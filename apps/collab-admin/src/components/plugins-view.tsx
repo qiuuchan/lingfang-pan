@@ -24,6 +24,7 @@ import { SettingsIcon, ToggleLeftIcon, ToggleRightIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid, ActionBar } from '@/components/shared';
+import { usePagination, Pagination } from '@/components/ui/pagination';
 import type { Plugin, PluginStatus } from '@/lib/types';
 import { labelOf, formatTime } from '@/lib/types';
 
@@ -31,6 +32,7 @@ export function PluginsView() {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const load = () => api<{ plugins: Plugin[] }>('/api/admin/plugins').then((r) => setPlugins(r.plugins));
   useLoad(load);
+  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(plugins);
 
   async function toggle(plugin: Plugin) {
     await run(
@@ -55,8 +57,8 @@ export function PluginsView() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {plugins.length ? (
-            plugins.map((plugin) => (
+          {paginated.length ? (
+            paginated.map((plugin) => (
               <TableRow key={plugin.id}>
                 <TableCell className="font-medium">{plugin.name}</TableCell>
                 <TableCell className="max-w-md truncate text-muted-foreground">
@@ -96,6 +98,13 @@ export function PluginsView() {
           )}
         </TableBody>
       </Table>
+      <Pagination
+        totalItems={totalItems}
+        pageSize={pageSize}
+        currentPage={page}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </Section>
   );
 }

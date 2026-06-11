@@ -24,6 +24,7 @@ import { CheckCircleIcon, XCircleIcon, FileTextIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid, ActionBar } from '@/components/shared';
+import { usePagination, Pagination } from '@/components/ui/pagination';
 import type { Application } from '@/lib/types';
 import { labelOf, formatTime } from '@/lib/types';
 
@@ -32,6 +33,7 @@ export function ApplicationsView() {
   const load = () =>
     api<{ applications: Application[] }>('/api/admin/team-admin-applications').then((r) => setItems(r.applications));
   useLoad(load);
+  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(items);
 
   async function approve(application: Application) {
     await run(
@@ -54,8 +56,8 @@ export function ApplicationsView() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.length ? (
-            items.map((app) => (
+          {paginated.length ? (
+            paginated.map((app) => (
               <TableRow key={app.id}>
                 <TableCell className="font-medium">{app.user.email}</TableCell>
                 <TableCell>{app.teamName}</TableCell>
@@ -98,6 +100,13 @@ export function ApplicationsView() {
           )}
         </TableBody>
       </Table>
+      <Pagination
+        totalItems={totalItems}
+        pageSize={pageSize}
+        currentPage={page}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </Section>
   );
 }
