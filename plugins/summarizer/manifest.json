@@ -1,0 +1,15 @@
+{
+  "id": "com.lingfang.summarizer",
+  "name": "长文总结",
+  "version": "0.0.1",
+  "description": "把长文档/网页提炼成要点。",
+  "runtime_type": "client",
+  "entry": "ui/index.html",
+  "visibility": "tenant",
+  "capabilities": [
+    { "kind": "ui.view", "reason": "展示总结结果", "risk": "none", "requires_admin": false },
+    { "kind": "fs.pick", "reason": "选择要总结的文档", "risk": "low", "requires_admin": false },
+    { "kind": "fs.read", "reason": "读取所选文档内容", "risk": "medium", "requires_admin": true },
+    { "kind": "llm.chat", "reason": "调用大模型生成摘要", "risk": "medium", "requires_admin": true }
+  ]
+}

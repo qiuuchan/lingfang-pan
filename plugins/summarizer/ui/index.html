@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>长文总结</title>
+  <style>
+    /* 只消费宿主 design token，不硬编码色值 */
+    body { font-family: var(--lf-font-sans, system-ui); color: var(--lf-color-text, #1a1a1a); padding: var(--lf-spacing-md, 14px); }
+    button { background: var(--lf-color-primary, #2563eb); color: #fff; border: 0; border-radius: var(--lf-radius-md, 10px); padding: 10px 16px; cursor: pointer; }
+    #out { margin-top: 14px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <button id="run">选择文档并总结</button>
+  <div id="out"></div>
+  <script>
+    // 示例：经宿主注入的 sdk 调用能力，插件不接触 key / 网络（见 docs/03 §5）
+    document.getElementById('run').onclick = async () => {
+      const [file] = await sdk.fs.pick({ accept: ['.pdf', '.txt', '.md'] });
+      const text = await sdk.fs.read(file);
+      const summary = await sdk.llm.chat({
+        messages: [
+          { role: 'system', content: '你是文档总结助手' },
+          { role: 'user', content: '请总结：\n' + text }
+        ]
+      });
+      document.getElementById('out').textContent = summary;
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "@lingfang/plugin-sdk",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lingfang/contract": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
