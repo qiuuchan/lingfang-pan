@@ -19,8 +19,14 @@ export function Dashboard() {
   ];
 
   const pendingTasks = [
-    { label: '待审批申请', count: data?.pendingApplications ?? 0, icon: AlertCircleIcon, href: '#applications', color: 'text-amber-500' },
-    { label: '已禁用插件', count: 0, icon: CheckCircleIcon, href: '#plugins', color: 'text-muted-foreground' },
+    { label: '待审批申请', count: data?.pendingApplications ?? 0, icon: AlertCircleIcon, color: 'text-amber-500' },
+    { label: '已禁用插件', count: 0, icon: CheckCircleIcon, color: 'text-muted-foreground' },
+  ];
+
+  const quickActions = [
+    { label: '创建用户', icon: UsersIcon },
+    { label: '创建团队', icon: BoxesIcon },
+    { label: '审批管理', icon: CheckCircleIcon },
   ];
 
   return (
@@ -44,56 +50,54 @@ export function Dashboard() {
       {/* Pending / Todo */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">待办事项</CardTitle>
             <CardDescription>需要关注的处理项</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {pendingTasks.map((task) => (
-              <div
-                key={task.label}
-                className="flex items-center justify-between rounded-lg border p-3 text-sm"
-              >
-                <div className="flex items-center gap-3">
-                  <task.icon className={cn('size-4', task.color)} />
-                  <span>{task.label}</span>
+          <CardContent className="p-0">
+            <div className="px-6 pb-6">
+              {pendingTasks.map((task, i) => (
+                <div key={task.label}>
+                  {i > 0 && <Separator className="my-2" />}
+                  <div className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm">
+                    <div className="flex items-center gap-3">
+                      <task.icon className={cn('size-4', task.color)} />
+                      <span>{task.label}</span>
+                    </div>
+                    <Badge variant="outline">{task.count}</Badge>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">{task.count}</Badge>
+              ))}
+              {pendingTasks.every((t) => t.count === 0) && (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  <CheckCircleIcon className="mx-auto mb-1 size-6 text-emerald-500" />
+                  暂无待处理事项
                 </div>
-              </div>
-            ))}
-            {pendingTasks.every((t) => t.count === 0) && (
-              <div className="py-4 text-center text-sm text-muted-foreground">
-                <CheckCircleIcon className="mx-auto mb-1 size-6 text-emerald-500" />
-                暂无待处理事项
-              </div>
-            )}
+              )}
+            </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">快速操作</CardTitle>
             <CardDescription>常用管理入口</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              { label: '创建用户', icon: UsersIcon },
-              { label: '创建团队', icon: BoxesIcon },
-              { label: '审批管理', icon: CheckCircleIcon },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="flex cursor-pointer items-center justify-between rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50"
-              >
-                <div className="flex items-center gap-3">
-                  <item.icon className="size-4 text-muted-foreground" />
-                  <span>{item.label}</span>
+          <CardContent className="p-0">
+            <div className="px-6 pb-6">
+              {quickActions.map((item, i) => (
+                <div key={item.label}>
+                  {i > 0 && <Separator className="my-2" />}
+                  <div className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-muted/50">
+                    <div className="flex items-center gap-3">
+                      <item.icon className="size-4 text-muted-foreground" />
+                      <span>{item.label}</span>
+                    </div>
+                    <ArrowRightIcon className="size-4 text-muted-foreground" />
+                  </div>
                 </div>
-                <ArrowRightIcon className="size-4 text-muted-foreground" />
-              </div>
-            ))}
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>

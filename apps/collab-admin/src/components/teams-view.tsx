@@ -22,11 +22,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon } from 'lucide-react';
+import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/utils';
 import { useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
+import { usePagination, Pagination } from '@/components/ui/pagination';
 import type { Team, TeamMember, TeamStatus, User, LedgerDirection } from '@/lib/types';
 import { yuanToCents, activeMembers, teamAdmins, adminNames } from '@/lib/types';
 
@@ -43,6 +44,7 @@ export function TeamsView() {
   useLoad(load);
 
   const activeUsers = users.filter((u) => u.status === 'ACTIVE');
+  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(teams);
 
   return (
     <Section title="团队管理" description="团队信息维护、余额调整和管理员分配。">
@@ -67,8 +69,8 @@ export function TeamsView() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {teams.length ? (
-              teams.map((team) => (
+            {paginated.length ? (
+              paginated.map((team) => (
                 <TableRow key={team.id}>
                   <TableCell className="font-medium">{team.name}</TableCell>
                   <TableCell className="font-mono text-xs">{team.slug}</TableCell>
@@ -95,6 +97,13 @@ export function TeamsView() {
             )}
           </TableBody>
         </Table>
+        <Pagination
+          totalItems={totalItems}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
     </Section>
   );
@@ -192,6 +201,15 @@ function TeamDetailDialog({
     );
   }
 
+  async function deleteTeam() {
+    if (!window.confirm(`确认永久删除团队「${team.name}」及其所有成员、数据？此操作不可恢复。`)) return;
+    await run(
+      () => api(`/api/admin/teams/${team.id}`, { method: 'DELETE' }).then(onRefresh),
+      '团队已删除',
+    );
+    setOpen(false);
+  }
+
   async function assignAdmin() {
     if (!adminUserId) return toast.error('请选择用户');
     await run(
@@ -267,6 +285,16 @@ function TeamDetailDialog({
               </div>
             </div>
             <Button onClick={save} className="w-full">保存团队信息</Button>
+            <div className="mt-4 space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              <p className="text-sm font-medium text-destructive">危险操作</p>
+              <p className="text-xs text-muted-foreground">
+                永久删除该团队及其所有成员、余额数据。此操作不可恢复。
+              </p>
+              <Button variant="destructive" onClick={deleteTeam} className="w-full">
+                <Trash2Icon className="mr-1.5 size-4" />
+                删除团队
+              </Button>
+            </div>
           </TabsContent>
 
           <TabsContent value="balance" className="space-y-4">

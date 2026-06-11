@@ -20,12 +20,14 @@ import { EyeIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLoad } from '@/lib/helpers';
 import { Section } from '@/components/shared';
+import { usePagination, Pagination } from '@/components/ui/pagination';
 import type { AuditLog } from '@/lib/types';
 import { actionLabel, targetLabel, formatTime, localizeMetadata } from '@/lib/types';
 
 export function AuditView() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   useLoad(() => api<{ logs: AuditLog[] }>('/api/admin/audit-logs').then((r) => setLogs(r.logs)));
+  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(logs, 20);
 
   return (
     <Section title="审计日志" description="平台级操作记录，含中文动作和对象展示。">
@@ -40,8 +42,8 @@ export function AuditView() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {logs.length ? (
-            logs.map((log) => (
+          {paginated.length ? (
+            paginated.map((log) => (
               <TableRow key={log.id}>
                 <TableCell>{actionLabel(log.action)}</TableCell>
                 <TableCell>{targetLabel(log.targetType)}</TableCell>
@@ -65,6 +67,13 @@ export function AuditView() {
           )}
         </TableBody>
       </Table>
+      <Pagination
+        totalItems={totalItems}
+        pageSize={pageSize}
+        currentPage={page}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </Section>
   );
 }
