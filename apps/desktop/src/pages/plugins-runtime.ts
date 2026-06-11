@@ -72,6 +72,9 @@ export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> 
     });
     return bridgeShim(plugin.id) + html;
   }
+  if (plugin.source === 'platform') {
+    return sdkShim(plugin.id) + `<!doctype html><html><body style="font-family:system-ui;margin:24px"><h1>${plugin.name}</h1><p>${plugin.description || '平台插件已启用。具体运行能力由后续插件实现接入。'}</p></body></html>`;
+  }
   const { content } = await api<{ content: string }>(`/plugins/${plugin.id}/files/${plugin.entry}`);
   return sdkShim(plugin.id) + content;
 }
@@ -128,7 +131,7 @@ function mergePlugins(builtin: LoadedPlugin[], db: LoadedPlugin[]): LoadedPlugin
 export async function loadPlugins(): Promise<{ plugins: LoadedPlugin[]; error: string }> {
   const [builtin, db] = await Promise.allSettled([
     tauriInvoke<LoadedPlugin[]>('list_plugins'),
-    api<{ plugins: LoadedPlugin[] }>('/plugins').then((result) => result.plugins),
+    api<{ plugins: LoadedPlugin[] }>('/api/plugins/available').then((result) => result.plugins.map((plugin) => ({ ...plugin, version: plugin.version || '1.0.0', entry: plugin.entry || 'ui/index.html', source: 'platform' as const }))),
   ]);
   const builtinPlugins = builtin.status === 'fulfilled' ? builtin.value : [];
   const dbPlugins = db.status === 'fulfilled' ? db.value : [];

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { CheckCircle2Icon, AlertTriangleIcon, UsersIcon, ServerIcon } from 'lucide-react';
+import { CheckCircle2Icon, AlertTriangleIcon, ServerIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
 import type { GatewayConfig } from '@/lib/types';
@@ -276,130 +276,6 @@ export function Settings() {
         )}
       </CardContent>
     </Card>
-    <MembersCard />
     </div>
-  );
-}
-
-interface Member {
-  user_id: string;
-  email: string;
-  display_name: string;
-  role: string;
-}
-
-const ROLE_LABEL: Record<string, string> = { owner: '团队所有者', admin: '管理员', member: '成员' };
-// 可分配的角色（owner 归属唯一，通过转让而非邀请变更，这里不提供选 owner）。
-const ASSIGNABLE_ROLES = [
-  { v: 'member', label: '成员' },
-  { v: 'admin', label: '管理员' },
-];
-
-// 团队成员管理：owner/admin 可邀请已注册用户、调整成员角色；普通成员只读查看名单。
-function MembersCard() {
-  const { session } = useApp();
-  const canManage = session.role === 'owner' || session.role === 'admin';
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('member');
-  const [inviting, setInviting] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
-
-  async function refresh() {
-    try {
-      const { members } = await api<{ members: Member[] }>('/members');
-      setMembers(members);
-    } catch (e) {
-      toast.error((e as ApiError).message);
-      setMembers([]);
-    }
-  }
-
-  useEffect(() => { refresh(); }, []);
-
-  async function invite() {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return toast.error('请输入有效的成员邮箱');
-    setInviting(true);
-    try {
-      await api('/members', { method: 'POST', body: { email: email.trim(), role } });
-      toast.success('已添加/更新成员');
-      setEmail('');
-      await refresh();
-    } catch (e) {
-      const err = e as ApiError;
-      toast.error(err.code === 'forbidden' ? '仅团队 owner/admin 可管理成员' : /尚未注册/.test(err.message) ? '该邮箱尚未注册，请对方先注册账号' : err.message);
-    } finally {
-      setInviting(false);
-    }
-  }
-
-  // 调整成员角色：复用邀请接口（按 email upsert 角色）。owner 行不可改。
-  async function changeRole(m: Member, next: string) {
-    if (next === m.role) return;
-    setSavingId(m.user_id);
-    try {
-      await api('/members', { method: 'POST', body: { email: m.email, role: next } });
-      toast.success(`已将 ${m.display_name} 设为${ROLE_LABEL[next] || next}`);
-      await refresh();
-    } catch (e) {
-      toast.error((e as ApiError).message);
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><UsersIcon className="size-5 text-primary" />团队成员</CardTitle>
-        <CardDescription>
-          {canManage ? '邀请已注册用户加入本团队并分配角色；管理员可配置网关、管理成员。' : '查看团队成员与角色。仅团队所有者 / 管理员可邀请与调整。'}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {canManage && (
-          <div className="flex items-center gap-2">
-            <Input placeholder="成员邮箱（须已注册）" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && invite()} />
-            <Select value={role} onValueChange={(v) => setRole(v ?? 'member')}>
-              <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-              <SelectContent>{ASSIGNABLE_ROLES.map((r) => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
-            </Select>
-            <LoadingButton loading={inviting} onClick={invite}>邀请</LoadingButton>
-          </div>
-        )}
-
-        {members === null ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
-        ) : members.length ? (
-          <div className="flex flex-col divide-y rounded-lg border">
-            {members.map((m) => {
-              const isOwner = m.role === 'owner';
-              const isSelf = m.user_id === session.userId;
-              return (
-                <div key={m.user_id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-medium">{m.display_name}</span>
-                      {isSelf && <Badge variant="secondary" className="shrink-0">我</Badge>}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">{m.email}</div>
-                  </div>
-                  {canManage && !isOwner ? (
-                    <Select value={m.role} onValueChange={(v) => changeRole(m, v ?? m.role)} disabled={savingId === m.user_id}>
-                      <SelectTrigger className="w-28 shrink-0"><SelectValue /></SelectTrigger>
-                      <SelectContent>{ASSIGNABLE_ROLES.map((r) => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
-                    </Select>
-                  ) : (
-                    <Badge variant={isOwner ? 'default' : 'secondary'} className="shrink-0">{ROLE_LABEL[m.role] || m.role}</Badge>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">暂无成员。</p>
-        )}
-      </CardContent>
-    </Card>
   );
 }

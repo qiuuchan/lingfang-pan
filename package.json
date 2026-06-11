@@ -14,6 +14,14 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "dev:server": "cargo run -p server",
-    "dev:desktop": "pnpm -C apps/desktop dev"
+    "dev:desktop": "pnpm -C apps/desktop dev",
+    "collab:api:generate": "pnpm -C apps/collab-api prisma:generate",
+    "collab:api:migrate": "pnpm -C apps/collab-api prisma:deploy",
+    "collab:api:seed": "pnpm -C apps/collab-api seed:admin",
+    "collab:api:dev": "pnpm -C apps/collab-api dev",
+    "collab:api:start": "pnpm -C apps/collab-api start",
+    "collab:api:build": "pnpm -C apps/collab-api build",
+    "collab:admin:dev": "pnpm -C apps/collab-admin dev",
+    "collab:admin:build": "pnpm -C apps/collab-admin build"
   }
 }

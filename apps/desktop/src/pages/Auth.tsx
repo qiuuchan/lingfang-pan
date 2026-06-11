@@ -1,28 +1,40 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ServerIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, isEmail, type ApiError } from '@/lib/api';
+import { api, isEmail, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
+import type { CollabSessionResponse } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 
 export function Auth() {
-  const { applySession } = useApp();
+  const { applyCollabSession, backendUrl, saveBackendUrl } = useApp();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [wantsTeamAdmin, setWantsTeamAdmin] = useState(false);
+  const [teamName, setTeamName] = useState('');
+  const [reason, setReason] = useState('');
+  const [backendUrlDraft, setBackendUrlDraft] = useState(backendUrl || '');
+  const [showBackendSettings, setShowBackendSettings] = useState(!backendUrl);
   const [loading, setLoading] = useState(false);
+  const [testingBackend, setTestingBackend] = useState(false);
 
   async function loginCore(em: string, pw: string) {
-    const r = await api<{ token: string; user_id: string; display_name?: string; is_platform_admin?: boolean }>('/auth/login', {
+    const r = await api<CollabSessionResponse>('/api/auth/login', {
       auth: false, method: 'POST', body: { email: em, password: pw },
     });
-    applySession({ token: r.token, userId: r.user_id, displayName: r.display_name ?? null, isPlatformAdmin: !!r.is_platform_admin });
+    if (!r.token) throw new Error('登录响应缺少 token');
+    applyCollabSession(r);
   }
 
   async function onLogin() {
+    if (!backendUrl) return toast.error('请先在下方设置后端地址');
     if (!isEmail(email)) return toast.error('请输入有效的邮箱地址');
     if (!password) return toast.error('请输入密码');
     setLoading(true);
@@ -37,68 +49,113 @@ export function Auth() {
   }
 
   async function onRegister() {
+    if (!backendUrl) return toast.error('请先在下方设置后端地址');
     if (!isEmail(email)) return toast.error('请输入有效的邮箱地址（如 name@example.com）');
     if (password.length < 8) return toast.error('密码至少 8 位');
+    if (wantsTeamAdmin && !teamName.trim()) return toast.error('请填写要申请管理的团队名称');
     setLoading(true);
     try {
-      await api('/auth/register', {
-        auth: false, method: 'POST',
-        body: { email: email.trim(), password, display_name: name.trim() || email.trim() },
+      const r = await api<CollabSessionResponse>('/api/auth/register', {
+        auth: false,
+        method: 'POST',
+        body: {
+          email: email.trim(),
+          password,
+          displayName: name.trim() || email.trim(),
+          wantsTeamAdmin,
+          teamName: teamName.trim(),
+          reason: reason.trim(),
+        },
       });
-      toast.success('注册成功，正在登录…');
-      await loginCore(email.trim(), password);
+      toast.success(wantsTeamAdmin ? '申请已提交，等待平台管理员审批' : '注册成功，请输入团队邀请码');
+      applyCollabSession(r);
     } catch (e) {
       const err = e as ApiError;
-      toast.error(/已存在|duplicate/.test(err.message) ? '该邮箱已注册，请直接登录' : err.message);
+      toast.error(/已存在|duplicate|registered/.test(err.message) ? '该邮箱已注册，请直接登录' : err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveBackend() {
+    const normalized = normalizeBackendUrl(backendUrlDraft);
+    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    setTestingBackend(true);
+    try {
+      await testBackendUrl(normalized);
+      if (!saveBackendUrl(normalized)) return toast.error('后端地址格式不正确');
+      setBackendUrlDraft(normalized);
+      setShowBackendSettings(false);
+      toast.success('后端地址已保存');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setTestingBackend(false);
     }
   }
 
   const submit = mode === 'login' ? onLogin : onRegister;
 
   return (
-    <Card className="w-full max-w-sm animate-in fade-in zoom-in-95 duration-300">
-      <CardHeader>
-        <CardTitle key={mode} className="animate-in fade-in slide-in-from-top-2 duration-300">
-          {mode === 'login' ? '登录' : '注册新账号'}
-        </CardTitle>
-      </CardHeader>
+    <Card className="w-full max-w-lg animate-in fade-in zoom-in-95 duration-300">
+      <CardHeader><CardTitle>{mode === 'login' ? '登录本地客户端' : '注册新账号'}</CardTitle></CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <Input
-          placeholder="邮箱"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-        />
-        <Input
-          type="password"
-          placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-        />
-        {/* 昵称字段仅注册可见：用 grid 行高过渡做平滑展开/收起 */}
+        <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
         <div className={cn('grid transition-all duration-300 ease-out', mode === 'register' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
-          <div className="overflow-hidden">
-            <Input
-              placeholder="昵称（可选）"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submit()}
-            />
+          <div className="flex flex-col gap-3 overflow-hidden">
+            <Input placeholder="昵称（可选）" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+              <input type="checkbox" checked={wantsTeamAdmin} onChange={(e) => setWantsTeamAdmin(e.target.checked)} />
+              我是团队管理员，需要提交审批申请
+            </label>
+            {wantsTeamAdmin && (
+              <div className="flex flex-col gap-3">
+                <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+                <Textarea placeholder="申请说明（可选）" value={reason} onChange={(e) => setReason(e.target.value)} />
+              </div>
+            )}
           </div>
         </div>
-        <LoadingButton className="w-full" loading={loading} onClick={submit}>
-          {mode === 'login' ? '登录' : '注册'}
-        </LoadingButton>
+        <LoadingButton className="w-full" loading={loading} onClick={submit}>{mode === 'login' ? '登录' : '注册'}</LoadingButton>
         <p className="text-center text-sm text-muted-foreground">
-          {mode === 'login' ? (
-            <>还没有账号？<button className="text-primary hover:underline" onClick={() => setMode('register')}>注册新账号</button></>
-          ) : (
-            <>已有账号？<button className="text-primary hover:underline" onClick={() => setMode('login')}>去登录</button></>
-          )}
+          {mode === 'login' ? <><span>还没有账号？</span><button className="text-primary hover:underline" onClick={() => setMode('register')}>注册新账号</button></> : <><span>已有账号？</span><button className="text-primary hover:underline" onClick={() => setMode('login')}>去登录</button></>}
         </p>
+        <div className="mt-2 border-t pt-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <ServerIcon className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block font-medium text-foreground">后端地址</span>
+                <span className="block truncate text-muted-foreground">{backendUrl || '未设置，登录和注册前需要先保存地址'}</span>
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowBackendSettings((value) => !value)}
+            >
+              {showBackendSettings ? '收起' : backendUrl ? '修改' : '设置'}
+            </Button>
+          </div>
+          <div className={cn('grid transition-all duration-300 ease-out', showBackendSettings ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
+            <div className="flex flex-col gap-3 overflow-hidden">
+              <Input
+                placeholder="例如 http://127.0.0.1:3000 或 https://api.example.com"
+                value={backendUrlDraft}
+                onChange={(e) => setBackendUrlDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveBackend()}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <LoadingButton loading={testingBackend} onClick={saveBackend}>测试并保存</LoadingButton>
+                <Button variant="outline" onClick={() => setBackendUrlDraft('http://127.0.0.1:3000')}>填入本机默认地址</Button>
+              </div>
+              <p className="text-xs text-muted-foreground">保存前会访问 <span className="font-mono">/api/health</span> 校验后端是否可用。</p>
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
