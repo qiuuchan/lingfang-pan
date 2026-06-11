@@ -37,3 +37,39 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 修复全量源码 Review 问题
+
+**Date**: 2026-06-11
+**Task**: 修复全量源码 Review 问题
+**Branch**: `main`
+
+### Summary
+
+修复服务端租户鉴权、插件发布安装策略、LLM 密钥加密与流式错误传播；修复桌面 capability 路径校验和插件 runtime 契约；对齐 contract、SDK、示例插件，并完成验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f42c66` | (see git log) |
+| `66a1f53` | (see git log) |
+| `04e63db` | (see git log) |
+| `db841cf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
