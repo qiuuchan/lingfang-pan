@@ -1,0 +1,97 @@
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { WalletIcon, ArrowDownLeftIcon, ArrowUpRightIcon } from 'lucide-react';
+import { api, type ApiError } from '@/lib/api';
+import { centsToYuan } from '@/lib/money';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+
+interface WalletTx {
+  id: string;
+  amount_cents: number;
+  direction: 'debit' | 'credit';
+  reason: string;
+  plugin_id?: string | null;
+  at: string;
+}
+
+interface WalletData {
+  balance_cents: number;
+  transactions: WalletTx[];
+}
+
+// 流水原因 → 中文展示。
+const REASON_LABEL: Record<string, string> = {
+  signup_bonus: '注册赠送',
+  purchase: '购买插件',
+  sale: '插件销售收入',
+};
+
+function fmtTime(iso: string): string {
+  try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); } catch { return iso; }
+}
+
+export function Wallet() {
+  const [data, setData] = useState<WalletData | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setData(await api<WalletData>('/wallet'));
+      } catch (e) {
+        toast.error((e as ApiError).message);
+        setData({ balance_cents: 0, transactions: [] });
+      }
+    })();
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><WalletIcon className="size-5 text-primary" />我的钱包</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">当前余额</div>
+          <div className="mt-1 text-4xl font-semibold tabular-nums">
+            {data === null ? '…' : centsToYuan(data.balance_cents)}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">余额用于购买市场上的付费插件；每个账户注册时赠送 ¥10 测试余额。</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">交易流水</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data === null ? (
+            <p className="text-sm text-muted-foreground">加载中…</p>
+          ) : data.transactions.length ? (
+            <div className="flex flex-col divide-y">
+              {data.transactions.map((t) => {
+                const credit = t.direction === 'credit';
+                return (
+                  <div key={t.id} className="flex items-center gap-3 py-2.5">
+                    <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full', credit ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600')}>
+                      {credit ? <ArrowDownLeftIcon className="size-4" /> : <ArrowUpRightIcon className="size-4" />}
+                    </span>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">{REASON_LABEL[t.reason] || t.reason}</div>
+                      <div className="text-xs text-muted-foreground">{fmtTime(t.at)}</div>
+                    </div>
+                    <span className={cn('text-sm font-semibold tabular-nums', credit ? 'text-green-600' : 'text-red-600')}>
+                      {credit ? '+' : '-'}{centsToYuan(t.amount_cents)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">暂无交易记录。</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

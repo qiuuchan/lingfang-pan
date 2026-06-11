@@ -1,0 +1,12 @@
+{
+  "id": "builtin.system-info",
+  "name": "系统信息",
+  "version": "0.1.0",
+  "description": "查看系统信息（演示 system.info capability）",
+  "runtime_type": "client",
+  "entry": "index.html",
+  "capabilities": [
+    { "kind": "system.info" }
+  ],
+  "visibility": "public"
+}

@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"桌面壳默认能力。插件越权能力另由 capability 网关按 manifest + 授权放行。","local":true,"windows":["main"],"permissions":["core:default"]}}

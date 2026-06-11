@@ -1,0 +1,10 @@
+{
+  "id": "builtin.todo-list",
+  "name": "待办清单",
+  "version": "0.1.0",
+  "description": "简单的本地待办事项管理（演示纯 UI 插件）",
+  "runtime_type": "client",
+  "entry": "index.html",
+  "capabilities": [],
+  "visibility": "public"
+}

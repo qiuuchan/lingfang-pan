@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统信息</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 700px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 24px; }
+    h1 { font-size: 24px; margin-bottom: 20px; color: #333; }
+    .info-grid { display: grid; grid-template-columns: 140px 1fr; gap: 16px 20px; }
+    .label { font-weight: 600; color: #666; font-size: 14px; }
+    .value { color: #333; font-size: 14px; font-family: monospace; }
+    .refresh { margin-top: 20px; padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .refresh:hover { background: #1d4ed8; }
+    .error { color: #ef4444; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>💻 系统信息</h1>
+    <div class="info-grid" id="infoGrid">加载中...</div>
+    <button class="refresh" onclick="loadInfo()">刷新</button>
+    <div id="error" class="error"></div>
+  </div>
+  <script>
+    async function loadInfo() {
+      try {
+        document.getElementById('error').textContent = '';
+        const info = await window.LingFangBridge?.invokeCapability('system.info', {});
+        if (!info) throw new Error('无法获取系统信息');
+
+        const grid = document.getElementById('infoGrid');
+        grid.innerHTML = `
+          <div class="label">操作系统</div><div class="value">${info.os || 'N/A'}</div>
+          <div class="label">架构</div><div class="value">${info.arch || 'N/A'}</div>
+          <div class="label">主机名</div><div class="value">${info.hostname || 'N/A'}</div>
+          <div class="label">CPU 核心数</div><div class="value">${info.cpuCores || 'N/A'}</div>
+          <div class="label">总内存</div><div class="value">${formatBytes(info.totalMemory)}</div>
+          <div class="label">可用内存</div><div class="value">${formatBytes(info.freeMemory)}</div>
+          <div class="label">运行时间</div><div class="value">${formatUptime(info.uptime)}</div>
+        `;
+      } catch (err) {
+        document.getElementById('error').textContent = `❌ ${err.message}`;
+      }
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return 'N/A';
+      return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+    }
+
+    function formatUptime(seconds) {
+      if (!seconds) return 'N/A';
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      return `${days} 天 ${hours} 小时`;
+    }
+
+    if (window.LingFangBridge) {
+      loadInfo();
+    } else {
+      document.getElementById('error').textContent = '❌ LingFangBridge 未就绪（需在 LingFang 桌面环境中运行）';
+    }
+  </script>
+</body>
+</html>

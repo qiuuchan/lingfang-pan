@@ -1,0 +1,12 @@
+{
+  "id": "builtin.file-explorer",
+  "name": "文件浏览器",
+  "version": "0.1.0",
+  "description": "浏览和查看文件（演示 fs.read capability）",
+  "runtime_type": "client",
+  "entry": "index.html",
+  "capabilities": [
+    { "kind": "fs.read", "paths": ["$HOME/Documents", "$HOME/Downloads"] }
+  ],
+  "visibility": "public"
+}
