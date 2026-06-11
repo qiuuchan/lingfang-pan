@@ -1,0 +1,11 @@
+/* LingFang design token：宿主注入到所有插件容器。
+   插件只能消费这些变量，禁止硬编码色值（见 docs/03 §4），保证「装 N 个插件还像同一个 App」。 */
+:root {
+  --lf-color-primary: #2563eb;
+  --lf-color-bg: #fafafa;
+  --lf-color-text: #1a1a1a;
+  --lf-color-border: #dddddd;
+  --lf-radius-md: 10px;
+  --lf-spacing-md: 14px;
+  --lf-font-sans: system-ui, sans-serif;
+}

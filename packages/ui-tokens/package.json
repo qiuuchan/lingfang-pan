@@ -1,0 +1,5 @@
+{
+  "name": "@lingfang/ui-tokens",
+  "version": "0.0.1",
+  "files": ["tokens.css"]
+}
