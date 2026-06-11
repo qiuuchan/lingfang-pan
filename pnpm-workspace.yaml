@@ -1,0 +1,6 @@
+# pnpm workspace：仅纳入 TS/前端侧包。
+# 服务端 apps/server 与 desktop 的 Rust 部分由 Cargo workspace 管理（见根 Cargo.toml）。
+packages:
+  - 'apps/desktop'
+  - 'packages/*'
+  - 'plugins/*'

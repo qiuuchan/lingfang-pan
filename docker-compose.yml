@@ -1,0 +1,22 @@
+# 本地开发依赖：真实 PostgreSQL（取代旧版内存/文件兜底）。
+# 启动：pnpm db:up
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lingfang
+      POSTGRES_PASSWORD: lingfang
+      POSTGRES_DB: lingfang
+    # 宿主机 5432 已被原生 PostgreSQL 18 占用，这里映射到 5433 避让。
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lingfang"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
