@@ -1,169 +1,216 @@
-# LingFang Platform
+<p align="center">
+  <img src="apps/desktop/public/logo.png" width="80" alt="LingFang" />
+</p>
 
-> 定位：**no-code 的 AI 插件生成平台**——任何人用自然语言描述，AI 直接生成可运行插件。
+<h1 align="center">LingFang</h1>
+<p align="center">AI-powered no-code plugin generation platform</p>
 
-## 这是什么
+<p align="center">
+  <img src="https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri" />
+  <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" />
+  <img src="https://img.shields.io/badge/Rust-1.8+-DEA584?logo=rust" />
+  <img src="https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs" />
+  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" />
+</p>
 
-任何人（包括不会写代码的人）用自然语言描述想要的功能，平台调第三方 LLM API（如 newapi / one-api 等 OpenAI 兼容网关）**直接生成可运行的插件**，在沙箱里即时预览、对话式迭代、发布、上架市场。**「造插件」是产品主线。** 完整定位见 [愿景与架构](docs/01-vision-and-architecture.md)。
+---
 
-## 核心特性
+## Architecture
 
-- **自然语言造插件**：描述需求 → AI 生成 manifest + HTML/CSS/JS → 沙箱即时预览 → 发布。
-- **流式生成 + 思考过程**：SSE 实时逐字推送；支持模型原生推理（如 deepseek-r1 的 `reasoning_content`），不支持的模型回退到 `<think>` 提示词约定，前端实时显示「正在思考」。
-- **对话式迭代**：在已生成草稿上继续追加需求修改；已发布的插件也能「继续修改」载回对话页迭代。
-- **我的插件**：本地内置 + 你发布的 + 从市场安装的，统一在此运行；可把常用插件**固定到侧边栏子菜单**一键启动。
-- **插件市场**：搜索 / 排序 / 详情 / 评分（须已购买或免费已安装）/ 发布上架 / 安装。
-- **内部经济**：钱包余额（注册赠送）、付费插件购买结算、平台审核。
-- **多租户**：注册 / 登录 / 团队（租户）/ 成员角色（owner/admin/member）；**首个注册用户自动成为平台管理员**。
+```mermaid
+graph TB
+    subgraph Desktop["🖥 Desktop Client (Tauri 2 + React)"]
+        Gen["AI Plugin Generator"]
+        Sandbox["Sandbox Preview"]
+        Market["Plugin Marketplace"]
+        Wallet["Wallet & Economy"]
+        Teams["Team Spaces"]
+    end
 
-## 协作平台（三平台架构）
+    subgraph Admin["⚙️ Admin Dashboard (React + shadcn/ui)"]
+        Users["User Management"]
+        Approvals["Team Approvals"]
+        Plugins["Plugin Governance"]
+        Audit["Audit Log"]
+    end
 
-本仓库新增一套独立的多租户协作系统，采用“前台本地客户端 + 网页管理端 + 统一后端 API”三平台架构。该系统优先支持本地 Node/PostgreSQL 部署，Docker Compose 作为可选路径保留。
+    subgraph APIs["🔌 Backend APIs"]
+        Server["Rust Server
+        axum + SQLite
+        Port 8787"]
+        Collab["NestJS Collab API
+        Prisma + PostgreSQL
+        Port 3000"]
+    end
 
-本地快速启动入口：
+    subgraph Store["💾 Storage"]
+        SQLite[("SQLite
+        Plugin DB")]
+        PG[("PostgreSQL
+        Collab DB")]
+    end
+
+    Desktop --> Server
+    Desktop --> Collab
+    Admin --> Collab
+    Server --> SQLite
+    Collab --> PG
+```
+
+**Two independent systems, one platform:**
+
+| System | Stack | Database | Role |
+|--------|-------|----------|------|
+| **AI Plugin Engine** | Rust + axum | SQLite (embedded) | Plugin generation, LLM proxy, marketplace, wallet |
+| **Collab Platform** | NestJS + Prisma | PostgreSQL | Multi-tenant teams, RBAC, admin panel |
+
+---
+
+## Features
+
+### 🧠 AI Plugin Generation
+Describe features in natural language → AI generates runnable plugins with streaming preview. Iterate conversationally, publish to marketplace.
+
+- **Streaming generation** with real-time reasoning display (SSE + `reasoning_content`)
+- **Conversational iteration** — refine plugins through chat
+- **Plugin sandbox** — instant preview before publishing
+
+### 🏪 Marketplace & Economy
+- Search, rate, install plugins
+- Wallet system with balance and purchase flow
+- Built-in plugins: file explorer, system info, todo list
+
+### 👥 Multi-tenant Collaboration *(new)*
+- **Teams** with roles: Admin → Member
+- **Team admin applications** with approval workflow
+- **Shared balance** and ledger for team plugins
+- **Admin dashboard** for platform governance
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+```bash
+# AI Plugin Engine (no Docker needed)
+cargo ≥ 1.80        # Rust toolchain
+pnpm ≥ 9            # Node package manager
+
+# Collab Platform
+Node.js ≥ 20
+PostgreSQL 16       # Docker: docker compose up -d
+```
+
+### AI Plugin Engine (one command)
+
+```bash
+pnpm install
+pnpm start          # Starts Rust backend + Tauri desktop
+```
+
+- Backend: `http://127.0.0.1:8787`
+- Desktop: auto-launches as native window
+
+### Collab Platform
 
 ```bash
 pnpm install
 cp apps/collab-api/.env.example apps/collab-api/.env
-pnpm -C apps/collab-api db:setup
-pnpm -C apps/collab-api dev
-VITE_API_BASE_URL=http://localhost:3000 pnpm -C apps/collab-admin dev
+pnpm -C apps/collab-api db:setup        # prisma generate + migrate + seed
+pnpm -C apps/collab-api dev             # API → :3000
+VITE_COLLAB_API_BASE=http://localhost:3000 pnpm -C apps/collab-admin dev  # Admin → :4174
 ```
 
-- API：`http://localhost:3000`
-- Swagger：`http://localhost:3000/api/docs`
-- 管理端：`http://localhost:4174`
-- 本地客户端后端地址：`http://127.0.0.1:3000`
-
-详细说明：
-
-- [协作平台架构](docs/collab-platform.md)
-- [API 文档](docs/collab-api.md)
-- [部署文档](docs/collab-deployment.md)
-- [本地客户端接入](docs/collab-desktop-client.md)
-- [管理端使用说明](docs/collab-admin-guide.md)
-
-该协作系统不替代下方 LingFang AI 插件生成平台主线；旧 Rust/SQLite 服务端仍保留。
-
-## 技术栈
-
-| 层 | 技术 |
-|----|------|
-| 桌面壳 | Tauri 2 + React + Vite + Tailwind v4 + shadcn/ui |
-| 服务端 | Rust + axum + sqlx |
-| 数据库 | **内嵌 SQLite（单文件、零安装、默认）**——无需 Docker/PostgreSQL |
-| LLM | 第三方 OpenAI 兼容网关（平台只路由 + 审计，不自建计费） |
-
-## 快速开始
-
-### 前置
-
-只需 **`cargo`（Rust）** 和 **`pnpm`**。**不需要 Docker、不需要 PostgreSQL**——数据库用内嵌 SQLite，首次启动自动创建 `lingfang.db`。
+**Docker alternative:**
 
 ```bash
-pnpm install                     # 安装前端依赖
+docker compose -f docker-compose.collab.yml up -d
 ```
 
-### 一键启动（推荐）
+| Endpoint | URL |
+|----------|-----|
+| Collab API | `http://localhost:3000` |
+| Swagger UI | `http://localhost:3000/api/docs` |
+| Admin Panel | `http://localhost:4174` |
 
-自动完成：准备 `.env`（可选）→ 编译并启动服务端（自动建 SQLite 库）→ 等待健康 → 启动桌面壳。
+---
 
-```powershell
-pnpm start            # Windows（PowerShell 7）
-pnpm start:sh         # macOS / Linux
-pnpm start:backend    # 只起后端，不起桌面壳
+## Project Structure
+
+```
+lingfang/
+├── apps/
+│   ├── desktop/          Tauri 2 + React desktop client
+│   │   ├── src/                  UI pages, components, API layer
+│   │   ├── src-tauri/            Rust capability gateway
+│   │   └── builtin-plugins/      Todo, File Explorer, System Info
+│   ├── server/           Rust backend (axum + SQLite)
+│   │   ├── src/routes/           Auth, drafts, marketplace, wallet, LLM
+│   │   └── migrations/           SQLite schema
+│   ├── collab-api/       NestJS collaboration API (Prisma + PostgreSQL)
+│   │   └── prisma/               Data model, migrations, seed
+│   └── collab-admin/     Web admin dashboard (React + shadcn/ui)
+│       └── src/components/       Users, Teams, Plugins, Approvals, Audit
+├── packages/
+│   ├── contract/         Zod schemas — single source of truth
+│   ├── plugin-sdk/       Plugin capability SDK for runtime
+│   └── ui-tokens/        Design tokens (CSS custom properties)
+├── plugins/
+│   └── summarizer/       Example plugin: LLM-based text summarizer
+├── docs/                 Architecture, API, deployment, ADRs
+├── tools/                Startup scripts, logo generator
+└── docker-compose*.yml   Docker configs for PostgreSQL + Collab stack
 ```
 
-首次运行会编译 Rust（拉依赖较久）。关闭桌面壳即自动停服务端。桌面壳启动后会先检查后端 URL；如果未预置或未保存，会先要求填写后端服务地址。
+---
 
-### 手动分步（调试用）
+## Configuration
+
+All environment variables have sensible defaults for local development. See `.env.example` and `.env.collab.example` for the full list.
+
+| Variable | Default | Scope |
+|----------|---------|-------|
+| `BIND_ADDR` | `127.0.0.1:8787` | Rust server |
+| `DATABASE_URL` | `sqlite:lingfang.db` | Rust server |
+| `DATABASE_URL` | `postgresql://...` | Collab API |
+| `JWT_SECRET` | dev placeholder | Both |
+
+Deploy with `BIND_ADDR=0.0.0.0:8787` and set `CORS_ALLOWED_ORIGINS` for network access.
+
+---
+
+## Documentation
+
+| Document | Topic |
+|----------|-------|
+| [Vision & Architecture](docs/01-vision-and-architecture.md) | Product vision, system design |
+| [Domain & Plugins](docs/02-domain-and-plugins.md) | Entity model, plugin manifest, SDK |
+| [Backend & LLM](docs/03-backend-and-llm.md) | API design, auth, LLM gateway |
+| [Engineering](docs/04-engineering.md) | Monorepo conventions, config |
+| [Collab Platform](docs/collab-platform.md) | Multi-tenant architecture |
+| [Collab API](docs/collab-api.md) | API reference |
+| [Collab Deployment](docs/collab-deployment.md) | Docker & manual deployment |
+| [ADR](docs/adr/) | Architecture Decision Records (5 docs) |
+
+---
+
+## Verification
 
 ```bash
-cargo run -p server              # 1. 启动服务端（自动创建 lingfang.db 并跑迁移）
-pnpm -C apps/desktop dev         # 2. 启动 Tauri 壳，首次进入时填写后端 URL
+cargo test -p server              # Rust unit tests
+pnpm -C apps/desktop typecheck    # Desktop typecheck
+pnpm -C apps/collab-api typecheck # API typecheck
+pnpm -C apps/collab-admin build   # Admin build
 ```
 
-进入桌面壳后：先确认后端服务地址 → 注册 / 登录 → 建团队 → 配 LLM 网关 → 描述生成 → 预览 → 发布。
+---
 
-生成插件需在壳内「设置 → LLM 网关」填入第三方 `base_url` + `api_key`（key 仅服务端持有、加密落库、不回显）。
+## Design Principles
 
-## 配置
-
-所有配置经环境变量（`.env`，全部可选，见 `.env.example`）：
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `DATABASE_URL` | `sqlite:lingfang.db?mode=rwc` | 数据库连接串；默认内嵌 SQLite，文件不存在自动创建 |
-| `BIND_ADDR` | `127.0.0.1:8787` | 服务端监听地址；跨机器访问时通常设为 `0.0.0.0:8787` |
-| `CORS_ALLOWED_ORIGINS` | 空 | 逗号分隔的前端来源白名单；留空时使用开发期 permissive CORS |
-| `JWT_SECRET` | dev 占位 | JWT 签名密钥（生产务必改） |
-| `KEY_ENCRYPTION_SECRET` | dev 占位 | 加密租户 LLM key 的密钥（生产务必改） |
-| `PLATFORM_ADMIN_EMAIL` | 空 | 指定平台审核员邮箱；留空则首个注册用户为管理员 |
-
-### 前后端分离与分发
-
-桌面壳只需要知道后端 URL。首次没有有效后端地址时，应用会先显示配置入口，不会进入登录页或发业务请求。
-
-分发者可以在 `apps/desktop/public/app.config.json` 里预置默认后端地址：
-
-```json
-{ "api_base": "https://your-backend.example.com" }
-```
-
-用户仍可在应用内「设置 → 后端服务地址」修改；保存后后续请求会立即使用新后端，切换后端时需要重新登录。
-
-后端部署到局域网或公网时，通常需要：
-
-```env
-BIND_ADDR=0.0.0.0:8787
-CORS_ALLOWED_ORIGINS=http://localhost:1420,https://your-desktop-origin.example.com
-```
-
-LLM 网关地址仍可在 `apps/desktop/public/gateway.config.json` 预置（终端用户只填自己的 key）。
-
-## 代码结构
-
-```
-apps/server/        Rust + axum + sqlx（SQLite）：身份/租户/草稿/生成/发布/安装/授权/审计/市场/钱包 + LLM 代理
-  src/{config,error,db,state,auth,crypto,llm,audit}.rs + routes/{auth,drafts,catalog,llm,marketplace,wallet}.rs
-  migrations/0001..0005_*.sql   （SQLite 方言）
-apps/desktop/       Tauri 2 壳：React + Vite + Tailwind v4 + shadcn/ui
-  src/{pages,components,lib}    描述→生成（流式+思考）→预览→发布→市场→钱包；侧边栏固定插件
-  public/app.config.json        默认后端地址（可预置；用户也可在应用内修改）
-  public/gateway.config.json     LLM 网关地址（分发可配）
-  src-tauri/                     capability 网关（fs/system）+ 内置插件加载
-  builtin-plugins/               内置插件：todo-list / file-explorer / system-info
-packages/contract/  单一事实来源（zod）：identity / plugin / draft / llm
-packages/plugin-sdk/ 插件能力客户端
-packages/ui-tokens/ design token
-tools/start.ps1 / start.sh      一键启动（SQLite，无需 DB 服务）
-```
-
-## 数据库
-
-默认内嵌 SQLite（`lingfang.db`，位于服务端工作目录），首次启动自动建库并跑迁移，无需任何外部依赖。迁移文件在 `apps/server/migrations/`，启动时按序自动应用。
-
-迁移类型约定：UUID 列用 `BLOB`，JSON / 时间用 `TEXT`，布尔用 `INTEGER(0/1)`。
-
-## 本地验证
-
-```bash
-cargo test -p server                 # 后端单元测试
-pnpm -C apps/desktop typecheck       # 前端类型检查
-pnpm -C apps/desktop vite:build      # 前端生产构建
-```
-
-## 设计宪法
-
-1. 契约先行，实现对齐。 2. 不造已有轮子。 3. 平台不碰业务。
-4. 不自建 LLM 计费经济（只路由 + 审计）。 5. 本地可验证。 6. 保持最小、易部署。
-
-## 文档
-
-| 文档 | 内容 |
-|------|------|
-| [01 愿景与架构](docs/01-vision-and-architecture.md) | 定位 + Tauri2 三支柱 / 生成数据流 / 里程碑 |
-| [02 领域模型与插件系统](docs/02-domain-and-plugins.md) | 实体契约 + manifest / 能力 / 沙箱 / SDK |
-| [03 后端与 LLM 网关](docs/03-backend-and-llm.md) | API / 鉴权 / 隔离 / 第三方网关对接 |
-| [04 工程规范](docs/04-engineering.md) | monorepo 布局 / 配置隔离 / 本地验证 |
-| [ADR 决策记录](docs/adr/) | 0001–0005 |
+1. **Contract-first** — Zod schemas in `packages/contract` drive all implementations
+2. **No reinventing wheels** — use battle-tested tools (axum, NestJS, Prisma, shadcn/ui)
+3. **Platform stays neutral** — routes LLM requests, doesn't handle billing
+4. **Locally verifiable** — SQLite embedded DB, zero-dependency startup
+5. **Minimal deployable** — single binary (Rust server) + static files (admin panel)
