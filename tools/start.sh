@@ -52,25 +52,25 @@ cargo run -p server >night_runs/server.log 2>&1 &
 SERVER_PID=$!
 
 cleanup() {
-  info "停止服务端（PID $SERVER_PID）…"
-  kill "$SERVER_PID" 2>/dev/null || true
+  info "停止服务端（PID ${SERVER_PID}）…"
+  kill "${SERVER_PID}" 2>/dev/null || true
   ok "已停止。"
 }
 trap cleanup EXIT
 
 # ---------- 3. 等待服务端健康 ----------
-HEALTH="http://$BIND_ADDR/health"
-info "等待服务端健康（$HEALTH）…"
+HEALTH="http://${BIND_ADDR}/health"
+info "等待服务端健康（${HEALTH}）…"
 up=0
 for _ in $(seq 1 90); do
-  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
     die "服务端进程已退出。查看日志：night_runs/server.log"
   fi
-  if curl -fsS "$HEALTH" >/dev/null 2>&1; then up=1; break; fi
+  if curl -fsS "${HEALTH}" >/dev/null 2>&1; then up=1; break; fi
   sleep 2
 done
 [ "$up" -eq 1 ] || die "服务端在 180 秒内未就绪。查看日志：night_runs/server.log"
-ok "服务端已就绪：http://$BIND_ADDR"
+ok "服务端已就绪：http://${BIND_ADDR}"
 
 # ---------- 4. 启动桌面壳 ----------
 if [ "$SKIP_DESKTOP" -eq 1 ]; then

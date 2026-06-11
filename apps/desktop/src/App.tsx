@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { toast } from 'sonner';
+import { AlertTriangleIcon, ServerIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
-import { setAuthToken } from '@/lib/api';
+import { apiBase, configureApiBase, normalizeBackendUrl, setAuthToken, testBackendUrl } from '@/lib/api';
 import type { Session, View, PluginDraft, LoadedPlugin } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { Auth } from '@/pages/Auth';
@@ -11,8 +13,15 @@ import { Market } from '@/pages/Market';
 import { Wallet } from '@/pages/Wallet';
 import { Review } from '@/pages/Review';
 import { Settings } from '@/pages/Settings';
+import { LoadingButton } from '@/components/loading-button';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface AppContextValue {
+  backendUrl: string | null;
+  saveBackendUrl: (url: string) => boolean;
   session: Session;
   applySession: (patch: Partial<Session>) => void;
   resetSession: () => void;
@@ -60,10 +69,19 @@ const emptySession: Session = { token: null, userId: null, displayName: null, te
 
 export default function App() {
   const [session, setSession] = useState<Session>(emptySession);
+  const [backendUrl, setBackendUrl] = useState<string | null>(() => apiBase() || null);
   const [view, setView] = useState<View>('generator');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
+
+  const saveBackendUrl = useCallback((url: string) => {
+    const normalized = normalizeBackendUrl(url);
+    if (!normalized) return false;
+    configureApiBase(normalized, { persist: true });
+    setBackendUrl(normalized);
+    return true;
+  }, []);
 
   const applySession = useCallback((patch: Partial<Session>) => {
     setSession((prev) => {
@@ -103,12 +121,25 @@ export default function App() {
   const isPinned = useCallback((id: string) => pinnedPlugins.some((x) => x.id === id), [pinnedPlugins]);
 
   const ctx: AppContextValue = {
+    backendUrl, saveBackendUrl,
     session, applySession, resetSession,
     view, setView,
     currentDraft, setCurrentDraft,
     runningPlugin, setRunningPlugin,
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
   };
+
+  // 未配置后端地址时，先阻断登录和业务请求。
+  if (!backendUrl) {
+    return (
+      <AppContext.Provider value={ctx}>
+        <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-background p-4 text-foreground">
+          <BackendUrlSetup onSaved={saveBackendUrl} />
+        </div>
+        <Toaster position="top-right" richColors closeButton />
+      </AppContext.Provider>
+    );
+  }
 
   // 未登录 / 未选租户：全屏居中单页（无侧边栏）。
   if (!session.token) {
@@ -151,5 +182,59 @@ export default function App() {
       </div>
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
+  );
+}
+
+function BackendUrlSetup({ onSaved }: { onSaved: (url: string) => boolean }) {
+  const [url, setUrl] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  async function save() {
+    const normalized = normalizeBackendUrl(url);
+    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    setTesting(true);
+    try {
+      await testBackendUrl(normalized);
+      if (!onSaved(normalized)) return toast.error('后端地址格式不正确');
+      toast.success('后端地址已保存');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <Card className="w-full max-w-lg animate-in fade-in zoom-in-95 duration-300">
+      <CardHeader>
+        <div className="mb-2 inline-flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <ServerIcon className="size-5" />
+        </div>
+        <CardTitle>连接后端服务</CardTitle>
+        <CardDescription>
+          LingFang 前端与后端分离部署。首次使用前，请填写后端服务地址，之后也可以在设置中修改。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+          <span>未配置后端地址前，登录、租户选择、插件生成和市场请求都会暂停。</span>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="backendUrl">后端 URL</Label>
+          <Input
+            id="backendUrl"
+            placeholder="例如 http://127.0.0.1:8787 或 https://api.example.com"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && save()}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <LoadingButton loading={testing} onClick={save}>测试并保存</LoadingButton>
+          <Button variant="outline" onClick={() => setUrl('http://127.0.0.1:8787')}>填入本机默认地址</Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

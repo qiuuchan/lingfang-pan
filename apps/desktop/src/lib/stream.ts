@@ -25,7 +25,9 @@ export async function streamGenerate(
   prompt: string,
   cb: StreamCallbacks,
 ): Promise<PluginDraft> {
-  const res = await fetch(`${apiBase()}/drafts/${draftId}/generate/stream`, {
+  const base = apiBase();
+  if (!base) throw new Error('尚未配置后端服务地址，请先填写后端 URL。');
+  const res = await fetch(`${base}/drafts/${draftId}/generate/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
     body: JSON.stringify({ prompt }),

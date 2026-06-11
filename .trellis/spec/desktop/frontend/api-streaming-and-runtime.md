@@ -6,6 +6,7 @@
 
 Direct `fetch` is currently reserved for:
 - startup/static config: `app.config.json`, `gateway.config.json`, `models-catalog.json`
+- backend health checks through `testBackendUrl()`
 - the SSE stream in `lib/stream.ts`
 
 Reference files:
@@ -13,6 +14,45 @@ Reference files:
 - `apps/desktop/src/main.tsx`
 - `apps/desktop/src/pages/Settings.tsx`
 - `apps/desktop/src/lib/models.ts`
+
+## Scenario: Backend URL Configuration Boundary
+
+### 1. Scope / Trigger
+- Trigger: changing backend URL setup, app startup, `apiBase()`, Settings backend address UI, or connection testing.
+
+### 2. Signatures
+- `initApiBase(defaultUrl?: string | null) -> string | null`
+- `configureApiBase(url, { persist }) -> boolean`
+- `normalizeBackendUrl(raw) -> string | null`
+- `testBackendUrl(url) -> Promise<void>`
+- `api(path, options) -> Promise<T>`
+
+### 3. Contracts
+- User backend URL is stored globally under `localStorage` key `lf:backendUrl`; it is not tenant-scoped.
+- URL priority: stored user value -> `app.config.json.api_base` -> empty setup state.
+- Valid URLs must use `http://` or `https://`; saved values are trimmed and trailing slash removed.
+- Empty backend URL blocks Auth, tenant selection, business API, and SSE requests.
+
+### 4. Validation & Error Matrix
+- Empty URL -> setup card blocks app entry.
+- Invalid scheme or malformed URL -> Chinese validation error.
+- `/health` unreachable -> connection error mentioning backend URL, network, and CORS.
+- Saved URL changes -> reset current session because old token may belong to another backend.
+
+### 5. Good/Base/Bad Cases
+- Good: packaged default is empty; first run shows backend setup and sends no business request.
+- Base: packaged default points to local backend; app can enter Auth immediately.
+- Bad: page directly concatenates its own backend URL instead of using `apiBase()`.
+
+### 6. Tests Required
+- `pnpm -C apps/desktop typecheck`
+- `pnpm -C apps/desktop vite:build`
+- Manual/runtime check for first-run empty URL and Settings URL change when UI behavior is touched.
+
+### 7. Wrong vs Correct
+Wrong: keep a hidden hardcoded `http://127.0.0.1:8787` fallback that bypasses user setup.
+
+Correct: use the shared backend URL configuration layer and let empty config become an explicit setup state.
 
 ## Error Handling
 

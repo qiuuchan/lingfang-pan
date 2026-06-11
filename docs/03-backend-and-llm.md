@@ -1,93 +1,139 @@
 # 多租户后台与第三方 LLM 网关
 
-> 蓝图 · 2026-06-09（v2：含插件生成服务）· 上游 [愿景与架构](01-vision-and-architecture.md)、[领域模型](02-domain-and-plugins.md)
+> 当前实现 · 2026-06-11 · 上游 [愿景与架构](01-vision-and-architecture.md)、[领域模型](02-domain-and-plugins.md)
 > 决策：服务端 [ADR-0003](adr/0003-multi-tenant-persistence.md)、LLM [ADR-0002](adr/0002-llm-third-party-gateway.md)
 
 ---
 
-# A 部分 · 多租户后台（Rust + axum + PostgreSQL）
+# A 部分 · 多租户后台（Rust + axum + SQLite）
 
 ## 1. 职责
 
-- **插件生成服务**（产品核心）：prompt 工程 + 调 LLM 生成插件 + 校验 + 草稿管理。
-- 身份/租户/成员/权限 · 插件发布/安装/授权 · LLM 网关绑定 · 调用审计。
-- **不做**：业务逻辑（在插件）、token 计费（在第三方网关）。
+- **插件生成服务**：prompt 工程、调用 LLM、校验生成物、保存草稿、发布插件。
+- 身份、租户、成员、权限、插件发布/安装/授权、LLM 网关绑定、市场、钱包和审计。
+- **不做**：插件业务逻辑、第三方 LLM token 计费、桌面壳本地能力。
 
 ## 2. API 面
 
-```
+```text
+# 健康检查
+GET /health
+
 # 身份与租户
-POST /auth/register | /auth/login | /auth/switch-tenant
-POST /tenants ; GET /tenants/me
-POST /members | GET /members          # 当前租户（来自 JWT），下同各租户内资源
+POST /auth/register
+POST /auth/login
+POST /auth/switch-tenant
+POST /tenants
+GET  /tenants/me
+POST /members
+GET  /members
 
-# ★插件生成（产品核心）
-POST /drafts                  新建草稿（用户首次描述）
-POST /drafts/:id/generate     按描述生成/迭代插件（调 LLM，当前非流式 JSON）
-GET  /drafts/:id              取草稿（文件 + 对话 + 诊断）
-POST /drafts/:id/publish      校验通过后发布为 Plugin
+# 插件草稿与生成
+POST /drafts
+GET  /drafts/:id
+POST /drafts/:id/generate
+POST /drafts/:id/generate/stream
+POST /drafts/:id/publish
+POST /plugins/:id/edit
 
-# 插件发布物 / 安装 / 授权
-GET /plugins ; POST /installations ; POST/GET /grants
+# 插件目录 / 安装 / 授权
+GET  /plugins
+GET  /plugins/:id/files/*file
+POST /installations
+POST /grants
+GET  /grants
 
-# LLM 网关绑定（GET 绝不返回明文 key）
-POST/GET /llm-bindings
-POST /llm/proxy               插件运行时的 LLM 调用入口（当前非流式）
+# 市场与审核
+GET  /marketplace/search
+GET  /marketplace/plugins/:id
+POST /marketplace/publish
+POST /marketplace/rate
+POST /marketplace/install
+GET  /admin/review/pending
+POST /admin/review/approve
+POST /admin/review/reject
 
-# 审计
-GET /audit                    含 generate / runtime 两类调用
+# 钱包
+GET  /wallet
+POST /wallet/purchase
+
+# LLM 网关绑定与运行时代理
+POST /llm-bindings
+GET  /llm-bindings
+POST /llm/models
+POST /llm/test
+POST /llm/proxy
+GET  /audit
 ```
 
-## 3. 鉴权与租户上下文
+## 3. 前后端分离访问路径
 
-JWT `{user_id, tenant_id, role}` → axum 中间件注入 `RequestContext` → 所有 repo 查询强制带 `tenant_id`。切换租户走 `/auth/switch-tenant` 换发 token。
+桌面端只保存一个后端 URL：
 
-## 4. 租户隔离（硬实现）
+```text
+桌面端本机配置 → apiBase() → axum 后端 → SQLite / 第三方 LLM 网关
+```
 
-`TenantScopedRepo` 自动注入 `tenant_id`，禁裸 SQL 绕过；路径 `:id` 必须等于 JWT 的 `tenant_id` 否则 403；`api_key` 仅服务端可解密。
+- 首次没有后端 URL 时，桌面端先显示后端地址配置入口，不发登录或业务请求。
+- 设置页可修改后端 URL；切换到另一套后端后需要重新登录。
+- 连接测试使用无鉴权 `GET /health`。
+- 打包默认地址可放在 `apps/desktop/public/app.config.json`，但最终可由用户在应用内修复。
+
+## 4. 鉴权与租户上下文
+
+- 注册/登录后获取用户 token。
+- 租户选择通过 `/auth/switch-tenant` 换发包含当前租户的 token。
+- 租户内资源使用服务端 `TenantCtx`，以数据库中的 active membership 为权限来源。
+- 前端/插件永不持有第三方 LLM key 明文。
 
 ## 5. 数据库与运行
 
-表对应 [领域模型](02-domain-and-plugins.md)（含 `plugin_drafts`）；迁移纳入版本控制。**无 demo 默认**：未配 `DATABASE_URL` 直接退出（`apps/server/src/main.rs` 已落实）。本地：`pnpm db:up` → 迁移 → `cargo run -p server`。
+当前实现使用内嵌 SQLite：
 
----
+- 默认连接串：`sqlite:lingfang.db?mode=rwc`
+- 首次启动自动创建数据库文件。
+- 迁移文件位于 `apps/server/migrations/`，启动时自动应用。
+- 无需 Docker 或 PostgreSQL。
 
-# B 部分 · 第三方 LLM 网关对接
+关键环境变量：
 
-## 6. 核心原则
+| 变量 | 说明 |
+|------|------|
+| `DATABASE_URL` | SQLite 连接串，可改为自定义路径 |
+| `BIND_ADDR` | 服务端监听地址；跨机器访问时通常设为 `0.0.0.0:8787` |
+| `CORS_ALLOWED_ORIGINS` | 逗号分隔的前端来源白名单；留空时使用开发期 permissive CORS |
+| `JWT_SECRET` | JWT 签名密钥，生产必须使用强随机值 |
+| `KEY_ENCRYPTION_SECRET` | 租户 LLM key 加密密钥，生产必须使用强随机值 |
+| `PLATFORM_ADMIN_EMAIL` | 可选平台审核员邮箱 |
 
-> 平台**不做** token 计量/扣费/分成。租户在第三方网关（newapi 等）创建 key、设配额；平台只**存绑定、路由、审计**。**生成插件**和**插件运行时**两类 LLM 调用都经它。
+## 6. 跨域策略
 
-## 7. 绑定管理
+服务端启动时根据 `CORS_ALLOWED_ORIGINS` 决定跨域行为：
 
-```ts
-// POST /tenants/:id/llm-bindings
-{ name:"团队 newapi", protocol:"openai-compatible",
-  base_url:"https://newapi.example.com/v1", api_key:"sk-xxx",  // 服务端立即加密落库
-  models:["gpt-4o-mini","claude-3-5-sonnet","deepseek-chat"] }
+- 留空：开发期 permissive CORS，方便本地 Tauri/Vite 调试。
+- 非空：按逗号分隔 origin 白名单放行。
+- 白名单模式允许 `GET`、`POST`、`OPTIONS`，以及 `Authorization`、`Content-Type`。
+
+示例：
+
+```env
+BIND_ADDR=0.0.0.0:8787
+CORS_ALLOWED_ORIGINS=http://localhost:1420,https://desktop.example.com
 ```
 
-key 加密存储，GET 脱敏为 `sk-****`，前端/插件永不见明文。
+## 7. 第三方 LLM 网关对接
 
-## 8. 两类转发流程
+平台不做 token 计量、扣费或分成。租户在第三方 OpenAI 兼容网关中创建 key、设配额；平台只存绑定、路由请求并审计。
 
-**① 生成插件 `/drafts/:id/generate`（核心）**
-```
-用户描述 → 后台构造 prompt（插件契约 + 描述 + 草稿快照，要求 structured output）
- → 取租户绑定、解密 key → OpenAI 兼容转发到第三方网关
- → 拿到插件代码 → schema + 安全校验 → 不过则错误回喂重生成
- → 存 PluginDraft → SSE 进度回壳 → 写 InvocationAudit(kind=generate)
+绑定流程：
+
+```text
+设置页填入 API Key → 后端加密落库 → 生成插件与插件运行时调用统一经后端代理 → 写审计
 ```
 
-**② 插件运行时 `/llm/proxy`**
-```
-插件 sdk.llm.chat → 壳网关(校验 manifest+授权) → /llm/proxy → 第三方网关
- → SSE 透传 → 写 InvocationAudit(kind=runtime)
-```
+关键要求：
 
-## 9. 协议与降级
-
-- 首发只支持 `openai-compatible`，一举对接 newapi/one-api/LiteLLM/各中转站。
-- 限流/配额交第三方网关，429/额度不足时**透传**错误。
-- 租户未配绑定 → 返回 `llm_binding_missing`，提示去配置——**显式失败，不伪造结果**。
-- 生成结果不合法（非合法插件代码）→ 返回 `generation_invalid` 并记诊断，不产出假插件。
+- `GET /llm-bindings` 只返回脱敏 key。
+- 租户未配置绑定时返回 `llm_binding_missing`。
+- 上游 LLM 错误以显式错误返回，不伪造生成结果。
+- 生成结果不合法时返回 `generation_invalid` 并保留诊断。
