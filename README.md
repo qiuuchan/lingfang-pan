@@ -16,6 +16,35 @@
 - **内部经济**：钱包余额（注册赠送）、付费插件购买结算、平台审核。
 - **多租户**：注册 / 登录 / 团队（租户）/ 成员角色（owner/admin/member）；**首个注册用户自动成为平台管理员**。
 
+## 协作平台（三平台架构）
+
+本仓库新增一套独立的多租户协作系统，采用“前台本地客户端 + 网页管理端 + 统一后端 API”三平台架构。该系统优先支持本地 Node/PostgreSQL 部署，Docker Compose 作为可选路径保留。
+
+本地快速启动入口：
+
+```bash
+pnpm install
+cp apps/collab-api/.env.example apps/collab-api/.env
+pnpm -C apps/collab-api db:setup
+pnpm -C apps/collab-api dev
+VITE_API_BASE_URL=http://localhost:3000 pnpm -C apps/collab-admin dev
+```
+
+- API：`http://localhost:3000`
+- Swagger：`http://localhost:3000/api/docs`
+- 管理端：`http://localhost:4174`
+- 本地客户端后端地址：`http://127.0.0.1:3000`
+
+详细说明：
+
+- [协作平台架构](docs/collab-platform.md)
+- [API 文档](docs/collab-api.md)
+- [部署文档](docs/collab-deployment.md)
+- [本地客户端接入](docs/collab-desktop-client.md)
+- [管理端使用说明](docs/collab-admin-guide.md)
+
+该协作系统不替代下方 LingFang AI 插件生成平台主线；旧 Rust/SQLite 服务端仍保留。
+
 ## 技术栈
 
 | 层 | 技术 |

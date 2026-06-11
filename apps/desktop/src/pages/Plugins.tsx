@@ -31,7 +31,7 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
       const draft = await api<PluginDraft>(`/plugins/${plugin.id}/edit`, { method: 'POST' });
       setCurrentDraft(draft);
       setRunningPlugin(null);
-      setView('generator');
+      setView('team');
     } catch (caught) {
       toast.error(errorMessage(caught));
       setEditing(false);

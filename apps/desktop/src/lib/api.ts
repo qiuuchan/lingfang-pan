@@ -73,7 +73,7 @@ export async function testBackendUrl(url: string): Promise<void> {
   if (!normalized) throw new Error('请输入以 http:// 或 https:// 开头的后端地址');
   let res: Response;
   try {
-    res = await fetch(`${normalized}/health`, { method: 'GET', cache: 'no-store' });
+    res = await fetch(`${normalized}/api/health`, { method: 'GET', cache: 'no-store' });
   } catch {
     throw new Error(`无法连接后端（${normalized}）。请检查地址、网络和跨域配置。`);
   }
@@ -121,7 +121,7 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.message || data.error || res.statusText) as ApiError;
-    err.code = data.error;
+    err.code = data.code || data.error;
     throw err;
   }
   return data as T;

@@ -23,6 +23,7 @@ night_runs/
 .env
 .env.*
 !.env.example
+!.env.collab.example
 **/secrets/
 
 # Trellis 本机运行态
@@ -43,3 +44,4 @@ night_runs/
 .cursor/
 .codex/
 .agents/
+pnpm-lock.yaml

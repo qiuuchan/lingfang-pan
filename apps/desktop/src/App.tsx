@@ -1,29 +1,22 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import { toast } from 'sonner';
-import { AlertTriangleIcon, ServerIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
-import { apiBase, configureApiBase, normalizeBackendUrl, setAuthToken, testBackendUrl } from '@/lib/api';
-import type { Session, View, PluginDraft, LoadedPlugin } from '@/lib/types';
+import { api, apiBase, configureApiBase, normalizeBackendUrl, setAuthToken } from '@/lib/api';
+import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { Auth } from '@/pages/Auth';
-import { TenantSelect } from '@/pages/TenantSelect';
-import { Generator } from '@/pages/Generator';
+import { Onboarding } from '@/pages/Onboarding';
+import { TeamHome } from '@/pages/TeamHome';
+import { TeamManage } from '@/pages/TeamManage';
 import { Plugins } from '@/pages/Plugins';
-import { Market } from '@/pages/Market';
-import { Wallet } from '@/pages/Wallet';
-import { Review } from '@/pages/Review';
 import { Settings } from '@/pages/Settings';
-import { LoadingButton } from '@/components/loading-button';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 
 interface AppContextValue {
   backendUrl: string | null;
   saveBackendUrl: (url: string) => boolean;
   session: Session;
   applySession: (patch: Partial<Session>) => void;
+  applyCollabSession: (payload: CollabSessionResponse) => void;
+  refreshSession: () => Promise<void>;
   resetSession: () => void;
   view: View;
   setView: (v: View) => void;
@@ -31,7 +24,6 @@ interface AppContextValue {
   setCurrentDraft: (d: PluginDraft | null) => void;
   runningPlugin: LoadedPlugin | null;
   setRunningPlugin: (p: LoadedPlugin | null) => void;
-  // 固定到侧边栏的插件（按租户存于 localStorage）。
   pinnedPlugins: LoadedPlugin[];
   pinPlugin: (p: LoadedPlugin) => void;
   unpinPlugin: (id: string) => void;
@@ -46,7 +38,6 @@ export function useApp() {
   return ctx;
 }
 
-// 固定插件按租户隔离存储于 localStorage（本地偏好，不跨设备同步）。
 const pinKey = (tenantId: string | null) => `lf:pins:${tenantId || 'none'}`;
 function loadPins(tenantId: string | null): LoadedPlugin[] {
   try {
@@ -65,12 +56,38 @@ function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
   }
 }
 
-const emptySession: Session = { token: null, userId: null, displayName: null, tenantId: null, tenantName: null, role: null, isPlatformAdmin: false };
+const emptySession: Session = {
+  token: null,
+  userId: null,
+  displayName: null,
+  email: null,
+  tenantId: null,
+  tenantName: null,
+  role: null,
+  isPlatformAdmin: false,
+  onboarding: null,
+  application: null,
+};
+
+function sessionFromPayload(payload: CollabSessionResponse, previousToken: string | null): Session {
+  return {
+    token: payload.token ?? previousToken,
+    userId: payload.user.id,
+    displayName: payload.user.displayName,
+    email: payload.user.email,
+    tenantId: payload.team?.id ?? null,
+    tenantName: payload.team?.name ?? null,
+    role: payload.team?.role ?? null,
+    isPlatformAdmin: payload.user.platformRole === 'PLATFORM_ADMIN',
+    onboarding: payload.onboarding,
+    application: payload.application,
+  };
+}
 
 export default function App() {
   const [session, setSession] = useState<Session>(emptySession);
   const [backendUrl, setBackendUrl] = useState<string | null>(() => apiBase() || null);
-  const [view, setView] = useState<View>('generator');
+  const [view, setView] = useState<View>('team');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
@@ -91,12 +108,28 @@ export default function App() {
     });
   }, []);
 
+  const applyCollabSession = useCallback((payload: CollabSessionResponse) => {
+    setSession((prev) => {
+      const next = sessionFromPayload(payload, prev.token);
+      setAuthToken(next.token);
+      if (next.onboarding === 'TEAM_ADMIN_SPACE') setView('team-manage');
+      else setView('team');
+      return next;
+    });
+  }, []);
+
+  const refreshSession = useCallback(async () => {
+    const payload = await api<CollabSessionResponse>('/api/auth/me');
+    applyCollabSession(payload);
+  }, [applyCollabSession]);
+
   const resetSession = useCallback(() => {
     setAuthToken(null);
     setSession(emptySession);
+    setRunningPlugin(null);
+    setView('team');
   }, []);
 
-  // 固定插件随当前租户加载（按租户隔离存于 localStorage）。
   useEffect(() => {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
@@ -122,119 +155,38 @@ export default function App() {
 
   const ctx: AppContextValue = {
     backendUrl, saveBackendUrl,
-    session, applySession, resetSession,
+    session, applySession, applyCollabSession, refreshSession, resetSession,
     view, setView,
     currentDraft, setCurrentDraft,
     runningPlugin, setRunningPlugin,
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
   };
 
-  // 未配置后端地址时，先阻断登录和业务请求。
-  if (!backendUrl) {
-    return (
-      <AppContext.Provider value={ctx}>
-        <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-background p-4 text-foreground">
-          <BackendUrlSetup onSaved={saveBackendUrl} />
-        </div>
-        <Toaster position="top-right" richColors closeButton />
-      </AppContext.Provider>
-    );
+  if (!session.token) {
+    return <AppContext.Provider value={ctx}><Centered><Auth /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
-  // 未登录 / 未选租户：全屏居中单页（无侧边栏）。
-  if (!session.token) {
-    return (
-      <AppContext.Provider value={ctx}>
-        <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-background p-4 text-foreground"><Auth /></div>
-        <Toaster position="top-right" richColors closeButton />
-      </AppContext.Provider>
-    );
-  }
-  if (!session.tenantId) {
-    return (
-      <AppContext.Provider value={ctx}>
-        <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-background p-4 text-foreground"><TenantSelect /></div>
-        <Toaster position="top-right" richColors closeButton />
-      </AppContext.Provider>
-    );
+  if (session.onboarding && !['TEAM_SPACE', 'TEAM_ADMIN_SPACE'].includes(session.onboarding)) {
+    return <AppContext.Provider value={ctx}><Centered><Onboarding /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   let body: ReactNode;
   if (view === 'plugins') body = <Plugins />;
-  else if (view === 'market') body = <Market />;
-  else if (view === 'wallet') body = <Wallet />;
-  else if (view === 'review') body = <Review />;
+  else if (view === 'team-manage') body = <TeamManage />;
   else if (view === 'settings') body = <Settings />;
-  else body = <Generator />;
-
-  // 造插件用满宽双栏；其余页面居中限宽并可滚动。
-  const wide = view === 'generator';
+  else body = <TeamHome />;
 
   return (
     <AppContext.Provider value={ctx}>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
         <Sidebar />
-        {wide ? (
-          <main className="flex min-h-0 flex-1 flex-col px-4 py-4">{body}</main>
-        ) : (
-          <main className="flex-1 overflow-y-auto px-6 py-6"><div className="mx-auto w-full max-w-5xl">{body}</div></main>
-        )}
+        <main className="flex-1 overflow-y-auto px-6 py-6"><div className="mx-auto w-full max-w-6xl">{body}</div></main>
       </div>
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );
 }
 
-function BackendUrlSetup({ onSaved }: { onSaved: (url: string) => boolean }) {
-  const [url, setUrl] = useState('');
-  const [testing, setTesting] = useState(false);
-
-  async function save() {
-    const normalized = normalizeBackendUrl(url);
-    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
-    setTesting(true);
-    try {
-      await testBackendUrl(normalized);
-      if (!onSaved(normalized)) return toast.error('后端地址格式不正确');
-      toast.success('后端地址已保存');
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  return (
-    <Card className="w-full max-w-lg animate-in fade-in zoom-in-95 duration-300">
-      <CardHeader>
-        <div className="mb-2 inline-flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <ServerIcon className="size-5" />
-        </div>
-        <CardTitle>连接后端服务</CardTitle>
-        <CardDescription>
-          LingFang 前端与后端分离部署。首次使用前，请填写后端服务地址，之后也可以在设置中修改。
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
-          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
-          <span>未配置后端地址前，登录、租户选择、插件生成和市场请求都会暂停。</span>
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="backendUrl">后端 URL</Label>
-          <Input
-            id="backendUrl"
-            placeholder="例如 http://127.0.0.1:8787 或 https://api.example.com"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && save()}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <LoadingButton loading={testing} onClick={save}>测试并保存</LoadingButton>
-          <Button variant="outline" onClick={() => setUrl('http://127.0.0.1:8787')}>填入本机默认地址</Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
+function Centered({ children }: { children: ReactNode }) {
+  return <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-background p-4 text-foreground">{children}</div>;
 }
