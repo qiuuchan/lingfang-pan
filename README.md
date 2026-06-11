@@ -1,54 +1,33 @@
-<p align="center">
-  <img src="apps/desktop/public/logo.png" width="80" alt="LingFang" />
-</p>
-
 <h1 align="center">LingFang</h1>
-<p align="center">AI-powered no-code plugin generation platform</p>
+<p align="center">基于 AI 的无代码插件生成平台</p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri" />
-  <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" />
-  <img src="https://img.shields.io/badge/Rust-1.8+-DEA584?logo=rust" />
-  <img src="https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs" />
-  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" />
-</p>
-
----
-
-## Architecture
+## 架构
 
 ```mermaid
 graph TB
-    subgraph Desktop["🖥 Desktop Client (Tauri 2 + React)"]
-        Gen["AI Plugin Generator"]
-        Sandbox["Sandbox Preview"]
-        Market["Plugin Marketplace"]
-        Wallet["Wallet & Economy"]
-        Teams["Team Spaces"]
+    subgraph Desktop["桌面客户端 Tauri 2 + React"]
+        Gen["AI 插件生成器"]
+        Sandbox["沙箱预览"]
+        Market["插件市场"]
+        Wallet["钱包经济"]
+        Teams["团队协作"]
     end
 
-    subgraph Admin["⚙️ Admin Dashboard (React + shadcn/ui)"]
-        Users["User Management"]
-        Approvals["Team Approvals"]
-        Plugins["Plugin Governance"]
-        Audit["Audit Log"]
+    subgraph Admin["管理端 React + shadcn/ui"]
+        Users["用户管理"]
+        Approvals["审批管理"]
+        Plugins["插件治理"]
+        Audit["审计日志"]
     end
 
-    subgraph APIs["🔌 Backend APIs"]
-        Server["Rust Server
-        axum + SQLite
-        Port 8787"]
-        Collab["NestJS Collab API
-        Prisma + PostgreSQL
-        Port 3000"]
+    subgraph APIs["后端 API"]
+        Server["Rust 服务 axum + SQLite 端口 8787"]
+        Collab["NestJS 协作 API Prisma + PostgreSQL 端口 3000"]
     end
 
-    subgraph Store["💾 Storage"]
-        SQLite[("SQLite
-        Plugin DB")]
-        PG[("PostgreSQL
-        Collab DB")]
+    subgraph Store["存储"]
+        SQLite[("SQLite 插件数据库")]
+        PG[("PostgreSQL 协作数据库")]
     end
 
     Desktop --> Server
@@ -58,159 +37,132 @@ graph TB
     Collab --> PG
 ```
 
-**Two independent systems, one platform:**
+**两套独立系统，一个平台：**
 
-| System | Stack | Database | Role |
-|--------|-------|----------|------|
-| **AI Plugin Engine** | Rust + axum | SQLite (embedded) | Plugin generation, LLM proxy, marketplace, wallet |
-| **Collab Platform** | NestJS + Prisma | PostgreSQL | Multi-tenant teams, RBAC, admin panel |
+| 系统 | 技术栈 | 数据库 | 职责 |
+|------|--------|--------|------|
+| AI 插件引擎 | Rust + axum | SQLite（内嵌） | 插件生成、LLM 代理、市场、钱包 |
+| 协作平台 | NestJS + Prisma | PostgreSQL | 多租户团队、RBAC、管理后台 |
 
----
+## 功能
 
-## Features
+**AI 插件生成** — 自然语言描述需求，AI 流式生成可运行插件，沙箱即时预览，对话式迭代，发布到市场。
 
-### 🧠 AI Plugin Generation
-Describe features in natural language → AI generates runnable plugins with streaming preview. Iterate conversationally, publish to marketplace.
+- SSE 流式生成，实时展示推理过程
+- 对话式迭代修改已生成的插件
+- 插件沙箱即时预览
 
-- **Streaming generation** with real-time reasoning display (SSE + `reasoning_content`)
-- **Conversational iteration** — refine plugins through chat
-- **Plugin sandbox** — instant preview before publishing
+**市场与经济** — 搜索/评分/安装插件，钱包余额体系，付费插件购买结算。内置文件管理器、系统信息、待办事项三个插件。
 
-### 🏪 Marketplace & Economy
-- Search, rate, install plugins
-- Wallet system with balance and purchase flow
-- Built-in plugins: file explorer, system info, todo list
+**多租户协作** — 团队管理（管理员/成员角色），团队管理员申请审批流程，团队共享余额及流水。
 
-### 👥 Multi-tenant Collaboration *(new)*
-- **Teams** with roles: Admin → Member
-- **Team admin applications** with approval workflow
-- **Shared balance** and ledger for team plugins
-- **Admin dashboard** for platform governance
+## 快速开始
 
----
-
-## Quick Start
-
-### Prerequisites
+### 前置条件
 
 ```bash
-# AI Plugin Engine (no Docker needed)
-cargo ≥ 1.80        # Rust toolchain
-pnpm ≥ 9            # Node package manager
-
-# Collab Platform
-Node.js ≥ 20
-PostgreSQL 16       # Docker: docker compose up -d
+cargo >= 1.80        # Rust 工具链
+pnpm >= 9            # Node 包管理器
+Node.js >= 20        # 协作平台需要
 ```
 
-### AI Plugin Engine (one command)
+### AI 插件引擎（一键启动，无需 Docker）
 
 ```bash
 pnpm install
-pnpm start          # Starts Rust backend + Tauri desktop
+pnpm start
 ```
 
-- Backend: `http://127.0.0.1:8787`
-- Desktop: auto-launches as native window
+- 后端：`http://127.0.0.1:8787`
+- 桌面端自动启动为原生窗口
+- 首次运行自动创建 SQLite 数据库
 
-### Collab Platform
+### 协作平台
 
 ```bash
+# 本地开发
 pnpm install
 cp apps/collab-api/.env.example apps/collab-api/.env
-pnpm -C apps/collab-api db:setup        # prisma generate + migrate + seed
-pnpm -C apps/collab-api dev             # API → :3000
-VITE_COLLAB_API_BASE=http://localhost:3000 pnpm -C apps/collab-admin dev  # Admin → :4174
-```
+pnpm -C apps/collab-api db:setup
+pnpm -C apps/collab-api dev          # API → :3000
+VITE_COLLAB_API_BASE=http://localhost:3000 pnpm -C apps/collab-admin dev  # 管理端 → :4174
 
-**Docker alternative:**
-
-```bash
+# Docker 部署
 docker compose -f docker-compose.collab.yml up -d
 ```
 
-| Endpoint | URL |
-|----------|-----|
-| Collab API | `http://localhost:3000` |
-| Swagger UI | `http://localhost:3000/api/docs` |
-| Admin Panel | `http://localhost:4174` |
+| 地址 | 说明 |
+|------|------|
+| `http://localhost:3000` | 协作 API |
+| `http://localhost:3000/api/docs` | Swagger 文档 |
+| `http://localhost:4174` | 管理后台 |
 
----
-
-## Project Structure
+## 项目结构
 
 ```
 lingfang/
 ├── apps/
-│   ├── desktop/          Tauri 2 + React desktop client
-│   │   ├── src/                  UI pages, components, API layer
-│   │   ├── src-tauri/            Rust capability gateway
-│   │   └── builtin-plugins/      Todo, File Explorer, System Info
-│   ├── server/           Rust backend (axum + SQLite)
-│   │   ├── src/routes/           Auth, drafts, marketplace, wallet, LLM
-│   │   └── migrations/           SQLite schema
-│   ├── collab-api/       NestJS collaboration API (Prisma + PostgreSQL)
-│   │   └── prisma/               Data model, migrations, seed
-│   └── collab-admin/     Web admin dashboard (React + shadcn/ui)
-│       └── src/components/       Users, Teams, Plugins, Approvals, Audit
+│   ├── desktop/          Tauri 2 + React 桌面客户端
+│   │   ├── src/                  UI 页面、组件、API 层
+│   │   ├── src-tauri/            Rust 能力网关
+│   │   └── builtin-plugins/      内置插件
+│   ├── server/           Rust 后端（axum + SQLite）
+│   │   ├── src/routes/           认证、草稿、市场、钱包、LLM
+│   │   └── migrations/           SQLite 迁移
+│   ├── collab-api/       NestJS 协作 API（Prisma + PostgreSQL）
+│   │   └── prisma/               数据模型、迁移、种子
+│   └── collab-admin/     Web 管理后台（React + shadcn/ui）
+│       └── src/components/       用户、团队、插件、审批、审计
 ├── packages/
-│   ├── contract/         Zod schemas — single source of truth
-│   ├── plugin-sdk/       Plugin capability SDK for runtime
-│   └── ui-tokens/        Design tokens (CSS custom properties)
+│   ├── contract/         Zod 契约 — 前后端共享类型
+│   ├── plugin-sdk/       插件能力客户端 SDK
+│   └── ui-tokens/        设计令牌（CSS 变量）
 ├── plugins/
-│   └── summarizer/       Example plugin: LLM-based text summarizer
-├── docs/                 Architecture, API, deployment, ADRs
-├── tools/                Startup scripts, logo generator
-└── docker-compose*.yml   Docker configs for PostgreSQL + Collab stack
+│   └── summarizer/       示例插件：LLM 文本摘要
+├── docs/                 架构文档、API 文档、ADR
+├── tools/                启动脚本、Logo 生成器
+└── docker-compose*.yml   Docker 部署配置
 ```
 
----
+## 配置
 
-## Configuration
+所有环境变量均有本地开发默认值，详见 `.env.example` 和 `.env.collab.example`。
 
-All environment variables have sensible defaults for local development. See `.env.example` and `.env.collab.example` for the full list.
+| 变量 | 默认值 | 作用域 |
+|------|--------|--------|
+| `BIND_ADDR` | `127.0.0.1:8787` | Rust 服务 |
+| `DATABASE_URL` | `sqlite:lingfang.db` | Rust 服务 |
+| `DATABASE_URL` | `postgresql://...` | 协作 API |
+| `JWT_SECRET` | 开发占位值 | 全部 |
 
-| Variable | Default | Scope |
-|----------|---------|-------|
-| `BIND_ADDR` | `127.0.0.1:8787` | Rust server |
-| `DATABASE_URL` | `sqlite:lingfang.db` | Rust server |
-| `DATABASE_URL` | `postgresql://...` | Collab API |
-| `JWT_SECRET` | dev placeholder | Both |
+部署到局域网或公网时，设置 `BIND_ADDR=0.0.0.0:8787` 并配置 `CORS_ALLOWED_ORIGINS`。
 
-Deploy with `BIND_ADDR=0.0.0.0:8787` and set `CORS_ALLOWED_ORIGINS` for network access.
+## 文档
 
----
+| 文档 | 内容 |
+|------|------|
+| [愿景与架构](docs/01-vision-and-architecture.md) | 产品定位、系统设计 |
+| [领域模型与插件](docs/02-domain-and-plugins.md) | 实体契约、插件清单、SDK |
+| [后端与 LLM](docs/03-backend-and-llm.md) | API 设计、鉴权、网关 |
+| [工程规范](docs/04-engineering.md) | Monorepo 约定、配置隔离 |
+| [协作平台架构](docs/collab-platform.md) | 多租户架构 |
+| [协作 API](docs/collab-api.md) | API 参考 |
+| [协作部署](docs/collab-deployment.md) | Docker 与手动部署 |
+| [ADR](docs/adr/) | 架构决策记录（5 篇） |
 
-## Documentation
-
-| Document | Topic |
-|----------|-------|
-| [Vision & Architecture](docs/01-vision-and-architecture.md) | Product vision, system design |
-| [Domain & Plugins](docs/02-domain-and-plugins.md) | Entity model, plugin manifest, SDK |
-| [Backend & LLM](docs/03-backend-and-llm.md) | API design, auth, LLM gateway |
-| [Engineering](docs/04-engineering.md) | Monorepo conventions, config |
-| [Collab Platform](docs/collab-platform.md) | Multi-tenant architecture |
-| [Collab API](docs/collab-api.md) | API reference |
-| [Collab Deployment](docs/collab-deployment.md) | Docker & manual deployment |
-| [ADR](docs/adr/) | Architecture Decision Records (5 docs) |
-
----
-
-## Verification
+## 验证
 
 ```bash
-cargo test -p server              # Rust unit tests
-pnpm -C apps/desktop typecheck    # Desktop typecheck
-pnpm -C apps/collab-api typecheck # API typecheck
-pnpm -C apps/collab-admin build   # Admin build
+cargo test -p server              # Rust 单元测试
+pnpm -C apps/desktop typecheck    # 桌面端类型检查
+pnpm -C apps/collab-api typecheck # API 类型检查
+pnpm -C apps/collab-admin build   # 管理端构建
 ```
 
----
+## 设计原则
 
-## Design Principles
-
-1. **Contract-first** — Zod schemas in `packages/contract` drive all implementations
-2. **No reinventing wheels** — use battle-tested tools (axum, NestJS, Prisma, shadcn/ui)
-3. **Platform stays neutral** — routes LLM requests, doesn't handle billing
-4. **Locally verifiable** — SQLite embedded DB, zero-dependency startup
-5. **Minimal deployable** — single binary (Rust server) + static files (admin panel)
+1. **契约先行** — `packages/contract` 中的 Zod schema 是所有实现的唯一事实来源
+2. **不重复造轮子** — 选用经过验证的工具（axum、NestJS、Prisma、shadcn/ui）
+3. **平台保持中立** — 只路由 LLM 请求，不处理计费
+4. **本地可验证** — SQLite 内嵌数据库，零依赖启动
+5. **最小可部署** — 单一二进制（Rust 服务）+ 静态文件（管理后台）
