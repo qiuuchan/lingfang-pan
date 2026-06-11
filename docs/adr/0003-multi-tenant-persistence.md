@@ -1,8 +1,10 @@
 # ADR-0003：持久化用 PostgreSQL，服务端用 Rust + axum
 
-- **状态**：Accepted
+- **状态**：Superseded by current implementation note（当前实现以 SQLite 为准）
 - **日期**：2026-06-09
 - **关联**：[多租户后台](../03-backend-and-llm.md)、[领域模型](../02-domain-and-plugins.md)
+
+> 当前代码与 README 已采用内嵌 SQLite：`Config::from_env()` 默认 `sqlite:lingfang.db?mode=rwc`，启动时自动建库并运行迁移。本文保留历史决策背景，不作为当前运行配置依据。
 
 ---
 

@@ -1,13 +1,85 @@
-// 与本地服务端通信 + Tauri 命令桥。会话 token 以模块变量镜像，便于在 React 之外的 fetch 中读取。
-// 后端地址可在分发时通过 public/app.config.json 的 api_base 覆盖（见 main.tsx 启动加载），便于打包不同环境。
-const DEFAULT_API = 'http://127.0.0.1:8787';
-let apiBaseUrl = DEFAULT_API;
+const BACKEND_URL_STORAGE_KEY = 'lf:backendUrl';
+let apiBaseUrl = '';
+
+const trimTrailingSlash = (url: string) => url.replace(/\/+$/, '');
+
+export function normalizeBackendUrl(raw: string | null | undefined): string | null {
+  const value = trimTrailingSlash((raw || '').trim());
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return trimTrailingSlash(parsed.toString());
+  } catch {
+    return null;
+  }
+}
+
+function readStoredBackendUrl(): string | null {
+  try {
+    return normalizeBackendUrl(localStorage.getItem(BACKEND_URL_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+export function configureApiBase(url: string | null | undefined, { persist = false }: { persist?: boolean } = {}) {
+  const normalized = normalizeBackendUrl(url);
+  if (!normalized) return false;
+  apiBaseUrl = normalized;
+  if (persist) {
+    try {
+      localStorage.setItem(BACKEND_URL_STORAGE_KEY, normalized);
+    } catch {
+      /* localStorage 不可用则只更新当前会话 */
+    }
+  }
+  return true;
+}
+
+export function clearApiBase() {
+  apiBaseUrl = '';
+  try {
+    localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
+  } catch {
+    /* localStorage 不可用则忽略 */
+  }
+}
+
+export function initApiBase(defaultUrl?: string | null) {
+  const stored = readStoredBackendUrl();
+  if (stored) {
+    apiBaseUrl = stored;
+    return stored;
+  }
+  const fallback = normalizeBackendUrl(defaultUrl);
+  if (fallback) {
+    apiBaseUrl = fallback;
+    return fallback;
+  }
+  apiBaseUrl = '';
+  return null;
+}
 
 export function setApiBase(url: string | null | undefined) {
-  if (url && url.trim()) apiBaseUrl = url.trim().replace(/\/+$/, '');
+  configureApiBase(url);
 }
 export function apiBase() {
   return apiBaseUrl;
+}
+
+export async function testBackendUrl(url: string): Promise<void> {
+  const normalized = normalizeBackendUrl(url);
+  if (!normalized) throw new Error('请输入以 http:// 或 https:// 开头的后端地址');
+  let res: Response;
+  try {
+    res = await fetch(`${normalized}/health`, { method: 'GET', cache: 'no-store' });
+  } catch {
+    throw new Error(`无法连接后端（${normalized}）。请检查地址、网络和跨域配置。`);
+  }
+  if (!res.ok) throw new Error(`后端健康检查失败：HTTP ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  if (data.status !== 'ok') throw new Error('后端健康检查响应不正确');
 }
 
 let authToken: string | null = null;
@@ -39,10 +111,12 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (auth && authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
+  const base = apiBase();
+  if (!base) throw new Error('尚未配置后端服务地址，请先填写后端 URL。');
   try {
-    res = await fetch(apiBase() + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   } catch {
-    throw new Error(`无法连接服务端（${apiBase()}）。请确认已用 pnpm start 启动后端。`);
+    throw new Error(`无法连接后端（${base}）。请检查后端地址、网络和跨域配置。`);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

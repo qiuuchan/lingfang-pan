@@ -8,6 +8,8 @@ pub struct Config {
     /// 用于加密租户的第三方 LLM key（落库密文）。
     pub key_encryption_secret: String,
     pub bind_addr: String,
+    /// 允许访问后端的前端来源；为空时使用开发期 permissive CORS。
+    pub cors_allowed_origins: Vec<String>,
     /// 平台审核员邮箱：启动时据此标记 users.is_platform_admin（未配置则无审核员）。
     pub platform_admin_email: Option<String>,
 }
@@ -36,6 +38,12 @@ impl Config {
         let key_encryption_secret = std::env::var("KEY_ENCRYPTION_SECRET")
             .unwrap_or_else(|_| "dev-insecure-key-encryption-secret".to_string());
         let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".to_string());
+        let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
         let platform_admin_email = std::env::var("PLATFORM_ADMIN_EMAIL")
             .ok()
             .map(|s| s.trim().to_string())
@@ -45,6 +53,7 @@ impl Config {
             jwt_secret,
             key_encryption_secret,
             bind_addr,
+            cors_allowed_origins,
             platform_admin_email,
         }
     }
@@ -89,6 +98,7 @@ mod tests {
             jwt_secret: "jwt-secret-with-at-least-thirty-two-bytes".to_string(),
             key_encryption_secret: "key-secret-with-at-least-thirty-two-bytes".to_string(),
             bind_addr: "127.0.0.1:0".to_string(),
+            cors_allowed_origins: Vec::new(),
             platform_admin_email: None,
         }
     }

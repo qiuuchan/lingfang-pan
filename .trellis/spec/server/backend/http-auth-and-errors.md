@@ -39,6 +39,41 @@ Reference files:
 
 Do not add mock success responses. For missing LLM binding, invalid generation, denied capability, payment failure, or upstream errors, return the explicit `AppError` variant.
 
+## Scenario: Health Check And CORS Boundary
+
+### 1. Scope / Trigger
+- Trigger: changing `/health`, `Config`, CORS behavior, frontend backend URL setup, or deployment docs.
+
+### 2. Signatures
+- Health API: `GET /health -> { "status": "ok" }`
+- Env: `CORS_ALLOWED_ORIGINS=<origin>[,<origin>...]`
+- Config field: `cors_allowed_origins: Vec<String>`
+
+### 3. Contracts
+- `/health` is unauthenticated and is the desktop connection-test endpoint.
+- Empty `CORS_ALLOWED_ORIGINS` keeps development permissive CORS.
+- Non-empty `CORS_ALLOWED_ORIGINS` is an exact origin allowlist.
+- Allowlisted CORS supports `GET`, `POST`, `OPTIONS`, `Authorization`, and `Content-Type`.
+
+### 4. Validation & Error Matrix
+- Invalid allowlist origin at startup -> hard startup failure.
+- Origin not in allowlist -> browser/WebView blocks frontend request.
+- Missing backend URL on desktop -> frontend blocks before hitting server.
+
+### 5. Good/Base/Bad Cases
+- Good: deployed backend sets `BIND_ADDR=0.0.0.0:8787` and exact `CORS_ALLOWED_ORIGINS`.
+- Base: local dev leaves `CORS_ALLOWED_ORIGINS` empty.
+- Bad: server keeps permissive CORS in deployment while docs claim a whitelist is active.
+
+### 6. Tests Required
+- `cargo test -p server` after changing config shape or CORS construction.
+- Runtime smoke test: desktop `/health` check succeeds for expected backend URL.
+
+### 7. Wrong vs Correct
+Wrong: create a second health endpoint or require auth for connection testing.
+
+Correct: reuse `GET /health` as the only unauthenticated backend readiness signal.
+
 ## Scenario: Tenant Context Membership Authority
 
 ### 1. Scope / Trigger

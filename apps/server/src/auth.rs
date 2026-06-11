@@ -202,6 +202,7 @@ mod tests {
                 jwt_secret: "jwt-secret-with-at-least-thirty-two-bytes".to_string(),
                 key_encryption_secret: "key-secret-with-at-least-thirty-two-bytes".to_string(),
                 bind_addr: "127.0.0.1:0".to_string(),
+                cors_allowed_origins: Vec::new(),
                 platform_admin_email: None,
             },
             http: reqwest::Client::new(),

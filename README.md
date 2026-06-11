@@ -45,14 +45,16 @@ pnpm start:sh         # macOS / Linux
 pnpm start:backend    # 只起后端，不起桌面壳
 ```
 
-首次运行会编译 Rust（拉依赖较久）。关闭桌面壳即自动停服务端。
+首次运行会编译 Rust（拉依赖较久）。关闭桌面壳即自动停服务端。桌面壳启动后会先检查后端 URL；如果未预置或未保存，会先要求填写后端服务地址。
 
 ### 手动分步（调试用）
 
 ```bash
 cargo run -p server              # 1. 启动服务端（自动创建 lingfang.db 并跑迁移）
-pnpm -C apps/desktop dev         # 2. 启动 Tauri 壳：注册→建团队→配网关→描述生成→预览→发布
+pnpm -C apps/desktop dev         # 2. 启动 Tauri 壳，首次进入时填写后端 URL
 ```
+
+进入桌面壳后：先确认后端服务地址 → 注册 / 登录 → 建团队 → 配 LLM 网关 → 描述生成 → 预览 → 发布。
 
 生成插件需在壳内「设置 → LLM 网关」填入第三方 `base_url` + `api_key`（key 仅服务端持有、加密落库、不回显）。
 
@@ -63,20 +65,32 @@ pnpm -C apps/desktop dev         # 2. 启动 Tauri 壳：注册→建团队→�
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `DATABASE_URL` | `sqlite:lingfang.db?mode=rwc` | 数据库连接串；默认内嵌 SQLite，文件不存在自动创建 |
-| `BIND_ADDR` | `127.0.0.1:8787` | 服务端监听地址 |
+| `BIND_ADDR` | `127.0.0.1:8787` | 服务端监听地址；跨机器访问时通常设为 `0.0.0.0:8787` |
+| `CORS_ALLOWED_ORIGINS` | 空 | 逗号分隔的前端来源白名单；留空时使用开发期 permissive CORS |
 | `JWT_SECRET` | dev 占位 | JWT 签名密钥（生产务必改） |
 | `KEY_ENCRYPTION_SECRET` | dev 占位 | 加密租户 LLM key 的密钥（生产务必改） |
 | `PLATFORM_ADMIN_EMAIL` | 空 | 指定平台审核员邮箱；留空则首个注册用户为管理员 |
 
-### 分发自定义后端地址
+### 前后端分离与分发
 
-桌面壳默认连 `http://127.0.0.1:8787`。分发软件时可编辑 `apps/desktop/public/app.config.json` 的 `api_base` 指向你的后端，无需改代码：
+桌面壳只需要知道后端 URL。首次没有有效后端地址时，应用会先显示配置入口，不会进入登录页或发业务请求。
+
+分发者可以在 `apps/desktop/public/app.config.json` 里预置默认后端地址：
 
 ```json
 { "api_base": "https://your-backend.example.com" }
 ```
 
-LLM 网关地址同理在 `apps/desktop/public/gateway.config.json` 预置（终端用户只填自己的 key）。
+用户仍可在应用内「设置 → 后端服务地址」修改；保存后后续请求会立即使用新后端，切换后端时需要重新登录。
+
+后端部署到局域网或公网时，通常需要：
+
+```env
+BIND_ADDR=0.0.0.0:8787
+CORS_ALLOWED_ORIGINS=http://localhost:1420,https://your-desktop-origin.example.com
+```
+
+LLM 网关地址仍可在 `apps/desktop/public/gateway.config.json` 预置（终端用户只填自己的 key）。
 
 ## 代码结构
 
@@ -86,7 +100,7 @@ apps/server/        Rust + axum + sqlx（SQLite）：身份/租户/草稿/生成
   migrations/0001..0005_*.sql   （SQLite 方言）
 apps/desktop/       Tauri 2 壳：React + Vite + Tailwind v4 + shadcn/ui
   src/{pages,components,lib}    描述→生成（流式+思考）→预览→发布→市场→钱包；侧边栏固定插件
-  public/app.config.json        后端地址（分发可配）
+  public/app.config.json        默认后端地址（可预置；用户也可在应用内修改）
   public/gateway.config.json     LLM 网关地址（分发可配）
   src-tauri/                     capability 网关（fs/system）+ 内置插件加载
   builtin-plugins/               内置插件：todo-list / file-explorer / system-info

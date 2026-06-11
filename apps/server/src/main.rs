@@ -12,11 +12,33 @@ mod plugin_policy;
 mod routes;
 mod state;
 
+use axum::http::{header, HeaderValue, Method};
 use config::Config;
 use state::AppState;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
+
+fn cors_layer(config: &Config) -> CorsLayer {
+    if config.cors_allowed_origins.is_empty() {
+        return CorsLayer::permissive();
+    }
+
+    let origins = config
+        .cors_allowed_origins
+        .iter()
+        .map(|origin| {
+            origin
+                .parse::<HeaderValue>()
+                .unwrap_or_else(|_| panic!("CORS_ALLOWED_ORIGINS 包含无效来源: {origin}"))
+        })
+        .collect::<Vec<_>>();
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+}
 
 #[tokio::main]
 async fn main() {
@@ -38,6 +60,7 @@ async fn main() {
         db::seed_platform_admin(&pool, email).await;
     }
     let bind_addr = config.bind_addr.clone();
+    let cors = cors_layer(&config);
     let state = AppState {
         pool,
         config,
@@ -46,7 +69,7 @@ async fn main() {
 
     let app = routes::router()
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&bind_addr)

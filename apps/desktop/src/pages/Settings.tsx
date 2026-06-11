@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { CheckCircle2Icon, AlertTriangleIcon, UsersIcon } from 'lucide-react';
+import { CheckCircle2Icon, AlertTriangleIcon, UsersIcon, ServerIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, type ApiError } from '@/lib/api';
+import { api, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
 import type { GatewayConfig } from '@/lib/types';
 import { loadModelCatalog, modelLabel } from '@/lib/models';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,10 @@ interface Binding {
 }
 
 export function Settings() {
+  const { backendUrl, saveBackendUrl, resetSession } = useApp();
+  const [backendInput, setBackendInput] = useState(backendUrl || '');
+  const [testingBackend, setTestingBackend] = useState(false);
+  const [savingBackend, setSavingBackend] = useState(false);
   const [config, setConfig] = useState<GatewayConfig | null>(null);
   const [configError, setConfigError] = useState(false);
   const [binding, setBinding] = useState<Binding | null>(null);
@@ -31,6 +35,42 @@ export function Settings() {
   const [fetching, setFetching] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  async function testBackend() {
+    const normalized = normalizeBackendUrl(backendInput);
+    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    setTestingBackend(true);
+    try {
+      await testBackendUrl(normalized);
+      toast.success('后端连接正常');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setTestingBackend(false);
+    }
+  }
+
+  async function saveBackend() {
+    const normalized = normalizeBackendUrl(backendInput);
+    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    setSavingBackend(true);
+    try {
+      await testBackendUrl(normalized);
+      const changed = normalized !== backendUrl;
+      if (!saveBackendUrl(normalized)) return toast.error('后端地址格式不正确');
+      setBackendInput(normalized);
+      if (changed) {
+        resetSession();
+        toast.success('后端地址已保存，请重新登录');
+      } else {
+        toast.success('后端地址已保存');
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingBackend(false);
+    }
+  }
 
   async function refreshBinding() {
     try {
@@ -131,6 +171,39 @@ export function Settings() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+    <Card className="w-full">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <ServerIcon className="size-5 text-primary" />
+          <CardTitle>后端服务地址</CardTitle>
+        </div>
+        <CardDescription>
+          前端只保存后端 URL，登录、租户、插件生成、市场和钱包都会连接到这个服务。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="text-sm text-muted-foreground">
+          当前地址：<span className="font-mono text-foreground">{backendUrl || '未配置'}</span>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="backendServiceUrl">后端 URL</Label>
+          <Input
+            id="backendServiceUrl"
+            placeholder="例如 http://127.0.0.1:8787 或 https://api.example.com"
+            value={backendInput}
+            onChange={(e) => setBackendInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && saveBackend()}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <LoadingButton variant="outline" loading={testingBackend} onClick={testBackend}>测试连接</LoadingButton>
+          <LoadingButton loading={savingBackend} onClick={saveBackend}>测试并保存</LoadingButton>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          如果切换到另一套后端，当前登录态会失效，保存后需要重新登录。
+        </p>
+      </CardContent>
+    </Card>
     <Card className="w-full">
       <CardHeader>
         <CardTitle>LLM 网关</CardTitle>
