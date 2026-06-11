@@ -1,0 +1,45 @@
+# 依赖
+node_modules/
+target/
+dist/
+**/dist/
+
+# 桌面打包产物
+apps/desktop/src-tauri/target/
+release/
+
+# 运行 / 测试产物
+night_runs/
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+**/__pycache__/
+**/*.pyc
+
+# 本地态与密钥（永不入仓）
+.env
+.env.*
+!.env.example
+**/secrets/
+
+# Trellis 本机运行态
+.trellis/.developer
+.trellis/.current-task
+.trellis/.runtime/
+.trellis/.ralph-state.json
+.trellis/.agents/
+.trellis/.agent-log
+.trellis/.session-id
+.trellis/**/.plan-log
+.trellis/**/*.tmp
+.trellis/**/.backup-*/
+.trellis/**/*.new
+
+# 个人 AI 工具配置（仓库不为任何单一 AI 工具绑定）
+.claude/
+.cursor/
+.codex/
+.agents/

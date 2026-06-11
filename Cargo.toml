@@ -1,0 +1,7 @@
+# Cargo workspace：服务端与 Tauri 桌面壳的 Rust 部分。
+[workspace]
+resolver = "2"
+members = [
+  "apps/server",
+  "apps/desktop/src-tauri",
+]

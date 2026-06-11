@@ -1,0 +1,19 @@
+{
+  "name": "lingfang-platform",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "pwsh -NoProfile -File tools/start.ps1",
+    "start:sh": "bash tools/start.sh",
+    "start:backend": "pwsh -NoProfile -File tools/start.ps1 -SkipDesktop",
+    "dist": "pwsh -NoProfile -File tools/create-distribution.ps1",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "dev:server": "cargo run -p server",
+    "dev:desktop": "pnpm -C apps/desktop dev"
+  }
+}
