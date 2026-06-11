@@ -1,0 +1,6 @@
+{
+  "_说明": "分发前在此填好你的第三方网关地址（OpenAI 兼容，如 newapi/one-api 的 /v1）。终端用户只需在设置页填入自己的 API Key，无需也无法修改网关地址，便于统一成本控制。",
+  "name": "LingFang 默认网关",
+  "base_url": "https://opencode.ai/zen/go/v1",
+  "models": []
+}
