@@ -41,7 +41,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 function InfoRow({ label, value }: { label: string; value: string }) {
-  return <div className="flex items-start justify-between gap-3 text-xs"><span className="shrink-0 text-muted-foreground">{label}</span><span className="break-all text-right font-mono">{value}</span></div>;
+  return <div className="flex items-start justify-between gap-3 text-xs"><span className="shrink-0 text-muted-foreground">{label}</span><span className="break-all text-right font-mono text-popover-foreground">{value}</span></div>;
 }
 
 export function Sidebar() {
@@ -84,7 +84,7 @@ export function Sidebar() {
             <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
           </PopoverTrigger>
           <PopoverContent side="right" align="end" className="w-80">
-            <p className="font-medium">账户信息</p>
+            <p className="font-medium text-popover-foreground">账户信息</p>
             <div className="flex flex-col gap-1.5">
               <InfoRow label="昵称" value={session.displayName || '—'} />
               <InfoRow label="邮箱" value={session.email || '—'} />

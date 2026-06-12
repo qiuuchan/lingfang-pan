@@ -37,7 +37,7 @@ export function Wallet() {
   useEffect(() => {
     (async () => {
       try {
-        setData(await api<WalletData>('/wallet'));
+        setData(await api<WalletData>('/api/wallet'));
       } catch (e) {
         toast.error((e as ApiError).message);
         setData({ balance_cents: 0, transactions: [] });

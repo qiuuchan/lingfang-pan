@@ -174,8 +174,7 @@ export default function App() {
   }
 
   let body: ReactNode;
-  if (view === 'home') body = <PluginCreatorHome />;
-  else if (view === 'plugins') body = <Plugins />;
+  if (view === 'plugins') body = <Plugins />;
   else if (view === 'team-manage') body = <TeamManage />;
   else if (view === 'market') body = <Market />;
   else if (view === 'wallet') body = <Wallet />;
@@ -187,7 +186,16 @@ export default function App() {
     <AppContext.Provider value={ctx}>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto px-6 py-6"><div className="mx-auto w-full max-w-6xl">{body}</div></main>
+        <main className="flex-1 overflow-hidden">
+          <div className={view === 'home' ? 'h-full' : 'hidden'}>
+            <PluginCreatorHome />
+          </div>
+          {view !== 'home' && (
+            <div className="h-full overflow-y-auto px-6 py-6">
+              <div className="mx-auto w-full max-w-6xl">{body}</div>
+            </div>
+          )}
+        </main>
       </div>
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
