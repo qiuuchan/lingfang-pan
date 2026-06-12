@@ -4,11 +4,12 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
-import { HomeIcon, PackageIcon, SettingsIcon, UsersIcon, ChevronDownIcon, LogOutIcon, UserRoundIcon, type LucideIcon } from 'lucide-react';
+import { HomeIcon, PackageIcon, SettingsIcon, UsersIcon, ChevronDownIcon, LogOutIcon, UserRoundIcon, SparklesIcon, type LucideIcon } from 'lucide-react';
 
 interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean }
 
 const NAV: NavItem[] = [
+  { v: 'home', label: '创建插件', icon: SparklesIcon },
   { v: 'team', label: '团队空间', icon: HomeIcon },
   { v: 'team-manage', label: '团队管理', icon: UsersIcon, teamAdminOnly: true },
   { v: 'plugins', label: '插件', icon: PackageIcon },

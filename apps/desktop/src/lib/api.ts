@@ -97,6 +97,12 @@ export async function tauriInvoke<T = unknown>(cmd: string, args?: Record<string
   return inv(cmd, args) as Promise<T>;
 }
 
+export async function tauriListen<T = unknown>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> {
+  const listen = (window as unknown as { __TAURI__?: { event?: { listen?: Function } } }).__TAURI__?.event?.listen;
+  if (!listen) throw new Error('需在 LingFang 桌面环境中运行');
+  return listen(event, handler) as Promise<() => void>;
+}
+
 export interface ApiError extends Error {
   code?: string;
 }
