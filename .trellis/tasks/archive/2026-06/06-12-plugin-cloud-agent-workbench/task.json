@@ -1,0 +1,32 @@
+{
+  "id": "plugin-cloud-agent-workbench",
+  "name": "plugin-cloud-agent-workbench",
+  "title": "云端插件创建分享与本地代码助手",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-12",
+  "completedAt": "2026-06-12",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-12-cloud-plugin-sharing",
+    "06-12-desktop-plugin-home",
+    "06-12-local-agent-runtime",
+    "06-12-plugin-capability-sdk",
+    "06-12-real-cli-verification"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
