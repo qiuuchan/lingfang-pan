@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { ArrowLeftIcon, DownloadIcon, StarIcon, ShoppingCartIcon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
+import { useApp } from '@/App';
 import { fmtYuan } from '@/lib/money';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { LoadingButton } from '@/components/loading-button';
 import { Pagination } from '@/components/pagination';
+import { Stars } from '@/components/stars';
 
 const PAGE_SIZE = 6;
 
@@ -94,7 +96,7 @@ export function Market() {
             <>
               <div className="flex flex-col divide-y rounded-lg border">
                 {pageItems.map((p) => (
-                  <button key={p.id} className="flex items-center justify-between gap-4 px-4 py-3.5 text-left transition hover:bg-muted/60" onClick={() => openDetail(p.id)}>
+                  <Button key={p.id} variant="ghost" className="flex h-auto items-center justify-between gap-4 rounded-none px-4 py-3.5 text-left" onClick={() => openDetail(p.id)}>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium">{p.name}</span>
@@ -102,8 +104,11 @@ export function Market() {
                       </div>
                       <div className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">{p.description}</div>
                     </div>
-                    <div className="shrink-0 text-xs text-muted-foreground">⭐ {p.avg_score || '—'} ({p.rating_count}) · ⬇ {p.install_count}</div>
-                  </button>
+                    <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1"><StarIcon className="size-3 fill-current text-yellow-500" />{p.avg_score || '—'} ({p.rating_count})</span>
+                      <span className="inline-flex items-center gap-1"><DownloadIcon className="size-3" />{p.install_count}</span>
+                    </div>
+                  </Button>
                 ))}
               </div>
               <Pagination page={page} totalPages={totalPages} onChange={setPage} />
@@ -116,6 +121,7 @@ export function Market() {
 }
 
 function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: () => void; onReload: (p: MarketPlugin) => void }) {
+  const { setView } = useApp();
   const [installing, setInstalling] = useState(false);
   const [buying, setBuying] = useState(false);
   const [rating, setRating] = useState(false);
@@ -141,7 +147,14 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
       await api('/wallet/purchase', { method: 'POST', body: { plugin_id: plugin.id } });
       toast.success('购买成功 ✓');
       await reload();
-    } catch (e) { toast.error(friendlyError(e as ApiError)); }
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.code === 'insufficient_balance') {
+        toast.error('余额不足', { action: { label: '去钱包', onClick: () => setView('wallet') } });
+      } else {
+        toast.error(friendlyError(err));
+      }
+    }
     finally { setBuying(false); }
   }
 
@@ -194,7 +207,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
           <h3 className="mb-2 text-sm font-semibold">评价</h3>
           {reviews.length ? reviews.map((r, i) => (
             <div key={i} className="flex items-center gap-2 py-1 text-sm">
-              <span className="text-yellow-500">{'★'.repeat(r.score)}{'☆'.repeat(5 - r.score)}</span>
+              <Stars score={r.score} starClassName="size-3.5" />
               <span className="text-muted-foreground">{r.comment}</span>
             </div>
           )) : <span className="text-sm text-muted-foreground">暂无评价</span>}
@@ -204,7 +217,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
           <div className="flex items-center gap-2">
             <Select value={score} onValueChange={(v) => setScore(v ?? '5')}>
               <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-              <SelectContent>{[5, 4, 3, 2, 1].map((n) => <SelectItem key={n} value={String(n)}>{'★'.repeat(n)}</SelectItem>)}</SelectContent>
+              <SelectContent>{[5, 4, 3, 2, 1].map((n) => <SelectItem key={n} value={String(n)}><Stars score={n} starClassName="size-3" /></SelectItem>)}</SelectContent>
             </Select>
             <Input placeholder="留下评价（可选）" value={comment} onChange={(e) => setComment(e.target.value)} />
             <LoadingButton loading={rating} onClick={rate}>提交评分</LoadingButton>

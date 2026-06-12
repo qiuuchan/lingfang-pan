@@ -61,7 +61,7 @@ function PluginListItem({
   const source = pluginSource(plugin);
   return (
     <div className="group flex items-center justify-between gap-3 px-4 py-3.5 transition hover:bg-muted/60">
-      <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => onRun(plugin)}>
+      <Button variant="ghost" className="flex min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 text-left" onClick={() => onRun(plugin)}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="truncate font-medium">{plugin.name}</span>
@@ -71,7 +71,7 @@ function PluginListItem({
           </div>
           <div className="truncate text-sm text-muted-foreground">{plugin.description || '—'}</div>
         </div>
-      </button>
+      </Button>
       <div className="flex shrink-0 items-center gap-2">
         <span className="text-xs text-muted-foreground">v{plugin.version}</span>
         <Button

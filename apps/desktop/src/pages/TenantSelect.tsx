@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
 import { api, type ApiError } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { LoadingButton } from '@/components/loading-button';
@@ -65,11 +65,8 @@ export function TenantSelect() {
   }
 
   return (
-    <Card className="mx-auto w-full max-w-lg">
-      <CardHeader>
-        <CardTitle>选择或创建团队（租户）</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <Card className="w-full border-0 p-0 shadow-none">
+      <CardContent className="flex flex-col gap-3 pt-2">
         {tenants === null ? (
           <p className="text-sm text-muted-foreground">加载中…</p>
         ) : tenants.length ? (

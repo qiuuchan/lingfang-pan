@@ -20,14 +20,14 @@ Reference files:
 This is a work-focused app. Existing pages use restrained cards and dense lists, not marketing sections.
 
 Current layout rules:
-- Auth and tenant selection are centered full-screen states.
-- The generator page is a full-height two-column tool surface.
+- Auth is a centered full-screen state; tenant switching is a Dialog opened from the Sidebar user area.
+- The plugin creator page is a single-column conversation surface with a right-side details Sheet.
 - Other pages live in a centered `max-w-5xl` content column.
 - Lists commonly use `divide-y rounded-lg border` instead of nested cards.
 
 Reference files:
 - `apps/desktop/src/App.tsx`
-- `apps/desktop/src/pages/Generator.tsx`
+- `apps/desktop/src/pages/PluginCreatorHome.tsx`
 - `apps/desktop/src/pages/Market.tsx`
 - `apps/desktop/src/pages/Plugins.tsx`
 
@@ -42,4 +42,18 @@ Examples:
 ## Styling Source
 
 Global theme tokens live in `apps/desktop/src/index.css`. shadcn component variants should use semantic Tailwind tokens like `bg-background`, `text-muted-foreground`, `border`, `primary`, and `destructive` instead of one-off hex colors.
+
+## Radius And Scrollbar Conventions
+
+Radius tiers (do not introduce arbitrary `rounded-2xl/3xl/4xl`):
+- `rounded-md` — inputs, small icon buttons
+- `rounded-lg` — list items, bordered containers, `<pre>` debug blocks
+- `rounded-xl` — cards (matches the shadcn Card default), Sheet/Dialog surfaces
+- `rounded-full` — avatars, badges, icon backplates
+
+Scrollbars are globally hidden (`scrollbar-width: none` + `*::-webkit-scrollbar { display: none }`) while keeping wheel/trackpad/keyboard scroll. Do not re-add visible scrollbars. The app defaults to dark theme via `next-themes` (`attribute="class"`, `defaultTheme="dark"`) wired in `main.tsx`; `.dark` token block in `index.css` is the source palette.
+
+Reference files:
+- `apps/desktop/src/index.css`
+- `apps/desktop/src/main.tsx`
 

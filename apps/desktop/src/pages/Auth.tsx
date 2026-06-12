@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { LoadingButton } from '@/components/loading-button';
 
 export function Auth() {
@@ -105,8 +106,8 @@ export function Auth() {
         <div className={cn('grid transition-all duration-300 ease-out', mode === 'register' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
           <div className="flex flex-col gap-3 overflow-hidden">
             <Input placeholder="昵称（可选）" value={name} onChange={(e) => setName(e.target.value)} />
-            <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-              <input type="checkbox" checked={wantsTeamAdmin} onChange={(e) => setWantsTeamAdmin(e.target.checked)} />
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+              <Checkbox checked={wantsTeamAdmin} onCheckedChange={(v) => setWantsTeamAdmin(v === true)} />
               我是团队管理员，需要提交审批申请
             </label>
             {wantsTeamAdmin && (
@@ -119,7 +120,7 @@ export function Auth() {
         </div>
         <LoadingButton className="w-full" loading={loading} onClick={submit}>{mode === 'login' ? '登录' : '注册'}</LoadingButton>
         <p className="text-center text-sm text-muted-foreground">
-          {mode === 'login' ? <><span>还没有账号？</span><button className="text-primary hover:underline" onClick={() => setMode('register')}>注册新账号</button></> : <><span>已有账号？</span><button className="text-primary hover:underline" onClick={() => setMode('login')}>去登录</button></>}
+          {mode === 'login' ? <><span>还没有账号？</span><Button variant="link" className="h-auto p-0" onClick={() => setMode('register')}>注册新账号</Button></> : <><span>已有账号？</span><Button variant="link" className="h-auto p-0" onClick={() => setMode('login')}>去登录</Button></>}
         </p>
         <div className="mt-2 border-t pt-4">
           <div className="mb-3 flex items-center justify-between gap-3">

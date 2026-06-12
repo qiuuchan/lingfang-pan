@@ -137,7 +137,7 @@ function RunnerBody({
 }
 
 export function Plugins() {
-  const { runningPlugin, setRunningPlugin, pinPlugin, unpinPlugin, isPinned } = useApp();
+  const { runningPlugin, setRunningPlugin, pinPlugin, unpinPlugin, isPinned, setView } = useApp();
   const [list, setList] = useState<LoadedPlugin[] | null>(null);
   const [error, setError] = useState<string>('');
   const [page, setPage] = useState(1);
@@ -167,7 +167,6 @@ export function Plugins() {
     <Card>
       <CardHeader>
         <CardTitle>我的插件</CardTitle>
-        <p className="text-sm text-muted-foreground">本地内置插件、你发布的插件、从市场安装的插件都在这里运行。</p>
       </CardHeader>
       <CardContent>
         {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
@@ -184,7 +183,15 @@ export function Plugins() {
             totalPages={totalPages}
           />
         ) : (
-          !error && <span className="text-sm text-muted-foreground">暂无插件。先到「造插件」生成并发布，或到「市场」安装。</span>
+          !error && (
+            <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
+              <span>暂无插件</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setView('home')}>去创建插件</Button>
+                <Button variant="outline" size="sm" onClick={() => setView('market')}>去市场安装</Button>
+              </div>
+            </div>
+          )
         )}
       </CardContent>
     </Card>

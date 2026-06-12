@@ -56,7 +56,6 @@ export function Wallet() {
           <div className="mt-1 text-4xl font-semibold tabular-nums">
             {data === null ? '…' : centsToYuan(data.balance_cents)}
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">余额用于购买市场上的付费插件；每个账户注册时赠送 ¥10 测试余额。</p>
         </CardContent>
       </Card>
 
