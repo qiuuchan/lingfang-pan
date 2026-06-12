@@ -5,6 +5,7 @@ import type { BalanceLedger, InvitationCode, TeamMember } from '@/lib/types';
 import { centsToYuan } from '@/lib/money';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Table as STable, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { LoadingButton } from '@/components/loading-button';
 import { Button } from '@/components/ui/button';
 
@@ -70,22 +71,37 @@ export function TeamManage() {
       </Card>
       <Card>
         <CardHeader><CardTitle>成员列表</CardTitle></CardHeader>
-        <CardContent><Table headers={['成员', '邮箱', '角色', '操作']} rows={members.map((m) => [m.user.displayName, m.user.email, m.role, m.role === 'MEMBER' ? <Button key={m.userId} variant="destructive" onClick={() => removeMember(m.userId)}>移除</Button> : '团队管理员'])} /></CardContent>
+        <CardContent><DataTable headers={['成员', '邮箱', '角色', '操作']} rows={members.map((m) => [m.user.displayName, m.user.email, m.role, m.role === 'MEMBER' ? <Button key={m.userId} variant="destructive" onClick={() => removeMember(m.userId)}>移除</Button> : '团队管理员'])} /></CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>邀请码</CardTitle></CardHeader>
-        <CardContent><Table headers={['前缀', '状态', '使用次数', '操作']} rows={invitations.map((i) => [i.displayCodePrefix, i.status, `${i.usedCount}/${i.maxUses}`, i.status === 'ACTIVE' ? <Button key={i.id} variant="outline" onClick={() => disableInvitation(i.id)}>禁用</Button> : '—'])} /></CardContent>
+        <CardContent><DataTable headers={['前缀', '状态', '使用次数', '操作']} rows={invitations.map((i) => [i.displayCodePrefix, i.status, `${i.usedCount}/${i.maxUses}`, i.status === 'ACTIVE' ? <Button key={i.id} variant="outline" onClick={() => disableInvitation(i.id)}>禁用</Button> : '—'])} /></CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>余额流水</CardTitle><CardDescription>团队管理员不可调整余额。</CardDescription></CardHeader>
-        <CardContent><Table headers={['原因', '方向', '金额', '时间']} rows={ledger.map((l) => [l.reason, l.direction, centsToYuan(l.amountCents), new Date(l.createdAt).toLocaleString()])} /></CardContent>
+        <CardContent><DataTable headers={['原因', '方向', '金额', '时间']} rows={ledger.map((l) => [l.reason, l.direction, centsToYuan(l.amountCents), new Date(l.createdAt).toLocaleString()])} /></CardContent>
       </Card>
     </div>
   );
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
-  return <div className="overflow-x-auto rounded-lg border"><table className="w-full text-sm"><thead className="bg-muted/60"><tr>{headers.map((h) => <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>)}</tr></thead><tbody className="divide-y">{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j} className="px-3 py-2 text-muted-foreground">{cell}</td>)}</tr>)}</tbody></table></div>;
+function DataTable({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
+  return (
+    <STable className="rounded-lg border">
+      <TableHeader>
+        <TableRow>
+          {headers.map((h) => <TableHead key={h} className="px-3 py-2">{h}</TableHead>)}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row, i) => (
+          <TableRow key={i}>
+            {row.map((cell, j) => <TableCell key={j} className="px-3 py-2">{cell}</TableCell>)}
+          </TableRow>
+        ))}
+      </TableBody>
+    </STable>
+  );
 }
 
 async function run(fn: () => Promise<unknown>) {

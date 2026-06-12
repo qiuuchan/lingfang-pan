@@ -61,7 +61,6 @@ export function Review() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><ShieldCheckIcon className="size-5 text-primary" />插件审核</CardTitle>
-        <p className="text-sm text-muted-foreground">作者提交到市场的插件需经审核通过后才对其他团队可见。</p>
       </CardHeader>
       <CardContent>
         {list === null ? (

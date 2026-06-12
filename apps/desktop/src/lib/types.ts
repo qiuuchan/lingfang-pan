@@ -114,4 +114,4 @@ export interface GatewayConfig {
   models?: string[];
 }
 
-export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'generator' | 'market' | 'wallet' | 'review';
+export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'market' | 'wallet' | 'review';

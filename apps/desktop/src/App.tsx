@@ -9,6 +9,9 @@ import { TeamHome } from '@/pages/TeamHome';
 import { TeamManage } from '@/pages/TeamManage';
 import { Plugins } from '@/pages/Plugins';
 import { Settings } from '@/pages/Settings';
+import { Market } from '@/pages/Market';
+import { Wallet } from '@/pages/Wallet';
+import { Review } from '@/pages/Review';
 import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
 
 interface AppContextValue {
@@ -174,6 +177,9 @@ export default function App() {
   if (view === 'home') body = <PluginCreatorHome />;
   else if (view === 'plugins') body = <Plugins />;
   else if (view === 'team-manage') body = <TeamManage />;
+  else if (view === 'market') body = <Market />;
+  else if (view === 'wallet') body = <Wallet />;
+  else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
   else if (view === 'settings') body = <Settings />;
   else body = <TeamHome />;
 
