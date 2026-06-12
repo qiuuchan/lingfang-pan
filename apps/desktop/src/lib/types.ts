@@ -108,10 +108,4 @@ export interface LoadedPlugin {
   updatedAt?: string;
 }
 
-export interface GatewayConfig {
-  name?: string;
-  base_url?: string;
-  models?: string[];
-}
-
 export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'market' | 'wallet' | 'review';

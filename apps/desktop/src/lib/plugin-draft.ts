@@ -195,7 +195,7 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
     runtime_type: 'client',
     entry: LOCAL_DRAFT_ENTRY,
     visibility: 'tenant',
-    capabilities: ['llm.chat'],
+    capabilities: ['code-assistant'],
   };
   const escapedOutput = output.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char] || char));
   const html = `<!doctype html>
@@ -277,7 +277,7 @@ export function previewSrcDoc(files: DraftFile[]): string {
   const shim = `<script>
     window.sdk = {
       invoke: async (cap) => { alert('能力 ' + cap + ' 将由宿主网关提供'); },
-      llm: { chat: async () => '（预览态：发布后经平台网关调用 LLM）' },
+      codeAssistant: { run: async () => '（预览态：发布后由本地代码助手执行）' },
       ui: { render: (c) => { document.body.insertAdjacentHTML('beforeend', '<pre>' + (typeof c === 'string' ? c : JSON.stringify(c, null, 2)) + '</pre>'); } },
     };
   <\/script>`;
