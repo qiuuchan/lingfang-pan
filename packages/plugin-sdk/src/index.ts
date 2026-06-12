@@ -6,6 +6,13 @@ import type { CapabilityKind } from '@lingfang/contract';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type ChatInput = { messages: ChatMessage[]; model?: string };
+type CodeAssistantTool = 'claude' | 'codex' | 'opencode';
+type CodeAssistantCheckInput = { tool?: CodeAssistantTool };
+type CodeAssistantRunInput = { tool: CodeAssistantTool; model?: string; prompt: string; workspaceDir?: string };
+type CodeAssistantStopInput = { sessionId: string };
+type PluginFile = { path: string; content: string };
+type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
+type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
 
 async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}): Promise<T> {
   const bridge = (globalThis as unknown as { __lingfangInvoke?: (c: string, a: unknown) => Promise<unknown> })
@@ -42,9 +49,29 @@ export const sdk = {
   llm: {
     chat: (input: ChatInput) => invoke<string>('llm.chat', input),
   },
+  codeAssistant: {
+    check: (input: CodeAssistantCheckInput = {}) => invoke<unknown>('code-assistant.session', { op: 'check', ...input }),
+    run: (input: CodeAssistantRunInput) => invoke<unknown>('code-assistant.run', input),
+    stop: (sessionId: string) => invoke<void>('code-assistant.session', { op: 'stop', sessionId }),
+    stopInput: (input: CodeAssistantStopInput) => invoke<void>('code-assistant.session', { op: 'stop', ...input }),
+  },
+  plugin: {
+    upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),
+    submitMarketplace: (input: PluginSubmitMarketplaceInput) => invoke<unknown>('plugin.submitMarketplace', input),
+  },
   ui: {
     render: (content: unknown) => invoke<void>('ui.view', { content }),
   },
 };
 
-export type { ChatMessage, ChatInput };
+export type {
+  ChatMessage,
+  ChatInput,
+  CodeAssistantTool,
+  CodeAssistantCheckInput,
+  CodeAssistantRunInput,
+  CodeAssistantStopInput,
+  PluginFile,
+  PluginUploadInput,
+  PluginSubmitMarketplaceInput,
+};
