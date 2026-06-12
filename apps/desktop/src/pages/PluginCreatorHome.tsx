@@ -26,6 +26,7 @@ import {
   type SessionExitPayload,
   type SessionOutputPayload,
   type SessionStartedPayload,
+  type TranscriptEvent,
 } from '@/lib/plugin-draft';
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -46,8 +47,7 @@ export function PluginCreatorHome() {
   const [streaming, setStreaming] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
-  const [liveText, setLiveText] = useState('');
-  const [liveReasoning, setLiveReasoning] = useState('');
+  const [liveEvents, setLiveEvents] = useState<TranscriptEvent[]>([]);
   const [liveStage, setLiveStage] = useState('');
   const [liveError, setLiveError] = useState<string | null>(null);
   const [assistantSession, setAssistantSession] = useState<AssistantSessionState | null>(null);
@@ -72,7 +72,7 @@ export function PluginCreatorHome() {
   const hasConversation = turns.length > 0 || Boolean(pendingUser) || streaming || Boolean(liveError);
 
   useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
-  useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight }); }, [turns.length, liveText, pendingUser]);
+  useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight }); }, [turns.length, liveEvents, pendingUser]);
   useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
   useEffect(() => { setRecent(readRecent(session.tenantId)); }, [session.tenantId]);
@@ -112,9 +112,9 @@ export function PluginCreatorHome() {
             stderr: payload.stream === 'stderr' ? tailText(prev.stderr + text) : prev.stderr,
           } : prev);
           if (payload.stream === 'stderr') {
-            setLiveReasoning((prev) => tailText(prev + text, 6_000));
+            setLiveEvents((prev) => [...prev, { at: new Date().toISOString(), event: 'output', payload: { stream: 'stderr', text } }].slice(-200));
           } else {
-            setLiveText((prev) => tailText(prev + text));
+            setLiveEvents((prev) => [...prev, { at: new Date().toISOString(), event: 'output', payload: { stream: 'stdout', text } }].slice(-200));
           }
           setLiveStage(payload.stream === 'stderr' ? '本地代码助手正在输出诊断…' : '本地代码助手正在生成…');
         }));
@@ -211,8 +211,7 @@ export function PluginCreatorHome() {
     if (!text || streaming) return;
     setInput('');
     setPendingUser(text);
-    setLiveText('');
-    setLiveReasoning('');
+    setLiveEvents([]);
     setLiveStage('正在启动本地代码助手长任务…');
     setLiveError(null);
     setStreaming(true);
@@ -318,8 +317,7 @@ export function PluginCreatorHome() {
     setCurrentDraft(null);
     setCloudPlugin(null);
     setPendingUser(null);
-    setLiveText('');
-    setLiveReasoning('');
+    setLiveEvents([]);
     setLiveStage('');
     setLiveError(null);
     setAssistantSession(null);
@@ -365,7 +363,7 @@ export function PluginCreatorHome() {
               <div ref={chatRef} className="flex min-h-[52vh] flex-col gap-4">
                 {turns.map((turn, index) => <Bubble key={index} role={turn.role} content={turn.content} />)}
                 {pendingUser && <Bubble role="user" content={pendingUser} />}
-                {streaming && <LiveProcess stage={liveStage} text={liveText} reasoning={liveReasoning} />}
+                {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
                 {!streaming && liveError && <Bubble role="assistant" content={liveError} error />}
               </div>
             </ScrollArea>

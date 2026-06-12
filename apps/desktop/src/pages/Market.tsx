@@ -54,7 +54,7 @@ export function Market() {
 
   const search = useCallback(async () => {
     try {
-      const data = await api<{ plugins: MarketPlugin[] }>(`/marketplace/search?q=${encodeURIComponent(q)}&sort=${sort}`);
+      const data = await api<{ plugins: MarketPlugin[] }>(`/api/marketplace/search?q=${encodeURIComponent(q)}&sort=${sort}`);
       setPlugins(data.plugins);
       setPage(1);
     } catch (e) {
@@ -72,7 +72,7 @@ export function Market() {
   const pageItems = (plugins ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   async function openDetail(id: string) {
-    try { setDetail(await api<MarketPlugin>(`/marketplace/plugins/${id}`)); } catch (e) { toast.error((e as ApiError).message); }
+    try { setDetail(await api<MarketPlugin>(`/api/marketplace/plugins/${id}`)); } catch (e) { toast.error((e as ApiError).message); }
   }
 
   return (
@@ -138,13 +138,13 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
   const rateHint = isFree ? '安装后即可评分' : '购买后即可评分';
 
   async function reload() {
-    onReload(await api<MarketPlugin>(`/marketplace/plugins/${plugin.id}`));
+    onReload(await api<MarketPlugin>(`/api/marketplace/plugins/${plugin.id}`));
   }
 
   async function buy() {
     setBuying(true);
     try {
-      await api('/wallet/purchase', { method: 'POST', body: { plugin_id: plugin.id } });
+      await api('/api/wallet/purchase', { method: 'POST', body: { plugin_id: plugin.id } });
       toast.success('购买成功 ✓');
       await reload();
     } catch (e) {
@@ -160,7 +160,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
 
   async function install() {
     setInstalling(true);
-    try { await api('/marketplace/install', { method: 'POST', body: { plugin_id: plugin.id } }); toast.success('已安装 ✓（可在「我的插件」运行）'); }
+    try { await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: plugin.id } }); toast.success('已安装 ✓（可在「我的插件」运行）'); }
     catch (e) { toast.error(friendlyError(e as ApiError)); }
     finally { setInstalling(false); }
   }
@@ -168,7 +168,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
   async function rate() {
     setRating(true);
     try {
-      await api('/marketplace/rate', { method: 'POST', body: { plugin_id: plugin.id, score: parseInt(score), comment } });
+      await api('/api/marketplace/rate', { method: 'POST', body: { plugin_id: plugin.id, score: parseInt(score), comment } });
       setComment('');
       await reload();
       toast.success('评分已提交');
