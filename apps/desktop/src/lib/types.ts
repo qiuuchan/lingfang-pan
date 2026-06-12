@@ -98,7 +98,14 @@ export interface LoadedPlugin {
   builtin?: boolean;
   entry: string;
   status?: string;
-  source?: 'builtin' | 'published' | 'installed' | 'platform';
+  source?: 'builtin' | 'published' | 'installed' | 'platform' | 'team' | 'marketplace';
+  files?: DraftFile[];
+  manifest?: unknown;
+  reviewStatus?: string;
+  reviewReason?: string;
+  marketplace?: boolean;
+  priceCents?: number;
+  updatedAt?: string;
 }
 
 export interface GatewayConfig {
@@ -107,4 +114,4 @@ export interface GatewayConfig {
   models?: string[];
 }
 
-export type View = 'team' | 'team-manage' | 'plugins' | 'settings' | 'generator' | 'market' | 'wallet' | 'review';
+export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'generator' | 'market' | 'wallet' | 'review';

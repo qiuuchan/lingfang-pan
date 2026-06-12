@@ -3,13 +3,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
+mod code_assistant;
 mod plugins;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::Value;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use capability::CapabilityRegistry;
 use plugins::LoadedPlugin;
@@ -62,6 +63,82 @@ fn invoke_capability(
     capability::invoke(&state.registry, &plugin_id, &kind, &args).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn code_assistant_list_tools() -> Vec<code_assistant::ToolAvailability> {
+    code_assistant::list_tools()
+}
+
+#[tauri::command]
+fn code_assistant_check_tool(
+    input: code_assistant::CheckToolInput,
+) -> code_assistant::ToolAvailability {
+    code_assistant::check_tool(input.tool)
+}
+
+#[tauri::command]
+fn code_assistant_run_probe(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::ProbeInput,
+) -> Result<code_assistant::ProbeResult, String> {
+    code_assistant::run_probe(&state, input)
+}
+
+#[tauri::command]
+fn code_assistant_get_config(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+) -> code_assistant::store::CodeAssistantConfig {
+    code_assistant::get_config(&state)
+}
+
+#[tauri::command]
+fn code_assistant_save_config(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::SaveConfigInput,
+) -> Result<code_assistant::store::CodeAssistantConfig, String> {
+    code_assistant::save_config(&state, input)
+}
+
+#[tauri::command]
+fn code_assistant_start_session(
+    app: tauri::AppHandle,
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::StartSessionInput,
+) -> Result<code_assistant::store::SessionRecord, String> {
+    code_assistant::start_session(app, state.inner().clone(), input)
+}
+
+#[tauri::command]
+fn code_assistant_send_input(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::SendInputInput,
+) -> Result<(), String> {
+    code_assistant::send_input(&state, input)
+}
+
+#[tauri::command]
+fn code_assistant_stop_session(
+    app: tauri::AppHandle,
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::StopSessionInput,
+) -> Result<(), String> {
+    code_assistant::stop_session(app, &state, input)
+}
+
+#[tauri::command]
+fn code_assistant_list_sessions(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+) -> Vec<code_assistant::store::SessionRecord> {
+    code_assistant::list_sessions(&state)
+}
+
+#[tauri::command]
+fn code_assistant_read_transcript(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::ReadTranscriptInput,
+) -> Result<String, String> {
+    code_assistant::read_transcript(&state, input)
+}
+
 /// 定位内置插件目录：开发态用源码路径，打包态用资源目录。
 fn builtin_dir(app: &tauri::App) -> PathBuf {
     // 开发态：CARGO_MANIFEST_DIR/../builtin-plugins
@@ -91,12 +168,28 @@ fn main() {
                 registry,
                 plugins: loaded,
             });
+            let assistant_state = code_assistant::CodeAssistantState::new(app)?;
+            app.manage(assistant_state);
+            let _ = app.emit(
+                "code-assistant://availability-changed",
+                code_assistant::list_tools(),
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_plugins,
             read_plugin_file,
-            invoke_capability
+            invoke_capability,
+            code_assistant_list_tools,
+            code_assistant_check_tool,
+            code_assistant_run_probe,
+            code_assistant_get_config,
+            code_assistant_save_config,
+            code_assistant_start_session,
+            code_assistant_send_input,
+            code_assistant_stop_session,
+            code_assistant_list_sessions,
+            code_assistant_read_transcript
         ])
         .run(tauri::generate_context!())
         .expect("启动 LingFang 桌面壳失败");

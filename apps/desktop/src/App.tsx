@@ -9,6 +9,7 @@ import { TeamHome } from '@/pages/TeamHome';
 import { TeamManage } from '@/pages/TeamManage';
 import { Plugins } from '@/pages/Plugins';
 import { Settings } from '@/pages/Settings';
+import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -87,7 +88,7 @@ function sessionFromPayload(payload: CollabSessionResponse, previousToken: strin
 export default function App() {
   const [session, setSession] = useState<Session>(emptySession);
   const [backendUrl, setBackendUrl] = useState<string | null>(() => apiBase() || null);
-  const [view, setView] = useState<View>('team');
+  const [view, setView] = useState<View>('home');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
@@ -112,8 +113,7 @@ export default function App() {
     setSession((prev) => {
       const next = sessionFromPayload(payload, prev.token);
       setAuthToken(next.token);
-      if (next.onboarding === 'TEAM_ADMIN_SPACE') setView('team-manage');
-      else setView('team');
+      setView('home');
       return next;
     });
   }, []);
@@ -127,7 +127,7 @@ export default function App() {
     setAuthToken(null);
     setSession(emptySession);
     setRunningPlugin(null);
-    setView('team');
+    setView('home');
   }, []);
 
   useEffect(() => {
@@ -171,7 +171,8 @@ export default function App() {
   }
 
   let body: ReactNode;
-  if (view === 'plugins') body = <Plugins />;
+  if (view === 'home') body = <PluginCreatorHome />;
+  else if (view === 'plugins') body = <Plugins />;
   else if (view === 'team-manage') body = <TeamManage />;
   else if (view === 'settings') body = <Settings />;
   else body = <TeamHome />;

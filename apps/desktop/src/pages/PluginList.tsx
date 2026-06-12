@@ -9,6 +9,8 @@ const SOURCE_LABEL: Record<NonNullable<LoadedPlugin['source']>, string> = {
   installed: '已安装',
   builtin: '内置',
   platform: '平台',
+  team: '团队共享',
+  marketplace: '市场',
 };
 
 type PluginListProps = {

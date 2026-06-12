@@ -28,10 +28,21 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
   async function editInGenerator() {
     setEditing(true);
     try {
-      const draft = await api<PluginDraft>(`/plugins/${plugin.id}/edit`, { method: 'POST' });
-      setCurrentDraft(draft);
+      if (plugin.files?.length) {
+        setCurrentDraft({
+          id: plugin.id,
+          status: plugin.status || 'ready',
+          files: plugin.files,
+          turns: [],
+          diagnostics: [],
+          plugin_id: plugin.id,
+        });
+      } else {
+        const draft = await api<PluginDraft>(`/plugins/${plugin.id}/edit`, { method: 'POST' });
+        setCurrentDraft(draft);
+      }
       setRunningPlugin(null);
-      setView('team');
+      setView('home');
     } catch (caught) {
       toast.error(errorMessage(caught));
       setEditing(false);

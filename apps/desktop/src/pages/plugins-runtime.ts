@@ -54,6 +54,15 @@ function sdkShim(pluginId: string): string {
           read: () => Promise.reject(new Error('文件能力需将插件作为内置插件分发')),
         },
         llm: { chat: (input) => call('llm.chat', input || {}) },
+        codeAssistant: {
+          check: (input) => call('code-assistant.session', Object.assign({ op: 'check' }, input || {})),
+          run: (input) => call('code-assistant.run', input || {}),
+          stop: (sessionId) => call('code-assistant.session', { op: 'stop', sessionId }),
+        },
+        plugin: {
+          upload: (input) => call('plugin.upload', input || {}),
+          submitMarketplace: (input) => call('plugin.submitMarketplace', input || {}),
+        },
         ui: { render: (c) => { document.body.insertAdjacentHTML('beforeend', '<pre>' + (typeof c === 'string' ? c : JSON.stringify(c, null, 2)) + '</pre>'); } },
       };
     })();
@@ -64,6 +73,11 @@ function isBuiltinPlugin(plugin: LoadedPlugin): boolean {
   return plugin.source === 'builtin' || Boolean(plugin.builtin);
 }
 
+function pluginFileContent(plugin: LoadedPlugin): string | null {
+  const file = plugin.files?.find((item) => item.path === plugin.entry);
+  return typeof file?.content === 'string' ? file.content : null;
+}
+
 export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> {
   if (isBuiltinPlugin(plugin)) {
     const html = await tauriInvoke<string>('read_plugin_file', {
@@ -72,6 +86,8 @@ export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> 
     });
     return bridgeShim(plugin.id) + html;
   }
+  const packaged = pluginFileContent(plugin);
+  if (packaged !== null) return sdkShim(plugin.id) + packaged;
   if (plugin.source === 'platform') {
     return sdkShim(plugin.id) + `<!doctype html><html><body style="font-family:system-ui;margin:24px"><h1>${plugin.name}</h1><p>${plugin.description || '平台插件已启用。具体运行能力由后续插件实现接入。'}</p></body></html>`;
   }
@@ -83,7 +99,7 @@ export type RuntimeMessage = {
   __lf_call?: unknown;
   id?: unknown;
   kind?: string;
-  args?: { messages?: unknown; model?: unknown };
+  args?: { messages?: unknown; model?: unknown; [key: string]: unknown };
 };
 
 export function runtimeMessage(data: unknown): RuntimeMessage | null {
@@ -99,14 +115,31 @@ export function errorMessage(error: unknown): string {
 
 async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMessage['args']) {
   if (isBuiltinPlugin(plugin)) {
+    if (kind === 'code-assistant.session') {
+      if (args?.op === 'check') return tauriInvoke('code_assistant_list_tools');
+      if (args?.op === 'stop') return tauriInvoke('code_assistant_stop_session', { input: { session_id: args.sessionId } });
+    }
+    if (kind === 'code-assistant.run') return tauriInvoke('code_assistant_start_session', { input: args || {} });
     return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
-  if (kind !== 'llm.chat') throw new Error(`运行态暂不支持的能力：${kind}`);
-  const result = await api<{ content: string }>('/llm/proxy', {
-    method: 'POST',
-    body: { plugin_id: plugin.id, messages: args?.messages, model: args?.model },
-  });
-  return result.content;
+  if (kind === 'llm.chat') {
+    const result = await api<{ content: string }>('/llm/proxy', {
+      method: 'POST',
+      body: { plugin_id: plugin.id, messages: args?.messages, model: args?.model },
+    });
+    return result.content;
+  }
+  if (kind === 'plugin.upload') {
+    return api('/api/plugins/upload', { method: 'POST', body: args || {} });
+  }
+  if (kind === 'plugin.submitMarketplace') {
+    const pluginId = String(args?.pluginId || plugin.id);
+    return api(`/api/plugins/${pluginId}/submit-marketplace`, { method: 'POST', body: { priceCents: args?.priceCents } });
+  }
+  if (kind === 'code-assistant.run' || kind === 'code-assistant.session') {
+    throw new Error('云端/平台插件默认不能调用本地代码助手能力，请使用内置可信插件或完成团队管理员授权。');
+  }
+  throw new Error(`运行态暂不支持的能力：${kind}`);
 }
 
 export async function handleRuntimeCall(
@@ -131,7 +164,7 @@ function mergePlugins(builtin: LoadedPlugin[], db: LoadedPlugin[]): LoadedPlugin
 export async function loadPlugins(): Promise<{ plugins: LoadedPlugin[]; error: string }> {
   const [builtin, db] = await Promise.allSettled([
     tauriInvoke<LoadedPlugin[]>('list_plugins'),
-    api<{ plugins: LoadedPlugin[] }>('/api/plugins/available').then((result) => result.plugins.map((plugin) => ({ ...plugin, version: plugin.version || '1.0.0', entry: plugin.entry || 'ui/index.html', source: 'platform' as const }))),
+    api<{ plugins: LoadedPlugin[] }>('/api/plugins/available').then((result) => result.plugins.map((plugin) => ({ ...plugin, version: plugin.version || '1.0.0', entry: plugin.entry || 'ui/index.html', source: plugin.source || 'platform' as const }))),
   ]);
   const builtinPlugins = builtin.status === 'fulfilled' ? builtin.value : [];
   const dbPlugins = db.status === 'fulfilled' ? db.value : [];
