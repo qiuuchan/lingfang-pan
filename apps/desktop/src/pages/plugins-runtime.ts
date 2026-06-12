@@ -123,11 +123,7 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
   if (kind === 'llm.chat') {
-    const result = await api<{ content: string }>('/llm/proxy', {
-      method: 'POST',
-      body: { plugin_id: plugin.id, messages: args?.messages, model: args?.model },
-    });
-    return result.content;
+    throw new Error('本地运行时不支持 llm.chat 云端能力，请使用 code-assistant 本地代码助手。');
   }
   if (kind === 'plugin.upload') {
     return api('/api/plugins/upload', { method: 'POST', body: args || {} });
