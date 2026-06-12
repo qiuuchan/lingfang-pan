@@ -1,0 +1,19 @@
+{
+  "at": "2026-06-12T06:23:17.704Z",
+  "browser": "Google Chrome via DevTools Protocol",
+  "appUrl": "http://localhost:1420/",
+  "backend": "http://localhost:3001",
+  "testUser": "plugin-e2e-20260612062307@lingfang.test",
+  "teamId": "5560f60e-47bf-45f6-81b2-8b0075b28ce2",
+  "pluginId": "4e5ee214-8a28-4190-b1b5-f2fb959690df",
+  "checks": {
+    "health": true,
+    "loginReachedHome": true,
+    "singleDialogVisible": true,
+    "detailsDrawerVisible": true,
+    "nonTauriBoundaryVisible": true,
+    "consoleErrorCount": 0
+  },
+  "screenshots": [],
+  "screenshotNote": "截图已移除；保留 console.json / network-requests.json / api-cloud-flow.json 作为可重放结构化证据。"
+}

@@ -62,7 +62,12 @@ Authorization: Bearer <token>
 | GET | `/api/teams/current/balance` | 团队成员 |
 | GET | `/api/teams/current/balance-ledger` | 团队成员 |
 | POST | `/api/teams/current/consume` | 团队成员 |
-| GET | `/api/plugins/available` | 已登录 |
+| POST | `/api/plugins/upload` | 团队成员，上传插件到团队云端共享空间 |
+| GET | `/api/plugins/mine` | 团队成员，当前用户创建的插件 |
+| GET | `/api/plugins/available` | 团队成员，当前团队可用插件 |
+| POST | `/api/plugins/:id/submit-marketplace` | 作者或团队管理员，提交公共市场审核 |
+| POST | `/api/plugins/:id/edit-draft` | 作者或团队管理员，编辑未审核中的插件草稿 |
+| POST | `/api/plugins/:id/install` | 团队成员，安装已审核通过的公共市场插件 |
 
 ## 管理端 API
 
@@ -73,11 +78,46 @@ Authorization: Bearer <token>
 | GET/POST/PATCH | `/api/admin/teams` | 团队管理 |
 | POST/DELETE | `/api/admin/teams/:id/admins` | 指定/撤销团队管理员 |
 | POST | `/api/admin/teams/:id/balance-adjustments` | 调整团队共享余额 |
-| GET/POST/PATCH | `/api/admin/plugins` | 平台插件管理 |
+| GET/POST/PATCH | `/api/admin/plugins` | 平台插件管理，POST 仍禁止绕过客户端创建插件 |
+| GET | `/api/admin/plugins/review-pending` | 待审核市场插件 |
+| POST | `/api/admin/plugins/:id/approve` | 审核通过市场插件 |
+| POST | `/api/admin/plugins/:id/reject` | 驳回市场插件 |
 | GET | `/api/admin/team-admin-applications` | 审批列表 |
 | POST | `/api/admin/team-admin-applications/:id/approve` | 审批通过 |
 | POST | `/api/admin/team-admin-applications/:id/reject` | 审批驳回 |
 | GET | `/api/admin/audit-logs` | 审计日志 |
+
+## 插件云端分享 API
+
+`POST /api/plugins/upload` 请求体：
+
+```json
+{
+  "manifest": {
+    "id": "timer",
+    "name": "番茄钟",
+    "version": "0.1.0",
+    "description": "可配置时长的计时器",
+    "runtime_type": "client",
+    "entry": "ui/index.html",
+    "visibility": "tenant",
+    "capabilities": [{ "kind": "ui.view", "reason": "展示插件界面", "risk": "low" }]
+  },
+  "files": [
+    { "path": "manifest.json", "content": "{...}" },
+    { "path": "ui/index.html", "content": "<div>...</div>" }
+  ],
+  "priceCents": 0
+}
+```
+
+上传约束：
+
+- `manifest.entry` 必须存在于 `files`。
+- 文件路径只能是相对路径，不能包含绝对路径、空段、`.`、`..` 或隐藏系统路径段。
+- 单文件上限 256 KiB，总包上限 2 MiB，最多 80 个文件。
+- 团队内相同 `contentHash` 自动去重并返回已有插件。
+- 市场提交流程为 `DRAFT/REJECTED -> PENDING -> APPROVED/PUBLIC` 或 `REJECTED/TEAM`。
 
 ## 示例
 
