@@ -82,6 +82,12 @@ export class AdminController {
     return this.collab.adminPlugins(requireUser(req).id);
   }
 
+  @Get('plugins/review-pending')
+  @ApiOperation({ summary: '待审核市场插件列表' })
+  reviewPendingPlugins(@Req() req: Request) {
+    return this.collab.adminPluginReviewPending(requireUser(req).id);
+  }
+
   @Post('plugins')
   @ApiOperation({ summary: '拒绝管理端新增平台插件' })
   createPlugin(@Req() req: Request, @Body() body: { name: string; description?: string; status?: 'ENABLED' | 'DISABLED' }) {
@@ -89,9 +95,21 @@ export class AdminController {
     return this.collab.adminCreatePlugin(requireUser(req).id);
   }
 
+  @Post('plugins/:id/approve')
+  @ApiOperation({ summary: '审核通过市场插件' })
+  approvePlugin(@Req() req: Request, @Param('id') id: string) {
+    return this.collab.adminApprovePlugin(requireUser(req).id, id);
+  }
+
+  @Post('plugins/:id/reject')
+  @ApiOperation({ summary: '驳回市场插件' })
+  rejectPlugin(@Req() req: Request, @Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.collab.adminRejectPlugin(requireUser(req).id, id, body.reason);
+  }
+
   @Patch('plugins/:id')
   @ApiOperation({ summary: '更新平台插件' })
-  updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: { name?: string; description?: string; status?: 'ENABLED' | 'DISABLED' }) {
+  updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: { name?: string; description?: string; status?: 'ENABLED' | 'DISABLED'; priceCents?: number }) {
     return this.collab.adminUpdatePlugin(requireUser(req).id, id, body);
   }
 
