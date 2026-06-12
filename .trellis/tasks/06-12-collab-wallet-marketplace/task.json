@@ -1,9 +1,9 @@
 {
-  "id": "backend-collab-unification",
-  "name": "backend-collab-unification",
-  "title": "后端统一到 collab-api 与三端整理",
+  "id": "collab-wallet-marketplace",
+  "name": "collab-wallet-marketplace",
+  "title": "collab-api 新增 wallet 与 marketplace 模块",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -18,11 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "06-12-desktop-remove-llm",
-    "06-12-collab-wallet-marketplace"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "06-12-backend-collab-unification",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

@@ -6,10 +6,14 @@ import { TeamsController, InvitationsController } from './teams.controller';
 import { ApplicationsController } from './applications.controller';
 import { PluginsController } from './plugins.controller';
 import { AdminController } from './admin.controller';
+import { WalletController } from './wallet.controller';
+import { MarketplaceController } from './marketplace.controller';
 import { CollabService } from './collab.service';
+import { EconomyService } from './economy.service';
+import { MarketplaceService } from './marketplace.service';
 
 @Module({
-  controllers: [MeController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController],
-  providers: [PrismaService, AuthService, CollabService],
+  controllers: [MeController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, WalletController, MarketplaceController],
+  providers: [PrismaService, AuthService, CollabService, EconomyService, MarketplaceService],
 })
 export class CollabModule {}

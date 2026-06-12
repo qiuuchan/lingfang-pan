@@ -88,6 +88,11 @@ model User {
   authoredPlugins       Plugin[]               @relation("PluginAuthor")
   reviewedPlugins       Plugin[]               @relation("PluginReviewer")
   pluginReviews         PluginReview[]         @relation("PluginReviewReviewer")
+  wallet                Wallet?
+  walletTransactions    WalletTransaction[]
+  purchasesBuyer        Purchase[]             @relation("PurchaseBuyer")
+  purchasesSeller       Purchase[]             @relation("PurchaseSeller")
+  pluginRatings         PluginRating[]         @relation("PluginRater")
   auditLogs             AuditLog[]             @relation("AuditActor")
 }
 
@@ -199,6 +204,8 @@ model Plugin {
   reviewedBy    User?              @relation("PluginReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   installations PluginInstallation[]
   reviews       PluginReview[]
+  purchases     Purchase[]
+  ratings       PluginRating[]
 
   @@unique([teamId, contentHash])
   @@index([teamId, status, visibility])
@@ -248,4 +255,58 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([actorUserId, createdAt])
+}
+
+model Wallet {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  balanceCents Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WalletTransaction {
+  id                 String          @id @default(uuid())
+  userId             String
+  amountCents        Int
+  direction          LedgerDirection
+  reason             String
+  pluginId           String?
+  counterpartyUserId String?
+  createdAt          DateTime        @default(now())
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Purchase {
+  id           String   @id @default(uuid())
+  pluginId     String
+  buyerUserId  String
+  buyerTeamId  String
+  sellerUserId String
+  priceCents   Int
+  createdAt    DateTime @default(now())
+  plugin       Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  buyer        User     @relation("PurchaseBuyer", fields: [buyerUserId], references: [id])
+  seller       User     @relation("PurchaseSeller", fields: [sellerUserId], references: [id])
+
+  @@unique([pluginId, buyerUserId])
+  @@index([buyerUserId])
+}
+
+model PluginRating {
+  id        String   @id @default(uuid())
+  pluginId  String
+  userId    String
+  teamId    String
+  score     Int
+  comment   String   @default("")
+  createdAt DateTime @default(now())
+  plugin    Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  user      User     @relation("PluginRater", fields: [userId], references: [id])
+
+  @@unique([pluginId, userId])
+  @@index([pluginId])
 }
