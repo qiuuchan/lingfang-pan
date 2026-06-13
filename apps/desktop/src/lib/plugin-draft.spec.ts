@@ -3,6 +3,11 @@ import {
   buildFallbackEntryHtml,
   buildLocalDraft,
   cleanPathFrontend,
+  deriveTitle,
+  hasStructuredBlocks,
+  makeConversationDraft,
+  makeConversationTurn,
+  mergeConversationTurn,
   mergeFollowupDraft,
   normalizeCapabilities,
   normalizeTurns,
@@ -512,5 +517,163 @@ describe('normalizeTurns', () => {
   it('空数组 / undefined 安全', () => {
     expect(normalizeTurns([])).toEqual([]);
     expect(normalizeTurns(undefined)).toEqual([]);
+  });
+});
+
+// === design §3.1.2 / §8.2：对话优先 gate 与纯对话态草稿（AC1 核心） ===
+
+describe('hasStructuredBlocks', () => {
+  it('纯自然语言无围栏块 → false（「你好」不触发结构化解析）', () => {
+    expect(hasStructuredBlocks('你好！我是助手，有什么可以帮你的吗？')).toBe(false);
+  });
+
+  it('纯文本含普通段落 → false', () => {
+    expect(hasStructuredBlocks('这是说明。\n再一段说明。')).toBe(false);
+  });
+
+  it('含 manifest 块 → true（自动检测触发）', () => {
+    const raw = [
+      '```lingfang-manifest json',
+      '{ "id": "x", "name": "X" }',
+      '```',
+    ].join('\n');
+    expect(hasStructuredBlocks(raw)).toBe(true);
+  });
+
+  it('含 file 块 → true（自动检测触发）', () => {
+    const raw = [
+      '```file path="ui/index.html"',
+      '<div></div>',
+      '```',
+    ].join('\n');
+    expect(hasStructuredBlocks(raw)).toBe(true);
+  });
+
+  it('只有 unknown 代码块（裸 ```js）→ false（gate 严格只认 manifest/file）', () => {
+    const raw = [
+      '```js',
+      'console.log("hi")',
+      '```',
+    ].join('\n');
+    expect(hasStructuredBlocks(raw)).toBe(false);
+  });
+
+  it('只有 notes 块 → false（notes 不算结构化触发）', () => {
+    const raw = [
+      '```lingfang-notes',
+      '这是一段说明',
+      '```',
+    ].join('\n');
+    expect(hasStructuredBlocks(raw)).toBe(false);
+  });
+
+  it('空字符串 / undefined 安全 → false', () => {
+    expect(hasStructuredBlocks('')).toBe(false);
+  });
+});
+
+describe('makeConversationTurn', () => {
+  it('产出 user + assistant 一对 turn', () => {
+    const turns = makeConversationTurn('你好', '你好！有什么可以帮你？');
+    expect(turns).toHaveLength(2);
+    expect(turns[0]).toMatchObject({ role: 'user', content: '你好' });
+    expect(turns[1]).toMatchObject({ role: 'assistant', content: '你好！有什么可以帮你？' });
+  });
+
+  it('assistant 文本为空时兜底占位文案', () => {
+    const turns = makeConversationTurn('你好', '');
+    expect(turns[1].content).not.toBe('');
+    expect(turns[1].role).toBe('assistant');
+  });
+
+  it('每个 turn 带时间戳', () => {
+    const turns = makeConversationTurn('q', 'a');
+    expect(typeof turns[0].at).toBe('string');
+    expect(typeof turns[1].at).toBe('string');
+  });
+});
+
+describe('makeConversationDraft', () => {
+  it('产出纯对话态草稿：turns=[u,a] / files=[] / status=generating', () => {
+    const draft = makeConversationDraft('你好', '你好！');
+    expect(draft.turns).toHaveLength(2);
+    expect(draft.files).toEqual([]);
+    // AC1 关键：纯对话态绝不取 'invalid'，否则触发 destructive Badge + 预览 disabled。
+    expect(draft.status).toBe('generating');
+    expect(draft.diagnostics).toEqual([]);
+  });
+
+  it('id 非 undefined（有稳定标识）', () => {
+    const draft = makeConversationDraft('你好', '你好！');
+    expect(typeof draft.id).toBe('string');
+    expect(draft.id.length).toBeGreaterThan(0);
+  });
+});
+
+describe('mergeConversationTurn', () => {
+  it('在既有纯对话 draft 上累积 turns（+2）', () => {
+    const prev = makeConversationDraft('你好', '你好！');
+    const baseTurns = prev.turns.length;
+    const merged = mergeConversationTurn(prev, '再问一句', '回答你');
+    expect(merged.turns.length).toBe(baseTurns + 2);
+    expect(merged.turns.some((t) => t.role === 'user' && t.content === '再问一句')).toBe(true);
+    expect(merged.turns.some((t) => t.role === 'assistant' && t.content === '回答你')).toBe(true);
+  });
+
+  it('累积后 files 仍保持空（纯对话态不被污染）', () => {
+    const prev = makeConversationDraft('你好', '你好！');
+    const merged = mergeConversationTurn(prev, '再问', '再答');
+    expect(merged.files).toEqual([]);
+    expect(merged.status).toBe('generating');
+  });
+
+  it('prev.id 保持稳定（同一对话跨轮，不新开草稿）', () => {
+    const prev = makeConversationDraft('你好', '你好！');
+    const prevId = prev.id;
+    const merged = mergeConversationTurn(prev, '再问', '再答');
+    expect(merged.id).toBe(prevId);
+  });
+
+  it('经 normalizeTurns 去重（相邻同 role 同 content）', () => {
+    const prev = makeConversationDraft('你好', '你好！');
+    const merged = mergeConversationTurn(prev, '你好', '你好！');
+    const turns = normalizeTurns(merged.turns);
+    for (let i = 1; i < turns.length; i++) {
+      if (turns[i].role === turns[i - 1].role) {
+        expect(turns[i].content).not.toBe(turns[i - 1].content);
+      }
+    }
+  });
+});
+
+// === design §6.2：deriveTitle 会话标题懒回填 ===
+
+describe('deriveTitle', () => {
+  it('record 已有 title → 原样返回（去空白）', () => {
+    expect(deriveTitle({ title: '番茄钟插件' })).toBe('番茄钟插件');
+    expect(deriveTitle({ title: '  带空格  ' })).toBe('带空格');
+  });
+
+  it('title 为空 → 从 transcript 首 input prompt 截断 24 字', () => {
+    const transcript = JSON.stringify({ event: 'input', payload: { prompt: '做一个番茄钟插件' } });
+    expect(deriveTitle({}, transcript)).toBe('做一个番茄钟插件');
+  });
+
+  it('prompt 超过 24 字 → 截断加省略号', () => {
+    const long = '请帮我做一个可以设置二十五分钟和四十五分钟的番茄钟计时器插件';
+    const transcript = JSON.stringify({ event: 'input', payload: { prompt: long } });
+    const title = deriveTitle({}, transcript);
+    expect(title.length).toBeLessThanOrEqual(25); // 24 字 + …
+    expect(title.endsWith('…')).toBe(true);
+  });
+
+  it('无 title 且无 transcript → 兜底「新对话」', () => {
+    expect(deriveTitle({})).toBe('新对话');
+    expect(deriveTitle({ title: null })).toBe('新对话');
+  });
+
+  it('transcript 无 input 事件 → 兜底「新对话」', () => {
+    const transcript = JSON.stringify({ event: 'output', payload: { text: 'hi' } });
+    expect(deriveTitle({}, transcript)).toBe('新对话');
   });
 });

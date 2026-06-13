@@ -37,6 +37,8 @@ export interface CliProbeResult {
   diagnostics?: string[];
 }
 
+// design §3.2.4：多会话字段镜像（对齐 Rust SessionRecord 的 #[serde(default)] 可选字段）。
+// 旧 sessions.json 无这些字段时反序列化为 None/undefined，向后兼容不报错。
 export interface AssistantSessionRecord {
   sessionId: string;
   tool: ProviderId;
@@ -49,6 +51,27 @@ export interface AssistantSessionRecord {
   startedAt: string;
   endedAt?: string | null;
   exitCode?: number | null;
+  // 会话展示标题（首启从 transcript 首 input prompt 截断回填，用户重命名后落库）。
+  title?: string | null;
+  // 草稿最后更新时间（会话栏排序依据，ISO 字符串）。
+  draftUpdatedAt?: string | null;
+  // 归档标记（会话栏折叠归档区）。
+  archived?: boolean | null;
+}
+
+// design §3.2.4：会话栏列表项（轻量，不含 turns/draft 正文）。
+// tauriInvoke('code_assistant_list_sessions') 直接返回该数组，前端按 draftUpdatedAt ?? startedAt 排序。
+export interface ConversationMeta {
+  sessionId: string;
+  tool: ProviderId;
+  model?: string | null;
+  title?: string | null;
+  status: string;
+  startedAt: string;
+  transcriptPath?: string;
+  commandPreview?: string[];
+  draftUpdatedAt?: string | null;
+  archived?: boolean | null;
 }
 
 export interface AssistantSessionState {
@@ -174,6 +197,23 @@ export function sessionToProbeResult(session: AssistantSessionState): CliProbeRe
 
 export function tailText(input: string, maxChars = 12_000) {
   return input.length > maxChars ? input.slice(-maxChars) : input;
+}
+
+// design §6.2：会话展示标题推导（title None 时的懒回填）。
+// 优先用 record 已落库的 title；否则从 transcript 首 input 事件取 prompt 截断 24 字（前端中点宽度友好）。
+// 仅显示态用途，不强制落库；用户重命名时才 rename_session 持久化。
+export function deriveTitle(record: { title?: string | null }, transcriptRaw?: string): string {
+  if (record.title && record.title.trim()) return record.title.trim();
+  if (transcriptRaw) {
+    const events = parseTranscript(transcriptRaw);
+    const firstInput = events.find((event) => event.event === 'input');
+    const prompt = typeof firstInput?.payload?.prompt === 'string' ? firstInput.payload.prompt : '';
+    if (prompt.trim()) {
+      const trimmed = prompt.trim().replace(/\s+/g, ' ');
+      return trimmed.length > 24 ? `${trimmed.slice(0, 24)}…` : trimmed;
+    }
+  }
+  return '新对话';
 }
 
 export function providerLabel(provider: ProviderId) {
@@ -615,6 +655,62 @@ export function normalizeTurns(turns?: DraftTurn[]): DraftTurn[] {
     out.push(turn);
   }
   return out;
+}
+
+// === design §3.1.2 / §3.4.1：对话优先 gate 与纯对话态草稿（AC1 核心） ===
+//
+// 这组纯函数解耦「对话」与「插件创建」：
+// - hasStructuredBlocks 探测产出是否含 manifest/file 块（gate，决定是否自动解析为草稿）。
+// - makeConversationTurn / mergeConversationTurn 产出「纯对话态」草稿（无 files，仅 turns），
+//   使「你好」这类闲聊不再被判 invalid、不再强制弹详情面板。
+//
+// 纯对话态草稿约定 status='generating'（STATUS_LABEL 已有此键），绝不取 'invalid'
+// （否则触发右侧 destructive Badge + 预览 disabled，违背 AC1）。
+
+// 探测产出是否含结构化块（manifest 或 file）。复用 extractFencedBlocks，严格只认协议块：
+// 纯文本 / 只有 unknown 代码块（如裸 ```js）→ false；含 manifest 或 file 块 → true。
+export function hasStructuredBlocks(rawText: string): boolean {
+  const blocks = extractFencedBlocks(rawText);
+  return blocks.some((b) => b.kind === 'manifest' || b.kind === 'file');
+}
+
+// 生成单个纯对话 turn（user + assistant 一对）。
+// 与 makeConversationDraft/mergeConversationTurn 的差异：本函数仅产出 turn 数组，
+// 供调用方按需拼装（如 finalizeSession 纯对话态累积）。
+export function makeConversationTurn(userPrompt: string, assistantText: string): DraftTurn[] {
+  const now = new Date().toISOString();
+  return [
+    { role: 'user', content: userPrompt, at: now },
+    { role: 'assistant', content: assistantText || '本地 CLI 没有返回可展示内容。', at: now },
+  ];
+}
+
+// 首轮纯对话态草稿：无 files/manifest，仅 turns=[u,a]，status='generating'。
+export function makeConversationDraft(userPrompt: string, assistantText: string): PluginDraft {
+  return {
+    id: `conversation-${Date.now()}`,
+    status: 'generating',
+    files: [],
+    turns: makeConversationTurn(userPrompt, assistantText),
+    diagnostics: [],
+  };
+}
+
+// 追问纯对话态：在既有 draft 上累积 turns（normalizeTurns 去重），files 保持空。
+// prev.id 保持稳定（同一对话跨轮，不新开草稿）。
+export function mergeConversationTurn(prev: PluginDraft, userPrompt: string, assistantText: string): PluginDraft {
+  const now = new Date().toISOString();
+  return {
+    ...prev,
+    status: 'generating',
+    files: prev.files,
+    turns: normalizeTurns([
+      ...prev.turns,
+      { role: 'user', content: userPrompt, at: now },
+      { role: 'assistant', content: assistantText || '本地 CLI 没有返回可展示内容。', at: now },
+    ]),
+    diagnostics: prev.diagnostics,
+  };
 }
 
 // design §3.3.6 (e)：追问草稿合并——在既有 draft 上累积 turns，files/manifest 用追问产出（R2 解析）覆盖迭代，
