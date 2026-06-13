@@ -8,12 +8,14 @@ import { PluginsController } from './plugins.controller';
 import { AdminController } from './admin.controller';
 import { WalletController } from './wallet.controller';
 import { MarketplaceController } from './marketplace.controller';
-import { CollabService } from './collab.service';
+import { TeamService } from './team.service';
+import { PluginService } from './plugin.service';
+import { AdminService } from './admin.service';
 import { EconomyService } from './economy.service';
 import { MarketplaceService } from './marketplace.service';
 
 @Module({
   controllers: [MeController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, WalletController, MarketplaceController],
-  providers: [PrismaService, AuthService, CollabService, EconomyService, MarketplaceService],
+  providers: [PrismaService, AuthService, TeamService, PluginService, AdminService, EconomyService, MarketplaceService],
 })
 export class CollabModule {}

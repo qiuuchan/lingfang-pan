@@ -38,6 +38,14 @@ export function slugify(input: string) {
   return base || `team-${Date.now()}`;
 }
 
+export const publicUser = (user: { id: string; email: string; displayName: string; status: string; platformRole?: string }) => ({
+  id: user.id,
+  email: user.email,
+  displayName: user.displayName,
+  status: user.status,
+  platformRole: user.platformRole,
+});
+
 export function requireUser(req: Request): AuthUser {
   const user = (req as Request & { user?: AuthUser }).user;
   if (!user) throw unauthorized();

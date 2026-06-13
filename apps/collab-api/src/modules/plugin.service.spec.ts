@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CollabService } from './collab.service';
+import { PluginService } from './plugin.service';
 
 const now = new Date('2026-06-12T00:00:00.000Z');
 
@@ -37,7 +37,7 @@ function createService(options: { existingPlugin?: unknown; membershipRole?: 'ME
       team: { id: 'team-1', status: 'ACTIVE' },
     })),
   };
-  return { service: new CollabService(prisma as never, auth as never), prisma, auth };
+  return { service: new PluginService(prisma as never, auth as never), prisma, auth };
 }
 
 const validPackage = {
