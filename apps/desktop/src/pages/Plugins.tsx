@@ -73,10 +73,10 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
   }, [plugin]);
 
   return (
-    <Card>
+    <div className="flex h-full flex-col">
       <RunnerHeader plugin={plugin} editing={editing} onBack={onBack} onEdit={editInGenerator} />
       <RunnerBody error={error} iframeRef={iframeRef} plugin={plugin} srcDoc={srcDoc} />
-    </Card>
+    </div>
   );
 }
 
@@ -92,8 +92,8 @@ function RunnerHeader({
   onEdit: () => void;
 }) {
   return (
-    <CardHeader className="flex-row items-center justify-between space-y-0">
-      <CardTitle>{plugin.name}</CardTitle>
+    <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
+      <span className="truncate text-sm font-medium">{plugin.name}</span>
       <div className="flex items-center gap-2">
         {plugin.source === 'team' && (
           <LoadingButton variant="outline" size="sm" loading={editing} onClick={onEdit}>
@@ -104,7 +104,7 @@ function RunnerHeader({
           <ArrowLeftIcon className="size-4" />返回插件列表
         </Button>
       </div>
-    </CardHeader>
+    </div>
   );
 }
 
@@ -120,19 +120,21 @@ function RunnerBody({
   srcDoc: string;
 }) {
   return (
-    <CardContent>
+    <div className="relative min-h-0 flex-1 bg-muted/30">
       {error ? (
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="p-4 text-sm text-destructive">{error}</p>
       ) : (
+        // 运行态：iframe 铺满整个主体区（无边框无圆角），插件自身内容滚动。
+        // sandbox 加 allow-same-origin/forms/popups（运行可信插件，允许 localStorage/DOM/表单完整交互）。
         <iframe
           ref={iframeRef}
           title={plugin.name}
-          sandbox="allow-scripts"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           srcDoc={srcDoc}
-          className="h-[520px] w-full rounded-md border bg-white"
+          className="absolute inset-0 h-full w-full border-0 bg-white"
         />
       )}
-    </CardContent>
+    </div>
   );
 }
 

@@ -268,9 +268,14 @@ export default function App() {
               <PluginCreatorHome />
             </div>
             {view !== 'home' && (
-              <div className="h-full overflow-y-auto px-6 py-6">
-                <div className="mx-auto w-full max-w-6xl">{body}</div>
-              </div>
+              view === 'plugins' && runningPlugin ? (
+                // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
+                <div className="h-full">{body}</div>
+              ) : (
+                <div className="h-full overflow-y-auto px-6 py-6">
+                  <div className="mx-auto w-full max-w-6xl">{body}</div>
+                </div>
+              )
             )}
           </main>
         </div>
