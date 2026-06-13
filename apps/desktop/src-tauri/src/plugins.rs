@@ -78,6 +78,11 @@ fn parse_manifest(dir: &PathBuf) -> Option<(LoadedPlugin, Vec<DeclaredCapability
 }
 
 /// 扫描内置插件目录，注册能力，返回已加载插件列表。
+///
+/// 修复 SCRIPT-05（low 错误处理）：此前 read_dir 失败静默返回空 Vec，
+/// parse_manifest 失败（JSON 非法 / 缺 id / 缺 name）也静默跳过，
+/// 启动期仅打印总数不报告哪些子目录失败，开发者难定位打包态损坏。
+/// 修复：read_dir 失败与单个插件加载失败均打印 eprintln（含目录路径），便于定位。
 pub fn load_builtin_plugins(
     base_dir: &PathBuf,
     registry: &CapabilityRegistry,
@@ -85,16 +90,33 @@ pub fn load_builtin_plugins(
     let mut result = Vec::new();
     let read = match std::fs::read_dir(base_dir) {
         Ok(r) => r,
-        Err(_) => return result,
+        Err(error) => {
+            // 修复 SCRIPT-05：打印目录路径与 OS 错误，便于定位内置插件目录缺失/权限问题。
+            eprintln!(
+                "内置插件目录读取失败（目录 {:?}）：{error}",
+                base_dir.to_string_lossy()
+            );
+            return result;
+        }
     };
     for entry in read.flatten() {
         let path = entry.path();
         if !path.is_dir() {
             continue;
         }
-        if let Some((plugin, caps)) = parse_manifest(&path) {
-            registry.register(&plugin.id, caps);
-            result.push(plugin);
+        match parse_manifest(&path) {
+            Some((plugin, caps)) => {
+                registry.register(&plugin.id, caps);
+                result.push(plugin);
+            }
+            // 修复 SCRIPT-05：parse_manifest 返回 None 表示 manifest 损坏/缺字段，
+            // 打印子目录路径便于开发/打包态定位。
+            None => {
+                eprintln!(
+                    "内置插件加载失败（manifest 解析失败，目录 {:?}）",
+                    path.to_string_lossy()
+                );
+            }
         }
     }
     result

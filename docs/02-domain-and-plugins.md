@@ -127,7 +127,8 @@ AI 生成的插件代码通过 SDK 访问能力（骨架见 `packages/plugin-sdk
 
 ```ts
 const [file] = await sdk.fs.pick({ accept:['.pdf','.txt','.md'] });
-const text   = await sdk.fs.read(file);
+const result = await sdk.fs.read(file);  // 返回 {content:string}（文件）或 {entries:string[]}（目录）
+const text   = 'content' in result ? result.content : '';
 const out    = await sdk.llm.chat({ messages:[...] });  // 不含 key/base_url/供应商
 await sdk.ui.render(out);
 ```

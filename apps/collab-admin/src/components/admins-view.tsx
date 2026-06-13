@@ -131,14 +131,15 @@ function CreateAdminDialog({ children, onRefresh }: { children: React.ReactNode;
 
   async function create() {
     if (!email.trim()) return toast.error('请输入邮箱');
-    await run(
+    // ADMIN-VIEW-04 修复：仅成功才关闭对话框并清空表单。
+    if (!(await run(
       () =>
         api('/api/admin/users', {
           method: 'POST',
           body: { email, password, displayName: displayName || email, platformRole: 'PLATFORM_ADMIN' },
         }).then(onRefresh),
       '平台管理员已创建',
-    );
+    ))) return;
     setOpen(false);
     setEmail('');
     setDisplayName('');
@@ -211,32 +212,33 @@ function EditAdminDialog({
       platformRole: 'PLATFORM_ADMIN',
     };
     if (editPassword.trim()) body.password = editPassword;
-    await run(
+    // ADMIN-VIEW-04 修复：仅成功才关闭对话框，失败保留草稿。
+    if (!(await run(
       () =>
         api(`/api/admin/users/${user.id}`, { method: 'PATCH', body }).then(onRefresh),
       '平台管理员信息已更新',
-    );
+    ))) return;
     setOpen(false);
   }
 
   async function demote() {
-    await run(
+    if (!(await run(
       () =>
         api(`/api/admin/users/${user.id}`, {
           method: 'PATCH',
           body: { platformRole: 'NONE' },
         }).then(onRefresh),
       '已降级为普通用户',
-    );
+    ))) return;
     setOpen(false);
   }
 
   async function deleteUser() {
     if (!window.confirm(`确认永久删除管理员 ${user.email}？此操作不可恢复。`)) return;
-    await run(
+    if (!(await run(
       () => api(`/api/admin/users/${user.id}`, { method: 'DELETE' }).then(onRefresh),
       '管理员已删除',
-    );
+    ))) return;
     setOpen(false);
   }
 

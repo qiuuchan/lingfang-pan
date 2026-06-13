@@ -72,7 +72,11 @@ export function Auth() {
       applyCollabSession(r);
     } catch (e) {
       const err = e as ApiError;
-      toast.error(/已存在|duplicate|registered/.test(err.message) ? '该邮箱已注册，请直接登录' : err.message);
+      // 修复 DESK-AUTH-01：此前用正则 /已存在|duplicate|registered/ 匹配后端冲突消息，
+      // 但 collab-api 在邮箱已存在时抛 conflict('该邮箱已注册')，其消息文本不含上述任一子串，
+      // 正则不匹配 → 友好引导「该邮箱已注册，请直接登录」永不触发。
+      // 改为基于 err.code（ApiError 已透传）精确判定，与 onLogin 的 err.code==='unauthorized' 模式一致。
+      toast.error(err.code === 'conflict' ? '该邮箱已注册，请直接登录' : err.message);
     } finally {
       setLoading(false);
     }

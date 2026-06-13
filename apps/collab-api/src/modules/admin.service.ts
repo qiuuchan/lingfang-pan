@@ -14,14 +14,17 @@ export class AdminService {
 
   async adminDashboard(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
-    const [users, teams, pendingApplications, plugins, pendingPluginReviews] = await Promise.all([
+    // ADMIN-VIEW-03 修复：原仅返回 enabledPlugins，仪表盘「已禁用插件」待办数硬编码 0。
+    // 现补一次 status='DISABLED' 的 plugin 计数，返回 disabledPlugins 让前端读到真实值。
+    const [users, teams, pendingApplications, plugins, disabledPlugins, pendingPluginReviews] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.team.count(),
       this.prisma.teamAdminApplication.count({ where: { status: 'PENDING' } }),
       this.prisma.plugin.count({ where: { status: 'ENABLED' } }),
+      this.prisma.plugin.count({ where: { status: 'DISABLED' } }),
       this.prisma.plugin.count({ where: { reviewStatus: 'PENDING' } }),
     ]);
-    return { users, teams, pendingApplications, enabledPlugins: plugins, pendingPluginReviews };
+    return { users, teams, pendingApplications, enabledPlugins: plugins, disabledPlugins, pendingPluginReviews };
   }
 
   async adminUsers(userId: string) {
@@ -41,11 +44,25 @@ export class AdminService {
 
   async adminUpdateUser(actorId: string, id: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
     await this.auth.ensurePlatformAdmin(actorId);
+    // 修复 ADMIN-09：禁止自降级/自禁用（会锁死末位平台管理员）。
+    if (id === actorId && (input.status === 'DISABLED' || input.platformRole === 'NONE')) {
+      throw forbidden('不能禁用或降级自己的平台管理员权限');
+    }
+    // 修复 ADMIN-09：禁止禁用/降级最后一个 PLATFORM_ADMIN。
+    if (input.status === 'DISABLED' || input.platformRole === 'NONE') {
+      const target = await this.prisma.user.findUnique({ where: { id }, select: { platformRole: true, status: true } });
+      if (target?.platformRole === 'PLATFORM_ADMIN' && target.status === 'ACTIVE') {
+        const remainingAdmins = await this.prisma.user.count({ where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' } });
+        if (remainingAdmins <= 1) throw forbidden('不能禁用或降级最后一个平台管理员');
+      }
+    }
     // 显式仅取声明字段，丢弃 email/password 等客户端误传的非法键，避免透传进 prisma.user.update 触发 PrismaClientValidationError。
-    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN' } = {};
+    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; tokenVersion?: { increment: number } } = {};
     if (input.displayName !== undefined) data.displayName = input.displayName;
     if (input.status !== undefined) data.status = input.status;
     if (input.platformRole !== undefined) data.platformRole = input.platformRole;
+    // 修复 ADMIN-02 / AUTH-01：禁用或降级时自增 tokenVersion，使已签发的旧 token 立即失效。
+    if (input.status === 'DISABLED' || input.platformRole === 'NONE') data.tokenVersion = { increment: 1 };
     const user = await this.prisma.user.update({ where: { id }, data });
     await this.audit(actorId, 'admin.user.updated', 'User', id, data);
     return { user: publicUser(user) };
@@ -53,7 +70,15 @@ export class AdminService {
 
   async adminDeleteUser(actorId: string, id: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const user = await this.prisma.user.update({ where: { id }, data: { status: 'DISABLED' } });
+    // 修复 ADMIN-09：禁止自禁用与禁用最后一个平台管理员。
+    if (id === actorId) throw forbidden('不能禁用自己的账号');
+    const target = await this.prisma.user.findUnique({ where: { id }, select: { platformRole: true, status: true } });
+    if (target?.platformRole === 'PLATFORM_ADMIN' && target.status === 'ACTIVE') {
+      const remainingAdmins = await this.prisma.user.count({ where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' } });
+      if (remainingAdmins <= 1) throw forbidden('不能禁用最后一个平台管理员');
+    }
+    // tokenVersion 自增使旧 token 立即失效（ADMIN-02）；此前旧 token 最长 7 天仍可用。
+    const user = await this.prisma.user.update({ where: { id }, data: { status: 'DISABLED', tokenVersion: { increment: 1 } } });
     await this.audit(actorId, 'admin.user.disabled', 'User', id, {});
     return { user: publicUser(user) };
   }
@@ -83,16 +108,28 @@ export class AdminService {
   async adminCreateTeam(actorId: string, input: { name: string; slug?: string; balanceCents?: number }) {
     await this.auth.ensurePlatformAdmin(actorId);
     const name = input.name.trim();
-    const team = await this.prisma.team.create({ data: { name, slug: input.slug || slugify(name), balanceCents: Number(input.balanceCents || 0) } });
-    if (team.balanceCents > 0) await this.prisma.balanceLedger.create({ data: { teamId: team.id, amountCents: team.balanceCents, direction: 'CREDIT', reason: 'initial_balance', actorUserId: actorId } });
+    // 修复 ADMIN-07：balanceCents 强制取整（Int 列不接受浮点，且避免浮点 cents 误差）。
+    const balanceCents = Math.max(0, Math.floor(Number(input.balanceCents || 0)));
+    // 修复 ADMIN-06：建团与初始流水放入同一事务，保证「余额变更必有流水」不变量。
+    const team = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.team.create({ data: { name, slug: input.slug || slugify(name), balanceCents } });
+      if (created.balanceCents > 0) {
+        await tx.balanceLedger.create({ data: { teamId: created.id, amountCents: created.balanceCents, direction: 'CREDIT', reason: 'initial_balance', actorUserId: actorId } });
+      }
+      return created;
+    });
     await this.audit(actorId, 'admin.team.created', 'Team', team.id, { name });
     return { team };
   }
 
   async adminUpdateTeam(actorId: string, id: string, input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED' }) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const team = await this.prisma.team.update({ where: { id }, data: input });
-    await this.audit(actorId, 'admin.team.updated', 'Team', id, input);
+    // 修复 XLOG-01：显式字段白名单（此前 data: input 直接透传，可静默改 balanceCents 绕过流水审计）。
+    const data: { name?: string; status?: 'ACTIVE' | 'SUSPENDED' } = {};
+    if (input.name !== undefined) data.name = input.name;
+    if (input.status !== undefined) data.status = input.status;
+    const team = await this.prisma.team.update({ where: { id }, data });
+    await this.audit(actorId, 'admin.team.updated', 'Team', id, data);
     return { team };
   }
 
@@ -117,9 +154,14 @@ export class AdminService {
 
   async adminSetTeamAdmin(actorId: string, teamId: string, input: { userId: string }) {
     await this.auth.ensurePlatformAdmin(actorId);
+    // 修复 ADMIN-08：校验目标团队与用户状态，避免给已 SUSPENDED 团队或 DISABLED 用户授权产生僵尸管理员。
+    const team = await this.prisma.team.findUnique({ where: { id: teamId }, select: { status: true } });
+    if (!team || team.status !== 'ACTIVE') throw notFound('团队不存在或已挂起');
+    const targetUser = await this.prisma.user.findUnique({ where: { id: input.userId }, select: { status: true } });
+    if (!targetUser || targetUser.status !== 'ACTIVE') throw notFound('用户不存在或已禁用');
     const membership = await this.prisma.teamMembership.upsert({
       where: { teamId_userId: { teamId, userId: input.userId } },
-      create: { teamId, userId: input.userId, role: 'TEAM_ADMIN' },
+      create: { teamId, userId: input.userId, role: 'TEAM_ADMIN', status: 'ACTIVE' },
       update: { role: 'TEAM_ADMIN', status: 'ACTIVE' },
     });
     await this.audit(actorId, 'admin.team_admin.assigned', 'User', input.userId, { teamId });
@@ -128,6 +170,9 @@ export class AdminService {
 
   async adminRevokeTeamAdmin(actorId: string, teamId: string, targetUserId: string) {
     await this.auth.ensurePlatformAdmin(actorId);
+    // 修复 ADMIN-08：update 在记录不存在时抛 P2025，此前被吞成 500，现显式前置存在性校验返回 404。
+    const existing = await this.prisma.teamMembership.findUnique({ where: { teamId_userId: { teamId, userId: targetUserId } } });
+    if (!existing) throw notFound('团队成员关系不存在');
     const membership = await this.prisma.teamMembership.update({ where: { teamId_userId: { teamId, userId: targetUserId } }, data: { role: 'MEMBER' } });
     await this.audit(actorId, 'admin.team_admin.revoked', 'User', targetUserId, { teamId });
     return { membership };
@@ -135,7 +180,10 @@ export class AdminService {
 
   async adminAdjustBalance(actorId: string, teamId: string, input: { amountCents: number; direction: 'CREDIT' | 'DEBIT'; reason?: string }) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const amount = Math.max(1, Number(input.amountCents || 0));
+    // 修复 ADMIN-10：前置存在性校验，CREDIT 分支此前用无条件 team.update，团队不存在时 P2025 被吞成 500。
+    const exists = await this.prisma.team.findUnique({ where: { id: teamId }, select: { id: true } });
+    if (!exists) throw notFound('团队不存在');
+    const amount = Math.max(1, Math.floor(Number(input.amountCents || 0)));
     await this.prisma.$transaction(async (tx) => {
       const data = input.direction === 'CREDIT' ? { balanceCents: { increment: amount } } : { balanceCents: { decrement: amount } };
       if (input.direction === 'DEBIT') {
@@ -208,13 +256,16 @@ export class AdminService {
 
   async adminUpdatePlugin(actorId: string, id: string, input: { name?: string; description?: string; status?: 'ENABLED' | 'DISABLED'; priceCents?: number }) {
     await this.auth.ensurePlatformAdmin(actorId);
+    // 修复 PLUGIN-09：前置存在性校验，此前 plugin.update 在 id 不存在时抛 P2025 被吞成 500。
+    const existing = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw notFound('插件不存在');
     const plugin = await this.prisma.plugin.update({
       where: { id },
       data: {
         name: input.name,
         description: input.description,
         status: input.status,
-        priceCents: input.priceCents === undefined ? undefined : Math.max(0, Number(input.priceCents)),
+        priceCents: input.priceCents === undefined ? undefined : Math.max(0, Math.floor(Number(input.priceCents))),
       },
     });
     await this.audit(actorId, 'admin.plugin.updated', 'Plugin', id, input);
@@ -235,9 +286,14 @@ export class AdminService {
 
   async rejectApplication(actorId: string, id: string, reason?: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const application = await this.prisma.teamAdminApplication.update({ where: { id }, data: { status: 'REJECTED', reviewReason: reason || '', reviewedById: actorId, reviewedAt: new Date() } });
+    // 修复 AUTH-02 / XSM-01 / ADMIN-05：此前无 status==='PENDING' 守卫，
+    // 可把已 APPROVED（已建团）的申请改回 REJECTED，造成状态与团队数据不一致。
+    const application = await this.prisma.teamAdminApplication.findUnique({ where: { id } });
+    if (!application) throw notFound('申请不存在');
+    if (application.status !== 'PENDING') throw conflict('该申请已处理');
+    const updated = await this.prisma.teamAdminApplication.update({ where: { id }, data: { status: 'REJECTED', reviewReason: reason || '', reviewedById: actorId, reviewedAt: new Date() } });
     await this.audit(actorId, 'team_admin_application.rejected', 'TeamAdminApplication', id, { reason });
-    return { application };
+    return { application: updated };
   }
 
   async auditLogs(userId: string) {

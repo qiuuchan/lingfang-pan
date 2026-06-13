@@ -37,7 +37,7 @@ import { PluginsView } from '@/components/plugins-view';
 import { ApplicationsView } from '@/components/applications-view';
 import { AdminsView } from '@/components/admins-view';
 import { AuditView } from '@/components/audit-view';
-import { api, getToken, isPlatformAdminSession, setToken, type AdminSession } from '@/lib/api';
+import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
 import type { View } from '@/lib/types';
 import pkg from '../package.json';
 
@@ -79,9 +79,25 @@ export default function App() {
       })
       .catch((e) => {
         setToken(null);
-        toast.error((e as Error).message);
+        // ADMIN-01：401 已由 api() 的 UNAUTHORIZED 事件路径处理（refresh 失败后派发事件 + handler 已 toast），
+        // 此处仅对非 401 错误（如网络异常、非管理员）toast，避免重复弹两条相同提示。
+        const status = (e as { status?: number }).status;
+        if (status !== 401) toast.error((e as Error).message);
       })
       .finally(() => setChecking(false));
+  }, []);
+
+  // ADMIN-01 修复：监听 api() 派发的 401 全局事件，清 session 回登录页。
+  // 此前 token 过期后任意 /api/admin/* 请求仅弹 toast，session 不清空，用户卡死在已登录外壳。
+  // 现由 api() 在 refresh 失败/已过期时派发 UNAUTHORIZED_EVENT，App.tsx 监听并 resetSession。
+  useEffect(() => {
+    const handler = () => {
+      setToken(null);
+      setSession(null);
+      toast.error('登录已过期，请重新登录');
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, handler);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
   }, []);
 
   function handleLogout() {
@@ -194,7 +210,7 @@ export default function App() {
 
           {/* Views with transition */}
           <div key={view} className="animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
-            {view === 'dashboard' && <Dashboard />}
+            {view === 'dashboard' && <Dashboard onNavigate={setView} />}
             {view === 'users' && <UsersView />}
             {view === 'platformAdmins' && <AdminsView />}
             {view === 'teams' && <TeamsView />}

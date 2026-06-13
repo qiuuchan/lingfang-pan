@@ -115,7 +115,14 @@ fn interpreter_candidates(runtime: ScriptRuntime) -> Vec<&'static str> {
 }
 
 /// 探测解释器是否存在 + 版本号。
-/// 命中后跑 `--version` 实跑确认非 Store stub（stub 通常不在 stdout 打印 Python x.y.z 且会挂起，由超时兜底）。
+/// 命中后跑 `--version` 实跑确认非 Store stub（design §4.5 / §6.4 已确认约束）。
+///
+/// 修复 SCRIPT-03（medium 错误处理）：此前 guard 仅 `!captured.timed_out`，未校验 exit_code
+/// 也未校验版本内容。Windows 上未装 Python 时 Microsoft Store 的 python.exe 别名（0 字节 stub，
+/// is_file()==true）会被 find_binary 命中；其 --version 不挂起（timed_out=false），而是向 stderr
+/// 打印「Python was not found; ... install from the Microsoft Store」并以 9009 退出，
+/// 导致 available 被置为 true、version=Store 提示语，绕过 py launcher 优先策略的设计意图，
+/// 前端失去安装指引。修复：guard 叠加 exit_code==Some(0) + 排除 stderr 含 Store stub 关键字。
 #[tauri::command]
 pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, String> {
     let hint = install_hint(runtime);
@@ -129,7 +136,12 @@ pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, Strin
                 5_000,
                 minimal_env(),
             ) {
-                Ok(captured) if !captured.timed_out => {
+                // 修复 SCRIPT-03：必须 exit_code==Some(0) 且非 Store stub。
+                Ok(captured)
+                    if !captured.timed_out
+                        && captured.exit_code == Some(0)
+                        && !is_store_stub_output(&captured.stderr, runtime) =>
+                {
                     // 版本字符串拼接 stdout + stderr（部分实现走 stderr），取首行。
                     let raw_version = format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
                     let version = raw_version
@@ -144,7 +156,7 @@ pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, Strin
                     });
                 }
                 _ => {
-                    // 候选命中但 --version 失败/超时（疑似 stub）：继续尝试下一个候选。
+                    // 候选命中但 --version 失败/超时/退出码非 0/疑似 Store stub：继续尝试下一个候选。
                     continue;
                 }
             }
@@ -156,6 +168,17 @@ pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, Strin
         version: None,
         hint: Some(hint),
     })
+}
+
+/// 修复 SCRIPT-03：识别 Microsoft Store python.exe stub 的特征输出。
+/// stub 在 stderr 打印含「was not found」/「Microsoft Store」的提示并以 9009 退出。
+/// 仅对 Python 候选生效（node 无 Store stub 问题）。
+fn is_store_stub_output(stderr: &str, runtime: ScriptRuntime) -> bool {
+    if runtime != ScriptRuntime::Python {
+        return false;
+    }
+    let lower = stderr.to_lowercase();
+    lower.contains("was not found") || lower.contains("microsoft store")
 }
 
 /// 最小白名单环境变量：仅保留解释器/依赖查找与系统调用必需项，裁掉宿主 token/密钥。
@@ -216,7 +239,19 @@ fn materialize_sandbox(
     files: &[ScriptFile],
     entry: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
-    let sandbox = base.join("plugin-sandbox").join(plugin_id);
+    // 修复 SCRIPT-01（critical 路径穿越删除）：
+    // 此前 plugin_id 直接 join 进路径，含 '../'、'\\'、盘符或空串时会越出 plugin-sandbox，
+    // 随后的 remove_dir_all 在未规范化路径上递归删，造成任意目录删除（不可恢复）。
+    // canonicalize 前缀断言也被绕过（sandbox_canon 本身已被推到 plugin-sandbox 之外）。
+    // 用段级白名单严格校验 plugin_id，仅允许 [A-Za-z0-9_-]，杜绝任何路径分量注入。
+    let safe_id = sanitize_plugin_id(plugin_id)?;
+    let sandbox_root = base.join("plugin-sandbox");
+    let sandbox = sandbox_root.join(&safe_id);
+    // 修复 SCRIPT-04（low 资源泄漏）：此前仅清当前 plugin_id 自身目录，从不回收其它 plugin_id
+    // 的历史 sandbox，app_data/plugin-sandbox/ 持续堆积孤立目录。新增 LRU 清理：落盘前扫描
+    // plugin-sandbox 目录，按 mtime 排序保留最近 SANDBOX_KEEP_DIRS 个，删除其余（含本次 plugin_id，
+    // 因随后立即重建）。仅对名字通过 sanitize_plugin_id 的目录操作，杜绝误删非 sandbox 目录。
+    cleanup_sandbox_lru(&sandbox_root, &safe_id);
     // 清空旧内容后重建，避免脏数据（上一轮残留文件影响本轮运行）。
     let _ = std::fs::remove_dir_all(&sandbox);
     std::fs::create_dir_all(&sandbox).map_err(|error| error.to_string())?;
@@ -240,6 +275,65 @@ fn materialize_sandbox(
         return Err(format!("entry 路径逃逸 sandbox：{entry}"));
     }
     Ok((sandbox_canon, entry_canon))
+}
+
+/// 修复 SCRIPT-01：plugin_id 段级白名单校验。
+/// 仅允许字母、数字、下划线、短横线，禁空串、路径分隔符、点号（防 .. / 隐藏段 / 盘符）。
+fn sanitize_plugin_id(plugin_id: &str) -> Result<String, String> {
+    let trimmed = plugin_id.trim();
+    if trimmed.is_empty() {
+        return Err("plugin_id 不能为空".to_string());
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(format!(
+            "plugin_id 含非法字符（仅允许字母数字下划线短横线）：{trimmed}"
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// 修复 SCRIPT-04（low 资源泄漏）：sandbox LRU 清理。
+/// 落盘前扫描 plugin-sandbox 目录，按 mtime 排序保留最近 SANDBOX_KEEP_DIRS 个，
+/// 删除其余（含本次 plugin_id，因随后立即重建）。
+///
+/// 安全保证：
+/// - 仅处理名字通过 sanitize_plugin_id 的子目录（[A-Za-z0-9_-]），杜绝误删非 sandbox 目录。
+/// - 目录不存在不报错（首次运行）。
+/// - 单个目录删除失败不影响其它（继续尝试，最大化清理）。
+fn cleanup_sandbox_lru(sandbox_root: &Path, _current_plugin_id: &str) {
+    /// 保留的最近 sandbox 目录数量（LRU 上限）。8 个足以覆盖对话式迭代场景，
+    /// 超出按 mtime 从最旧开始删除。
+    const SANDBOX_KEEP_DIRS: usize = 8;
+
+    let entries = match std::fs::read_dir(sandbox_root) {
+        Ok(e) => e,
+        Err(_) => return, // 目录不存在（首次运行）或不可读，静默跳过。
+    };
+    // 收集 (path, mtime) 对，仅保留通过 sanitize_plugin_id 的目录名（安全过滤）。
+    let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        // 仅清理合法 plugin_id 目录，跳过任何非法名（防误删用户其它文件）。
+        if sanitize_plugin_id(&name_str).is_err() {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) if m.is_dir() => m,
+            _ => continue, // 非目录或读元数据失败，跳过。
+        };
+        let mtime = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        candidates.push((path, mtime));
+    }
+    // mtime 降序（最新在前），超出 KEEP 的从尾部（最旧）开始删。
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    for (path, _mtime) in candidates.into_iter().skip(SANDBOX_KEEP_DIRS) {
+        let _ = std::fs::remove_dir_all(&path);
+    }
 }
 
 /// 命令：运行插件脚本（无参数一次性运行 + 带超时）。
@@ -475,6 +569,129 @@ mod tests {
         // 超时应在略超 800ms 处回收（含 50ms 轮询粒度容忍）。
         let elapsed = started.elapsed().as_millis();
         assert!(elapsed < 3000, "超时回收耗时异常：{elapsed}ms");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // 修复 SCRIPT-03（medium 错误处理）：probe guard 必须拒绝 Microsoft Store stub。
+    // stub --version 退出码非 0（9009）或 stderr 含「was not found」，应判为不可用。
+    #[test]
+    fn store_stub_output_is_detected() {
+        // Python 候选的 stub 输出（典型 Microsoft Store 提示）应被判为 stub。
+        assert!(is_store_stub_output(
+            "Python was not found; run without arguments to install from the Microsoft Store...",
+            ScriptRuntime::Python,
+        ));
+        assert!(is_store_stub_output(
+            "MiCrOsOfT StOrE install hint",
+            ScriptRuntime::Python,
+        ));
+        // 真实 Python 版本输出不应被判为 stub。
+        assert!(!is_store_stub_output(
+            "Python 3.12.0",
+            ScriptRuntime::Python,
+        ));
+        // 空 stderr 不判为 stub。
+        assert!(!is_store_stub_output("", ScriptRuntime::Python));
+        // Node 候选始终不判为 stub（无 Store stub 问题）。
+        assert!(!is_store_stub_output(
+            "Python was not found",
+            ScriptRuntime::Nodejs,
+        ));
+    }
+
+    // 修复 SCRIPT-04（low 资源泄漏）：sandbox LRU 清理应保留最近 N 个，删除最旧。
+    #[test]
+    fn sandbox_lru_keeps_recent_and_removes_old() {
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-sandbox-lru-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // 写 12 个合法 plugin_id 目录（超 KEEP=8），用不同的 mtime 模拟历史。
+        // 通过 touch（写文件）调整 mtime，确保排序可区分。
+        for i in 0..12u32 {
+            let dir = tmp.join(format!("plugin-{i}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            // 每个目录里写一个文件并设置不同的 mtime（i 越大 mtime 越新）。
+            std::fs::write(dir.join("marker.txt"), format!("{i}")).unwrap();
+            // 用不同 sleep 间隔确保 mtime 严格递增（filesystem 精度可能粗，多 sleep 几毫秒）。
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // 调 cleanup_sandbox_lru（KEEP=8）：应删除最旧的 4 个（plugin-0..plugin-3）。
+        cleanup_sandbox_lru(&tmp, "plugin-new");
+        let remaining: Vec<String> = std::fs::read_dir(&tmp)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        // 保留 8 个，最旧的 4 个被删。
+        assert_eq!(remaining.len(), 8, "应保留 8 个，实际 {remaining:?}");
+        assert!(!remaining.iter().any(|n| n == "plugin-0"), "plugin-0 应被删");
+        assert!(!remaining.iter().any(|n| n == "plugin-3"), "plugin-3 应被删");
+        assert!(remaining.iter().any(|n| n == "plugin-4"), "plugin-4 应保留");
+        assert!(remaining.iter().any(|n| n == "plugin-11"), "plugin-11 应保留");
+        // 非法目录名不应被删（安全过滤）：写一个含路径分隔符的目录。
+        // 注意：Windows/Linux 不允许目录名含 / 或 \，改用 . 开头的隐藏名（sanitize 拒绝）。
+        let hidden = tmp.join(".hidden-dir");
+        std::fs::create_dir_all(&hidden).unwrap();
+        cleanup_sandbox_lru(&tmp, "plugin-x");
+        // .hidden-dir 应仍存在（sanitize_plugin_id 拒绝 . 开头）。
+        assert!(hidden.exists(), "非法名目录不应被 LRU 删除");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // 修复 SCRIPT-02（high 并发）：超时杀进程应杀整个进程组（含孙进程），
+    // wait_with_output 不应永久挂起。本测试派生孙进程（node 子进程）模拟，验证回收不阻塞。
+    #[test]
+    fn timeout_kills_grandchild_process_tree() {
+        let binary = match maybe_node() {
+            Some(b) => b,
+            None => {
+                eprintln!("[skip] 宿主无 node，跳过孙进程超时测试");
+                return;
+            }
+        };
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-timeout-grandchild-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // 派生一个孙进程（unref 后死循环），主进程也死循环。
+        // 超时杀主进程后，孙进程若不被杀会继续持有 stdout 管道写端，wait_with_output 永久阻塞。
+        let script = r#"
+            const { spawn } = require('child_process');
+            // 孙进程：同样死循环（继承 stdout 管道写端）。
+            spawn(process.execPath, ['-e', 'while(true){}']).unref();
+            // 主进程：死循环，直到被 kill。
+            while (true) {}
+        "#;
+        let entry = tmp.join("spawn_loop.js");
+        std::fs::write(&entry, script).unwrap();
+        let started = Instant::now();
+        // 关键断言：run_capture_with_env 必须在合理时间内返回（不永久阻塞）。
+        // 若孙进程未被杀，wait_with_output 会无限挂起，本测试 5s 超时 fail。
+        let captured = run_capture_with_env(
+            &binary,
+            vec![entry.to_string_lossy().to_string()],
+            None,
+            800,
+            minimal_env(),
+        )
+        .expect("超时应杀进程组并返回，不永久阻塞");
+        let elapsed = started.elapsed().as_millis();
+        assert!(captured.timed_out, "应触发超时");
+        // 关键：若 wait_with_output 永久阻塞，elapsed 会远超 5s（本测试 cargo 默认无超时，
+        // 但孙进程不被杀时实际会挂死到外部 CI 超时）。这里设 < 5000ms 作为快速回归保护。
+        assert!(
+            elapsed < 5000,
+            "超时回收孙进程耗时异常：{elapsed}ms（可能 wait_with_output 被孙进程管道阻塞）"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

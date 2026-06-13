@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public, requireUser } from '../common';
 import { AuthService } from './auth.service';
+import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -12,14 +13,14 @@ export class AuthController {
   @Public()
   @Post('register')
   @ApiOperation({ summary: '本地客户端注册普通用户或提交团队管理员申请' })
-  register(@Body() body: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {
+  register(@Body() body: RegisterDto) {
     return this.auth.register(body);
   }
 
   @Public()
   @Post('login')
   @ApiOperation({ summary: '本地客户端和管理端共用登录' })
-  login(@Body() body: { email: string; password: string }) {
+  login(@Body() body: LoginDto) {
     return this.auth.login(body);
   }
 

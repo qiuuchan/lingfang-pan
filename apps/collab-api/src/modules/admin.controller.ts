@@ -3,6 +3,18 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { AdminService } from './admin.service';
+import {
+  AdminAdjustBalanceDto,
+  AdminCreatePluginDto,
+  AdminCreateTeamDto,
+  AdminCreateUserDto,
+  AdminRejectApplicationDto,
+  AdminRejectPluginDto,
+  AdminSetTeamAdminDto,
+  AdminUpdatePluginDto,
+  AdminUpdateTeamDto,
+  AdminUpdateUserDto,
+} from './dto/admin.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -24,13 +36,13 @@ export class AdminController {
 
   @Post('users')
   @ApiOperation({ summary: '创建用户' })
-  createUser(@Req() req: Request, @Body() body: { email: string; password: string; displayName?: string; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
+  createUser(@Req() req: Request, @Body() body: AdminCreateUserDto) {
     return this.admin.adminCreateUser(requireUser(req).id, body);
   }
 
   @Patch('users/:id')
   @ApiOperation({ summary: '更新用户' })
-  updateUser(@Req() req: Request, @Param('id') id: string, @Body() body: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
+  updateUser(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdateUserDto) {
     return this.admin.adminUpdateUser(requireUser(req).id, id, body);
   }
 
@@ -48,13 +60,13 @@ export class AdminController {
 
   @Post('teams')
   @ApiOperation({ summary: '创建团队' })
-  createTeam(@Req() req: Request, @Body() body: { name: string; slug?: string; balanceCents?: number }) {
+  createTeam(@Req() req: Request, @Body() body: AdminCreateTeamDto) {
     return this.admin.adminCreateTeam(requireUser(req).id, body);
   }
 
   @Patch('teams/:id')
   @ApiOperation({ summary: '更新团队' })
-  updateTeam(@Req() req: Request, @Param('id') id: string, @Body() body: { name?: string; status?: 'ACTIVE' | 'SUSPENDED' }) {
+  updateTeam(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdateTeamDto) {
     return this.admin.adminUpdateTeam(requireUser(req).id, id, body);
   }
 
@@ -66,7 +78,7 @@ export class AdminController {
 
   @Post('teams/:id/admins')
   @ApiOperation({ summary: '指定团队管理员' })
-  setTeamAdmin(@Req() req: Request, @Param('id') id: string, @Body() body: { userId: string }) {
+  setTeamAdmin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminSetTeamAdminDto) {
     return this.admin.adminSetTeamAdmin(requireUser(req).id, id, body);
   }
 
@@ -78,7 +90,7 @@ export class AdminController {
 
   @Post('teams/:teamId/balance-adjustments')
   @ApiOperation({ summary: '调整团队共享余额' })
-  adjustBalance(@Req() req: Request, @Param('teamId') teamId: string, @Body() body: { amountCents: number; direction: 'CREDIT' | 'DEBIT'; reason?: string }) {
+  adjustBalance(@Req() req: Request, @Param('teamId') teamId: string, @Body() body: AdminAdjustBalanceDto) {
     return this.admin.adminAdjustBalance(requireUser(req).id, teamId, body);
   }
 
@@ -96,7 +108,7 @@ export class AdminController {
 
   @Post('plugins')
   @ApiOperation({ summary: '拒绝管理端新增平台插件' })
-  createPlugin(@Req() req: Request, @Body() body: { name: string; description?: string; status?: 'ENABLED' | 'DISABLED' }) {
+  createPlugin(@Req() req: Request, @Body() body: AdminCreatePluginDto) {
     void body;
     return this.admin.adminCreatePlugin(requireUser(req).id);
   }
@@ -109,13 +121,13 @@ export class AdminController {
 
   @Post('plugins/:id/reject')
   @ApiOperation({ summary: '驳回市场插件' })
-  rejectPlugin(@Req() req: Request, @Param('id') id: string, @Body() body: { reason?: string }) {
+  rejectPlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminRejectPluginDto) {
     return this.admin.adminRejectPlugin(requireUser(req).id, id, body.reason);
   }
 
   @Patch('plugins/:id')
   @ApiOperation({ summary: '更新平台插件' })
-  updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: { name?: string; description?: string; status?: 'ENABLED' | 'DISABLED'; priceCents?: number }) {
+  updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdatePluginDto) {
     return this.admin.adminUpdatePlugin(requireUser(req).id, id, body);
   }
 
@@ -133,7 +145,7 @@ export class AdminController {
 
   @Post('team-admin-applications/:id/reject')
   @ApiOperation({ summary: '驳回团队管理员申请' })
-  reject(@Req() req: Request, @Param('id') id: string, @Body() body: { reason?: string }) {
+  reject(@Req() req: Request, @Param('id') id: string, @Body() body: AdminRejectApplicationDto) {
     return this.admin.rejectApplication(requireUser(req).id, id, body.reason);
   }
 

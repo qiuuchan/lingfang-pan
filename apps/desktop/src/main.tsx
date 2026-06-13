@@ -5,12 +5,80 @@ import App from '@/App';
 import { initApiBase, initAuthToken } from '@/lib/api';
 import '@/index.css';
 
+// DESK-SHELL-05 修复：渲染树顶层 ErrorBoundary。
+// 此前任何 render 阶段抛错（如 sessionFromPayload 对畸形 /api/auth/me 响应裸解引用）
+// 会让 React 卸载整棵树 → 白屏不可恢复，Tauri 用户只能强杀进程重启。
+// 此 ErrorBoundary 兜底渲染降级 UI，并提供「重置本地会话」按钮让用户自救（清掉损坏的 lf:session）。
+class RootErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    // 控制台留痕便于排障（不外发），与「不写 .md 报告」一致。
+    // eslint-disable-next-line no-console
+    console.error('应用渲染崩溃：', error, info?.componentStack);
+  }
+
+  handleReset = () => {
+    // 清掉可能损坏的本地状态（lf:session / lf:authToken），再整页 reload 回到 Auth。
+    try {
+      localStorage.removeItem('lf:session');
+      localStorage.removeItem('lf:authToken');
+    } catch {
+      /* localStorage 不可用则忽略 */
+    }
+    window.location.reload();
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: '#0b0e14', color: '#e2e8f0', padding: 24 }}>
+          <div style={{ maxWidth: 480, textAlign: 'center', fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>
+            <h1 style={{ fontSize: 20, marginBottom: 8 }}>应用遇到错误</h1>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>
+              页面渲染过程中出现问题。可以重置本地会话后重新进入应用。
+            </p>
+            <pre style={{ textAlign: 'left', background: '#0f172a', padding: 12, borderRadius: 8, fontSize: 12, overflow: 'auto', maxHeight: 200, marginBottom: 16 }}>
+              {this.state.error.message || String(this.state.error)}
+            </pre>
+            <button
+              type="button"
+              onClick={this.handleReset}
+              style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14 }}
+            >
+              重置本地会话并重载
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 async function bootstrap() {
   let defaultApiBase: string | null = null;
   try {
-    const res = await fetch('app.config.json', { cache: 'no-store' });
-    const cfg = (await res.json()) as { api_base?: string };
-    defaultApiBase = cfg.api_base ?? null;
+    // DESK-SHELL-02 修复：app.config.json fetch 加 5s 超时（AbortController），
+    // 避免该 fetch 挂起导致 bootstrap 永不 render、整屏白屏。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const res = await fetch('app.config.json', { cache: 'no-store', signal: controller.signal });
+      const cfg = (await res.json()) as { api_base?: string };
+      defaultApiBase = cfg.api_base ?? null;
+    } catch {
+      /* 无打包默认配置则进入后端地址配置入口；超时也走 fallback */
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     /* 无打包默认配置则进入后端地址配置入口 */
   }
@@ -19,7 +87,9 @@ async function bootstrap() {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
-        <App />
+        <RootErrorBoundary>
+          <App />
+        </RootErrorBoundary>
       </ThemeProvider>
     </React.StrictMode>,
   );

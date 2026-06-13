@@ -18,29 +18,35 @@ export class AuthService {
 
   async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {
     const email = input.email?.trim().toLowerCase();
-    if (!email || !email.includes('@')) throw badRequest('请输入有效邮箱');
-    if (!input.password || input.password.length < 8) throw badRequest('密码至少 8 位');
+    // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
+    // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
     const exists = await this.prisma.user.findUnique({ where: { email } });
     if (exists) throw conflict('该邮箱已注册');
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        displayName: input.displayName?.trim() || email,
-      },
-    });
-    if (input.wantsTeamAdmin) {
-      await this.prisma.teamAdminApplication.create({
+    // 修复 AUTH-03：此前 user.create 与 teamAdminApplication.create/audit 非原子，
+    // application.create 失败会留孤儿 user。包进事务保证一致性。
+    const userId = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
         data: {
-          userId: user.id,
-          teamName: input.teamName?.trim() || `${user.displayName} 的团队`,
-          reason: input.reason?.trim() || '',
+          email,
+          passwordHash,
+          displayName: input.displayName?.trim() || email,
         },
       });
-      await this.audit(user.id, 'team_admin_application.created', 'User', user.id, { email });
-    }
-    return this.sessionFor(user.id);
+      if (input.wantsTeamAdmin) {
+        await tx.teamAdminApplication.create({
+          data: {
+            userId: user.id,
+            teamName: input.teamName?.trim() || `${user.displayName} 的团队`,
+            reason: input.reason?.trim() || '',
+          },
+        });
+        await tx.auditLog.create({ data: { actorUserId: user.id, action: 'team_admin_application.created', targetType: 'User', targetId: user.id, metadata: { email } } });
+      }
+      return user.id;
+    });
+    // 事务提交后再读库生成 session（sessionFor 用主 prisma，需读到已提交数据）。
+    return this.sessionFor(userId);
   }
 
   async login(input: { email: string; password: string }) {
@@ -65,7 +71,9 @@ export class AuthService {
       where: { id: userId },
       include: { memberships: { where: { status: 'ACTIVE' }, include: { team: true }, orderBy: { joinedAt: 'desc' } } },
     });
-    if (!user) throw unauthorized();
+    // 修复 AUTH-01：/auth/me 与 /auth/refresh 共享此入口，必须校验 status，
+    // 否则被禁用用户可凭旧 token 经 refresh 永久续命（login 已校验但 sessionFor 此前缺失）。
+    if (!user || user.status !== 'ACTIVE') throw unauthorized();
     const application = await this.prisma.teamAdminApplication.findFirst({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
@@ -73,13 +81,14 @@ export class AuthService {
     const membership = user.memberships[0] || null;
     const onboarding: OnboardingState = this.resolveOnboarding(user.platformRole, membership?.role, application?.status);
     const payload = {
-      token: includeToken ? this.issueToken(user.id, user.email, user.platformRole) : undefined,
+      token: includeToken ? this.issueToken(user.id, user.email, user.platformRole, user.tokenVersion) : undefined,
       user: {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
         platformRole: user.platformRole,
         status: user.status,
+        tokenVersion: user.tokenVersion,
       },
       team: membership ? { id: membership.team.id, name: membership.team.name, slug: membership.team.slug, role: membership.role } : null,
       application: application ? { id: application.id, status: application.status, teamName: application.teamName, reviewReason: application.reviewReason } : null,
@@ -97,11 +106,16 @@ export class AuthService {
     return 'NEEDS_INVITATION';
   }
 
-  private issueToken(userId: string, email: string, platformRole: string) {
+  private issueToken(userId: string, email: string, platformRole: string, tokenVersion: number) {
     const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as SignOptions['expiresIn'] };
+    // payload 携带 tokenVersion，JwtAuthGuard 校验时与库比对实现吊销（ADMIN-02/AUTH-01）。
+    // 与 main.ts 启动断言 + security.ts 的 JwtAuthGuard 对齐：JWT_SECRET 缺失时直接抛错而非回退弱默认值
+    // （XSEC-04 / AUTH-04）。生产环境由 main.ts fail-fast 兜底；开发环境 .env 必须配置合法密钥。
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new Error('JWT_SECRET 未配置，无法签发 token');
     return jwt.sign(
-      { sub: userId, email, platformRole },
-      (process.env.JWT_SECRET || 'dev-collab-change-me') as Secret,
+      { sub: userId, email, platformRole, tokenVersion },
+      secret as Secret,
       options,
     );
   }
@@ -117,6 +131,9 @@ export class AuthService {
       orderBy: { joinedAt: 'desc' },
     });
     if (!membership) throw forbidden('请先加入团队');
+    // 修复 TEAM-03：SUSPENDED 团队的成员不应能继续消耗余额/生成邀请码/操作成员。
+    // 此前所有 team.service 接口经此入口但都不校验 team.status，与 plugin.service.ts:17 已认可的语义对齐。
+    if (membership.team.status !== 'ACTIVE') throw forbidden('团队当前不可用');
     return membership;
   }
 

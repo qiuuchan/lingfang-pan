@@ -145,12 +145,23 @@ export function adminNames(team: Team) {
   return names.length ? names.join('、') : '—';
 }
 
+// ADMIN-VIEW-08 修复：localizeMetadata 此前对每个字符串 value 无差别 labelOf，
+// 命中 STATUS_LABEL 即替换——审计 metadata 含大量业务字符串（reason/name/displayName），
+// 恰好等于状态码字面量（PENDING/ACTIVE/NONE/CREDIT 等）的业务文本会被错误翻译（如团队名 NONE 显示「普通用户」）。
+// 现改为白名单：仅对已知枚举 key（direction/status/platformRole/role）做 labelOf，其余原样输出；
+// 对 amountCents 这类已知金额字段做分→元格式化，避免裸露的 cents 数值。
+const METADATA_LOCALIZE_KEYS = new Set(['direction', 'status', 'platformRole', 'role']);
+
 export function localizeMetadata(metadata: unknown): unknown {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
   return Object.fromEntries(
-    Object.entries(metadata as Record<string, unknown>).map(([key, value]) => [
-      key,
-      typeof value === 'string' ? labelOf(value) : value,
-    ]),
+    Object.entries(metadata as Record<string, unknown>).map(([key, value]) => {
+      if (METADATA_LOCALIZE_KEYS.has(key) && typeof value === 'string') return [key, labelOf(value)];
+      if (key === 'amountCents' && (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))) {
+        // 分→元格式化，裸露的 cents 不便阅读。
+        return [key, `${(Number(value) / 100).toFixed(2)} 元`];
+      }
+      return [key, value];
+    }),
   );
 }

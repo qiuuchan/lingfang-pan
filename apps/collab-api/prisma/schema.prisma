@@ -80,6 +80,8 @@ model User {
   passwordHash          String
   status                UserStatus             @default(ACTIVE)
   platformRole          PlatformRole           @default(NONE)
+  // token 版本号：禁用/降级用户时自增，使已签发的旧 JWT 在 JwtAuthGuard 校验时失效（ADMIN-02/AUTH-01/XERR-02）。
+  tokenVersion          Int                    @default(0)
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   memberships           TeamMembership[]

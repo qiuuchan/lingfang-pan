@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Markdown } from '@/components/markdown';
 import {
   aggregateToolCards,
-  extractAskUserQuestions,
+  extractAskUserQuestionsForCard,
   formatToolInput,
   type AskUserQuestion,
   type ToolCardView,
@@ -41,9 +41,12 @@ export interface StreamingMessageProps {
   // R4 AskUserQuestion：用户选择某个 option 后回调，answer 文本作为下一轮 send_input 传入。
   // 本轮按 --resume 续接（答案当普通文本），tool_use_id 精确关联留后续 stream-json input 升级。
   onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
+  // ASKU-01：用户是否正在提交某 option（防重入）。true 时所有 option 按钮 disabled，
+  // 避免 send_input resolve 前 async 窗口内连点触发多次 send_input。
+  askAnswering?: boolean;
 }
 
-export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAskUserAnswer }: StreamingMessageProps) {
+export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAskUserAnswer, askAnswering = false }: StreamingMessageProps) {
   // 思考区：累积所有 thought 增量为一段（流式追加，增量显示）。
   const thoughtText = segments
     .filter((s) => s.stream === 'thought')
@@ -59,7 +62,6 @@ export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAsk
   // 工具区：累积所有 tool 片段聚合为卡片（含 AskUserQuestion）。
   const toolSegments = segments.filter((s) => s.stream === 'tool').map((s) => s.text);
   const toolCards = aggregateToolCards(toolSegments);
-  const askQuestions = extractAskUserQuestions(toolCards);
 
   // R5 stage 文案动态：优先用上层传入的 stage（含启停/降级等场景文案）；
   // 上层未给精确文案时，按当前流类型切换「正在思考中…」/「正在生成…」。
@@ -88,14 +90,29 @@ export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAsk
             <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">{seg.text.replace(/\n$/, '')}</pre>
           </div>
         ))}
-        {toolCards.map((card, i) => (
-          <ToolCard
-            key={`tool-${i}`}
-            card={card}
-            question={askQuestions[i]}
-            onAskUserAnswer={onAskUserAnswer}
-          />
-        ))}
+        {/* STREAM-01 / DRAFT-03 修复：按卡片就地解析其承载的 AskUserQuestion questions。
+            此前用 extractAskUserQuestions 返回扁平数组 + 全局下标 i 取值，遇到「同轮前置普通工具（Read/Write）」
+            或「单卡多问」时下标错配 / 后续问题被吞。改为每张卡片就地解析，1:1 对齐渲染。 */}
+        {toolCards.flatMap((card, cardIndex) => {
+          const cardQuestions = extractAskUserQuestionsForCard(card);
+          return cardQuestions.length
+            ? cardQuestions.map((q, qIdx) => (
+              <ToolCard
+                key={`tool-${cardIndex}-${qIdx}`}
+                card={card}
+                question={q}
+                answered={askAnswering}
+                onAskUserAnswer={onAskUserAnswer}
+              />
+            ))
+            : (
+              <ToolCard
+                key={`tool-${cardIndex}`}
+                card={card}
+                onAskUserAnswer={onAskUserAnswer}
+              />
+            );
+        })}
       </div>
     </div>
   );
@@ -132,13 +149,17 @@ function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }
 
 // 工具卡片（R3/R4）：普通工具显示 name + input 摘要；AskUserQuestion 渲染问题卡片（每问 header + question + options）。
 // 复用 ErrorBubble 的卡片观感（border + 圆角 + 浅底）。
+// ASKU-01 修复：question 卡片自带「已回答」状态（点击 option 后置位），option 按钮在已回答后 disabled，
+// 防止用户在 send_input resolve 前 async 窗口内连点触发多次 send_input（Rust send_input 无 in-flight 守卫）。
 function ToolCard({
   card,
   question,
+  answered = false,
   onAskUserAnswer,
 }: {
   card: ToolCardView;
   question?: AskUserQuestion;
+  answered?: boolean;
   onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
 }) {
   // AskUserQuestion：渲染问题卡片（R4），用户点 option 后回传答案。
@@ -156,6 +177,7 @@ function ToolCard({
               key={`${opt.label}-${idx}`}
               variant="outline"
               size="sm"
+              disabled={answered}
               className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
               onClick={() => onAskUserAnswer?.(question, opt.label)}
             >
@@ -164,7 +186,9 @@ function ToolCard({
             </Button>
           ))}
         </div>
-        <p className="mt-1.5 text-[11px] text-muted-foreground">本轮答案作为追问文本传入（--resume 续接）。</p>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          {answered ? '已选择，正在提交…' : '本轮答案作为追问文本传入（--resume 续接）。'}
+        </p>
       </div>
     );
   }

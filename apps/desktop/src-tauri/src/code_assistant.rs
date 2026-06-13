@@ -10,6 +10,9 @@ use std::time::Instant;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt as WindowsCommandExt;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -425,6 +428,31 @@ pub fn send_input<E: AssistantEventSink>(
         .into_iter()
         .find(|r| r.session_id == input.session_id)
         .ok_or("session 不存在或已结束")?;
+    // 修复 SPAWN-01 / RUSTSHIM-02（high 状态机）：此前 send_input 仅校验 session 记录存在，
+    // 不校验前一轮子进程是否仍在跑。AskUserQuestion 卡片在 streaming 恒 true 时用户点 option 即触发
+    // （前端 handleAskUserAnswer 仅守 `if (!streaming) return`），spawn_and_attach 的 processes.insert
+    // 会覆盖旧 Arc 而不停止旧 child，导致 child1 孤儿继续烧 LLM token / CPU，
+    // 且 child1 退出时 waiter 按 session_id 误删 child2 的 map/registry 条目并抢先 update_session_exit。
+    // 修复：send_input 入口先停掉仍在跑的旧 child（spawn_and_attach 内 take + kill_child_tree），
+    // 保证追问发起时最多只有一个活子进程。
+    if session.status == "running" {
+        // spawn_and_attach 内会复用同 session_id 覆盖 map；这里先 take 旧 child 杀进程组，
+        // 让旧 waiter 自然观察到 None 提前退出（不写 update_session_exit，避免覆盖本轮状态）。
+        let old_child = {
+            let processes = state.processes.lock().unwrap();
+            processes.get(&input.session_id).cloned()
+        };
+        if let Some(child) = old_child {
+            let taken = {
+                let mut guard = child.lock().unwrap();
+                guard.take()
+            };
+            if let Some(mut child) = taken {
+                kill_child_tree(&child);
+                let _ = child.wait();
+            }
+        }
+    }
     let definition = tool_definition(session.tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
@@ -518,28 +546,34 @@ pub fn stop_session<E: AssistantEventSink>(
                 false
             }
         };
-        if !killed {
-            return Err("session 已结束".to_string());
+        // 修复 SPAWN-04（low 并发）：此前子进程在用户点停止与 stop_session 拿锁之间自然退出时，
+        // spawn_waiter 200ms 轮询先 take 掉 child，stop_session 拿到 None → killed=false →
+        // 返回 Err('session 已结束')。用户点了停止却收到错误 toast，且状态落 exited 而非预期 stopped。
+        // 修复：stop 对「进程已死」幂等——killed=false 时视为目标达成返回 Ok(())，不再报错。
+        // 终态以 waiter 写入的 exited 为准（无数据丢失），用户语义上「停止」已满足。
+        if killed {
+            {
+                let mut processes = state.processes.lock().unwrap();
+                processes.remove(&input.session_id);
+            }
+            state.store.unregister_process(&input.session_id)?;
+            let ended_at = now_string();
+            state
+                .store
+                .append_transcript(&input.session_id, "stopped", json!({ "by": "user" }))?;
+            state
+                .store
+                .update_session_exit(&input.session_id, "stopped", None, ended_at.clone())?;
+            app.emit_json(
+                "code-assistant://exit",
+                json!({ "sessionId": input.session_id, "exitCode": null, "status": "stopped", "endedAt": ended_at }),
+            );
         }
-        {
-            let mut processes = state.processes.lock().unwrap();
-            processes.remove(&input.session_id);
-        }
-        state.store.unregister_process(&input.session_id)?;
-        let ended_at = now_string();
-        state
-            .store
-            .append_transcript(&input.session_id, "stopped", json!({ "by": "user" }))?;
-        state
-            .store
-            .update_session_exit(&input.session_id, "stopped", None, ended_at.clone())?;
-        app.emit_json(
-            "code-assistant://exit",
-            json!({ "sessionId": input.session_id, "exitCode": null, "status": "stopped", "endedAt": ended_at }),
-        );
         Ok(())
     } else {
-        Err("session 不存在或已结束".to_string())
+        // 进程表无该 session：可能已自然退出（waiter 已清理），也可能从未启动。
+        // 幂等语义：对用户而言「停止一个已结束的会话」应成功而非报错（避免误导性 toast）。
+        Ok(())
     }
 }
 
@@ -599,7 +633,7 @@ fn spawn_and_attach<E: AssistantEventSink>(
         CodeAssistantTool::Claude => OutputFormat::StreamJson,
         _ => OutputFormat::Plain,
     };
-    spawn_reader(
+    let stdout_reader = spawn_reader(
         app.clone(),
         state.clone(),
         session_id.clone(),
@@ -607,7 +641,7 @@ fn spawn_and_attach<E: AssistantEventSink>(
         output_format,
         stdout,
     );
-    spawn_reader(
+    let stderr_reader = spawn_reader(
         app.clone(),
         state.clone(),
         session_id.clone(),
@@ -615,7 +649,7 @@ fn spawn_and_attach<E: AssistantEventSink>(
         OutputFormat::Plain,
         stderr,
     );
-    spawn_waiter(app, state, session_id, child);
+    spawn_waiter(app, state, session_id, child, stdout_reader, stderr_reader);
     Ok(pid)
 }
 
@@ -711,11 +745,35 @@ pub fn scan_workspace_files(
 /// - 超大文件（>256KB，对齐后端 MAX_PLUGIN_FILE_BYTES，避免后续上传必然 400）。
 ///
 /// 防穿越：canonicalize 每个文件后断言仍以 root_canon 为前缀（符号链接逃逸防御）。
+///
+/// 修复 RUSTSHIM-04（medium 逻辑 bug）：此前用 entry.metadata()（跟随符号链接返回目标元数据）
+/// 判定是否目录，对指向目录的符号链接 metadata.is_dir()==true，于是递归 collect_workspace_files，
+/// sandbox 内存在目录符号链接环（a/link -> a）时会沿符号链接无限深入，最终栈溢出 panic
+/// （栈溢出无法被 catch_unwind 捕获，是进程级 abort）。
+/// 修复：用 symlink_metadata 判定（不跟随），目录符号链接被视为「符号链接」而非「目录」直接跳过；
+/// 同时加深度上限 MAX_SCAN_DEPTH 作为第二道防线（防恶意深层嵌套目录爆栈）。
 fn collect_workspace_files(
     current: &std::path::Path,
     root_canon: &std::path::Path,
     out: &mut Vec<DraftFileJson>,
 ) -> Result<(), String> {
+    collect_workspace_files_inner(current, root_canon, out, 0)
+}
+
+/// 沙箱扫描深度上限（修复 RUSTSHIM-04 第二道防线）：32 层足以覆盖任何合法插件结构，
+/// 超出视为恶意嵌套或符号链接环，停止递归（避免栈溢出）。
+const MAX_SCAN_DEPTH: usize = 32;
+
+fn collect_workspace_files_inner(
+    current: &std::path::Path,
+    root_canon: &std::path::Path,
+    out: &mut Vec<DraftFileJson>,
+    depth: usize,
+) -> Result<(), String> {
+    // 修复 RUSTSHIM-04：深度上限防栈溢出（符号链接环或恶意深层嵌套）。
+    if depth > MAX_SCAN_DEPTH {
+        return Ok(());
+    }
     let entries = std::fs::read_dir(current).map_err(|error| error.to_string())?;
     for entry in entries.flatten() {
         let file_name = entry.file_name();
@@ -729,17 +787,19 @@ fn collect_workspace_files(
             continue;
         }
         let path = entry.path();
-        let metadata = match entry.metadata() {
+        // 修复 RUSTSHIM-04：用 symlink_metadata（不跟随符号链接）判定类型，
+        // 目录符号链接不被当作目录递归（避免符号链接环 / 指向祖先目录的环致栈溢出）。
+        let metadata = match std::fs::symlink_metadata(&path) {
             Ok(m) => m,
             Err(_) => continue, // 元数据读取失败跳过（权限/竞态等）。
         };
         if metadata.is_dir() {
-            // 递归子目录（collect_workspace_files 自带排除规则）。
-            collect_workspace_files(&path, root_canon, out)?;
+            // 真实目录（非符号链接）递归（collect_workspace_files_inner 自带排除规则 + 深度守卫）。
+            collect_workspace_files_inner(&path, root_canon, out, depth + 1)?;
             continue;
         }
         if !metadata.is_file() {
-            continue; // 符号链接等非普通文件跳过。
+            continue; // 符号链接 / FIFO / socket 等非普通文件跳过。
         }
         // 超大文件跳过（对齐后端 256KB 单文件限制，避免上传必然 400）。
         const MAX_FILE_BYTES: u64 = 256 * 1024;
@@ -929,13 +989,13 @@ fn extract_stream_json_items(line: &str) -> Vec<StreamItem> {
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
+                        // 修复 RUST-STREAM-04（info 边界）：input 字段为 null/标量时 other.to_string()
+                        // 会序列化为 "null"/"true"/"42" 字符串，前端工具卡片渲染出现 "AskUserQuestion null"
+                        // 等字面量。规范化：null → "{}"，对象/数组 → JSON 序列化，字符串 → 透传，
+                        // 其余标量包成 JSON 值序列化（保持合法 JSON 形态，避免裸字面量）。
                         let input_json = block
                             .get("input")
-                            .map(|v| match v {
-                                // 已是字符串则透传（部分实现把 input 当字符串传）。
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
-                            })
+                            .map(normalize_tool_input)
                             .unwrap_or_default();
                         items.push(StreamItem::ToolUse { name, input_json });
                     }
@@ -965,12 +1025,10 @@ fn extract_stream_json_items(line: &str) -> Vec<StreamItem> {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
+                            // 修复 RUST-STREAM-04：复用 normalize_tool_input 规范化 input 字段。
                             let input_json = block
                                 .get("input")
-                                .map(|v| match v {
-                                    serde_json::Value::String(s) => s.clone(),
-                                    other => other.to_string(),
-                                })
+                                .map(normalize_tool_input)
                                 .unwrap_or_default();
                             vec![StreamItem::ToolUse { name, input_json }]
                         }
@@ -1052,6 +1110,28 @@ fn extract_stream_json_session_id(line: &str) -> Option<String> {
     }
 }
 
+/// 规范化 tool_use 块的 input 字段为合法 JSON 字符串（修复 RUST-STREAM-04）。
+///
+/// 协议约定 tool_use.input 几乎必为 JSON 对象（content_block_start 时初始化为 {}，
+/// 入参增量经 input_json_delta.partial_json 通道）。但理论上协议不禁止 null/标量，
+/// 此前 `other.to_string()` 对 null → "null"、true → "true"、数字 → 字符串，
+/// 前端工具卡片渲染出现 "AskUserQuestion null" 字面量（无害但语义错位）。
+///
+/// 规范化策略：
+/// - String：透传（部分实现把 input 当字符串传，保持兼容）。
+/// - Object / Array：序列化为 JSON 字符串（保留原结构）。
+/// - Null：返回 "{}"（空对象，符合「无入参」的工具语义）。
+/// - Number / Bool：包成 JSON 值序列化（保持合法 JSON 形态，避免裸字面量）。
+fn normalize_tool_input(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => "{}".to_string(),
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => value.to_string(),
+        // 标量（数字/布尔）：序列化为合法 JSON 字面量（不带引号，保持类型信息）。
+        other => other.to_string(),
+    }
+}
+
 fn spawn_reader<E: AssistantEventSink>(
     app: E,
     state: CodeAssistantState,
@@ -1059,8 +1139,8 @@ fn spawn_reader<E: AssistantEventSink>(
     stream: &'static str,
     output_format: OutputFormat,
     pipe: Option<impl std::io::Read + Send + 'static>,
-) {
-    if let Some(pipe) = pipe {
+) -> Option<std::thread::JoinHandle<()>> {
+    pipe.map(|pipe| {
         std::thread::spawn(move || {
             let mut reader = std::io::BufReader::new(pipe);
             let mut buffer = String::new();
@@ -1178,8 +1258,8 @@ fn spawn_reader<E: AssistantEventSink>(
                     }
                 }
             }
-        });
-    }
+        })
+    })
 }
 
 #[cfg(unix)]
@@ -1192,7 +1272,25 @@ fn libc_setsid() {
     }
 }
 
+// 修复 SPAWN-02（high 并发/资源泄漏）：stop_child_process 此前 Unix 走 kill -PGID 杀进程组，
+// 但块外无条件 child.kill() + child.wait() 在 Windows 上被编译进去且 kill() 仅 TerminateProcess
+// 杀直接子进程，孙子进程（MCP server、工具进程、codex 的 node 子进程）成为孤儿，
+// 持续泄漏 CPU/内存/网络连接/可能持有的 LLM 会话。
+// 修复：Windows 分支用 taskkill /PID <pid> /T [/F] 杀整棵进程树（与 store.rs::kill_process 对齐），
+// 兜底仍走 child.kill() + child.wait() 保证 Child 句柄被回收。
+// Unix 保持原 kill -PGID 语义。
 fn stop_child_process(mut child: Child) {
+    // 复用 kill_child_tree 发进程组/树 kill 信号（不 wait），再由本函数 wait 回收 Child 句柄。
+    kill_child_tree(&child);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// 仅向子进程及其子孙进程发送终止信号（不 wait 回收）。
+/// 供 run_captured_inner 超时分支复用：发完 kill 后立即 wait_with_output 回收 stdout/stderr。
+/// - Unix：kill -TERM -<pgid> → 等 → kill -KILL -<pgid>（spawn 时 setsid 已建独立进程组）。
+/// - Windows：taskkill /PID <pid> /T → 等 → taskkill /F /PID <pid> /T（递归杀进程树）。
+fn kill_child_tree(child: &Child) {
     #[cfg(unix)]
     {
         let group = format!("-{}", child.id());
@@ -1201,21 +1299,29 @@ fn stop_child_process(mut child: Child) {
             .arg("--")
             .arg(&group)
             .status();
-        for _ in 0..10 {
-            match child.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
-                Err(_) => return,
-            }
-        }
+        // 给进程组 1 秒优雅退出窗口（TERM 后轮询 try_wait 不要求 Child 可变，
+        // 但 try_wait 需要 &mut，这里改为简单 sleep 等系统回收，由调用方后续 wait 确认）。
+        std::thread::sleep(std::time::Duration::from_millis(100));
         let _ = Command::new("kill")
             .arg("-KILL")
             .arg("--")
             .arg(&group)
             .status();
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    #[cfg(windows)]
+    {
+        let pid = child.id();
+        // 先温和终止整棵进程树，等不到再强杀。
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T"])
+            .creation_flags(0x0800_0000)
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string(), "/T"])
+            .creation_flags(0x0800_0000)
+            .status();
+    }
 }
 
 fn spawn_waiter<E: AssistantEventSink>(
@@ -1223,14 +1329,19 @@ fn spawn_waiter<E: AssistantEventSink>(
     state: CodeAssistantState,
     session_id: String,
     child: Arc<Mutex<Option<Child>>>,
+    stdout_reader: Option<std::thread::JoinHandle<()>>,
+    stderr_reader: Option<std::thread::JoinHandle<()>>,
 ) {
     std::thread::spawn(move || {
+        // 修复 SPAWN-05（low 健壮性）：try_wait 返回 Err 时直接 break None 不杀子进程，
+        // map/registry 已被清空，子进程变孤儿且无法停止。修复：Err 分支也 take 并 kill_child_tree 回收。
         let exit_code = loop {
             let status = {
                 let mut child = child.lock().unwrap();
                 if let Some(child) = child.as_mut() {
                     child.try_wait()
                 } else {
+                    // send_input 已 take 旧 child（多轮重 spawn），本 waiter 无需发 exit 事件直接退出。
                     return;
                 }
             };
@@ -1241,12 +1352,45 @@ fn spawn_waiter<E: AssistantEventSink>(
                     break status.code();
                 }
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
-                Err(_) => break None,
+                Err(_) => {
+                    // try_wait 系统级错误（罕见）：take 旧 child 杀进程组，避免孤儿；exit_code 走 None。
+                    let mut child = child.lock().unwrap();
+                    if let Some(mut owned) = child.take() {
+                        kill_child_tree(&owned);
+                        let _ = owned.wait();
+                    }
+                    break None;
+                }
             }
         };
-        {
+        // 修复 SPAWN-06（low 并发）：spawn_waiter 与 spawn_reader 是独立线程无同步，
+        // 子进程退出时其 stdout/stderr pipe OS 缓冲区可能还有未读数据，reader 的下一次 read_line
+        // 才会读到并 emit output。若 spawn_waiter 200ms 轮询先 try_wait 命中 Ok(Some) 即发 exit，
+        // 会早于 reader 的最后一批 output 到达前端，导致 finalizeSession 读 transcript 漏末尾产出。
+        // 修复：发 exit 事件前 join 两个 reader 线程，确保 pipe 数据全部 flush 到 transcript + emit output。
+        // reader 在 pipe 写端全部关闭（子进程已死）后 read_line 返回 Ok(0) 自然退出，join 不会无限阻塞。
+        if let Some(handle) = stdout_reader {
+            let _ = handle.join();
+        }
+        if let Some(handle) = stderr_reader {
+            let _ = handle.join();
+        }
+        // 修复 SPAWN-01：旧 waiter 不能误删新轮 child 的 map/registry 条目。
+        // processes 可能已被新轮 spawn_and_attach 覆盖为新 Arc；仅在当前 Arc 仍是注册的那个时才删。
+        // 若已被覆盖（ptr 不等），说明 send_input 启动了新轮，旧 waiter 应静默退出，
+        // 不发 unregister / update_session_exit / exit 事件，避免覆盖新轮 running 状态。
+        let still_current = {
             let mut processes = state.processes.lock().unwrap();
-            processes.remove(&session_id);
+            match processes.get(&session_id) {
+                Some(registered) if Arc::ptr_eq(registered, &child) => {
+                    processes.remove(&session_id);
+                    true
+                }
+                _ => false, // 已被新轮覆盖，或已被 stop_session 移除
+            }
+        };
+        if !still_current {
+            return;
         }
         let _ = state.store.unregister_process(&session_id);
         let ended_at = now_string();
@@ -1276,6 +1420,12 @@ pub(crate) struct CapturedOutput {
 /// env: None 表示继承全量环境变量（code_assistant CLI 原行为，保持不变）；
 ///      Some 表示显式白名单环境变量（plugin_script 预览执行用，避免泄漏宿主 token）。
 /// 抽取为 pub(crate) 以供 plugin_script::run_plugin_script 复用同一套轮询/超时/回收逻辑。
+///
+/// 修复 SCRIPT-02（high 并发）：超时分支此前仅 child.kill()（Windows TerminateProcess / Unix SIGKILL）
+/// 杀直接子进程，孙进程仍持有 stdout/stderr 管道写端，随后 wait_with_output() 永远读不到 EOF，
+/// 导致 run_plugin_script 命令线程永久挂起（前端 ScriptPreviewPanel 卡死，15s 兜底失效）。
+/// 修复：超时分支改用 stop_child_process 杀整个进程组（Unix kill -PGID / Windows taskkill /T），
+/// 让所有持有管道写端的子孙进程全部退出，wait_with_output 才能真正收到 EOF 返回。
 pub(crate) fn run_captured_inner(
     binary: &PathBuf,
     args: Vec<String>,
@@ -1297,6 +1447,23 @@ pub(crate) fn run_captured_inner(
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
     }
+    // 修复 SCRIPT-02：让子进程脱离父进程组（Unix setsid / Windows CREATE_NEW_PROCESS_GROUP），
+    // 这样 stop_child_process 杀进程组才能波及孙进程（孙进程跟随父进入新组）。
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            libc_setsid();
+            Ok(())
+        });
+    }
+    #[cfg(windows)]
+    {
+        // CREATE_NEW_PROCESS_GROUP (0x200)：子进程成为新进程组根，taskkill /T 递归杀整组。
+        // 叠加 CREATE_NO_WINDOW (0x0800_0000)：不弹控制台窗口。
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        WindowsCommandExt::creation_flags(&mut command, CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let started = Instant::now();
     loop {
@@ -1312,7 +1479,11 @@ pub(crate) fn run_captured_inner(
             });
         }
         if started.elapsed().as_millis() > timeout_ms as u128 {
-            let _ = child.kill();
+            // 修复 SCRIPT-02：杀整个进程组（含孙进程），释放管道写端，避免 wait_with_output 挂起。
+            // kill_child_tree 内部按 Unix kill -PGID / Windows taskkill /T 处理，不 wait 回收，
+            // 由随后的 wait_with_output 一次性回收 stdout/stderr + Child 句柄。
+            kill_child_tree(&child);
+            // 杀进程组后所有管道写端关闭，wait_with_output 必然返回（不会无限阻塞）。
             let output = child
                 .wait_with_output()
                 .map_err(|error| error.to_string())?;
@@ -1593,9 +1764,25 @@ fn build_history_summary(store: &AssistantStore, session_id: &str) -> Result<Str
                 }
             }
             (Some("output"), Some(p)) => {
+                // 修复 RUST-STREAM-01（medium 数据一致性）：此前 build_history_summary 对 output 事件
+                // 只取 payload.text，未按 payload.stream 过滤。spawn_reader 写入 transcript 时，
+                // stdout/stderr/thought/tool 四类都写成 event:"output" 且 payload 含 stream 字段。
+                // 该函数把所有 output 的 text 一律当作「【AI】回复」拼进摘要，导致：
+                // (1) codex/opencode 永远走伪多轮，其 stderr 的诊断/warning 被当成 AI 回复；
+                // (2) claude 降级为伪多轮时，思考内容（thought）和工具调用 JSON 片段（tool，含不完整
+                //     input_json_delta 如 `{"path":"b`）被当成 AI 回复，污染 LLM 上下文。
+                // 与前端 transcriptTextSinceLastInput 取 stream==='stdout' 对齐，仅 stdout 进【AI】，
+                // stderr 用【诊断】标签保留少量价值，thought/tool 不进摘要（claude 降级路径）。
+                let stream = p.get("stream").and_then(|x| x.as_str()).unwrap_or("stdout");
                 let text = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
-                if !text.trim().is_empty() {
-                    lines.push(format!("【AI】{text}"));
+                if text.trim().is_empty() {
+                    continue;
+                }
+                match stream {
+                    "stdout" => lines.push(format!("【AI】{text}")),
+                    "stderr" => lines.push(format!("【诊断】{text}")),
+                    // thought / tool / 其他流不进伪多轮历史摘要（避免思考原文与工具 JSON 污染）。
+                    _ => {}
                 }
             }
             _ => {}
@@ -1991,6 +2178,66 @@ mod tests {
         let summary = build_history_summary(&store, "s1").unwrap();
         assert!(summary.contains("【用户】做一个番茄钟"), "{summary}");
         assert!(summary.contains("【AI】已生成番茄钟插件"), "{summary}");
+    }
+
+    // 修复 RUST-STREAM-01（medium 数据一致性）：伪多轮历史摘要必须按 stream 过滤，
+    // 仅 stdout 进【AI】，stderr 进【诊断】，thought/tool 不进摘要（避免污染 LLM 上下文）。
+    #[test]
+    fn summary_filters_output_by_stream() {
+        let store = temp_assistant_store("summary-stream-filter");
+        store
+            .append_transcript("s4", "input", json!({ "prompt": "做番茄钟" }))
+            .unwrap();
+        // stdout 正文 → 进【AI】。
+        store
+            .append_transcript(
+                "s4",
+                "output",
+                json!({ "stream": "stdout", "text": "好的，已生成" }),
+            )
+            .unwrap();
+        // stderr 诊断 → 进【诊断】而非【AI】。
+        store
+            .append_transcript(
+                "s4",
+                "output",
+                json!({ "stream": "stderr", "text": "deprecation warning" }),
+            )
+            .unwrap();
+        // thought 思考原文 → 不进摘要。
+        store
+            .append_transcript(
+                "s4",
+                "output",
+                json!({ "stream": "thought", "text": "正在思考方案" }),
+            )
+            .unwrap();
+        // tool 工具调用 JSON 片段（含不完整 input_json_delta）→ 不进摘要。
+        store
+            .append_transcript(
+                "s4",
+                "output",
+                json!({ "stream": "tool", "text": "Read {\"path\":\"b" }),
+            )
+            .unwrap();
+        let summary = build_history_summary(&store, "s4").unwrap();
+        // stdout 进【AI】。
+        assert!(summary.contains("【AI】好的，已生成"), "{summary}");
+        // stderr 进【诊断】而非【AI】（不与正文混为同类）。
+        assert!(summary.contains("【诊断】deprecation warning"), "{summary}");
+        assert!(
+            !summary.contains("【AI】deprecation warning"),
+            "stderr 不应进【AI】：{summary}"
+        );
+        // thought / tool 不应进摘要（claude 降级伪多轮路径的污染源）。
+        assert!(
+            !summary.contains("正在思考方案"),
+            "thought 不应进伪多轮历史：{summary}"
+        );
+        assert!(
+            !summary.contains("Read {\"path\":\"b"),
+            "tool 片段不应进伪多轮历史：{summary}"
+        );
     }
 
     #[test]
@@ -2420,5 +2667,46 @@ mod tests {
             },
         );
         assert!(result.is_err(), "session 不存在应报错");
+    }
+
+    // 修复 RUSTSHIM-04（medium 逻辑 bug）：sandbox 内目录符号链接环不应导致栈溢出 panic。
+    // 修复前用 entry.metadata()（跟随符号链接）判定 is_dir，对指向祖先目录的符号链接
+    // 递归 collect_workspace_files 会沿符号链接无限深入，栈溢出 abort 整个 Tauri 进程。
+    // 修复后用 symlink_metadata（不跟随），符号链接被视为非目录直接跳过。
+    // 注：Unix 才支持创建符号链接；Windows 需要特殊权限/开发者模式，cfg 限制为 unix。
+    #[cfg(unix)]
+    #[test]
+    fn scan_does_not_stack_overflow_on_symlink_loop() {
+        use std::os::unix::fs::symlink;
+        let (state, sandbox) = state_with_sandbox("scan-symlink-loop");
+        std::fs::write(sandbox.join("manifest.json"), "{}").unwrap();
+        std::fs::create_dir_all(sandbox.join("realdir")).unwrap();
+        std::fs::write(sandbox.join("realdir").join("a.txt"), "a").unwrap();
+        // 创建指向祖先目录的符号链接（构成环：sandbox/loop -> sandbox）。
+        symlink(&sandbox, sandbox.join("loop")).unwrap();
+        // 创建指向自身的目录符号链接（最经典的环）。
+        symlink(
+            sandbox.join("self-loop"),
+            sandbox.join("self-loop-target"),
+        )
+        .ok(); // 可能因目标不存在而失败，不影响主断言
+
+        // 关键断言：scan 应正常返回（不栈溢出 panic），且符号链接本身被跳过。
+        let files = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "scan-1".to_string(),
+            },
+        )
+        .expect("符号链接环场景应正常扫描不栈溢出");
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        // manifest.json + realdir/a.txt 应被收集；符号链接目录不被递归。
+        assert!(paths.contains(&"manifest.json"), "应含 manifest.json");
+        assert!(paths.contains(&"realdir/a.txt"), "应含 realdir/a.txt");
+        // 符号链接目录不应进结果（symlink_metadata 判定为非普通文件，跳过）。
+        assert!(
+            !paths.iter().any(|p| p.starts_with("loop")),
+            "符号链接目录不应被递归扫描：{paths:?}"
+        );
     }
 }

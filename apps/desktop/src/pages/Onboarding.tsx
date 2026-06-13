@@ -71,13 +71,25 @@ export function Onboarding() {
   }
 
   if (session.onboarding === 'APPLICATION_REJECTED') {
+    // 修复 DESK-ONBOARD-01：CardDescription 此前文案承诺「或使用邀请码作为普通成员加入团队」，
+    // 但分支只渲染「重新提交管理员申请」表单，无任何邀请码输入框。两者承诺与能力不符 → 形成死路。
+    // 此处补上邀请码入口（与 NEEDS_INVITATION 分支共用 code state + redeem 函数，零新增后端依赖）。
     return (
       <Card className="w-full max-w-lg">
         <CardHeader><CardTitle>申请已驳回</CardTitle><CardDescription>{session.application?.reviewReason || '你可以重新提交申请，或使用邀请码作为普通成员加入团队。'}</CardDescription></CardHeader>
-        <CardContent className="space-y-3">
-          <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
-          <Textarea placeholder="重新申请说明" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <LoadingButton loading={loading} onClick={submitApplication}>重新提交团队管理员申请</LoadingButton>
+        <CardContent className="space-y-4">
+          {/* 重新提交团队管理员申请 */}
+          <div className="space-y-3">
+            <p className="text-xs font-medium text-muted-foreground">重新提交团队管理员申请</p>
+            <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+            <Textarea placeholder="重新申请说明" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <LoadingButton loading={loading} onClick={submitApplication}>重新提交团队管理员申请</LoadingButton>
+          </div>
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-xs font-medium text-muted-foreground">或使用邀请码作为普通成员加入团队</p>
+            <Input placeholder="团队邀请码，例如 LF-XXXXXXX" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+            <LoadingButton variant="outline" loading={loading} onClick={redeem}>加入团队</LoadingButton>
+          </div>
         </CardContent>
       </Card>
     );

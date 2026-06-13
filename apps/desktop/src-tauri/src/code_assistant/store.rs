@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -112,9 +113,20 @@ pub struct RegistryCleanupRecord {
     pub command_preview: Vec<String>,
 }
 
+// 修复 RUSTSHIM-01 / RUSTSHIM-03 / SPAWN-03 / RUST-STREAM-03（并发根因）：
+// 此前 AssistantStore 仅是 root: PathBuf 的 Clone 包装，无任何锁。upsert_session /
+// update_session_exit / set_cli_session_id / rename_session / touch_draft_updated_at /
+// append_transcript 全是非原子 read-modify-write（write_json 裸 fs::write 覆盖）。
+// 多线程并发（命令线程 + spawn_waiter 后台线程 + spawn_reader 后台线程 stdout/stderr
+// 双 reader）写同一 sessions.json / {id}.jsonl 会丢失更新甚至撕裂 JSONL 行。
+// 设计者对 processes HashMap 用了 Arc<Mutex>，却遗漏 store 文件写。
+// 修复策略：AssistantStore 内嵌 Mutex<()> 序列化所有 sessions.json 的读-改-写，
+// 并对 transcript 追加也走该锁（per-store 单写）；write_json 改为 tmp+rename 原子替换。
+// 因 AssistantStore 需 Clone（CodeAssistantState 持有副本语义），用 Arc<Mutex<()>> 共享。
 #[derive(Clone, Debug)]
 pub struct AssistantStore {
     root: PathBuf,
+    file_lock: Arc<Mutex<()>>,
 }
 
 impl AssistantStore {
@@ -122,7 +134,10 @@ impl AssistantStore {
         fs::create_dir_all(root.join("transcripts")).map_err(|error| error.to_string())?;
         // design §3.2.2：草稿分文件存（drafts/{id}.json），与 transcripts 同级。
         fs::create_dir_all(root.join("drafts")).map_err(|error| error.to_string())?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            file_lock: Arc::new(Mutex::new(())),
+        })
     }
 
     fn config_path(&self) -> PathBuf {
@@ -157,6 +172,9 @@ impl AssistantStore {
     }
 
     pub fn register_process(&self, process: RegisteredAgentProcess) -> Result<(), String> {
+        // 修复 RUSTSHIM-01：registry.json 同款非原子 RMW，并发更新丢失条目。
+        // 用 file_lock 序列化读-改-写（与 processes HashMap 的 Arc<Mutex> 同款锁策略）。
+        let _guard = self.file_lock.lock().unwrap();
         let mut registry = self.read_registry();
         registry
             .processes
@@ -169,6 +187,8 @@ impl AssistantStore {
     }
 
     pub fn unregister_process(&self, session_id: &str) -> Result<(), String> {
+        // 修复 RUSTSHIM-01：registry.json 的 RMW 必须串行化。
+        let _guard = self.file_lock.lock().unwrap();
         let mut registry = self.read_registry();
         registry
             .processes
@@ -177,6 +197,8 @@ impl AssistantStore {
     }
 
     pub fn cleanup_registered_processes(&self) -> Result<Vec<RegistryCleanupRecord>, String> {
+        // 修复 RUSTSHIM-01：扫 + 写 registry.json 整体在锁内，避免与 register/unregister 交叉。
+        let _guard = self.file_lock.lock().unwrap();
         let processes = self.list_registered_processes();
         if processes.is_empty() {
             return Ok(Vec::new());
@@ -237,6 +259,10 @@ impl AssistantStore {
     }
 
     pub fn upsert_session(&self, record: SessionRecord) -> Result<(), String> {
+        // 修复 RUSTSHIM-01 / RUST-STREAM-03：sessions.json 的读-改-写必须串行化，
+        // 否则 waiter 写 exit 状态会被 send_input 的 upsert(status=running) 覆盖，
+        // 导致会话卡 running、前端 activeExited 守卫据此阻止追问，多轮锁死。
+        let _guard = self.file_lock.lock().unwrap();
         let mut sessions = self.list_sessions();
         if let Some(existing) = sessions
             .iter_mut()
@@ -257,6 +283,9 @@ impl AssistantStore {
         exit_code: Option<i32>,
         ended_at: String,
     ) -> Result<(), String> {
+        // 修复 RUSTSHIM-01 / RUST-STREAM-03：update_session_exit 是退出终态，
+        // 必须在 file_lock 内执行，避免被 reader 线程的 set_cli_session_id 覆盖。
+        let _guard = self.file_lock.lock().unwrap();
         let mut sessions = self.list_sessions();
         if let Some(record) = sessions
             .iter_mut()
@@ -279,6 +308,9 @@ impl AssistantStore {
         if cli_session_id.trim().is_empty() {
             return Ok(());
         }
+        // 修复 RUSTSHIM-01 / RUST-STREAM-03：set_cli_session_id 由 reader 线程调用，
+        // 与 waiter 的 update_session_exit 跨线程写同一 sessions.json，无锁会丢失更新。
+        let _guard = self.file_lock.lock().unwrap();
         let mut sessions = self.list_sessions();
         if let Some(record) = sessions
             .iter_mut()
@@ -297,6 +329,8 @@ impl AssistantStore {
         title: &str,
         draft_updated_at: String,
     ) -> Result<SessionRecord, String> {
+        // 修复 RUSTSHIM-01：rename_session 也是 sessions.json 的 RMW，必须串行化。
+        let _guard = self.file_lock.lock().unwrap();
         let mut sessions = self.list_sessions();
         let record = sessions
             .iter_mut()
@@ -316,6 +350,8 @@ impl AssistantStore {
         session_id: &str,
         draft_updated_at: String,
     ) -> Result<(), String> {
+        // 修复 RUSTSHIM-01：touch_draft_updated_at 也是 sessions.json 的 RMW，必须串行化。
+        let _guard = self.file_lock.lock().unwrap();
         let mut sessions = self.list_sessions();
         let record = sessions
             .iter_mut()
@@ -331,6 +367,12 @@ impl AssistantStore {
         event: &str,
         payload: Value,
     ) -> Result<PathBuf, String> {
+        // 修复 SPAWN-03：append_transcript 用 OpenOptions::append + writeln! 写一行，无锁。
+        // spawn_and_attach 对同一 session 启动 stdout + stderr 两个 reader 线程，
+        // 并发写同一 {id}.jsonl，writeln! 经 write_all 拆多次 write() 会撕裂 JSONL 行。
+        // 用 file_lock 序列化追加（per-store 单写），与 sessions.json 共用同一把锁
+        // （粒度足够：写盘是微秒级，reader 主瓶颈是 read_line 解析）。
+        let _guard = self.file_lock.lock().unwrap();
         let path = self.transcript_path(session_id);
         let mut file = OpenOptions::new()
             .create(true)
@@ -377,12 +419,9 @@ impl AssistantStore {
     /// 写草稿（design §3.2.2）。复用 write_json 同款「建父目录 + 写」模式，
     /// 但写的是前端传入的 Value（保持前后端 PluginDraft schema 解耦）。
     pub fn write_draft(&self, session_id: &str, draft: &Value) -> Result<(), String> {
+        // 修复 RUSTSHIM-01：drafts/{id}.json 单文件写入用原子 tmp+rename（write_json_atomically）。
         let path = self.draft_path(session_id);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let raw = serde_json::to_string_pretty(draft).map_err(|error| error.to_string())?;
-        fs::write(path, raw).map_err(|error| error.to_string())
+        write_json_atomically(&path, draft)
     }
 
     /// 删除单个草稿文件（design §3.2.2）。文件不存在视为已删，忽略错误（幂等）。
@@ -395,6 +434,8 @@ impl AssistantStore {
     /// sessions.json 记录 + transcripts/{id}.jsonl + drafts/{id}.json。
     /// 后两处不存在不报错（幂等，允许半删状态收尾）。
     pub fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        // 修复 RUSTSHIM-01：delete_session 也是 sessions.json 的 RMW，必须串行化。
+        let _guard = self.file_lock.lock().unwrap();
         let mut sessions = self.list_sessions();
         sessions.retain(|item| item.session_id != session_id);
         sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));
@@ -487,12 +528,88 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_str(&raw).ok()
 }
 
+// 修复 RUSTSHIM-01：write_json 用裸 fs::write(path, raw)（open+truncate+write），
+// 并发交叉下读到半截内容会损坏 JSON。改成 tmp 文件全量写完后 rename 原子替换：
+// rename 在同文件系统内是 POSIX 原子语义，Windows MoveFileEx 也是原子替换。
+// 所有 write_json 调用都在 file_lock 内，原子替换是第二道防线（双保险）。
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
+    write_json_atomically(path, value)
+}
+
+/// 原子写 JSON：写到同目录临时文件，再 rename 替换目标。
+/// 同目录保证 tmp 与目标在同文件系统（rename 原子语义的前提）。
+/// tmp 文件名带 pid + 纳秒时间戳，避免并发写者互相覆盖 tmp。
+fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let parent = path.parent().ok_or_else(|| "目标路径无父目录".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let raw = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
-    fs::write(path, raw).map_err(|error| error.to_string())
+    let tmp_name = format!(
+        ".tmp-{}-{}-{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    let tmp_path = parent.join(&tmp_name);
+    // 写 tmp 文件：失败则清理 tmp 避免残留。
+    if let Err(error) = fs::write(&tmp_path, &raw) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error.to_string());
+    }
+    // 原子替换：rename 在 Unix 同文件系统内是原子操作；Windows 上 persist(true) 走 MoveFileEx。
+    if let Err(error) = persist_rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// 跨平台原子 rename（覆盖目标），返回字符串错误便于上层透传。
+/// Unix：fs::rename 在同文件系统内是 POSIX 原子语义，已覆盖目标。
+/// Windows：fs::rename 不覆盖已存在目标，需 MoveFileExW 带 MOVEFILE_REPLACE_EXISTING。
+fn persist_rename(from: &Path, to: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        fs::rename(from, to).map_err(|error| error.to_string())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        // MoveFileExW 带 MOVEFILE_REPLACE_EXISTING (0x1) + MOVEFILE_WRITE_THROUGH (0x8)。
+        const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+        const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+        let from_wide: Vec<u16> = from
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let to_wide: Vec<u16> = to
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        extern "system" {
+            fn MoveFileExW(
+                lpexistingfilename: *const u16,
+                lpnewfilename: *const u16,
+                dwflags: u32,
+            ) -> i32;
+        }
+        unsafe {
+            let ok = MoveFileExW(
+                from_wide.as_ptr(),
+                to_wide.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            );
+            if ok == 0 {
+                Err(std::io::Error::last_os_error().to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
