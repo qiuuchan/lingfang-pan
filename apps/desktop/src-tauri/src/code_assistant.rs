@@ -487,9 +487,8 @@ fn spawn_and_attach<E: AssistantEventSink>(
     let session_id = session.session_id.clone();
     let workspace_dir = session.workspace_dir.clone();
 
-    let mut command_builder = Command::new(&command.binary);
+    let mut command_builder = build_spawn_command(&command.binary, &args);
     command_builder
-        .args(&args)
         .current_dir(&workspace_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -873,9 +872,8 @@ pub(crate) fn run_captured_inner(
     timeout_ms: u64,
     env: Option<&[(std::ffi::OsString, std::ffi::OsString)]>,
 ) -> Result<CapturedOutput, String> {
-    let mut command = Command::new(binary);
+    let mut command = build_spawn_command(binary, &args);
     command
-        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -965,11 +963,24 @@ fn candidate_labels(candidates: &[ToolCommand]) -> Vec<String> {
         .collect()
 }
 
-/// 跨平台 PATH 探测候选二进制，Windows 自动补 .exe。
+/// 跨平台 PATH 探测候选二进制，Windows 优先补 .cmd/.bat（npm shim）再 .exe。
+/// npm 全局装的 claude/codex/opencode 是 .cmd 批处理 shim（非 .exe）；
+/// 无扩展名的同名文件是给 bash 的 shell 脚本，Rust 直接 spawn 会 os error 193，
+/// 故 Windows 上优先返回带 .cmd/.bat 扩展的可执行文件。
 /// pub(crate) 供 plugin_script::probe_script_runtime 复用（探测 node/py/python）。
 pub(crate) fn find_binary(candidate: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
+        #[cfg(windows)]
+        {
+            // Windows 优先 .cmd/.bat（npm shim），再 .exe
+            for ext in [".cmd", ".bat", ".exe"] {
+                let full = dir.join(format!("{candidate}{ext}"));
+                if full.is_file() {
+                    return Some(full);
+                }
+            }
+        }
         let full = dir.join(candidate);
         if full.is_file() {
             return Some(full);
@@ -983,6 +994,94 @@ pub(crate) fn find_binary(candidate: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// 构造子进程 Command。
+/// Windows 上 npm 全局 CLI（claude/codex/opencode）是 .cmd shim，其内容形如：
+///   "%dp0%\node_modules\...\xxx.exe" %*       （claude/opencode 直接 exe）
+///   "%_prog%" "%dp0%\node_modules\...\xxx.js" %* （codex 走 node）
+/// Rust 直接 spawn .cmd 会报 "batch file arguments are invalid"；走 cmd /C 则孙子进程
+/// stdout 不进入我们 piped 的 handle（Windows handle 继承缺陷）。
+/// 故解析 .cmd 提取真实可执行入口（exe 或 node+js），直接 spawn，彻底绕过 cmd.exe。
+pub(crate) fn build_spawn_command(binary: &std::path::Path, args: &[String]) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let is_batch = binary
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+            .unwrap_or(false);
+        if is_batch {
+            if let Some(resolved) = resolve_npm_shim(binary) {
+                let mut cmd = Command::new(&resolved.binary);
+                cmd.creation_flags(CREATE_NO_WINDOW).args(&resolved.prefix_args).args(args);
+                return cmd;
+            }
+            // 解析失败回退 cmd /C（至少能跑，但 stdout 可能丢）
+            let mut cmd = Command::new("cmd");
+            cmd.creation_flags(CREATE_NO_WINDOW).arg("/C").arg(binary).args(args);
+            return cmd;
+        }
+        let mut cmd = Command::new(binary);
+        cmd.creation_flags(CREATE_NO_WINDOW).args(args);
+        return cmd;
+    }
+    #[cfg(not(windows))]
+    {
+        let mut cmd = Command::new(binary);
+        cmd.args(args);
+        cmd
+    }
+}
+
+/// 解析 npm .cmd shim，提取其调用的真实命令。
+/// 匹配 `"...path..." %*` 模式，%dp0% 替换为 .cmd 所在目录；
+/// .exe 直接返回；.js/.mjs/.cjs 包装成 node 调用。
+struct ResolvedShim {
+    binary: PathBuf,
+    prefix_args: Vec<String>,
+}
+
+fn resolve_npm_shim(cmd_path: &std::path::Path) -> Option<ResolvedShim> {
+    let content = std::fs::read_to_string(cmd_path).ok()?;
+    let dp0 = cmd_path.parent()?;
+    // 找所有 "..." 形式的路径，取最后一个形如 node_modules/... 的（跳过 node.exe 本身的引用）
+    let mut target_path: Option<String> = None;
+    for cap in regex_lite_quotes(&content) {
+        if cap.contains("node_modules") && (cap.ends_with(".exe") || cap.ends_with(".js") || cap.ends_with(".mjs") || cap.ends_with(".cjs")) {
+            target_path = Some(cap);
+        }
+    }
+    let raw = target_path?;
+    let resolved = raw.replace("%dp0%", &dp0.to_string_lossy());
+    let path = PathBuf::from(&resolved);
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("exe") => Some(ResolvedShim { binary: path, prefix_args: vec![] }),
+        Some(ext) if ext == "js" || ext == "mjs" || ext == "cjs" => {
+            // .js 类：需要 node 执行
+            let node = find_binary("node")?;
+            Some(ResolvedShim { binary: node, prefix_args: vec![path.to_string_lossy().to_string()] })
+        }
+        _ => None,
+    }
+}
+
+/// 轻量提取双引号包裹的内容（避免引入 regex crate 依赖）。
+fn regex_lite_quotes(content: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = content.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '"' {
+            let mut buf = String::new();
+            for c2 in chars.by_ref() {
+                if c2 == '"' { break; }
+                buf.push(c2);
+            }
+            if !buf.is_empty() { out.push(buf); }
+        }
+    }
+    out
 }
 
 fn command_preview(binary: &std::path::Path, args: &[String]) -> Vec<String> {
@@ -1371,5 +1470,53 @@ mod tests {
         assert_eq!(session.status, "stopped");
         assert!(transcript.contains("stopped"));
         assert!(state.store.list_registered_processes().is_empty());
+    }
+
+    /// resolve_npm_shim 应从 claude/opencode 风格的 .cmd（直接调 .exe）提取真实 exe 路径。
+    /// 这是 Windows 上 npm 全局 CLI 的标准形态，Rust 直接 spawn .cmd 会丢孙子进程 stdout。
+    #[cfg(windows)]
+    #[test]
+    fn resolve_npm_shim_extracts_exe_from_cmd() {
+        let dir = std::env::temp_dir().join(format!("lf-shim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe_dir = dir.join("node_modules").join("fake-cli").join("bin");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::write(exe_dir.join("fake.exe"), "stub").unwrap();
+        let cmd_path = dir.join("fake.cmd");
+        std::fs::write(
+            &cmd_path,
+            "@ECHO off\nSETLOCAL\nCALL :find_dp0\n\"%dp0%\\node_modules\\fake-cli\\bin\\fake.exe\"   %*\n",
+        )
+        .unwrap();
+        let resolved = super::resolve_npm_shim(&cmd_path).expect("应解析出 shim 入口");
+        assert_eq!(resolved.binary, exe_dir.join("fake.exe"));
+        assert!(resolved.prefix_args.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// resolve_npm_shim 应从 codex 风格 .cmd（node + .js）包装成 node 调用。
+    #[cfg(windows)]
+    #[test]
+    fn resolve_npm_shim_wraps_js_with_node() {
+        let dir = std::env::temp_dir().join(format!("lf-shim-js-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let js_dir = dir.join("node_modules").join("fake-cli").join("bin");
+        std::fs::create_dir_all(&js_dir).unwrap();
+        std::fs::write(js_dir.join("fake.js"), "// js").unwrap();
+        let cmd_path = dir.join("fakejs.cmd");
+        std::fs::write(
+            &cmd_path,
+            "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" \"%dp0%\\node_modules\\fake-cli\\bin\\fake.js\" %*\n",
+        )
+        .unwrap();
+        let resolved = super::resolve_npm_shim(&cmd_path).expect("应解析出 node + js");
+        assert!(
+            resolved.binary.file_name().unwrap() == "node.exe" || resolved.binary.file_name().unwrap() == "node",
+            "应为 node，实际 {:?}",
+            resolved.binary
+        );
+        assert_eq!(resolved.prefix_args.len(), 1);
+        assert!(resolved.prefix_args[0].ends_with("fake.js"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

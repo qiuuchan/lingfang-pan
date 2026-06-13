@@ -60,7 +60,7 @@ export function Composer({
               停止
             </Button>
           ) : (
-            <Button onClick={onSend} disabled={!input.trim()}>
+            <Button onClick={() => onSend()} disabled={!input.trim()}>
               <SendIcon className="size-4" />
               发送
             </Button>
