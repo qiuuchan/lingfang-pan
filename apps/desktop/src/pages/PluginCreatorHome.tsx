@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PanelRightOpenIcon, SparklesIcon } from 'lucide-react';
+import { PanelRightOpenIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
 import {
@@ -31,9 +31,7 @@ import {
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
 import { Bubble } from '@/components/chat/Bubble';
 import { LiveProcess } from '@/components/chat/LiveProcess';
 import { Composer } from '@/components/creator/Composer';
@@ -44,6 +42,7 @@ export function PluginCreatorHome() {
   const [input, setInput] = useState('');
   const [provider, setProvider] = useState(PROVIDERS[0].id);
   const [model, setModel] = useState(PROVIDERS[0].models[0]);
+  const [providers, setProviders] = useState(PROVIDERS);
   const [streaming, setStreaming] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
@@ -62,7 +61,7 @@ export function PluginCreatorHome() {
   const [recent, setRecent] = useState<LoadedPlugin[]>(() => readRecent(session.tenantId));
   const chatRef = useRef<HTMLDivElement>(null);
 
-  const providerInfo = PROVIDERS.find((item) => item.id === provider) || PROVIDERS[0];
+  const providerInfo = providers.find((item) => item.id === provider) || providers[0];
   const turns = normalizeTurns(currentDraft?.turns);
   const files = currentDraft?.files || [];
   const manifest = useMemo(() => parseManifest(files), [files]);
@@ -71,6 +70,24 @@ export function PluginCreatorHome() {
   const activeContent = files.find((file) => file.path === activeFile)?.content || '';
   const hasConversation = turns.length > 0 || Boolean(pendingUser) || streaming || Boolean(liveError);
 
+  // 从后端拉取真实工具/模型列表，覆盖前端 fallback，避免前后端两份硬编码漂移。
+  useEffect(() => {
+    let cancelled = false;
+    tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean; models?: string[] }>>('code_assistant_list_tools')
+      .then((tools) => {
+        if (cancelled) return;
+        const mapped = tools
+          .filter((t) => t.available)
+          .map((t) => ({
+            id: String(t.tool),
+            label: String(t.display_name || t.tool),
+            models: Array.isArray(t.models) ? t.models.map(String) : [],
+          }));
+        if (mapped.length) setProviders(mapped);
+      })
+      .catch(() => { /* fallback 到 PROVIDERS */ });
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
   useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight }); }, [turns.length, liveEvents, pendingUser]);
   useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
@@ -220,13 +237,13 @@ export function PluginCreatorHome() {
     const selectedProvider = provider as ProviderId;
     pendingPromptRef.current = { text, providerLabel: providerInfo.label, model };
     try {
-      const prompt = `请基于这个需求创建一个 LingFang 插件草稿。请给出插件目标、核心交互、文件结构和关键实现建议。需求：${text}`;
+      const systemPrompt = '请基于以下需求创建一个 LingFang 插件草稿。请给出插件目标、核心交互、文件结构和关键实现建议。';
       const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
         input: {
           tool: selectedProvider,
           model: model === 'default' ? undefined : model,
-          workspaceDir: '/Users/littlesheep/Desktop/lingfang',
-          prompt,
+          prompt: text,
+          systemPrompt,
         },
       });
       assistantSessionIdRef.current = record.sessionId;
@@ -327,28 +344,25 @@ export function PluginCreatorHome() {
   }
 
   return (
-    <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
-      <div className="flex min-h-[calc(100vh-3rem)] items-center justify-center bg-background px-4 py-6">
-        <main className="w-full max-w-4xl">
-          <Card className="min-h-[calc(100vh-7rem)] border-primary/10 bg-card/95 shadow-xl shadow-primary/5">
-            <CardHeader className="border-b px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                  <SparklesIcon className="size-4 shrink-0 text-primary" />
-                  <span className="truncate">今天想创建什么插件？</span>
-                  {status && <Badge variant={status === 'ready' ? 'default' : status === 'invalid' ? 'destructive' : 'secondary'}>{STATUS_LABEL[status] || status}</Badge>}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={newDraft}>新对话</Button>
-                  <SheetTrigger render={<Button variant="outline" size="sm" />}>
-                    <PanelRightOpenIcon className="size-4" /> 详情
-                  </SheetTrigger>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="flex min-h-[calc(100vh-12rem)] flex-col p-0">
+    <div className="flex h-full">
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b pl-16 pr-4 py-3">
+          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+            <SparklesIcon className="size-4 shrink-0 text-primary" />
+            <span className="truncate">插件创建</span>
+            {status && <Badge variant={status === 'ready' ? 'default' : status === 'invalid' ? 'destructive' : 'secondary'}>{STATUS_LABEL[status] || status}</Badge>}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={newDraft}>新对话</Button>
+            <Button variant="outline" size="sm" onClick={() => setDetailsOpen(true)}>
+              <PanelRightOpenIcon className="size-4" /> 详情
+            </Button>
+          </div>
+        </div>
+        <div ref={chatRef} className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto h-full max-w-3xl px-4 py-6">
           {!hasConversation ? (
-            <div className="flex flex-1 flex-col justify-center px-4 py-8 text-center md:px-8">
+            <div className="flex h-full flex-col justify-center text-center">
               <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">今天想创建什么插件？</h1>
               <div className="mx-auto mt-8 grid w-full max-w-2xl gap-2">
                 {EXAMPLES.map((example) => (
@@ -359,57 +373,67 @@ export function PluginCreatorHome() {
               </div>
             </div>
           ) : (
-            <ScrollArea className="min-h-0 flex-1 px-4 py-4 md:px-6">
-              <div ref={chatRef} className="flex min-h-[52vh] flex-col gap-4">
-                {turns.map((turn, index) => <Bubble key={index} role={turn.role} content={turn.content} />)}
-                {pendingUser && <Bubble role="user" content={pendingUser} />}
-                {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
-                {!streaming && liveError && <Bubble role="assistant" content={liveError} error />}
-              </div>
-            </ScrollArea>
+            <div className="flex flex-col gap-4">
+              {turns.map((turn, index) => <Bubble key={index} role={turn.role} content={turn.content} />)}
+              {pendingUser && <Bubble role="user" content={pendingUser} />}
+              {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
+              {!streaming && liveError && <Bubble role="assistant" content={liveError} error />}
+            </div>
           )}
+          </div>
+        </div>
 
-          <Composer
-            input={input}
-            model={model}
-            provider={provider}
-            providerInfo={providerInfo}
-            streaming={streaming}
-            onInputChange={setInput}
-            onModelChange={setModel}
-            onProviderChange={setProvider}
-            onSend={send}
-            onStop={stopCurrentSession}
-          />
-            </CardContent>
-          </Card>
-        </main>
+        <div className="shrink-0 border-t bg-background px-4 py-3">
+          <div className="mx-auto max-w-3xl">
+            <Composer
+              input={input}
+              model={model}
+              provider={provider}
+              providerInfo={providerInfo}
+              providers={providers}
+              streaming={streaming}
+              onInputChange={setInput}
+              onModelChange={setModel}
+              onProviderChange={setProvider}
+              onSend={send}
+              onStop={stopCurrentSession}
+            />
+          </div>
+        </div>
       </div>
 
-      <SheetContent className="flex flex-col p-0" side="right">
-        <SheetHeader className="border-b p-4">
-          <SheetTitle>插件创建详情</SheetTitle>
-        </SheetHeader>
-        <DetailsPanel
-          assistantSession={assistantSession}
-          status={status}
-          files={files}
-          diagnostics={diagnostics}
-          activeFile={activeFile}
-          activeContent={activeContent}
-          previewKey={previewKey}
-          cloudPlugin={cloudPlugin}
-          recent={recent}
-          uploading={uploading}
-          submitting={submitting}
-          onActiveFileChange={setActiveFile}
-          onRefreshPreview={() => setPreviewKey((key) => key + 1)}
-          onUpload={uploadCloud}
-          onSubmitMarketplace={submitMarketplace}
-          onRun={() => cloudPlugin && runPlugin(cloudPlugin)}
-          onRunRecent={runPlugin}
-        />
-      </SheetContent>
-    </Sheet>
+      <aside className={cn(
+        'flex h-full shrink-0 flex-col border-l bg-card transition-all duration-200 overflow-hidden',
+        detailsOpen ? 'w-[420px]' : 'w-0',
+      )}>
+        <div className="flex h-full w-[420px] flex-col">
+          <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+            <span className="text-sm font-medium">插件创建详情</span>
+            <Button variant="ghost" size="icon" className="size-7" onClick={() => setDetailsOpen(false)}>
+              <XIcon className="size-4" />
+            </Button>
+          </div>
+          <DetailsPanel
+            assistantSession={assistantSession}
+            status={status}
+            files={files}
+            diagnostics={diagnostics}
+            activeFile={activeFile}
+            activeContent={activeContent}
+            previewKey={previewKey}
+            cloudPlugin={cloudPlugin}
+            recent={recent}
+            uploading={uploading}
+            submitting={submitting}
+            onActiveFileChange={setActiveFile}
+            onRefreshPreview={() => setPreviewKey((key) => key + 1)}
+            onUpload={uploadCloud}
+            onSubmitMarketplace={submitMarketplace}
+            onRun={() => cloudPlugin && runPlugin(cloudPlugin)}
+            onRunRecent={runPlugin}
+          />
+        </div>
+      </aside>
+    </div>
   );
 }

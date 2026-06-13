@@ -1,4 +1,5 @@
 const BACKEND_URL_STORAGE_KEY = 'lf:backendUrl';
+const AUTH_TOKEN_STORAGE_KEY = 'lf:authToken';
 let apiBaseUrl = '';
 
 const trimTrailingSlash = (url: string) => url.replace(/\/+$/, '');
@@ -85,9 +86,24 @@ export async function testBackendUrl(url: string): Promise<void> {
 let authToken: string | null = null;
 export function setAuthToken(t: string | null) {
   authToken = t;
+  try {
+    if (t) localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, t);
+    else localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    /* localStorage 不可用则只更新当前会话 */
+  }
 }
 export function getAuthToken() {
   return authToken;
+}
+export function initAuthToken(): string | null {
+  try {
+    const stored = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (stored) authToken = stored;
+    return authToken;
+  } catch {
+    return null;
+  }
 }
 
 // Tauri 命令调用（桌面环境注入 __TAURI__，需 tauri.conf.json 开 withGlobalTauri）。

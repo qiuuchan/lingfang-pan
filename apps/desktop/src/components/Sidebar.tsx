@@ -44,7 +44,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   return <div className="flex items-start justify-between gap-3 text-xs"><span className="shrink-0 text-muted-foreground">{label}</span><span className="break-all text-right font-mono text-popover-foreground">{value}</span></div>;
 }
 
-export function Sidebar() {
+export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const { session, view, setView, setRunningPlugin, resetSession } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
   const [open, setOpen] = useState(false);
@@ -56,12 +56,15 @@ export function Sidebar() {
   useEffect(() => { setTenantOpen(false); }, [session.tenantId]);
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r bg-card">
-      <div className="flex items-center gap-2 border-b px-4 py-3.5">
+    <aside className={cn(
+      'flex shrink-0 flex-col border-r bg-card transition-all duration-200 overflow-hidden',
+      collapsed ? 'w-0' : 'w-56',
+    )}>
+      <div className="flex w-56 items-center gap-2 border-b px-4 py-3.5">
         <HomeIcon className="size-5 text-primary" />
         <span className="text-sm font-semibold leading-tight">LingFang<br /><span className="text-xs font-normal text-muted-foreground">协作平台前台</span></span>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2.5">
+      <nav className="flex w-56 flex-1 flex-col gap-1 overflow-y-auto p-2.5">
         {items.map(({ v, label, icon: Icon }) => {
           const active = view === v;
           return (
@@ -76,7 +79,7 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="border-t p-2.5">
+      <div className="w-56 border-t p-2.5">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full justify-start gap-2 px-3 py-2')}>
             <UserRoundIcon className="size-4 shrink-0" />

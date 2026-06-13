@@ -151,6 +151,8 @@ pub struct StartSessionInput {
     #[serde(alias = "workspaceDir")]
     pub workspace_dir: Option<String>,
     pub prompt: String,
+    #[serde(alias = "systemPrompt")]
+    pub system_prompt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,7 +281,11 @@ pub fn start_session<E: AssistantEventSink>(
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
     let workspace_dir = resolve_workspace(input.workspace_dir)?;
     let session_id = new_session_id(input.tool);
-    let args = command.args_with(definition.run_args(&input.prompt, input.model.as_deref()));
+    let final_prompt = match input.system_prompt.as_deref() {
+        Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n---\n\n{}", input.prompt),
+        _ => input.prompt.clone(),
+    };
+    let args = command.args_with(definition.run_args(&final_prompt, input.model.as_deref()));
     let command_preview = command_preview(&command.binary, &args);
     let transcript_path = state.store.transcript_path(&session_id);
     let started_at = now_string();
@@ -363,11 +369,16 @@ pub fn start_session<E: AssistantEventSink>(
         json!({ "sessionId": session_id, "pid": pid, "record": record }),
     );
 
+    let output_format = match input.tool {
+        CodeAssistantTool::Claude => OutputFormat::StreamJson,
+        _ => OutputFormat::Plain,
+    };
     spawn_reader(
         app.clone(),
         state.clone(),
         session_id.clone(),
         "stdout",
+        output_format,
         stdout,
     );
     spawn_reader(
@@ -375,6 +386,7 @@ pub fn start_session<E: AssistantEventSink>(
         state.clone(),
         session_id.clone(),
         "stderr",
+        OutputFormat::Plain,
         stderr,
     );
     spawn_waiter(app, state, session_id, child);
@@ -528,11 +540,43 @@ fn run_once(
     })
 }
 
+#[derive(Clone, Copy)]
+enum OutputFormat {
+    Plain,
+    StreamJson,
+}
+
+/// 解析 claude stream-json 的一行，提取 assistant 文本片段；非 assistant 行返回 None。
+fn extract_stream_json_text(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if value.get("type").and_then(|v| v.as_str()) != Some("assistant") {
+        return None;
+    }
+    let content = value.get("message")?.get("content")?.as_array()?;
+    let text: String = content
+        .iter()
+        .filter_map(|item| {
+            if item.get("type").and_then(|v| v.as_str()) == Some("text") {
+                item.get("text").and_then(|v| v.as_str()).map(String::from)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
 fn spawn_reader<E: AssistantEventSink>(
     app: E,
     state: CodeAssistantState,
     session_id: String,
     stream: &'static str,
+    output_format: OutputFormat,
     pipe: Option<impl std::io::Read + Send + 'static>,
 ) {
     if let Some(pipe) = pipe {
@@ -544,7 +588,13 @@ fn spawn_reader<E: AssistantEventSink>(
                 match std::io::BufRead::read_line(&mut reader, &mut buffer) {
                     Ok(0) => break,
                     Ok(_) => {
-                        let text = buffer.clone();
+                        let text = match output_format {
+                            OutputFormat::StreamJson => match extract_stream_json_text(&buffer) {
+                                Some(extracted) => extracted,
+                                None => continue,
+                            },
+                            OutputFormat::Plain => buffer.clone(),
+                        };
                         let _ = state.store.append_transcript(
                             &session_id,
                             "output",
