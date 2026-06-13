@@ -28,8 +28,8 @@ export function SessionStatusPanel({ session }: { session: AssistantSessionState
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div className="grid grid-cols-2 gap-2">
-          <Info label="状态" value={statusLabel[session.status] || session.status} />
-          <Info label="退出码" value={session.exitCode === undefined ? '运行中' : session.exitCode === null ? '无' : String(session.exitCode)} />
+          <Info label="状态" value={statusLabel[session.status] || session.status} truncate />
+          <Info label="退出码" value={session.exitCode === undefined ? '运行中' : session.exitCode === null ? '无' : String(session.exitCode)} truncate />
           <Info label="PID" value={session.pid ? String(session.pid) : '未返回'} />
           <Info label="Transcript" value={session.transcriptPath || '未返回'} />
         </div>
@@ -43,8 +43,8 @@ export function SessionStatusPanel({ session }: { session: AssistantSessionState
         </div>
         {(session.stdout || session.stderr) && (
           <div className="space-y-2">
-            {session.stdout && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-2 font-mono text-xs">{session.stdout}</pre>}
-            {session.stderr && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 p-2 font-mono text-xs text-amber-900">{session.stderr}</pre>}
+            {session.stdout && <pre className="scrollbar-thin max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-2 font-mono text-xs">{session.stdout}</pre>}
+            {session.stderr && <pre className="scrollbar-thin max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 p-2 font-mono text-xs text-amber-900">{session.stderr}</pre>}
           </div>
         )}
       </CardContent>

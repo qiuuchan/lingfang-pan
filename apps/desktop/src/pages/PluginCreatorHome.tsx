@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { PanelRightOpenIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
+import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import { PLUGIN_CREATOR_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
+import { toCreatorError, toUploadError, type CreatorError } from '@/lib/creator-error';
 import {
   EXAMPLES,
   PROVIDERS,
@@ -34,6 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Bubble } from '@/components/chat/Bubble';
+import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { LiveProcess } from '@/components/chat/LiveProcess';
 import { Composer } from '@/components/creator/Composer';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
@@ -49,7 +51,7 @@ export function PluginCreatorHome() {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<TranscriptEvent[]>([]);
   const [liveStage, setLiveStage] = useState('');
-  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<CreatorError | null>(null);
   const [assistantSession, setAssistantSession] = useState<AssistantSessionState | null>(null);
   const assistantSessionRef = useRef<AssistantSessionState | null>(null);
   const assistantSessionIdRef = useRef<string | null>(null);
@@ -140,7 +142,7 @@ export function PluginCreatorHome() {
           if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
           const message = payload.error || '本地代码助手输出异常';
           setAssistantSession((prev) => prev ? { ...prev, status: 'failed', diagnostics: [...prev.diagnostics, message] } : prev);
-          setLiveError(message);
+          setLiveError(toCreatorError('cli_session_error', new Error(message)));
         }));
         unlisteners.push(await tauriListen<SessionExitPayload>('code-assistant://exit', ({ payload }) => {
           if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
@@ -205,9 +207,9 @@ export function PluginCreatorHome() {
         toast.error('本地代码助手未成功完成，请查看右侧诊断');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveError(`读取 transcript 失败：${message}`);
-      toast.error(message);
+      const creatorError = toCreatorError('transcript_failed', error);
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     } finally {
       setStreaming(false);
       setLiveStage('');
@@ -224,8 +226,13 @@ export function PluginCreatorHome() {
     });
   }
 
-  async function send() {
-    const text = input.trim();
+  // 最近一次发起的 prompt 快照，错误后不清空，供 ErrorBubble 的「重试」复用。
+  const lastPromptRef = useRef<string | null>(null);
+
+  // 发起一轮对话。overrideText 用于「重试」场景复用上一次 prompt
+  // （send 出错时 input 已清空，重试不能用空 input）。
+  async function send(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
     if (!text || streaming) return;
     setInput('');
     setPendingUser(text);
@@ -237,6 +244,7 @@ export function PluginCreatorHome() {
     setCurrentDraft(null);
     const selectedProvider = provider as ProviderId;
     pendingPromptRef.current = { text, providerLabel: providerInfo.label, model };
+    lastPromptRef.current = text;
     try {
       const systemPrompt = PLUGIN_CREATOR_SYSTEM_PROMPT;
       const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
@@ -267,9 +275,9 @@ export function PluginCreatorHome() {
       setLiveStage('本地代码助手已启动，等待输出…');
       setDetailsOpen(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveError(`生成失败：${message}`);
-      toast.error(message);
+      const creatorError = toCreatorError('cli_start_failed', error);
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
       setStreaming(false);
       setLiveStage('');
       pendingPromptRef.current = null;
@@ -285,9 +293,9 @@ export function PluginCreatorHome() {
     try {
       await tauriInvoke('code_assistant_stop_session', { input: { sessionId } });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveError(`停止失败：${message}`);
-      toast.error(message);
+      const creatorError = toCreatorError('session_op_failed', error);
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     }
   }
 
@@ -304,7 +312,10 @@ export function PluginCreatorHome() {
       pushRecent(plugin);
       toast.success(result.deduplicated ? '团队云端已有相同插件' : '已上传到团队云端共享');
     } catch (error) {
-      toast.error((error as ApiError).message);
+      const creatorError = toUploadError(error, 'upload');
+      // toast 用友好标题作瞬时反馈；同时 push 进 liveError 对话气泡可回看（AC6 双通道）。
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     } finally {
       setUploading(false);
     }
@@ -320,7 +331,9 @@ export function PluginCreatorHome() {
       pushRecent(plugin);
       toast.success('已提交公共市场审核');
     } catch (error) {
-      toast.error((error as ApiError).message);
+      const creatorError = toUploadError(error, 'submit');
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     } finally {
       setSubmitting(false);
     }
@@ -342,11 +355,13 @@ export function PluginCreatorHome() {
     assistantSessionRef.current = null;
     assistantSessionIdRef.current = null;
     pendingPromptRef.current = null;
+    lastPromptRef.current = null;
   }
 
   return (
     <div className="flex h-full">
       <div className="flex h-full min-w-0 flex-1 flex-col">
+        {/* pl-16 为 Sidebar 折叠态悬浮触发区避让，非视觉对称是有意为之。 */}
         <div className="flex shrink-0 items-center justify-between gap-3 border-b pl-16 pr-4 py-3">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <SparklesIcon className="size-4 shrink-0 text-primary" />
@@ -378,7 +393,7 @@ export function PluginCreatorHome() {
               {turns.map((turn, index) => <Bubble key={index} role={turn.role} content={turn.content} />)}
               {pendingUser && <Bubble role="user" content={pendingUser} />}
               {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
-              {!streaming && liveError && <Bubble role="assistant" content={liveError} error />}
+              {!streaming && liveError && <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined} />}
             </div>
           )}
           </div>
@@ -405,9 +420,9 @@ export function PluginCreatorHome() {
 
       <aside className={cn(
         'flex h-full shrink-0 flex-col border-l bg-card transition-all duration-200 overflow-hidden',
-        detailsOpen ? 'w-[420px]' : 'w-0',
+        detailsOpen ? 'w-full md:w-[420px] z-20' : 'w-0',
       )}>
-        <div className="flex h-full w-[420px] flex-col">
+        <div className="flex h-full w-full md:w-[420px] flex-col">
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-medium">插件创建详情</span>
             <Button variant="ghost" size="icon" className="size-7" onClick={() => setDetailsOpen(false)}>
