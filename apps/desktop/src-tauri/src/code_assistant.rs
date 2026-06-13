@@ -203,6 +203,10 @@ pub struct SendInputInput {
     #[serde(alias = "sessionId")]
     pub session_id: String,
     pub input: String,
+    // 追问时可选的模型覆盖：传则优先于 session 首轮固化值，实现「会话内切模型下一轮生效」。
+    // 对齐 AionUi「会话级记忆 + 切换立即下一轮生效」语义；claude 走 --resume <id> --model <current>，
+    // 官方支持 per-invocation 覆盖（code.claude.com/docs/en/cli-reference）。
+    pub model: Option<String>,
 }
 
 pub fn list_tools() -> Vec<ToolAvailability> {
@@ -436,9 +440,12 @@ pub fn send_input<E: AssistantEventSink>(
             (composed, None)
         }
     };
+    // 模型覆盖（design §3.3.4 会话内切模型）：追问传入的 model 优先，回退 session 首轮固化值。
+    // 传入非空时同时回写到 next_session.model（记忆最后选择，关闭重开仍用切后的模型，对齐 AionUi）。
+    let effective_model = input.model.as_deref().or(session.model.as_deref());
     let args = command.args_with(definition.run_args(
         &final_prompt,
-        session.model.as_deref(),
+        effective_model,
         resume_id.as_deref(),
     ));
 
@@ -449,6 +456,10 @@ pub fn send_input<E: AssistantEventSink>(
     next_session.pid = None;
     next_session.exit_code = None;
     next_session.ended_at = None;
+    // 若用户本轮切换了模型，回写到 session 记录（关闭重开会话仍记住最后用的模型）。
+    if input.model.is_some() {
+        next_session.model = input.model.clone();
+    }
     state.store.upsert_session(next_session.clone())?;
     // 若 claude 因缺 id 降级为伪多轮，在 transcript 留痕（前端可据此提示降级语义）。
     if claude_missing_id {
