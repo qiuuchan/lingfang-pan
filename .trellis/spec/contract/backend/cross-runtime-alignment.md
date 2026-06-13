@@ -10,6 +10,8 @@ Reference docs:
 
 ## Server Alignment
 
+> ⚠️ **已迁移（2026-06-13）**：原 Rust 后端 apps/server 已删除，以下对齐职责全部迁移到 NestJS apps/collab-api。改契约时改为核对对应 collab-api 模块：身份与角色 `apps/collab-api/src/modules/auth.*`，草稿与发布 `apps/collab-api/src/modules/plugin.service.ts`/`plugins.controller.ts`，LLM 绑定与审计 `apps/collab-api/src/modules/plugins.controller.ts`，市场与钱包 `apps/collab-api/src/modules/marketplace.*`/`wallet.controller.ts`。下方保留原 server 路径仅作历史参考。
+
 Rust does not import the TS package, so alignment is manual. When changing a contract, inspect matching server code:
 
 - identity and roles: `apps/server/src/auth.rs`, `apps/server/src/routes/auth.rs`

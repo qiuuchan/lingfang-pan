@@ -1,5 +1,7 @@
 # server 后端规范
 
+> ⚠️ **已废弃（2026-06-13）**：本目录描述的 Rust 后端 apps/server 已删除，后端能力统一由 NestJS apps/collab-api 提供（见 .trellis/spec/lingfang-desktop 或 docs/collab-api.md）。以下内容保留为历史设计参考，不再作为实现依据。
+
 ## Scope
 
 适用于 `apps/server/`：Rust + axum + sqlx + SQLite 的多租户服务端。它负责身份、租户、草稿生成、发布、市场、钱包、LLM 网关和审计。

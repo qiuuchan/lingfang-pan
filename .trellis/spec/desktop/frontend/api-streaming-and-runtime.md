@@ -74,7 +74,7 @@ Do not swallow new backend errors or convert them to fake success states. Surfac
 - `done` returns the full `PluginDraft`
 - `error` throws an `Error` with `code`
 
-When changing the backend stream contract, update `apps/desktop/src/lib/stream.ts` and `apps/server/src/routes/drafts.rs` together.
+When changing the backend stream contract, update `apps/desktop/src/lib/stream.ts` and `apps/collab-api/src/modules/plugins.controller.ts` (SSE 生成端点，已由 apps/server 迁移至 apps/collab-api) together.
 
 ## Plugin Preview And Runtime
 
@@ -92,7 +92,7 @@ Reference files:
 - `apps/desktop/src/pages/Generator.tsx`
 - `apps/desktop/src/pages/Plugins.tsx`
 - `apps/desktop/src-tauri/src/capability.rs`
-- `apps/server/src/routes/llm.rs`
+- `apps/collab-api/src/modules/plugins.controller.ts` (LLM 代理 `/llm/proxy`，已由 apps/server 迁移至 apps/collab-api)
 
 ## Scenario: Plugin Iframe Runtime Bridge
 

@@ -20,29 +20,27 @@ graph TB
         Audit["审计日志"]
     end
 
-    subgraph APIs["后端 API"]
-        Server["Rust 服务 axum + SQLite 端口 8787"]
-        Collab["NestJS 协作 API Prisma + PostgreSQL 端口 3000"]
+    subgraph API["统一后端 collab-api（NestJS + Prisma）端口 3000，/api 前缀"]
+        PluginsApi["插件生成 / LLM 代理 / 市场 / 钱包"]
+        TenantApi["多租户团队 / RBAC / 管理后台"]
     end
 
     subgraph Store["存储"]
-        SQLite[("SQLite 插件数据库")]
-        PG[("PostgreSQL 协作数据库")]
+        PG[("PostgreSQL")]
     end
 
-    Desktop --> Server
-    Desktop --> Collab
-    Admin --> Collab
-    Server --> SQLite
-    Collab --> PG
+    Desktop --> API
+    Admin --> API
+    API --> PG
 ```
 
-**两套独立系统，一个平台：**
+**单后端、一个平台：**
 
-| 系统 | 技术栈 | 数据库 | 职责 |
+| 子系统 | 技术栈 | 数据库 | 职责 |
 |------|--------|--------|------|
-| AI 插件引擎 | Rust + axum | SQLite（内嵌） | 插件生成、LLM 代理、市场、钱包 |
-| 协作平台 | NestJS + Prisma | PostgreSQL | 多租户团队、RBAC、管理后台 |
+| collab-api | NestJS 11 + Prisma 7 | PostgreSQL | 插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台 |
+| desktop | Tauri 2 + React | —（经 collab-api） | 桌面端 UI、内置插件、本地命令（list_plugins / code_assistant_*） |
+| collab-admin | React + shadcn/ui | —（经 collab-api） | 用户、团队、插件、审批、审计的 Web 管理后台 |
 
 ## 功能
 
@@ -61,31 +59,34 @@ graph TB
 ### 前置条件
 
 ```bash
-cargo >= 1.80        # Rust 工具链
+Node.js >= 20        # 前端与 collab-api
 pnpm >= 9            # Node 包管理器
-Node.js >= 20        # 协作平台需要
+PostgreSQL >= 16     # 统一数据库（lingfang_collab 库）
+cargo >= 1.80        # Rust 工具链，用于构建 Tauri 桌面壳（非后端依赖）
 ```
 
-### AI 插件引擎（一键启动，无需 Docker）
+### 一键启动（collab-api + 桌面壳）
 
 ```bash
 pnpm install
 pnpm start
 ```
 
-- 后端：`http://127.0.0.1:8787`
-- 桌面端自动启动为原生窗口
-- 首次运行自动创建 SQLite 数据库
+`pnpm start`（tools/start.ps1）依次：校验 `.env` → 检查 PostgreSQL 连通 → `prisma migrate deploy` + 建平台管理员 → 启动 collab-api（:3000）→ 等待 `/api/health` → 启动桌面壳（Tauri）。
 
-### 协作平台
+- 后端：`http://localhost:3000`，Swagger：`http://localhost:3000/api/docs`
+- 桌面端自动启动为原生窗口，首次进入登录页（后端地址填 `http://127.0.0.1:3000`）
+- 平台管理员：`admin@example.com` / `ChangeMe123!`
+
+### 协作平台（分步启动 / 管理端）
 
 ```bash
-# 本地开发
+# 后端（等价于 pnpm start 的核心步骤，单独开发时）
 pnpm install
 cp apps/collab-api/.env.example apps/collab-api/.env
-pnpm -C apps/collab-api db:setup
-pnpm -C apps/collab-api dev          # API → :3000
-VITE_COLLAB_API_BASE=http://localhost:3000 pnpm -C apps/collab-admin dev  # 管理端 → :4174
+pnpm -C apps/collab-api db:setup       # prisma generate + migrate deploy + 建管理员
+pnpm -C apps/collab-api dev            # collab-api → :3000
+pnpm -C apps/collab-admin dev          # 管理端 → :4174
 
 # Docker 部署
 docker compose -f docker-compose.collab.yml up -d
@@ -93,9 +94,9 @@ docker compose -f docker-compose.collab.yml up -d
 
 | 地址 | 说明 |
 |------|------|
-| `http://localhost:3000` | 协作 API |
+| `http://localhost:3000` | collab-api（统一后端） |
 | `http://localhost:3000/api/docs` | Swagger 文档 |
-| `http://localhost:4174` | 管理后台 |
+| `http://localhost:4174` | 管理后台（collab-admin） |
 
 ## 项目结构
 
@@ -104,12 +105,10 @@ lingfang/
 ├── apps/
 │   ├── desktop/          Tauri 2 + React 桌面客户端
 │   │   ├── src/                  UI 页面、组件、API 层
-│   │   ├── src-tauri/            Rust 能力网关
+│   │   ├── src-tauri/            Rust 桌面壳（本地命令 list_plugins / code_assistant_*）
 │   │   └── builtin-plugins/      内置插件
-│   ├── server/           Rust 后端（axum + SQLite）
-│   │   ├── src/routes/           认证、草稿、市场、钱包、LLM
-│   │   └── migrations/           SQLite 迁移
-│   ├── collab-api/       NestJS 协作 API（Prisma + PostgreSQL）
+│   ├── collab-api/       NestJS 统一后端（Prisma + PostgreSQL :3000）
+│   │   ├── src/modules/          插件、团队、市场、钱包、管理、鉴权
 │   │   └── prisma/               数据模型、迁移、种子
 │   └── collab-admin/     Web 管理后台（React + shadcn/ui）
 │       └── src/components/       用户、团队、插件、审批、审计
@@ -120,22 +119,22 @@ lingfang/
 ├── plugins/
 │   └── summarizer/       示例插件：LLM 文本摘要
 ├── docs/                 架构文档、API 文档、ADR
-├── tools/                启动脚本、Logo 生成器
+├── tools/                启动脚本、分发脚本、Logo 生成器
 └── docker-compose*.yml   Docker 部署配置
 ```
 
 ## 配置
 
-所有环境变量均有本地开发默认值，详见 `.env.example` 和 `.env.collab.example`。
+所有环境变量均有本地开发默认值，详见 `apps/collab-api/.env.example`。
 
 | 变量 | 默认值 | 作用域 |
 |------|--------|--------|
-| `BIND_ADDR` | `127.0.0.1:8787` | Rust 服务 |
-| `DATABASE_URL` | `sqlite:lingfang.db` | Rust 服务 |
-| `DATABASE_URL` | `postgresql://...` | 协作 API |
-| `JWT_SECRET` | 开发占位值 | 全部 |
+| `PORT` | `3000` | collab-api 监听端口 |
+| `DATABASE_URL` | `postgresql://lingfang:lingfang@localhost:5432/lingfang_collab` | collab-api（PostgreSQL） |
+| `JWT_SECRET` | 开发占位值 | collab-api 鉴权 |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4174,http://localhost:1420,tauri://localhost` | collab-api 跨域 |
 
-部署到局域网或公网时，设置 `BIND_ADDR=0.0.0.0:8787` 并配置 `CORS_ALLOWED_ORIGINS`。
+部署到局域网或公网时，设置 `PORT` 与 `CORS_ALLOWED_ORIGINS`（例如 `https://desktop.example.com`），数据库与反向代理详见 `docs/collab-deployment.md`。
 
 ## 文档
 
@@ -153,16 +152,16 @@ lingfang/
 ## 验证
 
 ```bash
-cargo test -p server              # Rust 单元测试
 pnpm -C apps/desktop typecheck    # 桌面端类型检查
 pnpm -C apps/collab-api typecheck # API 类型检查
+pnpm -C apps/collab-api test      # API 单元测试（Vitest）
 pnpm -C apps/collab-admin build   # 管理端构建
 ```
 
 ## 设计原则
 
 1. **契约先行** — `packages/contract` 中的 Zod schema 是所有实现的唯一事实来源
-2. **不重复造轮子** — 选用经过验证的工具（axum、NestJS、Prisma、shadcn/ui）
+2. **不重复造轮子** — 选用经过验证的工具（NestJS、Prisma、Tauri、shadcn/ui）
 3. **平台保持中立** — 只路由 LLM 请求，不处理计费
-4. **本地可验证** — SQLite 内嵌数据库，零依赖启动
-5. **最小可部署** — 单一二进制（Rust 服务）+ 静态文件（管理后台）
+4. **本地可验证** — PostgreSQL + Prisma 迁移，`pnpm start` 一条命令拉起后端与桌面端
+5. **最小可部署** — 单一 collab-api 后端（Node 进程）+ 静态文件（管理后台）

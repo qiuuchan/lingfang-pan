@@ -43,10 +43,7 @@ $BlockedDirectories = @(
 )
 
 $BlockedFiles = @(
-  '.env',
-  'lingfang.db',
-  'lingfang.db-shm',
-  'lingfang.db-wal'
+  '.env'
 )
 
 $BlockedExtensions = @(
@@ -169,7 +166,6 @@ function Write-DistributionReadme($DestinationRoot) {
 ## 不能打包
 
 - 本机密钥与环境：`.env`、`.env.*`（`.env.example` 除外）
-- 本机数据库：`lingfang.db`、`lingfang.db-wal`、`lingfang.db-shm`
 - 依赖与构建缓存：`node_modules/`、`target/`、`dist/`
 - 运行日志与临时输出：`night_runs/`、`*.log`
 - 个人工具配置：`.claude/`、`.cursor/`、`.codex/`、`.agents/`

@@ -20,7 +20,7 @@ Tauri `AppState` contains:
 - `Arc<CapabilityRegistry>`
 - loaded builtin plugin list
 
-Do not add server-like tenant state or LLM credentials to the Tauri state. Tenant and LLM data belong to `apps/server`.
+Do not add server-like tenant state or LLM credentials to the Tauri state. Tenant and LLM data belong to `apps/collab-api`.
 
 ## Build Config
 

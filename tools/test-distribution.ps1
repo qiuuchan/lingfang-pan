@@ -4,7 +4,6 @@ $Root = Split-Path -Parent $PSScriptRoot
 $ScriptPath = Join-Path $PSScriptRoot 'create-distribution.ps1'
 $OutDir = Join-Path 'O:\tmp' 'lingfang-dist-test'
 $ExtractDir = Join-Path 'O:\tmp' 'lingfang-dist-extract'
-$NestedEnvPath = Join-Path $Root 'apps\server\.env.local'
 
 function Reset-Directory($Path) {
   $full = [System.IO.Path]::GetFullPath($Path)
@@ -41,12 +40,13 @@ if (-not (Test-Path -LiteralPath $ScriptPath)) {
   throw "缺少分发脚本：$ScriptPath"
 }
 
-Set-Content -LiteralPath $NestedEnvPath -Value 'SHOULD_NOT_PACKAGE=true' -Encoding UTF8
+$TestEnvPath = Join-Path $Root '.env.test-dist'
+Set-Content -LiteralPath $TestEnvPath -Value 'SHOULD_NOT_PACKAGE=true' -Encoding UTF8
 try {
   $json = & $ScriptPath -OutputDir $OutDir -PackageName 'lingfang-platform-test' -Timestamp 'test' -Json
 } finally {
-  if (Test-Path -LiteralPath $NestedEnvPath) {
-    Remove-Item -LiteralPath $NestedEnvPath -Force
+  if (Test-Path -LiteralPath $TestEnvPath) {
+    Remove-Item -LiteralPath $TestEnvPath -Force
   }
 }
 $result = $json | ConvertFrom-Json
@@ -60,17 +60,14 @@ Assert-Entry $PackageRoot 'README.md'
 Assert-Entry $PackageRoot 'DISTRIBUTION.md'
 Assert-Entry $PackageRoot 'package.json'
 Assert-Entry $PackageRoot '.env.example'
-Assert-Entry $PackageRoot 'apps\server\src\main.rs'
+Assert-Entry $PackageRoot 'apps\collab-api\src\main.ts'
 Assert-Entry $PackageRoot 'apps\desktop\src\main.tsx'
 Assert-Entry $PackageRoot 'packages\contract\src\index.ts'
 Assert-Entry $PackageRoot 'plugins\summarizer\manifest.json'
 Assert-Entry $PackageRoot 'tools\start.ps1'
 
 Assert-MissingEntry $PackageRoot '.env'
-Assert-MissingEntry $PackageRoot 'apps\server\.env.local'
-Assert-MissingEntry $PackageRoot 'lingfang.db'
-Assert-MissingEntry $PackageRoot 'lingfang.db-wal'
-Assert-MissingEntry $PackageRoot 'lingfang.db-shm'
+Assert-MissingEntry $PackageRoot '.env.test-dist'
 Assert-MissingEntry $PackageRoot 'node_modules'
 Assert-MissingEntry $PackageRoot 'target'
 Assert-MissingEntry $PackageRoot 'night_runs'
