@@ -88,11 +88,9 @@ export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> 
   }
   const packaged = pluginFileContent(plugin);
   if (packaged !== null) return sdkShim(plugin.id) + packaged;
-  if (plugin.source === 'platform') {
-    return sdkShim(plugin.id) + `<!doctype html><html><body style="font-family:system-ui;margin:24px"><h1>${plugin.name}</h1><p>${plugin.description || '平台插件已启用。具体运行能力由后续插件实现接入。'}</p></body></html>`;
-  }
-  const { content } = await api<{ content: string }>(`/plugins/${plugin.id}/files/${plugin.entry}`);
-  return sdkShim(plugin.id) + content;
+  // collab-api 的 publicPlugin 始终内联 files，缺失即视为异常数据；不再回退到已下线的
+  // Rust /plugins/:id/files/* 路由（collab-api 无对应能力），改返回占位 HTML。
+  return sdkShim(plugin.id) + `<!doctype html><html><body style="font-family:system-ui;margin:24px"><h1>${plugin.name}</h1><p>${plugin.description || '插件内容暂不可用。'}</p></body></html>`;
 }
 
 export type RuntimeMessage = {

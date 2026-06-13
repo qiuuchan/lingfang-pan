@@ -75,6 +75,8 @@ Tauri 2 + Rust 壳（ADR-0001）/ Rust + axum + sqlx + PostgreSQL 后台（ADR-0
 
 插件 `sdk.llm.chat` → 壳 capability 网关（校验 manifest + 授权）→ `/llm/proxy` → 第三方网关 → 写审计。插件永不持 key，平台只路由+审计。
 
+> ⚠️ **已迁移至 collab-api**：上述 `/llm/proxy` 出口已不在 Rust apps/server 中，相关 LLM 网关绑定/代理/审计能力已在 commit `7ef4bf0` 迁移到 NestJS **collab-api（`/api/*` 前缀）**。当前实际契约见 [docs/collab-api.md](collab-api.md)，收敛背景见 [docs/collab-platform.md](collab-platform.md)。
+
 ## 12. 红线
 
 插件不直连网络 / 不持 key / 跑沙箱 / 三重校验 · 平台不计费只审计 · 服务端默认即连真实 PG（无 demo 默认）· 生成不用自研 agent。

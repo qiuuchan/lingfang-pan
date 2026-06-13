@@ -1,11 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
-import { TenantSelect } from '@/pages/TenantSelect';
 import {
   HomeIcon,
   PackageIcon,
@@ -18,7 +16,6 @@ import {
   StoreIcon,
   WalletIcon,
   ShieldCheckIcon,
-  ArrowLeftRightIcon,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -48,12 +45,8 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const { session, view, setView, setRunningPlugin, resetSession } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
   const [open, setOpen] = useState(false);
-  const [tenantOpen, setTenantOpen] = useState(false);
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
-
-  // 切换/创建团队成功后 tenantId 变化，自动关闭切换团队弹窗。
-  useEffect(() => { setTenantOpen(false); }, [session.tenantId]);
 
   return (
     <aside className={cn(
@@ -96,9 +89,6 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
               <InfoRow label="用户 ID" value={session.userId || '—'} />
             </div>
             <div className="mt-2 flex flex-col gap-1 border-t pt-2">
-              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setOpen(false); setTenantOpen(true); }}>
-                <ArrowLeftRightIcon className="size-4" />切换团队
-              </Button>
               <Button variant="ghost" size="sm" className="w-full justify-start text-destructive hover:text-destructive" onClick={resetSession}>
                 <LogOutIcon className="size-4" />退出登录
               </Button>
@@ -106,15 +96,6 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           </PopoverContent>
         </Popover>
       </div>
-
-      <Dialog open={tenantOpen} onOpenChange={setTenantOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>切换或创建团队</DialogTitle>
-          </DialogHeader>
-          <TenantSelect />
-        </DialogContent>
-      </Dialog>
     </aside>
   );
 }

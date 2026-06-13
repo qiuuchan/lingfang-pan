@@ -41,8 +41,13 @@ export class AdminService {
 
   async adminUpdateUser(actorId: string, id: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const user = await this.prisma.user.update({ where: { id }, data: input });
-    await this.audit(actorId, 'admin.user.updated', 'User', id, input);
+    // 显式仅取声明字段，丢弃 email/password 等客户端误传的非法键，避免透传进 prisma.user.update 触发 PrismaClientValidationError。
+    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN' } = {};
+    if (input.displayName !== undefined) data.displayName = input.displayName;
+    if (input.status !== undefined) data.status = input.status;
+    if (input.platformRole !== undefined) data.platformRole = input.platformRole;
+    const user = await this.prisma.user.update({ where: { id }, data });
+    await this.audit(actorId, 'admin.user.updated', 'User', id, data);
     return { user: publicUser(user) };
   }
 
@@ -89,6 +94,25 @@ export class AdminService {
     const team = await this.prisma.team.update({ where: { id }, data: input });
     await this.audit(actorId, 'admin.team.updated', 'Team', id, input);
     return { team };
+  }
+
+  // 软删除团队：参照 adminDeleteUser 的 DISABLED 模式，置为 SUSPENDED 而非物理级联删除（避免误删数据）。
+  async adminDeleteTeam(actorId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const team = await this.prisma.team.update({ where: { id }, data: { status: 'SUSPENDED' } });
+    await this.audit(actorId, 'admin.team.deleted', 'Team', id, {});
+    // 返回精简字段，不携带 memberships 等敏感 relation。
+    return {
+      team: {
+        id: team.id,
+        name: team.name,
+        slug: team.slug,
+        status: team.status,
+        balanceCents: team.balanceCents,
+        createdAt: team.createdAt,
+        updatedAt: team.updatedAt,
+      },
+    };
   }
 
   async adminSetTeamAdmin(actorId: string, teamId: string, input: { userId: string }) {
@@ -199,7 +223,8 @@ export class AdminService {
 
   async adminApplications(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
-    const applications = await this.prisma.teamAdminApplication.findMany({ include: { user: true }, orderBy: { createdAt: 'desc' } });
+    // include reviewedBy 以便前端展示申请处理人（未处理时为 null）。
+    const applications = await this.prisma.teamAdminApplication.findMany({ include: { user: true, reviewedBy: true }, orderBy: { createdAt: 'desc' } });
     return { applications };
   }
 

@@ -58,6 +58,12 @@ export class AdminController {
     return this.admin.adminUpdateTeam(requireUser(req).id, id, body);
   }
 
+  @Delete('teams/:id')
+  @ApiOperation({ summary: '停用团队' })
+  deleteTeam(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminDeleteTeam(requireUser(req).id, id);
+  }
+
   @Post('teams/:id/admins')
   @ApiOperation({ summary: '指定团队管理员' })
   setTeamAdmin(@Req() req: Request, @Param('id') id: string, @Body() body: { userId: string }) {

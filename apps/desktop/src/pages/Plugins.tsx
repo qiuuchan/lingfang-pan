@@ -2,8 +2,7 @@ import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api } from '@/lib/api';
-import type { LoadedPlugin, PluginDraft } from '@/lib/types';
+import type { LoadedPlugin } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -28,6 +27,8 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
   async function editInGenerator() {
     setEditing(true);
     try {
+      // collab-api 的 publicPlugin 始终内联返回 files，直接用本地数据派生草稿即可，
+      // 不再回退到已下线的 Rust /plugins/:id/edit 路由（collab-api 无对应能力）。
       if (plugin.files?.length) {
         setCurrentDraft({
           id: plugin.id,
@@ -38,8 +39,7 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
           plugin_id: plugin.id,
         });
       } else {
-        const draft = await api<PluginDraft>(`/plugins/${plugin.id}/edit`, { method: 'POST' });
-        setCurrentDraft(draft);
+        throw new Error('插件缺少打包文件，无法进入编辑器。');
       }
       setRunningPlugin(null);
       setView('home');
@@ -95,7 +95,7 @@ function RunnerHeader({
     <CardHeader className="flex-row items-center justify-between space-y-0">
       <CardTitle>{plugin.name}</CardTitle>
       <div className="flex items-center gap-2">
-        {plugin.source === 'published' && (
+        {plugin.source === 'team' && (
           <LoadingButton variant="outline" size="sm" loading={editing} onClick={onEdit}>
             <PencilIcon className="size-4" />继续修改
           </LoadingButton>

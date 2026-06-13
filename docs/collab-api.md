@@ -76,6 +76,7 @@ Authorization: Bearer <token>
 | GET | `/api/admin/dashboard` | 管理端指标 |
 | GET/POST/PATCH | `/api/admin/users` | 用户管理 |
 | GET/POST/PATCH | `/api/admin/teams` | 团队管理 |
+| DELETE | `/api/admin/teams/:id` | 停用团队（软删除，置 status=SUSPENDED） |
 | POST/DELETE | `/api/admin/teams/:id/admins` | 指定/撤销团队管理员 |
 | POST | `/api/admin/teams/:id/balance-adjustments` | 调整团队共享余额 |
 | GET/POST/PATCH | `/api/admin/plugins` | 平台插件管理，POST 仍禁止绕过客户端创建插件 |

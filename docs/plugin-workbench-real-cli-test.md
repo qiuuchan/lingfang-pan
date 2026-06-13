@@ -159,7 +159,7 @@
 - 命令：`pnpm -C apps/desktop dev`
 - Tauri 进程：`target/debug/lingfang-desktop`，本轮确认 PID `86335` 正在运行。
 - Vite dev server：`http://localhost:1420/` 返回 `200 OK`，页面大小 `567 bytes`。
-- 协作后端：`http://localhost:3001/api/health` 返回 `{ "status": "ok", "service": "collab-api" }`。
+- 协作后端：`http://localhost:3001/api/health` 返回 `{ "status": "ok", "service": "collab-api" }`。（注：当时为临时 `PORT=3001` 启动，默认端口为 `3000`，详见 docs/collab-deployment.md。）
 - Tauri WebDriver：当前 Tauri CLI 没有 `driver` 子命令，本机只有 `safaridriver`，因此本轮自动化点击使用 Chrome DevTools 覆盖同源前端；桌面宿主运行态用 Tauri 进程、Vite 端口、Rust 命令测试和真实 CLI 调用证据确认。
 
 ### 浏览器交互 E2E
