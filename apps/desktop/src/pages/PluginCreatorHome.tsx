@@ -50,6 +50,7 @@ import {
 } from '@/lib/plugin-draft';
 import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
 import type { LoadedPlugin } from '@/lib/types';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -116,6 +117,14 @@ export function PluginCreatorHome() {
   const manifest = useMemo(() => parseManifest(files), [files]);
   const status = currentDraft?.status;
   const diagnostics = currentDraft?.diagnostics || [];
+  // 悬浮窗（历史/预览）顶部条拖动窗口：mousedown 调 startDragging（data-tauri-drag-region 单独在 portal 内不生效）。
+  // 仅左键 + 非 button/input 元素触发，避免点关闭/按钮时也拖动。
+  const onDragWindow = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, a, [role="button"]')) return;
+    void getCurrentWindow().startDragging();
+  };
   // 当前活动会话标题（AI 总结首轮后生成，显示在顶部「插件创建」旁）。
   const activeConversationTitle = activeId ? (metas.find((m) => m.sessionId === activeId)?.title || '') : '';
   const activeContent = files.find((file) => file.path === activeFile)?.content || '';
@@ -961,7 +970,7 @@ export function PluginCreatorHome() {
       {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="gap-0 p-0 sm:max-w-xl">
-          <DialogHeader className="border-b px-4 py-3" data-tauri-drag-region>
+          <DialogHeader className="border-b px-4 py-3" data-tauri-drag-region onMouseDown={onDragWindow}>
             <DialogTitle className="text-base" data-tauri-drag-region>历史对话</DialogTitle>
           </DialogHeader>
           <ConversationRail
