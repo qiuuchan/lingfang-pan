@@ -3,6 +3,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, type ApiError } from '@/lib/api';
 import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
+import { TitleBar } from '@/components/TitleBar';
+// PanelLeft 图标已移到 TitleBar，不再在此 import。
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
 import { TeamHome } from '@/pages/TeamHome';
@@ -13,7 +15,6 @@ import { Market } from '@/pages/Market';
 import { Wallet } from '@/pages/Wallet';
 import { Review } from '@/pages/Review';
 import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -257,26 +258,22 @@ export default function App() {
 
   return (
     <AppContext.Provider value={ctx}>
-      <div className="flex h-screen overflow-hidden bg-background text-foreground">
-        <Sidebar collapsed={!sidebarOpen} />
-        <main className="relative flex-1 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen((v) => !v)}
-            className="absolute left-3 top-3 z-30 inline-flex size-9 items-center justify-center rounded-md border bg-background/80 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent"
-            aria-label={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
-          >
-            {sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftOpenIcon className="size-4" />}
-          </button>
-          <div className={view === 'home' ? 'h-full' : 'hidden'}>
-            <PluginCreatorHome />
-          </div>
-          {view !== 'home' && (
-            <div className="h-full overflow-y-auto pl-16 pr-6 py-6">
-              <div className="mx-auto w-full max-w-6xl">{body}</div>
+      <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+        {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制（最小化/最大化/关闭）。 */}
+        <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+        <div className="flex min-h-0 flex-1">
+          <Sidebar collapsed={!sidebarOpen} />
+          <main className="relative flex-1 overflow-hidden">
+            <div className={view === 'home' ? 'h-full' : 'hidden'}>
+              <PluginCreatorHome />
             </div>
-          )}
-        </main>
+            {view !== 'home' && (
+              <div className="h-full overflow-y-auto px-6 py-6">
+                <div className="mx-auto w-full max-w-6xl">{body}</div>
+              </div>
+            )}
+          </main>
+        </div>
       </div>
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>

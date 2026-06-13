@@ -735,8 +735,8 @@ export function PluginCreatorHome() {
       {/* 问题2：历史记录改为顶部「历史」按钮触发的悬浮窗（Popover），不再用左侧固定栏。 */}
       {/* 布局从三栏（rail|对话|详情）收敛为两栏（对话|详情），腾出宽度给对话区。 */}
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        {/* pl-16 为 Sidebar 折叠态悬浮触发区避让，非视觉对称是有意为之。 */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b pl-16 pr-4 py-3">
+        {/* 侧边栏折叠按钮已上移到 TitleBar，此处不再需要 pl-16 避让。 */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <SparklesIcon className="size-4 shrink-0 text-primary" />
             <span className="shrink-0">插件创建</span>
