@@ -95,6 +95,10 @@ export function PluginCreatorHome() {
   const [cloudPlugin, setCloudPlugin] = useState<LoadedPlugin | null>(null);
   // 最近插件只写 localStorage（供「插件」页读取），创建页不再展示，故无 state。
   const chatRef = useRef<HTMLDivElement>(null);
+  // 修复：finalizeSession 在 exit listener（useEffect 闭包）里调用，捕获的 currentDraft 是注册时的旧值，
+  // 导致追问时读到 null → 走 makeConversationDraft 只产本轮 turn，老对话丢失。用 ref 跟踪最新值。
+  const currentDraftRef = useRef(currentDraft);
+  useEffect(() => { currentDraftRef.current = currentDraft; }, [currentDraft]);
 
   const providerInfo = providers.find((item) => item.id === provider) || providers[0];
   const turns = normalizeTurns(currentDraft?.turns);
@@ -305,16 +309,17 @@ export function PluginCreatorHome() {
       setAssistantSession(finalSession);
       const probeResult = sessionToProbeResult(finalSession);
       const promptText = pending?.text || pendingUser || '本地代码助手插件';
+      const prevDraft = currentDraftRef.current; // 读 ref 最新值（闭包陷阱修复）
 
       // design §3.1.2 / AC1：对话优先 gate——产出含 manifest/file 块才解析为草稿（自动检测）。
       // 纯对话态（无结构化块）只追加 turn，status='generating'，不弹详情、不判 invalid。
       const structured = hasStructuredBlocks(finalSession.stdout);
-      let nextDraft: typeof currentDraft;
+      let nextDraft: NonNullable<typeof currentDraft>;
       if (structured) {
         // 有结构化块：走原 buildLocalDraft（首轮）/ mergeFollowupDraft（追问），产出/更新草稿并弹详情。
-        if (isFollowup && currentDraft) {
+        if (isFollowup && prevDraft) {
           // design §3.3.6 (c)：追问在既有 draft 上累积 turns、files 用新产出覆盖（mergeFollowupDraft）。
-          nextDraft = mergeFollowupDraft(currentDraft, probeResult, promptText);
+          nextDraft = mergeFollowupDraft(prevDraft, probeResult, promptText);
         } else {
           nextDraft = buildLocalDraft({
             prompt: promptText,
@@ -328,8 +333,8 @@ export function PluginCreatorHome() {
       } else {
         // 纯对话态（AC1）：仅累积 turn，files 保持空，status='generating'，绝不判 invalid。
         const assistantText = finalSession.stdout || finalSession.stderr || '本地 CLI 没有返回可展示内容。';
-        if (isFollowup && currentDraft) {
-          nextDraft = mergeConversationTurn(currentDraft, promptText, assistantText);
+        if (isFollowup && prevDraft) {
+          nextDraft = mergeConversationTurn(prevDraft, promptText, assistantText);
         } else {
           nextDraft = makeConversationDraft(promptText, assistantText);
         }
