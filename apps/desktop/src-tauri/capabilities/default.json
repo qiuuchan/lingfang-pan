@@ -4,6 +4,13 @@
   "description": "桌面壳默认能力。插件越权能力另由 capability 网关按 manifest + 授权放行。",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized"
   ]
 }
