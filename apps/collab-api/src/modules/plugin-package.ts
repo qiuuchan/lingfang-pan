@@ -31,13 +31,13 @@ export type NormalizedPluginPackage = {
     name: string;
     version: string;
     description: string;
-    runtime_type: 'client' | 'cloud';
+    runtime_type: 'client' | 'cloud' | 'nodejs' | 'python';
     entry: string;
     visibility: 'private' | 'tenant';
     capabilities: Array<{ kind: string; reason: string; risk: string; requires_admin: boolean; scope?: unknown }>;
   };
   files: PluginFileInput[];
-  runtimeType: 'CLIENT' | 'CLOUD';
+  runtimeType: 'CLIENT' | 'CLOUD' | 'NODEJS' | 'PYTHON';
   visibility: 'PRIVATE' | 'TEAM';
   contentHash: string;
 };
@@ -45,6 +45,21 @@ export type NormalizedPluginPackage = {
 const MAX_PLUGIN_FILES = 80;
 const MAX_PLUGIN_FILE_BYTES = 256 * 1024;
 const MAX_PLUGIN_TOTAL_BYTES = 2 * 1024 * 1024;
+
+// 合法 runtime_type 白名单（与契约 RuntimeType 四值一致）。
+// nodejs/python 为脚本型运行时：上传云端仅做源码托管，预览执行由桌面壳本地完成（见 R3）。
+const ALLOWED_RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python'] as const;
+
+// 运行时类型映射表（小写 manifest 值 → Prisma 枚举大写）。
+// 头号陷阱修复（design §4.1）：原 `runtime === 'client' ? 'CLIENT' : 'CLOUD'` 三元
+// 会把 nodejs/python 误判为 CLOUD，导致数据库 enum 与 manifest runtime_type 不一致。
+// 改用显式映射表 + 兜底，保证四值一一对应。
+const RUNTIME_TYPE_MAP: Record<string, 'CLIENT' | 'CLOUD' | 'NODEJS' | 'PYTHON'> = {
+  client: 'CLIENT',
+  cloud: 'CLOUD',
+  nodejs: 'NODEJS',
+  python: 'PYTHON',
+};
 const ALLOWED_CAPABILITIES = new Set([
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
   'clipboard', 'llm.chat', 'storage.kv',
@@ -79,7 +94,9 @@ export function normalizePluginPackage(input: PluginPackageInput): NormalizedPlu
   const version = cleanText(manifest.version || '0.1.0', '插件版本不能为空');
   const entry = cleanPath(manifest.entry || 'ui/index.html');
   const runtime = String(manifest.runtime_type || manifest.runtimeType || 'client').toLowerCase();
-  if (runtime !== 'client' && runtime !== 'cloud') throw badRequest('runtime_type 只允许 client 或 cloud');
+  if (!ALLOWED_RUNTIME_TYPES.includes(runtime as typeof ALLOWED_RUNTIME_TYPES[number])) {
+    throw badRequest('runtime_type 只允许 client / cloud / nodejs / python');
+  }
   const visibilityValue = String(manifest.visibility || 'tenant').toLowerCase();
   if (visibilityValue !== 'tenant' && visibilityValue !== 'private') throw badRequest('visibility 只允许 tenant 或 private');
 
@@ -118,7 +135,7 @@ export function normalizePluginPackage(input: PluginPackageInput): NormalizedPlu
     name,
     version,
     description: String(manifest.description || ''),
-    runtime_type: runtime as 'client' | 'cloud',
+    runtime_type: runtime as 'client' | 'cloud' | 'nodejs' | 'python',
     entry,
     visibility: visibilityValue as 'private' | 'tenant',
     capabilities,
@@ -127,7 +144,7 @@ export function normalizePluginPackage(input: PluginPackageInput): NormalizedPlu
   return {
     manifest: normalizedManifest,
     files,
-    runtimeType: runtime === 'client' ? 'CLIENT' : 'CLOUD',
+    runtimeType: RUNTIME_TYPE_MAP[runtime] ?? 'CLIENT',
     visibility: visibilityValue === 'private' ? 'PRIVATE' : 'TEAM',
     contentHash,
   };

@@ -4,6 +4,7 @@
 
 mod capability;
 mod code_assistant;
+mod plugin_script;
 mod plugins;
 
 use std::path::PathBuf;
@@ -204,7 +205,9 @@ fn main() {
             code_assistant_send_input,
             code_assistant_stop_session,
             code_assistant_list_sessions,
-            code_assistant_read_transcript
+            code_assistant_read_transcript,
+            plugin_script::probe_script_runtime,
+            plugin_script::run_plugin_script
         ])
         .run(tauri::generate_context!())
         .expect("启动 LingFang 桌面壳失败");

@@ -549,7 +549,7 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
     name: parsedManifest?.name || input.prompt.slice(0, 24) || '本地代码助手插件',
     version: parsedManifest?.version || '0.1.0',
     description: parsedManifest?.description || `由 ${input.providerLabel} 本地 CLI 生成的插件草稿`,
-    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as 'client' | 'cloud', // 本子任务仅 client|cloud
+    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'],
     entry: parsedManifest?.entry || LOCAL_DRAFT_ENTRY,
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, 'tenant') as 'private' | 'tenant',
     // 契约收敛：彻底消除字符串数组 bug（旧 :198 的 ['code-assistant']）。
@@ -635,7 +635,7 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
     name: parsedManifest?.name || prevManifest.name,
     version: parsedManifest?.version || prevManifest.version,
     description: parsedManifest?.description || prevManifest.description,
-    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as 'client' | 'cloud',
+    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'],
     entry: parsedManifest?.entry || prevManifest.entry,
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
     capabilities: normalizeCapabilities(parsedManifest?.capabilities),
