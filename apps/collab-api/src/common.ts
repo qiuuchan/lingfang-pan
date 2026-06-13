@@ -27,7 +27,7 @@ export const unauthorized = (message = '请先登录') => new AppError(401, 'una
 export const forbidden = (message = '权限不足') => new AppError(403, 'forbidden', message);
 export const notFound = (message = '资源不存在') => new AppError(404, 'not_found', message);
 export const conflict = (message: string, details?: unknown) => new AppError(409, 'conflict', message, details);
-export const insufficientBalance = () => new AppError(402, 'insufficient_balance', '团队余额不足');
+export const insufficientBalance = () => new AppError(402, 'insufficient_balance', '钱包余额不足');
 
 export function slugify(input: string) {
   const base = input

@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AuthService } from './auth.service';
 import { badRequest, notFound, AppError } from '../common';
@@ -6,8 +6,8 @@ import { badRequest, notFound, AppError } from '../common';
 @Injectable()
 export class MarketplaceService {
   constructor(
-    private readonly prisma: PrismaService,
-    @Inject(forwardRef(() => AuthService)) private readonly auth: AuthService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
   async search(userId: string, q: string, sort: string) {
