@@ -58,12 +58,12 @@ export function PreviewDrawer({
         </div>
         {/* 主体：预览撑满 + 可选源码侧栏 */}
         <div className="flex min-h-0 flex-1">
-          <div className="relative min-h-0 flex-1 overflow-auto bg-muted/30">
+          <div className="relative min-h-0 flex-1 bg-muted/30">
             {files.length ? (
               isScriptRuntime(runtime) ? (
-                <div className="h-full p-4"><ScriptPreviewPanel files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefreshPreview} /></div>
+                <div className="h-full overflow-auto p-4"><ScriptPreviewPanel files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefreshPreview} /></div>
               ) : (
-                // client runtime：iframe absolute 撑满父容器，插件自身内容由其 CSS 滚动
+                // client runtime：iframe absolute 撑满 relative 父容器；父容器 overflow-hidden，iframe 自身滚动。
                 <iframe key={previewKey} title="plugin-preview" sandbox="allow-scripts" srcDoc={previewSrcDoc(files)} className="absolute inset-0 h-full w-full border-0 bg-white" />
               )
             ) : (
