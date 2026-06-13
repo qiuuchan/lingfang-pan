@@ -15,7 +15,14 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
 };
 
 fn build_args(prompt: &str, model: Option<&str>) -> Vec<String> {
-    let mut args = vec!["-p".to_string(), prompt.to_string()];
+    let mut args = vec![
+        "-p".to_string(),
+        prompt.to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
+    ];
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);
     }

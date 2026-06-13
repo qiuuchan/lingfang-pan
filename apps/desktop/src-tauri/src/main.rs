@@ -102,8 +102,22 @@ fn code_assistant_save_config(
 fn code_assistant_start_session(
     app: tauri::AppHandle,
     state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::StartSessionInput,
+    mut input: code_assistant::StartSessionInput,
 ) -> Result<code_assistant::store::SessionRecord, String> {
+    // 前端未指定 workspace 时，落到 app_data 下的 sandbox 目录，避免 CLI 沿宿主项目根读取 CLAUDE.md/.claude。
+    if input
+        .workspace_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        if let Ok(data_dir) = app.path().app_data_dir() {
+            let sandbox = data_dir.join("claude-sandbox");
+            let _ = std::fs::create_dir_all(&sandbox);
+            input.workspace_dir = Some(sandbox.to_string_lossy().to_string());
+        }
+    }
     code_assistant::start_session(app, state.inner().clone(), input)
 }
 

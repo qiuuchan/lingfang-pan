@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { Toaster } from '@/components/ui/sonner';
-import { api, apiBase, configureApiBase, normalizeBackendUrl, setAuthToken } from '@/lib/api';
+import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, type ApiError } from '@/lib/api';
 import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { Auth } from '@/pages/Auth';
@@ -13,6 +13,7 @@ import { Market } from '@/pages/Market';
 import { Wallet } from '@/pages/Wallet';
 import { Review } from '@/pages/Review';
 import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
+import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -73,6 +74,32 @@ const emptySession: Session = {
   application: null,
 };
 
+const SESSION_STORAGE_KEY = 'lf:session';
+function loadStoredSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Session;
+    return parsed && parsed.token ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function saveStoredSession(session: Session) {
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    /* localStorage 不可用则忽略 */
+  }
+}
+function clearStoredSession() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    /* localStorage 不可用则忽略 */
+  }
+}
+
 function sessionFromPayload(payload: CollabSessionResponse, previousToken: string | null): Session {
   return {
     token: payload.token ?? previousToken,
@@ -89,9 +116,16 @@ function sessionFromPayload(payload: CollabSessionResponse, previousToken: strin
 }
 
 export default function App() {
-  const [session, setSession] = useState<Session>(emptySession);
+  const [session, setSession] = useState<Session>(() => {
+    const stored = loadStoredSession();
+    if (stored) return stored;
+    const token = getAuthToken();
+    return token ? { ...emptySession, token } : emptySession;
+  });
+  const [restoring, setRestoring] = useState(() => session.token !== null);
   const [backendUrl, setBackendUrl] = useState<string | null>(() => apiBase() || null);
   const [view, setView] = useState<View>('home');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
@@ -108,6 +142,7 @@ export default function App() {
     setSession((prev) => {
       const next = { ...prev, ...patch };
       setAuthToken(next.token);
+      saveStoredSession(next);
       return next;
     });
   }, []);
@@ -116,6 +151,7 @@ export default function App() {
     setSession((prev) => {
       const next = sessionFromPayload(payload, prev.token);
       setAuthToken(next.token);
+      saveStoredSession(next);
       setView('home');
       return next;
     });
@@ -128,9 +164,35 @@ export default function App() {
 
   const resetSession = useCallback(() => {
     setAuthToken(null);
+    clearStoredSession();
     setSession(emptySession);
     setRunningPlugin(null);
     setView('home');
+  }, []);
+
+  // 启动时若本地存有 session，静默调 /api/auth/me 刷新；仅 token 真无效（401）才登出。
+  // 网络/后端未启动时保留已恢复的 session，进主界面，下次启动重试。
+  useEffect(() => {
+    if (!session.token) {
+      setRestoring(false);
+      return;
+    }
+    let cancelled = false;
+    refreshSession()
+      .catch((err) => {
+        if (cancelled) return;
+        const code = (err as ApiError).code;
+        if (code === 'unauthorized' || code === 'invalid_token') {
+          resetSession();
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRestoring(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -165,6 +227,17 @@ export default function App() {
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
   };
 
+  if (restoring) {
+    return (
+      <AppContext.Provider value={ctx}>
+        <Centered>
+          <p className="text-sm text-muted-foreground">正在恢复会话…</p>
+        </Centered>
+        <Toaster position="top-right" richColors closeButton />
+      </AppContext.Provider>
+    );
+  }
+
   if (!session.token) {
     return <AppContext.Provider value={ctx}><Centered><Auth /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
@@ -185,13 +258,21 @@ export default function App() {
   return (
     <AppContext.Provider value={ctx}>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
-        <Sidebar />
-        <main className="flex-1 overflow-hidden">
+        <Sidebar collapsed={!sidebarOpen} />
+        <main className="relative flex-1 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            className="absolute left-3 top-3 z-30 inline-flex size-9 items-center justify-center rounded-md border bg-background/80 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent"
+            aria-label={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
+          >
+            {sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftOpenIcon className="size-4" />}
+          </button>
           <div className={view === 'home' ? 'h-full' : 'hidden'}>
             <PluginCreatorHome />
           </div>
           {view !== 'home' && (
-            <div className="h-full overflow-y-auto px-6 py-6">
+            <div className="h-full overflow-y-auto pl-16 pr-6 py-6">
               <div className="mx-auto w-full max-w-6xl">{body}</div>
             </div>
           )}

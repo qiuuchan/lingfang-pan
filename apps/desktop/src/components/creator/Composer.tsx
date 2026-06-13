@@ -2,13 +2,13 @@ import { SendIcon, SquareIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { PROVIDERS } from '@/lib/plugin-draft';
 
 export function Composer({
   input,
   model,
   provider,
   providerInfo,
+  providers,
   streaming,
   onInputChange,
   onModelChange,
@@ -20,6 +20,7 @@ export function Composer({
   model: string;
   provider: string;
   providerInfo: { id: string; label: string; models: string[] };
+  providers: { id: string; label: string; models: string[] }[];
   streaming: boolean;
   onInputChange: (value: string) => void;
   onModelChange: (value: string) => void;
@@ -28,7 +29,7 @@ export function Composer({
   onStop: () => void;
 }) {
   return (
-    <div className="border-t bg-card/95 p-3 backdrop-blur">
+    <div>
       <div className="rounded-xl border bg-background p-3 shadow-sm">
         <Textarea
           placeholder="自然描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件。"
@@ -44,9 +45,9 @@ export function Composer({
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Select disabled={streaming} value={provider} onValueChange={(value) => onProviderChange(value || PROVIDERS[0].id)}>
+            <Select disabled={streaming} value={provider} onValueChange={(value) => onProviderChange(value || providers[0]?.id || provider)}>
               <SelectTrigger className="h-8 w-[150px]"><SelectValue>{providerInfo.label}</SelectValue></SelectTrigger>
-              <SelectContent>{PROVIDERS.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
+              <SelectContent>{providers.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
             </Select>
             <Select disabled={streaming} value={model} onValueChange={(value) => onModelChange(value || providerInfo.models[0])}>
               <SelectTrigger className="h-8 w-[150px]"><SelectValue>{model === 'default' ? '默认模型' : model}</SelectValue></SelectTrigger>
