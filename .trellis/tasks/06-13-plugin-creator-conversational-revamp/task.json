@@ -1,0 +1,32 @@
+{
+  "id": "plugin-creator-conversational-revamp",
+  "name": "plugin-creator-conversational-revamp",
+  "title": "插件创建对话式重构与语言扩展",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-13",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-13-conversational-multiturn",
+    "06-13-structured-output-parsing",
+    "06-13-node-python-local-exec",
+    "06-13-output-rendering-polish",
+    "06-13-styling-and-error-polish"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
