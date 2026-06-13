@@ -425,6 +425,20 @@ export function PluginCreatorHome() {
     });
     // 新会话立即成为 activeId（listener 守卫据此路由新会话事件）。
     setActiveIdRef(record.sessionId);
+    // 关键：新会话立即加入 metas（历史列表），否则对话完成后切换会话找不到这条历史。
+    const newMeta: ConversationMeta = {
+      sessionId: record.sessionId,
+      tool: (record.tool || selectedProvider) as ProviderId,
+      model: record.model || model,
+      title: null, // 标题待 finalizeSession 本地启发式总结填充
+      status: 'running',
+      startedAt: record.startedAt,
+      transcriptPath: record.transcriptPath || undefined,
+      commandPreview: record.commandPreview,
+      draftUpdatedAt: null,
+      archived: false,
+    };
+    setMetas((prev) => prev.some((m) => m.sessionId === record.sessionId) ? prev : [newMeta, ...prev]);
     const nextSession: AssistantSessionState = {
       sessionId: record.sessionId,
       status: 'running',
