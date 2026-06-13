@@ -43,7 +43,7 @@ export function PreviewDrawer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[100vh] w-[100vw] max-w-none gap-0 rounded-none border-0 p-0 sm:max-w-none">
+      <DialogContent className="flex h-[100vh] w-[100vw] max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none">
         {/* 顶部条：标题 + 刷新 + 源码切换 */}
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
           <DialogTitle className="text-sm font-medium">插件预览</DialogTitle>
