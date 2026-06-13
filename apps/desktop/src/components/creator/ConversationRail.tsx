@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { PlusIcon, MessageSquareIcon, Trash2Icon, PencilIcon } from 'lucide-react';
+import { PlusIcon, MessageSquareIcon, Trash2Icon, PencilIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { deriveTitle, providerLabel, type ConversationMeta } from '@/lib/plugin-draft';
 
@@ -41,12 +40,20 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  // 分页：每页 5 条，底部分页器切换（用户要求"五个一页 + 底部选择页面按钮"）。
+  const PAGE_SIZE = 5;
+  const [page, setPage] = useState(0);
+
   // 排序：draftUpdatedAt ?? startedAt 降序（最近更新在前，空态新对话次之）。
   const sorted = [...metas].sort((a, b) => {
     const ta = new Date(a.draftUpdatedAt || a.startedAt).getTime();
     const tb = new Date(b.draftUpdatedAt || b.startedAt).getTime();
     return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
   });
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  // 当前页超出范围时收敛（会话删除/新增导致页数变化）。
+  const safePage = Math.min(page, totalPages - 1);
+  const paged = sorted.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   function startRename(meta: ConversationMeta) {
     setRenamingId(meta.sessionId);
@@ -71,14 +78,13 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
           <PlusIcon className="size-3.5" />新对话
         </Button>
       </div>
-      {/* 会话列表：ScrollArea 限高分页，内容多时可滚动（自动分页效果）。 */}
-      <ScrollArea className="max-h-[70vh] min-h-[120px]">
-        <div className="p-2">
+      {/* 会话列表：分页（每页 5 条），单页无需滚动。 */}
+      <div className="p-2">
           {sorted.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">还没有对话，点击上方「新对话」开始。</p>
           ) : (
             <ul className="flex flex-col gap-2">
-              {sorted.map((meta) => {
+              {paged.map((meta) => {
                 const active = meta.sessionId === activeId;
                 const title = deriveTitle(meta);
                 return (
@@ -158,8 +164,41 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
               })}
             </ul>
           )}
+      </div>
+      {/* 底部分页器：上一页 / 页码 / 下一页（仅多页时显示）。 */}
+      {totalPages > 1 && (
+        <div className="flex shrink-0 items-center justify-center gap-1 border-t px-3 py-2">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            disabled={safePage === 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            title="上一页"
+          >
+            <ChevronLeftIcon className="size-4" />
+          </Button>
+          {Array.from({ length: totalPages }, (_, i) => (
+            <Button
+              key={i}
+              variant={i === safePage ? 'default' : 'ghost'}
+              size="icon-xs"
+              className="h-6 w-6 text-xs"
+              onClick={() => setPage(i)}
+            >
+              {i + 1}
+            </Button>
+          ))}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            disabled={safePage >= totalPages - 1}
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            title="下一页"
+          >
+            <ChevronRightIcon className="size-4" />
+          </Button>
         </div>
-      </ScrollArea>
+      )}
     </div>
   );
 }
