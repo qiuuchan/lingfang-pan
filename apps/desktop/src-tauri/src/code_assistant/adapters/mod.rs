@@ -91,12 +91,14 @@ mod tests {
         let definition = tool_definition(CodeAssistantTool::Claude);
         // claude headless 模式固定携带 stream-json 输出 + verbose + include-partial-messages（adapters/claude.rs）。
         // probe_args 是首轮调用，不带 --resume。
+        // --permission-mode bypassPermissions：方案A 自动放行 Write 写文件到 sandbox（不卡授权）。
         assert_eq!(
             definition.probe_args("ping", Some("sonnet")),
             vec![
                 "-p", "ping",
                 "--output-format", "stream-json",
                 "--verbose", "--include-partial-messages",
+                "--permission-mode", "bypassPermissions",
                 "--model", "sonnet",
             ]
         );
@@ -132,6 +134,7 @@ mod tests {
                 "-p", "ping",
                 "--output-format", "stream-json",
                 "--verbose", "--include-partial-messages",
+                "--permission-mode", "bypassPermissions",
                 "--model", "sonnet",
                 "--resume", "sid-123",
             ]

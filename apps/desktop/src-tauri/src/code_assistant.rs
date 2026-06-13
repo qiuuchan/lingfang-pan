@@ -201,6 +201,21 @@ pub struct ReadDraftInput {
     pub session_id: String,
 }
 
+// 扫描 sandbox 目录产出文件（方案A：claude 用 Write 工具把插件文件写到 workspace，
+// CLI 跑完后 Rust 扫描目录收成结构化 files）。与前端 DraftFile 同构（path + content）。
+#[derive(Clone, Debug, Serialize)]
+pub struct DraftFileJson {
+    pub path: String,
+    pub content: String,
+}
+
+// scan_workspace_files 命令入参：仅 sessionId（sandbox 路径从 SessionRecord.workspace_dir 取，禁止硬编码）。
+#[derive(Debug, Deserialize)]
+pub struct ScanWorkspaceInput {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SendInputInput {
     #[serde(alias = "sessionId")]
@@ -320,7 +335,7 @@ pub fn start_session<E: AssistantEventSink>(
     let definition = tool_definition(input.tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
-    let workspace_dir = resolve_workspace(input.workspace_dir)?;
+    let workspace_dir = resolve_workspace(input.workspace_dir, Some(state.store.root()))?;
     let session_id = new_session_id(input.tool);
     let final_prompt = match input.system_prompt.as_deref() {
         Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n---\n\n{}", input.prompt),
@@ -651,6 +666,115 @@ pub fn read_draft(
     state.store.read_draft(&input.session_id)
 }
 
+/// 扫描 sandbox 目录收成结构化文件列表（方案A：claude 用 Write 工具把插件文件写到 workspace）。
+///
+/// 数据源：从 SessionRecord.workspace_dir 取 sandbox 根目录（禁止硬编码，路径来自落盘记录）。
+/// 递归遍历所有文件，排除：隐藏文件（. 开头）、node_modules、.git、二进制文件（非 UTF-8 跳过）、
+/// 超大文件（>256KB 跳过，对齐后端 MAX_PLUGIN_FILE_BYTES 限制）。
+/// 路径转相对（相对 sandbox 根），canonicalize 前缀断言防穿越（不返回 sandbox 外的文件）。
+///
+/// 空目录（纯对话 / claude 未写文件）返回 Ok(Vec::new())，调用方据此回退到对话态逻辑。
+pub fn scan_workspace_files(
+    state: &CodeAssistantState,
+    input: ScanWorkspaceInput,
+) -> Result<Vec<DraftFileJson>, String> {
+    // 从 SessionRecord 取 workspace_dir（单一真源，禁止硬编码路径）。
+    let session = state
+        .store
+        .list_sessions()
+        .into_iter()
+        .find(|r| r.session_id == input.session_id)
+        .ok_or_else(|| format!("session 不存在：{}", input.session_id))?;
+    let workspace_dir = session.workspace_dir;
+    // sandbox 根 canonicalize（防符号链接逃逸）；目录不存在视为空（返回空列表）。
+    let root = std::path::PathBuf::from(&workspace_dir);
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let root_canon = root
+        .canonicalize()
+        .map_err(|error| format!("sandbox 目录无法访问：{error}"))?;
+    // 递归扫描收集（depth-first，跳过排除项）。
+    let mut files: Vec<DraftFileJson> = Vec::new();
+    collect_workspace_files(&root_canon, &root_canon, &mut files)?;
+    // manifest.json 置顶（与 buildLocalDraft 同款约定，前端 parseManifest 直接命中首位）。
+    files.sort_by_key(|file| if file.path == "manifest.json" { 0 } else { 1 });
+    Ok(files)
+}
+
+/// 递归收集 sandbox 文件（内部辅助，scan_workspace_files 调用）。
+///
+/// 排除规则（硬性要求）：
+/// - 隐藏文件 / 目录（文件名以 . 开头，如 .env / .git / .claude）。
+/// - node_modules 目录（依赖体积大，非插件源码）。
+/// - 二进制文件（read_to_string 失败即非 UTF-8，跳过不报错）。
+/// - 超大文件（>256KB，对齐后端 MAX_PLUGIN_FILE_BYTES，避免后续上传必然 400）。
+///
+/// 防穿越：canonicalize 每个文件后断言仍以 root_canon 为前缀（符号链接逃逸防御）。
+fn collect_workspace_files(
+    current: &std::path::Path,
+    root_canon: &std::path::Path,
+    out: &mut Vec<DraftFileJson>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(current).map_err(|error| error.to_string())?;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        // 排除隐藏项（.env / .git / .claude 等系统/配置文件）。
+        if name.starts_with('.') {
+            continue;
+        }
+        // 排除 node_modules（依赖目录，体积大且非插件源码）。
+        if name == "node_modules" {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue, // 元数据读取失败跳过（权限/竞态等）。
+        };
+        if metadata.is_dir() {
+            // 递归子目录（collect_workspace_files 自带排除规则）。
+            collect_workspace_files(&path, root_canon, out)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            continue; // 符号链接等非普通文件跳过。
+        }
+        // 超大文件跳过（对齐后端 256KB 单文件限制，避免上传必然 400）。
+        const MAX_FILE_BYTES: u64 = 256 * 1024;
+        if metadata.len() > MAX_FILE_BYTES {
+            continue;
+        }
+        // 防穿越：canonicalize 后断言仍以 sandbox 根为前缀（符号链接逃逸防御）。
+        let canon = match path.canonicalize() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !canon.starts_with(root_canon) {
+            continue; // 逃逸 sandbox，跳过（不报错，静默忽略异常项）。
+        }
+        // 读取内容：read_to_string 失败即二进制文件（非 UTF-8），跳过不报错。
+        let content = match std::fs::read_to_string(&canon) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        // 相对路径（相对 sandbox 根），统一用 / 分隔（跨平台一致，对齐前端 cleanPath）。
+        let rel = canon
+            .strip_prefix(root_canon)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if rel.is_empty() {
+            continue;
+        }
+        out.push(DraftFileJson {
+            path: rel,
+            content,
+        });
+    }
+    Ok(())
+}
+
 fn run_once(
     state: &CodeAssistantState,
     tool: CodeAssistantTool,
@@ -662,7 +786,7 @@ fn run_once(
     let definition = tool_definition(tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
-    let workspace_dir = resolve_workspace(workspace_dir)?;
+    let workspace_dir = resolve_workspace(workspace_dir, Some(state.store.root()))?;
     let session_id = new_session_id(tool);
     let args = command.args_with(definition.probe_args(&prompt, model.as_deref()));
     let command_preview = command_preview(&command.binary, &args);
@@ -1388,13 +1512,19 @@ fn redact_arg(arg: &str) -> String {
 
 /// workspace 目录校验 + canonicalize（防符号链接逃逸）。
 /// pub(crate) 供 plugin_script::run_plugin_script 复用其 canonicalize 逻辑。
-pub(crate) fn resolve_workspace(workspace_dir: Option<String>) -> Result<String, String> {
+pub(crate) fn resolve_workspace(workspace_dir: Option<String>, default_root: Option<&std::path::Path>) -> Result<String, String> {
     let path = workspace_dir
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
+        .or_else(|| {
+            // 默认落到 app_data/claude-sandbox 隔离目录（不读宿主项目 CLAUDE.md/hooks），
+            // 避免 claude 在项目目录运行时被 Trellis 上下文覆盖 systemPrompt。
+            default_root.map(|root| root.join("claude-sandbox"))
+        })
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    // 隔离目录不存在则创建（首次使用 claude-sandbox）。
     if !path.exists() {
-        return Err(format!("workspace 不存在：{}", path.to_string_lossy()));
+        std::fs::create_dir_all(&path).map_err(|e| format!("创建 sandbox 目录失败：{e}"))?;
     }
     if !path.is_dir() {
         return Err(format!("workspace 不是目录：{}", path.to_string_lossy()));
@@ -2099,5 +2229,196 @@ mod tests {
         assert_eq!(resolved.prefix_args.len(), 1);
         assert!(resolved.prefix_args[0].ends_with("fake.js"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // === sandbox 扫描（方案A：claude 写文件到 workspace，CLI 跑完扫描收成 files） ===
+    //
+    // 覆盖 scan_workspace_files + collect_workspace_files：
+    // - 正常扫描 manifest.json + ui/index.html（claude 典型产出）。
+    // - 排除隐藏文件（.env）、node_modules、.git。
+    // - 跳过二进制文件（非 UTF-8）。
+    // - 跳过超大文件（>256KB）。
+    // - manifest.json 置顶。
+    // - session 不存在报错；sandbox 空目录返回空列表。
+
+    /// 构造一个带 sandbox 记录的 state（workspace_dir 指向临时 sandbox）。
+    /// 返回 (state, sandbox_root)：测试方在 sandbox_root 下写文件后调 scan_workspace_files。
+    fn state_with_sandbox(test_name: &str) -> (CodeAssistantState, PathBuf) {
+        let store = temp_assistant_store(test_name);
+        let sandbox = store.root().join("claude-sandbox");
+        std::fs::create_dir_all(&sandbox).unwrap();
+        // 写一条 session 记录，workspace_dir 指向 sandbox（scan_workspace_files 从此取路径）。
+        store
+            .upsert_session(SessionRecord {
+                session_id: "scan-1".into(),
+                tool: CodeAssistantTool::Claude,
+                model: Some("sonnet".into()),
+                workspace_dir: sandbox.to_string_lossy().to_string(),
+                status: "exited".into(),
+                transcript_path: store.transcript_path("scan-1").to_string_lossy().to_string(),
+                command_preview: vec!["claude".into()],
+                pid: None,
+                started_at: "1".into(),
+                ended_at: None,
+                exit_code: Some(0),
+                cli_session_id: None,
+                title: None,
+                archived: None,
+                draft_updated_at: None,
+            })
+            .unwrap();
+        let state = CodeAssistantState {
+            store,
+            processes: Arc::new(Mutex::new(HashMap::new())),
+        };
+        (state, sandbox)
+    }
+
+    #[test]
+    fn scan_returns_manifest_and_files_with_relative_paths() {
+        // claude 典型产出：manifest.json + ui/index.html，扫描返回相对路径。
+        let (state, sandbox) = state_with_sandbox("scan-normal");
+        std::fs::write(
+            sandbox.join("manifest.json"),
+            r#"{"id":"pomodoro","name":"番茄钟"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(sandbox.join("ui")).unwrap();
+        std::fs::write(sandbox.join("ui").join("index.html"), "<html></html>").unwrap();
+
+        let files = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "scan-1".to_string(),
+            },
+        )
+        .expect("扫描应成功");
+
+        // manifest.json 置顶，ui/index.html 跟随；路径用 / 分隔（跨平台一致）。
+        assert_eq!(files.len(), 2, "应返回 2 个文件，实际 {files:?}");
+        assert_eq!(files[0].path, "manifest.json", "manifest.json 应置顶");
+        assert_eq!(files[0].content, r#"{"id":"pomodoro","name":"番茄钟"}"#);
+        assert_eq!(files[1].path, "ui/index.html");
+        assert_eq!(files[1].content, "<html></html>");
+    }
+
+    #[test]
+    fn scan_excludes_hidden_files_and_node_modules_and_git() {
+        // 排除 .env / .git 目录 / node_modules 目录（依赖体积大且非插件源码）。
+        let (state, sandbox) = state_with_sandbox("scan-exclude");
+        std::fs::write(sandbox.join("manifest.json"), "{}").unwrap();
+        std::fs::write(sandbox.join(".env"), "SECRET=xxx").unwrap();
+        std::fs::create_dir_all(sandbox.join(".git")).unwrap();
+        std::fs::write(sandbox.join(".git").join("config"), "git-config").unwrap();
+        std::fs::create_dir_all(sandbox.join("node_modules")).unwrap();
+        std::fs::write(
+            sandbox.join("node_modules").join("lib.js"),
+            "module.exports = 1",
+        )
+        .unwrap();
+        std::fs::create_dir_all(sandbox.join("ui")).unwrap();
+        std::fs::write(sandbox.join("ui").join("index.html"), "<html></html>").unwrap();
+
+        let files = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "scan-1".to_string(),
+            },
+        )
+        .expect("扫描应成功");
+
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        // 仅保留 manifest.json + ui/index.html，.env / .git / node_modules 全部排除。
+        assert!(paths.contains(&"manifest.json"), "应含 manifest.json");
+        assert!(paths.contains(&"ui/index.html"), "应含 ui/index.html");
+        assert!(!paths.contains(&".env"), "不应含 .env");
+        assert!(
+            !paths.iter().any(|p| p.starts_with(".git")),
+            "不应含 .git 目录内文件"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with("node_modules")),
+            "不应含 node_modules 目录内文件"
+        );
+    }
+
+    #[test]
+    fn scan_skips_binary_files() {
+        // 二进制文件（非 UTF-8）跳过，不报错（read_to_string 失败即跳过）。
+        let (state, sandbox) = state_with_sandbox("scan-binary");
+        std::fs::write(sandbox.join("manifest.json"), "{}").unwrap();
+        // 写入无效 UTF-8 字节序列（二进制文件）。
+        let binary = vec![0xFFu8, 0xFE, 0xFD, 0x00];
+        std::fs::write(sandbox.join("image.png"), binary).unwrap();
+        std::fs::create_dir_all(sandbox.join("ui")).unwrap();
+        std::fs::write(sandbox.join("ui").join("index.html"), "<html></html>").unwrap();
+
+        let files = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "scan-1".to_string(),
+            },
+        )
+        .expect("扫描应成功（二进制跳过不报错）");
+
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(!paths.contains(&"image.png"), "二进制文件应跳过");
+        assert!(paths.contains(&"manifest.json"));
+        assert!(paths.contains(&"ui/index.html"));
+    }
+
+    #[test]
+    fn scan_skips_oversized_files() {
+        // 超大文件（>256KB）跳过，对齐后端 MAX_PLUGIN_FILE_BYTES 限制。
+        let (state, sandbox) = state_with_sandbox("scan-oversize");
+        std::fs::write(sandbox.join("manifest.json"), "{}").unwrap();
+        // 写一个 300KB 的文本文件（超 256KB 限制）。
+        let big = "x".repeat(300 * 1024);
+        std::fs::write(sandbox.join("huge.txt"), big).unwrap();
+        std::fs::create_dir_all(sandbox.join("ui")).unwrap();
+        std::fs::write(sandbox.join("ui").join("index.html"), "<html></html>").unwrap();
+
+        let files = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "scan-1".to_string(),
+            },
+        )
+        .expect("扫描应成功（超大文件跳过）");
+
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(!paths.contains(&"huge.txt"), "超大文件应跳过");
+        assert!(paths.contains(&"manifest.json"));
+    }
+
+    #[test]
+    fn scan_empty_sandbox_returns_empty_list() {
+        // 空目录（纯对话 / claude 未写文件）返回空列表，调用方据此回退对话态逻辑。
+        let (state, _sandbox) = state_with_sandbox("scan-empty");
+        let files = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "scan-1".to_string(),
+            },
+        )
+        .expect("空 sandbox 应返回空列表");
+        assert!(files.is_empty(), "空 sandbox 应返回空列表");
+    }
+
+    #[test]
+    fn scan_missing_session_errors() {
+        // session 不存在报错（不静默吞，避免前端拿到空列表误判为「claude 没写文件」）。
+        let store = temp_assistant_store("scan-missing-session");
+        let state = CodeAssistantState {
+            store,
+            processes: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let result = scan_workspace_files(
+            &state,
+            ScanWorkspaceInput {
+                session_id: "nonexistent".to_string(),
+            },
+        );
+        assert!(result.is_err(), "session 不存在应报错");
     }
 }

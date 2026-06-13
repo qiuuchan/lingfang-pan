@@ -875,6 +875,126 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
   };
 }
 
+// === 方案A：从 sandbox 扫描结果构建插件草稿（claude 用 Write 工具写文件到 workspace） ===
+//
+// 与 buildLocalDraft 的差异：files 直接来自 Rust scan_workspace_files 扫描目录（非 stdout 围栏块解析），
+// manifest 从扫描结果里的 manifest.json 内容解析（claude 真实写盘，比强制纯文本围栏块稳定）。
+//
+// 调用时机：CLI exit 后，finalizeSession 先调 scanWorkspaceFiles，若返回 manifest.json + 文件即走本函数，
+// 不再走 stdout 围栏块解析（claude 写了文件就不再产围栏块，stdout 解析会判 invalid）。
+//
+// 返回值约定：
+// - 扫描到 manifest.json 且至少一个文件 → 完整 PluginDraft（status=ready/partial）。
+// - 空 sandbox 或无 manifest.json → 返回 null（调用方据回退到对话态 / stdout 围栏块解析）。
+
+export interface SbFile {
+  path: string;
+  content: string;
+}
+
+export function buildDraftFromSandboxFiles(input: {
+  prompt: string;
+  providerLabel: string;
+  model: string;
+  result: CliProbeResult;
+  files: SbFile[];
+}): PluginDraft | null {
+  // 无 manifest.json → 无法识别为插件包（claude 未写文件或纯对话），返回 null 让调用方回退。
+  const manifestFile = input.files.find((file) => file.path === 'manifest.json');
+  if (!manifestFile) return null;
+
+  const id = `local-${input.result.tool}-${Date.now()}`;
+  const pluginId = safePluginId(input.prompt);
+  const now = new Date().toISOString();
+
+  // 从 manifest.json 内容解析 manifest（claude 写盘的原始 JSON，可能含字段缺失 → 兜底补全）。
+  // 复用 parseStructuredPackage 同款兜底策略（枚举 normalizeEnum + capabilities normalizeCapabilities）。
+  let parsedManifest: Partial<PluginManifest> | null = null;
+  const schemaDiagnostics: DraftDiagnostic[] = [];
+  try {
+    const obj = JSON.parse(manifestFile.content);
+    const zodParsed = PluginManifest.safeParse(obj);
+    if (zodParsed.success) {
+      parsedManifest = zodParsed.data;
+    } else {
+      // zod 校验失败：保留可读字段供兜底补全，并补 schema 诊断。
+      parsedManifest = typeof obj === 'object' && obj ? (obj as Partial<PluginManifest>) : null;
+      schemaDiagnostics.push({
+        stage: 'schema',
+        status: 'fail',
+        message: `manifest 校验失败：${zodParsed.error.issues.map((i) => `${i.path.join('.') || '(root)'} ${i.message}`).join('; ')}`,
+      });
+    }
+  } catch (err) {
+    schemaDiagnostics.push({
+      stage: 'schema',
+      status: 'fail',
+      message: `manifest JSON 解析失败：${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+
+  // CLI 字段优先 + 前端兜底补全（与 buildLocalDraft 同款策略，保证少字段 partial 场景仍可用）。
+  const manifest = {
+    id: parsedManifest?.id || pluginId,
+    name: parsedManifest?.name || input.prompt.slice(0, 24) || '本地代码助手插件',
+    version: parsedManifest?.version || '0.1.0',
+    description: parsedManifest?.description || `由 ${input.providerLabel} 本地 CLI 生成的插件草稿`,
+    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'],
+    entry: parsedManifest?.entry || LOCAL_DRAFT_ENTRY,
+    visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, 'tenant') as 'private' | 'tenant',
+    capabilities: normalizeCapabilities(parsedManifest?.capabilities),
+  };
+
+  // files：扫描结果去掉旧的 manifest.json（claude 写盘的原始 JSON 可能字段不全），
+  // 重新塞入收敛后的合法 manifest.json（放首位，与 buildLocalDraft 同款约定）。
+  const scanFilesExceptManifest = input.files.filter((file) => file.path !== 'manifest.json');
+  let files: DraftFile[] = [...scanFilesExceptManifest];
+
+  // entry 缺失自动兜底页（claude 偶尔只写 manifest.json 漏 entry 文件）。
+  // entryMissing 标记原始扫描是否缺失 entry（决定 status：原始缺失则 partial，即使兜底页注入也不判 ready）。
+  const entryMissing = !scanFilesExceptManifest.some((file) => file.path === manifest.entry);
+  if (entryMissing) {
+    files = [...files, {
+      path: manifest.entry,
+      content: buildFallbackEntryHtml({
+        manifestName: manifest.name,
+        description: manifest.description,
+      }),
+    }];
+    schemaDiagnostics.push({
+      stage: 'schema',
+      status: 'warn',
+      message: `entry ${manifest.entry} 缺失，已生成兜底预览页`,
+    });
+  }
+  files = [{ path: 'manifest.json', content: JSON.stringify(manifest, null, 2) }, ...files];
+
+  // 状态判定：有 manifest 且原始扫描含 entry 文件 → ready；entry 缺失（兜底页注入）或 manifest 解析失败 → partial。
+  const status: PluginDraft['status'] = parsedManifest && !entryMissing ? 'ready' : 'partial';
+
+  const schemaStatus: DraftDiagnostic['status'] = status === 'ready' ? 'pass' : 'warn';
+  const schemaSummary = `sandbox 扫描：${status}（manifest ${parsedManifest ? '已解析' : '兜底'}，扫描文件 ${input.files.length}）`;
+
+  return {
+    id,
+    status,
+    files,
+    turns: [
+      { role: 'user', content: input.prompt, at: now },
+      // assistant 内容优先用 stdout（claude 写完文件后给用户的自然语言说明），其次固定文案。
+      { role: 'assistant', content: extractCliText(input.result) || '本地代码助手已把插件文件写入工作目录。', at: now },
+    ],
+    diagnostics: [
+      { stage: 'local-cli', status: input.result.success ? 'pass' : 'fail', message: `${input.providerLabel} ${input.model === 'default' ? '默认模型' : input.model}，session ${cliSessionId(input.result) || '未返回'}` },
+      { stage: 'command', status: 'info', message: cliCommand(input.result).join(' ') || '未返回命令预览' },
+      { stage: 'transcript', status: cliTranscriptPath(input.result) ? 'info' : 'fail', message: cliTranscriptPath(input.result) || '未返回 transcript 路径' },
+      { stage: 'schema', status: schemaStatus, message: schemaSummary },
+      ...(input.result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
+      ...schemaDiagnostics,
+    ],
+  };
+}
+
 export function normalizeTurns(turns?: DraftTurn[]): DraftTurn[] {
   const out: DraftTurn[] = [];
   for (const turn of turns || []) {
@@ -1004,6 +1124,89 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
       ...prev.turns,
       { role: 'user', content: prompt, at: now },
       { role: 'assistant', content: parsed.notes || output || '本地 CLI 没有返回可展示内容。', at: now },
+    ]),
+    diagnostics: [
+      ...prev.diagnostics,
+      { stage: 'local-cli', status: result.success ? 'pass' : 'fail', message: `追问 ${cliSessionId(result) || '未返回 session'}` },
+      { stage: 'schema', status: schemaStatus, message: schemaSummary },
+      ...(result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
+      ...schemaDiagnostics,
+    ],
+  };
+}
+
+// 方案A 追问合并：与 mergeFollowupDraft 同款语义，但 files 数据源改为 sandbox 扫描结果（非 stdout 围栏块）。
+// 调用时机：追问 CLI exit 后，finalizeSession 先调 scanWorkspaceFiles；返回 manifest.json 即走本函数，
+// 否则回退到 mergeFollowupDraft（stdout 围栏块解析）或对话态。
+// prev.id 保持稳定（同一插件跨轮迭代，不新开草稿）。
+export function mergeFollowupDraftWithSandbox(prev: PluginDraft, result: CliProbeResult, prompt: string, sbFiles: SbFile[]): PluginDraft {
+  const output = extractCliText(result);
+  const now = new Date().toISOString();
+
+  // 从 sandbox 扫描的 manifest.json 解析 manifest（claude 真实写盘）。
+  const manifestFile = sbFiles.find((file) => file.path === 'manifest.json');
+  let parsedManifest: Partial<PluginManifest> | null = null;
+  if (manifestFile) {
+    try {
+      const obj = JSON.parse(manifestFile.content);
+      parsedManifest = typeof obj === 'object' && obj ? (obj as Partial<PluginManifest>) : null;
+    } catch {
+      parsedManifest = null;
+    }
+  }
+
+  // manifest 沿用 prev 的 id/name（迭代不换插件），仅用追问产出补全可变字段。
+  const prevManifest = parseManifest(prev.files);
+  const manifest = {
+    id: parsedManifest?.id || prevManifest.id,
+    name: parsedManifest?.name || prevManifest.name,
+    version: parsedManifest?.version || prevManifest.version,
+    description: parsedManifest?.description || prevManifest.description,
+    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'],
+    entry: parsedManifest?.entry || prevManifest.entry,
+    visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
+    capabilities: normalizeCapabilities(parsedManifest?.capabilities),
+  };
+
+  // files：sandbox 扫描结果非空则覆盖（迭代），否则保留 prev.files（兜底，追问未改文件时维持上轮）。
+  const scanFilesExceptManifest = sbFiles.filter((file) => file.path !== 'manifest.json');
+  let files: DraftFile[];
+  let status: PluginDraft['status'];
+  const schemaDiagnostics: DraftDiagnostic[] = [];
+  if (scanFilesExceptManifest.length > 0) {
+    files = [...scanFilesExceptManifest];
+    // 原始扫描是否含 entry（决定 ready/partial，兜底页注入不算）。
+    const entryMissing = !scanFilesExceptManifest.some((file) => file.path === manifest.entry);
+    if (entryMissing) {
+      files = [...files, {
+        path: manifest.entry,
+        content: buildFallbackEntryHtml({
+          manifestName: manifest.name,
+          description: manifest.description,
+        }),
+      }];
+      schemaDiagnostics.push({ stage: 'schema', status: 'warn', message: `entry ${manifest.entry} 缺失，已生成兜底预览页` });
+    }
+    // sandbox 有源码产出且原始含 entry → ready；entry 缺失（兜底页注入）→ partial。
+    status = parsedManifest && !entryMissing ? 'ready' : 'partial';
+  } else {
+    // sandbox 仅 manifest.json 无源码文件：保留上轮文件，标记 partial（追问未改源码，保守标记）。
+    files = prev.files.filter((file) => file.path !== 'manifest.json');
+    status = 'partial';
+  }
+  files = [{ path: 'manifest.json', content: JSON.stringify(manifest, null, 2) }, ...files];
+
+  const schemaStatus: DraftDiagnostic['status'] = status === 'ready' ? 'pass' : 'warn';
+  const schemaSummary = `追问 sandbox 扫描：${status}（manifest ${parsedManifest ? '已解析' : '沿用上轮'}，扫描文件 ${sbFiles.length}）`;
+
+  return {
+    ...prev,
+    status,
+    files,
+    turns: normalizeTurns([
+      ...prev.turns,
+      { role: 'user', content: prompt, at: now },
+      { role: 'assistant', content: output || '本地代码助手已更新插件文件。', at: now },
     ]),
     diagnostics: [
       ...prev.diagnostics,

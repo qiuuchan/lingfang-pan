@@ -269,7 +269,7 @@ pub fn run_plugin_script(
     let (sandbox_canon, entry_canon) =
         materialize_sandbox(&data_dir, &input.plugin_id, &input.files, &input.entry)?;
 
-    let workspace = resolve_workspace(Some(sandbox_canon.to_string_lossy().to_string()))?;
+    let workspace = resolve_workspace(Some(sandbox_canon.to_string_lossy().to_string()), None)?;
     let mut args: Vec<String> = Vec::new();
     // Python 经 py launcher 时需显式指定 -3？保持简单：直接用探测到的 binary（py/python3/node），
     // 由 binary 自身决定默认版本。此处仅追加 entry 路径。

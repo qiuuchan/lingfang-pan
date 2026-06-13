@@ -31,6 +31,10 @@ fn build_args(
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--include-partial-messages".to_string(),
+        // 方案A：claude 用 Write 工具把插件文件写到 sandbox 目录（agent 本能），Rust 跑完扫描目录收成包。
+        // bypassPermissions 让 headless 自动放行写文件（不卡授权）。
+        "--permission-mode".to_string(),
+        "bypassPermissions".to_string(),
     ];
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);

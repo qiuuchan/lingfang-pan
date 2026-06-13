@@ -129,6 +129,11 @@ impl AssistantStore {
         self.root.join("config.json")
     }
 
+    /// 数据根目录（app_data_dir/code-assistant），供 sandbox 等派生路径使用。
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     fn sessions_path(&self) -> PathBuf {
         self.root.join("sessions.json")
     }

@@ -41,6 +41,14 @@ export function readDraft(sessionId: string): Promise<string | null> {
   return tauriInvoke<string | null>('code_assistant_read_draft', { input: { sessionId } });
 }
 
+// 扫描 sandbox 目录收成结构化文件列表（方案A：claude 用 Write 工具把插件文件写到 workspace，
+// CLI 跑完后 Rust 扫描目录产出 files 供 finalizeSession 构建插件草稿）。
+// 返回 {path, content}[]：path 为相对 sandbox 根的路径（统一 / 分隔）。
+// 空 sandbox（纯对话 / claude 未写文件）返回空数组，调用方据此回退到对话态逻辑。
+export function scanWorkspaceFiles(sessionId: string): Promise<{ path: string; content: string }[]> {
+  return tauriInvoke<{ path: string; content: string }[]>('code_assistant_scan_workspace', { input: { sessionId } });
+}
+
 // 读取 localStorage 中的 activeId（无则返回 null）。解析失败静默回退 null，不抛错。
 export function readActiveId(tenantId: string | null): string | null {
   try {

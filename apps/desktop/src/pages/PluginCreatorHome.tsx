@@ -10,6 +10,7 @@ import {
   readDraft,
   renameConversation,
   saveDraft,
+  scanWorkspaceFiles,
   writeActiveId,
 } from '@/lib/conversations';
 import { toCreatorError, toUploadError, type CreatorError } from '@/lib/creator-error';
@@ -17,11 +18,13 @@ import {
   EXAMPLES,
   PROVIDERS,
   STATUS_LABEL,
+  buildDraftFromSandboxFiles,
   buildLocalDraft,
   hasStructuredBlocks,
   makeConversationDraft,
   mergeConversationTurn,
   mergeFollowupDraft,
+  mergeFollowupDraftWithSandbox,
   normalizeTurns,
   parseManifest,
   parseTranscript,
@@ -328,12 +331,42 @@ export function PluginCreatorHome() {
       const promptText = pending?.text || pendingUser || '本地代码助手插件';
       const prevDraft = currentDraftRef.current; // 读 ref 最新值（闭包陷阱修复）
 
+      // 方案A：claude 用 Write 工具把插件文件写到 sandbox 目录，CLI exit 后先扫描 sandbox 收文件。
+      // 扫描到 manifest.json → files 直接来自磁盘（claude 真实写盘），不走 stdout 围栏块解析
+      // （claude 写了文件后不再产围栏块，stdout 解析会判 invalid，故 sandbox 是结构化产出的主来源）。
+      // 扫描为空（纯对话 / claude 未写文件）→ 回退到现有对话 / 围栏块逻辑。
+      const sbFiles = await scanWorkspaceFiles(sessionId).catch(() => []);
+      const hasSandboxManifest = sbFiles.some((file) => file.path === 'manifest.json');
+
       // design §3.1.2 / AC1：对话优先 gate——产出含 manifest/file 块才解析为草稿（自动检测）。
       // 纯对话态（无结构化块）只追加 turn，status='generating'，不弹详情、不判 invalid。
       const structured = hasStructuredBlocks(finalSession.stdout);
       let nextDraft: NonNullable<typeof currentDraft>;
-      if (structured) {
-        // 有结构化块：走原 buildLocalDraft（首轮）/ mergeFollowupDraft（追问），产出/更新草稿并弹详情。
+      if (hasSandboxManifest) {
+        // sandbox 扫描到 manifest.json（claude 写了文件）：走 sandbox 草稿构建，files 来自磁盘扫描。
+        if (isFollowup && prevDraft) {
+          nextDraft = mergeFollowupDraftWithSandbox(prevDraft, probeResult, promptText, sbFiles);
+        } else {
+          const built = buildDraftFromSandboxFiles({
+            prompt: promptText,
+            providerLabel: pending?.providerLabel || finalSession.providerLabel,
+            model: pending?.model || finalSession.model,
+            result: probeResult,
+            files: sbFiles,
+          });
+          // sandbox 有 manifest.json 但 buildDraftFromSandboxFiles 返回 null（极端：manifest 解析全失败），
+          // 回退到 stdout 围栏块解析，保证不丢产出。
+          nextDraft = built || buildLocalDraft({
+            prompt: promptText,
+            providerLabel: pending?.providerLabel || finalSession.providerLabel,
+            model: pending?.model || finalSession.model,
+            result: probeResult,
+          });
+        }
+        setCurrentDraft(nextDraft);
+        setDetailsOpen(true);
+      } else if (structured) {
+        // 有结构化块（claude 偶尔仍产围栏块兜底）：走原 buildLocalDraft（首轮）/ mergeFollowupDraft（追问）。
         if (isFollowup && prevDraft) {
           // design §3.3.6 (c)：追问在既有 draft 上累积 turns、files 用新产出覆盖（mergeFollowupDraft）。
           nextDraft = mergeFollowupDraft(prevDraft, probeResult, promptText);
@@ -383,12 +416,14 @@ export function PluginCreatorHome() {
         }
       }
 
-      // toast 文案分场景：结构化走「完成」语义；纯对话态走「已完成对话」，避免 invalid 误报。
-      if (structured && finalSession.status === 'exited' && finalSession.exitCode === 0) {
+      // toast 文案分场景：结构化（sandbox 扫描或围栏块）走「完成」语义；纯对话态走「已完成对话」，避免 invalid 误报。
+      // hasSandboxManifest / structured 任一命中即视为「有结构化产出」，走完成语义。
+      const hasStructuredOutput = hasSandboxManifest || structured;
+      if (hasStructuredOutput && finalSession.status === 'exited' && finalSession.exitCode === 0) {
         toast.success(isFollowup ? '本地代码助手已完成追问迭代' : '本地代码助手已完成长任务');
       } else if (finalSession.status === 'stopped') {
         toast.message('已停止本地代码助手，保留部分结果');
-      } else if (!structured) {
+      } else if (!hasStructuredOutput) {
         toast.success('对话已完成');
       } else {
         toast.error('本地代码助手未成功完成，请查看右侧诊断');
