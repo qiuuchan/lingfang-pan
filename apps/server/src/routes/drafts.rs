@@ -1,9 +1,7 @@
-//! 插件草稿路由（产品核心）：create / get / generate / publish。
+//! 插件草稿路由：create / get / publish。
 
-mod generation;
 mod publish;
 
-pub use generation::{generate, generate_stream};
 pub use publish::publish;
 
 use axum::{

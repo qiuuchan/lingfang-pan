@@ -7,7 +7,6 @@ mod config;
 mod crypto;
 mod db;
 mod error;
-mod llm;
 mod plugin_policy;
 mod routes;
 mod state;
@@ -61,11 +60,7 @@ async fn main() {
     }
     let bind_addr = config.bind_addr.clone();
     let cors = cors_layer(&config);
-    let state = AppState {
-        pool,
-        config,
-        http: reqwest::Client::new(),
-    };
+    let state = AppState { pool, config };
 
     let app = routes::router()
         .with_state(state)
