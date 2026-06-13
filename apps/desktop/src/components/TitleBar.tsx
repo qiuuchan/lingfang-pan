@@ -24,15 +24,25 @@ export function TitleBar({ sidebarOpen, onToggleSidebar }: TitleBarProps) {
     return () => { unlisten?.(); };
   }, []);
 
-  const api = () => (window as unknown as { __TAURI__?: { window?: { getCurrent?: () => WinApi } } }).__TAURI__?.window?.getCurrent?.();
+  const api = () => (window as unknown as { __TAURI__?: { window?: { getCurrent?: () => WinApi; getCurrentWindow?: () => WinApi } } }).__TAURI__?.window?.getCurrentWindow?.() ?? (window as unknown as { __TAURI__?: { window?: { getCurrent?: () => WinApi } } }).__TAURI__?.window?.getCurrent?.();
+
+  // Tauri v2 推荐的可靠拖拽：mousedown 时调 startDragging（不依赖 data-tauri-drag-region 属性）。
+  // 仅左键 + 非按钮元素（target 不是 button/input）才触发，避免点窗口控制按钮时也拖动。
+  const onDragStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, a, [role="button"]')) return;
+    api()?.startDragging?.();
+  };
 
   return (
     <div
       data-tauri-drag-region
+      onMouseDown={onDragStart}
       className="flex h-9 shrink-0 select-none items-center justify-between border-b bg-background/80 backdrop-blur"
     >
       {/* 左侧：侧边栏折叠按钮 + 应用名 */}
-      <div className="flex h-full items-center gap-1 px-2" data-tauri-drag-region>
+      <div className="flex h-full items-center gap-1 px-2" data-tauri-drag-region onMouseDown={onDragStart}>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onToggleSidebar(); }}
@@ -65,6 +75,7 @@ interface WinApi {
   minimize?: () => Promise<void> | void;
   toggleMaximize?: () => Promise<void> | void;
   close?: () => Promise<void> | void;
+  startDragging?: () => Promise<void> | void;
   isMaximized?: () => Promise<boolean>;
   onResized?: (cb: (maximized: boolean) => void) => Promise<(() => void) | undefined>;
 }
