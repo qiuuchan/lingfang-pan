@@ -603,7 +603,7 @@ describe('makeConversationDraft', () => {
     expect(draft.turns).toHaveLength(2);
     expect(draft.files).toEqual([]);
     // AC1 关键：纯对话态绝不取 'invalid'，否则触发 destructive Badge + 预览 disabled。
-    expect(draft.status).toBe('generating');
+    expect(draft.status).toBe('chat');
     expect(draft.diagnostics).toEqual([]);
   });
 
@@ -628,7 +628,7 @@ describe('mergeConversationTurn', () => {
     const prev = makeConversationDraft('你好', '你好！');
     const merged = mergeConversationTurn(prev, '再问', '再答');
     expect(merged.files).toEqual([]);
-    expect(merged.status).toBe('generating');
+    expect(merged.status).toBe('chat');
   });
 
   it('prev.id 保持稳定（同一对话跨轮，不新开草稿）', () => {
