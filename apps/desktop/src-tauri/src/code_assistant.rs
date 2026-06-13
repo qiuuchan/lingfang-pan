@@ -726,21 +726,172 @@ enum OutputFormat {
     StreamJson,
 }
 
-/// 解析 claude stream-json 的一行，提取 assistant 文本片段；非 assistant 行返回 None。
-fn extract_stream_json_text(line: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
-    if value.get("type").and_then(|v| v.as_str()) != Some("assistant") {
-        return None;
-    }
-    let content = value.get("message")?.get("content")?.as_array()?;
-    let text: String = content
-        .iter()
-        .filter_map(|item| {
-            if item.get("type").and_then(|v| v.as_str()) == Some("text") {
-                item.get("text").and_then(|v| v.as_str()).map(String::from)
-            } else {
-                None
+/// stream-json 一行解析出的分类片段（design 阶段1 R3）。
+/// 关键约束：只有 Text 进 stdout 流（协议解析依赖纯文本）；
+/// Thinking / ToolUse 走独立 thought / tool 流，绝不污染 stdout。
+#[derive(Debug, Clone, PartialEq)]
+enum StreamItem {
+    /// 正文文本（assistant 文本块 / text_delta），进 stdout 流。
+    Text(String),
+    /// 思考内容（thinking 块 / thinking_delta），进 thought 流。
+    Thinking(String),
+    /// 工具调用（含 AskUserQuestion），进 tool 流。input_json 为序列化的入参（可能不完整）。
+    ToolUse {
+        name: String,
+        input_json: String,
+    },
+}
+
+/// 解析 claude stream-json 的一行，返回分类片段数组（design 阶段1 R3）。
+/// 同时兼容两种形态：
+/// - `type==assistant`（完整消息行）：遍历 message.content[]，按块类型产出 Text/Thinking/ToolUse。
+/// - `type==stream_event`（`--include-partial-messages` 的增量行）：按 event.type 分流：
+///   * content_block_start.content_block.type==tool_use → 初始化 ToolUse（input 取 content_block.input）
+///   * content_block_start.content_block.type==thinking/text → 块起始（增量阶段产出，起始本身无文本，跳过）
+///   * content_block_delta.delta.type==thinking_delta → Thinking(delta.thinking)
+///   * content_block_delta.delta.type==text_delta → Text(delta.text)
+///   * content_block_delta.delta.type==input_json_delta → ToolUse{name:"", input_json:delta.partial_json}
+///     （input_json 累积版，前端按增量渲染；tool_use_id 精确关联留后续 stream-json input 升级，本轮简化）
+///
+/// 非 JSON / 非相关行返回空 Vec（不报错）。
+fn extract_stream_json_items(line: &str) -> Vec<StreamItem> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return Vec::new();
+    };
+    let Some(ty) = value.get("type").and_then(|v| v.as_str()) else {
+        return Vec::new();
+    };
+    match ty {
+        // 完整 assistant 消息（旧 / 无 partial 的形态）：遍历 content 数组分类。
+        "assistant" => {
+            let Some(content) = value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            else {
+                return Vec::new();
+            };
+            let mut items = Vec::new();
+            for block in content {
+                let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match block_type {
+                    "text" => {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            if !text.is_empty() {
+                                items.push(StreamItem::Text(text.to_string()));
+                            }
+                        }
+                    }
+                    "thinking" => {
+                        if let Some(thinking) = block.get("thinking").and_then(|v| v.as_str()) {
+                            if !thinking.is_empty() {
+                                items.push(StreamItem::Thinking(thinking.to_string()));
+                            }
+                        }
+                    }
+                    "tool_use" => {
+                        let name = block
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let input_json = block
+                            .get("input")
+                            .map(|v| match v {
+                                // 已是字符串则透传（部分实现把 input 当字符串传）。
+                                serde_json::Value::String(s) => s.clone(),
+                                other => other.to_string(),
+                            })
+                            .unwrap_or_default();
+                        items.push(StreamItem::ToolUse { name, input_json });
+                    }
+                    _ => {}
+                }
             }
+            items
+        }
+        // stream_event 增量形态（--include-partial-messages）：按 event.type 分流。
+        "stream_event" => {
+            let Some(event) = value.get("event") else {
+                return Vec::new();
+            };
+            let Some(event_type) = event.get("type").and_then(|v| v.as_str()) else {
+                return Vec::new();
+            };
+            match event_type {
+                // 工具块起始：产出 ToolUse 占位（name 已知，input 初始化）。
+                "content_block_start" => {
+                    let Some(block) = event.get("content_block") else {
+                        return Vec::new();
+                    };
+                    match block.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+                        "tool_use" => {
+                            let name = block
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let input_json = block
+                                .get("input")
+                                .map(|v| match v {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => other.to_string(),
+                                })
+                                .unwrap_or_default();
+                            vec![StreamItem::ToolUse { name, input_json }]
+                        }
+                        // thinking/text 块起始无文本，文本由后续 delta 产出；跳过。
+                        _ => Vec::new(),
+                    }
+                }
+                // 增量块：按 delta.type 分类产出。
+                "content_block_delta" => {
+                    let Some(delta) = event.get("delta") else {
+                        return Vec::new();
+                    };
+                    match delta.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+                        "text_delta" => delta
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| vec![StreamItem::Text(s.to_string())])
+                            .unwrap_or_default(),
+                        "thinking_delta" => delta
+                            .get("thinking")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| vec![StreamItem::Thinking(s.to_string())])
+                            .unwrap_or_default(),
+                        "input_json_delta" => delta
+                            .get("partial_json")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| vec![StreamItem::ToolUse {
+                                name: String::new(),
+                                input_json: s.to_string(),
+                            }])
+                            .unwrap_or_default(),
+                        _ => Vec::new(),
+                    }
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// 解析 claude stream-json 的一行，提取 assistant 文本片段（仅 Text 类，进 stdout 协议聚合）。
+/// 保留旧签名（spawn_reader 之外的潜在复用 + 单测历史兼容）；
+/// 内部改为复用 extract_stream_json_items 后过滤 Text 项 join，
+/// 自动覆盖 thinking/tool_use 不进 stdout 的关键约束（协议解析依赖纯 stdout 文本）。
+#[allow(dead_code)]
+fn extract_stream_json_text(line: &str) -> Option<String> {
+    let text: String = extract_stream_json_items(line)
+        .into_iter()
+        .filter_map(|item| match item {
+            StreamItem::Text(s) => Some(s),
+            _ => None,
         })
         .collect::<Vec<_>>()
         .join("");
@@ -786,10 +937,16 @@ fn spawn_reader<E: AssistantEventSink>(
                 match std::io::BufRead::read_line(&mut reader, &mut buffer) {
                     Ok(0) => break,
                     Ok(_) => {
-                        let text = match output_format {
+                        // 分类产出（design 阶段1 R3）：每行解析为若干 (stream, text) 对，
+                        // 按 stream 字段独立 emit + 写盘。关键约束：
+                        // - Text → 'stdout'（协议解析依赖，transcriptTextSinceLastInput 只取 stdout/stderr）
+                        // - Thinking → 'thought'（思考折叠区，不进 stdout）
+                        // - ToolUse（含 AskUserQuestion）→ 'tool'（工具卡片，不进 stdout）
+                        // codex/opencode（Plain）保持原行为：整行进原 stream（stdout/stderr）。
+                        let items: Vec<(&'static str, String)> = match output_format {
                             OutputFormat::StreamJson => {
                                 // 旁路：先尝试提取 claude session_id（system/result 行），仅 stdout 流、只设一次。
-                                // 与文本提取并行，不互相阻塞；失败/非 system-result 行静默跳过。
+                                // 与分类解析并行，不互相阻塞；失败/非 system-result 行静默跳过。
                                 if stream == "stdout"
                                     && !cli_id_captured.load(std::sync::atomic::Ordering::SeqCst)
                                 {
@@ -817,22 +974,60 @@ fn spawn_reader<E: AssistantEventSink>(
                                         }
                                     }
                                 }
-                                match extract_stream_json_text(&buffer) {
-                                    Some(extracted) => extracted,
-                                    None => continue,
-                                }
+                                // 分类解析：按 StreamItem.type 路由到 stdout/thought/tool 流。
+                                // 仅 stdout（Text）会被 transcriptTextSinceLastInput 提取（协议聚合输入），
+                                // thought/tool 走独立流，前端按 stream 字段区分渲染，绝不污染 stdout。
+                                extract_stream_json_items(&buffer)
+                                    .into_iter()
+                                    .filter_map(|item| match item {
+                                        StreamItem::Text(text) => {
+                                            if text.is_empty() {
+                                                None
+                                            } else {
+                                                Some(("stdout", text))
+                                            }
+                                        }
+                                        StreamItem::Thinking(thinking) => {
+                                            if thinking.is_empty() {
+                                                None
+                                            } else {
+                                                Some(("thought", thinking))
+                                            }
+                                        }
+                                        StreamItem::ToolUse { name, input_json } => {
+                                            // 工具卡片内容：name + 入参摘要（空 name 表示纯 input_json_delta 增量）。
+                                            // AskUserQuestion 同走此流，前端按 name 区分问题卡片。
+                                            let merged = if name.is_empty() {
+                                                input_json
+                                            } else {
+                                                format!("{name} {input_json}").trim().to_string()
+                                            };
+                                            if merged.is_empty() {
+                                                None
+                                            } else {
+                                                Some(("tool", merged))
+                                            }
+                                        }
+                                    })
+                                    .collect()
                             }
-                            OutputFormat::Plain => buffer.clone(),
+                            OutputFormat::Plain => vec![(stream, buffer.clone())],
                         };
-                        let _ = state.store.append_transcript(
-                            &session_id,
-                            "output",
-                            json!({ "stream": stream, "text": text }),
-                        );
-                        app.emit_json(
-                            "code-assistant://output",
-                            json!({ "sessionId": session_id, "stream": stream, "text": text }),
-                        );
+                        for (item_stream, item_text) in items {
+                            let _ = state.store.append_transcript(
+                                &session_id,
+                                "output",
+                                json!({ "stream": item_stream, "text": item_text }),
+                            );
+                            app.emit_json(
+                                "code-assistant://output",
+                                json!({
+                                    "sessionId": session_id,
+                                    "stream": item_stream,
+                                    "text": item_text,
+                                }),
+                            );
+                        }
                     }
                     Err(error) => {
                         let message = error.to_string();
@@ -1335,6 +1530,298 @@ mod tests {
     fn session_id_non_json_returns_none() {
         assert_eq!(extract_stream_json_session_id("not json at all"), None);
         assert_eq!(extract_stream_json_session_id(""), None);
+    }
+
+    // === design 阶段1 R3：stream-json 分类解析（extract_stream_json_items / extract_stream_json_text） ===
+    //
+    // 覆盖：完整 assistant 行（text/thinking/tool_use 三类）+ stream_event 增量（content_block_start /
+    // content_block_delta 的 text_delta/thinking_delta/input_json_delta）+ AskUserQuestion + 解析失败/空行。
+    // 关键不变量：extract_stream_json_text 仅返回 Text 类（thinking/tool_use 绝不进 stdout）。
+
+    #[test]
+    fn items_assistant_text_block_yields_text() {
+        // 完整 assistant 行的 text 块 → Text。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![StreamItem::Text("hello".to_string())]
+        );
+    }
+
+    #[test]
+    fn items_assistant_thinking_block_yields_thinking() {
+        // 完整 assistant 行的 thinking 块 → Thinking（不进 stdout）。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"先想想"}]}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![StreamItem::Thinking("先想想".to_string())]
+        );
+    }
+
+    #[test]
+    fn items_assistant_tool_use_block_yields_tool_use() {
+        // 完整 assistant 行的 tool_use 块 → ToolUse{name, input_json}。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"path":"a.ts"}}]}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![StreamItem::ToolUse {
+                name: "Read".to_string(),
+                input_json: r#"{"path":"a.ts"}"#.to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn items_assistant_askuserquestion_yields_tool_use() {
+        // AskUserQuestion 也是 tool_use，前端按 name 区分渲染问题卡片。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"选哪个?","options":[{"label":"A"},{"label":"B"}]}]}}]}}"#;
+        let items = extract_stream_json_items(line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::ToolUse { name, input_json } => {
+                assert_eq!(name, "AskUserQuestion");
+                assert!(input_json.contains("选哪个"));
+            }
+            other => panic!("期望 ToolUse，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn items_assistant_mixed_blocks_preserve_order() {
+        // 同一 assistant 行含多块时按出现顺序产出（thinking→text→tool_use）。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"推理"},{"type":"text","text":"答案"},{"type":"tool_use","name":"Write","input":{}}]}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![
+                StreamItem::Thinking("推理".to_string()),
+                StreamItem::Text("答案".to_string()),
+                StreamItem::ToolUse {
+                    name: "Write".to_string(),
+                    input_json: "{}".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn items_stream_event_text_delta_yields_text() {
+        // content_block_delta 的 text_delta → Text（增量正文，进 stdout）。
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"你好"}}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![StreamItem::Text("你好".to_string())]
+        );
+    }
+
+    #[test]
+    fn items_stream_event_thinking_delta_yields_thinking() {
+        // content_block_delta 的 thinking_delta → Thinking（思考增量，进 thought 流）。
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"分析中"}}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![StreamItem::Thinking("分析中".to_string())]
+        );
+    }
+
+    #[test]
+    fn items_stream_event_tool_use_start_yields_tool_use() {
+        // content_block_start 的 tool_use → 初始化 ToolUse（name 已知，input 取 content_block.input）。
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read","input":{}}}}"#;
+        assert_eq!(
+            extract_stream_json_items(line),
+            vec![StreamItem::ToolUse {
+                name: "Read".to_string(),
+                input_json: "{}".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn items_stream_event_input_json_delta_yields_tool_use_partial() {
+        // content_block_delta 的 input_json_delta → ToolUse{name:"", input_json:partial_json}（增量入参）。
+        // partial_json 是「累积中」的 JSON 片段（真实 input_json_delta 把已收到的部分原样回传）。
+        // 用 serde_json 构造再序列化，避免 raw 字符串转义地狱。
+        let value = json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": "{\"path\":\"b",
+                }
+            }
+        });
+        let line = value.to_string();
+        let items = extract_stream_json_items(&line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::ToolUse { name, input_json } => {
+                assert!(name.is_empty(), "input_json_delta 的 name 应为空");
+                assert!(input_json.contains("path"), "应含 path 字段，实际 {input_json:?}");
+            }
+            other => panic!("期望 ToolUse，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn items_stream_event_thinking_start_yields_nothing() {
+        // content_block_start 的 thinking/text 块起始无文本，由后续 delta 产出，故返回空。
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}}"#;
+        assert!(extract_stream_json_items(line).is_empty());
+    }
+
+    #[test]
+    fn items_stream_event_message_start_yields_nothing() {
+        // message_start / message_delta / message_stop 等非内容事件不产出片段。
+        let line = r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#;
+        assert!(extract_stream_json_items(line).is_empty());
+    }
+
+    #[test]
+    fn items_non_content_type_yields_empty() {
+        // system/result 等行不是产出行（session_id 旁路负责），分类解析返回空。
+        let line = r#"{"type":"system","subtype":"init","session_id":"s1"}"#;
+        assert!(extract_stream_json_items(line).is_empty());
+    }
+
+    #[test]
+    fn items_invalid_json_yields_empty() {
+        // 非 JSON / 空行不报错，返回空 Vec。
+        assert!(extract_stream_json_items("not json").is_empty());
+        assert!(extract_stream_json_items("").is_empty());
+    }
+
+    #[test]
+    fn text_filter_excludes_thinking_and_tool_use() {
+        // 关键不变量：extract_stream_json_text 仅返回 Text 类聚合，
+        // thinking / tool_use 绝不进 stdout（协议解析依赖纯 stdout 文本）。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"推理"},{"type":"text","text":"正文"},{"type":"tool_use","name":"Read","input":{"path":"a"}}]}}"#;
+        assert_eq!(extract_stream_json_text(line), Some("正文".to_string()));
+    }
+
+    #[test]
+    fn text_empty_when_only_thinking_or_tool() {
+        // 仅含 thinking/tool_use 时 stdout 聚合为空（Some/None 视 text 是否存在）。
+        let thinking_only = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"仅思考"}]}}"#;
+        assert_eq!(extract_stream_json_text(thinking_only), None);
+        let tool_only = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}"#;
+        assert_eq!(extract_stream_json_text(tool_only), None);
+    }
+
+    // === design 阶段1：spawn_reader 分类 emit 端到端（stdout 不被 thinking/tool 污染） ===
+    //
+    // 真实读取器在 detached 线程跑；这里用一个捕获事件 sink + Cursor 喂 stream-json 多行，
+    // 校验：thinking/tool_use 的内容走 thought/tool 流、绝不进 stdout。
+    // 等待策略：Cursor 数据量极小，线程读完后 Ok(0) 自然退出；轮询 transcript 落盘条目数直至稳定。
+
+    #[derive(Clone)]
+    struct CapturingSink {
+        events: Arc<Mutex<Vec<(&'static str, serde_json::Value)>>>,
+    }
+
+    impl AssistantEventSink for CapturingSink {
+        fn emit_json(&self, event: &'static str, payload: serde_json::Value) {
+            self.events.lock().unwrap().push((event, payload));
+        }
+    }
+
+    #[test]
+    fn reader_routes_thinking_and_tool_out_of_stdout() {
+        use std::io::Cursor;
+        // 构造一段 claude stream-json：text_delta（正文）+ thinking_delta（思考）+ tool_use（工具）。
+        // stdin 喂入的每一行均以换行结尾（BufRead::read_line 按行消费）。
+        let raw = [
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"正文"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","text":"思考原文","thinking":"思考"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read","input":{"path":"a.ts"}}}}"#,
+        ]
+        .join("\n")
+            + "\n";
+        let bytes = raw.into_bytes();
+        let cursor: Cursor<Vec<u8>> = Cursor::new(bytes);
+
+        let store = temp_assistant_store("reader-stdout-purity");
+        let state = CodeAssistantState {
+            store: store.clone(),
+            processes: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let sink = CapturingSink {
+            events: Arc::new(Mutex::new(Vec::new())),
+        };
+        let captured = sink.events.clone();
+
+        // spawn_reader 在 detached 线程里消费 Cursor，分类后按 stream 字段 emit。
+        spawn_reader(
+            sink,
+            state,
+            "reader-session".to_string(),
+            "stdout",
+            OutputFormat::StreamJson,
+            Some(cursor),
+        );
+
+        // 等待读取器线程消费完毕（Cursor 读尽后 read_line 返回 Ok(0) 退出）。
+        // 用 transcript 行数稳定作为完成信号（3 行产出 → 3 条 output 事件）。
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let transcript = store.read_transcript("reader-session").unwrap_or_default();
+            if transcript.lines().filter(|l| l.contains("\"event\":\"output\"")).count() >= 3
+                || Instant::now() > deadline
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        // 收集所有 code-assistant://output 事件的 (stream, text)。
+        let outputs: Vec<(String, String)> = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(event, _)| *event == "code-assistant://output")
+            .filter_map(|(_, payload)| {
+                let stream = payload.get("stream")?.as_str()?.to_string();
+                let text = payload.get("text")?.as_str()?.to_string();
+                Some((stream, text))
+            })
+            .collect();
+
+        // 正文进 stdout；思考进 thought；工具进 tool。三类互不串台。
+        let stdout_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "stdout")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let thought_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "thought")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let tool_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "tool")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert_eq!(stdout_text, "正文", "stdout 应仅含正文，实际 {stdout_text:?}");
+        assert_eq!(thought_text, "思考", "thought 应含思考内容，实际 {thought_text:?}");
+        assert!(
+            tool_text.starts_with("Read"),
+            "tool 应含工具名 Read，实际 {tool_text:?}"
+        );
+
+        // 关键不变量：stdout 绝不含思考 / 工具内容（协议解析依赖纯 stdout 文本）。
+        assert!(
+            !stdout_text.contains("思考"),
+            "stdout 被思考内容污染：{stdout_text:?}"
+        );
+        assert!(
+            !stdout_text.contains("Read"),
+            "stdout 被工具内容污染：{stdout_text:?}"
+        );
     }
 
     // === design §3.3.5：build_history_summary 伪多轮数据源 ===
