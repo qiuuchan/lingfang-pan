@@ -856,7 +856,7 @@ export function PluginCreatorHome() {
       />
       {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-w-2xl gap-0 p-0">
+        <DialogContent className="max-w-4xl gap-0 p-0">
           <DialogHeader className="border-b px-4 py-3">
             <DialogTitle className="text-base">历史对话</DialogTitle>
           </DialogHeader>
