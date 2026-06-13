@@ -41,7 +41,7 @@ export function Composer({
               onSend();
             }
           }}
-          className="max-h-44 min-h-20 resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+          className="max-h-44 min-h-20 resize-none border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <div className="flex flex-wrap items-center gap-2">
