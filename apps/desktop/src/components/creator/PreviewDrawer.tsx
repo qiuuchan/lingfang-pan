@@ -68,7 +68,8 @@ export function PreviewDrawer({
                 <div className="h-full overflow-auto p-4"><ScriptPreviewPanel files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefreshPreview} /></div>
               ) : (
                 // client runtime：iframe absolute 撑满 relative 父容器；父容器 overflow-hidden，iframe 自身滚动。
-                <iframe key={previewKey} title="plugin-preview" sandbox="allow-scripts" srcDoc={previewSrcDoc(files)} className="absolute inset-0 h-full w-full border-0 bg-white" />
+                // sandbox 加 allow-same-origin（预览态可信本地插件，允许 localStorage/DOM 完整交互）+ allow-forms/popups（按钮/表单/弹窗可点）。
+                <iframe key={previewKey} title="plugin-preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" srcDoc={previewSrcDoc(files)} className="absolute inset-0 h-full w-full border-0 bg-white" />
               )
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

@@ -27,7 +27,7 @@ export function PreviewPanel({ files, previewKey, onRefresh }: { files: DraftFil
       </CardHeader>
       <CardContent>
         {files.length ? (
-          <iframe key={previewKey} title="plugin-preview" sandbox="allow-scripts" srcDoc={previewSrcDoc(files)} className="h-[360px] w-full rounded-lg border bg-white" />
+          <iframe key={previewKey} title="plugin-preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" srcDoc={previewSrcDoc(files)} className="h-[360px] w-full rounded-lg border bg-white" />
         ) : (
           <div className="flex h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">生成插件后显示预览。</div>
         )}
