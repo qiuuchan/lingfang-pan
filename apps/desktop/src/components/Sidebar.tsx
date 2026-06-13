@@ -37,7 +37,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const { session, view, setView, setRunningPlugin } = useApp();
+  const { session, view, setView, setRunningPlugin, applySession, resetSession } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
   // R6：账户信息改居中悬浮 Dialog（替代原右对齐 Popover）。
   const [accountOpen, setAccountOpen] = useState(false);
@@ -80,7 +80,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
         </button>
       </div>
-      <AccountDialog open={accountOpen} onOpenChange={setAccountOpen} />
+      <AccountDialog open={accountOpen} onOpenChange={setAccountOpen} session={session} applySession={applySession} resetSession={resetSession} />
     </aside>
   );
 }

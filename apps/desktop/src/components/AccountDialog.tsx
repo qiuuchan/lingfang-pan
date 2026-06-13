@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { LogOutIcon, UserRoundIcon } from 'lucide-react';
-import { useApp } from '@/App';
 import { api, isEmail } from '@/lib/api';
+import type { Session } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,20 +11,27 @@ import { Label } from '@/components/ui/label';
 // R6 用户设置居中弹窗：侧边栏底部账户信息点击 → 居中悬浮 Dialog（复用 ui/dialog）。
 // 支持：修改用户名 / 修改邮箱 / 重置密码 / 退出登录。
 //
+// session/applySession/resetSession 由父组件（Sidebar，在 AppProvider 内）通过 props 注入，
+// 避免本组件因渲染位置（portal/重建）拿不到 AppContext 导致「useApp 必须在 AppProvider 内使用」崩溃。
+//
 // 后端支持现状（apps/collab-api/src/modules/auth.controller.ts）：
 // 仅有 GET /api/auth/me，尚无 PATCH /profile 或修改密码/邮箱的接口。
 // 故本轮：用户名/邮箱/密码三项对接 PATCH /api/auth/me（约定 body 字段），
 // 后端未实现时返回 404/405 → toast 报错并标注「待后端支持」；
 // 退出登录走既有 resetSession（纯前端清 token，已可用）。
-// 待后续后端补齐 profile 更新接口后无需改前端即可生效。
 
 const ROLE_LABEL: Record<string, string> = {
   TEAM_ADMIN: '团队管理员',
   MEMBER: '成员',
 };
 
-export function AccountDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { session, applySession, resetSession } = useApp();
+export function AccountDialog({ open, onOpenChange, session, applySession, resetSession }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  session: Session;
+  applySession: (patch: Partial<Session>) => void;
+  resetSession: () => void;
+}) {
   const [displayName, setDisplayName] = useState(session.displayName || '');
   const [email, setEmail] = useState(session.email || '');
   const [password, setPassword] = useState('');
