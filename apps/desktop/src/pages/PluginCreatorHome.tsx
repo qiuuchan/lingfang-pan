@@ -70,7 +70,7 @@ export function PluginCreatorHome() {
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [cloudPlugin, setCloudPlugin] = useState<LoadedPlugin | null>(null);
-  const [recent, setRecent] = useState<LoadedPlugin[]>(() => readRecent(session.tenantId));
+  // 最近插件只写 localStorage（供「插件」页读取），创建页不再展示，故无 state。
   const chatRef = useRef<HTMLDivElement>(null);
 
   const providerInfo = providers.find((item) => item.id === provider) || providers[0];
@@ -104,7 +104,6 @@ export function PluginCreatorHome() {
   useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight }); }, [turns.length, liveEvents, pendingUser]);
   useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
-  useEffect(() => { setRecent(readRecent(session.tenantId)); }, [session.tenantId]);
 
   useEffect(() => {
     let disposed = false;
@@ -252,11 +251,10 @@ export function PluginCreatorHome() {
   }
 
   function pushRecent(plugin: LoadedPlugin) {
-    setRecent((prev) => {
-      const next = [plugin, ...prev.filter((item) => item.id !== plugin.id)];
-      writeRecent(session.tenantId, next);
-      return next.slice(0, 8);
-    });
+    // 仅落 localStorage（供「插件」页读取），创建页不展示最近列表。
+    const prev = readRecent(session.tenantId);
+    const next = [plugin, ...prev.filter((item) => item.id !== plugin.id)];
+    writeRecent(session.tenantId, next.slice(0, 8));
   }
 
   // 最近一次发起的 prompt 快照，错误后不清空，供 ErrorBubble 的「重试」复用。
@@ -518,7 +516,6 @@ export function PluginCreatorHome() {
             activeContent={activeContent}
             previewKey={previewKey}
             cloudPlugin={cloudPlugin}
-            recent={recent}
             uploading={uploading}
             submitting={submitting}
             onActiveFileChange={setActiveFile}
@@ -526,7 +523,6 @@ export function PluginCreatorHome() {
             onUpload={uploadCloud}
             onSubmitMarketplace={submitMarketplace}
             onRun={() => cloudPlugin && runPlugin(cloudPlugin)}
-            onRunRecent={runPlugin}
           />
         </div>
       </aside>
