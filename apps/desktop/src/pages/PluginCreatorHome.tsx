@@ -5,7 +5,6 @@ import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import {
   deleteConversation,
-  generateTitle,
   listConversations,
   readActiveId,
   readDraft,
@@ -42,6 +41,7 @@ import {
   type SessionExitPayload,
   type SessionOutputPayload,
   type SessionStartedPayload,
+  summarizeTitleLocally,
   type TranscriptEvent,
 } from '@/lib/plugin-draft';
 import type { LoadedPlugin } from '@/lib/types';
@@ -356,23 +356,17 @@ export function PluginCreatorHome() {
         // 落盘失败不阻断对话流程（本地磁盘异常仅静默，历史仍在 transcripts/{id}.jsonl）。
       }
 
-      // AI 标题生成（首轮 + 当前会话尚无 title）：用 CLI 总结对话主题，rename + 更新 metas 与顶部。
-      // 失败静默（deriveTitle 启发式兜底）；后台跑不阻塞 toast。
+      // 标题生成（首轮 + 当前会话尚无 title）：本地启发式秒级总结，无 CLI 冷启动延迟。
+      // 优先从用户首句去祈使前缀拿核心需求，回退 assistant 首行；rename 持久化 + 更新 metas 与顶部。
       const currentMeta = metas.find((m) => m.sessionId === sessionId);
-      if (!isFollowup && !currentMeta?.title && promptText && finalSession.stdout) {
-        const userText = promptText;
-        const assistantText = finalSession.stdout;
-        const tool = (finalSession.provider || provider) as 'claude' | 'codex' | 'opencode';
-        void generateTitle({ tool, model: finalSession.model, userText, assistantText }).then(async (title) => {
-          if (!title) return;
-          try {
-            await renameConversation(sessionId, title);
-            setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
-          } catch {
-            /* rename 失败静默，标题仅停留在内存 metas */
-            setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
-          }
-        });
+      if (!isFollowup && !currentMeta?.title && promptText) {
+        const title = summarizeTitleLocally(promptText, finalSession.stdout || '');
+        if (title) {
+          setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
+          void renameConversation(sessionId, title).catch(() => {
+            /* rename 失败静默，标题已停留在内存 metas */
+          });
+        }
       }
 
       // toast 文案分场景：结构化走「完成」语义；纯对话态走「已完成对话」，避免 invalid 误报。
