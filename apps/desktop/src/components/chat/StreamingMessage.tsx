@@ -101,13 +101,13 @@ export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAsk
   );
 }
 
-// 思考折叠区（R3）：默认折叠（思考完展开回看），流式中可自动展开。
+// 思考折叠区（R3）：流式中自动展开（持续显示增量），思考完成后默认折叠（减少视觉噪音，可点开回看）。
 // 浅色 + 斜体，标题「思考中」配脑图标，点击 header 切换展开/收起。
 function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = React.useState(true);
-  // 流式中自动展开（持续显示增量），结束后默认收起（减少视觉噪音）。
+  // 流式中自动展开；思考完成（streaming true→false）后自动折叠。
   React.useEffect(() => {
-    if (streaming) setOpen(true);
+    setOpen(streaming);
   }, [streaming]);
   const display = text.replace(/\n$/, '');
   return (
@@ -168,17 +168,22 @@ function ToolCard({
       </div>
     );
   }
-  // 普通工具卡片：name 标签 + input 摘要（JSON pretty 或原文）。
+  // 普通工具卡片：name 标签常驻显示，input 内容默认折叠（点 header 展开），减少视觉噪音。
   const inputDisplay = formatToolInput(card.inputText);
   return (
-    <div className="flex items-start gap-2 rounded-lg border bg-background/60 px-3 py-2 text-xs">
-      <WrenchIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-      <span className="shrink-0 rounded bg-muted px-1 font-mono text-muted-foreground">{card.name || '工具'}</span>
-      {inputDisplay ? (
-        <pre className="scrollbar-thin max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{inputDisplay}</pre>
-      ) : (
-        <span className="text-muted-foreground/60">（入参待输出）</span>
-      )}
-    </div>
+    <details className="rounded-lg border bg-background/60 text-xs">
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-muted-foreground select-none">
+        <WrenchIcon className="size-3.5 shrink-0" />
+        <span className="shrink-0 rounded bg-muted px-1 font-mono">{card.name || '工具'}</span>
+        <ChevronDownIcon className="ml-auto size-3.5 shrink-0 transition-transform [[open]_&]:rotate-180" />
+      </summary>
+      <div className="border-t px-3 py-2">
+        {inputDisplay ? (
+          <pre className="scrollbar-thin max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{inputDisplay}</pre>
+        ) : (
+          <span className="text-muted-foreground/60">（入参待输出）</span>
+        )}
+      </div>
+    </details>
   );
 }
