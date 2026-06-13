@@ -155,6 +155,38 @@ fn code_assistant_read_transcript(
     code_assistant::read_transcript(&state, input)
 }
 
+#[tauri::command]
+fn code_assistant_rename_session(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::RenameSessionInput,
+) -> Result<code_assistant::store::SessionRecord, String> {
+    code_assistant::rename_session(&state, input)
+}
+
+#[tauri::command]
+fn code_assistant_delete_session(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::DeleteSessionInput,
+) -> Result<(), String> {
+    code_assistant::delete_session(&state, input)
+}
+
+#[tauri::command]
+fn code_assistant_save_draft(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::SaveDraftInput,
+) -> Result<(), String> {
+    code_assistant::save_draft(&state, input)
+}
+
+#[tauri::command]
+fn code_assistant_read_draft(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::ReadDraftInput,
+) -> Result<Option<Value>, String> {
+    code_assistant::read_draft(&state, input)
+}
+
 /// 定位内置插件目录：开发态用源码路径，打包态用资源目录。
 fn builtin_dir(app: &tauri::App) -> PathBuf {
     // 开发态：CARGO_MANIFEST_DIR/../builtin-plugins
@@ -206,6 +238,10 @@ fn main() {
             code_assistant_stop_session,
             code_assistant_list_sessions,
             code_assistant_read_transcript,
+            code_assistant_rename_session,
+            code_assistant_delete_session,
+            code_assistant_save_draft,
+            code_assistant_read_draft,
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script
         ])
