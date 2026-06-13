@@ -884,9 +884,8 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
       { role: 'assistant', content: parsed.notes || output || '本地 CLI 没有返回可展示内容。', at: now },
     ],
     diagnostics: [
-      { stage: 'local-cli', status: input.result.success ? 'pass' : 'fail', message: `${input.providerLabel} ${input.model === 'default' ? '默认模型' : input.model}，session ${cliSessionId(input.result) || '未返回'}` },
-      { stage: 'command', status: 'info', message: summarizeCommandPreview(cliCommand(input.result)) },
-      { stage: 'transcript', status: cliTranscriptPath(input.result) ? 'info' : 'fail', message: cliTranscriptPath(input.result) || '未返回 transcript 路径' },
+      // 只保留用户关心的 schema 结果（成功/失败原因）；session/命令/transcript 等工程排障信息
+      // 已在「分析」tab 的 SessionStatusPanel 展示，此处不再重复（避免诊断面板对普通用户太工程化）。
       { stage: 'schema', status: schemaStatus, message: schemaSummary },
       ...(input.result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
       ...schemaDiagnostics,
@@ -1004,9 +1003,8 @@ export function buildDraftFromSandboxFiles(input: {
       { role: 'assistant', content: extractCliText(input.result) || '本地代码助手已把插件文件写入工作目录。', at: now },
     ],
     diagnostics: [
-      { stage: 'local-cli', status: input.result.success ? 'pass' : 'fail', message: `${input.providerLabel} ${input.model === 'default' ? '默认模型' : input.model}，session ${cliSessionId(input.result) || '未返回'}` },
-      { stage: 'command', status: 'info', message: summarizeCommandPreview(cliCommand(input.result)) },
-      { stage: 'transcript', status: cliTranscriptPath(input.result) ? 'info' : 'fail', message: cliTranscriptPath(input.result) || '未返回 transcript 路径' },
+      // 只保留用户关心的 schema 结果（成功/失败原因）；session/命令/transcript 等工程排障信息
+      // 已在「分析」tab 的 SessionStatusPanel 展示，此处不再重复（避免诊断面板对普通用户太工程化）。
       { stage: 'schema', status: schemaStatus, message: schemaSummary },
       ...(input.result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
       ...schemaDiagnostics,
