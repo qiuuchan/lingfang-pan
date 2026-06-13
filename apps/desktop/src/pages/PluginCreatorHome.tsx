@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { PanelRightOpenIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
+import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import { PLUGIN_CREATOR_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
+import { toCreatorError, toUploadError, type CreatorError } from '@/lib/creator-error';
 import {
   EXAMPLES,
   PROVIDERS,
@@ -36,6 +37,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Bubble } from '@/components/chat/Bubble';
+import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { LiveProcess } from '@/components/chat/LiveProcess';
 import { Composer } from '@/components/creator/Composer';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
@@ -51,7 +53,7 @@ export function PluginCreatorHome() {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<TranscriptEvent[]>([]);
   const [liveStage, setLiveStage] = useState('');
-  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<CreatorError | null>(null);
   const [assistantSession, setAssistantSession] = useState<AssistantSessionState | null>(null);
   const assistantSessionRef = useRef<AssistantSessionState | null>(null);
   const assistantSessionIdRef = useRef<string | null>(null);
@@ -157,7 +159,7 @@ export function PluginCreatorHome() {
           if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
           const message = payload.error || '本地代码助手输出异常';
           setAssistantSession((prev) => prev ? { ...prev, status: 'failed', diagnostics: [...prev.diagnostics, message] } : prev);
-          setLiveError(message);
+          setLiveError(toCreatorError('cli_session_error', new Error(message)));
         }));
         unlisteners.push(await tauriListen<SessionExitPayload>('code-assistant://exit', ({ payload }) => {
           if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
@@ -236,9 +238,9 @@ export function PluginCreatorHome() {
         toast.error('本地代码助手未成功完成，请查看右侧诊断');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveError(`读取 transcript 失败：${message}`);
-      toast.error(message);
+      const creatorError = toCreatorError('transcript_failed', error);
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     } finally {
       // design §3.3.6 (c)：finally 仅清流式态与 pendingPrompt，**保留** assistantSessionIdRef（追问需用）。
       // newDraft 负责 session 完全重置；追问完成后仍持有 id 供下一轮追问判断 firstRoundDone。
@@ -257,21 +259,13 @@ export function PluginCreatorHome() {
     });
   }
 
+  // 最近一次发起的 prompt 快照，错误后不清空，供 ErrorBubble 的「重试」复用。
+  const lastPromptRef = useRef<string | null>(null);
+
   // design §3.3.6 (d)：多轮错误分类处理——会话已退出 / CLI 不可用 / cli_session_id 缺失，
-  // 全部走 setLiveError + Bubble error（复用 Bubble error 态），不裸 toast、不静默（呼应 R1/AC6）。
+  // 全部走 setLiveError + ErrorBubble（复用错误气泡），不裸 toast、不静默（呼应 R1/AC6）。
   function handleMultiturnError(error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    let friendly: string;
-    if (message.includes('不存在') || message.includes('已结束') || message.includes('已结束')) {
-      friendly = '对话已结束，请新开对话继续（点击右上角「新对话」）。';
-    } else if (message.includes('未找到') || message.includes('CLI')) {
-      friendly = `本地代码助手不可用：${message}`;
-    } else if (message.includes('降级') || message.includes('session id')) {
-      friendly = `未能捕获会话 id，已自动降级为新对话。原因：${message}`;
-    } else {
-      friendly = `追问失败：${message}`;
-    }
-    setLiveError(friendly);
+    setLiveError(toCreatorError('session_op_failed', error));
     setStreaming(false);
     setLiveStage('');
     setPendingUser(null);
@@ -310,8 +304,10 @@ export function PluginCreatorHome() {
     setDetailsOpen(true);
   }
 
-  async function send() {
-    const text = input.trim();
+  // 发起一轮对话。overrideText 用于「重试」场景复用上一次 prompt
+  // （send 出错时 input 已清空，重试不能用空 input）。
+  async function send(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
     if (!text || streaming) return;
     setInput('');
     setPendingUser(text);
@@ -322,6 +318,7 @@ export function PluginCreatorHome() {
     // design §3.3.6 (b)：关键——移除原 setCurrentDraft(null)，草稿跨轮累积。
     const selectedProvider = provider as ProviderId;
     pendingPromptRef.current = { text, providerLabel: providerInfo.label, model };
+    lastPromptRef.current = text;
 
     // 首问/追问分流（design §3.3.6 (b)）：有活动 session 且首轮已 exited → 走 send_input 追问；否则首问 start_session。
     const activeId = assistantSessionIdRef.current;
@@ -351,9 +348,9 @@ export function PluginCreatorHome() {
     try {
       await startNewSession(text, selectedProvider);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveError(`生成失败：${message}`);
-      toast.error(message);
+      const creatorError = toCreatorError('cli_start_failed', error);
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
       setStreaming(false);
       setLiveStage('');
       pendingPromptRef.current = null;
@@ -369,9 +366,9 @@ export function PluginCreatorHome() {
     try {
       await tauriInvoke('code_assistant_stop_session', { input: { sessionId } });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveError(`停止失败：${message}`);
-      toast.error(message);
+      const creatorError = toCreatorError('session_op_failed', error);
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     }
   }
 
@@ -388,7 +385,10 @@ export function PluginCreatorHome() {
       pushRecent(plugin);
       toast.success(result.deduplicated ? '团队云端已有相同插件' : '已上传到团队云端共享');
     } catch (error) {
-      toast.error((error as ApiError).message);
+      const creatorError = toUploadError(error, 'upload');
+      // toast 用友好标题作瞬时反馈；同时 push 进 liveError 对话气泡可回看（AC6 双通道）。
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     } finally {
       setUploading(false);
     }
@@ -404,7 +404,9 @@ export function PluginCreatorHome() {
       pushRecent(plugin);
       toast.success('已提交公共市场审核');
     } catch (error) {
-      toast.error((error as ApiError).message);
+      const creatorError = toUploadError(error, 'submit');
+      setLiveError(creatorError);
+      toast.error(creatorError.title);
     } finally {
       setSubmitting(false);
     }
@@ -429,11 +431,13 @@ export function PluginCreatorHome() {
     isFollowupRef.current = false;
     // 重置多轮运行态：新对话回到首轮语义（multiturnMode 待定）。
     setMultiturnMode(null);
+    lastPromptRef.current = null;
   }
 
   return (
     <div className="flex h-full">
       <div className="flex h-full min-w-0 flex-1 flex-col">
+        {/* pl-16 为 Sidebar 折叠态悬浮触发区避让，非视觉对称是有意为之。 */}
         <div className="flex shrink-0 items-center justify-between gap-3 border-b pl-16 pr-4 py-3">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <SparklesIcon className="size-4 shrink-0 text-primary" />
@@ -469,7 +473,7 @@ export function PluginCreatorHome() {
                 <p className="px-1 text-xs text-muted-foreground">此 CLI 不支持原生多轮，已基于历史继续生成（上下文非真复用）。</p>
               )}
               {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
-              {!streaming && liveError && <Bubble role="assistant" content={liveError} error />}
+              {!streaming && liveError && <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined} />}
             </div>
           )}
           </div>
@@ -496,9 +500,9 @@ export function PluginCreatorHome() {
 
       <aside className={cn(
         'flex h-full shrink-0 flex-col border-l bg-card transition-all duration-200 overflow-hidden',
-        detailsOpen ? 'w-[420px]' : 'w-0',
+        detailsOpen ? 'w-full md:w-[420px] z-20' : 'w-0',
       )}>
-        <div className="flex h-full w-[420px] flex-col">
+        <div className="flex h-full w-full md:w-[420px] flex-col">
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-medium">插件创建详情</span>
             <Button variant="ghost" size="icon" className="size-7" onClick={() => setDetailsOpen(false)}>

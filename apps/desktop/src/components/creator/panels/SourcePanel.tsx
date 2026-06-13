@@ -13,9 +13,9 @@ export function SourcePanel({ files, activeFile, activeContent, onActiveFileChan
         {files.length ? (
           <>
             <Tabs value={activeFile} onValueChange={onActiveFileChange}>
-              <TabsList className="max-w-full flex-wrap">{files.map((file) => <TabsTrigger key={file.path} value={file.path}>{file.path}</TabsTrigger>)}</TabsList>
+              <TabsList className="max-w-full overflow-x-auto overflow-y-hidden scrollbar-thin">{files.map((file) => <TabsTrigger key={file.path} value={file.path}>{file.path}</TabsTrigger>)}</TabsList>
             </Tabs>
-            <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs">{activeContent}</pre>
+            <pre className="scrollbar-thin mt-2 max-h-64 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs">{activeContent}</pre>
           </>
         ) : <p className="text-sm text-muted-foreground">暂无源码。</p>}
       </CardContent>
