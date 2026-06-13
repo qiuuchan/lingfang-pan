@@ -1,42 +1,24 @@
 // 身份与租户契约（见 docs/02 §A）。
+// CONTRACT-02 / CONTRACT-07 修复：原契约字段全为 snake_case，与已收敛到 NestJS+Prisma+PostgreSQL 的
+// collab-api HTTP DTO 命名（一律 camelCase）系统性漂移；现在 dead schema（HTTP 响应类型）已对齐后端，
+// 仍保留运行时实际在用的 PluginManifest/CapabilityKind/PluginCapability/RuntimeType 等 manifest 边界
+// （snake_case 与 manifest.json 自洽）。
 import { z } from 'zod';
 
+// 契约仅保留 manifest 边界需要的 TenantRole 别名（与 PluginGrant 主体配合使用）。
+// HTTP 响应侧的 user/team/session 不再以 dead schema 形式声明（见本文件末注释）。
 export const TenantRole = z.enum(['owner', 'admin', 'developer', 'member']);
 export type TenantRole = z.infer<typeof TenantRole>;
 
-export const User = z.object({
-  id: z.string().min(1),
-  email: z.string().email(),
-  display_name: z.string().min(1),
-  status: z.enum(['active', 'disabled']).default('active'),
-  created_at: z.string().datetime(),
-});
-export type User = z.infer<typeof User>;
-
-export const Tenant = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  slug: z.string().min(1),
-  owner_user_id: z.string().min(1),
-  status: z.enum(['active', 'suspended']).default('active'),
-  created_at: z.string().datetime(),
-});
-export type Tenant = z.infer<typeof Tenant>;
-
-export const Membership = z.object({
-  tenant_id: z.string().min(1),
-  user_id: z.string().min(1),
-  role: TenantRole,
-  status: z.enum(['active', 'invited', 'disabled']).default('active'),
-  joined_at: z.string().datetime(),
-});
-export type Membership = z.infer<typeof Membership>;
-
-// —— 请求 / 响应 ——
+// —— 请求 ——
+// CONTRACT-07 修复：对齐 collab-api auth.controller.ts 的真实注册请求体（camelCase + 申请相关字段）。
 export const RegisterRequest = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  display_name: z.string().min(1),
+  displayName: z.string().min(1),
+  wantsTeamAdmin: z.boolean().optional(),
+  teamName: z.string().optional(),
+  reason: z.string().optional(),
 });
 export type RegisterRequest = z.infer<typeof RegisterRequest>;
 
@@ -46,20 +28,41 @@ export const LoginRequest = z.object({
 });
 export type LoginRequest = z.infer<typeof LoginRequest>;
 
-// 登录返回的 JWT 与当前上下文（tenant_id 在用户尚未选租户时为 null）
+// CONTRACT-07 修复：登录响应与 auth.service.ts sessionFor 返回结构对齐——
+// 嵌套 user/team/application/onboarding，而非扁平 user_id/tenant_id/role。
+// 注意：HTTP 响应契约当前为 dead schema（无运行时消费者），声明意图仅是"对齐未来可能的客户端校验"。
 export const AuthSession = z.object({
-  token: z.string().min(1),
-  user_id: z.string().min(1),
-  tenant_id: z.string().min(1).nullable(),
-  role: TenantRole.nullable(),
+  token: z.string().min(1).optional(),
+  user: z.object({
+    id: z.string().min(1),
+    email: z.string().email(),
+    displayName: z.string().min(1),
+    platformRole: z.enum(['NONE', 'PLATFORM_ADMIN']),
+    status: z.enum(['ACTIVE', 'DISABLED']),
+  }),
+  team: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    slug: z.string().min(1),
+    role: z.string().min(1),
+  }).nullable(),
+  application: z.object({
+    id: z.string().min(1),
+    status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
+    teamName: z.string().min(1),
+    reviewReason: z.string().optional(),
+  }).nullable(),
+  onboarding: z.enum([
+    'NEEDS_INVITATION',
+    'PENDING_APPROVAL',
+    'APPLICATION_REJECTED',
+    'TEAM_SPACE',
+    'TEAM_ADMIN_SPACE',
+    'PLATFORM_ADMIN_WEB_ONLY',
+  ]),
 });
 export type AuthSession = z.infer<typeof AuthSession>;
 
-export const CreateTenantRequest = z.object({ name: z.string().min(1), slug: z.string().min(1) });
-export type CreateTenantRequest = z.infer<typeof CreateTenantRequest>;
-
-export const InviteMemberRequest = z.object({
-  email: z.string().email(),
-  role: TenantRole.default('member'),
-});
-export type InviteMemberRequest = z.infer<typeof InviteMemberRequest>;
+// 原本还声明了 User/Tenant/Membership/CreateTenantRequest/InviteMemberRequest 等 dead schema，
+// 这些类型在后端是 Prisma 模型直接序列化 camelCase，前端用本地类型（types.ts）消费；
+// 为避免契约继续声明不存在的 HTTP 边界而误导，已移除——manifest 边界所需的类型在 plugin.ts 中保留。

@@ -85,11 +85,18 @@ export function PluginCreatorHome() {
   const [assistantSession, setAssistantSession] = useState<AssistantSessionState | null>(null);
   const assistantSessionRef = useRef<AssistantSessionState | null>(null);
   // design §3.1.3 / §3.2：listener 守卫改按 activeId 路由。
-  // assistantSessionIdRef 保留为活动会话 id 的同步可读源（事件回调读取），由 activeId 驱动。
-  const assistantSessionIdRef = useRef<string | null>(null);
+  // CREATOR-13 清理：assistantSessionIdRef 此前声明并写入但全仓库无任何读取点
+  // （所有路由守卫实际用 activeIdRef.current），是迁移遗留的死代码。已删除，路由职责由 activeIdRef 单独承担。
   const pendingPromptRef = useRef<{ text: string; providerLabel: string; model: string } | null>(null);
   // 标记当前进行中的轮次是否为追问（send() 追问路径置 true，finalizeSession 据此走累积分支）。
   const isFollowupRef = useRef(false);
+  // ASKU-01 修复：AskUserQuestion 问题卡片防重入守卫。
+  // handleAskUserAnswer 唯一守卫只有 if(!streaming) return，streaming 在 send_input resolve 前恒为 true，
+  // 用户在 async 窗口内连点会触发多次 send_input（Rust 侧无 in-flight 守卫 → 派生并发进程、双 exit、transcript 串写）。
+  // 此 ref 在入口置位、finally 复位，禁用 option 按钮直到本轮 send_input 完成。
+  // 配套 askAnswering state（驱动 StreamingMessage 重渲染 option 按钮 disabled 态）。
+  const askAnsweringRef = useRef(false);
+  const [askAnswering, setAskAnswering] = useState(false);
   // design §3.2.4：多会话 store。metas 由 list_sessions 一次拉取；activeId 决定当前渲染的会话与草稿。
   const [metas, setMetas] = useState<ConversationMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -168,6 +175,13 @@ export function PluginCreatorHome() {
   }, [turns.length, liveSegments, pendingUser]);
   useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  // CREATOR-11 修复：listener effect 此前依赖 [provider, model]，会被 list_tools 异步覆盖 providers
+  // 后触发的 model 变更重新挂载。重挂窗口内到达的 exit 事件丢失 → finalizeSession 永不执行、streaming 永久 true。
+  // 用 ref 读取 provider/model，让 listener 只挂载一次（依赖稳定量 tenantId）。
+  const providerRef = useRef(provider);
+  useEffect(() => { providerRef.current = provider; }, [provider]);
+  const modelRef = useRef(model);
+  useEffect(() => { modelRef.current = model; }, [model]);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
 
   // design §3.2：挂载时拉取会话列表 + 从 localStorage 恢复 activeId。
@@ -198,7 +212,6 @@ export function PluginCreatorHome() {
   function setActiveIdRef(id: string | null) {
     activeIdRef.current = id;
     setActiveId(id);
-    assistantSessionIdRef.current = id;
     writeActiveId(session.tenantId, id);
   }
 
@@ -212,13 +225,16 @@ export function PluginCreatorHome() {
           // design §3.1.3：守卫按 activeId 路由（首问已 startNewSession 设过 activeIdRef）。
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const record = payload.record;
+          // CREATOR-11 修复：用 ref 读取 provider/model，避免在 listener 闭包内绑定到 effect 注册时的旧值。
+          const providerVal = providerRef.current;
+          const modelVal = modelRef.current;
           setLiveStage('本地代码助手已启动，等待输出…');
           setAssistantSession((prev) => ({
             sessionId: payload.sessionId,
             status: 'running',
-            provider: (record?.tool || prev?.provider || provider) as ProviderId,
-            providerLabel: providerLabel((record?.tool || prev?.provider || provider) as ProviderId),
-            model: record?.model || prev?.model || model,
+            provider: (record?.tool || prev?.provider || providerVal) as ProviderId,
+            providerLabel: providerLabel((record?.tool || prev?.provider || providerVal) as ProviderId),
+            model: record?.model || prev?.model || modelVal,
             commandPreview: record?.commandPreview || prev?.commandPreview || [],
             transcriptPath: record?.transcriptPath || prev?.transcriptPath || '',
             pid: payload.pid,
@@ -303,7 +319,9 @@ export function PluginCreatorHome() {
       disposed = true;
       for (const unlisten of unlisteners) unlisten();
     };
-  }, [provider, model]);
+    // CREATOR-11 修复：依赖改为稳定量 [session.tenantId]，不再绑 [provider, model]。
+    // 避免 list_tools 异步覆盖 providers 触发 model 变更 → listener 重挂丢失 exit 事件。
+  }, [session.tenantId]);
 
   async function finalizeSession(sessionId: string, status: AssistantSessionState['status'], exitCode: number | null, endedAt?: string) {
     const isFollowup = isFollowupRef.current;
@@ -319,24 +337,43 @@ export function PluginCreatorHome() {
       const diagnostics = transcriptDiagnostics(events);
       const pending = pendingPromptRef.current;
       const currentSession = assistantSessionRef.current;
+      // CREATOR-06 修复：此前 finalSession.stdout = tailText(stdout || ..., 12000)，
+      // 对 codex/opencode（stdout 围栏块解析路径）当一轮产出超 12k 字符时前段被截掉，
+      // 若 manifest 块或 file 起始围栏落在丢弃的前段，hasStructuredBlocks=false → 落入纯对话态，
+      // 结构化产出被丢弃。stdout 已是 transcriptTextSinceLastInput 切出的「本轮」输出（不会跨轮累积），
+      // 故结构化检测与解析直接用完整本轮 stdout，不受 tailText(12000) 截断影响。
+      // （tailText 仍用于 SessionStatusPanel 显示的 stdout/stderr，仅作渲染层内存保护。）
+      const fullStdout = stdout || currentSession?.stdout || '';
+      const fullStderr = stderr || currentSession?.stderr || '';
       const finalSession: AssistantSessionState = {
         sessionId,
         status,
-        provider: (currentSession?.provider || provider) as ProviderId,
-        providerLabel: currentSession?.providerLabel || providerInfo.label,
-        model: currentSession?.model || model,
+        // CREATOR-11 修复：用 ref 读取 provider/model，避免 finalizeSession 闭包绑定到 listener 注册时的旧值
+        // （listener effect 依赖 [session.tenantId]，provider 变化时不会重挂，闭包陈旧）。
+        provider: (currentSession?.provider || providerRef.current) as ProviderId,
+        providerLabel: currentSession?.providerLabel || providerLabel((currentSession?.provider || providerRef.current) as ProviderId),
+        model: currentSession?.model || modelRef.current,
         commandPreview: currentSession?.commandPreview || [],
         transcriptPath: currentSession?.transcriptPath || '',
         pid: currentSession?.pid,
         exitCode,
         startedAt: currentSession?.startedAt,
         endedAt,
-        stdout: tailText(stdout || currentSession?.stdout || ''),
-        stderr: tailText(stderr || currentSession?.stderr || ''),
+        stdout: tailText(fullStdout),
+        stderr: tailText(fullStderr),
         diagnostics,
       };
       setAssistantSession(finalSession);
-      const probeResult = sessionToProbeResult(finalSession);
+      // probeResult 用完整本轮 stdout（结构化解析依赖围栏块完整）。
+      const probeResult = sessionToProbeResult({ ...finalSession, stdout: fullStdout, stderr: fullStderr });
+      // 修复 CREATOR-02：finalizeSession 是 async，await read_transcript/scan_workspace 期间用户可能切换会话。
+      // 若已切走，currentDraftRef 已变成新会话草稿，此时 merge 会把本轮产出叠到别会话上并脏写回本会话文件。
+      // 中途守卫：sessionId 不再是活跃会话则中止（本轮产出已落 transcript，不影响后续手动恢复）。
+      if (sessionId !== activeIdRef.current) return;
+      // 修复 CREATOR-04：error 事件后同一进程的 exit 仍会触发 finalizeSession 成功路径。
+      // 此前成功路径不清 liveError，ErrorBubble（!streaming && liveError）与 toast.success 同屏并存。
+      // 成功路径起点清掉陈旧错误气泡（真正失败走 catch 块重新 setLiveError）。
+      setLiveError(null);
       const promptText = pending?.text || pendingUser || '本地代码助手插件';
       const prevDraft = currentDraftRef.current; // 读 ref 最新值（闭包陷阱修复）
 
@@ -349,7 +386,8 @@ export function PluginCreatorHome() {
 
       // design §3.1.2 / AC1：对话优先 gate——产出含 manifest/file 块才解析为草稿（自动检测）。
       // 纯对话态（无结构化块）只追加 turn，status='generating'，不弹详情、不判 invalid。
-      const structured = hasStructuredBlocks(finalSession.stdout);
+      // CREATOR-06：用完整本轮 stdout（fullStdout）做检测，避免 tailText 截断导致误判纯对话态。
+      const structured = hasStructuredBlocks(fullStdout);
       let nextDraft: NonNullable<typeof currentDraft>;
       if (hasSandboxManifest) {
         // sandbox 扫描到 manifest.json（claude 写了文件）：走 sandbox 草稿构建，files 来自磁盘扫描。
@@ -445,8 +483,14 @@ export function PluginCreatorHome() {
       // design §3.3.6 (c)：finally 仅清流式态与 pendingPrompt，**保留** activeIdRef（追问需用）。
       setStreaming(false);
       setLiveStage('');
+      // 修复 CREATOR-09：catch 路径（read_transcript 失败）此前未清 pendingUser，
+      // 用户气泡残留 → hasConversation 仍为 true，空状态引导被隐藏，UI 卡在带错误气泡的对话态。
+      setPendingUser(null);
       pendingPromptRef.current = null;
       isFollowupRef.current = false;
+      // 修复 ASKU-01：AskUserQuestion 防重入守卫复位（任何 finalizeSession 完成都解锁 option 按钮）。
+      askAnsweringRef.current = false;
+      setAskAnswering(false);
     }
   }
 
@@ -571,7 +615,11 @@ export function PluginCreatorHome() {
       toast.error(creatorError.title);
       setStreaming(false);
       setLiveStage('');
+      // 修复 CREATOR-08：首轮 start_session 失败的 catch 此前漏清 pendingUser，
+      // line 558 刚置位的用户气泡与 ErrorBubble 同屏残留。与 handleMultiturnError 行为对齐。
+      setPendingUser(null);
       pendingPromptRef.current = null;
+      isFollowupRef.current = false;
       setActiveIdRef(null);
     }
   }
@@ -594,11 +642,31 @@ export function PluginCreatorHome() {
   // 本轮按 --resume 续接（答案当普通文本），tool_use_id 精确关联留后续 stream-json input 升级。
   // 复用 send() 的追问路径：答案文本走 input，effort/model 随当前选择器值。
   async function handleAskUserAnswer(question: AskUserQuestion, optionLabel: string) {
-    if (!streaming) return;
+    // ASKU-01 修复：防重入守卫。streaming 在 send_input resolve 前恒为 true，
+    // 此前连点会触发多次 send_input。用 askAnsweringRef 在入口置位、finally 复位，
+    // 期间 StreamingMessage 的 option 按钮 disabled（读 askAnsweringRef 经 answered prop 传入）。
+    if (!streaming || askAnsweringRef.current) return;
+    // 修复 CREATOR-07：追问前置条件应与 send() 一致——校验首轮已退出（status !== 'running'），
+    // 否则首轮 CLI 仍在 running 时派生第二个进程写同一 transcript，双 exit 覆盖草稿。
+    // （Rust send_input 无 running 检查，前端必须自守。）
     const sessionId = activeIdRef.current;
     if (!sessionId) return;
+    if (assistantSession?.status && assistantSession.status === 'running') {
+      // 首轮仍在运行：拒绝追问提交，避免派生并发进程污染 transcript。
+      toast.error('上一轮仍在运行，请等待完成或停止后再回答。');
+      return;
+    }
     // 组合可读回答：问句 + 选项（便于上下文追溯，纯选项字面在多选语境下歧义）。
     const answer = `${question.question}\n选择：${optionLabel}`;
+    // 修复 CREATOR-01：复用 send() 追问路径的状态写入。此前这些 ref/state 全程未更新，
+    // 导致 CLI exit 后 finalizeSession 读 isFollowupRef(仍 false) 走首轮分支，用首问覆盖已累积草稿、答案丢失。
+    setPendingUser(answer);
+    pendingPromptRef.current = { text: answer, providerLabel: providerInfo.label, model };
+    lastPromptRef.current = answer;
+    isFollowupRef.current = true;
+    // ASKU-01：防重入置位（option 按钮 disabled 直到 send_input 完成）。
+    askAnsweringRef.current = true;
+    setAskAnswering(true);
     setLiveStage('正在提交你的选择…');
     try {
       await tauriInvoke('code_assistant_send_input', {
@@ -613,6 +681,9 @@ export function PluginCreatorHome() {
       setLiveSegments((prev) => prev.filter((s) => s.stream !== 'tool'));
     } catch (error) {
       handleMultiturnError(error);
+      // ASKU-01：send_input 抛错时 finalizeSession 不会跑（无 exit 事件），askAnsweringRef 需手动复位。
+      askAnsweringRef.current = false;
+      setAskAnswering(false);
     }
   }
 
@@ -630,6 +701,13 @@ export function PluginCreatorHome() {
     setLiveSegments([]);
     setLiveError(null);
     setStreaming(false);
+    // 修复 CREATOR-03：清理 liveSegments/liveError/streaming 但漏掉 setPendingUser(null)，
+    // 旧会话的 pendingUser 气泡残留到新会话视图；且 hasConversation 含 Boolean(pendingUser)，
+    // 新空会话会误进对话视图而非空状态引导。与 newDraft 一致地补上。
+    setPendingUser(null);
+    // 修复 ASKU-01：切会话时复位防重入守卫（若旧会话追问未完成即被切走）。
+    askAnsweringRef.current = false;
+    setAskAnswering(false);
     try {
       const draftRaw = await readDraft(id);
       setCurrentDraft(draftRaw ? JSON.parse(draftRaw) : null);
@@ -655,7 +733,16 @@ export function PluginCreatorHome() {
       assistantSessionRef.current = rebuilt;
       setAssistantSession(rebuilt);
     }
-    setMultiturnMode(null);
+    // 修复 CREATOR-05：selectConversation 此前无条件 setMultiturnMode(null)。
+    // codex/opencode 不 emit session-cli-id（仅 claude stream-json 才 emit），追问期间 multiturnMode 仍为 null，
+    // 「此 CLI 不支持原生多轮…」透明提示永不显示，且 liveStage 反而显示 native 文案误导用户上下文真复用。
+    // 改为：codex/opencode 直接置 'degraded'（恢复会话首问即弹降级提示，符合设计决策）；
+    // claude 保持 null（由后续 session-cli-id 或 exit 判定）。
+    if (meta && (meta.tool === 'codex' || meta.tool === 'opencode')) {
+      setMultiturnMode('degraded');
+    } else {
+      setMultiturnMode(null);
+    }
     setCloudPlugin(null);
   }
 
@@ -705,8 +792,22 @@ export function PluginCreatorHome() {
       const stdout = transcriptTextSinceLastInput(events, 'stdout');
       const stderr = transcriptTextSinceLastInput(events, 'stderr');
       const base = assistantSessionRef.current || assistantSession;
-      const promptText = pendingPromptRef.current?.text || lastPromptRef.current || turns.find((t) => t.role === 'user')?.content || '本地代码助手插件';
+      // CREATOR-06：与 finalizeSession 一致——结构化解析依赖完整本轮 stdout（transcriptTextSinceLastInput
+      // 已切本轮，不会跨轮累积），不受 tailText(12000) 截断影响。
+      const fullStdout = stdout || base?.stdout || '';
+      const fullStderr = stderr || base?.stderr || '';
+      // 修复 CREATOR-12：promptText 回退此前取首个 user turn（turns.find），多轮下应取最后一个 user turn，
+      // 与 transcriptTextSinceLastInput（取最后一个 input 之后）的「最近一轮」语义对齐。
+      // 否则恢复历史纯对话会话后点「转为草稿」会把首轮 prompt 当本轮 user turn 追加（归因错误 + 重复 user turn）。
+      const lastUserTurn = (() => {
+        for (let i = turns.length - 1; i >= 0; i--) {
+          if (turns[i].role === 'user') return turns[i].content;
+        }
+        return undefined;
+      })();
+      const promptText = pendingPromptRef.current?.text || lastPromptRef.current || lastUserTurn || '本地代码助手插件';
       // 重建完整 AssistantSessionState（强制定义解析所需的全部字段，避免 null 展开）。
+      // 显示层 stdout/stderr 仍走 tailText（内存保护）；probeResult 用完整本轮 stdout。
       const rebuilt: AssistantSessionState = {
         sessionId,
         status: base?.status || 'exited',
@@ -716,11 +817,11 @@ export function PluginCreatorHome() {
         commandPreview: base?.commandPreview || [],
         transcriptPath: base?.transcriptPath || '',
         startedAt: base?.startedAt,
-        stdout: tailText(stdout || base?.stdout || ''),
-        stderr: tailText(stderr || base?.stderr || ''),
+        stdout: tailText(fullStdout),
+        stderr: tailText(fullStderr),
         diagnostics: base?.diagnostics || [],
       };
-      const probeResult = sessionToProbeResult(rebuilt);
+      const probeResult = sessionToProbeResult({ ...rebuilt, stdout: fullStdout, stderr: fullStderr });
       const draft = (currentDraft && currentDraft.turns.length > 0)
         ? mergeFollowupDraft(currentDraft, probeResult, promptText)
         : buildLocalDraft({
@@ -899,6 +1000,7 @@ export function PluginCreatorHome() {
                   segments={liveSegments}
                   hasThought={liveSegments.some((s) => s.stream === 'thought')}
                   hasStdout={liveSegments.some((s) => s.stream === 'stdout')}
+                  askAnswering={askAnswering}
                   onAskUserAnswer={(question, optionLabel) => { void handleAskUserAnswer(question, optionLabel); }}
                 />
               )}

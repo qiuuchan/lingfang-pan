@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { MarketplaceService } from './marketplace.service';
+import { MarketplaceInstallDto, MarketplaceRateDto } from './dto/plugins.dto';
 
 @ApiTags('Marketplace')
 @ApiBearerAuth()
@@ -24,13 +25,13 @@ export class MarketplaceController {
 
   @Post('install')
   @ApiOperation({ summary: '安装市场插件到当前团队' })
-  install(@Req() req: Request, @Body() body: { plugin_id: string }) {
+  install(@Req() req: Request, @Body() body: MarketplaceInstallDto) {
     return this.market.install(requireUser(req).id, body.plugin_id);
   }
 
   @Post('rate')
   @ApiOperation({ summary: '为市场插件评分（须先购买/安装）' })
-  rate(@Req() req: Request, @Body() body: { plugin_id: string; score: number; comment?: string }) {
-    return this.market.rate(requireUser(req).id, body.plugin_id, Number(body.score), body.comment || '');
+  rate(@Req() req: Request, @Body() body: MarketplaceRateDto) {
+    return this.market.rate(requireUser(req).id, body.plugin_id, body.score, body.comment || '');
   }
 }

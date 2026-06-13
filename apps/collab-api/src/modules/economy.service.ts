@@ -15,19 +15,24 @@ export class EconomyService {
   // 注册赠送 ¥10（1000 分）：首次访问钱包时 upsert，不改 auth.service 的注册流程。
   // 同步写入 signup_bonus CREDIT 流水，保持与旧 Rust 经济系统一致（verify-economy.ps1 断言该流水存在）。
   async ensureWallet(userId: string) {
-    const wallet = await this.prisma.wallet.upsert({
-      where: { userId },
-      update: {},
-      create: { userId, balanceCents: SIGNUP_BONUS_CENTS },
-    });
-    // 幂等：仅当尚无 signup_bonus 流水时补写一条 CREDIT，不依赖 upsert 是否实际新增。
-    const existing = await this.prisma.walletTransaction.findFirst({ where: { userId, reason: 'signup_bonus' } });
-    if (!existing) {
-      await this.prisma.walletTransaction.create({
-        data: { userId, amountCents: SIGNUP_BONUS_CENTS, direction: 'CREDIT', reason: 'signup_bonus' },
+    // 修复 SCHEMA-01：此前 wallet.upsert 与流水 findFirst+create 分离，并发可重复发放 signup_bonus。
+    // 改用事务内幂等：upsert wallet 后在事务内查流水，无则创建，保证「首充流水唯一」不变量。
+    return this.prisma.$transaction(async (tx) => {
+      const wallet = await tx.wallet.upsert({
+        where: { userId },
+        update: {},
+        create: { userId, balanceCents: SIGNUP_BONUS_CENTS },
       });
-    }
-    return wallet;
+      // 仅当钱包是新创建（余额恰好等于赠送额且无任何流水）时补写 signup_bonus，
+      // 避免对已存在钱包重复发放。事务内行锁（wallet 行被 upsert 锁定）串行化并发。
+      const existing = await tx.walletTransaction.findFirst({ where: { userId, reason: 'signup_bonus' } });
+      if (!existing) {
+        await tx.walletTransaction.create({
+          data: { userId, amountCents: SIGNUP_BONUS_CENTS, direction: 'CREDIT', reason: 'signup_bonus' },
+        });
+      }
+      return wallet;
+    });
   }
 
   async getWallet(userId: string) {

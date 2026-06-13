@@ -16,7 +16,6 @@ import {
   parseStructuredPackage,
   parseTranscript,
   summarizeTitleLocally,
-  transcriptText,
   transcriptTextSinceLastInput,
 } from './plugin-draft';
 
@@ -325,6 +324,25 @@ describe('parseStructuredPackage', () => {
     expect(parsed.manifest).toBeNull();
     expect(parsed.status).toBe('invalid');
   });
+
+  // CREATOR-06 修复验证：parseStructuredPackage 直接处理完整 stdout（不受 tailText 截断），
+  // 超过 12k 字符的产出只要结构完整即可正确解析。
+  it('大产出（> 12000 字符）仍能完整解析结构化块（CREATOR-06）', () => {
+    // 构造一个 > 12k 的 manifest+file 包：file 内容 padding 到 > 12000 字符。
+    const padding = 'x'.repeat(13_000);
+    const raw = [
+      '```lingfang-manifest json',
+      '{ "id": "big-ok", "name": "BigOk", "entry": "ui/index.html" }',
+      '```',
+      '```file path="ui/index.html"',
+      `<div>${padding}</div>`,
+      '```',
+    ].join('\n');
+    const parsed = parseStructuredPackage(raw);
+    expect(parsed.status).toBe('ready');
+    expect(parsed.manifest?.id).toBe('big-ok');
+    expect(parsed.files.find((f) => f.path === 'ui/index.html')?.content).toContain(padding);
+  });
 });
 
 // === buildFallbackEntryHtml ===
@@ -398,6 +416,24 @@ describe('buildLocalDraft 产出收敛', () => {
   it('完全失败（无输出）→ status invalid，不比现状差', () => {
     const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith('', false) });
     expect(draft.status).toBe('invalid');
+  });
+
+  // DRAFT-02 修复：字节超限（单文件 > 256KB）的 invalid 不再被静默升格为 partial。
+  it('字节超限（manifest 合法但单文件 > 256KB）→ status invalid（不再静默升格 partial）', () => {
+    const big = 'a'.repeat(260 * 1024);
+    const raw = [
+      '```lingfang-manifest json',
+      '{ "id": "big", "name": "Big", "entry": "ui/index.html" }',
+      '```',
+      '```file path="ui/index.html"',
+      big,
+      '```',
+    ].join('\n');
+    const draft = buildLocalDraft({ prompt: '做一个插件', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith(raw) });
+    // parse 层判 invalid，buildLocalDraft 不再折叠为 partial。
+    expect(draft.status).toBe('invalid');
+    // 诊断仍带字节超限 fail 文案。
+    expect(draft.diagnostics.some((d) => d.stage === 'schema' && d.status === 'fail')).toBe(true);
   });
 });
 
@@ -497,6 +533,80 @@ describe('mergeFollowupDraft', () => {
       '```',
     ].join('\n')), '追问');
     expect(merged.diagnostics.length).toBeGreaterThan(baseDiag);
+  });
+
+  // DRAFT-01 修复：追问未重发完整 manifest（仅 file 块无 manifest 块）时 prevManifest.capabilities 保留。
+  it('追问仅产出 file 块无 manifest 块 → prevManifest.capabilities 保留（不降级为单能力兜底）', () => {
+    // 关键场景：多能力插件（如 fs.read + ui.view）在后续追问只改源码不重发 manifest 时，
+    // 此前 normalizeCapabilities(undefined) 一律兜底为 [code-assistant.run]，已授权能力静默丢失。
+    const prev = buildDraftFromSandboxFiles({
+      prompt: '做一个多能力插件',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith('已生成。'),
+      files: [
+        { path: 'manifest.json', content: '{ "id": "multi", "name": "多能力", "entry": "ui/index.html", "capabilities": [{ "kind": "fs.read", "reason": "读取" }, { "kind": "ui.view", "reason": "渲染" }] }' },
+        { path: 'ui/index.html', content: '<div>v1</div>' },
+      ],
+    })!;
+    // 追问仅出 file 块（改按钮颜色），无 manifest 块。
+    const merged = mergeFollowupDraft(prev, probeWith([
+      '```file path="ui/index.html"',
+      '<div>v2 红色按钮</div>',
+      '```',
+    ].join('\n')), '把按钮改红');
+    const manifestFile = merged.files.find((f) => f.path === 'manifest.json');
+    const manifest = JSON.parse(manifestFile!.content);
+    // prevManifest 的多能力必须保留，不降级为单 code-assistant.run。
+    expect(Array.isArray(manifest.capabilities)).toBe(true);
+    expect(manifest.capabilities.length).toBe(2);
+    expect(manifest.capabilities.some((c: { kind: string }) => c.kind === 'fs.read')).toBe(true);
+    expect(manifest.capabilities.some((c: { kind: string }) => c.kind === 'ui.view')).toBe(true);
+    expect(manifest.capabilities.some((c: { kind: string }) => c.kind === 'code-assistant.run')).toBe(false);
+  });
+
+  it('追问重发完整 capabilities → 覆盖 prev（迭代而非保留旧能力）', () => {
+    const prev = firstRoundDraft();
+    const merged = mergeFollowupDraft(prev, probeWith([
+      '```lingfang-manifest json',
+      '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html", "capabilities": [{ "kind": "fs.read", "reason": "新读" }] }',
+      '```',
+      '```file path="ui/index.html"',
+      '<div>v2</div>',
+      '```',
+    ].join('\n')), '加个读取能力');
+    const manifest = JSON.parse(merged.files.find((f) => f.path === 'manifest.json')!.content);
+    // 合法非空 capabilities 覆盖 prev，迭代生效。
+    expect(manifest.capabilities.some((c: { kind: string }) => c.kind === 'fs.read')).toBe(true);
+  });
+
+  // DRAFT-04 修复：prevManifest 含磁盘脏值（非法 visibility/runtime_type）时，
+  // normalizeEnum 的 fallback 路径校验 fallback 是否在白名单，脏值不继续透传。
+  it('prevManifest 含非法 visibility/runtime_type（磁盘脏值）→ fallback 校验白名单，脏值不透传', () => {
+    // 构造一个磁盘脏 prev：manifest.json 字段为非法 'public' / 'edge'。
+    const prev = buildDraftFromSandboxFiles({
+      prompt: '做一个插件',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith('已生成。'),
+      files: [
+        { path: 'manifest.json', content: '{ "id": "dirty", "name": "脏值", "entry": "ui/index.html", "visibility": "public", "runtime_type": "edge" }' },
+        { path: 'ui/index.html', content: '<div>v1</div>' },
+      ],
+    })!;
+    // 追问不重发 manifest → 走 prevManifest fallback 路径。
+    const merged = mergeFollowupDraft(prev, probeWith([
+      '```file path="ui/index.html"',
+      '<div>v2</div>',
+      '```',
+    ].join('\n')), '改红');
+    const manifest = JSON.parse(merged.files.find((f) => f.path === 'manifest.json')!.content);
+    // 脏值 'public'/'edge' 不在白名单，fallback 校验退回白名单首个允许值，绝不透传到新 manifest.json。
+    expect(manifest.visibility).not.toBe('public');
+    expect(manifest.runtime_type).not.toBe('edge');
+    // 落到合法白名单内（visibility: private|tenant；runtime_type: client|cloud|nodejs|python）。
+    expect(['private', 'tenant']).toContain(manifest.visibility);
+    expect(['client', 'cloud', 'nodejs', 'python']).toContain(manifest.runtime_type);
   });
 });
 
@@ -647,6 +757,30 @@ describe('mergeFollowupDraftWithSandbox', () => {
       { path: 'manifest.json', content: '{}' },
     ]);
     expect(merged.id).toBe(prevId);
+  });
+
+  // DRAFT-01 修复（sandbox 路径同款根因）：追问 sandbox 的 manifest.json 不含 capabilities 时，
+  // 保留 prevManifest.capabilities，不降级为单能力兜底。
+  it('追问 sandbox manifest.json 缺 capabilities 字段 → prevManifest.capabilities 保留', () => {
+    const prev = buildDraftFromSandboxFiles({
+      prompt: '做一个多能力插件',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith('已生成。'),
+      files: [
+        { path: 'manifest.json', content: '{ "id": "multi", "name": "多能力", "entry": "ui/index.html", "capabilities": [{ "kind": "fs.read", "reason": "读取" }, { "kind": "ui.view", "reason": "渲染" }] }' },
+        { path: 'ui/index.html', content: '<div>v1</div>' },
+      ],
+    })!;
+    // 追问 sandbox 重写 manifest.json 但漏了 capabilities 字段。
+    const merged = mergeFollowupDraftWithSandbox(prev, probeWith('已改'), '把按钮改红', [
+      { path: 'manifest.json', content: '{ "id": "multi", "name": "多能力", "entry": "ui/index.html" }' },
+      { path: 'ui/index.html', content: '<div>v2</div>' },
+    ]);
+    const manifest = JSON.parse(merged.files.find((f) => f.path === 'manifest.json')!.content);
+    expect(manifest.capabilities.length).toBe(2);
+    expect(manifest.capabilities.some((c: { kind: string }) => c.kind === 'fs.read')).toBe(true);
+    expect(manifest.capabilities.some((c: { kind: string }) => c.kind === 'code-assistant.run')).toBe(false);
   });
 });
 
@@ -876,17 +1010,18 @@ describe('transcriptTextSinceLastInput', () => {
     expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('答3');
   });
 
-  it('问题5 回归对照：旧 transcriptText 会串轮，新函数只取本轮', () => {
-    // 问题5 根因：transcriptText 用 .join('') 拼所有 output → 多轮串成一段。
-    // transcriptTextSinceLastInput 切到最后一轮 → 一问一答。
+  it('问题5 回归对照：transcriptTextSinceLastInput 只取本轮（旧行为已随 DRAFT-06 删除）', () => {
+    // DRAFT-06 清理：旧的 transcriptText（多轮串接 bug 行为）已从生产代码移除，
+    // 仅以此断言锁定「本轮切片」语义——多轮场景只返回最后一个 input 之后的 output。
     const events = [
       ev('input', { prompt: '你好' }),
       ev('output', { stream: 'stdout', text: '你好回复' }),
       ev('input', { prompt: '你能做什么', kind: 'followup' }),
       ev('output', { stream: 'stdout', text: '能力回复' }),
     ];
-    expect(transcriptText(events, 'stdout')).toBe('你好回复能力回复'); // 旧行为（串轮）
     expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('能力回复'); // 新行为（本轮）
+    // 关键：绝不串入历史轮次输出。
+    expect(transcriptTextSinceLastInput(events, 'stdout')).not.toContain('你好回复');
   });
 });
 

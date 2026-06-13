@@ -128,14 +128,15 @@ function PluginEditDialog({
   }, [plugin]);
 
   async function save() {
-    await run(
+    // ADMIN-VIEW-04 修复：仅成功才关闭对话框，失败保留已编辑的描述/状态。
+    if (!(await run(
       () =>
         api(`/api/admin/plugins/${plugin.id}`, {
           method: 'PATCH',
           body: { description, status },
         }).then(onRefresh),
       '插件治理信息已更新',
-    );
+    ))) return;
     setOpen(false);
   }
 

@@ -13,9 +13,12 @@ interface PendingPlugin {
   name: string;
   version: string;
   description?: string;
-  price_cents: number;
-  is_free: boolean;
-  at: string;
+  // 修复 DESK-REVIEW-01：后端 publicPlugin(...) 返回 priceCents（驼峰）+ updatedAt，
+  // 此前声明 price_cents / is_free / at（蛇形 + 不存在字段），导致 p.is_free 恒 undefined（falsy）→
+  // Badge variant 恒 'default'；fmtYuan(p.price_cents) 命中 undefined → money.ts:6 c===0 return '免费' →
+  // 付费插件价格徽标永远显示「免费」。改为与后端契约对齐（camelCase）。
+  priceCents: number;
+  updatedAt?: string;
 }
 
 export function Review() {
@@ -75,7 +78,7 @@ export function Review() {
                     <div className="mt-0.5 text-sm text-muted-foreground">{p.description || '（无描述）'}</div>
                     <div className="mt-1 font-mono text-xs text-muted-foreground">{p.id}</div>
                   </div>
-                  <Badge variant={p.is_free ? 'secondary' : 'default'}>{fmtYuan(p.price_cents)}</Badge>
+                  <Badge variant={p.priceCents === 0 ? 'secondary' : 'default'}>{fmtYuan(p.priceCents)}</Badge>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                   <Input

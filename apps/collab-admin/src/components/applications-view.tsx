@@ -180,14 +180,15 @@ function RejectDialog({
 
   async function reject() {
     if (!reason.trim()) return toast.error('请输入驳回原因');
-    await run(
+    // ADMIN-VIEW-04 修复：仅成功才关闭对话框，失败保留已输入的驳回原因。
+    if (!(await run(
       () =>
         api(`/api/admin/team-admin-applications/${application.id}/reject`, {
           method: 'POST',
           body: { reason: reason.trim() },
         }).then(onRefresh),
       '申请已驳回',
-    );
+    ))) return;
     setOpen(false);
   }
 

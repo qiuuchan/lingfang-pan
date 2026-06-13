@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { TeamService } from './team.service';
+import { SubmitApplicationDto } from './dto/applications.dto';
 
 @ApiTags('Applications')
 @ApiBearerAuth()
@@ -12,7 +13,7 @@ export class ApplicationsController {
 
   @Post()
   @ApiOperation({ summary: '提交团队管理员申请' })
-  submit(@Req() req: Request, @Body() body: { teamName: string; reason?: string }) {
+  submit(@Req() req: Request, @Body() body: SubmitApplicationDto) {
     return this.team.submitApplication(requireUser(req).id, body);
   }
 

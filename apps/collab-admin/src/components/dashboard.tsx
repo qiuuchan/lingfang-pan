@@ -6,8 +6,12 @@ import { UsersIcon, BoxesIcon, ClockIcon, PlugIcon, AlertCircleIcon, CheckCircle
 import { useLoad } from '@/lib/helpers';
 import { api, type DashboardData } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import type { View } from '@/lib/types';
 
-export function Dashboard() {
+// ADMIN-VIEW-02 修复：Dashboard 增加 onNavigate 回调 prop，
+// quickActions 每项挂 onClick 调用 onNavigate 跳转到对应视图，
+// 消除「cursor-pointer + hover + ArrowRightIcon 但无 onClick」的死链误导。
+export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } = {}) {
   const [data, setData] = useState<DashboardData | null>(null);
   useLoad(() => api<DashboardData>('/api/admin/dashboard').then(setData));
 
@@ -20,13 +24,15 @@ export function Dashboard() {
 
   const pendingTasks = [
     { label: '待审批申请', count: data?.pendingApplications ?? 0, icon: AlertCircleIcon, color: 'text-amber-500' },
-    { label: '已禁用插件', count: 0, icon: CheckCircleIcon, color: 'text-muted-foreground' },
+    // ADMIN-VIEW-03 修复：原硬编码 0，现读后端 disabledPlugins（adminDashboard 已补该指标）。
+    { label: '已禁用插件', count: data?.disabledPlugins ?? 0, icon: CheckCircleIcon, color: 'text-muted-foreground' },
   ];
 
-  const quickActions = [
-    { label: '创建用户', icon: UsersIcon },
-    { label: '创建团队', icon: BoxesIcon },
-    { label: '审批管理', icon: CheckCircleIcon },
+  // ADMIN-VIEW-02：每项挂 onClick 跳转。
+  const quickActions: { label: string; icon: typeof UsersIcon; view: View }[] = [
+    { label: '创建用户', icon: UsersIcon, view: 'users' },
+    { label: '创建团队', icon: BoxesIcon, view: 'teams' },
+    { label: '审批管理', icon: CheckCircleIcon, view: 'applications' },
   ];
 
   return (
@@ -85,18 +91,31 @@ export function Dashboard() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="px-6 pb-6">
-              {quickActions.map((item, i) => (
-                <div key={item.label}>
-                  {i > 0 && <Separator className="my-2" />}
-                  <div className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <item.icon className="size-4 text-muted-foreground" />
-                      <span>{item.label}</span>
-                    </div>
-                    <ArrowRightIcon className="size-4 text-muted-foreground" />
+              {quickActions.map((item, i) => {
+                const Icon = item.icon;
+                // ADMIN-VIEW-02：有 onNavigate 时整项可点击跳转；无 onNavigate 时移除 cursor-pointer/hover/Arrow，
+                // 避免三重视觉暗示「可点击」但点击无反应的死链误导。
+                const clickable = Boolean(onNavigate);
+                return (
+                  <div key={item.label}>
+                    {i > 0 && <Separator className="my-2" />}
+                    <button
+                      type="button"
+                      onClick={() => onNavigate?.(item.view)}
+                      className={cn(
+                        'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm',
+                        clickable && 'cursor-pointer transition-colors hover:bg-muted/50',
+                      )}
+                    >
+                      <span className="flex items-center gap-3">
+                        <Icon className="size-4 text-muted-foreground" />
+                        <span>{item.label}</span>
+                      </span>
+                      {clickable && <ArrowRightIcon className="size-4 text-muted-foreground" />}
+                    </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

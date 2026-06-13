@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { conflict, forbidden, notFound } from '../common';
+import { badRequest, conflict, forbidden, notFound, AppError } from '../common';
 import { AuthService } from './auth.service';
 import { ensurePluginManager, normalizePluginPackage, publicPlugin, type PluginPackageInput } from './plugin-package';
 
@@ -67,7 +67,20 @@ export class PluginService {
       },
       orderBy: [{ marketplace: 'asc' }, { updatedAt: 'desc' }],
     });
-    return { plugins: plugins.map((plugin) => publicPlugin(plugin, membership.teamId)) };
+    // 修复 PPK-02 / PPK-05：对非本团队的市场插件（PUBLIC 第三分支）脱敏 ——
+    // 不返回 files 源码（付费插件需购买后桌面端才能从 detail 拿，此前被白嫖），
+    // 不返回 reviewReason/reviewedById 审核内部态（仅作者与管理员可见）。
+    // 本团队插件（作者/团队成员）保留完整字段，因为他们本就持有源码与审核态。
+    return {
+      plugins: plugins.map((plugin) => {
+        const isOwnTeam = plugin.teamId === membership.teamId;
+        const public_ = publicPlugin(plugin, membership.teamId);
+        if (!isOwnTeam) {
+          return { ...public_, files: undefined, manifest: undefined, reviewReason: undefined, reviewedById: undefined };
+        }
+        return public_;
+      }),
+    };
   }
 
   async submitPluginToMarketplace(userId: string, id: string, input: { priceCents?: number }) {
@@ -78,7 +91,10 @@ export class PluginService {
     if (plugin.status !== 'ENABLED') throw forbidden('已禁用插件不能提交市场');
     if (plugin.reviewStatus === 'PENDING') throw conflict('插件已在审核中');
 
-    const priceCents = Math.max(0, Number(input.priceCents || plugin.priceCents || 0));
+    // 修复 PPK-03：显式区分 undefined（保持原价）与 0（免费化），此前 0 被 || 吞掉无法改免费。
+    const priceCents = input.priceCents === undefined
+      ? Math.max(0, plugin.priceCents)
+      : Math.max(0, Math.floor(Number(input.priceCents) || 0));
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.plugin.update({
         where: { id },
@@ -97,6 +113,11 @@ export class PluginService {
     if (!plugin) throw notFound('插件不存在');
     ensurePluginManager(plugin, membership.teamId, userId, membership.role);
     if (plugin.reviewStatus === 'PENDING') throw conflict('审核中的插件不能编辑，请等待审核完成或联系平台管理员');
+    // 修复 PLUGIN-04：已 APPROVED+上架的插件不应被作者单方面重置为 DRAFT 下架，
+    // 否则已购买用户 detail/install 立即 404 且无下架审计。需平台管理员经 adminRejectPlugin 处理。
+    if (plugin.reviewStatus === 'APPROVED' && plugin.marketplace) {
+      throw conflict('已上架市场的插件需联系平台管理员下架后再编辑');
+    }
 
     const normalized = normalizePluginPackage(input);
     const duplicated = await this.prisma.plugin.findUnique({
@@ -133,6 +154,15 @@ export class PluginService {
     const plugin = await this.prisma.plugin.findUnique({ where: { id } });
     if (!plugin || plugin.status !== 'ENABLED' || plugin.reviewStatus !== 'APPROVED' || !plugin.marketplace || plugin.visibility !== 'PUBLIC') {
       throw notFound('市场插件不存在或不可安装');
+    }
+    // 修复 PPK-01（critical 付费墙绕过）：此前此路径完全缺失付费校验，
+    // 付费插件可被任意已登录用户免费安装、installCount 虚增、作者分成流失。
+    // 与 marketplace.service.ts:94-97 的 install 保持契约一致 —— 付费插件必须先有 Purchase。
+    if (plugin.priceCents > 0) {
+      const bought = await this.prisma.purchase.count({ where: { pluginId: id, buyerUserId: userId } });
+      if (bought === 0) {
+        throw new AppError(402, 'payment_required', '该插件为付费插件，请先购买');
+      }
     }
     const existing = await this.prisma.pluginInstallation.findUnique({ where: { pluginId_teamId: { pluginId: id, teamId: membership.teamId } } });
     const installation = existing

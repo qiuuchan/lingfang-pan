@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { TeamService } from './team.service';
+import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto } from './dto/teams.dto';
 
 @ApiTags('Teams')
 @ApiBearerAuth()
@@ -30,7 +31,7 @@ export class TeamsController {
 
   @Post('invitations')
   @ApiOperation({ summary: '团队管理员生成邀请码' })
-  createInvitation(@Req() req: Request, @Body() body: { maxUses?: number; expiresAt?: string }) {
+  createInvitation(@Req() req: Request, @Body() body: CreateInvitationDto) {
     return this.team.createInvitation(requireUser(req).id, body);
   }
 
@@ -60,7 +61,7 @@ export class TeamsController {
 
   @Post('consume')
   @ApiOperation({ summary: '消耗团队共享余额' })
-  consume(@Req() req: Request, @Body() body: { amountCents: number; reason?: string }) {
+  consume(@Req() req: Request, @Body() body: ConsumeBalanceDto) {
     return this.team.consume(requireUser(req).id, body);
   }
 }
@@ -73,7 +74,7 @@ export class InvitationsController {
 
   @Post('redeem')
   @ApiOperation({ summary: '普通用户凭邀请码加入团队' })
-  redeem(@Req() req: Request, @Body() body: { code: string }) {
+  redeem(@Req() req: Request, @Body() body: RedeemInvitationDto) {
     return this.team.redeemInvitation(requireUser(req).id, body.code);
   }
 }

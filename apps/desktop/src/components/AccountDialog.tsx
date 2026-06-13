@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { LogOutIcon, UserRoundIcon } from 'lucide-react';
-import { api, isEmail } from '@/lib/api';
+import { api, isEmail, type ApiError } from '@/lib/api';
 import type { Session } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -77,9 +77,14 @@ export function AccountDialog({ open, onOpenChange, session, applySession, reset
       toast.success('账户信息已更新');
       onOpenChange(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      // 404/405 表示后端尚未实现 profile 更新接口，标注待后续支持。
-      toast.error(message.includes('404') || message.includes('405') ? '后端尚未支持修改账户信息' : message);
+      // 修复 ACCT-01 / DESK-06：此前用 message.includes('404')||message.includes('405') 判定后端未实现，
+      // 但 api() 抛的 Error.message 取 data.message||data.error||res.statusText（不含状态码数字），
+      // 后端 NestJS 路由未注册时返回 {code:'http_error', message:'Cannot PATCH /api/auth/me'}，
+      // includes 恒 false → 友好降级永不触发，裸英文错误直接泄露给用户。
+      // 改为基于 err.status（api() 已透传）精确判定 404/405。
+      const err = error as ApiError;
+      const backendNotImplemented = err.status === 404 || err.status === 405;
+      toast.error(backendNotImplemented ? '后端尚未支持修改账户信息' : err.message);
     } finally {
       setSavingProfile(false);
     }
@@ -99,8 +104,10 @@ export function AccountDialog({ open, onOpenChange, session, applySession, reset
       setPassword('');
       onOpenChange(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      toast.error(message.includes('404') || message.includes('405') ? '后端尚未支持修改密码' : message);
+      // 修复 ACCT-01 / DESK-06：与 saveProfile 同款，基于 err.status 精确判定后端未实现。
+      const err = error as ApiError;
+      const backendNotImplemented = err.status === 404 || err.status === 405;
+      toast.error(backendNotImplemented ? '后端尚未支持修改密码' : err.message);
     } finally {
       setSavingPassword(false);
     }

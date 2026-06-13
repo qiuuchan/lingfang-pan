@@ -125,11 +125,14 @@ function RunnerBody({
         <p className="p-4 text-sm text-destructive">{error}</p>
       ) : (
         // 运行态：iframe 铺满整个主体区（无边框无圆角），插件自身内容滚动。
-        // sandbox 加 allow-same-origin/forms/popups（运行可信插件，允许 localStorage/DOM/表单完整交互）。
+        // 修复 RT-01（critical iframe 越权）：去掉 allow-same-origin，使 srcDoc iframe 成为 opaque origin，
+        // 不继承宿主 origin，无法访问 parent.__TAURI__.core.invoke 或 parent.localStorage 中的 JWT，
+        // 三重 capability 校验不再被旁路。postMessage 通信不依赖 same-origin，运行态桥不受影响。
+        // localStorage 在 opaque origin 下仍可用（独立存储），内置插件（todo-list 等）正常工作。
         <iframe
           ref={iframeRef}
           title={plugin.name}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          sandbox="allow-scripts allow-forms allow-popups"
           srcDoc={srcDoc}
           className="absolute inset-0 h-full w-full border-0 bg-white"
         />
@@ -146,16 +149,13 @@ export function Plugins() {
 
   useEffect(() => {
     if (runningPlugin) return;
-    (async () => {
-      try {
-        const result = await loadPlugins();
-        setError(result.error);
-        setList(result.plugins);
-        setPage(1);
-      } catch (caught) {
-        setError(errorMessage(caught));
-        setList([]);
-      }
+    // DESK-PLUGINS-01 修复：loadPlugins 用 Promise.allSettled 永不 reject，
+    // 此前外层 try/catch 是死代码（catch 不可达）。错误实际经 setError(result.error) 生效。
+    void (async () => {
+      const result = await loadPlugins();
+      setError(result.error);
+      setList(result.plugins);
+      setPage(1);
     })();
   }, [runningPlugin]);
 

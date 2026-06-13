@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { EconomyService } from './economy.service';
+import { PurchaseDto } from './dto/wallet.dto';
 
 @ApiTags('Wallet')
 @ApiBearerAuth()
@@ -18,7 +19,7 @@ export class WalletController {
 
   @Post('purchase')
   @ApiOperation({ summary: '购买市场付费插件（内部账本结算）' })
-  purchase(@Req() req: Request, @Body() body: { plugin_id: string }) {
+  purchase(@Req() req: Request, @Body() body: PurchaseDto) {
     return this.economy.purchase(requireUser(req).id, body.plugin_id);
   }
 }

@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { Toaster } from '@/components/ui/sonner';
-import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, type ApiError } from '@/lib/api';
+import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api';
 import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
@@ -57,8 +57,10 @@ function loadPins(tenantId: string | null): LoadedPlugin[] {
 function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
   try {
     localStorage.setItem(pinKey(tenantId), JSON.stringify(pins));
-  } catch {
-    /* localStorage 不可用则忽略 */
+  } catch (err) {
+    // DESK-SHELL-04 修复：配额满 / localStorage 被禁用时不再静默吞错，
+    // 给用户可见提示（持久化失败会导致下次重启「固定插件丢失」，需提示）。
+    reportPersistenceFailure(err);
   }
 }
 
@@ -76,6 +78,23 @@ const emptySession: Session = {
 };
 
 const SESSION_STORAGE_KEY = 'lf:session';
+
+// DESK-SHELL-04 修复：localStorage 配额满 / 被禁用时统一提示，避免「持久化静默失败、
+// 重启后丢失登录态/固定插件」无任何线索。仅在失败后提示一次（节流），避免刷屏。
+let persistenceErrorReported = false;
+function reportPersistenceFailure(err: unknown) {
+  if (persistenceErrorReported) return;
+  persistenceErrorReported = true;
+  const isQuotaOrSecurity = err instanceof DOMException && (err.name === 'QuotaExceededError' || err.name === 'SecurityError');
+  const hint = isQuotaOrSecurity
+    ? '本地存储空间不足或被禁用，登录状态和固定插件可能无法保存，下次启动需重新登录。'
+    : '本地存储写入失败，登录状态可能未保存。';
+  // 延迟一帧再 toast，避免在模块顶层/事件回调同步路径触发渲染异常。
+  setTimeout(() => {
+    try { import('sonner').then(({ toast }) => toast.warning(hint)); } catch { /* sonner 未加载则忽略 */ }
+  }, 0);
+}
+
 function loadStoredSession(): Session | null {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -89,8 +108,9 @@ function loadStoredSession(): Session | null {
 function saveStoredSession(session: Session) {
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    /* localStorage 不可用则忽略 */
+  } catch (err) {
+    // DESK-SHELL-04 修复：配额满 / localStorage 被禁用时不再静默吞错。
+    reportPersistenceFailure(err);
   }
 }
 function clearStoredSession() {
@@ -102,15 +122,23 @@ function clearStoredSession() {
 }
 
 function sessionFromPayload(payload: CollabSessionResponse, previousToken: string | null): Session {
+  // DESK-SHELL-05 修复：后端 /api/auth/me 在反代改写 / 响应截断 / 版本不符等场景可能返回 2xx
+  // 但 body 缺 user 字段。此前直接 payload.user.id 裸解引用会在 setSession updater 内抛 TypeError，
+  // 又因 main.tsx 无 ErrorBoundary 会白屏不可恢复。此处显式校验 payload.user，
+  // 缺失时抛出带语义的错误，由 refreshSession 的 .catch 兜底 resetSession，避免崩溃。
+  const user = payload && typeof payload === 'object' ? payload.user : undefined;
+  if (!user || typeof user.id !== 'string' || typeof user.email !== 'string' || typeof user.displayName !== 'string') {
+    throw new Error('后端返回的会话数据缺少必要的用户信息，请重新登录。');
+  }
   return {
     token: payload.token ?? previousToken,
-    userId: payload.user.id,
-    displayName: payload.user.displayName,
-    email: payload.user.email,
+    userId: user.id,
+    displayName: user.displayName,
+    email: user.email,
     tenantId: payload.team?.id ?? null,
     tenantName: payload.team?.name ?? null,
     role: payload.team?.role ?? null,
-    isPlatformAdmin: payload.user.platformRole === 'PLATFORM_ADMIN',
+    isPlatformAdmin: user.platformRole === 'PLATFORM_ADMIN',
     onboarding: payload.onboarding,
     application: payload.application,
   };
@@ -139,23 +167,29 @@ export default function App() {
     return true;
   }, []);
 
+  // DESK-SHELL-03 修复：applySession / applyCollabSession 不再把 setAuthToken / saveStoredSession /
+  // setView 等副作用放进 setSession updater（React 要求 updater 纯函数；StrictMode dev 下双调
+  // 与并发渲染可能丢弃该次更新，副作用已落盘但内存 session 未变更，造成状态不一致）。
+  // 改为先在函数体内顺序执行副作用，再调纯 setSession 拼接 next 状态。
+  // 用 ref 跟踪最新 session，使 updater 之外也能读到 prev（避免闭包陈旧）。
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+
   const applySession = useCallback((patch: Partial<Session>) => {
-    setSession((prev) => {
-      const next = { ...prev, ...patch };
-      setAuthToken(next.token);
-      saveStoredSession(next);
-      return next;
-    });
+    const next = { ...sessionRef.current, ...patch };
+    setAuthToken(next.token);
+    saveStoredSession(next);
+    sessionRef.current = next;
+    setSession(next);
   }, []);
 
   const applyCollabSession = useCallback((payload: CollabSessionResponse) => {
-    setSession((prev) => {
-      const next = sessionFromPayload(payload, prev.token);
-      setAuthToken(next.token);
-      saveStoredSession(next);
-      setView('home');
-      return next;
-    });
+    const next = sessionFromPayload(payload, sessionRef.current.token);
+    setAuthToken(next.token);
+    saveStoredSession(next);
+    sessionRef.current = next;
+    setView('home');
+    setSession(next);
   }, []);
 
   const refreshSession = useCallback(async () => {
@@ -166,6 +200,10 @@ export default function App() {
   const resetSession = useCallback(() => {
     setAuthToken(null);
     clearStoredSession();
+    // DESK-SHELL-07 修复：登出时清空 currentDraft，避免同机下一登录用户短暂看到上一用户的草稿。
+    // App 始终挂载（登出渲染 Auth 不卸载），useState 不会自动重置。
+    setCurrentDraft(null);
+    sessionRef.current = emptySession;
     setSession(emptySession);
     setRunningPlugin(null);
     setView('home');
@@ -183,9 +221,17 @@ export default function App() {
       .catch((err) => {
         if (cancelled) return;
         const code = (err as ApiError).code;
+        // DESK-SHELL-01 修复：apiBase() 为空时 api() 抛无 code 的 Error，此前不匹配
+        // unauthorized/invalid_token 分支，导致保留 session 却锁进「已登录但无后端」死循环。
+        // 此处对「无 code 的连接错误」也清 session（让用户回到 Auth/Settings 重新配置）。
+        // 仅当确实没有后端地址（而非短暂网络抖动）时才清，避免误登出。
         if (code === 'unauthorized' || code === 'invalid_token') {
           resetSession();
+        } else if (!apiBase()) {
+          // 没有 apiBase：session 残留无意义，回到 Auth 页让用户重新配置后端。
+          resetSession();
         }
+        // 其余网络错误（连接失败）：保留 session，进主界面，下次启动重试。
       })
       .finally(() => {
         if (!cancelled) setRestoring(false);
@@ -195,6 +241,17 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // DESK-TOKEN-01 / DESK-03 修复：全局监听 api() 派发的 UNAUTHORIZED 事件，
+  // 任意业务页遇到 401（token 过期/被吊销）时统一登出，避免「反复 toast 但不回登录页」死循环。
+  // 仅在已登录态响应（避免 Auth 页的 401 也误触发）。
+  useEffect(() => {
+    const handler = () => {
+      if (sessionRef.current.token) resetSession();
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, handler);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
+  }, [resetSession]);
 
   useEffect(() => {
     setPinnedPlugins(loadPins(session.tenantId));

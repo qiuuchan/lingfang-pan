@@ -123,27 +123,32 @@ export function Pagination({
 }
 
 /** Hook for client-side pagination */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 
 export function usePagination<T>(items: T[], defaultPageSize = 10) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
 
-  const paginated = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return items.slice(start, start + pageSize);
-  }, [items, page, pageSize]);
-
-  // Reset page when items change
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  if (page > totalPages) {
-    // Will be corrected on next render
-    setTimeout(() => setPage(1), 0);
-  }
+  // ADMIN-VIEW-06 修复：派生 effectivePage = min(page, totalPages)，
+  // 让本次渲染立即用有效页计算 paginated，避免旧实现「本次渲染用越界 page 得空数组→短暂渲染空态→
+  // setTimeout 下一 tick 重置」的闪烁。
+  const effectivePage = Math.min(page, totalPages);
+
+  const paginated = useMemo(() => {
+    const start = (effectivePage - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, effectivePage, pageSize]);
+
+  // ADMIN-VIEW-06：在 effect（提交阶段）而非渲染体内同步 page 到有效范围。
+  // 列表收缩使当前页越界时，下一渲染 effectivePage 已夹到 totalPages，无空态闪烁。
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   return {
     paginated,
-    page,
+    page: effectivePage,
     setPage,
     pageSize,
     setPageSize,

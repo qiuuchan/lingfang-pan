@@ -56,6 +56,15 @@ export function initApiBase(defaultUrl?: string | null) {
   const fallback = normalizeBackendUrl(defaultUrl);
   if (fallback) {
     apiBaseUrl = fallback;
+    // DESK-SHELL-01 修复：fallback 分支也持久化（与 configureApiBase 的 persist 对齐），
+    // 否则 lf:session 写入但 lf:backendUrl 仍为空，后续重启若 app.config.json 的 api_base
+    // 被清空/替换域名，initApiBase(null) 会得到空 base，但 loadStoredSession 仍返回带 token 的 session，
+    // 主壳陷入「已登录但无后端」的死循环（refreshSession 抛无 code 的 Error，不触发 reset）。
+    try {
+      localStorage.setItem(BACKEND_URL_STORAGE_KEY, fallback);
+    } catch {
+      /* localStorage 不可用则只更新当前会话 */
+    }
     return fallback;
   }
   apiBaseUrl = '';
@@ -119,31 +128,62 @@ export async function tauriListen<T = unknown>(event: string, handler: (event: {
   return listen(event, handler) as Promise<() => void>;
 }
 
+// 401 全局拦截事件名（DESK-TOKEN-01 / DESK-03 修复）：
+// api() 检测到 token 失效（code='unauthorized' / 'invalid_token' 或 HTTP 401）时派发此事件，
+// App.tsx 注册一次性监听器调用 resetSession()，避免业务页陷入反复 toast 但不回登录页的死循环。
+export const UNAUTHORIZED_EVENT = 'lf:unauthorized';
+
 export interface ApiError extends Error {
   code?: string;
+  // HTTP 状态码（DESK-06 / ACCT-01 修复）：api() 把 res.status 挂到错误对象上，
+  // 调用方可据此精确判定「后端未实现 404/405」等场景，不再依赖脆弱的字符串匹配。
+  status?: number;
 }
 
 interface ApiOptions {
   method?: string;
   body?: unknown;
   auth?: boolean;
+  // 请求超时（毫秒）。DESK-01 / DESK-SHELL-02 修复：默认 30s，
+  // 超时后 abort fetch 并抛友好错误，避免后端挂起时 UI 加载态永久冻结。
+  timeoutMs?: number;
 }
 
-export async function api<T = any>(path: string, { method = 'GET', body, auth = true }: ApiOptions = {}): Promise<T> {
+// 默认请求超时（30s）。覆盖 fetch 原生「无超时」行为，与浏览器默认 connection timeout 解耦。
+const DEFAULT_API_TIMEOUT_MS = 30_000;
+
+export async function api<T = any>(path: string, { method = 'GET', body, auth = true, timeoutMs = DEFAULT_API_TIMEOUT_MS }: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (auth && authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
   const base = apiBase();
   if (!base) throw new Error('尚未配置后端服务地址，请先填写后端 URL。');
+  // 超时控制：用 AbortController 兜底挂起的 fetch（后端 TCP 连接但不回响应、慢查询、网络黑洞）。
+  // 超时后 reject 友好错误，避免调用方加载态永久冻结（DESK-01 / DESK-SHELL-02）。
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    res = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
-  } catch {
+    res = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller?.signal });
+  } catch (err) {
+    // AbortError → 友好的超时提示；其余网络错误 → 连接失败提示。
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('后端响应超时，请检查网络或后端服务状态后重试。');
+    }
     throw new Error(`无法连接后端（${base}）。请检查后端地址、网络和跨域配置。`);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.message || data.error || res.statusText) as ApiError;
     err.code = data.code || data.error;
+    err.status = res.status;
+    // 401 全局拦截（DESK-TOKEN-01 / DESK-03）：仅在 auth 请求且 HTTP 401 时派发，
+    // 由 App.tsx 监听器调用 resetSession（避免业务页陷入反复报错却不回登录页）。
+    // 业务页的 toast 仍会照常抛出（瞬时反馈），此处不阻断 throw 流程。
+    if (auth && res.status === 401) {
+      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* webview 可能无 CustomEvent，静默兜底 */ }
+    }
     throw err;
   }
   return data as T;

@@ -1,4 +1,5 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, SetMetadata } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 
@@ -9,6 +10,8 @@ export interface AuthUser {
   id: string;
   email: string;
   platformRole: 'NONE' | 'PLATFORM_ADMIN';
+  /** token 版本号，与 user.tokenVersion 比对以实现吊销（见 JwtAuthGuard）。 */
+  tokenVersion: number;
 }
 
 export class AppError extends Error {
@@ -82,10 +85,37 @@ export class AppExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    // 根因修复（XERR-01 及其衍生十余条缺陷）：
+    // 把 Prisma 错误翻译为语义化状态码，避免业务冲突被吞成 500，
+    // 且不回显 Prisma 原始 message（含表名/字段名/约束名，信息泄漏）。
+    if (error instanceof Prisma.PrismaClientValidationError) {
+      response.status(400).json({ code: 'bad_request', message: '请求参数校验失败', requestId });
+      return;
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      const mapped = mapPrismaKnownError(error);
+      response.status(mapped.status).json({ code: mapped.code, message: mapped.message, requestId });
+      return;
+    }
+
     response.status(500).json({
       code: 'internal_error',
-      message: error instanceof Error ? error.message : '服务内部错误',
+      message: '服务内部错误',
       requestId,
     });
+  }
+}
+
+/** 把 PrismaClientKnownRequestError 的错误码映射为语义化 HTTP 响应（不泄漏 schema 信息）。 */
+function mapPrismaKnownError(error: Prisma.PrismaClientKnownRequestError): { status: number; code: string; message: string } {
+  switch (error.code) {
+    case 'P2002': // 唯一约束冲突
+      return { status: 409, code: 'conflict', message: '资源已存在或与现有记录冲突' };
+    case 'P2025': // 记录不存在
+      return { status: 404, code: 'not_found', message: '资源不存在' };
+    case 'P2003': // 外键约束冲突
+      return { status: 409, code: 'conflict', message: '存在关联资源，无法完成操作' };
+    default:
+      return { status: 500, code: 'internal_error', message: '服务内部错误' };
   }
 }

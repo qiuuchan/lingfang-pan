@@ -4,6 +4,7 @@ import {
   aggregateToolCards,
   splitToolText,
   extractAskUserQuestions,
+  extractAskUserQuestionsForCard,
   formatToolInput,
   EFFORT_LEVELS,
   EFFORT_LABEL,
@@ -180,6 +181,55 @@ describe('extractAskUserQuestions', () => {
       }),
     }];
     expect(extractAskUserQuestions(cards).length).toBe(2);
+  });
+});
+
+// === STREAM-01 / DRAFT-03 修复：extractAskUserQuestionsForCard 按卡片就地解析 ===
+describe('extractAskUserQuestionsForCard', () => {
+  it('AskUserQuestion 卡片就地解析其承载的 questions（与卡片 1:1 对齐）', () => {
+    const card = {
+      name: 'AskUserQuestion',
+      inputText: JSON.stringify({
+        questions: [
+          { question: '选哪个？', options: [{ label: 'A' }, { label: 'B' }] },
+        ],
+      }),
+    };
+    const qs = extractAskUserQuestionsForCard(card);
+    expect(qs.length).toBe(1);
+    expect(qs[0].question).toBe('选哪个？');
+    expect(qs[0].options.length).toBe(2);
+  });
+
+  it('单卡多问（Claude AskUserQuestion questions 字段 1-4 项）全部解析', () => {
+    // STREAM-01 核心场景：单卡 2 个 question 此前用全局下标只渲染第 1 个，后续被吞。
+    // 按卡片就地解析后两问都返回，渲染方对每个 question 各渲染一张 ToolCard。
+    const card = {
+      name: 'AskUserQuestion',
+      inputText: JSON.stringify({
+        questions: [
+          { question: '问1', options: [{ label: 'a' }, { label: 'b' }] },
+          { question: '问2', options: [{ label: 'c' }, { label: 'd' }] },
+        ],
+      }),
+    };
+    expect(extractAskUserQuestionsForCard(card).length).toBe(2);
+  });
+
+  it('非 AskUserQuestion 卡片返回空数组', () => {
+    expect(extractAskUserQuestionsForCard({ name: 'Read', inputText: '{"path":"a.ts"}' })).toEqual([]);
+  });
+
+  it('input 未闭合 JSON 跳过不抛错', () => {
+    expect(extractAskUserQuestionsForCard({ name: 'AskUserQuestion', inputText: '{"questions":[' })).toEqual([]);
+  });
+
+  it('无可选项的问题被丢弃', () => {
+    const card = {
+      name: 'AskUserQuestion',
+      inputText: JSON.stringify({ questions: [{ question: '空', options: [] }] }),
+    };
+    expect(extractAskUserQuestionsForCard(card)).toEqual([]);
   });
 });
 

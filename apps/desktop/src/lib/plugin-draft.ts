@@ -117,6 +117,11 @@ export function aggregateToolCards(segments: string[]): ToolCardView[] {
 // 从工具卡片列表中提取所有 AskUserQuestion 的 questions（R4 问题卡片数据源）。
 // inputText 可能是不完整 JSON：解析失败静默跳过（等后续增量补全后下一帧再解析）。
 // 成功解析且含 questions 数组才产出，避免普通工具调用被误判为提问。
+//
+// 注意（DRAFT-03 / STREAM-01 修复）：本函数返回扁平化的问题数组，长度 = 所有 AskUserQuestion
+// 卡片的有效问题总数（单卡多问时 > 卡片数），与输入 cards 的下标不对齐。
+// 消费方（StreamingMessage）不应再按下标取值——改用 extractAskUserQuestionsForCard，
+// 按卡片就地解析该卡片承载的 questions，消除下标错配与单卡多问丢问的双重缺陷。
 export function extractAskUserQuestions(cards: ToolCardView[]): AskUserQuestion[] {
   const out: AskUserQuestion[] = [];
   for (const card of cards) {
@@ -160,6 +165,51 @@ export function extractAskUserQuestions(cards: ToolCardView[]): AskUserQuestion[
     } catch {
       // input 仍在累积中（片段 JSON），跳过等下一帧。
     }
+  }
+  return out;
+}
+
+// DRAFT-03 / STREAM-01 修复：按单张卡片就地解析其承载的 AskUserQuestion questions。
+// 返回值与该卡片 1:1 对齐，不再受其它卡片（如前置的 Read/Write）下标错配影响，
+// 且天然支持「单卡多问」（Claude AskUserQuestion 工具 questions 字段官方 1-4 项数组）。
+// 卡片非 AskUserQuestion 或解析失败时返回空数组（普通工具渲染由 StreamingMessage 内 card.name 判定兜底）。
+export function extractAskUserQuestionsForCard(card: ToolCardView): AskUserQuestion[] {
+  if (card.name !== 'AskUserQuestion' || !card.inputText) return [];
+  const out: AskUserQuestion[] = [];
+  try {
+    const parsed = JSON.parse(card.inputText) as { questions?: unknown };
+    if (!Array.isArray(parsed.questions)) return [];
+    for (const q of parsed.questions) {
+      if (!q || typeof q !== 'object') continue;
+      const question = typeof (q as { question?: unknown }).question === 'string'
+        ? String((q as { question?: string }).question)
+        : '';
+      const header = typeof (q as { header?: unknown }).header === 'string'
+        ? String((q as { header?: string }).header)
+        : undefined;
+      const rawOptions = (q as { options?: unknown }).options;
+      const options: AskUserOption[] = Array.isArray(rawOptions)
+        ? rawOptions
+            .map((o) => {
+              if (typeof o === 'string') return { label: o } as AskUserOption;
+              if (o && typeof o === 'object') {
+                const label = (o as { label?: unknown }).label;
+                const description = (o as { description?: unknown }).description;
+                return {
+                  label: typeof label === 'string' ? label : String(label ?? ''),
+                  description: typeof description === 'string' ? description : undefined,
+                } as AskUserOption;
+              }
+              return null;
+            })
+            .filter((o): o is AskUserOption => Boolean(o && o.label))
+        : [];
+      if (question && options.length) {
+        out.push({ question, header, options });
+      }
+    }
+  } catch {
+    // input 仍在累积中（片段 JSON），跳过等下一帧。
   }
   return out;
 }
@@ -329,13 +379,11 @@ export function parseTranscript(raw: string): TranscriptEvent[] {
     });
 }
 
-export function transcriptText(events: TranscriptEvent[], stream: 'stdout' | 'stderr') {
-  return events
-    .filter((event) => event.event === 'output' && event.payload?.stream === stream)
-    .map((event) => (typeof event.payload?.text === 'string' ? event.payload.text : ''))
-    .join('')
-    .trim();
-}
+// DRAFT-06 清理：transcriptText（旧多轮串接实现）已删除。
+// 此前它用 .join('') 拼所有 output（即多轮串轮 bug 行为），仅被 plugin-draft.spec.ts 作为旧行为对照引用。
+// 生产代码已统一改用 transcriptTextSinceLastInput（取最后一个 input 之后的 output，一问一答语义）。
+// 保留了已知 bug 行为的导出函数易被新代码误用导致多轮串轮回归，故移除。
+// 回归对照测试已在 spec 内改写为对 transcriptTextSinceLastInput 的单侧断言 + 注释说明。
 
 // design §3.3.6 / 多会话 bug 修复：只拼接「最后一个 input 事件之后」的 output 事件。
 //
@@ -548,10 +596,26 @@ const FRONTEND_RUNTIME_TYPES = new Set<string>(RuntimeType.options);
 // 合法 visibility（前端镜像后端 plugin-package.ts:83-84）。
 const FRONTEND_VISIBILITIES = new Set(['private', 'tenant']);
 
-// 收敛枚举字段：合法值原样采用，非法值（含 falsy）退回默认。
-// 防止模型产出非法 visibility/runtime_type（如 'public'/'edge'）穿透到后端导致 400。
+// 收敛枚举字段：合法值原样采用，非法值（含 falsy）退回 fallback；
+// DRAFT-04 修复：若 fallback 本身不在白名单（磁盘脏值经 parseManifest 透传为 prevManifest.runtime_type/visibility），
+// 退回白名单首个允许值，避免脏值继续传播到新写出的 manifest.json（最终被后端 normalizePluginPackage 400 拒绝）。
 function normalizeEnum(value: unknown, allowed: Set<string>, fallback: string): string {
-  return typeof value === 'string' && allowed.has(value) ? value : fallback;
+  if (typeof value === 'string' && allowed.has(value)) return value;
+  if (allowed.has(fallback)) return fallback;
+  // fallback 不在白名单：退回白名单首个允许值（保守，保证产出端永不写出非法枚举）。
+  const first = allowed.values().next();
+  return first.done ? fallback : first.value;
+}
+
+// DRAFT-01 / DRAFT-04 修复：判断 capabilities 源是否「合法非空对象数组」。
+// 用于 mergeFollowupDraft / mergeFollowupDraftWithSandbox：仅当 parsed 提供合法 capabilities
+// 才覆盖 prev，否则透传 prev（避免追问未重发完整 manifest 时多能力降级为单能力兜底）。
+function hasValidCapabilities(value: unknown): boolean {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every(
+      (c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && typeof (c as { kind?: unknown }).kind === 'string' && FRONTEND_CAPABILITY_KINDS.has((c as { kind: CapabilityKindType }).kind),
+    );
 }
 
 // parseStructuredPackage 的返回结构。
@@ -864,11 +928,15 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
   // manifest.json 始终以收敛后的合法对象序列化，放在 files 首位。
   files = [{ path: 'manifest.json', content: JSON.stringify(manifest, null, 2) }, ...files];
 
-  // 状态判定：完全失败（无 manifest 且无输出）退回当前行为，否则采用 parse 的 ready/partial。
+  // 状态判定（DRAFT-02 修复）：
+  // - 无 manifest 输出 → fallbackStatus（与 success 联动：success+output→partial，否则 invalid）。
+  // - manifest 解析成功 + 字节超限 → 保持 parse 的 invalid（parse 在字节超限时强制设 invalid）。
+  //   此前三元把任何非 ready 的 parsed.status（含 invalid）一律折叠为 partial，丢失了 parse 层判定。
+  // - 其余（ready/partial）→ 原样采用。
   const fallbackStatus = input.result.success && output ? 'partial' : 'invalid';
-  const status = parsed.status === 'invalid' && !parsedManifest
+  const status = !parsedManifest
     ? fallbackStatus
-    : parsed.status === 'ready' ? 'ready' : 'partial';
+    : parsed.status === 'ready' ? 'ready' : parsed.status;
 
   // schema stage 汇总诊断。
   const schemaStatus: DraftDiagnostic['status'] = parsed.status === 'ready' ? 'pass' : parsed.status === 'partial' ? 'warn' : 'fail';
@@ -1099,7 +1167,14 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
     runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'],
     entry: parsedManifest?.entry || prevManifest.entry,
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
-    capabilities: normalizeCapabilities(parsedManifest?.capabilities),
+    // 修复 DRAFT-01：此前 capabilities 写成 normalizeCapabilities(parsedManifest?.capabilities)，
+    // 不参考 prevManifest.capabilities。normalizeCapabilities 在收到 undefined/[]/非法数组时一律兜底为
+    // [FALLBACK_CAPABILITY]（单 code-assistant.run）。追问只产 file 块无 manifest 块（codex/opencode 伪多轮常见）
+    // 时 prevManifest.capabilities 被整体丢弃，多能力插件静默降级为单能力。
+    // 与 entry/runtime_type/visibility 同款语义：parsed 合法非空才覆盖，否则透传 prev。
+    capabilities: hasValidCapabilities(parsedManifest?.capabilities)
+      ? normalizeCapabilities(parsedManifest?.capabilities)
+      : prevManifest.capabilities,
   };
 
   // files：追问产出非空则覆盖（R2 迭代），否则保留 prev.files（兜底，design §3.3.6 风险点 RISK8）。
@@ -1126,9 +1201,9 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
   files = [{ path: 'manifest.json', content: JSON.stringify(manifest, null, 2) }, ...files];
 
   // 状态：追问成功（有结构化产出或 success）→ ready/partial；完全无输出 → partial（保留可用态，不判 invalid）。
-  const status: PluginDraft['status'] = parsed.status === 'ready'
-    ? 'ready'
-    : (result.success || output ? 'partial' : 'partial');
+  // DRAFT-05 修复：此前三元 (result.success || output ? 'partial' : 'partial') 两支同值（死分支）。
+  // 简化为单一 'partial'；若未来需把「完全无输出」改为 invalid，再展开为独立分支并补 spec。
+  const status: PluginDraft['status'] = parsed.status === 'ready' ? 'ready' : 'partial';
 
   const schemaStatus: DraftDiagnostic['status'] = parsed.status === 'ready' ? 'pass' : parsed.status === 'partial' ? 'warn' : 'fail';
   const schemaSummary = `追问解析：${parsed.status}（manifest ${parsedManifest ? '已解析' : '缺失'}，文件 ${parsed.files.length}，notes ${parsed.notes ? '有' : '无'}）`;
@@ -1182,7 +1257,11 @@ export function mergeFollowupDraftWithSandbox(prev: PluginDraft, result: CliProb
     runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'],
     entry: parsedManifest?.entry || prevManifest.entry,
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
-    capabilities: normalizeCapabilities(parsedManifest?.capabilities),
+    // 修复 DRAFT-01：与 mergeFollowupDraft 同款修复——parsed 合法非空才覆盖，否则透传 prev，
+    // 避免追问未重发完整 manifest 时 prevManifest.capabilities 被整体丢弃（多能力插件降级为单能力）。
+    capabilities: hasValidCapabilities(parsedManifest?.capabilities)
+      ? normalizeCapabilities(parsedManifest?.capabilities)
+      : prevManifest.capabilities,
   };
 
   // files：sandbox 扫描结果非空则覆盖（迭代），否则保留 prev.files（兜底，追问未改文件时维持上轮）。
@@ -1259,6 +1338,9 @@ export function parseManifest(files: DraftFile[]) {
 export function previewSrcDoc(files: DraftFile[]): string {
   const manifest = parseManifest(files);
   const html = files.find((file) => file.path === manifest.entry)?.content || '<p>无预览入口</p>';
+  // SDK-06 修复：预览态同样注入宿主设计令牌，与运行态 tokensStyles() 行为一致，
+  // 让创建器预览的 var(--lf-color-*) 正确解析（而非依赖插件自身 fallback）。
+  const tokens = `<style data-lf-tokens>:root{--lf-color-primary:#2563eb;--lf-color-bg:#fafafa;--lf-color-text:#1a1a1a;--lf-color-border:#dddddd;--lf-radius-md:10px;--lf-spacing-md:14px;--lf-font-sans:system-ui,sans-serif;}</style>`;
   const shim = `<script>
     window.sdk = {
       invoke: async (cap) => { alert('能力 ' + cap + ' 将由宿主网关提供'); },
@@ -1266,7 +1348,7 @@ export function previewSrcDoc(files: DraftFile[]): string {
       ui: { render: (c) => { document.body.insertAdjacentHTML('beforeend', '<pre>' + (typeof c === 'string' ? c : JSON.stringify(c, null, 2)) + '</pre>'); } },
     };
   <\/script>`;
-  return shim + html;
+  return tokens + shim + html;
 }
 
 export function recentKey(tenantId: string | null) {

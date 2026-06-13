@@ -25,7 +25,7 @@ import {
 import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/utils';
-import { useLoad, run } from '@/lib/helpers';
+import { useLoad, run, useGuardedAction } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
 import type { Team, TeamMember, TeamStatus, User, LedgerDirection } from '@/lib/types';
@@ -116,14 +116,15 @@ function CreateTeamDialog({ children, onRefresh }: { children: React.ReactNode; 
 
   async function create() {
     if (!name.trim()) return toast.error('请输入团队名称');
-    await run(
+    // ADMIN-VIEW-04 修复：仅成功才关闭对话框并清空表单，失败时保留草稿供用户修正。
+    if (!(await run(
       () =>
         api('/api/admin/teams', {
           method: 'POST',
           body: { name, balanceCents: yuanToCents(initialBalance) },
         }).then(onRefresh),
       '团队已创建',
-    );
+    ))) return;
     setOpen(false);
     setName('');
   }
@@ -191,35 +192,38 @@ function TeamDetailDialog({
   }
 
   async function save() {
-    await run(
+    // ADMIN-VIEW-04 修复：仅成功才关闭/重置，失败保留草稿。
+    if (!(await run(
       () =>
         api(`/api/admin/teams/${team.id}`, {
           method: 'PATCH',
           body: { name: editName, status: editStatus },
         }).then(onRefresh),
       '团队信息已更新',
-    );
+    ))) return;
   }
 
   async function deleteTeam() {
     if (!window.confirm(`确认永久删除团队「${team.name}」及其所有成员、数据？此操作不可恢复。`)) return;
-    await run(
+    // ADMIN-VIEW-04：仅成功才关闭。
+    if (!(await run(
       () => api(`/api/admin/teams/${team.id}`, { method: 'DELETE' }).then(onRefresh),
       '团队已删除',
-    );
+    ))) return;
     setOpen(false);
   }
 
   async function assignAdmin() {
     if (!adminUserId) return toast.error('请选择用户');
-    await run(
+    // ADMIN-VIEW-04：仅成功才清空选择。
+    if (!(await run(
       () =>
         api(`/api/admin/teams/${team.id}/admins`, {
           method: 'POST',
           body: { userId: adminUserId },
         }).then(onRefresh),
       '团队管理员已指定',
-    );
+    ))) return;
     setAdminUserId('');
   }
 
@@ -232,14 +236,21 @@ function TeamDetailDialog({
     );
   }
 
+  // ADMIN-VIEW-01 修复：余额调整是资金类操作，无后端幂等键。
+  // 加防重入守卫（in-flight 期间重复点击直接返回）+ 按钮 disabled/loading 态，防双击导致资金双倍变动。
+  const [balanceBusy, guardBalance] = useGuardedAction();
+
   async function adjustBalance() {
-    await run(
-      () =>
-        api(`/api/admin/teams/${team.id}/balance-adjustments`, {
-          method: 'POST',
-          body: { amountCents: yuanToCents(balanceAmount), direction: balanceDirection, reason: balanceReason },
-        }).then(onRefresh),
-      '团队余额已调整',
+    await guardBalance(() =>
+      // 失败也保留对话框（不关闭），用户可修正重试。
+      run(
+        () =>
+          api(`/api/admin/teams/${team.id}/balance-adjustments`, {
+            method: 'POST',
+            body: { amountCents: yuanToCents(balanceAmount), direction: balanceDirection, reason: balanceReason },
+          }).then(onRefresh),
+        '团队余额已调整',
+      ),
     );
   }
 
@@ -319,9 +330,9 @@ function TeamDetailDialog({
               <Label>原因</Label>
               <Input value={balanceReason} onChange={(e) => setBalanceReason(e.target.value)} />
             </div>
-            <Button onClick={adjustBalance} className="w-full">
+            <Button onClick={adjustBalance} disabled={balanceBusy} className="w-full">
               <DollarSignIcon className="mr-1.5 size-4" />
-              提交余额调整
+              {balanceBusy ? '提交中…' : '提交余额调整'}
             </Button>
           </TabsContent>
 
