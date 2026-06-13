@@ -9,28 +9,29 @@
 ```text
 lingfang-platform/
 ├── apps/
-│   ├── desktop/            # Tauri 2 桌面壳（React + Vite + Rust 壳层）
-│   └── server/             # Rust + axum + sqlx + SQLite 服务端
+│   ├── desktop/            # Tauri 2 桌面壳（React + Vite + Rust 壳层，本地命令 list_plugins / code_assistant_*）
+│   ├── collab-api/         # NestJS + Prisma + PostgreSQL 统一后端（:3000，/api 前缀）
+│   └── collab-admin/       # React + shadcn/ui 管理后台（:4174）
 ├── packages/
 │   ├── contract/           # TS 类型与契约
 │   ├── plugin-sdk/         # @lingfang/plugin-sdk
 │   └── ui-tokens/          # design token
 ├── plugins/                # 示例插件
 ├── docs/                   # 设计文档
-├── tools/                  # 启动、分发、验证脚本
-├── Cargo.toml              # Rust workspace
+├── tools/                  # 启动、分发脚本
+├── apps/desktop/src-tauri/ # Tauri 壳层 Cargo workspace（仅桌面壳，非后端）
 ├── pnpm-workspace.yaml     # TS/前端 workspace
 └── package.json
 ```
 
-平台代码放在 `apps/` 与 `packages/`；示例插件独立放在 `plugins/`。
+平台代码放在 `apps/` 与 `packages/`；示例插件独立放在 `plugins/`。后端已收敛到唯一的 `apps/collab-api`（NestJS + PostgreSQL）。
 
 ## 2. 配置与密钥隔离
 
-- 本地 `.env` 不入仓。
-- 服务端密钥使用环境变量：`JWT_SECRET`、`KEY_ENCRYPTION_SECRET`。
-- 租户第三方 LLM key 只提交给服务端，服务端加密落库，前端和插件不回显明文。
-- 桌面端只保存后端 URL，不保存服务端密钥。
+- 本地 `.env` 不入仓（`apps/collab-api/.env`）。
+- 后端密钥使用环境变量：`JWT_SECRET`、`DATABASE_URL`、`CORS_ALLOWED_ORIGINS`，统一在 `apps/collab-api/.env` 管理。
+- 租户第三方 LLM key 只提交给 collab-api，服务端加密落库，前端和插件不回显明文。
+- 桌面端只保存后端 URL，不保存后端密钥。
 
 ## 3. 前后端分离配置
 
@@ -59,36 +60,41 @@ lingfang-platform/
 ## 5. 构建与脚本
 
 ```bash
-pnpm install                       # 安装前端依赖
-pnpm start                         # Windows PowerShell 一键启动
-pnpm start:sh                      # macOS / Linux 一键启动
-pnpm start:backend                 # 只启动服务端
-pnpm dev:server                    # cargo run -p server
-pnpm dev:desktop                   # pnpm -C apps/desktop dev
+pnpm install                       # 安装前端与后端依赖
+pnpm start                         # 一键启动：PG 检查 → migrate → seed → collab-api(:3000) → 桌面壳
+pnpm start:backend                 # 仅启动后端（tools/start.ps1 -SkipDesktop）
+pnpm collab:api:dev                # 单独开发 collab-api（pnpm -C apps/collab-api dev）
+pnpm collab:admin:dev              # 单独开发管理后台（pnpm -C apps/collab-admin dev）
+pnpm dev:desktop                   # 单独开发桌面端（pnpm -C apps/desktop dev）
 pnpm -C apps/desktop typecheck     # 前端类型检查
 pnpm -C apps/desktop vite:build    # 前端生产构建
-cargo test -p server               # 后端测试
+pnpm -C apps/collab-api typecheck  # collab-api 类型检查
+pnpm -C apps/collab-api test       # collab-api 单元测试（Vitest）
 ```
 
-当前默认数据库是 SQLite，不需要 `db:up` 或 PostgreSQL 服务。
+当前默认数据库是 PostgreSQL（lingfang_collab 库），需在 `apps/collab-api/.env` 配置可达的 `DATABASE_URL`，详见 `docs/collab-deployment.md`。
 
 ## 6. 部署要点
+
+collab-api 部署配置在 `apps/collab-api/.env`：
 
 本机开发：
 
 ```env
-BIND_ADDR=127.0.0.1:8787
-CORS_ALLOWED_ORIGINS=
+PORT=3000
+DATABASE_URL="postgresql://lingfang:lingfang@localhost:5432/lingfang_collab"
+CORS_ALLOWED_ORIGINS="http://localhost:4174,http://localhost:1420,tauri://localhost"
 ```
 
 局域网/远端后端：
 
 ```env
-BIND_ADDR=0.0.0.0:8787
+PORT=3000
+DATABASE_URL="postgresql://user:pass@db-host:5432/lingfang_collab"
 CORS_ALLOWED_ORIGINS=http://localhost:1420,https://desktop.example.com
 ```
 
-若桌面端填写公网 HTTPS 后端，服务端 HTTPS 通常由 Caddy、Nginx 或其他反向代理终止。
+若桌面端填写公网 HTTPS 后端，HTTPS 通常由 Caddy、Nginx 或其他反向代理终止。Docker 部署见 `docs/collab-deployment.md`。
 
 ## 7. 本地验证
 
@@ -97,14 +103,11 @@ CORS_ALLOWED_ORIGINS=http://localhost:1420,https://desktop.example.com
 ```bash
 pnpm -C apps/desktop typecheck
 pnpm -C apps/desktop vite:build
-cargo test -p server
+pnpm -C apps/collab-api typecheck
+pnpm -C apps/collab-api test
 ```
 
-Tauri Rust 壳层变更较多时，再运行：
-
-```bash
-cargo test -p lingfang-desktop
-```
+Tauri Rust 壳层（`apps/desktop/src-tauri`）变更较多时，再运行其本地命令测试。
 
 ## 8. 编码规范
 

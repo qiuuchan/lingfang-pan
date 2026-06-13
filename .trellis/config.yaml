@@ -121,8 +121,6 @@ packages:
     path: packages/ui-tokens
   summarizer:
     path: plugins/summarizer
-  server:
-    path: apps/server
   lingfang-desktop:
     path: apps/desktop/src-tauri
 default_package: @lingfang/desktop

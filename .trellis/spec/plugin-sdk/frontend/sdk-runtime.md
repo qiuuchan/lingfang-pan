@@ -25,14 +25,14 @@ SDK methods are thin wrappers around capability names from `@lingfang/contract`:
 - `llm.chat`
 - `ui.render`
 
-Do not include `base_url`, API key, provider name, or billing data in SDK calls. LLM routing is server-owned through tenant bindings.
+Do not include `base_url`, API key, provider name, or billing data in SDK calls. LLM routing is owned by the backend (`apps/collab-api`) through tenant bindings.
 
 ## Generated Plugin Expectations
 
 AI-generated plugins may use SDK-style calls only for capabilities declared in `manifest.json`. The generation prompt and validation currently forbid direct `import`, `require`, `fetch`, `XMLHttpRequest`, and `eval` in generated UI files.
 
 Reference files:
-- `apps/server/src/llm.rs`
+- `apps/collab-api/src/modules/plugins.controller.ts`
 - `plugins/summarizer/ui/index.html`
 
 ## Type Safety

@@ -1,7 +1,7 @@
-# Cargo workspace：服务端与 Tauri 桌面壳的 Rust 部分。
+# Cargo workspace：Tauri 桌面壳的 Rust 部分。
+# 后端 API 由 apps/collab-api（NestJS）提供，不再使用 Rust 后端（见 docs/collab-platform.md）。
 [workspace]
 resolver = "2"
 members = [
-  "apps/server",
   "apps/desktop/src-tauri",
 ]

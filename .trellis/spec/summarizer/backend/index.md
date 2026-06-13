@@ -13,11 +13,11 @@
 
 Do not add plugin-specific backend code under `plugins/summarizer`. Shared runtime services belong to:
 
-- `apps/server` for LLM proxy, audit, authorization, market/install flows
+- `apps/collab-api` for LLM proxy, audit, authorization, market/install flows
 - `apps/desktop/src-tauri` for local file/system capabilities
 - `packages/plugin-sdk` for the typed plugin client
 
 ## Quality Check
 
 - No package-local backend check exists.
-- If capability behavior changed, run affected host checks for `apps/server` or `apps/desktop/src-tauri`.
+- If capability behavior changed, run affected host checks for `apps/collab-api` or `apps/desktop/src-tauri`.

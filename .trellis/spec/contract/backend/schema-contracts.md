@@ -44,7 +44,7 @@ Use `.min(1)`, `.email()`, `.datetime()`, and enum values to make invalid payloa
 
 Treat `PluginDraft` as the product core object. Changes to `PluginDraftFile`, `PluginDraftTurn`, `PluginDraftDiagnostic`, or `PluginDraftStatus` affect:
 
-- generation persistence in `apps/server/src/routes/drafts.rs`
+- generation persistence in `apps/collab-api/src/modules/plugin.service.ts`
 - streaming display in `apps/desktop/src/pages/Generator.tsx`
 - published plugin editing in `apps/desktop/src/pages/Plugins.tsx`
 
