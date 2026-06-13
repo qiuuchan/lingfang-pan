@@ -25,7 +25,7 @@ export function Review() {
 
   const load = useCallback(async () => {
     try {
-      const { plugins } = await api<{ plugins: PendingPlugin[] }>('/admin/review/pending');
+      const { plugins } = await api<{ plugins: PendingPlugin[] }>('/api/admin/plugins/review-pending');
       setList(plugins);
     } catch (e) {
       toast.error((e as ApiError).message);
@@ -38,7 +38,7 @@ export function Review() {
   async function approve(id: string) {
     setBusy(id);
     try {
-      await api('/admin/review/approve', { method: 'POST', body: { plugin_id: id } });
+      await api(`/api/admin/plugins/${id}/approve`, { method: 'POST' });
       toast.success('已通过审核 ✓');
       await load();
     } catch (e) { toast.error((e as ApiError).message); }
@@ -50,7 +50,7 @@ export function Review() {
     if (!reason) return toast.error('请填写驳回理由');
     setBusy(id);
     try {
-      await api('/admin/review/reject', { method: 'POST', body: { plugin_id: id, reason } });
+      await api(`/api/admin/plugins/${id}/reject`, { method: 'POST', body: { reason } });
       toast.success('已驳回');
       await load();
     } catch (e) { toast.error((e as ApiError).message); }
