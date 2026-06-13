@@ -21,7 +21,9 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
     build_args,
 };
 
-fn build_args(prompt: &str, model: Option<&str>) -> Vec<String> {
+// resume_id 接收但忽略：codex 的 resume 是独立子命令（exec 不暴露 --resume），
+// 多轮续接由 send_input 层用历史摘要拼进 prompt 实现（design §3.3.4），保持跨 CLI 统一签名。
+fn build_args(prompt: &str, model: Option<&str>, _resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec!["exec".to_string(), prompt.to_string()];
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);

@@ -123,10 +123,11 @@ fn code_assistant_start_session(
 
 #[tauri::command]
 fn code_assistant_send_input(
+    app: tauri::AppHandle,
     state: tauri::State<code_assistant::CodeAssistantState>,
     input: code_assistant::SendInputInput,
 ) -> Result<(), String> {
-    code_assistant::send_input(&state, input)
+    code_assistant::send_input(app, &state, input)
 }
 
 #[tauri::command]

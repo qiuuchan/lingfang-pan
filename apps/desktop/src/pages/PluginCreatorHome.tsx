@@ -9,6 +9,7 @@ import {
   PROVIDERS,
   STATUS_LABEL,
   buildLocalDraft,
+  mergeFollowupDraft,
   normalizeTurns,
   parseManifest,
   parseTranscript,
@@ -23,6 +24,7 @@ import {
   type AssistantSessionState,
   type CliProbeResult,
   type ProviderId,
+  type SessionCliIdPayload,
   type SessionErrorPayload,
   type SessionExitPayload,
   type SessionOutputPayload,
@@ -54,6 +56,13 @@ export function PluginCreatorHome() {
   const assistantSessionRef = useRef<AssistantSessionState | null>(null);
   const assistantSessionIdRef = useRef<string | null>(null);
   const pendingPromptRef = useRef<{ text: string; providerLabel: string; model: string } | null>(null);
+  // 标记当前进行中的轮次是否为追问（send() 追问路径置 true，finalizeSession 据此走累积分支）。
+  const isFollowupRef = useRef(false);
+  // 多轮运行态（design §3.3.6 (a)）：multiturnMode 标记当前会话续接能力。
+  // native=claude 已捕获 session id（Rust 已回写 SessionRecord.cli_session_id 并走 --resume）；
+  // degraded=codex/opencode 或 claude 未捕获 id（历史摘要伪多轮）。
+  // cli_session_id 的真值在 Rust SessionRecord，前端只需 mode 信号驱动 UI 文案。
+  const [multiturnMode, setMultiturnMode] = useState<'native' | 'degraded' | null>(null);
   const [activeFile, setActiveFile] = useState('');
   const [previewKey, setPreviewKey] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -120,6 +129,14 @@ export function PluginCreatorHome() {
             diagnostics: prev?.diagnostics || [],
           }));
         }));
+        // design §3.3.3：捕获 claude session_id（仅 claude stream-json 会 emit）→ 标记 native 真 resume 多轮。
+        // cli_session_id 真值由 Rust 回写 SessionRecord，前端只据此切 native mode。
+        unlisteners.push(await tauriListen<SessionCliIdPayload>('code-assistant://session-cli-id', ({ payload }) => {
+          if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
+          if (payload.cliSessionId) {
+            setMultiturnMode('native');
+          }
+        }));
         unlisteners.push(await tauriListen<SessionOutputPayload>('code-assistant://output', ({ payload }) => {
           if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
           const text = payload.text || '';
@@ -146,6 +163,9 @@ export function PluginCreatorHome() {
           if (disposed || payload.sessionId !== assistantSessionIdRef.current) return;
           const nextStatus = payload.status === 'stopped' ? 'stopped' : 'exited';
           setAssistantSession((prev) => prev ? { ...prev, status: nextStatus, exitCode: payload.exitCode ?? null, endedAt: payload.endedAt } : prev);
+          // design §3.3.6 (d)：首轮 exit 后判定多轮能力——claude 已捕获 cliSessionId 为 native；
+          // 其余（codex/opencode，或 claude 未捕获 id）标记 degraded（伪多轮，透明提示）。
+          setMultiturnMode((prev) => prev === 'native' ? 'native' : 'degraded');
           setLiveStage(nextStatus === 'stopped' ? '已停止，正在整理部分结果…' : '已结束，正在整理结果…');
           void finalizeSession(payload.sessionId, nextStatus, payload.exitCode ?? null, payload.endedAt);
         }));
@@ -162,6 +182,7 @@ export function PluginCreatorHome() {
   }, [provider, model]);
 
   async function finalizeSession(sessionId: string, status: AssistantSessionState['status'], exitCode: number | null, endedAt?: string) {
+    const isFollowup = isFollowupRef.current;
     try {
       const raw = await tauriInvoke<string>('code_assistant_read_transcript', { input: { sessionId } });
       const events = parseTranscript(raw);
@@ -187,18 +208,28 @@ export function PluginCreatorHome() {
         diagnostics,
       };
       setAssistantSession(finalSession);
-      const draft = buildLocalDraft({
-        prompt: pending?.text || pendingUser || '本地代码助手插件',
-        providerLabel: pending?.providerLabel || finalSession.providerLabel,
-        model: pending?.model || finalSession.model,
-        result: sessionToProbeResult(finalSession),
-      });
-      setCurrentDraft(draft);
+      const probeResult = sessionToProbeResult(finalSession);
+      const promptText = pending?.text || pendingUser || '本地代码助手插件';
+      if (isFollowup && currentDraft) {
+        // design §3.3.6 (c)：追问在既有 draft 上累积 turns、files 用新产出覆盖（mergeFollowupDraft），
+        // 不重建草稿。pendingPromptRef 在追问路径保留的是本轮追问文本。
+        const merged = mergeFollowupDraft(currentDraft, probeResult, promptText);
+        setCurrentDraft(merged);
+      } else {
+        // 首轮：全新构建（turns=[u1,a1]）。
+        const draft = buildLocalDraft({
+          prompt: promptText,
+          providerLabel: pending?.providerLabel || finalSession.providerLabel,
+          model: pending?.model || finalSession.model,
+          result: probeResult,
+        });
+        setCurrentDraft(draft);
+      }
       setPendingUser(null);
       setPreviewKey((key) => key + 1);
       setDetailsOpen(true);
       if (finalSession.status === 'exited' && finalSession.exitCode === 0) {
-        toast.success('本地代码助手已完成长任务');
+        toast.success(isFollowup ? '本地代码助手已完成追问迭代' : '本地代码助手已完成长任务');
       } else if (finalSession.status === 'stopped') {
         toast.message('已停止本地代码助手，保留部分结果');
       } else {
@@ -209,10 +240,12 @@ export function PluginCreatorHome() {
       setLiveError(`读取 transcript 失败：${message}`);
       toast.error(message);
     } finally {
+      // design §3.3.6 (c)：finally 仅清流式态与 pendingPrompt，**保留** assistantSessionIdRef（追问需用）。
+      // newDraft 负责 session 完全重置；追问完成后仍持有 id 供下一轮追问判断 firstRoundDone。
       setStreaming(false);
       setLiveStage('');
       pendingPromptRef.current = null;
-      assistantSessionIdRef.current = null;
+      isFollowupRef.current = false;
     }
   }
 
@@ -224,48 +257,99 @@ export function PluginCreatorHome() {
     });
   }
 
+  // design §3.3.6 (d)：多轮错误分类处理——会话已退出 / CLI 不可用 / cli_session_id 缺失，
+  // 全部走 setLiveError + Bubble error（复用 Bubble error 态），不裸 toast、不静默（呼应 R1/AC6）。
+  function handleMultiturnError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    let friendly: string;
+    if (message.includes('不存在') || message.includes('已结束') || message.includes('已结束')) {
+      friendly = '对话已结束，请新开对话继续（点击右上角「新对话」）。';
+    } else if (message.includes('未找到') || message.includes('CLI')) {
+      friendly = `本地代码助手不可用：${message}`;
+    } else if (message.includes('降级') || message.includes('session id')) {
+      friendly = `未能捕获会话 id，已自动降级为新对话。原因：${message}`;
+    } else {
+      friendly = `追问失败：${message}`;
+    }
+    setLiveError(friendly);
+    setStreaming(false);
+    setLiveStage('');
+    setPendingUser(null);
+    pendingPromptRef.current = null;
+    isFollowupRef.current = false;
+  }
+
+  async function startNewSession(text: string, selectedProvider: ProviderId) {
+    const systemPrompt = PLUGIN_CREATOR_SYSTEM_PROMPT;
+    const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
+      input: {
+        tool: selectedProvider,
+        model: model === 'default' ? undefined : model,
+        prompt: text,
+        systemPrompt,
+      },
+    });
+    assistantSessionIdRef.current = record.sessionId;
+    const nextSession: AssistantSessionState = {
+      sessionId: record.sessionId,
+      status: 'running',
+      provider: selectedProvider,
+      providerLabel: providerInfo.label,
+      model,
+      commandPreview: record.commandPreview || [],
+      transcriptPath: record.transcriptPath || '',
+      pid: record.pid || undefined,
+      startedAt: record.startedAt,
+      stdout: '',
+      stderr: '',
+      diagnostics: [],
+    };
+    assistantSessionRef.current = nextSession;
+    setAssistantSession(nextSession);
+    setLiveStage('本地代码助手已启动，等待输出…');
+    setDetailsOpen(true);
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || streaming) return;
     setInput('');
     setPendingUser(text);
     setLiveEvents([]);
-    setLiveStage('正在启动本地代码助手长任务…');
     setLiveError(null);
     setStreaming(true);
     setCloudPlugin(null);
-    setCurrentDraft(null);
+    // design §3.3.6 (b)：关键——移除原 setCurrentDraft(null)，草稿跨轮累积。
     const selectedProvider = provider as ProviderId;
     pendingPromptRef.current = { text, providerLabel: providerInfo.label, model };
+
+    // 首问/追问分流（design §3.3.6 (b)）：有活动 session 且首轮已 exited → 走 send_input 追问；否则首问 start_session。
+    const activeId = assistantSessionIdRef.current;
+    const activeExited = Boolean(activeId && assistantSession?.status && assistantSession.status !== 'running');
+    if (activeId && activeExited) {
+      // 追问路径：调用 Rust send_input（已解锁真续接）。
+      isFollowupRef.current = true;
+      setLiveStage(
+        multiturnMode === 'degraded'
+          ? '本地代码助手基于历史继续生成（降级多轮，上下文非真复用）…'
+          : '本地代码助手续接上下文生成…',
+      );
+      try {
+        await tauriInvoke('code_assistant_send_input', {
+          input: { sessionId: activeId, input: text },
+        });
+        // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
+      } catch (error) {
+        handleMultiturnError(error);
+      }
+      return;
+    }
+
+    // 首轮路径：保留原 start_session 逻辑（抽到 startNewSession）。
+    isFollowupRef.current = false;
+    setLiveStage('正在启动本地代码助手长任务…');
     try {
-      const systemPrompt = PLUGIN_CREATOR_SYSTEM_PROMPT;
-      const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
-        input: {
-          tool: selectedProvider,
-          model: model === 'default' ? undefined : model,
-          prompt: text,
-          systemPrompt,
-        },
-      });
-      assistantSessionIdRef.current = record.sessionId;
-      const nextSession: AssistantSessionState = {
-        sessionId: record.sessionId,
-        status: 'running',
-        provider: selectedProvider,
-        providerLabel: providerInfo.label,
-        model,
-        commandPreview: record.commandPreview || [],
-        transcriptPath: record.transcriptPath || '',
-        pid: record.pid || undefined,
-        startedAt: record.startedAt,
-        stdout: '',
-        stderr: '',
-        diagnostics: [],
-      };
-      assistantSessionRef.current = nextSession;
-      setAssistantSession(nextSession);
-      setLiveStage('本地代码助手已启动，等待输出…');
-      setDetailsOpen(true);
+      await startNewSession(text, selectedProvider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setLiveError(`生成失败：${message}`);
@@ -342,6 +426,9 @@ export function PluginCreatorHome() {
     assistantSessionRef.current = null;
     assistantSessionIdRef.current = null;
     pendingPromptRef.current = null;
+    isFollowupRef.current = false;
+    // 重置多轮运行态：新对话回到首轮语义（multiturnMode 待定）。
+    setMultiturnMode(null);
   }
 
   return (
@@ -377,6 +464,10 @@ export function PluginCreatorHome() {
             <div className="flex flex-col gap-4">
               {turns.map((turn, index) => <Bubble key={index} role={turn.role} content={turn.content} />)}
               {pendingUser && <Bubble role="user" content={pendingUser} />}
+              {streaming && isFollowupRef.current && multiturnMode === 'degraded' && (
+                // design §3.3.6 (d)：降级伪多轮透明提示（codex/opencode 或 claude 缺 id）。
+                <p className="px-1 text-xs text-muted-foreground">此 CLI 不支持原生多轮，已基于历史继续生成（上下文非真复用）。</p>
+              )}
               {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
               {!streaming && liveError && <Bubble role="assistant" content={liveError} error />}
             </div>

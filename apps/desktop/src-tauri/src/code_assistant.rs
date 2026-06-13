@@ -285,7 +285,11 @@ pub fn start_session<E: AssistantEventSink>(
         Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n---\n\n{}", input.prompt),
         _ => input.prompt.clone(),
     };
-    let args = command.args_with(definition.run_args(&final_prompt, input.model.as_deref()));
+    let args = command.args_with(definition.run_args(
+        &final_prompt,
+        input.model.as_deref(),
+        None,
+    ));
     let command_preview = command_preview(&command.binary, &args);
     let transcript_path = state.store.transcript_path(&session_id);
     let started_at = now_string();
@@ -302,108 +306,126 @@ pub fn start_session<E: AssistantEventSink>(
         }),
     )?;
 
-    let mut command_builder = Command::new(&command.binary);
-    command_builder
-        .args(&args)
-        .current_dir(&workspace_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    unsafe {
-        command_builder.pre_exec(|| {
-            libc_setsid();
-            Ok(())
-        });
-    }
-    let mut child = command_builder.spawn().map_err(|error| error.to_string())?;
-
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let pid = child.id();
-    if let Err(error) = state.store.register_process(RegisteredAgentProcess {
-        pid,
-        session_id: session_id.clone(),
-        tool: input.tool,
-        model: input.model.clone(),
-        workspace_dir: workspace_dir.clone(),
-        command_preview: command_preview.clone(),
-        registered_at_ms: now_millis(),
-    }) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(error);
-    }
-    let child = Arc::new(Mutex::new(Some(child)));
-    {
-        let mut processes = state.processes.lock().unwrap();
-        processes.insert(session_id.clone(), child.clone());
-    }
-
     let record = SessionRecord {
         session_id: session_id.clone(),
         tool: input.tool,
         model: input.model,
-        workspace_dir,
+        workspace_dir: workspace_dir.clone(),
         status: "running".to_string(),
         transcript_path: transcript_path.to_string_lossy().to_string(),
-        command_preview,
-        pid: Some(pid),
+        command_preview: command_preview.clone(),
+        pid: None,
         started_at,
         ended_at: None,
         exit_code: None,
+        // 首轮未知 claude session id，由 spawn_reader 旁路捕获后回写（design §3.3.3）。
+        cli_session_id: None,
     };
-    if let Err(error) = state.store.upsert_session(record.clone()) {
-        {
-            let mut processes = state.processes.lock().unwrap();
-            processes.remove(&session_id);
+    // 先 upsert 落盘（首轮记录），失败直接返回，不 spawn 子进程。
+    state.store.upsert_session(record.clone())?;
+
+    // 复用 spawn_and_attach（与 send_input 共用 spawn+register+reader+waiter 管线，DRY）。
+    let pid = match spawn_and_attach(app.clone(), state.clone(), record.clone(), command, args) {
+        Ok(pid) => pid,
+        Err(error) => {
+            // spawn 失败：回滚落盘的 session 记录状态为 failed。
+            let _ = state.store.update_session_exit(
+                &record.session_id,
+                "failed",
+                None,
+                now_string(),
+            );
+            return Err(error);
         }
-        let _ = state.store.unregister_process(&session_id);
-        if let Some(child) = child.lock().unwrap().take() {
-            stop_child_process(child);
-        }
-        return Err(error);
-    }
+    };
+    // spawn 成功：回填真实 pid 到 record 并补发 session-started。
+    let record = SessionRecord {
+        pid: Some(pid),
+        ..record
+    };
+
     app.emit_json(
         "code-assistant://session-started",
         json!({ "sessionId": session_id, "pid": pid, "record": record }),
     );
 
-    let output_format = match input.tool {
-        CodeAssistantTool::Claude => OutputFormat::StreamJson,
-        _ => OutputFormat::Plain,
-    };
-    spawn_reader(
-        app.clone(),
-        state.clone(),
-        session_id.clone(),
-        "stdout",
-        output_format,
-        stdout,
-    );
-    spawn_reader(
-        app.clone(),
-        state.clone(),
-        session_id.clone(),
-        "stderr",
-        OutputFormat::Plain,
-        stderr,
-    );
-    spawn_waiter(app, state, session_id, child);
-
     Ok(record)
 }
 
-pub fn send_input(state: &CodeAssistantState, input: SendInputInput) -> Result<(), String> {
-    let _ = input.input;
-    state.store.append_transcript(
-        &input.session_id,
-        "input-rejected",
-        json!({
-            "reason": "当前适配器使用一次性非交互 CLI 调用；请开启新 session 发送新输入。"
-        }),
-    )?;
-    Err("当前适配器使用一次性非交互 CLI 调用；请开启新 session 发送新输入。".to_string())
+pub fn send_input<E: AssistantEventSink>(
+    app: E,
+    state: &CodeAssistantState,
+    input: SendInputInput,
+) -> Result<(), String> {
+    // design §3.3.4：send_input 是多轮续接的真正发起者，复用 start_session 的 spawn 管线（非常驻 stdin）。
+    let session = state
+        .store
+        .list_sessions()
+        .into_iter()
+        .find(|r| r.session_id == input.session_id)
+        .ok_or("session 不存在或已结束")?;
+    let definition = tool_definition(session.tool);
+    let command = find_command(definition.candidate_commands)
+        .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
+
+    // 写追问 input transcript（event=input, kind=followup）。旧实现写 input-rejected 已废弃。
+    state
+        .store
+        .append_transcript(
+            &input.session_id,
+            "input",
+            json!({ "prompt": input.input, "kind": "followup" }),
+        )?;
+
+    // 续接 prompt 构造（design §3.3.4）：
+    // - claude：用捕获到的 cli_session_id 走 --resume 真续接；缺 id 则降级伪多轮（拼历史）。
+    // - codex/opencode：永远伪多轮，把历史摘要拼进 prompt 模拟「记得上下文」。
+    let claude_missing_id =
+        session.tool == CodeAssistantTool::Claude && session.cli_session_id.is_none();
+    let (final_prompt, resume_id): (String, Option<String>) = match session.tool {
+        CodeAssistantTool::Claude if !claude_missing_id => (
+            input.input.clone(),
+            session.cli_session_id.clone(),
+        ),
+        _ => {
+            // 伪多轮（codex/opencode 或 claude 缺 id 降级）：历史摘要 + 用户追问。
+            let summary = build_history_summary(&state.store, &input.session_id)?;
+            let composed = if summary.is_empty() {
+                input.input.clone()
+            } else {
+                format!(
+                    "{summary}\n\n---\n\n以上是之前的对话历史，请基于它继续。用户追问：{}",
+                    input.input
+                )
+            };
+            (composed, None)
+        }
+    };
+    let args = command.args_with(definition.run_args(
+        &final_prompt,
+        session.model.as_deref(),
+        resume_id.as_deref(),
+    ));
+
+    // 追问期间 status 回到 running（design §3.3.4 状态契约），waiter 退出后再置 exited。
+    let mut next_session = session.clone();
+    next_session.status = "running".to_string();
+    next_session.command_preview = command_preview(&command.binary, &args);
+    next_session.pid = None;
+    next_session.exit_code = None;
+    next_session.ended_at = None;
+    state.store.upsert_session(next_session.clone())?;
+    // 若 claude 因缺 id 降级为伪多轮，在 transcript 留痕（前端可据此提示降级语义）。
+    if claude_missing_id {
+        let _ = state.store.append_transcript(
+            &input.session_id,
+            "multiturn-degraded",
+            json!({ "reason": "未捕获到 claude session id，已降级为基于历史的伪多轮" }),
+        );
+    }
+
+    spawn_and_attach(app, state.clone(), next_session, command, args)?;
+    Ok(())
 }
 
 pub fn stop_session<E: AssistantEventSink>(
@@ -448,6 +470,83 @@ pub fn stop_session<E: AssistantEventSink>(
     } else {
         Err("session 不存在或已结束".to_string())
     }
+}
+
+/// spawn 子进程并接入 reader/waiter（design §3.3.4 spawn_followup_run 公共段抽取）。
+/// start_session（首轮）与 send_input（追问）共用，避免复制粘贴（DRY）。
+/// 调用方负责：构造 args、写 input transcript、upsert session（status=running）。
+/// 本函数负责：spawn（Stdio::null stdin, piped stdout/stderr）→ register_process → spawn_reader×2 → spawn_waiter。
+/// 返回子进程 pid（供首轮 session-started 事件回填）。
+fn spawn_and_attach<E: AssistantEventSink>(
+    app: E,
+    state: CodeAssistantState,
+    session: SessionRecord,
+    command: ResolvedToolCommand,
+    args: Vec<String>,
+) -> Result<u32, String> {
+    let session_id = session.session_id.clone();
+    let workspace_dir = session.workspace_dir.clone();
+
+    let mut command_builder = Command::new(&command.binary);
+    command_builder
+        .args(&args)
+        .current_dir(&workspace_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    unsafe {
+        command_builder.pre_exec(|| {
+            libc_setsid();
+            Ok(())
+        });
+    }
+    let mut child = command_builder.spawn().map_err(|error| error.to_string())?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let pid = child.id();
+    if let Err(error) = state.store.register_process(RegisteredAgentProcess {
+        pid,
+        session_id: session_id.clone(),
+        tool: session.tool,
+        model: session.model.clone(),
+        workspace_dir: workspace_dir.clone(),
+        command_preview: session.command_preview.clone(),
+        registered_at_ms: now_millis(),
+    }) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    let child = Arc::new(Mutex::new(Some(child)));
+    {
+        let mut processes = state.processes.lock().unwrap();
+        processes.insert(session_id.clone(), child.clone());
+    }
+
+    let output_format = match session.tool {
+        CodeAssistantTool::Claude => OutputFormat::StreamJson,
+        _ => OutputFormat::Plain,
+    };
+    spawn_reader(
+        app.clone(),
+        state.clone(),
+        session_id.clone(),
+        "stdout",
+        output_format,
+        stdout,
+    );
+    spawn_reader(
+        app.clone(),
+        state.clone(),
+        session_id.clone(),
+        "stderr",
+        OutputFormat::Plain,
+        stderr,
+    );
+    spawn_waiter(app, state, session_id, child);
+    Ok(pid)
 }
 
 pub fn list_sessions(state: &CodeAssistantState) -> Vec<SessionRecord> {
@@ -571,6 +670,22 @@ fn extract_stream_json_text(line: &str) -> Option<String> {
     }
 }
 
+/// 解析 claude stream-json 的一行，提取 CLI 侧 session_id（design §3.3.3）。
+/// 仅 `system`（init）/ `result`（结束）事件携带 session_id；assistant 行返回 None（不误取文本行）。
+/// 与 extract_stream_json_text 是并行旁路：互不干扰。
+fn extract_stream_json_session_id(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let ty = value.get("type").and_then(|v| v.as_str())?;
+    match ty {
+        "system" | "result" => value
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        _ => None,
+    }
+}
+
 fn spawn_reader<E: AssistantEventSink>(
     app: E,
     state: CodeAssistantState,
@@ -583,16 +698,49 @@ fn spawn_reader<E: AssistantEventSink>(
         std::thread::spawn(move || {
             let mut reader = std::io::BufReader::new(pipe);
             let mut buffer = String::new();
+            // session id 旁路捕获「只设一次」标志（design §3.3.3）：避免同一 session_id 行被重复写盘 + 重复 emit。
+            let cli_id_captured = std::sync::atomic::AtomicBool::new(false);
             loop {
                 buffer.clear();
                 match std::io::BufRead::read_line(&mut reader, &mut buffer) {
                     Ok(0) => break,
                     Ok(_) => {
                         let text = match output_format {
-                            OutputFormat::StreamJson => match extract_stream_json_text(&buffer) {
-                                Some(extracted) => extracted,
-                                None => continue,
-                            },
+                            OutputFormat::StreamJson => {
+                                // 旁路：先尝试提取 claude session_id（system/result 行），仅 stdout 流、只设一次。
+                                // 与文本提取并行，不互相阻塞；失败/非 system-result 行静默跳过。
+                                if stream == "stdout"
+                                    && !cli_id_captured.load(std::sync::atomic::Ordering::SeqCst)
+                                {
+                                    if let Some(cli_id) =
+                                        extract_stream_json_session_id(&buffer)
+                                    {
+                                        if cli_id_captured
+                                            .compare_exchange(
+                                                false,
+                                                true,
+                                                std::sync::atomic::Ordering::SeqCst,
+                                                std::sync::atomic::Ordering::SeqCst,
+                                            )
+                                            .is_ok()
+                                        {
+                                            let _ =
+                                                state.store.set_cli_session_id(&session_id, &cli_id);
+                                            app.emit_json(
+                                                "code-assistant://session-cli-id",
+                                                json!({
+                                                    "sessionId": session_id,
+                                                    "cliSessionId": cli_id,
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+                                match extract_stream_json_text(&buffer) {
+                                    Some(extracted) => extracted,
+                                    None => continue,
+                                }
+                            }
                             OutputFormat::Plain => buffer.clone(),
                         };
                         let _ = state.store.append_transcript(
@@ -857,6 +1005,51 @@ fn tail(input: &str, max_chars: usize) -> String {
         .collect()
 }
 
+/// 整体字符限长截断（design §3.3.5）：防历史摘要过长导致 Windows 命令行参数超限（~32k）。
+/// 限长为字符数（非字节），按 `tail` 同模式取尾部保留最近上下文。
+fn truncate_history(input: &str, max_chars: usize) -> String {
+    tail(input, max_chars)
+}
+
+/// 读取 transcript 中已有的 input/output 事件，拼成可读历史摘要供 codex/opencode 伪多轮复用（design §3.3.5）。
+/// 格式：`【用户】...\n\n【AI】...`；空 prompt/空 output 跳过；整体限长 12k 字符（防命令行参数超限）。
+/// 这是伪多轮的数据源：codex/opencode 不支持 CLI 级 session 复用，靠把历史拼进新 prompt 模拟「记得上下文」。
+fn build_history_summary(store: &AssistantStore, session_id: &str) -> Result<String, String> {
+    let raw = store.read_transcript(session_id)?;
+    let mut lines: Vec<String> = Vec::new();
+    for line in raw.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        let (ev, payload) = (
+            v.get("event").and_then(|x| x.as_str()),
+            v.get("payload"),
+        );
+        match (ev, payload) {
+            (Some("input"), Some(p)) => {
+                // 跳过追问自身写入的 followup input（kind=followup），只读真实首轮 user prompt。
+                // 首轮 input payload 无 kind 或 kind != followup；追问的 followup input 由追问 prompt 提供，避免重复。
+                let kind = p.get("kind").and_then(|x| x.as_str());
+                if kind == Some("followup") {
+                    continue;
+                }
+                let prompt = p.get("prompt").and_then(|x| x.as_str()).unwrap_or("");
+                if !prompt.trim().is_empty() {
+                    lines.push(format!("【用户】{prompt}"));
+                }
+            }
+            (Some("output"), Some(p)) => {
+                let text = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                if !text.trim().is_empty() {
+                    lines.push(format!("【AI】{text}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(truncate_history(&lines.join("\n\n"), 12_000))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,6 +1074,124 @@ mod tests {
     fn tail_keeps_last_chars() {
         assert_eq!(tail("abcdef", 3), "def");
         assert_eq!(tail("abc", 10), "abc");
+    }
+
+    // === design §3.3.3：claude session_id 捕获 ===
+
+    #[test]
+    fn session_id_from_system_line() {
+        // system init 行携带 session_id（claude stream-json 初始事件）。
+        let line = r#"{"type":"system","subtype":"init","session_id":"claude-sys-1","cwd":"/tmp"}"#;
+        assert_eq!(
+            extract_stream_json_session_id(line),
+            Some("claude-sys-1".to_string())
+        );
+    }
+
+    #[test]
+    fn session_id_from_result_line() {
+        // result 结束行携带 session_id（部分版本在结束事件输出）。
+        let line = r#"{"type":"result","subtype":"success","session_id":"claude-res-2","result":"done"}"#;
+        assert_eq!(
+            extract_stream_json_session_id(line),
+            Some("claude-res-2".to_string())
+        );
+    }
+
+    #[test]
+    fn assistant_line_returns_none_for_session_id() {
+        // assistant 行不应被误取为 session id（文本提取才是 assistant 行的职责）。
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}"#;
+        assert_eq!(extract_stream_json_session_id(line), None);
+    }
+
+    #[test]
+    fn session_id_missing_returns_none() {
+        // system 行无 session_id 字段时返回 None。
+        let line = r#"{"type":"system","subtype":"init"}"#;
+        assert_eq!(extract_stream_json_session_id(line), None);
+    }
+
+    #[test]
+    fn session_id_non_json_returns_none() {
+        assert_eq!(extract_stream_json_session_id("not json at all"), None);
+        assert_eq!(extract_stream_json_session_id(""), None);
+    }
+
+    // === design §3.3.5：build_history_summary 伪多轮数据源 ===
+
+    fn temp_assistant_store(name: &str) -> AssistantStore {
+        let root = std::env::temp_dir().join(format!(
+            "lingfang-code-assistant-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        AssistantStore::new(root).expect("assistant store should initialize")
+    }
+
+    #[test]
+    fn summary_includes_user_and_ai() {
+        let store = temp_assistant_store("summary-basic");
+        store
+            .append_transcript("s1", "input", json!({ "prompt": "做一个番茄钟" }))
+            .unwrap();
+        store
+            .append_transcript(
+                "s1",
+                "output",
+                json!({ "stream": "stdout", "text": "已生成番茄钟插件" }),
+            )
+            .unwrap();
+        let summary = build_history_summary(&store, "s1").unwrap();
+        assert!(summary.contains("【用户】做一个番茄钟"), "{summary}");
+        assert!(summary.contains("【AI】已生成番茄钟插件"), "{summary}");
+    }
+
+    #[test]
+    fn summary_truncates_when_too_long() {
+        let store = temp_assistant_store("summary-truncate");
+        // 喂超长历史（>12k 字符）。
+        let big = "x".repeat(8_000);
+        store
+            .append_transcript("s2", "input", json!({ "prompt": big.clone() }))
+            .unwrap();
+        store
+            .append_transcript("s2", "output", json!({ "text": big }))
+            .unwrap();
+        let summary = build_history_summary(&store, "s2").unwrap();
+        // 整体限长 12k 字符（防 Windows 命令行参数超限）。
+        assert!(
+            summary.chars().count() <= 12_000,
+            "summary len = {}",
+            summary.chars().count()
+        );
+        assert!(!summary.is_empty());
+    }
+
+    #[test]
+    fn summary_skips_empty_and_followup_input() {
+        let store = temp_assistant_store("summary-filter");
+        // 空 prompt 跳过。
+        store
+            .append_transcript("s3", "input", json!({ "prompt": "  " }))
+            .unwrap();
+        // followup 追问 input 不进历史（由追问 prompt 本身提供，避免重复）。
+        store
+            .append_transcript(
+                "s3",
+                "input",
+                json!({ "prompt": "把按钮改红", "kind": "followup" }),
+            )
+            .unwrap();
+        store
+            .append_transcript("s3", "input", json!({ "prompt": "做一个番茄钟" }))
+            .unwrap();
+        store
+            .append_transcript("s3", "output", json!({ "text": "" }))
+            .unwrap();
+        let summary = build_history_summary(&store, "s3").unwrap();
+        assert!(summary.contains("【用户】做一个番茄钟"));
+        assert!(!summary.contains("把按钮改红"));
     }
 
     #[test]
@@ -910,6 +1221,7 @@ mod tests {
                 model: None,
                 workspace_dir: Some(env!("CARGO_MANIFEST_DIR").into()),
                 prompt: "Reply with exactly: lingfang-long-session-ok".into(),
+                system_prompt: None,
             },
         )
         .expect("codex session should start");
@@ -982,6 +1294,7 @@ mod tests {
                 model: None,
                 workspace_dir: Some(env!("CARGO_MANIFEST_DIR").into()),
                 prompt: "Write a detailed LingFang plugin design with at least 20 sections. Do not be brief.".into(),
+                system_prompt: None,
             },
         )
         .expect("codex session should start");

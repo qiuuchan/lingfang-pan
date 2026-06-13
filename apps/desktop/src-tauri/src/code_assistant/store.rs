@@ -51,6 +51,10 @@ pub struct SessionRecord {
     pub ended_at: Option<String>,
     #[serde(alias = "exitCode", rename = "exitCode")]
     pub exit_code: Option<i32>,
+    // CLI 侧会话 id（仅 claude 真 resume 用到；design §3.3.2）。
+    // 本地落盘字段，非云端契约：default 保证旧 sessions.json 可读。
+    #[serde(default, alias = "cliSessionId", rename = "cliSessionId")]
+    pub cli_session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -246,6 +250,26 @@ impl AssistantStore {
         write_json(&self.sessions_path(), &sessions)
     }
 
+    /// 捕获到 CLI 侧会话 id（claude stream-json 的 session_id）后回写（design §3.3.2）。
+    /// 复用 update_session_exit 的「定位 record 改字段再写」模式；只写非空 id（首轮可能未捕获）。
+    pub fn set_cli_session_id(
+        &self,
+        session_id: &str,
+        cli_session_id: &str,
+    ) -> Result<(), String> {
+        if cli_session_id.trim().is_empty() {
+            return Ok(());
+        }
+        let mut sessions = self.list_sessions();
+        if let Some(record) = sessions
+            .iter_mut()
+            .find(|item| item.session_id == session_id)
+        {
+            record.cli_session_id = Some(cli_session_id.to_string());
+        }
+        write_json(&self.sessions_path(), &sessions)
+    }
+
     pub fn append_transcript(
         &self,
         session_id: &str,
@@ -405,5 +429,65 @@ mod tests {
 
         store.unregister_process("s1").unwrap();
         assert!(store.list_registered_processes().is_empty());
+    }
+
+    // === design §3.3.2：cli_session_id 回写 + 向后兼容 ===
+
+    #[test]
+    fn cli_session_id_roundtrip() {
+        // 写 sessions → set cli id → 读出字段。
+        let store = temp_store("cli-id");
+        store
+            .upsert_session(SessionRecord {
+                session_id: "s1".into(),
+                tool: CodeAssistantTool::Claude,
+                model: Some("sonnet".into()),
+                workspace_dir: "/tmp".into(),
+                status: "running".into(),
+                transcript_path: "/tmp/t.jsonl".into(),
+                command_preview: vec!["claude".into()],
+                pid: Some(123),
+                started_at: "1".into(),
+                ended_at: None,
+                exit_code: None,
+                cli_session_id: None,
+            })
+            .unwrap();
+        store.set_cli_session_id("s1", "claude-sid-abc").unwrap();
+        let record = store
+            .list_sessions()
+            .into_iter()
+            .find(|r| r.session_id == "s1")
+            .unwrap();
+        assert_eq!(record.cli_session_id.as_deref(), Some("claude-sid-abc"));
+    }
+
+    #[test]
+    fn cli_session_id_empty_is_noop() {
+        // 空字符串不写（防误覆盖）。
+        let store = temp_store("cli-id-empty");
+        store
+            .upsert_session(SessionRecord {
+                session_id: "s2".into(),
+                tool: CodeAssistantTool::Claude,
+                model: None,
+                workspace_dir: "/tmp".into(),
+                status: "running".into(),
+                transcript_path: "/tmp/t.jsonl".into(),
+                command_preview: vec!["claude".into()],
+                pid: None,
+                started_at: "1".into(),
+                ended_at: None,
+                exit_code: None,
+                cli_session_id: None,
+            })
+            .unwrap();
+        store.set_cli_session_id("s2", "  ").unwrap();
+        let record = store
+            .list_sessions()
+            .into_iter()
+            .find(|r| r.session_id == "s2")
+            .unwrap();
+        assert_eq!(record.cli_session_id, None);
     }
 }

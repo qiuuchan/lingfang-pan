@@ -14,7 +14,7 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
     build_args,
 };
 
-fn build_args(prompt: &str, model: Option<&str>) -> Vec<String> {
+fn build_args(prompt: &str, model: Option<&str>, resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         prompt.to_string(),
@@ -25,6 +25,10 @@ fn build_args(prompt: &str, model: Option<&str>) -> Vec<String> {
     ];
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);
+    }
+    // 真多轮续接：claude headless 用 `--resume <session_id>` 续接上一轮上下文。
+    if let Some(id) = resume_id {
+        args.extend(["--resume".to_string(), id.to_string()]);
     }
     args
 }

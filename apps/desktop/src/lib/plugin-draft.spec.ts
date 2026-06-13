@@ -3,7 +3,9 @@ import {
   buildFallbackEntryHtml,
   buildLocalDraft,
   cleanPathFrontend,
+  mergeFollowupDraft,
   normalizeCapabilities,
+  normalizeTurns,
   parseStructuredPackage,
 } from './plugin-draft';
 
@@ -385,5 +387,130 @@ describe('buildLocalDraft 产出收敛', () => {
   it('完全失败（无输出）→ status invalid，不比现状差', () => {
     const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith('', false) });
     expect(draft.status).toBe('invalid');
+  });
+});
+
+// === design §3.3.6 (e)：mergeFollowupDraft 追问草稿累积 ===
+
+describe('mergeFollowupDraft', () => {
+  // 构造一个首轮 draft（已含 manifest + entry 文件 + 2 turns）。
+  function firstRoundDraft() {
+    return buildLocalDraft({
+      prompt: '做一个番茄钟',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith([
+        '```lingfang-manifest json',
+        '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html" }',
+        '```',
+        '```file path="ui/index.html"',
+        '<div>番茄钟 v1</div>',
+        '```',
+      ].join('\n')),
+    });
+  }
+
+  it('完全失败（追问无产出）→ status partial，保留上轮文件', () => {
+    // design §3.3.6 RISK8：追问无结构化产出时兜底保留 prev.files，不丢草稿。
+    const prev = firstRoundDraft();
+    const merged = mergeFollowupDraft(prev, probeWith('', false), '把按钮改成红色');
+    // 追问无产出：保留上轮 entry 文件，status partial（不判 invalid，保留可用态）。
+    expect(merged.files.find((f) => f.path === 'ui/index.html')?.content).toContain('v1');
+    expect(merged.status).toBe('partial');
+    // turns 仍累积 +2（user 追问 + assistant 兜底文案）。
+    expect(merged.turns.length).toBe(prev.turns.length + 2);
+  });
+
+  it('追问在既有 draft 上累积 turns（+2）', () => {
+    const prev = firstRoundDraft();
+    const baseTurns = prev.turns.length;
+    const merged = mergeFollowupDraft(
+      prev,
+      probeWith([
+        '```lingfang-notes',
+        '已把按钮改成红色',
+        '```',
+      ].join('\n')),
+      '把按钮改成红色',
+    );
+    expect(merged.turns.length).toBe(baseTurns + 2);
+    expect(merged.turns.some((t) => t.role === 'user' && t.content === '把按钮改成红色')).toBe(true);
+    expect(merged.turns.some((t) => t.role === 'assistant' && t.content.includes('按钮改成红色'))).toBe(true);
+  });
+
+  it('追问产出新文件覆盖 prev.files（迭代）', () => {
+    const prev = firstRoundDraft();
+    const merged = mergeFollowupDraft(
+      prev,
+      probeWith([
+        '```lingfang-manifest json',
+        '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html" }',
+        '```',
+        '```file path="ui/index.html"',
+        '<div>番茄钟 v2 红色按钮</div>',
+        '```',
+      ].join('\n')),
+      '把按钮改成红色',
+    );
+    // entry 文件被追问产出覆盖为 v2。
+    expect(merged.files.find((f) => f.path === 'ui/index.html')?.content).toContain('v2 红色按钮');
+    expect(merged.files.find((f) => f.path === 'ui/index.html')?.content).not.toContain('v1');
+  });
+
+  it('prev.id 保持稳定（同一插件跨轮迭代，不新开草稿）', () => {
+    const prev = firstRoundDraft();
+    const prevId = prev.id;
+    const merged = mergeFollowupDraft(prev, probeWith('```\nwhatever\n```'), '追问');
+    expect(merged.id).toBe(prevId);
+  });
+
+  it('追问空 assistant 输出经 normalizeTurns 不产生相邻重复', () => {
+    // CLI 无输出时 assistant 兜底文案可能与策略相关；这里验证追问追加后 normalizeTurns 兜底去重生效。
+    const prev = firstRoundDraft();
+    const merged = mergeFollowupDraft(prev, probeWith('', true), '追问1');
+    const turns = normalizeTurns(merged.turns);
+    // 不应出现相邻同 role 同 content 的重复。
+    for (let i = 1; i < turns.length; i++) {
+      if (turns[i].role === turns[i - 1].role) {
+        expect(turns[i].content).not.toBe(turns[i - 1].content);
+      }
+    }
+  });
+
+  it('diagnostics 合并（prev 诊断保留 + 追问新增）', () => {
+    const prev = firstRoundDraft();
+    const baseDiag = prev.diagnostics.length;
+    const merged = mergeFollowupDraft(prev, probeWith([
+      '```lingfang-notes',
+      'done',
+      '```',
+    ].join('\n')), '追问');
+    expect(merged.diagnostics.length).toBeGreaterThan(baseDiag);
+  });
+});
+
+// === normalizeTurns：相邻同 role 同 content 去重（design §3.3.6 风险点 RISK5） ===
+
+describe('normalizeTurns', () => {
+  it('相邻同 role 同 content 去重', () => {
+    const turns = [
+      { role: 'assistant' as const, content: 'a', at: '1' },
+      { role: 'assistant' as const, content: 'a', at: '2' },
+    ];
+    expect(normalizeTurns(turns)).toHaveLength(1);
+  });
+
+  it('不同 content 不去重', () => {
+    const turns = [
+      { role: 'user' as const, content: 'q1', at: '1' },
+      { role: 'assistant' as const, content: 'a1', at: '2' },
+      { role: 'user' as const, content: 'q2', at: '3' },
+    ];
+    expect(normalizeTurns(turns)).toHaveLength(3);
+  });
+
+  it('空数组 / undefined 安全', () => {
+    expect(normalizeTurns([])).toEqual([]);
+    expect(normalizeTurns(undefined)).toEqual([]);
   });
 });

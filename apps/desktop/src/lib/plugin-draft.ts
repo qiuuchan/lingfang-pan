@@ -93,6 +93,13 @@ export interface SessionExitPayload {
   endedAt?: string;
 }
 
+// design §3.3.3：spawn_reader 捕获到 claude session_id 后 emit 的 payload。
+// 前端据此 setCliSessionId + 标记 multiturnMode='native'（claude 真 resume）。
+export interface SessionCliIdPayload {
+  sessionId: string;
+  cliSessionId: string;
+}
+
 export type TranscriptEvent = {
   at?: string;
   event?: string;
@@ -146,7 +153,7 @@ export function transcriptText(events: TranscriptEvent[], stream: 'stdout' | 'st
 
 export function transcriptDiagnostics(events: TranscriptEvent[]) {
   return events
-    .filter((event) => event.event === 'error' || event.event === 'registry-cleanup' || event.event === 'input-rejected' || event.event === 'stopped')
+    .filter((event) => event.event === 'error' || event.event === 'registry-cleanup' || event.event === 'input-rejected' || event.event === 'stopped' || event.event === 'multiturn-degraded')
     .map((event) => `${event.event}: ${JSON.stringify(event.payload || {})}`);
 }
 
@@ -608,6 +615,80 @@ export function normalizeTurns(turns?: DraftTurn[]): DraftTurn[] {
     out.push(turn);
   }
   return out;
+}
+
+// design §3.3.6 (e)：追问草稿合并——在既有 draft 上累积 turns，files/manifest 用追问产出（R2 解析）覆盖迭代，
+// R2 未产出时兜底保留 prev.files（保证追问即使结构化失败也能累积对话、不丢上轮文件）。
+// prev.id 保持稳定（同一插件跨轮迭代，不新开草稿）。
+export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, prompt: string): PluginDraft {
+  const output = extractCliText(result);
+  const now = new Date().toISOString();
+
+  // 追问产出重新解析（R2 parseStructuredPackage 已存在）；失败时 parsed.files 为空，兜底 prev。
+  const parsed = parseStructuredPackage(output);
+  const parsedManifest = parsed.manifest;
+
+  // manifest 沿用 prev 的 id/name（迭代不换插件），仅用追问产出补全可变字段。
+  const prevManifest = parseManifest(prev.files);
+  const manifest = {
+    id: parsedManifest?.id || prevManifest.id,
+    name: parsedManifest?.name || prevManifest.name,
+    version: parsedManifest?.version || prevManifest.version,
+    description: parsedManifest?.description || prevManifest.description,
+    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as 'client' | 'cloud',
+    entry: parsedManifest?.entry || prevManifest.entry,
+    visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
+    capabilities: normalizeCapabilities(parsedManifest?.capabilities),
+  };
+
+  // files：追问产出非空则覆盖（R2 迭代），否则保留 prev.files（兜底，design §3.3.6 风险点 RISK8）。
+  let files: DraftFile[];
+  const schemaDiagnostics: DraftDiagnostic[] = [...parsed.diagnostics];
+  if (parsed.files.length > 0) {
+    files = [...parsed.files];
+    if (!files.find((file) => file.path === manifest.entry)) {
+      files = [...files, {
+        path: manifest.entry,
+        content: buildFallbackEntryHtml({
+          notes: parsed.notes,
+          manifestName: manifest.name,
+          description: manifest.description,
+        }),
+      }];
+      schemaDiagnostics.push({ stage: 'schema', status: 'warn', message: `entry ${manifest.entry} 缺失，已生成兜底预览页` });
+    }
+  } else {
+    // R2 未产出结构化文件：保留上轮文件，标记 partial。
+    files = prev.files.filter((file) => file.path !== 'manifest.json');
+  }
+  // manifest.json 始终以收敛后的合法对象序列化，放 files 首位。
+  files = [{ path: 'manifest.json', content: JSON.stringify(manifest, null, 2) }, ...files];
+
+  // 状态：追问成功（有结构化产出或 success）→ ready/partial；完全无输出 → partial（保留可用态，不判 invalid）。
+  const status: PluginDraft['status'] = parsed.status === 'ready'
+    ? 'ready'
+    : (result.success || output ? 'partial' : 'partial');
+
+  const schemaStatus: DraftDiagnostic['status'] = parsed.status === 'ready' ? 'pass' : parsed.status === 'partial' ? 'warn' : 'fail';
+  const schemaSummary = `追问解析：${parsed.status}（manifest ${parsedManifest ? '已解析' : '缺失'}，文件 ${parsed.files.length}，notes ${parsed.notes ? '有' : '无'}）`;
+
+  return {
+    ...prev,
+    status,
+    files,
+    turns: normalizeTurns([
+      ...prev.turns,
+      { role: 'user', content: prompt, at: now },
+      { role: 'assistant', content: parsed.notes || output || '本地 CLI 没有返回可展示内容。', at: now },
+    ]),
+    diagnostics: [
+      ...prev.diagnostics,
+      { stage: 'local-cli', status: result.success ? 'pass' : 'fail', message: `追问 ${cliSessionId(result) || '未返回 session'}` },
+      { stage: 'schema', status: schemaStatus, message: schemaSummary },
+      ...(result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
+      ...schemaDiagnostics,
+    ],
+  };
 }
 
 export function parseManifest(files: DraftFile[]) {
