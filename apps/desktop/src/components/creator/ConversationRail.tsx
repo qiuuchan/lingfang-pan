@@ -100,13 +100,13 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
                         }
                       }}
                       className={cn(
-                        'group flex cursor-pointer flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-sm transition-colors',
+                        'group flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
                         active
                           ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
                           : 'border-border bg-card hover:border-primary/40 hover:bg-accent/40',
                       )}
                     >
-                      {/* 标题行（或重命名输入框） */}
+                      {/* 重命名态：整行变输入框；正常态：图标+标题 | tool+时间 | 操作（单行紧凑） */}
                       {renamingId === meta.sessionId ? (
                         <input
                           autoFocus
@@ -120,43 +120,38 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
                           className="w-full rounded border bg-background px-1.5 py-0.5 text-sm text-foreground outline-none"
                         />
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <>
                           <MessageSquareIcon className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
-                          <span className={cn('truncate font-medium', active ? 'text-primary' : 'text-foreground')}>
+                          <span className={cn('min-w-0 flex-1 truncate font-medium', active ? 'text-primary' : 'text-foreground')}>
                             {title}
                           </span>
-                        </div>
-                      )}
-                      {/* 元信息行：tool Badge + 相对时间 */}
-                      <div className="flex items-center justify-between gap-2 pl-5">
-                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-normal text-muted-foreground">
-                          {providerLabel(meta.tool)}
-                        </Badge>
-                        <span className="text-[10px] text-muted-foreground">
-                          {relativeTime(meta.draftUpdatedAt || meta.startedAt)}
-                        </span>
-                      </div>
-                      {/* 悬浮操作：重命名 / 删除（active 态常驻可见） */}
-                      {renamingId !== meta.sessionId && (
-                        <div className={cn('flex items-center gap-0.5 pl-5', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={(e) => { e.stopPropagation(); startRename(meta); }}
-                            title="重命名"
-                          >
-                            <PencilIcon className="size-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="hover:text-destructive"
-                            onClick={(e) => { e.stopPropagation(); onDelete(meta.sessionId); }}
-                            title="删除"
-                          >
-                            <Trash2Icon className="size-3" />
-                          </Button>
-                        </div>
+                          <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px] font-normal text-muted-foreground">
+                            {providerLabel(meta.tool)}
+                          </Badge>
+                          <span className="w-16 shrink-0 text-right text-[10px] text-muted-foreground">
+                            {relativeTime(meta.draftUpdatedAt || meta.startedAt)}
+                          </span>
+                          {/* 悬浮操作：重命名 / 删除（active 态常驻可见） */}
+                          <div className={cn('flex shrink-0 items-center gap-0.5', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={(e) => { e.stopPropagation(); startRename(meta); }}
+                              title="重命名"
+                            >
+                              <PencilIcon className="size-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="hover:text-destructive"
+                              onClick={(e) => { e.stopPropagation(); onDelete(meta.sessionId); }}
+                              title="删除"
+                            >
+                              <Trash2Icon className="size-3" />
+                            </Button>
+                          </div>
+                        </>
                       )}
                     </div>
                   </li>
