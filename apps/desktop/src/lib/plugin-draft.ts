@@ -244,6 +244,43 @@ export function deriveTitle(record: { title?: string | null }, transcriptRaw?: s
   return '新对话';
 }
 
+// 本地启发式秒级生成标题（不调 CLI，瞬时完成）。
+// 优先从用户首句提取主题（循环去掉「帮我/请/做一个/创建一个」等连续祈使前缀，更精炼）；
+// 若用户输入太短或为闲聊，回退到 assistant 回复首行有意义片段；最终截断到 16 字。
+export function summarizeTitleLocally(userText: string, assistantText: string): string {
+  const clean = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/["""'。，,.!！?？\n]/g, '');
+  const prefixes = ['帮我', '麻烦帮', '麻烦', '请', '我想', '我要', '我想要', '能不能', '可以', '你能', '做一个', '做', '创建一个', '创建', '写一个', '写', '实现一个', '实现', '开发一个', '开发', '制作一个', '制作'];
+  // 循环移除连续祈使前缀（"帮我做一个" → "做一个" → ""）。
+  let user = clean(userText);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const p of prefixes) {
+      if (user.startsWith(p)) {
+        user = user.slice(p.length).trim();
+        changed = true;
+      }
+    }
+  }
+  if (user.length >= 5) {
+    return user.slice(0, 16);
+  }
+  // 闲聊类（"你好"/"hi"）：assistant 首句通常太短，取前两段拼接更有意义。
+  // 注意：必须在 clean 之前按标点切分（clean 会删标点）。
+  if (assistantText.trim()) {
+    const segments = assistantText
+      .split(/[！!。.\n，,]/)
+      .map((s) => s.trim().replace(/["""']/g, ''))
+      .filter((s) => s.length >= 2);
+    if (segments.length) {
+      const first = segments[0];
+      const title = first.length <= 4 && segments[1] ? first + segments[1] : first;
+      if (title.length >= 2) return title.replace(/\s+/g, ' ').slice(0, 16);
+    }
+  }
+  return clean(userText).slice(0, 16) || '新对话';
+}
+
 export function providerLabel(provider: ProviderId) {
   return PROVIDERS.find((item) => item.id === provider)?.label || provider;
 }

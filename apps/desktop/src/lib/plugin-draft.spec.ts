@@ -13,6 +13,7 @@ import {
   normalizeTurns,
   parseStructuredPackage,
   parseTranscript,
+  summarizeTitleLocally,
   transcriptText,
   transcriptTextSinceLastInput,
 } from './plugin-draft';
@@ -766,5 +767,29 @@ describe('deriveTitle', () => {
   it('transcript 无 input 事件 → 兜底「新对话」', () => {
     const transcript = JSON.stringify({ event: 'output', payload: { text: 'hi' } });
     expect(deriveTitle({}, transcript)).toBe('新对话');
+  });
+});
+
+// === summarizeTitleLocally：本地启发式秒级标题（去祈使前缀，截断16字） ===
+describe('summarizeTitleLocally', () => {
+  it('去掉祈使前缀拿核心需求', () => {
+    expect(summarizeTitleLocally('帮我做一个番茄钟插件', '好的')).toBe('番茄钟插件');
+    expect(summarizeTitleLocally('请创建一个倒计时工具', '')).toBe('倒计时工具');
+    expect(summarizeTitleLocally('我想实现 Markdown 编辑器', '')).toBe('Markdown 编辑器');
+  });
+
+  it('闲聊类（你好/hi）回退 assistant 首行', () => {
+    // clean 会去掉标点，"你好！我是 Claude Code，很高兴..." → 首句"你好"+第二句"我是 Claude Code"
+    const title = summarizeTitleLocally('你好', '你好！我是 Claude Code，很高兴为你服务。');
+    expect(title).toBe('你好我是 Claude Code');
+  });
+
+  it('截断到 16 字', () => {
+    const long = '做一个非常非常非常非常非常非常非常长的插件需求描述';
+    expect(summarizeTitleLocally(long, '').length).toBeLessThanOrEqual(16);
+  });
+
+  it('空输入兜底新对话', () => {
+    expect(summarizeTitleLocally('', '')).toBe('新对话');
   });
 });
