@@ -11,7 +11,7 @@ use std::time::Instant;
 use std::os::unix::process::CommandExt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use adapters::{tool_definition, CodeAssistantTool, ToolCommand, TOOL_DEFINITIONS};
@@ -163,6 +163,37 @@ pub struct StopSessionInput {
 
 #[derive(Debug, Deserialize)]
 pub struct ReadTranscriptInput {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+}
+
+// === design §3.2.3：多会话 CRUD Input（sessionId 统一 camelCase 别名，对齐前端 tauriInvoke 入参） ===
+
+#[derive(Debug, Deserialize)]
+pub struct RenameSessionInput {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteSessionInput {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveDraftInput {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    /// 前端序列化后的 PluginDraft JSON。Rust 不解析其内部定义（透传 serde_json::Value），
+    /// 与 append_transcript 的 payload: Value 同模式，保持前后端 schema 解耦（design §3.2.2）。
+    #[serde(alias = "draftJson")]
+    pub draft_json: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReadDraftInput {
     #[serde(alias = "sessionId")]
     pub session_id: String,
 }
@@ -320,6 +351,10 @@ pub fn start_session<E: AssistantEventSink>(
         exit_code: None,
         // 首轮未知 claude session id，由 spawn_reader 旁路捕获后回写（design §3.3.3）。
         cli_session_id: None,
+        // 新会话无标题/归档/草稿更新时间，由前端懒回填或用户重命名时落盘（design §3.2.1）。
+        title: None,
+        archived: None,
+        draft_updated_at: None,
     };
     // 先 upsert 落盘（首轮记录），失败直接返回，不 spawn 子进程。
     state.store.upsert_session(record.clone())?;
@@ -557,6 +592,42 @@ pub fn read_transcript(
     input: ReadTranscriptInput,
 ) -> Result<String, String> {
     state.store.read_transcript(&input.session_id)
+}
+
+// === design §3.2.3：多会话 CRUD 命令 ===
+// rename/save_draft 同步刷新 draft_updated_at（会话栏排序依据）。
+// save_draft/read_draft 透传 serde_json::Value，Rust 不感知前端 PluginDraft 定义（前后端 schema 解耦）。
+
+/// 重命名会话标题，返回更新后的 SessionRecord（前端刷新会话栏 meta）。
+pub fn rename_session(
+    state: &CodeAssistantState,
+    input: RenameSessionInput,
+) -> Result<SessionRecord, String> {
+    state
+        .store
+        .rename_session(&input.session_id, &input.title, now_string())
+}
+
+/// 删除会话（清 sessions 记录 + transcript + draft 三处），幂等。
+pub fn delete_session(state: &CodeAssistantState, input: DeleteSessionInput) -> Result<(), String> {
+    state.store.delete_session(&input.session_id)
+}
+
+/// 写草稿到 drafts/{sessionId}.json，并刷新该会话的 draft_updated_at。
+pub fn save_draft(state: &CodeAssistantState, input: SaveDraftInput) -> Result<(), String> {
+    state.store.write_draft(&input.session_id, &input.draft_json)?;
+    // 落盘成功后同步刷新更新时间（前端会话栏排序/相对时间依据）。
+    state
+        .store
+        .touch_draft_updated_at(&input.session_id, now_string())
+}
+
+/// 读取草稿原文（Value 透传）。文件不存在返回 None。
+pub fn read_draft(
+    state: &CodeAssistantState,
+    input: ReadDraftInput,
+) -> Result<Option<Value>, String> {
+    state.store.read_draft(&input.session_id)
 }
 
 fn run_once(
