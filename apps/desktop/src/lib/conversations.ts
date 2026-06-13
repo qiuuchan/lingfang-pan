@@ -50,6 +50,46 @@ export function readActiveId(tenantId: string | null): string | null {
   }
 }
 
+// 用本地代码助手 CLI 总结一段对话，生成简短标题。
+// 独立短任务（不复用当前对话 session，避免污染上下文），systemPrompt 严格约束只回标题文本。
+// 返回值已 trim + 截断到 16 字。失败时返回空串，调用方降级到 deriveTitle 启发式。
+export async function generateTitle(opts: {
+  tool: 'claude' | 'codex' | 'opencode';
+  model?: string;
+  userText: string;
+  assistantText: string;
+}): Promise<string> {
+  const sysPrompt = '你是标题总结助手。请用简体中文给下面这段对话起一个不超过 10 个字的标题，只输出标题本身，不要标点、引号、解释、换行。';
+  const prompt = `用户：${opts.userText.slice(0, 500)}\n\n助手：${opts.assistantText.slice(0, 800)}\n\n请给出这段对话的标题。`;
+  try {
+    const record = await tauriInvoke<{ sessionId: string }>('code_assistant_start_session', {
+      input: {
+        tool: opts.tool,
+        model: opts.model && opts.model !== 'default' ? opts.model : undefined,
+        prompt,
+        systemPrompt: sysPrompt,
+      },
+    });
+    const raw = await tauriInvoke<string>('code_assistant_read_transcript', { input: { sessionId: record.sessionId } });
+    // transcript 里取首个非空 stdout output 作为标题（短任务只产一轮）。
+    const events = raw.split('\n').filter(Boolean);
+    for (const line of events) {
+      try {
+        const ev = JSON.parse(line);
+        if (ev.event === 'output' && ev.payload?.stream === 'stdout' && typeof ev.payload.text === 'string') {
+          const title = ev.payload.text.trim().replace(/["""'。，,.!！?？\n]/g, '').slice(0, 16);
+          if (title) return title;
+        }
+      } catch {
+        /* 跳过非 JSON 行 */
+      }
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
 // 写入 activeId 到 localStorage（同步持久化，新建/切换/删除时调用）。
 export function writeActiveId(tenantId: string | null, sessionId: string | null): void {
   try {
