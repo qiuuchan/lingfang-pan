@@ -2,6 +2,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Info } from '../Info';
 import { capitalizeModel, type AssistantSessionState } from '@/lib/plugin-draft';
 
+// 命令预览摘要：保留二进制名与所有 flags（--model/--output-format 等），
+// 仅把 -p 后的超长 prompt/systemPrompt 内容截断为「<prompt …>」，避免面板被几 KB 文本占满。
+function summarizeCommand(preview: string[]): string {
+  if (!preview.length) return '未返回命令预览';
+  const out: string[] = [];
+  for (let i = 0; i < preview.length; i++) {
+    const tok = preview[i];
+    if (tok === '-p' || tok === '--print') {
+      // 跳过下一个 token（prompt 正文），用占位符代替。
+      out.push(tok, '<prompt…>');
+      i += 1;
+    } else if (tok.length > 80) {
+      // 其他超长 token（理论上不应有）也截断。
+      out.push(`${tok.slice(0, 40)}…${tok.slice(-8)}`);
+    } else {
+      out.push(tok);
+    }
+  }
+  return out.join(' ');
+}
+
 export function SessionStatusPanel({ session }: { session: AssistantSessionState | null }) {
   if (!session) {
   return (
@@ -39,7 +60,8 @@ export function SessionStatusPanel({ session }: { session: AssistantSessionState
         </div>
         <div className="space-y-1">
           <div className="font-medium">命令</div>
-          <p className="break-all rounded-lg bg-muted p-2 font-mono text-xs text-muted-foreground">{session.commandPreview.join(' ') || '未返回命令预览'}</p>
+          {/* 只展示二进制 + 关键 flags，隐藏 -p 后的超长 prompt/systemPrompt 内容（避免面板被占满） */}
+          <p className="break-all rounded-lg bg-muted p-2 font-mono text-xs text-muted-foreground">{summarizeCommand(session.commandPreview)}</p>
         </div>
         {(session.stdout || session.stderr) && (
           <div className="space-y-2">
