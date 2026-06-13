@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AuthService } from './auth.service';
 import { badRequest, insufficientBalance, notFound } from '../common';
@@ -8,8 +8,8 @@ const SIGNUP_BONUS_CENTS = 1000;
 @Injectable()
 export class EconomyService {
   constructor(
-    private readonly prisma: PrismaService,
-    @Inject(forwardRef(() => AuthService)) private readonly auth: AuthService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
   // 注册赠送 ¥10（1000 分）：首次访问钱包时 upsert，不改 auth.service 的注册流程。
