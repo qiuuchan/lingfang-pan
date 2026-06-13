@@ -14,7 +14,9 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
     build_args,
 };
 
-fn build_args(prompt: &str, model: Option<&str>) -> Vec<String> {
+// resume_id 接收但忽略：opencode 无 session 复用能力，
+// 多轮续接由 send_input 层用历史摘要拼进 prompt 实现（design §3.3.4）。
+fn build_args(prompt: &str, model: Option<&str>, _resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec!["run".to_string(), prompt.to_string()];
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);
