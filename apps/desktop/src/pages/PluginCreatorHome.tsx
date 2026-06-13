@@ -487,8 +487,9 @@ export function PluginCreatorHome() {
           : '本地代码助手续接上下文生成…',
       );
       try {
+        // 追问传入当前选的 model（会话内切模型，下一轮生效）；Rust 优先用此值覆盖 session 固化值。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text },
+          input: { sessionId: activeSessionId, input: text, model: model === 'default' ? undefined : model },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
