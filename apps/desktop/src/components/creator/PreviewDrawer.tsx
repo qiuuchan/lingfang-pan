@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { RefreshCwIcon, CodeIcon, EyeIcon, XIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,7 @@ export function PreviewDrawer({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false} className="flex h-[100vh] w-[100vw] max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none">
         {/* 顶部条：标题 + 刷新 + 源码 + 关闭（自带 X 已隐藏避免与按钮重叠；条上可拖动窗口） */}
-        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" data-tauri-drag-region>
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" data-tauri-drag-region onMouseDown={(e) => { if (e.button !== 0) return; if ((e.target as HTMLElement).closest('button, input, a')) return; void getCurrentWindow().startDragging(); }}>
           <DialogTitle className="text-sm font-medium" data-tauri-drag-region>插件预览</DialogTitle>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" disabled={!files.length} onClick={onRefreshPreview}>
