@@ -45,8 +45,8 @@ import {
 } from '@/lib/plugin-draft';
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { Bubble } from '@/components/chat/Bubble';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
@@ -65,6 +65,8 @@ export function PluginCreatorHome() {
   const [streaming, setStreaming] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  // 问题2：历史悬浮窗改居中 Dialog（自动分页=内部 ScrollArea 限高），不再用右对齐 Popover。
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<TranscriptEvent[]>([]);
   const [liveStage, setLiveStage] = useState('');
@@ -125,7 +127,20 @@ export function PluginCreatorHome() {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
-  useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight }); }, [turns.length, liveEvents, pendingUser]);
+  // 问题1：智能滚动——仅当用户已贴近底部（或尚未手动向上滚）时才自动滚到底，
+  // 用户向上翻看历史时新消息到来不打断（AionUi 标准模式）。
+  const stickToBottomRef = useRef(true);
+  const handleChatScroll = () => {
+    const el = chatRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distance < 80; // 距底 80px 内视为"贴底"
+  };
+  useEffect(() => {
+    if (stickToBottomRef.current) {
+      chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight });
+    }
+  }, [turns.length, liveEvents, pendingUser]);
   useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
@@ -693,25 +708,16 @@ export function PluginCreatorHome() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="ghost" size="sm" onClick={newDraft}>新对话</Button>
-            {/* 问题2：历史记录悬浮窗——历史按钮 + Popover 承载 ConversationRail。 */}
-            <Popover>
-              <PopoverTrigger
-                className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'gap-1')}
-                title="历史对话"
-              >
-                <HistoryIcon className="size-4" /> 历史
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-80 p-0">
-                <ConversationRail
-                  metas={metas}
-                  activeId={activeId}
-                  onSelect={(id) => { void selectConversation(id); }}
-                  onNew={newDraft}
-                  onRename={handleRenameConversation}
-                  onDelete={handleDeleteConversation}
-                />
-              </PopoverContent>
-            </Popover>
+            {/* 问题2：历史记录改居中 Dialog + 自动分页（内部 ScrollArea 限高），不再右对齐 Popover。 */}
+            <Button variant="ghost" size="sm" className="gap-1" title="历史对话" onClick={() => setHistoryOpen(true)}>
+              <HistoryIcon className="size-4" /> 历史
+            </Button>
+            {/* 问题4：转草稿按钮移顶部——仅当前会话无 draft 且有 assistant turn 时显示（不每条气泡挂）。 */}
+            {showConvertAction && (
+              <Button variant="outline" size="sm" onClick={() => { void forceConvertToDraft(); }}>
+                <WandSparklesIcon className="size-3.5" /> 转为草稿
+              </Button>
+            )}
             {/* design §3.3.2：预览按钮——有草稿（files 非空）才可点，否则 disabled + tooltip。 */}
             <Button
               variant="outline"
@@ -727,10 +733,10 @@ export function PluginCreatorHome() {
             </Button>
           </div>
         </div>
-        {/* 问题1：对话区滚动条可见（scrollbar-thin，避免被全局 scrollbar-hide 隐藏）。 */}
-        <div ref={chatRef} className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-          {/* 问题3：底部加 pb-6 呼吸空间，长回复气泡不顶 Composer 的 border-t 分隔线。 */}
-          <div className="mx-auto h-full max-w-3xl px-4 py-6 pb-10">
+        {/* 问题1：对话区滚动条可见（scrollbar-thin），内容自然撑高超容器产生滚动；onScroll 驱动智能贴底。 */}
+        <div ref={chatRef} onScroll={handleChatScroll} className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          {/* 问题3：去 h-full（否则 pb 被视口吃掉），底部 pb-20 让长回复气泡远离 Composer 分隔线。 */}
+          <div className="mx-auto max-w-3xl px-4 py-6 pb-20">
           {!hasConversation ? (
             <div className="flex h-full flex-col justify-center text-center">
               <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">今天想创建什么插件？</h1>
@@ -749,12 +755,6 @@ export function PluginCreatorHome() {
                   key={index}
                   role={turn.role}
                   content={turn.content}
-                  // 问题4：仅最后一条 assistant turn（且纯对话态、非流式）挂「转为插件草稿」按钮。
-                  actions={turn.role === 'assistant' && showConvertAction && index === lastAssistantIndex ? (
-                    <Button variant="outline" size="sm" onClick={() => { void forceConvertToDraft(); }}>
-                      <WandSparklesIcon className="size-3.5" /> 转为插件草稿
-                    </Button>
-                  ) : undefined}
                 />
               ))}
               {pendingUser && <Bubble role="user" content={pendingUser} />}
@@ -826,6 +826,22 @@ export function PluginCreatorHome() {
         onActiveFileChange={setActiveFile}
         onRefreshPreview={() => setPreviewKey((key) => key + 1)}
       />
+      {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-md gap-0 p-0">
+          <DialogHeader className="border-b px-4 py-3">
+            <DialogTitle className="text-base">历史对话</DialogTitle>
+          </DialogHeader>
+          <ConversationRail
+            metas={metas}
+            activeId={activeId}
+            onSelect={(id) => { void selectConversation(id); setHistoryOpen(false); }}
+            onNew={() => { newDraft(); setHistoryOpen(false); }}
+            onRename={handleRenameConversation}
+            onDelete={handleDeleteConversation}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
