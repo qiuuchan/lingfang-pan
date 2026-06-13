@@ -452,6 +452,25 @@ export function cliCommand(result: CliProbeResult) {
   return result.commandPreview || result.command_preview || [];
 }
 
+// 命令预览摘要：保留二进制名与所有 flags，仅把 -p 后的超长 prompt/systemPrompt
+// 内容替换为 <prompt…>，避免诊断面板被几 KB 文本占满（与 SessionStatusPanel 同源逻辑）。
+export function summarizeCommandPreview(preview: string[]): string {
+  if (!preview.length) return '未返回命令预览';
+  const out: string[] = [];
+  for (let i = 0; i < preview.length; i++) {
+    const tok = preview[i];
+    if (tok === '-p' || tok === '--print') {
+      out.push(tok, '<prompt…>');
+      i += 1;
+    } else if (tok.length > 80) {
+      out.push(`${tok.slice(0, 40)}…${tok.slice(-8)}`);
+    } else {
+      out.push(tok);
+    }
+  }
+  return out.join(' ');
+}
+
 export function cliSessionId(result: CliProbeResult) {
   return result.sessionId || result.session_id || '';
 }
@@ -866,7 +885,7 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
     ],
     diagnostics: [
       { stage: 'local-cli', status: input.result.success ? 'pass' : 'fail', message: `${input.providerLabel} ${input.model === 'default' ? '默认模型' : input.model}，session ${cliSessionId(input.result) || '未返回'}` },
-      { stage: 'command', status: 'info', message: cliCommand(input.result).join(' ') || '未返回命令预览' },
+      { stage: 'command', status: 'info', message: summarizeCommandPreview(cliCommand(input.result)) },
       { stage: 'transcript', status: cliTranscriptPath(input.result) ? 'info' : 'fail', message: cliTranscriptPath(input.result) || '未返回 transcript 路径' },
       { stage: 'schema', status: schemaStatus, message: schemaSummary },
       ...(input.result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
@@ -986,7 +1005,7 @@ export function buildDraftFromSandboxFiles(input: {
     ],
     diagnostics: [
       { stage: 'local-cli', status: input.result.success ? 'pass' : 'fail', message: `${input.providerLabel} ${input.model === 'default' ? '默认模型' : input.model}，session ${cliSessionId(input.result) || '未返回'}` },
-      { stage: 'command', status: 'info', message: cliCommand(input.result).join(' ') || '未返回命令预览' },
+      { stage: 'command', status: 'info', message: summarizeCommandPreview(cliCommand(input.result)) },
       { stage: 'transcript', status: cliTranscriptPath(input.result) ? 'info' : 'fail', message: cliTranscriptPath(input.result) || '未返回 transcript 路径' },
       { stage: 'schema', status: schemaStatus, message: schemaSummary },
       ...(input.result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
