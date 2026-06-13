@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RefreshCwIcon, CodeIcon, EyeIcon } from 'lucide-react';
+import { RefreshCwIcon, CodeIcon, EyeIcon, XIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -43,16 +43,19 @@ export function PreviewDrawer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[100vh] w-[100vw] max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none">
-        {/* 顶部条：标题 + 刷新 + 源码切换 */}
-        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
-          <DialogTitle className="text-sm font-medium">插件预览</DialogTitle>
+      <DialogContent showCloseButton={false} className="flex h-[100vh] w-[100vw] max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none">
+        {/* 顶部条：标题 + 刷新 + 源码 + 关闭（自带 X 已隐藏避免与按钮重叠；条上可拖动窗口） */}
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" data-tauri-drag-region>
+          <DialogTitle className="text-sm font-medium" data-tauri-drag-region>插件预览</DialogTitle>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" disabled={!files.length} onClick={onRefreshPreview}>
               <RefreshCwIcon className="size-4" /> 刷新
             </Button>
             <Button variant={showSource ? 'default' : 'outline'} size="sm" disabled={!files.length} onClick={() => setShowSource((v) => !v)}>
               <CodeIcon className="size-4" /> 源码
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => onOpenChange(false)} title="关闭">
+              <XIcon className="size-4" />
             </Button>
           </div>
         </div>
