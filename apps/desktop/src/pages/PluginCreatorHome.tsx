@@ -45,6 +45,7 @@ import {
   type SessionStartedPayload,
   summarizeTitleLocally,
 } from '@/lib/plugin-draft';
+import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -427,13 +428,14 @@ export function PluginCreatorHome() {
   }
 
   async function startNewSession(text: string, selectedProvider: ProviderId) {
-    // design §3.1.1：不再注入 PLUGIN_CREATOR_SYSTEM_PROMPT（对话优先，AC1）。
-    // 不传 systemPrompt → Rust start_session 走裸 prompt 分支（code_assistant.rs 的 match _ => prompt）。
+    // 默认注入轻量对话 systemPrompt：正常聊天 + 检测到创建插件意图时按协议产出围栏块。
+    // 这样「你好」是普通对话（不产 manifest），「做个番茄钟插件」AI 知道用协议格式输出可预览插件包。
     const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
       input: {
         tool: selectedProvider,
         model: model === 'default' ? undefined : model,
         prompt: text,
+        systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         // R2 思考强度随首轮传入（claude 透传 --effort；codex/opencode 忽略）。
         effort,
       },
