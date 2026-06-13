@@ -2,23 +2,23 @@ import { Body, Controller, Get, Inject, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
-import { CollabService } from './collab.service';
+import { TeamService } from './team.service';
 
 @ApiTags('Applications')
 @ApiBearerAuth()
 @Controller('team-admin-applications')
 export class ApplicationsController {
-  constructor(@Inject(CollabService) private readonly collab: CollabService) {}
+  constructor(@Inject(TeamService) private readonly team: TeamService) {}
 
   @Post()
   @ApiOperation({ summary: '提交团队管理员申请' })
   submit(@Req() req: Request, @Body() body: { teamName: string; reason?: string }) {
-    return this.collab.submitApplication(requireUser(req).id, body);
+    return this.team.submitApplication(requireUser(req).id, body);
   }
 
   @Get('me')
   @ApiOperation({ summary: '查询自己的团队管理员申请状态' })
   mine(@Req() req: Request) {
-    return this.collab.myApplication(requireUser(req).id);
+    return this.team.myApplication(requireUser(req).id);
   }
 }
