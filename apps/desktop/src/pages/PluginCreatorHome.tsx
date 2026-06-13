@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PanelRightOpenIcon, SparklesIcon, XIcon, EyeIcon, WandSparklesIcon } from 'lucide-react';
+import { PanelRightOpenIcon, SparklesIcon, XIcon, EyeIcon, WandSparklesIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import {
@@ -30,7 +30,7 @@ import {
   sessionToProbeResult,
   tailText,
   transcriptDiagnostics,
-  transcriptText,
+  transcriptTextSinceLastInput,
   writeRecent,
   type AssistantSessionRecord,
   type AssistantSessionState,
@@ -45,7 +45,8 @@ import {
 } from '@/lib/plugin-draft';
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { Bubble } from '@/components/chat/Bubble';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
@@ -261,8 +262,12 @@ export function PluginCreatorHome() {
     try {
       const raw = await tauriInvoke<string>('code_assistant_read_transcript', { input: { sessionId } });
       const events = parseTranscript(raw);
-      const stdout = transcriptText(events, 'stdout');
-      const stderr = transcriptText(events, 'stderr');
+      // 多轮 bug 修复（问题5）：transcript 是 append 的，每轮 output 都追加到同一文件。
+      // 用 transcriptTextSinceLastInput 只取「最后一个 input 事件之后」的 output，
+      // 保证 finalizeSession 拿到的 stdout/stderr 仅含本轮产出，不再把历史轮次拼进本轮 assistant turn。
+      // diagnostics 保持全量（transcriptDiagnostics），排障更全面。
+      const stdout = transcriptTextSinceLastInput(events, 'stdout');
+      const stderr = transcriptTextSinceLastInput(events, 'stderr');
       const diagnostics = transcriptDiagnostics(events);
       const pending = pendingPromptRef.current;
       const currentSession = assistantSessionRef.current;
@@ -556,8 +561,10 @@ export function PluginCreatorHome() {
     try {
       const raw = await tauriInvoke<string>('code_assistant_read_transcript', { input: { sessionId } });
       const events = parseTranscript(raw);
-      const stdout = transcriptText(events, 'stdout');
-      const stderr = transcriptText(events, 'stderr');
+      // 手动转草稿取最近一轮 assistant 产出（design §3.4.2），与 finalizeSession 同源用本轮切片，
+      // 避免把历史轮次输出一并塞进草稿（问题5 修复一致性）。
+      const stdout = transcriptTextSinceLastInput(events, 'stdout');
+      const stderr = transcriptTextSinceLastInput(events, 'stderr');
       const base = assistantSessionRef.current || assistantSession;
       const promptText = pendingPromptRef.current?.text || lastPromptRef.current || turns.find((t) => t.role === 'user')?.content || '本地代码助手插件';
       // 重建完整 AssistantSessionState（强制定义解析所需的全部字段，避免 null 展开）。
@@ -661,20 +668,21 @@ export function PluginCreatorHome() {
     lastPromptRef.current = null;
   }
 
-  // 当前会话是否为纯对话态（files 空）→ 决定是否在 assistant 气泡渲染「转为插件草稿」按钮。
-  const showConvertAction = Boolean(activeId) && !hasDraft && turns.some((t) => t.role === 'assistant');
+  // 问题4：转草稿按钮显示条件——仅当「当前会话无 draft 且是最后一条 assistant turn」时显示。
+  // 历史 assistant 轮次不显示（避免每条气泡都有按钮），已有 draft（hasDraft=true）不显示，
+  // 流式进行中不显示（本轮尚未产出，末条 assistant 实为上轮，显示会误导）。
+  const lastAssistantIndex = (() => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === 'assistant') return i;
+    }
+    return -1;
+  })();
+  const showConvertAction = Boolean(activeId) && !hasDraft && !streaming && lastAssistantIndex !== -1;
 
   return (
     <div className="flex h-full">
-      {/* design §3.2.5：会话栏（Sidebar 之外的最左栏，w-64 固定）。 */}
-      <ConversationRail
-        metas={metas}
-        activeId={activeId}
-        onSelect={(id) => { void selectConversation(id); }}
-        onNew={newDraft}
-        onRename={handleRenameConversation}
-        onDelete={handleDeleteConversation}
-      />
+      {/* 问题2：历史记录改为顶部「历史」按钮触发的悬浮窗（Popover），不再用左侧固定栏。 */}
+      {/* 布局从三栏（rail|对话|详情）收敛为两栏（对话|详情），腾出宽度给对话区。 */}
       <div className="flex h-full min-w-0 flex-1 flex-col">
         {/* pl-16 为 Sidebar 折叠态悬浮触发区避让，非视觉对称是有意为之。 */}
         <div className="flex shrink-0 items-center justify-between gap-3 border-b pl-16 pr-4 py-3">
@@ -685,6 +693,25 @@ export function PluginCreatorHome() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="ghost" size="sm" onClick={newDraft}>新对话</Button>
+            {/* 问题2：历史记录悬浮窗——历史按钮 + Popover 承载 ConversationRail。 */}
+            <Popover>
+              <PopoverTrigger
+                className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'gap-1')}
+                title="历史对话"
+              >
+                <HistoryIcon className="size-4" /> 历史
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-80 p-0">
+                <ConversationRail
+                  metas={metas}
+                  activeId={activeId}
+                  onSelect={(id) => { void selectConversation(id); }}
+                  onNew={newDraft}
+                  onRename={handleRenameConversation}
+                  onDelete={handleDeleteConversation}
+                />
+              </PopoverContent>
+            </Popover>
             {/* design §3.3.2：预览按钮——有草稿（files 非空）才可点，否则 disabled + tooltip。 */}
             <Button
               variant="outline"
@@ -700,8 +727,10 @@ export function PluginCreatorHome() {
             </Button>
           </div>
         </div>
-        <div ref={chatRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto h-full max-w-3xl px-4 py-6">
+        {/* 问题1：对话区滚动条可见（scrollbar-thin，避免被全局 scrollbar-hide 隐藏）。 */}
+        <div ref={chatRef} className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          {/* 问题3：底部加 pb-6 呼吸空间，长回复气泡不顶 Composer 的 border-t 分隔线。 */}
+          <div className="mx-auto h-full max-w-3xl px-4 py-6 pb-10">
           {!hasConversation ? (
             <div className="flex h-full flex-col justify-center text-center">
               <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">今天想创建什么插件？</h1>
@@ -720,8 +749,8 @@ export function PluginCreatorHome() {
                   key={index}
                   role={turn.role}
                   content={turn.content}
-                  // design §3.4.2：仅 assistant 末轮 + 纯对话态挂「转为插件草稿」按钮（手动触发，AC6）。
-                  actions={turn.role === 'assistant' && showConvertAction && index === turns.length - 1 ? (
+                  // 问题4：仅最后一条 assistant turn（且纯对话态、非流式）挂「转为插件草稿」按钮。
+                  actions={turn.role === 'assistant' && showConvertAction && index === lastAssistantIndex ? (
                     <Button variant="outline" size="sm" onClick={() => { void forceConvertToDraft(); }}>
                       <WandSparklesIcon className="size-3.5" /> 转为插件草稿
                     </Button>

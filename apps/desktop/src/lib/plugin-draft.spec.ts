@@ -12,6 +12,9 @@ import {
   normalizeCapabilities,
   normalizeTurns,
   parseStructuredPackage,
+  parseTranscript,
+  transcriptText,
+  transcriptTextSinceLastInput,
 } from './plugin-draft';
 
 // === cleanPathFrontend：与后端 plugin-package.ts:61-69 cleanPath 对齐 ===
@@ -646,7 +649,95 @@ describe('mergeConversationTurn', () => {
   });
 });
 
-// === design §6.2：deriveTitle 会话标题懒回填 ===
+// === design §3.3.6 / 问题5 修复：transcriptTextSinceLastInput 只取本轮输出 ===
+
+describe('transcriptTextSinceLastInput', () => {
+  // 构造一条 transcript 事件（与 Rust append_transcript 写入的 JSON 行对齐）。
+  function ev(event: string, payload: Record<string, unknown> = {}) {
+    return { at: '2026-06-13T00:00:00Z', event, payload };
+  }
+
+  it('单轮：input 后的 output 全部取到', () => {
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('output', { stream: 'stdout', text: '你好！' }),
+      ev('output', { stream: 'stdout', text: '有什么可以帮你？' }),
+    ];
+    expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('你好！有什么可以帮你？');
+  });
+
+  it('多轮：只取最后一个 input 之后的 output（不串历史轮次）', () => {
+    // 问题5 复现场景：第1轮「你好」→输出 A1；第2轮「你能做什么」→输出 A2。
+    // 旧 transcriptText 会拼成 A1+A2，本函数只返回 A2。
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('output', { stream: 'stdout', text: '你好！（第1轮输出）' }),
+      ev('input', { prompt: '你能做什么', kind: 'followup' }),
+      ev('output', { stream: 'stdout', text: '我能做很多事（第2轮输出）' }),
+    ];
+    const result = transcriptTextSinceLastInput(events, 'stdout');
+    expect(result).toBe('我能做很多事（第2轮输出）');
+    // 关键回归：绝不含第1轮输出。
+    expect(result).not.toContain('第1轮输出');
+  });
+
+  it('无 input 事件 → 取全部 output（向后兼容首轮 / 旧数据）', () => {
+    const events = [
+      ev('output', { stream: 'stdout', text: 'a' }),
+      ev('output', { stream: 'stdout', text: 'b' }),
+    ];
+    expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('ab');
+  });
+
+  it('input 后无 output（本轮 CLI 尚未产出）→ 返回空串', () => {
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('output', { stream: 'stderr', text: 'some warn' }),
+    ];
+    expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('');
+  });
+
+  it('按 stream 分流：stdout 不混入 stderr', () => {
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('output', { stream: 'stdout', text: 'out' }),
+      ev('output', { stream: 'stderr', text: 'err' }),
+    ];
+    expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('out');
+    expect(transcriptTextSinceLastInput(events, 'stderr')).toBe('err');
+  });
+
+  it('空数组 → 返回空串', () => {
+    expect(transcriptTextSinceLastInput([], 'stdout')).toBe('');
+  });
+
+  it('三轮场景：只取最后一轮（中间轮次与首轮都不串入）', () => {
+    const events = [
+      ev('input', { prompt: '问1' }),
+      ev('output', { stream: 'stdout', text: '答1' }),
+      ev('input', { prompt: '问2', kind: 'followup' }),
+      ev('output', { stream: 'stdout', text: '答2' }),
+      ev('input', { prompt: '问3', kind: 'followup' }),
+      ev('output', { stream: 'stdout', text: '答3' }),
+    ];
+    expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('答3');
+  });
+
+  it('问题5 回归对照：旧 transcriptText 会串轮，新函数只取本轮', () => {
+    // 问题5 根因：transcriptText 用 .join('') 拼所有 output → 多轮串成一段。
+    // transcriptTextSinceLastInput 切到最后一轮 → 一问一答。
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('output', { stream: 'stdout', text: '你好回复' }),
+      ev('input', { prompt: '你能做什么', kind: 'followup' }),
+      ev('output', { stream: 'stdout', text: '能力回复' }),
+    ];
+    expect(transcriptText(events, 'stdout')).toBe('你好回复能力回复'); // 旧行为（串轮）
+    expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('能力回复'); // 新行为（本轮）
+  });
+});
+
+
 
 describe('deriveTitle', () => {
   it('record 已有 title → 原样返回（去空白）', () => {

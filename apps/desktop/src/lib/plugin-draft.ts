@@ -174,6 +174,34 @@ export function transcriptText(events: TranscriptEvent[], stream: 'stdout' | 'st
     .trim();
 }
 
+// design §3.3.6 / 多会话 bug 修复：只拼接「最后一个 input 事件之后」的 output 事件。
+//
+// 背景：多轮对话的 transcript 是 append 的（store.rs append_transcript 把每轮 output
+// 都追加到同一个 transcripts/{sessionId}.jsonl）。Rust 端在每轮开始时写一条 input 事件
+// （code_assistant.rs:328 首轮 tool/model/prompt，:406-413 追问 prompt/kind=followup），
+// 所以「最后一个 input 事件」恰好标记本轮的起点。
+//
+// 旧的 transcriptText 用 .join('') 拼接所有 output，导致第 N 轮 finalizeSession 拿到的
+// stdout = 前 N-1 轮输出 + 本轮输出，全部塞进一个 assistant turn（用户实测现象）。
+// 本函数通过 lastIndexOf('input') 定位本轮起点，只取其后的 output，保证「一问一答」语义。
+//
+// 边界：无 input 事件（旧 transcript 或异常）→ 取全部 output（与 transcriptText 等价，向后兼容）；
+// input 后无 output（本轮 CLI 尚未产出）→ 返回空串。
+export function transcriptTextSinceLastInput(events: TranscriptEvent[], stream: 'stdout' | 'stderr') {
+  let lastInputIndex = -1;
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].event === 'input') lastInputIndex = i;
+  }
+  // 无 input 事件：退回全量拼接（向后兼容首轮异常 / 旧数据，不丢输出）。
+  const start = lastInputIndex === -1 ? 0 : lastInputIndex + 1;
+  return events
+    .slice(start)
+    .filter((event) => event.event === 'output' && event.payload?.stream === stream)
+    .map((event) => (typeof event.payload?.text === 'string' ? event.payload.text : ''))
+    .join('')
+    .trim();
+}
+
 export function transcriptDiagnostics(events: TranscriptEvent[]) {
   return events
     .filter((event) => event.event === 'error' || event.event === 'registry-cleanup' || event.event === 'input-rejected' || event.event === 'stopped' || event.event === 'multiturn-degraded')
