@@ -153,6 +153,9 @@ pub struct StartSessionInput {
     pub prompt: String,
     #[serde(alias = "systemPrompt")]
     pub system_prompt: Option<String>,
+    // R2 思考强度：claude 透传 `--effort <level>`（max/high/medium/low/none）；
+    // codex/opencode 接收但忽略。随每轮 send 传入，可在会话中途调整。
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,6 +210,9 @@ pub struct SendInputInput {
     // 对齐 AionUi「会话级记忆 + 切换立即下一轮生效」语义；claude 走 --resume <id> --model <current>，
     // 官方支持 per-invocation 覆盖（code.claude.com/docs/en/cli-reference）。
     pub model: Option<String>,
+    // R2 思考强度：追问时可覆盖首轮值，随本轮 send_input 传入。
+    // None 表示沿用 start_session 首轮值（由调用方记忆）；非空则覆盖生效（可会话中途调）。
+    pub effort: Option<String>,
 }
 
 pub fn list_tools() -> Vec<ToolAvailability> {
@@ -324,6 +330,7 @@ pub fn start_session<E: AssistantEventSink>(
         &final_prompt,
         input.model.as_deref(),
         None,
+        input.effort.as_deref(),
     ));
     let command_preview = command_preview(&command.binary, &args);
     let transcript_path = state.store.transcript_path(&session_id);
@@ -443,10 +450,13 @@ pub fn send_input<E: AssistantEventSink>(
     // 模型覆盖（design §3.3.4 会话内切模型）：追问传入的 model 优先，回退 session 首轮固化值。
     // 传入非空时同时回写到 next_session.model（记忆最后选择，关闭重开仍用切后的模型，对齐 AionUi）。
     let effective_model = input.model.as_deref().or(session.model.as_deref());
+    // R2 思考强度：前端每轮 send 均传 effort（start_session 首轮 + send_input 追问），
+    // 故直接用本轮入参值，无需在 SessionRecord 额外持久化（会话中途调即随轮次生效）。
     let args = command.args_with(definition.run_args(
         &final_prompt,
         effective_model,
         resume_id.as_deref(),
+        input.effort.as_deref(),
     ));
 
     // 追问期间 status 回到 running（design §3.3.4 状态契约），waiter 退出后再置 exited。
@@ -1928,6 +1938,7 @@ mod tests {
                 workspace_dir: Some(env!("CARGO_MANIFEST_DIR").into()),
                 prompt: "Reply with exactly: lingfang-long-session-ok".into(),
                 system_prompt: None,
+                effort: None,
             },
         )
         .expect("codex session should start");
@@ -2001,6 +2012,7 @@ mod tests {
                 workspace_dir: Some(env!("CARGO_MANIFEST_DIR").into()),
                 prompt: "Write a detailed LingFang plugin design with at least 20 sections. Do not be brief.".into(),
                 system_prompt: None,
+                effort: None,
             },
         )
         .expect("codex session should start");

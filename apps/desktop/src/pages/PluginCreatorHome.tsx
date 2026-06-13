@@ -32,9 +32,11 @@ import {
   transcriptDiagnostics,
   transcriptTextSinceLastInput,
   writeRecent,
+  type AskUserQuestion,
   type AssistantSessionRecord,
   type AssistantSessionState,
   type ConversationMeta,
+  type EffortLevel,
   type ProviderId,
   type SessionCliIdPayload,
   type SessionErrorPayload,
@@ -42,7 +44,6 @@ import {
   type SessionOutputPayload,
   type SessionStartedPayload,
   summarizeTitleLocally,
-  type TranscriptEvent,
 } from '@/lib/plugin-draft';
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -51,7 +52,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { cn } from '@/lib/utils';
 import { Bubble } from '@/components/chat/Bubble';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
-import { LiveProcess } from '@/components/chat/LiveProcess';
+import { StreamingMessage } from '@/components/chat/StreamingMessage';
 import { Composer } from '@/components/creator/Composer';
 import { ConversationRail } from '@/components/creator/ConversationRail';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
@@ -63,13 +64,17 @@ export function PluginCreatorHome() {
   const [provider, setProvider] = useState(PROVIDERS[0].id);
   const [model, setModel] = useState(PROVIDERS[0].models[0]);
   const [providers, setProviders] = useState(PROVIDERS);
+  // R2 思考强度：随每轮 send 传（start_session + send_input 都带，可会话中途调）。默认 medium。
+  const [effort, setEffort] = useState<EffortLevel>('medium');
   const [streaming, setStreaming] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   // 问题2：历史悬浮窗改居中 Dialog（自动分页=内部 ScrollArea 限高），不再用右对齐 Popover。
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
-  const [liveEvents, setLiveEvents] = useState<TranscriptEvent[]>([]);
+  // R3 流式分类：liveSegments 直接存 {stream, text}，按 stream 字段（stdout/stderr/thought/tool）分发渲染。
+  // thought/tool 走独立分类区，绝不污染 stdout（协议解析依赖，阶段1 Rust 侧已分流）。
+  const [liveSegments, setLiveSegments] = useState<Array<{ stream: 'stdout' | 'stderr' | 'thought' | 'tool'; text: string }>>([]);
   const [liveStage, setLiveStage] = useState('');
   const [liveError, setLiveError] = useState<CreatorError | null>(null);
   const [assistantSession, setAssistantSession] = useState<AssistantSessionState | null>(null);
@@ -147,7 +152,7 @@ export function PluginCreatorHome() {
     if (stickToBottomRef.current) {
       chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight });
     }
-  }, [turns.length, liveEvents, pendingUser]);
+  }, [turns.length, liveSegments, pendingUser]);
   useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
@@ -239,17 +244,25 @@ export function PluginCreatorHome() {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const text = payload.text || '';
           if (!text) return;
+          const stream = payload.stream || 'stdout';
+          // 关键约束（阶段1）：stdout/stderr 进协议聚合输入（assistantSession.stdout/stderr），
+          // thought/tool 走独立分类区，绝不污染 stdout（协议解析依赖纯 stdout 文本）。
           setAssistantSession((prev) => prev ? {
             ...prev,
-            stdout: payload.stream === 'stdout' ? tailText(prev.stdout + text) : prev.stdout,
-            stderr: payload.stream === 'stderr' ? tailText(prev.stderr + text) : prev.stderr,
+            stdout: stream === 'stdout' ? tailText(prev.stdout + text) : prev.stdout,
+            stderr: stream === 'stderr' ? tailText(prev.stderr + text) : prev.stderr,
           } : prev);
-          if (payload.stream === 'stderr') {
-            setLiveEvents((prev) => [...prev, { at: new Date().toISOString(), event: 'output', payload: { stream: 'stderr', text } }].slice(-200));
-          } else {
-            setLiveEvents((prev) => [...prev, { at: new Date().toISOString(), event: 'output', payload: { stream: 'stdout', text } }].slice(-200));
-          }
-          setLiveStage(payload.stream === 'stderr' ? '本地代码助手正在输出诊断…' : '本地代码助手正在生成…');
+          // R3：按 stream 字段分发到分类渲染（stdout/stderr/thought/tool），thought/tool 独立区域展示。
+          setLiveSegments((prev) => [...prev, { stream, text }].slice(-400));
+          // R5 stage 文案动态：思考阶段「正在思考中…」/ 文本阶段「正在生成…」/ 诊断「正在输出诊断…」。
+          // 兜底：未知 stream 归生成中。
+          setLiveStage(
+            stream === 'thought' ? '正在思考中…'
+              : stream === 'stdout' ? '正在生成…'
+                : stream === 'stderr' ? '本地代码助手正在输出诊断…'
+                  : stream === 'tool' ? '正在调用工具…'
+                    : '本地代码助手正在生成…',
+          );
         }));
         unlisteners.push(await tauriListen<SessionErrorPayload>('code-assistant://error', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
@@ -421,6 +434,8 @@ export function PluginCreatorHome() {
         tool: selectedProvider,
         model: model === 'default' ? undefined : model,
         prompt: text,
+        // R2 思考强度随首轮传入（claude 透传 --effort；codex/opencode 忽略）。
+        effort,
       },
     });
     // 新会话立即成为 activeId（listener 守卫据此路由新会话事件）。
@@ -466,7 +481,7 @@ export function PluginCreatorHome() {
     if (!text || streaming) return;
     setInput('');
     setPendingUser(text);
-    setLiveEvents([]);
+    setLiveSegments([]);
     setLiveError(null);
     setStreaming(true);
     setCloudPlugin(null);
@@ -488,8 +503,9 @@ export function PluginCreatorHome() {
       );
       try {
         // 追问传入当前选的 model（会话内切模型，下一轮生效）；Rust 优先用此值覆盖 session 固化值。
+        // R2 effort 同样随本轮传入（可会话中途调思考强度）。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: model === 'default' ? undefined : model },
+          input: { sessionId: activeSessionId, input: text, model: model === 'default' ? undefined : model, effort },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -528,6 +544,32 @@ export function PluginCreatorHome() {
     }
   }
 
+  // R4 AskUserQuestion 回答回传：用户在问题卡片选了 option 后，把答案作为下一轮 send_input 传入。
+  // 本轮按 --resume 续接（答案当普通文本），tool_use_id 精确关联留后续 stream-json input 升级。
+  // 复用 send() 的追问路径：答案文本走 input，effort/model 随当前选择器值。
+  async function handleAskUserAnswer(question: AskUserQuestion, optionLabel: string) {
+    if (!streaming) return;
+    const sessionId = activeIdRef.current;
+    if (!sessionId) return;
+    // 组合可读回答：问句 + 选项（便于上下文追溯，纯选项字面在多选语境下歧义）。
+    const answer = `${question.question}\n选择：${optionLabel}`;
+    setLiveStage('正在提交你的选择…');
+    try {
+      await tauriInvoke('code_assistant_send_input', {
+        input: {
+          sessionId,
+          input: answer,
+          model: model === 'default' ? undefined : model,
+          effort,
+        },
+      });
+      // 回答提交后新一轮 output 由既有 listener 处理；清掉本轮工具片段，避免问题卡片重复渲染。
+      setLiveSegments((prev) => prev.filter((s) => s.stream !== 'tool'));
+    } catch (error) {
+      handleMultiturnError(error);
+    }
+  }
+
   // design §3.2.6：切换会话——先落盘当前未保存草稿，再读目标 draft + 重建 assistantSession。
   // records 参数用于避免重复 list（挂载恢复时已有最新列表）。
   async function selectConversation(id: string, records?: ConversationMeta[]) {
@@ -539,7 +581,7 @@ export function PluginCreatorHome() {
       } catch { /* 落盘失败不阻断切换 */ }
     }
     setActiveIdRef(id);
-    setLiveEvents([]);
+    setLiveSegments([]);
     setLiveError(null);
     setStreaming(false);
     try {
@@ -706,7 +748,7 @@ export function PluginCreatorHome() {
     setCurrentDraft(null);
     setCloudPlugin(null);
     setPendingUser(null);
-    setLiveEvents([]);
+    setLiveSegments([]);
     setLiveStage('');
     setLiveError(null);
     setAssistantSession(null);
@@ -805,7 +847,15 @@ export function PluginCreatorHome() {
                 // design §3.3.6 (d)：降级伪多轮透明提示（codex/opencode 或 claude 缺 id）。
                 <p className="px-1 text-xs text-muted-foreground">此 CLI 不支持原生多轮，已基于历史继续生成（上下文非真复用）。</p>
               )}
-              {streaming && <LiveProcess stage={liveStage} events={liveEvents} />}
+              {streaming && (
+                <StreamingMessage
+                  stage={liveStage}
+                  segments={liveSegments}
+                  hasThought={liveSegments.some((s) => s.stream === 'thought')}
+                  hasStdout={liveSegments.some((s) => s.stream === 'stdout')}
+                  onAskUserAnswer={(question, optionLabel) => { void handleAskUserAnswer(question, optionLabel); }}
+                />
+              )}
               {!streaming && liveError && <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined} />}
             </div>
           )}
@@ -821,9 +871,11 @@ export function PluginCreatorHome() {
               providerInfo={providerInfo}
               providers={providers}
               streaming={streaming}
+              effort={effort}
               onInputChange={setInput}
               onModelChange={setModel}
               onProviderChange={setProvider}
+              onEffortChange={setEffort}
               onSend={send}
               onStop={stopCurrentSession}
             />

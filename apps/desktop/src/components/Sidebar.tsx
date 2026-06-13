@@ -1,16 +1,15 @@
 import { useState } from 'react';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
+import { AccountDialog } from '@/components/AccountDialog';
 import {
   HomeIcon,
   PackageIcon,
   SettingsIcon,
   UsersIcon,
   ChevronDownIcon,
-  LogOutIcon,
   UserRoundIcon,
   SparklesIcon,
   StoreIcon,
@@ -37,14 +36,11 @@ const ROLE_LABEL: Record<string, string> = {
   MEMBER: '成员',
 };
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return <div className="flex items-start justify-between gap-3 text-xs"><span className="shrink-0 text-muted-foreground">{label}</span><span className="break-all text-right font-mono text-popover-foreground">{value}</span></div>;
-}
-
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const { session, view, setView, setRunningPlugin, resetSession } = useApp();
+  const { session, view, setView, setRunningPlugin } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
-  const [open, setOpen] = useState(false);
+  // R6：账户信息改居中悬浮 Dialog（替代原右对齐 Popover）。
+  const [accountOpen, setAccountOpen] = useState(false);
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
 
@@ -73,29 +69,18 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         })}
       </nav>
       <div className="w-56 border-t p-2.5">
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full justify-start gap-2 px-3 py-2')}>
-            <UserRoundIcon className="size-4 shrink-0" />
-            <span className="flex-1 truncate text-left text-xs"><span className="block truncate font-medium text-foreground">{tenantLabel}</span><span className="block truncate text-muted-foreground">{roleLabel}</span></span>
-            <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
-          </PopoverTrigger>
-          <PopoverContent side="right" align="end" className="w-80">
-            <p className="font-medium text-popover-foreground">账户信息</p>
-            <div className="flex flex-col gap-1.5">
-              <InfoRow label="昵称" value={session.displayName || '—'} />
-              <InfoRow label="邮箱" value={session.email || '—'} />
-              <InfoRow label="团队" value={session.tenantName || '未加入'} />
-              <InfoRow label="角色" value={roleLabel} />
-              <InfoRow label="用户 ID" value={session.userId || '—'} />
-            </div>
-            <div className="mt-2 flex flex-col gap-1 border-t pt-2">
-              <Button variant="ghost" size="sm" className="w-full justify-start text-destructive hover:text-destructive" onClick={resetSession}>
-                <LogOutIcon className="size-4" />退出登录
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+        {/* R6：点击底部账户信息 → 居中悬浮 AccountDialog（修改用户名/密码/邮箱/登出）。 */}
+        <button
+          type="button"
+          onClick={() => setAccountOpen(true)}
+          className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full justify-start gap-2 px-3 py-2')}
+        >
+          <UserRoundIcon className="size-4 shrink-0" />
+          <span className="flex-1 truncate text-left text-xs"><span className="block truncate font-medium text-foreground">{tenantLabel}</span><span className="block truncate text-muted-foreground">{roleLabel}</span></span>
+          <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
+        </button>
       </div>
+      <AccountDialog open={accountOpen} onOpenChange={setAccountOpen} />
     </aside>
   );
 }

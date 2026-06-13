@@ -14,7 +14,16 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
     build_args,
 };
 
-fn build_args(prompt: &str, model: Option<&str>, resume_id: Option<&str>) -> Vec<String> {
+// build_args 签名与 adapters/mod.rs 的 fn 指针对齐：追加 effort（思考强度）入参。
+// - effort：claude headless 透传 `--effort <level>`（max/high/medium/low/none）；None 或空忽略。
+// - codex/opencode 无对应参数，签名对齐但忽略（统一签名解耦调用方）。
+// 设计 R2：思考强度随每轮 send 传（start_session + send_input 都带，可会话中途调）。
+fn build_args(
+    prompt: &str,
+    model: Option<&str>,
+    resume_id: Option<&str>,
+    effort: Option<&str>,
+) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         prompt.to_string(),
@@ -29,6 +38,11 @@ fn build_args(prompt: &str, model: Option<&str>, resume_id: Option<&str>) -> Vec
     // 真多轮续接：claude headless 用 `--resume <session_id>` 续接上一轮上下文。
     if let Some(id) = resume_id {
         args.extend(["--resume".to_string(), id.to_string()]);
+    }
+    // 思考强度（R2）：非空时透传 `--effort <level>`，claude 据此调节思考预算。
+    // 合法值由前端选择器收敛（max/high/medium/low/none），此处仅做去空过滤，非法值交由 CLI 自行报错。
+    if let Some(level) = effort.map(str::trim).filter(|value| !value.is_empty()) {
+        args.extend(["--effort".to_string(), level.to_string()]);
     }
     args
 }

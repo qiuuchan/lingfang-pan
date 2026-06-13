@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Info } from '../Info';
-import type { AssistantSessionState } from '@/lib/plugin-draft';
+import { capitalizeModel, type AssistantSessionState } from '@/lib/plugin-draft';
 
 export function SessionStatusPanel({ session }: { session: AssistantSessionState | null }) {
   if (!session) {
@@ -24,7 +24,7 @@ export function SessionStatusPanel({ session }: { session: AssistantSessionState
     <Card>
       <CardHeader>
         <CardTitle className="text-base">长任务</CardTitle>
-        <CardDescription className="font-mono">{session.providerLabel} · {session.model === 'default' ? '默认模型' : session.model}</CardDescription>
+        <CardDescription className="font-mono">{session.providerLabel} · {session.model === 'default' ? '默认模型' : capitalizeModel(session.model)}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div className="grid grid-cols-2 gap-2">
