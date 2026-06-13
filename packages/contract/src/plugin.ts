@@ -1,7 +1,9 @@
 // 插件与能力契约（见 docs/02 §B）。
 import { z } from 'zod';
 
-export const RuntimeType = z.enum(['client', 'cloud']);
+// 运行时类型四值：client（浏览器侧 HTML/iframe）/ cloud（云端执行）/
+// nodejs / python（脚本型，由桌面壳本地预览执行，见 R3）。
+export const RuntimeType = z.enum(['client', 'cloud', 'nodejs', 'python']);
 export type RuntimeType = z.infer<typeof RuntimeType>;
 
 export const CapabilityKind = z.enum([

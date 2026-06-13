@@ -854,19 +854,24 @@ fn spawn_waiter<E: AssistantEventSink>(
     });
 }
 
-#[derive(Debug)]
-struct CapturedOutput {
-    stdout: String,
-    stderr: String,
-    exit_code: Option<i32>,
-    timed_out: bool,
+#[derive(Debug, Clone)]
+pub(crate) struct CapturedOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
 }
 
-fn run_capture(
+/// 带超时的同步运行核心（轮询 try_wait + 超时 kill 回收）。
+/// env: None 表示继承全量环境变量（code_assistant CLI 原行为，保持不变）；
+///      Some 表示显式白名单环境变量（plugin_script 预览执行用，避免泄漏宿主 token）。
+/// 抽取为 pub(crate) 以供 plugin_script::run_plugin_script 复用同一套轮询/超时/回收逻辑。
+pub(crate) fn run_captured_inner(
     binary: &PathBuf,
     args: Vec<String>,
     workspace_dir: Option<&str>,
     timeout_ms: u64,
+    env: Option<&[(std::ffi::OsString, std::ffi::OsString)]>,
 ) -> Result<CapturedOutput, String> {
     let mut command = Command::new(binary);
     command
@@ -876,6 +881,12 @@ fn run_capture(
         .stderr(Stdio::piped());
     if let Some(workspace_dir) = workspace_dir {
         command.current_dir(workspace_dir);
+    }
+    if let Some(env) = env {
+        command.env_clear().envs(
+            env.iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
     }
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let started = Instant::now();
@@ -907,6 +918,29 @@ fn run_capture(
     }
 }
 
+/// 带超时的同步运行（继承全量环境变量）。
+/// 仅供 code_assistant CLI 流程使用；plugin_script 预览执行请用 run_capture_with_env。
+fn run_capture(
+    binary: &PathBuf,
+    args: Vec<String>,
+    workspace_dir: Option<&str>,
+    timeout_ms: u64,
+) -> Result<CapturedOutput, String> {
+    run_captured_inner(binary, args, workspace_dir, timeout_ms, None)
+}
+
+/// 带超时的同步运行（最小白名单环境变量）。
+/// 供 plugin_script::run_plugin_script 复用：避免把宿主 LINGFANG_TOKEN / CLI key 泄漏到用户脚本。
+pub(crate) fn run_capture_with_env(
+    binary: &PathBuf,
+    args: Vec<String>,
+    workspace_dir: Option<&str>,
+    timeout_ms: u64,
+    env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> Result<CapturedOutput, String> {
+    run_captured_inner(binary, args, workspace_dir, timeout_ms, Some(&env))
+}
+
 fn find_command(candidates: &[ToolCommand]) -> Option<ResolvedToolCommand> {
     for candidate in candidates {
         if let Some(binary) = find_binary(candidate.binary) {
@@ -931,7 +965,9 @@ fn candidate_labels(candidates: &[ToolCommand]) -> Vec<String> {
         .collect()
 }
 
-fn find_binary(candidate: &str) -> Option<PathBuf> {
+/// 跨平台 PATH 探测候选二进制，Windows 自动补 .exe。
+/// pub(crate) 供 plugin_script::probe_script_runtime 复用（探测 node/py/python）。
+pub(crate) fn find_binary(candidate: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let full = dir.join(candidate);
@@ -964,7 +1000,9 @@ fn redact_arg(arg: &str) -> String {
     }
 }
 
-fn resolve_workspace(workspace_dir: Option<String>) -> Result<String, String> {
+/// workspace 目录校验 + canonicalize（防符号链接逃逸）。
+/// pub(crate) 供 plugin_script::run_plugin_script 复用其 canonicalize 逻辑。
+pub(crate) fn resolve_workspace(workspace_dir: Option<String>) -> Result<String, String> {
     let path = workspace_dir
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)

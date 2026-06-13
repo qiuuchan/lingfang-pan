@@ -56,6 +56,8 @@ enum PluginStatus {
 enum PluginRuntimeType {
   CLIENT
   CLOUD
+  NODEJS
+  PYTHON
 }
 
 enum PluginVisibility {
