@@ -71,13 +71,13 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
           <PlusIcon className="size-3.5" />新对话
         </Button>
       </div>
-      {/* 会话列表：ScrollArea 限高，内容多时可滚动（问题1：历史记录悬浮窗内部可滚动）。 */}
-      <ScrollArea className="max-h-[60vh]">
+      {/* 会话列表：ScrollArea 限高分页，内容多时可滚动（自动分页效果）。 */}
+      <ScrollArea className="max-h-[70vh] min-h-[120px]">
         <div className="p-2">
           {sorted.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">还没有对话，点击上方「新对话」开始。</p>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col gap-2">
               {sorted.map((meta) => {
                 const active = meta.sessionId === activeId;
                 const title = deriveTitle(meta);
@@ -94,8 +94,10 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
                         }
                       }}
                       className={cn(
-                        'group flex cursor-pointer flex-col gap-1 rounded-lg px-2.5 py-2 text-sm transition-colors',
-                        active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted',
+                        'group flex cursor-pointer flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-sm transition-colors',
+                        active
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                          : 'border-border bg-card hover:border-primary/40 hover:bg-accent/40',
                       )}
                     >
                       {/* 标题行（或重命名输入框） */}
@@ -113,31 +115,27 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
                         />
                       ) : (
                         <div className="flex items-center gap-2">
-                          <MessageSquareIcon className="size-3.5 shrink-0 opacity-70" />
-                          <span className={cn('truncate', active ? 'text-primary-foreground' : 'text-foreground')}>
-                            {title.length > 24 ? `${title.slice(0, 24)}…` : title}
+                          <MessageSquareIcon className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
+                          <span className={cn('truncate font-medium', active ? 'text-primary' : 'text-foreground')}>
+                            {title}
                           </span>
                         </div>
                       )}
                       {/* 元信息行：tool Badge + 相对时间 */}
                       <div className="flex items-center justify-between gap-2 pl-5">
-                        <Badge
-                          variant={active ? 'outline' : 'secondary'}
-                          className={cn('h-4 px-1.5 text-[10px] font-normal', active && 'border-primary-foreground/40 text-primary-foreground')}
-                        >
+                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-normal text-muted-foreground">
                           {providerLabel(meta.tool)}
                         </Badge>
-                        <span className={cn('text-[10px]', active ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                        <span className="text-[10px] text-muted-foreground">
                           {relativeTime(meta.draftUpdatedAt || meta.startedAt)}
                         </span>
                       </div>
                       {/* 悬浮操作：重命名 / 删除（active 态常驻可见） */}
                       {renamingId !== meta.sessionId && (
-                        <div className={cn('flex items-center gap-1 pl-5', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
+                        <div className={cn('flex items-center gap-0.5 pl-5', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            className={cn(active ? 'hover:bg-primary-foreground/15' : '')}
                             onClick={(e) => { e.stopPropagation(); startRename(meta); }}
                             title="重命名"
                           >
@@ -146,7 +144,7 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            className={cn(active ? 'hover:bg-primary-foreground/15' : 'hover:text-destructive')}
+                            className="hover:text-destructive"
                             onClick={(e) => { e.stopPropagation(); onDelete(meta.sessionId); }}
                             title="删除"
                           >

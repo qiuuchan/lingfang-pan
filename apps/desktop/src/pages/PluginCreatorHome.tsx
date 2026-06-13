@@ -5,6 +5,7 @@ import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import {
   deleteConversation,
+  generateTitle,
   listConversations,
   readActiveId,
   readDraft,
@@ -106,6 +107,8 @@ export function PluginCreatorHome() {
   const manifest = useMemo(() => parseManifest(files), [files]);
   const status = currentDraft?.status;
   const diagnostics = currentDraft?.diagnostics || [];
+  // 当前活动会话标题（AI 总结首轮后生成，显示在顶部「插件创建」旁）。
+  const activeConversationTitle = activeId ? (metas.find((m) => m.sessionId === activeId)?.title || '') : '';
   const activeContent = files.find((file) => file.path === activeFile)?.content || '';
   const hasConversation = turns.length > 0 || Boolean(pendingUser) || streaming || Boolean(liveError);
   // design §3.3.2：预览按钮启用条件——当前会话有结构化草稿（files 非空）。
@@ -351,6 +354,25 @@ export function PluginCreatorHome() {
         setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, draftUpdatedAt: new Date().toISOString(), status: finalSession.status } : m));
       } catch {
         // 落盘失败不阻断对话流程（本地磁盘异常仅静默，历史仍在 transcripts/{id}.jsonl）。
+      }
+
+      // AI 标题生成（首轮 + 当前会话尚无 title）：用 CLI 总结对话主题，rename + 更新 metas 与顶部。
+      // 失败静默（deriveTitle 启发式兜底）；后台跑不阻塞 toast。
+      const currentMeta = metas.find((m) => m.sessionId === sessionId);
+      if (!isFollowup && !currentMeta?.title && promptText && finalSession.stdout) {
+        const userText = promptText;
+        const assistantText = finalSession.stdout;
+        const tool = (finalSession.provider || provider) as 'claude' | 'codex' | 'opencode';
+        void generateTitle({ tool, model: finalSession.model, userText, assistantText }).then(async (title) => {
+          if (!title) return;
+          try {
+            await renameConversation(sessionId, title);
+            setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
+          } catch {
+            /* rename 失败静默，标题仅停留在内存 metas */
+            setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
+          }
+        });
       }
 
       // toast 文案分场景：结构化走「完成」语义；纯对话态走「已完成对话」，避免 invalid 误报。
@@ -708,7 +730,14 @@ export function PluginCreatorHome() {
         <div className="flex shrink-0 items-center justify-between gap-3 border-b pl-16 pr-4 py-3">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <SparklesIcon className="size-4 shrink-0 text-primary" />
-            <span className="truncate">插件创建</span>
+            <span className="shrink-0">插件创建</span>
+            {/* AI 总结的当前会话标题（首轮后自动生成），显示在「插件创建」旁。 */}
+            {activeConversationTitle && (
+              <>
+                <span className="text-muted-foreground/50">/</span>
+                <span className="truncate text-muted-foreground">{activeConversationTitle}</span>
+              </>
+            )}
             {status && <Badge variant={status === 'ready' ? 'default' : status === 'invalid' ? 'destructive' : 'secondary'}>{STATUS_LABEL[status] || status}</Badge>}
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -833,7 +862,7 @@ export function PluginCreatorHome() {
       />
       {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-w-md gap-0 p-0">
+        <DialogContent className="max-w-lg gap-0 p-0">
           <DialogHeader className="border-b px-4 py-3">
             <DialogTitle className="text-base">历史对话</DialogTitle>
           </DialogHeader>
