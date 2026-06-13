@@ -16,6 +16,166 @@ export const PROVIDERS = [
 
 export type ProviderId = 'claude' | 'codex' | 'opencode';
 
+// R2 思考强度：claude --effort 取值；codex/opencode 无对应参数（忽略）。
+// 「不思考」对应 none（关闭思考），medium 为默认推荐档。
+export type EffortLevel = 'max' | 'high' | 'medium' | 'low' | 'none';
+
+export const EFFORT_LEVELS: EffortLevel[] = ['max', 'high', 'medium', 'low', 'none'];
+
+export const EFFORT_LABEL: Record<EffortLevel, string> = {
+  max: '极致思考',
+  high: '深度思考',
+  medium: '标准思考',
+  low: '轻量思考',
+  none: '不思考',
+};
+
+// R1 模型名首字母大写：UI 显示层把小写 id（sonnet/opus/haiku/fable…）转为首字母大写。
+// 仅做首字符大写、其余保持原样（适配 gpt-5.1-codex 这类带连字符的复合 id 不误伤）。
+// default 等占位值原样返回（由调用方另显示「默认模型」）。
+export function capitalizeModel(id: string | null | undefined): string {
+  if (!id) return '';
+  if (id === 'default') return '默认模型';
+  const trimmed = id.trim();
+  if (!trimmed) return '';
+  const first = trimmed.charAt(0);
+  const rest = trimmed.slice(1);
+  // 仅对 ASCII 字母首字符做 toUpperCase（中文/数字首字符保持原样）。
+  return (first >= 'a' && first <= 'z' ? first.toUpperCase() : first) + rest;
+}
+
+// === R3/R4 流式分类渲染：工具卡片 / AskUserQuestion 解析 ===
+//
+// Rust spawn_reader 把 claude stream-json 的工具内容走独立 'tool' 流，每条文本形如：
+//   "AskUserQuestion {\"questions\":[...]}"（content_block_start，name 已知）
+//   "{\"path\":\"b"（input_json_delta 增量，name 为空，累积 JSON 片段）
+// 工具流是「逐片段」的，前端需要：累积同一工具的 input 片段 → JSON.parse → 判定是否 AskUserQuestion。
+// 本轮简化：把收到的 tool 片段按「name 头 + input 累积」聚合，AskUserQuestion 单独抽 questions。
+
+// 单个工具卡片视图模型：name + 累积后的 input（字符串原文，渲染时按需 JSON 格式化）。
+export interface ToolCardView {
+  // 工具名（input_json_delta 增量无 name，聚合时沿用同卡片的已知 name）。
+  name: string;
+  // 累积的入参 JSON 文本（可能仍是不完整片段，渲染兜底按字符串展示）。
+  inputText: string;
+}
+
+// AskUserQuestion 单问题模型（对齐 claude AskUserQuestion 工具的 questions[].options[]）。
+export interface AskUserOption {
+  label: string;
+  description?: string;
+}
+export interface AskUserQuestion {
+  question: string;
+  header?: string;
+  options: AskUserOption[];
+}
+
+// 从一段 tool 流文本中解析出 (name, inputJson 片段)。
+// 格式约定（spawn_reader 产出）：
+//   - content_block_start：有 name 头，形如 "Read {json}" 或裸 "Read"（input 为空时）。
+//   - input_json_delta：name 为空，文本为原始 partial_json 片段（可能不以 { 开头，如 ".ts"}" 续片）。
+// 判定 name 头的稳健规则：必须形如「标识符 + 至少一个空白 + 余下」才认作 name 头；
+// 否则一律视为纯 input 片段（name 为空），避免把 ".ts"}" 这类续片误判为新工具名。
+export function splitToolText(text: string): { name: string; jsonPart: string } {
+  const trimmed = text.trimStart();
+  if (!trimmed) return { name: '', jsonPart: '' };
+  // 标识符头（字母/下划线开头）+ 空白 + 余下非空 → 拆 name。
+  const headerMatch = trimmed.match(/^([A-Za-z_]\w*)\s+(\S[\s\S]*)$/);
+  if (headerMatch) {
+    return { name: headerMatch[1], jsonPart: headerMatch[2].trim() };
+  }
+  // 纯标识符头无余下（content_block_start 的空 input，如裸 "Read"）：仅当整体是单个标识符时认作 name。
+  const bareMatch = trimmed.match(/^([A-Za-z_]\w*)$/);
+  if (bareMatch) {
+    return { name: bareMatch[1], jsonPart: '' };
+  }
+  // 其余（{json、续片 .ts"} 等）：name 为空，整体当 input 片段。
+  return { name: '', jsonPart: trimmed };
+}
+
+// 把 tool 流片段数组聚合为工具卡片视图（按到达顺序，input 累积同名/相邻卡片）。
+// 聚合策略：遇到带 name 的片段开启新卡片（name 非空）；无 name 的片段 append 到最近一张卡片的 input。
+// 首片无 name（极少见）时建一张空名卡片兜底。
+export function aggregateToolCards(segments: string[]): ToolCardView[] {
+  const cards: ToolCardView[] = [];
+  for (const seg of segments) {
+    const { name, jsonPart } = splitToolText(seg);
+    if (name) {
+      cards.push({ name, inputText: jsonPart });
+    } else if (cards.length) {
+      // 纯 input 增量：拼到最近一张卡片（content_block_start 后跟若干 input_json_delta）。
+      cards[cards.length - 1].inputText += jsonPart;
+    } else if (jsonPart) {
+      // 兜底：无 name 头却有 input（异常形态），建空名卡片承载。
+      cards.push({ name: '', inputText: jsonPart });
+    }
+  }
+  return cards;
+}
+
+// 从工具卡片列表中提取所有 AskUserQuestion 的 questions（R4 问题卡片数据源）。
+// inputText 可能是不完整 JSON：解析失败静默跳过（等后续增量补全后下一帧再解析）。
+// 成功解析且含 questions 数组才产出，避免普通工具调用被误判为提问。
+export function extractAskUserQuestions(cards: ToolCardView[]): AskUserQuestion[] {
+  const out: AskUserQuestion[] = [];
+  for (const card of cards) {
+    if (card.name !== 'AskUserQuestion') continue;
+    if (!card.inputText) continue;
+    try {
+      const parsed = JSON.parse(card.inputText) as { questions?: unknown };
+      if (Array.isArray(parsed.questions)) {
+        for (const q of parsed.questions) {
+          if (q && typeof q === 'object') {
+            const question = typeof (q as { question?: unknown }).question === 'string'
+              ? String((q as { question?: string }).question)
+              : '';
+            const header = typeof (q as { header?: unknown }).header === 'string'
+              ? String((q as { header?: string }).header)
+              : undefined;
+            const rawOptions = (q as { options?: unknown }).options;
+            const options: AskUserOption[] = Array.isArray(rawOptions)
+              ? rawOptions
+                  .map((o) => {
+                    if (typeof o === 'string') return { label: o } as AskUserOption;
+                    if (o && typeof o === 'object') {
+                      const label = (o as { label?: unknown }).label;
+                      const description = (o as { description?: unknown }).description;
+                      return {
+                        label: typeof label === 'string' ? label : String(label ?? ''),
+                        description: typeof description === 'string' ? description : undefined,
+                      } as AskUserOption;
+                    }
+                    return null;
+                  })
+                  .filter((o): o is AskUserOption => Boolean(o && o.label))
+              : [];
+            // 仅保留有可选项的问题（2-4 项约定，但这里宽松收集，渲染层不强制上限）。
+            if (question && options.length) {
+              out.push({ question, header, options });
+            }
+          }
+        }
+      }
+    } catch {
+      // input 仍在累积中（片段 JSON），跳过等下一帧。
+    }
+  }
+  return out;
+}
+
+// 把任意工具卡片的 input 文本安全格式化为可展示字符串：
+// 能 JSON.parse 则 pretty print，否则原样返回（增量未闭合场景兜底）。
+export function formatToolInput(inputText: string): string {
+  const trimmed = inputText.trim();
+  if (!trimmed) return '';
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return trimmed;
+  }
+}
+
 export interface CliProbeResult {
   tool: ProviderId;
   model?: string | null;
@@ -99,7 +259,9 @@ export interface SessionStartedPayload {
 
 export interface SessionOutputPayload {
   sessionId: string;
-  stream?: 'stdout' | 'stderr';
+  // stream 字段：R3 流式分类——stdout（正文文本，协议解析依赖）/ stderr（诊断）/
+  // thought（思考增量，不进 stdout）/ tool（工具调用卡片，含 AskUserQuestion，不进 stdout）。
+  stream?: 'stdout' | 'stderr' | 'thought' | 'tool';
   text?: string;
 }
 
