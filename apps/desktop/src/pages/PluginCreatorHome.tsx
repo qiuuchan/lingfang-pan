@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { PanelRightOpenIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
+import { PLUGIN_CREATOR_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
 import {
   EXAMPLES,
   PROVIDERS,
@@ -237,7 +238,7 @@ export function PluginCreatorHome() {
     const selectedProvider = provider as ProviderId;
     pendingPromptRef.current = { text, providerLabel: providerInfo.label, model };
     try {
-      const systemPrompt = '请基于以下需求创建一个 LingFang 插件草稿。请给出插件目标、核心交互、文件结构和关键实现建议。';
+      const systemPrompt = PLUGIN_CREATOR_SYSTEM_PROMPT;
       const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
         input: {
           tool: selectedProvider,
