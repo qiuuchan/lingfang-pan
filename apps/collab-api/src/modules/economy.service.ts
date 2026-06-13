@@ -13,12 +13,21 @@ export class EconomyService {
   ) {}
 
   // 注册赠送 ¥10（1000 分）：首次访问钱包时 upsert，不改 auth.service 的注册流程。
+  // 同步写入 signup_bonus CREDIT 流水，保持与旧 Rust 经济系统一致（verify-economy.ps1 断言该流水存在）。
   async ensureWallet(userId: string) {
-    return this.prisma.wallet.upsert({
+    const wallet = await this.prisma.wallet.upsert({
       where: { userId },
       update: {},
       create: { userId, balanceCents: SIGNUP_BONUS_CENTS },
     });
+    // 幂等：仅当尚无 signup_bonus 流水时补写一条 CREDIT，不依赖 upsert 是否实际新增。
+    const existing = await this.prisma.walletTransaction.findFirst({ where: { userId, reason: 'signup_bonus' } });
+    if (!existing) {
+      await this.prisma.walletTransaction.create({
+        data: { userId, amountCents: SIGNUP_BONUS_CENTS, direction: 'CREDIT', reason: 'signup_bonus' },
+      });
+    }
+    return wallet;
   }
 
   async getWallet(userId: string) {
