@@ -187,6 +187,16 @@ fn code_assistant_read_draft(
     code_assistant::read_draft(&state, input)
 }
 
+/// 扫描 sandbox 目录收成结构化文件列表（方案A：claude 用 Write 工具把插件文件写到 workspace，
+/// CLI 跑完后 Rust 扫描目录产出 files 供前端构建 PluginDraft）。
+#[tauri::command]
+fn code_assistant_scan_workspace(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::ScanWorkspaceInput,
+) -> Result<Vec<code_assistant::DraftFileJson>, String> {
+    code_assistant::scan_workspace_files(&state, input)
+}
+
 /// 定位内置插件目录：开发态用源码路径，打包态用资源目录。
 fn builtin_dir(app: &tauri::App) -> PathBuf {
     // 开发态：CARGO_MANIFEST_DIR/../builtin-plugins
@@ -242,6 +252,7 @@ fn main() {
             code_assistant_delete_session,
             code_assistant_save_draft,
             code_assistant_read_draft,
+            code_assistant_scan_workspace,
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script
         ])

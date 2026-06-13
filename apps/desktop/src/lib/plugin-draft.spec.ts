@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildDraftFromSandboxFiles,
   buildFallbackEntryHtml,
   buildLocalDraft,
   cleanPathFrontend,
@@ -9,6 +10,7 @@ import {
   makeConversationTurn,
   mergeConversationTurn,
   mergeFollowupDraft,
+  mergeFollowupDraftWithSandbox,
   normalizeCapabilities,
   normalizeTurns,
   parseStructuredPackage,
@@ -495,6 +497,156 @@ describe('mergeFollowupDraft', () => {
       '```',
     ].join('\n')), '追问');
     expect(merged.diagnostics.length).toBeGreaterThan(baseDiag);
+  });
+});
+
+// === 方案A：sandbox 扫描结果构建草稿（claude 用 Write 工具写文件到 workspace） ===
+//
+// buildDraftFromSandboxFiles / mergeFollowupDraftWithSandbox：
+// files 数据源是 Rust scan_workspace_files 扫描磁盘的结果（非 stdout 围栏块）。
+// 覆盖：正常扫描（manifest.json + ui/index.html）、无 manifest.json 返回 null、entry 缺失兜底、
+// 追问迭代（sandbox 新产出覆盖）、追问空产出保留上轮文件。
+
+describe('buildDraftFromSandboxFiles', () => {
+  it('扫描到 manifest.json + entry → status ready，files 来自磁盘', () => {
+    // claude 典型产出：manifest.json + ui/index.html，扫描结果直接构造成草稿。
+    const draft = buildDraftFromSandboxFiles({
+      prompt: '做一个番茄钟',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith('插件已生成。'),
+      files: [
+        { path: 'manifest.json', content: '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html" }' },
+        { path: 'ui/index.html', content: '<div>番茄钟</div>' },
+      ],
+    });
+    expect(draft).not.toBeNull();
+    expect(draft!.status).toBe('ready');
+    // manifest.json 收敛后放首位。
+    expect(draft!.files[0].path).toBe('manifest.json');
+    // entry 文件保留扫描原文。
+    expect(draft!.files.find((f) => f.path === 'ui/index.html')?.content).toContain('番茄钟');
+  });
+
+  it('扫描无 manifest.json → 返回 null（调用方回退对话 / 围栏块）', () => {
+    // 纯对话或 claude 未写 manifest.json：无法识别为插件包，返回 null。
+    const draft = buildDraftFromSandboxFiles({
+      prompt: '你好',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith('你好！'),
+      files: [{ path: 'readme.txt', content: 'hi' }],
+    });
+    expect(draft).toBeNull();
+  });
+
+  it('扫描仅有 manifest.json 无 entry → 补兜底预览页 + status partial', () => {
+    // claude 偶尔只写 manifest.json 漏 entry 文件：补兜底页保证可预览。
+    const draft = buildDraftFromSandboxFiles({
+      prompt: '做一个番茄钟',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith(''),
+      files: [{ path: 'manifest.json', content: '{ "id": "p", "name": "番茄钟", "entry": "ui/index.html" }' }],
+    });
+    expect(draft).not.toBeNull();
+    expect(draft!.status).toBe('partial');
+    // 兜底页被注入到 entry 路径。
+    expect(draft!.files.find((f) => f.path === 'ui/index.html')?.content).toContain('番茄钟');
+  });
+
+  it('manifest.json 非法 JSON → 补 schema 诊断，仍兜底构造（不丢产出）', () => {
+    // manifest.json 内容非 JSON：解析失败但仍构造草稿（兜底补全字段），status partial。
+    const draft = buildDraftFromSandboxFiles({
+      prompt: '做一个番茄钟',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith(''),
+      files: [
+        { path: 'manifest.json', content: 'not json' },
+        { path: 'ui/index.html', content: '<div></div>' },
+      ],
+    });
+    expect(draft).not.toBeNull();
+    expect(draft!.status).toBe('partial');
+    expect(draft!.diagnostics.some((d) => d.stage === 'schema' && d.message.includes('manifest'))).toBe(true);
+  });
+
+  it('capabilities 收敛为合法对象数组（不漏裸 code-assistant）', () => {
+    // manifest 写了裸 code-assistant 字符串数组：normalizeCapabilities 兜底为合法对象数组。
+    const draft = buildDraftFromSandboxFiles({
+      prompt: '做一个插件',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith(''),
+      files: [
+        { path: 'manifest.json', content: '{ "id": "p", "name": "P", "capabilities": ["code-assistant"] }' },
+        { path: 'ui/index.html', content: '<div></div>' },
+      ],
+    });
+    expect(draft).not.toBeNull();
+    const manifestFile = draft!.files.find((f) => f.path === 'manifest.json');
+    const manifest = JSON.parse(manifestFile!.content);
+    // 收敛后 capabilities 是合法对象数组，kind 在白名单（绝不裸 code-assistant）。
+    expect(Array.isArray(manifest.capabilities)).toBe(true);
+    expect(manifest.capabilities.length).toBeGreaterThan(0);
+    expect(manifest.capabilities[0].kind).not.toBe('code-assistant');
+  });
+});
+
+describe('mergeFollowupDraftWithSandbox', () => {
+  // 构造一个首轮 draft（已含 manifest + entry 文件 + 2 turns）。
+  function firstRoundDraft() {
+    return buildDraftFromSandboxFiles({
+      prompt: '做一个番茄钟',
+      providerLabel: 'Claude Code',
+      model: 'sonnet',
+      result: probeWith('已生成。'),
+      files: [
+        { path: 'manifest.json', content: '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html" }' },
+        { path: 'ui/index.html', content: '<div>番茄钟 v1</div>' },
+      ],
+    })!;
+  }
+
+  it('追问 sandbox 新产出覆盖 prev.files（迭代）', () => {
+    const prev = firstRoundDraft();
+    const merged = mergeFollowupDraftWithSandbox(prev, probeWith('已更新'), '把按钮改红', [
+      { path: 'manifest.json', content: '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html" }' },
+      { path: 'ui/index.html', content: '<div>番茄钟 v2 红色按钮</div>' },
+    ]);
+    // entry 文件被追问产出覆盖为 v2。
+    expect(merged.files.find((f) => f.path === 'ui/index.html')?.content).toContain('v2 红色按钮');
+    expect(merged.status).toBe('ready');
+  });
+
+  it('追问 sandbox 空（仅 manifest.json 无源码）→ 保留上轮文件 + partial', () => {
+    // 追问未改文件（sandbox 仅 manifest.json）：保留上轮 entry 文件，status partial。
+    const prev = firstRoundDraft();
+    const merged = mergeFollowupDraftWithSandbox(prev, probeWith('已确认'), '确认', [
+      { path: 'manifest.json', content: '{ "id": "pomodoro", "name": "番茄钟" }' },
+    ]);
+    expect(merged.files.find((f) => f.path === 'ui/index.html')?.content).toContain('v1');
+    expect(merged.status).toBe('partial');
+  });
+
+  it('追问在既有 draft 上累积 turns（+2）', () => {
+    const prev = firstRoundDraft();
+    const baseTurns = prev.turns.length;
+    const merged = mergeFollowupDraftWithSandbox(prev, probeWith('已更新'), '把按钮改红', [
+      { path: 'manifest.json', content: '{ "id": "pomodoro", "name": "番茄钟", "entry": "ui/index.html" }' },
+      { path: 'ui/index.html', content: '<div>v2</div>' },
+    ]);
+    expect(merged.turns.length).toBe(baseTurns + 2);
+  });
+
+  it('prev.id 保持稳定（同一插件跨轮迭代）', () => {
+    const prev = firstRoundDraft();
+    const prevId = prev.id;
+    const merged = mergeFollowupDraftWithSandbox(prev, probeWith(''), '追问', [
+      { path: 'manifest.json', content: '{}' },
+    ]);
+    expect(merged.id).toBe(prevId);
   });
 });
 

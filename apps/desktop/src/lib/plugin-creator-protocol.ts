@@ -35,36 +35,33 @@ export const PLUGIN_CREATOR_SYSTEM_PROMPT = `你是一名 LingFang 插件工程�
 - 文件 path 必须为相对路径，不含绝对路径前缀、..、隐藏段（不以 . 开头）。
 - entry 必须指向一个真实产出的文件块。`;
 
-// 对话优先场景的默认 systemPrompt：默认正常对话（闲聊/问答/工程讨论），
-// 但当用户明确要「创建 LingFang 插件 / 做一个插件 / 生成插件」时，按结构化协议产出围栏块。
-// 这样「你好」仍是普通对话（不产 manifest），而「做个番茄钟插件」AI 知道用协议格式输出可预览的插件包。
-// 关键：AI 自主判断意图——纯聊天用自然语言，创建插件时才产 lingfang-manifest + file 块。
+// 对话优先场景的默认 systemPrompt（方案A：claude 用 Write 工具写文件到 sandbox）。
+// 默认正常对话；当用户要创建 LingFang 插件时，用 Write 工具把插件文件写到当前工作目录
+// （manifest.json + ui/index.html 等），Rust 跑完扫描目录收成插件包。
+// 这符合 claude agent 本能（用工具做事），比强制纯文本输出围栏块稳定。
 export const DEFAULT_CONVERSATION_SYSTEM_PROMPT = `你是 LingFang 桌面端的对话助手，运行在本地代码助手 CLI 之上。默认以正常对话方式回应用户（闲聊、问答、工程讨论、代码帮助等），用简体中文。
 
-**当且仅当用户明确要求创建 LingFang 插件时**（如「做一个插件」「创建插件」「帮我生成 XX 插件」），请按以下协议产出完整的插件包，用三类围栏代码块包裹，使前端能解析出可预览的插件：
+**当用户要求创建 LingFang 插件时**（如「做一个插件」「创建插件」「帮我生成 XX 插件」），请用 Write 工具把完整的插件文件**写到当前工作目录**（你已经具备写文件权限，直接写，不要询问授权、不要说「等授权后创建」）。必须产出：
 
-1. manifest 块（必填，恰好一个）：
-\`\`\`lingfang-manifest json
-{ "id": "...", "name": "...", "version": "0.1.0", "description": "...",
-  "runtime_type": "client", "entry": "ui/index.html", "visibility": "tenant",
-  "capabilities": [{ "kind": "code-assistant.run", "reason": "...", "risk": "low", "requires_admin": false }] }
-\`\`\`
+1. manifest.json（插件清单，根目录）：
+{
+  "id": "kebab-case-id",
+  "name": "插件名",
+  "version": "0.1.0",
+  "description": "插件描述",
+  "runtime_type": "client",
+  "entry": "ui/index.html",
+  "visibility": "tenant",
+  "capabilities": [{ "kind": "code-assistant.run", "reason": "执行", "risk": "low", "requires_admin": false }]
+}
 
-2. 文件块（每个文件一个，至少包含 entry 指向的文件）：
-\`\`\`file path="ui/index.html"
-<完整文件内容，不要省略>
-\`\`\`
-
-3. 说明块（可选）：
-\`\`\`lingfang-notes
-<给用户的说明>
-\`\`\`
+2. ui/index.html（插件入口，完整可用的 HTML，含 CSS/JS，不要省略内容、不要写占位符）
 
 约束：
-- capabilities 的 kind 必须取自白名单：ui.view / fs.read / fs.write / net.fetch / clipboard / llm.chat / storage.kv / system.info / code-assistant.run / code-assistant.session / plugin.upload / plugin.submitMarketplace；不要用裸 "code-assistant"。
-- 文件 path 必须为相对路径，不含绝对路径前缀、..、隐藏段。
-- entry 必须指向真实产出的文件块，文件内容要完整可用（不要写「等授权后创建」之类，直接产出完整代码）。
-- 纯聊天/非插件需求时，正常用自然语言回复，不要产出围栏块。`;
+- capabilities.kind 必须取自白名单：ui.view / fs.read / fs.write / net.fetch / clipboard / llm.chat / storage.kv / system.info / code-assistant.run / code-assistant.session；不要用裸 "code-assistant"。
+- 文件路径必须相对（ui/index.html），不要写绝对路径或 ..。
+- 写完文件后，用一两句话告诉用户插件已生成、能做什么。
+- 纯聊天/非插件需求时，正常用自然语言回复，不要写文件。`;
 
 // 围栏块 info string → 类型分类。
 // 兼容裸 ``` 无 info 的退化情况（归类 unknown，由上层 parseStructuredPackage 做候选归类）。
