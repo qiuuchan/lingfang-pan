@@ -135,6 +135,7 @@ export const STATUS_LABEL: Record<string, string> = {
   invalid: '含校验问题',
   generating: '生成中',
   published: '已发布',
+  chat: '对话', // 纯对话态（无插件草稿），对话完成后标记，避免一直显示"生成中"。
 };
 
 const LOCAL_DRAFT_ENTRY = 'ui/index.html';
@@ -750,11 +751,11 @@ export function makeConversationTurn(userPrompt: string, assistantText: string):
   ];
 }
 
-// 首轮纯对话态草稿：无 files/manifest，仅 turns=[u,a]，status='generating'。
+// 首轮纯对话态草稿：无 files/manifest，仅 turns=[u,a]，status='chat'（已完成对话，非"生成中"）。
 export function makeConversationDraft(userPrompt: string, assistantText: string): PluginDraft {
   return {
     id: `conversation-${Date.now()}`,
-    status: 'generating',
+    status: 'chat',
     files: [],
     turns: makeConversationTurn(userPrompt, assistantText),
     diagnostics: [],
@@ -767,7 +768,7 @@ export function mergeConversationTurn(prev: PluginDraft, userPrompt: string, ass
   const now = new Date().toISOString();
   return {
     ...prev,
-    status: 'generating',
+    status: 'chat',
     files: prev.files,
     turns: normalizeTurns([
       ...prev.turns,
