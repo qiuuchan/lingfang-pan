@@ -147,7 +147,7 @@ export function ScriptPreviewPanel({
           </div>
           {sourceView && entryFile && (
             <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground">入口文件 {manifest.entry}（只读，未执行）</div>
+              <div className="text-xs text-muted-foreground">入口文件 {manifest.entry}（只读，未运行）</div>
               <pre className="scrollbar-thin max-h-72 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">{entryFile.content}</pre>
             </div>
           )}
@@ -193,7 +193,7 @@ export function ScriptPreviewPanel({
         {/* 运行结果：成功展示终端输出；失败展示 ErrorBubble */}
         {run.status === 'idle' && (
           <div className="flex h-40 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
-            点击「运行」预览执行结果（无参数一次性运行，默认 15s 超时）。
+            点击「运行」预览执行结果（无参数一次性运行，默认 15 秒超时）。
           </div>
         )}
         {run.status === 'running' && (
@@ -204,11 +204,11 @@ export function ScriptPreviewPanel({
         {run.status === 'done' && (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
-              <span>退出码：<span className={run.exitCode === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>{run.exitCode ?? '未知'}</span></span>
+              <span>运行结果：<span className={run.exitCode === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>{run.exitCode ?? '未知'}</span></span>
             </div>
             <pre className="scrollbar-thin max-h-64 overflow-auto rounded-lg bg-[#0d1117] p-3 font-mono text-xs leading-relaxed text-[#e6edf3] whitespace-pre-wrap break-words">
-              {run.stdout || '（无 stdout 输出）'}
-              {run.stderr && `\n\n--- stderr ---\n${run.stderr}`}
+              {run.stdout || '（无输出）'}
+              {run.stderr && `\n\n--- 错误输出 ---\n${run.stderr}`}
             </pre>
           </div>
         )}

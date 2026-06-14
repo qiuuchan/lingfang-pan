@@ -228,7 +228,7 @@ export function PluginCreatorHome() {
           // CREATOR-11 修复：用 ref 读取 provider/model，避免在 listener 闭包内绑定到 effect 注册时的旧值。
           const providerVal = providerRef.current;
           const modelVal = modelRef.current;
-          setLiveStage('本地代码助手已启动，等待输出…');
+          setLiveStage('代码助手已启动，等待响应…');
           setAssistantSession((prev) => ({
             sessionId: payload.sessionId,
             status: 'running',
@@ -286,16 +286,16 @@ export function PluginCreatorHome() {
           // R5 stage 文案动态：思考阶段「正在思考中…」/ 文本阶段「正在生成…」/ 诊断「正在输出诊断…」。
           // 兜底：未知 stream 归生成中。
           setLiveStage(
-            stream === 'thought' ? '正在思考中…'
-              : stream === 'stdout' ? '正在生成…'
-                : stream === 'stderr' ? '本地代码助手正在输出诊断…'
-                  : stream === 'tool' ? '正在调用工具…'
-                    : '本地代码助手正在生成…',
+            stream === 'thought' ? '思考中…'
+              : stream === 'stdout' ? '生成中…'
+                : stream === 'stderr' ? '检查结果输出中…'
+                  : stream === 'tool' ? '调用工具中…'
+                    : '生成中…',
           );
         }));
         unlisteners.push(await tauriListen<SessionErrorPayload>('code-assistant://error', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
-          const message = payload.error || '本地代码助手输出异常';
+          const message = payload.error || '代码助手输出异常';
           setAssistantSession((prev) => prev ? { ...prev, status: 'failed', diagnostics: [...prev.diagnostics, message] } : prev);
           setLiveError(toCreatorError('cli_session_error', new Error(message)));
         }));
@@ -306,7 +306,7 @@ export function PluginCreatorHome() {
           // design §3.3.6 (d)：首轮 exit 后判定多轮能力——claude 已捕获 cliSessionId 为 native；
           // 其余（codex/opencode，或 claude 未捕获 id）标记 degraded（伪多轮，透明提示）。
           setMultiturnMode((prev) => prev === 'native' ? 'native' : 'degraded');
-          setLiveStage(nextStatus === 'stopped' ? '已停止，正在整理部分结果…' : '已结束，正在整理结果…');
+          setLiveStage(nextStatus === 'stopped' ? '已停止，整理结果中…' : '已结束，整理结果中…');
           void finalizeSession(payload.sessionId, nextStatus, payload.exitCode ?? null, payload.endedAt);
         }));
       } catch {
@@ -374,7 +374,7 @@ export function PluginCreatorHome() {
       // 此前成功路径不清 liveError，ErrorBubble（!streaming && liveError）与 toast.success 同屏并存。
       // 成功路径起点清掉陈旧错误气泡（真正失败走 catch 块重新 setLiveError）。
       setLiveError(null);
-      const promptText = pending?.text || pendingUser || '本地代码助手插件';
+      const promptText = pending?.text || pendingUser || '插件';
       const prevDraft = currentDraftRef.current; // 读 ref 最新值（闭包陷阱修复）
 
       // 方案A：claude 用 Write 工具把插件文件写到 sandbox 目录，CLI exit 后先扫描 sandbox 收文件。
@@ -429,7 +429,7 @@ export function PluginCreatorHome() {
         setDetailsOpen(true);
       } else {
         // 纯对话态（AC1）：仅累积 turn，files 保持空，status='generating'，绝不判 invalid。
-        const assistantText = finalSession.stdout || finalSession.stderr || '本地 CLI 没有返回可展示内容。';
+        const assistantText = finalSession.stdout || finalSession.stderr || '代码助手没有返回可展示内容。';
         if (isFollowup && prevDraft) {
           nextDraft = mergeConversationTurn(prevDraft, promptText, assistantText);
         } else {
@@ -467,13 +467,13 @@ export function PluginCreatorHome() {
       // hasSandboxManifest / structured 任一命中即视为「有结构化产出」，走完成语义。
       const hasStructuredOutput = hasSandboxManifest || structured;
       if (hasStructuredOutput && finalSession.status === 'exited' && finalSession.exitCode === 0) {
-        toast.success(isFollowup ? '本地代码助手已完成追问迭代' : '本地代码助手已完成长任务');
+        toast.success(isFollowup ? '代码助手已完成本次更新' : '代码助手已完成生成');
       } else if (finalSession.status === 'stopped') {
-        toast.message('已停止本地代码助手，保留部分结果');
+        toast.message('已停止代码助手，保留部分结果');
       } else if (!hasStructuredOutput) {
         toast.success('对话已完成');
       } else {
-        toast.error('本地代码助手未成功完成，请查看右侧诊断');
+        toast.error('代码助手未成功完成，查看右侧检查结果');
       }
     } catch (error) {
       const creatorError = toCreatorError('transcript_failed', error);
@@ -560,7 +560,7 @@ export function PluginCreatorHome() {
     };
     assistantSessionRef.current = nextSession;
     setAssistantSession(nextSession);
-    setLiveStage('本地代码助手已启动，等待输出…');
+    setLiveStage('代码助手已启动，等待响应…');
     // 纯对话态默认不弹详情面板；若旧会话已打开详情也无关新对话，保持当前开合态。
   }
 
@@ -588,8 +588,8 @@ export function PluginCreatorHome() {
       isFollowupRef.current = true;
       setLiveStage(
         multiturnMode === 'degraded'
-          ? '本地代码助手基于历史继续生成（降级多轮，上下文非真复用）…'
-          : '本地代码助手续接上下文生成…',
+          ? '代码助手基于历史继续生成（多轮能力有限，未完整复用上下文）…'
+          : '代码助手继续生成中…',
       );
       try {
         // 追问传入当前选的 model（会话内切模型，下一轮生效）；Rust 优先用此值覆盖 session 固化值。
@@ -606,7 +606,7 @@ export function PluginCreatorHome() {
 
     // 首轮路径：保留原 start_session 逻辑（抽到 startNewSession）。
     isFollowupRef.current = false;
-    setLiveStage('正在启动本地代码助手长任务…');
+    setLiveStage('正在启动代码助手…');
     try {
       await startNewSession(text, selectedProvider);
     } catch (error) {
@@ -627,7 +627,7 @@ export function PluginCreatorHome() {
   async function stopCurrentSession() {
     const sessionId = activeIdRef.current || assistantSession?.sessionId;
     if (!sessionId || !streaming) return;
-    setLiveStage('正在停止本地代码助手…');
+    setLiveStage('正在停止代码助手…');
     setAssistantSession((prev) => prev ? { ...prev, status: 'stopping' } : prev);
     try {
       await tauriInvoke('code_assistant_stop_session', { input: { sessionId } });
@@ -653,7 +653,7 @@ export function PluginCreatorHome() {
     if (!sessionId) return;
     if (assistantSession?.status && assistantSession.status === 'running') {
       // 首轮仍在运行：拒绝追问提交，避免派生并发进程污染 transcript。
-      toast.error('上一轮仍在运行，请等待完成或停止后再回答。');
+      toast.error('上一轮仍在运行，等待完成或停止后再回答。');
       return;
     }
     // 组合可读回答：问句 + 选项（便于上下文追溯，纯选项字面在多选语境下歧义）。
@@ -667,7 +667,7 @@ export function PluginCreatorHome() {
     // ASKU-01：防重入置位（option 按钮 disabled 直到 send_input 完成）。
     askAnsweringRef.current = true;
     setAskAnswering(true);
-    setLiveStage('正在提交你的选择…');
+    setLiveStage('提交中…');
     try {
       await tauriInvoke('code_assistant_send_input', {
         input: {
@@ -750,7 +750,7 @@ export function PluginCreatorHome() {
     try {
       await deleteConversation(id);
     } catch {
-      toast.error('删除会话失败');
+      toast.error('删除对话失败');
       return;
     }
     const remaining = metas.filter((m) => m.sessionId !== id);
@@ -766,14 +766,14 @@ export function PluginCreatorHome() {
         assistantSessionRef.current = null;
       }
     }
-    toast.success('已删除会话');
+    toast.success('已删除对话');
   }
 
   async function handleRenameConversation(id: string, title: string) {
     try {
       await renameConversation(id, title);
     } catch {
-      toast.error('重命名会话失败');
+      toast.error('重命名对话失败');
       return;
     }
     setMetas((prev) => prev.map((m) => m.sessionId === id ? { ...m, title, draftUpdatedAt: new Date().toISOString() } : m));
@@ -805,7 +805,7 @@ export function PluginCreatorHome() {
         }
         return undefined;
       })();
-      const promptText = pendingPromptRef.current?.text || lastPromptRef.current || lastUserTurn || '本地代码助手插件';
+      const promptText = pendingPromptRef.current?.text || lastPromptRef.current || lastUserTurn || '插件';
       // 重建完整 AssistantSessionState（强制定义解析所需的全部字段，避免 null 展开）。
       // 显示层 stdout/stderr 仍走 tailText（内存保护）；probeResult 用完整本轮 stdout。
       const rebuilt: AssistantSessionState = {
@@ -856,7 +856,7 @@ export function PluginCreatorHome() {
       const plugin = { ...result.plugin, files, manifest, source: 'team' as const };
       setCloudPlugin(plugin);
       pushRecent(plugin);
-      toast.success(result.deduplicated ? '团队云端已有相同插件' : '已上传到团队云端共享');
+      toast.success(result.deduplicated ? '团队共享中已有相同插件' : '已上传到团队共享');
     } catch (error) {
       const creatorError = toUploadError(error, 'upload');
       // toast 用友好标题作瞬时反馈；同时 push 进 liveError 对话气泡可回看（AC6 双通道）。
@@ -868,14 +868,14 @@ export function PluginCreatorHome() {
   }
 
   async function submitMarketplace() {
-    if (!cloudPlugin) return toast.error('请先上传到团队云端');
+    if (!cloudPlugin) return toast.error('先上传到团队共享');
     setSubmitting(true);
     try {
       const result = await api<{ plugin: LoadedPlugin }>(`/api/plugins/${cloudPlugin.id}/submit-marketplace`, { method: 'POST', body: { priceCents: 0 } });
       const plugin = { ...cloudPlugin, ...result.plugin, source: 'team' as const };
       setCloudPlugin(plugin);
       pushRecent(plugin);
-      toast.success('已提交公共市场审核');
+      toast.success('已提交插件市场审核');
     } catch (error) {
       const creatorError = toUploadError(error, 'submit');
       setLiveError(creatorError);
@@ -956,7 +956,7 @@ export function PluginCreatorHome() {
               size="sm"
               disabled={!hasDraft}
               onClick={() => setPreviewOpen(true)}
-              title={hasDraft ? '打开预览大窗' : '尚未生成插件草稿'}
+              title={hasDraft ? '打开预览' : '尚未生成插件草稿'}
             >
               <EyeIcon className="size-4" /> 预览
             </Button>
@@ -992,7 +992,7 @@ export function PluginCreatorHome() {
               {pendingUser && <Bubble role="user" content={pendingUser} />}
               {streaming && isFollowupRef.current && multiturnMode === 'degraded' && (
                 // design §3.3.6 (d)：降级伪多轮透明提示（codex/opencode 或 claude 缺 id）。
-                <p className="px-1 text-xs text-muted-foreground">此 CLI 不支持原生多轮，已基于历史继续生成（上下文非真复用）。</p>
+                <p className="px-1 text-xs text-muted-foreground">当前模型多轮能力有限，已基于历史继续生成（未完整复用上下文）。</p>
               )}
               {streaming && (
                 <StreamingMessage

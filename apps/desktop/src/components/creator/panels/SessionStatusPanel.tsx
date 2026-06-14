@@ -5,7 +5,7 @@ import { capitalizeModel, type AssistantSessionState } from '@/lib/plugin-draft'
 // 命令预览摘要：保留二进制名与所有 flags（--model/--output-format 等），
 // 仅把 -p 后的超长 prompt/systemPrompt 内容截断为「<prompt …>」，避免面板被几 KB 文本占满。
 function summarizeCommand(preview: string[]): string {
-  if (!preview.length) return '未返回命令预览';
+  if (!preview.length) return '无命令信息';
   const out: string[] = [];
   for (let i = 0; i < preview.length; i++) {
     const tok = preview[i];
@@ -28,7 +28,7 @@ export function SessionStatusPanel({ session }: { session: AssistantSessionState
   return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">长任务</CardTitle>
+          <CardTitle className="text-base">对话信息</CardTitle>
         </CardHeader>
       </Card>
     );
@@ -44,18 +44,18 @@ export function SessionStatusPanel({ session }: { session: AssistantSessionState
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">长任务</CardTitle>
+        <CardTitle className="text-base">对话信息</CardTitle>
         <CardDescription className="font-mono">{session.providerLabel} · {session.model === 'default' ? '默认模型' : capitalizeModel(session.model)}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div className="grid grid-cols-2 gap-2">
           <Info label="状态" value={statusLabel[session.status] || session.status} truncate />
-          <Info label="退出码" value={session.exitCode === undefined ? '运行中' : session.exitCode === null ? '无' : String(session.exitCode)} truncate />
-          <Info label="PID" value={session.pid ? String(session.pid) : '未返回'} />
-          <Info label="Transcript" value={session.transcriptPath || '未返回'} />
+          <Info label="运行结果" value={session.exitCode === undefined ? '运行中' : session.exitCode === null ? '无' : String(session.exitCode)} truncate />
+          <Info label="进程号" value={session.pid ? String(session.pid) : '未提供'} />
+          <Info label="记录" value={session.transcriptPath || '未提供'} />
         </div>
         <div className="space-y-1">
-          <div className="font-medium">Session</div>
+          <div className="font-medium">对话</div>
           <p className="break-all rounded-lg bg-muted p-2 font-mono text-xs text-muted-foreground">{session.sessionId}</p>
         </div>
         <div className="space-y-1">

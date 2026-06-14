@@ -89,7 +89,7 @@ export function ProvidersView() {
   return (
     <Section
       title="模型服务"
-      description="维护平台模型 provider 列表并指定「当前启用」。应用端只感知当前启用的服务地址，用户界面不暴露 provider 概念。"
+      description="维护平台模型 provider 列表并指定「当前启用」。应用端只感知当前启用的服务地址，用户界面不显示 provider。"
     >
       <div>
         <div className="mb-3 flex items-center justify-between">
@@ -154,7 +154,7 @@ export function ProvidersView() {
                               </Button>
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>当前启用项不可删除，请先切换到其他模型服务</TooltipContent>
+                          <TooltipContent>当前启用项不可删除，先切换到其他模型服务</TooltipContent>
                         </Tooltip>
                       ) : (
                         <Button variant="destructive" size="sm" onClick={() => remove(provider)}>
@@ -180,7 +180,7 @@ export function ProvidersView() {
             ) : (
               <TableRow>
                 <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                  暂无模型服务，请新增并设为启用
+                  暂无模型服务，新增并设为启用
                 </TableCell>
               </TableRow>
             )}
@@ -251,8 +251,8 @@ function CreateProviderDialog({ children, onRefresh }: { children: React.ReactNo
   const [form, setForm] = useState<ProviderFormState>(emptyForm());
 
   async function create() {
-    if (!form.name.trim()) return toast.error('请输入名称');
-    if (!form.apiUrl.trim()) return toast.error('请输入 API 地址');
+    if (!form.name.trim()) return toast.error('输入名称');
+    if (!form.apiUrl.trim()) return toast.error('输入 API 地址');
     const body = {
       provider: form.provider,
       name: form.name.trim(),
@@ -313,8 +313,8 @@ function EditProviderDialog({
   }, [open, provider]);
 
   async function save() {
-    if (!form.name.trim()) return toast.error('请输入名称');
-    if (!form.apiUrl.trim()) return toast.error('请输入 API 地址');
+    if (!form.name.trim()) return toast.error('输入名称');
+    if (!form.apiUrl.trim()) return toast.error('输入 API 地址');
     const body = {
       provider: form.provider,
       name: form.name.trim(),
@@ -409,7 +409,7 @@ function ProviderFormFields({
           value={form.modelsText}
           onChange={(e) => patch({ modelsText: e.target.value })}
         />
-        <p className="text-xs text-muted-foreground">这是占位/兜底清单，应用端实际模型由 apiKey 拉取。</p>
+        <p className="text-xs text-muted-foreground">这是示例清单，应用端实际模型由 API 密钥获取。</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">

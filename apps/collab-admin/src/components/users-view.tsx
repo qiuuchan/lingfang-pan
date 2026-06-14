@@ -48,7 +48,7 @@ export function UsersView() {
 
   return (
     <div className="space-y-8">
-      <Section title="用户管理" description="管理普通用户账号。平台管理员请到独立页面管理。">
+      <Section title="用户管理" description="管理普通用户账号，平台管理员在独立页面管理。">
         <div>
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -130,7 +130,7 @@ function CreateUserDialog({ children, onRefresh }: { children: React.ReactNode; 
   const [password, setPassword] = useState('ChangeMe123!');
 
   async function create() {
-    if (!email.trim()) return toast.error('请输入邮箱');
+    if (!email.trim()) return toast.error('输入邮箱');
     // ADMIN-VIEW-04 修复：仅成功才关闭对话框并清空表单。
     if (!(await run(
       () =>
@@ -206,7 +206,7 @@ function EditUserDialog({
   }
 
   async function save() {
-    if (!editEmail.trim()) return toast.error('请输入邮箱');
+    if (!editEmail.trim()) return toast.error('输入邮箱');
     const body: Record<string, unknown> = {
       email: editEmail.trim(),
       displayName: editName,
@@ -315,7 +315,7 @@ function EditUserDialog({
             {showPromote && user.platformRole !== 'PLATFORM_ADMIN' ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  将该用户提升为平台管理员，赋予全局管理权限。此操作不可逆，请谨慎操作。
+                  将该用户提升为平台管理员，赋予全局管理权限。此操作不可逆。
                 </p>
                 <Button onClick={promote} className="w-full">
                   <ShieldCheckIcon className="mr-1.5 size-4" />
@@ -324,7 +324,7 @@ function EditUserDialog({
               </div>
             ) : (
               <div className="py-4 text-center text-sm text-muted-foreground">
-                该用户已是平台管理员，请在管理员页面管理。
+                该用户已是平台管理员，在管理员页面管理。
               </div>
             )}
             <div className="mt-4 space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">

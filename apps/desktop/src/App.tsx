@@ -87,8 +87,8 @@ function reportPersistenceFailure(err: unknown) {
   persistenceErrorReported = true;
   const isQuotaOrSecurity = err instanceof DOMException && (err.name === 'QuotaExceededError' || err.name === 'SecurityError');
   const hint = isQuotaOrSecurity
-    ? '本地存储空间不足或被禁用，登录状态和固定插件可能无法保存，下次启动需重新登录。'
-    : '本地存储写入失败，登录状态可能未保存。';
+    ? '存储空间不足或被禁用，登录状态和固定插件可能无法保存，下次启动需重新登录。'
+    : '存储写入失败，登录状态可能未保存。';
   // 延迟一帧再 toast，避免在模块顶层/事件回调同步路径触发渲染异常。
   setTimeout(() => {
     try { import('sonner').then(({ toast }) => toast.warning(hint)); } catch { /* sonner 未加载则忽略 */ }
@@ -128,7 +128,7 @@ function sessionFromPayload(payload: CollabSessionResponse, previousToken: strin
   // 缺失时抛出带语义的错误，由 refreshSession 的 .catch 兜底 resetSession，避免崩溃。
   const user = payload && typeof payload === 'object' ? payload.user : undefined;
   if (!user || typeof user.id !== 'string' || typeof user.email !== 'string' || typeof user.displayName !== 'string') {
-    throw new Error('后端返回的会话数据缺少必要的用户信息，请重新登录。');
+    throw new Error('服务返回的数据缺少必要的用户信息，请重新登录。');
   }
   return {
     token: payload.token ?? previousToken,
@@ -289,7 +289,7 @@ export default function App() {
     return (
       <AppContext.Provider value={ctx}>
         <Centered>
-          <p className="text-sm text-muted-foreground">正在恢复会话…</p>
+          <p className="text-sm text-muted-foreground">正在恢复登录…</p>
         </Centered>
         <Toaster position="top-right" richColors closeButton />
       </AppContext.Provider>

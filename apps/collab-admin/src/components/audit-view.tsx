@@ -30,7 +30,7 @@ export function AuditView() {
   const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(logs, 20);
 
   return (
-    <Section title="审计日志" description="平台级操作记录，含中文动作和对象展示。">
+    <Section title="审计日志" description="平台级操作记录。">
       <Table>
         <TableHeader>
           <TableRow>

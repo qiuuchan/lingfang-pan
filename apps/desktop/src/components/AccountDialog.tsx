@@ -59,7 +59,7 @@ export function AccountDialog({ open, onOpenChange, session, applySession, reset
       return;
     }
     if (!isEmail(nextEmail)) {
-      toast.error('请输入有效邮箱');
+      toast.error('邮箱格式不正确');
       return;
     }
     setSavingProfile(true);
@@ -84,7 +84,7 @@ export function AccountDialog({ open, onOpenChange, session, applySession, reset
       // 改为基于 err.status（api() 已透传）精确判定 404/405。
       const err = error as ApiError;
       const backendNotImplemented = err.status === 404 || err.status === 405;
-      toast.error(backendNotImplemented ? '后端尚未支持修改账户信息' : err.message);
+      toast.error(backendNotImplemented ? '暂不支持修改账户信息' : err.message);
     } finally {
       setSavingProfile(false);
     }
@@ -100,14 +100,14 @@ export function AccountDialog({ open, onOpenChange, session, applySession, reset
     setSavingPassword(true);
     try {
       await api('/api/auth/me', { method: 'PATCH', body: { password } });
-      toast.success('密码已重置，下次登录请使用新密码');
+      toast.success('密码已重置');
       setPassword('');
       onOpenChange(false);
     } catch (error) {
       // 修复 ACCT-01 / DESK-06：与 saveProfile 同款，基于 err.status 精确判定后端未实现。
       const err = error as ApiError;
       const backendNotImplemented = err.status === 404 || err.status === 405;
-      toast.error(backendNotImplemented ? '后端尚未支持修改密码' : err.message);
+      toast.error(backendNotImplemented ? '暂不支持修改密码' : err.message);
     } finally {
       setSavingPassword(false);
     }

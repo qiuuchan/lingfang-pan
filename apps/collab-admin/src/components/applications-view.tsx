@@ -179,7 +179,7 @@ function RejectDialog({
   const [reason, setReason] = useState(application.reviewReason || '');
 
   async function reject() {
-    if (!reason.trim()) return toast.error('请输入驳回原因');
+    if (!reason.trim()) return toast.error('输入未通过原因');
     // ADMIN-VIEW-04 修复：仅成功才关闭对话框，失败保留已输入的驳回原因。
     if (!(await run(
       () =>
@@ -209,11 +209,11 @@ function RejectDialog({
             ]}
           />
           <div className="space-y-2">
-            <Label>驳回原因</Label>
+            <Label>未通过原因</Label>
             <Textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="请输入驳回原因"
+              placeholder="输入未通过原因"
             />
           </div>
         </div>

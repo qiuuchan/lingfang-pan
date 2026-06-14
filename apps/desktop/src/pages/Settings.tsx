@@ -140,15 +140,15 @@ export function Settings() {
       if (result.status === 'Succeeded') {
         toast.success('安装成功');
       } else if (result.status === 'NeedsConfirmation') {
-        toast.warning('安装需要管理员权限，请以管理员身份重试或手动安装。');
+        toast.warning('安装需要管理员权限，请以管理员身份重试或手动安装');
       } else if (result.status === 'Unsupported') {
-        toast.warning(result.message || '当前平台不支持自动安装，请手动安装。');
+        toast.warning(result.message || '当前平台不支持自动安装，请手动安装');
       } else {
         // Failed：Rust 侧已清理半装残留（design D4），提示重试。
-        toast.error(result.message || '安装失败，请重试。');
+        toast.error(result.message || '安装失败，请重试');
       }
     } catch (err) {
-      toast.error((err as ApiError).message || '安装失败，请重试。');
+      toast.error((err as ApiError).message || '安装失败，请重试');
     } finally {
       setInstalling((prev) => ({ ...prev, [target]: false }));
     }
@@ -157,7 +157,7 @@ export function Settings() {
   // === Tab3 后端地址 Card 逻辑（零改动，从原 Settings 搬入） ===
   async function testBackend() {
     const normalized = normalizeBackendUrl(backendInput);
-    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    if (!normalized) return toast.error('输入以 http:// 或 https:// 开头的后端地址');
     setTestingBackend(true);
     try {
       await testBackendUrl(normalized);
@@ -171,7 +171,7 @@ export function Settings() {
 
   async function saveBackend() {
     const normalized = normalizeBackendUrl(backendInput);
-    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    if (!normalized) return toast.error('输入以 http:// 或 https:// 开头的后端地址');
     setSavingBackend(true);
     try {
       await testBackendUrl(normalized);
@@ -180,7 +180,7 @@ export function Settings() {
       setBackendInput(normalized);
       if (changed) {
         resetSession();
-        toast.success('后端地址已保存，请重新登录');
+        toast.success('后端地址已保存，需重新登录');
       } else {
         toast.success('后端地址已保存');
       }
@@ -197,7 +197,7 @@ export function Settings() {
   async function checkForUpdate() {
     const base = backendUrl || '';
     if (!base) {
-      toast.error('请先在上方配置后端地址');
+      toast.error('先在上方配置后端地址');
       return;
     }
     setChecking(true);
@@ -210,7 +210,7 @@ export function Settings() {
       setProgress({ downloaded: 0, total: null });
       setUpdateMeta(meta);
     } catch (err) {
-      toast.error((err as ApiError).message || '检查更新失败，请重试。');
+      toast.error((err as ApiError).message || '检查更新失败，请重试');
     } finally {
       setChecking(false);
     }
@@ -228,11 +228,11 @@ export function Settings() {
         } else if (event.event === 'Progress') {
           setProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
         } else if (event.event === 'Finished') {
-          toast.success('更新下载完成，即将重启…');
+          toast.success('更新下载完成，即将重启');
         }
       });
     } catch (err) {
-      toast.error((err as ApiError).message || '下载更新失败，请重试。');
+      toast.error((err as ApiError).message || '下载更新失败，请重试');
       setUpdateInstalling(false);
     }
   }
@@ -247,8 +247,8 @@ export function Settings() {
     <div className="mx-auto w-full max-w-3xl">
       <Tabs defaultValue="cli">
         <TabsList>
-          <TabsTrigger value="cli">CLI 与运行时</TabsTrigger>
-          <TabsTrigger value="gateway">模型网关</TabsTrigger>
+          <TabsTrigger value="cli">CLI 与运行环境</TabsTrigger>
+          <TabsTrigger value="gateway">模型服务</TabsTrigger>
           <TabsTrigger value="backend">后端服务</TabsTrigger>
         </TabsList>
 
@@ -283,7 +283,7 @@ export function Settings() {
                 当前地址：<span className="font-mono text-foreground">{backendUrl || '未配置'}</span>
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="backendServiceUrl">后端 URL</Label>
+                <Label htmlFor="backendServiceUrl">后端地址</Label>
                 <Input
                   id="backendServiceUrl"
                   placeholder="例如 http://127.0.0.1:3000 或 https://api.example.com"
@@ -297,7 +297,7 @@ export function Settings() {
                 <LoadingButton loading={savingBackend} onClick={() => { void saveBackend(); }}>测试并保存</LoadingButton>
               </div>
               <p className="text-xs text-muted-foreground">
-                切换到另一套后端时当前登录态会失效，保存后需要重新登录。
+                切换到另一套后端时当前登录会失效，保存后需重新登录。
               </p>
             </CardContent>
           </Card>
@@ -312,7 +312,7 @@ export function Settings() {
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <p className="text-sm text-muted-foreground">
-                连接后端的发布服务检查新版本，发现更新后可下载安装包并自动重启。
+                连接后端检查新版本，发现更新后可下载安装包并自动重启。
               </p>
               <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
             </CardContent>
@@ -340,7 +340,7 @@ export function Settings() {
           {updateInstalling ? (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{progress.total !== null ? '下载中…' : '下载中…（未知总大小）'}</span>
+                <span>{progress.total !== null ? '下载中' : '下载中（未知总大小）'}</span>
                 <span>
                   {progress.total !== null
                     ? `${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`
@@ -352,7 +352,7 @@ export function Settings() {
                 value={progress.downloaded}
                 max={progress.total ?? undefined}
               />
-              <p className="text-xs text-muted-foreground">下载完成后将自动安装并重启应用，请勿关闭窗口。</p>
+              <p className="text-xs text-muted-foreground">下载完成后自动安装并重启，请勿关闭窗口。</p>
             </div>
           ) : null}
 

@@ -18,7 +18,7 @@ export function Onboarding() {
   const [loading, setLoading] = useState(false);
 
   async function redeem() {
-    if (!code.trim()) return toast.error('请输入团队邀请码');
+    if (!code.trim()) return toast.error('输入团队邀请码');
     setLoading(true);
     try {
       const r = await api<CollabSessionResponse>('/api/invitations/redeem', { method: 'POST', body: { code: code.trim() } });
@@ -32,7 +32,7 @@ export function Onboarding() {
   }
 
   async function submitApplication() {
-    if (!teamName.trim()) return toast.error('请填写团队名称');
+    if (!teamName.trim()) return toast.error('填写团队名称');
     setLoading(true);
     try {
       await api('/api/team-admin-applications', { method: 'POST', body: { teamName: teamName.trim(), reason: reason.trim() } });
@@ -76,7 +76,7 @@ export function Onboarding() {
     // 此处补上邀请码入口（与 NEEDS_INVITATION 分支共用 code state + redeem 函数，零新增后端依赖）。
     return (
       <Card className="w-full max-w-lg">
-        <CardHeader><CardTitle>申请已驳回</CardTitle><CardDescription>{session.application?.reviewReason || '你可以重新提交申请，或使用邀请码作为普通成员加入团队。'}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>申请未通过</CardTitle><CardDescription>{session.application?.reviewReason || '你可以重新提交申请，或使用邀请码作为普通成员加入团队。'}</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           {/* 重新提交团队管理员申请 */}
           <div className="space-y-3">

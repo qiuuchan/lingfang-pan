@@ -95,7 +95,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
               <span className="lf-section-label">download</span>
               <h1 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight">获取 LingFang</h1>
               <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
-                最新稳定版的各平台安装包。点击对应平台下载，客户端支持后续自动更新检查。
+                最新稳定版的各平台安装包。点击对应平台下载，客户端会自动检查后续更新。
               </p>
             </div>
 
@@ -130,7 +130,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                           暂无可用版本
                         </span>
                         <p className="mt-1 text-sm" style={{ color: 'var(--lf-fg-subtle)' }}>
-                          后端 /api/releases 暂未返回数据，请确认 collab-api 已启动并 seed 版本。
+                          暂未获取到版本信息，稍后重试或确认服务已发布版本。
                         </p>
                       </div>
                     )}
@@ -194,7 +194,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
 
                 {status === 'ready' && release && (
                   <p className="lf-mono mt-5 text-xs leading-relaxed" style={{ color: 'var(--lf-fg-subtle)' }}>
-                    # 所有产物均提供签名校验，客户端可离线验签后安装。
+                    # 所有安装包均提供签名校验，客户端可离线验证后安装。
                   </p>
                 )}
               </div>

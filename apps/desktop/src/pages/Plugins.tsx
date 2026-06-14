@@ -39,7 +39,7 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
           plugin_id: plugin.id,
         });
       } else {
-        throw new Error('插件缺少打包文件，无法进入编辑器。');
+        throw new Error('插件缺少安装文件，无法进入编辑器。');
       }
       setRunningPlugin(null);
       setView('home');

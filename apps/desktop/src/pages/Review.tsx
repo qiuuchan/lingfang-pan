@@ -50,7 +50,7 @@ export function Review() {
 
   async function reject(id: string) {
     const reason = (reasons[id] || '').trim();
-    if (!reason) return toast.error('请填写驳回理由');
+    if (!reason) return toast.error('填写未通过原因');
     setBusy(id);
     try {
       await api(`/api/admin/plugins/${id}/reject`, { method: 'POST', body: { reason } });
@@ -82,7 +82,7 @@ export function Review() {
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                   <Input
-                    placeholder="驳回理由（驳回时必填）"
+                    placeholder="未通过原因（驳回时必填）"
                     value={reasons[p.id] || ''}
                     onChange={(e) => setReasons((r) => ({ ...r, [p.id]: e.target.value }))}
                     className="flex-1"

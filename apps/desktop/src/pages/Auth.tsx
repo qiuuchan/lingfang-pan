@@ -35,9 +35,9 @@ export function Auth() {
   }
 
   async function onLogin() {
-    if (!backendUrl) return toast.error('请先在下方设置后端地址');
-    if (!isEmail(email)) return toast.error('请输入有效的邮箱地址');
-    if (!password) return toast.error('请输入密码');
+    if (!backendUrl) return toast.error('先在下方设置服务地址');
+    if (!isEmail(email)) return toast.error('邮箱格式不正确');
+    if (!password) return toast.error('输入密码');
     setLoading(true);
     try {
       await loginCore(email.trim(), password);
@@ -50,10 +50,10 @@ export function Auth() {
   }
 
   async function onRegister() {
-    if (!backendUrl) return toast.error('请先在下方设置后端地址');
-    if (!isEmail(email)) return toast.error('请输入有效的邮箱地址（如 name@example.com）');
+    if (!backendUrl) return toast.error('先在下方设置服务地址');
+    if (!isEmail(email)) return toast.error('邮箱格式不正确（如 name@example.com）');
     if (password.length < 8) return toast.error('密码至少 8 位');
-    if (wantsTeamAdmin && !teamName.trim()) return toast.error('请填写要申请管理的团队名称');
+    if (wantsTeamAdmin && !teamName.trim()) return toast.error('填写要申请管理的团队名称');
     setLoading(true);
     try {
       const r = await api<CollabSessionResponse>('/api/auth/register', {
@@ -84,14 +84,14 @@ export function Auth() {
 
   async function saveBackend() {
     const normalized = normalizeBackendUrl(backendUrlDraft);
-    if (!normalized) return toast.error('请输入以 http:// 或 https:// 开头的后端地址');
+    if (!normalized) return toast.error('服务地址需以 http:// 或 https:// 开头');
     setTestingBackend(true);
     try {
       await testBackendUrl(normalized);
-      if (!saveBackendUrl(normalized)) return toast.error('后端地址格式不正确');
+      if (!saveBackendUrl(normalized)) return toast.error('服务地址格式不正确');
       setBackendUrlDraft(normalized);
       setShowBackendSettings(false);
-      toast.success('后端地址已保存');
+      toast.success('服务地址已保存');
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -133,7 +133,7 @@ export function Auth() {
                 <ServerIcon className="size-4" />
               </span>
               <span className="min-w-0">
-                <span className="block font-medium text-foreground">后端地址</span>
+                <span className="block font-medium text-foreground">服务地址</span>
                 <span className="block truncate text-muted-foreground">{backendUrl || '未设置，登录和注册前需要先保存地址'}</span>
               </span>
             </div>
@@ -157,7 +157,7 @@ export function Auth() {
                 <LoadingButton loading={testingBackend} onClick={saveBackend}>测试并保存</LoadingButton>
                 <Button variant="outline" onClick={() => setBackendUrlDraft('http://127.0.0.1:3000')}>填入本机默认地址</Button>
               </div>
-              <p className="text-xs text-muted-foreground">保存前会访问 <span className="font-mono">/api/health</span> 校验后端是否可用。</p>
+              <p className="text-xs text-muted-foreground">保存前会检测服务地址是否可用。</p>
             </div>
           </div>
         </div>

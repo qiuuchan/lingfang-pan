@@ -103,7 +103,7 @@ export default function App() {
     const handler = () => {
       setToken(null);
       setSession(null);
-      toast.error('登录已过期，请重新登录');
+      toast.error('登录已过期，重新登录');
     };
     window.addEventListener(UNAUTHORIZED_EVENT, handler);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
@@ -143,7 +143,7 @@ export default function App() {
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-        正在检查会话…
+        检查中…
       </div>
     );
   }
@@ -313,7 +313,7 @@ export default function App() {
             )}
             {updateResult === 'error' && (
               <p className="text-center text-xs text-muted-foreground">
-                无法连接服务器，请检查网络后再试。
+              无法连接服务器，检查网络后重试。
               </p>
             )}
             {updateResult?.startsWith('new:') && (

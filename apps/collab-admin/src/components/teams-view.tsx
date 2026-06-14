@@ -115,7 +115,7 @@ function CreateTeamDialog({ children, onRefresh }: { children: React.ReactNode; 
   const [initialBalance, setInitialBalance] = useState('100');
 
   async function create() {
-    if (!name.trim()) return toast.error('请输入团队名称');
+    if (!name.trim()) return toast.error('输入团队名称');
     // ADMIN-VIEW-04 修复：仅成功才关闭对话框并清空表单，失败时保留草稿供用户修正。
     if (!(await run(
       () =>
@@ -214,7 +214,7 @@ function TeamDetailDialog({
   }
 
   async function assignAdmin() {
-    if (!adminUserId) return toast.error('请选择用户');
+    if (!adminUserId) return toast.error('选择用户');
     // ADMIN-VIEW-04：仅成功才清空选择。
     if (!(await run(
       () =>

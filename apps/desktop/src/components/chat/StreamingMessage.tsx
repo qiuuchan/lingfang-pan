@@ -65,7 +65,7 @@ export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAsk
 
   // R5 stage 文案动态：优先用上层传入的 stage（含启停/降级等场景文案）；
   // 上层未给精确文案时，按当前流类型切换「正在思考中…」/「正在生成…」。
-  const dynamicStage = stage || (hasThought && !hasStdout ? '正在思考中…' : hasStdout ? '正在生成…' : '生成中…');
+  const dynamicStage = stage || (hasThought && !hasStdout ? '思考中…' : hasStdout ? '生成中…' : '生成中…');
 
   const hasAnyContent = Boolean(thoughtText || stdoutText || stderrLines.length || toolCards.length);
 
@@ -86,7 +86,7 @@ export function StreamingMessage({ stage, segments, hasThought, hasStdout, onAsk
         {stderrLines.map((seg, i) => (
           <div key={`err-${i}`} className="flex items-start gap-2 text-xs">
             <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
-            <span className="shrink-0 rounded bg-amber-500/15 px-1 font-mono text-amber-500">诊断</span>
+            <span className="shrink-0 rounded bg-amber-500/15 px-1 font-mono text-amber-500">检查结果</span>
             <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">{seg.text.replace(/\n$/, '')}</pre>
           </div>
         ))}
@@ -187,7 +187,7 @@ function ToolCard({
           ))}
         </div>
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          {answered ? '已选择，正在提交…' : '本轮答案作为追问文本传入（--resume 续接）。'}
+          {answered ? '已选择，提交中…' : '选择的答案将作为下一次提问的上下文。'}
         </p>
       </div>
     );

@@ -47,7 +47,7 @@ export function Composer({
     <div>
       <div className="rounded-xl border bg-background p-3 shadow-sm">
         <Textarea
-          placeholder="自然描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件。"
+          placeholder="描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件。"
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={(event) => {
