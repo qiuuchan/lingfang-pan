@@ -176,13 +176,13 @@ export function Settings() {
     try {
       await testBackendUrl(normalized);
       const changed = normalized !== backendUrl;
-      if (!saveBackendUrl(normalized)) return toast.error('后端地址格式不正确');
+      if (!saveBackendUrl(normalized)) return toast.error('公司平台地址格式不正确');
       setBackendInput(normalized);
       if (changed) {
         resetSession();
-        toast.success('后端地址已保存，需重新登录');
+        toast.success('公司平台地址已保存，需重新登录');
       } else {
-        toast.success('后端地址已保存');
+        toast.success('公司平台地址已保存');
       }
     } catch (e) {
       toast.error((e as Error).message);
@@ -197,7 +197,7 @@ export function Settings() {
   async function checkForUpdate() {
     const base = backendUrl || '';
     if (!base) {
-      toast.error('先在上方配置后端地址');
+      toast.error('先在上方配置公司平台地址');
       return;
     }
     setChecking(true);
@@ -249,7 +249,7 @@ export function Settings() {
         <TabsList>
           <TabsTrigger value="cli">CLI 与运行环境</TabsTrigger>
           <TabsTrigger value="gateway">模型服务</TabsTrigger>
-          <TabsTrigger value="backend">后端服务</TabsTrigger>
+          <TabsTrigger value="backend">公司平台</TabsTrigger>
         </TabsList>
 
         {/* Tab1：CLI 与运行时管理 */}
@@ -275,7 +275,7 @@ export function Settings() {
             <CardHeader>
               <div className="flex items-center gap-2">
                 <ServerIcon className="size-5 text-primary" />
-                <CardTitle>后端服务地址</CardTitle>
+                <CardTitle>公司平台地址</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
@@ -283,10 +283,10 @@ export function Settings() {
                 当前地址：<span className="font-mono text-foreground">{backendUrl || '未配置'}</span>
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="backendServiceUrl">后端地址</Label>
+                <Label htmlFor="backendServiceUrl">平台地址</Label>
                 <Input
                   id="backendServiceUrl"
-                  placeholder="例如 http://127.0.0.1:3000 或 https://api.example.com"
+                  placeholder="例如 https://platform.example.com"
                   value={backendInput}
                   onChange={(e) => setBackendInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && saveBackend()}
@@ -297,7 +297,7 @@ export function Settings() {
                 <LoadingButton loading={savingBackend} onClick={() => { void saveBackend(); }}>测试并保存</LoadingButton>
               </div>
               <p className="text-xs text-muted-foreground">
-                切换到另一套后端时当前登录会失效，保存后需重新登录。
+                切换到另一个平台时当前登录会失效，保存后需重新登录。
               </p>
             </CardContent>
           </Card>
@@ -312,7 +312,7 @@ export function Settings() {
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <p className="text-sm text-muted-foreground">
-                连接后端检查新版本，发现更新后可下载安装包并自动重启。
+                连接公司平台检查新版本，发现更新后可下载安装包并自动重启。
               </p>
               <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
             </CardContent>
