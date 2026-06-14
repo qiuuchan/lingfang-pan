@@ -109,3 +109,40 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 设置页 CLI/运行时检测安装与模型网关配置
+
+**Date**: 2026-06-14
+**Task**: 设置页 CLI/运行时检测安装与模型网关配置
+**Branch**: `feat/settings-cli-runtime-model-gateway`
+
+### Summary
+
+桌面设置页加三 Tab：(1) CLI 与运行时自动检测 + winget 安装（半装清理），(2) 模型网关配置（平台维护 apiUrl 目录 + 租户 apiKey AES-256-GCM 加密存库跨电脑），(3) 后端服务。后端新增 LlmGateway/TenantLlmBinding 两表 + credential-cipher + 5 租户端点 + 4 admin 端点 + seed 6 默认网关；桌面 Tauri 新增 cli_installer（winget 安装 + emit availability 事件）；前端三 Tab + 错误按 LlmErrorCode 分支。26 条对抗评审裁决，4 阶段实施，cargo 84 测 + collab-api 29 测 + desktop 146 测全绿。顺手修了 vitest/tsc 配置根治 build 产物污染 test 的基础设施 bug。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4b273a8` | (see git log) |
+| `7a5e469` | (see git log) |
+| `1a77376` | (see git log) |
+| `47f861f` | (see git log) |
+| `6311f3b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
