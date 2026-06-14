@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import 'dotenv/config';
 import { resolve } from 'node:path';
 import { json, urlencoded } from 'express';
 import { NestFactory, Reflector } from '@nestjs/core';
