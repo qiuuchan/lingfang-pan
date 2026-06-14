@@ -19,3 +19,7 @@ tauri-plugin-updater = "2"
 # url crate：tauri-plugin-updater 2.x 的 endpoints() 强制要求 Vec<Url>（非 String），
 # check_update 命令用 format! 拼出 URL 字符串后需 Url::parse 转换（design §4.5 预见的必要依赖）。
 url = "2"
+# fetch_models 命令（llm_fetch.rs）直连 LLM provider 的 /v1/models 拉取模型列表。
+# features=json 解析 OpenAI 兼容响应体；features=rustls-tls 复用 rustls 避免原生 OpenSSL/WinHTTP 依赖；
+# default-features=false 裁掉默认的 native-tls / charset / blocking 等不需要的 feature，减小产物体积。
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

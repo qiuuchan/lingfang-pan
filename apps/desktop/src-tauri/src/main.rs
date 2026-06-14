@@ -5,6 +5,7 @@
 mod capability;
 mod cli_installer;
 mod code_assistant;
+mod llm_fetch;
 mod plugin_script;
 mod plugins;
 mod updater;
@@ -263,6 +264,7 @@ fn main() {
             cli_installer::install_cli,
             cli_installer::install_runtime,
             cli_installer::cancel_install,
+            llm_fetch::fetch_models,
             updater::check_update,
             updater::download_and_install
         ])
