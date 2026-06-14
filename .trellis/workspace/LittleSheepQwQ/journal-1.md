@@ -218,3 +218,37 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 模型网关定稿 v3（单provider云分发+无provider UI）
+
+**Date**: 2026-06-15
+**Task**: 模型网关定稿 v3（单provider云分发+无provider UI）
+**Branch**: `feat/settings-cli-runtime-model-gateway`
+
+### Summary
+
+模型网关第三版定稿。应用界面零 provider 概念（用户只填 apiKey+拉取模型+选模型），平台 Admin 维护多 provider 设一个当前启用，应用拉取当前启用 provider 的 url。破坏式重构：LlmGateway 加 isActive（事务唯一），TenantLlmBinding 去 gatewayId 改 teamId 唯一。新增 GET /api/llm/active-provider + Admin /api/admin/llm-providers CRUD + activate 端点。桌面 ModelGatewayTab 重写去 provider；collab-admin 新增 providers-view 管理页。3 阶段实施+端到端 check 全过，291 测全绿（collab-api 50+desktop 146+cargo 95）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0516fdb` | (see git log) |
+| `9f6d66` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
