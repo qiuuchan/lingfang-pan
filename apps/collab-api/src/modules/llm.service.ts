@@ -1,25 +1,25 @@
-// LLM 网关目录 + 租户绑定服务。
+// LLM 单 provider 云分发 + 租户绑定服务（v3 定稿）。
 //
-// 设计契约（见 design.md §4.3 鉴权 + §4.4 审计）：
-//  - 平台网关目录方法（adminListGateways/adminCreateGateway/adminUpdateGateway/adminSetGatewayStatus）首行 ensurePlatformAdmin。
+// 设计契约（见 design.md §3.3 service 改造）：
+//  - 应用界面零 provider 概念：getActiveProvider 返回当前启用 provider 的 apiUrl（全表最多一条 isActive=true）。
+//  - 平台 provider 目录方法（adminListProviders/adminCreateProvider/adminUpdateProvider/adminDeleteProvider/adminActivateProvider）首行 ensurePlatformAdmin。
 //  - 租户方法分两档：
-//    · 只读（listGatewaysForTenant/listBindings）用 ensureCurrentTeam，普通成员可见（用于选择/查看脱敏串）。
+//    · 只读（getActiveProvider/listBindings）用 ensureCurrentTeam，普通成员可见（拿 apiUrl 拉模型/查看脱敏串）。
 //    · 写操作（upsertBinding/deleteBinding/decryptBindingKey）用 ensureTeamAdmin，仅 TEAM_ADMIN 可改。
-//  - 无物理 DELETE（B8）：网关目录仅 PATCH status=DISABLED 软删除；binding 上 gateway onDelete: Restrict，禁用网关不删绑定（只读保留）。
-//  - 审计 metadata 固定 shape `{teamId, gatewayId, provider, kind?, enabled?}`，**永不记 apiKey 明文/密文/脱敏串/hint/fingerprint**（AC12）。
-//  - PUT/DELETE/decrypt 用 prisma.$transaction 同事务写 binding 操作 + auditLog（B9 原子性）。
-//  - GET /binding 零解密（B12）：apiKeyHint/keyFingerprint 在 PUT 时计算落库，列表读取不调 decryptApiKey。
-//  - effectiveModels = modelOverride ?? gatewayModels（B23）：null/undefined 继承网关清单，string[] 为子集覆盖。
-//  - apiKey 可选语义（B5）：undefined 保留原密（kind=config_only），非空重新加密 + 轮换 hint/fingerprint（kind=key_rotated 或 create）。
-//  - 所有出参字段 camelCase（B11）。
+//  - 审计 metadata 固定 shape（无 gatewayId/provider 概念后简化为 {teamId, kind?, enabled?}），**永不记 apiKey 明文/密文/脱敏串/hint/fingerprint**。
+//  - PUT/DELETE/decrypt 用 prisma.$transaction 同事务写 binding 操作 + auditLog（原子性）。
+//  - GET /binding 零解密：apiKeyHint/keyFingerprint 在 PUT 时计算落库，列表读取不调 decryptApiKey。
+//  - apiKey 可选语义：undefined 保留原密（kind=config_only），非空重新加密 + 轮换 hint/fingerprint（kind=key_rotated 或 create）。
+//  - adminActivateProvider 用 $transaction 维护唯一 active：先 updateMany 所有 isActive=true → false，再 update 目标 → true。
+//  - 所有出参字段 camelCase。
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, type TenantLlmBinding, type LlmGateway } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { badRequest, AppError, notFound } from '../common';
+import { AppError, badRequest } from '../common';
 import { AuthService } from './auth.service';
 import { decryptApiKey, encryptApiKey, fingerprintApiKey, getLlmKey, maskApiKey } from '../crypto/credential-cipher';
 import { LLM_PROVIDER } from './dto/enums';
-import type { BindingUpsertDto, GatewayCreateDto, GatewayUpdateDto } from './dto/llm.dto';
+import type { BindingUpsertDto, ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
 
 @Injectable()
 export class LlmService {
@@ -28,27 +28,46 @@ export class LlmService {
     @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
-  // === 平台 Admin 网关目录方法 ===
+  // === 租户：当前启用 provider ===
 
-  /** GET /api/admin/llm-gateways：含 DISABLED + 全字段。 */
-  async adminListGateways(actorId: string) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    const gateways = await this.prisma.llmGateway.findMany({
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+  /** GET /api/llm/active-provider：返回当前启用 provider 的 apiUrl + defaultModels。
+   *  无启用 provider → 404 no_active_provider（应用提示「平台尚未配置模型服务」）。 */
+  async getActiveProvider(actorId: string) {
+    await this.auth.ensureCurrentTeam(actorId);
+    const provider = await this.prisma.llmGateway.findFirst({
+      where: { isActive: true, status: 'ENABLED' },
     });
-    return { gateways: gateways.map((g) => this.adminGateway(g)) };
+    if (!provider) {
+      throw new AppError(404, 'no_active_provider', '平台尚未配置模型服务，请联系管理员');
+    }
+    return {
+      name: provider.name,
+      apiUrl: provider.apiUrl,
+      defaultModels: (provider.models as string[]) ?? [],
+    };
   }
 
-  /** POST /api/admin/llm-gateways。 */
-  async adminCreateGateway(actorId: string, dto: GatewayCreateDto) {
+  // === 平台 Admin provider 目录方法 ===
+
+  /** GET /api/admin/llm-providers：含 DISABLED + isActive + 全字段。 */
+  async adminListProviders(actorId: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const providers = await this.prisma.llmGateway.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+    return { providers: providers.map((p) => this.adminProvider(p)) };
+  }
+
+  /** POST /api/admin/llm-providers（isActive 不在此设，通过 activate 端点）。 */
+  async adminCreateProvider(actorId: string, dto: ProviderCreateDto) {
     await this.auth.ensurePlatformAdmin(actorId);
     // provider 宽松校验：DTO 为 String，service 在 LLM_PROVIDER 集合内校验（D2 平台管理）。
-    // custom 兜底允许自建网关，避免硬编码枚举限制未来扩展。
+    // custom 兜底允许自建 provider，避免硬编码枚举限制未来扩展。
     if (!LLM_PROVIDER.includes(dto.provider as (typeof LLM_PROVIDER)[number])) {
       throw badRequest(`provider 不在白名单：${LLM_PROVIDER.join('/')}`);
     }
     const apiUrl = this.normalizeApiUrl(dto.apiUrl);
-    const gateway = await this.prisma.llmGateway.create({
+    const provider = await this.prisma.llmGateway.create({
       data: {
         provider: dto.provider,
         name: dto.name,
@@ -59,22 +78,23 @@ export class LlmService {
         status: dto.status ?? 'ENABLED',
       },
     });
-    await this.audit(actorId, 'admin.llm_gateway.created', 'LlmGateway', gateway.id, {
-      provider: gateway.provider,
-      name: gateway.name,
+    await this.audit(actorId, 'admin.llm_provider.created', 'LlmGateway', provider.id, {
+      provider: provider.provider,
+      name: provider.name,
     });
-    return { gateway: this.adminGateway(gateway) };
+    return { provider: this.adminProvider(provider) };
   }
 
-  /** PATCH /api/admin/llm-gateways/:id（全可选字段）。 */
-  async adminUpdateGateway(actorId: string, id: string, dto: GatewayUpdateDto) {
+  /** PATCH /api/admin/llm-providers/:id（全可选字段，isActive 不在此改）。 */
+  async adminUpdateProvider(actorId: string, id: string, dto: ProviderUpdateDto) {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.llmGateway.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw notFound('网关不存在');
+    if (!existing) throw new AppError(404, 'provider_not_found', 'provider 不存在');
     if (dto.provider !== undefined && !LLM_PROVIDER.includes(dto.provider as (typeof LLM_PROVIDER)[number])) {
       throw badRequest(`provider 不在白名单：${LLM_PROVIDER.join('/')}`);
     }
     // 显式字段白名单（不依赖拦截器），仅取 DTO 声明字段，避免越权字段透传进 prisma.update。
+    // 注意：isActive 不在 update 端点改（只能通过 activate 端点事务维护唯一）。
     const data: Prisma.LlmGatewayUpdateInput = {};
     if (dto.provider !== undefined) data.provider = dto.provider;
     if (dto.name !== undefined) data.name = dto.name;
@@ -82,75 +102,76 @@ export class LlmService {
     if (dto.models !== undefined) data.models = dto.models as unknown as Prisma.InputJsonValue;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
-    // status 在此端点也可改（与 PATCH /:id/status 不同路径但允许，单端点便利）。
     if (dto.status !== undefined) data.status = dto.status;
-    const gateway = await this.prisma.llmGateway.update({ where: { id }, data });
-    await this.audit(actorId, 'admin.llm_gateway.updated', 'LlmGateway', gateway.id, {
-      provider: gateway.provider,
-      name: gateway.name,
+    const provider = await this.prisma.llmGateway.update({ where: { id }, data });
+    await this.audit(actorId, 'admin.llm_provider.updated', 'LlmGateway', provider.id, {
+      provider: provider.provider,
+      name: provider.name,
     });
-    return { gateway: this.adminGateway(gateway) };
+    return { provider: this.adminProvider(provider) };
   }
 
-  /** PATCH /api/admin/llm-gateways/:id/status（软删除，无物理 DELETE，B8）。 */
-  async adminSetGatewayStatus(actorId: string, id: string, status: 'ENABLED' | 'DISABLED') {
+  /** DELETE /api/admin/llm-providers/:id（active 的拒绝删，提示先切换）。 */
+  async adminDeleteProvider(actorId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const existing = await this.prisma.llmGateway.findUnique({ where: { id }, select: { id: true, isActive: true, name: true } });
+    if (!existing) throw new AppError(404, 'provider_not_found', 'provider 不存在');
+    if (existing.isActive) {
+      throw new AppError(
+        409,
+        'provider_active_not_deletable',
+        '该 provider 当前已启用，请先切换到其他 provider',
+      );
+    }
+    await this.prisma.llmGateway.delete({ where: { id } });
+    await this.audit(actorId, 'admin.llm_provider.deleted', 'LlmGateway', id, { name: existing.name });
+    return { ok: true };
+  }
+
+  /** PATCH /api/admin/llm-providers/:id/activate：设为当前启用，$transaction 维护唯一 active。
+   *  先把所有 isActive=true 置 false，再把目标置 true（同事务原子）。 */
+  async adminActivateProvider(actorId: string, id: string) {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.llmGateway.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw notFound('网关不存在');
-    const gateway = await this.prisma.llmGateway.update({ where: { id }, data: { status } });
-    await this.audit(actorId, 'admin.llm_gateway.disabled', 'LlmGateway', gateway.id, {
-      provider: gateway.provider,
-      name: gateway.name,
-      status,
+    if (!existing) throw new AppError(404, 'provider_not_found', 'provider 不存在');
+    const provider = await this.prisma.$transaction(async (tx) => {
+      // 先把所有 isActive=true 置 false（唯一 active 维护），再设目标为 true。
+      await tx.llmGateway.updateMany({ where: { isActive: true }, data: { isActive: false } });
+      return tx.llmGateway.update({ where: { id }, data: { isActive: true } });
     });
-    return { gateway: this.adminGateway(gateway) };
+    await this.audit(actorId, 'admin.llm_provider.activated', 'LlmGateway', provider.id, {
+      provider: provider.provider,
+      name: provider.name,
+    });
+    return { provider: this.adminProvider(provider) };
   }
 
-  // === 租户方法 ===
+  // === 租户绑定方法 ===
 
-  /** GET /api/llm/gateways：仅 ENABLED，无任何 key（租户选择用）。 */
-  async listGatewaysForTenant(actorId: string) {
-    const membership = await this.auth.ensureCurrentTeam(actorId);
-    void membership; // 仅鉴权，teamId 不参与过滤（网关目录是平台级公开的）
-    const gateways = await this.prisma.llmGateway.findMany({
-      where: { status: 'ENABLED' },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-    });
-    return { gateways: gateways.map((g) => this.publicGateway(g)) };
-  }
-
-  /** GET /api/llm/binding：当前团队的绑定列表，publicBinding 映射，零解密（B12）。 */
+  /** GET /api/llm/binding：当前团队的单条绑定，publicBinding 映射，零解密。 */
   async listBindings(actorId: string) {
     const membership = await this.auth.ensureCurrentTeam(actorId);
-    const bindings = await this.prisma.tenantLlmBinding.findMany({
+    const binding = await this.prisma.tenantLlmBinding.findUnique({
       where: { teamId: membership.team.id },
-      include: {
-        gateway: true,
-        updatedBy: { select: { id: true, displayName: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
+      include: { updatedBy: { select: { id: true, displayName: true } } },
     });
-    return { bindings: bindings.map((b) => this.publicBinding(b, b.gateway)) };
+    return { binding: binding ? this.publicBinding(binding) : null };
   }
 
-  /** PUT /api/llm/binding：ensureTeamAdmin，写库即加密 + $transaction + 审计（B9）。 */
+  /** PUT /api/llm/binding：ensureTeamAdmin，按 teamId upsert，写库即加密 + $transaction + 审计。 */
   async upsertBinding(actorId: string, dto: BindingUpsertDto) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
     const teamId = membership.team.id;
-    // 校验网关存在且 ENABLED（DISABLED 拒绝 upsert，gateway_disabled，AC10）。
-    const gateway = await this.prisma.llmGateway.findUnique({ where: { id: dto.gatewayId } });
-    if (!gateway) throw notFound('网关不存在');
-    if (gateway.status !== 'ENABLED') throw new AppError(409, 'gateway_disabled', '该网关已被禁用，无法绑定');
 
     const existing = await this.prisma.tenantLlmBinding.findUnique({
-      where: { teamId_gatewayId: { teamId, gatewayId: dto.gatewayId } },
+      where: { teamId },
     });
 
-    // apiKey 可选语义（B5）：undefined=保留原密（config_only）；非空=重新加密轮换（key_rotated/create）。
+    // apiKey 可选语义：undefined=保留原密（config_only）；非空=重新加密轮换（key_rotated/create）。
     const apiKeyProvided = dto.apiKey !== undefined && dto.apiKey !== null && dto.apiKey.length > 0;
     if (!existing && !apiKeyProvided) {
       // undefined 且无 binding：返 binding_not_found（design.md B5），前端按 ErrorCode 引导填表。
-      throw new AppError(404, 'binding_not_found', '未绑定该网关，首次绑定必须提供 apiKey');
+      throw new AppError(404, 'binding_not_found', '尚未绑定，首次绑定必须提供 apiKey');
     }
 
     let kind: 'create' | 'key_rotated' | 'config_only';
@@ -173,7 +194,7 @@ export class LlmService {
       keyFingerprint = fingerprintApiKey(dto.apiKey as string);
     }
 
-    // modelOverride：undefined=不改（仅 create 分支需要从 undefined → null）；null=继承 gateway.models；string[]=子集。
+    // modelOverride：undefined=不改；null=清空选择；string[]=用户选的子集。
     // Prisma 的 NullableJson 字段 null 用 Prisma.JsonNull（非 JS null）。
     const modelOverrideValue =
       dto.modelOverride === undefined
@@ -182,13 +203,11 @@ export class LlmService {
           ? Prisma.JsonNull
           : (dto.modelOverride as unknown as Prisma.InputJsonValue);
 
-    // $transaction 原子写 binding + auditLog（B9）。upsert 保证 create/update 分支一致。
+    // $transaction 原子写 binding + auditLog。upsert 保证 create/update 分支一致。
     const binding = await this.prisma.$transaction(async (tx) => {
       // create 分支：字段补齐默认值；update 分支：仅传需要改的字段。
       const createData: Prisma.TenantLlmBindingUncheckedCreateInput = {
         teamId,
-        gatewayId: dto.gatewayId,
-        provider: gateway.provider,
         encryptedApiKey: encryptedApiKey ?? '', // 首次绑定已校验 apiKeyProvided，理论不会到 ''
         apiKeyHint: apiKeyHint ?? '',
         keyFingerprint: keyFingerprint ?? '',
@@ -198,7 +217,6 @@ export class LlmService {
         updatedById: actorId,
       };
       const updateData: Prisma.TenantLlmBindingUncheckedUpdateInput = {
-        provider: gateway.provider,
         updatedById: actorId,
         ...(encryptedApiKey !== undefined ? { encryptedApiKey } : {}),
         ...(apiKeyHint !== undefined ? { apiKeyHint } : {}),
@@ -207,64 +225,62 @@ export class LlmService {
         ...(modelOverrideValue !== undefined ? { modelOverride: modelOverrideValue } : {}),
       };
       const result = await tx.tenantLlmBinding.upsert({
-        where: { teamId_gatewayId: { teamId, gatewayId: dto.gatewayId } },
+        where: { teamId },
         create: createData,
         update: updateData,
-        include: { gateway: true, updatedBy: { select: { id: true, displayName: true } } },
+        include: { updatedBy: { select: { id: true, displayName: true } } },
       });
-      // 审计 metadata 永远只 {teamId, gatewayId, provider, kind, enabled}，绝不记 key 明文/密文/hint/fingerprint（AC12）。
+      // 审计 metadata 永远只 {teamId, kind, enabled}，绝不记 key 明文/密文/hint/fingerprint（v3 去 gatewayId/provider 后简化 shape）。
       await tx.auditLog.create({
         data: {
           actorUserId: actorId,
           action: 'llm_binding.upserted',
           targetType: 'TenantLlmBinding',
           targetId: result.id,
-          metadata: { teamId, gatewayId: dto.gatewayId, provider: gateway.provider, kind, enabled: result.enabled },
+          metadata: { teamId, kind, enabled: result.enabled },
         },
       });
       return result;
     });
-    return { binding: this.publicBinding(binding, binding.gateway) };
+    return { binding: this.publicBinding(binding) };
   }
 
-  /** DELETE /api/llm/binding/:gatewayId：ensureTeamAdmin，$transaction: delete + audit。 */
-  async deleteBinding(actorId: string, gatewayId: string) {
+  /** DELETE /api/llm/binding：ensureTeamAdmin，$transaction: delete + audit（按 teamId 唯一）。 */
+  async deleteBinding(actorId: string) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
     const teamId = membership.team.id;
     const existing = await this.prisma.tenantLlmBinding.findUnique({
-      where: { teamId_gatewayId: { teamId, gatewayId } },
-      include: { gateway: { select: { provider: true } } },
+      where: { teamId },
+      select: { id: true },
     });
-    if (!existing) throw new AppError(404, 'binding_not_found', '未绑定该网关');
+    if (!existing) throw new AppError(404, 'binding_not_found', '尚未绑定');
     await this.prisma.$transaction(async (tx) => {
       await tx.tenantLlmBinding.delete({ where: { id: existing.id } });
-      // 审计 metadata 只记 teamId/gatewayId/provider，绝不记 key 相关字段。
+      // 审计 metadata 只记 teamId，绝不记 key 相关字段（无 gatewayId/provider 了）。
       await tx.auditLog.create({
         data: {
           actorUserId: actorId,
           action: 'llm_binding.deleted',
           targetType: 'TenantLlmBinding',
           targetId: existing.id,
-          metadata: { teamId, gatewayId, provider: existing.gateway.provider },
+          metadata: { teamId },
         },
       });
     });
     return { ok: true };
   }
 
-  /** POST /api/llm/binding/:gatewayId/decrypt：ensureTeamAdmin，返回明文供桌面 CLI 使用（D1）。
+  /** POST /api/llm/binding/decrypt：ensureTeamAdmin，返回明文供桌面 CLI 使用（按 teamId 唯一绑定）。
    *  - 库泄漏 ≠ key 泄漏（库是密文）。
    *  - 明文经 HTTPS 返回给已认证桌面客户端。
    *  - 强审计：每次解密写 llm_binding.key_decrypted（metadata 不含 key）。 */
-  async decryptBindingKey(actorId: string, gatewayId: string) {
+  async decryptBindingKey(actorId: string) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
     const teamId = membership.team.id;
     const binding = await this.prisma.tenantLlmBinding.findUnique({
-      where: { teamId_gatewayId: { teamId, gatewayId } },
-      include: { gateway: { select: { provider: true, status: true } } },
+      where: { teamId },
     });
-    if (!binding) throw new AppError(404, 'binding_not_found', '未绑定该网关');
-    if (binding.gateway.status !== 'ENABLED') throw new AppError(409, 'gateway_disabled', '该网关已被禁用');
+    if (!binding) throw new AppError(404, 'binding_not_found', '尚未绑定');
 
     const key = getLlmKey();
     const plaintext = decryptApiKey(binding.encryptedApiKey, key);
@@ -276,7 +292,7 @@ export class LlmService {
           action: 'llm_binding.key_decrypted',
           targetType: 'TenantLlmBinding',
           targetId: binding.id,
-          metadata: { teamId, gatewayId, provider: binding.gateway.provider },
+          metadata: { teamId },
         },
       });
     });
@@ -286,57 +302,33 @@ export class LlmService {
 
   // === 辅助方法 ===
 
-  /** 平台 Admin 视角的网关全字段出参（含 status/disabled 字段）。 */
-  private adminGateway(g: LlmGateway) {
+  /** 平台 Admin 视角的 provider 全字段出参（含 status/isActive）。 */
+  private adminProvider(p: LlmGateway) {
     return {
-      id: g.id,
-      provider: g.provider,
-      name: g.name,
-      apiUrl: g.apiUrl,
-      status: g.status,
-      models: (g.models as string[]) ?? [],
-      description: g.description,
-      sortOrder: g.sortOrder,
-      createdAt: g.createdAt.toISOString(),
-      updatedAt: g.updatedAt.toISOString(),
+      id: p.id,
+      provider: p.provider,
+      name: p.name,
+      apiUrl: p.apiUrl,
+      status: p.status,
+      models: (p.models as string[]) ?? [],
+      description: p.description,
+      sortOrder: p.sortOrder,
+      isActive: p.isActive,
+      createdAt: p.createdAt.toISOString(),
+      updatedAt: p.updatedAt.toISOString(),
     };
   }
 
-  /** 租户视角的网关出参（仅 ENABLED 字段 + 公开字段，无 status）。 */
-  private publicGateway(g: LlmGateway) {
-    return {
-      id: g.id,
-      provider: g.provider,
-      name: g.name,
-      apiUrl: g.apiUrl,
-      models: (g.models as string[]) ?? [],
-      description: g.description,
-      sortOrder: g.sortOrder,
-    };
-  }
-
-  /** 租户绑定出参：显式挑字段白名单（不依赖拦截器），零解密（B12）。
-   *  effectiveModels = modelOverride ?? gatewayModels（B23）。 */
-  private publicBinding(
-    b: TenantLlmBinding & { gateway: LlmGateway; updatedBy?: { id: string; displayName: string } | null },
-    gateway: LlmGateway,
-  ) {
-    const gatewayModels = (gateway.models as string[]) ?? [];
-    const modelOverride = b.modelOverride === null || b.modelOverride === undefined ? null : (b.modelOverride as string[]);
-    const effectiveModels = modelOverride ?? gatewayModels;
+  /** 租户绑定出参：显式挑字段白名单（不依赖拦截器），零解密。无 gatewayId/provider 概念（v3 定稿）。 */
+  private publicBinding(b: TenantLlmBinding & { updatedBy?: { id: string; displayName: string } | null }) {
+    const modelOverride =
+      b.modelOverride === null || b.modelOverride === undefined ? null : (b.modelOverride as string[]);
     return {
       id: b.id,
-      gatewayId: b.gatewayId,
-      provider: b.provider,
-      gatewayName: gateway.name,
-      apiUrl: gateway.apiUrl,
-      gatewayStatus: gateway.status,
-      enabled: b.enabled,
       apiKeyHint: b.apiKeyHint, // 脱敏串（非敏感，明文存库）
       keyFingerprint: b.keyFingerprint, // sha256 前 16 位（非敏感，明文存库）
-      gatewayModels,
+      enabled: b.enabled,
       modelOverride,
-      effectiveModels,
       updatedBy: b.updatedBy ?? null,
       updatedAt: b.updatedAt.toISOString(),
     };

@@ -351,9 +351,11 @@ model PluginRating {
   @@index([pluginId])
 }
 
-// LLM 网关目录（平台级，平台 Admin 维护，应用发布时 seed 默认值）。
+// LLM provider 目录（平台级，平台 Admin 维护，应用发布时 seed 默认值）。
 // provider 为 String（非 enum）：平台维护白名单（openai/anthropic/azure/deepseek/moonshot/qwen/custom），
 // 见 dto/enums.ts LLM_PROVIDER。models 为 string[]（Json）。name 唯一（upsert seed 幂等）。
+// isActive：当前启用 provider（全表最多一条 true，由 adminActivateProvider 事务维护唯一）。
+// 应用界面零 provider 概念：仅取 isActive=true 的 provider 的 apiUrl 供桌面拉取模型。
 model LlmGateway {
   id          String           @id @default(uuid())
   provider    String                            // 平台维护白名单值（非 enum，String）
@@ -363,39 +365,37 @@ model LlmGateway {
   models      Json             @default("[]")   // string[]，如 ["gpt-4o","gpt-4o-mini"]
   description String           @default("")
   sortOrder   Int              @default(0)      // 小在前
+  isActive    Boolean          @default(false)  // 当前启用 provider（全表最多一条 true，事务维护唯一）
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
-  bindings    TenantLlmBinding[]
 
   @@index([status, sortOrder])
+  @@index([isActive])
 }
 
 // 租户 LLM 绑定（租户级，TEAM_ADMIN 维护）。
+// v3 定稿：去 gatewayId + provider（用户界面零 provider 概念），teamId @unique（一个团队一条 apiKey 绑定）。
+// 用户填 apiKey 拉取当前启用 provider 的模型，平台切换 provider 后用户只需重新填 key（无感知切换）。
 // encryptedApiKey 为 AES-256-GCM 密文打包 base64(iv(12B)||tag(16B)||ciphertext)。
 // apiKeyHint 为脱敏串（非敏感，明文存库供列表展示，零解密）。
 // keyFingerprint 为 sha256(明文).slice(0,16)，稳定标识「这是哪个 key」（不泄漏明文）。
-// gateway 上 onDelete: Restrict：禁用网关不删绑定（只读保留），防止误删清空全部租户 key。
 model TenantLlmBinding {
   id              String     @id @default(uuid())
-  teamId          String
-  gatewayId       String
-  provider        String                       // 冗余，与 gateway.provider 一致（便于审计 metadata 不再联表）
-  encryptedApiKey String                       // base64(iv(12B) || tag(16B) || ciphertext)
-  apiKeyHint      String     @default("")      // 明文存非敏感脱敏串（PUT 时计算落库）
-  keyFingerprint  String     @default("")      // sha256(plaintext).slice(0,16)
+  teamId          String     @unique                     // 一个团队一条 apiKey 绑定（v3 定稿）
+  encryptedApiKey String                                 // base64(iv(12B) || tag(16B) || ciphertext)
+  apiKeyHint      String     @default("")                // 明文存非敏感脱敏串（PUT 时计算落库）
+  keyFingerprint  String     @default("")                // sha256(plaintext).slice(0,16)
   enabled         Boolean    @default(true)
-  modelOverride   Json?                        // null=继承 gateway.models；string[]=子集
-  createdById     String?                       // FK User，谁创建
-  updatedById     String?                       // FK User，谁最后改
+  modelOverride   Json?                                    // string[]，用户从拉取结果选的模型子集
+  createdById     String?                                 // FK User，谁创建
+  updatedById     String?                                 // FK User，谁最后改
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
-  team       Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  gateway    LlmGateway @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
-  createdBy  User?      @relation("BindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy  User?      @relation("BindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  team       Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy  User? @relation("BindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User? @relation("BindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
-  @@unique([teamId, gatewayId])
   @@index([teamId, enabled])
 }
 
