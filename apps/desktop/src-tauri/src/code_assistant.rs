@@ -1290,7 +1290,9 @@ fn stop_child_process(mut child: Child) {
 /// 供 run_captured_inner 超时分支复用：发完 kill 后立即 wait_with_output 回收 stdout/stderr。
 /// - Unix：kill -TERM -<pgid> → 等 → kill -KILL -<pgid>（spawn 时 setsid 已建独立进程组）。
 /// - Windows：taskkill /PID <pid> /T → 等 → taskkill /F /PID <pid> /T（递归杀进程树）。
-fn kill_child_tree(child: &Child) {
+///
+/// pub(crate) 供 cli_installer::cancel_install 复用（杀 winget 子进程组，AC4 安装可取消）。
+pub(crate) fn kill_child_tree(child: &Child) {
     #[cfg(unix)]
     {
         let group = format!("-{}", child.id());

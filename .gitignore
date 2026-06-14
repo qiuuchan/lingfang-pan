@@ -26,6 +26,10 @@ night_runs/
 !.env.collab.example
 **/secrets/
 
+# Tauri 更新签名密钥（私钥永不入仓；公钥内嵌进 tauri.conf.json）
+.tauri/
+*.key
+
 # Trellis 本机运行态
 .trellis/.developer
 .trellis/.current-task

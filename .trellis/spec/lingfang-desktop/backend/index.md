@@ -8,6 +8,7 @@
 
 - 改内置插件扫描、manifest 解析或资源目录时，先读 [plugin-loading.md](./plugin-loading.md)。
 - 改本地能力、路径校验或 Tauri command 时，先读 [capability-gateway.md](./capability-gateway.md)。
+- 改检查更新、tauri-plugin-updater、版本发布契约时，先读 [updater-integration.md](./updater-integration.md)。
 - 改构建配置、命令或测试时，先读 [quality.md](./quality.md)。
 - 同时改前端 iframe 运行时，读 `.trellis/spec/desktop/frontend/api-streaming-and-runtime.md`。
 
