@@ -146,3 +146,39 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 桌面端检查更新（Tauri updater 集成）
+
+**Date**: 2026-06-14
+**Task**: 桌面端检查更新（Tauri updater 集成）
+**Branch**: `feat/settings-cli-runtime-model-gateway`
+
+### Summary
+
+集成 tauri-plugin-updater 实现完整检查更新流程。后端新增 /api/releases/tauri-update 适配 Tauri 固定契约（pub_date 下划线/204 语义，用 @Res passthrough 避开 ClassSerializerInterceptor 崩溃）；桌面 Rust 新建 updater.rs（PendingUpdate+ipc::Channel 官方模式，endpoints 运行时动态注入因后端地址用户配置）；前端设置页加检查更新 Card+Dialog+进度条。签名密钥对生成于 .tauri/（gitignore 私钥，pubkey 入 tauri.conf.json）。3 阶段实施+跨层 check 全过，44+88+146 测全绿。实战踩坑固化进 updater-integration.md spec。阶段4（带签名构建+补 seed signature+端到端下载安装）待手动验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `729a9ea` | (see git log) |
+| `dc48181` | (see git log) |
+| `9f6d66` | (see git log) |
+| `f9096a9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
