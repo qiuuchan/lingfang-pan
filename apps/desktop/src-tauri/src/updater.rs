@@ -151,6 +151,8 @@ pub async fn check_update(
     let url = url::Url::parse(&url_string).map_err(|e| e.to_string())?;
 
     // 动态注入 endpoint：updater_builder 读 conf.json 的 pubkey/timeout 等，但 endpoints 运行时覆盖。
+    // 注意：release 模式 updater 强制 HTTPS endpoint（防中间人篡改更新包），HTTP 仅 dev 允许。
+    // 本地/内网部署用 HTTP 后端时，tauri.conf.json 的 plugins.updater.dangerousInsecureTransportProtocol=true 放行。
     let update = app
         .updater_builder()
         .endpoints(vec![url])
