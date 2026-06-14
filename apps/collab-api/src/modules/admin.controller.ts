@@ -16,7 +16,7 @@ import {
   AdminUpdateTeamDto,
   AdminUpdateUserDto,
 } from './dto/admin.dto';
-import { GatewayCreateDto, GatewayStatusDto, GatewayUpdateDto } from './dto/llm.dto';
+import { ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
 import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
 import { ReleaseService } from './release.service';
 
@@ -163,30 +163,36 @@ export class AdminController {
     return this.admin.auditLogs(requireUser(req).id);
   }
 
-  // === LLM 网关目录（平台 Admin 维护，ensurePlatformAdmin 在 LlmService 内） ===
+  // === LLM provider 目录（平台 Admin 维护，ensurePlatformAdmin 在 LlmService 内） ===
 
-  @Get('llm-gateways')
-  @ApiOperation({ summary: '网关目录列表（含 DISABLED，全字段）' })
-  listLlmGateways(@Req() req: Request) {
-    return this.llm.adminListGateways(requireUser(req).id);
+  @Get('llm-providers')
+  @ApiOperation({ summary: 'provider 列表（含 isActive + 全字段）' })
+  listLlmProviders(@Req() req: Request) {
+    return this.llm.adminListProviders(requireUser(req).id);
   }
 
-  @Post('llm-gateways')
-  @ApiOperation({ summary: '新建网关' })
-  createLlmGateway(@Req() req: Request, @Body() body: GatewayCreateDto) {
-    return this.llm.adminCreateGateway(requireUser(req).id, body);
+  @Post('llm-providers')
+  @ApiOperation({ summary: '新建 provider（isActive 通过 activate 端点设）' })
+  createLlmProvider(@Req() req: Request, @Body() body: ProviderCreateDto) {
+    return this.llm.adminCreateProvider(requireUser(req).id, body);
   }
 
-  @Patch('llm-gateways/:id')
-  @ApiOperation({ summary: '更新网关（全可选字段）' })
-  updateLlmGateway(@Req() req: Request, @Param('id') id: string, @Body() body: GatewayUpdateDto) {
-    return this.llm.adminUpdateGateway(requireUser(req).id, id, body);
+  @Patch('llm-providers/:id')
+  @ApiOperation({ summary: '更新 provider（全可选字段，isActive 不在此改）' })
+  updateLlmProvider(@Req() req: Request, @Param('id') id: string, @Body() body: ProviderUpdateDto) {
+    return this.llm.adminUpdateProvider(requireUser(req).id, id, body);
   }
 
-  @Patch('llm-gateways/:id/status')
-  @ApiOperation({ summary: '启用/禁用网关（软删除，无物理 DELETE）' })
-  setLlmGatewayStatus(@Req() req: Request, @Param('id') id: string, @Body() body: GatewayStatusDto) {
-    return this.llm.adminSetGatewayStatus(requireUser(req).id, id, body.status);
+  @Delete('llm-providers/:id')
+  @ApiOperation({ summary: '删除 provider（active 的拒绝删）' })
+  deleteLlmProvider(@Req() req: Request, @Param('id') id: string) {
+    return this.llm.adminDeleteProvider(requireUser(req).id, id);
+  }
+
+  @Patch('llm-providers/:id/activate')
+  @ApiOperation({ summary: '设为当前启用（事务维护唯一 active）' })
+  activateLlmProvider(@Req() req: Request, @Param('id') id: string) {
+    return this.llm.adminActivateProvider(requireUser(req).id, id);
   }
 
   // === 应用版本发布（平台 Admin 维护，ensurePlatformAdmin 在 ReleaseService 内） ===

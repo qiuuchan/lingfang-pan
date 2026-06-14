@@ -1,5 +1,9 @@
-// LLM 网关目录 seed：应用发布时写入一批默认网关，方便开箱即用（design.md §9 / prd.md D2）。
-// 幂等：按 name upsert，重复执行不报错、不覆盖已调整的 models/sortOrder（仅 create 时用默认值，
+// LLM provider 目录 seed：应用发布时写入一批默认 provider，方便开箱即用（design.md §9 / prd.md D2）。
+// v3 定稿：单 provider 云分发。把 OpenAI 那条设为 isActive=true（当前启用），
+// 方便全新库首次部署即可填 key 拉模型（无需 Admin 手动激活）。
+// 注意：仅「全新库首次 seed」时写 isActive=true；升级库（已有同名 provider）重跑 seed 会 skip，
+// 此时若全表无 active，需 Admin 手动激活一条（design.md §9 首版无生产数据，破坏式重建可接受）。
+// 幂等：按 name upsert，重复执行不报错、不覆盖已调整的 models/sortOrder/isActive（仅 create 时用默认值，
 // 已存在则跳过——允许平台 Admin 在 seed 后自定义）。
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -8,10 +12,10 @@ import { PrismaClient } from '@prisma/client';
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-/** 默认网关清单（provider / name / apiUrl / models / sortOrder）。
+/** 默认 provider 清单（provider / name / apiUrl / models / sortOrder）。
  *  winget-style: apiUrl 已规范化去尾斜杠。
  *  对应 prd.md AC14 + design.md §9。 */
-const DEFAULT_GATEWAYS = [
+const DEFAULT_PROVIDERS = [
   {
     provider: 'openai',
     name: 'OpenAI 官方',
@@ -19,6 +23,7 @@ const DEFAULT_GATEWAYS = [
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
     description: 'OpenAI 官方 API（GPT 系列模型）',
     sortOrder: 1,
+    isActive: true, // 默认启用 OpenAI（当前启用 provider，全表最多一条 true）
   },
   {
     provider: 'anthropic',
@@ -65,28 +70,29 @@ const DEFAULT_GATEWAYS = [
 async function main() {
   let created = 0;
   let skipped = 0;
-  for (const gateway of DEFAULT_GATEWAYS) {
+  for (const provider of DEFAULT_PROVIDERS) {
     // 幂等 upsert by name（name 唯一约束）。已存在时不覆盖，保留 Admin 的自定义。
-    // 用findFirst避免 upsert 在已存在时仍写 update: {}（触发 updatedAt 变化）。
-    const existing = await prisma.llmGateway.findUnique({ where: { name: gateway.name } });
+    // 用 findUnique 避免 upsert 在已存在时仍写 update: {}（触发 updatedAt 变化）。
+    const existing = await prisma.llmGateway.findUnique({ where: { name: provider.name } });
     if (existing) {
       skipped++;
       continue;
     }
     await prisma.llmGateway.create({
       data: {
-        provider: gateway.provider,
-        name: gateway.name,
-        apiUrl: gateway.apiUrl,
-        models: gateway.models,
-        description: gateway.description,
-        sortOrder: gateway.sortOrder,
+        provider: provider.provider,
+        name: provider.name,
+        apiUrl: provider.apiUrl,
+        models: provider.models,
+        description: provider.description,
+        sortOrder: provider.sortOrder,
         status: 'ENABLED',
+        isActive: provider.isActive ?? false,
       },
     });
     created++;
   }
-  console.log(`LLM 网关 seed 完成：新增 ${created} 条，跳过已存在 ${skipped} 条。`);
+  console.log(`LLM provider seed 完成：新增 ${created} 条，跳过已存在 ${skipped} 条。`);
 }
 
 main().finally(async () => prisma.$disconnect());

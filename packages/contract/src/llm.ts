@@ -1,13 +1,19 @@
-// LLM 相关契约（LLM 网关目录 + 租户绑定单一真源）。
+// LLM 相关契约（单 provider 云分发 + 无 provider UI，v3 定稿）。
 //
-// 历史说明：CONTRACT-06 曾删除旧文件的空壳 schema（无 /llm/proxy 路由、无 LlmGateway 表）。
-// 本任务（06-14-settings-cli-runtime-model-gateway）重建为后端真实存在的「模型网关目录 + 租户绑定」契约：
-//  - LlmGatewayPublicSchema / TenantBindingPublicSchema：GET 出参（脱敏、零密钥、零明文）。
-//  - BindingUpsertInputSchema：租户 PUT /api/llm/binding 入参（apiKey 可选语义见 design.md B5）。
-//  - GatewayCreateInputSchema / GatewayUpdateInputSchema：平台 Admin 网关目录增改入参。
-//  - LlmErrorCode：6 个网关/绑定/安装专属错误码（与 collab-api common.ts 的 code 字段对齐）。
+// 设计（见 06-14-model-gateway-final-single-provider）：
+//  - 应用界面零 provider 概念：用户只看到「一个 apiKey 输入 + 拉取模型 + 模型选择」。
+//  - 平台 Admin 维护多 provider（LlmGateway 表）+ 设一个「当前启用」（isActive=true，全表最多一条）。
+//  - 应用拉取当前启用 provider 的 apiUrl，用户填 key 用它。Admin 切 provider，用户无感知（重填 key + 拉模型）。
+//  - TenantLlmBinding 去 gatewayId，teamId @unique（一个团队一条 apiKey 绑定）。
+//
+// 契约：
+//  - ActiveProviderSchema：GET /api/llm/active-provider 出参（当前启用 provider 的 apiUrl + defaultModels）。
+//  - TenantBindingPublicSchema：GET /api/llm/binding 出参（单条，脱敏，零解密，无 gatewayId/provider）。
+//  - BindingUpsertInputSchema：PUT /api/llm/binding 入参（apiKey 可选语义见 design.md B5）。
+//  - ProviderCreateInputSchema / ProviderUpdateInputSchema：平台 Admin provider 增改入参。
+//  - LlmErrorCode：错误码（含 no_active_provider）。
 //  - ChatMessage：plugin-sdk 的本地 ChatMessage 与之同名但未复用契约；此处保留以便未来插件复用。
-//  - ErrorCode：业务通用错误码集合（与 collab-api common.ts AppError.code 对齐），plugin.test.mjs 测试覆盖。
+//  - ErrorCode：业务通用错误码集合（与 collab-api common.ts AppError.code 对齐）。
 import { z } from 'zod';
 
 export const ChatMessage = z.object({
@@ -33,10 +39,12 @@ export const ErrorCode = z.enum([
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
-// LLM 网关/绑定/安装专属错误码（与 collab-api common.ts AppError.code 对齐，前端按 code 分支处理）。
+// LLM 网关/绑定专属错误码（与 collab-api common.ts AppError.code 对齐，前端按 code 分支处理）。
 export const LlmErrorCode = z.enum([
-  'gateway_disabled',         // 网关已软删除（status=DISABLED），绑定只读
-  'binding_not_found',        // 租户尚未绑定该网关（GET decrypt / config-only PUT 无原密可改）
+  'no_active_provider',       // 平台未配置当前启用 provider（无 isActive=true），应用提示「平台尚未配置模型服务」
+  'provider_not_found',       // Admin 操作目标 provider 不存在
+  'provider_active_not_deletable', // 试图删除当前启用的 provider（需先切换到其他 provider）
+  'binding_not_found',        // 租户尚未绑定（config-only PUT 无原密可改 / decrypt 无绑定）
   'llm_key_decrypt_failed',   // 密文被篡改/密钥不匹配，AES-GCM tag 校验失败
   'llm_key_not_configured',   // 服务端 LLM_KEY_ENCRYPTION_KEY 未配置，无法加解密
   'install_unsupported',      // 当前平台不支持自动安装（macOS/Linux 无 winget）
@@ -44,57 +52,70 @@ export const LlmErrorCode = z.enum([
 ]);
 export type LlmErrorCode = z.infer<typeof LlmErrorCode>;
 
-// === 平台 Admin 网关目录契约 ===
+// === 平台 Admin provider 目录契约 ===
 
-/** GET /api/llm/gateways（租户侧，仅 ENABLED）单条出参。 */
-export const LlmGatewayPublicSchema = z.object({
+/** GET /api/admin/llm-providers 单条出参（含 DISABLED + isActive 全字段）。 */
+export const LlmProviderAdminSchema = z.object({
   id: z.string(),
   provider: z.string(),
   name: z.string(),
   apiUrl: z.string(),
+  status: z.enum(['ENABLED', 'DISABLED']),
   models: z.array(z.string()).default([]),
   description: z.string().default(''),
   sortOrder: z.number().default(0),
+  isActive: z.boolean().default(false),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
-export type LlmGatewayPublic = z.infer<typeof LlmGatewayPublicSchema>;
+export type LlmProviderAdmin = z.infer<typeof LlmProviderAdminSchema>;
 
-// === 租户绑定契约 ===
+// === 当前启用 provider 契约（应用拉取用） ===
 
-/** GET /api/llm/binding 单条出参（脱敏，零解密；effectiveModels = modelOverride ?? gatewayModels）。 */
+/** GET /api/llm/active-provider 出参（当前启用 provider 的 apiUrl + defaultModels，不暴露「有多个」）。
+ *  无启用 provider → 404 `no_active_provider`。 */
+export const ActiveProviderSchema = z.object({
+  name: z.string().optional(),                 // 展示名（可选，应用通常不展示）
+  apiUrl: z.string(),                          // 拉取模型用的 API 基址
+  defaultModels: z.array(z.string()).default([]), // provider 声明的默认模型清单（占位/兜底）
+});
+export type ActiveProvider = z.infer<typeof ActiveProviderSchema>;
+
+// === 租户绑定契约（单条，无 gatewayId/provider） ===
+
+/** GET /api/llm/binding 出参（单条，脱敏，零解密）。
+ *  v3 定稿：去 gatewayId/provider/gatewayName/apiUrl/gatewayStatus/gatewayModels/effectiveModels。
+ *  modelOverride 为用户从拉取结果选的模型列表（string[]|null）。 */
 export const TenantBindingPublicSchema = z.object({
   id: z.string(),
-  gatewayId: z.string(),
-  provider: z.string(),
-  gatewayName: z.string(),
-  apiUrl: z.string(),
-  gatewayStatus: z.enum(['ENABLED', 'DISABLED']),
+  apiKeyHint: z.string(),                          // 脱敏串（如 sk-1***wxyz），非密文非明文
+  keyFingerprint: z.string(),                      // sha256(明文).slice(0,16)，稳定标识「这是哪个 key」
   enabled: z.boolean(),
-  apiKeyHint: z.string(),                       // 脱敏串（如 sk-1***wxyz），非密文非明文
-  keyFingerprint: z.string(),                   // sha256(明文).slice(0,16)，稳定标识「这是哪个 key」
-  gatewayModels: z.array(z.string()),           // 网关目录声明的模型清单
-  modelOverride: z.array(z.string()).nullable(),// null=继承 gatewayModels；string[]=子集
-  effectiveModels: z.array(z.string()),         // 实际生效模型 = modelOverride ?? gatewayModels
+  modelOverride: z.array(z.string()).nullable(),   // 用户从拉取结果选的模型列表；null=未选
   updatedBy: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   updatedAt: z.string(),
 });
 export type TenantBindingPublic = z.infer<typeof TenantBindingPublicSchema>;
 
-/** PUT /api/llm/binding 入参。
+/** PUT /api/llm/binding 入参（无 gatewayId，按 teamId 唯一 upsert）。
  *  apiKey 语义（design.md B5）：
  *  - undefined：保留原密，仅改 enabled/modelOverride（kind=config_only）；
  *  - 非空：重新加密 + 轮换 hint/fingerprint（kind=key_rotated 或 create）。 */
 export const BindingUpsertInputSchema = z.object({
-  gatewayId: z.string(),
   apiKey: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
   modelOverride: z.array(z.string()).nullable().optional(),
 });
 export type BindingUpsertInput = z.infer<typeof BindingUpsertInputSchema>;
 
-// === 平台 Admin 网关目录增改入参 ===
+// === 平台 Admin provider 增改入参 ===
 
-/** POST /api/admin/llm-gateways 入参。apiUrl 服务端规范化去尾斜杠。 */
-export const GatewayCreateInputSchema = z.object({
+/** POST /api/admin/llm-providers 入参。
+ *  - provider 为 String（非 enum），平台维护白名单（见 enums.ts LLM_PROVIDER）。
+ *  - apiUrl 服务端规范化去尾斜杠（service 内 normalizeApiUrl）。
+ *  - name 唯一（DB 约束 + seed upsert 幂等）。
+ *  - isActive 不在此设，通过 PATCH /:id/activate 端点事务维护唯一。 */
+export const ProviderCreateInputSchema = z.object({
   provider: z.string().min(1),
   name: z.string().min(1),
   apiUrl: z.string().min(1),
@@ -103,8 +124,8 @@ export const GatewayCreateInputSchema = z.object({
   sortOrder: z.number().min(0).optional(),
   status: z.enum(['ENABLED', 'DISABLED']).optional(),
 });
-export type GatewayCreateInput = z.infer<typeof GatewayCreateInputSchema>;
+export type ProviderCreateInput = z.infer<typeof ProviderCreateInputSchema>;
 
-/** PATCH /api/admin/llm-gateways/:id 入参（全可选）。 */
-export const GatewayUpdateInputSchema = GatewayCreateInputSchema.partial();
-export type GatewayUpdateInput = z.infer<typeof GatewayUpdateInputSchema>;
+/** PATCH /api/admin/llm-providers/:id 入参（全可选）。 */
+export const ProviderUpdateInputSchema = ProviderCreateInputSchema.partial();
+export type ProviderUpdateInput = z.infer<typeof ProviderUpdateInputSchema>;
