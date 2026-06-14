@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -40,6 +40,23 @@ export type Plugin = {
   description: string;
   status: PluginStatus;
   updatedAt?: string;
+};
+
+// LLM provider 目录项（镜像后端 LlmProviderAdmin 出参，见 packages/contract/src/llm.ts）。
+// isActive 是核心视图概念：全表最多一条 true（事务维护唯一），代表「当前启用」的模型服务。
+export type LlmProviderStatus = 'ENABLED' | 'DISABLED';
+export type LlmProvider = {
+  id: string;
+  provider: string;
+  name: string;
+  apiUrl: string;
+  status: LlmProviderStatus;
+  models: string[];
+  description: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Application = {
