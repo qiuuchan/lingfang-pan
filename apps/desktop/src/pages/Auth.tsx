@@ -35,7 +35,7 @@ export function Auth() {
   }
 
   async function onLogin() {
-    if (!backendUrl) return toast.error('先在下方设置服务地址');
+    if (!backendUrl) return toast.error('先在下方设置公司平台地址');
     if (!isEmail(email)) return toast.error('邮箱格式不正确');
     if (!password) return toast.error('输入密码');
     setLoading(true);
@@ -50,7 +50,7 @@ export function Auth() {
   }
 
   async function onRegister() {
-    if (!backendUrl) return toast.error('先在下方设置服务地址');
+    if (!backendUrl) return toast.error('先在下方设置公司平台地址');
     if (!isEmail(email)) return toast.error('邮箱格式不正确（如 name@example.com）');
     if (password.length < 8) return toast.error('密码至少 8 位');
     if (wantsTeamAdmin && !teamName.trim()) return toast.error('填写要申请管理的团队名称');
@@ -88,10 +88,10 @@ export function Auth() {
     setTestingBackend(true);
     try {
       await testBackendUrl(normalized);
-      if (!saveBackendUrl(normalized)) return toast.error('服务地址格式不正确');
+      if (!saveBackendUrl(normalized)) return toast.error('公司平台地址格式不正确');
       setBackendUrlDraft(normalized);
       setShowBackendSettings(false);
-      toast.success('服务地址已保存');
+      toast.success('公司平台地址已保存');
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -133,8 +133,8 @@ export function Auth() {
                 <ServerIcon className="size-4" />
               </span>
               <span className="min-w-0">
-                <span className="block font-medium text-foreground">服务地址</span>
-                <span className="block truncate text-muted-foreground">{backendUrl || '未设置，登录和注册前需要先保存地址'}</span>
+                <span className="block font-medium text-foreground">公司平台地址</span>
+                <span className="block truncate text-muted-foreground">{backendUrl || '未设置，登录和注册前需要先保存平台地址'}</span>
               </span>
             </div>
             <Button
@@ -157,7 +157,7 @@ export function Auth() {
                 <LoadingButton loading={testingBackend} onClick={saveBackend}>测试并保存</LoadingButton>
                 <Button variant="outline" onClick={() => setBackendUrlDraft('http://127.0.0.1:3000')}>填入本机默认地址</Button>
               </div>
-              <p className="text-xs text-muted-foreground">保存前会检测服务地址是否可用。</p>
+              <p className="text-xs text-muted-foreground">保存前会检测公司平台地址是否可用。</p>
             </div>
           </div>
         </div>
