@@ -1,7 +1,7 @@
 // LLM 租户控制器：5 个 /api/llm/* 路由（design.md §4.2）。
 // 全局 JwtAuthGuard（security.ts），本控制器不额外声明 @Public。
 // 所有方法经 requireUser(req).id 透传 service，鉴权在 service 内（ensureCurrentTeam/ensureTeamAdmin）。
-import { Body, Controller, Delete, Get, Param, Post, Put, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
@@ -12,7 +12,10 @@ import { BindingUpsertDto } from './dto/llm.dto';
 @ApiBearerAuth()
 @Controller('llm')
 export class LlmController {
-  constructor(private readonly llm: LlmService) {}
+  // 显式 @Inject(LlmService) token，对齐项目既有 controller 约定（admin/wallet/release 均用显式 token）。
+  // 简写注入依赖 emitDecoratorMetadata 反射，当模块内存在含异常依赖链的 provider（如 release）时，
+  // 反射解析会拿错 token 导致 this.llm 为 undefined，运行时报 Cannot read 'listGatewaysForTenant'。
+  constructor(@Inject(LlmService) private readonly llm: LlmService) {}
 
   @Get('gateways')
   @ApiOperation({ summary: '网关目录（仅 ENABLED，租户选择用）' })
