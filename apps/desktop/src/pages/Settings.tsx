@@ -14,11 +14,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ServerIcon } from 'lucide-react';
+import { RefreshCwIcon, ServerIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { normalizeBackendUrl, testBackendUrl, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
 import { installCli, installRuntime, AVAILABILITY_EVENT } from '@/lib/install-cli';
+import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
 import type {
   CliInstallTarget,
   InstallResult,
@@ -32,8 +33,31 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Markdown } from '@/components/markdown';
 import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { ModelGatewayTab } from './settings/ModelGatewayTab';
+
+// 字节数转人类可读（design §3.3：total 未知时显示已下载量）。
+// 二进制单位（1024），保留 1 位小数。
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
 
 export function Settings() {
   const { backendUrl, saveBackendUrl, resetSession } = useApp();
@@ -42,6 +66,15 @@ export function Settings() {
   const [backendInput, setBackendInput] = useState(backendUrl || '');
   const [testingBackend, setTestingBackend] = useState(false);
   const [savingBackend, setSavingBackend] = useState(false);
+
+  // === Tab3 检查更新 state（design §3.2） ===
+  // checking：检查中态；updateMeta：非 null 时弹更新 Dialog；updateInstalling：下载安装中（锁 Dialog）。
+  // progress：下载进度（total 为 Content-Length，未知则 null；downloaded 为已累计字节数）。
+  // 注：installing（Tab1 安装态，Record<InstallTarget, boolean>）已占用，故此处用 updateInstalling 避名冲突。
+  const [checking, setChecking] = useState(false);
+  const [updateMeta, setUpdateMeta] = useState<UpdateMetadata | null>(null);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [progress, setProgress] = useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
 
   // === Tab1 CLI/运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
   const [cliResults, setCliResults] = useState<ToolAvailability[] | null>(null);
@@ -158,6 +191,58 @@ export function Settings() {
     }
   }
 
+  // === Tab3 检查更新逻辑（design §3.2） ===
+  // checkUpdate：backendUrl 空 → 友好提示；返 null → 已是最新；非 null → 弹 Dialog。
+  // 错误（网络/验签元数据/endpoint 无效）走 catch toast（ApiError.message）。
+  async function checkForUpdate() {
+    const base = backendUrl || '';
+    if (!base) {
+      toast.error('请先在上方配置后端地址');
+      return;
+    }
+    setChecking(true);
+    try {
+      const meta = await checkUpdate(base);
+      if (!meta) {
+        toast.success('当前已是最新版本');
+        return;
+      }
+      setProgress({ downloaded: 0, total: null });
+      setUpdateMeta(meta);
+    } catch (err) {
+      toast.error((err as ApiError).message || '检查更新失败，请重试。');
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  // 立即更新：downloadAndInstall 订阅 Channel 事件（Started/Progress/Finished）。
+  // Started 设 total，Progress 累加 downloaded，Finished 提示即将重启（Rust 侧 app.restart 自动执行）。
+  // 安装过程中安装包验签失败/网络中断 → catch toast；finally 解除 updateInstalling（成功路径进程已退出不触发）。
+  async function installUpdate() {
+    setUpdateInstalling(true);
+    try {
+      await downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          setProgress({ downloaded: 0, total: event.data.contentLength });
+        } else if (event.event === 'Progress') {
+          setProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
+        } else if (event.event === 'Finished') {
+          toast.success('更新下载完成，即将重启…');
+        }
+      });
+    } catch (err) {
+      toast.error((err as ApiError).message || '下载更新失败，请重试。');
+      setUpdateInstalling(false);
+    }
+  }
+
+  // 关闭更新 Dialog：安装中禁止关闭（避免误触中断）。dismissable=false 同步拦截 Esc/外点。
+  function closeUpdateDialog(open: boolean) {
+    if (!open && updateInstalling) return;
+    setUpdateMeta(null);
+  }
+
   return (
     <div className="mx-auto w-full max-w-3xl">
       <Tabs defaultValue="cli">
@@ -216,8 +301,69 @@ export function Settings() {
               </p>
             </CardContent>
           </Card>
+
+          {/* 检查更新 Card（design §3.2）：放在后端地址 Card 下方，复用 backendUrl 作为更新源。 */}
+          <Card className="mt-4 w-full">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <RefreshCwIcon className="size-5 text-primary" />
+                <CardTitle>检查更新</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                连接后端的发布服务检查新版本，发现更新后可下载安装包并自动重启。
+              </p>
+              <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
+
+      {/* 更新 Dialog（design §3.2/§3.3）：发现新版本时展示 changelog + 进度条 + 立即更新。
+          安装中锁定：disablePointerDismissal 阻外点 + closeUpdateDialog 拦 Esc/关闭按钮。 */}
+      <Dialog open={updateMeta !== null} onOpenChange={closeUpdateDialog} disablePointerDismissal={updateInstalling}>
+        <DialogContent showCloseButton={!updateInstalling} className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>发现新版本 v{updateMeta?.version}</DialogTitle>
+            <DialogDescription>
+              当前版本 v{updateMeta?.currentVersion}，建议更新到最新版本。
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* changelog：复用 Markdown 组件渲染 notes（design §5）。notes 为空时给占位。 */}
+          <div className="max-h-72 overflow-y-auto">
+            <Markdown>{updateMeta?.notes ?? '本次更新暂无说明。'}</Markdown>
+          </div>
+
+          {/* 进度条（design §3.3）：下载中显示百分比（已知 total）或已下载字节数（未知 total）。 */}
+          {updateInstalling ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{progress.total !== null ? '下载中…' : '下载中…（未知总大小）'}</span>
+                <span>
+                  {progress.total !== null
+                    ? `${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`
+                    : `${formatBytes(progress.downloaded)}`}
+                </span>
+              </div>
+              <progress
+                className="h-2 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary"
+                value={progress.downloaded}
+                max={progress.total ?? undefined}
+              />
+              <p className="text-xs text-muted-foreground">下载完成后将自动安装并重启应用，请勿关闭窗口。</p>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <LoadingButton variant="outline" loading={false} disabled={updateInstalling} onClick={() => closeUpdateDialog(false)}>稍后</LoadingButton>
+            <LoadingButton loading={updateInstalling} disabled={updateInstalling} onClick={() => { void installUpdate(); }}>
+              立即更新
+            </LoadingButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
