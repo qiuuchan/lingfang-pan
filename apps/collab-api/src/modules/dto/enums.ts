@@ -12,3 +12,20 @@ export const TEAM_STATUS = ['ACTIVE', 'SUSPENDED'] as const;
 export const PLUGIN_STATUS = ['ENABLED', 'DISABLED'] as const;
 /** 余额调整方向：加款 / 扣款（与 BalanceDirection 对齐）。 */
 export const BALANCE_DIRECTION = ['CREDIT', 'DEBIT'] as const;
+
+// === LLM 网关目录相关常量 ===
+
+/** LLM 网关提供方白名单（平台维护，provider 为 String 非 enum，design.md D2）。
+ *  seed 默认网关用这些值；custom 兜底自建网关。Service 层校验 provider 属于此集合。 */
+export const LLM_PROVIDER = [
+  'openai',
+  'anthropic',
+  'azure',
+  'deepseek',
+  'moonshot',
+  'qwen',
+  'custom',
+] as const;
+
+/** LLM 网关状态（与 LlmGatewayStatus 对齐，ENABLED 租户可见 / DISABLED 软删除）。 */
+export const LLM_GATEWAY_STATUS = ['ENABLED', 'DISABLED'] as const;
