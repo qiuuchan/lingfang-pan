@@ -182,3 +182,39 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 模型网关重做（填key+Rust拉取模型）+ 检查更新修复
+
+**Date**: 2026-06-14
+**Task**: 模型网关重做（填key+Rust拉取模型）+ 检查更新修复
+**Branch**: `feat/settings-cli-runtime-model-gateway`
+
+### Summary
+
+模型网关交互重做：去掉旧的网关目录选+静态模型勾选，改为选provider+填apiKey+桌面Rust reqwest调provider /v1/models动态拉取模型。新增llm_fetch.rs(fetch_models命令+7单测)+重写ModelGatewayTab。后端零改动(表/端点/加密全保留)。另修检查更新两个release模式bug：CORS白名单加tauri.localhost(release origin)+updater允许HTTP(dangerousInsecureTransportProtocol，release强制HTTPS)。带签名打包验证LingFang_0.0.1_x64-setup.exe+.sig。cargo 94测+desktop 146测全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `21cfcef` | (see git log) |
+| `4f6f829` | (see git log) |
+| `d08f006` | (see git log) |
+| `9f6d66` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

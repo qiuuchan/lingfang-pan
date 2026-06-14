@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-06-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~184 | Active |
+| `journal-1.md` | ~220 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-06-14 | 模型网关重做（填key+Rust拉取模型）+ 检查更新修复 | `21cfcef`, `4f6f829`, `d08f006`, 9f6d66 | `feat/settings-cli-runtime-model-gateway` |
 | 5 | 2026-06-14 | 桌面端检查更新（Tauri updater 集成） | `729a9ea`, `dc48181`, 9f6d66, `f9096a9` | `feat/settings-cli-runtime-model-gateway` |
 | 4 | 2026-06-14 | 设置页 CLI/运行时检测安装与模型网关配置 | `4b273a8`, `7a5e469`, `1a77376`, `47f861f`, `6311f3b` | `feat/settings-cli-runtime-model-gateway` |
 | 3 | 2026-06-12 | 完成多租户协作平台 | `53ecce2`, `c5985c5`, `160bea5`, `08d6ea4` | `main` |
