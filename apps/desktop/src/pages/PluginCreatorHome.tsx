@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { PanelRightOpenIcon, SparklesIcon, XIcon, EyeIcon, WandSparklesIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, tauriInvoke, tauriListen } from '@/lib/api';
+import { api, apiBase, getAuthToken, tauriInvoke, tauriListen } from '@/lib/api';
 import {
   deleteConversation,
   listConversations,
@@ -515,6 +515,16 @@ export function PluginCreatorHome() {
     isFollowupRef.current = false;
   }
 
+  // CLI 配置注入（task 06-15）：把当前登录态的 backendUrl + authToken 传给 Rust，
+  // Rust 内部调 decrypt/active-provider 拿 apiKey + apiUrl 生成 CLI 隔离配置（key 不进前端，AC8）。
+  // 未登录或无后端地址时返回 undefined（Rust 侧降级为不注入，CLI 走默认配置，AC4）。
+  function buildCliConfig() {
+    const backendUrl = apiBase();
+    const authToken = getAuthToken();
+    if (!backendUrl || !authToken) return undefined;
+    return { backendUrl, authToken };
+  }
+
   async function startNewSession(text: string, selectedProvider: ProviderId) {
     // 默认注入轻量对话 systemPrompt：正常聊天 + 检测到创建插件意图时按协议产出围栏块。
     // 这样「你好」是普通对话（不产 manifest），「做个番茄钟插件」AI 知道用协议格式输出可预览插件包。
@@ -526,6 +536,8 @@ export function PluginCreatorHome() {
         systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         // R2 思考强度随首轮传入（claude 透传 --effort；codex/opencode 忽略）。
         effort,
+        // CLI 配置注入（平台 key/url 桥接进 CLI 启动，task 06-15）。
+        cliConfig: buildCliConfig(),
       },
     });
     // 新会话立即成为 activeId（listener 守卫据此路由新会话事件）。
@@ -595,7 +607,7 @@ export function PluginCreatorHome() {
         // 追问传入当前选的 model（会话内切模型，下一轮生效）；Rust 优先用此值覆盖 session 固化值。
         // R2 effort 同样随本轮传入（可会话中途调思考强度）。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: model === 'default' ? undefined : model, effort },
+          input: { sessionId: activeSessionId, input: text, model: model === 'default' ? undefined : model, effort, cliConfig: buildCliConfig() },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -1033,9 +1045,10 @@ export function PluginCreatorHome() {
 
       <aside className={cn(
         'flex h-full shrink-0 flex-col border-l bg-card transition-all duration-200 overflow-hidden',
-        detailsOpen ? 'w-full md:w-[420px] z-20' : 'w-0',
+        // 自适应宽度：小屏全宽，中大屏弹性（min 360 / 中屏 32vw / 大屏 24vw / max 560），替代原固定 420px。
+        detailsOpen ? 'w-full md:w-[min(32vw,560px)] xl:w-[min(24vw,560px)] md:min-w-[360px] z-20' : 'w-0',
       )}>
-        <div className="flex h-full w-full md:w-[420px] flex-col">
+        <div className="flex h-full w-full md:w-[min(32vw,560px)] xl:w-[min(24vw,560px)] md:min-w-[360px] flex-col">
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-medium">插件创建详情</span>
             <Button variant="ghost" size="icon" className="size-7" onClick={() => setDetailsOpen(false)}>

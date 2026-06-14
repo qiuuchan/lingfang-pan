@@ -95,6 +95,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
       stderr: raw.stderr,
       exitCode: raw.exit_code,
       failure: 'timeout',
+      elapsedMs: raw.elapsed_ms,
     };
   }
   if (raw.exit_code !== 0) {
@@ -104,6 +105,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
       stderr: raw.stderr,
       exitCode: raw.exit_code,
       failure: 'nonzero_exit',
+      elapsedMs: raw.elapsed_ms,
     };
   }
   return {
@@ -111,6 +113,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
     stdout: raw.stdout,
     stderr: raw.stderr,
     exitCode: raw.exit_code,
+    elapsedMs: raw.elapsed_ms,
   };
 }
 

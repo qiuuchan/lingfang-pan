@@ -104,7 +104,8 @@ export function ScriptPreviewPanel({
           stdout: result.stdout ?? '',
           stderr: result.stderr ?? '',
           exitCode: result.exitCode ?? null,
-          elapsedMs: 0,
+          // B1 修复：透传 Rust 的 elapsed_ms（此前硬编码 0 导致耗时永不显示）。
+          elapsedMs: result.elapsedMs ?? 0,
         });
       } else {
         // 失败/超时/解释器缺失：经 fromRunResult 转 CreatorError，由 ErrorBubble 友好渲染。
@@ -205,6 +206,9 @@ export function ScriptPreviewPanel({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
               <span>运行结果：<span className={run.exitCode === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>{run.exitCode ?? '未知'}</span></span>
+              {run.elapsedMs > 0 && (
+                <span className="text-muted-foreground">耗时 {(run.elapsedMs / 1000).toFixed(2)}s</span>
+              )}
             </div>
             <pre className="scrollbar-thin max-h-64 overflow-auto rounded-lg bg-[#0d1117] p-3 font-mono text-xs leading-relaxed text-[#e6edf3] whitespace-pre-wrap break-words">
               {run.stdout || '（无输出）'}
