@@ -4,6 +4,7 @@ import {
   ActivityIcon,
   BoxesIcon,
   CheckCircleIcon,
+  CloudCogIcon,
   InfoIcon,
   LayoutDashboardIcon,
   LogOutIcon,
@@ -40,6 +41,7 @@ import { PluginsView } from '@/components/plugins-view';
 import { ApplicationsView } from '@/components/applications-view';
 import { AdminsView } from '@/components/admins-view';
 import { AuditView } from '@/components/audit-view';
+import { ProvidersView } from '@/components/providers-view';
 import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
 import type { View } from '@/lib/types';
 import pkg from '../package.json';
@@ -50,6 +52,7 @@ const navItems: SidebarNavItem[] = [
   { view: 'platformAdmins', label: '平台管理员', icon: ShieldCheckIcon },
   { view: 'teams', label: '团队管理', icon: BoxesIcon },
   { view: 'plugins', label: '插件管理', icon: PlugIcon },
+  { view: 'llmProviders', label: '模型服务', icon: CloudCogIcon },
   { view: 'applications', label: '审批管理', icon: CheckCircleIcon },
   { view: 'audit', label: '审计日志', icon: ActivityIcon },
 ];
@@ -60,6 +63,7 @@ const VIEW_LABEL: Record<View, string> = {
   platformAdmins: '平台管理员',
   teams: '团队管理',
   plugins: '插件管理',
+  llmProviders: '模型服务',
   applications: '审批管理',
   audit: '审计日志',
 };
@@ -236,6 +240,7 @@ export default function App() {
             {view === 'platformAdmins' && <AdminsView />}
             {view === 'teams' && <TeamsView />}
             {view === 'plugins' && <PluginsView />}
+            {view === 'llmProviders' && <ProvidersView />}
             {view === 'applications' && <ApplicationsView />}
             {view === 'audit' && <AuditView />}
           </div>

@@ -1,39 +1,31 @@
-// ModelGatewayTab.tsx — 设置页模型网关配置（重做版：填 key + Rust 拉取模型）。
+// ModelGatewayTab.tsx — 设置页模型网关配置（v3 定稿：单 provider 云分发 + 无 provider UI）。
 //
-// 职责（design §3.2 / prd AC1-AC8）：
-// - 挂载拉取 provider 云分发列表（GET /api/llm/gateways）+ 当前租户绑定（GET /api/llm/binding，脱敏）。
-// - 新交互：选 provider → 填 apiKey → 点「拉取模型」（tauriInvoke fetch_models，Rust 直连 provider
-//   /v1/models）→ 显示拉取到的真实模型列表（checkbox 多选）→ 保存 PUT /api/llm/binding。
-// - 已绑定 provider：显示脱敏 apiKeyHint + 「已配置」标记，apiKey 留空=保留原密（design B5）。
-// - 错误按前缀 code 分支（不 message.includes，design §3.2 第5点）：
-//   fetch_models：api_key_invalid / provider_response_unsupported / 网络 / 其余。
-//   PUT/DELETE：按 LlmErrorCode 分支（gateway_disabled / binding_not_found / ...）。
+// 职责（design §5 / prd AC1/AC2/AC7/AC8）：
+// - 用户界面零 provider 概念：只有一个 apiKey 输入 + 「拉取模型」按钮 + 模型 checkbox 组 + 保存。
+// - 挂载：GET /api/llm/active-provider（拿当前启用 provider 的 apiUrl + defaultModels 兜底）
+//        + GET /api/llm/binding（当前团队的单条绑定，脱敏 hint + modelOverride）。
+// - 拉取模型：tauriInvoke('fetch_models') 直连 active provider 的 /v1/models（reqwest 绕 CORS）。
+// - 保存：PUT /api/llm/binding { apiKey, modelOverride }（无 gatewayId，按 teamId 唯一 upsert）。
 //
-// 安全（AC7）：apiKey 只在「拉取模型」时作为 fetchModels 参数经 IPC 传给 Rust reqwest 临时用，
-// 不存入前端 state 之外的位置（state 在保存/取消后清空），不进 webview 长期内存。后端只存加密 key。
+// 安全（AC9）：apiKey 只在「拉取模型」时作为 fetchModels 参数经 IPC 传给 Rust reqwest 临时用，
+// 不存入前端 state 之外的位置（state 在保存后清空），不进 webview 长期内存。后端只存加密 key。
 //
-// 与旧版差异（破坏式重做）：删除「网关下拉 + 静态 models checkbox 组」交互，provider 的 apiUrl
-// 来自云分发，用户不感知 url；模型由 provider 真实 /v1/models 返回，非 Admin 维护静态数组。
+// 错误处理：
+// - active-provider 404 `no_active_provider`（AC7）→ 整个 Card 显示「平台尚未配置模型服务，请联系管理员」并禁用输入。
+// - fetch_models（friendlyFetchError，按 message 前缀 code 分支）：api_key_invalid / provider_response_unsupported / 网络。
+// - PUT/DELETE（friendlyLlmError，按 LlmErrorCode 分支）：binding_not_found / llm_key_decrypt_failed / ...。
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { NetworkIcon, KeyRoundIcon, Trash2Icon } from 'lucide-react';
+import { KeyRoundIcon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import { fetchModels } from '@/lib/llm-fetch';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -43,34 +35,27 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type {
+  ActiveProvider,
   BindingUpsertInput,
   LlmErrorCode,
-  LlmGatewayPublic,
   TenantBindingPublic,
 } from '@lingfang/contract';
 
-/** GET /api/llm/gateways 出参。 */
-interface GatewaysResponse {
-  gateways: LlmGatewayPublic[];
-}
+/** GET /api/llm/active-provider 出参。 */
+type ActiveProviderResponse = ActiveProvider;
 
-/** GET /api/llm/binding 出参。 */
-interface BindingsResponse {
-  bindings: TenantBindingPublic[];
-}
-
-/** PUT /api/llm/binding 出参（单条绑定，脱敏）。 */
+/** GET /api/llm/binding 出参（单条绑定，无则 null）。 */
 interface BindingResponse {
-  binding: TenantBindingPublic;
+  binding: TenantBindingPublic | null;
 }
 
-/** LlmErrorCode → 友好提示文案（design B25，按 code 分支不 message.includes）。 */
+/** LlmErrorCode → 友好提示文案（design §5，按 code 分支不 message.includes）。 */
 function friendlyLlmError(code: string | undefined, fallback: string): string {
   switch (code as LlmErrorCode) {
-    case 'gateway_disabled':
-      return '该 provider 已被平台禁用，请选择其他 provider。';
+    case 'no_active_provider':
+      return '平台尚未配置模型服务，请联系管理员。';
     case 'binding_not_found':
-      return '尚未保存该 provider 的绑定，请填写 apiKey 后再保存。';
+      return '尚未保存绑定，请填写 apiKey 后再保存。';
     case 'llm_key_decrypt_failed':
       return 'apiKey 解密失败，请重新填写 apiKey 后保存。';
     case 'llm_key_not_configured':
@@ -81,9 +66,9 @@ function friendlyLlmError(code: string | undefined, fallback: string): string {
 }
 
 /**
- * fetch_models 错误 → 友好提示文案（design §3.2 第5点，按 message 前缀 code 分支）。
+ * fetch_models 错误 → 友好提示文案（design §5，按 message 前缀 code 分支）。
  *
- * Rust llm_fetch 返回的错误字符串形如 "api_key_invalid:openai 的 apiKey 无效或已过期"，
+ * Rust llm_fetch 返回的错误字符串形如 "api_key_invalid:apiKey 无效或已过期"，
  * 前缀是稳定的 code（前端用 startsWith 匹配），后缀是 provider 上下文的人类可读描述。
  */
 function friendlyFetchError(message: string): string {
@@ -91,22 +76,33 @@ function friendlyFetchError(message: string): string {
     return 'apiKey 无效或已过期，请检查后重试。';
   }
   if (message.startsWith('provider_response_unsupported')) {
-    return '该 provider 暂不支持自动拉取模型（非 OpenAI 兼容协议）。';
+    return '当前模型服务暂不支持自动拉取模型（非 OpenAI 兼容协议）。';
   }
   if (message.includes('网络') || message.includes('timeout') || message.includes('Timeout')) {
-    return '网络请求失败，请检查网络或 provider 地址后重试。';
+    return '网络请求失败，请检查网络或服务地址后重试。';
   }
   return message;
 }
 
+/** 判定一个 ApiError 是否为「无 active provider」（HTTP 404 + code）。 */
+function isNoActiveProviderError(err: unknown): boolean {
+  const e = err as ApiError;
+  return e?.code === 'no_active_provider' || e?.status === 404;
+}
+
 export function ModelGatewayTab() {
-  const [providers, setProviders] = useState<LlmGatewayPublic[]>([]);
-  const [bindings, setBindings] = useState<TenantBindingPublic[]>([]);
+  // 当前启用 provider（null=平台未配置 active provider）。
+  const [activeProvider, setActiveProvider] = useState<ActiveProvider | null>(null);
+  // 平台未配置 active provider（active-provider 404 时为 true，整 Card 切到禁用态）。
+  const [noProvider, setNoProvider] = useState(false);
+
+  // 当前团队的单条绑定（null=未绑定）。
+  const [binding, setBinding] = useState<TenantBindingPublic | null>(null);
+
+  // 挂载态：拉 active-provider + binding。
   const [loading, setLoading] = useState(true);
 
-  // 编辑态：选中的 provider id（null=未选）。
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
-  // 用户填的明文 apiKey（未保存；保存/取消/切换 provider 时清空）。
+  // 用户填的明文 apiKey（未保存；保存后清空）。
   const [apiKeyInput, setApiKeyInput] = useState('');
   // 拉取状态。
   const [fetching, setFetching] = useState(false);
@@ -115,19 +111,33 @@ export function ModelGatewayTab() {
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // 待确认删除的绑定（点击删除 → 置 binding → 弹二次确认 Dialog）。
-  const [pendingDelete, setPendingDelete] = useState<TenantBindingPublic | null>(null);
+  // 待确认删除（点删除 → 置 true → 弹二次确认 Dialog）。
+  const [pendingDelete, setPendingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setNoProvider(false);
     try {
-      const [gRes, bRes] = await Promise.all([
-        api<GatewaysResponse>('/api/llm/gateways'),
-        api<BindingsResponse>('/api/llm/binding'),
-      ]);
-      setProviders(gRes.gateways ?? []);
-      setBindings(bRes.bindings ?? []);
+      // 先拉 active-provider：404 时切到「平台未配置」禁用态，binding 也不必再拉。
+      try {
+        const apRes = await api<ActiveProviderResponse>('/api/llm/active-provider');
+        setActiveProvider(apRes);
+      } catch (err) {
+        if (isNoActiveProviderError(err)) {
+          setActiveProvider(null);
+          setNoProvider(true);
+          // 无 active provider 时直接结束加载，binding 也无意义。
+          setLoading(false);
+          return;
+        }
+        throw err;
+      }
+      // 再拉当前团队的单条绑定（脱敏 hint + modelOverride）。
+      const bRes = await api<BindingResponse>('/api/llm/binding');
+      setBinding(bRes.binding);
+      // 若已有绑定且含 modelOverride，预填勾选态（方便用户在未重新拉取时调整选择）。
+      setSelectedModels(bRes.binding?.modelOverride ?? []);
     } catch (err) {
       toast.error((err as ApiError).message);
     } finally {
@@ -135,44 +145,14 @@ export function ModelGatewayTab() {
     }
   }, []);
 
-  // 挂载拉取 provider 列表 + 绑定（refresh 已捕获错误并 toast，无需此处再 catch）。
+  // 挂载拉取 active-provider + binding（refresh 已捕获错误并 toast）。
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // 当前选中的 provider 对象（从云分发列表查）。
-  const selectedProvider = useMemo(
-    () => providers.find((g) => g.id === selectedProviderId) ?? null,
-    [providers, selectedProviderId],
-  );
-
-  // 当前选中 provider 的已有绑定（若有）。
-  const selectedBinding = useMemo(
-    () => bindings.find((b) => b.gatewayId === selectedProviderId) ?? null,
-    [bindings, selectedProviderId],
-  );
-
-  /** 切换 provider：清空编辑态，回到「待填 key」初始态。 */
-  function handleSelectProvider(gatewayId: string) {
-    setSelectedProviderId(gatewayId);
-    setApiKeyInput('');
-    setFetchedModels([]);
-    setSelectedModels([]);
-    setFetching(false);
-  }
-
-  /** 重置编辑态（关闭面板/取消）。 */
-  function resetEdit() {
-    setSelectedProviderId(null);
-    setApiKeyInput('');
-    setFetchedModels([]);
-    setSelectedModels([]);
-    setFetching(false);
-  }
-
-  /** 点「拉取模型」：调 fetch_models（Rust 直连 provider /v1/models）。 */
+  /** 点「拉取模型」：调 fetch_models（Rust 直连 active provider /v1/models）。 */
   async function handleFetchModels() {
-    if (!selectedProvider) return;
+    if (!activeProvider) return;
     if (!apiKeyInput.trim()) {
       toast.error('请先填写 apiKey');
       return;
@@ -181,17 +161,18 @@ export function ModelGatewayTab() {
     setFetchedModels([]);
     setSelectedModels([]);
     try {
-      // AC7：apiKey 仅作为参数传给 Rust reqwest 临时用，不落盘不进长期内存。
+      // AC9：apiKey 仅作为参数传给 Rust reqwest 临时用，不落盘不进长期内存。
+      // provider 参数仅作错误提示上下文（可传 activeProvider.name 或空串）。
       const models = await fetchModels(
-        selectedProvider.provider,
-        selectedProvider.apiUrl,
+        activeProvider.name ?? '',
+        activeProvider.apiUrl,
         apiKeyInput,
       );
       setFetchedModels(models);
       // 默认全选拉取到的模型（用户可取消勾选）。
       setSelectedModels(models);
       if (models.length === 0) {
-        toast.info('该 provider 当前无可用模型。');
+        toast.info('当前模型服务无可用模型。');
       } else {
         toast.success(`已拉取 ${models.length} 个模型`);
       }
@@ -212,33 +193,22 @@ export function ModelGatewayTab() {
 
   /** 保存绑定（PUT）。apiKey 留空=保留原密（undefined，design B5）。 */
   async function handleSave() {
-    if (!selectedProviderId) {
-      toast.error('请选择 provider');
-      return;
-    }
-    const exists = bindings.some((b) => b.gatewayId === selectedProviderId);
     // 新建绑定必须填 apiKey；已存在绑定留空可保留原密。
-    if (!exists && !apiKeyInput.trim()) {
+    if (!binding && !apiKeyInput.trim()) {
       toast.error('请填写 apiKey');
       return;
     }
     const payload: BindingUpsertInput = {
-      gatewayId: selectedProviderId,
       apiKey: apiKeyInput.trim() || undefined,
       modelOverride: selectedModels,
     };
     setSaving(true);
     try {
       const res = await api<BindingResponse>('/api/llm/binding', { method: 'PUT', body: payload });
-      setBindings((prev) => {
-        const idx = prev.findIndex((b) => b.gatewayId === res.binding.gatewayId);
-        if (idx === -1) return [...prev, res.binding];
-        const next = [...prev];
-        next[idx] = res.binding;
-        return next;
-      });
-      toast.success('provider 绑定已保存');
-      resetEdit();
+      setBinding(res.binding);
+      // 保存后清空明文 apiKey（不长期持有）。
+      setApiKeyInput('');
+      toast.success('已保存');
     } catch (err) {
       const e = err as ApiError;
       toast.error(friendlyLlmError(e.code, e.message));
@@ -249,17 +219,15 @@ export function ModelGatewayTab() {
 
   /** 删除绑定（DELETE，二次确认）。 */
   async function confirmDelete() {
-    if (!pendingDelete) return;
     setDeleting(true);
     try {
-      await api(`/api/llm/binding/${pendingDelete.gatewayId}`, { method: 'DELETE' });
-      setBindings((prev) => prev.filter((b) => b.gatewayId !== pendingDelete.gatewayId));
-      // 若删除的正是当前编辑中的 provider，一并重置编辑态。
-      if (selectedProviderId === pendingDelete.gatewayId) {
-        resetEdit();
-      }
+      await api('/api/llm/binding', { method: 'DELETE' });
+      setBinding(null);
+      setFetchedModels([]);
+      setSelectedModels([]);
+      setApiKeyInput('');
+      setPendingDelete(false);
       toast.success('绑定已删除');
-      setPendingDelete(null);
     } catch (err) {
       const e = err as ApiError;
       toast.error(friendlyLlmError(e.code, e.message));
@@ -271,79 +239,73 @@ export function ModelGatewayTab() {
   if (loading) {
     return (
       <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">加载 provider 列表…</CardContent>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">加载中…</CardContent>
+      </Card>
+    );
+  }
+
+  // AC7：平台未配置 active provider → 整 Card 显示提示并禁用所有输入。
+  if (noProvider) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">模型网关</CardTitle>
+        </CardHeader>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          平台尚未配置模型服务，请联系管理员。
+        </CardContent>
       </Card>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 顶部说明 */}
+      {/* 顶部说明：零 provider 概念（不暴露「网关目录/provider/源」字样）。 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <NetworkIcon className="size-4 text-primary" />
-        选择平台分发的 provider，填写你自己的 apiKey（云端加密存储，跨电脑可用），拉取该 provider 的真实可用模型。
+        <KeyRoundIcon className="size-4 text-primary" />
+        填写你的 apiKey（云端加密存储，跨电脑可用），拉取当前可用的模型并勾选要启用的。
       </div>
 
-      {/* provider 配置区 */}
+      {/* 配置区 */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">配置 provider</CardTitle>
+        <CardHeader className="flex-row items-center justify-between gap-2">
+          <CardTitle className="text-base">模型网关</CardTitle>
+          {/* 已绑定标记：显示脱敏 hint + 「已配置」Badge。 */}
+          {binding ? (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <KeyRoundIcon className="size-3" />
+              <span className="font-mono">{binding.apiKeyHint || '（未设置密钥）'}</span>
+              {binding.enabled ? (
+                <Badge variant="default">已启用</Badge>
+              ) : (
+                <Badge variant="secondary">已停用</Badge>
+              )}
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {/* 1. provider 选择 */}
+          {/* 1. apiKey 输入 + 拉取按钮 */}
           <div className="flex flex-col gap-1.5">
-            <Label>provider</Label>
-            <Select
-              value={selectedProviderId}
-              onValueChange={(v) => { if (typeof v === 'string') handleSelectProvider(v); }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="选择 provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {providers.map((g) => (
-                  <SelectItem key={g.id} value={g.id}>
-                    {g.name}（{g.provider}）
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedProvider?.description ? (
-              <span className="text-xs text-muted-foreground">{selectedProvider.description}</span>
-            ) : null}
-            {/* 已绑定标记：选中已配置的 provider 时显示脱敏 hint */}
-            {selectedBinding ? (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <KeyRoundIcon className="size-3" />
-                <span className="font-mono">{selectedBinding.apiKeyHint || '（未设置密钥）'}</span>
-                <Badge variant="secondary">已配置</Badge>
-              </div>
-            ) : null}
-          </div>
-
-          {/* 2. apiKey 输入 + 拉取按钮 */}
-          <div className="flex flex-col gap-1.5">
-            <Label>apiKey {selectedBinding ? '（留空保留原密）' : ''}</Label>
+            <Label>apiKey {binding ? '（留空保留原密）' : ''}</Label>
             <div className="flex gap-2">
               <Input
                 type="password"
-                placeholder={selectedBinding ? '重新填写覆盖原密钥' : 'sk-...'}
+                placeholder={binding ? '重新填写覆盖原密钥' : 'sk-...'}
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 autoComplete="off"
-                disabled={!selectedProviderId}
               />
               <LoadingButton
                 onClick={() => { void handleFetchModels(); }}
                 loading={fetching}
-                disabled={!selectedProviderId || !apiKeyInput.trim() || fetching}
+                disabled={!apiKeyInput.trim() || fetching}
               >
                 拉取模型
               </LoadingButton>
             </div>
           </div>
 
-          {/* 3. 模型展示区 */}
+          {/* 2. 模型展示区 */}
           {fetching ? (
             <div className="rounded-lg border p-3 text-center text-sm text-muted-foreground">
               正在拉取模型…
@@ -366,94 +328,48 @@ export function ModelGatewayTab() {
             </div>
           ) : null}
 
-          {/* 4. 保存按钮 */}
-          {selectedProviderId ? (
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={resetEdit}>取消</Button>
-              <LoadingButton onClick={() => { void handleSave(); }} loading={saving} disabled={saving}>
-                保存
+          {/* 3. 已绑定但未重新拉取时，若 modelOverride 非空，回显当前生效模型（供用户知情）。 */}
+          {!fetching && fetchedModels.length === 0 && binding?.modelOverride && binding.modelOverride.length > 0 ? (
+            <div className="text-xs text-muted-foreground">
+              当前生效模型：<span className="font-mono text-foreground">{binding.modelOverride.join('、')}</span>
+            </div>
+          ) : null}
+
+          {/* 4. 保存 + 删除按钮 */}
+          <div className="flex justify-end gap-2">
+            {binding ? (
+              <LoadingButton
+                variant="outline"
+                onClick={() => setPendingDelete(true)}
+                disabled={deleting}
+              >
+                删除绑定
               </LoadingButton>
+            ) : null}
+            <LoadingButton onClick={() => { void handleSave(); }} loading={saving} disabled={saving}>
+              保存
+            </LoadingButton>
+          </div>
+
+          {binding?.updatedBy ? (
+            <div className="text-xs text-muted-foreground">
+              最近更新：{binding.updatedBy.displayName} · {binding.updatedAt}
             </div>
           ) : null}
         </CardContent>
       </Card>
 
-      {/* 当前绑定列表 */}
-      {bindings.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            尚未绑定任何 provider，请在上方选择 provider 并填写 apiKey 开始配置。
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <div className="text-sm text-muted-foreground">已绑定的 provider</div>
-          {bindings.map((b) => (
-            <Card key={b.id}>
-              <CardContent className="flex flex-col gap-2 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{b.gatewayName}</span>
-                      <Badge variant="outline">{b.provider}</Badge>
-                      {b.gatewayStatus === 'DISABLED' ? (
-                        <Badge variant="destructive">已禁用</Badge>
-                      ) : b.enabled ? (
-                        <Badge variant="default">已启用</Badge>
-                      ) : (
-                        <Badge variant="secondary">已停用</Badge>
-                      )}
-                    </div>
-                    {/* apiKey 脱敏串（非明文非密文，后端 maskApiKey 产出） */}
-                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <KeyRoundIcon className="size-3" />
-                      <span className="font-mono">{b.apiKeyHint || '（未设置密钥）'}</span>
-                    </div>
-                    {/* 生效模型（modelOverride ?? gatewayModels） */}
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      生效模型：<span className="text-foreground">{b.effectiveModels.join('、') || '无'}</span>
-                    </div>
-                    {b.updatedBy ? (
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        最近更新：{b.updatedBy.displayName} · {b.updatedAt}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {/* 编辑=选中该 provider 进入配置区，预填 modelOverride（若已绑定）。 */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        handleSelectProvider(b.gatewayId);
-                        // 预填已绑定的 modelOverride（用于在未重新拉取时保留原选择）。
-                        setSelectedModels(b.modelOverride ?? b.effectiveModels ?? []);
-                      }}
-                    >
-                      编辑
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setPendingDelete(b)} aria-label="删除">
-                      <Trash2Icon className="text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
       {/* 删除二次确认 Dialog */}
-      <Dialog open={pendingDelete !== null} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
+      <Dialog open={pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(false); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>删除 provider 绑定</DialogTitle>
+            <DialogTitle>删除模型绑定</DialogTitle>
             <DialogDescription>
-              将删除「{pendingDelete?.gatewayName ?? ''}」的绑定与其加密 apiKey，此操作不可撤销。
+              将删除当前的模型绑定与其加密 apiKey，此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDelete(null)}>取消</Button>
+            <LoadingButton variant="outline" onClick={() => setPendingDelete(false)}>取消</LoadingButton>
             <LoadingButton variant="destructive" loading={deleting} onClick={() => { void confirmDelete(); }}>
               确认删除
             </LoadingButton>
