@@ -115,8 +115,10 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
 }
 
 /** 安装指引文案（与 Rust install_hint 镜像，前端首屏快速展示无需等待 probe）。 */
+// winget 包 id 经 microsoft/winget-pkgs 官方 manifest 核实（design §6.4）：
+// Node.js LTS 是 OpenJS.NodeJS.LTS（非 OpenJS.Technology.NodeJS，后者不存在）。
 export const RUNTIME_INSTALL_HINT: Record<ScriptRuntime, string> = {
-  nodejs: '未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.Technology.NodeJS.LTS',
+  nodejs: '未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.NodeJS.LTS',
   python: '未检测到 Python。请安装：运行 winget install Python.Python.3.12，或访问 https://python.org 下载。Windows 推荐 py launcher。',
 };
 
