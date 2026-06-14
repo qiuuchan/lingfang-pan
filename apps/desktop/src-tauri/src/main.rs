@@ -3,8 +3,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
+mod cli_config;
 mod cli_installer;
 mod code_assistant;
+mod llm_credentials;
 mod llm_fetch;
 mod plugin_script;
 mod plugins;
@@ -103,9 +105,9 @@ fn code_assistant_save_config(
 }
 
 #[tauri::command]
-fn code_assistant_start_session(
+async fn code_assistant_start_session(
     app: tauri::AppHandle,
-    state: tauri::State<code_assistant::CodeAssistantState>,
+    state: tauri::State<'_, code_assistant::CodeAssistantState>,
     mut input: code_assistant::StartSessionInput,
 ) -> Result<code_assistant::store::SessionRecord, String> {
     // 前端未指定 workspace 时，落到 app_data 下的 sandbox 目录，避免 CLI 沿宿主项目根读取 CLAUDE.md/.claude。
@@ -122,16 +124,72 @@ fn code_assistant_start_session(
             input.workspace_dir = Some(sandbox.to_string_lossy().to_string());
         }
     }
-    code_assistant::start_session(app, state.inner().clone(), input)
+    let state_inner = state.inner().clone();
+    // CLI 配置注入（task 06-15）：提前生成 session_id，spawn 前从后端拿 apiKey + apiUrl 生成 cli_env。
+    // session_id 提前生成是为了让临时配置目录路径（cli-configs/<sessionId>/）与 session 记录一致，
+    // 便于会话结束清理（AC7）。backendUrl + token 从前端 webview 传入，key 明文只在 Rust 内流转（AC8）。
+    let session_id = code_assistant::new_session_id(input.tool);
+    let cli_env = resolve_cli_env(
+        &app,
+        &state_inner,
+        input.cli_config.as_ref(),
+        &session_id,
+        input.tool,
+    )
+    .await;
+    code_assistant::start_session(app, state_inner, input, session_id, cli_env)
 }
 
 #[tauri::command]
-fn code_assistant_send_input(
+async fn code_assistant_send_input(
     app: tauri::AppHandle,
-    state: tauri::State<code_assistant::CodeAssistantState>,
+    state: tauri::State<'_, code_assistant::CodeAssistantState>,
     input: code_assistant::SendInputInput,
 ) -> Result<(), String> {
-    code_assistant::send_input(app, &state, input)
+    let state_inner = state.inner().clone();
+    // 追问轮同样注入（保证多轮用平台 key/url）。session_id 已存在于入参，tool 从 session 记录取。
+    let tool = code_assistant::lookup_session_tool(&state_inner, &input.session_id);
+    let cli_env = resolve_cli_env(
+        &app,
+        &state_inner,
+        input.cli_config.as_ref(),
+        &input.session_id,
+        tool,
+    )
+    .await;
+    code_assistant::send_input(app, &state_inner, input, cli_env)
+}
+
+/// 解析 CLI 配置注入 env（claude/codex/opencode 的隔离配置生成）。
+///
+/// 流程（task 06-15）：
+/// 1. cli_config 缺失（前端未传 backendUrl/token）→ 返回空 Vec（降级，AC4）。
+/// 2. Rust 内部调 `llm_credentials::fetch_credentials` 从后端拿 (apiKey, apiUrl)（AC8 key 不进前端）。
+/// 3. 调 `cli_config::prepare_cli_env` 按 tool 类型生成 env（claude 纯 env / codex CODEX_HOME+config.toml / opencode OPENCODE_CONFIG+json）。
+/// 4. fetch 失败/无 key → 返回空 Vec（降级，CLI 走默认配置，不崩）。
+async fn resolve_cli_env(
+    _app: &tauri::AppHandle,
+    state: &code_assistant::CodeAssistantState,
+    cli_config: Option<&code_assistant::CliConfigInput>,
+    session_id: &str,
+    tool: code_assistant::adapters::CodeAssistantTool,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    // 前端未传 cli_config（未登录或后端未配置）→ 降级不注入（AC4）。
+    let Some(cli_config) = cli_config else {
+        return Vec::new();
+    };
+    let (backend_url, auth_token) = match (cli_config.backend_url.as_str(), cli_config.auth_token.as_str()) {
+        (url, token) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
+        _ => return Vec::new(),
+    };
+    // Rust 内部调后端拿 key/url（降级 None 时返回空 Vec）。
+    let credentials = match llm_credentials::fetch_credentials(backend_url, auth_token).await {
+        Ok(Some((key, url))) => (key, url),
+        _ => return Vec::new(),
+    };
+    // 临时配置目录：app_data/cli-configs/<sessionId>/（codex/opencode 写文件，claude 不写）。
+    let config_dir = state.configs_root().join(session_id);
+    cli_config::prepare_cli_env(tool, &credentials.0, &credentials.1, &config_dir)
 }
 
 #[tauri::command]
