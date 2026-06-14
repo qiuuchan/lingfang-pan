@@ -11,6 +11,7 @@
   },
   "bundle": {
     "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
     "resources": {
       "../builtin-plugins": "builtin-plugins"
     }
