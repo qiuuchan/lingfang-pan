@@ -148,6 +148,40 @@ describe('ReleaseService', () => {
     expect(result.assets[0].platform).toBe('WINDOWS');
   });
 
+  // === tauriManifest：Tauri updater 契约端点的数据源 ===
+  // 字段名严格遵循 Tauri 契约（pub_date 下划线，非 camelCase），无更新返 null。
+
+  it('tauriManifest 有匹配 asset 时返回 Tauri 契约（精确字段名）', async () => {
+    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'https://x/LingFang_1.0.0_x64-setup.exe', filename: 'f', signature: 'dW50cnVzdGVk', sizeBytes: 1024, createdAt: now };
+    prisma.release.findFirst.mockResolvedValue(
+      makeRelease({ version: '1.0.0', publishedAt: now, notes: '## changelog', assets: [winAsset] }),
+    );
+    const manifest = await service.tauriManifest('STABLE', 'WINDOWS', 'X86_64');
+    expect(manifest).toEqual({
+      version: '1.0.0',
+      pub_date: now.toISOString(),
+      url: 'https://x/LingFang_1.0.0_x64-setup.exe',
+      signature: 'dW50cnVzdGVk',
+      notes: '## changelog',
+    });
+    // 关键约束：字段名必须是 Tauri 契约（下划线 pub_date），不能是 camelCase。
+    expect(manifest).not.toBeNull();
+    expect(Object.keys(manifest!)).toEqual(['version', 'pub_date', 'url', 'signature', 'notes']);
+  });
+
+  it('tauriManifest 版本存在但无匹配平台 asset 时返回 null', async () => {
+    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: null, createdAt: now };
+    prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset] }));
+    const manifest = await service.tauriManifest('STABLE', 'LINUX', 'X86_64');
+    expect(manifest).toBeNull();
+  });
+
+  it('tauriManifest 无已发布版本时返回 null', async () => {
+    prisma.release.findFirst.mockResolvedValue(null);
+    const manifest = await service.tauriManifest('BETA', 'WINDOWS', 'X86_64');
+    expect(manifest).toBeNull();
+  });
+
   it('get 非 PUBLISHED 版本抛 not_found', async () => {
     prisma.release.findUnique.mockResolvedValue(makeRelease({ status: 'DRAFT' }));
     await expect(service.get('1.0.0', 'STABLE')).rejects.toMatchObject({ status: 404 });
