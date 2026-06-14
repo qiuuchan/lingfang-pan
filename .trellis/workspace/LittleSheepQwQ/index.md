@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-06-12
+- **Total Sessions**: 4
+- **Last Active**: 2026-06-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~111 | Active |
+| `journal-1.md` | ~148 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-06-14 | 设置页 CLI/运行时检测安装与模型网关配置 | `4b273a8`, `7a5e469`, `1a77376`, `47f861f`, `6311f3b` | `feat/settings-cli-runtime-model-gateway` |
 | 3 | 2026-06-12 | 完成多租户协作平台 | `53ecce2`, `c5985c5`, `160bea5`, `08d6ea4` | `main` |
 | 2 | 2026-06-11 | 修复全量源码 Review 问题 | `6f42c66`, `66a1f53`, `04e63db`, `db841cf` | `main` |
 | 1 | 2026-06-11 | Bootstrap Trellis specs | - | `-` |
