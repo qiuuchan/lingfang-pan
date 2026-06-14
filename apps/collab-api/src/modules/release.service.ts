@@ -58,6 +58,34 @@ export class ReleaseService {
     };
   }
 
+  /** GET /api/releases/tauri-update：Tauri updater 契约端点的数据源。
+   *  - Tauri updater 期望 endpoint 返回固定 JSON：{version, pub_date, url, signature, notes}（单 asset）。
+   *  - 复用 latest 的查询逻辑（同 channel 内 isLatest=true + PUBLISHED），挑出 platform/arch 均匹配的单个 asset。
+   *  - 返回 null 表示无更新（无已发布版本 / 无匹配平台产物），controller 据此返 HTTP 204（Tauri 判无更新）。
+   *  - 字段名严格遵循 Tauri 契约（pub_date 下划线，非 camelCase），不可改。 */
+  async tauriManifest(channel: 'STABLE' | 'BETA', platform?: string, arch?: string) {
+    const release = await this.prisma.release.findFirst({
+      where: { channel, status: 'PUBLISHED', isLatest: true },
+      include: { assets: true },
+    });
+    if (!release) return null;
+
+    // 挑 platform + arch 均匹配的单个 asset。
+    // platform/arch 宽松接收（Tauri 上报值未做枚举校验），不匹配即 null（contract：无 asset = 无更新）。
+    const asset = release.assets.find(
+      (a) => (!platform || a.platform === platform) && (!arch || a.arch === arch),
+    );
+    if (!asset) return null;
+
+    return {
+      version: release.version,
+      pub_date: release.publishedAt?.toISOString() ?? new Date().toISOString(),
+      url: asset.url,
+      signature: asset.signature,
+      notes: release.notes,
+    };
+  }
+
   /** GET /api/releases：已发布版本列表（按 publishedAt desc）。limit 由 controller 传入，此处 clamp 到 [1,50]。 */
   async list(query: ReleaseListQueryDto, limit?: number) {
     const channel = query.channel ?? 'STABLE';
