@@ -1,8 +1,10 @@
 pub mod adapters;
 pub mod store;
 
+use crate::cli_config;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -39,6 +41,10 @@ impl<R: Runtime> AssistantEventSink for AppHandle<R> {
 pub struct CodeAssistantState {
     store: AssistantStore,
     processes: Arc<Mutex<HashMap<String, Arc<Mutex<Option<Child>>>>>>,
+    // CLI 配置注入的临时配置根目录（app_data/cli-configs）。
+    // codex/opencode 的临时 config.toml/opencode.json 写在 cli-configs/<sessionId>/ 下，
+    // 会话结束时由 cleanup_session_config 清理（AC7）。claude 不写文件（纯 env）。
+    configs_root: PathBuf,
 }
 
 impl CodeAssistantState {
@@ -48,6 +54,10 @@ impl CodeAssistantState {
             .app_data_dir()
             .map_err(|error| error.to_string())?;
         let store = AssistantStore::new(app_data.join("code-assistant"))?;
+        // CLI 临时配置根目录：app_data/cli-configs/<sessionId>/。
+        // 在此创建根目录；每个 session 的子目录由 cli_config::prepare_cli_env 按需创建。
+        let configs_root = app_data.join("cli-configs");
+        std::fs::create_dir_all(&configs_root).map_err(|error| error.to_string())?;
         let cleanup_records = store.cleanup_registered_processes()?;
         for record in &cleanup_records {
             let _ = store.append_transcript(
@@ -75,7 +85,14 @@ impl CodeAssistantState {
         Ok(Self {
             store,
             processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root,
         })
+    }
+
+    /// CLI 临时配置根目录（app_data/cli-configs），供 spawn 前 prepare_cli_env 写临时配置、
+    /// 会话结束后 cleanup_session_config 清理。
+    pub fn configs_root(&self) -> &Path {
+        &self.configs_root
     }
 }
 
@@ -159,6 +176,25 @@ pub struct StartSessionInput {
     // R2 思考强度：claude 透传 `--effort <level>`（max/high/medium/low/none）；
     // codex/opencode 接收但忽略。随每轮 send 传入，可在会话中途调整。
     pub effort: Option<String>,
+    // CLI 配置注入（task 06-15）：前端传入 backendUrl + authToken，Rust 内部调后端拿 apiKey + apiUrl
+    // 生成 CLI 隔离配置（claude env / codex CODEX_HOME / opencode OPENCODE_CONFIG）。
+    // None 或字段缺失 → 降级不注入（CLI 走默认配置，AC4）。key 明文绝不回前端（AC8）。
+    #[serde(default, alias = "cliConfig")]
+    pub cli_config: Option<CliConfigInput>,
+}
+
+/// CLI 配置注入所需的后端连接信息（前端从登录态注入，Rust 内部调 decrypt 拿 key）。
+///
+/// 安全（AC8）：仅传 backendUrl + authToken，**不传 apiKey**。apiKey 明文由 Rust 内部调
+/// `POST /api/llm/binding/decrypt` 获取，仅存在于 Rust 进程内存，不进前端 webview。
+#[derive(Debug, Deserialize, Default)]
+pub struct CliConfigInput {
+    /// 后端基础地址（如 https://api.lingfang.com），Rust 内部拼 /api/llm/* 端点。
+    #[serde(default, alias = "backendUrl")]
+    pub backend_url: String,
+    /// 用户登录 JWT（Authorization: Bearer），Rust 内部调 decrypt/active-provider 用。
+    #[serde(default, alias = "authToken")]
+    pub auth_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +267,9 @@ pub struct SendInputInput {
     // R2 思考强度：追问时可覆盖首轮值，随本轮 send_input 传入。
     // None 表示沿用 start_session 首轮值（由调用方记忆）；非空则覆盖生效（可会话中途调）。
     pub effort: Option<String>,
+    // CLI 配置注入（task 06-15）：追问轮同样注入平台 key/url，保证多轮用平台模型源。
+    #[serde(default, alias = "cliConfig")]
+    pub cli_config: Option<CliConfigInput>,
 }
 
 pub fn list_tools() -> Vec<ToolAvailability> {
@@ -334,12 +373,17 @@ pub fn start_session<E: AssistantEventSink>(
     app: E,
     state: CodeAssistantState,
     input: StartSessionInput,
+    // 由 main.rs 提前生成的 session_id（与 cli_config 临时目录路径一致，便于 AC7 清理）。
+    session_id: String,
+    // CLI 配置注入 env（由 tauri command 层 fetch_credentials + prepare_cli_env 生成）。
+    // 空 Vec 表示降级（无 key/url 或 fetch 失败），spawn 不注入 env，CLI 走默认配置（AC4）。
+    cli_env: Vec<(OsString, OsString)>,
 ) -> Result<SessionRecord, String> {
     let definition = tool_definition(input.tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
     let workspace_dir = resolve_workspace(input.workspace_dir, Some(state.store.root()))?;
-    let session_id = new_session_id(input.tool);
+    let session_id = session_id;
     let final_prompt = match input.system_prompt.as_deref() {
         Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n---\n\n{}", input.prompt),
         _ => input.prompt.clone(),
@@ -363,6 +407,9 @@ pub fn start_session<E: AssistantEventSink>(
             "prompt": input.prompt,
             "commandPreview": command_preview,
             "workspaceDir": workspace_dir,
+            // CLI 配置注入降级标志（前端可据此提示「未注入平台 key，使用 CLI 默认配置」）。
+            // 不记录 key/url 明文（AC8），只记布尔值。
+            "cliConfigInjected": !cli_env.is_empty(),
         }),
     )?;
 
@@ -389,10 +436,18 @@ pub fn start_session<E: AssistantEventSink>(
     state.store.upsert_session(record.clone())?;
 
     // 复用 spawn_and_attach（与 send_input 共用 spawn+register+reader+waiter 管线，DRY）。
-    let pid = match spawn_and_attach(app.clone(), state.clone(), record.clone(), command, args) {
+    let pid = match spawn_and_attach(
+        app.clone(),
+        state.clone(),
+        record.clone(),
+        command,
+        args,
+        cli_env,
+    ) {
         Ok(pid) => pid,
         Err(error) => {
-            // spawn 失败：回滚落盘的 session 记录状态为 failed。
+            // spawn 失败：回滚落盘的 session 记录状态为 failed，并清理已生成的临时配置（AC7）。
+            cli_config::cleanup_session_config(state.configs_root(), &record.session_id);
             let _ = state.store.update_session_exit(
                 &record.session_id,
                 "failed",
@@ -420,6 +475,8 @@ pub fn send_input<E: AssistantEventSink>(
     app: E,
     state: &CodeAssistantState,
     input: SendInputInput,
+    // CLI 配置注入 env（同 start_session，由 tauri command 层生成）。空 Vec = 降级。
+    cli_env: Vec<(OsString, OsString)>,
 ) -> Result<(), String> {
     // design §3.3.4：send_input 是多轮续接的真正发起者，复用 start_session 的 spawn 管线（非常驻 stdin）。
     let session = state
@@ -523,7 +580,7 @@ pub fn send_input<E: AssistantEventSink>(
         );
     }
 
-    spawn_and_attach(app, state.clone(), next_session, command, args)?;
+    spawn_and_attach(app, state.clone(), next_session, command, args, cli_env)?;
     Ok(())
 }
 
@@ -564,6 +621,8 @@ pub fn stop_session<E: AssistantEventSink>(
             state
                 .store
                 .update_session_exit(&input.session_id, "stopped", None, ended_at.clone())?;
+            // AC7：用户主动停止时清理临时 CLI 配置目录（waiter 不会触发自然退出分支）。
+            cli_config::cleanup_session_config(state.configs_root(), &input.session_id);
             app.emit_json(
                 "code-assistant://exit",
                 json!({ "sessionId": input.session_id, "exitCode": null, "status": "stopped", "endedAt": ended_at }),
@@ -579,8 +638,8 @@ pub fn stop_session<E: AssistantEventSink>(
 
 /// spawn 子进程并接入 reader/waiter（design §3.3.4 spawn_followup_run 公共段抽取）。
 /// start_session（首轮）与 send_input（追问）共用，避免复制粘贴（DRY）。
-/// 调用方负责：构造 args、写 input transcript、upsert session（status=running）。
-/// 本函数负责：spawn（Stdio::null stdin, piped stdout/stderr）→ register_process → spawn_reader×2 → spawn_waiter。
+/// 调用方负责：构造 args、写 input transcript、upsert session（status=running）、生成 cli_env。
+/// 本函数负责：spawn（Stdio::null stdin, piped stdout/stderr + 注入 cli_env）→ register_process → spawn_reader×2 → spawn_waiter。
 /// 返回子进程 pid（供首轮 session-started 事件回填）。
 fn spawn_and_attach<E: AssistantEventSink>(
     app: E,
@@ -588,6 +647,9 @@ fn spawn_and_attach<E: AssistantEventSink>(
     session: SessionRecord,
     command: ResolvedToolCommand,
     args: Vec<String>,
+    // CLI 配置注入 env（claude: ANTHROPIC_*；codex: CODEX_HOME+OPENAI_API_KEY；opencode: OPENCODE_CONFIG）。
+    // 空 Vec = 降级不注入（AC4）。.envs() 追加而非 env_clear，保留宿主 PATH 让 CLI 找到二进制。
+    cli_env: Vec<(OsString, OsString)>,
 ) -> Result<u32, String> {
     let session_id = session.session_id.clone();
     let workspace_dir = session.workspace_dir.clone();
@@ -598,6 +660,16 @@ fn spawn_and_attach<E: AssistantEventSink>(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // CLI 配置注入：追加 env（不清空宿主 env，保留 PATH/HOME 等）。
+    // codex/opencode 的 CODEX_HOME/OPENCODE_CONFIG 指向 app_data/cli-configs/<sessionId>/ 临时配置，
+    // 不污染用户 ~/.codex / ~/.config/opencode（AC2/AC3）。
+    if !cli_env.is_empty() {
+        command_builder.envs(
+            cli_env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+    }
     #[cfg(unix)]
     unsafe {
         command_builder.pre_exec(|| {
@@ -678,8 +750,10 @@ pub fn rename_session(
         .rename_session(&input.session_id, &input.title, now_string())
 }
 
-/// 删除会话（清 sessions 记录 + transcript + draft 三处），幂等。
+/// 删除会话（清 sessions 记录 + transcript + draft + CLI 临时配置 四处），幂等。
 pub fn delete_session(state: &CodeAssistantState, input: DeleteSessionInput) -> Result<(), String> {
+    // AC7：删除会话时一并清理残留的 CLI 临时配置目录（可能因异常退出未清理）。
+    cli_config::cleanup_session_config(state.configs_root(), &input.session_id);
     state.store.delete_session(&input.session_id)
 }
 
@@ -1403,6 +1477,9 @@ fn spawn_waiter<E: AssistantEventSink>(
         let _ = state
             .store
             .update_session_exit(&session_id, "exited", exit_code, ended_at.clone());
+        // AC7：会话自然结束时清理临时 CLI 配置目录（codex/opencode 的 config.toml/opencode.json）。
+        // 幂等：claude 无配置文件，目录不存在时 remove_dir_all 静默忽略。
+        cli_config::cleanup_session_config(state.configs_root(), &session_id);
         app.emit_json(
             "code-assistant://exit",
             json!({ "sessionId": session_id, "exitCode": exit_code, "status": "exited", "endedAt": ended_at }),
@@ -1707,11 +1784,23 @@ pub(crate) fn resolve_workspace(workspace_dir: Option<String>, default_root: Opt
         .map_err(|error| error.to_string())
 }
 
-fn new_session_id(tool: CodeAssistantTool) -> String {
+pub(crate) fn new_session_id(tool: CodeAssistantTool) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     format!("{}-{}-{}", tool.as_str(), now.as_secs(), now.subsec_nanos())
+}
+
+/// 查询某 session 记录的 tool（供 main.rs resolve_cli_env 决定按哪种 CLI 机制生成配置）。
+/// session 不存在返回 Claude（兜底，不会命中实际注入逻辑因 fetch 也会失败）。
+pub fn lookup_session_tool(state: &CodeAssistantState, session_id: &str) -> CodeAssistantTool {
+    state
+        .store
+        .list_sessions()
+        .into_iter()
+        .find(|r| r.session_id == session_id)
+        .map(|r| r.tool)
+        .unwrap_or(CodeAssistantTool::Claude)
 }
 
 fn first_non_empty<'a>(first: &'a str, second: &'a str) -> &'a str {
@@ -2073,6 +2162,10 @@ mod tests {
         let state = CodeAssistantState {
             store: store.clone(),
             processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-reader-test-configs-{}",
+                std::process::id()
+            )),
         };
         let sink = CapturingSink {
             events: Arc::new(Mutex::new(Vec::new())),
@@ -2307,6 +2400,10 @@ mod tests {
         let state = CodeAssistantState {
             store: AssistantStore::new(root).expect("assistant store should initialize"),
             processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-real-codex-configs-{}",
+                std::process::id()
+            )),
         };
         let record = start_session(
             NoopEventSink,
@@ -2318,7 +2415,12 @@ mod tests {
                 prompt: "Reply with exactly: lingfang-long-session-ok".into(),
                 system_prompt: None,
                 effort: None,
+                cli_config: None,
             },
+            // session_id 由调用方提前生成（与生产路径 main.rs 一致）。
+            new_session_id(CodeAssistantTool::Codex),
+            // 真实 codex 测试走降级（不注入平台 key），验证 CLI 默认配置路径仍可跑（lingfang-long-session-ok）。
+            Vec::new(),
         )
         .expect("codex session should start");
 
@@ -2381,6 +2483,10 @@ mod tests {
         let state = CodeAssistantState {
             store: AssistantStore::new(root).expect("assistant store should initialize"),
             processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-real-codex-stop-configs-{}",
+                std::process::id()
+            )),
         };
         let record = start_session(
             NoopEventSink,
@@ -2392,7 +2498,10 @@ mod tests {
                 prompt: "Write a detailed LingFang plugin design with at least 20 sections. Do not be brief.".into(),
                 system_prompt: None,
                 effort: None,
+                cli_config: None,
             },
+            new_session_id(CodeAssistantTool::Codex),
+            Vec::new(),
         )
         .expect("codex session should start");
         assert_eq!(state.store.list_registered_processes().len(), 1);
@@ -2519,6 +2628,10 @@ mod tests {
         let state = CodeAssistantState {
             store,
             processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-scan-configs-{}",
+                std::process::id()
+            )),
         };
         (state, sandbox)
     }
@@ -2661,6 +2774,10 @@ mod tests {
         let state = CodeAssistantState {
             store,
             processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-scan-missing-configs-{}",
+                std::process::id()
+            )),
         };
         let result = scan_workspace_files(
             &state,
