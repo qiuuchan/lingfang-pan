@@ -29,7 +29,11 @@ Tauri updater 期望 endpoint 返回**固定 JSON 结构**（字段名精确，�
 - 密钥对：`.tauri/lingfang.key`（私钥）+ `.tauri/lingfang.key.pub`（公钥）。
 - `.gitignore` 必须含 `.tauri/` + `*.key`（**私钥永不入仓**）。
 - 公钥内嵌 `tauri.conf.json` 的 `plugins.updater.pubkey`（base64 整行）。
-- 构建时设 `TAURI_SIGNING_PRIVATE_KEY_PATH` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（无密码则空串），产物自动签名（`.msi.zip` + `.msi.zip.sig`）。
+- 构建时设 `TAURI_SIGNING_PRIVATE_KEY`（**传私钥内容字符串，不是 `_PATH`**）+ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（无密码则空串），产物自动签名（`.exe` + `.exe.sig`）。
+  - **实战踩坑**：文档说 `TAURI_SIGNING_PRIVATE_KEY_PATH` 和 `TAURI_SIGNING_PRIVATE_KEY` 都支持，但实测 `_PATH` 不生效（报 `no private key`）。**必须用 `_KEY` 传值**：
+    ```bash
+    TAURI_SIGNING_PRIVATE_KEY="$(cat .tauri/lingfang.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" pnpm tauri build --bundles nsis
+    ```
 - **pubkey 与私钥必须配对**：构建用的私钥 = conf.json pubkey 的配对密钥，否则验签失败。
 
 ## endpoint 动态注入（本项目特有）
