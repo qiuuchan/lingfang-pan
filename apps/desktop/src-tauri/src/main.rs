@@ -7,6 +7,7 @@ mod cli_installer;
 mod code_assistant;
 mod plugin_script;
 mod plugins;
+mod updater;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -218,6 +219,7 @@ fn builtin_dir(app: &tauri::App) -> PathBuf {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let registry = Arc::new(CapabilityRegistry::default());
             let dir = builtin_dir(app);
@@ -229,6 +231,8 @@ fn main() {
             });
             let assistant_state = code_assistant::CodeAssistantState::new(app)?;
             app.manage(assistant_state);
+            // updater 全局 State：缓存 check_update 拿到的 Update，供 download_and_install 取用。
+            app.manage(updater::PendingUpdate(std::sync::Mutex::new(None)));
             let _ = app.emit(
                 "code-assistant://availability-changed",
                 code_assistant::list_tools(),
@@ -258,7 +262,9 @@ fn main() {
             plugin_script::run_plugin_script,
             cli_installer::install_cli,
             cli_installer::install_runtime,
-            cli_installer::cancel_install
+            cli_installer::cancel_install,
+            updater::check_update,
+            updater::download_and_install
         ])
         .run(tauri::generate_context!())
         .expect("启动 LingFang 桌面壳失败");
