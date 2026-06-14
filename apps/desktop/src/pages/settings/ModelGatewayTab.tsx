@@ -55,11 +55,11 @@ function friendlyLlmError(code: string | undefined, fallback: string): string {
     case 'no_active_provider':
       return '平台尚未配置模型服务，请联系管理员。';
     case 'binding_not_found':
-      return '尚未保存绑定，请填写 apiKey 后再保存。';
+      return '尚未保存配置，填写 API 密钥后再保存。';
     case 'llm_key_decrypt_failed':
-      return 'apiKey 解密失败，请重新填写 apiKey 后保存。';
+      return '密钥读取失败，重新填写 API 密钥后保存。';
     case 'llm_key_not_configured':
-      return '服务端尚未配置加密密钥，请联系平台管理员。';
+      return '平台尚未配置加密密钥，请联系管理员。';
     default:
       return fallback;
   }
@@ -73,7 +73,7 @@ function friendlyLlmError(code: string | undefined, fallback: string): string {
  */
 function friendlyFetchError(message: string): string {
   if (message.startsWith('api_key_invalid')) {
-    return 'apiKey 无效或已过期，请检查后重试。';
+    return 'API 密钥无效或已过期，请检查后重试。';
   }
   if (message.startsWith('provider_response_unsupported')) {
     return '当前模型服务暂不支持自动拉取模型（非 OpenAI 兼容协议）。';
@@ -154,7 +154,7 @@ export function ModelGatewayTab() {
   async function handleFetchModels() {
     if (!activeProvider) return;
     if (!apiKeyInput.trim()) {
-      toast.error('请先填写 apiKey');
+      toast.error('先填写 API 密钥');
       return;
     }
     setFetching(true);
@@ -195,7 +195,7 @@ export function ModelGatewayTab() {
   async function handleSave() {
     // 新建绑定必须填 apiKey；已存在绑定留空可保留原密。
     if (!binding && !apiKeyInput.trim()) {
-      toast.error('请填写 apiKey');
+      toast.error('填写 API 密钥');
       return;
     }
     const payload: BindingUpsertInput = {
@@ -227,7 +227,7 @@ export function ModelGatewayTab() {
       setSelectedModels([]);
       setApiKeyInput('');
       setPendingDelete(false);
-      toast.success('绑定已删除');
+      toast.success('模型配置已删除');
     } catch (err) {
       const e = err as ApiError;
       toast.error(friendlyLlmError(e.code, e.message));
@@ -249,7 +249,7 @@ export function ModelGatewayTab() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">模型网关</CardTitle>
+          <CardTitle className="text-base">模型服务</CardTitle>
         </CardHeader>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
           平台尚未配置模型服务，请联系管理员。
@@ -263,13 +263,13 @@ export function ModelGatewayTab() {
       {/* 顶部说明：零 provider 概念（不暴露「网关目录/provider/源」字样）。 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <KeyRoundIcon className="size-4 text-primary" />
-        填写你的 apiKey（云端加密存储，跨电脑可用），拉取当前可用的模型并勾选要启用的。
+        填写你的 API 密钥（云端加密存储，跨电脑可用），拉取当前可用模型并勾选要启用的。
       </div>
 
       {/* 配置区 */}
       <Card>
         <CardHeader className="flex-row items-center justify-between gap-2">
-          <CardTitle className="text-base">模型网关</CardTitle>
+          <CardTitle className="text-base">模型服务</CardTitle>
           {/* 已绑定标记：显示脱敏 hint + 「已配置」Badge。 */}
           {binding ? (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -286,11 +286,11 @@ export function ModelGatewayTab() {
         <CardContent className="flex flex-col gap-4">
           {/* 1. apiKey 输入 + 拉取按钮 */}
           <div className="flex flex-col gap-1.5">
-            <Label>apiKey {binding ? '（留空保留原密）' : ''}</Label>
+            <Label>API 密钥 {binding ? '（留空保留原密钥）' : ''}</Label>
             <div className="flex gap-2">
               <Input
                 type="password"
-                placeholder={binding ? '重新填写覆盖原密钥' : 'sk-...'}
+                placeholder={binding ? '重新填写以覆盖原密钥' : 'sk-...'}
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 autoComplete="off"
@@ -308,7 +308,7 @@ export function ModelGatewayTab() {
           {/* 2. 模型展示区 */}
           {fetching ? (
             <div className="rounded-lg border p-3 text-center text-sm text-muted-foreground">
-              正在拉取模型…
+              拉取中
             </div>
           ) : fetchedModels.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -343,7 +343,7 @@ export function ModelGatewayTab() {
                 onClick={() => setPendingDelete(true)}
                 disabled={deleting}
               >
-                删除绑定
+                删除配置
               </LoadingButton>
             ) : null}
             <LoadingButton onClick={() => { void handleSave(); }} loading={saving} disabled={saving}>
@@ -363,9 +363,9 @@ export function ModelGatewayTab() {
       <Dialog open={pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(false); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>删除模型绑定</DialogTitle>
+            <DialogTitle>删除模型配置</DialogTitle>
             <DialogDescription>
-              将删除当前的模型绑定与其加密 apiKey，此操作不可撤销。
+              将删除当前的模型配置与关联的密钥，此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -23,7 +23,7 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
         method: 'POST',
         body: { email, password },
       });
-      if (!result.token) throw new Error('登录响应缺少 token');
+      if (!result.token) throw new Error('登录失败，请稍后重试');
       if (!isPlatformAdminSession(result)) throw new Error('该账号不是平台管理员');
       setToken(result.token);
       onAuthed(result);
@@ -65,7 +65,7 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
               平台管理员登录
             </h1>
             <p className="mt-1.5 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
-              初始账号由后端 seed/bootstrap 创建。
+              初始账号在系统部署时创建。
             </p>
 
             <div className="mt-6 space-y-4">

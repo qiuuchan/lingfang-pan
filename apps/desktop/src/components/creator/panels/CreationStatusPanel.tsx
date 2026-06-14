@@ -18,10 +18,10 @@ export function CreationStatusPanel({ status, files, diagnostics }: { status?: s
           <Info label="状态" value={status ? STATUS_LABEL[status] || status : '未开始'} truncate />
           <Info label="文件" value={`${files.length} 个`} truncate />
           <Info label="入口" value={manifest.entry} />
-          <Info label="运行时" value={manifest.runtime_type} truncate />
+          <Info label="运行环境" value={manifest.runtime_type} truncate />
         </div>
         <div className="space-y-1.5 text-sm">
-          <div className="flex items-center gap-2 font-medium"><CheckCircle2Icon className="size-4 text-primary" />诊断</div>
+          <div className="flex items-center gap-2 font-medium"><CheckCircle2Icon className="size-4 text-primary" />检查结果</div>
           {diagnostics.length ? diagnostics.map((item, index) => (
             <div
               key={index}
@@ -34,7 +34,7 @@ export function CreationStatusPanel({ status, files, diagnostics }: { status?: s
               <span className="break-words">{item.status} — {item.message}</span>
             </div>
           )) : (
-            <div className="rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">暂无诊断。</div>
+            <div className="rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">暂无检查结果。</div>
           )}
         </div>
       </CardContent>

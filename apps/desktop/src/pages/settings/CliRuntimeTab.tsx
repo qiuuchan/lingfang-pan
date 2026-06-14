@@ -66,7 +66,7 @@ export function CliRuntimeTab({
       {/* 顶部操作区：重新检测全部 */}
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm text-muted-foreground">
-          自动检测本机已安装的 CLI 工具与脚本运行时，未安装时可一键通过 winget 安装（仅 Windows）。
+          自动检测本机已安装的 CLI 工具与脚本运行环境，未安装时可一键自动安装（仅 Windows）。
         </div>
         <LoadingButton variant="outline" size="sm" loading={probing} onClick={onProbeAll}>
           <RefreshCwIcon />重新检测全部
@@ -110,7 +110,7 @@ export function CliRuntimeTab({
         <CardHeader>
           <div className="flex items-center gap-2">
             <CpuIcon className="size-4 text-primary" />
-            <CardTitle>脚本运行时</CardTitle>
+            <CardTitle>脚本运行环境</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -232,8 +232,8 @@ function InstallConfirmDialog({
         <DialogHeader>
           <DialogTitle>确认安装 {meta?.label ?? '组件'}</DialogTitle>
           <DialogDescription>
-            将执行 <span className="font-mono">winget install {meta?.wingetId}</span>。
-            安装过程可能需要管理员权限（UAC 弹窗），并受 300 秒硬超时保护。
+            将通过系统包管理器安装 <span className="font-mono">{meta?.wingetId}</span>。
+            安装可能需要管理员权限确认。
             仅 Windows 支持自动安装，macOS/Linux 请手动安装。
           </DialogDescription>
         </DialogHeader>

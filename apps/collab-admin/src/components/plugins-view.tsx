@@ -46,7 +46,7 @@ export function PluginsView() {
   }
 
   return (
-    <Section title="插件管理" description="管理端只做平台治理；插件创建和 Agent 生成属于本地客户端。">
+    <Section title="插件管理" description="管理端只做平台治理，插件创建在本地客户端完成。">
       <Table>
         <TableHeader>
           <TableRow>

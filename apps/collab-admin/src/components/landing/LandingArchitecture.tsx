@@ -1,6 +1,6 @@
 // 落地页架构区：技术栈矩阵 + ASCII 系统拓扑。
 const STACK = [
-  { layer: '桌面客户端', tech: 'Tauri 2 · React', note: '原生窗口 · 自定义标题栏 · 内置插件沙箱' },
+  { layer: '桌面客户端', tech: 'Tauri 2 · React', note: '原生窗口 · 自定义标题栏 · 内置插件独立环境' },
   { layer: '统一后端', tech: 'NestJS 11 · Prisma 7', note: '/api 前缀 · Swagger · PostgreSQL' },
   { layer: '管理端 / 官网', tech: 'React · shadcn/ui', note: '落地页 + 用户 · 团队 · 插件 · 审批 · 审计' },
   { layer: '共享契约', tech: 'Zod · TypeScript', note: '前后端单一事实来源' },
@@ -81,7 +81,7 @@ export function LandingArchitecture() {
             {'\n'}
             <span style={{ color: 'var(--lf-fg-subtle)' }}>│</span>  <span style={{ color: 'var(--lf-accent)' }}>collab-api</span>  NestJS · /api · Swagger    <span style={{ color: 'var(--lf-fg-subtle)' }}>:3000 │</span>
             {'\n'}
-            <span style={{ color: 'var(--lf-fg-subtle)' }}>│</span>  插件生成 · LLM 代理 · 市场 · 钱包 · 多租户 · RBAC      <span style={{ color: 'var(--lf-fg-subtle)' }}>│</span>
+            <span style={{ color: 'var(--lf-fg-subtle)' }}>│</span>  插件生成 · LLM 代理 · 市场 · 钱包 · 多团队 · 角色权限    <span style={{ color: 'var(--lf-fg-subtle)' }}>│</span>
             {'\n'}
             <span style={{ color: 'var(--lf-fg-subtle)' }}>└──────────────────────────────┬──────────────────────────┘</span>
             {'\n'}

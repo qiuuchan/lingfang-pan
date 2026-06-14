@@ -48,7 +48,7 @@ export function AdminsView() {
 
   return (
     <div className="space-y-8">
-      <Section title="平台管理员" description="平台管理员拥有全局管理权限，独立于此页管理。">
+      <Section title="平台管理员" description="平台管理员拥有全局管理权限，在此页面管理。">
         <div>
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -130,7 +130,7 @@ function CreateAdminDialog({ children, onRefresh }: { children: React.ReactNode;
   const [password, setPassword] = useState('ChangeMe123!');
 
   async function create() {
-    if (!email.trim()) return toast.error('请输入邮箱');
+    if (!email.trim()) return toast.error('输入邮箱');
     // ADMIN-VIEW-04 修复：仅成功才关闭对话框并清空表单。
     if (!(await run(
       () =>
@@ -204,7 +204,7 @@ function EditAdminDialog({
   }
 
   async function save() {
-    if (!editEmail.trim()) return toast.error('请输入邮箱');
+    if (!editEmail.trim()) return toast.error('输入邮箱');
     const body: Record<string, unknown> = {
       email: editEmail.trim(),
       displayName: editName,

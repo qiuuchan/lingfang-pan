@@ -47,7 +47,7 @@ export function TeamHome() {
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Metric icon={<UsersIcon />} label="团队" value={team?.name || '—'} desc={team?.slug || '团队标识'} />
-        <Metric icon={<CoinsIcon />} label="共享余额" value={centsToYuan(balance)} desc="所有扣减由后端账本记录" />
+        <Metric icon={<CoinsIcon />} label="共享余额" value={centsToYuan(balance)} desc="所有扣减均由系统记录" />
         <Metric icon={<PlugIcon />} label="可用插件" value={String(plugins.length)} desc="平台禁用插件不会显示" />
       </div>
       <Card>

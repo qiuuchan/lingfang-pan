@@ -67,7 +67,7 @@ export function LandingHero({ onLogin, onNavigateDownload, onNavigateChangelog }
           className="lf-animate-rise mx-auto mt-7 max-w-2xl text-center text-lg sm:text-xl leading-relaxed"
           style={{ animationDelay: '160ms', color: 'var(--lf-fg-muted)' }}
         >
-          基于 AI 的无代码插件生成平台 —— 自然语言描述需求，AI 流式生成可运行插件，沙箱即时预览，发布到市场。
+          用 AI 无代码生成插件 —— 自然语言描述需求，AI 流式生成可运行插件，独立环境即时预览，发布到市场。
         </p>
 
         {/* CTA */}

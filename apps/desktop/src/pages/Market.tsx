@@ -40,7 +40,7 @@ const SORTS = [
 
 // 购买/安装的错误码 → 友好提示。
 function friendlyError(e: ApiError): string {
-  if (e.code === 'insufficient_balance') return '余额不足，请到「钱包」查看余额';
+  if (e.code === 'insufficient_balance') return '余额不足，去「钱包」查看余额';
   if (e.code === 'payment_required') return '该插件为付费插件，请先购买';
   return e.message;
 }
@@ -228,7 +228,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
             <LoadingButton loading={rating} onClick={rate}>提交评分</LoadingButton>
           </div>
         ) : (
-          <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">{rateHint}——{isFree ? '安装' : '购买'}后即可对它打分。</p>
+          <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">{rateHint}。</p>
         )}
       </CardContent>
     </Card>
