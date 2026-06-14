@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { AdminService } from './admin.service';
+import { LlmService } from './llm.service';
 import {
   AdminAdjustBalanceDto,
   AdminCreatePluginDto,
@@ -15,12 +16,16 @@ import {
   AdminUpdateTeamDto,
   AdminUpdateUserDto,
 } from './dto/admin.dto';
+import { GatewayCreateDto, GatewayStatusDto, GatewayUpdateDto } from './dto/llm.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
 @Controller('admin')
 export class AdminController {
-  constructor(@Inject(AdminService) private readonly admin: AdminService) {}
+  constructor(
+    @Inject(AdminService) private readonly admin: AdminService,
+    @Inject(LlmService) private readonly llm: LlmService,
+  ) {}
 
   @Get('dashboard')
   @ApiOperation({ summary: '管理端指标' })
@@ -153,5 +158,31 @@ export class AdminController {
   @ApiOperation({ summary: '审计日志' })
   auditLogs(@Req() req: Request) {
     return this.admin.auditLogs(requireUser(req).id);
+  }
+
+  // === LLM 网关目录（平台 Admin 维护，ensurePlatformAdmin 在 LlmService 内） ===
+
+  @Get('llm-gateways')
+  @ApiOperation({ summary: '网关目录列表（含 DISABLED，全字段）' })
+  listLlmGateways(@Req() req: Request) {
+    return this.llm.adminListGateways(requireUser(req).id);
+  }
+
+  @Post('llm-gateways')
+  @ApiOperation({ summary: '新建网关' })
+  createLlmGateway(@Req() req: Request, @Body() body: GatewayCreateDto) {
+    return this.llm.adminCreateGateway(requireUser(req).id, body);
+  }
+
+  @Patch('llm-gateways/:id')
+  @ApiOperation({ summary: '更新网关（全可选字段）' })
+  updateLlmGateway(@Req() req: Request, @Param('id') id: string, @Body() body: GatewayUpdateDto) {
+    return this.llm.adminUpdateGateway(requireUser(req).id, id, body);
+  }
+
+  @Patch('llm-gateways/:id/status')
+  @ApiOperation({ summary: '启用/禁用网关（软删除，无物理 DELETE）' })
+  setLlmGatewayStatus(@Req() req: Request, @Param('id') id: string, @Body() body: GatewayStatusDto) {
+    return this.llm.adminSetGatewayStatus(requireUser(req).id, id, body.status);
   }
 }
