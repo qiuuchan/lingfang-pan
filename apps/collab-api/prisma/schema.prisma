@@ -73,6 +73,12 @@ enum PluginReviewStatus {
   REJECTED
 }
 
+// LLM 网关目录状态：ENABLED 租户可见可绑定，DISABLED 软删除（保留绑定只读，无物理 DELETE，design.md B8）。
+enum LlmGatewayStatus {
+  ENABLED
+  DISABLED
+}
+
 model User {
   id                    String                 @id @default(uuid())
   email                 String                 @unique
@@ -98,6 +104,8 @@ model User {
   purchasesSeller       Purchase[]             @relation("PurchaseSeller")
   pluginRatings         PluginRating[]         @relation("PluginRater")
   auditLogs             AuditLog[]             @relation("AuditActor")
+  createdLlmBindings    TenantLlmBinding[]    @relation("BindingCreator")
+  updatedLlmBindings    TenantLlmBinding[]    @relation("BindingUpdater")
 }
 
 model Team {
@@ -113,6 +121,7 @@ model Team {
   ledger       BalanceLedger[]
   plugins      Plugin[]
   installations PluginInstallation[]
+  bindings     TenantLlmBinding[]
 }
 
 model TeamMembership {
@@ -313,4 +322,52 @@ model PluginRating {
 
   @@unique([pluginId, userId])
   @@index([pluginId])
+}
+
+// LLM 网关目录（平台级，平台 Admin 维护，应用发布时 seed 默认值）。
+// provider 为 String（非 enum）：平台维护白名单（openai/anthropic/azure/deepseek/moonshot/qwen/custom），
+// 见 dto/enums.ts LLM_PROVIDER。models 为 string[]（Json）。name 唯一（upsert seed 幂等）。
+model LlmGateway {
+  id          String           @id @default(uuid())
+  provider    String                            // 平台维护白名单值（非 enum，String）
+  name        String           @unique          // 展示名，如「OpenAI 官方」，seed upsert by name
+  apiUrl      String                            // 服务端规范化去尾斜杠、http/https
+  status      LlmGatewayStatus @default(ENABLED)
+  models      Json             @default("[]")   // string[]，如 ["gpt-4o","gpt-4o-mini"]
+  description String           @default("")
+  sortOrder   Int              @default(0)      // 小在前
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  bindings    TenantLlmBinding[]
+
+  @@index([status, sortOrder])
+}
+
+// 租户 LLM 绑定（租户级，TEAM_ADMIN 维护）。
+// encryptedApiKey 为 AES-256-GCM 密文打包 base64(iv(12B)||tag(16B)||ciphertext)。
+// apiKeyHint 为脱敏串（非敏感，明文存库供列表展示，零解密）。
+// keyFingerprint 为 sha256(明文).slice(0,16)，稳定标识「这是哪个 key」（不泄漏明文）。
+// gateway 上 onDelete: Restrict：禁用网关不删绑定（只读保留），防止误删清空全部租户 key。
+model TenantLlmBinding {
+  id              String     @id @default(uuid())
+  teamId          String
+  gatewayId       String
+  provider        String                       // 冗余，与 gateway.provider 一致（便于审计 metadata 不再联表）
+  encryptedApiKey String                       // base64(iv(12B) || tag(16B) || ciphertext)
+  apiKeyHint      String     @default("")      // 明文存非敏感脱敏串（PUT 时计算落库）
+  keyFingerprint  String     @default("")      // sha256(plaintext).slice(0,16)
+  enabled         Boolean    @default(true)
+  modelOverride   Json?                        // null=继承 gateway.models；string[]=子集
+  createdById     String?                       // FK User，谁创建
+  updatedById     String?                       // FK User，谁最后改
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  team       Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  gateway    LlmGateway @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
+  createdBy  User?      @relation("BindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User?      @relation("BindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([teamId, gatewayId])
+  @@index([teamId, enabled])
 }
