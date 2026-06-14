@@ -29,7 +29,10 @@ import {
 } from '@/components/ui/breadcrumb';
 import { Sidebar, type SidebarNavItem } from '@/components/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { Login } from '@/components/login';
+import { Landing } from '@/components/landing/Landing';
+import { LoginPage } from '@/components/landing/LoginPage';
+import { DownloadPage } from '@/components/landing/DownloadPage';
+import { ChangelogPage } from '@/components/landing/ChangelogPage';
 import { Dashboard } from '@/components/dashboard';
 import { UsersView } from '@/components/users-view';
 import { TeamsView } from '@/components/teams-view';
@@ -65,6 +68,8 @@ export default function App() {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [checking, setChecking] = useState(!!getToken());
   const [view, setView] = useState<View>('dashboard');
+  // 未登录态的落地页视图：首页 / 登录页 / 下载页 / 更新日志页（各自独立全屏页，状态机 AJAX 切换，无路由库）。
+  const [landingView, setLandingView] = useState<'home' | 'login' | 'download' | 'changelog'>('home');
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -140,7 +145,23 @@ export default function App() {
   }
 
   if (!session) {
-    return <Login onAuthed={setSession} />;
+    // 未登录：按 landingView 在首页 / 登录页 / 下载页 / 更新日志页之间切换（各自独立全屏页，AJAX 无刷新）。
+    if (landingView === 'login') {
+      return <LoginPage onAuthed={setSession} onBack={() => setLandingView('home')} />;
+    }
+    if (landingView === 'download') {
+      return <DownloadPage onBack={() => setLandingView('home')} />;
+    }
+    if (landingView === 'changelog') {
+      return <ChangelogPage onBack={() => setLandingView('home')} />;
+    }
+    return (
+      <Landing
+        onLogin={() => setLandingView('login')}
+        onNavigateDownload={() => setLandingView('download')}
+        onNavigateChangelog={() => setLandingView('changelog')}
+      />
+    );
   }
 
   const currentLabel = VIEW_LABEL[view];

@@ -79,6 +79,33 @@ enum LlmGatewayStatus {
   DISABLED
 }
 
+// 发布通道：STABLE 正式版（官网默认展示、桌面端默认检查），BETA 预览版（自愿接入）。
+enum ReleaseChannel {
+  STABLE
+  BETA
+}
+
+// 发布状态：DRAFT 草稿（仅 Admin 可见）、PUBLISHED 已发布（公开可见）、ARCHIVED 已归档（历史保留不再展示为最新）。
+enum ReleaseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// 产物平台：WINDOWS（.msi/.exe）、DARWIN（macOS .dmg/.app）、LINUX（.AppImage/.deb）。
+enum AssetPlatform {
+  WINDOWS
+  DARWIN
+  LINUX
+}
+
+// 产物架构：X86_64（Intel/AMD64）、AARCH64（ARM64，Apple Silicon / Win on ARM）、UNIVERSAL（macOS 通用二进制）。
+enum AssetArch {
+  X86_64
+  AARCH64
+  UNIVERSAL
+}
+
 model User {
   id                    String                 @id @default(uuid())
   email                 String                 @unique
@@ -370,4 +397,48 @@ model TenantLlmBinding {
 
   @@unique([teamId, gatewayId])
   @@index([teamId, enabled])
+}
+
+// 应用版本发布（平台级，平台 Admin 维护，官网展示 + 桌面端检查更新用）。
+// version 为 semver 字符串（如 1.0.0），同 channel 内 (channel, version) 唯一。
+// isLatest 由 publish 端点原子维护：发布时同 channel 其他版本 isLatest=false，仅一条 true。
+// notes 为 markdown 文本（changelog），title 为版本标题（如「AI 生成器重构」）。
+// publishedAt 在首次 publish 时落库（重发保持不变），用于官网时间线排序。
+model Release {
+  id          String         @id @default(uuid())
+  version     String                              // semver，如 1.0.0
+  channel     ReleaseChannel @default(STABLE)
+  status      ReleaseStatus  @default(DRAFT)
+  title       String         @default("")         // 版本标题（展示用）
+  notes       String         @default("")         // markdown changelog
+  isLatest    Boolean        @default(false)      // 同 channel 内最新发布（publish 原子维护）
+  publishedAt DateTime?                            // 首次发布时间，归档不清空（时间线排序）
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  assets      ReleaseAsset[]
+
+  @@unique([channel, version])
+  @@index([channel, status, isLatest])
+  @@index([channel, status, publishedAt])
+}
+
+// 版本产物（一个版本下多个平台/架构的安装包登记）。
+// url 为下载地址（外链，如 GitHub Release 直链或 CDN）；signature 为 Tauri updater 签名（base64，可选）。
+// sizeBytes 用 Int（安装包 < 2GB，Int 上限 ~2.1GB 足够；避免 BigInt 的 JSON 序列化坑）。
+// filename 为展示用文件名（如 LingFang_1.0.0_x64-setup.exe）。
+// (releaseId, platform, arch) 唯一：同版本同平台同架构仅一个产物。
+model ReleaseAsset {
+  id         String        @id @default(uuid())
+  releaseId  String
+  platform   AssetPlatform
+  arch       AssetArch
+  url        String                       // 下载直链（外链）
+  filename   String        @default("")   // 展示用文件名
+  signature  String        @default("")   // Tauri updater base64 签名（可选，未接入 updater 时为空）
+  sizeBytes  Int?                          // 安装包字节大小（展示用，< 2GB）
+  createdAt  DateTime      @default(now())
+  release    Release       @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, platform, arch])
+  @@index([releaseId])
 }
