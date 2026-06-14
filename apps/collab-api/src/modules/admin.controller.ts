@@ -17,6 +17,8 @@ import {
   AdminUpdateUserDto,
 } from './dto/admin.dto';
 import { GatewayCreateDto, GatewayStatusDto, GatewayUpdateDto } from './dto/llm.dto';
+import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
+import { ReleaseService } from './release.service';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -25,6 +27,7 @@ export class AdminController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(LlmService) private readonly llm: LlmService,
+    @Inject(ReleaseService) private readonly releases: ReleaseService,
   ) {}
 
   @Get('dashboard')
@@ -184,5 +187,43 @@ export class AdminController {
   @ApiOperation({ summary: '启用/禁用网关（软删除，无物理 DELETE）' })
   setLlmGatewayStatus(@Req() req: Request, @Param('id') id: string, @Body() body: GatewayStatusDto) {
     return this.llm.adminSetGatewayStatus(requireUser(req).id, id, body.status);
+  }
+
+  // === 应用版本发布（平台 Admin 维护，ensurePlatformAdmin 在 ReleaseService 内） ===
+
+  @Post('releases')
+  @ApiOperation({ summary: '创建版本（DRAFT，需后续 publish）' })
+  createRelease(@Req() req: Request, @Body() body: ReleaseCreateDto) {
+    return this.releases.create(requireUser(req).id, body);
+  }
+
+  @Patch('releases/:id')
+  @ApiOperation({ summary: '更新版本标题/说明' })
+  updateRelease(@Req() req: Request, @Param('id') id: string, @Body() body: ReleaseUpdateDto) {
+    return this.releases.update(requireUser(req).id, id, body);
+  }
+
+  @Post('releases/:id/publish')
+  @ApiOperation({ summary: '发布版本（标记 isLatest，事务维护同 channel 唯一）' })
+  publishRelease(@Req() req: Request, @Param('id') id: string) {
+    return this.releases.publish(requireUser(req).id, id);
+  }
+
+  @Post('releases/:id/archive')
+  @ApiOperation({ summary: '归档版本（status=ARCHIVED，取消 latest）' })
+  archiveRelease(@Req() req: Request, @Param('id') id: string) {
+    return this.releases.archive(requireUser(req).id, id);
+  }
+
+  @Post('releases/:id/assets')
+  @ApiOperation({ summary: '登记版本产物（平台/架构/下载链接）' })
+  addReleaseAsset(@Req() req: Request, @Param('id') id: string, @Body() body: ReleaseAssetCreateDto) {
+    return this.releases.addAsset(requireUser(req).id, id, body);
+  }
+
+  @Delete('releases/:id/assets/:assetId')
+  @ApiOperation({ summary: '删除版本产物' })
+  deleteReleaseAsset(@Req() req: Request, @Param('id') id: string, @Param('assetId') assetId: string) {
+    return this.releases.deleteAsset(requireUser(req).id, id, assetId);
   }
 }

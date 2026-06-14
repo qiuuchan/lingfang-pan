@@ -29,3 +29,14 @@ export const LLM_PROVIDER = [
 
 /** LLM 网关状态（与 LlmGatewayStatus 对齐，ENABLED 租户可见 / DISABLED 软删除）。 */
 export const LLM_GATEWAY_STATUS = ['ENABLED', 'DISABLED'] as const;
+
+// === 应用版本发布相关常量 ===
+
+/** 发布通道（与 ReleaseChannel 对齐，STABLE 正式 / BETA 预览）。 */
+export const RELEASE_CHANNEL = ['STABLE', 'BETA'] as const;
+/** 发布状态（与 ReleaseStatus 对齐，DRAFT 草稿 / PUBLISHED 已发布 / ARCHIVED 已归档）。 */
+export const RELEASE_STATUS = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
+/** 产物平台（与 AssetPlatform 对齐，WINDOWS / DARWIN=macOS / LINUX）。 */
+export const ASSET_PLATFORM = ['WINDOWS', 'DARWIN', 'LINUX'] as const;
+/** 产物架构（与 AssetArch 对齐，X86_64 / AARCH64 / UNIVERSAL）。 */
+export const ASSET_ARCH = ['X86_64', 'AARCH64', 'UNIVERSAL'] as const;
