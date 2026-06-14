@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
+mod cli_installer;
 mod code_assistant;
 mod plugin_script;
 mod plugins;
@@ -254,7 +255,10 @@ fn main() {
             code_assistant_read_draft,
             code_assistant_scan_workspace,
             plugin_script::probe_script_runtime,
-            plugin_script::run_plugin_script
+            plugin_script::run_plugin_script,
+            cli_installer::install_cli,
+            cli_installer::install_runtime,
+            cli_installer::cancel_install
         ])
         .run(tauri::generate_context!())
         .expect("启动 LingFang 桌面壳失败");

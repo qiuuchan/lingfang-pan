@@ -184,7 +184,10 @@ fn is_store_stub_output(stderr: &str, runtime: ScriptRuntime) -> bool {
 /// 最小白名单环境变量：仅保留解释器/依赖查找与系统调用必需项，裁掉宿主 token/密钥。
 /// 权衡（design §4.4）：依赖自定义环境变量的脚本在预览中行为可能与真实运行不一致，
 /// 但预览目标是「能跑起来看 stdout」，非「100% 复现生产环境」。
-fn minimal_env() -> Vec<(OsString, OsString)> {
+///
+/// pub(crate) 供 cli_installer::installer_env 参考其 keys 白名单思路（design §6.6，
+/// cli_installer 独立构造 installer_env 实例，不复用本函数返回值；本提升仅暴露语义供跨模块共享）。
+pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
     let keys = [
         "PATH",                       // 解释器/依赖查找必须
         "HOME", "USERPROFILE",        // Node/Python 用户级配置
