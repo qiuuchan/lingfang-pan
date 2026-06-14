@@ -78,7 +78,9 @@ pub struct RunResult {
 fn install_hint(runtime: ScriptRuntime) -> String {
     match runtime {
         ScriptRuntime::Nodejs => {
-            "未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.Technology.NodeJS.LTS".to_string()
+            // winget 包 id 经 microsoft/winget-pkgs 官方 manifest 核实为 OpenJS.NodeJS.LTS
+            //（非 OpenJS.Technology.NodeJS，后者不存在，前端 RUNTIME_INSTALL_HINT 已修正同步）。
+            "未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.NodeJS.LTS".to_string()
         }
         ScriptRuntime::Python => {
             "未检测到 Python。请安装：运行 winget install Python.Python.3.12，或访问 https://python.org 下载。Windows 推荐 py launcher。".to_string()
@@ -199,6 +201,32 @@ pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
         .iter()
         .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
         .collect()
+}
+
+/// 在 minimal_env 基础上按运行时追加专属环境变量。
+///
+/// Python（H2 修复）：
+/// - `PYTHONIOENCODING=utf-8`：强制 stdout/stderr UTF-8 编码，避免 Windows 中文系统默认 GBK
+///   导致 `print("你好")` 触发 UnicodeEncodeError 崩溃或 String::from_utf8_lossy 解码乱码。
+/// - `PYTHONUTF8=1`：PEP 540 UTF-8 模式，文件读取/默认编码统一 UTF-8。
+///
+/// Python 多文件（H4 修复）：
+/// - `PYTHONPATH=<sandbox根>`：让 entry 在子目录时（如 src/main.py）能 import sandbox 根的模块
+///   （Python 默认 sys.path[0] 是脚本所在目录，非 sandbox 根）。
+fn runtime_env(
+    runtime: ScriptRuntime,
+    workspace: &str,
+    base: Vec<(OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    let mut env = base;
+    if runtime == ScriptRuntime::Python {
+        env.push((OsString::from("PYTHONIOENCODING"), OsString::from("utf-8")));
+        env.push((OsString::from("PYTHONUTF8"), OsString::from("1")));
+        if !workspace.is_empty() {
+            env.push((OsString::from("PYTHONPATH"), OsString::from(workspace)));
+        }
+    }
+    env
 }
 
 /// 规范化相对路径：禁绝对路径（/ ~ C:）/空段/./../隐藏系统段。
@@ -369,17 +397,26 @@ pub fn run_plugin_script(
     let workspace = resolve_workspace(Some(sandbox_canon.to_string_lossy().to_string()), None)?;
     let mut args: Vec<String> = Vec::new();
     // Python 经 py launcher 时需显式指定 -3？保持简单：直接用探测到的 binary（py/python3/node），
-    // 由 binary 自身决定默认版本。此处仅追加 entry 路径。
+    // 由 binary 自身决定默认版本。
+    // H1 修复：Python 追加 -u（无缓冲），避免管道块缓冲导致短输出在超时 kill 时丢失。
+    // H4 修复（多文件相对 import）：追加 PYTHONPATH=<sandbox根> env（见下方 runtime_env）。
+    if input.runtime == ScriptRuntime::Python {
+        args.push("-u".to_string());
+    }
     args.push(entry_canon.to_string_lossy().to_string());
 
     let timeout = input.timeout_ms.unwrap_or(15_000);
     let started = Instant::now();
+    // H2 修复：Python 追加 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1，避免 Windows 中文系统
+    // 默认 GBK 编码导致 print 中文输出 UnicodeEncodeError 崩溃或乱码。
+    // H4 修复：PYTHONPATH=<sandbox根> 让多文件插件的 import 能找到 sandbox 根目录的模块。
+    let env = runtime_env(input.runtime, &workspace, minimal_env());
     let captured: CapturedOutput = run_capture_with_env(
         &binary,
         args,
         Some(&workspace),
         timeout,
-        minimal_env(),
+        env,
     )?;
     Ok(RunResult {
         stdout: captured.stdout,
@@ -399,6 +436,40 @@ mod tests {
 
     fn rel(path: &str) -> PathBuf {
         sanitize_rel_path(path).expect("合法相对路径应通过")
+    }
+
+    // === H1/H2/H4 修复测试：runtime_env 按 runtime 注入专属环境变量 ===
+
+    #[test]
+    fn runtime_env_python_adds_utf8_and_pythonpath() {
+        // Python 必须注入 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1（H2 防 Windows 中文乱码）
+        // + PYTHONPATH=<workspace>（H4 多文件相对 import）。
+        let env = runtime_env(ScriptRuntime::Python, "/sandbox/root", vec![]);
+        let keys: Vec<_> = env.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        assert!(keys.iter().any(|k| k == "PYTHONIOENCODING"), "缺 PYTHONIOENCODING");
+        assert!(keys.iter().any(|k| k == "PYTHONUTF8"), "缺 PYTHONUTF8");
+        assert!(keys.iter().any(|k| k == "PYTHONPATH"), "缺 PYTHONPATH");
+        // 值校验。
+        let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.to_string_lossy().to_string());
+        assert_eq!(get("PYTHONIOENCODING").as_deref(), Some("utf-8"));
+        assert_eq!(get("PYTHONUTF8").as_deref(), Some("1"));
+        assert_eq!(get("PYTHONPATH").as_deref(), Some("/sandbox/root"));
+    }
+
+    #[test]
+    fn runtime_env_nodejs_does_not_add_python_vars() {
+        // Node.js 不注入 Python 专属变量（避免污染）。
+        let env = runtime_env(ScriptRuntime::Nodejs, "/sandbox", vec![]);
+        let keys: Vec<_> = env.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        assert!(!keys.iter().any(|k| k == "PYTHONIOENCODING" || k == "PYTHONUTF8" || k == "PYTHONPATH"));
+    }
+
+    #[test]
+    fn runtime_env_preserves_base_env() {
+        // base env 的现有项必须保留（追加不替换）。
+        let base = vec![(OsString::from("PATH"), OsString::from("/usr/bin"))];
+        let env = runtime_env(ScriptRuntime::Python, "/ws", base);
+        assert!(env.iter().any(|(k, v)| k == "PATH" && v == "/usr/bin"));
     }
 
     #[test]

@@ -46,6 +46,8 @@ export interface RunScriptResult {
   failure?: 'interpreter_missing' | 'timeout' | 'nonzero_exit' | 'spawn_failed';
   /** 解释器探测到的可执行路径（用于友好卡片展示「已用 node vX」）。 */
   interpreter?: string;
+  /** 执行耗时（毫秒），Rust RunResult.elapsed_ms 透传，前端状态条展示。 */
+  elapsedMs?: number;
 }
 
 /** 把任意 unknown 异常归一化为字符串（用于 raw 字段）。 */
