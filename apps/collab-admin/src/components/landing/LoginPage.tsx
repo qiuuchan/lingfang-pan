@@ -1,9 +1,19 @@
 // 独立全屏登录页（非悬浮 Dialog）。
 // 深色背景 + 左上角 logo + 居中表单卡 + 「← 返回首页」。
 // 登录成功 onAuthed → App.tsx 切到后台；onBack 回落地页。
-import { useState } from 'react';
+// 忘记密码：调 /api/auth/forgot-password（与桌面端 Auth.tsx 同端点），弹窗收集邮箱。
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api, isPlatformAdminSession, setToken, type AdminSession } from '@/lib/api';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 interface LoginPageProps {
   onAuthed: (s: AdminSession) => void;
@@ -14,6 +24,10 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
   const [email, setEmail] = useState('admin@example.com');
   const [password, setPassword] = useState('ChangeMe123!');
   const [loading, setLoading] = useState(false);
+  // 忘记密码弹窗（调 /api/auth/forgot-password）。
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   async function submit() {
     setLoading(true);
@@ -33,6 +47,26 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
       setLoading(false);
     }
   }
+
+  async function onForgotPassword() {
+    if (!forgotEmail.trim()) return toast.error('请输入邮箱');
+    setForgotLoading(true);
+    try {
+      await api('/api/auth/forgot-password', { auth: false, method: 'POST', body: { email: forgotEmail.trim() } });
+      toast.success('若该邮箱已注册，重置链接已发送');
+      setForgotOpen(false);
+      setForgotEmail('');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
+  // 打开忘记密码弹窗时预填当前登录邮箱（便于直接发送）。
+  useEffect(() => {
+    if (forgotOpen) setForgotEmail(email);
+  }, [forgotOpen, email]);
 
   return (
     <div className="landing-scope lf-noise">
@@ -112,9 +146,50 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
             >
               {loading ? '登录中…' : '登录管理端'}
             </button>
+
+            {/* 忘记密码入口：调 /api/auth/forgot-password 发重置邮件 */}
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={() => setForgotOpen(true)}
+                className="text-xs transition-colors hover:underline"
+                style={{ color: 'var(--lf-fg-muted)' }}
+              >
+                忘记密码？
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* 忘记密码对话框 */}
+      <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>找回密码</DialogTitle>
+            <DialogDescription>输入注册邮箱，我们会发送密码重置链接到你的邮箱。</DialogDescription>
+          </DialogHeader>
+          <input
+            type="text"
+            placeholder="注册邮箱"
+            value={forgotEmail}
+            onChange={(e) => setForgotEmail(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onForgotPassword()}
+            className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
+            style={{
+              backgroundColor: 'var(--lf-bg-elevated)',
+              borderColor: 'var(--lf-border-bright)',
+              color: 'var(--lf-fg)',
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setForgotOpen(false)}>取消</Button>
+            <Button onClick={onForgotPassword} disabled={forgotLoading}>
+              {forgotLoading ? '发送中…' : '发送重置链接'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   SunIcon,
   MonitorIcon,
   InfoIcon,
+  SendIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Section, InfoGrid } from '@/components/shared';
 import { useTheme } from '@/lib/theme';
+import { api } from '@/lib/api';
 import pkg from '../../package.json';
 
 // 平台基础信息的 localStorage key（后端 /api/admin/settings 端点尚未落地，前端先本地持久化，
@@ -60,6 +62,9 @@ export function SettingsView() {
   const [info, setInfo] = useState<PlatformInfo>(() => readPlatformInfo());
   // 草稿态：编辑过程中不立即持久化，保存时才写 localStorage + toast。
   const [draft, setDraft] = useState<PlatformInfo>(() => readPlatformInfo());
+  // 测试发信：调 POST /api/admin/settings/test-email，验证 SMTP 配置是否正常。
+  const [testEmail, setTestEmail] = useState('');
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
 
   // 平台信息从 localStorage 读取，无需后端请求；留空 useLoad 以保持视图模式一致。
   useEffect(() => { /* 占位：平台信息持久化在 localStorage，无后端请求 */ }, []);
@@ -73,6 +78,25 @@ export function SettingsView() {
     localStorage.setItem(PLATFORM_INFO_KEY, JSON.stringify(next));
     setInfo(next);
     toast.success('平台信息已保存（仅本地）');
+  }
+
+  // 调用后端 /api/admin/settings/test-email 发送测试邮件，验证 SMTP 配置。
+  // 后端返回 {ok, configured, message}：ok=true 提示成功，false 提示失败原因（如 SMTP 未配 / 认证失败）。
+  async function sendTestEmail() {
+    if (!testEmail.trim()) return toast.error('请输入收件邮箱');
+    setTestEmailLoading(true);
+    try {
+      const result = await api<{ ok: boolean; configured: boolean; message: string }>(
+        '/api/admin/settings/test-email',
+        { method: 'POST', body: { to: testEmail.trim() } },
+      );
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setTestEmailLoading(false);
+    }
   }
 
   return (
@@ -171,27 +195,53 @@ export function SettingsView() {
         </Section>
       </motion.div>
 
-      {/* SMTP 配置（只读） */}
+      {/* SMTP 配置（只读）+ 测试发信 */}
       <motion.div variants={cardVariant}>
         <Section
           title="邮件服务（SMTP）"
-          description="邀请码、审批通知等邮件经由平台 SMTP 发送。此处为只读展示，修改需在服务端 .env 配置。"
+          description="邀请码、审批通知、找回密码与邮箱验证邮件经由平台 SMTP 发送。SMTP 在服务端 .env 配置，此处可发测试邮件验证配置是否正常。"
         >
           <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
             <MailIcon className="size-3.5" />
-            <span>以下为前端占位展示，实际值由后端 /api/admin/settings 读取 .env 注入（端点待落地）。</span>
+            <span>SMTP 主机 / 端口 / 加密等参数在服务端 .env（SMTP_URL / SMTP_FROM）配置，前端只读展示。</span>
           </div>
           <InfoGrid
             items={[
-              ['SMTP 主机', '（由后端 .env SMTP_HOST 提供）'],
-              ['端口', '（SMTP_PORT）'],
-              ['发件人', '（SMTP_FROM）'],
-              ['加密', '（SMTP_SECURE: SSL / STARTTLS）'],
+              ['SMTP 连接', '（由后端 .env SMTP_URL 提供，如 smtps://host:465）'],
+              ['发件人', '（SMTP_FROM，未配用平台默认 no-reply）'],
+              ['重置链接前缀', '（PASSWORD_RESET_BASE_URL）'],
+              ['验证链接前缀', '（EMAIL_VERIFY_BASE_URL）'],
             ]}
           />
+
+          {/* 测试发信：输入收件邮箱 → 调 /api/admin/settings/test-email → 返回成功 / 失败 + 错误信息 */}
+          <div className="mt-4 rounded-xl border bg-muted/20 p-4">
+            <div className="mb-2 text-sm font-medium">测试发信</div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="test-email-input">收件邮箱</Label>
+                <Input
+                  id="test-email-input"
+                  type="email"
+                  value={testEmail}
+                  onChange={(e) => setTestEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                  onKeyDown={(e) => e.key === 'Enter' && sendTestEmail()}
+                />
+              </div>
+              <Button onClick={sendTestEmail} disabled={testEmailLoading} className="sm:mb-[1px]">
+                <SendIcon className="mr-1 size-4" />
+                {testEmailLoading ? '发送中…' : '发送测试邮件'}
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              点击后后端会通过当前 SMTP 配置向该邮箱发一封测试邮件。若失败，错误信息会显示在右上角通知（便于排查 SMTP 连接 / 认证问题）。
+            </p>
+          </div>
+
           <div className="mt-3">
             <Badge variant="outline" className="text-muted-foreground">
-              只读 · 待后端端点接入
+              SMTP 参数只读 · 在服务端 .env 配置
             </Badge>
           </div>
         </Section>

@@ -115,6 +115,8 @@ model User {
   platformRole          PlatformRole           @default(NONE)
   // token 版本号：禁用/降级用户时自增，使已签发的旧 JWT 在 JwtAuthGuard 校验时失效（ADMIN-02/AUTH-01/XERR-02）。
   tokenVersion          Int                    @default(0)
+  // 邮箱验证时间：null=未验证。注册时自动发验证邮件，首版不阻断登录（session 响应带 emailVerified 供前端提示去验证）。
+  emailVerified         DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   memberships           TeamMembership[]

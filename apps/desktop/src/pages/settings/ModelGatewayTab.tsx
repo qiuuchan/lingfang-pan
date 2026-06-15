@@ -26,6 +26,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
+import { Shimmer } from '@/lib/motion';
 import {
   Dialog,
   DialogContent,
@@ -237,9 +238,15 @@ export function ModelGatewayTab() {
   }
 
   if (loading) {
+    // 加载骨架：标题块 + 若干行占位，替代「加载中…」纯文字。
     return (
       <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">加载中…</CardContent>
+        <CardContent className="space-y-3 py-6">
+          <Shimmer className="h-5 w-40" />
+          <Shimmer className="h-10 w-full" />
+          <Shimmer className="h-10 w-full" />
+          <Shimmer className="h-8 w-32" />
+        </CardContent>
       </Card>
     );
   }

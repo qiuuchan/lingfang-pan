@@ -17,7 +17,7 @@ export function SourcePanel({ files, activeFile, activeContent, onActiveFileChan
             </Tabs>
             <pre className="scrollbar-thin mt-2 max-h-64 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs">{activeContent}</pre>
           </>
-        ) : <p className="text-sm text-muted-foreground">暂无源码。</p>}
+        ) : <p className="py-4 text-center text-sm text-muted-foreground">还没有生成源码</p>}
       </CardContent>
     </Card>
   );

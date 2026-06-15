@@ -1,4 +1,4 @@
-// SettingsService 单测：覆盖鉴权守卫、key 白名单、value 校验、公开信息仅暴露白名单字段。
+// SettingsService 单测：覆盖鉴权守卫、key 白名单、value 校验、公开信息仅暴露白名单字段、测试发信。
 //  - member_cannot_update_settings（ensurePlatformAdmin 守卫，403）。
 //  - member_cannot_get_settings（ensurePlatformAdmin 守卫，403）。
 //  - update_rejects_unknown_key（非白名单 key 拒绝）。
@@ -6,7 +6,8 @@
 //  - update_rejects_empty_payload（空数组拒绝）。
 //  - update_upserts_whitelisted_keys（白名单 key 逐项 upsert + 审计）。
 //  - get_public_info_only_returns_whitelisted_fields（仅 platformName/logoUrl，缺省兜底）。
-// 参考 release.service.spec.ts：Mock PrismaService + AuthService，不连真实 DB。
+//  - test_email_lets_mail_service_send_and_returns_result（委托 MailService.sendTestEmail）。
+// 参考 release.service.spec.ts：Mock PrismaService + AuthService + MailService，不连真实 DB。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { SettingsService, PUBLIC_SETTING_KEYS } from './settings.service';
 import { forbidden } from '../common';
@@ -29,16 +30,22 @@ function mockAuth() {
   };
 }
 
+function mockMail() {
+  return { sendTestEmail: vi.fn() };
+}
+
 describe('SettingsService', () => {
   let prisma: ReturnType<typeof mockPrisma>;
   let auth: ReturnType<typeof mockAuth>;
+  let mail: ReturnType<typeof mockMail>;
   let service: SettingsService;
 
   beforeEach(() => {
     prisma = mockPrisma();
     auth = mockAuth();
+    mail = mockMail();
     // @ts-expect-error mock 不实现完整 PrismaService 接口，仅测用到的方法。
-    service = new SettingsService(prisma, auth);
+    service = new SettingsService(prisma, auth, mail);
   });
 
   it('非平台管理员读取设置被 ensurePlatformAdmin 拒绝（403）', async () => {
@@ -115,5 +122,24 @@ describe('SettingsService', () => {
     prisma.platformSetting.findMany.mockResolvedValue([]);
     const result = await service.getPublicInfo();
     expect(result).toEqual({ platformName: 'LingFang', logoUrl: '' });
+  });
+
+  it('testEmail 拒绝非法邮箱格式', async () => {
+    await expect(service.testEmail('user-admin', 'not-an-email')).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    expect(mail.sendTestEmail).not.toHaveBeenCalled();
+  });
+
+  it('testEmail 委托 MailService 发送并返回结果 + 落审计', async () => {
+    mail.sendTestEmail.mockResolvedValue({ ok: true, configured: true, message: '测试邮件已发送，请查收。' });
+    const result = await service.testEmail('user-admin', 'Dest@example.com');
+    expect(mail.sendTestEmail).toHaveBeenCalledWith('dest@example.com');
+    expect(result).toEqual({ ok: true, configured: true, message: '测试邮件已发送，请查收。' });
+    // 审计落库：metadata 收件人邮箱脱敏（仅前 2 字符 + ***）。
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'admin.setting.test_email',
+        metadata: expect.objectContaining({ to: 'de***', ok: true, configured: true }),
+      }),
+    }));
   });
 });

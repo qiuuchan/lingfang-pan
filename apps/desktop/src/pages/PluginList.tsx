@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/pagination';
 import type { LoadedPlugin } from '@/lib/types';
+import { StaggerContainer, StaggerItem } from '@/lib/motion';
 
 const SOURCE_LABEL: Record<NonNullable<LoadedPlugin['source']>, string> = {
   published: '已发布',
@@ -31,17 +32,19 @@ export function PluginList(props: PluginListProps) {
   const { isPinned, items, onRun, onTogglePin, page, setPage, totalPages } = props;
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col divide-y rounded-lg border">
+      {/* 列表项交错入场（尊重 useReducedMotion），每项轻微悬停反馈。 */}
+      <StaggerContainer className="flex flex-col divide-y rounded-lg border" stagger={0.05}>
         {items.map((plugin) => (
-          <PluginListItem
-            key={plugin.id}
-            isPinned={isPinned(plugin.id)}
-            onRun={onRun}
-            onTogglePin={onTogglePin}
-            plugin={plugin}
-          />
+          <StaggerItem key={plugin.id} whileHover={{ x: 2, transition: { type: 'spring', stiffness: 300, damping: 20 } }}>
+            <PluginListItem
+              isPinned={isPinned(plugin.id)}
+              onRun={onRun}
+              onTogglePin={onTogglePin}
+              plugin={plugin}
+            />
+          </StaggerItem>
         ))}
-      </div>
+      </StaggerContainer>
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
   );

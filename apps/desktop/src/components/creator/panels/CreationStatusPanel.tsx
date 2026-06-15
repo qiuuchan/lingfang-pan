@@ -34,7 +34,7 @@ export function CreationStatusPanel({ status, files, diagnostics }: { status?: s
               <span className="break-words">{item.status} — {item.message}</span>
             </div>
           )) : (
-            <div className="rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">暂无检查结果。</div>
+            <div className="rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">代码助手运行后会在这里显示检查结果</div>
           )}
         </div>
       </CardContent>

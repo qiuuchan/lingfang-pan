@@ -16,6 +16,7 @@ function mockPrisma() {
     findUnique: vi.fn(),
     updateMany: vi.fn(),
     findUniqueOrThrow: vi.fn(),
+    update: vi.fn(),
   };
   const auditLog = { create: vi.fn() };
   const tx = { user: { updateMany: user.updateMany, findUniqueOrThrow: user.findUniqueOrThrow } };
@@ -24,7 +25,13 @@ function mockPrisma() {
 }
 
 function mockMail() {
-  return { isConfigured: vi.fn(() => false), sendMail: vi.fn(async () => undefined) };
+  return {
+    isConfigured: vi.fn(() => false),
+    sendMail: vi.fn(async () => undefined),
+    sendPasswordReset: vi.fn(async () => undefined),
+    sendEmailVerification: vi.fn(async () => undefined),
+    sendTestEmail: vi.fn(),
+  };
 }
 
 describe('AuthService 找回密码 + 重置密码', () => {
@@ -50,20 +57,20 @@ describe('AuthService 找回密码 + 重置密码', () => {
     });
 
     it('邮箱存在时发邮件（含 reset_token 链接）', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0 });
       const result = await service.forgotPassword({ email: 'a@b.com' });
       expect(result.ok).toBe(true);
-      // sendMail 被调用，邮件内容含 reset_token。
-      expect(mail.sendMail).toHaveBeenCalledTimes(1);
-      const call = mail.sendMail.mock.calls[0];
+      // sendPasswordReset 被调用，链接含 reset_token。
+      expect(mail.sendPasswordReset).toHaveBeenCalledTimes(1);
+      const call = mail.sendPasswordReset.mock.calls[0];
       expect(call[0]).toBe('a@b.com'); // to
-      expect(String(call[2])).toContain('reset_token='); // html 含链接
+      expect(String(call[1])).toContain('reset_token='); // link 含 token
     });
 
     it('已禁用用户不发邮件（静默跳过）', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', status: 'DISABLED' });
       await service.forgotPassword({ email: 'a@b.com' });
-      expect(mail.sendMail).not.toHaveBeenCalled();
+      expect(mail.sendPasswordReset).not.toHaveBeenCalled();
     });
 
     it('空邮箱抛 bad_request', async () => {
@@ -133,6 +140,78 @@ describe('AuthService 找回密码 + 重置密码', () => {
       const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '-1s' });
       await expect(service.resetPassword({ token, newPassword: 'newpass123' }))
         .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    });
+  });
+
+  describe('verifyEmail', () => {
+    it('token 无效时抛 bad_request', async () => {
+      await expect(service.verifyEmail({ token: 'invalid-token' }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('scope 非 email_verify 的 token 被拒绝', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+      await expect(service.verifyEmail({ token }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    });
+
+    it('账号非 ACTIVE 时抛 bad_request', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'email_verify', tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, status: 'DISABLED', emailVerified: null });
+      await expect(service.verifyEmail({ token }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    });
+
+    it('已验证用户幂等返回成功（不重复 update）', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'email_verify', tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, status: 'ACTIVE', emailVerified: new Date('2026-01-01') });
+      const result = await service.verifyEmail({ token });
+      expect(result.ok).toBe(true);
+      expect(result.alreadyVerified).toBe(true);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('token 内嵌 tokenVersion 与库不一致时抛 bad_request', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'email_verify', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 4, status: 'ACTIVE', emailVerified: null });
+      await expect(service.verifyEmail({ token }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    });
+
+    it('合法 token 成功标记 emailVerified + 审计', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'email_verify', tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, status: 'ACTIVE', emailVerified: null });
+      const result = await service.verifyEmail({ token });
+      expect(result.ok).toBe(true);
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: expect.objectContaining({ emailVerified: expect.any(Date) }),
+      }));
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.email.verified', targetId: 'u1' }),
+      }));
+    });
+  });
+
+  describe('resendVerification', () => {
+    it('已验证用户幂等返回（不发邮件）', async () => {
+      prisma.user.findUnique.mockResolvedValue({ email: 'a@b.com', status: 'ACTIVE', emailVerified: new Date('2026-01-01'), tokenVersion: 0 });
+      const result = await service.resendVerification('u1');
+      expect(result.ok).toBe(true);
+      expect(result.alreadyVerified).toBe(true);
+      expect(mail.sendEmailVerification).not.toHaveBeenCalled();
+    });
+
+    it('未验证用户重发验证邮件', async () => {
+      // sendVerificationEmail 内部先 findUnique（tokenVersion/emailVerified）再发邮件。
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ email: 'a@b.com', status: 'ACTIVE', emailVerified: null, tokenVersion: 0 }) // resendVerification 入口
+        .mockResolvedValueOnce({ tokenVersion: 0, emailVerified: null }); // sendVerificationEmail 内部
+      const result = await service.resendVerification('u1');
+      expect(result.ok).toBe(true);
+      expect(mail.sendEmailVerification).toHaveBeenCalledTimes(1);
+      expect(String(mail.sendEmailVerification.mock.calls[0][1])).toContain('verify_token=');
     });
   });
 });

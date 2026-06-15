@@ -49,8 +49,28 @@ export class AuthService {
       }
       return user.id;
     });
+    // 注册后异步发送邮箱验证邮件（失败不影响注册成功，降级 console.log 兜底）。
+    // 首版不阻断登录：emailVerified 仅作标记，前端据 session 提示去验证。
+    await this.sendVerificationEmail(userId, email).catch((error) => {
+      console.error('[mail.verification_send_failed]', { userId, email, error: (error as Error).message });
+    });
     // 事务提交后再读库生成 session（sessionFor 用主 prisma，需读到已提交数据）。
     return this.sessionFor(userId);
+  }
+
+  /**
+   * 发送邮箱验证邮件：签发独立 verify token（scope=email_verify，TTL 24h，复用 JWT_SECRET），
+   * 调 MailService.sendEmailVerification 发统一品牌模板邮件。
+   * verify_link 形如 <base>/?verify_token=xxx，由前端解析后调 verify-email 端点完成验证。
+   */
+  private async sendVerificationEmail(userId: string, email: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true, emailVerified: true } });
+    // 已验证的用户不重发（幂等，避免重复邮件骚扰）。
+    if (!user || user.emailVerified) return;
+    const token = this.issueVerifyToken(userId, email, user.tokenVersion);
+    const baseUrl = (process.env.EMAIL_VERIFY_BASE_URL || '').replace(/\/+$/, '');
+    const link = baseUrl ? `${baseUrl}/?verify_token=${encodeURIComponent(token)}` : `/?verify_token=${encodeURIComponent(token)}`;
+    await this.mail.sendEmailVerification(email, link);
   }
 
   async login(input: { email: string; password: string }) {
@@ -92,16 +112,7 @@ export class AuthService {
       // 重置链接：前端路由 ?reset_token=xxx（Auth.tsx 解析后弹「重置密码」对话框）。
       // baseUrl 未配时降级为只带 token 的相对路径（开发期 console.log 可见完整 token）。
       const link = baseUrl ? `${baseUrl}/?reset_token=${encodeURIComponent(token)}` : `/?reset_token=${encodeURIComponent(token)}`;
-      const html = [
-        '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:16px;">',
-        '<h2>重置你的 LingFang 平台密码</h2>',
-        '<p>我们收到了你的密码重置请求。点击下方按钮设置新密码（链接 15 分钟内有效）：</p>',
-        `<p><a href="${link}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">重置密码</a></p>`,
-        `<p style="word-break:break-all;font-size:12px;color:#666;">若按钮无法点击，直接访问：<br>${link}</p>`,
-        '<p style="font-size:12px;color:#999;">如果不是你本人发起的请求，请忽略此邮件，你的密码不会被修改。</p>',
-        '</div>',
-      ].join('');
-      await this.mail.sendMail(email, '重置你的 LingFang 平台密码', html);
+      await this.mail.sendPasswordReset(email, link);
     }
     return { ok: true, message: '若该邮箱已注册，重置链接已发送' };
   }
@@ -151,6 +162,62 @@ export class AuthService {
     return { ok: true, message: '密码已重置，请使用新密码登录' };
   }
 
+  /**
+   * 验证邮箱（verify-email 端点）：校验 verify token → 标记 emailVerified = now。
+   *
+   * 安全设计（与 reset-password 一致）：
+   *  - verify token 为独立 JWT（scope=email_verify，TTL 24h，复用 JWT_SECRET）。
+   *  - 校验 payload.scope === 'email_verify' 且 sub 存在。
+   *  - tokenVersion 比对：账号被禁用 / 降级后 tokenVersion 已自增，旧 verify token 同步失效（降级覆盖）。
+   *  - 幂等：已验证用户重复调用直接返回成功（不报错，便于前端重试）。
+   *  - 不阻断登录：首版 emailVerified 仅作标记，verify-email 是用户主动触发的补充验证。
+   */
+  async verifyEmail(input: { token: string }) {
+    if (!input.token) throw badRequest('验证链接无效');
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw unauthorized('服务端未配置密钥');
+    let payload: jwt.JwtPayload;
+    try {
+      payload = jwt.verify(input.token, secret as Secret, { algorithms: ['HS256'] }) as jwt.JwtPayload;
+    } catch {
+      throw badRequest('验证链接已过期或无效');
+    }
+    if (payload.scope !== 'email_verify' || !payload.sub) throw badRequest('验证链接无效');
+
+    const userId = String(payload.sub);
+    const userRow = await this.prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true, status: true, emailVerified: true } });
+    if (!userRow || userRow.status !== 'ACTIVE') throw badRequest('账号不可用，验证失败');
+    // 幂等：已验证直接成功返回（不报错，前端重试友好）。
+    if (userRow.emailVerified) return { ok: true, message: '邮箱已验证', alreadyVerified: true };
+    const tokenVersionInPayload = Number(payload.tokenVersion);
+    if (!Number.isFinite(tokenVersionInPayload) || tokenVersionInPayload !== userRow.tokenVersion) {
+      throw badRequest('验证链接已失效，请重新申请');
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: new Date() },
+    });
+    await this.prisma.auditLog.create({
+      data: { actorUserId: userId, action: 'auth.email.verified', targetType: 'User', targetId: userId },
+    });
+    return { ok: true, message: '邮箱验证成功' };
+  }
+
+  /**
+   * 重发验证邮件（resend-verification 端点）：登录态用户主动触发。
+   * 幂等：已验证用户返回已验证提示（不发邮件，避免骚扰）。
+   * 邮件发送失败不影响响应（降级 console.log 兜底，前端统一提示「验证邮件已发送」）。
+   */
+  async resendVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, status: true, emailVerified: true, tokenVersion: true } });
+    if (!user || user.status !== 'ACTIVE') throw unauthorized('账号不可用');
+    if (user.emailVerified) return { ok: true, message: '邮箱已验证，无需重发', alreadyVerified: true };
+    await this.sendVerificationEmail(userId, user.email).catch((error) => {
+      console.error('[mail.resend_verification_failed]', { userId, email: user.email, error: (error as Error).message });
+    });
+    return { ok: true, message: '验证邮件已发送，请查收' };
+  }
+
   private async sessionFor(userId: string, includeToken = true) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -174,6 +241,8 @@ export class AuthService {
         platformRole: user.platformRole,
         status: user.status,
         tokenVersion: user.tokenVersion,
+        // 邮箱验证状态：null=未验证（前端提示去验证），非 null=已验证时间。
+        emailVerified: user.emailVerified,
       },
       team: membership ? { id: membership.team.id, name: membership.team.name, slug: membership.team.slug, role: membership.role } : null,
       application: application ? { id: application.id, status: application.status, teamName: application.teamName, reviewReason: application.reviewReason } : null,
@@ -219,6 +288,20 @@ export class AuthService {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET 未配置，无法签发重置 token');
     return jwt.sign({ sub: userId, email, scope: 'pwd_reset', tokenVersion }, secret as Secret, options);
+  }
+
+  /**
+   * 签发邮箱验证 token：独立于登录 token，scope=email_verify 标记用途，TTL 24h。
+   * 复用 JWT_SECRET 签名（与登录 token 同密钥不同 scope，互不混淆）。
+   *
+   * tokenVersion 内嵌：账号被禁用 / 降级后 tokenVersion 自增，旧 verify token 校验失败（降级覆盖）。
+   * 邮箱验证不涉及密码变更，无需一次性语义（用户可重复点击链接验证），故不在此自增 tokenVersion。
+   */
+  private issueVerifyToken(userId: string, email: string, tokenVersion: number) {
+    const options: SignOptions = { expiresIn: '24h' };
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new Error('JWT_SECRET 未配置，无法签发验证 token');
+    return jwt.sign({ sub: userId, email, scope: 'email_verify', tokenVersion }, secret as Secret, options);
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {

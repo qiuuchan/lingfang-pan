@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, PencilIcon } from 'lucide-react';
+import { ArrowLeftIcon, PencilIcon, PackageIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginList } from './PluginList';
+import { Shimmer } from '@/lib/motion';
 import {
   errorMessage,
   handleRuntimeCall,
@@ -173,7 +174,10 @@ export function Plugins() {
       <CardContent>
         {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
         {list === null ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
+          // 加载骨架：6 行（与单页条数一致）占位，替代「加载中…」纯文字。
+          <div className="flex flex-col divide-y rounded-lg border">
+            {Array.from({ length: PAGE_SIZE }).map((_, i) => <Shimmer key={i} className="h-14 w-full rounded-none" />)}
+          </div>
         ) : total ? (
           <PluginList
             isPinned={isPinned}
@@ -186,8 +190,11 @@ export function Plugins() {
           />
         ) : (
           !error && (
-            <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
-              <span>暂无插件</span>
+            // 空状态：图标 + 引导文案 + 两个去向，替代单行「暂无插件」。
+            <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
+              <PackageIcon className="size-8 text-muted-foreground/50" />
+              <span>还没有可运行的插件</span>
+              <span className="text-xs">创建一个新插件，或从市场安装一个。</span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => setView('home')}>去创建插件</Button>
                 <Button variant="outline" size="sm" onClick={() => setView('market')}>去市场安装</Button>
