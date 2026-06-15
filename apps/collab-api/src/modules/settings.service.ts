@@ -48,13 +48,24 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v.length > 500) throw badRequest('logoUrl 过长（上限 500 字符）');
     return v;
   },
-  // 组A SMTP 连接 URL：smtp/smtps 协议校验（非空时），格式非法拒绝保存
-  // （避免存坏配置让后续发信静默失败 / 测试发信报含糊错误）。空值允许（清空=回退 .env fallback）。
+  // 组A SMTP 连接 URL：支持完整 URL（smtps://host:465）或裸地址（smtpdm.aliyun.com:465）。
+  // 裸地址自动补 smtps://（默认 SSL），避免用户填「smtpdm.aliyun.com」被拒。
+  // 空值允许（清空=回退 .env fallback）。
   smtpUrl: (raw) => {
-    const v = raw.trim();
-    if (v && !/^smtp(s)?:\/\/.+/i.test(v)) throw badRequest('smtpUrl 必须是 smtp(s)://host[:port] 格式');
+    let v = raw.trim();
     if (v.length > 500) throw badRequest('smtpUrl 过长（上限 500 字符）');
-    return v;
+    if (!v) return v;
+    // 已带协议前缀，直接校验格式。
+    if (/^smtp(s)?:\/\/.+/i.test(v)) return v;
+    // 裸地址（无协议前缀）：自动补 smtps://（默认 SSL/TLS，465 端口最常见）。
+    // 用户填 smtpdm.aliyun.com:465 → smtps://smtpdm.aliyun.com:465
+    // 用户填 smtpdm.aliyun.com（无端口）→ smtps://smtpdm.aliyun.com:465（补默认端口）
+    if (/^[a-z0-9.-]+(:\d+)?$/i.test(v)) {
+      // 无端口则补 :465（SSL 默认端口）。
+      if (!/:\d+$/.test(v)) v += ':465';
+      return `smtps://${v}`;
+    }
+    throw badRequest('smtpUrl 格式不正确（示例：smtpdm.aliyun.com:465 或 smtps://smtpdm.aliyun.com:465）');
   },
   // 组A SMTP 发件人地址：允许纯地址或「名称 <addr>」格式，长度上限防滥用。空值允许（用品牌默认）。
   smtpFrom: (raw) => {
