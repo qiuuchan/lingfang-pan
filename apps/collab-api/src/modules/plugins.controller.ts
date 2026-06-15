@@ -4,7 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { PluginService } from './plugin.service';
-import { PluginPackageDto, SubmitMarketplaceDto } from './dto/plugins.dto';
+import { PluginPackageDto, SetPluginPriceDto, SetPluginStatusDto, SubmitMarketplaceDto } from './dto/plugins.dto';
 
 @ApiTags('Plugins')
 @ApiBearerAuth()
@@ -42,6 +42,18 @@ export class PluginsController {
   @ApiOperation({ summary: '编辑已上传插件草稿' })
   editDraft(@Req() req: Request, @Param('id') id: string, @Body() body: PluginPackageDto) {
     return this.plugins.editPluginDraft(requireUser(req).id, id, body);
+  }
+
+  @Post(':id/set-price')
+  @ApiOperation({ summary: '设置插件定价（不改源码、不触发审核流程）' })
+  setPrice(@Req() req: Request, @Param('id') id: string, @Body() body: SetPluginPriceDto) {
+    return this.plugins.setPluginPrice(requireUser(req).id, id, body);
+  }
+
+  @Post(':id/set-status')
+  @ApiOperation({ summary: '切换插件启用/禁用（仅作者/团队管理员，不改其他治理字段）' })
+  setStatus(@Req() req: Request, @Param('id') id: string, @Body() body: SetPluginStatusDto) {
+    return this.plugins.setPluginStatus(requireUser(req).id, id, body);
   }
 
   @Post(':id/install')

@@ -67,6 +67,25 @@ export class SubmitMarketplaceDto {
   priceCents?: number;
 }
 
+/** 作者设置插件定价请求体 DTO。与 SubmitMarketplaceDto 同结构（priceCents 语义一致），
+ *  但走独立端点 POST /api/plugins/:id/set-price（不改源码、不触发审核流程）。 */
+export class SetPluginPriceDto {
+  @ApiPropertyOptional({ description: '定价（分）；undefined 保持原价，0 表示免费', example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'priceCents 必须是整数' })
+  @Min(0, { message: 'priceCents 不能为负' })
+  priceCents?: number;
+}
+
+/** 作者切换插件启用/禁用请求体 DTO。status 仅 ENABLED / DISABLED（与 Prisma PluginStatus 对齐）。
+ *  走独立端点 POST /api/plugins/:id/set-status（仅作者/团队管理员，不改其他治理字段）。 */
+export class SetPluginStatusDto {
+  @ApiProperty({ description: '插件治理状态（ENABLED 启用 / DISABLED 禁用）', example: 'ENABLED' })
+  @IsString()
+  status!: 'ENABLED' | 'DISABLED';
+}
+
 /** 市场插件安装请求体 DTO。 */
 export class MarketplaceInstallDto {
   @ApiProperty({ description: '要安装的市场插件 ID' })

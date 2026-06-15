@@ -13,7 +13,6 @@ const NAV = (onNavigateDownload: () => void, onNavigateChangelog: () => void) =>
   { label: '功能', href: '#lf-features', onClick: undefined },
   { label: '下载', href: undefined, onClick: onNavigateDownload },
   { label: '更新日志', href: undefined, onClick: onNavigateChangelog },
-  { label: '架构', href: '#lf-architecture', onClick: undefined },
 ];
 
 export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }: NavProps) {

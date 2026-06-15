@@ -162,6 +162,16 @@ export function Plugins() {
 
   if (runningPlugin) return <Runner plugin={runningPlugin} onBack={() => setRunningPlugin(null)} />;
 
+  // 作者改价/切状态后重新拉取列表，刷新审核状态/价格/启用态角标。
+  const reload = () => {
+    void (async () => {
+      const result = await loadPlugins();
+      setError(result.error);
+      setList(result.plugins);
+      setPage(1);
+    })();
+  };
+
   const total = list?.length ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageItems = (list ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -183,6 +193,7 @@ export function Plugins() {
             isPinned={isPinned}
             items={pageItems}
             onRun={setRunningPlugin}
+            onAuthorChanged={reload}
             onTogglePin={(plugin, pinned) => (pinned ? unpinPlugin(plugin.id) : pinPlugin(plugin))}
             page={page}
             setPage={setPage}
