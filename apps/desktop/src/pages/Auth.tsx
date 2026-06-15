@@ -231,8 +231,8 @@ export function Auth() {
           <CardTitle>{mode === 'login' ? '登录本地客户端' : '注册新账号'}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-          <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" spellCheck={false} />
+          <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" />
           {/* 组C 极验：后端配置了 geetestCaptchaId 且任一场景（login/register/forgot）启用时渲染「点击验证」组件。
               容器始终挂载（captchaVisible 为 true 时），登录/注册共用卡片表单内的验证码实例，
               forgot 弹窗内复用同一 validateResult（不重复渲染容器，避免极验组件重复销毁/重建）。
