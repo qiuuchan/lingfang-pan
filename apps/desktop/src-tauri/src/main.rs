@@ -198,11 +198,9 @@ async fn code_assistant_start_session(
     plugin_store: tauri::State<'_, plugin_store::PluginStore>,
     mut input: code_assistant::StartSessionInput,
 ) -> Result<code_assistant::store::SessionRecord, String> {
-    // 组A/组D task 06-16（AC10）：插件创建会话（带 pluginId）→ workspace 强制落到
-    // plugins_root/<pluginId>/ 持久化目录（PluginStore.ensure_plugin_dir 计算 + 创建）。
-    // CLI 产出的文件直接写进插件持久化目录，重启软件后仍在。
-    // 非插件场景（无 pluginId 且无 workspaceDir，如纯对话/标题总结）→ 回退 claude-sandbox 隔离目录，
-    // 避免 CLI 沿宿主项目根读取 CLAUDE.md/.claude。
+    // 流程重构：plugin_id 为空时用 session_id 生成临时持久化目录（plugins_root/<session_id>/）。
+    // 这样 AI 产出文件仍有持久化目录（重启不丢），上传时 rename_plugin_dir 改正式名。
+    // 非 workspaceDir 且非 plugin_id（纯对话/标题总结）→ 回退 claude-sandbox 隔离目录。
     let has_plugin_id = input
         .plugin_id
         .as_deref()
@@ -211,21 +209,17 @@ async fn code_assistant_start_session(
         .is_some();
     if has_plugin_id {
         let plugin_id = input.plugin_id.as_deref().unwrap_or("").trim().to_string();
-        // ensure_plugin_dir 走段级白名单校验（防 plugin_id 路径穿越），失败返回友好错误。
         let plugin_dir = plugin_store.ensure_plugin_dir(&plugin_id)?;
         input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
-    } else if input
-        .workspace_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_none()
-    {
-        if let Ok(data_dir) = app.path().app_data_dir() {
-            let sandbox = data_dir.join("claude-sandbox");
-            let _ = std::fs::create_dir_all(&sandbox);
-            input.workspace_dir = Some(sandbox.to_string_lossy().to_string());
-        }
+    } else if input.workspace_dir.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_none() {
+        // 无 plugin_id 且无 workspace_dir → 用 session_id 作临时 plugin_id（持久化目录）。
+        // session_id 由 code_assistant 内部生成（格式如 claude-<secs>-<nanos>），已通过段级白名单。
+        // 但 session_id 尚未生成（在 code_assistant::start_session 内），这里用时间戳预生成。
+        let temp_id = format!("temp-{}-{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos());
+        let plugin_dir = plugin_store.ensure_plugin_dir(&temp_id)?;
+        input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
     }
     let state_inner = state.inner().clone();
     // CLI 配置注入（task 06-15）：提前生成 session_id，spawn 前从后端拿 apiKey + apiUrl 生成 cli_env。
@@ -453,6 +447,7 @@ fn main() {
             plugin_store::set_plugins_root,
             plugin_store::scan_plugin_status,
             plugin_store::read_local_plugin_file,
+            plugin_store::rename_plugin_dir,
             cli_installer::install_cli,
             cli_installer::install_runtime,
             cli_installer::cancel_install,
