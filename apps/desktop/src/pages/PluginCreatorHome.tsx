@@ -30,6 +30,7 @@ import {
   parseTranscript,
   providerLabel,
   readRecent,
+  resolveSendModel,
   sessionToProbeResult,
   tailText,
   transcriptDiagnostics,
@@ -542,12 +543,13 @@ export function PluginCreatorHome() {
     const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
       input: {
         tool: selectedProvider,
-        model: model === 'default' ? undefined : model,
+        // R6 自定义模型：把哨兵/default/空串归一为 undefined（回退 CLI 默认），真模型 id 原样透传。
+        model: resolveSendModel(model),
         prompt: text,
         systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         // R2 思考强度随首轮传入（claude 透传 --effort；codex/opencode 忽略）。
         effort,
-        // CLI 配置注入（平台 key/url 桥接进 CLI 启动，task 06-15）。
+        // CLI 配置注入（平台 key/url + model 桥接进 CLI 启动，task 06-15）。
         cliConfig: buildCliConfig(),
       },
     });
@@ -623,8 +625,9 @@ export function PluginCreatorHome() {
       try {
         // 追问传入当前选的 model（会话内切模型，下一轮生效）；Rust 优先用此值覆盖 session 固化值。
         // R2 effort 同样随本轮传入（可会话中途调思考强度）。
+        // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: model === 'default' ? undefined : model, effort, cliConfig: buildCliConfig() },
+          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, cliConfig: buildCliConfig() },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -702,7 +705,8 @@ export function PluginCreatorHome() {
         input: {
           sessionId,
           input: answer,
-          model: model === 'default' ? undefined : model,
+          // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
+          model: resolveSendModel(model),
           effort,
         },
       });

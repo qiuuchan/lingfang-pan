@@ -44,6 +44,20 @@ export function capitalizeModel(id: string | null | undefined): string {
   return (first >= 'a' && first <= 'z' ? first.toUpperCase() : first) + rest;
 }
 
+// R6 自定义模型哨兵：Composer 的 Select「自定义…」项 value。
+// 选中后展开 Input 手输任意 model id。send 时须把哨兵视为「未选模型」回退 CLI 默认（与 default 同语义）。
+// 双下划线前缀避免与真实模型 id 冲突。
+export const CUSTOM_MODEL_SENTINEL = '__custom__';
+
+// R6 发送前模型清理：把占位值（default / 自定义哨兵 / 空白）归一为 undefined，
+// 与 Rust adapters clean_model 语义一致（None 或非空且非占位）。
+// 父组件 send 时调用，避免把哨兵当真模型传给 Rust 写进配置文件。
+export function resolveSendModel(model: string | null | undefined): string | undefined {
+  const trimmed = (model ?? '').trim();
+  if (!trimmed || trimmed === 'default' || trimmed === CUSTOM_MODEL_SENTINEL) return undefined;
+  return trimmed;
+}
+
 // === R3/R4 流式分类渲染：工具卡片 / AskUserQuestion 解析 ===
 //
 // Rust spawn_reader 把 claude stream-json 的工具内容走独立 'tool' 流，每条文本形如：
