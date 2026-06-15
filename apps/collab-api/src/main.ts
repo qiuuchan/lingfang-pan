@@ -50,6 +50,20 @@ async function bootstrap() {
   app.use(helmet());
   app.setGlobalPrefix('api');
 
+  // 修复 B3：生产部署在 nginx/Tauri 反代后，未设 trust proxy 时 Express req.ip 取反代 socket IP，
+  // 所有请求共享一个 IP 池 → 全局限流 60/min/IP 实际变成「全站每分钟 60 个请求」，
+  // 敏感端点 10/min/IP 的防爆破设计失效。生产环境信任最后一跳（自己的反代），req.ip 取真实客户端 IP。
+  // 仅信任 1 跳：客户端无法伪造 X-Forwarded-For 绕过限流（trust proxy=true 才会被伪造）。
+  // 开发环境无反代，req.ip 直接是 socket IP，保持默认（不设 trust proxy）。
+  if (process.env.NODE_ENV === 'production') {
+    // NestApplication 不直接暴露 Express 的 .set，通过 HTTP adapter 拿底层 Express instance。
+    const httpAdapter = app.getHttpAdapter();
+    const expressInstance = httpAdapter.getInstance();
+    if (typeof (expressInstance as { set?: (k: string, v: unknown) => void }).set === 'function') {
+      (expressInstance as { set: (k: string, v: unknown) => void }).set('trust proxy', 1);
+    }
+  }
+
   // 根因修复（XSEC-01）：全局 ValidationPipe —— 此前所有 @Body 的 TS 类型注解运行时被擦除，
   // Express 原样接收客户端 JSON，是越权字段透传、浮点进 Int 列、非法枚举值等十余条缺陷的共同根因。
   app.useGlobalPipes(

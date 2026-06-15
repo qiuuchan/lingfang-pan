@@ -269,8 +269,18 @@ export class AdminService {
         await tx.team.update({ where: { id: teamId }, data });
       }
       await tx.balanceLedger.create({ data: { teamId, amountCents: amount, direction: input.direction, reason: input.reason || 'admin_adjustment', actorUserId: actorId } });
+      // 修复 H4：auditLog 写入移入事务，与 balanceLedger 原子提交。
+      // 修复 H5：metadata 显式挑白名单字段，此前透传 input DTO 引用，shape 随 DTO 演进而漂移。
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'admin.team.balance_adjusted',
+          targetType: 'Team',
+          targetId: teamId,
+          metadata: { teamId, amountCents: input.amountCents, direction: input.direction, reason: input.reason },
+        },
+      });
     });
-    await this.audit(actorId, 'admin.team.balance_adjusted', 'Team', teamId, input);
     return this.prisma.team.findUnique({ where: { id: teamId } });
   }
 
@@ -351,8 +361,16 @@ export class AdminService {
   async adminApplications(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
     // include reviewedBy 以便前端展示申请处理人（未处理时为 null）。
+    // 安全修复 B1：include: { user: true } 会原样返回整行 User（含 passwordHash/tokenVersion），
+    // 经 Nest 序列化泄漏凭据哈希。与 adminUsers 等接口一致，出参按 publicUser 白名单脱敏。
     const applications = await this.prisma.teamAdminApplication.findMany({ include: { user: true, reviewedBy: true }, orderBy: { createdAt: 'desc' } });
-    return { applications };
+    return {
+      applications: applications.map((a) => ({
+        ...a,
+        user: publicUser(a.user),
+        reviewedBy: a.reviewedBy ? publicUser(a.reviewedBy) : null,
+      })),
+    };
   }
 
   async approveApplication(actorId: string, id: string) {
@@ -374,7 +392,13 @@ export class AdminService {
 
   async auditLogs(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
-    const logs = await this.prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 200, include: { actor: true } });
+    // 安全修复 B2：include: { actor: true } 会原样返回整行 User（含 passwordHash/tokenVersion），
+    // 与 adminApplications 同类凭据泄漏。改用 select 显式挑白名单字段，杜绝哈希外泄。
+    const logs = await this.prisma.auditLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: { actor: { select: { id: true, email: true, displayName: true, platformRole: true, status: true } } },
+    });
     return { logs };
   }
 

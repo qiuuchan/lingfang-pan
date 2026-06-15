@@ -12,8 +12,14 @@ interface HeroProps {
 export function LandingHero({ onLogin, onNavigateDownload, onNavigateChangelog }: HeroProps) {
   const [version, setVersion] = useState<string | null>(null);
 
+  // 修复 H4：组件卸载后 promise 仍可能 resolve（用户落地页跳转中）。
+  // 加 aborted 标志 + cleanup，与 DownloadPage.tsx 的同模式对齐，避免在已卸载组件上 setState。
   useEffect(() => {
-    getLatestRelease().then((r) => setVersion(r?.version ?? null));
+    let aborted = false;
+    getLatestRelease().then((r) => {
+      if (!aborted) setVersion(r?.version ?? null);
+    });
+    return () => { aborted = true; };
   }, []);
 
   return (

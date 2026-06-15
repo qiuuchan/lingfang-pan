@@ -35,27 +35,28 @@ export class ReleaseController {
   @ApiOperation({ summary: 'Tauri updater 契约端点（单 asset，无更新返 204）' })
   async tauriUpdate(
     @Query() query: ReleaseTauriQueryDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+    @Res() res: Response,
+  ): Promise<void> {
     // 复用 latest 查询 + 挑单 asset，映射为 Tauri 固定契约 {version, pub_date, url, signature, notes}。
     // 无已发布版本 / 无匹配平台产物 → 204 No Content（Tauri updater 把非 200 当「无更新」）。
-    // passthrough: true：保留 NestJS 标准响应处理（兼容全局 ClassSerializerInterceptor），
-    //   仅用 res.status() 控制 HTTP 状态码。注意不可返回 res.send() 的结果（Response 对象本身），
-    //   否则全局 ClassSerializerInterceptor 会尝试序列化 Response → 二次写响应 → Node ERR_INTERNAL_ASSERTION 崩溃。
+    //
+    // 修复 H6：此前用 @Res({ passthrough: true }) + return null。
+    // passthrough 模式下返回值仍会经全局 ClassSerializerInterceptor 序列化，
+    // 某些 Nest/Express 组合下会把 null 序列化为字符串 "null" 写进 body，
+    // 把 204 变成 200 或触发 ERR_HTTP_HEADERS_SENT，破坏 Tauri 更新判定。
+    // 改用裸 @Res()（不经 passthrough，彻底绕过拦截器），显式 res.status(204).end() / res.status(200).json()。
+    // 裸 @Res() 下 Nest 不再接管响应，必须自行写 body；此方法已完全自管，安全。
     const manifest = await this.releases.tauriManifest(
       query.channel ?? 'STABLE',
       query.platform,
       query.arch,
     );
     if (!manifest) {
-      // 204 No Content：仅设状态码，return null 让 Nest 标准 pipeline 收尾。
-      //   Express 对 204 自动不发 body（HTTP 规范），无需手动 .end()/.send()。
-      //   全局 ClassSerializerInterceptor 对 null 返回值序列化无害（不触发 Response 二次写）。
-      res.status(204);
-      return null;
+      // 204 No Content：HTTP 规范 204 必须无 body，.end() 显式收尾不发 body。
+      res.status(204).end();
+      return;
     }
-    res.status(200);
-    return manifest;
+    res.status(200).json(manifest);
   }
 
   @Public()

@@ -44,6 +44,7 @@ import { AuditView } from '@/components/audit-view';
 import { ProvidersView } from '@/components/providers-view';
 import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
 import type { View } from '@/lib/types';
+import { getLatestRelease } from '@/lib/releases';
 import pkg from '../package.json';
 
 const navItems: SidebarNavItem[] = [
@@ -118,20 +119,21 @@ export default function App() {
     setCheckingUpdate(true);
     setUpdateResult(null);
     try {
-      // Fetch latest version info from the API or a version endpoint
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_COLLAB_API_BASE || '';
-      const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const serverVersion = data.version || 'unknown';
-        const currentVersion = pkg.version || '0.0.0';
-        if (serverVersion === currentVersion) {
-          setUpdateResult('current');
-        } else {
-          setUpdateResult(`new:${serverVersion}`);
-        }
-      } else {
+      // 修复 H1：此前 fetch /api/health 并把 serverVersion（collab-api 的 package.json 版本）
+      // 与 pkg.version（collab-admin 的 package.json 版本）比较——两个独立包分别发布，
+      // 任一版本不一致都会永远误报「有新版本」或「已是最新」。改用 /api/releases/latest
+      // 取最新已发布版本号（真正的发布渠道），与本应用版本比较，语义正确。
+      const release = await getLatestRelease('STABLE');
+      if (!release) {
         setUpdateResult('error');
+        return;
+      }
+      const latestVersion = release.version;
+      const currentVersion = pkg.version || '0.0.0';
+      if (latestVersion === currentVersion) {
+        setUpdateResult('current');
+      } else {
+        setUpdateResult(`new:${latestVersion}`);
       }
     } catch {
       setUpdateResult('error');

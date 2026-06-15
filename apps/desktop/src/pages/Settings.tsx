@@ -225,9 +225,13 @@ export function Settings({
 
   // 立即更新：downloadAndInstall 订阅 Channel 事件（Started/Progress/Finished）。
   // Started 设 total，Progress 累加 downloaded，Finished 提示即将重启（Rust 侧 app.restart 自动执行）。
-  // 安装过程中安装包验签失败/网络中断 → catch toast；finally 解除 updateInstalling（成功路径进程已退出不触发）。
+  // 安装包验签失败/网络中断 → catch toast + 解锁。
+  // 修复 H1：成功路径的 downloadAndInstall 若 Rust 侧 app.restart 未触发（restart 失败被吞/平台异常），
+  // Promise 会 resolve 而进程未退出，此前仅 catch 解锁，Dialog 永久锁死（disablePointerDismissal + showCloseButton=false）。
+  // 现在成功 resolve 兜底解锁并提示用户手动重启，避免更新流程死锁只能强杀进程。
   async function installUpdate() {
     setUpdateInstalling(true);
+    let finished = false;
     try {
       await downloadAndInstall((event) => {
         if (event.event === 'Started') {
@@ -235,9 +239,18 @@ export function Settings({
         } else if (event.event === 'Progress') {
           setProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
         } else if (event.event === 'Finished') {
+          finished = true;
           toast.success('更新下载完成，即将重启');
         }
       });
+      // 成功 resolve 但进程未退出（Rust restart 失败兜底）：解锁 Dialog，提示手动重启。
+      // finished=true 表示下载已完成，重启应在 Rust 侧自动发生；此处仅作 fallback 不重复 toast。
+      setUpdateInstalling(false);
+      if (finished) {
+        toast.warning('更新已就绪，若未自动重启请手动重启应用完成安装。');
+      } else {
+        toast.warning('更新流程已结束，若未自动重启请手动重启应用。');
+      }
     } catch (err) {
       toast.error((err as ApiError).message || '下载更新失败，请重试');
       setUpdateInstalling(false);

@@ -202,8 +202,33 @@ pub fn write_opencode_config(
 /// 本函数删除 `<configs_root>/<session_id>/`。
 ///
 /// 幂等：目录不存在不报错（允许半删状态收尾）。
+///
+/// 安全修复 H1：`session_id` 来自前端 IPC 入参（stop_session / delete_session / send_input），
+/// 不可信任。此前直接 `configs_root.join(session_id)` 后 `remove_dir_all`，传入 `..` / 路径分隔符
+/// 可删除 configs_root 之外的任意目录（数据丢失）。现加两层防护：
+/// 1. 字符过滤：session_id 必须非空且不含 `/`、`\`、`..`（裸标识符）。
+/// 2. canonicalize 前缀断言：规范化后路径必须仍以 configs_root 规范化路径为前缀。
+/// 任一校验失败静默返回（不删，安全优先）。
 pub fn cleanup_session_config(configs_root: &Path, session_id: &str) {
+    // 第一层：裸标识符校验（防 `..` 与路径分隔符穿越）。
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+    {
+        return;
+    }
     let dir = configs_root.join(session_id);
+    // 第二层：canonicalize 前缀断言（防符号链接等绕过）。configs_root 不存在时跳过删除。
+    let Ok(canon) = dir.canonicalize() else {
+        return;
+    };
+    let Ok(root_canon) = configs_root.canonicalize() else {
+        return;
+    };
+    if !canon.starts_with(&root_canon) {
+        return;
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
