@@ -246,11 +246,91 @@ pnpm dist                          # tools/create-distribution.ps1
 
 ### 管理端（collab-admin）
 
+管理端是一个 **React SPA**（Vite 构建），未登录显示官网落地页，登录后进入管理后台。生产部署只需静态文件托管。
+
+#### 1. 构建
+
 ```bash
-# 构建时注入后端地址（两个变量名都支持，优先 VITE_API_BASE_URL）
+# 构建时注入后端地址（管理端所有 API 请求都走这个地址）
+# 两个变量名都支持，优先 VITE_API_BASE_URL
 VITE_API_BASE_URL=https://api.example.com pnpm -C apps/collab-admin build
-pnpm -C apps/collab-admin preview  # 静态文件托管
+
+# 产物在 apps/collab-admin/dist/（纯静态 HTML + JS + CSS + 字体 woff2）
 ```
+
+> **注意**：`VITE_API_BASE_URL` 是生产后端地址（不含尾斜杠），如 `https://api.lingfang.com`。
+> 本地开发用 `pnpm -C apps/collab-admin dev`（:4174，自动连 localhost:3000）。
+
+#### 2. 部署方式
+
+**方式一：Nginx 静态托管（推荐）**
+
+```nginx
+server {
+    listen 80;
+    server_name admin.example.com;
+    root /var/www/lingfang-admin/dist;
+
+    # SPA 路由回退（所有路径走 index.html）
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API 反代到后端
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 静态资源缓存（woff2 字体/js/css 带 hash 不变）
+    location ~* \.(woff2|js|css|png|jpg|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Gzip 压缩
+    gzip on;
+    gzip_types text/css application/javascript application/json font/woff2;
+}
+```
+
+**方式二：Node 静态服务器**
+
+```bash
+# 用 serve / http-server / caddy 等任意静态文件服务器
+npx serve apps/collab-admin/dist -l 4174
+# 或
+pnpm -C apps/collab-admin preview   # Vite 内置 preview（开发用，不推荐生产）
+```
+
+**方式三：Docker（docker-compose 一体化）**
+
+```bash
+# 见下方 Docker Compose 部分，管理端自动构建+托管
+```
+
+#### 3. 首次使用
+
+部署后访问管理端地址，首次启动会进入**安装向导**（Setup Wizard）：
+1. 设置平台管理员邮箱 / 密码 / 显示名
+2. 设置平台名称
+3. 完成后自动登录，进入管理后台
+
+> 安装向导仅在数据库无 `PLATFORM_ADMIN` 用户时可用，完成后自动禁用（防被重复创建管理员）。
+
+#### 4. 管理后台配置（登录后）
+
+| 配置项 | 位置 | 说明 |
+|--------|------|------|
+| 平台名称 / Logo | 平台设置 → 平台信息 | 云端存储，全端同步（官网/桌面客户端都显示） |
+| SMTP 邮件 | 平台设置 → 邮件服务 | 阿里云 DirectMail / QQ / 163 等，填服务器地址+端口+用户名+密码 |
+| 极验验证码 | 平台设置 → 验证码服务 | 管理端登录/注册的验证码（桌面客户端不需要验证码） |
+| 模型服务 | 模型服务 | 平台维护 provider 列表 + 设当前启用，用户在桌面端填 API 密钥 |
+| Gitee 更新日志 | 平台设置 → 更新日志 | 配置 Gitee 仓库 owner/repo/token，官网更新日志页自动拉取 release |
+| 主题切换 | 平台设置 → 外观 | 亮色/暗色/跟随系统 |
 
 ### Docker Compose 一体化部署
 
