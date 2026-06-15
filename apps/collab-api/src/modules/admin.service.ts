@@ -27,6 +27,82 @@ export class AdminService {
     return { users, teams, pendingApplications, enabledPlugins: plugins, disabledPlugins, pendingPluginReviews };
   }
 
+  // 平台级 AI 生成质量看板（调研报告 Top10 / A4）。
+  // 首版复用现有 AuditLog 聚合，不新建 CliSessionLog 表（避免与组A schema 迁移冲突）：
+  //   - 调用次数：llm_binding.key_decrypted（桌面每次发起 AI 生成都会解密 key → 一次会话即一次调用代理）。
+  //   - 成功次数：plugin.uploaded（生成成功并上传团队云端，是产物落地的可靠信号）。
+  //   - 失败次数：调用 - 成功（近似估算，因 audit 不记录每次失败，仅作为质量趋势参考）。
+  //   - 全部基于 AuditLog count，零新表、零破坏式 DDL。
+  async adminGenerationStats(userId: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    // 月度窗口：当前自然月起始 → 现在（取本月初便于运营观察近期质量趋势）。
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const [monthCalls, monthSuccess, totalCalls, totalSuccess] = await Promise.all([
+      this.prisma.auditLog.count({ where: { action: 'llm_binding.key_decrypted', createdAt: { gte: monthStart } } }),
+      this.prisma.auditLog.count({ where: { action: 'plugin.uploaded', createdAt: { gte: monthStart } } }),
+      this.prisma.auditLog.count({ where: { action: 'llm_binding.key_decrypted' } }),
+      this.prisma.auditLog.count({ where: { action: 'plugin.uploaded' } }),
+    ]);
+    const safeRate = (calls: number, success: number) => (calls > 0 ? Math.round((success / calls) * 1000) / 10 : 0);
+    return {
+      period: 'current_month',
+      month: { calls: monthCalls, success: monthSuccess, failed: Math.max(0, monthCalls - monthSuccess), successRate: safeRate(monthCalls, monthSuccess) },
+      total: { calls: totalCalls, success: totalSuccess, failed: Math.max(0, totalCalls - totalSuccess), successRate: safeRate(totalCalls, totalSuccess) },
+      // 平均耗时暂缺（audit 未记录 duration），保留字段便于前端预留展示位，避免 NaN。
+      avgDurationMs: null,
+    };
+  }
+
+  // 平台级财务概览看板（调研报告 Top10 / C7）。
+  // 全量基于现有 Purchase/Plugin 表聚合，不新建 PaymentOrder/PlatformFeePolicy 表：
+  //   - GMV（月/累计）：sum(Purchase.priceCents)。平台抽成暂为 0（ADR-0002 明确放弃），platformRevenueCents 恒为 0。
+  //   - 付费用户数：distinct Purchase.buyerUserId。
+  //   - 付费转化率：付费用户 / 总用户（需 count User）。
+  //   - Top5 热销插件：按 installCount 降序取前 5（市场插件，installCount 是 installMarketplacePlugin 维护的真实安装数）。
+  async adminFinanceStats(userId: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const [monthGmvAgg, totalGmvAgg, paidBuyers, totalUsers, topPluginsRaw] = await Promise.all([
+      // Prisma aggregate _sum 对空表返回 null，用 ?? 0 兜底避免 NaN。
+      this.prisma.purchase.aggregate({ where: { createdAt: { gte: monthStart } }, _sum: { priceCents: true } }),
+      this.prisma.purchase.aggregate({ _sum: { priceCents: true } }),
+      this.prisma.purchase.findMany({ select: { buyerUserId: true }, distinct: ['buyerUserId'] }),
+      this.prisma.user.count(),
+      this.prisma.plugin.findMany({
+        where: { marketplace: true },
+        orderBy: [{ installCount: 'desc' }, { ratingCount: 'desc' }],
+        take: 5,
+        select: { id: true, name: true, installCount: true, ratingCount: true, ratingSum: true, priceCents: true },
+      }),
+    ]);
+    const monthGmv = monthGmvAgg._sum.priceCents ?? 0;
+    const totalGmv = totalGmvAgg._sum.priceCents ?? 0;
+    const paidUserCount = paidBuyers.length;
+    const conversionRate = totalUsers > 0 ? Math.round((paidUserCount / totalUsers) * 1000) / 10 : 0;
+    const topPlugins = topPluginsRaw.map((p) => ({
+      id: p.id,
+      name: p.name,
+      installCount: p.installCount,
+      ratingCount: p.ratingCount,
+      // 平均分：ratingCount>0 才计算，否则 0，避免除零 NaN。
+      avgScore: p.ratingCount > 0 ? Math.round((p.ratingSum / p.ratingCount) * 10) / 10 : 0,
+      priceCents: p.priceCents,
+    }));
+    return {
+      period: 'current_month',
+      month: { gmvCents: monthGmv },
+      total: { gmvCents: totalGmv },
+      // 平台抽成暂为 0（ADR-0002 放弃抽成现金流），保留字段为后续商业化预留。
+      platformRevenueCents: 0,
+      paidUserCount,
+      totalUserCount: totalUsers,
+      conversionRate,
+      topPlugins,
+    };
+  }
+
   async adminUsers(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
     const users = await this.prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });

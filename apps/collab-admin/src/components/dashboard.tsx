@@ -2,10 +2,25 @@ import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { UsersIcon, BoxesIcon, ClockIcon, PlugIcon, AlertCircleIcon, CheckCircleIcon, ArrowRightIcon } from 'lucide-react';
+import {
+  UsersIcon,
+  BoxesIcon,
+  ClockIcon,
+  PlugIcon,
+  AlertCircleIcon,
+  CheckCircleIcon,
+  ArrowRightIcon,
+  SparklesIcon,
+  WalletIcon,
+  TrendingUpIcon,
+  ShoppingCartIcon,
+  PercentIcon,
+  StarIcon,
+  DownloadIcon,
+} from 'lucide-react';
 import { useLoad } from '@/lib/helpers';
-import { api, type DashboardData } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { api, type DashboardData, type GenerationStats, type FinanceStats } from '@/lib/api';
+import { cn, money } from '@/lib/utils';
 import type { View } from '@/lib/types';
 
 // ADMIN-VIEW-02 修复：Dashboard 增加 onNavigate 回调 prop，
@@ -13,7 +28,13 @@ import type { View } from '@/lib/types';
 // 消除「cursor-pointer + hover + ArrowRightIcon 但无 onClick」的死链误导。
 export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } = {}) {
   const [data, setData] = useState<DashboardData | null>(null);
+  // DASHBOARD-STATS-01：并行加载基础指标 + AI 生成质量 + 财务概览，互不阻塞。
+  // 各 useLoad 独立捕获失败并 toast，单个看板接口失败不影响其他区块渲染（各自降级为空态）。
+  const [generation, setGeneration] = useState<GenerationStats | null>(null);
+  const [finance, setFinance] = useState<FinanceStats | null>(null);
   useLoad(() => api<DashboardData>('/api/admin/dashboard').then(setData));
+  useLoad(() => api<GenerationStats>('/api/admin/stats/generation').then(setGeneration));
+  useLoad(() => api<FinanceStats>('/api/admin/stats/finance').then(setFinance));
 
   const stats = [
     { label: '用户总数', value: data?.users ?? 0, desc: '全平台账号', icon: UsersIcon, color: 'text-blue-500' },
@@ -51,6 +72,87 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* AI 生成质量（调研报告 Top10 / A4）：调用次数 / 成功率 / 失败数。
+          后端基于 AuditLog（llm_binding.key_decrypted 调用代理 + plugin.uploaded 成功代理）聚合。 */}
+      <div>
+        <div className="mb-3 flex items-center gap-2">
+          <SparklesIcon className="size-4 text-violet-500" />
+          <h2 className="text-sm font-semibold">AI 生成质量</h2>
+          <span className="text-xs text-muted-foreground">基于审计日志聚合，调用代理为 key 解密次数</span>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <GenerationStatCard label="本月调用" value={generation?.month.calls ?? 0} desc="AI 生成会话次数" icon={SparklesIcon} color="text-violet-500" />
+          <GenerationStatCard label="本月成功" value={generation?.month.success ?? 0} desc="成功上传插件数" icon={CheckCircleIcon} color="text-emerald-500" />
+          <GenerationStatCard label="本月成功率" value={`${generation?.month.successRate ?? 0}%`} desc="成功 / 调用" icon={PercentIcon} color="text-blue-500" />
+          <GenerationStatCard label="累计成功率" value={`${generation?.total.successRate ?? 0}%`} desc={`累计 ${generation?.total.calls ?? 0} 次调用`} icon={TrendingUpIcon} color="text-amber-500" />
+        </div>
+      </div>
+
+      {/* 财务概览（调研报告 Top10 / C7）：GMV / 付费用户 / 转化率 / 热销插件。
+          后端基于 Purchase/Plugin 聚合，平台抽成暂为 0（ADR-0002）。 */}
+      <div>
+        <div className="mb-3 flex items-center gap-2">
+          <WalletIcon className="size-4 text-emerald-500" />
+          <h2 className="text-sm font-semibold">财务概览</h2>
+          <span className="text-xs text-muted-foreground">平台抽成暂为 0，GMV 为交易总额</span>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <GenerationStatCard label="本月 GMV" value={money(finance?.month.gmvCents ?? 0)} desc="本月交易总额" icon={WalletIcon} color="text-emerald-500" />
+            <GenerationStatCard label="累计 GMV" value={money(finance?.total.gmvCents ?? 0)} desc="历史交易总额" icon={TrendingUpIcon} color="text-blue-500" />
+            <GenerationStatCard label="付费用户" value={`${finance?.paidUserCount ?? 0} / ${finance?.totalUserCount ?? 0}`} desc="付费 / 总用户" icon={ShoppingCartIcon} color="text-violet-500" />
+            <GenerationStatCard label="付费转化率" value={`${finance?.conversionRate ?? 0}%`} desc="付费用户 / 总用户" icon={PercentIcon} color="text-amber-500" />
+          </div>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <StarIcon className="size-4 text-amber-500" />
+                Top 5 热销插件
+              </CardTitle>
+              <CardDescription>按安装数排序</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="px-6 pb-6">
+                {(finance?.topPlugins ?? []).length === 0 ? (
+                  <div className="py-6 text-center text-sm text-muted-foreground">
+                    <DownloadIcon className="mx-auto mb-1 size-6 text-muted-foreground/50" />
+                    暂无上架插件数据
+                  </div>
+                ) : (
+                  (finance?.topPlugins ?? []).map((plugin, i) => (
+                    <div key={plugin.id}>
+                      {i > 0 && <Separator className="my-2" />}
+                      <div className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                            {i + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{plugin.name}</div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-0.5">
+                                <DownloadIcon className="size-3" />
+                                {plugin.installCount}
+                              </span>
+                              <span className="flex items-center gap-0.5">
+                                <StarIcon className="size-3 text-amber-500" />
+                                {plugin.avgScore}（{plugin.ratingCount}）
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <Badge variant="outline">{plugin.priceCents === 0 ? '免费' : money(plugin.priceCents)}</Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Pending / Todo */}
@@ -121,5 +223,35 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
         </Card>
       </div>
     </div>
+  );
+}
+
+/** 通用指标卡片：复用于 AI 生成质量与财务概览区块。
+ *  - value 为字符串/数字均支持（百分比、金额等已格式化为字符串）。
+ *  - 加载中（data 为 null）时显示 0，避免 NaN；后端聚合对空表已兜底 0。 */
+function GenerationStatCard({
+  label,
+  value,
+  desc,
+  icon: Icon,
+  color,
+}: {
+  label: string;
+  value: string | number;
+  desc: string;
+  icon: typeof UsersIcon;
+  color: string;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardDescription>{label}</CardDescription>
+        <Icon className={cn('size-4', color)} />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="text-xs text-muted-foreground">{desc}</p>
+      </CardContent>
+    </Card>
   );
 }
