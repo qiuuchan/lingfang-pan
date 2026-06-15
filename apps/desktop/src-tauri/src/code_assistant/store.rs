@@ -3,11 +3,17 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+// 安全修复 H2：file_lock 是 code-assistant 子系统的会话存储串行化锁，
+// poison 后所有 upsert_session/append_transcript/update_session_exit 均会 panic，
+// 会话永久卡死。容忍 poison（与 code_assistant.rs 同模式），数据仍有效。
+// 注：let _guard = ... 模式下 guard 生命周期到当前块末尾，转换不影响释放语义。
 use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+use super::lock_or_recover;
 
 use super::adapters::CodeAssistantTool;
 
@@ -174,7 +180,7 @@ impl AssistantStore {
     pub fn register_process(&self, process: RegisteredAgentProcess) -> Result<(), String> {
         // 修复 RUSTSHIM-01：registry.json 同款非原子 RMW，并发更新丢失条目。
         // 用 file_lock 序列化读-改-写（与 processes HashMap 的 Arc<Mutex> 同款锁策略）。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut registry = self.read_registry();
         registry
             .processes
@@ -188,7 +194,7 @@ impl AssistantStore {
 
     pub fn unregister_process(&self, session_id: &str) -> Result<(), String> {
         // 修复 RUSTSHIM-01：registry.json 的 RMW 必须串行化。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut registry = self.read_registry();
         registry
             .processes
@@ -198,7 +204,7 @@ impl AssistantStore {
 
     pub fn cleanup_registered_processes(&self) -> Result<Vec<RegistryCleanupRecord>, String> {
         // 修复 RUSTSHIM-01：扫 + 写 registry.json 整体在锁内，避免与 register/unregister 交叉。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let processes = self.list_registered_processes();
         if processes.is_empty() {
             return Ok(Vec::new());
@@ -262,7 +268,7 @@ impl AssistantStore {
         // 修复 RUSTSHIM-01 / RUST-STREAM-03：sessions.json 的读-改-写必须串行化，
         // 否则 waiter 写 exit 状态会被 send_input 的 upsert(status=running) 覆盖，
         // 导致会话卡 running、前端 activeExited 守卫据此阻止追问，多轮锁死。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         if let Some(existing) = sessions
             .iter_mut()
@@ -285,7 +291,7 @@ impl AssistantStore {
     ) -> Result<(), String> {
         // 修复 RUSTSHIM-01 / RUST-STREAM-03：update_session_exit 是退出终态，
         // 必须在 file_lock 内执行，避免被 reader 线程的 set_cli_session_id 覆盖。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         if let Some(record) = sessions
             .iter_mut()
@@ -310,7 +316,7 @@ impl AssistantStore {
         }
         // 修复 RUSTSHIM-01 / RUST-STREAM-03：set_cli_session_id 由 reader 线程调用，
         // 与 waiter 的 update_session_exit 跨线程写同一 sessions.json，无锁会丢失更新。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         if let Some(record) = sessions
             .iter_mut()
@@ -330,7 +336,7 @@ impl AssistantStore {
         draft_updated_at: String,
     ) -> Result<SessionRecord, String> {
         // 修复 RUSTSHIM-01：rename_session 也是 sessions.json 的 RMW，必须串行化。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         let record = sessions
             .iter_mut()
@@ -351,7 +357,7 @@ impl AssistantStore {
         draft_updated_at: String,
     ) -> Result<(), String> {
         // 修复 RUSTSHIM-01：touch_draft_updated_at 也是 sessions.json 的 RMW，必须串行化。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         let record = sessions
             .iter_mut()
@@ -372,7 +378,7 @@ impl AssistantStore {
         // 并发写同一 {id}.jsonl，writeln! 经 write_all 拆多次 write() 会撕裂 JSONL 行。
         // 用 file_lock 序列化追加（per-store 单写），与 sessions.json 共用同一把锁
         // （粒度足够：写盘是微秒级，reader 主瓶颈是 read_line 解析）。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let path = self.transcript_path(session_id);
         let mut file = OpenOptions::new()
             .create(true)
@@ -435,7 +441,7 @@ impl AssistantStore {
     /// 后两处不存在不报错（幂等，允许半删状态收尾）。
     pub fn delete_session(&self, session_id: &str) -> Result<(), String> {
         // 修复 RUSTSHIM-01：delete_session 也是 sessions.json 的 RMW，必须串行化。
-        let _guard = self.file_lock.lock().unwrap();
+        let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         sessions.retain(|item| item.session_id != session_id);
         sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));

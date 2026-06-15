@@ -84,16 +84,18 @@ describe('AuthService 找回密码 + 重置密码', () => {
     });
 
     it('合法 token 成功改密 + tokenVersion++ + 审计', async () => {
-      // 用真实 jwt 签发一个 scope=pwd_reset 的 token（与 issueResetToken 闭环）。
-      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset' }, process.env.JWT_SECRET!, { expiresIn: '15m' });
+      // 修复 H1/H3：reset token 内嵌 tokenVersion，resetPassword 校验时与库比对。
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '15m' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 3, status: 'ACTIVE' });
       prisma.user.updateMany.mockResolvedValue({ count: 1 });
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'a@b.com' });
 
       const result = await service.resetPassword({ token, newPassword: 'newpass123' });
       expect(result.ok).toBe(true);
-      // updateMany 带 tokenVersion: { increment: 1 }（作废所有旧登录 token）。
+      // updateMany 带 tokenVersion: { increment: 1 }（作废所有旧登录 token），
+      // 且 where 含 tokenVersion（防重放 + 覆盖降级场景）。
       expect(prisma.__tx.user.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 'u1', status: 'ACTIVE' },
+        where: { id: 'u1', status: 'ACTIVE', tokenVersion: 3 },
         data: expect.objectContaining({ tokenVersion: { increment: 1 } }),
       }));
       // 审计 action=auth.password.reset。
@@ -102,11 +104,21 @@ describe('AuthService 找回密码 + 重置密码', () => {
       }));
     });
 
-    it('账号非 ACTIVE（updateMany count=0）时抛 bad_request', async () => {
-      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset' }, process.env.JWT_SECRET!, { expiresIn: '15m' });
-      prisma.user.updateMany.mockResolvedValue({ count: 0 });
+    it('账号非 ACTIVE 时抛 bad_request', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '15m' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 3, status: 'DISABLED' });
       await expect(service.resetPassword({ token, newPassword: 'newpass123' }))
         .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('token 内嵌 tokenVersion 与库不一致（重放/降级场景）时抛 bad_request', async () => {
+      // 修复 H1/H3：改密后 tokenVersion 已自增，旧 reset token 内嵌旧值校验失败。
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '15m' });
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 4, status: 'ACTIVE' });
+      await expect(service.resetPassword({ token, newPassword: 'newpass123' }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('scope 非 pwd_reset 的 token 被拒绝', async () => {
@@ -118,7 +130,7 @@ describe('AuthService 找回密码 + 重置密码', () => {
 
     it('过期的 token 被拒绝（jwt.verify 抛错）', async () => {
       // 签发一个已过期的 token（expiresIn: -1s 即已过期）。
-      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset' }, process.env.JWT_SECRET!, { expiresIn: '-1s' });
+      const token = jwt.sign({ sub: 'u1', email: 'a@b.com', scope: 'pwd_reset', tokenVersion: 3 }, process.env.JWT_SECRET!, { expiresIn: '-1s' });
       await expect(service.resetPassword({ token, newPassword: 'newpass123' }))
         .rejects.toMatchObject({ status: 400, code: 'bad_request' });
     });

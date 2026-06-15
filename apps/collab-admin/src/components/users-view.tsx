@@ -164,7 +164,7 @@ function CreateUserDialog({ children, onRefresh }: { children: React.ReactNode; 
           </div>
           <div className="space-y-2">
             <Label>初始密码</Label>
-            <Input value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
         </div>
         <DialogFooter>

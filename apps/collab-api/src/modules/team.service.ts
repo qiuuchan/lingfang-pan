@@ -20,15 +20,17 @@ export class TeamService {
   async submitApplication(userId: string, input: { teamName: string; reason?: string }) {
     const pending = await this.prisma.teamAdminApplication.findFirst({ where: { userId, status: 'PENDING' } });
     if (pending) return { application: pending };
-    // 修复 TEAM-02：此前并发提交可创建多条 PENDING（无唯一约束）。
-    // 用 upsert 兜底——若并发创建命中 P2002（理论上 schema 无 unique，但保险），
-    // 更实际的是 findFirst+create 之间仍有窗口；接受至多产生少量重复 PENDING（低频管理操作，非关键）。
+    // 修复 H7：此前 .catch 无差别吞掉所有 DB 错误（连接断/字段超长/外键失败）并伪装成
+    // 「返回已有 PENDING」，DB 故障被掩盖成 404，且极端时序下可能创建重复 PENDING。
+    // schema 无 unique 约束，并发 create 不会触发 P2002，故仅显式兜底 P2002，其余错误正常抛出。
     const application = await this.prisma.teamAdminApplication.create({
       data: { userId, teamName: input.teamName?.trim() || '新团队', reason: input.reason?.trim() || '' },
     }).catch((error) => {
-      // 并发下可能命中重复（虽无 unique，但极端时序）——退化为返回已有 PENDING。
-      void error;
-      return this.prisma.teamAdminApplication.findFirstOrThrow({ where: { userId, status: 'PENDING' } });
+      if (error?.code === 'P2002') {
+        // 并发命中唯一约束（理论 schema 无 unique，保险）：退化为返回已有 PENDING。
+        return this.prisma.teamAdminApplication.findFirstOrThrow({ where: { userId, status: 'PENDING' } });
+      }
+      throw error;
     });
     await this.audit(userId, 'team_admin_application.created', 'TeamAdminApplication', application.id, { teamName: application.teamName });
     return { application };
@@ -242,6 +244,9 @@ export class TeamService {
       const updated = await tx.team.updateMany({ where: { id: membership.teamId, balanceCents: { gte: amount } }, data: { balanceCents: { decrement: amount } } });
       if (updated.count !== 1) throw insufficientBalance();
       await tx.balanceLedger.create({ data: { teamId: membership.teamId, amountCents: amount, direction: 'DEBIT', reason: input.reason || 'usage', actorUserId: userId } });
+      // 修复 H4：auditLog 写入移入事务，保证「余额变更必有审计」原子性。
+      // 此前事务外 audit() 在 DB 抖动时丢失，与 balanceLedger 不一致，破坏安全追溯链。
+      await tx.auditLog.create({ data: { actorUserId: userId, action: 'team.balance.consumed', targetType: 'Team', targetId: membership.teamId, metadata: { amountCents: amount, reason: input.reason || 'usage' } } });
     });
     return this.balance(userId);
   }

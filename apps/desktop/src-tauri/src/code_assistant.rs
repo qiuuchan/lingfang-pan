@@ -9,6 +9,17 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+// 安全修复 H2：容忍 std::sync::Mutex poison。
+// 任一持锁线程 panic 会 poison 锁，原 .lock().unwrap() 在此之后全部二次 panic，
+// 导致整个 code-assistant 子系统（所有会话无法停止/追问/删除）不可用，需重启应用。
+// PoisonError::into_inner() 拿到锁内数据（数据仍有效，仅代表另一线程异常退出），
+// 与未 poison 的 guard 行为一致，杜绝 panic 级联。
+// 单独提取泛型函数而非内联闭包，避免 `.lock().unwrap_or_else(|e| e.into_inner())`
+// 在闭包处触发 E0282 类型推断失败（into_inner 的多个泛型目标无法消歧）。
+fn lock_or_recover<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
@@ -496,12 +507,12 @@ pub fn send_input<E: AssistantEventSink>(
         // spawn_and_attach 内会复用同 session_id 覆盖 map；这里先 take 旧 child 杀进程组，
         // 让旧 waiter 自然观察到 None 提前退出（不写 update_session_exit，避免覆盖本轮状态）。
         let old_child = {
-            let processes = state.processes.lock().unwrap();
+            let processes = lock_or_recover(&state.processes);
             processes.get(&input.session_id).cloned()
         };
         if let Some(child) = old_child {
             let taken = {
-                let mut guard = child.lock().unwrap();
+                let mut guard = lock_or_recover(&child);
                 guard.take()
             };
             if let Some(mut child) = taken {
@@ -590,12 +601,12 @@ pub fn stop_session<E: AssistantEventSink>(
     input: StopSessionInput,
 ) -> Result<(), String> {
     let child = {
-        let processes = state.processes.lock().unwrap();
+        let processes = lock_or_recover(&state.processes);
         processes.get(&input.session_id).cloned()
     };
     if let Some(child) = child {
         let killed = {
-            let mut child = child.lock().unwrap();
+            let mut child = lock_or_recover(&child);
             if let Some(child) = child.take() {
                 stop_child_process(child);
                 true
@@ -610,7 +621,7 @@ pub fn stop_session<E: AssistantEventSink>(
         // 终态以 waiter 写入的 exited 为准（无数据丢失），用户语义上「停止」已满足。
         if killed {
             {
-                let mut processes = state.processes.lock().unwrap();
+                let mut processes = lock_or_recover(&state.processes);
                 processes.remove(&input.session_id);
             }
             state.store.unregister_process(&input.session_id)?;
@@ -697,7 +708,7 @@ fn spawn_and_attach<E: AssistantEventSink>(
     }
     let child = Arc::new(Mutex::new(Some(child)));
     {
-        let mut processes = state.processes.lock().unwrap();
+        let mut processes = lock_or_recover(&state.processes);
         processes.insert(session_id.clone(), child.clone());
     }
 
@@ -1413,7 +1424,7 @@ fn spawn_waiter<E: AssistantEventSink>(
         // map/registry 已被清空，子进程变孤儿且无法停止。修复：Err 分支也 take 并 kill_child_tree 回收。
         let exit_code = loop {
             let status = {
-                let mut child = child.lock().unwrap();
+                let mut child = lock_or_recover(&child);
                 if let Some(child) = child.as_mut() {
                     child.try_wait()
                 } else {
@@ -1423,14 +1434,14 @@ fn spawn_waiter<E: AssistantEventSink>(
             };
             match status {
                 Ok(Some(status)) => {
-                    let mut child = child.lock().unwrap();
+                    let mut child = lock_or_recover(&child);
                     let _ = child.take();
                     break status.code();
                 }
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
                 Err(_) => {
                     // try_wait 系统级错误（罕见）：take 旧 child 杀进程组，避免孤儿；exit_code 走 None。
-                    let mut child = child.lock().unwrap();
+                    let mut child = lock_or_recover(&child);
                     if let Some(mut owned) = child.take() {
                         kill_child_tree(&owned);
                         let _ = owned.wait();
@@ -1456,7 +1467,7 @@ fn spawn_waiter<E: AssistantEventSink>(
         // 若已被覆盖（ptr 不等），说明 send_input 启动了新轮，旧 waiter 应静默退出，
         // 不发 unregister / update_session_exit / exit 事件，避免覆盖新轮 running 状态。
         let still_current = {
-            let mut processes = state.processes.lock().unwrap();
+            let mut processes = lock_or_recover(&state.processes);
             match processes.get(&session_id) {
                 Some(registered) if Arc::ptr_eq(registered, &child) => {
                     processes.remove(&session_id);
@@ -2139,7 +2150,7 @@ mod tests {
 
     impl AssistantEventSink for CapturingSink {
         fn emit_json(&self, event: &'static str, payload: serde_json::Value) {
-            self.events.lock().unwrap().push((event, payload));
+            lock_or_recover(&self.events).push((event, payload));
         }
     }
 

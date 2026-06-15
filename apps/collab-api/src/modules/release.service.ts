@@ -79,7 +79,10 @@ export class ReleaseService {
 
     return {
       version: release.version,
-      pub_date: release.publishedAt?.toISOString() ?? new Date().toISOString(),
+      // 安全修复 H9：publishedAt 为 null 时不可用 new Date() 兜底——
+      // Tauri updater 假设「同版本同 pub_date」，每次请求都返回当前时间会误判有新版本反复下载。
+      // 已发布但缺 publishedAt 属异常状态，返 null 让 Tauri 忽略该字段（比不稳定值安全）。
+      pub_date: release.publishedAt ? release.publishedAt.toISOString() : null,
       url: asset.url,
       signature: asset.signature,
       notes: release.notes,

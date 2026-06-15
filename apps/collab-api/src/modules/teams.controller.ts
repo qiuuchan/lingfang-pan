@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { Public, requireUser } from '../common';
 import { TeamService } from './team.service';
@@ -18,12 +19,16 @@ export class PublicTeamsController {
   constructor(@Inject(TeamService) private readonly team: TeamService) {}
 
   @Public()
+  // 修复 H2：公开端点默认 60/min/IP 过宽，可被脚本批量爬取团队目录。收紧到 30/min/IP。
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get('public')
   @ApiOperation({ summary: '发现公开团队（列出 allowPublicJoin=true + ACTIVE 的团队）' })
   listPublic() {
     return this.team.listPublicTeams();
   }
 
+  // 修复 H2：写操作默认 60/min/IP 过宽，脚本批量注册账号可灌僵尸成员。收紧到 10/min/IP。
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post(':id/join')
   @ApiOperation({ summary: '直接加入公开团队（无需邀请码）' })
   join(@Req() req: Request, @Param('id') id: string) {

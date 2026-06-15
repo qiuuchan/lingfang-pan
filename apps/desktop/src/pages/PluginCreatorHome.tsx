@@ -147,6 +147,9 @@ export function PluginCreatorHome() {
   const hasDraft = Boolean(currentDraft?.files.length);
 
   // 从后端拉取真实工具/模型列表，覆盖前端 fallback，避免前后端两份硬编码漂移。
+  // 修复 H5：追踪后端是否报告过至少一个可用 CLI。若全 unavailable（用户未装任何 CLI），
+  // send 入口拦截，避免发起注定失败的 start_session（此前仅 env-readiness 横幅提示但非阻断）。
+  const hasAvailableCliRef = useRef<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
     tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean; models?: string[] }>>('code_assistant_list_tools')
@@ -159,9 +162,11 @@ export function PluginCreatorHome() {
             label: String(t.display_name || t.tool),
             models: Array.isArray(t.models) ? t.models.map(String) : [],
           }));
+        // 仅在确实拉到过 tools 列表时写入可用性（null 表示尚未拉取，不阻断）。
+        hasAvailableCliRef.current = mapped.length > 0;
         if (mapped.length) setProviders(mapped);
       })
-      .catch(() => { /* fallback 到 PROVIDERS */ });
+      .catch(() => { /* fallback 到 PROVIDERS，hasAvailableCliRef 保持 null 不阻断 */ });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
@@ -587,6 +592,12 @@ export function PluginCreatorHome() {
   async function send(overrideText?: string) {
     const text = (overrideText ?? input).trim();
     if (!text || streaming) return;
+    // 修复 H5：后端已确认无可用 CLI 时拦截发送，避免发起注定失败的 start_session。
+    // null 表示尚未拉取（不阻断，与原行为一致）；false 表示确认无可用 CLI。
+    if (hasAvailableCliRef.current === false) {
+      toast.error('当前无可用 CLI，请先在设置中安装 Claude / Codex / OpenCode');
+      return;
+    }
     setInput('');
     setPendingUser(text);
     setLiveSegments([]);
@@ -919,6 +930,9 @@ export function PluginCreatorHome() {
     setAssistantSession(null);
     assistantSessionRef.current = null;
     setActiveIdRef(null);
+    // 修复 H3：重置活动文件选中态。此前未清 activeFile，新对话后预览/详情面板仍指向旧会话文件路径，
+    // activeContent 取空串不崩但状态不一致（指向已不存在的文件）。与 setActiveIdRef(null) 同步重置。
+    setActiveFile('');
     pendingPromptRef.current = null;
     isFollowupRef.current = false;
     // 重置多轮运行态：新对话回到首轮语义（multiturnMode 待定）。

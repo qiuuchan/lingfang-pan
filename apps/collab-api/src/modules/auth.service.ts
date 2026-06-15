@@ -84,7 +84,10 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 邮箱不存在/已禁用：静默跳过，不抛错（防邮箱探测）。前端统一提示「链接已发送」。
     if (user && user.status === 'ACTIVE') {
-      const token = this.issueResetToken(user.id, email);
+      // 修复 H1/H3：reset token 内嵌签发时的 tokenVersion，resetPassword 校验时与库比对。
+      // 这样既防重放（改密后 tokenVersion++，旧 reset token 校验失败），
+      // 也覆盖降级场景（admin 改 status 或 platformRole 时已 tokenVersion++，旧 reset token 同步失效）。
+      const token = this.issueResetToken(user.id, email, user.tokenVersion);
       const baseUrl = (process.env.PASSWORD_RESET_BASE_URL || '').replace(/\/+$/, '');
       // 重置链接：前端路由 ?reset_token=xxx（Auth.tsx 解析后弹「重置密码」对话框）。
       // baseUrl 未配时降级为只带 token 的相对路径（开发期 console.log 可见完整 token）。
@@ -122,14 +125,24 @@ export class AuthService {
     if (payload.scope !== 'pwd_reset' || !payload.sub) throw badRequest('重置链接无效');
 
     const userId = String(payload.sub);
+    // 修复 H1/H3：加载当前 tokenVersion 与 status，与 reset token 内嵌的 tokenVersion 比对。
+    // - 重放防护：resetPassword 成功后 tokenVersion++，旧 reset token（内嵌旧 tokenVersion）校验失败。
+    // - 降级覆盖：admin 改 status/platformRole 时已 tokenVersion++，旧 reset token 同步失效。
+    const userRow = await this.prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true, status: true } });
+    if (!userRow || userRow.status !== 'ACTIVE') throw badRequest('账号不可用，重置失败');
+    const tokenVersionInPayload = Number(payload.tokenVersion);
+    if (!Number.isFinite(tokenVersionInPayload) || tokenVersionInPayload !== userRow.tokenVersion) {
+      throw badRequest('重置链接已失效，请重新申请');
+    }
     const passwordHash = await bcrypt.hash(input.newPassword, 12);
     // 事务：改密 + tokenVersion++ 原子完成（两者必须一起生效，否则改密但旧 token 仍可用）。
+    // tokenVersion 加入 where 条件作为乐观锁：并发重放时仅第一个命中，第二个 count=0 抛错。
     const user = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.user.updateMany({
-        where: { id: userId, status: 'ACTIVE' },
+        where: { id: userId, status: 'ACTIVE', tokenVersion: userRow.tokenVersion },
         data: { passwordHash, tokenVersion: { increment: 1 } },
       });
-      if (updated.count === 0) throw badRequest('账号不可用，重置失败');
+      if (updated.count === 0) throw badRequest('重置链接已失效，请重新申请');
       return tx.user.findUniqueOrThrow({ where: { id: userId } });
     });
     await this.prisma.auditLog.create({
@@ -195,14 +208,17 @@ export class AuthService {
   /**
    * 签发密码重置 token：独立于登录 token，scope=pwd_reset 标记用途，TTL 15min。
    * 复用 JWT_SECRET 签名（与登录 token 同密钥不同 scope，互不混淆）。
-   * token 不携带 tokenVersion——resetPassword 改密时主动 tokenVersion++ 作废旧登录 token，
-   * reset token 本身只能用一次（改密后已无意义，且 15min 过期）。
+   *
+   * 修复 H1/H3：token 内嵌签发时的 tokenVersion。resetPassword 改密时 tokenVersion++，
+   * 使旧 reset token（携带旧 tokenVersion）校验失败，实现一次性语义：
+   *  - 重放防护：链接泄漏后第二次提交，tokenVersion 已变，校验失败。
+   *  - 降级覆盖：admin 改 status/platformRole 同步 tokenVersion++，旧 reset token 失效。
    */
-  private issueResetToken(userId: string, email: string) {
+  private issueResetToken(userId: string, email: string, tokenVersion: number) {
     const options: SignOptions = { expiresIn: '15m' };
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET 未配置，无法签发重置 token');
-    return jwt.sign({ sub: userId, email, scope: 'pwd_reset' }, secret as Secret, options);
+    return jwt.sign({ sub: userId, email, scope: 'pwd_reset', tokenVersion }, secret as Secret, options);
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {
