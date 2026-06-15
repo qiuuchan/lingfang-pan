@@ -252,3 +252,40 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 平台完整交付（CLI注入+插件修复+文案+调研补齐+全仓库review）
+
+**Date**: 2026-06-15
+**Task**: 平台完整交付（CLI注入+插件修复+文案+调研补齐+全仓库review）
+**Branch**: `main`
+
+### Summary
+
+完成 6 大任务全部交付。①CLI配置注入(claude env/codex CODEX_HOME/opencode OPENCODE_CONFIG隔离,不污染默认)+codex可用性(聚合输出标注)。②Node/Python插件修复(Python -u无缓冲+UTF-8编码+PYTHONPATH多文件import+耗时显示+winget id修正+详情面板自适应宽度)。③文案公司平台地址。④平台完整性调研(5维度审计报告,Top10缺口)。⑤补齐Top1/5/7/9/10(团队发现解决注册即孤儿+找回密码SMTP占位+登录限流throttler+新手引导环境检测+admin看板生成质量财务)。⑥全仓库review修17处blocker/high(路径穿越安全漏洞/Mutex poison容错/tokenVersion重放/trust proxy限流/数据泄漏/事务原子等)。354测全绿(cargo114+api78+desktop162)+全包typecheck。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `17c7f85` | (see git log) |
+| `5079e37` | (see git log) |
+| `2d0f6d3` | (see git log) |
+| `d2d5aa5` | (see git log) |
+| `4bee679` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
