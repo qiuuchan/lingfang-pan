@@ -5,8 +5,9 @@ services:
       POSTGRES_USER: lingfang
       POSTGRES_PASSWORD: lingfang
       POSTGRES_DB: lingfang_collab
+    # 仅绑定宿主机本地回环，不直接暴露公网
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - collab_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,36 +15,40 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   collab-api:
     build:
       context: .
       dockerfile: apps/collab-api/Dockerfile
     env_file:
-      - path: .env.collab.example
-        required: true
-      - path: .env.collab
-        required: false
+      - .env.collab
     environment:
       DATABASE_URL: postgresql://lingfang:lingfang@postgres:5432/lingfang_collab?schema=public
       PORT: 3000
+      NODE_ENV: production
+    # 仅绑定宿主机本地回环，由 Nginx 反代对外服务
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
-    command: sh -c "pnpm -C apps/collab-api prisma:generate && pnpm -C apps/collab-api prisma migrate deploy && pnpm -C apps/collab-api seed:admin && pnpm -C apps/collab-api start"
+    command: sh -c "cd /app/apps/collab-api && npx prisma generate && npx prisma migrate deploy && node dist/seed-admin.js && node dist/main.js"
+    restart: unless-stopped
 
   collab-admin:
     build:
       context: .
       dockerfile: apps/collab-admin/Dockerfile
       args:
-        VITE_COLLAB_API_BASE: ${VITE_API_BASE_URL:-${VITE_COLLAB_API_BASE:-http://localhost:3000}}
+        # 同源部署使用相对路径（空值），前端请求走 /api/ 由 Nginx 代理
+        VITE_COLLAB_API_BASE: ${VITE_API_BASE_URL:-${VITE_COLLAB_API_BASE:-}}
+    # 仅绑定宿主机本地回环，由 Nginx 反代对外服务
     ports:
-      - "4174:4174"
+      - "127.0.0.1:4174:4174"
     depends_on:
       - collab-api
+    restart: unless-stopped
 
 volumes:
   collab_pgdata:
