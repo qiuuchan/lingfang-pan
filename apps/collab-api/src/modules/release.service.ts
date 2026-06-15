@@ -14,6 +14,9 @@
 //    用于 /latest 的 updateAvailable 标志，不依赖 DB 排序（latest 靠 isLatest 标志，更可靠）。
 //  - 所有出参字段 camelCase，时间转 ISO 字符串。
 import { Inject, Injectable } from '@nestjs/common';
+import { createHash, randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
+import { createWriteStream, mkdirSync } from 'node:fs';
 import type { Release, ReleaseAsset } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AppError, badRequest, notFound } from '../common';
@@ -202,6 +205,71 @@ export class ReleaseService {
       version: existing.version,
       platform: dto.platform,
       arch: dto.arch,
+    });
+    return { asset: this.publicAsset(asset) };
+  }
+
+  /** POST /api/admin/releases/:id/assets/upload：上传安装包文件到 downloads/ 目录，自动创建 asset。
+   *  文件名加随机前缀防冲突（同版本重新上传不覆盖旧文件），url 指向 /downloads/<filename>。
+   *  signature 文件（.sig）如果有同名 xxx.sig 则自动读取填入。 */
+  async uploadAsset(
+    actorId: string,
+    id: string,
+    file: { originalname: string; buffer?: Buffer; path?: string; size?: number },
+    platform?: string,
+    arch?: string,
+  ) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    if (!file) throw badRequest('未收到文件（field name 必须是 file）');
+    const existing = await this.prisma.release.findUnique({ where: { id }, select: { id: true, version: true, channel: true } });
+    if (!existing) throw notFound('版本不存在');
+
+    // 文件名加随机前缀防冲突（不同版本同名 setup.exe 不覆盖）。
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const uniqueName = `${randomBytes(4).toString('hex')}_${safeName}`;
+    const downloadsDir = resolve(process.cwd(), 'downloads');
+    mkdirSync(downloadsDir, { recursive: true });
+    const filePath = resolve(downloadsDir, uniqueName);
+
+    // 写入文件（buffer 模式或 diskStorage 模式）。
+    if (file.buffer) {
+      const { writeFileSync } = require('node:fs');
+      writeFileSync(filePath, file.buffer);
+    } else if (file.path) {
+      const { copyFileSync } = require('node:fs');
+      copyFileSync(file.path, filePath);
+    }
+
+    // 尝试读取同名 .sig 签名文件（如果有）。
+    let signature = '';
+    try {
+      const { readFileSync } = require('node:fs');
+      signature = readFileSync(resolve(downloadsDir, `${uniqueName}.sig`), 'utf-8').trim();
+    } catch {
+      // .sig 不存在（非 updater 必需），留空。
+    }
+
+    // 构建公开下载 URL。
+    const baseUrl = process.env.PUBLIC_BASE_URL || '';
+    const url = `${baseUrl}/downloads/${uniqueName}`;
+
+    const asset = await this.prisma.releaseAsset.create({
+      data: {
+        releaseId: id,
+        platform: (platform || 'WINDOWS') as ReleaseAsset['platform'],
+        arch: (arch || 'X86_64') as ReleaseAsset['arch'],
+        url,
+        filename: file.originalname,
+        signature,
+        sizeBytes: file.size ?? null,
+      },
+    });
+    await this.audit(actorId, 'admin.release.asset_uploaded', 'ReleaseAsset', asset.id, {
+      releaseId: id,
+      version: existing.version,
+      platform: asset.platform,
+      arch: asset.arch,
+      sizeBytes: file.size,
     });
     return { asset: this.publicAsset(asset) };
   }

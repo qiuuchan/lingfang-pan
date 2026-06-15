@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
@@ -310,6 +311,18 @@ export class AdminController {
   @ApiOperation({ summary: '登记版本产物（平台/架构/下载链接）' })
   addReleaseAsset(@Req() req: Request, @Param('id') id: string, @Body() body: ReleaseAssetCreateDto) {
     return this.releases.addAsset(requireUser(req).id, id, body);
+  }
+
+  @Post('releases/:id/assets/upload')
+  @ApiOperation({ summary: '上传安装包文件（自动创建 asset，存 downloads/ 目录）' })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }))
+  uploadReleaseAsset(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; buffer?: Buffer; path?: string; size?: number },
+    @Body() body: { platform?: string; arch?: string },
+  ) {
+    return this.releases.uploadAsset(requireUser(req).id, id, file, body.platform, body.arch);
   }
 
   @Delete('releases/:id/assets/:assetId')

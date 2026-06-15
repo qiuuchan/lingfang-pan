@@ -60,6 +60,16 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   app.use(json({ limit: '2mb' }));
   app.use(urlencoded({ limit: '2mb', extended: true }));
+
+  // 静态托管 downloads/ 目录（admin 上传的安装包）：
+  // /downloads/LingFang_1.0.0_x64-setup.exe → downloads/LingFang_1.0.0_x64-setup.exe。
+  const downloadsDir = resolve(process.cwd(), 'downloads');
+  const httpAdapter = app.getHttpAdapter();
+  const expressInstance = httpAdapter.getInstance();
+  if (typeof (expressInstance as { use?: (path: string, handler: unknown) => void }).use === 'function') {
+    const express = await import('express');
+    (expressInstance as { use: (path: string, handler: unknown) => void }).use('/downloads', express.static(downloadsDir));
+  }
   app.use(helmet());
   app.setGlobalPrefix('api');
 
