@@ -107,9 +107,10 @@ mod tests {
     #[test]
     fn codex_probe_uses_exec_subcommand() {
         let definition = tool_definition(CodeAssistantTool::Codex);
+        // --skip-git-repo-check：sandbox 非 git 仓库，必须跳过 codex 的目录信任检查。
         assert_eq!(
             definition.probe_args("ping", Some("gpt-5.1-codex")),
-            vec!["exec", "ping", "--model", "gpt-5.1-codex"]
+            vec!["exec", "ping", "--model", "gpt-5.1-codex", "--skip-git-repo-check"]
         );
     }
 
@@ -172,7 +173,7 @@ mod tests {
         // effort 同样不进入 args（codex 无思考强度参数，R2 仅 claude 生效）。
         let definition = tool_definition(CodeAssistantTool::Codex);
         let args = definition.run_args("ping", Some("gpt-5.1-codex"), Some("sid-xyz"), Some("high"));
-        assert_eq!(args, vec!["exec", "ping", "--model", "gpt-5.1-codex"]);
+        assert_eq!(args, vec!["exec", "ping", "--model", "gpt-5.1-codex", "--skip-git-repo-check"]);
     }
 
     #[test]

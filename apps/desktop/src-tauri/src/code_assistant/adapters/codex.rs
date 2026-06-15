@@ -48,5 +48,10 @@ fn build_args(
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);
     }
+    // 修复 codex「Not inside a trusted directory」报错：sandbox 工作目录不是 git 仓库，
+    // codex 默认拒绝在非 git 目录运行（安全限制）。加 --skip-git-repo-check 放行。
+    // sandbox 是 code_assistant::resolve_workspace 生成的隔离目录（app_data/claude-sandbox），
+    // 不含 .git，故必须显式跳过该检查，否则 codex exec 立即退出不产出。
+    args.push("--skip-git-repo-check".to_string());
     args
 }
