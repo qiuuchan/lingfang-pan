@@ -1,6 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { PrismaService } from '../prisma.service';
+import { setServers } from 'node:dns';
+
+// 修复系统代理（Clash/V2Ray TUN 模式）劫持 DNS 导致 queryA ETIMEOUT：
+// 显式指定公共 DNS 服务器（阿里 223.5.5.5 + Google 8.8.8.8），绕过系统 DNS 配置。
+// 仅影响 dns.resolve* 系列（不影响 dns.lookup/getaddrinfo），nodemailer lookup 回调用 resolve4。
+// 安全：公共 DNS 只做域名→IP 解析（无副作用），与系统 DNS 等价但不受代理 TUN 劫持。
+try {
+  setServers(['223.5.5.5', '8.8.8.8']);
+} catch {
+  // setServers 失败不阻塞（极端环境 dns 模块不可用时回退系统默认）。
+}
 
 /**
  * 邮件服务（SMTP 配置来源：后台 PlatformSetting 优先，.env 仅作 fallback）。
@@ -96,7 +107,7 @@ export class MailService {
    *    二者皆无则不发 auth（服务端无认证场景，如本地 relay）。
    *  - smtpUrl 非法（解析失败）返回 null，调用方按「未配置」降级 console.log。
    */
-  private buildTransporter(cfg: SmtpConfig): Transporter | null {
+  private async buildTransporter(cfg: SmtpConfig): Promise<Transporter | null> {
     const url = cfg.smtpUrl;
     if (!url) return null;
     let parsed: URL;
@@ -108,32 +119,35 @@ export class MailService {
     }
     const isSmtps = parsed.protocol === 'smtps:';
     const port = parsed.port ? Number(parsed.port) : isSmtps ? 465 : 587;
-    // secure：smtps 协议恒 true；smtp 协议依端口（465=true，587 等 STARTTLS=false）。
     const secure = isSmtps || port === 465;
-    // auth 凭据优先级：独立配置 > url 内嵌。decodeURIComponent 还原 URL 编码的凭据（如 user%40domain）。
     const authUser = cfg.smtpUser || (parsed.username ? decodeURIComponent(parsed.username) : '');
     const authPass = cfg.smtpPass || (parsed.password ? decodeURIComponent(parsed.password) : '');
+
+    // 修复系统代理（Clash/V2Ray TUN）劫持 DNS 导致 nodemailer queryA ETIMEOUT：
+    // 创建 transporter 前先用独立 Resolver（公共 DNS 223.5.5.5）解析出 IP，host 直接用 IP。
+    // TLS SNI 用 servername 保原域名（SMTP 服务器证书校验域名）。
+    const hostname = parsed.hostname;
+    let resolvedHost = hostname;
+    try {
+      const { Resolver } = await import('node:dns');
+      const resolver = new Resolver();
+      resolver.setServers(['223.5.5.5', '8.8.8.8', '114.114.114.114']);
+      const addresses = await new Promise<string[]>((resolve, reject) => {
+        resolver.resolve4(hostname, (err, addrs) => (err ? reject(err) : resolve(addrs)));
+      });
+      if (addresses.length) {
+        resolvedHost = addresses[0];
+        console.log(`[mail.dns_resolved] ${hostname} → ${resolvedHost}（绕过代理 DNS）`);
+      }
+    } catch {
+      console.warn(`[mail.dns_resolve_failed] ${hostname}，回退系统 DNS`);
+    }
+
     const options: Record<string, unknown> = {
-      host: parsed.hostname,
+      host: resolvedHost,
       port,
       secure,
-      // 修复 ETIMEOUT：系统代理（Clash/V2Ray 127.0.0.1:7890）可能劫持 DNS 查询导致 nodemailer
-      // queryA 超时。用 Node 原生 dns.resolve 直连系统 DNS 服务器（绕过代理 DNS 劫持）。
-      // dns.lookup 默认走 getaddrinfo（受系统 DNS 配置/代理影响），改为 dns.resolve（直连）。
-      lookup: ((hostname: string, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
-        const dns = require('node:dns');
-        dns.resolve4(hostname, (err: NodeJS.ErrnoException | null, addresses: string[]) => {
-          if (err || !addresses.length) {
-            // resolve4 失败时回退默认 lookup（兼容 hosts 文件 / IPv6 / 本地域名）。
-            dns.lookup(hostname, (e: NodeJS.ErrnoException | null, address: string, family: number) => {
-              callback(e, address, family);
-            });
-          } else {
-            callback(null, addresses[0], 4);
-          }
-        });
-      }),
-      // 连接超时：防止 SMTP 握手卡死（默认 nodemailer 无超时，代理场景会挂）。
+      tls: resolvedHost !== hostname ? { servername: hostname } : undefined,
       connectionTimeout: 15_000,
       greetingTimeout: 10_000,
       socketTimeout: 20_000,
@@ -178,7 +192,7 @@ export class MailService {
    */
   async sendMail(to: string, subject: string, html: string): Promise<void> {
     const cfg = await this.loadConfig();
-    const transporter = this.buildTransporter(cfg);
+    const transporter = await this.buildTransporter(cfg);
     if (!transporter) {
       // 占位：未配 SMTP_URL，邮件内容落 console.log 供开发期查看。
       // 不视为错误：找回密码 / 邮箱验证流程继续，前端提示「链接已发送」。
@@ -241,7 +255,7 @@ export class MailService {
    */
   async sendTestEmail(to: string): Promise<{ ok: boolean; message: string; configured: boolean }> {
     const cfg = await this.loadConfig();
-    const transporter = this.buildTransporter(cfg);
+    const transporter = await this.buildTransporter(cfg);
     if (!transporter) {
       return {
         ok: false,
