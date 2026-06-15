@@ -142,3 +142,35 @@ export interface DashboardData {
   // 后端 /api/admin/dashboard 现返回该指标；前端读取后端值，避免假数据。
   disabledPlugins?: number;
 }
+
+// AI 生成质量看板（调研报告 Top10 / A4）。后端复用 AuditLog 聚合：
+// 调用次数 = llm_binding.key_decrypted 计数，成功次数 = plugin.uploaded 计数。
+// 失败数为近似估算（calls - success），avgDurationMs 暂为 null（audit 未记录耗时）。
+export interface GenerationStats {
+  period: string;
+  month: { calls: number; success: number; failed: number; successRate: number };
+  total: { calls: number; success: number; failed: number; successRate: number };
+  avgDurationMs: number | null;
+}
+
+// 财务概览看板（调研报告 Top10 / C7）。全量基于 Purchase/Plugin 聚合：
+// GMV = sum(Purchase.priceCents)，平台抽成暂为 0（ADR-0002）。
+export interface FinanceTopPlugin {
+  id: string;
+  name: string;
+  installCount: number;
+  ratingCount: number;
+  avgScore: number;
+  priceCents: number;
+}
+
+export interface FinanceStats {
+  period: string;
+  month: { gmvCents: number };
+  total: { gmvCents: number };
+  platformRevenueCents: number;
+  paidUserCount: number;
+  totalUserCount: number;
+  conversionRate: number;
+  topPlugins: FinanceTopPlugin[];
+}

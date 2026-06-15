@@ -36,6 +36,18 @@ export class AdminController {
     return this.admin.adminDashboard(requireUser(req).id);
   }
 
+  @Get('stats/generation')
+  @ApiOperation({ summary: 'AI 生成质量看板（调用次数/成功率）' })
+  generationStats(@Req() req: Request) {
+    return this.admin.adminGenerationStats(requireUser(req).id);
+  }
+
+  @Get('stats/finance')
+  @ApiOperation({ summary: '财务概览看板（GMV/付费用户/热销插件）' })
+  financeStats(@Req() req: Request) {
+    return this.admin.adminFinanceStats(requireUser(req).id);
+  }
+
   @Get('users')
   @ApiOperation({ summary: '用户列表' })
   users(@Req() req: Request) {
