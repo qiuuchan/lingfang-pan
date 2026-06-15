@@ -33,7 +33,7 @@
   min-height: 100vh;
   background-color: var(--lf-bg);
   color: var(--lf-fg);
-  font-family: 'MiSans', 'MiSansLatin', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'HarmonyOS Sans SC', ui-sans-serif, system-ui, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }

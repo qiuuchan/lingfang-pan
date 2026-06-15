@@ -1,21 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-/* MiSans：中文走 MiSans（Normal 按 unicode-range 分片，浏览器只加载用到的码点），
-   拉丁走 MiSansLatin（体积小）。两套 @font-face 同名前缀，font-sans 按顺序匹配。 */
-@import "misans/lib/Normal/MiSans-Regular.min.css";
-@import "misans/lib/Normal/MiSans-Medium.min.css";
-@import "misans/lib/Normal/MiSans-Semibold.min.css";
-@import "misans/lib/Normal/MiSans-Bold.min.css";
-@import "misans/lib/Latin/MiSansLatin-Regular.min.css";
-@import "misans/lib/Latin/MiSansLatin-Medium.min.css";
-@import "misans/lib/Latin/MiSansLatin-Semibold.min.css";
-@import "misans/lib/Latin/MiSansLatin-Bold.min.css";
+/* HarmonyOS Sans SC（华为鸿蒙字体，免费商用）：中文 + 拉丁全覆盖，cn-font-split 按 unicode-range 分片，
+   浏览器只加载用到的码点，加载快。替换原 MiSans。
+   字重（Thin/Light/Regular/Medium/Semibold/Bold/Black）由包内 index.css 统一汇总 @font-face。 */
+@import "harmonyos-sans-sc-webfont-splitted";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: 'MiSans', 'MiSansLatin', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'HarmonyOS Sans SC', ui-sans-serif, system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
