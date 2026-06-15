@@ -136,19 +136,27 @@ model User {
 }
 
 model Team {
-  id           String           @id @default(uuid())
-  name         String
-  slug         String           @unique
-  status       TeamStatus       @default(ACTIVE)
-  balanceCents Int              @default(0)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  memberships  TeamMembership[]
-  invitations  InvitationCode[]
-  ledger       BalanceLedger[]
-  plugins      Plugin[]
-  installations PluginInstallation[]
-  bindings     TenantLlmBinding[]
+  id              String           @id @default(uuid())
+  name            String
+  slug            String           @unique
+  status          TeamStatus       @default(ACTIVE)
+  // 团队是否开放公开加入：true 时出现在「发现公开团队」列表，普通用户可一键直接加入（无需邀请码）。
+  // 默认 false：团队管理员需在 TeamManage 主动开启（避免新建团队立刻被任意用户加入）。
+  allowPublicJoin Boolean          @default(false)
+  // 团队简介：公开团队发现页展示，帮助用户判断是否加入。
+  description     String           @default("")
+  balanceCents    Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  memberships     TeamMembership[]
+  invitations     InvitationCode[]
+  ledger          BalanceLedger[]
+  plugins         Plugin[]
+  installations   PluginInstallation[]
+  bindings        TenantLlmBinding[]
+
+  // 公开团队发现查询索引：GET /api/teams/public 按 allowPublicJoin=true + status=ACTIVE 过滤。
+  @@index([allowPublicJoin, status])
 }
 
 model TeamMembership {

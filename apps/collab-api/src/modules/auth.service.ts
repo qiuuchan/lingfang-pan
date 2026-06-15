@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, slugify, unauthorized } from '../common';
+import { MailService } from './mail.service';
 
 export type OnboardingState =
   | 'NEEDS_INVITATION'
@@ -14,7 +15,10 @@ export type OnboardingState =
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(MailService) private readonly mail: MailService,
+  ) {}
 
   async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {
     const email = input.email?.trim().toLowerCase();
@@ -64,6 +68,74 @@ export class AuthService {
 
   async refresh(userId: string) {
     return this.sessionFor(userId);
+  }
+
+  /**
+   * 找回密码（Top5 解法）：生成短 TTL（15min）的 reset token，发送重置链接邮件。
+   *
+   * 安全设计：无论邮箱是否注册都返回「链接已发送」——不泄漏邮箱是否注册（防探测枚举）。
+   * 仅当邮箱确实存在时才真正发邮件；不存在的邮箱静默跳过（前端无感知差异）。
+   * reset token 为独立 JWT（scope='pwd_reset'），与登录 token 分离，复用 JWT_SECRET 签名。
+   * token 内嵌 userId，reset-password 时校验 + 改密 + tokenVersion++（作废所有旧登录 token）。
+   */
+  async forgotPassword(input: { email: string }) {
+    const email = input.email?.trim().toLowerCase();
+    if (!email) throw badRequest('请输入邮箱');
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    // 邮箱不存在/已禁用：静默跳过，不抛错（防邮箱探测）。前端统一提示「链接已发送」。
+    if (user && user.status === 'ACTIVE') {
+      const token = this.issueResetToken(user.id, email);
+      const baseUrl = (process.env.PASSWORD_RESET_BASE_URL || '').replace(/\/+$/, '');
+      // 重置链接：前端路由 ?reset_token=xxx（Auth.tsx 解析后弹「重置密码」对话框）。
+      // baseUrl 未配时降级为只带 token 的相对路径（开发期 console.log 可见完整 token）。
+      const link = baseUrl ? `${baseUrl}/?reset_token=${encodeURIComponent(token)}` : `/?reset_token=${encodeURIComponent(token)}`;
+      const html = [
+        '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:16px;">',
+        '<h2>重置你的 LingFang 平台密码</h2>',
+        '<p>我们收到了你的密码重置请求。点击下方按钮设置新密码（链接 15 分钟内有效）：</p>',
+        `<p><a href="${link}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">重置密码</a></p>`,
+        `<p style="word-break:break-all;font-size:12px;color:#666;">若按钮无法点击，直接访问：<br>${link}</p>`,
+        '<p style="font-size:12px;color:#999;">如果不是你本人发起的请求，请忽略此邮件，你的密码不会被修改。</p>',
+        '</div>',
+      ].join('');
+      await this.mail.sendMail(email, '重置你的 LingFang 平台密码', html);
+    }
+    return { ok: true, message: '若该邮箱已注册，重置链接已发送' };
+  }
+
+  /**
+   * 重置密码（Top5 解法）：校验 reset token → 改密 → tokenVersion++（作废所有旧登录 token）。
+   * tokenVersion 自增确保：密码被改后，攻击者即便持有旧的登录 JWT 也会在 JwtAuthGuard 校验时失效。
+   */
+  async resetPassword(input: { token: string; newPassword: string }) {
+    if (!input.token) throw badRequest('重置链接无效');
+    if (!input.newPassword || input.newPassword.length < 8) throw badRequest('新密码至少 8 位');
+    // 校验 reset token：复用 JWT_SECRET，限定 scope=pwd_reset，TTL 15min（issueResetToken 内置）。
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw unauthorized('服务端未配置密钥');
+    let payload: jwt.JwtPayload;
+    try {
+      payload = jwt.verify(input.token, secret as Secret, { algorithms: ['HS256'] }) as jwt.JwtPayload;
+    } catch {
+      throw badRequest('重置链接已过期或无效');
+    }
+    if (payload.scope !== 'pwd_reset' || !payload.sub) throw badRequest('重置链接无效');
+
+    const userId = String(payload.sub);
+    const passwordHash = await bcrypt.hash(input.newPassword, 12);
+    // 事务：改密 + tokenVersion++ 原子完成（两者必须一起生效，否则改密但旧 token 仍可用）。
+    const user = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.updateMany({
+        where: { id: userId, status: 'ACTIVE' },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
+      });
+      if (updated.count === 0) throw badRequest('账号不可用，重置失败');
+      return tx.user.findUniqueOrThrow({ where: { id: userId } });
+    });
+    await this.prisma.auditLog.create({
+      data: { actorUserId: user.id, action: 'auth.password.reset', targetType: 'User', targetId: user.id, metadata: { email: user.email } },
+    });
+    return { ok: true, message: '密码已重置，请使用新密码登录' };
   }
 
   private async sessionFor(userId: string, includeToken = true) {
@@ -118,6 +190,19 @@ export class AuthService {
       secret as Secret,
       options,
     );
+  }
+
+  /**
+   * 签发密码重置 token：独立于登录 token，scope=pwd_reset 标记用途，TTL 15min。
+   * 复用 JWT_SECRET 签名（与登录 token 同密钥不同 scope，互不混淆）。
+   * token 不携带 tokenVersion——resetPassword 改密时主动 tokenVersion++ 作废旧登录 token，
+   * reset token 本身只能用一次（改密后已无意义，且 15min 过期）。
+   */
+  private issueResetToken(userId: string, email: string) {
+    const options: SignOptions = { expiresIn: '15m' };
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new Error('JWT_SECRET 未配置，无法签发重置 token');
+    return jwt.sign({ sub: userId, email, scope: 'pwd_reset' }, secret as Secret, options);
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {

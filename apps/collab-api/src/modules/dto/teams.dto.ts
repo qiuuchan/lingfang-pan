@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 /** 生成团队邀请码请求体 DTO。 */
 export class CreateInvitationDto {
@@ -36,4 +36,20 @@ export class RedeemInvitationDto {
   @ApiProperty({ description: '团队邀请码' })
   @IsString()
   code!: string;
+}
+
+/**
+ * 更新团队公开发现设置请求体 DTO。
+ * allowPublicJoin 切换是否出现在「发现公开团队」列表；description 为发现页展示简介（限 500 字）。
+ */
+export class UpdateTeamProfileDto {
+  @ApiPropertyOptional({ description: '是否开放公开加入（true=出现在发现页）' })
+  @IsOptional()
+  @IsBoolean({ message: 'allowPublicJoin 必须是布尔值' })
+  allowPublicJoin?: boolean;
+
+  @ApiPropertyOptional({ description: '团队简介（发现页展示，≤500 字）' })
+  @IsOptional()
+  @IsString()
+  description?: string;
 }

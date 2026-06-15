@@ -70,6 +70,64 @@ export class TeamService {
     return { team: membership.team, role: membership.role };
   }
 
+  /**
+   * 公开团队发现（Top1「注册即孤儿」解法）：列出 allowPublicJoin=true + ACTIVE 的团队。
+   * 供未入团/已注册用户在发现页浏览，可一键直接加入（joinPublicTeam）。
+   * 仅返回非敏感字段（id/name/description/memberCount），按成员数降序（活跃团队优先），限 50 条。
+   * 不需要登录态：用户注册后即可在 onboarding 页看到入口，打破「必须邀请码」冷启动。
+   */
+  async listPublicTeams() {
+    const teams = await this.prisma.team.findMany({
+      where: { allowPublicJoin: true, status: 'ACTIVE' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        _count: { select: { memberships: { where: { status: 'ACTIVE' } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    // 按成员数降序（活跃团队优先），稳定排序兜底 createdAt。
+    const sorted = [...teams].sort((a, b) => b._count.memberships - a._count.memberships);
+    return {
+      teams: sorted.map((t) => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        description: t.description,
+        memberCount: t._count.memberships,
+      })),
+    };
+  }
+
+  /**
+   * 公开团队直接加入（无需邀请码、无需审批）：allowPublicJoin=true + ACTIVE 的团队，
+   * 用户点击「加入」直接写入 ACTIVE 成员（角色 MEMBER）。
+   * 复用 upsert 重新激活已 REMOVED 成员并刷新 joinedAt（与 redeemInvitation 同模式）。
+   * 返回最新 session（team 已变更，前端据此进入团队空间）。
+   */
+  async joinPublicTeam(userId: string, teamId: string) {
+    const team = await this.prisma.team.findUnique({ where: { id: teamId } });
+    if (!team) throw notFound('团队不存在');
+    if (team.status !== 'ACTIVE') throw forbidden('团队当前不可加入');
+    if (!team.allowPublicJoin) throw forbidden('该团队未开放公开加入');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.teamMembership.upsert({
+        where: { teamId_userId: { teamId, userId } },
+        create: { teamId, userId, role: 'MEMBER' },
+        // 重新激活已 REMOVED 成员时刷新 joinedAt（与 redeemInvitation 的 TEAM-06 修复对齐），
+        // 否则 ensureCurrentTeam 按 joinedAt desc 选当前团队会错指。
+        update: { status: 'ACTIVE', role: 'MEMBER', joinedAt: new Date() },
+      });
+      await tx.auditLog.create({
+        data: { actorUserId: userId, action: 'team.public_joined', targetType: 'Team', targetId: teamId, metadata: { teamId } },
+      });
+    });
+    return this.auth.me(userId);
+  }
+
   async currentMembers(userId: string) {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const members = await this.prisma.teamMembership.findMany({
@@ -129,6 +187,37 @@ export class TeamService {
     await this.prisma.invitationCode.update({ where: { id }, data: { status: 'DISABLED' } });
     await this.audit(actorId, 'invitation.disabled', 'InvitationCode', id, { teamId: membership.teamId });
     return { ok: true };
+  }
+
+  /**
+   * 团队管理员更新团队公开发现设置（allowPublicJoin + description）。
+   * allowPublicJoin 切换是否出现在「发现公开团队」列表；description 为发现页展示的简介。
+   * 仅 TEAM_ADMIN 可操作，限当前团队（防越权改他团）。
+   */
+  async updateTeamProfile(actorId: string, input: { allowPublicJoin?: boolean; description?: string }) {
+    const membership = await this.auth.ensureTeamAdmin(actorId);
+    const data: { allowPublicJoin?: boolean; description?: string } = {};
+    if (typeof input.allowPublicJoin === 'boolean') data.allowPublicJoin = input.allowPublicJoin;
+    if (input.description !== undefined) data.description = input.description.trim().slice(0, 500); // 简介限 500 字防滥用
+    if (Object.keys(data).length === 0) return this.teamProfile(membership.teamId);
+    await this.prisma.team.update({ where: { id: membership.teamId }, data });
+    await this.audit(actorId, 'team.profile.updated', 'Team', membership.teamId, data);
+    return this.teamProfile(membership.teamId);
+  }
+
+  /** 团队公开信息（发现页 / TeamManage 展示用）：allowPublicJoin + description。 */
+  async teamProfile(teamId: string) {
+    const team = await this.prisma.team.findUniqueOrThrow({
+      where: { id: teamId },
+      select: { id: true, name: true, allowPublicJoin: true, description: true },
+    });
+    return { team };
+  }
+
+  /** 当前团队公开信息（TEAM_ADMIN/普通成员均可读，TeamManage 展示开关状态）。 */
+  async currentTeamProfile(actorId: string) {
+    const membership = await this.auth.ensureCurrentTeam(actorId);
+    return this.teamProfile(membership.teamId);
   }
 
   async balance(userId: string) {

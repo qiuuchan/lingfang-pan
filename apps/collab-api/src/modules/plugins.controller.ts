@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { PluginService } from './plugin.service';
@@ -12,6 +13,8 @@ export class PluginsController {
   constructor(@Inject(PluginService) private readonly plugins: PluginService) {}
 
   @Post('upload')
+  // 插件上传限流 10 次/分钟/IP（Top9）：单包 2MB，高频上传放大 DB 写入与磁盘压力。
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: '上传插件到当前团队云端共享空间' })
   upload(@Req() req: Request, @Body() body: PluginPackageDto) {
     return this.plugins.uploadPlugin(requireUser(req).id, body);

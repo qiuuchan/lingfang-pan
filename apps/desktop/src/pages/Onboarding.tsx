@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { ShieldAlertIcon, TicketIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api } from '@/lib/api';
-import type { CollabSessionResponse } from '@/lib/types';
+import type { CollabSessionResponse, PublicTeam } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,6 +16,38 @@ export function Onboarding() {
   const [teamName, setTeamName] = useState(session.application?.teamName || '');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
+  // 公开团队发现（Top1「注册即孤儿」解法）：列出 allowPublicJoin=true 的团队，用户可一键直接加入。
+  const [publicTeams, setPublicTeams] = useState<PublicTeam[]>([]);
+  const [joiningTeamId, setJoiningTeamId] = useState<string | null>(null);
+
+  async function loadPublicTeams() {
+    try {
+      // 公开端点无需鉴权，但需配置 backendUrl（api() 会校验）。
+      const r = await api<{ teams: PublicTeam[] }>('/api/teams/public', { method: 'GET', auth: false });
+      setPublicTeams(r.teams || []);
+    } catch {
+      // 静默失败：发现页是辅助入口，加载失败不影响邀请码主流程。
+    }
+  }
+
+  useEffect(() => {
+    void loadPublicTeams();
+  }, []);
+
+  async function joinPublicTeam(teamId: string) {
+    setJoiningTeamId(teamId);
+    setLoading(true);
+    try {
+      const r = await api<CollabSessionResponse>(`/api/teams/${teamId}/join`, { method: 'POST' });
+      applyCollabSession(r);
+      toast.success('已加入团队');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoading(false);
+      setJoiningTeamId(null);
+    }
+  }
 
   async function redeem() {
     if (!code.trim()) return toast.error('输入团队邀请码');
@@ -45,6 +77,37 @@ export function Onboarding() {
     }
   }
 
+  // 公开团队发现卡片（重复渲染段，统一抽出避免分支重复）：邀请码输入下方展示。
+  const discoveryCard = (
+    <div className="border-t pt-4 space-y-3">
+      <p className="text-xs font-medium text-muted-foreground">或直接加入一个公开团队</p>
+      {publicTeams.length === 0 ? (
+        <p className="text-xs text-muted-foreground">暂无公开团队。可向团队管理员索要邀请码。</p>
+      ) : (
+        <div className="max-h-64 space-y-2 overflow-y-auto">
+          {publicTeams.map((t) => (
+            <div key={t.id} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{t.name}</p>
+                {t.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.description}</p>}
+                <p className="mt-1 text-xs text-muted-foreground">{t.memberCount} 位成员</p>
+              </div>
+              <LoadingButton
+                size="sm"
+                variant="outline"
+                loading={loading && joiningTeamId === t.id}
+                disabled={loading && joiningTeamId !== t.id}
+                onClick={() => joinPublicTeam(t.id)}
+              >
+                加入
+              </LoadingButton>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   if (session.onboarding === 'PLATFORM_ADMIN_WEB_ONLY') {
     return (
       <Card className="w-full max-w-lg">
@@ -65,6 +128,7 @@ export function Onboarding() {
         <CardContent className="space-y-3">
           <p className="rounded-md border bg-muted/50 p-3 text-sm">申请团队：{session.application?.teamName || '—'}</p>
           <div className="flex gap-2"><LoadingButton loading={loading} onClick={refreshSession}>刷新状态</LoadingButton><Button variant="outline" onClick={resetSession}>退出登录</Button></div>
+          {discoveryCard}
         </CardContent>
       </Card>
     );
@@ -90,6 +154,7 @@ export function Onboarding() {
             <Input placeholder="团队邀请码，例如 LF-XXXXXXX" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
             <LoadingButton variant="outline" loading={loading} onClick={redeem}>加入团队</LoadingButton>
           </div>
+          {discoveryCard}
         </CardContent>
       </Card>
     );
@@ -100,11 +165,12 @@ export function Onboarding() {
       <CardHeader>
         <div className="mb-2 inline-flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary"><TicketIcon className="size-5" /></div>
         <CardTitle>加入团队</CardTitle>
-        <CardDescription>注册后必须输入有效团队邀请码，才能进入团队空间。</CardDescription>
+        <CardDescription>注册后可通过邀请码加入，或直接加入下方公开团队。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <Input placeholder="团队邀请码，例如 LF-XXXXXXX" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
         <div className="flex gap-2"><LoadingButton loading={loading} onClick={redeem}>加入团队</LoadingButton><Button variant="outline" onClick={resetSession}>退出登录</Button></div>
+        {discoveryCard}
       </CardContent>
     </Card>
   );
