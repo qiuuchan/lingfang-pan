@@ -41,6 +41,7 @@ import type {
   LlmErrorCode,
   TenantBindingPublic,
 } from '@lingfang/contract';
+import { dragRegionProps } from '@/lib/window-drag';
 
 /** GET /api/llm/active-provider 出参。 */
 type ActiveProviderResponse = ActiveProvider;
@@ -369,8 +370,8 @@ export function ModelGatewayTab() {
       {/* 删除二次确认 Dialog */}
       <Dialog open={pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(false); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>删除模型配置</DialogTitle>
+          <DialogHeader {...dragRegionProps}>
+            <DialogTitle data-tauri-drag-region>删除模型配置</DialogTitle>
             <DialogDescription>
               将删除当前的模型配置与关联的密钥，此操作不可撤销。
             </DialogDescription>

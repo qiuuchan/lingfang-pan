@@ -40,8 +40,8 @@ export const TASK_STEPS: TaskStep[] = [
   },
   {
     icon: EyeIcon,
-    title: '预览插件',
-    description: '生成完成后点「预览」查看插件实际运行效果。',
+    title: '使用插件',
+    description: '生成完成后点「使用插件」查看插件实际运行效果。',
     view: 'home',
   },
   {

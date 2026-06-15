@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { CLI_TOOL_META, RUNTIME_META } from '@/lib/install-cli';
+import { dragRegionProps } from '@/lib/window-drag';
 import type {
   CliToolId,
   InstallTarget,
@@ -229,8 +230,8 @@ function InstallConfirmDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
       <DialogContent showCloseButton={false} className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>确认安装 {meta?.label ?? '组件'}</DialogTitle>
+        <DialogHeader {...dragRegionProps}>
+          <DialogTitle data-tauri-drag-region>确认安装 {meta?.label ?? '组件'}</DialogTitle>
           <DialogDescription>
             将通过系统包管理器安装 <span className="font-mono">{meta?.wingetId}</span>。
             安装可能需要管理员权限确认。

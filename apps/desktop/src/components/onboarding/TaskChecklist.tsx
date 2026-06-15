@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog';
 import { CircleCheckIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { dragRegionProps } from '@/lib/window-drag';
 import type { Session, View } from '@/lib/types';
 import { TASK_STEPS } from '@/components/onboarding/task-steps';
 import {
@@ -97,8 +98,8 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
   return (
     <Dialog open onOpenChange={() => { /* 不允许外点/Esc 关闭，强制走任务流程（仅「稍后再说」可关） */ }}>
       <DialogContent showCloseButton={false} className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
+        <DialogHeader {...dragRegionProps}>
+          <DialogTitle className="flex items-center gap-2 text-base" data-tauri-drag-region>
             <span>新手任务清单</span>
             <span className="text-xs font-normal text-muted-foreground">{finishedCount}/{TASK_STEPS.length}</span>
           </DialogTitle>
