@@ -52,10 +52,11 @@ fn build_args(
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);
     }
-    // 修复 codex「Not inside a trusted directory」报错：sandbox 工作目录不是 git 仓库，
+    // 修复 codex「Not inside a trusted directory」报错：工作目录不是 git 仓库，
     // codex 默认拒绝在非 git 目录运行（安全限制）。加 --skip-git-repo-check 放行。
-    // sandbox 是 code_assistant::resolve_workspace 生成的隔离目录（app_data/claude-sandbox），
-    // 不含 .git，故必须显式跳过该检查，否则 codex exec 立即退出不产出。
+    // workspace 由 code_assistant::resolve_workspace 生成：插件创建会话落到 plugins_root/<plugin_id>/
+    // （组D task 06-16 持久化目录），非插件场景回退 app_data/claude-sandbox。两者均不含 .git，
+    // 故必须显式跳过该检查，否则 codex exec 立即退出不产出。
     args.push("--skip-git-repo-check".to_string());
     // --json：输出 JSONL 事件流（支持流式思考/工具分类，对齐 claude stream-json 的分类渲染）。
     // --color never：禁用 ANSI 颜色码（JSONL 通道无需颜色，避免颜色码混入 JSON 解析）。

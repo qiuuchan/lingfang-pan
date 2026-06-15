@@ -38,3 +38,34 @@ export async function fetchModels(provider: string, apiUrl: string, apiKey: stri
   });
   return result.models;
 }
+
+/** test_llm_chat 命令出参（与 Rust TestLlmChatResult 对齐）。 */
+interface TestLlmChatOutput {
+  content: string;
+}
+
+/**
+ * 测试模型连接：用配置的上游模型发送一条消息（默认 "hi"），返回助手回复。
+ *
+ * 走 Rust reqwest 直连 `{apiUrl}/v1/chat/completions`（OpenAI 兼容），Bearer apiKey。
+ * 用于模型服务页「测试连接」按钮，验证 key/地址/模型组合是否可用。
+ *
+ * @param provider  provider 标识（仅错误提示上下文）
+ * @param apiUrl    provider 基础地址
+ * @param apiKey    明文 apiKey（仅本次请求用）
+ * @param model     要测试的模型 id
+ * @param prompt    可选自定义文案，默认 "hi"
+ * @returns 助手回复内容；失败抛 Error，message 含 code 前缀（api_key_invalid:/网络等）
+ */
+export async function testLlmChat(
+  provider: string,
+  apiUrl: string,
+  apiKey: string,
+  model: string,
+  prompt?: string,
+): Promise<string> {
+  const input: Record<string, string> = { provider, apiUrl, apiKey, model };
+  if (prompt) input.prompt = prompt;
+  const result = await tauriInvoke<TestLlmChatOutput>('test_llm_chat', { input });
+  return result.content;
+}

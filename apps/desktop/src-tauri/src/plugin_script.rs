@@ -394,7 +394,9 @@ pub fn run_plugin_script(
     let (sandbox_canon, entry_canon) =
         materialize_sandbox(&data_dir, &input.plugin_id, &input.files, &input.entry)?;
 
-    let workspace = resolve_workspace(Some(sandbox_canon.to_string_lossy().to_string()), None)?;
+    // 组D task 06-16：plugin_script 预览执行仍用临时 sandbox（group B 的 venv/pnpm 持久化运行尚未落地），
+    // 故 plugin_id 传 None 走 workspace_dir 显式路径分支（不落 plugins_root，保持预览隔离）。
+    let workspace = resolve_workspace(Some(sandbox_canon.to_string_lossy().to_string()), None, None)?;
     let mut args: Vec<String> = Vec::new();
     // Python 经 py launcher 时需显式指定 -3？保持简单：直接用探测到的 binary（py/python3/node），
     // 由 binary 自身决定默认版本。

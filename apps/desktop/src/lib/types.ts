@@ -126,6 +126,10 @@ export interface LoadedPlugin {
   entry: string;
   status?: string;
   source?: 'builtin' | 'published' | 'installed' | 'platform' | 'team' | 'marketplace';
+  // 运行时类型（manifest.runtime_type）：决定插件运行方式（client=软件内 iframe，nodejs/python=独立进程）。
+  // 来源：collab-api 的 publicPlugin 已返回该字段（plugin-package.ts 解析），内置插件未返回时回退 'client'。
+  // task 06-16-plugin-system-rebuild 组C：Plugins.tsx 据此渲染「运行」/「打开」按钮分派。
+  runtime_type?: 'client' | 'nodejs' | 'python' | 'cloud';
   files?: DraftFile[];
   manifest?: unknown;
   reviewStatus?: string;

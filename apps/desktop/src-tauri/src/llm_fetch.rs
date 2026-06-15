@@ -117,6 +117,101 @@ pub async fn fetch_models(input: FetchModelsInput) -> Result<FetchModelsResult, 
     })
 }
 
+/// test_llm_chat 命令入参（与 fetch_models 同款 camelCase，多一个 model 字段）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestLlmChatInput {
+    pub provider: String,
+    pub api_url: String,
+    pub api_key: String,
+    /// 要测试的模型 id（用户从拉取/保存的模型里选一个）。
+    pub model: String,
+    /// 可选自定义测试文案，默认 "hi"。
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+/// test_llm_chat 命令出参：返回助手回复内容（首条 message）。
+#[derive(Serialize)]
+pub struct TestLlmChatResult {
+    pub content: String,
+}
+
+/// OpenAI 兼容 `/v1/chat/completions` 响应：取 choices[0].message.content。
+#[derive(Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Deserialize)]
+struct ChatChoice {
+    message: ChatMessage,
+}
+
+#[derive(Deserialize)]
+struct ChatMessage {
+    content: Option<String>,
+}
+
+/// 把 provider 基础地址拼成 `/chat/completions` 完整 URL（与 build_models_url 同款 /v1 智能补全）。
+fn build_chat_url(api_url: &str) -> String {
+    let base = api_url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{}/chat/completions", base)
+    } else {
+        format!("{}/v1/chat/completions", base)
+    }
+}
+
+/// 命令：用配置的上游模型发送一条测试消息（默认 "hi"），验证 key/地址/模型可用性。
+///
+/// 场景：模型服务页「测试连接」按钮，让用户在保存前快速验证配置是否有效。
+/// 流程：POST {api_url}/v1/chat/completions（Bearer key，body 含 model + messages），30s 超时，
+/// 返回 choices[0].message.content。错误约定与 fetch_models 一致（api_key_invalid:/网络等）。
+#[tauri::command]
+pub async fn test_llm_chat(input: TestLlmChatInput) -> Result<TestLlmChatResult, String> {
+    let url = build_chat_url(&input.api_url);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("LingFang-Desktop")
+        .build()
+        .map_err(|e| format!("网络请求初始化失败：{e}"))?;
+    let prompt = input.prompt.as_deref().unwrap_or("hi");
+    let body = serde_json::json!({
+        "model": input.model,
+        "messages": [
+            { "role": "user", "content": prompt }
+        ],
+    });
+    let resp = client
+        .post(&url)
+        .bearer_auth(&input.api_key)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败：{e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(format!("api_key_invalid:{} 的 apiKey 无效或已过期", input.provider));
+    }
+    if !status.is_success() {
+        // 模型名错误常表现为 404（model not found），回显状态码供用户定位。
+        return Err(format!("{} 返回错误：HTTP {status}（请检查模型名是否正确）", input.provider));
+    }
+    let parsed: ChatCompletionResponse = resp
+        .json()
+        .await
+        .map_err(|_| format!("provider_response_unsupported:{} 返回格式非 OpenAI 兼容", input.provider))?;
+    let content = parsed
+        .choices
+        .into_iter()
+        .next()
+        .and_then(|c| c.message.content)
+        .unwrap_or_else(|| "（空回复）".to_string());
+    Ok(TestLlmChatResult { content })
+}
+
 // === 单元测试（design §6） ===
 //
 // 测试范围：纯函数 build_models_url（URL 拼接逻辑），不实跑 reqwest（真实 HTTP 走手动验证）。
@@ -171,6 +266,15 @@ mod tests {
         // 空串边界：trim_end_matches 对空串返回空，拼接结果为 /v1/models（前端 apiUrl 必非空，
         // 此处仅验证不 panic）。
         assert_eq!(build_models_url(""), "/v1/models");
+    }
+
+    #[test]
+    fn build_chat_url_appends_path() {
+        // 与 build_models_url 同款 /v1 智能补全，但追加的是 /chat/completions。
+        assert_eq!(build_chat_url("https://api.openai.com"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(build_chat_url("https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions");
+        // 尾斜杠裁掉。
+        assert_eq!(build_chat_url("https://api.deepseek.com/"), "https://api.deepseek.com/v1/chat/completions");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon } from 'lucide-react';
+import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,17 @@ import {
   loadPlugins,
   runtimeMessage,
 } from './plugins-runtime';
+// 组C：本地插件持久化目录扫描（动态状态 + 运行/停止进程）。
+import {
+  scanPluginStatus,
+  startPlugin,
+  stopPlugin,
+  readLocalPluginFile,
+  STATUS_DISPLAY,
+  STATUS_VARIANT,
+  RUNTIME_DISPLAY,
+  type LocalPluginStatus,
+} from '@/lib/plugin-status';
 
 const PAGE_SIZE = 6;
 
@@ -36,7 +47,7 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
   const [scriptPreviewKey, setScriptPreviewKey] = useState(0);
 
   // R3 据 manifest 的 runtime_type 分派运行态。client→iframe（不变），nodejs/python→脚本运行，cloud→说明。
-  const runtime = parseManifest(plugin.files || []).runtime_type;
+  const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
 
   async function editInGenerator() {
     setEditing(true);
@@ -94,8 +105,11 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
       {isScriptRuntime(runtime) ? (
         // R3 nodejs/python：复用创建器的脚本运行组件（探测→运行→终端回显 + 缺失运行时引导）。
         // 「使用/启用」即点「运行」执行 entry 脚本；缺失解释器时组件内引导安装。
+        // 组C 改造（task 06-16）：Python/Node 改为独立进程运行（venv/pnpm），不再嵌入软件内终端。
+        // ScriptPreviewPanel 的「运行」按钮现已改为 startPlugin 独立进程启动，软件内仅显示运行状态 + 停止按钮。
         <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4">
           <ScriptPreviewPanel
+            pluginId={plugin.id}
             files={plugin.files || []}
             runtime={runtime}
             previewKey={scriptPreviewKey}
@@ -181,11 +195,167 @@ function RunnerBody({
   );
 }
 
+// 组C：本地持久化插件列表项（从 scan_plugin_status 扫描文件系统获取）。
+// 与 PluginListItem（数据库/内置插件）解耦：本地插件的运行方式与状态展示完全不同
+// （独立进程运行 + 动态状态 Badge），不复用 PluginListItem 的作者改价/审核 UI。
+function LocalPluginItem({
+  item,
+  onStart,
+  onStop,
+  onOpen,
+}: {
+  item: LocalPluginStatus;
+  onStart: (id: string) => void;
+  onStop: (id: string) => void;
+  onOpen: (item: LocalPluginStatus) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const isRunning = item.status === 'running';
+  const isScript = item.runtime === 'nodejs' || item.runtime === 'python';
+
+  // 本地插件仅 client（HTML）可「打开」内嵌 iframe；nodejs/python 走「运行」独立进程。
+  const canOpen = item.runtime === 'client' && item.status !== 'error';
+
+  async function handleToggle() {
+    setBusy(true);
+    try {
+      if (isRunning) {
+        await stopPlugin(item.id);
+        toast.success('插件已停止');
+      } else {
+        await startPlugin(item.id);
+        toast.success('插件已启动，运行在独立进程');
+      }
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="group flex items-center justify-between gap-3 px-4 py-3.5 transition hover:bg-muted/60">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 名称：用户命名（不取 manifest.name，scan 时已优先 title 字段）。 */}
+          <span className="truncate font-medium">{item.name}</span>
+          {/* 类型图标（运行时分类，PRD 需求：类型图标）。 */}
+          <span className="shrink-0 text-xs text-muted-foreground">{RUNTIME_DISPLAY[item.runtime]}</span>
+          {/* 动态状态 Badge：ready/incomplete/error/running/stopped（PRD AC2）。 */}
+          <span
+            className={`inline-flex h-5 items-center rounded-full px-2 text-xs font-medium ${
+              STATUS_VARIANT[item.status] === 'default'
+                ? 'bg-primary text-primary-foreground'
+                : STATUS_VARIANT[item.status] === 'destructive'
+                  ? 'bg-destructive/10 text-destructive dark:bg-destructive/20'
+                  : STATUS_VARIANT[item.status] === 'secondary'
+                    ? 'bg-secondary text-secondary-foreground'
+                    : 'border border-border text-foreground'
+            }`}
+          >
+            {STATUS_DISPLAY[item.status]}
+          </span>
+        </div>
+        {/* 状态诊断说明：incomplete/error 时展示原因，便于用户修复。 */}
+        <div className="truncate text-sm text-muted-foreground">
+          {item.detail || item.description || '—'}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-xs text-muted-foreground">v{item.version}</span>
+        {/* 脚本型（Python/Node）：运行/停止按钮（独立进程，PRD AC5）。 */}
+        {isScript && (
+          <LoadingButton
+            variant={isRunning ? 'destructive' : 'default'}
+            size="sm"
+            loading={busy}
+            disabled={item.status === 'incomplete' || item.status === 'error'}
+            onClick={handleToggle}
+            title={item.status === 'incomplete' || item.status === 'error' ? '插件未就绪，无法运行' : undefined}
+          >
+            {isRunning ? <SquareIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />}
+            {isRunning ? '停止' : '运行'}
+          </LoadingButton>
+        )}
+        {/* 网页型（HTML）：打开按钮（软件内 iframe 显示，PRD AC9）。 */}
+        {canOpen && (
+          <Button variant="default" size="sm" onClick={() => onOpen(item)}>
+            打开
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 组C：本地持久化插件列表（从 scan_plugin_status 获取，独立于数据库插件列表）。
+// 本地插件是「持久化目录扫描」的产物，与 PluginList（数据库/内置）分离展示，避免状态来源混淆。
+function LocalPluginList({
+  items,
+  loading,
+  onStart,
+  onStop,
+  onOpen,
+  onRefresh,
+}: {
+  items: LocalPluginStatus[];
+  loading: boolean;
+  onStart: (id: string) => void;
+  onStop: (id: string) => void;
+  onOpen: (item: LocalPluginStatus) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <Card className="w-full">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <CardTitle>本地插件</CardTitle>
+          <span className="text-xs text-muted-foreground">{items.length} 个（持久化目录）</span>
+        </div>
+        <Button variant="ghost" size="icon-sm" title="重新扫描本地插件状态" onClick={onRefresh}>
+          <RefreshCwIcon className="size-4" />
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          // 加载骨架：与数据库列表一致的 6 行占位。
+          <div className="flex flex-col divide-y rounded-lg border">
+            {Array.from({ length: PAGE_SIZE }).map((_, i) => <Shimmer key={i} className="h-14 w-full rounded-none" />)}
+          </div>
+        ) : items.length ? (
+          <div className="flex flex-col divide-y rounded-lg border">
+            {items.map((item) => (
+              <LocalPluginItem
+                key={item.id}
+                item={item}
+                onStart={onStart}
+                onStop={onStop}
+                onOpen={onOpen}
+              />
+            ))}
+          </div>
+        ) : (
+          // 空状态：引导去创建插件（本地插件由 AI 生成器写入持久化目录）。
+          <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground">
+            <PackageIcon className="size-7 text-muted-foreground/50" />
+            <span>还没有本地插件</span>
+            <span className="text-xs">在创建器生成的插件会保存在这里，重启后仍可用。</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Plugins() {
   const { runningPlugin, setRunningPlugin, pinPlugin, unpinPlugin, isPinned, setView } = useApp();
   const [list, setList] = useState<LoadedPlugin[] | null>(null);
   const [error, setError] = useState<string>('');
   const [page, setPage] = useState(1);
+
+  // 组C：本地持久化插件列表（文件系统扫描，动态状态）。
+  const [localPlugins, setLocalPlugins] = useState<LocalPluginStatus[] | null>(null);
+  const [localLoading, setLocalLoading] = useState(false);
 
   useEffect(() => {
     if (runningPlugin) return;
@@ -197,6 +367,26 @@ export function Plugins() {
       setList(result.plugins);
       setPage(1);
     })();
+  }, [runningPlugin]);
+
+  // 组C：扫描本地持久化插件（挂载 + runningPlugin 变化时刷新）。
+  // scan 失败（Rust 命令未实现或目录读取失败）降级为空数组，不阻断数据库插件列表展示。
+  const reloadLocal = () => {
+    setLocalLoading(true);
+    void scanPluginStatus()
+      .then((items) => setLocalPlugins(items))
+      .catch((caught) => {
+        // scan 失败：保留上次结果（首次失败置空数组），不刷错误 toast（与数据库列表分离，降级静默）。
+        setLocalPlugins((prev) => prev ?? []);
+        toast.error(`扫描本地插件失败：${errorMessage(caught)}`);
+      })
+      .finally(() => setLocalLoading(false));
+  };
+
+  useEffect(() => {
+    if (runningPlugin) return;
+    reloadLocal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningPlugin]);
 
   if (runningPlugin) return <Runner plugin={runningPlugin} onBack={() => setRunningPlugin(null)} />;
@@ -211,48 +401,100 @@ export function Plugins() {
     })();
   };
 
+  // 组C：打开本地 HTML 插件（读取持久化目录的 entry 文件内容，复用 Runner 的 iframe 分支）。
+  // 本地插件文件在 plugins_root/<pluginId>/，通过组A 的 read_local_plugin_file 读取 entry HTML，
+  // 填入 adapted.files 让 Runner 的 loadPluginDocument 走 sdkShim + 插件 HTML 路径（与数据库插件一致）。
+  // read_local_plugin_file 失败（Rust 未实现 / 文件缺失）回退占位 adapted（Runner 显示占位 HTML）。
+  const openLocal = async (item: LocalPluginStatus) => {
+    let files: LoadedPlugin['files'];
+    try {
+      const entryContent = await readLocalPluginFile(item.id, item.entry);
+      files = [{ path: item.entry, content: entryContent }];
+    } catch {
+      // 读取失败：files 留空，Runner 的 loadPluginDocument 会渲染占位 HTML（不崩）。
+      files = [];
+    }
+    const adapted: LoadedPlugin = {
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      version: item.version,
+      entry: item.entry,
+      builtin: false,
+      runtime_type: 'client',
+      status: item.status,
+      files,
+    };
+    setRunningPlugin(adapted);
+  };
+
+  // 组C：启动/停止本地脚本插件后刷新扫描，状态变 running/stopped 同步 Badge。
+  const onLocalStart = (id: string) => {
+    void startPlugin(id)
+      .then(() => { toast.success('插件已启动，运行在独立进程'); reloadLocal(); })
+      .catch((caught) => toast.error(`启动失败：${errorMessage(caught)}`));
+  };
+  const onLocalStop = (id: string) => {
+    void stopPlugin(id)
+      .then(() => { toast.success('插件已停止'); reloadLocal(); })
+      .catch((caught) => toast.error(`停止失败：${errorMessage(caught)}`));
+  };
+
   const total = list?.length ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageItems = (list ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>我的插件</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
-        {list === null ? (
-          // 加载骨架：6 行（与单页条数一致）占位，替代「加载中…」纯文字。
-          <div className="flex flex-col divide-y rounded-lg border">
-            {Array.from({ length: PAGE_SIZE }).map((_, i) => <Shimmer key={i} className="h-14 w-full rounded-none" />)}
-          </div>
-        ) : total ? (
-          <PluginList
-            isPinned={isPinned}
-            items={pageItems}
-            onRun={setRunningPlugin}
-            onAuthorChanged={reload}
-            onTogglePin={(plugin, pinned) => (pinned ? unpinPlugin(plugin.id) : pinPlugin(plugin))}
-            page={page}
-            setPage={setPage}
-            totalPages={totalPages}
-          />
-        ) : (
-          !error && (
-            // 空状态：图标 + 引导文案 + 两个去向，替代单行「暂无插件」。
-            <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
-              <PackageIcon className="size-8 text-muted-foreground/50" />
-              <span>还没有可运行的插件</span>
-              <span className="text-xs">创建一个新插件，或从市场安装一个。</span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setView('home')}>去创建插件</Button>
-                <Button variant="outline" size="sm" onClick={() => setView('market')}>去市场安装</Button>
-              </div>
+    <div className="flex flex-col gap-4">
+      {/* 组C：本地持久化插件列表（动态状态 + 运行/停止/打开 UI），置于数据库插件列表上方。
+          PRD 需求 4：插件数据持久化，重启软件后还在，故本地插件是用户最常用的入口。 */}
+      <LocalPluginList
+        items={localPlugins ?? []}
+        loading={localLoading}
+        onStart={onLocalStart}
+        onStop={onLocalStop}
+        onOpen={openLocal}
+        onRefresh={reloadLocal}
+      />
+
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle>我的插件</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+          {list === null ? (
+            // 加载骨架：6 行（与单页条数一致）占位，替代「加载中…」纯文字。
+            <div className="flex flex-col divide-y rounded-lg border">
+              {Array.from({ length: PAGE_SIZE }).map((_, i) => <Shimmer key={i} className="h-14 w-full rounded-none" />)}
             </div>
-          )
-        )}
-      </CardContent>
-    </Card>
+          ) : total ? (
+            <PluginList
+              isPinned={isPinned}
+              items={pageItems}
+              onRun={setRunningPlugin}
+              onAuthorChanged={reload}
+              onTogglePin={(plugin, pinned) => (pinned ? unpinPlugin(plugin.id) : pinPlugin(plugin))}
+              page={page}
+              setPage={setPage}
+              totalPages={totalPages}
+            />
+          ) : (
+            !error && (
+              // 空状态：图标 + 引导文案 + 两个去向，替代单行「暂无插件」。
+              <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
+                <PackageIcon className="size-8 text-muted-foreground/50" />
+                <span>还没有可运行的插件</span>
+                <span className="text-xs">创建一个新插件，或从市场安装一个。</span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setView('home')}>去创建插件</Button>
+                  <Button variant="outline" size="sm" onClick={() => setView('market')}>去市场安装</Button>
+                </div>
+              </div>
+            )
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

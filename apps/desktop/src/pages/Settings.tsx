@@ -44,6 +44,7 @@ import {
 import { Markdown } from '@/components/markdown';
 import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { ModelGatewayTab } from './settings/ModelGatewayTab';
+import { PluginsTab } from './settings/PluginsTab';
 import { dragRegionProps } from '@/lib/window-drag';
 
 // 字节数转人类可读（design §3.3：total 未知时显示已下载量）。
@@ -273,6 +274,7 @@ export function Settings({
         <TabsList>
           <TabsTrigger value="cli">CLI 与运行环境</TabsTrigger>
           <TabsTrigger value="gateway">模型服务</TabsTrigger>
+          <TabsTrigger value="plugins">插件</TabsTrigger>
           <TabsTrigger value="backend">公司平台</TabsTrigger>
         </TabsList>
 
@@ -291,6 +293,11 @@ export function Settings({
         {/* Tab2：模型网关配置（自管 state，独立于探测） */}
         <TabsContent value="gateway" keepMounted>
           <ModelGatewayTab />
+        </TabsContent>
+
+        {/* Tab：插件存放路径配置（组A，PRD 需求 6 / AC7） */}
+        <TabsContent value="plugins" keepMounted>
+          <PluginsTab />
         </TabsContent>
 
         {/* Tab3：后端服务地址（零功能改动搬入） */}
