@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DetailSheet } from '@/components/ui/detail-sheet';
 import {
   Table,
   TableBody,
@@ -22,18 +24,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon } from 'lucide-react';
+import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon, SearchIcon, UsersIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/utils';
 import { useLoad, run, useGuardedAction } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
 import type { Team, TeamMember, TeamStatus, User, LedgerDirection } from '@/lib/types';
-import { yuanToCents, activeMembers, teamAdmins, adminNames } from '@/lib/types';
+import { yuanToCents, activeMembers, teamAdmins, adminNames, labelOf, formatTime } from '@/lib/types';
 
 export function TeamsView() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState<Team | null>(null);
 
   const load = () =>
     Promise.all([
@@ -43,18 +47,44 @@ export function TeamsView() {
 
   useLoad(load);
 
+  // 详情 Sheet 打开期间，团队列表刷新（如「管理」对话框内改名/调余额）后同步 active 到最新对象。
+  useEffect(() => {
+    if (!active) return;
+    const latest = teams.find((t) => t.id === active.id);
+    if (latest && latest !== active) setActive(latest);
+  }, [teams, active]);
+
   const activeUsers = users.filter((u) => u.status === 'ACTIVE');
-  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(teams);
+
+  // 前端过滤：搜索按 name/slug（任务约束「搜索框」）。
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return teams;
+    return teams.filter((t) => t.name.toLowerCase().includes(q) || t.slug.toLowerCase().includes(q));
+  }, [teams, query]);
+
+  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(filtered);
 
   return (
     <Section title="团队管理" description="团队信息维护、余额调整和管理员分配。">
       <div className="space-y-6">
-        <CreateTeamDialog onRefresh={load}>
-          <Button>
-            <PlusIcon className="mr-1.5 size-4" />
-            创建团队
-          </Button>
-        </CreateTeamDialog>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative max-w-xs flex-1">
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="搜索团队名称或 Slug"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <CreateTeamDialog onRefresh={load}>
+            <Button>
+              <PlusIcon className="mr-1.5 size-4" />
+              创建团队
+            </Button>
+          </CreateTeamDialog>
+        </div>
 
         <Table>
           <TableHeader>
@@ -71,14 +101,14 @@ export function TeamsView() {
           <TableBody>
             {paginated.length ? (
               paginated.map((team) => (
-                <TableRow key={team.id}>
+                <TableRow key={team.id} className="cursor-pointer" onClick={() => setActive(team)}>
                   <TableCell className="font-medium">{team.name}</TableCell>
                   <TableCell className="font-mono text-xs">{team.slug}</TableCell>
                   <TableCell><StatusBadge value={team.status} /></TableCell>
                   <TableCell className="font-medium">{money(team.balanceCents)}</TableCell>
                   <TableCell>{team.memberCount ?? activeMembers(team).length}</TableCell>
                   <TableCell>{adminNames(team)}</TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <TeamDetailDialog team={team} activeUsers={activeUsers} onRefresh={load}>
                       <Button variant="outline" size="sm">
                         <PencilIcon className="mr-1 size-3.5" />
@@ -91,7 +121,7 @@ export function TeamsView() {
             ) : (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                  暂无团队
+                  {teams.length ? '没有符合搜索条件的团队' : '暂无团队'}
                 </TableCell>
               </TableRow>
             )}
@@ -105,7 +135,82 @@ export function TeamsView() {
           onPageSizeChange={setPageSize}
         />
       </div>
+
+      {/* 行点击打开的详情抽屉：团队信息 + 成员数 + 余额 + 公开加入开关 + 成员列表。 */}
+      <TeamOverviewSheet team={active} onOpenChange={(o) => !o && setActive(null)} />
     </Section>
+  );
+}
+
+// 团队概览侧边抽屉（只读）：行点击查看，区别于「管理」按钮打开的 TeamDetailDialog（含编辑/余额/管理员操作）。
+function TeamOverviewSheet({
+  team,
+  onOpenChange,
+}: {
+  team: Team | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const members = team ? activeMembers(team) : [];
+  const admins = team ? teamAdmins(team) : [];
+
+  return (
+    <DetailSheet
+      open={!!team}
+      onOpenChange={onOpenChange}
+      title={team?.name || ''}
+      description={team?.slug}
+    >
+      {team ? (
+        <>
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">团队信息</div>
+            <InfoGrid
+              items={[
+                ['团队 ID', team.id],
+                ['Slug', team.slug],
+                ['状态', <StatusBadge key="s" value={team.status} />],
+                ['当前余额', money(team.balanceCents)],
+                ['活跃成员', String(team.memberCount ?? members.length)],
+                ['公开加入', team.allowPublicJoin ? <Badge key="pj" variant="success">已开放</Badge> : <Badge key="pj" variant="secondary">关闭</Badge>],
+                ['创建时间', formatTime(team.createdAt)],
+              ]}
+            />
+          </div>
+
+          {team.description ? (
+            <div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">团队简介</div>
+              <p className="whitespace-pre-wrap break-all text-sm text-foreground">{team.description}</p>
+            </div>
+          ) : null}
+
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <UsersIcon className="size-3.5" />
+              成员列表（{members.length}）
+            </div>
+            {members.length ? (
+              <div className="space-y-2">
+                {members.map((member) => {
+                  const isAdmin = admins.some((a) => a.userId === member.userId);
+                  return (
+                    <div key={member.userId} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">{member.user.displayName || member.user.email}</div>
+                        <div className="truncate text-xs text-muted-foreground">{member.user.email}</div>
+                      </div>
+                      <Badge variant={isAdmin ? 'default' : 'secondary'}>{labelOf(member.role)}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无活跃成员</p>
+            )}
+          </div>
+        </>
+      ) : null}
+    </DetailSheet>
   );
 }
 

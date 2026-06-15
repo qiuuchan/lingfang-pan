@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,8 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DetailSheet } from '@/components/ui/detail-sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -21,22 +24,57 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PlusIcon, PencilIcon, ShieldCheckIcon, BanIcon, Trash2Icon } from 'lucide-react';
+import { PlusIcon, PencilIcon, ShieldCheckIcon, BanIcon, Trash2Icon, SearchIcon, ActivityIcon } from 'lucide-react';
 import { api } from '@/lib/api';
+import { money } from '@/lib/utils';
 import { useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { User, UserStatus } from '@/lib/types';
-import { labelOf } from '@/lib/types';
+import type { AuditLog, Team, User, UserStatus } from '@/lib/types';
+import { labelOf, formatTime, actionLabel } from '@/lib/types';
+
+type StatusFilter = 'ALL' | 'ACTIVE' | 'DISABLED';
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: 'ALL', label: '全部状态' },
+  { value: 'ACTIVE', label: '正常' },
+  { value: 'DISABLED', label: '已禁用' },
+];
 
 export function UsersView() {
   const [users, setUsers] = useState<User[]>([]);
-  const load = () => api<{ users: User[] }>('/api/admin/users').then((r) => setUsers(r.users));
+  // teams 用于详情 Sheet 派生「用户所在团队 + 钱包余额」（后端无 user 详情端点，前端从团队成员关系派生）。
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [active, setActive] = useState<User | null>(null);
+
+  const load = () =>
+    Promise.all([
+      api<{ users: User[] }>('/api/admin/users').then((r) => setUsers(r.users)),
+      api<{ teams: Team[] }>('/api/admin/teams').then((r) => setTeams(r.teams)),
+    ]);
   useLoad(load);
 
-  const regularUsers = useMemo(() => users.filter((u) => u.platformRole !== 'PLATFORM_ADMIN'), [users]);
-  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(regularUsers);
+  // 详情 Sheet 打开期间，用户列表刷新（如 footer 封禁/解封）后同步 active 到最新对象，避免显示陈旧状态。
+  useEffect(() => {
+    if (!active) return;
+    const latest = users.find((u) => u.id === active.id);
+    if (latest && latest !== active) setActive(latest);
+  }, [users, active]);
+
+  // 前端过滤：搜索按 email/displayName（任务约束），状态筛选按 user.status。
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return users.filter((u) => {
+      if (u.platformRole === 'PLATFORM_ADMIN') return false; // 仅普通用户，平台管理员在独立页管理。
+      if (q && !u.email.toLowerCase().includes(q) && !(u.displayName || '').toLowerCase().includes(q)) return false;
+      if (statusFilter !== 'ALL' && u.status !== statusFilter) return false;
+      return true;
+    });
+  }, [users, query, statusFilter]);
+
+  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(filtered);
 
   async function toggleBan(user: User) {
     const newStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
@@ -49,9 +87,28 @@ export function UsersView() {
   return (
     <div className="space-y-8">
       <Section title="用户管理" description="管理普通用户账号，平台管理员在独立页面管理。">
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <div>
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative max-w-xs flex-1">
+                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="搜索邮箱或昵称"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+                <SelectTrigger className="sm:w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_FILTERS.map((f) => (
+                    <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <div className="text-sm text-muted-foreground">{totalItems} 个用户</div>
             </div>
             <CreateUserDialog onRefresh={load}>
@@ -75,12 +132,12 @@ export function UsersView() {
             <TableBody>
               {paginated.length ? (
                 paginated.map((user) => (
-                  <TableRow key={user.id}>
+                  <TableRow key={user.id} className="cursor-pointer" onClick={() => setActive(user)}>
                     <TableCell className="font-medium">{user.email}</TableCell>
                     <TableCell>{user.displayName}</TableCell>
                     <TableCell><StatusBadge value={user.status} /></TableCell>
                     <TableCell><StatusBadge value={user.platformRole} /></TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-2">
                         <EditUserDialog user={user} onRefresh={load} showPromote>
                           <Button variant="outline" size="sm">
@@ -103,7 +160,7 @@ export function UsersView() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    暂无普通用户
+                    {users.length ? '没有符合筛选条件的用户' : '暂无普通用户'}
                   </TableCell>
                 </TableRow>
               )}
@@ -118,7 +175,135 @@ export function UsersView() {
           />
         </div>
       </Section>
+
+      {/* 行点击打开的详情抽屉：用户信息 + 所在团队（含余额）+ 最近操作。 */}
+      <UserDetailSheet user={active} teams={teams} onOpenChange={(o) => !o && setActive(null)} onRefresh={load} />
     </div>
+  );
+}
+
+// 用户详情侧边抽屉。后端无 user 详情端点，团队从已加载的 teams 列表按成员匹配派生，
+// 最近操作在打开时懒加载 /api/admin/audit-logs 并按 actorId 过滤（避免每次 mount 拉全量日志）。
+function UserDetailSheet({
+  user,
+  teams,
+  onOpenChange,
+  onRefresh,
+}: {
+  user: User | null;
+  teams: Team[];
+  onOpenChange: (open: boolean) => void;
+  onRefresh: () => void;
+}) {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
+  const userTeams = useMemo(() => {
+    if (!user) return [];
+    return teams
+      .filter((t) => (t.members || []).some((m) => m.userId === user.id))
+      .map((t) => ({ id: t.id, name: t.name, slug: t.slug, status: t.status, balanceCents: t.balanceCents, role: t.members?.find((m) => m.userId === user.id)?.role }));
+  }, [user, teams]);
+
+  useEffect(() => {
+    if (!user) {
+      setLogs([]);
+      return;
+    }
+    setLoadingLogs(true);
+    api<{ logs: AuditLog[] }>('/api/admin/audit-logs')
+      .then((r) => setLogs(r.logs.filter((l) => l.actor?.id === user.id).slice(0, 10)))
+      .catch(() => setLogs([]))
+      .finally(() => setLoadingLogs(false));
+  }, [user]);
+
+  return (
+    <DetailSheet
+      open={!!user}
+      onOpenChange={onOpenChange}
+      title={user?.displayName || user?.email || ''}
+      description={user?.email}
+      footer={
+        user ? (
+          <Button
+            variant={user.status === 'ACTIVE' ? 'ghost' : 'outline'}
+            className="w-full"
+            onClick={() => {
+              const newStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+              void run(
+                () => api(`/api/admin/users/${user.id}`, { method: 'PATCH', body: { status: newStatus, platformRole: user.platformRole } }).then(onRefresh),
+                newStatus === 'DISABLED' ? '用户已封禁' : '用户已解封',
+              );
+            }}
+          >
+            <BanIcon className="mr-1.5 size-4" />
+            {user.status === 'ACTIVE' ? '封禁用户' : '解封用户'}
+          </Button>
+        ) : null
+      }
+    >
+      {user ? (
+        <>
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">账户信息</div>
+            <InfoGrid
+              items={[
+                ['用户 ID', user.id],
+                ['邮箱', user.email],
+                ['显示名', user.displayName || '—'],
+                ['状态', <StatusBadge key="s" value={user.status} />],
+                ['角色', <StatusBadge key="r" value={user.platformRole} />],
+              ]}
+            />
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">所在团队</div>
+            {userTeams.length ? (
+              <div className="space-y-2">
+                {userTeams.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{t.name}</div>
+                      <div className="truncate text-xs text-muted-foreground font-mono">{t.slug}</div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge variant="secondary">{labelOf(t.role)}</Badge>
+                      <span className="font-medium">{money(t.balanceCents)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">该用户未加入任何团队</p>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <ActivityIcon className="size-3.5" />
+              最近操作
+            </div>
+            {loadingLogs ? (
+              <p className="text-sm text-muted-foreground">加载中…</p>
+            ) : logs.length ? (
+              <div className="space-y-1.5">
+                {logs.map((log) => (
+                  <div key={log.id} className="rounded-xl border px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{actionLabel(log.action)}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{formatTime(log.createdAt)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无操作记录</p>
+            )}
+          </div>
+        </>
+      ) : null}
+    </DetailSheet>
   );
 }
 

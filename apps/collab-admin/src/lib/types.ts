@@ -1,8 +1,11 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
 export type PluginStatus = 'ENABLED' | 'DISABLED';
+export type PluginReviewStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
+export type PluginVisibility = 'PUBLIC' | 'TEAM' | 'PRIVATE';
+export type PluginRuntimeType = 'CLIENT' | 'NODE' | 'PYTHON';
 export type ApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type TeamRole = 'TEAM_ADMIN' | 'MEMBER';
 export type LedgerDirection = 'CREDIT' | 'DEBIT';
@@ -32,14 +35,43 @@ export type Team = {
   balanceCents: number;
   memberCount?: number;
   members?: TeamMember[];
+  // 后端 adminTeams 返回完整 Team 行（...team 展开），补充管理端详情所需字段。
+  allowPublicJoin?: boolean;
+  description?: string;
+  createdAt?: string;
 };
 
+// 插件完整字段：后端 publicPlugin（apps/collab-api/src/modules/plugin-package.ts）实际返回上述全部字段，
+// 此前前端只声明了 4 个，导致详情 Sheet 无法展示 capabilities / 文件列表 / 审核状态等治理信息。
+// files / manifest / capabilities 后端存为 Json，前端按 unknown 持有，渲染时再做结构化降级。
+export type PluginFileEntry = { path?: string; size?: number; hash?: string } & Record<string, unknown>;
 export type Plugin = {
   id: string;
   name: string;
   description: string;
   status: PluginStatus;
   updatedAt?: string;
+  version?: string;
+  entry?: string;
+  runtimeType?: string;
+  runtime_type?: string;
+  visibility?: PluginVisibility;
+  teamId?: string | null;
+  authorUserId?: string | null;
+  files?: PluginFileEntry[] | unknown;
+  manifest?: Record<string, unknown> | unknown;
+  capabilities?: unknown;
+  contentHash?: string;
+  reviewStatus?: PluginReviewStatus;
+  reviewReason?: string;
+  reviewedById?: string | null;
+  reviewedAt?: string | null;
+  marketplace?: boolean;
+  priceCents?: number;
+  installCount?: number;
+  ratingCount?: number;
+  ratingSum?: number;
+  createdAt?: string;
 };
 
 // LLM provider 目录项（镜像后端 LlmProviderAdmin 出参，见 packages/contract/src/llm.ts）。
@@ -89,12 +121,22 @@ export const STATUS_LABEL: Record<string, string> = {
   PENDING: '待审批',
   APPROVED: '已通过',
   REJECTED: '已驳回',
+  DRAFT: '草稿',
   NONE: '普通用户',
   PLATFORM_ADMIN: '平台管理员',
   TEAM_ADMIN: '团队管理员',
   MEMBER: '成员',
   CREDIT: '入账',
   DEBIT: '扣减',
+  PUBLIC: '公开',
+  TEAM: '团队',
+  PRIVATE: '私有',
+  CLIENT: '客户端',
+  NODE: 'Node 服务',
+  PYTHON: 'Python 服务',
+  marketplace: '已上架市场',
+  true: '是',
+  false: '否',
 };
 
 export const ACTION_LABEL: Record<string, string> = {

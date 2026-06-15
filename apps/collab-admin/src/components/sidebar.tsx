@@ -15,15 +15,24 @@ export type SidebarNavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-type SidebarProps = {
+// 分组渲染：标题（muted 小字）+ 组内项；侧栏按分组层级展示。
+export type SidebarNavGroup = {
+  title: string;
   items: SidebarNavItem[];
+};
+
+type SidebarProps = {
+  // 分组导航（组C 新增）：按「核心管理 / 内容 / 系统」分组渲染，标题为 muted 小字。
+  groups?: SidebarNavGroup[];
+  // 扁平导航（向后兼容）：未提供 groups 时按扁平列表渲染（不分组的旧调用方）。
+  items?: SidebarNavItem[];
   activeView: string;
   onSelect: (view: string) => void;
   header?: ReactNode;
   footer?: ReactNode;
 };
 
-export function Sidebar({ items, activeView, onSelect, header, footer }: SidebarProps) {
+export function Sidebar({ groups, items, activeView, onSelect, header, footer }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -36,44 +45,63 @@ export function Sidebar({ items, activeView, onSelect, header, footer }: Sidebar
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  // 渲染单个导航项：激活态高亮 + 折叠态居中（仅图标）+ 折叠态 tooltip。
+  function renderItem({ view, label, icon: Icon }: SidebarNavItem) {
+    const isActive = activeView === view;
+    const button = (
+      <button
+        key={view}
+        onClick={() => {
+          onSelect(view);
+          setMobileOpen(false);
+        }}
+        className={cn(
+          'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
+          isActive
+            ? 'bg-primary text-primary-foreground shadow-sm'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+          collapsed && 'justify-center px-2',
+        )}
+      >
+        <Icon className="size-4 shrink-0" />
+        {!collapsed && <span>{label}</span>}
+      </button>
+    );
+
+    if (collapsed) {
+      return (
+        <Tooltip key={view}>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent side="right" className="flex items-center gap-2">
+            {label}
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+    return button;
+  }
+
+  function renderGroup(group: SidebarNavGroup) {
+    return (
+      <div key={group.title} className="space-y-1">
+        {!collapsed && (
+          // 分组标题：muted 小字，仅展开态显示（折叠态省略以保持图标列对齐）。
+          <div className="px-3 pb-0.5 pt-3 text-xs font-medium text-muted-foreground/70 uppercase tracking-wide">
+            {group.title}
+          </div>
+        )}
+        {group.items.map(renderItem)}
+      </div>
+    );
+  }
+
   const sidebarContent = (
     <div className="flex h-full flex-col gap-2">
       {header && <div className="shrink-0">{header}</div>}
-      <nav className="flex-1 space-y-1 overflow-y-auto py-1">
-        {items.map(({ view, label, icon: Icon }) => {
-          const isActive = activeView === view;
-          const button = (
-            <button
-              key={view}
-              onClick={() => {
-                onSelect(view);
-                setMobileOpen(false);
-              }}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
-                isActive
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                collapsed && 'justify-center px-2',
-              )}
-            >
-              <Icon className="size-4 shrink-0" />
-              {!collapsed && <span>{label}</span>}
-            </button>
-          );
-
-          if (collapsed) {
-            return (
-              <Tooltip key={view}>
-                <TooltipTrigger asChild>{button}</TooltipTrigger>
-                <TooltipContent side="right" className="flex items-center gap-2">
-                  {label}
-                </TooltipContent>
-              </Tooltip>
-            );
-          }
-          return button;
-        })}
+      <nav className="flex-1 space-y-2 overflow-y-auto py-1">
+        {groups
+          ? groups.map(renderGroup)
+          : (items || []).map(renderItem)}
       </nav>
       {footer && <div className="shrink-0">{footer}</div>}
     </div>
