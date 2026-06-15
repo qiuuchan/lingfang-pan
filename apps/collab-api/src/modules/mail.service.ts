@@ -117,6 +117,26 @@ export class MailService {
       host: parsed.hostname,
       port,
       secure,
+      // 修复 ETIMEOUT：系统代理（Clash/V2Ray 127.0.0.1:7890）可能劫持 DNS 查询导致 nodemailer
+      // queryA 超时。用 Node 原生 dns.resolve 直连系统 DNS 服务器（绕过代理 DNS 劫持）。
+      // dns.lookup 默认走 getaddrinfo（受系统 DNS 配置/代理影响），改为 dns.resolve（直连）。
+      lookup: ((hostname: string, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => {
+        const dns = require('node:dns');
+        dns.resolve4(hostname, (err: NodeJS.ErrnoException | null, addresses: string[]) => {
+          if (err || !addresses.length) {
+            // resolve4 失败时回退默认 lookup（兼容 hosts 文件 / IPv6 / 本地域名）。
+            dns.lookup(hostname, (e: NodeJS.ErrnoException | null, address: string, family: number) => {
+              callback(e, address, family);
+            });
+          } else {
+            callback(null, addresses[0], 4);
+          }
+        });
+      }),
+      // 连接超时：防止 SMTP 握手卡死（默认 nodemailer 无超时，代理场景会挂）。
+      connectionTimeout: 15_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     };
     if (authUser) options.auth = { user: authUser, pass: authPass };
     try {
