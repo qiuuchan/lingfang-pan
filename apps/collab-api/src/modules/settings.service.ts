@@ -13,11 +13,13 @@ import { PrismaService } from '../prisma.service';
 import { badRequest } from '../common';
 import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
+import { GeetestService } from './geetest.service';
 import type { UpdateSettingsDto } from './dto/settings.dto';
 
 /** 公开字段白名单：getPublicInfo 仅暴露这些 key（与官网 / 桌面端展示字段一一对应）。
- *  其余 key（运营内部备注、未发布开关等）仅 Admin 可见，绝不在公开端点暴露。 */
-export const PUBLIC_SETTING_KEYS = ['platformName', 'logoUrl'] as const;
+ *  其余 key（运营内部备注、未发布开关、geetestCaptchaKey 等密钥）仅 Admin 可见，绝不在公开端点暴露。
+ *  组C 极验：geetestCaptchaId 公开（前端需据此初始化极验组件），但 geetestCaptchaKey 不公开（仅后端校验用）。 */
+export const PUBLIC_SETTING_KEYS = ['platformName', 'logoUrl', 'geetestCaptchaId'] as const;
 
 /** value 校验规则表：key → 校验函数。
  *  - 非白名单 key：upsert 阶段直接 badRequest（KEY_VALIDATORS 缺该 key 即拒绝）。
@@ -37,7 +39,71 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v.length > 500) throw badRequest('logoUrl 过长（上限 500 字符）');
     return v;
   },
+  // 组A SMTP 连接 URL：smtp/smtps 协议校验（非空时），格式非法拒绝保存
+  // （避免存坏配置让后续发信静默失败 / 测试发信报含糊错误）。空值允许（清空=回退 .env fallback）。
+  smtpUrl: (raw) => {
+    const v = raw.trim();
+    if (v && !/^smtp(s)?:\/\/.+/i.test(v)) throw badRequest('smtpUrl 必须是 smtp(s)://host[:port] 格式');
+    if (v.length > 500) throw badRequest('smtpUrl 过长（上限 500 字符）');
+    return v;
+  },
+  // 组A SMTP 发件人地址：允许纯地址或「名称 <addr>」格式，长度上限防滥用。空值允许（用品牌默认）。
+  smtpFrom: (raw) => {
+    const v = raw.trim();
+    if (v.length > 200) throw badRequest('smtpFrom 过长（上限 200 字符）');
+    return v;
+  },
+  // 组A SMTP 认证用户名：trim 去空白，长度上限防滥用（不做邮箱格式校验，部分 SMTP user 是登录名非邮箱）。
+  smtpUser: (raw) => {
+    const v = raw.trim();
+    if (v.length > 200) throw badRequest('smtpUser 过长（上限 200 字符）');
+    return v;
+  },
+  // 组A SMTP 认证密码：不 trim（密码可能含首尾空白），仅限长度上限；空值允许（清空独立凭据回退 url 内嵌）。
+  smtpPass: (raw) => {
+    if (raw.length > 500) throw badRequest('smtpPass 过长（上限 500 字符）');
+    return raw;
+  },
+  // 组C 极验 captchaId：trim 去空白，允许空（空=未配置，前端不显验证码，开发态跳过）。
+  // 长度上限防滥用；极验官方 captchaId 为 32 位 hex，此处放宽到 100 容纳未来格式变化。
+  geetestCaptchaId: (raw) => {
+    const v = raw.trim();
+    if (v.length > 100) throw badRequest('geetestCaptchaId 过长（上限 100 字符）');
+    return v;
+  },
+  // 组C 极验 captchaKey：服务端私钥，仅后端校验用（绝不公开）。允许空（未配置）。
+  // 长度上限防滥用；极验官方 captchaKey 为 32 位 hex，放宽到 200 容纳未来格式变化。
+  geetestCaptchaKey: (raw) => {
+    const v = raw.trim();
+    if (v.length > 200) throw badRequest('geetestCaptchaKey 过长（上限 200 字符）');
+    return v;
+  },
+  // 组B 账户级密码重试锁定阈值：正整数（1~100），默认 5（auth.service.getLockConfig 在缺省/非法时兜底）。
+  maxLoginAttempts: (raw) => {
+    const v = raw.trim();
+    const n = Number.parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 100) throw badRequest('maxLoginAttempts 必须是 1~100 的整数');
+    return String(n);
+  },
+  // 组B 账户锁定持续分钟数：正整数（1~10080，上限一周），默认 15。
+  lockDurationMinutes: (raw) => {
+    const v = raw.trim();
+    const n = Number.parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 10080) throw badRequest('lockDurationMinutes 必须是 1~10080 的整数');
+    return String(n);
+  },
 };
+
+/** 影响 MailService SMTP / 品牌缓存的 PlatformSetting key 集合。
+ *  组A：更新这些 key 后调用 mail.invalidateSmtpCache()，保证 admin 保存后下一封邮件即读到新配置（AC1），
+ *  不依赖 SMTP_CACHE_TTL 过期。smtpUrl/smtpFrom/smtpUser/smtpPass 影响 SMTP 连接，platformName/logoUrl 影响品牌渲染。 */
+const MAIL_CACHE_KEYS = new Set(['smtpUrl', 'smtpFrom', 'smtpUser', 'smtpPass', 'platformName', 'logoUrl']);
+
+/** 影响 GeetestService 极验配置缓存的 PlatformSetting key 集合。
+ *  组C：更新这些 key 后调用 geetest.invalidateConfigCache()，使 admin 改极验配置后下一次登录/注册校验即读到新值
+ *  （与 SMTP 热生效语义一致）。geetestCaptchaId 同时影响公开信息缓存（已在 publicInfoCache=null 处失效），
+ *  geetestCaptchaKey 仅后端校验用，此处单独失效 geetest 配置缓存避免「前端已显示验证码、后端仍跳过校验」不一致。 */
+const GEETEST_CACHE_KEYS = new Set(['geetestCaptchaId', 'geetestCaptchaKey']);
 
 /** 公开信息（platformName/logoUrl）的内存缓存 TTL（毫秒）。
  *  该端点 @Public 且为高频访问（官网落地页 + 桌面端启动页每次加载都请求），
@@ -47,7 +113,7 @@ const PUBLIC_INFO_CACHE_TTL_MS = 30_000;
 
 /** 缓存条目：值快照 + 过期时间戳。expiresAt=0 表示已失效（下次请求重新查库）。 */
 interface PublicInfoCacheEntry {
-  value: { platformName: string; logoUrl: string };
+  value: { platformName: string; logoUrl: string; geetestCaptchaId: string };
   expiresAt: number;
 }
 
@@ -69,6 +135,7 @@ export class SettingsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(GeetestService) private readonly geetest: GeetestService,
   ) {}
 
   /** GET /api/admin/settings：返回全部设置项（Admin 视角，含 description + updatedById）。
@@ -114,12 +181,23 @@ export class SettingsService {
     // 组E 性能：设置变更后失效公开信息缓存（platformName/logoUrl 可能被改），
     // 确保下一次 GET /api/platform-info 回源读取最新值（而非命中过期缓存）。
     publicInfoCache = null;
+    // 组A：SMTP / 品牌 key 变更时失效 MailService 缓存，保证 admin 保存后下一封邮件即读到新配置（AC1）。
+    // 仅当本次提交含影响邮件的 key 时才清（避免无关 key 改动也无谓失效 SMTP 缓存）。
+    if (normalized.some((item) => MAIL_CACHE_KEYS.has(item.key))) {
+      this.mail.invalidateSmtpCache();
+    }
+    // 组C：极验 key 变更时失效 GeetestService 配置缓存，保证 admin 改极验配置后下一次校验即读到新值
+    // （与 SMTP 热生效语义一致；geetestCaptchaId 公开缓存已在上方 publicInfoCache=null 处统一失效）。
+    if (normalized.some((item) => GEETEST_CACHE_KEYS.has(item.key))) {
+      this.geetest.invalidateConfigCache();
+    }
     return { settings: results };
   }
 
   /** GET /api/platform-info：不鉴权（@Public），仅返回 PUBLIC_SETTING_KEYS 白名单内的字段。
-   *  缺省值兜底：platformName 默认「LingFang」，logoUrl 默认空串（前端按需渲染占位）。
-   *  返回对象（非数组）：公开端点契约要求扁平 {platformName, logoUrl} 便于前端直接解构。
+   *  缺省值兜底：platformName 默认「LingFang」，logoUrl 默认空串（前端按需渲染占位），
+   *  geetestCaptchaId 默认空串（未配置极验，前端不显验证码）。
+   *  返回对象（非数组）：公开端点契约要求扁平 {platformName, logoUrl, geetestCaptchaId} 便于前端直接解构。
    *  组E 性能：命中内存缓存直接返回（TTL 内零 DB 查询），过期或被失效后回源查库并刷新缓存。 */
   async getPublicInfo() {
     const now = Date.now();
@@ -134,9 +212,40 @@ export class SettingsService {
     const value = {
       platformName: map.get('platformName') ?? 'LingFang',
       logoUrl: map.get('logoUrl') ?? '',
+      // 组C 极验：captchaId 公开（前端据此初始化极验组件），缺省空串=未配置，前端不显验证码。
+      geetestCaptchaId: (map.get('geetestCaptchaId') ?? '').trim(),
     };
     publicInfoCache = { value, expiresAt: now + PUBLIC_INFO_CACHE_TTL_MS };
     return value;
+  }
+
+  /** GET /api/admin/settings/smtp：返回当前生效的 SMTP 配置（PlatformSetting 优先，.env fallback），
+   *  供 admin「邮件服务」编辑表单预填。仅平台 Admin 可调用。
+   *
+   *  凭据安全：smtpPass 永不返回明文（避免 SMTP 密码经 HTTP 响应泄漏到浏览器 / 日志），
+   *  改返 hasSmtpPass 布尔（true=已配置密码）。前端密码输入框：hasSmtpPass=true 时显示占位提示「已配置」，
+   *  admin 不改密码则留空提交（updateSettings 对空值放行，MailService 按现状用旧密码）。
+   *  hasSmtpUrl 标记 SMTP 是否已配置（表单据此显示「测试发信」可用性提示）。 */
+  async getSmtpSettings(userId: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['smtpUrl', 'smtpFrom', 'smtpUser', 'smtpPass'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    // PlatformSetting 有值优先，无值回退 .env（兼容老配置 / 初始化）。
+    const smtpUrl = (map.get('smtpUrl') || process.env.SMTP_URL || '').trim();
+    const smtpFrom = (map.get('smtpFrom') || process.env.SMTP_FROM || '').trim();
+    const smtpUser = (map.get('smtpUser') || '').trim();
+    const smtpPass = map.get('smtpPass') || '';
+    return {
+      smtpUrl,
+      smtpFrom,
+      smtpUser,
+      // 密码不返回明文，仅返回是否已配置（前端据 hasSmtpPass 显示「已配置」占位）。
+      hasSmtpPass: smtpPass.length > 0,
+      hasSmtpUrl: smtpUrl.length > 0,
+    };
   }
 
   /** POST /api/admin/settings/test-email：发送测试邮件验证 SMTP 配置。

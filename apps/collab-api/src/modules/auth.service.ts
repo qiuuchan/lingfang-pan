@@ -4,6 +4,7 @@ import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, slugify, unauthorized } from '../common';
 import { MailService } from './mail.service';
+import { GeetestService, type GeetestCaptchaParams } from './geetest.service';
 
 export type OnboardingState =
   | 'NEEDS_INVITATION'
@@ -18,9 +19,25 @@ export class AuthService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MailService) private readonly mail: MailService,
+    @Inject(GeetestService) private readonly geetest: GeetestService,
   ) {}
 
-  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {
+  /**
+   * 组C 极验验证码校验守卫：供 login/register/forgotPassword 复用。
+   * - 后端配置了 geetestCaptchaId 时强制校验：captcha 缺失或校验失败 → throw badRequest('请先完成验证码')。
+   * - 未配置极验 → 直接跳过（开发态不强制，前端也不显验证码）。
+   * 极验 API 异常时 GeetestService.validate 自身降级放行（容灾，不阻断登录），此处无需重复处理。
+   */
+  private async requireCaptcha(captcha?: Partial<GeetestCaptchaParams>): Promise<void> {
+    const configured = await this.geetest.isConfigured();
+    if (!configured) return;
+    const ok = await this.geetest.validate(captcha);
+    if (!ok) throw badRequest('请先完成验证码');
+  }
+
+  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string; captcha?: Partial<GeetestCaptchaParams> }) {
+    // 组C 极验：配置极验后强制校验验证码（在所有业务逻辑之前，避免无效请求消耗 DB 查询）。
+    await this.requireCaptcha(input.captcha);
     const email = input.email?.trim().toLowerCase();
     // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
     // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
@@ -75,7 +92,9 @@ export class AuthService {
     await this.mail.sendEmailVerification(email, link);
   }
 
-  async login(input: { email: string; password: string }) {
+  async login(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams> }) {
+    // 组C 极验：配置极验后强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
+    await this.requireCaptcha(input.captcha);
     const email = input.email?.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 登录失败统一审计：actorUserId 可为 null（用户不存在时），便于安全审计追踪暴力破解尝试。
@@ -84,14 +103,93 @@ export class AuthService {
       await this.prisma.auditLog.create({ data: { actorUserId: null, action: 'auth.login.failed', targetType: 'User', targetId: user?.id ?? null, metadata: { email, reason: user ? 'account_inactive' : 'user_not_found' } } });
       throw unauthorized('邮箱或密码错误');
     }
+    // 组B 账户级锁定：与 throttler（IP 限流）正交。lockedUntil 未过期直接拒绝并返剩余分钟，
+    // 防分布式 IP 池对单账户的暴力爆破。user_not_found/account_inactive 分支不在此校验（无 user 行）。
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      const remainingMinutes = this.remainingLockMinutes(user.lockedUntil);
+      await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.locked', targetType: 'User', targetId: user.id, metadata: { email, remainingMinutes } } });
+      throw forbidden(`账户已锁定，请 ${remainingMinutes} 分钟后再试`);
+    }
     const ok = await bcrypt.compare(input.password || '', user.passwordHash);
     if (!ok) {
+      // 组B 密码错误累计：failedLoginAttempts++，达阈值则设 lockedUntil 并审计 auth.login.locked。
+      // 阈值/锁定期由 PlatformSetting 可配（缺省 5 次 / 15min）；事务保证 attempts 与 lockedUntil 原子落库。
+      await this.recordFailedLogin(user.id, email);
       await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.failed', targetType: 'User', targetId: user.id, metadata: { email, reason: 'wrong_password' } } });
       throw unauthorized('邮箱或密码错误');
     }
     // 登录成功审计：actor=用户自身，记录成功事件便于安全合规追溯（此前完全缺失）。
+    // 组B 成功后重置失败计数与锁定状态（清零 failedLoginAttempts、置空 lockedUntil）。
+    await this.resetFailedLogin(user.id);
     await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.success', targetType: 'User', targetId: user.id, metadata: { email } } });
     return this.sessionFor(user.id);
+  }
+
+  /**
+   * 组B：读取账户级锁定阈值与锁定时长（均来自 PlatformSetting，Admin 可调）。
+   * - maxLoginAttempts：连续密码错误达该次数触发锁定，默认 5。
+   * - lockDurationMinutes：锁定持续分钟数，默认 15。
+   * 读取失败或值非法时降级为默认值（不阻断登录主流程），与极验等容灾语义一致。
+   */
+  private async getLockConfig(): Promise<{ maxAttempts: number; lockMinutes: number }> {
+    const defaults = { maxAttempts: 5, lockMinutes: 15 };
+    try {
+      const rows = await this.prisma.platformSetting.findMany({
+        where: { key: { in: ['maxLoginAttempts', 'lockDurationMinutes'] } },
+        select: { key: true, value: true },
+      });
+      const map = new Map(rows.map((r) => [r.key, r.value] as const));
+      const maxAttempts = Number.parseInt(map.get('maxLoginAttempts') ?? '', 10);
+      const lockMinutes = Number.parseInt(map.get('lockDurationMinutes') ?? '', 10);
+      return {
+        maxAttempts: Number.isFinite(maxAttempts) && maxAttempts > 0 ? maxAttempts : defaults.maxAttempts,
+        lockMinutes: Number.isFinite(lockMinutes) && lockMinutes > 0 ? lockMinutes : defaults.lockMinutes,
+      };
+    } catch {
+      // PlatformSetting 读取失败降级为默认值，登录主流程不中断（容灾优先于精确阈值）。
+      return defaults;
+    }
+  }
+
+  /** 组B：将 lockedUntil 折算为向上取整的剩余分钟数（最少 1，避免提示「0 分钟」误导）。 */
+  private remainingLockMinutes(lockedUntil: Date): number {
+    const ms = lockedUntil.getTime() - Date.now();
+    return Math.max(1, Math.ceil(ms / 60_000));
+  }
+
+  /**
+   * 组B：记录一次密码错误——failedLoginAttempts 自增，达阈值则置 lockedUntil。
+   * update 仅写 attempts/lockedUntil，不碰 passwordHash/tokenVersion（与重置密码逻辑解耦）。
+   * 触发锁定时落 auth.login.locked 审计（与 login 入口已锁定时的审计同一 action，便于聚合统计）。
+   */
+  private async recordFailedLogin(userId: string, email: string) {
+    const { maxAttempts, lockMinutes } = await this.getLockConfig();
+    // 先读当前 attempts 计算下一次累计值，决定是否跨过阈值触发锁定。
+    // 不用原子 increment + 条件判断是因 Prisma 无法在单条 update 内「自增并按新值条件置锁定」，
+    // 故采用「读-算-写」两步：并发场景下最坏多算一两次错误，但锁定仍会触发（安全侧偏向锁定）。
+    const row = await this.prisma.user.findUnique({ where: { id: userId }, select: { failedLoginAttempts: true } });
+    const nextAttempts = (row?.failedLoginAttempts ?? 0) + 1;
+    const nowOverThreshold = nextAttempts >= maxAttempts;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: nowOverThreshold
+        ? { failedLoginAttempts: nextAttempts, lockedUntil: new Date(Date.now() + lockMinutes * 60_000) }
+        : { failedLoginAttempts: nextAttempts },
+    });
+    if (nowOverThreshold) {
+      await this.prisma.auditLog.create({ data: { actorUserId: userId, action: 'auth.login.locked', targetType: 'User', targetId: userId, metadata: { email, attempts: nextAttempts, lockMinutes } } });
+    }
+  }
+
+  /** 组B：登录成功后重置失败计数与锁定状态（failedLoginAttempts=0、lockedUntil=null）。
+   *  写失败不阻塞登录主流程（session 签发优先于计数复位），降级吞错；下次密码错误仍会正常累计。 */
+  private async resetFailedLogin(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: 0, lockedUntil: null },
+    }).catch(() => {
+      // 重置失败不阻塞登录主流程（session 签发优先），降级吞错；下次失败仍会正常累计。
+    });
   }
 
   async me(userId: string) {
@@ -127,7 +225,9 @@ export class AuthService {
    * reset token 为独立 JWT（scope='pwd_reset'），与登录 token 分离，复用 JWT_SECRET 签名。
    * token 内嵌 userId，reset-password 时校验 + 改密 + tokenVersion++（作废所有旧登录 token）。
    */
-  async forgotPassword(input: { email: string }) {
+  async forgotPassword(input: { email: string; captcha?: Partial<GeetestCaptchaParams> }) {
+    // 组C 极验：配置极验后强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
+    await this.requireCaptcha(input.captcha);
     const email = input.email?.trim().toLowerCase();
     if (!email) throw badRequest('请输入邮箱');
     const user = await this.prisma.user.findUnique({ where: { email } });

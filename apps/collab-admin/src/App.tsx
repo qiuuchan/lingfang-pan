@@ -32,6 +32,7 @@ import { Landing } from '@/components/landing/Landing';
 import { LoginPage } from '@/components/landing/LoginPage';
 import { DownloadPage } from '@/components/landing/DownloadPage';
 import { ChangelogPage } from '@/components/landing/ChangelogPage';
+import { SetupWizard } from '@/components/setup-wizard';
 // 组D 加载优化：登录后各后台 View 按需懒加载，首屏（落地页/登录页）不进 bundle。
 // 落地页四件套（Landing/LoginPage/DownloadPage/ChangelogPage）保持静态 import——
 // 它们走未登录快速路径，且 Landing 是首屏，懒加载反而增加首次可交互延迟。
@@ -75,6 +76,12 @@ export default function App() {
   // 首次登录引导向导：session 建立时若本机无完成标记则弹出。
   // 关闭（完成/跳过）后由 OnboardingWizard 写入 ONBOARDING_DONE_KEY，并向导自管 open 状态。
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // 组D 首次启动安装向导：needsSetup=true（DB 无 PLATFORM_ADMIN）时渲染 SetupWizard。
+  // setupChecking=true 表示正在查 /api/setup/status；needsSetup 由后端返回决定是否拦截进向导。
+  const [setupChecking, setSetupChecking] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  // 安装向导创建的管理员邮箱：完成后传给 LoginPage 预填，便于用户直接登录刚创建的账号。
+  const [setupEmail, setSetupEmail] = useState('');
   // 组C：Cmd+K / Ctrl+K 快捷搜索面板。hook 内部挂全局快捷键，返回 open 态。
   const commandPalette = useCommandPalette();
 
@@ -97,6 +104,26 @@ export default function App() {
       })
       .finally(() => setChecking(false));
   }, []);
+
+  // 组D 首次启动安装向导：启动时查 /api/setup/status（@Public），needsSetup=true 则拦截进向导。
+  // 与 token 检查解耦：即使无 token 也独立判定平台是否已初始化（向导发生在登录之前）。
+  // status 端点查询失败（后端未启动 / 网络异常）不阻断流程：保守视为无需向导，进入正常登录。
+  useEffect(() => {
+    api<{ needsSetup: boolean }>('/api/setup/status', { auth: false })
+      .then((res) => setNeedsSetup(!!res.needsSetup))
+      .catch(() => {
+        // 查询失败：保守不拦截，让用户走正常登录（后端未就绪时登录也会报错，但不在向导卡死）。
+        setNeedsSetup(false);
+      })
+      .finally(() => setSetupChecking(false));
+  }, []);
+
+  // 安装向导完成：关闭向导 + 转登录页并预填邮箱。
+  function handleSetupDone(prefillEmail: string) {
+    setSetupEmail(prefillEmail);
+    setNeedsSetup(false);
+    setLandingView('login');
+  }
 
   // ADMIN-01 修复：监听 api() 派发的 401 全局事件，清 session 回登录页。
   // 此前 token 过期后任意 /api/admin/* 请求仅弹 toast，session 不清空，用户卡死在已登录外壳。
@@ -141,7 +168,7 @@ export default function App() {
     }
   }
 
-  if (checking) {
+  if (checking || setupChecking) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
         检查中…
@@ -149,10 +176,16 @@ export default function App() {
     );
   }
 
+  // 组D 首次启动安装向导：needsSetup=true（DB 无 PLATFORM_ADMIN）时拦截渲染向导，
+  // 优先级高于登录页 / 落地页——平台未初始化时不应让用户尝试登录（必然失败）。
+  if (needsSetup) {
+    return <SetupWizard onDone={handleSetupDone} />;
+  }
+
   if (!session) {
     // 未登录：按 landingView 在首页 / 登录页 / 下载页 / 更新日志页之间切换（各自独立全屏页，AJAX 无刷新）。
     if (landingView === 'login') {
-      return <LoginPage onAuthed={setSession} onBack={() => setLandingView('home')} />;
+      return <LoginPage initialEmail={setupEmail} onAuthed={setSession} onBack={() => setLandingView('home')} />;
     }
     if (landingView === 'download') {
       return <DownloadPage onBack={() => setLandingView('home')} />;
