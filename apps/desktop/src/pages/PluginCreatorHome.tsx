@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PanelRightOpenIcon, SparklesIcon, XIcon, EyeIcon, WandSparklesIcon, HistoryIcon } from 'lucide-react';
+import { PanelRightOpenIcon, SparklesIcon, XIcon, EyeIcon, WandSparklesIcon, HistoryIcon, AlertTriangleIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api, apiBase, getAuthToken, tauriInvoke, tauriListen } from '@/lib/api';
 import {
@@ -55,6 +55,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useEnvReadiness } from '@/lib/env-readiness';
+import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
 import { Bubble } from '@/components/chat/Bubble';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { StreamingMessage } from '@/components/chat/StreamingMessage';
@@ -64,7 +66,11 @@ import { DetailsPanel } from '@/components/creator/DetailsPanel';
 import { PreviewDrawer } from '@/components/creator/PreviewDrawer';
 
 export function PluginCreatorHome() {
-  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView } = useApp();
+  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view } = useApp();
+  // 平台缺口 Top7：环境就绪检测（CLI / 模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
+  // loading=true 时不渲染横幅（避免首帧闪烁）；ready=false 时渲染并提示去设置。
+  // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
+  const envReadiness = useEnvReadiness(session, view);
   const [input, setInput] = useState('');
   const [provider, setProvider] = useState(PROVIDERS[0].id);
   const [model, setModel] = useState(PROVIDERS[0].models[0]);
@@ -977,6 +983,31 @@ export function PluginCreatorHome() {
             </Button>
           </div>
         </div>
+        {/* 平台缺口 Top7：环境未就绪横幅——ready=false 时提示缺失项 + 「去设置」按钮。
+            检测项见 env-readiness.ts（CLI / 模型服务 / 后端地址 / 团队）。
+            loading=true 时不渲染（首帧未拉取完，避免闪烁）；ready=true 不渲染（环境 OK 无需打扰）。 */}
+        {!envReadiness.loading && !envReadiness.ready && (
+          <div className="flex shrink-0 items-start gap-3 border-b bg-amber-50 px-4 py-2.5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0 flex-1 text-xs leading-relaxed">
+              环境未就绪：{envReadiness.missing.join('；')}。完善后即可创建插件。
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 border-amber-300 bg-transparent text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-900/50"
+              onClick={() => {
+                // 缺失项优先级：未装 CLI → cli Tab；未配模型 → gateway Tab；否则 backend Tab。
+                const m = envReadiness.missing.join('');
+                const tab = m.includes('CLI') ? 'cli' : m.includes('API 密钥') ? 'gateway' : 'backend';
+                setSettingsTab(tab);
+                setView('settings');
+              }}
+            >
+              去设置
+            </Button>
+          </div>
+        )}
         {/* 问题1：对话区滚动条可见（scrollbar-thin），内容自然撑高超容器产生滚动；onScroll 驱动智能贴底。 */}
         <div ref={chatRef} onScroll={handleChatScroll} className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           {/* 问题3：去 h-full（否则 pb 被视口吃掉），底部 pb-20 让长回复气泡远离 Composer 分隔线。 */}
@@ -1098,6 +1129,9 @@ export function PluginCreatorHome() {
           />
         </DialogContent>
       </Dialog>
+      {/* 平台缺口 Top7：新手任务清单（首次登录弹 Dialog，5 步引导，进度持久化）。
+          已全部完成时组件内部 return null，不渲染 Dialog。 */}
+      <TaskChecklist session={session} setView={setView} setSettingsTab={setSettingsTab} />
     </div>
   );
 }
