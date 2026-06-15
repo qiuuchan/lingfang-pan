@@ -33,59 +33,6 @@ fn list_plugins(state: tauri::State<AppState>) -> Vec<LoadedPlugin> {
     state.plugins.clone()
 }
 
-/// 命令：拉起 AI 换装批量版 Python 程序（R4）。
-///
-/// 在 builtin-plugins/ai-wardrobe 目录下，用探测到的 Python 解释器 detached 启动 main.py
-/// （PySide6 GUI 独立窗口，不嵌入桌面端）。不阻塞：spawn 后立即返回。
-/// 依赖（PySide6/requests/Pillow）需用户预先 pip install（缺失时程序自身报错，前端提示）。
-#[tauri::command]
-fn launch_ai_wardrobe(app: tauri::AppHandle) -> Result<(), String> {
-    use std::process::Command;
-    // 换装程序目录定位（与 builtin_dir 同款：开发态 CARGO_MANIFEST_DIR/../builtin-plugins，打包态 resource_dir）。
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|p| p.join("builtin-plugins").join("ai-wardrobe"));
-    let base = if let Some(d) = dev {
-        if d.exists() {
-            d
-        } else {
-            app.path()
-                .resource_dir()
-                .map(|r| r.join("builtin-plugins").join("ai-wardrobe"))
-                .unwrap_or_else(|_| PathBuf::from("builtin-plugins/ai-wardrobe"))
-        }
-    } else {
-        app.path()
-            .resource_dir()
-            .map(|r| r.join("builtin-plugins").join("ai-wardrobe"))
-            .unwrap_or_else(|_| PathBuf::from("builtin-plugins/ai-wardrobe"))
-    };
-    if !base.exists() {
-        return Err(format!("换装程序目录不存在：{}", base.display()));
-    }
-    let entry = base.join("main.py");
-    if !entry.exists() {
-        return Err(format!("换装入口文件不存在：{}", entry.display()));
-    }
-    // 探测 Python 解释器（与 plugin_script 同款候选顺序：Windows 优先 py launcher）。
-    let candidates: Vec<&str> = if cfg!(windows) {
-        vec!["py", "python", "python3"]
-    } else {
-        vec!["python3", "python"]
-    };
-    let python = candidates
-        .iter()
-        .find_map(|c| code_assistant::find_binary(c))
-        .ok_or_else(|| "未找到 Python 解释器，请先安装 Python 并加入 PATH".to_string())?;
-    // detached 启动：gui main.py 独立运行，桌面端不等待。
-    Command::new(python)
-        .arg(&entry)
-        .current_dir(&base)
-        .spawn()
-        .map_err(|e| format!("启动换装程序失败：{e}"))?;
-    Ok(())
-}
-
 /// 命令：插件网络请求（R5 net.fetch capability）。
 ///
 /// 内置可信插件经前端桥调用 sdk.net.fetch 时走此命令：从 Rust 进程发起 HTTP 请求，
@@ -452,7 +399,6 @@ fn main() {
             list_plugins,
             read_plugin_file,
             invoke_capability,
-            launch_ai_wardrobe,
             plugin_net_fetch,
             code_assistant_list_tools,
             code_assistant_check_tool,
