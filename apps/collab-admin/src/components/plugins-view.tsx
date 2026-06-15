@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -112,20 +113,33 @@ export function PluginsView() {
     );
   }
 
-  // 批量启用/禁用：逐条 PATCH（后端无批量端点），用 Promise.all 并发，成功后统一刷新 + 清空选择。
+  // 批量启用/禁用：逐条 PATCH（后端无批量端点），用 Promise.allSettled 并发。
+  // 修复 BULK-SETTLE：此前用 Promise.all，任一 PATCH 失败即整体 reject → run toast 错误 + 不刷新列表，
+  // 但部分 PATCH 可能已成功执行，UI 仍显示更新前状态，管理员误以为全部失败而重复操作（双重切换）。
+  // 改用 allSettled：无论部分失败与否都 load() 刷新已变更项，并按「全成/部分成/全败」给准确反馈。
   async function bulkSetStatus(status: PluginStatus) {
     const targets = filtered.filter((p) => selectedIds.has(p.id));
     if (!targets.length) return;
-    const ok = await run(
-      () =>
-        Promise.all(
-          targets.map((p) =>
-            api(`/api/admin/plugins/${p.id}`, { method: 'PATCH', body: { status } }),
-          ),
-        ).then(load),
-      status === 'ENABLED' ? `已批量启用 ${targets.length} 个插件` : `已批量禁用 ${targets.length} 个插件`,
+    const results = await Promise.allSettled(
+      targets.map((p) =>
+        api(`/api/admin/plugins/${p.id}`, { method: 'PATCH', body: { status } }),
+      ),
     );
-    if (ok) setSelectedIds(new Set());
+    const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+    const rejected = results.length - fulfilled;
+    await load(); // 即使部分失败也刷新列表，反映已成功变更的状态。
+    if (rejected === 0) {
+      toast.success(status === 'ENABLED' ? `已批量启用 ${fulfilled} 个插件` : `已批量禁用 ${fulfilled} 个插件`);
+      setSelectedIds(new Set());
+    } else if (fulfilled === 0) {
+      // 全部失败：取第一条 reject reason 的消息展示（401 已由 UNAUTHORIZED 路径处理，此处理论上是非 401）。
+      const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      const msg = first ? (first.reason as Error)?.message : '操作失败';
+      toast.error(`批量操作全部失败：${msg}`);
+    } else {
+      toast.warning(`成功 ${fulfilled} 个，失败 ${rejected} 个（已刷新列表，请核对未变更项）`);
+      setSelectedIds(new Set());
+    }
   }
 
   return (

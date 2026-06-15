@@ -120,21 +120,19 @@ export default function App() {
     setCheckingUpdate(true);
     setUpdateResult(null);
     try {
-      // 修复 H1：此前 fetch /api/health 并把 serverVersion（collab-api 的 package.json 版本）
-      // 与 pkg.version（collab-admin 的 package.json 版本）比较——两个独立包分别发布，
-      // 任一版本不一致都会永远误报「有新版本」或「已是最新」。改用 /api/releases/latest
-      // 取最新已发布版本号（真正的发布渠道），与本应用版本比较，语义正确。
-      const release = await getLatestRelease('STABLE');
+      const currentVersion = pkg.version || '0.0.0';
+      // 透传 currentVersion 给后端，由 release.service.isNewer 做 semver 比较（主.次.修 + prerelease），
+      // 避免前端用精确字符串比较 release.version === currentVersion 误判（v 前缀/尾零等格式差异导致永远误报）。
+      const release = await getLatestRelease('STABLE', currentVersion);
       if (!release) {
         setUpdateResult('error');
         return;
       }
-      const latestVersion = release.version;
-      const currentVersion = pkg.version || '0.0.0';
-      if (latestVersion === currentVersion) {
+      // 优先用后端权威的 updateAvailable（undefined 时降级为「非最新」语义，保守提示有更新可下载）。
+      if (release.updateAvailable === false) {
         setUpdateResult('current');
       } else {
-        setUpdateResult(`new:${latestVersion}`);
+        setUpdateResult(`new:${release.version}`);
       }
     } catch {
       setUpdateResult('error');

@@ -31,12 +31,16 @@ pub struct DeclaredCapability {
 
 impl CapabilityRegistry {
     pub fn register(&self, plugin_id: &str, caps: Vec<DeclaredCapability>) {
-        let mut map = self.plugins.lock().unwrap();
+        // 修复 CAPLOCK：原 .lock().unwrap() 在持锁线程 panic 时会 poison 锁，
+        // 其后所有 register/find 调用二次 panic，整个插件能力子系统（所有 capability 调用）瘫痪需重启。
+        // PoisonError::into_inner() 拿到锁内数据（数据仍有效，仅代表另一线程异常退出），
+        // 与 code_assistant.rs::lock_or_recover 同款容忍策略，杜绝 panic 级联。
+        let mut map = self.plugins.lock().unwrap_or_else(|poison| poison.into_inner());
         map.insert(plugin_id.to_string(), caps);
     }
 
     fn find(&self, plugin_id: &str, kind: &str) -> Option<DeclaredCapability> {
-        let map = self.plugins.lock().unwrap();
+        let map = self.plugins.lock().unwrap_or_else(|poison| poison.into_inner());
         map.get(plugin_id)?.iter().find(|c| c.kind == kind).cloned()
     }
 }

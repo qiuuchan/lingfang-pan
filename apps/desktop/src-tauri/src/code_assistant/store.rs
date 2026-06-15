@@ -487,11 +487,29 @@ fn process_alive(pid: u32) -> bool {
     }
     #[cfg(windows)]
     {
-        Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}")])
-            .output()
-            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
+        // 修复 PROCALIVE-WIN：此前用 String::contains(&pid.to_string()) 判定进程存活，
+        // 但 tasklist /FI "PID eq {pid}" 的输出始终包含作为过滤参数字面量的 PID 串（表头/参数行），
+        // 导致对任意 PID 恒返回 true → cleanup_registered_processes 把已死进程误判为存活，
+        // 注册表永不收缩、每次启动都尝试 kill 已死 PID。
+        // 改用 /FO CSV /NH 输出无表头数据行：匹配的进程会有一行 CSV，PID 位于第二列（,"PID",）；
+        // 无匹配时 tasklist 退出码非 0 且无可解析数据行。据此精确判定。
+        let out = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output();
+        match out {
+            Ok(output) => {
+                // 退出码非 0（典型：无匹配进程）直接判死亡。
+                if !output.status.success() {
+                    return false;
+                }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // 匹配进程的 CSV 行形如 "name.exe","123",...，PID 作为独立带引号字段出现。
+                // 用 ","<pid>"," 精确匹配第二列，避免误命中同名映像名或其他字段。
+                let needle = format!("\",{pid},\"");
+                stdout.lines().any(|line| line.contains(&needle))
+            }
+            Err(_) => false,
+        }
     }
 }
 

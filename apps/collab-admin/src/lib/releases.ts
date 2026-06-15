@@ -43,10 +43,16 @@ async function fetchPublic(path: string): Promise<Response> {
   }
 }
 
-/** 获取最新版本（含产物）。API 不可用或无版本时返回 null（落地页降级展示占位）。 */
-export async function getLatestRelease(channel: 'STABLE' | 'BETA' = 'STABLE'): Promise<Release | null> {
+/** 获取最新版本（含产物）。API 不可用或无版本时返回 null（落地页降级展示占位）。
+ *  可选 currentVersion：透传给后端 /api/releases/latest?currentVersion=，后端返回 updateAvailable
+ *  （semver 比较，宽松解析主.次.修 + prerelease），避免调用方自行实现版本比较导致格式不一致误判。 */
+export async function getLatestRelease(
+  channel: 'STABLE' | 'BETA' = 'STABLE',
+  currentVersion?: string,
+): Promise<Release | null> {
   try {
-    const resp = await fetchPublic(`/api/releases/latest?channel=${channel}`);
+    const cv = currentVersion ? `&currentVersion=${encodeURIComponent(currentVersion)}` : '';
+    const resp = await fetchPublic(`/api/releases/latest?channel=${channel}${cv}`);
     if (!resp.ok) return null;
     return (await resp.json()) as Release;
   } catch {
