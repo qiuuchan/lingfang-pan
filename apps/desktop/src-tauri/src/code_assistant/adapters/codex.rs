@@ -25,19 +25,23 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
 // 且无思考强度参数；多轮续接由 send_input 层用历史摘要拼进 prompt 实现（design §3.3.4），
 // 思考强度仅 claude 生效（R2），这里保持统一签名解耦调用方。
 //
-// === codex 可用性降级标注（task 06-15 R2 / AC6） ===
-// codex exec 的输出模式（已查 developers.openai.com/codex/cli/reference + noninteractive 文档）：
-// - 默认（当前实现）：进度流→stderr，最终 agent message→stdout（**聚合输出**，非流式）。
-// - `--json`（别名 `--experimental-json`）：输出 JSONL 事件流（agentMessage delta / item / turn 事件，
-//   支持流式思考与工具调用），格式为 `{"msg":{"type":"text","content":"..."},"timestamp":"..."}`
-//   或 `{"method":"item/agentMessage/delta","params":{...}}`（不同版本格式不一致）。
+// === codex --json 流式分类输出（task 06-13 R3 codex 补齐）===
+// codex exec 支持 `--json`（输出 JSONL 事件流，见 codex-cli 0.139.0 `codex exec --help`），
+// 实测 + 二进制字符串反查确认事件 type 清单（每行一个 JSON，顶层 `type` 字段为判别器）：
+// - `thread.started`（含 thread_id）/`turn.started`/`turn.completed` → 仅生命周期信号，丢弃。
+// - `turn.failed`（含 error.message）/`error`（含 message，含 reconnecting 重连尝试）→ 错误，
+//   进 stderr 流（让前端诊断区可见真实错误，不进 stdout 协议解析）。
+// - `token_count`（含 usage）→ 用量统计，丢弃（不污染对话）。
+// - `item.started`/`item.updated`/`item.completed`（含 item 对象）→ 真正的内容载体，按 item.type 分类：
+//     * agent_message（含 content[]，每项 {type:"output_text",text}）→ Text（进 stdout）。
+//     * agent_message_content_delta（含 delta）→ Text 增量（进 stdout）。
+//     * reasoning / agent_reasoning / agent_reasoning_raw_content → Thinking（进 thought）。
+//     * reasoning_content_delta / reasoning_raw_content_delta → Thinking 增量（进 thought）。
+//     * local_shell_call（含 action.command）/function_call（含 name+arguments）/mcp_tool_call →
+//       ToolUse（进 tool，工具卡片）。
+// 解析器在 code_assistant.rs::extract_codex_json_items 实现，spawn_reader 用 OutputFormat::CodexJson 调用。
 //
-// 决策（诚实标注降级，AC6）：当前**不加** `--json`，codex 思考/工具输出为聚合模式：
-// - 最终结果进 stdout（前端对话区可见，满足 AC5「输出可见」）。
-// - 进度/思考片段进 stderr（前端诊断区可见，但不按 claude stream-json 那样分流到 thought/tool 流）。
-// 不加 --json 的原因：codex JSONL 事件格式与 claude stream-json 完全不同，需新增独立解析器
-// （且 codex 版本间事件 schema 不稳定），超出「CLI 配置注入」核心任务范围。
-// 后续若要 codex 流式思考/工具展示，需单独任务实现 codex JSONL 解析 + spawn_reader 的 OutputFormat::CodexJson。
+// `--color never`：禁用 ANSI 颜色码（JSONL 通道不需要，且避免颜色码混入 JSON 解析）。
 fn build_args(
     prompt: &str,
     model: Option<&str>,
@@ -53,5 +57,10 @@ fn build_args(
     // sandbox 是 code_assistant::resolve_workspace 生成的隔离目录（app_data/claude-sandbox），
     // 不含 .git，故必须显式跳过该检查，否则 codex exec 立即退出不产出。
     args.push("--skip-git-repo-check".to_string());
+    // --json：输出 JSONL 事件流（支持流式思考/工具分类，对齐 claude stream-json 的分类渲染）。
+    // --color never：禁用 ANSI 颜色码（JSONL 通道无需颜色，避免颜色码混入 JSON 解析）。
+    args.push("--json".to_string());
+    args.push("--color".to_string());
+    args.push("never".to_string());
     args
 }

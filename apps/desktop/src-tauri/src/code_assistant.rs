@@ -712,9 +712,12 @@ fn spawn_and_attach<E: AssistantEventSink>(
         processes.insert(session_id.clone(), child.clone());
     }
 
+    // 分类输出格式：claude → StreamJson，codex → CodexJson（--json JSONL 事件流），
+    // opencode → Plain（纯文本，无分类）。stderr 一律 Plain（codex/opencode 的 stderr 是进度/诊断非 JSON）。
     let output_format = match session.tool {
         CodeAssistantTool::Claude => OutputFormat::StreamJson,
-        _ => OutputFormat::Plain,
+        CodeAssistantTool::Codex => OutputFormat::CodexJson,
+        CodeAssistantTool::Opencode => OutputFormat::Plain,
     };
     let stdout_reader = spawn_reader(
         app.clone(),
@@ -1003,11 +1006,17 @@ fn run_once(
 enum OutputFormat {
     Plain,
     StreamJson,
+    // codex `--json` JSONL 事件流（task 06-13 R3 codex 补齐）。
+    // 与 StreamJson（claude）不同的解析器 extract_codex_json_items，但产出同样的 StreamItem 分类。
+    // 仅用于 codex 的 stdout 通道；stderr 仍用 Plain（codex 把进度/诊断写 stderr，非 JSON）。
+    CodexJson,
 }
 
-/// stream-json 一行解析出的分类片段（design 阶段1 R3）。
+/// stream-json / codex-json 一行解析出的分类片段（design 阶段1 R3）。
 /// 关键约束：只有 Text 进 stdout 流（协议解析依赖纯文本）；
 /// Thinking / ToolUse 走独立 thought / tool 流，绝不污染 stdout。
+/// Stderr 仅 codex-json 的错误事件用（turn.failed / error），强制进 stderr 流让诊断区可见，
+/// 绝不进 stdout（否则错误文本污染协议解析输入）。
 #[derive(Debug, Clone, PartialEq)]
 enum StreamItem {
     /// 正文文本（assistant 文本块 / text_delta），进 stdout 流。
@@ -1019,6 +1028,38 @@ enum StreamItem {
         name: String,
         input_json: String,
     },
+    /// 错误/诊断（codex 的 turn.failed / error 事件），进 stderr 流。
+    /// 仅 codex-json 使用：把错误从 JSONL 解析出来路由到 stderr（不进 stdout）。
+    Stderr(String),
+}
+
+/// 把 StreamItem 映射到 (stream 字段, text)，供 StreamJson / CodexJson 复用（DRY）。
+/// 返回 None 表示该项应被丢弃（空文本）。
+/// - Text → ("stdout", text)（协议聚合输入）。
+/// - Thinking → ("thought", thinking)（思考折叠区，不进 stdout）。
+/// - ToolUse → ("tool", name+input 摘要)（工具卡片，不进 stdout）。
+/// - Stderr → ("stderr", text)（诊断区，不进 stdout）。
+fn stream_item_to_pair(item: StreamItem) -> Option<(&'static str, String)> {
+    match item {
+        StreamItem::Text(text) if !text.is_empty() => Some(("stdout", text)),
+        StreamItem::Thinking(thinking) if !thinking.is_empty() => Some(("thought", thinking)),
+        StreamItem::Stderr(text) if !text.is_empty() => Some(("stderr", text)),
+        StreamItem::ToolUse { name, input_json } => {
+            // 工具卡片内容：name + 入参摘要（空 name 表示纯 input_json_delta 增量）。
+            // AskUserQuestion 同走此流，前端按 name 区分问题卡片。
+            let merged = if name.is_empty() {
+                input_json
+            } else {
+                format!("{name} {input_json}").trim().to_string()
+            };
+            if merged.is_empty() {
+                None
+            } else {
+                Some(("tool", merged))
+            }
+        }
+        _ => None,
+    }
 }
 
 /// 解析 claude stream-json 的一行，返回分类片段数组（design 阶段1 R3）。
@@ -1179,6 +1220,177 @@ fn extract_stream_json_text(line: &str) -> Option<String> {
     }
 }
 
+/// 解析 codex `--json` JSONL 的一行，返回分类片段数组（task 06-13 R3 codex 补齐）。
+///
+/// codex-cli 0.139.0 的 `codex exec --json` 每行输出一个 JSON，顶层 `type` 字段为事件判别器。
+/// 事件清单（已通过 `codex exec --json` 实测 + 二进制字符串反查 `codex.exe` 确认）：
+///
+/// - `thread.started`（含 thread_id）/ `turn.started` / `turn.completed` → 生命周期信号，**丢弃**（不展示）。
+/// - `turn.failed`（含 error.message）/ `error`（含 message，如 reconnecting 重连） → 错误，
+///   进 **stderr** 流（前端诊断区可见真实错误，不进 stdout 协议解析）。
+/// - `token_count`（含 usage） → 用量统计，**丢弃**。
+/// - `items`（含完整 items 数组） → 批量 item，逐项按 item.type 分类（与 item.completed 同解析）。
+/// - `item.started` / `item.updated` / `item.completed`（含 item 对象）→ 按 item.type 分类：
+///     * `agent_message`（content[] 每项 {type:"output_text",text}）→ **Text**（进 stdout）。
+///     * `agent_message_content_delta`（含 delta）→ **Text** 增量（进 stdout）。
+///     * `reasoning` / `agent_reasoning` / `agent_reasoning_raw_content` → **Thinking**（进 thought）。
+///     * `reasoning_content_delta` / `reasoning_raw_content_delta` → **Thinking** 增量（进 thought）。
+///     * `local_shell_call`（含 action.command）/ `function_call`（含 name+arguments）/ `mcp_tool_call` →
+///       **ToolUse**（进 tool，工具卡片）。
+///     * 其他（file_change / command_execution / commentary 等）→ 丢弃（避免噪声）。
+///
+/// 非 JSON / 空行 / 非已知 type 返回空 Vec（不报错，容忍 codex 版本新增事件类型）。
+fn extract_codex_json_items(line: &str) -> Vec<StreamItem> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return Vec::new();
+    };
+    let Some(ty) = value.get("type").and_then(|v| v.as_str()) else {
+        return Vec::new();
+    };
+    match ty {
+        // 错误事件：turn.failed（含 error 对象）/ error（含 message 字符串）。
+        // 进 stderr 流（诊断区可见），不进 stdout（协议解析依赖纯 stdout）。
+        // 注意：codex 的 reconnecting（重连尝试 1/5..5/5）也是 error 事件，原样透传让用户看到重连过程。
+        "turn.failed" => {
+            let message = value
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("codex 执行失败");
+            vec![StreamItem::Stderr(format!("[turn.failed] {message}"))]
+        }
+        "error" => {
+            let message = value
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("codex 错误");
+            vec![StreamItem::Stderr(format!("[error] {message}"))]
+        }
+        // 单 item 事件：item.started/updated/completed，按 item.type 分类。
+        "item.started" | "item.updated" | "item.completed" => {
+            value.get("item").map(classify_codex_item).unwrap_or_default()
+        }
+        // 批量 items 事件：逐项分类（兜底，多数情况下 codex 走 item.* 流式）。
+        "items" => value
+            .get("items")
+            .and_then(|items| items.as_array())
+            .map(|arr| arr.iter().flat_map(classify_codex_item).collect())
+            .unwrap_or_default(),
+        // 生命周期/统计事件：丢弃（不展示，避免噪声）。
+        // thread.started / turn.started / turn.completed / token_count / changes 等。
+        _ => Vec::new(),
+    }
+}
+
+/// 按 codex item.type 分类产出 StreamItem（extract_codex_json_items 的子解析）。
+///
+/// codex item 结构（已实测 + 二进制反查）：`{type, content[]?, delta?, summary[]?, action?, arguments?, ...}`。
+/// - `agent_message`：content 数组每项 {type:"output_text"|"input_text", text} → Text（输出文本进 stdout）。
+/// - `agent_message_content_delta`：delta 字段为增量文本 → Text。
+/// - `reasoning` / `agent_reasoning` / `agent_reasoning_raw_content`：summary 数组每项 {type:"summary_text", text}
+///   或 reasoning_raw_content 的 text → Thinking（进 thought 流，不进 stdout）。
+/// - `reasoning_content_delta` / `reasoning_raw_content_delta`：delta 为增量思考文本 → Thinking。
+/// - `local_shell_call`：action.command 为执行的命令 → ToolUse{name:"shell", input_json:命令}。
+/// - `function_call`：name + arguments → ToolUse{name, input_json:arguments}。
+/// - `mcp_tool_call`：tool_name + arguments → ToolUse{name:tool_name, input_json}。
+/// - 其他（file_change / command_execution / commentary / web_search 等）→ 丢弃（避免噪声，前端不需要）。
+fn classify_codex_item(item: &serde_json::Value) -> Vec<StreamItem> {
+    let item_ty = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    match item_ty {
+        // 文本输出（agent 消息）→ Text（进 stdout）。
+        "agent_message" => {
+            let mut items = Vec::new();
+            if let Some(content) = item.get("content").and_then(|c| c.as_array()) {
+                for part in content {
+                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                        if !text.is_empty() {
+                            items.push(StreamItem::Text(text.to_string()));
+                        }
+                    }
+                }
+            }
+            items
+        }
+        // 文本增量 → Text。
+        "agent_message_content_delta" => item
+            .get("delta")
+            .and_then(|d| d.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| vec![StreamItem::Text(s.to_string())])
+            .unwrap_or_default(),
+        // 思考 → Thinking（进 thought，不进 stdout）。
+        "reasoning" | "agent_reasoning" | "agent_reasoning_raw_content" => {
+            let mut items = Vec::new();
+            // reasoning.summary[] 每项 {type:"summary_text", text}。
+            if let Some(summary) = item.get("summary").and_then(|s| s.as_array()) {
+                for part in summary {
+                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                        if !text.is_empty() {
+                            items.push(StreamItem::Thinking(text.to_string()));
+                        }
+                    }
+                }
+            }
+            // 部分 reasoning 变体直接含 text 字段（agent_reasoning_raw_content）。
+            if items.is_empty() {
+                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                    if !text.is_empty() {
+                        items.push(StreamItem::Thinking(text.to_string()));
+                    }
+                }
+            }
+            items
+        }
+        // 思考增量 → Thinking。
+        "reasoning_content_delta" | "reasoning_raw_content_delta" => item
+            .get("delta")
+            .and_then(|d| d.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| vec![StreamItem::Thinking(s.to_string())])
+            .unwrap_or_default(),
+        // 本地 shell 调用 → ToolUse（工具卡片）。
+        "local_shell_call" => {
+            let command = item
+                .get("action")
+                .and_then(|a| a.get("command"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            vec![StreamItem::ToolUse {
+                name: "shell".to_string(),
+                input_json: serde_json::json!({ "command": command }).to_string(),
+            }]
+        }
+        // 函数调用 → ToolUse。
+        "function_call" => {
+            let name = item
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            let input_json = item
+                .get("arguments")
+                .map(normalize_tool_input)
+                .unwrap_or_default();
+            vec![StreamItem::ToolUse { name, input_json }]
+        }
+        // MCP 工具调用 → ToolUse。
+        "mcp_tool_call" => {
+            let name = item
+                .get("tool_name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("mcp")
+                .to_string();
+            let input_json = item
+                .get("arguments")
+                .map(normalize_tool_input)
+                .unwrap_or_else(|| "{}".to_string());
+            vec![StreamItem::ToolUse { name, input_json }]
+        }
+        // 其他类型（file_change / command_execution / commentary / web_search 等）→ 丢弃。
+        _ => Vec::new(),
+    }
+}
+
 /// 解析 claude stream-json 的一行，提取 CLI 侧 session_id（design §3.3.3）。
 /// 仅 `system`（init）/ `result`（结束）事件携带 session_id；assistant 行返回 None（不误取文本行）。
 /// 与 extract_stream_json_text 是并行旁路：互不干扰。
@@ -1241,7 +1453,9 @@ fn spawn_reader<E: AssistantEventSink>(
                         // - Text → 'stdout'（协议解析依赖，transcriptTextSinceLastInput 只取 stdout/stderr）
                         // - Thinking → 'thought'（思考折叠区，不进 stdout）
                         // - ToolUse（含 AskUserQuestion）→ 'tool'（工具卡片，不进 stdout）
-                        // codex/opencode（Plain）保持原行为：整行进原 stream（stdout/stderr）。
+                        // - Stderr（codex 错误事件）→ 'stderr'（诊断区，不进 stdout）
+                        // codex 用 CodexJson 走 extract_codex_json_items（同样产出 StreamItem 分类）。
+                        // opencode（Plain）保持原行为：整行进原 stream（stdout/stderr）。
                         let items: Vec<(&'static str, String)> = match output_format {
                             OutputFormat::StreamJson => {
                                 // 旁路：先尝试提取 claude session_id（system/result 行），仅 stdout 流、只设一次。
@@ -1278,36 +1492,17 @@ fn spawn_reader<E: AssistantEventSink>(
                                 // thought/tool 走独立流，前端按 stream 字段区分渲染，绝不污染 stdout。
                                 extract_stream_json_items(&buffer)
                                     .into_iter()
-                                    .filter_map(|item| match item {
-                                        StreamItem::Text(text) => {
-                                            if text.is_empty() {
-                                                None
-                                            } else {
-                                                Some(("stdout", text))
-                                            }
-                                        }
-                                        StreamItem::Thinking(thinking) => {
-                                            if thinking.is_empty() {
-                                                None
-                                            } else {
-                                                Some(("thought", thinking))
-                                            }
-                                        }
-                                        StreamItem::ToolUse { name, input_json } => {
-                                            // 工具卡片内容：name + 入参摘要（空 name 表示纯 input_json_delta 增量）。
-                                            // AskUserQuestion 同走此流，前端按 name 区分问题卡片。
-                                            let merged = if name.is_empty() {
-                                                input_json
-                                            } else {
-                                                format!("{name} {input_json}").trim().to_string()
-                                            };
-                                            if merged.is_empty() {
-                                                None
-                                            } else {
-                                                Some(("tool", merged))
-                                            }
-                                        }
-                                    })
+                                    .filter_map(stream_item_to_pair)
+                                    .collect()
+                            }
+                            OutputFormat::CodexJson => {
+                                // codex --json JSONL 分类解析（task 06-13 R3 codex 补齐）。
+                                // 与 claude stream-json 同样产出 StreamItem，复用 stream_item_to_pair 路由。
+                                // 关键约束同样生效：Text 进 stdout、Thinking 进 thought、ToolUse 进 tool、
+                                // 错误事件进 stderr（turn.failed/error 不污染 stdout 协议解析）。
+                                extract_codex_json_items(&buffer)
+                                    .into_iter()
+                                    .filter_map(stream_item_to_pair)
                                     .collect()
                             }
                             OutputFormat::Plain => vec![(stream, buffer.clone())],
@@ -2137,6 +2332,199 @@ mod tests {
         assert_eq!(extract_stream_json_text(tool_only), None);
     }
 
+    // === task 06-13 R3：codex --json JSONL 分类解析（extract_codex_json_items / classify_codex_item） ===
+    //
+    // codex-cli 0.139.0 的 `codex exec --json` 每行一个 JSON，顶层 type 为判别器。
+    // 事件清单（实测 + codex.exe 二进制字符串反查）：
+    //   thread.started/turn.started/turn.completed/token_count → 丢弃。
+    //   turn.failed/error → Stderr（诊断，不进 stdout）。
+    //   item.started/updated/completed + items → 按 item.type 分类。
+    // 关键不变量：仅 Text 进 stdout（协议解析依赖），Thinking 进 thought，ToolUse 进 tool，Stderr 进 stderr。
+
+    #[test]
+    fn codex_thread_started_yields_empty() {
+        // 生命周期事件：丢弃（不展示）。
+        let line = r#"{"type":"thread.started","thread_id":"019e-abc"}"#;
+        assert!(extract_codex_json_items(line).is_empty());
+    }
+
+    #[test]
+    fn codex_turn_started_completed_yields_empty() {
+        // 生命周期事件：丢弃。
+        assert!(extract_codex_json_items(r#"{"type":"turn.started"}"#).is_empty());
+        assert!(extract_codex_json_items(r#"{"type":"turn.completed"}"#).is_empty());
+    }
+
+    #[test]
+    fn codex_token_count_yields_empty() {
+        // 用量统计：丢弃。
+        let line = r#"{"type":"token_count","usage":{"input_tokens":10,"output_tokens":5}}"#;
+        assert!(extract_codex_json_items(line).is_empty());
+    }
+
+    #[test]
+    fn codex_turn_failed_yields_stderr() {
+        // turn.failed 含 error.message → Stderr（诊断区，不进 stdout）。
+        let line = r#"{"type":"turn.failed","error":{"message":"unexpected status 402 Payment Required"}}"#;
+        let items = extract_codex_json_items(line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::Stderr(s) => {
+                assert!(s.contains("402"), "应含错误信息：{s}");
+                assert!(s.contains("turn.failed"), "应标注事件类型：{s}");
+            }
+            other => panic!("期望 Stderr，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_error_event_yields_stderr() {
+        // error 事件（含 reconnecting 重连尝试）→ Stderr。
+        let line = r#"{"type":"error","message":"Reconnecting... 1/5 (unexpected status 402)"}"#;
+        let items = extract_codex_json_items(line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::Stderr(s) => assert!(s.contains("Reconnecting"), "应含重连信息：{s}"),
+            other => panic!("期望 Stderr，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_item_agent_message_yields_text() {
+        // item.completed 含 agent_message（content[].text）→ Text（进 stdout）。
+        let line = r#"{"type":"item.completed","item":{"type":"agent_message","content":[{"type":"output_text","text":"你好世界"}]}}"#;
+        assert_eq!(
+            extract_codex_json_items(line),
+            vec![StreamItem::Text("你好世界".to_string())]
+        );
+    }
+
+    #[test]
+    fn codex_item_agent_message_content_delta_yields_text() {
+        // agent_message_content_delta（含 delta）→ Text 增量。
+        let line = r#"{"type":"item.updated","item":{"type":"agent_message_content_delta","delta":"增量文本"}}"#;
+        assert_eq!(
+            extract_codex_json_items(line),
+            vec![StreamItem::Text("增量文本".to_string())]
+        );
+    }
+
+    #[test]
+    fn codex_item_reasoning_yields_thinking() {
+        // item.completed 含 reasoning（summary[].text）→ Thinking（进 thought，不进 stdout）。
+        let line = r#"{"type":"item.completed","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"分析方案"}]}}"#;
+        assert_eq!(
+            extract_codex_json_items(line),
+            vec![StreamItem::Thinking("分析方案".to_string())]
+        );
+    }
+
+    #[test]
+    fn codex_item_reasoning_content_delta_yields_thinking() {
+        // reasoning_content_delta → Thinking 增量。
+        let line = r#"{"type":"item.updated","item":{"type":"reasoning_content_delta","delta":"推理中"}}"#;
+        assert_eq!(
+            extract_codex_json_items(line),
+            vec![StreamItem::Thinking("推理中".to_string())]
+        );
+    }
+
+    #[test]
+    fn codex_item_local_shell_call_yields_tool_use() {
+        // local_shell_call（含 action.command）→ ToolUse{name:"shell"}。
+        let line = r#"{"type":"item.completed","item":{"type":"local_shell_call","action":{"command":"ls -la"}}}"#;
+        let items = extract_codex_json_items(line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::ToolUse { name, input_json } => {
+                assert_eq!(name, "shell");
+                assert!(input_json.contains("ls -la"), "应含命令：{input_json}");
+            }
+            other => panic!("期望 ToolUse，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_item_function_call_yields_tool_use() {
+        // function_call（含 name + arguments）→ ToolUse{name, input_json:arguments}。
+        let line = r#"{"type":"item.completed","item":{"type":"function_call","name":"read_file","arguments":"{\"path\":\"a.ts\"}"}}"#;
+        let items = extract_codex_json_items(line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::ToolUse { name, input_json } => {
+                assert_eq!(name, "read_file");
+                assert!(input_json.contains("path"), "应含入参：{input_json}");
+            }
+            other => panic!("期望 ToolUse，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_item_mcp_tool_call_yields_tool_use() {
+        // mcp_tool_call（含 tool_name + arguments）→ ToolUse{name:tool_name}。
+        let line = r#"{"type":"item.completed","item":{"type":"mcp_tool_call","tool_name":"exa_search","arguments":{"query":"hello"}}}"#;
+        let items = extract_codex_json_items(line);
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            StreamItem::ToolUse { name, input_json } => {
+                assert_eq!(name, "exa_search");
+                assert!(input_json.contains("query"), "应含入参：{input_json}");
+            }
+            other => panic!("期望 ToolUse，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_items_batch_event_classifies_each() {
+        // items 批量事件：逐项分类（兜底路径）。
+        let line = r#"{"type":"items","items":[{"type":"agent_message","content":[{"type":"output_text","text":"A"}]},{"type":"reasoning","summary":[{"type":"summary_text","text":"B"}]}]}"#;
+        let items = extract_codex_json_items(line);
+        assert_eq!(
+            items,
+            vec![
+                StreamItem::Text("A".to_string()),
+                StreamItem::Thinking("B".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_unknown_event_type_yields_empty() {
+        // 未知事件类型（codex 版本新增）→ 容忍丢弃，不报错。
+        let line = r#"{"type":"some_future_event","data":"x"}"#;
+        assert!(extract_codex_json_items(line).is_empty());
+    }
+
+    #[test]
+    fn codex_invalid_json_yields_empty() {
+        // 非 JSON / 空行 → 容忍，返回空 Vec。
+        assert!(extract_codex_json_items("not json").is_empty());
+        assert!(extract_codex_json_items("").is_empty());
+    }
+
+    #[test]
+    fn codex_text_filter_excludes_thinking_and_tool_and_stderr() {
+        // 关键不变量：codex 解析结果中 thinking/tool/stderr 绝不进 stdout（协议解析依赖）。
+        // 用 stream_item_to_pair 验证路由：仅 Text → stdout，其余 → 各自独立流。
+        let thinking = StreamItem::Thinking("思考".to_string());
+        let tool = StreamItem::ToolUse {
+            name: "shell".to_string(),
+            input_json: "{}".to_string(),
+        };
+        let stderr = StreamItem::Stderr("[error] boom".to_string());
+        let text = StreamItem::Text("正文".to_string());
+        assert_eq!(stream_item_to_pair(thinking), Some(("thought", "思考".to_string())));
+        assert_eq!(
+            stream_item_to_pair(tool),
+            Some(("tool", "shell {}".to_string()))
+        );
+        assert_eq!(
+            stream_item_to_pair(stderr),
+            Some(("stderr", "[error] boom".to_string()))
+        );
+        assert_eq!(stream_item_to_pair(text), Some(("stdout", "正文".to_string())));
+    }
+
     // === design 阶段1：spawn_reader 分类 emit 端到端（stdout 不被 thinking/tool 污染） ===
     //
     // 真实读取器在 detached 线程跑；这里用一个捕获事件 sink + Cursor 喂 stream-json 多行，
@@ -2254,6 +2642,134 @@ mod tests {
         assert!(
             !stdout_text.contains("Read"),
             "stdout 被工具内容污染：{stdout_text:?}"
+        );
+    }
+
+    #[test]
+    fn reader_codex_json_routes_thinking_tool_error_out_of_stdout() {
+        use std::io::Cursor;
+        // 构造一段 codex --json JSONL：item.completed（正文）+ reasoning（思考）+ function_call（工具）
+        // + turn.failed（错误）。验证分类路由与 claude stream-json 等价（stdout 纯净）。
+        let raw = [
+            r#"{"type":"item.completed","item":{"type":"agent_message","content":[{"type":"output_text","text":"正文"}]}}"#,
+            r#"{"type":"item.completed","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"思考"}]}}"#,
+            r#"{"type":"item.completed","item":{"type":"function_call","name":"Read","arguments":"{\"path\":\"a.ts\"}"}}"#,
+            r#"{"type":"turn.failed","error":{"message":"402 余额不足"}}"#,
+            r#"{"type":"thread.started","thread_id":"t-1"}"#,
+        ]
+        .join("\n")
+            + "\n";
+        let bytes = raw.into_bytes();
+        let cursor: Cursor<Vec<u8>> = Cursor::new(bytes);
+
+        let store = temp_assistant_store("reader-codex-stdout-purity");
+        let state = CodeAssistantState {
+            store: store.clone(),
+            processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-reader-codex-test-configs-{}",
+                std::process::id()
+            )),
+        };
+        let sink = CapturingSink {
+            events: Arc::new(Mutex::new(Vec::new())),
+        };
+        let captured = sink.events.clone();
+
+        spawn_reader(
+            sink,
+            state,
+            "codex-reader-session".to_string(),
+            "stdout",
+            OutputFormat::CodexJson,
+            Some(cursor),
+        );
+
+        // 等待读取器消费完毕：4 行产出（thread.started 被丢弃，其余各 1 条）。
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let transcript = store
+                .read_transcript("codex-reader-session")
+                .unwrap_or_default();
+            if transcript
+                .lines()
+                .filter(|l| l.contains("\"event\":\"output\""))
+                .count()
+                >= 4
+                || Instant::now() > deadline
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let outputs: Vec<(String, String)> = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(event, _)| *event == "code-assistant://output")
+            .filter_map(|(_, payload)| {
+                let stream = payload.get("stream")?.as_str()?.to_string();
+                let text = payload.get("text")?.as_str()?.to_string();
+                Some((stream, text))
+            })
+            .collect();
+
+        let stdout_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "stdout")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let thought_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "thought")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let tool_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "tool")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let stderr_text: String = outputs
+            .iter()
+            .filter(|(s, _)| s == "stderr")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+
+        // 正文进 stdout；思考进 thought；工具进 tool；错误进 stderr。
+        assert_eq!(stdout_text, "正文", "stdout 应仅含正文，实际 {stdout_text:?}");
+        assert_eq!(thought_text, "思考", "thought 应含思考，实际 {thought_text:?}");
+        assert!(
+            tool_text.starts_with("Read"),
+            "tool 应含工具名 Read，实际 {tool_text:?}"
+        );
+        assert!(
+            stderr_text.contains("402"),
+            "stderr 应含错误信息，实际 {stderr_text:?}"
+        );
+
+        // 关键不变量：stdout 绝不含思考 / 工具 / 错误内容（协议解析依赖纯 stdout）。
+        assert!(
+            !stdout_text.contains("思考"),
+            "stdout 被思考污染：{stdout_text:?}"
+        );
+        assert!(
+            !stdout_text.contains("Read"),
+            "stdout 被工具污染：{stdout_text:?}"
+        );
+        assert!(
+            !stdout_text.contains("402"),
+            "stdout 被错误污染：{stdout_text:?}"
+        );
+
+        // thread.started 生命周期事件应被丢弃（不产生任何 output 事件）。
+        assert!(
+            !outputs.iter().any(|(_, t)| t.contains("t-1")),
+            "thread.started 应被丢弃，不应进任何流：{outputs:?}"
         );
     }
 
