@@ -371,12 +371,18 @@ export const STATUS_LABEL: Record<string, string> = {
 const LOCAL_DRAFT_ENTRY = 'ui/index.html';
 
 export function safePluginId(input: string) {
-  const slug = input
+  // plugin_id \u5fc5\u987b\u7eaf ASCII\uff08Rust sanitize_plugin_id \u4ec5\u5141\u8bb8 [A-Za-z0-9_-]\uff09\u3002
+  // \u975e ASCII \u5b57\u7b26\uff08\u542b\u4e2d\u6587\uff09\u9010\u4e2a\u8f6c base36 \u7f16\u7801\uff0c\u4fdd\u8bc1\u5408\u6cd5\u4e14\u53ef\u9006\u3002
+  const ascii = input.replace(/[^\x20-\x7e]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    return code > 255 ? `u${code.toString(36)}` : `x${code.toString(36)}`;
+  });
+  const slug = ascii
     .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 32);
-  return slug || 'local-agent-plugin';
+    .slice(0, 48);
+  return slug || 'plugin';
 }
 
 export function extractCliText(result: CliProbeResult) {
