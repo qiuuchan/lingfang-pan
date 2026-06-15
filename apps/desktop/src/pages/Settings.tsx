@@ -59,7 +59,14 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-export function Settings() {
+export function Settings({
+  // 受控 Tab：默认 'cli'，支持父组件（如新手任务清单「去设置 → 模型服务」）定向跳转。
+  value,
+  onValueChange,
+}: {
+  value?: string;
+  onValueChange?: (value: string) => void;
+}) {
   const { backendUrl, saveBackendUrl, resetSession } = useApp();
 
   // === Tab3 后端地址 Card state（零改动保留原逻辑） ===
@@ -245,7 +252,10 @@ export function Settings() {
 
   return (
     <div className="mx-auto w-full max-w-3xl">
-      <Tabs defaultValue="cli">
+      <Tabs
+        // value 未传时走 defaultValue（非受控，保持原行为）；传了则受控，支持父组件定向跳 Tab。
+        {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli' })}
+      >
         <TabsList>
           <TabsTrigger value="cli">CLI 与运行环境</TabsTrigger>
           <TabsTrigger value="gateway">模型服务</TabsTrigger>

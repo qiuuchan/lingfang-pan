@@ -34,6 +34,9 @@ interface AppContextValue {
   pinPlugin: (p: LoadedPlugin) => void;
   unpinPlugin: (id: string) => void;
   isPinned: (id: string) => boolean;
+  // 受控的 Settings 页 Tab（供新手任务清单「去设置 → 模型服务」等定向跳转）。
+  settingsTab: 'cli' | 'gateway' | 'backend';
+  setSettingsTab: (tab: 'cli' | 'gateway' | 'backend') => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -158,6 +161,8 @@ export default function App() {
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
+  // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway' 再 setView('settings')。
+  const [settingsTab, setSettingsTab] = useState<'cli' | 'gateway' | 'backend'>('cli');
 
   const saveBackendUrl = useCallback((url: string) => {
     const normalized = normalizeBackendUrl(url);
@@ -283,6 +288,7 @@ export default function App() {
     currentDraft, setCurrentDraft,
     runningPlugin, setRunningPlugin,
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
+    settingsTab, setSettingsTab,
   };
 
   if (restoring) {
@@ -310,7 +316,7 @@ export default function App() {
   else if (view === 'market') body = <Market />;
   else if (view === 'wallet') body = <Wallet />;
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
-  else if (view === 'settings') body = <Settings />;
+  else if (view === 'settings') body = <Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as 'cli' | 'gateway' | 'backend')} />;
   else body = <TeamHome />;
 
   return (
