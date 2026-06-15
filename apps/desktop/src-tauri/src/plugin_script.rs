@@ -768,4 +768,86 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    // === 完整插件执行测试（覆盖三种 runtime 的真实创建流程）===
+    // 验证：sandbox 落盘 + runtime_env 注入 + run_capture_with_env 执行，
+    // 含中文输出（验证 UTF-8/H2）、Python 多文件 import（H4 PYTHONPATH）、-u 无缓冲（H1）。
+
+    #[test]
+    fn node_plugin_chinese_output_and_structured() {
+        // Node 插件完整执行：中文输出不乱码 + JSON 结构化 + stdout/stderr 分离。
+        let binary = match maybe_node() {
+            Some(b) => b,
+            None => { eprintln!("[skip] 宿主无 node"); return; }
+        };
+        let tmp = std::env::temp_dir().join(format!("lf-node-plugin-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("index.js"), r#"
+console.log("插件启动：Node.js " + process.version);
+console.log("处理结果：✓ 会议纪要已整理，生成 3 条行动项");
+console.log(JSON.stringify({ actionItems: ["任务A", "任务B"] }));
+console.error("诊断信息");
+"#).unwrap();
+        let entry = tmp.join("index.js");
+        let captured = run_capture_with_env(&binary, vec![entry.to_string_lossy().to_string()], Some(tmp.to_str().unwrap()), 10_000, minimal_env()).unwrap();
+        assert!(!captured.timed_out, "node 不应超时");
+        assert_eq!(captured.exit_code, Some(0), "node 应 exit 0");
+        assert!(captured.stdout.contains("会议纪要已整理"), "中文 stdout 丢失/乱码：{}", captured.stdout);
+        assert!(captured.stdout.contains("任务A"), "JSON 中文内容丢失：{}", captured.stdout);
+        assert!(captured.stderr.contains("诊断信息"), "stderr 应含诊断");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn python_plugin_chinese_and_cross_dir_import() {
+        // Python 插件完整执行：验证 H1(-u 无缓冲) + H2(UTF-8 编码防中文乱码) + H4(PYTHONPATH 跨目录 import)。
+        let binary = match maybe_python() {
+            Some(b) => b,
+            None => { eprintln!("[skip] 宿主无 python"); return; }
+        };
+        let tmp = std::env::temp_dir().join(format!("lf-py-plugin-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(tmp.join("pkg")).unwrap();
+        // 子模块 pkg/util.py（跨目录 import，验证 PYTHONPATH 注入）。
+        std::fs::write(tmp.join("pkg/util.py"), "def greet(name):\n    return f'你好 {name}，Python 插件运行中'\n").unwrap();
+        // main.py 在根，import pkg.util（需 PYTHONPATH=<根>）。
+        std::fs::write(tmp.join("main.py"), r#"
+# -*- coding: utf-8 -*-
+import sys, json
+from pkg.util import greet
+print(greet("开发者"))
+print("处理结果：✓ 数据清洗完成，处理 128 条记录")
+print(json.dumps({"records": 128, "status": "cleaned"}, ensure_ascii=False))
+sys.stderr.write("诊断：Python stderr\n")
+"#).unwrap();
+        let entry = tmp.join("main.py");
+        // 模拟 run_plugin_script 的真实调用：-u + runtime_env（PYTHONIOENCODING/PYTHONUTF8/PYTHONPATH）。
+        let workspace = tmp.to_string_lossy().to_string();
+        let env = runtime_env(ScriptRuntime::Python, &workspace, minimal_env());
+        let captured = run_capture_with_env(&binary, vec!["-u".to_string(), entry.to_string_lossy().to_string()], Some(&workspace), 10_000, env).unwrap();
+        assert!(!captured.timed_out, "python 不应超时");
+        assert_eq!(captured.exit_code, Some(0), "python 应 exit 0");
+        // H4：跨目录 import 成功（无 ModuleNotFoundError）。
+        assert!(captured.stdout.contains("你好 开发者"), "PYTHONPATH 跨目录 import 失败或中文乱码：{}", captured.stdout);
+        // H2：中文不乱码。
+        assert!(captured.stdout.contains("数据清洗完成"), "UTF-8 中文输出乱码：{}", captured.stdout);
+        assert!(captured.stderr.contains("Python stderr"), "stderr 丢失");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn html_plugin_materialize_and_readable() {
+        // HTML 插件：materialize_sandbox 落盘 + 文件可读（iframe srcDoc 渲染前置条件）。
+        let tmp = std::env::temp_dir().join(format!("lf-html-plugin-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let files = vec![ScriptFile {
+            path: "ui/index.html".to_string(),
+            content: "<!DOCTYPE html><html><body><h1>HTML 插件预览</h1><p>前端插件正常</p></body></html>".to_string(),
+        }];
+        let (sandbox, entry) = materialize_sandbox(&tmp, "html-test-plugin", &files, "ui/index.html").unwrap();
+        assert!(entry.starts_with(&sandbox), "entry 应在 sandbox 内");
+        let content = std::fs::read_to_string(&entry).unwrap();
+        assert!(content.contains("HTML 插件预览"), "HTML 内容应可读");
+        assert!(content.contains("<!DOCTYPE html>"), "应是完整 HTML 文档（iframe srcDoc 可渲染）");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
