@@ -58,7 +58,7 @@ landing/
 ├── LandingFeatures.tsx      三大核心功能卡片
 ├── LandingDownload.tsx      下载区（从 /api/releases/latest 取数）
 ├── LandingChangelog.tsx     更新日志时间线（从 /api/releases 取数）
-├── LandingArchitecture.tsx  技术栈 + 系统拓扑
+├── LandingTopology.tsx     系统拓扑（SVG 三节点 + 流动光点动画）
 └── LandingFooter.tsx        页脚
 ```
 
