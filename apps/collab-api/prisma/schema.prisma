@@ -115,6 +115,10 @@ model User {
   platformRole          PlatformRole           @default(NONE)
   // token 版本号：禁用/降级用户时自增，使已签发的旧 JWT 在 JwtAuthGuard 校验时失效（ADMIN-02/AUTH-01/XERR-02）。
   tokenVersion          Int                    @default(0)
+  // 账户级密码重试锁定（组B）：连续密码错误累计计数，达阈值后置 lockedUntil 锁定。
+  // 与 throttler（IP 级限流）正交：throttler 防单 IP 暴力扫描，本字段防定向爆破单账户。
+  failedLoginAttempts   Int                    @default(0)
+  lockedUntil           DateTime?
   // 邮箱验证时间：null=未验证。注册时自动发验证邮件，首版不阻断登录（session 响应带 emailVerified 供前端提示去验证）。
   emailVerified         DateTime?
   createdAt             DateTime               @default(now())

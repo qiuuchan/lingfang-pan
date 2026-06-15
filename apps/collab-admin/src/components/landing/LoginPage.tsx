@@ -2,9 +2,11 @@
 // 深色背景 + 左上角 logo + 居中表单卡 + 「← 返回首页」。
 // 登录成功 onAuthed → App.tsx 切到后台；onBack 回落地页。
 // 忘记密码：调 /api/auth/forgot-password（与桌面端 Auth.tsx 同端点），弹窗收集邮箱。
+// 组C 极验：后端配置了 geetestCaptchaId 时，登录/找回密码表单集成「点击验证」极验组件。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api, isPlatformAdminSession, setToken, type AdminSession } from '@/lib/api';
+import { useGeetest } from '@/lib/geetest';
 import {
   Dialog,
   DialogContent,
@@ -16,12 +18,20 @@ import {
 import { Button } from '@/components/ui/button';
 
 interface LoginPageProps {
+  // 组D 安装向导完成后传入预填邮箱（刚创建的管理员账号），便于直接登录。
   onAuthed: (s: AdminSession) => void;
   onBack: () => void;
+  initialEmail?: string;
 }
 
-export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
-  const [email, setEmail] = useState('admin@example.com');
+interface PlatformInfo {
+  platformName: string;
+  logoUrl: string;
+  geetestCaptchaId: string;
+}
+
+export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
+  const [email, setEmail] = useState(initialEmail || 'admin@example.com');
   const [password, setPassword] = useState('ChangeMe123!');
   const [loading, setLoading] = useState(false);
   // 忘记密码弹窗（调 /api/auth/forgot-password）。
@@ -29,17 +39,33 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
 
+  // 组C 极验：platform-info 取 geetestCaptchaId（公开端点，后端配置了才显验证码）。
+  const [captchaId, setCaptchaId] = useState('');
+  const captcha = useGeetest(captchaId);
+
+  useEffect(() => {
+    // platform-info 公开端点（auth:false），失败静默（未配置极验时 captchaId 保持空，不显验证码）。
+    api<PlatformInfo>('/api/platform-info', { auth: false, method: 'GET' })
+      .then((info) => setCaptchaId(info.geetestCaptchaId ?? ''))
+      .catch(() => {
+        /* 拉取失败不阻断登录 */
+      });
+  }, []);
+
   async function submit() {
+    // 组C 极验：配置了验证码时强制先通过验证。
+    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
     setLoading(true);
     try {
       const result = await api<AdminSession>('/api/auth/login', {
         auth: false,
         method: 'POST',
-        body: { email, password },
+        body: { email, password, captcha: captcha.validateResult ?? undefined },
       });
       if (!result.token) throw new Error('登录失败，请稍后重试');
       if (!isPlatformAdminSession(result)) throw new Error('该账号不是平台管理员');
       setToken(result.token);
+      captcha.reset();
       onAuthed(result);
     } catch (e) {
       toast.error((e as Error).message);
@@ -50,12 +76,19 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
 
   async function onForgotPassword() {
     if (!forgotEmail.trim()) return toast.error('请输入邮箱');
+    // 组C 极验：配置了验证码时强制先通过验证（防找回密码邮件轰炸）。
+    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
     setForgotLoading(true);
     try {
-      await api('/api/auth/forgot-password', { auth: false, method: 'POST', body: { email: forgotEmail.trim() } });
+      await api('/api/auth/forgot-password', {
+        auth: false,
+        method: 'POST',
+        body: { email: forgotEmail.trim(), captcha: captcha.validateResult ?? undefined },
+      });
       toast.success('若该邮箱已注册，重置链接已发送');
       setForgotOpen(false);
       setForgotEmail('');
+      captcha.reset();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -137,6 +170,15 @@ export function LoginPage({ onAuthed, onBack }: LoginPageProps) {
                   }}
                 />
               </div>
+              {/* 组C 极验：后端配置了 geetestCaptchaId 时渲染「点击验证」组件（captchaId 为空则不渲染，开发态跳过）。 */}
+              {captchaId && (
+                <div className="flex flex-col gap-1">
+                  <div ref={captcha.containerRef} />
+                  {!captcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}
+                  {captcha.ready && !captcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>请点击完成上方验证</p>}
+                  {captcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
+                </div>
+              )}
             </div>
 
             <button

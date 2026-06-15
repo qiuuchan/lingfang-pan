@@ -1,0 +1,144 @@
+// 极验 GeeTest V4 验证码二次校验服务（组C）。
+//
+// 设计契约：
+//  - validate(lot_number, captcha_output, pass_token, gen_time)：后端二次校验入口。
+//    1) 读 PlatformSetting 的 geetestCaptchaId/geetestCaptchaKey（缓存，避免每次登录查库）。
+//    2) 未配置 geetestCaptchaId（空）→ 直接返回 true（开发态跳过，前端不显验证码）。
+//    3) 已配置 → sign_token = HMAC-SHA256(captchaKey, lot_number) hex，
+//       POST http://gcaptcha4.geetest.com/validate?captcha_id=<id>（表单 5 参数）。
+//    4) 极验返回 result==='success' → true；result!=='success' → false。
+//    5) 容灾：极验 API 超时/异常/响应非 JSON → 降级放行 true + console.error 日志，
+//       不阻断登录/注册（外部依赖挂掉不应让用户无法登录；极验官方文档明确推荐此降级策略）。
+//
+// 缓存设计：getCaptchaConfig 内联缓存实例字段（首次查库）。配置变更时由 SettingsService.updateSettings
+// 调 invalidateConfigCache 失效（与 mail.invalidateSmtpCache 同模式），admin 保存后即生效无需重启。
+// 配置读取与 mail.service.getBrand 同模式（直接查 PlatformSetting 白名单 key，不注入 SettingsService 避免循环依赖）。
+import { Inject, Injectable } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
+import { PrismaService } from '../prisma.service';
+
+/** 极验二次校验接口地址（官方固定，http/https 均支持）。
+ *  captcha_id 作为 query 参数附在 URL 后，便于在网关/日志层按 id 识别异常请求。 */
+const GEETEST_VALIDATE_URL = 'http://gcaptcha4.geetest.com/validate';
+
+/** 二次校验请求超时（毫秒）。极验 API 正常响应 <1s，5s 兜底防网络黑洞挂起登录流程。 */
+const GEETEST_TIMEOUT_MS = 5_000;
+
+/** 极验配置缓存条目：值快照 + 加载标志。
+ *  null 表示未加载（首次请求查库），加载后缓存 id/key（即便为空也缓存，避免每次空查询）。 */
+interface GeetestConfig {
+  captchaId: string;
+  captchaKey: string;
+}
+
+/** 前端回调产出的 4 个验证参数（gt4.js captchaObj.onSuccess 回调）。 */
+export interface GeetestCaptchaParams {
+  lot_number: string;
+  captcha_output: string;
+  pass_token: string;
+  gen_time: string;
+}
+
+@Injectable()
+export class GeetestService {
+  /** 极验配置缓存（启动后变更需重启）。null=未加载。 */
+  private configCache: GeetestConfig | null = null;
+
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  /**
+   * 二次校验：判定本次验证码是否有效。
+   * @param params 前端回调产出的 4 参数（lot_number/captcha_output/pass_token/gen_time）。
+   *   未配置极验时（开发态）params 可为 undefined，直接放行。
+   * @returns true=通过（或容灾放行），false=验证失败。
+   *   调用方在「已配置极验 + params 缺失」时应自行抛 badRequest，本方法仅负责「配了就校验，校验失败返 false」。
+   */
+  async validate(params?: Partial<GeetestCaptchaParams>): Promise<boolean> {
+    const config = await this.getCaptchaConfig();
+    // 未配置极验（captchaId 空）→ 直接放行（开发态跳过，前端不显验证码）。
+    if (!config.captchaId) return true;
+
+    // 已配置极验：4 参数必须齐全，任一缺失视为未完成验证码。
+    if (!params?.lot_number || !params?.captcha_output || !params?.pass_token || !params?.gen_time) {
+      return false;
+    }
+
+    // 生成签名：HMAC-SHA256(captchaKey, lot_number) hex。
+    // lot_number 作为消息，captchaKey 作为密钥（极验官方固定算法，与服务端 key 一致才能通过校验）。
+    const sign_token = createHmac('sha256', config.captchaKey).update(params.lot_number).digest('hex');
+
+    // 构造表单 5 参数（application/x-www-form-urlencoded）。
+    const form = new URLSearchParams({
+      lot_number: params.lot_number,
+      captcha_output: params.captcha_output,
+      pass_token: params.pass_token,
+      gen_time: params.gen_time,
+      sign_token,
+    });
+    const url = `${GEETEST_VALIDATE_URL}?captcha_id=${encodeURIComponent(config.captchaId)}`;
+
+    try {
+      // AbortController 兜底超时：极验挂起时不让登录流程无限等待。
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), GEETEST_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: form.toString(),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      // 容灾：响应状态非 200 → 降级放行（极验服务异常，不阻断业务）。
+      if (!res.ok) {
+        console.error('[geetest.validate] 极验响应状态异常，降级放行', { status: res.status });
+        return true;
+      }
+      const data = (await res.json()) as { result?: string; reason?: string };
+      // 仅 result==='success' 视为通过；其余（fail 等）均返回 false，调用方提示「请先完成验证码」。
+      return data.result === 'success';
+    } catch (error) {
+      // 容灾：网络异常/超时/响应非 JSON → 降级放行 true + 日志，不阻断登录。
+      // 极验官方明确推荐此策略：避免外部依赖挂掉导致用户无法登录。
+      console.error('[geetest.validate] 极验二次校验异常，降级放行', { error: (error as Error).message });
+      return true;
+    }
+  }
+
+  /** 失效极验配置缓存。由 SettingsService.updateSettings 在改了 geetestCaptchaId/geetestCaptchaKey 后调用，
+   *  保证 admin 保存后下一次登录/注册校验即读到新配置（不依赖重启进程生效），与 mail.invalidateSmtpCache 同模式。
+   *
+   *  与「启动后变更需重启」的旧设计不同：admin 通过设置页改极验配置的频率虽低，但「改了不生效」会造成
+   *  前端（platform-info 30s 缓存刷新后）已显示验证码、后端却仍按旧缓存状态跳过校验的不一致；统一在
+   *  updateSettings 后失效缓存，使行为与 SMTP 热生效一致（admin 保存即生效）。 */
+  invalidateConfigCache(): void {
+    this.configCache = null;
+  }
+
+  /** 当前是否已配置极验（前端据此决定是否显示验证码）。
+   *  供 platform-info 端点返回（与 getPublicInfo 合并查询，避免前端多次往返）。 */
+  async isConfigured(): Promise<boolean> {
+    const config = await this.getCaptchaConfig();
+    return !!config.captchaId;
+  }
+
+  /** 读取极验配置（PlatformSetting 缓存）。
+   *  首次查库并缓存到实例字段；SettingsService.updateSettings 改 geetest key 后调 invalidateConfigCache 失效。
+   *  即便 key 不存在也缓存空串（避免每次登录都查空），保证「未配置」判定稳定。 */
+  private async getCaptchaConfig(): Promise<GeetestConfig> {
+    if (this.configCache) return this.configCache;
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['geetestCaptchaId', 'geetestCaptchaKey'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    this.configCache = {
+      captchaId: (map.get('geetestCaptchaId') ?? '').trim(),
+      captchaKey: map.get('geetestCaptchaKey') ?? '',
+    };
+    return this.configCache;
+  }
+}

@@ -3,7 +3,8 @@ import { toast } from 'sonner';
 import { ServerIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api, isEmail, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
-import type { CollabSessionResponse } from '@/lib/types';
+import { useGeetest } from '@/lib/geetest';
+import type { CollabSessionResponse, PlatformInfo } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,6 +38,21 @@ export function Auth() {
   const [newPassword, setNewPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
+  // 组C 极验：platform-info 取 geetestCaptchaId（公开端点，后端配置了才显验证码）。
+  // 仅在 backendUrl 已配置时拉取（未配置时调用方本就要先设后端地址）。
+  const [captchaId, setCaptchaId] = useState('');
+  const captcha = useGeetest(captchaId);
+
+  useEffect(() => {
+    if (!backendUrl) return;
+    // platform-info 公开端点（auth:false），失败静默（未配置极验时 captchaId 保持空，不显验证码）。
+    api<PlatformInfo>('/api/platform-info', { auth: false, method: 'GET' })
+      .then((info) => setCaptchaId(info.geetestCaptchaId ?? ''))
+      .catch(() => {
+        /* 拉取失败不阻断登录（开发态后端可能未实现该端点的旧版本） */
+      });
+  }, [backendUrl]);
+
   useEffect(() => {
     // 从 URL 解析 reset_token（邮件重置链接形如 <base>/?reset_token=xxx）。
     try {
@@ -55,12 +71,20 @@ export function Auth() {
 
   async function onForgotPassword() {
     if (!isEmail(forgotEmail)) return toast.error('邮箱格式不正确');
+    // 组C 极验：配置了验证码时强制先通过验证（防找回密码邮件轰炸）。
+    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
     setForgotLoading(true);
     try {
-      await api('/api/auth/forgot-password', { auth: false, method: 'POST', body: { email: forgotEmail.trim() } });
+      await api('/api/auth/forgot-password', {
+        auth: false,
+        method: 'POST',
+        body: { email: forgotEmail.trim(), captcha: captcha.validateResult ?? undefined },
+      });
       toast.success('若该邮箱已注册，重置链接已发送');
       setForgotOpen(false);
       setForgotEmail('');
+      // 提交后重置验证码（下次需重新验证）。
+      captcha.reset();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -92,7 +116,7 @@ export function Auth() {
 
   async function loginCore(em: string, pw: string) {
     const r = await api<CollabSessionResponse>('/api/auth/login', {
-      auth: false, method: 'POST', body: { email: em, password: pw },
+      auth: false, method: 'POST', body: { email: em, password: pw, captcha: captcha.validateResult ?? undefined },
     });
     if (!r.token) throw new Error('登录响应缺少 token');
     applyCollabSession(r);
@@ -102,9 +126,13 @@ export function Auth() {
     if (!backendUrl) return toast.error('先在下方设置公司平台地址');
     if (!isEmail(email)) return toast.error('邮箱格式不正确');
     if (!password) return toast.error('输入密码');
+    // 组C 极验：配置了验证码时强制先通过验证。
+    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
     setLoading(true);
     try {
       await loginCore(email.trim(), password);
+      // 登录成功后重置验证码（下次需重新验证）。
+      captcha.reset();
     } catch (e) {
       const err = e as ApiError;
       toast.error(err.code === 'unauthorized' ? '邮箱或密码错误' : err.message);
@@ -118,6 +146,8 @@ export function Auth() {
     if (!isEmail(email)) return toast.error('邮箱格式不正确（如 name@example.com）');
     if (password.length < 8) return toast.error('密码至少 8 位');
     if (wantsTeamAdmin && !teamName.trim()) return toast.error('填写要申请管理的团队名称');
+    // 组C 极验：配置了验证码时强制先通过验证。
+    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
     setLoading(true);
     try {
       const r = await api<CollabSessionResponse>('/api/auth/register', {
@@ -130,10 +160,12 @@ export function Auth() {
           wantsTeamAdmin,
           teamName: teamName.trim(),
           reason: reason.trim(),
+          captcha: captcha.validateResult ?? undefined,
         },
       });
       toast.success(wantsTeamAdmin ? '申请已提交，等待平台管理员审批' : '注册成功，请输入团队邀请码');
       applyCollabSession(r);
+      captcha.reset();
     } catch (e) {
       const err = e as ApiError;
       // 修复 DESK-AUTH-01：此前用正则 /已存在|duplicate|registered/ 匹配后端冲突消息，
@@ -172,6 +204,15 @@ export function Auth() {
         <CardContent className="flex flex-col gap-3">
           <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
           <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          {/* 组C 极验：后端配置了 geetestCaptchaId 时渲染「点击验证」组件（captchaId 为空则不渲染，开发态跳过）。 */}
+          {captchaId && (
+            <div className="flex flex-col gap-1">
+              <div ref={captcha.containerRef} />
+              {!captcha.ready && <p className="text-xs text-muted-foreground">验证码组件加载中…</p>}
+              {captcha.ready && !captcha.validateResult && <p className="text-xs text-muted-foreground">请点击完成上方验证</p>}
+              {captcha.validateResult && <p className="text-xs text-emerald-600">验证已通过</p>}
+            </div>
+          )}
           <div className={cn('grid transition-all duration-300 ease-out', mode === 'register' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
             <div className="flex flex-col gap-3 overflow-hidden">
               <Input placeholder="昵称（可选）" value={name} onChange={(e) => setName(e.target.value)} />

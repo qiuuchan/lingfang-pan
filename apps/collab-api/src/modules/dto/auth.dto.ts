@@ -1,5 +1,27 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+/** 极验 V4 验证码参数（gt4.js captchaObj.onSuccess 回调产出的 4 参数）。
+ *  仅在后端配置了 geetestCaptchaId 时才强制要求（service 层据 PlatformSetting 判定）。
+ *  4 个字段均非空字符串校验由 service 层 GeetestService.validate 负责，DTO 层仅做类型约束。 */
+export class GeetestCaptchaDto {
+  @ApiProperty({ description: '验证流水号', example: '4c7b...' })
+  @IsString()
+  lot_number!: string;
+
+  @ApiProperty({ description: '验证输出信息' })
+  @IsString()
+  captcha_output!: string;
+
+  @ApiProperty({ description: '验证通过标识' })
+  @IsString()
+  pass_token!: string;
+
+  @ApiProperty({ description: '验证通过时间戳' })
+  @IsString()
+  gen_time!: string;
+}
 
 /** 注册请求体 DTO。校验邮箱格式、密码长度与可选的团队管理员申请字段。 */
 export class RegisterDto {
@@ -31,6 +53,13 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  // 组C 极验：后端配置了 geetestCaptchaId 时强制校验（service 层判定），未配置则跳过（开发态）。
+  @ApiPropertyOptional({ description: '极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GeetestCaptchaDto)
+  captcha?: GeetestCaptchaDto;
 }
 
 /** 登录请求体 DTO。 */
@@ -42,6 +71,13 @@ export class LoginDto {
   @ApiProperty({ description: '登录密码' })
   @IsString()
   password!: string;
+
+  // 组C 极验：后端配置了 geetestCaptchaId 时强制校验（service 层判定），未配置则跳过（开发态）。
+  @ApiPropertyOptional({ description: '极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GeetestCaptchaDto)
+  captcha?: GeetestCaptchaDto;
 }
 
 /** 找回密码请求体 DTO。 */
@@ -49,6 +85,13 @@ export class ForgotPasswordDto {
   @ApiProperty({ description: '注册邮箱地址' })
   @IsEmail({}, { message: '请输入有效邮箱' })
   email!: string;
+
+  // 组C 极验：后端配置了 geetestCaptchaId 时强制校验（service 层判定），未配置则跳过（开发态）。
+  @ApiPropertyOptional({ description: '极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GeetestCaptchaDto)
+  captcha?: GeetestCaptchaDto;
 }
 
 /** 重置密码请求体 DTO。 */

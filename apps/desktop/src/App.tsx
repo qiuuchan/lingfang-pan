@@ -11,6 +11,7 @@ import { Footer } from '@/components/Footer';
 // 其余重页面（Market/Wallet/Review/TeamManage/Settings/Plugins/TeamHome）按需懒加载，首屏不进 bundle。
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
+import { SetupWizard } from '@/pages/SetupWizard';
 import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 
@@ -169,6 +170,9 @@ export default function App() {
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
   // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway' 再 setView('settings')。
   const [settingsTab, setSettingsTab] = useState<'cli' | 'gateway' | 'backend'>('cli');
+  // 组D 首次启动安装向导：backendUrl 已配置且无 token 时查 /api/setup/status，
+  // needsSetup=true（DB 无 PLATFORM_ADMIN）则渲染 SetupWizard 替代 Auth。
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   const saveBackendUrl = useCallback((url: string) => {
     const normalized = normalizeBackendUrl(url);
@@ -264,6 +268,29 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
   }, [resetSession]);
 
+  // 组D 首次启动安装向导：无 token 且 backendUrl 已配置时，查 /api/setup/status。
+  // needsSetup=true（DB 无 PLATFORM_ADMIN）→ 渲染 SetupWizard 替代 Auth，拦截在登录之前。
+  // 依赖 [session.token, backendUrl]：backendUrl 刚保存或登出（token 清空）时都会重新判定。
+  // 查询失败（后端未启动 / 网络异常）不阻断：保守视为无需向导，进 Auth 走正常登录（登录会报错提示）。
+  useEffect(() => {
+    if (sessionRef.current.token || !backendUrl) {
+      setNeedsSetup(false);
+      return;
+    }
+    let cancelled = false;
+    api<{ needsSetup: boolean }>('/api/setup/status', { auth: false })
+      .then((res) => {
+        if (!cancelled) setNeedsSetup(!!res.needsSetup);
+      })
+      .catch(() => {
+        // 查询失败：保守不拦截，进 Auth（后端未就绪时 Auth 内的请求会给出连接错误提示）。
+        if (!cancelled) setNeedsSetup(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.token, backendUrl]);
+
   useEffect(() => {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
@@ -313,7 +340,14 @@ export default function App() {
   }
 
   if (!session.token) {
-    return <AppContext.Provider value={ctx}><Centered><Auth /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
+    // 组D：needsSetup=true（平台未初始化）时渲染 SetupWizard 替代 Auth，拦截在登录之前。
+    // 向导完成后 needsSetup 置 false（effect 重查亦会刷新），回到 Auth 走正常登录。
+    const authBody = needsSetup ? (
+      <SetupWizard onDone={() => setNeedsSetup(false)} />
+    ) : (
+      <Auth />
+    );
+    return <AppContext.Provider value={ctx}><Centered>{authBody}</Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   if (session.onboarding && !['TEAM_SPACE', 'TEAM_ADMIN_SPACE'].includes(session.onboarding)) {

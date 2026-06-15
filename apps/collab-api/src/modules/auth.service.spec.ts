@@ -17,12 +17,17 @@ function mockPrisma() {
     findUnique: vi.fn(),
     updateMany: vi.fn(),
     findUniqueOrThrow: vi.fn(),
-    update: vi.fn(),
+    // update 默认 resolved：组B resetFailedLogin 用 .catch() 链降级，需 thenable；
+    // verifyEmail 成功路径也 await update（结果未用），resolved 默认值兼容两者。
+    update: vi.fn(async () => undefined),
     create: vi.fn(),
   };
   // auditLog.create 默认返回 resolved Promise（logout/refresh 用 .catch() 链，需 thenable）。
   const auditLog = { create: vi.fn(async () => undefined) };
   const teamAdminApplication = { create: vi.fn(), findFirst: vi.fn(async () => null) };
+  // platformSetting.findMany 默认返回空数组：组B getLockConfig 读 maxLoginAttempts/lockDurationMinutes，
+  // 未配置时降级默认值（5 次 / 15min）；用例可在 beforeEach 后按需 mockResolvedValue 覆盖。
+  const platformSetting = { findMany: vi.fn(async () => []) };
   // tx 上下文：register 事务内调用 user.create + auditLog.create（+ 可选 teamAdminApplication.create）。
   const tx = {
     user: { updateMany: user.updateMany, findUniqueOrThrow: user.findUniqueOrThrow, create: user.create },
@@ -30,7 +35,7 @@ function mockPrisma() {
     teamAdminApplication,
   };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
-  return { user, auditLog, teamAdminApplication, $transaction, __tx: tx };
+  return { user, auditLog, teamAdminApplication, platformSetting, $transaction, __tx: tx };
 }
 
 function mockMail() {
@@ -43,16 +48,27 @@ function mockMail() {
   };
 }
 
+// 组C 极验 mock：默认「未配置」（isConfigured=false），requireCaptcha 直接跳过，
+// 不影响既有 login/register/forgotPassword 用例的行为。
+function mockGeetest() {
+  return {
+    isConfigured: vi.fn(async () => false),
+    validate: vi.fn(async () => true),
+  };
+}
+
 describe('AuthService 找回密码 + 重置密码', () => {
   let prisma: ReturnType<typeof mockPrisma>;
   let mail: ReturnType<typeof mockMail>;
+  let geetest: ReturnType<typeof mockGeetest>;
   let service: AuthService;
 
   beforeEach(() => {
     prisma = mockPrisma();
     mail = mockMail();
+    geetest = mockGeetest();
     // @ts-expect-error mock 不实现完整 PrismaService 接口，仅测用到的方法。
-    service = new AuthService(prisma, mail);
+    service = new AuthService(prisma, mail, geetest);
   });
 
   describe('forgotPassword', () => {
@@ -160,6 +176,8 @@ describe('AuthService 找回密码 + 重置密码', () => {
     const activeUser = {
       id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
       displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
+      // 组B 账户锁定字段：未锁定态（lockedUntil=null + attempts=0），login 入口锁检查放行。
+      failedLoginAttempts: 0, lockedUntil: null,
     };
 
     it('登录成功写 auth.login.success 审计', async () => {
@@ -177,6 +195,8 @@ describe('AuthService 找回密码 + 重置密码', () => {
 
     it('密码错误写 auth.login.failed 审计（reason=wrong_password）', async () => {
       prisma.user.findUnique.mockResolvedValueOnce(activeUser);
+      // 组B recordFailedLogin 内部再 findUnique 读 failedLoginAttempts（返回 0 → 累计 1，未达阈值）。
+      prisma.user.findUnique.mockResolvedValueOnce({ failedLoginAttempts: 0 });
       await expect(service.login({ email: 'a@b.com', password: 'wrongpass' }))
         .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -199,6 +219,103 @@ describe('AuthService 找回密码 + 重置密码', () => {
         .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ action: 'auth.login.failed', metadata: expect.objectContaining({ reason: 'account_inactive' }) }),
+      }));
+    });
+  });
+
+  // === 组B 账户级密码重试锁定 ===
+  describe('组B 账户锁定', () => {
+    const realHash = bcrypt.hashSync('pass1234', 12);
+    const baseUser = {
+      id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
+      displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
+      failedLoginAttempts: 0, lockedUntil: null,
+    };
+
+    it('lockedUntil 未过期时直接拒绝并写 auth.login.locked 审计（返剩余分钟）', async () => {
+      // 锁定到 10 分钟后。
+      const lockedUser = { ...baseUser, lockedUntil: new Date(Date.now() + 10 * 60_000) };
+      prisma.user.findUnique.mockResolvedValueOnce(lockedUser);
+      await expect(service.login({ email: 'a@b.com', password: 'pass1234' }))
+        .rejects.toMatchObject({ status: 403, code: 'forbidden' });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.locked', actorUserId: 'u1', metadata: expect.objectContaining({ remainingMinutes: expect.any(Number) }) }),
+      }));
+      // 锁定时不应比对密码（bcrypt.compare 不触发）。
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('lockedUntil 已过期（历史时间）放行登录', async () => {
+      // 锁定时间已过（1 分钟前）→ 不再拦截，走正常密码校验。
+      const unlockedUser = { ...baseUser, lockedUntil: new Date(Date.now() - 60_000) };
+      prisma.user.findUnique.mockResolvedValueOnce(unlockedUser);
+      // sessionFor 再读一次。
+      prisma.user.findUnique.mockResolvedValueOnce(unlockedUser);
+      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
+      expect(result.user.id).toBe('u1');
+    });
+
+    it('密码错误累计 attempts，未达阈值不锁定（默认 5 次）', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(baseUser);
+      // recordFailedLogin 读 attempts：当前 2 → 累计 3，未达 5 → 仅自增 attempts，不写 auth.login.locked。
+      prisma.user.findUnique.mockResolvedValueOnce({ failedLoginAttempts: 2 });
+      await expect(service.login({ email: 'a@b.com', password: 'wrongpass' }))
+        .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+      // 仅自增 attempts（不设 lockedUntil）。
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: { failedLoginAttempts: 3 },
+      }));
+      // 未达阈值：不写 auth.login.locked 审计（只有 auth.login.failed）。
+      expect(prisma.auditLog.create).not.toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.locked' }),
+      }));
+    });
+
+    it('达阈值时设 lockedUntil 并写 auth.login.locked 审计', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(baseUser);
+      // 当前 attempts=4 → 累计 5 达默认阈值 → 设 lockedUntil。
+      prisma.user.findUnique.mockResolvedValueOnce({ failedLoginAttempts: 4 });
+      await expect(service.login({ email: 'a@b.com', password: 'wrongpass' }))
+        .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+      // update 含 lockedUntil（Date）且 attempts=5。
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: expect.objectContaining({ failedLoginAttempts: 5, lockedUntil: expect.any(Date) }),
+      }));
+      // 触发锁定：写 auth.login.locked 审计（metadata 含 attempts + lockMinutes）。
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.locked', actorUserId: 'u1', metadata: expect.objectContaining({ attempts: 5, lockMinutes: 15 }) }),
+      }));
+    });
+
+    it('阈值/锁定期读 PlatformSetting（可配）', async () => {
+      // 配置：3 次锁定 / 30 分钟。当前 attempts=2 → 累计 3 达自定义阈值。
+      prisma.platformSetting.findMany.mockResolvedValueOnce([
+        { key: 'maxLoginAttempts', value: '3' },
+        { key: 'lockDurationMinutes', value: '30' },
+      ]);
+      prisma.user.findUnique.mockResolvedValueOnce(baseUser);
+      prisma.user.findUnique.mockResolvedValueOnce({ failedLoginAttempts: 2 });
+      await expect(service.login({ email: 'a@b.com', password: 'wrongpass' }))
+        .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ failedLoginAttempts: 3, lockedUntil: expect.any(Date) }),
+      }));
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.locked', metadata: expect.objectContaining({ attempts: 3, lockMinutes: 30 }) }),
+      }));
+    });
+
+    it('登录成功后重置 failedLoginAttempts=0 + lockedUntil=null', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(baseUser);
+      // sessionFor 再读一次。
+      prisma.user.findUnique.mockResolvedValueOnce(baseUser);
+      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
+      expect(result.user.id).toBe('u1');
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
       }));
     });
   });
@@ -267,6 +384,58 @@ describe('AuthService 找回密码 + 重置密码', () => {
     });
   });
 
+
+  // === 组C 极验验证码：登录/注册/找回密码配置极验后强制校验，未配置跳过 ===
+  describe('极验验证码校验（requireCaptcha）', () => {
+    it('未配置极验时 login 跳过验证码校验（开发态）', async () => {
+      geetest.isConfigured.mockResolvedValue(false);
+      const realHash = bcrypt.hashSync('pass1234', 12);
+      const activeUser = {
+        id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
+        displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
+      };
+      prisma.user.findUnique.mockResolvedValueOnce(activeUser).mockResolvedValueOnce(activeUser);
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
+      expect(result.user.id).toBe('u1');
+      // isConfigured 被调用（判定是否强制校验），validate 不应被调用（未配置即跳过）。
+      expect(geetest.validate).not.toHaveBeenCalled();
+    });
+
+    it('配置极验后 login 缺 captcha 抛 bad_request', async () => {
+      geetest.isConfigured.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(false); // 缺参数 → validate 返 false
+      await expect(service.login({ email: 'a@b.com', password: 'pass1234' }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+      // 验证码校验失败不应查用户（在 requireCaptcha 之后才查库）。
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('配置极验后 register 验证通过则继续注册流程', async () => {
+      geetest.isConfigured.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(true);
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      prisma.user.findUnique.mockResolvedValueOnce({ tokenVersion: 0, emailVerified: null });
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'new-user', email: 'new@b.com', status: 'ACTIVE', tokenVersion: 0, displayName: 'New', platformRole: 'NONE', emailVerified: null, memberships: [] });
+      prisma.user.create.mockResolvedValueOnce({ id: 'new-user', email: 'new@b.com', displayName: 'New' });
+      const result = await service.register({
+        email: 'new@b.com', password: 'newpass1234',
+        captcha: { lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' },
+      });
+      expect(result.user.id).toBe('new-user');
+      // validate 收到前端 4 参数。
+      expect(geetest.validate).toHaveBeenCalledWith({ lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+    });
+
+    it('配置极验后 forgotPassword 验证失败抛 bad_request（不查库不发包）', async () => {
+      geetest.isConfigured.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(false);
+      await expect(service.forgotPassword({ email: 'a@b.com' }))
+        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(mail.sendPasswordReset).not.toHaveBeenCalled();
+    });
+  });
 
   describe('verifyEmail', () => {
     it('token 无效时抛 bad_request', async () => {

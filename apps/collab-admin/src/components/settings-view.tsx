@@ -36,6 +36,24 @@ const DEFAULT_PLATFORM_INFO: PlatformInfo = {
   logoText: 'LF',
 };
 
+// SMTP 配置：从 GET /api/admin/settings/smtp 加载（PlatformSetting 优先，.env fallback）。
+// hasSmtpPass 标记后端是否已存密码（密码不返回明文，避免经 HTTP 泄漏到浏览器）。
+type SmtpSettings = {
+  smtpUrl: string;
+  smtpFrom: string;
+  smtpUser: string;
+  hasSmtpPass: boolean;
+  hasSmtpUrl: boolean;
+};
+
+const EMPTY_SMTP: SmtpSettings = {
+  smtpUrl: '',
+  smtpFrom: '',
+  smtpUser: '',
+  hasSmtpPass: false,
+  hasSmtpUrl: false,
+};
+
 function readPlatformInfo(): PlatformInfo {
   try {
     const raw = localStorage.getItem(PLATFORM_INFO_KEY);
@@ -65,9 +83,63 @@ export function SettingsView() {
   // 测试发信：调 POST /api/admin/settings/test-email，验证 SMTP 配置是否正常。
   const [testEmail, setTestEmail] = useState('');
   const [testEmailLoading, setTestEmailLoading] = useState(false);
+  // SMTP 编辑表单：从 GET /api/admin/settings/smtp 加载当前生效配置（含 .env fallback）。
+  // smtpPassDraft 仅在 admin 输入新密码时才有值（后端不返回明文，表单用占位提示「已配置」）。
+  const [smtp, setSmtp] = useState<SmtpSettings>(EMPTY_SMTP);
+  const [smtpDraft, setSmtpDraft] = useState<SmtpSettings>(EMPTY_SMTP);
+  const [smtpPassDraft, setSmtpPassDraft] = useState('');
+  const [smtpLoading, setSmtpLoading] = useState(true);
+  const [smtpSaving, setSmtpSaving] = useState(false);
 
-  // 平台信息从 localStorage 读取，无需后端请求；留空 useLoad 以保持视图模式一致。
-  useEffect(() => { /* 占位：平台信息持久化在 localStorage，无后端请求 */ }, []);
+  // 平台信息从 localStorage 读取，无需后端请求；SMTP 配置从后端加载。
+  useEffect(() => {
+    let cancelled = false;
+    // GET /api/admin/settings/smtp：返回当前生效 SMTP 配置（密码脱敏 hasSmtpPass）。
+    // 失败（网络/未鉴权）降级空表单 + toast，不阻塞页面其余部分渲染。
+    api<SmtpSettings>('/api/admin/settings/smtp')
+      .then((data) => {
+        if (cancelled) return;
+        const next = { ...EMPTY_SMTP, ...data };
+        setSmtp(next);
+        setSmtpDraft(next);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        toast.error(`SMTP 配置加载失败：${(e as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setSmtpLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 保存 SMTP 配置：PATCH /api/admin/settings（批量 upsert）。
+  // 提交策略：
+  //  - smtpUrl/smtpFrom/smtpUser 始终提交（空值=清空，回退 .env fallback 或 url 内嵌）。
+  //  - smtpPass 仅在 admin 输入了新值时提交（不输入=保持后端已存密码不变，避免空值覆盖丢失密码）。
+  async function saveSmtpSettings() {
+    setSmtpSaving(true);
+    try {
+      const entries: Array<{ key: string; value: string }> = [
+        { key: 'smtpUrl', value: smtpDraft.smtpUrl.trim() },
+        { key: 'smtpFrom', value: smtpDraft.smtpFrom.trim() },
+        { key: 'smtpUser', value: smtpDraft.smtpUser.trim() },
+      ];
+      if (smtpPassDraft.length > 0) entries.push({ key: 'smtpPass', value: smtpPassDraft });
+      await api('/api/admin/settings', { method: 'PATCH', body: { settings: entries } });
+      // 保存成功后同步本地快照 + 清空密码草稿（后端已存新密码，下次加载 hasSmtpPass=true）。
+      setSmtp(smtpDraft);
+      setSmtpPassDraft('');
+      if (smtpPassDraft.length > 0) setSmtpDraft({ ...smtpDraft, hasSmtpPass: true });
+      toast.success('SMTP 配置已保存，运行时即时生效');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSmtpSaving(false);
+    }
+  }
 
   function savePlatformInfo() {
     const next = {
@@ -195,24 +267,99 @@ export function SettingsView() {
         </Section>
       </motion.div>
 
-      {/* SMTP 配置（只读）+ 测试发信 */}
+      {/* SMTP 配置（可编辑，保存后运行时即时生效）+ 测试发信 */}
       <motion.div variants={cardVariant}>
         <Section
           title="邮件服务（SMTP）"
-          description="邀请码、审批通知、找回密码与邮箱验证邮件经由平台 SMTP 发送。SMTP 在服务端 .env 配置，此处可发测试邮件验证配置是否正常。"
+          description="邀请码、审批通知、找回密码与邮箱验证邮件经由平台 SMTP 发送。配置保存后运行时即时生效（无需重启）。"
         >
-          <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <MailIcon className="size-3.5" />
-            <span>SMTP 主机 / 端口 / 加密等参数在服务端 .env（SMTP_URL / SMTP_FROM）配置，前端只读展示。</span>
+            <span>
+              配置优先级：此处后台配置 &gt; 服务端 .env（SMTP_URL / SMTP_FROM 仅作 fallback）。
+              独立用户名 / 密码未填时，凭据可内嵌在 SMTP 连接 URL（如 smtps://user:pass@host:465）。
+            </span>
           </div>
-          <InfoGrid
-            items={[
-              ['SMTP 连接', '（由后端 .env SMTP_URL 提供，如 smtps://host:465）'],
-              ['发件人', '（SMTP_FROM，未配用平台默认 no-reply）'],
-              ['重置链接前缀', '（PASSWORD_RESET_BASE_URL）'],
-              ['验证链接前缀', '（EMAIL_VERIFY_BASE_URL）'],
-            ]}
-          />
+
+          {/* 编辑表单：smtpUrl / smtpFrom / smtpUser / smtpPass。
+              smtpPass 输入框：后端不返回明文，已配置时显示占位「已配置，留空保持不变」。
+              加载中（smtpLoading）用 disabled 占位，避免空表单一闪而过。 */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="smtp-url">SMTP 连接 URL</Label>
+              <Input
+                id="smtp-url"
+                value={smtpDraft.smtpUrl}
+                onChange={(e) => setSmtpDraft({ ...smtpDraft, smtpUrl: e.target.value })}
+                placeholder="smtps://smtp.example.com:465"
+                disabled={smtpLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                smtp(s)://host[:port]，端口 465 用 smtps://（TLS 直连），587 用 smtp://（STARTTLS）。
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="smtp-from">发件人地址</Label>
+              <Input
+                id="smtp-from"
+                value={smtpDraft.smtpFrom}
+                onChange={(e) => setSmtpDraft({ ...smtpDraft, smtpFrom: e.target.value })}
+                placeholder="LingFang 平台 <no-reply@example.com>"
+                disabled={smtpLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">未填用平台默认（含品牌名）。</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="smtp-user">认证用户名</Label>
+              <Input
+                id="smtp-user"
+                value={smtpDraft.smtpUser}
+                onChange={(e) => setSmtpDraft({ ...smtpDraft, smtpUser: e.target.value })}
+                placeholder="（可选，URL 内嵌凭据时可不填）"
+                disabled={smtpLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="smtp-pass">认证密码</Label>
+              <Input
+                id="smtp-pass"
+                type="password"
+                value={smtpPassDraft}
+                onChange={(e) => setSmtpPassDraft(e.target.value)}
+                placeholder={smtpDraft.hasSmtpPass ? '已配置，留空保持不变' : '（未配置）'}
+                disabled={smtpLoading}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                {smtpDraft.hasSmtpPass
+                  ? '当前已配置密码，留空提交则保持原密码不变。'
+                  : '独立配置密码（与 URL 内嵌凭据二选一）。'}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSmtpDraft(smtp);
+                setSmtpPassDraft('');
+              }}
+              disabled={smtpLoading || smtpSaving}
+            >
+              重置
+            </Button>
+            <Button onClick={saveSmtpSettings} disabled={smtpLoading || smtpSaving}>
+              <SaveIcon className="mr-1 size-4" />
+              {smtpSaving ? '保存中…' : '保存 SMTP 配置'}
+            </Button>
+          </div>
 
           {/* 测试发信：输入收件邮箱 → 调 /api/admin/settings/test-email → 返回成功 / 失败 + 错误信息 */}
           <div className="mt-4 rounded-xl border bg-muted/20 p-4">
@@ -241,7 +388,11 @@ export function SettingsView() {
 
           <div className="mt-3">
             <Badge variant="outline" className="text-muted-foreground">
-              SMTP 参数只读 · 在服务端 .env 配置
+              {smtpLoading
+                ? '配置加载中…'
+                : smtp.hasSmtpUrl
+                  ? 'SMTP 已配置 · 后台配置优先于 .env'
+                  : 'SMTP 未配置 · 邮件降级为 console.log'}
             </Badge>
           </div>
         </Section>
@@ -263,16 +414,19 @@ export function SettingsView() {
         </Section>
       </motion.div>
 
-      {/* 后端端点迁移说明（TODO） */}
+      {/* 遗留说明：平台名称/Logo 文案卡片仍为本地存储 */}
       <motion.div variants={cardVariant}>
         <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4 text-sm">
           <InfoIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="space-y-1 text-muted-foreground">
-            <div className="font-medium text-foreground">后端端点迁移计划（TODO）</div>
+            <div className="font-medium text-foreground">说明：平台名称 / Logo 文案仅本机生效</div>
             <p>
-              平台信息与 SMTP 当前仅本地只读展示。后续需在 collab-api 新增
-              <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-xs">/api/admin/settings</code>
-              端点（仅 PLATFORM_ADMIN），分别支持 GET 读取与 PATCH 写入平台元信息，前端再切换为 api() 调用。
+              邮件服务（SMTP）已接入后端
+              <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-xs">/api/admin/settings/smtp</code>
+              ，保存后运行时即时生效。上方「平台信息」卡片的名称 / Logo 文案当前仅保存在本机
+              （localStorage），不写入后端 PlatformSetting；对外展示的平台名 / logo 以
+              <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-xs">/api/platform-info</code>
+              返回值为准（首次安装向导或 admin 通过设置 key 写入）。后续可将本卡片也切换为后端读写以保持一致。
             </p>
           </div>
         </div>

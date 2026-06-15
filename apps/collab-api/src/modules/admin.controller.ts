@@ -332,6 +332,12 @@ export class AdminController {
     return this.settings.updateSettings(requireUser(req).id, body);
   }
 
+  @Get('settings/smtp')
+  @ApiOperation({ summary: '当前生效的 SMTP 配置（PlatformSetting 优先，.env fallback；密码脱敏）' })
+  smtpSettings(@Req() req: Request) {
+    return this.settings.getSmtpSettings(requireUser(req).id);
+  }
+
   @Post('settings/test-email')
   @ApiOperation({ summary: '发送测试邮件验证 SMTP 配置（返成功/失败 + 错误信息）' })
   testEmail(@Req() req: Request, @Body() body: TestEmailDto) {

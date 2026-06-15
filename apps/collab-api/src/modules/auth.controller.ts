@@ -20,7 +20,15 @@ export class AuthController {
   @AUTH_THROTTLE
   @ApiOperation({ summary: '本地客户端注册普通用户或提交团队管理员申请' })
   register(@Body() body: RegisterDto) {
-    return this.auth.register(body);
+    return this.auth.register({
+      email: body.email,
+      password: body.password,
+      displayName: body.displayName,
+      wantsTeamAdmin: body.wantsTeamAdmin,
+      teamName: body.teamName,
+      reason: body.reason,
+      captcha: body.captcha,
+    });
   }
 
   @Public()
@@ -28,7 +36,7 @@ export class AuthController {
   @AUTH_THROTTLE
   @ApiOperation({ summary: '本地客户端和管理端共用登录' })
   login(@Body() body: LoginDto) {
-    return this.auth.login(body);
+    return this.auth.login({ email: body.email, password: body.password, captcha: body.captcha });
   }
 
   @Public()
@@ -36,7 +44,7 @@ export class AuthController {
   @AUTH_THROTTLE
   @ApiOperation({ summary: '找回密码：发送重置链接邮件（占位 SMTP 未配时降级 console.log）' })
   forgotPassword(@Body() body: ForgotPasswordDto) {
-    return this.auth.forgotPassword(body);
+    return this.auth.forgotPassword({ email: body.email, captcha: body.captcha });
   }
 
   @Public()
