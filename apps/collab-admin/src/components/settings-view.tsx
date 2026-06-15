@@ -539,18 +539,23 @@ export function SettingsView() {
               加载中（smtpLoading）用 disabled 占位，避免空表单一闪而过。 */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="smtp-url">SMTP 连接 URL</Label>
+              <Label htmlFor="smtp-url">SMTP 服务器地址</Label>
               <Input
                 id="smtp-url"
                 value={smtpDraft.smtpUrl}
                 onChange={(e) => setSmtpDraft({ ...smtpDraft, smtpUrl: e.target.value })}
-                placeholder="smtps://smtp.example.com:465"
+                placeholder="smtpdm.aliyun.com:465"
                 disabled={smtpLoading}
                 spellCheck={false}
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                smtp(s)://host[:port]，端口 465 用 smtps://（TLS 直连），587 用 smtp://（STARTTLS）。
+                填服务器地址[:端口]，自动识别 SSL。常见服务商：
+                阿里云 <code className="rounded bg-muted px-1">smtpdm.aliyun.com:465</code>、
+                QQ <code className="rounded bg-muted px-1">smtp.qq.com:465</code>、
+                163 <code className="rounded bg-muted px-1">smtp.163.com:465</code>、
+                Gmail <code className="rounded bg-muted px-1">smtp.gmail.com:587</code>。
+                也可填完整格式 <code className="rounded bg-muted px-1">smtps://host:port</code>。
               </p>
             </div>
             <div className="space-y-2">
