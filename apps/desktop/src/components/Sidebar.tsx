@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { tauriInvoke } from '@/lib/api';
 import type { View } from '@/lib/types';
 import { AccountDialog } from '@/components/AccountDialog';
 import {
@@ -15,6 +17,7 @@ import {
   StoreIcon,
   WalletIcon,
   ShieldCheckIcon,
+  ShirtIcon,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -41,8 +44,22 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
   // R6：账户信息改居中悬浮 Dialog（替代原右对齐 Popover）。
   const [accountOpen, setAccountOpen] = useState(false);
+  // R4：拉起 AI 换装 Python 程序（独立 GUI 窗口，subprocess 启动）。
+  const [launchingWardrobe, setLaunchingWardrobe] = useState(false);
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
+
+  async function handleLaunchWardrobe() {
+    setLaunchingWardrobe(true);
+    try {
+      await tauriInvoke('launch_ai_wardrobe');
+      toast.success('已启动 AI 换装批量版（独立窗口）');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '启动换装程序失败');
+    } finally {
+      setLaunchingWardrobe(false);
+    }
+  }
 
   return (
     <aside className={cn(
@@ -81,6 +98,18 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           );
         })}
       </nav>
+      <div className="w-56 border-t p-2.5">
+        {/* R4：AI 换装批量版 — 独立 Python 程序（PySide6 GUI），点击 subprocess 拉起。
+            依赖 PySide6/requests/Pillow（需 pip install），缺失时程序自身报错。 */}
+        <Button
+          variant="outline"
+          disabled={launchingWardrobe}
+          onClick={handleLaunchWardrobe}
+          className="h-9 w-full justify-start gap-2.5 px-3 font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <ShirtIcon className="size-4" />AI 换装批量版
+        </Button>
+      </div>
       <div className="w-56 border-t p-2.5">
         {/* R6：点击底部账户信息 → 居中悬浮 AccountDialog（修改用户名/密码/邮箱/登出）。 */}
         <button

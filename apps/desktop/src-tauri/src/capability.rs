@@ -39,7 +39,7 @@ impl CapabilityRegistry {
         map.insert(plugin_id.to_string(), caps);
     }
 
-    fn find(&self, plugin_id: &str, kind: &str) -> Option<DeclaredCapability> {
+    pub fn find(&self, plugin_id: &str, kind: &str) -> Option<DeclaredCapability> {
         let map = self.plugins.lock().unwrap_or_else(|poison| poison.into_inner());
         map.get(plugin_id)?.iter().find(|c| c.kind == kind).cloned()
     }
