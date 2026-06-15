@@ -688,6 +688,17 @@ fn spawn_and_attach<E: AssistantEventSink>(
             Ok(())
         });
     }
+    #[cfg(windows)]
+    {
+        // 修复 SPAWN-PGRP（BLOCKER B1/H6）：run_captured_inner（探测/脚本路径）设置了
+        // CREATE_NEW_PROCESS_GROUP 让 stop_child_process 的 taskkill /T 能波及孙进程，
+        // 但 spawn_and_attach（实际会话 spawn 路径）此前漏设——会话 CLI 启动的 MCP server /
+        // node 子进程在会话停止后可能脱离进程树成为孤儿，持续燃烧 LLM token / 占用资源。
+        // 此处与 run_captured_inner（code_assistant.rs:1748-1750）对齐，叠加 NO_WINDOW 不弹控制台。
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        WindowsCommandExt::creation_flags(&mut command_builder, CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
     let mut child = command_builder.spawn().map_err(|error| error.to_string())?;
 
     let stdout = child.stdout.take();

@@ -802,6 +802,7 @@ export class AdminService {
    *    已注册 action 用显式列表，未注册的用 startsWith 前缀（覆盖未来新增的同前缀 action）。
    *  - q：关键词搜索，匹配 action / actor email / targetId（OR 组合）。
    *  - actorId / targetType：精确过滤。
+   *  - category + q 同时存在：两组条件 AND 串联（交集），见 AUDIT-OR 修复。
    *
    * 性能：AuditLog 已有 createdAt + actorUserId 索引；action 无索引但 take: 200 + orderBy createdAt desc
    * 使扫描面可控。如未来量大可加 action 索引（非破坏式迁移）。
@@ -818,6 +819,8 @@ export class AdminService {
     if (filters.targetType) where.targetType = filters.targetType;
 
     // 分类筛选：组合「已注册 action 列表 + 前缀 startsWith」，覆盖注册表与未来同前缀新增。
+    // category OR 组：满足该分类下任一 action 条件。
+    let categoryConditions: Prisma.AuditLogWhereInput[] | null = null;
     if (filters.category) {
       const prefix = this.categoryPrefix(filters.category);
       const conditions: Prisma.AuditLogWhereInput[] = [];
@@ -825,21 +828,35 @@ export class AdminService {
       // 已注册的 action（含跨前缀归类，如 platform_admin.bootstrap → system）。
       const registered = this.registeredActionsByCategory(filters.category);
       if (registered.length > 0) conditions.push({ action: { in: registered } });
-      if (conditions.length > 0) where.OR = conditions;
+      if (conditions.length > 0) categoryConditions = conditions;
     }
 
-    // 关键词搜索：action / actor email / targetId 模糊匹配。
+    // 关键词搜索：action / actor email / targetId 模糊匹配（OR 组合）。
     // actor email 需走 relation 查询（actor 是 User 关联），用 actor: { email: { contains } }。
+    let keywordConditions: Prisma.AuditLogWhereInput[] | null = null;
     if (filters.q) {
       const kw = filters.q.trim();
       if (kw) {
-        where.OR = [
-          ...(where.OR as Prisma.AuditLogWhereInput[] | undefined) ?? [],
+        keywordConditions = [
           { action: { contains: kw, mode: 'insensitive' } },
           { targetId: { contains: kw, mode: 'insensitive' } },
           { actor: { email: { contains: kw, mode: 'insensitive' } } },
         ];
       }
+    }
+
+    // 修复 AUDIT-OR：此前 category 与 q 的条件被扁平合并进同一个 where.OR，
+    // 形成 (category 条件 OR keyword 条件) 的并集，而非预期的 (category) AND (keyword) 交集，
+    // 导致管理员同时筛选分类 + 关键词时结果范围被错误扩大。
+    // 现按「各自独立 OR 组、整体 AND 串联」构建：
+    //  - 两者皆有：where.AND = [ { OR: category }, { OR: keyword } ]（交集，语义正确）。
+    //  - 仅其一：where.OR = 该组（与历史单独筛选行为一致）。
+    if (categoryConditions && keywordConditions) {
+      where.AND = [{ OR: categoryConditions }, { OR: keywordConditions }];
+    } else if (categoryConditions) {
+      where.OR = categoryConditions;
+    } else if (keywordConditions) {
+      where.OR = keywordConditions;
     }
 
     const logs = await this.prisma.auditLog.findMany({

@@ -709,6 +709,28 @@ describe('AdminService auditLogs 过滤', () => {
     expect(call.where.OR).toBeUndefined();
   });
 
+  it('category + q 同时存在：两组条件 AND 串联（交集，非 OR 合并）— AUDIT-OR 修复', async () => {
+    // 修复前：category 与 q 被扁平合并进同一个 where.OR，形成并集（范围错误扩大）。
+    // 修复后：where.AND = [ { OR: category 组 }, { OR: keyword 组 } ]，交集语义正确。
+    await service.auditLogs('user-admin', { category: 'auth', q: 'login' });
+    const call = prisma.auditLog.findMany.mock.calls[0][0] as {
+      where: { AND?: Array<{ OR: Array<Record<string, unknown>> }>; OR?: unknown };
+    };
+    // 同时存在 category + q 时不再用顶层 where.OR，改用 where.AND 串联两个 OR 组。
+    expect(call.where.AND).toBeDefined();
+    expect(call.where.OR).toBeUndefined();
+    expect(call.where.AND).toHaveLength(2);
+    // 第一组 = category 的 OR（auth 前缀 startsWith + 已注册 action 列表）。
+    const categoryGroup = call.where.AND![0].OR;
+    expect(categoryGroup.some((c) => 'action' in c && 'startsWith' in c.action)).toBe(true);
+    // 第二组 = keyword 的 OR（action / targetId / actor.email 三条 contains）。
+    const keywordGroup = call.where.AND![1].OR;
+    expect(keywordGroup).toHaveLength(3);
+    expect(keywordGroup.some((c) => 'action' in c && 'contains' in c.action)).toBe(true);
+    expect(keywordGroup.some((c) => 'targetId' in c)).toBe(true);
+    expect(keywordGroup.some((c) => 'actor' in c)).toBe(true);
+  });
+
   it('actor select 白名单不含 passwordHash/tokenVersion（防凭据泄漏）', async () => {
     await service.auditLogs('user-admin', {});
     const call = prisma.auditLog.findMany.mock.calls[0][0] as {

@@ -708,6 +708,11 @@ export function PluginCreatorHome() {
           // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
           model: resolveSendModel(model),
           effort,
+          // 修复 ASK-CLICONFIG：首问（start_session）与普通追问（上方 send_input）都注入 cliConfig，
+          // 但 AskUser 问题卡片选 option 回答的追问轮此前漏传——该轮不注入平台 key/apiUrl，
+          // 与普通追问行为不一致，可能在 Rust 侧未复用首轮注入配置时鉴权失败/路由到错误 provider。
+          // 与 line 630 追问路径对齐，补齐 cliConfig。
+          cliConfig: buildCliConfig(),
         },
       });
       // 回答提交后新一轮 output 由既有 listener 处理；清掉本轮工具片段，避免问题卡片重复渲染。

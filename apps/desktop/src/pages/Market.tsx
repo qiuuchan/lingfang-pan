@@ -72,6 +72,15 @@ export function Market() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageItems = (plugins ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  // 修复 MARKET-PAGE：plugins 列表变化后收敛 page 到有效范围。
+  // 虽然每次 search() 成功都会 setPage(1)，但存在「列表被其他路径缩短」的防御场景
+  // （未来若 buy/install 副作用刷新列表、或 sort 切换返回更少结果），page 可能停在超出 totalPages 的旧值，
+  // 导致 pageItems 切片为空、用户看到空白列表。此处兜底收敛，无副作用。
+  // 须置于 totalPages 声明之后（依赖该值），故放在组件体而非顶部 effect 区。
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
   async function openDetail(id: string) {
     try { setDetail(await api<MarketPlugin>(`/api/marketplace/plugins/${id}`)); } catch (e) { toast.error((e as ApiError).message); }
   }

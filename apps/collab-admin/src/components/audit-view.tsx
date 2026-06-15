@@ -52,6 +52,10 @@ export function AuditView() {
   // debounce 后的搜索词：避免每次按键都触发后端请求（300ms 防抖）。
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  // 修复 AUDIT-ERR：此前 catch 完全静默，非 401 错误（网络中断/500）时表格看起来是空的，
+  // 管理员无法区分「真的无日志」与「加载失败」。加 error 状态：仅非 401 错误时记录，在空状态区分展示。
+  // 401 仍由 api() 的 UNAUTHORIZED 事件统一处理（不在此重复记录）。
+  const [error, setError] = useState<string | null>(null);
 
   // 防抖：query 变化后 300ms 同步到 debouncedQuery，触发后端重新拉取。
   useEffect(() => {
@@ -71,12 +75,16 @@ export function AuditView() {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setError(null);
     api<{ logs: AuditLog[] }>(`/api/admin/audit-logs${qs ? `?${qs}` : ''}`)
       .then((r) => {
         if (mounted) setLogs(r.logs);
       })
-      .catch(() => {
-        // 401 由 api() 的 UNAUTHORIZED 事件统一处理；其他错误静默（logs 保持旧值，loading 复位）。
+      .catch((e: Error & { status?: number }) => {
+        // 401 由 api() 的 UNAUTHORIZED 事件统一处理；其他错误记录以便区分「无日志」与「加载失败」。
+        if (!mounted) return;
+        if (e.status === 401) return;
+        if (mounted) setError(e.message || '加载审计日志失败');
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -90,10 +98,12 @@ export function AuditView() {
 
   const reload = () => {
     setLoading(true);
+    setError(null);
     api<{ logs: AuditLog[] }>(`/api/admin/audit-logs${qs ? `?${qs}` : ''}`)
       .then((r) => setLogs(r.logs))
-      .catch(() => {
-        // 手动 reload 失败静默（logs 保持旧值）。
+      .catch((e: Error & { status?: number }) => {
+        if (e.status === 401) return;
+        setError(e.message || '加载审计日志失败');
       })
       .finally(() => setLoading(false));
   };
@@ -174,7 +184,7 @@ export function AuditView() {
             ) : (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                  {loading ? '加载中…' : '暂无审计日志'}
+                  {loading ? '加载中…' : error ? `加载失败：${error}` : '暂无审计日志'}
                 </TableCell>
               </TableRow>
             )}

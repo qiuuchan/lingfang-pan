@@ -198,10 +198,26 @@ pub fn write_codex_config(
     std::fs::write(&path, toml).map_err(|error| error.to_string())
 }
 
-/// TOML 基本字符串转义（仅 " 和 \ 需转义，控制字符极罕见故不处理）。
+/// TOML 基本字符串转义。
 /// 用防御性转义替代引入 toml crate 依赖（PRD 明确避免新依赖）。
+///
+/// 转义规则（覆盖 TOML 基本字符串禁止的字符）：
+///  - `\` → `\\`、`"` → `\"`（基本转义）。
+///  - 控制字符 U+0000–U+001F（TOML 基本字符串禁止，否则 codex 解析 config.toml 失败）→ `\uXXXX`。
+///    修复 TOML-CTRL：此前注释「控制字符极罕见故不处理」，但 model 名来自前端用户自定义输入，
+///    含换行/null 等控制字符会让生成的 config.toml 非法，codex 静默退化为默认配置或报错。
+///    用 \uXXXX 保留原值（TOML 合法转义），不静默剥离用户输入。
 fn escape_toml_string(value: &str) -> String {
-    value.replace('\\', r"\\").replace('"', r#"\""#)
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str(r"\\"),
+            '"' => out.push_str(r#"\""#),
+            c if (c as u32) <= 0x001F => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// 写 opencode 临时 opencode.json 到 `<config_dir>/opencode.json`，返回该文件路径。
@@ -545,6 +561,35 @@ mod tests {
         assert!(
             body.contains(r#"api_key = "sk-\"q\\k""#),
             "TOML 应含转义后的 key：{body}"
+        );
+    }
+
+    #[test]
+    fn codex_toml_escapes_control_chars_in_model() {
+        // 修复 TOML-CTRL：model 含控制字符（换行/null）时必须转义为 \uXXXX，
+        // 否则生成的 config.toml 非法，codex 解析失败。
+        // 不引入 toml crate（PRD 避免新依赖），用程序化不变量验证控制字符被转义：
+        //  1) model 行存在且为单行（值内换行已转义，不会把行打断）。
+        //  2) model 行内不含原始控制字符字节（U+0000–U+001F）。
+        //  3) 文件内出现 \u 转义前缀（控制字符确实被 \uXXXX 序列替代）。
+        let dir = temp_dir("codex-model-ctrl");
+        let model_with_ctrl = "gpt\n5\x00";
+        write_codex_config(&dir, "sk-test", "https://api.example.com", Some(model_with_ctrl)).unwrap();
+        let body = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        // 1) model 行存在且为单行：按行查找以 "model = " 开头的行应恰好命中一行。
+        let model_line = body
+            .lines()
+            .find(|line| line.starts_with("model = "))
+            .expect("应存在 model 行");
+        // 2) model 行内不含任何原始控制字符字节（换行已转义，整行是单行）。
+        assert!(
+            !model_line.chars().any(|c| (c as u32) <= 0x001F),
+            "model 行不得含原始控制字符（应已转义为 \\uXXXX）：{model_line}"
+        );
+        // 3) 文件内出现 \u 转义前缀（证明控制字符被 \uXXXX 序列替代，而非被剥离或原样保留）。
+        assert!(
+            body.contains("\\u"),
+            "TOML 应含 \\uXXXX 控制字符转义序列：{body}"
         );
     }
 
