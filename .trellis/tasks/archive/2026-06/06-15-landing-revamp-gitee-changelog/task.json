@@ -1,0 +1,31 @@
+{
+  "id": "landing-revamp-gitee-changelog",
+  "name": "landing-revamp-gitee-changelog",
+  "title": "官网首页重构与Gitee更新日志接入",
+  "description": "5项交付：1.首页topology动画美化 2.删architecture section+导航 3.Gitee私有仓库release拉取更新日志+管理端密钥配置 4.页脚美化 5.下载页美化",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-15",
+  "completedAt": "2026-06-15",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-15-topology-revamp",
+    "06-15-gitee-changelog",
+    "06-15-footer-revamp",
+    "06-15-download-revamp"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

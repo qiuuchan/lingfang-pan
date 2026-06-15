@@ -13,6 +13,7 @@ import { WalletController } from './wallet.controller';
 import { MarketplaceController } from './marketplace.controller';
 import { ReleaseController } from './release.controller';
 import { PlatformInfoController } from './platform-info.controller';
+import { ChangelogController } from './changelog.controller';
 import { SetupController } from './setup.controller';
 import { NotificationController } from './notification.controller';
 import { TeamService } from './team.service';
@@ -23,14 +24,16 @@ import { EconomyService } from './economy.service';
 import { MarketplaceService } from './marketplace.service';
 import { ReleaseService } from './release.service';
 import { SettingsService } from './settings.service';
+import { GiteeChangelogService } from './gitee-changelog.service';
 import { NotificationService } from './notification.service';
 import { MeService } from './me.service';
 
 @Module({
-  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, LlmController, WalletController, MarketplaceController, ReleaseController, PlatformInfoController, NotificationController, SetupController],
+  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, LlmController, WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController],
   // CollabModule 直接声明 AuthService（与 AuthModule 重复声明，历史架构；TeamService 等注入之），
   // 故 MailService / GeetestService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到它们。
   // NotificationService 无外部依赖（仅 PrismaService），被 AdminService/EconomyService 注入以在审核/购买成功后埋点触发通知。
-  providers: [PrismaService, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService, LlmService, EconomyService, MarketplaceService, ReleaseService, SettingsService, NotificationService, MeService],
+  // GiteeChangelogService 被 SettingsService（缓存失效钩子）与 ChangelogController 注入，需在此提供。
+  providers: [PrismaService, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService, LlmService, EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService],
 })
 export class CollabModule {}
