@@ -40,10 +40,12 @@ export interface TeamInfo {
 
 // 组C 极验：GET /api/platform-info 公开端点响应（不鉴权）。
 // geetestCaptchaId 空串=未配置极验，前端不显验证码（开发态跳过）。
+// geetestScenes 逗号分隔的场景白名单（login/register/forgot），前端按当前表单场景决定是否强制验证码。
 export interface PlatformInfo {
   platformName: string;
   logoUrl: string;
   geetestCaptchaId: string;
+  geetestScenes: string;
 }
 
 /** 公开团队发现页条目（GET /api/teams/public）。 */

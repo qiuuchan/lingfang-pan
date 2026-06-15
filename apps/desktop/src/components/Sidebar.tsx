@@ -37,7 +37,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const { session, view, setView, setRunningPlugin, applySession, resetSession } = useApp();
+  const { session, view, setView, setRunningPlugin, applySession, resetSession, platformName, platformLogoUrl } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
   // R6：账户信息改居中悬浮 Dialog（替代原右对齐 Popover）。
   const [accountOpen, setAccountOpen] = useState(false);
@@ -50,8 +50,21 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
       collapsed ? 'w-0' : 'w-56',
     )}>
       <div className="flex w-56 items-center gap-2 border-b px-4 py-3.5">
-        <HomeIcon className="size-5 text-primary" />
-        <span className="text-sm font-semibold leading-tight">LingFang<br /><span className="text-xs font-normal text-muted-foreground">协作平台前台</span></span>
+        {/* 云同步平台信息：logoUrl 有值显示图片，无值 fallback HomeIcon 默认图标。
+            平台名取后端 platformName（admin 可在「设置 → 平台信息」改名，全端同步）。 */}
+        <div className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-primary/10 text-primary">
+          {platformLogoUrl ? (
+            <img
+              src={platformLogoUrl}
+              alt={platformName}
+              className="size-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <HomeIcon className="size-5 text-primary" />
+          )}
+        </div>
+        <span className="text-sm font-semibold leading-tight">{platformName}<br /><span className="text-xs font-normal text-muted-foreground">协作平台前台</span></span>
       </div>
       <nav className="flex w-56 flex-1 flex-col gap-1 overflow-y-auto p-2.5">
         {items.map(({ v, label, icon: Icon }) => {

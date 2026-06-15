@@ -22,7 +22,7 @@ import {
 } from './dto/admin.dto';
 import { ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
 import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
-import { UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
+import { RevealSecretDto, UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
 import { ReleaseService } from './release.service';
 import { SettingsService } from './settings.service';
 
@@ -342,5 +342,35 @@ export class AdminController {
   @ApiOperation({ summary: '发送测试邮件验证 SMTP 配置（返成功/失败 + 错误信息）' })
   testEmail(@Req() req: Request, @Body() body: TestEmailDto) {
     return this.settings.testEmail(requireUser(req).id, body.to);
+  }
+
+  @Get('settings/geetest')
+  @ApiOperation({ summary: '当前极验配置（captchaId/scenes 明文，captchaKey 脱敏）' })
+  geetestSettings(@Req() req: Request) {
+    return this.settings.getGeetestSettings(requireUser(req).id);
+  }
+
+  @Post('settings/test-captcha')
+  @ApiOperation({ summary: '测试极验配置是否可用（探测接口连通性，返成功/失败 + 错误信息）' })
+  testCaptcha(@Req() req: Request) {
+    return this.settings.testCaptcha(requireUser(req).id);
+  }
+
+  @Get('settings/gitee')
+  @ApiOperation({ summary: '当前 Gitee 更新日志源配置（owner/repo 明文，accessToken 脱敏）' })
+  giteeSettings(@Req() req: Request) {
+    return this.settings.getGiteeSettings(requireUser(req).id);
+  }
+
+  @Post('settings/test-gitee')
+  @ApiOperation({ summary: '测试 Gitee 配置是否可用（探测 releases 端点连通性，返成功/失败 + 错误信息）' })
+  testGitee(@Req() req: Request) {
+    return this.settings.testGitee(requireUser(req).id);
+  }
+
+  @Post('settings/reveal-secret')
+  @ApiOperation({ summary: '查看敏感配置明文（SMTP 密码 / 极验私钥，需二次密码确认 + 审计）' })
+  revealSecret(@Req() req: Request, @Body() body: RevealSecretDto) {
+    return this.settings.revealSecret(requireUser(req).id, body);
   }
 }

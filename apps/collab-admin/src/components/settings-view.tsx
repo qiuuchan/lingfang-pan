@@ -7,33 +7,41 @@ import {
   SaveIcon,
   SunIcon,
   MonitorIcon,
-  InfoIcon,
   SendIcon,
+  ShieldCheckIcon,
+  EyeIcon,
+  GitBranchIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Section, InfoGrid } from '@/components/shared';
 import { useTheme } from '@/lib/theme';
 import { api } from '@/lib/api';
 import pkg from '../../package.json';
 
-// 平台基础信息的 localStorage key（后端 /api/admin/settings 端点尚未落地，前端先本地持久化，
-// 待后端就绪后改为 api() 读写，此处 TODO 标注迁移点）。
-const PLATFORM_INFO_KEY = 'lf:admin-platform-info';
-
+// 平台基础信息：云端存储（PlatformSetting 表 platformName/logoUrl）。
+// 加载用公开端点 GET /api/platform-info（扁平 {platformName, logoUrl, ...}），
+// 保存用 PATCH /api/admin/settings（{settings:[{key,value}]}，key 受后端白名单约束）。
+// 所有端（admin / 桌面 / 官网落地页）拉同一 platform-info，改后云端同步可见。
 type PlatformInfo = {
-  name: string;
-  description: string;
-  logoText: string;
+  platformName: string;
+  logoUrl: string;
 };
 
 const DEFAULT_PLATFORM_INFO: PlatformInfo = {
-  name: 'LingFang 协作平台',
-  description: '一体化协作与插件经济平台',
-  logoText: 'LF',
+  platformName: 'LingFang',
+  logoUrl: '',
 };
 
 // SMTP 配置：从 GET /api/admin/settings/smtp 加载（PlatformSetting 优先，.env fallback）。
@@ -54,16 +62,43 @@ const EMPTY_SMTP: SmtpSettings = {
   hasSmtpUrl: false,
 };
 
-function readPlatformInfo(): PlatformInfo {
-  try {
-    const raw = localStorage.getItem(PLATFORM_INFO_KEY);
-    if (!raw) return DEFAULT_PLATFORM_INFO;
-    const parsed = JSON.parse(raw) as Partial<PlatformInfo>;
-    return { ...DEFAULT_PLATFORM_INFO, ...parsed };
-  } catch {
-    return DEFAULT_PLATFORM_INFO;
-  }
-}
+// 组C 极验配置：从 GET /api/admin/settings/geetest 加载。
+// captchaId/scenes 明文（captchaId 本就公开、scenes 非密钥），captchaKey 脱敏（hasCaptchaKey 布尔）。
+type GeetestSettings = {
+  geetestCaptchaId: string;
+  hasCaptchaKey: boolean;
+  geetestScenes: string;
+  hasCaptchaId: boolean;
+};
+
+const EMPTY_GEETEST: GeetestSettings = {
+  geetestCaptchaId: '',
+  hasCaptchaKey: false,
+  geetestScenes: '',
+  hasCaptchaId: false,
+};
+
+/** 极验场景元数据：label + value，渲染勾选项 + 序列化为逗号分隔串提交。
+ *  与后端 settings.service KEY_VALIDATORS.geetestScenes 的 SCENES 白名单一致（login/register/forgot）。 */
+const GEETEST_SCENE_OPTIONS: Array<{ value: string; label: string; desc: string }> = [
+  { value: 'login', label: '登录', desc: '登录表单强制验证码' },
+  { value: 'register', label: '注册', desc: '注册表单强制验证码' },
+  { value: 'forgot', label: '找回密码', desc: '找回密码表单强制验证码' },
+];
+
+// 组D Gitee 更新日志源配置：从 GET /api/admin/settings/gitee 加载。
+// owner/repo 明文（非密钥），accessToken 脱敏（hasAccessToken 布尔）。
+type GiteeSettings = {
+  giteeOwner: string;
+  giteeRepo: string;
+  hasAccessToken: boolean;
+};
+
+const EMPTY_GITEE: GiteeSettings = {
+  giteeOwner: '',
+  giteeRepo: '',
+  hasAccessToken: false,
+};
 
 // framer-motion 卡片入场：stagger 错峰，使多卡依次滑入。
 const containerVariant = {
@@ -77,9 +112,12 @@ const cardVariant = {
 
 export function SettingsView() {
   const { mode, setTheme } = useTheme();
-  const [info, setInfo] = useState<PlatformInfo>(() => readPlatformInfo());
-  // 草稿态：编辑过程中不立即持久化，保存时才写 localStorage + toast。
-  const [draft, setDraft] = useState<PlatformInfo>(() => readPlatformInfo());
+  // 平台信息：从云端 GET /api/platform-info（公开扁平端点）加载 platformName/logoUrl。
+  // info = 已保存快照（重置基准 + 展示态），draft = 编辑草稿（保存时才 PATCH 到云端）。
+  const [info, setInfo] = useState<PlatformInfo>(DEFAULT_PLATFORM_INFO);
+  const [draft, setDraft] = useState<PlatformInfo>(DEFAULT_PLATFORM_INFO);
+  const [platformInfoLoading, setPlatformInfoLoading] = useState(true);
+  const [platformInfoSaving, setPlatformInfoSaving] = useState(false);
   // 测试发信：调 POST /api/admin/settings/test-email，验证 SMTP 配置是否正常。
   const [testEmail, setTestEmail] = useState('');
   const [testEmailLoading, setTestEmailLoading] = useState(false);
@@ -91,9 +129,48 @@ export function SettingsView() {
   const [smtpLoading, setSmtpLoading] = useState(true);
   const [smtpSaving, setSmtpSaving] = useState(false);
 
-  // 平台信息从 localStorage 读取，无需后端请求；SMTP 配置从后端加载。
+  // 组C 极验配置：从 GET /api/admin/settings/geetest 加载（captchaId/scenes 明文，captchaKey 脱敏）。
+  // captchaKeyDraft 仅在 admin 输入新 key 时才有值（后端不返回明文）。
+  // scenesDraft 是勾选的场景集合（login/register/forgot），保存时序列化为逗号分隔串提交。
+  const [geetest, setGeetest] = useState<GeetestSettings>(EMPTY_GEETEST);
+  const [geetestDraft, setGeetestDraft] = useState<GeetestSettings>(EMPTY_GEETEST);
+  const [geetestCaptchaKeyDraft, setGeetestCaptchaKeyDraft] = useState('');
+  const [geetestScenesDraft, setGeetestScenesDraft] = useState<Set<string>>(new Set());
+  const [geetestLoading, setGeetestLoading] = useState(true);
+  const [geetestSaving, setGeetestSaving] = useState(false);
+  const [geetestTesting, setGeetestTesting] = useState(false);
+
+  // 组D Gitee 更新日志源：从 GET /api/admin/settings/gitee 加载（owner/repo 明文，accessToken 脱敏）。
+  // accessTokenDraft 仅在 admin 输入新值时才有值（后端不返回明文，与极验 captchaKeyDraft 同款）。
+  const [gitee, setGitee] = useState<GiteeSettings>(EMPTY_GITEE);
+  const [giteeDraft, setGiteeDraft] = useState<GiteeSettings>(EMPTY_GITEE);
+  const [giteeAccessTokenDraft, setGiteeAccessTokenDraft] = useState('');
+  const [giteeLoading, setGiteeLoading] = useState(true);
+  const [giteeSaving, setGiteeSaving] = useState(false);
+  const [giteeTesting, setGiteeTesting] = useState(false);
+
+  // 平台信息 / SMTP / 极验配置均从后端加载：平台信息走公开 platform-info，SMTP / 极验走 admin 端点。
   useEffect(() => {
     let cancelled = false;
+    // GET /api/platform-info（@Public）：返回扁平 {platformName, logoUrl, ...}。
+    // platformName 缺省 'LingFang'，logoUrl 缺省空串（前端按空值渲染默认 logo）。失败降级默认值 + toast。
+    api<PlatformInfo>('/api/platform-info', { auth: false })
+      .then((data) => {
+        if (cancelled) return;
+        const next = {
+          platformName: (data.platformName || '').trim() || DEFAULT_PLATFORM_INFO.platformName,
+          logoUrl: (data.logoUrl || '').trim(),
+        };
+        setInfo(next);
+        setDraft(next);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        toast.error(`平台信息加载失败：${(e as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setPlatformInfoLoading(false);
+      });
     // GET /api/admin/settings/smtp：返回当前生效 SMTP 配置（密码脱敏 hasSmtpPass）。
     // 失败（网络/未鉴权）降级空表单 + toast，不阻塞页面其余部分渲染。
     api<SmtpSettings>('/api/admin/settings/smtp')
@@ -109,6 +186,40 @@ export function SettingsView() {
       })
       .finally(() => {
         if (!cancelled) setSmtpLoading(false);
+      });
+    // GET /api/admin/settings/geetest：返回当前极验配置（captchaKey 脱敏 hasCaptchaKey）。
+    // 失败降级空表单 + toast，不阻塞页面其余部分渲染。
+    api<GeetestSettings>('/api/admin/settings/geetest')
+      .then((data) => {
+        if (cancelled) return;
+        const next = { ...EMPTY_GEETEST, ...data };
+        setGeetest(next);
+        setGeetestDraft(next);
+        // 解析 scenes 逗号分隔串为 Set（勾选状态）。
+        setGeetestScenesDraft(new Set(next.geetestScenes.split(',').map((s) => s.trim()).filter(Boolean)));
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        toast.error(`极验配置加载失败：${(e as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setGeetestLoading(false);
+      });
+    // GET /api/admin/settings/gitee：返回当前 Gitee 配置（accessToken 脱敏 hasAccessToken）。
+    // 失败降级空表单 + toast，不阻塞页面其余部分渲染。
+    api<GiteeSettings>('/api/admin/settings/gitee')
+      .then((data) => {
+        if (cancelled) return;
+        const next = { ...EMPTY_GITEE, ...data };
+        setGitee(next);
+        setGiteeDraft(next);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        toast.error(`Gitee 配置加载失败：${(e as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setGiteeLoading(false);
       });
     return () => {
       cancelled = true;
@@ -141,15 +252,32 @@ export function SettingsView() {
     }
   }
 
-  function savePlatformInfo() {
-    const next = {
-      name: draft.name.trim() || DEFAULT_PLATFORM_INFO.name,
-      description: draft.description.trim() || DEFAULT_PLATFORM_INFO.description,
-      logoText: draft.logoText.trim() || DEFAULT_PLATFORM_INFO.logoText,
+  // 保存平台信息到云端：PATCH /api/admin/settings（批量 upsert platformName/logoUrl）。
+  // 保存成功后同步本地快照，所有端拉 platform-info 即见新值（后端已失效公开信息缓存，下次请求回源最新值）。
+  async function savePlatformInfo() {
+    const next: PlatformInfo = {
+      platformName: draft.platformName.trim() || DEFAULT_PLATFORM_INFO.platformName,
+      logoUrl: draft.logoUrl.trim(),
     };
-    localStorage.setItem(PLATFORM_INFO_KEY, JSON.stringify(next));
-    setInfo(next);
-    toast.success('平台信息已保存（仅本地）');
+    setPlatformInfoSaving(true);
+    try {
+      await api('/api/admin/settings', {
+        method: 'PATCH',
+        body: {
+          settings: [
+            { key: 'platformName', value: next.platformName },
+            { key: 'logoUrl', value: next.logoUrl },
+          ],
+        },
+      });
+      setInfo(next);
+      setDraft(next);
+      toast.success('平台信息已保存，全端生效');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPlatformInfoSaving(false);
+    }
   }
 
   // 调用后端 /api/admin/settings/test-email 发送测试邮件，验证 SMTP 配置。
@@ -171,6 +299,114 @@ export function SettingsView() {
     }
   }
 
+  // 组C 极验：保存极验配置（captchaId/captchaKey/scenes 批量 upsert）。
+  // 提交策略：
+  //  - captchaId 始终提交（空值=清空，开发态跳过）。
+  //  - captchaKey 仅在 admin 输入新值时提交（不输入=保持后端已存 key 不变，避免空值覆盖丢失）。
+  //  - scenes 始终提交（按勾选场景序列化为逗号分隔串，空串=全部场景关闭）。
+  async function saveGeetestSettings() {
+    setGeetestSaving(true);
+    try {
+      const scenes = GEETEST_SCENE_OPTIONS
+        .filter((opt) => geetestScenesDraft.has(opt.value))
+        .map((opt) => opt.value)
+        .join(',');
+      const entries: Array<{ key: string; value: string }> = [
+        { key: 'geetestCaptchaId', value: geetestDraft.geetestCaptchaId.trim() },
+        { key: 'geetestScenes', value: scenes },
+      ];
+      if (geetestCaptchaKeyDraft.length > 0) entries.push({ key: 'geetestCaptchaKey', value: geetestCaptchaKeyDraft });
+      await api('/api/admin/settings', { method: 'PATCH', body: { settings: entries } });
+      // 保存成功后同步本地快照 + 清空 key 草稿（后端已存新 key，下次加载 hasCaptchaKey=true）。
+      setGeetest({ ...geetestDraft, geetestScenes: scenes, hasCaptchaKey: geetestCaptchaKeyDraft.length > 0 ? true : geetestDraft.hasCaptchaKey });
+      setGeetestDraft((prev) => ({ ...prev, geetestScenes: scenes, hasCaptchaKey: geetestCaptchaKeyDraft.length > 0 ? true : prev.hasCaptchaKey }));
+      setGeetestCaptchaKeyDraft('');
+      toast.success('极验配置已保存，运行时即时生效');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setGeetestSaving(false);
+    }
+  }
+
+  // 组C 极验：测试配置连通性（POST /api/admin/settings/test-captcha，无 body）。
+  // 后端读已保存的 captchaId/captchaKey 探测极验接口连通性，返回 {ok, configured, message}。
+  // 注意：测试的是「已保存」的配置，admin 改了未保存时需先保存再测试。
+  async function testGeetest() {
+    if (geetestDraft.geetestCaptchaId.trim() !== geetest.geetestCaptchaId || geetestCaptchaKeyDraft.length > 0) {
+      return toast.error('配置已修改，请先保存再测试');
+    }
+    setGeetestTesting(true);
+    try {
+      const result = await api<{ ok: boolean; configured: boolean; message: string }>(
+        '/api/admin/settings/test-captcha',
+        { method: 'POST' },
+      );
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setGeetestTesting(false);
+    }
+  }
+
+  // 组D Gitee：保存配置（owner/repo/accessToken 批量 upsert）。
+  // 提交策略：owner/repo 始终提交（空值=用默认，后端读侧兜底）；accessToken 仅在 admin 输入新值时提交
+  // （不输入=保持后端已存 token 不变，避免空值覆盖丢失，与极验 captchaKey 同款）。
+  async function saveGiteeSettings() {
+    setGiteeSaving(true);
+    try {
+      const entries: Array<{ key: string; value: string }> = [
+        { key: 'giteeOwner', value: giteeDraft.giteeOwner.trim() },
+        { key: 'giteeRepo', value: giteeDraft.giteeRepo.trim() },
+      ];
+      if (giteeAccessTokenDraft.length > 0) entries.push({ key: 'giteeAccessToken', value: giteeAccessTokenDraft });
+      await api('/api/admin/settings', { method: 'PATCH', body: { settings: entries } });
+      // 保存成功后同步本地快照 + 清空 token 草稿（后端已存新 token，下次加载 hasAccessToken=true）。
+      setGitee({
+        ...giteeDraft,
+        hasAccessToken: giteeAccessTokenDraft.length > 0 ? true : giteeDraft.hasAccessToken,
+      });
+      setGiteeDraft((prev) => ({
+        ...prev,
+        hasAccessToken: giteeAccessTokenDraft.length > 0 ? true : prev.hasAccessToken,
+      }));
+      setGiteeAccessTokenDraft('');
+      toast.success('Gitee 配置已保存，更新日志缓存即时刷新');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setGiteeSaving(false);
+    }
+  }
+
+  // 组D Gitee：测试连通性（POST /api/admin/settings/test-gitee，无 body）。
+  // 后端读已保存的 owner/repo/token 探测 Gitee releases 端点，返回 {ok, configured, message}。
+  // 注意：测试「已保存」的配置，admin 改了未保存时需先保存再测试（与极验 testGeetest 同款）。
+  async function testGitee() {
+    if (
+      giteeDraft.giteeOwner.trim() !== gitee.giteeOwner ||
+      giteeDraft.giteeRepo.trim() !== gitee.giteeRepo ||
+      giteeAccessTokenDraft.length > 0
+    ) {
+      return toast.error('配置已修改，请先保存再测试');
+    }
+    setGiteeTesting(true);
+    try {
+      const result = await api<{ ok: boolean; configured: boolean; message: string }>(
+        '/api/admin/settings/test-gitee',
+        { method: 'POST' },
+      );
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setGiteeTesting(false);
+    }
+  }
+
   return (
     <motion.div
       variants={containerVariant}
@@ -182,53 +418,70 @@ export function SettingsView() {
       <motion.div variants={cardVariant}>
         <Section
           title="平台信息"
-          description="平台名称、简介与 Logo 文案，用于展示与对外识别。后端持久化端点待落地，当前仅保存在本机。"
+          description="平台名称与 Logo，云端存储并对全端（管理端 / 桌面客户端 / 官网）同步生效。"
         >
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-[auto_1fr]">
               <div className="flex items-center gap-3">
-                <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-primary text-2xl font-bold text-primary-foreground">
-                  {(draft.logoText || 'LF').slice(0, 3)}
+                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-primary text-primary-foreground">
+                  {/* logoUrl 有值显示图片，无值 fallback 首字母 logo（平台名首字符）。 */}
+                  {draft.logoUrl ? (
+                    <img
+                      src={draft.logoUrl}
+                      alt="平台 Logo"
+                      className="size-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="text-2xl font-bold">
+                      {(draft.platformName || 'L').slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  Logo 文案最多 3 个字符，
-                  <br />用于头像与侧栏角标展示。
+                  Logo 链接为空时，
+                  <br />用平台名首字母作默认头像。
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>平台名称</Label>
+                  <Label htmlFor="platform-name">平台名称</Label>
                   <Input
-                    value={draft.name}
-                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                    placeholder="LingFang 协作平台"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Logo 文案</Label>
-                  <Input
-                    value={draft.logoText}
-                    onChange={(e) => setDraft({ ...draft, logoText: e.target.value })}
-                    placeholder="LF"
-                    maxLength={3}
+                    id="platform-name"
+                    value={draft.platformName}
+                    onChange={(e) => setDraft({ ...draft, platformName: e.target.value })}
+                    placeholder="LingFang"
+                    disabled={platformInfoLoading}
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label>平台简介</Label>
-                  <Textarea
-                    value={draft.description}
-                    onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-                    placeholder="一句话描述平台定位"
-                    rows={2}
+                  <Label htmlFor="logo-url">Logo 链接</Label>
+                  <Input
+                    id="logo-url"
+                    value={draft.logoUrl}
+                    onChange={(e) => setDraft({ ...draft, logoUrl: e.target.value })}
+                    placeholder="https://example.com/logo.png"
+                    spellCheck={false}
+                    autoComplete="off"
+                    disabled={platformInfoLoading}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    http/https 公开图片链接；留空则用平台名首字母占位（适用于头像与侧栏角标）。
+                  </p>
                 </div>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t pt-4">
-              <Button variant="ghost" onClick={() => setDraft(info)}>重置</Button>
-              <Button onClick={savePlatformInfo}>
+              <Button
+                variant="ghost"
+                onClick={() => setDraft(info)}
+                disabled={platformInfoLoading || platformInfoSaving}
+              >
+                重置
+              </Button>
+              <Button onClick={savePlatformInfo} disabled={platformInfoLoading || platformInfoSaving}>
                 <SaveIcon className="mr-1 size-4" />
-                保存
+                {platformInfoSaving ? '保存中…' : '保存'}
               </Button>
             </div>
           </div>
@@ -341,6 +594,12 @@ export function SettingsView() {
                   ? '当前已配置密码，留空提交则保持原密码不变。'
                   : '独立配置密码（与 URL 内嵌凭据二选一）。'}
               </p>
+              {/* 查看已存密码明文（需二次密码确认 + 审计）；未配置时不允许查看。 */}
+              <RevealSecretButton
+                secretKey="smtpPass"
+                label="SMTP 认证密码"
+                hasConfigured={smtpDraft.hasSmtpPass}
+              />
             </div>
           </div>
 
@@ -398,6 +657,251 @@ export function SettingsView() {
         </Section>
       </motion.div>
 
+      {/* 组C 极验验证码服务（captchaId/captchaKey/scenes 场景开关 + 测试连通性） */}
+      <motion.div variants={cardVariant}>
+        <Section
+          title="验证码服务（极验）"
+          description="登录 / 注册 / 找回密码表单的图形验证码。配置 captchaId（公开）与 captchaKey（私钥，脱敏不返回明文），并按场景勾选启用。保存后运行时即时生效（无需重启）。"
+        >
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <ShieldCheckIcon className="size-3.5" />
+            <span>
+              captchaId 公开（前端 platform-info 据此初始化极验组件），captchaKey 仅后端校验用（绝不公开）。
+              未配置或未勾选任何场景时，对应表单不强制验证码（开发态可空跑）。
+            </span>
+          </div>
+
+          {/* 编辑表单：captchaId / captchaKey。
+              captchaKey 输入框：后端不返回明文，已配置时显示占位「已配置，留空保持不变」。
+              加载中（geetestLoading）用 disabled 占位，避免空表单一闪而过。 */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="geetest-captcha-id">极验 captchaId</Label>
+              <Input
+                id="geetest-captcha-id"
+                value={geetestDraft.geetestCaptchaId}
+                onChange={(e) => setGeetestDraft({ ...geetestDraft, geetestCaptchaId: e.target.value })}
+                placeholder="（32 位 hex，极验控制台获取）"
+                disabled={geetestLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                极验控制台「应用管理」里的 captchaId，前端据此加载验证码组件。
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="geetest-captcha-key">极验 captchaKey（私钥）</Label>
+              <Input
+                id="geetest-captcha-key"
+                type="password"
+                value={geetestCaptchaKeyDraft}
+                onChange={(e) => setGeetestCaptchaKeyDraft(e.target.value)}
+                placeholder={geetestDraft.hasCaptchaKey ? '已配置，留空保持不变' : '（未配置）'}
+                disabled={geetestLoading}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                {geetestDraft.hasCaptchaKey
+                  ? '当前已配置私钥，留空提交则保持原 key 不变。'
+                  : '极验控制台「应用管理」里的 captchaKey，仅后端二次校验用。'}
+              </p>
+              {/* 查看已存私钥明文（需二次密码确认 + 审计）；未配置时不允许查看。 */}
+              <RevealSecretButton
+                secretKey="geetestCaptchaKey"
+                label="极验 captchaKey 私钥"
+                hasConfigured={geetestDraft.hasCaptchaKey}
+              />
+            </div>
+          </div>
+
+          {/* 场景开关：login/register/forgot 勾选，决定哪些场景强制验证码。 */}
+          <div className="mt-4 space-y-2">
+            <Label>启用场景</Label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {GEETEST_SCENE_OPTIONS.map((opt) => {
+                const checked = geetestScenesDraft.has(opt.value);
+                return (
+                  <label
+                    key={opt.value}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-xl border p-3 text-sm transition-colors ${
+                      checked ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'border-border hover:bg-muted/50'
+                    }`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(v) => {
+                        setGeetestScenesDraft((prev) => {
+                          const next = new Set(prev);
+                          if (v) next.add(opt.value);
+                          else next.delete(opt.value);
+                          return next;
+                        });
+                      }}
+                    />
+                    <div className="min-w-0">
+                      <div className="font-medium">{opt.label}</div>
+                      <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              勾选的场景在对应表单强制验证码；未勾选则跳过（即便配了 id/key 也不校验）。
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setGeetestDraft(geetest);
+                setGeetestCaptchaKeyDraft('');
+                setGeetestScenesDraft(new Set(geetest.geetestScenes.split(',').map((s) => s.trim()).filter(Boolean)));
+              }}
+              disabled={geetestLoading || geetestSaving}
+            >
+              重置
+            </Button>
+            <Button onClick={saveGeetestSettings} disabled={geetestLoading || geetestSaving}>
+              <SaveIcon className="mr-1 size-4" />
+              {geetestSaving ? '保存中…' : '保存极验配置'}
+            </Button>
+          </div>
+
+          {/* 测试连通性：调 /api/admin/settings/test-captcha → 返回成功 / 失败 + 错误信息 */}
+          <div className="mt-4 rounded-xl border bg-muted/20 p-4">
+            <div className="mb-2 text-sm font-medium">测试连通性</div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <p className="flex-1 text-xs text-muted-foreground">
+                点击后后端会读已保存的 captchaId / captchaKey 向极验接口发探测请求，校验连通性与 key 有效性。
+                若失败，错误信息会显示在右上角通知（便于排查 captchaId / key 是否正确）。
+              </p>
+              <Button onClick={testGeetest} disabled={geetestTesting || geetestLoading || geetestSaving} className="sm:mb-[1px]">
+                <ShieldCheckIcon className="mr-1 size-4" />
+                {geetestTesting ? '测试中…' : '测试极验'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <Badge variant="outline" className="text-muted-foreground">
+              {geetestLoading
+                ? '配置加载中…'
+                : geetest.hasCaptchaId
+                  ? `极验已配置 · 启用场景：${geetest.geetestScenes || '无'}`
+                  : '极验未配置 · 验证码跳过'}
+            </Badge>
+          </div>
+        </Section>
+      </motion.div>
+
+      {/* 组D Gitee 更新日志源（owner/repo 明文 + accessToken 脱敏 + 测试连通性） */}
+      <motion.div variants={cardVariant}>
+        <Section
+          title="更新日志源（Gitee）"
+          description="官网更新日志页从 Gitee 仓库 release 拉取。配置 owner / repo 与私人令牌（私有仓库必需，脱敏不返回明文），保存后更新日志缓存即时刷新（无需重启）。"
+        >
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <GitBranchIcon className="size-3.5" />
+            <span>
+              令牌在 Gitee「设置 → 私人令牌」生成，须勾选 project 权限。owner / repo 留空则用默认（yijianruyuan / lingfang）。
+              更新日志源来自 Gitee release notes，下载页版本号来自本地已签名产物，两者可能不一致（属正常）。
+            </span>
+          </div>
+
+          {/* 编辑表单：owner / repo 明文，accessToken password 脱敏（已配置显示占位「已配置，留空保持不变」）。 */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="gitee-owner">Gitee owner（用户/组织）</Label>
+              <Input
+                id="gitee-owner"
+                value={giteeDraft.giteeOwner}
+                onChange={(e) => setGiteeDraft({ ...giteeDraft, giteeOwner: e.target.value })}
+                placeholder="yijianruyuan"
+                disabled={giteeLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">留空用默认 yijianruyuan。</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="gitee-repo">Gitee 仓库名</Label>
+              <Input
+                id="gitee-repo"
+                value={giteeDraft.giteeRepo}
+                onChange={(e) => setGiteeDraft({ ...giteeDraft, giteeRepo: e.target.value })}
+                placeholder="lingfang"
+                disabled={giteeLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">留空用默认 lingfang。</p>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="gitee-token">Gitee 私人令牌（私有仓库必需）</Label>
+              <Input
+                id="gitee-token"
+                type="password"
+                value={giteeAccessTokenDraft}
+                onChange={(e) => setGiteeAccessTokenDraft(e.target.value)}
+                placeholder={giteeDraft.hasAccessToken ? '已配置，留空保持不变' : '（未配置，更新日志将显示「未配置」）'}
+                disabled={giteeLoading}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                {giteeDraft.hasAccessToken
+                  ? '当前已配置令牌，留空提交则保持原令牌不变。'
+                  : 'Gitee「设置 → 私人令牌」生成，勾选 project 权限。仅后端拉取用，绝不公开。'}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setGiteeDraft(gitee);
+                setGiteeAccessTokenDraft('');
+              }}
+              disabled={giteeLoading || giteeSaving}
+            >
+              重置
+            </Button>
+            <Button onClick={saveGiteeSettings} disabled={giteeLoading || giteeSaving}>
+              <SaveIcon className="mr-1 size-4" />
+              {giteeSaving ? '保存中…' : '保存 Gitee 配置'}
+            </Button>
+          </div>
+
+          {/* 测试连通性：调 /api/admin/settings/test-gitee → 返回成功 / 失败 + 错误信息 */}
+          <div className="mt-4 rounded-xl border bg-muted/20 p-4">
+            <div className="mb-2 text-sm font-medium">测试连通性</div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <p className="flex-1 text-xs text-muted-foreground">
+                点击后后端会读已保存的 owner / repo / token 向 Gitee releases 端点发探测请求，校验连通性与令牌有效性。
+                若失败，错误信息会显示在右上角通知（便于排查 token 失效 / 缺权限 / owner-repo 错误）。
+              </p>
+              <Button onClick={testGitee} disabled={giteeTesting || giteeLoading || giteeSaving} className="sm:mb-[1px]">
+                <GitBranchIcon className="mr-1 size-4" />
+                {giteeTesting ? '测试中…' : '测试 Gitee'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <Badge variant="outline" className="text-muted-foreground">
+              {giteeLoading
+                ? '配置加载中…'
+                : gitee.hasAccessToken
+                  ? `Gitee 已配置 · ${gitee.giteeOwner || 'yijianruyuan'}/${gitee.giteeRepo || 'lingfang'}`
+                  : 'Gitee 未配置 · 更新日志降级显示「未配置」'}
+            </Badge>
+          </div>
+        </Section>
+      </motion.div>
+
       {/* 版本信息 */}
       <motion.div variants={cardVariant}>
         <Section
@@ -412,24 +916,6 @@ export function SettingsView() {
             ]}
           />
         </Section>
-      </motion.div>
-
-      {/* 遗留说明：平台名称/Logo 文案卡片仍为本地存储 */}
-      <motion.div variants={cardVariant}>
-        <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/20 p-4 text-sm">
-          <InfoIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <div className="space-y-1 text-muted-foreground">
-            <div className="font-medium text-foreground">说明：平台名称 / Logo 文案仅本机生效</div>
-            <p>
-              邮件服务（SMTP）已接入后端
-              <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-xs">/api/admin/settings/smtp</code>
-              ，保存后运行时即时生效。上方「平台信息」卡片的名称 / Logo 文案当前仅保存在本机
-              （localStorage），不写入后端 PlatformSetting；对外展示的平台名 / logo 以
-              <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-xs">/api/platform-info</code>
-              返回值为准（首次安装向导或 admin 通过设置 key 写入）。后续可将本卡片也切换为后端读写以保持一致。
-            </p>
-          </div>
-        </div>
       </motion.div>
     </motion.div>
   );
@@ -463,5 +949,114 @@ function ThemeOption({
         <div className="text-xs text-muted-foreground">{desc}</div>
       </div>
     </button>
+  );
+}
+
+/** 查看敏感配置明文按钮（SMTP 密码 / 极验私钥）。
+ *  调 POST /api/admin/settings/reveal-secret（body: { password, key }），后端校验 admin 当前密码后才返回明文。
+ *  流程：点击「查看」→ 弹密码确认对话框 → 输入当前管理员密码 → 调 reveal-secret → 展示明文（可复制）。
+ *  安全：明文不缓存、不写本地存储，关闭对话框即清空；密码错误 / 未配置均有友好提示。
+ *  disabled 条件：hasConfigured=false（后端未存该 key）时不允许查看（无可看内容）。 */
+function RevealSecretButton({
+  secretKey,
+  label,
+  hasConfigured,
+}: {
+  secretKey: 'smtpPass' | 'geetestCaptchaKey';
+  label: string;
+  hasConfigured: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [revealed, setRevealed] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // 打开时重置密码与明文（避免上次的明文残留）。
+  useEffect(() => {
+    if (open) {
+      setPassword('');
+      setRevealed('');
+    }
+  }, [open]);
+
+  async function reveal() {
+    if (!password) return toast.error('请输入当前管理员密码');
+    setLoading(true);
+    try {
+      const result = await api<{ value: string }>('/api/admin/settings/reveal-secret', {
+        method: 'POST',
+        body: { password, key: secretKey },
+      });
+      setRevealed(result.value);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!hasConfigured}
+        title={hasConfigured ? '查看明文（需二次密码确认）' : '未配置，无可查看内容'}
+        onClick={() => setOpen(true)}
+      >
+        <EyeIcon className="mr-1 size-3.5" />
+        查看
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>查看 {label} 明文</DialogTitle>
+            <DialogDescription>
+              敏感操作：需输入当前管理员密码二次确认，操作会写入审计日志。
+            </DialogDescription>
+          </DialogHeader>
+          {revealed ? (
+            <div className="space-y-2">
+              <Label>明文（仅本次可见，关闭后清空）</Label>
+              <Input value={revealed} readOnly className="font-mono text-xs" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(revealed).then(
+                    () => toast.success('已复制到剪贴板'),
+                    () => toast.error('复制失败，请手动选取'),
+                  );
+                }}
+              >
+                复制
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="reveal-password">当前管理员密码</Label>
+              <Input
+                id="reveal-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="输入你的登录密码"
+                onKeyDown={(e) => e.key === 'Enter' && reveal()}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            {revealed ? (
+              <Button variant="outline" onClick={() => setOpen(false)}>关闭</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
+                <Button onClick={reveal} disabled={loading}>{loading ? '验证中…' : '确认查看'}</Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

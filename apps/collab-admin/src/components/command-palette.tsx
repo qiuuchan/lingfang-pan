@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { CornerDownLeftIcon, SearchIcon } from 'lucide-react';
 import { NAV_GROUPS, NAV_ITEMS } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
@@ -19,6 +19,7 @@ export function CommandPalette({ open, onOpenChange, onSelect }: CommandPaletteP
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
 
   // 过滤结果：query 为空时展示全部（分组保留）；非空时跨分组模糊匹配视图名。
   const matchedGroups = useMemo(() => {
@@ -100,19 +101,19 @@ export function CommandPalette({ open, onOpenChange, onSelect }: CommandPaletteP
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={reduce ? { duration: 0.12 } : { duration: 0.15 }}
             onClick={() => onOpenChange(false)}
           />
-          {/* 面板：缩放 + 轻微上移进入 */}
+          {/* 面板：缩放 + 轻微上移进入（spring 弹性，与 Dialog 一致；reduce 退化为瞬时）。 */}
           <motion.div
             role="dialog"
             aria-modal="true"
             aria-label="快捷搜索"
             className="relative w-full max-w-xl overflow-hidden rounded-2xl border bg-popover text-popover-foreground shadow-xl"
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.98, y: 8 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
+            transition={reduce ? { duration: 0.12 } : { type: 'spring', stiffness: 320, damping: 30 }}
             onKeyDown={onKeyDown}
           >
             {/* 搜索输入 */}

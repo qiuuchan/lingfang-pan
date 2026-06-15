@@ -28,6 +28,7 @@ interface PlatformInfo {
   platformName: string;
   logoUrl: string;
   geetestCaptchaId: string;
+  geetestScenes: string;
 }
 
 export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
@@ -39,22 +40,36 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // 组C 极验：platform-info 取 geetestCaptchaId（公开端点，后端配置了才显验证码）。
+  // 组C 极验 + 组D 云同步平台信息：platform-info 取 geetestCaptchaId（公开端点，后端配置了才显验证码）+
+  // platformName（云同步展示平台名，登录页顶栏与标题用平台名而非硬编码）+ geetestScenes（场景开关）。
   const [captchaId, setCaptchaId] = useState('');
+  const [platformName, setPlatformName] = useState('');
+  const [captchaScenes, setCaptchaScenes] = useState<Set<string>>(new Set());
   const captcha = useGeetest(captchaId);
 
   useEffect(() => {
     // platform-info 公开端点（auth:false），失败静默（未配置极验时 captchaId 保持空，不显验证码）。
     api<PlatformInfo>('/api/platform-info', { auth: false, method: 'GET' })
-      .then((info) => setCaptchaId(info.geetestCaptchaId ?? ''))
+      .then((info) => {
+        setCaptchaId(info.geetestCaptchaId ?? '');
+        // 云同步平台名：后端 platformName（缺省 'LingFang'），用于顶栏与登录页标题展示。
+        setPlatformName((info.platformName || '').trim());
+        // 场景开关：解析逗号分隔串为 Set，登录/找回密码分别判定是否强制验证码。
+        setCaptchaScenes(new Set((info.geetestScenes ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)));
+      })
       .catch(() => {
         /* 拉取失败不阻断登录 */
       });
   }, []);
 
+  /** 当前场景是否启用验证码（与后端 requireCaptcha(scene) 语义一致）。
+   *  任一相关场景（login/forgot）启用即渲染验证码容器（共用同一实例）。 */
+  const sceneEnabled = (scene: 'login' | 'forgot') => !!captchaId && captchaScenes.has(scene);
+  const captchaVisible = !!captchaId && (sceneEnabled('login') || sceneEnabled('forgot'));
+
   async function submit() {
-    // 组C 极验：配置了验证码时强制先通过验证。
-    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
+    // 组C 极验：login 场景启用时强制先通过验证。
+    if (sceneEnabled('login') && !captcha.validateResult) return toast.error('请先完成验证码');
     setLoading(true);
     try {
       const result = await api<AdminSession>('/api/auth/login', {
@@ -76,8 +91,8 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
 
   async function onForgotPassword() {
     if (!forgotEmail.trim()) return toast.error('请输入邮箱');
-    // 组C 极验：配置了验证码时强制先通过验证（防找回密码邮件轰炸）。
-    if (captchaId && !captcha.validateResult) return toast.error('请先完成验证码');
+    // 组C 极验：forgot 场景启用时强制先通过验证（防找回密码邮件轰炸）。
+    if (sceneEnabled('forgot') && !captcha.validateResult) return toast.error('请先完成验证码');
     setForgotLoading(true);
     try {
       await api('/api/auth/forgot-password', {
@@ -119,9 +134,10 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               className="lf-mono inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-bold"
               style={{ borderColor: 'var(--lf-accent)', color: 'var(--lf-accent)' }}
             >
-              L
+              {(platformName || 'L').slice(0, 1)}
             </span>
-            <span className="text-sm font-semibold tracking-tight">LingFang</span>
+            {/* 云同步平台名：后端 platformName（缺省 'LingFang'），与后台保持一致。 */}
+            <span className="text-sm font-semibold tracking-tight">{platformName || 'LingFang'}</span>
           </div>
         </header>
 
@@ -129,7 +145,7 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
         <div className="lf-login-wrap">
           <div className="lf-login-card">
             <h1 className="text-xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
-              平台管理员登录
+              {platformName ? `${platformName} · 管理员登录` : '平台管理员登录'}
             </h1>
             <p className="mt-1.5 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
               初始账号在系统部署时创建。
@@ -170,8 +186,9 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                   }}
                 />
               </div>
-              {/* 组C 极验：后端配置了 geetestCaptchaId 时渲染「点击验证」组件（captchaId 为空则不渲染，开发态跳过）。 */}
-              {captchaId && (
+              {/* 组C 极验：后端配置了 geetestCaptchaId 且任一场景（login/forgot）启用时渲染「点击验证」组件。
+                  场景未启用 / captchaId 为空则不渲染（后端 requireCaptcha 亦跳过，前端不强制）。 */}
+              {captchaVisible && (
                 <div className="flex flex-col gap-1">
                   <div ref={captcha.containerRef} />
                   {!captcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}

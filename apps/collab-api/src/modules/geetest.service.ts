@@ -25,10 +25,11 @@ const GEETEST_VALIDATE_URL = 'http://gcaptcha4.geetest.com/validate';
 const GEETEST_TIMEOUT_MS = 5_000;
 
 /** 极验配置缓存条目：值快照 + 加载标志。
- *  null 表示未加载（首次请求查库），加载后缓存 id/key（即便为空也缓存，避免每次空查询）。 */
+ *  null 表示未加载（首次请求查库），加载后缓存 id/key/scenes（即便为空也缓存，避免每次空查询）。 */
 interface GeetestConfig {
   captchaId: string;
   captchaKey: string;
+  scenes: string[];
 }
 
 /** 前端回调产出的 4 个验证参数（gt4.js captchaObj.onSuccess 回调）。 */
@@ -38,6 +39,10 @@ export interface GeetestCaptchaParams {
   pass_token: string;
   gen_time: string;
 }
+
+/** 极验支持的场景枚举（与 settings.service KEY_VALIDATORS.geetestScenes 的 SCENES 白名单一致）。
+ *  login/register/forgot 分别对应登录/注册/找回密码三个表单。 */
+export type GeetestScene = 'login' | 'register' | 'forgot';
 
 @Injectable()
 export class GeetestService {
@@ -108,7 +113,7 @@ export class GeetestService {
     }
   }
 
-  /** 失效极验配置缓存。由 SettingsService.updateSettings 在改了 geetestCaptchaId/geetestCaptchaKey 后调用，
+  /** 失效极验配置缓存。由 SettingsService.updateSettings 在改了 geetestCaptchaId/geetestCaptchaKey/geetestScenes 后调用，
    *  保证 admin 保存后下一次登录/注册校验即读到新配置（不依赖重启进程生效），与 mail.invalidateSmtpCache 同模式。
    *
    *  与「启动后变更需重启」的旧设计不同：admin 通过设置页改极验配置的频率虽低，但「改了不生效」会造成
@@ -125,19 +130,34 @@ export class GeetestService {
     return !!config.captchaId;
   }
 
+  /** 指定场景是否启用极验校验（组C 场景开关）。
+   *  - 未配置 captchaId（极验未启用）→ 任何场景都返回 false（不校验）。
+   *  - 已配置但 scenes 为空 → 全部场景返回 false（即便配了 id/key 也不校验，admin 可临时关闭所有场景）。
+   *  - scenes 含该场景 → true（该场景强制校验验证码）。
+   *  AuthService.requireCaptcha(scene) 据此决定是否跳过校验。 */
+  async isSceneEnabled(scene: GeetestScene): Promise<boolean> {
+    const config = await this.getCaptchaConfig();
+    if (!config.captchaId) return false;
+    return config.scenes.includes(scene);
+  }
+
   /** 读取极验配置（PlatformSetting 缓存）。
    *  首次查库并缓存到实例字段；SettingsService.updateSettings 改 geetest key 后调 invalidateConfigCache 失效。
-   *  即便 key 不存在也缓存空串（避免每次登录都查空），保证「未配置」判定稳定。 */
+   *  即便 key 不存在也缓存空串/空数组（避免每次登录都查空），保证「未配置」判定稳定。 */
   private async getCaptchaConfig(): Promise<GeetestConfig> {
     if (this.configCache) return this.configCache;
     const rows = await this.prisma.platformSetting.findMany({
-      where: { key: { in: ['geetestCaptchaId', 'geetestCaptchaKey'] } },
+      where: { key: { in: ['geetestCaptchaId', 'geetestCaptchaKey', 'geetestScenes'] } },
       select: { key: true, value: true },
     });
     const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    // scenes 按「非空项 + 小写」解析（与 settings.service.geetestScenes 归一化输出兼容；容错兜底非法值）。
+    const scenesRaw = map.get('geetestScenes') ?? '';
+    const scenes = scenesRaw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     this.configCache = {
       captchaId: (map.get('geetestCaptchaId') ?? '').trim(),
       captchaKey: map.get('geetestCaptchaKey') ?? '',
+      scenes,
     };
     return this.configCache;
   }

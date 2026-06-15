@@ -1,5 +1,6 @@
 // 管理端后台主内容区页脚：版权 + 版本 + 链接（文档/官网）。
-// 仅渲染于 App.tsx 主内容区底部，随主内容滚到底可见，不做全局 fixed。
+// 作为 App.tsx 主体区 flex-col 的最后一个子元素（shrink-0），固定在视口底部，不随主内容滚动。
+// flex 布局下无需 mt-8（内容区已 flex-1 占满剩余空间，Footer 自然贴底）。
 import pkg from '../../package.json';
 
 const YEAR = 2026;
@@ -13,7 +14,7 @@ interface FooterProps {
 
 export function Footer({ version = APP_VERSION }: FooterProps) {
   return (
-    <footer className="mt-8 flex flex-col items-center justify-between gap-2 border-t py-4 text-xs text-muted-foreground sm:flex-row">
+    <footer className="shrink-0 flex flex-col items-center justify-between gap-2 border-t py-4 text-xs text-muted-foreground sm:flex-row">
       <p>© {YEAR} LingFang</p>
       <div className="flex items-center gap-4">
         <span className="font-mono">v{version}</span>
