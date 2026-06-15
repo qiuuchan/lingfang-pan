@@ -51,7 +51,36 @@
   --ring: oklch(0.708 0 0);
 }
 
+/* 暗色主题：在 <html> 上添加 .dark class 触发（@custom-variant dark 已声明在文件顶部）。
+   oklch 反相取值，与亮色一一对应；badge 的 dark:bg-emerald-950 等变体依赖此块。 */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.627 0.265 27.325);
+  --border: oklch(0.33 0 0);
+  --input: oklch(0.33 0 0);
+  --ring: oklch(0.556 0 0);
+}
+
 @layer base {
   * { @apply border-border outline-ring/50; }
+  /* theme-transition：切换主题时对颜色属性做平滑过渡，避免生硬闪烁。
+     仅在 useTheme 切换前临时挂上，切换后移除以不影响日常交互性能。 */
   body { @apply bg-background text-foreground font-sans; }
+  body.theme-transition,
+  body.theme-transition * {
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
 }

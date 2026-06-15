@@ -1,17 +1,11 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  ActivityIcon,
-  BoxesIcon,
   CheckCircleIcon,
-  CloudCogIcon,
   InfoIcon,
-  LayoutDashboardIcon,
   LogOutIcon,
-  PlugIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
-  UsersIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,11 +19,14 @@ import {
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
+  BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
-import { Sidebar, type SidebarNavItem } from '@/components/sidebar';
+import { Sidebar, type SidebarNavGroup } from '@/components/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { CommandPalette, useCommandPalette } from '@/components/command-palette';
 import { Landing } from '@/components/landing/Landing';
 import { LoginPage } from '@/components/landing/LoginPage';
 import { DownloadPage } from '@/components/landing/DownloadPage';
@@ -42,32 +39,23 @@ import { ApplicationsView } from '@/components/applications-view';
 import { AdminsView } from '@/components/admins-view';
 import { AuditView } from '@/components/audit-view';
 import { ProvidersView } from '@/components/providers-view';
+import { SettingsView } from '@/components/settings-view';
+import { OnboardingWizard, ONBOARDING_DONE_KEY } from '@/components/onboarding-wizard';
+import { NAV_GROUPS, VIEW_LABEL, VIEW_GROUP } from '@/lib/navigation';
 import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
+import { initTheme } from '@/lib/theme';
 import type { View } from '@/lib/types';
+import { PageTransition } from '@/lib/motion';
 import { getLatestRelease } from '@/lib/releases';
 import pkg from '../package.json';
 
-const navItems: SidebarNavItem[] = [
-  { view: 'dashboard', label: '仪表盘', icon: LayoutDashboardIcon },
-  { view: 'users', label: '用户管理', icon: UsersIcon },
-  { view: 'platformAdmins', label: '平台管理员', icon: ShieldCheckIcon },
-  { view: 'teams', label: '团队管理', icon: BoxesIcon },
-  { view: 'plugins', label: '插件管理', icon: PlugIcon },
-  { view: 'llmProviders', label: '模型服务', icon: CloudCogIcon },
-  { view: 'applications', label: '审批管理', icon: CheckCircleIcon },
-  { view: 'audit', label: '审计日志', icon: ActivityIcon },
-];
+// 主题初始化：在模块加载时同步应用，避免首屏亮暗闪烁（FOUC）。
+// 放在模块顶层执行一次，早于 React 渲染，读取 localStorage 的主题偏好并应用到 <html>。
+initTheme();
 
-const VIEW_LABEL: Record<View, string> = {
-  dashboard: '仪表盘',
-  users: '用户管理',
-  platformAdmins: '平台管理员',
-  teams: '团队管理',
-  plugins: '插件管理',
-  llmProviders: '模型服务',
-  applications: '审批管理',
-  audit: '审计日志',
-};
+// 分组导航配置（来自 @/lib/navigation 单一数据源）：核心管理 / 内容 / 系统。
+// 侧栏、面包屑、命令面板统一引用，文案一处维护避免漂移。
+const navGroups: SidebarNavGroup[] = NAV_GROUPS;
 
 export default function App() {
   const [session, setSession] = useState<AdminSession | null>(null);
@@ -79,6 +67,11 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<string | null>(null);
+  // 首次登录引导向导：session 建立时若本机无完成标记则弹出。
+  // 关闭（完成/跳过）后由 OnboardingWizard 写入 ONBOARDING_DONE_KEY，并向导自管 open 状态。
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // 组C：Cmd+K / Ctrl+K 快捷搜索面板。hook 内部挂全局快捷键，返回 open 态。
+  const commandPalette = useCommandPalette();
 
   useEffect(() => {
     if (!getToken()) return;
@@ -86,6 +79,9 @@ export default function App() {
       .then((next) => {
         if (!isPlatformAdminSession(next)) throw new Error('当前账号不是平台管理员');
         setSession(next);
+        // 首登判定：本机无完成标记 → 弹出引导向导。
+        // 标记按设备维度持久（localStorage），换浏览器或清缓存会重新引导，符合「首次登录」语义。
+        if (!localStorage.getItem(ONBOARDING_DONE_KEY)) setOnboardingOpen(true);
       })
       .catch((e) => {
         setToken(null);
@@ -171,6 +167,7 @@ export default function App() {
   }
 
   const currentLabel = VIEW_LABEL[view];
+  const currentGroup = VIEW_GROUP[view];
 
   const sidebarHeader = (
     <div className="rounded-xl border bg-card p-3 shadow-sm">
@@ -212,7 +209,7 @@ export default function App() {
     <TooltipProvider>
       <div className="flex min-h-screen bg-muted/30">
         <Sidebar
-          items={navItems}
+          groups={navGroups}
           activeView={view}
           onSelect={(v) => setView(v as View)}
           header={sidebarHeader}
@@ -222,13 +219,33 @@ export default function App() {
         <main className="min-w-0 flex-1 px-4 pb-8 pt-14 sm:pt-8 lg:p-8">
           {/* Header */}
           <header className="mb-6 flex flex-col gap-2 rounded-2xl border bg-background p-5 shadow-sm">
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbPage>{currentLabel}</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
+            <div className="flex items-center justify-between gap-3">
+              {/* 面包屑：分组 / 视图，分组为可点击返回仪表盘的链接 */}
+              <Breadcrumb>
+                <BreadcrumbList>
+                  <BreadcrumbItem>
+                    <BreadcrumbLink
+                      className="cursor-pointer"
+                      onClick={() => setView('dashboard')}
+                    >
+                      {currentGroup}
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>{currentLabel}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </BreadcrumbList>
+              </Breadcrumb>
+              {/* Cmd+K 快捷搜索入口 */}
+              <button
+                onClick={() => commandPalette.setOpen(true)}
+                className="flex items-center gap-2 rounded-lg border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <span>快捷搜索</span>
+                <kbd className="rounded border bg-background px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+              </button>
+            </div>
             <h1 className="text-2xl font-semibold tracking-tight">{currentLabel}</h1>
             <p className="text-sm text-muted-foreground">
               平台级治理入口：账号、团队、插件、审批和审计统一在这里处理。
@@ -236,7 +253,7 @@ export default function App() {
           </header>
 
           {/* Views with transition */}
-          <div key={view} className="animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+          <PageTransition viewKey={view}>
             {view === 'dashboard' && <Dashboard onNavigate={setView} />}
             {view === 'users' && <UsersView />}
             {view === 'platformAdmins' && <AdminsView />}
@@ -245,7 +262,8 @@ export default function App() {
             {view === 'llmProviders' && <ProvidersView />}
             {view === 'applications' && <ApplicationsView />}
             {view === 'audit' && <AuditView />}
-          </div>
+            {view === 'settings' && <SettingsView />}
+          </PageTransition>
         </main>
       </div>
 
@@ -329,6 +347,23 @@ export default function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 首次登录引导向导：onboardingOpen 由 /api/auth/me 成功后按本机标记决定。
+          「去完成」会跳转到对应 view 并关闭向导；「跳过」/「完成」均写入完成标记。 */}
+      {onboardingOpen && (
+        <OnboardingWizard
+          onNavigate={(v) => setView(v)}
+          onClose={() => setOnboardingOpen(false)}
+        />
+      )}
+
+      {/* 组C：Cmd+K / Ctrl+K 快捷搜索面板，命中视图名后跳转。
+          通过 AnimatePresence 动画进出，z-50 浮于所有内容之上。 */}
+      <CommandPalette
+        open={commandPalette.open}
+        onOpenChange={commandPalette.setOpen}
+        onSelect={(v) => setView(v)}
+      />
     </TooltipProvider>
   );
 }

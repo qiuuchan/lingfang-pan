@@ -1,0 +1,263 @@
+import { useEffect, type ReactNode } from 'react';
+import {
+  motion,
+  AnimatePresence,
+  useMotionValue,
+  useTransform,
+  useReducedMotion,
+  animate,
+  type Variants,
+  type HTMLMotionProps,
+} from 'framer-motion';
+import { cn } from '@/lib/utils';
+
+/* 动画基建（组B / framer-motion）：集中提供可复用的入场、交错、数字滚动、简易条形图、骨架闪光组件。
+   全部尊重 prefers-reduced-motion：系统开启「减少动态效果」时退化为静态渲染或瞬时切换，避免引起眩晕。
+   设计要点：
+   - 入场类组件（FadeIn/SlideIn/Stagger*）用 useReducedMotion 提前分流，关闭动效时直接返回普通 div，零成本降级。
+   - AnimatedNumber 用 useMotionValue + animate() 驱动数值从 0 滚到目标值，useTransform 把数值格式化为展示字符串。
+   - MiniBarChart 用 motion.div 对 width 百分比做缓动动画，按索引错峰入场，不引入任何图表库。 */
+
+/** 方向 → 初始位移：up/down 控制 y 轴，left/right 控制 x 轴。 */
+type Direction = 'up' | 'down' | 'left' | 'right';
+
+const DIRECTION_OFFSET: Record<Direction, { x?: number; y?: number }> = {
+  up: { y: 24 },
+  down: { y: -24 },
+  left: { x: -24 },
+  right: { x: 24 },
+};
+
+/** 淡入 + 轻微上浮，适合区块标题、卡片等单元素入场。 */
+export function FadeIn({
+  children,
+  delay = 0,
+  duration = 0.4,
+  className,
+}: {
+  children: ReactNode;
+  delay?: number;
+  duration?: number;
+  className?: string;
+}) {
+  const reduce = useReducedMotion();
+  if (reduce) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration, delay, ease: 'easeOut' }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** 方向感知的滑入。direction 决定从哪一侧进入（默认 up：自下而上）。 */
+export function SlideIn({
+  children,
+  direction = 'up',
+  delay = 0,
+  duration = 0.45,
+  className,
+}: {
+  children: ReactNode;
+  direction?: Direction;
+  delay?: number;
+  duration?: number;
+  className?: string;
+}) {
+  const reduce = useReducedMotion();
+  if (reduce) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, ...DIRECTION_OFFSET[direction] }}
+      animate={{ opacity: 1, x: 0, y: 0 }}
+      transition={{ duration, delay, ease: 'easeOut' }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** 交错容器：子级用 StaggerItem 包裹，按 stagger 间隔依次入场。
+ *  通过 variants 的 staggerChildren 机制驱动，子级无需自己声明 initial/animate。 */
+const CONTAINER_VARIANTS: Variants = {
+  hidden: {},
+  show: (ctx: { stagger: number; delayChildren: number }) => ({
+    transition: { staggerChildren: ctx.stagger, delayChildren: ctx.delayChildren },
+  }),
+};
+
+const ITEM_VARIANTS: Variants = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+};
+
+export function StaggerContainer({
+  children,
+  className,
+  stagger = 0.07,
+  delayChildren = 0.05,
+}: {
+  children: ReactNode;
+  className?: string;
+  stagger?: number;
+  delayChildren?: number;
+}) {
+  const reduce = useReducedMotion();
+  if (reduce) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      custom={{ stagger, delayChildren }}
+      variants={CONTAINER_VARIANTS}
+      initial="hidden"
+      animate="show"
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** 交错项：必须作为 StaggerContainer 的直接子级。
+ *  whileHover 用于挂载时的入场与悬停反馈（如指标卡片上浮）二者叠加，互不冲突。 */
+export function StaggerItem({
+  children,
+  className,
+  whileHover,
+}: {
+  children: ReactNode;
+  className?: string;
+  whileHover?: HTMLMotionProps<'div'>['whileHover'];
+}) {
+  const reduce = useReducedMotion();
+  if (reduce) return <div className={className}>{children}</div>;
+  return (
+    <motion.div className={className} variants={ITEM_VARIANTS} whileHover={whileHover}>
+      {children}
+    </motion.div>
+  );
+}
+
+/** 数字滚动：值从 0 平滑动画到目标值。
+ *  - value 必须是数字（金额传 cents、百分比传 0-100 整数）。
+ *  - format 可选，把中间帧数值格式化为展示串（如 (v) => `¥${(v/100).toFixed(2)}`）。
+ *  - 未传 format 时按简体中文千分位取整展示。 */
+export function AnimatedNumber({
+  value,
+  format,
+  duration = 1.2,
+  className,
+}: {
+  value: number;
+  format?: (latest: number) => string;
+  duration?: number;
+  className?: string;
+}) {
+  const reduce = useReducedMotion();
+  const count = useMotionValue(0);
+  const display = useTransform(count, (latest) =>
+    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN'),
+  );
+
+  useEffect(() => {
+    if (reduce) {
+      // 关闭动效：直接置为目标值，避免停留在 0。
+      count.set(value);
+      return;
+    }
+    const controls = animate(count, value, { duration, ease: 'easeOut' });
+    return () => controls.stop();
+  }, [value, duration, reduce, count]);
+
+  return <motion.span className={className}>{display}</motion.span>;
+}
+
+/** 简易水平条形图：用 motion.div 对 width 百分比做缓动动画，按索引错峰入场。
+ *  不引入图表库；data 为 [{label,value}]，value 越大条越长（相对最大值归一化）。 */
+export function MiniBarChart({
+  data,
+  formatValue,
+  className,
+  colorClassName = 'bg-primary',
+}: {
+  data: Array<{ label: string; value: number }>;
+  formatValue?: (value: number) => string;
+  className?: string;
+  colorClassName?: string;
+}) {
+  const reduce = useReducedMotion();
+  if (data.length === 0) {
+    return (
+      <div className={cn('py-4 text-center text-sm text-muted-foreground', className)}>暂无数据</div>
+    );
+  }
+  const max = Math.max(1, ...data.map((d) => d.value));
+  return (
+    <div className={cn('space-y-2.5', className)}>
+      {data.map((d, i) => {
+        const pct = (d.value / max) * 100;
+        return (
+          <div key={`${d.label}-${i}`} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="truncate pr-2 text-muted-foreground">{d.label}</span>
+              <span className="shrink-0 font-medium tabular-nums text-foreground">
+                {formatValue ? formatValue(d.value) : d.value.toLocaleString('zh-CN')}
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <motion.div
+                className={cn('h-full rounded-full', colorClassName)}
+                initial={{ width: reduce ? `${pct}%` : 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.7, delay: reduce ? 0 : 0.1 + i * 0.08, ease: 'easeOut' }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 骨架闪光块：加载占位。用 motion.div 循环平移一道高光横扫，模拟内容加载中的 shimmer。
+ *  高光用 foreground/10 透明度，自动适配亮/暗主题。 */
+export function Shimmer({ className }: { className?: string }) {
+  const reduce = useReducedMotion();
+  if (reduce) {
+    return <div className={cn('rounded-md bg-muted/60', className)} />;
+  }
+  return (
+    <div className={cn('relative overflow-hidden rounded-md bg-muted/60', className)}>
+      <motion.div
+        className="absolute inset-0 bg-gradient-to-r from-transparent via-foreground/10 to-transparent"
+        initial={{ x: '-100%' }}
+        animate={{ x: '100%' }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: 'linear' }}
+      />
+    </div>
+  );
+}
+
+/** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade + slide。
+ *  mode="wait" 保证旧视图退出后再挂载新视图，避免双视图同时撑开布局。
+ *  仅 App.tsx 的视图容器使用。 */
+export function PageTransition({ viewKey, children }: { viewKey: string; children: ReactNode }) {
+  const reduce = useReducedMotion();
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={viewKey}
+        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={reduce ? { opacity: 0 } : { opacity: 0, y: -12 }}
+        transition={{ duration: reduce ? 0.15 : 0.25, ease: 'easeOut' }}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
+  );
+}

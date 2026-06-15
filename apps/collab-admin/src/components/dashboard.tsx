@@ -21,6 +21,13 @@ import {
 import { useLoad } from '@/lib/helpers';
 import { api, type DashboardData, type GenerationStats, type FinanceStats } from '@/lib/api';
 import { cn, money } from '@/lib/utils';
+import {
+  AnimatedNumber,
+  MiniBarChart,
+  Shimmer,
+  StaggerContainer,
+  StaggerItem,
+} from '@/lib/motion';
 import type { View } from '@/lib/types';
 
 // ADMIN-VIEW-02 修复：Dashboard 增加 onNavigate 回调 prop，
@@ -56,23 +63,36 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
     { label: '审批管理', icon: CheckCircleIcon, view: 'applications' },
   ];
 
+  // 加载中标识：data 仍为 null 表示基础指标接口未返回。骨架屏据此切换。
+  const baseLoading = data === null;
+
   return (
     <div className="space-y-8">
-      {/* Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Stats：基础指标卡片，交错入场 + 悬停弹性 + 数字滚动。 */}
+      <StaggerContainer className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" stagger={0.08}>
         {stats.map(({ label, value, desc, icon: Icon, color }) => (
-          <Card key={label}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardDescription>{label}</CardDescription>
-              <Icon className={cn('size-4', color)} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{value}</div>
-              <p className="text-xs text-muted-foreground">{desc}</p>
-            </CardContent>
-          </Card>
+          <StaggerItem
+            key={label}
+            whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}
+          >
+            <StatCardSkeletonOrContent loading={baseLoading}>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardDescription>{label}</CardDescription>
+                  <Icon className={cn('size-4', color)} />
+                </CardHeader>
+                <CardContent>
+                  {/* 数字滚动：从 0 滚到目标值，给指标以「生长」感。 */}
+                  <div className="text-2xl font-bold tabular-nums">
+                    <AnimatedNumber value={value} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{desc}</p>
+                </CardContent>
+              </Card>
+            </StatCardSkeletonOrContent>
+          </StaggerItem>
         ))}
-      </div>
+      </StaggerContainer>
 
       {/* AI 生成质量（调研报告 Top10 / A4）：调用次数 / 成功率 / 失败数。
           后端基于 AuditLog（llm_binding.key_decrypted 调用代理 + plugin.uploaded 成功代理）聚合。 */}
@@ -82,12 +102,20 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
           <h2 className="text-sm font-semibold">AI 生成质量</h2>
           <span className="text-xs text-muted-foreground">基于审计日志聚合，调用代理为 key 解密次数</span>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <GenerationStatCard label="本月调用" value={generation?.month.calls ?? 0} desc="AI 生成会话次数" icon={SparklesIcon} color="text-violet-500" />
-          <GenerationStatCard label="本月成功" value={generation?.month.success ?? 0} desc="成功上传插件数" icon={CheckCircleIcon} color="text-emerald-500" />
-          <GenerationStatCard label="本月成功率" value={`${generation?.month.successRate ?? 0}%`} desc="成功 / 调用" icon={PercentIcon} color="text-blue-500" />
-          <GenerationStatCard label="累计成功率" value={`${generation?.total.successRate ?? 0}%`} desc={`累计 ${generation?.total.calls ?? 0} 次调用`} icon={TrendingUpIcon} color="text-amber-500" />
-        </div>
+        <StaggerContainer className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" stagger={0.08}>
+          <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+            <GenerationStatCard label="本月调用" value={generation?.month.calls ?? 0} desc="AI 生成会话次数" icon={SparklesIcon} color="text-violet-500" animate loading={generation === null} />
+          </StaggerItem>
+          <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+            <GenerationStatCard label="本月成功" value={generation?.month.success ?? 0} desc="成功上传插件数" icon={CheckCircleIcon} color="text-emerald-500" animate loading={generation === null} />
+          </StaggerItem>
+          <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+            <GenerationStatCard label="本月成功率" value={`${generation?.month.successRate ?? 0}%`} desc="成功 / 调用" icon={PercentIcon} color="text-blue-500" loading={generation === null} />
+          </StaggerItem>
+          <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+            <GenerationStatCard label="累计成功率" value={`${generation?.total.successRate ?? 0}%`} desc={`累计 ${generation?.total.calls ?? 0} 次调用`} icon={TrendingUpIcon} color="text-amber-500" loading={generation === null} />
+          </StaggerItem>
+        </StaggerContainer>
       </div>
 
       {/* 财务概览（调研报告 Top10 / C7）：GMV / 付费用户 / 转化率 / 热销插件。
@@ -99,12 +127,20 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
           <span className="text-xs text-muted-foreground">平台抽成暂为 0，GMV 为交易总额</span>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <GenerationStatCard label="本月 GMV" value={money(finance?.month.gmvCents ?? 0)} desc="本月交易总额" icon={WalletIcon} color="text-emerald-500" />
-            <GenerationStatCard label="累计 GMV" value={money(finance?.total.gmvCents ?? 0)} desc="历史交易总额" icon={TrendingUpIcon} color="text-blue-500" />
-            <GenerationStatCard label="付费用户" value={`${finance?.paidUserCount ?? 0} / ${finance?.totalUserCount ?? 0}`} desc="付费 / 总用户" icon={ShoppingCartIcon} color="text-violet-500" />
-            <GenerationStatCard label="付费转化率" value={`${finance?.conversionRate ?? 0}%`} desc="付费用户 / 总用户" icon={PercentIcon} color="text-amber-500" />
-          </div>
+          <StaggerContainer className="grid gap-4 sm:grid-cols-2" stagger={0.08}>
+            <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+              <GenerationStatCard label="本月 GMV" value={money(finance?.month.gmvCents ?? 0)} desc="本月交易总额" icon={WalletIcon} color="text-emerald-500" loading={finance === null} />
+            </StaggerItem>
+            <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+              <GenerationStatCard label="累计 GMV" value={money(finance?.total.gmvCents ?? 0)} desc="历史交易总额" icon={TrendingUpIcon} color="text-blue-500" loading={finance === null} />
+            </StaggerItem>
+            <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+              <GenerationStatCard label="付费用户" value={`${finance?.paidUserCount ?? 0} / ${finance?.totalUserCount ?? 0}`} desc="付费 / 总用户" icon={ShoppingCartIcon} color="text-violet-500" loading={finance === null} />
+            </StaggerItem>
+            <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+              <GenerationStatCard label="付费转化率" value={`${finance?.conversionRate ?? 0}%`} desc="付费用户 / 总用户" icon={PercentIcon} color="text-amber-500" loading={finance === null} />
+            </StaggerItem>
+          </StaggerContainer>
 
           <Card>
             <CardHeader className="pb-3">
@@ -116,7 +152,14 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
             </CardHeader>
             <CardContent className="p-0">
               <div className="px-6 pb-6">
-                {(finance?.topPlugins ?? []).length === 0 ? (
+                {finance === null ? (
+                  // 加载中：5 行骨架闪光占位。
+                  <div className="space-y-2">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Shimmer key={i} className="h-9 w-full" />
+                    ))}
+                  </div>
+                ) : (finance?.topPlugins ?? []).length === 0 ? (
                   <div className="py-6 text-center text-sm text-muted-foreground">
                     <DownloadIcon className="mx-auto mb-1 size-6 text-muted-foreground/50" />
                     暂无上架插件数据
@@ -154,6 +197,26 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
           </Card>
         </div>
       </div>
+
+      {/* 插件安装量简易条形图：基于财务 Top5 的 installCount，用 framer-motion 画 div 宽度动画，不引图表库。 */}
+      {(finance?.topPlugins ?? []).length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <DownloadIcon className="size-4 text-blue-500" />
+              插件安装量（Top 5）
+            </CardTitle>
+            <CardDescription>相对最大安装量归一化展示</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <MiniBarChart
+              data={(finance?.topPlugins ?? []).map((p) => ({ label: p.name, value: p.installCount }))}
+              formatValue={(v) => `${v.toLocaleString('zh-CN')} 次`}
+              colorClassName="bg-blue-500"
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pending / Todo */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -226,22 +289,63 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
   );
 }
 
+/** 基础指标卡片的加载/内容切换：loading 时渲染骨架闪光块，否则渲染真实卡片内容。
+ *  保留外层 StaggerItem 交错入场不受 loading 影响（骨架与真实内容都会交错进入）。 */
+function StatCardSkeletonOrContent({ loading, children }: { loading: boolean; children: React.ReactNode }) {
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <Shimmer className="h-3 w-16" />
+          <Shimmer className="size-4 rounded" />
+        </CardHeader>
+        <CardContent>
+          <Shimmer className="mb-2 h-7 w-24" />
+          <Shimmer className="h-3 w-20" />
+        </CardContent>
+      </Card>
+    );
+  }
+  return <>{children}</>;
+}
+
 /** 通用指标卡片：复用于 AI 生成质量与财务概览区块。
  *  - value 为字符串/数字均支持（百分比、金额等已格式化为字符串）。
- *  - 加载中（data 为 null）时显示 0，避免 NaN；后端聚合对空表已兜底 0。 */
+ *  - animate 为 true 时对纯数字 value 做滚动动画（字符串如「85%」不做滚动）。
+ *  - loading 时渲染骨架闪光块，避免 NaN；后端聚合对空表已兜底 0。 */
 function GenerationStatCard({
   label,
   value,
   desc,
   icon: Icon,
   color,
+  animate = false,
+  loading = false,
 }: {
   label: string;
   value: string | number;
   desc: string;
   icon: typeof UsersIcon;
   color: string;
+  animate?: boolean;
+  loading?: boolean;
 }) {
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <Shimmer className="h-3 w-16" />
+          <Shimmer className="size-4 rounded" />
+        </CardHeader>
+        <CardContent>
+          <Shimmer className="mb-2 h-7 w-24" />
+          <Shimmer className="h-3 w-20" />
+        </CardContent>
+      </Card>
+    );
+  }
+  // 仅纯数字做滚动；含 %/¥/字符串的指标直接展示（滚动含非数字会错乱）。
+  const numeric = typeof value === 'number';
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -249,7 +353,9 @@ function GenerationStatCard({
         <Icon className={cn('size-4', color)} />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-2xl font-bold tabular-nums">
+          {animate && numeric ? <AnimatedNumber value={value} /> : value}
+        </div>
         <p className="text-xs text-muted-foreground">{desc}</p>
       </CardContent>
     </Card>
