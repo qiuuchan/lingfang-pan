@@ -1,16 +1,16 @@
-// 极简 markdown 渲染（落地页更新日志 / 下载页 release notes 共用）。
-// 不引 react-markdown 等重型库（+40KB gzip 落地页首屏变大），用正则覆盖 80% 场景。
-// 支持：# / ## / ### 标题、- / * 列表（保留缩进）、> 引用、--- 分隔线、空行段落分隔、
-//       **bold**、`code`、![alt](url) 图片、[text](url) 链接。
-// 不支持：多行代码块 fence（```），标注「release notes 不建议贴代码块」。
+// Markdown 渲染（落地页更新日志 / 下载页 release notes 共用）。
+// 扩展版：支持代码块 fence、标题、有序/无序列表、引用、分隔线、表格、段落、行内元素。
+// 不引 react-markdown（+40KB gzip），手写覆盖 95% release notes 场景。
+// 支持语法：# / ## / ### / #### 标题、- / * 无序列表、1. / 2. 有序列表、
+//          > 引用、--- 分隔线、```代码块```、| 表格 |、**bold**、`code`、![img](url)、[link](url)。
 import type { ReactNode } from 'react';
 
-/** 行内元素解析：**bold**、`code`、![alt](url) 图片、[text](url) 链接。
+/** 行内元素解析：**bold**、`code`、![alt](url) 图片、[text](url) 链接、~~删除线~~。
  *  图片必须在链接前匹配（!\[ 前缀优先于 \[），否则图片会被当链接解析错。 */
 export function renderInline(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
-  // 顺序：图片 → 链接 → bold → code。
-  const regex = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g;
+  // 顺序：图片 → 链接 → bold → 删除线 → code。
+  const regex = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|~~([^~]+)~~|`([^`]+)`/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
@@ -43,10 +43,18 @@ export function renderInline(text: string): ReactNode[] {
         </a>,
       );
     } else if (match[0].startsWith('**')) {
+      // 粗体
       parts.push(
         <strong key={key++} className="font-semibold" style={{ color: 'var(--lf-fg)' }}>
           {match[0].slice(2, -2)}
         </strong>,
+      );
+    } else if (match[0].startsWith('~~')) {
+      // 删除线
+      parts.push(
+        <del key={key++} className="opacity-60">
+          {match[0].slice(2, -2)}
+        </del>,
       );
     } else {
       // 行内 code
@@ -66,66 +74,244 @@ export function renderInline(text: string): ReactNode[] {
   return parts;
 }
 
-/** 块级渲染：支持 #/##/###、-/* 列表（保留缩进）、> 引用、--- 分隔线、空行段落分隔。
- *  多行代码块 fence ``` 不解析（当普通段落）。返回 ReactNode 数组供组件直接渲染。 */
+/** 解析表格行（| a | b | 格式），返回单元格数组（去首尾空 + 去 |）。 */
+function parseTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+/** 判断是否为表格分隔行（| --- | --- | 格式）。 */
+function isTableSeparator(line: string): boolean {
+  const trimmed = line.trim();
+  return /^\|?[\s-:]+(\|[\s-:]+)+\|?$/.test(trimmed) && trimmed.includes('-');
+}
+
+/** 块级渲染：支持代码块/标题/列表/引用/分隔线/表格/段落。
+ *  返回 ReactNode 数组供组件直接渲染。 */
 export function renderMarkdown(md: string): ReactNode[] {
-  const lines = md.split('\n');
+  const lines = md.replace(/\r\n/g, '\n').split('\n');
   const nodes: ReactNode[] = [];
-  lines.forEach((line, i) => {
+  let i = 0;
+  let key = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
     const trimmed = line.trim();
-    // 保留空行做段落分隔（不渲染节点）。
-    if (trimmed.length === 0) return;
-    // 标题：# / ## / ###。
-    const heading = /^(#{1,3})\s+(.*)$/.exec(trimmed);
+
+    // 空行跳过。
+    if (trimmed.length === 0) {
+      i++;
+      continue;
+    }
+
+    // 代码块 fence（``` 或 ~~~）。
+    const fenceMatch = /^(`{3,}|~{3,})/.exec(trimmed);
+    if (fenceMatch) {
+      const fence = fenceMatch[1];
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith(fence[0].repeat(3))) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // 跳过闭合 fence。
+      nodes.push(
+        <pre
+          key={key++}
+          className="lf-mono my-3 overflow-x-auto rounded-lg p-4 text-xs leading-relaxed"
+          style={{
+            backgroundColor: 'var(--lf-bg-elevated)',
+            border: '1px solid var(--lf-border)',
+            color: 'var(--lf-fg)',
+          }}
+        >
+          {codeLines.join('\n')}
+        </pre>,
+      );
+      continue;
+    }
+
+    // 标题：# / ## / ### / ####。
+    const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed);
     if (heading) {
       const level = heading[1].length;
-      const sizeCls = level === 1 ? 'text-lg' : level === 2 ? 'text-base' : 'text-sm';
+      const sizeCls =
+        level === 1
+          ? 'text-xl font-bold mt-5 mb-2'
+          : level === 2
+            ? 'text-lg font-semibold mt-4 mb-1.5'
+            : level === 3
+              ? 'text-base font-semibold mt-3 mb-1'
+              : 'text-sm font-semibold mt-2 mb-1';
+      const HeadingTag = (`h${Math.min(level + 2, 6)}` as 'h3' | 'h4' | 'h5' | 'h6');
       nodes.push(
-        <h4 key={i} className={`lf-mono ${sizeCls} font-semibold mt-3 first:mt-0`} style={{ color: 'var(--lf-fg)' }}>
+        <HeadingTag key={key++} className={sizeCls} style={{ color: 'var(--lf-fg)' }}>
           {renderInline(heading[2])}
-        </h4>,
+        </HeadingTag>,
       );
-      return;
+      i++;
+      continue;
     }
+
     // 分隔线
-    if (trimmed === '---' || trimmed === '***') {
-      nodes.push(<hr key={i} className="my-3 border-t" style={{ borderColor: 'var(--lf-border)' }} />);
-      return;
+    if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
+      nodes.push(<hr key={key++} className="my-4 border-t" style={{ borderColor: 'var(--lf-border)' }} />);
+      i++;
+      continue;
     }
-    // 列表项：- 或 *（保留缩进表达层级，避免塌平）。
-    if (/^[-*]\s+/.test(trimmed)) {
-      const indent = line.length - line.trimStart().length;
+
+    // 表格检测（当前行含 | + 下一行是分隔行）。
+    if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const headerCells = parseTableRow(trimmed);
+      i += 2; // 跳过表头 + 分隔行。
+      const bodyRows: string[][] = [];
+      while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim().length > 0) {
+        bodyRows.push(parseTableRow(lines[i]));
+        i++;
+      }
       nodes.push(
-        <div
-          key={i}
-          className="flex gap-2 text-sm"
-          style={{ color: 'var(--lf-fg-muted)', paddingLeft: `${indent * 0.5}rem` }}
-        >
-          <span style={{ color: 'var(--lf-accent)' }}>›</span>
-          <span>{renderInline(trimmed.replace(/^[-*]\s+/, ''))}</span>
+        <div key={key++} className="my-3 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                {headerCells.map((cell, ci) => (
+                  <th
+                    key={ci}
+                    className="border px-3 py-2 text-left font-semibold"
+                    style={{ borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg)' }}
+                  >
+                    {renderInline(cell)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {bodyRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td
+                      key={ci}
+                      className="border px-3 py-1.5"
+                      style={{ borderColor: 'var(--lf-border)', color: 'var(--lf-fg-muted)' }}
+                    >
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>,
       );
-      return;
+      continue;
     }
+
+    // 有序列表项：1. / 2. / 3.
+    const orderedMatch = /^(\d+)\.\s+(.*)$/.exec(trimmed);
+    if (orderedMatch) {
+      const items: { num: string; content: string; indent: number }[] = [];
+      while (i < lines.length) {
+        const m = /^(\d+)\.\s+(.*)$/.exec(lines[i].trim());
+        if (m) {
+          const indent = lines[i].length - lines[i].trimStart().length;
+          items.push({ num: m[1], content: m[2], indent });
+          i++;
+        } else if (lines[i].trim().length === 0) {
+          i++;
+          break;
+        } else {
+          break;
+        }
+      }
+      nodes.push(
+        <ol key={key++} className="my-2 space-y-1 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+          {items.map((item, idx) => (
+            <li
+              key={idx}
+              className="flex gap-2.5"
+              style={{ paddingLeft: `${item.indent * 0.5}rem` }}
+            >
+              <span className="lf-mono shrink-0 font-semibold" style={{ color: 'var(--lf-accent)' }}>
+                {item.num}.
+              </span>
+              <span>{renderInline(item.content)}</span>
+            </li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    // 无序列表项：- 或 *
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items: { content: string; indent: number }[] = [];
+      while (i < lines.length) {
+        const m = /^[-*]\s+(.*)$/.exec(lines[i].trim());
+        if (m) {
+          const indent = lines[i].length - lines[i].trimStart().length;
+          items.push({ content: m[1], indent });
+          i++;
+        } else if (lines[i].trim().length === 0) {
+          i++;
+          break;
+        } else {
+          break;
+        }
+      }
+      nodes.push(
+        <ul key={key++} className="my-2 space-y-1 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+          {items.map((item, idx) => (
+            <li
+              key={idx}
+              className="flex gap-2.5"
+              style={{ paddingLeft: `${item.indent * 0.5}rem` }}
+            >
+              <span className="mt-0.5 shrink-0" style={{ color: 'var(--lf-accent)' }}>
+                ›
+              </span>
+              <span>{renderInline(item.content)}</span>
+            </li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
     // 引用
     if (trimmed.startsWith('> ')) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('> ')) {
+        quoteLines.push(lines[i].trim().slice(2));
+        i++;
+      }
       nodes.push(
         <blockquote
-          key={i}
-          className="border-l-2 pl-3 text-xs italic"
-          style={{ borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg-subtle)' }}
+          key={key++}
+          className="my-3 border-l-2 pl-4 py-1 text-sm italic"
+          style={{ borderColor: 'var(--lf-accent)', color: 'var(--lf-fg-subtle)' }}
         >
-          {renderInline(trimmed.slice(2))}
+          {quoteLines.map((q, qi) => (
+            <p key={qi} className="leading-relaxed">
+              {renderInline(q)}
+            </p>
+          ))}
         </blockquote>,
       );
-      return;
+      continue;
     }
+
     // 普通段落
     nodes.push(
-      <p key={i} className="text-sm leading-relaxed" style={{ color: 'var(--lf-fg-muted)' }}>
+      <p key={key++} className="my-1.5 text-sm leading-relaxed" style={{ color: 'var(--lf-fg-muted)' }}>
         {renderInline(trimmed)}
       </p>,
     );
-  });
+    i++;
+  }
+
   return nodes;
 }
