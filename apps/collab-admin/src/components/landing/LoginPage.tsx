@@ -32,7 +32,7 @@ interface PlatformInfo {
 }
 
 export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
-  const [email, setEmail] = useState(initialEmail || 'admin@example.com');
+  const [email, setEmail] = useState(initialEmail || '');
   const [password, setPassword] = useState('ChangeMe123!');
   const [loading, setLoading] = useState(false);
   // 忘记密码弹窗（调 /api/auth/forgot-password）。
