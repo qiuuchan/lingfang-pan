@@ -589,6 +589,27 @@ pub fn read_local_plugin_file(
     state.read_plugin_file(&plugin_id, &file)
 }
 
+/// 流程重构：上传命名时 rename 临时插件目录为正式目录。
+/// 安全：old_id 和 new_id 均走 sanitize_plugin_id 白名单 + canonicalize 前缀断言。
+#[tauri::command]
+pub fn rename_plugin_dir(
+    state: tauri::State<'_, PluginStore>,
+    old_id: String,
+    new_id: String,
+) -> Result<String, String> {
+    let safe_new = sanitize_plugin_id(&new_id)?;
+    let old_dir = state.plugin_dir(&old_id)?;
+    let new_dir = state.plugin_dir(&safe_new)?;
+    if !old_dir.exists() {
+        return Err(format!("原插件目录不存在：{old_id}"));
+    }
+    if new_dir.exists() {
+        return Err(format!("目标插件名已存在：{safe_new}"));
+    }
+    std::fs::rename(&old_dir, &new_dir).map_err(|e| format!("重命名插件目录失败：{e}"))?;
+    Ok(safe_new)
+}
+
 // === 单元测试（覆盖 scan 状态判定 + sanitize_plugin_id 防穿越 + 配置读写） ===
 
 #[cfg(test)]

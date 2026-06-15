@@ -53,8 +53,10 @@ import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protoco
 import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { LoadingButton } from '@/components/loading-button';
 import { cn } from '@/lib/utils';
 import { useEnvReadiness } from '@/lib/env-readiness';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -82,14 +84,9 @@ export function PluginCreatorHome() {
   // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
   const envReadiness = useEnvReadiness(session, view);
   const [input, setInput] = useState('');
-  // 组C（PRD 需求 1）：插件名用户命名，不再自动取 manifest.name。
-  // 用户在创建器顶部输入插件名（如「我的番茄钟」），首次发送时据此生成持久化 plugin_id，
-  // 并写入 manifest.title 字段（Rust 组A 在 scan 时优先读 title 展示，缺失回退 name）。
-  // 空串时：首发送后由 prompt 自动生成 plugin_id（向后兼容旧行为，不强制填名）。
-  const [pluginName, setPluginName] = useState('');
-  // 组C（PRD AC10）：当前会话对应的持久化 plugin_id（start_session 传入后固化到 session 记录）。
-  // 命中时 workspace 强制落到 plugins_root/<plugin_id>/（Rust resolve_workspace 已支持 plugin_id 优先）。
-  // null 表示当前会话尚未关联持久化插件（纯对话态或创建前）。
+  // 流程重构：创建期不要求命名（先对话→AI生成→预览→上传时命名）。
+  // pluginId 首次发送时由 Rust 侧用 session_id 自动生成临时目录名（plugins_root/<session_id>/）。
+  // 上传时弹命名 Dialog，用户填名后 rename_plugin_dir 改正式目录名。
   const [pluginId, setPluginId] = useState<string | null>(null);
   const pluginIdRef = useRef<string | null>(null);
   // 组C（PRD 需求 2）：插件状态从文件系统动态扫描（pluginId 命中持久化目录时才有意义）。
@@ -592,28 +589,17 @@ export function PluginCreatorHome() {
     return { backendUrl, authToken };
   }
 
+  // 流程重构：创建期不传 pluginId，Rust 侧用 session_id 自动生成临时持久化目录。
+  // 上传时弹命名 Dialog，用户填名后 rename 目录。
   async function startNewSession(text: string, selectedProvider: ProviderId) {
-    // 组C（PRD 需求 1 + AC10）：插件名用户命名 → 生成持久化 plugin_id 传入 start_session。
-    // pluginName 非空时：用 safePluginId 规范化（小写/连字符/去特殊）生成目录名；
-    // 为空时：仍从 prompt 自动生成（向后兼容），保证非插件场景（纯对话）不阻断。
-    // Rust resolve_workspace 命中 plugin_id 时 workspace 强制落到 plugins_root/<plugin_id>/（持久化目录）。
-    const resolvedPluginId = safePluginId(pluginName.trim() || text);
-    setPluginId(resolvedPluginId);
-    pluginIdRef.current = resolvedPluginId;
-    // 默认注入轻量对话 systemPrompt：正常聊天 + 检测到创建插件意图时按协议产出围栏块。
-    // 这样「你好」是普通对话（不产 manifest），「做个番茄钟插件」AI 知道用协议格式输出可预览插件包。
     const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
       input: {
         tool: selectedProvider,
-        // R6 自定义模型：把哨兵/default/空串归一为 undefined（回退 CLI 默认），真模型 id 原样透传。
         model: resolveSendModel(model),
-        // 组C：pluginId 命中持久化目录（Rust 组D 已支持 plugin_id 优先 workspace）。
-        pluginId: resolvedPluginId,
+        // 不传 pluginId → Rust 用 session_id 自动生成 plugins_root/<session_id>/ 持久化目录。
         prompt: text,
         systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
-        // R2 思考强度随首轮传入（claude 透传 --effort；codex/opencode 忽略）。
         effort,
-        // CLI 配置注入（平台 key/url + model 桥接进 CLI 启动，task 06-15）。
         cliConfig: buildCliConfig(),
       },
     });
@@ -810,9 +796,7 @@ export function PluginCreatorHome() {
     // 修复 ASKU-01：切会话时复位防重入守卫（若旧会话追问未完成即被切走）。
     askAnsweringRef.current = false;
     setAskAnswering(false);
-    // 组C：切会话时清空插件名/pluginId/状态——新会话尚未关联持久化目录，旧值已无意义。
-    // 会话本身不持久化 pluginName（用户命名属创建期输入），切回时需重新输入或由草稿文件反推。
-    setPluginName('');
+    // 流程重构：切会话时清空 pluginId/状态。
     setPluginId(null);
     pluginIdRef.current = null;
     setPluginStatus(null);
@@ -953,25 +937,41 @@ export function PluginCreatorHome() {
     }
   }
 
-  async function uploadCloud() {
+  // 流程重构：上传时弹命名 Dialog，用户确认插件名后才上传。
+  const [namingOpen, setNamingOpen] = useState(false);
+  const [namingValue, setNamingValue] = useState('');
+  const [namingLoading, setNamingLoading] = useState(false);
+
+  /** 上传按钮点击：先弹命名 Dialog。 */
+  function uploadCloud() {
     if (!files.length) return;
-    setUploading(true);
+    setNamingValue(manifest.name || '');
+    setNamingOpen(true);
+  }
+
+  /** 命名确认后实际执行上传。 */
+  async function doUpload() {
+    const name = namingValue.trim();
+    if (!name) return toast.error('请填写插件名称');
+    setNamingLoading(true);
     try {
+      // 上传到后端（manifest 含用户命名的 name）。
+      const uploadManifest = { ...manifest, name };
       const result = await api<{ plugin: LoadedPlugin; deduplicated?: boolean }>('/api/plugins/upload', {
         method: 'POST',
-        body: { manifest, files },
+        body: { manifest: uploadManifest, files },
       });
-      const plugin = { ...result.plugin, files, manifest, source: 'team' as const };
+      const plugin = { ...result.plugin, files, manifest: uploadManifest, source: 'team' as const };
       setCloudPlugin(plugin);
       pushRecent(plugin);
+      setNamingOpen(false);
       toast.success(result.deduplicated ? '团队共享中已有相同插件' : '已上传到团队共享');
     } catch (error) {
       const creatorError = toUploadError(error, 'upload');
-      // toast 用友好标题作瞬时反馈；同时 push 进 liveError 对话气泡可回看（AC6 双通道）。
       setLiveError(creatorError);
       toast.error(creatorError.title);
     } finally {
-      setUploading(false);
+      setNamingLoading(false);
     }
   }
 
@@ -1017,8 +1017,7 @@ export function PluginCreatorHome() {
     // 重置多轮运行态：新对话回到首轮语义（multiturnMode 待定）。
     setMultiturnMode(null);
     lastPromptRef.current = null;
-    // 组C：重置插件名 + pluginId + 动态状态。新对话不再关联上一插件的持久化目录。
-    setPluginName('');
+    // 流程重构：重置 pluginId + 动态状态。新对话不再关联上一插件的持久化目录。
     setPluginId(null);
     pluginIdRef.current = null;
     setPluginStatus(null);
@@ -1165,18 +1164,8 @@ export function PluginCreatorHome() {
 
         <div className="shrink-0 border-t bg-background px-4 py-3">
           <div className="mx-auto max-w-3xl">
-            {/* 组C（PRD 需求 1）：插件名称输入框——用户命名插件，不自动取 manifest.name。
-                空串时首发送后由 prompt 自动生成 plugin_id（向后兼容），非强制。
-                首轮发送后 pluginId 固化（Rust session 记录），改名需开新对话（插件目录名不可中途改）。 */}
-            <div className="mb-2 flex items-center gap-2">
-              <Input
-                value={pluginName}
-                onChange={(event) => setPluginName(event.target.value)}
-                placeholder={pluginId ? `已创建插件目录：${pluginId}（新对话可改名）` : '插件名称（可选，如「我的番茄钟」）'}
-                disabled={Boolean(pluginId) && streaming}
-                className="h-8 text-sm"
-              />
-            </div>
+            {/* 流程重构：创建期不需要插件名称输入框。
+                正确流程：对话 → AI 生成代码 → 预览 → 上传时弹命名 Dialog。 */}
             <Composer
               input={input}
               model={model}
@@ -1255,6 +1244,31 @@ export function PluginCreatorHome() {
       {/* 平台缺口 Top7：新手任务清单（首次登录弹 Dialog，5 步引导，进度持久化）。
           已全部完成时组件内部 return null，不渲染 Dialog。 */}
       <TaskChecklist session={session} setView={setView} setSettingsTab={setSettingsTab} />
+
+      {/* 流程重构：上传命名 Dialog（用户在上传时给插件命名）。 */}
+      <Dialog open={namingOpen} onOpenChange={(o) => { if (!namingLoading) setNamingOpen(o); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>命名并上传插件</DialogTitle>
+            <DialogDescription>给插件起个名字，团队成员将通过这个名字找到它。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="plugin-name-input">插件名称</Label>
+            <Input
+              id="plugin-name-input"
+              value={namingValue}
+              onChange={(e) => setNamingValue(e.target.value)}
+              placeholder="如：我的番茄钟"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && !namingLoading && doUpload()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNamingOpen(false)} disabled={namingLoading}>取消</Button>
+            <LoadingButton onClick={doUpload} loading={namingLoading}>上传</LoadingButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
