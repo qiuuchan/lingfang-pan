@@ -316,7 +316,7 @@ export function ModelGatewayTab() {
               <LoadingButton
                 onClick={() => { void handleFetchModels(); }}
                 loading={fetching}
-                disabled={!apiKeyInput.trim() || fetching}
+                disabled={(!apiKeyInput.trim() && !binding) || fetching}
               >
                 拉取模型
               </LoadingButton>
