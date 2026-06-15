@@ -1,9 +1,35 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { requireUser } from '../common';
+import { Public, requireUser } from '../common';
 import { TeamService } from './team.service';
-import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto } from './dto/teams.dto';
+import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto, UpdateTeamProfileDto } from './dto/teams.dto';
+
+/**
+ * 公开团队发现控制器（Top1「注册即孤儿」解法）。
+ * GET /api/teams/public：列出 allowPublicJoin=true + ACTIVE 的团队（发现页）。
+ * POST /api/teams/:id/join：用户直接加入公开团队（无需邀请码/审批）。
+ * 与 TeamsController 分离：前者挂在 /teams/current（需登录态），此处挂在 /teams 顶层（公开发现）。
+ */
+@ApiTags('Teams')
+@ApiBearerAuth()
+@Controller('teams')
+export class PublicTeamsController {
+  constructor(@Inject(TeamService) private readonly team: TeamService) {}
+
+  @Public()
+  @Get('public')
+  @ApiOperation({ summary: '发现公开团队（列出 allowPublicJoin=true + ACTIVE 的团队）' })
+  listPublic() {
+    return this.team.listPublicTeams();
+  }
+
+  @Post(':id/join')
+  @ApiOperation({ summary: '直接加入公开团队（无需邀请码）' })
+  join(@Req() req: Request, @Param('id') id: string) {
+    return this.team.joinPublicTeam(requireUser(req).id, id);
+  }
+}
 
 @ApiTags('Teams')
 @ApiBearerAuth()
@@ -15,6 +41,18 @@ export class TeamsController {
   @ApiOperation({ summary: '当前团队信息' })
   current(@Req() req: Request) {
     return this.team.currentTeam(requireUser(req).id);
+  }
+
+  @Get('profile')
+  @ApiOperation({ summary: '当前团队公开发现设置（allowPublicJoin + description）' })
+  profile(@Req() req: Request) {
+    return this.team.currentTeamProfile(requireUser(req).id);
+  }
+
+  @Patch('profile')
+  @ApiOperation({ summary: '团队管理员更新团队公开发现设置' })
+  updateProfile(@Req() req: Request, @Body() body: UpdateTeamProfileDto) {
+    return this.team.updateTeamProfile(requireUser(req).id, body);
   }
 
   @Get('members')

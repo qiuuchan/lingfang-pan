@@ -38,6 +38,23 @@ export interface TeamInfo {
   balanceCents: number;
 }
 
+/** 公开团队发现页条目（GET /api/teams/public）。 */
+export interface PublicTeam {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  memberCount: number;
+}
+
+/** 当前团队公开发现设置（GET /api/teams/current/profile）。 */
+export interface TeamProfile {
+  id: string;
+  name: string;
+  allowPublicJoin: boolean;
+  description: string;
+}
+
 export interface TeamMember {
   userId: string;
   role: TeamRole;

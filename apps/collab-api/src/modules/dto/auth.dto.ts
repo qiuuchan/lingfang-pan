@@ -43,3 +43,22 @@ export class LoginDto {
   @IsString()
   password!: string;
 }
+
+/** 找回密码请求体 DTO。 */
+export class ForgotPasswordDto {
+  @ApiProperty({ description: '注册邮箱地址' })
+  @IsEmail({}, { message: '请输入有效邮箱' })
+  email!: string;
+}
+
+/** 重置密码请求体 DTO。 */
+export class ResetPasswordDto {
+  @ApiProperty({ description: '邮件下发的重置 token' })
+  @IsString()
+  token!: string;
+
+  @ApiProperty({ description: '新密码（至少 8 位）', minLength: 8 })
+  @IsString()
+  @MinLength(8, { message: '新密码至少 8 位' })
+  newPassword!: string;
+}
