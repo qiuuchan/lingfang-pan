@@ -14,6 +14,28 @@
     "targets": ["nsis"],
     "resources": {
       "../builtin-plugins": "builtin-plugins"
+    },
+    "copyright": "© 2026 LingFang",
+    "shortDescription": "LingFang 协作平台桌面客户端",
+    "longDescription": "LingFang 协作平台桌面客户端：AI 插件创建、团队协作、插件市场与钱包，支持本地代码助手与多种运行时插件。",
+    "publisher": "LingFang",
+    "category": "Productivity",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis-header.bmp",
+        "sidebarImage": "icons/nsis-sidebar.bmp",
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true
+      }
     }
   },
   "app": {
