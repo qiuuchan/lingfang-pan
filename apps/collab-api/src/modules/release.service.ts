@@ -249,9 +249,8 @@ export class ReleaseService {
       // .sig 不存在（非 updater 必需），留空。
     }
 
-    // 构建公开下载 URL。
-    const baseUrl = process.env.PUBLIC_BASE_URL || '';
-    const url = `${baseUrl}/downloads/${uniqueName}`;
+    // 构建公开下载 URL（相对路径，由当前后端地址拼接）。
+    const url = `/downloads/${uniqueName}`;
 
     const asset = await this.prisma.releaseAsset.create({
       data: {

@@ -152,10 +152,22 @@ export function ModelGatewayTab() {
     void refresh();
   }, [refresh]);
 
-  /** 点「拉取模型」：调 fetch_models（Rust 直连 active provider /v1/models）。 */
+  /** 点「拉取模型」：调 fetch_models（Rust 直连 active provider /v1/models）。
+   *  已绑定 key 时直接用 decrypt 拿明文拉取，不需要用户重新填。 */
   async function handleFetchModels() {
     if (!activeProvider) return;
-    if (!apiKeyInput.trim()) {
+    // 优先用用户输入的 key；输入为空但已有绑定时，调 decrypt 拿绑定的 key。
+    let key = apiKeyInput.trim();
+    if (!key && binding) {
+      try {
+        const res = await api<{ apiKey: string }>('/api/llm/binding/decrypt', { method: 'POST' });
+        key = res.apiKey;
+      } catch {
+        toast.error('获取已保存的密钥失败');
+        return;
+      }
+    }
+    if (!key) {
       toast.error('先填写 API 密钥');
       return;
     }
@@ -163,12 +175,10 @@ export function ModelGatewayTab() {
     setFetchedModels([]);
     setSelectedModels([]);
     try {
-      // AC9：apiKey 仅作为参数传给 Rust reqwest 临时用，不落盘不进长期内存。
-      // provider 参数仅作错误提示上下文（可传 activeProvider.name 或空串）。
       const models = await fetchModels(
         activeProvider.name ?? '',
         activeProvider.apiUrl,
-        apiKeyInput,
+        key,
       );
       setFetchedModels(models);
       // 默认全选拉取到的模型（用户可取消勾选）。
