@@ -1,24 +1,81 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { LoggerModule } from 'nestjs-pino';
 import { PrismaService } from './prisma.service';
 import { AuthModule } from './modules/auth.module';
 import { CollabModule } from './modules/collab.module';
 import { JwtAuthGuard } from './security';
-import { HealthController } from './health.controller';
+import { HealthController, ReadinessService } from './health.controller';
 
 /**
- * 全局限流（Top9 解法）：
- * - ThrottlerModule 默认 60 次/分钟/IP（default 命名空间）。
- * - ThrottlerGuard 作为全局守卫启用；敏感端点（login/register/forgot-password/purchase/upload）
- *   用 @Throttle({ default: { limit: 10, ttl: 60000 } }) 收紧到 10 次/分钟。
- * - tracker 默认用 req.ip（Express 的 trust proxy 下取真实客户端 IP）。
+ * 结构化日志（nestjs-pino）配置。
  *
- * 与 JwtAuthGuard 的关系：两个守卫均为 APP_GUARD，NestJS 按注册顺序执行。
- * ThrottlerGuard 放前面（先限流再鉴权），降低无效请求的 DB 回查压力。
+ * - 格式：dev（NODE_ENV !== 'production'）用 pino-pretty 美化输出便于人工排查；
+ *   prod 输出纯 JSON 行，便于日志采集系统（ELK/Loki）结构化检索。
+ * - 自动请求日志：pino-http 中间件记录 method/url/status/duration/ip，
+ *   trust proxy 已在 main.ts 设为 1 跳，故 ip 为真实客户端 IP。
+ * - redact：遮蔽敏感字段（apiKey/password/token/secret/authorization 等），
+ *   覆盖 req.body 与 req.headers 两类常见泄漏路径；遮蔽值不落日志。
+ *   fast-redact 通配 * 仅匹配单层，故对 body 同时列「顶层 + 一层嵌套」两套路径，
+ *   覆盖如 req.body.gateway.apiKey（LLM 网关绑定）这类嵌套敏感字段。
  */
+const isProd = process.env.NODE_ENV === 'production';
+
+/**
+ * 敏感字段名（按业务实际命名补充，含常见变体）。
+ * - authorization：标准 Bearer token 头。
+ * - token / refreshToken / accessToken：登录、刷新令牌。
+ * - password / newPassword：登录、改密。
+ * - apiKey / secret：LLM 网关密钥、第三方凭证。
+ */
+const sensitiveKeys = [
+  'authorization',
+  'token',
+  'refreshToken',
+  'accessToken',
+  'password',
+  'newPassword',
+  'apiKey',
+  'secret',
+];
+
+/**
+ * 构造 redact 路径：对每个敏感键生成「req.body.<key>」（顶层）与「req.body.*.<key>」（一层嵌套），
+ * 以及「req.headers.<lower>」（HTTP 头名恒小写）。
+ */
+function buildRedactPaths(): string[] {
+  const paths: string[] = [];
+  for (const key of sensitiveKeys) {
+    paths.push(`req.body.${key}`); // 顶层请求体字段（如登录 DTO.password）
+    paths.push(`req.body.*.${key}`); // 一层嵌套（如 llm 网关绑定 gateway.apiKey）
+    paths.push(`req.headers.${key.toLowerCase()}`); // 请求头（Express 已统一小写）
+  }
+  return paths;
+}
+
 @Module({
   imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: isProd ? 'info' : 'debug',
+        transport: isProd
+          ? undefined
+          : {
+              target: 'pino-pretty',
+              options: {
+                colorize: true,
+                singleLine: true,
+                translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
+              },
+            },
+        // 遮蔽敏感字段：请求体（顶层+一层嵌套）与请求头中的 apiKey/password/token/secret/authorization 等。
+        redact: {
+          paths: buildRedactPaths(),
+          censor: '[REDACTED]',
+        },
+      },
+    }),
     ThrottlerModule.forRoot([
       {
         ttl: 60_000, // 60 秒窗口
@@ -31,6 +88,7 @@ import { HealthController } from './health.controller';
   controllers: [HealthController],
   providers: [
     PrismaService,
+    ReadinessService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],

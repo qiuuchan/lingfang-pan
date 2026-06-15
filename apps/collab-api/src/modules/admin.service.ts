@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma.service';
 import { conflict, forbidden, insufficientBalance, notFound, publicUser, slugify } from '../common';
 import { AuthService } from './auth.service';
+import { NotificationService } from './notification.service';
 import { publicPlugin } from './plugin-package';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class AdminService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   async adminDashboard(userId: string) {
@@ -314,6 +316,20 @@ export class AdminService {
       await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin.approved', targetType: 'Plugin', targetId: id, metadata: { teamId: plugin.teamId } } });
       return next;
     });
+    // 通知作者：插件审核通过（触发失败不阻塞主操作，仅吞错记日志）。
+    if (plugin.authorUserId) {
+      try {
+        await this.notifications.create(
+          plugin.authorUserId,
+          'plugin_approved',
+          '插件审核通过',
+          `你的插件「${plugin.name}」已通过平台审核并上架市场。`,
+          { relatedType: 'Plugin', relatedId: id },
+        );
+      } catch {
+        // 通知触发失败不阻塞审核主流程。
+      }
+    }
     return { plugin: publicPlugin(updated, updated.teamId || undefined) };
   }
 
@@ -332,6 +348,20 @@ export class AdminService {
       await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin.rejected', targetType: 'Plugin', targetId: id, metadata: { teamId: plugin.teamId, reason: reviewReason } } });
       return next;
     });
+    // 通知作者：插件审核未通过，附驳回原因（触发失败不阻塞主操作）。
+    if (plugin.authorUserId) {
+      try {
+        await this.notifications.create(
+          plugin.authorUserId,
+          'plugin_rejected',
+          '插件审核未通过',
+          `你的插件「${plugin.name}」未通过平台审核：${reviewReason}`,
+          { relatedType: 'Plugin', relatedId: id },
+        );
+      } catch {
+        // 通知触发失败不阻塞审核主流程。
+      }
+    }
     return { plugin: publicPlugin(updated, updated.teamId || undefined) };
   }
 
@@ -374,7 +404,24 @@ export class AdminService {
   }
 
   async approveApplication(actorId: string, id: string) {
+    // createTeamForApplication 内部已 ensurePlatformAdmin + 校验状态，返回建好的团队。
     const team = await this.auth.createTeamForApplication(id, actorId);
+    // 通知申请者：团队管理员申请已通过（触发失败不阻塞主操作）。
+    // createTeamForApplication 已保证 application 存在且 status 已转 APPROVED，此处直接读申请者 userId。
+    const application = await this.prisma.teamAdminApplication.findUnique({ where: { id }, select: { userId: true, teamName: true } });
+    if (application?.userId) {
+      try {
+        await this.notifications.create(
+          application.userId,
+          'application_approved',
+          '团队管理员申请已通过',
+          `你的团队管理员申请已通过，团队「${application.teamName}」已创建。`,
+          { relatedType: 'Team', relatedId: team.id },
+        );
+      } catch {
+        // 通知触发失败不阻塞主流程。
+      }
+    }
     return { team };
   }
 
@@ -387,6 +434,18 @@ export class AdminService {
     if (application.status !== 'PENDING') throw conflict('该申请已处理');
     const updated = await this.prisma.teamAdminApplication.update({ where: { id }, data: { status: 'REJECTED', reviewReason: reason || '', reviewedById: actorId, reviewedAt: new Date() } });
     await this.audit(actorId, 'team_admin_application.rejected', 'TeamAdminApplication', id, { reason });
+    // 通知申请者：团队管理员申请未通过（触发失败不阻塞主操作）。
+    try {
+      await this.notifications.create(
+        application.userId,
+        'application_rejected',
+        '团队管理员申请未通过',
+        `你的团队管理员申请未通过${reason ? `：${reason}` : ''}。`,
+        { relatedType: 'TeamAdminApplication', relatedId: id },
+      );
+    } catch {
+      // 通知触发失败不阻塞主流程。
+    }
     return { application: updated };
   }
 

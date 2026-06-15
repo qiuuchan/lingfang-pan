@@ -133,6 +133,8 @@ model User {
   auditLogs             AuditLog[]             @relation("AuditActor")
   createdLlmBindings    TenantLlmBinding[]    @relation("BindingCreator")
   updatedLlmBindings    TenantLlmBinding[]    @relation("BindingUpdater")
+  platformSettingUpdates PlatformSetting[]   @relation("SettingUpdater")
+  notifications         Notification[]
 }
 
 model Team {
@@ -305,6 +307,19 @@ model AuditLog {
   @@index([actorUserId, createdAt])
 }
 
+// 平台设置（key/value 键值表，平台 Admin 维护）。
+// key 为主键（如 platformName/logoUrl），value 为 String（富文本/URL/开关均以字符串存，由调用方按 key 解析）。
+// description 为后台展示用说明（不参与业务逻辑，仅辅助 Admin 识别每项含义）。
+// updatedById 记录最后修改人（FK User，onDelete SetNull，Admin 被禁用后设置仍保留但作者置空）。
+model PlatformSetting {
+  key         String   @id
+  value       String   @default("")
+  description String   @default("")
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("SettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
 model Wallet {
   id           String   @id @default(uuid())
   userId       String   @unique
@@ -449,4 +464,24 @@ model ReleaseAsset {
 
   @@unique([releaseId, platform, arch])
   @@index([releaseId])
+}
+
+// 用户通知（用户级，不强制团队归属）。由内部业务事件触发 create（审核结果/收入到账等）。
+// type 为 String（非 enum）：业务侧自由扩展通知类型，不锁死枚举（如 plugin_approved/purchase_sale/application_approved）。
+// read 默认 false（未读），relatedType/relatedId 可选，指向触发该通知的业务实体（前端可据此跳转详情）。
+// 索引 [userId, read] 支撑「未读列表」查询，[userId, createdAt] 支撑「按时间倒序」分页。
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String
+  title       String
+  body        String   @default("")
+  read        Boolean  @default(false)
+  relatedType String?
+  relatedId   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
 }
