@@ -112,6 +112,8 @@ export class MarketplaceService {
         where: { id: existing.id },
         data: { version: plugin.version, status: 'ENABLED', installedById: userId },
       });
+      // 市场安装审计（重装分支）：记录刷新版本事件，与首次安装 action 区分（同一 action 不同 metadata.reason）。
+      await this.audit(userId, 'marketplace.plugin.installed', 'Plugin', pluginId, { teamId: membership.teamId, reason: 'reinstall' });
       return { plugin_id: pluginId, version: plugin.version, status: 'already_installed' as const };
     }
     await this.prisma.$transaction([
@@ -120,6 +122,8 @@ export class MarketplaceService {
       }),
       this.prisma.plugin.update({ where: { id: pluginId }, data: { installCount: { increment: 1 } } }),
     ]);
+    // 市场安装审计（首次安装）：此前 marketplace install 完全缺失审计，现补齐。
+    await this.audit(userId, 'marketplace.plugin.installed', 'Plugin', pluginId, { teamId: membership.teamId, reason: 'install' });
 
     return { plugin_id: pluginId, version: plugin.version, status: 'installed' as const };
   }
@@ -165,7 +169,13 @@ export class MarketplaceService {
         },
       });
     });
+    // 市场评分审计：记录用户对插件的评分行为（首次评分/改分均记），metadata 含 score 便于追溯。
+    await this.audit(userId, 'plugin.marketplace.rated', 'Plugin', pluginId, { teamId: membership.teamId, score });
 
     return { ok: true };
+  }
+
+  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
+    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
   }
 }

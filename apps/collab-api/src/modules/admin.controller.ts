@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
@@ -6,14 +6,18 @@ import { AdminService } from './admin.service';
 import { LlmService } from './llm.service';
 import {
   AdminAdjustBalanceDto,
+  AdminAuditLogsQueryDto,
   AdminCreatePluginDto,
   AdminCreateTeamDto,
   AdminCreateUserDto,
+  AdminPlatformRoleDto,
   AdminRejectApplicationDto,
   AdminRejectPluginDto,
   AdminSetTeamAdminDto,
+  AdminUpdateMemberRoleDto,
   AdminUpdatePluginDto,
   AdminUpdateTeamDto,
+  AdminUpdateTeamStatusDto,
   AdminUpdateUserDto,
 } from './dto/admin.dto';
 import { ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
@@ -75,6 +79,24 @@ export class AdminController {
     return this.admin.adminDeleteUser(requireUser(req).id, id);
   }
 
+  @Get('users/:id/detail')
+  @ApiOperation({ summary: '用户详情（登录历史 + 钱包 + 团队 memberships + 钱包流水）' })
+  userDetail(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminUserDetail(requireUser(req).id, id);
+  }
+
+  @Post('users/:id/reset-password')
+  @ApiOperation({ summary: '管理员强制重置用户密码（生成临时密码返给 admin）' })
+  resetUserPassword(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminResetUserPassword(requireUser(req).id, id);
+  }
+
+  @Patch('users/:id/platform-role')
+  @ApiOperation({ summary: '调整用户平台角色（NONE↔PLATFORM_ADMIN，禁止自改自身）' })
+  updateUserPlatformRole(@Req() req: Request, @Param('id') id: string, @Body() body: AdminPlatformRoleDto) {
+    return this.admin.adminUpdateUserPlatformRole(requireUser(req).id, id, body);
+  }
+
   @Get('teams')
   @ApiOperation({ summary: '团队列表' })
   teams(@Req() req: Request) {
@@ -117,6 +139,30 @@ export class AdminController {
     return this.admin.adminAdjustBalance(requireUser(req).id, teamId, body);
   }
 
+  @Get('teams/:id/members')
+  @ApiOperation({ summary: '团队成员列表（含 role/status/joinedAt）' })
+  teamMembers(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminTeamMembers(requireUser(req).id, id);
+  }
+
+  @Patch('teams/:id/members/:userId/role')
+  @ApiOperation({ summary: '调整团队成员角色（TEAM_ADMIN↔MEMBER）' })
+  updateMemberRole(@Req() req: Request, @Param('id') id: string, @Param('userId') userId: string, @Body() body: AdminUpdateMemberRoleDto) {
+    return this.admin.adminUpdateMemberRole(requireUser(req).id, id, userId, body);
+  }
+
+  @Patch('teams/:id/status')
+  @ApiOperation({ summary: '团队启用/停用（ACTIVE/SUSPENDED）' })
+  updateTeamStatus(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdateTeamStatusDto) {
+    return this.admin.adminUpdateTeamStatus(requireUser(req).id, id, body);
+  }
+
+  @Get('teams/:id/detail')
+  @ApiOperation({ summary: '团队详情（成员数 + 插件数 + 购买记录 + 余额流水摘要）' })
+  teamDetail(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminTeamDetail(requireUser(req).id, id);
+  }
+
   @Get('plugins')
   @ApiOperation({ summary: '平台插件列表' })
   plugins(@Req() req: Request) {
@@ -149,9 +195,21 @@ export class AdminController {
   }
 
   @Patch('plugins/:id')
-  @ApiOperation({ summary: '更新平台插件' })
+  @ApiOperation({ summary: '更新平台插件（名称/描述/版本/定价/可见性/状态）' })
   updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdatePluginDto) {
     return this.admin.adminUpdatePlugin(requireUser(req).id, id, body);
+  }
+
+  @Post('plugins/:id/delist')
+  @ApiOperation({ summary: '下架市场插件（marketplace=false + reviewStatus=DRAFT + 通知作者）' })
+  delistPlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminRejectPluginDto) {
+    return this.admin.adminDelistPlugin(requireUser(req).id, id, body.reason);
+  }
+
+  @Get('plugins/:id/audit-history')
+  @ApiOperation({ summary: '插件审核历史（PluginReview 时间线）' })
+  pluginAuditHistory(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminPluginAuditHistory(requireUser(req).id, id);
   }
 
   @Get('team-admin-applications')
@@ -173,9 +231,21 @@ export class AdminController {
   }
 
   @Get('audit-logs')
-  @ApiOperation({ summary: '审计日志' })
-  auditLogs(@Req() req: Request) {
-    return this.admin.auditLogs(requireUser(req).id);
+  @ApiOperation({ summary: '审计日志（支持分类筛选 + 关键词搜索 + 操作者/对象过滤）' })
+  auditLogs(@Req() req: Request, @Query() query: AdminAuditLogsQueryDto) {
+    return this.admin.auditLogs(requireUser(req).id, query);
+  }
+
+  @Get('audit-categories')
+  @ApiOperation({ summary: '审计分类元数据（key + 中文 + 说明，供前端筛选下拉）' })
+  auditCategories(@Req() req: Request) {
+    return this.admin.auditCategories(requireUser(req).id);
+  }
+
+  @Get('admins/:id/activity')
+  @ApiOperation({ summary: '管理员操作记录（actorUserId 维度的审计日志）' })
+  adminActivity(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminActivity(requireUser(req).id, id);
   }
 
   // === LLM provider 目录（平台 Admin 维护，ensurePlatformAdmin 在 LlmService 内） ===

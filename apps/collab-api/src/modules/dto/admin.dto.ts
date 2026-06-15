@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { BALANCE_DIRECTION, PLATFORM_ROLE, PLUGIN_STATUS, TEAM_STATUS, USER_STATUS } from './enums';
+import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { BALANCE_DIRECTION, PLATFORM_ROLE, PLUGIN_STATUS, PLUGIN_VISIBILITY, TEAM_ROLE, TEAM_STATUS, USER_STATUS } from './enums';
 
 /** 管理端创建用户请求体 DTO。 */
 export class AdminCreateUserDto {
@@ -126,17 +126,26 @@ export class AdminRejectPluginDto {
   reason?: string;
 }
 
-/** 更新平台插件请求体 DTO。priceCents 可选非负整数。 */
+/** 更新平台插件请求体 DTO。字段白名单与服务层显式提取对齐，priceCents 可选非负整数。
+ *  version 为展示用 semver 字符串（非严格校验，仅限长 32 防异常超长串），
+ *  visibility 为枚举白名单（PRIVATE/TEAM/PUBLIC），杜绝越权字段透传。 */
 export class AdminUpdatePluginDto {
   @ApiPropertyOptional({ description: '插件名称' })
   @IsOptional()
   @IsString()
+  @MaxLength(128, { message: '插件名称过长' })
   name?: string;
 
   @ApiPropertyOptional({ description: '插件描述' })
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiPropertyOptional({ description: '插件版本（semver 展示串）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32, { message: '版本号过长' })
+  version?: string;
 
   @ApiPropertyOptional({ description: '插件状态', enum: PLUGIN_STATUS })
   @IsOptional()
@@ -149,6 +158,11 @@ export class AdminUpdatePluginDto {
   @IsInt({ message: 'priceCents 必须是整数' })
   @Min(0, { message: 'priceCents 不能为负' })
   priceCents?: number;
+
+  @ApiPropertyOptional({ description: '可见性', enum: PLUGIN_VISIBILITY })
+  @IsOptional()
+  @IsEnum(PLUGIN_VISIBILITY, { message: 'visibility 只允许 PRIVATE、TEAM 或 PUBLIC' })
+  visibility?: (typeof PLUGIN_VISIBILITY)[number];
 }
 
 /** 驳回团队管理员申请请求体 DTO。reason 可选。 */
@@ -157,4 +171,55 @@ export class AdminRejectApplicationDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+/** 调整团队成员角色请求体 DTO。role 枚举白名单（TEAM_ADMIN/MEMBER），杜绝越权字段透传。 */
+export class AdminUpdateMemberRoleDto {
+  @ApiProperty({ description: '成员角色', enum: TEAM_ROLE })
+  @IsEnum(TEAM_ROLE, { message: 'role 只允许 TEAM_ADMIN 或 MEMBER' })
+  role!: (typeof TEAM_ROLE)[number];
+}
+
+/** 团队启用/停用请求体 DTO。status 枚举白名单（ACTIVE/SUSPENDED）。 */
+export class AdminUpdateTeamStatusDto {
+  @ApiProperty({ description: '团队状态', enum: TEAM_STATUS })
+  @IsEnum(TEAM_STATUS, { message: 'status 只允许 ACTIVE 或 SUSPENDED' })
+  status!: (typeof TEAM_STATUS)[number];
+}
+
+/** 管理端调整用户平台角色请求体 DTO（专用端点 PATCH /platform-role）。
+ *  platformRole 枚举白名单，与 AdminUpdateUserDto 区分：此端点仅改角色，
+ *  且禁止自改自身（service 内 id === actorId 时拒绝，防自降级锁死末位管理员）。 */
+export class AdminPlatformRoleDto {
+  @ApiProperty({ description: '目标平台角色', enum: PLATFORM_ROLE })
+  @IsEnum(PLATFORM_ROLE, { message: 'platformRole 只允许 NONE 或 PLATFORM_ADMIN' })
+  platformRole!: (typeof PLATFORM_ROLE)[number];
+}
+
+/** 审计日志查询参数 DTO（组D 审计完善）。
+ *  category：按 action 前缀分类筛选（auth/team/plugin/marketplace/wallet/llm/admin/system）。
+ *  q：关键词搜索（匹配 action / actor email / targetId）。
+ *  actorId / targetType：精确过滤。全部可选。 */
+export const AUDIT_CATEGORY = ['auth', 'team', 'plugin', 'marketplace', 'wallet', 'llm', 'admin', 'system'] as const;
+
+export class AdminAuditLogsQueryDto {
+  @ApiPropertyOptional({ description: '分类筛选', enum: AUDIT_CATEGORY })
+  @IsOptional()
+  @IsEnum(AUDIT_CATEGORY, { message: 'category 只允许 auth/team/plugin/marketplace/wallet/llm/admin/system' })
+  category?: (typeof AUDIT_CATEGORY)[number];
+
+  @ApiPropertyOptional({ description: '关键词搜索（action / actor email / targetId）' })
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @ApiPropertyOptional({ description: '操作者用户 ID（精确过滤）' })
+  @IsOptional()
+  @IsString()
+  actorId?: string;
+
+  @ApiPropertyOptional({ description: '对象类型（精确过滤，如 User/Team/Plugin）' })
+  @IsOptional()
+  @IsString()
+  targetType?: string;
 }

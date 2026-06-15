@@ -5,6 +5,7 @@
 // 注意 JWT_SECRET 由 vitest setup 注入（见 vitest.config 或 .env）；测试用真实 jwt 签发/校验闭环。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 
@@ -17,11 +18,19 @@ function mockPrisma() {
     updateMany: vi.fn(),
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
+    create: vi.fn(),
   };
-  const auditLog = { create: vi.fn() };
-  const tx = { user: { updateMany: user.updateMany, findUniqueOrThrow: user.findUniqueOrThrow } };
+  // auditLog.create 默认返回 resolved Promise（logout/refresh 用 .catch() 链，需 thenable）。
+  const auditLog = { create: vi.fn(async () => undefined) };
+  const teamAdminApplication = { create: vi.fn(), findFirst: vi.fn(async () => null) };
+  // tx 上下文：register 事务内调用 user.create + auditLog.create（+ 可选 teamAdminApplication.create）。
+  const tx = {
+    user: { updateMany: user.updateMany, findUniqueOrThrow: user.findUniqueOrThrow, create: user.create },
+    auditLog,
+    teamAdminApplication,
+  };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
-  return { user, auditLog, $transaction, __tx: tx };
+  return { user, auditLog, teamAdminApplication, $transaction, __tx: tx };
 }
 
 function mockMail() {
@@ -142,6 +151,122 @@ describe('AuthService 找回密码 + 重置密码', () => {
         .rejects.toMatchObject({ status: 400, code: 'bad_request' });
     });
   });
+
+  // === 组D 审计完善：login/register/logout/refresh 审计埋点 ===
+  describe('login 审计', () => {
+    // sessionFor 内部 findUnique 带 memberships include，mock 需返回完整 user 行。
+    // 用真实 bcrypt hash（明文 'pass1234'）确保 bcrypt.compare 通过。
+    const realHash = bcrypt.hashSync('pass1234', 12);
+    const activeUser = {
+      id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
+      displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
+    };
+
+    it('登录成功写 auth.login.success 审计', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(activeUser);
+      // sessionFor 内部再读一次 user + teamAdminApplication。
+      prisma.user.findUnique.mockResolvedValueOnce(activeUser);
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
+      expect(result.user.id).toBe('u1');
+      // 成功审计 action=auth.login.success。
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.success', actorUserId: 'u1', targetId: 'u1' }),
+      }));
+    });
+
+    it('密码错误写 auth.login.failed 审计（reason=wrong_password）', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(activeUser);
+      await expect(service.login({ email: 'a@b.com', password: 'wrongpass' }))
+        .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.failed', actorUserId: 'u1', metadata: expect.objectContaining({ reason: 'wrong_password' }) }),
+      }));
+    });
+
+    it('用户不存在时写 auth.login.failed 审计（actorUserId=null）', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      await expect(service.login({ email: 'nobody@b.com', password: 'pass1234' }))
+        .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.failed', actorUserId: null }),
+      }));
+    });
+
+    it('账号非 ACTIVE 时写 auth.login.failed 审计（reason=account_inactive）', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({ ...activeUser, status: 'DISABLED' });
+      await expect(service.login({ email: 'a@b.com', password: 'pass1234' }))
+        .rejects.toMatchObject({ status: 401, code: 'unauthorized' });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.login.failed', metadata: expect.objectContaining({ reason: 'account_inactive' }) }),
+      }));
+    });
+  });
+
+  describe('register 审计', () => {
+    it('注册成功写 auth.register 审计', async () => {
+      // findUnique 调用顺序：① 存在性检查（null）② sendVerificationEmail 读 tokenVersion/emailVerified ③ sessionFor 读完整 user。
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      prisma.user.findUnique.mockResolvedValueOnce({ tokenVersion: 0, emailVerified: null });
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'new-user', email: 'new@b.com', status: 'ACTIVE', tokenVersion: 0, displayName: 'New', platformRole: 'NONE', emailVerified: null, memberships: [] });
+      prisma.user.create.mockResolvedValueOnce({ id: 'new-user', email: 'new@b.com', displayName: 'New' });
+
+      const result = await service.register({ email: 'new@b.com', password: 'newpass1234' });
+      expect(result.user.id).toBe('new-user');
+      // 注册审计 action=auth.register（事务内 tx.auditLog.create）。
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.register', actorUserId: 'new-user' }),
+      }));
+    });
+
+    it('wantsTeamAdmin=true 时同时写 team_admin_application.created 审计', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      prisma.user.findUnique.mockResolvedValueOnce({ tokenVersion: 0, emailVerified: null });
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'new-admin', email: 'admin@b.com', status: 'ACTIVE', tokenVersion: 0, displayName: 'Admin', platformRole: 'NONE', emailVerified: null, memberships: [] });
+      prisma.user.create.mockResolvedValueOnce({ id: 'new-admin', email: 'admin@b.com', displayName: 'Admin' });
+
+      await service.register({ email: 'admin@b.com', password: 'newpass1234', wantsTeamAdmin: true, teamName: '我的团队' });
+      // 团队管理员申请审计 action=team_admin_application.created。
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'team_admin_application.created' }),
+      }));
+    });
+  });
+
+  describe('logout / refresh 审计', () => {
+    it('logout 写 auth.logout 审计（actor=用户自身）', async () => {
+      const result = await service.logout('u1');
+      expect(result.ok).toBe(true);
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.logout', actorUserId: 'u1', targetId: 'u1' }),
+      }));
+    });
+
+    it('logout 审计写入失败不阻塞响应（降级吞错）', async () => {
+      prisma.auditLog.create.mockRejectedValueOnce(new Error('db down'));
+      const result = await service.logout('u1');
+      expect(result.ok).toBe(true);
+    });
+
+    it('refresh 写 auth.token.refreshed 审计', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0, displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [] });
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      await service.refresh('u1');
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'auth.token.refreshed', actorUserId: 'u1' }),
+      }));
+    });
+
+    it('refresh 审计写入失败不阻塞 sessionFor（降级吞错）', async () => {
+      prisma.auditLog.create.mockRejectedValueOnce(new Error('db down'));
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0, displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [] });
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      // 审计失败但 sessionFor 仍正常返回 session（token 续签优先）。
+      const result = await service.refresh('u1');
+      expect(result.user.id).toBe('u1');
+    });
+  });
+
 
   describe('verifyEmail', () => {
     it('token 无效时抛 bad_request', async () => {

@@ -27,6 +27,7 @@ function mockPrisma() {
   const wallet = { updateMany: vi.fn(), upsert: vi.fn() };
   const purchase = { findUnique: vi.fn(async () => null), create: vi.fn() };
   const walletTransaction = { create: vi.fn(), findFirst: vi.fn(async () => ({ id: 'wt0' })) };
+  const auditLog = { create: vi.fn() };
   const tx = { wallet, purchase, walletTransaction };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
   return {
@@ -34,6 +35,7 @@ function mockPrisma() {
     purchase,
     wallet,
     walletTransaction,
+    auditLog,
     $transaction,
     __tx: tx,
   };

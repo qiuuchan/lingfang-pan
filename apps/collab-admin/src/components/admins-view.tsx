@@ -21,17 +21,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PlusIcon, PencilIcon, ShieldOffIcon, BanIcon, Trash2Icon } from 'lucide-react';
+import { DetailSheet } from '@/components/ui/detail-sheet';
+import { PlusIcon, PencilIcon, ShieldOffIcon, BanIcon, Trash2Icon, ActivityIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { User, UserStatus } from '@/lib/types';
-import { labelOf } from '@/lib/types';
+import type { AuditLog, User, UserStatus } from '@/lib/types';
+import { labelOf, formatTime, actionLabel, targetLabel } from '@/lib/types';
 
 export function AdminsView() {
   const [users, setUsers] = useState<User[]>([]);
+  const [activeAdmin, setActiveAdmin] = useState<User | null>(null);
   const load = () => api<{ users: User[] }>('/api/admin/users').then((r) => setUsers(r.users));
   useLoad(load);
 
@@ -69,7 +71,7 @@ export function AdminsView() {
                 <TableHead>显示名</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>角色</TableHead>
-                <TableHead className="w-[180px]">操作</TableHead>
+                <TableHead className="w-[240px]">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -88,6 +90,14 @@ export function AdminsView() {
                             编辑
                           </Button>
                         </EditAdminDialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setActiveAdmin(user)}
+                        >
+                          <ActivityIcon className="mr-1 size-3.5" />
+                          操作记录
+                        </Button>
                         <Button
                           variant={user.status === 'ACTIVE' ? 'ghost' : 'outline'}
                           size="sm"
@@ -118,6 +128,9 @@ export function AdminsView() {
           />
         </div>
       </Section>
+
+      {/* 管理员操作记录抽屉：拉取该 admin 作为 actor 的审计日志（按时间倒序）。 */}
+      <AdminActivitySheet admin={activeAdmin} onOpenChange={(o) => !o && setActiveAdmin(null)} />
     </div>
   );
 }
@@ -222,9 +235,10 @@ function EditAdminDialog({
   }
 
   async function demote() {
+    // 使用专用 platform-role 端点（仅改角色，禁止自改自身 + 独立审计 admin.user.role_changed + tokenVersion++ 作废旧 token）。
     if (!(await run(
       () =>
-        api(`/api/admin/users/${user.id}`, {
+        api(`/api/admin/users/${user.id}/platform-role`, {
           method: 'PATCH',
           body: { platformRole: 'NONE' },
         }).then(onRefresh),
@@ -333,5 +347,83 @@ function EditAdminDialog({
         </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 管理员操作记录抽屉：拉取该 admin 作为 actor 的审计日志（/api/admin/admins/:id/activity）。
+ *  按 createdAt 倒序展示，含 action 中文说明 + 对象 + 时间，便于审计该管理员的治理操作。 */
+function AdminActivitySheet({
+  admin,
+  onOpenChange,
+}: {
+  admin: User | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!admin) {
+      setLogs([]);
+      return;
+    }
+    setLoading(true);
+    api<{ logs: AuditLog[] }>(`/api/admin/admins/${admin.id}/activity`)
+      .then((r) => setLogs(r.logs))
+      .catch(() => setLogs([]))
+      .finally(() => setLoading(false));
+  }, [admin]);
+
+  return (
+    <DetailSheet
+      open={!!admin}
+      onOpenChange={onOpenChange}
+      title={admin?.displayName || admin?.email || ''}
+      description={admin?.email}
+    >
+      {admin ? (
+        <>
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">管理员信息</div>
+            <InfoGrid
+              items={[
+                ['管理员 ID', admin.id],
+                ['邮箱', admin.email],
+                ['状态', <StatusBadge key="s" value={admin.status} />],
+                ['角色', <StatusBadge key="r" value={admin.platformRole} />],
+              ]}
+            />
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <ActivityIcon className="size-3.5" />
+              操作记录（最近 50 条）
+            </div>
+            {loading ? (
+              <p className="text-sm text-muted-foreground">加载中…</p>
+            ) : logs.length ? (
+              <div className="space-y-1.5">
+                {logs.map((log) => (
+                  <div key={log.id} className="rounded-xl border px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{actionLabel(log.action)}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{formatTime(log.createdAt)}</span>
+                    </div>
+                    {log.targetType ? (
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        对象：{targetLabel(log.targetType)}{log.targetId ? ` · ${log.targetId.slice(0, 8)}` : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无操作记录</p>
+            )}
+          </div>
+        </>
+      ) : null}
+    </DetailSheet>
   );
 }

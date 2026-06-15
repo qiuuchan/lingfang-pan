@@ -24,13 +24,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { SearchIcon, SettingsIcon, ToggleLeftIcon, ToggleRightIcon, LayersIcon } from 'lucide-react';
+import { SearchIcon, SettingsIcon, ToggleLeftIcon, ToggleRightIcon, LayersIcon, PencilIcon, ArchiveIcon } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useLoad, run } from '@/lib/helpers';
+import { useGuardedAction, useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid, ActionBar } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { Plugin, PluginFileEntry, PluginStatus } from '@/lib/types';
-import { labelOf, formatTime } from '@/lib/types';
+import type { Plugin, PluginFileEntry, PluginStatus, PluginVisibility } from '@/lib/types';
+import { labelOf, formatTime, yuanToCents } from '@/lib/types';
 import { money } from '@/lib/utils';
 
 type ReviewFilter = 'ALL' | 'APPROVED' | 'PENDING' | 'REJECTED';
@@ -258,7 +258,8 @@ export function PluginsView() {
 }
 
 // 审核状态徽章：reviewStatus 映射到语义色（与 StatusBadge 风格一致但独立，避免 DRAFT 等新增态污染通用映射）。
-function ReviewBadge({ status }: { status: NonNullable<Plugin['reviewStatus']> }) {
+// status 接受任意 string：列表行传入 Plugin['reviewStatus']，审核历史传入后端 PluginReview.status（同为枚举串）。
+function ReviewBadge({ status }: { status: string }) {
   const map: Record<string, 'success' | 'warning' | 'destructive' | 'secondary'> = {
     APPROVED: 'success',
     PENDING: 'warning',
@@ -280,6 +281,8 @@ function PluginDetailSheet({
 }) {
   const fileList = normalizeFiles(plugin?.files);
   const capabilities = normalizeCapabilities(plugin?.capabilities);
+  // 下架为资金/上架状态类操作，前端用防重入守卫避免双击重复触发（与余额调整同模式）。
+  const [delistBusy, delistGuard] = useGuardedAction();
 
   return (
     <DetailSheet
@@ -289,7 +292,13 @@ function PluginDetailSheet({
       description={plugin?.version ? `v${plugin.version}` : undefined}
       footer={
         plugin ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <PluginInfoEditDialog plugin={plugin} onRefresh={onRefresh}>
+              <Button variant="outline" className="flex-1">
+                <PencilIcon className="mr-1 size-4" />
+                编辑信息
+              </Button>
+            </PluginInfoEditDialog>
             <Button
               variant={plugin.status === 'ENABLED' ? 'destructive' : 'outline'}
               className="flex-1"
@@ -311,6 +320,9 @@ function PluginDetailSheet({
               )}
               {plugin.status === 'ENABLED' ? '禁用插件' : '启用插件'}
             </Button>
+            {plugin.marketplace ? (
+              <PluginDelistDialog plugin={plugin} busy={delistBusy} onConfirm={delistGuard} onRefresh={onRefresh} />
+            ) : null}
           </div>
         ) : null
       }
@@ -391,6 +403,8 @@ function PluginDetailSheet({
               <p className="whitespace-pre-wrap break-all text-sm text-foreground">{plugin.reviewReason}</p>
             </div>
           ) : null}
+
+          <PluginReviewTimeline pluginId={plugin.id} />
         </>
       ) : null}
     </DetailSheet>
@@ -465,6 +479,226 @@ function PluginEditDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// 详情抽屉的「编辑信息」对话框：改 name/description/version/priceCents/visibility。
+// 与行内 PluginEditDialog（描述+治理状态）互补：此弹窗聚焦展示信息与可见性，不含 status（status 由独立切换按钮维护）。
+// 仅成功才关闭：失败保留草稿供修正（与 PluginEditDialog.save 同约定）。
+function PluginInfoEditDialog({
+  plugin,
+  children,
+  onRefresh,
+}: {
+  plugin: Plugin;
+  children: React.ReactNode;
+  onRefresh: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(plugin.name);
+  const [description, setDescription] = useState(plugin.description || '');
+  const [version, setVersion] = useState(plugin.version || '');
+  // 价格以元为输入单位（cents 不便阅读），保存时用 yuanToCents 转回分。
+  const [priceYuan, setPriceYuan] = useState(plugin.priceCents ? (plugin.priceCents / 100).toString() : '');
+  const [visibility, setVisibility] = useState<PluginVisibility>(plugin.visibility || 'TEAM');
+
+  useEffect(() => {
+    setName(plugin.name);
+    setDescription(plugin.description || '');
+    setVersion(plugin.version || '');
+    setPriceYuan(plugin.priceCents ? (plugin.priceCents / 100).toString() : '');
+    setVisibility(plugin.visibility || 'TEAM');
+  }, [plugin]);
+
+  async function save() {
+    // 价格空串视为免费（0 分）；非空串用 yuanToCents 校验并转换（非法格式抛错，run 会 toast）。
+    let priceCents = 0;
+    if (priceYuan.trim()) {
+      priceCents = yuanToCents(priceYuan);
+    }
+    if (!(await run(
+      () =>
+        api(`/api/admin/plugins/${plugin.id}`, {
+          method: 'PATCH',
+          body: { name: name.trim(), description, version: version.trim(), priceCents, visibility },
+        }).then(onRefresh),
+      '插件信息已更新',
+    ))) return;
+    setOpen(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>编辑插件信息</DialogTitle>
+          <DialogDescription>{plugin.name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>插件名称</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={128} />
+          </div>
+          <div className="space-y-2">
+            <Label>插件说明</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>版本</Label>
+              <Input value={version} onChange={(e) => setVersion(e.target.value)} maxLength={32} placeholder="0.1.0" />
+            </div>
+            <div className="space-y-2">
+              <Label>定价（元）</Label>
+              <Input value={priceYuan} onChange={(e) => setPriceYuan(e.target.value)} placeholder="0 表示免费" inputMode="decimal" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>可见性</Label>
+            <Select value={visibility} onValueChange={(v) => setVisibility(v as PluginVisibility)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PRIVATE">私有</SelectItem>
+                <SelectItem value="TEAM">团队</SelectItem>
+                <SelectItem value="PUBLIC">公开</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={save}>保存信息</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// 详情抽屉的「下架」按钮 + 二次确认对话框：调 POST /api/admin/plugins/:id/delist。
+// 仅在插件已上架市场（marketplace=true）时渲染。下架会通知作者，操作不可逆（需作者重新提交审核）。
+function PluginDelistDialog({
+  plugin,
+  busy,
+  onConfirm,
+  onRefresh,
+}: {
+  plugin: Plugin;
+  busy: boolean;
+  onConfirm: <T>(fn: () => Promise<T>) => Promise<T | undefined>;
+  onRefresh: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    if (!open) setReason('');
+  }, [open]);
+
+  async function confirm() {
+    // 用防重入守卫包裹：避免双击重复触发下架（资金/上架状态类操作无后端幂等键）。
+    const result = await onConfirm(() =>
+      api(`/api/admin/plugins/${plugin.id}/delist`, {
+        method: 'POST',
+        body: reason.trim() ? { reason: reason.trim() } : {},
+      }).then((r) => {
+        onRefresh();
+        return r;
+      }),
+    );
+    if (result) setOpen(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="destructive" className="flex-1">
+          <ArchiveIcon className="mr-1 size-4" />
+          下架市场
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>下架插件</DialogTitle>
+          <DialogDescription>{plugin.name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            下架后该插件将退出市场（marketplace=false，审核状态回到草稿），已安装用户不受影响但无法被新用户安装。作者会收到下架通知，可重新编辑后再次提交审核。
+          </p>
+          <div className="space-y-2">
+            <Label>下架原因（可选，写入通知）</Label>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="如：违反平台规范" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
+          <Button variant="destructive" disabled={busy} onClick={confirm}>
+            {busy ? '下架中…' : '确认下架'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// 审核历史时间线：拉取 GET /api/admin/plugins/:id/audit-history，按时间倒序渲染 PluginReview 列表。
+// 每项展示审核状态（语义色徽章）、原因、审核人、时间。无记录时显示空态。
+type PluginReviewEntry = {
+  id: string;
+  status: string;
+  reason: string;
+  reviewer: { id: string; email: string; displayName: string } | null;
+  createdAt: string;
+};
+
+function PluginReviewTimeline({ pluginId }: { pluginId: string }) {
+  const [reviews, setReviews] = useState<PluginReviewEntry[] | null>(null);
+
+  // 依赖 pluginId：DetailSheet 在切换不同插件时不会重挂载 PluginReviewTimeline（同 key），
+  // 故不能用 mount-once 的 useLoad，必须用 useEffect 监听 pluginId 变化重新拉取。
+  useEffect(() => {
+    let mounted = true;
+    setReviews(null);
+    api<{ reviews: PluginReviewEntry[] }>(`/api/admin/plugins/${pluginId}/audit-history`)
+      .then((r) => {
+        if (mounted) setReviews(r.reviews);
+      })
+      .catch((e: Error & { status?: number }) => {
+        // 卸载后或 401 不弹 toast（与 useLoad 约定一致）。
+        if (!mounted || e.status === 401) return;
+        setReviews([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [pluginId]);
+
+  return (
+    <div>
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">审核历史</div>
+      {reviews === null ? (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      ) : reviews.length ? (
+        <div className="space-y-2">
+          {reviews.map((r) => (
+            <div key={r.id} className="rounded-xl border bg-muted/20 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <ReviewBadge status={r.status} />
+                <span className="text-xs text-muted-foreground">{formatTime(r.createdAt)}</span>
+              </div>
+              <div className="mt-1.5 text-xs text-muted-foreground">
+                审核人：{r.reviewer?.displayName || r.reviewer?.email || '系统'}
+              </div>
+              {r.reason ? (
+                <p className="mt-1 break-all text-foreground">{r.reason}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">暂无审核记录</p>
+      )}
+    </div>
   );
 }
 

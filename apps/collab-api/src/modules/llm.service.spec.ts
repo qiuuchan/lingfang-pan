@@ -11,7 +11,7 @@
 //  - admin_delete_active_provider_rejected：删 active provider 返 provider_active_not_deletable。
 // 参考 plugin.service.spec.ts：Mock PrismaService + AuthService，不连真实 DB。
 import { describe, expect, it, vi, beforeAll } from 'vitest';
-import { LlmService } from './llm.service';
+import { LlmService, resetActiveProviderCache } from './llm.service';
 
 const now = new Date('2026-06-14T00:00:00.000Z');
 
@@ -142,6 +142,9 @@ function createService(options: CreateServiceOptions = {}) {
     }),
     ensurePlatformAdmin: vi.fn(async () => ({ id: 'user-admin', platformRole: 'PLATFORM_ADMIN' })),
   };
+  // 组E 性能：active-provider module-level 缓存在用例间隔离，避免前序用例填充的缓存被后续用例命中
+  // （否则 active_provider_returns_url 缓存的 provider 会让后续 no_active_provider 用例错误命中）。
+  resetActiveProviderCache();
   return { service: new LlmService(prisma as never, auth as never), prisma, auth };
 }
 
@@ -287,6 +290,37 @@ describe('LlmService', () => {
     await expect(service.getActiveProvider('user-admin')).rejects.toMatchObject({
       code: 'no_active_provider',
     });
+  });
+
+  // 组E 性能：active-provider 内存缓存。
+  it('getActiveProvider 命中缓存时不重复查库（TTL 内仅 findFirst 一次）', async () => {
+    const { service, prisma } = createService({
+      activeProvider: makeProvider({ isActive: true, status: 'ENABLED' }),
+    });
+
+    await service.getActiveProvider('user-admin');
+    await service.getActiveProvider('user-admin');
+    await service.getActiveProvider('user-admin');
+    // 三次调用只查一次库，后两次命中 module-level 缓存。
+    expect(prisma.llmGateway.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('adminActivateProvider 成功后失效缓存（下次 getActiveProvider 回源查库）', async () => {
+    // 先填充缓存（首次 getActiveProvider 查库）。
+    const first = createService({ activeProvider: makeProvider({ isActive: true, status: 'ENABLED' }) });
+    await first.service.getActiveProvider('user-admin');
+    expect(first.prisma.llmGateway.findFirst).toHaveBeenCalledTimes(1);
+
+    // activate 后缓存应失效。activeProvider 也设为返回 provider，确保失效后 getActiveProvider 回源能命中。
+    const { service, prisma } = createService({
+      activeProvider: makeProvider({ id: 'provider-2', isActive: true, status: 'ENABLED' }),
+      adminTargetProviderSet: true,
+      adminTargetProvider: makeProvider({ id: 'provider-2', isActive: true, status: 'ENABLED' }),
+    });
+    await service.adminActivateProvider('user-admin', 'provider-2');
+    // 紧接 getActiveProvider 回源查库（缓存被 activate 清空）。
+    await service.getActiveProvider('user-admin');
+    expect(prisma.llmGateway.findFirst).toHaveBeenCalledTimes(1);
   });
 
   // === admin activate 事务唯一性（AC5） ===
