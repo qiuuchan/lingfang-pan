@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, PencilIcon, PackageIcon } from 'lucide-react';
+import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginList } from './PluginList';
 import { Shimmer } from '@/lib/motion';
+import { parseManifest } from '@/lib/plugin-draft';
+import type { ScriptRuntime } from '@/lib/plugin-script';
+import { ScriptPreviewPanel } from '@/components/creator/panels/ScriptPreviewPanel';
 import {
   errorMessage,
   handleRuntimeCall,
@@ -18,12 +21,22 @@ import {
 
 const PAGE_SIZE = 6;
 
+// R3 runtime 分派判定：nodejs/python 走脚本运行视图（复用 ScriptPreviewPanel），client 走 iframe，cloud 给说明。
+function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
+  return runtime === 'nodejs' || runtime === 'python';
+}
+
 function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
   const { setCurrentDraft, setView, setRunningPlugin } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [srcDoc, setSrcDoc] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [editing, setEditing] = useState(false);
+  // R3 脚本运行视图刷新 key：点刷新时 +1 触发 ScriptPreviewPanel 重新探测。
+  const [scriptPreviewKey, setScriptPreviewKey] = useState(0);
+
+  // R3 据 manifest 的 runtime_type 分派运行态。client→iframe（不变），nodejs/python→脚本运行，cloud→说明。
+  const runtime = parseManifest(plugin.files || []).runtime_type;
 
   async function editInGenerator() {
     setEditing(true);
@@ -51,6 +64,8 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
   }
 
   useEffect(() => {
+    // R3 脚本型/cloud runtime 不走 iframe 文档加载，跳过。
+    if (isScriptRuntime(runtime) || runtime === 'cloud') return;
     (async () => {
       try {
         setError('');
@@ -59,7 +74,7 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
         setError(errorMessage(caught));
       }
     })();
-  }, [plugin]);
+  }, [plugin, runtime]);
 
   useEffect(() => {
     const handler = async (ev: MessageEvent) => {
@@ -76,7 +91,31 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
   return (
     <div className="flex h-full flex-col">
       <RunnerHeader plugin={plugin} editing={editing} onBack={onBack} onEdit={editInGenerator} />
-      <RunnerBody error={error} iframeRef={iframeRef} plugin={plugin} srcDoc={srcDoc} />
+      {isScriptRuntime(runtime) ? (
+        // R3 nodejs/python：复用创建器的脚本运行组件（探测→运行→终端回显 + 缺失运行时引导）。
+        // 「使用/启用」即点「运行」执行 entry 脚本；缺失解释器时组件内引导安装。
+        <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4">
+          <ScriptPreviewPanel
+            files={plugin.files || []}
+            runtime={runtime}
+            previewKey={scriptPreviewKey}
+            onRefresh={() => setScriptPreviewKey((k) => k + 1)}
+          />
+        </div>
+      ) : runtime === 'cloud' ? (
+        // R3 cloud runtime：不在桌面壳本地运行范围，给说明而非空 iframe。
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/30 p-6">
+          <div className="flex max-w-md flex-col items-center gap-3 text-center">
+            <CloudIcon className="size-10 text-muted-foreground/50" />
+            <h3 className="text-base font-semibold">{plugin.name}</h3>
+            <p className="text-sm text-muted-foreground">
+              这是一个云端运行时插件，其逻辑在服务端执行，桌面端仅提供入口与配置。请在插件市场或对应服务页面使用。
+            </p>
+          </div>
+        </div>
+      ) : (
+        <RunnerBody error={error} iframeRef={iframeRef} plugin={plugin} srcDoc={srcDoc} />
+      )}
     </div>
   );
 }

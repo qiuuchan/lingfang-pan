@@ -170,6 +170,11 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
       throw new Error(`code-assistant.session 需要 op='check' 或 'stop'，收到：${args?.op ?? String(args?.op)}`);
     }
     if (kind === 'code-assistant.run') return tauriInvoke('code_assistant_start_session', { input: args || {} });
+    // R5 net.fetch：内置插件网络请求走 Rust plugin_net_fetch（绕 webview CORS）。
+    // 仅 manifest 声明了 net.fetch 的插件可用（Rust 侧二次校验）。返回 { status, headers, body }。
+    if (kind === 'net.fetch') {
+      return tauriInvoke('plugin_net_fetch', { pluginId: plugin.id, args: args || {} });
+    }
     return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
   if (kind === 'llm.chat') {

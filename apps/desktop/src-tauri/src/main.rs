@@ -15,7 +15,7 @@ mod updater;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
 use capability::CapabilityRegistry;
@@ -31,6 +31,144 @@ struct AppState {
 #[tauri::command]
 fn list_plugins(state: tauri::State<AppState>) -> Vec<LoadedPlugin> {
     state.plugins.clone()
+}
+
+/// 命令：拉起 AI 换装批量版 Python 程序（R4）。
+///
+/// 在 builtin-plugins/ai-wardrobe 目录下，用探测到的 Python 解释器 detached 启动 main.py
+/// （PySide6 GUI 独立窗口，不嵌入桌面端）。不阻塞：spawn 后立即返回。
+/// 依赖（PySide6/requests/Pillow）需用户预先 pip install（缺失时程序自身报错，前端提示）。
+#[tauri::command]
+fn launch_ai_wardrobe(app: tauri::AppHandle) -> Result<(), String> {
+    use std::process::Command;
+    // 换装程序目录定位（与 builtin_dir 同款：开发态 CARGO_MANIFEST_DIR/../builtin-plugins，打包态 resource_dir）。
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("builtin-plugins").join("ai-wardrobe"));
+    let base = if let Some(d) = dev {
+        if d.exists() {
+            d
+        } else {
+            app.path()
+                .resource_dir()
+                .map(|r| r.join("builtin-plugins").join("ai-wardrobe"))
+                .unwrap_or_else(|_| PathBuf::from("builtin-plugins/ai-wardrobe"))
+        }
+    } else {
+        app.path()
+            .resource_dir()
+            .map(|r| r.join("builtin-plugins").join("ai-wardrobe"))
+            .unwrap_or_else(|_| PathBuf::from("builtin-plugins/ai-wardrobe"))
+    };
+    if !base.exists() {
+        return Err(format!("换装程序目录不存在：{}", base.display()));
+    }
+    let entry = base.join("main.py");
+    if !entry.exists() {
+        return Err(format!("换装入口文件不存在：{}", entry.display()));
+    }
+    // 探测 Python 解释器（与 plugin_script 同款候选顺序：Windows 优先 py launcher）。
+    let candidates: Vec<&str> = if cfg!(windows) {
+        vec!["py", "python", "python3"]
+    } else {
+        vec!["python3", "python"]
+    };
+    let python = candidates
+        .iter()
+        .find_map(|c| code_assistant::find_binary(c))
+        .ok_or_else(|| "未找到 Python 解释器，请先安装 Python 并加入 PATH".to_string())?;
+    // detached 启动：gui main.py 独立运行，桌面端不等待。
+    Command::new(python)
+        .arg(&entry)
+        .current_dir(&base)
+        .spawn()
+        .map_err(|e| format!("启动换装程序失败：{e}"))?;
+    Ok(())
+}
+
+/// 命令：插件网络请求（R5 net.fetch capability）。
+///
+/// 内置可信插件经前端桥调用 sdk.net.fetch 时走此命令：从 Rust 进程发起 HTTP 请求，
+/// 绕过 webview 跨域（CORS）限制。仅允许 manifest 声明了 net.fetch 的插件调用。
+/// args: { url, method?, headers?, body? }。返回 { status, headers, body }。
+/// 限制：30s 超时，body 最大 10 MiB（防滥用）。
+#[tauri::command]
+async fn plugin_net_fetch(
+    state: tauri::State<'_, AppState>,
+    plugin_id: String,
+    args: Value,
+) -> Result<Value, String> {
+    // 1) manifest 声明校验：仅声明了 net.fetch 的插件可用。
+    let declared = state.registry.find(&plugin_id, "net.fetch");
+    if declared.is_none() {
+        return Err(format!("插件未声明能力: net.fetch"));
+    }
+    let url = args
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "net.fetch 缺少 url 参数".to_string())?;
+    // 仅允许 http/https（防 file:// 等本地协议绕过）。
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("net.fetch 仅支持 http/https".to_string());
+    }
+    let method = args
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_uppercase();
+    // 2) 构建请求（reqwest 从 Rust 进程发，不受 webview CORS 约束）。
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("LingFang-Desktop-Plugin")
+        .build()
+        .map_err(|e| format!("网络请求初始化失败：{e}"))?;
+    let mut req = match method.as_str() {
+        "GET" => client.get(url),
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "DELETE" => client.delete(url),
+        "PATCH" => client.patch(url),
+        other => return Err(format!("net.fetch 不支持的方法：{other}")),
+    };
+    // headers：透传插件指定的请求头（如 Authorization）。
+    if let Some(headers) = args.get("headers").and_then(|v| v.as_object()) {
+        for (k, v) in headers {
+            if let Some(s) = v.as_str() {
+                req = req.header(k, s);
+            }
+        }
+    }
+    // body：JSON 字符串透传。
+    if let Some(body) = args.get("body") {
+        req = req.json(body);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败：{e}"))?;
+    let status = resp.status().as_u16();
+    // 响应头（扁平化为 string=>string）。
+    let headers: serde_json::Map<String, Value> = {
+        let mut m = serde_json::Map::new();
+        for (k, v) in resp.headers() {
+            if let Ok(vs) = v.to_str() {
+                m.insert(k.as_str().to_string(), Value::String(vs.to_string()));
+            }
+        }
+        m
+    };
+    // body 文本（限制 10 MiB，防超大响应撑爆内存）。
+    const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取响应失败：{e}"))?;
+    if bytes.len() > MAX_BODY_BYTES {
+        return Err(format!("响应体超过 {} 字节上限", MAX_BODY_BYTES));
+    }
+    // 尝试 UTF-8 解码；失败给 base64（前端按需处理）。此处简化：lossy 转 string。
+    let body = String::from_utf8_lossy(&bytes).to_string();
+    Ok(json!({ "status": status, "headers": headers, "body": body }))
 }
 
 /// 命令：读取插件资源文件内容（用于壳加载 entry HTML）。
@@ -314,6 +452,8 @@ fn main() {
             list_plugins,
             read_plugin_file,
             invoke_capability,
+            launch_ai_wardrobe,
+            plugin_net_fetch,
             code_assistant_list_tools,
             code_assistant_check_tool,
             code_assistant_run_probe,
