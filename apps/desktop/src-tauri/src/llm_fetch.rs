@@ -57,11 +57,15 @@ struct ModelEntry {
     id: String,
 }
 
-/// 把 provider 基础地址拼成 `/v1/models` 完整 URL：去尾斜杠后追加路径（design §2.2）。
-///
-/// 纯函数便于单测：不实跑 reqwest，仅断言拼接逻辑正确（去重复尾斜杠 + 路径前导斜杠）。
+/// 把 provider 基础地址拼成 `/models` 完整 URL。
+/// 智能：apiUrl 已含 /v1 则只追加 /models；不含 /v1 则追加 /v1/models。
 fn build_models_url(api_url: &str) -> String {
-    format!("{}/v1/models", api_url.trim_end_matches('/'))
+    let base = api_url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{}/models", base)
+    } else {
+        format!("{}/v1/models", base)
+    }
 }
 
 /// 命令：拉取 provider 的可用模型列表。
@@ -132,9 +136,9 @@ mod tests {
 
     #[test]
     fn build_models_url_trims_trailing_slash() {
-        // 尾斜杠应被裁掉，避免拼成 //v1/models（双斜杠虽多数 provider 容忍但不规范）。
+        // 尾斜杠应被裁掉，避免拼成 //models（双斜杠虽多数 provider 容忍但不规范）。
         assert_eq!(
-            build_models_url("https://api.openai.com/"),
+            build_models_url("https://api.openai.com/v1/"),
             "https://api.openai.com/v1/models"
         );
         // 多个尾斜杠全部裁掉。
@@ -142,11 +146,10 @@ mod tests {
             build_models_url("https://api.openai.com///"),
             "https://api.openai.com/v1/models"
         );
-        // 带 /v1 前缀的地址：用户填的 apiUrl 若已含 /v1，结果会是 /v1/v1/models（前端 apiUrl 规范
-        // 不带 /v1，由云分发 LlmGateway.apiUrl 保证，本测仅验证去尾斜杠行为本身）。
+        // 带 /v1 前缀的地址：智能识别已含 /v1，只追加 /models（不重复 /v1）。
         assert_eq!(
             build_models_url("https://api.openai.com/v1/"),
-            "https://api.openai.com/v1/v1/models"
+            "https://api.openai.com/v1/models"
         );
     }
 
