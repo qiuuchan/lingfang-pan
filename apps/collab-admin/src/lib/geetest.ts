@@ -7,11 +7,12 @@
 // 集成官方 gt4.js SDK（通过 <script> 标签动态加载，暴露全局 initGeetest4）。
 // 流程：
 //  1. loadGeetestScript：首次调用注入 https://static.geetest.com/v4/gt4.js（幂等）。
-//  2. initGeetest4({ captchaId, product:'bind', ... })：初始化组件，绑定到容器元素。
+//  2. initGeetest4({ captchaId, product:'float', ... })：初始化组件，绑定到容器元素。
 //  3. captchaObj.onSuccess：用户通过验证后读 4 参数存 state。
 //  4. captchaObj.onClose / reset：用户关闭或重试时清空已存参数。
 //
-// product:'bind' 模式：组件绑定到已有 DOM 元素（点击触发验证弹层），与登录表单 UI 融合更自然。
+// product:'float' 模式：验证码浮入容器自带「点击验证」按钮（与桌面端一致），用户可见可点击，
+// 相比 'bind'（需外部按钮触发 verify()）更直观，避免「看不到验证码组件」的容器问题。
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** gt4.js SDK 地址（官方 CDN，固定版本路径）。 */
@@ -40,7 +41,7 @@ export interface GeetestValidateResult {
 
 /** 全局 initGeetest4 函数签名（gt4.js 暴露在 window 上）。 */
 type InitGeetest4 = (
-  options: { captchaId: string; product: 'bind' },
+  options: { captchaId: string; product: 'float' },
   callback: (captchaObj: GeetestCaptchaObj) => void,
 ) => void;
 
@@ -71,7 +72,7 @@ export function loadGeetestScript(): Promise<void> {
  * 极验验证码 hook。
  * @param captchaId 后端 platform-info 返回的 geetestCaptchaId（空串=未配置，不初始化）。
  * @returns
- *  - containerRef：绑定到容器元素（极验组件挂载点）。
+ *  - containerRef：绑定到容器元素（极验组件挂载点）。容器需渲染且非空，组件才能 appendTo。
  *  - ready：组件已就绪（captchaId 非空 + SDK 加载完成 + 组件初始化完成）。
  *  - validateResult：用户通过验证后的 4 参数（null=未验证或已重置）。
  *  - reset：重置验证状态（提交失败后强制重新验证）。
@@ -93,7 +94,8 @@ export function useGeetest(captchaId: string) {
         if (cancelled || !containerRef.current) return;
         const init = (window as unknown as { initGeetest4?: InitGeetest4 }).initGeetest4;
         if (!init) throw new Error('极验 SDK 未正确加载');
-        init({ captchaId, product: 'bind' }, (obj) => {
+        // product:'float'：验证码浮入容器自带「点击验证」按钮，用户可见可点击（与桌面端一致）。
+        init({ captchaId, product: 'float' }, (obj) => {
           if (cancelled) {
             obj.destroy?.();
             return;

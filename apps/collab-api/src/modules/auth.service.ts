@@ -4,7 +4,7 @@ import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, slugify, unauthorized } from '../common';
 import { MailService } from './mail.service';
-import { GeetestService, type GeetestCaptchaParams } from './geetest.service';
+import { GeetestService, type GeetestCaptchaParams, type GeetestScene } from './geetest.service';
 
 export type OnboardingState =
   | 'NEEDS_INVITATION'
@@ -24,20 +24,21 @@ export class AuthService {
 
   /**
    * 组C 极验验证码校验守卫：供 login/register/forgotPassword 复用。
-   * - 后端配置了 geetestCaptchaId 时强制校验：captcha 缺失或校验失败 → throw badRequest('请先完成验证码')。
-   * - 未配置极验 → 直接跳过（开发态不强制，前端也不显验证码）。
+   * - 按 scene 判定是否启用：geetestScenes 配置未含该场景 → 直接跳过（admin 可按场景开关验证码）。
+   * - 启用场景下强制校验：captcha 缺失或校验失败 → throw badRequest('请先完成验证码')。
+   * - 未配置极验（captchaId 空）→ 直接跳过（开发态不强制，前端也不显验证码）。
    * 极验 API 异常时 GeetestService.validate 自身降级放行（容灾，不阻断登录），此处无需重复处理。
    */
-  private async requireCaptcha(captcha?: Partial<GeetestCaptchaParams>): Promise<void> {
-    const configured = await this.geetest.isConfigured();
-    if (!configured) return;
+  private async requireCaptcha(scene: GeetestScene, captcha?: Partial<GeetestCaptchaParams>): Promise<void> {
+    const enabled = await this.geetest.isSceneEnabled(scene);
+    if (!enabled) return;
     const ok = await this.geetest.validate(captcha);
     if (!ok) throw badRequest('请先完成验证码');
   }
 
   async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string; captcha?: Partial<GeetestCaptchaParams> }) {
-    // 组C 极验：配置极验后强制校验验证码（在所有业务逻辑之前，避免无效请求消耗 DB 查询）。
-    await this.requireCaptcha(input.captcha);
+    // 组C 极验：register 场景启用时强制校验验证码（在所有业务逻辑之前，避免无效请求消耗 DB 查询）。
+    await this.requireCaptcha('register', input.captcha);
     const email = input.email?.trim().toLowerCase();
     // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
     // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
@@ -93,8 +94,8 @@ export class AuthService {
   }
 
   async login(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams> }) {
-    // 组C 极验：配置极验后强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
-    await this.requireCaptcha(input.captcha);
+    // 组C 极验：login 场景启用时强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
+    await this.requireCaptcha('login', input.captcha);
     const email = input.email?.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 登录失败统一审计：actorUserId 可为 null（用户不存在时），便于安全审计追踪暴力破解尝试。
@@ -226,8 +227,8 @@ export class AuthService {
    * token 内嵌 userId，reset-password 时校验 + 改密 + tokenVersion++（作废所有旧登录 token）。
    */
   async forgotPassword(input: { email: string; captcha?: Partial<GeetestCaptchaParams> }) {
-    // 组C 极验：配置极验后强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
-    await this.requireCaptcha(input.captcha);
+    // 组C 极验：forgot 场景启用时强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
+    await this.requireCaptcha('forgot', input.captcha);
     const email = input.email?.trim().toLowerCase();
     if (!email) throw badRequest('请输入邮箱');
     const user = await this.prisma.user.findUnique({ where: { email } });

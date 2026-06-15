@@ -44,6 +44,10 @@ interface AppContextValue {
   // 受控的 Settings 页 Tab（供新手任务清单「去设置 → 模型服务」等定向跳转）。
   settingsTab: 'cli' | 'gateway' | 'backend';
   setSettingsTab: (tab: 'cli' | 'gateway' | 'backend') => void;
+  // 云同步平台信息：platformName/logoUrl（GET /api/platform-info @Public），供侧栏 / 落地展示。
+  // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
+  platformName: string;
+  platformLogoUrl: string;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -170,6 +174,10 @@ export default function App() {
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
   // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway' 再 setView('settings')。
   const [settingsTab, setSettingsTab] = useState<'cli' | 'gateway' | 'backend'>('cli');
+  // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
+  // platformName 缺省 'LingFang'，logoUrl 缺省空串。admin 改名后全端拉同一值（侧栏 header 同步）。
+  const [platformName, setPlatformName] = useState('LingFang');
+  const [platformLogoUrl, setPlatformLogoUrl] = useState('');
   // 组D 首次启动安装向导：backendUrl 已配置且无 token 时查 /api/setup/status，
   // needsSetup=true（DB 无 PLATFORM_ADMIN）则渲染 SetupWizard 替代 Auth。
   const [needsSetup, setNeedsSetup] = useState(false);
@@ -291,6 +299,25 @@ export default function App() {
     };
   }, [session.token, backendUrl]);
 
+  // 云同步平台信息：backendUrl 已配置时拉 GET /api/platform-info，更新侧栏 header 展示。
+  // 失败静默（保持默认 'LingFang'），不阻断登录与主流程（与 Auth.tsx 同语义）。
+  useEffect(() => {
+    if (!backendUrl) return;
+    let cancelled = false;
+    api<{ platformName?: string; logoUrl?: string }>('/api/platform-info', { auth: false, method: 'GET' })
+      .then((info) => {
+        if (cancelled) return;
+        if (info.platformName) setPlatformName(info.platformName.trim());
+        if (info.logoUrl) setPlatformLogoUrl(info.logoUrl.trim());
+      })
+      .catch(() => {
+        /* 拉取失败保持默认值，不阻断流程 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl]);
+
   useEffect(() => {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
@@ -322,6 +349,7 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
+    platformName, platformLogoUrl,
   };
 
   if (restoring) {
@@ -370,28 +398,33 @@ export default function App() {
         <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
         <div className="flex min-h-0 flex-1">
           <Sidebar collapsed={!sidebarOpen} />
-          <main className="relative flex-1 overflow-hidden">
-            <div className={view === 'home' ? 'h-full' : 'hidden'}>
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className={view === 'home' ? 'min-h-0 flex-1' : 'hidden'}>
               <PluginCreatorHome />
             </div>
             {view !== 'home' && (
               view === 'plugins' && runningPlugin ? (
                 // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
                 // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
-                <div className="h-full">
+                <div className="min-h-0 flex-1">
                   <Suspense fallback={null}>{body}</Suspense>
                 </div>
               ) : (
-                // 组D：Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
+                // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
+                // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
+                // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
+                // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
                 // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
-                <div className="h-full overflow-y-auto px-6 py-6">
-                  <div className="mx-auto w-full max-w-6xl">
-                    <Suspense fallback={<ListSkeleton rows={6} />}>
-                      <PageTransition viewKey={view}>{body}</PageTransition>
-                    </Suspense>
+                <>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                    <div className="mx-auto w-full max-w-6xl">
+                      <Suspense fallback={<ListSkeleton rows={6} />}>
+                        <PageTransition viewKey={view}>{body}</PageTransition>
+                      </Suspense>
+                    </div>
                   </div>
                   <Footer />
-                </div>
+                </>
               )
             )}
           </main>

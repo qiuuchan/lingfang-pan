@@ -118,12 +118,15 @@
 }
 
 @layer base {
-  /* 仅装饰性滚动隐藏：页面级与显式标记 .scrollbar-hide 的容器。
-     功能性滚动区（代码块/日志/堆栈/详情面板）用 .scrollbar-thin 恢复可见性。 */
+  /* 全局隐藏滚动条（保留滚动功能，仅隐藏滚动指示条）：body/html/* 均隐藏。
+     与 ui-composition 规范一致「滚动条全局隐藏，保留 wheel/trackpad/键盘滚动」。
+     功能性滚动区（代码块/日志/堆栈/详情面板）用 .scrollbar-thin 恢复可见性（utilities 层级更高，覆盖此处）。 */
+  *,
   body, html,
   .scrollbar-hide {
     scrollbar-width: none;
     }
+  *::-webkit-scrollbar,
   body::-webkit-scrollbar,
   html::-webkit-scrollbar,
   .scrollbar-hide::-webkit-scrollbar {

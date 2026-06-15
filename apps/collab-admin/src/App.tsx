@@ -85,6 +85,27 @@ export default function App() {
   // 组C：Cmd+K / Ctrl+K 快捷搜索面板。hook 内部挂全局快捷键，返回 open 态。
   const commandPalette = useCommandPalette();
 
+  // 云同步平台信息：GET /api/platform-info（@Public），取 platformName/logoUrl 显示在侧栏 header。
+  // 与桌面端 / 官网落地页共用同一公开端点，admin 改名/Logo 后全端拉到同一值。
+  // 仅 session 建立后拉取（admin 主界面才需要），失败静默回退默认 'LingFang'。
+  const [platformName, setPlatformName] = useState('LingFang');
+  const [platformLogoUrl, setPlatformLogoUrl] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    api<{ platformName?: string; logoUrl?: string }>('/api/platform-info', { auth: false })
+      .then((info) => {
+        if (cancelled) return;
+        if (info.platformName) setPlatformName(info.platformName.trim());
+        if (info.logoUrl) setPlatformLogoUrl(info.logoUrl.trim());
+      })
+      .catch(() => {
+        /* 拉取失败不阻断主界面，保持默认 'LingFang' 标题 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!getToken()) return;
     api<AdminSession>('/api/auth/me')
@@ -208,11 +229,22 @@ export default function App() {
   const sidebarHeader = (
     <div className="rounded-xl border bg-card p-3 shadow-sm">
       <div className="flex items-center gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <ShieldCheckIcon className="size-5" />
+        <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary text-primary-foreground">
+          {/* logoUrl 有值显示图片，无值 fallback ShieldCheckIcon 默认图标。 */}
+          {platformLogoUrl ? (
+            <img
+              src={platformLogoUrl}
+              alt={platformName}
+              className="size-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <ShieldCheckIcon className="size-5" />
+          )}
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">协作平台管理端</div>
+          {/* 云同步平台名：展示后端 platformName（admin 可在「设置 → 平台信息」改名）。 */}
+          <div className="truncate text-sm font-semibold">{platformName}</div>
           <div className="text-xs text-muted-foreground">Platform Admin</div>
         </div>
       </div>
@@ -243,7 +275,9 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      {/* 固定视口高度 + overflow-hidden：侧栏 stretch 撑满不滚动，主内容区独立 overflow-y-auto。 */}
+      {/* 固定视口高度 + overflow-hidden：侧栏 stretch 撑满不滚动。
+          main flex-col：header（shrink-0）+ 内容滚动区（flex-1 overflow-y-auto）+ Footer（shrink-0）。
+          Footer 固定在视口底部，不随主内容滚动（与桌面端一致）。 */}
       <div className="flex h-screen overflow-hidden bg-muted/30">
         <Sidebar
           groups={navGroups}
@@ -253,9 +287,9 @@ export default function App() {
           footer={sidebarFooter}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 pb-8 pt-14 sm:pt-8 lg:p-8">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden px-4 pt-14 sm:pt-8 lg:px-8 lg:pt-8">
           {/* Header */}
-          <header className="mb-6 flex flex-col gap-2 rounded-2xl border bg-background p-5 shadow-sm">
+          <header className="mb-6 shrink-0 rounded-2xl border bg-background p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               {/* 面包屑：分组 / 视图，分组为可点击返回仪表盘的链接 */}
               <Breadcrumb>
@@ -289,22 +323,25 @@ export default function App() {
             </p>
           </header>
 
-          {/* Views with transition：各 View 懒加载，Suspense 用列表骨架兜底首次加载。 */}
-          <PageTransition viewKey={view}>
-            <Suspense fallback={<ListSkeleton rows={6} />}>
-              {view === 'dashboard' && <Dashboard onNavigate={setView} />}
-              {view === 'users' && <UsersView />}
-              {view === 'platformAdmins' && <AdminsView />}
-              {view === 'teams' && <TeamsView />}
-              {view === 'plugins' && <PluginsView />}
-              {view === 'llmProviders' && <ProvidersView />}
-              {view === 'applications' && <ApplicationsView />}
-              {view === 'audit' && <AuditView />}
-              {view === 'settings' && <SettingsView />}
-            </Suspense>
-          </PageTransition>
+          {/* 内容滚动区：flex-1 独占滚动空间，Footer 在外层 flex-col 末尾 shrink-0 固定。 */}
+          <div className="min-h-0 flex-1 overflow-y-auto pb-8">
+            {/* Views with transition：各 View 懒加载，Suspense 用列表骨架兜底首次加载。 */}
+            <PageTransition viewKey={view}>
+              <Suspense fallback={<ListSkeleton rows={6} />}>
+                {view === 'dashboard' && <Dashboard onNavigate={setView} />}
+                {view === 'users' && <UsersView />}
+                {view === 'platformAdmins' && <AdminsView />}
+                {view === 'teams' && <TeamsView />}
+                {view === 'plugins' && <PluginsView />}
+                {view === 'llmProviders' && <ProvidersView />}
+                {view === 'applications' && <ApplicationsView />}
+                {view === 'audit' && <AuditView />}
+                {view === 'settings' && <SettingsView />}
+              </Suspense>
+            </PageTransition>
+          </div>
 
-          {/* 页脚：主内容区底部，随主内容滚到底可见。 */}
+          {/* 页脚：固定在视口底部（shrink-0），不随主内容滚动。 */}
           <Footer />
         </main>
       </div>
