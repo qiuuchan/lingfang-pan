@@ -274,3 +274,48 @@
   max-width: 48rem;
   margin-inline: auto;
 }
+
+/* === topology 流动光点（LandingTopology） ===
+ * 流动用纯 CSS @keyframes（offset-path 沿连线，合成器线程零主线程开销），不用 framer-motion
+ * repeat:Infinity（SVG transform 跨浏览器兼容坑 + 主线程开销）。
+ * 光点只动 transform/opacity，发光用静态 <radialGradient> fill，禁 filter:drop-shadow/blur（深色页掉帧源）。
+ *
+ * offset-path 取自组件 FLOW_PATHS 两条贝塞尔曲线，分别给 desktop/admin→collab-api 两段光点。
+ * 两段错峰（animation-delay 0 / 1.5s），避免同步视觉单调。 */
+@keyframes lf-flow {
+  from { offset-distance: 0%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  to   { offset-distance: 100%; opacity: 0; }
+}
+
+/* 实心光点 + 发光底共享同一条 offset-path + 动画，仅半径/填充不同（组件内 <circle> 用 lf-flow-a/b 区分段、
+ *  再叠 lf-flow-dot / lf-flow-glow 区分实心/发光）。
+ *  path 必须与组件 FLOW_PATHS 的 d 值完全一致，否则光点偏离连线。
+ *  两段错峰：a 段 animation-delay 0，b 段 1.5s（避免同步视觉单调）。 */
+.lf-flow-a {
+  offset-path: path('M220,120 C 220,140 450,140 450,160');
+  animation: lf-flow 3s linear infinite;
+}
+.lf-flow-b {
+  offset-path: path('M680,120 C 680,140 450,140 450,160');
+  animation: lf-flow 3s linear 1.5s infinite;
+}
+
+/* prefers-reduced-motion 显式降级：
+ *  全局 reduce 规则（上方 .landing-scope * + !important）会把 infinite 拍成 1 次、3s 拍成 0.01ms，
+ *  导致光点瞬移到 offset-distance:0%（opacity 0）后消失。此处同带 !important 覆盖全局，
+ *  让光点静态停在连线中段（50%）可见，而非消失。必须放在全局 reduce 规则之后才生效。 */
+@media (prefers-reduced-motion: reduce) {
+  .landing-scope .lf-flow-a,
+  .landing-scope .lf-flow-b {
+    animation: none !important;
+    offset-distance: 50% !important;
+  }
+  .landing-scope .lf-flow-dot {
+    opacity: 0.9 !important;
+  }
+  .landing-scope .lf-flow-glow {
+    opacity: 0.5 !important;
+  }
+}

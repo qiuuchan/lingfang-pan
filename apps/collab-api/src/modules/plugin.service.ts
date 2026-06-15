@@ -107,6 +107,56 @@ export class PluginService {
     return { plugin: publicPlugin(updated, membership.teamId) };
   }
 
+  /** 作者/团队管理员设置插件定价（不改源码、不触发审核流程）。
+   *  与 editPluginDraft 区别：editPluginDraft 需要完整 manifest+files 且会重置 reviewStatus=DRAFT，
+   *  本方法仅更新 priceCents，保留现有 reviewStatus/marketplace 不变（适合作者在审核前/未上架时调价）。
+   *  约束：审核中(PENDING)的插件不可改价（避免审核与定价并发），已上架(APPROVED+marketplace)需走管理员下架后重审。 */
+  async setPluginPrice(userId: string, id: string, input: { priceCents?: number }) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const plugin = await this.prisma.plugin.findUnique({ where: { id } });
+    if (!plugin) throw notFound('插件不存在');
+    ensurePluginManager(plugin, membership.teamId, userId, membership.role);
+    if (plugin.reviewStatus === 'PENDING') throw conflict('审核中的插件不能改价，请等待审核完成');
+    if (plugin.reviewStatus === 'APPROVED' && plugin.marketplace) {
+      throw conflict('已上架市场的插件需联系平台管理员下架后再改价');
+    }
+    // priceCents 语义与 submitPluginToMarketplace 对齐：undefined 保持原价，0=免费，负数归 0。
+    const priceCents = input.priceCents === undefined
+      ? Math.max(0, plugin.priceCents)
+      : Math.max(0, Math.floor(Number(input.priceCents) || 0));
+    const updated = await this.prisma.plugin.update({
+      where: { id },
+      data: { priceCents },
+    });
+    await this.audit(userId, 'plugin.price.set', 'Plugin', id, { teamId: membership.teamId, priceCents });
+    return { plugin: publicPlugin(updated, membership.teamId) };
+  }
+
+  /** 作者/团队管理员切换插件启用/禁用（status: ENABLED/DISABLED）。
+   *  与 admin.adminUpdatePlugin 区别：admin 可改任意插件，本方法仅限作者/团队管理员改自己的插件，
+   *  且不改其他治理字段（价格/可见性等）。约束：审核中(PENDING)的插件不可切换（避免审核与下架并发），
+   *  已上架(APPROVED+marketplace)的市场插件不可由作者禁用（影响已购买/安装用户，需走管理员下架）。 */
+  async setPluginStatus(userId: string, id: string, input: { status: 'ENABLED' | 'DISABLED' }) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const plugin = await this.prisma.plugin.findUnique({ where: { id } });
+    if (!plugin) throw notFound('插件不存在');
+    ensurePluginManager(plugin, membership.teamId, userId, membership.role);
+    if (plugin.reviewStatus === 'PENDING') throw conflict('审核中的插件不能切换状态，请等待审核完成');
+    if (plugin.reviewStatus === 'APPROVED' && plugin.marketplace) {
+      throw conflict('已上架市场的插件需联系平台管理员下架后再禁用');
+    }
+    if (input.status !== 'ENABLED' && input.status !== 'DISABLED') {
+      throw badRequest('status 仅支持 ENABLED 或 DISABLED');
+    }
+    if (plugin.status === input.status) return { plugin: publicPlugin(plugin, membership.teamId) };
+    const updated = await this.prisma.plugin.update({
+      where: { id },
+      data: { status: input.status },
+    });
+    await this.audit(userId, input.status === 'ENABLED' ? 'plugin.enabled' : 'plugin.disabled', 'Plugin', id, { teamId: membership.teamId });
+    return { plugin: publicPlugin(updated, membership.teamId) };
+  }
+
   async editPluginDraft(userId: string, id: string, input: PluginPackageInput) {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const plugin = await this.prisma.plugin.findUnique({ where: { id } });

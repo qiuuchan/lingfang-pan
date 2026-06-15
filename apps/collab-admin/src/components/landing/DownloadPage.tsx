@@ -1,8 +1,10 @@
 // 独立全屏下载页。
-// 从 /api/releases/latest 取最新版本，展示各平台下载卡片。
+// 从 /api/releases/latest 取最新版本（本地 DB 已签名产物，与 Gitee 更新日志职责分离），展示各平台下载卡片。
+// 日期统一用 formatDate（与更新日志页时区一致）；签名状态数据驱动；平台卡 hover accent 线；release notes 折叠区。
 // 顶栏：返回首页 + logo。窄列居中内容。API 不可用时优雅降级。
 import { useEffect, useState } from 'react';
-import { getLatestRelease, formatSize, PLATFORM_META, type Release, type ReleaseAsset } from '@/lib/releases';
+import { getLatestRelease, formatSize, formatDate, PLATFORM_META, type Release, type ReleaseAsset } from '@/lib/releases';
+import { renderMarkdown } from '@/lib/markdown';
 
 type Platform = keyof typeof PLATFORM_META;
 
@@ -118,7 +120,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                         </div>
                         {release.publishedAt && (
                           <div className="lf-mono mt-1 text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
-                            发布于 {new Date(release.publishedAt).toISOString().slice(0, 10)}
+                            发布于 {formatDate(release.publishedAt)}
                           </div>
                         )}
                       </>
@@ -160,6 +162,13 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                           backgroundColor: 'var(--lf-bg-elevated)',
                         }}
                       >
+                        {/* hover 顶部 accent 线（available 时从 w-0 拉到 w-full，走合成线程） */}
+                        {available && (
+                          <span
+                            className="absolute left-0 top-0 h-[2px] w-0 bg-[var(--lf-accent)] transition-all duration-300 group-hover:w-full"
+                            aria-hidden="true"
+                          />
+                        )}
                         <div className="flex items-center justify-between" style={{ color: 'var(--lf-fg-muted)' }}>
                           <PlatformIcon platform={platform} />
                           {available && (
@@ -192,11 +201,51 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                   })}
                 </div>
 
-                {status === 'ready' && release && (
-                  <p className="lf-mono mt-5 text-xs leading-relaxed" style={{ color: 'var(--lf-fg-subtle)' }}>
-                    # 所有安装包均提供签名校验，客户端可离线验证后安装。
-                  </p>
-                )}
+                {status === 'ready' && release && (() => {
+                  // 签名状态数据驱动：遍历 assets 检查 signature 非空，避免文案承诺与数据不符。
+                  const assets = release.assets ?? [];
+                  const signedCount = assets.filter((a) => a.signature && a.signature.trim().length > 0).length;
+                  const signState = signedCount === 0 ? 'none' : signedCount === assets.length ? 'all' : 'partial';
+                  const signText =
+                    signState === 'all'
+                      ? '所有安装包均提供签名校验，客户端可离线验证后安装。'
+                      : signState === 'partial'
+                        ? '部分安装包尚未登记签名，未签名产物客户端将跳过校验。'
+                        : ''; // none → 隐藏该行
+                  return (
+                    <>
+                      {signText && (
+                        <p className="lf-mono mt-5 text-xs leading-relaxed" style={{ color: 'var(--lf-fg-subtle)' }}>
+                          # {signText}
+                        </p>
+                      )}
+                      {/* release notes 折叠区（复用 lib/markdown renderMarkdown），默认折叠不塞进平台卡 */}
+                      {release.notes && release.notes.trim().length > 0 && (
+                        <details className="lf-card group mt-5 overflow-hidden">
+                          <summary
+                            className="flex cursor-pointer list-none items-center justify-between px-5 py-3 text-sm font-medium transition-colors hover:bg-[var(--lf-bg-hover)]"
+                            style={{ color: 'var(--lf-fg)' }}
+                          >
+                            <span>版本更新说明</span>
+                            <svg
+                              className="shrink-0 transition-transform group-open:rotate-90"
+                              style={{ color: 'var(--lf-fg-subtle)' }}
+                              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                            >
+                              <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </summary>
+                          <div
+                            className="border-t px-5 py-4"
+                            style={{ borderColor: 'var(--lf-border)' }}
+                          >
+                            <div className="space-y-1.5">{renderMarkdown(release.notes)}</div>
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

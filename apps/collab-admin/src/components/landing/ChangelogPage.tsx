@@ -1,92 +1,40 @@
 // 独立全屏更新日志页。
-// 从 /api/releases 取版本列表，渲染时间线（notes markdown 极简渲染：## / - / > / **bold** / `code`）。
-// 顶栏：返回首页 + logo。窄列居中内容。
-import { useEffect, useState, type ReactNode } from 'react';
-import { listReleases, formatDate, type Release } from '@/lib/releases';
+// 从 /api/changelog（Gitee release 标准化）取版本列表，渲染时间线。
+// notes markdown 渲染用 lib/markdown.tsx 的共享 renderMarkdown（与下载页 release notes 同源）。
+// 顶栏：返回首页 + logo。窄列居中内容。降级（degraded=true）时顶部显示橙色横幅但不阻断时间线。
+import { useEffect, useState } from 'react';
+import { listChangelog, formatDate, type ChangelogEntry } from '@/lib/releases';
+import { renderMarkdown } from '@/lib/markdown';
 
-function renderNotes(md: string): ReactNode[] {
-  const lines = md.split('\n').filter((l) => l.trim().length > 0);
-  return lines.map((line, i) => {
-    const trimmed = line.trim();
-    const inline = (text: string): ReactNode => {
-      const parts: ReactNode[] = [];
-      const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-      let lastIndex = 0;
-      let match: RegExpExecArray | null;
-      let key = 0;
-      while ((match = regex.exec(text)) !== null) {
-        if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-        const token = match[0];
-        if (token.startsWith('**')) {
-          parts.push(
-            <strong key={key++} className="font-semibold" style={{ color: 'var(--lf-fg)' }}>
-              {token.slice(2, -2)}
-            </strong>,
-          );
-        } else {
-          parts.push(
-            <code
-              key={key++}
-              className="lf-mono rounded px-1.5 py-0.5 text-[0.85em]"
-              style={{ backgroundColor: 'var(--lf-bg-elevated)', color: 'var(--lf-accent)' }}
-            >
-              {token.slice(1, -1)}
-            </code>,
-          );
-        }
-        lastIndex = match.index + token.length;
-      }
-      if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-      return parts;
-    };
-
-    if (trimmed.startsWith('## ')) {
-      return (
-        <h4 key={i} className="lf-mono text-base font-semibold mt-2" style={{ color: 'var(--lf-fg)' }}>
-          {inline(trimmed.slice(3))}
-        </h4>
-      );
-    }
-    if (trimmed.startsWith('- ')) {
-      return (
-        <div key={i} className="flex gap-2 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
-          <span style={{ color: 'var(--lf-accent)' }}>›</span>
-          <span>{inline(trimmed.slice(2))}</span>
-        </div>
-      );
-    }
-    if (trimmed.startsWith('> ')) {
-      return (
-        <blockquote
-          key={i}
-          className="border-l-2 pl-3 text-xs italic"
-          style={{ borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg-subtle)' }}
-        >
-          {inline(trimmed.slice(2))}
-        </blockquote>
-      );
-    }
-    return (
-      <p key={i} className="text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
-        {inline(trimmed)}
-      </p>
-    );
-  });
-}
+type Status = 'loading' | 'ready';
 
 export function ChangelogPage({ onBack }: { onBack: () => void }) {
-  const [releases, setReleases] = useState<Release[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [releases, setReleases] = useState<ChangelogEntry[]>([]);
+  const [degraded, setDegraded] = useState(false);
+  const [degradedMessage, setDegradedMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>('loading');
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    listReleases('STABLE', 20)
-      .then((r) => {
-        setReleases(r);
-        if (r.length > 0) setExpanded(r[0].id);
+    let aborted = false;
+    listChangelog()
+      .then((resp) => {
+        if (aborted) return;
+        setReleases(resp.releases);
+        setDegraded(resp.degraded);
+        setDegradedMessage(resp.degraded ? (resp.message ?? null) : null);
+        if (resp.releases.length > 0) setExpanded(resp.releases[0].id);
       })
-      .catch(() => setReleases([]))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // 网络层兜底（listChangelog 内部已 catch，此处双保险）。
+        if (!aborted) setReleases([]);
+      })
+      .finally(() => {
+        if (!aborted) setStatus('ready');
+      });
+    return () => {
+      aborted = true;
+    };
   }, []);
 
   return (
@@ -125,7 +73,28 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
             </div>
 
             <div className="mt-10">
-              {loading ? (
+              {/* 降级横幅：degraded=true 时显示，不阻断时间线渲染（若有缓存 releases 仍展示）。 */}
+              {status === 'ready' && degraded && degradedMessage && (
+                <div
+                  className="mb-4 flex items-start gap-2.5 rounded-lg border p-3 text-sm"
+                  style={{
+                    borderColor: 'rgba(245, 158, 11, 0.4)',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    color: 'var(--lf-fg-muted)',
+                  }}
+                >
+                  <svg
+                    className="mt-0.5 shrink-0"
+                    style={{ color: '#f59e0b' }}
+                    width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  >
+                    <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>{degradedMessage}</span>
+                </div>
+              )}
+
+              {status === 'loading' ? (
                 <div className="space-y-3">
                   {[0, 1, 2].map((i) => (
                     <div key={i} className="h-16 animate-pulse rounded-lg" style={{ backgroundColor: 'var(--lf-bg-card)' }} />
@@ -134,10 +103,10 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
               ) : releases.length === 0 ? (
                 <div className="lf-card p-8 text-center">
                   <div className="lf-mono text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
-                    // 暂无已发布版本
+                    // 暂无更新日志
                   </div>
                   <p className="mt-2 text-sm" style={{ color: 'var(--lf-fg-subtle)' }}>
-                    版本发布后此处自动展示时间线。
+                    管理端配置 Gitee 更新日志源后，此处自动展示版本时间线。
                   </p>
                 </div>
               ) : (
@@ -200,7 +169,7 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
                         {isOpen && (
                           <div className="border-t px-5 py-4" style={{ borderColor: 'var(--lf-border)' }}>
                             {hasNotes ? (
-                              <div className="space-y-1.5">{renderNotes(release.notes)}</div>
+                              <div className="space-y-1.5">{renderMarkdown(release.notes)}</div>
                             ) : (
                               <div className="lf-mono text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
                                 // 本版本无更新说明

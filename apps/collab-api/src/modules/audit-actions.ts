@@ -80,6 +80,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // === plugin（插件生命周期）===
   'plugin.uploaded': '上传插件',
   'plugin.draft.edited': '编辑插件草稿',
+  'plugin.price.set': '设置插件定价',
+  'plugin.enabled': '启用插件',
+  'plugin.disabled': '禁用插件',
   'plugin.marketplace.submitted': '提交插件到市场',
   'plugin.marketplace.installed': '安装市场插件',
   'plugin.marketplace.rated': '评价市场插件',
@@ -129,6 +132,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // === system（平台配置/启动）===
   'admin.setting.updated': '更新平台设置',
   'admin.setting.test_email': '测试 SMTP 邮件',
+  'admin.setting.secret_revealed': '查看敏感配置明文',
   'platform_admin.bootstrap': '引导平台管理员',
 };
 
