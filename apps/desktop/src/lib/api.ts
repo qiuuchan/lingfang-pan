@@ -133,6 +133,29 @@ export async function tauriListen<T = unknown>(event: string, handler: (event: {
 // App.tsx 注册一次性监听器调用 resetSession()，避免业务页陷入反复 toast 但不回登录页的死循环。
 export const UNAUTHORIZED_EVENT = 'lf:unauthorized';
 
+// 后端不可达事件名（R6 连接失败页）：
+// api() 检测到 fetch 抛网络异常（连接拒绝/DNS 失败/超时，非 HTTP 错误）时派发，
+// App.tsx 监听后置 backendUnreachable=true，主界面渲染 BackendUnreachable 友好页替代反复 toast。
+// 恢复（testBackendUrl 成功 / 后续请求成功）时派发 reachable 事件退出该态。
+export const BACKEND_UNREACHABLE_EVENT = 'lf:backend-unreachable';
+export const BACKEND_REACHABLE_EVENT = 'lf:backend-reachable';
+
+// 判定错误是否为「连接失败」类（fetch 抛异常，非 HTTP 状态错误）。
+// api() 的 catch 分支只抛两种 Error 文案：超时 / 无法连接后端。两者都意味着后端当前不可达。
+export function isConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  return msg.startsWith('后端响应超时') || msg.startsWith('无法连接后端');
+}
+
+// 便捷派发：连接失败派 unreachable，成功派 reachable（业务侧请求成功后可调用以退出不可达态）。
+export function dispatchBackendUnreachable() {
+  try { window.dispatchEvent(new CustomEvent(BACKEND_UNREACHABLE_EVENT)); } catch { /* webview 可能无 CustomEvent，静默兜底 */ }
+}
+export function dispatchBackendReachable() {
+  try { window.dispatchEvent(new CustomEvent(BACKEND_REACHABLE_EVENT)); } catch { /* webview 可能无 CustomEvent，静默兜底 */ }
+}
+
 export interface ApiError extends Error {
   code?: string;
   // HTTP 状态码（DESK-06 / ACCT-01 修复）：api() 把 res.status 挂到错误对象上，
@@ -166,13 +189,18 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
     res = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller?.signal });
   } catch (err) {
     // AbortError → 友好的超时提示；其余网络错误 → 连接失败提示。
+    // R6：两类都属「后端不可达」，派发 BACKEND_UNREACHABLE_EVENT 让 App 渲染友好页（替代反复 toast）。
     if (err instanceof DOMException && err.name === 'AbortError') {
+      dispatchBackendUnreachable();
       throw new Error('后端响应超时，请检查网络或后端服务状态后重试。');
     }
+    dispatchBackendUnreachable();
     throw new Error(`无法连接后端（${base}）。请检查后端地址、网络和跨域配置。`);
   } finally {
     if (timer) clearTimeout(timer);
   }
+  // fetch 成功（拿到 HTTP 响应，无论状态码）：后端可达，退出不可达态。
+  dispatchBackendReachable();
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.message || data.error || res.statusText) as ApiError;

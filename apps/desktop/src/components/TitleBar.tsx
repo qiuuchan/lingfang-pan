@@ -2,10 +2,10 @@ import { PanelLeftCloseIcon, PanelLeftOpenIcon, MinusIcon, SquareIcon, XIcon, Co
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { cn } from '@/lib/utils';
+import { dragRegionProps } from '@/lib/window-drag';
 
 // 自定义标题栏（隐藏系统 decorations 后承载窗口拖拽 + 最小化/最大化/关闭 + 侧边栏折叠）。
-// 用 @tauri-apps/api 标准导入（v2 推荐），不依赖猜测全局 __TAURI__ 结构。
-// 拖拽：mousedown 调 startDragging（最可靠），仅左键 + 非交互元素触发。
+// 拖动逻辑抽到 lib/window-drag.ts（dragRegionProps），主窗口 DOM 与 portal 弹窗统一复用。
 
 interface TitleBarProps {
   sidebarOpen: boolean;
@@ -26,22 +26,13 @@ export function TitleBar({ sidebarOpen, onToggleSidebar }: TitleBarProps) {
     return () => { unlisten?.(); };
   }, [appWindow]);
 
-  // 拖拽：左键按下且非按钮/输入元素时调 startDragging（Tauri v2 推荐方式）。
-  const onDragStart = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    const target = e.target as HTMLElement;
-    if (target.closest('button, input, a, [role="button"]')) return;
-    void appWindow.startDragging();
-  };
-
   return (
     <div
-      data-tauri-drag-region
-      onMouseDown={onDragStart}
+      {...dragRegionProps}
       className="flex h-9 shrink-0 select-none items-center justify-between border-b bg-background/80 backdrop-blur"
     >
       {/* 左侧：侧边栏折叠按钮 + 应用名 */}
-      <div className="flex h-full items-center gap-1 px-2" data-tauri-drag-region onMouseDown={onDragStart}>
+      <div className="flex h-full items-center gap-1 px-2" {...dragRegionProps}>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onToggleSidebar(); }}

@@ -18,6 +18,7 @@ import { api, type ApiError } from '@/lib/api';
 import { fmtYuan, yuanToCents } from '@/lib/money';
 import type { LoadedPlugin } from '@/lib/types';
 import { StaggerContainer, StaggerItem } from '@/lib/motion';
+import { dragRegionProps } from '@/lib/window-drag';
 
 const SOURCE_LABEL: Record<NonNullable<LoadedPlugin['source']>, string> = {
   published: '已发布',
@@ -177,8 +178,8 @@ function PluginPriceEditDialog({ plugin, onSaved }: { plugin: LoadedPlugin; onSa
         <PencilIcon className="size-4" />
       </Button>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>编辑价格</DialogTitle>
+        <DialogHeader {...dragRegionProps}>
+          <DialogTitle data-tauri-drag-region>编辑价格</DialogTitle>
           <DialogDescription>{plugin.name}（修改后立即生效，不触发审核流程）</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

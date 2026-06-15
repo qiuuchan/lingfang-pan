@@ -44,6 +44,7 @@ import {
 import { Markdown } from '@/components/markdown';
 import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { ModelGatewayTab } from './settings/ModelGatewayTab';
+import { dragRegionProps } from '@/lib/window-drag';
 
 // 字节数转人类可读（design §3.3：total 未知时显示已下载量）。
 // 二进制单位（1024），保留 1 位小数。
@@ -347,8 +348,8 @@ export function Settings({
           安装中锁定：disablePointerDismissal 阻外点 + closeUpdateDialog 拦 Esc/关闭按钮。 */}
       <Dialog open={updateMeta !== null} onOpenChange={closeUpdateDialog} disablePointerDismissal={updateInstalling}>
         <DialogContent showCloseButton={!updateInstalling} className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>发现新版本 v{updateMeta?.version}</DialogTitle>
+          <DialogHeader {...dragRegionProps}>
+            <DialogTitle data-tauri-drag-region>发现新版本 v{updateMeta?.version}</DialogTitle>
             <DialogDescription>
               当前版本 v{updateMeta?.currentVersion}，建议更新到最新版本。
             </DialogDescription>

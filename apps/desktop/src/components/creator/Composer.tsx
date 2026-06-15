@@ -1,6 +1,5 @@
 import { SendIcon, SquareIcon, GaugeIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -28,6 +27,7 @@ export function Composer({
   onModelChange,
   onProviderChange,
   onEffortChange,
+  onCustomModel,
   onSend,
   onStop,
 }: {
@@ -42,18 +42,15 @@ export function Composer({
   onModelChange: (value: string) => void;
   onProviderChange: (value: string) => void;
   onEffortChange: (value: EffortLevel) => void;
+  // R1「自定义…」：不再就地展开输入框，改为跳转到设置页（gateway tab）让用户配置上游模型。
+  onCustomModel: () => void;
   onSend: () => void;
   onStop: () => void;
 }) {
-  // R6 自定义模型：model 不在预设列表（含哨兵态/已输入自定义值/外部恢复的自定义值）时为自定义态。
-  // 哨兵 __custom__ 表示「刚切到自定义、尚未输入」；其它非预设值即用户已手输的模型 id。
-  const isCustomModel = Boolean(model) && !providerInfo.models.includes(model);
-  // Select 显示值：自定义态显示哨兵（驱动 SelectItem 高亮「自定义…」），否则显示当前预设 model。
-  const selectValue = isCustomModel
-    ? CUSTOM_MODEL_SENTINEL
-    : (model || providerInfo.models[0] || CUSTOM_MODEL_SENTINEL);
-  // Input 显示值：哨兵态显示空（用户从头输入），已输入/外部恢复的自定义值原样回填。
-  const customInputValue = model === CUSTOM_MODEL_SENTINEL ? '' : model;
+  // R1 模型来源纯运行时（本地 CLI 探测 + 上游配置），无硬编码预设。
+  // selectValue：有模型则显示当前选中，无模型（空态）显示哨兵驱动空态提示项。
+  const hasModels = providerInfo.models.length > 0;
+  const selectValue = hasModels ? (model || providerInfo.models[0]) : CUSTOM_MODEL_SENTINEL;
 
   return (
     <div>
@@ -76,41 +73,30 @@ export function Composer({
               <SelectTrigger className="h-8 w-[150px]"><SelectValue>{providerInfo.label}</SelectValue></SelectTrigger>
               <SelectContent>{providers.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
             </Select>
-            {/* R1 模型名首字母大写：SelectValue 显示用 capitalizeModel，SelectItem 同步大写展示。 */}
-            {/* R6 自定义模型：Select 列表尾加「自定义…」哨兵项，选中后展开 Input 手输任意 model id。 */}
+            {/* R1 模型来源纯运行时（本地 CLI 探测 + 上游配置）：SelectValue 显示当前模型，列表无硬编码预设。 */}
+            {/* 「自定义…」不再就地展开输入框，改为跳转到设置页（gateway tab）配置上游模型（onCustomModel）。 */}
             <Select
               disabled={streaming}
               value={selectValue}
               onValueChange={(value) => {
                 if (value === CUSTOM_MODEL_SENTINEL) {
-                  // 切到自定义态：通知父组件（model 变哨兵 → isCustomModel 仍 true → Input 展开）。
-                  // 若 model 当前是预设值，Input 显示空（从头输）；若已是自定义值则原样回填。
-                  onModelChange(CUSTOM_MODEL_SENTINEL);
+                  // 选中「自定义…」/ 空态项：跳设置页配置模型，不改 model 值。
+                  onCustomModel();
                   return;
                 }
                 onModelChange(value || providerInfo.models[0]);
               }}
             >
               <SelectTrigger className="h-8 w-[150px]">
-                <SelectValue>{isCustomModel ? '自定义…' : capitalizeModel(model)}</SelectValue>
+                <SelectValue>{hasModels ? capitalizeModel(model || providerInfo.models[0]) : '未配置模型'}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {providerInfo.models.map((item) => <SelectItem key={item} value={item}>{capitalizeModel(item)}</SelectItem>)}
-                <SelectItem value={CUSTOM_MODEL_SENTINEL}>自定义…</SelectItem>
+                {/* 空态：无可用模型时显示引导项（选中跳设置）；有模型时尾加「自定义…」也跳设置。 */}
+                {!hasModels && <SelectItem value={CUSTOM_MODEL_SENTINEL}>未配置可用模型，去设置…</SelectItem>}
+                {hasModels && <SelectItem value={CUSTOM_MODEL_SENTINEL}>自定义…</SelectItem>}
               </SelectContent>
             </Select>
-            {/* R6 自定义模型 Input：自定义态（哨兵或已输入非预设值）时显示。
-                用户手输任意 model id（如 minimax-m3/kimi-k2.7-code），不做格式校验（CLI 自行处理无效模型）。
-                实时回传 onModelChange（每键触发，上层 send 时 resolveSendModel 过滤哨兵后透传到 Rust）。 */}
-            {isCustomModel && (
-              <Input
-                className="h-8 w-[180px]"
-                placeholder="输入模型 id，如 minimax-m3"
-                value={customInputValue}
-                disabled={streaming}
-                onChange={(event) => onModelChange(event.target.value)}
-              />
-            )}
             {/* R2 思考强度：仅 claude 生效（codex/opencode 传了也忽略，标注提示）。 */}
             <Select disabled={streaming} value={effort} onValueChange={(value) => onEffortChange((value as EffortLevel) || EFFORT_OFF)}>
               <SelectTrigger className="h-8 w-[130px]" title="思考强度（仅 Claude 生效）">

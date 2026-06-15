@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { dragRegionProps } from '@/lib/window-drag';
 
 // R6 用户设置居中弹窗：侧边栏底部账户信息点击 → 居中悬浮 Dialog（复用 ui/dialog）。
 // 支持：修改用户名 / 修改邮箱 / 重置密码 / 退出登录。
@@ -116,8 +117,8 @@ export function AccountDialog({ open, onOpenChange, session, applySession, reset
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><UserRoundIcon className="size-4" />账户设置</DialogTitle>
+        <DialogHeader {...dragRegionProps}>
+          <DialogTitle className="flex items-center gap-2" data-tauri-drag-region><UserRoundIcon className="size-4" />账户设置</DialogTitle>
           <DialogDescription>修改昵称、邮箱、密码或退出登录。</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">

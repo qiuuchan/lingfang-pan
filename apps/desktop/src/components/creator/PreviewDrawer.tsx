@@ -1,18 +1,18 @@
 import { useState } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { RefreshCwIcon, CodeIcon, EyeIcon, XIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { parseManifest, previewSrcDoc } from '@/lib/plugin-draft';
+import { dragRegionProps } from '@/lib/window-drag';
 import type { ScriptRuntime } from '@/lib/plugin-script';
 import type { DraftFile } from '@/lib/types';
 import { ScriptPreviewPanel } from './panels/ScriptPreviewPanel';
 import { SourcePanel } from './panels/SourcePanel';
 
-// 全屏预览大窗（顶部「预览」按钮触发）：铺满整个视口，预览主体撑满可滚动。
-// 左侧预览（client→iframe 撑满 / nodejs-python→ScriptPreviewPanel），右侧可收起的源码面板（多文件切换）。
-// 预览内容（iframe 内的插件自身）由插件 CSS 决定是否滚动；iframe 容器本身铺满。
+// 全屏使用插件大窗（顶部「使用插件」按钮触发）：铺满整个视口，运行主体撑满可滚动。
+// 左侧运行（client→iframe 撑满 / nodejs-python→ScriptPreviewPanel），右侧可收起的源码面板（多文件切换）。
+// 运行内容（iframe 内的插件自身）由插件 CSS 决定是否滚动；iframe 容器本身铺满。
 
 interface PreviewDrawerProps {
   open: boolean;
@@ -46,8 +46,8 @@ export function PreviewDrawer({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false} className="flex h-[100vh] w-[100vw] max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none">
         {/* 顶部条：标题 + 刷新 + 源码 + 关闭（自带 X 已隐藏避免与按钮重叠；条上可拖动窗口） */}
-        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" data-tauri-drag-region onMouseDown={(e) => { if (e.button !== 0) return; if ((e.target as HTMLElement).closest('button, input, a')) return; void getCurrentWindow().startDragging(); }}>
-          <DialogTitle className="text-sm font-medium" data-tauri-drag-region>插件预览</DialogTitle>
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" {...dragRegionProps}>
+          <DialogTitle className="text-sm font-medium" data-tauri-drag-region>使用插件</DialogTitle>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" disabled={!files.length} onClick={onRefreshPreview}>
               <RefreshCwIcon className="size-4" /> 刷新
@@ -73,7 +73,7 @@ export function PreviewDrawer({
               )
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                <EyeIcon className="mr-2 size-4" />生成插件后显示预览
+                <EyeIcon className="mr-2 size-4" />生成插件后即可使用
               </div>
             )}
           </div>

@@ -51,12 +51,12 @@ import {
 } from '@/lib/plugin-draft';
 import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
 import type { LoadedPlugin } from '@/lib/types';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useEnvReadiness } from '@/lib/env-readiness';
+import { dragRegionProps } from '@/lib/window-drag';
 import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
 import { Bubble } from '@/components/chat/Bubble';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
@@ -74,7 +74,8 @@ export function PluginCreatorHome() {
   const envReadiness = useEnvReadiness(session, view);
   const [input, setInput] = useState('');
   const [provider, setProvider] = useState(PROVIDERS[0].id);
-  const [model, setModel] = useState(PROVIDERS[0].models[0]);
+  // R1 model 初始空串：模型清单由运行时双源合并填充（PROVIDERS.models 已置空），首次拉取后 effect 自动 setModel。
+  const [model, setModel] = useState<string>(PROVIDERS[0].models[0] || '');
   const [providers, setProviders] = useState(PROVIDERS);
   // R2 思考强度：随每轮 send 传（start_session + send_input 都带，可会话中途调）。默认 medium。
   const [effort, setEffort] = useState<EffortLevel>('medium');
@@ -131,14 +132,6 @@ export function PluginCreatorHome() {
   const manifest = useMemo(() => parseManifest(files), [files]);
   const status = currentDraft?.status;
   const diagnostics = currentDraft?.diagnostics || [];
-  // 悬浮窗（历史/预览）顶部条拖动窗口：mousedown 调 startDragging（data-tauri-drag-region 单独在 portal 内不生效）。
-  // 仅左键 + 非 button/input 元素触发，避免点关闭/按钮时也拖动。
-  const onDragWindow = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    const target = e.target as HTMLElement;
-    if (target.closest('button, input, a, [role="button"]')) return;
-    void getCurrentWindow().startDragging();
-  };
   // 当前活动会话标题（AI 总结首轮后生成，显示在顶部「插件创建」旁）。
   const activeConversationTitle = activeId ? (metas.find((m) => m.sessionId === activeId)?.title || '') : '';
   const activeContent = files.find((file) => file.path === activeFile)?.content || '';
@@ -153,19 +146,36 @@ export function PluginCreatorHome() {
   const hasAvailableCliRef = useRef<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
-    tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean; models?: string[] }>>('code_assistant_list_tools')
-      .then((tools) => {
+    // R1 双源合并：本地已装 CLI 探测的可用模型 + gateway 上游已配置模型，去重后填入 providers。
+    // 并行发起：tauriInvoke(code_assistant_list_tools) + api(/api/llm/active-provider) + api(/api/llm/binding)。
+    // 上游模型（modelOverride/defaultModels）合并进每个 provider 的 models 列表，让用户配的上游模型可直接选。
+    Promise.all([
+      tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean; models?: string[] }>>('code_assistant_list_tools'),
+      api<{ defaultModels?: string[] } | null>('/api/llm/active-provider').catch(() => null),
+      api<{ binding?: { modelOverride?: string[] | null } } | null>('/api/llm/binding').catch(() => null),
+    ])
+      .then(([tools, activeProvider, binding]) => {
         if (cancelled) return;
-        const mapped = tools
+        const cliMapped = (tools || [])
           .filter((t) => t.available)
           .map((t) => ({
             id: String(t.tool),
             label: String(t.display_name || t.tool),
             models: Array.isArray(t.models) ? t.models.map(String) : [],
           }));
-        // 仅在确实拉到过 tools 列表时写入可用性（null 表示尚未拉取，不阻断）。
-        hasAvailableCliRef.current = mapped.length > 0;
-        if (mapped.length) setProviders(mapped);
+        // 上游模型：binding.modelOverride（用户勾选）优先，fallback activeProvider.defaultModels。
+        const upstreamModels = Array.from(new Set([
+          ...((binding?.binding?.modelOverride) || []),
+          ...((activeProvider?.defaultModels) || []),
+        ])).filter(Boolean);
+        // 合并策略：把上游模型并入每个可用 CLI provider 的 models（去重），保留 PROVIDERS 的 label 骨架兜底。
+        const baseProviders = cliMapped.length ? cliMapped : PROVIDERS;
+        const merged = baseProviders.map((p) => ({
+          ...p,
+          models: Array.from(new Set([...p.models, ...upstreamModels])),
+        }));
+        hasAvailableCliRef.current = cliMapped.length > 0;
+        if (merged.length) setProviders(merged);
       })
       .catch(() => { /* fallback 到 PROVIDERS，hasAvailableCliRef 保持 null 不阻断 */ });
     return () => { cancelled = true; };
@@ -991,15 +1001,15 @@ export function PluginCreatorHome() {
                 <WandSparklesIcon className="size-3.5" /> 转为草稿
               </Button>
             )}
-            {/* design §3.3.2：预览按钮——有草稿（files 非空）才可点，否则 disabled + tooltip。 */}
+            {/* design §3.3.2：使用插件按钮——有草稿（files 非空）才可点，否则 disabled + tooltip。 */}
             <Button
               variant="outline"
               size="sm"
               disabled={!hasDraft}
               onClick={() => setPreviewOpen(true)}
-              title={hasDraft ? '打开预览' : '尚未生成插件草稿'}
+              title={hasDraft ? '使用插件' : '尚未生成插件草稿'}
             >
-              <EyeIcon className="size-4" /> 预览
+              <EyeIcon className="size-4" /> 使用插件
             </Button>
             <Button variant="outline" size="sm" onClick={() => setDetailsOpen(true)}>
               <PanelRightOpenIcon className="size-4" /> 详情
@@ -1090,6 +1100,7 @@ export function PluginCreatorHome() {
               onModelChange={setModel}
               onProviderChange={setProvider}
               onEffortChange={setEffort}
+              onCustomModel={() => { setSettingsTab('gateway'); setView('settings'); }}
               onSend={send}
               onStop={stopCurrentSession}
             />
@@ -1139,7 +1150,7 @@ export function PluginCreatorHome() {
       {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="gap-0 p-0 sm:max-w-xl">
-          <DialogHeader className="border-b px-4 py-3" data-tauri-drag-region onMouseDown={onDragWindow}>
+          <DialogHeader className="border-b px-4 py-3" {...dragRegionProps}>
             <DialogTitle className="text-base" data-tauri-drag-region>历史对话</DialogTitle>
           </DialogHeader>
           <ConversationRail

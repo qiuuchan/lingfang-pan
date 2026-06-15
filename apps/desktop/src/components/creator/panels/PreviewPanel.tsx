@@ -22,14 +22,14 @@ export function PreviewPanel({ files, previewKey, onRefresh }: { files: DraftFil
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">预览</CardTitle>
+        <CardTitle className="text-base">使用插件</CardTitle>
         <Button variant="ghost" size="icon-sm" disabled={!files.length} onClick={onRefresh}><RefreshCwIcon className="size-4" /></Button>
       </CardHeader>
       <CardContent>
         {files.length ? (
           <iframe key={previewKey} title="plugin-preview" sandbox="allow-scripts allow-forms allow-popups" srcDoc={previewSrcDoc(files)} className="h-[360px] w-full rounded-lg border bg-white" />
         ) : (
-          <div className="flex h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">生成插件后显示预览。</div>
+          <div className="flex h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">生成插件后即可使用。</div>
         )}
       </CardContent>
     </Card>

@@ -1,11 +1,12 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { Loader2Icon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
-import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api';
+import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { Footer } from '@/components/Footer';
+import { BackendUnreachable } from '@/components/BackendUnreachable';
 // 组D 加载优化：PluginCreatorHome 是首页（首屏即需）且在 App 内常驻挂载（home view 用 hidden 控制显隐，
 // 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
 // 其余重页面（Market/Wallet/Review/TeamManage/Settings/Plugins/TeamHome）按需懒加载，首屏不进 bundle。
@@ -167,6 +168,9 @@ export default function App() {
   });
   const [restoring, setRestoring] = useState(() => session.token !== null);
   const [backendUrl, setBackendUrl] = useState<string | null>(() => apiBase() || null);
+  // R6 后端不可达态：api() fetch 抛网络异常时派发 unreachable → true，主界面渲染 BackendUnreachable 友好页。
+  // 后续请求成功或 testBackendUrl 探测通过时派发 reachable → false，恢复正常业务页。
+  const [backendUnreachable, setBackendUnreachable] = useState(false);
   const [view, setView] = useState<View>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -275,6 +279,19 @@ export default function App() {
     window.addEventListener(UNAUTHORIZED_EVENT, handler);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
   }, [resetSession]);
+
+  // R6 连接失败页：监听 api() 派发的后端不可达/可达事件，切换 backendUnreachable 状态。
+  // 仅在已登录主界面响应（Auth/SetupWizard 页的连接错误走各自 toast，不渲染全屏不可达页）。
+  useEffect(() => {
+    const onUnreachable = () => { if (sessionRef.current.token) setBackendUnreachable(true); };
+    const onReachable = () => setBackendUnreachable(false);
+    window.addEventListener(BACKEND_UNREACHABLE_EVENT, onUnreachable);
+    window.addEventListener(BACKEND_REACHABLE_EVENT, onReachable);
+    return () => {
+      window.removeEventListener(BACKEND_UNREACHABLE_EVENT, onUnreachable);
+      window.removeEventListener(BACKEND_REACHABLE_EVENT, onReachable);
+    };
+  }, []);
 
   // 组D 首次启动安装向导：无 token 且 backendUrl 已配置时，查 /api/setup/status。
   // needsSetup=true（DB 无 PLATFORM_ADMIN）→ 渲染 SetupWizard 替代 Auth，拦截在登录之前。
@@ -399,33 +416,41 @@ export default function App() {
         <div className="flex min-h-0 flex-1">
           <Sidebar collapsed={!sidebarOpen} />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className={view === 'home' ? 'min-h-0 flex-1' : 'hidden'}>
-              <PluginCreatorHome />
-            </div>
-            {view !== 'home' && (
-              view === 'plugins' && runningPlugin ? (
-                // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
-                // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
-                <div className="min-h-0 flex-1">
-                  <Suspense fallback={null}>{body}</Suspense>
+            {backendUnreachable ? (
+              // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗、切设置）。
+              // 「去设置」跳 backend tab 改地址，「重试」探测成功后派发 reachable 退出此态。
+              <BackendUnreachable onGoSettings={() => { setSettingsTab('backend'); setView('settings'); }} />
+            ) : (
+              <>
+                <div className={view === 'home' ? 'min-h-0 flex-1' : 'hidden'}>
+                  <PluginCreatorHome />
                 </div>
-              ) : (
-                // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
-                // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
-                // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
-                // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
-                // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
-                <>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-                    <div className="mx-auto w-full max-w-6xl">
-                      <Suspense fallback={<ListSkeleton rows={6} />}>
-                        <PageTransition viewKey={view}>{body}</PageTransition>
-                      </Suspense>
+                {view !== 'home' && (
+                  view === 'plugins' && runningPlugin ? (
+                    // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
+                    // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
+                    <div className="min-h-0 flex-1">
+                      <Suspense fallback={null}>{body}</Suspense>
                     </div>
-                  </div>
-                  <Footer />
-                </>
-              )
+                  ) : (
+                    // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
+                    // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
+                    // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
+                    // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
+                    // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
+                    <>
+                      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                        <div className="mx-auto w-full max-w-6xl">
+                          <Suspense fallback={<ListSkeleton rows={6} />}>
+                            <PageTransition viewKey={view}>{body}</PageTransition>
+                          </Suspense>
+                        </div>
+                      </div>
+                      <Footer />
+                    </>
+                  )
+                )}
+              </>
             )}
           </main>
         </div>

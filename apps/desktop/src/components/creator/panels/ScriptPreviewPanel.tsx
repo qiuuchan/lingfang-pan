@@ -127,7 +127,7 @@ export function ScriptPreviewPanel({
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="flex items-center gap-2 text-base">
-            <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 预览
+            <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 运行
           </CardTitle>
           <Button variant="ghost" size="icon-sm" onClick={onRefresh}><RefreshCwIcon className="size-4" /></Button>
         </CardHeader>
@@ -162,7 +162,7 @@ export function ScriptPreviewPanel({
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle className="flex items-center gap-2 text-base">
-          <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 预览
+          <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 运行
         </CardTitle>
         <div className="flex items-center gap-1">
           <Button

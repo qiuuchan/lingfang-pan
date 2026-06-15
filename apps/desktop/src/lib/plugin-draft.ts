@@ -8,10 +8,14 @@ export const EXAMPLES = [
   '创建一个 Markdown 速记插件，左侧编辑右侧实时预览，支持复制导出',
 ];
 
+// R1 模型来源：不再硬编码具体型号（sonnet/opus/gpt-5.5…），改为运行时双源合并——
+// ① 本地已装 code-assistant CLI 探测的可用模型（code_assistant_list_tools）
+// ② gateway 上游已配置并勾选的真实模型（/api/llm/binding modelOverride + /api/llm/active-provider defaultModels）
+// 此常量仅保留 CLI 的 id/label 骨架（label 字典），models 留空由运行时填充。
 export const PROVIDERS = [
-  { id: 'claude', label: 'Claude Code', models: ['sonnet', 'opus'] },
-  { id: 'codex', label: 'Codex', models: ['default', 'gpt-5.5', 'gpt-5.1-codex', 'gpt-5.1'] },
-  { id: 'opencode', label: 'OpenCode', models: ['default', 'qwen-coder'] },
+  { id: 'claude', label: 'Claude Code', models: [] as string[] },
+  { id: 'codex', label: 'Codex', models: [] as string[] },
+  { id: 'opencode', label: 'OpenCode', models: [] as string[] },
 ];
 
 export type ProviderId = 'claude' | 'codex' | 'opencode';
