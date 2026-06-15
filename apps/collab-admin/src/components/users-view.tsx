@@ -24,13 +24,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PlusIcon, PencilIcon, ShieldCheckIcon, BanIcon, Trash2Icon, SearchIcon, ActivityIcon } from 'lucide-react';
+import { PlusIcon, PencilIcon, ShieldCheckIcon, BanIcon, Trash2Icon, SearchIcon, ActivityIcon, KeyIcon, WalletIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/utils';
 import { useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { AuditLog, Team, User, UserStatus } from '@/lib/types';
+import type { User, UserDetail, UserStatus } from '@/lib/types';
 import { labelOf, formatTime, actionLabel } from '@/lib/types';
 
 type StatusFilter = 'ALL' | 'ACTIVE' | 'DISABLED';
@@ -43,17 +43,12 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 
 export function UsersView() {
   const [users, setUsers] = useState<User[]>([]);
-  // teams 用于详情 Sheet 派生「用户所在团队 + 钱包余额」（后端无 user 详情端点，前端从团队成员关系派生）。
-  const [teams, setTeams] = useState<Team[]>([]);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [active, setActive] = useState<User | null>(null);
 
-  const load = () =>
-    Promise.all([
-      api<{ users: User[] }>('/api/admin/users').then((r) => setUsers(r.users)),
-      api<{ teams: Team[] }>('/api/admin/teams').then((r) => setTeams(r.teams)),
-    ]);
+  // 仅加载用户列表；详情（团队/钱包/登录历史）由 UserDetailSheet 通过 detail 端点懒加载，避免列表 mount 拉全量。
+  const load = () => api<{ users: User[] }>('/api/admin/users').then((r) => setUsers(r.users));
   useLoad(load);
 
   // 详情 Sheet 打开期间，用户列表刷新（如 footer 封禁/解封）后同步 active 到最新对象，避免显示陈旧状态。
@@ -176,46 +171,49 @@ export function UsersView() {
         </div>
       </Section>
 
-      {/* 行点击打开的详情抽屉：用户信息 + 所在团队（含余额）+ 最近操作。 */}
-      <UserDetailSheet user={active} teams={teams} onOpenChange={(o) => !o && setActive(null)} onRefresh={load} />
+      {/* 行点击打开的详情抽屉：用户信息 + 钱包 + 所在团队 + 登录历史。 */}
+      <UserDetailSheet user={active} onOpenChange={(o) => !o && setActive(null)} onRefresh={load} />
     </div>
   );
 }
 
-// 用户详情侧边抽屉。后端无 user 详情端点，团队从已加载的 teams 列表按成员匹配派生，
-// 最近操作在打开时懒加载 /api/admin/audit-logs 并按 actorId 过滤（避免每次 mount 拉全量日志）。
+// 用户详情侧边抽屉。后端 /api/admin/users/:id/detail 一次性聚合：
+// 登录历史（auth.* 审计）+ 钱包 + 团队 memberships + 钱包流水，避免前端从 teams 列表派生 + 拉全量审计日志再前端过滤。
 function UserDetailSheet({
   user,
-  teams,
   onOpenChange,
   onRefresh,
 }: {
   user: User | null;
-  teams: Team[];
   onOpenChange: (open: boolean) => void;
   onRefresh: () => void;
 }) {
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [detail, setDetail] = useState<UserDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
 
-  const userTeams = useMemo(() => {
-    if (!user) return [];
-    return teams
-      .filter((t) => (t.members || []).some((m) => m.userId === user.id))
-      .map((t) => ({ id: t.id, name: t.name, slug: t.slug, status: t.status, balanceCents: t.balanceCents, role: t.members?.find((m) => m.userId === user.id)?.role }));
-  }, [user, teams]);
-
+  // 打开时懒加载用户详情（避免列表 mount 拉全量）。user 变 null（关闭）时清空。
   useEffect(() => {
     if (!user) {
-      setLogs([]);
+      setDetail(null);
+      setTempPassword(null);
       return;
     }
-    setLoadingLogs(true);
-    api<{ logs: AuditLog[] }>('/api/admin/audit-logs')
-      .then((r) => setLogs(r.logs.filter((l) => l.actor?.id === user.id).slice(0, 10)))
-      .catch(() => setLogs([]))
-      .finally(() => setLoadingLogs(false));
+    setLoading(true);
+    api<UserDetail>(`/api/admin/users/${user.id}/detail`)
+      .then(setDetail)
+      .catch(() => setDetail(null))
+      .finally(() => setLoading(false));
   }, [user]);
+
+  async function resetPassword() {
+    if (!user) return;
+    if (!window.confirm(`确认强制重置用户 ${user.email} 的密码？将生成临时密码并作废当前会话。`)) return;
+    const result = await api<{ tempPassword: string }>(`/api/admin/users/${user.id}/reset-password`, { method: 'POST' });
+    // 临时密码一次性展示，admin 需手动复制转交用户（不自动复制到剪贴板，避免泄漏到无关上下文）。
+    setTempPassword(result.tempPassword);
+    toast.success('密码已重置，请将临时密码安全转交用户');
+  }
 
   return (
     <DetailSheet
@@ -225,20 +223,34 @@ function UserDetailSheet({
       description={user?.email}
       footer={
         user ? (
-          <Button
-            variant={user.status === 'ACTIVE' ? 'ghost' : 'outline'}
-            className="w-full"
-            onClick={() => {
-              const newStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
-              void run(
-                () => api(`/api/admin/users/${user.id}`, { method: 'PATCH', body: { status: newStatus, platformRole: user.platformRole } }).then(onRefresh),
-                newStatus === 'DISABLED' ? '用户已封禁' : '用户已解封',
-              );
-            }}
-          >
-            <BanIcon className="mr-1.5 size-4" />
-            {user.status === 'ACTIVE' ? '封禁用户' : '解封用户'}
-          </Button>
+          <div className="flex flex-col gap-2">
+            {tempPassword ? (
+              <div className="rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950">
+                <div className="mb-1 font-medium text-amber-700 dark:text-amber-300">临时密码（仅显示一次，请立即转交用户）</div>
+                <div className="break-all rounded bg-background px-2 py-1.5 font-mono text-base tracking-wider">{tempPassword}</div>
+              </div>
+            ) : null}
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => void resetPassword()}>
+                <KeyIcon className="mr-1.5 size-4" />
+                重置密码
+              </Button>
+              <Button
+                variant={user.status === 'ACTIVE' ? 'ghost' : 'outline'}
+                className="flex-1"
+                onClick={() => {
+                  const newStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+                  void run(
+                    () => api(`/api/admin/users/${user.id}`, { method: 'PATCH', body: { status: newStatus, platformRole: user.platformRole } }).then(onRefresh),
+                    newStatus === 'DISABLED' ? '用户已封禁' : '用户已解封',
+                  );
+                }}
+              >
+                <BanIcon className="mr-1.5 size-4" />
+                {user.status === 'ACTIVE' ? '封禁用户' : '解封用户'}
+              </Button>
+            </div>
+          </div>
         ) : null
       }
     >
@@ -253,23 +265,34 @@ function UserDetailSheet({
                 ['显示名', user.displayName || '—'],
                 ['状态', <StatusBadge key="s" value={user.status} />],
                 ['角色', <StatusBadge key="r" value={user.platformRole} />],
+                ['注册时间', formatTime(detail?.user.createdAt)],
               ]}
             />
           </div>
 
           <div>
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <WalletIcon className="size-3.5" />
+              钱包余额
+            </div>
+            <div className="rounded-xl border bg-muted/20 px-3 py-2 text-sm">
+              <span className="font-medium">{money(detail?.wallet.balanceCents ?? 0)}</span>
+            </div>
+          </div>
+
+          <div>
             <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">所在团队</div>
-            {userTeams.length ? (
+            {detail && detail.teams.length ? (
               <div className="space-y-2">
-                {userTeams.map((t) => (
-                  <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm">
+                {detail.teams.map((t) => (
+                  <div key={t.teamId} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm">
                     <div className="min-w-0">
-                      <div className="truncate font-medium">{t.name}</div>
-                      <div className="truncate text-xs text-muted-foreground font-mono">{t.slug}</div>
+                      <div className="truncate font-medium">{t.team.name}</div>
+                      <div className="truncate text-xs text-muted-foreground font-mono">{t.team.slug}</div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <Badge variant="secondary">{labelOf(t.role)}</Badge>
-                      <span className="font-medium">{money(t.balanceCents)}</span>
+                      <span className="font-medium">{money(t.team.balanceCents)}</span>
                     </div>
                   </div>
                 ))}
@@ -282,13 +305,13 @@ function UserDetailSheet({
           <div>
             <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               <ActivityIcon className="size-3.5" />
-              最近操作
+              登录历史
             </div>
-            {loadingLogs ? (
+            {loading ? (
               <p className="text-sm text-muted-foreground">加载中…</p>
-            ) : logs.length ? (
+            ) : detail && detail.loginHistory.length ? (
               <div className="space-y-1.5">
-                {logs.map((log) => (
+                {detail.loginHistory.map((log) => (
                   <div key={log.id} className="rounded-xl border px-3 py-2 text-sm">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{actionLabel(log.action)}</span>
@@ -298,7 +321,7 @@ function UserDetailSheet({
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">暂无操作记录</p>
+              <p className="text-sm text-muted-foreground">暂无登录记录</p>
             )}
           </div>
         </>
@@ -409,9 +432,10 @@ function EditUserDialog({
   }
 
   async function promote() {
+    // 使用专用 platform-role 端点（仅改角色，禁止自改自身 + 独立审计 admin.user.role_changed）。
     if (!(await run(
       () =>
-        api(`/api/admin/users/${user.id}`, {
+        api(`/api/admin/users/${user.id}/platform-role`, {
           method: 'PATCH',
           body: { platformRole: 'PLATFORM_ADMIN' },
         }).then(onRefresh),

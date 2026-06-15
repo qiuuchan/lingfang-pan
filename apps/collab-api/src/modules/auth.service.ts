@@ -37,6 +37,8 @@ export class AuthService {
           displayName: input.displayName?.trim() || email,
         },
       });
+      // 注册审计：actor=新用户自身，targetType=User（与 team_admin_application.created 事务内并列）。
+      await tx.auditLog.create({ data: { actorUserId: user.id, action: 'auth.register', targetType: 'User', targetId: user.id, metadata: { email } } });
       if (input.wantsTeamAdmin) {
         await tx.teamAdminApplication.create({
           data: {
@@ -76,9 +78,19 @@ export class AuthService {
   async login(input: { email: string; password: string }) {
     const email = input.email?.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || user.status !== 'ACTIVE') throw unauthorized('邮箱或密码错误');
+    // 登录失败统一审计：actorUserId 可为 null（用户不存在时），便于安全审计追踪暴力破解尝试。
+    // 不在错误消息中区分「用户不存在」与「密码错误」（防探测），但审计记录 email 供管理员追溯。
+    if (!user || user.status !== 'ACTIVE') {
+      await this.prisma.auditLog.create({ data: { actorUserId: null, action: 'auth.login.failed', targetType: 'User', targetId: user?.id ?? null, metadata: { email, reason: user ? 'account_inactive' : 'user_not_found' } } });
+      throw unauthorized('邮箱或密码错误');
+    }
     const ok = await bcrypt.compare(input.password || '', user.passwordHash);
-    if (!ok) throw unauthorized('邮箱或密码错误');
+    if (!ok) {
+      await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.failed', targetType: 'User', targetId: user.id, metadata: { email, reason: 'wrong_password' } } });
+      throw unauthorized('邮箱或密码错误');
+    }
+    // 登录成功审计：actor=用户自身，记录成功事件便于安全合规追溯（此前完全缺失）。
+    await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.success', targetType: 'User', targetId: user.id, metadata: { email } } });
     return this.sessionFor(user.id);
   }
 
@@ -87,7 +99,24 @@ export class AuthService {
   }
 
   async refresh(userId: string) {
+    // token 刷新审计：记录滑动续签事件（actor=用户自身），便于安全审计追踪会话活跃度。
+    // 失败（sessionFor 抛 unauthorized）时不审计，与 login.failed 区分（refresh 失败多为 token 过期，非恶意）。
+    await this.prisma.auditLog.create({ data: { actorUserId: userId, action: 'auth.token.refreshed', targetType: 'User', targetId: userId } }).catch(() => {
+      // 审计写入失败不阻塞 refresh 主流程（token 续签优先于审计），降级吞错。
+    });
     return this.sessionFor(userId);
+  }
+
+  /**
+   * 退出登录审计（POST /auth/logout）。
+   * 当前版本为无状态 JWT，logout 仅客户端清理 + 审计记录，不在服务端维护 token 黑名单。
+   * 审计写入失败不阻塞响应（降级吞错，logout 优先返回成功）。
+   */
+  async logout(userId: string) {
+    await this.prisma.auditLog.create({ data: { actorUserId: userId, action: 'auth.logout', targetType: 'User', targetId: userId } }).catch(() => {
+      // 审计写入失败不阻塞 logout 响应。
+    });
+    return { ok: true };
   }
 
   /**

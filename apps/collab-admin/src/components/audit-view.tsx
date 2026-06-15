@@ -1,4 +1,14 @@
-import { useState } from 'react';
+// 组D 审计完善：audit-view 增强为「分类筛选 + 关键词搜索 + 中文说明 + 详情展开」。
+//
+// 设计：
+//  - 分类筛选：下拉选择分类（auth/team/plugin/...），传 category query 触发后端过滤。
+//  - 关键词搜索：输入框 debounce 300ms，传 q query 触发后端搜索（action / actor email / targetId）。
+//  - 中文说明：列展示 actionLabel(action)（action → 中文映射），原 action 作为副标小字展示。
+//  - 详情展开：保留 Dialog 模式，点行展开 metadata 完整 JSON + actor 信息 + target 信息。
+//
+// 后端过滤 vs 客户端过滤：后端 take:200 限制结果集，分类/关键词在服务端 where 过滤更精准，
+// 客户端仅做分页（20 条/页），避免本地全量过滤导致空页。
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -8,6 +18,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -16,70 +28,173 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { EyeIcon } from 'lucide-react';
+import { EyeIcon, RotateCwIcon, SearchIcon } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useLoad } from '@/lib/helpers';
 import { Section } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { AuditLog } from '@/lib/types';
-import { actionLabel, targetLabel, formatTime, localizeMetadata } from '@/lib/types';
+import type { AuditLog, AuditCategoryKey } from '@/lib/types';
+import {
+  AUDIT_CATEGORIES,
+  actionLabel,
+  targetLabel,
+  formatTime,
+  localizeMetadata,
+  auditCategory,
+  categoryLabel,
+} from '@/lib/types';
+
+type CategoryFilter = AuditCategoryKey | 'ALL';
 
 export function AuditView() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
-  useLoad(() => api<{ logs: AuditLog[] }>('/api/admin/audit-logs').then((r) => setLogs(r.logs)));
+  const [category, setCategory] = useState<CategoryFilter>('ALL');
+  const [query, setQuery] = useState('');
+  // debounce 后的搜索词：避免每次按键都触发后端请求（300ms 防抖）。
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  // 防抖：query 变化后 300ms 同步到 debouncedQuery，触发后端重新拉取。
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // 构建查询参数：category / q 非空时附加到 query string。
+  const params = new URLSearchParams();
+  if (category !== 'ALL') params.set('category', category);
+  if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim());
+  const qs = params.toString();
+
+  // 响应式拉取：category / debouncedQuery 变化时重新请求后端。
+  // qs 为依赖：category 与 debouncedQuery 的合成产物，单一依赖避免重复请求。
+  // mounted 守卫：卸载后不 setState（与 useLoad 同款防孤儿 toast/状态更新）。
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    api<{ logs: AuditLog[] }>(`/api/admin/audit-logs${qs ? `?${qs}` : ''}`)
+      .then((r) => {
+        if (mounted) setLogs(r.logs);
+      })
+      .catch(() => {
+        // 401 由 api() 的 UNAUTHORIZED 事件统一处理；其他错误静默（logs 保持旧值，loading 复位）。
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [qs]);
+
   const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(logs, 20);
 
+  const reload = () => {
+    setLoading(true);
+    api<{ logs: AuditLog[] }>(`/api/admin/audit-logs${qs ? `?${qs}` : ''}`)
+      .then((r) => setLogs(r.logs))
+      .catch(() => {
+        // 手动 reload 失败静默（logs 保持旧值）。
+      })
+      .finally(() => setLoading(false));
+  };
+
   return (
-    <Section title="审计日志" description="平台级操作记录。">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>动作</TableHead>
-            <TableHead>对象</TableHead>
-            <TableHead>操作者</TableHead>
-            <TableHead>时间</TableHead>
-            <TableHead className="w-[100px]">详情</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {paginated.length ? (
-            paginated.map((log) => (
-              <TableRow key={log.id}>
-                <TableCell>{actionLabel(log.action)}</TableCell>
-                <TableCell>{targetLabel(log.targetType)}</TableCell>
-                <TableCell>{log.actor?.email || '系统'}</TableCell>
-                <TableCell>{formatTime(log.createdAt)}</TableCell>
-                <TableCell>
-                  <AuditDetailDialog log={log}>
-                    <Button variant="ghost" size="icon" className="size-8">
-                      <EyeIcon className="size-4" />
-                    </Button>
-                  </AuditDetailDialog>
+    <Section title="审计日志" description="平台级操作记录，支持按分类筛选与关键词搜索。">
+      <div className="space-y-4">
+        {/* 工具栏：分类筛选 + 关键词搜索 + 刷新 */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative max-w-xs flex-1">
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="搜索 action / 操作者邮箱 / 对象 ID"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={category} onValueChange={(v) => setCategory(v as CategoryFilter)}>
+              <SelectTrigger className="sm:w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部分类</SelectItem>
+                {AUDIT_CATEGORIES.map((c) => (
+                  <SelectItem key={c.key} value={c.key}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
+            <RotateCwIcon className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+            刷新
+          </Button>
+        </div>
+
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>动作</TableHead>
+              <TableHead>分类</TableHead>
+              <TableHead>对象</TableHead>
+              <TableHead>操作者</TableHead>
+              <TableHead>时间</TableHead>
+              <TableHead className="w-[100px]">详情</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paginated.length ? (
+              paginated.map((log) => {
+                const cat = auditCategory(log.action);
+                return (
+                  <TableRow key={log.id}>
+                    <TableCell>
+                      <div className="font-medium">{actionLabel(log.action)}</div>
+                      {/* 原 action 码作为副标小字展示，便于精确追溯（中文说明 + 原码双展示）。 */}
+                      <div className="font-mono text-xs text-muted-foreground">{log.action}</div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">{categoryLabel(cat)}</span>
+                    </TableCell>
+                    <TableCell>{targetLabel(log.targetType)}</TableCell>
+                    <TableCell>{log.actor?.email || '系统'}</TableCell>
+                    <TableCell>{formatTime(log.createdAt)}</TableCell>
+                    <TableCell>
+                      <AuditDetailDialog log={log}>
+                        <Button variant="ghost" size="icon" className="size-8">
+                          <EyeIcon className="size-4" />
+                        </Button>
+                      </AuditDetailDialog>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            ) : (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  {loading ? '加载中…' : '暂无审计日志'}
                 </TableCell>
               </TableRow>
-            ))
-          ) : (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                暂无审计日志
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-      <Pagination
-        totalItems={totalItems}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={setPage}
-        onPageSizeChange={setPageSize}
-      />
+            )}
+          </TableBody>
+        </Table>
+        <Pagination
+          totalItems={totalItems}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      </div>
     </Section>
   );
 }
 
 function AuditDetailDialog({ log, children }: { log: AuditLog; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const cat = auditCategory(log.action);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -96,6 +211,14 @@ function AuditDetailDialog({ log, children }: { log: AuditLog; children: React.R
               <span className="font-mono text-xs text-foreground">{log.action}</span>
             </div>
             <div className="grid gap-1 sm:grid-cols-[80px_1fr]">
+              <span className="text-muted-foreground">分类</span>
+              <span className="text-foreground">{categoryLabel(cat)}</span>
+            </div>
+            <div className="grid gap-1 sm:grid-cols-[80px_1fr]">
+              <span className="text-muted-foreground">说明</span>
+              <span className="text-foreground">{actionLabel(log.action)}</span>
+            </div>
+            <div className="grid gap-1 sm:grid-cols-[80px_1fr]">
               <span className="text-muted-foreground">对象</span>
               <span className="text-foreground">{targetLabel(log.targetType)}</span>
             </div>
@@ -105,7 +228,9 @@ function AuditDetailDialog({ log, children }: { log: AuditLog; children: React.R
             </div>
             <div className="grid gap-1 sm:grid-cols-[80px_1fr]">
               <span className="text-muted-foreground">操作者</span>
-              <span className="text-foreground">{log.actor?.email || '系统'}</span>
+              <span className="text-foreground">
+                {log.actor ? `${log.actor.email}${log.actor.displayName ? `（${log.actor.displayName}）` : ''}` : '系统'}
+              </span>
             </div>
             <div className="grid gap-1 sm:grid-cols-[80px_1fr]">
               <span className="text-muted-foreground">时间</span>

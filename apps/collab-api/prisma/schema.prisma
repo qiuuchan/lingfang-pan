@@ -307,6 +307,10 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([actorUserId, createdAt])
+  // 组E 性能：按 action 聚合的高频查询索引。adminGenerationStats/adminFinanceStats
+  // 每次看板渲染都按 action（如 'llm_binding.key_decrypted'/'plugin.uploaded'）+ createdAt 范围 count 4 次，
+  // 此前全表扫描；audit-view 按分类筛选同样依赖 action 前缀。复合 [action, createdAt] 覆盖两种过滤。
+  @@index([action, createdAt])
 }
 
 // 平台设置（key/value 键值表，平台 Admin 维护）。
@@ -359,6 +363,9 @@ model Purchase {
 
   @@unique([pluginId, buyerUserId])
   @@index([buyerUserId])
+  // 组E 性能：按买方团队聚合的高频查询索引。adminTeamDetail 用 buyerTeamId + createdAt desc
+  // 拉最近 10 笔购买，此前 buyerTeamId 无索引走全表扫描；按租户的财务聚合同样受益。
+  @@index([buyerTeamId, createdAt])
 }
 
 model PluginRating {

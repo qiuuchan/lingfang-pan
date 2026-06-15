@@ -80,7 +80,7 @@ export class AuthController {
   @Post('logout')
   @ApiBearerAuth()
   @ApiOperation({ summary: '退出登录；当前版本为无状态 JWT 客户端清理' })
-  logout() {
-    return { ok: true };
+  logout(@Req() req: Request) {
+    return this.auth.logout(requireUser(req).id);
   }
 }

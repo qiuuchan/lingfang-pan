@@ -115,6 +115,9 @@ export class EconomyService {
     });
 
     const wallet = await this.ensureWallet(userId);
+    // 购买审计：actor=买家，记录插件购买扣款事件（便于管理员追溯市场交易）。
+    // 在事务外审计（与 walletTransaction 流水分离：流水是财务账本，audit 是治理追溯）。
+    await this.audit(userId, 'wallet.purchase', 'Plugin', pluginId, { buyerTeamId: membership.teamId, sellerUserId: sellerId, priceCents: price });
     // 通知卖家：插件售出，收入到账（触发失败不阻塞主操作）。
     try {
       await this.notifications.create(
@@ -128,5 +131,9 @@ export class EconomyService {
       // 通知触发失败不阻塞购买主流程。
     }
     return { status: 'purchased' as const, plugin_id: pluginId, price_cents: price, balance_cents: wallet.balanceCents };
+  }
+
+  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
+    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
   }
 }

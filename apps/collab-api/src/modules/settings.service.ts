@@ -39,6 +39,30 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
   },
 };
 
+/** 公开信息（platformName/logoUrl）的内存缓存 TTL（毫秒）。
+ *  该端点 @Public 且为高频访问（官网落地页 + 桌面端启动页每次加载都请求），
+ *  PlatformSetting 表改动极少（仅 Admin 改平台名/logo 时变），缓存 30s 可消除绝大多数 DB 查询。
+ *  组E 性能：module-level cache + 手动失效（updateSettings 改公开 key 时清缓存），不引入 Redis 等外部依赖。 */
+const PUBLIC_INFO_CACHE_TTL_MS = 30_000;
+
+/** 缓存条目：值快照 + 过期时间戳。expiresAt=0 表示已失效（下次请求重新查库）。 */
+interface PublicInfoCacheEntry {
+  value: { platformName: string; logoUrl: string };
+  expiresAt: number;
+}
+
+/** module-level 缓存：进程内单例，所有 SettingsService 实例共享。
+ *  NestJS 默认 singleton scope，此变量等价于实例字段，但用 module-level 避免与 DI 生命周期耦合。
+ *  null = 未填充（首次请求或被失效后）。 */
+let publicInfoCache: PublicInfoCacheEntry | null = null;
+
+/** 重置公开信息缓存（仅供测试隔离用例间状态）。
+ *  生产代码通过 updateSettings 自动失效，无需手动调用。导出以让单测在每个用例前清空 module-level 状态，
+ *  避免「前一个用例填充的缓存被后一个用例命中」导致的测试顺序依赖。 */
+export function resetPublicInfoCache(): void {
+  publicInfoCache = null;
+}
+
 @Injectable()
 export class SettingsService {
   constructor(
@@ -87,22 +111,32 @@ export class SettingsService {
       results.push({ key: setting.key, value: setting.value });
       await this.audit(actorId, 'admin.setting.updated', 'PlatformSetting', item.key, { key: item.key, value: item.value });
     }
+    // 组E 性能：设置变更后失效公开信息缓存（platformName/logoUrl 可能被改），
+    // 确保下一次 GET /api/platform-info 回源读取最新值（而非命中过期缓存）。
+    publicInfoCache = null;
     return { settings: results };
   }
 
   /** GET /api/platform-info：不鉴权（@Public），仅返回 PUBLIC_SETTING_KEYS 白名单内的字段。
    *  缺省值兜底：platformName 默认「LingFang」，logoUrl 默认空串（前端按需渲染占位）。
-   *  返回对象（非数组）：公开端点契约要求扁平 {platformName, logoUrl} 便于前端直接解构。 */
+   *  返回对象（非数组）：公开端点契约要求扁平 {platformName, logoUrl} 便于前端直接解构。
+   *  组E 性能：命中内存缓存直接返回（TTL 内零 DB 查询），过期或被失效后回源查库并刷新缓存。 */
   async getPublicInfo() {
+    const now = Date.now();
+    if (publicInfoCache && publicInfoCache.expiresAt > now) {
+      return publicInfoCache.value;
+    }
     const rows = await this.prisma.platformSetting.findMany({
       where: { key: { in: [...PUBLIC_SETTING_KEYS] } },
       select: { key: true, value: true },
     });
     const map = new Map(rows.map((r) => [r.key, r.value] as const));
-    return {
+    const value = {
       platformName: map.get('platformName') ?? 'LingFang',
       logoUrl: map.get('logoUrl') ?? '',
     };
+    publicInfoCache = { value, expiresAt: now + PUBLIC_INFO_CACHE_TTL_MS };
+    return value;
   }
 
   /** POST /api/admin/settings/test-email：发送测试邮件验证 SMTP 配置。

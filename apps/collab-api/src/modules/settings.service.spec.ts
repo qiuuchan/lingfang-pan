@@ -9,7 +9,7 @@
 //  - test_email_lets_mail_service_send_and_returns_result（委托 MailService.sendTestEmail）。
 // 参考 release.service.spec.ts：Mock PrismaService + AuthService + MailService，不连真实 DB。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { SettingsService, PUBLIC_SETTING_KEYS } from './settings.service';
+import { SettingsService, PUBLIC_SETTING_KEYS, resetPublicInfoCache } from './settings.service';
 import { forbidden } from '../common';
 
 function mockPrisma() {
@@ -41,6 +41,8 @@ describe('SettingsService', () => {
   let service: SettingsService;
 
   beforeEach(() => {
+    // 组E 性能：module-level 公开信息缓存在用例间隔离，避免前序用例填充的缓存被后续用例命中。
+    resetPublicInfoCache();
     prisma = mockPrisma();
     auth = mockAuth();
     mail = mockMail();
@@ -122,6 +124,29 @@ describe('SettingsService', () => {
     prisma.platformSetting.findMany.mockResolvedValue([]);
     const result = await service.getPublicInfo();
     expect(result).toEqual({ platformName: 'LingFang', logoUrl: '' });
+  });
+
+  // 组E 性能：公开信息内存缓存（@Public 高频端点）。
+  it('getPublicInfo 命中缓存时不重复查库（TTL 内仅 findMany 一次）', async () => {
+    prisma.platformSetting.findMany.mockResolvedValue([{ key: 'platformName', value: '灵坊' }]);
+    await service.getPublicInfo();
+    await service.getPublicInfo();
+    await service.getPublicInfo();
+    // 三次调用只查一次库，后两次命中 module-level 缓存。
+    expect(prisma.platformSetting.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('updateSettings 成功后失效缓存（下次 getPublicInfo 回源查库）', async () => {
+    prisma.platformSetting.findMany.mockResolvedValue([{ key: 'platformName', value: '灵坊' }]);
+    prisma.platformSetting.upsert.mockResolvedValue({ key: 'platformName', value: '新名' });
+    // 首次请求填充缓存。
+    await service.getPublicInfo();
+    expect(prisma.platformSetting.findMany).toHaveBeenCalledTimes(1);
+    // 更新设置应失效缓存。
+    await service.updateSettings('user-admin', { settings: [{ key: 'platformName', value: '新名' }] });
+    // 下次 getPublicInfo 回源查库（缓存已被清空）。
+    await service.getPublicInfo();
+    expect(prisma.platformSetting.findMany).toHaveBeenCalledTimes(2);
   });
 
   it('testEmail 拒绝非法邮箱格式', async () => {

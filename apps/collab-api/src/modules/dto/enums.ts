@@ -10,8 +10,12 @@ export const PLATFORM_ROLE = ['NONE', 'PLATFORM_ADMIN'] as const;
 export const TEAM_STATUS = ['ACTIVE', 'SUSPENDED'] as const;
 /** 插件启用状态（与 PluginStatus 对齐）。 */
 export const PLUGIN_STATUS = ['ENABLED', 'DISABLED'] as const;
+/** 插件可见性（与 PluginVisibility 对齐，私有 / 团队 / 公开）。 */
+export const PLUGIN_VISIBILITY = ['PRIVATE', 'TEAM', 'PUBLIC'] as const;
 /** 余额调整方向：加款 / 扣款（与 BalanceDirection 对齐）。 */
 export const BALANCE_DIRECTION = ['CREDIT', 'DEBIT'] as const;
+/** 团队成员角色（与 TeamRole 对齐）：团队管理员 / 普通成员。 */
+export const TEAM_ROLE = ['TEAM_ADMIN', 'MEMBER'] as const;
 
 // === LLM 网关目录相关常量 ===
 
