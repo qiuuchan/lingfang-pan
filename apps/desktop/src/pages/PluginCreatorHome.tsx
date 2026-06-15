@@ -54,6 +54,7 @@ import type { LoadedPlugin } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useEnvReadiness } from '@/lib/env-readiness';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -65,6 +66,14 @@ import { Composer } from '@/components/creator/Composer';
 import { ConversationRail } from '@/components/creator/ConversationRail';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
 import { PreviewDrawer } from '@/components/creator/PreviewDrawer';
+// 组C：插件名用户命名（PRD 需求 1）+ 动态状态从文件系统扫描（PRD 需求 2）。
+import { safePluginId } from '@/lib/plugin-draft';
+import {
+  scanPluginStatus,
+  STATUS_DISPLAY,
+  STATUS_VARIANT,
+  type LocalPluginStatus,
+} from '@/lib/plugin-status';
 
 export function PluginCreatorHome() {
   const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view } = useApp();
@@ -73,6 +82,19 @@ export function PluginCreatorHome() {
   // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
   const envReadiness = useEnvReadiness(session, view);
   const [input, setInput] = useState('');
+  // 组C（PRD 需求 1）：插件名用户命名，不再自动取 manifest.name。
+  // 用户在创建器顶部输入插件名（如「我的番茄钟」），首次发送时据此生成持久化 plugin_id，
+  // 并写入 manifest.title 字段（Rust 组A 在 scan 时优先读 title 展示，缺失回退 name）。
+  // 空串时：首发送后由 prompt 自动生成 plugin_id（向后兼容旧行为，不强制填名）。
+  const [pluginName, setPluginName] = useState('');
+  // 组C（PRD AC10）：当前会话对应的持久化 plugin_id（start_session 传入后固化到 session 记录）。
+  // 命中时 workspace 强制落到 plugins_root/<plugin_id>/（Rust resolve_workspace 已支持 plugin_id 优先）。
+  // null 表示当前会话尚未关联持久化插件（纯对话态或创建前）。
+  const [pluginId, setPluginId] = useState<string | null>(null);
+  const pluginIdRef = useRef<string | null>(null);
+  // 组C（PRD 需求 2）：插件状态从文件系统动态扫描（pluginId 命中持久化目录时才有意义）。
+  // null=未扫描/无 pluginId；LocalPluginStatus=当前插件的真实状态（ready/incomplete/error/running）。
+  const [pluginStatus, setPluginStatus] = useState<LocalPluginStatus | null>(null);
   const [provider, setProvider] = useState(PROVIDERS[0].id);
   // R1 model 初始空串：模型清单由运行时双源合并填充（PROVIDERS.models 已置空），首次拉取后 effect 自动 setModel。
   const [model, setModel] = useState<string>(PROVIDERS[0].models[0] || '');
@@ -146,9 +168,9 @@ export function PluginCreatorHome() {
   const hasAvailableCliRef = useRef<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
-    // R1 双源合并：本地已装 CLI 探测的可用模型 + gateway 上游已配置模型，去重后填入 providers。
-    // 并行发起：tauriInvoke(code_assistant_list_tools) + api(/api/llm/active-provider) + api(/api/llm/binding)。
-    // 上游模型（modelOverride/defaultModels）合并进每个 provider 的 models 列表，让用户配的上游模型可直接选。
+    // R1 模型来源：只用「模型服务里拉取并保存的上游模型」（binding.modelOverride + active-provider.defaultModels）。
+    // 不再并入本地 CLI 预填模型（sonnet/opus/gpt-5.5 等 CLI 内置默认值），因为用户未主动配置、且可能与上游模型混淆。
+    // provider（claude/codex/opencode）骨架仍由本地 CLI 探测提供（决定 send 调哪个 CLI），但每个 provider 的 models 只填上游模型。
     Promise.all([
       tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean; models?: string[] }>>('code_assistant_list_tools'),
       api<{ defaultModels?: string[] } | null>('/api/llm/active-provider').catch(() => null),
@@ -156,25 +178,23 @@ export function PluginCreatorHome() {
     ])
       .then(([tools, activeProvider, binding]) => {
         if (cancelled) return;
-        const cliMapped = (tools || [])
+        // provider 骨架：本地已装 CLI（仅取 id/label，不取其内置 models）。
+        const cliProviders = (tools || [])
           .filter((t) => t.available)
           .map((t) => ({
             id: String(t.tool),
             label: String(t.display_name || t.tool),
-            models: Array.isArray(t.models) ? t.models.map(String) : [],
+            models: [] as string[],
           }));
-        // 上游模型：binding.modelOverride（用户勾选）优先，fallback activeProvider.defaultModels。
+        // 上游模型（用户在模型服务里拉取保存的）：binding.modelOverride 优先，fallback activeProvider.defaultModels。
         const upstreamModels = Array.from(new Set([
           ...((binding?.binding?.modelOverride) || []),
           ...((activeProvider?.defaultModels) || []),
         ])).filter(Boolean);
-        // 合并策略：把上游模型并入每个可用 CLI provider 的 models（去重），保留 PROVIDERS 的 label 骨架兜底。
-        const baseProviders = cliMapped.length ? cliMapped : PROVIDERS;
-        const merged = baseProviders.map((p) => ({
-          ...p,
-          models: Array.from(new Set([...p.models, ...upstreamModels])),
-        }));
-        hasAvailableCliRef.current = cliMapped.length > 0;
+        // 每个 provider 的 models 只填上游模型（不并入 CLI 预填）。
+        const baseProviders = cliProviders.length ? cliProviders : PROVIDERS;
+        const merged = baseProviders.map((p) => ({ ...p, models: [...upstreamModels] }));
+        hasAvailableCliRef.current = cliProviders.length > 0;
         if (merged.length) setProviders(merged);
       })
       .catch(() => { /* fallback 到 PROVIDERS，hasAvailableCliRef 保持 null 不阻断 */ });
@@ -205,6 +225,31 @@ export function PluginCreatorHome() {
   const modelRef = useRef(model);
   useEffect(() => { modelRef.current = model; }, [model]);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
+
+  // 组C（PRD 需求 2 / AC2）：插件状态从文件系统动态扫描。
+  // pluginId 命中持久化目录时调 scan_plugin_status 拿当前插件的真实状态（ready/incomplete/error/running）。
+  // 顶部状态 Badge 显示 pluginStatus.status（优先于 currentDraft.status，反映文件系统真相）。
+  // 流式进行中（streaming）也重扫（AI 正在写文件，状态可能从 incomplete→ready 动态变化）。
+  useEffect(() => {
+    if (!pluginId) {
+      setPluginStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const scan = async () => {
+      try {
+        const items = await scanPluginStatus();
+        if (cancelled) return;
+        const current = items.find((item) => item.id === pluginId);
+        setPluginStatus(current ?? null);
+      } catch {
+        // scan 失败静默（Rust 组A 未实现时降级，不阻断创建流程；顶部状态回退到草稿状态）。
+        if (!cancelled) setPluginStatus(null);
+      }
+    };
+    void scan();
+    return () => { cancelled = true; };
+  }, [pluginId, streaming, files.length]);
 
   // design §3.2：挂载时拉取会话列表 + 从 localStorage 恢复 activeId。
   // 恢复后若该 activeId 有效，加载其 draft 并重建 assistantSession 供历史渲染。
@@ -548,6 +593,13 @@ export function PluginCreatorHome() {
   }
 
   async function startNewSession(text: string, selectedProvider: ProviderId) {
+    // 组C（PRD 需求 1 + AC10）：插件名用户命名 → 生成持久化 plugin_id 传入 start_session。
+    // pluginName 非空时：用 safePluginId 规范化（小写/连字符/去特殊）生成目录名；
+    // 为空时：仍从 prompt 自动生成（向后兼容），保证非插件场景（纯对话）不阻断。
+    // Rust resolve_workspace 命中 plugin_id 时 workspace 强制落到 plugins_root/<plugin_id>/（持久化目录）。
+    const resolvedPluginId = safePluginId(pluginName.trim() || text);
+    setPluginId(resolvedPluginId);
+    pluginIdRef.current = resolvedPluginId;
     // 默认注入轻量对话 systemPrompt：正常聊天 + 检测到创建插件意图时按协议产出围栏块。
     // 这样「你好」是普通对话（不产 manifest），「做个番茄钟插件」AI 知道用协议格式输出可预览插件包。
     const record = await tauriInvoke<AssistantSessionRecord>('code_assistant_start_session', {
@@ -555,6 +607,8 @@ export function PluginCreatorHome() {
         tool: selectedProvider,
         // R6 自定义模型：把哨兵/default/空串归一为 undefined（回退 CLI 默认），真模型 id 原样透传。
         model: resolveSendModel(model),
+        // 组C：pluginId 命中持久化目录（Rust 组D 已支持 plugin_id 优先 workspace）。
+        pluginId: resolvedPluginId,
         prompt: text,
         systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         // R2 思考强度随首轮传入（claude 透传 --effort；codex/opencode 忽略）。
@@ -756,6 +810,12 @@ export function PluginCreatorHome() {
     // 修复 ASKU-01：切会话时复位防重入守卫（若旧会话追问未完成即被切走）。
     askAnsweringRef.current = false;
     setAskAnswering(false);
+    // 组C：切会话时清空插件名/pluginId/状态——新会话尚未关联持久化目录，旧值已无意义。
+    // 会话本身不持久化 pluginName（用户命名属创建期输入），切回时需重新输入或由草稿文件反推。
+    setPluginName('');
+    setPluginId(null);
+    pluginIdRef.current = null;
+    setPluginStatus(null);
     try {
       const draftRaw = await readDraft(id);
       setCurrentDraft(draftRaw ? JSON.parse(draftRaw) : null);
@@ -957,6 +1017,11 @@ export function PluginCreatorHome() {
     // 重置多轮运行态：新对话回到首轮语义（multiturnMode 待定）。
     setMultiturnMode(null);
     lastPromptRef.current = null;
+    // 组C：重置插件名 + pluginId + 动态状态。新对话不再关联上一插件的持久化目录。
+    setPluginName('');
+    setPluginId(null);
+    pluginIdRef.current = null;
+    setPluginStatus(null);
   }
 
   // 问题4：转草稿按钮显示条件——仅当「当前会话无 draft 且是最后一条 assistant turn」时显示。
@@ -987,7 +1052,19 @@ export function PluginCreatorHome() {
                 <span className="truncate text-muted-foreground">{activeConversationTitle}</span>
               </>
             )}
-            {status && <Badge variant={status === 'ready' ? 'default' : status === 'invalid' ? 'destructive' : 'secondary'}>{STATUS_LABEL[status] || status}</Badge>}
+            {/* 组C（PRD 需求 2）：状态优先显示文件系统扫描结果（pluginStatus，真实 ready/incomplete/error），
+                无 pluginId 时回退到草稿状态（currentDraft.status，反映解析阶段）。
+                双源策略：创建期用草稿状态，AI 写入持久化目录后用文件系统状态。 */}
+            {(() => {
+              if (pluginStatus) {
+                const variant = STATUS_VARIANT[pluginStatus.status];
+                return <Badge variant={variant}>{STATUS_DISPLAY[pluginStatus.status]}</Badge>;
+              }
+              if (status) {
+                return <Badge variant={status === 'ready' ? 'default' : status === 'invalid' ? 'destructive' : 'secondary'}>{STATUS_LABEL[status] || status}</Badge>;
+              }
+              return null;
+            })()}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="ghost" size="sm" onClick={newDraft}>新对话</Button>
@@ -1088,6 +1165,18 @@ export function PluginCreatorHome() {
 
         <div className="shrink-0 border-t bg-background px-4 py-3">
           <div className="mx-auto max-w-3xl">
+            {/* 组C（PRD 需求 1）：插件名称输入框——用户命名插件，不自动取 manifest.name。
+                空串时首发送后由 prompt 自动生成 plugin_id（向后兼容），非强制。
+                首轮发送后 pluginId 固化（Rust session 记录），改名需开新对话（插件目录名不可中途改）。 */}
+            <div className="mb-2 flex items-center gap-2">
+              <Input
+                value={pluginName}
+                onChange={(event) => setPluginName(event.target.value)}
+                placeholder={pluginId ? `已创建插件目录：${pluginId}（新对话可改名）` : '插件名称（可选，如「我的番茄钟」）'}
+                disabled={Boolean(pluginId) && streaming}
+                className="h-8 text-sm"
+              />
+            </div>
             <Composer
               input={input}
               model={model}

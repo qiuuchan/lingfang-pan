@@ -187,6 +187,12 @@ pub struct StartSessionInput {
     // R2 思考强度：claude 透传 `--effort <level>`（max/high/medium/low/none）；
     // codex/opencode 接收但忽略。随每轮 send 传入，可在会话中途调整。
     pub effort: Option<String>,
+    // 组D task 06-16（AC10）：插件创建会话前端传入 pluginId（用户命名规范化后的目录名）。
+    // 命中时 resolve_workspace 把 workspace 强制落到 plugins_root/<pluginId>/ 持久化目录
+    // （不再回退 claude-sandbox），CLI 产出的文件直接写进插件持久化目录。
+    // None 表示非插件场景（纯对话/标题总结），走默认 claude-sandbox 隔离目录。
+    #[serde(default, alias = "pluginId")]
+    pub plugin_id: Option<String>,
     // CLI 配置注入（task 06-15）：前端传入 backendUrl + authToken，Rust 内部调后端拿 apiKey + apiUrl
     // 生成 CLI 隔离配置（claude env / codex CODEX_HOME / opencode OPENCODE_CONFIG）。
     // None 或字段缺失 → 降级不注入（CLI 走默认配置，AC4）。key 明文绝不回前端（AC8）。
@@ -393,7 +399,7 @@ pub fn start_session<E: AssistantEventSink>(
     let definition = tool_definition(input.tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
-    let workspace_dir = resolve_workspace(input.workspace_dir, Some(state.store.root()))?;
+    let workspace_dir = resolve_workspace(input.workspace_dir, Some(state.store.root()), input.plugin_id.as_deref())?;
     let session_id = session_id;
     let final_prompt = match input.system_prompt.as_deref() {
         Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n---\n\n{}", input.prompt),
@@ -945,7 +951,7 @@ fn run_once(
     let definition = tool_definition(tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
-    let workspace_dir = resolve_workspace(workspace_dir, Some(state.store.root()))?;
+    let workspace_dir = resolve_workspace(workspace_dir, Some(state.store.root()), None)?;
     let session_id = new_session_id(tool);
     let args = command.args_with(definition.probe_args(&prompt, model.as_deref()));
     let command_preview = command_preview(&command.binary, &args);
@@ -1979,7 +1985,14 @@ fn redact_arg(arg: &str) -> String {
 
 /// workspace 目录校验 + canonicalize（防符号链接逃逸）。
 /// pub(crate) 供 plugin_script::run_plugin_script 复用其 canonicalize 逻辑。
-pub(crate) fn resolve_workspace(workspace_dir: Option<String>, default_root: Option<&std::path::Path>) -> Result<String, String> {
+///
+/// 参数：
+/// - `workspace_dir`：显式 workspace 路径（优先级最高，如 main.rs 已把插件持久化目录注入此处）。
+/// - `default_root`：workspace_dir 缺失时的回退根目录（app_data_dir/code-assistant），派生 claude-sandbox。
+/// - `plugin_id`：组D task 06-16 预留参数（plugin_script 预览执行传 None 走显式 workspace_dir 分支）。
+///   非空时理论上可解析为 plugins_root/<plugin_id>/，但当前持久化目录解析已在 main.rs 完成
+///   （start_session 注入 workspace_dir），此处仅占位保持签名稳定，供后续直接调用方扩展。
+pub(crate) fn resolve_workspace(workspace_dir: Option<String>, default_root: Option<&std::path::Path>, _plugin_id: Option<&str>) -> Result<String, String> {
     let path = workspace_dir
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
@@ -2953,6 +2966,7 @@ mod tests {
                 prompt: "Reply with exactly: lingfang-long-session-ok".into(),
                 system_prompt: None,
                 effort: None,
+                plugin_id: None,
                 cli_config: None,
             },
             // session_id 由调用方提前生成（与生产路径 main.rs 一致）。
@@ -3036,6 +3050,7 @@ mod tests {
                 prompt: "Write a detailed LingFang plugin design with at least 20 sections. Do not be brief.".into(),
                 system_prompt: None,
                 effort: None,
+                plugin_id: None,
                 cli_config: None,
             },
             new_session_id(CodeAssistantTool::Codex),

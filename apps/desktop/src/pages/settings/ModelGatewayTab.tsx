@@ -19,13 +19,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { KeyRoundIcon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
-import { fetchModels } from '@/lib/llm-fetch';
+import { fetchModels, testLlmChat } from '@/lib/llm-fetch';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Shimmer } from '@/lib/motion';
 import {
   Dialog,
@@ -116,6 +117,11 @@ export function ModelGatewayTab() {
   // 待确认删除（点删除 → 置 true → 弹二次确认 Dialog）。
   const [pendingDelete, setPendingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // 测试连接（问题3）：用配置的上游模型发 hi 验证连通性。
+  const [testing, setTesting] = useState(false);
+  const [testModel, setTestModel] = useState('');
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -248,6 +254,50 @@ export function ModelGatewayTab() {
     }
   }
 
+  /** 测试连接（问题3）：用配置的上游模型发送 "hi"，验证 key/地址/模型组合是否可用。
+   *  测试模型取 testModel（用户从下拉选），key 取输入框优先、否则 decrypt 已保存的。 */
+  async function handleTestConnection() {
+    if (!activeProvider) return;
+    // 可测模型候选：已拉取的 + 已保存生效的，去重。
+    const candidates = Array.from(new Set([
+      ...fetchedModels,
+      ...(binding?.modelOverride ?? []),
+    ])).filter(Boolean);
+    const model = testModel || candidates[0];
+    if (!model) {
+      toast.error('先拉取或保存模型后再测试');
+      return;
+    }
+    // 取 key：输入框优先，否则 decrypt 已绑定的。
+    let key = apiKeyInput.trim();
+    if (!key && binding) {
+      try {
+        const res = await api<{ apiKey: string }>('/api/llm/binding/decrypt', { method: 'POST' });
+        key = res.apiKey;
+      } catch {
+        toast.error('获取已保存的密钥失败');
+        return;
+      }
+    }
+    if (!key) {
+      toast.error('先填写 API 密钥');
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const content = await testLlmChat(activeProvider.name ?? '', activeProvider.apiUrl, key, model);
+      setTestResult(content);
+      toast.success('测试成功，模型连接正常');
+    } catch (err) {
+      const msg = (err as Error).message || '测试失败';
+      setTestResult(null);
+      toast.error(friendlyFetchError(msg));
+    } finally {
+      setTesting(false);
+    }
+  }
+
   if (loading) {
     // 加载骨架：标题块 + 若干行占位，替代「加载中…」纯文字。
     return (
@@ -346,14 +396,62 @@ export function ModelGatewayTab() {
             </div>
           ) : null}
 
-          {/* 3. 已绑定但未重新拉取时，若 modelOverride 非空，回显当前生效模型（供用户知情）。 */}
+          {/* 3. 当前生效模型展示：
+              - 拉取过（fetchedModels 非空）：展示拉取结果 checkbox 组（可勾选后保存）。
+              - 未拉取但已有保存的 modelOverride：回显已保存的生效模型（只读 checkbox 列表，样式与拉取态一致，
+                避免切页面回来 fetchedModels 被重置后退化为纯文字串）。
+              两态共用 checkbox 列表渲染，保证切换页面/重新挂载后样式不跳变。 */}
           {!fetching && fetchedModels.length === 0 && binding?.modelOverride && binding.modelOverride.length > 0 ? (
-            <div className="text-xs text-muted-foreground">
-              当前生效模型：<span className="font-mono text-foreground">{binding.modelOverride.join('、')}</span>
+            <div className="flex flex-col gap-1.5">
+              <Label>当前生效模型（已保存，重新拉取可调整）</Label>
+              <div className="flex flex-col gap-1.5 rounded-lg border p-2 max-h-60 overflow-y-auto">
+                {binding.modelOverride.map((m) => (
+                  <div key={m} className="flex items-center gap-2">
+                    <Checkbox id={`active-model-${m}`} checked readOnly />
+                    <Label htmlFor={`active-model-${m}`} className="cursor-default font-mono text-xs">{m}</Label>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
-          {/* 4. 保存 + 删除按钮 */}
+          {/* 4. 测试连接（问题3）：选一个模型发 hi 验证 key/地址/模型组合可用。 */}
+          {(() => {
+            const testCandidates = Array.from(new Set([
+              ...fetchedModels,
+              ...(binding?.modelOverride ?? []),
+            ])).filter(Boolean);
+            if (!testCandidates.length) return null;
+            return (
+              <div className="flex flex-col gap-1.5 rounded-lg border border-dashed p-3">
+                <Label>测试连接</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Select value={testModel || testCandidates[0]} onValueChange={(v) => setTestModel(v || '')}>
+                    <SelectTrigger className="h-9 w-[220px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {testCandidates.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <LoadingButton
+                    variant="outline"
+                    onClick={() => { void handleTestConnection(); }}
+                    loading={testing}
+                    disabled={testing}
+                  >
+                    发送 hi 测试
+                  </LoadingButton>
+                </div>
+                {testResult !== null ? (
+                  <div className="rounded-md bg-muted/50 p-2 text-xs">
+                    <span className="text-muted-foreground">模型回复：</span>
+                    <span className="break-all">{testResult}</span>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
+
+          {/* 5. 保存 + 删除按钮 */}
           <div className="flex justify-end gap-2">
             {binding ? (
               <LoadingButton

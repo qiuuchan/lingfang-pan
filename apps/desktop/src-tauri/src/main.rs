@@ -8,7 +8,9 @@ mod cli_installer;
 mod code_assistant;
 mod llm_credentials;
 mod llm_fetch;
+mod plugin_runner;
 mod plugin_script;
+mod plugin_store;
 mod plugins;
 mod updater;
 
@@ -193,10 +195,26 @@ fn code_assistant_save_config(
 async fn code_assistant_start_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, code_assistant::CodeAssistantState>,
+    plugin_store: tauri::State<'_, plugin_store::PluginStore>,
     mut input: code_assistant::StartSessionInput,
 ) -> Result<code_assistant::store::SessionRecord, String> {
-    // 前端未指定 workspace 时，落到 app_data 下的 sandbox 目录，避免 CLI 沿宿主项目根读取 CLAUDE.md/.claude。
-    if input
+    // 组A/组D task 06-16（AC10）：插件创建会话（带 pluginId）→ workspace 强制落到
+    // plugins_root/<pluginId>/ 持久化目录（PluginStore.ensure_plugin_dir 计算 + 创建）。
+    // CLI 产出的文件直接写进插件持久化目录，重启软件后仍在。
+    // 非插件场景（无 pluginId 且无 workspaceDir，如纯对话/标题总结）→ 回退 claude-sandbox 隔离目录，
+    // 避免 CLI 沿宿主项目根读取 CLAUDE.md/.claude。
+    let has_plugin_id = input
+        .plugin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some();
+    if has_plugin_id {
+        let plugin_id = input.plugin_id.as_deref().unwrap_or("").trim().to_string();
+        // ensure_plugin_dir 走段级白名单校验（防 plugin_id 路径穿越），失败返回友好错误。
+        let plugin_dir = plugin_store.ensure_plugin_dir(&plugin_id)?;
+        input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
+    } else if input
         .workspace_dir
         .as_deref()
         .map(str::trim)
@@ -389,6 +407,17 @@ fn main() {
             app.manage(assistant_state);
             // updater 全局 State：缓存 check_update 拿到的 Update，供 download_and_install 取用。
             app.manage(updater::PendingUpdate(std::sync::Mutex::new(None)));
+            // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
+            // 组B 的 start_plugin/stop_plugin 经此 State 的 ensure_plugin_dir 解析插件目录，
+            // scan_plugin_status 据此扫文件系统判 ready/incomplete/error + 合并组B 内存进程表判 running。
+            // 配置落 app_data_dir/plugins/.lingfang/config.json（原子写），默认 plugins_root = app_data_dir/plugins。
+            let plugin_store = plugin_store::PluginStore::new(
+                &app.path().app_data_dir().map_err(|e| e.to_string())?,
+            )?;
+            app.manage(plugin_store);
+            // task 06-16 组B：插件持久化运行引擎的内存进程表（plugin_id→Child 句柄）。
+            // start_plugin/stop_plugin/get_plugin_status 经此 State spawn/take/kill 进程。
+            app.manage(plugin_runner::PluginProcessTable::new());
             let _ = app.emit(
                 "code-assistant://availability-changed",
                 code_assistant::list_tools(),
@@ -417,10 +446,18 @@ fn main() {
             code_assistant_scan_workspace,
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script,
+            plugin_runner::start_plugin,
+            plugin_runner::stop_plugin,
+            plugin_runner::get_plugin_status,
+            plugin_store::get_plugins_root,
+            plugin_store::set_plugins_root,
+            plugin_store::scan_plugin_status,
+            plugin_store::read_local_plugin_file,
             cli_installer::install_cli,
             cli_installer::install_runtime,
             cli_installer::cancel_install,
             llm_fetch::fetch_models,
+            llm_fetch::test_llm_chat,
             updater::check_update,
             updater::download_and_install
         ])
