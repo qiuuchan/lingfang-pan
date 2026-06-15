@@ -5,6 +5,7 @@ import { json, urlencoded } from 'express';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AppExceptionFilter } from './common';
@@ -44,7 +45,12 @@ async function bootstrap() {
   // 修复 PPK-04：默认 body parser limit 仅 100KB，使 plugin-package 的 2MiB 上传约束不可达
   // （上传超 100KB 直接 413，到不了 normalizePluginPackage 的字节校验）。
   // 提到 2MiB 与插件包总上限对齐。
-  const app = await NestFactory.create(AppModule);
+  // bufferLogs: true 让 NestJS 在 useLogger 注入 pino 前缓冲启动日志，
+  // 避免 bootstrap 早期消息走默认 ConsoleLogger 与 pino 输出双轨不一致。
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // 用 pino Logger 替代 NestJS 默认 ConsoleLogger：框架级日志（路由解析、启动横幅等）
+  // 与业务日志（services 内 this.logger.*）统一走 pino，格式/请求上下文/redact 一致。
+  app.useLogger(app.get(Logger));
   app.use(json({ limit: '2mb' }));
   app.use(urlencoded({ limit: '2mb', extended: true }));
   app.use(helmet());

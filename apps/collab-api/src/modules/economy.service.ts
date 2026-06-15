@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { AuthService } from './auth.service';
 import { badRequest, insufficientBalance, notFound } from '../common';
+import { NotificationService } from './notification.service';
 
 const SIGNUP_BONUS_CENTS = 1000;
 
@@ -10,6 +11,7 @@ export class EconomyService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   // 注册赠送 ¥10（1000 分）：首次访问钱包时 upsert，不改 auth.service 的注册流程。
@@ -113,6 +115,18 @@ export class EconomyService {
     });
 
     const wallet = await this.ensureWallet(userId);
+    // 通知卖家：插件售出，收入到账（触发失败不阻塞主操作）。
+    try {
+      await this.notifications.create(
+        sellerId,
+        'purchase_sale',
+        '你的插件有新订单',
+        `你的插件「${plugin.name}」已被购买，¥${(price / 100).toFixed(2)} 已到账。`,
+        { relatedType: 'Plugin', relatedId: pluginId },
+      );
+    } catch {
+      // 通知触发失败不阻塞购买主流程。
+    }
     return { status: 'purchased' as const, plugin_id: pluginId, price_cents: price, balance_cents: wallet.balanceCents };
   }
 }

@@ -11,6 +11,8 @@ import { LlmController } from './llm.controller';
 import { WalletController } from './wallet.controller';
 import { MarketplaceController } from './marketplace.controller';
 import { ReleaseController } from './release.controller';
+import { PlatformInfoController } from './platform-info.controller';
+import { NotificationController } from './notification.controller';
 import { TeamService } from './team.service';
 import { PluginService } from './plugin.service';
 import { AdminService } from './admin.service';
@@ -18,11 +20,15 @@ import { LlmService } from './llm.service';
 import { EconomyService } from './economy.service';
 import { MarketplaceService } from './marketplace.service';
 import { ReleaseService } from './release.service';
+import { SettingsService } from './settings.service';
+import { NotificationService } from './notification.service';
+import { MeService } from './me.service';
 
 @Module({
-  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, LlmController, WalletController, MarketplaceController, ReleaseController],
+  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, LlmController, WalletController, MarketplaceController, ReleaseController, PlatformInfoController, NotificationController],
   // CollabModule 直接声明 AuthService（与 AuthModule 重复声明，历史架构；TeamService 等注入之），
   // 故 MailService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到 MailService。
-  providers: [PrismaService, AuthService, MailService, TeamService, PluginService, AdminService, LlmService, EconomyService, MarketplaceService, ReleaseService],
+  // NotificationService 无外部依赖（仅 PrismaService），被 AdminService/EconomyService 注入以在审核/购买成功后埋点触发通知。
+  providers: [PrismaService, AuthService, MailService, TeamService, PluginService, AdminService, LlmService, EconomyService, MarketplaceService, ReleaseService, SettingsService, NotificationService, MeService],
 })
 export class CollabModule {}

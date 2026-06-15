@@ -18,7 +18,9 @@ import {
 } from './dto/admin.dto';
 import { ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
 import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
+import { UpdateSettingsDto } from './dto/settings.dto';
 import { ReleaseService } from './release.service';
+import { SettingsService } from './settings.service';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -28,6 +30,7 @@ export class AdminController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(LlmService) private readonly llm: LlmService,
     @Inject(ReleaseService) private readonly releases: ReleaseService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   @Get('dashboard')
@@ -243,5 +246,19 @@ export class AdminController {
   @ApiOperation({ summary: '删除版本产物' })
   deleteReleaseAsset(@Req() req: Request, @Param('id') id: string, @Param('assetId') assetId: string) {
     return this.releases.deleteAsset(requireUser(req).id, id, assetId);
+  }
+
+  // === 平台设置（ensurePlatformAdmin 在 SettingsService 内） ===
+
+  @Get('settings')
+  @ApiOperation({ summary: '平台设置列表（全 key/value + description）' })
+  listSettings(@Req() req: Request) {
+    return this.settings.getSettings(requireUser(req).id);
+  }
+
+  @Patch('settings')
+  @ApiOperation({ summary: '批量更新平台设置（upsert + 审计）' })
+  updateSettings(@Req() req: Request, @Body() body: UpdateSettingsDto) {
+    return this.settings.updateSettings(requireUser(req).id, body);
   }
 }
