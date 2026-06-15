@@ -7,7 +7,7 @@
 //! - 本模块负责：把 (api_key, api_url) 按各 CLI 的隔离机制写入临时配置，
 //!   spawn 时以 env 指向临时配置，**绝不写用户默认配置**。
 //!
-//! 三 CLI 隔离机制（已查 context7 官方文档 + GitHub discussion #7782 查证）：
+//! 三 CLI 隔离机制（已查 context7 官方文档 + GitHub discussion #7782 + codex 0.139 二进制反查）：
 //! - **claude**：env `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（最简单，无需配置文件）。
 //! - **codex**：env `CODEX_HOME=<临时目录>`，该目录放 `config.toml`：
 //!     ```toml
@@ -15,11 +15,21 @@
 //!     [model_providers.lingfang]
 //!     name = "LingFang Platform"
 //!     base_url = "<apiUrl>"
-//!     wire_api = "chat"        # 平台是 OpenAI Chat Completions 兼容（非 Responses API）
+//!     wire_api = "responses"   # 平台网关走 OpenAI Responses API（codex 0.139 原生路径）
 //!     api_key = "<key>"        # 明文 api_key 字段（discussion #7782 验证 codex 接受）
 //!     ```
 //!   同时追加 env `OPENAI_API_KEY=<key>` 作为双保险（codex 多路径读取）。
 //! - **opencode**：env `OPENCODE_CONFIG=<临时.json>`，json 含 provider.lingfang.options.{baseURL, apiKey}。
+//!
+//! wire_api 取值决策（task 06-13 修正）：
+//! - codex-cli 0.139.0 二进制反查：`/responses` 路径出现 10 次，`/chat/completions` 出现 **0 次**。
+//!   即 codex 0.139 已以 Responses API 为主要路径，Chat Completions 路径已被移除/弃用。
+//! - 平台默认 provider 是 OpenAI 官方（`https://api.openai.com/v1`，见 seed-llm-gateways.ts），
+//!   OpenAI 官方原生支持 Responses API（codex 的默认 wire_api 即 responses）。
+//! - 用户实测：本地 CC Switch 代理（`wire_api = "responses"`）走 `/v1/responses` 端点，
+//!   仅因余额不足 402 失败，端点本身正确（证明 responses 是有效路径）。
+//! - 故 `wire_api = "responses"`（此前 `chat` 在 0.139 会回退到 responses 但带 deprecate warning，
+//!   且部分第三方网关 chat 端点已不可用，responses 是正确选择）。
 //!
 //! 安全边界（AC8）：
 //! - 临时配置文件放在 app_data/cli-configs/<sessionId>/ 下，文件权限默认（用户私有）。
@@ -120,12 +130,11 @@ fn prepare_opencode_env(
 
 /// 写 codex 临时 config.toml 到 `<config_dir>/config.toml`。
 ///
-/// 格式（已查 context7 + GitHub discussion #7782 查证）：
+/// 格式（已查 context7 + GitHub discussion #7782 + codex 0.139 二进制反查）：
 /// - `model_provider = "lingfang"`：选中自定义 provider（不可用保留 id openai/ollama/lmstudio）。
 /// - `[model_providers.lingfang]`：provider 定义。
-/// - `base_url`：平台 apiUrl（OpenAI 兼容）。
-/// - `wire_api = "chat"`：平台是 OpenAI Chat Completions 协议（非 Responses API）。
-///   官方新版本默认 responses 且 chat 已 deprecate，但对纯 Chat Completions 网关仍工作（带 warning）。
+/// - `base_url`：平台 apiUrl（OpenAI 兼容，应含 /v1 后缀，如 `https://api.openai.com/v1`）。
+/// - `wire_api = "responses"`：平台走 OpenAI Responses API（codex 0.139 原生路径，见模块文档决策说明）。
 /// - `api_key`：明文 key（discussion #7782 的 LM Studio 示例验证 codex 接受此字段）。
 ///
 /// TOML 手写（避免引入 toml crate 依赖）：字段均为简单字符串/字面量，无嵌套对象，
@@ -141,7 +150,7 @@ pub fn write_codex_config(config_dir: &Path, api_key: &str, api_url: &str) -> Re
          [model_providers.{CODEX_PROVIDER_ID}]\n\
          name = \"LingFang Platform\"\n\
          base_url = \"{url}\"\n\
-         wire_api = \"chat\"\n\
+         wire_api = \"responses\"\n\
          api_key = \"{key}\"\n",
         url = escape_toml_string(api_url),
         key = escape_toml_string(api_key),
@@ -321,15 +330,15 @@ mod tests {
             toml.contains("model_provider = \"lingfang\""),
             "应含 model_provider：{toml}"
         );
-        // provider 段含 base_url + wire_api=chat + api_key。
+        // provider 段含 base_url + wire_api=responses + api_key。
         assert!(toml.contains("[model_providers.lingfang]"));
         assert!(
             toml.contains("base_url = \"https://llm.example.com\""),
             "应含 base_url：{toml}"
         );
         assert!(
-            toml.contains("wire_api = \"chat\""),
-            "应含 wire_api=chat（平台是 Chat Completions 兼容）：{toml}"
+            toml.contains("wire_api = \"responses\""),
+            "应含 wire_api=responses（codex 0.139 走 Responses API 原生路径）：{toml}"
         );
         assert!(
             toml.contains("api_key = \"sk-codex-456\""),
