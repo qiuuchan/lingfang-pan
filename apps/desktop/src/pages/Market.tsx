@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, DownloadIcon, StarIcon, ShoppingCartIcon } from 'lucide-react';
+import { ArrowLeftIcon, DownloadIcon, StarIcon, ShoppingCartIcon, PackageSearchIcon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import { useApp } from '@/App';
 import { fmtYuan } from '@/lib/money';
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { LoadingButton } from '@/components/loading-button';
 import { Pagination } from '@/components/pagination';
 import { Stars } from '@/components/stars';
+import { StaggerContainer, StaggerItem, Shimmer } from '@/lib/motion';
 
 const PAGE_SIZE = 6;
 
@@ -91,29 +92,41 @@ export function Market() {
         </div>
         <div className="mt-4 flex flex-col gap-4">
           {plugins === null ? (
-            <span className="text-sm text-muted-foreground">加载中…</span>
+            // 加载骨架：6 行占位（与单页条数一致），替代「加载中…」纯文字。
+            <div className="flex flex-col divide-y rounded-lg border">
+              {Array.from({ length: PAGE_SIZE }).map((_, i) => <Shimmer key={i} className="h-14 w-full rounded-none" />)}
+            </div>
           ) : total ? (
             <>
-              <div className="flex flex-col divide-y rounded-lg border">
+              <StaggerContainer className="flex flex-col divide-y rounded-lg border" stagger={0.05}>
                 {pageItems.map((p) => (
-                  <Button key={p.id} variant="ghost" className="flex h-auto items-center justify-between gap-4 rounded-none px-4 py-3.5 text-left" onClick={() => openDetail(p.id)}>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-medium">{p.name}</span>
-                        <Badge variant={p.is_free ? 'secondary' : 'default'} className="shrink-0">{fmtYuan(p.price_cents)}</Badge>
+                  <StaggerItem key={p.id} whileHover={{ x: 2, transition: { type: 'spring', stiffness: 300, damping: 20 } }}>
+                    <Button variant="ghost" className="flex h-auto w-full items-center justify-between gap-4 rounded-none px-4 py-3.5 text-left" onClick={() => openDetail(p.id)}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium">{p.name}</span>
+                          <Badge variant={p.is_free ? 'secondary' : 'default'} className="shrink-0">{fmtYuan(p.price_cents)}</Badge>
+                        </div>
+                        <div className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">{p.description}</div>
                       </div>
-                      <div className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">{p.description}</div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1"><StarIcon className="size-3 fill-current text-yellow-500" />{p.avg_score || '—'} ({p.rating_count})</span>
-                      <span className="inline-flex items-center gap-1"><DownloadIcon className="size-3" />{p.install_count}</span>
-                    </div>
-                  </Button>
+                      <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1"><StarIcon className="size-3 fill-current text-yellow-500" />{p.avg_score || '—'} ({p.rating_count})</span>
+                        <span className="inline-flex items-center gap-1"><DownloadIcon className="size-3" />{p.install_count}</span>
+                      </div>
+                    </Button>
+                  </StaggerItem>
                 ))}
-              </div>
+              </StaggerContainer>
               <Pagination page={page} totalPages={totalPages} onChange={setPage} />
             </>
-          ) : <span className="text-sm text-muted-foreground">没有找到匹配的插件。</span>}
+          ) : (
+            // 空状态：图标 + 引导文案，替代单行「没有找到匹配的插件。」
+            <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
+              <PackageSearchIcon className="size-8 text-muted-foreground/50" />
+              <span>没有找到匹配的插件</span>
+              <span className="text-xs">试试调整关键词，或切换排序方式重新搜索。</span>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -160,7 +173,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
 
   async function install() {
     setInstalling(true);
-    try { await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: plugin.id } }); toast.success('已安装 ✓（可在「我的插件」运行）');
+    try { await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: plugin.id } }); toast.success('已安装，可在「我的插件」运行');
       // 修复 DESK-MARKET-01：install 成功后此前不 reload，导致免费插件 detail 对象 installed 仍为旧值 false，
       // canRate（免费依赖 installed）不刷新，用户必须返回市场列表再重新点进详情才能看到评分入口。
       // 与 buy() 行为对齐，install 成功后也 reload detail。
@@ -215,7 +228,7 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
               <Stars score={r.score} starClassName="size-3.5" />
               <span className="text-muted-foreground">{r.comment}</span>
             </div>
-          )) : <span className="text-sm text-muted-foreground">暂无评价</span>}
+          )) : <span className="text-sm text-muted-foreground">还没有评价，安装后第一个来打分</span>}
         </div>
 
         {canRate ? (

@@ -11,12 +11,13 @@ import {
 } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
-/* 动画基建（组B / framer-motion）：集中提供可复用的入场、交错、数字滚动、简易条形图、骨架闪光组件。
+/* 动画基建（组D / framer-motion）：集中提供可复用的入场、交错、数字滚动、骨架闪光、页面转场组件。
+   与 apps/collab-admin/src/lib/motion.tsx 共享同一套语义（组件名 / 行为一致），便于双端维护对齐。
    全部尊重 prefers-reduced-motion：系统开启「减少动态效果」时退化为静态渲染或瞬时切换，避免引起眩晕。
    设计要点：
    - 入场类组件（FadeIn/SlideIn/Stagger*）用 useReducedMotion 提前分流，关闭动效时直接返回普通 div，零成本降级。
    - AnimatedNumber 用 useMotionValue + animate() 驱动数值从 0 滚到目标值，useTransform 把数值格式化为展示字符串。
-   - MiniBarChart 用 motion.div 对 width 百分比做缓动动画，按索引错峰入场，不引入任何图表库。 */
+   - PageTransition 供 App.tsx 在 view 切换时做淡入/位移转场（home 常驻挂载的 PluginCreatorHome 除外）。 */
 
 /** 方向 → 初始位移：up/down 控制 y 轴，left/right 控制 x 轴。 */
 type Direction = 'up' | 'down' | 'left' | 'right';
@@ -123,7 +124,7 @@ export function StaggerContainer({
 }
 
 /** 交错项：必须作为 StaggerContainer 的直接子级。
- *  whileHover 用于挂载时的入场与悬停反馈（如指标卡片上浮）二者叠加，互不冲突。 */
+ *  whileHover 用于挂载时的入场与悬停反馈（如卡片上浮）二者叠加，互不冲突。 */
 export function StaggerItem({
   children,
   className,
@@ -143,7 +144,7 @@ export function StaggerItem({
 }
 
 /** 数字滚动：值从 0 平滑动画到目标值。
- *  - value 必须是数字（金额传 cents、百分比传 0-100 整数）。
+ *  - value 必须是数字（余额传 cents、百分比传 0-100 整数）。
  *  - format 可选，把中间帧数值格式化为展示串（如 (v) => `¥${(v/100).toFixed(2)}`）。
  *  - 未传 format 时按简体中文千分位取整展示。 */
 export function AnimatedNumber({
@@ -176,55 +177,8 @@ export function AnimatedNumber({
   return <motion.span className={className}>{display}</motion.span>;
 }
 
-/** 简易水平条形图：用 motion.div 对 width 百分比做缓动动画，按索引错峰入场。
- *  不引入图表库；data 为 [{label,value}]，value 越大条越长（相对最大值归一化）。 */
-export function MiniBarChart({
-  data,
-  formatValue,
-  className,
-  colorClassName = 'bg-primary',
-}: {
-  data: Array<{ label: string; value: number }>;
-  formatValue?: (value: number) => string;
-  className?: string;
-  colorClassName?: string;
-}) {
-  const reduce = useReducedMotion();
-  if (data.length === 0) {
-    return (
-      <div className={cn('py-4 text-center text-sm text-muted-foreground', className)}>暂无数据</div>
-    );
-  }
-  const max = Math.max(1, ...data.map((d) => d.value));
-  return (
-    <div className={cn('space-y-2.5', className)}>
-      {data.map((d, i) => {
-        const pct = (d.value / max) * 100;
-        return (
-          <div key={`${d.label}-${i}`} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="truncate pr-2 text-muted-foreground">{d.label}</span>
-              <span className="shrink-0 font-medium tabular-nums text-foreground">
-                {formatValue ? formatValue(d.value) : d.value.toLocaleString('zh-CN')}
-              </span>
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-              <motion.div
-                className={cn('h-full rounded-full', colorClassName)}
-                initial={{ width: reduce ? `${pct}%` : 0 }}
-                animate={{ width: `${pct}%` }}
-                transition={{ duration: 0.7, delay: reduce ? 0 : 0.1 + i * 0.08, ease: 'easeOut' }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 /** 骨架闪光块：加载占位。用 motion.div 循环平移一道高光横扫，模拟内容加载中的 shimmer。
- *  高光用 foreground/10 透明度，自动适配亮/暗主题。 */
+ *  高光用 foreground/10 透明度，自动适配亮/暗主题。供 Suspense fallback 与列表加载态复用。 */
 export function Shimmer({ className }: { className?: string }) {
   const reduce = useReducedMotion();
   if (reduce) {
@@ -243,7 +197,7 @@ export function Shimmer({ className }: { className?: string }) {
 }
 
 /** 列表骨架占位：渲染 count 行 Shimmer，宽度递减模拟内容节奏。
- *  用于列表加载态与 Suspense fallback（懒加载 View 首次解析时的占位）。 */
+ *  用于列表加载态（Plugins/Market/Review 等）与 Suspense fallback。 */
 export function ListSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
   return (
     <div className={cn('space-y-3', className)}>
@@ -256,7 +210,7 @@ export function ListSkeleton({ rows = 4, className }: { rows?: number; className
 
 /** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade + slide。
  *  mode="wait" 保证旧视图退出后再挂载新视图，避免双视图同时撑开布局。
- *  仅 App.tsx 的视图容器使用。 */
+ *  仅 App.tsx 的视图容器使用（PluginCreatorHome 常驻挂载，不进此组件）。 */
 export function PageTransition({ viewKey, children }: { viewKey: string; children: ReactNode }) {
   const reduce = useReducedMotion();
   return (

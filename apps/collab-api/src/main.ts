@@ -42,6 +42,13 @@ async function bootstrap() {
   }
   // 本阶段只做启动断言。阶段 2 LlmService 通过 Nest provider token 注入（useFactory: () => getLlmKey()）。
 
+  // SMTP 邮件服务缺失告警：未配 SMTP_URL 时找回密码 / 邮箱验证邮件降级为 console.log（流程不中断）。
+  // 与 JWT_SECRET / LLM_KEY 的 fail-fast 不同：邮件是可降级能力（占位兜底），不阻塞启动；
+  // 但需醒目告警提醒运维配置，否则生产环境邮件全静默（用户收不到重置 / 验证链接）。
+  if (!process.env.SMTP_URL) {
+    console.warn('[邮件警告] SMTP_URL 未配置：找回密码 / 邮箱验证邮件将降级输出到 console.log（不实际发送）。生产环境请配置 SMTP_URL="smtps://user:pass@host:465" 后重启。');
+  }
+
   // 修复 PPK-04：默认 body parser limit 仅 100KB，使 plugin-package 的 2MiB 上传约束不可达
   // （上传超 100KB 直接 413，到不了 normalizePluginPackage 的字节校验）。
   // 提到 2MiB 与插件包总上限对齐。

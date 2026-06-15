@@ -12,6 +12,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { badRequest } from '../common';
 import { AuthService } from './auth.service';
+import { MailService } from './mail.service';
 import type { UpdateSettingsDto } from './dto/settings.dto';
 
 /** 公开字段白名单：getPublicInfo 仅暴露这些 key（与官网 / 桌面端展示字段一一对应）。
@@ -43,6 +44,7 @@ export class SettingsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(MailService) private readonly mail: MailService,
   ) {}
 
   /** GET /api/admin/settings：返回全部设置项（Admin 视角，含 description + updatedById）。
@@ -101,6 +103,24 @@ export class SettingsService {
       platformName: map.get('platformName') ?? 'LingFang',
       logoUrl: map.get('logoUrl') ?? '',
     };
+  }
+
+  /** POST /api/admin/settings/test-email：发送测试邮件验证 SMTP 配置。
+   *  仅平台 Admin 可调用（ensurePlatformAdmin）。to 由 Admin 手填（不限定当前邮箱，便于验证任意收件人）。
+   *  返回 MailService.sendTestEmail 的结果（成功 / 失败 + 错误信息），供 Admin 判断 SMTP 是否配通。
+   *  MailService 显式返回结果而非静默吞错：测试发信的目的就是「验证配置」，Admin 需看到失败原因。
+   *  落审计：记录谁测试了发信（不记收件人邮箱全文，metadata 仅标 actor + 目标前缀防泄漏）。 */
+  async testEmail(actorId: string, to: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const target = to?.trim().toLowerCase();
+    if (!target || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) throw badRequest('收件邮箱格式不正确');
+    const result = await this.mail.sendTestEmail(target);
+    await this.audit(actorId, 'admin.setting.test_email', 'PlatformSetting', undefined, {
+      to: target.slice(0, 2) + '***',
+      ok: result.ok,
+      configured: result.configured,
+    });
+    return result;
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {

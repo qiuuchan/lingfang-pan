@@ -2,7 +2,7 @@
 // 字段白名单由全局 ValidationPipe（whitelist + forbidNonWhitelisted）强制，杜绝越权字段透传。
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsString, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEmail, IsString, MinLength, ValidateNested } from 'class-validator';
 
 /** 单项设置：key 受 service 层 KEY_VALIDATORS 白名单约束（platformName/logoUrl 等），value 为字符串。 */
 export class SettingItemDto {
@@ -29,4 +29,11 @@ export class UpdateSettingsDto {
   @ValidateNested({ each: true })
   @Type(() => SettingItemDto)
   settings!: SettingItemDto[];
+}
+
+/** POST /api/admin/settings/test-email 入参：收件邮箱（Admin 手填，用于验证 SMTP 配置）。 */
+export class TestEmailDto {
+  @ApiProperty({ description: '测试收件邮箱', example: 'admin@example.com' })
+  @IsEmail({}, { message: '收件邮箱格式不正确' })
+  to!: string;
 }

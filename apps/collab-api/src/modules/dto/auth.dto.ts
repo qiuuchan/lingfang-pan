@@ -62,3 +62,10 @@ export class ResetPasswordDto {
   @MinLength(8, { message: '新密码至少 8 位' })
   newPassword!: string;
 }
+
+/** 邮箱验证请求体 DTO（verify-email 端点）。 */
+export class VerifyEmailDto {
+  @ApiProperty({ description: '邮件下发的验证 token' })
+  @IsString()
+  token!: string;
+}

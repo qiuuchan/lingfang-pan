@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import {
   CheckCircleIcon,
@@ -25,29 +25,34 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { Sidebar, type SidebarNavGroup } from '@/components/sidebar';
+import { Footer } from '@/components/Footer';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { CommandPalette, useCommandPalette } from '@/components/command-palette';
 import { Landing } from '@/components/landing/Landing';
 import { LoginPage } from '@/components/landing/LoginPage';
 import { DownloadPage } from '@/components/landing/DownloadPage';
 import { ChangelogPage } from '@/components/landing/ChangelogPage';
-import { Dashboard } from '@/components/dashboard';
-import { UsersView } from '@/components/users-view';
-import { TeamsView } from '@/components/teams-view';
-import { PluginsView } from '@/components/plugins-view';
-import { ApplicationsView } from '@/components/applications-view';
-import { AdminsView } from '@/components/admins-view';
-import { AuditView } from '@/components/audit-view';
-import { ProvidersView } from '@/components/providers-view';
-import { SettingsView } from '@/components/settings-view';
+// 组D 加载优化：登录后各后台 View 按需懒加载，首屏（落地页/登录页）不进 bundle。
+// 落地页四件套（Landing/LoginPage/DownloadPage/ChangelogPage）保持静态 import——
+// 它们走未登录快速路径，且 Landing 是首屏，懒加载反而增加首次可交互延迟。
 import { OnboardingWizard, ONBOARDING_DONE_KEY } from '@/components/onboarding-wizard';
 import { NAV_GROUPS, VIEW_LABEL, VIEW_GROUP } from '@/lib/navigation';
 import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
 import { initTheme } from '@/lib/theme';
 import type { View } from '@/lib/types';
-import { PageTransition } from '@/lib/motion';
+import { PageTransition, ListSkeleton } from '@/lib/motion';
 import { getLatestRelease } from '@/lib/releases';
 import pkg from '../package.json';
+
+const Dashboard = lazy(() => import('@/components/dashboard').then((m) => ({ default: m.Dashboard })));
+const UsersView = lazy(() => import('@/components/users-view').then((m) => ({ default: m.UsersView })));
+const TeamsView = lazy(() => import('@/components/teams-view').then((m) => ({ default: m.TeamsView })));
+const PluginsView = lazy(() => import('@/components/plugins-view').then((m) => ({ default: m.PluginsView })));
+const ApplicationsView = lazy(() => import('@/components/applications-view').then((m) => ({ default: m.ApplicationsView })));
+const AdminsView = lazy(() => import('@/components/admins-view').then((m) => ({ default: m.AdminsView })));
+const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ default: m.AuditView })));
+const ProvidersView = lazy(() => import('@/components/providers-view').then((m) => ({ default: m.ProvidersView })));
+const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
 
 // 主题初始化：在模块加载时同步应用，避免首屏亮暗闪烁（FOUC）。
 // 放在模块顶层执行一次，早于 React 渲染，读取 localStorage 的主题偏好并应用到 <html>。
@@ -207,7 +212,8 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex min-h-screen bg-muted/30">
+      {/* 固定视口高度 + overflow-hidden：侧栏 stretch 撑满不滚动，主内容区独立 overflow-y-auto。 */}
+      <div className="flex h-screen overflow-hidden bg-muted/30">
         <Sidebar
           groups={navGroups}
           activeView={view}
@@ -216,7 +222,7 @@ export default function App() {
           footer={sidebarFooter}
         />
 
-        <main className="min-w-0 flex-1 px-4 pb-8 pt-14 sm:pt-8 lg:p-8">
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 pb-8 pt-14 sm:pt-8 lg:p-8">
           {/* Header */}
           <header className="mb-6 flex flex-col gap-2 rounded-2xl border bg-background p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
@@ -252,18 +258,23 @@ export default function App() {
             </p>
           </header>
 
-          {/* Views with transition */}
+          {/* Views with transition：各 View 懒加载，Suspense 用列表骨架兜底首次加载。 */}
           <PageTransition viewKey={view}>
-            {view === 'dashboard' && <Dashboard onNavigate={setView} />}
-            {view === 'users' && <UsersView />}
-            {view === 'platformAdmins' && <AdminsView />}
-            {view === 'teams' && <TeamsView />}
-            {view === 'plugins' && <PluginsView />}
-            {view === 'llmProviders' && <ProvidersView />}
-            {view === 'applications' && <ApplicationsView />}
-            {view === 'audit' && <AuditView />}
-            {view === 'settings' && <SettingsView />}
+            <Suspense fallback={<ListSkeleton rows={6} />}>
+              {view === 'dashboard' && <Dashboard onNavigate={setView} />}
+              {view === 'users' && <UsersView />}
+              {view === 'platformAdmins' && <AdminsView />}
+              {view === 'teams' && <TeamsView />}
+              {view === 'plugins' && <PluginsView />}
+              {view === 'llmProviders' && <ProvidersView />}
+              {view === 'applications' && <ApplicationsView />}
+              {view === 'audit' && <AuditView />}
+              {view === 'settings' && <SettingsView />}
+            </Suspense>
           </PageTransition>
+
+          {/* 页脚：主内容区底部，随主内容滚到底可见。 */}
+          <Footer />
         </main>
       </div>
 

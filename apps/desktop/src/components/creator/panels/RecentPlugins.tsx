@@ -18,7 +18,7 @@ export function RecentPlugins({ plugins, onRun }: { plugins: LoadedPlugin[]; onR
             </span>
             <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
           </Button>
-        )) : <p className="text-sm text-muted-foreground">暂无最近插件。</p>}
+        )) : <p className="py-2 text-center text-sm text-muted-foreground">还没有运行过的插件</p>}
       </CardContent>
     </Card>
   );

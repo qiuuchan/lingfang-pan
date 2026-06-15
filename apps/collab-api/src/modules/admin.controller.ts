@@ -18,7 +18,7 @@ import {
 } from './dto/admin.dto';
 import { ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
 import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
-import { UpdateSettingsDto } from './dto/settings.dto';
+import { UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
 import { ReleaseService } from './release.service';
 import { SettingsService } from './settings.service';
 
@@ -260,5 +260,11 @@ export class AdminController {
   @ApiOperation({ summary: '批量更新平台设置（upsert + 审计）' })
   updateSettings(@Req() req: Request, @Body() body: UpdateSettingsDto) {
     return this.settings.updateSettings(requireUser(req).id, body);
+  }
+
+  @Post('settings/test-email')
+  @ApiOperation({ summary: '发送测试邮件验证 SMTP 配置（返成功/失败 + 错误信息）' })
+  testEmail(@Req() req: Request, @Body() body: TestEmailDto) {
+    return this.settings.testEmail(requireUser(req).id, body.to);
   }
 }

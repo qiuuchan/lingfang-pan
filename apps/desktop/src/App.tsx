@@ -1,20 +1,26 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
+import { Loader2Icon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api';
 import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
-// PanelLeft 图标已移到 TitleBar，不再在此 import。
+import { Footer } from '@/components/Footer';
+// 组D 加载优化：PluginCreatorHome 是首页（首屏即需）且在 App 内常驻挂载（home view 用 hidden 控制显隐，
+// 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
+// 其余重页面（Market/Wallet/Review/TeamManage/Settings/Plugins/TeamHome）按需懒加载，首屏不进 bundle。
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
-import { TeamHome } from '@/pages/TeamHome';
-import { TeamManage } from '@/pages/TeamManage';
-import { Plugins } from '@/pages/Plugins';
-import { Settings } from '@/pages/Settings';
-import { Market } from '@/pages/Market';
-import { Wallet } from '@/pages/Wallet';
-import { Review } from '@/pages/Review';
 import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
+import { ListSkeleton, PageTransition } from '@/lib/motion';
+
+const Plugins = lazy(() => import('./pages/Plugins').then((m) => ({ default: m.Plugins })));
+const TeamHome = lazy(() => import('./pages/TeamHome').then((m) => ({ default: m.TeamHome })));
+const TeamManage = lazy(() => import('./pages/TeamManage').then((m) => ({ default: m.TeamManage })));
+const Market = lazy(() => import('./pages/Market').then((m) => ({ default: m.Market })));
+const Wallet = lazy(() => import('./pages/Wallet').then((m) => ({ default: m.Wallet })));
+const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
+const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -295,7 +301,11 @@ export default function App() {
     return (
       <AppContext.Provider value={ctx}>
         <Centered>
-          <p className="text-sm text-muted-foreground">正在恢复登录…</p>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {/* 登录态恢复期间给一个旋转指示，避免静态文字让用户误以为卡死。 */}
+            <Loader2Icon className="size-4 animate-spin" />
+            <span>正在恢复登录…</span>
+          </div>
         </Centered>
         <Toaster position="top-right" richColors closeButton />
       </AppContext.Provider>
@@ -333,10 +343,20 @@ export default function App() {
             {view !== 'home' && (
               view === 'plugins' && runningPlugin ? (
                 // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
-                <div className="h-full">{body}</div>
+                // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
+                <div className="h-full">
+                  <Suspense fallback={null}>{body}</Suspense>
+                </div>
               ) : (
+                // 组D：Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
+                // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
                 <div className="h-full overflow-y-auto px-6 py-6">
-                  <div className="mx-auto w-full max-w-6xl">{body}</div>
+                  <div className="mx-auto w-full max-w-6xl">
+                    <Suspense fallback={<ListSkeleton rows={6} />}>
+                      <PageTransition viewKey={view}>{body}</PageTransition>
+                    </Suspense>
+                  </div>
+                  <Footer />
                 </div>
               )
             )}

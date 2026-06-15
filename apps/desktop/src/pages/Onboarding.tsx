@@ -82,7 +82,7 @@ export function Onboarding() {
     <div className="border-t pt-4 space-y-3">
       <p className="text-xs font-medium text-muted-foreground">或直接加入一个公开团队</p>
       {publicTeams.length === 0 ? (
-        <p className="text-xs text-muted-foreground">暂无公开团队。可向团队管理员索要邀请码。</p>
+        <p className="text-xs text-muted-foreground">当前没有可加入的公开团队，可向团队管理员索要邀请码。</p>
       ) : (
         <div className="max-h-64 space-y-2 overflow-y-auto">
           {publicTeams.map((t) => (
