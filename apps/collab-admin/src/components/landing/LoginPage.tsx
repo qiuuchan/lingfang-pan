@@ -161,6 +161,8 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && submit()}
+                  autoComplete="off"
+                  spellCheck={false}
                   className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
                   style={{
                     backgroundColor: 'var(--lf-bg-elevated)',
@@ -178,6 +180,7 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && submit()}
+                  autoComplete="new-password"
                   className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
                   style={{
                     backgroundColor: 'var(--lf-bg-elevated)',
