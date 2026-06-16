@@ -62,9 +62,8 @@ import { cn } from '@/lib/utils';
 import { useEnvReadiness } from '@/lib/env-readiness';
 import { dragRegionProps } from '@/lib/window-drag';
 import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
-import { Bubble } from '@/components/chat/Bubble';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
-import { StreamingMessage } from '@/components/chat/StreamingMessage';
+import { AssistantChat } from '@/components/chat/AssistantChat';
 import { Composer } from '@/components/creator/Composer';
 import { ConversationRail } from '@/components/creator/ConversationRail';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
@@ -1199,27 +1198,17 @@ export function PluginCreatorHome() {
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              {turns.map((turn, index) => (
-                <Bubble
-                  key={index}
-                  role={turn.role}
-                  content={turn.content}
-                />
-              ))}
-              {pendingUser && <Bubble role="user" content={pendingUser} />}
+              {/* 对话显示改用 assistant-ui（替换自写 Bubble+StreamingMessage）：
+                  useExternalStoreRuntime 适配 Tauri 事件流，思考/工具/正文分行渲染。 */}
+              <AssistantChat
+                turns={[...turns, ...(pendingUser ? [{ role: 'user' as const, content: pendingUser }] : [])]}
+                segments={liveSegments}
+                streaming={streaming}
+                stage={liveStage}
+              />
               {streaming && isFollowupRef.current && multiturnMode === 'degraded' && (
                 // design §3.3.6 (d)：降级伪多轮透明提示（codex/opencode 或 claude 缺 id）。
                 <p className="px-1 text-xs text-muted-foreground">当前模型多轮能力有限，已基于历史继续生成（未完整复用上下文）。</p>
-              )}
-              {streaming && (
-                <StreamingMessage
-                  stage={liveStage}
-                  segments={liveSegments}
-                  hasThought={liveSegments.some((s) => s.stream === 'thought')}
-                  hasStdout={liveSegments.some((s) => s.stream === 'stdout')}
-                  askAnswering={askAnswering}
-                  onAskUserAnswer={(question, optionLabel) => { void handleAskUserAnswer(question, optionLabel); }}
-                />
               )}
               {!streaming && liveError && <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined} />}
             </div>
