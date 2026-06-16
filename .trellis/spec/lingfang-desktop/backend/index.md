@@ -7,6 +7,7 @@
 ## Pre-Development Checklist
 
 - 改内置插件扫描、manifest 解析或资源目录时，先读 [plugin-loading.md](./plugin-loading.md)。
+- 改用户/AI 创建插件的持久化目录、venv/pnpm 运行、进程管理、命名链路时，先读 [plugin-runtime-persistence.md](./plugin-runtime-persistence.md)。
 - 改本地能力、路径校验或 Tauri command 时，先读 [capability-gateway.md](./capability-gateway.md)。
 - 改检查更新、tauri-plugin-updater、版本发布契约时，先读 [updater-integration.md](./updater-integration.md)。
 - 改构建配置、命令或测试时，先读 [quality.md](./quality.md)。
