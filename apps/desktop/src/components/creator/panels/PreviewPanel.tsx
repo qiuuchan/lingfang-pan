@@ -14,10 +14,10 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
   return runtime === 'nodejs' || runtime === 'python';
 }
 
-export function PreviewPanel({ files, previewKey, onRefresh }: { files: DraftFile[]; previewKey: number; onRefresh: () => void }) {
+export function PreviewPanel({ files, previewKey, onRefresh, pluginId }: { files: DraftFile[]; previewKey: number; onRefresh: () => void; pluginId?: string }) {
   const runtime = parseManifest(files).runtime_type;
   if (isScriptRuntime(runtime)) {
-    return <ScriptPreviewPanel files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefresh} />;
+    return <ScriptPreviewPanel pluginId={pluginId} files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefresh} />;
   }
   return (
     <Card>

@@ -1264,6 +1264,7 @@ export function PluginCreatorHome() {
         previewKey={previewKey}
         onActiveFileChange={setActiveFile}
         onRefreshPreview={() => setPreviewKey((key) => key + 1)}
+        pluginId={pluginId ?? undefined}
       />
       {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
