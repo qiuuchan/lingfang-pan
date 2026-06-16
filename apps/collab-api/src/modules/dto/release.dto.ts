@@ -136,7 +136,7 @@ export class ReleaseTauriQueryDto {
   @IsString()
   arch?: string;
 
-  @ApiPropertyOptional({ description: '当前版本（Tauri updater 上报，仅用于日志/审计，不参与版本判定）', example: '0.0.1' })
+  @ApiPropertyOptional({ description: '当前版本（Tauri updater 上报，仅用于日志/审计，不参与版本判定）', example: '0.0.2' })
   @IsOptional()
   @IsString()
   current_version?: string;
