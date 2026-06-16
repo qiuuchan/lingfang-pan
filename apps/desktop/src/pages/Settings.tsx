@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { RefreshCwIcon, ServerIcon } from 'lucide-react';
+import { RefreshCwIcon, ServerIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { normalizeBackendUrl, testBackendUrl, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
@@ -33,6 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Markdown } from '@/components/markdown';
+import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { ModelGatewayTab } from './settings/ModelGatewayTab';
 import { PluginsTab } from './settings/PluginsTab';
@@ -84,6 +86,8 @@ export function Settings({
   const [updateMeta, setUpdateMeta] = useState<UpdateMetadata | null>(null);
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [progress, setProgress] = useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
+  // 更新日志悬浮窗（ChangelogDialog）：检查更新卡片下方「查看更新日志」按钮触发。
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   // === Tab1 CLI/运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
   const [cliResults, setCliResults] = useState<ToolAvailability[] | null>(null);
@@ -345,7 +349,12 @@ export function Settings({
               <p className="text-sm text-muted-foreground">
                 连接公司平台检查新版本，发现更新后可下载安装包并自动重启。
               </p>
-              <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
+              <div className="flex flex-wrap gap-2">
+                <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
+                <Button variant="outline" onClick={() => setChangelogOpen(true)}>
+                  <HistoryIcon className="size-4" />查看更新日志
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -395,6 +404,9 @@ export function Settings({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 更新日志悬浮窗：查看历史版本变更（react-markdown + GFM 任务列表 + 代码高亮）。 */}
+      <ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} />
     </div>
   );
 }
