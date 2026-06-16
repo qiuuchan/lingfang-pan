@@ -14,8 +14,11 @@ pub const DEFINITION: ToolDefinition = ToolDefinition {
     build_args,
 };
 
-// build_args 签名与 adapters/mod.rs 的 fn 指针对齐：追加 effort（思考强度）入参。
+// build_args 签名与 adapters/mod.rs 的 fn 指针对齐：追加 effort（思考强度）+ system_prompt 入参。
 // - effort：claude headless 透传 `--effort <level>`（max/high/medium/low/none）；None 或空忽略。
+// - system_prompt：非空时用 `--system-prompt <s>` 作为独立 system message（而非拼进 -p 用户消息）。
+//   修正：此前 start_session 把 systemPrompt 拼进 final_prompt 传给 -p，claude 把它当普通用户文本，
+//   导致创建指令被弱化/忽略。改用 --system-prompt 让 claude 正确区分系统指令与用户需求。
 // - codex/opencode 无对应参数，签名对齐但忽略（统一签名解耦调用方）。
 // 设计 R2：思考强度随每轮 send 传（start_session + send_input 都带，可会话中途调）。
 fn build_args(
@@ -23,6 +26,7 @@ fn build_args(
     model: Option<&str>,
     resume_id: Option<&str>,
     effort: Option<&str>,
+    system_prompt: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
@@ -36,6 +40,10 @@ fn build_args(
         "--permission-mode".to_string(),
         "bypassPermissions".to_string(),
     ];
+    // system_prompt 作为独立 system message（修正：此前拼进 -p 被弱化为用户文本）。
+    if let Some(sys) = system_prompt.map(str::trim).filter(|s| !s.is_empty()) {
+        args.extend(["--system-prompt".to_string(), sys.to_string()]);
+    }
     if let Some(model) = model {
         args.extend(["--model".to_string(), model.to_string()]);
     }
