@@ -53,12 +53,18 @@ function segmentsToParts(segments: ChatSegment[]): ThreadMessageLike[] {
 
 // 把 LingFang turns + 流式 segments 转成 ThreadMessageLike[]。
 function buildMessages(turns: ChatTurn[], segments: ChatSegment[], streaming: boolean): ThreadMessageLike[] {
-  const msgs: ThreadMessageLike[] = turns.map((t, i) => ({
-    id: `turn-${i}`,
-    role: t.role,
-    content: [{ type: 'text' as const, text: t.content }],
-    status: { type: 'complete' as const, reason: 'stop' as const },
-  } as ThreadMessageLike));
+  const msgs: ThreadMessageLike[] = turns.map((t, i) => {
+    const base: ThreadMessageLike = {
+      id: `turn-${i}`,
+      role: t.role,
+      content: [{ type: 'text' as const, text: t.content }],
+    };
+    // status 仅 assistant 消息支持（user 消息带 status 会触发「status is only supported for assistant messages」）。
+    if (t.role === 'assistant') {
+      (base as { status?: { type: 'complete'; reason: 'stop' } }).status = { type: 'complete', reason: 'stop' };
+    }
+    return base;
+  });
 
   // 流式中：追加一个 running 的 assistant message，含 reasoning/tool/text 多 part。
   if (streaming && segments.length > 0) {
