@@ -66,15 +66,17 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[85vh] max-h-[85vh] w-[94vw] max-w-5xl flex-col gap-0 p-0 sm:max-w-5xl">
-        {/* 标题栏（可拖拽窗口） */}
-        <div {...dragRegionProps} className="flex shrink-0 items-center justify-between border-b px-5 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <SparklesIcon className="size-4 text-primary" />
-            <DialogTitle className="text-base" data-tauri-drag-region>更新日志</DialogTitle>
-          </div>
-          <DialogDescription className="sr-only">查看 LingFang 各版本的变更说明</DialogDescription>
-          <div className="flex items-center gap-2">
-            <LoadingButton variant="ghost" size="sm" loading={status === 'loading'} onClick={load}>
+        {/* 标题栏（可拖拽窗口）。
+            刷新按钮放左侧标题旁——右上角的关闭按钮（DialogContent 自带 absolute right-2）
+            与刷新分列两侧，避免挤在一起。 */}
+        <div {...dragRegionProps} className="flex shrink-0 items-center justify-between border-b pl-5 pr-12 py-3.5">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <SparklesIcon className="size-4 text-primary" />
+              <DialogTitle className="text-base" data-tauri-drag-region>更新日志</DialogTitle>
+            </div>
+            <DialogDescription className="sr-only">查看 LingFang 各版本的变更说明</DialogDescription>
+            <LoadingButton variant="ghost" size="sm" loading={status === 'loading'} onClick={load} className="h-7 px-2 text-xs">
               刷新
             </LoadingButton>
           </div>
