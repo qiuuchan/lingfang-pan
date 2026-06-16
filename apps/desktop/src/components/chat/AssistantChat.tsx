@@ -53,7 +53,20 @@ function segmentsToParts(segments: ChatSegment[]): ThreadMessageLike[] {
 
 // 把 LingFang turns + 流式 segments 转成 ThreadMessageLike[]。
 function buildMessages(turns: ChatTurn[], segments: ChatSegment[], streaming: boolean): ThreadMessageLike[] {
-  const msgs: ThreadMessageLike[] = turns.map((t, i) => {
+  // 判断当前轮的 assistant 回复是否已在 segments（live message）里渲染。
+  // streaming=true 且 segments 有 stdout/text 时，turns 里的最后一条 assistant turn 是同一轮
+  // （finalizeSession 在 setStreaming(false) 之前已把回复加进 turns，与 segments 重叠）→ 重复。
+  // 此时从 turns 排除最后一条 assistant turn，避免 text 双重渲染。
+  const hasLiveText = streaming && segments.some((s) => s.stream === 'stdout' || s.stream === 'stderr');
+  const lastAssistantIdx = (() => {
+    for (let i = turns.length - 1; i >= 0; i--) if (turns[i].role === 'assistant') return i;
+    return -1;
+  })();
+  const effectiveTurns = hasLiveText && lastAssistantIdx >= 0
+    ? turns.filter((_, i) => i !== lastAssistantIdx)
+    : turns;
+
+  const msgs: ThreadMessageLike[] = effectiveTurns.map((t, i) => {
     const base: ThreadMessageLike = {
       id: `turn-${i}`,
       role: t.role,
