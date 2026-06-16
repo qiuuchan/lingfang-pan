@@ -79,11 +79,10 @@ const EMPTY_GEETEST: GeetestSettings = {
 };
 
 /** 极验场景元数据：label + value，渲染勾选项 + 序列化为逗号分隔串提交。
- *  与后端 settings.service KEY_VALIDATORS.geetestScenes 的 SCENES 白名单一致（login/register/forgot）。 */
+ *  与后端 settings.service KEY_VALIDATORS.geetestScenes 的 SCENES 白名单一致（admin_login/admin_forgot）。 */
 const GEETEST_SCENE_OPTIONS: Array<{ value: string; label: string; desc: string }> = [
-  { value: 'login', label: '登录', desc: '登录表单强制验证码' },
-  { value: 'register', label: '注册', desc: '注册表单强制验证码' },
-  { value: 'forgot', label: '找回密码', desc: '找回密码表单强制验证码' },
+  { value: 'admin_login', label: '管理端登录', desc: '管理端登录表单强制验证码' },
+  { value: 'admin_forgot', label: '管理端找回密码', desc: '管理端找回密码表单强制验证码' },
 ];
 
 // 组D Gitee 更新日志源配置：从 GET /api/admin/settings/gitee 加载。
@@ -131,7 +130,7 @@ export function SettingsView() {
 
   // 组C 极验配置：从 GET /api/admin/settings/geetest 加载（captchaId/scenes 明文，captchaKey 脱敏）。
   // captchaKeyDraft 仅在 admin 输入新 key 时才有值（后端不返回明文）。
-  // scenesDraft 是勾选的场景集合（login/register/forgot），保存时序列化为逗号分隔串提交。
+  // scenesDraft 是勾选的管理端场景集合（admin_login/admin_forgot），保存时序列化为逗号分隔串提交。
   const [geetest, setGeetest] = useState<GeetestSettings>(EMPTY_GEETEST);
   const [geetestDraft, setGeetestDraft] = useState<GeetestSettings>(EMPTY_GEETEST);
   const [geetestCaptchaKeyDraft, setGeetestCaptchaKeyDraft] = useState('');
@@ -666,7 +665,7 @@ export function SettingsView() {
       <motion.div variants={cardVariant}>
         <Section
           title="验证码服务（极验）"
-          description="登录 / 注册 / 找回密码表单的图形验证码。配置 captchaId（公开）与 captchaKey（私钥，脱敏不返回明文），并按场景勾选启用。保存后运行时即时生效（无需重启）。"
+          description="管理端登录 / 管理端找回密码表单的图形验证码。配置 captchaId（公开）与 captchaKey（私钥，脱敏不返回明文），并按管理端场景勾选启用。保存后运行时即时生效（无需重启）。"
         >
           <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <ShieldCheckIcon className="size-3.5" />
@@ -720,7 +719,7 @@ export function SettingsView() {
             </div>
           </div>
 
-          {/* 场景开关：login/register/forgot 勾选，决定哪些场景强制验证码。 */}
+          {/* 场景开关：admin_login/admin_forgot 勾选，决定哪些管理端场景强制验证码。 */}
           <div className="mt-4 space-y-2">
             <Label>启用场景</Label>
             <div className="grid gap-2 sm:grid-cols-3">

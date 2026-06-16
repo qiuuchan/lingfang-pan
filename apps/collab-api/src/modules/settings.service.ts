@@ -26,9 +26,31 @@ const GEETEST_TIMEOUT_MS = 5_000;
 
 /** 公开字段白名单：getPublicInfo 仅暴露这些 key（与官网 / 桌面端展示字段一一对应）。
  *  其余 key（运营内部备注、未发布开关、geetestCaptchaKey 等密钥）仅 Admin 可见，绝不在公开端点暴露。
- *  组C 极验：geetestCaptchaId 公开（前端需据此初始化极验组件），geetestScenes 公开（前端按场景决定是否渲染验证码，
- *  场景未启用时不强制校验，与后端 requireCaptcha(scene) 语义一致），但 geetestCaptchaKey 不公开（仅后端校验用）。 */
+ *  组C 极验：geetestCaptchaId 公开（前端需据此初始化极验组件），geetestScenes 公开（管理端前端按场景决定是否渲染验证码，
+ *  场景未启用时不强制校验，与后端 requireAdminCaptcha(scene) 语义一致），但 geetestCaptchaKey 不公开（仅后端校验用）。 */
 export const PUBLIC_SETTING_KEYS = ['platformName', 'logoUrl', 'geetestCaptchaId', 'geetestScenes'] as const;
+
+/** 极验场景归一化：当前仅管理端场景生效；兼容旧配置 login/forgot，register 已无对应应用端验证码语义。 */
+function normalizeGeetestScenes(raw: string): string {
+  const order = ['admin_login', 'admin_forgot'] as const;
+  const aliases: Record<string, (typeof order)[number] | null> = {
+    admin_login: 'admin_login',
+    admin_forgot: 'admin_forgot',
+    login: 'admin_login',
+    forgot: 'admin_forgot',
+    register: null,
+  };
+  const valid = new Set<string>();
+  const items = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  for (const item of items) {
+    if (!(item in aliases)) {
+      throw badRequest(`geetestScenes 含未知场景：${item}（仅支持 admin_login/admin_forgot）`);
+    }
+    const mapped = aliases[item];
+    if (mapped) valid.add(mapped);
+  }
+  return order.filter((s) => valid.has(s)).join(',');
+}
 
 /** value 校验规则表：key → 校验函数。
  *  - 非白名单 key：upsert 阶段直接 badRequest（KEY_VALIDATORS 缺该 key 即拒绝）。
@@ -98,22 +120,10 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v.length > 200) throw badRequest('geetestCaptchaKey 过长（上限 200 字符）');
     return v;
   },
-  // 组C 极验场景开关：逗号分隔的场景白名单（login/register/forgot），仅命中场景才强制验证码。
-  // 校验：去空白后按逗号拆分，逐项校验必须是 SCENES 白名单内的合法值；空串=全部场景关闭（即便配了 id/key 也不校验）。
-  // 归一化输出：合法项去重后按固定顺序拼接（login,register,forgot），保证存储与比较稳定。
-  geetestScenes: (raw) => {
-    const SCENES = ['login', 'register', 'forgot'] as const;
-    const items = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-    const valid = new Set<string>();
-    for (const item of items) {
-      if (!(SCENES as readonly string[]).includes(item)) {
-        throw badRequest(`geetestScenes 含未知场景：${item}（仅支持 login/register/forgot）`);
-      }
-      valid.add(item);
-    }
-    // 固定顺序输出（login → register → forgot），便于阅读与稳定比较。
-    return SCENES.filter((s) => valid.has(s)).join(',');
-  },
+  // 组C 极验场景开关：逗号分隔的管理端场景白名单（admin_login/admin_forgot），仅命中场景才强制验证码。
+  // 兼容旧配置 login/forgot：会分别映射到 admin_login/admin_forgot；register 不再参与管理端场景。
+  // 空串=全部场景关闭（即便配了 id/key 也不校验）。
+  geetestScenes: (raw) => normalizeGeetestScenes(raw),
   // 组B 账户级密码重试锁定阈值：正整数（1~100），默认 5（auth.service.getLockConfig 在缺省/非法时兜底）。
   maxLoginAttempts: (raw) => {
     const v = raw.trim();
@@ -169,7 +179,7 @@ const SECRET_KEYS = new Set(['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken'
 const MAIL_CACHE_KEYS = new Set(['smtpUrl', 'smtpFrom', 'smtpUser', 'smtpPass', 'platformName', 'logoUrl']);
 
 /** 影响 GeetestService 极验配置缓存的 PlatformSetting key 集合。
- *  组C：更新这些 key 后调用 geetest.invalidateConfigCache()，使 admin 改极验配置后下一次登录/注册校验即读到新值
+ *  组C：更新这些 key 后调用 geetest.invalidateConfigCache()，使 admin 改极验配置后下一次管理端验证码校验即读到新值
  *  （与 SMTP 热生效语义一致）。geetestCaptchaId 同时影响公开信息缓存（已在 publicInfoCache=null 处失效），
  *  geetestCaptchaKey 仅后端校验用，geetestScenes 决定哪些场景强制校验，三者均需失效 geetest 配置缓存避免
  *  「前端已显示验证码、后端仍跳过校验」或「场景配置已改、后端仍按旧场景判定」不一致。 */
@@ -241,25 +251,26 @@ export class SettingsService {
       normalized.push({ key: entry.key, value: validator(entry.value) });
     }
 
-    // 逐项 upsert（key 为主键，create/update 分支写 updatedById + value）。
-    // 未做事务包裹：设置项之间无关联不变量，逐项独立 upsert 即可，失败一项不影响已落库的其他项
-    // （审计只对成功落库的项写入，保证审计与数据一致）。
-    const results: Array<{ key: string; value: string }> = [];
-    for (const item of normalized) {
-      const setting = await this.prisma.platformSetting.upsert({
-        where: { key: item.key },
-        create: { key: item.key, value: item.value, updatedById: actorId },
-        update: { value: item.value, updatedById: actorId },
-      });
-      results.push({ key: setting.key, value: setting.value });
-      // 密钥类 key 审计不记明文（防 token 经 AuditLog.metadata 泄漏）。
-      // SECRET_KEYS={smtpPass,geetestCaptchaKey,giteeAccessToken} 命中后改记 {key, configured}，
-      // 与 testCaptcha 同范式（metadata 仅记布尔）。非密钥 key 仍记明文 value（便于追溯配置变更）。
-      const auditMeta = SECRET_KEYS.has(item.key)
-        ? { key: item.key, configured: item.value.length > 0 }
-        : { key: item.key, value: item.value };
-      await this.audit(actorId, 'admin.setting.updated', 'PlatformSetting', item.key, auditMeta);
-    }
+    // 同一批设置必须原子提交：任一 upsert 或审计失败，整批回滚，避免 SMTP/极验/Gitee 多字段半更新。
+    const results = await this.prisma.$transaction(async (tx) => {
+      const written: Array<{ key: string; value: string }> = [];
+      for (const item of normalized) {
+        const setting = await tx.platformSetting.upsert({
+          where: { key: item.key },
+          create: { key: item.key, value: item.value, updatedById: actorId },
+          update: { value: item.value, updatedById: actorId },
+        });
+        written.push({ key: setting.key, value: setting.value });
+        // 密钥类 key 审计不记明文（防 token 经 AuditLog.metadata 泄漏）。
+        // SECRET_KEYS={smtpPass,geetestCaptchaKey,giteeAccessToken} 命中后改记 {key, configured}，
+        // 与 testCaptcha 同范式（metadata 仅记布尔）。非密钥 key 仍记明文 value（便于追溯配置变更）。
+        const auditMeta = SECRET_KEYS.has(item.key)
+          ? { key: item.key, configured: item.value.length > 0 }
+          : { key: item.key, value: item.value };
+        await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.setting.updated', targetType: 'PlatformSetting', targetId: item.key, metadata: auditMeta } });
+      }
+      return written;
+    });
     // 组E 性能：设置变更后失效公开信息缓存（platformName/logoUrl 可能被改），
     // 确保下一次 GET /api/platform-info 回源读取最新值（而非命中过期缓存）。
     publicInfoCache = null;
@@ -301,9 +312,9 @@ export class SettingsService {
       logoUrl: map.get('logoUrl') ?? '',
       // 组C 极验：captchaId 公开（前端据此初始化极验组件），缺省空串=未配置，前端不显验证码。
       geetestCaptchaId: (map.get('geetestCaptchaId') ?? '').trim(),
-      // 组C 场景开关：geetestScenes 公开（前端按场景决定是否渲染/强制验证码，与后端 requireCaptcha 语义一致）。
+      // 组C 场景开关：geetestScenes 公开（前端按场景决定是否渲染/强制验证码，与后端 admin 场景语义一致）。
       // 缺省空串=全部场景关闭（即便配了 captchaId 也不强制）。
-      geetestScenes: (map.get('geetestScenes') ?? '').trim(),
+      geetestScenes: normalizeGeetestScenes(map.get('geetestScenes') ?? ''),
     };
     publicInfoCache = { value, expiresAt: now + PUBLIC_INFO_CACHE_TTL_MS };
     return value;
@@ -369,7 +380,7 @@ export class SettingsService {
     const map = new Map(rows.map((r) => [r.key, r.value] as const));
     const captchaId = (map.get('geetestCaptchaId') ?? '').trim();
     const captchaKey = map.get('geetestCaptchaKey') ?? '';
-    const scenes = (map.get('geetestScenes') ?? '').trim();
+    const scenes = normalizeGeetestScenes(map.get('geetestScenes') ?? '');
     return {
       geetestCaptchaId: captchaId,
       // 私钥不返回明文，仅返回是否已配置（前端据 hasCaptchaKey 显示「已配置」占位）。
@@ -517,20 +528,20 @@ export class SettingsService {
     }
   }
 
-  /** POST /api/admin/settings/reveal-secret：查看敏感配置明文（SMTP 密码 / 极验私钥）。
+  /** POST /api/admin/settings/reveal-secret：查看敏感配置明文（SMTP 密码 / 极验私钥 / Gitee token）。
    *
    *  安全模型（敏感操作，三重防护）：
    *  1. ensurePlatformAdmin：仅平台管理员可调用（守卫一）。
    *  2. 密码二次确认：用 bcrypt.compare 校验 body.password 与当前用户 passwordHash，
    *     密码错误抛 unauthorized（防 admin 会话被劫持后无门槛查看明文密钥，守卫二）。
-   *  3. key 白名单：DTO 层 @IsIn 已限 smtpPass / geetestCaptchaKey，service 层再次断言（守卫三）。
+   *  3. key 白名单：DTO 层 @IsIn 已限 smtpPass / geetestCaptchaKey / giteeAccessToken，service 层再次断言（守卫三）。
    *
    *  审计：无论成功/失败都落 admin.setting.secret_revealed（metadata 仅记 key + ok，不记 value 明文）。 */
   async revealSecret(actorId: string, input: { password: string; key: string }) {
     const user = await this.auth.ensurePlatformAdmin(actorId);
     const key = input.key as RevealableSecretKey;
     if (!(REVEALABLE_SECRET_KEYS as readonly string[]).includes(key)) {
-      throw badRequest('仅支持查看 smtpPass 或 geetestCaptchaKey');
+      throw badRequest('仅支持查看 smtpPass、geetestCaptchaKey 或 giteeAccessToken');
     }
     const passwordOk = await bcrypt.compare(input.password || '', user.passwordHash);
     if (!passwordOk) {

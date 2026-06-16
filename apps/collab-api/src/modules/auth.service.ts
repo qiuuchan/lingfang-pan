@@ -23,27 +23,17 @@ export class AuthService {
   ) {}
 
   /**
-   * 组C 极验验证码校验守卫：供 login/register/forgotPassword 复用。
-   * - 应用端（desktop 客户端，clientKind==='desktop'）一律跳过验证码：桌面客户端本身不做验证码 UI，
-   *   且登录态受 Tauri 壳隔离，无公开爆破面，与浏览器端管理后台的风险模型不同。
-   * - 管理端（浏览器，clientKind 非 desktop）按 scene 判定：geetestScenes 未含该场景 → 跳过；
-   *   含该场景 → 强制校验，captcha 缺失或校验失败 → throw badRequest('请先完成验证码')。
-   * - 未配置极验（captchaId 空）→ 直接跳过（开发态不强制，前端也不显验证码）。
-   * 极验 API 异常时 GeetestService.validate 自身降级放行（容灾，不阻断登录），此处无需重复处理。
+   * 管理端极验验证码校验守卫。
+   * 普通应用端认证入口不接收、不要求验证码；验证码只用于管理端登录和管理端找回密码。
    */
-  private async requireCaptcha(scene: GeetestScene, captcha: Partial<GeetestCaptchaParams> | undefined, clientKind?: string): Promise<void> {
-    // 应用端（desktop）跳过验证码：桌面客户端无验证码 UI，由调用方经 X-Client:desktop header 标识。
-    if (clientKind === 'desktop') return;
+  private async requireAdminCaptcha(scene: GeetestScene, captcha: Partial<GeetestCaptchaParams> | undefined): Promise<void> {
     const enabled = await this.geetest.isSceneEnabled(scene);
     if (!enabled) return;
     const ok = await this.geetest.validate(captcha);
     if (!ok) throw badRequest('请先完成验证码');
   }
 
-  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string; captcha?: Partial<GeetestCaptchaParams>; clientKind?: string }) {
-    // 组C 极验：register 场景启用时强制校验验证码（在所有业务逻辑之前，避免无效请求消耗 DB 查询）。
-    // 应用端（desktop）跳过验证码（见 requireCaptcha 的 clientKind 判定）。
-    await this.requireCaptcha('register', input.captcha, input.clientKind);
+  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {
     const email = input.email?.trim().toLowerCase();
     // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
     // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
@@ -98,10 +88,7 @@ export class AuthService {
     await this.mail.sendEmailVerification(email, link);
   }
 
-  async login(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams>; clientKind?: string }) {
-    // 组C 极验：login 场景启用时强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
-    // 应用端（desktop）跳过验证码（见 requireCaptcha 的 clientKind 判定）。
-    await this.requireCaptcha('login', input.captcha, input.clientKind);
+  async login(input: { email: string; password: string }, options: { allowPlatformAdmin?: boolean } = {}) {
     const email = input.email?.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 登录失败统一审计：actorUserId 可为 null（用户不存在时），便于安全审计追踪暴力破解尝试。
@@ -109,6 +96,10 @@ export class AuthService {
     if (!user || user.status !== 'ACTIVE') {
       await this.prisma.auditLog.create({ data: { actorUserId: null, action: 'auth.login.failed', targetType: 'User', targetId: user?.id ?? null, metadata: { email, reason: user ? 'account_inactive' : 'user_not_found' } } });
       throw unauthorized('邮箱或密码错误');
+    }
+    if (user.platformRole === 'PLATFORM_ADMIN' && !options.allowPlatformAdmin) {
+      await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.failed', targetType: 'User', targetId: user.id, metadata: { email, reason: 'platform_admin_requires_admin_login' } } });
+      throw forbidden('平台管理员请从管理端登录');
     }
     // 组B 账户级锁定：与 throttler（IP 限流）正交。lockedUntil 未过期直接拒绝并返剩余分钟，
     // 防分布式 IP 池对单账户的暴力爆破。user_not_found/account_inactive 分支不在此校验（无 user 行）。
@@ -130,6 +121,13 @@ export class AuthService {
     await this.resetFailedLogin(user.id);
     await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.success', targetType: 'User', targetId: user.id, metadata: { email } } });
     return this.sessionFor(user.id);
+  }
+
+  async adminLogin(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams> }) {
+    await this.requireAdminCaptcha('admin_login', input.captcha);
+    const session = await this.login({ email: input.email, password: input.password }, { allowPlatformAdmin: true });
+    if (session.user.platformRole !== 'PLATFORM_ADMIN') throw forbidden('该账号不是平台管理员');
+    return session;
   }
 
   /**
@@ -228,19 +226,28 @@ export class AuthService {
    * 找回密码（Top5 解法）：生成短 TTL（15min）的 reset token，发送重置链接邮件。
    *
    * 安全设计：无论邮箱是否注册都返回「链接已发送」——不泄漏邮箱是否注册（防探测枚举）。
-   * 仅当邮箱确实存在时才真正发邮件；不存在的邮箱静默跳过（前端无感知差异）。
+   * 仅当邮箱确实存在、账号启用且匹配入口账号类型时才真正发邮件；不存在/不匹配的邮箱静默跳过（前端无感知差异）。
    * reset token 为独立 JWT（scope='pwd_reset'），与登录 token 分离，复用 JWT_SECRET 签名。
    * token 内嵌 userId，reset-password 时校验 + 改密 + tokenVersion++（作废所有旧登录 token）。
    */
-  async forgotPassword(input: { email: string; captcha?: Partial<GeetestCaptchaParams>; clientKind?: string }) {
-    // 组C 极验：forgot 场景启用时强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
-    // 应用端（desktop）跳过验证码（见 requireCaptcha 的 clientKind 判定）。
-    await this.requireCaptcha('forgot', input.captcha, input.clientKind);
-    const email = input.email?.trim().toLowerCase();
+  async forgotPassword(input: { email: string }) {
+    return this.sendPasswordResetIfEligible(input.email, { excludePlatformAdmin: true });
+  }
+
+  async adminForgotPassword(input: { email: string; captcha?: Partial<GeetestCaptchaParams> }) {
+    await this.requireAdminCaptcha('admin_forgot', input.captcha);
+    return this.sendPasswordResetIfEligible(input.email, { platformAdminOnly: true });
+  }
+
+  private async sendPasswordResetIfEligible(rawEmail: string, options: { excludePlatformAdmin?: boolean; platformAdminOnly?: boolean } = {}) {
+    const email = rawEmail?.trim().toLowerCase();
     if (!email) throw badRequest('请输入邮箱');
     const user = await this.prisma.user.findUnique({ where: { email } });
-    // 邮箱不存在/已禁用：静默跳过，不抛错（防邮箱探测）。前端统一提示「链接已发送」。
-    if (user && user.status === 'ACTIVE') {
+    // 邮箱不存在/已禁用/入口账号类型不匹配：静默跳过，不抛错（防邮箱探测）。前端统一提示「链接已发送」。
+    const roleAllowed = user
+      && (!options.excludePlatformAdmin || user.platformRole !== 'PLATFORM_ADMIN')
+      && (!options.platformAdminOnly || user.platformRole === 'PLATFORM_ADMIN');
+    if (user && user.status === 'ACTIVE' && roleAllowed) {
       // 修复 H1/H3：reset token 内嵌签发时的 tokenVersion，resetPassword 校验时与库比对。
       // 这样既防重放（改密后 tokenVersion++，旧 reset token 校验失败），
       // 也覆盖降级场景（admin 改 status 或 platformRole 时已 tokenVersion++，旧 reset token 同步失效）。

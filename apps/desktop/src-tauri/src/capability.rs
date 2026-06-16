@@ -35,12 +35,18 @@ impl CapabilityRegistry {
         // 其后所有 register/find 调用二次 panic，整个插件能力子系统（所有 capability 调用）瘫痪需重启。
         // PoisonError::into_inner() 拿到锁内数据（数据仍有效，仅代表另一线程异常退出），
         // 与 code_assistant.rs::lock_or_recover 同款容忍策略，杜绝 panic 级联。
-        let mut map = self.plugins.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut map = self
+            .plugins
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         map.insert(plugin_id.to_string(), caps);
     }
 
     pub fn find(&self, plugin_id: &str, kind: &str) -> Option<DeclaredCapability> {
-        let map = self.plugins.lock().unwrap_or_else(|poison| poison.into_inner());
+        let map = self
+            .plugins
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         map.get(plugin_id)?.iter().find(|c| c.kind == kind).cloned()
     }
 }
@@ -133,7 +139,8 @@ fn fs_read(declared: &DeclaredCapability, args: &Value) -> Result<Value, CapErro
     if meta.is_dir() {
         let mut entries = Vec::new();
         let mut truncated = false;
-        let read = std::fs::read_dir(&path).map_err(|_| CapError::Exec("目录读取失败".to_string()))?;
+        let read =
+            std::fs::read_dir(&path).map_err(|_| CapError::Exec("目录读取失败".to_string()))?;
         for entry in read.flatten() {
             if entries.len() >= MAX_FS_READ_ENTRIES {
                 truncated = true;
@@ -282,7 +289,9 @@ mod tests {
         // 目录本身：应成功返回 entries 列表（CAP-02 的 truncated 字段也存在）。
         let dir_request = json!({ "path": allowed.to_string_lossy() });
         let dir_result = fs_read(&cap, &dir_request).expect("授权目录应成功");
-        let entries = dir_result["entries"].as_array().expect("应返回 entries 数组");
+        let entries = dir_result["entries"]
+            .as_array()
+            .expect("应返回 entries 数组");
         assert!(
             entries.iter().any(|e| e["name"] == "sub.txt"),
             "entries 应含 sub.txt，实际 {entries:?}"
@@ -321,8 +330,7 @@ mod tests {
             "错误串不应泄漏真实路径片段：{message}"
         );
         // 不存在的路径也应统一为 OutOfScope 固定串（关闭「不存在」oracle）。
-        let missing_request =
-            json!({ "path": allowed.join("nonexistent-file").to_string_lossy() });
+        let missing_request = json!({ "path": allowed.join("nonexistent-file").to_string_lossy() });
         let missing_err = fs_read(&cap, &missing_request).unwrap_err();
         assert!(
             matches!(missing_err, CapError::OutOfScope(_)),
@@ -385,8 +393,7 @@ mod tests {
             "文案应区分已声明 vs 未声明：{message}"
         );
         // 对照：真正未声明的 kind 仍返回 NotDeclared（find 失败）。
-        let undeclared_err =
-            invoke(&registry, "test-plugin", "net.fetch", &json!({})).unwrap_err();
+        let undeclared_err = invoke(&registry, "test-plugin", "net.fetch", &json!({})).unwrap_err();
         assert!(
             matches!(undeclared_err, CapError::NotDeclared(_)),
             "未声明的 kind 应返回 NotDeclared，实际 {undeclared_err:?}"

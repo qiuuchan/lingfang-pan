@@ -24,19 +24,23 @@
 //! 兜底（@anthropic-ai/claude-code / @openai/codex / opencode-ai），首版未实现。
 
 use std::ffi::OsString;
+#[cfg(windows)]
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(windows)]
+use tauri::Emitter;
+use tauri::{AppHandle, Manager};
 
-use crate::code_assistant::{
-    check_tool, find_binary, kill_child_tree, list_tools, run_capture_with_env, CapturedOutput,
-    ToolAvailability,
-};
 use crate::code_assistant::adapters::CodeAssistantTool;
+#[cfg(windows)]
+use crate::code_assistant::{
+    check_tool, find_binary, list_tools, run_capture_with_env, ToolAvailability,
+};
+use crate::code_assistant::{kill_child_tree, CapturedOutput};
 
 /// 当前正在运行的安装子进程（供 cancel_install 杀进程组）。
 /// 单一槽位：同时仅允许一个安装任务（前端通过按钮 loading 互斥保证）。
@@ -139,6 +143,7 @@ impl InstallResult {
         }
     }
 
+    #[cfg(windows)]
     fn failed(message: impl Into<String>, exit_code: Option<i32>, elapsed_ms: u64) -> Self {
         Self {
             status: InstallStatus::Failed,
@@ -227,6 +232,7 @@ fn redact_log_line(line: &str) -> String {
 ///
 /// winget list 查包是否残留 → 若在则 winget uninstall --silent。
 /// 仅查不抛错：清理失败不影响主流程的 Failed/超时判定（已失败的事实不变）。
+#[cfg(windows)]
 fn cleanup_partial_install(target: InstallTarget) {
     let id = match winget_package_id(target) {
         Some(id) => id,
@@ -235,11 +241,7 @@ fn cleanup_partial_install(target: InstallTarget) {
     // 查残留：winget list --id <id>（30s 超时，env 白名单）。
     let check = run_capture_with_env(
         &PathBuf::from("winget"),
-        vec![
-            "list".to_string(),
-            "--id".to_string(),
-            id.to_string(),
-        ],
+        vec!["list".to_string(), "--id".to_string(), id.to_string()],
         None,
         30_000,
         installer_env(),
@@ -339,6 +341,7 @@ fn current_platform_string() -> String {
 }
 
 /// 检测 winget 是否可用（spawn 一次 winget --version 确认）。
+#[cfg(windows)]
 fn winget_available() -> bool {
     match run_capture_with_env(
         &PathBuf::from("winget"),
@@ -353,6 +356,7 @@ fn winget_available() -> bool {
 }
 
 /// 装后探测 binary 是否就位 + 取版本（design §6.3 第 5 步 Succeeded 分支）。
+#[cfg(windows)]
 fn probe_after_install(target: InstallTarget) -> (Option<String>, Option<String>) {
     if let Some(tool) = target.to_code_assistant_tool() {
         // CLI 类（claude/codex/opencode）：复用 check_tool 取 version + binary_path。
@@ -422,33 +426,15 @@ fn run_install(app: AppHandle, target: InstallTarget) -> Result<InstallResult, S
         return Ok(result);
     }
 
-    // 步骤 2：winget 可用性判定。
-    if !winget_available() {
-        let result = InstallResult::failed(
-            format!(
-                "未检测到 winget，无法自动安装 {}。请手动安装：见官网。",
-                target.display_name()
-            ),
-            None,
-            started.elapsed().as_millis() as u64,
-        );
-        append_install_history(
-            &app,
-            target,
-            started_epoch,
-            result.exit_code,
-            result.elapsed_ms,
-            result.status,
-        );
-        return Ok(result);
-    }
-
-    // 步骤 3：查包 id（白名单，防注入）。
-    let package_id = match winget_package_id(target) {
-        Some(id) => id,
-        None => {
+    #[cfg(windows)]
+    {
+        // 步骤 2：winget 可用性判定。
+        if !winget_available() {
             let result = InstallResult::failed(
-                format!("暂不支持的安装目标：{}", target.display_name()),
+                format!(
+                    "未检测到 winget，无法自动安装 {}。请手动安装：见官网。",
+                    target.display_name()
+                ),
                 None,
                 started.elapsed().as_millis() as u64,
             );
@@ -462,164 +448,176 @@ fn run_install(app: AppHandle, target: InstallTarget) -> Result<InstallResult, S
             );
             return Ok(result);
         }
-    };
 
-    // 步骤 4-5：spawn winget install（300s 硬超时，env_clear + 白名单）。
-    let args: Vec<String> = vec![
-        "install".to_string(),
-        "--id".to_string(),
-        package_id.to_string(),
-        "-e".to_string(),
-        "--accept-source-agreements".to_string(),
-        "--accept-package-agreements".to_string(),
-        "--silent".to_string(),
-    ];
-    let env = installer_env();
-    // 提前占位 CURRENT_INSTALL（None → Some 占位），cancel_install 可在 300s 内打断。
-    // 占位 child 在 run_capture_with_env 返回后由 take_install_child 清理。
-    // 注意：run_capture_with_env 内部 spawn，child 不外露，故 CURRENT_INSTALL 仅在 cancel
-    // 的简化首版不挂实际 child；TODO 改造 run_captured_inner 暴露 child 句柄供 cancel 真打断。
-    let captured = run_capture_with_env(
-        &PathBuf::from("winget"),
-        args,
-        None,
-        300_000,
-        env,
-    );
-
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-
-    let captured = match captured {
-        Ok(c) => c,
-        Err(error) => {
-            // spawn 失败（罕见，winget --version 刚过但 install spawn 失败，多为系统资源耗尽）。
-            let message = format!("启动 winget 安装失败：{}", redact_log_line(&error));
-            let result = InstallResult::failed(message, None, elapsed_ms);
-            append_install_history(
-                &app,
-                target,
-                started_epoch,
-                result.exit_code,
-                result.elapsed_ms,
-                result.status,
-            );
-            return Ok(result);
-        }
-    };
-
-    // 步骤 6：判定。
-    let result = if captured.timed_out {
-        // 超时分支（design D4）：清理半装 + Failed 提示重试。
-        cleanup_partial_install(target);
-        InstallResult::failed(
-            format!(
-                "{} 安装超时（300s），已尝试清理半装残留，请重试。",
-                target.display_name()
-            ),
-            captured.exit_code,
-            elapsed_ms,
-        )
-    } else if looks_like_uac_required(&captured) {
-        // UAC 提权分支（design B21）：引导用户手动以管理员身份运行。
-        InstallResult {
-            status: InstallStatus::NeedsConfirmation,
-            exit_code: captured.exit_code,
-            elapsed_ms,
-            binary_path: None,
-            version: None,
-            message: format!(
-                "{} 安装需要管理员权限，请以管理员身份运行桌面壳或手动安装。",
-                target.display_name()
-            ),
-        }
-    } else if captured.exit_code == Some(0) {
-        // 成功分支：探测 binary。
-        let (binary_path, version) = probe_after_install(target);
-        if binary_path.is_some() {
-            InstallResult {
-                status: InstallStatus::Succeeded,
-                exit_code: captured.exit_code,
-                elapsed_ms,
-                binary_path,
-                version,
-                message: format!("{} 安装成功", target.display_name()),
+        // 步骤 3：查包 id（白名单，防注入）。
+        let package_id = match winget_package_id(target) {
+            Some(id) => id,
+            None => {
+                let result = InstallResult::failed(
+                    format!("暂不支持的安装目标：{}", target.display_name()),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                );
+                append_install_history(
+                    &app,
+                    target,
+                    started_epoch,
+                    result.exit_code,
+                    result.elapsed_ms,
+                    result.status,
+                );
+                return Ok(result);
             }
-        } else {
-            // exit 0 但探测不到 binary：winget 可能装到非 PATH 位置（罕见）。
-            // 仍走 cleanup 防半装残留，提示用户重启 shell 后重试探测。
+        };
+
+        // 步骤 4-5：spawn winget install（300s 硬超时，env_clear + 白名单）。
+        let args: Vec<String> = vec![
+            "install".to_string(),
+            "--id".to_string(),
+            package_id.to_string(),
+            "-e".to_string(),
+            "--accept-source-agreements".to_string(),
+            "--accept-package-agreements".to_string(),
+            "--silent".to_string(),
+        ];
+        let env = installer_env();
+        // 提前占位 CURRENT_INSTALL（None → Some 占位），cancel_install 可在 300s 内打断。
+        // 占位 child 在 run_capture_with_env 返回后由 take_install_child 清理。
+        // 注意：run_capture_with_env 内部 spawn，child 不外露，故 CURRENT_INSTALL 仅在 cancel
+        // 的简化首版不挂实际 child；TODO 改造 run_captured_inner 暴露 child 句柄供 cancel 真打断。
+        let captured = run_capture_with_env(&PathBuf::from("winget"), args, None, 300_000, env);
+
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+
+        let captured = match captured {
+            Ok(c) => c,
+            Err(error) => {
+                // spawn 失败（罕见，winget --version 刚过但 install spawn 失败，多为系统资源耗尽）。
+                let message = format!("启动 winget 安装失败：{}", redact_log_line(&error));
+                let result = InstallResult::failed(message, None, elapsed_ms);
+                append_install_history(
+                    &app,
+                    target,
+                    started_epoch,
+                    result.exit_code,
+                    result.elapsed_ms,
+                    result.status,
+                );
+                return Ok(result);
+            }
+        };
+
+        // 步骤 6：判定。
+        let result = if captured.timed_out {
+            // 超时分支（design D4）：清理半装 + Failed 提示重试。
             cleanup_partial_install(target);
             InstallResult::failed(
                 format!(
-                    "{} 安装退出码为 0 但探测不到可执行文件，可能需要重启终端使 PATH 生效。",
+                    "{} 安装超时（300s），已尝试清理半装残留，请重试。",
                     target.display_name()
                 ),
                 captured.exit_code,
                 elapsed_ms,
             )
-        }
-    } else {
-        // 其余非 0 退出码（design D4）：清理半装 + Failed + redact stderr_tail。
-        cleanup_partial_install(target);
-        let stderr_tail = captured
-            .stderr
-            .lines()
-            .rev()
-            .take(5)
-            .map(redact_log_line)
-            .collect::<Vec<_>>()
-            .join("\n");
-        let stdout_tail = captured
-            .stdout
-            .lines()
-            .rev()
-            .take(3)
-            .map(redact_log_line)
-            .collect::<Vec<_>>()
-            .join("\n");
-        let tail = if stderr_tail.is_empty() {
-            stdout_tail
+        } else if looks_like_uac_required(&captured) {
+            // UAC 提权分支（design B21）：引导用户手动以管理员身份运行。
+            InstallResult {
+                status: InstallStatus::NeedsConfirmation,
+                exit_code: captured.exit_code,
+                elapsed_ms,
+                binary_path: None,
+                version: None,
+                message: format!(
+                    "{} 安装需要管理员权限，请以管理员身份运行桌面壳或手动安装。",
+                    target.display_name()
+                ),
+            }
+        } else if captured.exit_code == Some(0) {
+            // 成功分支：探测 binary。
+            let (binary_path, version) = probe_after_install(target);
+            if binary_path.is_some() {
+                InstallResult {
+                    status: InstallStatus::Succeeded,
+                    exit_code: captured.exit_code,
+                    elapsed_ms,
+                    binary_path,
+                    version,
+                    message: format!("{} 安装成功", target.display_name()),
+                }
+            } else {
+                // exit 0 但探测不到 binary：winget 可能装到非 PATH 位置（罕见）。
+                // 仍走 cleanup 防半装残留，提示用户重启 shell 后重试探测。
+                cleanup_partial_install(target);
+                InstallResult::failed(
+                    format!(
+                        "{} 安装退出码为 0 但探测不到可执行文件，可能需要重启终端使 PATH 生效。",
+                        target.display_name()
+                    ),
+                    captured.exit_code,
+                    elapsed_ms,
+                )
+            }
         } else {
-            stderr_tail
+            // 其余非 0 退出码（design D4）：清理半装 + Failed + redact stderr_tail。
+            cleanup_partial_install(target);
+            let stderr_tail = captured
+                .stderr
+                .lines()
+                .rev()
+                .take(5)
+                .map(redact_log_line)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let stdout_tail = captured
+                .stdout
+                .lines()
+                .rev()
+                .take(3)
+                .map(redact_log_line)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let tail = if stderr_tail.is_empty() {
+                stdout_tail
+            } else {
+                stderr_tail
+            };
+            let message = format!(
+                "{} 安装失败（退出码 {:?}）。\n输出尾部：\n{}",
+                target.display_name(),
+                captured.exit_code,
+                tail
+            );
+            InstallResult::failed(message, captured.exit_code, elapsed_ms)
         };
-        let message = format!(
-            "{} 安装失败（退出码 {:?}）。\n输出尾部：\n{}",
-            target.display_name(),
-            captured.exit_code,
-            tail
-        );
-        InstallResult::failed(message, captured.exit_code, elapsed_ms)
-    };
 
-    // 步骤 7：Succeeded 时 emit 探测刷新事件（与 main.rs:232 首启 emit 同形态）。
-    if result.status == InstallStatus::Succeeded {
-        let _ = app.emit(
-            "code-assistant://availability-changed",
-            list_tools(),
+        // 步骤 7：Succeeded 时 emit 探测刷新事件（与 main.rs:232 首启 emit 同形态）。
+        if result.status == InstallStatus::Succeeded {
+            let _ = app.emit("code-assistant://availability-changed", list_tools());
+            // install-cli://done 单独 emit，前端可据此关 LoadingButton（design B3）。
+            let _ = app.emit(
+                "install-cli://done",
+                serde_json::json!({ "target": target, "status": result.status }),
+            );
+        } else {
+            // 失败/NeedsConfirmation/Unsupported 也 emit done，前端关 loading 并展示结果。
+            let _ = app.emit(
+                "install-cli://done",
+                serde_json::json!({ "target": target, "status": result.status }),
+            );
+        }
+
+        // 步骤 8：写 install-history.jsonl。
+        append_install_history(
+            &app,
+            target,
+            started_epoch,
+            result.exit_code,
+            result.elapsed_ms,
+            result.status,
         );
-        // install-cli://done 单独 emit，前端可据此关 LoadingButton（design B3）。
-        let _ = app.emit(
-            "install-cli://done",
-            serde_json::json!({ "target": target, "status": result.status }),
-        );
-    } else {
-        // 失败/NeedsConfirmation/Unsupported 也 emit done，前端关 loading 并展示结果。
-        let _ = app.emit(
-            "install-cli://done",
-            serde_json::json!({ "target": target, "status": result.status }),
-        );
+
+        Ok(result)
     }
-
-    // 步骤 8：写 install-history.jsonl。
-    append_install_history(
-        &app,
-        target,
-        started_epoch,
-        result.exit_code,
-        result.elapsed_ms,
-        result.status,
-    );
-
-    Ok(result)
 }
 
 /// 命令：安装 CLI 工具（claude / codex / opencode）。

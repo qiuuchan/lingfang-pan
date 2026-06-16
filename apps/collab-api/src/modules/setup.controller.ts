@@ -2,10 +2,10 @@
 //
 // 设计契约（严格仅未初始化时可用，防被恶意创建管理员）：
 //  - status 端点：查 User where platformRole=PLATFORM_ADMIN 计数，count===0 → needsSetup=true。
-//  - setup 端点：进入前二次复检 needsSetup（true 才继续，false 抛 403 setup_already_done）。
-//    复检而非依赖 status 调用时机：防「status 请求与 setup 请求之间，seed-admin 已创建管理员」的竞态。
-//  - 全程 $transaction 原子完成：建管理员（bcrypt hash）+ 写 platformName + 审计 platform_admin.bootstrap，
-//    避免部分成功（建了管理员却没写平台名 / 审计缺失）。
+//  - setup 端点：进入前复检 needsSetup；事务内先创建固定 PlatformSetting lock，利用 key 主键兜住并发。
+//    复检负责常规已初始化场景，lock 负责两个首次 setup 请求同时通过复检的竞态。
+//  - 全程 $transaction 原子完成：创建 bootstrap lock + 建管理员（bcrypt hash）+ 写 platformName + 审计
+//    platform_admin.bootstrap，避免部分成功（建了管理员却没写平台名 / 审计缺失）。
 //  - platformName 复用 SettingsService.KEY_VALIDATORS 的同款归一化（trim + 长度上限），保持单一来源语义。
 import { Body, Controller, Get, Inject, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -13,6 +13,8 @@ import bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma.service';
 import { AppError, Public } from '../common';
 import { SetupDto } from './dto/setup.dto';
+
+const SETUP_BOOTSTRAP_LOCK_KEY = '__setup_bootstrap_lock__';
 
 @ApiTags('Setup')
 @Controller('setup')
@@ -54,32 +56,46 @@ export class SetupController {
     const passwordHash = await bcrypt.hash(body.password, 12);
     const displayName = (body.displayName ?? '').trim() || email;
 
-    // $transaction 原子完成三件事：建管理员 + 写 platformName + 审计。
-    // 三者必须一起成功：建管理员后落审计是安全可追溯要求；platformName 与管理员同批写入避免半初始化。
-    await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN' },
-      });
-      // platformName 非空才写 PlatformSetting（空则保留 getPublicInfo 的默认 'LingFang' 兜底）。
-      if (platformName) {
-        await tx.platformSetting.upsert({
-          where: { key: 'platformName' },
-          create: { key: 'platformName', value: platformName, updatedById: user.id },
-          update: { value: platformName, updatedById: user.id },
+    // $transaction 原子完成四件事：创建 bootstrap lock + 建管理员 + 写 platformName + 审计。
+    // lock 使用 PlatformSetting.key 主键兜住并发：两个首次 setup 同时通过复检时，只能一个插入成功。
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.platformSetting.create({
+          data: {
+            key: SETUP_BOOTSTRAP_LOCK_KEY,
+            value: 'completed',
+            description: '首次安装向导一次性初始化锁',
+          },
         });
-      }
-      await tx.auditLog.create({
-        data: {
-          actorUserId: user.id,
-          action: 'platform_admin.bootstrap',
-          targetType: 'User',
-          targetId: user.id,
-          metadata: { email, via: 'setup-wizard' },
-        },
+        const user = await tx.user.create({
+          data: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN' },
+        });
+        // platformName 非空才写 PlatformSetting（空则保留 getPublicInfo 的默认 'LingFang' 兜底）。
+        if (platformName) {
+          await tx.platformSetting.upsert({
+            where: { key: 'platformName' },
+            create: { key: 'platformName', value: platformName, updatedById: user.id },
+            update: { value: platformName, updatedById: user.id },
+          });
+        }
+        await tx.auditLog.create({
+          data: {
+            actorUserId: user.id,
+            action: 'platform_admin.bootstrap',
+            targetType: 'User',
+            targetId: user.id,
+            metadata: { email, via: 'setup-wizard' },
+          },
+        });
       });
-    });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
+        throw new AppError(403, 'forbidden', '平台已完成初始化，安装向导已关闭', { reason: 'setup_already_done' });
+      }
+      throw error;
+    }
 
-    // 完成后该端点自动失效：下次调用 status 返回 needsSetup=false，setup 进入即被 adminCount 复检拦截（403）。
+    // 完成后该端点自动失效：下次调用 status 返回 needsSetup=false，setup 进入即被 adminCount 复检或 bootstrap lock 拦截。
     return { ok: true };
   }
 }

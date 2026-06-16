@@ -39,9 +39,9 @@ export class TestEmailDto {
 }
 
 /** 可被 reveal-secret 解密的敏感配置 key 白名单。
- *  仅这两项是后端存储的密钥类配置（SMTP 密码 / 极验私钥），其余 key 要么公开要么不应被明文查看。
- *  在 DTO 层用 @IsIn 强制，配合 service 层兜底，杜绝通过 reveal-secret 读取任意 key（如未来新增的 token）。 */
-export const REVEALABLE_SECRET_KEYS = ['smtpPass', 'geetestCaptchaKey'] as const;
+ *  这些 key 都按密钥类配置保存，审计时只记录 configured，不记录明文。
+ *  在 DTO 层用 @IsIn 强制，配合 service 层兜底，杜绝通过 reveal-secret 读取任意 key。 */
+export const REVEALABLE_SECRET_KEYS = ['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken'] as const;
 export type RevealableSecretKey = (typeof REVEALABLE_SECRET_KEYS)[number];
 
 /** POST /api/admin/settings/reveal-secret 入参：admin 当前密码 + 要查看的敏感 key。
@@ -53,8 +53,8 @@ export class RevealSecretDto {
   @MinLength(1, { message: 'password 不能为空' })
   password!: string;
 
-  @ApiProperty({ description: '要查看明文的敏感 key（仅 smtpPass / geetestCaptchaKey）', example: 'smtpPass' })
+  @ApiProperty({ description: '要查看明文的敏感 key（仅 smtpPass / geetestCaptchaKey / giteeAccessToken）', example: 'smtpPass' })
   @IsString()
-  @IsIn(REVEALABLE_SECRET_KEYS, { message: '仅支持查看 smtpPass 或 geetestCaptchaKey' })
+  @IsIn(REVEALABLE_SECRET_KEYS, { message: '仅支持查看 smtpPass、geetestCaptchaKey 或 giteeAccessToken' })
   key!: RevealableSecretKey;
 }

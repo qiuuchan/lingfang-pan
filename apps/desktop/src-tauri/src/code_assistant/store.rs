@@ -306,11 +306,7 @@ impl AssistantStore {
 
     /// 捕获到 CLI 侧会话 id（claude stream-json 的 session_id）后回写（design §3.3.2）。
     /// 复用 update_session_exit 的「定位 record 改字段再写」模式；只写非空 id（首轮可能未捕获）。
-    pub fn set_cli_session_id(
-        &self,
-        session_id: &str,
-        cli_session_id: &str,
-    ) -> Result<(), String> {
+    pub fn set_cli_session_id(&self, session_id: &str, cli_session_id: &str) -> Result<(), String> {
         if cli_session_id.trim().is_empty() {
             return Ok(());
         }
@@ -419,7 +415,9 @@ impl AssistantStore {
             return Ok(None);
         }
         let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        serde_json::from_str::<Value>(&raw).map(Some).map_err(|error| error.to_string())
+        serde_json::from_str::<Value>(&raw)
+            .map(Some)
+            .map_err(|error| error.to_string())
     }
 
     /// 写草稿（design §3.2.2）。复用 write_json 同款「建父目录 + 写」模式，
@@ -564,7 +562,9 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
 /// 同目录保证 tmp 与目标在同文件系统（rename 原子语义的前提）。
 /// tmp 文件名带 pid + 纳秒时间戳，避免并发写者互相覆盖 tmp。
 fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let parent = path.parent().ok_or_else(|| "目标路径无父目录".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "目标路径无父目录".to_string())?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let raw = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
     let tmp_name = format!(
@@ -782,7 +782,8 @@ mod tests {
             "commandPreview": ["claude"],
             "startedAt": "1"
         }"#;
-        let record: SessionRecord = serde_json::from_str(legacy).expect("旧 sessions.json 应可反序列化");
+        let record: SessionRecord =
+            serde_json::from_str(legacy).expect("旧 sessions.json 应可反序列化");
         assert_eq!(record.session_id, "legacy-1");
         assert_eq!(record.title, None);
         assert_eq!(record.archived, None);
@@ -855,9 +856,7 @@ mod tests {
         store
             .append_transcript("del-1", "input", json!({ "prompt": "你好" }))
             .unwrap();
-        store
-            .write_draft("del-1", &json!({ "files": [] }))
-            .unwrap();
+        store.write_draft("del-1", &json!({ "files": [] })).unwrap();
         // 三个产物都存在。
         assert!(store.transcript_path("del-1").exists());
         assert!(store.draft_path("del-1").exists());

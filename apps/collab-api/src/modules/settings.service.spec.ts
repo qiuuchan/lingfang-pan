@@ -10,17 +10,19 @@
 //  - 组A：SMTP key 校验 + 改 SMTP/品牌 key 失效 mail 缓存 + getSmtpSettings 配置回退 + 密码脱敏。
 // 参考 release.service.spec.ts：Mock PrismaService + AuthService + MailService，不连真实 DB。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import bcrypt from 'bcryptjs';
 import { SettingsService, PUBLIC_SETTING_KEYS, resetPublicInfoCache } from './settings.service';
 import { forbidden } from '../common';
 
 function mockPrisma() {
-  return {
-    platformSetting: {
-      findMany: vi.fn(),
-      upsert: vi.fn(),
-    },
-    auditLog: { create: vi.fn() },
+  const platformSetting = {
+    findMany: vi.fn(),
+    upsert: vi.fn(),
+    findUnique: vi.fn(),
   };
+  const auditLog = { create: vi.fn() };
+  const $transaction = vi.fn(async (cb: (tx: { platformSetting: typeof platformSetting; auditLog: typeof auditLog }) => Promise<unknown>) => cb({ platformSetting, auditLog }));
+  return { platformSetting, auditLog, $transaction };
 }
 
 function mockAuth() {
@@ -157,6 +159,22 @@ describe('SettingsService', () => {
     ]);
   });
 
+  it('update 事务内任一写入失败时整批失败且不执行缓存失效', async () => {
+    prisma.platformSetting.upsert
+      .mockResolvedValueOnce({ key: 'platformName', value: '灵坊' })
+      .mockRejectedValueOnce(new Error('db failed'));
+    await expect(service.updateSettings('user-admin', {
+      settings: [
+        { key: 'platformName', value: '灵坊' },
+        { key: 'logoUrl', value: 'https://x/logo.png' },
+      ],
+    })).rejects.toThrow('db failed');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mail.invalidateSmtpCache).not.toHaveBeenCalled();
+    expect(geetest.invalidateConfigCache).not.toHaveBeenCalled();
+    expect(gitee.invalidateChangelogCache).not.toHaveBeenCalled();
+  });
+
   it('getPublicInfo 仅返回 platformName/logoUrl/geetestCaptchaId/geetestScenes（缺省兜底）', async () => {
     // DB 仅有 platformName 一项，logoUrl/geetestCaptchaId/geetestScenes 缺失 → 返回兜底空串。
     prisma.platformSetting.findMany.mockResolvedValue([{ key: 'platformName', value: '灵坊' }]);
@@ -190,14 +208,14 @@ describe('SettingsService', () => {
     expect(PUBLIC_SETTING_KEYS).not.toContain('geetestCaptchaKey');
   });
 
-  // 组C 场景开关：geetestScenes 公开（前端按场景决定是否渲染验证码），与 captchaId 同级暴露。
-  it('getPublicInfo 暴露 geetestScenes（trim 归一化，前端据此按场景开关验证码）', async () => {
+  // 组C 场景开关：geetestScenes 公开（管理端前端按场景决定是否渲染验证码）。
+  it('getPublicInfo 暴露归一化后的管理端 geetestScenes', async () => {
     prisma.platformSetting.findMany.mockResolvedValue([
       { key: 'geetestCaptchaId', value: 'fake-id' },
-      { key: 'geetestScenes', value: '  login,register  ' },
+      { key: 'geetestScenes', value: '  login,forgot  ' },
     ]);
     const result = await service.getPublicInfo();
-    expect(result.geetestScenes).toBe('login,register');
+    expect(result.geetestScenes).toBe('admin_login,admin_forgot');
     expect(PUBLIC_SETTING_KEYS).toContain('geetestScenes');
   });
 
@@ -244,17 +262,16 @@ describe('SettingsService', () => {
   });
 
   // 组C 极验场景开关：geetestScenes 白名单 + 归一化。
-  it('update 接受合法 geetestScenes（逗号分隔，归一化为固定顺序 login,register,forgot）', async () => {
-    prisma.platformSetting.upsert.mockResolvedValue({ key: 'geetestScenes', value: 'login,register,forgot' });
-    // 乱序 + 大小写混合 + 多余空白，归一化后按固定顺序输出。
+  it('update 接受管理端 geetestScenes，并兼容旧 login/forgot 配置', async () => {
+    prisma.platformSetting.upsert.mockResolvedValue({ key: 'geetestScenes', value: 'admin_login,admin_forgot' });
     const result = await service.updateSettings('user-admin', {
       settings: [{ key: 'geetestScenes', value: '  Forgot , LOGIN , register  ' }],
     });
     expect(prisma.platformSetting.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: { key: 'geetestScenes' },
-      create: expect.objectContaining({ value: 'login,register,forgot' }),
+      create: expect.objectContaining({ value: 'admin_login,admin_forgot' }),
     }));
-    expect(result.settings).toEqual([{ key: 'geetestScenes', value: 'login,register,forgot' }]);
+    expect(result.settings).toEqual([{ key: 'geetestScenes', value: 'admin_login,admin_forgot' }]);
   });
 
   it('update 接受空 geetestScenes（清空=全部场景关闭）', async () => {
@@ -270,14 +287,14 @@ describe('SettingsService', () => {
 
   it('update 拒绝含未知场景的 geetestScenes', async () => {
     await expect(
-      service.updateSettings('user-admin', { settings: [{ key: 'geetestScenes', value: 'login,evil' }] }),
+      service.updateSettings('user-admin', { settings: [{ key: 'geetestScenes', value: 'admin_login,evil' }] }),
     ).rejects.toMatchObject({ status: 400, code: 'bad_request' });
     expect(prisma.platformSetting.upsert).not.toHaveBeenCalled();
   });
 
   it('update 改 geetestScenes 后失效 GeetestService 配置缓存（场景变更需重读配置）', async () => {
-    prisma.platformSetting.upsert.mockResolvedValue({ key: 'geetestScenes', value: 'login' });
-    await service.updateSettings('user-admin', { settings: [{ key: 'geetestScenes', value: 'login' }] });
+    prisma.platformSetting.upsert.mockResolvedValue({ key: 'geetestScenes', value: 'admin_login' });
+    await service.updateSettings('user-admin', { settings: [{ key: 'geetestScenes', value: 'admin_login' }] });
     expect(geetest.invalidateConfigCache).toHaveBeenCalledTimes(1);
   });
 
@@ -285,13 +302,13 @@ describe('SettingsService', () => {
     prisma.platformSetting.findMany.mockResolvedValue([
       { key: 'geetestCaptchaId', value: 'fake-id' },
       { key: 'geetestCaptchaKey', value: 'super-secret-key' },
-      { key: 'geetestScenes', value: 'login,register' },
+      { key: 'geetestScenes', value: 'login,forgot' },
     ]);
     const result = await service.getGeetestSettings('user-admin');
     expect(result).toEqual({
       geetestCaptchaId: 'fake-id',
       hasCaptchaKey: true,
-      geetestScenes: 'login,register',
+      geetestScenes: 'admin_login,admin_forgot',
       hasCaptchaId: true,
     });
     // 关键约束：绝不返回 captchaKey 明文（避免私钥经 HTTP 响应泄漏到浏览器）。
@@ -592,6 +609,21 @@ describe('SettingsService', () => {
       throw forbidden('仅平台管理员可操作');
     });
     await expect(service.getGiteeSettings('user-member')).rejects.toMatchObject({ status: 403, code: 'forbidden' });
+  });
+
+  it('revealSecret 支持通过二次密码确认查看 giteeAccessToken 明文', async () => {
+    const passwordHash = await bcrypt.hash('AdminPass123!', 4);
+    auth.ensurePlatformAdmin.mockResolvedValue({ id: 'admin-1', passwordHash });
+    prisma.platformSetting.findUnique.mockResolvedValue({ value: 'secret-token-0123456789abcdef' });
+    const result = await service.revealSecret('admin-1', { key: 'giteeAccessToken', password: 'AdminPass123!' });
+    expect(result).toEqual({ value: 'secret-token-0123456789abcdef' });
+    expect(prisma.platformSetting.findUnique).toHaveBeenCalledWith({
+      where: { key: 'giteeAccessToken' },
+      select: { value: true },
+    });
+    const auditData = prisma.auditLog.create.mock.calls[0][0].data;
+    expect(auditData.action).toBe('admin.setting.secret_revealed');
+    expect(JSON.stringify(auditData.metadata)).not.toContain('secret-token');
   });
 
   it('testGitee 未配置 token 时返回 configured=false', async () => {
