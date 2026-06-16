@@ -10,6 +10,7 @@ import { PluginList } from './PluginList';
 import { Shimmer } from '@/lib/motion';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
 import { parseManifest } from '@/lib/plugin-draft';
+import { dragRegionProps } from '@/lib/window-drag';
 import type { ScriptRuntime } from '@/lib/plugin-script';
 import { ScriptPreviewPanel } from '@/components/creator/panels/ScriptPreviewPanel';
 import {
@@ -181,8 +182,8 @@ function RunnerHeader({
   onShowManifest: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
-      <span className="truncate text-sm font-medium">{plugin.name}</span>
+    <div {...dragRegionProps} className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
+      <span className="truncate text-sm font-medium" data-tauri-drag-region>{plugin.name}</span>
       <div className="flex items-center gap-2">
         {/* 详情：展示插件 manifest.json 信息（体验完善需求 1，所有插件可用）。 */}
         <Button variant="ghost" size="sm" onClick={onShowManifest}>
