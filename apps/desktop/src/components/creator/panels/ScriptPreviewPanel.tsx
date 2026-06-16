@@ -17,7 +17,7 @@
 // 缺失解释器降级：两种模式都保留 probe 探测 + 安装指引（start/run 均依赖解释器存在）。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { PlayIcon, RefreshCwIcon, SquareIcon, TerminalIcon, Code2Icon } from 'lucide-react';
+import { PlayIcon, RefreshCwIcon, SquareIcon, TerminalIcon, Code2Icon, Loader2Icon, CheckIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -34,6 +34,8 @@ import {
   scanPluginStatus,
   startPlugin,
   stopPlugin,
+  type PluginStartProgress,
+  type PluginStartStage,
 } from '@/lib/plugin-status';
 import { parseManifest } from '@/lib/plugin-draft';
 import { errorMessage } from '@/pages/plugins-runtime';
@@ -47,9 +49,10 @@ type ProbeState =
 
 // 组C 持久化运行态：独立进程运行（不再嵌入式终端回显）。
 // running/stopping 都带 pid+startedAt，便于停止失败时回退到 running 态保留进程信息。
+// starting 态带 stage + stageMessage（来自 Rust plugin:start-progress 事件），渲染分阶段进度动画。
 type PersistentRunState =
   | { status: 'idle' }
-  | { status: 'starting' }
+  | { status: 'starting'; stage: PluginStartStage; stageMessage: string }
   | { status: 'running'; pid: number; startedAt: string }
   | { status: 'stopping'; pid: number; startedAt: string }
   | { status: 'error'; error: CreatorError };
@@ -140,9 +143,13 @@ export function ScriptPreviewPanel({
   // === 组C 持久化运行：启动/停止独立进程 ===
   const handleStart = useCallback(async () => {
     if (!pluginId) return;
-    setPersistentRun({ status: 'starting' });
+    // 初始 checking 阶段（Rust 进 start_plugin 会先 emit checking，但立即设置避免 UI 空窗）。
+    setPersistentRun({ status: 'starting', stage: 'checking', stageMessage: '正在检查插件运行环境…' });
     try {
-      const result = await startPlugin(pluginId);
+      // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
+      const result = await startPlugin(pluginId, (progress: PluginStartProgress) => {
+        setPersistentRun({ status: 'starting', stage: progress.stage, stageMessage: progress.message });
+      });
       setPersistentRun({ status: 'running', pid: result.pid, startedAt: result.started_at });
       toast.success(`${RUNTIME_LABEL[runtime]} 插件已启动，运行在独立进程`);
     } catch (error) {
@@ -269,11 +276,14 @@ export function ScriptPreviewPanel({
           </div>
 
           {/* 运行状态展示（PRD 需求 5：软件内显示「插件运行中」+ 进程信息 + 「强制关闭」按钮） */}
-          {(persistentRun.status === 'idle' || persistentRun.status === 'starting') && (
+          {persistentRun.status === 'idle' && (
             <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center text-sm text-muted-foreground">
               <p>插件将以独立进程运行（{runtime === 'python' ? '使用 .venv 隔离环境' : '使用 pnpm install + start'}）。</p>
               <p className="text-xs">点击「运行」启动；运行输出在插件自身的窗口/控制台。</p>
             </div>
+          )}
+          {persistentRun.status === 'starting' && (
+            <StartProgressView stage={persistentRun.stage} message={persistentRun.stageMessage} runtime={runtime} />
           )}
           {persistentRun.status === 'running' && (
             <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
@@ -397,5 +407,67 @@ export function ScriptPreviewPanel({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// === 启动分阶段进度视图（shadcn 风格，体验完善需求 2） ===
+//
+// 三阶段垂直步骤：checking → deps_installing（按需）→ starting。
+// 当前阶段 Spinner 旋转；已过阶段 CheckIcon 绿色；未到阶段灰色。每阶段附中文文案。
+// deps_installing 仅当 stage 命中时高亮（后端 ensure 逻辑：依赖已装则跳过该阶段直接到 starting）。
+
+const STAGE_ORDER: PluginStartStage[] = ['checking', 'deps_installing', 'starting'];
+const STAGE_LABEL: Record<PluginStartStage, string> = {
+  checking: '检查运行环境',
+  deps_installing: '安装依赖',
+  starting: '启动插件进程',
+};
+
+function StartProgressView({
+  stage,
+  message,
+  runtime,
+}: {
+  stage: PluginStartStage;
+  message: string;
+  runtime: ScriptRuntime;
+}) {
+  const currentIndex = STAGE_ORDER.indexOf(stage);
+  // Node 首次启动可能无 deps_installing（无依赖声明）→ Python 总有 checking。
+  // 统一展示三阶段，但 deps_installing 是否「跳过」由后端是否 emit 该 stage 决定（未到则灰色）。
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Loader2Icon className="size-4 animate-spin text-primary" />
+        <span>正在启动 {RUNTIME_LABEL[runtime]} 插件…</span>
+      </div>
+      <div className="flex flex-col gap-2.5">
+        {STAGE_ORDER.map((s, index) => {
+          const done = index < currentIndex;
+          const active = index === currentIndex;
+          return (
+            <div key={s} className="flex items-center gap-2.5 text-sm">
+              <span className="flex size-5 shrink-0 items-center justify-center">
+                {done ? (
+                  <span className="flex size-5 items-center justify-center rounded-full bg-emerald-500 text-emerald-50">
+                    <CheckIcon className="size-3" />
+                  </span>
+                ) : active ? (
+                  <Loader2Icon className="size-4 animate-spin text-primary" />
+                ) : (
+                  <span className="size-2 rounded-full bg-muted-foreground/30" />
+                )}
+              </span>
+              <span className={done ? 'text-muted-foreground line-through' : active ? 'text-foreground font-medium' : 'text-muted-foreground/60'}>
+                {STAGE_LABEL[s]}
+              </span>
+              {active && message && (
+                <span className="text-xs text-muted-foreground">· {message}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
