@@ -24,21 +24,26 @@ export class AuthService {
 
   /**
    * 组C 极验验证码校验守卫：供 login/register/forgotPassword 复用。
-   * - 按 scene 判定是否启用：geetestScenes 配置未含该场景 → 直接跳过（admin 可按场景开关验证码）。
-   * - 启用场景下强制校验：captcha 缺失或校验失败 → throw badRequest('请先完成验证码')。
+   * - 应用端（desktop 客户端，clientKind==='desktop'）一律跳过验证码：桌面客户端本身不做验证码 UI，
+   *   且登录态受 Tauri 壳隔离，无公开爆破面，与浏览器端管理后台的风险模型不同。
+   * - 管理端（浏览器，clientKind 非 desktop）按 scene 判定：geetestScenes 未含该场景 → 跳过；
+   *   含该场景 → 强制校验，captcha 缺失或校验失败 → throw badRequest('请先完成验证码')。
    * - 未配置极验（captchaId 空）→ 直接跳过（开发态不强制，前端也不显验证码）。
    * 极验 API 异常时 GeetestService.validate 自身降级放行（容灾，不阻断登录），此处无需重复处理。
    */
-  private async requireCaptcha(scene: GeetestScene, captcha?: Partial<GeetestCaptchaParams>): Promise<void> {
+  private async requireCaptcha(scene: GeetestScene, captcha: Partial<GeetestCaptchaParams> | undefined, clientKind?: string): Promise<void> {
+    // 应用端（desktop）跳过验证码：桌面客户端无验证码 UI，由调用方经 X-Client:desktop header 标识。
+    if (clientKind === 'desktop') return;
     const enabled = await this.geetest.isSceneEnabled(scene);
     if (!enabled) return;
     const ok = await this.geetest.validate(captcha);
     if (!ok) throw badRequest('请先完成验证码');
   }
 
-  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string; captcha?: Partial<GeetestCaptchaParams> }) {
+  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string; captcha?: Partial<GeetestCaptchaParams>; clientKind?: string }) {
     // 组C 极验：register 场景启用时强制校验验证码（在所有业务逻辑之前，避免无效请求消耗 DB 查询）。
-    await this.requireCaptcha('register', input.captcha);
+    // 应用端（desktop）跳过验证码（见 requireCaptcha 的 clientKind 判定）。
+    await this.requireCaptcha('register', input.captcha, input.clientKind);
     const email = input.email?.trim().toLowerCase();
     // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
     // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
@@ -93,9 +98,10 @@ export class AuthService {
     await this.mail.sendEmailVerification(email, link);
   }
 
-  async login(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams> }) {
+  async login(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams>; clientKind?: string }) {
     // 组C 极验：login 场景启用时强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
-    await this.requireCaptcha('login', input.captcha);
+    // 应用端（desktop）跳过验证码（见 requireCaptcha 的 clientKind 判定）。
+    await this.requireCaptcha('login', input.captcha, input.clientKind);
     const email = input.email?.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 登录失败统一审计：actorUserId 可为 null（用户不存在时），便于安全审计追踪暴力破解尝试。
@@ -226,9 +232,10 @@ export class AuthService {
    * reset token 为独立 JWT（scope='pwd_reset'），与登录 token 分离，复用 JWT_SECRET 签名。
    * token 内嵌 userId，reset-password 时校验 + 改密 + tokenVersion++（作废所有旧登录 token）。
    */
-  async forgotPassword(input: { email: string; captcha?: Partial<GeetestCaptchaParams> }) {
+  async forgotPassword(input: { email: string; captcha?: Partial<GeetestCaptchaParams>; clientKind?: string }) {
     // 组C 极验：forgot 场景启用时强制校验验证码（在查用户之前，避免无效请求消耗 DB 查询）。
-    await this.requireCaptcha('forgot', input.captcha);
+    // 应用端（desktop）跳过验证码（见 requireCaptcha 的 clientKind 判定）。
+    await this.requireCaptcha('forgot', input.captcha, input.clientKind);
     const email = input.email?.trim().toLowerCase();
     if (!email) throw badRequest('请输入邮箱');
     const user = await this.prisma.user.findUnique({ where: { email } });

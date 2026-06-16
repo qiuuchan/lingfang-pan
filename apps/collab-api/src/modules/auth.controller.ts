@@ -19,7 +19,9 @@ export class AuthController {
   @Post('register')
   @AUTH_THROTTLE
   @ApiOperation({ summary: '本地客户端注册普通用户或提交团队管理员申请' })
-  register(@Body() body: RegisterDto) {
+  register(@Body() body: RegisterDto, @Req() req: Request) {
+    // 应用端（desktop）经 X-Client:desktop header 标识，service.requireCaptcha 据此跳过验证码。
+    const clientKind = (req.headers['x-client'] as string | undefined)?.trim().toLowerCase();
     return this.auth.register({
       email: body.email,
       password: body.password,
@@ -28,6 +30,7 @@ export class AuthController {
       teamName: body.teamName,
       reason: body.reason,
       captcha: body.captcha,
+      clientKind,
     });
   }
 
@@ -35,16 +38,20 @@ export class AuthController {
   @Post('login')
   @AUTH_THROTTLE
   @ApiOperation({ summary: '本地客户端和管理端共用登录' })
-  login(@Body() body: LoginDto) {
-    return this.auth.login({ email: body.email, password: body.password, captcha: body.captcha });
+  login(@Body() body: LoginDto, @Req() req: Request) {
+    // 应用端（desktop）经 X-Client:desktop header 标识，service.requireCaptcha 据此跳过验证码。
+    const clientKind = (req.headers['x-client'] as string | undefined)?.trim().toLowerCase();
+    return this.auth.login({ email: body.email, password: body.password, captcha: body.captcha, clientKind });
   }
 
   @Public()
   @Post('forgot-password')
   @AUTH_THROTTLE
   @ApiOperation({ summary: '找回密码：发送重置链接邮件（占位 SMTP 未配时降级 console.log）' })
-  forgotPassword(@Body() body: ForgotPasswordDto) {
-    return this.auth.forgotPassword({ email: body.email, captcha: body.captcha });
+  forgotPassword(@Body() body: ForgotPasswordDto, @Req() req: Request) {
+    // 应用端（desktop）经 X-Client:desktop header 标识，service.requireCaptcha 据此跳过验证码。
+    const clientKind = (req.headers['x-client'] as string | undefined)?.trim().toLowerCase();
+    return this.auth.forgotPassword({ email: body.email, captcha: body.captcha, clientKind });
   }
 
   @Public()
