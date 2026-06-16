@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon } from 'lucide-react';
+import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon, InfoIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import type { LoadedPlugin } from '@/lib/types';
+import type { LoadedPlugin, DraftFile } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginList } from './PluginList';
 import { Shimmer } from '@/lib/motion';
+import { PluginManifestDialog } from '@/components/PluginManifestDialog';
 import { parseManifest } from '@/lib/plugin-draft';
 import type { ScriptRuntime } from '@/lib/plugin-script';
 import { ScriptPreviewPanel } from '@/components/creator/panels/ScriptPreviewPanel';
@@ -38,16 +39,25 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 }
 
 function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
-  const { setCurrentDraft, setView, setRunningPlugin } = useApp();
+  const { setCurrentDraft, setView, setRunningPlugin, session } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [srcDoc, setSrcDoc] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [editing, setEditing] = useState(false);
+  // 详情弹窗（体验完善需求 1：展示插件 manifest.json 信息）。
+  const [manifestOpen, setManifestOpen] = useState(false);
   // R3 脚本运行视图刷新 key：点刷新时 +1 触发 ScriptPreviewPanel 重新探测。
   const [scriptPreviewKey, setScriptPreviewKey] = useState(0);
 
   // R3 据 manifest 的 runtime_type 分派运行态。client→iframe（不变），nodejs/python→脚本运行，cloud→说明。
   const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
+
+  // 修改权限（与后端 ensurePluginManager 一致）：作者本人 或 当前用户是 TEAM_ADMIN。
+  // 内置插件（builtin）不可改；市场第三方插件（source==='marketplace' 且非本团队）无 files 也不可改。
+  const canEdit = !plugin.builtin
+    && plugin.source === 'team'
+    && (plugin.authorUserId === session.userId || session.role === 'TEAM_ADMIN')
+    && Boolean(plugin.files?.length);
 
   async function editInGenerator() {
     setEditing(true);
@@ -101,7 +111,14 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
 
   return (
     <div className="flex h-full flex-col">
-      <RunnerHeader plugin={plugin} editing={editing} onBack={onBack} onEdit={editInGenerator} />
+      <RunnerHeader
+        plugin={plugin}
+        editing={editing}
+        canEdit={canEdit}
+        onBack={onBack}
+        onEdit={editInGenerator}
+        onShowManifest={() => setManifestOpen(true)}
+      />
       {isScriptRuntime(runtime) ? (
         // R3 nodejs/python：复用创建器的脚本运行组件（探测→运行→终端回显 + 缺失运行时引导）。
         // 「使用/启用」即点「运行」执行 entry 脚本；缺失解释器时组件内引导安装。
@@ -130,6 +147,20 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
       ) : (
         <RunnerBody error={error} iframeRef={iframeRef} plugin={plugin} srcDoc={srcDoc} />
       )}
+      <PluginManifestDialog
+        open={manifestOpen}
+        onOpenChange={setManifestOpen}
+        pluginName={plugin.name}
+        files={plugin.files}
+        fallback={{
+          id: plugin.id,
+          name: plugin.name,
+          version: plugin.version,
+          runtime_type: plugin.runtime_type,
+          entry: plugin.entry,
+          description: plugin.description,
+        }}
+      />
     </div>
   );
 }
@@ -137,19 +168,28 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
 function RunnerHeader({
   plugin,
   editing,
+  canEdit,
   onBack,
   onEdit,
+  onShowManifest,
 }: {
   plugin: LoadedPlugin;
   editing: boolean;
+  canEdit: boolean;
   onBack: () => void;
   onEdit: () => void;
+  onShowManifest: () => void;
 }) {
   return (
     <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
       <span className="truncate text-sm font-medium">{plugin.name}</span>
       <div className="flex items-center gap-2">
-        {plugin.source === 'team' && (
+        {/* 详情：展示插件 manifest.json 信息（体验完善需求 1，所有插件可用）。 */}
+        <Button variant="ghost" size="sm" onClick={onShowManifest}>
+          <InfoIcon className="size-4" />详情
+        </Button>
+        {/* 继续修改：作者本人 或 TEAM_ADMIN 可改（与后端 ensurePluginManager 一致，需求 3）。 */}
+        {canEdit && (
           <LoadingButton variant="outline" size="sm" loading={editing} onClick={onEdit}>
             <PencilIcon className="size-4" />继续修改
           </LoadingButton>
@@ -210,11 +250,29 @@ function LocalPluginItem({
   onOpen: (item: LocalPluginStatus) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // 详情弹窗（体验完善需求 1：展示本地插件 manifest.json 信息，懒加载读取）。
+  const [manifestOpen, setManifestOpen] = useState(false);
+  // 本地插件 manifest 文件列表（详情弹窗打开时懒加载读取 manifest.json）。
+  const [manifestFiles, setManifestFiles] = useState<DraftFile[]>([]);
   const isRunning = item.status === 'running';
   const isScript = item.runtime === 'nodejs' || item.runtime === 'python';
 
   // 本地插件仅 client（HTML）可「打开」内嵌 iframe；nodejs/python 走「运行」独立进程。
   const canOpen = item.runtime === 'client' && item.status !== 'error';
+
+  // 打开详情：懒加载读取本地插件 manifest.json（首次打开才读，避免列表渲染时 N 次文件 IO）。
+  async function openManifest() {
+    if (!manifestFiles.length) {
+      try {
+        const content = await readLocalPluginFile(item.id, 'manifest.json');
+        setManifestFiles([{ path: 'manifest.json', content }]);
+      } catch {
+        // manifest 读取失败（incomplete/error 插件可能无 manifest）：留空，弹窗用 fallback 字段展示。
+        setManifestFiles([]);
+      }
+    }
+    setManifestOpen(true);
+  }
 
   async function handleToggle() {
     setBusy(true);
@@ -263,6 +321,10 @@ function LocalPluginItem({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <span className="text-xs text-muted-foreground">v{item.version}</span>
+        {/* 详情：展示插件 manifest.json 信息（体验完善需求 1，所有插件可用）。 */}
+        <Button variant="ghost" size="sm" onClick={openManifest} title="查看插件信息">
+          <InfoIcon className="size-3.5" />
+        </Button>
         {/* 脚本型（Python/Node）：运行/停止按钮（独立进程，PRD AC5）。 */}
         {isScript && (
           <LoadingButton
@@ -284,6 +346,20 @@ function LocalPluginItem({
           </Button>
         )}
       </div>
+      <PluginManifestDialog
+        open={manifestOpen}
+        onOpenChange={setManifestOpen}
+        pluginName={item.name}
+        files={manifestFiles}
+        fallback={{
+          id: item.id,
+          name: item.name,
+          version: item.version,
+          runtime_type: item.runtime,
+          entry: item.entry,
+          description: item.description,
+        }}
+      />
     </div>
   );
 }
