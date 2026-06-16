@@ -4,6 +4,8 @@ import {
   buildFallbackEntryHtml,
   buildLocalDraft,
   cleanPathFrontend,
+  defaultEntryForRuntime,
+  buildFallbackEntryFile,
   deriveTitle,
   hasStructuredBlocks,
   makeConversationDraft,
@@ -1078,5 +1080,47 @@ describe('summarizeTitleLocally', () => {
 
   it('空输入兜底新对话', () => {
     expect(summarizeTitleLocally('', '')).toBe('新对话');
+  });
+});
+
+// === 入口按 runtime_type 分流（修复 Python/Node 入口误判为 ui/index.html） ===
+
+describe('defaultEntryForRuntime', () => {
+  it('python → main.py', () => {
+    expect(defaultEntryForRuntime('python')).toBe('main.py');
+  });
+  it('nodejs → index.js', () => {
+    expect(defaultEntryForRuntime('nodejs')).toBe('index.js');
+  });
+  it('client → ui/index.html', () => {
+    expect(defaultEntryForRuntime('client')).toBe('ui/index.html');
+  });
+  it('未知/缺失 → 回退 ui/index.html', () => {
+    expect(defaultEntryForRuntime(undefined)).toBe('ui/index.html');
+    expect(defaultEntryForRuntime('cloud')).toBe('ui/index.html');
+    expect(defaultEntryForRuntime('')).toBe('ui/index.html');
+  });
+});
+
+describe('buildFallbackEntryFile', () => {
+  it('python 生成 main.py 可运行骨架（含 if __name__ guard）', () => {
+    const file = buildFallbackEntryFile('python', { manifestName: '番茄钟' });
+    expect(file.language).toBe('python');
+    expect(file.content).toContain('main');
+    expect(file.content).toContain("if __name__ == '__main__'");
+  });
+  it('nodejs 生成 index.js 骨架', () => {
+    const file = buildFallbackEntryFile('nodejs', { manifestName: 'my-tool' });
+    expect(file.language).toBe('javascript');
+    expect(file.content).toContain('console.log');
+  });
+  it('client 生成 HTML 兜底页', () => {
+    const file = buildFallbackEntryFile('client', { manifestName: '网页插件' });
+    expect(file.language).toBe('html');
+    expect(file.content).toContain('<!doctype html>');
+  });
+  it('兜底骨架含 manifestName（便于用户识别）', () => {
+    const py = buildFallbackEntryFile('python', { manifestName: '番茄钟' });
+    expect(py.content).toContain('番茄钟');
   });
 });

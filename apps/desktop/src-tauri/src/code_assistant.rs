@@ -401,15 +401,14 @@ pub fn start_session<E: AssistantEventSink>(
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
     let workspace_dir = resolve_workspace(input.workspace_dir, Some(state.store.root()), input.plugin_id.as_deref())?;
     let session_id = session_id;
-    let final_prompt = match input.system_prompt.as_deref() {
-        Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n---\n\n{}", input.prompt),
-        _ => input.prompt.clone(),
-    };
+    // system_prompt 不再拼进 prompt 文本——改由 run_args 的 system_prompt 参数传给 claude 的 --system-prompt
+    // （作为独立 system message）。此前拼接方式让 claude 把创建指令当普通用户文本，弱化/忽略指令。
     let args = command.args_with(definition.run_args(
-        &final_prompt,
+        &input.prompt,
         input.model.as_deref(),
         None,
         input.effort.as_deref(),
+        input.system_prompt.as_deref(),
     ));
     let command_preview = command_preview(&command.binary, &args);
     let transcript_path = state.store.transcript_path(&session_id);
@@ -569,11 +568,14 @@ pub fn send_input<E: AssistantEventSink>(
     let effective_model = input.model.as_deref().or(session.model.as_deref());
     // R2 思考强度：前端每轮 send 均传 effort（start_session 首轮 + send_input 追问），
     // 故直接用本轮入参值，无需在 SessionRecord 额外持久化（会话中途调即随轮次生效）。
+    // system_prompt 仅首轮 start_session 传（--system-prompt）；追问走 --resume 续接，
+    // claude 会恢复首轮 system prompt，重复传可能与 --resume 冲突，故此处恒 None。
     let args = command.args_with(definition.run_args(
         &final_prompt,
         effective_model,
         resume_id.as_deref(),
         input.effort.as_deref(),
+        None,
     ));
 
     // 追问期间 status 回到 running（design §3.3.4 状态契约），waiter 退出后再置 exited。

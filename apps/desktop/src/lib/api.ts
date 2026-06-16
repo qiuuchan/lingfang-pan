@@ -176,7 +176,9 @@ interface ApiOptions {
 const DEFAULT_API_TIMEOUT_MS = 30_000;
 
 export async function api<T = any>(path: string, { method = 'GET', body, auth = true, timeoutMs = DEFAULT_API_TIMEOUT_MS }: ApiOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // 客户端标识：所有请求带 X-Client:desktop，后端 auth.requireCaptcha 据此对应用端跳过验证码
+  // （管理端浏览器不带此 header → 继续强制验证码）。桌面客户端无验证码 UI，登录/注册/找回密码直通。
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Client': 'desktop' };
   if (auth && authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
   const base = apiBase();

@@ -47,6 +47,7 @@ fn build_args(
     model: Option<&str>,
     _resume_id: Option<&str>,
     _effort: Option<&str>,
+    _system_prompt: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec!["exec".to_string(), prompt.to_string()];
     if let Some(model) = model {
