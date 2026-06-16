@@ -66,14 +66,15 @@ struct PluginManifest {
 /// - 解析失败（文件缺失/JSON 非法/runtime_type 非法）返回具体错误，供前端展示 error 状态。
 fn parse_manifest(plugin_dir: &std::path::Path) -> Result<PluginManifest, String> {
     let manifest_path = plugin_dir.join("manifest.json");
-    let raw = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("读取 manifest.json 失败（{}）：{e}", manifest_path.display()))?;
+    let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
+        format!(
+            "读取 manifest.json 失败（{}）：{e}",
+            manifest_path.display()
+        )
+    })?;
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("manifest.json 解析失败：{e}"))?;
-    let runtime_str = v
-        .get("runtime_type")
-        .and_then(|x| x.as_str())
-        .unwrap_or("");
+    let runtime_str = v.get("runtime_type").and_then(|x| x.as_str()).unwrap_or("");
     let runtime = match runtime_str {
         "nodejs" => PluginRuntimeKind::Nodejs,
         "python" => PluginRuntimeKind::Python,
@@ -151,8 +152,9 @@ fn ensure_python_venv(plugin_dir: &std::path::Path) -> Result<PathBuf, String> {
     // 已有 venv 且解释器存在 → 跳过创建（但 requirements.txt 仍需检查是否装过，简化：每次 start 都补装幂等）。
     if !py.is_file() {
         // 探测宿主 Python：Windows 优先 py launcher（避免 Microsoft Store stub，见 plugin_script.rs 注释）。
-        let host_py = find_python_interpreter()
-            .ok_or_else(|| "未检测到 Python 解释器（需安装 Python 3 或 py launcher）".to_string())?;
+        let host_py = find_python_interpreter().ok_or_else(|| {
+            "未检测到 Python 解释器（需安装 Python 3 或 py launcher）".to_string()
+        })?;
         // venv 创建：py -3 -m venv .venv。venv 含 pip 引导可能 30s+，给 300s 超时。
         let venv_args = vec![
             "-m".to_string(),
@@ -267,11 +269,18 @@ fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
         return false;
     }
     // 仅当声明了非空依赖才真正需要 install（与 ensure_node_dependencies 的 has_deps 判定一致）。
-    let Ok(raw) = std::fs::read_to_string(&pkg_json) else { return false; };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return false; };
-    ["dependencies", "devDependencies"]
-        .iter()
-        .any(|k| v.get(k).and_then(|x| x.as_object()).map(|m| !m.is_empty()).unwrap_or(false))
+    let Ok(raw) = std::fs::read_to_string(&pkg_json) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    ["dependencies", "devDependencies"].iter().any(|k| {
+        v.get(k)
+            .and_then(|x| x.as_object())
+            .map(|m| !m.is_empty())
+            .unwrap_or(false)
+    })
 }
 
 /// 确保 Node 插件依赖已安装（PRD 需求 7 / AC8）。
@@ -288,13 +297,16 @@ fn ensure_node_dependencies(plugin_dir: &std::path::Path) -> Result<(), String> 
         return Ok(());
     }
     // 解析是否有依赖声明（空 dependencies 不触发 install）。
-    let raw = std::fs::read_to_string(&pkg_json)
-        .map_err(|e| format!("读取 package.json 失败：{e}"))?;
+    let raw =
+        std::fs::read_to_string(&pkg_json).map_err(|e| format!("读取 package.json 失败：{e}"))?;
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("package.json 解析失败：{e}"))?;
-    let has_deps = ["dependencies", "devDependencies"]
-        .iter()
-        .any(|k| v.get(k).and_then(|x| x.as_object()).map(|m| !m.is_empty()).unwrap_or(false));
+    let has_deps = ["dependencies", "devDependencies"].iter().any(|k| {
+        v.get(k)
+            .and_then(|x| x.as_object())
+            .map(|m| !m.is_empty())
+            .unwrap_or(false)
+    });
     if !has_deps {
         return Ok(());
     }
@@ -460,11 +472,14 @@ pub fn start_plugin(
     use tauri::Emitter;
     // 阶段事件辅助：emit 失败不阻断启动（UI 无监听者或通道错误时静默降级为同步等待）。
     let emit_stage = |stage: &str, message: &str| {
-        let _ = app.emit("plugin:start-progress", PluginStartProgress {
-            plugin_id: plugin_id.clone(),
-            stage: stage.to_string(),
-            message: message.to_string(),
-        });
+        let _ = app.emit(
+            "plugin:start-progress",
+            PluginStartProgress {
+                plugin_id: plugin_id.clone(),
+                stage: stage.to_string(),
+                message: message.to_string(),
+            },
+        );
     };
 
     emit_stage("checking", "正在检查插件运行环境…");
@@ -475,7 +490,10 @@ pub fn start_plugin(
         PluginRuntimeKind::Python => {
             // Python：先探测是否需创建 venv / 装依赖（首次慢，已装则秒过），发对应阶段事件。
             if needs_python_venv(&plugin_dir) {
-                emit_stage("deps_installing", "正在创建 Python 虚拟环境并安装依赖（首次较慢）…");
+                emit_stage(
+                    "deps_installing",
+                    "正在创建 Python 虚拟环境并安装依赖（首次较慢）…",
+                );
             }
             // ensure_python_venv：venv 不存在则建 + 有 requirements.txt 则 pip install（幂等）。
             let py = ensure_python_venv(&plugin_dir)?;
@@ -491,7 +509,10 @@ pub fn start_plugin(
         PluginRuntimeKind::Nodejs => {
             // Node：先探测是否需 pnpm install（首次慢，node_modules 已在则秒过），发对应阶段事件。
             if needs_node_install(&plugin_dir) {
-                emit_stage("deps_installing", "正在安装 Node 依赖（pnpm install，首次较慢）…");
+                emit_stage(
+                    "deps_installing",
+                    "正在安装 Node 依赖（pnpm install，首次较慢）…",
+                );
             }
             // ensure_node_dependencies：有 package.json + 非空依赖且 node_modules 缺失 → pnpm/npm install（幂等）。
             ensure_node_dependencies(&plugin_dir)?;
@@ -505,13 +526,13 @@ pub fn start_plugin(
                     (runner, vec!["start".to_string()])
                 } else {
                     // 无 pnpm/npm：回退 node entry（package.json 可能仅声明元信息无 start）。
-                    let node = find_binary("node")
-                        .ok_or_else(|| "未检测到 Node.js 运行时".to_string())?;
+                    let node =
+                        find_binary("node").ok_or_else(|| "未检测到 Node.js 运行时".to_string())?;
                     (node, vec![entry_abs.to_string_lossy().to_string()])
                 }
             } else {
-                let node = find_binary("node")
-                    .ok_or_else(|| "未检测到 Node.js 运行时".to_string())?;
+                let node =
+                    find_binary("node").ok_or_else(|| "未检测到 Node.js 运行时".to_string())?;
                 (node, vec![entry_abs.to_string_lossy().to_string()])
             }
         }
@@ -552,7 +573,9 @@ pub fn start_plugin(
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
-    let child = command.spawn().map_err(|e| format!("启动插件进程失败：{e}"))?;
+    let child = command
+        .spawn()
+        .map_err(|e| format!("启动插件进程失败：{e}"))?;
     let started_at = now_iso();
     let pid = process_table.register(&plugin_id, child, started_at.clone());
     // 运行态仅存内存进程表（组A scan_plugin_status 经 process_table.is_running 合并判定 running，
@@ -713,12 +736,18 @@ mod tests {
     fn minimal_env_excludes_sensitive_keys() {
         // 白名单不应含 TOKEN/KEY/SECRET/LINGFANG_ 前缀（防泄漏）。
         let env = minimal_env();
-        let keys: Vec<_> = env.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        let keys: Vec<_> = env
+            .iter()
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
         for k in &keys {
             let upper = k.to_uppercase();
             assert!(!upper.contains("TOKEN"), "minimal_env 不应含 TOKEN：{k}");
             assert!(!upper.contains("SECRET"), "minimal_env 不应含 SECRET：{k}");
-            assert!(!upper.contains("LINGFANG"), "minimal_env 不应含 LINGFANG_：{k}");
+            assert!(
+                !upper.contains("LINGFANG"),
+                "minimal_env 不应含 LINGFANG_：{k}"
+            );
         }
     }
 
@@ -792,14 +821,15 @@ mod tests {
         let child = cmd.spawn().expect("测试长进程应能 spawn");
         let _pid = table.register("long-plugin", child, "2000Z".to_string());
         // 取出并杀。
-        let (mut killed_child, _) = table
-            .take("long-plugin")
-            .expect("应能取出注册的进程");
+        let (mut killed_child, _) = table.take("long-plugin").expect("应能取出注册的进程");
         kill_child_tree(&killed_child);
         let _ = killed_child.kill();
         let _status = killed_child.wait().expect("wait 应能回收");
         // 二次 take 应 None（已取出）。
-        assert!(table.take("long-plugin").is_none(), "已 take 的进程不应再可取");
+        assert!(
+            table.take("long-plugin").is_none(),
+            "已 take 的进程不应再可取"
+        );
     }
 
     #[test]

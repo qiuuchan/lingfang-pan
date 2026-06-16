@@ -48,8 +48,8 @@ function mockMail() {
   };
 }
 
-// 组C 极验 mock：默认「未配置」（isSceneEnabled=false），requireCaptcha 直接跳过，
-// 不影响既有 login/register/forgotPassword 用例的行为。isSceneEnabled 默认放行跳过校验（开发态语义）。
+// 组C 极验 mock：默认「未配置」（isSceneEnabled=false），管理端验证码校验直接跳过，
+// 不影响既有应用端认证用例的行为。isSceneEnabled 默认放行跳过校验（开发态语义）。
 function mockGeetest() {
   return {
     isConfigured: vi.fn(async () => false),
@@ -73,6 +73,16 @@ describe('AuthService 找回密码 + 重置密码', () => {
   });
 
   describe('forgotPassword', () => {
+    it('应用端找回密码不要求验证码', async () => {
+      geetest.isSceneEnabled.mockResolvedValueOnce(true);
+      geetest.validate.mockResolvedValueOnce(false);
+      prisma.user.findUnique.mockResolvedValue(null);
+      const result = await service.forgotPassword({ email: 'a@b.com' });
+      expect(result.ok).toBe(true);
+      expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
+      expect(geetest.validate).not.toHaveBeenCalled();
+    });
+
     it('邮箱不存在时静默跳过（不抛错，防邮箱探测）', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       const result = await service.forgotPassword({ email: 'nobody@example.com' });
@@ -386,77 +396,124 @@ describe('AuthService 找回密码 + 重置密码', () => {
   });
 
 
-  // === 组C 极验验证码：登录/注册/找回密码配置极验后强制校验，未配置跳过 ===
-  describe('极验验证码校验（requireCaptcha）', () => {
-    it('未配置极验时 login 跳过验证码校验（开发态）', async () => {
-      geetest.isSceneEnabled.mockResolvedValue(false);
-      const realHash = bcrypt.hashSync('pass1234', 12);
-      const activeUser = {
-        id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
-        displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
-      };
-      prisma.user.findUnique.mockResolvedValueOnce(activeUser).mockResolvedValueOnce(activeUser);
-      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
-      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
-      expect(result.user.id).toBe('u1');
-      // isSceneEnabled 被调用（判定是否强制校验），validate 不应被调用（场景未启用即跳过）。
-      expect(geetest.isSceneEnabled).toHaveBeenCalledWith('login');
-      expect(geetest.validate).not.toHaveBeenCalled();
-    });
+  // === 组C 极验验证码：仅管理端登录/找回密码按配置强制校验，应用端认证入口不接收验证码 ===
+  describe('管理端验证码校验', () => {
+    const realHash = bcrypt.hashSync('pass1234', 12);
+    const activeUser = {
+      id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
+      displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
+      failedLoginAttempts: 0, lockedUntil: null,
+    };
 
-    it('login 场景未启用时跳过验证码校验（场景开关关闭）', async () => {
-      // 组C 场景开关：即便极验已配置（isConfigured=true），login 场景未在 geetestScenes 白名单内时跳过。
-      geetest.isConfigured.mockResolvedValue(true);
-      geetest.isSceneEnabled.mockResolvedValue(false);
-      const realHash = bcrypt.hashSync('pass1234', 12);
-      const activeUser = {
-        id: 'u1', email: 'a@b.com', status: 'ACTIVE', passwordHash: realHash, tokenVersion: 0,
-        displayName: 'A', platformRole: 'NONE', emailVerified: null, memberships: [],
-      };
-      prisma.user.findUnique.mockResolvedValueOnce(activeUser).mockResolvedValueOnce(activeUser);
-      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
-      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
-      expect(result.user.id).toBe('u1');
-      // isSceneEnabled 判定 login 场景未启用 → 跳过校验，validate 不调用。
-      expect(geetest.validate).not.toHaveBeenCalled();
-    });
+    const activeAdmin = { ...activeUser, platformRole: 'PLATFORM_ADMIN' };
 
-    it('login 场景启用且缺 captcha 抛 bad_request', async () => {
-      geetest.isConfigured.mockResolvedValue(true);
+    it('应用端 login 不读取验证码场景配置', async () => {
       geetest.isSceneEnabled.mockResolvedValue(true);
-      geetest.validate.mockResolvedValue(false); // 缺参数 → validate 返 false
+      geetest.validate.mockResolvedValue(false);
+      prisma.user.findUnique.mockResolvedValueOnce(activeUser).mockResolvedValueOnce(activeUser);
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      const result = await service.login({ email: 'a@b.com', password: 'pass1234' });
+      expect(result.user.id).toBe('u1');
+      expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
+      expect(geetest.validate).not.toHaveBeenCalled();
+    });
+
+    it('平台管理员不能通过应用端 login 绕过管理端验证码边界', async () => {
+      geetest.isSceneEnabled.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(false);
+      prisma.user.findUnique.mockResolvedValueOnce(activeAdmin);
       await expect(service.login({ email: 'a@b.com', password: 'pass1234' }))
-        .rejects.toMatchObject({ status: 400, code: 'bad_request' });
-      // 验证码校验失败不应查用户（在 requireCaptcha 之后才查库）。
-      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+        .rejects.toMatchObject({ status: 403, code: 'forbidden' });
+      expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
+      expect(geetest.validate).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'auth.login.failed',
+          actorUserId: 'u1',
+          metadata: expect.objectContaining({ reason: 'platform_admin_requires_admin_login' }),
+        }),
+      }));
     });
 
-    it('register 场景启用且验证通过则继续注册流程', async () => {
-      geetest.isConfigured.mockResolvedValue(true);
+    it('应用端 register 不读取验证码场景配置', async () => {
       geetest.isSceneEnabled.mockResolvedValue(true);
-      geetest.validate.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(false);
       prisma.user.findUnique.mockResolvedValueOnce(null);
       prisma.user.findUnique.mockResolvedValueOnce({ tokenVersion: 0, emailVerified: null });
       prisma.user.findUnique.mockResolvedValueOnce({ id: 'new-user', email: 'new@b.com', status: 'ACTIVE', tokenVersion: 0, displayName: 'New', platformRole: 'NONE', emailVerified: null, memberships: [] });
       prisma.user.create.mockResolvedValueOnce({ id: 'new-user', email: 'new@b.com', displayName: 'New' });
-      const result = await service.register({
-        email: 'new@b.com', password: 'newpass1234',
-        captcha: { lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' },
-      });
+      const result = await service.register({ email: 'new@b.com', password: 'newpass1234' });
       expect(result.user.id).toBe('new-user');
-      // requireCaptcha 传 scene='register'，validate 收到前端 4 参数。
-      expect(geetest.isSceneEnabled).toHaveBeenCalledWith('register');
-      expect(geetest.validate).toHaveBeenCalledWith({ lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+      expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
+      expect(geetest.validate).not.toHaveBeenCalled();
     });
 
-    it('forgot 场景启用且验证失败抛 bad_request（不查库不发包）', async () => {
-      geetest.isConfigured.mockResolvedValue(true);
+    it('管理端 login 场景未启用时跳过验证码校验', async () => {
+      geetest.isSceneEnabled.mockResolvedValue(false);
+      prisma.user.findUnique.mockResolvedValueOnce(activeAdmin).mockResolvedValueOnce(activeAdmin);
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      const result = await service.adminLogin({ email: 'a@b.com', password: 'pass1234' });
+      expect(result.user.id).toBe('u1');
+      expect(geetest.isSceneEnabled).toHaveBeenCalledWith('admin_login');
+      expect(geetest.validate).not.toHaveBeenCalled();
+    });
+
+    it('非平台管理员不能通过管理端登录入口', async () => {
+      geetest.isSceneEnabled.mockResolvedValue(false);
+      prisma.user.findUnique.mockResolvedValueOnce(activeUser).mockResolvedValueOnce(activeUser);
+      prisma.teamAdminApplication.findFirst = vi.fn(async () => null);
+      await expect(service.adminLogin({ email: 'a@b.com', password: 'pass1234' }))
+        .rejects.toMatchObject({ status: 403, code: 'forbidden' });
+    });
+
+    it('管理端 login 场景启用且缺 captcha 抛 bad_request', async () => {
       geetest.isSceneEnabled.mockResolvedValue(true);
       geetest.validate.mockResolvedValue(false);
-      await expect(service.forgotPassword({ email: 'a@b.com' }))
+      await expect(service.adminLogin({ email: 'a@b.com', password: 'pass1234' }))
         .rejects.toMatchObject({ status: 400, code: 'bad_request' });
       expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(geetest.validate).toHaveBeenCalledTimes(1);
+    });
+
+    it('管理端 forgot 场景启用且验证通过则发送重置邮件', async () => {
+      geetest.isSceneEnabled.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(true);
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0, platformRole: 'PLATFORM_ADMIN' });
+      const result = await service.adminForgotPassword({
+        email: 'a@b.com',
+        captcha: { lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' },
+      });
+      expect(result.ok).toBe(true);
+      expect(geetest.isSceneEnabled).toHaveBeenCalledWith('admin_forgot');
+      expect(geetest.validate).toHaveBeenCalledWith({ lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+      expect(mail.sendPasswordReset).toHaveBeenCalledTimes(1);
+    });
+
+    it('管理端 forgot 不向普通账号发邮件', async () => {
+      geetest.isSceneEnabled.mockResolvedValue(true);
+      geetest.validate.mockResolvedValue(true);
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0, platformRole: 'NONE' });
+      const result = await service.adminForgotPassword({
+        email: 'a@b.com',
+        captcha: { lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' },
+      });
+      expect(result.ok).toBe(true);
       expect(mail.sendPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it('应用端 forgot 不向平台管理员发邮件', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0, platformRole: 'PLATFORM_ADMIN' });
+      const result = await service.forgotPassword({ email: 'a@b.com' });
+      expect(result.ok).toBe(true);
+      expect(mail.sendPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it('应用端 forgot 不要求验证码且不读取管理端场景', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      const result = await service.forgotPassword({ email: 'a@b.com' });
+      expect(result.ok).toBe(true);
+      expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
+      expect(geetest.validate).not.toHaveBeenCalled();
     });
   });
 

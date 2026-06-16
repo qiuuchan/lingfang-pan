@@ -91,10 +91,7 @@ async fn plugin_net_fetch(
     if let Some(body) = args.get("body") {
         req = req.json(body);
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("网络请求失败：{e}"))?;
+    let resp = req.send().await.map_err(|e| format!("网络请求失败：{e}"))?;
     let status = resp.status().as_u16();
     // 响应头（扁平化为 string=>string）。
     let headers: serde_json::Map<String, Value> = {
@@ -211,13 +208,27 @@ async fn code_assistant_start_session(
         let plugin_id = input.plugin_id.as_deref().unwrap_or("").trim().to_string();
         let plugin_dir = plugin_store.ensure_plugin_dir(&plugin_id)?;
         input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
-    } else if input.workspace_dir.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_none() {
+    } else if input
+        .workspace_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_none()
+    {
         // 无 plugin_id 且无 workspace_dir → 用 session_id 作临时 plugin_id（持久化目录）。
         // session_id 由 code_assistant 内部生成（格式如 claude-<secs>-<nanos>），已通过段级白名单。
         // 但 session_id 尚未生成（在 code_assistant::start_session 内），这里用时间戳预生成。
-        let temp_id = format!("temp-{}-{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos());
+        let temp_id = format!(
+            "temp-{}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        );
         let plugin_dir = plugin_store.ensure_plugin_dir(&temp_id)?;
         input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
     }
@@ -287,7 +298,10 @@ async fn resolve_cli_env(
     let Some(cli_config) = cli_config else {
         return Vec::new();
     };
-    let (backend_url, auth_token) = match (cli_config.backend_url.as_str(), cli_config.auth_token.as_str()) {
+    let (backend_url, auth_token) = match (
+        cli_config.backend_url.as_str(),
+        cli_config.auth_token.as_str(),
+    ) {
         (url, token) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
         _ => return Vec::new(),
     };

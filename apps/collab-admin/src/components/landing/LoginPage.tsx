@@ -1,8 +1,8 @@
 // 独立全屏登录页（非悬浮 Dialog）。
 // 深色背景 + 左上角 logo + 居中表单卡 + 「← 返回首页」。
 // 登录成功 onAuthed → App.tsx 切到后台；onBack 回落地页。
-// 忘记密码：调 /api/auth/forgot-password（与桌面端 Auth.tsx 同端点），弹窗收集邮箱。
-// 组C 极验：后端配置了 geetestCaptchaId 时，登录/找回密码表单集成「点击验证」极验组件。
+// 忘记密码：调管理端专用找回密码入口，弹窗收集邮箱。
+// 组C 极验：后端配置了 geetestCaptchaId 时，管理端登录/找回密码表单集成「点击验证」极验组件。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api, isPlatformAdminSession, setToken, type AdminSession } from '@/lib/api';
@@ -35,7 +35,7 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
   const [email, setEmail] = useState(initialEmail || '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  // 忘记密码弹窗（调 /api/auth/forgot-password）。
+  // 忘记密码弹窗（调管理端专用找回密码入口）。
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -45,7 +45,10 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
   const [captchaId, setCaptchaId] = useState('');
   const [platformName, setPlatformName] = useState('');
   const [captchaScenes, setCaptchaScenes] = useState<Set<string>>(new Set());
-  const captcha = useGeetest(captchaId);
+  const loginCaptchaEnabled = !!captchaId && captchaScenes.has('admin_login');
+  const forgotCaptchaEnabled = !!captchaId && captchaScenes.has('admin_forgot');
+  const loginCaptcha = useGeetest(loginCaptchaEnabled ? captchaId : '');
+  const forgotCaptcha = useGeetest(forgotOpen && forgotCaptchaEnabled ? captchaId : '');
 
   useEffect(() => {
     // platform-info 公开端点（auth:false），失败静默（未配置极验时 captchaId 保持空，不显验证码）。
@@ -54,7 +57,7 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
         setCaptchaId(info.geetestCaptchaId ?? '');
         // 云同步平台名：后端 platformName（缺省 'LingFang'），用于顶栏与登录页标题展示。
         setPlatformName((info.platformName || '').trim());
-        // 场景开关：解析逗号分隔串为 Set，登录/找回密码分别判定是否强制验证码。
+        // 场景开关：解析逗号分隔串为 Set，管理端登录/找回密码分别判定是否强制验证码。
         setCaptchaScenes(new Set((info.geetestScenes ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)));
       })
       .catch(() => {
@@ -62,25 +65,22 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
       });
   }, []);
 
-  /** 当前场景是否启用验证码（与后端 requireCaptcha(scene) 语义一致）。
-   *  任一相关场景（login/forgot）启用即渲染验证码容器（共用同一实例）。 */
-  const sceneEnabled = (scene: 'login' | 'forgot') => !!captchaId && captchaScenes.has(scene);
-  const captchaVisible = !!captchaId && (sceneEnabled('login') || sceneEnabled('forgot'));
+  /** 当前管理端场景是否启用验证码。 */
+  const sceneEnabled = (scene: 'admin_login' | 'admin_forgot') => (scene === 'admin_login' ? loginCaptchaEnabled : forgotCaptchaEnabled);
 
   async function submit() {
-    // 组C 极验：login 场景启用时强制先通过验证。
-    if (sceneEnabled('login') && !captcha.validateResult) return toast.error('请先完成验证码');
+    if (sceneEnabled('admin_login') && !loginCaptcha.validateResult) return toast.error('请先完成验证码');
     setLoading(true);
     try {
-      const result = await api<AdminSession>('/api/auth/login', {
+      const result = await api<AdminSession>('/api/auth/admin/login', {
         auth: false,
         method: 'POST',
-        body: { email, password, captcha: captcha.validateResult ?? undefined },
+        body: { email, password, captcha: loginCaptcha.validateResult ?? undefined },
       });
       if (!result.token) throw new Error('登录失败，请稍后重试');
       if (!isPlatformAdminSession(result)) throw new Error('该账号不是平台管理员');
       setToken(result.token);
-      captcha.reset();
+      loginCaptcha.reset();
       onAuthed(result);
     } catch (e) {
       toast.error((e as Error).message);
@@ -91,19 +91,18 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
 
   async function onForgotPassword() {
     if (!forgotEmail.trim()) return toast.error('请输入邮箱');
-    // 组C 极验：forgot 场景启用时强制先通过验证（防找回密码邮件轰炸）。
-    if (sceneEnabled('forgot') && !captcha.validateResult) return toast.error('请先完成验证码');
+    if (sceneEnabled('admin_forgot') && !forgotCaptcha.validateResult) return toast.error('请先完成验证码');
     setForgotLoading(true);
     try {
-      await api('/api/auth/forgot-password', {
+      await api('/api/auth/admin/forgot-password', {
         auth: false,
         method: 'POST',
-        body: { email: forgotEmail.trim(), captcha: captcha.validateResult ?? undefined },
+        body: { email: forgotEmail.trim(), captcha: forgotCaptcha.validateResult ?? undefined },
       });
       toast.success('若该邮箱已注册，重置链接已发送');
       setForgotOpen(false);
       setForgotEmail('');
-      captcha.reset();
+      forgotCaptcha.reset();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -189,14 +188,14 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                   }}
                 />
               </div>
-              {/* 组C 极验：后端配置了 geetestCaptchaId 且任一场景（login/forgot）启用时渲染「点击验证」组件。
-                  场景未启用 / captchaId 为空则不渲染（后端 requireCaptcha 亦跳过，前端不强制）。 */}
-              {captchaVisible && (
+              {/* 组C 极验：管理端登录场景启用时渲染「点击验证」组件。
+                  场景未启用 / captchaId 为空则不渲染。 */}
+              {sceneEnabled('admin_login') && (
                 <div className="flex flex-col gap-1">
-                  <div ref={captcha.containerRef} />
-                  {!captcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}
-                  {captcha.ready && !captcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>请点击完成上方验证</p>}
-                  {captcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
+                  <div ref={loginCaptcha.containerRef} />
+                  {!loginCaptcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}
+                  {loginCaptcha.ready && !loginCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>请点击完成上方验证</p>}
+                  {loginCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
                 </div>
               )}
             </div>
@@ -209,7 +208,7 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               {loading ? '登录中…' : '登录管理端'}
             </button>
 
-            {/* 忘记密码入口：调 /api/auth/forgot-password 发重置邮件 */}
+            {/* 忘记密码入口：调管理端专用端点发重置邮件 */}
             <div className="mt-3 text-center">
               <button
                 type="button"
@@ -244,6 +243,16 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               color: 'var(--lf-fg)',
             }}
           />
+          <div className="mt-3">
+            {sceneEnabled('admin_forgot') && (
+              <div className="flex flex-col gap-1">
+                <div ref={forgotCaptcha.containerRef} />
+                {!forgotCaptcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}
+                {forgotCaptcha.ready && !forgotCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>请点击完成上方验证</p>}
+                {forgotCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
+              </div>
+            )}
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setForgotOpen(false)}>取消</Button>
             <Button onClick={onForgotPassword} disabled={forgotLoading}>

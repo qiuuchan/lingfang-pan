@@ -37,14 +37,14 @@ pub struct ToolDefinition {
     pub version_args: &'static [&'static str],
     pub models: &'static [&'static str],
     pub default_model: &'static str,
-// build_args 追加 resume_id / effort / system_prompt 入参（design §3.3.1 + R2 + system prompt 修正）：
-// - claude：resume_id 非空时拼接 `--resume <id>` 实现真续接；effort 非空时拼接 `--effort <level>` 调节思考强度；
-//   system_prompt 非空时用 `--system-prompt <s>` 作为独立 system message（而非拼进 -p 用户消息，
-//   避免 system prompt 被弱化为普通用户文本——此前的 final_prompt 拼接方式导致 claude 忽略创建指令）。
-// - codex/opencode：resume_id / effort / system_prompt 接收但忽略，统一签名解耦调用方；
-//   续接靠历史摘要，思考强度仅 claude 生效，system prompt 由各自配置文件注入（cli_config.rs）。
-// None 表示首轮 / 未设思考强度 / 无独立 system prompt。
-pub build_args: fn(
+    // build_args 追加 resume_id / effort / system_prompt 入参（design §3.3.1 + R2 + system prompt 修正）：
+    // - claude：resume_id 非空时拼接 `--resume <id>` 实现真续接；effort 非空时拼接 `--effort <level>` 调节思考强度；
+    //   system_prompt 非空时用 `--system-prompt <s>` 作为独立 system message（而非拼进 -p 用户消息，
+    //   避免 system prompt 被弱化为普通用户文本——此前的 final_prompt 拼接方式导致 claude 忽略创建指令）。
+    // - codex/opencode：resume_id / effort / system_prompt 接收但忽略，统一签名解耦调用方；
+    //   续接靠历史摘要，思考强度仅 claude 生效，system prompt 由各自配置文件注入（cli_config.rs）。
+    // None 表示首轮 / 未设思考强度 / 无独立 system prompt。
+    pub build_args: fn(
         prompt: &str,
         model: Option<&str>,
         resume_id: Option<&str>,
@@ -101,11 +101,16 @@ mod tests {
         assert_eq!(
             definition.probe_args("ping", Some("sonnet")),
             vec![
-                "-p", "ping",
-                "--output-format", "stream-json",
-                "--verbose", "--include-partial-messages",
-                "--permission-mode", "bypassPermissions",
-                "--model", "sonnet",
+                "-p",
+                "ping",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-mode",
+                "bypassPermissions",
+                "--model",
+                "sonnet",
             ]
         );
     }
@@ -148,12 +153,18 @@ mod tests {
         assert_eq!(
             definition.run_args("ping", Some("sonnet"), Some("sid-123"), None, None),
             vec![
-                "-p", "ping",
-                "--output-format", "stream-json",
-                "--verbose", "--include-partial-messages",
-                "--permission-mode", "bypassPermissions",
-                "--model", "sonnet",
-                "--resume", "sid-123",
+                "-p",
+                "ping",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-mode",
+                "bypassPermissions",
+                "--model",
+                "sonnet",
+                "--resume",
+                "sid-123",
             ]
         );
     }
@@ -163,7 +174,9 @@ mod tests {
         // system_prompt 非空时拼 `--system-prompt <s>` 作为独立 system message（修正：不再拼进 -p）。
         let definition = tool_definition(CodeAssistantTool::Claude);
         let args = definition.run_args("ping", None, None, None, Some("你是插件助手"));
-        assert!(args.windows(2).any(|w| w[0] == "--system-prompt" && w[1] == "你是插件助手"));
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "--system-prompt" && w[1] == "你是插件助手"));
     }
 
     #[test]
@@ -180,7 +193,9 @@ mod tests {
         let definition = tool_definition(CodeAssistantTool::Claude);
         let args = definition.run_args("ping", Some("sonnet"), None, Some("high"), None);
         assert!(args.iter().any(|a| a == "--effort"));
-        assert!(args.windows(2).any(|w| w[0] == "--effort" && w[1] == "high"));
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "--effort" && w[1] == "high"));
     }
 
     #[test]
@@ -205,7 +220,13 @@ mod tests {
         // effort/system_prompt 同样不进入 args（codex 无思考强度参数，system prompt 由配置文件注入）。
         // --json + --color never：task 06-13 R3，codex 走 JSONL 事件流（分类渲染 + 禁用 ANSI 颜色码）。
         let definition = tool_definition(CodeAssistantTool::Codex);
-        let args = definition.run_args("ping", Some("gpt-5.1-codex"), Some("sid-xyz"), Some("high"), Some("sys"));
+        let args = definition.run_args(
+            "ping",
+            Some("gpt-5.1-codex"),
+            Some("sid-xyz"),
+            Some("high"),
+            Some("sys"),
+        );
         assert_eq!(
             args,
             vec![

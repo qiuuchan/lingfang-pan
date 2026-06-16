@@ -8,7 +8,7 @@
 //       POST http://gcaptcha4.geetest.com/validate?captcha_id=<id>（表单 5 参数）。
 //    4) 极验返回 result==='success' → true；result!=='success' → false。
 //    5) 容灾：极验 API 超时/异常/响应非 JSON → 降级放行 true + console.error 日志，
-//       不阻断登录/注册（外部依赖挂掉不应让用户无法登录；极验官方文档明确推荐此降级策略）。
+//       不阻断管理端登录/找回密码（外部依赖挂掉不应让管理员无法登录；极验官方文档明确推荐此降级策略）。
 //
 // 缓存设计：getCaptchaConfig 内联缓存实例字段（首次查库）。配置变更时由 SettingsService.updateSettings
 // 调 invalidateConfigCache 失效（与 mail.invalidateSmtpCache 同模式），admin 保存后即生效无需重启。
@@ -41,8 +41,14 @@ export interface GeetestCaptchaParams {
 }
 
 /** 极验支持的场景枚举（与 settings.service KEY_VALIDATORS.geetestScenes 的 SCENES 白名单一致）。
- *  login/register/forgot 分别对应登录/注册/找回密码三个表单。 */
-export type GeetestScene = 'login' | 'register' | 'forgot';
+ *  admin_login/admin_forgot 分别对应管理端登录/管理端找回密码。 */
+export type GeetestScene = 'admin_login' | 'admin_forgot';
+
+function normalizeScene(item: string): GeetestScene | null {
+  if (item === 'admin_login' || item === 'login') return 'admin_login';
+  if (item === 'admin_forgot' || item === 'forgot') return 'admin_forgot';
+  return null;
+}
 
 @Injectable()
 export class GeetestService {
@@ -114,7 +120,7 @@ export class GeetestService {
   }
 
   /** 失效极验配置缓存。由 SettingsService.updateSettings 在改了 geetestCaptchaId/geetestCaptchaKey/geetestScenes 后调用，
-   *  保证 admin 保存后下一次登录/注册校验即读到新配置（不依赖重启进程生效），与 mail.invalidateSmtpCache 同模式。
+   *  保证 admin 保存后下一次管理端验证码校验即读到新配置（不依赖重启进程生效），与 mail.invalidateSmtpCache 同模式。
    *
    *  与「启动后变更需重启」的旧设计不同：admin 通过设置页改极验配置的频率虽低，但「改了不生效」会造成
    *  前端（platform-info 30s 缓存刷新后）已显示验证码、后端却仍按旧缓存状态跳过校验的不一致；统一在
@@ -134,7 +140,7 @@ export class GeetestService {
    *  - 未配置 captchaId（极验未启用）→ 任何场景都返回 false（不校验）。
    *  - 已配置但 scenes 为空 → 全部场景返回 false（即便配了 id/key 也不校验，admin 可临时关闭所有场景）。
    *  - scenes 含该场景 → true（该场景强制校验验证码）。
-   *  AuthService.requireCaptcha(scene) 据此决定是否跳过校验。 */
+   *  AuthService.requireAdminCaptcha(scene) 据此决定是否跳过校验。 */
   async isSceneEnabled(scene: GeetestScene): Promise<boolean> {
     const config = await this.getCaptchaConfig();
     if (!config.captchaId) return false;
@@ -151,9 +157,16 @@ export class GeetestService {
       select: { key: true, value: true },
     });
     const map = new Map(rows.map((r) => [r.key, r.value] as const));
-    // scenes 按「非空项 + 小写」解析（与 settings.service.geetestScenes 归一化输出兼容；容错兜底非法值）。
+    // scenes 按「非空项 + 小写」解析；兼容旧 login/forgot 值并映射为管理端场景。
     const scenesRaw = map.get('geetestScenes') ?? '';
-    const scenes = scenesRaw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const sceneSet = new Set(
+      scenesRaw
+        .split(',')
+        .map((s) => normalizeScene(s.trim().toLowerCase()))
+        .filter((s): s is GeetestScene => !!s),
+    );
+    const sceneOrder = ['admin_login', 'admin_forgot'] as const;
+    const scenes: GeetestScene[] = sceneOrder.filter((s) => sceneSet.has(s));
     this.configCache = {
       captchaId: (map.get('geetestCaptchaId') ?? '').trim(),
       captchaKey: map.get('geetestCaptchaKey') ?? '',

@@ -22,9 +22,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use crate::code_assistant::{
-    find_binary, run_capture_with_env, resolve_workspace, CapturedOutput,
-};
+use crate::code_assistant::{find_binary, resolve_workspace, run_capture_with_env, CapturedOutput};
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
 /// serde rename_all = lowercase：nodejs / python，与契约 RuntimeType 对齐。
@@ -145,7 +143,8 @@ pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, Strin
                         && !is_store_stub_output(&captured.stderr, runtime) =>
                 {
                     // 版本字符串拼接 stdout + stderr（部分实现走 stderr），取首行。
-                    let raw_version = format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
+                    let raw_version =
+                        format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
                     let version = raw_version
                         .lines()
                         .find(|line| !line.trim().is_empty())
@@ -191,14 +190,18 @@ fn is_store_stub_output(stderr: &str, runtime: ScriptRuntime) -> bool {
 /// cli_installer 独立构造 installer_env 实例，不复用本函数返回值；本提升仅暴露语义供跨模块共享）。
 pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
     let keys = [
-        "PATH",                       // 解释器/依赖查找必须
-        "HOME", "USERPROFILE",        // Node/Python 用户级配置
-        "APPDATA", "LOCALAPPDATA",    // Windows npm/pip 缓存定位
-        "SystemRoot", "TEMP", "TMP",  // Windows 系统调用与临时目录
-        "LANG", "LC_ALL",             // 区域，避免乱码
+        "PATH", // 解释器/依赖查找必须
+        "HOME",
+        "USERPROFILE", // Node/Python 用户级配置
+        "APPDATA",
+        "LOCALAPPDATA", // Windows npm/pip 缓存定位
+        "SystemRoot",
+        "TEMP",
+        "TMP", // Windows 系统调用与临时目录
+        "LANG",
+        "LC_ALL", // 区域，避免乱码
     ];
-    keys
-        .iter()
+    keys.iter()
         .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
         .collect()
 }
@@ -236,7 +239,10 @@ fn sanitize_rel_path(path: &str) -> Result<PathBuf, String> {
     if normalized.is_empty() {
         return Err("路径不能为空".to_string());
     }
-    if normalized.starts_with('/') || normalized.starts_with('~') || is_windows_drive_prefix(&normalized) {
+    if normalized.starts_with('/')
+        || normalized.starts_with('~')
+        || is_windows_drive_prefix(&normalized)
+    {
         return Err(format!("路径不能是绝对路径：{normalized}"));
     }
     let segments: Vec<&str> = normalized.split('/').collect();
@@ -276,7 +282,11 @@ fn needs_runtime_start(files: &[ScriptFile]) -> Option<String> {
     // 读取 package.json 内容（与 materialize_sandbox 一致：files 里的 path 形如 "package.json"）。
     let pkg = files.iter().find(|f| f.path == "package.json")?;
     let value: serde_json::Value = serde_json::from_str(&pkg.content).ok()?;
-    let start = value.get("scripts").and_then(|s| s.get("start"))?.as_str()?.trim();
+    let start = value
+        .get("scripts")
+        .and_then(|s| s.get("start"))?
+        .as_str()?
+        .trim();
     // 简单 `node <file>` 形态可裸 node 预览（如 "node index.js"）；其余（electron . / 框架 CLI）需专属运行时。
     // 容错：去引号后若以 "node " 开头且只有一个参数，视为简单形态放行；否则视为专属运行时。
     let is_plain_node = start.starts_with("node ") && start.split_whitespace().count() == 2;
@@ -305,13 +315,19 @@ mod needs_runtime_start_tests {
     use super::*;
 
     fn file(path: &str, content: &str) -> ScriptFile {
-        ScriptFile { path: path.to_string(), content: content.to_string() }
+        ScriptFile {
+            path: path.to_string(),
+            content: content.to_string(),
+        }
     }
 
     #[test]
     fn plain_node_start_is_allowed() {
         // scripts.start = "node index.js" 形态简单，裸 node 可预览，不拦截。
-        let files = vec![file("package.json", r#"{"scripts":{"start":"node index.js"}}"#)];
+        let files = vec![file(
+            "package.json",
+            r#"{"scripts":{"start":"node index.js"}}"#,
+        )];
         assert!(needs_runtime_start(&files).is_none());
     }
 
@@ -382,7 +398,9 @@ fn materialize_sandbox(
 
     // canonicalize 后断言仍以 sandbox 为前缀（防符号链接逃逸，软隔离第二道防线）。
     let sandbox_canon = sandbox.canonicalize().map_err(|error| error.to_string())?;
-    let entry_canon = entry_abs.canonicalize().map_err(|error| error.to_string())?;
+    let entry_canon = entry_abs
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
     if !entry_canon.starts_with(&sandbox_canon) {
         return Err(format!("entry 路径逃逸 sandbox：{entry}"));
     }
@@ -438,7 +456,9 @@ fn cleanup_sandbox_lru(sandbox_root: &Path, _current_plugin_id: &str) {
             Ok(m) if m.is_dir() => m,
             _ => continue, // 非目录或读元数据失败，跳过。
         };
-        let mtime = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let mtime = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         candidates.push((path, mtime));
     }
     // mtime 降序（最新在前），超出 KEEP 的从尾部（最旧）开始删。
@@ -487,7 +507,11 @@ pub fn run_plugin_script(
 
     // 组D task 06-16：plugin_script 预览执行仍用临时 sandbox（group B 的 venv/pnpm 持久化运行尚未落地），
     // 故 plugin_id 传 None 走 workspace_dir 显式路径分支（不落 plugins_root，保持预览隔离）。
-    let workspace = resolve_workspace(Some(sandbox_canon.to_string_lossy().to_string()), None, None)?;
+    let workspace = resolve_workspace(
+        Some(sandbox_canon.to_string_lossy().to_string()),
+        None,
+        None,
+    )?;
     let mut args: Vec<String> = Vec::new();
     // Python 经 py launcher 时需显式指定 -3？保持简单：直接用探测到的 binary（py/python3/node），
     // 由 binary 自身决定默认版本。
@@ -504,13 +528,8 @@ pub fn run_plugin_script(
     // 默认 GBK 编码导致 print 中文输出 UnicodeEncodeError 崩溃或乱码。
     // H4 修复：PYTHONPATH=<sandbox根> 让多文件插件的 import 能找到 sandbox 根目录的模块。
     let env = runtime_env(input.runtime, &workspace, minimal_env());
-    let captured: CapturedOutput = run_capture_with_env(
-        &binary,
-        args,
-        Some(&workspace),
-        timeout,
-        env,
-    )?;
+    let captured: CapturedOutput =
+        run_capture_with_env(&binary, args, Some(&workspace), timeout, env)?;
     Ok(RunResult {
         stdout: captured.stdout,
         stderr: captured.stderr,
@@ -538,12 +557,22 @@ mod tests {
         // Python 必须注入 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1（H2 防 Windows 中文乱码）
         // + PYTHONPATH=<workspace>（H4 多文件相对 import）。
         let env = runtime_env(ScriptRuntime::Python, "/sandbox/root", vec![]);
-        let keys: Vec<_> = env.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
-        assert!(keys.iter().any(|k| k == "PYTHONIOENCODING"), "缺 PYTHONIOENCODING");
+        let keys: Vec<_> = env
+            .iter()
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            keys.iter().any(|k| k == "PYTHONIOENCODING"),
+            "缺 PYTHONIOENCODING"
+        );
         assert!(keys.iter().any(|k| k == "PYTHONUTF8"), "缺 PYTHONUTF8");
         assert!(keys.iter().any(|k| k == "PYTHONPATH"), "缺 PYTHONPATH");
         // 值校验。
-        let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.to_string_lossy().to_string());
+        let get = |key: &str| {
+            env.iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.to_string_lossy().to_string())
+        };
         assert_eq!(get("PYTHONIOENCODING").as_deref(), Some("utf-8"));
         assert_eq!(get("PYTHONUTF8").as_deref(), Some("1"));
         assert_eq!(get("PYTHONPATH").as_deref(), Some("/sandbox/root"));
@@ -553,8 +582,13 @@ mod tests {
     fn runtime_env_nodejs_does_not_add_python_vars() {
         // Node.js 不注入 Python 专属变量（避免污染）。
         let env = runtime_env(ScriptRuntime::Nodejs, "/sandbox", vec![]);
-        let keys: Vec<_> = env.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
-        assert!(!keys.iter().any(|k| k == "PYTHONIOENCODING" || k == "PYTHONUTF8" || k == "PYTHONPATH"));
+        let keys: Vec<_> = env
+            .iter()
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
+        assert!(!keys
+            .iter()
+            .any(|k| k == "PYTHONIOENCODING" || k == "PYTHONUTF8" || k == "PYTHONPATH"));
     }
 
     #[test]
@@ -796,10 +830,19 @@ mod tests {
             .collect();
         // 保留 8 个，最旧的 4 个被删。
         assert_eq!(remaining.len(), 8, "应保留 8 个，实际 {remaining:?}");
-        assert!(!remaining.iter().any(|n| n == "plugin-0"), "plugin-0 应被删");
-        assert!(!remaining.iter().any(|n| n == "plugin-3"), "plugin-3 应被删");
+        assert!(
+            !remaining.iter().any(|n| n == "plugin-0"),
+            "plugin-0 应被删"
+        );
+        assert!(
+            !remaining.iter().any(|n| n == "plugin-3"),
+            "plugin-3 应被删"
+        );
         assert!(remaining.iter().any(|n| n == "plugin-4"), "plugin-4 应保留");
-        assert!(remaining.iter().any(|n| n == "plugin-11"), "plugin-11 应保留");
+        assert!(
+            remaining.iter().any(|n| n == "plugin-11"),
+            "plugin-11 应保留"
+        );
         // 非法目录名不应被删（安全过滤）：写一个含路径分隔符的目录。
         // 注意：Windows/Linux 不允许目录名含 / 或 \，改用 . 开头的隐藏名（sanitize 拒绝）。
         let hidden = tmp.join(".hidden-dir");
@@ -871,22 +914,50 @@ mod tests {
         // Node 插件完整执行：中文输出不乱码 + JSON 结构化 + stdout/stderr 分离。
         let binary = match maybe_node() {
             Some(b) => b,
-            None => { eprintln!("[skip] 宿主无 node"); return; }
+            None => {
+                eprintln!("[skip] 宿主无 node");
+                return;
+            }
         };
-        let tmp = std::env::temp_dir().join(format!("lf-node-plugin-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-node-plugin-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("index.js"), r#"
+        std::fs::write(
+            tmp.join("index.js"),
+            r#"
 console.log("插件启动：Node.js " + process.version);
 console.log("处理结果：✓ 会议纪要已整理，生成 3 条行动项");
 console.log(JSON.stringify({ actionItems: ["任务A", "任务B"] }));
 console.error("诊断信息");
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let entry = tmp.join("index.js");
-        let captured = run_capture_with_env(&binary, vec![entry.to_string_lossy().to_string()], Some(tmp.to_str().unwrap()), 10_000, minimal_env()).unwrap();
+        let captured = run_capture_with_env(
+            &binary,
+            vec![entry.to_string_lossy().to_string()],
+            Some(tmp.to_str().unwrap()),
+            10_000,
+            minimal_env(),
+        )
+        .unwrap();
         assert!(!captured.timed_out, "node 不应超时");
         assert_eq!(captured.exit_code, Some(0), "node 应 exit 0");
-        assert!(captured.stdout.contains("会议纪要已整理"), "中文 stdout 丢失/乱码：{}", captured.stdout);
-        assert!(captured.stdout.contains("任务A"), "JSON 中文内容丢失：{}", captured.stdout);
+        assert!(
+            captured.stdout.contains("会议纪要已整理"),
+            "中文 stdout 丢失/乱码：{}",
+            captured.stdout
+        );
+        assert!(
+            captured.stdout.contains("任务A"),
+            "JSON 中文内容丢失：{}",
+            captured.stdout
+        );
         assert!(captured.stderr.contains("诊断信息"), "stderr 应含诊断");
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -896,14 +967,29 @@ console.error("诊断信息");
         // Python 插件完整执行：验证 H1(-u 无缓冲) + H2(UTF-8 编码防中文乱码) + H4(PYTHONPATH 跨目录 import)。
         let binary = match maybe_python() {
             Some(b) => b,
-            None => { eprintln!("[skip] 宿主无 python"); return; }
+            None => {
+                eprintln!("[skip] 宿主无 python");
+                return;
+            }
         };
-        let tmp = std::env::temp_dir().join(format!("lf-py-plugin-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-py-plugin-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(tmp.join("pkg")).unwrap();
         // 子模块 pkg/util.py（跨目录 import，验证 PYTHONPATH 注入）。
-        std::fs::write(tmp.join("pkg/util.py"), "def greet(name):\n    return f'你好 {name}，Python 插件运行中'\n").unwrap();
+        std::fs::write(
+            tmp.join("pkg/util.py"),
+            "def greet(name):\n    return f'你好 {name}，Python 插件运行中'\n",
+        )
+        .unwrap();
         // main.py 在根，import pkg.util（需 PYTHONPATH=<根>）。
-        std::fs::write(tmp.join("main.py"), r#"
+        std::fs::write(
+            tmp.join("main.py"),
+            r#"
 # -*- coding: utf-8 -*-
 import sys, json
 from pkg.util import greet
@@ -911,18 +997,35 @@ print(greet("开发者"))
 print("处理结果：✓ 数据清洗完成，处理 128 条记录")
 print(json.dumps({"records": 128, "status": "cleaned"}, ensure_ascii=False))
 sys.stderr.write("诊断：Python stderr\n")
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let entry = tmp.join("main.py");
         // 模拟 run_plugin_script 的真实调用：-u + runtime_env（PYTHONIOENCODING/PYTHONUTF8/PYTHONPATH）。
         let workspace = tmp.to_string_lossy().to_string();
         let env = runtime_env(ScriptRuntime::Python, &workspace, minimal_env());
-        let captured = run_capture_with_env(&binary, vec!["-u".to_string(), entry.to_string_lossy().to_string()], Some(&workspace), 10_000, env).unwrap();
+        let captured = run_capture_with_env(
+            &binary,
+            vec!["-u".to_string(), entry.to_string_lossy().to_string()],
+            Some(&workspace),
+            10_000,
+            env,
+        )
+        .unwrap();
         assert!(!captured.timed_out, "python 不应超时");
         assert_eq!(captured.exit_code, Some(0), "python 应 exit 0");
         // H4：跨目录 import 成功（无 ModuleNotFoundError）。
-        assert!(captured.stdout.contains("你好 开发者"), "PYTHONPATH 跨目录 import 失败或中文乱码：{}", captured.stdout);
+        assert!(
+            captured.stdout.contains("你好 开发者"),
+            "PYTHONPATH 跨目录 import 失败或中文乱码：{}",
+            captured.stdout
+        );
         // H2：中文不乱码。
-        assert!(captured.stdout.contains("数据清洗完成"), "UTF-8 中文输出乱码：{}", captured.stdout);
+        assert!(
+            captured.stdout.contains("数据清洗完成"),
+            "UTF-8 中文输出乱码：{}",
+            captured.stdout
+        );
         assert!(captured.stderr.contains("Python stderr"), "stderr 丢失");
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -930,17 +1033,29 @@ sys.stderr.write("诊断：Python stderr\n")
     #[test]
     fn html_plugin_materialize_and_readable() {
         // HTML 插件：materialize_sandbox 落盘 + 文件可读（iframe srcDoc 渲染前置条件）。
-        let tmp = std::env::temp_dir().join(format!("lf-html-plugin-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-html-plugin-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(&tmp).unwrap();
         let files = vec![ScriptFile {
             path: "ui/index.html".to_string(),
-            content: "<!DOCTYPE html><html><body><h1>HTML 插件预览</h1><p>前端插件正常</p></body></html>".to_string(),
+            content:
+                "<!DOCTYPE html><html><body><h1>HTML 插件预览</h1><p>前端插件正常</p></body></html>"
+                    .to_string(),
         }];
-        let (sandbox, entry) = materialize_sandbox(&tmp, "html-test-plugin", &files, "ui/index.html").unwrap();
+        let (sandbox, entry) =
+            materialize_sandbox(&tmp, "html-test-plugin", &files, "ui/index.html").unwrap();
         assert!(entry.starts_with(&sandbox), "entry 应在 sandbox 内");
         let content = std::fs::read_to_string(&entry).unwrap();
         assert!(content.contains("HTML 插件预览"), "HTML 内容应可读");
-        assert!(content.contains("<!DOCTYPE html>"), "应是完整 HTML 文档（iframe srcDoc 可渲染）");
+        assert!(
+            content.contains("<!DOCTYPE html>"),
+            "应是完整 HTML 文档（iframe srcDoc 可渲染）"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

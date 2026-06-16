@@ -93,10 +93,7 @@ fn prepare_claude_env(api_key: &str, api_url: &str) -> Vec<(OsString, OsString)>
             OsString::from("ANTHROPIC_BASE_URL"),
             OsString::from(api_url),
         ),
-        (
-            OsString::from("ANTHROPIC_API_KEY"),
-            OsString::from(api_key),
-        ),
+        (OsString::from("ANTHROPIC_API_KEY"), OsString::from(api_key)),
     ]
 }
 
@@ -112,15 +109,15 @@ fn prepare_codex_env(
     model: Option<&str>,
 ) -> Vec<(OsString, OsString)> {
     if let Err(error) = write_codex_config(config_dir, api_key, api_url, model) {
-        eprintln!(
-            "codex 临时配置写入失败（降级为默认配置）：{}",
-            error
-        );
+        eprintln!("codex 临时配置写入失败（降级为默认配置）：{}", error);
         return Vec::new();
     }
     vec![
         // CODEX_HOME 指向临时目录：codex 读 <CODEX_HOME>/config.toml（隔离，不碰 ~/.codex）。
-        (OsString::from("CODEX_HOME"), config_dir.as_os_str().to_owned()),
+        (
+            OsString::from("CODEX_HOME"),
+            config_dir.as_os_str().to_owned(),
+        ),
         // 双保险：codex 多路径读 OPENAI_API_KEY；config.toml 的 api_key 字段优先。
         (OsString::from("OPENAI_API_KEY"), OsString::from(api_key)),
     ]
@@ -139,10 +136,7 @@ fn prepare_opencode_env(
     match write_opencode_config(config_dir, api_key, api_url, model) {
         Ok(path) => vec![(OsString::from("OPENCODE_CONFIG"), path.into_os_string())],
         Err(error) => {
-            eprintln!(
-                "opencode 临时配置写入失败（降级为默认配置）：{}",
-                error
-            );
+            eprintln!("opencode 临时配置写入失败（降级为默认配置）：{}", error);
             Vec::new()
         }
     }
@@ -171,7 +165,9 @@ pub fn write_codex_config(
     std::fs::create_dir_all(config_dir).map_err(|error| error.to_string())?;
     // clean model：trim + 去空 + 去占位 default（与 adapters clean_model / write_opencode_config 一致）。
     // default 是前端「默认模型」占位，不应写入配置文件（CLI 回退自身默认模型）。
-    let clean_model = model.map(str::trim).filter(|value| !value.is_empty() && *value != "default");
+    let clean_model = model
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "default");
     // model 行：仅 clean 后非空时拼一行（顶级，紧跟 model_provider，在 [model_providers.*] 段之前）。
     // model 仍走 escape_toml_string 转义（用户可手输任意字符，如 "gpt-5.1-codex" 无特殊字符但需防御）。
     let model_line = match clean_model {
@@ -237,7 +233,9 @@ pub fn write_opencode_config(
 ) -> Result<std::path::PathBuf, String> {
     std::fs::create_dir_all(config_dir).map_err(|error| error.to_string())?;
     // clean model：trim + 去空 + 去占位 default（与 adapters clean_model 一致）。
-    let clean_model = model.map(str::trim).filter(|value| !value.is_empty() && *value != "default");
+    let clean_model = model
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "default");
     // model 字段 = lingfang/<model>，模型条目 key 与 model 末段保持一致（opencode 据此匹配 provider 内模型）。
     // 空时回退 default 占位（保留原行为，不破坏降级路径）。
     let model_key = clean_model.unwrap_or("default");
@@ -350,7 +348,12 @@ mod tests {
         );
         let map: Vec<(String, String)> = env
             .into_iter()
-            .map(|(k, v)| (k.to_string_lossy().to_string(), v.to_string_lossy().to_string()))
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.to_string_lossy().to_string(),
+                )
+            })
             .collect();
         assert_eq!(map.len(), 2, "claude 应注入 2 个 env");
         assert!(
@@ -364,7 +367,10 @@ mod tests {
             "应有 ANTHROPIC_API_KEY：{map:?}"
         );
         // claude 不写配置文件（纯 env）。
-        assert!(dir.read_dir().unwrap().count() == 0, "claude 不应写配置文件");
+        assert!(
+            dir.read_dir().unwrap().count() == 0,
+            "claude 不应写配置文件"
+        );
     }
 
     // === codex config.toml ===
@@ -381,7 +387,12 @@ mod tests {
         );
         let map: Vec<(String, String)> = env
             .into_iter()
-            .map(|(k, v)| (k.to_string_lossy().to_string(), v.to_string_lossy().to_string()))
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.to_string_lossy().to_string(),
+                )
+            })
             .collect();
         assert_eq!(map.len(), 2, "codex 应注入 2 个 env");
         // CODEX_HOME 指向临时目录。
@@ -469,7 +480,8 @@ mod tests {
     #[test]
     fn opencode_config_json_contains_provider_options() {
         let dir = temp_dir("opencode-json");
-        let path = write_opencode_config(&dir, "sk-oc-789", "https://oc.example.com", None).unwrap();
+        let path =
+            write_opencode_config(&dir, "sk-oc-789", "https://oc.example.com", None).unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
         // model = lingfang/default。
@@ -479,7 +491,10 @@ mod tests {
         assert_eq!(options["baseURL"], "https://oc.example.com");
         assert_eq!(options["apiKey"], "sk-oc-789");
         // npm 适配器 + models 占位。
-        assert_eq!(parsed["provider"]["lingfang"]["npm"], "@ai-sdk/openai-compatible");
+        assert_eq!(
+            parsed["provider"]["lingfang"]["npm"],
+            "@ai-sdk/openai-compatible"
+        );
         assert!(parsed["provider"]["lingfang"]["models"]["default"]["name"].is_string());
     }
 
@@ -542,11 +557,15 @@ mod tests {
         // api_key 含双引号/反斜杠时，serde_json 序列化应正确转义（不破坏 JSON）。
         let dir = temp_dir("special-chars");
         let tricky_key = "sk-\"weird\\key";
-        let path = write_opencode_config(&dir, tricky_key, "https://api.example.com", None).unwrap();
+        let path =
+            write_opencode_config(&dir, tricky_key, "https://api.example.com", None).unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         // JSON 应可正确解析（转义无误）。
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("JSON 应合法");
-        assert_eq!(parsed["provider"]["lingfang"]["options"]["apiKey"], tricky_key);
+        assert_eq!(
+            parsed["provider"]["lingfang"]["options"]["apiKey"],
+            tricky_key
+        );
     }
 
     #[test]
@@ -574,7 +593,13 @@ mod tests {
         //  3) 文件内出现 \u 转义前缀（控制字符确实被 \uXXXX 序列替代）。
         let dir = temp_dir("codex-model-ctrl");
         let model_with_ctrl = "gpt\n5\x00";
-        write_codex_config(&dir, "sk-test", "https://api.example.com", Some(model_with_ctrl)).unwrap();
+        write_codex_config(
+            &dir,
+            "sk-test",
+            "https://api.example.com",
+            Some(model_with_ctrl),
+        )
+        .unwrap();
         let body = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         // 1) model 行存在且为单行：按行查找以 "model = " 开头的行应恰好命中一行。
         let model_line = body
@@ -602,15 +627,25 @@ mod tests {
     fn codex_config_toml_writes_top_level_model() {
         // model 非空时写入顶级 `model = "<m>"`，位置在 model_provider 之后、[model_providers.*] 段之前。
         let dir = temp_dir("codex-model");
-        write_codex_config(&dir, "sk-codex", "https://llm.example.com", Some("gpt-5.1-codex")).unwrap();
+        write_codex_config(
+            &dir,
+            "sk-codex",
+            "https://llm.example.com",
+            Some("gpt-5.1-codex"),
+        )
+        .unwrap();
         let toml = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(
             toml.contains("model = \"gpt-5.1-codex\""),
             "应含顶级 model 字段：{toml}"
         );
         // 顶级 model 必须在 provider 段之前（否则被解析为 provider 子字段）。
-        let model_pos = toml.find("model = \"gpt-5.1-codex\"").expect("model 行应存在");
-        let provider_seg_pos = toml.find("[model_providers.lingfang]").expect("provider 段应存在");
+        let model_pos = toml
+            .find("model = \"gpt-5.1-codex\"")
+            .expect("model 行应存在");
+        let provider_seg_pos = toml
+            .find("[model_providers.lingfang]")
+            .expect("provider 段应存在");
         assert!(
             model_pos < provider_seg_pos,
             "model 必须为顶级字段（在 [model_providers.*] 之前）：{toml}"
@@ -661,10 +696,15 @@ mod tests {
     fn opencode_config_json_writes_custom_model() {
         // model 非空：json model = lingfang/<model>，models 条目含 <model> 定义（非 default 占位）。
         let dir = temp_dir("opencode-model");
-        let path = write_opencode_config(&dir, "sk-oc", "https://oc.example.com", Some("qwen-coder")).unwrap();
+        let path =
+            write_opencode_config(&dir, "sk-oc", "https://oc.example.com", Some("qwen-coder"))
+                .unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["model"], "lingfang/qwen-coder", "model 应为 lingfang/<model>");
+        assert_eq!(
+            parsed["model"], "lingfang/qwen-coder",
+            "model 应为 lingfang/<model>"
+        );
         // provider.models 应含 qwen-coder 条目（opencode 据此匹配模型）。
         assert!(
             parsed["provider"]["lingfang"]["models"]["qwen-coder"]["name"].is_string(),

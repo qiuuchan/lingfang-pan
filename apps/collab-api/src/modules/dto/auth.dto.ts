@@ -2,9 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEmail, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
-/** 极验 V4 验证码参数（gt4.js captchaObj.onSuccess 回调产出的 4 参数）。
- *  仅在后端配置了 geetestCaptchaId 时才强制要求（service 层据 PlatformSetting 判定）。
- *  4 个字段均非空字符串校验由 service 层 GeetestService.validate 负责，DTO 层仅做类型约束。 */
+/** 极验 V4 验证码参数（gt4.js captchaObj.onSuccess 回调产出的 4 参数）。 */
 export class GeetestCaptchaDto {
   @ApiProperty({ description: '验证流水号', example: '4c7b...' })
   @IsString()
@@ -53,16 +51,9 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   reason?: string;
-
-  // 组C 极验：后端配置了 geetestCaptchaId 时强制校验（service 层判定），未配置则跳过（开发态）。
-  @ApiPropertyOptional({ description: '极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => GeetestCaptchaDto)
-  captcha?: GeetestCaptchaDto;
 }
 
-/** 登录请求体 DTO。 */
+/** 应用端登录请求体 DTO。 */
 export class LoginDto {
   @ApiProperty({ description: '邮箱地址' })
   @IsEmail({}, { message: '请输入有效邮箱' })
@@ -71,23 +62,27 @@ export class LoginDto {
   @ApiProperty({ description: '登录密码' })
   @IsString()
   password!: string;
+}
 
-  // 组C 极验：后端配置了 geetestCaptchaId 时强制校验（service 层判定），未配置则跳过（开发态）。
-  @ApiPropertyOptional({ description: '极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+/** 管理端登录请求体 DTO。 */
+export class AdminLoginDto extends LoginDto {
+  @ApiPropertyOptional({ description: '管理端极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => GeetestCaptchaDto)
   captcha?: GeetestCaptchaDto;
 }
 
-/** 找回密码请求体 DTO。 */
+/** 应用端找回密码请求体 DTO。 */
 export class ForgotPasswordDto {
   @ApiProperty({ description: '注册邮箱地址' })
   @IsEmail({}, { message: '请输入有效邮箱' })
   email!: string;
+}
 
-  // 组C 极验：后端配置了 geetestCaptchaId 时强制校验（service 层判定），未配置则跳过（开发态）。
-  @ApiPropertyOptional({ description: '极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+/** 管理端找回密码请求体 DTO。 */
+export class AdminForgotPasswordDto extends ForgotPasswordDto {
+  @ApiPropertyOptional({ description: '管理端极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => GeetestCaptchaDto)

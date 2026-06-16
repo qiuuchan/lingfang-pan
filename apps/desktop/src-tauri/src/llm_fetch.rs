@@ -96,7 +96,10 @@ pub async fn fetch_models(input: FetchModelsInput) -> Result<FetchModelsResult, 
     let status = resp.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         // AC2：key 无效或过期，返回带 code 前缀的友好提示（含 provider 上下文）。
-        return Err(format!("api_key_invalid:{} 的 apiKey 无效或已过期", input.provider));
+        return Err(format!(
+            "api_key_invalid:{} 的 apiKey 无效或已过期",
+            input.provider
+        ));
     }
     if !status.is_success() {
         // 非 2xx（429/5xx 等）：不读取 body 进错误信息（避免 provider 回显敏感内容），仅回显状态码 + provider。
@@ -193,16 +196,24 @@ pub async fn test_llm_chat(input: TestLlmChatInput) -> Result<TestLlmChatResult,
         .map_err(|e| format!("网络请求失败：{e}"))?;
     let status = resp.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(format!("api_key_invalid:{} 的 apiKey 无效或已过期", input.provider));
+        return Err(format!(
+            "api_key_invalid:{} 的 apiKey 无效或已过期",
+            input.provider
+        ));
     }
     if !status.is_success() {
         // 模型名错误常表现为 404（model not found），回显状态码供用户定位。
-        return Err(format!("{} 返回错误：HTTP {status}（请检查模型名是否正确）", input.provider));
+        return Err(format!(
+            "{} 返回错误：HTTP {status}（请检查模型名是否正确）",
+            input.provider
+        ));
     }
-    let parsed: ChatCompletionResponse = resp
-        .json()
-        .await
-        .map_err(|_| format!("provider_response_unsupported:{} 返回格式非 OpenAI 兼容", input.provider))?;
+    let parsed: ChatCompletionResponse = resp.json().await.map_err(|_| {
+        format!(
+            "provider_response_unsupported:{} 返回格式非 OpenAI 兼容",
+            input.provider
+        )
+    })?;
     let content = parsed
         .choices
         .into_iter()
@@ -222,7 +233,10 @@ mod tests {
     #[test]
     fn build_models_url_appends_path() {
         // 正常地址：直接追加 /v1/models。
-        assert_eq!(build_models_url("https://api.openai.com"), "https://api.openai.com/v1/models");
+        assert_eq!(
+            build_models_url("https://api.openai.com"),
+            "https://api.openai.com/v1/models"
+        );
         assert_eq!(
             build_models_url("https://api.deepseek.com"),
             "https://api.deepseek.com/v1/models"
@@ -271,10 +285,19 @@ mod tests {
     #[test]
     fn build_chat_url_appends_path() {
         // 与 build_models_url 同款 /v1 智能补全，但追加的是 /chat/completions。
-        assert_eq!(build_chat_url("https://api.openai.com"), "https://api.openai.com/v1/chat/completions");
-        assert_eq!(build_chat_url("https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(
+            build_chat_url("https://api.openai.com"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_chat_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
         // 尾斜杠裁掉。
-        assert_eq!(build_chat_url("https://api.deepseek.com/"), "https://api.deepseek.com/v1/chat/completions");
+        assert_eq!(
+            build_chat_url("https://api.deepseek.com/"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
     }
 
     #[test]
@@ -289,9 +312,13 @@ mod tests {
         assert_eq!(input.api_key, "sk-test");
 
         // snake_case key 反而应被拒绝（rename 后 api_url 不再匹配）。
-        let snake = r#"{"provider":"openai","api_url":"https://api.openai.com","api_key":"sk-test"}"#;
+        let snake =
+            r#"{"provider":"openai","api_url":"https://api.openai.com","api_key":"sk-test"}"#;
         let result: Result<FetchModelsInput, _> = serde_json::from_str(snake);
-        assert!(result.is_err(), "rename_all=camelCase 后 snake_case key 应被拒绝");
+        assert!(
+            result.is_err(),
+            "rename_all=camelCase 后 snake_case key 应被拒绝"
+        );
     }
 
     #[test]

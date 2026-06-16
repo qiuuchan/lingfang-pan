@@ -399,7 +399,11 @@ pub fn start_session<E: AssistantEventSink>(
     let definition = tool_definition(input.tool);
     let command = find_command(definition.candidate_commands)
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
-    let workspace_dir = resolve_workspace(input.workspace_dir, Some(state.store.root()), input.plugin_id.as_deref())?;
+    let workspace_dir = resolve_workspace(
+        input.workspace_dir,
+        Some(state.store.root()),
+        input.plugin_id.as_deref(),
+    )?;
     let session_id = session_id;
     // system_prompt 不再拼进 prompt 文本——改由 run_args 的 system_prompt 参数传给 claude 的 --system-prompt
     // （作为独立 system message）。此前拼接方式让 claude 把创建指令当普通用户文本，弱化/忽略指令。
@@ -464,12 +468,10 @@ pub fn start_session<E: AssistantEventSink>(
         Err(error) => {
             // spawn 失败：回滚落盘的 session 记录状态为 failed，并清理已生成的临时配置（AC7）。
             cli_config::cleanup_session_config(state.configs_root(), &record.session_id);
-            let _ = state.store.update_session_exit(
-                &record.session_id,
-                "failed",
-                None,
-                now_string(),
-            );
+            let _ =
+                state
+                    .store
+                    .update_session_exit(&record.session_id, "failed", None, now_string());
             return Err(error);
         }
     };
@@ -531,13 +533,11 @@ pub fn send_input<E: AssistantEventSink>(
         .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
 
     // 写追问 input transcript（event=input, kind=followup）。旧实现写 input-rejected 已废弃。
-    state
-        .store
-        .append_transcript(
-            &input.session_id,
-            "input",
-            json!({ "prompt": input.input, "kind": "followup" }),
-        )?;
+    state.store.append_transcript(
+        &input.session_id,
+        "input",
+        json!({ "prompt": input.input, "kind": "followup" }),
+    )?;
 
     // 续接 prompt 构造（design §3.3.4）：
     // - claude：用捕获到的 cli_session_id 走 --resume 真续接；缺 id 则降级伪多轮（拼历史）。
@@ -545,10 +545,9 @@ pub fn send_input<E: AssistantEventSink>(
     let claude_missing_id =
         session.tool == CodeAssistantTool::Claude && session.cli_session_id.is_none();
     let (final_prompt, resume_id): (String, Option<String>) = match session.tool {
-        CodeAssistantTool::Claude if !claude_missing_id => (
-            input.input.clone(),
-            session.cli_session_id.clone(),
-        ),
+        CodeAssistantTool::Claude if !claude_missing_id => {
+            (input.input.clone(), session.cli_session_id.clone())
+        }
         _ => {
             // 伪多轮（codex/opencode 或 claude 缺 id 降级）：历史摘要 + 用户追问。
             let summary = build_history_summary(&state.store, &input.session_id)?;
@@ -637,9 +636,12 @@ pub fn stop_session<E: AssistantEventSink>(
             state
                 .store
                 .append_transcript(&input.session_id, "stopped", json!({ "by": "user" }))?;
-            state
-                .store
-                .update_session_exit(&input.session_id, "stopped", None, ended_at.clone())?;
+            state.store.update_session_exit(
+                &input.session_id,
+                "stopped",
+                None,
+                ended_at.clone(),
+            )?;
             // AC7：用户主动停止时清理临时 CLI 配置目录（waiter 不会触发自然退出分支）。
             cli_config::cleanup_session_config(state.configs_root(), &input.session_id);
             app.emit_json(
@@ -705,7 +707,10 @@ fn spawn_and_attach<E: AssistantEventSink>(
         // 此处与 run_captured_inner（code_assistant.rs:1748-1750）对齐，叠加 NO_WINDOW 不弹控制台。
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        WindowsCommandExt::creation_flags(&mut command_builder, CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        WindowsCommandExt::creation_flags(
+            &mut command_builder,
+            CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+        );
     }
     let mut child = command_builder.spawn().map_err(|error| error.to_string())?;
 
@@ -792,7 +797,9 @@ pub fn delete_session(state: &CodeAssistantState, input: DeleteSessionInput) -> 
 
 /// 写草稿到 drafts/{sessionId}.json，并刷新该会话的 draft_updated_at。
 pub fn save_draft(state: &CodeAssistantState, input: SaveDraftInput) -> Result<(), String> {
-    state.store.write_draft(&input.session_id, &input.draft_json)?;
+    state
+        .store
+        .write_draft(&input.session_id, &input.draft_json)?;
     // 落盘成功后同步刷新更新时间（前端会话栏排序/相对时间依据）。
     state
         .store
@@ -934,10 +941,7 @@ fn collect_workspace_files_inner(
         if rel.is_empty() {
             continue;
         }
-        out.push(DraftFileJson {
-            path: rel,
-            content,
-        });
+        out.push(DraftFileJson { path: rel, content });
     }
     Ok(())
 }
@@ -1043,10 +1047,7 @@ enum StreamItem {
     /// 思考内容（thinking 块 / thinking_delta），进 thought 流。
     Thinking(String),
     /// 工具调用（含 AskUserQuestion），进 tool 流。input_json 为序列化的入参（可能不完整）。
-    ToolUse {
-        name: String,
-        input_json: String,
-    },
+    ToolUse { name: String, input_json: String },
     /// 错误/诊断（codex 的 turn.failed / error 事件），进 stderr 流。
     /// 仅 codex-json 使用：把错误从 JSONL 解析出来路由到 stderr（不进 stdout）。
     Stderr(String),
@@ -1203,10 +1204,12 @@ fn extract_stream_json_items(line: &str) -> Vec<StreamItem> {
                             .get("partial_json")
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
-                            .map(|s| vec![StreamItem::ToolUse {
-                                name: String::new(),
-                                input_json: s.to_string(),
-                            }])
+                            .map(|s| {
+                                vec![StreamItem::ToolUse {
+                                    name: String::new(),
+                                    input_json: s.to_string(),
+                                }]
+                            })
                             .unwrap_or_default(),
                         _ => Vec::new(),
                     }
@@ -1286,9 +1289,10 @@ fn extract_codex_json_items(line: &str) -> Vec<StreamItem> {
             vec![StreamItem::Stderr(format!("[error] {message}"))]
         }
         // 单 item 事件：item.started/updated/completed，按 item.type 分类。
-        "item.started" | "item.updated" | "item.completed" => {
-            value.get("item").map(classify_codex_item).unwrap_or_default()
-        }
+        "item.started" | "item.updated" | "item.completed" => value
+            .get("item")
+            .map(classify_codex_item)
+            .unwrap_or_default(),
         // 批量 items 事件：逐项分类（兜底，多数情况下 codex 走 item.* 流式）。
         "items" => value
             .get("items")
@@ -1482,9 +1486,7 @@ fn spawn_reader<E: AssistantEventSink>(
                                 if stream == "stdout"
                                     && !cli_id_captured.load(std::sync::atomic::Ordering::SeqCst)
                                 {
-                                    if let Some(cli_id) =
-                                        extract_stream_json_session_id(&buffer)
-                                    {
+                                    if let Some(cli_id) = extract_stream_json_session_id(&buffer) {
                                         if cli_id_captured
                                             .compare_exchange(
                                                 false,
@@ -1494,8 +1496,9 @@ fn spawn_reader<E: AssistantEventSink>(
                                             )
                                             .is_ok()
                                         {
-                                            let _ =
-                                                state.store.set_cli_session_id(&session_id, &cli_id);
+                                            let _ = state
+                                                .store
+                                                .set_cli_session_id(&session_id, &cli_id);
                                             app.emit_json(
                                                 "code-assistant://session-cli-id",
                                                 json!({
@@ -1599,6 +1602,8 @@ pub(crate) fn kill_child_tree(child: &Child) {
             .arg("-TERM")
             .arg("--")
             .arg(&group)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
         // 给进程组 1 秒优雅退出窗口（TERM 后轮询 try_wait 不要求 Child 可变，
         // 但 try_wait 需要 &mut，这里改为简单 sleep 等系统回收，由调用方后续 wait 确认）。
@@ -1607,6 +1612,8 @@ pub(crate) fn kill_child_tree(child: &Child) {
             .arg("-KILL")
             .arg("--")
             .arg(&group)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
     }
     #[cfg(windows)]
@@ -1746,10 +1753,9 @@ pub(crate) fn run_captured_inner(
         command.current_dir(workspace_dir);
     }
     if let Some(env) = env {
-        command.env_clear().envs(
-            env.iter()
-                .map(|(key, value)| (key.clone(), value.clone())),
-        );
+        command
+            .env_clear()
+            .envs(env.iter().map(|(key, value)| (key.clone(), value.clone())));
     }
     // 修复 SCRIPT-02：让子进程脱离父进程组（Unix setsid / Windows CREATE_NEW_PROCESS_GROUP），
     // 这样 stop_child_process 杀进程组才能波及孙进程（孙进程跟随父进入新组）。
@@ -1766,7 +1772,10 @@ pub(crate) fn run_captured_inner(
         // 叠加 CREATE_NO_WINDOW (0x0800_0000)：不弹控制台窗口。
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        WindowsCommandExt::creation_flags(&mut command, CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        WindowsCommandExt::creation_flags(
+            &mut command,
+            CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+        );
     }
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let started = Instant::now();
@@ -1901,12 +1910,17 @@ pub(crate) fn build_spawn_command(binary: &std::path::Path, args: &[String]) -> 
         if is_batch {
             if let Some(resolved) = resolve_npm_shim(binary) {
                 let mut cmd = Command::new(&resolved.binary);
-                cmd.creation_flags(CREATE_NO_WINDOW).args(&resolved.prefix_args).args(args);
+                cmd.creation_flags(CREATE_NO_WINDOW)
+                    .args(&resolved.prefix_args)
+                    .args(args);
                 return cmd;
             }
             // 解析失败回退 cmd /C（至少能跑，但 stdout 可能丢）
             let mut cmd = Command::new("cmd");
-            cmd.creation_flags(CREATE_NO_WINDOW).arg("/C").arg(binary).args(args);
+            cmd.creation_flags(CREATE_NO_WINDOW)
+                .arg("/C")
+                .arg(binary)
+                .args(args);
             return cmd;
         }
         let mut cmd = Command::new(binary);
@@ -1924,18 +1938,25 @@ pub(crate) fn build_spawn_command(binary: &std::path::Path, args: &[String]) -> 
 /// 解析 npm .cmd shim，提取其调用的真实命令。
 /// 匹配 `"...path..." %*` 模式，%dp0% 替换为 .cmd 所在目录；
 /// .exe 直接返回；.js/.mjs/.cjs 包装成 node 调用。
+#[cfg(windows)]
 struct ResolvedShim {
     binary: PathBuf,
     prefix_args: Vec<String>,
 }
 
+#[cfg(windows)]
 fn resolve_npm_shim(cmd_path: &std::path::Path) -> Option<ResolvedShim> {
     let content = std::fs::read_to_string(cmd_path).ok()?;
     let dp0 = cmd_path.parent()?;
     // 找所有 "..." 形式的路径，取最后一个形如 node_modules/... 的（跳过 node.exe 本身的引用）
     let mut target_path: Option<String> = None;
     for cap in regex_lite_quotes(&content) {
-        if cap.contains("node_modules") && (cap.ends_with(".exe") || cap.ends_with(".js") || cap.ends_with(".mjs") || cap.ends_with(".cjs")) {
+        if cap.contains("node_modules")
+            && (cap.ends_with(".exe")
+                || cap.ends_with(".js")
+                || cap.ends_with(".mjs")
+                || cap.ends_with(".cjs"))
+        {
             target_path = Some(cap);
         }
     }
@@ -1943,17 +1964,24 @@ fn resolve_npm_shim(cmd_path: &std::path::Path) -> Option<ResolvedShim> {
     let resolved = raw.replace("%dp0%", &dp0.to_string_lossy());
     let path = PathBuf::from(&resolved);
     match path.extension().and_then(|e| e.to_str()) {
-        Some("exe") => Some(ResolvedShim { binary: path, prefix_args: vec![] }),
+        Some("exe") => Some(ResolvedShim {
+            binary: path,
+            prefix_args: vec![],
+        }),
         Some(ext) if ext == "js" || ext == "mjs" || ext == "cjs" => {
             // .js 类：需要 node 执行
             let node = find_binary("node")?;
-            Some(ResolvedShim { binary: node, prefix_args: vec![path.to_string_lossy().to_string()] })
+            Some(ResolvedShim {
+                binary: node,
+                prefix_args: vec![path.to_string_lossy().to_string()],
+            })
         }
         _ => None,
     }
 }
 
 /// 轻量提取双引号包裹的内容（避免引入 regex crate 依赖）。
+#[cfg(windows)]
 fn regex_lite_quotes(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut chars = content.chars().peekable();
@@ -1961,10 +1989,14 @@ fn regex_lite_quotes(content: &str) -> Vec<String> {
         if c == '"' {
             let mut buf = String::new();
             for c2 in chars.by_ref() {
-                if c2 == '"' { break; }
+                if c2 == '"' {
+                    break;
+                }
                 buf.push(c2);
             }
-            if !buf.is_empty() { out.push(buf); }
+            if !buf.is_empty() {
+                out.push(buf);
+            }
         }
     }
     out
@@ -1994,7 +2026,11 @@ fn redact_arg(arg: &str) -> String {
 /// - `plugin_id`：组D task 06-16 预留参数（plugin_script 预览执行传 None 走显式 workspace_dir 分支）。
 ///   非空时理论上可解析为 plugins_root/<plugin_id>/，但当前持久化目录解析已在 main.rs 完成
 ///   （start_session 注入 workspace_dir），此处仅占位保持签名稳定，供后续直接调用方扩展。
-pub(crate) fn resolve_workspace(workspace_dir: Option<String>, default_root: Option<&std::path::Path>, _plugin_id: Option<&str>) -> Result<String, String> {
+pub(crate) fn resolve_workspace(
+    workspace_dir: Option<String>,
+    default_root: Option<&std::path::Path>,
+    _plugin_id: Option<&str>,
+) -> Result<String, String> {
     let path = workspace_dir
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
@@ -2069,10 +2105,7 @@ fn build_history_summary(store: &AssistantStore, session_id: &str) -> Result<Str
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
             continue;
         };
-        let (ev, payload) = (
-            v.get("event").and_then(|x| x.as_str()),
-            v.get("payload"),
-        );
+        let (ev, payload) = (v.get("event").and_then(|x| x.as_str()), v.get("payload"));
         match (ev, payload) {
             (Some("input"), Some(p)) => {
                 // 跳过追问自身写入的 followup input（kind=followup），只读真实首轮 user prompt。
@@ -2155,7 +2188,8 @@ mod tests {
     #[test]
     fn session_id_from_result_line() {
         // result 结束行携带 session_id（部分版本在结束事件输出）。
-        let line = r#"{"type":"result","subtype":"success","session_id":"claude-res-2","result":"done"}"#;
+        let line =
+            r#"{"type":"result","subtype":"success","session_id":"claude-res-2","result":"done"}"#;
         assert_eq!(
             extract_stream_json_session_id(line),
             Some("claude-res-2".to_string())
@@ -2307,7 +2341,10 @@ mod tests {
         match &items[0] {
             StreamItem::ToolUse { name, input_json } => {
                 assert!(name.is_empty(), "input_json_delta 的 name 应为空");
-                assert!(input_json.contains("path"), "应含 path 字段，实际 {input_json:?}");
+                assert!(
+                    input_json.contains("path"),
+                    "应含 path 字段，实际 {input_json:?}"
+                );
             }
             other => panic!("期望 ToolUse，实际 {other:?}"),
         }
@@ -2323,7 +2360,8 @@ mod tests {
     #[test]
     fn items_stream_event_message_start_yields_nothing() {
         // message_start / message_delta / message_stop 等非内容事件不产出片段。
-        let line = r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#;
+        let line =
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#;
         assert!(extract_stream_json_items(line).is_empty());
     }
 
@@ -2448,7 +2486,8 @@ mod tests {
     #[test]
     fn codex_item_reasoning_content_delta_yields_thinking() {
         // reasoning_content_delta → Thinking 增量。
-        let line = r#"{"type":"item.updated","item":{"type":"reasoning_content_delta","delta":"推理中"}}"#;
+        let line =
+            r#"{"type":"item.updated","item":{"type":"reasoning_content_delta","delta":"推理中"}}"#;
         assert_eq!(
             extract_codex_json_items(line),
             vec![StreamItem::Thinking("推理中".to_string())]
@@ -2539,7 +2578,10 @@ mod tests {
         };
         let stderr = StreamItem::Stderr("[error] boom".to_string());
         let text = StreamItem::Text("正文".to_string());
-        assert_eq!(stream_item_to_pair(thinking), Some(("thought", "思考".to_string())));
+        assert_eq!(
+            stream_item_to_pair(thinking),
+            Some(("thought", "思考".to_string()))
+        );
         assert_eq!(
             stream_item_to_pair(tool),
             Some(("tool", "shell {}".to_string()))
@@ -2548,7 +2590,10 @@ mod tests {
             stream_item_to_pair(stderr),
             Some(("stderr", "[error] boom".to_string()))
         );
-        assert_eq!(stream_item_to_pair(text), Some(("stdout", "正文".to_string())));
+        assert_eq!(
+            stream_item_to_pair(text),
+            Some(("stdout", "正文".to_string()))
+        );
     }
 
     // === design 阶段1：spawn_reader 分类 emit 端到端（stdout 不被 thinking/tool 污染） ===
@@ -2612,7 +2657,11 @@ mod tests {
         let deadline = Instant::now() + std::time::Duration::from_secs(2);
         loop {
             let transcript = store.read_transcript("reader-session").unwrap_or_default();
-            if transcript.lines().filter(|l| l.contains("\"event\":\"output\"")).count() >= 3
+            if transcript
+                .lines()
+                .filter(|l| l.contains("\"event\":\"output\""))
+                .count()
+                >= 3
                 || Instant::now() > deadline
             {
                 break;
@@ -2653,8 +2702,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
 
-        assert_eq!(stdout_text, "正文", "stdout 应仅含正文，实际 {stdout_text:?}");
-        assert_eq!(thought_text, "思考", "thought 应含思考内容，实际 {thought_text:?}");
+        assert_eq!(
+            stdout_text, "正文",
+            "stdout 应仅含正文，实际 {stdout_text:?}"
+        );
+        assert_eq!(
+            thought_text, "思考",
+            "thought 应含思考内容，实际 {thought_text:?}"
+        );
         assert!(
             tool_text.starts_with("Read"),
             "tool 应含工具名 Read，实际 {tool_text:?}"
@@ -2767,8 +2822,14 @@ mod tests {
             .join("");
 
         // 正文进 stdout；思考进 thought；工具进 tool；错误进 stderr。
-        assert_eq!(stdout_text, "正文", "stdout 应仅含正文，实际 {stdout_text:?}");
-        assert_eq!(thought_text, "思考", "thought 应含思考，实际 {thought_text:?}");
+        assert_eq!(
+            stdout_text, "正文",
+            "stdout 应仅含正文，实际 {stdout_text:?}"
+        );
+        assert_eq!(
+            thought_text, "思考",
+            "thought 应含思考，实际 {thought_text:?}"
+        );
         assert!(
             tool_text.starts_with("Read"),
             "tool 应含工具名 Read，实际 {tool_text:?}"
@@ -3135,7 +3196,8 @@ mod tests {
         .unwrap();
         let resolved = super::resolve_npm_shim(&cmd_path).expect("应解析出 node + js");
         assert!(
-            resolved.binary.file_name().unwrap() == "node.exe" || resolved.binary.file_name().unwrap() == "node",
+            resolved.binary.file_name().unwrap() == "node.exe"
+                || resolved.binary.file_name().unwrap() == "node",
             "应为 node，实际 {:?}",
             resolved.binary
         );
@@ -3168,7 +3230,10 @@ mod tests {
                 model: Some("sonnet".into()),
                 workspace_dir: sandbox.to_string_lossy().to_string(),
                 status: "exited".into(),
-                transcript_path: store.transcript_path("scan-1").to_string_lossy().to_string(),
+                transcript_path: store
+                    .transcript_path("scan-1")
+                    .to_string_lossy()
+                    .to_string(),
                 command_preview: vec!["claude".into()],
                 pid: None,
                 started_at: "1".into(),
@@ -3183,10 +3248,8 @@ mod tests {
         let state = CodeAssistantState {
             store,
             processes: Arc::new(Mutex::new(HashMap::new())),
-            configs_root: std::env::temp_dir().join(format!(
-                "lingfang-scan-configs-{}",
-                std::process::id()
-            )),
+            configs_root: std::env::temp_dir()
+                .join(format!("lingfang-scan-configs-{}", std::process::id())),
         };
         (state, sandbox)
     }
@@ -3359,11 +3422,7 @@ mod tests {
         // 创建指向祖先目录的符号链接（构成环：sandbox/loop -> sandbox）。
         symlink(&sandbox, sandbox.join("loop")).unwrap();
         // 创建指向自身的目录符号链接（最经典的环）。
-        symlink(
-            sandbox.join("self-loop"),
-            sandbox.join("self-loop-target"),
-        )
-        .ok(); // 可能因目标不存在而失败，不影响主断言
+        symlink(sandbox.join("self-loop"), sandbox.join("self-loop-target")).ok(); // 可能因目标不存在而失败，不影响主断言
 
         // 关键断言：scan 应正常返回（不栈溢出 panic），且符号链接本身被跳过。
         let files = scan_workspace_files(

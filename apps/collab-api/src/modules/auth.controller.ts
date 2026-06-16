@@ -4,7 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { Public, requireUser } from '../common';
 import { AuthService } from './auth.service';
-import { ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto } from './dto/auth.dto';
+import { ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto, AdminForgotPasswordDto, AdminLoginDto } from './dto/auth.dto';
 
 // 敏感鉴权端点统一限流：10 次/分钟/IP（Top9）。
 // 防暴力破解密码、注册轰炸、找回密码邮件轰炸。全局默认 60 次/分钟，此处收紧到 10。
@@ -18,10 +18,8 @@ export class AuthController {
   @Public()
   @Post('register')
   @AUTH_THROTTLE
-  @ApiOperation({ summary: '本地客户端注册普通用户或提交团队管理员申请' })
-  register(@Body() body: RegisterDto, @Req() req: Request) {
-    // 应用端（desktop）经 X-Client:desktop header 标识，service.requireCaptcha 据此跳过验证码。
-    const clientKind = (req.headers['x-client'] as string | undefined)?.trim().toLowerCase();
+  @ApiOperation({ summary: '本地客户端注册普通用户或提交团队管理员申请（无验证码）' })
+  register(@Body() body: RegisterDto) {
     return this.auth.register({
       email: body.email,
       password: body.password,
@@ -29,29 +27,39 @@ export class AuthController {
       wantsTeamAdmin: body.wantsTeamAdmin,
       teamName: body.teamName,
       reason: body.reason,
-      captcha: body.captcha,
-      clientKind,
     });
   }
 
   @Public()
   @Post('login')
   @AUTH_THROTTLE
-  @ApiOperation({ summary: '本地客户端和管理端共用登录' })
-  login(@Body() body: LoginDto, @Req() req: Request) {
-    // 应用端（desktop）经 X-Client:desktop header 标识，service.requireCaptcha 据此跳过验证码。
-    const clientKind = (req.headers['x-client'] as string | undefined)?.trim().toLowerCase();
-    return this.auth.login({ email: body.email, password: body.password, captcha: body.captcha, clientKind });
+  @ApiOperation({ summary: '本地客户端登录（无验证码）' })
+  login(@Body() body: LoginDto) {
+    return this.auth.login({ email: body.email, password: body.password });
+  }
+
+  @Public()
+  @Post('admin/login')
+  @AUTH_THROTTLE
+  @ApiOperation({ summary: '管理端登录（按平台配置校验验证码）' })
+  adminLogin(@Body() body: AdminLoginDto) {
+    return this.auth.adminLogin({ email: body.email, password: body.password, captcha: body.captcha });
   }
 
   @Public()
   @Post('forgot-password')
   @AUTH_THROTTLE
-  @ApiOperation({ summary: '找回密码：发送重置链接邮件（占位 SMTP 未配时降级 console.log）' })
-  forgotPassword(@Body() body: ForgotPasswordDto, @Req() req: Request) {
-    // 应用端（desktop）经 X-Client:desktop header 标识，service.requireCaptcha 据此跳过验证码。
-    const clientKind = (req.headers['x-client'] as string | undefined)?.trim().toLowerCase();
-    return this.auth.forgotPassword({ email: body.email, captcha: body.captcha, clientKind });
+  @ApiOperation({ summary: '应用端找回密码：发送重置链接邮件（无验证码）' })
+  forgotPassword(@Body() body: ForgotPasswordDto) {
+    return this.auth.forgotPassword({ email: body.email });
+  }
+
+  @Public()
+  @Post('admin/forgot-password')
+  @AUTH_THROTTLE
+  @ApiOperation({ summary: '管理端找回密码：按平台配置校验验证码后发送重置链接邮件' })
+  adminForgotPassword(@Body() body: AdminForgotPasswordDto) {
+    return this.auth.adminForgotPassword({ email: body.email, captcha: body.captcha });
   }
 
   @Public()

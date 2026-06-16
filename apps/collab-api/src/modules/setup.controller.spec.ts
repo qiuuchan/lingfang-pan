@@ -13,7 +13,7 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
   // 事务回调内用到的 tx 方法（user.create / platformSetting.upsert / auditLog.create）默认 resolved。
   const tx = {
     user: { create: vi.fn(async () => ({ id: 'u1', email: 'a@b.com' })) },
-    platformSetting: { upsert: vi.fn(async () => undefined) },
+    platformSetting: { create: vi.fn(async () => undefined), upsert: vi.fn(async () => undefined) },
     auditLog: { create: vi.fn(async () => undefined) },
   };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
@@ -84,7 +84,10 @@ describe('SetupController', () => {
       // 邮箱归一化为小写。
       expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: 'admin@example.com' } });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      // 事务内：建管理员（platformRole=PLATFORM_ADMIN）。
+      // 事务内：先创建 bootstrap lock，再建管理员（platformRole=PLATFORM_ADMIN）。
+      expect(prisma.tx.platformSetting.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ key: '__setup_bootstrap_lock__', value: 'completed' }),
+      }));
       const createCall = prisma.tx.user.create.mock.calls[0][0];
       expect(createCall.data.email).toBe('admin@example.com');
       expect(createCall.data.platformRole).toBe('PLATFORM_ADMIN');
@@ -100,8 +103,20 @@ describe('SetupController', () => {
       expect(auditCall.data.targetType).toBe('User');
     });
 
-    it('platformName 为空时不写 PlatformSetting（保留默认兜底）', async () => {
+    it('bootstrap lock 冲突时抛 403（setup_already_done），兜住并发初始化', async () => {
+      prisma.tx.platformSetting.create.mockRejectedValueOnce({ code: 'P2002' });
+      await expect(controller.setup(validBody as never)).rejects.toMatchObject({
+        status: 403,
+        code: 'forbidden',
+        details: { reason: 'setup_already_done' },
+      });
+      expect(prisma.tx.user.create).not.toHaveBeenCalled();
+      expect(prisma.tx.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('platformName 为空时只写 bootstrap lock，不写 platformName 设置（保留默认兜底）', async () => {
       await controller.setup({ email: 'a@b.com', password: 'ChangeMe123!' } as never);
+      expect(prisma.tx.platformSetting.create).toHaveBeenCalledTimes(1);
       expect(prisma.tx.platformSetting.upsert).not.toHaveBeenCalled();
       // 仍建管理员 + 审计。
       expect(prisma.tx.user.create).toHaveBeenCalledTimes(1);

@@ -114,7 +114,8 @@ mod tests {
     #[test]
     fn active_provider_parses_camel_case_api_url() {
         // 后端实际返回 { name, apiUrl, defaultModels }（见 llm.service.ts getActiveProvider）。
-        let body = r#"{"name":"LingFang","apiUrl":"https://api.example.com","defaultModels":["gpt-4"]}"#;
+        let body =
+            r#"{"name":"LingFang","apiUrl":"https://api.example.com","defaultModels":["gpt-4"]}"#;
         let parsed: ActiveProviderResponse = serde_json::from_str(body).expect("应可解析");
         assert_eq!(parsed.api_url.as_deref(), Some("https://api.example.com"));
     }

@@ -215,7 +215,12 @@ impl PluginStore {
     /// - 原目录不存在或目标已存在 → 报错。
     /// - title 非空 → 写入新目录 manifest.json 的 title 字段（保留其它字段），缺失则不动 manifest。
     /// 返回 sanitize 后的正式目录名（= 新 plugin_id）。
-    pub fn rename_and_title(&self, old_id: &str, new_id: &str, title: Option<&str>) -> Result<String, String> {
+    pub fn rename_and_title(
+        &self,
+        old_id: &str,
+        new_id: &str,
+        title: Option<&str>,
+    ) -> Result<String, String> {
         let safe_new = sanitize_plugin_id(new_id)?;
         let old_dir = self.plugin_dir(old_id)?;
         let new_dir = self.plugin_dir(&safe_new)?;
@@ -291,7 +296,10 @@ impl PluginStore {
         let base = dir
             .canonicalize()
             .map_err(|e| format!("插件目录不存在：{e}"))?;
-        let target = base.join(file).canonicalize().map_err(|e| format!("文件不存在：{e}"))?;
+        let target = base
+            .join(file)
+            .canonicalize()
+            .map_err(|e| format!("文件不存在：{e}"))?;
         if !target.starts_with(&base) {
             return Err("非法文件路径".to_string());
         }
@@ -416,10 +424,7 @@ fn parse_entry(value: Option<&Value>) -> String {
 
 /// 解析 manifest description（缺失为空串）。
 fn parse_description(value: Option<&Value>) -> String {
-    value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
+    value.and_then(|v| v.as_str()).unwrap_or("").to_string()
 }
 
 /// 解析 manifest version（缺失为 '0.0.0'）。
@@ -471,7 +476,9 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
 ///
 /// 同目录保证 tmp 与目标在同文件系统（rename 原子语义的前提）。tmp 文件名带 pid + 纳秒时间戳避免并发覆盖。
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let parent = path.parent().ok_or_else(|| "目标路径无父目录".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "目标路径无父目录".to_string())?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let raw = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
     let tmp_name = format!(
@@ -729,12 +736,19 @@ mod tests {
         fs::write(
             temp_dir.join("manifest.json"),
             r#"{"id":"x","name":"ai-gen-id","entry":"ui/index.html"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         fs::create_dir_all(temp_dir.join("ui")).unwrap();
         fs::write(temp_dir.join("ui").join("index.html"), "x").unwrap();
 
         // rename 为正式目录名（前端 safePluginId 已把「我的番茄钟」转成 ASCII，如 base36 编码串）+ 写入用户命名 title。
-        let safe = store.rename_and_title("temp-1700000000-123", "wode-fanqie-zhong", Some("我的番茄钟")).unwrap();
+        let safe = store
+            .rename_and_title(
+                "temp-1700000000-123",
+                "wode-fanqie-zhong",
+                Some("我的番茄钟"),
+            )
+            .unwrap();
         assert_eq!(safe, "wode-fanqie-zhong");
 
         // scan 读到的展示名是用户命名（title 优先），而非 ai-gen-id。
@@ -744,14 +758,23 @@ mod tests {
         // PluginMeta.id 取 manifest.id（程序标识符 x），与目录名不同——目录名是持久化 plugin_id。
         assert_eq!(metas[0].id, "x");
         // 目录已从 temp-1700000000-123 改名为正式目录名 wode-fanqie-zhong。
-        assert!(!store.plugin_dir("temp-1700000000-123").unwrap().exists(), "旧临时目录应已不存在");
+        assert!(
+            !store.plugin_dir("temp-1700000000-123").unwrap().exists(),
+            "旧临时目录应已不存在"
+        );
         let new_dir = store.plugin_dir(&safe).unwrap();
         assert!(new_dir.exists(), "正式目录应存在");
         // manifest.json 的 title 字段确实被写入（pretty print 格式，冒号后带空格）。
         let new_manifest = fs::read_to_string(new_dir.join("manifest.json")).unwrap();
-        assert!(new_manifest.contains(r#""title": "我的番茄钟""#), "title 应写入 manifest.json，实际：{new_manifest}");
+        assert!(
+            new_manifest.contains(r#""title": "我的番茄钟""#),
+            "title 应写入 manifest.json，实际：{new_manifest}"
+        );
         // 原有字段保留（rename 不破坏 manifest 其它内容）。
-        assert!(new_manifest.contains(r#""name": "ai-gen-id""#), "原 name 字段应保留");
+        assert!(
+            new_manifest.contains(r#""name": "ai-gen-id""#),
+            "原 name 字段应保留"
+        );
         // data/ 子目录仍在（ensure_plugin_dir 创建，rename 不丢）。
         assert!(new_dir.join("data").is_dir());
     }
@@ -789,7 +812,8 @@ mod tests {
         fs::write(
             dir.join("manifest.json"),
             r#"{"id":"no-entry","name":"无入口","entry":"main.py"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         // 无 main.py。
         let metas = store.list_plugins();
         assert_eq!(metas[0].status, PluginStatus::Incomplete);
@@ -814,7 +838,11 @@ mod tests {
         let dir = store.plugins_root().join("no-id");
         fs::create_dir_all(&dir).unwrap();
         // 缺 name 字段。
-        fs::write(dir.join("manifest.json"), r#"{"id":"no-id","entry":"ui/index.html"}"#).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"no-id","entry":"ui/index.html"}"#,
+        )
+        .unwrap();
         let metas = store.list_plugins();
         assert_eq!(metas[0].status, PluginStatus::Error);
         assert!(metas[0].detail.as_deref().unwrap().contains("id 或 name"));
@@ -829,7 +857,8 @@ mod tests {
         fs::write(
             py_dir.join("manifest.json"),
             r#"{"id":"py-plugin","name":"Py","runtime_type":"python","entry":"main.py"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         fs::write(py_dir.join("main.py"), "print(1)").unwrap();
         // nodejs 插件。
         let node_dir = store.plugins_root().join("node-plugin");
@@ -837,7 +866,8 @@ mod tests {
         fs::write(
             node_dir.join("manifest.json"),
             r#"{"id":"node-plugin","name":"Node","runtime_type":"nodejs","entry":"index.js"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         fs::write(node_dir.join("index.js"), "console.log(1)").unwrap();
         // cloud 插件（归一为 client）。
         let cloud_dir = store.plugins_root().join("cloud-plugin");
@@ -877,10 +907,8 @@ mod tests {
         // 默认 plugins_root = anchor_root（app_data/plugins）。
         assert_eq!(store.plugins_root(), store.anchor_root);
         // 设置自定义路径。
-        let custom = std::env::temp_dir().join(format!(
-            "lingfang-plugin-custom-{}",
-            std::process::id()
-        ));
+        let custom =
+            std::env::temp_dir().join(format!("lingfang-plugin-custom-{}", std::process::id()));
         let _ = fs::remove_dir_all(&custom);
         store
             .write_config(&PluginStoreConfig {

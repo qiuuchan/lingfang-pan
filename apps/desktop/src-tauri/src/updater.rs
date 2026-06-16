@@ -92,7 +92,13 @@ pub enum DownloadEvent {
 /// - query 参数顺序固定：channel → platform → arch → current_version（与后端 DTO 字段无关，
 ///   query 参数顺序不影响后端解析，仅用于单测断言 URL 字符串稳定）。
 /// - 不引入 url crate（design §4.5 优化），用 format! 直接拼字符串。
-fn build_update_url(backend: &str, channel: &str, platform: &str, arch: &str, version: &str) -> String {
+fn build_update_url(
+    backend: &str,
+    channel: &str,
+    platform: &str,
+    arch: &str,
+    version: &str,
+) -> String {
     format!(
         "{}/api/releases/tauri-update?channel={}&platform={}&arch={}&current_version={}",
         backend.trim_end_matches('/'),
@@ -331,7 +337,9 @@ mod tests {
         // - 变体内部字段 rename_all="camelCase"：contentLength / chunkLength。
         // 官方 @tauri-apps/plugin-updater JS 端按 PascalCase event 分发（switch(event.event){case 'Started':...}），
         // 此契约保证前端可兼容官方 JS 库或自行解析。
-        let started = DownloadEvent::Started { content_length: Some(1024) };
+        let started = DownloadEvent::Started {
+            content_length: Some(1024),
+        };
         let json = serde_json::to_string(&started).unwrap();
         assert!(
             json.contains("\"event\":\"Started\""),
@@ -366,7 +374,10 @@ mod tests {
         );
 
         // 完整结构校验（确保 tag/content 拓扑正确）。
-        let full = serde_json::to_string(&DownloadEvent::Started { content_length: None }).unwrap();
+        let full = serde_json::to_string(&DownloadEvent::Started {
+            content_length: None,
+        })
+        .unwrap();
         assert_eq!(
             full,
             "{\"event\":\"Started\",\"data\":{\"contentLength\":null}}"
