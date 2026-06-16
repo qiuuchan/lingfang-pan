@@ -1448,3 +1448,57 @@ export function writeRecent(tenantId: string | null, plugins: LoadedPlugin[]) {
     /* localStorage 不可用则忽略 */
   }
 }
+
+/**
+ * 插件结构校验：检测 AI 生成结果是否符合运行要求（manifest 存在 + 入口文件存在 + 入口名规范）。
+ *
+ * 返回诊断数组（空=结构正常）。供创建器 finalizeSession 后追加进 draft.diagnostics，
+ * 让详情面板「检查结果」显式提示结构问题，避免「AI 写了文件但缺 manifest/入口名错」时
+ * 用户以为生成成功却无法运行。
+ *
+ * 检测项：
+ * - files 非空但无 manifest.json → fail（无法运行，引导重新生成）。
+ * - 有 manifest 但 entry 文件不在 files → warn（scan 判 incomplete，运行会报错）。
+ * - Python 入口非 main.py / Node 入口非 index.js → warn（不规范，建议改名）。
+ */
+export function validatePluginStructure(files: DraftFile[]): DraftDiagnostic[] {
+  const diagnostics: DraftDiagnostic[] = [];
+  if (files.length === 0) return diagnostics; // 纯对话态不校验。
+
+  const hasManifest = files.some((f) => f.path === 'manifest.json');
+  if (!hasManifest) {
+    diagnostics.push({
+      stage: 'schema',
+      status: 'fail',
+      message: '缺少 manifest.json，插件无法运行。请让 AI 重新生成并确保产出 manifest.json 清单文件。',
+    });
+    return diagnostics; // 无 manifest 则后续 entry 校验无意义。
+  }
+
+  const manifest = parseManifest(files);
+  const entryExists = files.some((f) => f.path === manifest.entry);
+  if (!entryExists) {
+    diagnostics.push({
+      stage: 'schema',
+      status: 'warn',
+      message: `入口文件 ${manifest.entry} 不存在（manifest.entry 指向的文件未生成）。运行时会报错。`,
+    });
+  }
+
+  // 入口名规范提示（python 应为 main.py，nodejs 应为 index.js）。
+  if (manifest.runtime_type === 'python' && manifest.entry !== 'main.py') {
+    diagnostics.push({
+      stage: 'schema',
+      status: 'warn',
+      message: `Python 插件入口建议命名为 main.py（当前为 ${manifest.entry}）。虽然可运行，但不符合规范。`,
+    });
+  } else if (manifest.runtime_type === 'nodejs' && manifest.entry !== 'index.js') {
+    diagnostics.push({
+      stage: 'schema',
+      status: 'warn',
+      message: `Node 插件入口建议命名为 index.js（当前为 ${manifest.entry}）。`,
+    });
+  }
+
+  return diagnostics;
+}

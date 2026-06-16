@@ -48,6 +48,7 @@ import {
   type SessionOutputPayload,
   type SessionStartedPayload,
   summarizeTitleLocally,
+  validatePluginStructure,
 } from '@/lib/plugin-draft';
 import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
 import type { LoadedPlugin } from '@/lib/types';
@@ -510,6 +511,15 @@ export function PluginCreatorHome() {
       // 让顶部 Badge 走 scan_plugin_status 读文件系统真相而非解析态。
       if (nextDraft && pluginIdRef.current) {
         nextDraft.plugin_id = pluginIdRef.current;
+      }
+
+      // 结构校验：AI 生成后检测 manifest 缺失/入口文件缺失/入口名不规范，
+      // 追加诊断进 draft.diagnostics，让详情面板「检查结果」显式提示（避免「生成成功却无法运行」）。
+      if (nextDraft && nextDraft.files.length > 0) {
+        const structureDiags = validatePluginStructure(nextDraft.files);
+        if (structureDiags.length > 0) {
+          nextDraft.diagnostics = [...(nextDraft.diagnostics ?? []), ...structureDiags];
+        }
       }
 
       // design §3.2.7：草稿落盘到 drafts/{sessionId}.json + 更新 metas 对应项 draftUpdatedAt。
