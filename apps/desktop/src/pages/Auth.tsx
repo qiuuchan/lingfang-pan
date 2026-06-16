@@ -190,7 +190,7 @@ export function Auth() {
   return (
     <>
       <Card className="w-full max-w-lg animate-in fade-in zoom-in-95 duration-300">
-        <CardHeader {...dragRegionProps}>
+        <CardHeader>
           {/* 云同步平台名：展示后端 platformName（与后台一致），缺省时 fallback 到「LingFang」。 */}
           {platformName && (
             <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
@@ -200,7 +200,7 @@ export function Auth() {
               <span className="truncate font-medium">{platformName}</span>
             </div>
           )}
-          <CardTitle data-tauri-drag-region>{mode === 'login' ? '登录本地客户端' : '注册新账号'}</CardTitle>
+          <CardTitle>{mode === 'login' ? '登录本地客户端' : '注册新账号'}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" spellCheck={false} />

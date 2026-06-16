@@ -372,7 +372,7 @@ export default function App() {
   if (restoring) {
     return (
       <AppContext.Provider value={ctx}>
-        <Centered>
+        <Centered chrome label={platformName}>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {/* 登录态恢复期间给一个旋转指示，避免静态文字让用户误以为卡死。 */}
             <Loader2Icon className="size-4 animate-spin" />
@@ -392,11 +392,11 @@ export default function App() {
     ) : (
       <Auth />
     );
-    return <AppContext.Provider value={ctx}><Centered>{authBody}</Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
+    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}>{authBody}</Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   if (session.onboarding && !['TEAM_SPACE', 'TEAM_ADMIN_SPACE'].includes(session.onboarding)) {
-    return <AppContext.Provider value={ctx}><Centered><Onboarding /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
+    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}><Onboarding /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   let body: ReactNode;
@@ -460,6 +460,19 @@ export default function App() {
   );
 }
 
-function Centered({ children }: { children: ReactNode }) {
-  return <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-background p-4 text-foreground">{children}</div>;
+function Centered({ children, chrome = false, label = 'LingFang' }: { children: ReactNode; chrome?: boolean; label?: string }) {
+  // chrome=true（登录/安装向导/恢复中等无侧边栏全屏态）：顶部渲染 TitleBar（承载窗口拖拽 + 最小化/最大化/关闭），
+  // 内容在剩余空间垂直水平居中。decorations:false 隐藏了系统标题栏，登录页必须自实现拖拽入口。
+  const body = (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-background p-4 text-foreground">{children}</div>
+  );
+  if (!chrome) {
+    return <div className="flex min-h-screen flex-col bg-background text-foreground">{body}</div>;
+  }
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <TitleBar label={label} />
+      {body}
+    </div>
+  );
 }
