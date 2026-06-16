@@ -23,6 +23,10 @@ interface PreviewDrawerProps {
   previewKey: number;
   onActiveFileChange: (value: string) => void;
   onRefreshPreview: () => void;
+  /** 持久化插件 id（创建期已落地 plugins_root/<id>/）。提供时 ScriptPreviewPanel 走 start_plugin
+   *  独立进程运行（pnpm install + pnpm start），缺失时降级 run_plugin_script 一次性预览。
+   *  透传 pluginId 让 Electron 等需专属运行时的插件在创建期也能直接拉起（而非被预检拦截）。 */
+  pluginId?: string;
 }
 
 function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
@@ -38,6 +42,7 @@ export function PreviewDrawer({
   previewKey,
   onActiveFileChange,
   onRefreshPreview,
+  pluginId,
 }: PreviewDrawerProps) {
   const runtime = parseManifest(files).runtime_type;
   const [showSource, setShowSource] = useState(false);
@@ -65,7 +70,7 @@ export function PreviewDrawer({
           <div className="relative min-h-0 flex-1 bg-muted/30">
             {files.length ? (
               isScriptRuntime(runtime) ? (
-                <div className="h-full overflow-auto p-4"><ScriptPreviewPanel files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefreshPreview} /></div>
+                <div className="h-full overflow-auto p-4"><ScriptPreviewPanel pluginId={pluginId} files={files} runtime={runtime} previewKey={previewKey} onRefresh={onRefreshPreview} /></div>
               ) : (
                 // client runtime：iframe absolute 撑满 relative 父容器；父容器 overflow-hidden，iframe 自身滚动。
                 // 修复 RT-01：去掉 allow-same-origin（opaque origin 隔离 parent.__TAURI__/localStorage 越权）。
