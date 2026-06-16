@@ -66,8 +66,12 @@ function buildMessages(turns: ChatTurn[], segments: ChatSegment[], streaming: bo
     return base;
   });
 
-  // 流式中：追加一个 running 的 assistant message，含 reasoning/tool/text 多 part。
-  if (streaming && segments.length > 0) {
+  // 流式 segments 有内容时：追加一个 assistant message（含 reasoning/tool/text 多 part）。
+  // streaming=true 时 status=running（思考自动展开）；streaming=false（本轮结束）时 status=complete
+  // （思考折叠保留，不消失）。结束后 turns 里虽有同条 text，但 turns 是 DraftTurn 只存纯文本无 reasoning/tool，
+  // 故 segments 必须保留以维持思考/工具的渲染——为避免 text 重复，结束后 segments 的 text part 不再追加
+  // （turns 已含），只追加 reasoning/tool。
+  if (segments.length > 0) {
     const parts: ThreadMessageLike['content'] extends infer C ? (C extends readonly (infer P)[] ? P[] : never) : never = [];
     const thoughtText = segments.filter((s) => s.stream === 'thought').map((s) => s.text).join('');
     if (thoughtText) parts.push({ type: 'reasoning', text: thoughtText } as never);
@@ -84,16 +88,19 @@ function buildMessages(turns: ChatTurn[], segments: ChatSegment[], streaming: bo
       } as never);
     }
 
-    const stdoutText = segments.filter((s) => s.stream === 'stdout').map((s) => s.text).join('');
-    const stderrText = segments.filter((s) => s.stream === 'stderr').map((s) => s.text).join('\n');
-    const textText = [stdoutText, stderrText].filter(Boolean).join('\n');
-    if (textText) parts.push({ type: 'text', text: textText } as never);
+    // text part：流式中追加（live message 是唯一展示处）；结束后不追加（turns 已含 text，避免重复）。
+    if (streaming) {
+      const stdoutText = segments.filter((s) => s.stream === 'stdout').map((s) => s.text).join('');
+      const stderrText = segments.filter((s) => s.stream === 'stderr').map((s) => s.text).join('\n');
+      const textText = [stdoutText, stderrText].filter(Boolean).join('\n');
+      if (textText) parts.push({ type: 'text', text: textText } as never);
+    }
 
     msgs.push({
       id: 'live',
       role: 'assistant',
       content: parts,
-      status: { type: 'running' },
+      status: { type: streaming ? 'running' : 'complete', ...(streaming ? {} : { reason: 'stop' }) },
     } as ThreadMessageLike);
   }
   return msgs;
