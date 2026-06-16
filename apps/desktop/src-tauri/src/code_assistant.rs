@@ -287,6 +287,11 @@ pub struct SendInputInput {
     // CLI 配置注入（task 06-15）：追问轮同样注入平台 key/url，保证多轮用平台模型源。
     #[serde(default, alias = "cliConfig")]
     pub cli_config: Option<CliConfigInput>,
+    // 系统提示词：追问轮也传（claude --system-prompt），保证降级分支（claude 缺 cli_session_id 伪多轮）
+    // 与 codex/opencode（永远伪多轮）也有 LingFang 插件开发规范约束，不因缺首轮 system prompt 续接而丢失。
+    // claude resume 分支重复传无害（resume 恢复上下文 + system-prompt 重申当前约束）。
+    #[serde(default, alias = "systemPrompt")]
+    pub system_prompt: Option<String>,
 }
 
 pub fn list_tools() -> Vec<ToolAvailability> {
@@ -567,14 +572,14 @@ pub fn send_input<E: AssistantEventSink>(
     let effective_model = input.model.as_deref().or(session.model.as_deref());
     // R2 思考强度：前端每轮 send 均传 effort（start_session 首轮 + send_input 追问），
     // 故直接用本轮入参值，无需在 SessionRecord 额外持久化（会话中途调即随轮次生效）。
-    // system_prompt 仅首轮 start_session 传（--system-prompt）；追问走 --resume 续接，
-    // claude 会恢复首轮 system prompt，重复传可能与 --resume 冲突，故此处恒 None。
+    // system_prompt 追问轮也传（--system-prompt）：claude resume 分支重复传无害（重申当前约束），
+    // 降级分支（claude 缺 cli_session_id 伪多轮）与 codex/opencode 必须传（否则无系统约束）。
     let args = command.args_with(definition.run_args(
         &final_prompt,
         effective_model,
         resume_id.as_deref(),
         input.effort.as_deref(),
-        None,
+        input.system_prompt.as_deref(),
     ));
 
     // 追问期间 status 回到 running（design §3.3.4 状态契约），waiter 退出后再置 exited。
