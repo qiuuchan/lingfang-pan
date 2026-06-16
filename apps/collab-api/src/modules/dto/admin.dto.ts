@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, IsEmail, MinLength } from 'class-validator';
 import { BALANCE_DIRECTION, PLATFORM_ROLE, PLUGIN_STATUS, PLUGIN_VISIBILITY, TEAM_ROLE, TEAM_STATUS, USER_STATUS } from './enums';
 
 /** 管理端创建用户请求体 DTO。 */
@@ -40,6 +40,17 @@ export class AdminUpdateUserDto {
   @IsOptional()
   @IsEnum(PLATFORM_ROLE, { message: 'platformRole 只允许 NONE 或 PLATFORM_ADMIN' })
   platformRole?: (typeof PLATFORM_ROLE)[number];
+
+  @ApiPropertyOptional({ description: '邮箱（改后作废旧 token，需重新登录）' })
+  @IsOptional()
+  @IsEmail({}, { message: '邮箱格式不正确' })
+  email?: string;
+
+  @ApiPropertyOptional({ description: '新密码（明文传入，服务端 hash；改后作废旧 token）' })
+  @IsOptional()
+  @IsString()
+  @MinLength(8, { message: '密码至少 8 位' })
+  password?: string;
 }
 
 /** 管理端创建团队请求体 DTO。 */

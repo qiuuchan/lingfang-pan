@@ -126,7 +126,7 @@ export class AdminService {
     return { user: publicUser(user) };
   }
 
-  async adminUpdateUser(actorId: string, id: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
+  async adminUpdateUser(actorId: string, id: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; email?: string; password?: string }) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 ADMIN-09：禁止自降级/自禁用（会锁死末位平台管理员）。
     if (id === actorId && (input.status === 'DISABLED' || input.platformRole === 'NONE')) {
@@ -140,15 +140,37 @@ export class AdminService {
         if (remainingAdmins <= 1) throw forbidden('不能禁用或降级最后一个平台管理员');
       }
     }
-    // 显式仅取声明字段，丢弃 email/password 等客户端误传的非法键，避免透传进 prisma.user.update 触发 PrismaClientValidationError。
-    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; tokenVersion?: { increment: number } } = {};
+    // email 改动：归一化（trim+lower）+ 唯一性校验（排除自身）。
+    let normalizedEmail: string | undefined;
+    if (input.email !== undefined) {
+      normalizedEmail = input.email.trim().toLowerCase();
+      if (normalizedEmail) {
+        const dup = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (dup && dup.id !== id) throw conflict('该邮箱已被其他用户占用');
+      }
+    }
+    // 显式仅取声明字段，避免客户端误传非法键透传进 prisma.user.update。
+    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; email?: string; passwordHash?: string; tokenVersion?: { increment: number } } = {};
     if (input.displayName !== undefined) data.displayName = input.displayName;
     if (input.status !== undefined) data.status = input.status;
     if (input.platformRole !== undefined) data.platformRole = input.platformRole;
+    if (normalizedEmail !== undefined) data.email = normalizedEmail;
+    // password 明文 → bcrypt hash（与 register/login 一致 cost=12）。
+    if (input.password !== undefined) {
+      if (input.password.length < 8) throw badRequest('密码至少 8 位');
+      data.passwordHash = await bcrypt.hash(input.password, 12);
+    }
     // 修复 ADMIN-02 / AUTH-01：禁用或降级时自增 tokenVersion，使已签发的旧 token 立即失效。
-    if (input.status === 'DISABLED' || input.platformRole === 'NONE') data.tokenVersion = { increment: 1 };
+    // 改 email 或 password 也自增 tokenVersion（强制重新登录，旧 token 作废）。
+    if (input.status === 'DISABLED' || input.platformRole === 'NONE' || normalizedEmail !== undefined || input.password !== undefined) {
+      data.tokenVersion = { increment: 1 };
+    }
     const user = await this.prisma.user.update({ where: { id }, data });
-    await this.audit(actorId, 'admin.user.updated', 'User', id, data);
+    // 审计：email/password 改动不记明文（脱敏），仅记字段变更标记。
+    const auditData: Record<string, unknown> = { ...data };
+    if (data.passwordHash) auditData.password = '[changed]';
+    delete auditData.passwordHash;
+    await this.audit(actorId, 'admin.user.updated', 'User', id, auditData);
     return { user: publicUser(user) };
   }
 
