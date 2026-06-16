@@ -58,20 +58,22 @@ ui/index.html   ← 入口（完整可用，含 CSS/JS，不要占位符）
 
 ### 类型二：Python 插件（runtime_type: python）—— 独立 venv 进程运行，GUI 应用会弹独立窗口
 \`\`\`
-manifest.json       ← 清单
-main.py             ← 入口（必须是 main.py，程序从这里启动）
+manifest.json       ← 清单（必须生成）
+main.py             ← 入口（必须命名为 main.py，禁止用 run.py / app.py / start.py 等其他名字）
 requirements.txt    ← 有第三方依赖时才写（如 PyQt5、requests），无依赖则不写
 \`\`\`
+**关键**：入口文件必须叫 main.py，manifest.entry 必须填 "main.py"。即使你的程序原本叫 run.py，也必须改名为 main.py。
 data/ 目录会自动创建，可用相对路径 data/xxx 读写运行数据。
 
 ### 类型三：Node 插件（runtime_type: nodejs）—— pnpm install + pnpm start 独立进程
 \`\`\`
-manifest.json   ← 清单
+manifest.json   ← 清单（必须生成）
 package.json    ← 含 dependencies 和 scripts.start（如 "start": "node index.js"）
-index.js        ← 入口（或 scripts.start 指向的文件）
+index.js        ← 入口（必须命名为 index.js，或 package.json scripts.start 指向的文件）
 \`\`\`
 
 ### manifest.json 必须遵守
+- **必须生成 manifest.json**（无 manifest 的插件无法运行）。
 - runtime_type 与 entry 必须匹配：client→"ui/index.html"，python→"main.py"，nodejs→"index.js"。
 - entry 必须指向一个你真实产出的文件。
 - capabilities.kind 取自白名单：ui.view / fs.read / fs.write / net.fetch / clipboard / llm.chat / storage.kv / system.info / code-assistant.run / code-assistant.session；不要用裸 "code-assistant"。

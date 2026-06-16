@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DraftFile } from '@/lib/types';
 import {
   buildDraftFromSandboxFiles,
   buildFallbackEntryHtml,
@@ -19,6 +20,7 @@ import {
   parseTranscript,
   summarizeTitleLocally,
   transcriptTextSinceLastInput,
+  validatePluginStructure,
 } from './plugin-draft';
 
 // === cleanPathFrontend：与后端 plugin-package.ts:61-69 cleanPath 对齐 ===
@@ -1122,5 +1124,48 @@ describe('buildFallbackEntryFile', () => {
   it('兜底骨架含 manifestName（便于用户识别）', () => {
     const py = buildFallbackEntryFile('python', { manifestName: '番茄钟' });
     expect(py.content).toContain('番茄钟');
+  });
+});
+
+// === 插件结构校验（validatePluginStructure） ===
+
+describe('validatePluginStructure', () => {
+  function file(path: string, content = ''): DraftFile {
+    return { path, content };
+  }
+
+  it('files 为空时不校验（纯对话态）', () => {
+    expect(validatePluginStructure([])).toEqual([]);
+  });
+
+  it('有 files 但缺 manifest.json → fail 诊断', () => {
+    const diags = validatePluginStructure([file('run.py'), file('main.py')]);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].status).toBe('fail');
+    expect(diags[0].message).toContain('manifest.json');
+  });
+
+  it('有 manifest + 入口存在 + 入口名规范 → 无诊断', () => {
+    const manifest = file('manifest.json', JSON.stringify({
+      id: 'x', name: 'x', runtime_type: 'python', entry: 'main.py',
+    }));
+    const diags = validatePluginStructure([manifest, file('main.py')]);
+    expect(diags).toEqual([]);
+  });
+
+  it('有 manifest 但 entry 文件缺失 → warn', () => {
+    const manifest = file('manifest.json', JSON.stringify({
+      id: 'x', name: 'x', runtime_type: 'python', entry: 'main.py',
+    }));
+    const diags = validatePluginStructure([manifest]); // 无 main.py
+    expect(diags.some((d) => d.status === 'warn' && d.message.includes('main.py 不存在'))).toBe(true);
+  });
+
+  it('Python 入口非 main.py → warn 规范提示', () => {
+    const manifest = file('manifest.json', JSON.stringify({
+      id: 'x', name: 'x', runtime_type: 'python', entry: 'run.py',
+    }));
+    const diags = validatePluginStructure([manifest, file('run.py')]);
+    expect(diags.some((d) => d.status === 'warn' && d.message.includes('main.py'))).toBe(true);
   });
 });
