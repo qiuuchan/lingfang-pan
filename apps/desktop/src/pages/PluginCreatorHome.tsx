@@ -702,7 +702,7 @@ export function PluginCreatorHome() {
         // R2 effort 同样随本轮传入（可会话中途调思考强度）。
         // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, cliConfig: buildCliConfig() },
+          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, cliConfig: buildCliConfig(), systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -788,6 +788,8 @@ export function PluginCreatorHome() {
           // 与普通追问行为不一致，可能在 Rust 侧未复用首轮注入配置时鉴权失败/路由到错误 provider。
           // 与 line 630 追问路径对齐，补齐 cliConfig。
           cliConfig: buildCliConfig(),
+          // 追问轮也传 systemPrompt（与 send() 追问路径一致，保证降级分支/codex/opencode 有系统约束）。
+          systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         },
       });
       // 回答提交后新一轮 output 由既有 listener 处理；清掉本轮工具片段，避免问题卡片重复渲染。
