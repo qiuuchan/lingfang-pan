@@ -7,7 +7,7 @@
 //
 // 仅替换显示层：onNew 回调复用 PluginCreatorHome 的 send()，会话/draft/预览逻辑不变。
 
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, createContext, useContext, type ReactNode } from 'react';
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -18,6 +18,7 @@ import {
 import { BrainIcon, WrenchIcon, ChevronDownIcon, Loader2Icon } from 'lucide-react';
 import { Markdown } from '@/components/markdown';
 import { aggregateToolCards } from '@/lib/plugin-draft';
+import { cn } from '@/lib/utils';
 
 export interface ChatSegment {
   stream: 'stdout' | 'stderr' | 'thought' | 'tool';
@@ -132,26 +133,32 @@ export function AssistantChat({ turns, segments, streaming, stage }: AssistantCh
   });
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadPrimitive.Root className="flex h-full flex-col">
-        <ThreadPrimitive.Viewport className="flex flex-1 flex-col gap-4 overflow-y-auto px-1 pb-4">
-          <ThreadPrimitive.Messages
-            components={{
-              UserMessage,
-              AssistantMessage,
-            }}
-          />
-          {streaming && (
-            <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
-              <Loader2Icon className="size-3 animate-spin" />
-              {stage || '生成中…'}
-            </div>
-          )}
-        </ThreadPrimitive.Viewport>
-      </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
+    <StreamingContext.Provider value={streaming}>
+      <AssistantRuntimeProvider runtime={runtime}>
+        <ThreadPrimitive.Root className="flex h-full flex-col">
+          <ThreadPrimitive.Viewport className="flex flex-1 flex-col gap-4 overflow-y-auto px-1 pb-4">
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage,
+                AssistantMessage,
+              }}
+            />
+            {streaming && (
+              <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+                <Loader2Icon className="size-3 animate-spin" />
+                {stage || '生成中…'}
+              </div>
+            )}
+          </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Root>
+      </AssistantRuntimeProvider>
+    </StreamingContext.Provider>
   );
 }
+
+// 把 streaming 状态传给 AssistantMessage（判断 reasoning 展开/折叠）。
+const StreamingContext = createContext(false);
+const useStreaming = () => useContext(StreamingContext);
 
 // 用户消息气泡
 function UserMessage() {
@@ -170,14 +177,17 @@ function UserMessage() {
 // assistant 消息：按 content part 类型分行渲染
 function AssistantMessage() {
   const message = useMessage();
-  const isRunning = message.status?.type === 'running';
+  const streaming = useStreaming();
+  // 仅 live message（当前轮）在 streaming 时展开思考；历史消息/结束后折叠。
+  const isLiveMsg = message.id === 'live';
+  const reasonOpen = isLiveMsg && streaming;
   return (
     <div className="max-w-[82%] self-start rounded-xl bg-muted px-4 py-3">
       <span className="mb-1 block text-[11px] opacity-70">AI</span>
       <div className="flex flex-col gap-2">
         {message.content.map((part, i) => {
           if (part.type === 'reasoning') {
-            return <ReasoningBlock key={i} text={(part as { text: string }).text} streaming={isRunning} />;
+            return <ReasoningBlock key={i} text={(part as { text: string }).text} open={reasonOpen} />;
           }
           if (part.type === 'tool-call') {
             const tc = part as { toolName?: string; argsText?: string };
@@ -198,14 +208,14 @@ function AssistantMessage() {
   );
 }
 
-// 思考折叠区
-function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
+// 思考折叠区：open 控制展开/折叠（流式中展开，结束后折叠保留）。
+function ReasoningBlock({ text, open }: { text: string; open: boolean }) {
   return (
-    <details open={streaming} className="rounded-lg border border-primary/15 bg-primary/5">
+    <details open={open} className="rounded-lg border border-primary/15 bg-primary/5">
       <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary/80 select-none">
         <BrainIcon className="size-3.5 shrink-0" />
-        <span>思考中</span>
-        <ChevronDownIcon className="ml-auto size-3.5 shrink-0" />
+        <span>思考</span>
+        <ChevronDownIcon className={cn('ml-auto size-3.5 shrink-0 transition-transform', open ? 'rotate-180' : 'rotate-0')} />
       </summary>
       <div className="border-t border-primary/10 px-3 py-2">
         <p className="whitespace-pre-wrap break-words font-mono text-xs italic text-muted-foreground">{text.replace(/\n$/, '')}</p>
