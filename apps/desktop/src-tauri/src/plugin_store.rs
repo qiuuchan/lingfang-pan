@@ -199,13 +199,51 @@ impl PluginStore {
     }
 
     /// 确保插件目录存在（不存在则 create_dir_all）。返回规范化的插件目录绝对路径。
+    /// 同时创建 data/ 子目录（PRD 需求 4 / AC4）：插件运行数据（JSON/SQLite/文件等）统一存这里，
+    /// 子进程 cwd 即插件目录，可经相对路径 data/ 读写，框架保证目录存在（不依赖插件作者自觉 mkdir）。
     pub fn ensure_plugin_dir(&self, plugin_id: &str) -> Result<PathBuf, String> {
         let dir = self.plugin_dir(plugin_id)?;
-        fs::create_dir_all(&dir).map_err(|e| format!("创建插件目录失败：{e}"))?;
+        fs::create_dir_all(dir.join("data")).map_err(|e| format!("创建插件 data 目录失败：{e}"))?;
         dir.canonicalize()
             .map_err(|e| format!("插件目录无法访问：{e}"))
     }
 
+    /// rename 插件目录为正式目录名，并可选地把用户命名写入 manifest.title（PRD 需求 1 / AC1）。
+    ///
+    /// rename_plugin_dir 命令的底层实现，抽出为方法便于单测（无需构造 tauri::State）。
+    /// - old_id/new_id 经 sanitize_plugin_id 白名单校验（防穿越）。
+    /// - 原目录不存在或目标已存在 → 报错。
+    /// - title 非空 → 写入新目录 manifest.json 的 title 字段（保留其它字段），缺失则不动 manifest。
+    /// 返回 sanitize 后的正式目录名（= 新 plugin_id）。
+    pub fn rename_and_title(&self, old_id: &str, new_id: &str, title: Option<&str>) -> Result<String, String> {
+        let safe_new = sanitize_plugin_id(new_id)?;
+        let old_dir = self.plugin_dir(old_id)?;
+        let new_dir = self.plugin_dir(&safe_new)?;
+        if !old_dir.exists() {
+            return Err(format!("原插件目录不存在：{old_id}"));
+        }
+        if new_dir.exists() {
+            return Err(format!("目标插件名已存在：{safe_new}"));
+        }
+        fs::rename(&old_dir, &new_dir).map_err(|e| format!("重命名插件目录失败：{e}"))?;
+        if let Some(t) = title.map(str::trim).filter(|s| !s.is_empty()) {
+            let manifest_path = new_dir.join("manifest.json");
+            if let Ok(content) = fs::read_to_string(&manifest_path) {
+                // 解析为通用 JSON Value 改 title 字段后写回，保留其它字段与顺序。
+                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if v.get("title").and_then(|x| x.as_str()) != Some(t) {
+                        v["title"] = serde_json::Value::String(t.to_string());
+                        if let Ok(pretty) = serde_json::to_string_pretty(&v) {
+                            let _ = fs::write(&manifest_path, pretty);
+                        }
+                    }
+                }
+            }
+            // manifest 不存在或读取失败：不阻断 rename（目录已改名成功），title 写入跳过。
+        }
+        Ok(safe_new)
+    }
+    ///
     /// 扫描 plugins_root 下全部子目录，产出每个插件的 PluginMeta（PRD 需求 2 / AC2）。
     ///
     /// 仅判定文件系统状态（ready/incomplete/error）；running/stopped 由 scan_plugin_status
@@ -589,25 +627,18 @@ pub fn read_local_plugin_file(
     state.read_plugin_file(&plugin_id, &file)
 }
 
-/// 流程重构：上传命名时 rename 临时插件目录为正式目录。
-/// 安全：old_id 和 new_id 均走 sanitize_plugin_id 白名单 + canonicalize 前缀断言。
+/// 流程重构：上传命名时 rename 临时插件目录为正式目录，并把用户命名写入 manifest.title（PRD 需求 1 / AC1）。
+/// 安全：old_id 和 new_id 均走 sanitize_plugin_id 白名单。
+/// title（可选）：非空时写入新目录 manifest.json 的 title 字段，scan_one_plugin 据此展示用户命名
+/// （title 优先于 name）。title 为空表示仅改目录名、不动 manifest。
 #[tauri::command]
 pub fn rename_plugin_dir(
     state: tauri::State<'_, PluginStore>,
     old_id: String,
     new_id: String,
+    title: Option<String>,
 ) -> Result<String, String> {
-    let safe_new = sanitize_plugin_id(&new_id)?;
-    let old_dir = state.plugin_dir(&old_id)?;
-    let new_dir = state.plugin_dir(&safe_new)?;
-    if !old_dir.exists() {
-        return Err(format!("原插件目录不存在：{old_id}"));
-    }
-    if new_dir.exists() {
-        return Err(format!("目标插件名已存在：{safe_new}"));
-    }
-    std::fs::rename(&old_dir, &new_dir).map_err(|e| format!("重命名插件目录失败：{e}"))?;
-    Ok(safe_new)
+    state.rename_and_title(&old_id, &new_id, title.as_deref())
 }
 
 // === 单元测试（覆盖 scan 状态判定 + sanitize_plugin_id 防穿越 + 配置读写） ===
@@ -685,6 +716,54 @@ mod tests {
 
         let metas = store.list_plugins();
         assert_eq!(metas[0].name, "用户命名");
+    }
+
+    #[test]
+    fn rename_and_title_writes_title_and_renames_dir() {
+        // AC1 用户命名：rename 临时目录为正式名 + 把用户命名写入 manifest.title。
+        // 后端 new_id 已是前端 safePluginId 转换后的纯 ASCII（sanitize_plugin_id 只接受 ASCII），
+        // 中文用户名作为 title 参数传入（写进 manifest.title，scan 据此展示）。
+        let store = temp_store("rename-title");
+        // 构造临时插件目录（模拟 AI 生成落盘的 temp-<id> 目录），manifest 无 title。
+        let temp_dir = store.ensure_plugin_dir("temp-1700000000-123").unwrap();
+        fs::write(
+            temp_dir.join("manifest.json"),
+            r#"{"id":"x","name":"ai-gen-id","entry":"ui/index.html"}"#,
+        ).unwrap();
+        fs::create_dir_all(temp_dir.join("ui")).unwrap();
+        fs::write(temp_dir.join("ui").join("index.html"), "x").unwrap();
+
+        // rename 为正式目录名（前端 safePluginId 已把「我的番茄钟」转成 ASCII，如 base36 编码串）+ 写入用户命名 title。
+        let safe = store.rename_and_title("temp-1700000000-123", "wode-fanqie-zhong", Some("我的番茄钟")).unwrap();
+        assert_eq!(safe, "wode-fanqie-zhong");
+
+        // scan 读到的展示名是用户命名（title 优先），而非 ai-gen-id。
+        let metas = store.list_plugins();
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].name, "我的番茄钟");
+        // PluginMeta.id 取 manifest.id（程序标识符 x），与目录名不同——目录名是持久化 plugin_id。
+        assert_eq!(metas[0].id, "x");
+        // 目录已从 temp-1700000000-123 改名为正式目录名 wode-fanqie-zhong。
+        assert!(!store.plugin_dir("temp-1700000000-123").unwrap().exists(), "旧临时目录应已不存在");
+        let new_dir = store.plugin_dir(&safe).unwrap();
+        assert!(new_dir.exists(), "正式目录应存在");
+        // manifest.json 的 title 字段确实被写入（pretty print 格式，冒号后带空格）。
+        let new_manifest = fs::read_to_string(new_dir.join("manifest.json")).unwrap();
+        assert!(new_manifest.contains(r#""title": "我的番茄钟""#), "title 应写入 manifest.json，实际：{new_manifest}");
+        // 原有字段保留（rename 不破坏 manifest 其它内容）。
+        assert!(new_manifest.contains(r#""name": "ai-gen-id""#), "原 name 字段应保留");
+        // data/ 子目录仍在（ensure_plugin_dir 创建，rename 不丢）。
+        assert!(new_dir.join("data").is_dir());
+    }
+
+    #[test]
+    fn rename_and_title_rejects_existing_target() {
+        let store = temp_store("rename-collision");
+        store.ensure_plugin_dir("src-a").unwrap();
+        store.ensure_plugin_dir("dst-b").unwrap();
+        // 目标已存在 → 报错，不覆盖。
+        let err = store.rename_and_title("src-a", "dst-b", None).unwrap_err();
+        assert!(err.contains("已存在"));
     }
 
     #[test]
@@ -824,6 +903,8 @@ mod tests {
         let canon = store.ensure_plugin_dir("new-plugin").unwrap();
         assert!(canon.is_absolute());
         assert!(canon.exists());
+        // data/ 子目录随插件目录一并创建（PRD 需求 4 / AC4）。
+        assert!(canon.join("data").is_dir(), "插件 data/ 子目录应被框架创建");
         // 非法 plugin_id 被拒。
         assert!(store.ensure_plugin_dir("../escape").is_err());
     }

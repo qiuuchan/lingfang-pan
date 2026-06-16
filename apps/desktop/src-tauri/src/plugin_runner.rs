@@ -130,6 +130,14 @@ fn venv_pip(venv_dir: &std::path::Path) -> PathBuf {
     }
 }
 
+/// 探测 Python 插件是否需要创建 venv（首次慢，已建则 ensure 秒过）。
+/// 用于 start_plugin 发「安装依赖」阶段事件（前端据此决定是否展示安装动画）。
+/// 判定：venv 内 python 不存在 → 需要创建（+可能 pip install）。与 ensure_python_venv 的「已就绪跳过」逻辑对齐。
+fn needs_python_venv(plugin_dir: &std::path::Path) -> bool {
+    let venv_dir = plugin_dir.join(".venv");
+    !venv_python(&venv_dir).is_file()
+}
+
 /// 确保 Python 插件有可用 venv（PRD 需求 3 / AC3）。
 /// 流程：
 /// 1. 检查 .venv/ 是否存在且 venv_python 可执行 → 已就绪直接返回。
@@ -246,6 +254,25 @@ fn minimal_env() -> Vec<(OsString, OsString)> {
 }
 
 // === Node pnpm 管理 ===
+
+/// 探测 Node 插件是否需要 pnpm install（首次慢，node_modules 已在则 ensure 秒过）。
+/// 用于 start_plugin 发「安装依赖」阶段事件。与 ensure_node_dependencies 的「已装跳过」逻辑对齐：
+/// 有 package.json + 非空依赖 且 node_modules 缺失 → 需要安装。
+fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
+    let pkg_json = plugin_dir.join("package.json");
+    if !pkg_json.is_file() {
+        return false;
+    }
+    if plugin_dir.join("node_modules").is_dir() {
+        return false;
+    }
+    // 仅当声明了非空依赖才真正需要 install（与 ensure_node_dependencies 的 has_deps 判定一致）。
+    let Ok(raw) = std::fs::read_to_string(&pkg_json) else { return false; };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return false; };
+    ["dependencies", "devDependencies"]
+        .iter()
+        .any(|k| v.get(k).and_then(|x| x.as_object()).map(|m| !m.is_empty()).unwrap_or(false))
+}
 
 /// 确保 Node 插件依赖已安装（PRD 需求 7 / AC8）。
 /// 流程：
@@ -387,6 +414,15 @@ pub struct StartPluginResult {
     pub started_at: String,
 }
 
+/// 启动阶段进度事件 payload（emit 到 `plugin:start-progress`，前端渲染分阶段动画）。
+/// stage 取值：checking / deps_installing / starting（最终结果由命令返回值交付，不在此事件）。
+#[derive(Clone, Debug, Serialize)]
+pub struct PluginStartProgress {
+    pub plugin_id: String,
+    pub stage: String,
+    pub message: String,
+}
+
 /// get_plugin_status 返回值（扩展契约，供前端判定 running/stopped 刷新）。
 #[derive(Clone, Debug, Serialize)]
 pub struct PluginProcessStatus {
@@ -407,18 +443,41 @@ pub struct PluginProcessStatus {
 /// 4. spawn detached（Stdio::null，不捕获 stdout 进 UI；GUI 自己弹窗口）。
 /// 5. 注册到内存进程表（供 scan_plugin_status / get_plugin_status 判定 running；不落 DB）。
 /// 6. 返回 { pid, started_at }。
+///
+/// 启动阶段事件（前端据此渲染分阶段进度动画，PRD 体验完善需求）：
+/// 每个阶段经 app.emit 发 `plugin:start-progress` 事件，payload = { pluginId, stage, message }：
+/// - `checking`：正在检查依赖是否已就绪（venv/node_modules 是否存在）。
+/// - `deps_installing`：依赖缺失，正在安装（pip install / pnpm install，可能几十秒）。
+/// - `starting`：依赖就绪，正在拉起入口进程。
+/// 最终结果仍由命令返回值（Ok=pid / Err=错误）交付，事件仅驱动 UI 进度。
 #[tauri::command]
 pub fn start_plugin(
+    app: tauri::AppHandle,
     store: tauri::State<'_, PluginStore>,
     process_table: tauri::State<'_, PluginProcessTable>,
     plugin_id: String,
 ) -> Result<StartPluginResult, String> {
+    use tauri::Emitter;
+    // 阶段事件辅助：emit 失败不阻断启动（UI 无监听者或通道错误时静默降级为同步等待）。
+    let emit_stage = |stage: &str, message: &str| {
+        let _ = app.emit("plugin:start-progress", PluginStartProgress {
+            plugin_id: plugin_id.clone(),
+            stage: stage.to_string(),
+            message: message.to_string(),
+        });
+    };
+
+    emit_stage("checking", "正在检查插件运行环境…");
     let plugin_dir = resolve_plugin_dir(&store, &plugin_id)?;
     let manifest = parse_manifest(&plugin_dir)?;
 
     let (binary, args) = match manifest.runtime {
         PluginRuntimeKind::Python => {
-            // Python：确保 venv，用 venv 内 python 跑 entry。-u 无缓冲（与 plugin_script.rs 一致）。
+            // Python：先探测是否需创建 venv / 装依赖（首次慢，已装则秒过），发对应阶段事件。
+            if needs_python_venv(&plugin_dir) {
+                emit_stage("deps_installing", "正在创建 Python 虚拟环境并安装依赖（首次较慢）…");
+            }
+            // ensure_python_venv：venv 不存在则建 + 有 requirements.txt 则 pip install（幂等）。
             let py = ensure_python_venv(&plugin_dir)?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
@@ -430,7 +489,11 @@ pub fn start_plugin(
             )
         }
         PluginRuntimeKind::Nodejs => {
-            // Node：确保依赖，用 pnpm start（回退 node index.js）。
+            // Node：先探测是否需 pnpm install（首次慢，node_modules 已在则秒过），发对应阶段事件。
+            if needs_node_install(&plugin_dir) {
+                emit_stage("deps_installing", "正在安装 Node 依赖（pnpm install，首次较慢）…");
+            }
+            // ensure_node_dependencies：有 package.json + 非空依赖且 node_modules 缺失 → pnpm/npm install（幂等）。
             ensure_node_dependencies(&plugin_dir)?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
@@ -454,6 +517,8 @@ pub fn start_plugin(
         }
     };
 
+    // 依赖就绪，即将 spawn 入口进程 → 发 starting 阶段（前端切换到「启动中」动画）。
+    emit_stage("starting", "正在启动插件进程…");
     // detached spawn：Stdio::null（不捕获 stdout/stderr 进 UI，PRD 需求 9 明确「不在软件 UI 内嵌入终端输出」）。
     // 子进程 cwd = 插件目录（让插件能读写自身 data/ 子目录等相对路径）。
     let mut command = std::process::Command::new(&binary);

@@ -370,6 +370,52 @@ export const STATUS_LABEL: Record<string, string> = {
 
 const LOCAL_DRAFT_ENTRY = 'ui/index.html';
 
+/**
+ * 按 runtime_type 返回默认入口文件（修复 Python/Node 入口误判为 ui/index.html 的 bug）。
+ * - python → main.py（独立 venv 进程入口，PRD 需求 5）
+ * - nodejs → index.js（pnpm start 入口，PRD 需求 7）
+ * - client / 未知 → ui/index.html（软件内 iframe，PRD 需求 8）
+ *
+ * 此前 entry 缺失时一律回退 ui/index.html（LOCAL_DRAFT_ENTRY），导致 Python 插件挂着 HTML 入口 +
+ * 被补一个 HTML 兜底页，运行时找不到 main.py 报错。现按 runtime 分流，与 start_plugin 的入口解析对齐。
+ */
+export function defaultEntryForRuntime(runtimeType: string | undefined): string {
+  switch (runtimeType) {
+    case 'python':
+      return 'main.py';
+    case 'nodejs':
+      return 'index.js';
+    case 'client':
+    default:
+      return LOCAL_DRAFT_ENTRY;
+  }
+}
+
+/**
+ * entry 缺失时生成的兜底入口文件内容（按 runtime_type 分流）。
+ * - client → HTML 兜底预览页（buildFallbackEntryHtml，原有行为）
+ * - python → main.py 最小可运行骨架（打印一行，用户可见进程跑起来）
+ * - nodejs → index.js 最小骨架
+ * 这样即便 AI 未产入口，scan 判 ready 且运行时不崩（与 defaultEntryForRuntime 配套）。
+ */
+export function buildFallbackEntryFile(runtimeType: string | undefined, meta: { notes?: string; manifestName: string; description?: string }): { content: string; language: string } {
+  switch (runtimeType) {
+    case 'python':
+      return {
+        content: `# LingFang Python 插件入口（自动生成的骨架）\n# 请替换为你的实际逻辑\nimport sys\n\n\ndef main() -> None:\n    print('插件已启动：' + ${JSON.stringify(meta.manifestName)}, file=sys.stdout)\n    # TODO: 在此实现插件逻辑\n\n\nif __name__ == '__main__':\n    main()\n`,
+        language: 'python',
+      };
+    case 'nodejs':
+      return {
+        content: `// LingFang Node 插件入口（自动生成的骨架）\n// 请替换为你的实际逻辑\nconsole.log('插件已启动：' + ${JSON.stringify(meta.manifestName)});\n// TODO: 在此实现插件逻辑\n`,
+        language: 'javascript',
+      };
+    case 'client':
+    default:
+      return { content: buildFallbackEntryHtml(meta), language: 'html' };
+  }
+}
+
 export function safePluginId(input: string) {
   // plugin_id \u5fc5\u987b\u7eaf ASCII\uff08Rust sanitize_plugin_id \u4ec5\u5141\u8bb8 [A-Za-z0-9_-]\uff09\u3002
   // \u975e ASCII \u5b57\u7b26\uff08\u542b\u4e2d\u6587\uff09\u9010\u4e2a\u8f6c base36 \u7f16\u7801\uff0c\u4fdd\u8bc1\u5408\u6cd5\u4e14\u53ef\u9006\u3002
@@ -919,34 +965,36 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
 
   // CLI 字段优先 + 前端兜底补全（兼容模型少产字段的 partial 场景）。
   // 枚举字段用 normalizeEnum 收敛：非法值（如 'public'/'edge'）退回默认，避免穿透后端 400。
+  // runtime_type 先行确定，entry 回退按 runtime 分流（python→main.py / nodejs→index.js / client→ui/index.html），
+  // 修复 Python/Node 插件入口误判为 ui/index.html 的 bug。
+  const runtimeType = normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'];
   const manifest = {
     id: parsedManifest?.id || pluginId,
     name: parsedManifest?.name || input.prompt.slice(0, 24) || '本地代码助手插件',
     version: parsedManifest?.version || '0.1.0',
     description: parsedManifest?.description || `由 ${input.providerLabel} 本地 CLI 生成的插件草稿`,
-    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'],
-    entry: parsedManifest?.entry || LOCAL_DRAFT_ENTRY,
+    runtime_type: runtimeType,
+    entry: parsedManifest?.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, 'tenant') as 'private' | 'tenant',
     // 契约收敛：彻底消除字符串数组 bug（旧 :198 的 ['code-assistant']）。
     capabilities: normalizeCapabilities(parsedManifest?.capabilities),
   };
 
-  // entry 缺失自动兜底页 + warning（保证模型未产 entry 时仍有可预览文件）。
+  // entry 缺失自动兜底 + warning（保证模型未产 entry 时仍有可运行文件）。
+  // 兜底内容按 runtime 分流：python→main.py 骨架，nodejs→index.js 骨架，client→HTML 预览页。
   let files: DraftFile[] = [...parsed.files];
   const schemaDiagnostics: DraftDiagnostic[] = [...parsed.diagnostics];
   if (!files.find((file) => file.path === manifest.entry)) {
-    files = [...files, {
-      path: manifest.entry,
-      content: buildFallbackEntryHtml({
-        notes: parsed.notes,
-        manifestName: manifest.name,
-        description: manifest.description,
-      }),
-    }];
+    const fallback = buildFallbackEntryFile(runtimeType, {
+      notes: parsed.notes,
+      manifestName: manifest.name,
+      description: manifest.description,
+    });
+    files = [...files, { path: manifest.entry, content: fallback.content }];
     schemaDiagnostics.push({
       stage: 'schema',
       status: 'warn',
-      message: `entry ${manifest.entry} 缺失，已生成兜底预览页`,
+      message: `入口文件 ${manifest.entry} 缺失，已按 ${runtimeType} 类型生成兜底骨架`,
     });
   }
   // manifest.json 始终以收敛后的合法对象序列化，放在 files 首位。
@@ -1044,13 +1092,15 @@ export function buildDraftFromSandboxFiles(input: {
   }
 
   // CLI 字段优先 + 前端兜底补全（与 buildLocalDraft 同款策略，保证少字段 partial 场景仍可用）。
+  // runtime_type 先行，entry 回退按 runtime 分流（python→main.py / nodejs→index.js / client→ui/index.html）。
+  const runtimeType = normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'];
   const manifest = {
     id: parsedManifest?.id || pluginId,
     name: parsedManifest?.name || input.prompt.slice(0, 24) || '本地代码助手插件',
     version: parsedManifest?.version || '0.1.0',
     description: parsedManifest?.description || `由 ${input.providerLabel} 本地 CLI 生成的插件草稿`,
-    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'],
-    entry: parsedManifest?.entry || LOCAL_DRAFT_ENTRY,
+    runtime_type: runtimeType,
+    entry: parsedManifest?.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, 'tenant') as 'private' | 'tenant',
     capabilities: normalizeCapabilities(parsedManifest?.capabilities),
   };
@@ -1060,21 +1110,19 @@ export function buildDraftFromSandboxFiles(input: {
   const scanFilesExceptManifest = input.files.filter((file) => file.path !== 'manifest.json');
   let files: DraftFile[] = [...scanFilesExceptManifest];
 
-  // entry 缺失自动兜底页（claude 偶尔只写 manifest.json 漏 entry 文件）。
+  // entry 缺失自动兜底（claude 偶尔只写 manifest.json 漏 entry 文件），按 runtime 分流兜底内容。
   // entryMissing 标记原始扫描是否缺失 entry（决定 status：原始缺失则 partial，即使兜底页注入也不判 ready）。
   const entryMissing = !scanFilesExceptManifest.some((file) => file.path === manifest.entry);
   if (entryMissing) {
-    files = [...files, {
-      path: manifest.entry,
-      content: buildFallbackEntryHtml({
-        manifestName: manifest.name,
-        description: manifest.description,
-      }),
-    }];
+    const fallback = buildFallbackEntryFile(runtimeType, {
+      manifestName: manifest.name,
+      description: manifest.description,
+    });
+    files = [...files, { path: manifest.entry, content: fallback.content }];
     schemaDiagnostics.push({
       stage: 'schema',
       status: 'warn',
-      message: `entry ${manifest.entry} 缺失，已生成兜底预览页`,
+      message: `入口文件 ${manifest.entry} 缺失，已按 ${runtimeType} 类型生成兜底骨架`,
     });
   }
   files = [{ path: 'manifest.json', content: JSON.stringify(manifest, null, 2) }, ...files];
@@ -1183,13 +1231,16 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
 
   // manifest 沿用 prev 的 id/name（迭代不换插件），仅用追问产出补全可变字段。
   const prevManifest = parseManifest(prev.files);
+  // runtime_type 先行（追问产出优先，回退 prev），entry/兜底按 runtime 分流。
+  const runtimeType = normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'];
   const manifest = {
     id: parsedManifest?.id || prevManifest.id,
     name: parsedManifest?.name || prevManifest.name,
     version: parsedManifest?.version || prevManifest.version,
     description: parsedManifest?.description || prevManifest.description,
-    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'],
-    entry: parsedManifest?.entry || prevManifest.entry,
+    runtime_type: runtimeType,
+    // entry：追问产出优先，回退 prev.entry（prev 已按 runtime 分流过），最后按当前 runtime 兜底。
+    entry: parsedManifest?.entry || prevManifest.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
     // 修复 DRAFT-01：此前 capabilities 写成 normalizeCapabilities(parsedManifest?.capabilities)，
     // 不参考 prevManifest.capabilities。normalizeCapabilities 在收到 undefined/[]/非法数组时一律兜底为
@@ -1207,15 +1258,13 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
   if (parsed.files.length > 0) {
     files = [...parsed.files];
     if (!files.find((file) => file.path === manifest.entry)) {
-      files = [...files, {
-        path: manifest.entry,
-        content: buildFallbackEntryHtml({
-          notes: parsed.notes,
-          manifestName: manifest.name,
-          description: manifest.description,
-        }),
-      }];
-      schemaDiagnostics.push({ stage: 'schema', status: 'warn', message: `entry ${manifest.entry} 缺失，已生成兜底预览页` });
+      const fallback = buildFallbackEntryFile(runtimeType, {
+        notes: parsed.notes,
+        manifestName: manifest.name,
+        description: manifest.description,
+      });
+      files = [...files, { path: manifest.entry, content: fallback.content }];
+      schemaDiagnostics.push({ stage: 'schema', status: 'warn', message: `入口文件 ${manifest.entry} 缺失，已按 ${runtimeType} 类型生成兜底骨架` });
     }
   } else {
     // R2 未产出结构化文件：保留上轮文件，标记 partial。
@@ -1273,13 +1322,15 @@ export function mergeFollowupDraftWithSandbox(prev: PluginDraft, result: CliProb
 
   // manifest 沿用 prev 的 id/name（迭代不换插件），仅用追问产出补全可变字段。
   const prevManifest = parseManifest(prev.files);
+  // runtime_type 先行（追问产出优先，回退 prev），entry/兜底按 runtime 分流。
+  const runtimeType = normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'];
   const manifest = {
     id: parsedManifest?.id || prevManifest.id,
     name: parsedManifest?.name || prevManifest.name,
     version: parsedManifest?.version || prevManifest.version,
     description: parsedManifest?.description || prevManifest.description,
-    runtime_type: normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, prevManifest.runtime_type as string) as PluginManifest['runtime_type'],
-    entry: parsedManifest?.entry || prevManifest.entry,
+    runtime_type: runtimeType,
+    entry: parsedManifest?.entry || prevManifest.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
     // 修复 DRAFT-01：与 mergeFollowupDraft 同款修复——parsed 合法非空才覆盖，否则透传 prev，
     // 避免追问未重发完整 manifest 时 prevManifest.capabilities 被整体丢弃（多能力插件降级为单能力）。
@@ -1298,14 +1349,12 @@ export function mergeFollowupDraftWithSandbox(prev: PluginDraft, result: CliProb
     // 原始扫描是否含 entry（决定 ready/partial，兜底页注入不算）。
     const entryMissing = !scanFilesExceptManifest.some((file) => file.path === manifest.entry);
     if (entryMissing) {
-      files = [...files, {
-        path: manifest.entry,
-        content: buildFallbackEntryHtml({
-          manifestName: manifest.name,
-          description: manifest.description,
-        }),
-      }];
-      schemaDiagnostics.push({ stage: 'schema', status: 'warn', message: `entry ${manifest.entry} 缺失，已生成兜底预览页` });
+      const fallback = buildFallbackEntryFile(runtimeType, {
+        manifestName: manifest.name,
+        description: manifest.description,
+      });
+      files = [...files, { path: manifest.entry, content: fallback.content }];
+      schemaDiagnostics.push({ stage: 'schema', status: 'warn', message: `入口文件 ${manifest.entry} 缺失，已按 ${runtimeType} 类型生成兜底骨架` });
     }
     // sandbox 有源码产出且原始含 entry → ready；entry 缺失（兜底页注入）→ partial。
     status = parsedManifest && !entryMissing ? 'ready' : 'partial';
@@ -1345,6 +1394,9 @@ export function parseManifest(files: DraftFile[]) {
     return {
       id: parsed.id || parsed.name || 'generated-plugin',
       name: parsed.name || '未命名插件',
+      // 用户命名（PRD 需求 1 / AC1）：title 优先于 name 作为展示名。
+      // 上传时 doUpload 把用户填的名写入 title 落盘，scan_one_plugin 同样 title 优先回退。
+      title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : '',
       version: parsed.version || '0.1.0',
       description: parsed.description || '',
       runtime_type: parsed.runtime_type || parsed.runtimeType || 'client',
@@ -1355,7 +1407,7 @@ export function parseManifest(files: DraftFile[]) {
     };
   } catch {
     // 解析失败：无能力声明，空数组合法（后端接受）。
-    return { id: 'generated-plugin', name: '未命名插件', version: '0.1.0', description: '', runtime_type: 'client', entry: 'ui/index.html', visibility: 'tenant', capabilities: [] };
+    return { id: 'generated-plugin', name: '未命名插件', title: '', version: '0.1.0', description: '', runtime_type: 'client', entry: 'ui/index.html', visibility: 'tenant', capabilities: [] };
   }
 }
 
