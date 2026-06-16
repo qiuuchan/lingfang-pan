@@ -262,6 +262,87 @@ fn is_windows_drive_prefix(path: &str) -> bool {
         && (bytes[2] == b'/' || bytes[2] == b'\\')
 }
 
+/// 预检 Node 插件是否需要专属运行时（预览执行用裸 node 跑不了）。
+///
+/// 判定：files 含 package.json 且其 scripts.start 不是简单的 `node <file>` 形态
+/// （即依赖了 electron / 框架 CLI 等特殊可执行运行时）。
+/// 命中时返回友好错误提示（引导用持久化运行），未命中返回 None。
+///
+/// 背景：预览执行用 `node <entry>` 一次性跑，但 electron 等是特殊可执行包，
+/// `require('electron')` 在纯 node 下会抛 EISDIR / 模块解析错（node 把 electron 的
+/// 路径当目录 realpath）。此类插件必须经 `pnpm start`（即 `electron .`）启动，
+/// 属于持久化运行（Plugins 页「运行」按钮）的范畴，预览执行本就不适用。
+fn needs_runtime_start(files: &[ScriptFile]) -> Option<String> {
+    // 读取 package.json 内容（与 materialize_sandbox 一致：files 里的 path 形如 "package.json"）。
+    let pkg = files.iter().find(|f| f.path == "package.json")?;
+    let value: serde_json::Value = serde_json::from_str(&pkg.content).ok()?;
+    let start = value.get("scripts").and_then(|s| s.get("start"))?.as_str()?.trim();
+    // 简单 `node <file>` 形态可裸 node 预览（如 "node index.js"）；其余（electron . / 框架 CLI）需专属运行时。
+    // 容错：去引号后若以 "node " 开头且只有一个参数，视为简单形态放行；否则视为专属运行时。
+    let is_plain_node = start.starts_with("node ") && start.split_whitespace().count() == 2;
+    if is_plain_node {
+        return None;
+    }
+    // 依赖里若含 electron/pkg 等打包/运行时框架，给出更具体的提示。
+    let deps = value
+        .get("dependencies")
+        .and_then(|d| d.as_object())
+        .map(|m| m.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let runtime_hint = if deps.iter().any(|d| d == "electron") {
+        "（检测到 electron 依赖，需用 pnpm start 启动主进程）"
+    } else {
+        ""
+    };
+    Some(format!(
+        "该插件声明了 scripts.start（{}），需要专属运行时而非直接 node 运行，预览执行无法启动{}。请在「插件」页用「运行」按钮以独立进程启动（pnpm start）。",
+        start, runtime_hint
+    ))
+}
+
+#[cfg(test)]
+mod needs_runtime_start_tests {
+    use super::*;
+
+    fn file(path: &str, content: &str) -> ScriptFile {
+        ScriptFile { path: path.to_string(), content: content.to_string() }
+    }
+
+    #[test]
+    fn plain_node_start_is_allowed() {
+        // scripts.start = "node index.js" 形态简单，裸 node 可预览，不拦截。
+        let files = vec![file("package.json", r#"{"scripts":{"start":"node index.js"}}"#)];
+        assert!(needs_runtime_start(&files).is_none());
+    }
+
+    #[test]
+    fn electron_start_is_blocked() {
+        // scripts.start = "electron ." 需要 electron 运行时，预览拦截并提示。
+        let files = vec![file(
+            "package.json",
+            r#"{"scripts":{"start":"electron ."},"dependencies":{"electron":"^31"}}"#,
+        )];
+        let reason = needs_runtime_start(&files).expect("应拦截 electron");
+        assert!(reason.contains("electron ."));
+        assert!(reason.contains("electron 依赖"));
+        assert!(reason.contains("独立进程"));
+    }
+
+    #[test]
+    fn no_package_json_is_allowed() {
+        // 无 package.json（纯脚本插件）不拦截。
+        let files = vec![file("index.js", "console.log('hi')")];
+        assert!(needs_runtime_start(&files).is_none());
+    }
+
+    #[test]
+    fn malformed_package_json_is_allowed() {
+        // package.json 非法 JSON 时不拦截（降级为裸 node 尝试，由真实 node 错误兜底）。
+        let files = vec![file("package.json", "{not json")];
+        assert!(needs_runtime_start(&files).is_none());
+    }
+}
+
 /// sandbox 落盘：清空旧目录后重建，逐文件写入子目录。
 /// 返回 canonicalize 后的 sandbox 根与 entry 绝对路径，供 run_capture_with_env 使用。
 fn materialize_sandbox(
@@ -393,6 +474,16 @@ pub fn run_plugin_script(
         .map_err(|error| error.to_string())?;
     let (sandbox_canon, entry_canon) =
         materialize_sandbox(&data_dir, &input.plugin_id, &input.files, &input.entry)?;
+
+    // 预检（Node 插件专属运行时）：若插件声明了 package.json + scripts.start（如 electron . / 框架 CLI），
+    // 说明它需要专属运行时而非裸 node 直跑入口。预览执行用 `node <entry>` 无法加载此类运行时
+    // （electron 是特殊可执行包，node require('electron') 会抛 EISDIR/模块解析错）。
+    // 提前返回友好提示，引导用户用持久化运行（插件页「运行」→ pnpm start 独立进程），而非暴露 node 内部堆栈。
+    if input.runtime == ScriptRuntime::Nodejs {
+        if let Some(reason) = needs_runtime_start(&input.files) {
+            return Err(reason);
+        }
+    }
 
     // 组D task 06-16：plugin_script 预览执行仍用临时 sandbox（group B 的 venv/pnpm 持久化运行尚未落地），
     // 故 plugin_id 传 None 走 workspace_dir 显式路径分支（不落 plugins_root，保持预览隔离）。
