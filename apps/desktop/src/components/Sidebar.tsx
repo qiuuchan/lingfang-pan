@@ -74,7 +74,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
               key={v}
               variant="ghost"
               onClick={() => { setRunningPlugin(null); setView(v); }}
-              className={cn('h-9 justify-start gap-2.5 px-3 font-medium', active ? 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground!' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}
+              className={cn('h-9 justify-start gap-2.5 px-3 font-medium', active ? 'bg-primary text-primary-foreground hover:bg-primary! hover:text-primary-foreground!' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}
             >
               <Icon className="size-4" />{label}
             </Button>
