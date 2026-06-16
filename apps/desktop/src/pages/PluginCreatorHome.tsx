@@ -284,9 +284,22 @@ export function PluginCreatorHome() {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
 
+    // 修复 StrictMode 重复注册：tauriListen 是 async，StrictMode 开发模式双调用 effect 时，
+    // 第一次的 await 可能在 cleanup 之后才 resolve 并 push listener，导致该 listener 永不被清理
+    // → 同一 output 事件触发两次 handler → 文本重复显示两遍。
+    // helper：await 后若已 disposed，立即 unlisten 不 push（防止孤儿 listener）。
+    async function attachListen<T>(event: string, handler: (e: { payload: T }) => void) {
+      const unlisten = await tauriListen<T>(event, handler);
+      if (disposed) {
+        unlisten();
+      } else {
+        unlisteners.push(unlisten);
+      }
+    }
+
     async function attach() {
       try {
-        unlisteners.push(await tauriListen<SessionStartedPayload>('code-assistant://session-started', ({ payload }) => {
+        await attachListen<SessionStartedPayload>('code-assistant://session-started', ({ payload }) => {
           // design §3.1.3：守卫按 activeId 路由（首问已 startNewSession 设过 activeIdRef）。
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const record = payload.record;
@@ -325,16 +338,16 @@ export function PluginCreatorHome() {
               archived: record.archived,
             }, ...prev];
           });
-        }));
+        });
         // design §3.3.3：捕获 claude session_id（仅 claude stream-json 会 emit）→ 标记 native 真 resume 多轮。
         // cli_session_id 真值由 Rust 回写 SessionRecord，前端只据此切 native mode。
-        unlisteners.push(await tauriListen<SessionCliIdPayload>('code-assistant://session-cli-id', ({ payload }) => {
+        await attachListen<SessionCliIdPayload>('code-assistant://session-cli-id', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           if (payload.cliSessionId) {
             setMultiturnMode('native');
           }
-        }));
-        unlisteners.push(await tauriListen<SessionOutputPayload>('code-assistant://output', ({ payload }) => {
+        });
+        await attachListen<SessionOutputPayload>('code-assistant://output', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const text = payload.text || '';
           if (!text) return;
@@ -357,14 +370,14 @@ export function PluginCreatorHome() {
                   : stream === 'tool' ? '调用工具中…'
                     : '生成中…',
           );
-        }));
-        unlisteners.push(await tauriListen<SessionErrorPayload>('code-assistant://error', ({ payload }) => {
+        });
+        await attachListen<SessionErrorPayload>('code-assistant://error', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const message = payload.error || '代码助手输出异常';
           setAssistantSession((prev) => prev ? { ...prev, status: 'failed', diagnostics: [...prev.diagnostics, message] } : prev);
           setLiveError(toCreatorError('cli_session_error', new Error(message)));
-        }));
-        unlisteners.push(await tauriListen<SessionExitPayload>('code-assistant://exit', ({ payload }) => {
+        });
+        await attachListen<SessionExitPayload>('code-assistant://exit', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const nextStatus = payload.status === 'stopped' ? 'stopped' : 'exited';
           setAssistantSession((prev) => prev ? { ...prev, status: nextStatus, exitCode: payload.exitCode ?? null, endedAt: payload.endedAt } : prev);
@@ -373,7 +386,7 @@ export function PluginCreatorHome() {
           setMultiturnMode((prev) => prev === 'native' ? 'native' : 'degraded');
           setLiveStage(nextStatus === 'stopped' ? '已停止，整理结果中…' : '已结束，整理结果中…');
           void finalizeSession(payload.sessionId, nextStatus, payload.exitCode ?? null, payload.endedAt);
-        }));
+        });
       } catch {
         // 浏览器预览环境没有 Tauri event bridge，发送时会通过 invoke 给出明确错误。
       }
