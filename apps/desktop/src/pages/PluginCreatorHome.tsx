@@ -506,6 +506,12 @@ export function PluginCreatorHome() {
       setPendingUser(null);
       setPreviewKey((key) => key + 1);
 
+      // 需求 3（状态读文件系统）：草稿携带 plugin_id，切回历史会话时据此恢复 pluginId，
+      // 让顶部 Badge 走 scan_plugin_status 读文件系统真相而非解析态。
+      if (nextDraft && pluginIdRef.current) {
+        nextDraft.plugin_id = pluginIdRef.current;
+      }
+
       // design §3.2.7：草稿落盘到 drafts/{sessionId}.json + 更新 metas 对应项 draftUpdatedAt。
       try {
         if (nextDraft) await saveDraft(sessionId, JSON.stringify(nextDraft));
@@ -605,6 +611,15 @@ export function PluginCreatorHome() {
     });
     // 新会话立即成为 activeId（listener 守卫据此路由新会话事件）。
     setActiveIdRef(record.sessionId);
+    // 流程重构（AC1 修复）：从 Rust 返回的 workspaceDir（= plugins_root/<temp_id>/ 持久化目录）
+    // 提取 plugin_id，供上传时 rename_plugin_dir 改正式目录名 + 创建期状态扫描命中。
+    // record.workspaceDir 是 canonicalize 后的绝对路径，取末段即 plugin_id（sanitize 白名单已通过）。
+    if (record.workspaceDir) {
+      const derivedId = record.workspaceDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+      const nextPluginId = derivedId || null;
+      setPluginId(nextPluginId);
+      pluginIdRef.current = nextPluginId;
+    }
     // 关键：新会话立即加入 metas（历史列表），否则对话完成后切换会话找不到这条历史。
     const newMeta: ConversationMeta = {
       sessionId: record.sessionId,
@@ -802,7 +817,15 @@ export function PluginCreatorHome() {
     setPluginStatus(null);
     try {
       const draftRaw = await readDraft(id);
-      setCurrentDraft(draftRaw ? JSON.parse(draftRaw) : null);
+      const parsed = draftRaw ? JSON.parse(draftRaw) : null;
+      setCurrentDraft(parsed);
+      // 需求 3（状态读文件系统）：从草稿恢复 plugin_id（草稿落盘时已携带），让顶部 Badge
+      // 走 scan_plugin_status 读文件系统真相，而非回退到解析态 status。
+      const draftPluginId = typeof parsed?.plugin_id === 'string' && parsed.plugin_id.trim() ? parsed.plugin_id : null;
+      if (draftPluginId) {
+        setPluginId(draftPluginId);
+        pluginIdRef.current = draftPluginId;
+      }
     } catch {
       setCurrentDraft(null);
     }
@@ -955,8 +978,25 @@ export function PluginCreatorHome() {
     if (!name) return toast.error('请填写插件名称');
     setNamingLoading(true);
     try {
-      // 上传到后端（manifest 含用户命名的 name）。
-      const uploadManifest = { ...manifest, name };
+      // AC1 用户命名：先把临时持久化目录 rename 成正式目录名（基于用户命名的 safePluginId），
+      // 并把用户命名写入 manifest.title（Rust rename_plugin_dir 的 title 参数一次完成）。
+      // rename 失败不阻断上传（降级：目录名仍为 temp_id，但 title 已进 uploadManifest，云端展示名仍正确）。
+      const oldId = pluginIdRef.current;
+      if (oldId) {
+        const safeNew = safePluginId(name);
+        if (safeNew && safeNew !== oldId) {
+          try {
+            const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId: safeNew, title: name });
+            setPluginId(renamed);
+            pluginIdRef.current = renamed;
+          } catch (e) {
+            // rename 失败（重名/权限/同名目录已存在）：仅 toast 提示，继续走上传（title 仍随 manifest 上传）。
+            toast.error(`命名持久化目录失败：${(e as Error).message || e}（仍将以上传名展示）`);
+          }
+        }
+      }
+      // 上传到后端（manifest 含用户命名的 name + title）。
+      const uploadManifest = { ...manifest, name, title: name };
       const result = await api<{ plugin: LoadedPlugin; deduplicated?: boolean }>('/api/plugins/upload', {
         method: 'POST',
         body: { manifest: uploadManifest, files },
@@ -1051,9 +1091,9 @@ export function PluginCreatorHome() {
                 <span className="truncate text-muted-foreground">{activeConversationTitle}</span>
               </>
             )}
-            {/* 组C（PRD 需求 2）：状态优先显示文件系统扫描结果（pluginStatus，真实 ready/incomplete/error），
-                无 pluginId 时回退到草稿状态（currentDraft.status，反映解析阶段）。
-                双源策略：创建期用草稿状态，AI 写入持久化目录后用文件系统状态。 */}
+            {/* 需求 3（状态读文件系统）：状态优先显示 scan_plugin_status 扫描结果（ready/incomplete/error/running），
+                反映插件持久化目录的真实文件状态——AI 写完文件即实时判定，不依赖转草稿。
+                仅当无 pluginId（纯对话/未关联目录）时回退到草稿解析态 status。 */}
             {(() => {
               if (pluginStatus) {
                 const variant = STATUS_VARIANT[pluginStatus.status];

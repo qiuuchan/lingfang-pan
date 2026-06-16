@@ -14,7 +14,7 @@
 // 注：这些 Rust 命令由组A（目录管理）/组B（venv+pnpm 运行）实现，本封装层按契约先行落地，
 // 后端实现后即生效；命令未实现时 tauriInvoke 抛错，前端按 errorMessage 友好降级（不崩）。
 
-import { tauriInvoke } from '@/lib/api';
+import { tauriInvoke, tauriListen } from '@/lib/api';
 
 // === 动态状态（PRD 需求 2：状态动态获取，不存 DB） ===
 
@@ -83,6 +83,21 @@ export const RUNTIME_DISPLAY: Record<PluginRuntime, string> = {
   python: 'Python',
 };
 
+// === 启动阶段进度（start_plugin 的分阶段事件，前端渲染动画） ===
+
+// 启动阶段（Rust plugin_runner emit 的 `plugin:start-progress` 事件 stage 取值）。
+// - checking：正在检查运行环境/依赖是否就绪。
+// - deps_installing：依赖缺失，正在安装（pip install / pnpm install）。
+// - starting：依赖就绪，正在拉起入口进程。
+export type PluginStartStage = 'checking' | 'deps_installing' | 'starting';
+
+// start_plugin 阶段进度事件 payload（与 Rust PluginStartProgress 对齐，camelCase 由 Tauri 自动转换）。
+export interface PluginStartProgress {
+  pluginId: string;
+  stage: PluginStartStage;
+  message: string;
+}
+
 // === Rust 命令封装 ===
 
 /**
@@ -110,10 +125,27 @@ export function scanPluginStatus(): Promise<LocalPluginStatus[]> {
  * - 进程 detach 后独立运行（外部窗口/终端），软件仅记录 pid + started_at。
  * - HTML 插件不支持 start（仅软件内 iframe，走 open 而非 start）。
  *
+ * 启动阶段事件：onProgress 回调接收 Rust emit 的 `plugin:start-progress` 事件（checking /
+ * deps_installing / starting），供前端渲染分阶段进度动画。回调在 startPlugin resolve/reject 后自动解绑。
+ *
  * 返回启动信息（pid + started_at），前端据此刷新 status==='running'。
  */
-export function startPlugin(pluginId: string): Promise<{ pid: number; started_at: string }> {
-  return tauriInvoke<{ pid: number; started_at: string }>('start_plugin', { pluginId });
+export async function startPlugin(
+  pluginId: string,
+  onProgress?: (progress: PluginStartProgress) => void,
+): Promise<{ pid: number; started_at: string }> {
+  // 订阅阶段事件（仅本次启动期间），完成后解绑避免泄漏。
+  const unlisten = onProgress
+    ? await tauriListen<PluginStartProgress>('plugin:start-progress', (event) => {
+        // 仅处理本次启动插件的进度事件（同插件并发启动时按 pluginId 过滤）。
+        if (event.payload?.pluginId === pluginId) onProgress(event.payload);
+      })
+    : null;
+  try {
+    return await tauriInvoke<{ pid: number; started_at: string }>('start_plugin', { pluginId });
+  } finally {
+    unlisten?.();
+  }
 }
 
 /**
