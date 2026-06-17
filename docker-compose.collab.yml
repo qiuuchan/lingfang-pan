@@ -29,6 +29,8 @@ services:
       NODE_ENV: production
     ports:
       - "0.0.0.0:19006:19006"
+    volumes:
+      - downloads:/app/downloads
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,3 +55,4 @@ services:
 
 volumes:
   collab_pgdata:
+  downloads:
