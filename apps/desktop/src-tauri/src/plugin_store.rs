@@ -177,11 +177,17 @@ impl PluginStore {
         };
         for entry in entries.flatten() {
             let name = entry.file_name();
-            let Some(name_str) = name.to_str() else { continue };
-            if !name_str.starts_with("temp-") { continue; }
+            let Some(name_str) = name.to_str() else {
+                continue;
+            };
+            if !name_str.starts_with("temp-") {
+                continue;
+            }
             let path = entry.path();
             // 仅清理完全空目录（无任何文件/子目录）。
-            let Ok(inner) = fs::read_dir(&path) else { continue };
+            let Ok(inner) = fs::read_dir(&path) else {
+                continue;
+            };
             if inner.count() == 0 {
                 let _ = fs::remove_dir(&path); // 非空会失败，忽略（保守不删）。
             }
@@ -353,11 +359,17 @@ impl PluginStore {
             }
             let p = std::path::Path::new(path);
             // 绝对路径（Windows 盘符 C:\ 或 Unix /）一律拒。
-            if p.is_absolute() || path.starts_with('/') || path.starts_with('\\') || path.contains(':') {
+            if p.is_absolute()
+                || path.starts_with('/')
+                || path.starts_with('\\')
+                || path.contains(':')
+            {
                 return Err(format!("非法文件路径（绝对路径）：{path}"));
             }
             // 段级校验：任一段为 .. 视为穿越。
-            if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 return Err(format!("非法文件路径（含 ..）：{path}"));
             }
             let target = base.join(p);
@@ -423,11 +435,15 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
         }
     };
     // 缺 id 或 name → error（与 plugins.rs parse_manifest 同款强约束）。
-    let id = v.get("id").and_then(|x| x.as_str()).unwrap_or(plugin_id);
+    // 注意：PluginMeta.id 始终用目录名（plugin_id），不用 manifest.id —— 文件系统操作
+    // （delete/read/start/rename）以目录名为准，manifest.id 仅是声明，可能与目录名不同
+    // （用户上传命名 safePluginId 与 manifest.id 常不一致）。若用 manifest.id 作 id，
+    // delete 会指向不存在的目录幂等 Ok 但没删（实战 bug）。
+    let id_field = v.get("id").and_then(|x| x.as_str());
     let name_field = v.get("name").and_then(|x| x.as_str());
-    if v.get("id").and_then(|x| x.as_str()).is_none() || name_field.is_none() {
+    if id_field.is_none() || name_field.is_none() {
         return PluginMeta {
-            id: id.to_string(),
+            id: plugin_id.to_string(),
             name: name_field.unwrap_or(plugin_id).to_string(),
             status: PluginStatus::Error,
             runtime: parse_runtime(v.get("runtime_type")),
@@ -460,7 +476,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
         )
     };
     PluginMeta {
-        id: id.to_string(),
+        id: plugin_id.to_string(),
         name,
         status,
         runtime,
@@ -798,6 +814,30 @@ mod tests {
         assert!(m.detail.is_none());
     }
 
+    // scan 的 id 用目录名（plugin_id），不用 manifest.id —— 文件系统操作以目录名为准。
+    // manifest.id 与目录名不同时（用户命名 safePluginId 常与 manifest.id 不一致），
+    // id 仍应是目录名，否则 delete/read 指向错误路径（实战：显示删除成功但目录没删）。
+    #[test]
+    fn scan_id_uses_dir_name_not_manifest_id() {
+        let store = temp_store("scan-id-dirname");
+        // 目录名 = "ai-image"，manifest.id = "ai-image-studio"（不同）。
+        let dir = store.plugins_root().join("ai-image");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"ai-image-studio","name":"AI图像工作室","runtime_type":"client","entry":"ui/index.html"}"#,
+        ).unwrap();
+        fs::create_dir_all(dir.join("ui")).unwrap();
+        fs::write(dir.join("ui").join("index.html"), "x").unwrap();
+
+        let metas = store.list_plugins();
+        assert_eq!(metas.len(), 1);
+        // id 必须是目录名 "ai-image"，不是 manifest.id "ai-image-studio"。
+        assert_eq!(metas[0].id, "ai-image");
+        // name 用 manifest.name（展示名）。
+        assert_eq!(metas[0].name, "AI图像工作室");
+    }
+
     #[test]
     fn scan_title_takes_priority_over_name() {
         // PRD 需求 1：插件名用户命名，manifest.title 优先于 manifest.name 展示。
@@ -845,8 +885,8 @@ mod tests {
         let metas = store.list_plugins();
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].name, "我的番茄钟");
-        // PluginMeta.id 取 manifest.id（程序标识符 x），与目录名不同——目录名是持久化 plugin_id。
-        assert_eq!(metas[0].id, "x");
+        // PluginMeta.id 取目录名（持久化 plugin_id），不用 manifest.id。
+        assert_eq!(metas[0].id, "wode-fanqie-zhong");
         // 目录已从 temp-1700000000-123 改名为正式目录名 wode-fanqie-zhong。
         assert!(
             !store.plugin_dir("temp-1700000000-123").unwrap().exists(),
@@ -1005,7 +1045,11 @@ mod tests {
         // 正式插件目录：不应被碰。
         let real_plugin = root.join("my-plugin");
         fs::create_dir_all(real_plugin.join("ui")).unwrap();
-        fs::write(real_plugin.join("manifest.json"), r#"{"id":"x","name":"x"}"#).unwrap();
+        fs::write(
+            real_plugin.join("manifest.json"),
+            r#"{"id":"x","name":"x"}"#,
+        )
+        .unwrap();
 
         store.cleanup_empty_temp_dirs();
 
@@ -1107,23 +1151,39 @@ mod tests {
     fn write_files_writes_multiple_and_subdirs() {
         let store = temp_store("write-multi");
         let files = vec![
-            ("manifest.json".to_string(), r#"{"id":"x","name":"X"}"#.to_string()),
+            (
+                "manifest.json".to_string(),
+                r#"{"id":"x","name":"X"}"#.to_string(),
+            ),
             ("ui/index.html".to_string(), "<html></html>".to_string()),
             ("data/config.json".to_string(), "{}".to_string()),
         ];
         store.write_files("my-plugin", &files).unwrap();
         let dir = store.plugin_dir("my-plugin").unwrap();
-        assert_eq!(fs::read_to_string(dir.join("manifest.json")).unwrap(), r#"{"id":"x","name":"X"}"#);
-        assert_eq!(fs::read_to_string(dir.join("ui").join("index.html")).unwrap(), "<html></html>");
-        assert_eq!(fs::read_to_string(dir.join("data").join("config.json")).unwrap(), "{}");
+        assert_eq!(
+            fs::read_to_string(dir.join("manifest.json")).unwrap(),
+            r#"{"id":"x","name":"X"}"#
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("ui").join("index.html")).unwrap(),
+            "<html></html>"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("data").join("config.json")).unwrap(),
+            "{}"
+        );
     }
 
     #[test]
     fn write_files_overwrites_existing() {
         let store = temp_store("write-overwrite");
-        store.write_files("p", &[("a.txt".to_string(), "v1".to_string())]).unwrap();
+        store
+            .write_files("p", &[("a.txt".to_string(), "v1".to_string())])
+            .unwrap();
         // 再写覆盖。
-        store.write_files("p", &[("a.txt".to_string(), "v2".to_string())]).unwrap();
+        store
+            .write_files("p", &[("a.txt".to_string(), "v2".to_string())])
+            .unwrap();
         let dir = store.plugin_dir("p").unwrap();
         assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "v2");
     }
@@ -1132,14 +1192,18 @@ mod tests {
     fn write_files_rejects_traversal_path() {
         let store = temp_store("write-traversal");
         // ../escape 应被段级白名单拒绝（防越出 plugin_dir）。
-        let err = store.write_files("p", &[("../escape.txt".to_string(), "x".to_string())]).unwrap_err();
+        let err = store
+            .write_files("p", &[("../escape.txt".to_string(), "x".to_string())])
+            .unwrap_err();
         assert!(err.contains("非法") || err.contains(".."));
     }
 
     #[test]
     fn write_files_rejects_absolute_path() {
         let store = temp_store("write-absolute");
-        let err = store.write_files("p", &[("/etc/passwd".to_string(), "x".to_string())]).unwrap_err();
+        let err = store
+            .write_files("p", &[("/etc/passwd".to_string(), "x".to_string())])
+            .unwrap_err();
         assert!(err.contains("非法"));
     }
 }
