@@ -150,14 +150,28 @@ export class ReleaseService {
     return { release: this.adminRelease(release) };
   }
 
-  /** PATCH /api/admin/releases/:id：更新 title/notes（DRAFT/PUBLISHED 均可改，版本号与 channel 不可改）。 */
+  /** PATCH /api/admin/releases/:id：更新 title/notes/channel/publishedAt。
+   *  channel 改动需检查 channel+version 唯一约束（改后不能与现有版本冲突）。
+   *  publishedAt 可手动修正（ISO 字符串或 null 清空），覆盖 publish 自动落的首发时间。 */
   async update(actorId: string, id: string, dto: ReleaseUpdateDto) {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.release.findUnique({ where: { id } });
     if (!existing) throw notFound('版本不存在');
-    const data: { title?: string; notes?: string } = {};
+    const data: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: Date | null } = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.channel !== undefined && dto.channel !== existing.channel) {
+      // 改 channel 需检查 channel+version 唯一（同版本号不能在目标 channel 已存在）。
+      const conflict = await this.prisma.release.findUnique({
+        where: { channel_version: { channel: dto.channel, version: existing.version } },
+      });
+      if (conflict) throw badRequest(`目标通道 ${dto.channel} 已存在版本 ${existing.version}`);
+      data.channel = dto.channel;
+    }
+    if (dto.publishedAt !== undefined) {
+      // null = 清空首发时间，ISO 字符串 = 手动修正。
+      data.publishedAt = dto.publishedAt ? new Date(dto.publishedAt) : null;
+    }
     const release = await this.prisma.release.update({ where: { id }, data });
     await this.audit(actorId, 'admin.release.updated', 'Release', release.id, { version: release.version, channel: release.channel });
     return { release: this.adminRelease(release) };
@@ -195,6 +209,18 @@ export class ReleaseService {
     const release = await this.prisma.release.update({ where: { id }, data: { status: 'ARCHIVED', isLatest: false } });
     await this.audit(actorId, 'admin.release.archived', 'Release', release.id, { version: release.version, channel: release.channel });
     return { release: this.adminRelease(release) };
+  }
+
+  /** DELETE /api/admin/releases/:id：物理删除版本（级联删 assets，onDelete: Cascade 自动）。
+   *  已发布的版本删除后官网/更新检查立即不再展示。downloads/ 里的安装包文件不自动清理（无关联记录）。 */
+  async deleteRelease(actorId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const existing = await this.prisma.release.findUnique({ where: { id }, select: { id: true, version: true, channel: true } });
+    if (!existing) throw notFound('版本不存在');
+    // ReleaseAsset 关联 onDelete: Cascade，prisma.release.delete 自动级联删 assets。
+    await this.prisma.release.delete({ where: { id } });
+    await this.audit(actorId, 'admin.release.deleted', 'Release', id, { version: existing.version, channel: existing.channel });
+    return { id };
   }
 
   /** POST /api/admin/releases/:id/assets：登记一个平台产物（releaseId+platform+arch 唯一）。 */

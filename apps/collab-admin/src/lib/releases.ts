@@ -179,8 +179,14 @@ export function createRelease(input: ReleaseCreateInput) {
 }
 
 /** PATCH /api/admin/releases/:id：改 title/notes。 */
-export function updateRelease(id: string, body: { title?: string; notes?: string }) {
+/** PATCH /api/admin/releases/:id：更新 title/notes/channel/publishedAt。 */
+export function updateRelease(id: string, body: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: string | null }) {
   return api<{ release: AdminRelease }>(`/api/admin/releases/${id}`, { method: 'PATCH', body });
+}
+
+/** DELETE /api/admin/releases/:id：删除版本（级联删 assets）。 */
+export function deleteRelease(id: string) {
+  return api(`/api/admin/releases/${id}`, { method: 'DELETE' });
 }
 
 /** POST /api/admin/releases/:id/publish：发布。 */
