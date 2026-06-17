@@ -2,7 +2,7 @@
 //  - member_cannot_create_release（ensurePlatformAdmin 守卫，403）。
 //  - create_conflict_on_duplicate_version（同 channel+version 唯一，409 由 Prisma 映射，此处验 service 层 badRequest 提前拦截）。
 //  - publish_sets_is_latest_and_demotes_others（事务：当前 isLatest=true，同 channel 其他=false）。
-//  - publish_rejects_archived（归档版本不可发布）。
+//  - publish 允许归档版本重新发布（取消归档恢复下载）。
 //  - latest_returns_only_published（非 PUBLISHED 不暴露）。
 //  - latest_with_current_version_update_available（semver 比较：1.0.0 > 0.9.0）。
 // 参考 llm.service.spec.ts：Mock PrismaService + AuthService，不连真实 DB。
@@ -116,9 +116,13 @@ describe('ReleaseService', () => {
     expect(prisma.auditLog.create).toHaveBeenCalled();
   });
 
-  it('publish 拒绝已归档版本', async () => {
-    prisma.release.findUnique.mockResolvedValue(makeRelease({ status: 'ARCHIVED' }));
-    await expect(service.publish('user-admin', 'release-1')).rejects.toMatchObject({ status: 400 });
+  it('publish 允许归档版本重新发布（取消归档，恢复下载）', async () => {
+    prisma.release.findUnique.mockResolvedValue(makeRelease({ status: 'ARCHIVED', publishedAt: now }));
+    prisma.release.update.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true, publishedAt: now }));
+    const result = await service.publish('user-admin', 'release-1');
+    expect(result.release.status).toBe('PUBLISHED');
+    expect(result.release.isLatest).toBe(true);
+    expect(prisma.release.update).toHaveBeenCalled();
   });
 
   it('latest 仅返回 PUBLISHED+isLatest 版本', async () => {

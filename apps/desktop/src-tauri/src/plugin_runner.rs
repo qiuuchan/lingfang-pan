@@ -986,9 +986,16 @@ mod tests {
         let _pid = table.register("long-plugin", child, "2000Z".to_string());
         // 取出并杀。
         let (mut killed_child, _) = table.take("long-plugin").expect("应能取出注册的进程");
+        let started = std::time::Instant::now();
         kill_child_tree(&killed_child);
         let _ = killed_child.kill();
         let _status = killed_child.wait().expect("wait 应能回收");
+        const STOP_TEST_TIMEOUT_MS: u128 = 3_000;
+        let elapsed = started.elapsed().as_millis();
+        assert!(
+            elapsed < STOP_TEST_TIMEOUT_MS,
+            "停止长进程耗时异常：{elapsed}ms"
+        );
         // 二次 take 应 None（已取出）。
         assert!(
             table.take("long-plugin").is_none(),
