@@ -740,6 +740,7 @@ mod tests {
 
     #[test]
     fn timeout_kills_infinite_loop() {
+        let _guard = crate::code_assistant::process_tree_test_lock();
         let binary = match maybe_node() {
             Some(b) => b,
             None => {
@@ -857,6 +858,7 @@ mod tests {
     // wait_with_output 不应永久挂起。本测试派生孙进程（node 子进程）模拟，验证回收不阻塞。
     #[test]
     fn timeout_kills_grandchild_process_tree() {
+        let _guard = crate::code_assistant::process_tree_test_lock();
         let binary = match maybe_node() {
             Some(b) => b,
             None => {

@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use crate::code_assistant::{find_binary, kill_child_tree, run_capture_with_env};
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
-use crate::plugin_store::{PluginStore, sanitize_plugin_id};
+use crate::plugin_store::{sanitize_plugin_id, PluginStore};
 
 /// 插件运行时类型（与 plugin_store::PluginRuntime 对齐，serde lowercase）。
 /// 仅 nodejs/python 走本模块的独立进程运行通道；client（HTML）由前端 iframe 直接显示，不经此通道。
@@ -72,7 +72,8 @@ fn parse_manifest(plugin_dir: &std::path::Path) -> Result<PluginManifest, String
     let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             // 创建期 temp 目录空（AI 未产出 manifest）：结构化前缀，前端识别后引导重新生成。
-            "manifest_missing:插件未生成完成（缺少 manifest.json），请继续对话让 AI 补全或重新创建".to_string()
+            "manifest_missing:插件未生成完成（缺少 manifest.json），请继续对话让 AI 补全或重新创建"
+                .to_string()
         } else {
             format!(
                 "读取 manifest.json 失败（{}）：{e}",
@@ -652,7 +653,10 @@ fn truncate_stderr(s: &str, max_chars: usize) -> String {
         return s.to_string();
     }
     let truncated: String = s.chars().take(max_chars).collect();
-    format!("{truncated}\n…(stderr 已截断，共 {} 字符)", s.chars().count())
+    format!(
+        "{truncated}\n…(stderr 已截断，共 {} 字符)",
+        s.chars().count()
+    )
 }
 
 /// 命令：停止插件独立进程（PRD AC5：可强制关闭）。
@@ -898,14 +902,19 @@ mod tests {
         let child = cmd.spawn().expect("测试进程应能 spawn");
         let pid = table.register("test-plugin", child, "1000Z".to_string());
         assert!(pid > 0, "注册应返回有效 pid");
-        // 等待进程退出，is_running 应返回 None 并清表。
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let status = table.is_running("test-plugin");
-        assert!(status.is_none(), "进程退出后 is_running 应返回 None 并清表");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while table.is_running("test-plugin").is_some() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            table.is_running("test-plugin").is_none(),
+            "进程退出后 is_running 应返回 None 并清表"
+        );
     }
 
     #[test]
     fn process_table_stop_plugin_kills_running_process() {
+        let _guard = crate::code_assistant::process_tree_test_lock();
         // take + kill_child_tree 应能杀掉一个运行中的长进程。
         let table = PluginProcessTable::new();
         #[cfg(unix)]
@@ -1028,15 +1037,20 @@ mod tests {
         let result = wait_for_crash(&mut child, Duration::from_millis(500));
         assert!(result.is_some(), "秒退进程应被检测为崩溃");
         let err = result.unwrap();
-        assert!(err.starts_with("plugin_crashed:"), "崩溃错误应含 plugin_crashed: 前缀");
+        assert!(
+            err.starts_with("plugin_crashed:"),
+            "崩溃错误应含 plugin_crashed: 前缀"
+        );
     }
 
     #[test]
     fn wait_for_crash_returns_none_for_long_running() {
+        let _guard = crate::code_assistant::process_tree_test_lock();
         // 存活进程：sleep 10（不会在 500ms 内退出）。
         let mut cmd = if cfg!(windows) {
             let mut c = std::process::Command::new("cmd");
-            c.args(["/c", "ping -n 10 127.0.0.1 > nul"]).stderr(Stdio::piped());
+            c.args(["/c", "ping -n 10 127.0.0.1 > nul"])
+                .stderr(Stdio::piped());
             c
         } else {
             let mut c = std::process::Command::new("sh");
