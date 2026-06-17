@@ -212,4 +212,64 @@ describe('ReleaseService', () => {
     await expect(service.deleteAsset('user-admin', 'release-1', 'asset-1')).rejects.toMatchObject({ status: 404 });
     expect(prisma.releaseAsset.delete).not.toHaveBeenCalled();
   });
+
+  it('listAdmin 返回全部状态（含 DRAFT/ARCHIVED）且含 assets', async () => {
+    prisma.release.findMany.mockResolvedValue([
+      makeRelease({ id: 'r1', status: 'DRAFT', assets: [] }),
+      makeRelease({ id: 'r2', status: 'ARCHIVED', assets: [{ id: 'a', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: 1, createdAt: now }] }),
+    ]);
+    const result = await service.listAdmin('user-admin');
+    expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: { updatedAt: 'desc' },
+    }));
+    expect(result.releases).toHaveLength(2);
+    expect(result.releases[1].assets).toHaveLength(1);
+  });
+
+  it('listAdmin channel 过滤传入 where', async () => {
+    prisma.release.findMany.mockResolvedValue([]);
+    await service.listAdmin('user-admin', 'BETA');
+    expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { channel: 'BETA' },
+    }));
+  });
+
+  it('listAdmin 非 platform admin 被拒（403）', async () => {
+    auth.ensurePlatformAdmin.mockRejectedValueOnce(forbidden('需要平台管理员'));
+    await expect(service.listAdmin('user-member')).rejects.toMatchObject({ status: 403 });
+    expect(prisma.release.findMany).not.toHaveBeenCalled();
+  });
+
+  it('uploadAsset 写文件 + 读 .sig 填 signature + 建 asset', async () => {
+    prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '0.0.2', channel: 'STABLE' });
+    prisma.releaseAsset.create.mockResolvedValue({
+      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'setup.exe', signature: 'dW50cnVzdGVk', sizeBytes: 100, createdAt: now,
+    });
+    const file = { originalname: 'setup.exe', buffer: Buffer.from('exe-content'), size: 100 };
+    const sigFile = { buffer: Buffer.from('dW50cnVzdGVk') };
+    const result = await service.uploadAsset('user-admin', 'release-1', file, sigFile, 'WINDOWS', 'X86_64');
+    expect(result.asset.signature).toBe('dW50cnVzdGVk');
+    expect(prisma.releaseAsset.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64',
+        url: expect.stringContaining('/downloads/'),
+        filename: 'setup.exe', signature: 'dW50cnVzdGVk', sizeBytes: 100,
+      }),
+    });
+  });
+
+  it('uploadAsset 无 .sig 时 signature 留空', async () => {
+    prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '0.0.2', channel: 'STABLE' });
+    prisma.releaseAsset.create.mockResolvedValue({
+      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'setup.exe', signature: '', sizeBytes: 100, createdAt: now,
+    });
+    const file = { originalname: 'setup.exe', buffer: Buffer.from('exe'), size: 100 };
+    const result = await service.uploadAsset('user-admin', 'release-1', file, undefined, 'WINDOWS', 'X86_64');
+    expect(result.asset.signature).toBe('');
+  });
+
+  it('uploadAsset 未传 file 抛 bad_request', async () => {
+    await expect(service.uploadAsset('user-admin', 'release-1', undefined, undefined)).rejects.toMatchObject({ status: 400 });
+    expect(prisma.releaseAsset.create).not.toHaveBeenCalled();
+  });
 });

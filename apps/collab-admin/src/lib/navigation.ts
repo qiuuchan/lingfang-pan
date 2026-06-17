@@ -5,6 +5,7 @@ import {
   CloudCogIcon,
   LayoutDashboardIcon,
   PlugIcon,
+  RocketIcon,
   SettingsIcon,
   ShieldCheckIcon,
   UsersIcon,
@@ -48,6 +49,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { view: 'platformAdmins', label: '平台管理员', icon: ShieldCheckIcon },
       { view: 'audit', label: '审计日志', icon: ActivityIcon },
+      { view: 'releases', label: '版本发布', icon: RocketIcon },
       { view: 'settings', label: '平台设置', icon: SettingsIcon },
     ],
   },

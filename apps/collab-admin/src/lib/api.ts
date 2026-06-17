@@ -39,6 +39,8 @@ export interface ApiOptions {
   method?: string;
   body?: unknown;
   auth?: boolean;
+  // multipart 上传：传 FormData 时跳过 JSON.stringify 与 application/json 头（浏览器自动加 boundary）。
+  formData?: FormData;
   // 请求超时（毫秒）。默认 30s。
   timeoutMs?: number;
   // ADMIN-01：标记为 refresh 请求自身，避免 refresh 失败时递归派发 UNAUTHORIZED 导致重复清 session。
@@ -74,7 +76,10 @@ async function tryRefresh(): Promise<string | null> {
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // formData 上传：不设 Content-Type（浏览器加 multipart boundary），body 直接用 FormData。
+  // 否则默认 JSON：Content-Type: application/json + JSON.stringify(body)。
+  const isFormData = options.formData instanceof FormData;
+  const headers: Record<string, string> = isFormData ? {} : { 'Content-Type': 'application/json' };
   if (options.auth !== false && token) headers.Authorization = `Bearer ${token}`;
   let response: Response;
   // ADMIN-06：用 AbortController 兜底挂起的 fetch。
@@ -85,7 +90,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     response = await fetch(`${apiBase()}${path}`, {
       method: options.method || 'GET',
       headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: isFormData ? options.formData : (options.body ? JSON.stringify(options.body) : undefined),
       signal: controller?.signal,
     });
   } catch (err) {

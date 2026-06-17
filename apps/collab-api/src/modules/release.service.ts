@@ -114,6 +114,19 @@ export class ReleaseService {
     return { release: this.publicRelease(release, release.assets) };
   }
 
+  /** GET /api/admin/releases：Admin 版本列表（含 DRAFT/PUBLISHED/ARCHIVED 全部状态）。
+   *  与公开 list 的差异：不过滤 status（admin 需管理 DRAFT/ARCHIVED）、含 assets、按 updatedAt desc。
+   *  channel 可选过滤；ensurePlatformAdmin 与其他 admin 写方法一致（首行校验）。 */
+  async listAdmin(actorId: string, channel?: 'STABLE' | 'BETA') {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const releases = await this.prisma.release.findMany({
+      where: channel ? { channel } : undefined,
+      orderBy: { updatedAt: 'desc' },
+      include: { assets: { orderBy: [{ platform: 'asc' }, { arch: 'asc' }] } },
+    });
+    return { releases: releases.map((r) => this.publicRelease(r, r.assets)) };
+  }
+
   // === 平台 Admin 写方法 ===
 
   /** POST /api/admin/releases：创建 DRAFT 版本（channel+version 唯一）。 */
@@ -211,11 +224,13 @@ export class ReleaseService {
 
   /** POST /api/admin/releases/:id/assets/upload：上传安装包文件到 downloads/ 目录，自动创建 asset。
    *  文件名加随机前缀防冲突（同版本重新上传不覆盖旧文件），url 指向 /downloads/<filename>。
-   *  signature 文件（.sig）如果有同名 xxx.sig 则自动读取填入。 */
+   *  可选附带 .sig 签名文件（field name=signature），有则读内容填入 asset.signature（updater 验签用）；
+   *  无则 signature 留空（仅下载场景，不接 updater）。 */
   async uploadAsset(
     actorId: string,
     id: string,
-    file: { originalname: string; buffer?: Buffer; path?: string; size?: number },
+    file: { originalname: string; buffer?: Buffer; path?: string; size?: number } | undefined,
+    sigFile: { buffer?: Buffer; path?: string } | undefined,
     platform?: string,
     arch?: string,
   ) {
@@ -231,7 +246,7 @@ export class ReleaseService {
     mkdirSync(downloadsDir, { recursive: true });
     const filePath = resolve(downloadsDir, uniqueName);
 
-    // 写入文件（buffer 模式或 diskStorage 模式）。
+    // 写入安装包文件（buffer 模式或 diskStorage 模式）。
     if (file.buffer) {
       const { writeFileSync } = require('node:fs');
       writeFileSync(filePath, file.buffer);
@@ -240,13 +255,18 @@ export class ReleaseService {
       copyFileSync(file.path, filePath);
     }
 
-    // 尝试读取同名 .sig 签名文件（如果有）。
+    // 读取上传的 .sig 签名文件内容（如有），填入 asset.signature（updater 验签用）。
+    // 替代旧的「读同名 .sig」逻辑——前端现在直接上传 .sig，不再依赖 downloads/ 目录同名文件。
     let signature = '';
-    try {
-      const { readFileSync } = require('node:fs');
-      signature = readFileSync(resolve(downloadsDir, `${uniqueName}.sig`), 'utf-8').trim();
-    } catch {
-      // .sig 不存在（非 updater 必需），留空。
+    if (sigFile) {
+      try {
+        const { readFileSync } = require('node:fs');
+        signature = sigFile.buffer
+          ? sigFile.buffer.toString('utf-8').trim()
+          : readFileSync(sigFile.path, 'utf-8').trim();
+      } catch {
+        // .sig 读取失败不阻断上传（signature 留空，降级为仅下载）。
+      }
     }
 
     // 构建公开下载 URL（相对路径，由当前后端地址拼接）。
@@ -269,6 +289,7 @@ export class ReleaseService {
       platform: asset.platform,
       arch: asset.arch,
       sizeBytes: file.size,
+      hasSignature: signature.length > 0,
     });
     return { asset: this.publicAsset(asset) };
   }
