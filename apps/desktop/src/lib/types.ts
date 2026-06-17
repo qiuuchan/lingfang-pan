@@ -86,10 +86,18 @@ export interface BalanceLedger {
   createdAt: string;
 }
 
+export type AssistantOutputStream = 'stdout' | 'stderr' | 'thought' | 'tool';
+
+export interface DraftTurnSegment {
+  stream: AssistantOutputStream;
+  text: string;
+}
+
 export interface DraftTurn {
   role: 'user' | 'assistant';
   content: string;
   at: string;
+  segments?: DraftTurnSegment[];
 }
 
 export interface DraftFile {

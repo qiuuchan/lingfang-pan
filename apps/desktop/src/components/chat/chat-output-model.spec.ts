@@ -83,4 +83,49 @@ describe('buildChatOutputItems', () => {
     expect(items[1]).toMatchObject({ type: 'tool', name: 'Read' });
     expect(items[2]).toMatchObject({ type: 'tool', name: 'Write' });
   });
+
+  it('结束后的 assistant turn 可以携带 segments，思考和工具不会收尾丢失', () => {
+    const turns: ChatTurn[] = [
+      { role: 'user', content: '做一个图片工具' },
+      {
+        role: 'assistant',
+        content: '图片工具已生成。',
+        segments: [
+          { stream: 'thought', text: '先确认 PySide6 结构。' },
+          { stream: 'stdout', text: '图片工具已生成。' },
+          { stream: 'tool', text: 'Write {"path":"main.py"}' },
+        ],
+      },
+    ];
+
+    const items = buildChatOutputItems(turns, [], false);
+
+    expect(items.map((item) => item.type)).toEqual(['user', 'reasoning', 'assistant-text', 'tool']);
+    expect(items[1]).toMatchObject({ type: 'reasoning', text: '先确认 PySide6 结构。', live: false });
+    expect(items[2]).toMatchObject({ type: 'assistant-text', text: '图片工具已生成。', live: false });
+    expect(items[3]).toMatchObject({ type: 'tool', name: 'Write' });
+  });
+
+  it('把高密度执行日志拆成多条进度项，避免整轮输出挤成一坨', () => {
+    const segments: ChatSegment[] = [
+      {
+        stream: 'stdout',
+        text: '现在写配置与常量模块：配置模块完成。现在写持久化层：持久化层完成。现在写 API 客户端模块：API 客户端完成。',
+      },
+    ];
+
+    const items = buildChatOutputItems([], segments, true);
+
+    expect(items.map((item) => item.type)).toEqual([
+      'progress',
+      'progress',
+      'progress',
+      'progress',
+      'progress',
+      'progress',
+    ]);
+    expect(items[0]).toMatchObject({ type: 'progress', title: '现在写配置与常量模块', status: 'running' });
+    expect(items[1]).toMatchObject({ type: 'progress', title: '配置模块完成', status: 'done' });
+    expect(items[2]).toMatchObject({ type: 'progress', title: '现在写持久化层', status: 'running' });
+  });
 });

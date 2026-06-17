@@ -1058,6 +1058,191 @@ enum StreamItem {
     Stderr(String),
 }
 
+#[derive(Default)]
+struct ClaudeStreamJsonState {
+    emitted_text: String,
+    emitted_thinking: String,
+    tool_snapshots: Vec<ToolSnapshot>,
+    saw_tool_delta: bool,
+}
+
+#[derive(Clone)]
+struct ToolSnapshot {
+    name: String,
+    input_json: String,
+}
+
+impl ClaudeStreamJsonState {
+    fn items_for_line(&mut self, line: &str) -> Vec<StreamItem> {
+        let items = extract_stream_json_items(line);
+        if items.is_empty() {
+            return items;
+        }
+        if stream_json_line_type(line).as_deref() == Some("assistant") {
+            return self.delta_assistant_snapshot(items);
+        }
+        self.observe_incremental_items(&items);
+        items
+    }
+
+    fn observe_incremental_items(&mut self, items: &[StreamItem]) {
+        for item in items {
+            match item {
+                StreamItem::Text(text) => self.emitted_text.push_str(text),
+                StreamItem::Thinking(text) => self.emitted_thinking.push_str(text),
+                StreamItem::ToolUse { .. } => self.saw_tool_delta = true,
+                StreamItem::Stderr(_) => {}
+            }
+        }
+    }
+
+    fn delta_assistant_snapshot(&mut self, items: Vec<StreamItem>) -> Vec<StreamItem> {
+        let text_delta = self.replace_snapshot_text(&items, true);
+        let thinking_delta = self.replace_snapshot_text(&items, false);
+        let mut emitted_text = false;
+        let mut emitted_thinking = false;
+        let mut tool_index = 0;
+        let mut next_tools = Vec::new();
+        let mut out = Vec::new();
+        for item in items {
+            self.push_snapshot_item(item, &mut SnapshotPush {
+                out: &mut out,
+                next_tools: &mut next_tools,
+                tool_index: &mut tool_index,
+                text_delta: &text_delta,
+                thinking_delta: &thinking_delta,
+                emitted_text: &mut emitted_text,
+                emitted_thinking: &mut emitted_thinking,
+            });
+        }
+        if !next_tools.is_empty() {
+            self.tool_snapshots = next_tools;
+        }
+        out
+    }
+
+    fn replace_snapshot_text(&mut self, items: &[StreamItem], text: bool) -> String {
+        let snapshot = snapshot_text(items, text);
+        let previous = if text {
+            &self.emitted_text
+        } else {
+            &self.emitted_thinking
+        };
+        let delta = snapshot_suffix(previous, &snapshot);
+        if text {
+            self.emitted_text = snapshot;
+        } else {
+            self.emitted_thinking = snapshot;
+        }
+        delta
+    }
+
+    fn push_tool_snapshot(
+        &self,
+        snapshot: ToolSnapshot,
+        index: usize,
+        next_tools: &mut Vec<ToolSnapshot>,
+    ) -> Option<StreamItem> {
+        if self.saw_tool_delta {
+            next_tools.push(snapshot);
+            return None;
+        }
+        let item = delta_tool_snapshot(self.tool_snapshots.get(index), &snapshot);
+        next_tools.push(snapshot);
+        item
+    }
+
+    fn push_snapshot_item(&self, item: StreamItem, state: &mut SnapshotPush<'_>) {
+        match item {
+            StreamItem::Text(_) if !*state.emitted_text => {
+                *state.emitted_text = true;
+                push_text_delta(state.out, state.text_delta);
+            }
+            StreamItem::Thinking(_) if !*state.emitted_thinking => {
+                *state.emitted_thinking = true;
+                push_thinking_delta(state.out, state.thinking_delta);
+            }
+            StreamItem::ToolUse { name, input_json } => {
+                let snapshot = ToolSnapshot { name, input_json };
+                if let Some(item) =
+                    self.push_tool_snapshot(snapshot, *state.tool_index, state.next_tools)
+                {
+                    state.out.push(item);
+                }
+                *state.tool_index += 1;
+            }
+            StreamItem::Stderr(text) => state.out.push(StreamItem::Stderr(text)),
+            StreamItem::Text(_) | StreamItem::Thinking(_) => {}
+        }
+    }
+}
+
+struct SnapshotPush<'a> {
+    out: &'a mut Vec<StreamItem>,
+    next_tools: &'a mut Vec<ToolSnapshot>,
+    tool_index: &'a mut usize,
+    text_delta: &'a str,
+    thinking_delta: &'a str,
+    emitted_text: &'a mut bool,
+    emitted_thinking: &'a mut bool,
+}
+
+fn stream_json_line_type(line: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(line.trim()).ok()?;
+    value
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+fn snapshot_text(items: &[StreamItem], text: bool) -> String {
+    items
+        .iter()
+        .filter_map(|item| match (text, item) {
+            (true, StreamItem::Text(value)) => Some(value.as_str()),
+            (false, StreamItem::Thinking(value)) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn snapshot_suffix(previous: &str, current: &str) -> String {
+    if current.starts_with(previous) {
+        current[previous.len()..].to_string()
+    } else {
+        current.to_string()
+    }
+}
+
+fn delta_tool_snapshot(previous: Option<&ToolSnapshot>, current: &ToolSnapshot) -> Option<StreamItem> {
+    if let Some(previous) = previous {
+        if previous.name == current.name && current.input_json.starts_with(&previous.input_json) {
+            let suffix = current.input_json[previous.input_json.len()..].to_string();
+            return (!suffix.is_empty()).then(|| StreamItem::ToolUse {
+                name: String::new(),
+                input_json: suffix,
+            });
+        }
+    }
+    Some(StreamItem::ToolUse {
+        name: current.name.clone(),
+        input_json: current.input_json.clone(),
+    })
+}
+
+fn push_text_delta(out: &mut Vec<StreamItem>, text: &str) {
+    if !text.is_empty() {
+        out.push(StreamItem::Text(text.to_string()));
+    }
+}
+
+fn push_thinking_delta(out: &mut Vec<StreamItem>, text: &str) {
+    if !text.is_empty() {
+        out.push(StreamItem::Thinking(text.to_string()));
+    }
+}
+
 /// 把 StreamItem 映射到 (stream 字段, text)，供 StreamJson / CodexJson 复用（DRY）。
 /// 返回 None 表示该项应被丢弃（空文本）。
 /// - Text → ("stdout", text)（协议聚合输入）。
@@ -1469,6 +1654,7 @@ fn spawn_reader<E: AssistantEventSink>(
         std::thread::spawn(move || {
             let mut reader = std::io::BufReader::new(pipe);
             let mut buffer = String::new();
+            let mut claude_stream_state = ClaudeStreamJsonState::default();
             // session id 旁路捕获「只设一次」标志（design §3.3.3）：避免同一 session_id 行被重复写盘 + 重复 emit。
             let cli_id_captured = std::sync::atomic::AtomicBool::new(false);
             loop {
@@ -1517,7 +1703,8 @@ fn spawn_reader<E: AssistantEventSink>(
                                 // 分类解析：按 StreamItem.type 路由到 stdout/thought/tool 流。
                                 // 仅 stdout（Text）会被 transcriptTextSinceLastInput 提取（协议聚合输入），
                                 // thought/tool 走独立流，前端按 stream 字段区分渲染，绝不污染 stdout。
-                                extract_stream_json_items(&buffer)
+                                claude_stream_state
+                                    .items_for_line(&buffer)
                                     .into_iter()
                                     .filter_map(stream_item_to_pair)
                                     .collect()
@@ -2729,6 +2916,86 @@ mod tests {
             !stdout_text.contains("Read"),
             "stdout 被工具内容污染：{stdout_text:?}"
         );
+    }
+
+    #[test]
+    fn reader_deltaizes_claude_assistant_snapshots() {
+        use std::io::Cursor;
+        let raw = [
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"我来写配置。"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"我来写配置。配置完成。"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"先看结构。"},{"type":"text","text":"我来写配置。配置完成。现在写 UI。"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"先看结构。继续分析。"},{"type":"text","text":"我来写配置。配置完成。现在写 UI。"}]}}"#,
+        ]
+        .join("\n")
+            + "\n";
+        let cursor = Cursor::new(raw.into_bytes());
+
+        let store = temp_assistant_store("reader-claude-snapshot-delta");
+        let state = CodeAssistantState {
+            store: store.clone(),
+            processes: Arc::new(Mutex::new(HashMap::new())),
+            configs_root: std::env::temp_dir().join(format!(
+                "lingfang-reader-snapshot-configs-{}",
+                std::process::id()
+            )),
+        };
+        let sink = CapturingSink {
+            events: Arc::new(Mutex::new(Vec::new())),
+        };
+        let captured = sink.events.clone();
+
+        spawn_reader(
+            sink,
+            state,
+            "snapshot-session".to_string(),
+            "stdout",
+            OutputFormat::StreamJson,
+            Some(cursor),
+        );
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let transcript = store.read_transcript("snapshot-session").unwrap_or_default();
+            if transcript
+                .lines()
+                .filter(|l| l.contains("\"event\":\"output\""))
+                .count()
+                >= 5
+                || Instant::now() > deadline
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let outputs: Vec<(String, String)> = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(event, _)| *event == "code-assistant://output")
+            .filter_map(|(_, payload)| {
+                let stream = payload.get("stream")?.as_str()?.to_string();
+                let text = payload.get("text")?.as_str()?.to_string();
+                Some((stream, text))
+            })
+            .collect();
+
+        let stdout_text = outputs
+            .iter()
+            .filter(|(s, _)| s == "stdout")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        let thought_text = outputs
+            .iter()
+            .filter(|(s, _)| s == "thought")
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert_eq!(stdout_text, "我来写配置。配置完成。现在写 UI。");
+        assert_eq!(thought_text, "先看结构。继续分析。");
     }
 
     #[test]
