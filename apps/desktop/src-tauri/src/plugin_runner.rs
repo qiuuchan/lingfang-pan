@@ -28,6 +28,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use std::collections::HashMap;
 
@@ -547,7 +548,7 @@ pub fn start_plugin(
 
     // 依赖就绪，即将 spawn 入口进程 → 发 starting 阶段（前端切换到「启动中」动画）。
     emit_stage("starting", "正在启动插件进程…");
-    // detached spawn：Stdio::null（不捕获 stdout/stderr 进 UI，PRD 需求 9 明确「不在软件 UI 内嵌入终端输出」）。
+    // detached spawn：stdout null（GUI 输出不进 UI，PRD 需求 9），stderr piped（捕获崩溃异常）。
     // 子进程 cwd = 插件目录（让插件能读写自身 data/ 子目录等相对路径）。
     let mut command = std::process::Command::new(&binary);
     command
@@ -555,7 +556,7 @@ pub fn start_plugin(
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
     command.env_clear().envs(minimal_env());
     // Unix：setsid 建独立进程组（detached，stop_plugin 杀整组）。
@@ -580,14 +581,78 @@ pub fn start_plugin(
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|e| format!("启动插件进程失败：{e}"))?;
+    // 秒退判定：spawn 后短等待（800ms），若进程立即退出 = 崩溃，读 stderr 返回 plugin_crashed 错误。
+    // 正常 GUI 插件会一直运行（超时即放行）。捕获 stderr 让用户看到 Python/Node 异常而非「无法启动」。
+    if let Some(crash_err) = wait_for_crash(&mut child, Duration::from_millis(800)) {
+        // 崩溃：进程已退出，child drop 回收。返回 plugin_crashed: 前缀（前端 catch 显示 stderr + 一键修复）。
+        return Err(crash_err);
+    }
+    // 存活 = 正常运行：stderr pipe 交后台线程排空（防 pipe 满阻塞进程），读后丢弃不进 UI。
+    if let Some(mut stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = [0u8; 1024];
+            loop {
+                match stderr.read(&mut buf) {
+                    Ok(0) | Err(_) => break, // 进程退出或 pipe 关闭
+                    _ => { /* 丢弃，不进 UI */ }
+                }
+            }
+        });
+    }
     let started_at = now_iso();
     let pid = process_table.register(&plugin_id, child, started_at.clone());
     // 运行态仅存内存进程表（组A scan_plugin_status 经 process_table.is_running 合并判定 running，
     // 不落 DB——PRD 需求 2「状态不存 DB」，重启后所有插件从文件系统重判 ready）。
     Ok(StartPluginResult { pid, started_at })
+}
+
+/// spawn 后短等待判定进程是否秒退（崩溃）。
+/// - 退出 = 崩溃：读 stderr 全部内容，返回 `plugin_crashed:<status>\n<stderr 摘要>` 前缀错误。
+/// - 存活（超时未退）= 正常运行：返回 None（调用方继续注册进程表）。
+///
+/// 抽成纯函数便于单测（不依赖 tauri::State）。try_wait 轮询（非 wait 阻塞）避免阻塞 start_plugin 命令。
+pub(crate) fn wait_for_crash(child: &mut std::process::Child, timeout: Duration) -> Option<String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // 进程已退出 = 崩溃，读 stderr。
+                let stderr_text = child
+                    .stderr
+                    .take()
+                    .and_then(|mut s| {
+                        use std::io::Read;
+                        let mut buf = String::new();
+                        s.read_to_string(&mut buf).ok().map(|_| buf)
+                    })
+                    .unwrap_or_default();
+                let truncated = truncate_stderr(&stderr_text, 2000);
+                return Some(format!(
+                    "plugin_crashed:插件启动后立即退出（{status}）\n{truncated}"
+                ));
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    return None; // 存活超时 = 正常运行
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return None, // try_wait 异常，保守当正常运行（不误报崩溃）
+        }
+    }
+}
+
+/// 截断 stderr 到 max_chars 字符（超长加尾标），避免错误信息过长。
+fn truncate_stderr(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(max_chars).collect();
+    format!("{truncated}\n…(stderr 已截断，共 {} 字符)", s.chars().count())
 }
 
 /// 命令：停止插件独立进程（PRD AC5：可强制关闭）。
@@ -943,5 +1008,54 @@ mod tests {
         // 穿越 plugin_id 被 sanitize_plugin_id 拒绝（防 ../ 越出 plugins_root）。
         let err = delete_plugin_dir(&store, &table, "../escape").unwrap_err();
         assert!(err.contains("plugin_id") || err.contains("非法") || err.contains("不合法"));
+    }
+
+    // === wait_for_crash 测试 ===
+
+    #[test]
+    fn wait_for_crash_detects_immediate_exit() {
+        // 秒退进程：cmd /c exit 1（Windows）/ sh -c "exit 1"（Unix），立即退出。
+        let mut cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/c", "exit 1"]).stderr(Stdio::piped());
+            c
+        } else {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", "exit 1"]).stderr(Stdio::piped());
+            c
+        };
+        let mut child = cmd.spawn().expect("spawn 测试进程应成功");
+        let result = wait_for_crash(&mut child, Duration::from_millis(500));
+        assert!(result.is_some(), "秒退进程应被检测为崩溃");
+        let err = result.unwrap();
+        assert!(err.starts_with("plugin_crashed:"), "崩溃错误应含 plugin_crashed: 前缀");
+    }
+
+    #[test]
+    fn wait_for_crash_returns_none_for_long_running() {
+        // 存活进程：sleep 10（不会在 500ms 内退出）。
+        let mut cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/c", "ping -n 10 127.0.0.1 > nul"]).stderr(Stdio::piped());
+            c
+        } else {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", "sleep 10"]).stderr(Stdio::piped());
+            c
+        };
+        let mut child = cmd.spawn().expect("spawn 测试进程应成功");
+        let result = wait_for_crash(&mut child, Duration::from_millis(300));
+        assert!(result.is_none(), "存活进程不应判为崩溃");
+        // 清理测试进程。
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn truncate_stderr_long_text_is_cut() {
+        let long = "x".repeat(3000);
+        let t = truncate_stderr(&long, 100);
+        assert!(t.contains("已截断"), "超长 stderr 应截断并标注");
+        assert!(t.chars().count() < long.chars().count());
     }
 }

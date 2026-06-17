@@ -43,7 +43,7 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 }
 
 function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
-  const { setCurrentDraft, setView, setRunningPlugin, session } = useApp();
+  const { setCurrentDraft, setView, setRunningPlugin, session, setPendingAutoFixPrompt } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [srcDoc, setSrcDoc] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -62,6 +62,30 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
     && plugin.source === 'team'
     && (plugin.authorUserId === session.userId || session.role === 'TEAM_ADMIN')
     && Boolean(plugin.files?.length);
+
+  // 一键修复：运行崩溃时把 stderr 构造成 prompt，落盘 files + 跳创建器 + 设 pendingAutoFixPrompt
+  // 让创建器自动 send 给 AI 修。stderr 含 Python/Node 异常，AI 看到能定位修复。
+  async function handleAutoFix(stderr: string) {
+    try {
+      if (plugin.files?.length) {
+        await writePluginFiles(plugin.id, plugin.files);
+      }
+      setCurrentDraft({
+        id: plugin.id,
+        status: plugin.status || 'ready',
+        files: plugin.files || [],
+        turns: [],
+        diagnostics: [],
+        plugin_id: plugin.id,
+      });
+      // 构造修复 prompt：stderr + 引导语。创建器挂载后读 pendingAutoFixPrompt 自动 send。
+      setPendingAutoFixPrompt(`插件运行时报错，请定位并修复：\n\`\`\`\n${stderr}\n\`\`\`\n请修复问题并重新写出完整文件。`);
+      setRunningPlugin(null);
+      setView('home');
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    }
+  }
 
   async function editInGenerator() {
     setEditing(true);
@@ -137,6 +161,7 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
             runtime={runtime}
             previewKey={scriptPreviewKey}
             onRefresh={() => setScriptPreviewKey((k) => k + 1)}
+            onRequestFix={handleAutoFix}
           />
         </div>
       ) : runtime === 'cloud' ? (

@@ -17,7 +17,7 @@
 // 缺失解释器降级：两种模式都保留 probe 探测 + 安装指引（start/run 均依赖解释器存在）。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { PlayIcon, RefreshCwIcon, SquareIcon, TerminalIcon, Code2Icon, Loader2Icon, CheckIcon } from 'lucide-react';
+import { PlayIcon, RefreshCwIcon, SquareIcon, TerminalIcon, Code2Icon, Loader2Icon, CheckIcon, WandSparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -70,6 +70,7 @@ export function ScriptPreviewPanel({
   runtime,
   previewKey,
   onRefresh,
+  onRequestFix,
 }: {
   // 持久化目录下的插件 id（提供时走持久化独立进程运行；缺失时走创建期 sandbox 预览）。
   pluginId?: string;
@@ -77,6 +78,8 @@ export function ScriptPreviewPanel({
   runtime: ScriptRuntime;
   previewKey: number;
   onRefresh: () => void;
+  // 一键修复：plugin_crashed 时把 stderr 传回父组件（创建器）调 send 让 AI 修。无则不显示按钮。
+  onRequestFix?: (stderr: string) => void;
 }) {
   const [probe, setProbe] = useState<ProbeState>({ status: 'idle' });
   const [persistentRun, setPersistentRun] = useState<PersistentRunState>({ status: 'idle' });
@@ -173,6 +176,13 @@ export function ScriptPreviewPanel({
         setPersistentRun({
           status: 'error',
           error: toCreatorError('manifest_missing', new Error(message.slice('manifest_missing:'.length))),
+        });
+      } else if (message.startsWith('plugin_crashed:')) {
+        // 启动后秒退（插件代码异常）：展示 stderr + 一键修复按钮（onRequestFix 由父组件传入）。
+        const stderr = message.slice('plugin_crashed:'.length);
+        setPersistentRun({
+          status: 'error',
+          error: { ...toCreatorError('plugin_crashed', new Error(stderr)), raw: stderr },
         });
       } else {
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
@@ -326,7 +336,20 @@ export function ScriptPreviewPanel({
             </div>
           )}
           {persistentRun.status === 'error' && (
-            <ErrorBubble error={persistentRun.error} onRetry={persistentRun.error.retryable ? handleStart : undefined} />
+            <>
+              <ErrorBubble error={persistentRun.error} onRetry={persistentRun.error.retryable ? handleStart : undefined} />
+              {/* 一键修复：plugin_crashed 时把 stderr 传回创建器调 send 让 AI 修。仅持久化运行 + 有 onRequestFix 时显示。 */}
+              {persistentRun.error.kind === 'plugin_crashed' && onRequestFix && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onRequestFix(persistentRun.error.raw || '')}
+                >
+                  <WandSparklesIcon className="mr-1 size-3.5" />
+                  让 AI 修复
+                </Button>
+              )}
+            </>
           )}
 
           {/* pluginId 目录缺 manifest（创建期 AI 未产出 / temp 残留）：禁用运行 + 引导补全。 */}

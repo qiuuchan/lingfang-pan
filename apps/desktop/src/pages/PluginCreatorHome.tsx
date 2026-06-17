@@ -95,7 +95,7 @@ function pluginManifestSummary(plugin: LoadedPlugin): string {
 }
 
 export function PluginCreatorHome() {
-  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion } = useApp();
+  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
   // 平台缺口 Top7：环境就绪检测（CLI / 模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
   // loading=true 时不渲染横幅（避免首帧闪烁）；ready=false 时渲染并提示去设置。
   // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
@@ -246,6 +246,17 @@ export function PluginCreatorHome() {
     })();
     return () => { cancelled = true; };
   }, []);
+  // 一键修复：从 Plugins 页跳来时 pendingAutoFixPrompt 非空 → 填 input 并自动 send 给 AI 修。
+  // 用完即清（null），避免重复触发。等 currentDraft 就绪（落盘完成后）再 send。
+  useEffect(() => {
+    if (pendingAutoFixPrompt && currentDraft?.plugin_id) {
+      const prompt = pendingAutoFixPrompt;
+      setPendingAutoFixPrompt(null);
+      setInput(prompt);
+      void send(prompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoFixPrompt, currentDraft?.plugin_id]);
   // 问题1：智能滚动——仅当用户已贴近底部（或尚未手动向上滚）时才自动滚到底，
   // 用户向上翻看历史时新消息到来不打断（AionUi 标准模式）。
   const stickToBottomRef = useRef(true);

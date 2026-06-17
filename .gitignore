@@ -8,6 +8,9 @@ dist/
 apps/desktop/src-tauri/target/
 release/
 
+# 后端运行时上传目录（admin 发布管理上传的安装包，运行时产物不入仓）
+apps/collab-api/downloads/
+
 # 运行 / 测试产物
 night_runs/
 apps/collab-api/prisma/.generated/
