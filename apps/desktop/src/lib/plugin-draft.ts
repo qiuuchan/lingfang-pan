@@ -138,7 +138,7 @@ export function aggregateToolCards(segments: string[]): ToolCardView[] {
 //
 // 注意（DRAFT-03 / STREAM-01 修复）：本函数返回扁平化的问题数组，长度 = 所有 AskUserQuestion
 // 卡片的有效问题总数（单卡多问时 > 卡片数），与输入 cards 的下标不对齐。
-// 消费方（StreamingMessage）不应再按下标取值——改用 extractAskUserQuestionsForCard，
+// 消费方（例如 AssistantChat 的工具块）不应再按下标取值——改用 extractAskUserQuestionsForCard，
 // 按卡片就地解析该卡片承载的 questions，消除下标错配与单卡多问丢问的双重缺陷。
 export function extractAskUserQuestions(cards: ToolCardView[]): AskUserQuestion[] {
   const out: AskUserQuestion[] = [];
@@ -190,7 +190,7 @@ export function extractAskUserQuestions(cards: ToolCardView[]): AskUserQuestion[
 // DRAFT-03 / STREAM-01 修复：按单张卡片就地解析其承载的 AskUserQuestion questions。
 // 返回值与该卡片 1:1 对齐，不再受其它卡片（如前置的 Read/Write）下标错配影响，
 // 且天然支持「单卡多问」（Claude AskUserQuestion 工具 questions 字段官方 1-4 项数组）。
-// 卡片非 AskUserQuestion 或解析失败时返回空数组（普通工具渲染由 StreamingMessage 内 card.name 判定兜底）。
+// 卡片非 AskUserQuestion 或解析失败时返回空数组（普通工具渲染由输出块渲染层按 card.name 判定兜底）。
 export function extractAskUserQuestionsForCard(card: ToolCardView): AskUserQuestion[] {
   if (card.name !== 'AskUserQuestion' || !card.inputText) return [];
   const out: AskUserQuestion[] = [];
