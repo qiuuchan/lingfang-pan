@@ -50,6 +50,52 @@ Reference files:
 
 进程表 `PluginProcessTable`（`Arc<Mutex<HashMap<plugin_id, Child>>>`）记录 Child 句柄 + pid + started_at。**不落 DB**——重启后所有插件从文件系统重判 ready。`stop_plugin` 取出 Child → `kill_child_tree`（进程组/树 kill）→ `wait` 回收。
 
+### Scenario: Windows Process Tree Stop Uses Win32 APIs
+
+#### 1. Scope / Trigger
+- Trigger: changing `kill_child_tree`, `stop_plugin`, preview execution timeout cleanup, or tests that assert plugin process cleanup speed.
+
+#### 2. Signatures
+- `kill_child_tree(child: &std::process::Child)`
+- `stop_plugin(process_table, plugin_id) -> Result<(), String>`
+- `run_captured_inner(..., timeout_ms, ...) -> Result<CapturedOutput, String>`
+
+#### 3. Contracts
+- Windows process cleanup must not shell out to `taskkill`; it must enumerate child processes with ToolHelp and terminate via Win32 `TerminateProcess`.
+- Child processes must be terminated before the root process so inherited stdout/stderr pipe handles close promptly.
+- Unix keeps process-group semantics via `setsid` + `kill -TERM/-KILL -<pgid>`.
+
+#### 4. Validation & Error Matrix
+- direct child still alive after stop -> `process_table_stop_plugin_kills_running_process` must fail under the time assertion.
+- grandchild keeps stdout/stderr pipe open after preview timeout -> `timeout_kills_grandchild_process_tree` must fail or exceed 5 seconds.
+- missing process handle / already exited process -> best-effort terminate returns; caller `wait` remains the observable cleanup point.
+
+#### 5. Good/Base/Bad Cases
+- Good: Windows Node plugin `node -e "setInterval(...)"` stops in under 3 seconds.
+- Base: Unix long-running `sleep` process stops through the process group and `wait` returns.
+- Bad: `taskkill /F /PID <pid> /T` can block for roughly 60 seconds on Windows console-process chains, making tests and plugin stop sluggish.
+
+#### 6. Tests Required
+- `plugin_runner::tests::process_table_stop_plugin_kills_running_process` asserts stop latency under 3 seconds.
+- `plugin_script::tests::timeout_kills_infinite_loop` asserts preview timeout returns promptly.
+- `plugin_script::tests::timeout_kills_grandchild_process_tree` asserts grandchildren holding inherited pipes are terminated.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+```rust
+Command::new("taskkill").args(["/F", "/PID", &pid.to_string(), "/T"]).status();
+```
+
+Correct:
+```rust
+let child_pids = windows_child_pids(pid);
+for child_pid in child_pids {
+    kill_process_tree_windows(child_pid);
+}
+terminate_windows_process(pid);
+```
+
 启动阶段事件：`start_plugin` 在 `checking → deps_installing（按需）→ starting` 三阶段 emit `plugin:start-progress` 事件（`PluginStartProgress` payload），前端据此渲染分阶段进度动画。`needs_python_venv` / `needs_node_install` 探测是否真需装依赖，仅首次慢启动发安装阶段。
 
 Reference files:
