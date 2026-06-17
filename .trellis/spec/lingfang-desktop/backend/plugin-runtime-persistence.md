@@ -135,3 +135,19 @@ Reference files:
 - 软隔离：`sanitize_plugin_id` 段级白名单、路径不穿越 plugins_root、env 白名单、超时 kill（仅预览）、stdin=null。
 - 可逃逸：用户权限运行的脚本可执行 `fs.writeFile` / `child_process` / 网络请求（与本地直接 `node main.js` 等价风险）。
 - 后续独立大任务（TODO）：OS 级硬隔离（Windows AppContainer / Linux bubblewrap / macOS sandbox-exec）+ 新增 `script.node` / `script.python` capability kind，让本通道也走声明式授权。
+
+## temp 目录残留清理 + manifest 缺失友好处理（2026-06-17）
+
+创建期无 plugin_id 时用 `temp-<secs>-<nanos>` 建目录（main.rs），AI 会话失败/中断会留下空 temp 目录（无 manifest）。重启后草稿恢复 pluginId=temp-xxx 指向空目录，点运行报 os error 2「预览执行无法启动」。三层兜底：
+
+1. **启动清理空 temp 目录**（`plugin_store.rs` `PluginStore::new` 调 `cleanup_empty_temp_dirs`）：扫 `plugins_root/temp-*`，`read_dir().count()==0` 的用 `remove_dir`（非 `remove_dir_all`，只删空目录）删，错误忽略。files≥1 无 manifest 的 temp 保留（可能有产出，由前端引导）。
+2. **manifest 缺失友好错误**（`plugin_runner.rs` `parse_manifest`）：读 manifest 文件 `NotFound` 时返回 `manifest_missing:<引导文案>` 前缀（与 `interpreter_missing:` 同款前缀约定），前端 `ScriptPreviewPanel.handleStart` catch 该前缀 → `toCreatorError('manifest_missing')` 显示「插件未生成完成，继续对话补全」，而非裸 os error 2。
+3. **前端草稿恢复预防**（`ScriptPreviewPanel.syncRunState`）：持久化模式下 scan_plugin_status 返回 `incomplete`/`error` → `pluginIncomplete=true` → 禁用运行按钮 + ErrorBubble 引导。复用 PluginCreatorHome 已有的 scan useEffect（pluginId 变化即扫文件系统状态）。
+
+前缀约定：Rust 错误字符串用 `<code>:<人类可读>` 前缀（`interpreter_missing:` / `manifest_missing:`），前端 `startsWith` 识别后映射到 CreatorErrorKind，与 `creator-error.ts` 的 kind 表对齐。
+
+Reference files:
+- `apps/desktop/src-tauri/src/plugin_store.rs`（`cleanup_empty_temp_dirs`）
+- `apps/desktop/src-tauri/src/plugin_runner.rs`（`parse_manifest` 的 `manifest_missing:` 分支）
+- `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`pluginIncomplete` + `manifest_missing:` catch）
+- `apps/desktop/src/lib/creator-error.ts`（`manifest_missing` kind）
