@@ -19,6 +19,7 @@ import {
   parseStructuredPackage,
   parseTranscript,
   summarizeTitleLocally,
+  transcriptSegmentsSinceLastInput,
   transcriptTextSinceLastInput,
   validatePluginStructure,
 } from './plugin-draft';
@@ -902,6 +903,20 @@ describe('makeConversationDraft', () => {
     expect(typeof draft.id).toBe('string');
     expect(draft.id.length).toBeGreaterThan(0);
   });
+
+  it('可以把 assistant 分块一并写进 turn', () => {
+    const draft = makeConversationDraft('你好', '配置完成。', [
+      { stream: 'thought', text: '先确认结构。' },
+      { stream: 'stdout', text: '配置完成。' },
+      { stream: 'tool', text: 'Write {"path":"main.py"}' },
+    ]);
+    const assistant = draft.turns[1];
+    expect(assistant.segments).toEqual([
+      { stream: 'thought', text: '先确认结构。' },
+      { stream: 'stdout', text: '配置完成。' },
+      { stream: 'tool', text: 'Write {"path":"main.py"}' },
+    ]);
+  });
 });
 
 describe('mergeConversationTurn', () => {
@@ -1026,6 +1041,31 @@ describe('transcriptTextSinceLastInput', () => {
     expect(transcriptTextSinceLastInput(events, 'stdout')).toBe('能力回复'); // 新行为（本轮）
     // 关键：绝不串入历史轮次输出。
     expect(transcriptTextSinceLastInput(events, 'stdout')).not.toContain('你好回复');
+  });
+});
+
+describe('transcriptSegmentsSinceLastInput', () => {
+  function ev(event: string, payload: Record<string, unknown> = {}) {
+    return { at: '2026-06-13T00:00:00Z', event, payload };
+  }
+
+  it('只提取最近一轮 output，并保留 stdout/thought/tool/stderr 分类', () => {
+    const events = [
+      ev('input', { prompt: '第一轮' }),
+      ev('output', { stream: 'stdout', text: '旧回复' }),
+      ev('input', { prompt: '第二轮' }),
+      ev('output', { stream: 'thought', text: '分析。' }),
+      ev('output', { stream: 'stdout', text: '现在写配置：' }),
+      ev('output', { stream: 'tool', text: 'Write {"path":"main.py"}' }),
+      ev('output', { stream: 'stderr', text: 'warning' }),
+    ];
+
+    expect(transcriptSegmentsSinceLastInput(events)).toEqual([
+      { stream: 'thought', text: '分析。' },
+      { stream: 'stdout', text: '现在写配置：' },
+      { stream: 'tool', text: 'Write {"path":"main.py"}' },
+      { stream: 'stderr', text: 'warning' },
+    ]);
   });
 });
 

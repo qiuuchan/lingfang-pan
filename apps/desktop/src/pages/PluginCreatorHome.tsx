@@ -34,7 +34,9 @@ import {
   sessionToProbeResult,
   tailText,
   transcriptDiagnostics,
+  transcriptSegmentsSinceLastInput,
   transcriptTextSinceLastInput,
+  withLastAssistantSegments,
   writeRecent,
   type AskUserQuestion,
   type AssistantSessionRecord,
@@ -412,6 +414,7 @@ export function PluginCreatorHome() {
       // diagnostics 保持全量（transcriptDiagnostics），排障更全面。
       const stdout = transcriptTextSinceLastInput(events, 'stdout');
       const stderr = transcriptTextSinceLastInput(events, 'stderr');
+      const turnSegments = transcriptSegmentsSinceLastInput(events);
       const diagnostics = transcriptDiagnostics(events);
       const pending = pendingPromptRef.current;
       const currentSession = assistantSessionRef.current;
@@ -488,6 +491,7 @@ export function PluginCreatorHome() {
             result: probeResult,
           });
         }
+        nextDraft = withLastAssistantSegments(nextDraft, turnSegments);
         setCurrentDraft(nextDraft);
         setDetailsOpen(true);
       } else if (structured) {
@@ -503,6 +507,7 @@ export function PluginCreatorHome() {
             result: probeResult,
           });
         }
+        nextDraft = withLastAssistantSegments(nextDraft, turnSegments);
         setCurrentDraft(nextDraft);
         setDetailsOpen(true);
       } else {
@@ -511,8 +516,9 @@ export function PluginCreatorHome() {
         if (isFollowup && prevDraft) {
           nextDraft = mergeConversationTurn(prevDraft, promptText, assistantText);
         } else {
-          nextDraft = makeConversationDraft(promptText, assistantText);
+          nextDraft = makeConversationDraft(promptText, assistantText, turnSegments);
         }
+        nextDraft = withLastAssistantSegments(nextDraft, turnSegments);
         setCurrentDraft(nextDraft);
         // 不调 setDetailsOpen(true)——纯对话默认不弹右侧面板（AC1 关键）。
       }
@@ -931,6 +937,7 @@ export function PluginCreatorHome() {
       // 避免把历史轮次输出一并塞进草稿（问题5 修复一致性）。
       const stdout = transcriptTextSinceLastInput(events, 'stdout');
       const stderr = transcriptTextSinceLastInput(events, 'stderr');
+      const turnSegments = transcriptSegmentsSinceLastInput(events);
       const base = assistantSessionRef.current || assistantSession;
       // CREATOR-06：与 finalizeSession 一致——结构化解析依赖完整本轮 stdout（transcriptTextSinceLastInput
       // 已切本轮，不会跨轮累积），不受 tailText(12000) 截断影响。
@@ -962,7 +969,7 @@ export function PluginCreatorHome() {
         diagnostics: base?.diagnostics || [],
       };
       const probeResult = sessionToProbeResult({ ...rebuilt, stdout: fullStdout, stderr: fullStderr });
-      const draft = (currentDraft && currentDraft.turns.length > 0)
+      const draftBase = (currentDraft && currentDraft.turns.length > 0)
         ? mergeFollowupDraft(currentDraft, probeResult, promptText)
         : buildLocalDraft({
             prompt: promptText,
@@ -970,6 +977,7 @@ export function PluginCreatorHome() {
             model: rebuilt.model,
             result: probeResult,
           });
+      const draft = withLastAssistantSegments(draftBase, turnSegments);
       setCurrentDraft(draft);
       setPreviewKey((key) => key + 1);
       try {
@@ -1004,8 +1012,8 @@ export function PluginCreatorHome() {
     setNamingLoading(true);
     try {
       // AC1 用户命名：先把临时持久化目录 rename 成正式目录名（基于用户命名的 safePluginId），
-      // 并把用户命名写入 manifest.title（Rust rename_plugin_dir 的 title 参数一次完成）。
-      // rename 失败不阻断上传（降级：目录名仍为 temp_id，但 title 已进 uploadManifest，云端展示名仍正确）。
+      // 并把用户命名写入本地 manifest.title（Rust rename_plugin_dir 的 title 参数一次完成，仅落盘本地）。
+      // rename 失败不阻断上传（降级：目录名仍为 temp_id，但用户命名已写入 name 随上传，云端展示名仍正确）。
       const oldId = pluginIdRef.current;
       if (oldId) {
         const safeNew = safePluginId(name);
@@ -1015,13 +1023,26 @@ export function PluginCreatorHome() {
             setPluginId(renamed);
             pluginIdRef.current = renamed;
           } catch (e) {
-            // rename 失败（重名/权限/同名目录已存在）：仅 toast 提示，继续走上传（title 仍随 manifest 上传）。
+            // rename 失败（重名/权限/同名目录已存在）：仅 toast 提示，继续走上传（用户命名仍随 name 上传）。
             toast.error(`命名持久化目录失败：${(e as Error).message || e}（仍将以上传名展示）`);
           }
         }
       }
-      // 上传到后端（manifest 含用户命名的 name + title）。
-      const uploadManifest = { ...manifest, name, title: name };
+      // 上传到后端。manifest 仅携带后端 DTO 白名单认可的字段——
+      // title 是桌面壳纯本地概念（rename_plugin_dir 落盘 manifest.json，供本地展示名 title 优先回退），
+      // 后端 PluginManifestDto 未声明 title，全局 ValidationPipe forbidNonWhitelisted 会以
+      // `property title should not exist` 直接 400。故此处显式裁剪，不展开 ...manifest 误带 title。
+      // 云端展示名由 name 承载（用户命名已写入 name），不依赖 title。
+      const uploadManifest = {
+        id: manifest.id,
+        name,
+        version: manifest.version,
+        description: manifest.description,
+        runtime_type: manifest.runtime_type,
+        entry: manifest.entry,
+        visibility: manifest.visibility,
+        capabilities: manifest.capabilities,
+      };
       const result = await api<{ plugin: LoadedPlugin; deduplicated?: boolean }>('/api/plugins/upload', {
         method: 'POST',
         body: { manifest: uploadManifest, files },

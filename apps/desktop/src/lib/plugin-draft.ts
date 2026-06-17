@@ -1,6 +1,6 @@
 import { CapabilityKind, PluginManifest, RuntimeType, type CapabilityKind as CapabilityKindType, type PluginCapability } from '@lingfang/contract';
 import { classifyBlockInfo, type StructuredBlock } from '@/lib/plugin-creator-protocol';
-import type { DraftDiagnostic, DraftFile, DraftTurn, LoadedPlugin, PluginDraft } from '@/lib/types';
+import type { AssistantOutputStream, DraftDiagnostic, DraftFile, DraftTurn, LoadedPlugin, PluginDraft } from '@/lib/types';
 
 export const EXAMPLES = [
   '做一个番茄钟插件，可设置 25/45 分钟、暂停继续、完成后提醒',
@@ -359,6 +359,11 @@ export type TranscriptEvent = {
   payload?: Record<string, unknown>;
 };
 
+export interface TurnSegmentInput {
+  stream: AssistantOutputStream;
+  text: string;
+}
+
 export const STATUS_LABEL: Record<string, string> = {
   ready: '可上传',
   partial: '部分结果',
@@ -481,6 +486,42 @@ export function transcriptTextSinceLastInput(events: TranscriptEvent[], stream: 
     .map((event) => (typeof event.payload?.text === 'string' ? event.payload.text : ''))
     .join('')
     .trim();
+}
+
+export function transcriptSegmentsSinceLastInput(events: TranscriptEvent[]): TurnSegmentInput[] {
+  let lastInputIndex = -1;
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].event === 'input') lastInputIndex = i;
+  }
+  const start = lastInputIndex === -1 ? 0 : lastInputIndex + 1;
+  return compactTurnSegments(
+    events
+      .slice(start)
+      .filter((event) => event.event === 'output')
+      .flatMap((event) => {
+        const stream = event.payload?.stream;
+        const text = event.payload?.text;
+        if (!isAssistantOutputStream(stream) || typeof text !== 'string' || !text) return [];
+        return [{ stream, text }];
+      }),
+  );
+}
+
+function isAssistantOutputStream(value: unknown): value is AssistantOutputStream {
+  return value === 'stdout' || value === 'stderr' || value === 'thought' || value === 'tool';
+}
+
+function compactTurnSegments(segments: TurnSegmentInput[]): TurnSegmentInput[] {
+  const out: TurnSegmentInput[] = [];
+  for (const segment of segments) {
+    const last = out[out.length - 1];
+    if (last?.stream === segment.stream) {
+      last.text += segment.text;
+    } else {
+      out.push({ ...segment });
+    }
+  }
+  return out;
 }
 
 export function transcriptDiagnostics(events: TranscriptEvent[]) {
@@ -953,7 +994,12 @@ export function buildFallbackEntryHtml(input: { notes?: string; manifestName: st
 </html>`;
 }
 
-export function buildLocalDraft(input: { prompt: string; providerLabel: string; model: string; result: CliProbeResult }): PluginDraft {
+export function buildLocalDraft(input: {
+  prompt: string;
+  providerLabel: string;
+  model: string;
+  result: CliProbeResult;
+}): PluginDraft {
   const output = extractCliText(input.result);
   const id = `local-${input.result.tool}-${Date.now()}`;
   const pluginId = safePluginId(input.prompt);
@@ -1021,7 +1067,7 @@ export function buildLocalDraft(input: { prompt: string; providerLabel: string; 
     turns: [
       { role: 'user', content: input.prompt, at: now },
       // assistant 内容优先 notes（模型给用户的自然语言说明），其次 stdout 原文。
-      { role: 'assistant', content: parsed.notes || output || '本地 CLI 没有返回可展示内容。', at: now },
+      buildAssistantTurn(parsed.notes || output || '本地 CLI 没有返回可展示内容。', now),
     ],
     diagnostics: [
       // 只保留用户关心的 schema 结果（成功/失败原因）；session/命令/transcript 等工程排障信息
@@ -1140,7 +1186,10 @@ export function buildDraftFromSandboxFiles(input: {
     turns: [
       { role: 'user', content: input.prompt, at: now },
       // assistant 内容优先用 stdout（claude 写完文件后给用户的自然语言说明），其次固定文案。
-      { role: 'assistant', content: extractCliText(input.result) || '本地代码助手已把插件文件写入工作目录。', at: now },
+      buildAssistantTurn(
+        extractCliText(input.result) || '本地代码助手已把插件文件写入工作目录。',
+        now,
+      ),
     ],
     diagnostics: [
       // 只保留用户关心的 schema 结果（成功/失败原因）；session/命令/transcript 等工程排障信息
@@ -1182,28 +1231,40 @@ export function hasStructuredBlocks(rawText: string): boolean {
 // 生成单个纯对话 turn（user + assistant 一对）。
 // 与 makeConversationDraft/mergeConversationTurn 的差异：本函数仅产出 turn 数组，
 // 供调用方按需拼装（如 finalizeSession 纯对话态累积）。
-export function makeConversationTurn(userPrompt: string, assistantText: string): DraftTurn[] {
+export function makeConversationTurn(
+  userPrompt: string,
+  assistantText: string,
+  segments: TurnSegmentInput[] = [],
+): DraftTurn[] {
   const now = new Date().toISOString();
   return [
     { role: 'user', content: userPrompt, at: now },
-    { role: 'assistant', content: assistantText || '本地 CLI 没有返回可展示内容。', at: now },
+    buildAssistantTurn(assistantText, now, segments),
   ];
 }
 
 // 首轮纯对话态草稿：无 files/manifest，仅 turns=[u,a]，status='chat'（已完成对话，非"生成中"）。
-export function makeConversationDraft(userPrompt: string, assistantText: string): PluginDraft {
+export function makeConversationDraft(
+  userPrompt: string,
+  assistantText: string,
+  segments: TurnSegmentInput[] = [],
+): PluginDraft {
   return {
     id: `conversation-${Date.now()}`,
     status: 'chat',
     files: [],
-    turns: makeConversationTurn(userPrompt, assistantText),
+    turns: makeConversationTurn(userPrompt, assistantText, segments),
     diagnostics: [],
   };
 }
 
 // 追问纯对话态：在既有 draft 上累积 turns（normalizeTurns 去重），files 保持空。
 // prev.id 保持稳定（同一对话跨轮，不新开草稿）。
-export function mergeConversationTurn(prev: PluginDraft, userPrompt: string, assistantText: string): PluginDraft {
+export function mergeConversationTurn(
+  prev: PluginDraft,
+  userPrompt: string,
+  assistantText: string,
+): PluginDraft {
   const now = new Date().toISOString();
   return {
     ...prev,
@@ -1212,16 +1273,40 @@ export function mergeConversationTurn(prev: PluginDraft, userPrompt: string, ass
     turns: normalizeTurns([
       ...prev.turns,
       { role: 'user', content: userPrompt, at: now },
-      { role: 'assistant', content: assistantText || '本地 CLI 没有返回可展示内容。', at: now },
+      buildAssistantTurn(assistantText, now),
     ]),
     diagnostics: prev.diagnostics,
   };
 }
 
+function buildAssistantTurn(text: string, at: string, segments: TurnSegmentInput[] = []): DraftTurn {
+  const content = text || '本地 CLI 没有返回可展示内容。';
+  const cleaned = compactTurnSegments(segments).filter((segment) => segment.text.trim());
+  if (!cleaned.length) return { role: 'assistant', content, at };
+  return { role: 'assistant', content, at, segments: cleaned };
+}
+
+export function withLastAssistantSegments(draft: PluginDraft, segments: TurnSegmentInput[]): PluginDraft {
+  const cleaned = compactTurnSegments(segments).filter((segment) => segment.text.trim());
+  if (!cleaned.length) return draft;
+  for (let index = draft.turns.length - 1; index >= 0; index--) {
+    if (draft.turns[index].role !== 'assistant') continue;
+    const turns = draft.turns.map((turn, turnIndex) => (
+      turnIndex === index ? { ...turn, segments: cleaned } : turn
+    ));
+    return { ...draft, turns };
+  }
+  return draft;
+}
+
 // design §3.3.6 (e)：追问草稿合并——在既有 draft 上累积 turns，files/manifest 用追问产出（R2 解析）覆盖迭代，
 // R2 未产出时兜底保留 prev.files（保证追问即使结构化失败也能累积对话、不丢上轮文件）。
 // prev.id 保持稳定（同一插件跨轮迭代，不新开草稿）。
-export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, prompt: string): PluginDraft {
+export function mergeFollowupDraft(
+  prev: PluginDraft,
+  result: CliProbeResult,
+  prompt: string,
+): PluginDraft {
   const output = extractCliText(result);
   const now = new Date().toISOString();
 
@@ -1288,7 +1373,7 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
     turns: normalizeTurns([
       ...prev.turns,
       { role: 'user', content: prompt, at: now },
-      { role: 'assistant', content: parsed.notes || output || '本地 CLI 没有返回可展示内容。', at: now },
+      buildAssistantTurn(parsed.notes || output || '本地 CLI 没有返回可展示内容。', now),
     ]),
     diagnostics: [
       ...prev.diagnostics,
@@ -1304,7 +1389,12 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
 // 调用时机：追问 CLI exit 后，finalizeSession 先调 scanWorkspaceFiles；返回 manifest.json 即走本函数，
 // 否则回退到 mergeFollowupDraft（stdout 围栏块解析）或对话态。
 // prev.id 保持稳定（同一插件跨轮迭代，不新开草稿）。
-export function mergeFollowupDraftWithSandbox(prev: PluginDraft, result: CliProbeResult, prompt: string, sbFiles: SbFile[]): PluginDraft {
+export function mergeFollowupDraftWithSandbox(
+  prev: PluginDraft,
+  result: CliProbeResult,
+  prompt: string,
+  sbFiles: SbFile[],
+): PluginDraft {
   const output = extractCliText(result);
   const now = new Date().toISOString();
 
@@ -1375,7 +1465,7 @@ export function mergeFollowupDraftWithSandbox(prev: PluginDraft, result: CliProb
     turns: normalizeTurns([
       ...prev.turns,
       { role: 'user', content: prompt, at: now },
-      { role: 'assistant', content: output || '本地代码助手已更新插件文件。', at: now },
+      buildAssistantTurn(output || '本地代码助手已更新插件文件。', now),
     ]),
     diagnostics: [
       ...prev.diagnostics,

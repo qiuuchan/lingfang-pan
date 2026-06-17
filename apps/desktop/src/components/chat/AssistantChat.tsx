@@ -2,10 +2,12 @@ import { useMemo, type ReactNode } from 'react';
 import {
   AlertCircleIcon,
   BrainIcon,
+  CheckCircle2Icon,
   ChevronDownIcon,
   HelpCircleIcon,
   Loader2Icon,
   MessageSquareTextIcon,
+  CircleIcon,
   WrenchIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -79,6 +81,8 @@ function ChatOutputItemView({
       return <DiagnosticBlock text={item.text} />;
     case 'tool':
       return <ToolBlock item={item} askAnswering={askAnswering} onAskUserAnswer={onAskUserAnswer} />;
+    case 'progress':
+      return <ProgressBlock item={item} />;
     default:
       return null;
   }
@@ -94,9 +98,9 @@ function UserBubble({ text }: { text: string }) {
 
 function AssistantTextBlock({ text, live }: { text: string; live: boolean }) {
   return (
-    <div className="max-w-[82%] self-start rounded-lg border bg-card px-4 py-3 text-foreground">
+    <div className="max-w-[86%] self-start border-l border-border/80 pl-3 text-foreground">
       <OutputLabel icon={<MessageSquareTextIcon className="size-3.5" />} text={live ? 'AI 正在回复' : 'AI 回复'} />
-      <div className="mt-1.5">
+      <div className="mt-1.5 text-sm leading-7">
         <Markdown>{text}</Markdown>
       </div>
     </div>
@@ -106,15 +110,15 @@ function AssistantTextBlock({ text, live }: { text: string; live: boolean }) {
 function ReasoningBlock({ item }: { item: Extract<ChatOutputItem, { type: 'reasoning' }> }) {
   return (
     <details
-      className="group max-w-[82%] self-start rounded-lg border border-primary/15 bg-primary/5"
+      className="group max-w-[86%] self-start border-l border-primary/30 pl-3"
     >
-      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs font-medium text-primary/80 select-none">
+      <summary className="flex cursor-pointer items-center gap-2 py-1.5 text-xs font-medium text-primary/80 select-none">
         <BrainIcon className="size-3.5 shrink-0" />
         <span>{item.live ? 'AI 正在思考' : 'AI 思考'}</span>
         <span className="min-w-0 flex-1 truncate font-normal text-primary/55">{compactPreview(item.text)}</span>
         <ChevronDownIcon className="size-3.5 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="border-t border-primary/10 px-3 py-2">
+      <div className="py-2">
         <p className="whitespace-pre-wrap break-words font-mono text-xs italic text-muted-foreground">{item.text}</p>
       </div>
     </details>
@@ -123,9 +127,23 @@ function ReasoningBlock({ item }: { item: Extract<ChatOutputItem, { type: 'reaso
 
 function DiagnosticBlock({ text }: { text: string }) {
   return (
-    <div className="max-w-[82%] self-start rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs">
+    <div className="max-w-[86%] self-start border-l border-amber-500/40 pl-3 text-xs">
       <OutputLabel icon={<AlertCircleIcon className="size-3.5" />} text="检查结果" tone="warning" />
       <pre className="mt-1.5 whitespace-pre-wrap break-words font-mono text-muted-foreground">{text}</pre>
+    </div>
+  );
+}
+
+function ProgressBlock({ item }: { item: Extract<ChatOutputItem, { type: 'progress' }> }) {
+  const done = item.status === 'done';
+  return (
+    <div className="flex max-w-[86%] items-start gap-2 self-start pl-0.5 text-xs text-muted-foreground">
+      {done ? (
+        <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0 text-primary" />
+      ) : (
+        <CircleIcon className={cn('mt-1 size-2.5 shrink-0', item.live ? 'fill-primary text-primary' : 'text-muted-foreground/60')} />
+      )}
+      <span className={cn('min-w-0 break-words leading-5', done && 'text-foreground/80')}>{item.title}</span>
     </div>
   );
 }
@@ -144,16 +162,16 @@ function ToolBlock({
   }
   const inputDisplay = formatToolInput(item.argsText);
   return (
-    <details className="group max-w-[82%] self-start rounded-lg border bg-card text-xs">
-      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-muted-foreground select-none">
+    <details className="group max-w-[86%] self-start border-l border-border/80 pl-3 text-xs">
+      <summary className="flex cursor-pointer items-center gap-2 py-1.5 text-muted-foreground select-none">
         <WrenchIcon className="size-3.5 shrink-0" />
         <span className="shrink-0">工具调用</span>
-        <span className="min-w-0 truncate rounded bg-muted px-1 font-mono text-foreground/80">{item.name}</span>
+        <span className="min-w-0 truncate font-mono text-foreground/80">{item.name}</span>
         <ChevronDownIcon className="ml-auto size-3.5 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="border-t px-3 py-2">
+      <div className="py-2">
         {inputDisplay ? (
-          <pre className="scrollbar-thin max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{inputDisplay}</pre>
+          <pre className="scrollbar-thin max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-2 font-mono text-muted-foreground">{inputDisplay}</pre>
         ) : (
           <span className="text-muted-foreground/60">入参待输出</span>
         )}
@@ -172,7 +190,7 @@ function QuestionToolBlock({
   onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
 }) {
   return (
-    <div className="max-w-[82%] self-start rounded-lg border border-primary/25 bg-primary/5 px-3 py-2">
+    <div className="max-w-[86%] self-start border-l border-primary/40 pl-3">
       <OutputLabel icon={<HelpCircleIcon className="size-3.5" />} text={item.name || '工具调用'} tone="primary" />
       <div className="mt-2 divide-y divide-primary/10">
         {item.questions.map((question, index) => (
