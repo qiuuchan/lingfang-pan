@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-06-15
+- **Total Sessions**: 9
+- **Last Active**: 2026-06-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~291 | Active |
+| `journal-1.md` | ~324 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-06-17 | Collab MySQL Redis CDN loading optimization | `6fa10f8` | `main` |
 | 8 | 2026-06-15 | 平台完整交付（CLI注入+插件修复+文案+调研补齐+全仓库review） | `17c7f85`, `5079e37`, `2d0f6d3`, `d2d5aa5`, `4bee679` | `main` |
 | 7 | 2026-06-15 | 模型网关定稿 v3（单provider云分发+无provider UI） | `0516fdb`, 9f6d66 | `feat/settings-cli-runtime-model-gateway` |
 | 6 | 2026-06-14 | 模型网关重做（填key+Rust拉取模型）+ 检查更新修复 | `21cfcef`, `4f6f829`, `d08f006`, 9f6d66 | `feat/settings-cli-runtime-model-gateway` |
