@@ -74,6 +74,47 @@ Reference files:
 Reference files:
 - `apps/desktop/src-tauri/src/plugin_store.rs`（`scan_one_plugin` / `list_plugins` / `scan_plugin_status`）
 
+### Scenario: Local Plugin Identity Uses Directory Name
+
+#### 1. Scope / Trigger
+- Trigger: changing `scan_one_plugin`, local plugin deletion/start/read commands, or upload rename behavior.
+
+#### 2. Signatures
+- `scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta`
+- `PluginMeta.id: String`
+- Local file-system commands take `plugin_id` and resolve `plugins_root/<plugin_id>/`.
+
+#### 3. Contracts
+- `PluginMeta.id` must be the directory name passed as `plugin_id`, not `manifest.json.id`.
+- `manifest.json.id` remains required for manifest validity, but it is a declaration field only.
+- User upload rename can make directory `plugin_id` differ from manifest `id`; this is valid.
+
+#### 4. Validation & Error Matrix
+- manifest missing `id` or `name` -> `PluginStatus::Error`, but returned `PluginMeta.id` still equals directory `plugin_id`.
+- manifest `id` differs from directory name -> `PluginStatus::Ready` if entry exists, returned `PluginMeta.id` equals directory name.
+- invalid directory name -> skipped before `scan_one_plugin` via `sanitize_plugin_id`.
+
+#### 5. Good/Base/Bad Cases
+- Good: directory `ai-image`, manifest `id=ai-image-studio` -> UI actions use `ai-image`.
+- Base: directory and manifest id both `my-clock` -> UI actions use `my-clock`.
+- Bad: returning manifest `id` makes local delete/read/start target the wrong directory and can look successful while leaving files behind.
+
+#### 6. Tests Required
+- `plugin_store::tests::scan_id_uses_dir_name_not_manifest_id`
+- `plugin_store::tests::rename_and_title_writes_title_and_renames_dir`
+
+#### 7. Wrong vs Correct
+
+Wrong:
+```rust
+PluginMeta { id: manifest_id.to_string(), ... }
+```
+
+Correct:
+```rust
+PluginMeta { id: plugin_id.to_string(), ... }
+```
+
 ## 用户命名链路（AC1）
 
 插件名由用户在上传时命名（不自动取 manifest.name）：
