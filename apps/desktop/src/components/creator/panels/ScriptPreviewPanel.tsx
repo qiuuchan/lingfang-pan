@@ -83,6 +83,9 @@ export function ScriptPreviewPanel({
   const [previewRun, setPreviewRun] = useState<PreviewRunState>({ status: 'idle' });
   // 降级：用户主动选择「仍要预览源码」（不执行脚本，只读展示入口文件）。
   const [sourceView, setSourceView] = useState(false);
+  // 持久化模式下，pluginId 目录无 manifest（创建期 AI 未产出 / temp 残留）→ 禁用运行 + 引导补全。
+  // scan_plugin_status 返回 incomplete/error 即判定（ready/running 不拦）。
+  const [pluginIncomplete, setPluginIncomplete] = useState(false);
 
   const manifest = useMemo(() => parseManifest(files), [files]);
   const entryFile = useMemo(
@@ -117,6 +120,7 @@ export function ScriptPreviewPanel({
 
   // 组C：持久化模式下挂载时 + pluginId 变化时先 scan_plugin_status 同步当前运行态。
   // 用户从 Plugins 进入 Runner 时进程可能已在跑，据此回填 running 态。
+  // 同时检测 pluginId 目录是否缺 manifest（incomplete/error）→ pluginIncomplete 禁用运行 + 引导。
   const syncRunState = useCallback(async () => {
     if (!usePersistent) return;
     try {
@@ -125,8 +129,12 @@ export function ScriptPreviewPanel({
       if (current && current.status === 'running' && current.pid != null) {
         setPersistentRun({ status: 'running', pid: current.pid, startedAt: current.started_at || new Date().toISOString() });
       }
+      // incomplete（缺 manifest/入口）或 error（manifest 非法）→ 目录无效，禁用运行引导补全。
+      // running/ready/stopped 不拦（正常可运行）。
+      setPluginIncomplete(current?.status === 'incomplete' || current?.status === 'error');
     } catch {
       // scan 失败静默（Rust 未实现时降级，不阻断 probe + 运行）。
+      setPluginIncomplete(false);
     }
   }, [pluginId, usePersistent]);
 
@@ -159,6 +167,12 @@ export function ScriptPreviewPanel({
         setPersistentRun({
           status: 'error',
           error: fromRunResult({ ok: false, failure: 'interpreter_missing', stderr: message.slice('interpreter_missing:'.length) }),
+        });
+      } else if (message.startsWith('manifest_missing:')) {
+        // temp 目录空（AI 未产出 manifest）：引导继续对话补全，而非裸「预览执行无法启动」。
+        setPersistentRun({
+          status: 'error',
+          error: toCreatorError('manifest_missing', new Error(message.slice('manifest_missing:'.length))),
         });
       } else {
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
@@ -315,6 +329,11 @@ export function ScriptPreviewPanel({
             <ErrorBubble error={persistentRun.error} onRetry={persistentRun.error.retryable ? handleStart : undefined} />
           )}
 
+          {/* pluginId 目录缺 manifest（创建期 AI 未产出 / temp 残留）：禁用运行 + 引导补全。 */}
+          {pluginIncomplete && (
+            <ErrorBubble error={toCreatorError('manifest_missing', new Error('插件目录缺少 manifest.json，无法运行'))} />
+          )}
+
           {/* 运行/停止按钮分派（PRD AC5：可强制关闭） */}
           <div className="flex flex-wrap gap-2">
             {persistentRun.status === 'running' || persistentRun.status === 'stopping' ? (
@@ -322,7 +341,7 @@ export function ScriptPreviewPanel({
                 <SquareIcon className="size-3.5" />强制关闭
               </LoadingButton>
             ) : (
-              <LoadingButton loading={persistentRun.status === 'starting'} disabled={probe.status !== 'ready'} onClick={handleStart}>
+              <LoadingButton loading={persistentRun.status === 'starting'} disabled={probe.status !== 'ready' || pluginIncomplete} onClick={handleStart}>
                 <PlayIcon className="size-3.5" />运行
               </LoadingButton>
             )}

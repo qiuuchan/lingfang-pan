@@ -64,13 +64,20 @@ struct PluginManifest {
 /// - runtime_type 必须是 nodejs/python（client 由前端分流，不应进本通道）。
 /// - entry 缺省：python → main.py，nodejs → index.js（与 builtin 示例插件对齐）。
 /// - 解析失败（文件缺失/JSON 非法/runtime_type 非法）返回具体错误，供前端展示 error 状态。
+/// - 文件不存在（创建期 AI 会话失败/中断残留的空 temp 目录）返回 `manifest_missing:` 前缀，
+///   前端据此显示「未生成完成，继续对话补全」引导，而非裸 os error 2。
 fn parse_manifest(plugin_dir: &std::path::Path) -> Result<PluginManifest, String> {
     let manifest_path = plugin_dir.join("manifest.json");
     let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
-        format!(
-            "读取 manifest.json 失败（{}）：{e}",
-            manifest_path.display()
-        )
+        if e.kind() == std::io::ErrorKind::NotFound {
+            // 创建期 temp 目录空（AI 未产出 manifest）：结构化前缀，前端识别后引导重新生成。
+            "manifest_missing:插件未生成完成（缺少 manifest.json），请继续对话让 AI 补全或重新创建".to_string()
+        } else {
+            format!(
+                "读取 manifest.json 失败（{}）：{e}",
+                manifest_path.display()
+            )
+        }
     })?;
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("manifest.json 解析失败：{e}"))?;
@@ -719,7 +726,12 @@ mod tests {
     fn parse_manifest_rejects_missing_file() {
         let tmp = temp_dir_unique("manifest-missing");
         std::fs::create_dir_all(&tmp).unwrap();
-        assert!(parse_manifest(&tmp).is_err());
+        // 文件不存在返回 manifest_missing: 前缀（前端据此引导重新生成，而非裸 os error 2）。
+        let err = parse_manifest(&tmp).unwrap_err();
+        assert!(
+            err.starts_with("manifest_missing:"),
+            "缺 manifest 应返回 manifest_missing 前缀，实际：{err}"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
