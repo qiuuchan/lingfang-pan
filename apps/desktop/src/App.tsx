@@ -49,6 +49,10 @@ interface AppContextValue {
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
   bumpModelConfig: () => void;
+  // 一键修复跨页传递：Plugins 页运行崩溃 → 设 stderr prompt → 跳创建器 → 创建器读取并自动 send。
+  // 用完即清（null），无持久化必要。
+  pendingAutoFixPrompt: string | null;
+  setPendingAutoFixPrompt: (prompt: string | null) => void;
   // 云同步平台信息：platformName/logoUrl（GET /api/platform-info @Public），供侧栏 / 落地展示。
   // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
   platformName: string;
@@ -185,6 +189,8 @@ export default function App() {
   // 模型配置刷新信号：设置页保存绑定后 bumpModelConfig() 递增，PluginCreatorHome 依赖它重拉模型。
   const [modelConfigVersion, setModelConfigVersion] = useState(0);
   const bumpModelConfig = useCallback(() => setModelConfigVersion((v) => v + 1), []);
+  // 一键修复：Plugins 页设 stderr prompt，跳创建器后创建器读取并自动 send 给 AI 修。
+  const [pendingAutoFixPrompt, setPendingAutoFixPrompt] = useState<string | null>(null);
   // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
   // platformName 缺省 'LingFang'，logoUrl 缺省空串。admin 改名后全端拉同一值（侧栏 header 同步）。
   const [platformName, setPlatformName] = useState('LingFang');
@@ -374,6 +380,7 @@ export default function App() {
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
     modelConfigVersion, bumpModelConfig,
+    pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
   };
 

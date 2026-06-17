@@ -200,3 +200,28 @@ Reference files:
 - `apps/desktop/src/pages/Plugins.tsx`（`editInGenerator` 落盘）
 - `apps/desktop/src/components/creator/Composer.tsx`（@触发 + chip + `MentionPlugin` 类型）
 - `apps/desktop/src/pages/PluginCreatorHome.tsx`（`attachedPlugins`/`mentionablePlugins` state + `pluginManifestSummary` + send 拼接）
+
+## 插件崩溃展示 stderr + 一键 AI 修复（2026-06-17）
+
+插件运行（start_plugin）崩溃时，原 `Stdio::null` 丢弃 stderr，用户只看到「无法启动」看不到 Python/Node 异常。改进：
+
+### stderr 捕获 + 秒退判定（Rust）
+- `start_plugin` 的 stderr 改 `Stdio::piped`（stdout 保持 null，PRD 需求 9 不嵌终端）。
+- spawn 后 `wait_for_crash(child, 800ms)`（纯函数便于单测）轮询 `try_wait`：
+  - 退出 = 崩溃：读 stderr 全部内容，返回 `plugin_crashed:<status>\n<stderr 摘要>` 前缀错误（与 `manifest_missing:`/`interpreter_missing:` 同款前缀约定）。stderr 超 2000 字符截断（`truncate_stderr`）。
+  - 存活 = 正常：stderr pipe 交后台线程排空（防 pipe 满阻塞），读后丢弃不进 UI，register 进程表返回 pid。
+
+### 前端展示 + 一键修复
+- `ScriptPreviewPanel.handleStart` catch `plugin_crashed:` 前缀 → `toCreatorError('plugin_crashed')` 展示「插件启动后立即退出」+ stderr 原文。
+- 错误卡片加「让 AI 修复」按钮（仅 plugin_crashed + 有 onRequestFix 时）：调 `onRequestFix(stderr)`。
+- `Plugins.tsx handleAutoFix`：落盘 files + 跳创建器 + 设 `pendingAutoFixPrompt`（AppContext 跨页传递）。
+- `PluginCreatorHome` 挂载 effect 检测 `pendingAutoFixPrompt` + `currentDraft.plugin_id` 就绪 → 自动 `send(prompt)`（prompt = stderr + 修复引导语），用完即清。AI 在原上下文（落盘的 files）修代码、重写文件，用户再运行验证。
+
+前缀约定：Rust 错误字符串用 `<code>:<人类可读>` 前缀（`interpreter_missing:` / `manifest_missing:` / `plugin_crashed:`），前端 `startsWith` 识别后映射到 CreatorErrorKind。
+
+Reference files:
+- `apps/desktop/src-tauri/src/plugin_runner.rs`（`wait_for_crash` / `truncate_stderr` + start_plugin stderr piped）
+- `apps/desktop/src/lib/creator-error.ts`（`plugin_crashed` kind）
+- `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`plugin_crashed:` catch + 「让 AI 修复」按钮）
+- `apps/desktop/src/App.tsx`（`pendingAutoFixPrompt` 跨页 state）
+- `apps/desktop/src/pages/Plugins.tsx`（`handleAutoFix`）+ `PluginCreatorHome.tsx`（effect 自动 send）
