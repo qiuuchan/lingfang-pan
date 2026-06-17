@@ -203,7 +203,7 @@ pnpm -C apps/collab-api db:setup
 
 # 4. 启动服务（分别开终端）
 pnpm -C apps/collab-api dev      # collab-api  → :3000
-pnpm -C apps/collab-admin dev    # 管理端     → :4174
+pnpm -C apps/collab-admin dev    # 管理端     → :19005
 pnpm -C apps/desktop dev         # 桌面端     → Tauri 窗口
 ```
 
@@ -214,7 +214,7 @@ pnpm -C apps/desktop dev         # 桌面端     → Tauri 窗口
 | `http://localhost:3000` | collab-api（统一后端） |
 | `http://localhost:3000/api/docs` | Swagger 文档（生产关闭） |
 | `http://localhost:3000/api/platform-info` | 平台公开信息（免登录） |
-| `http://localhost:4174` | 管理后台 + 官网落地页（二合一） |
+| `http://localhost:19005` | 管理后台 + 官网落地页（二合一） |
 | `http://localhost:1420` | 桌面端 Vite dev server（Tauri devUrl） |
 
 ---
@@ -266,7 +266,7 @@ VITE_CDN_BASE_URL=https://cdn.example.cn/lingfang-admin/ VITE_API_BASE_URL=https
 ```
 
 > **注意**：`VITE_API_BASE_URL` 是生产后端地址（不含尾斜杠），如 `https://api.lingfang.com`。
-> 本地开发用 `pnpm -C apps/collab-admin dev`（:4174，自动连 localhost:3000）。
+> 本地开发用 `pnpm -C apps/collab-admin dev`（:19005，自动连 localhost:3000）。
 
 #### 2. 部署方式
 
@@ -308,7 +308,7 @@ server {
 
 ```bash
 # 用 serve / http-server / caddy 等任意静态文件服务器
-npx serve apps/collab-admin/dist -l 4174
+npx serve apps/collab-admin/dist -l 19005
 # 或
 pnpm -C apps/collab-admin preview   # Vite 内置 preview（开发用，不推荐生产）
 ```
@@ -400,7 +400,7 @@ lingfang-platform/
 | `REDIS_URL` | （空） | collab-api | `CACHE_DRIVER=redis` 时必填，如 `redis://127.0.0.1:6379/0` |
 | `JWT_SECRET` | `dev-collab-change-me` | collab-api | JWT 签名密钥（生产必设 ≥ 16 字符，否则 fail-fast） |
 | `JWT_EXPIRES_IN` | `7d` | collab-api | JWT 过期时间 |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:4174,http://localhost:1420,tauri://localhost,http://tauri.localhost,...` | collab-api | CORS 白名单（未配时 fail-close） |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:19005,http://localhost:1420,tauri://localhost,http://tauri.localhost,...` | collab-api | CORS 白名单（未配时 fail-close） |
 
 ### 平台管理员引导
 
@@ -426,7 +426,7 @@ lingfang-platform/
 
 - `tauri://localhost` —— Tauri 2 dev 模式 webview origin。
 - `http(s)://tauri.localhost` —— Tauri 2 打包后 release origin（Windows 默认）。
-- 官网落地页已与管理后台合并为 `apps/collab-admin`（同源 `:4174`），无需额外跨域配置。
+- 官网落地页已与管理后台合并为 `apps/collab-admin`（同源 `:19005`），无需额外跨域配置。
 - 生产部署时追加管理端域名（如 `https://admin.example.com`）。
 
 数据库与反向代理详见 [`docs/collab-deployment.md`](docs/collab-deployment.md)。

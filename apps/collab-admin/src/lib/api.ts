@@ -27,7 +27,7 @@ export function setToken(next: string | null) {
 }
 
 export function apiBase() {
-  return import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_COLLAB_API_BASE || 'http://localhost:3000';
+  return import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_COLLAB_API_BASE || 'http://localhost:19006';
 }
 
 // ADMIN-06 修复：通用请求超时（30s）。

@@ -16,5 +16,5 @@ WORKDIR /app
 # 使用 serve 作为轻量静态文件服务器，避免 pnpm workspace 依赖
 RUN npm install -g serve
 COPY --from=build /app/apps/collab-admin/dist ./dist
-EXPOSE 4174
-CMD ["serve", "dist", "-l", "4174"]
+EXPOSE 19005
+CMD ["serve", "dist", "-l", "19005"]
