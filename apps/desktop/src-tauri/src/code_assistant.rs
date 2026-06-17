@@ -20,6 +20,16 @@ fn lock_or_recover<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
+#[cfg(test)]
+static PROCESS_TREE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn process_tree_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    PROCESS_TREE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
@@ -1105,15 +1115,18 @@ impl ClaudeStreamJsonState {
         let mut next_tools = Vec::new();
         let mut out = Vec::new();
         for item in items {
-            self.push_snapshot_item(item, &mut SnapshotPush {
-                out: &mut out,
-                next_tools: &mut next_tools,
-                tool_index: &mut tool_index,
-                text_delta: &text_delta,
-                thinking_delta: &thinking_delta,
-                emitted_text: &mut emitted_text,
-                emitted_thinking: &mut emitted_thinking,
-            });
+            self.push_snapshot_item(
+                item,
+                &mut SnapshotPush {
+                    out: &mut out,
+                    next_tools: &mut next_tools,
+                    tool_index: &mut tool_index,
+                    text_delta: &text_delta,
+                    thinking_delta: &thinking_delta,
+                    emitted_text: &mut emitted_text,
+                    emitted_thinking: &mut emitted_thinking,
+                },
+            );
         }
         if !next_tools.is_empty() {
             self.tool_snapshots = next_tools;
@@ -1215,7 +1228,10 @@ fn snapshot_suffix(previous: &str, current: &str) -> String {
     }
 }
 
-fn delta_tool_snapshot(previous: Option<&ToolSnapshot>, current: &ToolSnapshot) -> Option<StreamItem> {
+fn delta_tool_snapshot(
+    previous: Option<&ToolSnapshot>,
+    current: &ToolSnapshot,
+) -> Option<StreamItem> {
     if let Some(previous) = previous {
         if previous.name == current.name && current.input_json.starts_with(&previous.input_json) {
             let suffix = current.input_json[previous.input_json.len()..].to_string();
@@ -1783,7 +1799,7 @@ fn stop_child_process(mut child: Child) {
 /// 仅向子进程及其子孙进程发送终止信号（不 wait 回收）。
 /// 供 run_captured_inner 超时分支复用：发完 kill 后立即 wait_with_output 回收 stdout/stderr。
 /// - Unix：kill -TERM -<pgid> → 等 → kill -KILL -<pgid>（spawn 时 setsid 已建独立进程组）。
-/// - Windows：taskkill /PID <pid> /T → 等 → taskkill /F /PID <pid> /T（递归杀进程树）。
+/// - Windows：taskkill /F /PID <pid> /T（递归强杀进程树）。
 ///
 /// pub(crate) 供 cli_installer::cancel_install 复用（杀 winget 子进程组，AC4 安装可取消）。
 pub(crate) fn kill_child_tree(child: &Child) {
@@ -1811,15 +1827,12 @@ pub(crate) fn kill_child_tree(child: &Child) {
     #[cfg(windows)]
     {
         let pid = child.id();
-        // 先温和终止整棵进程树，等不到再强杀。
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T"])
-            .creation_flags(0x0800_0000)
-            .status();
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Windows 对 Node/cmd 进程树的非 /F taskkill 常返回“只能强制终止”，并额外拖慢超时回收。
         let _ = Command::new("taskkill")
             .args(["/F", "/PID", &pid.to_string(), "/T"])
             .creation_flags(0x0800_0000)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
     }
 }
@@ -2956,7 +2969,9 @@ mod tests {
 
         let deadline = Instant::now() + std::time::Duration::from_secs(2);
         loop {
-            let transcript = store.read_transcript("snapshot-session").unwrap_or_default();
+            let transcript = store
+                .read_transcript("snapshot-session")
+                .unwrap_or_default();
             if transcript
                 .lines()
                 .filter(|l| l.contains("\"event\":\"output\""))
