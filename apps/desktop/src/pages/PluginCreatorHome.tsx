@@ -14,6 +14,7 @@ import {
   writeActiveId,
 } from '@/lib/conversations';
 import { toCreatorError, toUploadError, type CreatorError } from '@/lib/creator-error';
+import { yuanToCents } from '@/lib/money';
 import {
   EXAMPLES,
   PROVIDERS,
@@ -1048,12 +1049,15 @@ export function PluginCreatorHome() {
   // 流程重构：上传时弹命名 Dialog，用户确认插件名后才上传。
   const [namingOpen, setNamingOpen] = useState(false);
   const [namingValue, setNamingValue] = useState('');
+  // 上传期设价（需求4）：命名 Dialog 同时填定价，留空=免费（0）。后端 upload DTO 接受 priceCents。
+  const [namingPriceYuan, setNamingPriceYuan] = useState('');
   const [namingLoading, setNamingLoading] = useState(false);
 
   /** 上传按钮点击：先弹命名 Dialog。 */
   function uploadCloud() {
     if (!files.length) return;
     setNamingValue(manifest.name || '');
+    setNamingPriceYuan('');
     setNamingOpen(true);
   }
 
@@ -1061,6 +1065,15 @@ export function PluginCreatorHome() {
   async function doUpload() {
     const name = namingValue.trim();
     if (!name) return toast.error('请填写插件名称');
+    // 上传期设价（需求4）：留空=免费（0），非空用 yuanToCents 转分（非法格式抛错 toast 拦截）。
+    let priceCents = 0;
+    if (namingPriceYuan.trim()) {
+      try {
+        priceCents = yuanToCents(namingPriceYuan);
+      } catch (e) {
+        return toast.error((e as Error).message || '定价格式非法');
+      }
+    }
     setNamingLoading(true);
     try {
       // AC1 用户命名：先把临时持久化目录 rename 成正式目录名（基于用户命名的 safePluginId），
@@ -1097,7 +1110,7 @@ export function PluginCreatorHome() {
       };
       const result = await api<{ plugin: LoadedPlugin; deduplicated?: boolean }>('/api/plugins/upload', {
         method: 'POST',
-        body: { manifest: uploadManifest, files },
+        body: { manifest: uploadManifest, files, priceCents },
       });
       const plugin = { ...result.plugin, files, manifest: uploadManifest, source: 'team' as const };
       setCloudPlugin(plugin);
@@ -1395,6 +1408,15 @@ export function PluginCreatorHome() {
               placeholder="如：我的番茄钟"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && !namingLoading && doUpload()}
+            />
+            {/* 上传期设价（需求4）：留空=免费，填价后上传的插件 priceCents 为该值。 */}
+            <Label htmlFor="plugin-price-input">定价（元，留空=免费）</Label>
+            <Input
+              id="plugin-price-input"
+              value={namingPriceYuan}
+              onChange={(e) => setNamingPriceYuan(e.target.value)}
+              placeholder="0 表示免费"
+              inputMode="decimal"
             />
           </div>
           <DialogFooter>

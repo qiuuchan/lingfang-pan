@@ -25,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { SearchIcon, SettingsIcon, ToggleLeftIcon, ToggleRightIcon, LayersIcon, PencilIcon, ArchiveIcon, Trash2Icon } from 'lucide-react';
+import { SearchIcon, SettingsIcon, ToggleLeftIcon, ToggleRightIcon, LayersIcon, PencilIcon, ArchiveIcon, Trash2Icon, CheckCircleIcon, XCircleIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useGuardedAction, useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid, ActionBar } from '@/components/shared';
@@ -297,8 +297,12 @@ function PluginDetailSheet({
   const capabilities = normalizeCapabilities(plugin?.capabilities);
   // 下架为资金/上架状态类操作，前端用防重入守卫避免双击重复触发（与余额调整同模式）。
   const [delistBusy, delistGuard] = useGuardedAction();
+  // 驳回 Dialog：PENDING 插件驳回时填原因（通知作者）。
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   return (
+    <>
     <DetailSheet
       open={!!plugin}
       onOpenChange={onOpenChange}
@@ -336,6 +340,34 @@ function PluginDetailSheet({
             </Button>
             {plugin.marketplace ? (
               <PluginDelistDialog plugin={plugin} busy={delistBusy} onConfirm={delistGuard} onRefresh={onRefresh} />
+            ) : null}
+            {/* 审核通过/驳回：仅 PENDING 显示。后端 POST /api/admin/plugins/:id/approve|reject。 */}
+            {plugin.reviewStatus === 'PENDING' ? (
+              <>
+                <Button
+                  variant="default"
+                  className="flex-1"
+                  disabled={false}
+                  onClick={() => {
+                    void run(
+                      () => api(`/api/admin/plugins/${plugin.id}/approve`, { method: 'POST' }).then(onRefresh),
+                      '已通过审核',
+                    );
+                  }}
+                >
+                  <CheckCircleIcon className="mr-1 size-4" />
+                  通过审核
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  disabled={false}
+                  onClick={() => { setRejectReason(''); setRejectOpen(true); }}
+                >
+                  <XCircleIcon className="mr-1 size-4" />
+                  驳回
+                </Button>
+              </>
             ) : null}
             <PluginAdminDeleteDialog plugin={plugin} onRefresh={onRefresh} />
           </div>
@@ -423,6 +455,41 @@ function PluginDetailSheet({
         </>
       ) : null}
     </DetailSheet>
+    {/* 驳回原因 Dialog：PENDING 插件驳回时填原因（通知作者）。 */}
+    <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>驳回插件</DialogTitle>
+          <DialogDescription>填写驳回原因，作者会收到通知并可修改后重新提交。</DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+          placeholder="如：功能不完整 / 违反平台规范 / 需补充说明"
+          rows={4}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setRejectOpen(false)}>取消</Button>
+          <Button
+            variant="destructive"
+            disabled={!rejectReason.trim()}
+            onClick={() => {
+              void run(
+                () =>
+                  api(`/api/admin/plugins/${plugin!.id}/reject`, {
+                    method: 'POST',
+                    body: { reason: rejectReason.trim() },
+                  }).then(() => { setRejectOpen(false); return onRefresh(); }),
+                '已驳回',
+              );
+            }}
+          >
+            确认驳回
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 
