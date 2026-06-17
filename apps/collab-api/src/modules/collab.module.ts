@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { AppCacheService, CacheService } from '../cache.service';
 import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 import { GeetestService } from './geetest.service';
@@ -34,6 +35,6 @@ import { MeService } from './me.service';
   // 故 MailService / GeetestService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到它们。
   // NotificationService 无外部依赖（仅 PrismaService），被 AdminService/EconomyService 注入以在审核/购买成功后埋点触发通知。
   // GiteeChangelogService 被 SettingsService（缓存失效钩子）与 ChangelogController 注入，需在此提供。
-  providers: [PrismaService, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService, LlmService, EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService],
+  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService, LlmService, EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService],
 })
 export class CollabModule {}
