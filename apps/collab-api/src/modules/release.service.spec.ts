@@ -227,6 +227,8 @@ describe('ReleaseService', () => {
       orderBy: { updatedAt: 'desc' },
     }));
     expect(result.releases).toHaveLength(2);
+    expect(result.releases[0].status).toBe('DRAFT');
+    expect(result.releases[1].status).toBe('ARCHIVED');
     expect(result.releases[1].assets).toHaveLength(1);
   });
 

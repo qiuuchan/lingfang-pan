@@ -124,7 +124,7 @@ export class ReleaseService {
       orderBy: { updatedAt: 'desc' },
       include: { assets: { orderBy: [{ platform: 'asc' }, { arch: 'asc' }] } },
     });
-    return { releases: releases.map((r) => this.publicRelease(r, r.assets)) };
+    return { releases: releases.map((r) => this.adminReleaseWithAssets(r, r.assets)) };
   }
 
   // === 平台 Admin 写方法 ===
@@ -360,6 +360,14 @@ export class ReleaseService {
       publishedAt: release.publishedAt ? release.publishedAt.toISOString() : null,
       createdAt: release.createdAt.toISOString(),
       updatedAt: release.updatedAt.toISOString(),
+    };
+  }
+
+  /** Admin 列表出参：在 adminRelease 基础上保留产物，供管理页按 status 渲染操作按钮。 */
+  private adminReleaseWithAssets(release: Release, assets: ReleaseAsset[]) {
+    return {
+      ...this.adminRelease(release),
+      assets: assets.map((a) => this.publicAsset(a)),
     };
   }
 
