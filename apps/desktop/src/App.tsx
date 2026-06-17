@@ -45,6 +45,10 @@ interface AppContextValue {
   // 受控的 Settings 页 Tab（供新手任务清单「去设置 → 模型服务」等定向跳转）。
   settingsTab: 'cli' | 'gateway' | 'backend';
   setSettingsTab: (tab: 'cli' | 'gateway' | 'backend') => void;
+  // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
+  // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
+  modelConfigVersion: number;
+  bumpModelConfig: () => void;
   // 云同步平台信息：platformName/logoUrl（GET /api/platform-info @Public），供侧栏 / 落地展示。
   // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
   platformName: string;
@@ -178,6 +182,9 @@ export default function App() {
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
   // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway' 再 setView('settings')。
   const [settingsTab, setSettingsTab] = useState<'cli' | 'gateway' | 'backend'>('cli');
+  // 模型配置刷新信号：设置页保存绑定后 bumpModelConfig() 递增，PluginCreatorHome 依赖它重拉模型。
+  const [modelConfigVersion, setModelConfigVersion] = useState(0);
+  const bumpModelConfig = useCallback(() => setModelConfigVersion((v) => v + 1), []);
   // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
   // platformName 缺省 'LingFang'，logoUrl 缺省空串。admin 改名后全端拉同一值（侧栏 header 同步）。
   const [platformName, setPlatformName] = useState('LingFang');
@@ -366,6 +373,7 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
+    modelConfigVersion, bumpModelConfig,
     platformName, platformLogoUrl,
   };
 

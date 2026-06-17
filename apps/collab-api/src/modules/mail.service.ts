@@ -108,13 +108,13 @@ export class MailService {
    *  - smtpUrl 非法（解析失败）返回 null，调用方按「未配置」降级 console.log。
    */
   private async buildTransporter(cfg: SmtpConfig): Promise<Transporter | null> {
-    const url = cfg.smtpUrl;
-    if (!url) return null;
+    const normalized = normalizeSmtpUrl(cfg.smtpUrl);
+    if (!normalized) return null;
     let parsed: URL;
     try {
-      parsed = new URL(url);
+      parsed = new URL(normalized);
     } catch {
-      console.error('[mail.smtp_url_invalid]', { url });
+      console.error('[mail.smtp_url_invalid]', { url: cfg.smtpUrl });
       return null;
     }
     const isSmtps = parsed.protocol === 'smtps:';
@@ -305,6 +305,25 @@ interface SmtpConfigCache {
 
 /** SMTP + 品牌配置查询的 PlatformSetting key 白名单（一次 findMany 全取，避免发一封信查两次库）。 */
 const CONFIG_KEYS = ['smtpUrl', 'smtpFrom', 'smtpUser', 'smtpPass', 'platformName', 'logoUrl'] as const;
+
+/**
+ * 归一化 SMTP URL：裸地址自动补协议头，确保 new URL 能正确解析。
+ *
+ * admin 后台 placeholder 引导填裸地址（如 `smtpdm.aliyun.com:465`），但 new URL 会把首段
+ * 当 scheme 解析失败。此函数按端口推断协议：465→smtps（TLS 直连），其余→smtp（STARTTLS），
+ * 无端口默认 smtps+465。已带协议头的原样返回。
+ *
+ * 抽成纯函数（无副作用）便于单测覆盖各边界，buildTransporter 复用。
+ */
+export function normalizeSmtpUrl(raw: string): string {
+  const url = raw.trim();
+  if (!url) return '';
+  if (/^[a-z][a-z0-9+\-.]*:\/\//i.test(url)) return url;
+  const hasPort = /:\d+$/.test(url);
+  const port = hasPort ? Number(url.match(/:(\d+)$/)?.[1]) : 465;
+  const scheme = port === 465 ? 'smtps' : 'smtp';
+  return hasPort ? `${scheme}://${url}` : `smtps://${url}:465`;
+}
 
 /** SMTP 配置缓存 TTL（毫秒）。
  *  邮件低频场景，TTL 兜底过期防「admin 改了配置但忘了清缓存」；正常路径由 updateSettings 手动失效。 */
