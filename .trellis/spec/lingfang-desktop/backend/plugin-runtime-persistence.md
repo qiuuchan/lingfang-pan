@@ -36,6 +36,56 @@ Reference files:
 - **Node**：`ensure_node_dependencies` 有 `package.json` + 非空依赖 + `node_modules` 缺失 → `pnpm install`（回退 `npm install`，600s）→ `pnpm start`（回退 `npm start` / `node entry`）。
 - **HTML**：`read_local_plugin_file` 读取 entry HTML → iframe srcDoc 渲染。iframe 去 `allow-same-origin` 形成 opaque origin，防越权访问 parent.__TAURI__/localStorage。
 
+### Scenario: Python Interpreter Discovery On Windows
+
+#### 1. Scope / Trigger
+- Trigger: changing `plugin_script::probe_script_runtime`, Python preview execution, or PATH binary discovery shared with code assistant CLI helpers.
+
+#### 2. Signatures
+- `probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, String>`
+- `find_binaries(candidate: &str) -> Vec<PathBuf>`
+- `run_plugin_script(app, input) -> Result<RunResult, String>`
+
+#### 3. Contracts
+- Python candidates on Windows are checked in order: `py`, `python`, `python3`.
+- For each candidate name, probe must enumerate every matching executable on `PATH`, not only the first path entry.
+- A candidate is available only after `--version` exits with code `0` and does not look like a Microsoft Store stub.
+- If `py.exe` exists but forwards to a broken WindowsApps interpreter and exits `101`, probe must continue to later `python.exe` candidates.
+
+#### 4. Validation & Error Matrix
+- `py.exe` exists but exits non-zero -> continue probing later `python` / `python3`.
+- WindowsApps Store stub emits "was not found" or "Microsoft Store" -> reject as unavailable.
+- no verified Python candidate -> return `ProbeResult { available: false, hint: Some(...) }`.
+- verified Python candidate -> use that exact `binary_path` for preview execution.
+
+#### 5. Good/Base/Bad Cases
+- Good: `py.exe` broken, `G:\AnConda\python.exe` later on PATH works; Python preview uses Anaconda and exits 0.
+- Base: `py.exe --version` works; probe uses `py.exe`.
+- Bad: `find_binary("py")` returns the first `py.exe`; preview runs it without validation and script exits 101.
+
+#### 6. Tests Required
+- `code_assistant::tests::find_binaries_in_path_keeps_later_matches`
+- `plugin_script::tests::store_stub_output_is_detected`
+- `plugin_script::tests::run_python_hello_script_if_available`
+- `plugin_script::tests::python_plugin_chinese_and_cross_dir_import`
+
+#### 7. Wrong vs Correct
+
+Wrong:
+```rust
+let binary = find_binary("py").unwrap();
+run_capture_with_env(&binary, args, None, 5_000, minimal_env())?;
+```
+
+Correct:
+```rust
+for binary in find_binaries("py") {
+    if probe_binary(&binary).is_available() {
+        return Ok(binary);
+    }
+}
+```
+
 Reference files:
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`start_plugin` / `stop_plugin` / `ensure_python_venv` / `ensure_node_dependencies`）
 - `apps/desktop/src/pages/Plugins.tsx`（runtime 分流 + RunnerBody iframe）

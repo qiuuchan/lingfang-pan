@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PanelRightOpenIcon, SparklesIcon, XIcon, EyeIcon, WandSparklesIcon, HistoryIcon, AlertTriangleIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, apiBase, getAuthToken, tauriInvoke, tauriListen } from '@/lib/api';
+import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import {
   deleteConversation,
   listConversations,
@@ -13,12 +12,8 @@ import {
   scanWorkspaceFiles,
   writeActiveId,
 } from '@/lib/conversations';
-import { toCreatorError, toUploadError, type CreatorError } from '@/lib/creator-error';
-import { yuanToCents } from '@/lib/money';
+import { toCreatorError, type CreatorError } from '@/lib/creator-error';
 import {
-  EXAMPLES,
-  PROVIDERS,
-  STATUS_LABEL,
   buildDraftFromSandboxFiles,
   buildLocalDraft,
   hasStructuredBlocks,
@@ -30,7 +25,6 @@ import {
   parseManifest,
   parseTranscript,
   providerLabel,
-  readRecent,
   resolveSendModel,
   sessionToProbeResult,
   tailText,
@@ -38,7 +32,6 @@ import {
   transcriptSegmentsSinceLastInput,
   transcriptTextSinceLastInput,
   withLastAssistantSegments,
-  writeRecent,
   type AskUserQuestion,
   type AssistantSessionRecord,
   type AssistantSessionState,
@@ -55,44 +48,14 @@ import {
 } from '@/lib/plugin-draft';
 import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
 import type { LoadedPlugin } from '@/lib/types';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { LoadingButton } from '@/components/loading-button';
-import { cn } from '@/lib/utils';
 import { useEnvReadiness } from '@/lib/env-readiness';
-import { dragRegionProps } from '@/lib/window-drag';
-import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
-import { ErrorBubble } from '@/components/chat/ErrorBubble';
-import { AssistantChat } from '@/components/chat/AssistantChat';
-import { Composer } from '@/components/creator/Composer';
-import { loadPlugins } from './plugins-runtime';
-import { ConversationRail } from '@/components/creator/ConversationRail';
-import { DetailsPanel } from '@/components/creator/DetailsPanel';
-import { PreviewDrawer } from '@/components/creator/PreviewDrawer';
+import { PluginCreatorLayout } from '@/components/creator/PluginCreatorLayout';
+import { UploadNamingDialog } from '@/components/creator/UploadNamingDialog';
+import { buildCliConfig, promptWithAttachedPlugins } from '@/lib/plugin-creator/session-helpers';
+import { canConvertConversationToDraft, lastTurnContent } from '@/lib/plugin-creator/turns';
+import { useCurrentPluginStatus, useLatestRef, useMentionablePlugins, usePluginUpload, useProviderCatalog, useStickyChatScroll } from './plugin-creator/hooks';
 // 组C：插件名用户命名（PRD 需求 1）+ 动态状态从文件系统扫描（PRD 需求 2）。
 import { safePluginId } from '@/lib/plugin-draft';
-import {
-  scanPluginStatus,
-  STATUS_DISPLAY,
-  STATUS_VARIANT,
-  type LocalPluginStatus,
-} from '@/lib/plugin-status';
-
-/** 从 LoadedPlugin 的 files 解析 manifest 摘要（@引用时拼进 prompt 让 AI 参考）。 */
-function pluginManifestSummary(plugin: LoadedPlugin): string {
-  const manifestFile = plugin.files?.find((f) => f.path === 'manifest.json');
-  if (!manifestFile) return `${plugin.name}（无 manifest）`;
-  try {
-    const m = JSON.parse(manifestFile.content);
-    const caps = Array.isArray(m.capabilities) ? m.capabilities.map((c: { kind?: string }) => c.kind).filter(Boolean).join('/') : '';
-    return `${m.runtime_type || 'client'}, entry=${m.entry || 'ui/index.html'}${caps ? `, capabilities: ${caps}` : ''}`;
-  } catch {
-    return `${plugin.name}（manifest 解析失败）`;
-  }
-}
 
 export function PluginCreatorHome() {
   const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
@@ -106,13 +69,7 @@ export function PluginCreatorHome() {
   // 上传时弹命名 Dialog，用户填名后 rename_plugin_dir 改正式目录名。
   const [pluginId, setPluginId] = useState<string | null>(null);
   const pluginIdRef = useRef<string | null>(null);
-  // 组C（PRD 需求 2）：插件状态从文件系统动态扫描（pluginId 命中持久化目录时才有意义）。
-  // null=未扫描/无 pluginId；LocalPluginStatus=当前插件的真实状态（ready/incomplete/error/running）。
-  const [pluginStatus, setPluginStatus] = useState<LocalPluginStatus | null>(null);
-  const [provider, setProvider] = useState(PROVIDERS[0].id);
-  // R1 model 初始空串：模型清单由运行时双源合并填充（PROVIDERS.models 已置空），首次拉取后 effect 自动 setModel。
-  const [model, setModel] = useState<string>(PROVIDERS[0].models[0] || '');
-  const [providers, setProviders] = useState(PROVIDERS);
+  const { provider, setProvider, model, setModel, providers, providerInfo, hasAvailableCliRef } = useProviderCatalog(modelConfigVersion);
   // R2 思考强度：随每轮 send 传（start_session + send_input 都带，可会话中途调）。默认 medium。
   const [effort, setEffort] = useState<EffortLevel>('medium');
   const [streaming, setStreaming] = useState(false);
@@ -127,7 +84,7 @@ export function PluginCreatorHome() {
   const [liveStage, setLiveStage] = useState('');
   const [liveError, setLiveError] = useState<CreatorError | null>(null);
   const [assistantSession, setAssistantSession] = useState<AssistantSessionState | null>(null);
-  const assistantSessionRef = useRef<AssistantSessionState | null>(null);
+  const assistantSessionRef = useLatestRef(assistantSession);
   // design §3.1.3 / §3.2：listener 守卫改按 activeId 路由。
   // CREATOR-13 清理：assistantSessionIdRef 此前声明并写入但全仓库无任何读取点
   // （所有路由守卫实际用 activeIdRef.current），是迁移遗留的死代码。已删除，路由职责由 activeIdRef 单独承担。
@@ -144,7 +101,7 @@ export function PluginCreatorHome() {
   // design §3.2.4：多会话 store。metas 由 list_sessions 一次拉取；activeId 决定当前渲染的会话与草稿。
   const [metas, setMetas] = useState<ConversationMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const activeIdRef = useRef<string | null>(null);
+  const activeIdRef = useLatestRef(activeId);
   // 多轮运行态（design §3.3.6 (a)）：multiturnMode 标记当前会话续接能力。
   // native=claude 已捕获 session id（Rust 已回写 SessionRecord.cli_session_id 并走 --resume）；
   // degraded=codex/opencode 或 claude 未捕获 id（历史摘要伪多轮）。
@@ -152,23 +109,17 @@ export function PluginCreatorHome() {
   const [multiturnMode, setMultiturnMode] = useState<'native' | 'degraded' | null>(null);
   const [activeFile, setActiveFile] = useState('');
   const [previewKey, setPreviewKey] = useState(0);
-  const [uploading, setUploading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [cloudPlugin, setCloudPlugin] = useState<LoadedPlugin | null>(null);
   // B 聊天引用插件：@触发选中的插件列表（id + name + manifest 摘要），send 时拼进 prompt 让 AI 参考。
   const [attachedPlugins, setAttachedPlugins] = useState<Array<{ id: string; name: string; summary: string }>>([]);
-  // B @触发可选的插件（team + 本地合并），Composer Popover 用。
-  const [mentionablePlugins, setMentionablePlugins] = useState<Array<{ id: string; name: string; summary: string }>>([]);
+  const mentionablePlugins = useMentionablePlugins();
   // 最近插件只写 localStorage（供「插件」页读取），创建页不再展示，故无 state。
-  const chatRef = useRef<HTMLDivElement>(null);
   // 修复：finalizeSession 在 exit listener（useEffect 闭包）里调用，捕获的 currentDraft 是注册时的旧值，
   // 导致追问时读到 null → 走 makeConversationDraft 只产本轮 turn，老对话丢失。用 ref 跟踪最新值。
-  const currentDraftRef = useRef(currentDraft);
-  useEffect(() => { currentDraftRef.current = currentDraft; }, [currentDraft]);
+  const currentDraftRef = useLatestRef(currentDraft);
 
-  const providerInfo = providers.find((item) => item.id === provider) || providers[0];
   const turns = normalizeTurns(currentDraft?.turns);
   const files = currentDraft?.files || [];
+  const pluginStatus = useCurrentPluginStatus(pluginId, streaming, files.length);
   const manifest = useMemo(() => parseManifest(files), [files]);
   const status = currentDraft?.status;
   const diagnostics = currentDraft?.diagnostics || [];
@@ -179,73 +130,33 @@ export function PluginCreatorHome() {
   // design §3.3.2：预览按钮启用条件——当前会话有结构化草稿（files 非空）。
   // 纯对话态（files 空，status='generating'）不点亮，避免点开空预览。
   const hasDraft = Boolean(currentDraft?.files.length);
-
-  // 从后端拉取真实工具/模型列表，覆盖前端 fallback，避免前后端两份硬编码漂移。
-  // 修复 H5：追踪后端是否报告过至少一个可用 CLI。若全 unavailable（用户未装任何 CLI），
-  // send 入口拦截，避免发起注定失败的 start_session（此前仅 env-readiness 横幅提示但非阻断）。
-  const hasAvailableCliRef = useRef<boolean | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    // R1 模型来源：只用「模型服务里拉取并保存的上游模型」（binding.modelOverride + active-provider.defaultModels）。
-    // 不再并入本地 CLI 预填模型（sonnet/opus/gpt-5.5 等 CLI 内置默认值），因为用户未主动配置、且可能与上游模型混淆。
-    // provider（claude/codex/opencode）骨架仍由本地 CLI 探测提供（决定 send 调哪个 CLI），但每个 provider 的 models 只填上游模型。
-    Promise.all([
-      tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean; models?: string[] }>>('code_assistant_list_tools'),
-      api<{ defaultModels?: string[] } | null>('/api/llm/active-provider').catch(() => null),
-      api<{ binding?: { modelOverride?: string[] | null } } | null>('/api/llm/binding').catch(() => null),
-    ])
-      .then(([tools, activeProvider, binding]) => {
-        if (cancelled) return;
-        // provider 骨架：本地已装 CLI（仅取 id/label，不取其内置 models）。
-        const cliProviders = (tools || [])
-          .filter((t) => t.available)
-          .map((t) => ({
-            id: String(t.tool),
-            label: String(t.display_name || t.tool),
-            models: [] as string[],
-          }));
-        // 上游模型（用户在模型服务里拉取保存的）：binding.modelOverride 优先，fallback activeProvider.defaultModels。
-        const upstreamModels = Array.from(new Set([
-          ...((binding?.binding?.modelOverride) || []),
-          ...((activeProvider?.defaultModels) || []),
-        ])).filter(Boolean);
-        // 每个 provider 的 models 只填上游模型（不并入 CLI 预填）。
-        const baseProviders = cliProviders.length ? cliProviders : PROVIDERS;
-        const merged = baseProviders.map((p) => ({ ...p, models: [...upstreamModels] }));
-        hasAvailableCliRef.current = cliProviders.length > 0;
-        if (merged.length) setProviders(merged);
-      })
-      .catch(() => { /* fallback 到 PROVIDERS，hasAvailableCliRef 保持 null 不阻断 */ });
-    return () => { cancelled = true; };
-    // 依赖 modelConfigVersion：设置页保存/删除模型绑定后 bump，这里重拉生效模型，无需重启应用。
-  }, [modelConfigVersion]);
-  useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
-  // B 聊天引用：拉 team 插件 + 本地插件作 @可选列表（manifest 摘要供 send 时拼接）。
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const [teamRes, localItems] = await Promise.all([
-        loadPlugins().catch(() => ({ plugins: [] as LoadedPlugin[], error: '' })),
-        scanPluginStatus().catch(() => []),
-      ]);
-      if (cancelled) return;
-      // team 插件：source=team（自己上传的），从 files 解析 manifest 摘要。
-      const team = teamRes.plugins
-        .filter((p) => p.source === 'team')
-        .map((p) => ({ id: p.id, name: p.name, summary: pluginManifestSummary(p) }));
-      // 本地插件：scan 扫描的（含 temp/正式），用 scan 的 manifest 字段。
-      const local = localItems.map((item) => ({
-        id: item.id,
-        name: item.name,
-        summary: `${item.runtime || 'client'}, entry=${item.entry || 'ui/index.html'}`,
-      }));
-      // 去重（team 插件可能也在本地）：按 id 优先 team。
-      const seen = new Set<string>();
-      const merged = [...team, ...local].filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
-      setMentionablePlugins(merged);
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const {
+    uploading,
+    submitting,
+    cloudPlugin,
+    setCloudPlugin,
+    namingOpen,
+    namingValue,
+    namingPriceYuan,
+    namingLoading,
+    setNamingOpen,
+    setNamingValue,
+    setNamingPriceYuan,
+    uploadCloud,
+    doUpload,
+    submitMarketplace,
+    runPlugin,
+  } = usePluginUpload({
+    files,
+    manifest,
+    tenantId: session.tenantId,
+    pluginIdRef,
+    setPluginId,
+    setRunningPlugin,
+    setView,
+    setLiveError,
+  });
+  const { chatRef, handleChatScroll } = useStickyChatScroll([turns.length, liveSegments, pendingUser]);
   // 一键修复：从 Plugins 页跳来时 pendingAutoFixPrompt 非空 → 填 input 并自动 send 给 AI 修。
   // 用完即清（null），避免重复触发。等 currentDraft 就绪（落盘完成后）再 send。
   useEffect(() => {
@@ -257,55 +168,12 @@ export function PluginCreatorHome() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAutoFixPrompt, currentDraft?.plugin_id]);
-  // 问题1：智能滚动——仅当用户已贴近底部（或尚未手动向上滚）时才自动滚到底，
-  // 用户向上翻看历史时新消息到来不打断（AionUi 标准模式）。
-  const stickToBottomRef = useRef(true);
-  const handleChatScroll = () => {
-    const el = chatRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distance < 80; // 距底 80px 内视为"贴底"
-  };
-  useEffect(() => {
-    if (stickToBottomRef.current) {
-      chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight });
-    }
-  }, [turns.length, liveSegments, pendingUser]);
-  useEffect(() => { assistantSessionRef.current = assistantSession; }, [assistantSession]);
-  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   // CREATOR-11 修复：listener effect 此前依赖 [provider, model]，会被 list_tools 异步覆盖 providers
   // 后触发的 model 变更重新挂载。重挂窗口内到达的 exit 事件丢失 → finalizeSession 永不执行、streaming 永久 true。
   // 用 ref 读取 provider/model，让 listener 只挂载一次（依赖稳定量 tenantId）。
-  const providerRef = useRef(provider);
-  useEffect(() => { providerRef.current = provider; }, [provider]);
-  const modelRef = useRef(model);
-  useEffect(() => { modelRef.current = model; }, [model]);
+  const providerRef = useLatestRef(provider);
+  const modelRef = useLatestRef(model);
   useEffect(() => { if (files.length && !files.find((file) => file.path === activeFile)) setActiveFile(files[0].path); }, [files, activeFile]);
-
-  // 组C（PRD 需求 2 / AC2）：插件状态从文件系统动态扫描。
-  // pluginId 命中持久化目录时调 scan_plugin_status 拿当前插件的真实状态（ready/incomplete/error/running）。
-  // 顶部状态 Badge 显示 pluginStatus.status（优先于 currentDraft.status，反映文件系统真相）。
-  // 流式进行中（streaming）也重扫（AI 正在写文件，状态可能从 incomplete→ready 动态变化）。
-  useEffect(() => {
-    if (!pluginId) {
-      setPluginStatus(null);
-      return;
-    }
-    let cancelled = false;
-    const scan = async () => {
-      try {
-        const items = await scanPluginStatus();
-        if (cancelled) return;
-        const current = items.find((item) => item.id === pluginId);
-        setPluginStatus(current ?? null);
-      } catch {
-        // scan 失败静默（Rust 组A 未实现时降级，不阻断创建流程；顶部状态回退到草稿状态）。
-        if (!cancelled) setPluginStatus(null);
-      }
-    };
-    void scan();
-    return () => { cancelled = true; };
-  }, [pluginId, streaming, files.length]);
 
   // design §3.2：挂载时拉取会话列表 + 从 localStorage 恢复 activeId。
   // 恢复后若该 activeId 有效，加载其 draft 并重建 assistantSession 供历史渲染。
@@ -649,13 +517,6 @@ export function PluginCreatorHome() {
     }
   }
 
-  function pushRecent(plugin: LoadedPlugin) {
-    // 仅落 localStorage（供「插件」页读取），创建页不展示最近列表。
-    const prev = readRecent(session.tenantId);
-    const next = [plugin, ...prev.filter((item) => item.id !== plugin.id)];
-    writeRecent(session.tenantId, next.slice(0, 8));
-  }
-
   // 最近一次发起的 prompt 快照，错误后不清空，供 ErrorBubble 的「重试」复用。
   const lastPromptRef = useRef<string | null>(null);
 
@@ -668,16 +529,6 @@ export function PluginCreatorHome() {
     setPendingUser(null);
     pendingPromptRef.current = null;
     isFollowupRef.current = false;
-  }
-
-  // CLI 配置注入（task 06-15）：把当前登录态的 backendUrl + authToken 传给 Rust，
-  // Rust 内部调 decrypt/active-provider 拿 apiKey + apiUrl 生成 CLI 隔离配置（key 不进前端，AC8）。
-  // 未登录或无后端地址时返回 undefined（Rust 侧降级为不注入，CLI 走默认配置，AC4）。
-  function buildCliConfig() {
-    const backendUrl = apiBase();
-    const authToken = getAuthToken();
-    if (!backendUrl || !authToken) return undefined;
-    return { backendUrl, authToken };
   }
 
   // 流程重构：创建期不传 pluginId，Rust 侧用 session_id 自动生成临时持久化目录。
@@ -752,12 +603,8 @@ export function PluginCreatorHome() {
     }
     // B 聊天引用：attachedPlugins 非空时把 manifest 摘要拼进 prompt 前，让 AI 参考被引用插件。
     // 最多 5 个（防 prompt 过长）；拼完清空引用（每轮独立，不跨轮累积）。
-    let text = rawText;
-    if (attachedPlugins.length > 0) {
-      const refs = attachedPlugins.slice(0, 5).map((p) => `- ${p.name}（${p.summary}）`).join('\n');
-      text = `[引用插件参考]\n${refs}\n[/引用插件参考]\n${rawText}`;
-      setAttachedPlugins([]);
-    }
+    const text = promptWithAttachedPlugins(rawText, attachedPlugins);
+    if (attachedPlugins.length > 0) setAttachedPlugins([]);
     setInput('');
     setPendingUser(text);
     setLiveSegments([]);
@@ -909,7 +756,6 @@ export function PluginCreatorHome() {
     // 流程重构：切会话时清空 pluginId/状态。
     setPluginId(null);
     pluginIdRef.current = null;
-    setPluginStatus(null);
     try {
       const draftRaw = await readDraft(id);
       const parsed = draftRaw ? JSON.parse(draftRaw) : null;
@@ -1010,12 +856,7 @@ export function PluginCreatorHome() {
       // 修复 CREATOR-12：promptText 回退此前取首个 user turn（turns.find），多轮下应取最后一个 user turn，
       // 与 transcriptTextSinceLastInput（取最后一个 input 之后）的「最近一轮」语义对齐。
       // 否则恢复历史纯对话会话后点「转为草稿」会把首轮 prompt 当本轮 user turn 追加（归因错误 + 重复 user turn）。
-      const lastUserTurn = (() => {
-        for (let i = turns.length - 1; i >= 0; i--) {
-          if (turns[i].role === 'user') return turns[i].content;
-        }
-        return undefined;
-      })();
+      const lastUserTurn = lastTurnContent(turns, 'user');
       const promptText = pendingPromptRef.current?.text || lastPromptRef.current || lastUserTurn || '插件';
       // 重建完整 AssistantSessionState（强制定义解析所需的全部字段，避免 null 展开）。
       // 显示层 stdout/stderr 仍走 tailText（内存保护）；probeResult 用完整本轮 stdout。
@@ -1057,109 +898,6 @@ export function PluginCreatorHome() {
     }
   }
 
-  // 流程重构：上传时弹命名 Dialog，用户确认插件名后才上传。
-  const [namingOpen, setNamingOpen] = useState(false);
-  const [namingValue, setNamingValue] = useState('');
-  // 上传期设价（需求4）：命名 Dialog 同时填定价，留空=免费（0）。后端 upload DTO 接受 priceCents。
-  const [namingPriceYuan, setNamingPriceYuan] = useState('');
-  const [namingLoading, setNamingLoading] = useState(false);
-
-  /** 上传按钮点击：先弹命名 Dialog。 */
-  function uploadCloud() {
-    if (!files.length) return;
-    setNamingValue(manifest.name || '');
-    setNamingPriceYuan('');
-    setNamingOpen(true);
-  }
-
-  /** 命名确认后实际执行上传。 */
-  async function doUpload() {
-    const name = namingValue.trim();
-    if (!name) return toast.error('请填写插件名称');
-    // 上传期设价（需求4）：留空=免费（0），非空用 yuanToCents 转分（非法格式抛错 toast 拦截）。
-    let priceCents = 0;
-    if (namingPriceYuan.trim()) {
-      try {
-        priceCents = yuanToCents(namingPriceYuan);
-      } catch (e) {
-        return toast.error((e as Error).message || '定价格式非法');
-      }
-    }
-    setNamingLoading(true);
-    try {
-      // AC1 用户命名：先把临时持久化目录 rename 成正式目录名（基于用户命名的 safePluginId），
-      // 并把用户命名写入本地 manifest.title（Rust rename_plugin_dir 的 title 参数一次完成，仅落盘本地）。
-      // rename 失败不阻断上传（降级：目录名仍为 temp_id，但用户命名已写入 name 随上传，云端展示名仍正确）。
-      const oldId = pluginIdRef.current;
-      if (oldId) {
-        const safeNew = safePluginId(name);
-        if (safeNew && safeNew !== oldId) {
-          try {
-            const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId: safeNew, title: name });
-            setPluginId(renamed);
-            pluginIdRef.current = renamed;
-          } catch (e) {
-            // rename 失败（重名/权限/同名目录已存在）：仅 toast 提示，继续走上传（用户命名仍随 name 上传）。
-            toast.error(`命名持久化目录失败：${(e as Error).message || e}（仍将以上传名展示）`);
-          }
-        }
-      }
-      // 上传到后端。manifest 仅携带后端 DTO 白名单认可的字段——
-      // title 是桌面壳纯本地概念（rename_plugin_dir 落盘 manifest.json，供本地展示名 title 优先回退），
-      // 后端 PluginManifestDto 未声明 title，全局 ValidationPipe forbidNonWhitelisted 会以
-      // `property title should not exist` 直接 400。故此处显式裁剪，不展开 ...manifest 误带 title。
-      // 云端展示名由 name 承载（用户命名已写入 name），不依赖 title。
-      const uploadManifest = {
-        id: manifest.id,
-        name,
-        version: manifest.version,
-        description: manifest.description,
-        runtime_type: manifest.runtime_type,
-        entry: manifest.entry,
-        visibility: manifest.visibility,
-        capabilities: manifest.capabilities,
-      };
-      const result = await api<{ plugin: LoadedPlugin; deduplicated?: boolean }>('/api/plugins/upload', {
-        method: 'POST',
-        body: { manifest: uploadManifest, files, priceCents },
-      });
-      const plugin = { ...result.plugin, files, manifest: uploadManifest, source: 'team' as const };
-      setCloudPlugin(plugin);
-      pushRecent(plugin);
-      setNamingOpen(false);
-      toast.success(result.deduplicated ? '团队共享中已有相同插件' : '已上传到团队共享');
-    } catch (error) {
-      const creatorError = toUploadError(error, 'upload');
-      setLiveError(creatorError);
-      toast.error(creatorError.title);
-    } finally {
-      setNamingLoading(false);
-    }
-  }
-
-  async function submitMarketplace() {
-    if (!cloudPlugin) return toast.error('先上传到团队共享');
-    setSubmitting(true);
-    try {
-      const result = await api<{ plugin: LoadedPlugin }>(`/api/plugins/${cloudPlugin.id}/submit-marketplace`, { method: 'POST', body: { priceCents: 0 } });
-      const plugin = { ...cloudPlugin, ...result.plugin, source: 'team' as const };
-      setCloudPlugin(plugin);
-      pushRecent(plugin);
-      toast.success('已提交插件市场审核');
-    } catch (error) {
-      const creatorError = toUploadError(error, 'submit');
-      setLiveError(creatorError);
-      toast.error(creatorError.title);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function runPlugin(plugin: LoadedPlugin) {
-    setRunningPlugin(plugin);
-    setView('plugins');
-  }
-
   // design §3.2.6：新建对话——清空当前运行态与草稿视图，首条消息落库后自动成为新会话。
   function newDraft() {
     setCurrentDraft(null);
@@ -1182,260 +920,93 @@ export function PluginCreatorHome() {
     // 流程重构：重置 pluginId + 动态状态。新对话不再关联上一插件的持久化目录。
     setPluginId(null);
     pluginIdRef.current = null;
-    setPluginStatus(null);
   }
 
-  // 问题4：转草稿按钮显示条件——仅当「当前会话无 draft 且是最后一条 assistant turn」时显示。
-  // 历史 assistant 轮次不显示（避免每条气泡都有按钮），已有 draft（hasDraft=true）不显示，
-  // 流式进行中不显示（本轮尚未产出，末条 assistant 实为上轮，显示会误导）。
-  const lastAssistantIndex = (() => {
-    for (let i = turns.length - 1; i >= 0; i--) {
-      if (turns[i].role === 'assistant') return i;
-    }
-    return -1;
-  })();
-  const showConvertAction = Boolean(activeId) && !hasDraft && !streaming && lastAssistantIndex !== -1;
+  const showConvertAction = canConvertConversationToDraft({ activeId, hasDraft, streaming, turns });
 
   return (
-    <div className="flex h-full">
-      {/* 问题2：历史记录改为顶部「历史」按钮触发的悬浮窗（Popover），不再用左侧固定栏。 */}
-      {/* 布局从三栏（rail|对话|详情）收敛为两栏（对话|详情），腾出宽度给对话区。 */}
-      <div className="flex h-full min-w-0 flex-1 flex-col">
-        {/* 侧边栏折叠按钮已上移到 TitleBar，此处不再需要 pl-16 避让。 */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-            <SparklesIcon className="size-4 shrink-0 text-primary" />
-            <span className="shrink-0">插件创建</span>
-            {/* AI 总结的当前会话标题（首轮后自动生成），显示在「插件创建」旁。 */}
-            {activeConversationTitle && (
-              <>
-                <span className="text-muted-foreground/50">/</span>
-                <span className="truncate text-muted-foreground">{activeConversationTitle}</span>
-              </>
-            )}
-            {/* 需求 3（状态读文件系统）：状态优先显示 scan_plugin_status 扫描结果（ready/incomplete/error/running），
-                反映插件持久化目录的真实文件状态——AI 写完文件即实时判定，不依赖转草稿。
-                仅当无 pluginId（纯对话/未关联目录）时回退到草稿解析态 status。 */}
-            {(() => {
-              if (pluginStatus) {
-                const variant = STATUS_VARIANT[pluginStatus.status];
-                return <Badge variant={variant}>{STATUS_DISPLAY[pluginStatus.status]}</Badge>;
-              }
-              if (status) {
-                return <Badge variant={status === 'ready' ? 'default' : status === 'invalid' ? 'destructive' : 'secondary'}>{STATUS_LABEL[status] || status}</Badge>;
-              }
-              return null;
-            })()}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={newDraft}>新对话</Button>
-            {/* 问题2：历史记录改居中 Dialog + 自动分页（内部 ScrollArea 限高），不再右对齐 Popover。 */}
-            <Button variant="ghost" size="sm" className="gap-1" title="历史对话" onClick={() => setHistoryOpen(true)}>
-              <HistoryIcon className="size-4" /> 历史
-            </Button>
-            {/* 问题4：转草稿按钮移顶部——仅当前会话无 draft 且有 assistant turn 时显示（不每条气泡挂）。 */}
-            {showConvertAction && (
-              <Button variant="outline" size="sm" onClick={() => { void forceConvertToDraft(); }}>
-                <WandSparklesIcon className="size-3.5" /> 转为草稿
-              </Button>
-            )}
-            {/* design §3.3.2：使用插件按钮——有草稿（files 非空）才可点，否则 disabled + tooltip。 */}
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!hasDraft}
-              onClick={() => setPreviewOpen(true)}
-              title={hasDraft ? '使用插件' : '尚未生成插件草稿'}
-            >
-              <EyeIcon className="size-4" /> 使用插件
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setDetailsOpen(true)}>
-              <PanelRightOpenIcon className="size-4" /> 详情
-            </Button>
-          </div>
-        </div>
-        {/* 平台缺口 Top7：环境未就绪横幅——ready=false 时提示缺失项 + 「去设置」按钮。
-            检测项见 env-readiness.ts（CLI / 模型服务 / 后端地址 / 团队）。
-            loading=true 时不渲染（首帧未拉取完，避免闪烁）；ready=true 不渲染（环境 OK 无需打扰）。 */}
-        {!envReadiness.loading && !envReadiness.ready && (
-          <div className="flex shrink-0 items-start gap-3 border-b bg-amber-50 px-4 py-2.5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-            <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
-            <div className="min-w-0 flex-1 text-xs leading-relaxed">
-              环境未就绪：{envReadiness.missing.join('；')}。完善后即可创建插件。
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 border-amber-300 bg-transparent text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-900/50"
-              onClick={() => {
-                // 缺失项优先级：未装 CLI → cli Tab；未配模型 → gateway Tab；否则 backend Tab。
-                const m = envReadiness.missing.join('');
-                const tab = m.includes('CLI') ? 'cli' : m.includes('API 密钥') ? 'gateway' : 'backend';
-                setSettingsTab(tab);
-                setView('settings');
-              }}
-            >
-              去设置
-            </Button>
-          </div>
-        )}
-        {/* 问题1：对话区滚动条可见（scrollbar-thin），内容自然撑高超容器产生滚动；onScroll 驱动智能贴底。 */}
-        <div ref={chatRef} onScroll={handleChatScroll} className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-          {/* 问题3：去 h-full（否则 pb 被视口吃掉），底部 pb-20 让长回复气泡远离 Composer 分隔线。 */}
-          <div className="mx-auto max-w-3xl px-4 py-6 pb-20">
-          {!hasConversation ? (
-            <div className="flex h-full flex-col justify-center text-center">
-              <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">今天想创建什么插件？</h1>
-              <div className="mx-auto mt-8 grid w-full max-w-2xl gap-2">
-                {EXAMPLES.map((example) => (
-                  <Button key={example} variant="outline" className="h-auto justify-start whitespace-normal rounded-xl px-4 py-3 text-left text-muted-foreground" onClick={() => setInput(example)}>
-                    {example}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {/* 对话显示按独立输出块渲染：思考 / 回复 / 诊断 / 工具调用各占一行。 */}
-              <AssistantChat
-                turns={[...turns, ...(pendingUser ? [{ role: 'user' as const, content: pendingUser }] : [])]}
-                segments={liveSegments}
-                streaming={streaming}
-                stage={liveStage}
-                onAskUserAnswer={handleAskUserAnswer}
-                askAnswering={askAnswering}
-              />
-              {streaming && isFollowupRef.current && multiturnMode === 'degraded' && (
-                // design §3.3.6 (d)：降级伪多轮透明提示（codex/opencode 或 claude 缺 id）。
-                <p className="px-1 text-xs text-muted-foreground">当前模型多轮能力有限，已基于历史继续生成（未完整复用上下文）。</p>
-              )}
-              {!streaming && liveError && <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined} />}
-            </div>
-          )}
-          </div>
-        </div>
-
-        <div className="shrink-0 border-t bg-background px-4 py-3">
-          <div className="mx-auto max-w-3xl">
-            {/* 流程重构：创建期不需要插件名称输入框。
-                正确流程：对话 → AI 生成代码 → 预览 → 上传时弹命名 Dialog。 */}
-            <Composer
-              input={input}
-              model={model}
-              provider={provider}
-              providerInfo={providerInfo}
-              providers={providers}
-              streaming={streaming}
-              effort={effort}
-              attachedPlugins={attachedPlugins}
-              mentionablePlugins={mentionablePlugins}
-              onAttach={(p) => setAttachedPlugins((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]))}
-              onDetach={(id) => setAttachedPlugins((prev) => prev.filter((x) => x.id !== id))}
-              onInputChange={setInput}
-              onModelChange={setModel}
-              onProviderChange={setProvider}
-              onEffortChange={setEffort}
-              onCustomModel={() => { setSettingsTab('gateway'); setView('settings'); }}
-              onSend={send}
-              onStop={stopCurrentSession}
-            />
-          </div>
-        </div>
-      </div>
-
-      <aside className={cn(
-        'flex h-full shrink-0 flex-col border-l bg-card transition-all duration-200 overflow-hidden',
-        // 自适应宽度：小屏全宽，中大屏弹性（min 360 / 中屏 32vw / 大屏 24vw / max 560），替代原固定 420px。
-        detailsOpen ? 'w-full md:w-[min(32vw,560px)] xl:w-[min(24vw,560px)] md:min-w-[360px] z-20' : 'w-0',
-      )}>
-        <div className="flex h-full w-full md:w-[min(32vw,560px)] xl:w-[min(24vw,560px)] md:min-w-[360px] flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-            <span className="text-sm font-medium">插件创建详情</span>
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => setDetailsOpen(false)}>
-              <XIcon className="size-4" />
-            </Button>
-          </div>
-          {/* design §3.3.1：DetailsPanel 已删 preview tab，预览/源码相关 props 全部移除（迁到 PreviewDrawer）。 */}
-          <DetailsPanel
-            assistantSession={assistantSession}
-            status={status}
-            files={files}
-            diagnostics={diagnostics}
-            cloudPlugin={cloudPlugin}
-            uploading={uploading}
-            submitting={submitting}
-            onUpload={uploadCloud}
-            onSubmitMarketplace={submitMarketplace}
-            onRun={() => cloudPlugin && runPlugin(cloudPlugin)}
-          />
-        </div>
-      </aside>
-
-      {/* design §3.3.3：预览大窗（全屏 Sheet），复用 PreviewPanel + SourcePanel。 */}
-      <PreviewDrawer
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
+    <>
+      <PluginCreatorLayout
+        chatRef={chatRef}
+        activeConversationTitle={activeConversationTitle}
+        pluginStatus={pluginStatus}
+        status={status}
+        showConvertAction={showConvertAction}
+        hasDraft={hasDraft}
+        envReadiness={envReadiness}
+        hasConversation={hasConversation}
+        turns={turns}
+        pendingUser={pendingUser}
+        liveSegments={liveSegments}
+        streaming={streaming}
+        liveStage={liveStage}
+        liveError={liveError}
+        askAnswering={askAnswering}
+        multiturnMode={multiturnMode}
+        isFollowup={isFollowupRef.current}
+        input={input}
+        model={model}
+        provider={provider}
+        providerInfo={providerInfo}
+        providers={providers}
+        effort={effort}
+        attachedPlugins={attachedPlugins}
+        mentionablePlugins={mentionablePlugins}
+        detailsOpen={detailsOpen}
+        previewOpen={previewOpen}
+        historyOpen={historyOpen}
         files={files}
         activeFile={activeFile}
         activeContent={activeContent}
         previewKey={previewKey}
+        pluginId={pluginId ?? undefined}
+        assistantSession={assistantSession}
+        diagnostics={diagnostics}
+        cloudPlugin={cloudPlugin}
+        uploading={uploading}
+        submitting={submitting}
+        metas={metas}
+        activeId={activeId}
+        session={session}
+        onChatScroll={handleChatScroll}
+        onInputChange={setInput}
+        onNewDraft={() => { newDraft(); setHistoryOpen(false); }}
+        onHistoryOpenChange={setHistoryOpen}
+        onForceConvert={() => { void forceConvertToDraft(); }}
+        onPreviewOpenChange={setPreviewOpen}
+        onDetailsOpenChange={setDetailsOpen}
+        onSettingsNavigate={(tab, nextView) => { setSettingsTab(tab); setView(nextView); }}
+        onAskUserAnswer={handleAskUserAnswer}
+        onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined}
+        onAttach={(p) => setAttachedPlugins((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]))}
+        onDetach={(id) => setAttachedPlugins((prev) => prev.filter((x) => x.id !== id))}
+        onModelChange={setModel}
+        onProviderChange={setProvider}
+        onEffortChange={setEffort}
+        onCustomModel={() => { setSettingsTab('gateway'); setView('settings'); }}
+        onSend={send}
+        onStop={stopCurrentSession}
+        onUpload={uploadCloud}
+        onSubmitMarketplace={submitMarketplace}
+        onRunPlugin={() => cloudPlugin && runPlugin(cloudPlugin)}
         onActiveFileChange={setActiveFile}
         onRefreshPreview={() => setPreviewKey((key) => key + 1)}
-        pluginId={pluginId ?? undefined}
+        onSelectConversation={(id) => { void selectConversation(id); setHistoryOpen(false); }}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
+        setView={setView}
+        setSettingsTab={setSettingsTab}
       />
-      {/* 问题2：历史对话居中 Dialog，内部 ConversationRail 自带 ScrollArea 限高分页。 */}
-      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="gap-0 p-0 sm:max-w-xl">
-          <DialogHeader className="border-b px-4 py-3" {...dragRegionProps}>
-            <DialogTitle className="text-base" data-tauri-drag-region>历史对话</DialogTitle>
-          </DialogHeader>
-          <ConversationRail
-            metas={metas}
-            activeId={activeId}
-            onSelect={(id) => { void selectConversation(id); setHistoryOpen(false); }}
-            onNew={() => { newDraft(); setHistoryOpen(false); }}
-            onRename={handleRenameConversation}
-            onDelete={handleDeleteConversation}
-          />
-        </DialogContent>
-      </Dialog>
-      {/* 平台缺口 Top7：新手任务清单（首次登录弹 Dialog，5 步引导，进度持久化）。
-          已全部完成时组件内部 return null，不渲染 Dialog。 */}
-      <TaskChecklist session={session} setView={setView} setSettingsTab={setSettingsTab} />
-
-      {/* 流程重构：上传命名 Dialog（用户在上传时给插件命名）。 */}
-      <Dialog open={namingOpen} onOpenChange={(o) => { if (!namingLoading) setNamingOpen(o); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>命名并上传插件</DialogTitle>
-            <DialogDescription>给插件起个名字，团队成员将通过这个名字找到它。</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <Label htmlFor="plugin-name-input">插件名称</Label>
-            <Input
-              id="plugin-name-input"
-              value={namingValue}
-              onChange={(e) => setNamingValue(e.target.value)}
-              placeholder="如：我的番茄钟"
-              autoFocus
-              onKeyDown={(e) => e.key === 'Enter' && !namingLoading && doUpload()}
-            />
-            {/* 上传期设价（需求4）：留空=免费，填价后上传的插件 priceCents 为该值。 */}
-            <Label htmlFor="plugin-price-input">定价（元，留空=免费）</Label>
-            <Input
-              id="plugin-price-input"
-              value={namingPriceYuan}
-              onChange={(e) => setNamingPriceYuan(e.target.value)}
-              placeholder="0 表示免费"
-              inputMode="decimal"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNamingOpen(false)} disabled={namingLoading}>取消</Button>
-            <LoadingButton onClick={doUpload} loading={namingLoading}>上传</LoadingButton>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+      <UploadNamingDialog
+        open={namingOpen}
+        value={namingValue}
+        priceYuan={namingPriceYuan}
+        loading={namingLoading}
+        onOpenChange={setNamingOpen}
+        onValueChange={setNamingValue}
+        onPriceYuanChange={setNamingPriceYuan}
+        onSubmit={doUpload}
+      />
+    </>
   );
 }

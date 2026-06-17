@@ -18,6 +18,13 @@
 
 Tauri backend only serves builtin/local capabilities. Published database plugins run through the desktop frontend iframe plus server APIs.
 
+## File Size Policy
+
+- `>1500` 行 Rust source 必须拆分。
+- `1000-1500` 行 Rust source 默认拆分；保留必须在任务文档中写明职责单一的理由。
+- `300-999` 行 source 进入监控；改动时优先抽 `state`、`process`、`path`、`manifest`、`commands`、`tests` 等职责模块。
+- Tauri command 文件应保持薄入口：参数解析和 `tauri::command` 留在 command 层，路径校验、进程管理、manifest 解析和 IO 放 helper module。
+
 ## Quality Check
 
 - Tauri/Rust compile and tests: `cargo test -p lingfang-desktop`
