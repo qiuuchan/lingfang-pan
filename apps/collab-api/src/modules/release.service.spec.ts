@@ -118,11 +118,11 @@ describe('ReleaseService', () => {
 
   it('publish 允许归档版本重新发布（取消归档，恢复下载）', async () => {
     prisma.release.findUnique.mockResolvedValue(makeRelease({ status: 'ARCHIVED', publishedAt: now }));
-    prisma.release.update.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true, publishedAt: now }));
+    prisma.__tx.release.update.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true, publishedAt: now }));
     const result = await service.publish('user-admin', 'release-1');
     expect(result.release.status).toBe('PUBLISHED');
     expect(result.release.isLatest).toBe(true);
-    expect(prisma.release.update).toHaveBeenCalled();
+    expect(prisma.__tx.release.update).toHaveBeenCalled();
   });
 
   it('latest 仅返回 PUBLISHED+isLatest 版本', async () => {

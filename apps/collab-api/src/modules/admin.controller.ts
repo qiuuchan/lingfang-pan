@@ -319,6 +319,12 @@ export class AdminController {
     return this.releases.archive(requireUser(req).id, id);
   }
 
+  @Delete('releases/:id')
+  @ApiOperation({ summary: '删除版本（物理删，级联删 assets）' })
+  deleteRelease(@Req() req: Request, @Param('id') id: string) {
+    return this.releases.deleteRelease(requireUser(req).id, id);
+  }
+
   @Post('releases/:id/assets')
   @ApiOperation({ summary: '登记版本产物（平台/架构/下载链接）' })
   addReleaseAsset(@Req() req: Request, @Param('id') id: string, @Body() body: ReleaseAssetCreateDto) {

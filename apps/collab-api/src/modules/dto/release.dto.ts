@@ -45,6 +45,16 @@ export class ReleaseUpdateDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({ description: '发布通道（改后需不与同版本号冲突）', enum: RELEASE_CHANNEL })
+  @IsOptional()
+  @IsEnum(RELEASE_CHANNEL, { message: 'channel 只允许 STABLE 或 BETA' })
+  channel?: (typeof RELEASE_CHANNEL)[number];
+
+  @ApiPropertyOptional({ description: '首发时间（ISO 字符串，手动修正；null 清空）', example: '2026-06-17T10:00:00.000Z' })
+  @IsOptional()
+  @IsString()
+  publishedAt?: string | null;
 }
 
 /** POST /api/admin/releases/:id/assets 入参：登记一个平台产物（外链下载地址）。 */

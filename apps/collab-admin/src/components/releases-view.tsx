@@ -38,6 +38,7 @@ import {
   updateRelease,
   publishRelease,
   archiveRelease,
+  deleteRelease,
   addAsset,
   uploadAsset,
   deleteAsset,
@@ -122,11 +123,12 @@ export function ReleasesView() {
 
   // 编辑 Dialog。
   const [editTarget, setEditTarget] = useState<AdminRelease | null>(null);
-  const [editForm, setEditForm] = useState({ title: '', notes: '' });
+  const [editForm, setEditForm] = useState({ title: '', notes: '', channel: 'STABLE' as 'STABLE' | 'BETA', publishedAt: '' });
 
   // 发布/归档/删除 asset 二次确认。
   const [confirmPublish, setConfirmPublish] = useState<AdminRelease | null>(null);
   const [confirmArchive, setConfirmArchive] = useState<AdminRelease | null>(null);
+  const [confirmDeleteRelease, setConfirmDeleteRelease] = useState<AdminRelease | null>(null);
   const [confirmDeleteAsset, setConfirmDeleteAsset] = useState<{ release: AdminRelease; assetId: string } | null>(null);
 
   async function handleCreate() {
@@ -146,12 +148,24 @@ export function ReleasesView() {
 
   function openEdit(r: AdminRelease) {
     setEditTarget(r);
-    setEditForm({ title: r.title ?? '', notes: r.notes ?? '' });
+    setEditForm({
+      title: r.title ?? '',
+      notes: r.notes ?? '',
+      channel: r.channel ?? 'STABLE',
+      // publishedAt ISO → datetime-local 可用值（截到分钟）。
+      publishedAt: r.publishedAt ? r.publishedAt.slice(0, 16) : '',
+    });
   }
   async function handleEdit() {
     if (!editTarget) return;
     const ok = await run(
-      () => updateRelease(editTarget.id, editForm).then(load),
+      () => updateRelease(editTarget.id, {
+        title: editForm.title,
+        notes: editForm.notes,
+        channel: editForm.channel,
+        // 空串 = 清空 publishedAt，非空转 ISO。
+        publishedAt: editForm.publishedAt ? new Date(editForm.publishedAt).toISOString() : null,
+      }).then(load),
       '已保存',
     );
     if (ok) setEditTarget(null);
@@ -172,6 +186,14 @@ export function ReleasesView() {
       '版本已归档',
     );
     if (ok) setConfirmArchive(null);
+  }
+  async function handleDeleteRelease() {
+    if (!confirmDeleteRelease) return;
+    const ok = await run(
+      () => deleteRelease(confirmDeleteRelease.id).then(load),
+      '版本已删除',
+    );
+    if (ok) setConfirmDeleteRelease(null);
   }
   async function handleDeleteAsset() {
     if (!confirmDeleteAsset) return;
@@ -254,6 +276,9 @@ export function ReleasesView() {
                             <ArchiveIcon className="size-3.5" />
                           </Button>
                         )}
+                        <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteRelease(r)} title="删除版本">
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -337,7 +362,7 @@ export function ReleasesView() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>编辑版本 v{editTarget?.version}</DialogTitle>
-              <DialogDescription>修改标题与更新说明。</DialogDescription>
+              <DialogDescription>修改标题、说明、通道、首发时间。</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <div className="space-y-1.5">
@@ -347,6 +372,22 @@ export function ReleasesView() {
               <div className="space-y-1.5">
                 <Label>更新说明（markdown）</Label>
                 <Textarea rows={6} value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>通道</Label>
+                  <Select value={editForm.channel} onValueChange={(v) => setEditForm({ ...editForm, channel: v as 'STABLE' | 'BETA' })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="STABLE">正式版</SelectItem>
+                      <SelectItem value="BETA">测试版</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>首发时间（留空清空）</Label>
+                  <Input type="datetime-local" value={editForm.publishedAt} onChange={(e) => setEditForm({ ...editForm, publishedAt: e.target.value })} />
+                </div>
               </div>
             </div>
             <DialogFooter>
@@ -380,6 +421,20 @@ export function ReleasesView() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmArchive(null)}>取消</Button>
               <Button variant="outline" onClick={() => { void handleArchive(); }}>确认归档</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 删除版本确认 */}
+        <Dialog open={!!confirmDeleteRelease} onOpenChange={(o) => { if (!o) setConfirmDeleteRelease(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>删除版本 v{confirmDeleteRelease?.version}</DialogTitle>
+              <DialogDescription>物理删除该版本及其全部产物（下载链接），不可恢复。官网与更新检查立即不再展示。确定删除？</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmDeleteRelease(null)}>取消</Button>
+              <Button variant="destructive" onClick={() => { void handleDeleteRelease(); }}>确认删除</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -566,11 +621,21 @@ function ReleaseDetail({
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label>安装包文件（.exe / .dmg / .AppImage）</Label>
-              <Input type="file" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed p-3 transition hover:bg-muted/50">
+                <UploadIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">点击选择文件</span>
+                {file && <span className="ml-auto truncate text-xs font-medium">{file.name}</span>}
+                <input type="file" className="hidden" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
+              </label>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label>签名文件（.sig，可选，updater 验签用）</Label>
-              <Input type="file" onChange={(e) => setSigFile(e.target.files?.[0] ?? null)} />
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed p-3 transition hover:bg-muted/50">
+                <UploadIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">点击选择文件</span>
+                {sigFile && <span className="ml-auto truncate text-xs font-medium">{sigFile.name}</span>}
+                <input type="file" className="hidden" onChange={(e) => setSigFile(e.target.files?.[0] ?? null)} />
+              </label>
             </div>
           </div>
           <div className="mt-3 flex justify-end">
