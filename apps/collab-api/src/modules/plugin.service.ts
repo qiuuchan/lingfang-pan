@@ -132,6 +132,22 @@ export class PluginService {
     return { plugin: publicPlugin(updated, membership.teamId) };
   }
 
+  /** 作者/团队管理员删除插件（物理删，级联清 Installation/Review）。
+   *  约束：已上架市场(marketplace=true)的插件不可由作者删（影响已购买/安装用户，需 admin 下架后再删）。
+   *  未上架（草稿/驳回/团队内）可删。级联删 PluginInstallation（onDelete: Cascade 自动）。 */
+  async deleteByAuthor(userId: string, id: string) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const plugin = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true, name: true, marketplace: true, teamId: true, authorUserId: true } });
+    if (!plugin) throw notFound('插件不存在');
+    ensurePluginManager(plugin, membership.teamId, userId, membership.role);
+    if (plugin.marketplace) {
+      throw conflict('已上架市场的插件需联系平台管理员下架后再删除');
+    }
+    // 级联删 PluginInstallation + PluginReview（schema onDelete: Cascade 自动）+ 物理删 Plugin。
+    await this.prisma.plugin.delete({ where: { id } });
+    await this.audit(userId, 'plugin.deleted', 'Plugin', id, { teamId: membership.teamId, name: plugin.name });
+  }
+
   /** 作者/团队管理员切换插件启用/禁用（status: ENABLED/DISABLED）。
    *  与 admin.adminUpdatePlugin 区别：admin 可改任意插件，本方法仅限作者/团队管理员改自己的插件，
    *  且不改其他治理字段（价格/可见性等）。约束：审核中(PENDING)的插件不可切换（避免审核与下架并发），

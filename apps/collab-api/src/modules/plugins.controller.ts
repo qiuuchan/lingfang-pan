@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
@@ -60,5 +60,11 @@ export class PluginsController {
   @ApiOperation({ summary: '安装公共市场插件到当前团队' })
   install(@Req() req: Request, @Param('id') id: string) {
     return this.plugins.installMarketplacePlugin(requireUser(req).id, id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: '删除插件（仅作者/团队管理员，未上架可删；已上架需先 admin 下架）' })
+  deletePlugin(@Req() req: Request, @Param('id') id: string) {
+    return this.plugins.deleteByAuthor(requireUser(req).id, id);
   }
 }

@@ -25,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { SearchIcon, SettingsIcon, ToggleLeftIcon, ToggleRightIcon, LayersIcon, PencilIcon, ArchiveIcon } from 'lucide-react';
+import { SearchIcon, SettingsIcon, ToggleLeftIcon, ToggleRightIcon, LayersIcon, PencilIcon, ArchiveIcon, Trash2Icon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useGuardedAction, useLoad, run } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid, ActionBar } from '@/components/shared';
@@ -337,6 +337,7 @@ function PluginDetailSheet({
             {plugin.marketplace ? (
               <PluginDelistDialog plugin={plugin} busy={delistBusy} onConfirm={delistGuard} onRefresh={onRefresh} />
             ) : null}
+            <PluginAdminDeleteDialog plugin={plugin} onRefresh={onRefresh} />
           </div>
         ) : null
       }
@@ -649,6 +650,51 @@ function PluginDelistDialog({
           <Button variant="destructive" disabled={busy} onClick={confirm}>
             {busy ? '下架中…' : '确认下架'}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// admin 物理删除插件：调 DELETE /api/admin/plugins/:id（任意，含已上架，级联清安装/购买记录）。
+// 二次确认（提示级联删购买/安装记录，不可恢复）。与下架区别：下架是软退市（保留记录），删除是物理清除。
+function PluginAdminDeleteDialog({ plugin, onRefresh }: { plugin: Plugin; onRefresh: () => Promise<unknown> | void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function del() {
+    setBusy(true);
+    try {
+      await api(`/api/admin/plugins/${plugin.id}`, { method: 'DELETE' });
+      toast.success('插件已删除');
+      setOpen(false);
+      await onRefresh();
+    } catch (e) {
+      toast.error((e as { message?: string }).message || '删除失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!busy) setOpen(o); }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="flex-1">
+          <Trash2Icon className="mr-1 size-4" />
+          删除插件
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>物理删除插件</DialogTitle>
+          <DialogDescription>
+            将永久删除「{plugin.name}」及其所有安装记录、购买记录、审核记录。此操作不可恢复，已购买/安装用户将失去访问。
+            如仅需退出市场，请用「下架」。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>取消</Button>
+          <Button variant="destructive" onClick={() => { void del(); }} disabled={busy}>{busy ? '删除中…' : '确认删除'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

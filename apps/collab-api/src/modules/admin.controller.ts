@@ -207,6 +207,12 @@ export class AdminController {
     return this.admin.adminDelistPlugin(requireUser(req).id, id, body.reason);
   }
 
+  @Delete('plugins/:id')
+  @ApiOperation({ summary: '物理删除插件（admin，任意，含已上架，级联清安装/购买记录）' })
+  deletePlugin(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminDeletePlugin(requireUser(req).id, id);
+  }
+
   @Get('plugins/:id/audit-history')
   @ApiOperation({ summary: '插件审核历史（PluginReview 时间线）' })
   pluginAuditHistory(@Req() req: Request, @Param('id') id: string) {

@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use crate::code_assistant::{find_binary, kill_child_tree, run_capture_with_env};
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
-use crate::plugin_store::PluginStore;
+use crate::plugin_store::{PluginStore, sanitize_plugin_id};
 
 /// 插件运行时类型（与 plugin_store::PluginRuntime 对齐，serde lowercase）。
 /// 仅 nodejs/python 走本模块的独立进程运行通道；client（HTML）由前端 iframe 直接显示，不经此通道。
@@ -609,6 +609,44 @@ pub fn stop_plugin(
     Ok(())
 }
 
+/// 命令：删除本地持久化插件目录（temp 草稿 / 正式本地插件）。
+///
+/// 流程：sanitize_plugin_id 防穿越 → 若进程表在运行先 stop（take + kill_child_tree + wait，
+/// 防文件占用删不掉）→ remove_dir_all(plugin_dir)。
+///
+/// 仅删 `plugins_root/<plugin_id>/`。builtin 内置插件在 builtin-plugins/（resources 打包），
+/// 不在 plugins_root，sanitize + plugin_dir 不会定位到——天然不删。
+/// 不删云端记录（后端独立 DELETE 端点）；目录不存在幂等 Ok（与 stop_plugin 同语义）。
+#[tauri::command]
+pub fn delete_plugin(
+    store: tauri::State<'_, PluginStore>,
+    process_table: tauri::State<'_, PluginProcessTable>,
+    plugin_id: String,
+) -> Result<(), String> {
+    delete_plugin_dir(&store, &process_table, &plugin_id)
+}
+
+/// delete_plugin 的纯逻辑（无 tauri::State，便于单测）。
+/// sanitize → take+kill 进程 → remove_dir_all 目录。
+pub(crate) fn delete_plugin_dir(
+    store: &PluginStore,
+    process_table: &PluginProcessTable,
+    plugin_id: &str,
+) -> Result<(), String> {
+    let id = sanitize_plugin_id(plugin_id)?;
+    // 先停进程（防 venv / node_modules 文件占用删不掉）。
+    if let Some((mut child, _)) = process_table.take(&id) {
+        kill_child_tree(&child);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let dir = store.plugin_dir(&id)?;
+    if !dir.exists() {
+        return Ok(()); // 目录不存在幂等成功（云端已删 / 手动清过）。
+    }
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("删除插件目录失败：{e}"))
+}
+
 /// 命令：查询插件进程运行状态（PRD 需求 2 / AC2：running/stopped 动态判定）。
 /// 查内存进程表（try_wait 实时判定，比 scan 读磁盘表更准），进程已退出时自动清表。
 #[tauri::command]
@@ -860,5 +898,50 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    // === delete_plugin_dir 测试 ===
+
+    /// 构造临时 PluginStore（anchor_root 在 temp_dir 下，隔离测试）。
+    fn temp_store_for_delete(name: &str) -> PluginStore {
+        let root = std::env::temp_dir().join(format!(
+            "lf-runner-delete-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        PluginStore::new(&root).expect("PluginStore 构造应成功")
+    }
+
+    #[test]
+    fn delete_plugin_dir_removes_existing_directory() {
+        let store = temp_store_for_delete("existing");
+        let id = "my-plugin";
+        let dir = store.ensure_plugin_dir(id).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"id":"x","name":"x"}"#).unwrap();
+        let table = PluginProcessTable::new();
+
+        delete_plugin_dir(&store, &table, id).unwrap();
+
+        assert!(!dir.exists(), "插件目录应被删除");
+    }
+
+    #[test]
+    fn delete_plugin_dir_nonexistent_is_idempotent() {
+        let store = temp_store_for_delete("missing");
+        let table = PluginProcessTable::new();
+        // 不存在的 plugin_id 删除应幂等成功（不报错）。
+        delete_plugin_dir(&store, &table, "never-existed").unwrap();
+    }
+
+    #[test]
+    fn delete_plugin_dir_rejects_traversal_id() {
+        let store = temp_store_for_delete("traversal");
+        let table = PluginProcessTable::new();
+        // 穿越 plugin_id 被 sanitize_plugin_id 拒绝（防 ../ 越出 plugins_root）。
+        let err = delete_plugin_dir(&store, &table, "../escape").unwrap_err();
+        assert!(err.contains("plugin_id") || err.contains("非法") || err.contains("不合法"));
     }
 }
