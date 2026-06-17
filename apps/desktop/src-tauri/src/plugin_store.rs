@@ -152,10 +152,40 @@ impl PluginStore {
         // 否则改了 plugins_root 后找不到 config 自身。plugins_root 默认即 anchor_root。
         fs::create_dir_all(anchor_root.join(META_DIR))
             .map_err(|e| format!("创建插件元数据目录失败：{e}"))?;
-        Ok(Self {
+        let store = Self {
             anchor_root,
             file_lock: Arc::new(Mutex::new(())),
-        })
+        };
+        // 清理创建期 AI 会话失败/中断残留的空 temp-<id> 目录（无 manifest 无文件，无保留价值）。
+        // files≥1 但无 manifest 的 temp 目录保留（可能有用户产出，由前端草稿恢复校验引导处理）。
+        store.cleanup_empty_temp_dirs();
+        Ok(store)
+    }
+
+    /// 清理 plugins_root 下 temp-* 空目录。
+    ///
+    /// 创建期无 plugin_id 时用 temp-<secs>-<nanos> 作临时 plugin_id 建目录（main.rs），
+    /// AI 会话失败/中断会留下空目录。重启后这些目录无 manifest，草稿恢复指向它们会报错。
+    /// 此处在启动时清理完全空目录（无任何文件/子目录），避免残留。
+    ///
+    /// 安全：用 `remove_dir`（非 `remove_dir_all`）只删空目录，非空目录报错忽略，
+    /// 绝不误删有内容的目录。仅匹配 `temp-` 前缀，不碰正式插件目录。
+    fn cleanup_empty_temp_dirs(&self) {
+        let root = self.plugins_root();
+        let Ok(entries) = fs::read_dir(&root) else {
+            return; // plugins_root 不存在或无权限，静默跳过（启动不阻断）。
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name_str) = name.to_str() else { continue };
+            if !name_str.starts_with("temp-") { continue; }
+            let path = entry.path();
+            // 仅清理完全空目录（无任何文件/子目录）。
+            let Ok(inner) = fs::read_dir(&path) else { continue };
+            if inner.count() == 0 {
+                let _ = fs::remove_dir(&path); // 非空会失败，忽略（保守不删）。
+            }
+        }
     }
 
     /// 配置文件路径（固定锚点：app_data/plugins/.lingfang/config.json）。
@@ -899,6 +929,29 @@ mod tests {
         // 仅 .lingfang 被跳过 + has space 被跳过 → 应为 0 个插件。
         assert!(metas.iter().all(|m| m.id != "has space"));
         assert!(metas.iter().all(|m| m.id != ".lingfang"));
+    }
+
+    #[test]
+    fn cleanup_empty_temp_dirs_removes_only_empty() {
+        let store = temp_store("cleanup-empty-temp");
+        let root = store.plugins_root();
+        // temp-empty：空目录（失败残留），应被清理。
+        let empty_temp = root.join("temp-1700000000-1");
+        fs::create_dir_all(&empty_temp).unwrap();
+        // temp-with-file：有文件但无 manifest（AI 写了一半），应保留（由前端引导处理）。
+        let partial_temp = root.join("temp-1700000000-2");
+        fs::create_dir_all(&partial_temp).unwrap();
+        fs::write(partial_temp.join("main.py"), "# half done").unwrap();
+        // 正式插件目录：不应被碰。
+        let real_plugin = root.join("my-plugin");
+        fs::create_dir_all(real_plugin.join("ui")).unwrap();
+        fs::write(real_plugin.join("manifest.json"), r#"{"id":"x","name":"x"}"#).unwrap();
+
+        store.cleanup_empty_temp_dirs();
+
+        assert!(!empty_temp.exists(), "空 temp 目录应被清理");
+        assert!(partial_temp.exists(), "有文件的 temp 目录应保留");
+        assert!(real_plugin.exists(), "正式插件目录不应被删");
     }
 
     #[test]
