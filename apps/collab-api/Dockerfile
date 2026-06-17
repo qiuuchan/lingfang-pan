@@ -13,5 +13,5 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/collab-api ./apps/collab-api
-EXPOSE 3000
+EXPOSE 19006
 CMD ["node", "apps/collab-api/dist/main.js"]

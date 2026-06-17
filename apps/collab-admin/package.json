@@ -4,9 +4,9 @@
   "version": "0.0.2",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 4174",
+    "dev": "vite --host 0.0.0.0 --port 19005",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 4174",
+    "preview": "vite preview --host 0.0.0.0 --port 19005",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
