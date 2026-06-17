@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth.module';
 import { CollabModule } from './modules/collab.module';
 import { JwtAuthGuard } from './security';
 import { HealthController, ReadinessService } from './health.controller';
+import { AppCacheService, CacheService } from './cache.service';
 
 /**
  * 结构化日志（nestjs-pino）配置。
@@ -88,6 +89,7 @@ function buildRedactPaths(): string[] {
   controllers: [HealthController],
   providers: [
     PrismaService,
+    { provide: AppCacheService, useClass: CacheService },
     ReadinessService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -10,6 +10,7 @@ release/
 
 # 运行 / 测试产物
 night_runs/
+apps/collab-api/prisma/.generated/
 *.log
 *.db
 *.db-shm

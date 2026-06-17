@@ -18,6 +18,7 @@ import { MailService } from './mail.service';
 import { GeetestService } from './geetest.service';
 import { GiteeChangelogService } from './gitee-changelog.service';
 import { REVEALABLE_SECRET_KEYS, type RevealableSecretKey, type UpdateSettingsDto } from './dto/settings.dto';
+import { AppCacheService, CACHE_DEFAULT_TTL_MS, createMemoryCacheStore } from '../cache.service';
 
 /** 极验二次校验接口地址（与 geetest.service 保持一致，用于 testCaptcha 探测连通性）。 */
 const GEETEST_VALIDATE_URL = 'http://gcaptcha4.geetest.com/validate';
@@ -190,28 +191,14 @@ const GEETEST_CACHE_KEYS = new Set(['geetestCaptchaId', 'geetestCaptchaKey', 'ge
  *  /api/changelog 回源拉取新配置结果（不依赖缓存 10min TTL 过期），与 mail/geetest 热生效语义一致。 */
 const GITEE_CACHE_KEYS = new Set(['giteeOwner', 'giteeRepo', 'giteeAccessToken']);
 
-/** 公开信息（platformName/logoUrl）的内存缓存 TTL（毫秒）。
- *  该端点 @Public 且为高频访问（官网落地页 + 桌面端启动页每次加载都请求），
- *  PlatformSetting 表改动极少（仅 Admin 改平台名/logo 时变），缓存 30s 可消除绝大多数 DB 查询。
- *  组E 性能：module-level cache + 手动失效（updateSettings 改公开 key 时清缓存），不引入 Redis 等外部依赖。 */
-const PUBLIC_INFO_CACHE_TTL_MS = 30_000;
-
-/** 缓存条目：值快照 + 过期时间戳。expiresAt=0 表示已失效（下次请求重新查库）。 */
-interface PublicInfoCacheEntry {
-  value: { platformName: string; logoUrl: string; geetestCaptchaId: string; geetestScenes: string };
-  expiresAt: number;
-}
-
-/** module-level 缓存：进程内单例，所有 SettingsService 实例共享。
- *  NestJS 默认 singleton scope，此变量等价于实例字段，但用 module-level 避免与 DI 生命周期耦合。
- *  null = 未填充（首次请求或被失效后）。 */
-let publicInfoCache: PublicInfoCacheEntry | null = null;
+const PUBLIC_INFO_CACHE_KEY = 'platform:public-info';
+const fallbackPublicInfoCache = new AppCacheService(createMemoryCacheStore());
 
 /** 重置公开信息缓存（仅供测试隔离用例间状态）。
  *  生产代码通过 updateSettings 自动失效，无需手动调用。导出以让单测在每个用例前清空 module-level 状态，
  *  避免「前一个用例填充的缓存被后一个用例命中」导致的测试顺序依赖。 */
 export function resetPublicInfoCache(): void {
-  publicInfoCache = null;
+  void fallbackPublicInfoCache.delete(PUBLIC_INFO_CACHE_KEY);
 }
 
 @Injectable()
@@ -222,6 +209,7 @@ export class SettingsService {
     @Inject(MailService) private readonly mail: MailService,
     @Inject(GeetestService) private readonly geetest: GeetestService,
     @Inject(GiteeChangelogService) private readonly gitee: GiteeChangelogService,
+    @Inject(AppCacheService) private readonly cache: AppCacheService = fallbackPublicInfoCache,
   ) {}
 
   /** GET /api/admin/settings：返回全部设置项（Admin 视角，含 description + updatedById）。
@@ -273,7 +261,7 @@ export class SettingsService {
     });
     // 组E 性能：设置变更后失效公开信息缓存（platformName/logoUrl 可能被改），
     // 确保下一次 GET /api/platform-info 回源读取最新值（而非命中过期缓存）。
-    publicInfoCache = null;
+    await this.cache.delete(PUBLIC_INFO_CACHE_KEY);
     // 组A：SMTP / 品牌 key 变更时失效 MailService 缓存，保证 admin 保存后下一封邮件即读到新配置（AC1）。
     // 仅当本次提交含影响邮件的 key 时才清（避免无关 key 改动也无谓失效 SMTP 缓存）。
     if (normalized.some((item) => MAIL_CACHE_KEYS.has(item.key))) {
@@ -298,26 +286,22 @@ export class SettingsService {
    *  返回对象（非数组）：公开端点契约要求扁平 {platformName, logoUrl, geetestCaptchaId} 便于前端直接解构。
    *  组E 性能：命中内存缓存直接返回（TTL 内零 DB 查询），过期或被失效后回源查库并刷新缓存。 */
   async getPublicInfo() {
-    const now = Date.now();
-    if (publicInfoCache && publicInfoCache.expiresAt > now) {
-      return publicInfoCache.value;
-    }
-    const rows = await this.prisma.platformSetting.findMany({
-      where: { key: { in: [...PUBLIC_SETTING_KEYS] } },
-      select: { key: true, value: true },
+    return this.cache.remember(PUBLIC_INFO_CACHE_KEY, CACHE_DEFAULT_TTL_MS, async () => {
+      const rows = await this.prisma.platformSetting.findMany({
+        where: { key: { in: [...PUBLIC_SETTING_KEYS] } },
+        select: { key: true, value: true },
+      });
+      const map = new Map(rows.map((r) => [r.key, r.value] as const));
+      return {
+        platformName: map.get('platformName') ?? 'LingFang',
+        logoUrl: map.get('logoUrl') ?? '',
+        // 组C 极验：captchaId 公开（前端据此初始化极验组件），缺省空串=未配置，前端不显验证码。
+        geetestCaptchaId: (map.get('geetestCaptchaId') ?? '').trim(),
+        // 组C 场景开关：geetestScenes 公开（前端按场景决定是否渲染/强制验证码，与后端 admin 场景语义一致）。
+        // 缺省空串=全部场景关闭（即便配了 captchaId 也不强制）。
+        geetestScenes: normalizeGeetestScenes(map.get('geetestScenes') ?? ''),
+      };
     });
-    const map = new Map(rows.map((r) => [r.key, r.value] as const));
-    const value = {
-      platformName: map.get('platformName') ?? 'LingFang',
-      logoUrl: map.get('logoUrl') ?? '',
-      // 组C 极验：captchaId 公开（前端据此初始化极验组件），缺省空串=未配置，前端不显验证码。
-      geetestCaptchaId: (map.get('geetestCaptchaId') ?? '').trim(),
-      // 组C 场景开关：geetestScenes 公开（前端按场景决定是否渲染/强制验证码，与后端 admin 场景语义一致）。
-      // 缺省空串=全部场景关闭（即便配了 captchaId 也不强制）。
-      geetestScenes: normalizeGeetestScenes(map.get('geetestScenes') ?? ''),
-    };
-    publicInfoCache = { value, expiresAt: now + PUBLIC_INFO_CACHE_TTL_MS };
-    return value;
   }
 
   /** GET /api/admin/settings/smtp：返回当前生效的 SMTP 配置（PlatformSetting 优先，.env fallback），

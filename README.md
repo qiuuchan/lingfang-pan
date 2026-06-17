@@ -11,7 +11,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=black)](https://tauri.app/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-%E2%89%A5%2016-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Database](https://img.shields.io/badge/DB-PostgreSQL%20%7C%20MySQL-4169E1)](#环境变量)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-Private-lightgrey)](#license)
 
@@ -42,7 +42,7 @@ LingFang 是一个 monorepo 形态的 AI 插件平台，核心能力是用对话
 
 - **桌面客户端**（Tauri 2 + React）—— AI 插件生成器、三种 CLI 编码助手、模型网关、沙箱预览、检查更新、市场、钱包、团队。
 - **管理后台 + 官网落地页**（React + shadcn/ui，二合一）—— 未登录展示官网，登录后进入后台管理用户/团队/插件/审批/审计。
-- **统一后端**（NestJS + Prisma + PostgreSQL）—— 鉴权、插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台 API。
+- **统一后端**（NestJS + Prisma + PostgreSQL/MySQL，可选 Redis）—— 鉴权、插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台 API。
 
 > 单后端、一个平台：桌面端与管理端共用同一套 API 与数据库。
 
@@ -132,19 +132,21 @@ graph TB
     end
 
     subgraph Store["存储"]
-        PG[("PostgreSQL ≥ 16")]
+        DB[("PostgreSQL ≥ 16 / MySQL 8+")]
+        Redis[("Redis 6+ 可选")]
     end
 
     Desktop --> API
     Admin --> API
-    API --> PG
+    API --> DB
+    API -.热点缓存.-> Redis
 ```
 
 ### 技术栈
 
 | 子系统 | 技术栈 | 数据库 | 职责 |
 |--------|--------|--------|------|
-| `apps/collab-api` | NestJS 11 + Prisma 7 + Express 5 | PostgreSQL | 鉴权、插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台、版本发布、通知 |
+| `apps/collab-api` | NestJS 11 + Prisma 7 + Express 5 | PostgreSQL / MySQL，Redis 可选 | 鉴权、插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台、版本发布、通知 |
 | `apps/desktop` | Tauri 2 + React 18 + Vite 6 | —（经 collab-api） | 桌面端 UI、AI 生成器、CLI 注入、内置插件、本地命令（Rust） |
 | `apps/collab-admin` | React 18 + shadcn/ui + Tailwind 4 | —（经 collab-api） | 官网落地页 + Web 管理后台（二合一） |
 | `packages/contract` | Zod | — | 前后端共享契约（类型唯一真源） |
@@ -153,7 +155,7 @@ graph TB
 
 ### 关键依赖
 
-- **后端**：`@nestjs/*` 11、`@prisma/client` 7、`@prisma/adapter-pg`、`bcryptjs`、`class-validator/transformer`、`jsonwebtoken`、`helmet`、`nestjs-pino`、`nodemailer`、`@nestjs/throttler`、`@nestjs/swagger`。
+- **后端**：`@nestjs/*` 11、`@prisma/client` 7、`@prisma/adapter-pg`、`@prisma/adapter-mariadb`、`bcryptjs`、`class-validator/transformer`、`jsonwebtoken`、`helmet`、`nestjs-pino`、`nodemailer`、`@nestjs/throttler`、`@nestjs/swagger`。
 - **桌面**：`@tauri-apps/api` 2、`@tauri-apps/cli` 2、`framer-motion` 12、`react-markdown` + `rehype-highlight` + `remark-gfm`、`highlight.js`、`next-themes`、`lucide-react`、`sonner`。
 - **管理端**：`@radix-ui/*`、`framer-motion` 12、`shadcn` 4、`lucide-react`、`sonner`、`tailwind-merge`。
 - **Rust（桌面壳）**：`tauri` 2、`tauri-plugin-updater` 2、`reqwest` 0.12（rustls-tls）、`sysinfo`、`serde`/`serde_json`。
@@ -168,7 +170,9 @@ graph TB
 |------|------|------|
 | [Node.js](https://nodejs.org/) | ≥ 20 | 前端与 collab-api |
 | [pnpm](https://pnpm.io/) | ≥ 9 | Node 包管理器 |
-| [PostgreSQL](https://www.postgresql.org/) | ≥ 16 | 统一数据库（`lingfang_collab` 库） |
+| [PostgreSQL](https://www.postgresql.org/) | ≥ 16 | 默认统一数据库（`lingfang_collab` 库） |
+| MySQL / MariaDB | MySQL ≥ 8 或 MariaDB 10.11+ | 可通过 `DATABASE_PROVIDER=mysql` 切换 |
+| Redis | ≥ 6 | 可选缓存，用于多实例共享热点数据 |
 | [Rust / cargo](https://www.rust-lang.org/) | ≥ 1.80 | 构建 Tauri 桌面壳（非后端依赖） |
 
 ### 一键启动（collab-api + 桌面壳）
@@ -178,7 +182,7 @@ pnpm install
 pnpm start
 ```
 
-`pnpm start`（`tools/start.ps1`）依次：校验 `.env` → 检查 PostgreSQL 连通 → `prisma migrate deploy` + 建平台管理员 → 启动 collab-api（`:3000`）→ 等待 `/api/health` → 启动桌面壳（Tauri）。
+`pnpm start`（`tools/start.ps1`）依次：校验 `.env` → 检查数据库连通 → `prisma:generate` + `prisma:deploy` + 建平台管理员 → 启动 collab-api（`:3000`）→ 等待 `/api/health` → 启动桌面壳（Tauri）。
 
 - 后端：`http://localhost:3000`，Swagger：`http://localhost:3000/api/docs`
 - 桌面端自动启动为原生窗口，首次进入登录页（后端地址填 `http://127.0.0.1:3000`）。
@@ -254,6 +258,9 @@ pnpm dist                          # tools/create-distribution.ps1
 # 构建时注入后端地址（管理端所有 API 请求都走这个地址）
 # 两个变量名都支持，优先 VITE_API_BASE_URL
 VITE_API_BASE_URL=https://api.example.com pnpm -C apps/collab-admin build
+
+# 如静态资源托管到国内 CDN，可注入 CDN 前缀；为空时使用同源静态资源
+VITE_CDN_BASE_URL=https://cdn.example.cn/lingfang-admin/ VITE_API_BASE_URL=https://api.example.com pnpm -C apps/collab-admin build
 
 # 产物在 apps/collab-admin/dist/（纯静态 HTML + JS + CSS + 字体 woff2）
 ```
@@ -338,7 +345,7 @@ pnpm -C apps/collab-admin preview   # Vite 内置 preview（开发用，不推�
 docker compose -f docker-compose.collab.yml up -d
 ```
 
-该编排包含：`postgres:16`（`lingfang_collab` 库，宿主 `:5434`）+ `collab-api`（自动 `prisma migrate deploy` + seed + `start`）+ `collab-admin`（构建注入 API 地址后 preview）。配置见 `.env.collab.example`。
+该编排默认包含：`postgres:16`（`lingfang_collab` 库，宿主 `:5434`）+ `collab-api`（自动 `prisma:generate` / `prisma:deploy` + seed + `start`）+ `collab-admin`（构建注入 API 地址后 preview）。配置见 `.env.collab.example`。
 
 ---
 
@@ -355,7 +362,7 @@ lingfang-platform/
 │   │   ├── src-tauri/                Rust 桌面壳
 │   │   │   └── src/                  main / plugins / capability / code_assistant / cli_config / llm_* / updater
 │   │   └── builtin-plugins/          内置插件：file-explorer / system-info / todo-list
-│   ├── collab-api/                   NestJS 统一后端（Prisma + PostgreSQL :3000）
+│   ├── collab-api/                   NestJS 统一后端（Prisma + PostgreSQL/MySQL :3000）
 │   │   ├── src/
 │   │   │   ├── modules/              auth / me / teams / applications / plugins / marketplace / wallet / llm / notifications / release / admin / settings
 │   │   │   ├── common/               守卫、装饰器、异常过滤器
@@ -387,7 +394,10 @@ lingfang-platform/
 | 变量 | 默认值 | 作用域 | 说明 |
 |------|--------|--------|------|
 | `PORT` | `3000` | collab-api | 监听端口 |
-| `DATABASE_URL` | `postgresql://lingfang:lingfang@localhost:5432/lingfang_collab?schema=public` | collab-api | PostgreSQL 连接串 |
+| `DATABASE_PROVIDER` | `postgresql` | collab-api | 数据库类型；支持 `postgresql` / `mysql`，会生成匹配的 Prisma Client |
+| `DATABASE_URL` | `postgresql://lingfang:lingfang@localhost:5432/lingfang_collab?schema=public` | collab-api | 数据库连接串，必须与 `DATABASE_PROVIDER` 协议匹配 |
+| `CACHE_DRIVER` | `memory` | collab-api | 缓存后端；`memory` 为进程内缓存，`redis` 使用 Redis 加速热点公开/管理数据 |
+| `REDIS_URL` | （空） | collab-api | `CACHE_DRIVER=redis` 时必填，如 `redis://127.0.0.1:6379/0` |
 | `JWT_SECRET` | `dev-collab-change-me` | collab-api | JWT 签名密钥（生产必设 ≥ 16 字符，否则 fail-fast） |
 | `JWT_EXPIRES_IN` | `7d` | collab-api | JWT 过期时间 |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4174,http://localhost:1420,tauri://localhost,http://tauri.localhost,...` | collab-api | CORS 白名单（未配时 fail-close） |
@@ -438,7 +448,7 @@ lingfang-platform/
 | `pnpm dev:desktop` | 桌面端 Tauri dev |
 | `pnpm collab:api:dev` | 后端 dev |
 | `pnpm collab:admin:dev` | 管理端 dev |
-| `pnpm collab:api:migrate` | 后端 `prisma migrate deploy` |
+| `pnpm collab:api:migrate` | 后端 `prisma:deploy` |
 | `pnpm collab:api:seed` | 建平台管理员 seed |
 
 ### 类型检查 / 测试 / 构建
@@ -463,14 +473,14 @@ pnpm -C apps/desktop build            # tauri build（NSIS + updater 产物）
 
 ```bash
 # 修改 schema.prisma 后生成新迁移
-pnpm -C apps/collab-api prisma:migrate     # prisma migrate dev
+pnpm -C apps/collab-api prisma:migrate     # PostgreSQL: migrate dev；MySQL: db push
 # 生产部署应用迁移
-pnpm -C apps/collab-api prisma:deploy      # prisma migrate deploy
+pnpm -C apps/collab-api prisma:deploy      # PostgreSQL: migrate deploy；MySQL: db push
 # 重置开发库 + 种子（破坏性，仅开发）
 pnpm -C apps/collab-api db:setup
 ```
 
-当前共 11 个迁移：init、plugin 云共享、wallet/marketplace、nodejs/python 运行时、user tokenVersion、LLM 网关目录、release 目录、单 provider、团队公开加入/密码重置/限流、平台设置、通知。
+PostgreSQL 使用 `prisma/migrations/` 中的迁移 SQL；MySQL 使用运行时生成的 `prisma/.generated/mysql/schema.prisma` 并通过 `db push` 同步结构。
 
 ---
 
@@ -497,7 +507,7 @@ pnpm -C apps/collab-api db:setup
 1. **契约先行** —— `packages/contract` 中的 Zod schema 是所有实现的唯一事实来源。
 2. **不重复造轮子** —— 选用经过验证的工具（NestJS、Prisma、Tauri、shadcn/ui、Radix）。
 3. **平台保持中立** —— 只路由 LLM 请求与 provider 切换，不内嵌计费逻辑。
-4. **本地可验证** —— PostgreSQL + Prisma 迁移，`pnpm start` 一条命令拉起后端与桌面端。
+4. **本地可验证** —— PostgreSQL/MySQL + Prisma，`pnpm start` 一条命令拉起后端与桌面端。
 5. **最小可部署** —— 单一 collab-api 后端（Node 进程）+ 静态文件（管理后台）+ 桌面安装包。
 
 ---

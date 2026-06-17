@@ -8,9 +8,11 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { preloadView } from '@/lib/view-preload';
+import type { View } from '@/lib/types';
 
 export type SidebarNavItem = {
-  view: string;
+  view: View;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 };
@@ -27,7 +29,7 @@ type SidebarProps = {
   // 扁平导航（向后兼容）：未提供 groups 时按扁平列表渲染（不分组的旧调用方）。
   items?: SidebarNavItem[];
   activeView: string;
-  onSelect: (view: string) => void;
+  onSelect: (view: View) => void;
   header?: ReactNode;
   footer?: ReactNode;
 };
@@ -55,6 +57,8 @@ export function Sidebar({ groups, items, activeView, onSelect, header, footer }:
           onSelect(view);
           setMobileOpen(false);
         }}
+        onFocus={() => preloadView(view)}
+        onMouseEnter={() => preloadView(view)}
         className={cn(
           'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
           isActive

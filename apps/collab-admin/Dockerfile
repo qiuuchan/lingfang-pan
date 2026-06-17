@@ -2,7 +2,9 @@ FROM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable
 ARG VITE_COLLAB_API_BASE=
+ARG VITE_CDN_BASE_URL=
 ENV VITE_COLLAB_API_BASE=$VITE_COLLAB_API_BASE
+ENV VITE_CDN_BASE_URL=$VITE_CDN_BASE_URL
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/collab-admin/package.json apps/collab-admin/package.json
 RUN pnpm install --filter @lingfang/collab-admin... --no-frozen-lockfile

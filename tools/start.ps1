@@ -1,9 +1,9 @@
 # LingFang 一键启动脚本（Windows / PowerShell）。
 #
-# 流程：检查依赖 → 校验 collab-api 配置 → 确保 PostgreSQL 可连 → 迁移+建管理员 →
+# 流程：检查依赖 → 校验 collab-api 配置 → 确保数据库可连 → 迁移/同步+建管理员 →
 #       启动 collab-api（NestJS，:3000）→ 等待健康 → 启动桌面壳（Tauri）。
 #
-# 后端为 apps/collab-api（NestJS，/api/* 前缀，依赖 PostgreSQL 16+）。
+# 后端为 apps/collab-api（NestJS，/api/* 前缀，支持 PostgreSQL 16+ 或 MySQL 8+/MariaDB）。
 # 旧 Rust apps/server（:8787）已下线，不再启动——见 docs/collab-platform.md「双后端收敛」。
 #
 # 用法：  pnpm start        （见根 package.json）
@@ -51,8 +51,60 @@ function Get-EnvVar($file, $key) {
   return $val
 }
 
+function Get-UriUserInfo($uri) {
+  $parts = ($uri.UserInfo -split ':', 2)
+  $user = if ($parts.Count -ge 1) { [Uri]::UnescapeDataString($parts[0]) } else { '' }
+  $password = if ($parts.Count -eq 2) { [Uri]::UnescapeDataString($parts[1]) } else { $null }
+  return @{ User = $user; Password = $password }
+}
+
+function Invoke-MySqlPreflight($mysql, $databaseUrl) {
+  $url = [Uri]$databaseUrl
+  $credentials = Get-UriUserInfo $url
+  $dbName = [Uri]::UnescapeDataString($url.AbsolutePath.TrimStart('/'))
+  $portValue = if ($url.Port -gt 0) { $url.Port } else { 3306 }
+  $hadMysqlPwd = Test-Path Env:MYSQL_PWD
+  $previousMysqlPwd = $env:MYSQL_PWD
+  try {
+    if ($null -ne $credentials.Password) { $env:MYSQL_PWD = $credentials.Password }
+    $args = @(
+      "--host=$($url.Host)",
+      "--port=$portValue",
+      "--user=$($credentials.User)",
+      '--protocol=tcp',
+      '--batch',
+      '--skip-column-names',
+      '--execute',
+      'SELECT 1;',
+      $dbName
+    )
+    return & $mysql @args 2>&1
+  } finally {
+    if ($hadMysqlPwd) { $env:MYSQL_PWD = $previousMysqlPwd }
+    else { Remove-Item Env:MYSQL_PWD -ErrorAction SilentlyContinue }
+  }
+}
+
+function Invoke-PostgresPreflight($psql, $databaseUrl) {
+  $url = [Uri]$databaseUrl
+  $credentials = Get-UriUserInfo $url
+  $dbName = [Uri]::UnescapeDataString($url.AbsolutePath.TrimStart('/'))
+  $portValue = if ($url.Port -gt 0) { $url.Port } else { 5432 }
+  $hadPgPassword = Test-Path Env:PGPASSWORD
+  $previousPgPassword = $env:PGPASSWORD
+  try {
+    if ($null -ne $credentials.Password) { $env:PGPASSWORD = $credentials.Password }
+    return & $psql -h $url.Host -p $portValue -U $credentials.User -d $dbName -tAc "SELECT 1;" 2>&1
+  } finally {
+    if ($hadPgPassword) { $env:PGPASSWORD = $previousPgPassword }
+    else { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+  }
+}
+
 $databaseUrl = Get-EnvVar $envPath 'DATABASE_URL'
 if (-not $databaseUrl) { Die "apps/collab-api/.env 缺少 DATABASE_URL，请检查配置。" }
+$databaseProvider = Get-EnvVar $envPath 'DATABASE_PROVIDER'
+if (-not $databaseProvider) { $databaseProvider = 'postgresql' }
 $port = Get-EnvVar $envPath 'PORT'
 if (-not $port) { $port = '3000' }
 
@@ -62,38 +114,55 @@ if ($portBusy) {
   Die "端口 $port 已被占用（PID $($portBusy.OwningProcess -join ',')）。请先停止占用该端口的进程，或修改 .env 的 PORT。"
 }
 
-# ---------- 3. 检查 PostgreSQL 连通性（原生 PG） ----------
-# collab-api 依赖 lingfang/lingfang@localhost:5432/lingfang_collab（见 docs/collab-deployment.md）。
-# 找 psql.exe（原生 PG 安装路径）；collab-api 用 Prisma，不受 PG locale 影响。
-$psql = $null
-foreach ($ver in @('18','17','16','15')) {
-  $cand = "C:\Program Files\PostgreSQL\$ver\bin\psql.exe"
-  if (Test-Path $cand) { $psql = $cand; break }
-}
+# ---------- 3. 检查数据库连通性 ----------
+if ($databaseProvider -eq 'mysql') {
+  $mysql = $null
+  foreach ($cand in @('C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe', 'C:\Program Files\MariaDB 11.0\bin\mysql.exe', 'C:\Program Files\MariaDB 10.11\bin\mysql.exe')) {
+    if (Test-Path $cand) { $mysql = $cand; break }
+  }
+  if ($mysql) {
+    Info "检查 MySQL 连通性…"
+    $connTest = Invoke-MySqlPreflight $mysql $databaseUrl
+    $connOk = $LASTEXITCODE -eq 0
+    if (-not $connOk) {
+      Write-Host $connTest -ForegroundColor DarkGray
+      Die "数据库未就绪。请先确认 MySQL 用户、库名和密码正确，然后重新运行 pnpm start。"
+    }
+    Ok "MySQL 连通正常。"
+  } else {
+    Warn "未找到 mysql.exe，跳过 MySQL 连通性预检（将依赖 Prisma 自身的连接错误报告）。"
+  }
+} else {
+  $psql = $null
+  foreach ($ver in @('18','17','16','15')) {
+    $cand = "C:\Program Files\PostgreSQL\$ver\bin\psql.exe"
+    if (Test-Path $cand) { $psql = $cand; break }
+  }
 
-if ($psql) {
-  Info "检查 PostgreSQL 连通性（lingfang@localhost:5432/lingfang_collab）…"
-  $env:PGPASSWORD = 'lingfang'
-  $connTest = & $psql -h localhost -p 5432 -U lingfang -d lingfang_collab -tAc "SELECT 1;" 2>&1
-  $connOk = $LASTEXITCODE -eq 0
-  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-  if (-not $connOk) {
-    Warn "无法以 lingfang 身份连接 lingfang_collab 库。"
-    Write-Host $connTest -ForegroundColor DarkGray
-    Die "数据库未就绪。请先以超级用户执行建库（参考命令）：
+  if ($psql) {
+    Info "检查 PostgreSQL 连通性…"
+    $connTest = Invoke-PostgresPreflight $psql $databaseUrl
+    $connOk = $LASTEXITCODE -eq 0
+    if (-not $connOk) {
+      Warn "无法连接 DATABASE_URL 指向的 PostgreSQL 数据库。"
+      Write-Host $connTest -ForegroundColor DarkGray
+      Die "数据库未就绪。请先按 DATABASE_URL 创建用户和数据库；默认开发配置可参考：
   psql -U postgres -d postgres -c `"CREATE USER lingfang WITH PASSWORD 'lingfang';`"
   psql -U postgres -d postgres -c `"CREATE DATABASE lingfang_collab OWNER lingfang LOCALE 'C' TEMPLATE template0;`"
 完成后重新运行 pnpm start。详见 docs/collab-deployment.md。"
+    }
+    Ok "PostgreSQL 连通正常。"
+  } else {
+    Warn "未找到 psql.exe，跳过 PostgreSQL 连通性预检（将依赖 Prisma 自身的连接错误报告）。"
   }
-  Ok "PostgreSQL 连通正常。"
-} else {
-  Warn "未找到 psql.exe，跳过连通性预检（将依赖 prisma 自身的连接错误报告）。"
 }
 
-# ---------- 4. 迁移 + 建平台管理员 ----------
-Info "应用 Prisma 迁移 + 生成客户端…"
+# ---------- 4. 迁移 / 同步 + 建平台管理员 ----------
+Info "生成 Prisma Client + 应用数据库结构…"
+& pnpm -C $collabDir prisma:generate 2>&1 | ForEach-Object { Write-Host $_ }
+if ($LASTEXITCODE -ne 0) { Die "Prisma 客户端生成失败。请检查 DATABASE_PROVIDER / DATABASE_URL 与依赖安装。" }
 & pnpm -C $collabDir prisma:deploy 2>&1 | ForEach-Object { Write-Host $_ }
-if ($LASTEXITCODE -ne 0) { Die "Prisma 迁移失败。请检查 DATABASE_URL 与 PostgreSQL 状态。" }
+if ($LASTEXITCODE -ne 0) { Die "Prisma 迁移/部署失败。请检查 DATABASE_URL 与数据库状态。" }
 
 Info "生成平台管理员（幂等，按 .env 的 PLATFORM_ADMIN_EMAIL）…"
 & pnpm -C $collabDir seed:admin 2>&1 | ForEach-Object { Write-Host $_ }

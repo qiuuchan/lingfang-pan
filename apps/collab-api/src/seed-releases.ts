@@ -3,10 +3,10 @@
 //
 // 注意：url 为占位（GitHub Releases 占位），正式发布前由平台 Admin 通过 /api/admin/releases 替换为真实链接。
 import 'dotenv/config';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { createPrismaAdapter } from './prisma.adapter';
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const adapter = createPrismaAdapter(process.env);
 const prisma = new PrismaClient({ adapter });
 
 /** 示例版本：0.0.1 STABLE，含 Windows x86_64 占位产物。 */
