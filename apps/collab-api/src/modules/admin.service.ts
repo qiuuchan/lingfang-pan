@@ -729,6 +729,19 @@ export class AdminService {
     return { plugin: publicPlugin(updated, updated.teamId || undefined) };
   }
 
+  /** 平台管理员物理删除插件（任意，含已上架）。
+   *  级联删 PluginInstallation + Purchase + PluginReview（schema onDelete: Cascade 自动）。
+   *  兜底能力：作者不能删的已上架/有购买插件，admin 可删（二次确认 + 审计）。 */
+  async adminDeletePlugin(actorId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const plugin = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true, name: true, marketplace: true, teamId: true } });
+    if (!plugin) throw notFound('插件不存在');
+    // 级联删 Installation + Purchase + Review（onDelete: Cascade）+ 物理删 Plugin。
+    await this.prisma.plugin.delete({ where: { id } });
+    await this.audit(actorId, 'admin.plugin.deleted', 'Plugin', id, { name: plugin.name, wasMarketplace: plugin.marketplace, teamId: plugin.teamId });
+    return { id };
+  }
+
   // 插件审核历史：PluginReview 列表（按时间倒序），供详情抽屉渲染审核时间线。
   // include reviewer 用 publicUser 白名单脱敏（与 adminApplications 同类凭据泄漏防护）。
   async adminPluginAuditHistory(userId: string, id: string) {

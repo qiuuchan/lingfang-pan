@@ -456,6 +456,7 @@ fn main() {
             plugin_script::run_plugin_script,
             plugin_runner::start_plugin,
             plugin_runner::stop_plugin,
+            plugin_runner::delete_plugin,
             plugin_runner::get_plugin_status,
             plugin_store::get_plugins_root,
             plugin_store::set_plugins_root,

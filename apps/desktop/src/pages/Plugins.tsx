@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon, InfoIcon } from 'lucide-react';
+import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon, InfoIcon, Trash2Icon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin, DraftFile } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { LoadingButton } from '@/components/loading-button';
 import { PluginList } from './PluginList';
 import { Shimmer } from '@/lib/motion';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { parseManifest } from '@/lib/plugin-draft';
 import { dragRegionProps } from '@/lib/window-drag';
 import type { ScriptRuntime } from '@/lib/plugin-script';
@@ -25,6 +26,7 @@ import {
   scanPluginStatus,
   startPlugin,
   stopPlugin,
+  deletePlugin,
   readLocalPluginFile,
   STATUS_DISPLAY,
   STATUS_VARIANT,
@@ -244,17 +246,22 @@ function LocalPluginItem({
   onStart,
   onStop,
   onOpen,
+  onDelete,
 }: {
   item: LocalPluginStatus;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onOpen: (item: LocalPluginStatus) => void;
+  onDelete: (item: LocalPluginStatus) => void;
 }) {
   const [busy, setBusy] = useState(false);
   // 详情弹窗（体验完善需求 1：展示本地插件 manifest.json 信息，懒加载读取）。
   const [manifestOpen, setManifestOpen] = useState(false);
   // 本地插件 manifest 文件列表（详情弹窗打开时懒加载读取 manifest.json）。
   const [manifestFiles, setManifestFiles] = useState<DraftFile[]>([]);
+  // 删除二次确认。
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const isRunning = item.status === 'running';
   const isScript = item.runtime === 'nodejs' || item.runtime === 'python';
 
@@ -292,6 +299,21 @@ function LocalPluginItem({
     }
   }
 
+  // 删除本地插件目录：Rust delete_plugin 先 stop 运行中进程再 remove_dir_all。
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deletePlugin(item.id);
+      toast.success('插件已删除');
+      setDeleteOpen(false);
+      onDelete(item);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="group flex items-center justify-between gap-3 px-4 py-3.5 transition hover:bg-muted/60">
       <div className="min-w-0 flex-1">
@@ -325,6 +347,10 @@ function LocalPluginItem({
         {/* 详情：展示插件 manifest.json 信息（体验完善需求 1，所有插件可用）。 */}
         <Button variant="ghost" size="sm" onClick={openManifest} title="查看插件信息">
           <InfoIcon className="size-3.5" />
+        </Button>
+        {/* 删除本地插件目录（temp 草稿 / 正式本地插件，不删云端记录）。 */}
+        <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)} title="删除本地插件">
+          <Trash2Icon className="size-3.5" />
         </Button>
         {/* 脚本型（Python/Node）：运行/停止按钮（独立进程，PRD AC5）。 */}
         {isScript && (
@@ -361,6 +387,23 @@ function LocalPluginItem({
           description: item.description,
         }}
       />
+      <Dialog open={deleteOpen} onOpenChange={(o) => { if (!deleting) setDeleteOpen(o); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-md">
+          <DialogHeader {...dragRegionProps}>
+            <DialogTitle data-tauri-drag-region>删除本地插件</DialogTitle>
+            <DialogDescription>
+              将删除本地插件目录「{item.name}」及其所有文件（含 venv/依赖/数据）。此操作不可撤销。
+              若该插件已上传云端，云端记录不受影响，可重新安装恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting}>取消</Button>
+            <LoadingButton variant="destructive" loading={deleting} onClick={() => { void handleDelete(); }}>
+              确认删除
+            </LoadingButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -374,6 +417,7 @@ function LocalPluginList({
   onStop,
   onOpen,
   onRefresh,
+  onDelete,
 }: {
   items: LocalPluginStatus[];
   loading: boolean;
@@ -381,6 +425,7 @@ function LocalPluginList({
   onStop: (id: string) => void;
   onOpen: (item: LocalPluginStatus) => void;
   onRefresh: () => void;
+  onDelete: (item: LocalPluginStatus) => void;
 }) {
   return (
     <Card className="w-full">
@@ -408,6 +453,7 @@ function LocalPluginList({
                 onStart={onStart}
                 onStop={onStop}
                 onOpen={onOpen}
+                onDelete={onDelete}
               />
             ))}
           </div>
@@ -532,6 +578,7 @@ export function Plugins() {
         onStop={onLocalStop}
         onOpen={openLocal}
         onRefresh={reloadLocal}
+        onDelete={reloadLocal}
       />
 
       <Card className="w-full">

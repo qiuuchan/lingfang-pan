@@ -151,3 +151,25 @@ Reference files:
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`parse_manifest` 的 `manifest_missing:` 分支）
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`pluginIncomplete` + `manifest_missing:` catch）
 - `apps/desktop/src/lib/creator-error.ts`（`manifest_missing` kind）
+
+## 插件删除（本地 + 云端分层，2026-06-17）
+
+删除插件分本地与云端两层，分层治理（保护已购买/安装用户）：
+
+- **本地删除**（`plugin_runner.rs` `delete_plugin` 命令，纯逻辑 `delete_plugin_dir` 便于单测）：`sanitize_plugin_id` 防穿越 → 若进程表在运行先 take+kill_child_tree+wait（防文件占用）→ `remove_dir_all(plugin_dir)`。仅删 `plugins_root/<id>/`，不删 builtin（builtin-plugins 不在 plugins_root）、不删云端记录。目录不存在幂等 Ok。
+- **作者删云端**（`DELETE /api/plugins/:id`，`plugin.service.deleteByAuthor`）：`ensurePluginManager` 作者校验 + **仅 marketplace=false 可删**（已上架抛 conflict「先联系管理员下架」）。级联删 PluginInstallation（onDelete: Cascade 自动）。
+- **admin 删云端**（`DELETE /api/admin/plugins/:id`，`admin.service.adminDeletePlugin`）：ensurePlatformAdmin + 删任意（含已上架）+ 级联删 Installation + Purchase + Review（Cascade）+ 审计 `admin.plugin.deleted`。
+
+**治理边界**：作者只能删未上架的（草稿/驳回/团队内），已上架的走 admin 下架（delist，软退市）后 admin 删。admin 可物理删任意（兜底，二次确认 + 审计，级联清购买记录——已确认接受）。
+
+**前端入口**：
+- 桌面 Plugins.tsx 本地插件项「删除」按钮 → deletePlugin（本地）。
+- 桌面 PluginList.tsx 作者插件（source==='team'）「删除」按钮 → DELETE /api/plugins/:id → 成功后 deletePlugin 清本地。
+- admin plugins-view「删除插件」按钮 → DELETE /api/admin/plugins/:id。
+
+Reference files:
+- `apps/desktop/src-tauri/src/plugin_runner.rs`（`delete_plugin` / `delete_plugin_dir`）
+- `apps/desktop/src/lib/plugin-status.ts`（`deletePlugin` 封装）
+- `apps/collab-api/src/modules/plugin.service.ts`（`deleteByAuthor`）
+- `apps/collab-api/src/modules/admin.service.ts`（`adminDeletePlugin`）
+- `apps/collab-api/src/modules/plugins.controller.ts` + `admin.controller.ts`（DELETE 端点）

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { PinIcon, PinOffIcon, PencilIcon, PowerIcon } from 'lucide-react';
+import { PinIcon, PinOffIcon, PencilIcon, PowerIcon, Trash2Icon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Pagination } from '@/components/pagination';
 import { api, type ApiError } from '@/lib/api';
+import { deletePlugin } from '@/lib/plugin-status';
 import { fmtYuan, yuanToCents } from '@/lib/money';
 import type { LoadedPlugin } from '@/lib/types';
 import { StaggerContainer, StaggerItem } from '@/lib/motion';
@@ -128,6 +129,7 @@ function PluginListItem({
       <div className="flex shrink-0 items-center gap-2">
         {authorManaged && <PluginPriceEditDialog plugin={plugin} onSaved={onAuthorChanged} />}
         {authorManaged && <PluginStatusToggle plugin={plugin} onToggled={onAuthorChanged} />}
+        {authorManaged && <PluginDeleteDialog plugin={plugin} onDeleted={onAuthorChanged} />}
         <span className="text-xs text-muted-foreground">v{plugin.version}</span>
         <Button
           variant={isPinned ? 'secondary' : 'ghost'}
@@ -199,6 +201,50 @@ function PluginPriceEditDialog({ plugin, onSaved }: { plugin: LoadedPlugin; onSa
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
           <Button onClick={save} disabled={saving}>{saving ? '保存中…' : '保存'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// 作者删除插件：调 DELETE /api/plugins/:id（仅未上架可删；已上架后端返 conflict）。
+// 删云端成功后同步删本地目录（若有），再 onDeleted 刷新列表。
+function PluginDeleteDialog({ plugin, onDeleted }: { plugin: LoadedPlugin; onDeleted?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function del() {
+    setDeleting(true);
+    try {
+      await api(`/api/plugins/${plugin.id}`, { method: 'DELETE' });
+      // 云端删成功后，同步清本地目录（忽略错误：本地可能无此插件）。
+      try { await deletePlugin(plugin.id); } catch { /* 本地无目录，忽略 */ }
+      toast.success('插件已删除');
+      setOpen(false);
+      onDeleted?.();
+    } catch (e) {
+      const msg = (e as ApiError).message || '删除失败';
+      toast.error(msg);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!deleting) setOpen(o); }}>
+      <Button variant="ghost" size="icon-sm" title="删除插件" onClick={() => setOpen(true)}>
+        <Trash2Icon className="size-4" />
+      </Button>
+      <DialogContent>
+        <DialogHeader {...dragRegionProps}>
+          <DialogTitle data-tauri-drag-region>删除插件</DialogTitle>
+          <DialogDescription>
+            将永久删除「{plugin.name}」的云端记录与本地目录。已上架市场的插件需先联系管理员下架。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={deleting}>取消</Button>
+          <Button variant="destructive" onClick={() => { void del(); }} disabled={deleting}>{deleting ? '删除中…' : '确认删除'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

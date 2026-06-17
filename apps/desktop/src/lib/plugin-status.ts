@@ -161,6 +161,18 @@ export function stopPlugin(pluginId: string): Promise<void> {
 }
 
 /**
+ * 删除本地持久化插件目录（temp 草稿 / 正式本地插件）。
+ *
+ * 组A Rust 后端契约（delete_plugin）：
+ * - sanitize_plugin_id 防穿越 → 若运行中先 stop → remove_dir_all 目录。
+ * - 仅删 plugins_root/<pluginId>/，不删云端记录、不删 builtin。
+ * - 目录不存在幂等成功。
+ */
+export function deletePlugin(pluginId: string): Promise<void> {
+  return tauriInvoke<void>('delete_plugin', { pluginId });
+}
+
+/**
  * 读取插件存放根目录路径（PRD 需求 6 / AC7）。
  *
  * 组A Rust 后端契约（get_plugins_root）：
