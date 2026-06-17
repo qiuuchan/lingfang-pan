@@ -289,3 +289,36 @@ Populated project-specific Trellis specs for desktop, server, Tauri backend, con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Collab MySQL Redis CDN loading optimization
+
+**Date**: 2026-06-17
+**Task**: Collab MySQL Redis CDN loading optimization
+**Branch**: `main`
+
+### Summary
+
+Committed completed Collab platform work for MySQL provider switching, Redis-backed cache acceleration, domestic CDN asset base support, and admin/desktop lazy-view preloading. Active task 06-17-fix-temp-plugin-recovery remains in progress and was not archived.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6fa10f8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
