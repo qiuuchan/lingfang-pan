@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings' | 'releases';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -9,6 +9,10 @@ export type PluginRuntimeType = 'CLIENT' | 'NODE' | 'PYTHON';
 export type ApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type TeamRole = 'TEAM_ADMIN' | 'MEMBER';
 export type LedgerDirection = 'CREDIT' | 'DEBIT';
+export type ReleaseStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+export type ReleaseChannel = 'STABLE' | 'BETA';
+export type AssetPlatform = 'WINDOWS' | 'DARWIN' | 'LINUX';
+export type AssetArch = 'X86_64' | 'AARCH64' | 'UNIVERSAL';
 
 export type User = {
   id: string;

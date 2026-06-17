@@ -1,7 +1,7 @@
 // 应用版本发布 API 客户端（落地页 Download / Changelog 用）。
 // 与原 apps/website/src/lib/releases.ts 等价，迁移自官网合并入管理端。
 // 复用 @/lib/api 的 apiBase()（同源 collab-api），无鉴权公开端点用 auth:false 的 fetch。
-import { apiBase } from '@/lib/api';
+import { api, apiBase } from '@/lib/api';
 
 /** 产物（与 collab-api ReleaseAsset 出参对齐）。 */
 export interface ReleaseAsset {
@@ -140,3 +140,99 @@ export async function listChangelog(): Promise<ChangelogResponse> {
     return { source: 'unconfigured', releases: [], degraded: true, message: '无法连接服务器，检查网络后重试' };
   }
 }
+
+// === Admin 版本发布管理（写操作，需 PLATFORM_ADMIN token） ===
+
+/** Admin 视角版本（比公开 Release 多 status：DRAFT/PUBLISHED/ARCHIVED）。 */
+export interface AdminRelease extends Release {
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+}
+
+/** 创建版本入参（POST /api/admin/releases）。 */
+export interface ReleaseCreateInput {
+  version: string;
+  channel?: 'STABLE' | 'BETA';
+  title?: string;
+  notes?: string;
+}
+
+/** 登记外链产物入参（POST /api/admin/releases/:id/assets）。 */
+export interface AssetCreateInput {
+  platform: 'WINDOWS' | 'DARWIN' | 'LINUX';
+  arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL';
+  url: string;
+  filename?: string;
+  signature?: string;
+  sizeBytes?: number;
+}
+
+/** GET /api/admin/releases：版本列表（含 DRAFT/ARCHIVED）。channel 可选过滤。 */
+export async function listAdminReleases(channel?: 'STABLE' | 'BETA'): Promise<AdminRelease[]> {
+  const q = channel ? `?channel=${channel}` : '';
+  const data = await api<{ releases: AdminRelease[] }>(`/api/admin/releases${q}`);
+  return data.releases ?? [];
+}
+
+/** POST /api/admin/releases：创建 DRAFT 版本。 */
+export function createRelease(input: ReleaseCreateInput) {
+  return api<{ release: AdminRelease }>('/api/admin/releases', { method: 'POST', body: input });
+}
+
+/** PATCH /api/admin/releases/:id：改 title/notes。 */
+export function updateRelease(id: string, body: { title?: string; notes?: string }) {
+  return api<{ release: AdminRelease }>(`/api/admin/releases/${id}`, { method: 'PATCH', body });
+}
+
+/** POST /api/admin/releases/:id/publish：发布。 */
+export function publishRelease(id: string) {
+  return api<{ release: AdminRelease }>(`/api/admin/releases/${id}/publish`, { method: 'POST' });
+}
+
+/** POST /api/admin/releases/:id/archive：归档。 */
+export function archiveRelease(id: string) {
+  return api<{ release: AdminRelease }>(`/api/admin/releases/${id}/archive`, { method: 'POST' });
+}
+
+/** POST /api/admin/releases/:id/assets：登记外链产物。 */
+export function addAsset(id: string, input: AssetCreateInput) {
+  return api<{ asset: ReleaseAsset }>(`/api/admin/releases/${id}/assets`, { method: 'POST', body: input });
+}
+
+/** POST /api/admin/releases/:id/assets/upload：上传安装包文件（multipart）+ 可选 .sig 签名。
+ *  上传大文件需较长超时（120s），与默认 30s 区分。返回建好的 asset（含 /downloads/ 下载链接 + signature）。 */
+export async function uploadAsset(
+  id: string,
+  file: File,
+  platform: 'WINDOWS' | 'DARWIN' | 'LINUX',
+  arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL',
+  sigFile?: File,
+): Promise<ReleaseAsset> {
+  const form = new FormData();
+  form.append('file', file);
+  if (sigFile) form.append('signature', sigFile);
+  form.append('platform', platform);
+  form.append('arch', arch);
+  const data = await api<{ asset: ReleaseAsset }>(`/api/admin/releases/${id}/assets/upload`, {
+    method: 'POST',
+    formData: form,
+    timeoutMs: 120_000,
+  });
+  return data.asset;
+}
+
+/** DELETE /api/admin/releases/:id/assets/:assetId：删除产物。 */
+export function deleteAsset(id: string, assetId: string) {
+  return api(`/api/admin/releases/${id}/assets/${assetId}`, { method: 'DELETE' });
+}
+
+/** 拼接下载直链：asset.url 是相对路径（/downloads/xxx），前端展示/复制时拼后端基址。 */
+export function absoluteDownloadUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${apiBase()}${url}`;
+}
+
+/** 触发下载（带 token？downloads 是公开静态目录，无需 token，直接打开）。 */
+export function openDownload(url: string) {
+  window.open(absoluteDownloadUrl(url), '_blank');
+}
+

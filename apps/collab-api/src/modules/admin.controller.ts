@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { requireUser } from '../common';
@@ -283,6 +283,12 @@ export class AdminController {
 
   // === 应用版本发布（平台 Admin 维护，ensurePlatformAdmin 在 ReleaseService 内） ===
 
+  @Get('releases')
+  @ApiOperation({ summary: '版本列表（含 DRAFT/PUBLISHED/ARCHIVED 全部状态，Admin）' })
+  listReleases(@Req() req: Request, @Query('channel') channel?: 'STABLE' | 'BETA') {
+    return this.releases.listAdmin(requireUser(req).id, channel);
+  }
+
   @Post('releases')
   @ApiOperation({ summary: '创建版本（DRAFT，需后续 publish）' })
   createRelease(@Req() req: Request, @Body() body: ReleaseCreateDto) {
@@ -314,15 +320,20 @@ export class AdminController {
   }
 
   @Post('releases/:id/assets/upload')
-  @ApiOperation({ summary: '上传安装包文件（自动创建 asset，存 downloads/ 目录）' })
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }))
+  @ApiOperation({ summary: '上传安装包文件（自动创建 asset，存 downloads/ 目录，可附带 .sig 签名）' })
+  @UseInterceptors(FileFieldsInterceptor(
+    [{ name: 'file', maxCount: 1 }, { name: 'signature', maxCount: 1 }],
+    { limits: { fileSize: 500 * 1024 * 1024 } },
+  ))
   uploadReleaseAsset(
     @Req() req: Request,
     @Param('id') id: string,
-    @UploadedFile() file: { originalname: string; buffer?: Buffer; path?: string; size?: number },
+    @UploadedFiles() files: { file?: Array<{ originalname: string; buffer?: Buffer; path?: string; size?: number }>; signature?: Array<{ buffer?: Buffer; path?: string }> },
     @Body() body: { platform?: string; arch?: string },
   ) {
-    return this.releases.uploadAsset(requireUser(req).id, id, file, body.platform, body.arch);
+    const file = files?.file?.[0];
+    const sigFile = files?.signature?.[0];
+    return this.releases.uploadAsset(requireUser(req).id, id, file, sigFile, body.platform, body.arch);
   }
 
   @Delete('releases/:id/assets/:assetId')
