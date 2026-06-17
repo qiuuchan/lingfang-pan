@@ -244,6 +244,11 @@ export function ReleasesView() {
                             <SendIcon className="size-3.5" />
                           </Button>
                         )}
+                        {r.status === 'ARCHIVED' && (
+                          <Button variant="ghost" size="sm" onClick={() => setConfirmPublish(r)} title="重新发布（取消归档）">
+                            <SendIcon className="size-3.5" />
+                          </Button>
+                        )}
                         {r.status === 'PUBLISHED' && (
                           <Button variant="ghost" size="sm" onClick={() => setConfirmArchive(r)} title="归档">
                             <ArchiveIcon className="size-3.5" />

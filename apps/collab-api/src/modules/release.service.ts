@@ -168,7 +168,8 @@ export class ReleaseService {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.release.findUnique({ where: { id } });
     if (!existing) throw notFound('版本不存在');
-    if (existing.status === 'ARCHIVED') throw badRequest('已归档的版本不可发布（请先改回 DRAFT）');
+    // 允许 DRAFT / ARCHIVED → PUBLISHED（重新发布/取消归档）。
+    // publishedAt 仅首次发布时落库，重发（含归档后恢复）保持原值（下方 line 179 注释）。
 
     const release = await this.prisma.$transaction(async (tx) => {
       // 同 channel 其他版本取消 latest 标志（保证 isLatest 在 channel 内唯一）。
