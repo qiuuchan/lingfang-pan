@@ -3,7 +3,7 @@
 // 日期统一用 formatDate（与更新日志页时区一致）；签名状态数据驱动；平台卡 hover accent 线；release notes 折叠区。
 // 顶栏：返回首页 + logo。窄列居中内容。API 不可用时优雅降级。
 import { useEffect, useState } from 'react';
-import { getLatestRelease, formatSize, formatDate, PLATFORM_META, type Release, type ReleaseAsset } from '@/lib/releases';
+import { getLatestRelease, formatSize, formatDate, PLATFORM_META, absoluteDownloadUrl, type Release, type ReleaseAsset } from '@/lib/releases';
 import { renderMarkdown } from '@/lib/markdown';
 
 type Platform = keyof typeof PLATFORM_META;
@@ -148,7 +148,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                     return (
                       <a
                         key={platform}
-                        href={available ? asset!.url : undefined}
+                        href={available ? absoluteDownloadUrl(asset!.url) : undefined}
                         target={available ? '_blank' : undefined}
                         rel={available ? 'noopener noreferrer' : undefined}
                         aria-disabled={!available}
