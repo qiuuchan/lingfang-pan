@@ -335,6 +335,47 @@ impl PluginStore {
         }
         fs::read_to_string(&target).map_err(|e| format!("读取文件失败：{e}"))
     }
+
+    /// 批量写插件文件到 plugins_root/<plugin_id>/（修改已有插件时落盘云端 files）。
+    ///
+    /// 与 read_plugin_file 对称的写操作。path 白名单防穿越：
+    /// - 不含 `..` 段（防越出 plugin_dir）。
+    /// - 非绝对路径（仅相对 plugin_dir）。
+    /// - join 后 canonicalize 父目录校验仍在 base 内（文件可能不存在，校验其父目录）。
+    /// 幂等：覆盖同名文件（保证云端最新版本）。自动创建子目录（如 ui/）。
+    pub fn write_files(&self, plugin_id: &str, files: &[(String, String)]) -> Result<(), String> {
+        let base = self.ensure_plugin_dir(plugin_id)?;
+        for (path, content) in files {
+            // path 白名单：拒绝对路径穿越（与 read 的 canonicalize+starts_with 同语义，但写时文件不存在，
+            // 改为校验 path 段不含 .. + 绝对路径，再 join 后规范化父目录校验）。
+            if path.is_empty() {
+                return Err(format!("非法文件路径：{path}"));
+            }
+            let p = std::path::Path::new(path);
+            // 绝对路径（Windows 盘符 C:\ 或 Unix /）一律拒。
+            if p.is_absolute() || path.starts_with('/') || path.starts_with('\\') || path.contains(':') {
+                return Err(format!("非法文件路径（绝对路径）：{path}"));
+            }
+            // 段级校验：任一段为 .. 视为穿越。
+            if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                return Err(format!("非法文件路径（含 ..）：{path}"));
+            }
+            let target = base.join(p);
+            // 校验规范化后仍在 base 内（防符号链接等绕过）。
+            let parent = target.parent().unwrap_or(std::path::Path::new(""));
+            if let Ok(parent_canon) = parent.canonicalize() {
+                if !parent_canon.starts_with(&base) {
+                    return Err(format!("非法文件路径（越出插件目录）：{path}"));
+                }
+            }
+            // 创建子目录（如 ui/）。
+            if let Some(parent_dir) = target.parent() {
+                fs::create_dir_all(parent_dir).map_err(|e| format!("创建文件目录失败：{e}"))?;
+            }
+            fs::write(&target, content).map_err(|e| format!("写入文件失败（{path}）：{e}"))?;
+        }
+        Ok(())
+    }
 }
 
 /// 扫描单个插件目录，判定 ready/incomplete/error（不含运行态，由命令层合并组B 进程表）。
@@ -662,6 +703,25 @@ pub fn read_local_plugin_file(
     file: String,
 ) -> Result<String, String> {
     state.read_plugin_file(&plugin_id, &file)
+}
+
+/// 单个文件入参（path 相对插件目录，content 文件内容）。
+#[derive(serde::Deserialize)]
+pub struct PluginFileInput {
+    pub path: String,
+    pub content: String,
+}
+
+/// 命令：批量写插件文件到 plugins_root/<plugin_id>/（修改已有插件时落盘云端 files）。
+/// 与 read_local_plugin_file 对称。path 白名单防穿越（write_files 方法内校验）。幂等覆盖。
+#[tauri::command]
+pub fn write_plugin_files(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    files: Vec<PluginFileInput>,
+) -> Result<(), String> {
+    let pairs: Vec<(String, String)> = files.into_iter().map(|f| (f.path, f.content)).collect();
+    state.write_files(&plugin_id, &pairs)
 }
 
 /// 流程重构：上传命名时 rename 临时插件目录为正式目录，并把用户命名写入 manifest.title（PRD 需求 1 / AC1）。
@@ -1041,5 +1101,45 @@ mod tests {
         assert!(json.contains("\"runtime\":\"python\""));
         // detail 为 None 时应跳过（skip_serializing_if）。
         assert!(!json.contains("\"detail\""));
+    }
+
+    #[test]
+    fn write_files_writes_multiple_and_subdirs() {
+        let store = temp_store("write-multi");
+        let files = vec![
+            ("manifest.json".to_string(), r#"{"id":"x","name":"X"}"#.to_string()),
+            ("ui/index.html".to_string(), "<html></html>".to_string()),
+            ("data/config.json".to_string(), "{}".to_string()),
+        ];
+        store.write_files("my-plugin", &files).unwrap();
+        let dir = store.plugin_dir("my-plugin").unwrap();
+        assert_eq!(fs::read_to_string(dir.join("manifest.json")).unwrap(), r#"{"id":"x","name":"X"}"#);
+        assert_eq!(fs::read_to_string(dir.join("ui").join("index.html")).unwrap(), "<html></html>");
+        assert_eq!(fs::read_to_string(dir.join("data").join("config.json")).unwrap(), "{}");
+    }
+
+    #[test]
+    fn write_files_overwrites_existing() {
+        let store = temp_store("write-overwrite");
+        store.write_files("p", &[("a.txt".to_string(), "v1".to_string())]).unwrap();
+        // 再写覆盖。
+        store.write_files("p", &[("a.txt".to_string(), "v2".to_string())]).unwrap();
+        let dir = store.plugin_dir("p").unwrap();
+        assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "v2");
+    }
+
+    #[test]
+    fn write_files_rejects_traversal_path() {
+        let store = temp_store("write-traversal");
+        // ../escape 应被段级白名单拒绝（防越出 plugin_dir）。
+        let err = store.write_files("p", &[("../escape.txt".to_string(), "x".to_string())]).unwrap_err();
+        assert!(err.contains("非法") || err.contains(".."));
+    }
+
+    #[test]
+    fn write_files_rejects_absolute_path() {
+        let store = temp_store("write-absolute");
+        let err = store.write_files("p", &[("/etc/passwd".to_string(), "x".to_string())]).unwrap_err();
+        assert!(err.contains("非法"));
     }
 }

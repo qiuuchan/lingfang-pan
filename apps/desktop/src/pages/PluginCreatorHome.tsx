@@ -67,6 +67,7 @@ import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { AssistantChat } from '@/components/chat/AssistantChat';
 import { Composer } from '@/components/creator/Composer';
+import { loadPlugins } from './plugins-runtime';
 import { ConversationRail } from '@/components/creator/ConversationRail';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
 import { PreviewDrawer } from '@/components/creator/PreviewDrawer';
@@ -78,6 +79,19 @@ import {
   STATUS_VARIANT,
   type LocalPluginStatus,
 } from '@/lib/plugin-status';
+
+/** 从 LoadedPlugin 的 files 解析 manifest 摘要（@引用时拼进 prompt 让 AI 参考）。 */
+function pluginManifestSummary(plugin: LoadedPlugin): string {
+  const manifestFile = plugin.files?.find((f) => f.path === 'manifest.json');
+  if (!manifestFile) return `${plugin.name}（无 manifest）`;
+  try {
+    const m = JSON.parse(manifestFile.content);
+    const caps = Array.isArray(m.capabilities) ? m.capabilities.map((c: { kind?: string }) => c.kind).filter(Boolean).join('/') : '';
+    return `${m.runtime_type || 'client'}, entry=${m.entry || 'ui/index.html'}${caps ? `, capabilities: ${caps}` : ''}`;
+  } catch {
+    return `${plugin.name}（manifest 解析失败）`;
+  }
+}
 
 export function PluginCreatorHome() {
   const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion } = useApp();
@@ -140,6 +154,10 @@ export function PluginCreatorHome() {
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [cloudPlugin, setCloudPlugin] = useState<LoadedPlugin | null>(null);
+  // B 聊天引用插件：@触发选中的插件列表（id + name + manifest 摘要），send 时拼进 prompt 让 AI 参考。
+  const [attachedPlugins, setAttachedPlugins] = useState<Array<{ id: string; name: string; summary: string }>>([]);
+  // B @触发可选的插件（team + 本地合并），Composer Popover 用。
+  const [mentionablePlugins, setMentionablePlugins] = useState<Array<{ id: string; name: string; summary: string }>>([]);
   // 最近插件只写 localStorage（供「插件」页读取），创建页不再展示，故无 state。
   const chatRef = useRef<HTMLDivElement>(null);
   // 修复：finalizeSession 在 exit listener（useEffect 闭包）里调用，捕获的 currentDraft 是注册时的旧值，
@@ -201,6 +219,32 @@ export function PluginCreatorHome() {
     // 依赖 modelConfigVersion：设置页保存/删除模型绑定后 bump，这里重拉生效模型，无需重启应用。
   }, [modelConfigVersion]);
   useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
+  // B 聊天引用：拉 team 插件 + 本地插件作 @可选列表（manifest 摘要供 send 时拼接）。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [teamRes, localItems] = await Promise.all([
+        loadPlugins().catch(() => ({ plugins: [] as LoadedPlugin[], error: '' })),
+        scanPluginStatus().catch(() => []),
+      ]);
+      if (cancelled) return;
+      // team 插件：source=team（自己上传的），从 files 解析 manifest 摘要。
+      const team = teamRes.plugins
+        .filter((p) => p.source === 'team')
+        .map((p) => ({ id: p.id, name: p.name, summary: pluginManifestSummary(p) }));
+      // 本地插件：scan 扫描的（含 temp/正式），用 scan 的 manifest 字段。
+      const local = localItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        summary: `${item.runtime || 'client'}, entry=${item.entry || 'ui/index.html'}`,
+      }));
+      // 去重（team 插件可能也在本地）：按 id 优先 team。
+      const seen = new Set<string>();
+      const merged = [...team, ...local].filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+      setMentionablePlugins(merged);
+    })();
+    return () => { cancelled = true; };
+  }, []);
   // 问题1：智能滚动——仅当用户已贴近底部（或尚未手动向上滚）时才自动滚到底，
   // 用户向上翻看历史时新消息到来不打断（AionUi 标准模式）。
   const stickToBottomRef = useRef(true);
@@ -686,13 +730,21 @@ export function PluginCreatorHome() {
   // 发起一轮对话。overrideText 用于「重试」场景复用上一次 prompt
   // （send 出错时 input 已清空，重试不能用空 input）。
   async function send(overrideText?: string) {
-    const text = (overrideText ?? input).trim();
-    if (!text || streaming) return;
+    const rawText = (overrideText ?? input).trim();
+    if (!rawText || streaming) return;
     // 修复 H5：后端已确认无可用 CLI 时拦截发送，避免发起注定失败的 start_session。
     // null 表示尚未拉取（不阻断，与原行为一致）；false 表示确认无可用 CLI。
     if (hasAvailableCliRef.current === false) {
       toast.error('当前无可用 CLI，请先在设置中安装 Claude / Codex / OpenCode');
       return;
+    }
+    // B 聊天引用：attachedPlugins 非空时把 manifest 摘要拼进 prompt 前，让 AI 参考被引用插件。
+    // 最多 5 个（防 prompt 过长）；拼完清空引用（每轮独立，不跨轮累积）。
+    let text = rawText;
+    if (attachedPlugins.length > 0) {
+      const refs = attachedPlugins.slice(0, 5).map((p) => `- ${p.name}（${p.summary}）`).join('\n');
+      text = `[引用插件参考]\n${refs}\n[/引用插件参考]\n${rawText}`;
+      setAttachedPlugins([]);
     }
     setInput('');
     setPendingUser(text);
@@ -1251,6 +1303,10 @@ export function PluginCreatorHome() {
               providers={providers}
               streaming={streaming}
               effort={effort}
+              attachedPlugins={attachedPlugins}
+              mentionablePlugins={mentionablePlugins}
+              onAttach={(p) => setAttachedPlugins((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]))}
+              onDetach={(id) => setAttachedPlugins((prev) => prev.filter((x) => x.id !== id))}
               onInputChange={setInput}
               onModelChange={setModel}
               onProviderChange={setProvider}

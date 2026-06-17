@@ -27,6 +27,7 @@ import {
   startPlugin,
   stopPlugin,
   deletePlugin,
+  writePluginFiles,
   readLocalPluginFile,
   STATUS_DISPLAY,
   STATUS_VARIANT,
@@ -67,18 +68,20 @@ function Runner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }
     try {
       // collab-api 的 publicPlugin 始终内联返回 files，直接用本地数据派生草稿即可，
       // 不再回退到已下线的 Rust /plugins/:id/edit 路由（collab-api 无对应能力）。
-      if (plugin.files?.length) {
-        setCurrentDraft({
-          id: plugin.id,
-          status: plugin.status || 'ready',
-          files: plugin.files,
-          turns: [],
-          diagnostics: [],
-          plugin_id: plugin.id,
-        });
-      } else {
+      if (!plugin.files?.length) {
         throw new Error('插件缺少安装文件，无法进入编辑器。');
       }
+      // 先把云端 files 落盘到本地 plugins_root/<plugin.id>/，让 AI 进创建器时能 Read 现有代码并改
+      // （而非看到空目录重新生成）。plugin.id 是 UUID（含 -），sanitize_plugin_id 接受。
+      await writePluginFiles(plugin.id, plugin.files);
+      setCurrentDraft({
+        id: plugin.id,
+        status: plugin.status || 'ready',
+        files: plugin.files,
+        turns: [],
+        diagnostics: [],
+        plugin_id: plugin.id,
+      });
       setRunningPlugin(null);
       setView('home');
     } catch (caught) {
