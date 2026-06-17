@@ -713,7 +713,47 @@ pub(crate) fn delete_plugin_dir(
     if !dir.exists() {
         return Ok(()); // 目录不存在幂等成功（云端已删 / 手动清过）。
     }
-    std::fs::remove_dir_all(&dir).map_err(|e| format!("删除插件目录失败：{e}"))
+    // 删目录：venv / node_modules 含大量 exe/pyd/dll，Windows 上 remove_dir_all 常因
+    // 杀软实时扫描锁 / 文件句柄短暂残留 / 只读属性失败（os error 5 拒绝访问）。
+    // 重试 3 次（间隔 300ms 等句柄释放 / AV 扫完），仍失败则 Windows 降级 rmdir /s /q（强制删）。
+    remove_dir_all_with_retry(&dir)
+}
+
+/// 带重试 + Windows rmdir 降级的目录删除（venv/node_modules 在 Windows 删除不可靠）。
+fn remove_dir_all_with_retry(dir: &std::path::Path) -> Result<(), String> {
+    // 先尝试 std::fs::remove_dir_all，重试 3 次（间隔 300ms）。
+    let mut last_err = None;
+    for attempt in 0..3 {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            }
+        }
+    }
+    // Windows 降级：cmd /c rmdir /s /q（强制删，对 AV 锁/只读更鲁棒）。
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/c", "rmdir", "/s", "/q"])
+            .arg(dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if let Ok(s) = status {
+            if s.success() {
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "删除插件目录失败：{}（可能是杀软锁定或文件占用，请关闭杀软实时保护或手动删除：{}）",
+        last_err.map(|e| e.to_string()).unwrap_or_default(),
+        dir.display()
+    ))
 }
 
 /// 命令：查询插件进程运行状态（PRD 需求 2 / AC2：running/stopped 动态判定）。
