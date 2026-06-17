@@ -33,7 +33,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: sh -c "cd /app/apps/collab-api && npx prisma generate && npx prisma migrate deploy && node dist/seed-admin.js && node dist/main.js"
+    command: sh -c "cd /app/apps/collab-api && pnpm prisma:generate && pnpm prisma:deploy && node dist/seed-admin.js && node dist/main.js"
     restart: unless-stopped
 
   collab-admin:
@@ -43,6 +43,8 @@ services:
       args:
         # 同源部署使用相对路径（空值），前端请求走 /api/ 由 Nginx 代理
         VITE_COLLAB_API_BASE: ${VITE_API_BASE_URL:-${VITE_COLLAB_API_BASE:-}}
+        # 国内 CDN 静态资源前缀（如 https://cdn.example.cn/lingfang-admin/），为空则使用同源静态资源
+        VITE_CDN_BASE_URL: ${VITE_CDN_BASE_URL:-}
     # 仅绑定宿主机本地回环，由 Nginx 反代对外服务
     ports:
       - "127.0.0.1:4174:4174"

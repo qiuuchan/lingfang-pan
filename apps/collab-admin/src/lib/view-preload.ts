@@ -1,0 +1,22 @@
+import type { View } from '@/lib/types';
+
+const loaders: Record<View, () => Promise<unknown>> = {
+  dashboard: () => import('@/components/dashboard'),
+  users: () => import('@/components/users-view'),
+  platformAdmins: () => import('@/components/admins-view'),
+  teams: () => import('@/components/teams-view'),
+  plugins: () => import('@/components/plugins-view'),
+  llmProviders: () => import('@/components/providers-view'),
+  applications: () => import('@/components/applications-view'),
+  audit: () => import('@/components/audit-view'),
+  releases: () => import('@/components/releases-view'),
+  settings: () => import('@/components/settings-view'),
+};
+
+const loaded = new Set<View>();
+
+export function preloadView(view: View): void {
+  if (loaded.has(view)) return;
+  loaded.add(view);
+  void loaders[view]?.().catch(() => loaded.delete(view));
+}

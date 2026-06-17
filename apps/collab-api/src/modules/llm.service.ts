@@ -20,27 +20,19 @@ import { AuthService } from './auth.service';
 import { decryptApiKey, encryptApiKey, fingerprintApiKey, getLlmKey, maskApiKey } from '../crypto/credential-cipher';
 import { LLM_PROVIDER } from './dto/enums';
 import type { BindingUpsertDto, ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
+import { AppCacheService, CACHE_DEFAULT_TTL_MS, createMemoryCacheStore } from '../cache.service';
 
 /** 当前启用 provider 的内存缓存 TTL（毫秒）。
  *  active-provider 极少变更（仅 adminActivateProvider 切换或 adminCreate/Update/Delete provider 时变），
  *  但被桌面端高频读取（启动拉模型 + 每次 AI 生成可能解密 key 间接依赖 provider 存在性）。
  *  组E 性能：module-level cache + 手动失效（admin 写操作清缓存），TTL 兜底防数据漂移。 */
-const ACTIVE_PROVIDER_CACHE_TTL_MS = 30_000;
-
-/** active-provider 缓存条目：null 也缓存（无启用 provider 时避免每次请求都查库返 404）。
- *  expiresAt 过期后回源。 */
-interface ActiveProviderCacheEntry {
-  value: { name: string; apiUrl: string; defaultModels: string[] } | null;
-  expiresAt: number;
-}
-
-/** module-level 缓存：进程内单例，避免与 DI 生命周期耦合。null = 未填充。 */
-let activeProviderCache: ActiveProviderCacheEntry | null = null;
+const ACTIVE_PROVIDER_CACHE_KEY = 'llm:active-provider';
+const fallbackActiveProviderCache = new AppCacheService(createMemoryCacheStore());
 
 /** 重置 active-provider 缓存（仅供测试隔离用例间状态）。
  *  生产代码通过 admin 写操作自动失效。导出以让单测在每个用例前清空 module-level 状态。 */
 export function resetActiveProviderCache(): void {
-  activeProviderCache = null;
+  void fallbackActiveProviderCache.delete(ACTIVE_PROVIDER_CACHE_KEY);
 }
 
 @Injectable()
@@ -48,6 +40,7 @@ export class LlmService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AppCacheService) private readonly cache: AppCacheService = fallbackActiveProviderCache,
   ) {}
 
   // === 租户：当前启用 provider ===
@@ -57,29 +50,21 @@ export class LlmService {
    *  组E 性能：命中内存缓存直接返回（TTL 内零 DB 查询），过期或被 admin 写操作失效后回源查库。 */
   async getActiveProvider(actorId: string) {
     await this.auth.ensureCurrentTeam(actorId);
-    const now = Date.now();
-    if (activeProviderCache && activeProviderCache.expiresAt > now) {
-      const cached = activeProviderCache.value;
-      if (!cached) {
-        throw new AppError(404, 'no_active_provider', '平台尚未配置模型服务，请联系管理员');
-      }
-      return cached;
-    }
-    const provider = await this.prisma.llmGateway.findFirst({
-      where: { isActive: true, status: 'ENABLED' },
+    const cached = await this.cache.remember(ACTIVE_PROVIDER_CACHE_KEY, CACHE_DEFAULT_TTL_MS, async () => {
+      const provider = await this.prisma.llmGateway.findFirst({
+        where: { isActive: true, status: 'ENABLED' },
+      });
+      if (!provider) return null;
+      return {
+        name: provider.name,
+        apiUrl: provider.apiUrl,
+        defaultModels: (provider.models as string[]) ?? [],
+      };
     });
-    if (!provider) {
-      // 缓存「无 active provider」负结果，避免高频请求反复查库。
-      activeProviderCache = { value: null, expiresAt: now + ACTIVE_PROVIDER_CACHE_TTL_MS };
+    if (!cached) {
       throw new AppError(404, 'no_active_provider', '平台尚未配置模型服务，请联系管理员');
     }
-    const value = {
-      name: provider.name,
-      apiUrl: provider.apiUrl,
-      defaultModels: (provider.models as string[]) ?? [],
-    };
-    activeProviderCache = { value, expiresAt: now + ACTIVE_PROVIDER_CACHE_TTL_MS };
-    return value;
+    return cached;
   }
 
   // === 平台 Admin provider 目录方法 ===
@@ -119,7 +104,7 @@ export class LlmService {
     });
     // 组E 性能：provider 目录变更后失效 active-provider 缓存（虽 create 默认 isActive=false，但 status 可能 ENABLED，
     // 保守失效避免遗漏任何影响 active 查询结果集的改动）。
-    activeProviderCache = null;
+    await this.cache.delete(ACTIVE_PROVIDER_CACHE_KEY);
     return { provider: this.adminProvider(provider) };
   }
 
@@ -147,7 +132,7 @@ export class LlmService {
       name: provider.name,
     });
     // 组E 性能：update 可能改 status（ENABLED↔DISABLED），影响 active-provider 查询的 status 过滤结果，需失效缓存。
-    activeProviderCache = null;
+    await this.cache.delete(ACTIVE_PROVIDER_CACHE_KEY);
     return { provider: this.adminProvider(provider) };
   }
 
@@ -166,7 +151,7 @@ export class LlmService {
     await this.prisma.llmGateway.delete({ where: { id } });
     await this.audit(actorId, 'admin.llm_provider.deleted', 'LlmGateway', id, { name: existing.name });
     // 组E 性能：provider 删除后失效 active-provider 缓存（删除的虽是 isActive=false 的，但保守失效确保一致性）。
-    activeProviderCache = null;
+    await this.cache.delete(ACTIVE_PROVIDER_CACHE_KEY);
     return { ok: true };
   }
 
@@ -186,7 +171,7 @@ export class LlmService {
       name: provider.name,
     });
     // 组E 性能：activate 切换了 isActive 唯一启用项，active-provider 查询结果必然改变，必须失效缓存。
-    activeProviderCache = null;
+    await this.cache.delete(ACTIVE_PROVIDER_CACHE_KEY);
     return { provider: this.adminProvider(provider) };
   }
 
