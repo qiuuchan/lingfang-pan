@@ -462,6 +462,7 @@ fn main() {
             plugin_store::set_plugins_root,
             plugin_store::scan_plugin_status,
             plugin_store::read_local_plugin_file,
+            plugin_store::write_plugin_files,
             plugin_store::rename_plugin_dir,
             cli_installer::install_cli,
             cli_installer::install_runtime,

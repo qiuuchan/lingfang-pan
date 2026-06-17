@@ -173,6 +173,18 @@ export function deletePlugin(pluginId: string): Promise<void> {
 }
 
 /**
+ * 批量写插件文件到 plugins_root/<pluginId>/（修改已有插件时落盘云端 files）。
+ *
+ * 组A Rust 后端契约（write_plugin_files）：
+ * - sanitize_plugin_id + ensure_plugin_dir 建目录 → 逐文件写（path 白名单防穿越）。
+ * - 幂等覆盖同名文件，自动创建子目录（如 ui/）。
+ * - 让 AI 进创建器时能 Read 到现有代码并改（而非重新生成）。
+ */
+export function writePluginFiles(pluginId: string, files: { path: string; content: string }[]): Promise<void> {
+  return tauriInvoke<void>('write_plugin_files', { pluginId, files });
+}
+
+/**
  * 读取插件存放根目录路径（PRD 需求 6 / AC7）。
  *
  * 组A Rust 后端契约（get_plugins_root）：

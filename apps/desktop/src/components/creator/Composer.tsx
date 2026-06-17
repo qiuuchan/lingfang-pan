@@ -1,4 +1,5 @@
-import { SendIcon, SquareIcon, GaugeIcon } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { SendIcon, SquareIcon, GaugeIcon, AtSignIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +16,9 @@ import {
 // effort 随每轮 send 传（start_session + send_input 都带，可会话中途调）。
 const EFFORT_OFF: EffortLevel = 'none';
 
+/** @引用的插件项（id + name + manifest 摘要，send 时拼进 prompt）。 */
+export type MentionPlugin = { id: string; name: string; summary: string };
+
 export function Composer({
   input,
   model,
@@ -23,6 +27,10 @@ export function Composer({
   providers,
   streaming,
   effort,
+  attachedPlugins,
+  mentionablePlugins,
+  onAttach,
+  onDetach,
   onInputChange,
   onModelChange,
   onProviderChange,
@@ -38,6 +46,10 @@ export function Composer({
   providers: { id: string; label: string; models: string[] }[];
   streaming: boolean;
   effort: EffortLevel;
+  attachedPlugins: MentionPlugin[];
+  mentionablePlugins: MentionPlugin[];
+  onAttach: (plugin: MentionPlugin) => void;
+  onDetach: (id: string) => void;
   onInputChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onProviderChange: (value: string) => void;
@@ -52,21 +64,97 @@ export function Composer({
   const hasModels = providerInfo.models.length > 0;
   const selectValue = hasModels ? (model || providerInfo.models[0]) : CUSTOM_MODEL_SENTINEL;
 
+  // B @触发：输入 @ 时弹插件选择 Popover。mentionQuery 是 @ 后的筛选词。
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 检测 input 末尾是否在输入 @引用（@ 后无空格、未结束）。
+  function handleInputChange(value: string) {
+    onInputChange(value);
+    // 找最后一个 @，其后无空格 = 正在输入引用词。
+    const lastAt = value.lastIndexOf('@');
+    if (lastAt !== -1) {
+      const after = value.slice(lastAt + 1);
+      if (!after.includes(' ') && !after.includes('\n')) {
+        setMentionQuery(after);
+        setMentionOpen(true);
+        return;
+      }
+    }
+    setMentionOpen(false);
+  }
+
+  // 选中插件：移除 input 里的 @标记词，插入 @<name>，记录引用。
+  function pickPlugin(plugin: MentionPlugin) {
+    const lastAt = input.lastIndexOf('@');
+    if (lastAt !== -1) {
+      const before = input.slice(0, lastAt);
+      const after = input.slice(lastAt + 1 + mentionQuery.length);
+      onInputChange(`${before}@${plugin.name} ${after}`);
+    }
+    onAttach(plugin);
+    setMentionOpen(false);
+    setMentionQuery('');
+    textareaRef.current?.focus();
+  }
+
+  const filteredMentions = mentionablePlugins
+    .filter((p) => p.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+    .filter((p) => !attachedPlugins.some((a) => a.id === p.id))
+    .slice(0, 8);
+
   return (
     <div>
       <div className="rounded-xl border bg-background p-3 shadow-sm">
-        <Textarea
-          placeholder="描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件。"
-          value={input}
-          onChange={(event) => onInputChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              onSend();
-            }
-          }}
-          className="max-h-44 min-h-20 resize-none border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
-        />
+        {/* B 已引用插件 chip 展示（可移除）。 */}
+        {attachedPlugins.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachedPlugins.map((p) => (
+              <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                <AtSignIcon className="size-3" />
+                {p.name}
+                <button type="button" onClick={() => onDetach(p.id)} className="ml-0.5 rounded-full hover:bg-primary/20">
+                  <XIcon className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* @触发下拉列表：相对 Textarea 容器绝对定位（避免 Popover API 差异）。 */}
+        <div className="relative">
+          <Textarea
+            ref={textareaRef}
+            placeholder="描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件。输入 @ 可引用已有插件作参考。"
+            value={input}
+            onChange={(event) => handleInputChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                if (mentionOpen) return; // @选择打开时 Enter 不发送（避免误触）
+                onSend();
+              }
+            }}
+            className="max-h-44 min-h-20 resize-none border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
+          />
+          {mentionOpen && filteredMentions.length > 0 && (
+            <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+              <div className="max-h-60 overflow-auto">
+                {filteredMentions.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => pickPlugin(p)}
+                    className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                  >
+                    <span className="font-medium">@{p.name}</span>
+                    <span className="text-muted-foreground">{p.summary}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <div className="flex flex-wrap items-center gap-2">
             <Select disabled={streaming} value={provider} onValueChange={(value) => onProviderChange(value || providers[0]?.id || provider)}>

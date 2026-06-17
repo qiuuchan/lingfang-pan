@@ -173,3 +173,30 @@ Reference files:
 - `apps/collab-api/src/modules/plugin.service.ts`（`deleteByAuthor`）
 - `apps/collab-api/src/modules/admin.service.ts`（`adminDeletePlugin`）
 - `apps/collab-api/src/modules/plugins.controller.ts` + `admin.controller.ts`（DELETE 端点）
+
+## 修改已有插件 + 聊天引用插件（2026-06-17）
+
+### A 修改已有插件：落盘云端 files 后进创建器
+
+`editInGenerator`（Plugins.tsx）「继续修改」时，先把云端 `plugin.files` 落盘到 `plugins_root/<plugin.id>/`（`write_plugin_files` 命令），再 `setCurrentDraft` + `setView('home')` 跳创建器。AI 进 `start_session` 时 workspace=该目录（已落盘 files），用 Read 工具看到现有代码并改（而非重新生成）。改完走已有 `edit-draft` 端点覆盖。
+
+`write_plugin_files`（`plugin_store.rs`，与 `read_local_plugin_file` 对称的写操作）：
+- `write_files` 方法：`ensure_plugin_dir` → 逐文件 path 白名单（拒 `..`/绝对路径/盘符 `:`）→ `fs::write` + 建子目录。
+- 幂等覆盖同名文件。`PluginFileInput { path, content }` 入参。
+- 安全：path 段级白名单防穿越（写时文件不存在，不能用 read 的 canonicalize+starts_with，改校验段不含 `..` + 非绝对 + join 后父目录 canonicalize 校验）。
+
+### B 聊天引用插件：@触发 + manifest 摘要拼 prompt
+
+创建器 Composer Textarea 输入 `@` 触发下拉（mentionablePlugins：team + 本地插件合并），选中后：
+- input 插入 `@<name>` 标记 + `attachedPlugins` 加该插件（id/name/summary）。
+- Textarea 上方 chip 展示已引用（可移除）。
+- send 时 attachedPlugins 非空 → prompt 前拼 `[引用插件参考] - name（manifest 摘要） [/引用插件参考]`，让 AI 参考被引用插件。限 5 个，每轮独立（send 后清空）。
+
+manifest 摘要（`pluginManifestSummary`）：从 plugin.files 找 manifest.json 解析 `runtime_type/entry/capabilities`。team 从 files 解析，本地从 scan 的 manifest 字段。
+
+Reference files:
+- `apps/desktop/src-tauri/src/plugin_store.rs`（`write_files` / `write_plugin_files` / `PluginFileInput`）
+- `apps/desktop/src/lib/plugin-status.ts`（`writePluginFiles` 封装）
+- `apps/desktop/src/pages/Plugins.tsx`（`editInGenerator` 落盘）
+- `apps/desktop/src/components/creator/Composer.tsx`（@触发 + chip + `MentionPlugin` 类型）
+- `apps/desktop/src/pages/PluginCreatorHome.tsx`（`attachedPlugins`/`mentionablePlugins` state + `pluginManifestSummary` + send 拼接）
