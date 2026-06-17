@@ -23,3 +23,4 @@ url = "2"
 # features=json 解析 OpenAI 兼容响应体；features=rustls-tls 复用 rustls 避免原生 OpenSSL/WinHTTP 依赖；
 # default-features=false 裁掉默认的 native-tls / charset / blocking 等不需要的 feature，减小产物体积。
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }

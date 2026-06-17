@@ -973,8 +973,15 @@ mod tests {
         #[cfg(windows)]
         let mut cmd = {
             use std::os::windows::process::CommandExt;
-            let mut c = std::process::Command::new("cmd");
-            c.arg("/C").arg("ping -n 30 127.0.0.1 > nul");
+            let node = match find_binary("node") {
+                Some(binary) => binary,
+                None => {
+                    eprintln!("[skip] 宿主无 node，跳过进程停止测试");
+                    return;
+                }
+            };
+            let mut c = std::process::Command::new(node);
+            c.args(["-e", "setInterval(() => {}, 1000)"]);
             const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
             c.creation_flags(CREATE_NEW_PROCESS_GROUP);
             c
