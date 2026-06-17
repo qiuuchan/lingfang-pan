@@ -113,6 +113,10 @@ channel:
 packages:
   desktop:
     path: apps/desktop
+  collab-api:
+    path: apps/collab-api
+  collab-admin:
+    path: apps/collab-admin
   contract:
     path: packages/contract
   plugin-sdk:

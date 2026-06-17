@@ -9,23 +9,15 @@ import {
   MonitorIcon,
   SendIcon,
   ShieldCheckIcon,
-  EyeIcon,
   GitBranchIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Section, InfoGrid } from '@/components/shared';
+import { RevealSecretButton, ThemeOption } from '@/components/settings/SettingsShared';
 import { useTheme } from '@/lib/theme';
 import { api } from '@/lib/api';
 import pkg from '../../package.json';
@@ -925,142 +917,3 @@ export function SettingsView() {
   );
 }
 
-/** 主题选项卡片：亮 / 暗 / 跟随系统三选一。 */
-function ThemeOption({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-  desc,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: typeof SunIcon;
-  label: string;
-  desc: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors ${
-        active ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'border-border hover:bg-muted/50'
-      }`}
-    >
-      <Icon className={`size-5 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
-      <div className="min-w-0">
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">{desc}</div>
-      </div>
-    </button>
-  );
-}
-
-/** 查看敏感配置明文按钮（SMTP 密码 / 极验私钥）。
- *  调 POST /api/admin/settings/reveal-secret（body: { password, key }），后端校验 admin 当前密码后才返回明文。
- *  流程：点击「查看」→ 弹密码确认对话框 → 输入当前管理员密码 → 调 reveal-secret → 展示明文（可复制）。
- *  安全：明文不缓存、不写本地存储，关闭对话框即清空；密码错误 / 未配置均有友好提示。
- *  disabled 条件：hasConfigured=false（后端未存该 key）时不允许查看（无可看内容）。 */
-function RevealSecretButton({
-  secretKey,
-  label,
-  hasConfigured,
-}: {
-  secretKey: 'smtpPass' | 'geetestCaptchaKey';
-  label: string;
-  hasConfigured: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState('');
-  const [revealed, setRevealed] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // 打开时重置密码与明文（避免上次的明文残留）。
-  useEffect(() => {
-    if (open) {
-      setPassword('');
-      setRevealed('');
-    }
-  }, [open]);
-
-  async function reveal() {
-    if (!password) return toast.error('请输入当前管理员密码');
-    setLoading(true);
-    try {
-      const result = await api<{ value: string }>('/api/admin/settings/reveal-secret', {
-        method: 'POST',
-        body: { password, key: secretKey },
-      });
-      setRevealed(result.value);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={!hasConfigured}
-        title={hasConfigured ? '查看明文（需二次密码确认）' : '未配置，无可查看内容'}
-        onClick={() => setOpen(true)}
-      >
-        <EyeIcon className="mr-1 size-3.5" />
-        查看
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>查看 {label} 明文</DialogTitle>
-            <DialogDescription>
-              敏感操作：需输入当前管理员密码二次确认，操作会写入审计日志。
-            </DialogDescription>
-          </DialogHeader>
-          {revealed ? (
-            <div className="space-y-2">
-              <Label>明文（仅本次可见，关闭后清空）</Label>
-              <Input value={revealed} readOnly className="font-mono text-xs" />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(revealed).then(
-                    () => toast.success('已复制到剪贴板'),
-                    () => toast.error('复制失败，请手动选取'),
-                  );
-                }}
-              >
-                复制
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="reveal-password">当前管理员密码</Label>
-              <Input
-                id="reveal-password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="输入你的登录密码"
-                onKeyDown={(e) => e.key === 'Enter' && reveal()}
-              />
-            </div>
-          )}
-          <DialogFooter>
-            {revealed ? (
-              <Button variant="outline" onClick={() => setOpen(false)}>关闭</Button>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
-                <Button onClick={reveal} disabled={loading}>{loading ? '验证中…' : '确认查看'}</Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}

@@ -1,0 +1,31 @@
+{
+  "id": "codebase-spec-refactor",
+  "name": "codebase-spec-refactor",
+  "title": "Codebase spec audit and refactor",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-17",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-17-quality-fixes",
+    "06-17-large-file-refactor",
+    "06-17-spec-update",
+    "06-17-code-audit-inventory"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
