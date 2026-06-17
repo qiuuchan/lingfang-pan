@@ -1,245 +1,249 @@
-// AssistantChat.tsx — 基于 assistant-ui 的对话显示组件（替换自写 StreamingMessage/Bubble）。
-//
-// 用 useExternalStoreRuntime 把 LingFang 的 Tauri 事件流数据（turns + liveSegments）
-// 适配成 assistant-ui 的 ThreadMessageLike，复用 assistant-ui 的运行时 + 消息状态管理。
-// 消息渲染用 useMessage hook 直接读 content parts，按类型分行：
-//   reasoning → 思考折叠区，tool-call → 工具卡片，text → Markdown 正文。
-//
-// 仅替换显示层：onNew 回调复用 PluginCreatorHome 的 send()，会话/draft/预览逻辑不变。
-
-import { useMemo, createContext, useContext, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import {
-  AssistantRuntimeProvider,
-  useExternalStoreRuntime,
-  ThreadPrimitive,
-  useMessage,
-  type ThreadMessageLike,
-} from '@assistant-ui/react';
-import { BrainIcon, WrenchIcon, ChevronDownIcon, Loader2Icon } from 'lucide-react';
+  AlertCircleIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  HelpCircleIcon,
+  Loader2Icon,
+  MessageSquareTextIcon,
+  WrenchIcon,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Markdown } from '@/components/markdown';
-import { aggregateToolCards } from '@/lib/plugin-draft';
+import { formatToolInput, type AskUserQuestion } from '@/lib/plugin-draft';
 import { cn } from '@/lib/utils';
-
-export interface ChatSegment {
-  stream: 'stdout' | 'stderr' | 'thought' | 'tool';
-  text: string;
-}
-
-export interface ChatTurn {
-  role: 'user' | 'assistant';
-  content: string;
-}
+import {
+  buildChatOutputItems,
+  type ChatOutputItem,
+  type ChatSegment,
+  type ChatTurn,
+} from './chat-output-model';
 
 interface AssistantChatProps {
   turns: ChatTurn[];
   segments: ChatSegment[];
   streaming: boolean;
   stage?: string;
+  onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
+  askAnswering?: boolean;
 }
 
-// 把流式 segments 聚合成 assistant-ui content parts。
-function segmentsToParts(segments: ChatSegment[]): ThreadMessageLike[] {
-  const result: ThreadMessageLike[] = [];
-  const thoughtText = segments.filter((s) => s.stream === 'thought').map((s) => s.text).join('');
-  if (thoughtText) {
-    result.push({
-      id: 'live',
-      role: 'assistant',
-      content: [{ type: 'reasoning', text: thoughtText }],
-      status: { type: 'running' },
-    } as ThreadMessageLike);
-  }
-  return result;
-}
-
-// 把 LingFang turns + 流式 segments 转成 ThreadMessageLike[]。
-function buildMessages(turns: ChatTurn[], segments: ChatSegment[], streaming: boolean): ThreadMessageLike[] {
-  // 判断当前轮的 assistant 回复是否已在 segments（live message）里渲染。
-  // streaming=true 且 segments 有 stdout/text 时，turns 里的最后一条 assistant turn 是同一轮
-  // （finalizeSession 在 setStreaming(false) 之前已把回复加进 turns，与 segments 重叠）→ 重复。
-  // 此时从 turns 排除最后一条 assistant turn，避免 text 双重渲染。
-  const hasLiveText = streaming && segments.some((s) => s.stream === 'stdout' || s.stream === 'stderr');
-  const lastAssistantIdx = (() => {
-    for (let i = turns.length - 1; i >= 0; i--) if (turns[i].role === 'assistant') return i;
-    return -1;
-  })();
-  const effectiveTurns = hasLiveText && lastAssistantIdx >= 0
-    ? turns.filter((_, i) => i !== lastAssistantIdx)
-    : turns;
-
-  const msgs: ThreadMessageLike[] = effectiveTurns.map((t, i) => {
-    const base: ThreadMessageLike = {
-      id: `turn-${i}`,
-      role: t.role,
-      content: [{ type: 'text' as const, text: t.content }],
-    };
-    // status 仅 assistant 消息支持（user 消息带 status 会触发「status is only supported for assistant messages」）。
-    if (t.role === 'assistant') {
-      (base as { status?: { type: 'complete'; reason: 'stop' } }).status = { type: 'complete', reason: 'stop' };
-    }
-    return base;
-  });
-
-  // 流式 segments 有内容时：追加一个 assistant message（含 reasoning/tool/text 多 part）。
-  // streaming=true 时 status=running（思考自动展开）；streaming=false（本轮结束）时 status=complete
-  // （思考折叠保留，不消失）。结束后 turns 里虽有同条 text，但 turns 是 DraftTurn 只存纯文本无 reasoning/tool，
-  // 故 segments 必须保留以维持思考/工具的渲染——为避免 text 重复，结束后 segments 的 text part 不再追加
-  // （turns 已含），只追加 reasoning/tool。
-  if (segments.length > 0) {
-    const parts: ThreadMessageLike['content'] extends infer C ? (C extends readonly (infer P)[] ? P[] : never) : never = [];
-    const thoughtText = segments.filter((s) => s.stream === 'thought').map((s) => s.text).join('');
-    if (thoughtText) parts.push({ type: 'reasoning', text: thoughtText } as never);
-
-    const toolSegments = segments.filter((s) => s.stream === 'tool').map((s) => s.text);
-    const toolCards = aggregateToolCards(toolSegments);
-    for (const card of toolCards) {
-      parts.push({
-        type: 'tool-call',
-        toolCallId: `${card.name}-${parts.length}`,
-        toolName: card.name || '工具',
-        argsText: card.inputText || '',
-        args: {},
-      } as never);
-    }
-
-    // text part：流式中追加（live message 是唯一展示处）；结束后不追加（turns 已含 text，避免重复）。
-    if (streaming) {
-      const stdoutText = segments.filter((s) => s.stream === 'stdout').map((s) => s.text).join('');
-      const stderrText = segments.filter((s) => s.stream === 'stderr').map((s) => s.text).join('\n');
-      const textText = [stdoutText, stderrText].filter(Boolean).join('\n');
-      if (textText) parts.push({ type: 'text', text: textText } as never);
-    }
-
-    msgs.push({
-      id: 'live',
-      role: 'assistant',
-      content: parts,
-      status: { type: streaming ? 'running' : 'complete', ...(streaming ? {} : { reason: 'stop' }) },
-    } as ThreadMessageLike);
-  }
-  return msgs;
-}
-
-export function AssistantChat({ turns, segments, streaming, stage }: AssistantChatProps) {
-  const messages = useMemo(() => buildMessages(turns, segments, streaming), [turns, segments, streaming]);
-
-  const runtime = useExternalStoreRuntime({
-    messages,
-    isRunning: streaming,
-    onNew: async () => {
-      /* 输入框保留现有 Composer，onNew 不处理 */
-    },
-    convertMessage: (msg) => msg,
-  });
+export function AssistantChat({
+  turns,
+  segments,
+  streaming,
+  stage,
+  onAskUserAnswer,
+  askAnswering = false,
+}: AssistantChatProps) {
+  const items = useMemo(() => buildChatOutputItems(turns, segments, streaming), [turns, segments, streaming]);
 
   return (
-    <StreamingContext.Provider value={streaming}>
-      <AssistantRuntimeProvider runtime={runtime}>
-        <ThreadPrimitive.Root className="flex h-full flex-col">
-          <ThreadPrimitive.Viewport className="flex flex-1 flex-col gap-4 overflow-y-auto px-1 pb-4">
-            <ThreadPrimitive.Messages
-              components={{
-                UserMessage,
-                AssistantMessage,
-              }}
-            />
-            {streaming && (
-              <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
-                <Loader2Icon className="size-3 animate-spin" />
-                {stage || '生成中…'}
-              </div>
-            )}
-          </ThreadPrimitive.Viewport>
-        </ThreadPrimitive.Root>
-      </AssistantRuntimeProvider>
-    </StreamingContext.Provider>
+    <div className="flex flex-col gap-3">
+      {items.map((item) => (
+        <ChatOutputItemView
+          key={item.id}
+          item={item}
+          askAnswering={askAnswering}
+          onAskUserAnswer={onAskUserAnswer}
+        />
+      ))}
+      {items.length === 0 && <span className="px-1 text-xs text-muted-foreground">等待模型输出…</span>}
+      {streaming && (
+        <div className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+          <Loader2Icon className="size-3 animate-spin" />
+          {stage || '生成中…'}
+        </div>
+      )}
+    </div>
   );
 }
 
-// 把 streaming 状态传给 AssistantMessage（判断 reasoning 展开/折叠）。
-const StreamingContext = createContext(false);
-const useStreaming = () => useContext(StreamingContext);
+function ChatOutputItemView({
+  item,
+  askAnswering,
+  onAskUserAnswer,
+}: {
+  item: ChatOutputItem;
+  askAnswering: boolean;
+  onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
+}) {
+  switch (item.type) {
+    case 'user':
+      return <UserBubble text={item.text} />;
+    case 'reasoning':
+      return <ReasoningBlock item={item} />;
+    case 'assistant-text':
+      return <AssistantTextBlock text={item.text} live={item.live} />;
+    case 'diagnostic':
+      return <DiagnosticBlock text={item.text} />;
+    case 'tool':
+      return <ToolBlock item={item} askAnswering={askAnswering} onAskUserAnswer={onAskUserAnswer} />;
+    default:
+      return null;
+  }
+}
 
-// 用户消息气泡
-function UserMessage() {
-  const message = useMessage();
-  const text = message.content
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('');
+function UserBubble({ text }: { text: string }) {
   return (
-    <div className="max-w-[82%] self-end rounded-xl bg-primary px-4 py-3 text-sm text-primary-foreground whitespace-pre-wrap break-words">
+    <div className="max-w-[82%] self-end rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground whitespace-pre-wrap break-words">
       {text}
     </div>
   );
 }
 
-// assistant 消息：按 content part 类型分行渲染
-function AssistantMessage() {
-  const message = useMessage();
-  const streaming = useStreaming();
-  // 仅 live message（当前轮）在 streaming 时展开思考；历史消息/结束后折叠。
-  const isLiveMsg = message.id === 'live';
-  const reasonOpen = isLiveMsg && streaming;
+function AssistantTextBlock({ text, live }: { text: string; live: boolean }) {
   return (
-    <div className="max-w-[82%] self-start rounded-xl bg-muted px-4 py-3">
-      <span className="mb-1 block text-[11px] opacity-70">AI</span>
-      <div className="flex flex-col gap-2">
-        {message.content.map((part, i) => {
-          if (part.type === 'reasoning') {
-            return <ReasoningBlock key={i} text={(part as { text: string }).text} open={reasonOpen} />;
-          }
-          if (part.type === 'tool-call') {
-            const tc = part as { toolName?: string; argsText?: string };
-            return <ToolCallBlock key={i} name={tc.toolName || '工具'} argsText={tc.argsText || ''} />;
-          }
-          if (part.type === 'text') {
-            return (
-              <div key={i} className="text-sm text-foreground">
-                <Markdown>{(part as { text: string }).text.replace(/\n$/, '')}</Markdown>
-              </div>
-            );
-          }
-          return null;
-        })}
-        {message.content.length === 0 && <span className="text-xs text-muted-foreground">等待模型输出…</span>}
+    <div className="max-w-[82%] self-start rounded-lg border bg-card px-4 py-3 text-foreground">
+      <OutputLabel icon={<MessageSquareTextIcon className="size-3.5" />} text={live ? 'AI 正在回复' : 'AI 回复'} />
+      <div className="mt-1.5">
+        <Markdown>{text}</Markdown>
       </div>
     </div>
   );
 }
 
-// 思考折叠区：open 控制展开/折叠（流式中展开，结束后折叠保留）。
-function ReasoningBlock({ text, open }: { text: string; open: boolean }) {
+function ReasoningBlock({ item }: { item: Extract<ChatOutputItem, { type: 'reasoning' }> }) {
   return (
-    <details open={open} className="rounded-lg border border-primary/15 bg-primary/5">
-      <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary/80 select-none">
+    <details
+      className="group max-w-[82%] self-start rounded-lg border border-primary/15 bg-primary/5"
+    >
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs font-medium text-primary/80 select-none">
         <BrainIcon className="size-3.5 shrink-0" />
-        <span>思考</span>
-        <ChevronDownIcon className={cn('ml-auto size-3.5 shrink-0 transition-transform', open ? 'rotate-180' : 'rotate-0')} />
+        <span>{item.live ? 'AI 正在思考' : 'AI 思考'}</span>
+        <span className="min-w-0 flex-1 truncate font-normal text-primary/55">{compactPreview(item.text)}</span>
+        <ChevronDownIcon className="size-3.5 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
       <div className="border-t border-primary/10 px-3 py-2">
-        <p className="whitespace-pre-wrap break-words font-mono text-xs italic text-muted-foreground">{text.replace(/\n$/, '')}</p>
+        <p className="whitespace-pre-wrap break-words font-mono text-xs italic text-muted-foreground">{item.text}</p>
       </div>
     </details>
   );
 }
 
-// 工具调用卡片
-function ToolCallBlock({ name, argsText }: { name: string; argsText: string }) {
+function DiagnosticBlock({ text }: { text: string }) {
   return (
-    <details className="rounded-lg border bg-background/60 text-xs">
+    <div className="max-w-[82%] self-start rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs">
+      <OutputLabel icon={<AlertCircleIcon className="size-3.5" />} text="检查结果" tone="warning" />
+      <pre className="mt-1.5 whitespace-pre-wrap break-words font-mono text-muted-foreground">{text}</pre>
+    </div>
+  );
+}
+
+function ToolBlock({
+  item,
+  askAnswering,
+  onAskUserAnswer,
+}: {
+  item: Extract<ChatOutputItem, { type: 'tool' }>;
+  askAnswering: boolean;
+  onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
+}) {
+  if (item.questions.length > 0) {
+    return <QuestionToolBlock item={item} askAnswering={askAnswering} onAskUserAnswer={onAskUserAnswer} />;
+  }
+  const inputDisplay = formatToolInput(item.argsText);
+  return (
+    <details className="group max-w-[82%] self-start rounded-lg border bg-card text-xs">
       <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-muted-foreground select-none">
         <WrenchIcon className="size-3.5 shrink-0" />
-        <span className="shrink-0 rounded bg-muted px-1 font-mono">{name}</span>
-        <ChevronDownIcon className="ml-auto size-3.5 shrink-0" />
+        <span className="shrink-0">工具调用</span>
+        <span className="min-w-0 truncate rounded bg-muted px-1 font-mono text-foreground/80">{item.name}</span>
+        <ChevronDownIcon className="ml-auto size-3.5 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
       <div className="border-t px-3 py-2">
-        {argsText ? (
-          <pre className="scrollbar-thin max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{argsText}</pre>
+        {inputDisplay ? (
+          <pre className="scrollbar-thin max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{inputDisplay}</pre>
         ) : (
-          <span className="text-muted-foreground/60">（入参待输出）</span>
+          <span className="text-muted-foreground/60">入参待输出</span>
         )}
       </div>
     </details>
   );
+}
+
+function QuestionToolBlock({
+  item,
+  askAnswering,
+  onAskUserAnswer,
+}: {
+  item: Extract<ChatOutputItem, { type: 'tool' }>;
+  askAnswering: boolean;
+  onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
+}) {
+  return (
+    <div className="max-w-[82%] self-start rounded-lg border border-primary/25 bg-primary/5 px-3 py-2">
+      <OutputLabel icon={<HelpCircleIcon className="size-3.5" />} text={item.name || '工具调用'} tone="primary" />
+      <div className="mt-2 divide-y divide-primary/10">
+        {item.questions.map((question, index) => (
+          <QuestionBlock
+            key={`${question.question}-${index}`}
+            question={question}
+            askAnswering={askAnswering}
+            onAskUserAnswer={onAskUserAnswer}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuestionBlock({
+  question,
+  askAnswering,
+  onAskUserAnswer,
+}: {
+  question: AskUserQuestion;
+  askAnswering: boolean;
+  onAskUserAnswer?: (question: AskUserQuestion, optionLabel: string) => void;
+}) {
+  return (
+    <div className="py-2 first:pt-0 last:pb-0">
+      <p className="text-xs font-medium text-primary">{question.header || 'AI 想确认一下'}</p>
+      <p className="mt-1 text-sm text-foreground">{question.question}</p>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {question.options.map((option, index) => (
+          <Button
+            key={`${option.label}-${index}`}
+            variant="outline"
+            size="sm"
+            disabled={askAnswering}
+            className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
+            onClick={() => onAskUserAnswer?.(question, option.label)}
+          >
+            <span className="font-medium">{option.label}</span>
+            {option.description && <span className="ml-1 text-xs font-normal text-muted-foreground">{option.description}</span>}
+          </Button>
+        ))}
+      </div>
+      {askAnswering && <p className="mt-1.5 text-[11px] text-muted-foreground">提交中…</p>}
+    </div>
+  );
+}
+
+function OutputLabel({
+  icon,
+  text,
+  tone = 'muted',
+}: {
+  icon: ReactNode;
+  text: string;
+  tone?: 'muted' | 'primary' | 'warning';
+}) {
+  return (
+    <div className={cn('flex items-center gap-1.5 text-xs font-medium', labelToneClass(tone))}>
+      {icon}
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function compactPreview(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function labelToneClass(tone: 'muted' | 'primary' | 'warning'): string {
+  if (tone === 'primary') return 'text-primary';
+  if (tone === 'warning') return 'text-amber-500';
+  return 'text-muted-foreground';
 }

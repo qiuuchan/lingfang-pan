@@ -121,7 +121,7 @@ export function PluginCreatorHome() {
   // handleAskUserAnswer 唯一守卫只有 if(!streaming) return，streaming 在 send_input resolve 前恒为 true，
   // 用户在 async 窗口内连点会触发多次 send_input（Rust 侧无 in-flight 守卫 → 派生并发进程、双 exit、transcript 串写）。
   // 此 ref 在入口置位、finally 复位，禁用 option 按钮直到本轮 send_input 完成。
-  // 配套 askAnswering state（驱动 StreamingMessage 重渲染 option 按钮 disabled 态）。
+  // 配套 askAnswering state（驱动 AssistantChat 问题选项 disabled 态）。
   const askAnsweringRef = useRef(false);
   const [askAnswering, setAskAnswering] = useState(false);
   // design §3.2.4：多会话 store。metas 由 list_sessions 一次拉取；activeId 决定当前渲染的会话与草稿。
@@ -763,7 +763,7 @@ export function PluginCreatorHome() {
   async function handleAskUserAnswer(question: AskUserQuestion, optionLabel: string) {
     // ASKU-01 修复：防重入守卫。streaming 在 send_input resolve 前恒为 true，
     // 此前连点会触发多次 send_input。用 askAnsweringRef 在入口置位、finally 复位，
-    // 期间 StreamingMessage 的 option 按钮 disabled（读 askAnsweringRef 经 answered prop 传入）。
+    // 期间 AssistantChat 的 option 按钮 disabled（读 askAnsweringRef 经 answered prop 传入）。
     if (!streaming || askAnsweringRef.current) return;
     // 修复 CREATOR-07：追问前置条件应与 send() 一致——校验首轮已退出（status !== 'running'），
     // 否则首轮 CLI 仍在 running 时派生第二个进程写同一 transcript，双 exit 覆盖草稿。
@@ -1198,13 +1198,14 @@ export function PluginCreatorHome() {
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              {/* 对话显示改用 assistant-ui（替换自写 Bubble+StreamingMessage）：
-                  useExternalStoreRuntime 适配 Tauri 事件流，思考/工具/正文分行渲染。 */}
+              {/* 对话显示按独立输出块渲染：思考 / 回复 / 诊断 / 工具调用各占一行。 */}
               <AssistantChat
                 turns={[...turns, ...(pendingUser ? [{ role: 'user' as const, content: pendingUser }] : [])]}
                 segments={liveSegments}
                 streaming={streaming}
                 stage={liveStage}
+                onAskUserAnswer={handleAskUserAnswer}
+                askAnswering={askAnswering}
               />
               {streaming && isFollowupRef.current && multiturnMode === 'degraded' && (
                 // design §3.3.6 (d)：降级伪多轮透明提示（codex/opencode 或 claude 缺 id）。
