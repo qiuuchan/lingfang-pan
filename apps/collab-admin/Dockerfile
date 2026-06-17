@@ -7,7 +7,8 @@ ENV VITE_COLLAB_API_BASE=$VITE_COLLAB_API_BASE
 ENV VITE_CDN_BASE_URL=$VITE_CDN_BASE_URL
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/collab-admin/package.json apps/collab-admin/package.json
-RUN pnpm install --filter @lingfang/collab-admin... --no-frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --filter @lingfang/collab-admin... --no-frozen-lockfile
 COPY apps/collab-admin apps/collab-admin
 RUN pnpm -C apps/collab-admin build
 
