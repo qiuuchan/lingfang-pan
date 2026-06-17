@@ -78,7 +78,7 @@ import {
 } from '@/lib/plugin-status';
 
 export function PluginCreatorHome() {
-  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view } = useApp();
+  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion } = useApp();
   // 平台缺口 Top7：环境就绪检测（CLI / 模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
   // loading=true 时不渲染横幅（避免首帧闪烁）；ready=false 时渲染并提示去设置。
   // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
@@ -196,7 +196,8 @@ export function PluginCreatorHome() {
       })
       .catch(() => { /* fallback 到 PROVIDERS，hasAvailableCliRef 保持 null 不阻断 */ });
     return () => { cancelled = true; };
-  }, []);
+    // 依赖 modelConfigVersion：设置页保存/删除模型绑定后 bump，这里重拉生效模型，无需重启应用。
+  }, [modelConfigVersion]);
   useEffect(() => { setModel(providerInfo.models[0]); }, [provider, providerInfo.models]);
   // 问题1：智能滚动——仅当用户已贴近底部（或尚未手动向上滚）时才自动滚到底，
   // 用户向上翻看历史时新消息到来不打断（AionUi 标准模式）。

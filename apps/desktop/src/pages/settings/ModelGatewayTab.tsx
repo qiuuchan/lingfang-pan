@@ -43,6 +43,7 @@ import type {
   TenantBindingPublic,
 } from '@lingfang/contract';
 import { dragRegionProps } from '@/lib/window-drag';
+import { useApp } from '@/App';
 
 /** GET /api/llm/active-provider 出参。 */
 type ActiveProviderResponse = ActiveProvider;
@@ -94,6 +95,8 @@ function isNoActiveProviderError(err: unknown): boolean {
 }
 
 export function ModelGatewayTab() {
+  // 保存绑定后 bump，通知对话页（PluginCreatorHome）重新拉取生效模型，无需重启应用。
+  const { bumpModelConfig } = useApp();
   // 当前启用 provider（null=平台未配置 active provider）。
   const [activeProvider, setActiveProvider] = useState<ActiveProvider | null>(null);
   // 平台未配置 active provider（active-provider 404 时为 true，整 Card 切到禁用态）。
@@ -226,6 +229,8 @@ export function ModelGatewayTab() {
       setBinding(res.binding);
       // 保存后清空明文 apiKey（不长期持有）。
       setApiKeyInput('');
+      // 通知对话页重拉生效模型（modelOverride 变更），避免重启才看到新模型。
+      bumpModelConfig();
       toast.success('已保存');
     } catch (err) {
       const e = err as ApiError;
@@ -245,6 +250,8 @@ export function ModelGatewayTab() {
       setSelectedModels([]);
       setApiKeyInput('');
       setPendingDelete(false);
+      // 删除绑定也改变生效模型，通知对话页重拉（模型选择器将清空）。
+      bumpModelConfig();
       toast.success('模型配置已删除');
     } catch (err) {
       const e = err as ApiError;
