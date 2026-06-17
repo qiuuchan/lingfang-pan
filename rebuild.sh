@@ -14,9 +14,9 @@ echo ""
 echo "[1/5] 停止旧容器..."
 docker compose -f "$COMPOSE_FILE" down 2>/dev/null || true
 
-# 2. 构建镜像（无缓存，确保最新代码）
-echo "[2/5] 构建镜像（无缓存）..."
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build --no-cache collab-api collab-admin
+# 2. 构建镜像（拉取最新基础镜像，利用层缓存加速）
+echo "[2/5] 构建镜像..."
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build --pull collab-api collab-admin
 echo "镜像构建完成。"
 
 # 3. 清理悬空和老旧镜像

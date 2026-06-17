@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+build
+
+# Env files (use .env.collab for Docker)
+.env
+.env.*
+!.env.collab.example
+!.env.collab
+
+# Docs (not needed at build time)
+docs
+*.md
+!README.md
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+**/__tests__
+
+# Misc
+*.log
+.turbo
+coverage

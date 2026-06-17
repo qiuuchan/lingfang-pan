@@ -3,7 +3,8 @@ WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/collab-api/package.json apps/collab-api/package.json
-RUN pnpm install --filter @lingfang/collab-api... --no-frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --filter @lingfang/collab-api... --no-frozen-lockfile
 COPY apps/collab-api apps/collab-api
 RUN pnpm -C apps/collab-api prisma:generate && pnpm -C apps/collab-api build
 
