@@ -11,20 +11,27 @@ echo "========================================"
 echo ""
 
 # 1. 停止旧容器
-echo "[1/4] 停止旧容器..."
+echo "[1/5] 停止旧容器..."
 docker compose -f "$COMPOSE_FILE" down 2>/dev/null || true
 
 # 2. 构建镜像（无缓存，确保最新代码）
-echo "[2/4] 构建镜像（无缓存）..."
+echo "[2/5] 构建镜像（无缓存）..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build --no-cache collab-api collab-admin
 echo "镜像构建完成。"
 
-# 3. 启动服务
-echo "[3/4] 启动服务..."
+# 3. 清理悬空和老旧镜像
+echo "[3/5] 清理旧镜像..."
+docker image prune -f --filter "until=24h" 2>/dev/null || true
+# 清理构建过程中产生的悬空镜像（<none>:<none>）
+docker image prune -f 2>/dev/null || true
+echo "旧镜像清理完成。"
+
+# 4. 启动服务
+echo "[4/5] 启动服务..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d
 
-# 4. 等待 API 就绪
-echo "[4/4] 等待 API 就绪..."
+# 5. 等待 API 就绪
+echo "[5/5] 等待 API 就绪..."
 for i in $(seq 1 30); do
     if curl -sf -o /dev/null http://0.0.0.0:19006/api/health 2>/dev/null; then
         echo "API 就绪！"
