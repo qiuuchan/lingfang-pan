@@ -1,7 +1,12 @@
 pub mod adapters;
+mod history;
+mod probe;
 mod process;
 pub mod store;
 mod stream;
+mod tools;
+mod types;
+mod workspace;
 
 use crate::cli_config;
 use std::collections::HashMap;
@@ -9,7 +14,6 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 // 安全修复 H2：容忍 std::sync::Mutex poison。
 // 任一持锁线程 panic 会 poison 锁，原 .lock().unwrap() 在此之后全部二次 panic，
@@ -32,14 +36,12 @@ pub(crate) fn process_tree_test_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poison| poison.into_inner())
 }
 
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use adapters::{tool_definition, CodeAssistantTool, ToolCommand, TOOL_DEFINITIONS};
-use process::{
-    build_spawn_command, command_preview, prepare_process_group, run_capture, stop_child_process,
-};
+use adapters::{tool_definition, CodeAssistantTool};
+use history::build_history_summary;
+use process::{build_spawn_command, command_preview, prepare_process_group, stop_child_process};
 pub(crate) use process::{
     find_binaries, find_binary, kill_child_tree, run_capture_with_env, CapturedOutput,
 };
@@ -53,8 +55,16 @@ use stream::{
 };
 #[cfg(test)]
 use stream::{extract_stream_json_items, extract_stream_json_text, StreamItem};
-
-const PROBE_PROMPT: &str = "Reply with exactly: lingfang-cli-ok";
+use tools::find_command;
+pub use tools::{check_tool, list_tools};
+use types::ResolvedToolCommand;
+pub use types::{
+    CheckToolInput, CliConfigInput, DeleteSessionInput, DraftFileJson, ProbeInput, ProbeResult,
+    ReadDraftInput, ReadTranscriptInput, RenameSessionInput, SaveConfigInput, SaveDraftInput,
+    ScanWorkspaceInput, SendInputInput, StartSessionInput, StopSessionInput, ToolAvailability,
+};
+pub use workspace::scan_workspace_files;
+pub(crate) use workspace::{new_session_id, resolve_workspace};
 
 pub(crate) trait AssistantEventSink: Clone + Send + Sync + 'static {
     fn emit_json(&self, event: &'static str, payload: serde_json::Value);
@@ -125,272 +135,7 @@ impl CodeAssistantState {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ResolvedToolCommand {
-    binary: PathBuf,
-    prefix_args: Vec<String>,
-    label: String,
-}
-
-impl ResolvedToolCommand {
-    fn args_with(&self, args: Vec<String>) -> Vec<String> {
-        let mut merged = self.prefix_args.clone();
-        merged.extend(args);
-        merged
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ToolAvailability {
-    pub tool: CodeAssistantTool,
-    pub display_name: String,
-    pub available: bool,
-    pub binary_path: Option<String>,
-    pub version: Option<String>,
-    pub models: Vec<String>,
-    pub default_model: String,
-    pub last_check: String,
-    pub probe_status: String,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ProbeResult {
-    pub tool: CodeAssistantTool,
-    pub model: Option<String>,
-    pub success: bool,
-    pub command_preview: Vec<String>,
-    pub stdout_tail: String,
-    pub stderr_tail: String,
-    pub exit_code: Option<i32>,
-    pub elapsed_ms: u128,
-    pub transcript_path: String,
-    pub session_id: String,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CheckToolInput {
-    pub tool: CodeAssistantTool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ProbeInput {
-    pub tool: CodeAssistantTool,
-    pub model: Option<String>,
-    #[serde(alias = "workspaceDir")]
-    pub workspace_dir: Option<String>,
-    pub prompt: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SaveConfigInput {
-    #[serde(alias = "defaultTool")]
-    pub default_tool: Option<CodeAssistantTool>,
-    #[serde(alias = "defaultModel")]
-    pub default_model: Option<String>,
-    #[serde(alias = "workspaceDir")]
-    pub workspace_dir: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StartSessionInput {
-    pub tool: CodeAssistantTool,
-    pub model: Option<String>,
-    #[serde(alias = "workspaceDir")]
-    pub workspace_dir: Option<String>,
-    pub prompt: String,
-    #[serde(alias = "systemPrompt")]
-    pub system_prompt: Option<String>,
-    // R2 思考强度：claude 透传 `--effort <level>`（max/high/medium/low/none）；
-    // codex/opencode 接收但忽略。随每轮 send 传入，可在会话中途调整。
-    pub effort: Option<String>,
-    // 组D task 06-16（AC10）：插件创建会话前端传入 pluginId（用户命名规范化后的目录名）。
-    // 命中时 resolve_workspace 把 workspace 强制落到 plugins_root/<pluginId>/ 持久化目录
-    // （不再回退 claude-sandbox），CLI 产出的文件直接写进插件持久化目录。
-    // None 表示非插件场景（纯对话/标题总结），走默认 claude-sandbox 隔离目录。
-    #[serde(default, alias = "pluginId")]
-    pub plugin_id: Option<String>,
-    // CLI 配置注入（task 06-15）：前端传入 backendUrl + authToken，Rust 内部调后端拿 apiKey + apiUrl
-    // 生成 CLI 隔离配置（claude env / codex CODEX_HOME / opencode OPENCODE_CONFIG）。
-    // None 或字段缺失 → 降级不注入（CLI 走默认配置，AC4）。key 明文绝不回前端（AC8）。
-    #[serde(default, alias = "cliConfig")]
-    pub cli_config: Option<CliConfigInput>,
-}
-
-/// CLI 配置注入所需的后端连接信息（前端从登录态注入，Rust 内部调 decrypt 拿 key）。
-///
-/// 安全（AC8）：仅传 backendUrl + authToken，**不传 apiKey**。apiKey 明文由 Rust 内部调
-/// `POST /api/llm/binding/decrypt` 获取，仅存在于 Rust 进程内存，不进前端 webview。
-#[derive(Debug, Deserialize, Default)]
-pub struct CliConfigInput {
-    /// 后端基础地址（如 https://api.lingfang.com），Rust 内部拼 /api/llm/* 端点。
-    #[serde(default, alias = "backendUrl")]
-    pub backend_url: String,
-    /// 用户登录 JWT（Authorization: Bearer），Rust 内部调 decrypt/active-provider 用。
-    #[serde(default, alias = "authToken")]
-    pub auth_token: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StopSessionInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ReadTranscriptInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-}
-
-// === design §3.2.3：多会话 CRUD Input（sessionId 统一 camelCase 别名，对齐前端 tauriInvoke 入参） ===
-
-#[derive(Debug, Deserialize)]
-pub struct RenameSessionInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-    pub title: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DeleteSessionInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SaveDraftInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-    /// 前端序列化后的 PluginDraft JSON。Rust 不解析其内部定义（透传 serde_json::Value），
-    /// 与 append_transcript 的 payload: Value 同模式，保持前后端 schema 解耦（design §3.2.2）。
-    #[serde(alias = "draftJson")]
-    pub draft_json: Value,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ReadDraftInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-}
-
-// 扫描 sandbox 目录产出文件（方案A：claude 用 Write 工具把插件文件写到 workspace，
-// CLI 跑完后 Rust 扫描目录收成结构化 files）。与前端 DraftFile 同构（path + content）。
-#[derive(Clone, Debug, Serialize)]
-pub struct DraftFileJson {
-    pub path: String,
-    pub content: String,
-}
-
-// scan_workspace_files 命令入参：仅 sessionId（sandbox 路径从 SessionRecord.workspace_dir 取，禁止硬编码）。
-#[derive(Debug, Deserialize)]
-pub struct ScanWorkspaceInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SendInputInput {
-    #[serde(alias = "sessionId")]
-    pub session_id: String,
-    pub input: String,
-    // 追问时可选的模型覆盖：传则优先于 session 首轮固化值，实现「会话内切模型下一轮生效」。
-    // 对齐 AionUi「会话级记忆 + 切换立即下一轮生效」语义；claude 走 --resume <id> --model <current>，
-    // 官方支持 per-invocation 覆盖（code.claude.com/docs/en/cli-reference）。
-    pub model: Option<String>,
-    // R2 思考强度：追问时可覆盖首轮值，随本轮 send_input 传入。
-    // None 表示沿用 start_session 首轮值（由调用方记忆）；非空则覆盖生效（可会话中途调）。
-    pub effort: Option<String>,
-    // CLI 配置注入（task 06-15）：追问轮同样注入平台 key/url，保证多轮用平台模型源。
-    #[serde(default, alias = "cliConfig")]
-    pub cli_config: Option<CliConfigInput>,
-    // 系统提示词：追问轮也传（claude --system-prompt），保证降级分支（claude 缺 cli_session_id 伪多轮）
-    // 与 codex/opencode（永远伪多轮）也有 LingFang 插件开发规范约束，不因缺首轮 system prompt 续接而丢失。
-    // claude resume 分支重复传无害（resume 恢复上下文 + system-prompt 重申当前约束）。
-    #[serde(default, alias = "systemPrompt")]
-    pub system_prompt: Option<String>,
-}
-
-pub fn list_tools() -> Vec<ToolAvailability> {
-    TOOL_DEFINITIONS
-        .iter()
-        .map(|definition| check_tool(definition.tool))
-        .collect()
-}
-
-pub fn check_tool(tool: CodeAssistantTool) -> ToolAvailability {
-    let definition = tool_definition(tool);
-    let command = find_command(definition.candidate_commands);
-    let mut diagnostics = Vec::new();
-    let mut version = None;
-
-    if let Some(resolved) = command.as_ref() {
-        match run_capture(
-            &resolved.binary,
-            resolved.args_with(
-                definition
-                    .version_args
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect(),
-            ),
-            None,
-            10_000,
-        ) {
-            Ok(output) => {
-                let merged = first_non_empty(&output.stdout, &output.stderr);
-                version = merged
-                    .lines()
-                    .next()
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .map(str::to_string);
-                if version.is_none() {
-                    diagnostics.push("版本命令没有返回可读版本号".to_string());
-                }
-                if !resolved.prefix_args.is_empty() {
-                    diagnostics.push(format!("使用命令入口：{}", resolved.label));
-                }
-            }
-            Err(error) => diagnostics.push(format!("版本检查失败：{error}")),
-        }
-    } else {
-        diagnostics.push(format!(
-            "未找到可执行命令：{}",
-            candidate_labels(definition.candidate_commands).join(", ")
-        ));
-    }
-
-    ToolAvailability {
-        tool,
-        display_name: definition.display_name.to_string(),
-        available: command.is_some(),
-        binary_path: command
-            .map(|command| command_preview(&command.binary, &command.prefix_args).join(" ")),
-        version,
-        models: definition
-            .models
-            .iter()
-            .map(|value| value.to_string())
-            .collect(),
-        default_model: definition.default_model.to_string(),
-        last_check: now_string(),
-        probe_status: "not_run".to_string(),
-        diagnostics,
-    }
-}
-
-pub fn run_probe(state: &CodeAssistantState, input: ProbeInput) -> Result<ProbeResult, String> {
-    run_once(
-        state,
-        input.tool,
-        input.model,
-        input.workspace_dir,
-        input.prompt.unwrap_or_else(|| PROBE_PROMPT.to_string()),
-        "probe",
-    )
-}
+pub use probe::run_probe;
 
 pub fn get_config(state: &CodeAssistantState) -> CodeAssistantConfig {
     state.store.read_config()
@@ -817,217 +562,6 @@ pub fn read_draft(
     state.store.read_draft(&input.session_id)
 }
 
-/// 扫描 sandbox 目录收成结构化文件列表（方案A：claude 用 Write 工具把插件文件写到 workspace）。
-///
-/// 数据源：从 SessionRecord.workspace_dir 取 sandbox 根目录（禁止硬编码，路径来自落盘记录）。
-/// 递归遍历所有文件，排除：隐藏文件（. 开头）、node_modules、.git、二进制文件（非 UTF-8 跳过）、
-/// 超大文件（>256KB 跳过，对齐后端 MAX_PLUGIN_FILE_BYTES 限制）。
-/// 路径转相对（相对 sandbox 根），canonicalize 前缀断言防穿越（不返回 sandbox 外的文件）。
-///
-/// 空目录（纯对话 / claude 未写文件）返回 Ok(Vec::new())，调用方据此回退到对话态逻辑。
-pub fn scan_workspace_files(
-    state: &CodeAssistantState,
-    input: ScanWorkspaceInput,
-) -> Result<Vec<DraftFileJson>, String> {
-    // 从 SessionRecord 取 workspace_dir（单一真源，禁止硬编码路径）。
-    let session = state
-        .store
-        .list_sessions()
-        .into_iter()
-        .find(|r| r.session_id == input.session_id)
-        .ok_or_else(|| format!("session 不存在：{}", input.session_id))?;
-    let workspace_dir = session.workspace_dir;
-    // sandbox 根 canonicalize（防符号链接逃逸）；目录不存在视为空（返回空列表）。
-    let root = std::path::PathBuf::from(&workspace_dir);
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    let root_canon = root
-        .canonicalize()
-        .map_err(|error| format!("sandbox 目录无法访问：{error}"))?;
-    // 递归扫描收集（depth-first，跳过排除项）。
-    let mut files: Vec<DraftFileJson> = Vec::new();
-    collect_workspace_files(&root_canon, &root_canon, &mut files)?;
-    // manifest.json 置顶（与 buildLocalDraft 同款约定，前端 parseManifest 直接命中首位）。
-    files.sort_by_key(|file| if file.path == "manifest.json" { 0 } else { 1 });
-    Ok(files)
-}
-
-/// 递归收集 sandbox 文件（内部辅助，scan_workspace_files 调用）。
-///
-/// 排除规则（硬性要求）：
-/// - 隐藏文件 / 目录（文件名以 . 开头，如 .env / .git / .claude）。
-/// - node_modules 目录（依赖体积大，非插件源码）。
-/// - 二进制文件（read_to_string 失败即非 UTF-8，跳过不报错）。
-/// - 超大文件（>256KB，对齐后端 MAX_PLUGIN_FILE_BYTES，避免后续上传必然 400）。
-///
-/// 防穿越：canonicalize 每个文件后断言仍以 root_canon 为前缀（符号链接逃逸防御）。
-///
-/// 修复 RUSTSHIM-04（medium 逻辑 bug）：此前用 entry.metadata()（跟随符号链接返回目标元数据）
-/// 判定是否目录，对指向目录的符号链接 metadata.is_dir()==true，于是递归 collect_workspace_files，
-/// sandbox 内存在目录符号链接环（a/link -> a）时会沿符号链接无限深入，最终栈溢出 panic
-/// （栈溢出无法被 catch_unwind 捕获，是进程级 abort）。
-/// 修复：用 symlink_metadata 判定（不跟随），目录符号链接被视为「符号链接」而非「目录」直接跳过；
-/// 同时加深度上限 MAX_SCAN_DEPTH 作为第二道防线（防恶意深层嵌套目录爆栈）。
-fn collect_workspace_files(
-    current: &std::path::Path,
-    root_canon: &std::path::Path,
-    out: &mut Vec<DraftFileJson>,
-) -> Result<(), String> {
-    collect_workspace_files_inner(current, root_canon, out, 0)
-}
-
-/// 沙箱扫描深度上限（修复 RUSTSHIM-04 第二道防线）：32 层足以覆盖任何合法插件结构，
-/// 超出视为恶意嵌套或符号链接环，停止递归（避免栈溢出）。
-const MAX_SCAN_DEPTH: usize = 32;
-
-fn collect_workspace_files_inner(
-    current: &std::path::Path,
-    root_canon: &std::path::Path,
-    out: &mut Vec<DraftFileJson>,
-    depth: usize,
-) -> Result<(), String> {
-    // 修复 RUSTSHIM-04：深度上限防栈溢出（符号链接环或恶意深层嵌套）。
-    if depth > MAX_SCAN_DEPTH {
-        return Ok(());
-    }
-    let entries = std::fs::read_dir(current).map_err(|error| error.to_string())?;
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let name = file_name.to_string_lossy();
-        // 排除隐藏项（.env / .git / .claude 等系统/配置文件）。
-        if name.starts_with('.') {
-            continue;
-        }
-        // 排除 node_modules（依赖目录，体积大且非插件源码）。
-        if name == "node_modules" {
-            continue;
-        }
-        let path = entry.path();
-        // 修复 RUSTSHIM-04：用 symlink_metadata（不跟随符号链接）判定类型，
-        // 目录符号链接不被当作目录递归（避免符号链接环 / 指向祖先目录的环致栈溢出）。
-        let metadata = match std::fs::symlink_metadata(&path) {
-            Ok(m) => m,
-            Err(_) => continue, // 元数据读取失败跳过（权限/竞态等）。
-        };
-        if metadata.is_dir() {
-            // 真实目录（非符号链接）递归（collect_workspace_files_inner 自带排除规则 + 深度守卫）。
-            collect_workspace_files_inner(&path, root_canon, out, depth + 1)?;
-            continue;
-        }
-        if !metadata.is_file() {
-            continue; // 符号链接 / FIFO / socket 等非普通文件跳过。
-        }
-        // 超大文件跳过（对齐后端 256KB 单文件限制，避免上传必然 400）。
-        const MAX_FILE_BYTES: u64 = 256 * 1024;
-        if metadata.len() > MAX_FILE_BYTES {
-            continue;
-        }
-        // 防穿越：canonicalize 后断言仍以 sandbox 根为前缀（符号链接逃逸防御）。
-        let canon = match path.canonicalize() {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if !canon.starts_with(root_canon) {
-            continue; // 逃逸 sandbox，跳过（不报错，静默忽略异常项）。
-        }
-        // 读取内容：read_to_string 失败即二进制文件（非 UTF-8），跳过不报错。
-        let content = match std::fs::read_to_string(&canon) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        // 相对路径（相对 sandbox 根），统一用 / 分隔（跨平台一致，对齐前端 cleanPath）。
-        let rel = canon
-            .strip_prefix(root_canon)
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        if rel.is_empty() {
-            continue;
-        }
-        out.push(DraftFileJson { path: rel, content });
-    }
-    Ok(())
-}
-
-fn run_once(
-    state: &CodeAssistantState,
-    tool: CodeAssistantTool,
-    model: Option<String>,
-    workspace_dir: Option<String>,
-    prompt: String,
-    event: &str,
-) -> Result<ProbeResult, String> {
-    let definition = tool_definition(tool);
-    let command = find_command(definition.candidate_commands)
-        .ok_or_else(|| format!("未找到 {} CLI", definition.display_name))?;
-    let workspace_dir = resolve_workspace(workspace_dir, Some(state.store.root()), None)?;
-    let session_id = new_session_id(tool);
-    let args = command.args_with(definition.probe_args(&prompt, model.as_deref()));
-    let command_preview = command_preview(&command.binary, &args);
-    let started = Instant::now();
-
-    state.store.append_transcript(
-        &session_id,
-        event,
-        json!({
-            "tool": tool,
-            "model": model,
-            "prompt": prompt,
-            "commandPreview": command_preview,
-            "workspaceDir": workspace_dir,
-        }),
-    )?;
-
-    let captured = run_capture(&command.binary, args, Some(&workspace_dir), 120_000)?;
-    let elapsed_ms = started.elapsed().as_millis();
-    let stdout_tail = tail(&captured.stdout, 8_000);
-    let stderr_tail = tail(&captured.stderr, 8_000);
-    let success = !captured.timed_out
-        && captured.exit_code == Some(0)
-        && (!stdout_tail.trim().is_empty() || !stderr_tail.trim().is_empty());
-    let mut diagnostics = Vec::new();
-    if captured.timed_out {
-        diagnostics.push("CLI 调用超时".to_string());
-    }
-    if captured.exit_code != Some(0) {
-        diagnostics.push(format!("CLI 退出码：{:?}", captured.exit_code));
-    }
-    if stdout_tail.trim().is_empty() && stderr_tail.trim().is_empty() {
-        diagnostics.push("CLI 没有返回 stdout/stderr".to_string());
-    }
-
-    state.store.append_transcript(
-        &session_id,
-        "exit",
-        json!({
-            "stdoutTail": stdout_tail,
-            "stderrTail": stderr_tail,
-            "exitCode": captured.exit_code,
-            "elapsedMs": elapsed_ms,
-            "success": success,
-            "diagnostics": diagnostics,
-        }),
-    )?;
-
-    Ok(ProbeResult {
-        tool,
-        model,
-        success,
-        command_preview,
-        stdout_tail,
-        stderr_tail,
-        exit_code: captured.exit_code,
-        elapsed_ms,
-        transcript_path: state
-            .store
-            .transcript_path(&session_id)
-            .to_string_lossy()
-            .to_string(),
-        session_id,
-        diagnostics,
-    })
-}
-
 fn spawn_reader<E: AssistantEventSink>(
     app: E,
     state: CodeAssistantState,
@@ -1229,72 +763,6 @@ fn spawn_waiter<E: AssistantEventSink>(
     });
 }
 
-fn find_command(candidates: &[ToolCommand]) -> Option<ResolvedToolCommand> {
-    for candidate in candidates {
-        if let Some(binary) = find_binary(candidate.binary) {
-            return Some(ResolvedToolCommand {
-                binary,
-                prefix_args: candidate
-                    .prefix_args
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect(),
-                label: candidate.label.to_string(),
-            });
-        }
-    }
-    None
-}
-
-fn candidate_labels(candidates: &[ToolCommand]) -> Vec<String> {
-    candidates
-        .iter()
-        .map(|candidate| candidate.label.to_string())
-        .collect()
-}
-
-/// workspace 目录校验 + canonicalize（防符号链接逃逸）。
-/// pub(crate) 供 plugin_script::run_plugin_script 复用其 canonicalize 逻辑。
-///
-/// 参数：
-/// - `workspace_dir`：显式 workspace 路径（优先级最高，如 main.rs 已把插件持久化目录注入此处）。
-/// - `default_root`：workspace_dir 缺失时的回退根目录（app_data_dir/code-assistant），派生 claude-sandbox。
-/// - `plugin_id`：组D task 06-16 预留参数（plugin_script 预览执行传 None 走显式 workspace_dir 分支）。
-///   非空时理论上可解析为 plugins_root/<plugin_id>/，但当前持久化目录解析已在 main.rs 完成
-///   （start_session 注入 workspace_dir），此处仅占位保持签名稳定，供后续直接调用方扩展。
-pub(crate) fn resolve_workspace(
-    workspace_dir: Option<String>,
-    default_root: Option<&std::path::Path>,
-    _plugin_id: Option<&str>,
-) -> Result<String, String> {
-    let path = workspace_dir
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            // 默认落到 app_data/claude-sandbox 隔离目录（不读宿主项目 CLAUDE.md/hooks），
-            // 避免 claude 在项目目录运行时被 Trellis 上下文覆盖 systemPrompt。
-            default_root.map(|root| root.join("claude-sandbox"))
-        })
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    // 隔离目录不存在则创建（首次使用 claude-sandbox）。
-    if !path.exists() {
-        std::fs::create_dir_all(&path).map_err(|e| format!("创建 sandbox 目录失败：{e}"))?;
-    }
-    if !path.is_dir() {
-        return Err(format!("workspace 不是目录：{}", path.to_string_lossy()));
-    }
-    path.canonicalize()
-        .map(|path| path.to_string_lossy().to_string())
-        .map_err(|error| error.to_string())
-}
-
-pub(crate) fn new_session_id(tool: CodeAssistantTool) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}-{}-{}", tool.as_str(), now.as_secs(), now.subsec_nanos())
-}
-
 /// 查询某 session 记录的 tool（供 main.rs resolve_cli_env 决定按哪种 CLI 机制生成配置）。
 /// session 不存在返回 Claude（兜底，不会命中实际注入逻辑因 fetch 也会失败）。
 pub fn lookup_session_tool(state: &CodeAssistantState, session_id: &str) -> CodeAssistantTool {
@@ -1305,82 +773,6 @@ pub fn lookup_session_tool(state: &CodeAssistantState, session_id: &str) -> Code
         .find(|r| r.session_id == session_id)
         .map(|r| r.tool)
         .unwrap_or(CodeAssistantTool::Claude)
-}
-
-fn first_non_empty<'a>(first: &'a str, second: &'a str) -> &'a str {
-    if first.trim().is_empty() {
-        second
-    } else {
-        first
-    }
-}
-
-fn tail(input: &str, max_chars: usize) -> String {
-    if input.chars().count() <= max_chars {
-        return input.to_string();
-    }
-    let chars: Vec<char> = input.chars().collect();
-    chars[chars.len().saturating_sub(max_chars)..]
-        .iter()
-        .collect()
-}
-
-/// 整体字符限长截断（design §3.3.5）：防历史摘要过长导致 Windows 命令行参数超限（~32k）。
-/// 限长为字符数（非字节），按 `tail` 同模式取尾部保留最近上下文。
-fn truncate_history(input: &str, max_chars: usize) -> String {
-    tail(input, max_chars)
-}
-
-/// 读取 transcript 中已有的 input/output 事件，拼成可读历史摘要供 codex/opencode 伪多轮复用（design §3.3.5）。
-/// 格式：`【用户】...\n\n【AI】...`；空 prompt/空 output 跳过；整体限长 12k 字符（防命令行参数超限）。
-/// 这是伪多轮的数据源：codex/opencode 不支持 CLI 级 session 复用，靠把历史拼进新 prompt 模拟「记得上下文」。
-fn build_history_summary(store: &AssistantStore, session_id: &str) -> Result<String, String> {
-    let raw = store.read_transcript(session_id)?;
-    let mut lines: Vec<String> = Vec::new();
-    for line in raw.lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
-            continue;
-        };
-        let (ev, payload) = (v.get("event").and_then(|x| x.as_str()), v.get("payload"));
-        match (ev, payload) {
-            (Some("input"), Some(p)) => {
-                // 跳过追问自身写入的 followup input（kind=followup），只读真实首轮 user prompt。
-                // 首轮 input payload 无 kind 或 kind != followup；追问的 followup input 由追问 prompt 提供，避免重复。
-                let kind = p.get("kind").and_then(|x| x.as_str());
-                if kind == Some("followup") {
-                    continue;
-                }
-                let prompt = p.get("prompt").and_then(|x| x.as_str()).unwrap_or("");
-                if !prompt.trim().is_empty() {
-                    lines.push(format!("【用户】{prompt}"));
-                }
-            }
-            (Some("output"), Some(p)) => {
-                // 修复 RUST-STREAM-01（medium 数据一致性）：此前 build_history_summary 对 output 事件
-                // 只取 payload.text，未按 payload.stream 过滤。spawn_reader 写入 transcript 时，
-                // stdout/stderr/thought/tool 四类都写成 event:"output" 且 payload 含 stream 字段。
-                // 该函数把所有 output 的 text 一律当作「【AI】回复」拼进摘要，导致：
-                // (1) codex/opencode 永远走伪多轮，其 stderr 的诊断/warning 被当成 AI 回复；
-                // (2) claude 降级为伪多轮时，思考内容（thought）和工具调用 JSON 片段（tool，含不完整
-                //     input_json_delta 如 `{"path":"b`）被当成 AI 回复，污染 LLM 上下文。
-                // 与前端 transcriptTextSinceLastInput 取 stream==='stdout' 对齐，仅 stdout 进【AI】，
-                // stderr 用【诊断】标签保留少量价值，thought/tool 不进摘要（claude 降级路径）。
-                let stream = p.get("stream").and_then(|x| x.as_str()).unwrap_or("stdout");
-                let text = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
-                if text.trim().is_empty() {
-                    continue;
-                }
-                match stream {
-                    "stdout" => lines.push(format!("【AI】{text}")),
-                    "stderr" => lines.push(format!("【诊断】{text}")),
-                    // thought / tool / 其他流不进伪多轮历史摘要（避免思考原文与工具 JSON 污染）。
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(truncate_history(&lines.join("\n\n"), 12_000))
 }
 
 #[cfg(test)]

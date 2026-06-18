@@ -888,6 +888,20 @@ describe('AdminService 用户管理 + 平台管理员管理完善（组C）', ()
       const result = await service.adminResetUserPassword('user-admin', 'u1');
       expect(result.tempPassword).toHaveLength(12);
     });
+
+    it('邮件通知失败时显式返回未发送状态（仍返回临时密码）', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', email: 'a@x.com', displayName: 'A', status: 'ACTIVE' });
+      prisma.user.update.mockResolvedValueOnce({ id: 'u1' });
+      mail.sendMail.mockRejectedValueOnce(new Error('SMTP 未配置'));
+
+      const result = await service.adminResetUserPassword('user-admin', 'u1');
+
+      expect(result.tempPassword).toHaveLength(12);
+      expect(result.emailNotice).toEqual({
+        sent: false,
+        message: '邮件通知未发送：SMTP 未配置',
+      });
+    });
   });
 
   describe('adminUpdateUserPlatformRole', () => {

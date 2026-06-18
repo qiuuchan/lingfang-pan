@@ -1,4 +1,7 @@
 use super::*;
+use std::time::Instant;
+
+use super::history::tail;
 
 #[derive(Clone)]
 struct NoopEventSink;

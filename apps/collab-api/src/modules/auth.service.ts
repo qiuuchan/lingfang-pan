@@ -64,11 +64,8 @@ export class AuthService {
       }
       return user.id;
     });
-    // 注册后异步发送邮箱验证邮件（失败不影响注册成功，降级 console.log 兜底）。
-    // 首版不阻断登录：emailVerified 仅作标记，前端据 session 提示去验证。
-    await this.sendVerificationEmail(userId, email).catch((error) => {
-      console.error('[mail.verification_send_failed]', { userId, email, error: (error as Error).message });
-    });
+    // 注册后发送邮箱验证邮件。邮件通道失败必须显式暴露，避免用户以为验证邮件已发送。
+    await this.sendVerificationEmail(userId, email);
     // 事务提交后再读库生成 session（sessionFor 用主 prisma，需读到已提交数据）。
     return this.sessionFor(userId);
   }
@@ -225,7 +222,7 @@ export class AuthService {
   /**
    * 找回密码（Top5 解法）：生成短 TTL（15min）的 reset token，发送重置链接邮件。
    *
-   * 安全设计：无论邮箱是否注册都返回「链接已发送」——不泄漏邮箱是否注册（防探测枚举）。
+   * 安全设计：无论邮箱是否注册都返回条件式提示——不泄漏邮箱是否注册（防探测枚举）。
    * 仅当邮箱确实存在、账号启用且匹配入口账号类型时才真正发邮件；不存在/不匹配的邮箱静默跳过（前端无感知差异）。
    * reset token 为独立 JWT（scope='pwd_reset'），与登录 token 分离，复用 JWT_SECRET 签名。
    * token 内嵌 userId，reset-password 时校验 + 改密 + tokenVersion++（作废所有旧登录 token）。
@@ -256,9 +253,15 @@ export class AuthService {
       // 重置链接：前端路由 ?reset_token=xxx（Auth.tsx 解析后弹「重置密码」对话框）。
       // baseUrl 未配时降级为只带 token 的相对路径（开发期 console.log 可见完整 token）。
       const link = baseUrl ? `${baseUrl}/?reset_token=${encodeURIComponent(token)}` : `/?reset_token=${encodeURIComponent(token)}`;
-      await this.mail.sendPasswordReset(email, link);
+      try {
+        await this.mail.sendPasswordReset(email, link);
+      } catch (error) {
+        // 安全例外：找回密码必须保持邮箱枚举不可区分，不能把「存在邮箱但 SMTP 失败」
+        // 与「邮箱不存在」暴露成不同响应。这里不声称已发送，真实失败只进服务端日志。
+        console.error('[mail.password_reset_failed]', { email, error: (error as Error).message });
+      }
     }
-    return { ok: true, message: '若该邮箱已注册，重置链接已发送' };
+    return { ok: true, message: '若该邮箱已注册且邮件服务可用，将收到重置链接' };
   }
 
   /**
@@ -350,15 +353,13 @@ export class AuthService {
   /**
    * 重发验证邮件（resend-verification 端点）：登录态用户主动触发。
    * 幂等：已验证用户返回已验证提示（不发邮件，避免骚扰）。
-   * 邮件发送失败不影响响应（降级 console.log 兜底，前端统一提示「验证邮件已发送」）。
+   * 邮件发送失败会向上抛出，避免前端误提示「验证邮件已发送」。
    */
   async resendVerification(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, status: true, emailVerified: true, tokenVersion: true } });
     if (!user || user.status !== 'ACTIVE') throw unauthorized('账号不可用');
     if (user.emailVerified) return { ok: true, message: '邮箱已验证，无需重发', alreadyVerified: true };
-    await this.sendVerificationEmail(userId, user.email).catch((error) => {
-      console.error('[mail.resend_verification_failed]', { userId, email: user.email, error: (error as Error).message });
-    });
+    await this.sendVerificationEmail(userId, user.email);
     return { ok: true, message: '验证邮件已发送，请查收' };
   }
 

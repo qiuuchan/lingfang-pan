@@ -26,8 +26,8 @@ try {
  *  - mail.service 不注入 SettingsService（避免循环依赖：SettingsService → MailService），
  *    直接用 PrismaService 查 SMTP 白名单 key（与 getBrand 同款直查模式）。
  *
- * SMTP 未配置（PlatformSetting 与 .env 均无 smtpUrl）时，sendMail 把邮件内容写入 console.log
- * （不抛错、不阻塞流程），供本地开发/未配 SMTP 的部署直接在终端看到重置/验证链接。
+ * SMTP 未配置（PlatformSetting 与 .env 均无 smtpUrl）时，sendMail 显式抛错，
+ * 避免调用方误以为验证/重置邮件已经真实发出。
  *
  * nodemailer 认证合并坑（github issue #1762）：createTransport 传 connection url 时，
  * 其余 options（如 auth）被忽略——url 独占解析。为支持「smtpUrl 给主机端口 + 独立 smtpUser/smtpPass
@@ -80,7 +80,7 @@ export class MailService {
     this.smtpCache = null;
   }
 
-  /** SMTP 是否已配置（smtpUrl 非空 = 真实发送，否则 console.log 兜底）。 */
+  /** SMTP 是否已配置（smtpUrl 非空 = 可尝试真实发送）。 */
   async isConfigured(): Promise<boolean> {
     const cfg = await this.loadConfig();
     return cfg.smtpUrl.length > 0;
@@ -105,7 +105,7 @@ export class MailService {
    *  - host/port/secure 永远从 smtpUrl 解析（URL 是连接信息的唯一来源）。
    *  - auth 凭据优先级：独立 smtpUser/smtpPass（admin 拆分配置）> smtpUrl 内嵌的 user:pass。
    *    二者皆无则不发 auth（服务端无认证场景，如本地 relay）。
-   *  - smtpUrl 非法（解析失败）返回 null，调用方按「未配置」降级 console.log。
+   *  - smtpUrl 非法（解析失败）返回 null，调用方按「配置无效」报错。
    */
   private async buildTransporter(cfg: SmtpConfig): Promise<Transporter | null> {
     const normalized = normalizeSmtpUrl(cfg.smtpUrl);
@@ -186,18 +186,17 @@ export class MailService {
   }
 
   /**
-   * 发送邮件。SMTP 未配置时降级为 console.log（不抛错），保证找回密码 / 邮箱验证流程不中断。
-   * 失败仅记录到 console.error（不向外抛），因为「邮件发送失败」对调用方不可恢复——
-   * 前端已提示「重置链接已发送」，避免泄漏邮箱是否注册（防探测）。
+   * 发送邮件。SMTP 未配置、配置无效或发送失败都会显式抛错；
+   * 调用方按自身安全语义决定是否转换成业务错误。
    */
   async sendMail(to: string, subject: string, html: string): Promise<void> {
     const cfg = await this.loadConfig();
+    if (!cfg.smtpUrl) {
+      throw new Error('SMTP 未配置，无法发送邮件');
+    }
     const transporter = await this.buildTransporter(cfg);
     if (!transporter) {
-      // 占位：未配 SMTP_URL，邮件内容落 console.log 供开发期查看。
-      // 不视为错误：找回密码 / 邮箱验证流程继续，前端提示「链接已发送」。
-      console.log('[mail.placeholder] SMTP 未配置，邮件内容降级输出：', { to, subject, html });
-      return;
+      throw new Error('SMTP 配置无效，无法创建邮件发送通道');
     }
     try {
       await transporter.sendMail({
@@ -207,8 +206,8 @@ export class MailService {
         html,
       });
     } catch (error) {
-      // 发送失败不阻断调用方流程（前端已统一提示「重置链接已发送」，防邮箱探测）。
       console.error('[mail.send_failed]', { to, subject, error: (error as Error).message });
+      throw error;
     }
   }
 
@@ -260,7 +259,7 @@ export class MailService {
       return {
         ok: false,
         configured: false,
-        message: 'SMTP 未配置（smtpUrl 为空），邮件降级为 console.log，未实际发送。',
+        message: 'SMTP 未配置（smtpUrl 为空），未实际发送。',
       };
     }
     const bodyHtml = '<p>这是一封来自平台的测试邮件，用于验证 SMTP 发信配置是否正常。</p><p>如果你收到了这封邮件，说明 SMTP 配置成功。</p>';

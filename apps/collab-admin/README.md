@@ -90,16 +90,14 @@ landing/
 | `POST` | `/api/admin/releases/:id/assets` | 登记产物（平台 / 架构 / 下载链接 / 签名） |
 | `DELETE` | `/api/admin/releases/:id/assets/:assetId` | 删除产物 |
 
-### Tauri 2 updater 接入路径（后续工作）
+### Tauri 2 updater 接入状态
 
-桌面端当前**未接入** Tauri 官方 updater（无 `tauri-plugin-updater` 依赖 / 配置 / 权限）。
-本模块的 `/api/releases/latest` 契约已与 Tauri updater 的查询格式兼容，后续接入步骤：
+桌面端已接入 Tauri 官方 updater：`apps/desktop/src-tauri/Cargo.toml` 依赖 `tauri-plugin-updater = "2"`，
+`tauri.conf.json` 内嵌 minisign 公钥，打包时生成 updater 签名产物。
 
-1. 生成签名密钥对：`pnpm tauri signer generate`（得到 pubkey 与私钥）。
-2. `apps/desktop/src-tauri/Cargo.toml` 加 `tauri-plugin-updater = "2"`。
-3. `tauri.conf.json` 加 `plugins.updater.endpoints` 指向 `https://<api>/api/releases/latest?platform={{target}}&arch={{arch}}&currentVersion={{current_version}}`，
-   以及 `plugins.updater.pubkey`。
-4. 打包时用私钥签名产物，`signature` 写入 `ReleaseAsset.signature`（通过 `/api/admin/releases/:id/assets` 登记）。
-5. `capabilities/default.json` 加 `updater:default` 权限。
+本项目后端地址由用户在桌面端设置页配置，不能在 `tauri.conf.json` 写死 endpoints。因此
+`plugins.updater.endpoints` 保持空数组，实际检查更新时由 Rust 命令运行时注入
+`/api/releases/tauri-update?channel=...&platform=...&arch=...&current_version=...`。
 
-完成后桌面端即可调用现有 `/api/releases/latest` 端点完成自动更新检查。
+管理端发布流程只负责维护后端 `Release` / `ReleaseAsset` 数据：登记平台、架构、下载链接、签名与发布状态。
+打包产物对应的 `.sig` 内容必须写入 `ReleaseAsset.signature`，否则桌面端下载后会在验签阶段失败。

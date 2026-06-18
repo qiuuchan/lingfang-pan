@@ -94,12 +94,12 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
     if (sceneEnabled('admin_forgot') && !forgotCaptcha.validateResult) return toast.error('请先完成验证码');
     setForgotLoading(true);
     try {
-      await api('/api/auth/admin/forgot-password', {
+      const result = await api<{ message?: string }>('/api/auth/admin/forgot-password', {
         auth: false,
         method: 'POST',
         body: { email: forgotEmail.trim(), captcha: forgotCaptcha.validateResult ?? undefined },
       });
-      toast.success('若该邮箱已注册，重置链接已发送');
+      toast.success(result.message ?? '若该邮箱已注册且邮件服务可用，将收到重置链接');
       setForgotOpen(false);
       setForgotEmail('');
       forgotCaptcha.reset();

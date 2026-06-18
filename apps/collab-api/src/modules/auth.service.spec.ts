@@ -79,6 +79,7 @@ describe('AuthService 找回密码 + 重置密码', () => {
       prisma.user.findUnique.mockResolvedValue(null);
       const result = await service.forgotPassword({ email: 'a@b.com' });
       expect(result.ok).toBe(true);
+      expect(result.message).toBe('若该邮箱已注册且邮件服务可用，将收到重置链接');
       expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
       expect(geetest.validate).not.toHaveBeenCalled();
     });
@@ -86,8 +87,9 @@ describe('AuthService 找回密码 + 重置密码', () => {
     it('邮箱不存在时静默跳过（不抛错，防邮箱探测）', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       const result = await service.forgotPassword({ email: 'nobody@example.com' });
-      // 统一返回「链接已发送」，不泄漏邮箱是否注册。
+      // 统一返回条件式提示，不泄漏邮箱是否注册，也不伪称邮件已发送。
       expect(result.ok).toBe(true);
+      expect(result.message).toBe('若该邮箱已注册且邮件服务可用，将收到重置链接');
       // 不存在的邮箱不发邮件。
       expect(mail.sendMail).not.toHaveBeenCalled();
     });
@@ -96,11 +98,25 @@ describe('AuthService 找回密码 + 重置密码', () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0 });
       const result = await service.forgotPassword({ email: 'a@b.com' });
       expect(result.ok).toBe(true);
+      expect(result.message).toBe('若该邮箱已注册且邮件服务可用，将收到重置链接');
       // sendPasswordReset 被调用，链接含 reset_token。
       expect(mail.sendPasswordReset).toHaveBeenCalledTimes(1);
       const call = mail.sendPasswordReset.mock.calls[0];
       expect(call[0]).toBe('a@b.com'); // to
       expect(String(call[1])).toContain('reset_token='); // link 含 token
+    });
+
+    it('邮箱存在但邮件发送失败时保持枚举不可区分且不伪称已发送', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', status: 'ACTIVE', tokenVersion: 0 });
+      mail.sendPasswordReset.mockRejectedValueOnce(new Error('SMTP 未配置'));
+
+      const result = await service.forgotPassword({ email: 'a@b.com' });
+
+      expect(result).toEqual({
+        ok: true,
+        message: '若该邮箱已注册且邮件服务可用，将收到重置链接',
+      });
+      expect(mail.sendPasswordReset).toHaveBeenCalledTimes(1);
     });
 
     it('已禁用用户不发邮件（静默跳过）', async () => {
@@ -484,6 +500,7 @@ describe('AuthService 找回密码 + 重置密码', () => {
         captcha: { lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' },
       });
       expect(result.ok).toBe(true);
+      expect(result.message).toBe('若该邮箱已注册且邮件服务可用，将收到重置链接');
       expect(geetest.isSceneEnabled).toHaveBeenCalledWith('admin_forgot');
       expect(geetest.validate).toHaveBeenCalledWith({ lot_number: 'l', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
       expect(mail.sendPasswordReset).toHaveBeenCalledTimes(1);

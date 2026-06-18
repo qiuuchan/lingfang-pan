@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::code_assistant::{
-    find_binaries, find_binary, resolve_workspace, run_capture_with_env, CapturedOutput,
+    find_binaries, resolve_workspace, run_capture_with_env, CapturedOutput,
 };
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
