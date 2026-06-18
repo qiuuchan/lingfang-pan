@@ -2,6 +2,7 @@ import type { View } from '@/lib/types';
 
 const loaders: Partial<Record<View, () => Promise<unknown>>> = {
   plugins: () => import('@/pages/Plugins'),
+  'author-center': () => import('@/pages/AuthorCenter'),
   team: () => import('@/pages/TeamHome'),
   'team-manage': () => import('@/pages/TeamManage'),
   market: () => import('@/pages/Market'),

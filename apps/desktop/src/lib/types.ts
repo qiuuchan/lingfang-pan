@@ -145,4 +145,4 @@ export interface LoadedPlugin {
   updatedAt?: string;
 }
 
-export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'market' | 'wallet' | 'review';
+export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';

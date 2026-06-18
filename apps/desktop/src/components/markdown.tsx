@@ -133,6 +133,23 @@ const COMPONENTS: Components = {
   // 复制按钮与最大高度/横向滚动均在此处提供。
   pre: PreBlock,
   a: ({ children, href }) => <a href={href} className="text-primary underline underline-offset-2">{children}</a>,
+  // 表格美化：react-markdown 默认渲染为浏览器裸 table（无边框圆角、行间无分隔），
+  // 在气泡内显得呆板。这里包一层圆角边框容器 + 表头底色 + 行分隔线 + 偶数行浅底，
+  // 列数多时外层 overflow-x-auto 横向滚动（气泡 max-w 受限）。
+  table: ({ children }) => (
+    <div className="my-3 overflow-x-auto rounded-lg border border-border/60">
+      <table className="w-full text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="border-b border-border/60 bg-muted/50 text-left">{children}</thead>
+  ),
+  // divide-y 画行间分隔线；偶数行浅底提升多行可读性（斑马纹）。
+  tbody: ({ children }) => (
+    <tbody className="divide-y divide-border/40 [&_tr:nth-child(even)]:bg-muted/20">{children}</tbody>
+  ),
+  th: ({ children }) => <th className="px-3 py-2 font-semibold">{children}</th>,
+  td: ({ children }) => <td className="px-3 py-2 align-top">{children}</td>,
 };
 
 export function Markdown({ children }: { children: string }) {

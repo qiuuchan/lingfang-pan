@@ -362,7 +362,7 @@ function TeamOverviewSheet({
           </TabsContent>
 
           {/* 流水：余额变动明细（含入账/扣减 + 原因）。 */}
-          <TabsContent value="ledger" className="space-y-3 pt-4">
+          <TabsContent value="ledger" className="space-y-3 px-2 pt-4">
             {detail ? (
               <>
                 <InfoGrid
