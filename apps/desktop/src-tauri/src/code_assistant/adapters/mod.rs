@@ -110,6 +110,8 @@ mod tests {
                 "--permission-mode",
                 "bypassPermissions",
                 "--bare",
+                "--setting-sources",
+                "",
                 "--model",
                 "sonnet",
             ]
@@ -123,6 +125,19 @@ mod tests {
         let definition = tool_definition(CodeAssistantTool::Claude);
         let args = definition.run_args("ping", Some("sonnet"), None, None, None);
         assert!(args.iter().any(|arg| arg == "--bare"));
+    }
+
+    #[test]
+    fn claude_run_args_disable_user_setting_sources() {
+        // Claude Code 的 --bare 仍会读取 ~/.claude/settings.json 里的 env/model。
+        // 必须显式清空 setting sources，避免 CC Switch 的 ANTHROPIC_* 覆盖平台注入。
+        let definition = tool_definition(CodeAssistantTool::Claude);
+        let args = definition.run_args("ping", Some("glm-5.2"), None, None, None);
+        assert!(
+            args.windows(2)
+                .any(|window| window[0] == "--setting-sources" && window[1].is_empty()),
+            "claude args 应清空 setting sources: {args:?}"
+        );
     }
 
     #[test]
@@ -172,6 +187,8 @@ mod tests {
                 "--permission-mode",
                 "bypassPermissions",
                 "--bare",
+                "--setting-sources",
+                "",
                 "--model",
                 "sonnet",
                 "--resume",

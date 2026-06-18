@@ -282,7 +282,7 @@ async fn code_assistant_send_input(
 /// 2. Rust 内部调 `llm_credentials::fetch_credentials` 从后端拿 (apiKey, apiUrl)（AC8 key 不进前端）。
 /// 3. 调 `cli_config::prepare_cli_env` 按 tool 类型生成 env（claude 纯 env / codex CODEX_HOME+config.toml / opencode OPENCODE_CONFIG+json），
 ///    并把用户选定 model 写进 codex/opencode 配置文件（task 06-15-custom-model-config-file-flow）。
-/// 4. fetch 失败/无 key → 返回空 Vec。claude 仍由 `--bare` 隔离用户 CC 配置，避免错用本机模型。
+/// 4. fetch 失败/无 key → 返回空 Vec。claude 仍清空 setting sources 隔离用户 CC 配置，避免错用本机模型。
 ///
 /// `model`：用户选定模型 id（已 clean：None 或非空且非 default）。codex 写 config.toml 顶级 model；
 /// opencode 写 json `lingfang/<model>`；claude 忽略（走 --model 命令行参数）。
