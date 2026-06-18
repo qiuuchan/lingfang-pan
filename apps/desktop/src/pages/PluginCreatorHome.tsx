@@ -117,6 +117,12 @@ export function PluginCreatorHome() {
   // 导致追问时读到 null → 走 makeConversationDraft 只产本轮 turn，老对话丢失。用 ref 跟踪最新值。
   const currentDraftRef = useLatestRef(currentDraft);
 
+  function handleProviderChange(value: string) {
+    const nextProvider = providers.find((item) => item.id === value);
+    if (!nextProvider) return;
+    setProvider(nextProvider.id);
+  }
+
   const turns = normalizeTurns(currentDraft?.turns);
   const files = currentDraft?.files || [];
   const pluginStatus = useCurrentPluginStatus(pluginId, streaming, files.length);
@@ -981,7 +987,7 @@ export function PluginCreatorHome() {
         onAttach={(p) => setAttachedPlugins((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]))}
         onDetach={(id) => setAttachedPlugins((prev) => prev.filter((x) => x.id !== id))}
         onModelChange={setModel}
-        onProviderChange={setProvider}
+        onProviderChange={handleProviderChange}
         onEffortChange={setEffort}
         onCustomModel={() => { setSettingsTab('gateway'); setView('settings'); }}
         onSend={send}

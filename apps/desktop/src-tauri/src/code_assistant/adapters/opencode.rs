@@ -1,4 +1,5 @@
 use super::{CodeAssistantTool, ToolCommand, ToolDefinition};
+use crate::cli_provider::opencode_model_ref;
 
 pub const DEFINITION: ToolDefinition = ToolDefinition {
     tool: CodeAssistantTool::Opencode,
@@ -26,7 +27,7 @@ fn build_args(
 ) -> Vec<String> {
     let mut args = vec!["run".to_string(), prompt.to_string()];
     if let Some(model) = model {
-        args.extend(["--model".to_string(), model.to_string()]);
+        args.extend(["--model".to_string(), opencode_model_ref(model)]);
     }
     args
 }

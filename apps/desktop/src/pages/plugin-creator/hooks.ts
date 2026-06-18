@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api, tauriInvoke } from '@/lib/api';
-import { readRecent, writeRecent, PROVIDERS, safePluginId, type ProviderId } from '@/lib/plugin-draft';
+import { buildAssistantProviderCatalog, readRecent, writeRecent, PROVIDERS, safePluginId, type ProviderId } from '@/lib/plugin-draft';
 import { toUploadError, type CreatorError } from '@/lib/creator-error';
 import { yuanToCents } from '@/lib/money';
 import { loadMentionablePlugins, type AttachedPluginRef } from '@/lib/plugin-creator/session-helpers';
@@ -30,21 +30,19 @@ export function useProviderCatalog(modelConfigVersion: number) {
     let cancelled = false;
     Promise.all([
       tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean }>>('code_assistant_list_tools'),
-      api<{ defaultModels?: string[] } | null>('/api/llm/active-provider').catch(() => null),
+      api<{ provider?: string; defaultModels?: string[] } | null>('/api/llm/active-provider').catch(() => null),
       api<{ binding?: { modelOverride?: string[] | null } } | null>('/api/llm/binding').catch(() => null),
     ])
       .then(([tools, activeProvider, binding]) => {
         if (cancelled) return;
-        const cliProviders = (tools || [])
-          .filter((tool) => tool.available)
-          .map((tool) => ({ id: String(tool.tool), label: String(tool.display_name || tool.tool), models: [] as string[] }));
-        const upstreamModels = Array.from(new Set([
-          ...((binding?.binding?.modelOverride) || []),
-          ...((activeProvider?.defaultModels) || []),
-        ])).filter(Boolean);
-        const baseProviders = cliProviders.length ? cliProviders : PROVIDERS;
-        hasAvailableCliRef.current = cliProviders.length > 0;
-        setProviders(baseProviders.map((item) => ({ ...item, models: [...upstreamModels] })));
+        const catalog = buildAssistantProviderCatalog({
+          tools,
+          activeProvider,
+          binding: binding?.binding ?? null,
+        });
+        hasAvailableCliRef.current = catalog.hasAvailableCli;
+        setProviders(catalog.providers);
+        setProvider((current) => catalog.providers.some((item) => item.id === current) ? current : catalog.providers[0]?.id || PROVIDERS[0].id);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -57,7 +55,7 @@ export function useProviderCatalog(modelConfigVersion: number) {
 
   useEffect(() => {
     setModel(providerInfo.models[0]);
-  }, [provider, providerInfo.models]);
+  }, [providerInfo.id, providerInfo.models]);
 
   return { provider, setProvider, model, setModel, providers, providerInfo, hasAvailableCliRef };
 }

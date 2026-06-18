@@ -7,7 +7,7 @@
 //  - TenantLlmBinding 去 gatewayId，teamId @unique（一个团队一条 apiKey 绑定）。
 //
 // 契约：
-//  - ActiveProviderSchema：GET /api/llm/active-provider 出参（当前启用 provider 的 apiUrl + defaultModels）。
+//  - ActiveProviderSchema：GET /api/llm/active-provider 出参（当前启用 provider 的 provider/apiUrl + defaultModels）。
 //  - TenantBindingPublicSchema：GET /api/llm/binding 出参（单条，脱敏，零解密，无 gatewayId/provider）。
 //  - BindingUpsertInputSchema：PUT /api/llm/binding 入参（apiKey 可选语义见 design.md B5）。
 //  - ProviderCreateInputSchema / ProviderUpdateInputSchema：平台 Admin provider 增改入参。
@@ -72,10 +72,11 @@ export type LlmProviderAdmin = z.infer<typeof LlmProviderAdminSchema>;
 
 // === 当前启用 provider 契约（应用拉取用） ===
 
-/** GET /api/llm/active-provider 出参（当前启用 provider 的 apiUrl + defaultModels，不暴露「有多个」）。
+/** GET /api/llm/active-provider 出参（当前启用 provider 的 provider/apiUrl + defaultModels，不暴露「有多个」）。
  *  无启用 provider → 404 `no_active_provider`。 */
 export const ActiveProviderSchema = z.object({
   name: z.string().optional(),                 // 展示名（可选，应用通常不展示）
+  provider: z.string(),                        // provider 类型（用于客户端选择兼容 CLI/protocol，不在用户界面展示）
   apiUrl: z.string(),                          // 拉取模型用的 API 基址
   defaultModels: z.array(z.string()).default([]), // provider 声明的默认模型清单（占位/兜底）
 });
