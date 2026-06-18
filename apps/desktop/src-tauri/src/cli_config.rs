@@ -8,7 +8,9 @@
 //!   spawn 时以 env 指向临时配置，**绝不写用户默认配置**。
 //!
 //! 三 CLI 隔离机制（已查 context7 官方文档 + GitHub discussion #7782 + codex 0.139 二进制反查）：
-//! - **claude**：env `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（最简单，无需配置文件）。
+//! - **claude**：env `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`，adapter 启动时追加
+//!   `--bare`，避免读取用户 `~/.claude/settings.json` 中由 CC Switch 等工具写入的
+//!   base_url/model 默认值；模型仍走 `--model <m>` 命令行参数。
 //!   模型不写配置文件——claude 走 `--model <m>` 命令行参数（adapters/claude.rs build_args），
 //!   配置文件无 model 字段机制，故这里 claude 忽略 model 参数。
 //! - **codex**：env `CODEX_HOME=<临时目录>`，该目录放 `config.toml`：
@@ -40,8 +42,9 @@
 //! - 本模块不打印 api_key（无 println!/eprintln! 含 key；command_preview 复用 redact_arg）。
 //! - 调用方负责在会话结束（spawn_waiter 退出 / stop_session / delete_session）时清理临时目录（AC7）。
 //!
-//! 降级（AC4）：无 api_key 或无 api_url 时，prepare_cli_env 返回空 Vec（调用方据此不注入 env，
-//! CLI 回退默认配置，行为与改造前一致，不崩）。
+//! 降级（AC4）：无 api_key 或无 api_url 时，prepare_cli_env 返回空 Vec（调用方据此不注入 env）。
+//! codex/opencode 仍按各自 CLI 默认配置处理；claude 因 adapter 强制 `--bare`，会暴露缺少
+//! LingFang 注入凭据的真实错误，而不会静默使用用户本机 CC 配置。
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -66,7 +69,8 @@ const OPENCODE_PROVIDER_ID: &str = "lingfang";
 ///
 /// 返回 `Vec<(OsString, OsString)>` 供 `Command::envs()` 追加（不清空宿主 env，保留 PATH 让 CLI 找到二进制）。
 ///
-/// 降级（AC4）：api_key 或 api_url 为空时返回空 Vec（不注入，CLI 走默认配置，不崩）。
+/// 降级（AC4）：api_key 或 api_url 为空时返回空 Vec（不注入）。
+/// claude adapter 使用 `--bare`，因此不会在缺平台凭据时读取用户级 CC 配置。
 pub fn prepare_cli_env(
     tool: CodeAssistantTool,
     api_key: &str,
@@ -79,7 +83,7 @@ pub fn prepare_cli_env(
         return Vec::new();
     }
     match tool {
-        // claude 走 --model 命令行参数，配置文件无 model 机制，故 model 不传入（忽略）。
+        // claude 走 --model 命令行参数；adapter 用 --bare 隔离用户 ~/.claude/settings.json。
         CodeAssistantTool::Claude => prepare_claude_env(api_key, api_url),
         CodeAssistantTool::Codex => prepare_codex_env(api_key, api_url, config_dir, model),
         CodeAssistantTool::Opencode => prepare_opencode_env(api_key, api_url, config_dir, model),
@@ -87,6 +91,7 @@ pub fn prepare_cli_env(
 }
 
 /// claude：纯 env 注入（ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY），无需配置文件。
+/// 用户级 Claude Code 配置隔离由 adapters/claude.rs 的 `--bare` 保证。
 fn prepare_claude_env(api_key: &str, api_url: &str) -> Vec<(OsString, OsString)> {
     vec![
         (

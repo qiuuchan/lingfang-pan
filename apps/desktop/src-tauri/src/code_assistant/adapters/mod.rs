@@ -109,10 +109,20 @@ mod tests {
                 "--include-partial-messages",
                 "--permission-mode",
                 "bypassPermissions",
+                "--bare",
                 "--model",
                 "sonnet",
             ]
         );
+    }
+
+    #[test]
+    fn claude_run_args_use_bare_mode_to_ignore_user_settings() {
+        // 桌面端必须使用 LingFang 注入的 key/url/model；不能读取用户 ~/.claude/settings.json
+        // 中由 CC Switch 等工具写入的 env/model 默认值。
+        let definition = tool_definition(CodeAssistantTool::Claude);
+        let args = definition.run_args("ping", Some("sonnet"), None, None, None);
+        assert!(args.iter().any(|arg| arg == "--bare"));
     }
 
     #[test]
@@ -161,6 +171,7 @@ mod tests {
                 "--include-partial-messages",
                 "--permission-mode",
                 "bypassPermissions",
+                "--bare",
                 "--model",
                 "sonnet",
                 "--resume",
