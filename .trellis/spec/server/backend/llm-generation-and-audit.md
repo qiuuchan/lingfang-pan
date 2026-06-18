@@ -41,7 +41,7 @@
 - `GET /api/llm/binding`（ensureCurrentTeam，单条绑定，apiKey 脱敏，**零解密**）。
 - `PUT /api/llm/binding`（ensureTeamAdmin，入参无 gatewayId，按 teamId 唯一 upsert，apiKey 写入即加密 + `$transaction` + 审计）。
 - `DELETE /api/llm/binding`（ensureTeamAdmin，按 teamId 删唯一绑定）。
-- `POST /api/llm/binding/decrypt`（ensureTeamAdmin + 强审计，按 teamId 取唯一绑定解密，返回明文供桌面 CLI 用）。
+- `POST /api/llm/binding/decrypt`（ensureTeamAdmin + 强审计，按 teamId 取唯一绑定解密，返回明文供桌面 SDK Runtime 用）。
 
 ## 安全契约（用户凭据保护）
 

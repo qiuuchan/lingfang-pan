@@ -17,7 +17,7 @@ Reference file:
 
 Large Rust command modules must be split by responsibility before they become the maintenance surface:
 
-- `code_assistant.rs` -> keep command/export surface thin; move state, process tree, workspace, probe and session flows under `code_assistant/`.
+- `code_assistant.rs` -> keep command/export surface thin; move SDK engines, local tools, process helpers, workspace and session storage under `code_assistant/`.
 - `plugin_store.rs` -> split config, path safety, manifest parsing, status scanning and file IO under `plugin_store/`.
 - `plugin_runner.rs` -> split manifest parsing, Python venv, Node install, process table and command wrappers under `plugin_runner/`.
 - `plugin_script.rs` -> split runtime probing, env construction, path validation, sandbox materialization and execution under `plugin_script/`.
@@ -26,12 +26,12 @@ The old top-level file may remain as `mod.rs`/barrel during migration, but imple
 
 ### Code Assistant Split Boundary
 
-`apps/desktop/src-tauri/src/code_assistant.rs` may remain as the thin command/session orchestration surface after process, stream and test logic have moved out. Treat it as a recorded exception only when:
+`apps/desktop/src-tauri/src/code_assistant.rs` may remain as the thin command/session orchestration surface after SDK engines, process helpers and test logic have moved out. Treat it as a recorded exception only when:
 
 - process lookup/capture/tree-kill lives under `code_assistant/process/`;
-- stream JSON parsing lives under `code_assistant/stream/`;
-- tests are split under `code_assistant/tests/` by behavior (`claude_stream`, `codex_stream`, `reader`, `summary`, `process`, `scan`, `real_cli`);
-- the remaining top-level file owns command inputs, session lifecycle glue, event sink glue and store/process coordination.
+- SDK request construction, response parsing, tool loops and local workspace tools live under `code_assistant/engine/`;
+- tests are split under `code_assistant/tests/` by behavior (`core`, `summary`, `process`, `scan`) plus engine-local tests for SDK request bodies and tool validation;
+- the remaining top-level file owns command inputs, session lifecycle glue, event sink glue and store/task coordination.
 
 Do not split the remaining session state machine by cutting arbitrary line ranges. Create a separate session-orchestration design first if the top-level file grows again.
 

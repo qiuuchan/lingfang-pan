@@ -20,8 +20,8 @@ export interface TaskStep {
 export const TASK_STEPS: TaskStep[] = [
   {
     icon: CpuIcon,
-    title: '安装代码助手 CLI',
-    description: '前往「设置 → CLI 与运行环境」安装 Claude / Codex / OpenCode，并按需安装 Node 或 Python。',
+    title: '准备脚本运行环境',
+    description: '前往「设置 → 脚本运行环境」按需安装 Node.js 或 Python。',
     view: 'settings',
     settingsTab: 'cli',
   },

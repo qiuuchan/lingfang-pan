@@ -3,9 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
-mod cli_config;
 mod cli_installer;
-mod cli_provider;
 mod code_assistant;
 mod llm_credentials;
 mod llm_fetch;
@@ -19,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 use capability::CapabilityRegistry;
 use plugins::LoadedPlugin;
@@ -155,26 +153,6 @@ fn invoke_capability(
 }
 
 #[tauri::command]
-fn code_assistant_list_tools() -> Vec<code_assistant::ToolAvailability> {
-    code_assistant::list_tools()
-}
-
-#[tauri::command]
-fn code_assistant_check_tool(
-    input: code_assistant::CheckToolInput,
-) -> code_assistant::ToolAvailability {
-    code_assistant::check_tool(input.tool)
-}
-
-#[tauri::command]
-fn code_assistant_run_probe(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::ProbeInput,
-) -> Result<code_assistant::ProbeResult, String> {
-    code_assistant::run_probe(&state, input)
-}
-
-#[tauri::command]
 fn code_assistant_get_config(
     state: tauri::State<code_assistant::CodeAssistantState>,
 ) -> code_assistant::store::CodeAssistantConfig {
@@ -234,22 +212,9 @@ async fn code_assistant_start_session(
         input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
     }
     let state_inner = state.inner().clone();
-    // CLI 配置注入（task 06-15）：提前生成 session_id，spawn 前从后端拿 apiKey + apiUrl 生成 cli_env。
-    // session_id 提前生成是为了让临时配置目录路径（cli-configs/<sessionId>/）与 session 记录一致，
-    // 便于会话结束清理（AC7）。backendUrl + token 从前端 webview 传入，key 明文只在 Rust 内流转（AC8）。
-    // model 透传：用户选定模型写进 codex config.toml 顶级 model 字段 + opencode.json 的 lingfang/<model>
-    // （task 06-15-custom-model-config-file-flow）。claude 忽略（走 --model 命令行参数）。
     let session_id = code_assistant::new_session_id(input.tool);
-    let cli_env = resolve_cli_env(
-        &app,
-        &state_inner,
-        input.cli_config.as_ref(),
-        &session_id,
-        input.tool,
-        input.model.as_deref(),
-    )
-    .await;
-    code_assistant::start_session(app, state_inner, input, session_id, cli_env)
+    let credentials = resolve_sdk_credentials(input.sdk_config.as_ref()).await?;
+    code_assistant::start_session(app, state_inner, input, session_id, credentials)
 }
 
 #[tauri::command]
@@ -259,61 +224,29 @@ async fn code_assistant_send_input(
     input: code_assistant::SendInputInput,
 ) -> Result<(), String> {
     let state_inner = state.inner().clone();
-    // 追问轮同样注入（保证多轮用平台 key/url）。session_id 已存在于入参，tool 从 session 记录取。
-    // model 透传同 start_session：写进 codex/opencode 配置文件（task 06-15）。
-    // 仅取本轮 input.model；追问未传 model 时配置文件回退 default，但 CLI 命令行已通过
-    // effective_model（input.model.or(session.model)）兜底，配置层 default 不影响实际使用的模型。
-    let tool = code_assistant::lookup_session_tool(&state_inner, &input.session_id);
-    let cli_env = resolve_cli_env(
-        &app,
-        &state_inner,
-        input.cli_config.as_ref(),
-        &input.session_id,
-        tool,
-        input.model.as_deref(),
-    )
-    .await;
-    code_assistant::send_input(app, &state_inner, input, cli_env)
+    let credentials = resolve_sdk_credentials(input.sdk_config.as_ref()).await?;
+    code_assistant::send_input(app, &state_inner, input, credentials)
 }
 
-/// 解析 CLI 配置注入 env（claude/codex/opencode 的隔离配置生成）。
-///
-/// 流程（task 06-15）：
-/// 1. cli_config 缺失（前端未传 backendUrl/token）→ 返回空 Vec（不注入平台凭据）。
-/// 2. Rust 内部调 `llm_credentials::fetch_credentials` 从后端拿 (apiKey, apiUrl)（AC8 key 不进前端）。
-/// 3. 调 `cli_config::prepare_cli_env` 按 tool 类型生成 env（claude 纯 env / codex CODEX_HOME+config.toml / opencode OPENCODE_CONFIG+json），
-///    并把用户选定 model 写进 codex/opencode 配置文件（task 06-15-custom-model-config-file-flow）。
-/// 4. fetch 失败/无 key → 返回空 Vec。claude 仍清空 setting sources 隔离用户 CC 配置，避免错用本机模型。
-///
-/// `model`：用户选定模型 id（已 clean：None 或非空且非 default）。codex 写 config.toml 顶级 model；
-/// opencode 写 json `lingfang/<model>`；claude 忽略（走 --model 命令行参数）。
-async fn resolve_cli_env(
-    _app: &tauri::AppHandle,
-    state: &code_assistant::CodeAssistantState,
-    cli_config: Option<&code_assistant::CliConfigInput>,
-    session_id: &str,
-    tool: code_assistant::adapters::CodeAssistantTool,
-    model: Option<&str>,
-) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
-    // 前端未传 cli_config（未登录或后端未配置）→ 不注入平台凭据。
-    let Some(cli_config) = cli_config else {
-        return Vec::new();
+async fn resolve_sdk_credentials(
+    sdk_config: Option<&code_assistant::SdkConfigInput>,
+) -> Result<code_assistant::engine::SdkCredentials, String> {
+    let Some(sdk_config) = sdk_config else {
+        return Err("缺少模型服务配置，请先登录并配置平台模型服务".to_string());
     };
     let (backend_url, auth_token) = match (
-        cli_config.backend_url.as_str(),
-        cli_config.auth_token.as_str(),
+        sdk_config.backend_url.as_str(),
+        sdk_config.auth_token.as_str(),
     ) {
         (url, token) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
-        _ => return Vec::new(),
+        _ => return Err("缺少后端地址或登录凭证，无法调用 SDK".to_string()),
     };
-    // Rust 内部调后端拿 key/url（拿不到时返回空 Vec）。
-    let credentials = match llm_credentials::fetch_credentials(backend_url, auth_token).await {
-        Ok(Some((key, url))) => (key, url),
-        _ => return Vec::new(),
+    let Some((api_key, api_url)) =
+        llm_credentials::fetch_credentials(backend_url, auth_token).await?
+    else {
+        return Err("未获取到模型服务 API Key 或 API URL，请检查模型服务绑定".to_string());
     };
-    // 临时配置目录：app_data/cli-configs/<sessionId>/（codex/opencode 写文件，claude 不写）。
-    let config_dir = state.configs_root().join(session_id);
-    cli_config::prepare_cli_env(tool, &credentials.0, &credentials.1, &config_dir, model)
+    Ok(code_assistant::engine::SdkCredentials { api_key, api_url })
 }
 
 #[tauri::command]
@@ -427,10 +360,6 @@ fn main() {
             // task 06-16 组B：插件持久化运行引擎的内存进程表（plugin_id→Child 句柄）。
             // start_plugin/stop_plugin/get_plugin_status 经此 State spawn/take/kill 进程。
             app.manage(plugin_runner::PluginProcessTable::new());
-            let _ = app.emit(
-                "code-assistant://availability-changed",
-                code_assistant::list_tools(),
-            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -438,9 +367,6 @@ fn main() {
             read_plugin_file,
             invoke_capability,
             plugin_net_fetch,
-            code_assistant_list_tools,
-            code_assistant_check_tool,
-            code_assistant_run_probe,
             code_assistant_get_config,
             code_assistant_save_config,
             code_assistant_start_session,
@@ -465,7 +391,6 @@ fn main() {
             plugin_store::read_local_plugin_file,
             plugin_store::write_plugin_files,
             plugin_store::rename_plugin_dir,
-            cli_installer::install_cli,
             cli_installer::install_runtime,
             cli_installer::cancel_install,
             llm_fetch::fetch_models,

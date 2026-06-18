@@ -1,24 +1,22 @@
 // env-readiness.ts — 环境就绪检测 hook（创建插件前置条件）。
 //
-// 背景：用户首次进入 PluginCreatorHome 只看到示例输入，不知道要先装 CLI、配模型服务、加入团队，
+// 背景：用户首次进入 PluginCreatorHome 只看到示例输入，不知道要先配模型服务、加入团队，
 // 直接 send 才以失败 toast 收场（原因不明）。本 hook 把「环境是否就绪 + 缺什么」前端化，供横幅展示。
 //
 // 检测项（design 平台缺口 Top7）：
-// ① CLI 是否装了：tauriInvoke('code_assistant_list_tools') 看至少一个 available。
-// ② 模型服务是否配了：GET /api/llm/binding 看有 apiKeyHint（脱敏串非空代表已存过 key）。
-// ③ 后端地址是否配了：apiBase() 非空（无后端地址 api() 会直接抛）。
-// ④ 是否加入团队：session.tenantName 非空（未加入团队无法上传团队共享 / 提交市场）。
+// ① 模型服务是否配了：GET /api/llm/binding 看有 apiKeyHint（脱敏串非空代表已存过 key）。
+// ② 后端地址是否配了：apiBase() 非空（无后端地址 api() 会直接抛）。
+// ③ 是否加入团队：session.tenantName 非空（未加入团队无法上传团队共享 / 提交市场）。
 //
 // 返回 { ready, missing, loading }：
 // - ready：四项全过为 true。
 // - missing：未就绪项的简体中文一句话描述数组（横幅直接 join('；') 展示）。
 // - loading：检测进行中（首次拉取未完成），调用方可据此暂不渲染横幅避免闪烁。
 //
-// 容错：CLI 探测 / 绑定拉取任意失败都不抛，按「未就绪」处理（横幅会提示去设置），避免检测本身炸 UI。
-// 非 Tauri 环境（浏览器预览）tauriInvoke 抛错 → CLI 项判 missing，符合「桌面环境外不可用」。
+// 容错：绑定拉取失败不抛，按「未就绪」处理（横幅会提示去设置），避免检测本身炸 UI。
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, apiBase, tauriInvoke } from '@/lib/api';
+import { api, apiBase } from '@/lib/api';
 import type { Session, View } from '@/lib/types';
 
 export interface EnvReadinessResult {
@@ -28,11 +26,6 @@ export interface EnvReadinessResult {
   missing: string[];
   /** 检测进行中（首次未完成）。 */
   loading: boolean;
-}
-
-interface ToolAvailabilityLike {
-  tool: string;
-  available?: boolean;
 }
 
 /** 主动重检（供外部在「用户从设置返回」后调用刷新）。 */
@@ -64,25 +57,17 @@ export function useEnvReadiness(
     // ③ 后端地址（最廉价，先查；无后端地址后续 api() 会直接抛）。
     const backendConfigured = Boolean(apiBase());
 
-    // ① ④ 不依赖网络，可同步判定；① CLI 走 tauriInvoke，② 模型绑定走 api()，两者并行避免串行延迟。
-    const [cliInstalled, modelConfigured] = await Promise.all([
-      // ① CLI 是否装了：list_tools 至少一个 available。非 Tauri 环境或调用失败判 missing。
-      tauriInvoke<ToolAvailabilityLike[]>('code_assistant_list_tools')
-        .then((tools) => Array.isArray(tools) && tools.some((t) => t.available))
-        .catch(() => false),
-      // ② 模型服务是否配了：binding.apiKeyHint 非空代表已存过 key。
-      //    无后端地址 / active provider 未配置 / 未绑定都落到 missing。
+    const modelConfigured = await (
       api<BindingResponse>('/api/llm/binding')
         .then((res) => Boolean(res?.binding?.apiKeyHint))
-        .catch(() => false),
-    ]);
+        .catch(() => false)
+    );
 
     // 组件已卸载 / tenantName 已变（依赖变化触发重探）：丢弃本次结果，避免 stale setState。
     if (signal?.cancelled) return;
 
     const miss: string[] = [];
     if (!backendConfigured) miss.push('未配置公司平台地址');
-    if (!cliInstalled) miss.push('未安装代码助手 CLI');
     if (!modelConfigured) miss.push('未配置模型服务 API 密钥');
     // ④ 是否加入团队：session.tenantName 非空（PENDING_APPROVAL 等中间态也没有 team）。
     if (!session.tenantName) miss.push('未加入团队');

@@ -7,12 +7,6 @@ use std::os::windows::process::CommandExt;
 #[cfg(unix)]
 use std::process::Stdio;
 
-pub(crate) fn stop_child_process(mut child: Child) {
-    kill_child_tree(&child);
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 pub(crate) fn kill_child_tree(child: &Child) {
     #[cfg(unix)]
     {

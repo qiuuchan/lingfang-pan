@@ -1,32 +1,27 @@
 // Settings.tsx — 设置页（三 Tab 化）。
 //
 // 三个 Tab（design §7.1）：
-// - cli：CLI 与运行时管理（探测 + 自动安装，复用桌面 Rust 探测/安装命令）。
+// - cli：脚本运行环境管理（探测 + 自动安装，复用桌面 Rust 探测/安装命令）。
 // - gateway：模型网关配置（拉后端目录 + 绑定，apiKey 加密存储）。
 // - backend：后端服务地址 Card（零功能改动，从原单 Card 布局搬入 Tab3）。
 //
-// 顶层 state（design B13）：探测结果（cliResults/runtimeResults）与安装态（installing）上提，
+// 顶层 state（design B13）：探测结果（runtimeResults）与安装态（installing）上提，
 // 不进 useApp；因为 TabsContent keepMounted 切 Tab 时不卸载，state 保留避免重探。
 // useRef 重入守卫（design B26）：probeAll 防止事件触发叠加并发探测。
 //
-// 监听 code-assistant://availability-changed（design B3）：Rust 安装成功后 emit 全量 ToolAvailability，
-// 前端监听后自动重探刷新状态（无需手动点「重新检测」）。
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RefreshCwIcon, ServerIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { normalizeBackendUrl, testBackendUrl, tauriInvoke, tauriListen, type ApiError } from '@/lib/api';
+import { normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
-import { installCli, installRuntime, AVAILABILITY_EVENT } from '@/lib/install-cli';
+import { installRuntime } from '@/lib/install-cli';
 import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
 import type {
-  CliInstallTarget,
   InstallResult,
   InstallTarget,
   ProbeResult,
   RuntimeInstallTarget,
-  ToolAvailability,
 } from '@/lib/cli-types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -89,30 +84,19 @@ export function Settings({
   // 更新日志悬浮窗（ChangelogDialog）：检查更新卡片下方「查看更新日志」按钮触发。
   const [changelogOpen, setChangelogOpen] = useState(false);
 
-  // === Tab1 CLI/运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
-  const [cliResults, setCliResults] = useState<ToolAvailability[] | null>(null);
+  // === Tab1 脚本运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
   const [runtimeResults, setRuntimeResults] = useState<Partial<Record<RuntimeInstallTarget, ProbeResult | null>> | null>(null);
   const [probing, setProbing] = useState(false);
   const [installing, setInstalling] = useState<Partial<Record<InstallTarget, boolean>>>({});
   const probingRef = useRef(false); // B26 重入守卫
 
-  // 重新探测全部：并行 list_tools + probe_script_runtime(nodejs/python)。
-  // probeScriptRuntime 可能 throw（探测失败），catch 后该项置 null；list_tools 失败整体保持上次结果。
+  // 重新探测全部：并行 probe_script_runtime(nodejs/python)。
+  // probeScriptRuntime 可能 throw（探测失败），catch 后该项置 null。
   const probeAll = useCallback(async () => {
     if (probingRef.current) return; // 已在探测，跳过叠加。
     probingRef.current = true;
     setProbing(true);
     try {
-      // list_tools 是 CLI 探测主通道；失败时 cliResults 置空让 UI 显检测中/未装。
-      let tools: ToolAvailability[] | null = null;
-      try {
-        tools = await tauriInvoke<ToolAvailability[]>('code_assistant_list_tools');
-      } catch {
-        tools = null;
-      }
-      setCliResults(tools);
-
-      // 并行探测两个运行时，各自独立兜底。
       const runtimes = await Promise.all([
         probeScriptRuntime('nodejs').then((r) => [r] as const).catch(() => [null] as const),
         probeScriptRuntime('python').then((r) => [r] as const).catch(() => [null] as const),
@@ -127,28 +111,16 @@ export function Settings({
     }
   }, []);
 
-  // 挂载探测一次 + 监听 Rust 安装完成事件自动重探。
+  // 挂载探测一次。
   useEffect(() => {
     void probeAll();
-    // tauriListen 可能在非 Tauri 环境 throw（开发态 SSR/单测），失败时不挂监听，不阻塞探测。
-    let unlisten: (() => void) | null = null;
-    tauriListen<ToolAvailability[]>(AVAILABILITY_EVENT, () => { void probeAll(); })
-      .then((fn) => { unlisten = fn; })
-      .catch(() => { /* 非 Tauri 环境忽略 */ });
-    return () => { if (unlisten) unlisten(); };
   }, [probeAll]);
 
-  /** 安装某目标：按类型路由 install_cli/install_runtime；catch toast；finally 清安装态。
-   *  Rust 安装成功后自动 emit AVAILABILITY_EVENT → 上面监听触发 probeAll 刷新，无需手动重探。 */
+  /** 安装某目标：运行时统一走 install_runtime；catch toast；finally 清安装态。 */
   const onInstall = useCallback(async (target: InstallTarget) => {
     setInstalling((prev) => ({ ...prev, [target]: true }));
     try {
-      let result: InstallResult;
-      if (target === 'nodejs' || target === 'python') {
-        result = await installRuntime(target as RuntimeInstallTarget);
-      } else {
-        result = await installCli(target as CliInstallTarget);
-      }
+      const result: InstallResult = await installRuntime(target as RuntimeInstallTarget);
       // 按 Rust InstallResult.status 分支友好提示（status 是 PascalCase）。
       if (result.status === 'Succeeded') {
         toast.success('安装成功');
@@ -276,16 +248,15 @@ export function Settings({
         {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli' })}
       >
         <TabsList>
-          <TabsTrigger value="cli">CLI 与运行环境</TabsTrigger>
+          <TabsTrigger value="cli">脚本运行环境</TabsTrigger>
           <TabsTrigger value="gateway">模型服务</TabsTrigger>
           <TabsTrigger value="plugins">插件</TabsTrigger>
           <TabsTrigger value="backend">公司平台</TabsTrigger>
         </TabsList>
 
-        {/* Tab1：CLI 与运行时管理 */}
+        {/* Tab1：脚本运行时管理 */}
         <TabsContent value="cli" keepMounted>
           <CliRuntimeTab
-            cliResults={cliResults}
             runtimeResults={runtimeResults}
             probing={probing}
             installing={installing}

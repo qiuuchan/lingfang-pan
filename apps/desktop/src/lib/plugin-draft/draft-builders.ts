@@ -1,7 +1,7 @@
 import { PluginManifest } from '@lingfang/contract';
 import type { DraftDiagnostic, DraftFile, DraftTurn, PluginDraft } from '@/lib/types';
 import { buildFallbackEntryFile, defaultEntryForRuntime, FRONTEND_RUNTIME_TYPES, FRONTEND_VISIBILITIES, hasValidCapabilities, normalizeCapabilities, normalizeEnum, parseManifest, safePluginId } from './manifest';
-import { cliSessionId, compactTurnSegments, extractCliText, type CliProbeResult, type TurnSegmentInput } from './session';
+import { assistantSessionId, compactTurnSegments, extractAssistantText, type CliProbeResult, type TurnSegmentInput } from './session';
 import { extractFencedBlocks, parseStructuredPackage } from './structured-package';
 
 export function buildLocalDraft(input: {
@@ -10,16 +10,16 @@ export function buildLocalDraft(input: {
   model: string;
   result: CliProbeResult;
 }): PluginDraft {
-  const output = extractCliText(input.result);
+  const output = extractAssistantText(input.result);
   const id = `local-${input.result.tool}-${Date.now()}`;
   const pluginId = safePluginId(input.prompt);
   const now = new Date().toISOString();
 
-  // 协议解析（design §3.2.5）：把 CLI stdout 解析为结构化 manifest + 多文件 + notes + 诊断。
+  // 协议解析（design §3.2.5）：把 SDK stdout 解析为结构化 manifest + 多文件 + notes + 诊断。
   const parsed = parseStructuredPackage(output);
   const parsedManifest = parsed.manifest;
 
-  // CLI 字段优先 + 前端兜底补全（兼容模型少产字段的 partial 场景）。
+  // SDK 输出优先 + 前端兜底补全（兼容模型少产字段的 partial 场景）。
   // 枚举字段用 normalizeEnum 收敛：非法值（如 'public'/'edge'）退回默认，避免穿透后端 400。
   // runtime_type 先行确定，entry 回退按 runtime 分流（python→main.py / nodejs→index.js / client→ui/index.html），
   // 修复 Python/Node 插件入口误判为 ui/index.html 的 bug。
@@ -28,7 +28,7 @@ export function buildLocalDraft(input: {
     id: parsedManifest?.id || pluginId,
     name: parsedManifest?.name || input.prompt.slice(0, 24) || '本地代码助手插件',
     version: parsedManifest?.version || '0.1.0',
-    description: parsedManifest?.description || `由 ${input.providerLabel} 本地 CLI 生成的插件草稿`,
+    description: parsedManifest?.description || `由 ${input.providerLabel} SDK Runtime 生成的插件草稿`,
     runtime_type: runtimeType,
     entry: parsedManifest?.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, 'tenant') as 'private' | 'tenant',
@@ -77,7 +77,7 @@ export function buildLocalDraft(input: {
     turns: [
       { role: 'user', content: input.prompt, at: now },
       // assistant 内容优先 notes（模型给用户的自然语言说明），其次 stdout 原文。
-      buildAssistantTurn(parsed.notes || output || '本地 CLI 没有返回可展示内容。', now),
+      buildAssistantTurn(parsed.notes || output || '本地 SDK Runtime 没有返回可展示内容。', now),
     ],
     diagnostics: [
       // 只保留用户关心的 schema 结果（成功/失败原因）；session/命令/transcript 等工程排障信息
@@ -147,14 +147,14 @@ export function buildDraftFromSandboxFiles(input: {
     });
   }
 
-  // CLI 字段优先 + 前端兜底补全（与 buildLocalDraft 同款策略，保证少字段 partial 场景仍可用）。
+  // SDK 输出优先 + 前端兜底补全（与 buildLocalDraft 同款策略，保证少字段 partial 场景仍可用）。
   // runtime_type 先行，entry 回退按 runtime 分流（python→main.py / nodejs→index.js / client→ui/index.html）。
   const runtimeType = normalizeEnum(parsedManifest?.runtime_type, FRONTEND_RUNTIME_TYPES, 'client') as PluginManifest['runtime_type'];
   const manifest = {
     id: parsedManifest?.id || pluginId,
     name: parsedManifest?.name || input.prompt.slice(0, 24) || '本地代码助手插件',
     version: parsedManifest?.version || '0.1.0',
-    description: parsedManifest?.description || `由 ${input.providerLabel} 本地 CLI 生成的插件草稿`,
+    description: parsedManifest?.description || `由 ${input.providerLabel} SDK Runtime 生成的插件草稿`,
     runtime_type: runtimeType,
     entry: parsedManifest?.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, 'tenant') as 'private' | 'tenant',
@@ -197,7 +197,7 @@ export function buildDraftFromSandboxFiles(input: {
       { role: 'user', content: input.prompt, at: now },
       // assistant 内容优先用 stdout（claude 写完文件后给用户的自然语言说明），其次固定文案。
       buildAssistantTurn(
-        extractCliText(input.result) || '本地代码助手已把插件文件写入工作目录。',
+        extractAssistantText(input.result) || '本地 SDK Runtime 已把插件文件写入工作目录。',
         now,
       ),
     ],
@@ -290,7 +290,7 @@ export function mergeConversationTurn(
 }
 
 function buildAssistantTurn(text: string, at: string, segments: TurnSegmentInput[] = []): DraftTurn {
-  const content = text || '本地 CLI 没有返回可展示内容。';
+  const content = text || '本地 SDK Runtime 没有返回可展示内容。';
   const cleaned = compactTurnSegments(segments).filter((segment) => segment.text.trim());
   if (!cleaned.length) return { role: 'assistant', content, at };
   return { role: 'assistant', content, at, segments: cleaned };
@@ -317,7 +317,7 @@ export function mergeFollowupDraft(
   result: CliProbeResult,
   prompt: string,
 ): PluginDraft {
-  const output = extractCliText(result);
+  const output = extractAssistantText(result);
   const now = new Date().toISOString();
 
   // 追问产出重新解析（R2 parseStructuredPackage 已存在）；失败时 parsed.files 为空，兜底 prev。
@@ -338,8 +338,8 @@ export function mergeFollowupDraft(
     entry: parsedManifest?.entry || prevManifest.entry || defaultEntryForRuntime(runtimeType),
     visibility: normalizeEnum(parsedManifest?.visibility, FRONTEND_VISIBILITIES, prevManifest.visibility as string) as 'private' | 'tenant',
     // 修复 DRAFT-01：此前 capabilities 写成 normalizeCapabilities(parsedManifest?.capabilities)，
-    // 不参考 prevManifest.capabilities。normalizeCapabilities 在收到 undefined/[]/非法数组时一律兜底为
-    // [FALLBACK_CAPABILITY]（单 code-assistant.run）。追问只产 file 块无 manifest 块（codex/opencode 伪多轮常见）
+  // 不参考 prevManifest.capabilities。normalizeCapabilities 在收到 undefined/[]/非法数组时一律兜底为
+  // [FALLBACK_CAPABILITY]（单 code-assistant.run）。追问只产 file 块无 manifest 块时
     // 时 prevManifest.capabilities 被整体丢弃，多能力插件静默降级为单能力。
     // 与 entry/runtime_type/visibility 同款语义：parsed 合法非空才覆盖，否则透传 prev。
     capabilities: hasValidCapabilities(parsedManifest?.capabilities)
@@ -383,11 +383,11 @@ export function mergeFollowupDraft(
     turns: normalizeTurns([
       ...prev.turns,
       { role: 'user', content: prompt, at: now },
-      buildAssistantTurn(parsed.notes || output || '本地 CLI 没有返回可展示内容。', now),
+      buildAssistantTurn(parsed.notes || output || '本地 SDK Runtime 没有返回可展示内容。', now),
     ]),
     diagnostics: [
       ...prev.diagnostics,
-      { stage: 'local-cli', status: result.success ? 'pass' : 'fail', message: `追问 ${cliSessionId(result) || '未返回 session'}` },
+      { stage: 'sdk-runtime', status: result.success ? 'pass' : 'fail', message: `追问 ${assistantSessionId(result) || '未返回 session'}` },
       { stage: 'schema', status: schemaStatus, message: schemaSummary },
       ...(result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
       ...schemaDiagnostics,
@@ -405,7 +405,7 @@ export function mergeFollowupDraftWithSandbox(
   prompt: string,
   sbFiles: SbFile[],
 ): PluginDraft {
-  const output = extractCliText(result);
+  const output = extractAssistantText(result);
   const now = new Date().toISOString();
 
   // 从 sandbox 扫描的 manifest.json 解析 manifest（claude 真实写盘）。
@@ -475,11 +475,11 @@ export function mergeFollowupDraftWithSandbox(
     turns: normalizeTurns([
       ...prev.turns,
       { role: 'user', content: prompt, at: now },
-      buildAssistantTurn(output || '本地代码助手已更新插件文件。', now),
+      buildAssistantTurn(output || '本地 SDK Runtime 已更新插件文件。', now),
     ]),
     diagnostics: [
       ...prev.diagnostics,
-      { stage: 'local-cli', status: result.success ? 'pass' : 'fail', message: `追问 ${cliSessionId(result) || '未返回 session'}` },
+      { stage: 'sdk-runtime', status: result.success ? 'pass' : 'fail', message: `追问 ${assistantSessionId(result) || '未返回 session'}` },
       { stage: 'schema', status: schemaStatus, message: schemaSummary },
       ...(result.diagnostics || []).map((message) => ({ stage: 'diagnostics', status: 'fail' as const, message })),
       ...schemaDiagnostics,

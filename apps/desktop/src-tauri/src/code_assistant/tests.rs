@@ -1,6 +1,4 @@
 use super::*;
-use std::time::Instant;
-
 use super::history::tail;
 
 #[derive(Clone)]
@@ -19,11 +17,7 @@ fn temp_assistant_store(name: &str) -> AssistantStore {
     AssistantStore::new(root).expect("assistant store should initialize")
 }
 
-mod claude_stream;
-mod codex_stream;
 mod core;
 mod process;
-mod reader;
-mod real_cli;
 mod scan;
 mod summary;

@@ -38,7 +38,6 @@ import {
   type ConversationMeta,
   type EffortLevel,
   type ProviderId,
-  type SessionCliIdPayload,
   type SessionErrorPayload,
   type SessionExitPayload,
   type SessionOutputPayload,
@@ -51,7 +50,7 @@ import type { LoadedPlugin } from '@/lib/types';
 import { useEnvReadiness } from '@/lib/env-readiness';
 import { PluginCreatorLayout } from '@/components/creator/PluginCreatorLayout';
 import { UploadNamingDialog } from '@/components/creator/UploadNamingDialog';
-import { buildCliConfig, promptWithAttachedPlugins } from '@/lib/plugin-creator/session-helpers';
+import { buildSdkConfig, promptWithAttachedPlugins } from '@/lib/plugin-creator/session-helpers';
 import { canConvertConversationToDraft, lastTurnContent } from '@/lib/plugin-creator/turns';
 import { useCurrentPluginStatus, useLatestRef, useMentionablePlugins, usePluginUpload, useProviderCatalog, useStickyChatScroll } from './plugin-creator/hooks';
 // 组C：插件名用户命名（PRD 需求 1）+ 动态状态从文件系统扫描（PRD 需求 2）。
@@ -59,7 +58,7 @@ import { safePluginId } from '@/lib/plugin-draft';
 
 export function PluginCreatorHome() {
   const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
-  // 平台缺口 Top7：环境就绪检测（CLI / 模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
+  // 环境就绪检测（模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
   // loading=true 时不渲染横幅（避免首帧闪烁）；ready=false 时渲染并提示去设置。
   // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
   const envReadiness = useEnvReadiness(session, view);
@@ -69,7 +68,7 @@ export function PluginCreatorHome() {
   // 上传时弹命名 Dialog，用户填名后 rename_plugin_dir 改正式目录名。
   const [pluginId, setPluginId] = useState<string | null>(null);
   const pluginIdRef = useRef<string | null>(null);
-  const { provider, setProvider, model, setModel, providers, providerInfo, hasAvailableCliRef } = useProviderCatalog(modelConfigVersion);
+  const { provider, setProvider, model, setModel, providers, providerInfo } = useProviderCatalog(modelConfigVersion);
   // R2 思考强度：随每轮 send 传（start_session + send_input 都带，可会话中途调）。默认 medium。
   const [effort, setEffort] = useState<EffortLevel>('medium');
   const [streaming, setStreaming] = useState(false);
@@ -102,11 +101,6 @@ export function PluginCreatorHome() {
   const [metas, setMetas] = useState<ConversationMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useLatestRef(activeId);
-  // 多轮运行态（design §3.3.6 (a)）：multiturnMode 标记当前会话续接能力。
-  // native=claude 已捕获 session id（Rust 已回写 SessionRecord.cli_session_id 并走 --resume）；
-  // degraded=codex/opencode 或 claude 未捕获 id（历史摘要伪多轮）。
-  // cli_session_id 的真值在 Rust SessionRecord，前端只需 mode 信号驱动 UI 文案。
-  const [multiturnMode, setMultiturnMode] = useState<'native' | 'degraded' | null>(null);
   const [activeFile, setActiveFile] = useState('');
   const [previewKey, setPreviewKey] = useState(0);
   // B 聊天引用插件：@触发选中的插件列表（id + name + manifest 摘要），send 时拼进 prompt 让 AI 参考。
@@ -271,14 +265,6 @@ export function PluginCreatorHome() {
             }, ...prev];
           });
         });
-        // design §3.3.3：捕获 claude session_id（仅 claude stream-json 会 emit）→ 标记 native 真 resume 多轮。
-        // cli_session_id 真值由 Rust 回写 SessionRecord，前端只据此切 native mode。
-        await attachListen<SessionCliIdPayload>('code-assistant://session-cli-id', ({ payload }) => {
-          if (disposed || payload.sessionId !== activeIdRef.current) return;
-          if (payload.cliSessionId) {
-            setMultiturnMode('native');
-          }
-        });
         await attachListen<SessionOutputPayload>('code-assistant://output', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const text = payload.text || '';
@@ -313,9 +299,6 @@ export function PluginCreatorHome() {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
           const nextStatus = payload.status === 'stopped' ? 'stopped' : 'exited';
           setAssistantSession((prev) => prev ? { ...prev, status: nextStatus, exitCode: payload.exitCode ?? null, endedAt: payload.endedAt } : prev);
-          // design §3.3.6 (d)：首轮 exit 后判定多轮能力——claude 已捕获 cliSessionId 为 native；
-          // 其余（codex/opencode，或 claude 未捕获 id）标记 degraded（伪多轮，透明提示）。
-          setMultiturnMode((prev) => prev === 'native' ? 'native' : 'degraded');
           setLiveStage(nextStatus === 'stopped' ? '已停止，整理结果中…' : '已结束，整理结果中…');
           void finalizeSession(payload.sessionId, nextStatus, payload.exitCode ?? null, payload.endedAt);
         });
@@ -349,7 +332,7 @@ export function PluginCreatorHome() {
       const pending = pendingPromptRef.current;
       const currentSession = assistantSessionRef.current;
       // CREATOR-06 修复：此前 finalSession.stdout = tailText(stdout || ..., 12000)，
-      // 对 codex/opencode（stdout 围栏块解析路径）当一轮产出超 12k 字符时前段被截掉，
+      // 当一轮产出超 12k 字符时前段被截掉，
       // 若 manifest 块或 file 起始围栏落在丢弃的前段，hasStructuredBlocks=false → 落入纯对话态，
       // 结构化产出被丢弃。stdout 已是 transcriptTextSinceLastInput 切出的「本轮」输出（不会跨轮累积），
       // 故结构化检测与解析直接用完整本轮 stdout，不受 tailText(12000) 截断影响。
@@ -388,7 +371,7 @@ export function PluginCreatorHome() {
       const promptText = pending?.text || pendingUser || '插件';
       const prevDraft = currentDraftRef.current; // 读 ref 最新值（闭包陷阱修复）
 
-      // 方案A：claude 用 Write 工具把插件文件写到 sandbox 目录，CLI exit 后先扫描 sandbox 收文件。
+      // SDK 工具把插件文件写到 workspace 目录，exit 后先扫描 workspace 收文件。
       // 扫描到 manifest.json → files 直接来自磁盘（claude 真实写盘），不走 stdout 围栏块解析
       // （claude 写了文件后不再产围栏块，stdout 解析会判 invalid，故 sandbox 是结构化产出的主来源）。
       // 扫描为空（纯对话 / claude 未写文件）→ 回退到现有对话 / 围栏块逻辑。
@@ -479,7 +462,7 @@ export function PluginCreatorHome() {
         // 落盘失败不阻断对话流程（本地磁盘异常仅静默，历史仍在 transcripts/{id}.jsonl）。
       }
 
-      // 标题生成（首轮 + 当前会话尚无 title）：本地启发式秒级总结，无 CLI 冷启动延迟。
+      // 标题生成（首轮 + 当前会话尚无 title）：本地启发式秒级总结。
       // 优先从用户首句去祈使前缀拿核心需求，回退 assistant 首行；rename 持久化 + 更新 metas 与顶部。
       const currentMeta = metas.find((m) => m.sessionId === sessionId);
       if (!isFollowup && !currentMeta?.title && promptText) {
@@ -526,8 +509,7 @@ export function PluginCreatorHome() {
   // 最近一次发起的 prompt 快照，错误后不清空，供 ErrorBubble 的「重试」复用。
   const lastPromptRef = useRef<string | null>(null);
 
-  // design §3.3.6 (d)：多轮错误分类处理——会话已退出 / CLI 不可用 / cli_session_id 缺失，
-  // 全部走 setLiveError + ErrorBubble（复用错误气泡），不裸 toast、不静默。
+  // 多轮错误统一走 setLiveError + ErrorBubble，不裸 toast、不静默。
   function handleMultiturnError(error: unknown) {
     setLiveError(toCreatorError('session_op_failed', error));
     setStreaming(false);
@@ -548,7 +530,7 @@ export function PluginCreatorHome() {
         prompt: text,
         systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         effort,
-        cliConfig: buildCliConfig(),
+        sdkConfig: buildSdkConfig(),
       },
     });
     // 新会话立即成为 activeId（listener 守卫据此路由新会话事件）。
@@ -601,12 +583,6 @@ export function PluginCreatorHome() {
   async function send(overrideText?: string) {
     const rawText = (overrideText ?? input).trim();
     if (!rawText || streaming) return;
-    // 修复 H5：后端已确认无可用 CLI 时拦截发送，避免发起注定失败的 start_session。
-    // null 表示尚未拉取（不阻断，与原行为一致）；false 表示确认无可用 CLI。
-    if (hasAvailableCliRef.current === false) {
-      toast.error('当前无可用 CLI，请先在设置中安装 Claude / Codex / OpenCode');
-      return;
-    }
     // B 聊天引用：attachedPlugins 非空时把 manifest 摘要拼进 prompt 前，让 AI 参考被引用插件。
     // 最多 5 个（防 prompt 过长）；拼完清空引用（每轮独立，不跨轮累积）。
     const text = promptWithAttachedPlugins(rawText, attachedPlugins);
@@ -628,17 +604,13 @@ export function PluginCreatorHome() {
     if (activeSessionId && activeExited) {
       // 追问路径：调用 Rust send_input（已解锁真续接）。
       isFollowupRef.current = true;
-      setLiveStage(
-        multiturnMode === 'degraded'
-          ? '代码助手基于历史继续生成（多轮能力有限，未完整复用上下文）…'
-          : '代码助手继续生成中…',
-      );
+      setLiveStage('代码助手继续生成中…');
       try {
         // 追问传入当前选的 model（会话内切模型，下一轮生效）；Rust 优先用此值覆盖 session 固化值。
         // R2 effort 同样随本轮传入（可会话中途调思考强度）。
         // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, cliConfig: buildCliConfig(), systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT },
+          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, sdkConfig: buildSdkConfig(), systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -690,7 +662,7 @@ export function PluginCreatorHome() {
     // 期间 AssistantChat 的 option 按钮 disabled（读 askAnsweringRef 经 answered prop 传入）。
     if (!streaming || askAnsweringRef.current) return;
     // 修复 CREATOR-07：追问前置条件应与 send() 一致——校验首轮已退出（status !== 'running'），
-    // 否则首轮 CLI 仍在 running 时派生第二个进程写同一 transcript，双 exit 覆盖草稿。
+    // 否则首轮仍在 running 时派生第二个任务写同一 transcript，双 exit 覆盖草稿。
     // （Rust send_input 无 running 检查，前端必须自守。）
     const sessionId = activeIdRef.current;
     if (!sessionId) return;
@@ -702,7 +674,7 @@ export function PluginCreatorHome() {
     // 组合可读回答：问句 + 选项（便于上下文追溯，纯选项字面在多选语境下歧义）。
     const answer = `${question.question}\n选择：${optionLabel}`;
     // 修复 CREATOR-01：复用 send() 追问路径的状态写入。此前这些 ref/state 全程未更新，
-    // 导致 CLI exit 后 finalizeSession 读 isFollowupRef(仍 false) 走首轮分支，用首问覆盖已累积草稿、答案丢失。
+    // 导致 exit 后 finalizeSession 读 isFollowupRef(仍 false) 走首轮分支，用首问覆盖已累积草稿、答案丢失。
     setPendingUser(answer);
     pendingPromptRef.current = { text: answer, providerLabel: providerInfo.label, model };
     lastPromptRef.current = answer;
@@ -719,12 +691,12 @@ export function PluginCreatorHome() {
           // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
           model: resolveSendModel(model),
           effort,
-          // 修复 ASK-CLICONFIG：首问（start_session）与普通追问（上方 send_input）都注入 cliConfig，
+          // 首问（start_session）与普通追问（上方 send_input）都注入 SDK 配置，
           // 但 AskUser 问题卡片选 option 回答的追问轮此前漏传——该轮不注入平台 key/apiUrl，
           // 与普通追问行为不一致，可能在 Rust 侧未复用首轮注入配置时鉴权失败/路由到错误 provider。
-          // 与 line 630 追问路径对齐，补齐 cliConfig。
-          cliConfig: buildCliConfig(),
-          // 追问轮也传 systemPrompt（与 send() 追问路径一致，保证降级分支/codex/opencode 有系统约束）。
+          // 与追问路径对齐，补齐 SDK 后端连接信息。
+          sdkConfig: buildSdkConfig(),
+          // 追问轮也传 systemPrompt（与 send() 追问路径一致）。
           systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
         },
       });
@@ -776,7 +748,7 @@ export function PluginCreatorHome() {
     } catch {
       setCurrentDraft(null);
     }
-    // 从 metas 重建 assistantSession（无 cli_session_id 真值时切回 degraded；首轮或 native 由后续事件维持）。
+    // 从 metas 重建 assistantSession。
     const meta = list.find((m) => m.sessionId === id);
     if (meta) {
       const rebuilt: AssistantSessionState = {
@@ -794,16 +766,6 @@ export function PluginCreatorHome() {
       };
       assistantSessionRef.current = rebuilt;
       setAssistantSession(rebuilt);
-    }
-    // 修复 CREATOR-05：selectConversation 此前无条件 setMultiturnMode(null)。
-    // codex/opencode 不 emit session-cli-id（仅 claude stream-json 才 emit），追问期间 multiturnMode 仍为 null，
-    // 「此 CLI 不支持原生多轮…」透明提示永不显示，且 liveStage 反而显示 native 文案误导用户上下文真复用。
-    // 改为：codex/opencode 直接置 'degraded'（恢复会话首问即弹降级提示，符合设计决策）；
-    // claude 保持 null（由后续 session-cli-id 或 exit 判定）。
-    if (meta && (meta.tool === 'codex' || meta.tool === 'opencode')) {
-      setMultiturnMode('degraded');
-    } else {
-      setMultiturnMode(null);
     }
     setCloudPlugin(null);
   }
@@ -920,8 +882,6 @@ export function PluginCreatorHome() {
     setActiveFile('');
     pendingPromptRef.current = null;
     isFollowupRef.current = false;
-    // 重置多轮运行态：新对话回到首轮语义（multiturnMode 待定）。
-    setMultiturnMode(null);
     lastPromptRef.current = null;
     // 流程重构：重置 pluginId + 动态状态。新对话不再关联上一插件的持久化目录。
     setPluginId(null);
@@ -948,7 +908,6 @@ export function PluginCreatorHome() {
         liveStage={liveStage}
         liveError={liveError}
         askAnswering={askAnswering}
-        multiturnMode={multiturnMode}
         isFollowup={isFollowupRef.current}
         input={input}
         model={model}

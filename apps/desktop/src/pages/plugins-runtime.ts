@@ -165,7 +165,12 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
       // RT-08 修复：op 既非 'check' 也非 'stop' 时此前静默落到末尾 invoke_capability，
       // capability.rs 只识别 fs.read/system.info，其它 kind 返回 NotDeclared('code-assistant.session')，
       // 用户看到的是与真实原因（op 非法）无关的错误信息。此处显式抛描述性错误。
-      if (args?.op === 'check') return tauriInvoke('code_assistant_list_tools');
+      if (args?.op === 'check') {
+        return [
+          { tool: 'claude', display_name: 'ClaudeCode', available: true },
+          { tool: 'codex', display_name: 'Codex', available: true },
+        ];
+      }
       if (args?.op === 'stop') return tauriInvoke('code_assistant_stop_session', { input: { session_id: args.sessionId } });
       throw new Error(`code-assistant.session 需要 op='check' 或 'stop'，收到：${args?.op ?? String(args?.op)}`);
     }

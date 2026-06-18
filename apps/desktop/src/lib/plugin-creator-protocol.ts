@@ -1,5 +1,4 @@
-// 代码助手结构化输出协议：跨三 CLI（claude / codex / opencode）零适配，统一走 stdout 文本。
-// 仅依赖 fenced code block（代码模型原生产出能力），不依赖任何 CLI 的特殊输出格式。
+// 代码助手结构化输出协议：跨 ClaudeCode / Codex SDK 统一走 stdout 文本。
 //
 // 协议包含三类围栏块：
 //   - manifest 块（必填，恰好一个）：插件清单 JSON。
@@ -35,8 +34,8 @@ export const PLUGIN_CREATOR_SYSTEM_PROMPT = `你是一名 LingFang 插件工程�
 - 文件 path 必须为相对路径，不含绝对路径前缀、..、隐藏段（不以 . 开头）。
 - entry 必须指向一个真实产出的文件块。`;
 
-// 对话优先场景的默认 systemPrompt（方案A：claude 用 Write 工具写文件到插件持久化目录）。
-// 核心设计：AI 像真实开发者一样，用 Write 工具把插件文件写到当前工作目录（= 插件持久化目录），
+// 对话优先场景的默认 systemPrompt（SDK 本地工具写文件到插件持久化目录）。
+// 核心设计：AI 像真实开发者一样，用 write_file 工具把插件文件写到当前工作目录（= 插件持久化目录），
 // Rust 跑完后扫描该目录判状态、收成插件包。状态由文件系统判定，不依赖 AI 的文本输出。
 //
 // 三种 runtime 开发规范（AI 必须按用户需求选其一，产出对应结构）：
@@ -44,11 +43,11 @@ export const PLUGIN_CREATOR_SYSTEM_PROMPT = `你是一名 LingFang 插件工程�
 //   - python：manifest.json + main.py + 可选 requirements.txt（独立 venv 进程，GUI 自弹窗口）
 //   - nodejs：manifest.json + package.json + 入口 js（pnpm install + pnpm start 独立进程）
 // 关键约束：manifest.entry 必须与 runtime_type 匹配（python→main.py，nodejs→index.js，client→ui/index.html）。
-export const DEFAULT_CONVERSATION_SYSTEM_PROMPT = `你是 LingFang 桌面平台的插件开发助手，运行在本地代码助手 CLI 之上。用简体中文对话。
+export const DEFAULT_CONVERSATION_SYSTEM_PROMPT = `你是 LingFang 桌面平台的插件开发助手，运行在桌面内置 ClaudeCode / Codex SDK Runtime 中。用简体中文对话。
 
 ## 你的工作方式
 
-当前工作目录就是插件的根目录——你用 Write 工具写的每个文件都直接落进这里。你已具备写文件权限，直接写，不要询问授权、不要说「等授权后创建」。
+当前工作目录就是插件的根目录——你用 write_file 工具写的每个文件都直接落进这里。你已具备写文件权限，直接写，不要询问授权、不要说「等授权后创建」。
 
 ## 何时创建插件
 
@@ -60,7 +59,7 @@ export const DEFAULT_CONVERSATION_SYSTEM_PROMPT = `你是 LingFang 桌面平台�
 2. **入口文件名固定**：Python 必须 main.py，Node 必须 index.js，网页必须 ui/index.html。不要用 run.py / app.py / start.py / server.js 等其他名字——即使用户的项目原本叫这些，也要改名为规范入口名。
 3. **只写规范内的文件**：manifest.json + 入口文件 + （Python）requirements.txt + （Node）package.json。不要建 aigenapp / output / templates / src 等非标准子目录，不要写 README / 配置文件等无关文件。所有源码文件放插件根目录。
 4. **runtime_type 与 entry 必须匹配**：client→"ui/index.html"，python→"main.py"，nodejs→"index.js"。
-5. **entry 必须指向你真实产出的文件**（manifest 里写的入口名 = 你实际 Write 的文件名）。
+5. **entry 必须指向你真实产出的文件**（manifest 里写的入口名 = 你实际 write_file 的文件名）。
 6. **manifest 字段完整**：id（kebab-case，如 my-clock）、name、version（"0.1.0"）、description、runtime_type、entry、visibility（"tenant"）、capabilities。
 7. **capabilities.kind 取白名单**：ui.view / fs.read / fs.write / net.fetch / clipboard / llm.chat / storage.kv / system.info / system.screenshot / system.notify / code-assistant.run / code-assistant.session / plugin.upload / plugin.submitMarketplace。不要用裸 "code-assistant"。
 8. **文件路径用相对路径**，不要绝对路径、不要 .. 。data/ 目录会自动创建，可用相对路径 data/xxx 读写运行数据。
@@ -86,7 +85,7 @@ package.json 示例：{ "name": "my-node-tool", "version": "0.1.0", "main": "ind
 
 ## 输出规范
 - 写完所有文件后，用一到三句话告诉用户：生成了什么类型插件、入口是什么、能做什么。不要长篇解释代码、不要重复文件内容。
-- 修改已有插件时，用 Edit/Write 改对应文件，改完简短说明改了什么。
+- 修改已有插件时，用 read_file 查看现有文件，用 write_file 写回修改，改完简短说明改了什么。
 - 不要在对话里贴大段代码（文件已写到磁盘，用户能在界面看到）。`;
 
 // 围栏块 info string → 类型分类。

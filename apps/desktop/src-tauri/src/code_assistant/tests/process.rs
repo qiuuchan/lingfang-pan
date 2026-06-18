@@ -1,7 +1,7 @@
 use crate::code_assistant::process::{find_binaries_in_path, resolve_npm_shim};
 
-/// resolve_npm_shim 应从 claude/opencode 风格的 .cmd（直接调 .exe）提取真实 exe 路径。
-/// 这是 Windows 上 npm 全局 CLI 的标准形态，Rust 直接 spawn .cmd 会丢孙子进程 stdout。
+/// resolve_npm_shim 应从 npm .cmd（直接调 .exe）提取真实 exe 路径。
+/// 这是 Windows 上 npm 全局工具的标准形态，Rust 直接 spawn .cmd 会丢孙子进程 stdout。
 #[cfg(windows)]
 #[test]
 fn resolve_npm_shim_extracts_exe_from_cmd() {
@@ -22,7 +22,7 @@ fn resolve_npm_shim_extracts_exe_from_cmd() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// resolve_npm_shim 应从 codex 风格 .cmd（node + .js）包装成 node 调用。
+/// resolve_npm_shim 应从 node + .js 风格 .cmd 包装成 node 调用。
 #[cfg(windows)]
 #[test]
 fn resolve_npm_shim_wraps_js_with_node() {

@@ -1,21 +1,18 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 // 安全修复 H2：file_lock 是 code-assistant 子系统的会话存储串行化锁，
 // poison 后所有 upsert_session/append_transcript/update_session_exit 均会 panic，
 // 会话永久卡死。容忍 poison（与 code_assistant.rs 同模式），数据仍有效。
 // 注：let _guard = ... 模式下 guard 生命周期到当前块末尾，转换不影响释放语义。
-use std::thread;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::lock_or_recover;
 
-use super::adapters::CodeAssistantTool;
+use super::types::CodeAssistantTool;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CodeAssistantConfig {
@@ -58,8 +55,7 @@ pub struct SessionRecord {
     pub ended_at: Option<String>,
     #[serde(alias = "exitCode", rename = "exitCode")]
     pub exit_code: Option<i32>,
-    // CLI 侧会话 id（仅 claude 真 resume 用到；design §3.3.2）。
-    // 本地落盘字段，非云端契约：default 保证旧 sessions.json 可读。
+    // 旧 CLI 侧会话 id。SDK runtime 不再写入，仅保留字段保证旧 sessions.json 可读。
     #[serde(default, alias = "cliSessionId", rename = "cliSessionId")]
     pub cli_session_id: Option<String>,
     // 会话展示标题（design §3.2.1）：首启可从 transcript 首 input 懒回填；用户重命名时落盘。
@@ -76,56 +72,11 @@ pub struct SessionRecord {
     pub draft_updated_at: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RegisteredAgentProcess {
-    pub pid: u32,
-    #[serde(alias = "sessionId", rename = "sessionId")]
-    pub session_id: String,
-    pub tool: CodeAssistantTool,
-    pub model: Option<String>,
-    #[serde(alias = "workspaceDir", rename = "workspaceDir")]
-    pub workspace_dir: String,
-    #[serde(alias = "commandPreview", rename = "commandPreview")]
-    pub command_preview: Vec<String>,
-    #[serde(alias = "registeredAtMs", rename = "registeredAtMs")]
-    pub registered_at_ms: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct AgentProcessRegistry {
-    version: u8,
-    processes: Vec<RegisteredAgentProcess>,
-}
-
-impl Default for AgentProcessRegistry {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            processes: Vec::new(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RegistryCleanupRecord {
-    #[serde(alias = "sessionId", rename = "sessionId")]
-    pub session_id: String,
-    pub pid: u32,
-    pub tool: CodeAssistantTool,
-    pub killed: bool,
-    #[serde(alias = "stillAlive", rename = "stillAlive")]
-    pub still_alive: bool,
-    #[serde(alias = "commandPreview", rename = "commandPreview")]
-    pub command_preview: Vec<String>,
-}
-
 // 修复 RUSTSHIM-01 / RUSTSHIM-03 / SPAWN-03 / RUST-STREAM-03（并发根因）：
 // 此前 AssistantStore 仅是 root: PathBuf 的 Clone 包装，无任何锁。upsert_session /
-// update_session_exit / set_cli_session_id / rename_session / touch_draft_updated_at /
-// append_transcript 全是非原子 read-modify-write（write_json 裸 fs::write 覆盖）。
-// 多线程并发（命令线程 + spawn_waiter 后台线程 + spawn_reader 后台线程 stdout/stderr
-// 双 reader）写同一 sessions.json / {id}.jsonl 会丢失更新甚至撕裂 JSONL 行。
-// 设计者对 processes HashMap 用了 Arc<Mutex>，却遗漏 store 文件写。
+// update_session_exit / rename_session / touch_draft_updated_at / append_transcript
+// 全是非原子 read-modify-write（write_json 裸 fs::write 覆盖）。
+// 多线程并发写同一 sessions.json / {id}.jsonl 会丢失更新甚至撕裂 JSONL 行。
 // 修复策略：AssistantStore 内嵌 Mutex<()> 序列化所有 sessions.json 的读-改-写，
 // 并对 transcript 追加也走该锁（per-store 单写）；write_json 改为 tmp+rename 原子替换。
 // 因 AssistantStore 需 Clone（CodeAssistantState 持有副本语义），用 Arc<Mutex<()>> 共享。
@@ -157,93 +108,6 @@ impl AssistantStore {
 
     fn sessions_path(&self) -> PathBuf {
         self.root.join("sessions.json")
-    }
-
-    pub fn registry_path(&self) -> PathBuf {
-        self.root
-            .join("runtime")
-            .join("agent-process-registry.json")
-    }
-
-    fn read_registry(&self) -> AgentProcessRegistry {
-        read_json(&self.registry_path()).unwrap_or_default()
-    }
-
-    fn write_registry(&self, registry: &AgentProcessRegistry) -> Result<(), String> {
-        write_json(&self.registry_path(), registry)
-    }
-
-    pub fn list_registered_processes(&self) -> Vec<RegisteredAgentProcess> {
-        self.read_registry().processes
-    }
-
-    pub fn register_process(&self, process: RegisteredAgentProcess) -> Result<(), String> {
-        // 修复 RUSTSHIM-01：registry.json 同款非原子 RMW，并发更新丢失条目。
-        // 用 file_lock 序列化读-改-写（与 processes HashMap 的 Arc<Mutex> 同款锁策略）。
-        let _guard = lock_or_recover(&self.file_lock);
-        let mut registry = self.read_registry();
-        registry
-            .processes
-            .retain(|item| item.session_id != process.session_id);
-        registry.processes.push(process);
-        registry
-            .processes
-            .sort_by(|a, b| b.registered_at_ms.cmp(&a.registered_at_ms));
-        self.write_registry(&registry)
-    }
-
-    pub fn unregister_process(&self, session_id: &str) -> Result<(), String> {
-        // 修复 RUSTSHIM-01：registry.json 的 RMW 必须串行化。
-        let _guard = lock_or_recover(&self.file_lock);
-        let mut registry = self.read_registry();
-        registry
-            .processes
-            .retain(|item| item.session_id != session_id);
-        self.write_registry(&registry)
-    }
-
-    pub fn cleanup_registered_processes(&self) -> Result<Vec<RegistryCleanupRecord>, String> {
-        // 修复 RUSTSHIM-01：扫 + 写 registry.json 整体在锁内，避免与 register/unregister 交叉。
-        let _guard = lock_or_recover(&self.file_lock);
-        let processes = self.list_registered_processes();
-        if processes.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut records = Vec::new();
-        for process in &processes {
-            let killed = kill_process(process.pid, false);
-            records.push(RegistryCleanupRecord {
-                session_id: process.session_id.clone(),
-                pid: process.pid,
-                tool: process.tool,
-                killed,
-                still_alive: process_alive(process.pid),
-                command_preview: process.command_preview.clone(),
-            });
-        }
-
-        thread::sleep(Duration::from_millis(1_000));
-
-        for record in &mut records {
-            if process_alive(record.pid) {
-                let killed = kill_process(record.pid, true);
-                record.killed = record.killed || killed;
-                record.still_alive = process_alive(record.pid);
-            } else {
-                record.still_alive = false;
-            }
-        }
-
-        let survivors: Vec<RegisteredAgentProcess> = processes
-            .into_iter()
-            .filter(|process| process_alive(process.pid))
-            .collect();
-        self.write_registry(&AgentProcessRegistry {
-            version: 1,
-            processes: survivors,
-        })?;
-        Ok(records)
     }
 
     pub fn transcript_path(&self, session_id: &str) -> PathBuf {
@@ -290,7 +154,7 @@ impl AssistantStore {
         ended_at: String,
     ) -> Result<(), String> {
         // 修复 RUSTSHIM-01 / RUST-STREAM-03：update_session_exit 是退出终态，
-        // 必须在 file_lock 内执行，避免被 reader 线程的 set_cli_session_id 覆盖。
+        // 必须在 file_lock 内执行，避免并发写覆盖。
         let _guard = lock_or_recover(&self.file_lock);
         let mut sessions = self.list_sessions();
         if let Some(record) = sessions
@@ -300,25 +164,6 @@ impl AssistantStore {
             record.status = status.to_string();
             record.exit_code = exit_code;
             record.ended_at = Some(ended_at);
-        }
-        write_json(&self.sessions_path(), &sessions)
-    }
-
-    /// 捕获到 CLI 侧会话 id（claude stream-json 的 session_id）后回写（design §3.3.2）。
-    /// 复用 update_session_exit 的「定位 record 改字段再写」模式；只写非空 id（首轮可能未捕获）。
-    pub fn set_cli_session_id(&self, session_id: &str, cli_session_id: &str) -> Result<(), String> {
-        if cli_session_id.trim().is_empty() {
-            return Ok(());
-        }
-        // 修复 RUSTSHIM-01 / RUST-STREAM-03：set_cli_session_id 由 reader 线程调用，
-        // 与 waiter 的 update_session_exit 跨线程写同一 sessions.json，无锁会丢失更新。
-        let _guard = lock_or_recover(&self.file_lock);
-        let mut sessions = self.list_sessions();
-        if let Some(record) = sessions
-            .iter_mut()
-            .find(|item| item.session_id == session_id)
-        {
-            record.cli_session_id = Some(cli_session_id.to_string());
         }
         write_json(&self.sessions_path(), &sessions)
     }
@@ -458,93 +303,6 @@ pub fn now_string() -> String {
     format!("{}.{:03}Z", now.as_secs(), now.subsec_millis())
 }
 
-pub fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
-fn process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let group = format!("-{pid}");
-        Command::new("kill")
-            .arg("-0")
-            .arg("--")
-            .arg(&group)
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-            || Command::new("kill")
-                .arg("-0")
-                .arg(pid.to_string())
-                .status()
-                .map(|status| status.success())
-                .unwrap_or(false)
-    }
-    #[cfg(windows)]
-    {
-        // 修复 PROCALIVE-WIN：此前用 String::contains(&pid.to_string()) 判定进程存活，
-        // 但 tasklist /FI "PID eq {pid}" 的输出始终包含作为过滤参数字面量的 PID 串（表头/参数行），
-        // 导致对任意 PID 恒返回 true → cleanup_registered_processes 把已死进程误判为存活，
-        // 注册表永不收缩、每次启动都尝试 kill 已死 PID。
-        // 改用 /FO CSV /NH 输出无表头数据行：匹配的进程会有一行 CSV，PID 位于第二列（,"PID",）；
-        // 无匹配时 tasklist 退出码非 0 且无可解析数据行。据此精确判定。
-        let out = Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-            .output();
-        match out {
-            Ok(output) => {
-                // 退出码非 0（典型：无匹配进程）直接判死亡。
-                if !output.status.success() {
-                    return false;
-                }
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // 匹配进程的 CSV 行形如 "name.exe","123",...，PID 作为独立带引号字段出现。
-                // 用 ","<pid>"," 精确匹配第二列，避免误命中同名映像名或其他字段。
-                let needle = format!("\",{pid},\"");
-                stdout.lines().any(|line| line.contains(&needle))
-            }
-            Err(_) => false,
-        }
-    }
-}
-
-fn kill_process(pid: u32, force: bool) -> bool {
-    #[cfg(unix)]
-    {
-        let signal = if force { "-KILL" } else { "-TERM" };
-        let group = format!("-{pid}");
-        let group_killed = Command::new("kill")
-            .arg(signal)
-            .arg("--")
-            .arg(&group)
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        let pid_killed = Command::new("kill")
-            .arg(signal)
-            .arg(pid.to_string())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        group_killed || pid_killed
-    }
-    #[cfg(windows)]
-    {
-        let mut args = vec!["/PID".to_string(), pid.to_string(), "/T".to_string()];
-        if force {
-            args.insert(0, "/F".to_string());
-        }
-        Command::new("taskkill")
-            .args(args)
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-}
-
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
@@ -661,92 +419,7 @@ mod tests {
         assert_eq!(store.read_config().default_model.as_deref(), Some("sonnet"));
     }
 
-    #[test]
-    fn registry_registers_and_unregisters_processes() {
-        let store = temp_store("registry");
-        store
-            .register_process(RegisteredAgentProcess {
-                pid: 12345,
-                session_id: "s1".into(),
-                tool: CodeAssistantTool::Codex,
-                model: Some("default".into()),
-                workspace_dir: "/tmp".into(),
-                command_preview: vec!["codex".into(), "exec".into()],
-                registered_at_ms: 42,
-            })
-            .unwrap();
-        assert_eq!(store.list_registered_processes().len(), 1);
-        assert_eq!(store.list_registered_processes()[0].session_id, "s1");
-
-        store.unregister_process("s1").unwrap();
-        assert!(store.list_registered_processes().is_empty());
-    }
-
-    // === design §3.3.2：cli_session_id 回写 + 向后兼容 ===
-
-    #[test]
-    fn cli_session_id_roundtrip() {
-        // 写 sessions → set cli id → 读出字段。
-        let store = temp_store("cli-id");
-        store
-            .upsert_session(SessionRecord {
-                session_id: "s1".into(),
-                tool: CodeAssistantTool::Claude,
-                model: Some("sonnet".into()),
-                workspace_dir: "/tmp".into(),
-                status: "running".into(),
-                transcript_path: "/tmp/t.jsonl".into(),
-                command_preview: vec!["claude".into()],
-                pid: Some(123),
-                started_at: "1".into(),
-                ended_at: None,
-                exit_code: None,
-                cli_session_id: None,
-                title: None,
-                archived: None,
-                draft_updated_at: None,
-            })
-            .unwrap();
-        store.set_cli_session_id("s1", "claude-sid-abc").unwrap();
-        let record = store
-            .list_sessions()
-            .into_iter()
-            .find(|r| r.session_id == "s1")
-            .unwrap();
-        assert_eq!(record.cli_session_id.as_deref(), Some("claude-sid-abc"));
-    }
-
-    #[test]
-    fn cli_session_id_empty_is_noop() {
-        // 空字符串不写（防误覆盖）。
-        let store = temp_store("cli-id-empty");
-        store
-            .upsert_session(SessionRecord {
-                session_id: "s2".into(),
-                tool: CodeAssistantTool::Claude,
-                model: None,
-                workspace_dir: "/tmp".into(),
-                status: "running".into(),
-                transcript_path: "/tmp/t.jsonl".into(),
-                command_preview: vec!["claude".into()],
-                pid: None,
-                started_at: "1".into(),
-                ended_at: None,
-                exit_code: None,
-                cli_session_id: None,
-                title: None,
-                archived: None,
-                draft_updated_at: None,
-            })
-            .unwrap();
-        store.set_cli_session_id("s2", "  ").unwrap();
-        let record = store
-            .list_sessions()
-            .into_iter()
-            .find(|r| r.session_id == "s2")
-            .unwrap();
-        assert_eq!(record.cli_session_id, None);
-    }
+    // === SDK 迁移：cli_session_id 字段只作旧 sessions.json 兼容读取 ===
 
     // === design §3.2.1/§3.2.2/§8.1：新字段向后兼容 + 草稿存取 + 会话删除 ===
 

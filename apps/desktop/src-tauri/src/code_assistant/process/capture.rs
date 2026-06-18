@@ -41,15 +41,6 @@ pub(crate) fn run_captured_inner(
     )
 }
 
-pub(crate) fn run_capture(
-    binary: &PathBuf,
-    args: Vec<String>,
-    workspace_dir: Option<&str>,
-    timeout_ms: u64,
-) -> Result<CapturedOutput, String> {
-    run_captured_inner(binary, args, workspace_dir, timeout_ms, None)
-}
-
 pub(crate) fn run_capture_with_env(
     binary: &PathBuf,
     args: Vec<String>,

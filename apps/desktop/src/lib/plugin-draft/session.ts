@@ -103,13 +103,6 @@ export interface SessionExitPayload {
   endedAt?: string;
 }
 
-// design §3.3.3：spawn_reader 捕获到 claude session_id 后 emit 的 payload。
-// 前端据此 setCliSessionId + 标记 multiturnMode='native'（claude 真 resume）。
-export interface SessionCliIdPayload {
-  sessionId: string;
-  cliSessionId: string;
-}
-
 export type TranscriptEvent = {
   at?: string;
   event?: string;
@@ -130,7 +123,7 @@ export const STATUS_LABEL: Record<string, string> = {
   chat: '对话', // 纯对话态（无插件草稿），对话完成后标记，避免一直显示"生成中"。
 };
 
-export function extractCliText(result: CliProbeResult) {
+export function extractAssistantText(result: CliProbeResult) {
   return (result.stdoutTail || result.stdout_tail || result.stderrTail || result.stderr_tail || '').trim();
 }
 
@@ -220,7 +213,7 @@ export function compactTurnSegments(segments: TurnSegmentInput[]): TurnSegmentIn
 
 export function transcriptDiagnostics(events: TranscriptEvent[]) {
   return events
-    .filter((event) => event.event === 'error' || event.event === 'registry-cleanup' || event.event === 'input-rejected' || event.event === 'stopped' || event.event === 'multiturn-degraded')
+    .filter((event) => event.event === 'error' || event.event === 'input-rejected' || event.event === 'stopped')
     .map((event) => `${event.event}: ${JSON.stringify(event.payload || {})}`);
 }
 
@@ -319,7 +312,7 @@ export function summarizeCommandPreview(preview: string[]): string {
   return out.join(' ');
 }
 
-export function cliSessionId(result: CliProbeResult) {
+export function assistantSessionId(result: CliProbeResult) {
   return result.sessionId || result.session_id || '';
 }
 

@@ -39,7 +39,7 @@ Reference files:
 ### Scenario: Python Interpreter Discovery On Windows
 
 #### 1. Scope / Trigger
-- Trigger: changing `plugin_script::probe_script_runtime`, Python preview execution, or PATH binary discovery shared with code assistant CLI helpers.
+- Trigger: changing `plugin_script::probe_script_runtime`, Python preview execution, or PATH binary discovery shared with plugin script/runtime helpers.
 
 #### 2. Signatures
 - `probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, String>`
@@ -246,14 +246,15 @@ Reference file:
 - 有 `plugin_id` → `plugin_store.ensure_plugin_dir` → 注入 `input.workspace_dir`。
 - 无 `plugin_id` → 用 `temp-<timestamp>-<nanos>` 作临时 plugin_id → `ensure_plugin_dir` → 持久化目录（不再是 `claude-sandbox` 临时目录）。
 
-AI（claude/codex/opencode CLI）用 Write 工具写文件时 cwd = workspace_dir = `plugins_root/<id>/`，产出直接落持久化目录。
+AI（ClaudeCode/Codex SDK Runtime）只能通过本地工具写文件。`write_file` 的 workspace = `plugins_root/<id>/`，产出直接落持久化目录；工具拒绝绝对路径、`..`、空段和隐藏段。
 
-## system-prompt 传递（claude）
+## system-prompt 传递（SDK Runtime）
 
-`start_session` 把 `system_prompt` 作为**独立 system message** 传给 claude（`--system-prompt <s>`），而非拼进 `-p` 用户消息。此前拼接方式导致 claude 把创建指令当普通用户文本弱化/忽略。追问（`send_input`）走 `--resume` 续接，system_prompt 恒 None（claude 恢复首轮 system prompt，避免与 `--resume` 冲突）。codex/opencode 签名对齐但忽略（system prompt 由各自配置文件注入，见 `cli_config.rs`）。
+`start_session` / `send_input` 仍接收 `system_prompt`，但不再拼命令行参数。ClaudeCodeEngine 把它放进 Anthropic Messages API 的 `system` 字段；CodexEngine 把它作为 OpenAI-compatible Chat Completions 的首条 `system` message。追问不再依赖 CLI resume id，统一从 transcript/history 重建上下文。
 
 Reference files:
-- `apps/desktop/src-tauri/src/code_assistant/adapters/claude.rs`（`build_args` 的 `system_prompt` 参数）
+- `apps/desktop/src-tauri/src/code_assistant/engine/runtime.rs`（`claude_messages` / `openai_messages`）
+- `apps/desktop/src-tauri/src/code_assistant/engine/anthropic.rs` / `openai.rs`（SDK request body）
 - `apps/desktop/src/lib/plugin-creator-protocol.ts`（`DEFAULT_CONVERSATION_SYSTEM_PROMPT` 三种 runtime 开发规范）
 
 ## 预览执行 vs 持久化运行
