@@ -48,3 +48,21 @@ pub(super) fn normalize_tool_input(value: &serde_json::Value) -> String {
         other => other.to_string(),
     }
 }
+
+pub(super) fn strip_ansi_escape_sequences(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        output.push(ch);
+    }
+    output
+}

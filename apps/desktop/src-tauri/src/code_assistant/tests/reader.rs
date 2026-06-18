@@ -331,3 +331,53 @@ fn reader_codex_json_routes_thinking_tool_error_out_of_stdout() {
         "thread.started 应被丢弃，不应进任何流：{outputs:?}"
     );
 }
+
+#[test]
+fn reader_strips_ansi_escape_sequences_from_plain_output() {
+    use std::io::Cursor;
+    let raw = "\u{1b}[0m\r\n> build · minimax-m3\r\n\u{1b}[93m\u{1b}[1m! \u{1b}[0mpermission requested\u{1b}[0m\n";
+    let cursor = Cursor::new(raw.as_bytes().to_vec());
+
+    let store = temp_assistant_store("reader-strip-ansi");
+    let state = CodeAssistantState {
+        store: store.clone(),
+        processes: Arc::new(Mutex::new(HashMap::new())),
+        configs_root: std::env::temp_dir().join(format!(
+            "lingfang-reader-strip-ansi-configs-{}",
+            std::process::id()
+        )),
+    };
+    let sink = CapturingSink {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let captured = sink.events.clone();
+
+    spawn_reader(
+        sink,
+        state,
+        "ansi-reader-session".to_string(),
+        "stdout",
+        OutputFormat::Plain,
+        Some(cursor),
+    );
+
+    wait_for_output_events(&captured, 3);
+    let outputs = captured_outputs(&captured);
+    let text = outputs
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("");
+    assert!(
+        !text.contains('\u{1b}'),
+        "UI 输出不得含 ANSI 转义：{text:?}"
+    );
+    assert!(text.contains("> build · minimax-m3"));
+    assert!(text.contains("! permission requested"));
+
+    let transcript = store.read_transcript("ansi-reader-session").unwrap();
+    assert!(
+        !transcript.contains("\\u001b") && !transcript.contains('\u{1b}'),
+        "transcript 不应落 ANSI 转义：{transcript:?}"
+    );
+}
