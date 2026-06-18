@@ -165,7 +165,7 @@ mod tests {
         let definition = tool_definition(CodeAssistantTool::Opencode);
         assert_eq!(
             definition.probe_args("ping", Some("default")),
-            vec!["run", "ping"]
+            vec!["run", "ping", "--dangerously-skip-permissions"]
         );
     }
 
@@ -174,7 +174,13 @@ mod tests {
         let definition = tool_definition(CodeAssistantTool::Opencode);
         assert_eq!(
             definition.probe_args("ping", Some("minimax-m3")),
-            vec!["run", "ping", "--model", "lingfang/minimax-m3"]
+            vec![
+                "run",
+                "ping",
+                "--dangerously-skip-permissions",
+                "--model",
+                "lingfang/minimax-m3",
+            ]
         );
     }
 
@@ -183,7 +189,13 @@ mod tests {
         let definition = tool_definition(CodeAssistantTool::Opencode);
         assert_eq!(
             definition.probe_args("ping", Some("lingfang/minimax-m3")),
-            vec!["run", "ping", "--model", "lingfang/minimax-m3"]
+            vec![
+                "run",
+                "ping",
+                "--dangerously-skip-permissions",
+                "--model",
+                "lingfang/minimax-m3",
+            ]
         );
     }
 
@@ -293,6 +305,6 @@ mod tests {
         // opencode 伪多轮：同上。
         let definition = tool_definition(CodeAssistantTool::Opencode);
         let args = definition.run_args("ping", None, Some("sid-abc"), Some("medium"), Some("sys"));
-        assert_eq!(args, vec!["run", "ping"]);
+        assert_eq!(args, vec!["run", "ping", "--dangerously-skip-permissions"]);
     }
 }

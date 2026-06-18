@@ -51,7 +51,7 @@ use store::{
 };
 use stream::{
     extract_codex_json_items, extract_stream_json_session_id, stream_item_to_pair,
-    ClaudeStreamJsonState, OutputFormat,
+    strip_ansi_escape_sequences, ClaudeStreamJsonState, OutputFormat,
 };
 #[cfg(test)]
 use stream::{extract_stream_json_items, extract_stream_json_text, StreamItem};
@@ -642,6 +642,10 @@ fn spawn_reader<E: AssistantEventSink>(
                             OutputFormat::Plain => vec![(stream, buffer.clone())],
                         };
                         for (item_stream, item_text) in items {
+                            let item_text = match output_format {
+                                OutputFormat::Plain => strip_ansi_escape_sequences(&item_text),
+                                OutputFormat::StreamJson | OutputFormat::CodexJson => item_text,
+                            };
                             let _ = state.store.append_transcript(
                                 &session_id,
                                 "output",

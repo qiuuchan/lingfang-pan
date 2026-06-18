@@ -25,7 +25,11 @@ fn build_args(
     _effort: Option<&str>,
     _system_prompt: Option<&str>,
 ) -> Vec<String> {
-    let mut args = vec!["run".to_string(), prompt.to_string()];
+    let mut args = vec![
+        "run".to_string(),
+        prompt.to_string(),
+        "--dangerously-skip-permissions".to_string(),
+    ];
     if let Some(model) = model {
         args.extend(["--model".to_string(), opencode_model_ref(model)]);
     }
