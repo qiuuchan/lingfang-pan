@@ -161,7 +161,7 @@ pub fn start_session<E: AssistantEventSink>(
     // 由 main.rs 提前生成的 session_id（与 cli_config 临时目录路径一致，便于 AC7 清理）。
     session_id: String,
     // CLI 配置注入 env（由 tauri command 层 fetch_credentials + prepare_cli_env 生成）。
-    // 空 Vec 表示未注入平台凭据（无 key/url 或 fetch 失败）；claude 仍由 --bare 隔离用户 CC 配置。
+    // 空 Vec 表示未注入平台凭据（无 key/url 或 fetch 失败）；claude 仍清空 setting sources 隔离用户 CC 配置。
     cli_env: Vec<(OsString, OsString)>,
 ) -> Result<SessionRecord, String> {
     let definition = tool_definition(input.tool);

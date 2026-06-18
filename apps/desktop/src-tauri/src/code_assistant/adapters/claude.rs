@@ -40,6 +40,8 @@ fn build_args(
         "--permission-mode".to_string(),
         "bypassPermissions".to_string(),
         "--bare".to_string(),
+        "--setting-sources".to_string(),
+        String::new(),
     ];
     // system_prompt 作为独立 system message（修正：此前拼进 -p 被弱化为用户文本）。
     if let Some(sys) = system_prompt.map(str::trim).filter(|s| !s.is_empty()) {
