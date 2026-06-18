@@ -278,11 +278,11 @@ async fn code_assistant_send_input(
 /// 解析 CLI 配置注入 env（claude/codex/opencode 的隔离配置生成）。
 ///
 /// 流程（task 06-15）：
-/// 1. cli_config 缺失（前端未传 backendUrl/token）→ 返回空 Vec（降级，AC4）。
+/// 1. cli_config 缺失（前端未传 backendUrl/token）→ 返回空 Vec（不注入平台凭据）。
 /// 2. Rust 内部调 `llm_credentials::fetch_credentials` 从后端拿 (apiKey, apiUrl)（AC8 key 不进前端）。
 /// 3. 调 `cli_config::prepare_cli_env` 按 tool 类型生成 env（claude 纯 env / codex CODEX_HOME+config.toml / opencode OPENCODE_CONFIG+json），
 ///    并把用户选定 model 写进 codex/opencode 配置文件（task 06-15-custom-model-config-file-flow）。
-/// 4. fetch 失败/无 key → 返回空 Vec（降级，CLI 走默认配置，不崩）。
+/// 4. fetch 失败/无 key → 返回空 Vec。claude 仍由 `--bare` 隔离用户 CC 配置，避免错用本机模型。
 ///
 /// `model`：用户选定模型 id（已 clean：None 或非空且非 default）。codex 写 config.toml 顶级 model；
 /// opencode 写 json `lingfang/<model>`；claude 忽略（走 --model 命令行参数）。
@@ -294,7 +294,7 @@ async fn resolve_cli_env(
     tool: code_assistant::adapters::CodeAssistantTool,
     model: Option<&str>,
 ) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
-    // 前端未传 cli_config（未登录或后端未配置）→ 降级不注入（AC4）。
+    // 前端未传 cli_config（未登录或后端未配置）→ 不注入平台凭据。
     let Some(cli_config) = cli_config else {
         return Vec::new();
     };
@@ -305,7 +305,7 @@ async fn resolve_cli_env(
         (url, token) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
         _ => return Vec::new(),
     };
-    // Rust 内部调后端拿 key/url（降级 None 时返回空 Vec）。
+    // Rust 内部调后端拿 key/url（拿不到时返回空 Vec）。
     let credentials = match llm_credentials::fetch_credentials(backend_url, auth_token).await {
         Ok(Some((key, url))) => (key, url),
         _ => return Vec::new(),

@@ -161,7 +161,7 @@ pub fn start_session<E: AssistantEventSink>(
     // 由 main.rs 提前生成的 session_id（与 cli_config 临时目录路径一致，便于 AC7 清理）。
     session_id: String,
     // CLI 配置注入 env（由 tauri command 层 fetch_credentials + prepare_cli_env 生成）。
-    // 空 Vec 表示降级（无 key/url 或 fetch 失败），spawn 不注入 env，CLI 走默认配置（AC4）。
+    // 空 Vec 表示未注入平台凭据（无 key/url 或 fetch 失败）；claude 仍由 --bare 隔离用户 CC 配置。
     cli_env: Vec<(OsString, OsString)>,
 ) -> Result<SessionRecord, String> {
     let definition = tool_definition(input.tool);
@@ -195,7 +195,7 @@ pub fn start_session<E: AssistantEventSink>(
             "prompt": input.prompt,
             "commandPreview": command_preview,
             "workspaceDir": workspace_dir,
-            // CLI 配置注入降级标志（前端可据此提示「未注入平台 key，使用 CLI 默认配置」）。
+            // CLI 配置注入状态（前端可据此提示「未注入平台 key/url」）。
             // 不记录 key/url 明文（AC8），只记布尔值。
             "cliConfigInjected": !cli_env.is_empty(),
         }),
@@ -261,7 +261,7 @@ pub fn send_input<E: AssistantEventSink>(
     app: E,
     state: &CodeAssistantState,
     input: SendInputInput,
-    // CLI 配置注入 env（同 start_session，由 tauri command 层生成）。空 Vec = 降级。
+    // CLI 配置注入 env（同 start_session，由 tauri command 层生成）。空 Vec = 未注入平台凭据。
     cli_env: Vec<(OsString, OsString)>,
 ) -> Result<(), String> {
     // design §3.3.4：send_input 是多轮续接的真正发起者，复用 start_session 的 spawn 管线（非常驻 stdin）。
@@ -437,7 +437,7 @@ fn spawn_and_attach<E: AssistantEventSink>(
     command: ResolvedToolCommand,
     args: Vec<String>,
     // CLI 配置注入 env（claude: ANTHROPIC_*；codex: CODEX_HOME+OPENAI_API_KEY；opencode: OPENCODE_CONFIG）。
-    // 空 Vec = 降级不注入（AC4）。.envs() 追加而非 env_clear，保留宿主 PATH 让 CLI 找到二进制。
+    // 空 Vec = 不注入平台凭据。.envs() 追加而非 env_clear，保留宿主 PATH 让 CLI 找到二进制。
     cli_env: Vec<(OsString, OsString)>,
 ) -> Result<u32, String> {
     let session_id = session.session_id.clone();
