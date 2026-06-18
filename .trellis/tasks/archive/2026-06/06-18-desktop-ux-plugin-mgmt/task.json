@@ -1,0 +1,33 @@
+{
+  "id": "desktop-ux-plugin-mgmt",
+  "name": "desktop-ux-plugin-mgmt",
+  "title": "桌面壳体验优化与插件管理",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-18",
+  "completedAt": "2026-06-18",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-18-fix-plugin-iframe-click",
+    "06-18-llm-chat-title",
+    "06-18-plugin-status-refresh",
+    "06-18-fix-wallet-table-padding",
+    "06-18-author-plugin-management",
+    "06-18-beautify-ai-response"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
