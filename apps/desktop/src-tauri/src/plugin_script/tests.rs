@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_assistant::find_binary;
 
 fn rel(path: &str) -> PathBuf {
     sanitize_rel_path(path).expect("合法相对路径应通过")

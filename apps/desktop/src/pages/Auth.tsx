@@ -75,12 +75,12 @@ export function Auth() {
     if (!isEmail(forgotEmail)) return toast.error('邮箱格式不正确');
     setForgotLoading(true);
     try {
-      await api('/api/auth/forgot-password', {
+      const result = await api<{ message?: string }>('/api/auth/forgot-password', {
         auth: false,
         method: 'POST',
         body: { email: forgotEmail.trim() },
       });
-      toast.success('若该邮箱已注册，重置链接已发送');
+      toast.success(result.message ?? '若该邮箱已注册且邮件服务可用，将收到重置链接');
       setForgotOpen(false);
       setForgotEmail('');
     } catch (e) {

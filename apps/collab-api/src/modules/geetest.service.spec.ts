@@ -1,10 +1,10 @@
-// GeetestService 单测：覆盖未配置放行、签名生成、极验成功/失败判定、容灾降级。
+// GeetestService 单测：覆盖未配置放行、签名生成、极验成功/失败判定、外部异常显式失败。
 //  - unconfigured_returns_true（未配置 captchaId，开发态跳过）。
 //  - missing_params_returns_false（已配置但 params 缺失 → false）。
 //  - success_when_geetest_returns_success（极验 result==='success' → true）。
 //  - failure_when_geetest_returns_fail（极验 result!=='success' → false）。
-//  - degraded_pass_on_network_error（网络异常降级放行 true + 不抛错）。
-//  - degraded_pass_on_non_200_status（响应非 200 降级放行 true）。
+//  - network_error_returns_false（网络异常显式返回 false，不伪造验证码成功）。
+//  - non_200_status_returns_false（响应非 200 显式返回 false）。
 //  - sign_token_uses_hmac_sha256（签名算法正确，与极验官方一致）。
 //  - is_configured_reads_captcha_id（isConfigured 据 captchaId 非空判定）。
 // 参考 settings.service.spec.ts：Mock PrismaService，不连真实 DB；fetch 用 vi.stubGlobal mock。
@@ -102,7 +102,7 @@ describe('GeetestService', () => {
     expect(ok).toBe(false);
   });
 
-  it('网络异常时降级放行（不抛错 + 记日志）', async () => {
+  it('网络异常时返回 false（不伪造验证码成功）', async () => {
     const prisma = mockPrisma([
       { key: 'geetestCaptchaId', value: 'fake-id' },
       { key: 'geetestCaptchaKey', value: 'fake-key' },
@@ -113,11 +113,11 @@ describe('GeetestService', () => {
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
     const ok = await service.validate({ lot_number: 'lot', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
-    expect(ok).toBe(true);
+    expect(ok).toBe(false);
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
-  it('响应状态非 200 时降级放行（+ 记日志）', async () => {
+  it('响应状态非 200 时返回 false（+ 记日志）', async () => {
     const prisma = mockPrisma([
       { key: 'geetestCaptchaId', value: 'fake-id' },
       { key: 'geetestCaptchaKey', value: 'fake-key' },
@@ -126,7 +126,7 @@ describe('GeetestService', () => {
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
     const ok = await service.validate({ lot_number: 'lot', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
-    expect(ok).toBe(true);
+    expect(ok).toBe(false);
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 

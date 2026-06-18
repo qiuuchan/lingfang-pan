@@ -1,10 +1,9 @@
 mod claude;
 mod codex;
 
-pub(super) use claude::{
-    extract_stream_json_items, extract_stream_json_session_id, extract_stream_json_text,
-    ClaudeStreamJsonState,
-};
+#[cfg(test)]
+pub(super) use claude::{extract_stream_json_items, extract_stream_json_text};
+pub(super) use claude::{extract_stream_json_session_id, ClaudeStreamJsonState};
 pub(super) use codex::extract_codex_json_items;
 
 #[derive(Clone, Copy)]

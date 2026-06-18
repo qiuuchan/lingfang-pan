@@ -1,15 +1,12 @@
+@import url("https://s1.hdslb.com/bfs/static/jinkela/long/font/HarmonyOS_Regular.css");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-/* HarmonyOS Sans SC（华为鸿蒙字体，免费商用）：中文 + 拉丁全覆盖，cn-font-split 按 unicode-range 分片，
-   浏览器只加载用到的码点，加载快。替换原 MiSans。
-   字重（Thin/Light/Regular/Medium/Semibold/Bold/Black）由包内 index.css 统一汇总 @font-face。 */
-@import "harmonyos-sans-sc-webfont-splitted";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: 'HarmonyOS Sans SC', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "HarmonyOS_Regular", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

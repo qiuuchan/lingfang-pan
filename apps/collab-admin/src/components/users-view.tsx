@@ -191,12 +191,14 @@ function UserDetailSheet({
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [emailNotice, setEmailNotice] = useState<{ sent: boolean; message: string } | null>(null);
 
   // 打开时懒加载用户详情（避免列表 mount 拉全量）。user 变 null（关闭）时清空。
   useEffect(() => {
     if (!user) {
       setDetail(null);
       setTempPassword(null);
+      setEmailNotice(null);
       return;
     }
     setLoading(true);
@@ -209,9 +211,10 @@ function UserDetailSheet({
   async function resetPassword() {
     if (!user) return;
     if (!window.confirm(`确认强制重置用户 ${user.email} 的密码？将生成临时密码并作废当前会话。`)) return;
-    const result = await api<{ tempPassword: string }>(`/api/admin/users/${user.id}/reset-password`, { method: 'POST' });
+    const result = await api<{ tempPassword: string; emailNotice?: { sent: boolean; message: string } }>(`/api/admin/users/${user.id}/reset-password`, { method: 'POST' });
     // 临时密码一次性展示，admin 需手动复制转交用户（不自动复制到剪贴板，避免泄漏到无关上下文）。
     setTempPassword(result.tempPassword);
+    setEmailNotice(result.emailNotice ?? null);
     toast.success('密码已重置，请将临时密码安全转交用户');
   }
 
@@ -228,6 +231,11 @@ function UserDetailSheet({
               <div className="rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950">
                 <div className="mb-1 font-medium text-amber-700 dark:text-amber-300">临时密码（仅显示一次，请立即转交用户）</div>
                 <div className="break-all rounded bg-background px-2 py-1.5 font-mono text-base tracking-wider">{tempPassword}</div>
+                {emailNotice ? (
+                  <div className={emailNotice.sent ? 'mt-2 text-xs text-emerald-700 dark:text-emerald-300' : 'mt-2 text-xs text-amber-700 dark:text-amber-300'}>
+                    {emailNotice.message}
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <div className="flex gap-2">

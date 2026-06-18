@@ -250,7 +250,7 @@ export class AdminService {
   // 安全设计：
   //  - 临时密码用 randomBytes(9) 生成（密码学安全随机源），base64url 字母表无歧义字符，便于人工转抄。
   //  - 临时密码仅在响应里返回一次给操作 admin，审计 metadata 不记录密码值（仅记 {reset: true}）。
-  //  - 触发站内通知 + 邮件（邮件失败不阻塞主操作，与审核通知同款吞错降级）。
+  //  - 触发站内通知 + 邮件；邮件失败随响应显式返回，避免管理员误以为通知已送达。
   //  - tokenVersion++ 作废旧 token，避免攻击者继续使用旧会话（与 auth.resetPassword 同款语义）。
   async adminResetUserPassword(actorId: string, id: string) {
     await this.auth.ensurePlatformAdmin(actorId);
@@ -289,10 +289,19 @@ export class AdminService {
     // 邮件通知：临时密码不直接发邮件（防邮件泄漏），仅告知「请联系管理员获取临时密码」。
     // 与 auth.forgotPassword 的重置链接模式不同（admin 强制重置不需要邮件链路传递密码）。
     const resetNoticeHtml = `<p>你的账号密码已被平台管理员重置。请使用管理员提供的临时密码登录，并尽快在「账号设置」中修改为你的新密码。</p>`;
-    this.mail.sendMail(user.email, '你的密码已被管理员重置', resetNoticeHtml).catch(() => {
-      // 邮件发送失败不阻塞主流程（降级吞错，与 mail.sendMail 内部一致）。
-    });
-    return { tempPassword, user: publicUser(user) };
+    const emailNotice = await this.sendPasswordResetNotice(user.email, resetNoticeHtml);
+    return { tempPassword, user: publicUser(user), emailNotice };
+  }
+
+  private async sendPasswordResetNotice(email: string, html: string) {
+    try {
+      await this.mail.sendMail(email, '你的密码已被管理员重置', html);
+      return { sent: true, message: '邮件通知已发送' };
+    } catch (error) {
+      const message = (error as Error).message || '未知错误';
+      console.error('[admin.reset_password.mail_failed]', { email, error: message });
+      return { sent: false, message: `邮件通知未发送：${message}` };
+    }
   }
 
   // 调整用户平台角色（NONE↔PLATFORM_ADMIN，专用端点）。

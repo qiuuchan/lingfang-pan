@@ -7,8 +7,8 @@
 //    3) 已配置 → sign_token = HMAC-SHA256(captchaKey, lot_number) hex，
 //       POST http://gcaptcha4.geetest.com/validate?captcha_id=<id>（表单 5 参数）。
 //    4) 极验返回 result==='success' → true；result!=='success' → false。
-//    5) 容灾：极验 API 超时/异常/响应非 JSON → 降级放行 true + console.error 日志，
-//       不阻断管理端登录/找回密码（外部依赖挂掉不应让管理员无法登录；极验官方文档明确推荐此降级策略）。
+//    5) 极验 API 超时/异常/响应非 JSON → 返回 false + console.error 日志，
+//       不伪造验证码成功；调用方按验证码失败处理。
 //
 // 缓存设计：getCaptchaConfig 内联缓存实例字段（首次查库）。配置变更时由 SettingsService.updateSettings
 // 调 invalidateConfigCache 失效（与 mail.invalidateSmtpCache 同模式），admin 保存后即生效无需重启。
@@ -61,7 +61,7 @@ export class GeetestService {
    * 二次校验：判定本次验证码是否有效。
    * @param params 前端回调产出的 4 参数（lot_number/captcha_output/pass_token/gen_time）。
    *   未配置极验时（开发态）params 可为 undefined，直接放行。
-   * @returns true=通过（或容灾放行），false=验证失败。
+   * @returns true=通过，false=验证失败或极验二次校验不可用。
    *   调用方在「已配置极验 + params 缺失」时应自行抛 badRequest，本方法仅负责「配了就校验，校验失败返 false」。
    */
   async validate(params?: Partial<GeetestCaptchaParams>): Promise<boolean> {
@@ -103,19 +103,18 @@ export class GeetestService {
       } finally {
         clearTimeout(timer);
       }
-      // 容灾：响应状态非 200 → 降级放行（极验服务异常，不阻断业务）。
+      // 响应状态非 200 → 显式失败，不把外部异常伪造成验证码成功。
       if (!res.ok) {
-        console.error('[geetest.validate] 极验响应状态异常，降级放行', { status: res.status });
-        return true;
+        console.error('[geetest.validate] 极验响应状态异常', { status: res.status });
+        return false;
       }
       const data = (await res.json()) as { result?: string; reason?: string };
       // 仅 result==='success' 视为通过；其余（fail 等）均返回 false，调用方提示「请先完成验证码」。
       return data.result === 'success';
     } catch (error) {
-      // 容灾：网络异常/超时/响应非 JSON → 降级放行 true + 日志，不阻断登录。
-      // 极验官方明确推荐此策略：避免外部依赖挂掉导致用户无法登录。
-      console.error('[geetest.validate] 极验二次校验异常，降级放行', { error: (error as Error).message });
-      return true;
+      // 网络异常/超时/响应非 JSON → 显式失败；不吞掉外部依赖错误。
+      console.error('[geetest.validate] 极验二次校验异常', { error: (error as Error).message });
+      return false;
     }
   }
 

@@ -2,8 +2,8 @@
 // 背景：admin 后台 placeholder 引导填裸地址（如 smtpdm.aliyun.com:465），但 new URL 会把首段当
 // scheme 解析失败，导致 SMTP 连接异常（实测报 531 Authentication is required）。
 // 此函数按端口推断协议补全，保证 new URL 能正确解析 host/port/protocol。
-import { describe, expect, it } from 'vitest';
-import { normalizeSmtpUrl } from './mail.service';
+import { describe, expect, it, vi } from 'vitest';
+import { MailService, normalizeSmtpUrl } from './mail.service';
 
 describe('normalizeSmtpUrl', () => {
   it('裸地址带 465 端口补 smtps://', () => {
@@ -49,5 +49,23 @@ describe('normalizeSmtpUrl', () => {
     expect(u.hostname).toBe('smtpdm.aliyun.com');
     expect(u.port).toBe('465');
     expect(u.protocol).toBe('smtps:');
+  });
+});
+
+function mockPrisma(rows: Array<{ key: string; value: string }> = []) {
+  return {
+    platformSetting: {
+      findMany: vi.fn(async () => rows),
+    },
+  };
+}
+
+describe('MailService sendMail', () => {
+  it('SMTP 未配置时显式抛错，不把邮件伪装成已发送', async () => {
+    const prisma = mockPrisma([]);
+    // @ts-expect-error mock 不实现完整 PrismaService 接口，仅测用到的方法。
+    const service = new MailService(prisma);
+
+    await expect(service.sendMail('a@b.com', '主题', '<p>hello</p>')).rejects.toThrow('SMTP 未配置');
   });
 });
