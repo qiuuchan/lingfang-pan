@@ -203,14 +203,23 @@ fn ensure_python_venv(plugin_dir: &std::path::Path) -> Result<PathBuf, String> {
                 pip_args,
                 Some(&plugin_dir.to_string_lossy()),
                 600_000,
-                minimal_env(),
+                pip_install_env(),
             )
             .map_err(|e| format!("pip install 失败：{e}"))?;
             if captured.exit_code != Some(0) {
+                // pip 的关键报错（找不到包 / 解析失败 / 网络错误）常打到 stdout 而非 stderr，
+                // 故 stderr 为空时回退取 stdout，确保前端能看到真实失败原因而非空白。
+                let detail = {
+                    let err = captured.stderr.trim();
+                    if err.is_empty() {
+                        captured.stdout.trim().to_string()
+                    } else {
+                        err.to_string()
+                    }
+                };
                 return Err(format!(
-                    "pip install 失败（exit={:?}）：{}",
+                    "pip install 失败（exit={:?}）：{detail}",
                     captured.exit_code,
-                    captured.stderr.trim()
                 ));
             }
         }
@@ -262,6 +271,31 @@ fn minimal_env() -> Vec<(OsString, OsString)> {
     keys.iter()
         .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
         .collect()
+}
+
+/// pip 默认镜像源（清华 TUNA）。国内访问 PyPI 官方源（pypi.org）极易超时/连接失败，
+/// 导致 pip install 以 exit 1 退出。故默认走国内镜像加速。后续如需用户自定义源，
+/// 可在设置项中覆盖 PIP_INDEX_URL（当前直接内置默认值）。
+const PIP_INDEX_URL: &str = "https://pypi.tuna.tsinghua.edu.cn/simple";
+const PIP_TRUSTED_HOST: &str = "pypi.tuna.tsinghua.edu.cn";
+
+/// pip install 专用环境：在 minimal_env 基础上注入镜像源与非交互配置。
+/// 用 env（而非命令行 -i）的原因：PEP 517 构建隔离会拉起子 pip 安装构建依赖，
+/// 子进程继承 env 才能同样走镜像；仅在顶层命令加 -i 无法覆盖构建隔离子调用。
+fn pip_install_env() -> Vec<(OsString, OsString)> {
+    let mut env = minimal_env();
+    env.push((OsString::from("PIP_INDEX_URL"), OsString::from(PIP_INDEX_URL)));
+    env.push((
+        OsString::from("PIP_TRUSTED_HOST"),
+        OsString::from(PIP_TRUSTED_HOST),
+    ));
+    // 跳过 pip 自身版本检查噪声 + 强制非交互（避免凭证提示挂起）。
+    env.push((
+        OsString::from("PIP_DISABLE_PIP_VERSION_CHECK"),
+        OsString::from("1"),
+    ));
+    env.push((OsString::from("PIP_NO_INPUT"), OsString::from("1")));
+    env
 }
 
 // === Node pnpm 管理 ===
