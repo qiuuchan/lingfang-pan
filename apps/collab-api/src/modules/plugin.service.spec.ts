@@ -3,7 +3,10 @@ import { PluginService } from './plugin.service';
 
 const now = new Date('2026-06-12T00:00:00.000Z');
 
-function createService(options: { existingPlugin?: unknown; membershipRole?: 'MEMBER' | 'TEAM_ADMIN' } = {}) {
+function createService(options: {
+  existingPlugin?: unknown;
+  membershipRole?: 'MEMBER' | 'TEAM_ADMIN';
+} = {}) {
   const pluginFindUnique = vi.fn(async () => options.existingPlugin || null);
   const pluginCreate = vi.fn(async ({ data }) => ({
     id: 'plugin-1',

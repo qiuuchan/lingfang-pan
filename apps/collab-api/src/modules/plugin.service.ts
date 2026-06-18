@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, notFound, AppError } from '../common';
 import { AuthService } from './auth.service';
-import { ensurePluginManager, normalizePluginPackage, publicPlugin, type PluginPackageInput } from './plugin-package';
+import { ensurePluginManager, normalizePluginPackage, publicAvailablePlugin, publicPlugin, type PluginPackageInput } from './plugin-package';
 
 @Injectable()
 export class PluginService {
@@ -65,22 +65,15 @@ export class PluginService {
           { installations: { some: { teamId: membership.teamId, status: 'ENABLED' } } },
         ],
       },
+      include: {
+        installations: {
+          where: { teamId: membership.teamId, status: 'ENABLED' },
+          select: { id: true },
+        },
+      },
       orderBy: [{ marketplace: 'asc' }, { updatedAt: 'desc' }],
     });
-    // 修复 PPK-02 / PPK-05：对非本团队的市场插件（PUBLIC 第三分支）脱敏 ——
-    // 不返回 files 源码（付费插件需购买后桌面端才能从 detail 拿，此前被白嫖），
-    // 不返回 reviewReason/reviewedById 审核内部态（仅作者与管理员可见）。
-    // 本团队插件（作者/团队成员）保留完整字段，因为他们本就持有源码与审核态。
-    return {
-      plugins: plugins.map((plugin) => {
-        const isOwnTeam = plugin.teamId === membership.teamId;
-        const public_ = publicPlugin(plugin, membership.teamId);
-        if (!isOwnTeam) {
-          return { ...public_, files: undefined, manifest: undefined, reviewReason: undefined, reviewedById: undefined };
-        }
-        return public_;
-      }),
-    };
+    return { plugins: plugins.map((plugin) => publicAvailablePlugin(plugin, membership.teamId)) };
   }
 
   async submitPluginToMarketplace(userId: string, id: string, input: { priceCents?: number }) {

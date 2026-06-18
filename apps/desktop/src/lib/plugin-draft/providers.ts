@@ -15,8 +15,6 @@ export const PROVIDERS: ProviderCatalogItem[] = [
 type ActiveProviderCatalogInput = { provider?: string | null; defaultModels?: string[] | null } | null;
 type BindingCatalogInput = { modelOverride?: string[] | null } | null;
 
-const OPENAI_COMPATIBLE_PROVIDER_IDS = new Set(['openai', 'azure', 'deepseek', 'minimax', 'moonshot', 'qwen']);
-
 export function buildAssistantProviderCatalog(input: {
   tools?: unknown;
   activeProvider?: ActiveProviderCatalogInput;
@@ -34,14 +32,11 @@ export function buildAssistantProviderCatalog(input: {
 }
 
 function compatibleProviderIds(provider: string | null | undefined): ProviderId[] {
-  const normalized = (provider || '').trim().toLowerCase();
-  if (normalized === 'anthropic') return ['claude'];
-  // 修复 CLAUDE-OPTION：custom 是用户自配端点，协议不确定（可能 Anthropic 兼容、也可能 OpenAI 兼容），
-  // 故同时提供 ClaudeCode（/v1/messages）与 Codex（/v1/chat/completions）两项，由用户按自身端点协议选择。
-  // 延续提交 0aa2fd8「custom 给两项」的意图，opencode CLI 下线后替换为 codex。
-  if (normalized === 'custom') return ['claude', 'codex'];
-  if (OPENAI_COMPATIBLE_PROVIDER_IDS.has(normalized) || !normalized) return ['codex'];
-  return ['codex'];
+  if ((provider || '').trim().toLowerCase() === 'anthropic') return ['claude'];
+  // 平台模型服务只暴露一个 active provider，但创建器有两套 SDK Runtime 协议：
+  // ClaudeCode 走 /v1/messages，Codex 走 /v1/chat/completions。除 Anthropic 明确只适配
+  // ClaudeCode 外，其余 provider/API 网关协议常由用户自建或兼容层决定，交给用户选择。
+  return ['claude', 'codex'];
 }
 
 function uniqueModels(models: string[]): string[] {

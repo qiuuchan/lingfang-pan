@@ -143,7 +143,8 @@ OpenCode、Claude CLI、Codex CLI 均不再是创建器执行器；前端不探�
 - Rust calls `/api/llm/active-provider` and `/api/llm/binding/decrypt`; missing backend URL, token, apiUrl, or apiKey is an explicit error.
 - Provider mapping:
   - `anthropic` → only `ClaudeCode`
-  - `openai`, `azure`, `deepseek`, `minimax`, `moonshot`, `qwen`, `custom`, unknown OpenAI-compatible providers → only `Codex`
+  - every other active provider, including `openai`, `azure`, `deepseek`, `minimax`, `moonshot`, `qwen`, `custom`, and unknown/self-hosted providers → show both `ClaudeCode` and `Codex`
+  - `ClaudeCode` posts to `/v1/messages`; `Codex` posts to `/v1/chat/completions`. Non-Anthropic gateways may be protocol adapters, so the user chooses the compatible SDK Runtime instead of the UI hiding one.
 - Session `commandPreview` is an SDK summary such as `["ClaudeCode SDK", model]`, not a shell command.
 - Transcript events remain `input`, `output { stream, text }`, `error`, `exit`, `stopped`.
 - `stop_session` cancels the in-memory SDK task and writes both `stopped` and `exit` transcript events; it does not kill a CLI process tree.
@@ -157,7 +158,7 @@ OpenCode、Claude CLI、Codex CLI 均不再是创建器执行器；前端不探�
 - Tool write path absolute / parent traversal / hidden segment -> explicit path validation error in tool result
 
 #### 5. Good/Base/Bad Cases
-- Good: minimax active provider + model `minimax-m3` shows only Codex and calls `/v1/chat/completions` with that model.
+- Good: minimax active provider + model `minimax-m3` shows ClaudeCode and Codex; choosing ClaudeCode calls `/v1/messages`, choosing Codex calls `/v1/chat/completions`.
 - Base: Anthropic active provider shows only ClaudeCode and calls `/v1/messages`.
 - Bad: falling back to a user-level Claude/Codex/OpenCode config, spawning a local CLI, or silently switching provider when SDK credentials fail.
 

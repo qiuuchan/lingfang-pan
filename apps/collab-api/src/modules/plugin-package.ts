@@ -210,6 +210,24 @@ export function publicPlugin(plugin: PublicPluginInput, currentTeamId?: string) 
   };
 }
 
+export function publicAvailablePlugin(
+  plugin: PublicPluginInput & { installations?: unknown[] },
+  currentTeamId: string,
+) {
+  const public_ = publicPlugin(plugin, currentTeamId);
+  const isOwnTeam = plugin.teamId === currentTeamId;
+  if (isOwnTeam) return public_;
+
+  const isInstalled = (plugin.installations ?? []).length > 0;
+  return {
+    ...public_,
+    files: isInstalled ? public_.files : undefined,
+    manifest: isInstalled ? public_.manifest : undefined,
+    reviewReason: undefined,
+    reviewedById: undefined,
+  };
+}
+
 export function ensurePluginManager(plugin: { teamId: string | null; authorUserId: string | null }, teamId: string, userId: string, role: string) {
   if (plugin.teamId !== teamId) throw forbidden('不能操作其他团队的插件');
   if (plugin.authorUserId !== userId && role !== 'TEAM_ADMIN') throw forbidden('仅作者或团队管理员可操作该插件');
