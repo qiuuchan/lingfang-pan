@@ -40,7 +40,6 @@ interface PluginCreatorLayoutProps {
   liveStage: string;
   liveError: CreatorError | null;
   askAnswering: boolean;
-  multiturnMode: 'native' | 'degraded' | null;
   isFollowup: boolean;
   input: string;
   model: string;
@@ -178,9 +177,6 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
                   onAskUserAnswer={props.onAskUserAnswer}
                   askAnswering={props.askAnswering}
                 />
-                {props.streaming && props.isFollowup && props.multiturnMode === 'degraded' && (
-                  <p className="px-1 text-xs text-muted-foreground">当前模型多轮能力有限，已基于历史继续生成（未完整复用上下文）。</p>
-                )}
                 {!props.streaming && props.liveError && <ErrorBubble error={props.liveError} onRetry={props.onRetry} />}
               </div>
             )}

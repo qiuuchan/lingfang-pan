@@ -41,10 +41,6 @@ fn append_summary_line(line: &str, lines: &mut Vec<String>) {
 }
 
 fn append_input_summary(payload: &serde_json::Value, lines: &mut Vec<String>) {
-    let kind = payload.get("kind").and_then(|value| value.as_str());
-    if kind == Some("followup") {
-        return;
-    }
     let prompt = payload
         .get("prompt")
         .and_then(|value| value.as_str())

@@ -20,7 +20,7 @@ describe('buildLocalDraft 产出收敛', () => {
       '<div></div>',
       '```',
     ].join('\n');
-    const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith(raw) });
+    const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'ClaudeCode', model: 'sonnet', result: probeWith(raw) });
     const manifestFile = draft.files.find((f) => f.path === 'manifest.json');
     const manifest = JSON.parse(manifestFile!.content);
     expect(manifest.visibility).toBe('tenant'); // 非法 public → tenant
@@ -37,14 +37,14 @@ describe('buildLocalDraft 产出收敛', () => {
       '<div></div>',
       '```',
     ].join('\n');
-    const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith(raw) });
+    const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'ClaudeCode', model: 'sonnet', result: probeWith(raw) });
     const manifest = JSON.parse(draft.files.find((f) => f.path === 'manifest.json')!.content);
     expect(manifest.visibility).toBe('private');
     expect(manifest.runtime_type).toBe('cloud');
   });
 
   it('完全失败（无输出）→ status invalid，不比现状差', () => {
-    const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith('', false) });
+    const draft = buildLocalDraft({ prompt: '做一个番茄钟', providerLabel: 'ClaudeCode', model: 'sonnet', result: probeWith('', false) });
     expect(draft.status).toBe('invalid');
   });
 
@@ -59,7 +59,7 @@ describe('buildLocalDraft 产出收敛', () => {
       big,
       '```',
     ].join('\n');
-    const draft = buildLocalDraft({ prompt: '做一个插件', providerLabel: 'Claude Code', model: 'sonnet', result: probeWith(raw) });
+    const draft = buildLocalDraft({ prompt: '做一个插件', providerLabel: 'ClaudeCode', model: 'sonnet', result: probeWith(raw) });
     // parse 层判 invalid，buildLocalDraft 不再折叠为 partial。
     expect(draft.status).toBe('invalid');
     // 诊断仍带字节超限 fail 文案。
@@ -74,7 +74,7 @@ describe('mergeFollowupDraft', () => {
   function firstRoundDraft() {
     return buildLocalDraft({
       prompt: '做一个番茄钟',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith([
         '```lingfang-manifest json',
@@ -171,7 +171,7 @@ describe('mergeFollowupDraft', () => {
     // 此前 normalizeCapabilities(undefined) 一律兜底为 [code-assistant.run]，已授权能力静默丢失。
     const prev = buildDraftFromSandboxFiles({
       prompt: '做一个多能力插件',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith('已生成。'),
       files: [
@@ -216,7 +216,7 @@ describe('mergeFollowupDraft', () => {
     // 构造一个磁盘脏 prev：manifest.json 字段为非法 'public' / 'edge'。
     const prev = buildDraftFromSandboxFiles({
       prompt: '做一个插件',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith('已生成。'),
       files: [
@@ -252,7 +252,7 @@ describe('buildDraftFromSandboxFiles', () => {
     // claude 典型产出：manifest.json + ui/index.html，扫描结果直接构造成草稿。
     const draft = buildDraftFromSandboxFiles({
       prompt: '做一个番茄钟',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith('插件已生成。'),
       files: [
@@ -272,7 +272,7 @@ describe('buildDraftFromSandboxFiles', () => {
     // 纯对话或 claude 未写 manifest.json：无法识别为插件包，返回 null。
     const draft = buildDraftFromSandboxFiles({
       prompt: '你好',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith('你好！'),
       files: [{ path: 'readme.txt', content: 'hi' }],
@@ -284,7 +284,7 @@ describe('buildDraftFromSandboxFiles', () => {
     // claude 偶尔只写 manifest.json 漏 entry 文件：补兜底页保证可预览。
     const draft = buildDraftFromSandboxFiles({
       prompt: '做一个番茄钟',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith(''),
       files: [{ path: 'manifest.json', content: '{ "id": "p", "name": "番茄钟", "entry": "ui/index.html" }' }],
@@ -299,7 +299,7 @@ describe('buildDraftFromSandboxFiles', () => {
     // manifest.json 内容非 JSON：解析失败但仍构造草稿（兜底补全字段），status partial。
     const draft = buildDraftFromSandboxFiles({
       prompt: '做一个番茄钟',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith(''),
       files: [
@@ -316,7 +316,7 @@ describe('buildDraftFromSandboxFiles', () => {
     // manifest 写了裸 code-assistant 字符串数组：normalizeCapabilities 兜底为合法对象数组。
     const draft = buildDraftFromSandboxFiles({
       prompt: '做一个插件',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith(''),
       files: [
@@ -339,7 +339,7 @@ describe('mergeFollowupDraftWithSandbox', () => {
   function firstRoundDraft() {
     return buildDraftFromSandboxFiles({
       prompt: '做一个番茄钟',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith('已生成。'),
       files: [
@@ -394,7 +394,7 @@ describe('mergeFollowupDraftWithSandbox', () => {
   it('追问 sandbox manifest.json 缺 capabilities 字段 → prevManifest.capabilities 保留', () => {
     const prev = buildDraftFromSandboxFiles({
       prompt: '做一个多能力插件',
-      providerLabel: 'Claude Code',
+      providerLabel: 'ClaudeCode',
       model: 'sonnet',
       result: probeWith('已生成。'),
       files: [

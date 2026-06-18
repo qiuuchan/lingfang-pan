@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_assistant::history::build_history_summary;
 
 // === design §3.3.5：build_history_summary 伪多轮数据源 ===
 
@@ -102,13 +103,13 @@ fn summary_truncates_when_too_long() {
 }
 
 #[test]
-fn summary_skips_empty_and_followup_input() {
+fn summary_keeps_followup_input_for_sdk_context() {
     let store = temp_assistant_store("summary-filter");
     // 空 prompt 跳过。
     store
         .append_transcript("s3", "input", json!({ "prompt": "  " }))
         .unwrap();
-    // followup 追问 input 不进历史（由追问 prompt 本身提供，避免重复）。
+    // SDK runtime 不再有 CLI resume，所有用户输入都必须进入 transcript 上下文。
     store
         .append_transcript(
             "s3",
@@ -124,5 +125,5 @@ fn summary_skips_empty_and_followup_input() {
         .unwrap();
     let summary = build_history_summary(&store, "s3").unwrap();
     assert!(summary.contains("【用户】做一个番茄钟"));
-    assert!(!summary.contains("把按钮改红"));
+    assert!(summary.contains("【用户】把按钮改红"));
 }

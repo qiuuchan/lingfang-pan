@@ -30,7 +30,7 @@ interface FetchModelsOutput {
  * @returns 模型 id 数组（如 ["gpt-4o", "gpt-4o-mini"]）；失败时抛 Error，message 含 code 前缀
  */
 export async function fetchModels(provider: string, apiUrl: string, apiKey: string): Promise<string[]> {
-  // 入参契约：与 install_cli 等命令一致走 struct 入参，Tauri 要求 { input: {...} } 包裹，
+  // 入参契约：Tauri 要求 struct 入参包 `{ input: {...} }`，
   // 否则报 `missing required key input`。Rust FetchModelsInput 标了 rename_all=camelCase，
   // 故此处传 camelCase 的 apiUrl/apiKey（与 Rust 字段 api_url/api_key 映射）。
   const result = await tauriInvoke<FetchModelsOutput>('fetch_models', {

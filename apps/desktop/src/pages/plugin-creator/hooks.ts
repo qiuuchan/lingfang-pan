@@ -24,23 +24,19 @@ export function useProviderCatalog(modelConfigVersion: number) {
   const [provider, setProvider] = useState(PROVIDERS[0].id);
   const [model, setModel] = useState<string>(PROVIDERS[0].models[0] || '');
   const [providers, setProviders] = useState(PROVIDERS);
-  const hasAvailableCliRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      tauriInvoke<Array<{ tool: string; display_name?: string; available?: boolean }>>('code_assistant_list_tools'),
       api<{ provider?: string; defaultModels?: string[] } | null>('/api/llm/active-provider').catch(() => null),
       api<{ binding?: { modelOverride?: string[] | null } } | null>('/api/llm/binding').catch(() => null),
     ])
-      .then(([tools, activeProvider, binding]) => {
+      .then(([activeProvider, binding]) => {
         if (cancelled) return;
         const catalog = buildAssistantProviderCatalog({
-          tools,
           activeProvider,
           binding: binding?.binding ?? null,
         });
-        hasAvailableCliRef.current = catalog.hasAvailableCli;
         setProviders(catalog.providers);
         setProvider((current) => catalog.providers.some((item) => item.id === current) ? current : catalog.providers[0]?.id || PROVIDERS[0].id);
       })
@@ -57,7 +53,7 @@ export function useProviderCatalog(modelConfigVersion: number) {
     setModel(providerInfo.models[0]);
   }, [providerInfo.id, providerInfo.models]);
 
-  return { provider, setProvider, model, setModel, providers, providerInfo, hasAvailableCliRef };
+  return { provider, setProvider, model, setModel, providers, providerInfo };
 }
 
 export function useMentionablePlugins() {

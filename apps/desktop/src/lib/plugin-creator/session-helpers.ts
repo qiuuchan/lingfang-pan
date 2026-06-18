@@ -46,7 +46,7 @@ export function promptWithAttachedPlugins(rawText: string, plugins: AttachedPlug
   return `[引用插件参考]\n${refs}\n[/引用插件参考]\n${rawText}`;
 }
 
-export function buildCliConfig() {
+export function buildSdkConfig() {
   const backendUrl = apiBase();
   const authToken = getAuthToken();
   if (!backendUrl || !authToken) return undefined;

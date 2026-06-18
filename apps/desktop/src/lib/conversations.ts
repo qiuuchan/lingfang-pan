@@ -41,8 +41,7 @@ export function readDraft(sessionId: string): Promise<string | null> {
   return tauriInvoke<string | null>('code_assistant_read_draft', { input: { sessionId } });
 }
 
-// 扫描 sandbox 目录收成结构化文件列表（方案A：claude 用 Write 工具把插件文件写到 workspace，
-// CLI 跑完后 Rust 扫描目录产出 files 供 finalizeSession 构建插件草稿）。
+// 扫描 workspace 目录收成结构化文件列表（SDK 工具写入 workspace 后由 Rust 扫描产出 files）。
 // 返回 {path, content}[]：path 为相对 sandbox 根的路径（统一 / 分隔）。
 // 空 sandbox（纯对话 / claude 未写文件）返回空数组，调用方据此回退到对话态逻辑。
 export function scanWorkspaceFiles(sessionId: string): Promise<{ path: string; content: string }[]> {
@@ -58,11 +57,11 @@ export function readActiveId(tenantId: string | null): string | null {
   }
 }
 
-// 用本地代码助手 CLI 总结一段对话，生成简短标题。
+// 用本地代码助手 SDK 总结一段对话，生成简短标题。
 // 独立短任务（不复用当前对话 session，避免污染上下文），systemPrompt 严格约束只回标题文本。
 // 返回值已 trim + 截断到 16 字。失败时返回空串，调用方降级到 deriveTitle 启发式。
 export async function generateTitle(opts: {
-  tool: 'claude' | 'codex' | 'opencode';
+  tool: 'claude' | 'codex';
   model?: string;
   userText: string;
   assistantText: string;

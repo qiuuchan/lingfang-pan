@@ -11,7 +11,7 @@ import {
   type EffortLevel,
 } from '@/lib/plugin-draft';
 
-// R2 思考强度选择器：claude 透传 --effort；codex/opencode 无对应参数（忽略，仅 claude 生效）。
+// 思考强度选择器：保留用户偏好字段，SDK runtime 当前不映射 provider 私有参数。
 // 「不思考」对应该 CLI 不开启 extended thinking；medium 为推荐档。
 // effort 随每轮 send 传（start_session + send_input 都带，可会话中途调）。
 const EFFORT_OFF: EffortLevel = 'none';
@@ -59,7 +59,7 @@ export function Composer({
   onSend: () => void;
   onStop: () => void;
 }) {
-  // R1 模型来源纯运行时（本地 CLI 探测 + 上游配置），无硬编码预设。
+  // R1 模型来源纯运行时（SDK provider catalog + 上游配置），无硬编码预设。
   // selectValue：有模型则显示当前选中，无模型（空态）显示哨兵驱动空态提示项。
   const hasModels = providerInfo.models.length > 0;
   const selectValue = hasModels ? (model || providerInfo.models[0]) : CUSTOM_MODEL_SENTINEL;
@@ -161,7 +161,7 @@ export function Composer({
               <SelectTrigger className="h-8 w-[150px]"><SelectValue>{providerInfo.label}</SelectValue></SelectTrigger>
               <SelectContent>{providers.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
             </Select>
-            {/* R1 模型来源纯运行时（本地 CLI 探测 + 上游配置）：SelectValue 显示当前模型，列表无硬编码预设。 */}
+            {/* R1 模型来源纯运行时（SDK provider catalog + 上游配置）：SelectValue 显示当前模型，列表无硬编码预设。 */}
             {/* 「自定义…」不再就地展开输入框，改为跳转到设置页（gateway tab）配置上游模型（onCustomModel）。 */}
             <Select
               disabled={streaming}
@@ -185,7 +185,7 @@ export function Composer({
                 {hasModels && <SelectItem value={CUSTOM_MODEL_SENTINEL}>自定义…</SelectItem>}
               </SelectContent>
             </Select>
-            {/* R2 思考强度：仅 claude 生效（codex/opencode 传了也忽略，标注提示）。 */}
+            {/* 思考强度：当前作为用户偏好字段保留。 */}
             <Select disabled={streaming} value={effort} onValueChange={(value) => onEffortChange((value as EffortLevel) || EFFORT_OFF)}>
               <SelectTrigger className="h-8 w-[130px]" title="思考强度（仅 Claude 生效）">
                 <span className="flex items-center gap-1"><GaugeIcon className="size-3.5 opacity-70" /><SelectValue>{EFFORT_LABEL[effort]}</SelectValue></span>

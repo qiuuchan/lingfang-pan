@@ -1,22 +1,23 @@
 use super::*;
+use std::path::PathBuf;
 
-// === sandbox 扫描（方案A：claude 写文件到 workspace，CLI 跑完扫描收成 files） ===
+// === workspace 扫描（SDK 本地工具写文件到 workspace 后扫描收成 files） ===
 //
 // 覆盖 scan_workspace_files + collect_workspace_files：
-// - 正常扫描 manifest.json + ui/index.html（claude 典型产出）。
+// - 正常扫描 manifest.json + ui/index.html（网页插件典型产出）。
 // - 排除隐藏文件（.env）、node_modules、.git。
 // - 跳过二进制文件（非 UTF-8）。
 // - 跳过超大文件（>256KB）。
 // - manifest.json 置顶。
 // - session 不存在报错；sandbox 空目录返回空列表。
 
-/// 构造一个带 sandbox 记录的 state（workspace_dir 指向临时 sandbox）。
-/// 返回 (state, sandbox_root)：测试方在 sandbox_root 下写文件后调 scan_workspace_files。
+/// 构造一个带 workspace 记录的 state（workspace_dir 指向临时目录）。
+/// 返回 (state, workspace_root)：测试方在 workspace_root 下写文件后调 scan_workspace_files。
 fn state_with_sandbox(test_name: &str) -> (CodeAssistantState, PathBuf) {
     let store = temp_assistant_store(test_name);
-    let sandbox = store.root().join("claude-sandbox");
+    let sandbox = store.root().join("sdk-workspace");
     std::fs::create_dir_all(&sandbox).unwrap();
-    // 写一条 session 记录，workspace_dir 指向 sandbox（scan_workspace_files 从此取路径）。
+    // 写一条 session 记录，workspace_dir 指向 workspace（scan_workspace_files 从此取路径）。
     store
         .upsert_session(SessionRecord {
             session_id: "scan-1".into(),
@@ -28,7 +29,7 @@ fn state_with_sandbox(test_name: &str) -> (CodeAssistantState, PathBuf) {
                 .transcript_path("scan-1")
                 .to_string_lossy()
                 .to_string(),
-            command_preview: vec!["claude".into()],
+            command_preview: vec!["ClaudeCode SDK".into()],
             pid: None,
             started_at: "1".into(),
             ended_at: None,
@@ -41,16 +42,14 @@ fn state_with_sandbox(test_name: &str) -> (CodeAssistantState, PathBuf) {
         .unwrap();
     let state = CodeAssistantState {
         store,
-        processes: Arc::new(Mutex::new(HashMap::new())),
-        configs_root: std::env::temp_dir()
-            .join(format!("lingfang-scan-configs-{}", std::process::id())),
+        tasks: Arc::new(Mutex::new(HashMap::new())),
     };
     (state, sandbox)
 }
 
 #[test]
 fn scan_returns_manifest_and_files_with_relative_paths() {
-    // claude 典型产出：manifest.json + ui/index.html，扫描返回相对路径。
+    // SDK 工具典型产出：manifest.json + ui/index.html，扫描返回相对路径。
     let (state, sandbox) = state_with_sandbox("scan-normal");
     std::fs::write(
         sandbox.join("manifest.json"),
@@ -167,7 +166,7 @@ fn scan_skips_oversized_files() {
 
 #[test]
 fn scan_empty_sandbox_returns_empty_list() {
-    // 空目录（纯对话 / claude 未写文件）返回空列表，调用方据此回退对话态逻辑。
+    // 空目录（纯对话 / SDK 未写文件）返回空列表，调用方据此回退对话态逻辑。
     let (state, _sandbox) = state_with_sandbox("scan-empty");
     let files = scan_workspace_files(
         &state,
@@ -181,15 +180,11 @@ fn scan_empty_sandbox_returns_empty_list() {
 
 #[test]
 fn scan_missing_session_errors() {
-    // session 不存在报错（不静默吞，避免前端拿到空列表误判为「claude 没写文件」）。
+    // session 不存在报错（不静默吞，避免前端拿到空列表误判为「SDK 没写文件」）。
     let store = temp_assistant_store("scan-missing-session");
     let state = CodeAssistantState {
         store,
-        processes: Arc::new(Mutex::new(HashMap::new())),
-        configs_root: std::env::temp_dir().join(format!(
-            "lingfang-scan-missing-configs-{}",
-            std::process::id()
-        )),
+        tasks: Arc::new(Mutex::new(HashMap::new())),
     };
     let result = scan_workspace_files(
         &state,

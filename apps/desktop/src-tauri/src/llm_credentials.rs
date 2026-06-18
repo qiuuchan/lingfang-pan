@@ -4,7 +4,7 @@
 //! - 模型网关 v3 后端有两个端点：
 //!   * `GET /api/llm/active-provider`（ensureCurrentTeam）：返 `{ name?, apiUrl, defaultModels }`。
 //!   * `POST /api/llm/binding/decrypt`（ensureTeamAdmin）：返 `{ apiKey: 明文 }`。
-//! - spawn CLI 前需要这俩值生成 cli_config（见 cli_config.rs）。
+//! - SDK runtime 发起模型请求前需要这俩值。
 //! - **安全（AC8）**：apiKey 明文只在 Rust reqwest 请求时临时用，经 HTTPS 拿到后立即传给
 //!   prepare_cli_env 生成临时配置，**绝不传给前端 webview**。前端只传 backendUrl + token。
 //!

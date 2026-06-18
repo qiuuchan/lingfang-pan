@@ -161,9 +161,9 @@ describe('summarizeTitleLocally', () => {
   });
 
   it('闲聊类（你好/hi）回退 assistant 首行', () => {
-    // clean 会去掉标点，"你好！我是 Claude Code，很高兴..." → 首句"你好"+第二句"我是 Claude Code"
-    const title = summarizeTitleLocally('你好', '你好！我是 Claude Code，很高兴为你服务。');
-    expect(title).toBe('你好我是 Claude Code');
+    // clean 会去掉标点，"你好！我是 ClaudeCode，很高兴..." → 首句"你好"+第二句"我是 ClaudeCode"
+    const title = summarizeTitleLocally('你好', '你好！我是 ClaudeCode，很高兴为你服务。');
+    expect(title).toBe('你好我是 ClaudeCode');
   });
 
   it('截断到 16 字', () => {

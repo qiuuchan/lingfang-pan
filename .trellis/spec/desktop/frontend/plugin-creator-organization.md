@@ -8,7 +8,7 @@
 
 `PluginCreatorHome.tsx` 只保留页面装配和少量路由级状态。以下职责必须外移：
 
-- CLI/provider/model readiness -> hook 或 `lib/plugin-creator/**`
+- SDK provider/model readiness -> hook 或 `lib/plugin-creator/**`
 - session start/stop/send -> hook
 - upload/review actions -> API helper
 - draft merge/conversation helpers -> `lib/plugin-draft/**`

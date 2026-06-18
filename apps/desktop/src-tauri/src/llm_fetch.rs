@@ -21,7 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// fetch_models 命令入参（前端 `{ input: {...} }` 包裹，与 install_cli 等命令一致）。
+/// fetch_models 命令入参（前端 `{ input: {...} }` 包裹）。
 ///
 /// `rename_all = "camelCase"`：前端 tauriInvoke 传 `{ provider, apiUrl, apiKey }`（camelCase，
 /// 与 lib/llm-fetch.ts 调用约定一致），serde 把 camelCase 的 apiUrl/api_key 映射到本结构体字段。

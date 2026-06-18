@@ -1,66 +1,27 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::adapters::CodeAssistantTool;
-
-#[derive(Clone, Debug)]
-pub(crate) struct ResolvedToolCommand {
-    pub(crate) binary: PathBuf,
-    pub(crate) prefix_args: Vec<String>,
-    pub(crate) label: String,
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CodeAssistantTool {
+    Claude,
+    Codex,
 }
 
-impl ResolvedToolCommand {
-    pub(crate) fn args_with(&self, args: Vec<String>) -> Vec<String> {
-        let mut merged = self.prefix_args.clone();
-        merged.extend(args);
-        merged
+impl CodeAssistantTool {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
     }
-}
 
-#[derive(Clone, Debug, Serialize)]
-pub struct ToolAvailability {
-    pub tool: CodeAssistantTool,
-    pub display_name: String,
-    pub available: bool,
-    pub binary_path: Option<String>,
-    pub version: Option<String>,
-    pub models: Vec<String>,
-    pub default_model: String,
-    pub last_check: String,
-    pub probe_status: String,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ProbeResult {
-    pub tool: CodeAssistantTool,
-    pub model: Option<String>,
-    pub success: bool,
-    pub command_preview: Vec<String>,
-    pub stdout_tail: String,
-    pub stderr_tail: String,
-    pub exit_code: Option<i32>,
-    pub elapsed_ms: u128,
-    pub transcript_path: String,
-    pub session_id: String,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CheckToolInput {
-    pub tool: CodeAssistantTool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ProbeInput {
-    pub tool: CodeAssistantTool,
-    pub model: Option<String>,
-    #[serde(alias = "workspaceDir")]
-    pub workspace_dir: Option<String>,
-    pub prompt: Option<String>,
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Claude => "ClaudeCode",
+            Self::Codex => "Codex",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,17 +43,19 @@ pub struct StartSessionInput {
     pub prompt: String,
     #[serde(alias = "systemPrompt")]
     pub system_prompt: Option<String>,
-    // R2 思考强度：claude 透传 `--effort <level>`；codex/opencode 接收但忽略。
+    // SDK runtime keeps this field for frontend compatibility. The current
+    // provider APIs do not expose a portable effort parameter, so it is ignored.
+    #[allow(dead_code)]
     pub effort: Option<String>,
     #[serde(default, alias = "pluginId")]
     pub plugin_id: Option<String>,
-    #[serde(default, alias = "cliConfig")]
-    pub cli_config: Option<CliConfigInput>,
+    #[serde(default, alias = "cliConfig", alias = "sdkConfig")]
+    pub sdk_config: Option<SdkConfigInput>,
 }
 
-/// CLI 配置注入所需的后端连接信息；apiKey 明文只在 Rust 内部获取，不回前端。
+/// SDK 请求所需的后端连接信息；apiKey 明文只在 Rust 内部获取，不回前端。
 #[derive(Debug, Deserialize, Default)]
-pub struct CliConfigInput {
+pub struct SdkConfigInput {
     #[serde(default, alias = "backendUrl")]
     pub backend_url: String,
     #[serde(default, alias = "authToken")]
@@ -157,9 +120,10 @@ pub struct SendInputInput {
     pub session_id: String,
     pub input: String,
     pub model: Option<String>,
+    #[allow(dead_code)]
     pub effort: Option<String>,
-    #[serde(default, alias = "cliConfig")]
-    pub cli_config: Option<CliConfigInput>,
+    #[serde(default, alias = "cliConfig", alias = "sdkConfig")]
+    pub sdk_config: Option<SdkConfigInput>,
     #[serde(default, alias = "systemPrompt")]
     pub system_prompt: Option<String>,
 }
