@@ -4,6 +4,7 @@ import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import {
   deleteConversation,
+  generateTitle,
   listConversations,
   readActiveId,
   readDraft,
@@ -55,6 +56,15 @@ import { canConvertConversationToDraft, lastTurnContent } from '@/lib/plugin-cre
 import { useCurrentPluginStatus, useLatestRef, useMentionablePlugins, usePluginUpload, useProviderCatalog, useStickyChatScroll } from './plugin-creator/hooks';
 // 组C：插件名用户命名（PRD 需求 1）+ 动态状态从文件系统扫描（PRD 需求 2）。
 import { safePluginId } from '@/lib/plugin-draft';
+
+// 将本轮会话的 provider 映射为 generateTitle 接受的工具名。
+// 当前 ProviderId 仅 claude/codex（自定义模型也归一到这两者之一），故正常都返回非空；
+// null 分支是对未来新增 provider 的防御性兜底——届时未覆盖的 provider 直接降级本地启发式。
+function resolveTitleTool(tool: string | undefined): 'claude' | 'codex' | null {
+  if (tool === 'claude') return 'claude';
+  if (tool === 'codex') return 'codex';
+  return null;
+}
 
 export function PluginCreatorHome() {
   const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
@@ -462,16 +472,32 @@ export function PluginCreatorHome() {
         // 落盘失败不阻断对话流程（本地磁盘异常仅静默，历史仍在 transcripts/{id}.jsonl）。
       }
 
-      // 标题生成（首轮 + 当前会话尚无 title）：本地启发式秒级总结。
-      // 优先从用户首句去祈使前缀拿核心需求，回退 assistant 首行；rename 持久化 + 更新 metas 与顶部。
+      // 标题生成（首轮 + 当前会话尚无 title）：优先用大模型 SDK 总结，失败降级本地启发式。
+      // SDK 短任务异步生成（不阻塞后续 toast / 落盘），到达后迟到刷新标题；本地启发式作保底。
       const currentMeta = metas.find((m) => m.sessionId === sessionId);
       if (!isFollowup && !currentMeta?.title && promptText) {
-        const title = summarizeTitleLocally(promptText, finalSession.stdout || '');
-        if (title) {
+        const stdout = finalSession.stdout || '';
+        // 应用标题：空串忽略，否则更新内存 metas + 持久化（rename 失败静默，标题仍留内存）。
+        const applyTitle = (title: string) => {
+          if (!title) return;
           setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
           void renameConversation(sessionId, title).catch(() => {
             /* rename 失败静默，标题已停留在内存 metas */
           });
+        };
+        const titleTool = resolveTitleTool(finalSession.provider);
+        if (titleTool) {
+          void (async () => {
+            const llmTitle = await generateTitle({
+              tool: titleTool,
+              model: finalSession.model,
+              userText: promptText,
+              assistantText: stdout,
+            });
+            applyTitle(llmTitle || summarizeTitleLocally(promptText, stdout));
+          })();
+        } else {
+          applyTitle(summarizeTitleLocally(promptText, stdout));
         }
       }
 

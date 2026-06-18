@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsObject, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+
+// 插件图标存入 manifest.icon（字符串），上限防止 manifest JSON 膨胀。
+// 取 64KB 字符（约 48KB 位图的 base64 data URI），超限 DTO 直接拒绝。
+const ICON_MAX_LEN = 64 * 1024;
 
 /** 插件包内单个文件条目：相对路径 + 文本内容。
  *  路径穿越/字节上限等业务校验由 normalizePluginPackage 负责（保留），DTO 仅校验类型。 */
@@ -84,6 +88,29 @@ export class SetPluginStatusDto {
   @ApiProperty({ description: '插件治理状态（ENABLED 启用 / DISABLED 禁用）', example: 'ENABLED' })
   @IsString()
   status!: 'ENABLED' | 'DISABLED';
+}
+
+/** 作者编辑插件元数据请求体 DTO（名称/描述/图标）。
+ *  与 PluginPackageDto（编辑草稿）区别：不带 files、不重算 contentHash、不重置审核态，
+ *  仅改展示信息，走独立端点 POST /api/plugins/:id/edit-meta。三字段均可选，service 兜底「至少一项」校验。 */
+export class EditPluginMetaDto {
+  @ApiPropertyOptional({ description: '插件名称（≤80 字符）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80, { message: '插件名称不能超过 80 字符' })
+  name?: string;
+
+  @ApiPropertyOptional({ description: '插件描述（≤500 字符，可为空串）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500, { message: '插件描述不能超过 500 字符' })
+  description?: string;
+
+  @ApiPropertyOptional({ description: '插件图标：emoji 或位图 base64 data URI（不接受 svg，上限约 64KB 字符）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(ICON_MAX_LEN, { message: '图标体积过大，请使用更小的图片' })
+  icon?: string;
 }
 
 /** 市场插件安装请求体 DTO。 */

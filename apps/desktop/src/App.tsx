@@ -17,6 +17,7 @@ import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 
 const Plugins = lazy(() => import('./pages/Plugins').then((m) => ({ default: m.Plugins })));
+const AuthorCenter = lazy(() => import('./pages/AuthorCenter').then((m) => ({ default: m.AuthorCenter })));
 const TeamHome = lazy(() => import('./pages/TeamHome').then((m) => ({ default: m.TeamHome })));
 const TeamManage = lazy(() => import('./pages/TeamManage').then((m) => ({ default: m.TeamManage })));
 const Market = lazy(() => import('./pages/Market').then((m) => ({ default: m.Market })));
@@ -416,6 +417,7 @@ export default function App() {
 
   let body: ReactNode;
   if (view === 'plugins') body = <Plugins />;
+  else if (view === 'author-center') body = <AuthorCenter />;
   else if (view === 'team-manage') body = <TeamManage />;
   else if (view === 'market') body = <Market />;
   else if (view === 'wallet') body = <Wallet />;

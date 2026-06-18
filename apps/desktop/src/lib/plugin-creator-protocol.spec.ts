@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyBlockInfo, PLUGIN_CREATOR_SYSTEM_PROMPT } from './plugin-creator-protocol';
+import { classifyBlockInfo, DEFAULT_CONVERSATION_SYSTEM_PROMPT, PLUGIN_CREATOR_SYSTEM_PROMPT } from './plugin-creator-protocol';
 
 describe('classifyBlockInfo', () => {
   it('识别 manifest 块（带语言标识）', () => {
@@ -54,5 +54,14 @@ describe('PLUGIN_CREATOR_SYSTEM_PROMPT', () => {
     // 白名单使用 code-assistant.run / code-assistant.session，绝不裸 code-assistant。
     expect(PLUGIN_CREATOR_SYSTEM_PROMPT).toContain('code-assistant.run');
     expect(PLUGIN_CREATOR_SYSTEM_PROMPT).toContain('不要用裸 "code-assistant"');
+  });
+});
+
+describe('DEFAULT_CONVERSATION_SYSTEM_PROMPT', () => {
+  it('介绍多个插件类型时引导使用卡片/列表，不鼓励 Markdown 表格', () => {
+    expect(DEFAULT_CONVERSATION_SYSTEM_PROMPT).toContain('不要使用 Markdown 表格');
+    expect(DEFAULT_CONVERSATION_SYSTEM_PROMPT).toContain('卡片式');
+    expect(DEFAULT_CONVERSATION_SYSTEM_PROMPT).not.toContain('用标准 GFM Markdown 表格');
+    expect(DEFAULT_CONVERSATION_SYSTEM_PROMPT).not.toContain('| 类型 | 适用场景 |');
   });
 });

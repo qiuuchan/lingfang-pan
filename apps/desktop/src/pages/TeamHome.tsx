@@ -80,16 +80,18 @@ export function TeamHome() {
       </Card>
       <Card>
         <CardHeader><CardTitle>最近余额流水</CardTitle><CardDescription>团队管理员只可查看，不能修改余额。</CardDescription></CardHeader>
-        <CardContent className="divide-y rounded-lg border">
-          {loading ? (
-            // 流水加载骨架：4 行占位。
-            Array.from({ length: 4 }).map((_, i) => <Shimmer key={i} className="m-1 h-8 w-[calc(100%-0.5rem)]" />)
-          ) : (
-            <>
-              {ledger.slice(0, 8).map((item) => <div key={item.id} className="flex items-center justify-between px-3 py-2 text-sm"><span>{item.reason}</span><span className={item.direction === 'CREDIT' ? 'text-emerald-600' : 'text-destructive'}>{item.direction === 'CREDIT' ? '+' : '-'}{centsToYuan(item.amountCents)}</span></div>)}
-              {!ledger.length && <p className="p-3 text-center text-sm text-muted-foreground">还没有余额流水</p>}
-            </>
-          )}
+        <CardContent>
+          <div className="divide-y rounded-lg border">
+            {loading ? (
+              // 流水加载骨架：4 行占位。
+              Array.from({ length: 4 }).map((_, i) => <Shimmer key={i} className="m-1 h-8 w-[calc(100%-0.5rem)]" />)
+            ) : (
+              <>
+                {ledger.slice(0, 8).map((item) => <div key={item.id} className="flex items-center justify-between px-3 py-2 text-sm"><span>{item.reason}</span><span className={item.direction === 'CREDIT' ? 'text-emerald-600' : 'text-destructive'}>{item.direction === 'CREDIT' ? '+' : '-'}{centsToYuan(item.amountCents)}</span></div>)}
+                {!ledger.length && <p className="p-3 text-center text-sm text-muted-foreground">还没有余额流水</p>}
+              </>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

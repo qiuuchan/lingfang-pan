@@ -15,6 +15,7 @@ import {
   StoreIcon,
   WalletIcon,
   ShieldCheckIcon,
+  LayoutDashboardIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
@@ -26,6 +27,7 @@ const NAV: NavItem[] = [
   { v: 'team', label: '团队空间', icon: HomeIcon },
   { v: 'team-manage', label: '团队管理', icon: UsersIcon, teamAdminOnly: true },
   { v: 'plugins', label: '插件', icon: PackageIcon },
+  { v: 'author-center', label: '作者中心', icon: LayoutDashboardIcon },
   { v: 'market', label: '市场', icon: StoreIcon },
   { v: 'wallet', label: '钱包', icon: WalletIcon },
   { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },

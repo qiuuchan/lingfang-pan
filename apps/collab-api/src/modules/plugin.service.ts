@@ -215,6 +215,58 @@ export class PluginService {
     return { plugin: publicPlugin(updated, membership.teamId) };
   }
 
+  /** 作者/团队管理员编辑插件元数据（名称/描述/图标），不改源码、不重算 contentHash、不重置审核态。
+   *  与 editPluginDraft 区别：editPluginDraft 改源码必须重传整包并打回 DRAFT 重审；
+   *  本方法只动展示信息（manifest 浅合并 + 顶层 name/description），其余字段透传。
+   *  约束：审核中(PENDING)不能编辑（与 editPluginDraft 一致，避免与审核并发）；
+   *  已上架(APPROVED+marketplace)允许仅改元数据 —— 名称/描述/图标不影响已购用户的功能与计费，
+   *  不触发源码变更，无需走「下架→改名→重审」的重流程（这是与 editPluginDraft 的关键差异）。
+   *  图标存入 manifest.icon（不加 schema 列）；不接受 image/svg+xml（规避内联脚本 XSS）。 */
+  async editPluginMeta(userId: string, id: string, input: { name?: string; description?: string; icon?: string }) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const plugin = await this.prisma.plugin.findUnique({ where: { id } });
+    if (!plugin) throw notFound('插件不存在');
+    ensurePluginManager(plugin, membership.teamId, userId, membership.role);
+    if (plugin.reviewStatus === 'PENDING') throw conflict('审核中的插件不能编辑，请等待审核完成');
+
+    // 入参归一：name 提供时 trim 后必须非空；description 允许空串；icon 拒绝 svg（含内联脚本风险）。
+    const name = input.name === undefined ? undefined : String(input.name).trim();
+    if (name !== undefined && !name) throw badRequest('插件名称不能为空');
+    const description = input.description === undefined ? undefined : String(input.description);
+    const icon = input.icon === undefined ? undefined : String(input.icon).trim();
+    if (icon && /^data:image\/svg\+xml/i.test(icon)) throw badRequest('图标不支持 SVG 格式，请使用 PNG/JPG/WebP 或 emoji');
+    if (name === undefined && description === undefined && icon === undefined) {
+      throw badRequest('至少需要提供一项要修改的字段（名称/描述/图标）');
+    }
+
+    // manifest 浅合并：保留 entry/runtime_type/capabilities 等所有未知键，仅覆盖被显式提供的展示字段。
+    const baseManifest = (plugin.manifest && typeof plugin.manifest === 'object' && !Array.isArray(plugin.manifest))
+      ? plugin.manifest as Record<string, unknown>
+      : {};
+    const nextManifest: Record<string, unknown> = { ...baseManifest };
+    if (name !== undefined) nextManifest.name = name;
+    if (description !== undefined) nextManifest.description = description;
+    if (icon !== undefined) {
+      // 空串视为清除图标（删除 manifest.icon 键），非空写入。
+      if (icon) nextManifest.icon = icon;
+      else delete nextManifest.icon;
+    }
+
+    const updated = await this.prisma.plugin.update({
+      where: { id },
+      data: {
+        // 顶层 name/description 仅当对应入参提供时更新（与 manifest 同步），其余治理字段一律不动。
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        manifest: nextManifest as unknown as Prisma.InputJsonValue,
+      },
+    });
+    // 审计只记改了哪些字段名，不记图标 base64 内容（避免日志膨胀与冗余）。
+    const fields = [name !== undefined && 'name', description !== undefined && 'description', icon !== undefined && 'icon'].filter(Boolean);
+    await this.audit(userId, 'plugin.meta.edited', 'Plugin', id, { teamId: membership.teamId, fields });
+    return { plugin: publicPlugin(updated, membership.teamId) };
+  }
+
   async installMarketplacePlugin(userId: string, id: string) {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const plugin = await this.prisma.plugin.findUnique({ where: { id } });

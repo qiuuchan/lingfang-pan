@@ -503,6 +503,8 @@ export function Plugins() {
   const [list, setList] = useState<LoadedPlugin[] | null>(null);
   const [error, setError] = useState<string>('');
   const [page, setPage] = useState(1);
+  // 云端「我的插件」刷新态：手动刷新时置 true 驱动按钮 loading + 防重入（与初次加载的 list===null 骨架解耦）。
+  const [cloudRefreshing, setCloudRefreshing] = useState(false);
 
   // 组C：本地持久化插件列表（文件系统扫描，动态状态）。
   const [localPlugins, setLocalPlugins] = useState<LocalPluginStatus[] | null>(null);
@@ -542,13 +544,20 @@ export function Plugins() {
 
   if (runningPlugin) return <Runner plugin={runningPlugin} onBack={() => setRunningPlugin(null)} />;
 
-  // 作者改价/切状态后重新拉取列表，刷新审核状态/价格/启用态角标。
+  // 作者改价/切状态后、或用户手动点刷新时重新拉取列表，刷新审核状态/价格/启用态角标。
+  // cloudRefreshing 防重入：刷新进行中忽略重复点击，结束后复位。
   const reload = () => {
+    if (cloudRefreshing) return;
+    setCloudRefreshing(true);
     void (async () => {
-      const result = await loadPlugins();
-      setError(result.error);
-      setList(result.plugins);
-      setPage(1);
+      try {
+        const result = await loadPlugins();
+        setError(result.error);
+        setList(result.plugins);
+        setPage(1);
+      } finally {
+        setCloudRefreshing(false);
+      }
     })();
   };
 
@@ -610,8 +619,21 @@ export function Plugins() {
       />
 
       <Card className="w-full">
-        <CardHeader>
-          <CardTitle>我的插件</CardTitle>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div className="flex items-center gap-2">
+            <CardTitle>我的插件</CardTitle>
+            <span className="text-xs text-muted-foreground">{total} 个（云端共享）</span>
+          </div>
+          {/* 云端列表刷新：重新拉取启用/审核状态。spin 动画在刷新中持续旋转，list===null 首屏加载时禁用避免空转。 */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="刷新云端插件状态"
+            disabled={cloudRefreshing || list === null}
+            onClick={reload}
+          >
+            <RefreshCwIcon className={`size-4 ${cloudRefreshing ? 'animate-spin' : ''}`} />
+          </Button>
         </CardHeader>
         <CardContent>
           {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
