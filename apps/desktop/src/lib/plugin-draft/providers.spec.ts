@@ -27,23 +27,24 @@ describe('buildAssistantProviderCatalog', () => {
     ]);
   });
 
-  it('routes OpenAI official models only to Codex', () => {
+  it('routes OpenAI official models to both ClaudeCode and Codex', () => {
     const catalog = buildAssistantProviderCatalog({
       activeProvider: { provider: 'openai', defaultModels: ['gpt-5.1'] },
       binding: { modelOverride: null },
     });
 
-    expect(catalog.providers.map((provider) => provider.id)).toEqual(['codex']);
+    expect(catalog.providers.map((provider) => provider.id)).toEqual(['claude', 'codex']);
     expect(catalog.providers.every((provider) => provider.models.includes('gpt-5.1'))).toBe(true);
   });
 
-  it('routes OpenAI-compatible platform models only to Codex', () => {
+  it('routes OpenAI-compatible platform models to both ClaudeCode and Codex', () => {
     const catalog = buildAssistantProviderCatalog({
       activeProvider: { provider: 'minimax', defaultModels: ['minimax-m3'] },
       binding: { modelOverride: ['minimax-m3'] },
     });
 
     expect(catalog.providers).toEqual([
+      { id: 'claude', label: 'ClaudeCode', models: ['minimax-m3'] },
       { id: 'codex', label: 'Codex', models: ['minimax-m3'] },
     ]);
   });
@@ -55,8 +56,6 @@ describe('buildAssistantProviderCatalog', () => {
       binding: null,
     });
 
-    expect(catalog.providers).toEqual([
-      { id: 'codex', label: 'Codex', models: ['gpt-5.1'] },
-    ]);
+    expect(catalog.providers.map((provider) => provider.id)).toEqual(['claude', 'codex']);
   });
 });
