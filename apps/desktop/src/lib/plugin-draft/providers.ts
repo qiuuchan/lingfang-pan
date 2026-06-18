@@ -8,13 +8,63 @@ export const EXAMPLES = [
 // ① 本地已装 code-assistant CLI 探测的可用模型（code_assistant_list_tools）
 // ② gateway 上游已配置并勾选的真实模型（/api/llm/binding modelOverride + /api/llm/active-provider defaultModels）
 // 此常量仅保留 CLI 的 id/label 骨架（label 字典），models 留空由运行时填充。
-export const PROVIDERS = [
+export type ProviderId = 'claude' | 'codex' | 'opencode';
+export type ProviderCatalogItem = { id: ProviderId; label: string; models: string[] };
+
+export const PROVIDERS: ProviderCatalogItem[] = [
   { id: 'claude', label: 'Claude Code', models: [] as string[] },
   { id: 'codex', label: 'Codex', models: [] as string[] },
   { id: 'opencode', label: 'OpenCode', models: [] as string[] },
 ];
 
-export type ProviderId = 'claude' | 'codex' | 'opencode';
+type ToolCatalogInput = { tool: string; display_name?: string; available?: boolean };
+type ActiveProviderCatalogInput = { provider?: string | null; defaultModels?: string[] | null } | null;
+type BindingCatalogInput = { modelOverride?: string[] | null } | null;
+
+const OPENAI_COMPATIBLE_PROVIDER_IDS = new Set(['azure', 'custom', 'deepseek', 'moonshot', 'qwen']);
+
+export function buildAssistantProviderCatalog(input: {
+  tools?: ToolCatalogInput[] | null;
+  activeProvider?: ActiveProviderCatalogInput;
+  binding?: BindingCatalogInput;
+}): { providers: ProviderCatalogItem[]; hasAvailableCli: boolean } {
+  const cliProviders = (input.tools || [])
+    .filter((tool) => tool.available && isProviderId(tool.tool))
+    .map((tool) => ({
+      id: tool.tool as ProviderId,
+      label: String(tool.display_name || tool.tool),
+      models: [] as string[],
+    }));
+  const baseProviders = cliProviders.length ? cliProviders : [...PROVIDERS];
+  const upstreamModels = uniqueModels([
+    ...((input.binding?.modelOverride) || []),
+    ...((input.activeProvider?.defaultModels) || []),
+  ]);
+  if (upstreamModels.length === 0) {
+    return { providers: baseProviders, hasAvailableCli: cliProviders.length > 0 };
+  }
+  const compatible = compatibleCliIds(input.activeProvider?.provider);
+  const providers = baseProviders
+    .filter((provider) => compatible.includes(provider.id))
+    .map((provider) => ({ ...provider, models: upstreamModels }));
+  return { providers, hasAvailableCli: cliProviders.length > 0 && providers.length > 0 };
+}
+
+function compatibleCliIds(provider: string | null | undefined): ProviderId[] {
+  const normalized = (provider || '').trim().toLowerCase();
+  if (normalized === 'anthropic') return ['claude'];
+  if (normalized === 'openai') return ['codex', 'opencode'];
+  if (OPENAI_COMPATIBLE_PROVIDER_IDS.has(normalized) || !normalized) return ['opencode'];
+  return ['opencode'];
+}
+
+function isProviderId(value: string): value is ProviderId {
+  return value === 'claude' || value === 'codex' || value === 'opencode';
+}
+
+function uniqueModels(models: string[]): string[] {
+  return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
+}
 
 // R2 思考强度：claude --effort 取值；codex/opencode 无对应参数（忽略）。
 // 「不思考」对应 none（关闭思考），medium 为默认推荐档。

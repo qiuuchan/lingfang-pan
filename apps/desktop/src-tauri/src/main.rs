@@ -5,6 +5,7 @@
 mod capability;
 mod cli_config;
 mod cli_installer;
+mod cli_provider;
 mod code_assistant;
 mod llm_credentials;
 mod llm_fetch;

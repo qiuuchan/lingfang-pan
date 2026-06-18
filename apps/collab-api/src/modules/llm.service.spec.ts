@@ -267,6 +267,7 @@ describe('LlmService', () => {
     expect(result.apiUrl).toBe('https://api.openai.com/v1');
     expect(result.defaultModels).toEqual(['gpt-4o', 'gpt-4o-mini']);
     expect(result.name).toBe('OpenAI 官方');
+    expect(result.provider).toBe('openai');
 
     // 关键：findFirst where 必须同时含 isActive:true 与 status:ENABLED，
     // 防 DISABLED 但 isActive=true 的 provider 被误当 active 返回。

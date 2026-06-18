@@ -25,7 +25,8 @@
 //!     ```
 //!   同时追加 env `OPENAI_API_KEY=<key>` 作为双保险（codex 多路径读取）。
 //! - **opencode**：env `OPENCODE_CONFIG=<临时.json>`，json 含 provider.lingfang.options.{baseURL, apiKey}，
-//!   `model` 字段为 `lingfang/<model>`（用户选定模型，非占位 default）。
+//!   `model` 字段为 `lingfang/<model>`（用户选定模型，非占位 default）；
+//!   同时隔离 `HOME` / `USERPROFILE` / `XDG_*`，避免 CLI 读取用户级 `~/.config/opencode` / `~/.opencode`。
 //!
 //! wire_api 取值决策（task 06-13 修正）：
 //! - codex-cli 0.139.0 二进制反查：`/responses` 路径出现 10 次，`/chat/completions` 出现 **0 次**。
@@ -50,11 +51,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::code_assistant::adapters::CodeAssistantTool;
-
-/// codex 临时 config.toml 的 provider id（不可用 openai/ollama/lmstudio 等保留 id）。
-const CODEX_PROVIDER_ID: &str = "lingfang";
-/// opencode 临时 json 的 provider key（与 npm 包名对齐，前端可识别）。
-const OPENCODE_PROVIDER_ID: &str = "lingfang";
+use crate::cli_provider::{opencode_model_ref, CODEX_PROVIDER_ID, OPENCODE_PROVIDER_ID};
 
 /// 按工具类型生成 spawn 时注入的 env 列表，并把 codex/opencode 的临时配置文件写入 config_dir。
 ///
@@ -139,12 +136,44 @@ fn prepare_opencode_env(
     model: Option<&str>,
 ) -> Vec<(OsString, OsString)> {
     match write_opencode_config(config_dir, api_key, api_url, model) {
-        Ok(path) => vec![(OsString::from("OPENCODE_CONFIG"), path.into_os_string())],
+        Ok(path) => {
+            let mut env = vec![(OsString::from("OPENCODE_CONFIG"), path.into_os_string())];
+            env.extend(opencode_isolation_envs(config_dir));
+            env
+        }
         Err(error) => {
             eprintln!("opencode 临时配置写入失败（降级为默认配置）：{}", error);
             Vec::new()
         }
     }
+}
+
+fn opencode_isolation_envs(config_dir: &Path) -> Vec<(OsString, OsString)> {
+    let home = config_dir.as_os_str().to_owned();
+    let xdg_config_home = config_dir.join("xdg-config");
+    let xdg_data_home = config_dir.join("xdg-data");
+    let xdg_state_home = config_dir.join("xdg-state");
+    let xdg_cache_home = config_dir.join("xdg-cache");
+    vec![
+        (OsString::from("HOME"), home.clone()),
+        (OsString::from("USERPROFILE"), home),
+        (
+            OsString::from("XDG_CONFIG_HOME"),
+            xdg_config_home.into_os_string(),
+        ),
+        (
+            OsString::from("XDG_DATA_HOME"),
+            xdg_data_home.into_os_string(),
+        ),
+        (
+            OsString::from("XDG_STATE_HOME"),
+            xdg_state_home.into_os_string(),
+        ),
+        (
+            OsString::from("XDG_CACHE_HOME"),
+            xdg_cache_home.into_os_string(),
+        ),
+    ]
 }
 
 /// 写 codex 临时 config.toml 到 `<config_dir>/config.toml`。
@@ -244,7 +273,7 @@ pub fn write_opencode_config(
     // model 字段 = lingfang/<model>，模型条目 key 与 model 末段保持一致（opencode 据此匹配 provider 内模型）。
     // 空时回退 default 占位（保留原行为，不破坏降级路径）。
     let model_key = clean_model.unwrap_or("default");
-    let model_field = format!("{OPENCODE_PROVIDER_ID}/{model_key}");
+    let model_field = opencode_model_ref(model_key);
     // 用 serde_json 构造再序列化（避免 JSON 转义地狱，且 api_key/api_url 含特殊字符时自动转义）。
     // models 条目 key 用动态 model_key（serde_json::json! 宏不支持动态 key，故用 .insert 后置）。
     let mut json = serde_json::json!({
@@ -337,6 +366,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn env_map(env: Vec<(OsString, OsString)>) -> std::collections::HashMap<String, String> {
+        env.into_iter()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.to_string_lossy().to_string(),
+                )
+            })
+            .collect()
     }
 
     // === claude env ===
@@ -468,10 +508,11 @@ mod tests {
             &dir,
             None,
         );
-        assert_eq!(env.len(), 1, "opencode 应注入 1 个 env");
-        let (key, value) = &env[0];
-        assert_eq!(key.to_string_lossy(), "OPENCODE_CONFIG");
-        let value_str = value.to_string_lossy().to_string();
+        let map = env_map(env);
+        let value_str = map
+            .get("OPENCODE_CONFIG")
+            .cloned()
+            .expect("应有 OPENCODE_CONFIG");
         assert!(
             value_str.ends_with("opencode.json"),
             "OPENCODE_CONFIG 应指向 opencode.json：{value_str}"
@@ -479,6 +520,53 @@ mod tests {
         assert!(
             value_str.starts_with(dir.to_string_lossy().as_ref()),
             "json 应在 config_dir 内：{value_str}"
+        );
+        assert!(map.contains_key("HOME"), "应注入 HOME");
+        assert!(map.contains_key("USERPROFILE"), "应注入 USERPROFILE");
+    }
+
+    #[test]
+    fn opencode_env_isolates_user_config_locations() {
+        let dir = temp_dir("opencode-isolation");
+        let env = prepare_cli_env(
+            CodeAssistantTool::Opencode,
+            "sk-oc-789",
+            "https://oc.example.com",
+            &dir,
+            Some("minimax-m3"),
+        );
+        let map = env_map(env);
+        let expected_home = dir.to_string_lossy().to_string();
+        assert!(
+            map.get("OPENCODE_CONFIG")
+                .is_some_and(|value| value.starts_with(&expected_home)),
+            "OPENCODE_CONFIG 应指向会话临时目录：{map:?}"
+        );
+        assert_eq!(map.get("HOME"), Some(&expected_home), "HOME 应隔离到临时目录");
+        assert_eq!(
+            map.get("USERPROFILE"),
+            Some(&expected_home),
+            "USERPROFILE 应隔离到临时目录"
+        );
+        assert_eq!(
+            map.get("XDG_CONFIG_HOME"),
+            Some(&dir.join("xdg-config").to_string_lossy().to_string()),
+            "XDG_CONFIG_HOME 应隔离到临时目录"
+        );
+        assert_eq!(
+            map.get("XDG_DATA_HOME"),
+            Some(&dir.join("xdg-data").to_string_lossy().to_string()),
+            "XDG_DATA_HOME 应隔离到临时目录"
+        );
+        assert_eq!(
+            map.get("XDG_STATE_HOME"),
+            Some(&dir.join("xdg-state").to_string_lossy().to_string()),
+            "XDG_STATE_HOME 应隔离到临时目录"
+        );
+        assert_eq!(
+            map.get("XDG_CACHE_HOME"),
+            Some(&dir.join("xdg-cache").to_string_lossy().to_string()),
+            "XDG_CACHE_HOME 应隔离到临时目录"
         );
     }
 

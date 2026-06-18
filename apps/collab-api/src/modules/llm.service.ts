@@ -45,7 +45,7 @@ export class LlmService {
 
   // === 租户：当前启用 provider ===
 
-  /** GET /api/llm/active-provider：返回当前启用 provider 的 apiUrl + defaultModels。
+  /** GET /api/llm/active-provider：返回当前启用 provider 的 provider + apiUrl + defaultModels。
    *  无启用 provider → 404 no_active_provider（应用提示「平台尚未配置模型服务」）。
    *  组E 性能：命中内存缓存直接返回（TTL 内零 DB 查询），过期或被 admin 写操作失效后回源查库。 */
   async getActiveProvider(actorId: string) {
@@ -57,6 +57,7 @@ export class LlmService {
       if (!provider) return null;
       return {
         name: provider.name,
+        provider: provider.provider,
         apiUrl: provider.apiUrl,
         defaultModels: (provider.models as string[]) ?? [],
       };

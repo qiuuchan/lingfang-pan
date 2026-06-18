@@ -169,6 +169,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn opencode_custom_model_arg_uses_lingfang_provider_prefix() {
+        let definition = tool_definition(CodeAssistantTool::Opencode);
+        assert_eq!(
+            definition.probe_args("ping", Some("minimax-m3")),
+            vec!["run", "ping", "--model", "lingfang/minimax-m3"]
+        );
+    }
+
+    #[test]
+    fn opencode_prefixed_custom_model_arg_is_not_prefixed_twice() {
+        let definition = tool_definition(CodeAssistantTool::Opencode);
+        assert_eq!(
+            definition.probe_args("ping", Some("lingfang/minimax-m3")),
+            vec!["run", "ping", "--model", "lingfang/minimax-m3"]
+        );
+    }
+
     // === design §3.3.1：build_args resume_id 行为 ===
 
     #[test]
