@@ -21,7 +21,7 @@ type ToolCatalogInput = { tool: string; display_name?: string; available?: boole
 type ActiveProviderCatalogInput = { provider?: string | null; defaultModels?: string[] | null } | null;
 type BindingCatalogInput = { modelOverride?: string[] | null } | null;
 
-const OPENAI_COMPATIBLE_PROVIDER_IDS = new Set(['azure', 'custom', 'deepseek', 'moonshot', 'qwen']);
+const OPENAI_COMPATIBLE_PROVIDER_IDS = new Set(['azure', 'deepseek', 'moonshot', 'qwen']);
 
 export function buildAssistantProviderCatalog(input: {
   tools?: ToolCatalogInput[] | null;
@@ -54,6 +54,7 @@ function compatibleCliIds(provider: string | null | undefined): ProviderId[] {
   const normalized = (provider || '').trim().toLowerCase();
   if (normalized === 'anthropic') return ['claude'];
   if (normalized === 'openai') return ['codex', 'opencode'];
+  if (normalized === 'custom') return ['claude', 'opencode'];
   if (OPENAI_COMPATIBLE_PROVIDER_IDS.has(normalized) || !normalized) return ['opencode'];
   return ['opencode'];
 }

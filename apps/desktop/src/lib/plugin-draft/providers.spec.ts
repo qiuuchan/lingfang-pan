@@ -8,7 +8,7 @@ const tools = [
 ];
 
 describe('buildAssistantProviderCatalog', () => {
-  it('does not offer OpenAI-compatible custom models through Claude Code', () => {
+  it('offers custom provider models through Claude Code and OpenCode', () => {
     const catalog = buildAssistantProviderCatalog({
       tools,
       activeProvider: { provider: 'custom', defaultModels: ['minimax-m3'] },
@@ -16,6 +16,7 @@ describe('buildAssistantProviderCatalog', () => {
     });
 
     expect(catalog.providers).toEqual([
+      { id: 'claude', label: 'Claude Code', models: ['minimax-m3'] },
       { id: 'opencode', label: 'OpenCode', models: ['minimax-m3'] },
     ]);
     expect(catalog.hasAvailableCli).toBe(true);
