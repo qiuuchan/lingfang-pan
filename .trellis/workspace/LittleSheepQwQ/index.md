@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-06-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~357 | Active |
+| `journal-1.md` | ~390 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-06-18 | 完成桌面插件管理体验优化 | `1b997f3` | `main` |
 | 10 | 2026-06-18 | 全库规范审计与大文件拆分 | `1ec0a4f` | `main` |
 | 9 | 2026-06-17 | Collab MySQL Redis CDN loading optimization | `6fa10f8` | `main` |
 | 8 | 2026-06-15 | 平台完整交付（CLI注入+插件修复+文案+调研补齐+全仓库review） | `17c7f85`, `5079e37`, `2d0f6d3`, `d2d5aa5`, `4bee679` | `main` |
