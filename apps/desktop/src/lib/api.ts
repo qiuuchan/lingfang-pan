@@ -163,6 +163,30 @@ export interface ApiError extends Error {
   status?: number;
 }
 
+// 统一错误信息提取（DESK-UPDATE-01 修复）：tauriInvoke 调 Tauri 命令时，Rust 侧
+// `Result<_, String>` 的错误以「裸字符串」形式 reject，而非 Error/ApiError 对象。
+// 调用方若用 `(err as ApiError).message` 取信息，对裸字符串永远得 undefined，
+// 真实失败原因（HTTP 状态、验签失败、网络错误）被吞，只能显示通用兜底文案。
+// 此函数归一化任意来源错误为可读字符串：字符串原样返回，Error 取 message，
+// 其余尝试 JSON 序列化兜底。提取不到时返回 fallback（调用方传入的兜底文案）。
+export function errorMessage(err: unknown, fallback = ''): string {
+  if (typeof err === 'string') return err.trim() || fallback;
+  if (err instanceof Error) return err.message || fallback;
+  if (err && typeof err === 'object') {
+    // Tauri 偶发以 { message } / { error } 结构 reject，或后端 ApiError 形态。
+    const obj = err as { message?: unknown; error?: unknown };
+    if (typeof obj.message === 'string' && obj.message) return obj.message;
+    if (typeof obj.error === 'string' && obj.error) return obj.error;
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}') return json;
+    } catch {
+      /* 含循环引用等无法序列化，落到兜底 */
+    }
+  }
+  return fallback;
+}
+
 interface ApiOptions {
   method?: string;
   body?: unknown;

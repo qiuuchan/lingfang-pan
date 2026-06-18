@@ -25,6 +25,7 @@ where
     serde_json::json!({
         "model": model,
         "messages": messages,
+        "stream": true,
         "tools": openai_tool_definitions(),
         "tool_choice": "auto",
     })
@@ -54,6 +55,7 @@ mod tests {
         );
 
         assert_eq!(body["model"], "minimax-m3");
+        assert_eq!(body["stream"], true);
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][1]["content"], "生成番茄钟");
         assert_eq!(body["tools"][0]["function"]["name"], "list_directory");

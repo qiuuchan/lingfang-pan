@@ -32,3 +32,32 @@ Source pattern:
 
 Avoid adding a new global state library for one page. It would not match the current app shape.
 
+### Don't: 把 Hook 放在条件 `return` 之后
+
+**Problem**:
+
+```tsx
+function Market() {
+  const [detail, setDetail] = useState(null);
+  // ...其它 hooks
+  if (detail) return <Detail .../>;        // 提前返回
+  const totalPages = Math.ceil(total / N);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]); // ← 在提前返回之后
+}
+```
+
+**Why it's bad**: React 要求每次渲染的 Hook 调用顺序与数量完全一致。`detail` 置值触发重渲染时在 `if (detail) return` 处截断，该 `useEffect` 不再执行，本次渲染比上次少一个 Hook → 抛 **React error #300**（"Rendered fewer hooks than expected. This may be caused by an accidental early return statement."），整页崩到 ErrorBoundary（DESK-MARKET-HOOKS：点击商店插件白屏即此因）。打包后只见 minified #300，本地 dev build 才有完整文案。
+
+**Instead**:
+
+```tsx
+function Market() {
+  const [detail, setDetail] = useState(null);
+  const totalPages = Math.ceil(total / N);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]); // ← 所有 hooks 在提前返回之前
+  if (detail) return <Detail .../>;
+}
+```
+
+所有 Hook（含依赖派生值的 `useEffect`）必须在任何条件 `return` 之前调用；派生值（如 `totalPages`）也一并上移到返回之前，避免「为了喂 Hook 把计算留下、却把 Hook 推到 return 后」。新增依赖列表 ESLint 修复或防御性补丁时尤其要警惕这点。
+

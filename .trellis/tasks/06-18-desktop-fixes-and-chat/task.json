@@ -1,0 +1,32 @@
+{
+  "id": "desktop-fixes-and-chat",
+  "name": "desktop-fixes-and-chat",
+  "title": "桌面端五项问题修复与对话增强",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-18",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-18-fix-market-hooks",
+    "06-18-fix-invite-case",
+    "06-18-fix-update-check",
+    "06-18-restore-claude-provider",
+    "06-18-chat-streaming-thinking-tools"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

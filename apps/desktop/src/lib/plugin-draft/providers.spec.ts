@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { buildAssistantProviderCatalog } from './providers';
 
 describe('buildAssistantProviderCatalog', () => {
-  it('routes custom provider models only to Codex', () => {
+  it('routes custom provider models to both ClaudeCode and Codex', () => {
     const catalog = buildAssistantProviderCatalog({
       activeProvider: { provider: 'custom', defaultModels: ['minimax-m3'] },
       binding: { modelOverride: ['minimax-m3'] },
     });
 
+    // 修复 CLAUDE-OPTION：custom 端点协议不确定，同时给 claude + codex 两项供用户自选。
     expect(catalog.providers).toEqual([
+      { id: 'claude', label: 'ClaudeCode', models: ['minimax-m3'] },
       { id: 'codex', label: 'Codex', models: ['minimax-m3'] },
     ]);
     expect(catalog.hasSdkRuntime).toBe(true);

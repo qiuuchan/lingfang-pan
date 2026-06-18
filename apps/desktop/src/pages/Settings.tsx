@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RefreshCwIcon, ServerIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
+import { errorMessage, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
 import { installRuntime } from '@/lib/install-cli';
 import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
@@ -195,7 +195,7 @@ export function Settings({
       setProgress({ downloaded: 0, total: null });
       setUpdateMeta(meta);
     } catch (err) {
-      toast.error((err as ApiError).message || '检查更新失败，请重试');
+      toast.error(errorMessage(err, '检查更新失败，请重试'));
     } finally {
       setChecking(false);
     }
@@ -230,7 +230,7 @@ export function Settings({
         toast.warning('更新流程已结束，若未自动重启请手动重启应用。');
       }
     } catch (err) {
-      toast.error((err as ApiError).message || '下载更新失败，请重试');
+      toast.error(errorMessage(err, '下载更新失败，请重试'));
       setUpdateInstalling(false);
     }
   }

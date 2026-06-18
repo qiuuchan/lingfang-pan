@@ -64,6 +64,26 @@ Backend errors expose stable `error` codes and human messages. UI pages use `Api
 
 Do not swallow new backend errors or convert them to fake success states. Surface the message and let the failed operation remain failed.
 
+### Convention: Tauri invoke 错误用 `errorMessage(err, fallback)` 提取
+
+**What**: 凡 `catch` 来自 `tauriInvoke`（即调 Rust `#[tauri::command]`）的错误，必须用 `errorMessage(err, fallback)` 提取信息，禁止 `(err as ApiError).message`。
+
+**Why**: Rust 命令返回 `Result<_, String>`，失败时以**裸字符串** reject，不是 `Error`/`ApiError` 对象。`(err as ApiError).message` 对裸字符串恒为 `undefined`，真实失败原因（HTTP 状态、验签失败、网络错误）被吞，用户只见通用兜底文案，无从排查（DESK-UPDATE-01：检查更新失败即此因）。`api()`（fetch 通道）抛的是真 `Error`，`.message` 可用——但两条通道混用易错，统一走 `errorMessage` 最稳。
+
+**Signature**: `errorMessage(err: unknown, fallback = ''): string` —— 字符串原样 `trim`、`Error` 取 `message`、`{message}`/`{error}` 对象取对应字段、其余 `JSON.stringify` 兜底；全空时返 `fallback`。位于 `apps/desktop/src/lib/api.ts`。
+
+**Example**:
+
+```typescript
+// Wrong：裸字符串 .message 恒 undefined → 永远走兜底，真因被吞
+catch (err) { toast.error((err as ApiError).message || '检查更新失败'); }
+
+// Correct：两种来源都能透出真实信息
+catch (err) { toast.error(errorMessage(err, '检查更新失败，请重试')); }
+```
+
+**Related**: 单测 `apps/desktop/src/lib/api-error-message.spec.ts` 覆盖裸字符串/Error/对象/兜底。
+
 ## Streaming Generation
 
 `streamGenerate()` parses server-sent events:
