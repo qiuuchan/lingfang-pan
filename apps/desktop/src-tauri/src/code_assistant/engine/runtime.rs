@@ -7,6 +7,9 @@ use serde_json::{json, Value};
 
 use super::anthropic::{build_messages_body, build_messages_url};
 use super::openai::{build_chat_body, build_chat_url};
+use super::stream::{
+    AnthropicStreamState, OpenAiStreamState, SseDecoder, StreamEvent, ToolCall, DONE_SENTINEL,
+};
 use super::tools::LocalToolExecutor;
 use super::SdkCredentials;
 use crate::code_assistant::history::build_history_summary;
@@ -62,22 +65,43 @@ async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<
             .await
             .map_err(|error| format!("ClaudeCode SDK 请求失败：{error}"))?;
         let status = response.status();
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|error| format!("ClaudeCode SDK 响应解析失败：{error}"))?;
         if !status.is_success() {
-            return Err(format!("ClaudeCode SDK 返回错误：HTTP {status} {value}"));
+            let detail = response.text().await.unwrap_or_default();
+            return Err(format!("ClaudeCode SDK 返回错误：HTTP {status} {detail}"));
         }
-        let (text, calls) = parse_anthropic_response(&value);
-        if !text.is_empty() {
-            sink.output("stdout", text);
+
+        let mut state = AnthropicStreamState::new();
+        let mut decoder = SseDecoder::new();
+        let mut response = response;
+        loop {
+            abort_if_cancelled(&request)?;
+            let chunk = response
+                .chunk()
+                .await
+                .map_err(|error| format!("ClaudeCode SDK 流读取失败：{error}"))?;
+            let Some(chunk) = chunk else { break };
+            for payload in decoder.push(&chunk) {
+                if payload == DONE_SENTINEL {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<Value>(&payload) else {
+                    // 偶发畸形负载安全跳过，不中断整轮。
+                    continue;
+                };
+                for event in state.accept(&value) {
+                    emit_stream_event(&sink, event);
+                }
+            }
         }
+
+        if state.stop_reason() != Some("tool_use") {
+            return Ok(());
+        }
+        let calls = state.tool_calls();
         if calls.is_empty() {
             return Ok(());
         }
-        emit_tool_calls(&sink, &calls);
-        append_anthropic_tool_round(&mut body, &value, &calls, &tools)?;
+        append_anthropic_tool_round(&mut body, state.into_assistant_content(), &calls, &tools)?;
     }
 }
 
@@ -100,22 +124,43 @@ async fn run_codex<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<(
             .await
             .map_err(|error| format!("Codex SDK 请求失败：{error}"))?;
         let status = response.status();
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|error| format!("Codex SDK 响应解析失败：{error}"))?;
         if !status.is_success() {
-            return Err(format!("Codex SDK 返回错误：HTTP {status} {value}"));
+            let detail = response.text().await.unwrap_or_default();
+            return Err(format!("Codex SDK 返回错误：HTTP {status} {detail}"));
         }
-        let (text, calls) = parse_openai_response(&value);
-        if !text.is_empty() {
-            sink.output("stdout", text);
+
+        let mut state = OpenAiStreamState::new();
+        let mut decoder = SseDecoder::new();
+        let mut response = response;
+        loop {
+            abort_if_cancelled(&request)?;
+            let chunk = response
+                .chunk()
+                .await
+                .map_err(|error| format!("Codex SDK 流读取失败：{error}"))?;
+            let Some(chunk) = chunk else { break };
+            for payload in decoder.push(&chunk) {
+                if payload == DONE_SENTINEL {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<Value>(&payload) else {
+                    // 偶发畸形负载安全跳过，不中断整轮。
+                    continue;
+                };
+                for event in state.accept(&value) {
+                    emit_stream_event(&sink, event);
+                }
+            }
         }
+
+        if state.finish_reason() != Some("tool_calls") {
+            return Ok(());
+        }
+        let calls = state.tool_calls();
         if calls.is_empty() {
             return Ok(());
         }
-        emit_tool_calls(&sink, &calls);
-        append_openai_tool_round(&mut body, &value, &calls, &tools)?;
+        append_openai_tool_round(&mut body, state.into_assistant_message(), &calls, &tools)?;
     }
 }
 
@@ -155,75 +200,38 @@ fn openai_messages(request: &RunRequest) -> Vec<(String, String)> {
     messages
 }
 
-#[derive(Clone, Debug)]
-struct ToolCall {
-    id: String,
-    name: String,
-    arguments: Value,
-}
-
-fn parse_anthropic_response(value: &Value) -> (String, Vec<ToolCall>) {
-    let mut text = String::new();
-    let mut calls = Vec::new();
-    for item in value.get("content").and_then(|value| value.as_array()).into_iter().flatten() {
-        match item.get("type").and_then(|value| value.as_str()) {
-            Some("text") => {
-                if let Some(part) = item.get("text").and_then(|value| value.as_str()) {
-                    text.push_str(part);
-                }
+/// 把状态机产出的增量事件经既有 sink 链路分类推送：
+/// 正文走 stdout、思考走 thought、工具调用走 tool（绝不混入 stdout）。
+fn emit_stream_event<S: EngineEventSink>(sink: &S, event: StreamEvent) {
+    match event {
+        StreamEvent::Text(text) => {
+            if !text.is_empty() {
+                sink.output("stdout", text);
             }
-            Some("tool_use") => calls.push(ToolCall {
-                id: string_field(item, "id"),
-                name: string_field(item, "name"),
-                arguments: item.get("input").cloned().unwrap_or_else(|| json!({})),
-            }),
-            _ => {}
+        }
+        StreamEvent::Thought(text) => {
+            if !text.is_empty() {
+                sink.output("thought", text);
+            }
+        }
+        StreamEvent::ToolCallReady(call) => {
+            sink.output("tool", format!("{} {}", call.name, call.arguments));
         }
     }
-    (text, calls)
 }
 
-fn parse_openai_response(value: &Value) -> (String, Vec<ToolCall>) {
-    let message = &value["choices"][0]["message"];
-    let text = message
-        .get("content")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string();
-    let mut calls = Vec::new();
-    for item in message
-        .get("tool_calls")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-    {
-        let raw_args = item["function"]["arguments"].as_str().unwrap_or("{}");
-        let arguments = serde_json::from_str(raw_args).unwrap_or_else(|_| json!({}));
-        calls.push(ToolCall {
-            id: string_field(item, "id"),
-            name: string_field(&item["function"], "name"),
-            arguments,
-        });
-    }
-    (text, calls)
-}
-
-fn emit_tool_calls<S: EngineEventSink>(sink: &S, calls: &[ToolCall]) {
-    for call in calls {
-        sink.output("tool", format!("{} {}", call.name, call.arguments));
-    }
-}
-
+/// 续轮：把流式重建出的 assistant content 与各工具的本地执行结果追加进 messages，
+/// 沿用 Anthropic 的 tool_result 续轮语义（thinking 块及其 signature 已在重建数组中保留）。
 fn append_anthropic_tool_round(
     body: &mut Value,
-    response: &Value,
+    assistant_content: Value,
     calls: &[ToolCall],
     tools: &LocalToolExecutor,
 ) -> Result<(), String> {
     let messages = body["messages"]
         .as_array_mut()
         .ok_or_else(|| "ClaudeCode messages 结构异常".to_string())?;
-    messages.push(json!({ "role": "assistant", "content": response["content"] }));
+    messages.push(json!({ "role": "assistant", "content": assistant_content }));
     let results = calls
         .iter()
         .map(|call| {
@@ -238,16 +246,18 @@ fn append_anthropic_tool_round(
     Ok(())
 }
 
+/// 续轮：追加流式重建出的 assistant message（含 tool_calls，不含 reasoning_content），
+/// 再为每个工具追加 role=tool 的执行结果。
 fn append_openai_tool_round(
     body: &mut Value,
-    response: &Value,
+    assistant_message: Value,
     calls: &[ToolCall],
     tools: &LocalToolExecutor,
 ) -> Result<(), String> {
     let messages = body["messages"]
         .as_array_mut()
         .ok_or_else(|| "Codex messages 结构异常".to_string())?;
-    messages.push(response["choices"][0]["message"].clone());
+    messages.push(assistant_message);
     for call in calls {
         messages.push(json!({
             "role": "tool",
@@ -256,14 +266,6 @@ fn append_openai_tool_round(
         }));
     }
     Ok(())
-}
-
-fn string_field(value: &Value, key: &str) -> String {
-    value
-        .get(key)
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string()
 }
 
 fn abort_if_cancelled(request: &RunRequest) -> Result<(), String> {

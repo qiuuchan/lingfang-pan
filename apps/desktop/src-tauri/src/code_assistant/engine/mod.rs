@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod openai;
 pub mod runtime;
+pub mod stream;
 pub mod tools;
 
 #[derive(Clone, Debug)]

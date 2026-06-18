@@ -24,7 +24,9 @@ where
         .collect::<Vec<_>>();
     let mut body = serde_json::json!({
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
+        "stream": true,
+        "thinking": { "type": "enabled", "budget_tokens": 2048 },
         "messages": messages,
         "tools": anthropic_tool_definitions(),
     });
@@ -60,6 +62,10 @@ mod tests {
 
         assert_eq!(body["model"], "claude-sonnet-4-5");
         assert_eq!(body["system"], "build plugins");
+        assert_eq!(body["max_tokens"], 8192);
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 2048);
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "生成番茄钟");
         assert_eq!(body["tools"][0]["name"], "list_directory");

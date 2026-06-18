@@ -4,7 +4,11 @@ import { PrismaService } from '../prisma.service';
 import { badRequest, forbidden, insufficientBalance, notFound, publicUser } from '../common';
 import { AuthService } from './auth.service';
 
-const hashInvite = (code: string) => createHash('sha256').update(code.trim()).digest('hex');
+// 邀请码哈希唯一入口：生成与兑换必须共用同一归一规则。
+// 修复 INVITE-CASE：生成时 code 经 toUpperCase() 后哈希（见 createInvitation），库中 codeHash 均为大写规范形。
+// 兑换若按用户原始大小写哈希，则小写/混合输入会查无记录、误报"邀请码无效"。
+// 故在此统一 trim + toUpperCase 归一：生成侧已大写（哈希不变、存量兼容），兑换侧任意大小写均可匹配。
+const hashInvite = (code: string) => createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
 
 @Injectable()
 export class TeamService {
