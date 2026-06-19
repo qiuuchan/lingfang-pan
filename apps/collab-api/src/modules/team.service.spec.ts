@@ -192,5 +192,14 @@ describe('TeamService 公开团队发现 + 直接加入 + 资料', () => {
         expect(prisma.invitationCode.findUnique.mock.calls[0][0].where.codeHash).toBe(storedCodeHash);
       }
     });
+
+    it('只输入列表里展示的前缀时提示必须使用完整邀请码', async () => {
+      await expect(service.redeemInvitation('u1', 'LF-ABCD')).rejects.toMatchObject({
+        status: 400,
+        code: 'bad_request',
+        message: '请输入完整邀请码',
+      });
+      expect(prisma.invitationCode.findUnique).not.toHaveBeenCalled();
+    });
   });
 });

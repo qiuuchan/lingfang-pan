@@ -100,9 +100,18 @@ fn string_field(value: &Value, key: &str) -> String {
 
 /// Anthropic content block 的累积形态，按响应内 `index` 顺序排列。
 enum AnthBlock {
-    Text { text: String },
-    Thinking { thinking: String, signature: String },
-    ToolUse { id: String, name: String, args_buf: String },
+    Text {
+        text: String,
+    },
+    Thinking {
+        thinking: String,
+        signature: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        args_buf: String,
+    },
 }
 
 /// Anthropic SSE 状态机：按 `data:` JSON 的 `type` 字段驱动，无需依赖 `event:` 行。
@@ -142,7 +151,12 @@ impl AnthropicStreamState {
         let block = &value["content_block"];
         match block.get("type").and_then(Value::as_str) {
             Some("text") => {
-                self.blocks.insert(index, AnthBlock::Text { text: String::new() });
+                self.blocks.insert(
+                    index,
+                    AnthBlock::Text {
+                        text: String::new(),
+                    },
+                );
             }
             Some("thinking") => {
                 self.blocks.insert(
@@ -181,7 +195,8 @@ impl AnthropicStreamState {
             }
             Some("thinking_delta") => {
                 if let Some(part) = delta.get("thinking").and_then(Value::as_str) {
-                    if let Some(AnthBlock::Thinking { thinking, .. }) = self.blocks.get_mut(&index) {
+                    if let Some(AnthBlock::Thinking { thinking, .. }) = self.blocks.get_mut(&index)
+                    {
                         thinking.push_str(part);
                     }
                     events.push(StreamEvent::Thought(part.to_string()));
@@ -190,7 +205,8 @@ impl AnthropicStreamState {
             Some("signature_delta") => {
                 // 签名仅用于续轮回放，不向前端 emit。
                 if let Some(part) = delta.get("signature").and_then(Value::as_str) {
-                    if let Some(AnthBlock::Thinking { signature, .. }) = self.blocks.get_mut(&index) {
+                    if let Some(AnthBlock::Thinking { signature, .. }) = self.blocks.get_mut(&index)
+                    {
                         signature.push_str(part);
                     }
                 }
@@ -225,7 +241,10 @@ impl AnthropicStreamState {
         let mut content = Vec::new();
         for block in self.blocks.values() {
             match block {
-                AnthBlock::Thinking { thinking, signature } => {
+                AnthBlock::Thinking {
+                    thinking,
+                    signature,
+                } => {
                     content.push(json!({
                         "type": "thinking",
                         "thinking": thinking,

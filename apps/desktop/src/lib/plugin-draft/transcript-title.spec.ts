@@ -64,6 +64,14 @@ describe('transcriptTextSinceLastInput', () => {
     expect(transcriptTextSinceLastInput(events, 'stderr')).toBe('err');
   });
 
+  it('错误事件作为本轮 stderr 可展示文本返回', () => {
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('error', { stream: 'stderr', error: 'ClaudeCode SDK 返回错误：HTTP 404 not found' }),
+    ];
+    expect(transcriptTextSinceLastInput(events, 'stderr')).toBe('ClaudeCode SDK 返回错误：HTTP 404 not found');
+  });
+
   it('空数组 → 返回空串', () => {
     expect(transcriptTextSinceLastInput([], 'stdout')).toBe('');
   });
@@ -116,6 +124,17 @@ describe('transcriptSegmentsSinceLastInput', () => {
       { stream: 'stdout', text: '现在写配置：' },
       { stream: 'tool', text: 'Write {"path":"main.py"}' },
       { stream: 'stderr', text: 'warning' },
+    ]);
+  });
+
+  it('错误事件进入最近一轮 stderr 分段，避免收尾后变成空回复', () => {
+    const events = [
+      ev('input', { prompt: '你好' }),
+      ev('error', { stream: 'stderr', error: 'ClaudeCode SDK 请求失败' }),
+    ];
+
+    expect(transcriptSegmentsSinceLastInput(events)).toEqual([
+      { stream: 'stderr', text: 'ClaudeCode SDK 请求失败' },
     ]);
   });
 });

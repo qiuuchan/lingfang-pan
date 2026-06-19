@@ -1,5 +1,5 @@
-use super::*;
 use super::history::tail;
+use super::*;
 
 #[derive(Clone)]
 struct NoopEventSink;

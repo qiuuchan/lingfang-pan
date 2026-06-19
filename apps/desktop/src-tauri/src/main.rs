@@ -241,12 +241,14 @@ async fn resolve_sdk_credentials(
         (url, token) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
         _ => return Err("缺少后端地址或登录凭证，无法调用 SDK".to_string()),
     };
-    let Some((api_key, api_url)) =
-        llm_credentials::fetch_credentials(backend_url, auth_token).await?
+    let Some(credentials) = llm_credentials::fetch_credentials(backend_url, auth_token).await?
     else {
         return Err("未获取到模型服务 API Key 或 API URL，请检查模型服务绑定".to_string());
     };
-    Ok(code_assistant::engine::SdkCredentials { api_key, api_url })
+    Ok(code_assistant::engine::SdkCredentials {
+        api_key: credentials.api_key,
+        api_url: credentials.api_url,
+    })
 }
 
 #[tauri::command]

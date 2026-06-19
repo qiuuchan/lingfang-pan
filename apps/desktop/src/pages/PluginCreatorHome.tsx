@@ -307,7 +307,7 @@ export function PluginCreatorHome() {
         });
         await attachListen<SessionExitPayload>('code-assistant://exit', ({ payload }) => {
           if (disposed || payload.sessionId !== activeIdRef.current) return;
-          const nextStatus = payload.status === 'stopped' ? 'stopped' : 'exited';
+          const nextStatus = payload.status === 'stopped' ? 'stopped' : payload.status === 'failed' ? 'failed' : 'exited';
           setAssistantSession((prev) => prev ? { ...prev, status: nextStatus, exitCode: payload.exitCode ?? null, endedAt: payload.endedAt } : prev);
           setLiveStage(nextStatus === 'stopped' ? '已停止，整理结果中…' : '已结束，整理结果中…');
           void finalizeSession(payload.sessionId, nextStatus, payload.exitCode ?? null, payload.endedAt);
@@ -508,6 +508,8 @@ export function PluginCreatorHome() {
         toast.success(isFollowup ? '代码助手已完成本次更新' : '代码助手已完成生成');
       } else if (finalSession.status === 'stopped') {
         toast.message('已停止代码助手，保留部分结果');
+      } else if (finalSession.status === 'failed') {
+        toast.error(finalSession.stderr || finalSession.diagnostics[finalSession.diagnostics.length - 1] || '代码助手未成功完成');
       } else if (!hasStructuredOutput) {
         toast.success('对话已完成');
       } else {
