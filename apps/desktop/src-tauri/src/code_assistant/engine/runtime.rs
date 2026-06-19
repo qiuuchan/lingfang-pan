@@ -5,7 +5,7 @@ use std::sync::{
 
 use serde_json::{json, Value};
 
-use super::anthropic::{build_messages_body, build_messages_url};
+use super::anthropic::{build_messages_body, build_provider_messages_url};
 use super::openai::{build_chat_body, build_chat_url};
 use super::stream::{
     AnthropicStreamState, OpenAiStreamState, SseDecoder, StreamEvent, ToolCall, DONE_SENTINEL,
@@ -45,7 +45,8 @@ pub async fn run_sdk_turn<S: EngineEventSink>(request: RunRequest, sink: S) -> R
 }
 
 async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<(), String> {
-    let url = build_messages_url(&request.credentials.api_url);
+    let url =
+        build_provider_messages_url(&request.credentials.provider, &request.credentials.api_url);
     let messages = claude_messages(&request);
     let mut body = build_messages_body(
         effective_model(request.model.as_deref(), "claude-sonnet-4-5"),
@@ -58,7 +59,7 @@ async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<
         abort_if_cancelled(&request)?;
         let response = client
             .post(&url)
-            .bearer_auth(&request.credentials.api_key)
+            .header("x-api-key", &request.credentials.api_key)
             .header("anthropic-version", "2023-06-01")
             .json(&body)
             .send()
@@ -101,7 +102,13 @@ async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<
         if calls.is_empty() {
             return Ok(());
         }
-        append_anthropic_tool_round(&mut body, state.into_assistant_content(), &calls, &tools)?;
+        append_anthropic_tool_round(
+            &sink,
+            &mut body,
+            state.into_assistant_content(),
+            &calls,
+            &tools,
+        )?;
     }
 }
 
@@ -160,7 +167,13 @@ async fn run_codex<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<(
         if calls.is_empty() {
             return Ok(());
         }
-        append_openai_tool_round(&mut body, state.into_assistant_message(), &calls, &tools)?;
+        append_openai_tool_round(
+            &sink,
+            &mut body,
+            state.into_assistant_message(),
+            &calls,
+            &tools,
+        )?;
     }
 }
 
@@ -222,7 +235,8 @@ fn emit_stream_event<S: EngineEventSink>(sink: &S, event: StreamEvent) {
 
 /// 续轮：把流式重建出的 assistant content 与各工具的本地执行结果追加进 messages，
 /// 沿用 Anthropic 的 tool_result 续轮语义（thinking 块及其 signature 已在重建数组中保留）。
-fn append_anthropic_tool_round(
+fn append_anthropic_tool_round<S: EngineEventSink>(
+    sink: &S,
     body: &mut Value,
     assistant_content: Value,
     calls: &[ToolCall],
@@ -235,10 +249,11 @@ fn append_anthropic_tool_round(
     let results = calls
         .iter()
         .map(|call| {
+            let result = execute_tool_with_visible_result(sink, call, tools);
             json!({
                 "type": "tool_result",
                 "tool_use_id": call.id,
-                "content": tools.execute(&call.name, &call.arguments).to_string(),
+                "content": result.to_string(),
             })
         })
         .collect::<Vec<_>>();
@@ -248,7 +263,8 @@ fn append_anthropic_tool_round(
 
 /// 续轮：追加流式重建出的 assistant message（含 tool_calls，不含 reasoning_content），
 /// 再为每个工具追加 role=tool 的执行结果。
-fn append_openai_tool_round(
+fn append_openai_tool_round<S: EngineEventSink>(
+    sink: &S,
     body: &mut Value,
     assistant_message: Value,
     calls: &[ToolCall],
@@ -259,13 +275,24 @@ fn append_openai_tool_round(
         .ok_or_else(|| "Codex messages 结构异常".to_string())?;
     messages.push(assistant_message);
     for call in calls {
+        let result = execute_tool_with_visible_result(sink, call, tools);
         messages.push(json!({
             "role": "tool",
             "tool_call_id": call.id,
-            "content": tools.execute(&call.name, &call.arguments).to_string(),
+            "content": result.to_string(),
         }));
     }
     Ok(())
+}
+
+fn execute_tool_with_visible_result<S: EngineEventSink>(
+    sink: &S,
+    call: &ToolCall,
+    tools: &LocalToolExecutor,
+) -> Value {
+    let result = tools.execute(&call.name, &call.arguments);
+    sink.output("tool", format!("{}_result {}", call.name, result));
+    result
 }
 
 fn abort_if_cancelled(request: &RunRequest) -> Result<(), String> {

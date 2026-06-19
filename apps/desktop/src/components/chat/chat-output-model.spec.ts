@@ -84,6 +84,28 @@ describe('buildChatOutputItems', () => {
     expect(items[2]).toMatchObject({ type: 'tool', name: 'Write' });
   });
 
+  it('工具调用结果会作为独立工具卡片展示，包含成功与失败详情', () => {
+    const segments: ChatSegment[] = [
+      { stream: 'tool', text: 'read_file {"path":"note.txt"}' },
+      { stream: 'tool', text: 'read_file_result {"ok":true,"result":{"content":"hello"}}' },
+      { stream: 'tool', text: 'read_file_result {"ok":false,"error":"文件不存在"}' },
+    ];
+
+    const items = buildChatOutputItems([], segments, false);
+
+    expect(items.map((item) => item.type)).toEqual(['tool', 'tool', 'tool']);
+    expect(items[1]).toMatchObject({
+      type: 'tool',
+      name: 'read_file_result',
+      argsText: '{"ok":true,"result":{"content":"hello"}}',
+    });
+    expect(items[2]).toMatchObject({
+      type: 'tool',
+      name: 'read_file_result',
+      argsText: '{"ok":false,"error":"文件不存在"}',
+    });
+  });
+
   it('结束后的 assistant turn 可以携带 segments，思考和工具不会收尾丢失', () => {
     const turns: ChatTurn[] = [
       { role: 'user', content: '做一个图片工具' },
