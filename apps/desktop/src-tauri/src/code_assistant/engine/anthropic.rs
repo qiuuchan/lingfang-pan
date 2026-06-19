@@ -2,10 +2,6 @@ use serde_json::Value;
 
 use super::tools::anthropic_tool_definitions;
 
-const MOONSHOT_PROVIDER: &str = "moonshot";
-const OPENAI_V1_SUFFIX: &str = "/v1";
-const ANTHROPIC_SUFFIX: &str = "/anthropic";
-
 pub fn build_messages_url(api_url: &str) -> String {
     let base = api_url.trim_end_matches('/');
     if base.ends_with("/v1") {
@@ -13,35 +9,6 @@ pub fn build_messages_url(api_url: &str) -> String {
     } else {
         format!("{base}/v1/messages")
     }
-}
-
-pub fn build_provider_messages_url(provider: &str, api_url: &str) -> String {
-    let base = match normalized_provider(provider).as_deref() {
-        Some(MOONSHOT_PROVIDER) => moonshot_anthropic_base(api_url),
-        _ => api_url.trim_end_matches('/').to_string(),
-    };
-    build_messages_url(&base)
-}
-
-fn moonshot_anthropic_base(api_url: &str) -> String {
-    let base = api_url.trim_end_matches('/');
-    if let Some(prefix) = base.strip_suffix(OPENAI_V1_SUFFIX) {
-        if prefix.ends_with(ANTHROPIC_SUFFIX) {
-            return prefix.to_string();
-        }
-        return format!("{prefix}{ANTHROPIC_SUFFIX}");
-    }
-    if base.ends_with(ANTHROPIC_SUFFIX) {
-        return base.to_string();
-    }
-    format!("{base}{ANTHROPIC_SUFFIX}")
-}
-
-fn normalized_provider(provider: &str) -> Option<String> {
-    Some(provider)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_ascii_lowercase)
 }
 
 pub fn build_messages_body<R, C>(model: &str, system: Option<&str>, messages: Vec<(R, C)>) -> Value
@@ -83,21 +50,9 @@ mod tests {
             build_messages_url("https://api.anthropic.com/v1/"),
             "https://api.anthropic.com/v1/messages"
         );
-    }
-
-    #[test]
-    fn provider_messages_url_uses_moonshot_anthropic_base() {
         assert_eq!(
-            build_provider_messages_url("moonshot", "https://api.moonshot.cn/v1"),
-            "https://api.moonshot.cn/anthropic/v1/messages"
-        );
-        assert_eq!(
-            build_provider_messages_url("moonshot", "https://api.moonshot.cn/anthropic"),
-            "https://api.moonshot.cn/anthropic/v1/messages"
-        );
-        assert_eq!(
-            build_provider_messages_url("moonshot", "https://api.moonshot.cn/anthropic/v1"),
-            "https://api.moonshot.cn/anthropic/v1/messages"
+            build_messages_url("https://api.moonshot.cn/v1"),
+            "https://api.moonshot.cn/v1/messages"
         );
     }
 
