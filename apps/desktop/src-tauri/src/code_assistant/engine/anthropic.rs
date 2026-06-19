@@ -4,7 +4,9 @@ use super::tools::anthropic_tool_definitions;
 
 pub fn build_messages_url(api_url: &str) -> String {
     let base = api_url.trim_end_matches('/');
-    if base.ends_with("/v1") {
+    if base.ends_with("/v1/messages") {
+        base.to_string()
+    } else if base.ends_with("/v1") {
         format!("{base}/messages")
     } else {
         format!("{base}/v1/messages")
@@ -41,18 +43,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn messages_url_appends_anthropic_path() {
+    fn messages_url_uses_configured_api_url() {
+        let configured_api_url = "https://configured.example/anthropic";
+
         assert_eq!(
-            build_messages_url("https://api.anthropic.com"),
-            "https://api.anthropic.com/v1/messages"
+            build_messages_url(configured_api_url),
+            "https://configured.example/anthropic/v1/messages"
         );
         assert_eq!(
-            build_messages_url("https://api.anthropic.com/v1/"),
-            "https://api.anthropic.com/v1/messages"
+            build_messages_url("https://configured.example/anthropic/v1/"),
+            "https://configured.example/anthropic/v1/messages"
         );
         assert_eq!(
-            build_messages_url("https://api.moonshot.cn/v1"),
-            "https://api.moonshot.cn/v1/messages"
+            build_messages_url("https://configured.example/anthropic/v1/messages"),
+            "https://configured.example/anthropic/v1/messages"
         );
     }
 
