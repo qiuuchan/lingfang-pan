@@ -16,7 +16,7 @@
 
 - **两通道请求体必须带 `stream: true`**，响应走 SSE 增量读（`reqwest::Response::chunk()`，无需 `stream` Cargo feature），禁止退回阻塞 `.json()`。
 - **Anthropic 认证头必须用 `x-api-key`**；不要用 `Authorization: Bearer ...`，否则官方 `/v1/messages` 会返回 `AuthError: Missing API key`。
-- **ClaudeCode 必须直连管理面板配置的 Anthropic Messages base**：`runtime.rs` 只能用 active provider 的 `apiUrl` 调 `build_messages_url(apiUrl)` 生成最终 POST URL。管理面板负责填入 provider 对应的 Messages-compatible base；例如 Moonshot ClaudeCode 应配置为 `https://api.moonshot.cn/anthropic`，而不是由 Runtime 硬编码 provider 特例。
+- **ClaudeCode 必须直连管理面板配置的 Anthropic Messages 地址**：`runtime.rs` 只能用 active provider 的 `apiUrl` 调 `build_messages_url(apiUrl)` 生成最终 POST URL。管理面板的 `apiUrl` 是唯一输入；Runtime 不允许硬编码任何 provider 专属 URL。
 - **Anthropic 启用 thinking**：body 含 `thinking: { type: "enabled", budget_tokens: 2048 }`，且 `max_tokens: 8192`。**硬约束 `budget_tokens < max_tokens`**，改任一值都要维持该不等式；thinking 启用时不可设 `temperature`（当前未设，勿加）。
 - **OpenAI 思考**：无需请求参数；上游模型（如 DeepSeek-R1）自带 `reasoning_content` 增量则透传展示，普通模型无此字段即不展示。
 
@@ -94,25 +94,24 @@
 
 ### 3. Contracts
 - ClaudeCode always speaks Anthropic Messages protocol and POSTs to `.../v1/messages`.
-- Runtime must not hardcode provider-specific base rewrites. The admin-managed `apiUrl` is the source of truth.
-- Moonshot ClaudeCode support requires the admin panel to configure `https://api.moonshot.cn/anthropic`; OpenAI-compatible `https://api.moonshot.cn/v1` is for Codex/OpenAI chat completions, not ClaudeCode Messages.
+- Runtime must not hardcode provider-specific base rewrites or provider-specific literal URLs. The admin-managed `apiUrl` is the source of truth.
+- Provider adapter paths, when needed, must be represented by the admin-managed `apiUrl` itself.
 - Codex/OpenAI runtime keeps using the same configured `apiUrl` with `/v1/chat/completions`.
 - Missing `apiUrl` prevents SDK credentials from being resolved; Runtime must not guess or derive an alternate provider URL.
 
 ### 4. Validation & Error Matrix
-- `apiUrl="https://api.moonshot.cn/anthropic"` -> `https://api.moonshot.cn/anthropic/v1/messages`.
-- `apiUrl="https://api.moonshot.cn/anthropic/v1"` -> `https://api.moonshot.cn/anthropic/v1/messages`.
-- `apiUrl="https://api.anthropic.com"` -> `https://api.anthropic.com/v1/messages`.
-- `apiUrl="https://api.moonshot.cn/v1"` -> `https://api.moonshot.cn/v1/messages`; this exposes a misconfigured admin URL instead of silently rewriting it.
+- `apiUrl="https://configured.example/anthropic"` -> `https://configured.example/anthropic/v1/messages`.
+- `apiUrl="https://configured.example/anthropic/v1"` -> `https://configured.example/anthropic/v1/messages`.
+- `apiUrl="https://configured.example/anthropic/v1/messages"` -> `https://configured.example/anthropic/v1/messages`.
 - active-provider response missing `apiUrl` -> no SDK credentials; the failed turn surfaces the configuration error.
 
 ### 5. Good/Base/Bad Cases
-- Good: Moonshot ClaudeCode turn posts to `/anthropic/v1/messages` with Anthropic tool schema.
-- Base: Anthropic official provider posts to `/v1/messages`.
-- Bad: Runtime sees `provider="moonshot"` and rewrites the configured `apiUrl` to a hardcoded base, hiding admin configuration errors.
+- Good: ClaudeCode turn posts to the Messages endpoint derived only from the configured `apiUrl`.
+- Base: configured provider base posts to `/v1/messages`.
+- Bad: Runtime sees a provider id and rewrites the configured `apiUrl` to a hardcoded base, hiding admin configuration errors.
 
 ### 6. Tests Required
-- Rust unit: `messages_url_appends_anthropic_path`.
+- Rust unit: `messages_url_uses_configured_api_url`.
 - Rust runtime capture: `claude_uses_configured_api_url_without_provider_rewrite` asserts `provider` does not alter the configured `apiUrl`.
 - Rust request capture: `claude_requests_use_anthropic_api_key_header` asserts `x-api-key` is used instead of bearer auth.
 
