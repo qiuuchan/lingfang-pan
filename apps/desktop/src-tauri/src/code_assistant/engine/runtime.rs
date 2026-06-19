@@ -5,7 +5,7 @@ use std::sync::{
 
 use serde_json::{json, Value};
 
-use super::anthropic::{build_messages_body, build_provider_messages_url};
+use super::anthropic::{build_messages_body, build_messages_url};
 use super::openai::{build_chat_body, build_chat_url};
 use super::stream::{
     AnthropicStreamState, OpenAiStreamState, SseDecoder, StreamEvent, ToolCall, DONE_SENTINEL,
@@ -45,8 +45,7 @@ pub async fn run_sdk_turn<S: EngineEventSink>(request: RunRequest, sink: S) -> R
 }
 
 async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<(), String> {
-    let url =
-        build_provider_messages_url(&request.credentials.provider, &request.credentials.api_url);
+    let url = build_messages_url(&request.credentials.api_url);
     let messages = claude_messages(&request);
     let mut body = build_messages_body(
         effective_model(request.model.as_deref(), "claude-sonnet-4-5"),
