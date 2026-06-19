@@ -21,6 +21,7 @@ import type { Release, ReleaseAsset } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AppError, badRequest, notFound } from '../common';
 import { AuthService } from './auth.service';
+import { absoluteUpdateAssetUrl } from './release-url';
 import type {
   ReleaseAssetCreateDto,
   ReleaseCreateDto,
@@ -66,7 +67,7 @@ export class ReleaseService {
    *  - 复用 latest 的查询逻辑（同 channel 内 isLatest=true + PUBLISHED），挑出 platform/arch 均匹配的单个 asset。
    *  - 返回 null 表示无更新（无已发布版本 / 无匹配平台产物），controller 据此返 HTTP 204（Tauri 判无更新）。
    *  - 字段名严格遵循 Tauri 契约（pub_date 下划线，非 camelCase），不可改。 */
-  async tauriManifest(channel: 'STABLE' | 'BETA', platform?: string, arch?: string) {
+  async tauriManifest(channel: 'STABLE' | 'BETA', platform?: string, arch?: string, baseUrl?: string) {
     const release = await this.prisma.release.findFirst({
       where: { channel, status: 'PUBLISHED', isLatest: true },
       include: { assets: true },
@@ -86,7 +87,7 @@ export class ReleaseService {
       // Tauri updater 假设「同版本同 pub_date」，每次请求都返回当前时间会误判有新版本反复下载。
       // 已发布但缺 publishedAt 属异常状态，返 null 让 Tauri 忽略该字段（比不稳定值安全）。
       pub_date: release.publishedAt ? release.publishedAt.toISOString() : null,
-      url: asset.url,
+      url: absoluteUpdateAssetUrl(asset.url, baseUrl),
       signature: asset.signature,
       notes: release.notes,
     };

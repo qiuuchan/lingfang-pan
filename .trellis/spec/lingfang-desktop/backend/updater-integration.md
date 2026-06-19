@@ -21,6 +21,7 @@ Tauri updater 期望 endpoint 返回**固定 JSON 结构**（字段名精确，�
 ```
 
 - **`pub_date` 是下划线**（不是 camelCase `pubDate`）。
+- **`url` 必须是绝对 URL**（如 `https://api.example.com/downloads/...`）。管理后台上传落库可保存 `/downloads/...` 相对路径，但 `/api/releases/tauri-update` 返回前必须按当前请求 base 转成绝对 URL，否则 Tauri updater 会报 `relative URL without a base`。
 - **HTTP 200 + 此结构** → 有更新；**非 200（如 204 No Content）** → 无更新。
 - `signature` 是 Tauri minisign 格式（base64），构建时由私钥签名，运行时用 pubkey 验签。**强制验签，不可跳过**。
 

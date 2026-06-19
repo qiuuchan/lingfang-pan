@@ -173,6 +173,13 @@ describe('ReleaseService', () => {
     expect(Object.keys(manifest!)).toEqual(['version', 'pub_date', 'url', 'signature', 'notes']);
   });
 
+  it('tauriManifest 将 /downloads 相对路径转换为 updater 可解析的绝对 URL', async () => {
+    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/setup.exe', filename: 'f', signature: 'dW50cnVzdGVk', sizeBytes: 1024, createdAt: now };
+    prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset] }));
+    const manifest = await service.tauriManifest('STABLE', 'WINDOWS', 'X86_64', 'https://api.example.com');
+    expect(manifest?.url).toBe('https://api.example.com/downloads/setup.exe');
+  });
+
   it('tauriManifest 版本存在但无匹配平台 asset 时返回 null', async () => {
     const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: null, createdAt: now };
     prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset] }));
