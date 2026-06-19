@@ -2,12 +2,13 @@
 // 仅暴露 status='PUBLISHED' 的版本；写操作（create/publish/asset）在 AdminController（ensurePlatformAdmin）。
 // @Public 放方法级（与 HealthController 一致），非 class 级，避免装饰器元数据歧义。
 // 路由声明顺序敏感：tauri-update 必须在 :version 之前，否则 'tauri-update' 被当作 version 参数。
-import { Controller, Get, Inject, Param, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Controller, Get, Inject, Param, Query, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common';
 import { ReleaseService } from './release.service';
 import { ReleaseLatestQueryDto, ReleaseListQueryDto, ReleaseTauriQueryDto } from './dto/release.dto';
+import { requestBaseUrl } from './release-url';
 
 @ApiTags('Releases')
 @Controller('releases')
@@ -35,6 +36,7 @@ export class ReleaseController {
   @ApiOperation({ summary: 'Tauri updater 契约端点（单 asset，无更新返 204）' })
   async tauriUpdate(
     @Query() query: ReleaseTauriQueryDto,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     // 复用 latest 查询 + 挑单 asset，映射为 Tauri 固定契约 {version, pub_date, url, signature, notes}。
@@ -50,6 +52,7 @@ export class ReleaseController {
       query.channel ?? 'STABLE',
       query.platform,
       query.arch,
+      requestBaseUrl(req),
     );
     if (!manifest) {
       // 204 No Content：HTTP 规范 204 必须无 body，.end() 显式收尾不发 body。
