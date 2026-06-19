@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
-import { getPluginsRoot, setPluginsRoot } from '@/lib/plugin-status';
+import { getPluginsRoot, openPluginsRoot, setPluginsRoot } from '@/lib/plugin-status';
 
 /** 友好提取错误消息：Tauri 命令 reject 以 Error 形式抛出（message 为 Rust 返回的字符串错误）。 */
 function errorMessage(error: unknown): string {
@@ -86,6 +86,14 @@ export function PluginsTab() {
     }
   }
 
+  async function openRoot() {
+    try {
+      await openPluginsRoot();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
   return (
     <Card className="w-full">
       <CardHeader>
@@ -115,6 +123,9 @@ export function PluginsTab() {
           <LoadingButton loading={saving} onClick={() => { void savePath(); }}>保存路径</LoadingButton>
           <LoadingButton variant="outline" loading={saving} onClick={() => { void resetDefault(); }}>
             恢复默认
+          </LoadingButton>
+          <LoadingButton variant="outline" loading={false} onClick={() => { void openRoot(); }}>
+            打开目录
           </LoadingButton>
         </div>
         <p className="text-xs text-muted-foreground">

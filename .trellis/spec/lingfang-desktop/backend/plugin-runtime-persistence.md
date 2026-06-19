@@ -217,15 +217,68 @@ PluginMeta { id: plugin_id.to_string(), ... }
 
 1. 创建期：`startNewSession` 从 Rust 返回的 `workspaceDir`（`plugins_root/<temp_id>/`）提取 plugin_id。
 2. 上传时：`doUpload` 弹命名 Dialog → `safePluginId(name)` 转正式目录名 → `rename_plugin_dir(oldId, newId, title=name)` 改目录名 + 把用户名写入 `manifest.title`。
-3. 展示：`scan_one_plugin` 的 `name = title ?? name_field ?? plugin_id`（title 优先）。
-4. 草稿携带 `plugin_id` 落盘，切历史会话据此恢复 pluginId（状态走文件系统扫描）。
+3. rename 成功后必须同步两处引用：
+   - 当前草稿 `plugin_id = renamedId`，并立即 `code_assistant_save_draft` 落盘；
+   - 当前会话 `SessionRecord.workspaceDir = plugins_root/<renamedId>`，经 `code_assistant_update_workspace` 写回 `sessions.json`。
+4. 展示：`scan_one_plugin` 的 `name = title ?? name_field ?? plugin_id`（title 优先）。
+5. 草稿携带 `plugin_id` 落盘，切历史会话据此恢复 pluginId（状态走文件系统扫描）。
 
 `rename_and_title`（`plugin_store.rs`）是 `rename_plugin_dir` 命令的底层方法（抽出为方法便于单测）：rename 目录 + 解析 manifest JSON 写入 title 字段（保留其他字段）。
 
 Reference files:
 - `apps/desktop/src-tauri/src/plugin_store.rs`（`rename_and_title`）
+- `apps/desktop/src-tauri/src/code_assistant/store.rs`（`update_session_workspace_dir`）
 - `apps/desktop/src/pages/PluginCreatorHome.tsx`（`doUpload` / `startNewSession`）
+- `apps/desktop/src/pages/plugin-creator/hooks.ts`（rename 后同步草稿与会话 workspace）
 - `apps/desktop/src/lib/plugin-draft.ts`（`parseManifest` 解析 title / `defaultEntryForRuntime`）
+
+### Scenario: Upload Rename Must Update Draft And Workspace
+
+#### 1. Scope / Trigger
+- Trigger: changing upload naming, `rename_plugin_dir`, creator draft persistence, `code_assistant_send_input`, or session workspace storage.
+
+#### 2. Signatures
+- Tauri command: `rename_plugin_dir(old_id, new_id, title?) -> renamedId`
+- Tauri command: `code_assistant_update_workspace({ sessionId, workspaceDir }) -> Result<(), String>`
+- Store method: `AssistantStore::update_session_workspace_dir(session_id, workspace_dir)`
+- Frontend helpers: `draftWithPluginId(draft, pluginId)`, `pluginWorkspaceDir(pluginsRoot, pluginId)`
+
+#### 3. Contracts
+- Directory rename changes the canonical local plugin identity. All future local actions must use the renamed directory id.
+- After rename succeeds, frontend must update current draft `plugin_id` and save it before considering upload synchronized.
+- After rename succeeds, frontend must update the Rust session `workspaceDir`; `send_input` uses `SessionRecord.workspace_dir` for the next SDK turn's tool workspace.
+- If active session or current draft is missing after a successful rename, fail the upload path explicitly instead of continuing with stale references.
+
+#### 4. Validation & Error Matrix
+- `rename_plugin_dir` succeeds but `code_assistant_save_draft` fails -> upload fails; stale draft is not accepted.
+- `rename_plugin_dir` succeeds but `code_assistant_update_workspace` fails -> upload fails; follow-up AI writes must not continue to the old temp directory.
+- missing active session id after rename -> error `当前会话不存在`.
+- missing current draft after rename -> error `当前草稿不存在`.
+
+#### 5. Good/Base/Bad Cases
+- Good: temp directory `temp-1` renamed to `timer`; draft `plugin_id` becomes `timer`; session `workspaceDir` becomes `plugins_root/timer`; follow-up AI edits `timer`.
+- Base: safe plugin id equals old id; no rename occurs, so no reference rewrite is required.
+- Bad: only `pluginIdRef.current` is changed in memory; saved draft still has `temp-1`, and `send_input` still writes to the old workspace path.
+
+#### 6. Tests Required
+- Frontend unit: `upload-sync.spec.ts` asserts renamed draft id and workspace path construction.
+- Rust unit: `update_session_workspace_dir_persists_new_path` asserts `sessions.json` workspace path updates.
+- Full checks: `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `cargo test -p lingfang-desktop`.
+
+#### 7. Wrong vs Correct
+Wrong:
+```typescript
+const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId, title });
+pluginIdRef.current = renamed;
+```
+
+Correct:
+```typescript
+const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId, title });
+const draft = requireRenamedDraft(currentDraft, renamed);
+await saveDraft(activeSessionId, JSON.stringify(draft));
+await updateConversationWorkspace(activeSessionId, pluginWorkspaceDir(await getPluginsRoot(), renamed));
+```
 
 ## 入口按 runtime_type 分流
 
@@ -338,6 +391,62 @@ Reference files:
 - `apps/desktop/src/pages/Plugins.tsx`（`editInGenerator` 落盘）
 - `apps/desktop/src/components/creator/Composer.tsx`（@触发 + chip + `MentionPlugin` 类型）
 - `apps/desktop/src/pages/PluginCreatorHome.tsx`（`attachedPlugins`/`mentionablePlugins` state + `pluginManifestSummary` + send 拼接）
+
+## 已安装云端插件包必须本地物化（2026-06-19）
+
+### 1. Scope / Trigger
+- Trigger: changing marketplace install flow, `/api/plugins/available` package projection, cloud plugin run/edit entrypoints, or `write_plugin_files` local materialization.
+
+### 2. Signatures
+- Frontend install: `installMarketplacePluginPackage(pluginId: string) -> Promise<LoadedPlugin>`
+- Frontend persistence: `ensurePluginPackagePersisted(plugin: LoadedPlugin) -> Promise<void>`
+- Frontend package builder: `pluginPackageFiles(plugin: LoadedPlugin) -> DraftFile[]`
+- Tauri write command: `write_plugin_files(plugin_id, files: PluginFileInput[])`
+- Tauri open command: `open_plugins_root() -> Result<(), String>`
+- Backend availability: `GET /api/plugins/available -> { plugins: LoadedPlugin[] }`
+
+### 3. Contracts
+- Marketplace install only creates/enables the backend `PluginInstallation`; it does not make the plugin runnable on the desktop by itself.
+- After `/api/marketplace/install`, desktop must call `/api/plugins/available`, find the installed plugin, and write the package to `plugins_root/<pluginId>/` before reporting install success.
+- Running a cloud/team plugin whose `runtime_type` is not `cloud` must first call `ensurePluginPackagePersisted(plugin)`, so `start_plugin(plugin.id)` reads real local files instead of an empty directory.
+- Local package materialization writes both `plugin.manifest` and `plugin.files[]`; if `plugin.manifest` is present it generates or overwrites `manifest.json` ahead of file entries.
+- A plugin package without non-manifest files or without any `manifest.json` source is invalid for local runtime and must fail explicitly.
+- `open_plugins_root` must create the root directory if missing and open it with the OS file manager; failures surface as returned errors.
+
+### 4. Validation & Error Matrix
+- `/api/plugins/available` does not contain installed `pluginId` -> error `安装已记录，但 /api/plugins/available 未返回该插件。`
+- available plugin has no `files` or empty `files` -> error `后端未返回插件文件，无法写入本地插件目录。`
+- available plugin has only `manifest.json` and no entry/source files -> error `后端未返回插件入口文件，无法写入本地插件目录。`
+- `files[]` lacks `manifest.json` and `plugin.manifest` is missing -> error `后端未返回 manifest.json，无法写入本地插件目录。`
+- `write_plugin_files` rejects absolute path / `..` / hidden segments -> propagate the Rust error; do not show install success.
+- OS file manager spawn fails in `open_plugins_root` -> return `打开插件目录失败：...`.
+
+### 5. Good/Base/Bad Cases
+- Good: install market plugin -> backend install succeeds -> available returns `manifest + files[]` -> desktop writes `manifest.json`, entry file, requirements/package files -> Plugins page can run it.
+- Base: available `files[]` already contains `manifest.json`; desktop writes it unchanged unless `plugin.manifest` is present.
+- Bad: POST `/api/marketplace/install` returns `installed` and UI toasts success without writing package files; later local scan reports incomplete or `pip install` fails in an empty directory.
+
+### 6. Tests Required
+- Frontend unit: `plugin-installation.spec.ts` asserts install fetches available package and writes local files.
+- Frontend unit: same spec asserts missing files, missing entry files, and missing manifest source fail explicitly.
+- Backend unit: `plugin-available.spec.ts` asserts marketplace package files are hidden before install and returned after install.
+- Rust/desktop checks: `cargo test -p lingfang-desktop`, `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, and desktop build when packaging.
+
+### 7. Wrong vs Correct
+Wrong:
+```typescript
+await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: pluginId } });
+toast.success('已安装');
+```
+
+Correct:
+```typescript
+await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: pluginId } });
+const { plugins } = await api<{ plugins: LoadedPlugin[] }>('/api/plugins/available');
+const plugin = plugins.find((item) => item.id === pluginId);
+if (!plugin) throw new Error('安装已记录，但 /api/plugins/available 未返回该插件。');
+await ensurePluginPackagePersisted(plugin);
+```
 
 ## 插件崩溃展示 stderr + 一键 AI 修复（2026-06-17）
 

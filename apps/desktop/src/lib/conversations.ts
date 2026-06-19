@@ -5,20 +5,44 @@
 //   - code_assistant_list_sessions → ConversationMeta[]
 //   - code_assistant_rename_session / delete_session / save_draft / read_draft（均经 { input: {...} }）
 //
-// activeId 持久化命名对齐 recentKey/pinKey（plugin-draft.ts:728 / App.tsx:46）：
-//   lf:active-conversation:{tenantId}，tenantId 为 null 时用 'none' 兜底（未加入团队态）。
+// activeId 持久化按 userId + tenantId 双维隔离，避免同机切换账号后恢复到上一账号的创建器会话。
 
 import { tauriInvoke } from '@/lib/api';
 import type { ConversationMeta } from '@/lib/plugin-draft';
 
+export type ConversationOwner = {
+  userId: string | null;
+  tenantId: string | null;
+};
+
+export function conversationOwner(userId: string | null, tenantId: string | null): ConversationOwner {
+  return { userId, tenantId };
+}
+
+function ownerPart(value: string | null): string {
+  return value?.trim() || 'none';
+}
+
 // 拼装 activeId 的 localStorage key（与 App.tsx 的 pinKey/recentKey 命名风格一致）。
-export function activeConversationKey(tenantId: string | null): string {
-  return `lf:active-conversation:${tenantId || 'none'}`;
+export function activeConversationKey(tenantId: string | null, userId: string | null): string {
+  return `lf:active-conversation:${ownerPart(tenantId)}:${ownerPart(userId)}`;
 }
 
 // 列出全部会话元数据（Rust list_sessions 返回 SessionRecord 数组，前端镜像为 ConversationMeta）。
 export function listConversations(): Promise<ConversationMeta[]> {
   return tauriInvoke<ConversationMeta[]>('code_assistant_list_sessions');
+}
+
+export function filterConversationsForOwner(
+  records: ConversationMeta[],
+  owner: ConversationOwner,
+): ConversationMeta[] {
+  const userId = ownerPart(owner.userId);
+  const tenantId = ownerPart(owner.tenantId);
+  return records.filter((record) => (
+    ownerPart(record.ownerUserId ?? null) === userId
+    && ownerPart(record.ownerTenantId ?? null) === tenantId
+  ));
 }
 
 // 重命名会话标题。Rust 同步回写 draftUpdatedAt=now（design §3.2.3）。
@@ -36,6 +60,10 @@ export function saveDraft(sessionId: string, draftJson: string): Promise<void> {
   return tauriInvoke('code_assistant_save_draft', { input: { sessionId, draftJson } });
 }
 
+export function updateConversationWorkspace(sessionId: string, workspaceDir: string): Promise<void> {
+  return tauriInvoke('code_assistant_update_workspace', { input: { sessionId, workspaceDir } });
+}
+
 // 读取草稿原文（不存在返回 null）。调用方负责 JSON.parse。
 export function readDraft(sessionId: string): Promise<string | null> {
   return tauriInvoke<string | null>('code_assistant_read_draft', { input: { sessionId } });
@@ -49,9 +77,9 @@ export function scanWorkspaceFiles(sessionId: string): Promise<{ path: string; c
 }
 
 // 读取 localStorage 中的 activeId（无则返回 null）。解析失败静默回退 null，不抛错。
-export function readActiveId(tenantId: string | null): string | null {
+export function readActiveId(owner: ConversationOwner): string | null {
   try {
-    return localStorage.getItem(activeConversationKey(tenantId));
+    return localStorage.getItem(activeConversationKey(owner.tenantId, owner.userId));
   } catch {
     return null;
   }
@@ -75,6 +103,8 @@ export async function generateTitle(opts: {
         model: opts.model && opts.model !== 'default' ? opts.model : undefined,
         prompt,
         systemPrompt: sysPrompt,
+        ownerUserId: null,
+        ownerTenantId: null,
       },
     });
     const raw = await tauriInvoke<string>('code_assistant_read_transcript', { input: { sessionId: record.sessionId } });
@@ -98,9 +128,9 @@ export async function generateTitle(opts: {
 }
 
 // 写入 activeId 到 localStorage（同步持久化，新建/切换/删除时调用）。
-export function writeActiveId(tenantId: string | null, sessionId: string | null): void {
+export function writeActiveId(owner: ConversationOwner, sessionId: string | null): void {
   try {
-    const key = activeConversationKey(tenantId);
+    const key = activeConversationKey(owner.tenantId, owner.userId);
     if (sessionId) localStorage.setItem(key, sessionId);
     else localStorage.removeItem(key);
   } catch {

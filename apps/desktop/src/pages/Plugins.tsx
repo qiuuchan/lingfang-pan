@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon, InfoIcon, Trash2Icon } from 'lucide-react';
+import { ArrowLeftIcon, PencilIcon, PackageIcon, CloudIcon, PlayIcon, SquareIcon, RefreshCwIcon, InfoIcon, Trash2Icon, FolderOpenIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin, DraftFile } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -28,12 +28,14 @@ import {
   stopPlugin,
   deletePlugin,
   writePluginFiles,
+  openPluginsRoot,
   readLocalPluginFile,
   STATUS_DISPLAY,
   STATUS_VARIANT,
   RUNTIME_DISPLAY,
   type LocalPluginStatus,
 } from '@/lib/plugin-status';
+import { ensurePluginPackagePersisted } from '@/lib/plugin-installation';
 
 const PAGE_SIZE = 6;
 
@@ -444,6 +446,7 @@ function LocalPluginList({
   onStart,
   onStop,
   onOpen,
+  onOpenRoot,
   onRefresh,
   onDelete,
 }: {
@@ -452,6 +455,7 @@ function LocalPluginList({
   onStart: (id: string) => void;
   onStop: (id: string) => void;
   onOpen: (item: LocalPluginStatus) => void;
+  onOpenRoot: () => void;
   onRefresh: () => void;
   onDelete: (item: LocalPluginStatus) => void;
 }) {
@@ -462,9 +466,14 @@ function LocalPluginList({
           <CardTitle>本地插件</CardTitle>
           <span className="text-xs text-muted-foreground">{items.length} 个（持久化目录）</span>
         </div>
-        <Button variant="ghost" size="icon-sm" title="重新扫描本地插件状态" onClick={onRefresh}>
-          <RefreshCwIcon className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon-sm" title="打开插件存储目录" onClick={onOpenRoot}>
+            <FolderOpenIcon className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" title="重新扫描本地插件状态" onClick={onRefresh}>
+            <RefreshCwIcon className="size-4" />
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -588,6 +597,22 @@ export function Plugins() {
     setRunningPlugin(adapted);
   };
 
+  const openCloudPlugin = async (plugin: LoadedPlugin) => {
+    const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
+    try {
+      if (!plugin.builtin && runtime !== 'cloud') {
+        await ensurePluginPackagePersisted(plugin);
+      }
+      setRunningPlugin(plugin);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    }
+  };
+
+  const openLocalRoot = () => {
+    void openPluginsRoot().catch((caught) => toast.error(errorMessage(caught)));
+  };
+
   // 组C：启动/停止本地脚本插件后刷新扫描，状态变 running/stopped 同步 Badge。
   const onLocalStart = (id: string) => {
     void startPlugin(id)
@@ -614,6 +639,7 @@ export function Plugins() {
         onStart={onLocalStart}
         onStop={onLocalStop}
         onOpen={openLocal}
+        onOpenRoot={openLocalRoot}
         onRefresh={reloadLocal}
         onDelete={reloadLocal}
       />
@@ -646,7 +672,7 @@ export function Plugins() {
             <PluginList
               isPinned={isPinned}
               items={pageItems}
-              onRun={setRunningPlugin}
+              onRun={(plugin) => { void openCloudPlugin(plugin); }}
               onAuthorChanged={reload}
               onTogglePin={(plugin, pinned) => (pinned ? unpinPlugin(plugin.id) : pinPlugin(plugin))}
               page={page}

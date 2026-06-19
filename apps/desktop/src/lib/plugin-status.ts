@@ -185,6 +185,15 @@ export function writePluginFiles(pluginId: string, files: { path: string; conten
 }
 
 /**
+ * 打开当前插件存放根目录。
+ *
+ * Rust 侧保证目录存在后交给系统文件管理器打开；失败时返回显式错误。
+ */
+export function openPluginsRoot(): Promise<void> {
+  return tauriInvoke<void>('open_plugins_root');
+}
+
+/**
  * 读取插件存放根目录路径（PRD 需求 6 / AC7）。
  *
  * 组A Rust 后端契约（get_plugins_root）：

@@ -23,7 +23,7 @@ use store::{now_string, AssistantStore, CodeAssistantConfig, SessionRecord};
 pub use types::{
     CodeAssistantTool, DeleteSessionInput, DraftFileJson, ReadDraftInput, ReadTranscriptInput,
     RenameSessionInput, SaveConfigInput, SaveDraftInput, ScanWorkspaceInput, SdkConfigInput,
-    SendInputInput, StartSessionInput, StopSessionInput,
+    SendInputInput, StartSessionInput, StopSessionInput, UpdateWorkspaceInput,
 };
 pub use workspace::scan_workspace_files;
 pub(crate) use workspace::{new_session_id, resolve_workspace};
@@ -137,6 +137,8 @@ pub fn start_session<E: AssistantEventSink>(
         title: None,
         archived: None,
         draft_updated_at: None,
+        owner_user_id: input.owner_user_id.clone(),
+        owner_tenant_id: input.owner_tenant_id.clone(),
     };
     state.store.upsert_session(record.clone())?;
     app.emit_json(
@@ -264,6 +266,15 @@ pub fn save_draft(state: &CodeAssistantState, input: SaveDraftInput) -> Result<(
     state
         .store
         .touch_draft_updated_at(&input.session_id, now_string())
+}
+
+pub fn update_workspace(
+    state: &CodeAssistantState,
+    input: UpdateWorkspaceInput,
+) -> Result<(), String> {
+    state
+        .store
+        .update_session_workspace_dir(&input.session_id, &input.workspace_dir)
 }
 
 pub fn read_draft(

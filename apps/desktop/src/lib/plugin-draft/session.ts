@@ -42,6 +42,9 @@ export interface AssistantSessionRecord {
   draftUpdatedAt?: string | null;
   // 归档标记（会话栏折叠归档区）。
   archived?: boolean | null;
+  // 本地账号隔离字段：避免同机切换账号后看到上一账号的创建器会话。
+  ownerUserId?: string | null;
+  ownerTenantId?: string | null;
 }
 
 // design §3.2.4：会话栏列表项（轻量，不含 turns/draft 正文）。
@@ -57,6 +60,8 @@ export interface ConversationMeta {
   commandPreview?: string[];
   draftUpdatedAt?: string | null;
   archived?: boolean | null;
+  ownerUserId?: string | null;
+  ownerTenantId?: string | null;
 }
 
 export interface AssistantSessionState {

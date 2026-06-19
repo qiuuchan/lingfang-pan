@@ -4,6 +4,8 @@ import { useApp } from '@/App';
 import { api, tauriInvoke, tauriListen } from '@/lib/api';
 import {
   deleteConversation,
+  conversationOwner,
+  filterConversationsForOwner,
   generateTitle,
   listConversations,
   readActiveId,
@@ -158,15 +160,22 @@ export function PluginCreatorHome() {
     runPlugin,
   } = usePluginUpload({
     files,
+    currentDraft,
     manifest,
     tenantId: session.tenantId,
+    activeSessionId: activeId,
     pluginIdRef,
+    setCurrentDraft,
     setPluginId,
     setRunningPlugin,
     setView,
     setLiveError,
   });
   const { chatRef, handleChatScroll } = useStickyChatScroll([turns.length, liveSegments, pendingUser]);
+  const owner = useMemo(
+    () => conversationOwner(session.userId, session.tenantId),
+    [session.userId, session.tenantId],
+  );
   // 一键修复：从 Plugins 页跳来时 pendingAutoFixPrompt 非空 → 填 input 并自动 send 给 AI 修。
   // 用完即清（null），避免重复触发。等 currentDraft 就绪（落盘完成后）再 send。
   useEffect(() => {
@@ -191,15 +200,17 @@ export function PluginCreatorHome() {
     let cancelled = false;
     (async () => {
       try {
-        const records = await listConversations();
+        const records = filterConversationsForOwner(await listConversations(), owner);
         if (cancelled) return;
         setMetas(records);
-        const restored = readActiveId(session.tenantId);
+        const restored = readActiveId(owner);
         if (restored && records.some((m) => m.sessionId === restored)) {
           await selectConversation(restored, records);
         } else if (records.length) {
-          // 旧 activeId 失效：默认选最近一项，但不强制写 localStorage（用户可见即恢复）。
-          setActiveIdRef(records[0].sessionId);
+          // 旧 activeId 失效：默认选当前账号最近一项，并加载其草稿。
+          await selectConversation(records[0].sessionId, records);
+        } else {
+          clearActiveConversationState();
         }
       } catch {
         // 浏览器预览环境无 Tauri bridge，静默忽略。
@@ -207,13 +218,28 @@ export function PluginCreatorHome() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.tenantId]);
+  }, [owner]);
 
   // 设置 activeId + 同步 ref + 写 localStorage（三处保持一致的唯一入口）。
   function setActiveIdRef(id: string | null) {
     activeIdRef.current = id;
     setActiveId(id);
-    writeActiveId(session.tenantId, id);
+    writeActiveId(owner, id);
+  }
+
+  function clearActiveConversationState() {
+    setActiveIdRef(null);
+    setAssistantSession(null);
+    setCurrentDraft(null);
+    setPluginId(null);
+    pluginIdRef.current = null;
+    setLiveSegments([]);
+    setLiveStage('');
+    setLiveError(null);
+    setPendingUser(null);
+    setStreaming(false);
+    setDetailsOpen(false);
+    setPreviewOpen(false);
   }
 
   useEffect(() => {
@@ -322,9 +348,9 @@ export function PluginCreatorHome() {
       disposed = true;
       for (const unlisten of unlisteners) unlisten();
     };
-    // CREATOR-11 修复：依赖改为稳定量 [session.tenantId]，不再绑 [provider, model]。
+    // CREATOR-11 修复：依赖改为稳定 owner，不再绑 [provider, model]。
     // 避免 list_tools 异步覆盖 providers 触发 model 变更 → listener 重挂丢失 exit 事件。
-  }, [session.tenantId]);
+  }, [owner]);
 
   async function finalizeSession(sessionId: string, status: AssistantSessionState['status'], exitCode: number | null, endedAt?: string) {
     const isFollowup = isFollowupRef.current;
@@ -557,6 +583,8 @@ export function PluginCreatorHome() {
         // 不传 pluginId → Rust 用 session_id 自动生成 plugins_root/<session_id>/ 持久化目录。
         prompt: text,
         systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
+        ownerUserId: session.userId,
+        ownerTenantId: session.tenantId,
         effort,
         sdkConfig: buildSdkConfig(),
       },

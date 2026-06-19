@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api, tauriInvoke } from '@/lib/api';
+import { saveDraft, updateConversationWorkspace } from '@/lib/conversations';
 import { buildAssistantProviderCatalog, readRecent, writeRecent, PROVIDERS, safePluginId, type ProviderId } from '@/lib/plugin-draft';
 import { toUploadError, type CreatorError } from '@/lib/creator-error';
 import { yuanToCents } from '@/lib/money';
+import { pluginWorkspaceDir, requireRenamedDraft } from '@/lib/plugin-creator/upload-sync';
 import { loadMentionablePlugins, type AttachedPluginRef } from '@/lib/plugin-creator/session-helpers';
-import { scanPluginStatus, type LocalPluginStatus } from '@/lib/plugin-status';
-import type { DraftFile, LoadedPlugin, View } from '@/lib/types';
+import { getPluginsRoot, scanPluginStatus, type LocalPluginStatus } from '@/lib/plugin-status';
+import type { DraftFile, LoadedPlugin, PluginDraft, View } from '@/lib/types';
 import { loadPlugins } from '../plugins-runtime';
 
 type PluginManifestView = {
@@ -131,9 +133,12 @@ export function useLatestRef<T>(value: T) {
 
 export function usePluginUpload(input: {
   files: DraftFile[];
+  currentDraft: PluginDraft | null;
   manifest: PluginManifestView;
   tenantId: string | null;
+  activeSessionId: string | null;
   pluginIdRef: { current: string | null };
+  setCurrentDraft: (draft: PluginDraft | null) => void;
   setPluginId: (pluginId: string | null) => void;
   setRunningPlugin: (plugin: LoadedPlugin | null) => void;
   setView: (view: View) => void;
@@ -168,7 +173,10 @@ export function usePluginUpload(input: {
 
     setNamingLoading(true);
     try {
-      await renameLocalPluginDir(input.pluginIdRef, input.setPluginId, name);
+      const renamed = await renameLocalPluginDir(input.pluginIdRef, input.setPluginId, name);
+      if (renamed) {
+        await syncRenamedPluginReferences(input.currentDraft, input.activeSessionId, renamed, input.setCurrentDraft);
+      }
       const uploadManifest = cloudUploadManifest(input.manifest, name);
       const result = await api<{ plugin: LoadedPlugin; deduplicated?: boolean }>('/api/plugins/upload', {
         method: 'POST',
@@ -247,18 +255,34 @@ async function renameLocalPluginDir(
   pluginIdRef: { current: string | null },
   setPluginId: (pluginId: string | null) => void,
   name: string,
-) {
+): Promise<string | null> {
   const oldId = pluginIdRef.current;
-  if (!oldId) return;
+  if (!oldId) return null;
   const safeNew = safePluginId(name);
-  if (!safeNew || safeNew === oldId) return;
+  if (!safeNew || safeNew === oldId) return null;
   try {
     const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId: safeNew, title: name });
     setPluginId(renamed);
     pluginIdRef.current = renamed;
+    return renamed;
   } catch (error) {
     toast.error(`命名持久化目录失败：${(error as Error).message || error}（仍将以上传名展示）`);
+    return null;
   }
+}
+
+async function syncRenamedPluginReferences(
+  currentDraft: PluginDraft | null,
+  activeSessionId: string | null,
+  pluginId: string,
+  setCurrentDraft: (draft: PluginDraft | null) => void,
+) {
+  if (!activeSessionId) throw new Error('插件目录已重命名，但当前会话不存在，无法同步插件路径。');
+  const draft = requireRenamedDraft(currentDraft, pluginId);
+  setCurrentDraft(draft);
+  await saveDraft(activeSessionId, JSON.stringify(draft));
+  const pluginsRoot = await getPluginsRoot();
+  await updateConversationWorkspace(activeSessionId, pluginWorkspaceDir(pluginsRoot, pluginId));
 }
 
 function cloudUploadManifest(manifest: PluginManifestView, name: string) {

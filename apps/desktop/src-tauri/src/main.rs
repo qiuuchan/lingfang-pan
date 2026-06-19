@@ -300,6 +300,14 @@ fn code_assistant_save_draft(
 }
 
 #[tauri::command]
+fn code_assistant_update_workspace(
+    state: tauri::State<code_assistant::CodeAssistantState>,
+    input: code_assistant::UpdateWorkspaceInput,
+) -> Result<(), String> {
+    code_assistant::update_workspace(&state, input)
+}
+
+#[tauri::command]
 fn code_assistant_read_draft(
     state: tauri::State<code_assistant::CodeAssistantState>,
     input: code_assistant::ReadDraftInput,
@@ -379,6 +387,7 @@ fn main() {
             code_assistant_rename_session,
             code_assistant_delete_session,
             code_assistant_save_draft,
+            code_assistant_update_workspace,
             code_assistant_read_draft,
             code_assistant_scan_workspace,
             plugin_script::probe_script_runtime,
@@ -392,6 +401,7 @@ fn main() {
             plugin_store::scan_plugin_status,
             plugin_store::read_local_plugin_file,
             plugin_store::write_plugin_files,
+            plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,
             cli_installer::install_runtime,
             cli_installer::cancel_install,

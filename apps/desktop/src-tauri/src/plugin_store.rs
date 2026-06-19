@@ -34,6 +34,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -738,6 +739,39 @@ pub fn write_plugin_files(
 ) -> Result<(), String> {
     let pairs: Vec<(String, String)> = files.into_iter().map(|f| (f.path, f.content)).collect();
     state.write_files(&plugin_id, &pairs)
+}
+
+#[tauri::command]
+pub fn open_plugins_root(state: tauri::State<'_, PluginStore>) -> Result<(), String> {
+    let root = state.plugins_root();
+    fs::create_dir_all(&root).map_err(|e| format!("创建插件目录失败：{e}"))?;
+    open_directory(&root)
+}
+
+fn open_directory(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("explorer");
+        cmd.arg(path);
+        cmd
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg(path);
+        cmd
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(path);
+        cmd
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开插件目录失败：{e}"))
 }
 
 /// 流程重构：上传命名时 rename 临时插件目录为正式目录，并把用户命名写入 manifest.title（PRD 需求 1 / AC1）。

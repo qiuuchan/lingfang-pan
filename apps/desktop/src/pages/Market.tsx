@@ -13,6 +13,7 @@ import { LoadingButton } from '@/components/loading-button';
 import { Pagination } from '@/components/pagination';
 import { Stars } from '@/components/stars';
 import { StaggerContainer, StaggerItem, Shimmer } from '@/lib/motion';
+import { installMarketplacePluginPackage } from '@/lib/plugin-installation';
 
 const PAGE_SIZE = 6;
 
@@ -185,7 +186,9 @@ function Detail({ plugin, onBack, onReload }: { plugin: MarketPlugin; onBack: ()
 
   async function install() {
     setInstalling(true);
-    try { await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: plugin.id } }); toast.success('已安装，可在「我的插件」运行');
+    try {
+      await installMarketplacePluginPackage(plugin.id);
+      toast.success('已安装，可在「我的插件」运行');
       // 修复 DESK-MARKET-01：install 成功后此前不 reload，导致免费插件 detail 对象 installed 仍为旧值 false，
       // canRate（免费依赖 installed）不刷新，用户必须返回市场列表再重新点进详情才能看到评分入口。
       // 与 buy() 行为对齐，install 成功后也 reload detail。
