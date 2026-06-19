@@ -14,7 +14,7 @@ import { PreviewDrawer } from '@/components/creator/PreviewDrawer';
 import type { EnvReadinessResult } from '@/lib/env-readiness';
 import { EXAMPLES, STATUS_LABEL, type AskUserQuestion, type AssistantSessionState, type ConversationMeta, type EffortLevel, type ProviderId } from '@/lib/plugin-draft';
 import type { CreatorError } from '@/lib/creator-error';
-import type { DraftDiagnostic, DraftFile, DraftTurn, LoadedPlugin, Session, View } from '@/lib/types';
+import type { AccountSettingsTab, DraftDiagnostic, DraftFile, DraftTurn, LoadedPlugin, Session, SettingsTab, View } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { dragRegionProps } from '@/lib/window-drag';
 import { STATUS_DISPLAY, STATUS_VARIANT, type LocalPluginStatus } from '@/lib/plugin-status';
@@ -22,7 +22,6 @@ import { STATUS_DISPLAY, STATUS_VARIANT, type LocalPluginStatus } from '@/lib/pl
 type LiveSegment = { stream: 'stdout' | 'stderr' | 'thought' | 'tool'; text: string };
 type ProviderInfo = { id: string; label: string; models: string[] };
 type AttachedPlugin = { id: string; name: string; summary: string };
-type SettingsTab = 'cli' | 'gateway' | 'backend';
 
 interface PluginCreatorLayoutProps {
   chatRef: LegacyRef<HTMLDivElement>;
@@ -72,7 +71,7 @@ interface PluginCreatorLayoutProps {
   onForceConvert: () => void;
   onPreviewOpenChange: (open: boolean) => void;
   onDetailsOpenChange: (open: boolean) => void;
-  onSettingsNavigate: (tab: SettingsTab, view: View) => void;
+  onSettingsNavigate: (tab: AccountSettingsTab, settingsTab?: SettingsTab) => void;
   onAskUserAnswer: (question: AskUserQuestion, optionLabel: string) => void;
   onRetry?: () => void;
   onAttach: (plugin: AttachedPlugin) => void;
@@ -146,7 +145,7 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
               className="h-7 shrink-0 border-amber-300 bg-transparent text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-900/50"
               onClick={() => {
                 const missing = props.envReadiness.missing.join('');
-                props.onSettingsNavigate(missing.includes('CLI') ? 'cli' : missing.includes('API 密钥') ? 'gateway' : 'backend', 'settings');
+                props.onSettingsNavigate('settings', missing.includes('CLI') ? 'cli' : missing.includes('API 密钥') ? 'gateway' : 'backend');
               }}
             >
               去设置

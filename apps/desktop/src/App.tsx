@@ -2,28 +2,24 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef, la
 import { Loader2Icon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
-import type { CollabSessionResponse, LoadedPlugin, PluginDraft, Session, View } from '@/lib/types';
+import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { Footer } from '@/components/Footer';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
-// 组D 加载优化：PluginCreatorHome 是首页（首屏即需）且在 App 内常驻挂载（home view 用 hidden 控制显隐，
+import { AccountDialog } from '@/components/AccountDialog';
+// 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
 // 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
-// 其余重页面（Market/Wallet/Review/TeamManage/Settings/Plugins/TeamHome）按需懒加载，首屏不进 bundle。
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
 import { SetupWizard } from '@/pages/SetupWizard';
+import { Home } from '@/pages/Home';
 import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
+import { isPluginCenterView } from '@/lib/plugin-center';
 
 const Plugins = lazy(() => import('./pages/Plugins').then((m) => ({ default: m.Plugins })));
-const AuthorCenter = lazy(() => import('./pages/AuthorCenter').then((m) => ({ default: m.AuthorCenter })));
-const TeamHome = lazy(() => import('./pages/TeamHome').then((m) => ({ default: m.TeamHome })));
-const TeamManage = lazy(() => import('./pages/TeamManage').then((m) => ({ default: m.TeamManage })));
-const Market = lazy(() => import('./pages/Market').then((m) => ({ default: m.Market })));
-const Wallet = lazy(() => import('./pages/Wallet').then((m) => ({ default: m.Wallet })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
-const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -44,8 +40,10 @@ interface AppContextValue {
   unpinPlugin: (id: string) => void;
   isPinned: (id: string) => boolean;
   // 受控的 Settings 页 Tab（供新手任务清单「去设置 → 模型服务」等定向跳转）。
-  settingsTab: 'cli' | 'gateway' | 'backend';
-  setSettingsTab: (tab: 'cli' | 'gateway' | 'backend') => void;
+  settingsTab: SettingsTab;
+  setSettingsTab: (tab: SettingsTab) => void;
+  accountSettingsTab: AccountSettingsTab;
+  openAccountSettings: (tab?: AccountSettingsTab, settingsTab?: SettingsTab) => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
@@ -180,13 +178,15 @@ export default function App() {
   // R6 后端不可达态：api() fetch 抛网络异常时派发 unreachable → true，主界面渲染 BackendUnreachable 友好页。
   // 后续请求成功或 testBackendUrl 探测通过时派发 reachable → false，恢复正常业务页。
   const [backendUnreachable, setBackendUnreachable] = useState(false);
-  const [view, setView] = useState<View>('home');
+  const [view, setViewState] = useState<View>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
+  const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
-  // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway' 再 setView('settings')。
-  const [settingsTab, setSettingsTab] = useState<'cli' | 'gateway' | 'backend'>('cli');
+  // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway'。
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('cli');
   // 模型配置刷新信号：设置页保存绑定后 bumpModelConfig() 递增，PluginCreatorHome 依赖它重拉模型。
   const [modelConfigVersion, setModelConfigVersion] = useState(0);
   const bumpModelConfig = useCallback(() => setModelConfigVersion((v) => v + 1), []);
@@ -199,6 +199,29 @@ export default function App() {
   // 组D 首次启动安装向导：backendUrl 已配置且无 token 时查 /api/setup/status，
   // needsSetup=true（DB 无 PLATFORM_ADMIN）则渲染 SetupWizard 替代 Auth。
   const [needsSetup, setNeedsSetup] = useState(false);
+
+  const openAccountSettings = useCallback((tab: AccountSettingsTab = 'account', nextSettingsTab?: SettingsTab) => {
+    if (nextSettingsTab) setSettingsTab(nextSettingsTab);
+    setAccountSettingsTab(tab);
+    setAccountSettingsOpen(true);
+  }, []);
+
+  const setView = useCallback((nextView: View) => {
+    if (nextView === 'settings') {
+      openAccountSettings('settings');
+      return;
+    }
+    if (nextView === 'wallet') {
+      openAccountSettings('wallet');
+      return;
+    }
+    if (nextView === 'team' || nextView === 'team-manage') {
+      openAccountSettings('team');
+      return;
+    }
+    setAccountSettingsOpen(false);
+    setViewState(nextView);
+  }, [openAccountSettings]);
 
   const saveBackendUrl = useCallback((url: string) => {
     const normalized = normalizeBackendUrl(url);
@@ -380,6 +403,7 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
+    accountSettingsTab, openAccountSettings,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
@@ -416,14 +440,10 @@ export default function App() {
   }
 
   let body: ReactNode;
-  if (view === 'plugins') body = <Plugins />;
-  else if (view === 'author-center') body = <AuthorCenter />;
-  else if (view === 'team-manage') body = <TeamManage />;
-  else if (view === 'market') body = <Market />;
-  else if (view === 'wallet') body = <Wallet />;
+  if (view === 'home') body = <Home />;
+  else if (view === 'plugins' || view === 'author-center' || view === 'market') body = <Plugins />;
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
-  else if (view === 'settings') body = <Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as 'cli' | 'gateway' | 'backend')} />;
-  else body = <TeamHome />;
+  else body = null;
 
   return (
     <AppContext.Provider value={ctx}>
@@ -436,14 +456,14 @@ export default function App() {
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗、切设置）。
               // 「去设置」跳 backend tab 改地址，「重试」探测成功后派发 reachable 退出此态。
-              <BackendUnreachable onGoSettings={() => { setSettingsTab('backend'); setView('settings'); }} />
+              <BackendUnreachable onGoSettings={() => openAccountSettings('settings', 'backend')} />
             ) : (
               <>
-                <div className={view === 'home' ? 'min-h-0 flex-1' : 'hidden'}>
+                <div className={view === 'creator' ? 'min-h-0 flex-1' : 'hidden'}>
                   <PluginCreatorHome />
                 </div>
-                {view !== 'home' && (
-                  view === 'plugins' && runningPlugin ? (
+                {view !== 'creator' && (
+                  isPluginCenterView(view) && runningPlugin ? (
                     // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
                     // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
                     <div className="min-h-0 flex-1">
@@ -472,6 +492,17 @@ export default function App() {
           </main>
         </div>
       </div>
+      <AccountDialog
+        open={accountSettingsOpen}
+        onOpenChange={setAccountSettingsOpen}
+        session={session}
+        applySession={applySession}
+        resetSession={resetSession}
+        tab={accountSettingsTab}
+        onTabChange={setAccountSettingsTab}
+        settingsTab={settingsTab}
+        onSettingsTabChange={setSettingsTab}
+      />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );

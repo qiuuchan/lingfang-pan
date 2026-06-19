@@ -1,37 +1,26 @@
-import { useState } from 'react';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
-import { AccountDialog } from '@/components/AccountDialog';
 import {
   HomeIcon,
   PackageIcon,
-  SettingsIcon,
-  UsersIcon,
   ChevronDownIcon,
   UserRoundIcon,
   SparklesIcon,
-  StoreIcon,
-  WalletIcon,
   ShieldCheckIcon,
-  LayoutDashboardIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
+import { isPluginCenterView } from '@/lib/plugin-center';
 
 interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
 
 const NAV: NavItem[] = [
-  { v: 'home', label: '创建插件', icon: SparklesIcon },
-  { v: 'team', label: '团队空间', icon: HomeIcon },
-  { v: 'team-manage', label: '团队管理', icon: UsersIcon, teamAdminOnly: true },
+  { v: 'home', label: '首页', icon: HomeIcon },
+  { v: 'creator', label: '创建插件', icon: SparklesIcon },
   { v: 'plugins', label: '插件', icon: PackageIcon },
-  { v: 'author-center', label: '作者中心', icon: LayoutDashboardIcon },
-  { v: 'market', label: '市场', icon: StoreIcon },
-  { v: 'wallet', label: '钱包', icon: WalletIcon },
   { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
-  { v: 'settings', label: '设置', icon: SettingsIcon },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -40,10 +29,8 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const { session, view, setView, setRunningPlugin, applySession, resetSession, platformName, platformLogoUrl } = useApp();
+  const { session, view, setView, setRunningPlugin, openAccountSettings, platformName, platformLogoUrl } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
-  // R6：账户信息改居中悬浮 Dialog（替代原右对齐 Popover）。
-  const [accountOpen, setAccountOpen] = useState(false);
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
 
@@ -71,7 +58,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
       </div>
       <nav className="flex w-56 flex-1 flex-col gap-1 overflow-y-auto p-2.5">
         {items.map(({ v, label, icon: Icon }) => {
-          const active = view === v;
+          const active = v === 'plugins' ? isPluginCenterView(view) : view === v;
           return (
             <Button
               key={v}
@@ -90,7 +77,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
         {/* R6：点击底部账户信息 → 居中悬浮 AccountDialog（修改用户名/密码/邮箱/登出）。 */}
         <button
           type="button"
-          onClick={() => setAccountOpen(true)}
+          onClick={() => openAccountSettings('account')}
           className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full justify-start gap-2 px-3 py-2')}
         >
           <UserRoundIcon className="size-4 shrink-0" />
@@ -98,7 +85,6 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
         </button>
       </div>
-      <AccountDialog open={accountOpen} onOpenChange={setAccountOpen} session={session} applySession={applySession} resetSession={resetSession} />
     </aside>
   );
 }

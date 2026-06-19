@@ -58,7 +58,7 @@ export interface LocalPluginStatus {
 
 // === 状态展示文案（PRD AC2：状态 Badge 中文展示） ===
 
-// 状态 → Badge variant（与 PluginList 现有 REVIEW_LABEL 风格一致）。
+// 状态 → Badge variant（与插件列表行的审核角标风格一致）。
 export const STATUS_VARIANT: Record<PluginStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   ready: 'secondary',
   incomplete: 'outline',

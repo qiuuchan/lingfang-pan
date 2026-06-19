@@ -69,10 +69,10 @@ function resolveTitleTool(tool: string | undefined): 'claude' | 'codex' | null {
 }
 
 export function PluginCreatorHome() {
-  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
+  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, openAccountSettings, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
   // 环境就绪检测（模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
   // loading=true 时不渲染横幅（避免首帧闪烁）；ready=false 时渲染并提示去设置。
-  // view 传入让用户从设置返回 home 时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
+  // view 传入让用户从设置返回创建器时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
   const envReadiness = useEnvReadiness(session, view);
   const [input, setInput] = useState('');
   // 流程重构：创建期不要求命名（先对话→AI生成→预览→上传时命名）。
@@ -996,7 +996,7 @@ export function PluginCreatorHome() {
         onForceConvert={() => { void forceConvertToDraft(); }}
         onPreviewOpenChange={setPreviewOpen}
         onDetailsOpenChange={setDetailsOpen}
-        onSettingsNavigate={(tab, nextView) => { setSettingsTab(tab); setView(nextView); }}
+        onSettingsNavigate={(tab, settingsTab) => openAccountSettings(tab, settingsTab)}
         onAskUserAnswer={handleAskUserAnswer}
         onRetry={lastPromptRef.current ? () => send(lastPromptRef.current!) : undefined}
         onAttach={(p) => setAttachedPlugins((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]))}
@@ -1004,7 +1004,7 @@ export function PluginCreatorHome() {
         onModelChange={setModel}
         onProviderChange={handleProviderChange}
         onEffortChange={setEffort}
-        onCustomModel={() => { setSettingsTab('gateway'); setView('settings'); }}
+        onCustomModel={() => openAccountSettings('settings', 'gateway')}
         onSend={send}
         onStop={stopCurrentSession}
         onUpload={uploadCloud}
