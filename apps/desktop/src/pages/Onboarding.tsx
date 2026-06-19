@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { ShieldAlertIcon, TicketIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { api } from '@/lib/api';
+import { INVITATION_CODE_PLACEHOLDER, validateInvitationCodeInput } from '@/lib/invitations';
 import type { CollabSessionResponse, PublicTeam } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -50,7 +51,8 @@ export function Onboarding() {
   }
 
   async function redeem() {
-    if (!code.trim()) return toast.error('输入团队邀请码');
+    const validationError = validateInvitationCodeInput(code);
+    if (validationError) return toast.error(validationError);
     setLoading(true);
     try {
       const r = await api<CollabSessionResponse>('/api/invitations/redeem', { method: 'POST', body: { code: code.trim() } });
@@ -151,7 +153,7 @@ export function Onboarding() {
           </div>
           <div className="border-t pt-4 space-y-3">
             <p className="text-xs font-medium text-muted-foreground">或使用邀请码作为普通成员加入团队</p>
-            <Input placeholder="团队邀请码，例如 LF-XXXXXXX" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+            <Input placeholder={INVITATION_CODE_PLACEHOLDER} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
             <LoadingButton variant="outline" loading={loading} onClick={redeem}>加入团队</LoadingButton>
           </div>
           {discoveryCard}
@@ -168,7 +170,7 @@ export function Onboarding() {
         <CardDescription>注册后可通过邀请码加入，或直接加入下方公开团队。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input placeholder="团队邀请码，例如 LF-XXXXXXX" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+        <Input placeholder={INVITATION_CODE_PLACEHOLDER} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
         <div className="flex gap-2"><LoadingButton loading={loading} onClick={redeem}>加入团队</LoadingButton><Button variant="outline" onClick={resetSession}>退出登录</Button></div>
         {discoveryCard}
       </CardContent>

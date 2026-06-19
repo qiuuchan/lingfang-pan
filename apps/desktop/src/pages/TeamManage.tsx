@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { CheckIcon, CopyIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { BalanceLedger, InvitationCode, TeamMember } from '@/lib/types';
 import { centsToYuan } from '@/lib/money';
@@ -15,6 +16,7 @@ export function TeamManage() {
   const [ledger, setLedger] = useState<BalanceLedger[]>([]);
   const [maxUses, setMaxUses] = useState('5');
   const [newCode, setNewCode] = useState('');
+  const [copiedCode, setCopiedCode] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function load() {
@@ -42,6 +44,7 @@ export function TeamManage() {
     try {
       const result = await api<{ invitation: InvitationCode }>('/api/teams/current/invitations', { method: 'POST', body: { maxUses: Number(maxUses) || 1 } });
       setNewCode(result.invitation.code || '');
+      setCopiedCode(false);
       await load();
       toast.success('邀请码已生成');
     } catch (e) {
@@ -59,6 +62,17 @@ export function TeamManage() {
     await run(() => api(`/api/teams/current/invitations/${id}/disable`, { method: 'PATCH' }).then(load));
   }
 
+  async function copyNewCode() {
+    if (!newCode) return;
+    if (await copyText(newCode)) {
+      setCopiedCode(true);
+      toast.success('已复制完整邀请码');
+      window.setTimeout(() => setCopiedCode(false), 1600);
+      return;
+    }
+    toast.error('复制失败，请手动选取');
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between"><div><h1 className="text-2xl font-semibold tracking-tight">团队管理</h1><p className="text-sm text-muted-foreground">团队管理员可管理成员与邀请码，余额只读。</p></div><LoadingButton loading={loading} onClick={load}>刷新</LoadingButton></div>
@@ -66,7 +80,15 @@ export function TeamManage() {
         <CardHeader><CardTitle>生成邀请码</CardTitle><CardDescription>普通用户注册后必须凭有效邀请码加入团队。</CardDescription></CardHeader>
         <CardContent className="space-y-3">
           <div className="flex max-w-sm gap-2"><Input value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder="最大使用次数" /><LoadingButton loading={loading} onClick={createInvitation}>生成</LoadingButton></div>
-          {newCode && <div className="rounded-md border bg-muted/50 p-3 font-mono text-sm">{newCode}</div>}
+          {newCode && (
+            <div className="flex max-w-xl items-center gap-2 rounded-md border bg-muted/50 p-3">
+              <code className="min-w-0 flex-1 break-all font-mono text-sm">{newCode}</code>
+              <Button type="button" variant="outline" size="sm" onClick={copyNewCode} aria-label="复制完整邀请码">
+                {copiedCode ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+              </Button>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">完整邀请码只在生成后显示一次；下方历史列表仅展示前缀，不能用于加入团队。</p>
         </CardContent>
       </Card>
       <Card>
@@ -75,7 +97,7 @@ export function TeamManage() {
       </Card>
       <Card>
         <CardHeader><CardTitle>邀请码</CardTitle></CardHeader>
-        <CardContent><DataTable headers={['前缀', '状态', '使用次数', '操作']} rows={invitations.map((i) => [i.displayCodePrefix, i.status, `${i.usedCount}/${i.maxUses}`, i.status === 'ACTIVE' ? <Button key={i.id} variant="outline" onClick={() => disableInvitation(i.id)}>禁用</Button> : '—'])} /></CardContent>
+        <CardContent><DataTable headers={['前缀（非完整邀请码）', '状态', '使用次数', '操作']} rows={invitations.map((i) => [i.displayCodePrefix, i.status, `${i.usedCount}/${i.maxUses}`, i.status === 'ACTIVE' ? <Button key={i.id} variant="outline" onClick={() => disableInvitation(i.id)}>禁用</Button> : '—'])} /></CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>余额流水</CardTitle><CardDescription>团队管理员不可调整余额。</CardDescription></CardHeader>
@@ -102,6 +124,33 @@ function DataTable({ headers, rows }: { headers: string[]; rows: React.ReactNode
       </TableBody>
     </STable>
   );
+}
+
+async function copyText(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    return fallbackCopy(text);
+  } catch {
+    return fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text: string) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 async function run(fn: () => Promise<unknown>) {

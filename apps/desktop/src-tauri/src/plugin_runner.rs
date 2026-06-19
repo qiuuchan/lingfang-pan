@@ -284,7 +284,10 @@ const PIP_TRUSTED_HOST: &str = "pypi.tuna.tsinghua.edu.cn";
 /// 子进程继承 env 才能同样走镜像；仅在顶层命令加 -i 无法覆盖构建隔离子调用。
 fn pip_install_env() -> Vec<(OsString, OsString)> {
     let mut env = minimal_env();
-    env.push((OsString::from("PIP_INDEX_URL"), OsString::from(PIP_INDEX_URL)));
+    env.push((
+        OsString::from("PIP_INDEX_URL"),
+        OsString::from(PIP_INDEX_URL),
+    ));
     env.push((
         OsString::from("PIP_TRUSTED_HOST"),
         OsString::from(PIP_TRUSTED_HOST),

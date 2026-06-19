@@ -99,7 +99,7 @@ export interface SessionErrorPayload {
 export interface SessionExitPayload {
   sessionId: string;
   exitCode?: number | null;
-  status?: 'stopped' | 'exited';
+  status?: 'stopped' | 'exited' | 'failed';
   endedAt?: string;
 }
 
@@ -159,7 +159,7 @@ export function parseTranscript(raw: string): TranscriptEvent[] {
 // 本函数通过 lastIndexOf('input') 定位本轮起点，只取其后的 output，保证「一问一答」语义。
 //
 // 边界：无 input 事件（旧 transcript 或异常）→ 取全部 output（与 transcriptText 等价，向后兼容）；
-// input 后无 output（本轮 CLI 尚未产出）→ 返回空串。
+// input 后无 output/error（本轮 SDK 尚未产出）→ 返回空串。
 export function transcriptTextSinceLastInput(events: TranscriptEvent[], stream: 'stdout' | 'stderr') {
   let lastInputIndex = -1;
   for (let i = 0; i < events.length; i++) {
@@ -169,8 +169,7 @@ export function transcriptTextSinceLastInput(events: TranscriptEvent[], stream: 
   const start = lastInputIndex === -1 ? 0 : lastInputIndex + 1;
   return events
     .slice(start)
-    .filter((event) => event.event === 'output' && event.payload?.stream === stream)
-    .map((event) => (typeof event.payload?.text === 'string' ? event.payload.text : ''))
+    .map((event) => transcriptDisplayText(event, stream))
     .join('')
     .trim();
 }
@@ -184,14 +183,29 @@ export function transcriptSegmentsSinceLastInput(events: TranscriptEvent[]): Tur
   return compactTurnSegments(
     events
       .slice(start)
-      .filter((event) => event.event === 'output')
       .flatMap((event) => {
-        const stream = event.payload?.stream;
-        const text = event.payload?.text;
+        const stream = transcriptDisplayStream(event);
+        const text = stream ? transcriptDisplayText(event, stream) : '';
         if (!isAssistantOutputStream(stream) || typeof text !== 'string' || !text) return [];
         return [{ stream, text }];
       }),
   );
+}
+
+function transcriptDisplayStream(event: TranscriptEvent): AssistantOutputStream | null {
+  if (event.event === 'error') return 'stderr';
+  const stream = event.payload?.stream;
+  return isAssistantOutputStream(stream) ? stream : null;
+}
+
+function transcriptDisplayText(event: TranscriptEvent, stream: AssistantOutputStream): string {
+  if (event.event === 'output' && event.payload?.stream === stream) {
+    return typeof event.payload.text === 'string' ? event.payload.text : '';
+  }
+  if (event.event === 'error' && stream === 'stderr') {
+    return typeof event.payload?.error === 'string' ? event.payload.error : '';
+  }
+  return '';
 }
 
 function isAssistantOutputStream(value: unknown): value is AssistantOutputStream {

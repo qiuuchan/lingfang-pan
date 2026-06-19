@@ -21,9 +21,9 @@ pub(crate) use process::{
 };
 use store::{now_string, AssistantStore, CodeAssistantConfig, SessionRecord};
 pub use types::{
-    CodeAssistantTool, DeleteSessionInput, DraftFileJson, ReadDraftInput,
-    ReadTranscriptInput, RenameSessionInput, SaveConfigInput, SaveDraftInput, ScanWorkspaceInput,
-    SdkConfigInput, SendInputInput, StartSessionInput, StopSessionInput,
+    CodeAssistantTool, DeleteSessionInput, DraftFileJson, ReadDraftInput, ReadTranscriptInput,
+    RenameSessionInput, SaveConfigInput, SaveDraftInput, ScanWorkspaceInput, SdkConfigInput,
+    SendInputInput, StartSessionInput, StopSessionInput,
 };
 pub use workspace::scan_workspace_files;
 pub(crate) use workspace::{new_session_id, resolve_workspace};
@@ -292,10 +292,7 @@ fn spawn_sdk_turn<E: AssistantEventSink>(
         let result = run_sdk_turn(request, sink.clone()).await;
         finish_sdk_turn(sink, task_state, task_id, result);
     });
-    let task = SdkTask {
-        cancel,
-        handle,
-    };
+    let task = SdkTask { cancel, handle };
     let mut tasks = lock_or_recover(&state.tasks);
     tasks.insert(session_id, task);
     Ok(())
@@ -317,9 +314,10 @@ fn finish_sdk_turn<E: AssistantEventSink>(
             let _ = state
                 .store
                 .append_transcript(&session_id, "exit", json!({ "exitCode": 0 }));
-            let _ = state
-                .store
-                .update_session_exit(&session_id, "exited", Some(0), ended_at.clone());
+            let _ =
+                state
+                    .store
+                    .update_session_exit(&session_id, "exited", Some(0), ended_at.clone());
             sink.app.emit_json(
                 "code-assistant://exit",
                 json!({ "sessionId": session_id, "exitCode": 0, "status": "exited", "endedAt": ended_at }),
@@ -333,12 +331,13 @@ fn finish_sdk_turn<E: AssistantEventSink>(
             let _ = state
                 .store
                 .append_transcript(&session_id, "exit", json!({ "exitCode": 1 }));
-            let _ = state
-                .store
-                .update_session_exit(&session_id, "failed", Some(1), ended_at.clone());
+            let _ =
+                state
+                    .store
+                    .update_session_exit(&session_id, "failed", Some(1), ended_at.clone());
             sink.app.emit_json(
                 "code-assistant://exit",
-                json!({ "sessionId": session_id, "exitCode": 1, "status": "exited", "endedAt": ended_at }),
+                json!({ "sessionId": session_id, "exitCode": 1, "status": "failed", "endedAt": ended_at }),
             );
         }
     }

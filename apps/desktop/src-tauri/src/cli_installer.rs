@@ -5,9 +5,9 @@ use std::process::Child;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::code_assistant::{find_binary, kill_child_tree, run_capture_with_env, CapturedOutput};
@@ -367,8 +367,14 @@ mod tests {
 
     #[test]
     fn winget_package_id_lookup() {
-        assert_eq!(winget_package_id(InstallTarget::Nodejs), "OpenJS.NodeJS.LTS");
-        assert_eq!(winget_package_id(InstallTarget::Python), "Python.Python.3.12");
+        assert_eq!(
+            winget_package_id(InstallTarget::Nodejs),
+            "OpenJS.NodeJS.LTS"
+        );
+        assert_eq!(
+            winget_package_id(InstallTarget::Python),
+            "Python.Python.3.12"
+        );
     }
 
     #[test]
@@ -382,7 +388,13 @@ mod tests {
 
     #[test]
     fn install_status_serializes_pascal_case() {
-        assert_eq!(serde_json::to_string(&InstallStatus::Succeeded).unwrap(), "\"Succeeded\"");
-        assert_eq!(serde_json::to_string(&InstallStatus::Unsupported).unwrap(), "\"Unsupported\"");
+        assert_eq!(
+            serde_json::to_string(&InstallStatus::Succeeded).unwrap(),
+            "\"Succeeded\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InstallStatus::Unsupported).unwrap(),
+            "\"Unsupported\""
+        );
     }
 }

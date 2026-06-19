@@ -8,7 +8,22 @@ import { AuthService } from './auth.service';
 // 修复 INVITE-CASE：生成时 code 经 toUpperCase() 后哈希（见 createInvitation），库中 codeHash 均为大写规范形。
 // 兑换若按用户原始大小写哈希，则小写/混合输入会查无记录、误报"邀请码无效"。
 // 故在此统一 trim + toUpperCase 归一：生成侧已大写（哈希不变、存量兼容），兑换侧任意大小写均可匹配。
-const hashInvite = (code: string) => createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
+const INVITE_CODE_PREFIX = 'LF-';
+const INVITE_CODE_RANDOM_BYTES = 9;
+const INVITE_CODE_RANDOM_CHARS = 12;
+const INVITE_CODE_LENGTH = INVITE_CODE_PREFIX.length + INVITE_CODE_RANDOM_CHARS;
+const INVITE_DISPLAY_PREFIX_LENGTH = 7;
+
+const normalizeInviteCode = (code: string) => code.trim().toUpperCase();
+const hashInvite = (code: string) => createHash('sha256').update(normalizeInviteCode(code)).digest('hex');
+
+function requireCompleteInviteCode(code: string) {
+  const normalized = normalizeInviteCode(code);
+  if (!normalized.startsWith(INVITE_CODE_PREFIX) || normalized.length < INVITE_CODE_LENGTH) {
+    throw badRequest('请输入完整邀请码');
+  }
+  return normalized;
+}
 
 @Injectable()
 export class TeamService {
@@ -46,7 +61,8 @@ export class TeamService {
   }
 
   async redeemInvitation(userId: string, code: string) {
-    const invite = await this.prisma.invitationCode.findUnique({ where: { codeHash: hashInvite(code) }, include: { team: true } });
+    const normalizedCode = requireCompleteInviteCode(code);
+    const invite = await this.prisma.invitationCode.findUnique({ where: { codeHash: hashInvite(normalizedCode) }, include: { team: true } });
     if (!invite || invite.status !== 'ACTIVE') throw badRequest('邀请码无效');
     if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) throw badRequest('邀请码已过期');
     if (invite.team.status !== 'ACTIVE') throw forbidden('团队当前不可加入');
@@ -165,13 +181,13 @@ export class TeamService {
       if (parsed.getTime() < Date.now()) throw badRequest('expiresAt 不能是过去时间');
       expiresAt = parsed;
     }
-    const code = `LF-${randomBytes(9).toString('base64url').toUpperCase()}`;
+    const code = `${INVITE_CODE_PREFIX}${randomBytes(INVITE_CODE_RANDOM_BYTES).toString('base64url').toUpperCase()}`;
     const invite = await this.prisma.invitationCode.create({
       data: {
         teamId: membership.teamId,
         createdById: actorId,
         codeHash: hashInvite(code),
-        displayCodePrefix: code.slice(0, 7),
+        displayCodePrefix: code.slice(0, INVITE_DISPLAY_PREFIX_LENGTH),
         maxUses: Math.max(1, Math.floor(Number(input.maxUses || 1))),
         expiresAt,
       },
