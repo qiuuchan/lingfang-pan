@@ -40,13 +40,13 @@ interface BindingResponse {
  * 检测创建插件所需的环境前置条件。
  *
  * @param session 当前登录态（取 tenantName 判定是否已加入团队）。
- * @param activeView 当前激活的 View（默认 'home'）。当切回 'home' 时自动重检，
+ * @param activeView 当前激活的 View（默认 'creator'）。当切回 'creator' 时自动重检，
  *                   让用户从设置返回后横幅立即刷新（PluginCreatorHome 常驻挂载，view 切换不卸载）。
  * @returns 就绪状态 + missing 描述 + loading 态 + refresh 重检函数。
  */
 export function useEnvReadiness(
   session: Session,
-  activeView: View = 'home',
+  activeView: View = 'creator',
 ): EnvReadinessResult & { refresh: RefreshEnvReadiness } {
   const [ready, setReady] = useState(false);
   const [missing, setMissing] = useState<string[]>([]);
@@ -77,12 +77,12 @@ export function useEnvReadiness(
     setLoading(false);
   }, [session.tenantName]);
 
-  // 单一 effect 同时响应 tenantName 变化 + 切回 home，两者都触发一次完整重检。
-  // 切回 home 时 loading 会短暂为 true（横幅在探测期间不渲染），探测完按最新结果重渲染——
+  // 单一 effect 同时响应 tenantName 变化 + 切回创建器，两者都触发一次完整重检。
+  // 切回 creator 时 loading 会短暂为 true（横幅在探测期间不渲染），探测完按最新结果重渲染——
   // 避免横幅停留在设置前的旧状态。PluginCreatorHome 常驻挂载（view 切换不卸载），
   // 故监听 activeView 才能在用户从设置返回时主动刷新。
   useEffect(() => {
-    if (activeView !== 'home') return;
+    if (activeView !== 'creator') return;
     const signal = { cancelled: false };
     setLoading(true);
     void probe(signal);

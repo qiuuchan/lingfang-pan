@@ -5,7 +5,7 @@
 
 import { CpuIcon, KeyRoundIcon, MessageSquareIcon, EyeIcon, UploadCloudIcon } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { View } from '@/lib/types';
+import type { SettingsTab, View } from '@/lib/types';
 
 export interface TaskStep {
   icon: LucideIcon;
@@ -14,7 +14,7 @@ export interface TaskStep {
   /** 跳转到的页面。 */
   view: View;
   /** Settings 页跳转时落到哪个 Tab（cli/gateway/backend）；非 Settings 页为 undefined。 */
-  settingsTab?: 'cli' | 'gateway' | 'backend';
+  settingsTab?: SettingsTab;
 }
 
 export const TASK_STEPS: TaskStep[] = [
@@ -36,18 +36,18 @@ export const TASK_STEPS: TaskStep[] = [
     icon: MessageSquareIcon,
     title: '发起首条对话',
     description: '回到「创建插件」页，描述你想做的插件，发送第一条消息让 AI 开始生成。',
-    view: 'home',
+    view: 'creator',
   },
   {
     icon: EyeIcon,
     title: '使用插件',
     description: '生成完成后点「使用插件」查看插件实际运行效果。',
-    view: 'home',
+    view: 'creator',
   },
   {
     icon: UploadCloudIcon,
     title: '上传团队共享',
     description: '在详情面板把生成好的插件上传到团队共享，或提交到插件市场。',
-    view: 'home',
+    view: 'creator',
   },
 ];

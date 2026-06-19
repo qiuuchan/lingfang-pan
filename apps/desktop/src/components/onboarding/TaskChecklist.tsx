@@ -29,7 +29,7 @@ import {
 import { CircleCheckIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { dragRegionProps } from '@/lib/window-drag';
-import type { Session, View } from '@/lib/types';
+import type { Session, SettingsTab, View } from '@/lib/types';
 import { TASK_STEPS } from '@/components/onboarding/task-steps';
 import {
   clearDone,
@@ -46,7 +46,7 @@ interface TaskChecklistProps {
   /** 跳转页面（与 App setView 一致）。 */
   setView: (v: View) => void;
   /** 切到 Settings 页时落到哪个 Tab。父组件持有 Settings 的 Tab 受控态并传入 setter。 */
-  setSettingsTab: (tab: 'cli' | 'gateway' | 'backend') => void;
+  setSettingsTab: (tab: SettingsTab) => void;
 }
 
 export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklistProps) {
