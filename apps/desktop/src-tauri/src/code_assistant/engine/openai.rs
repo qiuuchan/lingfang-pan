@@ -62,5 +62,10 @@ mod tests {
         assert_eq!(body["tools"][1]["function"]["name"], "read_file");
         assert_eq!(body["tools"][2]["function"]["name"], "write_file");
         assert_eq!(body["tools"][3]["function"]["name"], "scan_workspace");
+        assert_eq!(body["tools"][4]["function"]["name"], "list_local_directory");
+        assert_eq!(body["tools"][5]["function"]["name"], "read_local_file");
+        assert_eq!(body["tools"][6]["function"]["name"], "search_local_files");
+        assert_eq!(body["tools"][7]["function"]["name"], "import_local_project");
+        assert_eq!(body["tools"][8]["function"]["name"], "run_command");
     }
 }
