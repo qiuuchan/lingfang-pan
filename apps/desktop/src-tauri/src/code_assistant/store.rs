@@ -70,6 +70,12 @@ pub struct SessionRecord {
     // 本地落盘字段，default 保证旧 sessions.json 可读。
     #[serde(default, alias = "draftUpdatedAt", rename = "draftUpdatedAt")]
     pub draft_updated_at: Option<String>,
+    // 本地账号隔离字段。旧 sessions.json 无字段时为 None，前端会隐藏无 owner 的旧记录，
+    // 避免同机切换账号后继续看到上一账号的创建器聊天。
+    #[serde(default, alias = "ownerUserId", rename = "ownerUserId")]
+    pub owner_user_id: Option<String>,
+    #[serde(default, alias = "ownerTenantId", rename = "ownerTenantId")]
+    pub owner_tenant_id: Option<String>,
 }
 
 // 修复 RUSTSHIM-01 / RUSTSHIM-03 / SPAWN-03 / RUST-STREAM-03（并发根因）：
@@ -165,6 +171,21 @@ impl AssistantStore {
             record.exit_code = exit_code;
             record.ended_at = Some(ended_at);
         }
+        write_json(&self.sessions_path(), &sessions)
+    }
+
+    pub fn update_session_workspace_dir(
+        &self,
+        session_id: &str,
+        workspace_dir: &str,
+    ) -> Result<(), String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut sessions = self.list_sessions();
+        let record = sessions
+            .iter_mut()
+            .find(|item| item.session_id == session_id)
+            .ok_or_else(|| format!("session 不存在：{session_id}"))?;
+        record.workspace_dir = workspace_dir.to_string();
         write_json(&self.sessions_path(), &sessions)
     }
 
@@ -440,6 +461,8 @@ mod tests {
             title: None,
             archived: None,
             draft_updated_at: None,
+            owner_user_id: None,
+            owner_tenant_id: None,
         }
     }
 
@@ -462,6 +485,39 @@ mod tests {
         assert_eq!(record.archived, None);
         assert_eq!(record.draft_updated_at, None);
         assert_eq!(record.cli_session_id, None);
+        assert_eq!(record.owner_user_id, None);
+        assert_eq!(record.owner_tenant_id, None);
+    }
+
+    #[test]
+    fn session_record_owner_fields_roundtrip() {
+        let mut session = sample_session("owner-1");
+        session.owner_user_id = Some("user-1".into());
+        session.owner_tenant_id = Some("team-1".into());
+
+        let raw = serde_json::to_string(&session).unwrap();
+        assert!(raw.contains("ownerUserId"));
+        assert!(raw.contains("ownerTenantId"));
+        let parsed: SessionRecord = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed.owner_user_id.as_deref(), Some("user-1"));
+        assert_eq!(parsed.owner_tenant_id.as_deref(), Some("team-1"));
+    }
+
+    #[test]
+    fn update_session_workspace_dir_persists_new_path() {
+        let store = temp_store("workspace-update");
+        store.upsert_session(sample_session("workspace-1")).unwrap();
+
+        store
+            .update_session_workspace_dir("workspace-1", "O:/plugins/final-plugin")
+            .unwrap();
+
+        let record = store
+            .list_sessions()
+            .into_iter()
+            .find(|item| item.session_id == "workspace-1")
+            .unwrap();
+        assert_eq!(record.workspace_dir, "O:/plugins/final-plugin");
     }
 
     #[test]

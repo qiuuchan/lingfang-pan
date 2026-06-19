@@ -49,6 +49,10 @@ pub struct StartSessionInput {
     pub effort: Option<String>,
     #[serde(default, alias = "pluginId")]
     pub plugin_id: Option<String>,
+    #[serde(default, alias = "ownerUserId")]
+    pub owner_user_id: Option<String>,
+    #[serde(default, alias = "ownerTenantId")]
+    pub owner_tenant_id: Option<String>,
     #[serde(default, alias = "cliConfig", alias = "sdkConfig")]
     pub sdk_config: Option<SdkConfigInput>,
 }
@@ -94,6 +98,14 @@ pub struct SaveDraftInput {
     /// 前端序列化后的 PluginDraft JSON。Rust 不解析内部定义，保持前后端 schema 解耦。
     #[serde(alias = "draftJson")]
     pub draft_json: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkspaceInput {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    #[serde(alias = "workspaceDir")]
+    pub workspace_dir: String,
 }
 
 #[derive(Debug, Deserialize)]

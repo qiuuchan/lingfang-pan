@@ -1,9 +1,11 @@
+use std::net::IpAddr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 
 use serde_json::{json, Value};
+use url::{Host, Url};
 
 use super::anthropic::{build_messages_body, build_messages_url};
 use super::openai::{build_chat_body, build_chat_url};
@@ -53,7 +55,7 @@ async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<
         messages,
     );
     let tools = LocalToolExecutor::new(request.workspace_dir.clone().into());
-    let client = reqwest::Client::new();
+    let client = sdk_http_client(&url)?;
     loop {
         abort_if_cancelled(&request)?;
         let response = client
@@ -119,7 +121,7 @@ async fn run_codex<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<(
         messages,
     );
     let tools = LocalToolExecutor::new(request.workspace_dir.clone().into());
-    let client = reqwest::Client::new();
+    let client = sdk_http_client(&url)?;
     loop {
         abort_if_cancelled(&request)?;
         let response = client
@@ -181,6 +183,34 @@ fn effective_model<'a>(model: Option<&'a str>, fallback: &'a str) -> &'a str {
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "default")
         .unwrap_or(fallback)
+}
+
+fn sdk_http_client(api_url: &str) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder();
+    if is_loopback_url(api_url) {
+        builder = builder.no_proxy();
+    }
+    builder
+        .build()
+        .map_err(|error| format!("创建 SDK HTTP 客户端失败：{error}"))
+}
+
+pub(crate) fn is_loopback_url(raw: &str) -> bool {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match url.host() {
+        Some(Host::Ipv4(addr)) => IpAddr::V4(addr).is_loopback(),
+        Some(Host::Ipv6(addr)) => IpAddr::V6(addr).is_loopback(),
+        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 fn claude_messages(request: &RunRequest) -> Vec<(String, String)> {

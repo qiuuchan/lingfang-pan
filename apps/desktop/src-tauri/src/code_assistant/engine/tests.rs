@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
+use super::runtime::is_loopback_url;
 use super::runtime::{run_sdk_turn, EngineEventSink, RunRequest};
 use super::SdkCredentials;
 use crate::code_assistant::store::AssistantStore;
@@ -153,6 +154,16 @@ fn openai_tool_execution_result_is_emitted_to_tool_stream() {
         }),
         "tool result should be visible in tool stream: {outputs:?}"
     );
+}
+
+#[test]
+fn sdk_client_disables_proxy_for_loopback_urls() {
+    assert!(is_loopback_url("http://127.0.0.1:11434/v1/messages"));
+    assert!(is_loopback_url(
+        "http://localhost:11434/v1/chat/completions"
+    ));
+    assert!(is_loopback_url("http://[::1]:11434/v1/messages"));
+    assert!(!is_loopback_url("https://api.example.com/v1/messages"));
 }
 
 struct CapturedRequestServer {

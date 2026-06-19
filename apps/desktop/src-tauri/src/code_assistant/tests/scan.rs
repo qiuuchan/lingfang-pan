@@ -38,6 +38,8 @@ fn state_with_sandbox(test_name: &str) -> (CodeAssistantState, PathBuf) {
             title: None,
             archived: None,
             draft_updated_at: None,
+            owner_user_id: None,
+            owner_tenant_id: None,
         })
         .unwrap();
     let state = CodeAssistantState {

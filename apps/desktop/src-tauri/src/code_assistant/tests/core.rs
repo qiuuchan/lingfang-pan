@@ -45,6 +45,8 @@ fn running_session(store: &AssistantStore, session_id: &str) -> SessionRecord {
         title: None,
         archived: None,
         draft_updated_at: None,
+        owner_user_id: None,
+        owner_tenant_id: None,
     }
 }
 

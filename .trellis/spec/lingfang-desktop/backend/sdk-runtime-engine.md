@@ -176,6 +176,71 @@ Correct:
 { "event": "exit", "payload": { "exitCode": 1, "status": "failed" } }
 ```
 
+## Scenario: Code Assistant Session Owner Isolation And Loopback Proxy
+
+### 1. Scope / Trigger
+- Trigger: changing `StartSessionInput`, `SessionRecord`, creator conversation list/restore behavior, SDK HTTP client construction, or local mock/provider API URLs.
+
+### 2. Signatures
+- Start input fields: `ownerUserId?: string | null`, `ownerTenantId?: string | null`.
+- Session record fields: `ownerUserId?: string | null`, `ownerTenantId?: string | null`.
+- Active key: `lf:active-conversation:{tenantIdOrNone}:{userIdOrNone}`.
+- Frontend helpers: `conversationOwner(userId, tenantId)`, `filterConversationsForOwner(records, owner)`, `readActiveId(owner)`, `writeActiveId(owner, id)`.
+- SDK HTTP client: `sdk_http_client(api_url: &str) -> Result<reqwest::Client, String>`.
+- Loopback detector: `is_loopback_url(raw: &str) -> bool`.
+
+### 3. Contracts
+- New creator sessions must persist the current app account owner: both `ownerUserId` and `ownerTenantId`.
+- Creator history list must filter sessions by both owner fields; unowned legacy records are hidden from the account-scoped list.
+- Active conversation localStorage key must include both tenant and user, not tenant alone.
+- On account/team switch, if no owner-matching session exists, clear active id, draft, assistant session, plugin id, live output/error, and preview/dialog state.
+- Short internal title-generation sessions may use null owner fields and must remain hidden from normal owner-filtered creator history.
+- SDK runtime must build `reqwest::Client` via `sdk_http_client(&url)`. For loopback API URLs (`localhost`, `127.0.0.1`, `::1`, or any loopback IP), the client must disable proxy resolution with `no_proxy()`.
+- Non-loopback provider URLs keep default proxy behavior.
+
+### 4. Validation & Error Matrix
+- same tenant, different user -> different active key and no shared creator history.
+- different tenant, same user -> different active key and no shared creator history.
+- session record without owner fields -> not shown in owner-filtered creator history.
+- `http://localhost:11434/v1/messages` with system proxy configured -> request bypasses proxy; local mock/provider receives it directly.
+- invalid API URL passed to `is_loopback_url` -> returns false and does not panic.
+
+### 5. Good/Base/Bad Cases
+- Good: user A creates a plugin, switches to user B in the same team, and sees an empty/new creator state until B starts a session.
+- Base: user A returns later and the active id for `teamA:userA` restores A's last session.
+- Bad: active key is `lf:active-conversation:{tenantId}` only, so user B inherits user A's draft and transcript after account switch.
+- Bad: `reqwest::Client::new()` sends local mock traffic through a system HTTP proxy and a previously working loopback provider fails with 502.
+
+### 6. Tests Required
+- Frontend unit: `conversations.spec.ts` asserts active id key includes user and tenant, read/write isolation, and owner filtering hides legacy/unowned records.
+- Rust unit: `session_record_owner_fields_roundtrip` asserts owner fields serialize and deserialize with camelCase names.
+- Rust unit: `sdk_client_disables_proxy_for_loopback_urls` or detector-level equivalent asserts localhost/IPv4/IPv6 loopback classification and non-loopback false.
+- Full checks: `cargo test -p lingfang-desktop`, `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`.
+
+### 7. Wrong vs Correct
+Wrong:
+```typescript
+const restored = localStorage.getItem(`lf:active-conversation:${tenantId || 'none'}`);
+setMetas(await listConversations());
+```
+
+Correct:
+```typescript
+const owner = conversationOwner(session.userId, session.tenantId);
+const records = filterConversationsForOwner(await listConversations(), owner);
+const restored = readActiveId(owner);
+```
+
+Wrong:
+```rust
+let client = reqwest::Client::new();
+```
+
+Correct:
+```rust
+let client = sdk_http_client(&url)?;
+```
+
 ## 8. Tests Required
 
 - `cargo test -p lingfang-desktop`（`code_assistant::engine::stream::tests` 至少覆盖：SSE 跨 chunk 半行/`\r\n`/`[DONE]`、Anthropic text+tool 累积与 content 重建、Anthropic thinking 保 signature、OpenAI content/reasoning/tool 分片与 message 重建）。
