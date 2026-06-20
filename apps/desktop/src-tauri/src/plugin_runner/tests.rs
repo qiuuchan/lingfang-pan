@@ -94,6 +94,48 @@ fn minimal_env_excludes_sensitive_keys() {
 }
 
 #[test]
+fn bundled_pip_wheel_dir_prefers_ensurepip_bundled() {
+    let root = temp_dir_unique("pip-wheel-dir");
+    let bundled = root
+        .join("python")
+        .join("Lib")
+        .join("ensurepip")
+        .join("_bundled");
+    std::fs::create_dir_all(&bundled).unwrap();
+    std::fs::write(bundled.join("pip-25.0.1-py3-none-any.whl"), "").unwrap();
+    std::fs::write(root.join("python").join("pip-older.whl"), "").unwrap();
+
+    let runtime = EmbeddedRuntime::from_root(root.clone());
+    assert_eq!(bundled_pip_wheel_dir(&runtime), Some(bundled));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn bundled_pip_wheel_dir_falls_back_to_python_root() {
+    let root = temp_dir_unique("pip-wheel-root");
+    let python_root = root.join("python");
+    std::fs::create_dir_all(&python_root).unwrap();
+    std::fs::write(python_root.join("pip-25.0.1-py3-none-any.whl"), "").unwrap();
+
+    let runtime = EmbeddedRuntime::from_root(root.clone());
+    assert_eq!(bundled_pip_wheel_dir(&runtime), Some(python_root));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn contains_pip_wheel_ignores_non_pip_wheels() {
+    let root = temp_dir_unique("pip-wheel-missing");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("setuptools-1.0.0-py3-none-any.whl"), "").unwrap();
+
+    assert!(!contains_pip_wheel(&root));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn process_table_register_and_is_running() {
     // 注册一个会立即退出的进程（true/exit 0），验证 is_running 在退出后返回 None 且自动清表。
     let table = PluginProcessTable::new();

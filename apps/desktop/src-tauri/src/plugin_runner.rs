@@ -197,12 +197,7 @@ fn venv_has_pip(venv_dir: &std::path::Path) -> bool {
     };
     entries.flatten().any(|entry| {
         let name = entry.file_name().to_string_lossy().to_string();
-        name.starts_with("python")
-            && entry
-                .path()
-                .join("site-packages")
-                .join("pip")
-                .is_dir()
+        name.starts_with("python") && entry.path().join("site-packages").join("pip").is_dir()
     })
 }
 
@@ -231,15 +226,112 @@ fn create_python_venv(
         runtime.env(minimal_env()),
     )
     .map_err(|e| format!("创建 venv 失败：{e}"))?;
+    if captured.exit_code == Some(0) && venv_has_pip(venv_dir) {
+        return Ok(());
+    }
+
+    let primary_error = if captured.exit_code == Some(0) {
+        "标准 venv 创建完成但未检测到 pip".to_string()
+    } else {
+        format!(
+            "标准 venv 创建失败（exit={:?}）：{}",
+            captured.exit_code,
+            captured_detail(&captured),
+        )
+    };
+    let _ = remove_dir_all_with_retry(venv_dir);
+    create_python_venv_without_pip(runtime, plugin_dir, venv_dir)
+        .map_err(|fallback_error| format!("{primary_error}\n备用创建也失败：{fallback_error}"))
+}
+
+fn create_python_venv_without_pip(
+    runtime: &EmbeddedRuntime,
+    plugin_dir: &std::path::Path,
+    venv_dir: &std::path::Path,
+) -> Result<(), String> {
+    let host_py = runtime.require_runtime_command("python")?;
+    let venv_args = vec![
+        "-m".to_string(),
+        "venv".to_string(),
+        "--without-pip".to_string(),
+        "--clear".to_string(),
+        venv_dir.to_string_lossy().to_string(),
+    ];
+    let captured = run_capture_with_env(
+        &host_py,
+        venv_args,
+        Some(&plugin_dir.to_string_lossy()),
+        300_000,
+        runtime.env(minimal_env()),
+    )
+    .map_err(|e| format!("创建无 pip venv 失败：{e}"))?;
     if captured.exit_code != Some(0) {
         let _ = remove_dir_all_with_retry(venv_dir);
         return Err(format!(
-            "创建 venv 失败（exit={:?}）：{}",
+            "创建无 pip venv 失败（exit={:?}）：{}",
             captured.exit_code,
             captured_detail(&captured),
         ));
     }
+
+    let venv_py = venv_python(venv_dir);
+    let Some(wheel_dir) = bundled_pip_wheel_dir(runtime) else {
+        let _ = remove_dir_all_with_retry(venv_dir);
+        return Err("未找到内置 pip wheel，无法为 Python venv 安装 pip".to_string());
+    };
+    let pip_args = vec![
+        "-m".to_string(),
+        "pip".to_string(),
+        "--python".to_string(),
+        venv_py.to_string_lossy().to_string(),
+        "install".to_string(),
+        "--no-index".to_string(),
+        "--find-links".to_string(),
+        wheel_dir.to_string_lossy().to_string(),
+        "--upgrade".to_string(),
+        "pip".to_string(),
+    ];
+    let captured = run_capture_with_env(
+        &host_py,
+        pip_args,
+        Some(&plugin_dir.to_string_lossy()),
+        300_000,
+        runtime.env(minimal_env()),
+    )
+    .map_err(|e| format!("安装 venv pip 失败：{e}"))?;
+    if captured.exit_code != Some(0) {
+        let _ = remove_dir_all_with_retry(venv_dir);
+        return Err(format!(
+            "安装 venv pip 失败（exit={:?}）：{}",
+            captured.exit_code,
+            captured_detail(&captured),
+        ));
+    }
+    if !venv_has_pip(venv_dir) {
+        let _ = remove_dir_all_with_retry(venv_dir);
+        return Err("安装 venv pip 后仍未检测到 pip".to_string());
+    }
     Ok(())
+}
+
+fn bundled_pip_wheel_dir(runtime: &EmbeddedRuntime) -> Option<PathBuf> {
+    let python_root = runtime.root().join("python");
+    [
+        python_root.join("Lib").join("ensurepip").join("_bundled"),
+        python_root.clone(),
+    ]
+    .into_iter()
+    .find(|dir| contains_pip_wheel(dir))
+}
+
+fn contains_pip_wheel(dir: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        name.starts_with("pip-") && name.ends_with(".whl") && entry.path().is_file()
+    })
 }
 
 fn captured_detail(captured: &crate::code_assistant::CapturedOutput) -> String {
