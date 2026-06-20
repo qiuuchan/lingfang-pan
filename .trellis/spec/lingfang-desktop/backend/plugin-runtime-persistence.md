@@ -56,6 +56,8 @@ Reference files:
 - `probe_script_runtime` only probes embedded binaries and must never scan system `PATH`.
 - `run_plugin_script` preview execution uses only embedded Python/Node and injects the embedded runtime environment.
 - `start_plugin` persistent execution creates Python venvs with embedded Python, installs Python deps through the venv pip with embedded env, and uses embedded Node/pnpm/npm for Node install/start.
+- Python venv creation must verify pip after `python -m venv`; if standard `venv`/`ensurepip` fails or leaves no pip, retry with embedded `python -m venv --without-pip` and bootstrap pip via embedded `python -m pip --python <venv-python> install --no-index --find-links <embedded-pip-wheel-dir> --upgrade pip`.
+- Embedded pip wheel discovery must prefer `runtimes/python/Lib/ensurepip/_bundled/pip-*.whl` and may fall back to `runtimes/python/pip-*.whl` for older packaged layouts; it must not download pip or use host Python.
 - `run_command` maps `python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, and `pnpm` to embedded runtime commands only. External absolute paths for those command names are rejected.
 - Embedded env replaces `PATH` with embedded runtime directories and injects China mirrors: `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`, `PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn`, `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`, `npm_config_registry=https://registry.npmmirror.com`.
 
@@ -63,6 +65,8 @@ Reference files:
 - missing `runtimes/python` -> Python probe returns `available=false` with packaging hint; Python preview/start fail with embedded-runtime guidance.
 - missing `runtimes/nodejs` -> Node probe returns `available=false` with packaging hint; Node preview/start fail with embedded-runtime guidance.
 - host Python/Node installed but embedded runtime missing -> still unavailable; do not fall back to host.
+- embedded Python `ensurepip` fails while creating `.venv` -> remove the partial `.venv`, create a `--without-pip` venv, install pip from bundled wheel with embedded `pip --python`, then continue requirements install through the venv Python.
+- embedded Python cannot find any bundled `pip-*.whl` during fallback -> fail explicitly with a packaging error; do not fetch pip from the network.
 - `run_command("C:/Python/python.exe", ...)` or `run_command("/usr/bin/node", ...)` -> reject because runtime commands cannot use external absolute paths.
 - `run_command("git", ...)` -> may still use host `PATH`; the restriction is specific to Python/Node runtime commands.
 - dependency install needs network -> pip/npm/pnpm use the configured China mirrors by default.
@@ -72,10 +76,14 @@ Reference files:
 - Base: a Node plugin without package dependencies runs embedded `node entry`.
 - Bad: host has Python installed but bundle lacks `runtimes/python`; probe must still report missing embedded runtime.
 - Bad: code assistant asks to run `pip install` and it resolves to system pip; this leaks outside the supported plugin runtime.
+- Bad: venv creation retries with host `python -m ensurepip` or downloads pip from PyPI; this breaks the embedded runtime boundary and China mirror contract.
 
 #### 6. Tests Required
 - `embedded_runtime::tests::runtime_commands_are_detected_by_name`
 - `embedded_runtime::tests::env_replaces_path_and_adds_cn_mirrors`
+- `plugin_runner::tests::bundled_pip_wheel_dir_prefers_ensurepip_bundled`
+- `plugin_runner::tests::bundled_pip_wheel_dir_falls_back_to_python_root`
+- `plugin_runner::tests::contains_pip_wheel_ignores_non_pip_wheels`
 - `plugin_script::tests::install_hint_covers_both_runtimes`
 - Existing preview/process-tree tests may use host binaries only for low-level process cleanup coverage; production probe/start paths must remain embedded-only.
 
