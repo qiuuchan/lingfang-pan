@@ -54,7 +54,7 @@ export function AccountDialog({
           <DialogDescription>账户、团队、钱包和应用设置集中在这里。</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} orientation="vertical" onValueChange={(value) => onTabChange(value as AccountSettingsTab)} className="min-h-0 flex-1 flex-row gap-0">
-          <AccountSettingsNav value={tab} />
+          <AccountSettingsNav isTeamAdmin={session.role === 'TEAM_ADMIN'} value={tab} />
           <ScrollArea className="min-w-0 flex-1">
             <div className="p-5">
               <Suspense fallback={<ListSkeleton rows={6} />}>
@@ -67,7 +67,10 @@ export function AccountDialog({
                   />
                 </TabsContent>
                 <TabsContent value="team" keepMounted>
-                  <TeamPanel isTeamAdmin={session.role === 'TEAM_ADMIN'} />
+                  <TeamHome />
+                </TabsContent>
+                <TabsContent value="team-manage" keepMounted>
+                  {session.role === 'TEAM_ADMIN' ? <TeamManage /> : <PermissionPanel />}
                 </TabsContent>
                 <TabsContent value="wallet" keepMounted>
                   <Wallet />
@@ -188,11 +191,11 @@ function PasswordForm({
   );
 }
 
-function TeamPanel({ isTeamAdmin }: { isTeamAdmin: boolean }) {
+function PermissionPanel() {
   return (
-    <div className="flex flex-col gap-5">
-      <TeamHome />
-      {isTeamAdmin && <TeamManage />}
+    <div className="mx-auto max-w-xl rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+      <div className="font-medium text-foreground">需要团队管理员权限</div>
+      <p className="mt-1">团队管理页只对团队管理员开放。</p>
     </div>
   );
 }

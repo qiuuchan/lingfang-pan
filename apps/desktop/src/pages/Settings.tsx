@@ -211,20 +211,22 @@ export function Settings({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl">
+    <div className="mx-auto w-full max-w-5xl">
       <Tabs
         // value 未传时走 defaultValue（非受控，保持原行为）；传了则受控，支持父组件定向跳 Tab。
         {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli' })}
+        orientation="vertical"
+        className="flex-col items-start gap-5 md:flex-row"
       >
-        <TabsList>
-          <TabsTrigger value="cli">脚本运行环境</TabsTrigger>
-          <TabsTrigger value="gateway">模型服务</TabsTrigger>
-          <TabsTrigger value="plugins">插件</TabsTrigger>
-          <TabsTrigger value="backend">公司平台</TabsTrigger>
+        <TabsList variant="line" className="w-full shrink-0 items-stretch rounded-lg border bg-muted/20 p-2 md:w-48">
+          <TabsTrigger value="cli" className="h-10 justify-start px-3">脚本运行环境</TabsTrigger>
+          <TabsTrigger value="gateway" className="h-10 justify-start px-3">模型服务</TabsTrigger>
+          <TabsTrigger value="plugins" className="h-10 justify-start px-3">插件</TabsTrigger>
+          <TabsTrigger value="backend" className="h-10 justify-start px-3">公司平台</TabsTrigger>
         </TabsList>
 
         {/* Tab1：脚本运行时管理 */}
-        <TabsContent value="cli" keepMounted>
+        <TabsContent value="cli" keepMounted className="min-w-0">
           <CliRuntimeTab
             runtimeResults={runtimeResults}
             probing={probing}
@@ -233,17 +235,17 @@ export function Settings({
         </TabsContent>
 
         {/* Tab2：模型网关配置（自管 state，独立于探测） */}
-        <TabsContent value="gateway" keepMounted>
+        <TabsContent value="gateway" keepMounted className="min-w-0">
           <ModelGatewayTab />
         </TabsContent>
 
         {/* Tab：插件存放路径配置（组A，PRD 需求 6 / AC7） */}
-        <TabsContent value="plugins" keepMounted>
+        <TabsContent value="plugins" keepMounted className="min-w-0">
           <PluginsTab />
         </TabsContent>
 
         {/* Tab3：后端服务地址（零功能改动搬入） */}
-        <TabsContent value="backend" keepMounted>
+        <TabsContent value="backend" keepMounted className="min-w-0">
           <Card className="w-full">
             <CardHeader>
               <div className="flex items-center gap-2">

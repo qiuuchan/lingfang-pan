@@ -215,8 +215,12 @@ export default function App() {
       openAccountSettings('wallet');
       return;
     }
-    if (nextView === 'team' || nextView === 'team-manage') {
+    if (nextView === 'team') {
       openAccountSettings('team');
+      return;
+    }
+    if (nextView === 'team-manage') {
+      openAccountSettings('team-manage');
       return;
     }
     setAccountSettingsOpen(false);

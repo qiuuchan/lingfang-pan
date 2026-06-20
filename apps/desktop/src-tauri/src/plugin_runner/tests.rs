@@ -12,16 +12,6 @@ fn venv_python_path_is_platform_correct() {
 }
 
 #[test]
-fn venv_pip_path_is_platform_correct() {
-    let venv = PathBuf::from("/tmp/.venv");
-    let pip = venv_pip(&venv);
-    #[cfg(windows)]
-    assert!(pip.to_string_lossy().contains("Scripts"));
-    #[cfg(not(windows))]
-    assert!(pip.ends_with("bin/pip"));
-}
-
-#[test]
 fn parse_manifest_python_defaults_entry() {
     // manifest 缺 entry 时，python 默认 main.py，nodejs 默认 index.js。
     let tmp = temp_dir_unique("manifest-py");

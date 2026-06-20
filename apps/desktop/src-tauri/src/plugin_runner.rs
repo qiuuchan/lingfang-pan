@@ -126,26 +126,12 @@ fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
     }
 }
 
-/// 探测 Python venv 内的 pip 绝对路径（用于 pip install -r requirements.txt）。
-/// - Windows：.venv/Scripts/pip.exe
-/// - Unix：.venv/bin/pip
-fn venv_pip(venv_dir: &std::path::Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        venv_dir.join("Scripts").join("pip.exe")
-    }
-    #[cfg(not(windows))]
-    {
-        venv_dir.join("bin").join("pip")
-    }
-}
-
 /// 探测 Python 插件是否需要创建 venv（首次慢，已建则 ensure 秒过）。
 /// 用于 start_plugin 发「安装依赖」阶段事件（前端据此决定是否展示安装动画）。
 /// 判定：venv 内 python 不存在 → 需要创建（+可能 pip install）。与 ensure_python_venv 的「已就绪跳过」逻辑对齐。
 fn needs_python_venv(plugin_dir: &std::path::Path) -> bool {
     let venv_dir = plugin_dir.join(".venv");
-    !venv_python(&venv_dir).is_file()
+    !venv_python(&venv_dir).is_file() || !venv_has_pip(&venv_dir)
 }
 
 /// 确保 Python 插件有可用 venv（PRD 需求 3 / AC3）。
@@ -161,73 +147,111 @@ fn ensure_python_venv(
 ) -> Result<PathBuf, String> {
     let venv_dir = plugin_dir.join(".venv");
     let py = venv_python(&venv_dir);
-    // 已有 venv 且解释器存在 → 跳过创建（但 requirements.txt 仍需检查是否装过，简化：每次 start 都补装幂等）。
-    if !py.is_file() {
-        let host_py = runtime.require_runtime_command("python")?;
-        // venv 创建：使用软件内置 Python，禁止回退系统 Python。
-        let venv_args = vec![
-            "-m".to_string(),
-            "venv".to_string(),
-            venv_dir.to_string_lossy().to_string(),
-        ];
-        let captured = run_capture_with_env(
-            &host_py,
-            venv_args,
-            Some(&plugin_dir.to_string_lossy()),
-            300_000,
-            runtime.env(minimal_env()),
-        )
-        .map_err(|e| format!("创建 venv 失败：{e}"))?;
-        if captured.exit_code != Some(0) {
-            return Err(format!(
-                "创建 venv 失败（exit={:?}）：{}",
-                captured.exit_code,
-                captured.stderr.trim()
-            ));
-        }
+    // 已有 venv 且解释器/pip 存在 → 跳过创建（但 requirements.txt 仍需检查是否装过，简化：每次 start 都补装幂等）。
+    if !py.is_file() || !venv_has_pip(&venv_dir) {
+        create_python_venv(runtime, plugin_dir, &venv_dir)?;
     }
     // 有 requirements.txt → pip install（幂等，已装依赖 pip 会跳过）。
     let requirements = plugin_dir.join("requirements.txt");
     if requirements.is_file() {
-        let pip = venv_pip(&venv_dir);
-        if pip.is_file() {
-            // pip install 可能下载大包，给 600s 超时。--no-input 避免交互式提示挂起。
-            let pip_args = vec![
-                "install".to_string(),
-                "--no-input".to_string(),
-                "-r".to_string(),
-                requirements.to_string_lossy().to_string(),
-            ];
-            let captured = run_capture_with_env(
-                &pip,
-                pip_args,
-                Some(&plugin_dir.to_string_lossy()),
-                600_000,
-                runtime.env(minimal_env()),
-            )
-            .map_err(|e| format!("pip install 失败：{e}"))?;
-            if captured.exit_code != Some(0) {
-                // pip 的关键报错（找不到包 / 解析失败 / 网络错误）常打到 stdout 而非 stderr，
-                // 故 stderr 为空时回退取 stdout，确保前端能看到真实失败原因而非空白。
-                let detail = {
-                    let err = captured.stderr.trim();
-                    if err.is_empty() {
-                        captured.stdout.trim().to_string()
-                    } else {
-                        err.to_string()
-                    }
-                };
-                return Err(format!(
-                    "pip install 失败（exit={:?}）：{detail}",
-                    captured.exit_code,
-                ));
-            }
+        // pip install 可能下载大包，给 600s 超时。用 venv python -m pip，避开 Windows pip.exe
+        // 启动器在嵌入式/搬迁目录里解析解释器路径不稳的问题。
+        let pip_args = vec![
+            "-m".to_string(),
+            "pip".to_string(),
+            "install".to_string(),
+            "--no-input".to_string(),
+            "-r".to_string(),
+            requirements.to_string_lossy().to_string(),
+        ];
+        let captured = run_capture_with_env(
+            &py,
+            pip_args,
+            Some(&plugin_dir.to_string_lossy()),
+            600_000,
+            runtime.env(minimal_env()),
+        )
+        .map_err(|e| format!("pip install 失败：{e}"))?;
+        if captured.exit_code != Some(0) {
+            return Err(format!(
+                "pip install 失败（exit={:?}）：{}",
+                captured.exit_code,
+                captured_detail(&captured),
+            ));
         }
     }
     if !py.is_file() {
         return Err(format!("venv 创建后仍找不到解释器：{}", py.display()));
     }
     Ok(py)
+}
+
+fn venv_has_pip(venv_dir: &std::path::Path) -> bool {
+    let windows_pip = venv_dir.join("Lib").join("site-packages").join("pip");
+    if windows_pip.is_dir() {
+        return true;
+    }
+    let lib_dir = venv_dir.join("lib");
+    let Ok(entries) = std::fs::read_dir(lib_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name().to_string_lossy().to_string();
+        name.starts_with("python")
+            && entry
+                .path()
+                .join("site-packages")
+                .join("pip")
+                .is_dir()
+    })
+}
+
+fn create_python_venv(
+    runtime: &EmbeddedRuntime,
+    plugin_dir: &std::path::Path,
+    venv_dir: &std::path::Path,
+) -> Result<(), String> {
+    let host_py = runtime.require_runtime_command("python")?;
+    // 上一次失败可能留下半截 .venv（尤其 ensurepip 失败后 Scripts/python.exe 已存在但 pip 不完整）。
+    // 重新创建前清理目录，避免 Python venv 复用坏状态。
+    if venv_dir.exists() {
+        remove_dir_all_with_retry(venv_dir)?;
+    }
+    let venv_args = vec![
+        "-m".to_string(),
+        "venv".to_string(),
+        "--clear".to_string(),
+        venv_dir.to_string_lossy().to_string(),
+    ];
+    let captured = run_capture_with_env(
+        &host_py,
+        venv_args,
+        Some(&plugin_dir.to_string_lossy()),
+        300_000,
+        runtime.env(minimal_env()),
+    )
+    .map_err(|e| format!("创建 venv 失败：{e}"))?;
+    if captured.exit_code != Some(0) {
+        let _ = remove_dir_all_with_retry(venv_dir);
+        return Err(format!(
+            "创建 venv 失败（exit={:?}）：{}",
+            captured.exit_code,
+            captured_detail(&captured),
+        ));
+    }
+    Ok(())
+}
+
+fn captured_detail(captured: &crate::code_assistant::CapturedOutput) -> String {
+    let stderr = captured.stderr.trim();
+    if !stderr.is_empty() {
+        return stderr.to_string();
+    }
+    let stdout = captured.stdout.trim();
+    if !stdout.is_empty() {
+        return stdout.to_string();
+    }
+    "未返回详细错误".to_string()
 }
 
 /// 最小白名单环境变量（与 plugin_script.rs::minimal_env 同语义，避免泄漏宿主 token/密钥到插件进程）。
