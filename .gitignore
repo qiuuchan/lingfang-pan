@@ -53,6 +53,8 @@ apps/collab-api/prisma/.generated/
 .claude/
 .cursor/
 .codex/
+.opencode/
+.zcode/
 .agents/
 pnpm-lock.yaml
 
