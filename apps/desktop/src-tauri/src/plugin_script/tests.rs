@@ -109,21 +109,33 @@ fn materialize_writes_files_and_detects_escape() {
 
 #[test]
 fn install_hint_covers_both_runtimes() {
-    assert!(install_hint(ScriptRuntime::Nodejs).contains("nodejs.org"));
-    assert!(install_hint(ScriptRuntime::Python).contains("py launcher"));
+    assert!(install_hint(ScriptRuntime::Nodejs).contains("runtimes/nodejs"));
+    assert!(install_hint(ScriptRuntime::Python).contains("runtimes/python"));
 }
 
 // 解释器实跑测试：仅在宿主存在对应解释器时执行，否则跳过（不标记失败）。
 fn maybe_node() -> Option<PathBuf> {
-    interpreter_candidates(ScriptRuntime::Nodejs)
-        .iter()
-        .find_map(|c| find_binary(c))
+    #[cfg(windows)]
+    {
+        find_binary("node")
+    }
+    #[cfg(not(windows))]
+    {
+        ["node", "nodejs"].iter().find_map(|c| find_binary(c))
+    }
 }
 
 fn maybe_python() -> Option<PathBuf> {
-    probe_script_runtime(ScriptRuntime::Python)
-        .ok()
-        .and_then(|probe| probe.binary_path.map(PathBuf::from))
+    #[cfg(windows)]
+    {
+        ["py", "python", "python3"]
+            .iter()
+            .find_map(|c| find_binary(c))
+    }
+    #[cfg(not(windows))]
+    {
+        ["python3", "python"].iter().find_map(|c| find_binary(c))
+    }
 }
 
 #[test]
@@ -227,33 +239,6 @@ fn timeout_kills_infinite_loop() {
     let elapsed = started.elapsed().as_millis();
     assert!(elapsed < 3000, "超时回收耗时异常：{elapsed}ms");
     let _ = std::fs::remove_dir_all(&tmp);
-}
-
-// 修复 SCRIPT-03（medium 错误处理）：probe guard 必须拒绝 Microsoft Store stub。
-// stub --version 退出码非 0（9009）或 stderr 含「was not found」，应判为不可用。
-#[test]
-fn store_stub_output_is_detected() {
-    // Python 候选的 stub 输出（典型 Microsoft Store 提示）应被判为 stub。
-    assert!(is_store_stub_output(
-        "Python was not found; run without arguments to install from the Microsoft Store...",
-        ScriptRuntime::Python,
-    ));
-    assert!(is_store_stub_output(
-        "MiCrOsOfT StOrE install hint",
-        ScriptRuntime::Python,
-    ));
-    // 真实 Python 版本输出不应被判为 stub。
-    assert!(!is_store_stub_output(
-        "Python 3.12.0",
-        ScriptRuntime::Python,
-    ));
-    // 空 stderr 不判为 stub。
-    assert!(!is_store_stub_output("", ScriptRuntime::Python));
-    // Node 候选始终不判为 stub（无 Store stub 问题）。
-    assert!(!is_store_stub_output(
-        "Python was not found",
-        ScriptRuntime::Nodejs,
-    ));
 }
 
 // 修复 SCRIPT-04（low 资源泄漏）：sandbox LRU 清理应保留最近 N 个，删除最旧。

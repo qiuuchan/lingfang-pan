@@ -100,6 +100,7 @@ pub fn start_session<E: AssistantEventSink>(
     input: StartSessionInput,
     session_id: String,
     credentials: SdkCredentials,
+    embedded_runtime_root: Option<std::path::PathBuf>,
 ) -> Result<SessionRecord, String> {
     let workspace_dir = resolve_workspace(
         input.workspace_dir,
@@ -153,6 +154,7 @@ pub fn start_session<E: AssistantEventSink>(
             tool: input.tool,
             model: input.model,
             workspace_dir,
+            embedded_runtime_root,
             prompt: input.prompt,
             system_prompt: input.system_prompt,
             credentials,
@@ -168,6 +170,7 @@ pub fn send_input<E: AssistantEventSink>(
     state: &CodeAssistantState,
     input: SendInputInput,
     credentials: SdkCredentials,
+    embedded_runtime_root: Option<std::path::PathBuf>,
 ) -> Result<(), String> {
     let session = state
         .store
@@ -197,6 +200,7 @@ pub fn send_input<E: AssistantEventSink>(
             tool: session.tool,
             model: effective_model,
             workspace_dir: session.workspace_dir,
+            embedded_runtime_root,
             prompt: input.input,
             system_prompt: input.system_prompt,
             credentials,

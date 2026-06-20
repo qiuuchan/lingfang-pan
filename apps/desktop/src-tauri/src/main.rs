@@ -3,8 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
-mod cli_installer;
 mod code_assistant;
+mod embedded_runtime;
 mod llm_credentials;
 mod llm_fetch;
 mod plugin_runner;
@@ -214,7 +214,19 @@ async fn code_assistant_start_session(
     let state_inner = state.inner().clone();
     let session_id = code_assistant::new_session_id(input.tool);
     let credentials = resolve_sdk_credentials(input.sdk_config.as_ref()).await?;
-    code_assistant::start_session(app, state_inner, input, session_id, credentials)
+    let embedded_runtime_root = Some(
+        embedded_runtime::EmbeddedRuntime::from_app(&app)?
+            .root()
+            .to_path_buf(),
+    );
+    code_assistant::start_session(
+        app,
+        state_inner,
+        input,
+        session_id,
+        credentials,
+        embedded_runtime_root,
+    )
 }
 
 #[tauri::command]
@@ -225,7 +237,12 @@ async fn code_assistant_send_input(
 ) -> Result<(), String> {
     let state_inner = state.inner().clone();
     let credentials = resolve_sdk_credentials(input.sdk_config.as_ref()).await?;
-    code_assistant::send_input(app, &state_inner, input, credentials)
+    let embedded_runtime_root = Some(
+        embedded_runtime::EmbeddedRuntime::from_app(&app)?
+            .root()
+            .to_path_buf(),
+    );
+    code_assistant::send_input(app, &state_inner, input, credentials, embedded_runtime_root)
 }
 
 async fn resolve_sdk_credentials(
@@ -403,8 +420,6 @@ fn main() {
             plugin_store::write_plugin_files,
             plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,
-            cli_installer::install_runtime,
-            cli_installer::cancel_install,
             llm_fetch::fetch_models,
             llm_fetch::test_llm_chat,
             updater::check_update,

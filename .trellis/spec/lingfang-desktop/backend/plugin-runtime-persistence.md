@@ -29,61 +29,69 @@ Reference files:
 | runtime_type | 入口 | 运行方式 | UI |
 |---|---|---|---|
 | `client`（HTML） | `ui/index.html` | 软件内 iframe（opaque origin 沙盒） | 「打开」按钮 |
-| `python` | `main.py` | 独立 venv 进程（GUI 自弹窗口） | 「运行」/「停止」+ 状态 |
-| `nodejs` | `package.json` scripts.start | `pnpm start` 独立进程 | 「运行」/「停止」+ 状态 |
+| `python` | `main.py` | 软件内置 Python 创建的独立 venv 进程（GUI 自弹窗口） | 「运行」/「停止」+ 状态 |
+| `nodejs` | `package.json` scripts.start | 软件内置 pnpm/npm start 独立进程 | 「运行」/「停止」+ 状态 |
 
-- **Python**：`ensure_python_venv` 检测 `.venv/` → 不存在则 `py -3 -m venv .venv`（300s）→ 有 `requirements.txt` 则 `pip install -r`（600s，幂等）→ `.venv/Scripts/python.exe -u main.py`（Windows）。
-- **Node**：`ensure_node_dependencies` 有 `package.json` + 非空依赖 + `node_modules` 缺失 → `pnpm install`（回退 `npm install`，600s）→ `pnpm start`（回退 `npm start` / `node entry`）。
+- **Python**：`ensure_python_venv` 检测 `.venv/` → 不存在则用软件内置 `runtimes/python` 创建 venv（300s）→ 有 `requirements.txt` 则 `.venv/.../pip install -r`（600s，幂等，清华 PyPI 镜像）→ `.venv/Scripts/python.exe -u main.py`（Windows）。
+- **Node**：`ensure_node_dependencies` 有 `package.json` + 非空依赖 + `node_modules` 缺失 → 软件内置 `runtimes/nodejs` 下的 `pnpm install`，缺 pnpm 时回退内置 `npm install`（600s，npmmirror）→ 内置 `pnpm start` / `npm start`，无 package 脚本时内置 `node entry`。
 - **HTML**：`read_local_plugin_file` 读取 entry HTML → iframe srcDoc 渲染。iframe 去 `allow-same-origin` 形成 opaque origin，防越权访问 parent.__TAURI__/localStorage。
 
-### Scenario: Python Interpreter Discovery On Windows
+### Scenario: Embedded Python / Node Runtime Boundary
 
 #### 1. Scope / Trigger
-- Trigger: changing `plugin_script::probe_script_runtime`, Python preview execution, or PATH binary discovery shared with plugin script/runtime helpers.
+- Trigger: changing `embedded_runtime`, `plugin_script::probe_script_runtime`, Python/Node preview execution, persistent plugin start, dependency installation, code assistant `run_command`, or Tauri bundle resources.
 
 #### 2. Signatures
-- `probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, String>`
-- `find_binaries(candidate: &str) -> Vec<PathBuf>`
+- `EmbeddedRuntime::from_app(app) -> Result<EmbeddedRuntime, String>`
+- `probe_script_runtime(app, runtime: ScriptRuntime) -> Result<ProbeResult, String>`
 - `run_plugin_script(app, input) -> Result<RunResult, String>`
+- `start_plugin(app, store, process_table, plugin_id) -> Result<StartPluginResult, String>`
+- `run_command(workspace, command, args, cwd) -> Result<Value, String>`
 
 #### 3. Contracts
-- Python candidates on Windows are checked in order: `py`, `python`, `python3`.
-- For each candidate name, probe must enumerate every matching executable on `PATH`, not only the first path entry.
-- A candidate is available only after `--version` exits with code `0` and does not look like a Microsoft Store stub.
-- If `py.exe` exists but forwards to a broken WindowsApps interpreter and exits `101`, probe must continue to later `python.exe` candidates.
+- Python/Node runtimes are application resources under Tauri `bundle.resources` target `runtimes`.
+- Windows layout: `runtimes/python/python.exe`, `runtimes/python/Scripts/pip.exe`, `runtimes/nodejs/node.exe`, `runtimes/nodejs/npm.cmd|npm.exe|npm`, `runtimes/nodejs/pnpm.cmd|pnpm.exe|pnpm`.
+- Unix layout: `runtimes/python/bin/python`, `runtimes/python/bin/pip`, `runtimes/nodejs/bin/node`, `runtimes/nodejs/bin/npm|pnpm`.
+- `LINGFANG_EMBEDDED_RUNTIME_DIR` may override the runtime root for tests/dev diagnostics.
+- `probe_script_runtime` only probes embedded binaries and must never scan system `PATH`.
+- `run_plugin_script` preview execution uses only embedded Python/Node and injects the embedded runtime environment.
+- `start_plugin` persistent execution creates Python venvs with embedded Python, installs Python deps through the venv pip with embedded env, and uses embedded Node/pnpm/npm for Node install/start.
+- `run_command` maps `python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, and `pnpm` to embedded runtime commands only. External absolute paths for those command names are rejected.
+- Embedded env replaces `PATH` with embedded runtime directories and injects China mirrors: `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`, `PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn`, `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`, `npm_config_registry=https://registry.npmmirror.com`.
 
 #### 4. Validation & Error Matrix
-- `py.exe` exists but exits non-zero -> continue probing later `python` / `python3`.
-- WindowsApps Store stub emits "was not found" or "Microsoft Store" -> reject as unavailable.
-- no verified Python candidate -> return `ProbeResult { available: false, hint: Some(...) }`.
-- verified Python candidate -> use that exact `binary_path` for preview execution.
+- missing `runtimes/python` -> Python probe returns `available=false` with packaging hint; Python preview/start fail with embedded-runtime guidance.
+- missing `runtimes/nodejs` -> Node probe returns `available=false` with packaging hint; Node preview/start fail with embedded-runtime guidance.
+- host Python/Node installed but embedded runtime missing -> still unavailable; do not fall back to host.
+- `run_command("C:/Python/python.exe", ...)` or `run_command("/usr/bin/node", ...)` -> reject because runtime commands cannot use external absolute paths.
+- `run_command("git", ...)` -> may still use host `PATH`; the restriction is specific to Python/Node runtime commands.
+- dependency install needs network -> pip/npm/pnpm use the configured China mirrors by default.
 
 #### 5. Good/Base/Bad Cases
-- Good: `py.exe` broken, `G:\AnConda\python.exe` later on PATH works; Python preview uses Anaconda and exits 0.
-- Base: `py.exe --version` works; probe uses `py.exe`.
-- Bad: `find_binary("py")` returns the first `py.exe`; preview runs it without validation and script exits 101.
+- Good: application bundle contains `runtimes/python` and `runtimes/nodejs`; probes show embedded paths, preview/start install dependencies through mirrors.
+- Base: a Node plugin without package dependencies runs embedded `node entry`.
+- Bad: host has Python installed but bundle lacks `runtimes/python`; probe must still report missing embedded runtime.
+- Bad: code assistant asks to run `pip install` and it resolves to system pip; this leaks outside the supported plugin runtime.
 
 #### 6. Tests Required
-- `code_assistant::tests::find_binaries_in_path_keeps_later_matches`
-- `plugin_script::tests::store_stub_output_is_detected`
-- `plugin_script::tests::run_python_hello_script_if_available`
-- `plugin_script::tests::python_plugin_chinese_and_cross_dir_import`
+- `embedded_runtime::tests::runtime_commands_are_detected_by_name`
+- `embedded_runtime::tests::env_replaces_path_and_adds_cn_mirrors`
+- `plugin_script::tests::install_hint_covers_both_runtimes`
+- Existing preview/process-tree tests may use host binaries only for low-level process cleanup coverage; production probe/start paths must remain embedded-only.
 
 #### 7. Wrong vs Correct
 
 Wrong:
 ```rust
-let binary = find_binary("py").unwrap();
+let binary = find_binary("python").unwrap();
 run_capture_with_env(&binary, args, None, 5_000, minimal_env())?;
 ```
 
 Correct:
 ```rust
-for binary in find_binaries("py") {
-    if probe_binary(&binary).is_available() {
-        return Ok(binary);
-    }
-}
+let embedded = EmbeddedRuntime::from_app(&app)?;
+let binary = embedded.require_runtime_command("python")?;
+run_capture_with_env(&binary, args, None, 5_000, embedded.env(minimal_env()))?;
 ```
 
 Reference files:
@@ -313,8 +321,8 @@ Reference files:
 ## 预览执行 vs 持久化运行
 
 两条运行通道：
-- **`run_plugin_script`（预览执行）**：创建期一次性 sandbox 执行，裸 `node <entry>` / `python <entry>`，捕获 stdout 进 UI，15s 超时。适合验证简单脚本。**对需专属运行时的插件（如 Electron，`scripts.start=electron .`）不适用**——`needs_runtime_start` 预检拦截并提示用持久化运行。
-- **`start_plugin`（持久化运行）**：detached 独立进程，`pnpm install` + `pnpm start`，不捕获 stdout。创建器的 `ScriptPreviewPanel` 透传 `pluginId` 后走此通道（`usePersistent = Boolean(pluginId)`），让 Electron 等框架插件在创建期也能拉起。
+- **`run_plugin_script`（预览执行）**：创建期一次性 sandbox 执行，软件内置 `node <entry>` / `python <entry>`，捕获 stdout 进 UI，15s 超时。适合验证简单脚本。**对需专属运行时的插件（如 Electron，`scripts.start=electron .`）不适用**——`needs_runtime_start` 预检拦截并提示用持久化运行。
+- **`start_plugin`（持久化运行）**：detached 独立进程，内置 `pnpm/npm install` + `pnpm/npm start`，不捕获 stdout。创建器的 `ScriptPreviewPanel` 透传 `pluginId` 后走此通道（`usePersistent = Boolean(pluginId)`），让 Electron 等框架插件在创建期也能拉起。
 
 Reference files:
 - `apps/desktop/src-tauri/src/plugin_script.rs`（`run_plugin_script` / `needs_runtime_start`）

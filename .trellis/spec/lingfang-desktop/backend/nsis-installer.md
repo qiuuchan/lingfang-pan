@@ -52,14 +52,17 @@ pnpm --filter @lingfang/desktop tauri build --bundles nsis
 ## resources 打包约束
 
 - `bundle.resources` 用 source→target 对象映射，如 `"../builtin-plugins": "builtin-plugins"`。
+- 软件内置脚本运行时必须同样通过 resources 打包：`"../runtimes": "runtimes"`。打包目录需包含 `python/` 与 `nodejs/` 子目录，运行时探测和插件执行只读取该资源目录，不回退系统 PATH。
 - **支持 glob 包含，不支持排除语法**（无 `!`/`exclude`）。要排除 `__pycache__` 等：要么用精确包含 glob（会丢目录结构），要么 `beforeBuildCommand` 预清理，要么源目录本身保持干净。
 - builtin-plugins 必须打进包（quality.md 约束）：解包用 `7z l <exe>` 验证 `builtin-plugins/` 下各插件 manifest + 源码齐全。
+- runtimes 体积较大，打包前应确认目录中只包含发布所需文件；不要包含开发缓存、下载包或用户级配置。
 
 ## 验证清单（改 NSIS 配置后）
 
 - [ ] `tauri build --bundles nsis` 成功，产出 exe + .sig。
 - [ ] NSIS 编译零 warning/error（grep 日志 `warning|error|undefined`）。
 - [ ] `7z l` 验证 builtin-plugins 资源齐全。
+- [ ] `7z l` 验证 `runtimes/python/`、`runtimes/nodejs/` 资源齐全，包含可执行文件和 pip/npm/pnpm 入口。
 - [ ] updater 签名产物结构符合 [[updater-integration]] 契约。
 - [ ] 改 CSP/资源后跑 `pnpm -C apps/desktop vite:build` 验证前端不受影响（quality.md 约束）。
 - [ ] 实际 GUI 安装跑一遍（语言选择器/向导/快捷方式/卸载入口）——AI 无法代劳，需人工。

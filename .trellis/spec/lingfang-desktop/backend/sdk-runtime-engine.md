@@ -61,6 +61,7 @@
 - External source tools never write back to the source path. They inspect or copy source data into the plugin workspace.
 - `import_local_project` copies into the plugin workspace, skips generated-heavy folders (`node_modules`, `.venv`, `__pycache__`, `dist`, `build`, `.git`), and reports copied/skipped counts.
 - `run_command` runs only in the plugin workspace or a workspace subdirectory. For source projects, import first, then execute commands inside the workspace copy.
+- `run_command` resolves Python/Node runtime commands (`python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, `pnpm`) through `EmbeddedRuntime` only. It rejects external absolute paths for those command names and injects the embedded runtime mirror env. Other commands such as `git` may still use host PATH.
 - Non-zero command exit is returned as structured output with `exitCode`; it must not be converted into fake success or swallowed.
 - Local tool results are shaped as `{ ok: true, result }` or `{ ok: false, error }` and must be visible in the `tool` stream as `<name>_result <json>`.
 
@@ -70,6 +71,8 @@
 - `import_local_project("O:/AI换衣", "")` -> copies source files into workspace root, skipping generated folders.
 - `run_command(..., cwd: "O:/AI换衣")` -> `ok:false`, command cwd outside workspace.
 - `run_command(..., cwd omitted)` -> executes in workspace and returns stdout/stderr/exit code.
+- `run_command("python", ...)` with host Python installed but embedded `runtimes/python` missing -> `ok:false`, embedded runtime missing error.
+- `run_command("C:/Python/python.exe", ...)` -> `ok:false`, external runtime path rejected.
 
 ### 5. Tests Required
 - Rust `code_assistant::engine::tools` tests for path rejection, local read/list/search, import skips, and command cwd boundary.

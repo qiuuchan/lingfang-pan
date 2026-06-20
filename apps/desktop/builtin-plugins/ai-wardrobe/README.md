@@ -12,19 +12,16 @@
 ## 安装依赖
 
 ```bash
-pip install -r requirements.txt
+软件会使用内置 Python 自动创建 .venv 并安装 requirements.txt。
 ```
 
 ## 运行
 
 ```bash
-# 安装依赖后
-python main.py
-# Windows 若 python 命令异常（exit 49），改用 py launcher：
-py -3 main.py
+在 LingFang 桌面端侧边栏点击「AI 换装批量版」直接拉起。
 ```
 
-也可在 LingFang 桌面端侧边栏点击「AI 换装批量版」直接拉起（桌面端自动探测 Python 解释器启动）。
+插件运行只使用 LingFang 应用包内置 Python，不依赖系统解释器或系统启动器。
 
 ## 使用说明
 

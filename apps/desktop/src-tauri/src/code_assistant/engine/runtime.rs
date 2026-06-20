@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -24,6 +25,7 @@ pub struct RunRequest {
     pub tool: CodeAssistantTool,
     pub model: Option<String>,
     pub workspace_dir: String,
+    pub embedded_runtime_root: Option<PathBuf>,
     pub prompt: String,
     pub system_prompt: Option<String>,
     pub credentials: SdkCredentials,
@@ -54,7 +56,10 @@ async fn run_claude<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<
         request.system_prompt.as_deref(),
         messages,
     );
-    let tools = LocalToolExecutor::new(request.workspace_dir.clone().into());
+    let tools = LocalToolExecutor::with_runtime_root(
+        request.workspace_dir.clone().into(),
+        request.embedded_runtime_root.clone(),
+    );
     let client = sdk_http_client(&url)?;
     loop {
         abort_if_cancelled(&request)?;
@@ -120,7 +125,10 @@ async fn run_codex<S: EngineEventSink>(request: RunRequest, sink: S) -> Result<(
         effective_model(request.model.as_deref(), "gpt-5.1"),
         messages,
     );
-    let tools = LocalToolExecutor::new(request.workspace_dir.clone().into());
+    let tools = LocalToolExecutor::with_runtime_root(
+        request.workspace_dir.clone().into(),
+        request.embedded_runtime_root.clone(),
+    );
     let client = sdk_http_client(&url)?;
     loop {
         abort_if_cancelled(&request)?;

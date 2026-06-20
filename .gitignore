@@ -1,5 +1,7 @@
 # 依赖
 node_modules/
+!apps/desktop/runtimes/nodejs/node_modules/
+!apps/desktop/runtimes/nodejs/node_modules/**
 target/
 dist/
 **/dist/

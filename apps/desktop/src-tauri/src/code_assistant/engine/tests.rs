@@ -58,6 +58,7 @@ fn claude_requests_use_anthropic_api_key_header() {
             .root()
             .to_string_lossy()
             .to_string(),
+        embedded_runtime_root: None,
         prompt: "ping".into(),
         system_prompt: None,
         credentials: SdkCredentials {
@@ -97,6 +98,7 @@ fn claude_uses_configured_api_url_without_provider_rewrite() {
             .root()
             .to_string_lossy()
             .to_string(),
+        embedded_runtime_root: None,
         prompt: "ping".into(),
         system_prompt: None,
         credentials: SdkCredentials {
@@ -131,6 +133,7 @@ fn openai_tool_execution_result_is_emitted_to_tool_stream() {
         tool: CodeAssistantTool::Codex,
         model: Some("gpt-5.1".into()),
         workspace_dir: workspace.to_string_lossy().to_string(),
+        embedded_runtime_root: None,
         prompt: "read note".into(),
         system_prompt: None,
         credentials: SdkCredentials {

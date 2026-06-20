@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_assistant::find_binary;
 
 #[test]
 fn venv_python_path_is_platform_correct() {

@@ -7,9 +7,9 @@
 //!   （Python GUI 自己弹窗口，Node 输出在它自己的控制台），进程表记录 pid 供软件显示「运行中」+ 强制关闭。
 //!
 //! 运行流程（PRD 需求 3/5/7/9）：
-//! - Python：检测 .venv/ → 不存在则 `py -3 -m venv .venv` → 有 requirements.txt 则
-//!   `.venv/.../pip install -r requirements.txt` → detached `.venv/.../python main.py`。
-//! - Node：有 package.json + dependencies 则 `pnpm install` → detached `pnpm start`。
+//! - Python：检测 .venv/ → 不存在则用软件内置 Python 创建 venv → 有 requirements.txt 则
+//!   `.venv/.../pip install -r requirements.txt`（清华 PyPI 镜像）→ detached `.venv/.../python main.py`。
+//! - Node：有 package.json + dependencies 则用软件内置 pnpm/npm install（npmmirror）→ detached pnpm/npm start。
 //!
 //! 进程表集成（与组A plugin_store.rs 协作）：
 //! - start_plugin：spawn detached → 内存进程表（PluginProcessTable）记录 Child 句柄（不落 DB，
@@ -35,11 +35,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 // 复用 code_assistant.rs 的子进程基础设施：
-// - find_binary：跨平台 PATH 探测（Windows 优先 .cmd/.bat npm shim 再 .exe）。
 // - run_capture_with_env：带超时的同步运行（用于 venv 创建 / pip install / pnpm install 等阻塞阶段）。
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
-use crate::code_assistant::{find_binary, kill_child_tree, run_capture_with_env};
+use crate::code_assistant::{kill_child_tree, run_capture_with_env};
+use crate::embedded_runtime::EmbeddedRuntime;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
 use crate::plugin_store::{sanitize_plugin_id, PluginStore};
@@ -151,20 +151,20 @@ fn needs_python_venv(plugin_dir: &std::path::Path) -> bool {
 /// 确保 Python 插件有可用 venv（PRD 需求 3 / AC3）。
 /// 流程：
 /// 1. 检查 .venv/ 是否存在且 venv_python 可执行 → 已就绪直接返回。
-/// 2. 不存在 → 探测宿主 py/python 解释器 → `py -3 -m venv .venv`（带超时，venv 创建可能慢）。
+/// 2. 不存在 → 使用软件内置 Python → `python -m venv .venv`（带超时，venv 创建可能慢）。
 /// 3. 有 requirements.txt → `.venv/.../pip install -r requirements.txt`（带超时，依赖多时较慢）。
 ///
 /// 失败处理（PRD Constraints）：venv 创建/pip install 失败返回友好错误（不崩），前端据 error 展示。
-fn ensure_python_venv(plugin_dir: &std::path::Path) -> Result<PathBuf, String> {
+fn ensure_python_venv(
+    runtime: &EmbeddedRuntime,
+    plugin_dir: &std::path::Path,
+) -> Result<PathBuf, String> {
     let venv_dir = plugin_dir.join(".venv");
     let py = venv_python(&venv_dir);
     // 已有 venv 且解释器存在 → 跳过创建（但 requirements.txt 仍需检查是否装过，简化：每次 start 都补装幂等）。
     if !py.is_file() {
-        // 探测宿主 Python：Windows 优先 py launcher（避免 Microsoft Store stub，见 plugin_script.rs 注释）。
-        let host_py = find_python_interpreter().ok_or_else(|| {
-            "未检测到 Python 解释器（需安装 Python 3 或 py launcher）".to_string()
-        })?;
-        // venv 创建：py -3 -m venv .venv。venv 含 pip 引导可能 30s+，给 300s 超时。
+        let host_py = runtime.require_runtime_command("python")?;
+        // venv 创建：使用软件内置 Python，禁止回退系统 Python。
         let venv_args = vec![
             "-m".to_string(),
             "venv".to_string(),
@@ -175,7 +175,7 @@ fn ensure_python_venv(plugin_dir: &std::path::Path) -> Result<PathBuf, String> {
             venv_args,
             Some(&plugin_dir.to_string_lossy()),
             300_000,
-            minimal_env(),
+            runtime.env(minimal_env()),
         )
         .map_err(|e| format!("创建 venv 失败：{e}"))?;
         if captured.exit_code != Some(0) {
@@ -203,7 +203,7 @@ fn ensure_python_venv(plugin_dir: &std::path::Path) -> Result<PathBuf, String> {
                 pip_args,
                 Some(&plugin_dir.to_string_lossy()),
                 600_000,
-                pip_install_env(),
+                runtime.env(minimal_env()),
             )
             .map_err(|e| format!("pip install 失败：{e}"))?;
             if captured.exit_code != Some(0) {
@@ -230,29 +230,6 @@ fn ensure_python_venv(plugin_dir: &std::path::Path) -> Result<PathBuf, String> {
     Ok(py)
 }
 
-/// 探测宿主 Python 解释器（Windows 优先 py launcher）。
-/// 与 plugin_script.rs::interpreter_candidates 同款顺序，但返回 PathBuf（find_binary 命中的实际路径）。
-fn find_python_interpreter() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        for candidate in ["py", "python", "python3"] {
-            if let Some(p) = find_binary(candidate) {
-                return Some(p);
-            }
-        }
-        None
-    }
-    #[cfg(not(windows))]
-    {
-        for candidate in ["python3", "python"] {
-            if let Some(p) = find_binary(candidate) {
-                return Some(p);
-            }
-        }
-        None
-    }
-}
-
 /// 最小白名单环境变量（与 plugin_script.rs::minimal_env 同语义，避免泄漏宿主 token/密钥到插件进程）。
 /// 本模块独立构造（不依赖 plugin_script.rs 的 pub(crate) 导出，保持模块自洽）。
 fn minimal_env() -> Vec<(OsString, OsString)> {
@@ -271,34 +248,6 @@ fn minimal_env() -> Vec<(OsString, OsString)> {
     keys.iter()
         .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
         .collect()
-}
-
-/// pip 默认镜像源（清华 TUNA）。国内访问 PyPI 官方源（pypi.org）极易超时/连接失败，
-/// 导致 pip install 以 exit 1 退出。故默认走国内镜像加速。后续如需用户自定义源，
-/// 可在设置项中覆盖 PIP_INDEX_URL（当前直接内置默认值）。
-const PIP_INDEX_URL: &str = "https://pypi.tuna.tsinghua.edu.cn/simple";
-const PIP_TRUSTED_HOST: &str = "pypi.tuna.tsinghua.edu.cn";
-
-/// pip install 专用环境：在 minimal_env 基础上注入镜像源与非交互配置。
-/// 用 env（而非命令行 -i）的原因：PEP 517 构建隔离会拉起子 pip 安装构建依赖，
-/// 子进程继承 env 才能同样走镜像；仅在顶层命令加 -i 无法覆盖构建隔离子调用。
-fn pip_install_env() -> Vec<(OsString, OsString)> {
-    let mut env = minimal_env();
-    env.push((
-        OsString::from("PIP_INDEX_URL"),
-        OsString::from(PIP_INDEX_URL),
-    ));
-    env.push((
-        OsString::from("PIP_TRUSTED_HOST"),
-        OsString::from(PIP_TRUSTED_HOST),
-    ));
-    // 跳过 pip 自身版本检查噪声 + 强制非交互（避免凭证提示挂起）。
-    env.push((
-        OsString::from("PIP_DISABLE_PIP_VERSION_CHECK"),
-        OsString::from("1"),
-    ));
-    env.push((OsString::from("PIP_NO_INPUT"), OsString::from("1")));
-    env
 }
 
 // === Node pnpm 管理 ===
@@ -336,7 +285,10 @@ fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
 /// 3. 无 package.json → 返回 Ok（Node 脚本可能裸 index.js 无依赖声明）。
 ///
 /// 失败处理：pnpm/npm install 失败返回友好错误（不崩）。
-fn ensure_node_dependencies(plugin_dir: &std::path::Path) -> Result<(), String> {
+fn ensure_node_dependencies(
+    runtime: &EmbeddedRuntime,
+    plugin_dir: &std::path::Path,
+) -> Result<(), String> {
     let pkg_json = plugin_dir.join("package.json");
     if !pkg_json.is_file() {
         // 无 package.json 视为裸脚本，跳过安装（pnpm start 无意义，但 start_node_process 会据此报错）。
@@ -360,13 +312,13 @@ fn ensure_node_dependencies(plugin_dir: &std::path::Path) -> Result<(), String> 
     if plugin_dir.join("node_modules").is_dir() {
         return Ok(());
     }
-    // 优先 pnpm，回退 npm。
-    let (bin, install_args) = if let Some(pnpm) = find_binary("pnpm") {
+    // 优先软件内置 pnpm，回退软件内置 npm。禁止使用系统 npm/pnpm。
+    let (bin, install_args) = if let Some(pnpm) = runtime.pnpm() {
         (pnpm, vec!["install".to_string()])
-    } else if let Some(npm) = find_binary("npm") {
+    } else if let Some(npm) = runtime.npm() {
         (npm, vec!["install".to_string()])
     } else {
-        return Err("未检测到 pnpm 或 npm（需安装 pnpm：npm i -g pnpm）".to_string());
+        return Err("未找到软件内置 pnpm 或 npm，请确认 Node.js 运行时已随应用打包".to_string());
     };
     // install 可能下载大依赖，给 600s 超时。
     let captured = run_capture_with_env(
@@ -374,7 +326,7 @@ fn ensure_node_dependencies(plugin_dir: &std::path::Path) -> Result<(), String> 
         install_args,
         Some(&plugin_dir.to_string_lossy()),
         600_000,
-        minimal_env(),
+        runtime.env(minimal_env()),
     )
     .map_err(|e| format!("依赖安装失败：{e}"))?;
     if captured.exit_code != Some(0) {
@@ -531,6 +483,7 @@ pub fn start_plugin(
     emit_stage("checking", "正在检查插件运行环境…");
     let plugin_dir = resolve_plugin_dir(&store, &plugin_id)?;
     let manifest = parse_manifest(&plugin_dir)?;
+    let runtime = EmbeddedRuntime::from_app(&app)?;
 
     let (binary, args) = match manifest.runtime {
         PluginRuntimeKind::Python => {
@@ -541,8 +494,8 @@ pub fn start_plugin(
                     "正在创建 Python 虚拟环境并安装依赖（首次较慢）…",
                 );
             }
-            // ensure_python_venv：venv 不存在则建 + 有 requirements.txt 则 pip install（幂等）。
-            let py = ensure_python_venv(&plugin_dir)?;
+            // ensure_python_venv：venv 不存在则用内置 Python 创建 + 有 requirements.txt 则 pip install（幂等）。
+            let py = ensure_python_venv(&runtime, &plugin_dir)?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
                 return Err(format!("Python 入口文件不存在：{}", entry_abs.display()));
@@ -560,25 +513,23 @@ pub fn start_plugin(
                     "正在安装 Node 依赖（pnpm install，首次较慢）…",
                 );
             }
-            // ensure_node_dependencies：有 package.json + 非空依赖且 node_modules 缺失 → pnpm/npm install（幂等）。
-            ensure_node_dependencies(&plugin_dir)?;
+            // ensure_node_dependencies：有 package.json + 非空依赖且 node_modules 缺失 → 内置 pnpm/npm install（幂等）。
+            ensure_node_dependencies(&runtime, &plugin_dir)?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
                 return Err(format!("Node 入口文件不存在：{}", entry_abs.display()));
             }
             // 有 package.json + scripts.start → pnpm start（或 npm start）；否则裸 node entry。
             if plugin_dir.join("package.json").is_file() {
-                if let Some(runner) = find_binary("pnpm").or_else(|| find_binary("npm")) {
+                if let Some(runner) = runtime.pnpm().or_else(|| runtime.npm()) {
                     (runner, vec!["start".to_string()])
                 } else {
-                    // 无 pnpm/npm：回退 node entry（package.json 可能仅声明元信息无 start）。
-                    let node =
-                        find_binary("node").ok_or_else(|| "未检测到 Node.js 运行时".to_string())?;
+                    // 无 pnpm/npm：回退内置 node entry（package.json 可能仅声明元信息无 start）。
+                    let node = runtime.require_runtime_command("node")?;
                     (node, vec![entry_abs.to_string_lossy().to_string()])
                 }
             } else {
-                let node =
-                    find_binary("node").ok_or_else(|| "未检测到 Node.js 运行时".to_string())?;
+                let node = runtime.require_runtime_command("node")?;
                 (node, vec![entry_abs.to_string_lossy().to_string()])
             }
         }
@@ -596,7 +547,7 @@ pub fn start_plugin(
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
-    command.env_clear().envs(minimal_env());
+    command.env_clear().envs(runtime.env(minimal_env()));
     // Unix：setsid 建独立进程组（detached，stop_plugin 杀整组）。
     #[cfg(unix)]
     {

@@ -179,6 +179,20 @@ fn run_command_rejects_cwd_outside_workspace_or_imported_source() {
 }
 
 #[test]
+fn run_command_rejects_external_runtime_binary_path() {
+    let root = workspace("command-runtime-absolute");
+    let tools = LocalToolExecutor::new(root);
+
+    let value = tools.execute(
+        "run_command",
+        &json!({ "command": "C:/Python/python.exe", "args": ["--version"] }),
+    );
+
+    assert_eq!(value["ok"], false);
+    assert!(value["error"].as_str().unwrap().contains("软件内置运行时"));
+}
+
+#[test]
 fn run_command_defaults_to_workspace_cwd_and_returns_output() {
     let root = workspace("command-default-cwd");
     let tools = LocalToolExecutor::new(root);

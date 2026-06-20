@@ -1,11 +1,11 @@
 // Settings.tsx — 设置页（三 Tab 化）。
 //
 // 三个 Tab（design §7.1）：
-// - cli：脚本运行环境管理（探测 + 自动安装，复用桌面 Rust 探测/安装命令）。
+// - cli：软件内置脚本运行环境状态（探测内置 Node.js/Python）。
 // - gateway：模型网关配置（拉后端目录 + 绑定，apiKey 加密存储）。
 // - backend：后端服务地址 Card（零功能改动，从原单 Card 布局搬入 Tab3）。
 //
-// 顶层 state（design B13）：探测结果（runtimeResults）与安装态（installing）上提，
+// 顶层 state（design B13）：探测结果（runtimeResults）上提，
 // 不进 useApp；因为 TabsContent keepMounted 切 Tab 时不卸载，state 保留避免重探。
 // useRef 重入守卫（design B26）：probeAll 防止事件触发叠加并发探测。
 //
@@ -15,14 +15,8 @@ import { RefreshCwIcon, ServerIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { errorMessage, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
-import { installRuntime } from '@/lib/install-cli';
 import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
-import type {
-  InstallResult,
-  InstallTarget,
-  ProbeResult,
-  RuntimeInstallTarget,
-} from '@/lib/cli-types';
+import type { ProbeResult, RuntimeTarget } from '@/lib/cli-types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -76,7 +70,6 @@ export function Settings({
   // === Tab3 检查更新 state（design §3.2） ===
   // checking：检查中态；updateMeta：非 null 时弹更新 Dialog；updateInstalling：下载安装中（锁 Dialog）。
   // progress：下载进度（total 为 Content-Length，未知则 null；downloaded 为已累计字节数）。
-  // 注：installing（Tab1 安装态，Record<InstallTarget, boolean>）已占用，故此处用 updateInstalling 避名冲突。
   const [checking, setChecking] = useState(false);
   const [updateMeta, setUpdateMeta] = useState<UpdateMetadata | null>(null);
   const [updateInstalling, setUpdateInstalling] = useState(false);
@@ -85,9 +78,8 @@ export function Settings({
   const [changelogOpen, setChangelogOpen] = useState(false);
 
   // === Tab1 脚本运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
-  const [runtimeResults, setRuntimeResults] = useState<Partial<Record<RuntimeInstallTarget, ProbeResult | null>> | null>(null);
+  const [runtimeResults, setRuntimeResults] = useState<Partial<Record<RuntimeTarget, ProbeResult | null>> | null>(null);
   const [probing, setProbing] = useState(false);
-  const [installing, setInstalling] = useState<Partial<Record<InstallTarget, boolean>>>({});
   const probingRef = useRef(false); // B26 重入守卫
 
   // 重新探测全部：并行 probe_script_runtime(nodejs/python)。
@@ -115,29 +107,6 @@ export function Settings({
   useEffect(() => {
     void probeAll();
   }, [probeAll]);
-
-  /** 安装某目标：运行时统一走 install_runtime；catch toast；finally 清安装态。 */
-  const onInstall = useCallback(async (target: InstallTarget) => {
-    setInstalling((prev) => ({ ...prev, [target]: true }));
-    try {
-      const result: InstallResult = await installRuntime(target as RuntimeInstallTarget);
-      // 按 Rust InstallResult.status 分支友好提示（status 是 PascalCase）。
-      if (result.status === 'Succeeded') {
-        toast.success('安装成功');
-      } else if (result.status === 'NeedsConfirmation') {
-        toast.warning('安装需要管理员权限，请以管理员身份重试或手动安装');
-      } else if (result.status === 'Unsupported') {
-        toast.warning(result.message || '当前平台不支持自动安装，请手动安装');
-      } else {
-        // Failed：Rust 侧已清理半装残留（design D4），提示重试。
-        toast.error(result.message || '安装失败，请重试');
-      }
-    } catch (err) {
-      toast.error((err as ApiError).message || '安装失败，请重试');
-    } finally {
-      setInstalling((prev) => ({ ...prev, [target]: false }));
-    }
-  }, []);
 
   // === Tab3 后端地址 Card 逻辑（零改动，从原 Settings 搬入） ===
   async function testBackend() {
@@ -259,9 +228,7 @@ export function Settings({
           <CliRuntimeTab
             runtimeResults={runtimeResults}
             probing={probing}
-            installing={installing}
             onProbeAll={() => { void probeAll(); }}
-            onInstall={(t) => { void onInstall(t); }}
           />
         </TabsContent>
 
