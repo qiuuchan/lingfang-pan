@@ -37,7 +37,7 @@ export interface RunResult {
   elapsed_ms: number;
 }
 
-/** 探测解释器是否可用 + 版本。缺失时 available=false 并带 hint 安装指引。 */
+/** 探测软件内置解释器是否可用 + 版本。缺失时 available=false 并带打包指引。 */
 export function probeScriptRuntime(runtime: ScriptRuntime) {
   return tauriInvoke<ProbeResult>('probe_script_runtime', { runtime });
 }
@@ -117,12 +117,10 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
   };
 }
 
-/** 安装指引文案（与 Rust install_hint 镜像，前端首屏快速展示无需等待 probe）。 */
-// winget 包 id 经 microsoft/winget-pkgs 官方 manifest 核实（design §6.4）：
-// Node.js LTS 是 OpenJS.NodeJS.LTS（非 OpenJS.Technology.NodeJS，后者不存在）。
+/** 内置运行时缺失指引文案（与 Rust install_hint 镜像）。 */
 export const RUNTIME_INSTALL_HINT: Record<ScriptRuntime, string> = {
-  nodejs: '未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.NodeJS.LTS',
-  python: '未检测到 Python。请安装：运行 winget install Python.Python.3.12，或访问 https://python.org 下载。Windows 推荐 py launcher。',
+  nodejs: '未检测到软件内置 Node.js。请确认应用包内包含 runtimes/nodejs，并随安装包一起发布。',
+  python: '未检测到软件内置 Python。请确认应用包内包含 runtimes/python，并随安装包一起发布。',
 };
 
 /** 运行时显示名（UI 状态条展示）。 */

@@ -13,7 +13,8 @@
     "createUpdaterArtifacts": true,
     "targets": ["nsis"],
     "resources": {
-      "../builtin-plugins": "builtin-plugins"
+      "../builtin-plugins": "builtin-plugins",
+      "../runtimes": "runtimes"
     },
     "copyright": "© 2026 LingFang",
     "shortDescription": "LingFang 协作平台桌面客户端",

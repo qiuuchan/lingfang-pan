@@ -1,8 +1,9 @@
 //! 插件脚本本地预览执行（R3）。
 //!
 //! 职责：在桌面壳侧为 nodejs/python 运行时插件提供「无参数一次性预览执行」。
-//! 复用 code_assistant.rs 的子进程骨架（find_binary / run_capture_with_env / resolve_workspace），
+//! 复用 code_assistant.rs 的子进程骨架（run_capture_with_env / resolve_workspace），
 //! 在 app_data_dir/plugin-sandbox/<plugin_id> 下落盘用户脚本后带超时运行。
+//! Node.js / Python 解释器只来自应用包内置 runtimes/ 目录，不回退系统 PATH。
 //!
 //! 安全边界（design §6.1 明确留痕）：
 //! - 本通道是【不受控执行通道】，绕过 capability 网关（capability.rs 的声明式白名单
@@ -22,9 +23,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use crate::code_assistant::{
-    find_binaries, resolve_workspace, run_capture_with_env, CapturedOutput,
-};
+use crate::code_assistant::{resolve_workspace, run_capture_with_env, CapturedOutput};
+use crate::embedded_runtime::EmbeddedRuntime;
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
 /// serde rename_all = lowercase：nodejs / python，与契约 RuntimeType 对齐。
@@ -78,92 +78,65 @@ pub struct RunResult {
 fn install_hint(runtime: ScriptRuntime) -> String {
     match runtime {
         ScriptRuntime::Nodejs => {
-            // winget 包 id 经 microsoft/winget-pkgs 官方 manifest 核实为 OpenJS.NodeJS.LTS
-            //（非 OpenJS.Technology.NodeJS，后者不存在，前端 RUNTIME_INSTALL_HINT 已修正同步）。
-            "未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.NodeJS.LTS".to_string()
+            "未检测到软件内置 Node.js。请确认应用包内包含 runtimes/nodejs，并随安装包一起发布。"
+                .to_string()
         }
         ScriptRuntime::Python => {
-            "未检测到 Python。请安装：运行 winget install Python.Python.3.12，或访问 https://python.org 下载。Windows 推荐 py launcher。".to_string()
-        }
-    }
-}
-
-/// 探测候选解释器顺序（design §4.5）。
-/// Windows python 强制 py launcher 优先：裸 python 常是 Microsoft Store stub（执行后弹商店而非报错）。
-fn interpreter_candidates(runtime: ScriptRuntime) -> Vec<&'static str> {
-    match runtime {
-        ScriptRuntime::Nodejs => {
-            // Linux 部分发行版仅 nodejs（无 node 别名），故补 nodejs 候选。
-            #[cfg(not(windows))]
-            {
-                vec!["node", "nodejs"]
-            }
-            #[cfg(windows)]
-            {
-                vec!["node"]
-            }
-        }
-        ScriptRuntime::Python => {
-            #[cfg(windows)]
-            {
-                vec!["py", "python", "python3"]
-            }
-            #[cfg(not(windows))]
-            {
-                vec!["python3", "python"]
-            }
+            "未检测到软件内置 Python。请确认应用包内包含 runtimes/python，并随安装包一起发布。"
+                .to_string()
         }
     }
 }
 
 /// 探测解释器是否存在 + 版本号。
-/// 命中后跑 `--version` 实跑确认非 Store stub（design §4.5 / §6.4 已确认约束）。
-///
-/// 修复 SCRIPT-03（medium 错误处理）：此前 guard 仅 `!captured.timed_out`，未校验 exit_code
-/// 也未校验版本内容。Windows 上未装 Python 时 Microsoft Store 的 python.exe 别名（0 字节 stub，
-/// is_file()==true）会被 find_binary 命中；其 --version 不挂起（timed_out=false），而是向 stderr
-/// 打印「Python was not found; ... install from the Microsoft Store」并以 9009 退出，
-/// 导致 available 被置为 true、version=Store 提示语，绕过 py launcher 优先策略的设计意图，
-/// 前端失去安装指引。修复：guard 叠加 exit_code==Some(0) + 排除 stderr 含 Store stub 关键字。
+/// 仅探测软件内置运行时，不回退系统 PATH。
 #[tauri::command]
-pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, String> {
+pub fn probe_script_runtime(
+    app: tauri::AppHandle,
+    runtime: ScriptRuntime,
+) -> Result<ProbeResult, String> {
+    let embedded = EmbeddedRuntime::from_app(&app)?;
+    probe_script_runtime_inner(&embedded, runtime)
+}
+
+fn probe_script_runtime_inner(
+    embedded: &EmbeddedRuntime,
+    runtime: ScriptRuntime,
+) -> Result<ProbeResult, String> {
     let hint = install_hint(runtime);
-    for candidate in interpreter_candidates(runtime) {
-        for binary in find_binaries(candidate) {
-            // 用 --version 实跑：既能取版本，又能确认非 stub（py/python --version 均输出到 stdout）。
-            match run_capture_with_env(
-                &binary,
-                vec!["--version".to_string()],
-                None,
-                5_000,
-                minimal_env(),
-            ) {
-                // 修复 SCRIPT-03：必须 exit_code==Some(0) 且非 Store stub。
-                Ok(captured)
-                    if !captured.timed_out
-                        && captured.exit_code == Some(0)
-                        && !is_store_stub_output(&captured.stderr, runtime) =>
-                {
-                    // 版本字符串拼接 stdout + stderr（部分实现走 stderr），取首行。
-                    let raw_version =
-                        format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
-                    let version = raw_version
-                        .lines()
-                        .find(|line| !line.trim().is_empty())
-                        .map(|line| line.trim().to_string());
-                    return Ok(ProbeResult {
-                        available: true,
-                        binary_path: Some(binary.to_string_lossy().to_string()),
-                        version,
-                        hint: None,
-                    });
-                }
-                _ => {
-                    // 候选命中但 --version 失败/超时/退出码非 0/疑似 Store stub：继续尝试下一个候选。
-                    continue;
-                }
-            }
+    let binary = match runtime {
+        ScriptRuntime::Nodejs => embedded.node(),
+        ScriptRuntime::Python => embedded.python(),
+    };
+    let Some(binary) = binary else {
+        return Ok(ProbeResult {
+            available: false,
+            binary_path: None,
+            version: None,
+            hint: Some(hint),
+        });
+    };
+    match run_capture_with_env(
+        &binary,
+        vec!["--version".to_string()],
+        None,
+        5_000,
+        embedded.env(minimal_env()),
+    ) {
+        Ok(captured) if !captured.timed_out && captured.exit_code == Some(0) => {
+            let raw_version = format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
+            let version = raw_version
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string());
+            return Ok(ProbeResult {
+                available: true,
+                binary_path: Some(binary.to_string_lossy().to_string()),
+                version,
+                hint: None,
+            });
         }
+        _ => {}
     }
     Ok(ProbeResult {
         available: false,
@@ -173,23 +146,11 @@ pub fn probe_script_runtime(runtime: ScriptRuntime) -> Result<ProbeResult, Strin
     })
 }
 
-/// 修复 SCRIPT-03：识别 Microsoft Store python.exe stub 的特征输出。
-/// stub 在 stderr 打印含「was not found」/「Microsoft Store」的提示并以 9009 退出。
-/// 仅对 Python 候选生效（node 无 Store stub 问题）。
-fn is_store_stub_output(stderr: &str, runtime: ScriptRuntime) -> bool {
-    if runtime != ScriptRuntime::Python {
-        return false;
-    }
-    let lower = stderr.to_lowercase();
-    lower.contains("was not found") || lower.contains("microsoft store")
-}
-
 /// 最小白名单环境变量：仅保留解释器/依赖查找与系统调用必需项，裁掉宿主 token/密钥。
 /// 权衡（design §4.4）：依赖自定义环境变量的脚本在预览中行为可能与真实运行不一致，
 /// 但预览目标是「能跑起来看 stdout」，非「100% 复现生产环境」。
 ///
-/// pub(crate) 供 cli_installer::installer_env 参考其 keys 白名单思路（design §6.6，
-/// cli_installer 独立构造 installer_env 实例，不复用本函数返回值；本提升仅暴露语义供跨模块共享）。
+/// pub(crate) 供插件预览测试和运行环境组合复用其 keys 白名单语义。
 pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
     let keys = [
         "PATH", // 解释器/依赖查找必须
@@ -477,7 +438,8 @@ pub fn run_plugin_script(
     input: RunPluginScriptInput,
 ) -> Result<RunResult, String> {
     // 解释器探测前置：缺失直接返回友好错误（前端据 ProbeResult.hint 展示安装指引）。
-    let probe = probe_script_runtime(input.runtime)?;
+    let embedded = EmbeddedRuntime::from_app(&app)?;
+    let probe = probe_script_runtime_inner(&embedded, input.runtime)?;
     if !probe.available {
         return Err(format!(
             "interpreter_missing:{}",
@@ -515,8 +477,7 @@ pub fn run_plugin_script(
         None,
     )?;
     let mut args: Vec<String> = Vec::new();
-    // Python 经 py launcher 时需显式指定 -3？保持简单：直接用探测到的 binary（py/python3/node），
-    // 由 binary 自身决定默认版本。
+    // 解释器来自软件内置运行时，由 embedded_runtime 统一定位。
     // H1 修复：Python 追加 -u（无缓冲），避免管道块缓冲导致短输出在超时 kill 时丢失。
     // H4 修复（多文件相对 import）：追加 PYTHONPATH=<sandbox根> env（见下方 runtime_env）。
     if input.runtime == ScriptRuntime::Python {
@@ -529,7 +490,7 @@ pub fn run_plugin_script(
     // H2 修复：Python 追加 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1，避免 Windows 中文系统
     // 默认 GBK 编码导致 print 中文输出 UnicodeEncodeError 崩溃或乱码。
     // H4 修复：PYTHONPATH=<sandbox根> 让多文件插件的 import 能找到 sandbox 根目录的模块。
-    let env = runtime_env(input.runtime, &workspace, minimal_env());
+    let env = runtime_env(input.runtime, &workspace, embedded.env(minimal_env()));
     let captured: CapturedOutput =
         run_capture_with_env(&binary, args, Some(&workspace), timeout, env)?;
     Ok(RunResult {

@@ -17,11 +17,22 @@ use self::shell::run_command;
 
 pub struct LocalToolExecutor {
     workspace: PathBuf,
+    runtime_root: Option<PathBuf>,
 }
 
 impl LocalToolExecutor {
     pub fn new(workspace: PathBuf) -> Self {
-        Self { workspace }
+        Self {
+            workspace,
+            runtime_root: None,
+        }
+    }
+
+    pub fn with_runtime_root(workspace: PathBuf, runtime_root: Option<PathBuf>) -> Self {
+        Self {
+            workspace,
+            runtime_root,
+        }
     }
 
     pub fn list_directory(&self, path: &str) -> Result<Value, String> {
@@ -79,6 +90,7 @@ impl LocalToolExecutor {
             ),
             "run_command" => run_command(
                 &self.workspace,
+                self.runtime_root.as_deref(),
                 string_arg(arguments, "command")?,
                 string_array_arg(arguments, "args")?,
                 optional_string_arg(arguments, "cwd"),

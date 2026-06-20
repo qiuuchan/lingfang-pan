@@ -47,8 +47,8 @@ export const LlmErrorCode = z.enum([
   'binding_not_found',        // 租户尚未绑定（config-only PUT 无原密可改 / decrypt 无绑定）
   'llm_key_decrypt_failed',   // 密文被篡改/密钥不匹配，AES-GCM tag 校验失败
   'llm_key_not_configured',   // 服务端 LLM_KEY_ENCRYPTION_KEY 未配置，无法加解密
-  'install_unsupported',      // 当前平台不支持自动安装（macOS/Linux 无 winget）
-  'install_failed',           // winget/npm 安装失败或超时（已清理半装残留）
+  'install_unsupported',      // 保留兼容旧客户端；桌面端不再自动安装运行时
+  'install_failed',           // 保留兼容旧客户端；运行时应随应用内置打包
 ]);
 export type LlmErrorCode = z.infer<typeof LlmErrorCode>;
 
