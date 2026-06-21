@@ -59,7 +59,7 @@ ALTER TABLE "TeamMembership" ADD COLUMN "teamRoleId" TEXT;
 --    平台级：teamId=null；团队级系统角色为「每个团队一条」（这里先不预生成团队级系统角色，
 --    改由应用层 seed 按需为每个已存在团队补「系统团队管理员」「系统成员」，并在新建团队时自动补）。
 INSERT INTO "Role" ("id", "name", "scope", "teamId", "isSystem", "description", "permissions", "updatedAt")
-VALUES (
+SELECT
     -- 固定 id 便于回填引用 + 应用层 seed 识别（gen_random_uuid 不幂等，用确定性占位）
     '00000000-0000-0000-0000-platform0001',
     '系统平台管理员',
@@ -69,7 +69,6 @@ VALUES (
     '内置平台管理员角色，拥有全部平台权限',
     ARRAY[]::TEXT[],
     CURRENT_TIMESTAMP
-)
 WHERE NOT EXISTS (SELECT 1 FROM "Role" WHERE "id" = '00000000-0000-0000-0000-platform0001');
 
 -- 7. 回填：现有 platformRole=PLATFORM_ADMIN 的用户指向系统平台管理员角色
