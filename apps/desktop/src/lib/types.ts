@@ -13,12 +13,16 @@ export interface Session {
   isPlatformAdmin: boolean;
   onboarding: OnboardingState | null;
   application?: TeamAdminApplication | null;
+  /** RBAC：当前用户拥有的全部权限码（平台 + 团队），前端据此做入口门控。空数组表示无权限。 */
+  permissions: string[];
 }
 
 export interface CollabSessionResponse {
   token?: string;
   user: { id: string; email: string; displayName: string; platformRole: PlatformRole; status: string };
-  team: { id: string; name: string; slug: string; role: TeamRole } | null;
+  team: { id: string; name: string; slug: string; role: TeamRole; teamRoleId?: string | null } | null;
+  /** RBAC：当前用户权限码列表（后端 sessionFor 注入）。 */
+  permissions?: string[];
   application: TeamAdminApplication | null;
   onboarding: OnboardingState;
 }
@@ -146,9 +150,9 @@ export interface LoadedPlugin {
 }
 
 export type SettingsTab = 'cli' | 'gateway' | 'plugins' | 'backend';
-export type AccountSettingsTab = 'account' | 'team' | 'team-manage' | 'wallet' | 'settings';
+export type AccountSettingsTab = 'account' | 'team' | 'wallet' | 'settings';
 
-export type View = 'home' | 'creator' | 'team' | 'team-manage' | 'team-admin' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';
+export type View = 'home' | 'creator' | 'team' | 'team-admin' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';
 
 // RBAC：团队角色 + 权限码 + 插件授权（与后端 Role/PermissionEntry/PluginGrant + contract rbac.ts 对齐）。
 export type RoleScope = 'PLATFORM' | 'TEAM';

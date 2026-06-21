@@ -14,7 +14,6 @@ import { dragRegionProps } from '@/lib/window-drag';
 import { ListSkeleton } from '@/lib/motion';
 
 const TeamHome = lazy(() => import('@/pages/TeamHome').then((m) => ({ default: m.TeamHome })));
-const TeamManage = lazy(() => import('@/pages/TeamManage').then((m) => ({ default: m.TeamManage })));
 const Wallet = lazy(() => import('@/pages/Wallet').then((m) => ({ default: m.Wallet })));
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 
@@ -44,7 +43,7 @@ export function AccountDialog({
   settingsTab: SettingsTab;
   onSettingsTabChange: (tab: SettingsTab) => void;
 }) {
-  const rootTab = tab === 'team-manage' ? 'team' : tab;
+  const rootTab = tab;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -69,11 +68,7 @@ export function AccountDialog({
                   />
                 </TabsContent>
                 <TabsContent value="team" keepMounted>
-                  <TeamPanel
-                    isTeamAdmin={session.role === 'TEAM_ADMIN'}
-                    tab={tab}
-                    onTabChange={onTabChange}
-                  />
+                  <TeamHome />
                 </TabsContent>
                 <TabsContent value="wallet" keepMounted>
                   <Wallet />
@@ -87,41 +82,6 @@ export function AccountDialog({
         </Tabs>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function TeamPanel({
-  isTeamAdmin,
-  onTabChange,
-  tab,
-}: {
-  isTeamAdmin: boolean;
-  onTabChange: (tab: AccountSettingsTab) => void;
-  tab: AccountSettingsTab;
-}) {
-  if (!isTeamAdmin) {
-    return tab === 'team-manage' ? <PermissionPanel /> : <TeamHome />;
-  }
-
-  const teamTab = tab === 'team-manage' ? 'manage' : 'overview';
-
-  return (
-    <Tabs
-      value={teamTab}
-      onValueChange={(value) => onTabChange(value === 'manage' ? 'team-manage' : 'team')}
-      className="flex flex-col gap-4"
-    >
-      <TabsList className="inline-flex w-fit max-w-full gap-1">
-        <TabsTrigger value="overview" className="px-3">团队概览</TabsTrigger>
-        <TabsTrigger value="manage" className="px-3">团队管理</TabsTrigger>
-      </TabsList>
-      <TabsContent value="overview" keepMounted className="mt-0 focus-visible:outline-none">
-        <TeamHome />
-      </TabsContent>
-      <TabsContent value="manage" keepMounted className="mt-0 focus-visible:outline-none">
-        <TeamManage />
-      </TabsContent>
-    </Tabs>
   );
 }
 
@@ -225,15 +185,6 @@ function PasswordForm({
       <Label htmlFor="account-password">重置密码</Label>
       <Input id="account-password" type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="新密码（至少 8 位）" />
       <Button variant="outline" onClick={onSave} disabled={saving}>{saving ? '重置中...' : '重置密码'}</Button>
-    </div>
-  );
-}
-
-function PermissionPanel() {
-  return (
-    <div className="mx-auto max-w-xl rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-      <div className="font-medium text-foreground">需要团队管理员权限</div>
-      <p className="mt-1">团队管理页只对团队管理员开放。</p>
     </div>
   );
 }
