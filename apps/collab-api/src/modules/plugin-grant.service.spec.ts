@@ -108,14 +108,15 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
 
   describe('resolvePluginAccess', () => {
     it('团队管理员（系统团队管理员角色）默认放行，不查 grant', async () => {
-      prisma.role.findUnique.mockResolvedValue({ isSystem: true, name: '系统团队管理员' });
+      // 基于 code 检测（不依赖 name 字符串）
+      prisma.role.findUnique.mockResolvedValue({ isSystem: true, code: 'team_admin' });
       const ok = await service.resolvePluginAccess('team-1', 'plugin-1', 'admin-1', 'team-admin-team-1');
       expect(ok).toBe(true);
       expect(prisma.pluginGrant.findMany).not.toHaveBeenCalled();
     });
 
     it('user 级 DENY 优先，拒绝', async () => {
-      prisma.role.findUnique.mockResolvedValue({ isSystem: false, name: '自定义' });
+      prisma.role.findUnique.mockResolvedValue({ isSystem: false, code: null });
       prisma.pluginGrant.findMany.mockResolvedValue([
         { subjectKind: 'USER', effect: 'DENY' },
         { subjectKind: 'ROLE', effect: 'ALLOW' },
@@ -125,7 +126,7 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
     });
 
     it('user 级 ALLOW 优先于 role 级 DENY，放行', async () => {
-      prisma.role.findUnique.mockResolvedValue({ isSystem: false, name: '自定义' });
+      prisma.role.findUnique.mockResolvedValue({ isSystem: false, code: null });
       prisma.pluginGrant.findMany.mockResolvedValue([
         { subjectKind: 'USER', effect: 'ALLOW' },
         { subjectKind: 'ROLE', effect: 'DENY' },
@@ -135,14 +136,14 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
     });
 
     it('无任何 grant 默认放行', async () => {
-      prisma.role.findUnique.mockResolvedValue({ isSystem: false, name: '自定义' });
+      prisma.role.findUnique.mockResolvedValue({ isSystem: false, code: null });
       prisma.pluginGrant.findMany.mockResolvedValue([]);
       const ok = await service.resolvePluginAccess('team-1', 'plugin-1', 'u2', 'role-custom');
       expect(ok).toBe(true);
     });
 
     it('role 级 DENY（无 user 级 grant）拒绝', async () => {
-      prisma.role.findUnique.mockResolvedValue({ isSystem: false, name: '自定义' });
+      prisma.role.findUnique.mockResolvedValue({ isSystem: false, code: null });
       prisma.pluginGrant.findMany.mockResolvedValue([{ subjectKind: 'ROLE', effect: 'DENY' }]);
       const ok = await service.resolvePluginAccess('team-1', 'plugin-1', 'u2', 'role-custom');
       expect(ok).toBe(false);

@@ -41,6 +41,7 @@ function makeRole(overrides: Record<string, unknown> = {}) {
   return {
     id: 'role-1',
     name: '自定义角色',
+    code: null,
     scope: 'TEAM' as const,
     teamId: 'team-1',
     isSystem: false,
@@ -89,6 +90,23 @@ describe('RoleService 团队角色 + 平台角色', () => {
         data: expect.objectContaining({ scope: 'TEAM', teamId: 'team-1', name: '开发者' }),
       }));
       expect(prisma.auditLog.create).toHaveBeenCalled();
+    });
+
+    it('创建角色携带 code 时写入并校验唯一性', async () => {
+      prisma.role.findFirst.mockResolvedValue(null); // 无重名
+      prisma.role.create.mockResolvedValue(makeRole({ code: 'developer' }));
+      await service.createTeamRole('admin-1', { name: '开发者', code: 'developer' });
+      expect(prisma.role.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ code: 'developer' }),
+      }));
+    });
+
+    it('创建角色 code 重复拒绝 409', async () => {
+      // 第一次 findFirst（name 查重）返回 null；第二次 findFirst（code 查重，assertCodeAvailable）返回已存在
+      prisma.role.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(makeRole({ code: 'developer' }));
+      await expect(
+        service.createTeamRole('admin-1', { name: '新角色', code: 'developer' }),
+      ).rejects.toMatchObject({ status: 409 });
     });
 
     it('团队角色名重复拒绝 409', async () => {
@@ -175,7 +193,8 @@ describe('RoleService 团队角色 + 平台角色', () => {
     });
 
     it('系统团队管理员角色双写 teamRole=TEAM_ADMIN', async () => {
-      prisma.role.findUnique.mockResolvedValue(makeRole({ id: 'team-admin-team-1', name: '系统团队管理员', isSystem: true }));
+      // 基于 code 检测（不依赖 name 字符串）
+      prisma.role.findUnique.mockResolvedValue(makeRole({ id: 'team-admin-team-1', name: '系统团队管理员', code: 'team_admin', isSystem: true }));
       prisma.teamMembership.findUnique.mockResolvedValue({ teamId: 'team-1', userId: 'u2', status: 'ACTIVE' });
       prisma.teamMembership.update.mockResolvedValue({});
       await service.assignMemberRole('admin-1', 'u2', 'team-admin-team-1');

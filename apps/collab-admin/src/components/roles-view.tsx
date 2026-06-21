@@ -1,7 +1,8 @@
 // 平台角色管理视图（collab-admin web）。
-// 列出平台级角色 + 创建/编辑/删除 + 权限码勾选面板（按 group 分组）。
+// 列出平台级角色 + 创建/编辑/删除 + 权限码两级勾选面板（模块 → 操作）。
 // 内置角色（isSystem=true）锁定权限编辑、不可删除；可改显示名/描述。
-// 后端：GET/POST /api/admin/roles、PATCH/DELETE /api/admin/roles/:id、GET /api/admin/roles/permissions。
+// 后端：GET/POST /api/admin/roles、PATCH/DELETE /api/admin/roles/:id、GET /api/admin/roles/permissions、
+//       GET/PUT /api/admin/permission-groups、DELETE /api/admin/permission-groups/:groupKey。
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -30,24 +31,38 @@ import { api } from '@/lib/api';
 import { useLoad, run } from '@/lib/helpers';
 import { Section } from '@/components/shared';
 import { Badge } from '@/components/ui/badge';
-import type { PermissionEntry, Role } from '@/lib/types';
+import type { PermissionEntry, PermissionModule, PermissionGroup, Role } from '@/lib/types';
 import { formatTime } from '@/lib/types';
+
+const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export function RolesView() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<PermissionEntry[]>([]);
+  const [groups, setGroups] = useState<PermissionGroup[]>([]);
   const [editing, setEditing] = useState<Role | null>(null);
   const [creating, setCreating] = useState(false);
 
   const load = async () => {
-    const [r, p] = await Promise.all([
+    const [r, p, g] = await Promise.all([
       api<{ roles: Role[] }>('/api/admin/roles'),
       api<{ permissions: PermissionEntry[] }>('/api/admin/roles/permissions'),
+      api<{ groups: PermissionGroup[] }>('/api/admin/permission-groups').catch(() => ({ groups: [] })),
     ]);
     setRoles(r.roles);
     setPermissions(p.permissions);
+    setGroups(g.groups);
   };
   useLoad(load);
+
+  // 自定义分组显示名覆盖：groupKey → displayName
+  const groupLabelOverride = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of groups) {
+      if (g.customized) map.set(g.groupKey, g.displayName);
+    }
+    return map;
+  }, [groups]);
 
   return (
     <div className="space-y-8">
@@ -64,6 +79,7 @@ export function RolesView() {
           <TableHeader>
             <TableRow>
               <TableHead>角色名</TableHead>
+              <TableHead>编码</TableHead>
               <TableHead>类型</TableHead>
               <TableHead>权限数</TableHead>
               <TableHead>成员数</TableHead>
@@ -80,6 +96,13 @@ export function RolesView() {
                     {role.isSystem && <LockIcon className="size-3.5 text-muted-foreground" />}
                     {role.name}
                   </div>
+                </TableCell>
+                <TableCell>
+                  {role.code ? (
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{role.code}</code>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   {role.isSystem ? (
@@ -124,6 +147,7 @@ export function RolesView() {
       {creating && (
         <RoleEditDialog
           permissions={permissions}
+          groupLabelOverride={groupLabelOverride}
           onClose={() => setCreating(false)}
           onSaved={async () => {
             setCreating(false);
@@ -135,6 +159,7 @@ export function RolesView() {
         <RoleEditDialog
           role={editing}
           permissions={permissions}
+          groupLabelOverride={groupLabelOverride}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
@@ -146,32 +171,54 @@ export function RolesView() {
   );
 }
 
-/** 角色编辑/创建对话框：含名称、描述、权限码分组勾选面板。 */
+/**
+ * 把扁平权限码按模块折叠为两级结构（moduleKey → operations）。
+ * 显示名优先用自定义分组覆盖，否则用权限自带 moduleLabel。
+ */
+function buildModules(
+  permissions: PermissionEntry[],
+  groupLabelOverride: Map<string, string>,
+): PermissionModule[] {
+  const map = new Map<string, PermissionModule>();
+  for (const p of permissions) {
+    let m = map.get(p.moduleKey);
+    if (!m) {
+      m = {
+        moduleKey: p.moduleKey,
+        moduleLabel: groupLabelOverride.get(p.moduleKey) ?? p.moduleLabel,
+        scope: p.scope,
+        sortOrder: p.moduleOrder,
+        operations: [],
+      };
+      map.set(p.moduleKey, m);
+    }
+    m.operations.push(p);
+  }
+  return [...map.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.moduleKey.localeCompare(b.moduleKey));
+}
+
+/** 角色编辑/创建对话框：含名称、编码、描述、权限码两级勾选面板（模块父级 → 操作子项）。 */
 function RoleEditDialog({
   role,
   permissions,
+  groupLabelOverride,
   onClose,
   onSaved,
 }: {
   role?: Role | null;
   permissions: PermissionEntry[];
+  groupLabelOverride: Map<string, string>;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
   const isSystem = role?.isSystem ?? false;
   const [name, setName] = useState(role?.name ?? '');
+  const [code, setCode] = useState(role?.code ?? '');
   const [description, setDescription] = useState(role?.description ?? '');
   const [selected, setSelected] = useState<Set<string>>(new Set(role?.permissions ?? []));
 
-  // 权限按 group 分组（供勾选面板折叠展示）
-  const groups = useMemo(() => {
-    const map = new Map<string, PermissionEntry[]>();
-    for (const p of permissions) {
-      if (!map.has(p.group)) map.set(p.group, []);
-      map.get(p.group)!.push(p);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [permissions]);
+  // 权限按模块折叠（两级勾选树）
+  const modules = useMemo(() => buildModules(permissions, groupLabelOverride), [permissions, groupLabelOverride]);
 
   function toggle(code: string) {
     setSelected((prev) => {
@@ -182,7 +229,7 @@ function RoleEditDialog({
     });
   }
 
-  function toggleGroup(group: string, codes: string[]) {
+  function toggleModule(codes: string[]) {
     setSelected((prev) => {
       const allOn = codes.every((c) => prev.has(c));
       const next = new Set(prev);
@@ -197,11 +244,15 @@ function RoleEditDialog({
       toast.error('角色名不能为空');
       return;
     }
+    const trimmedCode = code.trim();
+    if (trimmedCode && !ROLE_CODE_PATTERN.test(trimmedCode)) {
+      toast.error('编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头');
+      return;
+    }
     const body = {
       name: name.trim(),
-      description: description.trim(),
-      // 系统角色不允许改权限（后端会拒绝），这里也不传 permissions 字段
-      ...(isSystem ? {} : { permissions: [...selected] }),
+      // 系统角色不允许改权限/编码（后端会拒绝），这里也不传 code/permissions 字段
+      ...(isSystem ? {} : { code: trimmedCode || undefined, permissions: [...selected] }),
     };
     const ok = role
       ? await run(() => api(`/api/admin/roles/${role.id}`, { method: 'PATCH', body }), '角色已更新')
@@ -218,14 +269,27 @@ function RoleEditDialog({
             {role ? `编辑角色：${role.name}` : '创建平台角色'}
           </DialogTitle>
           <DialogDescription>
-            {isSystem ? '内置角色权限锁定不可修改，仅可调整名称与说明。' : '勾选该角色拥有的平台权限，用户被分配此角色后即获得这些权限。'}
+            {isSystem ? '内置角色权限/编码锁定不可修改，仅可调整名称与说明。' : '勾选该角色拥有的平台权限，用户被分配此角色后即获得这些权限。'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="space-y-2">
-            <Label>角色名</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder="如：运营专员" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>角色名</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder="如：运营专员" />
+            </div>
+            <div className="space-y-2">
+              <Label>编码{isSystem && <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>}</Label>
+              <Input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                maxLength={64}
+                placeholder="如：operator"
+                disabled={isSystem}
+              />
+              <p className="text-xs text-muted-foreground">小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。</p>
+            </div>
           </div>
           <div className="space-y-2">
             <Label>说明</Label>
@@ -239,20 +303,21 @@ function RoleEditDialog({
             </div>
             <div className={`rounded-md border p-3 ${isSystem ? 'pointer-events-none opacity-60' : ''}`}>
               <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
-                {groups.map(([group, items]) => {
-                  const codes = items.map((i) => i.code);
+                {modules.map((m) => {
+                  const codes = m.operations.map((op) => op.code);
                   const allOn = codes.every((c) => selected.has(c));
                   return (
-                    <div key={group}>
+                    <div key={m.moduleKey}>
                       <div className="mb-1.5 flex items-center gap-2">
                         <Checkbox
                           checked={allOn}
-                          onCheckedChange={() => toggleGroup(group, codes)}
+                          onCheckedChange={() => toggleModule(codes)}
                         />
-                        <span className="text-sm font-medium">{group}</span>
+                        <span className="text-sm font-medium">{m.moduleLabel}</span>
+                        <span className="text-xs text-muted-foreground">{m.moduleKey}</span>
                       </div>
                       <div className="ml-6 space-y-1.5">
-                        {items.map((p) => (
+                        {m.operations.map((p) => (
                           <label key={p.code} className="flex cursor-pointer items-start gap-2 text-sm">
                             <Checkbox
                               checked={selected.has(p.code)}

@@ -10,7 +10,7 @@
 import { Body, Controller, Get, Inject, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import bcrypt from 'bcryptjs';
-import { SYSTEM_PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID, SYSTEM_PLATFORM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
 import { PrismaService } from '../prisma.service';
 import { AppError, Public } from '../common';
 import { SetupDto } from './dto/setup.dto';
@@ -75,6 +75,7 @@ export class SetupController {
           create: {
             id: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
             name: '系统平台管理员',
+            code: SYSTEM_PLATFORM_ADMIN_ROLE_CODE,
             scope: 'PLATFORM',
             teamId: null,
             isSystem: true,

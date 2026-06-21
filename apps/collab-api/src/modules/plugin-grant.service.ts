@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { badRequest, forbidden, notFound } from '../common';
 import { AuthService } from './auth.service';
+import { SYSTEM_TEAM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
 
 /** 插件授权行序列化：转 HTTP 响应（对齐 contract PluginGrantRow camelCase）。 */
 function publicGrant(grant: {
@@ -123,9 +124,10 @@ export class PluginGrantService {
     if (teamRoleId) {
       const role = await this.prisma.role.findUnique({
         where: { id: teamRoleId },
-        select: { isSystem: true, name: true },
+        select: { isSystem: true, code: true },
       });
-      if (role?.isSystem && role.name === '系统团队管理员') return true;
+      // 基于 code 检测（不依赖 name 字符串，更稳健，见 SYSTEM_TEAM_ADMIN_ROLE_CODE）
+      if (role?.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE) return true;
     }
 
     const orConditions: Array<{ subjectKind: 'USER' | 'ROLE'; subjectId: string }> = [

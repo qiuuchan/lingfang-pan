@@ -95,6 +95,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'role.revoked': '撤销成员角色',
   'plugin.grant.set': '设置插件授权',
   'plugin.grant.removed': '移除插件授权',
+  'permission_group.upserted': '修改权限分组名',
+  'permission_group.reset': '重置权限分组名',
 
   // === marketplace（市场）===
   'marketplace.plugin.installed': '市场安装插件',
@@ -154,9 +156,10 @@ const PREFIX_CATEGORY: Array<{ prefix: string; category: AuditCategoryKey }> = [
   { prefix: 'llm_binding.', category: 'llm' },
   { prefix: 'invitation.', category: 'team' },
   { prefix: 'team_admin_application.', category: 'team' },
-  // RBAC：团队角色/插件授权归 team 分类；平台角色动作由显式表覆盖归 admin。
+  // RBAC：团队角色/插件授权/权限分组归 team 分类；平台角色动作由显式表覆盖归 admin。
   { prefix: 'role.', category: 'team' },
   { prefix: 'plugin.grant.', category: 'team' },
+  { prefix: 'permission_group.', category: 'team' },
   { prefix: 'team.', category: 'team' },
   { prefix: 'plugin.marketplace.', category: 'marketplace' },
   { prefix: 'marketplace.', category: 'marketplace' },

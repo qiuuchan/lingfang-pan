@@ -27,9 +27,10 @@ Do not add a server field that is meant for frontend use without adding the cont
 
 Role drift is high-risk: `TenantRole` includes `developer`, while current UI labels and admin checks focus on `owner`, `admin`, and `member`. Any role change must update both sides.
 
-**RBAC 收敛（2026-06-21）**：实际角色系统已迁移到 `Role` 模型（PLATFORM/TEAM 两层 scope + 预定义权限码，见 `packages/contract/src/rbac.ts`）。
+**RBAC 收敛（2026-06-21，2026-06-22 增强）**：实际角色系统已迁移到 `Role` 模型（PLATFORM/TEAM 两层 scope + 预定义权限码，见 `packages/contract/src/rbac.ts`）。
 `identity.ts` 的 `TenantRole`（owner|admin|developer|member）降级为 dead schema，仅供 `PluginGrant.resolveGrant()` 的 role 字符串参数兼容，新代码请勿引用做业务判断。
-改角色时核对：`packages/contract/src/rbac.ts`（契约）、`apps/collab-api/prisma/schema.prisma`（Role/PermissionEntry/PluginGrant 模型）、`apps/collab-api/src/modules/permissions/permission-codes.ts`（权限码注册表）、`apps/collab-api/src/permissions.guard.ts`（授权守卫）、`apps/desktop/src/lib/types.ts` + `apps/collab-admin/src/lib/types.ts`（前端 Role 类型）。
+**两级权限节点（2026-06-22）**：权限按「模块 → 操作」两级组织（`PermissionModule.moduleKey/moduleLabel` 父级 + `operations` 叶子）；`PermissionEntry.moduleKey=group`（向后兼容）+ `moduleLabel/moduleOrder`。**角色编码 `Role.code`**（可选、同 scope+teamId 唯一，内置固定 platform_admin/team_admin/team_member，系统角色检测基于 code 而非 name）。**可编辑权限组 `PermissionGroup`**（管理员改 moduleKey 显示名，不可增删 moduleKey 本身）。
+改角色/权限时核对：`packages/contract/src/rbac.ts`（契约）、`apps/collab-api/prisma/schema.prisma`（Role/PermissionEntry/PermissionGroup/PluginGrant 模型）、`apps/collab-api/src/modules/permissions/permission-codes.ts`（权限码 + 模块 + 内置 code 注册表）、`apps/collab-api/src/modules/role.service.ts` + `permission-group.service.ts`（服务）、`apps/collab-api/src/permissions.guard.ts`（授权守卫）、`apps/desktop/src/lib/types.ts` + `apps/collab-admin/src/lib/types.ts`（前端 Role/PermissionEntry/PermissionGroup/PermissionModule 类型）。
 
 ## Error Codes
 
