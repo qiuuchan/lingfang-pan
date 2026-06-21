@@ -102,6 +102,17 @@ export function isPlatformPermission(code: string): boolean {
   return code.startsWith('platform.');
 }
 
+// === 内置系统角色 id（与 migration 20260621190000 + seed-rbac.ts 一致的确定性占位）===
+// 凡是写 platformRole='PLATFORM_ADMIN' 的地方，必须同步写 platformRoleId=SYSTEM_PLATFORM_ADMIN_ROLE_ID，
+// 否则新权限守卫解析不到平台角色权限，旧平台管理员会被锁死（迁移期双写一致性要求）。
+
+/** 系统平台管理员角色 id（migration 固定占位，seed-rbac upsert 同一 id）。 */
+export const SYSTEM_PLATFORM_ADMIN_ROLE_ID = '00000000-0000-0000-0000-platform0001';
+
+/** 团队级系统角色 id 拼接前缀（每团队两条：管理员 + 成员）。 */
+export const teamAdminRoleId = (teamId: string) => `team-admin-${teamId}`;
+export const teamMemberRoleId = (teamId: string) => `team-member-${teamId}`;
+
 /** 判断权限码是否属于团队级。 */
 export function isTeamPermission(code: string): boolean {
   return code.startsWith('team.');

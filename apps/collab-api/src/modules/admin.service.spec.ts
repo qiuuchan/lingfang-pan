@@ -937,10 +937,10 @@ describe('AdminService 用户管理 + 平台管理员管理完善（组C）', ()
       prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', email: 'a@x.com', displayName: 'A', platformRole: 'NONE', status: 'ACTIVE' });
       prisma.user.update.mockResolvedValueOnce({ id: 'u1', email: 'a@x.com', displayName: 'A', platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' });
       await service.adminUpdateUserPlatformRole('user-admin', 'u1', { platformRole: 'PLATFORM_ADMIN' });
-      // 升级不 tokenVersion++（提权不涉及吊销）。
+      // 升级不 tokenVersion++（提权不涉及吊销）；RBAC 双写 platformRole + platformRoleId。
       expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: 'u1' },
-        data: { platformRole: 'PLATFORM_ADMIN' },
+        data: { platformRole: 'PLATFORM_ADMIN', platformRoleId: '00000000-0000-0000-0000-platform0001' },
       }));
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ action: 'admin.user.role_changed', targetType: 'User', targetId: 'u1', metadata: { from: 'NONE', to: 'PLATFORM_ADMIN' } }),
@@ -952,9 +952,10 @@ describe('AdminService 用户管理 + 平台管理员管理完善（组C）', ()
       prisma.user.count.mockResolvedValueOnce(3); // 3 个管理员，可降级
       prisma.user.update.mockResolvedValueOnce({ id: 'u1', email: 'a@x.com', displayName: 'A', platformRole: 'NONE', status: 'ACTIVE' });
       await service.adminUpdateUserPlatformRole('user-admin', 'u1', { platformRole: 'NONE' });
+      // RBAC 双写：降级时 platformRoleId 同步置 null + tokenVersion++ 作废旧 token。
       expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: 'u1' },
-        data: { platformRole: 'NONE', tokenVersion: { increment: 1 } },
+        data: { platformRole: 'NONE', platformRoleId: null, tokenVersion: { increment: 1 } },
       }));
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ metadata: { from: 'PLATFORM_ADMIN', to: 'NONE' } }),

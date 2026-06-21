@@ -1,14 +1,12 @@
-// RBAC seed：权限码注册表 + 内置系统角色权限填充。
+// RBAC seed：权限码注册表 + 内置系统角色权限填充 + 存量用户/成员角色回填。
 //
 // 幂等设计（可重复执行）：
 //  1. 把 permission-codes.ts 全部权限码 upsert 到 PermissionEntry 表（新增/更新 label/description）。
 //  2. 为「系统平台管理员」角色填充全部 platform.* 权限。
 //  3. 为每个团队的「系统团队管理员」填充全部 team.* 权限、「系统成员」填充只读基线权限。
 //  4. 若团队级系统角色缺失（如迁移后新建团队但未触发应用层 hook），按需补建。
-//
-// 内置角色 id 约定（与 migration 20260621190000 一致）：
-//  - 平台级：'00000000-0000-0000-0000-platform0001'
-//  - 团队级：'team-admin-<teamId>' / 'team-member-<teamId>'
+//  5. 回填存量数据：platformRole=PLATFORM_ADMIN 但 platformRoleId 缺失的用户、
+//     role=TEAM_ADMIN/MEMBER 但 teamRoleId 缺失的成员（兼容旧版 seed-admin/setup/admin 创建的数据）。
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { createPrismaAdapter } from './prisma.adapter';
@@ -16,6 +14,9 @@ import {
   ALL_PERMISSIONS,
   PLATFORM_PERMISSIONS,
   TEAM_PERMISSIONS,
+  SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+  teamAdminRoleId,
+  teamMemberRoleId,
   type PermissionScope,
 } from './modules/permissions/permission-codes';
 
@@ -28,12 +29,6 @@ const MEMBER_BASELINE_PERMISSIONS = [
   'team.plugin.list',
   'team.balance.view',
 ];
-
-/** 系统平台管理员角色 id（与 migration 固定占位一致）。 */
-const PLATFORM_ADMIN_ROLE_ID = '00000000-0000-0000-0000-platform0001';
-/** 团队级系统角色 id 拼接前缀。 */
-const teamAdminRoleId = (teamId: string) => `team-admin-${teamId}`;
-const teamMemberRoleId = (teamId: string) => `team-member-${teamId}`;
 
 async function seedPermissionEntries() {
   for (const p of ALL_PERMISSIONS) {
@@ -50,10 +45,10 @@ async function seedPlatformAdminRole() {
   const platformCodes = PLATFORM_PERMISSIONS.map((p) => p.code);
   // 内置平台管理员角色（migration 已建，此处幂等 upsert）
   await prisma.role.upsert({
-    where: { id: PLATFORM_ADMIN_ROLE_ID },
+    where: { id: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
     update: { permissions: platformCodes },
     create: {
-      id: PLATFORM_ADMIN_ROLE_ID,
+      id: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
       name: '系统平台管理员',
       scope: 'PLATFORM',
       teamId: null,
@@ -103,10 +98,46 @@ async function seedTeamSystemRoles() {
   console.log(`角色 seed：${teams.length} 个团队的系统团队管理员/系统成员角色已同步。`);
 }
 
+/**
+ * 回填存量数据：兼容旧版（migration 前）通过 seed-admin/setup/admin 创建的用户/成员，
+ * 他们只有 platformRole/role 枚举，缺 platformRoleId/teamRoleId，会导致新权限守卫解析不到权限。
+ * 幂等：只更新 roleId 为 null 的行。
+ */
+async function backfillExistingRoleRefs() {
+  // 平台管理员：platformRole=PLATFORM_ADMIN 但 platformRoleId 缺失 → 指向系统平台管理员角色
+  const adminBackfilled = await prisma.user.updateMany({
+    where: { platformRole: 'PLATFORM_ADMIN', platformRoleId: null },
+    data: { platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
+  });
+  if (adminBackfilled.count > 0) {
+    console.log(`回填：${adminBackfilled.count} 个平台管理员用户的 platformRoleId 已补齐。`);
+  }
+
+  // 团队成员：role=TEAM_ADMIN/MEMBER 但 teamRoleId 缺失 → 指向对应系统团队角色。
+  // updateMany 无法用 teamId 拼 roleId，按团队循环更新（与 migration 回填同款语义）。
+  const teams = await prisma.team.findMany({ select: { id: true } });
+  let totalMembershipBackfilled = 0;
+  for (const team of teams) {
+    const r1 = await prisma.teamMembership.updateMany({
+      where: { teamId: team.id, role: 'TEAM_ADMIN', teamRoleId: null },
+      data: { teamRoleId: teamAdminRoleId(team.id) },
+    });
+    const r2 = await prisma.teamMembership.updateMany({
+      where: { teamId: team.id, role: 'MEMBER', teamRoleId: null },
+      data: { teamRoleId: teamMemberRoleId(team.id) },
+    });
+    totalMembershipBackfilled += r1.count + r2.count;
+  }
+  if (totalMembershipBackfilled > 0) {
+    console.log(`回填：${totalMembershipBackfilled} 个团队成员的 teamRoleId 已补齐。`);
+  }
+}
+
 async function main() {
   await seedPermissionEntries();
   await seedPlatformAdminRole();
   await seedTeamSystemRoles();
+  await backfillExistingRoleRefs();
   console.log('RBAC seed 完成。');
 }
 
