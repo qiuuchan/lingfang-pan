@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { Public, requireUser } from '../common';
+import { RequirePermission } from './auth.decorators';
 import { TeamService } from './team.service';
 import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto, UpdateTeamProfileDto } from './dto/teams.dto';
 
@@ -42,66 +43,77 @@ export class PublicTeamsController {
 export class TeamsController {
   constructor(@Inject(TeamService) private readonly team: TeamService) {}
 
+  @RequirePermission('team.dashboard.view')
   @Get()
   @ApiOperation({ summary: '当前团队信息' })
   current(@Req() req: Request) {
     return this.team.currentTeam(requireUser(req).id);
   }
 
+  @RequirePermission('team.dashboard.view')
   @Get('profile')
   @ApiOperation({ summary: '当前团队公开发现设置（allowPublicJoin + description）' })
   profile(@Req() req: Request) {
     return this.team.currentTeamProfile(requireUser(req).id);
   }
 
+  @RequirePermission('team.profile.update')
   @Patch('profile')
   @ApiOperation({ summary: '团队管理员更新团队公开发现设置' })
   updateProfile(@Req() req: Request, @Body() body: UpdateTeamProfileDto) {
     return this.team.updateTeamProfile(requireUser(req).id, body);
   }
 
+  @RequirePermission('team.member.list')
   @Get('members')
   @ApiOperation({ summary: '当前团队成员列表' })
   members(@Req() req: Request) {
     return this.team.currentMembers(requireUser(req).id);
   }
 
+  @RequirePermission('team.member.remove')
   @Delete('members/:userId')
   @ApiOperation({ summary: '团队管理员移除普通成员' })
   removeMember(@Req() req: Request, @Param('userId') userId: string) {
     return this.team.removeMember(requireUser(req).id, userId);
   }
 
+  @RequirePermission('team.member.invite')
   @Post('invitations')
   @ApiOperation({ summary: '团队管理员生成邀请码' })
   createInvitation(@Req() req: Request, @Body() body: CreateInvitationDto) {
     return this.team.createInvitation(requireUser(req).id, body);
   }
 
+  @RequirePermission('team.member.invite')
   @Get('invitations')
   @ApiOperation({ summary: '团队管理员查看邀请码' })
   invitations(@Req() req: Request) {
     return this.team.listInvitations(requireUser(req).id);
   }
 
+  @RequirePermission('team.member.invite')
   @Patch('invitations/:id/disable')
   @ApiOperation({ summary: '团队管理员禁用邀请码' })
   disableInvitation(@Req() req: Request, @Param('id') id: string) {
     return this.team.disableInvitation(requireUser(req).id, id);
   }
 
+  @RequirePermission('team.balance.view')
   @Get('balance')
   @ApiOperation({ summary: '当前团队余额' })
   balance(@Req() req: Request) {
     return this.team.balance(requireUser(req).id);
   }
 
+  @RequirePermission('team.balance.view')
   @Get('balance-ledger')
   @ApiOperation({ summary: '当前团队余额流水' })
   ledger(@Req() req: Request) {
     return this.team.ledger(requireUser(req).id);
   }
 
+  @RequirePermission('team.balance.consume')
   @Post('consume')
   @ApiOperation({ summary: '消耗团队共享余额' })
   consume(@Req() req: Request, @Body() body: ConsumeBalanceDto) {
