@@ -1,7 +1,7 @@
-// LLM provider 目录 + 租户绑定相关 DTO（class-validator，对齐现有 dto/ 模式）。
+// LLM provider 目录 + 用户绑定相关 DTO（class-validator，对齐现有 dto/ 模式）。
 // 字段白名单由全局 ValidationPipe（whitelist + forbidNonWhitelisted）强制，杜绝越权字段透传。
 // 所有字段 camelCase（与 /api/llm/* 契约一致，design.md B11）。
-// v3 定稿：TenantLlmBinding 去 gatewayId，BindingUpsertDto 无 gatewayId；Provider DTO 新增 isActive 不在 create 时设。
+// TenantLlmBinding 去 gatewayId，BindingUpsertDto 无 gatewayId；Provider DTO 新增 isActive 不在 create 时设。
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
@@ -98,7 +98,7 @@ export class ProviderUpdateDto {
   status?: (typeof LLM_GATEWAY_STATUS)[number];
 }
 
-// === 租户绑定 DTO（无 gatewayId，按 teamId 唯一 upsert） ===
+// === 用户绑定 DTO（无 gatewayId，按 userId 唯一 upsert） ===
 
 /** PUT /api/llm/binding 入参（无 gatewayId）。
  *  apiKey 语义（design.md B5）：

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { dragRegionProps } from '@/lib/window-drag';
 import { ListSkeleton } from '@/lib/motion';
 
@@ -44,6 +44,8 @@ export function AccountDialog({
   settingsTab: SettingsTab;
   onSettingsTabChange: (tab: SettingsTab) => void;
 }) {
+  const rootTab = tab === 'team-manage' ? 'team' : tab;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[86vh] max-h-[86vh] w-[94vw] max-w-6xl flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
@@ -53,8 +55,8 @@ export function AccountDialog({
           </DialogTitle>
           <DialogDescription>账户、团队、钱包和应用设置集中在这里。</DialogDescription>
         </DialogHeader>
-        <Tabs value={tab} orientation="vertical" onValueChange={(value) => onTabChange(value as AccountSettingsTab)} className="min-h-0 flex-1 flex-row gap-0">
-          <AccountSettingsNav isTeamAdmin={session.role === 'TEAM_ADMIN'} value={tab} />
+        <Tabs value={rootTab} orientation="vertical" onValueChange={(value) => onTabChange(value as AccountSettingsTab)} className="min-h-0 flex-1 flex-row gap-0">
+          <AccountSettingsNav value={rootTab} />
           <ScrollArea className="min-w-0 flex-1">
             <div className="p-5">
               <Suspense fallback={<ListSkeleton rows={6} />}>
@@ -67,10 +69,11 @@ export function AccountDialog({
                   />
                 </TabsContent>
                 <TabsContent value="team" keepMounted>
-                  <TeamHome />
-                </TabsContent>
-                <TabsContent value="team-manage" keepMounted>
-                  {session.role === 'TEAM_ADMIN' ? <TeamManage /> : <PermissionPanel />}
+                  <TeamPanel
+                    isTeamAdmin={session.role === 'TEAM_ADMIN'}
+                    tab={tab}
+                    onTabChange={onTabChange}
+                  />
                 </TabsContent>
                 <TabsContent value="wallet" keepMounted>
                   <Wallet />
@@ -84,6 +87,41 @@ export function AccountDialog({
         </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TeamPanel({
+  isTeamAdmin,
+  onTabChange,
+  tab,
+}: {
+  isTeamAdmin: boolean;
+  onTabChange: (tab: AccountSettingsTab) => void;
+  tab: AccountSettingsTab;
+}) {
+  if (!isTeamAdmin) {
+    return tab === 'team-manage' ? <PermissionPanel /> : <TeamHome />;
+  }
+
+  const teamTab = tab === 'team-manage' ? 'manage' : 'overview';
+
+  return (
+    <Tabs
+      value={teamTab}
+      onValueChange={(value) => onTabChange(value === 'manage' ? 'team-manage' : 'team')}
+      className="flex flex-col gap-4"
+    >
+      <TabsList className="inline-flex w-fit max-w-full gap-1">
+        <TabsTrigger value="overview" className="px-3">团队概览</TabsTrigger>
+        <TabsTrigger value="manage" className="px-3">团队管理</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview" keepMounted className="mt-0 focus-visible:outline-none">
+        <TeamHome />
+      </TabsContent>
+      <TabsContent value="manage" keepMounted className="mt-0 focus-visible:outline-none">
+        <TeamManage />
+      </TabsContent>
+    </Tabs>
   );
 }
 

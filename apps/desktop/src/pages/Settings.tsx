@@ -216,11 +216,11 @@ export function Settings({
         // value 未传时走 defaultValue（非受控，保持原行为）；传了则受控，支持父组件定向跳 Tab。
         {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli' })}
       >
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
-          <TabsTrigger value="cli">脚本运行环境</TabsTrigger>
-          <TabsTrigger value="gateway">模型服务</TabsTrigger>
-          <TabsTrigger value="plugins">插件</TabsTrigger>
-          <TabsTrigger value="backend">公司平台</TabsTrigger>
+        <TabsList className="inline-flex w-fit max-w-full gap-1">
+          <TabsTrigger value="cli" className="px-3">脚本运行环境</TabsTrigger>
+          <TabsTrigger value="gateway" className="px-3">模型服务</TabsTrigger>
+          <TabsTrigger value="plugins" className="px-3">插件</TabsTrigger>
+          <TabsTrigger value="backend" className="px-3">公司平台</TabsTrigger>
         </TabsList>
 
         {/* Tab1：脚本运行时管理 */}

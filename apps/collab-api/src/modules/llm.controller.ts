@@ -1,6 +1,6 @@
-// LLM 租户控制器：v3 定稿路由（单 provider 云分发，无 provider 概念）。
+// LLM 用户控制器：单 provider 云分发，无 provider 概念。
 // 全局 JwtAuthGuard（security.ts），本控制器不额外声明 @Public。
-// 所有方法经 requireUser(req).id 透传 service，鉴权在 service 内（ensureCurrentTeam/ensureTeamAdmin）。
+// 所有方法经 requireUser(req).id 透传 service，鉴权在 service 内（ensureCurrentTeam/ensurePlatformAdmin）。
 import { Body, Controller, Delete, Get, Inject, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
@@ -24,25 +24,25 @@ export class LlmController {
   }
 
   @Get('binding')
-  @ApiOperation({ summary: '当前团队绑定（单条，脱敏，零解密）' })
+  @ApiOperation({ summary: '当前用户绑定（单条，脱敏，零解密）' })
   listBindings(@Req() req: Request) {
     return this.llm.listBindings(requireUser(req).id);
   }
 
   @Put('binding')
-  @ApiOperation({ summary: '保存/更新当前团队绑定（按 teamId 唯一，TEAM_ADMIN）' })
+  @ApiOperation({ summary: '保存/更新当前用户绑定（按 userId 唯一）' })
   upsertBinding(@Req() req: Request, @Body() body: BindingUpsertDto) {
     return this.llm.upsertBinding(requireUser(req).id, body);
   }
 
   @Delete('binding')
-  @ApiOperation({ summary: '删除当前团队绑定（按 teamId 唯一，TEAM_ADMIN）' })
+  @ApiOperation({ summary: '删除当前用户绑定（按 userId 唯一）' })
   deleteBinding(@Req() req: Request) {
     return this.llm.deleteBinding(requireUser(req).id);
   }
 
   @Post('binding/decrypt')
-  @ApiOperation({ summary: '解密 apiKey 明文供桌面 CLI 使用（按 teamId 唯一，TEAM_ADMIN，强审计）' })
+  @ApiOperation({ summary: '解密当前用户 apiKey 明文供桌面 CLI 使用（按 userId 唯一，强审计）' })
   decryptKey(@Req() req: Request) {
     return this.llm.decryptBindingKey(requireUser(req).id);
   }

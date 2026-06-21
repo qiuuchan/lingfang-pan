@@ -7,8 +7,9 @@
 //!   （Python GUI 自己弹窗口，Node 输出在它自己的控制台），进程表记录 pid 供软件显示「运行中」+ 强制关闭。
 //!
 //! 运行流程（PRD 需求 3/5/7/9）：
-//! - Python：检测 .venv/ → 不存在则用软件内置 Python 创建 venv → 有 requirements.txt 则
-//!   `.venv/.../pip install -r requirements.txt`（清华 PyPI 镜像）→ detached `.venv/.../python main.py`。
+//! - Python：检测 venv → 不存在则用软件内置 Python 创建 venv → 有 requirements.txt 则
+//!   `venv/.../pip install -r requirements.txt`（清华 PyPI 镜像）→ detached `venv/.../python main.py`。
+//!   Windows 下 venv 放在短路径缓存，避免 PySide6 等深层 wheel 触发 260 字符路径限制。
 //! - Node：有 package.json + dependencies 则用软件内置 pnpm/npm install（npmmirror）→ detached pnpm/npm start。
 //!
 //! 进程表集成（与组A plugin_store.rs 协作）：
@@ -24,13 +25,13 @@
 //! - 可逃逸：用户权限运行的脚本可执行 fs.writeFile / child_process / 网络请求（与本地直接 `node main.js` 等价）。
 //! - 后续独立大任务：OS 级硬隔离 + script.node/script.python capability kind 让本通道也走声明式授权。
 
+use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -112,9 +113,38 @@ fn resolve_plugin_dir(store: &PluginStore, plugin_id: &str) -> Result<PathBuf, S
 
 // === Python venv 管理 ===
 
+/// Python venv directory for a plugin.
+/// Windows keeps venvs in a short per-user cache because packages such as PySide6
+/// contain very deep wheel paths that can exceed the legacy 260-character limit.
+fn python_venv_dir(plugin_dir: &std::path::Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        base.join("LingFang")
+            .join("python-venvs")
+            .join(format!("venv-{:016x}", stable_path_hash(plugin_dir)))
+    }
+    #[cfg(not(windows))]
+    {
+        plugin_dir.join(".venv")
+    }
+}
+
+fn stable_path_hash(path: &std::path::Path) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    let normalized = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    normalized.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// 探测 Python venv 内的解释器绝对路径（按 PRD 需求 3）。
-/// - Windows：.venv/Scripts/python.exe
-/// - Unix：.venv/bin/python
+/// - Windows：Scripts/python.exe
+/// - Unix：bin/python
 fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
     #[cfg(windows)]
     {
@@ -130,22 +160,22 @@ fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
 /// 用于 start_plugin 发「安装依赖」阶段事件（前端据此决定是否展示安装动画）。
 /// 判定：venv 内 python 不存在 → 需要创建（+可能 pip install）。与 ensure_python_venv 的「已就绪跳过」逻辑对齐。
 fn needs_python_venv(plugin_dir: &std::path::Path) -> bool {
-    let venv_dir = plugin_dir.join(".venv");
+    let venv_dir = python_venv_dir(plugin_dir);
     !venv_python(&venv_dir).is_file() || !venv_has_pip(&venv_dir)
 }
 
 /// 确保 Python 插件有可用 venv（PRD 需求 3 / AC3）。
 /// 流程：
-/// 1. 检查 .venv/ 是否存在且 venv_python 可执行 → 已就绪直接返回。
-/// 2. 不存在 → 使用软件内置 Python → `python -m venv .venv`（带超时，venv 创建可能慢）。
-/// 3. 有 requirements.txt → `.venv/.../pip install -r requirements.txt`（带超时，依赖多时较慢）。
+/// 1. 检查 venv 是否存在且 venv_python 可执行 → 已就绪直接返回。
+/// 2. 不存在 → 使用软件内置 Python → `python -m venv <venv_dir>`（带超时，venv 创建可能慢）。
+/// 3. 有 requirements.txt → `venv/.../pip install -r requirements.txt`（带超时，依赖多时较慢）。
 ///
 /// 失败处理（PRD Constraints）：venv 创建/pip install 失败返回友好错误（不崩），前端据 error 展示。
 fn ensure_python_venv(
     runtime: &EmbeddedRuntime,
     plugin_dir: &std::path::Path,
 ) -> Result<PathBuf, String> {
-    let venv_dir = plugin_dir.join(".venv");
+    let venv_dir = python_venv_dir(plugin_dir);
     let py = venv_python(&venv_dir);
     // 已有 venv 且解释器/pip 存在 → 跳过创建（但 requirements.txt 仍需检查是否装过，简化：每次 start 都补装幂等）。
     if !py.is_file() || !venv_has_pip(&venv_dir) {
@@ -207,7 +237,7 @@ fn create_python_venv(
     venv_dir: &std::path::Path,
 ) -> Result<(), String> {
     let host_py = runtime.require_runtime_command("python")?;
-    // 上一次失败可能留下半截 .venv（尤其 ensurepip 失败后 Scripts/python.exe 已存在但 pip 不完整）。
+    // 上一次失败可能留下半截 venv（尤其 ensurepip 失败后 Scripts/python.exe 已存在但 pip 不完整）。
     // 重新创建前清理目录，避免 Python venv 复用坏状态。
     if venv_dir.exists() {
         remove_dir_all_with_retry(venv_dir)?;
@@ -814,6 +844,7 @@ pub(crate) fn delete_plugin_dir(
         let _ = child.wait();
     }
     let dir = store.plugin_dir(&id)?;
+    remove_external_python_venv(&dir);
     if !dir.exists() {
         return Ok(()); // 目录不存在幂等成功（云端已删 / 手动清过）。
     }
@@ -821,6 +852,13 @@ pub(crate) fn delete_plugin_dir(
     // 杀软实时扫描锁 / 文件句柄短暂残留 / 只读属性失败（os error 5 拒绝访问）。
     // 重试 3 次（间隔 300ms 等句柄释放 / AV 扫完），仍失败则 Windows 降级 rmdir /s /q（强制删）。
     remove_dir_all_with_retry(&dir)
+}
+
+fn remove_external_python_venv(plugin_dir: &std::path::Path) {
+    let venv_dir = python_venv_dir(plugin_dir);
+    if venv_dir.exists() && !venv_dir.starts_with(plugin_dir) {
+        let _ = remove_dir_all_with_retry(&venv_dir);
+    }
 }
 
 /// 带重试 + Windows rmdir 降级的目录删除（venv/node_modules 在 Windows 删除不可靠）。

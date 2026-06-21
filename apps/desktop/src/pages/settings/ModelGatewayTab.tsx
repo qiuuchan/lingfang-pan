@@ -1,11 +1,11 @@
-// ModelGatewayTab.tsx — 设置页模型网关配置（v3 定稿：单 provider 云分发 + 无 provider UI）。
+// ModelGatewayTab.tsx — 设置页模型网关配置（单 provider 云分发 + 无 provider UI）。
 //
 // 职责（design §5 / prd AC1/AC2/AC7/AC8）：
 // - 用户界面零 provider 概念：只有一个 apiKey 输入 + 「拉取模型」按钮 + 模型 checkbox 组 + 保存。
 // - 挂载：GET /api/llm/active-provider（拿当前启用 provider 的 apiUrl + defaultModels 兜底）
-//        + GET /api/llm/binding（当前团队的单条绑定，脱敏 hint + modelOverride）。
+//        + GET /api/llm/binding（当前用户的单条绑定，脱敏 hint + modelOverride）。
 // - 拉取模型：tauriInvoke('fetch_models') 直连 active provider 的 /v1/models（reqwest 绕 CORS）。
-// - 保存：PUT /api/llm/binding { apiKey, modelOverride }（无 gatewayId，按 teamId 唯一 upsert）。
+// - 保存：PUT /api/llm/binding { apiKey, modelOverride }（无 gatewayId，按 userId 唯一 upsert）。
 //
 // 安全（AC9）：apiKey 只在「拉取模型」时作为 fetchModels 参数经 IPC 传给 Rust reqwest 临时用，
 // 不存入前端 state 之外的位置（state 在保存后清空），不进 webview 长期内存。后端只存加密 key。
@@ -102,7 +102,7 @@ export function ModelGatewayTab() {
   // 平台未配置 active provider（active-provider 404 时为 true，整 Card 切到禁用态）。
   const [noProvider, setNoProvider] = useState(false);
 
-  // 当前团队的单条绑定（null=未绑定）。
+  // 当前用户的单条绑定（null=未绑定）。
   const [binding, setBinding] = useState<TenantBindingPublic | null>(null);
 
   // 挂载态：拉 active-provider + binding。
@@ -144,7 +144,7 @@ export function ModelGatewayTab() {
         }
         throw err;
       }
-      // 再拉当前团队的单条绑定（脱敏 hint + modelOverride）。
+      // 再拉当前用户的单条绑定（脱敏 hint + modelOverride）。
       const bRes = await api<BindingResponse>('/api/llm/binding');
       setBinding(bRes.binding);
       // 若已有绑定且含 modelOverride，预填勾选态（方便用户在未重新拉取时调整选择）。
@@ -338,7 +338,7 @@ export function ModelGatewayTab() {
       {/* 顶部说明：零 provider 概念（不暴露「网关目录/provider/源」字样）。 */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <KeyRoundIcon className="size-4 text-primary" />
-        填写你的 API 密钥（云端加密存储，跨电脑可用），拉取当前可用模型并勾选要启用的。
+        填写你的 API 密钥（仅绑定到当前账户，云端加密存储），拉取当前可用模型并勾选要启用的。
       </div>
 
       {/* 配置区 */}
@@ -473,12 +473,6 @@ export function ModelGatewayTab() {
               保存
             </LoadingButton>
           </div>
-
-          {binding?.updatedBy ? (
-            <div className="text-xs text-muted-foreground">
-              最近更新：{binding.updatedBy.displayName} · {binding.updatedAt}
-            </div>
-          ) : null}
         </CardContent>
       </Card>
 

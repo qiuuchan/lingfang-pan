@@ -1,4 +1,4 @@
-import { SettingsIcon, ShieldCheckIcon, UserRoundIcon, UsersIcon, WalletIcon, type LucideIcon } from 'lucide-react';
+import { SettingsIcon, UserRoundIcon, UsersIcon, WalletIcon, type LucideIcon } from 'lucide-react';
 import { TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { AccountSettingsTab } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -8,19 +8,16 @@ interface AccountNavItem {
   readonly label: string;
   readonly description: string;
   readonly icon: LucideIcon;
-  readonly teamAdminOnly?: boolean;
 }
 
 const ACCOUNT_NAV_ITEMS = [
   { value: 'account', label: '账户', description: '资料与登录', icon: UserRoundIcon },
   { value: 'team', label: '团队空间', description: '余额与概览', icon: UsersIcon },
-  { value: 'team-manage', label: '团队管理', description: '成员与邀请', icon: ShieldCheckIcon, teamAdminOnly: true },
   { value: 'wallet', label: '钱包', description: '余额与消费', icon: WalletIcon },
   { value: 'settings', label: '设置', description: '模型与平台', icon: SettingsIcon },
 ] satisfies readonly AccountNavItem[];
 
-export function AccountSettingsNav({ isTeamAdmin, value }: { isTeamAdmin: boolean; value: AccountSettingsTab }) {
-  const items = ACCOUNT_NAV_ITEMS.filter((item) => !item.teamAdminOnly || isTeamAdmin);
+export function AccountSettingsNav({ value }: { value: AccountSettingsTab }) {
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r bg-muted/20">
       <div className="border-b px-4 py-3.5">
@@ -35,7 +32,7 @@ export function AccountSettingsNav({ isTeamAdmin, value }: { isTeamAdmin: boolea
         </div>
       </div>
       <TabsList variant="line" className="flex w-full flex-1 items-stretch justify-start gap-1 rounded-none bg-transparent p-2.5">
-        {items.map((item) => (
+        {ACCOUNT_NAV_ITEMS.map((item) => (
           <AccountNavTrigger key={item.value} active={value === item.value} item={item} />
         ))}
       </TabsList>

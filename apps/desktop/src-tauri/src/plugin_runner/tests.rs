@@ -12,6 +12,32 @@ fn venv_python_path_is_platform_correct() {
 }
 
 #[test]
+fn python_venv_dir_is_stable_for_same_plugin_path() {
+    let plugin = PathBuf::from(
+        r"C:\Users\Administrator\AppData\Roaming\com.lingfang.desktop\plugins\plugin-a",
+    );
+    assert_eq!(python_venv_dir(&plugin), python_venv_dir(&plugin));
+}
+
+#[test]
+fn python_venv_dir_uses_short_cache_on_windows() {
+    let plugin = PathBuf::from(
+        r"C:\Users\Administrator\AppData\Roaming\com.lingfang.desktop\plugins\plugin-a",
+    );
+    let venv = python_venv_dir(&plugin);
+    #[cfg(windows)]
+    {
+        assert!(
+            !venv.starts_with(&plugin),
+            "Windows venv should avoid deep plugin paths"
+        );
+        assert!(venv.to_string_lossy().contains("python-venvs"));
+    }
+    #[cfg(not(windows))]
+    assert_eq!(venv, plugin.join(".venv"));
+}
+
+#[test]
 fn parse_manifest_python_defaults_entry() {
     // manifest 缺 entry 时，python 默认 main.py，nodejs 默认 index.js。
     let tmp = temp_dir_unique("manifest-py");
