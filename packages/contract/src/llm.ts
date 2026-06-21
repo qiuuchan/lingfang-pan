@@ -1,14 +1,14 @@
-// LLM 相关契约（单 provider 云分发 + 无 provider UI，v3 定稿）。
+// LLM 相关契约（单 provider 云分发 + 无 provider UI）。
 //
 // 设计（见 06-14-model-gateway-final-single-provider）：
 //  - 应用界面零 provider 概念：用户只看到「一个 apiKey 输入 + 拉取模型 + 模型选择」。
 //  - 平台 Admin 维护多 provider（LlmGateway 表）+ 设一个「当前启用」（isActive=true，全表最多一条）。
 //  - 应用拉取当前启用 provider 的 apiUrl，用户填 key 用它。Admin 切 provider，用户无感知（重填 key + 拉模型）。
-//  - TenantLlmBinding 去 gatewayId，teamId @unique（一个团队一条 apiKey 绑定）。
+//  - TenantLlmBinding 去 gatewayId，userId @unique（一个用户一条 apiKey 绑定）。
 //
 // 契约：
 //  - ActiveProviderSchema：GET /api/llm/active-provider 出参（当前启用 provider 的 provider/apiUrl + defaultModels）。
-//  - TenantBindingPublicSchema：GET /api/llm/binding 出参（单条，脱敏，零解密，无 gatewayId/provider）。
+//  - TenantBindingPublicSchema：GET /api/llm/binding 出参（当前用户单条，脱敏，零解密，无 gatewayId/provider）。
 //  - BindingUpsertInputSchema：PUT /api/llm/binding 入参（apiKey 可选语义见 design.md B5）。
 //  - ProviderCreateInputSchema / ProviderUpdateInputSchema：平台 Admin provider 增改入参。
 //  - LlmErrorCode：错误码（含 no_active_provider）。
@@ -44,7 +44,7 @@ export const LlmErrorCode = z.enum([
   'no_active_provider',       // 平台未配置当前启用 provider（无 isActive=true），应用提示「平台尚未配置模型服务」
   'provider_not_found',       // Admin 操作目标 provider 不存在
   'provider_active_not_deletable', // 试图删除当前启用的 provider（需先切换到其他 provider）
-  'binding_not_found',        // 租户尚未绑定（config-only PUT 无原密可改 / decrypt 无绑定）
+  'binding_not_found',        // 当前用户尚未绑定（config-only PUT 无原密可改 / decrypt 无绑定）
   'llm_key_decrypt_failed',   // 密文被篡改/密钥不匹配，AES-GCM tag 校验失败
   'llm_key_not_configured',   // 服务端 LLM_KEY_ENCRYPTION_KEY 未配置，无法加解密
   'install_unsupported',      // 保留兼容旧客户端；桌面端不再自动安装运行时
@@ -82,10 +82,10 @@ export const ActiveProviderSchema = z.object({
 });
 export type ActiveProvider = z.infer<typeof ActiveProviderSchema>;
 
-// === 租户绑定契约（单条，无 gatewayId/provider） ===
+// === 用户绑定契约（单条，无 gatewayId/provider） ===
 
-/** GET /api/llm/binding 出参（单条，脱敏，零解密）。
- *  v3 定稿：去 gatewayId/provider/gatewayName/apiUrl/gatewayStatus/gatewayModels/effectiveModels。
+/** GET /api/llm/binding 出参（当前用户单条，脱敏，零解密）。
+ *  去 gatewayId/provider/gatewayName/apiUrl/gatewayStatus/gatewayModels/effectiveModels。
  *  modelOverride 为用户从拉取结果选的模型列表（string[]|null）。 */
 export const TenantBindingPublicSchema = z.object({
   id: z.string(),
@@ -98,7 +98,7 @@ export const TenantBindingPublicSchema = z.object({
 });
 export type TenantBindingPublic = z.infer<typeof TenantBindingPublicSchema>;
 
-/** PUT /api/llm/binding 入参（无 gatewayId，按 teamId 唯一 upsert）。
+/** PUT /api/llm/binding 入参（无 gatewayId，按 userId 唯一 upsert）。
  *  apiKey 语义（design.md B5）：
  *  - undefined：保留原密，仅改 enabled/modelOverride（kind=config_only）；
  *  - 非空：重新加密 + 轮换 hint/fingerprint（kind=key_rotated 或 create）。 */

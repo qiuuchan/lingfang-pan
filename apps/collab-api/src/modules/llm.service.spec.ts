@@ -1,13 +1,13 @@
-// LlmService 单测：v3 定稿（单 provider 云分发 + 无 provider UI）。
+// LlmService 单测：单 provider 云分发 + 无 provider UI。
 // 覆盖 design.md §7 验证项：
-//  - member_cannot_upsert_binding：MEMBER 调 PUT 应被 ensureTeamAdmin 守卫拒绝（403）。
-//  - cross_tenant_invisible：A 团队的 binding 不在 B 团队查询中。
+//  - member_can_upsert_personal_binding：MEMBER 也可维护自己的模型 key。
+//  - personal_binding_invisible：仅按当前 userId 查询自己的 binding。
 //  - dto_whitelist_strips_unknown：unknown 字段不透传（service 显式挑字段）。
 //  - audit_metadata_has_no_key：upsert 的 auditLog.metadata 不含 apiKey 明文/密文/hint/fingerprint。
 //  - decrypt_writes_audit：decrypt 调用后审计 action='llm_binding.key_decrypted'，metadata 不含明文。
 //  - active_provider_returns_url（AC2）：有 active provider 返 apiUrl，无返 404 no_active_provider。
 //  - activate_provider_transactional_uniqueness（AC5）：设新的，旧的自动 false。
-//  - binding_team_unique_upsert（AC6）：重复 PUT 按 teamId 覆盖。
+//  - binding_user_unique_upsert：重复 PUT 按 userId 覆盖。
 //  - admin_delete_active_provider_rejected：删 active provider 返 provider_active_not_deletable。
 // 参考 plugin.service.spec.ts：Mock PrismaService + AuthService，不连真实 DB。
 import { describe, expect, it, vi, beforeAll } from 'vitest';
@@ -52,6 +52,7 @@ function makeBinding(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'binding-1',
     teamId: 'team-1',
+    userId: 'user-admin',
     encryptedApiKey: makeEncryptedKey('sk-test-1234567890'),
     apiKeyHint: 'sk-***7890',
     keyFingerprint: 'abcdef0123456789',
@@ -154,49 +155,52 @@ describe('LlmService', () => {
     process.env.LLM_KEY_ENCRYPTION_KEY = TEST_KEY_HEX;
   });
 
-  // === 租户绑定测试 ===
+  // === 用户绑定测试 ===
 
-  it('MEMBER 调 upsertBinding 被拒绝（403 forbidden）', async () => {
-    const { service } = createService({ membershipRole: 'MEMBER' });
+  it('member_can_upsert_personal_binding: MEMBER 可维护自己的模型 key', async () => {
+    const { service, prisma, auth } = createService({ membershipRole: 'MEMBER' });
 
-    await expect(service.upsertBinding('user-member', { apiKey: 'sk-new' })).rejects.toMatchObject({
-      code: 'forbidden',
-      status: 403,
-    });
+    await service.upsertBinding('user-member', { apiKey: 'sk-new' });
+
+    expect(auth.ensureCurrentTeam).toHaveBeenCalledWith('user-member');
+    expect(auth.ensureTeamAdmin).not.toHaveBeenCalled();
+    const upsertCall = (prisma.tenantLlmBinding.upsert as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(upsertCall.where).toEqual({ userId: 'user-member' });
+    expect(upsertCall.create.userId).toBe('user-member');
   });
 
-  it('cross_tenant_invisible: listBindings 仅查当前 team 的 binding', async () => {
-    // 模拟 team-2 的成员调 listBindings：service 应按 membership.team.id='team-2' 查询，
-    // 查询条件不应包含 team-1（防跨租户泄漏）。
+  it('personal_binding_invisible: listBindings 仅查当前用户的 binding', async () => {
+    // 模拟 user-b 调 listBindings：service 应按 actorId 查询，避免看到其他用户的 key。
     const { service, prisma } = createService({
       teamId: 'team-2',
-      existingBinding: null, // team-2 无 binding
+      existingBinding: null, // user-b 无 binding
     });
 
     const result = await service.listBindings('user-b');
 
     expect(result.binding).toBeNull();
-    // 验证查询用 team-2 而非 team-1（防跨租户泄漏）。
+    // 验证查询用 actorId 而非 teamId（防用户间泄漏）。
     expect(prisma.tenantLlmBinding.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { teamId: 'team-2' } }),
+      expect.objectContaining({ where: { userId: 'user-b' } }),
     );
   });
 
   it('dto_whitelist_strips_unknown: upsert 不透传未知字段', async () => {
     const { service, prisma } = createService();
 
-    // 模拟客户端偷传 teamId/encryptedApiKey 字段（DTO 未声明，实际由 ValidationPipe 剥离，
+    // 模拟客户端偷传 teamId/userId/encryptedApiKey 字段（DTO 未声明，实际由 ValidationPipe 剥离，
     // 但 service 的显式挑字段是第二道防线：测试确认 service 不用这些值）。
     await service.upsertBinding('user-admin', {
       apiKey: 'sk-newkey',
       // 以下字段 DTO 未声明（ValidationPipe 会剥离），但 TS 类型已禁止，
       // 此处通过 as any 模拟「ValidationPipe 失效」的极端场景，验证 service 显式挑字段。
-      ...({ teamId: 'team-evil', encryptedApiKey: 'evil' } as unknown as Record<string, unknown>),
+      ...({ teamId: 'team-evil', userId: 'user-evil', encryptedApiKey: 'evil' } as unknown as Record<string, unknown>),
     } as never);
 
     const upsertCall = (prisma.tenantLlmBinding.upsert as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    // create 数据必须用 service 计算的 teamId（从 membership），不是客户端偷传的 team-evil。
+    // create 数据必须用 service 计算的 teamId/userId，不是客户端偷传值。
     expect(upsertCall.create.teamId).toBe('team-1');
+    expect(upsertCall.create.userId).toBe('user-admin');
     expect(upsertCall.create.encryptedApiKey).not.toBe('evil');
     // encryptedApiKey 应是密文（base64 格式，长度远大于明文 sk-newkey）。
     expect(upsertCall.create.encryptedApiKey).not.toBe('sk-newkey');
@@ -212,12 +216,13 @@ describe('LlmService', () => {
     const auditCall = (prisma.auditLog.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const metadata = auditCall.data.metadata as Record<string, unknown>;
 
-    // metadata 必须含 teamId/kind（v3 去 gatewayId/provider 后简化 shape）。
+    // metadata 必须含 teamId/userId/kind（v4 用户级绑定）。
     expect(metadata.teamId).toBe('team-1');
+    expect(metadata.userId).toBe('user-admin');
     expect(metadata.kind).toBe('create'); // 首次绑定
     expect(typeof metadata.enabled).toBe('boolean');
 
-    // metadata 绝不含 gatewayId/provider（v3 已去除）。
+    // metadata 绝不含 gatewayId/provider。
     expect(metadata).not.toHaveProperty('gatewayId');
     expect(metadata).not.toHaveProperty('provider');
 
@@ -253,6 +258,7 @@ describe('LlmService', () => {
     expect(metadataStr).not.toContain(plainKey);
     expect(metadataStr).not.toContain('apiKeyHint');
     expect(metadataStr).not.toContain('keyFingerprint');
+    expect(auditCall.data.metadata).toMatchObject({ teamId: 'team-1', userId: 'user-admin' });
   });
 
   // === active provider 测试（AC2/AC7） ===
@@ -347,18 +353,18 @@ describe('LlmService', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  // === binding team 唯一 upsert（AC6） ===
+  // === binding user 唯一 upsert ===
 
-  it('binding_team_unique_upsert（AC6）: 重复 PUT 按 teamId 覆盖（kind=key_rotated）', async () => {
-    // 已有 binding（team-1），再 PUT 同 teamId 的不同 key → kind=key_rotated，upsert where=teamId。
+  it('binding_user_unique_upsert: 重复 PUT 按 userId 覆盖（kind=key_rotated）', async () => {
+    // 已有 binding（user-admin），再 PUT 同 userId 的不同 key → kind=key_rotated，upsert where=userId。
     const existing = makeBinding();
     const { service, prisma } = createService({ existingBinding: existing });
 
     await service.upsertBinding('user-admin', { apiKey: 'sk-rotated-newkey' });
 
     const upsertCall = (prisma.tenantLlmBinding.upsert as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    // where 必须是 teamId（不再 teamId_gatewayId 复合键）。
-    expect(upsertCall.where).toEqual({ teamId: 'team-1' });
+    // where 必须是 userId，确保每个用户独立。
+    expect(upsertCall.where).toEqual({ userId: 'user-admin' });
 
     // 审计 kind 应为 key_rotated（已有 binding 且提供了新 key）。
     const auditCall = (prisma.auditLog.create as ReturnType<typeof vi.fn>).mock.calls[0][0];

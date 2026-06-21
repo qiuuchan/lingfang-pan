@@ -13,7 +13,7 @@
 │   ├── manifest.json             # { id, name, title(用户命名), runtime_type, entry, ... }
 │   ├── main.py / index.js / ui/index.html   # 入口（按 runtime_type 分流）
 │   ├── data/                     # 运行数据持久化子目录（框架 ensure_plugin_dir 自动创建）
-│   ├── .venv/                    # 仅 Python 插件（venv 隔离）
+│   ├── .venv/                    # 非 Windows Python 插件 venv；Windows venv 在短路径缓存
 │   └── node_modules/             # 仅 Node 插件（pnpm install 产物）
 ```
 
@@ -32,7 +32,7 @@ Reference files:
 | `python` | `main.py` | 软件内置 Python 创建的独立 venv 进程（GUI 自弹窗口） | 「运行」/「停止」+ 状态 |
 | `nodejs` | `package.json` scripts.start | 软件内置 pnpm/npm start 独立进程 | 「运行」/「停止」+ 状态 |
 
-- **Python**：`ensure_python_venv` 检测 `.venv/` → 不存在则用软件内置 `runtimes/python` 创建 venv（300s）→ 有 `requirements.txt` 则 `.venv/.../pip install -r`（600s，幂等，清华 PyPI 镜像）→ `.venv/Scripts/python.exe -u main.py`（Windows）。
+- **Python**：`ensure_python_venv` 检测 `python_venv_dir(plugin_dir)` → 不存在则用软件内置 `runtimes/python` 创建 venv（300s）→ 有 `requirements.txt` 则 `venv/.../pip install -r`（600s，幂等，清华 PyPI 镜像）→ `venv` 内 Python `-u main.py`。Windows 的 venv 不放插件目录，改放 `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>`，避免 PySide6 等深层 wheel 在默认 Roaming 插件目录下触发 260 字符路径限制。
 - **Node**：`ensure_node_dependencies` 有 `package.json` + 非空依赖 + `node_modules` 缺失 → 软件内置 `runtimes/nodejs` 下的 `pnpm install`，缺 pnpm 时回退内置 `npm install`（600s，npmmirror）→ 内置 `pnpm start` / `npm start`，无 package 脚本时内置 `node entry`。
 - **HTML**：`read_local_plugin_file` 读取 entry HTML → iframe srcDoc 渲染。iframe 去 `allow-same-origin` 形成 opaque origin，防越权访问 parent.__TAURI__/localStorage。
 
@@ -56,6 +56,7 @@ Reference files:
 - `probe_script_runtime` only probes embedded binaries and must never scan system `PATH`.
 - `run_plugin_script` preview execution uses only embedded Python/Node and injects the embedded runtime environment.
 - `start_plugin` persistent execution creates Python venvs with embedded Python, installs Python deps through the venv pip with embedded env, and uses embedded Node/pnpm/npm for Node install/start.
+- `python_venv_dir(plugin_dir)` must return `<plugin_dir>/.venv` on non-Windows and `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>` on Windows; the hash is derived from the normalized plugin path so the same plugin reuses the same short venv.
 - Python venv creation must verify pip after `python -m venv`; if standard `venv`/`ensurepip` fails or leaves no pip, retry with embedded `python -m venv --without-pip` and bootstrap pip via embedded `python -m pip --python <venv-python> install --no-index --find-links <embedded-pip-wheel-dir> --upgrade pip`.
 - Embedded pip wheel discovery must prefer `runtimes/python/Lib/ensurepip/_bundled/pip-*.whl` and may fall back to `runtimes/python/pip-*.whl` for older packaged layouts; it must not download pip or use host Python.
 - `run_command` maps `python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, and `pnpm` to embedded runtime commands only. External absolute paths for those command names are rejected.
@@ -65,7 +66,8 @@ Reference files:
 - missing `runtimes/python` -> Python probe returns `available=false` with packaging hint; Python preview/start fail with embedded-runtime guidance.
 - missing `runtimes/nodejs` -> Node probe returns `available=false` with packaging hint; Node preview/start fail with embedded-runtime guidance.
 - host Python/Node installed but embedded runtime missing -> still unavailable; do not fall back to host.
-- embedded Python `ensurepip` fails while creating `.venv` -> remove the partial `.venv`, create a `--without-pip` venv, install pip from bundled wheel with embedded `pip --python`, then continue requirements install through the venv Python.
+- embedded Python `ensurepip` fails while creating venv -> remove the partial venv directory, create a `--without-pip` venv, install pip from bundled wheel with embedded `pip --python`, then continue requirements install through the venv Python.
+- Windows plugin path is deep and `requirements.txt` contains PySide6 -> venv path must stay under `%LOCALAPPDATA%/LingFang/python-venvs/...`; do not require users to enable system Long Path support.
 - embedded Python cannot find any bundled `pip-*.whl` during fallback -> fail explicitly with a packaging error; do not fetch pip from the network.
 - `run_command("C:/Python/python.exe", ...)` or `run_command("/usr/bin/node", ...)` -> reject because runtime commands cannot use external absolute paths.
 - `run_command("git", ...)` -> may still use host `PATH`; the restriction is specific to Python/Node runtime commands.
@@ -84,6 +86,7 @@ Reference files:
 - `plugin_runner::tests::bundled_pip_wheel_dir_prefers_ensurepip_bundled`
 - `plugin_runner::tests::bundled_pip_wheel_dir_falls_back_to_python_root`
 - `plugin_runner::tests::contains_pip_wheel_ignores_non_pip_wheels`
+- `plugin_runner::tests::python_venv_dir_uses_short_cache_on_windows`
 - `plugin_script::tests::install_hint_covers_both_runtimes`
 - Existing preview/process-tree tests may use host binaries only for low-level process cleanup coverage; production probe/start paths must remain embedded-only.
 

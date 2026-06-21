@@ -137,6 +137,7 @@ model User {
   purchasesSeller       Purchase[]             @relation("PurchaseSeller")
   pluginRatings         PluginRating[]         @relation("PluginRater")
   auditLogs             AuditLog[]             @relation("AuditActor")
+  ownedLlmBinding       TenantLlmBinding?     @relation("BindingOwner")
   createdLlmBindings    TenantLlmBinding[]    @relation("BindingCreator")
   updatedLlmBindings    TenantLlmBinding[]    @relation("BindingUpdater")
   platformSettingUpdates PlatformSetting[]   @relation("SettingUpdater")
@@ -409,15 +410,16 @@ model LlmGateway {
   @@index([isActive])
 }
 
-// 租户 LLM 绑定（租户级，TEAM_ADMIN 维护）。
-// v3 定稿：去 gatewayId + provider（用户界面零 provider 概念），teamId @unique（一个团队一条 apiKey 绑定）。
+// 用户 LLM 绑定（用户级，当前账户维护）。
+// v4：去 gatewayId + provider（用户界面零 provider 概念），userId @unique（一个用户一条 apiKey 绑定）。
 // 用户填 apiKey 拉取当前启用 provider 的模型，平台切换 provider 后用户只需重新填 key（无感知切换）。
 // encryptedApiKey 为 AES-256-GCM 密文打包 base64(iv(12B)||tag(16B)||ciphertext)。
 // apiKeyHint 为脱敏串（非敏感，明文存库供列表展示，零解密）。
 // keyFingerprint 为 sha256(明文).slice(0,16)，稳定标识「这是哪个 key」（不泄漏明文）。
 model TenantLlmBinding {
   id              String     @id @default(uuid())
-  teamId          String     @unique                     // 一个团队一条 apiKey 绑定（v3 定稿）
+  teamId          String                                  // 当前团队上下文（审计/级联清理用）
+  userId          String     @unique                     // 一个用户一条 apiKey 绑定
   encryptedApiKey String                                 // base64(iv(12B) || tag(16B) || ciphertext)
   apiKeyHint      String     @default("")                // 明文存非敏感脱敏串（PUT 时计算落库）
   keyFingerprint  String     @default("")                // sha256(plaintext).slice(0,16)
@@ -429,10 +431,12 @@ model TenantLlmBinding {
   updatedAt       DateTime   @updatedAt
 
   team       Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  owner      User  @relation("BindingOwner", fields: [userId], references: [id], onDelete: Cascade)
   createdBy  User? @relation("BindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
   updatedBy  User? @relation("BindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([teamId, enabled])
+  @@index([userId, enabled])
 }
 
 // 应用版本发布（平台级，平台 Admin 维护，官网展示 + 桌面端检查更新用）。
