@@ -2,7 +2,7 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { createPrismaAdapter } from './prisma.adapter';
-import { SYSTEM_PLATFORM_ADMIN_ROLE_ID } from './modules/permissions/permission-codes';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID, SYSTEM_PLATFORM_ADMIN_ROLE_CODE } from './modules/permissions/permission-codes';
 
 const adapter = createPrismaAdapter(process.env);
 const prisma = new PrismaClient({ adapter });
@@ -31,6 +31,7 @@ async function main() {
     create: {
       id: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
       name: '系统平台管理员',
+      code: SYSTEM_PLATFORM_ADMIN_ROLE_CODE,
       scope: 'PLATFORM',
       teamId: null,
       isSystem: true,

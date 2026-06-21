@@ -539,16 +539,39 @@ model Notification {
 
 // RBAC：权限码注册表镜像。权限码本体由后端 permission-codes.ts 预定义（代码单一事实来源），
 // 此表仅供 admin UI 展示/分组勾选用（seed 时从 permission-codes 全量 upsert）。code 为主键。
-// scope 标识属平台级还是团队级；group 为分组键（如 "team.member"），供前端按分组渲染勾选树。
+// scope 标识属平台级还是团队级。
+// 模块→操作两级结构：group=moduleKey（向后兼容，如 "team.member"）；moduleLabel 为模块中文显示名（如「成员管理」）；
+// moduleOrder 用于模块间稳定排序（同模块多权限共享同一值）。
 model PermissionEntry {
   code        String    @id
   label       String
   scope       RoleScope
   group       String
+  moduleKey   String
+  moduleLabel String
+  moduleOrder Int       @default(0)
   description String    @default("")
   createdAt   DateTime  @default(now())
 
   @@index([scope, group])
+  @@index([scope, moduleKey])
+}
+
+// RBAC：权限组（可编辑分组显示名）。
+// 管理员可对每个 moduleKey（= groupKey）自定义显示名，覆盖 PermissionEntry.moduleLabel。
+// 仅覆盖显示名，不可新增/删除权限码本身。isSystem=true 为内置行（seed 写入，不可删）；isSystem=false 为管理员自定义覆盖行。
+// 复合主键 (scope, groupKey)：同一 scope 下 groupKey 唯一。
+model PermissionGroup {
+  scope      RoleScope
+  groupKey   String
+  displayName String
+  sortOrder  Int      @default(0)
+  isSystem   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@id([scope, groupKey])
+  @@index([scope, sortOrder])
 }
 
 // RBAC：自定义角色。
@@ -559,6 +582,7 @@ model PermissionEntry {
 model Role {
   id          String           @id @default(uuid())
   name        String
+  code        String?
   scope       RoleScope
   teamId      String?
   isSystem    Boolean          @default(false)
@@ -573,8 +597,10 @@ model Role {
   users       User[]           @relation("UserPlatformRole")
   memberships TeamMembership[] @relation("MembershipTeamRole")
 
-  // 同 scope+teamId 下角色名不重复。Postgres 中多列 unique 对 null 值各行独立（平台级 teamId=null 仍全局唯一）。
+  // 同 scope+teamId 下角色名不重复。code 同 scope+teamId 下唯一（可选；null 各行独立）。
+  // Postgres 中多列 unique 对 null 值各行独立（平台级 teamId=null 仍全局唯一）。
   @@unique([scope, teamId, name])
+  @@unique([scope, teamId, code])
   @@index([scope, teamId])
 }
 

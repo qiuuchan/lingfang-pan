@@ -5,7 +5,9 @@ import { AuthService } from './auth.service';
 import {
   PERMISSION_CODE_SET,
   permissionCodesByScope,
+  permissionModulesByScope,
   SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+  SYSTEM_TEAM_ADMIN_ROLE_CODE,
   type PermissionScope,
 } from './permissions/permission-codes';
 
@@ -14,6 +16,7 @@ function publicRole(
   role: {
     id: string;
     name: string;
+    code: string | null;
     scope: 'PLATFORM' | 'TEAM';
     teamId: string | null;
     isSystem: boolean;
@@ -27,6 +30,7 @@ function publicRole(
   return {
     id: role.id,
     name: role.name,
+    code: role.code,
     scope: role.scope,
     teamId: role.teamId,
     isSystem: role.isSystem,
@@ -47,9 +51,9 @@ export class RoleService {
 
   // ============ 权限码清单 ============
 
-  /** 返回某 scope 的全部权限码定义（前端角色编辑页勾选面板数据源）。 */
+  /** 返回某 scope 的权限模块（两级：模块→操作，前端勾选树数据源）+ 扁平权限码（向后兼容）。 */
   async listPermissions(scope: PermissionScope) {
-    return { permissions: permissionCodesByScope(scope) };
+    return { modules: permissionModulesByScope(scope), permissions: permissionCodesByScope(scope) };
   }
 
   // ============ 平台角色（scope=PLATFORM，平台管理员在 web 端管理） ============
@@ -72,7 +76,7 @@ export class RoleService {
   }
 
   /** 创建平台角色。需 platform.role.manage 权限。 */
-  async createPlatformRole(userId: string, input: { name: string; description?: string; permissions?: string[] }) {
+  async createPlatformRole(userId: string, input: { name: string; code?: string; description?: string; permissions?: string[] }) {
     await this.auth.ensurePermission(userId, 'platform.role.manage');
     const permissions = this.validatePermissions(input.permissions ?? [], 'PLATFORM');
     const existing = await this.prisma.role.findFirst({
@@ -80,9 +84,12 @@ export class RoleService {
       select: { id: true },
     });
     if (existing) throw conflict('平台角色名已存在');
+    const code = this.normalizeRoleCode(input.code);
+    if (code !== null) await this.assertCodeAvailable('PLATFORM', null, code);
     const role = await this.prisma.role.create({
       data: {
         name: input.name,
+        code,
         scope: 'PLATFORM',
         teamId: null,
         description: input.description ?? '',
@@ -90,23 +97,29 @@ export class RoleService {
         isSystem: false,
       },
     });
-    await this.audit(userId, 'role.created', 'Role', role.id, { scope: 'PLATFORM', name: role.name, permissions });
+    await this.audit(userId, 'role.created', 'Role', role.id, { scope: 'PLATFORM', name: role.name, code, permissions });
     return { role: publicRole(role, 0) };
   }
 
   /** 更新平台角色。系统角色不可改权限。需 platform.role.manage 权限。 */
-  async updatePlatformRole(userId: string, roleId: string, input: { name?: string; description?: string; permissions?: string[] }) {
+  async updatePlatformRole(userId: string, roleId: string, input: { name?: string; code?: string; description?: string; permissions?: string[] }) {
     await this.auth.ensurePermission(userId, 'platform.role.manage');
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role || role.scope !== 'PLATFORM') throw notFound('平台角色不存在');
 
-    const data: { name?: string; description?: string; permissions?: string[] } = {};
+    const data: { name?: string; code?: string | null; description?: string; permissions?: string[] } = {};
     if (input.name !== undefined) {
       if (input.name !== role.name) {
         const dup = await this.prisma.role.findFirst({ where: { scope: 'PLATFORM', name: input.name, NOT: { id: roleId } } });
         if (dup) throw conflict('平台角色名已存在');
       }
       data.name = input.name;
+    }
+    if (input.code !== undefined) {
+      if (role.isSystem) throw forbidden('内置角色编码不可修改');
+      const code = this.normalizeRoleCode(input.code);
+      if (code !== null && code !== role.code) await this.assertCodeAvailable('PLATFORM', null, code, roleId);
+      data.code = code;
     }
     if (input.description !== undefined) data.description = input.description;
     if (input.permissions !== undefined) {
@@ -172,15 +185,18 @@ export class RoleService {
   }
 
   /** 创建团队角色。需 team.role.manage 权限。 */
-  async createTeamRole(userId: string, input: { name: string; description?: string; permissions?: string[] }) {
+  async createTeamRole(userId: string, input: { name: string; code?: string; description?: string; permissions?: string[] }) {
     await this.auth.ensurePermission(userId, 'team.role.manage');
     const m = await this.resolveCurrentTeam(userId);
     const permissions = this.validatePermissions(input.permissions ?? [], 'TEAM');
     const existing = await this.prisma.role.findFirst({ where: { scope: 'TEAM', teamId: m.teamId, name: input.name } });
     if (existing) throw conflict('团队角色名已存在');
+    const code = this.normalizeRoleCode(input.code);
+    if (code !== null) await this.assertCodeAvailable('TEAM', m.teamId, code);
     const role = await this.prisma.role.create({
       data: {
         name: input.name,
+        code,
         scope: 'TEAM',
         teamId: m.teamId,
         description: input.description ?? '',
@@ -188,24 +204,30 @@ export class RoleService {
         isSystem: false,
       },
     });
-    await this.audit(userId, 'role.created', 'Role', role.id, { scope: 'TEAM', teamId: m.teamId, name: role.name, permissions });
+    await this.audit(userId, 'role.created', 'Role', role.id, { scope: 'TEAM', teamId: m.teamId, name: role.name, code, permissions });
     return { role: publicRole(role, 0) };
   }
 
   /** 更新团队角色。系统角色不可改权限；不可跨团队。需 team.role.manage 权限。 */
-  async updateTeamRole(userId: string, roleId: string, input: { name?: string; description?: string; permissions?: string[] }) {
+  async updateTeamRole(userId: string, roleId: string, input: { name?: string; code?: string; description?: string; permissions?: string[] }) {
     await this.auth.ensurePermission(userId, 'team.role.manage');
     const m = await this.resolveCurrentTeam(userId);
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role || role.scope !== 'TEAM' || role.teamId !== m.teamId) throw notFound('团队角色不存在');
 
-    const data: { name?: string; description?: string; permissions?: string[] } = {};
+    const data: { name?: string; code?: string | null; description?: string; permissions?: string[] } = {};
     if (input.name !== undefined) {
       if (input.name !== role.name) {
         const dup = await this.prisma.role.findFirst({ where: { scope: 'TEAM', teamId: m.teamId, name: input.name, NOT: { id: roleId } } });
         if (dup) throw conflict('团队角色名已存在');
       }
       data.name = input.name;
+    }
+    if (input.code !== undefined) {
+      if (role.isSystem) throw forbidden('内置角色编码不可修改');
+      const code = this.normalizeRoleCode(input.code);
+      if (code !== null && code !== role.code) await this.assertCodeAvailable('TEAM', m.teamId, code, roleId);
+      data.code = code;
     }
     if (input.description !== undefined) data.description = input.description;
     if (input.permissions !== undefined) {
@@ -244,7 +266,8 @@ export class RoleService {
     if (!target || target.status !== 'ACTIVE') throw notFound('团队成员不存在');
 
     // 迁移期双写：teamRole 枚举同步（系统团队管理员→TEAM_ADMIN，否则 MEMBER）
-    const isTeamAdmin = role.isSystem && role.name === '系统团队管理员';
+    // 基于 code 检测（不依赖 name 字符串，更稳健，见 SYSTEM_TEAM_ADMIN_ROLE_CODE）
+    const isTeamAdmin = role.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE;
     await this.prisma.teamMembership.update({
       where: { teamId_userId: { teamId: m.teamId, userId: targetUserId } },
       data: { teamRoleId: roleId, role: isTeamAdmin ? 'TEAM_ADMIN' : 'MEMBER' },
@@ -263,6 +286,22 @@ export class RoleService {
       if (!allowed.has(code)) throw badRequest(`权限码 ${code} 不属于${scope === 'PLATFORM' ? '平台' : '团队'}级`);
     }
     return [...new Set(codes)]; // 去重
+  }
+
+  /** 规范化角色编码：trim + 空串/null → null（表示不设编码）。DTO 已用正则校验非空值格式。 */
+  private normalizeRoleCode(raw: string | undefined | null): string | null {
+    if (raw === undefined || raw === null) return null;
+    const trimmed = raw.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+
+  /** 校验编码在同 scope+teamId 下唯一（排除自身）。code=null 跳过（多 null 行互不冲突）。 */
+  private async assertCodeAvailable(scope: PermissionScope, teamId: string | null, code: string, excludeRoleId?: string): Promise<void> {
+    const dup = await this.prisma.role.findFirst({
+      where: { scope, teamId, code, ...(excludeRoleId ? { NOT: { id: excludeRoleId } } : {}) },
+      select: { id: true },
+    });
+    if (dup) throw conflict('角色编码已存在');
   }
 
   /** 解析当前团队 membership（与 ensureCurrentTeam 同款：ACTIVE + team ACTIVE）。 */

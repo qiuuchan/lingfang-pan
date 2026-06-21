@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+
+/** 角色编码格式：小写字母/数字开头，允许小写字母、数字、下划线、连字符，1-64 字符。 */
+const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /** 创建角色请求体 DTO。permissions 为权限码数组（必须来自注册表白名单，service 层校验）。 */
 export class CreateRoleDto {
@@ -9,6 +12,13 @@ export class CreateRoleDto {
   @MinLength(1, { message: 'name 不能为空' })
   @MaxLength(64, { message: 'name 最长 64 字符' })
   name!: string;
+
+  @ApiPropertyOptional({ description: '角色编码（可选、同 scope+teamId 下唯一，如 admin/operator）' })
+  @IsOptional()
+  @IsString({ message: 'code 必须是字符串' })
+  @MaxLength(64, { message: 'code 最长 64 字符' })
+  @Matches(ROLE_CODE_PATTERN, { message: '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头' })
+  code?: string;
 
   @ApiPropertyOptional({ description: '角色描述（最长 255 字符）' })
   @IsOptional()
@@ -32,6 +42,13 @@ export class UpdateRoleDto {
   @MinLength(1, { message: 'name 不能为空' })
   @MaxLength(64, { message: 'name 最长 64 字符' })
   name?: string;
+
+  @ApiPropertyOptional({ description: '角色编码' })
+  @IsOptional()
+  @IsString({ message: 'code 必须是字符串' })
+  @MaxLength(64, { message: 'code 最长 64 字符' })
+  @Matches(ROLE_CODE_PATTERN, { message: '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头' })
+  code?: string;
 
   @ApiPropertyOptional({ description: '角色描述' })
   @IsOptional()
@@ -70,4 +87,19 @@ export class SetPluginGrantDto {
   @ApiProperty({ description: '授权效果：ALLOW 放行 / DENY 拒绝（deny 优先）', enum: ['ALLOW', 'DENY'] })
   @IsString()
   effect!: 'ALLOW' | 'DENY';
+}
+
+/** upsert 权限组显示名请求体 DTO（管理员自定义模块显示名覆盖）。 */
+export class UpsertPermissionGroupDto {
+  @ApiProperty({ description: '分组键（已注册的 moduleKey，不允许新增模块本身）' })
+  @IsString({ message: 'groupKey 必须是字符串' })
+  @MinLength(1, { message: 'groupKey 不能为空' })
+  @MaxLength(64, { message: 'groupKey 最长 64 字符' })
+  groupKey!: string;
+
+  @ApiProperty({ description: '分组显示名（1-64 字符）' })
+  @IsString({ message: 'displayName 必须是字符串' })
+  @MinLength(1, { message: 'displayName 不能为空' })
+  @MaxLength(64, { message: 'displayName 最长 64 字符' })
+  displayName!: string;
 }
