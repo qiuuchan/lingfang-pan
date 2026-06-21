@@ -14,7 +14,11 @@ import {
   ALL_PERMISSIONS,
   PLATFORM_PERMISSIONS,
   TEAM_PERMISSIONS,
+  BUILTIN_PERMISSION_GROUPS,
   SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+  SYSTEM_PLATFORM_ADMIN_ROLE_CODE,
+  SYSTEM_TEAM_ADMIN_ROLE_CODE,
+  SYSTEM_TEAM_MEMBER_ROLE_CODE,
   teamAdminRoleId,
   teamMemberRoleId,
   type PermissionScope,
@@ -34,11 +38,46 @@ async function seedPermissionEntries() {
   for (const p of ALL_PERMISSIONS) {
     await prisma.permissionEntry.upsert({
       where: { code: p.code },
-      update: { label: p.label, scope: p.scope as PermissionScope, group: p.group, description: p.description },
-      create: { code: p.code, label: p.label, scope: p.scope as PermissionScope, group: p.group, description: p.description },
+      update: {
+        label: p.label,
+        scope: p.scope as PermissionScope,
+        group: p.group,
+        moduleKey: p.moduleKey,
+        moduleLabel: p.moduleLabel,
+        moduleOrder: p.moduleOrder,
+        description: p.description,
+      },
+      create: {
+        code: p.code,
+        label: p.label,
+        scope: p.scope as PermissionScope,
+        group: p.group,
+        moduleKey: p.moduleKey,
+        moduleLabel: p.moduleLabel,
+        moduleOrder: p.moduleOrder,
+        description: p.description,
+      },
     });
   }
   console.log(`permission seed 完成：${ALL_PERMISSIONS.length} 条权限码已同步到 PermissionEntry。`);
+}
+
+/** seed 内置权限分组（PermissionGroup 表，isSystem=true，与 BUILTIN_PERMISSION_GROUPS 对齐）。 */
+async function seedPermissionGroups() {
+  for (const g of BUILTIN_PERMISSION_GROUPS) {
+    await prisma.permissionGroup.upsert({
+      where: { scope_groupKey: { scope: g.scope as PermissionScope, groupKey: g.groupKey } },
+      update: { sortOrder: g.sortOrder },
+      create: {
+        scope: g.scope as PermissionScope,
+        groupKey: g.groupKey,
+        displayName: g.displayName,
+        sortOrder: g.sortOrder,
+        isSystem: true,
+      },
+    });
+  }
+  console.log(`权限分组 seed：${BUILTIN_PERMISSION_GROUPS.length} 条内置分组已同步到 PermissionGroup。`);
 }
 
 async function seedPlatformAdminRole() {
@@ -46,10 +85,11 @@ async function seedPlatformAdminRole() {
   // 内置平台管理员角色（migration 已建，此处幂等 upsert）
   await prisma.role.upsert({
     where: { id: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
-    update: { permissions: platformCodes },
+    update: { permissions: platformCodes, code: SYSTEM_PLATFORM_ADMIN_ROLE_CODE },
     create: {
       id: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
       name: '系统平台管理员',
+      code: SYSTEM_PLATFORM_ADMIN_ROLE_CODE,
       scope: 'PLATFORM',
       teamId: null,
       isSystem: true,
@@ -65,13 +105,14 @@ async function seedTeamSystemRoles() {
   const teamCodes = TEAM_PERMISSIONS.map((p) => p.code);
 
   for (const team of teams) {
-    // 系统团队管理员：幂等 upsert（缺则建，有则刷新 permissions）
+    // 系统团队管理员：幂等 upsert（缺则建，有则刷新 permissions + code）
     await prisma.role.upsert({
       where: { id: teamAdminRoleId(team.id) },
-      update: { permissions: teamCodes },
+      update: { permissions: teamCodes, code: SYSTEM_TEAM_ADMIN_ROLE_CODE },
       create: {
         id: teamAdminRoleId(team.id),
         name: '系统团队管理员',
+        code: SYSTEM_TEAM_ADMIN_ROLE_CODE,
         scope: 'TEAM',
         teamId: team.id,
         isSystem: true,
@@ -83,10 +124,11 @@ async function seedTeamSystemRoles() {
     // 系统成员：幂等 upsert
     await prisma.role.upsert({
       where: { id: teamMemberRoleId(team.id) },
-      update: { permissions: MEMBER_BASELINE_PERMISSIONS },
+      update: { permissions: MEMBER_BASELINE_PERMISSIONS, code: SYSTEM_TEAM_MEMBER_ROLE_CODE },
       create: {
         id: teamMemberRoleId(team.id),
         name: '系统成员',
+        code: SYSTEM_TEAM_MEMBER_ROLE_CODE,
         scope: 'TEAM',
         teamId: team.id,
         isSystem: true,
@@ -135,6 +177,7 @@ async function backfillExistingRoleRefs() {
 
 async function main() {
   await seedPermissionEntries();
+  await seedPermissionGroups();
   await seedPlatformAdminRole();
   await seedTeamSystemRoles();
   await backfillExistingRoleRefs();

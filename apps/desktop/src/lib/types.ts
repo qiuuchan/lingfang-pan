@@ -164,13 +164,36 @@ export interface PermissionEntry {
   label: string;
   scope: RoleScope;
   group: string;
+  moduleKey: string;
+  moduleLabel: string;
+  moduleOrder: number;
   description: string;
   createdAt: string;
+}
+
+/** 权限模块定义（两级结构父级：模块 → 操作列表）。 */
+export interface PermissionModule {
+  moduleKey: string;
+  moduleLabel: string;
+  scope: RoleScope;
+  sortOrder: number;
+  operations: PermissionEntry[];
+}
+
+/** 权限分组（可编辑显示名，覆盖 moduleLabel）。 */
+export interface PermissionGroup {
+  scope: RoleScope;
+  groupKey: string;
+  displayName: string;
+  sortOrder: number;
+  isSystem: boolean;
+  customized?: boolean;
 }
 
 export interface Role {
   id: string;
   name: string;
+  code: string | null;
   scope: RoleScope;
   teamId: string | null;
   isSystem: boolean;
