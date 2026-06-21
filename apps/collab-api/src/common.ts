@@ -12,6 +12,8 @@ export interface AuthUser {
   platformRole: 'NONE' | 'PLATFORM_ADMIN';
   /** token 版本号，与 user.tokenVersion 比对以实现吊销（见 JwtAuthGuard）。 */
   tokenVersion: number;
+  /** RBAC：用户挂的平台级角色 id（scope=PLATFORM），由 JwtAuthGuard 回查时填充。null 表示无平台角色。 */
+  platformRoleId?: string | null;
 }
 
 export class AppError extends Error {

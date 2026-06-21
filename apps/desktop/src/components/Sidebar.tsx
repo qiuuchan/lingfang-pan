@@ -9,6 +9,7 @@ import {
   UserRoundIcon,
   SparklesIcon,
   ShieldCheckIcon,
+  UsersRoundIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
@@ -20,6 +21,7 @@ const NAV: NavItem[] = [
   { v: 'home', label: '首页', icon: HomeIcon },
   { v: 'creator', label: '创建插件', icon: SparklesIcon },
   { v: 'plugins', label: '插件', icon: PackageIcon },
+  { v: 'team-admin', label: '团队管理', icon: UsersRoundIcon, teamAdminOnly: true },
   { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
 ];
 

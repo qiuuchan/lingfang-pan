@@ -10,6 +10,7 @@ const loaders: Record<View, () => Promise<unknown>> = {
   applications: () => import('@/components/applications-view'),
   audit: () => import('@/components/audit-view'),
   releases: () => import('@/components/releases-view'),
+  roles: () => import('@/components/roles-view'),
   settings: () => import('@/components/settings-view'),
 };
 

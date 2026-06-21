@@ -6,6 +6,7 @@ import { PrismaService } from './prisma.service';
 import { AuthModule } from './modules/auth.module';
 import { CollabModule } from './modules/collab.module';
 import { JwtAuthGuard } from './security';
+import { PermissionsGuard } from './permissions.guard';
 import { HealthController, ReadinessService } from './health.controller';
 import { AppCacheService, CacheService } from './cache.service';
 
@@ -93,6 +94,9 @@ function buildRedactPaths(): string[] {
     ReadinessService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // RBAC 权限守卫：在 JwtAuthGuard 之后（user 已解析），按 @RequirePermission 校验。
+    // 未声明权限要求的路由放行（向后兼容），由 service 内部 ensureXxx 兜底。
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

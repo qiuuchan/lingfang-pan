@@ -7,6 +7,11 @@ import { z } from 'zod';
 
 // 契约仅保留 manifest 边界需要的 TenantRole 别名（与 PluginGrant 主体配合使用）。
 // HTTP 响应侧的 user/team/session 不再以 dead schema 形式声明（见本文件末注释）。
+//
+// ⚠️ DRIFT 收敛（RBAC 任务）：TenantRole（owner|admin|developer|member）为历史 dead schema，
+// 与实际 Prisma 角色模型（TeamRole=TEAM_ADMIN|MEMBER）不符。实际角色系统以 ./rbac.ts 的 Role 模型为准
+// （PLATFORM/TEAM 两层 scope + 预定义权限码）。新代码请勿引用 TenantRole 做业务判断；
+// 此处仅保留供 PluginGrant resolveGrant() 的 role 字符串参数兼容，后续随插件授权重构一并清理。
 export const TenantRole = z.enum(['owner', 'admin', 'developer', 'member']);
 export type TenantRole = z.infer<typeof TenantRole>;
 
