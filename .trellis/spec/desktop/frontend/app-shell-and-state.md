@@ -7,6 +7,12 @@
 - `apps/desktop/src/lib/types.ts` 的 `View`
 - `apps/desktop/src/App.tsx` 的页面分支
 - `apps/desktop/src/components/Sidebar.tsx` 的 `NAV`
+- `apps/desktop/src/lib/view-preload.ts` 的 loaders（预加载，可选但推荐）
+
+**团队管理控制面板（TeamAdmin，2026-06-21）**：新增顶级页面 `View = 'team-admin'`，仅团队管理员（`session.role === 'TEAM_ADMIN'`）可见，
+通过 `NAV` 的 `teamAdminOnly: true` 标志过滤。这是团队管理线路的核心 UI（与平台管理 web 端分离），
+含 5 个 tab：概览 / 成员管理 / 角色与权限 / 插件授权 / 邀请码与设置。子组件拆分在 `src/pages/team-admin/` 目录下（避免单文件过大，遵循 >1500 行必拆策略）。
+注意：`team-admin` 走主 body 渲染（不被 `setView` 拦截到 AccountDialog），与 `team-manage`（走 AccountDialog tab）不同。
 
 会话状态只保存在内存中的 `Session`，`applySession` 同步更新 `lib/api.ts` 的模块级 auth token。不要在页面里直接维护第二份 token。
 

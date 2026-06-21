@@ -4,6 +4,10 @@ import { PrismaService } from '../prisma.service';
 import { badRequest, forbidden, insufficientBalance, notFound, publicUser } from '../common';
 import { AuthService } from './auth.service';
 
+/** 系统成员角色 id 拼接约定（与 migration/seed-rbac.ts/auth.service.ts 一致）。
+ *  新成员加入团队时默认指向此角色；管理员可后续调整为自定义角色。 */
+const teamMemberRoleId = (teamId: string) => `team-member-${teamId}`;
+
 // 邀请码哈希唯一入口：生成与兑换必须共用同一归一规则。
 // 修复 INVITE-CASE：生成时 code 经 toUpperCase() 后哈希（见 createInvitation），库中 codeHash 均为大写规范形。
 // 兑换若按用户原始大小写哈希，则小写/混合输入会查无记录、误报"邀请码无效"。
@@ -77,10 +81,11 @@ export class TeamService {
       if (consumed.count !== 1) throw badRequest('邀请码已达到使用次数上限');
       await tx.teamMembership.upsert({
         where: { teamId_userId: { teamId: invite.teamId, userId } },
-        create: { teamId: invite.teamId, userId, role: 'MEMBER' },
+        create: { teamId: invite.teamId, userId, role: 'MEMBER', teamRoleId: teamMemberRoleId(invite.teamId) },
         // 修复 TEAM-06：重新激活已 REMOVED 成员时刷新 joinedAt，否则 ensureCurrentTeam/sessionFor
         // 按 joinedAt desc 选当前团队会错指（重新加入的旧团队 joinedAt 仍是历史值）。
-        update: { status: 'ACTIVE', role: 'MEMBER', joinedAt: new Date() },
+        // RBAC：重新激活时回填系统成员角色（REMOVED 前可能已清空 teamRoleId）。
+        update: { status: 'ACTIVE', role: 'MEMBER', teamRoleId: teamMemberRoleId(invite.teamId), joinedAt: new Date() },
       });
       await tx.auditLog.create({ data: { actorUserId: userId, action: 'invitation.redeemed', targetType: 'InvitationCode', targetId: invite.id, metadata: { teamId: invite.teamId } } });
     });
@@ -138,10 +143,11 @@ export class TeamService {
     await this.prisma.$transaction(async (tx) => {
       await tx.teamMembership.upsert({
         where: { teamId_userId: { teamId, userId } },
-        create: { teamId, userId, role: 'MEMBER' },
+        create: { teamId, userId, role: 'MEMBER', teamRoleId: teamMemberRoleId(teamId) },
         // 重新激活已 REMOVED 成员时刷新 joinedAt（与 redeemInvitation 的 TEAM-06 修复对齐），
         // 否则 ensureCurrentTeam 按 joinedAt desc 选当前团队会错指。
-        update: { status: 'ACTIVE', role: 'MEMBER', joinedAt: new Date() },
+        // RBAC：重新激活时回填系统成员角色。
+        update: { status: 'ACTIVE', role: 'MEMBER', teamRoleId: teamMemberRoleId(teamId), joinedAt: new Date() },
       });
       await tx.auditLog.create({
         data: { actorUserId: userId, action: 'team.public_joined', targetType: 'Team', targetId: teamId, metadata: { teamId } },

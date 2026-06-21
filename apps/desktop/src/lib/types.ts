@@ -148,4 +148,42 @@ export interface LoadedPlugin {
 export type SettingsTab = 'cli' | 'gateway' | 'plugins' | 'backend';
 export type AccountSettingsTab = 'account' | 'team' | 'team-manage' | 'wallet' | 'settings';
 
-export type View = 'home' | 'creator' | 'team' | 'team-manage' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';
+export type View = 'home' | 'creator' | 'team' | 'team-manage' | 'team-admin' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';
+
+// RBAC：团队角色 + 权限码 + 插件授权（与后端 Role/PermissionEntry/PluginGrant + contract rbac.ts 对齐）。
+export type RoleScope = 'PLATFORM' | 'TEAM';
+export type PluginGrantSubject = 'USER' | 'ROLE';
+export type PluginGrantEffect = 'ALLOW' | 'DENY';
+
+export interface PermissionEntry {
+  code: string;
+  label: string;
+  scope: RoleScope;
+  group: string;
+  description: string;
+  createdAt: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  scope: RoleScope;
+  teamId: string | null;
+  isSystem: boolean;
+  description: string;
+  permissions: string[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PluginGrantRow {
+  id: string;
+  teamId: string;
+  pluginId: string;
+  subjectKind: PluginGrantSubject;
+  subjectId: string;
+  effect: PluginGrantEffect;
+  createdBy: string | null;
+  createdAt: string;
+}

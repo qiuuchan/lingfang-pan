@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, notFound, AppError } from '../common';
 import { AuthService } from './auth.service';
+import { PluginGrantService } from './plugin-grant.service';
 import { ensurePluginManager, normalizePluginPackage, publicAvailablePlugin, publicPlugin, type PluginPackageInput } from './plugin-package';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class PluginService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(PluginGrantService) private readonly grants: PluginGrantService,
   ) {}
 
   async uploadPlugin(userId: string, input: PluginPackageInput) {
@@ -73,7 +75,14 @@ export class PluginService {
       },
       orderBy: [{ marketplace: 'asc' }, { updatedAt: 'desc' }],
     });
-    return { plugins: plugins.map((plugin) => publicAvailablePlugin(plugin, membership.teamId)) };
+    // RBAC 插件授权过滤：被 deny 的插件不出现在可用列表。
+    // resolvePluginAccess（deny 优先、user 级优先于 role 级、团队管理员默认放行、无 grant 默认放行）。
+    const accessible: typeof plugins = [];
+    for (const plugin of plugins) {
+      const ok = await this.grants.resolvePluginAccess(membership.teamId, plugin.id, userId, membership.teamRoleId);
+      if (ok) accessible.push(plugin);
+    }
+    return { plugins: accessible.map((plugin) => publicAvailablePlugin(plugin, membership.teamId)) };
   }
 
   async submitPluginToMarketplace(userId: string, id: string, input: { priceCents?: number }) {

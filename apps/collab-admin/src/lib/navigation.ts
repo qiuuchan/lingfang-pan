@@ -8,6 +8,7 @@ import {
   RocketIcon,
   SettingsIcon,
   ShieldCheckIcon,
+  ShieldIcon,
   UsersIcon,
 } from 'lucide-react';
 import type { View } from '@/lib/types';
@@ -47,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: '系统',
     items: [
+      { view: 'roles', label: '角色管理', icon: ShieldIcon },
       { view: 'platformAdmins', label: '平台管理员', icon: ShieldCheckIcon },
       { view: 'audit', label: '审计日志', icon: ActivityIcon },
       { view: 'releases', label: '版本发布', icon: RocketIcon },
