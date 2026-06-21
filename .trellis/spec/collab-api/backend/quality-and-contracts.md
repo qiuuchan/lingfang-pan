@@ -149,22 +149,27 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 ## Scenario: RBAC Permission Resolution (角色 + 权限码 + 插件授权)
 
 ### 1. Scope / Trigger
-- Trigger: 改 `@RequirePermission` 装饰器、`PermissionsGuard`、`AuthService.ensurePermission`、`RoleService`、`PluginGrantService`、`PluginService.availablePlugins`、角色/插件授权相关 Prisma 模型（Role/PermissionEntry/PluginGrant）或权限码注册表 `permission-codes.ts`。
+- Trigger: 改 `@RequirePermission` 装饰器、`PermissionsGuard`、`AuthService.ensurePermission`、`RoleService`、`PluginGrantService`、`PermissionGroupService`、`PluginService.availablePlugins`、角色/插件授权相关 Prisma 模型（Role/PermissionEntry/PermissionGroup/PluginGrant）或权限码注册表 `permission-codes.ts`。
 
 ### 2. Signatures
 - `@RequirePermission(...codes: string[])` 装饰器 → `PermissionsGuard.canActivate` 校验（OR 语义，任一命中放行）
 - `AuthService.ensurePermission(userId, ...codes)` 命令式 helper（service 内部条件分支用）
 - `PluginGrantService.resolvePluginAccess(teamId, pluginId, userId, teamRoleId)` → boolean（插件授权解析）
-- `RoleService.{list,create,update,delete}{Platform,Team}Role` / `assign{Platform,Member}Role`
-- DB: `User.platformRoleId`（平台角色）、`TeamMembership.teamRoleId`（团队角色）、`Role.permissions String[]`（权限码数组）、`PluginGrant(teamId, pluginId, subjectKind, subjectId, effect)`
+- `RoleService.{list,create,update,delete}{Platform,Team}Role` / `assign{Platform,Member}Role`（入参含可选 `code`）
+- `PermissionGroupService.{list,upsert,delete}Group(userId, scope, input)`（分组显示名管理）
+- `RoleService.listPermissions(scope)` → `{ modules: PermissionModuleDef[], permissions: PermissionEntry[] }`（两级结构 + 扁平兼容）
+- DB: `User.platformRoleId`（平台角色）、`TeamMembership.teamRoleId`（团队角色）、`Role.code String?`（角色编码，同 scope+teamId 唯一）、`Role.permissions String[]`（权限码数组）、`PermissionEntry.{moduleKey,moduleLabel,moduleOrder}`（两级模块结构）、`PermissionGroup(scope,groupKey,displayName,sortOrder,isSystem)`（可编辑分组显示名）、`PluginGrant(teamId, pluginId, subjectKind, subjectId, effect)`
 
 ### 3. Contracts
 - 权限码为预定义字符串（`permission-codes.ts` 注册表，dot.notation 如 `team.member.invite`），不可由用户自由新增。
+- **两级权限节点（模块 → 操作）**：权限按 `PermissionModule`（父级，moduleKey+moduleLabel，如「插件管理」）组织，每模块含若干操作（叶子节点）。`PermissionEntry.moduleKey = group`（向后兼容），`moduleLabel/moduleOrder` 用于前端勾选树折叠与排序。新增/删除权限码本身由代码注册表控制；管理员不可凭空增删节点。
+- **权限组（PermissionGroup）显示名可编辑**：管理员可对已注册 moduleKey 自定义显示名覆盖（如「插件管理」→「插件中心」），不可新增/删除 moduleKey。内置分组（isSystem=true，seed 写入）；`deleteGroup` = 重置为内置默认（非删除）。
+- **角色编码 Role.code**：可选、同 scope+teamId 下唯一（`@@unique([scope, teamId, code])`，null 各行独立）。内置角色固定 code：`platform_admin` / `team_admin` / `team_member`（见 `permission-codes.ts` 的 `SYSTEM_*_ROLE_CODE` 常量）。**系统角色检测必须基于 code（非 name 字符串比较）**——`PluginGrantService.resolvePluginAccess` 与 `RoleService.assignMemberRole` 均用 `role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE` 判定系统团队管理员。
 - 角色两层 scope：`PLATFORM`（全局，teamId=null，web 端管理）/ `TEAM`（归属某 team，桌面端管理）。
-- 内置角色（`isSystem=true`）3 个：系统平台管理员（全部 platform.*）、系统团队管理员（全部 team.*）、系统成员（只读基线）。不可删、不可改权限，可改显示名。
+- 内置角色（`isSystem=true`）3 个：系统平台管理员（code=platform_admin，全部 platform.*）、系统团队管理员（code=team_admin，全部 team.*）、系统成员（code=team_member，只读基线）。不可删、不可改权限/code，可改显示名。
 - 插件授权语义（resolvePluginAccess）：deny 优先、user 级优先于 role 级、系统团队管理员默认放行、无 grant 默认放行。
 - 迁移期双写：`User.platformRole` 枚举与 `platformRoleId` 并存；`TeamMembership.role` 枚举与 `teamRoleId` 并存。`assignPlatformRole`/`assignMemberRole` 同时写两者 + `tokenVersion` increment（吊销旧 token）。
-- 平台管理线路（web collab-admin，`/api/admin/roles`）与团队管理线路（桌面端 TeamAdmin，`/api/teams/current/roles`）两条干净分离，互不干扰。
+- 平台管理线路（web collab-admin，`/api/admin/roles` + `/api/admin/permission-groups`）与团队管理线路（桌面端 TeamAdmin，`/api/teams/current/roles` + `/api/teams/current/permission-groups`）两条干净分离，互不干扰。
 - **session 权限契约（跨层关键）**：`AuthService.sessionFor` 必须在响应中返回 `permissions: string[]`（平台角色 + 团队角色权限码合并，团队 SUSPENDED 时不含团队权限）、`user.platformRoleId`、`team.teamRoleId`。前端据此做入口门控（`apps/desktop/src/lib/permissions.ts` 的 `isTeamManager`/`hasPermission`），**不得再用 `session.role === 'TEAM_ADMIN'` 旧枚举判定**——否则自定义角色（如"运营"有 team.role.manage 但枚举是 MEMBER）的用户看不到入口。`resolveOnboarding` 同样基于权限码判断 TEAM_ADMIN_SPACE（有任意 team.* 管理权限），而非旧枚举。
 - **门控边界**：collab-admin web 控制台整体进入权用 `platformRole === 'PLATFORM_ADMIN'`（仅系统平台管理员），自定义平台角色不进整个后台；桌面端 review（市场审核）入口同理保留 `isPlatformAdmin`。细粒度功能权限由 `@RequirePermission` 在后端守卫层强制。
 
@@ -173,10 +178,15 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 - 权限码 scope 不匹配（团队角色用 platform.* 码）→ 400 `bad_request`（`权限码 X 不属于平台/团队级`）
 - 缺权限（`@RequirePermission` 或 `ensurePermission` 未命中）→ 403 `forbidden`（`权限不足`）
 - 改内置角色权限 → 403 `forbidden`（`内置角色权限不可修改`）
+- 改内置角色 code → 403 `forbidden`（`内置角色编码不可修改`）
 - 删内置角色 → 403 `forbidden`（`内置角色不可删除`）
 - 删有引用的角色 → 409 `conflict`（`该角色仍有 N 个引用，请先解除分配`）
 - 角色名重复（同 scope+teamId）→ 409 `conflict`（`角色名已存在`）
+- 角色 code 重复（同 scope+teamId）→ 409 `conflict`（`角色编码已存在`）
+- 角色 code 格式非法 → DTO 层 400（`@Matches(ROLE_CODE_PATTERN)`）
 - 跨团队操作角色（teamId 不匹配）→ 404 `not_found`（`团队角色不存在`）
+- 权限分组 groupKey 非已注册 moduleKey → 400 `bad_request`（`未知的权限分组键：X（不允许新增模块）`）
+- 重置未自定义的权限分组 → 404 `not_found`（`权限分组尚未自定义，无需重置`）
 - 插件授权 subjectKind=USER 但 subjectId 非本团队成员 → 400 `bad_request`
 - 插件授权 subjectKind=ROLE 但 subjectId 非本团队角色 → 400 `bad_request`
 
@@ -187,8 +197,9 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 
 ### 6. Tests Required
 - `permissions.guard.spec.ts`: @Public 放行、无 metadata 放行、平台权限命中/未命中、团队权限解析（含 SUSPENDED 不解析）、OR 语义、请求级缓存、缺登录态拒绝。
-- `role.service.spec.ts`: 角色 CRUD happy path + 每条 forbidden/conflict 分支 + 内置角色保护 + 权限码 scope 校验 + 双写 tokenVersion。
-- `plugin-grant.service.spec.ts`: setGrant/removeGrant + resolvePluginAccess 全矩阵（团队管理员放行、user DENY 优先、user ALLOW 胜 role DENY、无 grant 默认放行）。
+- `role.service.spec.ts`: 角色 CRUD happy path + 每条 forbidden/conflict 分支 + 内置角色保护 + 权限码 scope 校验 + 双写 tokenVersion + **code 唯一性/写入/code 重复 409**。
+- `permission-group.service.spec.ts`: listGroups 合并覆盖+customized 标注、upsert 改名+未知 groupKey 400、delete 重置+404、scope 隔离（TEAM 无 membership 拒绝 / PLATFORM 不调 resolveCurrentTeam）。
+- `plugin-grant.service.spec.ts`: setGrant/removeGrant + resolvePluginAccess 全矩阵（团队管理员放行、user DENY 优先、user ALLOW 胜 role DENY、无 grant 默认放行）。系统团队管理员 mock 须带 `code: 'team_admin'`（基于 code 检测）。
 
 ### 7. Wrong vs Correct
 Wrong:
@@ -221,10 +232,26 @@ await tx.teamMembership.create({ data: { teamId, userId, role: 'TEAM_ADMIN' } })
 Correct:
 
 ```ts
-// 新建团队时事务内补两条 isSystem 系统角色（确定性 id），申请人指向系统团队管理员
+// 新建团队时事务内补两条 isSystem 系统角色（确定性 id + 固定 code），申请人指向系统团队管理员
 const teamAdminRoleId = `team-admin-${team.id}`;
-await tx.role.create({ data: { id: teamAdminRoleId, name: '系统团队管理员', scope: 'TEAM', teamId: team.id, isSystem: true, permissions: TEAM_PERMISSIONS.map((p) => p.code) } });
+await tx.role.create({ data: { id: teamAdminRoleId, name: '系统团队管理员', code: SYSTEM_TEAM_ADMIN_ROLE_CODE, scope: 'TEAM', teamId: team.id, isSystem: true, permissions: TEAM_PERMISSIONS.map((p) => p.code) } });
 await tx.teamMembership.create({ data: { teamId, userId, role: 'TEAM_ADMIN', teamRoleId: teamAdminRoleId } });
+```
+
+Wrong:
+
+```ts
+// 用 name 字符串比较检测系统团队管理员（脆弱：name 可被改名，多语言/重命名即失效）
+const role = await prisma.role.findUnique({ where: { id: teamRoleId }, select: { isSystem: true, name: true } });
+if (role?.isSystem && role.name === '系统团队管理员') return true;
+```
+
+Correct:
+
+```ts
+// 基于 code 检测（code 不可被用户修改，内置角色固定 SYSTEM_TEAM_ADMIN_ROLE_CODE）
+const role = await prisma.role.findUnique({ where: { id: teamRoleId }, select: { isSystem: true, code: true } });
+if (role?.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE) return true;
 ```
 
 ## Wrong vs Correct

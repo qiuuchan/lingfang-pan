@@ -3,6 +3,10 @@
 // 设计要点：
 //  - 角色分两层 scope：PLATFORM（平台级，管平台资源，全局唯一）/ TEAM（团队级，归属某 team）。
 //  - 权限码为代码注册表预定义（不可由用户自由新增），字符串形如 "team.member.invite"。
+//  - 权限按「模块 → 操作」两级组织：moduleKey（如 team.plugin）+ moduleLabel（如「插件管理」），
+//    前端按模块折叠展示两级勾选树。group 字段 = moduleKey，保留向后兼容。
+//  - 权限组（PermissionGroup）显示名可由管理员自定义：覆盖内置 moduleLabel，不影响权限码本身。
+//  - 角色编码 code：可选、同 scope+teamId 下唯一（如 admin/operator）。内置角色 seed 固定 code。
 //  - 插件授权走独立表：团队管理员为团队内插件按 user/role 设置 allow/deny，deny 优先。
 //  - 契约字段一律 camelCase（与 collab-api HTTP 响应 / Prisma 模型对齐，见 identity.ts CONTRACT-07）。
 //
@@ -27,16 +31,52 @@ export const PermissionEntry = z.object({
   code: z.string().min(1),
   label: z.string(),
   scope: RoleScope,
+  /** 分组键（= moduleKey，向后兼容保留）。通常取 code 去掉最后一段 action。 */
   group: z.string(),
+  /** 模块键：权限所属功能模块（如 team.plugin）。等于 group，新代码优先用 moduleKey。 */
+  moduleKey: z.string(),
+  /** 模块显示名（如「插件管理」），前端两级树父级标题。 */
+  moduleLabel: z.string(),
+  /** 模块排序（升序），同模块多权限共享同一值。 */
+  moduleOrder: z.number().int().default(0),
   description: z.string().default(''),
   createdAt: z.string().datetime(),
 });
 export type PermissionEntry = z.infer<typeof PermissionEntry>;
 
+/** 权限模块定义（两级结构的父级：模块 → 操作列表）。 */
+export const PermissionModule = z.object({
+  moduleKey: z.string().min(1),
+  moduleLabel: z.string(),
+  scope: RoleScope,
+  sortOrder: z.number().int().default(0),
+  /** 是否内置模块（不可删除显示名覆盖）。前端按此判定可编辑性。 */
+  isSystem: z.boolean().default(true),
+});
+export type PermissionModule = z.infer<typeof PermissionModule>;
+
+/**
+ * 权限组（可编辑分组显示名）。
+ * 管理员可对每个 moduleKey 自定义显示名（覆盖内置 moduleLabel）；不可新增/删除权限码本身。
+ * 内置分组（isSystem=true，seed 写入）不可删；自定义覆盖行（isSystem=false）可删。
+ */
+export const PermissionGroup = z.object({
+  scope: RoleScope,
+  groupKey: z.string().min(1),
+  displayName: z.string().min(1),
+  sortOrder: z.number().int().default(0),
+  isSystem: z.boolean().default(false),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PermissionGroup = z.infer<typeof PermissionGroup>;
+
 /** 角色（HTTP 响应，对齐 Prisma Role 模型 camelCase）。 */
 export const Role = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  /** 角色编码：可选、同 scope+teamId 下唯一（如 admin/operator）。内置角色固定（platform_admin/team_admin/team_member）。 */
+  code: z.string().nullable(),
   scope: RoleScope,
   teamId: z.string().nullable(),
   isSystem: z.boolean().default(false),
@@ -63,8 +103,12 @@ export type PluginGrantRow = z.infer<typeof PluginGrantRow>;
 
 // ——— 请求体 DTO（创建/更新角色、设置插件授权） ———
 
+/** 角色编码正则：小写字母/数字开头，允许小写字母、数字、下划线、连字符，1-64 字符。 */
+export const ROLE_CODE_REGEX = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
 export const CreateRoleRequest = z.object({
   name: z.string().min(1).max(64),
+  code: z.union([z.string().regex(ROLE_CODE_REGEX, '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头').max(64), z.null()]).optional(),
   description: z.string().max(255).optional(),
   permissions: z.array(z.string().min(1)).default([]),
 });
@@ -72,6 +116,7 @@ export type CreateRoleRequest = z.infer<typeof CreateRoleRequest>;
 
 export const UpdateRoleRequest = z.object({
   name: z.string().min(1).max(64).optional(),
+  code: z.union([z.string().regex(ROLE_CODE_REGEX, '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头').max(64), z.null()]).optional(),
   description: z.string().max(255).optional(),
   permissions: z.array(z.string().min(1)).optional(),
 });
@@ -89,3 +134,12 @@ export const SetPluginGrantRequest = z.object({
   effect: PluginGrantEffect,
 });
 export type SetPluginGrantRequest = z.infer<typeof SetPluginGrantRequest>;
+
+// ——— 权限组 DTO（管理员自定义分组显示名）———
+
+/** upsert 权限组显示名请求体。groupKey 为已注册模块键（不允许新增模块）。 */
+export const UpsertPermissionGroupRequest = z.object({
+  groupKey: z.string().min(1).max(64),
+  displayName: z.string().min(1).max(64),
+});
+export type UpsertPermissionGroupRequest = z.infer<typeof UpsertPermissionGroupRequest>;

@@ -7,6 +7,8 @@ import { MailService } from './mail.service';
 import { GeetestService, type GeetestCaptchaParams, type GeetestScene } from './geetest.service';
 import {
   TEAM_PERMISSIONS,
+  SYSTEM_TEAM_ADMIN_ROLE_CODE,
+  SYSTEM_TEAM_MEMBER_ROLE_CODE,
 } from './permissions/permission-codes';
 
 /** 系统成员只读基线权限（与 seed-rbac.ts 保持一致）。 */
@@ -581,6 +583,7 @@ export class AuthService {
         data: {
           id: teamAdminRoleId,
           name: '系统团队管理员',
+          code: SYSTEM_TEAM_ADMIN_ROLE_CODE,
           scope: 'TEAM',
           teamId: team.id,
           isSystem: true,
@@ -592,6 +595,7 @@ export class AuthService {
         data: {
           id: teamMemberRoleId,
           name: '系统成员',
+          code: SYSTEM_TEAM_MEMBER_ROLE_CODE,
           scope: 'TEAM',
           teamId: team.id,
           isSystem: true,
