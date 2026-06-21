@@ -20,6 +20,7 @@ import { isPluginCenterView } from '@/lib/plugin-center';
 
 const Plugins = lazy(() => import('./pages/Plugins').then((m) => ({ default: m.Plugins })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
+const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -447,6 +448,7 @@ export default function App() {
   if (view === 'home') body = <Home />;
   else if (view === 'plugins' || view === 'author-center' || view === 'market') body = <Plugins />;
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
+  else if (view === 'team-admin') body = <TeamAdmin />;
   else body = null;
 
   return (

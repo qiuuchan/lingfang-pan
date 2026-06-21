@@ -146,6 +146,85 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 - `vitest.config.ts` 必须用 `include: ['src/**/*.spec.ts']` 锁定测试来源。
 - 后端单元测试运行时加 60 秒硬超时。
 
+## Scenario: RBAC Permission Resolution (角色 + 权限码 + 插件授权)
+
+### 1. Scope / Trigger
+- Trigger: 改 `@RequirePermission` 装饰器、`PermissionsGuard`、`AuthService.ensurePermission`、`RoleService`、`PluginGrantService`、`PluginService.availablePlugins`、角色/插件授权相关 Prisma 模型（Role/PermissionEntry/PluginGrant）或权限码注册表 `permission-codes.ts`。
+
+### 2. Signatures
+- `@RequirePermission(...codes: string[])` 装饰器 → `PermissionsGuard.canActivate` 校验（OR 语义，任一命中放行）
+- `AuthService.ensurePermission(userId, ...codes)` 命令式 helper（service 内部条件分支用）
+- `PluginGrantService.resolvePluginAccess(teamId, pluginId, userId, teamRoleId)` → boolean（插件授权解析）
+- `RoleService.{list,create,update,delete}{Platform,Team}Role` / `assign{Platform,Member}Role`
+- DB: `User.platformRoleId`（平台角色）、`TeamMembership.teamRoleId`（团队角色）、`Role.permissions String[]`（权限码数组）、`PluginGrant(teamId, pluginId, subjectKind, subjectId, effect)`
+
+### 3. Contracts
+- 权限码为预定义字符串（`permission-codes.ts` 注册表，dot.notation 如 `team.member.invite`），不可由用户自由新增。
+- 角色两层 scope：`PLATFORM`（全局，teamId=null，web 端管理）/ `TEAM`（归属某 team，桌面端管理）。
+- 内置角色（`isSystem=true`）3 个：系统平台管理员（全部 platform.*）、系统团队管理员（全部 team.*）、系统成员（只读基线）。不可删、不可改权限，可改显示名。
+- 插件授权语义（resolvePluginAccess）：deny 优先、user 级优先于 role 级、系统团队管理员默认放行、无 grant 默认放行。
+- 迁移期双写：`User.platformRole` 枚举与 `platformRoleId` 并存；`TeamMembership.role` 枚举与 `teamRoleId` 并存。`assignPlatformRole`/`assignMemberRole` 同时写两者 + `tokenVersion` increment（吊销旧 token）。
+- 平台管理线路（web collab-admin，`/api/admin/roles`）与团队管理线路（桌面端 TeamAdmin，`/api/teams/current/roles`）两条干净分离，互不干扰。
+
+### 4. Validation & Error Matrix
+- 权限码不在注册表 → 400 `bad_request`（`未知权限码：X`）
+- 权限码 scope 不匹配（团队角色用 platform.* 码）→ 400 `bad_request`（`权限码 X 不属于平台/团队级`）
+- 缺权限（`@RequirePermission` 或 `ensurePermission` 未命中）→ 403 `forbidden`（`权限不足`）
+- 改内置角色权限 → 403 `forbidden`（`内置角色权限不可修改`）
+- 删内置角色 → 403 `forbidden`（`内置角色不可删除`）
+- 删有引用的角色 → 409 `conflict`（`该角色仍有 N 个引用，请先解除分配`）
+- 角色名重复（同 scope+teamId）→ 409 `conflict`（`角色名已存在`）
+- 跨团队操作角色（teamId 不匹配）→ 404 `not_found`（`团队角色不存在`）
+- 插件授权 subjectKind=USER 但 subjectId 非本团队成员 → 400 `bad_request`
+- 插件授权 subjectKind=ROLE 但 subjectId 非本团队角色 → 400 `bad_request`
+
+### 5. Good/Base/Bad Cases
+- Good: 团队管理员创建「开发者」自定义角色勾选 `team.plugin.upload` + `team.plugin.edit`，分配给成员后该成员可上传/编辑团队插件。
+- Base: 团队管理员为某插件对「成员」角色设 DENY，所有成员不再看到该插件（availablePlugins 过滤）；团队管理员自身不受限（默认放行）。
+- Bad: 对单个用户设 ALLOW 但对其角色设 DENY —— 正确行为是 ALLOW（user 级优先）；错误实现会拒绝（role DENY 覆盖 user ALLOW）。
+
+### 6. Tests Required
+- `permissions.guard.spec.ts`: @Public 放行、无 metadata 放行、平台权限命中/未命中、团队权限解析（含 SUSPENDED 不解析）、OR 语义、请求级缓存、缺登录态拒绝。
+- `role.service.spec.ts`: 角色 CRUD happy path + 每条 forbidden/conflict 分支 + 内置角色保护 + 权限码 scope 校验 + 双写 tokenVersion。
+- `plugin-grant.service.spec.ts`: setGrant/removeGrant + resolvePluginAccess 全矩阵（团队管理员放行、user DENY 优先、user ALLOW 胜 role DENY、无 grant 默认放行）。
+
+### 7. Wrong vs Correct
+Wrong:
+
+```ts
+// 插件授权用 role DENY 覆盖 user ALLOW（违反 user 级优先语义）
+if (roleGrants.some((g) => g.effect === 'DENY')) return false;
+if (userGrants.some((g) => g.effect === 'ALLOW')) return true;
+```
+
+Correct:
+
+```ts
+// user 级先判，user 级有结果就不再看 role 级（deny 优先、user 级优先于 role 级）
+const userGrants = grants.filter((g) => g.subjectKind === 'USER');
+if (userGrants.some((g) => g.effect === 'DENY')) return false;
+if (userGrants.some((g) => g.effect === 'ALLOW')) return true;
+const roleGrants = grants.filter((g) => g.subjectKind === 'ROLE');
+if (roleGrants.some((g) => g.effect === 'DENY')) return false;
+if (roleGrants.some((g) => g.effect === 'ALLOW')) return true;
+```
+
+Wrong:
+
+```ts
+// 新建团队时不补团队级系统角色，申请人 membership 无 teamRoleId → 团队角色权限解析失败
+await tx.teamMembership.create({ data: { teamId, userId, role: 'TEAM_ADMIN' } });
+```
+
+Correct:
+
+```ts
+// 新建团队时事务内补两条 isSystem 系统角色（确定性 id），申请人指向系统团队管理员
+const teamAdminRoleId = `team-admin-${team.id}`;
+await tx.role.create({ data: { id: teamAdminRoleId, name: '系统团队管理员', scope: 'TEAM', teamId: team.id, isSystem: true, permissions: TEAM_PERMISSIONS.map((p) => p.code) } });
+await tx.teamMembership.create({ data: { teamId, userId, role: 'TEAM_ADMIN', teamRoleId: teamAdminRoleId } });
+```
+
 ## Wrong vs Correct
 
 Wrong:

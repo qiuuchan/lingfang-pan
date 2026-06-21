@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings' | 'releases';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings' | 'releases' | 'roles';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -93,6 +93,47 @@ export type LlmProvider = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+// RBAC：角色作用域、权限码定义、角色、插件授权（与后端 Role/PermissionEntry/PluginGrant 模型 + contract rbac.ts 对齐）。
+export type RoleScope = 'PLATFORM' | 'TEAM';
+export type PluginGrantSubject = 'USER' | 'ROLE';
+export type PluginGrantEffect = 'ALLOW' | 'DENY';
+
+/** 权限码注册表项（后端 permission-codes.ts 定义，seed 到 PermissionEntry 表）。 */
+export type PermissionEntry = {
+  code: string;
+  label: string;
+  scope: RoleScope;
+  group: string;
+  description: string;
+  createdAt: string;
+};
+
+/** 角色（平台级 scope=PLATFORM 全局 / 团队级 scope=TEAM 归属某 team）。 */
+export type Role = {
+  id: string;
+  name: string;
+  scope: RoleScope;
+  teamId: string | null;
+  isSystem: boolean;
+  description: string;
+  permissions: string[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** 插件授权行（团队管理员为团队内插件按 user/role 设置 allow/deny）。 */
+export type PluginGrantRow = {
+  id: string;
+  teamId: string;
+  pluginId: string;
+  subjectKind: PluginGrantSubject;
+  subjectId: string;
+  effect: PluginGrantEffect;
+  createdBy: string | null;
+  createdAt: string;
 };
 
 export type Application = {
@@ -344,6 +385,13 @@ export const ACTION_LABEL: Record<string, string> = {
   'admin.setting.updated': '更新平台设置',
   'admin.setting.test_email': '测试 SMTP 邮件',
   'platform_admin.bootstrap': '引导平台管理员',
+  // === rbac（角色与插件授权）===
+  'role.created': '创建角色',
+  'role.updated': '更新角色',
+  'role.deleted': '删除角色',
+  'role.assigned': '分配成员角色',
+  'plugin.grant.set': '设置插件授权',
+  'plugin.grant.removed': '移除插件授权',
 };
 
 export const TARGET_LABEL: Record<string, string> = {
@@ -357,6 +405,9 @@ export const TARGET_LABEL: Record<string, string> = {
   Release: '版本',
   ReleaseAsset: '版本产物',
   PlatformSetting: '平台设置',
+  Role: '角色',
+  PluginGrant: '插件授权',
+  TeamMembership: '团队成员',
 };
 
 export function labelOf(value?: string | null) {

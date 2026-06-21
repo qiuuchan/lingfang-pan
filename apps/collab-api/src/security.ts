@@ -48,9 +48,10 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // 回查库校验吊销：status 与 tokenVersion 任一不符即拒绝。
+    // RBAC：顺带 select platformRoleId 供 PermissionsGuard 解析平台角色权限（避免二次查库）。
     const user = await this.prisma.user.findUnique({
       where: { id: String(payload.sub) },
-      select: { status: true, tokenVersion: true, platformRole: true },
+      select: { status: true, tokenVersion: true, platformRole: true, platformRoleId: true },
     });
     if (!user || user.status !== 'ACTIVE') throw unauthorized('账号已被禁用，请联系管理员');
     if (payload.tokenVersion !== undefined && Number(payload.tokenVersion) !== user.tokenVersion) {
@@ -62,6 +63,7 @@ export class JwtAuthGuard implements CanActivate {
       email: String(payload.email),
       platformRole: user.platformRole === 'PLATFORM_ADMIN' ? 'PLATFORM_ADMIN' : 'NONE',
       tokenVersion: user.tokenVersion,
+      platformRoleId: user.platformRoleId,
     };
     return true;
   }

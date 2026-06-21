@@ -37,7 +37,11 @@ function createService(options: { existingPlugin?: unknown; membershipRole?: 'ME
       team: { id: 'team-1', status: 'ACTIVE' },
     })),
   };
-  return { service: new PluginService(prisma as never, auth as never), prisma, auth };
+  // RBAC 插件授权 service mock：默认放行（availablePlugins 调用）。
+  const grants = {
+    resolvePluginAccess: vi.fn(async () => true),
+  };
+  return { service: new PluginService(prisma as never, auth as never, grants as never), prisma, auth };
 }
 
 const validPackage = {
