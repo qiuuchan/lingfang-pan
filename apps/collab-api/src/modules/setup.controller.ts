@@ -10,6 +10,7 @@
 import { Body, Controller, Get, Inject, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import bcrypt from 'bcryptjs';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
 import { PrismaService } from '../prisma.service';
 import { AppError, Public } from '../common';
 import { SetupDto } from './dto/setup.dto';
@@ -67,8 +68,23 @@ export class SetupController {
             description: '首次安装向导一次性初始化锁',
           },
         });
+        // RBAC：确保系统平台管理员角色存在（兜底，权限填充由 seed-rbac 负责）。
+        await tx.role.upsert({
+          where: { id: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
+          update: {},
+          create: {
+            id: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+            name: '系统平台管理员',
+            scope: 'PLATFORM',
+            teamId: null,
+            isSystem: true,
+            description: '内置平台管理员角色，拥有全部平台权限',
+            permissions: [],
+          },
+        });
+        // RBAC 双写：platformRole 枚举 + platformRoleId 同步，否则新权限守卫解析不到平台角色权限。
         const user = await tx.user.create({
-          data: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN' },
+          data: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN', platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
         });
         // platformName 非空才写 PlatformSetting（空则保留 getPublicInfo 的默认 'LingFang' 兜底）。
         if (platformName) {

@@ -5,11 +5,9 @@ import { AuthService } from './auth.service';
 import {
   PERMISSION_CODE_SET,
   permissionCodesByScope,
+  SYSTEM_PLATFORM_ADMIN_ROLE_ID,
   type PermissionScope,
 } from './permissions/permission-codes';
-
-/** 系统平台管理员角色 id（与 seed/migration 一致）。 */
-export const PLATFORM_ADMIN_ROLE_ID = '00000000-0000-0000-0000-platform0001';
 
 /** 公共 Role 序列化：转 HTTP 响应（对齐 contract Role schema camelCase）。 */
 function publicRole(
@@ -145,7 +143,7 @@ export class RoleService {
     }
     await this.prisma.user.update({ where: { id: targetUserId }, data: { platformRoleId: roleId } });
     // 迁移期双写：platformRole 枚举同步（roleId=系统平台管理员 → PLATFORM_ADMIN，否则 NONE）
-    const isPlatformAdmin = roleId === PLATFORM_ADMIN_ROLE_ID;
+    const isPlatformAdmin = roleId === SYSTEM_PLATFORM_ADMIN_ROLE_ID;
     await this.prisma.user.update({
       where: { id: targetUserId },
       data: { platformRole: isPlatformAdmin ? 'PLATFORM_ADMIN' : 'NONE', tokenVersion: { increment: 1 } },

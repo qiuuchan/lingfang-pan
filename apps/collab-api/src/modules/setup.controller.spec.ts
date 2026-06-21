@@ -10,9 +10,10 @@ import { SetupController } from './setup.controller';
 vi.mock('bcryptjs', () => ({ default: { hash: vi.fn(async () => 'hashed-password') } }));
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
-  // 事务回调内用到的 tx 方法（user.create / platformSetting.upsert / auditLog.create）默认 resolved。
+  // 事务回调内用到的 tx 方法（user.create / role.upsert / platformSetting.upsert / auditLog.create）默认 resolved。
   const tx = {
     user: { create: vi.fn(async () => ({ id: 'u1', email: 'a@b.com' })) },
+    role: { upsert: vi.fn(async () => undefined) },
     platformSetting: { create: vi.fn(async () => undefined), upsert: vi.fn(async () => undefined) },
     auditLog: { create: vi.fn(async () => undefined) },
   };
@@ -91,7 +92,11 @@ describe('SetupController', () => {
       const createCall = prisma.tx.user.create.mock.calls[0][0];
       expect(createCall.data.email).toBe('admin@example.com');
       expect(createCall.data.platformRole).toBe('PLATFORM_ADMIN');
+      // RBAC 双写：platformRole + platformRoleId 同步（系统平台管理员角色）。
+      expect(createCall.data.platformRoleId).toBe('00000000-0000-0000-0000-platform0001');
       expect(createCall.data.passwordHash).toBe('hashed-password');
+      // RBAC：事务内兜底 upsert 系统平台管理员角色。
+      expect(prisma.tx.role.upsert).toHaveBeenCalledTimes(1);
       // 写 platformName。
       expect(prisma.tx.platformSetting.upsert).toHaveBeenCalledTimes(1);
       const settingCall = prisma.tx.platformSetting.upsert.mock.calls[0][0];

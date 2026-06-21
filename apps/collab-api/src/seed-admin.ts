@@ -2,6 +2,7 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { createPrismaAdapter } from './prisma.adapter';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID } from './modules/permissions/permission-codes';
 
 const adapter = createPrismaAdapter(process.env);
 const prisma = new PrismaClient({ adapter });
@@ -23,11 +24,27 @@ async function main() {
     return;
   }
 
+  // RBAC：确保系统平台管理员角色存在（seed-rbac 负责建角色 + 填权限，此处兜底防止 seed-admin 单独运行）。
+  await prisma.role.upsert({
+    where: { id: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
+    update: {},
+    create: {
+      id: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+      name: '系统平台管理员',
+      scope: 'PLATFORM',
+      teamId: null,
+      isSystem: true,
+      description: '内置平台管理员角色，拥有全部平台权限',
+      permissions: [],
+    },
+  });
+
   const passwordHash = await bcrypt.hash(password, 12);
+  // RBAC 双写：platformRole 枚举 + platformRoleId 同步，否则新权限守卫解析不到平台角色权限。
   const user = await prisma.user.upsert({
     where: { email },
-    create: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN' },
-    update: { platformRole: 'PLATFORM_ADMIN', displayName },
+    create: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN', platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
+    update: { platformRole: 'PLATFORM_ADMIN', displayName, platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
   });
   await prisma.auditLog.create({
     data: {

@@ -8,6 +8,7 @@ import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 import { NotificationService } from './notification.service';
 import { publicPlugin } from './plugin-package';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
 import { auditActionCategory, AUDIT_ACTION_LABEL, AUDIT_CATEGORIES, type AuditCategoryKey } from './audit-actions';
 
 @Injectable()
@@ -121,7 +122,10 @@ export class AdminService {
     await this.auth.ensurePlatformAdmin(actorId);
     const email = input.email.trim().toLowerCase();
     const passwordHash = await bcrypt.hash(input.password || 'ChangeMe123!', 12);
-    const user = await this.prisma.user.create({ data: { email, passwordHash, displayName: input.displayName || email, platformRole: input.platformRole || 'NONE' } });
+    const platformRole = input.platformRole || 'NONE';
+    // RBAC 双写：platformRole 枚举 + platformRoleId 同步。
+    const platformRoleId = platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null;
+    const user = await this.prisma.user.create({ data: { email, passwordHash, displayName: input.displayName || email, platformRole, platformRoleId } });
     await this.audit(actorId, 'admin.user.created', 'User', user.id, { email });
     return { user: publicUser(user) };
   }
@@ -150,10 +154,14 @@ export class AdminService {
       }
     }
     // 显式仅取声明字段，避免客户端误传非法键透传进 prisma.user.update。
-    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; email?: string; passwordHash?: string; tokenVersion?: { increment: number } } = {};
+    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; platformRoleId?: string | null; email?: string; passwordHash?: string; tokenVersion?: { increment: number } } = {};
     if (input.displayName !== undefined) data.displayName = input.displayName;
     if (input.status !== undefined) data.status = input.status;
-    if (input.platformRole !== undefined) data.platformRole = input.platformRole;
+    if (input.platformRole !== undefined) {
+      data.platformRole = input.platformRole;
+      // RBAC 双写：platformRole 枚举变化时同步 platformRoleId，保持权限守卫解析一致。
+      data.platformRoleId = input.platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null;
+    }
     if (normalizedEmail !== undefined) data.email = normalizedEmail;
     // password 明文 → bcrypt hash（与 register/login 一致 cost=12）。
     if (input.password !== undefined) {
@@ -328,7 +336,11 @@ export class AdminService {
       if (remainingAdmins <= 1) throw forbidden('不能降级最后一个平台管理员');
     }
     // 降级时 tokenVersion++ 作废旧 token（与 adminUpdateUser 同款语义），升级则不需要（提权不涉及吊销）。
-    const data: { platformRole: 'NONE' | 'PLATFORM_ADMIN'; tokenVersion?: { increment: number } } = { platformRole: input.platformRole };
+    // RBAC 双写：platformRole 枚举 + platformRoleId 同步。
+    const data: { platformRole: 'NONE' | 'PLATFORM_ADMIN'; platformRoleId: string | null; tokenVersion?: { increment: number } } = {
+      platformRole: input.platformRole,
+      platformRoleId: input.platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null,
+    };
     if (input.platformRole === 'NONE') data.tokenVersion = { increment: 1 };
     const user = await this.prisma.user.update({ where: { id }, data });
     await this.audit(actorId, 'admin.user.role_changed', 'User', id, { from: target.platformRole, to: input.platformRole });

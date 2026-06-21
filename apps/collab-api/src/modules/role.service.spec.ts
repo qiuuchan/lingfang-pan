@@ -1,7 +1,8 @@
 // RoleService 单测：覆盖平台/团队角色 CRUD + 成员角色分配 + 权限码校验 + 内置角色保护。
 // 参考 team.service.spec.ts：mock PrismaService + AuthService（ensurePermission 直接放行或抛 forbidden）。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { RoleService, PLATFORM_ADMIN_ROLE_ID } from './role.service';
+import { RoleService } from './role.service';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID as PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
 import { badRequest, conflict, forbidden, notFound } from '../common';
 
 function mockPrisma() {
