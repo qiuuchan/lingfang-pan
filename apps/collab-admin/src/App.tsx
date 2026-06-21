@@ -55,6 +55,7 @@ const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ de
 const ProvidersView = lazy(() => import('@/components/providers-view').then((m) => ({ default: m.ProvidersView })));
 const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
 const ReleasesView = lazy(() => import('@/components/releases-view').then((m) => ({ default: m.ReleasesView })));
+const RolesView = lazy(() => import('@/components/roles-view').then((m) => ({ default: m.RolesView })));
 
 // 主题初始化：在模块加载时同步应用，避免首屏亮暗闪烁（FOUC）。
 // 放在模块顶层执行一次，早于 React 渲染，读取 localStorage 的主题偏好并应用到 <html>。
@@ -338,6 +339,7 @@ export default function App() {
                 {view === 'applications' && <ApplicationsView />}
                 {view === 'audit' && <AuditView />}
                 {view === 'releases' && <ReleasesView />}
+                {view === 'roles' && <RolesView />}
                 {view === 'settings' && <SettingsView />}
               </Suspense>
             </PageTransition>

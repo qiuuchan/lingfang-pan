@@ -106,79 +106,112 @@ enum AssetArch {
   UNIVERSAL
 }
 
+// RBAC：角色作用域。PLATFORM 平台级（全局，管平台资源）；TEAM 团队级（归属某 team，管团队内资源）。
+enum RoleScope {
+  PLATFORM
+  TEAM
+}
+
+// RBAC：插件授权主体类型。USER 针对具体用户；ROLE 针对某角色下全部成员。
+enum PluginGrantSubject {
+  USER
+  ROLE
+}
+
+// RBAC：插件授权效果。ALLOW 放行 / DENY 拒绝（deny 优先，user 级优先于 role 级，团队管理员默认放行）。
+enum PluginGrantEffect {
+  ALLOW
+  DENY
+}
+
 model User {
-  id                    String                 @id @default(uuid())
-  email                 String                 @unique
-  displayName           String
-  passwordHash          String
-  status                UserStatus             @default(ACTIVE)
-  platformRole          PlatformRole           @default(NONE)
+  id                     String                 @id @default(uuid())
+  email                  String                 @unique
+  displayName            String
+  passwordHash           String
+  status                 UserStatus             @default(ACTIVE)
+  platformRole           PlatformRole           @default(NONE)
+  // RBAC：指向平台级角色（scope=PLATFORM）。过渡期与 platformRole 并存——
+  // platformRole=PLATFORM_ADMIN 的用户回填到「系统平台管理员」角色；迁移完成后逐步移除枚举列。
+  platformRoleId         String?
   // token 版本号：禁用/降级用户时自增，使已签发的旧 JWT 在 JwtAuthGuard 校验时失效（ADMIN-02/AUTH-01/XERR-02）。
-  tokenVersion          Int                    @default(0)
+  tokenVersion           Int                    @default(0)
   // 账户级密码重试锁定（组B）：连续密码错误累计计数，达阈值后置 lockedUntil 锁定。
   // 与 throttler（IP 级限流）正交：throttler 防单 IP 暴力扫描，本字段防定向爆破单账户。
-  failedLoginAttempts   Int                    @default(0)
-  lockedUntil           DateTime?
+  failedLoginAttempts    Int                    @default(0)
+  lockedUntil            DateTime?
   // 邮箱验证时间：null=未验证。注册时自动发验证邮件，首版不阻断登录（session 响应带 emailVerified 供前端提示去验证）。
-  emailVerified         DateTime?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  memberships           TeamMembership[]
-  applications          TeamAdminApplication[]
-  reviewedApplications  TeamAdminApplication[] @relation("ApplicationReviewer")
-  invitations           InvitationCode[]       @relation("InvitationCreator")
-  balanceLedgers        BalanceLedger[]        @relation("LedgerActor")
-  authoredPlugins       Plugin[]               @relation("PluginAuthor")
-  reviewedPlugins       Plugin[]               @relation("PluginReviewer")
-  pluginReviews         PluginReview[]         @relation("PluginReviewReviewer")
-  wallet                Wallet?
-  walletTransactions    WalletTransaction[]
-  purchasesBuyer        Purchase[]             @relation("PurchaseBuyer")
-  purchasesSeller       Purchase[]             @relation("PurchaseSeller")
-  pluginRatings         PluginRating[]         @relation("PluginRater")
-  auditLogs             AuditLog[]             @relation("AuditActor")
-  ownedLlmBinding       TenantLlmBinding?     @relation("BindingOwner")
-  createdLlmBindings    TenantLlmBinding[]    @relation("BindingCreator")
-  updatedLlmBindings    TenantLlmBinding[]    @relation("BindingUpdater")
-  platformSettingUpdates PlatformSetting[]   @relation("SettingUpdater")
-  notifications         Notification[]
+  emailVerified          DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  platformRoleRef        Role?                  @relation("UserPlatformRole", fields: [platformRoleId], references: [id], onDelete: SetNull)
+  memberships            TeamMembership[]
+  applications           TeamAdminApplication[]
+  reviewedApplications   TeamAdminApplication[] @relation("ApplicationReviewer")
+  invitations            InvitationCode[]       @relation("InvitationCreator")
+  balanceLedgers         BalanceLedger[]        @relation("LedgerActor")
+  authoredPlugins        Plugin[]               @relation("PluginAuthor")
+  reviewedPlugins        Plugin[]               @relation("PluginReviewer")
+  pluginReviews          PluginReview[]         @relation("PluginReviewReviewer")
+  wallet                 Wallet?
+  walletTransactions     WalletTransaction[]
+  purchasesBuyer         Purchase[]             @relation("PurchaseBuyer")
+  purchasesSeller        Purchase[]             @relation("PurchaseSeller")
+  pluginRatings          PluginRating[]         @relation("PluginRater")
+  auditLogs              AuditLog[]             @relation("AuditActor")
+  ownedLlmBinding        TenantLlmBinding?      @relation("BindingOwner")
+  createdLlmBindings     TenantLlmBinding[]     @relation("BindingCreator")
+  updatedLlmBindings     TenantLlmBinding[]     @relation("BindingUpdater")
+  platformSettingUpdates PlatformSetting[]      @relation("SettingUpdater")
+  pluginGrantsCreated    PluginGrant[]          @relation("PluginGrantCreator")
+  notifications          Notification[]
+
+  @@index([platformRoleId])
 }
 
 model Team {
-  id              String           @id @default(uuid())
+  id              String               @id @default(uuid())
   name            String
-  slug            String           @unique
-  status          TeamStatus       @default(ACTIVE)
+  slug            String               @unique
+  status          TeamStatus           @default(ACTIVE)
   // 团队是否开放公开加入：true 时出现在「发现公开团队」列表，普通用户可一键直接加入（无需邀请码）。
   // 默认 false：团队管理员需在 TeamManage 主动开启（避免新建团队立刻被任意用户加入）。
-  allowPublicJoin Boolean          @default(false)
+  allowPublicJoin Boolean              @default(false)
   // 团队简介：公开团队发现页展示，帮助用户判断是否加入。
-  description     String           @default("")
-  balanceCents    Int              @default(0)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  description     String               @default("")
+  balanceCents    Int                  @default(0)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
   memberships     TeamMembership[]
   invitations     InvitationCode[]
   ledger          BalanceLedger[]
   plugins         Plugin[]
   installations   PluginInstallation[]
   bindings        TenantLlmBinding[]
+  // RBAC：团队级自定义角色（scope=TEAM，teamId 指向本团队）+ 团队插件授权记录。
+  roles           Role[]
+  pluginGrants    PluginGrant[]
 
   // 公开团队发现查询索引：GET /api/teams/public 按 allowPublicJoin=true + status=ACTIVE 过滤。
   @@index([allowPublicJoin, status])
 }
 
 model TeamMembership {
-  teamId   String
-  userId   String
-  role     TeamRole
-  status   MembershipStatus @default(ACTIVE)
-  joinedAt DateTime         @default(now())
-  team     Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId     String
+  userId     String
+  role       TeamRole
+  // RBAC：指向团队级角色（scope=TEAM）。过渡期与 role 枚举并存——
+  // role=TEAM_ADMIN/MEMBER 的 membership 回填到对应系统角色；迁移完成后逐步移除枚举列。
+  teamRoleId String?
+  status     MembershipStatus @default(ACTIVE)
+  joinedAt   DateTime         @default(now())
+  team       Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamRole   Role?            @relation("MembershipTeamRole", fields: [teamRoleId], references: [id], onDelete: SetNull)
 
   @@id([teamId, userId])
   @@index([userId, status])
+  @@index([teamRoleId])
 }
 
 model TeamAdminApplication {
@@ -231,38 +264,39 @@ model BalanceLedger {
 }
 
 model Plugin {
-  id            String             @id @default(uuid())
+  id            String               @id @default(uuid())
   name          String
-  description   String             @default("")
-  version       String             @default("0.1.0")
-  entry         String             @default("ui/index.html")
-  runtimeType   PluginRuntimeType  @default(CLIENT)
-  status        PluginStatus       @default(ENABLED)
-  visibility    PluginVisibility   @default(TEAM)
+  description   String               @default("")
+  version       String               @default("0.1.0")
+  entry         String               @default("ui/index.html")
+  runtimeType   PluginRuntimeType    @default(CLIENT)
+  status        PluginStatus         @default(ENABLED)
+  visibility    PluginVisibility     @default(TEAM)
   teamId        String?
   authorUserId  String?
-  files         Json               @default("[]")
-  manifest      Json               @default("{}")
-  capabilities  Json               @default("[]")
-  contentHash   String             @default("")
-  reviewStatus  PluginReviewStatus @default(DRAFT)
-  reviewReason  String             @default("")
+  files         Json                 @default("[]")
+  manifest      Json                 @default("{}")
+  capabilities  Json                 @default("[]")
+  contentHash   String               @default("")
+  reviewStatus  PluginReviewStatus   @default(DRAFT)
+  reviewReason  String               @default("")
   reviewedById  String?
   reviewedAt    DateTime?
-  marketplace   Boolean            @default(false)
-  priceCents    Int                @default(0)
-  installCount  Int                @default(0)
-  ratingCount   Int                @default(0)
-  ratingSum     Int                @default(0)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  team          Team?              @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  author        User?              @relation("PluginAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
-  reviewedBy    User?              @relation("PluginReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  marketplace   Boolean              @default(false)
+  priceCents    Int                  @default(0)
+  installCount  Int                  @default(0)
+  ratingCount   Int                  @default(0)
+  ratingSum     Int                  @default(0)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  team          Team?                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  author        User?                @relation("PluginAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  reviewedBy    User?                @relation("PluginReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   installations PluginInstallation[]
   reviews       PluginReview[]
   purchases     Purchase[]
   ratings       PluginRating[]
+  pluginGrants  PluginGrant[]
 
   @@unique([teamId, contentHash])
   @@index([teamId, status, visibility])
@@ -287,14 +321,14 @@ model PluginInstallation {
 }
 
 model PluginReview {
-  id           String             @id @default(uuid())
-  pluginId     String
-  reviewerId   String?
-  status       PluginReviewStatus
-  reason       String             @default("")
-  createdAt    DateTime           @default(now())
-  plugin       Plugin             @relation(fields: [pluginId], references: [id], onDelete: Cascade)
-  reviewer     User?              @relation("PluginReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  id         String             @id @default(uuid())
+  pluginId   String
+  reviewerId String?
+  status     PluginReviewStatus
+  reason     String             @default("")
+  createdAt  DateTime           @default(now())
+  plugin     Plugin             @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  reviewer   User?              @relation("PluginReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
 
   @@index([pluginId, createdAt])
   @@index([status, createdAt])
@@ -395,14 +429,14 @@ model PluginRating {
 // 应用界面零 provider 概念：仅取 isActive=true 的 provider 的 apiUrl 供桌面拉取模型。
 model LlmGateway {
   id          String           @id @default(uuid())
-  provider    String                            // 平台维护白名单值（非 enum，String）
-  name        String           @unique          // 展示名，如「OpenAI 官方」，seed upsert by name
-  apiUrl      String                            // 服务端规范化去尾斜杠、http/https
+  provider    String // 平台维护白名单值（非 enum，String）
+  name        String           @unique // 展示名，如「OpenAI 官方」，seed upsert by name
+  apiUrl      String // 服务端规范化去尾斜杠、http/https
   status      LlmGatewayStatus @default(ENABLED)
-  models      Json             @default("[]")   // string[]，如 ["gpt-4o","gpt-4o-mini"]
+  models      Json             @default("[]") // string[]，如 ["gpt-4o","gpt-4o-mini"]
   description String           @default("")
-  sortOrder   Int              @default(0)      // 小在前
-  isActive    Boolean          @default(false)  // 当前启用 provider（全表最多一条 true，事务维护唯一）
+  sortOrder   Int              @default(0) // 小在前
+  isActive    Boolean          @default(false) // 当前启用 provider（全表最多一条 true，事务维护唯一）
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -417,23 +451,23 @@ model LlmGateway {
 // apiKeyHint 为脱敏串（非敏感，明文存库供列表展示，零解密）。
 // keyFingerprint 为 sha256(明文).slice(0,16)，稳定标识「这是哪个 key」（不泄漏明文）。
 model TenantLlmBinding {
-  id              String     @id @default(uuid())
-  teamId          String                                  // 当前团队上下文（审计/级联清理用）
-  userId          String     @unique                     // 一个用户一条 apiKey 绑定
-  encryptedApiKey String                                 // base64(iv(12B) || tag(16B) || ciphertext)
-  apiKeyHint      String     @default("")                // 明文存非敏感脱敏串（PUT 时计算落库）
-  keyFingerprint  String     @default("")                // sha256(plaintext).slice(0,16)
-  enabled         Boolean    @default(true)
-  modelOverride   Json?                                    // string[]，用户从拉取结果选的模型子集
-  createdById     String?                                 // FK User，谁创建
-  updatedById     String?                                 // FK User，谁最后改
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id              String   @id @default(uuid())
+  teamId          String // 当前团队上下文（审计/级联清理用）
+  userId          String   @unique // 一个用户一条 apiKey 绑定
+  encryptedApiKey String // base64(iv(12B) || tag(16B) || ciphertext)
+  apiKeyHint      String   @default("") // 明文存非敏感脱敏串（PUT 时计算落库）
+  keyFingerprint  String   @default("") // sha256(plaintext).slice(0,16)
+  enabled         Boolean  @default(true)
+  modelOverride   Json? // string[]，用户从拉取结果选的模型子集
+  createdById     String? // FK User，谁创建
+  updatedById     String? // FK User，谁最后改
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  team       Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  owner      User  @relation("BindingOwner", fields: [userId], references: [id], onDelete: Cascade)
-  createdBy  User? @relation("BindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy  User? @relation("BindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  team      Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  owner     User  @relation("BindingOwner", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("BindingCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User? @relation("BindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([teamId, enabled])
   @@index([userId, enabled])
@@ -446,13 +480,13 @@ model TenantLlmBinding {
 // publishedAt 在首次 publish 时落库（重发保持不变），用于官网时间线排序。
 model Release {
   id          String         @id @default(uuid())
-  version     String                              // semver，如 1.0.0
+  version     String // semver，如 1.0.0
   channel     ReleaseChannel @default(STABLE)
   status      ReleaseStatus  @default(DRAFT)
-  title       String         @default("")         // 版本标题（展示用）
-  notes       String         @default("")         // markdown changelog
-  isLatest    Boolean        @default(false)      // 同 channel 内最新发布（publish 原子维护）
-  publishedAt DateTime?                            // 首次发布时间，归档不清空（时间线排序）
+  title       String         @default("") // 版本标题（展示用）
+  notes       String         @default("") // markdown changelog
+  isLatest    Boolean        @default(false) // 同 channel 内最新发布（publish 原子维护）
+  publishedAt DateTime? // 首次发布时间，归档不清空（时间线排序）
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   assets      ReleaseAsset[]
@@ -468,16 +502,16 @@ model Release {
 // filename 为展示用文件名（如 LingFang_1.0.0_x64-setup.exe）。
 // (releaseId, platform, arch) 唯一：同版本同平台同架构仅一个产物。
 model ReleaseAsset {
-  id         String        @id @default(uuid())
-  releaseId  String
-  platform   AssetPlatform
-  arch       AssetArch
-  url        String                       // 下载直链（外链）
-  filename   String        @default("")   // 展示用文件名
-  signature  String        @default("")   // Tauri updater base64 签名（可选，未接入 updater 时为空）
-  sizeBytes  Int?                          // 安装包字节大小（展示用，< 2GB）
-  createdAt  DateTime      @default(now())
-  release    Release       @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  id        String        @id @default(uuid())
+  releaseId String
+  platform  AssetPlatform
+  arch      AssetArch
+  url       String // 下载直链（外链）
+  filename  String        @default("") // 展示用文件名
+  signature String        @default("") // Tauri updater base64 签名（可选，未接入 updater 时为空）
+  sizeBytes Int? // 安装包字节大小（展示用，< 2GB）
+  createdAt DateTime      @default(now())
+  release   Release       @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
   @@unique([releaseId, platform, arch])
   @@index([releaseId])
@@ -501,4 +535,67 @@ model Notification {
 
   @@index([userId, read])
   @@index([userId, createdAt])
+}
+
+// RBAC：权限码注册表镜像。权限码本体由后端 permission-codes.ts 预定义（代码单一事实来源），
+// 此表仅供 admin UI 展示/分组勾选用（seed 时从 permission-codes 全量 upsert）。code 为主键。
+// scope 标识属平台级还是团队级；group 为分组键（如 "team.member"），供前端按分组渲染勾选树。
+model PermissionEntry {
+  code        String    @id
+  label       String
+  scope       RoleScope
+  group       String
+  description String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([scope, group])
+}
+
+// RBAC：自定义角色。
+//  - scope=PLATFORM：平台级角色（全局，teamId=null），由平台管理员在 web 端管理，管平台资源。
+//  - scope=TEAM：团队级角色（teamId 必填，归属某 team），由团队管理员在桌面端管理，管团队内资源。
+// isSystem=true 为内置角色（系统平台管理员 / 系统团队管理员 / 系统成员），不可删除、不可改权限，仅可改显示名。
+// permissions 为权限码数组（Prisma 原生数组列，值来自 PermissionEntry.code 白名单）。
+model Role {
+  id          String           @id @default(uuid())
+  name        String
+  scope       RoleScope
+  teamId      String?
+  isSystem    Boolean          @default(false)
+  description String           @default("")
+  permissions String[]         @default([])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  team        Team?            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  // 反向关系：挂此平台角色的用户、挂此团队角色的成员关系。
+  // 注：PluginGrant.subjectId 是多态列（USER→userId/ROLE→roleId），不建 FK，
+  // 故 Role 不持有 pluginGrants 反向关系；插件授权按 subjectKind + subjectId 应用层联查。
+  users       User[]           @relation("UserPlatformRole")
+  memberships TeamMembership[] @relation("MembershipTeamRole")
+
+  // 同 scope+teamId 下角色名不重复。Postgres 中多列 unique 对 null 值各行独立（平台级 teamId=null 仍全局唯一）。
+  @@unique([scope, teamId, name])
+  @@index([scope, teamId])
+}
+
+// RBAC：团队级插件授权。团队管理员为团队内某插件按 user/role 设置 ALLOW/DENY。
+// 授权解析（resolvePluginAccess）：deny 优先、user 级优先于 role 级、团队管理员默认放行。
+// subjectKind=USER 时 subjectId=userId；subjectKind=ROLE 时 subjectId=teamRoleId。
+// subjectId 为多态列（不建 FK）：USER 时指向 User，ROLE 时指向 Role，由应用层校验存在性 + 团队归属。
+// createdBy 记录设置人（FK User，onDelete SetNull——管理员被禁用后授权记录保留但作者置空）。
+model PluginGrant {
+  id          String             @id @default(uuid())
+  teamId      String
+  pluginId    String
+  subjectKind PluginGrantSubject
+  subjectId   String
+  effect      PluginGrantEffect
+  createdBy   String?
+  createdAt   DateTime           @default(now())
+  team        Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  plugin      Plugin             @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  creator     User?              @relation("PluginGrantCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([teamId, pluginId, subjectKind, subjectId])
+  @@index([teamId, pluginId])
 }

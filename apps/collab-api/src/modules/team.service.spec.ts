@@ -93,9 +93,11 @@ describe('TeamService 公开团队发现 + 直接加入 + 资料', () => {
       prisma.team.findUnique.mockResolvedValue({ id: 't1', status: 'ACTIVE', allowPublicJoin: true });
       const result = await service.joinPublicTeam('u1', 't1');
       // upsert 带 teamId + userId，角色 MEMBER，刷新 joinedAt（重新激活已 REMOVED 成员）。
+      // RBAC：同时回填系统成员角色 teamRoleId（新成员默认指向 team-member-<teamId>）。
       expect(prisma.__tx.teamMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
         where: { teamId_userId: { teamId: 't1', userId: 'u1' } },
-        create: { teamId: 't1', userId: 'u1', role: 'MEMBER' },
+        create: { teamId: 't1', userId: 'u1', role: 'MEMBER', teamRoleId: 'team-member-t1' },
+        update: expect.objectContaining({ role: 'MEMBER', teamRoleId: 'team-member-t1', status: 'ACTIVE' }),
       }));
       // 审计 action=team.public_joined。
       expect(prisma.__tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({

@@ -6,3 +6,4 @@ export * from './identity';
 export * from './plugin';
 export * from './draft';
 export * from './llm';
+export * from './rbac';

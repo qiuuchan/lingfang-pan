@@ -5,6 +5,12 @@ import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, slugify, unauthorized } from '../common';
 import { MailService } from './mail.service';
 import { GeetestService, type GeetestCaptchaParams, type GeetestScene } from './geetest.service';
+import {
+  TEAM_PERMISSIONS,
+} from './permissions/permission-codes';
+
+/** 系统成员只读基线权限（与 seed-rbac.ts 保持一致）。 */
+const MEMBER_BASELINE_PERMISSIONS = ['team.dashboard.view', 'team.plugin.list', 'team.balance.view'];
 
 export type OnboardingState =
   | 'NEEDS_INVITATION'
@@ -478,6 +484,50 @@ export class AuthService {
     return user;
   }
 
+  /**
+   * RBAC：命令式权限校验（供 service 内部无法用 @RequirePermission 装饰器的场景）。
+   *
+   * 解析用户平台角色 + 当前团队角色的全部权限码，要求 codes 中任一命中（OR 语义），否则 forbidden()。
+   * 与 PermissionsGuard 同款解析逻辑（平台走 User.platformRoleId，团队走 ensureCurrentTeam→teamRoleId）。
+   *
+   * 注意：优先用 @RequirePermission 装饰器；此 helper 用于 service 内条件分支或跨方法二次校验。
+   */
+  async ensurePermission(userId: string, ...codes: string[]) {
+    if (codes.length === 0) throw forbidden('权限不足');
+    const perms = new Set<string>();
+
+    // 平台角色权限
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { platformRoleId: true },
+    });
+    if (user?.platformRoleId) {
+      const role = await this.prisma.role.findUnique({
+        where: { id: user.platformRoleId },
+        select: { permissions: true },
+      });
+      if (role) for (const code of role.permissions) perms.add(code);
+    }
+
+    // 当前团队角色权限
+    const membership = await this.prisma.teamMembership.findFirst({
+      where: { userId, status: 'ACTIVE' },
+      include: { team: { select: { status: true } } },
+      orderBy: { joinedAt: 'desc' },
+    });
+    if (membership?.teamRoleId && membership.team.status === 'ACTIVE') {
+      const role = await this.prisma.role.findUnique({
+        where: { id: membership.teamRoleId },
+        select: { permissions: true },
+      });
+      if (role) for (const code of role.permissions) perms.add(code);
+    }
+
+    const hit = codes.some((code) => perms.has(code));
+    if (!hit) throw forbidden('权限不足');
+    return { perms };
+  }
+
   async createTeamForApplication(applicationId: string, reviewerId: string) {
     await this.ensurePlatformAdmin(reviewerId);
     const application = await this.prisma.teamAdminApplication.findUnique({ where: { id: applicationId }, include: { user: true } });
@@ -486,7 +536,35 @@ export class AuthService {
     const slug = `${slugify(application.teamName)}-${application.id.slice(0, 6)}`;
     return this.prisma.$transaction(async (tx) => {
       const team = await tx.team.create({ data: { name: application.teamName, slug } });
-      await tx.teamMembership.create({ data: { teamId: team.id, userId: application.userId, role: 'TEAM_ADMIN' } });
+      // RBAC：新建团队时补两条团队级系统角色（确定性 id 便于 seed 幂等 + 应用层识别），
+      // 并把申请人 membership 指向系统团队管理员（双写 teamRole 枚举保持兼容）。
+      const teamAdminRoleId = `team-admin-${team.id}`;
+      const teamMemberRoleId = `team-member-${team.id}`;
+      await tx.role.create({
+        data: {
+          id: teamAdminRoleId,
+          name: '系统团队管理员',
+          scope: 'TEAM',
+          teamId: team.id,
+          isSystem: true,
+          description: '内置团队管理员角色，拥有全部团队权限',
+          permissions: TEAM_PERMISSIONS.map((p) => p.code),
+        },
+      });
+      await tx.role.create({
+        data: {
+          id: teamMemberRoleId,
+          name: '系统成员',
+          scope: 'TEAM',
+          teamId: team.id,
+          isSystem: true,
+          description: '内置成员角色，拥有只读基线权限',
+          permissions: MEMBER_BASELINE_PERMISSIONS,
+        },
+      });
+      await tx.teamMembership.create({
+        data: { teamId: team.id, userId: application.userId, role: 'TEAM_ADMIN', teamRoleId: teamAdminRoleId },
+      });
       await tx.teamAdminApplication.update({
         where: { id: application.id },
         data: { status: 'APPROVED', reviewedById: reviewerId, reviewedAt: new Date() },
