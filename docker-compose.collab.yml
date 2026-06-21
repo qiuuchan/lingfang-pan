@@ -34,7 +34,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: sh -c "cd /app/apps/collab-api && pnpm prisma:generate && pnpm prisma:deploy && node dist/seed-admin.js && node dist/main.js"
+    command: sh -c "cd /app/apps/collab-api && pnpm prisma:generate && pnpm prisma:deploy && node dist/seed-admin.js && node dist/seed-rbac.js && node dist/main.js"
     restart: unless-stopped
 
   collab-admin:
