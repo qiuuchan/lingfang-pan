@@ -165,6 +165,8 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 - 插件授权语义（resolvePluginAccess）：deny 优先、user 级优先于 role 级、系统团队管理员默认放行、无 grant 默认放行。
 - 迁移期双写：`User.platformRole` 枚举与 `platformRoleId` 并存；`TeamMembership.role` 枚举与 `teamRoleId` 并存。`assignPlatformRole`/`assignMemberRole` 同时写两者 + `tokenVersion` increment（吊销旧 token）。
 - 平台管理线路（web collab-admin，`/api/admin/roles`）与团队管理线路（桌面端 TeamAdmin，`/api/teams/current/roles`）两条干净分离，互不干扰。
+- **session 权限契约（跨层关键）**：`AuthService.sessionFor` 必须在响应中返回 `permissions: string[]`（平台角色 + 团队角色权限码合并，团队 SUSPENDED 时不含团队权限）、`user.platformRoleId`、`team.teamRoleId`。前端据此做入口门控（`apps/desktop/src/lib/permissions.ts` 的 `isTeamManager`/`hasPermission`），**不得再用 `session.role === 'TEAM_ADMIN'` 旧枚举判定**——否则自定义角色（如"运营"有 team.role.manage 但枚举是 MEMBER）的用户看不到入口。`resolveOnboarding` 同样基于权限码判断 TEAM_ADMIN_SPACE（有任意 team.* 管理权限），而非旧枚举。
+- **门控边界**：collab-admin web 控制台整体进入权用 `platformRole === 'PLATFORM_ADMIN'`（仅系统平台管理员），自定义平台角色不进整个后台；桌面端 review（市场审核）入口同理保留 `isPlatformAdmin`。细粒度功能权限由 `@RequirePermission` 在后端守卫层强制。
 
 ### 4. Validation & Error Matrix
 - 权限码不在注册表 → 400 `bad_request`（`未知权限码：X`）

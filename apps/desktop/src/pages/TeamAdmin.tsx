@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useApp } from '@/App';
+import { isTeamManager } from '@/lib/permissions';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -38,8 +39,8 @@ export function TeamAdmin() {
 
   useEffect(() => { loadOverview(); }, []);
 
-  // 非团队管理员兜底（理论上 Sidebar 已过滤，防御纵深）
-  if (session.role !== 'TEAM_ADMIN') {
+  // RBAC：基于权限码而非旧枚举判定（自定义团队管理角色也能进入）。
+  if (!isTeamManager(session.permissions)) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         仅团队管理员可访问团队管理面板

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
 import { isPluginCenterView } from '@/lib/plugin-center';
+import { isTeamManager } from '@/lib/permissions';
 
 interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
 
@@ -32,7 +33,7 @@ const ROLE_LABEL: Record<string, string> = {
 
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const { session, view, setView, setRunningPlugin, openAccountSettings, platformName, platformLogoUrl } = useApp();
-  const items = NAV.filter((n) => (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') && (!n.platformAdminOnly || session.isPlatformAdmin));
+  const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
 

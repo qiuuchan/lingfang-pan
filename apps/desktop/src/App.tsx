@@ -98,6 +98,7 @@ const emptySession: Session = {
   isPlatformAdmin: false,
   onboarding: null,
   application: null,
+  permissions: [],
 };
 
 const SESSION_STORAGE_KEY = 'lf:session';
@@ -164,6 +165,7 @@ function sessionFromPayload(payload: CollabSessionResponse, previousToken: strin
     isPlatformAdmin: user.platformRole === 'PLATFORM_ADMIN',
     onboarding: payload.onboarding,
     application: payload.application,
+    permissions: payload.permissions ?? [],
   };
 }
 
@@ -218,10 +220,6 @@ export default function App() {
     }
     if (nextView === 'team') {
       openAccountSettings('team');
-      return;
-    }
-    if (nextView === 'team-manage') {
-      openAccountSettings('team-manage');
       return;
     }
     setAccountSettingsOpen(false);

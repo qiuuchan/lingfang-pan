@@ -382,7 +382,12 @@ export class AuthService {
       orderBy: { createdAt: 'desc' },
     });
     const membership = user.memberships[0] || null;
-    const onboarding: OnboardingState = this.resolveOnboarding(user.platformRole, membership?.role, application?.status);
+
+    // RBAC：解析当前用户的全部权限码，随 session 下发给前端做入口门控（替代旧枚举判定）。
+    // 平台角色权限（User.platformRoleId）+ 团队角色权限（membership.teamRoleId，仅团队 ACTIVE 时）。
+    const permissions = await this.resolveUserPermissions(user.platformRoleId, membership);
+
+    const onboarding: OnboardingState = this.resolveOnboarding(user.platformRole, membership?.role, application?.status, permissions);
     const payload = {
       token: includeToken ? this.issueToken(user.id, user.email, user.platformRole, user.tokenVersion) : undefined,
       user: {
@@ -390,20 +395,52 @@ export class AuthService {
         email: user.email,
         displayName: user.displayName,
         platformRole: user.platformRole,
+        platformRoleId: user.platformRoleId,
         status: user.status,
         tokenVersion: user.tokenVersion,
         // 邮箱验证状态：null=未验证（前端提示去验证），非 null=已验证时间。
         emailVerified: user.emailVerified,
       },
-      team: membership ? { id: membership.team.id, name: membership.team.name, slug: membership.team.slug, role: membership.role } : null,
+      team: membership ? {
+        id: membership.team.id,
+        name: membership.team.name,
+        slug: membership.team.slug,
+        role: membership.role,
+        teamRoleId: membership.teamRoleId,
+      } : null,
+      // RBAC：当前用户拥有的全部权限码（平台 + 团队），前端据此渲染入口与操作按钮。
+      permissions,
       application: application ? { id: application.id, status: application.status, teamName: application.teamName, reviewReason: application.reviewReason } : null,
       onboarding,
     };
     return payload;
   }
 
-  private resolveOnboarding(platformRole: string, teamRole?: string, applicationStatus?: string): OnboardingState {
+  /**
+   * RBAC：解析用户全部权限码（平台角色 + 团队角色合并）。
+   * 与 PermissionsGuard.resolvePermissions 同款逻辑，供 sessionFor 注入前端可读权限集。
+   * 团队 SUSPENDED 时不解析团队权限（与 ensureCurrentTeam 拦截语义一致）。
+   */
+  private async resolveUserPermissions(platformRoleId: string | null, membership: { teamRoleId: string | null; team: { status: string } } | null): Promise<string[]> {
+    const perms = new Set<string>();
+    const roleIds: string[] = [];
+    if (platformRoleId) roleIds.push(platformRoleId);
+    if (membership?.teamRoleId && membership.team.status === 'ACTIVE') roleIds.push(membership.teamRoleId);
+    if (roleIds.length === 0) return [];
+    const roles = await this.prisma.role.findMany({
+      where: { id: { in: roleIds } },
+      select: { permissions: true },
+    });
+    for (const role of roles) for (const code of role.permissions) perms.add(code);
+    return [...perms];
+  }
+
+  private resolveOnboarding(platformRole: string, teamRole: string | undefined, applicationStatus: string | undefined, permissions: string[] = []): OnboardingState {
     if (platformRole === 'PLATFORM_ADMIN') return 'PLATFORM_ADMIN_WEB_ONLY';
+    // RBAC：onboarding 基于实际权限而非旧枚举——有任意 team.* 管理权限视为团队管理员空间。
+    if (permissions.some((p) => p.startsWith('team.') && !['team.dashboard.view', 'team.plugin.list', 'team.balance.view'].includes(p))) {
+      return 'TEAM_ADMIN_SPACE';
+    }
     if (teamRole === 'TEAM_ADMIN') return 'TEAM_ADMIN_SPACE';
     if (teamRole === 'MEMBER') return 'TEAM_SPACE';
     if (applicationStatus === 'PENDING') return 'PENDING_APPROVAL';
