@@ -96,24 +96,24 @@ CREATE INDEX "PermissionGroup_scope_sortOrder_idx" ON "PermissionGroup"("scope",
 --    幂等：WHERE NOT EXISTS 防重复执行。displayName 取内置 moduleLabel，管理员可后续覆盖。
 INSERT INTO "PermissionGroup" ("scope", "groupKey", "displayName", "sortOrder", "isSystem", "updatedAt")
 SELECT * FROM (VALUES
-  ('PLATFORM'::"RoleScope", 'platform.dashboard', '仪表盘', 10, true),
-  ('PLATFORM'::"RoleScope", 'platform.user', '用户管理', 20, true),
-  ('PLATFORM'::"RoleScope", 'platform.team', '团队管理', 30, true),
-  ('PLATFORM'::"RoleScope", 'platform.plugin', '插件市场', 40, true),
-  ('PLATFORM'::"RoleScope", 'platform.application', '申请审批', 50, true),
-  ('PLATFORM'::"RoleScope", 'platform.llm', '模型服务', 60, true),
-  ('PLATFORM'::"RoleScope", 'platform.release', '版本发布', 70, true),
-  ('PLATFORM'::"RoleScope", 'platform.admin', '平台管理员', 80, true),
-  ('PLATFORM'::"RoleScope", 'platform.role', '平台角色', 90, true),
-  ('PLATFORM'::"RoleScope", 'platform.audit', '审计日志', 100, true),
-  ('PLATFORM'::"RoleScope", 'platform.setting', '平台设置', 110, true),
-  ('TEAM'::"RoleScope", 'team.dashboard', '团队概览', 10, true),
-  ('TEAM'::"RoleScope", 'team.member', '成员管理', 20, true),
-  ('TEAM'::"RoleScope", 'team.role', '团队角色', 30, true),
-  ('TEAM'::"RoleScope", 'team.plugin', '插件管理', 40, true),
-  ('TEAM'::"RoleScope", 'team.plugin.grant', '插件授权', 50, true),
-  ('TEAM'::"RoleScope", 'team.balance', '团队余额', 60, true),
-  ('TEAM'::"RoleScope", 'team.profile', '团队资料', 70, true)
+  ('PLATFORM'::"RoleScope", 'platform.dashboard', '仪表盘', 10, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.user', '用户管理', 20, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.team', '团队管理', 30, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.plugin', '插件市场', 40, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.application', '申请审批', 50, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.llm', '模型服务', 60, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.release', '版本发布', 70, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.admin', '平台管理员', 80, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.role', '平台角色', 90, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.audit', '审计日志', 100, true, CURRENT_TIMESTAMP),
+  ('PLATFORM'::"RoleScope", 'platform.setting', '平台设置', 110, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.dashboard', '团队概览', 10, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.member', '成员管理', 20, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.role', '团队角色', 30, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.plugin', '插件管理', 40, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.plugin.grant', '插件授权', 50, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.balance', '团队余额', 60, true, CURRENT_TIMESTAMP),
+  ('TEAM'::"RoleScope", 'team.profile', '团队资料', 70, true, CURRENT_TIMESTAMP)
 ) AS v("scope", "groupKey", "displayName", "sortOrder", "isSystem")
 WHERE NOT EXISTS (
   SELECT 1 FROM "PermissionGroup" pg
