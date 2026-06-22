@@ -69,7 +69,7 @@ export function Sidebar({
   /** 唤起全局搜索（Task 6）。App 传入，打开 CommandPalette。 */
   onOpenSearch: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, openAccountSettings, platformName, platformLogoUrl } = useApp();
+  const { session, view, setView, setRunningPlugin, openAccountSettings } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
@@ -134,25 +134,8 @@ export function Sidebar({
       )}
       style={{ width: collapsed ? COLLAPSED_WIDTH : width }}
     >
-      {/* 平台信息头 */}
-      <div className={cn('flex items-center gap-2 border-b px-3 py-3.5', collapsed && 'justify-center px-0')}>
-        <div className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded bg-primary/10 text-primary">
-          {platformLogoUrl ? (
-            <img src={platformLogoUrl} alt={platformName} className="size-full object-cover" referrerPolicy="no-referrer" />
-          ) : (
-            <HomeIcon className="size-4 text-primary" />
-          )}
-        </div>
-        {!collapsed && (
-          <span className="min-w-0 truncate text-sm font-semibold leading-tight">
-            {platformName}
-            <br />
-            <span className="text-xs font-normal text-muted-foreground">协作平台前台</span>
-          </span>
-        )}
-      </div>
-
-      {/* 搜索入口（Task 6）+ 通知铃铛（Task 7）。 */}
+      {/* 搜索入口（Task 6）+ 通知铃铛（Task 7）。
+          顶部品牌区（logo + 平台名 + 副标题）已按需求移除，搜索栏即侧栏最顶部。 */}
       <div className={cn('flex items-center gap-1.5 border-b p-2', collapsed && 'flex-col px-2')}>
         <button
           type="button"

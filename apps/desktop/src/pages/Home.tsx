@@ -14,7 +14,9 @@ export function Home() {
   const greeting = greet(session.displayName);
 
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 py-10">
+    // min-h 用 calc 撑满主体可视高（视口高 - TitleBar h-9 2.25rem - 滚动容器 py-6 3rem），
+    // 使 items-center / justify-center 真正生效（原 h-full 因父级 max-w-6xl 无明确高度而解析为 auto，垂直居中失效）。
+    <div className="flex min-h-[calc(100dvh-5.25rem)] w-full flex-col items-center justify-center px-6 py-10">
       {/* 问候 + 副标题 */}
       <div className="mb-7 text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{greeting}</h1>
