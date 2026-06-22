@@ -7,6 +7,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
+import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
 import { FloatingCreateButton } from '@/components/FloatingCreateButton';
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
@@ -198,6 +199,8 @@ export default function App() {
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
+  // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
@@ -531,7 +534,11 @@ export default function App() {
         {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制（最小化/最大化/关闭）。 */}
         <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
         <div className="flex min-h-0 flex-1">
-          <Sidebar collapsed={!sidebarOpen} onOpenSearch={() => setSearchOpen(true)} />
+          <Sidebar
+            collapsed={!sidebarOpen}
+            onOpenSearch={() => setSearchOpen(true)}
+            onOpenAvatarMenu={() => setAvatarMenuOpen(true)}
+          />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗、切设置）。
@@ -602,6 +609,8 @@ export default function App() {
         settingsTab={settingsTab}
         onSettingsTabChange={setSettingsTab}
       />
+      {/* 项 4：左下角用户按钮弹出的 AvatarMenu（v4 形态，适配当前 RBAC/View）。 */}
+      <AvatarMenu open={avatarMenuOpen} onClose={() => setAvatarMenuOpen(false)} collapsed={!sidebarOpen} />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}

@@ -6,7 +6,7 @@
 //   · collapsed=false → 展开态，宽度可拖拽（200–320px），默认 224，持久化 lf:sidebar-width。
 //     拖拽手柄在右边缘，双击复位默认宽度。
 // - 顶部搜索按钮（Task 6）：点击 / Ctrl+K 唤起 CommandPalette（背景模糊居中浮层，由 App 渲染）。
-// - 底部账户信息：点击 → openAccountSettings('account')（AccountDialog 仍在 App 统一渲染，避免重复挂载）。
+// - 底部账户信息：点击 → 唤起 AvatarMenu（项 4，v4 富菜单形态，由 App 统一渲染）。团队管理 / 通知入口已迁入其中（项 3）。
 // - 样式沿用 v4 / 现有 shadcn token：bg-card、border-r、ghost 按钮、active 态 primary 高亮。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '@/App';
@@ -19,23 +19,20 @@ import {
   ChevronDownIcon,
   UserRoundIcon,
   ShieldCheckIcon,
-  UsersRoundIcon,
   SearchIcon,
-  BellIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
 import { isPluginCenterView } from '@/lib/plugin-center';
 import { isTeamManager } from '@/lib/permissions';
-import { NotificationCenter, useUnreadCount } from '@/components/NotificationCenter';
 
 interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
 
 const NAV: NavItem[] = [
   { v: 'home', label: '首页', icon: HomeIcon },
   // Task 9：「创建插件」入口迁至右下角 FAB（FloatingCreateButton），不再占用侧栏导航位。
+  // 项 3：团队管理入口迁至左下角 AvatarMenu，不再占用侧栏导航位。
   { v: 'plugins', label: '插件', icon: PackageIcon },
-  { v: 'team-admin', label: '团队管理', icon: UsersRoundIcon, teamAdminOnly: true },
   { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
 ];
 
@@ -64,21 +61,21 @@ function loadWidth(): number {
 export function Sidebar({
   collapsed,
   onOpenSearch,
+  onOpenAvatarMenu,
 }: {
   collapsed: boolean;
   /** 唤起全局搜索（Task 6）。App 传入，打开 CommandPalette。 */
   onOpenSearch: () => void;
+  /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
+  onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, openAccountSettings } = useApp();
+  const { session, view, setView, setRunningPlugin } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
 
   const [width, setWidth] = useState<number>(loadWidth);
   const [dragging, setDragging] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
-  // Task 7：未读通知数轮询（60s），仅登录态侧栏挂载时启用。
-  const unread = useUnreadCount(true);
   const widthRef = useRef(width);
   widthRef.current = width;
 
@@ -134,16 +131,15 @@ export function Sidebar({
       )}
       style={{ width: collapsed ? COLLAPSED_WIDTH : width }}
     >
-      {/* 搜索入口（Task 6）+ 通知铃铛（Task 7）。
-          顶部品牌区（logo + 平台名 + 副标题）已按需求移除，搜索栏即侧栏最顶部。 */}
-      <div className={cn('flex items-center gap-1.5 border-b p-2', collapsed && 'flex-col px-2')}>
+      {/* 搜索入口（Task 6）。通知铃铛已按项 3 迁入 AvatarMenu，搜索栏独占侧栏顶部。 */}
+      <div className="border-b p-2">
         <button
           type="button"
           onClick={onOpenSearch}
           className={cn(
             buttonVariants({ variant: 'outline', size: 'sm' }),
-            'h-9 justify-start gap-2 px-2.5 text-muted-foreground',
-            collapsed ? 'w-full justify-center px-0' : 'flex-1',
+            'h-9 w-full justify-start gap-2 px-2.5 text-muted-foreground',
+            collapsed && 'justify-center px-0',
           )}
           title="搜索（Ctrl K）"
           aria-label="搜索"
@@ -152,25 +148,6 @@ export function Sidebar({
           {!collapsed && <span className="text-xs">搜插件、搜功能…</span>}
           {!collapsed && (
             <kbd className="ml-auto rounded border bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">⌘K</kbd>
-          )}
-        </button>
-        {/* Task 7 通知铃铛：带未读红点角标，点击打开通知中心抽屉。 */}
-        <button
-          type="button"
-          onClick={() => setNotifOpen(true)}
-          className={cn(
-            buttonVariants({ variant: 'outline', size: 'sm' }),
-            'relative h-9 shrink-0 px-2 text-muted-foreground hover:text-foreground',
-            collapsed && 'w-full justify-center px-0',
-          )}
-          title="通知"
-          aria-label={`通知${unread > 0 ? `（${unread} 条未读）` : ''}`}
-        >
-          <BellIcon className="size-4 shrink-0" />
-          {unread > 0 && (
-            <span className="absolute -right-1 -top-1 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
-              {unread > 9 ? '9+' : unread}
-            </span>
           )}
         </button>
       </div>
@@ -202,11 +179,11 @@ export function Sidebar({
         })}
       </nav>
 
-      {/* 账户信息 */}
+      {/* 账户信息：点击弹出 AvatarMenu（项 4，v4 形态富菜单）。 */}
       <div className="border-t p-2">
         <button
           type="button"
-          onClick={() => openAccountSettings('account')}
+          onClick={onOpenAvatarMenu}
           title={collapsed ? tenantLabel : undefined}
           className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full gap-2 px-2 py-2', collapsed && 'justify-center px-0')}
         >
@@ -234,9 +211,6 @@ export function Sidebar({
           aria-orientation="vertical"
         />
       )}
-
-      {/* Task 7 通知中心抽屉（Sheet portal，渲染到 body，不受侧栏 overflow 影响）。 */}
-      <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
     </aside>
   );
 }
