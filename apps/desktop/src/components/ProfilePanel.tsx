@@ -1,91 +1,22 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+// ProfilePanel.tsx — 个人资料面板（项 14）：昵称/邮箱/改密/退出登录。
+//
+// 从原 AccountDialog 的 AccountPanel 抽出（AccountDialog 聚合体已删）。由 ProfileDialog
+// （PanelDialog 包裹）承载，从 AvatarMenu「个人资料」项打开。逻辑零改动，仅迁移位置。
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { LogOutIcon, UserRoundIcon } from 'lucide-react';
+import { LogOutIcon } from 'lucide-react';
 import { api, isEmail, type ApiError } from '@/lib/api';
-import type { AccountSettingsTab, Session, SettingsTab } from '@/lib/types';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { AccountSettingsNav } from '@/components/AccountSettingsNav';
+import type { Session } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { dragRegionProps } from '@/lib/window-drag';
-import { ListSkeleton } from '@/lib/motion';
-
-const TeamHome = lazy(() => import('@/pages/TeamHome').then((m) => ({ default: m.TeamHome })));
-const Wallet = lazy(() => import('@/pages/Wallet').then((m) => ({ default: m.Wallet })));
-const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 
 const ROLE_LABEL: Record<string, string> = {
   TEAM_ADMIN: '团队管理员',
   MEMBER: '成员',
 };
 
-export function AccountDialog({
-  applySession,
-  onOpenChange,
-  onSettingsTabChange,
-  onTabChange,
-  open,
-  resetSession,
-  session,
-  settingsTab,
-  tab,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  session: Session;
-  applySession: (patch: Partial<Session>) => void;
-  resetSession: () => void;
-  tab: AccountSettingsTab;
-  onTabChange: (tab: AccountSettingsTab) => void;
-  settingsTab: SettingsTab;
-  onSettingsTabChange: (tab: SettingsTab) => void;
-}) {
-  const rootTab = tab;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[86vh] max-h-[86vh] w-[94vw] max-w-6xl flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
-        <DialogHeader className="border-b px-5 py-4" {...dragRegionProps}>
-          <DialogTitle className="flex items-center gap-2" data-tauri-drag-region>
-            <UserRoundIcon className="size-4" />账户设置
-          </DialogTitle>
-          <DialogDescription>账户、团队、钱包和应用设置集中在这里。</DialogDescription>
-        </DialogHeader>
-        <Tabs value={rootTab} orientation="vertical" onValueChange={(value) => onTabChange(value as AccountSettingsTab)} className="min-h-0 flex-1 flex-row gap-0">
-          <AccountSettingsNav value={rootTab} />
-          <ScrollArea className="min-w-0 flex-1">
-            <div className="p-5">
-              <Suspense fallback={<ListSkeleton rows={6} />}>
-                <TabsContent value="account" keepMounted>
-                  <AccountPanel
-                    applySession={applySession}
-                    onClose={() => onOpenChange(false)}
-                    resetSession={resetSession}
-                    session={session}
-                  />
-                </TabsContent>
-                <TabsContent value="team" keepMounted>
-                  <TeamHome />
-                </TabsContent>
-                <TabsContent value="wallet" keepMounted>
-                  <Wallet />
-                </TabsContent>
-                <TabsContent value="settings" keepMounted>
-                  <Settings value={settingsTab} onValueChange={(value) => onSettingsTabChange(value as SettingsTab)} />
-                </TabsContent>
-              </Suspense>
-            </div>
-          </ScrollArea>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AccountPanel({
+export function ProfilePanel({
   applySession,
   onClose,
   resetSession,

@@ -7,7 +7,7 @@
 // - View 映射：team-manage→team-admin（body 视图）、llm→设置 gateway tab；删除「版本发布管理」（桌面端无 releases 视图，属 collab-admin）。
 // - 通知中心抽屉在本组件渲染（随菜单生命周期挂载）。
 // - 弹出层 left 定位随 collapsed 切换（折叠态贴窄轨道 w-14，展开态贴宽轨道 + 间距）。
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTheme } from 'next-themes';
 import {
   ChevronRightIcon,
@@ -16,6 +16,7 @@ import {
   WalletIcon,
   SettingsIcon,
   UsersIcon,
+  UserRoundIcon,
   PuzzleIcon,
   WrenchIcon,
   HelpCircleIcon,
@@ -28,7 +29,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '@/App';
 import { isTeamManager } from '@/lib/permissions';
-import { NotificationCenter, useUnreadCount } from '@/components/NotificationCenter';
+import { useUnreadCount } from '@/components/NotificationCenter';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
 
@@ -42,10 +43,10 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, setView, openAccountSettings } = useApp();
+  const { session, resetSession, setView, openAccountSettings, openNotifications } = useApp();
   const { theme, setTheme } = useTheme();
-  const [notifOpen, setNotifOpen] = useState(false);
-  // 仅菜单打开时轮询未读（与原侧栏铃铛同语义：登录态 + 可见时启用）。
+  // 通知中心已提为 App 顶层独立悬浮窗（项 1，修复嵌套导致的点击即关/卡死 bug）；
+  // 菜单仅显示未读角标（useUnreadCount），点击交给 openNotifications。
   const unread = useUnreadCount(open);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -94,13 +95,15 @@ export function AvatarMenu({
     onClick: () => void;
   };
 
-  // 上半部分菜单（通知 / 钱包 / 切团队 / 插件 / 团队管理 / 开发者 / LLM）。
+  // 上半部分菜单（个人资料 / 通知 / 钱包 / 切团队 / 插件 / 团队管理 / 开发者 / LLM）。
   const items: Item[] = [
-    { key: 'notif', label: '通知中心', icon: BellIcon, visible: true, badge: unread, onClick: () => { setNotifOpen(true); } },
+    { key: 'profile', label: '个人资料', icon: UserRoundIcon, visible: true, onClick: () => { openAccountSettings('account'); onClose(); } },
+    // 项 1：通知中心改为 App 顶层独立悬浮窗（openNotifications），不再嵌套本菜单内。
+    { key: 'notif', label: '通知中心', icon: BellIcon, visible: true, badge: unread, onClick: () => { openNotifications(); onClose(); } },
     { key: 'wallet', label: '钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('wallet'); onClose(); } },
     { key: 'switch-team', label: '切换团队', icon: RepeatIcon, visible: true, onClick: () => { openAccountSettings('team'); onClose(); } },
     { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => go('plugins') },
-    // team-admin 是 body 视图（主区渲染 TeamAdmin 页），区别于走 AccountDialog 的 'team' tab。
+    // team-admin 是 body 视图（主区渲染 TeamAdmin 页），区别于走悬浮窗的 'team'（切换团队）。
     { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => go('team-admin') },
     { key: 'creator', label: '开发者模式', icon: WrenchIcon, visible: canManageTeam, onClick: () => go('creator') },
     // LLM 设置：桌面端无独立 view，跳设置页 gateway tab（模型服务）。
@@ -210,9 +213,6 @@ export function AvatarMenu({
           </button>
         </div>
       </div>
-
-      {/* 通知中心抽屉（随菜单挂载，notifOpen 时打开）。 */}
-      <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
     </>
   );
 }

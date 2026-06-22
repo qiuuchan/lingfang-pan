@@ -6,7 +6,9 @@ import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDra
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
-import { AccountDialog } from '@/components/AccountDialog';
+import { PanelDialog } from '@/components/PanelDialog';
+import { ProfilePanel } from '@/components/ProfilePanel';
+import { NotificationCenter } from '@/components/NotificationCenter';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
 import { FloatingCreateButton } from '@/components/FloatingCreateButton';
@@ -26,6 +28,11 @@ import { isPluginCenterView } from '@/lib/plugin-center';
 const Plugins = lazy(() => import('./pages/Plugins').then((m) => ({ default: m.Plugins })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
 const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
+// 项 14：AccountDialog 已删，其承载的 Wallet/TeamHome/Settings 改为各自由 PanelDialog 包裹的独立悬浮窗，
+// 在 App 顶层懒加载挂载（与原 AccountDialog 内的懒加载同款）。
+const Wallet = lazy(() => import('@/pages/Wallet').then((m) => ({ default: m.Wallet })));
+const TeamHome = lazy(() => import('@/pages/TeamHome').then((m) => ({ default: m.TeamHome })));
+const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -50,8 +57,9 @@ interface AppContextValue {
   // 受控的 Settings 页 Tab（供新手任务清单「去设置 → 模型服务」等定向跳转）。
   settingsTab: SettingsTab;
   setSettingsTab: (tab: SettingsTab) => void;
-  accountSettingsTab: AccountSettingsTab;
   openAccountSettings: (tab?: AccountSettingsTab, settingsTab?: SettingsTab) => void;
+  /** 项 1/14：打开通知中心悬浮窗（App 顶层独立挂载，不依赖 AvatarMenu 生命周期）。 */
+  openNotifications: () => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
@@ -226,8 +234,13 @@ export default function App() {
     setCreatorOpenState(v);
     try { localStorage.setItem('lf:creator-open', v ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
   }, []);
-  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
-  const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
+  // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
+  const [notifOpen, setNotifOpen] = useState(false);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -261,11 +274,17 @@ export default function App() {
   // needsSetup=true（DB 无 PLATFORM_ADMIN）则渲染 SetupWizard 替代 Auth。
   const [needsSetup, setNeedsSetup] = useState(false);
 
+  // 项 14：路由到对应独立悬浮窗（保留原 openAccountSettings API，所有现有调用方零改动）。
+  // 'account' → 个人资料、'team' → 切换团队、'wallet' → 钱包、'settings' → 设置（可用 nextSettingsTab 指定子 tab）。
   const openAccountSettings = useCallback((tab: AccountSettingsTab = 'account', nextSettingsTab?: SettingsTab) => {
     if (nextSettingsTab) setSettingsTab(nextSettingsTab);
-    setAccountSettingsTab(tab);
-    setAccountSettingsOpen(true);
+    if (tab === 'wallet') setWalletOpen(true);
+    else if (tab === 'team') setTeamOpen(true);
+    else if (tab === 'settings') setSettingsOpen(true);
+    else setProfileOpen(true);
   }, []);
+  // 项 1：打开通知中心独立悬浮窗（AvatarMenu / 任意组件通过 context 调用）。
+  const openNotifications = useCallback(() => setNotifOpen(true), []);
 
   const setView = useCallback((nextView: View) => {
     // Task 9：'creator' 不再切换 view，改为打开创建器悬浮窗（保留底层页面，关闭即回到原页）。
@@ -285,8 +304,12 @@ export default function App() {
       openAccountSettings('team');
       return;
     }
-    setAccountSettingsOpen(false);
-    // 跳到其它页面时关闭创建器悬浮窗（若开着）。
+    // 跳到其它页面时关闭所有功能悬浮窗 + 创建器（若开着），避免浮窗残留在新页面上。
+    setWalletOpen(false);
+    setTeamOpen(false);
+    setSettingsOpen(false);
+    setProfileOpen(false);
+    setNotifOpen(false);
     setCreatorOpen(false);
     setViewState(nextView);
   }, [openAccountSettings]);
@@ -533,7 +556,7 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
-    accountSettingsTab, openAccountSettings,
+    openAccountSettings, openNotifications,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
@@ -649,17 +672,22 @@ export default function App() {
           </main>
         </div>
       </div>
-      <AccountDialog
-        open={accountSettingsOpen}
-        onOpenChange={setAccountSettingsOpen}
-        session={session}
-        applySession={applySession}
-        resetSession={resetSession}
-        tab={accountSettingsTab}
-        onTabChange={setAccountSettingsTab}
-        settingsTab={settingsTab}
-        onSettingsTabChange={setSettingsTab}
-      />
+      {/* 项 14：各功能独立悬浮窗（替代已删的 AccountDialog 聚合体）。每个由 AvatarMenu 对应按钮
+          经 openAccountSettings 路由打开；Wallet/TeamHome/Settings 懒加载，Suspense 兜底首次加载。 */}
+      <PanelDialog open={walletOpen} onOpenChange={setWalletOpen} title="钱包" size="md">
+        <Suspense fallback={<ListSkeleton rows={6} />}><Wallet /></Suspense>
+      </PanelDialog>
+      <PanelDialog open={teamOpen} onOpenChange={setTeamOpen} title="切换团队" size="md">
+        <Suspense fallback={<ListSkeleton rows={6} />}><TeamHome /></Suspense>
+      </PanelDialog>
+      <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="CLI / 模型服务 / 插件 / 后端地址">
+        <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>
+      </PanelDialog>
+      <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="md">
+        <ProfilePanel session={session} applySession={applySession} resetSession={resetSession} onClose={() => setProfileOpen(false)} />
+      </PanelDialog>
+      {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
+      <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
       {/* 项 4：左下角用户按钮弹出的 AvatarMenu（v4 形态，适配当前 RBAC/View）。 */}
       <AvatarMenu open={avatarMenuOpen} onClose={() => setAvatarMenuOpen(false)} collapsed={!sidebarOpen} />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
