@@ -10,6 +10,7 @@ import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
 import { CommandPalette } from '@/components/CommandPalette';
 import { FloatingCreateButton } from '@/components/FloatingCreateButton';
+import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
 import { loadPlugins } from '@/pages/plugins-runtime';
 // 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
@@ -578,6 +579,8 @@ export default function App() {
       />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}
+      <PermissionConsentDialog />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );

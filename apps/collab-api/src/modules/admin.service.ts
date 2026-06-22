@@ -668,6 +668,32 @@ export class AdminService {
         // 通知触发失败不阻塞审核主流程。
       }
     }
+    // Task 7「新版本推送」：重新审核通过（通常是作者改版后重提）且已有用户安装旧版本时，
+    // 向每位安装了旧版本的用户推 new_version 通知。首次上架无安装记录 → 不触发。
+    // 触发失败不阻塞审核主流程（与上方作者通知同语义）。
+    try {
+      const installations = await this.prisma.pluginInstallation.findMany({
+        where: { pluginId: id, status: 'ENABLED' },
+        select: { installedById: true, version: true },
+      });
+      const newVersion = updated.version;
+      for (const inst of installations) {
+        if (!inst.installedById || inst.version === newVersion) continue;
+        try {
+          await this.notifications.create(
+            inst.installedById,
+            'new_version',
+            '插件有新版本',
+            `你安装的「${plugin.name}」发布了新版本 v${newVersion}（当前 v${inst.version}），可在插件页更新。`,
+            { relatedType: 'Plugin', relatedId: id },
+          );
+        } catch {
+          /* 单条通知失败不影响其它用户 */
+        }
+      }
+    } catch {
+      /* 查询安装记录失败不阻塞审核 */
+    }
     return { plugin: publicPlugin(updated, updated.teamId || undefined) };
   }
 
