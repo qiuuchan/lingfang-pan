@@ -131,6 +131,40 @@ export async function forwardOpenAiImage(args: {
   return { inputTokens: 0, outputTokens: 0, images: Math.max(1, args.body.n ?? 1) };
 }
 
+/**
+ * 透传 multipart/raw 请求体到上游（如 OpenAI /v1/images/edits：图片编辑需 multipart 上传）。
+ * 不解析 body，原样转发 Content-Type + 原始字节；按响应 data 数量计费（图片张数）。
+ * relay 计费按张：count = max(1, 响应 data 长度)。
+ */
+export async function forwardRawPassthrough(args: {
+  baseUrl: string;
+  upstreamKey: string;
+  path: string; // 上游路径后缀（如 images/edits）
+  method: string;
+  contentType: string;
+  rawBody: Buffer;
+  res: ExpressResponse;
+}): Promise<ForwardResult> {
+  const url = `${args.baseUrl}/${args.path.replace(/^\//, '')}`;
+  const upstream = await upstreamFetch(url, {
+    method: args.method,
+    headers: { 'Content-Type': args.contentType, Authorization: `Bearer ${args.upstreamKey}` },
+    body: new Uint8Array(args.rawBody),
+  });
+  await ensureOk(upstream);
+  // 尝试解析 JSON 取图片数；非 JSON（少见）默认按 1 张。
+  let images = 1;
+  const text = await upstream.text();
+  try {
+    const data = JSON.parse(text) as { data?: unknown[] };
+    images = Math.max(1, data.data?.length ?? 1);
+    args.res.status(200).json(data);
+  } catch {
+    args.res.status(200).send(text);
+  }
+  return { inputTokens: 0, outputTokens: 0, images };
+}
+
 // === Anthropic 协议（/v1/messages） ===
 
 interface AnthropicMessagesRequest {

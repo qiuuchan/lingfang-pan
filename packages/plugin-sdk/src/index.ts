@@ -5,7 +5,9 @@
 import type { CapabilityKind } from '@lingfang/contract';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-type ChatInput = { messages: ChatMessage[]; model?: string };
+type ChatInput = { messages: ChatMessage[]; model?: 'fast' | 'premium' };
+type ImageGenerateInput = { prompt: string; model?: 'fast' | 'premium'; size?: string; n?: number };
+type ImageGenerateResult = { images: string[] };
 type CodeAssistantTool = 'claude' | 'codex' | 'opencode';
 type CodeAssistantCheckInput = { tool?: CodeAssistantTool };
 type CodeAssistantRunInput = { tool: CodeAssistantTool; model?: string; prompt: string; workspaceDir?: string };
@@ -117,6 +119,12 @@ export const sdk = {
   llm: {
     chat: (input: ChatInput) => invoke<string>('llm.chat', input),
   },
+  // 计费/中转：生图走平台 relay（/api/relay/v1/images/generations），按张计费，按团队灵石结算。
+  // 输入 prompt 必填；model 默认 fast；返回 { images: string[] }（url 或 data:base64）。
+  // 系统提示词已由平台强制注入：必须且仅能使用灵坊平台服务（需求 #3）。
+  image: {
+    generate: (input: ImageGenerateInput) => invoke<ImageGenerateResult>('image.generate', input),
+  },
   codeAssistant: {
     check: (input: CodeAssistantCheckInput = {}) => invoke<unknown>('code-assistant.session', { op: 'check', ...input }),
     run: (input: CodeAssistantRunInput) => invoke<unknown>('code-assistant.run', input),
@@ -139,6 +147,8 @@ export const sdk = {
 export type {
   ChatMessage,
   ChatInput,
+  ImageGenerateInput,
+  ImageGenerateResult,
   CodeAssistantTool,
   CodeAssistantCheckInput,
   CodeAssistantRunInput,

@@ -25,6 +25,7 @@ import {
   forwardOpenAiChat,
   forwardOpenAiImage,
   forwardAnthropicMessages,
+  forwardRawPassthrough,
   extractClientIp,
   type ForwardResult,
 } from './forwarders';
@@ -192,11 +193,54 @@ export class RelayService {
     });
   }
 
+  /** POST /api/relay/v1/images/edits（multipart 透传，如 OpenAI 图片编辑）。按张计费。 */
+  async imageEditsPassthrough(req: Request, res: Response) {
+    const auth = this.requireAuth(req);
+    this.assertScope(auth, 'image');
+    // multipart 上传含 model 字段（form-data）；默认 fast。
+    const tier = this.resolveTierFromQueryOrForm(req);
+    const cfg = await this.pricing.getTierConfig(tier);
+    const imageModel = cfg.imageModel;
+    if (!imageModel) throw new AppError(503, 'image_not_supported', `${cfg.label} 不提供生图`);
+    const price = await this.pricing.lookupPrice({ capability: 'image', model: imageModel, tier });
+    if (!price) throw new AppError(503, 'pricing_not_configured', `该生图模型未配置定价：${imageModel}`);
+    const contentType = String(req.headers['content-type'] ?? 'application/octet-stream');
+    // multipart：Express 不自动解析，原始字节在 req 流上。读取为 Buffer 原样转发（保 boundary 完整）。
+    const rawBody = await readRawBody(req);
+    return this.executeRelay(req, res, {
+      auth,
+      capability: 'image',
+      tier,
+      model: imageModel,
+      priceUnit: price.unit,
+      pricePerUnit: price.pricePerUnit,
+      stream: false,
+      requestSummary: { model: imageModel, endpoint: 'images/edits', contentType },
+      forward: (routed) =>
+        forwardRawPassthrough({
+          baseUrl: routed.baseUrl,
+          upstreamKey: routed.upstreamKey,
+          path: 'images/edits',
+          method: 'POST',
+          contentType,
+          rawBody,
+          res,
+        }),
+      usageToCredits: (fr) => ({ realCredits: this.pricing.computeCredits(price.unit, price.pricePerUnit, { images: fr.images }), usage: { inputTokens: 0, outputTokens: 0, images: fr.images } }),
+    });
+  }
+
   // === 内部：统一编排 ===
 
   private requireAuth(req: Request): RelayAuth {
     if (!req.relayAuth) throw new AppError(401, 'unauthorized', '未鉴权');
     return req.relayAuth;
+  }
+
+  /** multipart/query 里取 tier 哨兵（images/edits 不能用 @Body 解析 JSON）。 */
+  private resolveTierFromQueryOrForm(req: Request): Tier {
+    const m = (req.query.model ?? '') as string;
+    return wireToTier(String(m) || 'fast');
   }
 
   /** API Key scopes 强制（JWT scopes=['*'] 全放行）。 */
@@ -324,4 +368,18 @@ export class RelayService {
       },
     });
   }
+}
+
+/** 读取原始请求体为 Buffer（multipart 透传用，保 boundary 完整）。 */
+function readRawBody(req: Request): Promise<Buffer> {
+  // Express 若已把 body 解析为 Buffer（express.raw），直接用；否则从流读取。
+  if (Buffer.isBuffer((req as Request & { body?: unknown }).body)) {
+    return Promise.resolve((req as Request & { body: Buffer }).body);
+  }
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
