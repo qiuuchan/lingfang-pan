@@ -84,14 +84,17 @@ async function bootstrap() {
   }
   initApiBase(defaultApiBase);
   initAuthToken();
+  // Task 10 修复：移除 React.StrictMode。
+  // StrictMode 在 dev 下对每个组件执行 mount→unmount→remount，导致 framer-motion 的入场动画
+  // （StaggerContainer/FadeIn/PageTransition）每次挂载都重播——点击插件触发列表/运行器重挂载时，
+  // 用户可见「展示动画重复播放两次」。生产构建（.exe）StrictMode 本就是 no-op，移除后 dev 行为与
+  // 生产一致。StrictMode 的收益（暴露 effect 清理缺陷）本仓库已在各 effect 内以注释 + ref 兜底覆盖。
   ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
-        <RootErrorBoundary>
-          <App />
-        </RootErrorBoundary>
-      </ThemeProvider>
-    </React.StrictMode>,
+    <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
+      <RootErrorBoundary>
+        <App />
+      </RootErrorBoundary>
+    </ThemeProvider>,
   );
 }
 

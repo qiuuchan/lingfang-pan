@@ -15,6 +15,7 @@ import { LoadingButton } from '@/components/loading-button';
 import { Pagination } from '@/components/pagination';
 import { Stars } from '@/components/stars';
 import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
+import { CATEGORY_TABS, categorizePlugin, categoryLabel } from '@/lib/marketplace-categories';
 import { useMarketplaceDetail } from './use-marketplace-detail';
 import { useMarketplaceCatalog } from './use-marketplace-catalog';
 
@@ -65,6 +66,27 @@ export function MarketplacePluginsSection({ active }: { active: boolean }) {
         </Select>
         <Button onClick={catalog.search}>搜索</Button>
       </div>
+      {/* Task 1：自动分类标签行。点击切换 category，客户端过滤已拉取列表。 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {CATEGORY_TABS.map((tab) => {
+          const active = catalog.category === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => catalog.setCategory(tab.key)}
+              className={
+                'rounded-full border px-3 py-1 text-xs transition-colors ' +
+                (active
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground')
+              }
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
       {catalog.plugins === null ? (
         <ListSkeleton />
       ) : catalog.total ? (
@@ -90,11 +112,14 @@ export function MarketplacePluginsSection({ active }: { active: boolean }) {
 }
 
 function MarketplaceRow({ plugin, onOpen }: { plugin: MarketPlugin; onOpen: () => void }) {
+  // Task 1：展示自动分类标签（让「自动分类」结果可见，便于用户理解归类依据）。
+  const catLabel = categoryLabel(categorizePlugin(plugin));
   return (
     <Button variant="ghost" className="flex h-auto w-full items-center justify-between gap-4 rounded-none px-4 py-3.5 text-left" onClick={onOpen}>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{plugin.name}</span>
+          <Badge variant="outline" className="shrink-0 text-[10px] font-normal text-muted-foreground">{catLabel}</Badge>
           <Badge variant={plugin.is_free ? 'secondary' : 'default'} className="shrink-0">{fmtYuan(plugin.price_cents)}</Badge>
         </div>
         <div className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">{plugin.description}</div>

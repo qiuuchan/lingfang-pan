@@ -1,3 +1,5 @@
+import { formatTimestamp } from './time';
+
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamRole = string;
 export type OnboardingState = 'NEEDS_INVITATION' | 'PENDING_APPROVAL' | 'APPLICATION_REJECTED' | 'TEAM_SPACE' | 'TEAM_ADMIN_SPACE' | 'PLATFORM_ADMIN_WEB_ONLY';
@@ -221,8 +223,34 @@ export interface PluginGrantRow {
   createdAt: string;
 }
 
-/** 通用时间格式化：ISO 字符串 → zh-CN 本地时间（24h），解析失败原样返回。供团队管理列表展示复用。 */
+/** 通用时间格式化：ISO 字符串 → zh-CN 本地时间（24h），解析失败返回 '—'。
+ *  委托给 lib/time 的 formatTimestamp，兼容旧版 epoch.毫秒Z 格式（Task 4a 修复）。 */
 export function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); } catch { return iso; }
+  return formatTimestamp(iso);
 }
+
+// === Task 7 通知中心 ===
+// 后端 Notification 模型（apps/collab-api/prisma/schema.prisma）经 publicNotification 出参：
+// camelCase + createdAt ISO 字符串。type 为语义串（plugin_approved / new_version 等），前端按映射展示。
+
+/** 通知条目（GET /api/notifications 返回的元素结构）。 */
+export interface NotificationItem {
+  id: string;
+  /** 语义类型（plugin_approved / plugin_rejected / plugin_delisted / application_approved /
+   *  application_rejected / password_reset_by_admin / purchased / purchase_sale / new_version / …）。 */
+  type: string;
+  title: string;
+  body: string;
+  read: boolean;
+  /** 关联实体类型/id（前端据此跳转，如 plugin → 市场详情）。 */
+  relatedType?: string | null;
+  relatedId?: string | null;
+  createdAt: string;
+}
+
+/** GET /api/notifications 响应。 */
+export interface NotificationsResponse {
+  notifications: NotificationItem[];
+  unreadCount: number;
+}
+

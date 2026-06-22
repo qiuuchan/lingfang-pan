@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { deriveTitle, providerLabel, type ConversationMeta } from '@/lib/plugin-draft';
+import { parseTimestamp, relativeTime } from '@/lib/time';
 
 // design §3.2.5（历史记录悬浮窗版，问题2）：会话列表内容（列表 / 新建 / 切换 / 删除 / 重命名）。
 // 由 PluginCreatorHome 顶部「历史」按钮触发的 Popover 承载，ScrollArea 限高 max-h-[70vh]。
@@ -19,20 +20,16 @@ interface ConversationRailProps {
   onDelete: (id: string) => void;
 }
 
-// 相对时间简表（够用于会话栏展示，无需重量级库）。返回「刚刚/N分钟前/N小时前/N天前/日期」。
-function relativeTime(iso?: string | null): string {
+// 相对时间委托给 lib/time（兼容旧版 epoch.毫秒Z 时间戳，Task 4a 修复）。无值/无法解析返回空串。
+function displayRelativeTime(iso?: string | null): string {
   if (!iso) return '';
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return '';
-  const diff = Date.now() - t;
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return '刚刚';
-  if (min < 60) return `${min} 分钟前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} 小时前`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day} 天前`;
-  return new Date(iso).toLocaleDateString('zh-CN');
+  return parseTimestamp(iso) ? relativeTime(iso, '') : '';
+}
+
+// 排序键：draftUpdatedAt ?? startedAt → epoch 毫秒。兼容旧格式，无法解析回退 0（排到末尾）。
+function sortKey(iso: string | undefined): number {
+  const d = parseTimestamp(iso);
+  return d ? d.getTime() : 0;
 }
 
 export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, onDelete }: ConversationRailProps) {
@@ -45,11 +42,7 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
   const [page, setPage] = useState(0);
 
   // 排序：draftUpdatedAt ?? startedAt 降序（最近更新在前，空态新对话次之）。
-  const sorted = [...metas].sort((a, b) => {
-    const ta = new Date(a.draftUpdatedAt || a.startedAt).getTime();
-    const tb = new Date(b.draftUpdatedAt || b.startedAt).getTime();
-    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-  });
+  const sorted = [...metas].sort((a, b) => sortKey(b.draftUpdatedAt || b.startedAt) - sortKey(a.draftUpdatedAt || a.startedAt));
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   // 当前页超出范围时收敛（会话删除/新增导致页数变化）。
   const safePage = Math.min(page, totalPages - 1);
@@ -129,7 +122,7 @@ export function ConversationRail({ metas, activeId, onSelect, onNew, onRename, o
                             {providerLabel(meta.tool)}
                           </Badge>
                           <span className="w-16 shrink-0 text-right text-[10px] text-muted-foreground">
-                            {relativeTime(meta.draftUpdatedAt || meta.startedAt)}
+                            {displayRelativeTime(meta.draftUpdatedAt || meta.startedAt)}
                           </span>
                           {/* 悬浮操作：重命名 / 删除（active 态常驻可见） */}
                           <div className={cn('flex shrink-0 items-center gap-0.5', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>

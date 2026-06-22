@@ -173,6 +173,53 @@ export function deletePlugin(pluginId: string): Promise<void> {
 }
 
 /**
+ * 查询单个插件进程的实时运行状态（Rust get_plugin_status 命令）。
+ *
+ * 组B Rust 后端契约（get_plugin_status）：
+ * - 查内存进程表 try_wait 实时判定（比 scan 读磁盘更准），进程已退出时自动清表。
+ * - 返回 { running, pid, started_at }。
+ *
+ * 用途（Task 4b 修复）：ScriptPreviewPanel 在认为插件 running 时周期性轮询，
+ * 捕获「插件进程自行退出（脚本跑完 / 用户关掉插件窗口）」场景——此前前端态不会更新，
+ * 「强制关闭」按钮常驻、状态卡在 running。轮询发现 running=false 即回退 idle，按钮恢复「运行」。
+ */
+export interface PluginProcessStatus {
+  running: boolean;
+  pid: number | null;
+  started_at: string | null;
+}
+
+export function getPluginStatus(pluginId: string): Promise<PluginProcessStatus> {
+  return tauriInvoke<PluginProcessStatus>('get_plugin_status', { pluginId });
+}
+
+// === Task 14：插件安全与管理（签名校验 + 版本召回） ===
+
+/** 签名校验结果（Rust verify_plugin_signature_command 返回）。 */
+export interface PluginSignatureStatus {
+  signed: boolean;
+  verified: boolean;
+  reason: string;
+}
+
+/** 版本召回信息（Rust check_plugin_recall_command 返回）。 */
+export interface PluginRecallInfo {
+  recalled: boolean;
+  version: string;
+  reason: string;
+}
+
+/** 校验插件签名（minisign）。无签名/未配置公钥返回 signed=false，不抛错。 */
+export function verifyPluginSignature(pluginId: string): Promise<PluginSignatureStatus> {
+  return tauriInvoke<PluginSignatureStatus>('verify_plugin_signature_command', { pluginId });
+}
+
+/** 查询已安装插件版本是否被平台召回（.recalled.json）。 */
+export function checkPluginRecall(pluginId: string, installedVersion: string): Promise<PluginRecallInfo> {
+  return tauriInvoke<PluginRecallInfo>('check_plugin_recall_command', { pluginId, installedVersion });
+}
+
+/**
  * 批量写插件文件到 plugins_root/<pluginId>/（修改已有插件时落盘云端 files）。
  *
  * 组A Rust 后端契约（write_plugin_files）：
