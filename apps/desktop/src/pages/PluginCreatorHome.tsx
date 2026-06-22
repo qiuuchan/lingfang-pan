@@ -49,10 +49,9 @@ import {
   validatePluginStructure,
 } from '@/lib/plugin-draft';
 import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
-// Task 12：Skill 系统——创建器 systemPrompt 由基础提示 + 激活 skills 拼装，输出更精简、能力可扩展。
-import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
-/** 创建器当前生效的系统提示词（基础 + 默认激活 skills）。 */
-const CREATOR_SYSTEM_PROMPT = assembleSystemPrompt(DEFAULT_CONVERSATION_SYSTEM_PROMPT, DEFAULT_ACTIVE_SKILLS);
+// Task 12 / 项 14：Skill 系统——创建器 systemPrompt 由基础提示 + 激活 skills 拼装。
+// activeSkillIds 来自 AppContext（用户在 Skill 选择器里增减，持久化），故 systemPrompt 随之动态变化。
+import { assembleSystemPrompt } from '@/lib/skills';
 import type { LoadedPlugin } from '@/lib/types';
 import { useEnvReadiness } from '@/lib/env-readiness';
 import { PluginCreatorLayout } from '@/components/creator/PluginCreatorLayout';
@@ -73,7 +72,9 @@ function resolveTitleTool(tool: string | undefined): 'claude' | 'codex' | null {
 }
 
 export function PluginCreatorHome() {
-  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, openAccountSettings, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt } = useApp();
+  const { currentDraft, setCurrentDraft, session, setRunningPlugin, setView, setSettingsTab, openAccountSettings, view, modelConfigVersion, pendingAutoFixPrompt, setPendingAutoFixPrompt, activeSkillIds } = useApp();
+  // 项 14：systemPrompt 随激活 skills 动态拼装（用户在选择器增减 → 下次 send 生效）。
+  const creatorSystemPrompt = useMemo(() => assembleSystemPrompt(DEFAULT_CONVERSATION_SYSTEM_PROMPT, activeSkillIds), [activeSkillIds]);
   // 环境就绪检测（模型服务 / 后端地址 / 团队），用于顶部「环境未就绪」横幅。
   // loading=true 时不渲染横幅（避免首帧闪烁）；ready=false 时渲染并提示去设置。
   // view 传入让用户从设置返回创建器时自动重检（PluginCreatorHome 常驻挂载，view 切换不卸载）。
@@ -586,7 +587,7 @@ export function PluginCreatorHome() {
         model: resolveSendModel(model),
         // 不传 pluginId → Rust 用 session_id 自动生成 plugins_root/<session_id>/ 持久化目录。
         prompt: text,
-        systemPrompt: CREATOR_SYSTEM_PROMPT,
+        systemPrompt: creatorSystemPrompt,
         ownerUserId: session.userId,
         ownerTenantId: session.tenantId,
         effort,
@@ -670,7 +671,7 @@ export function PluginCreatorHome() {
         // R2 effort 同样随本轮传入（可会话中途调思考强度）。
         // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, sdkConfig: buildSdkConfig(), systemPrompt: CREATOR_SYSTEM_PROMPT },
+          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, sdkConfig: buildSdkConfig(), systemPrompt: creatorSystemPrompt },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -757,7 +758,7 @@ export function PluginCreatorHome() {
           // 与追问路径对齐，补齐 SDK 后端连接信息。
           sdkConfig: buildSdkConfig(),
           // 追问轮也传 systemPrompt（与 send() 追问路径一致）。
-          systemPrompt: CREATOR_SYSTEM_PROMPT,
+          systemPrompt: creatorSystemPrompt,
         },
       });
       // 回答提交后新一轮 output 由既有 listener 处理；清掉本轮工具片段，避免问题卡片重复渲染。

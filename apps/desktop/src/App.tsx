@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
+import { DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
@@ -65,6 +66,10 @@ interface AppContextValue {
   openNotifications: () => void;
   /** 项 5：打开团队管理居中悬浮窗。 */
   openTeamAdmin: () => void;
+  /** 项 14：激活的 Skill id 列表（创建器 systemPrompt 拼装用）。 */
+  activeSkillIds: string[];
+  /** 项 14：切换某 Skill 激活态。 */
+  toggleSkill: (id: string) => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
@@ -124,6 +129,27 @@ function loadRecent(tenantId: string | null): LoadedPlugin[] {
 function saveRecent(tenantId: string | null, recent: LoadedPlugin[]) {
   try {
     localStorage.setItem(recentKey(tenantId), JSON.stringify(recent));
+  } catch (err) {
+    reportPersistenceFailure(err);
+  }
+}
+
+// 项 14：激活的 Skill 集合（创建器 systemPrompt 拼装用）。默认 DEFAULT_ACTIVE_SKILLS，
+// 用户在创建器 Skill 选择器里增减后持久化，跨会话保留。
+const ACTIVE_SKILLS_KEY = 'lf:active-skills';
+function loadActiveSkills(): string[] {
+  try {
+    const raw = localStorage.getItem(ACTIVE_SKILLS_KEY);
+    if (!raw) return [...DEFAULT_ACTIVE_SKILLS];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [...DEFAULT_ACTIVE_SKILLS];
+  } catch {
+    return [...DEFAULT_ACTIVE_SKILLS];
+  }
+}
+function saveActiveSkills(ids: string[]) {
+  try {
+    localStorage.setItem(ACTIVE_SKILLS_KEY, JSON.stringify(ids));
   } catch (err) {
     reportPersistenceFailure(err);
   }
@@ -250,6 +276,8 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
   const [closePromptOpen, setClosePromptOpen] = useState(false);
+  // 项 14：激活的 Skill id 列表（创建器 systemPrompt 拼装用），持久化 lf:active-skills。
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>(loadActiveSkills);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -296,6 +324,14 @@ export default function App() {
   const openNotifications = useCallback(() => setNotifOpen(true), []);
   // 项 5：打开团队管理居中悬浮窗。
   const openTeamAdmin = useCallback(() => setTeamAdminOpen(true), []);
+  // 项 14：切换某 Skill 激活态（创建器 systemPrompt 据此动态拼装）。
+  const toggleSkill = useCallback((id: string) => {
+    setActiveSkillIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      saveActiveSkills(next);
+      return next;
+    });
+  }, []);
 
   const setView = useCallback((nextView: View) => {
     // Task 9：'creator' 不再切换 view，改为打开创建器悬浮窗（保留底层页面，关闭即回到原页）。
@@ -608,6 +644,7 @@ export default function App() {
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
     openAccountSettings, openNotifications, openTeamAdmin,
+    activeSkillIds, toggleSkill,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
