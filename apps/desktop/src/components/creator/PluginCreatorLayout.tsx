@@ -157,11 +157,24 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
             {!props.hasConversation ? (
               <div className="flex h-full flex-col justify-center text-center">
                 <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">今天想创建什么插件？</h1>
-                <div className="mx-auto mt-8 grid w-full max-w-2xl gap-2">
+                <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
+                  选一个起点快速体验，或在下方直接描述你的想法。
+                </p>
+                {/* Task 11：示例卡片化（图标 + 标题 + 说明），普通用户更易理解「能做什么」。 */}
+                <div className="mx-auto mt-8 grid w-full max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
                   {EXAMPLES.map((example) => (
-                    <Button key={example} variant="outline" className="h-auto justify-start whitespace-normal rounded-xl px-4 py-3 text-left text-muted-foreground" onClick={() => props.onInputChange(example)}>
-                      {example}
-                    </Button>
+                    <button
+                      key={example.title}
+                      type="button"
+                      onClick={() => props.onInputChange(example.prompt)}
+                      className="group flex items-start gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-all hover:border-primary/40 hover:shadow-sm"
+                    >
+                      <span className="text-2xl leading-none">{example.icon}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-foreground group-hover:text-primary">{example.title}</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">{example.hint}</span>
+                      </span>
+                    </button>
                   ))}
                 </div>
               </div>
