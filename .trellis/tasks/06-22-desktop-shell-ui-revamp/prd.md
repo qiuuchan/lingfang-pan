@@ -61,3 +61,55 @@
 - AvatarMenu 内「版本发布管理」（桌面端不适用，已剔除）。
 - collab-admin / 后端任何改动。
 - 通知中心、AccountDialog 内部功能改造（仅改入口与跳转）。
+
+---
+
+# Batch 2（项 10–14，用户第二批追加）
+
+## 项 10 — 通知中心悬浮窗化 + 修复点击即消失/无法关闭的 bug
+
+**根因**：Batch 1 Phase B 把 `<NotificationCenter>` 嵌套渲染在 `AvatarMenu` 内部；AvatarMenu 的「点外部关闭」mousedown handler 把对通知抽屉的点击判为「菜单外」→ 关菜单 → AvatarMenu `return null` → 通知抽屉一起卸载（点一下就消失）；菜单关后抽屉状态卡死，只能重启。
+
+**需求**：通知中心作为**独立悬浮窗**挂在 App 顶层（生命周期与 AvatarMenu 解耦），由 AvatarMenu「通知中心」项回调打开（并关菜单）。点抽屉内任意元素不再触发关闭；抽屉有自身的关闭（X / Esc / 点遮罩）。
+
+## 项 11 — 后台运行 + 最小化到托盘
+
+关窗口时不直接退出，弹询问「最小化到托盘 / 直接退出」+「以后不再询问」复选：
+- 选最小化 → 隐藏窗口到系统托盘（进程保留，单击托盘图标恢复，右键菜单含「显示窗口/退出」）。
+- 勾「以后不再询问」→ 按上次选择直接执行，偏好持久化（`lf:close-action`）。
+- 设置中保留修改入口（SettingsDialog 内「通用」/账户相关 tab 一个开关：「关闭窗口时」→ 最小化到托盘 / 直接退出 / 每次询问）。
+- Tauri：启用 `tray-icon` feature + Rust 托盘图标 + `on_window_event` 拦截 `CloseRequested` → prevent_close → 通知前端弹询问。
+
+## 项 12 — 应用名 LingFang → 灵坊工作台（统一显示名）
+
+改所有**用户可见**的 LingFang 展示面：`tauri.conf.json`（productName / 窗口 title / copyright / description / publisher）、`index.html <title>`、TitleBar 默认 label、App `platformName` 默认值、BackendUnreachable/ChangelogDialog 文案、plugin-window 标题后缀、AI 系统提示词与生成骨架注释中的品牌名。
+**不改**：bundle identifier `com.lingfang.desktop`、npm 包名 `@lingfang/desktop`、Rust crate `lingfang-desktop`、`window.LingFangBridge` 插件桥 API 名（改会破坏插件契约）、测试路径字面量。
+
+## 项 13 — 创建插件悬浮窗自适应 ~70%（不再铺满）
+
+创建器 overlay 由 `absolute inset-0`（铺满主体）改为居中悬浮窗，约占屏宽高 70%、圆角留边；背景模糊保留（`backdrop-blur`）。内部布局不变。
+
+## 项 14 — 头像菜单 = 所有功能入口，每个按钮对应一个独立悬浮窗；删除 AccountDialog
+
+**需求（用户确认 A）**：AvatarMenu 每个按钮各打开**一个独立悬浮窗**，删掉 AccountDialog 聚合体，其功能拆分整合进菜单：
+- 通知中心 → NotificationCenter（项 10 已独立化）
+- 钱包 → WalletDialog（承载 Wallet 页）
+- 切换团队 → TeamDialog（承载 TeamHome 页）
+- 插件管理 → PluginsDialog（承载 Plugins 页）
+- 团队管理 → TeamAdminDialog（承载 TeamAdmin 页，仅 isTeamManager）
+- LLM 设置 / 设置与快捷键 / 本地权限与安全 → SettingsDialog（承载 Settings 页，打开到对应子 tab：gateway/...）
+- 开发者模式 → 创建器悬浮窗（项 13，已独立）
+- 个人资料（新增菜单项）→ ProfileDialog（AccountPanel：昵称/邮箱/改密/退出，从 AccountDialog 抽出）
+- 帮助与反馈 → 外链
+- 退出登录 → resetSession
+
+所有这些悬浮窗挂在 **App 顶层**（各自独立 state），AvatarMenu / 侧栏按钮通过回调打开。删除 `AccountDialog.tsx`。侧栏「插件」项也改为打开 PluginsDialog（与菜单一致）；「审核」保留主区页（admin 工具，不在菜单）。
+
+## Batch 2 Acceptance Criteria
+
+- [ ] 10. 点 AvatarMenu「通知中心」→ 通知抽屉独立浮窗打开；点抽屉内元素不关闭；可用 X/Esc/遮罩正常关闭；不再需要重启恢复。
+- [ ] 11. 关窗口弹询问（最小化/退出 + 以后不再询问）；选最小化→托盘；托盘单击恢复、右键菜单（显示/退出）；偏好持久化；设置中可改。
+- [ ] 12. 安装包名/窗口标题/标题栏/落地产物名为「灵坊工作台」；无用户可见的 "LingFang" 残留（代码标识符除外）。
+- [ ] 13. 创建器为居中悬浮窗约 70%，不再铺满；背景仍模糊；内部功能不受影响。
+- [ ] 14. AvatarMenu 每个按钮各开一个独立悬浮窗；AccountDialog 已删；侧栏「插件」打开 PluginsDialog；钱包/团队/设置/个人资料/通知均独立浮窗；RBAC 可见性正确。
+- [ ] 通用：typecheck + vite build + vitest + cargo check 全绿。

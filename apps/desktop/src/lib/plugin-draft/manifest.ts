@@ -35,12 +35,12 @@ export function buildFallbackEntryFile(runtimeType: string | undefined, meta: { 
   switch (runtimeType) {
     case 'python':
       return {
-        content: `# LingFang Python 插件入口（自动生成的骨架）\n# 请替换为你的实际逻辑\nimport sys\n\n\ndef main() -> None:\n    print('插件已启动：' + ${JSON.stringify(meta.manifestName)}, file=sys.stdout)\n    # TODO: 在此实现插件逻辑\n\n\nif __name__ == '__main__':\n    main()\n`,
+        content: `# 灵坊工作台 Python 插件入口（自动生成的骨架）\n# 请替换为你的实际逻辑\nimport sys\n\n\ndef main() -> None:\n    print('插件已启动：' + ${JSON.stringify(meta.manifestName)}, file=sys.stdout)\n    # TODO: 在此实现插件逻辑\n\n\nif __name__ == '__main__':\n    main()\n`,
         language: 'python',
       };
     case 'nodejs':
       return {
-        content: `// LingFang Node 插件入口（自动生成的骨架）\n// 请替换为你的实际逻辑\nconsole.log('插件已启动：' + ${JSON.stringify(meta.manifestName)});\n// TODO: 在此实现插件逻辑\n`,
+        content: `// 灵坊工作台 Node 插件入口（自动生成的骨架）\n// 请替换为你的实际逻辑\nconsole.log('插件已启动：' + ${JSON.stringify(meta.manifestName)});\n// TODO: 在此实现插件逻辑\n`,
         language: 'javascript',
       };
     case 'client':
