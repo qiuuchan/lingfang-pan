@@ -220,3 +220,9 @@ export interface PluginGrantRow {
   createdBy: string | null;
   createdAt: string;
 }
+
+/** 通用时间格式化：ISO 字符串 → zh-CN 本地时间（24h），解析失败原样返回。供团队管理列表展示复用。 */
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); } catch { return iso; }
+}

@@ -184,8 +184,8 @@ function GrantsDialog({
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">主体类型</label>
                 <Select value={subjectKind} onValueChange={(v) => { setSubjectKind(v as PluginGrantSubject); setSubjectId(''); }}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent className="min-w-[12rem]">
                     <SelectItem value="USER">用户</SelectItem>
                     <SelectItem value="ROLE">角色</SelectItem>
                   </SelectContent>
@@ -194,8 +194,8 @@ function GrantsDialog({
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">效果</label>
                 <Select value={effect} onValueChange={(v) => setEffect(v as PluginGrantEffect)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent className="min-w-[12rem]">
                     <SelectItem value="DENY">禁用（拒绝）</SelectItem>
                     <SelectItem value="ALLOW">允许</SelectItem>
                   </SelectContent>
@@ -205,8 +205,8 @@ function GrantsDialog({
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">{subjectKind === 'USER' ? '选择用户' : '选择角色'}</label>
               <Select value={subjectId} onValueChange={(v) => { if (v) setSubjectId(v); }}>
-                <SelectTrigger><SelectValue placeholder="选择…" /></SelectTrigger>
-                <SelectContent>
+                <SelectTrigger className="w-full"><SelectValue placeholder="选择…" /></SelectTrigger>
+                <SelectContent className="min-w-[12rem]">
                   {subjectOptions.map((o) => (
                     <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
                   ))}
