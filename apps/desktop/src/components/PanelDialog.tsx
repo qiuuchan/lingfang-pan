@@ -24,8 +24,8 @@ export function PanelDialog({
   description?: string;
   icon?: ReactNode;
   children: ReactNode;
-  /** lg = 大（设置/插件等多内容）；md = 中（钱包/资料等较窄）。 */
-  size?: 'lg' | 'md';
+  /** lg = 大（设置/团队管理等多内容）；md = 中（钱包/团队空间）；sm = 小（个人资料，高度较矮）。 */
+  size?: 'lg' | 'md' | 'sm';
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -34,7 +34,9 @@ export function PanelDialog({
           'flex flex-col gap-0 overflow-hidden p-0',
           size === 'lg'
             ? 'h-[86vh] max-h-[86vh] w-[94vw] sm:max-w-6xl'
-            : 'h-[80vh] max-h-[80vh] w-[90vw] sm:max-w-2xl',
+            : size === 'md'
+              ? 'h-[80vh] max-h-[80vh] w-[90vw] sm:max-w-2xl'
+              : 'h-[60vh] max-h-[60vh] w-[88vw] sm:max-w-xl',
         )}
       >
         <DialogHeader className="border-b px-5 py-4" {...dragRegionProps}>
