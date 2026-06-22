@@ -229,6 +229,53 @@ export class ChannelService {
     return { ok, message, reply, latencyMs: Date.now() - started };
   }
 
+  /**
+   * 生图测试（端到端）：经渠道协议发一次最小生图请求。仅 OpenAI 协议渠道支持
+   * （/images/generations）；Anthropic 协议无原生生图 API，直接返回不支持。
+   * 返回 { ok, message, imageUrl?, latencyMs? }——imageUrl 为图片直链或 base64 data URI（前端可直接预览）。
+   */
+  async adminTestImage(actorId: string, id: string, model: string, prompt?: string) {
+    const channel = await this.prisma.channel.findUnique({ where: { id } });
+    if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
+    if (channel.protocol === 'ANTHROPIC') {
+      return { ok: false, message: 'Anthropic 协议不支持生图（中转生图走 OpenAI /images/generations）', imageUrl: null, latencyMs: 0 };
+    }
+    if (!model.trim()) throw badRequest('请选择生图模型');
+    const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, getLlmKey());
+    const base = this.normalizeUrl(channel.baseUrl);
+    const started = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60_000); // 生图较慢，60s 超时
+    let ok = false;
+    let message = '';
+    let imageUrl: string | null = null;
+    try {
+      const res = await fetch(`${base}/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${upstreamKey}` },
+        body: JSON.stringify({ model, prompt: prompt?.trim() || 'a red circle on white background', n: 1 }),
+        signal: controller.signal,
+      });
+      ok = res.ok;
+      if (ok) {
+        const data = (await res.json()) as { data?: { url?: string; b64_json?: string }[] };
+        const first = data.data?.[0];
+        if (first?.url) imageUrl = first.url;
+        else if (first?.b64_json) imageUrl = `data:image/png;base64,${first.b64_json}`;
+        message = imageUrl ? '生图成功' : '上游返回成功但无图片数据';
+        ok = Boolean(imageUrl);
+      } else {
+        message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+      }
+    } catch (e) {
+      message = `生图失败：${(e as Error).name === 'AbortError' ? '超时（60s）' : (e as Error).message}`;
+    } finally {
+      clearTimeout(timer);
+    }
+    await this.audit(actorId, 'admin.channel.test_image', id, { ok, model, name: channel.name });
+    return { ok, message, imageUrl, latencyMs: Date.now() - started };
+  }
+
   // === 内部 ===
 
   private validateProvider(provider: string) {
