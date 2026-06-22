@@ -13,6 +13,7 @@ import { type ApiError } from '@/lib/api';
 import { streamChat, type ChatMessage } from '@/lib/relay-chat-stream';
 import { parsePackageBlock, uploadCreatedPlugin, type CreatedPluginPackage } from '@/lib/plugin-creator/relay-creator';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
+import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -47,23 +48,8 @@ const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户会用自
 需求信息不够时，先用简短对话提问澄清（不要输出代码块）。每次只产出一个插件包。`;
 
 /**
- * 上下文管理：保留最近 maxTurns 轮对话，且总字符不超过 charBudget。
- * 取最近若干轮（用户+助手成对），从最新向前累计，超预算就截断更早的——保留近期上下文，
- * 丢掉久远的，避免长对话超出上游 context 窗口导致 relay/上游报错。
+ * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
-function truncateTurns(turns: Turn[], maxTurns: number, charBudget: number): Turn[] {
-  const recent = turns.slice(-maxTurns * 2); // 每轮约 2 条（user+assistant）
-  let total = 0;
-  const kept: Turn[] = [];
-  // 从最新向前累计，超出预算则停（丢更早的）。
-  for (let i = recent.length - 1; i >= 0; i--) {
-    const len = recent[i].content.length;
-    if (total + len > charBudget) break;
-    total += len;
-    kept.unshift(recent[i]);
-  }
-  return kept;
-}
 
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const { session } = useApp();
@@ -72,6 +58,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
+  const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
+  const compressRef = useRef(emptyCompressState());
   const [pkg, setPkg] = useState<CreatedPluginPackage | null>(null);
   const [uploading, setUploading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -109,17 +97,21 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     abortRef.current = controller;
 
     try {
-      // 系统提示词 = 基础提示 + 激活的 skills（动态拼装）；relay 服务端还会注入"必须用灵坊服务"规则。
+      // 系统提示词 = 基础提示 + 激活的 skills；relay 服务端还会注入"必须用灵坊服务"规则。
       const systemPrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
-      // 上下文管理：截断历史，避免长对话超出上游 context 窗口。
-      const truncated = truncateTurns(turns, 6, 6000);
-      const history: ChatMessage[] = [
-        { role: 'system', content: systemPrompt },
-        ...truncated.map((t) => ({ role: t.role, content: t.content } as ChatMessage)),
-        { role: 'user', content: text },
-      ];
+      // 上下文自动压缩：超阈值时把较早的纯对话轮摘要成一条（保留近期原文 + 含插件包的轮）。
+      const built = await buildContextMessages({
+        turns: turns.map((t) => ({ role: t.role, content: t.content })),
+        currentInput: text,
+        systemPrompt,
+        state: compressRef.current,
+        tier,
+        signal: controller.signal,
+      });
+      compressRef.current = built.state;
+      setCompressedHint(built.compressedCount);
       const full = await streamChat({
-        messages: history,
+        messages: built.messages,
         tier,
         signal: controller.signal,
         onDelta: (delta) => {
@@ -189,6 +181,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <Badge variant="secondary" className="text-xs">{session.tenantName ?? '当前团队'}</Badge>
           </div>
           <div className="flex items-center gap-2">
+            {/* 上下文自动压缩指示：超阈值时把早期对话轮摘要，保留近期+插件包。 */}
+            {compressedHint > 0 && (
+              <Badge variant="outline" className="gap-1 text-xs" title="早期对话已自动摘要为上下文，控制 token">
+                已压缩 {compressedHint} 轮
+              </Badge>
+            )}
             {/* Skill 选择器：动态拼装系统提示词（输出精简 / 增量重构 等，可开关）。 */}
             <Popover>
               <PopoverTrigger render={<Button variant="outline" size="sm" className="gap-1.5" title="Skill" />}>
