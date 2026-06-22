@@ -1824,6 +1824,7 @@ name = "lingfang-desktop"
 version = "0.0.5"
 dependencies = [
  "dirs 5.0.1",
+ "minisign-verify",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

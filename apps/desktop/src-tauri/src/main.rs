@@ -9,6 +9,7 @@ mod llm_credentials;
 mod llm_fetch;
 mod plugin_runner;
 mod plugin_script;
+mod plugin_security;
 mod plugin_store;
 mod plugins;
 mod updater;
@@ -423,7 +424,9 @@ fn main() {
             llm_fetch::fetch_models,
             llm_fetch::test_llm_chat,
             updater::check_update,
-            updater::download_and_install
+            updater::download_and_install,
+            plugin_security::verify_plugin_signature_command,
+            plugin_security::check_plugin_recall_command
         ])
         .run(tauri::generate_context!())
         .expect("启动 LingFang 桌面壳失败");

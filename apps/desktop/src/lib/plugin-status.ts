@@ -193,6 +193,32 @@ export function getPluginStatus(pluginId: string): Promise<PluginProcessStatus> 
   return tauriInvoke<PluginProcessStatus>('get_plugin_status', { pluginId });
 }
 
+// === Task 14：插件安全与管理（签名校验 + 版本召回） ===
+
+/** 签名校验结果（Rust verify_plugin_signature_command 返回）。 */
+export interface PluginSignatureStatus {
+  signed: boolean;
+  verified: boolean;
+  reason: string;
+}
+
+/** 版本召回信息（Rust check_plugin_recall_command 返回）。 */
+export interface PluginRecallInfo {
+  recalled: boolean;
+  version: string;
+  reason: string;
+}
+
+/** 校验插件签名（minisign）。无签名/未配置公钥返回 signed=false，不抛错。 */
+export function verifyPluginSignature(pluginId: string): Promise<PluginSignatureStatus> {
+  return tauriInvoke<PluginSignatureStatus>('verify_plugin_signature_command', { pluginId });
+}
+
+/** 查询已安装插件版本是否被平台召回（.recalled.json）。 */
+export function checkPluginRecall(pluginId: string, installedVersion: string): Promise<PluginRecallInfo> {
+  return tauriInvoke<PluginRecallInfo>('check_plugin_recall_command', { pluginId, installedVersion });
+}
+
 /**
  * 批量写插件文件到 plugins_root/<pluginId>/（修改已有插件时落盘云端 files）。
  *

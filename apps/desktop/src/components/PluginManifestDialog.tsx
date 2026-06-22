@@ -10,11 +10,13 @@
 //
 // 容错：插件无 files（市场付费插件脱敏）时只展示 LoadedPlugin 已有字段，原始 JSON 区隐藏。
 
-import { FileJsonIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileJsonIcon, ShieldCheckIcon, ShieldAlertIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { parseManifest } from '@/lib/plugin-draft';
+import { verifyPluginSignature, checkPluginRecall, type PluginSignatureStatus, type PluginRecallInfo } from '@/lib/plugin-status';
 import type { DraftFile } from '@/lib/types';
 
 // 运行时类型 → 中文展示（与 plugin-status RUNTIME_DISPLAY 对齐，独立维护避免循环依赖）。
@@ -62,6 +64,18 @@ export function PluginManifestDialog({
   // 原始 manifest.json 文本（仅 files 含 manifest.json 时展示）。
   const rawManifest = files?.find((file) => file.path === 'manifest.json')?.content;
   const rawPretty = rawManifest ? safePretty(rawManifest) : null;
+
+  // Task 14：签名校验 + 版本召回状态（仅本地插件有意义；非本地/无目录的查询静默失败）。
+  const [sig, setSig] = useState<PluginSignatureStatus | null>(null);
+  const [recall, setRecall] = useState<PluginRecallInfo | null>(null);
+  useEffect(() => {
+    if (!open || !id || id === '—') return;
+    let cancelled = false;
+    void verifyPluginSignature(id).then((s) => { if (!cancelled) setSig(s); }).catch(() => { if (!cancelled) setSig(null); });
+    const ver = version !== '—' ? version : '';
+    if (ver) void checkPluginRecall(id, ver).then((r) => { if (!cancelled) setRecall(r); }).catch(() => { if (!cancelled) setRecall(null); });
+    return () => { cancelled = true; };
+  }, [open, id, version]);
 
   // 关键字段网格项：label + value，统一渲染。
   const fields: Array<{ label: string; value: React.ReactNode }> = [
@@ -122,6 +136,42 @@ export function PluginManifestDialog({
                   </Badge>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Task 14：安全与版本状态（签名校验 + 召回）。非本地插件查询失败时本区隐藏。 */}
+          {(sig || recall) && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs text-muted-foreground">安全与版本状态</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {sig && (
+                  <Badge
+                    variant="outline"
+                    className={
+                      sig.verified
+                        ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                        : sig.signed
+                          ? 'border-rose-500/40 text-rose-600 dark:text-rose-400'
+                          : 'text-muted-foreground'
+                    }
+                    title={sig.reason}
+                  >
+                    {sig.verified ? <ShieldCheckIcon className="mr-1 size-3" /> : <ShieldAlertIcon className="mr-1 size-3" />}
+                    {sig.verified ? '签名已验证' : sig.signed ? '签名无效' : '未签名'}
+                  </Badge>
+                )}
+                {recall?.recalled && (
+                  <Badge variant="destructive" title={recall.reason || '该版本已被平台召回'}>
+                    <ShieldAlertIcon className="mr-1 size-3" />版本已召回（v{recall.version}）
+                  </Badge>
+                )}
+              </div>
+              {sig && !sig.verified && (
+                <span className="text-[11px] text-muted-foreground">{sig.reason}</span>
+              )}
+              {recall?.recalled && recall.reason && (
+                <span className="text-[11px] text-destructive">{recall.reason}</span>
+              )}
             </div>
           )}
 
