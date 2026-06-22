@@ -12,7 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { InvitationCode } from '@/lib/types';
+import { formatTime } from '@/lib/types';
 
 export function InvitationsTab() {
   const [invitations, reloadInvites, loadingInvites] = useTeamResource<{ invitations: InvitationCode[] }>(
@@ -21,6 +24,7 @@ export function InvitationsTab() {
     { invitations: [] },
   );
   const [maxUses, setMaxUses] = useState('5');
+  const [expiresAt, setExpiresAt] = useState('');
   const [newCode, setNewCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -28,8 +32,12 @@ export function InvitationsTab() {
   async function createInvitation() {
     setGenerating(true);
     try {
+      // 日期输入框值为 YYYY-MM-DD；转为该日 UTC 0 点的 ISO 字符串发给后端。
+      // 后端 team.service.ts:createInvitation 已校验合法未来日期，留空则不传（永不过期）。
+      const body: { maxUses: number; expiresAt?: string } = { maxUses: Number(maxUses) || 1 };
+      if (expiresAt) body.expiresAt = new Date(`${expiresAt}T00:00:00Z`).toISOString();
       const result = await api<{ invitation: InvitationCode & { code?: string } }>('/api/teams/current/invitations', {
-        method: 'POST', body: { maxUses: Number(maxUses) || 1 },
+        method: 'POST', body,
       });
       setNewCode(result.invitation.code || '');
       setCopiedCode(false);
@@ -61,8 +69,15 @@ export function InvitationsTab() {
           <CardDescription>普通用户注册后凭有效邀请码加入团队。完整邀请码只在生成时显示一次。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex max-w-sm gap-2">
-            <Input value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder="最大使用次数" />
+          <div className="flex max-w-lg flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="invite-max-uses">最大使用次数</Label>
+              <Input id="invite-max-uses" className="w-32" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder="最大使用次数" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="invite-expires-at">过期时间（可选）</Label>
+              <Input id="invite-expires-at" className="w-44" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+            </div>
             <LoadingButton loading={generating} onClick={createInvitation}>生成</LoadingButton>
           </div>
           {newCode && (
@@ -89,6 +104,7 @@ export function InvitationsTab() {
                 <TableHead>前缀（非完整邀请码）</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>使用次数</TableHead>
+                <TableHead>创建时间</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -96,8 +112,13 @@ export function InvitationsTab() {
               {invitations.invitations.map((i) => (
                 <TableRow key={i.id}>
                   <TableCell className="font-mono">{i.displayCodePrefix}</TableCell>
-                  <TableCell>{i.status}</TableCell>
+                  <TableCell>
+                    <Badge variant={i.status === 'ACTIVE' ? 'default' : 'secondary'}>
+                      {i.status === 'ACTIVE' ? '正常' : '已禁用'}
+                    </Badge>
+                  </TableCell>
                   <TableCell>{i.usedCount}/{i.maxUses}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatTime(i.createdAt)}</TableCell>
                   <TableCell className="text-right">
                     {i.status === 'ACTIVE' && (
                       <Button variant="outline" size="sm" onClick={async () => {
@@ -112,7 +133,7 @@ export function InvitationsTab() {
                 </TableRow>
               ))}
               {invitations.invitations.length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">暂无邀请码</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">暂无邀请码</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -161,13 +182,11 @@ function TeamProfileSection() {
       <CardHeader><CardTitle>团队资料</CardTitle><CardDescription>设置团队简介与是否允许公开加入。</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center gap-2">
-          <input
+          <Checkbox
             id="allow-public"
-            type="checkbox"
-            className="size-4"
             checked={allowPublicJoin ?? false}
             disabled={allowPublicJoin === null}
-            onChange={(e) => setAllowPublicJoin(e.target.checked)}
+            onCheckedChange={(v) => setAllowPublicJoin(Boolean(v))}
           />
           <Label htmlFor="allow-public">开放公开加入（出现在「发现公开团队」列表，用户可一键加入）</Label>
         </div>
