@@ -430,6 +430,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Task 9：Esc 关闭创建器悬浮窗（与浮窗标题栏「返回（Esc）」提示一致）。
+  useEffect(() => {
+    if (!creatorOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCreatorOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [creatorOpen]);
+
   const pinPlugin = useCallback((p: LoadedPlugin) => {
     setPinnedPlugins((prev) => {
       if (prev.some((x) => x.id === p.id)) return prev;
@@ -546,17 +556,22 @@ export default function App() {
                 {/* Task 9 创建器悬浮窗：始终挂载以保留对话 listener 状态（与原 view==='creator' 常驻语义一致），
                     creatorOpen 时作为浮动窗口覆盖主体区；关闭回到底层页面。 */}
                 <div className={creatorOpen ? 'absolute inset-0 z-30 flex flex-col bg-background shadow-2xl' : 'hidden'}>
-                  <PluginCreatorHome />
-                  {/* 浮动关闭按钮：创建器右上角，z-50 确保浮于创建器自身 header 之上。 */}
-                  <button
-                    type="button"
-                    onClick={() => setCreatorOpen(false)}
-                    aria-label="关闭创建器"
-                    title="返回"
-                    className="absolute right-3 top-3 z-50 inline-flex size-8 items-center justify-center rounded-full bg-background/80 text-muted-foreground backdrop-blur transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <XIcon className="size-4" />
-                  </button>
+                  {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
+                  <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
+                    <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>
+                    <button
+                      type="button"
+                      onClick={() => setCreatorOpen(false)}
+                      aria-label="关闭创建器"
+                      title="返回（Esc）"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <XIcon className="size-4" />
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <PluginCreatorHome />
+                  </div>
                 </div>
 
                 {/* Task 9 创建插件 FAB：右下角悬浮入口，创建器打开时自动隐藏。 */}
