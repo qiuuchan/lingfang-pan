@@ -18,7 +18,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::WindowEvent;
 
 use capability::CapabilityRegistry;
 use plugins::LoadedPlugin;
@@ -361,6 +364,49 @@ fn builtin_dir(app: &tauri::App) -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("builtin-plugins"))
 }
 
+// 项 11：系统托盘 + 关窗最小化到托盘。
+//
+// 托盘图标：左键单击 / 右键菜单「显示窗口」→ 显示并聚焦主窗口；菜单「退出」→ app.exit(0)。
+// 关窗：不直接退出，prevent_close 后向主窗口 emit `close-requested`，由前端按偏好
+// （lf:close-action：ask/tray/quit，localStorage）决定 隐藏到托盘 / 退出 / 弹询问。
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
+    let show_item = MenuItem::with_id(app, "tray-show", "显示窗口", true, None::<&str>)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, "tray-quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &sep, &quit_item])?;
+    TrayIconBuilder::with_id("main-tray")
+        .icon(app.default_window_icon().unwrap().clone())
+        .tooltip("灵坊工作台")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray-show" => show_main_window(app),
+            "tray-quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // 左键单击恢复窗口（右键由系统触发菜单）。
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// 前端在「直接退出」选择后调用，立即结束进程（配合关窗询问流程）。
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -388,9 +434,21 @@ fn main() {
             // task 06-16 组B：插件持久化运行引擎的内存进程表（plugin_id→Child 句柄）。
             // start_plugin/stop_plugin/get_plugin_status 经此 State spawn/take/kill 进程。
             app.manage(plugin_runner::PluginProcessTable::new());
+            // 项 11：系统托盘（显示窗口 / 退出菜单 + 左键单击恢复）。
+            setup_tray(app)?;
             Ok(())
         })
+        // 项 11：关窗拦截——prevent_close + emit close-requested，由前端按偏好决定（托盘/退出/询问）。
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.emit("close-requested", ());
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            quit_app,
             list_plugins,
             read_plugin_file,
             invoke_capability,

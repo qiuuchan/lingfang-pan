@@ -1,14 +1,17 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { Loader2Icon, XIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
-import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
+import { loadCloseAction } from '@/lib/close-behavior';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { PanelDialog } from '@/components/PanelDialog';
 import { ProfilePanel } from '@/components/ProfilePanel';
 import { NotificationCenter } from '@/components/NotificationCenter';
+import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
 import { FloatingCreateButton } from '@/components/FloatingCreateButton';
@@ -241,6 +244,8 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
   const [notifOpen, setNotifOpen] = useState(false);
+  // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -548,6 +553,45 @@ export default function App() {
   // Task 6/2：打开全局搜索悬浮窗（供首页居中搜索框 / 任意组件复用）。
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
+  // 项 11：关窗行为选择处理（由 CloseBehaviorDialog 回调）。
+  // tray→隐藏到托盘、quit→调用 Rust quit_app 退出、cancel→什么都不做（窗口保持打开）。
+  const handleCloseChoice = useCallback((action: 'tray' | 'quit' | 'cancel') => {
+    setClosePromptOpen(false);
+    if (action === 'tray') {
+      void getCurrentWindow().hide();
+    } else if (action === 'quit') {
+      void tauriInvoke('quit_app');
+    }
+  }, []);
+
+  // 项 11：监听 Rust 关窗拦截事件（main.rs on_window_event prevent_close 后 emit 'close-requested'）。
+  // 按本地偏好 lf:close-action 决定：tray→隐藏、quit→退出、ask→弹 CloseBehaviorDialog。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    tauriListen('close-requested', () => {
+      const pref = loadCloseAction();
+      if (pref === 'tray') {
+        void getCurrentWindow().hide();
+      } else if (pref === 'quit') {
+        void tauriInvoke('quit_app');
+      } else {
+        setClosePromptOpen(true);
+      }
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* 无 Tauri 壳（浏览器预览）静默忽略 */
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const ctx: AppContextValue = {
     backendUrl, saveBackendUrl,
     session, applySession, applyCollabSession, refreshSession, resetSession,
@@ -688,6 +732,8 @@ export default function App() {
       </PanelDialog>
       {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
       <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
+      {/* 项 11：关窗询问悬浮窗（偏好 'ask' 时弹；tray/quit/cancel 三选项）。 */}
+      <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} />
       {/* 项 4：左下角用户按钮弹出的 AvatarMenu（v4 形态，适配当前 RBAC/View）。 */}
       <AvatarMenu open={avatarMenuOpen} onClose={() => setAvatarMenuOpen(false)} collapsed={!sidebarOpen} />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}

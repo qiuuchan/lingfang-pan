@@ -36,6 +36,7 @@ import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { ModelGatewayTab } from './settings/ModelGatewayTab';
 import { PluginsTab } from './settings/PluginsTab';
+import { GeneralTab } from './settings/GeneralTab';
 import { dragRegionProps } from '@/lib/window-drag';
 
 // 字节数转人类可读（design §3.3：total 未知时显示已下载量）。
@@ -217,11 +218,17 @@ export function Settings({
         {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli' })}
       >
         <TabsList className="inline-flex w-fit max-w-full gap-1">
+          <TabsTrigger value="general" className="px-3">通用</TabsTrigger>
           <TabsTrigger value="cli" className="px-3">脚本运行环境</TabsTrigger>
           <TabsTrigger value="gateway" className="px-3">模型服务</TabsTrigger>
           <TabsTrigger value="plugins" className="px-3">插件</TabsTrigger>
           <TabsTrigger value="backend" className="px-3">公司平台</TabsTrigger>
         </TabsList>
+
+        {/* 项 11：通用（关窗行为等应用级偏好） */}
+        <TabsContent value="general" keepMounted className="mt-4 focus-visible:outline-none">
+          <GeneralTab />
+        </TabsContent>
 
         {/* Tab1：脚本运行时管理 */}
         <TabsContent value="cli" keepMounted className="mt-4 focus-visible:outline-none">

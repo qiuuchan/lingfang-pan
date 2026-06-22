@@ -157,7 +157,7 @@ export interface LoadedPlugin {
   updatedAt?: string;
 }
 
-export type SettingsTab = 'cli' | 'gateway' | 'plugins' | 'backend';
+export type SettingsTab = 'general' | 'cli' | 'gateway' | 'plugins' | 'backend';
 export type AccountSettingsTab = 'account' | 'team' | 'wallet' | 'settings';
 
 export type View = 'home' | 'creator' | 'team' | 'team-admin' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';
