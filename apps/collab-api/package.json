@@ -12,10 +12,9 @@
     "prisma:migrate": "tsx src/prisma-cli.ts migrate",
     "prisma:deploy": "tsx src/prisma-cli.ts deploy",
     "prisma:validate": "tsx src/prisma-cli.ts validate",
-    "db:setup": "pnpm prisma:generate && pnpm prisma:deploy && pnpm seed:admin && pnpm seed:rbac && pnpm seed:llm-gateways && pnpm seed:billing && pnpm seed:releases",
+    "db:setup": "pnpm prisma:generate && pnpm prisma:deploy && pnpm seed:admin && pnpm seed:rbac && pnpm seed:billing && pnpm seed:releases",
     "seed:admin": "tsx src/seed-admin.ts",
     "seed:rbac": "tsx src/seed-rbac.ts",
-    "seed:llm-gateways": "tsx src/seed-llm-gateways.ts",
     "seed:billing": "tsx src/seed-credits-channels.ts",
     "seed:releases": "tsx src/seed-releases.ts"
   },

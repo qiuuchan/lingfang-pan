@@ -5,7 +5,6 @@ import type { Request } from 'express';
 import { requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { AdminService } from './admin.service';
-import { LlmService } from './llm.service';
 import {
   AdminAdjustBalanceDto,
   AdminAuditLogsQueryDto,
@@ -22,7 +21,6 @@ import {
   AdminUpdateTeamStatusDto,
   AdminUpdateUserDto,
 } from './dto/admin.dto';
-import { ProviderCreateDto, ProviderUpdateDto } from './dto/llm.dto';
 import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
 import { RevealSecretDto, UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
 import { ReleaseService } from './release.service';
@@ -34,7 +32,6 @@ import { SettingsService } from './settings.service';
 export class AdminController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
-    @Inject(LlmService) private readonly llm: LlmService,
     @Inject(ReleaseService) private readonly releases: ReleaseService,
     @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
@@ -292,42 +289,8 @@ export class AdminController {
     return this.admin.adminActivity(requireUser(req).id, id);
   }
 
-  // === LLM provider 目录（平台 Admin 维护，ensurePlatformAdmin 在 LlmService 内） ===
-
-  @RequirePermission('platform.llm.provider.manage')
-  @Get('llm-providers')
-  @ApiOperation({ summary: 'provider 列表（含 isActive + 全字段）' })
-  listLlmProviders(@Req() req: Request) {
-    return this.llm.adminListProviders(requireUser(req).id);
-  }
-
-  @RequirePermission('platform.llm.provider.manage')
-  @Post('llm-providers')
-  @ApiOperation({ summary: '新建 provider（isActive 通过 activate 端点设）' })
-  createLlmProvider(@Req() req: Request, @Body() body: ProviderCreateDto) {
-    return this.llm.adminCreateProvider(requireUser(req).id, body);
-  }
-
-  @RequirePermission('platform.llm.provider.manage')
-  @Patch('llm-providers/:id')
-  @ApiOperation({ summary: '更新 provider（全可选字段，isActive 不在此改）' })
-  updateLlmProvider(@Req() req: Request, @Param('id') id: string, @Body() body: ProviderUpdateDto) {
-    return this.llm.adminUpdateProvider(requireUser(req).id, id, body);
-  }
-
-  @RequirePermission('platform.llm.provider.manage')
-  @Delete('llm-providers/:id')
-  @ApiOperation({ summary: '删除 provider（active 的拒绝删）' })
-  deleteLlmProvider(@Req() req: Request, @Param('id') id: string) {
-    return this.llm.adminDeleteProvider(requireUser(req).id, id);
-  }
-
-  @RequirePermission('platform.llm.provider.manage')
-  @Patch('llm-providers/:id/activate')
-  @ApiOperation({ summary: '设为当前启用（事务维护唯一 active）' })
-  activateLlmProvider(@Req() req: Request, @Param('id') id: string) {
-    return this.llm.adminActivateProvider(requireUser(req).id, id);
-  }
+  // 旧 LLM provider 目录（/admin/llm-providers）已随 BYOK 移除：渠道管理迁移至
+  // /api/admin/billing/channels（见 BillingController），旧 LlmService/LlmGateway 删除。
 
   // === 应用版本发布（平台 Admin 维护，ensurePlatformAdmin 在 ReleaseService 内） ===
 

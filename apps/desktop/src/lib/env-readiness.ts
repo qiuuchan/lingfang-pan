@@ -31,9 +31,9 @@ export interface EnvReadinessResult {
 /** 主动重检（供外部在「用户从设置返回」后调用刷新）。 */
 export type RefreshEnvReadiness = () => void;
 
-/** GET /api/llm/binding 出参的最小形态（只关心 binding.apiKeyHint）。 */
-interface BindingResponse {
-  binding: { apiKeyHint?: string | null } | null;
+/** GET /api/relay/v1/models 出参的最小形态（只关心 data 是否非空，判定中转是否配好版本）。 */
+interface RelayModelsResponse {
+  data?: { id: string }[];
 }
 
 /**
@@ -41,7 +41,7 @@ interface BindingResponse {
  *
  * @param session 当前登录态（取 tenantName 判定是否已加入团队）。
  * @param activeView 当前激活的 View（默认 'creator'）。当切回 'creator' 时自动重检，
- *                   让用户从设置返回后横幅立即刷新（PluginCreatorHome 常驻挂载，view 切换不卸载）。
+ *                   让用户从设置返回后横幅立即刷新。
  * @returns 就绪状态 + missing 描述 + loading 态 + refresh 重检函数。
  */
 export function useEnvReadiness(
@@ -52,14 +52,15 @@ export function useEnvReadiness(
   const [missing, setMissing] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 检测单次执行：四项并行查，失败按未就绪处理，绝不抛出（横幅兜底提示用户去设置）。
+  // 检测单次执行：三项查，失败按未就绪处理，绝不抛出（横幅兜底提示用户去设置）。
   const probe = useCallback(async (signal?: { cancelled: boolean }): Promise<void> => {
-    // ③ 后端地址（最廉价，先查；无后端地址后续 api() 会直接抛）。
+    // 后端地址（最廉价，先查；无后端地址后续 api() 会直接抛）。
     const backendConfigured = Boolean(apiBase());
 
+    // 中转是否配好版本：relay /v1/models 返回 fast/premium 版本列表（空 = 后台未配 ModelTierConfig/渠道）。
     const modelConfigured = await (
-      api<BindingResponse>('/api/llm/binding')
-        .then((res) => Boolean(res?.binding?.apiKeyHint))
+      api<RelayModelsResponse>('/api/relay/v1/models')
+        .then((res) => Boolean(res?.data?.length))
         .catch(() => false)
     );
 
@@ -68,8 +69,8 @@ export function useEnvReadiness(
 
     const miss: string[] = [];
     if (!backendConfigured) miss.push('未配置公司平台地址');
-    if (!modelConfigured) miss.push('未配置模型服务 API 密钥');
-    // ④ 是否加入团队：session.tenantName 非空（PENDING_APPROVAL 等中间态也没有 team）。
+    if (!modelConfigured) miss.push('平台未配置模型版本（联系管理员配置渠道与快速/高级版）');
+    // 是否加入团队：session.tenantName 非空（PENDING_APPROVAL 等中间态也没有 team）。
     if (!session.tenantName) miss.push('未加入团队');
 
     setMissing(miss);
