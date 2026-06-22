@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { Loader2Icon } from 'lucide-react';
+import { Loader2Icon, XIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
@@ -9,6 +9,7 @@ import { Footer } from '@/components/Footer';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
 import { CommandPalette } from '@/components/CommandPalette';
+import { FloatingCreateButton } from '@/components/FloatingCreateButton';
 // 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
 // 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
 import { Auth } from '@/pages/Auth';
@@ -186,6 +187,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
+  // Task 9 创建器悬浮窗：FAB / setView('creator') 唤起，覆盖主体区为浮动窗口。
+  const [creatorOpen, setCreatorOpen] = useState(false);
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -213,6 +216,11 @@ export default function App() {
   }, []);
 
   const setView = useCallback((nextView: View) => {
+    // Task 9：'creator' 不再切换 view，改为打开创建器悬浮窗（保留底层页面，关闭即回到原页）。
+    if (nextView === 'creator') {
+      setCreatorOpen(true);
+      return;
+    }
     if (nextView === 'settings') {
       openAccountSettings('settings');
       return;
@@ -226,6 +234,8 @@ export default function App() {
       return;
     }
     setAccountSettingsOpen(false);
+    // 跳到其它页面时关闭创建器悬浮窗（若开着）。
+    setCreatorOpen(false);
     setViewState(nextView);
   }, [openAccountSettings]);
 
@@ -478,34 +488,49 @@ export default function App() {
               <BackendUnreachable onGoSettings={() => openAccountSettings('settings', 'backend')} />
             ) : (
               <>
-                <div className={view === 'creator' ? 'min-h-0 flex-1' : 'hidden'}>
-                  <PluginCreatorHome />
-                </div>
-                {view !== 'creator' && (
-                  isPluginCenterView(view) && runningPlugin ? (
-                    // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
-                    // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
-                    <div className="min-h-0 flex-1">
-                      <Suspense fallback={null}>{body}</Suspense>
-                    </div>
-                  ) : (
-                    // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
-                    // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
-                    // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
-                    // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
-                    // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
-                    <>
-                      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-                        <div className="mx-auto w-full max-w-6xl">
-                          <Suspense fallback={<ListSkeleton rows={6} />}>
-                            <PageTransition viewKey={view}>{body}</PageTransition>
-                          </Suspense>
-                        </div>
+                {/* 主体业务页：创建器悬浮窗关闭时始终可见（Task 9：创建器改为 overlay，不再替换底层 view）。 */}
+                {isPluginCenterView(view) && runningPlugin ? (
+                  // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
+                  // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
+                  <div className="min-h-0 flex-1">
+                    <Suspense fallback={null}>{body}</Suspense>
+                  </div>
+                ) : (
+                  // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
+                  // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
+                  // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
+                  // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
+                  // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
+                  <>
+                    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                      <div className="mx-auto w-full max-w-6xl">
+                        <Suspense fallback={<ListSkeleton rows={6} />}>
+                          <PageTransition viewKey={view}>{body}</PageTransition>
+                        </Suspense>
                       </div>
-                      <Footer />
-                    </>
-                  )
+                    </div>
+                    <Footer />
+                  </>
                 )}
+
+                {/* Task 9 创建器悬浮窗：始终挂载以保留对话 listener 状态（与原 view==='creator' 常驻语义一致），
+                    creatorOpen 时作为浮动窗口覆盖主体区；关闭回到底层页面。 */}
+                <div className={creatorOpen ? 'absolute inset-0 z-30 flex flex-col bg-background shadow-2xl' : 'hidden'}>
+                  <PluginCreatorHome />
+                  {/* 浮动关闭按钮：创建器右上角，z-50 确保浮于创建器自身 header 之上。 */}
+                  <button
+                    type="button"
+                    onClick={() => setCreatorOpen(false)}
+                    aria-label="关闭创建器"
+                    title="返回"
+                    className="absolute right-3 top-3 z-50 inline-flex size-8 items-center justify-center rounded-full bg-background/80 text-muted-foreground backdrop-blur transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <XIcon className="size-4" />
+                  </button>
+                </div>
+
+                {/* Task 9 创建插件 FAB：右下角悬浮入口，创建器打开时自动隐藏。 */}
+                <FloatingCreateButton open={creatorOpen} onClick={() => setCreatorOpen(true)} />
               </>
             )}
           </main>

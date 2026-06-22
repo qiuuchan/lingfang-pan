@@ -18,7 +18,6 @@ import {
   PackageIcon,
   ChevronDownIcon,
   UserRoundIcon,
-  SparklesIcon,
   ShieldCheckIcon,
   UsersRoundIcon,
   SearchIcon,
@@ -32,7 +31,7 @@ interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: bo
 
 const NAV: NavItem[] = [
   { v: 'home', label: '首页', icon: HomeIcon },
-  { v: 'creator', label: '创建插件', icon: SparklesIcon },
+  // Task 9：「创建插件」入口迁至右下角 FAB（FloatingCreateButton），不再占用侧栏导航位。
   { v: 'plugins', label: '插件', icon: PackageIcon },
   { v: 'team-admin', label: '团队管理', icon: UsersRoundIcon, teamAdminOnly: true },
   { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
