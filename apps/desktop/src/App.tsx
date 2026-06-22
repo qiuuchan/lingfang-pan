@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { Loader2Icon } from 'lucide-react';
+import { Loader2Icon, XIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
@@ -8,6 +8,11 @@ import { TitleBar } from '@/components/TitleBar';
 import { Footer } from '@/components/Footer';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
+import { CommandPalette } from '@/components/CommandPalette';
+import { FloatingCreateButton } from '@/components/FloatingCreateButton';
+import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
+import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
+import { loadPlugins } from '@/pages/plugins-runtime';
 // 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
 // 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
 import { Auth } from '@/pages/Auth';
@@ -57,6 +62,8 @@ interface AppContextValue {
   // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
   platformName: string;
   platformLogoUrl: string;
+  // Task 6/2：全局搜索悬浮窗开关。首页居中搜索框 / 侧栏搜索按钮 / Ctrl+K 共用此入口。
+  openSearch: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -183,6 +190,10 @@ export default function App() {
   const [backendUnreachable, setBackendUnreachable] = useState(false);
   const [view, setViewState] = useState<View>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Task 9 创建器悬浮窗：FAB / setView('creator') 唤起，覆盖主体区为浮动窗口。
+  const [creatorOpen, setCreatorOpen] = useState(false);
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -210,6 +221,11 @@ export default function App() {
   }, []);
 
   const setView = useCallback((nextView: View) => {
+    // Task 9：'creator' 不再切换 view，改为打开创建器悬浮窗（保留底层页面，关闭即回到原页）。
+    if (nextView === 'creator') {
+      setCreatorOpen(true);
+      return;
+    }
     if (nextView === 'settings') {
       openAccountSettings('settings');
       return;
@@ -223,6 +239,8 @@ export default function App() {
       return;
     }
     setAccountSettingsOpen(false);
+    // 跳到其它页面时关闭创建器悬浮窗（若开着）。
+    setCreatorOpen(false);
     setViewState(nextView);
   }, [openAccountSettings]);
 
@@ -379,6 +397,53 @@ export default function App() {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
 
+  // Task 15 多窗口：standalone 插件窗口（?standalone=1&plugin=<id>）启动时自动加载目标插件并设为 runningPlugin，
+  // 让该窗口打开即运行指定插件，主窗口与各插件窗口互不干扰（不同插件各自独立窗口运行）。
+  useEffect(() => {
+    if (!isStandalonePluginWindow()) return;
+    const targetId = standalonePluginId();
+    if (!targetId || !session.token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { plugins } = await loadPlugins();
+        if (cancelled) return;
+        const target = plugins.find((p) => p.id === targetId);
+        if (target) setRunningPlugin(target);
+      } catch {
+        /* 加载失败静默：用户仍可手动在侧栏打开插件 */
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.token]);
+
+  // Task 6：Ctrl/Cmd+K 唤起全局搜索悬浮窗（与 Sidebar 搜索按钮同一入口）。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Task 9：Esc 关闭创建器悬浮窗（与浮窗标题栏「返回（Esc）」提示一致）。
+  // 若创建器内部有 Dialog/Sheet 打开（历史/预览/上传命名等），Esc 优先交给它们关闭，不连带关浮窗。
+  useEffect(() => {
+    if (!creatorOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const innerOverlayOpen = document.querySelector('[role="dialog"][data-state="open"], [role="presentation"][data-state="open"]');
+      if (innerOverlayOpen) return; // 交给 Radix overlay 自身处理
+      setCreatorOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [creatorOpen]);
+
   const pinPlugin = useCallback((p: LoadedPlugin) => {
     setPinnedPlugins((prev) => {
       if (prev.some((x) => x.id === p.id)) return prev;
@@ -398,6 +463,9 @@ export default function App() {
 
   const isPinned = useCallback((id: string) => pinnedPlugins.some((x) => x.id === id), [pinnedPlugins]);
 
+  // Task 6/2：打开全局搜索悬浮窗（供首页居中搜索框 / 任意组件复用）。
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+
   const ctx: AppContextValue = {
     backendUrl, saveBackendUrl,
     session, applySession, applyCollabSession, refreshSession, resetSession,
@@ -410,6 +478,7 @@ export default function App() {
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
+    openSearch,
   };
 
   if (restoring) {
@@ -455,7 +524,7 @@ export default function App() {
         {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制（最小化/最大化/关闭）。 */}
         <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
         <div className="flex min-h-0 flex-1">
-          <Sidebar collapsed={!sidebarOpen} />
+          <Sidebar collapsed={!sidebarOpen} onOpenSearch={() => setSearchOpen(true)} />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗、切设置）。
@@ -463,34 +532,54 @@ export default function App() {
               <BackendUnreachable onGoSettings={() => openAccountSettings('settings', 'backend')} />
             ) : (
               <>
-                <div className={view === 'creator' ? 'min-h-0 flex-1' : 'hidden'}>
-                  <PluginCreatorHome />
-                </div>
-                {view !== 'creator' && (
-                  isPluginCenterView(view) && runningPlugin ? (
-                    // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
-                    // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
-                    <div className="min-h-0 flex-1">
-                      <Suspense fallback={null}>{body}</Suspense>
-                    </div>
-                  ) : (
-                    // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
-                    // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
-                    // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
-                    // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
-                    // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
-                    <>
-                      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-                        <div className="mx-auto w-full max-w-6xl">
-                          <Suspense fallback={<ListSkeleton rows={6} />}>
-                            <PageTransition viewKey={view}>{body}</PageTransition>
-                          </Suspense>
-                        </div>
+                {/* 主体业务页：创建器悬浮窗关闭时始终可见（Task 9：创建器改为 overlay，不再替换底层 view）。 */}
+                {isPluginCenterView(view) && runningPlugin ? (
+                  // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
+                  // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
+                  <div className="min-h-0 flex-1">
+                    <Suspense fallback={null}>{body}</Suspense>
+                  </div>
+                ) : (
+                  // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
+                  // Footer 作为 shrink-0 固定在视口底部（不随主内容滚动，不被顶下去，无需滚到底才可见）。
+                  // 主内容滚不动 Footer；Footer 与侧边栏协调（侧边栏亦固定，二者一致）。
+                  // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
+                  // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
+                  <>
+                    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                      <div className="mx-auto w-full max-w-6xl">
+                        <Suspense fallback={<ListSkeleton rows={6} />}>
+                          <PageTransition viewKey={view}>{body}</PageTransition>
+                        </Suspense>
                       </div>
-                      <Footer />
-                    </>
-                  )
+                    </div>
+                    <Footer />
+                  </>
                 )}
+
+                {/* Task 9 创建器悬浮窗：始终挂载以保留对话 listener 状态（与原 view==='creator' 常驻语义一致），
+                    creatorOpen 时作为浮动窗口覆盖主体区；关闭回到底层页面。 */}
+                <div className={creatorOpen ? 'absolute inset-0 z-30 flex flex-col bg-background shadow-2xl' : 'hidden'}>
+                  {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
+                  <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
+                    <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>
+                    <button
+                      type="button"
+                      onClick={() => setCreatorOpen(false)}
+                      aria-label="关闭创建器"
+                      title="返回（Esc）"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <XIcon className="size-4" />
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <PluginCreatorHome />
+                  </div>
+                </div>
+
+                {/* Task 9 创建插件 FAB：右下角悬浮入口，创建器打开时自动隐藏。 */}
+                <FloatingCreateButton open={creatorOpen} onClick={() => setCreatorOpen(true)} />
               </>
             )}
           </main>
@@ -507,6 +596,10 @@ export default function App() {
         settingsTab={settingsTab}
         onSettingsTabChange={setSettingsTab}
       />
+      {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}
+      <PermissionConsentDialog />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );

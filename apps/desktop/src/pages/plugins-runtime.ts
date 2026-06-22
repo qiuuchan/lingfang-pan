@@ -1,5 +1,7 @@
 import { api, tauriInvoke, type ApiError } from '@/lib/api';
 import type { LoadedPlugin } from '@/lib/types';
+import { setSharedData, getSharedData, listSharedKeys } from '@/lib/plugin-shared-data';
+import { requestSystemPermission } from '@/lib/plugin-permissions';
 // SDK-06 修复：tokens.css 头注释与 spec（ui-tokens/frontend/tokens.md）均声明「宿主注入到所有插件容器」，
 // 但此前 apps/desktop 既未 import 也未在 srcDoc 注入，插件 var(--lf-color-*) 解析为空、设计令牌机制失效。
 // 现通过 Vite ?inline 把 tokens.css 内容内联为 <style> 前置到每个插件运行态文档，
@@ -98,6 +100,14 @@ function sdkShim(pluginId: string): string {
         plugin: {
           upload: (input) => call('plugin.upload', input || {}),
           submitMarketplace: (input) => call('plugin.submitMarketplace', input || {}),
+          // Task 5 插件间数据互通：A 写共享数据（如登录凭证），B 按 A 的 id + key 读取。
+          setSharedData: (key, value) => call('plugin.setSharedData', { key, value }),
+          getSharedData: (sourcePluginId, key) => call('plugin.getSharedData', { sourcePluginId, key }),
+          listSharedKeys: () => call('plugin.listSharedKeys', {}),
+        },
+        // Task 14 系统级权限请求：插件请求系统权限，宿主弹用户确认框（授权结果记忆）。
+        system: {
+          requestPermission: (code, reason) => call('system.requestPermission', { code, reason }),
         },
         ui: { render: (c) => { document.body.insertAdjacentHTML('beforeend', '<pre>' + (typeof c === 'string' ? c : JSON.stringify(c, null, 2)) + '</pre>'); } },
       };
@@ -160,6 +170,26 @@ export function errorMessage(error: unknown): string {
 }
 
 async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMessage['args']) {
+  // Task 5：插件间数据互通（共享存储）。两类插件共用前端 localStorage 存储，pluginId 取自宿主侧
+  // RuntimeMessage.pluginId（不由调用方自报，防 B 冒充 A 写入）。读取需显式传 sourcePluginId。
+  if (kind === 'plugin.setSharedData') {
+    return setSharedData(plugin.id, String(args?.key ?? ''), args?.value);
+  }
+  if (kind === 'plugin.getSharedData') {
+    return getSharedData(String(args?.sourcePluginId ?? ''), String(args?.key ?? ''));
+  }
+  if (kind === 'plugin.listSharedKeys') {
+    return listSharedKeys(plugin.id);
+  }
+  // Task 14：系统级权限运行时授权。插件调 sdk.system.requestPermission → 弹确认框（记忆决策）。
+  if (kind === 'system.requestPermission') {
+    return requestSystemPermission(
+      plugin.id,
+      plugin.name,
+      String(args?.code ?? ''),
+      String(args?.reason ?? ''),
+    );
+  }
   if (isBuiltinPlugin(plugin)) {
     if (kind === 'code-assistant.session') {
       // RT-08 修复：op 既非 'check' 也非 'stop' 时此前静默落到末尾 invoke_capability，

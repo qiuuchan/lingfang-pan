@@ -1,7 +1,53 @@
-export const EXAMPLES = [
-  '做一个番茄钟插件，可设置 25/45 分钟、暂停继续、完成后提醒',
-  '我要一个视频脚本分镜表工具，输入脚本后输出镜头、画面、旁白和标签',
-  '创建一个 Markdown 速记插件，左侧编辑右侧实时预览，支持复制导出',
+// Task 11：创建器空态示例。从扁平字符串升级为「图标 + 短标题 + 完整 prompt」结构，
+// 普通用户先看懂「能做这个」，点击后完整 prompt 填入输入框。标题保持 ≤5 字便于扫读。
+export interface CreatorExample {
+  /** emoji 图标（避免额外图标依赖，卡片左上角展示）。 */
+  icon: string;
+  /** 短标题（≤5 字），用户扫读用。 */
+  title: string;
+  /** 一句话说明这个插件能做什么（副标题）。 */
+  hint: string;
+  /** 点击后填入输入框的完整 prompt（发给 AI 生成）。 */
+  prompt: string;
+}
+
+export const EXAMPLES: CreatorExample[] = [
+  {
+    icon: '⏱️',
+    title: '番茄钟',
+    hint: '专注计时与提醒',
+    prompt: '做一个番茄钟插件，可设置 25/45 分钟、暂停继续、完成后提醒',
+  },
+  {
+    icon: '📝',
+    title: 'Markdown 速记',
+    hint: '左编辑右预览',
+    prompt: '创建一个 Markdown 速记插件，左侧编辑右侧实时预览，支持复制导出',
+  },
+  {
+    icon: '🎬',
+    title: '视频分镜',
+    hint: '脚本转分镜表',
+    prompt: '我要一个视频脚本分镜表工具，输入脚本后输出镜头、画面、旁白和标签',
+  },
+  {
+    icon: '🧾',
+    title: '会议纪要',
+    hint: '提炼结论与待办',
+    prompt: '做一个会议纪要插件，粘贴会议文字后自动提炼结论和待办事项',
+  },
+  {
+    icon: '🎨',
+    title: '配色生成',
+    hint: '主题配色方案',
+    prompt: '做一个配色方案生成插件，输入主题后给出一组和谐的颜色和预览',
+  },
+  {
+    icon: '📊',
+    title: '数据看板',
+    hint: 'CSV 转图表',
+    prompt: '做一个简易数据看板插件，粘贴 CSV 后生成柱状图和饼图',
+  },
 ];
 
 export type ProviderId = 'claude' | 'codex';

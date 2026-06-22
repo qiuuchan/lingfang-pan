@@ -3,7 +3,6 @@ import { AlertTriangleIcon, EyeIcon, HistoryIcon, PanelRightOpenIcon, SparklesIc
 import { AssistantChat } from '@/components/chat/AssistantChat';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { LoadingButton } from '@/components/loading-button';
-import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -116,21 +115,22 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
             )}
             {statusBadge}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={props.onNewDraft}>新对话</Button>
-            <Button variant="ghost" size="sm" className="gap-1" title="历史对话" onClick={() => props.onHistoryOpenChange(true)}>
-              <HistoryIcon className="size-4" /> 历史
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={props.onNewDraft} title="开始新对话">新对话</Button>
+            {/* Task 11：次要操作收为图标按钮 + tooltip，降低首屏认知负担。 */}
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" title="历史对话" onClick={() => props.onHistoryOpenChange(true)}>
+              <HistoryIcon className="size-4" />
             </Button>
             {props.showConvertAction && (
-              <Button variant="outline" size="sm" onClick={props.onForceConvert}>
+              <Button variant="outline" size="sm" onClick={props.onForceConvert} title="把当前对话的 AI 产出转为结构化草稿">
                 <WandSparklesIcon className="size-3.5" /> 转为草稿
               </Button>
             )}
-            <Button variant="outline" size="sm" disabled={!props.hasDraft} onClick={() => props.onPreviewOpenChange(true)} title={props.hasDraft ? '使用插件' : '尚未生成插件草稿'}>
+            <Button variant="default" size="sm" disabled={!props.hasDraft} onClick={() => props.onPreviewOpenChange(true)} title={props.hasDraft ? '预览并使用生成的插件' : '尚未生成插件草稿'}>
               <EyeIcon className="size-4" /> 使用插件
             </Button>
-            <Button variant="outline" size="sm" onClick={() => props.onDetailsOpenChange(true)}>
-              <PanelRightOpenIcon className="size-4" /> 详情
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" title="查看生成状态与文件详情" onClick={() => props.onDetailsOpenChange(true)}>
+              <PanelRightOpenIcon className="size-4" />
             </Button>
           </div>
         </div>
@@ -158,11 +158,24 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
             {!props.hasConversation ? (
               <div className="flex h-full flex-col justify-center text-center">
                 <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">今天想创建什么插件？</h1>
-                <div className="mx-auto mt-8 grid w-full max-w-2xl gap-2">
+                <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
+                  选一个起点快速体验，或在下方直接描述你的想法。
+                </p>
+                {/* Task 11：示例卡片化（图标 + 标题 + 说明），普通用户更易理解「能做什么」。 */}
+                <div className="mx-auto mt-8 grid w-full max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
                   {EXAMPLES.map((example) => (
-                    <Button key={example} variant="outline" className="h-auto justify-start whitespace-normal rounded-xl px-4 py-3 text-left text-muted-foreground" onClick={() => props.onInputChange(example)}>
-                      {example}
-                    </Button>
+                    <button
+                      key={example.title}
+                      type="button"
+                      onClick={() => props.onInputChange(example.prompt)}
+                      className="group flex items-start gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-all hover:border-primary/40 hover:shadow-sm"
+                    >
+                      <span className="text-2xl leading-none">{example.icon}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-foreground group-hover:text-primary">{example.title}</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">{example.hint}</span>
+                      </span>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -257,7 +270,6 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
           />
         </DialogContent>
       </Dialog>
-      <TaskChecklist session={props.session} setView={props.setView} setSettingsTab={props.setSettingsTab} />
     </div>
   );
 }
