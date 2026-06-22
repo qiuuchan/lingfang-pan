@@ -61,7 +61,7 @@ function bindingsLabel(bindings: ChannelBinding[]): string {
 
 export function ChannelsView() {
   const [channels, setChannels] = useState<Channel[]>([]);
-  const load = () => api<{ channels: Channel[] }>('/api/admin/billing/channels').then((r) => setChannels(r.channels));
+  const load = () => api<{ channels: Channel[] }>('/api/admin/billing/channels').then((r) => setChannels(r.channels ?? []));
   useLoad(load);
   const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(channels);
 

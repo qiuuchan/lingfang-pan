@@ -36,7 +36,7 @@ export class ChannelService {
       orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
       include: { bindings: true },
     });
-    return channels.map((c) => this.adminView(c, c.bindings));
+    return { channels: channels.map((c) => this.adminView(c, c.bindings)) };
   }
 
   /** 创建渠道（加密上游 key）。 */
