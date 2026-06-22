@@ -97,7 +97,18 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
     { code: 'platform.application.review', label: '审批团队管理员申请', description: '审批用户提交的开团申请' },
   ]),
   defineModule('PLATFORM', 'platform.llm', '模型服务', 60, [
-    { code: 'platform.llm.provider.manage', label: '管理模型服务', description: '管理 LLM 网关目录、激活 provider' },
+    { code: 'platform.llm.provider.manage', label: '管理模型服务', description: '管理 LLM 网关目录、激活 provider（旧 BYOK，过渡期保留）' },
+  ]),
+  // 计费与模型中转（Relay + 灵石）：渠道管理 / 模型定价 / 版本配置 / 灵石账户 / 调用日志 / API Key 总览 / 接入文档。
+  // 这些是平台级运营资源，仅平台管理员可操作（团队级灵石查看走 team.credits.view，见下）。
+  defineModule('PLATFORM', 'platform.billing', '计费与中转', 62, [
+    { code: 'platform.billing.channel.manage', label: '管理渠道', description: '管理上游渠道、范围绑定、优先级/权重、健康测试' },
+    { code: 'platform.billing.pricing.manage', label: '管理模型定价', description: '配置每个模型/能力的灵石单价与计费单位' },
+    { code: 'platform.billing.tier.manage', label: '管理模型版本', description: '配置快速版/高级版的底层模型与参数' },
+    { code: 'platform.billing.credit.adjust', label: '调整团队灵石', description: '为团队灵石账户加款/扣款' },
+    { code: 'platform.billing.call_log.view', label: '查看调用日志', description: '查看全平台 AI 调用日志（多维度查询）' },
+    { code: 'platform.billing.api_key.manage', label: '管理 API Key', description: '查看/吊销全平台的平台 API Key' },
+    { code: 'platform.billing.relay_docs.view', label: '查看接入文档', description: '查看中转接入指引（管理员侧）' },
   ]),
   defineModule('PLATFORM', 'platform.release', '版本发布', 70, [
     { code: 'platform.release.manage', label: '管理版本发布', description: '发布/归档应用版本、上传产物' },
@@ -148,8 +159,12 @@ export const TEAM_MODULES: PermissionModuleDef[] = [
     { code: 'team.plugin.grant.manage', label: '管理插件授权', description: '为本团队插件按用户/角色设置 allow/deny' },
   ]),
   defineModule('TEAM', 'team.balance', '团队余额', 60, [
-    { code: 'team.balance.view', label: '查看团队余额', description: '查看本团队余额与流水' },
+    { code: 'team.balance.view', label: '查看团队余额', description: '查看本团队余额与流水（人民币·市场）' },
     { code: 'team.balance.consume', label: '消耗团队余额', description: '调用消耗团队余额的接口' },
+  ]),
+  // 计费/中转 · 团队灵石（AI 用量计费货币，独立于人民币余额）。普通成员可查；调整仅平台 Admin。
+  defineModule('TEAM', 'team.credits', '团队灵石', 62, [
+    { code: 'team.credits.view', label: '查看团队灵石', description: '查看本团队灵石余额与流水（AI 用量计费）' },
   ]),
   defineModule('TEAM', 'team.profile', '团队资料', 70, [
     { code: 'team.profile.update', label: '编辑团队资料', description: '编辑本团队名称、简介、公开加入开关' },

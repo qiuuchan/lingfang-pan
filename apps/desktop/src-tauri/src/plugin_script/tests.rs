@@ -1,5 +1,5 @@
 use super::*;
-use crate::code_assistant::find_binary;
+use crate::process_util::find_binary;
 
 fn rel(path: &str) -> PathBuf {
     sanitize_rel_path(path).expect("合法相对路径应通过")
@@ -207,7 +207,7 @@ fn run_python_hello_script_if_available() {
 
 #[test]
 fn timeout_kills_infinite_loop() {
-    let _guard = crate::code_assistant::process_tree_test_lock();
+    let _guard = crate::process_util::process_tree_test_lock();
     let binary = match maybe_node() {
         Some(b) => b,
         None => {
@@ -298,7 +298,7 @@ fn sandbox_lru_keeps_recent_and_removes_old() {
 // wait_with_output 不应永久挂起。本测试派生孙进程（node 子进程）模拟，验证回收不阻塞。
 #[test]
 fn timeout_kills_grandchild_process_tree() {
-    let _guard = crate::code_assistant::process_tree_test_lock();
+    let _guard = crate::process_util::process_tree_test_lock();
     let binary = match maybe_node() {
         Some(b) => b,
         None => {
