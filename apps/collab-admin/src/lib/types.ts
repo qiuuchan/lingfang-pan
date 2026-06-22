@@ -29,6 +29,9 @@ export type TeamMember = {
   status: string;
   joinedAt: string;
   user: User;
+  // child-4 D7：后端 adminTeamMembers 返回完整 TeamMembership 行（含 teamRoleId）。
+  // 成员 tab 角色下拉 value=role.id，对比当前 teamRoleId 判断幂等切换。
+  teamRoleId?: string | null;
 };
 
 export type Team = {

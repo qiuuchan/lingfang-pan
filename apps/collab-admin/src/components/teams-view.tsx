@@ -24,14 +24,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon, SearchIcon, PowerIcon } from 'lucide-react';
+import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon, SearchIcon, PowerIcon, LockIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/utils';
 import { useLoad, run, useGuardedAction } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { Team, TeamDetail, TeamMember, TeamRole, TeamStatus, User, LedgerDirection } from '@/lib/types';
+import type { Team, TeamDetail, TeamMember, TeamStatus, User, LedgerDirection, PermissionEntry, Role } from '@/lib/types';
 import { yuanToCents, activeMembers, teamAdmins, adminNames, labelOf, formatTime } from '@/lib/types';
+import { RoleEditDialog } from '@/components/role-edit-dialog';
 
 export function TeamsView() {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -142,8 +143,9 @@ export function TeamsView() {
   );
 }
 
-// 团队概览侧边抽屉：行点击查看，含 Tabs（概览/成员/插件/购买/流水）+ footer 停用/启用按钮。
+// 团队概览侧边抽屉：行点击查看，含 Tabs（概览/成员/角色/插件/购买/流水）+ footer 停用/启用按钮。
 // 区别于「管理」按钮打开的 TeamDetailDialog（编辑信息/余额调整/管理员分配）。
+// child-4 D7：新增「角色」tab（代管团队角色 CRUD + 两级权限勾选）；成员 tab 角色下拉改为展示全部团队角色（传 roleId）。
 function TeamOverviewSheet({
   team,
   onOpenChange,
@@ -156,12 +158,26 @@ function TeamOverviewSheet({
   const [tab, setTab] = useState('overview');
   const [detail, setDetail] = useState<TeamDetail | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  // 团队角色 + 团队级权限码清单（child-4 D7：成员 tab 角色下拉 + 角色 tab CRUD 复用）
+  const [teamRoles, setTeamRoles] = useState<Role[]>([]);
+  const [teamPermissions, setTeamPermissions] = useState<PermissionEntry[]>([]);
+  // 角色 tab 编辑/创建对话框状态
+  const [editingRole, setEditingRole] = useState<Role | null>(null);
+  const [creatingRole, setCreatingRole] = useState(false);
 
-  // 详情打开时加载聚合视图 + 成员列表。team 变化（列表刷新同步 active）时重载。
+  // 加载团队角色列表（成员 tab 角色下拉 + 角色 tab 共用）。供 changeRole / role CRUD 后刷新。
+  const loadTeamRoles = async () => {
+    if (!team) return;
+    const r = await api<{ roles: Role[] }>(`/api/admin/teams/${team.id}/roles`);
+    setTeamRoles(r.roles);
+  };
+
+  // 详情打开时加载聚合视图 + 成员列表 + 团队角色 + 团队权限码。team 变化（列表刷新同步 active）时重载。
   useEffect(() => {
     if (!team) {
       setDetail(null);
       setMembers([]);
+      setTeamRoles([]);
       return;
     }
     setTab('overview');
@@ -169,11 +185,17 @@ function TeamOverviewSheet({
     Promise.all([
       api<TeamDetail>(`/api/admin/teams/${team.id}/detail`),
       api<{ members: TeamMember[] }>(`/api/admin/teams/${team.id}/members`).then((r) => r.members),
+      // 团队角色：成员 tab 角色下拉 + 角色 tab 共用
+      api<{ roles: Role[] }>(`/api/admin/teams/${team.id}/roles`).then((r) => r.roles),
+      // 团队级权限码清单：角色编辑面板勾选树数据源（与桌面端 roles 端点同源）
+      api<{ permissions: PermissionEntry[] }>(`/api/admin/teams/${team.id}/roles/permissions`),
     ])
-      .then(([d, m]) => {
+      .then(([d, m, roles, perms]) => {
         if (!mounted) return;
         setDetail(d);
         setMembers(m);
+        setTeamRoles(roles);
+        setTeamPermissions(perms.permissions);
       })
       .catch((e: Error & { status?: number }) => {
         if (!mounted) return;
@@ -186,18 +208,25 @@ function TeamOverviewSheet({
   }, [team]);
 
   // 切换团队成员角色：调用 PATCH /api/admin/teams/:id/members/:userId/role。
-  // 仅 ACTIVE 成员可切换（REMOVED 成员无意义），且无变更（同角色）时后端已幂等不写审计。
-  async function changeRole(member: TeamMember, role: TeamRole) {
+  // child-4 D7：传 roleId（指定任意团队自定义角色），替代旧 TEAM_ADMIN/MEMBER 枚举二选一。
+  // service 双写 teamRoleId + role 枚举（系统团队管理员 code → TEAM_ADMIN，否则 MEMBER）。
+  // 仅 ACTIVE 成员可切换（REMOVED 成员无意义），且无变更（同 roleId）时后端已幂等不写审计。
+  async function changeRole(member: TeamMember, roleId: string) {
     if (member.status !== 'ACTIVE') return toast.error('仅活跃成员可调整角色');
-    if (member.role === role) return;
+    // 幂等：成员 tab 角色下拉 value=role.id，与成员当前 teamRoleId 比较判断是否变更。
+    // teamRoleId 为空（旧成员未迁移）时跳过幂等判断，直接下发让后端写 teamRoleId。
+    if (member.teamRoleId && member.teamRoleId === roleId) return;
     if (!(await run(
       () =>
         api(`/api/admin/teams/${team!.id}/members/${member.userId}/role`, {
           method: 'PATCH',
-          body: { role },
+          body: { roleId },
         }).then(() =>
           // 成员角色切换后刷新成员列表 + 团队列表（adminNames 列展示依赖 members）。
-          api<{ members: TeamMember[] }>(`/api/admin/teams/${team!.id}/members`).then((r) => setMembers(r.members)),
+          api<{ members: TeamMember[] }>(`/api/admin/teams/${team!.id}/members`).then((r) => r.members).then((m) => {
+            // TeamMember 含 teamRoleId（后端 adminTeamMembers 返回完整 membership 行）；同步到 state。
+            setMembers(m);
+          }),
         ),
       '成员角色已更新',
     ))) return;
@@ -248,9 +277,10 @@ function TeamOverviewSheet({
     >
       {team ? (
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="overview">概览</TabsTrigger>
             <TabsTrigger value="members">成员</TabsTrigger>
+            <TabsTrigger value="roles">角色</TabsTrigger>
             <TabsTrigger value="plugins">插件</TabsTrigger>
             <TabsTrigger value="purchases">购买</TabsTrigger>
             <TabsTrigger value="ledger">流水</TabsTrigger>
@@ -286,7 +316,7 @@ function TeamOverviewSheet({
             ) : null}
           </TabsContent>
 
-          {/* 成员：列表 + 角色升级/降级（下拉切换 TEAM_ADMIN/MEMBER）。 */}
+          {/* 成员：列表 + 角色切换（child-4 D7：下拉展示该团队全部角色，value=role.id，传 roleId）。 */}
           <TabsContent value="members" className="space-y-3 pt-4">
             {members.length ? (
               <div className="space-y-2">
@@ -300,11 +330,12 @@ function TeamOverviewSheet({
                       </div>
                     </div>
                     {member.status === 'ACTIVE' ? (
-                      <Select value={member.role} onValueChange={(v) => changeRole(member, v as TeamRole)}>
-                        <SelectTrigger className="w-32 shrink-0"><SelectValue /></SelectTrigger>
+                      <Select value={member.teamRoleId ?? undefined} onValueChange={(v) => changeRole(member, v)}>
+                        <SelectTrigger className="w-36 shrink-0"><SelectValue placeholder="选择角色" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="TEAM_ADMIN">团队管理员</SelectItem>
-                          <SelectItem value="MEMBER">普通成员</SelectItem>
+                          {teamRoles.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     ) : (
@@ -315,6 +346,92 @@ function TeamOverviewSheet({
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">暂无成员</p>
+            )}
+          </TabsContent>
+
+          {/* 角色（child-4 D7）：该团队全部角色列表 + 创建/编辑/删除（系统角色锁定）+ 两级权限勾选。 */}
+          <TabsContent value="roles" className="space-y-3 pt-4">
+            <div className="mb-1 flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">{teamRoles.length} 个角色</div>
+              <Button size="sm" onClick={() => setCreatingRole(true)}>
+                <PlusIcon className="mr-1.5 size-4" />
+                创建角色
+              </Button>
+            </div>
+            {teamRoles.length ? (
+              <div className="space-y-2">
+                {teamRoles.map((role) => (
+                  <div key={role.id} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {role.isSystem && <LockIcon className="size-3.5 text-muted-foreground" />}
+                        <span className="truncate font-medium">{role.name}</span>
+                        {role.isSystem ? (
+                          <Badge variant="default">内置</Badge>
+                        ) : (
+                          <Badge variant="secondary">自定义</Badge>
+                        )}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {role.code ? <code className="rounded bg-muted px-1 py-0.5">{role.code}</code> : '—'}
+                        {' · '}权限 {role.permissions.length} 项{' · '}成员 {role.memberCount} 人
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button variant="ghost" size="icon" title="编辑" onClick={() => setEditingRole(role)}>
+                        <PencilIcon className="size-4" />
+                      </Button>
+                      {!role.isSystem && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="删除"
+                          onClick={async () => {
+                            if (!confirm(`确定删除角色「${role.name}」？`)) return;
+                            await run(
+                              () => api(`/api/admin/teams/${team!.id}/roles/${role.id}`, { method: 'DELETE' }).then(loadTeamRoles),
+                              '角色已删除',
+                            );
+                          }}
+                        >
+                          <Trash2Icon className="size-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">该团队暂无角色</p>
+            )}
+            {creatingRole && (
+              <RoleEditDialog
+                permissions={teamPermissions}
+                groupLabelOverride={new Map()}
+                title={`创建团队角色：${team.name}`}
+                description="勾选该角色拥有的团队权限，成员被分配此角色后即获得这些权限。"
+                onClose={() => setCreatingRole(false)}
+                onSubmit={async (body) => {
+                  const ok = await run(() => api(`/api/admin/teams/${team.id}/roles`, { method: 'POST', body }), '角色已创建');
+                  if (ok) await loadTeamRoles();
+                  return ok;
+                }}
+              />
+            )}
+            {editingRole && (
+              <RoleEditDialog
+                role={editingRole}
+                permissions={teamPermissions}
+                groupLabelOverride={new Map()}
+                title={`编辑团队角色：${editingRole.name}`}
+                description="勾选该角色拥有的团队权限，成员被分配此角色后即获得这些权限。"
+                onClose={() => setEditingRole(null)}
+                onSubmit={async (body) => {
+                  const ok = await run(() => api(`/api/admin/teams/${team.id}/roles/${editingRole.id}`, { method: 'PATCH', body }), '角色已更新');
+                  if (ok) await loadTeamRoles();
+                  return ok;
+                }}
+              />
             )}
           </TabsContent>
 

@@ -8,7 +8,7 @@ import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 import { NotificationService } from './notification.service';
 import { publicPlugin } from './plugin-package';
-import { SYSTEM_PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
+import { SYSTEM_PLATFORM_ADMIN_ROLE_ID, SYSTEM_TEAM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
 import { auditActionCategory, AUDIT_ACTION_LABEL, AUDIT_CATEGORIES, type AuditCategoryKey } from './audit-actions';
 
 @Injectable()
@@ -501,18 +501,52 @@ export class AdminService {
       orderBy: { joinedAt: 'asc' },
     });
     return {
-      members: memberships.map((m) => ({ teamId: m.teamId, userId: m.userId, role: m.role, status: m.status, joinedAt: m.joinedAt, user: publicUser(m.user) })),
+      members: memberships.map((m) => ({ teamId: m.teamId, userId: m.userId, role: m.role, status: m.status, joinedAt: m.joinedAt, teamRoleId: m.teamRoleId, user: publicUser(m.user) })),
     };
   }
 
-  // 调整团队成员角色（TEAM_ADMIN↔MEMBER）。平台 Admin 可在任意团队内升降级成员。
+  // 调整团队成员角色。平台 Admin 可在任意团队内为成员切换角色。
   // 与 adminSetTeamAdmin/adminRevokeTeamAdmin 区别：这两个是「指定/撤销」单向操作，
-  // 此方法是「双向切换」单一端点，前端成员 tab 直接用 role 下拉切换，无需判断升/降分支。
-  async adminUpdateMemberRole(actorId: string, teamId: string, targetUserId: string, input: { role: 'TEAM_ADMIN' | 'MEMBER' }) {
+  // 此方法是「双向/任意」单一端点：前端成员 tab 角色下拉直接切换，可传枚举或 roleId（child-4 D7）。
+  //
+  // 输入兼容两种形态（service 双分支处理）：
+  //  - { role: 'TEAM_ADMIN' | 'MEMBER' }：旧枚举（向后兼容旧前端），仅切换 role 字段，不动 teamRoleId。
+  //  - { roleId: '<role-id>' }：指定任意团队自定义角色（child-4 D7 新前端用），双写 teamRoleId + role 枚举
+  //    （系统团队管理员 code → TEAM_ADMIN，否则 MEMBER），与 RoleService.assignMemberRole 同款语义。
+  //  - 两者都未传：400 拒绝（DTO 用 @IsOptional 放宽，运行时显式校验）。
+  async adminUpdateMemberRole(actorId: string, teamId: string, targetUserId: string, input: { role?: 'TEAM_ADMIN' | 'MEMBER'; roleId?: string }) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 前置存在性校验：update 在记录不存在时抛 P2025，此前被吞成 500（与 adminRevokeTeamAdmin 的 ADMIN-08 修复同源）。
     const existing = await this.prisma.teamMembership.findUnique({ where: { teamId_userId: { teamId, userId: targetUserId } } });
     if (!existing) throw notFound('团队成员关系不存在');
+
+    // === 分支 1：roleId 形态（child-4 D7，指定任意团队角色）===
+    if (input.roleId !== undefined) {
+      const role = await this.prisma.role.findUnique({ where: { id: input.roleId } });
+      if (!role || role.scope !== 'TEAM' || role.teamId !== teamId) throw badRequest('团队角色不存在');
+      const isTeamAdmin = role.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE;
+      const nextRole: 'TEAM_ADMIN' | 'MEMBER' = isTeamAdmin ? 'TEAM_ADMIN' : 'MEMBER';
+      // 幂等优化：role 与 teamRoleId 都未变则不重复写审计。
+      if (existing.teamRoleId === role.id && existing.role === nextRole) {
+        return { membership: existing };
+      }
+      const membership = await this.prisma.teamMembership.update({
+        where: { teamId_userId: { teamId, userId: targetUserId } },
+        data: { teamRoleId: role.id, role: nextRole },
+      });
+      await this.audit(actorId, 'team.member.role_changed', 'User', targetUserId, {
+        teamId,
+        from: existing.role,
+        to: nextRole,
+        fromRoleId: existing.teamRoleId,
+        toRoleId: role.id,
+        managed: true,
+      });
+      return { membership };
+    }
+
+    // === 分支 2：role 枚举形态（旧前端兼容）===
+    if (input.role === undefined) throw badRequest('必须提供 role 或 roleId');
     // 幂等优化：已是目标角色则不重复写审计，避免无变更操作污染审计日志。
     if (existing.role === input.role) return { membership: existing };
     const membership = await this.prisma.teamMembership.update({ where: { teamId_userId: { teamId, userId: targetUserId } }, data: { role: input.role } });
