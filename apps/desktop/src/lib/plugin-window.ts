@@ -40,7 +40,7 @@ export async function openPluginInWindow(plugin: LoadedPlugin): Promise<void> {
     return;
   }
 
-  const title = `${plugin.name} — 灵坊工作台`;
+  const title = `${plugin.name} — 灵坊`;
   // 用户代理分区的 webview 共享主窗口的 localStorage（同源），session token 可用。
   try {
     const webview = new WebviewWindow(label, {

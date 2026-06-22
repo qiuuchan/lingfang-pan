@@ -3,7 +3,7 @@ import { PackageIcon, RefreshCwIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/pagination';
 import type { LoadedPlugin } from '@/lib/types';
-import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
+import { Shimmer } from '@/lib/motion';
 import { TeamPluginRow } from './TeamPluginRow';
 
 const PAGE_SIZE = 6;
@@ -136,19 +136,18 @@ function TeamPluginRows({
   onTogglePin: (plugin: LoadedPlugin, pinned: boolean) => void;
 }) {
   return (
-    <StaggerContainer className="flex flex-col divide-y rounded-lg border" stagger={0.05}>
+    <div className="flex flex-col divide-y rounded-lg border">
       {items.map((plugin) => (
-        <StaggerItem key={plugin.id} whileHover={{ x: 2, transition: { type: 'spring', stiffness: 300, damping: 20 } }}>
-          <TeamPluginRow
-            isPinned={isPinned(plugin.id)}
-            plugin={plugin}
-            onChanged={onRefresh}
-            onRun={onRun}
-            onTogglePin={onTogglePin}
-          />
-        </StaggerItem>
+        <TeamPluginRow
+          key={plugin.id}
+          isPinned={isPinned(plugin.id)}
+          plugin={plugin}
+          onChanged={onRefresh}
+          onRun={onRun}
+          onTogglePin={onTogglePin}
+        />
       ))}
-    </StaggerContainer>
+    </div>
   );
 }
 

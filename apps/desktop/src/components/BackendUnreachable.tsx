@@ -54,7 +54,7 @@ export function BackendUnreachable({ onGoSettings }: BackendUnreachableProps) {
         <div className="space-y-1.5">
           <h2 className="text-lg font-semibold">无法访问此页面</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            灵坊工作台 桌面端无法连接到协作服务。请确认后端服务已启动，或检查网络与地址配置后重试。
+            灵坊 桌面端无法连接到协作服务。请确认后端服务已启动，或检查网络与地址配置后重试。
           </p>
         </div>
 
