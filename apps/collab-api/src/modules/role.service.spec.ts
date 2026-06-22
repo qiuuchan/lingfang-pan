@@ -15,6 +15,9 @@ function mockPrisma() {
       update: vi.fn(),
       delete: vi.fn(),
     },
+    team: {
+      findUnique: vi.fn(),
+    },
     user: {
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -258,6 +261,116 @@ describe('RoleService 团队角色 + 平台角色', () => {
       await expect(
         service.createPlatformRole('admin-1', { name: 'R', permissions: ['team.dashboard.view'] }),
       ).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  // 平台管理员代管团队角色（listTeamRolesForTeam / createTeamRoleForTeam / updateTeamRoleForTeam /
+  // deleteTeamRoleForTeam / assignMemberRoleForTeam）：直接用 teamId 参数，绕过 resolveCurrentTeam。
+  // 与团队级版本（listTeamRoles/...）共享 validatePermissions / normalizeRoleCode / assertCodeAvailable / 系统角色锁定。
+  describe('代管团队角色（platform.team.role.manage）', () => {
+    beforeEach(() => {
+      // assertTeamManaged：团队存在 + ACTIVE
+      prisma.team.findUnique.mockResolvedValue({ id: 'team-2', status: 'ACTIVE' });
+    });
+
+    it('listTeamRolesForTeam 校验 platform.team.role.manage 权限', async () => {
+      prisma.role.findMany.mockResolvedValue([]);
+      await service.listTeamRolesForTeam('admin-1', 'team-2');
+      expect(auth.ensurePermission).toHaveBeenCalledWith('admin-1', 'platform.team.role.manage');
+      // 直接用传入 teamId（不走 resolveCurrentTeam → teamMembership.findFirst）
+      expect(prisma.role.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ scope: 'TEAM', teamId: 'team-2' }),
+      }));
+    });
+
+    it('listTeamRolesForTeam 团队不存在拒绝 404', async () => {
+      prisma.team.findUnique.mockResolvedValue(null);
+      await expect(service.listTeamRolesForTeam('admin-1', 'nope')).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('listTeamRolesForTeam 团队已停用拒绝 403', async () => {
+      prisma.team.findUnique.mockResolvedValue({ id: 'team-2', status: 'SUSPENDED' });
+      await expect(service.listTeamRolesForTeam('admin-1', 'team-2')).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('createTeamRoleForTeam 正常创建（写入 teamId 参数）', async () => {
+      prisma.role.findFirst.mockResolvedValue(null);
+      prisma.role.create.mockResolvedValue(makeRole({ teamId: 'team-2' }));
+      const result = await service.createTeamRoleForTeam('admin-1', 'team-2', { name: '开发者', permissions: ['team.dashboard.view'] });
+      expect(result.role.name).toBe('自定义角色');
+      expect(prisma.role.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ scope: 'TEAM', teamId: 'team-2', name: '开发者' }),
+      }));
+      expect(prisma.auditLog.create).toHaveBeenCalled();
+    });
+
+    it('createTeamRoleForTeam 权限码不属于团队级拒绝 400', async () => {
+      await expect(
+        service.createTeamRoleForTeam('admin-1', 'team-2', { name: 'R', permissions: ['platform.user.list'] }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('createTeamRoleForTeam 无 platform.team.role.manage 权限拒绝 403', async () => {
+      auth.ensurePermission.mockRejectedValue(forbidden());
+      await expect(service.createTeamRoleForTeam('admin-1', 'team-2', { name: 'R' })).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('updateTeamRoleForTeam 跨团队角色拒绝 404（teamId 不匹配）', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ teamId: 'other-team' }));
+      await expect(
+        service.updateTeamRoleForTeam('admin-1', 'team-2', 'role-1', { name: 'X' }),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('updateTeamRoleForTeam 系统角色改权限拒绝 403', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ isSystem: true, teamId: 'team-2' }));
+      await expect(
+        service.updateTeamRoleForTeam('admin-1', 'team-2', 'team-admin-team-2', { permissions: ['team.dashboard.view'] }),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('deleteTeamRoleForTeam 系统角色不可删 403', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ isSystem: true, teamId: 'team-2' }));
+      await expect(service.deleteTeamRoleForTeam('admin-1', 'team-2', 'role-1')).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('deleteTeamRoleForTeam 有成员引用时拒绝 409', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ isSystem: false, teamId: 'team-2' }));
+      prisma.teamMembership.count.mockResolvedValue(2);
+      await expect(service.deleteTeamRoleForTeam('admin-1', 'team-2', 'role-1')).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('deleteTeamRoleForTeam 正常删除', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ isSystem: false, teamId: 'team-2' }));
+      prisma.teamMembership.count.mockResolvedValue(0);
+      prisma.role.delete.mockResolvedValue(makeRole());
+      const result = await service.deleteTeamRoleForTeam('admin-1', 'team-2', 'role-1');
+      expect(result.ok).toBe(true);
+    });
+
+    it('assignMemberRoleForTeam 系统团队管理员角色双写 role=TEAM_ADMIN', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ id: 'team-admin-team-2', name: '系统团队管理员', code: 'team_admin', isSystem: true, teamId: 'team-2' }));
+      prisma.teamMembership.findUnique.mockResolvedValue({ teamId: 'team-2', userId: 'u2', status: 'ACTIVE', teamRoleId: null, role: 'MEMBER' });
+      prisma.teamMembership.update.mockResolvedValue({});
+      await service.assignMemberRoleForTeam('admin-1', 'team-2', 'u2', 'team-admin-team-2');
+      expect(prisma.teamMembership.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ role: 'TEAM_ADMIN', teamRoleId: 'team-admin-team-2' }),
+      }));
+    });
+
+    it('assignMemberRoleForTeam 目标角色不属于该团队拒绝 400', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ teamId: 'other-team' }));
+      await expect(
+        service.assignMemberRoleForTeam('admin-1', 'team-2', 'u2', 'role-1'),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('assignMemberRoleForTeam 目标用户不是该团队成员拒绝 404', async () => {
+      prisma.role.findUnique.mockResolvedValue(makeRole({ teamId: 'team-2' }));
+      prisma.teamMembership.findUnique.mockResolvedValue(null);
+      await expect(
+        service.assignMemberRoleForTeam('admin-1', 'team-2', 'u2', 'role-1'),
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 });

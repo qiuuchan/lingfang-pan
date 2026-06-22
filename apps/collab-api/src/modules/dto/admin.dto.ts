@@ -184,11 +184,21 @@ export class AdminRejectApplicationDto {
   reason?: string;
 }
 
-/** 调整团队成员角色请求体 DTO。role 枚举白名单（TEAM_ADMIN/MEMBER），杜绝越权字段透传。 */
+/** 调整团队成员角色请求体 DTO。
+ *  - role：旧枚举白名单（TEAM_ADMIN/MEMBER），向后兼容旧前端。
+ *  - roleId：新字段，指定任意团队自定义角色（child-4 D7：collab-admin 角色下拉传 roleId）。
+ *  service 层按「传了哪个字段」分别处理；二者必填其一（class-validator 表达「至少一个」需运行时校验，
+ *  这里用 @IsOptional 放宽，由 AdminService.adminUpdateMemberRole 显式拒绝「两个都没传」）。 */
 export class AdminUpdateMemberRoleDto {
-  @ApiProperty({ description: '成员角色', enum: TEAM_ROLE })
+  @ApiPropertyOptional({ description: '成员角色（旧枚举，TEAM_ADMIN/MEMBER）', enum: TEAM_ROLE })
+  @IsOptional()
   @IsEnum(TEAM_ROLE, { message: 'role 只允许 TEAM_ADMIN 或 MEMBER' })
-  role!: (typeof TEAM_ROLE)[number];
+  role?: (typeof TEAM_ROLE)[number];
+
+  @ApiPropertyOptional({ description: '团队角色 id（替代 role 枚举，指定任意团队自定义角色）' })
+  @IsOptional()
+  @IsString()
+  roleId?: string;
 }
 
 /** 团队启用/停用请求体 DTO。status 枚举白名单（ACTIVE/SUSPENDED）。 */

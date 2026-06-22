@@ -276,6 +276,127 @@ export class RoleService {
     return { ok: true };
   }
 
+  // ============ 平台管理员代管团队角色（scope=TEAM，指定 teamId，绕过 resolveCurrentTeam） ============
+  // 用途：collab-admin 平台管理员在 web 端为任意团队管理角色。守卫 platform.team.role.manage。
+  // 与上面 listTeamRole/createTeamRole/... 区别：直接用 :id 参数指定团队（平台管理员不必加入该团队），
+  // 复用同一套 validatePermissions / normalizeRoleCode / assertCodeAvailable / 系统角色锁定 / 审计逻辑。
+
+  /** 校验团队存在 + ACTIVE（代管前置；停用团队不允许角色管理，与桌面端 resolveCurrentTeam 语义一致）。 */
+  private async assertTeamManaged(teamId: string) {
+    const team = await this.prisma.team.findUnique({ where: { id: teamId }, select: { id: true, status: true } });
+    if (!team) throw notFound('团队不存在');
+    if (team.status !== 'ACTIVE') throw forbidden('团队当前不可用');
+    return team;
+  }
+
+  /** 列出指定团队的全部角色（含成员数）。需 platform.team.role.manage 权限。 */
+  async listTeamRolesForTeam(userId: string, teamId: string) {
+    await this.auth.ensurePermission(userId, 'platform.team.role.manage');
+    await this.assertTeamManaged(teamId);
+    const roles = await this.prisma.role.findMany({
+      where: { scope: 'TEAM', teamId },
+      orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }],
+    });
+    const counts = await this.prisma.teamMembership.groupBy({
+      by: ['teamRoleId'],
+      where: { teamRoleId: { in: roles.map((r) => r.id) }, status: 'ACTIVE' },
+      _count: { _all: true },
+    });
+    const countMap = new Map(counts.map((c) => [c.teamRoleId, c._count._all]));
+    return { roles: roles.map((r) => publicRole(r, countMap.get(r.id) ?? 0)) };
+  }
+
+  /** 为指定团队创建角色。需 platform.team.role.manage 权限。 */
+  async createTeamRoleForTeam(userId: string, teamId: string, input: { name: string; code?: string; description?: string; permissions?: string[] }) {
+    await this.auth.ensurePermission(userId, 'platform.team.role.manage');
+    await this.assertTeamManaged(teamId);
+    const permissions = this.validatePermissions(input.permissions ?? [], 'TEAM');
+    const existing = await this.prisma.role.findFirst({ where: { scope: 'TEAM', teamId, name: input.name } });
+    if (existing) throw conflict('团队角色名已存在');
+    const code = this.normalizeRoleCode(input.code);
+    if (code !== null) await this.assertCodeAvailable('TEAM', teamId, code);
+    const role = await this.prisma.role.create({
+      data: {
+        name: input.name,
+        code,
+        scope: 'TEAM',
+        teamId,
+        description: input.description ?? '',
+        permissions,
+        isSystem: false,
+      },
+    });
+    await this.audit(userId, 'role.created', 'Role', role.id, { scope: 'TEAM', teamId, managed: true, name: role.name, code, permissions });
+    return { role: publicRole(role, 0) };
+  }
+
+  /** 更新指定团队的角色。系统角色不可改权限/编码；role 必须属该团队。需 platform.team.role.manage 权限。 */
+  async updateTeamRoleForTeam(userId: string, teamId: string, roleId: string, input: { name?: string; code?: string; description?: string; permissions?: string[] }) {
+    await this.auth.ensurePermission(userId, 'platform.team.role.manage');
+    await this.assertTeamManaged(teamId);
+    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role || role.scope !== 'TEAM' || role.teamId !== teamId) throw notFound('团队角色不存在');
+
+    const data: { name?: string; code?: string | null; description?: string; permissions?: string[] } = {};
+    if (input.name !== undefined) {
+      if (input.name !== role.name) {
+        const dup = await this.prisma.role.findFirst({ where: { scope: 'TEAM', teamId, name: input.name, NOT: { id: roleId } } });
+        if (dup) throw conflict('团队角色名已存在');
+      }
+      data.name = input.name;
+    }
+    if (input.code !== undefined) {
+      if (role.isSystem) throw forbidden('内置角色编码不可修改');
+      const code = this.normalizeRoleCode(input.code);
+      if (code !== null && code !== role.code) await this.assertCodeAvailable('TEAM', teamId, code, roleId);
+      data.code = code;
+    }
+    if (input.description !== undefined) data.description = input.description;
+    if (input.permissions !== undefined) {
+      if (role.isSystem) throw forbidden('内置角色权限不可修改');
+      data.permissions = this.validatePermissions(input.permissions, 'TEAM');
+    }
+
+    const updated = await this.prisma.role.update({ where: { id: roleId }, data });
+    await this.audit(userId, 'role.updated', 'Role', roleId, { scope: 'TEAM', teamId, managed: true, changes: data });
+    return { role: publicRole(updated) };
+  }
+
+  /** 删除指定团队的角色。系统角色不可删；有成员引用时拒绝。需 platform.team.role.manage 权限。 */
+  async deleteTeamRoleForTeam(userId: string, teamId: string, roleId: string) {
+    await this.auth.ensurePermission(userId, 'platform.team.role.manage');
+    await this.assertTeamManaged(teamId);
+    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role || role.scope !== 'TEAM' || role.teamId !== teamId) throw notFound('团队角色不存在');
+    if (role.isSystem) throw forbidden('内置角色不可删除');
+    const refCount = await this.prisma.teamMembership.count({ where: { teamRoleId: roleId, status: 'ACTIVE' } });
+    if (refCount > 0) throw conflict(`该角色仍有 ${refCount} 个成员引用，请先解除分配`);
+    await this.prisma.role.delete({ where: { id: roleId } });
+    await this.audit(userId, 'role.deleted', 'Role', roleId, { scope: 'TEAM', teamId, managed: true, name: role.name });
+    return { ok: true };
+  }
+
+  /** 为团队成员分配团队角色（代管：直接指定 teamId）。需 platform.team.role.manage 权限。
+   *  复用「双写 teamRole 枚举」语义（系统团队管理员 code → TEAM_ADMIN，否则 MEMBER），与桌面端 assignMemberRole 一致。 */
+  async assignMemberRoleForTeam(userId: string, teamId: string, targetUserId: string, roleId: string) {
+    await this.auth.ensurePermission(userId, 'platform.team.role.manage');
+    await this.assertTeamManaged(teamId);
+    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role || role.scope !== 'TEAM' || role.teamId !== teamId) throw badRequest('团队角色不存在');
+    const target = await this.prisma.teamMembership.findUnique({
+      where: { teamId_userId: { teamId, userId: targetUserId } },
+    });
+    if (!target || target.status !== 'ACTIVE') throw notFound('团队成员不存在');
+
+    const isTeamAdmin = role.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE;
+    await this.prisma.teamMembership.update({
+      where: { teamId_userId: { teamId, userId: targetUserId } },
+      data: { teamRoleId: roleId, role: isTeamAdmin ? 'TEAM_ADMIN' : 'MEMBER' },
+    });
+    await this.audit(userId, 'role.assigned', 'TeamMembership', `${teamId}:${targetUserId}`, { scope: 'TEAM', teamId, managed: true, targetUserId, roleId, teamRole: isTeamAdmin ? 'TEAM_ADMIN' : 'MEMBER' });
+    return { ok: true };
+  }
+
   // ============ 内部 helper ============
 
   /** 校验权限码：必须在注册表白名单 + scope 匹配（团队角色只能用 team.* 码）。 */
