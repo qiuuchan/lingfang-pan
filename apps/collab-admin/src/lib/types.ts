@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings' | 'releases' | 'roles';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'llmProviders' | 'settings' | 'releases' | 'roles' | 'channels' | 'billing' | 'modelTiers' | 'credits' | 'callLogs' | 'apiKeys' | 'relayDocs';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -101,6 +101,98 @@ export type LlmProvider = {
 // RBAC：角色作用域、权限码定义、角色、插件授权（与后端 Role/PermissionEntry/PluginGrant 模型 + contract rbac.ts 对齐）。
 export type RoleScope = 'PLATFORM' | 'TEAM';
 export type PluginGrantSubject = 'USER' | 'ROLE';
+
+// === 计费与中转（镜像后端 billing 出参，见 packages/contract/src/billing.ts）===
+export type ChannelProtocol = 'OPENAI' | 'ANTHROPIC';
+export type ChannelScopeKind = 'GLOBAL' | 'TEAM' | 'ROLE';
+export type ChannelStatus = 'ENABLED' | 'DISABLED';
+export type PricingUnit = 'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE';
+export type ModelTier = 'FAST' | 'PREMIUM';
+export type ApiKeyStatus = 'ACTIVE' | 'DISABLED';
+
+export type ChannelBinding = { id: string; scopeKind: ChannelScopeKind; scopeId: string };
+export type Channel = {
+  id: string;
+  name: string;
+  protocol: ChannelProtocol;
+  provider: string;
+  baseUrl: string;
+  upstreamKeyHint: string;
+  hasUpstreamKey: boolean;
+  supportedModels: string[];
+  supportedTiers: ModelTier[];
+  status: ChannelStatus;
+  priority: number;
+  weight: number;
+  description: string;
+  lastHealthAt: string | null;
+  lastHealthOk: boolean | null;
+  bindings: ChannelBinding[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModelPricing = {
+  id: string;
+  capability: 'chat' | 'image' | 'action';
+  model: string;
+  label: string;
+  unit: PricingUnit;
+  pricePerUnit: number;
+  tier: ModelTier | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModelTierConfig = {
+  tier: ModelTier;
+  label: string;
+  chatModel: string;
+  imageModel: string | null;
+  temperature: number | null;
+  maxTokens: number | null;
+  extraParams: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type PlatformApiKeyPublic = {
+  id: string;
+  teamId: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  status: ApiKeyStatus;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+};
+
+export type LlmCallLog = {
+  id: string;
+  teamId: string;
+  userId: string | null;
+  apiKeyId: string | null;
+  channelId: string | null;
+  capability: string;
+  tier: ModelTier | null;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  images: number;
+  durationMs: number;
+  credits: number;
+  status: string;
+  httpStatus: number | null;
+  errorCode: string | null;
+  requestId: string | null;
+  requestSummary: Record<string, unknown>;
+  clientIp: string | null;
+  createdAt: string;
+  team?: { name: string };
+  user?: { email: string } | null;
+};
 export type PluginGrantEffect = 'ALLOW' | 'DENY';
 
 /** 权限码注册表项（后端 permission-codes.ts 定义，seed 到 PermissionEntry 表）。 */

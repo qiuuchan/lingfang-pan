@@ -34,7 +34,7 @@ import {
 import { Markdown } from '@/components/markdown';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { CliRuntimeTab } from './settings/CliRuntimeTab';
-import { ModelGatewayTab } from './settings/ModelGatewayTab';
+import { BillingTab } from './settings/BillingTab';
 import { PluginsTab } from './settings/PluginsTab';
 import { GeneralTab } from './settings/GeneralTab';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -220,7 +220,7 @@ export function Settings({
         <TabsList className="inline-flex w-fit max-w-full gap-1">
           <TabsTrigger value="general" className="px-3">通用</TabsTrigger>
           <TabsTrigger value="cli" className="px-3">脚本运行环境</TabsTrigger>
-          <TabsTrigger value="gateway" className="px-3">模型服务</TabsTrigger>
+          <TabsTrigger value="gateway" className="px-3">模型与计费</TabsTrigger>
           <TabsTrigger value="plugins" className="px-3">插件</TabsTrigger>
           <TabsTrigger value="backend" className="px-3">公司平台</TabsTrigger>
         </TabsList>
@@ -239,9 +239,9 @@ export function Settings({
           />
         </TabsContent>
 
-        {/* Tab2：模型网关配置（自管 state，独立于探测） */}
+        {/* Tab2：模型与计费（团队灵石 + API Key + 版本，替代旧 BYOK ModelGatewayTab） */}
         <TabsContent value="gateway" keepMounted className="mt-4 focus-visible:outline-none">
-          <ModelGatewayTab />
+          <BillingTab />
         </TabsContent>
 
         {/* Tab：插件存放路径配置（组A，PRD 需求 6 / AC7） */}
