@@ -9,6 +9,7 @@
 // - 弹出层 left 定位随 collapsed 切换（折叠态贴窄轨道 w-14，展开态贴宽轨道 + 间距）。
 import { useEffect, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronRightIcon,
   LogOutIcon,
@@ -76,7 +77,8 @@ export function AvatarMenu({
     return () => window.removeEventListener('keydown', handler);
   }, [open, onClose]);
 
-  if (!open) return null;
+  // 不再 early return——用 AnimatePresence 做开关过渡（项 15b）。菜单关闭时 open=false，
+  // 下方 {open && ...} 不渲染菜单本体，但退出动画由 AnimatePresence 在卸载前播放。
 
   const avatarChar = (session.displayName?.charAt(0) || '?').toUpperCase();
   // 团队管理 / 开发者入口同门控（团队管理员可见，与 v4 语义一致）。
@@ -127,20 +129,26 @@ export function AvatarMenu({
 
   return (
     <>
-      {/* 遮罩：挡住下层交互（点外关闭已由 mousedown effect 处理，遮罩兜底防穿透）。 */}
-      <div className="fixed inset-0 z-40" />
+      {/* 遮罩：挡住下层交互（透明，无需过渡；点外关闭由 mousedown effect 处理）。 */}
+      {open && <div className="fixed inset-0 z-40" />}
 
-      {/* 菜单：从左下角账户按钮上方弹出。left 贴近侧栏左内容边（侧栏 p-2 内边距 ≈ 8px），
-          折叠/展开均锚定账户头像左缘，菜单向右展开覆盖侧栏底 + 主区底。 */}
-      <div
-        ref={menuRef}
-        className={cn(
-          'fixed bottom-14 z-50 w-72 overflow-hidden rounded-xl border bg-card shadow-2xl',
-          collapsed ? 'left-3' : 'left-2',
-        )}
-        role="menu"
-        aria-orientation="vertical"
-      >
+      {/* 项 15b：菜单开关过渡（淡入 + 轻微上滑 + 缩放）。left 贴近侧栏左内容边。 */}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            key="avatar-menu"
+            ref={menuRef}
+            className={cn(
+              'fixed bottom-14 z-50 w-72 overflow-hidden rounded-xl border bg-card shadow-2xl',
+              collapsed ? 'left-3' : 'left-2',
+            )}
+            role="menu"
+            aria-orientation="vertical"
+            initial={{ opacity: 0, scale: 0.96, y: 6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 6 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
         {/* 头部：头像 + 显示名 + 租户 + 角色 */}
         <div className="flex items-center gap-3 border-b p-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
@@ -211,7 +219,9 @@ export function AvatarMenu({
             退出登录
           </button>
         </div>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 项 11：退出登录确认弹窗。 */}
       <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
