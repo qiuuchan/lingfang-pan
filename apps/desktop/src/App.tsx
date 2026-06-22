@@ -619,24 +619,26 @@ export default function App() {
                   </>
                 )}
 
-                {/* Task 9 创建器悬浮窗：始终挂载以保留对话 listener 状态（与原 view==='creator' 常驻语义一致），
-                    creatorOpen 时作为浮动窗口覆盖主体区；关闭回到底层页面。 */}
-                <div className={creatorOpen ? 'absolute inset-0 z-30 flex flex-col bg-background/70 backdrop-blur-xl shadow-2xl' : 'hidden'}>
-                  {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
-                  <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-                    <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>
-                    <button
-                      type="button"
-                      onClick={() => setCreatorOpen(false)}
-                      aria-label="关闭创建器"
-                      title="返回（Esc）"
-                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      <XIcon className="size-4" />
-                    </button>
-                  </div>
-                  <div className="min-h-0 flex-1">
-                    <PluginCreatorHome />
+                {/* Task 9 / 项 13 创建器悬浮窗：居中 ~70% 面板 + 模糊遮罩；始终挂载以保留对话 listener 状态。
+                    外层 absolute inset-0 是半透模糊遮罩（bg-background/40 backdrop-blur），内层是居中不透明面板（约屏宽高 70%）。 */}
+                <div className={creatorOpen ? 'absolute inset-0 z-30 flex items-center justify-center bg-background/40 backdrop-blur-xl' : 'hidden'}>
+                  <div className="flex h-[70vh] w-[70vw] min-h-[400px] min-w-[720px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+                    {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
+                    <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
+                      <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>
+                      <button
+                        type="button"
+                        onClick={() => setCreatorOpen(false)}
+                        aria-label="关闭创建器"
+                        title="返回（Esc）"
+                        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    </div>
+                    <div className="min-h-0 flex-1">
+                      <PluginCreatorHome />
+                    </div>
                   </div>
                 </div>
 
