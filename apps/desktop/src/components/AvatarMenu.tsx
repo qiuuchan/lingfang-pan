@@ -7,7 +7,7 @@
 // - View 映射：team-manage→team-admin（body 视图）、llm→设置 gateway tab；删除「版本发布管理」（桌面端无 releases 视图，属 collab-admin）。
 // - 通知中心抽屉在本组件渲染（随菜单生命周期挂载）。
 // - 弹出层 left 定位随 collapsed 切换（折叠态贴窄轨道 w-14，展开态贴宽轨道 + 间距）。
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import {
   ChevronRightIcon,
@@ -22,7 +22,6 @@ import {
   HelpCircleIcon,
   RepeatIcon,
   CpuIcon,
-  KeyRoundIcon,
   SunIcon,
   MoonIcon,
   MonitorIcon,
@@ -30,6 +29,8 @@ import {
 import { useApp } from '@/App';
 import { isTeamManager } from '@/lib/permissions';
 import { useUnreadCount } from '@/components/NotificationCenter';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
 
@@ -43,8 +44,10 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, setView, openAccountSettings, openNotifications } = useApp();
+  const { session, resetSession, setView, openAccountSettings, openNotifications, openTeamAdmin } = useApp();
   const { theme, setTheme } = useTheme();
+  // 项 11：退出登录确认弹窗。
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   // 通知中心已提为 App 顶层独立悬浮窗（项 1，修复嵌套导致的点击即关/卡死 bug）；
   // 菜单仅显示未读角标（useUnreadCount），点击交给 openNotifications。
   const unread = useUnreadCount(open);
@@ -95,25 +98,24 @@ export function AvatarMenu({
     onClick: () => void;
   };
 
-  // 上半部分菜单（个人资料 / 通知 / 钱包 / 切团队 / 插件 / 团队管理 / 开发者 / LLM）。
+  // 上半部分菜单（个人资料 / 通知 / 钱包 / 团队空间 / 插件 / 团队管理 / 开发者 / 其他设置）。
   const items: Item[] = [
     { key: 'profile', label: '个人资料', icon: UserRoundIcon, visible: true, onClick: () => { openAccountSettings('account'); onClose(); } },
     // 项 1：通知中心改为 App 顶层独立悬浮窗（openNotifications），不再嵌套本菜单内。
     { key: 'notif', label: '通知中心', icon: BellIcon, visible: true, badge: unread, onClick: () => { openNotifications(); onClose(); } },
     { key: 'wallet', label: '钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('wallet'); onClose(); } },
-    { key: 'switch-team', label: '切换团队', icon: RepeatIcon, visible: true, onClick: () => { openAccountSettings('team'); onClose(); } },
+    // 项 4：「切换团队」改名为「团队空间」。
+    { key: 'switch-team', label: '团队空间', icon: RepeatIcon, visible: true, onClick: () => { openAccountSettings('team'); onClose(); } },
     { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => go('plugins') },
-    // team-admin 是 body 视图（主区渲染 TeamAdmin 页），区别于走悬浮窗的 'team'（切换团队）。
-    { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => go('team-admin') },
+    // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
+    { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
     { key: 'creator', label: '开发者模式', icon: WrenchIcon, visible: canManageTeam, onClick: () => go('creator') },
-    // LLM 设置：桌面端无独立 view，跳设置页 gateway tab（模型服务）。
-    { key: 'llm', label: 'LLM 设置', icon: CpuIcon, visible: true, onClick: () => { openAccountSettings('settings', 'gateway'); onClose(); } },
+    // 项 8：「LLM 设置」改为「其他设置」，点击进设置页第一个 tab（general）。
+    { key: 'other-settings', label: '其他设置', icon: CpuIcon, visible: true, onClick: () => { openAccountSettings('settings', 'general'); onClose(); } },
   ];
 
-  // 下半部分菜单（设置 / 安全 / 帮助）。安全暂合并到设置页（无独立 tab）。
+  // 下半部分菜单（帮助）。项 9/10：「设置与快捷键」「本地权限与安全」已删除（统一并入「其他设置」）。
   const bottomItems: Item[] = [
-    { key: 'settings', label: '设置与快捷键', icon: SettingsIcon, visible: true, onClick: () => { openAccountSettings('settings'); onClose(); } },
-    { key: 'security', label: '本地权限与安全', icon: KeyRoundIcon, visible: true, onClick: () => { openAccountSettings('settings'); onClose(); } },
     { key: 'help', label: '帮助与反馈', icon: HelpCircleIcon, visible: true, onClick: () => window.open('https://lingfang.io/docs', '_blank') },
   ];
 
@@ -198,13 +200,10 @@ export function AvatarMenu({
 
         <div className="h-px bg-border" />
 
-        {/* 退出登录 */}
+        {/* 退出登录（项 11：点击弹确认，不直接退出） */}
         <div className="p-1.5">
           <button
-            onClick={() => {
-              resetSession();
-              onClose();
-            }}
+            onClick={() => setLogoutConfirmOpen(true)}
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
             role="menuitem"
           >
@@ -213,6 +212,22 @@ export function AvatarMenu({
           </button>
         </div>
       </div>
+
+      {/* 项 11：退出登录确认弹窗。 */}
+      <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>退出登录</DialogTitle>
+            <DialogDescription>确认退出当前账号？退出后需重新登录。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLogoutConfirmOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={() => { resetSession(); setLogoutConfirmOpen(false); onClose(); }}>
+              <LogOutIcon className="size-4" /> 确认退出
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

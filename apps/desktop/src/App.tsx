@@ -63,6 +63,8 @@ interface AppContextValue {
   openAccountSettings: (tab?: AccountSettingsTab, settingsTab?: SettingsTab) => void;
   /** 项 1/14：打开通知中心悬浮窗（App 顶层独立挂载，不依赖 AvatarMenu 生命周期）。 */
   openNotifications: () => void;
+  /** 项 5：打开团队管理居中悬浮窗。 */
+  openTeamAdmin: () => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
@@ -242,6 +244,8 @@ export default function App() {
   const [teamOpen, setTeamOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  // 项 5：团队管理改为居中悬浮窗（原主区页面导航）。
+  const [teamAdminOpen, setTeamAdminOpen] = useState(false);
   // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
@@ -290,6 +294,8 @@ export default function App() {
   }, []);
   // 项 1：打开通知中心独立悬浮窗（AvatarMenu / 任意组件通过 context 调用）。
   const openNotifications = useCallback(() => setNotifOpen(true), []);
+  // 项 5：打开团队管理居中悬浮窗。
+  const openTeamAdmin = useCallback(() => setTeamAdminOpen(true), []);
 
   const setView = useCallback((nextView: View) => {
     // Task 9：'creator' 不再切换 view，改为打开创建器悬浮窗（保留底层页面，关闭即回到原页）。
@@ -314,6 +320,7 @@ export default function App() {
     setTeamOpen(false);
     setSettingsOpen(false);
     setProfileOpen(false);
+    setTeamAdminOpen(false);
     setNotifOpen(false);
     setCreatorOpen(false);
     setViewState(nextView);
@@ -600,7 +607,7 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
-    openAccountSettings, openNotifications,
+    openAccountSettings, openNotifications, openTeamAdmin,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
@@ -689,7 +696,7 @@ export default function App() {
                 {/* Task 9 / 项 13 创建器悬浮窗：居中 ~70% 面板 + 模糊遮罩；始终挂载以保留对话 listener 状态。
                     外层 absolute inset-0 是半透模糊遮罩（bg-background/40 backdrop-blur），内层是居中不透明面板（约屏宽高 70%）。 */}
                 <div className={creatorOpen ? 'absolute inset-0 z-30 flex items-center justify-center bg-background/40 backdrop-blur-xl' : 'hidden'}>
-                  <div className="flex h-[70vh] w-[70vw] min-h-[400px] min-w-[720px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+                  <div className="flex h-[85vh] w-[88vw] min-h-[480px] min-w-[960px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
                     {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
                     <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
                       <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>
@@ -727,8 +734,12 @@ export default function App() {
       <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="CLI / 模型服务 / 插件 / 后端地址">
         <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>
       </PanelDialog>
-      <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="md">
+      <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="sm">
         <ProfilePanel session={session} applySession={applySession} resetSession={resetSession} onClose={() => setProfileOpen(false)} />
+      </PanelDialog>
+      {/* 项 5：团队管理居中悬浮窗（TeamAdmin 页，仅团队管理员；权限门控在 AvatarMenu 入口）。 */}
+      <PanelDialog open={teamAdminOpen} onOpenChange={setTeamAdminOpen} title="团队管理" size="lg">
+        <Suspense fallback={<ListSkeleton rows={6} />}><TeamAdmin /></Suspense>
       </PanelDialog>
       {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
       <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
