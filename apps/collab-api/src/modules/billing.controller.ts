@@ -83,9 +83,16 @@ export class BillingController {
 
   @Post('channels/:id/test')
   @RequirePermission('platform.billing.channel.manage')
-  @ApiOperation({ summary: '渠道健康测试' })
+  @ApiOperation({ summary: '渠道健康测试（连通性，返回可用模型列表）' })
   testChannel(@Req() req: Request, @Param('id') id: string) {
     return this.channels.adminTest(requireUser(req).id, id);
+  }
+
+  @Post('channels/:id/test-chat')
+  @RequirePermission('platform.billing.channel.manage')
+  @ApiOperation({ summary: '渠道实对话测试（端到端验证，发一条最小请求）' })
+  testChannelChat(@Req() req: Request, @Param('id') id: string, @Body() body: { model: string }) {
+    return this.channels.adminTestChat(requireUser(req).id, id, body.model);
   }
 
   // === 定价 ===
