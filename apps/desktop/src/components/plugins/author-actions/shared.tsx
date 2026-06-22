@@ -15,10 +15,10 @@ export function readPluginIcon(plugin: LoadedPlugin): string | undefined {
 
 export function PluginIcon({ icon, className }: { icon?: string; className?: string }) {
   if (icon && /^data:image\//i.test(icon)) {
-    return <img src={icon} alt="" className={className ?? 'size-8 rounded object-cover'} referrerPolicy="no-referrer" />;
+    return <img src={icon} alt="" className={className ?? 'size-10 rounded object-cover'} referrerPolicy="no-referrer" />;
   }
   return (
-    <span className={className ?? 'flex size-8 items-center justify-center rounded bg-muted text-lg'}>
+    <span className={className ?? 'flex size-10 items-center justify-center rounded bg-muted text-lg'}>
       {icon || '🧩'}
     </span>
   );

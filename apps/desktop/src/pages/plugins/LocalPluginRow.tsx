@@ -4,6 +4,7 @@ import { InfoIcon, PlayIcon, SquareIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
+import { PluginIcon } from '@/components/plugins/author-actions';
 import {
   Dialog,
   DialogContent,
@@ -117,14 +118,17 @@ function useLocalDeleteState(item: LocalPluginStatus, onDeleted: () => void) {
 
 function LocalPluginSummary({ item }: { item: LocalPluginStatus }) {
   return (
-    <div className="min-w-0 flex-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="truncate font-medium">{item.name}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{RUNTIME_DISPLAY[item.runtime]}</span>
-        <StatusPill status={item.status} />
-      </div>
-      <div className="truncate text-sm text-muted-foreground">
-        {item.detail || item.description || '—'}
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <PluginIcon icon={item.icon} className="size-10 shrink-0 rounded-lg object-cover" />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate font-medium">{item.name}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{RUNTIME_DISPLAY[item.runtime]}</span>
+          <StatusPill status={item.status} />
+        </div>
+        <div className="truncate text-sm text-muted-foreground">
+          {item.detail || item.description || '—'}
+        </div>
       </div>
     </div>
   );

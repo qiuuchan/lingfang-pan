@@ -42,6 +42,8 @@ interface AppContextValue {
   runningPlugin: LoadedPlugin | null;
   setRunningPlugin: (p: LoadedPlugin | null) => void;
   pinnedPlugins: LoadedPlugin[];
+  // 项 9：最近使用的插件（侧栏分区展示，按租户持久化 lf:recent:<tenantId>）。
+  recentPlugins: LoadedPlugin[];
   pinPlugin: (p: LoadedPlugin) => void;
   unpinPlugin: (id: string) => void;
   isPinned: (id: string) => boolean;
@@ -90,6 +92,26 @@ function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
   } catch (err) {
     // DESK-SHELL-04 修复：配额满 / localStorage 被禁用时不再静默吞错，
     // 给用户可见提示（持久化失败会导致下次重启「固定插件丢失」，需提示）。
+    reportPersistenceFailure(err);
+  }
+}
+
+// 项 9：最近使用插件（与 pins 同构：租户隔离、置顶去重、限量 5）。运行插件时记入，侧栏分区展示。
+const RECENT_MAX = 5;
+const recentKey = (tenantId: string | null) => `lf:recent:${tenantId || 'none'}`;
+function loadRecent(tenantId: string | null): LoadedPlugin[] {
+  try {
+    const raw = localStorage.getItem(recentKey(tenantId));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+function saveRecent(tenantId: string | null, recent: LoadedPlugin[]) {
+  try {
+    localStorage.setItem(recentKey(tenantId), JSON.stringify(recent));
+  } catch (err) {
     reportPersistenceFailure(err);
   }
 }
@@ -196,14 +218,34 @@ export default function App() {
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
   // Task 9 创建器悬浮窗：FAB / setView('creator') 唤起，覆盖主体区为浮动窗口。
-  const [creatorOpen, setCreatorOpen] = useState(false);
+  // 项 7：开关态持久化（lf:creator-open），跨重启保留「上次是否打开」；背景模糊（见 overlay className）。
+  const [creatorOpen, setCreatorOpenState] = useState<boolean>(() => {
+    try { return localStorage.getItem('lf:creator-open') === '1'; } catch { return false; }
+  });
+  const setCreatorOpen = useCallback((v: boolean) => {
+    setCreatorOpenState(v);
+    try { localStorage.setItem('lf:creator-open', v ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
+  }, []);
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
-  const [runningPlugin, setRunningPlugin] = useState<LoadedPlugin | null>(null);
+  const [runningPlugin, setRunningPluginState] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
+  // 项 9：最近使用插件（与 pinnedPlugins 同构，按 tenantId 持久化隔离）。
+  const [recentPlugins, setRecentPlugins] = useState<LoadedPlugin[]>([]);
+  // 项 9：包装 setRunningPlugin —— 运行插件时记入「最近使用」（置顶、去重、限量 RECENT_MAX、按租户持久化）。
+  // 保留 ctx 上 setRunningPlugin 原签名，所有现有调用方（Sidebar/Home/Plugins 等）自动走包装逻辑。
+  const setRunningPlugin = useCallback((p: LoadedPlugin | null) => {
+    setRunningPluginState(p);
+    if (!p) return;
+    setRecentPlugins((prev) => {
+      const next = [p, ...prev.filter((x) => x.id !== p.id)].slice(0, RECENT_MAX);
+      saveRecent(session.tenantId, next);
+      return next;
+    });
+  }, [session.tenantId]);
   // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway'。
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('cli');
   // 模型配置刷新信号：设置页保存绑定后 bumpModelConfig() 递增，PluginCreatorHome 依赖它重拉模型。
@@ -293,11 +335,13 @@ export default function App() {
     // DESK-SHELL-07 修复：登出时清空 currentDraft，避免同机下一登录用户短暂看到上一用户的草稿。
     // App 始终挂载（登出渲染 Auth 不卸载），useState 不会自动重置。
     setCurrentDraft(null);
+    // 项 7：登出关闭创建器悬浮窗并清持久化，避免下次登录自动弹出（残留 lf:creator-open=1）。
+    setCreatorOpen(false);
     sessionRef.current = emptySession;
     setSession(emptySession);
     setRunningPlugin(null);
     setView('home');
-  }, []);
+  }, [setCreatorOpen]);
 
   // 启动时若本地存有 session，静默调 /api/auth/me 刷新；仅 token 真无效（401）才登出。
   // 网络/后端未启动时保留已恢复的 session，进主界面，下次启动重试。
@@ -402,6 +446,11 @@ export default function App() {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
 
+  // 项 9：租户切换 / 登录态变化时重载「最近使用」插件列表。
+  useEffect(() => {
+    setRecentPlugins(loadRecent(session.tenantId));
+  }, [session.tenantId]);
+
   // 侧栏开合持久化：用户切换后写盘，跨重启保留（首次无 key 默认折叠，见上 useState 初值）。
   useEffect(() => {
     try { localStorage.setItem('lf:sidebar-open', sidebarOpen ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
@@ -482,7 +531,7 @@ export default function App() {
     view, setView,
     currentDraft, setCurrentDraft,
     runningPlugin, setRunningPlugin,
-    pinnedPlugins, pinPlugin, unpinPlugin, isPinned,
+    pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
     accountSettingsTab, openAccountSettings,
     modelConfigVersion, bumpModelConfig,
@@ -572,7 +621,7 @@ export default function App() {
 
                 {/* Task 9 创建器悬浮窗：始终挂载以保留对话 listener 状态（与原 view==='creator' 常驻语义一致），
                     creatorOpen 时作为浮动窗口覆盖主体区；关闭回到底层页面。 */}
-                <div className={creatorOpen ? 'absolute inset-0 z-30 flex flex-col bg-background shadow-2xl' : 'hidden'}>
+                <div className={creatorOpen ? 'absolute inset-0 z-30 flex flex-col bg-background/70 backdrop-blur-xl shadow-2xl' : 'hidden'}>
                   {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
                   <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
                     <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>

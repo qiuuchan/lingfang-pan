@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PluginIcon, readPluginIcon } from '@/components/plugins/author-actions';
 import { cn } from '@/lib/utils';
 import type { View } from '@/lib/types';
 import {
@@ -69,7 +70,7 @@ export function Sidebar({
   /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
   onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin } = useApp();
+  const { session, view, setView, setRunningPlugin, recentPlugins } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
@@ -178,6 +179,36 @@ export function Sidebar({
           );
         })}
       </nav>
+
+      {/* 项 9：最近使用的插件（运行插件时记入，置顶去重限量 5，按租户持久化）。空列表不渲染整块。 */}
+      {recentPlugins.length > 0 && (
+        <div className="shrink-0 border-t p-2">
+          {!collapsed && (
+            <div className="px-1 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+              最近使用
+            </div>
+          )}
+          <div className="flex flex-col gap-0.5">
+            {recentPlugins.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => { setRunningPlugin(p); setView('plugins'); }}
+                title={collapsed ? p.name : undefined}
+                className={cn(
+                  buttonVariants({ variant: 'ghost', size: 'sm' }),
+                  'h-9 gap-2.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+                  collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
+                )}
+              >
+                {/* 侧栏小号图标：显式 size-5 覆盖 PluginIcon 默认 size-10（项 6 放大后默认偏大）。 */}
+                <PluginIcon icon={readPluginIcon(p)} className="size-5 shrink-0 rounded object-cover" />
+                {!collapsed && <span className="truncate text-sm">{p.name}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 账户信息：点击弹出 AvatarMenu（项 4，v4 形态富菜单）。 */}
       <div className="border-t p-2">

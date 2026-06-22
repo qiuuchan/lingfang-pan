@@ -75,7 +75,7 @@ function TeamPluginSummary({
 }) {
   return (
     <>
-      <PluginIcon icon={readPluginIcon(plugin)} className="size-9 shrink-0 rounded-lg object-cover" />
+      <PluginIcon icon={readPluginIcon(plugin)} className="size-10 shrink-0 rounded-lg object-cover" />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{plugin.name}</span>

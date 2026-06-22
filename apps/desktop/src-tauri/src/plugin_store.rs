@@ -117,6 +117,9 @@ pub struct PluginMeta {
     pub description: String,
     /// 插件版本（manifest.version，缺失为 '0.0.0'）。
     pub version: String,
+    /// 插件图标（manifest.icon，缺失为 None；前端 PluginIcon 回退默认 🧩）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// 运行进程 pid（仅 status==='running' 时有意义；其余为 None）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -412,6 +415,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
                 entry: String::new(),
                 description: String::new(),
                 version: "0.0.0".to_string(),
+                icon: None,
                 pid: None,
                 started_at: None,
                 detail: Some("缺少 manifest.json（AI 生成未完成）".to_string()),
@@ -429,6 +433,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
                 entry: String::new(),
                 description: String::new(),
                 version: "0.0.0".to_string(),
+                icon: None,
                 pid: None,
                 started_at: None,
                 detail: Some(format!("manifest.json 解析失败：{e}")),
@@ -451,6 +456,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
             entry: parse_entry(v.get("entry")),
             description: parse_description(v.get("description")),
             version: parse_version(v.get("version")),
+            icon: None,
             pid: None,
             started_at: None,
             detail: Some("manifest.json 缺少 id 或 name 字段".to_string()),
@@ -484,6 +490,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
         entry,
         description: parse_description(v.get("description")),
         version: parse_version(v.get("version")),
+        icon: parse_icon(v.get("icon")),
         pid: None,
         started_at: None,
         detail,
@@ -522,6 +529,14 @@ fn parse_version(value: Option<&Value>) -> String {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("0.0.0")
         .to_string()
+}
+
+/// 解析 manifest icon（缺失/空为 None；前端 PluginIcon 据此显示真实图标，None 回退默认 🧩）。
+fn parse_icon(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// 排序 key：name 优先，缺失按 id（保证稳定字典序，前端列表不抖动）。
