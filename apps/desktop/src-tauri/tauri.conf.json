@@ -34,7 +34,8 @@
         "sidebarImage": "icons/nsis-sidebar.bmp",
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"],
-        "displayLanguageSelector": true
+        "displayLanguageSelector": true,
+        "installerHooks": "nsis/installer-hooks.nsh"
       }
     }
   },
