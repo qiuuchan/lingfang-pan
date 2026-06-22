@@ -43,7 +43,7 @@ export async function openPluginInWindow(plugin: LoadedPlugin): Promise<void> {
   const title = `${plugin.name} — LingFang`;
   // 用户代理分区的 webview 共享主窗口的 localStorage（同源），session token 可用。
   try {
-    new WebviewWindow(label, {
+    const webview = new WebviewWindow(label, {
       url,
       title,
       width: 960,
@@ -53,7 +53,16 @@ export async function openPluginInWindow(plugin: LoadedPlugin): Promise<void> {
       resizable: true,
       decorations: true,
     });
-    // 注意：不 await 创建完成（构造即触发，焦点管理走 getByLabel 后续调用）。
+    // 监听创建错误事件（WebviewWindow 构造不抛同步异常，能力缺失/URL 非法通过 error 事件上报）。
+    // once 创建后即解绑，不长期占用。
+    try {
+      webview.once('tauri://error', (event) => {
+        const msg = (event?.payload as { message?: string } | undefined)?.message || String(event?.payload ?? '未知错误');
+        import('sonner').then(({ toast }) => toast.error(`独立窗口创建失败：${msg}`)).catch(() => void 0);
+      });
+    } catch {
+      /* once 注册失败忽略 */
+    }
   } catch (error) {
     // 创建失败（能力缺失/被拒）抛给调用方 toast。
     throw new Error(`无法打开独立窗口：${error instanceof Error ? error.message : String(error)}`);

@@ -136,20 +136,6 @@ pub fn check_plugin_recall(store: &PluginStore, plugin_id: &str, installed_versi
     PluginRecallInfo { recalled: true, version: recalled_version.to_string(), reason }
 }
 
-// === 系统级权限请求 ===
-
-/// 插件请求的系统级权限项（manifest.permissions 声明，运行时前端向用户确认）。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemPermissionRequest {
-    /// 权限标识（如 system.elevated-fs / system.execute / system.network-listen）。
-    pub code: String,
-    /// 人类可读说明（为什么需要）。
-    pub reason: String,
-    /// 是否需要管理员授权（true 则前端弹确认框）。
-    pub requires_admin: bool,
-}
-
 // === Tauri 命令封装（供前端 invoke） ===
 
 /// 命令：校验插件签名（Task 14）。未配置公钥/无签名时返回 signed=false，不抛错。
