@@ -8,6 +8,7 @@ import { TitleBar } from '@/components/TitleBar';
 import { Footer } from '@/components/Footer';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
+import { CommandPalette } from '@/components/CommandPalette';
 // 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
 // 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
 import { Auth } from '@/pages/Auth';
@@ -183,6 +184,8 @@ export default function App() {
   const [backendUnreachable, setBackendUnreachable] = useState(false);
   const [view, setViewState] = useState<View>('home');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
+  const [searchOpen, setSearchOpen] = useState(false);
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountSettingsTab, setAccountSettingsTab] = useState<AccountSettingsTab>('account');
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -379,6 +382,18 @@ export default function App() {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
 
+  // Task 6：Ctrl/Cmd+K 唤起全局搜索悬浮窗（与 Sidebar 搜索按钮同一入口）。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const pinPlugin = useCallback((p: LoadedPlugin) => {
     setPinnedPlugins((prev) => {
       if (prev.some((x) => x.id === p.id)) return prev;
@@ -455,7 +470,7 @@ export default function App() {
         {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制（最小化/最大化/关闭）。 */}
         <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
         <div className="flex min-h-0 flex-1">
-          <Sidebar collapsed={!sidebarOpen} />
+          <Sidebar collapsed={!sidebarOpen} onOpenSearch={() => setSearchOpen(true)} />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗、切设置）。
@@ -507,6 +522,8 @@ export default function App() {
         settingsTab={settingsTab}
         onSettingsTabChange={setSettingsTab}
       />
+      {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );
