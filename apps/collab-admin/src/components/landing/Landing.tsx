@@ -1,12 +1,11 @@
 // 落地页根：未登录时的「官网首页」。
-// 深色作用域（.landing-scope）隔离自管理后台的浅色 shadcn 主题。
-// 登录、下载、更新日志均已独立为各自全屏页，由 App.tsx 的状态机切换；此处仅渲染首页 sections。
-// section 顺序：Hero → Topology → Features → Footer（topology 紧承 Hero 终端代码块氛围）。
+// 纸稿/朱砂印主题（.landing-scope）隔离自管理后台的 shadcn 主题。
+// section 顺序：Hero → Features → Topology → Footer。
 import './landing.css';
 import { LandingNav } from './LandingNav';
 import { LandingHero } from './LandingHero';
-import { LandingTopology } from './LandingTopology';
 import { LandingFeatures } from './LandingFeatures';
+import { LandingTopology } from './LandingTopology';
 import { LandingFooter } from './LandingFooter';
 
 interface LandingProps {
@@ -32,8 +31,8 @@ export function Landing({ onLogin, onNavigateDownload, onNavigateChangelog }: La
             onNavigateDownload={onNavigateDownload}
             onNavigateChangelog={onNavigateChangelog}
           />
-          <LandingTopology />
           <LandingFeatures />
+          <LandingTopology />
           <LandingFooter
             onNavigateDownload={onNavigateDownload}
             onNavigateChangelog={onNavigateChangelog}

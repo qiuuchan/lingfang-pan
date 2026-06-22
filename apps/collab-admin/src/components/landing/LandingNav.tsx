@@ -1,6 +1,6 @@
-// 落地页顶部导航（logo + 锚点 + 登录按钮）。
-// 「下载」「更新日志」均不再是同页锚点（已独立为全屏页），点击触发回调切换状态机视图。
-// 无 GitHub 链接（按需求移除外部仓库引用）。
+// 落地页顶部导航：纸稿主题下的极简顶栏。
+// 「下载」「更新日志」触发自 App.tsx 的状态机切换；「功能」锚点到首页区块。
+
 import type { ReactNode } from 'react';
 
 interface NavProps {
@@ -18,24 +18,20 @@ const NAV = (onNavigateDownload: () => void, onNavigateChangelog: () => void) =>
 export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }: NavProps) {
   return (
     <header
-      className="fixed top-0 inset-x-0 z-50 backdrop-blur-md border-b"
+      className="fixed top-0 inset-x-0 z-50 border-b"
       style={{
-        backgroundColor: 'rgba(15, 20, 25, 0.72)',
+        backgroundColor: 'rgba(244, 243, 240, 0.78)',
         borderBottomColor: 'var(--lf-border)',
+        backdropFilter: 'blur(14px)',
       }}
     >
       <nav className="mx-auto max-w-6xl px-6 h-16 flex items-center justify-between">
         <a href="#lf-top" className="flex items-center gap-2.5 group">
-          <span
-            className="lf-mono inline-flex h-8 w-8 items-center justify-center rounded-md border text-sm font-bold transition-shadow group-hover:shadow-[0_0_16px_-2px_var(--lf-accent-glow)]"
-            style={{ borderColor: 'var(--lf-accent)', color: 'var(--lf-accent)' }}
-          >
-            L
-          </span>
-          <span className="font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>LingFang</span>
+          <LandingLogo size={32} />
+          <span className="lf-display font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>LingFang</span>
         </a>
 
-        <div className="hidden md:flex items-center gap-7 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+        <div className="hidden md:flex items-center gap-8 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
           {NAV(onNavigateDownload, onNavigateChangelog).map((item) =>
             item.onClick ? (
               <button
@@ -70,16 +66,16 @@ export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }:
 export function LandingLogo({ size = 32 }: { size?: number }): ReactNode {
   return (
     <span
-      className="lf-mono inline-flex items-center justify-center rounded-md border font-bold"
+      className="lf-display inline-flex items-center justify-center rounded-lg border font-bold transition-shadow group-hover:shadow-[0_0_16px_-2px_var(--lf-accent-glow)]"
       style={{
         height: size,
         width: size,
-        fontSize: size * 0.5,
+        fontSize: size * 0.48,
         borderColor: 'var(--lf-accent)',
         color: 'var(--lf-accent)',
       }}
     >
-      L
+      灵
     </span>
   );
 }
