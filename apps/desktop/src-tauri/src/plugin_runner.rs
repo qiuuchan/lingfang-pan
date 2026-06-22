@@ -612,6 +612,8 @@ pub fn start_plugin(
     store: tauri::State<'_, PluginStore>,
     process_table: tauri::State<'_, PluginProcessTable>,
     plugin_id: String,
+    api_base: Option<String>,
+    auth_token: Option<String>,
 ) -> Result<StartPluginResult, String> {
     use tauri::Emitter;
     // 阶段事件辅助：emit 失败不阻断启动（UI 无监听者或通道错误时静默降级为同步等待）。
@@ -693,7 +695,16 @@ pub fn start_plugin(
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
-    command.env_clear().envs(runtime.env(minimal_env()));
+    // 计费/中转：先经 runtime.env 注入运行时 PATH/pip/npm 变量，再追加 LF_API_BASE / LF_AUTH_TOKEN，
+    // 供 Python/Node 插件经 /api/relay/v1/* 调平台 AI 服务（按团队灵石计费；旧硬编码第三方 key 已移除）。
+    let mut env = runtime.env(minimal_env());
+    if let Some(base) = api_base.as_ref().filter(|b| !b.is_empty()) {
+        env.push((OsString::from("LF_API_BASE"), OsString::from(base)));
+    }
+    if let Some(token) = auth_token.as_ref().filter(|t| !t.is_empty()) {
+        env.push((OsString::from("LF_AUTH_TOKEN"), OsString::from(token)));
+    }
+    command.env_clear().envs(env);
     // Unix：setsid 建独立进程组（detached，stop_plugin 杀整组）。
     #[cfg(unix)]
     {

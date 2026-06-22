@@ -14,7 +14,7 @@
 // 注：这些 Rust 命令由组A（目录管理）/组B（venv+pnpm 运行）实现，本封装层按契约先行落地，
 // 后端实现后即生效；命令未实现时 tauriInvoke 抛错，前端按 errorMessage 友好降级（不崩）。
 
-import { tauriInvoke, tauriListen } from '@/lib/api';
+import { tauriInvoke, tauriListen, apiBase, getAuthToken } from '@/lib/api';
 
 // === 动态状态（PRD 需求 2：状态动态获取，不存 DB） ===
 
@@ -144,7 +144,13 @@ export async function startPlugin(
       })
     : null;
   try {
-    return await tauriInvoke<{ pid: number; started_at: string }>('start_plugin', { pluginId });
+    // 计费/中转：把后端基址 + 登录态 token 注入插件进程环境（LF_API_BASE / LF_AUTH_TOKEN），
+    // 供 Python/Node 插件经 /api/relay/v1/* 调平台 AI 服务（按团队灵石计费，需求 #3：禁止第三方接口）。
+    return await tauriInvoke<{ pid: number; started_at: string }>('start_plugin', {
+      pluginId,
+      apiBase: apiBase(),
+      authToken: getAuthToken() ?? '',
+    });
   } finally {
     unlisten?.();
   }

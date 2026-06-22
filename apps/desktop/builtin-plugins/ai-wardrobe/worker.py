@@ -45,8 +45,6 @@ class BatchWorker(QObject):
     def run_tasks(
         self,
         tasks: list[tuple[list[str], str]],
-        api_key: str,
-        api_group: str,
         output_dir: str,
         max_workers: int = 4,
     ):
@@ -54,8 +52,6 @@ class BatchWorker(QObject):
 
         Args:
             tasks: [(image_paths, prompt), ...]
-            api_key: API 密钥
-            api_group: API 分组
             output_dir: 输出目录
             max_workers: 最大并发数
         """
@@ -73,10 +69,7 @@ class BatchWorker(QObject):
 
             desc = " x ".join(os.path.basename(p) for p in image_paths)
             try:
-                img_data = call_edit_api(
-                    image_paths, prompt,
-                    api_key=api_key, api_group=api_group,
-                )
+                img_data = call_edit_api(image_paths, prompt)
                 filename = _make_filename(image_paths)
                 output_path = os.path.join(output_dir, filename)
 

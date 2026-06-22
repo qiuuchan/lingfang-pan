@@ -42,4 +42,11 @@ export class RelayController {
   images(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: Record<string, unknown>) {
     return this.relay.imageGenerations(req, res, body);
   }
+
+  @Post('images/edits')
+  @ApiOperation({ summary: 'AI 生图编辑转发（multipart 透传，按张计费）' })
+  imageEdits(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    // multipart：body 不能用 @Body（已读为原始 buffer），由 service 处理 rawBody。
+    return this.relay.imageEditsPassthrough(req, res);
+  }
 }
