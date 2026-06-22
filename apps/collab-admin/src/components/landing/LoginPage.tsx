@@ -130,21 +130,21 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
           </button>
           <div className="flex items-center gap-2">
             <span
-              className="lf-mono inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-bold"
+              className="lf-display inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-bold"
               style={{ borderColor: 'var(--lf-accent)', color: 'var(--lf-accent)' }}
             >
-              {(platformName || 'L').slice(0, 1)}
+              灵
             </span>
             {/* 云同步平台名：后端 platformName（缺省 'LingFang'），与后台保持一致。 */}
-            <span className="text-sm font-semibold tracking-tight">{platformName || 'LingFang'}</span>
+            <span className="lf-display text-sm font-semibold tracking-tight">{platformName || 'LingFang'}</span>
           </div>
         </header>
 
         {/* 居中表单卡 */}
         <div className="lf-login-wrap">
           <div className="lf-login-card">
-            <h1 className="text-xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
-              {platformName ? `${platformName} · 管理员登录` : '平台管理员登录'}
+            <h1 className="lf-display text-xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
+              {platformName ? `${platformName} · 登录管理后台` : '登录管理后台'}
             </h1>
             <p className="mt-1.5 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
               初始账号在系统部署时创建。

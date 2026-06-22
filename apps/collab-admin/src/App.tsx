@@ -207,21 +207,22 @@ export default function App() {
 
   if (!session) {
     // 未登录：按 landingView 在首页 / 登录页 / 下载页 / 更新日志页之间切换（各自独立全屏页，AJAX 无刷新）。
-    if (landingView === 'login') {
-      return <LoginPage initialEmail={setupEmail} onAuthed={setSession} onBack={() => setLandingView('home')} />;
-    }
-    if (landingView === 'download') {
-      return <DownloadPage onBack={() => setLandingView('home')} />;
-    }
-    if (landingView === 'changelog') {
-      return <ChangelogPage onBack={() => setLandingView('home')} />;
-    }
+    // PageTransition 提供淡入淡出 + 轻微位移的切页动画。
     return (
-      <Landing
-        onLogin={() => setLandingView('login')}
-        onNavigateDownload={() => setLandingView('download')}
-        onNavigateChangelog={() => setLandingView('changelog')}
-      />
+      <PageTransition viewKey={landingView}>
+        {landingView === 'login' && (
+          <LoginPage initialEmail={setupEmail} onAuthed={setSession} onBack={() => setLandingView('home')} />
+        )}
+        {landingView === 'download' && <DownloadPage onBack={() => setLandingView('home')} />}
+        {landingView === 'changelog' && <ChangelogPage onBack={() => setLandingView('home')} />}
+        {landingView === 'home' && (
+          <Landing
+            onLogin={() => setLandingView('login')}
+            onNavigateDownload={() => setLandingView('download')}
+            onNavigateChangelog={() => setLandingView('changelog')}
+          />
+        )}
+      </PageTransition>
     );
   }
 

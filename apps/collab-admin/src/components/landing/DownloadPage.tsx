@@ -91,11 +91,11 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
         </header>
 
         {/* 内容 */}
-        <div className="lf-changelog-wrap">
-          <div className="lf-changelog-inner">
+        <div className="lf-download-wrap">
+          <div className="lf-download-inner">
             <div>
               <span className="lf-section-label">download</span>
-              <h1 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight">获取 LingFang</h1>
+              <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">下载 LingFang 客户端</h1>
               <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
                 最新稳定版的各平台安装包。点击对应平台下载，客户端会自动检查后续更新。
               </p>
