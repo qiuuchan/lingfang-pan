@@ -85,3 +85,27 @@ export async function streamChat({ messages, tier = 'fast', signal, onDelta }: S
   }
   return full;
 }
+
+/**
+ * 非流式聊天（一次性返回完整回复）。用于上下文压缩摘要等不需要流式的场景。
+ * 鉴权同 streamChat（JWT）。
+ */
+export async function chatComplete(messages: ChatMessage[], tier: 'fast' | 'premium' = 'fast', signal?: AbortSignal): Promise<string> {
+  const base = apiBase();
+  if (!base) throw new Error('未配置平台地址');
+  const token = getAuthToken();
+  if (!token) throw new Error('请先登录');
+  const res = await fetch(`${base}/api/relay/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Client': 'desktop', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ model: tier, messages, stream: false, temperature: 0.2 }),
+    signal,
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const err = await res.json(); detail = err.message || err.code || detail; } catch { /* 忽略 */ }
+    throw new Error(detail);
+  }
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  return data.choices?.[0]?.message?.content ?? '';
+}
