@@ -42,9 +42,6 @@ export function MembersTab() {
     if (ok) await reload();
   }
 
-  // 按角色 id 建立名称查找，用于下拉默认值映射（member 当前可能只有 role 枚举无 teamRoleId）
-  const roleById = new Map(roles.roles.map((r) => [r.id, r]));
-
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -67,21 +64,20 @@ export function MembersTab() {
           </TableHeader>
           <TableBody>
             {members.members.map((m) => {
-              const currentRole = roleById.size > 0
-                ? roles.roles.find((r) => r.name === (m.role === 'TEAM_ADMIN' ? '系统团队管理员' : '系统成员'))
-                : undefined;
+              // RBAC：当前角色直接取后端关联 Role 的 name（含自定义角色）；
+              // 分配下拉 value 用 teamRoleId（roleId），不再用 name 字符串反查。
               return (
                 <TableRow key={m.userId}>
                   <TableCell className="font-medium">{m.user.displayName}</TableCell>
                   <TableCell className="text-muted-foreground">{m.user.email}</TableCell>
                   <TableCell>
                     <Badge variant={m.role === 'TEAM_ADMIN' ? 'default' : 'secondary'}>
-                      {m.role === 'TEAM_ADMIN' ? '团队管理员' : '成员'}
+                      {m.roleName ?? (m.role === 'TEAM_ADMIN' ? '团队管理员' : '成员')}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <Select
-                      value={currentRole?.id}
+                      value={m.teamRoleId ?? undefined}
                       onValueChange={(roleId) => { if (roleId) assignRole(m, roleId); }}
                     >
                       <SelectTrigger className="w-40"><SelectValue placeholder="选择角色" /></SelectTrigger>
