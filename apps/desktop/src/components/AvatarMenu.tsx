@@ -125,12 +125,13 @@ export function AvatarMenu({
       {/* 遮罩：挡住下层交互（点外关闭已由 mousedown effect 处理，遮罩兜底防穿透）。 */}
       <div className="fixed inset-0 z-40" />
 
-      {/* 菜单：从左下角账户按钮上方弹出。left 随折叠态切换贴紧侧栏轨道。 */}
+      {/* 菜单：从左下角账户按钮上方弹出。left 贴近侧栏左内容边（侧栏 p-2 内边距 ≈ 8px），
+          折叠/展开均锚定账户头像左缘，菜单向右展开覆盖侧栏底 + 主区底。 */}
       <div
         ref={menuRef}
         className={cn(
           'fixed bottom-14 z-50 w-72 overflow-hidden rounded-xl border bg-card shadow-2xl',
-          collapsed ? 'left-14' : 'left-16',
+          collapsed ? 'left-3' : 'left-2',
         )}
         role="menu"
         aria-orientation="vertical"
