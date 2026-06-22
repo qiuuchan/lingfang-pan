@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api, type ApiError } from '@/lib/api';
+import { filterByCategory, type CategoryKey } from '@/lib/marketplace-categories';
 import type { MarketPlugin } from './MarketplacePluginsSection';
 
 const PAGE_SIZE = 6;
@@ -8,12 +9,21 @@ const PAGE_SIZE = 6;
 export function useMarketplaceCatalog(active: boolean) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('installs');
+  // Task 1：市场分类（客户端自动分类过滤，'all' = 不过滤）。
+  const [category, setCategory] = useState<CategoryKey | 'all'>('all');
   const [plugins, setPlugins] = useState<MarketPlugin[] | null>(null);
   const [detail, setDetail] = useState<MarketPlugin | null>(null);
   const [page, setPage] = useState(1);
-  const total = plugins?.length ?? 0;
+
+  // 服务端按 q+sort 拉全量，客户端再按分类过滤（q 已由服务端搜索过滤，此处仅按 category，避免双重过滤误删）。
+  const filtered = useMemo(
+    () => (plugins ? filterByCategory(plugins, category, '') : null),
+    [plugins, category],
+  );
+  const total = filtered?.length ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const pageItems = (plugins ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const safePage = Math.min(page, totalPages);
+  const pageItems = (filtered ?? []).slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const search = useCallback(async () => {
     await searchMarketplace({ q, setPage, setPlugins, sort });
@@ -23,10 +33,12 @@ export function useMarketplaceCatalog(active: boolean) {
     await openMarketplaceDetail(id, setDetail);
   }, []);
 
+  // 首次激活拉取全量（category/q 为初始值）。
   useEffect(() => {
     if (active && plugins === null) void search();
   }, [active, plugins, search]);
 
+  // 分类/搜索变化后页码越界收敛。
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [totalPages, page]);
@@ -34,18 +46,21 @@ export function useMarketplaceCatalog(active: boolean) {
   return {
     detail,
     openDetail,
-    page,
+    page: safePage,
+    setPage,
     pageItems,
-    plugins,
+    plugins: filtered,
     q,
     search,
     setDetail,
-    setPage,
     setQ,
     setSort,
     sort,
     total,
     totalPages,
+    // Task 1 分类。
+    category,
+    setCategory,
   };
 }
 
