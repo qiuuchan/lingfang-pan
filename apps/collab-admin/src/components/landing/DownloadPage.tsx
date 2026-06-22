@@ -84,9 +84,9 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
               className="lf-mono inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-bold"
               style={{ borderColor: 'var(--lf-accent)', color: 'var(--lf-accent)' }}
             >
-              L
+              灵
             </span>
-            <span className="text-sm font-semibold tracking-tight">LingFang</span>
+            <span className="lf-display text-sm font-semibold tracking-tight">LingFang</span>
           </div>
         </header>
 
