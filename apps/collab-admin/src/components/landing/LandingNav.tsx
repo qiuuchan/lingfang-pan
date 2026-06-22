@@ -2,7 +2,7 @@
 // 「下载」「更新日志」「管理员入口」均触发自 App.tsx 的状态机切换。
 
 import type { ReactNode } from 'react';
-import { Sun, Moon, Monitor } from 'lucide-react';
+import { Sun, Moon, Monitor, ShieldCheck } from 'lucide-react';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 
 interface NavProps {
@@ -78,8 +78,13 @@ export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }:
           >
             {THEME_ICONS[mode]}
           </button>
-          <button onClick={onLogin} className="lf-btn-primary text-sm">
-            管理员入口
+          <button
+            onClick={onLogin}
+            className="lf-icon-btn"
+            aria-label="管理员入口"
+            title="管理员入口"
+          >
+            <ShieldCheck size={18} />
           </button>
         </div>
       </nav>
