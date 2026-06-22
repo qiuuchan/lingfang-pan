@@ -48,6 +48,8 @@ export interface LocalPluginStatus {
   description: string;
   // 插件版本（manifest.version，缺失为 '0.0.0'）。
   version: string;
+  // 插件图标（manifest.icon，缺失为 undefined；PluginIcon 回退默认 🧩）。
+  icon?: string;
   // 运行进程信息（仅 status==='running' 时有意义；其余为 null）。
   pid: number | null;
   // 启动时间 ISO 字符串（仅 running/stopped 态有值）。

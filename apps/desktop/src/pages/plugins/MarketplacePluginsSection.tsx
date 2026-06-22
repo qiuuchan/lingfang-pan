@@ -18,6 +18,7 @@ import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
 import { CATEGORY_TABS, categorizePlugin, categoryLabel } from '@/lib/marketplace-categories';
 import { useMarketplaceDetail } from './use-marketplace-detail';
 import { useMarketplaceCatalog } from './use-marketplace-catalog';
+import { PluginIcon } from '@/components/plugins/author-actions';
 
 const PAGE_SIZE = 6;
 
@@ -26,6 +27,7 @@ export interface MarketPlugin {
   name: string;
   description?: string;
   version?: string;
+  icon?: string;
   avg_score?: number;
   rating_count?: number;
   install_count?: number;
@@ -116,6 +118,7 @@ function MarketplaceRow({ plugin, onOpen }: { plugin: MarketPlugin; onOpen: () =
   const catLabel = categoryLabel(categorizePlugin(plugin));
   return (
     <Button variant="ghost" className="flex h-auto w-full items-center justify-between gap-4 rounded-none px-4 py-3.5 text-left" onClick={onOpen}>
+      <PluginIcon icon={plugin.icon} className="size-10 shrink-0 rounded-lg object-cover" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{plugin.name}</span>
