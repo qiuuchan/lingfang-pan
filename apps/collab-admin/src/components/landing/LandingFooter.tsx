@@ -1,5 +1,5 @@
-// 落地页页脚：纸稿主题下的极简页脚。
-// 无 GitHub / 外部仓库链接；文档等未提供入口以禁用占位展示。
+// 落地页页脚：商业产品官网的极简页脚。
+// 已移除开源相关字样（MIT License / 技术栈声明）与架构说明。
 
 import { useEffect, useState } from 'react';
 import { getLatestRelease } from '@/lib/releases';
@@ -94,7 +94,7 @@ export function LandingFooter({
               <span className="lf-display font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>LingFang</span>
             </div>
             <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--lf-fg-muted)' }}>
-              用自然语言生成插件。可自托管，契约先行。
+              用自然语言生成插件，让每个人的业务经验都能变成可复用的数字能力。
             </p>
             {version && (
               <div className="mt-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
@@ -120,6 +120,7 @@ export function LandingFooter({
             title="产品"
             items={[
               { kind: 'anchor', label: '功能', href: '#lf-features' },
+              { kind: 'anchor', label: '工作流', href: '#lf-workflow' },
               { kind: 'button', label: '下载', onClick: onNavigateDownload },
               { kind: 'button', label: '更新日志', onClick: onNavigateChangelog },
             ]}
@@ -137,9 +138,9 @@ export function LandingFooter({
           <FooterCol
             title="关于"
             items={[
-              { kind: 'disabled', label: '技术栈' },
-              { kind: 'disabled', label: 'License' },
-              { kind: 'disabled', label: '联系维护者' },
+              { kind: 'disabled', label: '公司介绍' },
+              { kind: 'disabled', label: '联系我们' },
+              { kind: 'disabled', label: '隐私政策' },
             ]}
           />
         </div>
@@ -148,11 +149,11 @@ export function LandingFooter({
           className="mt-10 flex flex-col items-start justify-between gap-3 border-t pt-6 sm:flex-row sm:items-center"
           style={{ borderColor: 'var(--lf-border)' }}
         >
-          <p className="lf-mono text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
-            // 用 Tauri · NestJS · React · Prisma 构建
+          <p className="text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
+            LingFang 是面向企业团队的 AI 插件平台。
           </p>
           <p className="lf-mono text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
-            © {year} LingFang. MIT License.
+            © {year} LingFang. All rights reserved.
           </p>
         </div>
       </div>

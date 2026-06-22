@@ -66,7 +66,7 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
           <div className="lf-changelog-inner">
             <div>
               <span className="lf-section-label">changelog</span>
-              <h1 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight">更新日志</h1>
+              <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">更新日志</h1>
               <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
                 每一次发布都记录在案。点击展开查看版本的完整变更说明。
               </p>
@@ -102,11 +102,11 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
                 </div>
               ) : releases.length === 0 ? (
                 <div className="lf-card p-8 text-center">
-                  <div className="lf-mono text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
-                    // 暂无更新日志
-                  </div>
+                  <p className="text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+                    暂无更新日志
+                  </p>
                   <p className="mt-2 text-sm" style={{ color: 'var(--lf-fg-subtle)' }}>
-                    管理端配置 Gitee 更新日志源后，此处自动展示版本时间线。
+                    配置更新日志源后，此处自动展示版本时间线。
                   </p>
                 </div>
               ) : (
@@ -171,9 +171,9 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
                             {hasNotes ? (
                               <div className="space-y-1.5">{renderMarkdown(release.notes)}</div>
                             ) : (
-                              <div className="lf-mono text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
-                                // 本版本无更新说明
-                              </div>
+                              <p className="text-sm" style={{ color: 'var(--lf-fg-subtle)' }}>
+                                本版本无更新说明
+                              </p>
                             )}
                           </div>
                         )}

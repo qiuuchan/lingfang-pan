@@ -1,7 +1,9 @@
-// 落地页顶部导航：纸稿主题下的极简顶栏。
-// 「下载」「更新日志」触发自 App.tsx 的状态机切换；「功能」锚点到首页区块。
+// 落地页顶部导航：产品官网顶栏，含主题切换（浅色/深色/跟随系统）。
+// 「下载」「更新日志」「管理员入口」均触发自 App.tsx 的状态机切换。
 
 import type { ReactNode } from 'react';
+import { Sun, Moon, Monitor } from 'lucide-react';
+import { useTheme, type ThemeMode } from '@/lib/theme';
 
 interface NavProps {
   onLogin: () => void;
@@ -15,16 +17,28 @@ const NAV = (onNavigateDownload: () => void, onNavigateChangelog: () => void) =>
   { label: '更新日志', href: undefined, onClick: onNavigateChangelog },
 ];
 
+const THEME_CYCLE: ThemeMode[] = ['light', 'dark', 'system'];
+const THEME_ICONS: Record<ThemeMode, ReactNode> = {
+  light: <Sun size={18} />,
+  dark: <Moon size={18} />,
+  system: <Monitor size={18} />,
+};
+const THEME_LABELS: Record<ThemeMode, string> = {
+  light: '浅色',
+  dark: '深色',
+  system: '跟随系统',
+};
+
 export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }: NavProps) {
+  const { mode, setTheme } = useTheme();
+
+  function cycleTheme() {
+    const nextIndex = (THEME_CYCLE.indexOf(mode) + 1) % THEME_CYCLE.length;
+    setTheme(THEME_CYCLE[nextIndex]);
+  }
+
   return (
-    <header
-      className="fixed top-0 inset-x-0 z-50 border-b"
-      style={{
-        backgroundColor: 'rgba(244, 243, 240, 0.78)',
-        borderBottomColor: 'var(--lf-border)',
-        backdropFilter: 'blur(14px)',
-      }}
-    >
+    <header className="lf-nav">
       <nav className="mx-auto max-w-6xl px-6 h-16 flex items-center justify-between">
         <a href="#lf-top" className="flex items-center gap-2.5 group">
           <LandingLogo size={32} />
@@ -55,9 +69,19 @@ export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }:
           )}
         </div>
 
-        <button onClick={onLogin} className="lf-btn-primary text-sm">
-          登录管理端
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={cycleTheme}
+            className="lf-icon-btn"
+            aria-label={`当前主题：${THEME_LABELS[mode]}，点击切换`}
+            title={`当前主题：${THEME_LABELS[mode]}`}
+          >
+            {THEME_ICONS[mode]}
+          </button>
+          <button onClick={onLogin} className="lf-btn-primary text-sm">
+            管理员入口
+          </button>
+        </div>
       </nav>
     </header>
   );

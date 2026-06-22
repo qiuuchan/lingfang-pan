@@ -1,4 +1,4 @@
-/* 落地页作用域样式：纸稿/朱砂印主题。
+/* 落地页作用域样式：纸稿/朱砂印主题，支持浅色与深色模式。
  *
  * 设计方向：把「用自然语言生成插件」的过程比喻成一份被盖上朱砂印的文稿——
  * 既有手工作坊的温度，也有工程契约的精确。背景用暖灰纸色，强调色用朱砂红
@@ -10,23 +10,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 .landing-scope {
-  /* 纸稿层级 */
+  /* === 浅色纸稿 === */
   --lf-bg: #F4F3F0;
   --lf-bg-elevated: #FFFFFF;
   --lf-bg-card: #FAFAF8;
   --lf-bg-hover: #F0EFEC;
-  /* 墨色 */
   --lf-fg: #111111;
   --lf-fg-muted: #6B6A65;
   --lf-fg-subtle: #9C9B95;
-  /* 边框：淡墨色 */
   --lf-border: rgba(17, 17, 17, 0.08);
   --lf-border-bright: rgba(17, 17, 17, 0.14);
-  /* 朱砂印：发布/审核/CTA */
   --lf-accent: #C73E1D;
   --lf-accent-hover: #A83215;
   --lf-accent-glow: rgba(199, 62, 29, 0.14);
-  /* 辅助 */
   --lf-ink: #111111;
   --lf-success: #2D6A4F;
   --lf-cyan: #3A6EA5;
@@ -42,6 +38,23 @@
   font-family: var(--lf-font-sans);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+/* === 深色模式：浓墨纸 === */
+.dark .landing-scope {
+  --lf-bg: #0F0F0F;
+  --lf-bg-elevated: #171717;
+  --lf-bg-card: #141414;
+  --lf-bg-hover: #1E1E1E;
+  --lf-fg: #F4F3F0;
+  --lf-fg-muted: #9C9B95;
+  --lf-fg-subtle: #6B6A65;
+  --lf-border: rgba(244, 243, 240, 0.10);
+  --lf-border-bright: rgba(244, 243, 240, 0.16);
+  --lf-accent: #D44A2A;
+  --lf-accent-hover: #E05C3C;
+  --lf-accent-glow: rgba(212, 74, 42, 0.22);
+  --lf-ink: #F4F3F0;
 }
 
 .landing-scope * {
@@ -66,6 +79,11 @@
   -webkit-mask-image: radial-gradient(ellipse 100% 60% at 50% 0%, black 25%, transparent 80%);
   mask-image: radial-gradient(ellipse 100% 60% at 50% 0%, black 25%, transparent 80%);
 }
+.dark .landing-scope .lf-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(244, 243, 240, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(244, 243, 240, 0.05) 1px, transparent 1px);
+}
 
 /* 顶部暖色径向光晕 */
 .lf-glow {
@@ -78,6 +96,9 @@
   background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(199, 62, 29, 0.08) 0%, transparent 60%);
   animation: lf-breathe 8s ease-in-out infinite;
 }
+.dark .landing-scope .lf-glow {
+  background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(212, 74, 42, 0.12) 0%, transparent 55%);
+}
 
 /* 纸张噪点纹理 */
 .lf-noise::before {
@@ -89,6 +110,10 @@
   opacity: 0.028;
   mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+}
+.dark .landing-scope.lf-noise::before {
+  opacity: 0.04;
+  mix-blend-mode: overlay;
 }
 
 .lf-content {
@@ -126,6 +151,9 @@
 .lf-card:hover {
   border-color: var(--lf-border-bright);
   box-shadow: 0 4px 24px rgba(17, 17, 17, 0.04);
+}
+.dark .landing-scope .lf-card:hover {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }
 
 /* 主按钮：朱砂印实心 */
@@ -195,6 +223,26 @@
   color: var(--lf-fg);
 }
 
+/* 图标按钮 */
+.lf-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--lf-border-bright);
+  background-color: transparent;
+  color: var(--lf-fg-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.lf-icon-btn:hover {
+  border-color: var(--lf-fg-muted);
+  background-color: var(--lf-bg-hover);
+  color: var(--lf-fg);
+}
+
 /* 区块标签：小写 mono + 前缀点 */
 .lf-section-label {
   display: inline-flex;
@@ -257,7 +305,7 @@
   animation: lf-fade-in 0.5s ease both;
 }
 
-/* 滚动条（纸稿浅色风格） */
+/* 滚动条 */
 .landing-scope ::-webkit-scrollbar { width: 10px; height: 10px; }
 .landing-scope ::-webkit-scrollbar-track { background: var(--lf-bg); }
 .landing-scope ::-webkit-scrollbar-thumb {
@@ -277,7 +325,7 @@
   }
 }
 
-/* === 独立全屏页（登录 / 更新日志）共用顶栏 === */
+/* === 独立全屏页（登录 / 更新日志 / 下载）共用顶栏 === */
 .lf-page-topbar {
   position: sticky;
   top: 0;
@@ -290,6 +338,23 @@
   border-bottom: 1px solid var(--lf-border);
   background-color: rgba(244, 243, 240, 0.82);
   backdrop-filter: blur(12px);
+}
+.dark .landing-scope .lf-page-topbar {
+  background-color: rgba(15, 15, 15, 0.82);
+}
+
+/* 落地页固定顶栏 */
+.lf-nav {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--lf-border);
+  background-color: rgba(244, 243, 240, 0.78);
+  backdrop-filter: blur(14px);
+}
+.dark .landing-scope .lf-nav {
+  background-color: rgba(15, 15, 15, 0.82);
 }
 
 .lf-back-btn {
@@ -326,44 +391,34 @@
   padding: 2rem;
   box-shadow: 0 24px 60px -20px rgba(17, 17, 17, 0.1);
 }
+.dark .landing-scope .lf-login-card {
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+}
 
-/* 独立更新日志页 */
-.lf-changelog-wrap {
+/* 独立下载/更新日志页 */
+.lf-changelog-wrap,
+.lf-download-wrap {
   min-height: calc(100vh - 4rem);
   padding: 3rem 1.5rem 5rem;
 }
-.lf-changelog-inner {
+.lf-changelog-inner,
+.lf-download-inner {
   max-width: 48rem;
   margin-inline: auto;
 }
 
-/* === topology 流动光点（保留兼容，LandingTopology 新版若不用可安全废弃） === */
-@keyframes lf-flow {
-  from { offset-distance: 0%; opacity: 0; }
-  10%  { opacity: 1; }
-  90%  { opacity: 1; }
-  to   { offset-distance: 100%; opacity: 0; }
+/* === 产品流程区（LandingWorkflow） === */
+.lf-workflow-line {
+  position: absolute;
+  top: 2rem;
+  left: 1.75rem;
+  width: 2px;
+  height: calc(100% - 4rem);
+  background: linear-gradient(to bottom, var(--lf-accent), transparent);
+  opacity: 0.35;
 }
-
-.lf-flow-a {
-  offset-path: path('M220,120 C 220,140 450,140 450,160');
-  animation: lf-flow 3s linear infinite;
-}
-.lf-flow-b {
-  offset-path: path('M680,120 C 680,140 450,140 450,160');
-  animation: lf-flow 3s linear 1.5s infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .landing-scope .lf-flow-a,
-  .landing-scope .lf-flow-b {
-    animation: none !important;
-    offset-distance: 50% !important;
-  }
-  .landing-scope .lf-flow-dot {
-    opacity: 0.9 !important;
-  }
-  .landing-scope .lf-flow-glow {
-    opacity: 0.5 !important;
+@media (min-width: 768px) {
+  .lf-workflow-line {
+    display: none;
   }
 }

@@ -1,7 +1,7 @@
-// 落地页功能区：三大核心能力卡片。
-// 用朱砂印风格的图标边框和清晰的结构，把生成、市场、协作串成一条插件生命周期。
+// 落地页功能区：四大核心能力卡片。
+// 从生成、市场、协作到治理，覆盖企业引入 AI 插件的完整链路。
 
-import { Sparkles, Store, Users } from 'lucide-react';
+import { Sparkles, Store, Users, ShieldCheck } from 'lucide-react';
 
 const FEATURES = [
   {
@@ -9,27 +9,36 @@ const FEATURES = [
     title: 'AI 插件生成',
     tag: 'generate',
     description:
-      '自然语言描述需求，AI 流式生成可运行插件。对话式迭代修改，独立环境即时预览，一键发布到市场。',
-    points: ['流式生成，实时展示生成过程', '对话式迭代已生成的插件', '独立环境即时预览，所见即所得'],
+      '业务人员用自然语言描述需求，AI 自动生成功能完整的可运行插件。流式输出、对话式迭代、即时预览，让创意快速落地。',
+    points: ['自然语言驱动，零代码门槛', '多轮对话迭代已生成插件', '内置沙箱即时预览运行效果'],
     Icon: Sparkles,
   },
   {
     id: 'market',
-    title: '市场与经济',
+    title: '插件市场',
     tag: 'marketplace',
     description:
-      '搜索 / 评分 / 安装插件，钱包余额体系，付费插件购买结算。内置文件管理器、系统信息、待办事项三个插件。',
-    points: ['钱包余额与一键结算', '评分与安装统计', '付费插件购买流程'],
+      '团队沉淀的插件可上架内部市场，按使用场景检索、评分与复用。支持付费结算与余额管理，让优质能力流动起来。',
+    points: ['内部市场搜索、评分、安装', '钱包余额与付费插件结算', '内置实用插件开箱即用'],
     Icon: Store,
   },
   {
     id: 'collab',
     title: '团队协作',
-    tag: 'collab',
+    tag: 'teams',
     description:
-      '团队管理（管理员 / 成员角色），团队管理员申请审批流程，团队共享余额及明细记录。',
-    points: ['精细的角色权限', '团队管理员审批', '共享余额与明细记录'],
+      '按团队组织成员与插件权限，支持团队管理员审批、共享余额与明细记录。让插件从个人工具升级为组织能力。',
+    points: ['多团队隔离与成员管理', '团队管理员申请与审批', '共享余额与流水明细'],
     Icon: Users,
+  },
+  {
+    id: 'governance',
+    title: '安全与治理',
+    tag: 'governance',
+    description:
+      '平台级角色权限、插件审核流程与操作审计，确保 AI 生成的能力在企业内部安全可控地发布与使用。',
+    points: ['RBAC 角色权限控制', '插件提交与平台审核', '全量操作审计日志'],
+    Icon: ShieldCheck,
   },
 ] as const;
 
@@ -40,14 +49,14 @@ export function LandingFeatures() {
         <div className="max-w-2xl">
           <span className="lf-section-label">capabilities</span>
           <h2 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
-            一套平台，三重能力
+            从想法到能力，只需一套平台
           </h2>
           <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
-            从一句话需求到上线市场，再到团队协作分发 —— LingFang 把插件生命周期的每一环都串了起来。
+            LingFang 把插件的生成、分发、协作与治理串成完整闭环，让团队里的每个人都能参与构建企业专属 AI 能力。
           </p>
         </div>
 
-        <div className="mt-14 grid gap-5 md:grid-cols-3">
+        <div className="mt-14 grid gap-5 md:grid-cols-2">
           {FEATURES.map((feature) => (
             <article key={feature.id} className="lf-card p-6 flex flex-col group">
               <div className="flex items-center justify-between">

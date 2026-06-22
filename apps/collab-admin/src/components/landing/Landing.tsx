@@ -5,7 +5,8 @@ import './landing.css';
 import { LandingNav } from './LandingNav';
 import { LandingHero } from './LandingHero';
 import { LandingFeatures } from './LandingFeatures';
-import { LandingTopology } from './LandingTopology';
+import { LandingWorkflow } from './LandingWorkflow';
+import { LandingCTA } from './LandingCTA';
 import { LandingFooter } from './LandingFooter';
 
 interface LandingProps {
@@ -32,7 +33,11 @@ export function Landing({ onLogin, onNavigateDownload, onNavigateChangelog }: La
             onNavigateChangelog={onNavigateChangelog}
           />
           <LandingFeatures />
-          <LandingTopology />
+          <LandingWorkflow />
+          <LandingCTA
+            onLogin={onLogin}
+            onNavigateDownload={onNavigateDownload}
+          />
           <LandingFooter
             onNavigateDownload={onNavigateDownload}
             onNavigateChangelog={onNavigateChangelog}

@@ -1,4 +1,5 @@
-// 落地页 Hero：左侧文案论点，右侧签名组件 PluginManuscript。
+// 落地页 Hero：产品官网主视觉。
+// 左侧为商业定位文案 + 双 CTA，右侧为 PluginManuscript 签名演示。
 // 版本徽标从 /api/releases/latest 取，无版本时隐藏；点击跳转更新日志页。
 
 import { useEffect, useState } from 'react';
@@ -74,27 +75,34 @@ export function LandingHero({ onLogin, onNavigateDownload, onNavigateChangelog }
               className="lf-animate-rise mt-6 text-lg sm:text-xl leading-relaxed"
               style={{ animationDelay: '160ms', color: 'var(--lf-fg-muted)' }}
             >
-              LingFang 让团队用自然语言描述需求，AI 自动生成可运行的插件。
-              生成、预览、发布、上市，全流程在一处完成。
+              LingFang 让企业团队用自然语言描述需求，AI 自动生成可运行的插件。
+              无需专业开发背景，把每个人的业务经验变成可复用的数字能力。
             </p>
 
             <div
               className="lf-animate-rise mt-9 flex flex-wrap items-center gap-3"
               style={{ animationDelay: '240ms' }}
             >
-              <button onClick={onLogin} className="lf-btn-primary text-base">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                登录管理端
-              </button>
-              <button onClick={onNavigateDownload} className="lf-btn-secondary text-base">
+              <button onClick={onNavigateDownload} className="lf-btn-primary text-base">
                 下载客户端
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
+              <button onClick={onLogin} className="lf-btn-secondary text-base">
+                管理员入口
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
             </div>
+
+            <p
+              className="lf-animate-rise mt-5 text-sm"
+              style={{ animationDelay: '300ms', color: 'var(--lf-fg-subtle)' }}
+            >
+              支持 Windows、macOS 与 Linux，开箱即用。
+            </p>
           </div>
 
           {/* 右侧签名组件 */}
