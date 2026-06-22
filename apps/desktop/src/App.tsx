@@ -5,7 +5,6 @@ import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setA
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
-import { Footer } from '@/components/Footer';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
 import { CommandPalette } from '@/components/CommandPalette';
@@ -189,7 +188,10 @@ export default function App() {
   // 后续请求成功或 testBackendUrl 探测通过时派发 reachable → false，恢复正常业务页。
   const [backendUnreachable, setBackendUnreachable] = useState(false);
   const [view, setViewState] = useState<View>('home');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    // 默认折叠：首次无 key → getItem 返回 null → !== '1' → false。
+    try { return localStorage.getItem('lf:sidebar-open') === '1'; } catch { return false; }
+  });
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
   // Task 9 创建器悬浮窗：FAB / setView('creator') 唤起，覆盖主体区为浮动窗口。
@@ -397,6 +399,11 @@ export default function App() {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
 
+  // 侧栏开合持久化：用户切换后写盘，跨重启保留（首次无 key 默认折叠，见上 useState 初值）。
+  useEffect(() => {
+    try { localStorage.setItem('lf:sidebar-open', sidebarOpen ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
+  }, [sidebarOpen]);
+
   // Task 15 多窗口：standalone 插件窗口（?standalone=1&plugin=<id>）启动时自动加载目标插件并设为 runningPlugin，
   // 让该窗口打开即运行指定插件，主窗口与各插件窗口互不干扰（不同插件各自独立窗口运行）。
   useEffect(() => {
@@ -553,7 +560,6 @@ export default function App() {
                         </Suspense>
                       </div>
                     </div>
-                    <Footer />
                   </>
                 )}
 
