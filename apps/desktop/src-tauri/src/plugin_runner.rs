@@ -933,13 +933,13 @@ fn libc_setsid() {
     }
 }
 
-/// ISO 时间戳（与 code_assistant::store::now_string 同格式：epoch 秒.毫秒Z）。
+/// ISO 时间戳（复用 code_assistant::store::now_string 的 RFC 3339 格式）。
 /// 供进程表 started_at 记录 + 前端展示，scan_plugin_status 合并 running 态时透传。
+///
+/// 历史 bug（Task 4a「Invalid Date」）：旧实现产出 `epoch.毫秒Z`，浏览器 new Date 无法
+/// 解析。统一走 epoch_to_iso8601，保证前端 new Date(started_at) 可解析。
 fn now_iso() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}.{:03}Z", now.as_secs(), now.subsec_millis())
+    crate::code_assistant::store::now_string()
 }
 
 // === 单元测试 ===

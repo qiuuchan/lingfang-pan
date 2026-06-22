@@ -34,10 +34,12 @@ import {
   scanPluginStatus,
   startPlugin,
   stopPlugin,
+  getPluginStatus,
   type PluginStartProgress,
   type PluginStartStage,
 } from '@/lib/plugin-status';
 import { parseManifest } from '@/lib/plugin-draft';
+import { formatTimestamp } from '@/lib/time';
 import { errorMessage } from '@/pages/plugins-runtime';
 import type { DraftFile } from '@/lib/types';
 
@@ -150,6 +152,33 @@ export function ScriptPreviewPanel({
     void syncRunState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtime, previewKey, pluginId]);
+
+  // Task 4b 修复：插件进程自行退出（脚本跑完 / 用户关掉插件窗口 / 外部 kill）时，
+  // Rust 进程表 try_wait 会清表，但前端不轮询就不知道，「强制关闭」按钮常驻、状态卡 running。
+  // 此处仅在「前端认为 running」时每 2.5s 轮询 get_plugin_status，running=false 即回退 idle，
+  // 按钮恢复「运行」。停止/启动态不轮询（避免与 handleStart/handleStop 状态机打架）。
+  useEffect(() => {
+    if (!usePersistent || persistentRun.status !== 'running') return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const status = await getPluginStatus(pluginId!);
+        if (cancelled) return;
+        if (!status.running) {
+          // 进程已退出：回退 idle（保留一次 toast 提示，避免用户困惑按钮为何自己变回「运行」）。
+          setPersistentRun({ status: 'idle' });
+          toast.info('插件进程已结束');
+        }
+      } catch {
+        // 轮询失败（极端：Tauri 通道错误）静默，下次轮询再试，不打断 UI。
+      }
+    };
+    const timer = window.setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [usePersistent, pluginId, persistentRun.status]);
 
   // === 组C 持久化运行：启动/停止独立进程 ===
   const handleStart = useCallback(async () => {
@@ -320,7 +349,7 @@ export function ScriptPreviewPanel({
               </div>
               {persistentRun.startedAt && (
                 <div className="text-xs text-muted-foreground">
-                  启动时间：<span className="font-mono text-foreground">{new Date(persistentRun.startedAt).toLocaleString()}</span>
+                  启动时间：<span className="font-mono text-foreground">{formatTimestamp(persistentRun.startedAt)}</span>
                 </div>
               )}
               <p className="text-xs text-muted-foreground">

@@ -1,3 +1,5 @@
+import { formatTimestamp } from './time';
+
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamRole = string;
 export type OnboardingState = 'NEEDS_INVITATION' | 'PENDING_APPROVAL' | 'APPLICATION_REJECTED' | 'TEAM_SPACE' | 'TEAM_ADMIN_SPACE' | 'PLATFORM_ADMIN_WEB_ONLY';
@@ -221,8 +223,8 @@ export interface PluginGrantRow {
   createdAt: string;
 }
 
-/** 通用时间格式化：ISO 字符串 → zh-CN 本地时间（24h），解析失败原样返回。供团队管理列表展示复用。 */
+/** 通用时间格式化：ISO 字符串 → zh-CN 本地时间（24h），解析失败返回 '—'。
+ *  委托给 lib/time 的 formatTimestamp，兼容旧版 epoch.毫秒Z 格式（Task 4a 修复）。 */
 export function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); } catch { return iso; }
+  return formatTimestamp(iso);
 }
