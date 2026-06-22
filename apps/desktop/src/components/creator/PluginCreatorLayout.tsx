@@ -10,6 +10,7 @@ import { Composer } from '@/components/creator/Composer';
 import { ConversationRail } from '@/components/creator/ConversationRail';
 import { DetailsPanel } from '@/components/creator/DetailsPanel';
 import { PreviewDrawer } from '@/components/creator/PreviewDrawer';
+import { SkillsSelector } from '@/components/creator/SkillsSelector';
 import type { EnvReadinessResult } from '@/lib/env-readiness';
 import { EXAMPLES, STATUS_LABEL, type AskUserQuestion, type AssistantSessionState, type ConversationMeta, type EffortLevel, type ProviderId } from '@/lib/plugin-draft';
 import type { CreatorError } from '@/lib/creator-error';
@@ -117,6 +118,8 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Button variant="ghost" size="sm" onClick={props.onNewDraft} title="开始新对话">新对话</Button>
+            {/* 项 14：Skill 选择器（拼进 systemPrompt 的能力模块）。 */}
+            <SkillsSelector />
             {/* Task 11：次要操作收为图标按钮 + tooltip，降低首屏认知负担。 */}
             <Button variant="ghost" size="icon-sm" className="text-muted-foreground" title="历史对话" onClick={() => props.onHistoryOpenChange(true)}>
               <HistoryIcon className="size-4" />
