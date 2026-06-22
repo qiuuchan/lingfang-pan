@@ -160,10 +160,23 @@ export class TeamService {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const members = await this.prisma.teamMembership.findMany({
       where: { teamId: membership.teamId, status: 'ACTIVE' },
-      include: { user: true },
+      include: { user: true, teamRole: { select: { id: true, name: true, code: true } } },
       orderBy: { joinedAt: 'asc' },
     });
-    return { members: members.map((m) => ({ teamId: m.teamId, userId: m.userId, role: m.role, joinedAt: m.joinedAt, user: publicUser(m.user) })) };
+    // RBAC：返回成员当前角色 id/name/code（经 teamRoleId 关联到 Role），供前端「当前角色」列
+    // 直接显示角色实际名字（含自定义角色）+ 分配下拉按 roleId 匹配。teamRole 为 null（teamRoleId 空）时给 null。
+    return {
+      members: members.map((m) => ({
+        teamId: m.teamId,
+        userId: m.userId,
+        role: m.role,
+        teamRoleId: m.teamRoleId,
+        roleName: m.teamRole?.name ?? null,
+        roleCode: m.teamRole?.code ?? null,
+        joinedAt: m.joinedAt,
+        user: publicUser(m.user),
+      })),
+    };
   }
 
   async removeMember(actorId: string, userId: string) {

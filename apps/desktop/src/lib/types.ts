@@ -67,6 +67,12 @@ export interface TeamProfile {
 export interface TeamMember {
   userId: string;
   role: TeamRole;
+  /** RBAC：成员当前团队角色 id（经 teamRoleId 关联到 Role）。过渡期与 role 枚举并存；旧后端可能不返回。 */
+  teamRoleId?: string | null;
+  /** 角色显示名（来自关联 Role.name，自定义角色如「开发者」也正确）。role 为 null 时为 null。 */
+  roleName?: string | null;
+  /** 角色编码（来自关联 Role.code）。role 为 null 或无 code 时为 null。 */
+  roleCode?: string | null;
   joinedAt: string;
   user: { id: string; email: string; displayName: string; status: string };
 }

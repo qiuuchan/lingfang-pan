@@ -88,6 +88,30 @@ export const Role = z.object({
 });
 export type Role = z.infer<typeof Role>;
 
+/**
+ * 团队成员（HTTP 响应，对齐 team.service.ts currentMembers 返回结构）。
+ *
+ * RBAC 扩展（向后兼容）：roleName/roleCode/teamRoleId 为 optional，
+ * 经 teamRoleId 关联到 Role 取值；旧客户端忽略这些字段仍可正常工作。
+ * role（TeamRole 枚举）保留以兼容过渡期；新展示请优先用 roleName。
+ */
+export const TeamMember = z.object({
+  teamId: z.string().min(1),
+  userId: z.string().min(1),
+  role: z.string(),
+  teamRoleId: z.string().nullable().optional(),
+  roleName: z.string().nullable().optional(),
+  roleCode: z.string().nullable().optional(),
+  joinedAt: z.string().datetime(),
+  user: z.object({
+    id: z.string().min(1),
+    email: z.string().email(),
+    displayName: z.string().min(1),
+    status: z.string(),
+  }),
+});
+export type TeamMember = z.infer<typeof TeamMember>;
+
 /** 插件授权行（HTTP 响应，对齐 Prisma PluginGrant 模型 camelCase）。 */
 export const PluginGrantRow = z.object({
   id: z.string().min(1),
