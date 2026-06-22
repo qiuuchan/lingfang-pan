@@ -36,7 +36,7 @@ export class AdminPermissionGroupsController {
 
 /**
  * 团队权限分组管理控制器（桌面端 TeamAdmin 面板使用）。
- * 挂在 /api/teams/current/permission-groups，由 PermissionGroupService 内部 ensurePermission('team.role.manage') 校验。
+ * 挂在 /api/teams/current/permission-groups，由 PermissionGroupService 内部 ensurePermission('team.role.update') 校验。
  */
 @ApiTags('PermissionGroups')
 @ApiBearerAuth()

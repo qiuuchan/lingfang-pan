@@ -43,21 +43,21 @@ export class PluginsController {
     return this.plugins.submitPluginToMarketplace(requireUser(req).id, id, body);
   }
 
-  @RequirePermission('team.plugin.edit')
+  @RequirePermission('team.plugin.edit_draft')
   @Post(':id/edit-draft')
   @ApiOperation({ summary: '编辑已上传插件草稿' })
   editDraft(@Req() req: Request, @Param('id') id: string, @Body() body: PluginPackageDto) {
     return this.plugins.editPluginDraft(requireUser(req).id, id, body);
   }
 
-  @RequirePermission('team.plugin.edit')
+  @RequirePermission('team.plugin.edit_metadata')
   @Post(':id/edit-meta')
   @ApiOperation({ summary: '编辑插件元数据（名称/描述/图标，不重置审核态、不改源码）' })
   editMeta(@Req() req: Request, @Param('id') id: string, @Body() body: EditPluginMetaDto) {
     return this.plugins.editPluginMeta(requireUser(req).id, id, body);
   }
 
-  @RequirePermission('team.plugin.edit')
+  @RequirePermission('team.plugin.edit_price')
   @Post(':id/set-price')
   @ApiOperation({ summary: '设置插件定价（不改源码、不触发审核流程）' })
   setPrice(@Req() req: Request, @Param('id') id: string, @Body() body: SetPluginPriceDto) {

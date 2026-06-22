@@ -1,11 +1,13 @@
-// RBAC seed：权限码注册表 + 内置系统角色权限填充 + 存量用户/成员角色回填。
+// RBAC seed：权限码注册表 + 内置系统角色权限填充 + 存量用户/成员角色回填 + 旧码迁移。
 //
 // 幂等设计（可重复执行）：
 //  1. 把 permission-codes.ts 全部权限码 upsert 到 PermissionEntry 表（新增/更新 label/description）。
-//  2. 为「系统平台管理员」角色填充全部 platform.* 权限。
-//  3. 为每个团队的「系统团队管理员」填充全部 team.* 权限、「系统成员」填充只读基线权限。
-//  4. 若团队级系统角色缺失（如迁移后新建团队但未触发应用层 hook），按需补建。
-//  5. 回填存量数据：platformRole=PLATFORM_ADMIN 但 platformRoleId 缺失的用户、
+//  2. seed 内置权限分组（PermissionGroup 表）。
+//  3. 为「系统平台管理员」角色填充全部 platform.* 权限。
+//  4. 为每个团队的「系统团队管理员」填充全部 team.* 权限、「系统成员」填充只读基线权限。
+//  5. 迁移旧权限码：自定义角色（seed 不动它们）若仍含已废弃旧码，按 LEGACY_PERMISSION_EXPANSION 扩张为新码集合（不丢权限）。
+//  6. 清理 PermissionEntry 表中已废弃的旧码行（seed 是 upsert 不删，改后旧码残留需显式清）。
+//  7. 回填存量数据：platformRole=PLATFORM_ADMIN 但 platformRoleId 缺失的用户、
 //     role=TEAM_ADMIN/MEMBER 但 teamRoleId 缺失的成员（兼容旧版 seed-admin/setup/admin 创建的数据）。
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
@@ -21,6 +23,8 @@ import {
   SYSTEM_TEAM_MEMBER_ROLE_CODE,
   teamAdminRoleId,
   teamMemberRoleId,
+  expandLegacyPermissions,
+  LEGACY_PERMISSION_CODES,
   type PermissionScope,
 } from './modules/permissions/permission-codes';
 
@@ -141,6 +145,82 @@ async function seedTeamSystemRoles() {
 }
 
 /**
+ * 迁移旧权限码：自定义角色（seed 不动它们）若仍含已废弃旧码，按 LEGACY_PERMISSION_EXPANSION 扩张为新码集合。
+ *
+ * 算法（幂等）：
+ *  1. 拉全部 Role（系统 + 自定义，所有 scope），只读 id/permissions。
+ *  2. 对每个角色遍历 permissions，命中旧码则展开为对应新码集合，其余权限码原样保留；去重。
+ *  3. 仅当 permissions 集合有变化才 update。
+ *
+ * 幂等保证：
+ *  - 二次运行：permissions 已无旧码 → 不命中 → 不写。
+ *  - 系统角色：seedPlatformAdminRole/seedTeamSystemRoles 在 migrate 前已用代码常量（含新码不含旧码）全量刷新 → 无旧码 → 跳过。
+ *  - 自定义角色：seed 不动 → 保留旧码 → migrate 扩张。
+ *
+ * 事务保护：全部 role.update 包在 prisma.$transaction 内，任一失败整体回滚，保持可重试。
+ */
+async function migrateLegacyPermissionCodes() {
+  const roles = await prisma.role.findMany({ select: { id: true, permissions: true } });
+
+  // 计算每个角色需要写入的权限集（只有变化的才纳入事务）
+  const updates: { id: string; permissions: string[] }[] = [];
+  for (const role of roles) {
+    const { permissions, changed } = expandLegacyPermissions(role.permissions ?? []);
+    if (changed) {
+      updates.push({ id: role.id, permissions });
+    }
+  }
+
+  if (updates.length === 0) {
+    console.log('权限码迁移：无角色含旧码，跳过（migrate 0）。');
+    return;
+  }
+
+  await prisma.$transaction(
+    updates.map((u) =>
+      prisma.role.update({ where: { id: u.id }, data: { permissions: u.permissions } }),
+    ),
+  );
+  console.log(`权限码迁移：${updates.length} 个角色的旧权限码已扩张为新码集合。`);
+}
+
+/**
+ * 清理 PermissionEntry 表中的过期码行。
+ *
+ * seedPermissionEntries 是 upsert（不删），权限码改细后旧码行残留。
+ * 用 deleteMany where code notIn ALL_PERMISSIONS 清掉旧码 + 任何历史过期码，保证表只含注册表当前码。
+ * PermissionGroup 无需清理（groupKey 没变，team.plugin/platform.user/platform.plugin 仍是合法 moduleKey）。
+ * deleteMany 本身幂等。
+ */
+async function cleanupStalePermissionEntries() {
+  const validCodes = ALL_PERMISSIONS.map((p) => p.code);
+  const result = await prisma.permissionEntry.deleteMany({
+    where: { code: { notIn: validCodes } },
+  });
+  if (result.count > 0) {
+    console.log(`权限码清理：${result.count} 条过期 PermissionEntry 行已删除。`);
+  } else {
+    console.log('权限码清理：无过期行（cleanup 0）。');
+  }
+}
+
+/**
+ * 迁移后断言：扫全部角色，检查 permissions 是否仍含任何旧码 key（正常应为 0）。
+ * 非 0 时仅 warn 列出（不阻断 seed，避免中断部署），便于运维发现并补修。
+ */
+async function assertNoLegacyPermissionCodes() {
+  const roles = await prisma.role.findMany({ select: { id: true, name: true, permissions: true } });
+  const offenders = roles
+    .filter((r) => (r.permissions ?? []).some((c) => LEGACY_PERMISSION_CODES.has(c)))
+    .map((r) => ({ id: r.id, name: r.name, legacy: (r.permissions ?? []).filter((c) => LEGACY_PERMISSION_CODES.has(c)) }));
+  if (offenders.length > 0) {
+    console.warn(`[RBAC 迁移后断言 WARN] 仍有 ${offenders.length} 个角色含旧码：`, JSON.stringify(offenders));
+  } else {
+    console.log('权限码迁移后断言：全部角色已无旧码残留（0 stale）。');
+  }
+}
+
+/**
  * 回填存量数据：兼容旧版（migration 前）通过 seed-admin/setup/admin 创建的用户/成员，
  * 他们只有 platformRole/role 枚举，缺 platformRoleId/teamRoleId，会导致新权限守卫解析不到权限。
  * 幂等：只更新 roleId 为 null 的行。
@@ -180,6 +260,11 @@ async function main() {
   await seedPermissionGroups();
   await seedPlatformAdminRole();
   await seedTeamSystemRoles();
+  // 迁移必须在系统角色刷新之后（系统角色 seed 已写新码，migrate 不会误动它们）、
+  // cleanup 之前（cleanup 删旧码行，角色权限迁移必须在删行前完成）。
+  await migrateLegacyPermissionCodes();
+  await cleanupStalePermissionEntries();
+  await assertNoLegacyPermissionCodes();
   await backfillExistingRoleRefs();
   console.log('RBAC seed 完成。');
 }

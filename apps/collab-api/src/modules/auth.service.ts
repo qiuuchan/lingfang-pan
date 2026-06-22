@@ -533,6 +533,26 @@ export class AuthService {
    */
   async ensurePermission(userId: string, ...codes: string[]) {
     if (codes.length === 0) throw forbidden('权限不足');
+    const perms = await this.resolvePermissionsForUser(userId);
+    const hit = codes.some((code) => perms.has(code));
+    if (!hit) throw forbidden('权限不足');
+    return { perms };
+  }
+
+  /**
+   * RBAC：OR 语义命令式权限校验——要求 codes 中任一命中即放行（与 ensurePermission 等价的 OR 包装，
+   * 命名更显式表达「多码任一」语义，供 listTeamRoles 这类需要放宽守卫的入口使用，例如只配了
+   * member.role.assign 的角色也必须能加载角色下拉）。codes 为空拒绝。
+   */
+  async ensureAnyPermission(userId: string, ...codes: string[]) {
+    return this.ensurePermission(userId, ...codes);
+  }
+
+  /**
+   * 解析当前用户全部权限码（平台角色 + 当前 ACTIVE 团队角色合并）。
+   * 与 PermissionsGuard.resolvePermissions 同款逻辑，供 ensurePermission/ensureAnyPermission 复用。
+   */
+  private async resolvePermissionsForUser(userId: string): Promise<Set<string>> {
     const perms = new Set<string>();
 
     // 平台角色权限
@@ -562,9 +582,7 @@ export class AuthService {
       if (role) for (const code of role.permissions) perms.add(code);
     }
 
-    const hit = codes.some((code) => perms.has(code));
-    if (!hit) throw forbidden('权限不足');
-    return { perms };
+    return perms;
   }
 
   async createTeamForApplication(applicationId: string, reviewerId: string) {

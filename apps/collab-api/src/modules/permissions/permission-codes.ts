@@ -72,7 +72,8 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
   defineModule('PLATFORM', 'platform.user', '用户管理', 20, [
     { code: 'platform.user.list', label: '查看用户', description: '查看平台用户列表与详情' },
     { code: 'platform.user.create', label: '创建用户', description: '由平台管理员创建新用户账号' },
-    { code: 'platform.user.update', label: '编辑用户', description: '编辑用户资料、重置密码' },
+    { code: 'platform.user.update_profile', label: '编辑用户资料', description: '编辑用户资料（不含密码）' },
+    { code: 'platform.user.reset_password', label: '重置用户密码', description: '管理员强制重置用户密码' },
     { code: 'platform.user.disable', label: '禁用用户', description: '禁用/删除用户账号' },
     { code: 'platform.user.role.assign', label: '分配平台角色', description: '为用户分配/撤销平台级角色' },
   ]),
@@ -84,11 +85,13 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
     { code: 'platform.team.adjust_balance', label: '调整团队余额', description: '为团队加款/扣款' },
     { code: 'platform.team.set_admin', label: '指定团队管理员', description: '为团队任命/撤销团队管理员' },
     { code: 'platform.team.member.role', label: '管理团队成员角色', description: '平台管理员调整任意团队成员角色' },
+    { code: 'platform.team.role.manage', label: '管理团队角色', description: '平台管理员管理任意团队的自定义角色与权限' },
   ]),
   defineModule('PLATFORM', 'platform.plugin', '插件市场', 40, [
     { code: 'platform.plugin.list_all', label: '查看全部插件', description: '查看平台所有插件（含各团队私有）' },
     { code: 'platform.plugin.review', label: '审核市场插件', description: '审核市场上架申请、批准/拒绝/下架' },
-    { code: 'platform.plugin.manage', label: '管理插件', description: '平台级编辑/删除任意插件' },
+    { code: 'platform.plugin.edit', label: '编辑插件', description: '平台级编辑任意插件元数据/版本/定价/可见性' },
+    { code: 'platform.plugin.delete', label: '删除插件', description: '平台级物理删除任意插件（含已上架）' },
   ]),
   defineModule('PLATFORM', 'platform.application', '申请审批', 50, [
     { code: 'platform.application.review', label: '审批团队管理员申请', description: '审批用户提交的开团申请' },
@@ -126,12 +129,16 @@ export const TEAM_MODULES: PermissionModuleDef[] = [
     { code: 'team.member.role.assign', label: '分配成员角色', description: '为本团队成员分配/更换团队角色' },
   ]),
   defineModule('TEAM', 'team.role', '团队角色', 30, [
-    { code: 'team.role.manage', label: '管理团队角色', description: '创建/编辑本团队自定义角色与权限' },
+    { code: 'team.role.create', label: '创建团队角色', description: '为本团队创建自定义角色' },
+    { code: 'team.role.update', label: '编辑团队角色', description: '编辑本团队自定义角色与权限' },
+    { code: 'team.role.delete', label: '删除团队角色', description: '删除本团队自定义角色' },
   ]),
   defineModule('TEAM', 'team.plugin', '插件管理', 40, [
     { code: 'team.plugin.list', label: '查看团队插件', description: '查看本团队可用插件列表' },
     { code: 'team.plugin.upload', label: '上传插件', description: '为本团队上传新插件' },
-    { code: 'team.plugin.edit', label: '编辑插件', description: '编辑本团队插件元数据/草稿/价格' },
+    { code: 'team.plugin.edit_metadata', label: '编辑插件元数据', description: '编辑插件名称/描述/图标，不重置审核态、不改源码' },
+    { code: 'team.plugin.edit_draft', label: '编辑插件草稿', description: '重新上传/编辑已上传插件的草稿包' },
+    { code: 'team.plugin.edit_price', label: '设置插件定价', description: '设置插件定价，不改源码、不触发审核流程' },
     { code: 'team.plugin.delete', label: '删除插件', description: '删除本团队插件' },
     { code: 'team.plugin.install', label: '安装市场插件', description: '将市场插件安装到本团队' },
     { code: 'team.plugin.enable', label: '启用/禁用插件', description: '启用/禁用本团队已安装插件' },
@@ -200,6 +207,50 @@ export function isPlatformPermission(code: string): boolean {
 /** 判断权限码是否属于团队级。 */
 export function isTeamPermission(code: string): boolean {
   return code.startsWith('team.');
+}
+
+/**
+ * 旧权限码 → 新码集合的扩张映射（单一事实来源，供 seed 迁移使用）。
+ *
+ * 设计：4 个「敏感度混合」旧码被拆细。迁移时把命中旧码的角色权限「展开」为对应新码集合（去重），
+ * 其余权限码保留。这样新权限守卫（挂在更细的新码上）不会因旧角色丢权限——旧角色原本拥有的能力被新码完整覆盖。
+ *
+ * 注意：只扩张、不收缩。映射是单向的（旧→新），不定义反向（新→旧合并会有损）。
+ */
+export const LEGACY_PERMISSION_EXPANSION: Record<string, string[]> = {
+  'team.plugin.edit': ['team.plugin.edit_metadata', 'team.plugin.edit_draft', 'team.plugin.edit_price'],
+  'platform.user.update': ['platform.user.update_profile', 'platform.user.reset_password'],
+  'team.role.manage': ['team.role.create', 'team.role.update', 'team.role.delete'],
+  'platform.plugin.manage': ['platform.plugin.edit', 'platform.plugin.delete'],
+};
+
+/** 旧权限码集合（快速判断某码是否已废弃，需扩张）。 */
+export const LEGACY_PERMISSION_CODES: Set<string> = new Set(Object.keys(LEGACY_PERMISSION_EXPANSION));
+
+/**
+ * 把一个角色的当前权限码数组按 LEGACY_PERMISSION_EXPANSION 扩张为新码集合（幂等纯函数）。
+ *
+ * 算法：遍历 current，命中旧码则展开为对应新码集合，其余码原样保留；去重。
+ * 返回 { permissions: 新数组, changed: 是否发生变更 }。
+ *  - 幂等：current 已无旧码时 changed=false（调用方据此跳过 update）。
+ *
+ * 抽离为纯函数供单测构造 fixture 直接断言扩张正确性 + 二次跑 no-op，无需 mock Prisma。
+ */
+export function expandLegacyPermissions(current: string[]): { permissions: string[]; changed: boolean } {
+  let changed = false;
+  const expanded = new Set<string>();
+  for (const code of current) {
+    if (LEGACY_PERMISSION_CODES.has(code)) {
+      const target = LEGACY_PERMISSION_EXPANSION[code];
+      if (target) {
+        for (const c of target) expanded.add(c);
+        changed = true;
+      }
+    } else {
+      expanded.add(code);
+    }
+  }
+  return { permissions: [...expanded], changed };
 }
 
 // === 内置系统角色 id（与 migration 20260621190000 + seed-rbac.ts 一致的确定性占位）===

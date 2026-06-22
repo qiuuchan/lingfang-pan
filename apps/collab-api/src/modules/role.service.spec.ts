@@ -34,6 +34,7 @@ function mockPrisma() {
 function mockAuth() {
   return {
     ensurePermission: vi.fn(async () => ({ perms: new Set() })),
+    ensureAnyPermission: vi.fn(async () => ({ perms: new Set() })),
   };
 }
 
@@ -128,9 +129,29 @@ describe('RoleService 团队角色 + 平台角色', () => {
       ).rejects.toMatchObject({ status: 400 });
     });
 
-    it('无 team.role.manage 权限拒绝 403', async () => {
+    it('无 team.role.create 权限拒绝 403', async () => {
       auth.ensurePermission.mockRejectedValue(forbidden());
       await expect(service.createTeamRole('admin-1', { name: 'R' })).rejects.toMatchObject({ status: 403 });
+    });
+  });
+
+  describe('listTeamRoles（OR 守卫）', () => {
+    it('只配 team.member.role.assign 也能 list（ensureAnyPermission 放行）', async () => {
+      prisma.role.findMany.mockResolvedValue([]);
+      const result = await service.listTeamRoles('admin-1');
+      expect(result.roles).toEqual([]);
+      expect(auth.ensureAnyPermission).toHaveBeenCalledWith(
+        'admin-1',
+        'team.role.create',
+        'team.role.update',
+        'team.role.delete',
+        'team.member.role.assign',
+      );
+    });
+
+    it('无任一 list 守卫权限拒绝 403', async () => {
+      auth.ensureAnyPermission.mockRejectedValue(forbidden());
+      await expect(service.listTeamRoles('admin-1')).rejects.toMatchObject({ status: 403 });
     });
   });
 

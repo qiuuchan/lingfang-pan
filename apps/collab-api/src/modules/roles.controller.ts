@@ -62,7 +62,10 @@ export class AdminRolesController {
 
 /**
  * 团队角色管理控制器（桌面端 TeamAdmin 面板使用）。
- * 挂在 /api/teams/current/roles，由 @RequirePermission('team.role.manage' / 'team.member.role.assign') 守卫校验。
+ * 挂在 /api/teams/current/roles，由 @RequirePermission 守卫校验：
+ *  - 列表用 OR(create/update/delete/member.role.assign)（MembersTab 角色下拉也调，放宽让只配 member.role.assign 的角色能加载）
+ *  - 创建/更新/删除各对应单码 team.role.create/update/delete
+ *  - 分配成员角色用 team.member.role.assign
  */
 @ApiTags('Roles')
 @ApiBearerAuth()
@@ -76,14 +79,14 @@ export class RolesController {
     return this.role.listPermissions('TEAM');
   }
 
-  @RequirePermission('team.role.manage')
+  @RequirePermission('team.role.create', 'team.role.update', 'team.role.delete', 'team.member.role.assign')
   @Get()
   @ApiOperation({ summary: '列出当前团队的全部角色（含成员数）' })
   list(@Req() req: Request) {
     return this.role.listTeamRoles(requireUser(req).id);
   }
 
-  @RequirePermission('team.role.manage')
+  @RequirePermission('team.role.create')
   @Post()
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({ summary: '创建团队角色' })
@@ -91,14 +94,14 @@ export class RolesController {
     return this.role.createTeamRole(requireUser(req).id, dto);
   }
 
-  @RequirePermission('team.role.manage')
+  @RequirePermission('team.role.update')
   @Patch(':id')
   @ApiOperation({ summary: '更新团队角色（系统角色不可改权限，不可跨团队）' })
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateRoleDto) {
     return this.role.updateTeamRole(requireUser(req).id, id, dto);
   }
 
-  @RequirePermission('team.role.manage')
+  @RequirePermission('team.role.delete')
   @Delete(':id')
   @ApiOperation({ summary: '删除团队角色（系统角色不可删，有引用时拒绝）' })
   remove(@Req() req: Request, @Param('id') id: string) {

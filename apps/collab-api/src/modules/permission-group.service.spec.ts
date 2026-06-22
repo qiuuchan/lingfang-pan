@@ -67,7 +67,7 @@ describe('PermissionGroupService 权限分组显示名管理', () => {
       expect(memberGroup?.customized).toBe(false);
     });
 
-    it('无 team.role.manage 权限拒绝 403', async () => {
+    it('无 team.role.update 权限拒绝 403', async () => {
       auth.ensurePermission.mockRejectedValue(forbidden());
       await expect(service.listGroups('admin-1', 'TEAM')).rejects.toMatchObject({ status: 403 });
     });

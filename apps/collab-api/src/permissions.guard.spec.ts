@@ -131,6 +131,35 @@ describe('PermissionsGuard', () => {
     expect(ok).toBe(true);
   });
 
+  it('OR 语义（list 守卫）：4 码中末位 member.role.assign 命中即放行', async () => {
+    // 模拟 GET /teams/current/roles 的 OR 守卫(create/update/delete/member.role.assign)：
+    // 只配 member.role.assign 的角色（如负责分配成员角色但不管理自定义角色的角色）也必须能加载角色列表。
+    const guard = new PermissionsGuard(
+      mockReflector({
+        permissions: ['team.role.create', 'team.role.update', 'team.role.delete', 'team.member.role.assign'],
+      }),
+      prisma,
+    );
+    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.role.findUnique.mockResolvedValue({ permissions: ['team.member.role.assign'] });
+    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } }));
+    expect(ok).toBe(true);
+  });
+
+  it('OR 语义：多权限全部未命中拒绝 403', async () => {
+    const guard = new PermissionsGuard(
+      mockReflector({
+        permissions: ['team.role.create', 'team.role.update', 'team.role.delete', 'team.member.role.assign'],
+      }),
+      prisma,
+    );
+    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.role.findUnique.mockResolvedValue({ permissions: ['team.dashboard.view'] }); // 四码均未命中
+    await expect(
+      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } })),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it('混合权限：平台 + 团队，平台命中放行（无需团队解析也放行）', async () => {
     const guard = new PermissionsGuard(
       mockReflector({ permissions: ['platform.user.list', 'team.member.invite'] }),
