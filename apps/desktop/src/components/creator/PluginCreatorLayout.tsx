@@ -3,7 +3,6 @@ import { AlertTriangleIcon, EyeIcon, HistoryIcon, PanelRightOpenIcon, SparklesIc
 import { AssistantChat } from '@/components/chat/AssistantChat';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { LoadingButton } from '@/components/loading-button';
-import { TaskChecklist } from '@/components/onboarding/TaskChecklist';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -257,7 +256,6 @@ export function PluginCreatorLayout(props: PluginCreatorLayoutProps) {
           />
         </DialogContent>
       </Dialog>
-      <TaskChecklist session={props.session} setView={props.setView} setSettingsTab={props.setSettingsTab} />
     </div>
   );
 }
