@@ -7,14 +7,17 @@
 //  - 产物：助手完整回复若含 ```lingfang-plugin JSON 块，解析为插件包 → 显示预览 + 上传。
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { SparklesIcon, XIcon, SendIcon, UploadIcon, Loader2Icon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, UploadIcon, Loader2Icon, WrenchIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { type ApiError } from '@/lib/api';
 import { streamChat, type ChatMessage } from '@/lib/relay-chat-stream';
 import { parsePackageBlock, uploadCreatedPlugin, type CreatedPluginPackage } from '@/lib/plugin-creator/relay-creator';
+import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface Turn {
   role: 'user' | 'assistant';
@@ -43,11 +46,31 @@ const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户会用自
 
 需求信息不够时，先用简短对话提问澄清（不要输出代码块）。每次只产出一个插件包。`;
 
+/**
+ * 上下文管理：保留最近 maxTurns 轮对话，且总字符不超过 charBudget。
+ * 取最近若干轮（用户+助手成对），从最新向前累计，超预算就截断更早的——保留近期上下文，
+ * 丢掉久远的，避免长对话超出上游 context 窗口导致 relay/上游报错。
+ */
+function truncateTurns(turns: Turn[], maxTurns: number, charBudget: number): Turn[] {
+  const recent = turns.slice(-maxTurns * 2); // 每轮约 2 条（user+assistant）
+  let total = 0;
+  const kept: Turn[] = [];
+  // 从最新向前累计，超出预算则停（丢更早的）。
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const len = recent[i].content.length;
+    if (total + len > charBudget) break;
+    total += len;
+    kept.unshift(recent[i]);
+  }
+  return kept;
+}
+
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const { session } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
   const [pkg, setPkg] = useState<CreatedPluginPackage | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -86,7 +109,15 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     abortRef.current = controller;
 
     try {
-      const history: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...turns.map((t) => ({ role: t.role, content: t.content } as ChatMessage)), { role: 'user', content: text }];
+      // 系统提示词 = 基础提示 + 激活的 skills（动态拼装）；relay 服务端还会注入"必须用灵坊服务"规则。
+      const systemPrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
+      // 上下文管理：截断历史，避免长对话超出上游 context 窗口。
+      const truncated = truncateTurns(turns, 6, 6000);
+      const history: ChatMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...truncated.map((t) => ({ role: t.role, content: t.content } as ChatMessage)),
+        { role: 'user', content: text },
+      ];
       const full = await streamChat({
         messages: history,
         tier,
@@ -128,6 +159,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     abortRef.current?.abort();
   }
 
+  function toggleSkill(id: string) {
+    setActiveSkillIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
   async function upload() {
     if (!pkg) return;
     setUploading(true);
@@ -154,6 +189,28 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <Badge variant="secondary" className="text-xs">{session.tenantName ?? '当前团队'}</Badge>
           </div>
           <div className="flex items-center gap-2">
+            {/* Skill 选择器：动态拼装系统提示词（输出精简 / 增量重构 等，可开关）。 */}
+            <Popover>
+              <PopoverTrigger render={<Button variant="outline" size="sm" className="gap-1.5" title="Skill" />}>
+                <WrenchIcon className="size-3.5" />
+                Skill
+                {activeSkillIds.length > 0 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeSkillIds.length}</Badge>}
+              </PopoverTrigger>
+              <PopoverContent className="w-72" align="end">
+                <div className="text-xs font-medium text-muted-foreground">Skill（拼入系统提示词）</div>
+                <div className="mt-2 space-y-2">
+                  {SKILLS.map((s) => (
+                    <label key={s.id} className="flex cursor-pointer items-start gap-2 rounded-md p-1.5 hover:bg-muted">
+                      <Checkbox checked={activeSkillIds.includes(s.id)} onCheckedChange={() => toggleSkill(s.id)} className="mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium">{s.name}</div>
+                        <div className="text-xs text-muted-foreground">{s.description}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
             {/* 版本切换 */}
             <div className="flex rounded-md border p-0.5">
               {(['fast', 'premium'] as const).map((t) => (
