@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 // - run_capture_with_env：带超时的同步运行（用于 venv 创建 / pip install / pnpm install 等阻塞阶段）。
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
-use crate::code_assistant::{kill_child_tree, run_capture_with_env};
+use crate::process_util::{kill_child_tree, run_capture_with_env};
 use crate::embedded_runtime::EmbeddedRuntime;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
@@ -364,7 +364,7 @@ fn contains_pip_wheel(dir: &std::path::Path) -> bool {
     })
 }
 
-fn captured_detail(captured: &crate::code_assistant::CapturedOutput) -> String {
+fn captured_detail(captured: &crate::process_util::CapturedOutput) -> String {
     let stderr = captured.stderr.trim();
     if !stderr.is_empty() {
         return stderr.to_string();
@@ -950,7 +950,7 @@ fn libc_setsid() {
 /// 历史 bug（Task 4a「Invalid Date」）：旧实现产出 `epoch.毫秒Z`，浏览器 new Date 无法
 /// 解析。统一走 epoch_to_iso8601，保证前端 new Date(started_at) 可解析。
 fn now_iso() -> String {
-    crate::code_assistant::store::now_string()
+    crate::process_util::now_string()
 }
 
 // === 单元测试 ===

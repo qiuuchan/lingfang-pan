@@ -4,7 +4,7 @@ import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon, ExternalLinkIcon } from
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
-import { ScriptPreviewPanel } from '@/components/creator/panels/ScriptPreviewPanel';
+import { ScriptPreviewPanel } from '@/components/plugins/ScriptPreviewPanel';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { parseManifest } from '@/lib/plugin-draft';
