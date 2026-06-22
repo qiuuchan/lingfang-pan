@@ -41,9 +41,35 @@ Source pattern:
 
 ## AvatarMenu（左下角用户菜单）
 
-`components/AvatarMenu.tsx` 是从 `origin/lingfang-v4` 移植的富菜单，由 `App.tsx` 顶层渲染（`avatarMenuOpen` state），Sidebar 底部账户按钮点击唤起（替代直接 `openAccountSettings('account')`）。它**拥有**这些入口：通知中心（红点 `useUnreadCount`）、钱包、切换团队、插件管理、团队管理（`team-admin`，`isTeamManager` 可见）、开发者模式（创建器）、LLM 设置（→ 设置 gateway tab）、设置、帮助、主题切换、退出登录。
+`components/AvatarMenu.tsx` 是从 `origin/lingfang-v4` 移植的富菜单，由 `App.tsx` 顶层渲染（`avatarMenuOpen` state），Sidebar 底部账户按钮点击唤起。菜单项**每个按钮对应一个独立功能入口**（项 14）：
 
-注意：`team-admin` 不再出现在 Sidebar NAV（已迁入此菜单）；`review`（platformAdminOnly）仍在侧栏。v4 原版的「版本发布管理」「token 余额」在桌面端**不适用**，移植时已剔除。通知中心抽屉随菜单挂载（侧栏不再有铃铛，避免与菜单重复轮询）。
+- 个人资料 / 钱包 / 切换团队 / 设置（含 LLM 设置→gateway 子 tab、本地权限与安全）→ 经 `openAccountSettings(tab)` 路由到对应 **PanelDialog** 独立悬浮窗（见下节）。
+- 通知中心 → `openNotifications()`（NotificationCenter 已提为 App 顶层独立悬浮窗，**不**嵌套在 AvatarMenu 内——嵌套会导致菜单的「点外关闭」误杀通知抽屉，见 bug 备注）。
+- 插件管理 / 团队管理（`team-admin`，`isTeamManager` 可见）→ `setView` 主区页面导航。
+- 开发者模式 → 创建器悬浮窗；帮助 → 外链；退出登录 → `resetSession`；主题切换 → `next-themes`。
+
+菜单内**不渲染**任何功能浮窗本体——浮窗都在 App 顶层挂载，菜单只发指令（防止菜单关闭时连带卸载浮窗）。`team-admin` 不在 Sidebar NAV（已迁入此菜单）；`review`（platformAdminOnly）仍在侧栏。
+
+**bug 备注（项 1）**：NotificationCenter 曾嵌套渲染在 AvatarMenu 内部 + 菜单的 document mousedown 点外关闭 handler → 点通知抽屉任何元素都触发「点在菜单外」→ 关菜单 → AvatarMenu `return null` → 通知抽屉卸载（点一下就消失），且菜单关后抽屉状态卡死需重启。修复：所有功能浮窗一律 App 顶层独立挂载，菜单只回调打开。
+
+## Function Floating Windows（PanelDialog，项 14）
+
+原聚合式 `AccountDialog`（账户/团队/钱包/设置 4 tab）**已删除**。其功能拆为各自独立的悬浮窗，均由 App 顶层挂载，从 AvatarMenu 对应按钮打开：
+
+- `PanelDialog`（`components/PanelDialog.tsx`）：通用浮窗外壳（Dialog + 标题 + 拖拽 + ScrollArea），`size: 'lg' | 'md'`。承载 Wallet / TeamHome / Settings 页 + ProfilePanel。
+- App.tsx 持有各窗 open state（`walletOpen` / `teamOpen` / `settingsOpen` / `profileOpen` / `notifOpen`），`openAccountSettings(tab, settingsTab?)` 保留原 API 但**路由分发**到对应 state（所有现有调用方零改动）。Wallet/TeamHome/Settings 顶层懒加载。
+- `ProfilePanel`（`components/ProfilePanel.tsx`）：从原 AccountDialog 抽出的 AccountPanel（昵称/邮箱/改密/退出）。
+- 新增功能浮窗时：加一个 open state + 一个 `<PanelDialog>` 实例 + 在 `openAccountSettings`（或新 opener）路由，不要回到聚合 tab。
+
+## System Tray & Close Behavior（项 11）
+
+应用支持后台运行（最小化到系统托盘）：
+
+- **Rust**（`src-tauri/src/main.rs`）：`tauri` 启用 `tray-icon` feature；`setup_tray` 建托盘图标（右键菜单 显示窗口/退出 + 左键单击恢复）；`on_window_event` 拦截主窗口 `CloseRequested` → `api.prevent_close()` + `window.emit("close-requested", ())`；`quit_app` 命令供前端退出。
+- **前端**（`App.tsx`）：`tauriListen('close-requested')` 监听 → 读 `lf:close-action`（`ask`/`tray`/`quit`，默认 `ask`）：`tray`→`getCurrentWindow().hide()`、`quit`→`tauriInvoke('quit_app')`、`ask`→弹 `CloseBehaviorDialog`（最小化到托盘/直接退出/取消 + 以后不再询问复选）。
+- **修改入口**：SettingsDialog「通用」sub-tab（`SettingsTab = 'general' | ...`，`pages/settings/GeneralTab.tsx`）的「关闭窗口时」选择器，即「以后不再询问」的回改入口。
+
+新增需要 prevent_close / 后台常驻的行为时，沿用「Rust emit 事件 + 前端按 localStorage 偏好决策」模式，不要在 Rust 里直接读前端偏好。
 
 ## Page State Pattern
 
