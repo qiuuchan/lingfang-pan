@@ -113,21 +113,29 @@ export function ChannelsView() {
   );
 }
 
-// === 渠道测试对话框：连通性（models 端点）+ 可选实对话验证 ===
+// === 渠道测试对话框：连通性 + 实对话 + 生图 ===
 function TestChannelDialog({ channel, onDone, onClose }: { channel: Channel; onDone: () => void; onClose: () => void }) {
   const [connState, setConnState] = useState<{ loading: boolean; ok: boolean | null; message: string; models: string[] }>({ loading: true, ok: null, message: '', models: [] });
   const [model, setModel] = useState('');
   const [chatState, setChatState] = useState<{ loading: boolean; ok: boolean | null; message: string; reply: string; latencyMs: number }>({ loading: false, ok: null, message: '', reply: '', latencyMs: 0 });
+  // 生图测试：仅 OpenAI 协议（Anthropic 无原生生图 API）。
+  const supportsImage = channel.protocol !== 'ANTHROPIC';
+  const [imgModel, setImgModel] = useState('');
+  const [imgPrompt, setImgPrompt] = useState('a red circle on white background');
+  const [imgState, setImgState] = useState<{ loading: boolean; ok: boolean | null; message: string; imageUrl: string | null; latencyMs: number }>({ loading: false, ok: null, message: '', imageUrl: null, latencyMs: 0 });
 
   // 打开即自动跑连通性测试。
   useEffect(() => {
     let mounted = true;
     setConnState({ loading: true, ok: null, message: '', models: [] });
     api<{ ok: boolean; message: string; models: string[] }>(`/api/admin/billing/channels/${channel.id}/test`, { method: 'POST' })
-      .then((r) => { if (mounted) { setConnState({ loading: false, ok: r.ok, message: r.message, models: r.models ?? [] }); if (r.models?.length) setModel(r.models[0]); onDone(); } })
+      .then((r) => { if (mounted) { setConnState({ loading: false, ok: r.ok, message: r.message, models: r.models ?? [] }); if (r.models?.length) setModel(r.models[0]); } })
       .catch((e: Error & { status?: number }) => { if (mounted) setConnState({ loading: false, ok: false, message: e.message || '测试请求失败', models: [] }); });
     return () => { mounted = false; };
   }, [channel.id]);
+
+  // 连通性成功后刷新列表（更新「健康」列）。仅连通性测试触发一次。
+  useEffect(() => { if (connState.ok !== null && !connState.loading) onDone(); /* eslint-disable-next-line */ }, [connState.ok, connState.loading]);
 
   async function runChat() {
     if (!model.trim()) return toast.error('请选择测试模型');
@@ -140,6 +148,17 @@ function TestChannelDialog({ channel, onDone, onClose }: { channel: Channel; onD
     }
   }
 
+  async function runImage() {
+    if (!imgModel.trim()) return toast.error('请选择生图模型');
+    setImgState({ loading: true, ok: null, message: '', imageUrl: null, latencyMs: 0 });
+    try {
+      const r = await api<{ ok: boolean; message: string; imageUrl: string | null; latencyMs: number }>(`/api/admin/billing/channels/${channel.id}/test-image`, { method: 'POST', body: { model: imgModel, prompt: imgPrompt } });
+      setImgState({ loading: false, ok: r.ok, message: r.message, imageUrl: r.imageUrl, latencyMs: r.latencyMs });
+    } catch (e) {
+      setImgState({ loading: false, ok: false, message: (e as Error).message || '测试请求失败', imageUrl: null, latencyMs: 0 });
+    }
+  }
+
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-lg">
@@ -148,7 +167,7 @@ function TestChannelDialog({ channel, onDone, onClose }: { channel: Channel; onD
           <DialogDescription>{channel.protocol} · {channel.baseUrl}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {/* 连通性 */}
+          {/* ① 连通性 */}
           <div className="space-y-1">
             <div className="text-sm font-medium">① 连通性（models 端点）</div>
             {connState.loading ? <div className="text-sm text-muted-foreground">探测中…</div> : (
@@ -158,21 +177,18 @@ function TestChannelDialog({ channel, onDone, onClose }: { channel: Channel; onD
               </div>
             )}
           </div>
-          {/* 实对话 */}
+          {/* ② 实对话 */}
           <div className="space-y-2">
-            <div className="text-sm font-medium">② 实对话验证（可选，端到端）</div>
+            <div className="text-sm font-medium">② 实对话验证（hi）</div>
             <div className="flex gap-2">
               <Select value={model} onValueChange={setModel} disabled={connState.models.length === 0}>
                 <SelectTrigger className="flex-1"><SelectValue placeholder={connState.models.length ? '选模型' : '无可用模型'} /></SelectTrigger>
                 <SelectContent>
                   {connState.models.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}
-                  {/* 允许手输不在列表的模型：supportedModels 也作为候选 */}
                   {channel.supportedModels.filter((m) => !connState.models.includes(m)).map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}（声明）</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Button size="sm" onClick={runChat} disabled={chatState.loading || !model || connState.models.length === 0 && channel.supportedModels.length === 0}>
-                {chatState.loading ? '发送中…' : '发送 hi'}
-              </Button>
+              <Button size="sm" onClick={runChat} disabled={chatState.loading || !model}>{chatState.loading ? '发送中…' : '发送 hi'}</Button>
             </div>
             {chatState.ok !== null && !chatState.loading && (
               <div className={`rounded-md border p-2 text-sm ${chatState.ok ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950' : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950'}`}>
@@ -182,6 +198,36 @@ function TestChannelDialog({ channel, onDone, onClose }: { channel: Channel; onD
                 </div>
                 {chatState.reply && <div className="mt-1 text-muted-foreground">回复：{chatState.reply}</div>}
               </div>
+            )}
+          </div>
+          {/* ③ 生图 */}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">③ 生图验证（OpenAI 协议）</div>
+            {!supportsImage ? (
+              <div className="text-xs text-muted-foreground">Anthropic 协议不支持生图（中转生图走 OpenAI /images/generations）。</div>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <Select value={imgModel} onValueChange={setImgModel} disabled={connState.models.length === 0}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder={connState.models.length ? '选生图模型' : '无可用模型'} /></SelectTrigger>
+                    <SelectContent>
+                      {connState.models.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}
+                      {channel.supportedModels.filter((m) => !connState.models.includes(m)).map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}（声明）</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" onClick={runImage} disabled={imgState.loading || !imgModel}>{imgState.loading ? '生成中…' : '生成测试图'}</Button>
+                </div>
+                <Input placeholder="prompt（默认 a red circle on white background）" value={imgPrompt} onChange={(e) => setImgPrompt(e.target.value)} />
+                {imgState.ok !== null && !imgState.loading && (
+                  <div className={`rounded-md border p-2 text-sm ${imgState.ok ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950' : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950'}`}>
+                    <div className="flex items-center gap-2">
+                      {imgState.ok ? <span className="text-green-600">✓ {imgState.message}</span> : <span className="text-red-600">✗ {imgState.message}</span>}
+                      {imgState.ok && <span className="text-xs text-muted-foreground tabular-nums">{imgState.latencyMs} ms</span>}
+                    </div>
+                    {imgState.imageUrl && <img src={imgState.imageUrl} alt="测试生成图" className="mt-2 max-h-48 rounded border" />}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

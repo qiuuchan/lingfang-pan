@@ -95,6 +95,13 @@ export class BillingController {
     return this.channels.adminTestChat(requireUser(req).id, id, body.model);
   }
 
+  @Post('channels/:id/test-image')
+  @RequirePermission('platform.billing.channel.manage')
+  @ApiOperation({ summary: '渠道生图测试（OpenAI 协议，发一次最小生图请求）' })
+  testChannelImage(@Req() req: Request, @Param('id') id: string, @Body() body: { model: string; prompt?: string }) {
+    return this.channels.adminTestImage(requireUser(req).id, id, body.model, body.prompt);
+  }
+
   // === 定价 ===
 
   @Get('pricing')
