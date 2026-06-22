@@ -21,7 +21,6 @@ import {
   UserRoundIcon,
   ShieldCheckIcon,
   SearchIcon,
-  WandSparklesIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
@@ -32,8 +31,7 @@ interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: bo
 
 const NAV: NavItem[] = [
   { v: 'home', label: '首页', icon: HomeIcon },
-  // AI 创建插件（relay 版，替代已删的 code_assistant CLI 创建器）：侧栏入口。
-  { v: 'creator', label: '创建插件', icon: WandSparklesIcon },
+  // AI 创建插件入口为右下角 FAB（悬浮窗形态，非页面），不占侧栏导航位。
   // 项 3：团队管理入口迁至左下角 AvatarMenu，不再占用侧栏导航位。
   { v: 'plugins', label: '插件', icon: PackageIcon },
   { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
