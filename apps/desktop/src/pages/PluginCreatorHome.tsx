@@ -49,6 +49,10 @@ import {
   validatePluginStructure,
 } from '@/lib/plugin-draft';
 import { DEFAULT_CONVERSATION_SYSTEM_PROMPT } from '@/lib/plugin-creator-protocol';
+// Task 12：Skill 系统——创建器 systemPrompt 由基础提示 + 激活 skills 拼装，输出更精简、能力可扩展。
+import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
+/** 创建器当前生效的系统提示词（基础 + 默认激活 skills）。 */
+const CREATOR_SYSTEM_PROMPT = assembleSystemPrompt(DEFAULT_CONVERSATION_SYSTEM_PROMPT, DEFAULT_ACTIVE_SKILLS);
 import type { LoadedPlugin } from '@/lib/types';
 import { useEnvReadiness } from '@/lib/env-readiness';
 import { PluginCreatorLayout } from '@/components/creator/PluginCreatorLayout';
@@ -582,7 +586,7 @@ export function PluginCreatorHome() {
         model: resolveSendModel(model),
         // 不传 pluginId → Rust 用 session_id 自动生成 plugins_root/<session_id>/ 持久化目录。
         prompt: text,
-        systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
+        systemPrompt: CREATOR_SYSTEM_PROMPT,
         ownerUserId: session.userId,
         ownerTenantId: session.tenantId,
         effort,
@@ -666,7 +670,7 @@ export function PluginCreatorHome() {
         // R2 effort 同样随本轮传入（可会话中途调思考强度）。
         // R6 自定义模型：resolveSendModel 把哨兵/default 归一为 undefined。
         await tauriInvoke('code_assistant_send_input', {
-          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, sdkConfig: buildSdkConfig(), systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT },
+          input: { sessionId: activeSessionId, input: text, model: resolveSendModel(model), effort, sdkConfig: buildSdkConfig(), systemPrompt: CREATOR_SYSTEM_PROMPT },
         });
         // send_input 成功后新一轮 output/exit 事件由既有 listener 处理，finalizeSession 走追问累积分支。
       } catch (error) {
@@ -753,7 +757,7 @@ export function PluginCreatorHome() {
           // 与追问路径对齐，补齐 SDK 后端连接信息。
           sdkConfig: buildSdkConfig(),
           // 追问轮也传 systemPrompt（与 send() 追问路径一致）。
-          systemPrompt: DEFAULT_CONVERSATION_SYSTEM_PROMPT,
+          systemPrompt: CREATOR_SYSTEM_PROMPT,
         },
       });
       // 回答提交后新一轮 output 由既有 listener 处理；清掉本轮工具片段，避免问题卡片重复渲染。
