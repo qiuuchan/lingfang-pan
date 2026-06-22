@@ -125,26 +125,40 @@ export class ChannelService {
     return { ok: true };
   }
 
-  /** 健康测试：解密 key 探测 {baseUrl}/v1/models，写 lastHealthAt/lastHealthOk。 */
+  /**
+   * 健康测试（连通性）：按渠道协议探测 models 端点，写 lastHealthAt/lastHealthOk。
+   *  - OpenAI 协议：GET {baseUrl}/models，Bearer 鉴权（baseUrl 已含 /v1）。
+   *  - Anthropic 协议：GET {baseUrl}/v1/models，x-api-key + anthropic-version（baseUrl 不含 /v1）。
+   * 返回 { ok, message, models?, lastHealthOk }——models 列表供前端做"选模型发测试对话"。
+   */
   async adminTest(actorId: string, id: string) {
     const channel = await this.prisma.channel.findUnique({ where: { id } });
     if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
-    const key = getLlmKey();
-    const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, key);
-    const url = `${this.normalizeUrl(channel.baseUrl)}/models`;
+    const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, getLlmKey());
+    const url = channel.protocol === 'ANTHROPIC'
+      ? `${this.normalizeUrl(channel.baseUrl)}/v1/models`
+      : `${this.normalizeUrl(channel.baseUrl)}/models`;
+    const headers: Record<string, string> = channel.protocol === 'ANTHROPIC'
+      ? { 'x-api-key': upstreamKey, 'anthropic-version': '2023-06-01' }
+      : { Authorization: `Bearer ${upstreamKey}` };
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8_000);
     let ok = false;
     let message = '';
+    let models: string[] = [];
     try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${upstreamKey}` },
-        signal: controller.signal,
-      });
+      const res = await fetch(url, { headers, signal: controller.signal });
       ok = res.ok;
-      message = ok ? '渠道连通正常' : `上游返回 ${res.status}`;
+      if (ok) {
+        const data = (await res.json()) as { data?: { id?: string }[] };
+        models = (data.data ?? []).map((m) => m.id).filter((x): x is string => Boolean(x));
+        message = `连通正常，${models.length} 个可用模型`;
+      } else {
+        message = `上游返回 ${res.status}${res.status === 401 || res.status === 403 ? '（key 无效或无权限）' : ''}`;
+      }
     } catch (e) {
-      message = `探测失败：${(e as Error).message}`;
+      message = `探测失败：${(e as Error).name === 'AbortError' ? '超时' : (e as Error).message}`;
     } finally {
       clearTimeout(timer);
     }
@@ -153,7 +167,66 @@ export class ChannelService {
       data: { lastHealthAt: new Date(), lastHealthOk: ok },
     });
     await this.audit(actorId, 'admin.channel.tested', id, { ok, name: channel.name });
-    return { ok, message, lastHealthOk: ok };
+    return { ok, message, models, lastHealthOk: ok };
+  }
+
+  /**
+   * 实对话测试（端到端验证）：用指定 model 经渠道协议发一条最小请求（max_tokens 保守）。
+   * 验证的不只是连通性——能查出配额不足、模型不可用、key 权限不够等 models 端点查不出的问题。
+   * 返回 { ok, message, reply?, latencyMs? }。
+   */
+  async adminTestChat(actorId: string, id: string, model: string) {
+    const channel = await this.prisma.channel.findUnique({ where: { id } });
+    if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
+    if (!model.trim()) throw badRequest('请选择测试用模型');
+    const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, getLlmKey());
+    const base = this.normalizeUrl(channel.baseUrl);
+    const started = Date.now();
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    let ok = false;
+    let message = '';
+    let reply = '';
+    try {
+      if (channel.protocol === 'ANTHROPIC') {
+        const res = await fetch(`${base}/v1/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': upstreamKey, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] }),
+          signal: controller.signal,
+        });
+        ok = res.ok;
+        if (ok) {
+          const data = (await res.json()) as { content?: { text?: string }[] };
+          reply = data.content?.map((c) => c.text).filter(Boolean).join('') || '(空回复)';
+          message = '测试对话成功';
+        } else {
+          message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+        }
+      } else {
+        const res = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${upstreamKey}` },
+          body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] }),
+          signal: controller.signal,
+        });
+        ok = res.ok;
+        if (ok) {
+          const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+          reply = data.choices?.[0]?.message?.content || '(空回复)';
+          message = '测试对话成功';
+        } else {
+          message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+        }
+      }
+    } catch (e) {
+      message = `测试失败：${(e as Error).name === 'AbortError' ? '超时（30s）' : (e as Error).message}`;
+    } finally {
+      clearTimeout(timer);
+    }
+    await this.audit(actorId, 'admin.channel.test_chat', id, { ok, model, name: channel.name });
+    return { ok, message, reply, latencyMs: Date.now() - started };
   }
 
   // === 内部 ===

@@ -61,13 +61,11 @@ function bindingsLabel(bindings: ChannelBinding[]): string {
 
 export function ChannelsView() {
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [testing, setTesting] = useState<Channel | null>(null);
   const load = () => api<{ channels: Channel[] }>('/api/admin/billing/channels').then((r) => setChannels(r.channels ?? []));
   useLoad(load);
   const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(channels);
 
-  async function test(c: Channel) {
-    await run(() => api(`/api/admin/billing/channels/${c.id}/test`, { method: 'POST' }).then(load), undefined);
-  }
   async function remove(c: Channel) {
     if (!window.confirm(`确认删除渠道「${c.name}」？此操作不可恢复。`)) return;
     await run(() => api(`/api/admin/billing/channels/${c.id}`, { method: 'DELETE' }).then(load), '渠道已删除');
@@ -99,7 +97,7 @@ export function ChannelsView() {
                 <ActionBar>
                   <EditChannelDialog channel={c} onRefresh={load}><Button variant="outline" size="sm"><PencilIcon className="mr-1 size-3.5" />编辑</Button></EditChannelDialog>
                   <BindingsDialog channel={c} onRefresh={load}><Button variant="outline" size="sm"><Link2Icon className="mr-1 size-3.5" />绑定</Button></BindingsDialog>
-                  <Button variant="outline" size="sm" onClick={() => test(c)}><ZapIcon className="mr-1 size-3.5" />测试</Button>
+                  <Button variant="outline" size="sm" onClick={() => setTesting(c)}><ZapIcon className="mr-1 size-3.5" />测试</Button>
                   <Button variant="destructive" size="sm" onClick={() => remove(c)}><Trash2Icon className="mr-1 size-3.5" />删除</Button>
                 </ActionBar>
               </TableCell>
@@ -110,7 +108,86 @@ export function ChannelsView() {
         </TableBody>
       </Table>
       <Pagination totalItems={totalItems} pageSize={pageSize} currentPage={page} onPageChange={setPage} onPageSizeChange={setPageSize} />
+      {testing && <TestChannelDialog channel={testing} onDone={load} onClose={() => setTesting(null)} />}
     </Section>
+  );
+}
+
+// === 渠道测试对话框：连通性（models 端点）+ 可选实对话验证 ===
+function TestChannelDialog({ channel, onDone, onClose }: { channel: Channel; onDone: () => void; onClose: () => void }) {
+  const [connState, setConnState] = useState<{ loading: boolean; ok: boolean | null; message: string; models: string[] }>({ loading: true, ok: null, message: '', models: [] });
+  const [model, setModel] = useState('');
+  const [chatState, setChatState] = useState<{ loading: boolean; ok: boolean | null; message: string; reply: string; latencyMs: number }>({ loading: false, ok: null, message: '', reply: '', latencyMs: 0 });
+
+  // 打开即自动跑连通性测试。
+  useEffect(() => {
+    let mounted = true;
+    setConnState({ loading: true, ok: null, message: '', models: [] });
+    api<{ ok: boolean; message: string; models: string[] }>(`/api/admin/billing/channels/${channel.id}/test`, { method: 'POST' })
+      .then((r) => { if (mounted) { setConnState({ loading: false, ok: r.ok, message: r.message, models: r.models ?? [] }); if (r.models?.length) setModel(r.models[0]); onDone(); } })
+      .catch((e: Error & { status?: number }) => { if (mounted) setConnState({ loading: false, ok: false, message: e.message || '测试请求失败', models: [] }); });
+    return () => { mounted = false; };
+  }, [channel.id]);
+
+  async function runChat() {
+    if (!model.trim()) return toast.error('请选择测试模型');
+    setChatState({ loading: true, ok: null, message: '', reply: '', latencyMs: 0 });
+    try {
+      const r = await api<{ ok: boolean; message: string; reply: string; latencyMs: number }>(`/api/admin/billing/channels/${channel.id}/test-chat`, { method: 'POST', body: { model } });
+      setChatState({ loading: false, ok: r.ok, message: r.message, reply: r.reply, latencyMs: r.latencyMs });
+    } catch (e) {
+      setChatState({ loading: false, ok: false, message: (e as Error).message || '测试请求失败', reply: '', latencyMs: 0 });
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>测试渠道 · {channel.name}</DialogTitle>
+          <DialogDescription>{channel.protocol} · {channel.baseUrl}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* 连通性 */}
+          <div className="space-y-1">
+            <div className="text-sm font-medium">① 连通性（models 端点）</div>
+            {connState.loading ? <div className="text-sm text-muted-foreground">探测中…</div> : (
+              <div className="flex items-start gap-2 text-sm">
+                {connState.ok ? <span className="text-green-600">✓ 成功</span> : <span className="text-red-600">✗ 失败</span>}
+                <span className="text-muted-foreground">{connState.message}</span>
+              </div>
+            )}
+          </div>
+          {/* 实对话 */}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">② 实对话验证（可选，端到端）</div>
+            <div className="flex gap-2">
+              <Select value={model} onValueChange={setModel} disabled={connState.models.length === 0}>
+                <SelectTrigger className="flex-1"><SelectValue placeholder={connState.models.length ? '选模型' : '无可用模型'} /></SelectTrigger>
+                <SelectContent>
+                  {connState.models.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}
+                  {/* 允许手输不在列表的模型：supportedModels 也作为候选 */}
+                  {channel.supportedModels.filter((m) => !connState.models.includes(m)).map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}（声明）</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button size="sm" onClick={runChat} disabled={chatState.loading || !model || connState.models.length === 0 && channel.supportedModels.length === 0}>
+                {chatState.loading ? '发送中…' : '发送 hi'}
+              </Button>
+            </div>
+            {chatState.ok !== null && !chatState.loading && (
+              <div className={`rounded-md border p-2 text-sm ${chatState.ok ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950' : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950'}`}>
+                <div className="flex items-center gap-2">
+                  {chatState.ok ? <span className="text-green-600">✓ {chatState.message}</span> : <span className="text-red-600">✗ {chatState.message}</span>}
+                  {chatState.ok && <span className="text-xs text-muted-foreground tabular-nums">{chatState.latencyMs} ms</span>}
+                </div>
+                {chatState.reply && <div className="mt-1 text-muted-foreground">回复：{chatState.reply}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={onClose}>关闭</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
