@@ -167,9 +167,9 @@ export class RoleService {
 
   // ============ 团队角色（scope=TEAM，团队管理员在桌面端管理） ============
 
-  /** 列出当前团队的全部角色（含成员数）。需 team.role.manage 权限。 */
+  /** 列出当前团队的全部角色（含成员数）。需 OR(team.role.create/update/delete, team.member.role.assign) 权限。 */
   async listTeamRoles(userId: string) {
-    await this.auth.ensurePermission(userId, 'team.role.manage');
+    await this.auth.ensureAnyPermission(userId, 'team.role.create', 'team.role.update', 'team.role.delete', 'team.member.role.assign');
     const m = await this.resolveCurrentTeam(userId);
     const roles = await this.prisma.role.findMany({
       where: { scope: 'TEAM', teamId: m.teamId },
@@ -184,9 +184,9 @@ export class RoleService {
     return { roles: roles.map((r) => publicRole(r, countMap.get(r.id) ?? 0)) };
   }
 
-  /** 创建团队角色。需 team.role.manage 权限。 */
+  /** 创建团队角色。需 team.role.create 权限。 */
   async createTeamRole(userId: string, input: { name: string; code?: string; description?: string; permissions?: string[] }) {
-    await this.auth.ensurePermission(userId, 'team.role.manage');
+    await this.auth.ensurePermission(userId, 'team.role.create');
     const m = await this.resolveCurrentTeam(userId);
     const permissions = this.validatePermissions(input.permissions ?? [], 'TEAM');
     const existing = await this.prisma.role.findFirst({ where: { scope: 'TEAM', teamId: m.teamId, name: input.name } });
@@ -208,9 +208,9 @@ export class RoleService {
     return { role: publicRole(role, 0) };
   }
 
-  /** 更新团队角色。系统角色不可改权限；不可跨团队。需 team.role.manage 权限。 */
+  /** 更新团队角色。系统角色不可改权限；不可跨团队。需 team.role.update 权限。 */
   async updateTeamRole(userId: string, roleId: string, input: { name?: string; code?: string; description?: string; permissions?: string[] }) {
-    await this.auth.ensurePermission(userId, 'team.role.manage');
+    await this.auth.ensurePermission(userId, 'team.role.update');
     const m = await this.resolveCurrentTeam(userId);
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role || role.scope !== 'TEAM' || role.teamId !== m.teamId) throw notFound('团队角色不存在');
@@ -240,9 +240,9 @@ export class RoleService {
     return { role: publicRole(updated) };
   }
 
-  /** 删除团队角色。系统角色不可删；有成员引用时拒绝。需 team.role.manage 权限。 */
+  /** 删除团队角色。系统角色不可删；有成员引用时拒绝。需 team.role.delete 权限。 */
   async deleteTeamRole(userId: string, roleId: string) {
-    await this.auth.ensurePermission(userId, 'team.role.manage');
+    await this.auth.ensurePermission(userId, 'team.role.delete');
     const m = await this.resolveCurrentTeam(userId);
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role || role.scope !== 'TEAM' || role.teamId !== m.teamId) throw notFound('团队角色不存在');

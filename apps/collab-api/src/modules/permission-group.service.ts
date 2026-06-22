@@ -19,7 +19,7 @@ import {
  *  - deleteGroup：「重置为默认」语义 → 把 displayName 恢复成 BUILTIN_PERMISSION_GROUPS 的默认值。
  *  - listGroups：合并内置基线 + DB 行，标注 customized（当前显示名是否偏离默认）。
  *
- * scope 隔离：PLATFORM 分组用 platform.role.manage 守卫；TEAM 分组用 team.role.manage 守卫 + 归属当前团队。
+ * scope 隔离：PLATFORM 分组用 platform.role.manage 守卫；TEAM 分组用 team.role.update 守卫 + 归属当前团队。
  */
 @Injectable()
 export class PermissionGroupService {
@@ -120,7 +120,7 @@ export class PermissionGroupService {
 
   /** 按 scope 选择管理权限码并校验。 */
   private async ensureManagePermission(scope: PermissionScope, userId: string) {
-    const code = scope === 'PLATFORM' ? 'platform.role.manage' : 'team.role.manage';
+    const code = scope === 'PLATFORM' ? 'platform.role.manage' : 'team.role.update';
     await this.auth.ensurePermission(userId, code);
   }
 

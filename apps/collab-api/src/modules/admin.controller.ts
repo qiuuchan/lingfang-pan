@@ -74,7 +74,7 @@ export class AdminController {
     return this.admin.adminCreateUser(requireUser(req).id, body);
   }
 
-  @RequirePermission('platform.user.update')
+  @RequirePermission('platform.user.update_profile')
   @Patch('users/:id')
   @ApiOperation({ summary: '更新用户' })
   updateUser(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdateUserDto) {
@@ -95,7 +95,7 @@ export class AdminController {
     return this.admin.adminUserDetail(requireUser(req).id, id);
   }
 
-  @RequirePermission('platform.user.update')
+  @RequirePermission('platform.user.reset_password')
   @Post('users/:id/reset-password')
   @ApiOperation({ summary: '管理员强制重置用户密码（生成临时密码返给 admin）' })
   resetUserPassword(@Req() req: Request, @Param('id') id: string) {
@@ -200,7 +200,7 @@ export class AdminController {
     return this.admin.adminPluginReviewPending(requireUser(req).id);
   }
 
-  @RequirePermission('platform.plugin.manage')
+  @RequirePermission('platform.plugin.edit')
   @Post('plugins')
   @ApiOperation({ summary: '拒绝管理端新增平台插件' })
   createPlugin(@Req() req: Request, @Body() body: AdminCreatePluginDto) {
@@ -222,7 +222,7 @@ export class AdminController {
     return this.admin.adminRejectPlugin(requireUser(req).id, id, body.reason);
   }
 
-  @RequirePermission('platform.plugin.manage')
+  @RequirePermission('platform.plugin.edit')
   @Patch('plugins/:id')
   @ApiOperation({ summary: '更新平台插件（名称/描述/版本/定价/可见性/状态）' })
   updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdatePluginDto) {
@@ -236,7 +236,7 @@ export class AdminController {
     return this.admin.adminDelistPlugin(requireUser(req).id, id, body.reason);
   }
 
-  @RequirePermission('platform.plugin.manage')
+  @RequirePermission('platform.plugin.delete')
   @Delete('plugins/:id')
   @ApiOperation({ summary: '物理删除插件（admin，任意，含已上架，级联清安装/购买记录）' })
   deletePlugin(@Req() req: Request, @Param('id') id: string) {
