@@ -12,7 +12,8 @@ import { api, type ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { dragRegionProps } from '@/lib/window-drag';
 import { relativeTime } from '@/lib/time';
 import type { NotificationItem, NotificationsResponse } from '@/lib/types';
 
@@ -97,19 +98,20 @@ export function NotificationCenter({
   const unread = data?.unreadCount ?? 0;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col gap-0 sm:max-w-md">
-        <SheetHeader className="border-b">
-          <SheetTitle className="flex items-center gap-2">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* 项 3：改居中悬浮窗（原右侧 Sheet 抽屉）。与钱包/团队/设置面板一致的 Dialog 形态。 */}
+      <DialogContent className="flex h-[72vh] max-h-[72vh] w-[92vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="border-b px-5 py-4" {...dragRegionProps}>
+          <DialogTitle className="flex items-center gap-2" data-tauri-drag-region>
             <BellIcon className="size-4" />通知中心
             {unread > 0 && (
               <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
                 {unread} 条未读
               </span>
             )}
-          </SheetTitle>
-          <SheetDescription>插件过审、新版本推送、消费等消息汇总在此。</SheetDescription>
-        </SheetHeader>
+          </DialogTitle>
+          <DialogDescription>插件过审、新版本推送、消费等消息汇总在此。</DialogDescription>
+        </DialogHeader>
 
         <div className="flex items-center justify-end border-b px-4 py-2">
           <Button
@@ -142,8 +144,8 @@ export function NotificationCenter({
             </div>
           </ScrollArea>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 

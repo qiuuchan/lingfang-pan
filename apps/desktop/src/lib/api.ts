@@ -118,13 +118,13 @@ export function initAuthToken(): string | null {
 // Tauri 命令调用（桌面环境注入 __TAURI__，需 tauri.conf.json 开 withGlobalTauri）。
 export async function tauriInvoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: Function } } }).__TAURI__?.core?.invoke;
-  if (!inv) throw new Error('需在 灵坊工作台 桌面环境中运行');
+  if (!inv) throw new Error('需在 灵坊 桌面环境中运行');
   return inv(cmd, args) as Promise<T>;
 }
 
 export async function tauriListen<T = unknown>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> {
   const listen = (window as unknown as { __TAURI__?: { event?: { listen?: Function } } }).__TAURI__?.event?.listen;
-  if (!listen) throw new Error('需在 灵坊工作台 桌面环境中运行');
+  if (!listen) throw new Error('需在 灵坊 桌面环境中运行');
   return listen(event, handler) as Promise<() => void>;
 }
 

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { LoadingButton } from '@/components/loading-button';
 import { Pagination } from '@/components/pagination';
 import { Stars } from '@/components/stars';
-import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
+import { Shimmer } from '@/lib/motion';
 import { CATEGORY_TABS, categorizePlugin, categoryLabel } from '@/lib/marketplace-categories';
 import { useMarketplaceDetail } from './use-marketplace-detail';
 import { useMarketplaceCatalog } from './use-marketplace-catalog';
@@ -93,13 +93,11 @@ export function MarketplacePluginsSection({ active }: { active: boolean }) {
         <ListSkeleton />
       ) : catalog.total ? (
         <div className="flex flex-col gap-4">
-          <StaggerContainer className="flex flex-col divide-y rounded-lg border" stagger={0.05}>
+          <div className="flex flex-col divide-y rounded-lg border">
             {catalog.pageItems.map((plugin) => (
-              <StaggerItem key={plugin.id} whileHover={{ x: 2, transition: { type: 'spring', stiffness: 300, damping: 20 } }}>
-                <MarketplaceRow plugin={plugin} onOpen={() => { void catalog.openDetail(plugin.id); }} />
-              </StaggerItem>
+              <MarketplaceRow key={plugin.id} plugin={plugin} onOpen={() => { void catalog.openDetail(plugin.id); }} />
             ))}
-          </StaggerContainer>
+          </div>
           <Pagination page={catalog.page} totalPages={catalog.totalPages} onChange={catalog.setPage} />
         </div>
       ) : (

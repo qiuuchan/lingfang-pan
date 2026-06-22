@@ -277,7 +277,7 @@ export default function App() {
   const [pendingAutoFixPrompt, setPendingAutoFixPrompt] = useState<string | null>(null);
   // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
   // platformName 缺省 'LingFang'，logoUrl 缺省空串。admin 改名后全端拉同一值（侧栏 header 同步）。
-  const [platformName, setPlatformName] = useState('灵坊工作台');
+  const [platformName, setPlatformName] = useState('灵坊');
   const [platformLogoUrl, setPlatformLogoUrl] = useState('');
   // 组D 首次启动安装向导：backendUrl 已配置且无 token 时查 /api/setup/status，
   // needsSetup=true（DB 无 PLATFORM_ADMIN）则渲染 SetupWizard 替代 Auth。
@@ -756,7 +756,7 @@ export default function App() {
   );
 }
 
-function Centered({ children, chrome = false, label = '灵坊工作台' }: { children: ReactNode; chrome?: boolean; label?: string }) {
+function Centered({ children, chrome = false, label = '灵坊' }: { children: ReactNode; chrome?: boolean; label?: string }) {
   // chrome=true（登录/安装向导/恢复中等无侧边栏全屏态）：顶部渲染 TitleBar（承载窗口拖拽 + 最小化/最大化/关闭），
   // 内容在剩余空间垂直水平居中。decorations:false 隐藏了系统标题栏，登录页必须自实现拖拽入口。
   const body = (
