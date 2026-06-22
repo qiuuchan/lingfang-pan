@@ -56,6 +56,7 @@ apps/collab-api/prisma/.generated/
 .opencode/
 .zcode/
 .agents/
+.kimi-code/
 pnpm-lock.yaml
 
 # R4 换装逻辑来源（独立工具脚本，仅作复刻参考，不入仓）
