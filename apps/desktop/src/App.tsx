@@ -431,10 +431,14 @@ export default function App() {
   }, []);
 
   // Task 9：Esc 关闭创建器悬浮窗（与浮窗标题栏「返回（Esc）」提示一致）。
+  // 若创建器内部有 Dialog/Sheet 打开（历史/预览/上传命名等），Esc 优先交给它们关闭，不连带关浮窗。
   useEffect(() => {
     if (!creatorOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCreatorOpen(false);
+      if (e.key !== 'Escape') return;
+      const innerOverlayOpen = document.querySelector('[role="dialog"][data-state="open"], [role="presentation"][data-state="open"]');
+      if (innerOverlayOpen) return; // 交给 Radix overlay 自身处理
+      setCreatorOpen(false);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

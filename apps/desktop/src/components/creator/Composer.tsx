@@ -125,7 +125,7 @@ export function Composer({
         <div className="relative">
           <Textarea
             ref={textareaRef}
-            placeholder="描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件。输入 @ 可引用已有插件作参考。"
+            placeholder="描述你想创建的插件，例如：帮我做一个能整理会议纪要并生成行动项的插件…"
             value={input}
             onChange={(event) => handleInputChange(event.target.value)}
             onKeyDown={(event) => {
@@ -196,6 +196,10 @@ export function Composer({
                 ))}
               </SelectContent>
             </Select>
+            {/* Task 11：精简的快捷键提示（替代原 placeholder 里冗长的 @ 说明）。 */}
+            <span className="hidden text-[11px] text-muted-foreground/70 sm:inline">
+              <kbd className="rounded border bg-muted px-1">@</kbd> 引用插件 · <kbd className="rounded border bg-muted px-1">Enter</kbd> 发送
+            </span>
           </div>
           {streaming ? (
             <Button variant="destructive" onClick={onStop}>
