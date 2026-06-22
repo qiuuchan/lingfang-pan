@@ -1,0 +1,31 @@
+{
+  "id": "rbac-polish",
+  "name": "rbac-polish",
+  "title": "权限管理系统完善",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-22",
+  "completedAt": "2026-06-22",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-22-member-role-display",
+    "06-22-permission-split",
+    "06-22-team-admin-ui-polish",
+    "06-22-admin-team-roles"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
