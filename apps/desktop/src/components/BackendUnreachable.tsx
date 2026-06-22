@@ -10,7 +10,7 @@
 // - 与创建器 env-readiness 横幅互补：横幅处理「地址未配置」，本组件处理「地址已配但 fetch 失败」。
 
 import { useState } from 'react';
-import { CloudOffIcon, RefreshCwIcon, SettingsIcon } from 'lucide-react';
+import { CloudOffIcon, RefreshCwIcon } from "lucide-react";
 import { apiBase, testBackendUrl, dispatchBackendReachable } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
@@ -73,11 +73,8 @@ export function BackendUnreachable({ onGoSettings }: BackendUnreachableProps) {
             <RefreshCwIcon className={retrying ? 'size-4 animate-spin' : 'size-4'} />
             {retrying ? '正在重试…' : '重试连接'}
           </Button>
-          <Button variant="outline" className="flex-1" onClick={onGoSettings}>
-            <SettingsIcon className="size-4" />
-            去设置
-          </Button>
         </div>
+        <p className="text-xs text-muted-foreground">后端地址已内置，如需更改请联系管理员修改安装包配置。</p>
       </div>
     </div>
   );

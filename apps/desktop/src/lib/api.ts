@@ -24,51 +24,26 @@ function readStoredBackendUrl(): string | null {
   }
 }
 
-export function configureApiBase(url: string | null | undefined, { persist = false }: { persist?: boolean } = {}) {
-  const normalized = normalizeBackendUrl(url);
-  if (!normalized) return false;
-  apiBaseUrl = normalized;
-  if (persist) {
-    try {
-      localStorage.setItem(BACKEND_URL_STORAGE_KEY, normalized);
-    } catch {
-      /* localStorage 不可用则只更新当前会话 */
-    }
-  }
+/**
+ * 后端地址已内置（app.config.json），不可在运行时修改。
+ * 保留函数签名仅为向后兼容（旧调用点），实际为 no-op——地址始终取自 initApiBase 注入的内置值。
+ */
+export function configureApiBase(_url: string | null | undefined, _opts: { persist?: boolean } = {}) {
   return true;
 }
 
 export function clearApiBase() {
-  apiBaseUrl = '';
-  try {
-    localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
-  } catch {
-    /* localStorage 不可用则忽略 */
-  }
+  /* no-op：地址内置，不清除。 */
 }
 
+/**
+ * 初始化后端地址：地址内置在 app.config.json（api_base），终端用户不可改。
+ * 忽略历史的 localStorage backendUrl（旧版用户首次升级后会自动用内置地址）。
+ */
 export function initApiBase(defaultUrl?: string | null) {
-  const stored = readStoredBackendUrl();
-  if (stored) {
-    apiBaseUrl = stored;
-    return stored;
-  }
   const fallback = normalizeBackendUrl(defaultUrl);
-  if (fallback) {
-    apiBaseUrl = fallback;
-    // DESK-SHELL-01 修复：fallback 分支也持久化（与 configureApiBase 的 persist 对齐），
-    // 否则 lf:session 写入但 lf:backendUrl 仍为空，后续重启若 app.config.json 的 api_base
-    // 被清空/替换域名，initApiBase(null) 会得到空 base，但 loadStoredSession 仍返回带 token 的 session，
-    // 主壳陷入「已登录但无后端」的死循环（refreshSession 抛无 code 的 Error，不触发 reset）。
-    try {
-      localStorage.setItem(BACKEND_URL_STORAGE_KEY, fallback);
-    } catch {
-      /* localStorage 不可用则只更新当前会话 */
-    }
-    return fallback;
-  }
-  apiBaseUrl = '';
-  return null;
+  apiBaseUrl = fallback ?? '';
+  return fallback;
 }
 
 export function setApiBase(url: string | null | undefined) {

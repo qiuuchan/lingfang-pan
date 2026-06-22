@@ -11,9 +11,9 @@
 //
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { RefreshCwIcon, ServerIcon, HistoryIcon } from 'lucide-react';
+import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { errorMessage, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
+import { errorMessage, type ApiError } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
 import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
 import type { ProbeResult, RuntimeTarget } from '@/lib/cli-types';
@@ -61,12 +61,8 @@ export function Settings({
   value?: string;
   onValueChange?: (value: string) => void;
 }) {
-  const { backendUrl, saveBackendUrl, resetSession } = useApp();
+  const { backendUrl } = useApp();
 
-  // === Tab3 后端地址 Card state（零改动保留原逻辑） ===
-  const [backendInput, setBackendInput] = useState(backendUrl || '');
-  const [testingBackend, setTestingBackend] = useState(false);
-  const [savingBackend, setSavingBackend] = useState(false);
 
   // === Tab3 检查更新 state（design §3.2） ===
   // checking：检查中态；updateMeta：非 null 时弹更新 Dialog；updateInstalling：下载安装中（锁 Dialog）。
@@ -109,42 +105,7 @@ export function Settings({
     void probeAll();
   }, [probeAll]);
 
-  // === Tab3 后端地址 Card 逻辑（零改动，从原 Settings 搬入） ===
-  async function testBackend() {
-    const normalized = normalizeBackendUrl(backendInput);
-    if (!normalized) return toast.error('输入以 http:// 或 https:// 开头的后端地址');
-    setTestingBackend(true);
-    try {
-      await testBackendUrl(normalized);
-      toast.success('后端连接正常');
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setTestingBackend(false);
-    }
-  }
-
-  async function saveBackend() {
-    const normalized = normalizeBackendUrl(backendInput);
-    if (!normalized) return toast.error('输入以 http:// 或 https:// 开头的后端地址');
-    setSavingBackend(true);
-    try {
-      await testBackendUrl(normalized);
-      const changed = normalized !== backendUrl;
-      if (!saveBackendUrl(normalized)) return toast.error('公司平台地址格式不正确');
-      setBackendInput(normalized);
-      if (changed) {
-        resetSession();
-        toast.success('公司平台地址已保存，需重新登录');
-      } else {
-        toast.success('公司平台地址已保存');
-      }
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSavingBackend(false);
-    }
-  }
+  // 后端地址已内置（app.config.json），不再可配——原 testBackend/saveBackend 逻辑移除。
 
   // === Tab3 检查更新逻辑（design §3.2） ===
   // checkUpdate：backendUrl 空 → 友好提示；返 null → 已是最新；非 null → 弹 Dialog。
@@ -222,7 +183,7 @@ export function Settings({
           <TabsTrigger value="cli" className="px-3">脚本运行环境</TabsTrigger>
           <TabsTrigger value="gateway" className="px-3">模型与计费</TabsTrigger>
           <TabsTrigger value="plugins" className="px-3">插件</TabsTrigger>
-          <TabsTrigger value="backend" className="px-3">公司平台</TabsTrigger>
+          <TabsTrigger value="backend" className="px-3">更新</TabsTrigger>
         </TabsList>
 
         {/* 项 11：通用（关窗行为等应用级偏好） */}
@@ -251,39 +212,10 @@ export function Settings({
 
         {/* Tab3：后端服务地址（零功能改动搬入） */}
         <TabsContent value="backend" keepMounted className="mt-4 focus-visible:outline-none">
-          <Card className="w-full">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <ServerIcon className="size-5 text-primary" />
-                <CardTitle>公司平台地址</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="text-sm text-muted-foreground">
-                当前地址：<span className="font-mono text-foreground">{backendUrl || '未配置'}</span>
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="backendServiceUrl">平台地址</Label>
-                <Input
-                  id="backendServiceUrl"
-                  placeholder="例如 https://platform.example.com"
-                  value={backendInput}
-                  onChange={(e) => setBackendInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && saveBackend()}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <LoadingButton variant="outline" loading={testingBackend} onClick={() => { void testBackend(); }}>测试连接</LoadingButton>
-                <LoadingButton loading={savingBackend} onClick={() => { void saveBackend(); }}>测试并保存</LoadingButton>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                切换到另一个平台时当前登录会失效，保存后需重新登录。
-              </p>
-            </CardContent>
-          </Card>
+          {/* 后端地址已内置（app.config.json），不再在此可配。仅保留检查更新 Card。 */}
 
-          {/* 检查更新 Card（design §3.2）：放在后端地址 Card 下方，复用 backendUrl 作为更新源。 */}
-          <Card className="mt-4 w-full">
+          {/* 检查更新 Card：连接公司平台检查新版本，发现更新后可下载安装包并自动重启。 */}
+          <Card className="w-full">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <RefreshCwIcon className="size-5 text-primary" />
@@ -294,6 +226,9 @@ export function Settings({
               <p className="text-sm text-muted-foreground">
                 连接公司平台检查新版本，发现更新后可下载安装包并自动重启。
               </p>
+              <div className="text-xs text-muted-foreground">
+                平台地址（内置）：<span className="font-mono text-foreground">{backendUrl || '未配置'}</span>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
                 <Button variant="outline" onClick={() => setChangelogOpen(true)}>

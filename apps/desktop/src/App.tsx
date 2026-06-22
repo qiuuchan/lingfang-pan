@@ -14,6 +14,8 @@ import { NotificationCenter } from '@/components/NotificationCenter';
 import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
+import { FloatingCreateButton } from '@/components/FloatingCreateButton';
+import { FloatingCreator } from '@/components/creator/FloatingCreator';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
@@ -22,7 +24,6 @@ import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
 import { SetupWizard } from '@/pages/SetupWizard';
 import { Home } from '@/pages/Home';
-import { PluginCreator } from '@/pages/PluginCreator';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 import { isPluginCenterView } from '@/lib/plugin-center';
 
@@ -230,6 +231,8 @@ export default function App() {
   });
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
+  // v4 形态：AI 创建插件为悬浮窗（对话式流式），FAB 唤起，不切 view。
+  const [creatorOpen, setCreatorOpen] = useState(false);
   // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
   const [walletOpen, setWalletOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -618,7 +621,6 @@ export default function App() {
 
   let body: ReactNode;
   if (view === 'home') body = <Home />;
-  else if (view === 'creator') body = <PluginCreator />;
   else if (view === 'plugins' || view === 'author-center' || view === 'market') body = <Plugins />;
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
   else if (view === 'team-admin') body = <TeamAdmin />;
@@ -666,7 +668,9 @@ export default function App() {
                   </>
                 )}
 
-                {/* 创建器悬浮窗 + FAB 已随 code_assistant CLI 移除（relay 上线，不再本地 CLI 生成插件）。 */}
+                {/* AI 创建插件：v4 形态悬浮窗（对话式流式，relay 后端）+ 右下角 FAB 入口。 */}
+                {creatorOpen && <FloatingCreator onClose={() => setCreatorOpen(false)} />}
+                <FloatingCreateButton open={creatorOpen} onClick={() => setCreatorOpen(true)} />
               </>
             )}
           </main>
