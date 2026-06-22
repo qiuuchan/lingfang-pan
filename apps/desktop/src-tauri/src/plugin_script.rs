@@ -23,7 +23,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use crate::code_assistant::{resolve_workspace, run_capture_with_env, CapturedOutput};
+use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutput};
 use crate::embedded_runtime::EmbeddedRuntime;
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。

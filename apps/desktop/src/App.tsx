@@ -5,7 +5,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
-import { DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
@@ -15,17 +14,14 @@ import { NotificationCenter } from '@/components/NotificationCenter';
 import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
-import { FloatingCreateButton } from '@/components/FloatingCreateButton';
+
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
 import { loadPlugins } from '@/pages/plugins-runtime';
-// 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
-// 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
 import { SetupWizard } from '@/pages/SetupWizard';
 import { Home } from '@/pages/Home';
-import { PluginCreatorHome } from '@/pages/PluginCreatorHome';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 import { isPluginCenterView } from '@/lib/plugin-center';
 
@@ -66,10 +62,6 @@ interface AppContextValue {
   openNotifications: () => void;
   /** 项 5：打开团队管理居中悬浮窗。 */
   openTeamAdmin: () => void;
-  /** 项 14：激活的 Skill id 列表（创建器 systemPrompt 拼装用）。 */
-  activeSkillIds: string[];
-  /** 项 14：切换某 Skill 激活态。 */
-  toggleSkill: (id: string) => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
@@ -134,26 +126,7 @@ function saveRecent(tenantId: string | null, recent: LoadedPlugin[]) {
   }
 }
 
-// 项 14：激活的 Skill 集合（创建器 systemPrompt 拼装用）。默认 DEFAULT_ACTIVE_SKILLS，
-// 用户在创建器 Skill 选择器里增减后持久化，跨会话保留。
-const ACTIVE_SKILLS_KEY = 'lf:active-skills';
-function loadActiveSkills(): string[] {
-  try {
-    const raw = localStorage.getItem(ACTIVE_SKILLS_KEY);
-    if (!raw) return [...DEFAULT_ACTIVE_SKILLS];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [...DEFAULT_ACTIVE_SKILLS];
-  } catch {
-    return [...DEFAULT_ACTIVE_SKILLS];
-  }
-}
-function saveActiveSkills(ids: string[]) {
-  try {
-    localStorage.setItem(ACTIVE_SKILLS_KEY, JSON.stringify(ids));
-  } catch (err) {
-    reportPersistenceFailure(err);
-  }
-}
+// 激活 Skill 集合已随创建器移除（systemPrompt 拼装是创建器专属）。
 
 const emptySession: Session = {
   token: null,
@@ -256,15 +229,6 @@ export default function App() {
   });
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
-  // Task 9 创建器悬浮窗：FAB / setView('creator') 唤起，覆盖主体区为浮动窗口。
-  // 项 7：开关态持久化（lf:creator-open），跨重启保留「上次是否打开」；背景模糊（见 overlay className）。
-  const [creatorOpen, setCreatorOpenState] = useState<boolean>(() => {
-    try { return localStorage.getItem('lf:creator-open') === '1'; } catch { return false; }
-  });
-  const setCreatorOpen = useCallback((v: boolean) => {
-    setCreatorOpenState(v);
-    try { localStorage.setItem('lf:creator-open', v ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
-  }, []);
   // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
   const [walletOpen, setWalletOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -276,8 +240,6 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
   const [closePromptOpen, setClosePromptOpen] = useState(false);
-  // 项 14：激活的 Skill id 列表（创建器 systemPrompt 拼装用），持久化 lf:active-skills。
-  const [activeSkillIds, setActiveSkillIds] = useState<string[]>(loadActiveSkills);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -298,9 +260,10 @@ export default function App() {
   }, [session.tenantId]);
   // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway'。
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('cli');
-  // 模型配置刷新信号：设置页保存绑定后 bumpModelConfig() 递增，PluginCreatorHome 依赖它重拉模型。
-  const [modelConfigVersion, setModelConfigVersion] = useState(0);
-  const bumpModelConfig = useCallback(() => setModelConfigVersion((v) => v + 1), []);
+  // 模型配置刷新信号已随创建器移除（relay 上线后无需前端 bumpModelConfig）。
+  // 保留 no-op 存根维持 useApp 形状稳定，避免大面积类型改动。
+  const modelConfigVersion = 0;
+  const bumpModelConfig = useCallback(() => undefined, []);
   // 一键修复：Plugins 页设 stderr prompt，跳创建器后创建器读取并自动 send 给 AI 修。
   const [pendingAutoFixPrompt, setPendingAutoFixPrompt] = useState<string | null>(null);
   // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
@@ -324,21 +287,8 @@ export default function App() {
   const openNotifications = useCallback(() => setNotifOpen(true), []);
   // 项 5：打开团队管理居中悬浮窗。
   const openTeamAdmin = useCallback(() => setTeamAdminOpen(true), []);
-  // 项 14：切换某 Skill 激活态（创建器 systemPrompt 据此动态拼装）。
-  const toggleSkill = useCallback((id: string) => {
-    setActiveSkillIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      saveActiveSkills(next);
-      return next;
-    });
-  }, []);
 
   const setView = useCallback((nextView: View) => {
-    // Task 9：'creator' 不再切换 view，改为打开创建器悬浮窗（保留底层页面，关闭即回到原页）。
-    if (nextView === 'creator') {
-      setCreatorOpen(true);
-      return;
-    }
     if (nextView === 'settings') {
       openAccountSettings('settings');
       return;
@@ -358,7 +308,6 @@ export default function App() {
     setProfileOpen(false);
     setTeamAdminOpen(false);
     setNotifOpen(false);
-    setCreatorOpen(false);
     setViewState(nextView);
   }, [openAccountSettings]);
 
@@ -406,13 +355,11 @@ export default function App() {
     // DESK-SHELL-07 修复：登出时清空 currentDraft，避免同机下一登录用户短暂看到上一用户的草稿。
     // App 始终挂载（登出渲染 Auth 不卸载），useState 不会自动重置。
     setCurrentDraft(null);
-    // 项 7：登出关闭创建器悬浮窗并清持久化，避免下次登录自动弹出（残留 lf:creator-open=1）。
-    setCreatorOpen(false);
     sessionRef.current = emptySession;
     setSession(emptySession);
     setRunningPlugin(null);
     setView('home');
-  }, [setCreatorOpen]);
+  }, []);
 
   // 启动时若本地存有 session，静默调 /api/auth/me 刷新；仅 token 真无效（401）才登出。
   // 网络/后端未启动时保留已恢复的 session，进主界面，下次启动重试。
@@ -562,18 +509,6 @@ export default function App() {
 
   // Task 9：Esc 关闭创建器悬浮窗（与浮窗标题栏「返回（Esc）」提示一致）。
   // 若创建器内部有 Dialog/Sheet 打开（历史/预览/上传命名等），Esc 优先交给它们关闭，不连带关浮窗。
-  useEffect(() => {
-    if (!creatorOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const innerOverlayOpen = document.querySelector('[role="dialog"][data-state="open"], [role="presentation"][data-state="open"]');
-      if (innerOverlayOpen) return; // 交给 Radix overlay 自身处理
-      setCreatorOpen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [creatorOpen]);
-
   const pinPlugin = useCallback((p: LoadedPlugin) => {
     setPinnedPlugins((prev) => {
       if (prev.some((x) => x.id === p.id)) return prev;
@@ -644,7 +579,6 @@ export default function App() {
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
     openAccountSettings, openNotifications, openTeamAdmin,
-    activeSkillIds, toggleSkill,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
@@ -730,31 +664,7 @@ export default function App() {
                   </>
                 )}
 
-                {/* Task 9 / 项 13 创建器悬浮窗：居中 ~70% 面板 + 模糊遮罩；始终挂载以保留对话 listener 状态。
-                    外层 absolute inset-0 是半透模糊遮罩（bg-background/40 backdrop-blur），内层是居中不透明面板（约屏宽高 70%）。 */}
-                <div className={creatorOpen ? 'absolute inset-0 z-30 flex items-center justify-center bg-background/40 backdrop-blur-xl' : 'hidden'}>
-                  <div className="flex h-[85vh] w-[88vw] min-h-[480px] min-w-[960px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
-                    {/* 悬浮窗标题栏：独立的关闭入口，避免与创建器自身 header 的操作按钮重叠。 */}
-                    <div className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-                      <span className="text-xs text-muted-foreground">创建插件 · 悬浮窗</span>
-                      <button
-                        type="button"
-                        onClick={() => setCreatorOpen(false)}
-                        aria-label="关闭创建器"
-                        title="返回（Esc）"
-                        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      >
-                        <XIcon className="size-4" />
-                      </button>
-                    </div>
-                    <div className="min-h-0 flex-1">
-                      <PluginCreatorHome />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Task 9 创建插件 FAB：右下角悬浮入口，创建器打开时自动隐藏。 */}
-                <FloatingCreateButton open={creatorOpen} onClick={() => setCreatorOpen(true)} />
+                {/* 创建器悬浮窗 + FAB 已随 code_assistant CLI 移除（relay 上线，不再本地 CLI 生成插件）。 */}
               </>
             )}
           </main>
