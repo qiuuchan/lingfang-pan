@@ -127,14 +127,15 @@ CORS_ALLOWED_ORIGINS=http://localhost:1420,https://desktop.example.com
 
 > ⚠️ 本节描述的 `/llm-bindings`、`/llm/*` 路由与 LLM key 绑定/代理逻辑已**全部迁移至 collab-api（NestJS，`/api/*` 前缀）**，本 Rust 服务不再承载。以下为历史脉络保留；当前实际契约以 [docs/collab-api.md](collab-api.md) 为权威。
 
-> 🔁 **架构翻转（2026-06-22）**：原 BYOK（用户自带 key、桌面直连上游、平台不计费）已被
-> **平台托管渠道 + 统一中转 + 灵石按量计费**取代。新系统见
-> [docs/billing-and-relay-design.md](billing-and-relay-design.md)：
->  - `/api/relay/v1/{chat/completions,messages,images/generations,images/edits,models}` 中转层（fetch 直连上游，
->    OpenAI/Anthropic 双协议，SSE 流式透传）。
+> 🔁 **架构翻转（2026-06-22，v0.0.6 彻底完成）**：原 BYOK（用户自带 key、桌面直连上游、平台不计费）
+> 已被 **平台托管渠道 + 统一中转 + 灵石按量计费**完全取代，旧 BYOK 代码与表已**全部删除**：
+>  - `/api/relay/v1/*` 中转层（fetch 直连上游，OpenAI/Anthropic 双协议，SSE 流式透传），见
+>    [docs/billing-and-relay-design.md](billing-and-relay-design.md)。
 >  - 灵石（Credit）按团队账户计费，单价/版本/渠道全后台可配；调用日志多维度可查。
 >  - 前台仅「快速版/高级版」两固定版本（协议层强制 `model: fast|premium`）。
->  - 旧 BYOK（TenantLlmBinding / 单活跃 LlmGateway）保留过渡，P8 清理后 drop。
+>  - **已删除**：`LlmGateway` / `TenantLlmBinding` 表、`LlmService` / `LlmController`、
+>    `/api/llm/*` 与 `/api/admin/llm-providers` 路由、`seed-llm-gateways`、桌面 `ModelGatewayTab`、
+>    管理端 `providers-view`。下方历史脉络仅作存档。
 
 平台不做 token 计量、扣费或分成。租户在第三方 OpenAI 兼容网关中创建 key、设配额；平台只存绑定、路由请求并审计。
 

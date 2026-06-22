@@ -48,7 +48,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { view: 'plugins', label: '插件管理', icon: PlugIcon },
       { view: 'applications', label: '审批管理', icon: CheckCircleIcon },
-      { view: 'llmProviders', label: '模型服务', icon: CloudCogIcon },
     ],
   },
   {

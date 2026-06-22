@@ -6,7 +6,6 @@ const loaders: Record<View, () => Promise<unknown>> = {
   platformAdmins: () => import('@/components/admins-view'),
   teams: () => import('@/components/teams-view'),
   plugins: () => import('@/components/plugins-view'),
-  llmProviders: () => import('@/components/providers-view'),
   applications: () => import('@/components/applications-view'),
   audit: () => import('@/components/audit-view'),
   releases: () => import('@/components/releases-view'),

@@ -52,7 +52,6 @@ const PluginsView = lazy(() => import('@/components/plugins-view').then((m) => (
 const ApplicationsView = lazy(() => import('@/components/applications-view').then((m) => ({ default: m.ApplicationsView })));
 const AdminsView = lazy(() => import('@/components/admins-view').then((m) => ({ default: m.AdminsView })));
 const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ default: m.AuditView })));
-const ProvidersView = lazy(() => import('@/components/providers-view').then((m) => ({ default: m.ProvidersView })));
 const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
 const ReleasesView = lazy(() => import('@/components/releases-view').then((m) => ({ default: m.ReleasesView })));
 const RolesView = lazy(() => import('@/components/roles-view').then((m) => ({ default: m.RolesView })));
@@ -344,7 +343,6 @@ export default function App() {
                 {view === 'platformAdmins' && <AdminsView />}
                 {view === 'teams' && <TeamsView />}
                 {view === 'plugins' && <PluginsView />}
-                {view === 'llmProviders' && <ProvidersView />}
                 {view === 'applications' && <ApplicationsView />}
                 {view === 'audit' && <AuditView />}
                 {view === 'releases' && <ReleasesView />}

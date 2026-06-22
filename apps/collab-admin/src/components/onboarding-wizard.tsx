@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRightIcon,
   CheckIcon,
-  CloudCogIcon,
+  ServerIcon,
   BoxesIcon,
   RocketIcon,
   SettingsIcon,
@@ -49,10 +49,10 @@ const STEPS: Step[] = [
   {
     key: 'provider',
     index: 2,
-    title: '设置模型服务',
-    description: '在「模型服务」页接入 LLM 提供方并启用一条默认服务，AI 生成插件等功能才能正常调用。',
-    icon: CloudCogIcon,
-    targetView: 'llmProviders',
+    title: '配置模型渠道',
+    description: '在「渠道管理」页接入上游模型渠道并绑定范围，中转计费系统才能对外服务 AI 调用。',
+    icon: ServerIcon,
+    targetView: 'channels',
   },
   {
     key: 'team',

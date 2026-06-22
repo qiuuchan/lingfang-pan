@@ -19,8 +19,8 @@ export const TEAM_ROLE = ['TEAM_ADMIN', 'MEMBER'] as const;
 
 // === LLM 网关目录相关常量 ===
 
-/** LLM 网关提供方白名单（平台维护，provider 为 String 非 enum，design.md D2）。
- *  seed 默认网关用这些值；custom 兜底自建网关。Service 层校验 provider 属于此集合。 */
+/** 渠道上游 provider 白名单（Channel.provider 校验用，平台维护）。
+ *  custom 兜底自建上游。ChannelService 校验 provider 属于此集合。 */
 export const LLM_PROVIDER = [
   'openai',
   'anthropic',
@@ -31,8 +31,6 @@ export const LLM_PROVIDER = [
   'custom',
 ] as const;
 
-/** LLM 网关状态（与 LlmGatewayStatus 对齐，ENABLED 租户可见 / DISABLED 软删除）。 */
-export const LLM_GATEWAY_STATUS = ['ENABLED', 'DISABLED'] as const;
 
 // === 应用版本发布相关常量 ===
 
