@@ -14,7 +14,7 @@ interface TitleBarProps {
   label?: string;
 }
 
-export function TitleBar({ sidebarOpen, onToggleSidebar, label = 'LingFang' }: TitleBarProps) {
+export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作台' }: TitleBarProps) {
   // getCurrentWindow 在无 Tauri 壳（浏览器直连 vite dev server）时返回的对象不完整，
   // 调 isMaximized/onResized 会抛「Cannot read properties of undefined (reading 'metadata')」。
   // 运行时检测 __TAURI_INTERNALS__（withGlobalTauri:true 时注入），缺失则降级为纯展示标题栏（无窗口控制）。

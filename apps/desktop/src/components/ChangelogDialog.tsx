@@ -75,7 +75,7 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
               <SparklesIcon className="size-4 text-primary" />
               <DialogTitle className="text-base" data-tauri-drag-region>更新日志</DialogTitle>
             </div>
-            <DialogDescription className="sr-only">查看 LingFang 各版本的变更说明</DialogDescription>
+            <DialogDescription className="sr-only">查看 灵坊工作台 各版本的变更说明</DialogDescription>
             <LoadingButton variant="ghost" size="sm" loading={status === 'loading'} onClick={load} className="h-7 px-2 text-xs">
               刷新
             </LoadingButton>
