@@ -65,17 +65,21 @@ describe('CreditService reserve/reconcile/refund', () => {
     // cap=200, real=50 → actual=50, refund=150
     const charged = await svc.reconcile('t1', 200, 50, 'log1', 'u1');
     expect(charged).toBe(50);
-    // 退回 150（increment）+ 写 llm_consume DEBIT 50
-    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { increment: 150 } } }));
+    // 账本自洽模型：全额退回预扣（increment 200）+ 实扣 50（decrement 50）= 净 -50
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { increment: 200 } } }));
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { decrement: 50 } } }));
     const debitCreate = tx.creditLedger.create.mock.calls.find((c) => c[0].data.source === 'llm_consume');
     expect(debitCreate?.[0].data.amount).toBe(50);
+    const refundCreate = tx.creditLedger.create.mock.calls.find((c) => c[0].data.source === 'refund');
+    expect(refundCreate?.[0].data.amount).toBe(200);
   });
 
   it('reconcile: real>cap 时实际只扣 cap（用户保护，超出不收费）', async () => {
-    // cap=200, real=500 → actual=200（cap 内全额），refund=0
+    // cap=200, real=500 → actualCharge=200（cap 内全额）；退回 200 + 实扣 200 = 净 -200
     const charged = await svc.reconcile('t1', 200, 500, 'log1', 'u1');
     expect(charged).toBe(200);
-    expect(tx.teamCredit.update).not.toHaveBeenCalled(); // refund=0 不调 increment
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { increment: 200 } } }));
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { decrement: 200 } } }));
     const debitCreate = tx.creditLedger.create.mock.calls.find((c) => c[0].data.source === 'llm_consume');
     expect(debitCreate?.[0].data.amount).toBe(200);
   });

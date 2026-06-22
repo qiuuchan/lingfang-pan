@@ -114,8 +114,13 @@ export class CreditService {
 
   /**
    * 实算冲销：实际计费 = min(realCredits, cap)（cap 为单次硬上限，保护用户免被超长输出刷爆）。
-   * 退回未用预留 = cap - actualCharge（CREDIT，source=reconcile）。
-   * 写 reconcile 流水 + 返回实际扣减的灵石数（供写 LlmCallLog.credits）。
+   *
+   * 账本自洽模型（每行流水都对应一次 balance 变动，流水求和 == 余额变动）：
+   *  - reserve 已 DEBIT(cap)  [balance -= cap]
+   *  - reconcile：CREDIT(cap) 退回全部预扣  [balance += cap]
+   *               + DEBIT(actualCharge, llm_consume) 实扣  [balance -= actualCharge]
+   *  - 净效果：-cap + cap - actualCharge = -actualCharge ✓
+   * 返回实际扣减的灵石数（供写 LlmCallLog.credits）。
    */
   async reconcile(
     teamId: string,
@@ -124,12 +129,13 @@ export class CreditService {
     callLogId: string,
     actorUserId: string | null,
   ): Promise<number> {
+    // 确保团队灵石账户存在（cap<=0 事后计费路径下，reserve 不建账户，此处补建以扣除余额）。
+    await this.ensureAccount(teamId);
     if (cap <= 0) {
-      // 未预扣模式：事后直接扣实际额（actualCredits）。条件扣款防透支（余额不足则扣到 0，差额记 bad_debt——本期简化为扣到 0）。
+      // 未预扣模式：事后直接扣实际额。条件扣款防透支（余额不足则扣到 0，差额不追）。
       const actual = Math.max(0, realCredits);
       if (actual === 0) return 0;
       await this.prisma.$transaction(async (tx) => {
-        // 条件扣款：余额充足才扣全；不足扣到 0（relay 已服务完成，不回滚结果，但记透支标记）。
         const account = await tx.teamCredit.findUnique({ where: { teamId } });
         const balance = account?.balance ?? 0;
         const charge = Math.min(actual, Math.max(0, balance));
@@ -142,16 +148,16 @@ export class CreditService {
       });
       return actual;
     }
-    const actualCharge = Math.min(realCredits, cap); // cap 内全额计费，超出不收费
-    const refund = cap - actualCharge; // 退回未用预留
+    const actualCharge = Math.min(realCredits, cap); // cap 内全额计费，超出不收费（用户保护）
     await this.prisma.$transaction(async (tx) => {
-      if (refund > 0) {
-        await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: refund } } });
-        await tx.creditLedger.create({
-          data: { teamId, amount: refund, direction: 'CREDIT', source: 'refund', reason: '预扣冲销（未用部分退回）', actorUserId, callLogId },
-        });
-      }
+      // 1) 退回全部预扣（与 reserve 的 DEBIT(cap) 对冲，balance 回到调用前）。
+      await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: cap } } });
+      await tx.creditLedger.create({
+        data: { teamId, amount: cap, direction: 'CREDIT', source: 'refund', reason: '预扣退回', actorUserId, callLogId },
+      });
+      // 2) 实扣实际消费额（balance 真正减少 actualCharge）。
       if (actualCharge > 0) {
+        await tx.teamCredit.update({ where: { teamId }, data: { balance: { decrement: actualCharge } } });
         await tx.creditLedger.create({
           data: { teamId, amount: actualCharge, direction: 'DEBIT', source: 'llm_consume', reason: 'AI 对话消费', actorUserId, callLogId },
         });
