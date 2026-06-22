@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 // - run_capture_with_env：带超时的同步运行（用于 venv 创建 / pip install / pnpm install 等阻塞阶段）。
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
-use crate::code_assistant::{kill_child_tree, run_capture_with_env};
+use crate::process_util::{kill_child_tree, run_capture_with_env};
 use crate::embedded_runtime::EmbeddedRuntime;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
@@ -364,7 +364,7 @@ fn contains_pip_wheel(dir: &std::path::Path) -> bool {
     })
 }
 
-fn captured_detail(captured: &crate::code_assistant::CapturedOutput) -> String {
+fn captured_detail(captured: &crate::process_util::CapturedOutput) -> String {
     let stderr = captured.stderr.trim();
     if !stderr.is_empty() {
         return stderr.to_string();
@@ -612,6 +612,8 @@ pub fn start_plugin(
     store: tauri::State<'_, PluginStore>,
     process_table: tauri::State<'_, PluginProcessTable>,
     plugin_id: String,
+    api_base: Option<String>,
+    auth_token: Option<String>,
 ) -> Result<StartPluginResult, String> {
     use tauri::Emitter;
     // 阶段事件辅助：emit 失败不阻断启动（UI 无监听者或通道错误时静默降级为同步等待）。
@@ -693,7 +695,16 @@ pub fn start_plugin(
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
-    command.env_clear().envs(runtime.env(minimal_env()));
+    // 计费/中转：先经 runtime.env 注入运行时 PATH/pip/npm 变量，再追加 LF_API_BASE / LF_AUTH_TOKEN，
+    // 供 Python/Node 插件经 /api/relay/v1/* 调平台 AI 服务（按团队灵石计费；旧硬编码第三方 key 已移除）。
+    let mut env = runtime.env(minimal_env());
+    if let Some(base) = api_base.as_ref().filter(|b| !b.is_empty()) {
+        env.push((OsString::from("LF_API_BASE"), OsString::from(base)));
+    }
+    if let Some(token) = auth_token.as_ref().filter(|t| !t.is_empty()) {
+        env.push((OsString::from("LF_AUTH_TOKEN"), OsString::from(token)));
+    }
+    command.env_clear().envs(env);
     // Unix：setsid 建独立进程组（detached，stop_plugin 杀整组）。
     #[cfg(unix)]
     {
@@ -939,7 +950,7 @@ fn libc_setsid() {
 /// 历史 bug（Task 4a「Invalid Date」）：旧实现产出 `epoch.毫秒Z`，浏览器 new Date 无法
 /// 解析。统一走 epoch_to_iso8601，保证前端 new Date(started_at) 可解析。
 fn now_iso() -> String {
-    crate::code_assistant::store::now_string()
+    crate::process_util::now_string()
 }
 
 // === 单元测试 ===

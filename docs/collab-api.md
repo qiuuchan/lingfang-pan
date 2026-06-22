@@ -88,6 +88,28 @@ Authorization: Bearer <token>
 | POST | `/api/admin/team-admin-applications/:id/reject` | 审批驳回 |
 | GET | `/api/admin/audit-logs` | 审计日志 |
 
+## 计费与中转（Relay + 灵石 Credit）
+
+> 权威设计：[docs/billing-and-relay-design.md](billing-and-relay-design.md)
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/relay/v1/chat/completions` | OpenAI 兼容聊天转发（`@Public`，DualAuthGuard 鉴权：平台 API Key 或 JWT；SSE 流式；扣团队灵石） |
+| POST | `/api/relay/v1/messages` | Anthropic 兼容消息转发 |
+| POST | `/api/relay/v1/images/generations` | AI 生图（按张计费） |
+| POST | `/api/relay/v1/images/edits` | 生图编辑（multipart 透传，按张计费） |
+| GET  | `/api/relay/v1/models` | 仅返回 `fast`/`premium` 两个版本 |
+| GET/POST/PATCH/DELETE | `/api/admin/billing/channels[/:id]` | 渠道 CRUD + 绑定 + 健康测试 |
+| GET/POST/DELETE | `/api/admin/billing/pricing[/:id]` | 模型定价 |
+| GET/PUT | `/api/admin/billing/tiers[/:tier]` | 模型版本配置 |
+| GET | `/api/admin/billing/credits/teams/:teamId[/ledger]` | 团队灵石余额/流水 |
+| POST | `/api/admin/billing/credits/teams/:teamId/adjustments` | 调整团队灵石 |
+| GET | `/api/admin/billing/call-logs[?teamId&capability&status&...]` | 调用日志多维度查询 |
+| GET/DELETE | `/api/admin/billing/api-keys[/:id]` | API Key 总览/吊销 |
+| GET | `/api/admin/billing/relay-docs` | 接入文档（markdown） |
+| GET/POST/DELETE | `/api/me/api-keys[/:id]` | 当前团队 API Key 自助管理 |
+| GET | `/api/teams/current/credits[/ledger]` | 当前团队灵石 |
+
 ## 插件云端分享 API
 
 `POST /api/plugins/upload` 请求体：

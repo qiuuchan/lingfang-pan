@@ -1,5 +1,12 @@
-"""AI 换装批量版 - API 调用"""
+"""AI 换装批量版 - API 调用
 
+计费/中转改造（见 docs/billing-and-relay-design.md §11）：
+  - 移除硬编码第三方 key 与地址（旧版直连 47.112.8.9:19081，违反需求 #3 且无法计费）。
+  - 改为经「灵坊平台中转」调用：从环境变量读 LF_API_BASE（后端基址）+ LF_AUTH_TOKEN（登录态 JWT
+    或平台 API Key），POST {LF_API_BASE}/api/relay/v1/images/edits，按张扣团队灵石。
+  - 宿主在拉起 Python 插件进程时注入 LF_API_BASE / LF_AUTH_TOKEN（见 plugin_runner minimal_env 扩展）。
+  - 缺失环境变量时抛清晰错误，绝不回退任何硬编码凭据。
+"""
 import io
 import os
 import base64
@@ -11,9 +18,9 @@ from PIL import Image
 
 from templates import PROMPT_MAP
 
-API_URL = "http://47.112.8.9:19081/v1/images/edits"
-MODEL = "gpt-image-2"
-DEFAULT_KEY = "sk-sQXtwgZlIFnvR2dvpgnOz7vj1gYhyxqFV6picL8iJk2lFKOO"
+# 平台中转地址与凭据来自环境变量（由宿主注入）。绝不硬编码第三方 key/地址。
+MODEL = "premium"  # 前台版本哨兵（fast/premium），relay 解析为真实上游模型
+DEFAULT_TIER_QUERY = "premium"
 MAX_RETRIES = 3
 BASE_DELAY = 2.0
 REQUEST_TIMEOUT = 60
@@ -27,6 +34,18 @@ class ApiError(Exception):
 def build_prompt(mode: str) -> str:
     """根据模式名称获取对应 prompt 模板。"""
     return PROMPT_MAP[mode]
+
+
+def _relay_config() -> tuple[str, str]:
+    """读取平台中转配置：返回 (relay_url, auth_token)。缺失抛 ApiError。"""
+    base = os.environ.get("LF_API_BASE", "").rstrip("/")
+    token = os.environ.get("LF_AUTH_TOKEN", "")
+    if not base or not token:
+        raise ApiError(
+            "未配置平台中转凭据（LF_API_BASE / LF_AUTH_TOKEN）。"
+            "请在灵坊客户端「设置 → 模型与计费」确认已登录并连接平台后重试。"
+        )
+    return f"{base}/api/relay/v1/images/edits", token
 
 
 def _open_as_png(path: str) -> tuple[str, bytes]:
@@ -49,29 +68,16 @@ def _open_as_png(path: str) -> tuple[str, bytes]:
 def call_edit_api(
     image_paths: list[str],
     prompt: str,
-    api_key: str = DEFAULT_KEY,
-    api_group: str = "default",
     size: Optional[str] = None,
 ) -> bytes:
-    """调用图像编辑 API，返回第一张结果图的 PNG 字节数据。
+    """调用平台中转的图像编辑 API，返回第一张结果图的 PNG 字节数据。
 
-    Args:
-        image_paths: 图片路径列表（顺序对应 image[]）。
-        prompt: 提示词。
-        api_key: API 密钥。
-        api_group: 分组标识（default/A1/A2/A3）。
-        size: 可选输出尺寸，如 "1024x1024"。
-
-    Returns:
-        PNG 图片二进制数据。
-
-    Raises:
-        ApiError: 重试耗尽后抛出。
+    经 /api/relay/v1/images/edits 转发，按张扣团队灵石（凭据从环境变量读取）。
     """
     last_error: Optional[Exception] = None
     for attempt in range(MAX_RETRIES):
         try:
-            return _do_call(image_paths, prompt, api_key, api_group, size)
+            return _do_call(image_paths, prompt, size)
         except (requests.RequestException, ApiError) as e:
             last_error = e
             if attempt < MAX_RETRIES - 1:
@@ -82,11 +88,10 @@ def call_edit_api(
 def _do_call(
     image_paths: list[str],
     prompt: str,
-    api_key: str,
-    api_group: str,
     size: Optional[str],
 ) -> bytes:
-    """执行单次 API 请求（不含重试）。"""
+    """执行单次平台中转请求（不含重试）。"""
+    relay_url, token = _relay_config()
     entries: list[tuple[str, bytes]] = []
     for p in image_paths:
         entries.append(_open_as_png(p))
@@ -96,20 +101,19 @@ def _do_call(
         for name, data in entries
     ]
 
+    # model 取前台版本哨兵（fast/premium）；relay 解析为真实上游模型并计费。
     data: dict[str, object] = {"model": MODEL, "prompt": prompt}
     if size:
         data["size"] = size
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "X-API-Group": api_group,
-    }
+    headers = {"Authorization": f"Bearer {token}"}
 
     resp = requests.post(
-        API_URL,
+        relay_url,
         headers=headers,
         files=files,
         data=data,
+        params={"model": DEFAULT_TIER_QUERY},
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()

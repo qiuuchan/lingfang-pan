@@ -1,5 +1,5 @@
 use super::*;
-use crate::code_assistant::find_binary;
+use crate::process_util::find_binary;
 
 #[test]
 fn venv_python_path_is_platform_correct() {
@@ -205,7 +205,7 @@ fn process_table_register_and_is_running() {
 
 #[test]
 fn process_table_stop_plugin_kills_running_process() {
-    let _guard = crate::code_assistant::process_tree_test_lock();
+    let _guard = crate::process_util::process_tree_test_lock();
     // take + kill_child_tree 应能杀掉一个运行中的长进程。
     let table = PluginProcessTable::new();
     #[cfg(unix)]
@@ -350,7 +350,7 @@ fn wait_for_crash_detects_immediate_exit() {
 
 #[test]
 fn wait_for_crash_returns_none_for_long_running() {
-    let _guard = crate::code_assistant::process_tree_test_lock();
+    let _guard = crate::process_util::process_tree_test_lock();
     // 存活进程：sleep 10（不会在 500ms 内退出）。
     let mut cmd = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");

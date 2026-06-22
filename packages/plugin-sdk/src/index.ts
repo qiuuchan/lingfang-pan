@@ -5,11 +5,9 @@
 import type { CapabilityKind } from '@lingfang/contract';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
-type ChatInput = { messages: ChatMessage[]; model?: string };
-type CodeAssistantTool = 'claude' | 'codex' | 'opencode';
-type CodeAssistantCheckInput = { tool?: CodeAssistantTool };
-type CodeAssistantRunInput = { tool: CodeAssistantTool; model?: string; prompt: string; workspaceDir?: string };
-type CodeAssistantStopInput = { sessionId: string };
+type ChatInput = { messages: ChatMessage[]; model?: 'fast' | 'premium' };
+type ImageGenerateInput = { prompt: string; model?: 'fast' | 'premium'; size?: string; n?: number };
+type ImageGenerateResult = { images: string[] };
 type PluginFile = { path: string; content: string };
 type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
 type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
@@ -117,11 +115,11 @@ export const sdk = {
   llm: {
     chat: (input: ChatInput) => invoke<string>('llm.chat', input),
   },
-  codeAssistant: {
-    check: (input: CodeAssistantCheckInput = {}) => invoke<unknown>('code-assistant.session', { op: 'check', ...input }),
-    run: (input: CodeAssistantRunInput) => invoke<unknown>('code-assistant.run', input),
-    stop: (sessionId: string) => invoke<void>('code-assistant.session', { op: 'stop', sessionId }),
-    stopInput: (input: CodeAssistantStopInput) => invoke<void>('code-assistant.session', { op: 'stop', ...input }),
+  // 计费/中转：生图走平台 relay（/api/relay/v1/images/generations），按张计费，按团队灵石结算。
+  // 输入 prompt 必填；model 默认 fast；返回 { images: string[] }（url 或 data:base64）。
+  // 系统提示词已由平台强制注入：必须且仅能使用灵坊平台服务（需求 #3）。
+  image: {
+    generate: (input: ImageGenerateInput) => invoke<ImageGenerateResult>('image.generate', input),
   },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),
@@ -139,10 +137,8 @@ export const sdk = {
 export type {
   ChatMessage,
   ChatInput,
-  CodeAssistantTool,
-  CodeAssistantCheckInput,
-  CodeAssistantRunInput,
-  CodeAssistantStopInput,
+  ImageGenerateInput,
+  ImageGenerateResult,
   PluginFile,
   PluginUploadInput,
   PluginSubmitMarketplaceInput,

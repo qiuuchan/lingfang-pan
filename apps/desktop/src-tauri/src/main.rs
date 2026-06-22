@@ -3,10 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
-mod code_assistant;
 mod embedded_runtime;
-mod llm_credentials;
-mod llm_fetch;
+mod process_util;
 mod plugin_runner;
 mod plugin_script;
 mod plugin_security;
@@ -156,195 +154,8 @@ fn invoke_capability(
     capability::invoke(&state.registry, &plugin_id, &kind, &args).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn code_assistant_get_config(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-) -> code_assistant::store::CodeAssistantConfig {
-    code_assistant::get_config(&state)
-}
-
-#[tauri::command]
-fn code_assistant_save_config(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::SaveConfigInput,
-) -> Result<code_assistant::store::CodeAssistantConfig, String> {
-    code_assistant::save_config(&state, input)
-}
-
-#[tauri::command]
-async fn code_assistant_start_session(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, code_assistant::CodeAssistantState>,
-    plugin_store: tauri::State<'_, plugin_store::PluginStore>,
-    mut input: code_assistant::StartSessionInput,
-) -> Result<code_assistant::store::SessionRecord, String> {
-    // 流程重构：plugin_id 为空时用 session_id 生成临时持久化目录（plugins_root/<session_id>/）。
-    // 这样 AI 产出文件仍有持久化目录（重启不丢），上传时 rename_plugin_dir 改正式名。
-    // 非 workspaceDir 且非 plugin_id（纯对话/标题总结）→ 回退 claude-sandbox 隔离目录。
-    let has_plugin_id = input
-        .plugin_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some();
-    if has_plugin_id {
-        let plugin_id = input.plugin_id.as_deref().unwrap_or("").trim().to_string();
-        let plugin_dir = plugin_store.ensure_plugin_dir(&plugin_id)?;
-        input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
-    } else if input
-        .workspace_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .is_none()
-    {
-        // 无 plugin_id 且无 workspace_dir → 用 session_id 作临时 plugin_id（持久化目录）。
-        // session_id 由 code_assistant 内部生成（格式如 claude-<secs>-<nanos>），已通过段级白名单。
-        // 但 session_id 尚未生成（在 code_assistant::start_session 内），这里用时间戳预生成。
-        let temp_id = format!(
-            "temp-{}-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos()
-        );
-        let plugin_dir = plugin_store.ensure_plugin_dir(&temp_id)?;
-        input.workspace_dir = Some(plugin_dir.to_string_lossy().to_string());
-    }
-    let state_inner = state.inner().clone();
-    let session_id = code_assistant::new_session_id(input.tool);
-    let credentials = resolve_sdk_credentials(input.sdk_config.as_ref()).await?;
-    let embedded_runtime_root = Some(
-        embedded_runtime::EmbeddedRuntime::from_app(&app)?
-            .root()
-            .to_path_buf(),
-    );
-    code_assistant::start_session(
-        app,
-        state_inner,
-        input,
-        session_id,
-        credentials,
-        embedded_runtime_root,
-    )
-}
-
-#[tauri::command]
-async fn code_assistant_send_input(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, code_assistant::CodeAssistantState>,
-    input: code_assistant::SendInputInput,
-) -> Result<(), String> {
-    let state_inner = state.inner().clone();
-    let credentials = resolve_sdk_credentials(input.sdk_config.as_ref()).await?;
-    let embedded_runtime_root = Some(
-        embedded_runtime::EmbeddedRuntime::from_app(&app)?
-            .root()
-            .to_path_buf(),
-    );
-    code_assistant::send_input(app, &state_inner, input, credentials, embedded_runtime_root)
-}
-
-async fn resolve_sdk_credentials(
-    sdk_config: Option<&code_assistant::SdkConfigInput>,
-) -> Result<code_assistant::engine::SdkCredentials, String> {
-    let Some(sdk_config) = sdk_config else {
-        return Err("缺少模型服务配置，请先登录并配置平台模型服务".to_string());
-    };
-    let (backend_url, auth_token) = match (
-        sdk_config.backend_url.as_str(),
-        sdk_config.auth_token.as_str(),
-    ) {
-        (url, token) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
-        _ => return Err("缺少后端地址或登录凭证，无法调用 SDK".to_string()),
-    };
-    let Some(credentials) = llm_credentials::fetch_credentials(backend_url, auth_token).await?
-    else {
-        return Err("未获取到模型服务 API Key 或 API URL，请检查模型服务绑定".to_string());
-    };
-    Ok(code_assistant::engine::SdkCredentials {
-        api_key: credentials.api_key,
-        api_url: credentials.api_url,
-    })
-}
-
-#[tauri::command]
-fn code_assistant_stop_session(
-    app: tauri::AppHandle,
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::StopSessionInput,
-) -> Result<(), String> {
-    code_assistant::stop_session(app, &state, input)
-}
-
-#[tauri::command]
-fn code_assistant_list_sessions(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-) -> Vec<code_assistant::store::SessionRecord> {
-    code_assistant::list_sessions(&state)
-}
-
-#[tauri::command]
-fn code_assistant_read_transcript(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::ReadTranscriptInput,
-) -> Result<String, String> {
-    code_assistant::read_transcript(&state, input)
-}
-
-#[tauri::command]
-fn code_assistant_rename_session(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::RenameSessionInput,
-) -> Result<code_assistant::store::SessionRecord, String> {
-    code_assistant::rename_session(&state, input)
-}
-
-#[tauri::command]
-fn code_assistant_delete_session(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::DeleteSessionInput,
-) -> Result<(), String> {
-    code_assistant::delete_session(&state, input)
-}
-
-#[tauri::command]
-fn code_assistant_save_draft(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::SaveDraftInput,
-) -> Result<(), String> {
-    code_assistant::save_draft(&state, input)
-}
-
-#[tauri::command]
-fn code_assistant_update_workspace(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::UpdateWorkspaceInput,
-) -> Result<(), String> {
-    code_assistant::update_workspace(&state, input)
-}
-
-#[tauri::command]
-fn code_assistant_read_draft(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::ReadDraftInput,
-) -> Result<Option<Value>, String> {
-    code_assistant::read_draft(&state, input)
-}
-
-/// 扫描 sandbox 目录收成结构化文件列表（方案A：claude 用 Write 工具把插件文件写到 workspace，
-/// CLI 跑完后 Rust 扫描目录产出 files 供前端构建 PluginDraft）。
-#[tauri::command]
-fn code_assistant_scan_workspace(
-    state: tauri::State<code_assistant::CodeAssistantState>,
-    input: code_assistant::ScanWorkspaceInput,
-) -> Result<Vec<code_assistant::DraftFileJson>, String> {
-    code_assistant::scan_workspace_files(&state, input)
-}
+// code_assistant CLI（ClaudeCode/Codex 子进程）已整体移除：AI 能力统一走平台 relay（见 docs/billing-and-relay-design.md）。
+// 原 code_assistant_* / fetch_models / test_llm_chat 命令及 mod code_assistant / llm_credentials / llm_fetch 一并删除。
 
 /// 定位内置插件目录：开发态用源码路径，打包态用资源目录。
 fn builtin_dir(app: &tauri::App) -> PathBuf {
@@ -419,8 +230,6 @@ fn main() {
                 registry,
                 plugins: loaded,
             });
-            let assistant_state = code_assistant::CodeAssistantState::new(app)?;
-            app.manage(assistant_state);
             // updater 全局 State：缓存 check_update 拿到的 Update，供 download_and_install 取用。
             app.manage(updater::PendingUpdate(std::sync::Mutex::new(None)));
             // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
@@ -453,19 +262,6 @@ fn main() {
             read_plugin_file,
             invoke_capability,
             plugin_net_fetch,
-            code_assistant_get_config,
-            code_assistant_save_config,
-            code_assistant_start_session,
-            code_assistant_send_input,
-            code_assistant_stop_session,
-            code_assistant_list_sessions,
-            code_assistant_read_transcript,
-            code_assistant_rename_session,
-            code_assistant_delete_session,
-            code_assistant_save_draft,
-            code_assistant_update_workspace,
-            code_assistant_read_draft,
-            code_assistant_scan_workspace,
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script,
             plugin_runner::start_plugin,
@@ -479,8 +275,6 @@ fn main() {
             plugin_store::write_plugin_files,
             plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,
-            llm_fetch::fetch_models,
-            llm_fetch::test_llm_chat,
             updater::check_update,
             updater::download_and_install,
             plugin_security::verify_plugin_signature_command,

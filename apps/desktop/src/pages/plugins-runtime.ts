@@ -92,11 +92,7 @@ function sdkShim(pluginId: string): string {
           read: () => Promise.reject(new Error('文件能力需将插件作为内置插件分发')),
         },
         llm: { chat: (input) => call('llm.chat', input || {}) },
-        codeAssistant: {
-          check: (input) => call('code-assistant.session', Object.assign({ op: 'check' }, input || {})),
-          run: (input) => call('code-assistant.run', input || {}),
-          stop: (sessionId) => call('code-assistant.session', { op: 'stop', sessionId }),
-        },
+        image: { generate: (input) => call('image.generate', input || {}) },
         plugin: {
           upload: (input) => call('plugin.upload', input || {}),
           submitMarketplace: (input) => call('plugin.submitMarketplace', input || {}),
@@ -191,20 +187,7 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     );
   }
   if (isBuiltinPlugin(plugin)) {
-    if (kind === 'code-assistant.session') {
-      // RT-08 修复：op 既非 'check' 也非 'stop' 时此前静默落到末尾 invoke_capability，
-      // capability.rs 只识别 fs.read/system.info，其它 kind 返回 NotDeclared('code-assistant.session')，
-      // 用户看到的是与真实原因（op 非法）无关的错误信息。此处显式抛描述性错误。
-      if (args?.op === 'check') {
-        return [
-          { tool: 'claude', display_name: 'ClaudeCode', available: true },
-          { tool: 'codex', display_name: 'Codex', available: true },
-        ];
-      }
-      if (args?.op === 'stop') return tauriInvoke('code_assistant_stop_session', { input: { session_id: args.sessionId } });
-      throw new Error(`code-assistant.session 需要 op='check' 或 'stop'，收到：${args?.op ?? String(args?.op)}`);
-    }
-    if (kind === 'code-assistant.run') return tauriInvoke('code_assistant_start_session', { input: args || {} });
+    // code-assistant CLI 已删除（AI 能力走 relay）；builtin 插件如需 AI 用 sdk.llm.chat/image.generate。
     // R5 net.fetch：内置插件网络请求走 Rust plugin_net_fetch（绕 webview CORS）。
     // 仅 manifest 声明了 net.fetch 的插件可用（Rust 侧二次校验）。返回 { status, headers, body }。
     if (kind === 'net.fetch') {
@@ -213,12 +196,29 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
   if (kind === 'llm.chat') {
-    // RT-03 修复（部分）：ADR-0002 承诺的 /api/llm/proxy 路由在 collab-api 尚未实现，
-    // 数据库插件的 llm.chat 在本地运行态恒失败。此前错误消息「请使用 code-assistant 本地代码助手」
-    // 未说明根因是后端 proxy 路由缺失，给插件作者造成误导。改为说明契约缺口，引导改用 code-assistant.run。
-    // sdkShim 仍无条件暴露 sdk.llm.chat（与 SDK 契约一致，不破坏既有插件 API），
-    // 调用时由运行态 reject 给出清晰信号。
-    throw new Error('本地运行时暂不支持 llm.chat 云端能力（/api/llm/proxy 路由未实现），请改用 code-assistant.run 本地代码助手。');
+    // 计费/中转：llm.chat 走平台 relay（/api/relay/v1/chat/completions），用当前登录态 JWT 鉴权，
+    // 消费扣团队灵石。relay 据前台版本哨兵（fast/premium）解析真实模型并注入系统提示词规则。
+    // 契约：input = { messages, model?: 'fast'|'premium', stream? }。非流式聚合为字符串返回（兼容 sdk.llm.chat 的 Promise<string>）。
+    const input = (args || {}) as { messages: { role: string; content: string }[]; model?: string; stream?: boolean };
+    const tier = input.model === 'premium' ? 'premium' : 'fast';
+    const res = await api<{ choices?: { message?: { content?: string } }[]; content?: string }>(
+      '/api/relay/v1/chat/completions',
+      { method: 'POST', body: { model: tier, messages: input.messages, stream: false } },
+    );
+    // OpenAI 形状：choices[0].message.content；兜底 content 字段。
+    return res.choices?.[0]?.message?.content ?? res.content ?? '';
+  }
+  if (kind === 'image.generate') {
+    // 计费/中转：生图走 relay（/api/relay/v1/images/generations），按张计费。
+    // 契约：input = { prompt, model?: 'fast'|'premium', size?, n? }。返回 { images: string[] }（url 或 base64）。
+    const input = (args || {}) as { prompt: string; model?: string; size?: string; n?: number };
+    const tier = input.model === 'premium' ? 'premium' : 'fast';
+    const res = await api<{ data?: { url?: string; b64_json?: string }[] }>(
+      '/api/relay/v1/images/generations',
+      { method: 'POST', body: { model: tier, prompt: input.prompt, n: input.n ?? 1, size: input.size } },
+    );
+    const images = (res.data ?? []).map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : '')).filter(Boolean);
+    return { images };
   }
   if (kind === 'plugin.upload') {
     return api('/api/plugins/upload', { method: 'POST', body: args || {} });
@@ -226,10 +226,6 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
   if (kind === 'plugin.submitMarketplace') {
     const pluginId = String(args?.pluginId || plugin.id);
     return api(`/api/plugins/${pluginId}/submit-marketplace`, { method: 'POST', body: { priceCents: args?.priceCents } });
-  }
-  if (kind === 'code-assistant.run' || kind === 'code-assistant.session') {
-    // RT-03：错误消息此前声称「完成团队管理员授权」可解锁，但代码无此授权路径。改为说明根因。
-    throw new Error('云端/平台插件默认不能调用本地代码助手能力，仅内置可信插件可用。');
   }
   throw new Error(`运行态暂不支持的能力：${kind}`);
 }

@@ -213,8 +213,6 @@ class MainWindow(QMainWindow):
         return os.getcwd()
 
     def _on_start(self):
-        api_key = self._key_input.text().strip()
-        api_group = self._group_combo.currentText()
         concurrency = self._concurrency_spin.value()
         current_mode = next(m for m, b in self._mode_btns.items() if b.isChecked())
         prompt = build_prompt(current_mode)
@@ -248,9 +246,7 @@ class MainWindow(QMainWindow):
         self._worker = BatchWorker()
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(
-            lambda: self._worker.run_tasks(
-                tasks, api_key, api_group, output_dir, concurrency,
-            )
+            lambda: self._worker.run_tasks(tasks, output_dir, concurrency)
         )
         self._worker.signals.progress.connect(self._on_progress)
         self._worker.signals.finished.connect(self._on_finished)

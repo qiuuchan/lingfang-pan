@@ -1,0 +1,116 @@
+// 计费配置视图：全局灵石参数 + 模型定价 CRUD。见 docs/billing-and-relay-design.md §11.5.1 ②。
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { PlusIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { api } from '@/lib/api';
+import { useLoad, run } from '@/lib/helpers';
+import { Section, ActionBar } from '@/components/shared';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import type { ModelPricing, PricingUnit, ModelTier } from '@/lib/types';
+
+const UNIT_LABEL: Record<PricingUnit, string> = {
+  PER_TOKEN_INPUT: '每1k输入token', PER_TOKEN_OUTPUT: '每1k输出token', PER_CALL: '每次', PER_IMAGE: '每张',
+};
+const CAPABILITIES = ['chat', 'image', 'action'] as const;
+const UNITS: PricingUnit[] = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE'];
+
+function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => void }) {
+  const patch = (n: Partial<any>) => setForm({ ...form, ...n });
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2"><Label>能力</Label>
+          <Select value={form.capability} onValueChange={(v) => patch({ capability: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : '固定动作'}</SelectItem>)}</SelectContent></Select>
+        </div>
+        <div className="space-y-2"><Label>版本（可选）</Label>
+          <Select value={form.tier ?? '__none__'} onValueChange={(v) => patch({ tier: v === '__none__' ? null : (v as ModelTier) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不限版本</SelectItem><SelectItem value="FAST">快速版</SelectItem><SelectItem value="PREMIUM">高级版</SelectItem></SelectContent></Select>
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2"><Label>模型/动作 key</Label><Input placeholder="gpt-4o-mini / dall-e-3 / create_plugin_session" value={form.model} onChange={(e) => patch({ model: e.target.value })} /></div>
+        <div className="space-y-2"><Label>展示名</Label><Input value={form.label} onChange={(e) => patch({ label: e.target.value })} /></div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2"><Label>计费单位</Label>
+          <Select value={form.unit} onValueChange={(v) => patch({ unit: v as PricingUnit })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS.map((u) => <SelectItem key={u} value={u}>{UNIT_LABEL[u]}</SelectItem>)}</SelectContent></Select>
+        </div>
+        <div className="space-y-2"><Label>单价（灵石）</Label><Input type="number" min={0} value={form.pricePerUnit} onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })} /></div>
+      </div>
+      <div className="space-y-2"><Label>启用</Label>
+        <Select value={form.enabled ? 'true' : 'false'} onValueChange={(v) => patch({ enabled: v === 'true' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="true">启用</SelectItem><SelectItem value="false">禁用</SelectItem></SelectContent></Select>
+      </div>
+    </div>
+  );
+}
+
+export function BillingView() {
+  const [pricing, setPricing] = useState<ModelPricing[]>([]);
+  const load = () => api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing').then((r) => setPricing(r.pricing));
+  useLoad(load);
+
+  async function remove(p: ModelPricing) {
+    if (!window.confirm(`删除定价「${p.label || p.model}」？`)) return;
+    await run(() => api(`/api/admin/billing/pricing/${p.id}`, { method: 'DELETE' }).then(load), '定价已删除');
+  }
+
+  return (
+    <Section title="计费配置" description="模型灵石单价（后台可动态调整）+ 全局参数。前台版本对应底层模型在此决定价格。">
+      <CreatePricingDialog onRefresh={load}><Button><PlusIcon className="mr-1.5 size-4" />新增定价</Button></CreatePricingDialog>
+      <div className="mt-3">
+        <Table>
+          <TableHeader><TableRow><TableHead>能力</TableHead><TableHead>版本</TableHead><TableHead>模型/动作</TableHead><TableHead>计费单位</TableHead><TableHead>单价（灵石）</TableHead><TableHead>启用</TableHead><TableHead className="w-[120px]">操作</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {pricing.length ? pricing.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell className="text-muted-foreground">{p.capability}</TableCell>
+                <TableCell className="text-muted-foreground">{p.tier ?? '—'}</TableCell>
+                <TableCell className="font-medium">{p.label || p.model}<div className="font-mono text-xs text-muted-foreground">{p.model}</div></TableCell>
+                <TableCell className="text-muted-foreground">{UNIT_LABEL[p.unit]}</TableCell>
+                <TableCell className="tabular-nums">{p.pricePerUnit}</TableCell>
+                <TableCell>{p.enabled ? '●' : '○'}</TableCell>
+                <TableCell><ActionBar><EditPricingDialog pricing={p} onRefresh={load}><Button variant="outline" size="sm"><PencilIcon className="size-3.5" /></Button></EditPricingDialog><Button variant="destructive" size="sm" onClick={() => remove(p)}><Trash2Icon className="size-3.5" /></Button></ActionBar></TableCell>
+              </TableRow>
+            )) : <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">暂无定价</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </div>
+    </Section>
+  );
+}
+
+function emptyPricingForm() {
+  return { capability: 'chat', model: '', label: '', unit: 'PER_TOKEN_INPUT' as PricingUnit, pricePerUnit: 1, tier: null as ModelTier | null, enabled: true };
+}
+
+function CreatePricingDialog({ children, onRefresh }: { children: React.ReactNode; onRefresh: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(emptyPricingForm());
+  async function create() {
+    if (!form.model.trim()) return toast.error('输入模型/动作 key');
+    const body = { ...form, model: form.model.trim(), label: form.label.trim() };
+    if (!(await run(() => api('/api/admin/billing/pricing', { method: 'POST', body }).then(onRefresh), '定价已保存'))) return;
+    setOpen(false); setForm(emptyPricingForm());
+  }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild>{children}</DialogTrigger><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>新增/更新定价</DialogTitle><DialogDescription>同能力+模型+版本将更新而非新建</DialogDescription></DialogHeader><PricingFormFields form={form} setForm={setForm} /><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={create}>保存</Button></DialogFooter></DialogContent></Dialog>
+  );
+}
+
+function EditPricingDialog({ pricing, children, onRefresh }: { pricing: ModelPricing; children: React.ReactNode; onRefresh: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, tier: pricing.tier, enabled: pricing.enabled });
+  useEffect(() => { if (open) setForm({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, tier: pricing.tier, enabled: pricing.enabled }); }, [open, pricing]);
+  async function save() {
+    const body = { ...form, model: form.model.trim() };
+    if (!(await run(() => api('/api/admin/billing/pricing', { method: 'POST', body }).then(onRefresh), '定价已更新'))) return;
+    setOpen(false);
+  }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild>{children}</DialogTrigger><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>编辑定价</DialogTitle><DialogDescription>{pricing.label || pricing.model}</DialogDescription></DialogHeader><PricingFormFields form={form} setForm={setForm} /><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={save}>保存</Button></DialogFooter></DialogContent></Dialog>
+  );
+}
