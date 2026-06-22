@@ -3,13 +3,19 @@ import {
   BoxesIcon,
   CheckCircleIcon,
   CloudCogIcon,
+  CoinsIcon,
+  KeyRoundIcon,
   LayoutDashboardIcon,
   PlugIcon,
+  ReceiptIcon,
   RocketIcon,
+  ScrollTextIcon,
+  ServerIcon,
   SettingsIcon,
   ShieldCheckIcon,
   ShieldIcon,
   UsersIcon,
+  ZapIcon,
 } from 'lucide-react';
 import type { View } from '@/lib/types';
 
@@ -43,6 +49,18 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: 'plugins', label: '插件管理', icon: PlugIcon },
       { view: 'applications', label: '审批管理', icon: CheckCircleIcon },
       { view: 'llmProviders', label: '模型服务', icon: CloudCogIcon },
+    ],
+  },
+  {
+    title: '计费与模型',
+    items: [
+      { view: 'channels', label: '渠道管理', icon: ServerIcon },
+      { view: 'billing', label: '计费配置', icon: CoinsIcon },
+      { view: 'modelTiers', label: '模型版本', icon: ZapIcon },
+      { view: 'credits', label: '灵石账户', icon: ReceiptIcon },
+      { view: 'callLogs', label: '调用日志', icon: ActivityIcon },
+      { view: 'apiKeys', label: 'API Key 总览', icon: KeyRoundIcon },
+      { view: 'relayDocs', label: '接入文档', icon: ScrollTextIcon },
     ],
   },
   {
