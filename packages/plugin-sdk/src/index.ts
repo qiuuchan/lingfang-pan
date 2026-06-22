@@ -8,10 +8,6 @@ type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type ChatInput = { messages: ChatMessage[]; model?: 'fast' | 'premium' };
 type ImageGenerateInput = { prompt: string; model?: 'fast' | 'premium'; size?: string; n?: number };
 type ImageGenerateResult = { images: string[] };
-type CodeAssistantTool = 'claude' | 'codex' | 'opencode';
-type CodeAssistantCheckInput = { tool?: CodeAssistantTool };
-type CodeAssistantRunInput = { tool: CodeAssistantTool; model?: string; prompt: string; workspaceDir?: string };
-type CodeAssistantStopInput = { sessionId: string };
 type PluginFile = { path: string; content: string };
 type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
 type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
@@ -125,12 +121,6 @@ export const sdk = {
   image: {
     generate: (input: ImageGenerateInput) => invoke<ImageGenerateResult>('image.generate', input),
   },
-  codeAssistant: {
-    check: (input: CodeAssistantCheckInput = {}) => invoke<unknown>('code-assistant.session', { op: 'check', ...input }),
-    run: (input: CodeAssistantRunInput) => invoke<unknown>('code-assistant.run', input),
-    stop: (sessionId: string) => invoke<void>('code-assistant.session', { op: 'stop', sessionId }),
-    stopInput: (input: CodeAssistantStopInput) => invoke<void>('code-assistant.session', { op: 'stop', ...input }),
-  },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),
     submitMarketplace: (input: PluginSubmitMarketplaceInput) => invoke<unknown>('plugin.submitMarketplace', input),
@@ -149,10 +139,6 @@ export type {
   ChatInput,
   ImageGenerateInput,
   ImageGenerateResult,
-  CodeAssistantTool,
-  CodeAssistantCheckInput,
-  CodeAssistantRunInput,
-  CodeAssistantStopInput,
   PluginFile,
   PluginUploadInput,
   PluginSubmitMarketplaceInput,

@@ -93,11 +93,6 @@ function sdkShim(pluginId: string): string {
         },
         llm: { chat: (input) => call('llm.chat', input || {}) },
         image: { generate: (input) => call('image.generate', input || {}) },
-        codeAssistant: {
-          check: (input) => call('code-assistant.session', Object.assign({ op: 'check' }, input || {})),
-          run: (input) => call('code-assistant.run', input || {}),
-          stop: (sessionId) => call('code-assistant.session', { op: 'stop', sessionId }),
-        },
         plugin: {
           upload: (input) => call('plugin.upload', input || {}),
           submitMarketplace: (input) => call('plugin.submitMarketplace', input || {}),
@@ -192,20 +187,7 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     );
   }
   if (isBuiltinPlugin(plugin)) {
-    if (kind === 'code-assistant.session') {
-      // RT-08 修复：op 既非 'check' 也非 'stop' 时此前静默落到末尾 invoke_capability，
-      // capability.rs 只识别 fs.read/system.info，其它 kind 返回 NotDeclared('code-assistant.session')，
-      // 用户看到的是与真实原因（op 非法）无关的错误信息。此处显式抛描述性错误。
-      if (args?.op === 'check') {
-        return [
-          { tool: 'claude', display_name: 'ClaudeCode', available: true },
-          { tool: 'codex', display_name: 'Codex', available: true },
-        ];
-      }
-      if (args?.op === 'stop') return tauriInvoke('code_assistant_stop_session', { input: { session_id: args.sessionId } });
-      throw new Error(`code-assistant.session 需要 op='check' 或 'stop'，收到：${args?.op ?? String(args?.op)}`);
-    }
-    if (kind === 'code-assistant.run') return tauriInvoke('code_assistant_start_session', { input: args || {} });
+    // code-assistant CLI 已删除（AI 能力走 relay）；builtin 插件如需 AI 用 sdk.llm.chat/image.generate。
     // R5 net.fetch：内置插件网络请求走 Rust plugin_net_fetch（绕 webview CORS）。
     // 仅 manifest 声明了 net.fetch 的插件可用（Rust 侧二次校验）。返回 { status, headers, body }。
     if (kind === 'net.fetch') {
@@ -244,10 +226,6 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
   if (kind === 'plugin.submitMarketplace') {
     const pluginId = String(args?.pluginId || plugin.id);
     return api(`/api/plugins/${pluginId}/submit-marketplace`, { method: 'POST', body: { priceCents: args?.priceCents } });
-  }
-  if (kind === 'code-assistant.run' || kind === 'code-assistant.session') {
-    // RT-03：错误消息此前声称「完成团队管理员授权」可解锁，但代码无此授权路径。改为说明根因。
-    throw new Error('云端/平台插件默认不能调用本地代码助手能力，仅内置可信插件可用。');
   }
   throw new Error(`运行态暂不支持的能力：${kind}`);
 }
