@@ -22,6 +22,7 @@ import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
 import { SetupWizard } from '@/pages/SetupWizard';
 import { Home } from '@/pages/Home';
+import { PluginCreator } from '@/pages/PluginCreator';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 import { isPluginCenterView } from '@/lib/plugin-center';
 
@@ -617,6 +618,7 @@ export default function App() {
 
   let body: ReactNode;
   if (view === 'home') body = <Home />;
+  else if (view === 'creator') body = <PluginCreator />;
   else if (view === 'plugins' || view === 'author-center' || view === 'market') body = <Plugins />;
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
   else if (view === 'team-admin') body = <TeamAdmin />;
