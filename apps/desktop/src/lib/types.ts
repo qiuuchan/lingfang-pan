@@ -228,3 +228,29 @@ export interface PluginGrantRow {
 export function formatTime(iso: string | null | undefined): string {
   return formatTimestamp(iso);
 }
+
+// === Task 7 通知中心 ===
+// 后端 Notification 模型（apps/collab-api/prisma/schema.prisma）经 publicNotification 出参：
+// camelCase + createdAt ISO 字符串。type 为语义串（plugin_approved / new_version 等），前端按映射展示。
+
+/** 通知条目（GET /api/notifications 返回的元素结构）。 */
+export interface NotificationItem {
+  id: string;
+  /** 语义类型（plugin_approved / plugin_rejected / plugin_delisted / application_approved /
+   *  application_rejected / password_reset_by_admin / purchased / purchase_sale / new_version / …）。 */
+  type: string;
+  title: string;
+  body: string;
+  read: boolean;
+  /** 关联实体类型/id（前端据此跳转，如 plugin → 市场详情）。 */
+  relatedType?: string | null;
+  relatedId?: string | null;
+  createdAt: string;
+}
+
+/** GET /api/notifications 响应。 */
+export interface NotificationsResponse {
+  notifications: NotificationItem[];
+  unreadCount: number;
+}
+
