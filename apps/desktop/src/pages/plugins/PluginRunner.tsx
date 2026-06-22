@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Ref, type RefObject } from 'react';
-import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon } from 'lucide-react';
+import { toast } from 'sonner';
+import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon, ExternalLinkIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
@@ -9,6 +10,7 @@ import type { LoadedPlugin } from '@/lib/types';
 import { parseManifest } from '@/lib/plugin-draft';
 import type { ScriptRuntime } from '@/lib/plugin-script';
 import { dragRegionProps } from '@/lib/window-drag';
+import { openPluginInWindow } from '@/lib/plugin-window';
 import {
   errorMessage,
   handleRuntimeCall,
@@ -50,6 +52,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         onBack={onBack}
         onEdit={actions.editInGenerator}
         onShowManifest={() => setManifestOpen(true)}
+        onPopOut={() => { void openPluginInWindow(plugin).catch((e) => toast.error(e instanceof Error ? e.message : String(e))); }}
       />
       <RunnerContent
         error={document.error}
@@ -179,6 +182,7 @@ function RunnerHeader({
   onBack,
   onEdit,
   onShowManifest,
+  onPopOut,
 }: {
   plugin: LoadedPlugin;
   editing: boolean;
@@ -186,6 +190,8 @@ function RunnerHeader({
   onBack: () => void;
   onEdit: () => void;
   onShowManifest: () => void;
+  /** Task 15：弹出到独立窗口运行。 */
+  onPopOut: () => void;
 }) {
   return (
     <div {...dragRegionProps} className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
@@ -193,6 +199,10 @@ function RunnerHeader({
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onShowManifest}>
           <InfoIcon className="size-4" />详情
+        </Button>
+        {/* Task 15 多窗口：把插件弹出到独立窗口运行（一插件一窗口，聚焦即不重复创建）。 */}
+        <Button variant="ghost" size="sm" title="在新窗口打开" onClick={onPopOut}>
+          <ExternalLinkIcon className="size-4" />新窗口
         </Button>
         {canEdit && (
           <LoadingButton variant="outline" size="sm" loading={editing} onClick={onEdit}>

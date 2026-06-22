@@ -10,6 +10,8 @@ import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { AccountDialog } from '@/components/AccountDialog';
 import { CommandPalette } from '@/components/CommandPalette';
 import { FloatingCreateButton } from '@/components/FloatingCreateButton';
+import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
+import { loadPlugins } from '@/pages/plugins-runtime';
 // 组D 加载优化：PluginCreatorHome 是创建器主界面，且在 App 内常驻挂载（creator view 用 hidden 控制显隐，
 // 跨 view 保持对话 listener 状态），保持直接 import、不延迟、不进 PageTransition。
 import { Auth } from '@/pages/Auth';
@@ -393,6 +395,27 @@ export default function App() {
   useEffect(() => {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
+
+  // Task 15 多窗口：standalone 插件窗口（?standalone=1&plugin=<id>）启动时自动加载目标插件并设为 runningPlugin，
+  // 让该窗口打开即运行指定插件，主窗口与各插件窗口互不干扰（不同插件各自独立窗口运行）。
+  useEffect(() => {
+    if (!isStandalonePluginWindow()) return;
+    const targetId = standalonePluginId();
+    if (!targetId || !session.token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { plugins } = await loadPlugins();
+        if (cancelled) return;
+        const target = plugins.find((p) => p.id === targetId);
+        if (target) setRunningPlugin(target);
+      } catch {
+        /* 加载失败静默：用户仍可手动在侧栏打开插件 */
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.token]);
 
   // Task 6：Ctrl/Cmd+K 唤起全局搜索悬浮窗（与 Sidebar 搜索按钮同一入口）。
   useEffect(() => {
