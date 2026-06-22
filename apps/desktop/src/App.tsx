@@ -59,6 +59,8 @@ interface AppContextValue {
   // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
   platformName: string;
   platformLogoUrl: string;
+  // Task 6/2：全局搜索悬浮窗开关。首页居中搜索框 / 侧栏搜索按钮 / Ctrl+K 共用此入口。
+  openSearch: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -423,6 +425,9 @@ export default function App() {
 
   const isPinned = useCallback((id: string) => pinnedPlugins.some((x) => x.id === id), [pinnedPlugins]);
 
+  // Task 6/2：打开全局搜索悬浮窗（供首页居中搜索框 / 任意组件复用）。
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+
   const ctx: AppContextValue = {
     backendUrl, saveBackendUrl,
     session, applySession, applyCollabSession, refreshSession, resetSession,
@@ -435,6 +440,7 @@ export default function App() {
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
+    openSearch,
   };
 
   if (restoring) {
