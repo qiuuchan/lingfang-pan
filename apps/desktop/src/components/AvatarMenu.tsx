@@ -111,7 +111,7 @@ export function AvatarMenu({
     { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => go('plugins') },
     // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
     { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
-    { key: 'creator', label: '开发者模式', icon: WrenchIcon, visible: canManageTeam, onClick: () => go('creator') },
+    // AI 创建插件入口为右下角 FAB（悬浮窗），不在此菜单。
     // 项 8：「LLM 设置」改为「其他设置」，点击进设置页第一个 tab（general）。
     { key: 'other-settings', label: '其他设置', icon: CpuIcon, visible: true, onClick: () => { openAccountSettings('settings', 'general'); onClose(); } },
   ];

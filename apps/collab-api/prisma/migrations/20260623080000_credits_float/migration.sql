@@ -1,0 +1,6 @@
+-- 灵石货币支持小数精度（v0.0.6：定价支持小数如 3.5 灵石/百万 token）。
+-- 灵石相关列 Int → Float（PostgreSQL 浮点）。
+ALTER TABLE "TeamCredit" ALTER COLUMN "balance" TYPE DOUBLE PRECISION USING "balance"::DOUBLE PRECISION;
+ALTER TABLE "CreditLedger" ALTER COLUMN "amount" TYPE DOUBLE PRECISION USING "amount"::DOUBLE PRECISION;
+ALTER TABLE "ModelPricing" ALTER COLUMN "pricePerUnit" TYPE DOUBLE PRECISION USING "pricePerUnit"::DOUBLE PRECISION;
+ALTER TABLE "LlmCallLog" ALTER COLUMN "credits" TYPE DOUBLE PRECISION USING "credits"::DOUBLE PRECISION;
