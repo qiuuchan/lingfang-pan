@@ -21,25 +21,52 @@ const UNITS: PricingUnit[] = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL',
 
 function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => void }) {
   const patch = (n: Partial<any>) => setForm({ ...form, ...n });
+  // 按当前能力拉渠道模型列表（chat→聊天渠道模型；image→生图渠道模型；action 不拉，手输动作 key）。
+  // 渠道是配置源——定价的下拉选项 = 渠道已配的 models（去重）。allowCustom 兜底手输不在列表的值。
+  const [channelModels, setChannelModels] = useState<string[]>([]);
+  useEffect(() => {
+    if (form.capability === 'action') { setChannelModels([]); return; }
+    const kind = form.capability === 'chat' ? 'CHAT' : 'IMAGE';
+    let mounted = true;
+    api<{ channels: { models: string[] }[] }>(`/api/admin/billing/channels?kind=${kind}`)
+      .then((r) => { if (mounted) setChannelModels(Array.from(new Set((r.channels ?? []).flatMap((c) => c.models ?? [])))); })
+      .catch(() => { if (mounted) setChannelModels([]); });
+    return () => { mounted = false; };
+  }, [form.capability]);
+  // 模型字段：chat/image 用下拉（渠道模型集合）；action 用 Input（动作 key 自由填）。
+  const isModelSelect = form.capability === 'chat' || form.capability === 'image';
+  // 当前值若不在列表（如编辑存量定价、或渠道未配该模型），加进去避免 Select 显示空。
+  const modelOptions = isModelSelect && form.model && !channelModels.includes(form.model)
+    ? [form.model, ...channelModels] : channelModels;
+
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label>能力</Label>
-          <Select value={form.capability} onValueChange={(v) => patch({ capability: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : '固定动作'}</SelectItem>)}</SelectContent></Select>
+          <Select value={form.capability} onValueChange={(v) => patch({ capability: v, model: '' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : '固定动作'}</SelectItem>)}</SelectContent></Select>
         </div>
         <div className="space-y-2"><Label>版本（可选）</Label>
           <Select value={form.tier ?? '__none__'} onValueChange={(v) => patch({ tier: v === '__none__' ? null : (v as ModelTier) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不限版本</SelectItem><SelectItem value="FAST">快速版</SelectItem><SelectItem value="PREMIUM">高级版</SelectItem></SelectContent></Select>
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2"><Label>模型/动作 key</Label><Input placeholder="gpt-4o-mini / dall-e-3 / create_plugin_session" value={form.model} onChange={(e) => patch({ model: e.target.value })} /></div>
+        <div className="space-y-2"><Label>模型/动作 key</Label>
+          {isModelSelect ? (
+            <Select value={form.model} onValueChange={(v) => patch({ model: v })}>
+              <SelectTrigger><SelectValue placeholder={modelOptions.length ? '选模型' : '（该类型渠道未配模型，先在渠道管理配模型）'} /></SelectTrigger>
+              <SelectContent>{modelOptions.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}</SelectContent>
+            </Select>
+          ) : (
+            <Input placeholder="动作 key，如 create_plugin_session" value={form.model} onChange={(e) => patch({ model: e.target.value })} />
+          )}
+        </div>
         <div className="space-y-2"><Label>展示名</Label><Input value={form.label} onChange={(e) => patch({ label: e.target.value })} /></div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label>计费单位</Label>
           <Select value={form.unit} onValueChange={(v) => patch({ unit: v as PricingUnit })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS.map((u) => <SelectItem key={u} value={u}>{UNIT_LABEL[u]}</SelectItem>)}</SelectContent></Select>
         </div>
-        <div className="space-y-2"><Label>单价（灵石）</Label><Input type="number" min={0} value={form.pricePerUnit} onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })} /></div>
+        <div className="space-y-2"><Label>单价（灵石）</Label><Input type="number" step="0.0001" min={0} value={form.pricePerUnit} onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })} /></div>
       </div>
       <div className="space-y-2"><Label>启用</Label>
         <Select value={form.enabled ? 'true' : 'false'} onValueChange={(v) => patch({ enabled: v === 'true' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="true">启用</SelectItem><SelectItem value="false">禁用</SelectItem></SelectContent></Select>
