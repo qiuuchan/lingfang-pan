@@ -53,6 +53,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
+  const [compressing, setCompressing] = useState(false); // 压缩中指示
+  const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具上传中指示
   const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
@@ -61,7 +63,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   // 流式输出时自动滚到底。
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [turns]);
+  }, [turns, uploadingViaTool, compressing]);
 
   // Esc 关窗（无内层 overlay 打开时）。
   useEffect(() => {
@@ -92,6 +94,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       // 系统提示词 = 基础提示 + 激活的 skills；relay 服务端还会注入"必须用灵坊服务"规则。
       const systemPrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
       // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
+      setCompressing(true);
       const built = await buildContextMessages({
         turns: turns.map((t) => ({ role: t.role, content: t.content })),
         currentInput: text,
@@ -100,11 +103,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         tier,
         signal: controller.signal,
       });
+      setCompressing(false);
       compressRef.current = built.state;
       setCompressedHint(built.compressedCount);
 
       // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 upload_plugin 上传。
-      // fullStream 同时给文本增量 + 工具调用/结果事件，实现 agent 闭环。
+      // 文本 delta 流式累积进 assistant 气泡；tool-call/result 用独立指示器（不污染文本气泡）。
       const result = streamText({
         model: relayProvider().chat(tier),
         messages: built.messages,
@@ -114,6 +118,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       });
 
       let uploadedName = '';
+      let uploadedMsg = '';
       for await (const part of result.fullStream) {
         if (part.type === 'text-delta') {
           const delta = part.text;
@@ -124,31 +129,29 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             return next;
           });
         } else if (part.type === 'tool-call') {
-          // 模型调用了工具：在气泡里显示调用态。
-          if (part.toolName === 'upload_plugin') {
-            setTurns((prev) => {
-              const next = [...prev];
-              const cur = next[assistantIdx];
-              if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: cur.content + '\n\n_[正在上传插件…]_' };
-              return next;
-            });
-          }
+          // agent 工具调用：用独立指示器，不把文本塞进对话气泡（避免与后续 delta 混杂）。
+          if (part.toolName === 'upload_plugin') setUploadingViaTool(true);
         } else if (part.type === 'tool-result') {
-          const r = part.output as { ok: boolean; message: string; name?: string };
+          setUploadingViaTool(false);
+          const r = part.output as { ok: boolean; message: string; name?: string } | undefined;
           if (r?.ok && r.name) uploadedName = r.name;
+          else if (r && !r.ok) uploadedMsg = r.message;
         }
       }
-      // 流结束：取完整文本，清除流式标记；若工具已上传，提示并保留对话。
-      const full = await result.text;
+      // 流结束：清除流式标记（保留已累积的 delta 文本，不覆盖——result.text 是末步，会丢中间步骤）。
+      // 多步 agent 的各步文本已通过 fullStream 累积进气泡；末步总结也已 delta 进来。
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
-        if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: full, streaming: false };
+        if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, streaming: false };
         return next;
       });
       if (uploadedName) toast.success(`插件「${uploadedName}」已上传到团队空间`);
+      else if (uploadedMsg) toast.error(uploadedMsg);
     } catch (e) {
       const aborted = (e as Error).name === 'AbortError';
+      setUploadingViaTool(false);
+      setCompressing(false);
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
@@ -250,6 +253,16 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
         {/* 上传由 agent 工具调用（upload_plugin）驱动，无需手动预览/上传栏。 */}
 
+
+        {/* 状态指示（压缩中 / agent 工具上传中） */}
+        {(compressing || uploadingViaTool) && (
+          <div className="shrink-0 border-t bg-muted/30 px-4 py-1.5">
+            <div className="mx-auto flex max-w-3xl items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2Icon className="size-3 animate-spin" />
+              {compressing ? '正在压缩对话上下文…' : 'agent 正在上传插件…'}
+            </div>
+          </div>
+        )}
 
         {/* 输入区 */}
         <div className="shrink-0 border-t px-4 py-3">
