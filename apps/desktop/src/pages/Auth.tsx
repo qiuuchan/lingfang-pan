@@ -38,7 +38,7 @@ export function Auth() {
   const [newPassword, setNewPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
-  // 云同步平台信息：platform-info 取 platformName（云同步展示平台名，登录页标题用平台名而非硬编码）。
+  // 云同步平台信息：platform-info 取 platformName（登录页标题用平台名而非硬编码）。
   // 仅在 backendUrl 已配置时拉取（未配置时调用方本就要先设后端地址）。
   const [platformName, setPlatformName] = useState('');
 
@@ -47,7 +47,7 @@ export function Auth() {
     // platform-info 公开端点（auth:false），失败静默（后端可能未实现该端点的旧版本）。
     api<PlatformInfo>('/api/platform-info', { auth: false, method: 'GET' })
       .then((info) => {
-        // 云同步平台名：后端 platformName（缺省 'LingFang'），用于登录页标题展示。
+        // 云同步平台名：后端 platformName（缺省 '灵坊工作台'），用于登录页标题展示。
         setPlatformName((info.platformName || '').trim());
       })
       .catch(() => {
@@ -191,7 +191,7 @@ export function Auth() {
     <>
       <Card className="w-full max-w-lg animate-in fade-in zoom-in-95 duration-300">
         <CardHeader>
-          {/* 云同步平台名：展示后端 platformName（与后台一致），缺省时 fallback 到「LingFang」。 */}
+          {/* 云同步平台名：展示后端 platformName（与后台一致），缺省时 fallback 到「灵坊工作台」。 */}
           {platformName && (
             <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 font-semibold text-primary">
@@ -316,3 +316,4 @@ export function Auth() {
     </>
   );
 }
+
