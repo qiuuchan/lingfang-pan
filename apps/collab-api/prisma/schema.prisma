@@ -737,6 +737,7 @@ model ModelPricing {
   unit          PricingUnit
   pricePerUnit  Float // 灵石（PER_TOKEN_* 时为每 1M token 价，支持小数）
   tier          ModelTierId? // 可选版本绑定
+  contextWindow Int? // 该模型最大上下文窗口（token），供前端上下文用量管理与压缩阈值参考
   enabled       Boolean     @default(true)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt

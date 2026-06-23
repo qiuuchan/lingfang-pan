@@ -52,6 +52,8 @@ export class PricingUpsertDto {
   @ApiProperty({ enum: PRICING_UNIT }) @IsEnum(PRICING_UNIT) unit!: string;
   @ApiProperty({ description: '单价（灵石）；PER_TOKEN_* 时为每 1M token 灵石数，支持小数' })
   @Type(() => Number) @IsNumber() @Min(0) pricePerUnit!: number;
+  @ApiPropertyOptional({ description: '该模型最大上下文窗口（token）' })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) contextWindow?: number;
   @ApiPropertyOptional({ enum: TIER }) @IsOptional() @IsEnum(TIER) tier?: 'FAST' | 'PREMIUM';
   @ApiPropertyOptional() @IsOptional() @IsBoolean() enabled?: boolean;
 }
