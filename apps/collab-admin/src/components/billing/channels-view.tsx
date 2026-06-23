@@ -1,3 +1,4 @@
+import { getPresetModels } from '@/lib/preset-models';
 // 渠道管理（资源池模型重构后）：聊天渠道 / 生图渠道 两类分开（同表 kind 字段）。
 // 每个渠道：kind + tier（快速/高级）+ 归属资源池 + 多个轮询模型。
 import { useEffect, useState } from 'react';
@@ -159,7 +160,33 @@ function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?
             <div className="space-y-2"><Label>上游基址</Label><Input value={form.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" /></div>
           </div>
           <div className="space-y-2"><Label>上游 API Key</Label><Input type="password" value={form.upstreamKey} onChange={(e) => patch({ upstreamKey: e.target.value })} placeholder={channel ? '（不改则保留原 key）' : 'sk-...'} /></div>
-          <div className="space-y-2"><Label>可调用模型（多个，一行一个，轮询）</Label><Textarea value={form.modelsText} onChange={(e) => patch({ modelsText: e.target.value })} placeholder={'gpt-4o\ngpt-4o-mini'} /></div>
+          <div className="space-y-2">
+            <Label>可调用模型（轮询；从预设勾选或手输，一行一个）</Label>
+            {/* 预设模型快捷勾选（按 provider+kind 取，参考 model.dev 主流清单） */}
+            {getPresetModels(form.provider, kind).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {getPresetModels(form.provider, kind).map((m) => {
+                  const current = parseModels(form.modelsText);
+                  const checked = current.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        const next = checked ? current.filter((x) => x !== m.id) : [...current, m.id];
+                        patch({ modelsText: next.join('\n') });
+                      }}
+                      className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${checked ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                      title={`${m.label} · ${m.contextWindow ? (m.contextWindow / 1000) + 'K' : '生图'}${m.supportsReasoning ? ' · 支持思考' : ''}`}
+                    >
+                      {m.id}{m.supportsReasoning && ' 💭'}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <Textarea value={form.modelsText} onChange={(e) => patch({ modelsText: e.target.value })} placeholder={'gpt-4o\ngpt-4o-mini'} />
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2"><Label>状态</Label>
               <Select value={form.status} onValueChange={(v) => patch({ status: v as ChannelStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ENABLED">已启用</SelectItem><SelectItem value="DISABLED">已禁用</SelectItem></SelectContent></Select>

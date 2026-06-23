@@ -4,7 +4,7 @@
 // App.tsx 监听后置 backendUnreachable=true，主界面 main 区渲染本组件替代业务页（避免反复 toast）。
 //
 // 设计：
-// - 友好图标 + 「无法访问 LingFang 服务」标题 + 当前后端地址展示。
+// - 友好图标 + 「无法访问灵坊工作台服务」标题 + 当前后端地址展示。
 // - 「重试」按钮：调 testBackendUrl 重新探测，成功派发 reachable 退出不可达态。
 // - 「去设置」按钮：跳 backend tab 让用户修改后端地址。
 // - 与创建器 env-readiness 横幅互补：横幅处理「地址未配置」，本组件处理「地址已配但 fetch 失败」。
@@ -54,7 +54,7 @@ export function BackendUnreachable({ onGoSettings }: BackendUnreachableProps) {
         <div className="space-y-1.5">
           <h2 className="text-lg font-semibold">无法访问此页面</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            灵坊 桌面端无法连接到协作服务。请确认后端服务已启动，或检查网络与地址配置后重试。
+            灵坊工作台无法连接到协作服务。请确认后端服务已启动，或检查网络与地址配置后重试。
           </p>
         </div>
 
@@ -79,3 +79,4 @@ export function BackendUnreachable({ onGoSettings }: BackendUnreachableProps) {
     </div>
   );
 }
+

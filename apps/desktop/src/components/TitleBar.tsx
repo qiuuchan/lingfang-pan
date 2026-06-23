@@ -10,11 +10,11 @@ import { dragRegionProps } from '@/lib/window-drag';
 interface TitleBarProps {
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
-  /** 标题栏文案（默认 'LingFang'）。登录态等无侧边栏场景可传平台名展示。 */
+  /** 标题栏文案（默认 '灵坊工作台'）。登录态等无侧边栏场景可传平台名展示。 */
   label?: string;
 }
 
-export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊' }: TitleBarProps) {
+export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作台' }: TitleBarProps) {
   // getCurrentWindow 在无 Tauri 壳（浏览器直连 vite dev server）时返回的对象不完整，
   // 调 isMaximized/onResized 会抛「Cannot read properties of undefined (reading 'metadata')」。
   // 运行时检测 __TAURI_INTERNALS__（withGlobalTauri:true 时注入），缺失则降级为纯展示标题栏（无窗口控制）。
@@ -91,3 +91,4 @@ function WinBtn({ children, title, onClick, danger }: { children: React.ReactNod
     </button>
   );
 }
+
