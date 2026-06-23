@@ -22,11 +22,13 @@ export function TestChannelDialog({ channel, onDone, onClose }: { channel: Chann
     let mounted = true;
     setConn({ loading: true, ok: null, message: '', models: [] });
     api<{ ok: boolean; message: string; models: string[] }>(`/api/admin/billing/channels/${channel.id}/test`, { method: 'POST' })
-      .then((r) => { if (mounted) { setConn({ loading: false, ok: r.ok, message: r.message, models: r.models ?? [] }); if (r.models?.length) setModel(r.models[0]); } })
+      .then((r) => { if (mounted) { setConn({ loading: false, ok: r.ok, message: r.message, models: r.models ?? [] }); } })
       .catch((e: Error) => { if (mounted) setConn({ loading: false, ok: false, message: e.message || '请求失败', models: [] }); });
     return () => { mounted = false; };
   }, [channel.id]);
   useEffect(() => { if (conn.ok !== null && !conn.loading) onDone(); /* eslint-disable-next-line */ }, [conn.ok, conn.loading]);
+  // 默认选渠道填写的第一个模型（测试基于填写模型，不依赖连通测试拉取的列表）。
+  useEffect(() => { if (!model && channel.models.length) setModel(channel.models[0]); }, [channel.models, model]);
 
   async function runChat() {
     if (!model) return;
@@ -41,7 +43,8 @@ export function TestChannelDialog({ channel, onDone, onClose }: { channel: Chann
     catch (e) { setImg({ loading: false, ok: false, message: (e as Error).message, imageUrl: null, latencyMs: 0 }); }
   }
 
-  const models = [...conn.models, ...channel.models.filter((m) => !conn.models.includes(m))];
+  // 测试模型从渠道【填写】的 models 取（不从上游 /models 端点拉取——那只是连通性参考）。
+  const models = channel.models;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
