@@ -8,8 +8,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon } from 'lucide-react';
 import { useApp } from '@/App';
+import type { LoadedPlugin } from '@/lib/types';
 import { type ApiError } from '@/lib/api';
 import { relayProvider } from '@/lib/relay-provider';
 import { creatorTools } from '@/lib/plugin-creator/creator-tools';
@@ -20,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Markdown } from '@/components/markdown';
 
 interface Turn {
   role: 'user' | 'assistant';
@@ -47,12 +49,14 @@ const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户用自然
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
-  const { session } = useApp();
+  const { session, recentPlugins } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
+  const [thinking, setThinking] = useState(false); // 「思考」模式：让模型更深入推理（systemPrompt 追加引导）
+  const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
   const [compressing, setCompressing] = useState(false); // 压缩中指示
   const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具上传中指示
   const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
@@ -91,8 +95,16 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     abortRef.current = controller;
 
     try {
-      // 系统提示词 = 基础提示 + 激活的 skills；relay 服务端还会注入"必须用灵坊服务"规则。
-      const systemPrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
+      // 系统提示词 = 基础提示 + 激活的 skills（+ 思考模式追加深入推理引导）；relay 服务端还会注入"必须用灵坊服务"规则。
+      const basePrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
+      const thinkPrompt = thinking
+        ? `\n\n# 思考模式（已开启）\n请对需求做更深入的分析与推理：先拆解需求要点、权衡实现方案、再生成更严谨完整的代码。宁可多花时间也要保证质量与边界处理。`
+        : '';
+      // 引用现有插件：把其全部文件源码注入 systemPrompt，让 agent 基于现有代码做修改（而非从零生成）。
+      const refPrompt = referencedPlugin?.files?.length
+        ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
+        : '';
+      const systemPrompt = basePrompt + thinkPrompt + refPrompt;
       // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
       setCompressing(true);
       const built = await buildContextMessages({
@@ -174,8 +186,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/40 backdrop-blur-xl">
-      <div className="flex h-[85vh] w-[92vw] min-h-[480px] min-w-[720px] max-w-[1200px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md">
+      <div className="flex h-[85vh] max-h-[800px] w-full max-w-[1100px] min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
         {/* 标题栏 */}
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
@@ -189,6 +201,34 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <Badge variant="outline" className="gap-1 text-xs" title="早期对话已自动摘要为上下文，控制 token">
                 已压缩 {compressedHint} 轮
               </Badge>
+            )}
+            {/* 引用插件：选一个已有插件注入源码到上下文，让 agent 基于现有代码修改（#4） */}
+            {recentPlugins.length > 0 && (
+              <Popover>
+                <PopoverTrigger render={<Button variant={referencedPlugin ? 'default' : 'outline'} size="sm" className="gap-1.5" title="引用已有插件做修改" />}>
+                  <FileCode2Icon className="size-3.5" />
+                  {referencedPlugin ? referencedPlugin.name.slice(0, 8) : '引用插件'}
+                </PopoverTrigger>
+                <PopoverContent className="w-64" align="end">
+                  <div className="text-xs font-medium text-muted-foreground">引用已有插件（注入源码到上下文）</div>
+                  <div className="mt-1.5 max-h-60 space-y-0.5 overflow-y-auto">
+                    {recentPlugins.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => { setReferencedPlugin(referencedPlugin?.id === p.id ? null : p); }}
+                        className={`block w-full truncate rounded px-2 py-1.5 text-left text-sm transition-colors ${referencedPlugin?.id === p.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
+                        title={p.name}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                  {referencedPlugin && (
+                    <button type="button" onClick={() => setReferencedPlugin(null)} className="mt-1.5 w-full rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted">取消引用</button>
+                  )}
+                </PopoverContent>
+              </Popover>
             )}
             {/* Skill 选择器：动态拼装系统提示词（输出精简 / 增量重构 等，可开关）。 */}
             <Popover>
@@ -242,9 +282,19 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <div className="mx-auto flex max-w-3xl flex-col gap-3">
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm ${t.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'}`}>
-                    {t.content || (t.streaming ? <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2Icon className="size-3 animate-spin" />生成中…</span> : '')}
-                  </div>
+                  {t.role === 'user' ? (
+                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+                      {t.content}
+                    </div>
+                  ) : (
+                    <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground">
+                      {t.content ? (
+                        <Markdown>{t.content}</Markdown>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2Icon className="size-3 animate-spin" />生成中…</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -264,11 +314,23 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* 输入区 */}
+        {/* 输入区：思考开关 + Textarea + 发送/停止，三者同高对齐 */}
         <div className="shrink-0 border-t px-4 py-3">
           <div className="mx-auto flex max-w-3xl items-end gap-2">
+            {/* 思考开关：开启后模型做更深入推理（systemPrompt 追加思考引导） */}
+            <Button
+              type="button"
+              variant={thinking ? 'default' : 'outline'}
+              size="icon"
+              onClick={() => setThinking((v) => !v)}
+              disabled={busy}
+              title={thinking ? '思考模式已开启（深入推理）' : '开启思考模式'}
+              className="h-[40px] w-[40px] shrink-0"
+            >
+              <BrainIcon className="size-4" />
+            </Button>
             <Textarea
-              placeholder="描述插件需求，Enter 发送，Shift+Enter 换行"
+              placeholder={thinking ? '思考模式：描述需求，模型会深入分析后生成…' : '描述插件需求，Enter 发送，Shift+Enter 换行'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
@@ -277,9 +339,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               disabled={busy}
             />
             {busy ? (
-              <Button variant="outline" size="icon" onClick={stop} title="停止"><XIcon className="size-4" /></Button>
+              <Button variant="outline" size="icon" onClick={stop} title="停止" className="h-[40px] w-[40px] shrink-0"><XIcon className="size-4" /></Button>
             ) : (
-              <Button size="icon" onClick={() => void send()} disabled={!input.trim()} title="发送"><SendIcon className="size-4" /></Button>
+              <Button size="icon" onClick={() => void send()} disabled={!input.trim()} title="发送" className="h-[40px] w-[40px] shrink-0"><SendIcon className="size-4" /></Button>
             )}
           </div>
         </div>
