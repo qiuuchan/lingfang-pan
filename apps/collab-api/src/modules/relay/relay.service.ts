@@ -243,11 +243,12 @@ export class RelayService {
 
       let lastError: unknown;
       let lastCand: { id: string; model: string } | null = null;
+      let skippedForNoPricing = 0; // 因无定价被跳过的候选数
       for (const cand of candidates) {
         lastCand = { id: cand.id, model: cand.model };
-        // 按候选 model 查定价；无定价则跳过该候选（可能未配置该模型价格）。
+        // 按候选 model 查定价；无定价则跳过该候选（不能盲调不扣费）。
         const price = await this.pricing.lookupPrice({ capability, model: cand.model, tier });
-        if (!price) continue;
+        if (!price) { skippedForNoPricing++; continue; }
         try {
           const routed = await this.router.decryptUpstreamKey(cand.id);
           const fr = await plan.forward(routed.upstreamKey, routed.baseUrl, routed.protocol, cand.model);
@@ -269,8 +270,14 @@ export class RelayService {
           // 非流式：继续下一候选（故障转移）。
         }
       }
-      // 全部候选失败：退款 + 终态 + 抛错。
+      // 全部候选失败：退款 + 终态 + 抛错。区分「全无定价」与「上游失败」。
       await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+      if (lastError === undefined && skippedForNoPricing === candidates.length) {
+        // 所有候选都因无定价被跳过：明确提示配价，而非笼统 upstream_error。
+        const modelNames = Array.from(new Set(candidates.map((c) => c.model))).join('、');
+        await ensureFinalized({ status: 'no_pricing', errorCode: 'pricing_not_configured', httpStatus: 503, channelId: null, model: modelNames || '(none)' });
+        throw new AppError(503, 'pricing_not_configured', `渠道模型未配置定价：${modelNames}。请在「计费配置」为这些模型添加定价。`);
+      }
       const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
       await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
       throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败');
