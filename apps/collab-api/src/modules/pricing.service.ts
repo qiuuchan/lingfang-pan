@@ -35,9 +35,10 @@ export class PricingService {
 
   /**
    * 把用量 + 单价换算成灵石。
-   *  - PER_TOKEN_*：pricePerUnit = 每 1M token 的灵石数。actual = ceil(tokens × pricePerUnit / 1_000_000)，最少 1。
+   *  - PER_TOKEN_*：pricePerUnit = 每 1M token 的灵石数。actual = tokens × pricePerUnit / 1_000_000（浮点，保留精度）。
    *  - PER_CALL：固定 pricePerUnit。
    *  - PER_IMAGE：pricePerUnit × 张数。
+   * 灵石为 Float（支持小数单价），不再 ceil 强制整数——按真实用量精确计费。
    */
   computeCredits(
     unit: string,
@@ -48,12 +49,12 @@ export class PricingService {
       case 'PER_TOKEN_INPUT': {
         const tokens = usage.inputTokens ?? 0;
         if (tokens <= 0) return 0;
-        return Math.max(1, Math.ceil((tokens * pricePerUnit) / 1_000_000));
+        return (tokens * pricePerUnit) / 1_000_000;
       }
       case 'PER_TOKEN_OUTPUT': {
         const tokens = usage.outputTokens ?? 0;
         if (tokens <= 0) return 0;
-        return Math.max(1, Math.ceil((tokens * pricePerUnit) / 1_000_000));
+        return (tokens * pricePerUnit) / 1_000_000;
       }
       case 'PER_CALL':
         return pricePerUnit;

@@ -2,7 +2,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min,
+  IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Min,
 } from 'class-validator';
 
 const CHANNEL_PROTOCOL = ['OPENAI', 'ANTHROPIC'] as const;
@@ -50,8 +50,8 @@ export class PricingUpsertDto {
   @ApiProperty() @IsString() @IsNotEmpty() model!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() label?: string;
   @ApiProperty({ enum: PRICING_UNIT }) @IsEnum(PRICING_UNIT) unit!: string;
-  @ApiProperty({ description: '单价（灵石）；PER_TOKEN_* 时为每 1M token 灵石数' })
-  @Type(() => Number) @IsInt() @Min(0) pricePerUnit!: number;
+  @ApiProperty({ description: '单价（灵石）；PER_TOKEN_* 时为每 1M token 灵石数，支持小数' })
+  @Type(() => Number) @IsNumber() @Min(0) pricePerUnit!: number;
   @ApiPropertyOptional({ enum: TIER }) @IsOptional() @IsEnum(TIER) tier?: 'FAST' | 'PREMIUM';
   @ApiPropertyOptional() @IsOptional() @IsBoolean() enabled?: boolean;
 }

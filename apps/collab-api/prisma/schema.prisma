@@ -695,7 +695,7 @@ model Channel {
 // 注：灵石流水 CreditLedger 直接关联 Team（共享 teamId），不经本表，故本表不持有 ledger 反向关系。
 model TeamCredit {
   teamId    String   @id
-  balance   Int      @default(0) // 灵石余额（>=0 由应用层条件扣款保证）
+  balance   Float    @default(0) // 灵石余额（Float：支持小数单价；>=0 由应用层条件扣款保证）
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -708,7 +708,7 @@ model TeamCredit {
 model CreditLedger {
   id          String          @id @default(uuid())
   teamId      String
-  amount      Int // 灵石（正数）
+  amount      Float // 灵石（正数，支持小数）
   direction   LedgerDirection // 复用 CREDIT/DEBIT
   source      String // signup_bonus/llm_consume/image_consume/reserve/refund/admin_adjust/purchase
   reason      String          @default("") // 展示用说明
@@ -735,7 +735,7 @@ model ModelPricing {
   model         String // 上游模型 id 或动作 key
   label         String      @default("") // 展示名
   unit          PricingUnit
-  pricePerUnit  Int // 灵石（PER_TOKEN_* 时为每 1k token 价）
+  pricePerUnit  Float // 灵石（PER_TOKEN_* 时为每 1M token 价，支持小数）
   tier          ModelTierId? // 可选版本绑定
   enabled       Boolean     @default(true)
   createdAt     DateTime    @default(now())
@@ -793,7 +793,7 @@ model LlmCallLog {
   outputTokens   Int           @default(0)
   images         Int           @default(0) // 生图张数
   durationMs     Int           @default(0)
-  credits        Int           @default(0) // 本次实扣灵石
+  credits        Float         @default(0) // 本次实扣灵石（支持小数）
   status         String // success/upstream_error/client_error/insufficient_balance/rate_limited
   httpStatus     Int?
   errorCode      String?
