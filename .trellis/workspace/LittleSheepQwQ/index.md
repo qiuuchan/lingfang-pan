@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-06-18
+- **Total Sessions**: 12
+- **Last Active**: 2026-06-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~390 | Active |
+| `journal-1.md` | ~424 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-06-23 | 完成 desktop 外壳与插件体验 14 项调整并归档 | `bce8803`, `f72f4d3` | `main` |
 | 11 | 2026-06-18 | 完成桌面插件管理体验优化 | `1b997f3` | `main` |
 | 10 | 2026-06-18 | 全库规范审计与大文件拆分 | `1ec0a4f` | `main` |
 | 9 | 2026-06-17 | Collab MySQL Redis CDN loading optimization | `6fa10f8` | `main` |

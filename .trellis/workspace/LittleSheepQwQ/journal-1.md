@@ -388,3 +388,37 @@ Committed completed Collab platform work for MySQL provider switching, Redis-bac
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 完成 desktop 外壳与插件体验 14 项调整并归档
+
+**Date**: 2026-06-23
+**Task**: 完成 desktop 外壳与插件体验 14 项调整并归档
+**Branch**: `main`
+
+### Summary
+
+验证并收尾 06-22-desktop-shell-ui-revamp 任务（Batch 1 项 1-9 + Batch 2 项 10-14 共 14 项）。构建通过（vite build + cargo release）；确认 AccountDialog/Footer 已删、AvatarMenu 已移植、tray-icon 已启用、通知中心独立到 App 顶层、最近使用插件(lf:recent)、侧栏持久化(lf:sidebar-open)、创建器模糊+开关持久化(lf:creator-open)、创建器居中悬浮窗(~70%, backdrop-blur)、应用名统一为「灵坊工作台」。归档任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bce8803` | (see git log) |
+| `f72f4d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
