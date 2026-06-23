@@ -232,7 +232,14 @@ export default function App() {
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
   // v4 形态：AI 创建插件为悬浮窗（对话式流式），FAB 唤起，不切 view。
-  const [creatorOpen, setCreatorOpen] = useState(false);
+  // 项 7：creatorOpen 开关态持久化（lf:creator-open），跨重启保留「上次是否打开」。
+  const [creatorOpen, setCreatorOpenState] = useState<boolean>(() => {
+    try { return localStorage.getItem('lf:creator-open') === '1'; } catch { return false; }
+  });
+  const setCreatorOpen = useCallback((v: boolean) => {
+    setCreatorOpenState(v);
+    try { localStorage.setItem('lf:creator-open', v ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
+  }, []);
   // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
   const [walletOpen, setWalletOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -363,7 +370,9 @@ export default function App() {
     setSession(emptySession);
     setRunningPlugin(null);
     setView('home');
-  }, []);
+    // 项 7：登出时关闭创建器并清除持久化（避免下次登录自动弹浮窗）。
+    setCreatorOpen(false);
+  }, [setCreatorOpen]);
 
   // 启动时若本地存有 session，静默调 /api/auth/me 刷新；仅 token 真无效（401）才登出。
   // 网络/后端未启动时保留已恢复的 session，进主界面，下次启动重试。
