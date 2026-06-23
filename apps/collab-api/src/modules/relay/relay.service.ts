@@ -285,7 +285,13 @@ export class RelayService {
       // 任何未预期错误：退款兜底（防灵石泄漏）+ 确保日志终态，再原样抛给客户端。
       if (!finalized) {
         try { await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId); } catch { /* 忽略 */ }
-        await ensureFinalized({ status: 'client_error', errorCode: e instanceof AppError ? e.code : 'internal', httpStatus: e instanceof AppError ? (e as AppError).status : 500, channelId: null, model: '(error)' });
+        // 把原生错误信息记入 errorCode（前 120 字），便于后台调用日志直接看到根因（如 Prisma 列类型错）。
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const errCode = e instanceof AppError ? e.code : `internal:${errMsg.slice(0, 120)}`;
+        await ensureFinalized({ status: 'client_error', errorCode: errCode, httpStatus: e instanceof AppError ? (e as AppError).status : 500, channelId: null, model: '(error)' });
+        // 抛给客户端的消息也带根因（debug 友好）。
+        if (e instanceof AppError) throw e;
+        throw new AppError(500, 'internal', `relay 内部错误：${errMsg}`, { error: errMsg });
       }
       throw e;
     }
