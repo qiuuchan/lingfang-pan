@@ -22,10 +22,11 @@ export class PricingService {
     model: string;
     tier?: 'FAST' | 'PREMIUM' | null;
   }): Promise<{ unit: string; pricePerUnit: number } | null> {
-    const whereTier = args.tier ? [{ tier: args.tier }, { tier: null }] : [{ tier: null }];
-    for (const tierCond of whereTier) {
+    // tier 候选：有 tier 先精确匹配，再回退 null（不限版本）。直接用值，不包对象。
+    const tierValues: (('FAST' | 'PREMIUM') | null)[] = args.tier ? [args.tier, null] : [null];
+    for (const tv of tierValues) {
       const row = await this.prisma.modelPricing.findFirst({
-        where: { capability: args.capability, model: args.model, tier: tierCond as never, enabled: true },
+        where: { capability: args.capability, model: args.model, tier: tv, enabled: true },
         select: { unit: true, pricePerUnit: true },
       });
       if (row) return { unit: row.unit, pricePerUnit: row.pricePerUnit };
