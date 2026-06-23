@@ -55,14 +55,13 @@ const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ de
 const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
 const ReleasesView = lazy(() => import('@/components/releases-view').then((m) => ({ default: m.ReleasesView })));
 const RolesView = lazy(() => import('@/components/roles-view').then((m) => ({ default: m.RolesView })));
-// 计费与模型（P5）：渠道/计费/版本/灵石/调用日志/API Key/接入文档。
+// 计费与模型（资源池模型重构后）：资源池/渠道/计费/灵石/调用日志/API Key。
+const PoolsView = lazy(() => import('@/components/billing/pools-view').then((m) => ({ default: m.PoolsView })));
 const ChannelsView = lazy(() => import('@/components/billing/channels-view').then((m) => ({ default: m.ChannelsView })));
 const BillingView = lazy(() => import('@/components/billing/billing-view').then((m) => ({ default: m.BillingView })));
-const ModelTiersView = lazy(() => import('@/components/billing/model-tiers-view').then((m) => ({ default: m.ModelTiersView })));
 const CreditsView = lazy(() => import('@/components/billing/credits-view').then((m) => ({ default: m.CreditsView })));
 const CallLogsView = lazy(() => import('@/components/billing/call-logs-view').then((m) => ({ default: m.CallLogsView })));
 const ApiKeysView = lazy(() => import('@/components/billing/api-keys-view').then((m) => ({ default: m.ApiKeysView })));
-const RelayDocsView = lazy(() => import('@/components/billing/relay-docs-view').then((m) => ({ default: m.RelayDocsView })));
 
 // 主题初始化：在模块加载时同步应用，避免首屏亮暗闪烁（FOUC）。
 // 放在模块顶层执行一次，早于 React 渲染，读取 localStorage 的主题偏好并应用到 <html>。
@@ -347,13 +346,12 @@ export default function App() {
                 {view === 'audit' && <AuditView />}
                 {view === 'releases' && <ReleasesView />}
                 {view === 'roles' && <RolesView />}
+                {view === 'pools' && <PoolsView />}
                 {view === 'channels' && <ChannelsView />}
                 {view === 'billing' && <BillingView />}
-                {view === 'modelTiers' && <ModelTiersView />}
                 {view === 'credits' && <CreditsView />}
                 {view === 'callLogs' && <CallLogsView />}
                 {view === 'apiKeys' && <ApiKeysView />}
-                {view === 'relayDocs' && <RelayDocsView />}
                 {view === 'settings' && <SettingsView />}
               </Suspense>
             </PageTransition>

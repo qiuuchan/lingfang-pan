@@ -120,14 +120,20 @@ enum ChannelProtocol {
   ANTHROPIC
 }
 
-// 计费/中转 · 渠道适用范围类型。GLOBAL 全平台兜底；TEAM 绑定特定团队；ROLE 绑定平台/团队角色（用户组）。
-enum ChannelScopeKind {
-  GLOBAL
-  TEAM
-  ROLE
+// 计费/中转 · 资源池范围：SHARED 多团队共享 / DEDICATED 绑定单团队（teamId）。
+enum PoolScope {
+  SHARED
+  DEDICATED
 }
 
-// 计费/中转 · 计费单位。PER_TOKEN_INPUT/OUTPUT 按每 1k token 计；PER_CALL 按次固定；PER_IMAGE 按张固定。
+// 计费/中转 · 渠道类型：CHAT 聊天渠道（/v1/chat/completions、/v1/messages）/ IMAGE 生图渠道（/v1/images/generations、/v1/images/edits）。
+// 两类分开管理；relay 据请求 capability 只路由到对应 kind 的渠道。
+enum ChannelKind {
+  CHAT
+  IMAGE
+}
+
+// 计费/中转 · 计费单位。PER_TOKEN_INPUT/OUTPUT 按每 1M token 计（灵石/百万 token）；PER_CALL 按次固定；PER_IMAGE 按张固定。
 enum PricingUnit {
   PER_TOKEN_INPUT
   PER_TOKEN_OUTPUT
@@ -135,7 +141,8 @@ enum PricingUnit {
   PER_IMAGE
 }
 
-// 计费/中转 · 前台固定模型版本。FAST 快速版 / PREMIUM 高级版，底层模型由 ModelTierConfig 配置。
+// 计费/中转 · 渠道版本标签（FAST 快速 / PREMIUM 高级）。relay 据 model 哨兵匹配渠道 tier，多渠道轮询。
+// 旧 ModelTierConfig（tier→固定底层模型）已移除：版本现由「打了 tier 标签的渠道池」决定，渠道内 models[] 轮询。
 enum ModelTierId {
   FAST
   PREMIUM
@@ -232,6 +239,7 @@ model Team {
   creditLedger    CreditLedger[]
   apiKeys         PlatformApiKey[]
   callLogs        LlmCallLog[]
+  pools           Pool[]
 
   // 公开团队发现查询索引：GET /api/teams/public 按 allowPublicJoin=true + status=ACTIVE 过滤。
   @@index([allowPublicJoin, status])
@@ -634,51 +642,52 @@ model PluginGrant {
 //  - LlmCallLog 是计费/日志咽喉的唯一事实来源，多维索引覆盖管理端查询。
 // ============================================================
 
-// 上游渠道（平台 Admin 维护）。一个渠道 = 一组上游凭据 + 支持的模型/版本 + 路由策略。
+// 资源池（Pool）：渠道的访问范围容器。
+// scope=SHARED 时所有团队可用（teamId 留空）；scope=DEDICATED 时仅 teamId 指定团队可用。
+// 团队 T 可用的池 = 全部 SHARED 池 + scope=DEDICATED 且 teamId=T 的池；relay 在这些池的渠道中按 kind+tier 轮询。
+// 一个池可含多个渠道（聊天/生图混存）；渠道的 kind+tier 决定它服务哪类请求。
+model Pool {
+  id          String    @id @default(uuid())
+  name        String    @unique // 展示名（如「默认池」「A 企业专用池」）
+  scope       PoolScope @default(SHARED)
+  teamId      String? // scope=DEDICATED 时必填（应用层校验团队存在 + 唯一性）
+  description String    @default("")
+  createdAt   DateTime  @default(now())
+  team        Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  channels    Channel[]
+}
+
+// 上游渠道：归属一个资源池，有类型（聊天/生图）+ 版本标签（快速/高级）+ 多个可轮询模型。
 // encryptedUpstreamKey: base64(iv||tag||ciphertext)（AES-256-GCM，复用 credential-cipher）。
 // upstreamKeyHint: 脱敏串（非敏感，明文存库供列表展示，零解密）。
-// supportedModels: string[] 该渠道可服务的上游模型 id 白名单（路由匹配用）。
-// supportedTiers: 该渠道服务哪些前台版本（FAST/PREMIUM），辅助路由。
-// priority: 路由优先级（小优先）；weight: 同优先级内加权随机（负载均衡）；
-//           同 priority 内按 weight 加权选一，上游失败时按 priority 升序故障转移到下一候选。
-// lastHealthAt/lastHealthOk: 最近一次「渠道健康测试」结果（admin 手动触发或路由时探测）。
+// models: string[] 该渠道可在上游调用的模型 id 列表（自定义多个，relay 在其中轮询）。
+// kind: CHAT 聊天 / IMAGE 生图——决定路由到哪类请求；relay /chat/* 只走 CHAT 渠道，/images/* 只走 IMAGE 渠道。
+// tier: FAST/PREMIUM——relay 据 model 哨兵匹配；同 kind+tier 的渠道轮询调用。
+// protocol: OPENAI（/chat/completions + /images/generations）/ ANTHROPIC（/v1/messages）。
+//           IMAGE 渠道仅支持 OPENAI 协议（Anthropic 无原生生图 API）。
 model Channel {
   id                   String           @id @default(uuid())
   name                 String           @unique // 展示名（如「OpenAI 官方」）
+  kind                 ChannelKind // CHAT 聊天 / IMAGE 生图
+  tier                 ModelTierId // FAST 快速 / PREMIUM 高级
   protocol             ChannelProtocol
   provider             String // 平台白名单值（复用 LLM_PROVIDER：openai/anthropic/azure/…/custom）
+  poolId               String
   baseUrl              String // 上游基址（规范化去尾斜杠，如 https://api.openai.com/v1）
   encryptedUpstreamKey String // base64(iv||tag||ciphertext)
   upstreamKeyHint      String           @default("") // 脱敏串（非敏感，明文存库）
-  supportedModels      Json             @default("[]") // string[]，路由匹配用
-  supportedTiers       ModelTierId[]    @default([]) // 该渠道服务的前台版本
+  models               Json             @default("[]") // string[]，自定义多个上游模型，轮询调用
   status               ChannelStatus    @default(ENABLED)
-  priority             Int              @default(100) // 小优先
-  weight               Int              @default(1) // 同优先级加权（>=1）
   description          String           @default("")
   lastHealthAt         DateTime?
   lastHealthOk         Boolean?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
-  bindings             ChannelBinding[]
+  pool                 Pool             @relation(fields: [poolId], references: [id], onDelete: Cascade)
   callLogs             LlmCallLog[]
 
-  @@index([status, priority])
-}
-
-// 渠道↔主体绑定（多对多）。满足「为同一主体分配单一或多个渠道」。
-// scopeKind=GLOBAL 时 scopeId 留空（全局兜底渠道）；TEAM 时 scopeId=teamId；ROLE 时 scopeId=roleId。
-// (channelId, scopeKind, scopeId) 唯一防重复绑定。scopeId 为多态列（不建 FK，应用层校验）。
-model ChannelBinding {
-  id        String           @id @default(uuid())
-  channelId String
-  scopeKind ChannelScopeKind
-  scopeId   String           @default("") // GLOBAL 留空；TEAM=teamId；ROLE=roleId
-  createdAt DateTime         @default(now())
-  channel   Channel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
-
-  @@unique([channelId, scopeKind, scopeId])
-  @@index([scopeKind, scopeId])
+  @@index([poolId, status])
+  @@index([kind, tier, status])
 }
 
 // 团队灵石账户（每团队一行）。balance 为灵石整数（独立于 Team.balanceCents 人民币分）。
@@ -739,17 +748,9 @@ model ModelPricing {
 // 前台固定模型版本配置（快速版/高级版 → 底层上游模型 + 参数 + 调用策略）。
 // tier 为主键（FAST/PREMIUM 各一行）。前台仅显 label；relay 据 chatModel/imageModel 路由到上游。
 // extraParams 存放传给上游的附加参数（如 top_p、安全策略等），由后台统一配置，前台无感。
-model ModelTierConfig {
-  tier         ModelTierId @id
-  label        String      @default("") // 展示名（「快速版」/「高级版」）
-  chatModel    String // 聊天用上游模型 id
-  imageModel   String? // 生图用上游模型 id（可选：该版本不提供生图则为 null）
-  temperature  Float?
-  maxTokens    Int?
-  extraParams  Json        @default("{}") // 其他上游参数
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-}
+// ModelTierConfig 已移除：版本现由「打了 tier 标签的渠道池」决定，渠道内 models[] 轮询。
+// 旧的 tier→固定底层模型映射不再需要。
+
 
 // 平台 API Key（平台发放给团队，用于调 /api/relay/*）。
 // 明文格式 lf_<32 hex>；keyHash=sha256(明文) 存库（凭据类不存密文/脱敏，只存哈希用于比对查找）。

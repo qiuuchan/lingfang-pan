@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { ModelPricing, PricingUnit, ModelTier } from '@/lib/types';
 
 const UNIT_LABEL: Record<PricingUnit, string> = {
-  PER_TOKEN_INPUT: '每1k输入token', PER_TOKEN_OUTPUT: '每1k输出token', PER_CALL: '每次', PER_IMAGE: '每张',
+  PER_TOKEN_INPUT: '每1M输入token', PER_TOKEN_OUTPUT: '每1M输出token', PER_CALL: '每次', PER_IMAGE: '每张',
 };
 const CAPABILITIES = ['chat', 'image', 'action'] as const;
 const UNITS: PricingUnit[] = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE'];
