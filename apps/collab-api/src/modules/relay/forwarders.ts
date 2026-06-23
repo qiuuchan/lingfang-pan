@@ -27,7 +27,7 @@ export interface ForwardResult {
   images: number;
 }
 
-const UPSTREAM_TIMEOUT_MS = 120_000;
+const UPSTREAM_TIMEOUT_MS = 60_000; // 上游超时 60s（含 chat 流式）：超时即 abort，防日志卡 pending。
 
 /** 通用上游 fetch（带超时）。 */
 async function upstreamFetch(url: string, init: RequestInit): Promise<globalThis.Response> {

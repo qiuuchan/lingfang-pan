@@ -216,50 +216,72 @@ export class RelayService {
       },
     });
     const ticket: ReserveTicket = { teamId: auth.teamId, cap, callLogId: pendingLog.id, actorUserId: auth.userId };
+    // finalizedRef：确保 pendingLog 至少被 finalize 一次（防 catch 链中途抛错导致日志永久卡 pending）。
+    let finalized = false;
+    const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; channelId: string | null; model: string }) => {
+      if (finalized) return;
+      finalized = true;
+      try {
+        await this.finalizeLog(pendingLog.id, { ...args, durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
+      } catch { /* finalize 本身失败不阻断主流程（避免吞掉真实错误） */ }
+    };
 
     try {
-      await this.credits.reserve(auth.teamId, cap, pendingLog.id, auth.userId);
-    } catch (e) {
-      await this.finalizeLog(pendingLog.id, { status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, channelId: null, model: '(reserve-failed)', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
-      throw e;
-    }
-
-    const candidates = await this.router.selectCandidates({ teamId: auth.teamId, kind, tier });
-    if (candidates.length === 0) {
-      await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-      await this.finalizeLog(pendingLog.id, { status: 'no_channel', errorCode: 'no_channel_available', httpStatus: 503, channelId: null, model: '(no-channel)', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
-      throw new AppError(503, 'no_channel_available', `无可用${kind === 'CHAT' ? '聊天' : '生图'}渠道（${tier === 'FAST' ? '快速' : '高级'}版）`);
-    }
-
-    let lastError: unknown;
-    for (const cand of candidates) {
-      // 按候选 model 查定价；无定价则跳过该候选（可能未配置该模型价格）。
-      const price = await this.pricing.lookupPrice({ capability, model: cand.model, tier });
-      if (!price) continue;
       try {
-        const routed = await this.router.decryptUpstreamKey(cand.id);
-        const fr = await plan.forward(routed.upstreamKey, routed.baseUrl, routed.protocol, cand.model);
-        // 计费：按命中 model 的单价。
-        const usage = { inputTokens: fr.inputTokens, outputTokens: fr.outputTokens, images: fr.images };
-        const realCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
-        const charged = await this.credits.reconcile(auth.teamId, cap, realCredits, pendingLog.id, auth.userId);
-        await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
-        return;
+        await this.credits.reserve(auth.teamId, cap, pendingLog.id, auth.userId);
       } catch (e) {
-        lastError = e;
-        if (res.headersSent) {
-          await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-          await this.finalizeLog(pendingLog.id, { status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus: e instanceof UpstreamError ? e.httpStatus : 502, channelId: cand.id, model: cand.model, durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
+        await ensureFinalized({ status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, channelId: null, model: '(reserve-failed)' });
+        throw e;
+      }
+
+      const candidates = await this.router.selectCandidates({ teamId: auth.teamId, kind, tier });
+      if (candidates.length === 0) {
+        await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+        await ensureFinalized({ status: 'no_channel', errorCode: 'no_channel_available', httpStatus: 503, channelId: null, model: '(no-channel)' });
+        throw new AppError(503, 'no_channel_available', `无可用${kind === 'CHAT' ? '聊天' : '生图'}渠道（${tier === 'FAST' ? '快速' : '高级'}版）`);
+      }
+
+      let lastError: unknown;
+      let lastCand: { id: string; model: string } | null = null;
+      for (const cand of candidates) {
+        lastCand = { id: cand.id, model: cand.model };
+        // 按候选 model 查定价；无定价则跳过该候选（可能未配置该模型价格）。
+        const price = await this.pricing.lookupPrice({ capability, model: cand.model, tier });
+        if (!price) continue;
+        try {
+          const routed = await this.router.decryptUpstreamKey(cand.id);
+          const fr = await plan.forward(routed.upstreamKey, routed.baseUrl, routed.protocol, cand.model);
+          // 计费：按命中 model 的单价。
+          const usage = { inputTokens: fr.inputTokens, outputTokens: fr.outputTokens, images: fr.images };
+          const realCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
+          const charged = await this.credits.reconcile(auth.teamId, cap, realCredits, pendingLog.id, auth.userId);
+          finalized = true; // 成功路径手动置位（ensureFinalized 跳过，保留 usage/credits）
+          await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
           return;
+        } catch (e) {
+          lastError = e;
+          if (res.headersSent) {
+            // 流式已发头：无法故障转移，退款 + 终态。
+            await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+            await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus: e instanceof UpstreamError ? e.httpStatus : 502, channelId: cand.id, model: cand.model });
+            return;
+          }
+          // 非流式：继续下一候选（故障转移）。
         }
       }
+      // 全部候选失败：退款 + 终态 + 抛错。
+      await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+      const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
+      await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
+      throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败');
+    } catch (e) {
+      // 任何未预期错误：退款兜底（防灵石泄漏）+ 确保日志终态，再原样抛给客户端。
+      if (!finalized) {
+        try { await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId); } catch { /* 忽略 */ }
+        await ensureFinalized({ status: 'client_error', errorCode: e instanceof AppError ? e.code : 'internal', httpStatus: e instanceof AppError ? (e as AppError).status : 500, channelId: null, model: '(error)' });
+      }
+      throw e;
     }
-    await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-    const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : (candidates.length ? 502 : 503);
-    const errorCode = candidates.length ? 'upstream_llm_error' : 'no_channel_available';
-    await this.finalizeLog(pendingLog.id, { status: 'upstream_error', errorCode, httpStatus, channelId: candidates[0]?.id ?? null, model: candidates[0]?.model ?? '(none)', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
-    if (!candidates.length) throw new AppError(503, 'no_channel_available', '无可用渠道服务该模型');
-    throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败');
   }
 
   private async finalizeLog(
