@@ -8,10 +8,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
-import { type ApiError } from '@/lib/api';
+import { api, type ApiError } from '@/lib/api';
 import { relayProvider } from '@/lib/relay-provider';
 import { creatorTools } from '@/lib/plugin-creator/creator-tools';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
@@ -60,9 +60,30 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [compressing, setCompressing] = useState(false); // 压缩中指示
   const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具上传中指示
   const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
+  const [publishedName, setPublishedName] = useState<string | null>(null); // 已发布插件名（agent upload 成功后显示成功卡片）
+  const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
+  const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 拉当前 tier 的 chat 定价 → 取 contextWindow（供用量条 + 压缩阈值参考）。
+  useEffect(() => {
+    let mounted = true;
+    api<{ pricing: { contextWindow?: number | null; tier?: string; capability: string }[] }>('/api/admin/billing/pricing')
+      .then((r) => {
+        if (!mounted) return;
+        // 取当前 tier（或不限 tier）的 chat 定价的 contextWindow。
+        const chatRow = r.pricing?.find((p) => p.capability === 'chat' && (p.tier === tier.toUpperCase() || p.tier == null));
+        setContextWindow(chatRow?.contextWindow ?? null);
+      })
+      .catch(() => undefined);
+    return () => { mounted = false; };
+  }, [tier]);
+
+  // 粗估当前对话 token 用量（≈ 全部 turns 字符数 / 3.5，中英文混合近似）。
+  const usedTokens = Math.round(turns.reduce((s, t) => s + t.content.length, 0) / 3.5);
+  const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
 
   // 流式输出时自动滚到底。
   useEffect(() => {
@@ -131,8 +152,14 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
       let uploadedName = '';
       let uploadedMsg = '';
+      setReasoning('');
       for await (const part of result.fullStream) {
-        if (part.type === 'text-delta') {
+        if (part.type === 'reasoning-delta') {
+          // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series），把思考增量单独累积展示。
+          setReasoning((prev) => prev + (part as { text?: string; delta?: string }).text || (part as { delta?: string }).delta || '');
+        } else if (part.type === 'reasoning-end') {
+          // 思考结束：不自动清——保留供用户展开查看（下轮 send 时 setReasoning('') 清空）。
+        } else if (part.type === 'text-delta') {
           const delta = part.text;
           setTurns((prev) => {
             const next = [...prev];
@@ -146,7 +173,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         } else if (part.type === 'tool-result') {
           setUploadingViaTool(false);
           const r = part.output as { ok: boolean; message: string; name?: string } | undefined;
-          if (r?.ok && r.name) uploadedName = r.name;
+          if (r?.ok && r.name) { uploadedName = r.name; setPublishedName(r.name); }
           else if (r && !r.ok) uploadedMsg = r.message;
         }
       }
@@ -263,6 +290,11 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <button type="button" onClick={onClose} aria-label="关闭" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
               <XIcon className="size-4" />
             </button>
+            {turns.length > 0 && (
+              <button type="button" onClick={() => { setTurns([]); setReasoning(''); setReferencedPlugin(null); setPublishedName(null); compressRef.current = emptyCompressState(); setCompressedHint(0); }} title="新建对话" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <PlusIcon className="size-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -299,10 +331,50 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           )}
+          {/* #4 发布成功卡片：agent upload_plugin 成功后明确告知用户「已发布到团队空间」 */}
+          {publishedName && (
+            <div className="mx-auto mt-4 max-w-3xl">
+              <div className="flex items-center gap-3 rounded-xl border border-green-300 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950/30">
+                <CheckCircle2Icon className="size-5 shrink-0 text-green-600" />
+                <div className="flex-1 text-sm">
+                  <div className="font-medium">插件「{publishedName}」已发布到团队空间</div>
+                  <div className="text-xs text-muted-foreground">团队成员现可在插件中心看到并安装它。点「+」新建对话可继续创建下一个。</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 上传由 agent 工具调用（upload_plugin）驱动，无需手动预览/上传栏。 */}
 
+        {/* #3 思考流式输出（支持思考的模型才显示，不支持时 reasoning 为空自动隐藏） */}
+        {reasoning && (
+          <div className="shrink-0 border-t bg-purple-50/50 px-4 py-2 dark:bg-purple-950/20">
+            <details className="mx-auto max-w-3xl">
+              <summary className="cursor-pointer text-xs font-medium text-purple-600 dark:text-purple-400">
+                💭 思考过程（{reasoning.length} 字）{busy && <Loader2Icon className="ml-1 inline size-3 animate-spin" />}
+              </summary>
+              <div className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                {reasoning}
+              </div>
+            </details>
+          </div>
+        )}
+
+        {/* #1 上下文用量条（contextWindow 配好后显示百分比） */}
+        {contextWindow && turns.length > 0 && (
+          <div className="shrink-0 border-t px-4 py-1.5">
+            <div className="mx-auto max-w-3xl">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>上下文用量</span>
+                <span className="tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} token（{usagePct}%）{usagePct > 80 && ' · 即将自动压缩'}</span>
+              </div>
+              <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-muted">
+                <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-amber-500' : 'bg-primary'} `} style={{ width: `${usagePct}%` }} />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 状态指示（压缩中 / agent 工具上传中） */}
         {(compressing || uploadingViaTool) && (

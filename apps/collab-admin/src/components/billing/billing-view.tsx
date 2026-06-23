@@ -67,6 +67,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
           <Select value={form.unit} onValueChange={(v) => patch({ unit: v as PricingUnit })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS.map((u) => <SelectItem key={u} value={u}>{UNIT_LABEL[u]}</SelectItem>)}</SelectContent></Select>
         </div>
         <div className="space-y-2"><Label>单价（灵石）</Label><Input type="number" step="0.0001" min={0} value={form.pricePerUnit} onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })} /></div>
+        <div className="space-y-2"><Label>上下文窗口（token，可选）</Label><Input type="number" min={0} placeholder="如 128000" value={form.contextWindow ?? ''} onChange={(e) => patch({ contextWindow: e.target.value ? Number(e.target.value) : undefined })} /></div>
       </div>
       <div className="space-y-2"><Label>启用</Label>
         <Select value={form.enabled ? 'true' : 'false'} onValueChange={(v) => patch({ enabled: v === 'true' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="true">启用</SelectItem><SelectItem value="false">禁用</SelectItem></SelectContent></Select>
@@ -111,7 +112,7 @@ export function BillingView() {
 }
 
 function emptyPricingForm() {
-  return { capability: 'chat', model: '', label: '', unit: 'PER_TOKEN_INPUT' as PricingUnit, pricePerUnit: 1, tier: null as ModelTier | null, enabled: true };
+  return { capability: 'chat', model: '', label: '', unit: 'PER_TOKEN_INPUT' as PricingUnit, pricePerUnit: 1, contextWindow: undefined as number | undefined, tier: null as ModelTier | null, enabled: true };
 }
 
 function CreatePricingDialog({ children, onRefresh }: { children: React.ReactNode; onRefresh: () => void }) {
@@ -130,8 +131,8 @@ function CreatePricingDialog({ children, onRefresh }: { children: React.ReactNod
 
 function EditPricingDialog({ pricing, children, onRefresh }: { pricing: ModelPricing; children: React.ReactNode; onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, tier: pricing.tier, enabled: pricing.enabled });
-  useEffect(() => { if (open) setForm({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, tier: pricing.tier, enabled: pricing.enabled }); }, [open, pricing]);
+  const [form, setForm] = useState({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, contextWindow: (pricing as any).contextWindow, tier: pricing.tier, enabled: pricing.enabled });
+  useEffect(() => { if (open) setForm({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, contextWindow: (pricing as any).contextWindow, tier: pricing.tier, enabled: pricing.enabled }); }, [open, pricing]);
   async function save() {
     const body = { ...form, model: form.model.trim() };
     if (!(await run(() => api('/api/admin/billing/pricing', { method: 'POST', body }).then(onRefresh), '定价已更新'))) return;

@@ -129,7 +129,8 @@ export class BillingController {
     });
     const data = {
       capability: body.capability, model: body.model, label: body.label ?? '',
-      unit: body.unit as never, pricePerUnit: body.pricePerUnit, tier: body.tier ?? null, enabled: body.enabled ?? true,
+      unit: body.unit as never, pricePerUnit: body.pricePerUnit, tier: body.tier ?? null,
+      contextWindow: body.contextWindow ?? null, enabled: body.enabled ?? true,
     };
     const row = existing
       ? await this.prisma.modelPricing.update({ where: { id: existing.id }, data })
