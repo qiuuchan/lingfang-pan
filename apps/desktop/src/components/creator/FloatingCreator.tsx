@@ -1,17 +1,18 @@
-// FloatingCreator —— 悬浮窗 + 对话式 + 流式的 AI 插件创建器（v4 形态，relay 后端）。
+// FloatingCreator —— 悬浮窗 + 对话式 + 流式 AI 插件创建器（Vercel AI SDK agent）。
 //
-// 设计（对照旧 v4 创建器，去掉 code_assistant CLI 依赖）：
 //  - 悬浮窗：App 渲染为全屏遮罩 + 居中面板（~85vh），不切 view，关窗即回原页。
 //  - 对话式：多轮聊天（用户/助手气泡），输入框在底部，Enter 发送。
-//  - 流式：调 relay SSE（streamChat），助手回复逐 token 流入末条助手气泡。
-//  - 产物：助手完整回复若含 ```lingfang-plugin JSON 块，解析为插件包 → 显示预览 + 上传。
+//  - 流式 + agent：Vercel AI SDK streamText 走 relay；模型生成插件后**自己调用 upload_plugin 工具**上传
+//    （不再吐代码块让用户手动点）。fullStream 给文本增量 + 工具调用/结果事件，UI 实时反馈。
+//  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { SparklesIcon, XIcon, SendIcon, UploadIcon, Loader2Icon, WrenchIcon } from 'lucide-react';
+import { streamText, stepCountIs } from 'ai';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { type ApiError } from '@/lib/api';
-import { streamChat, type ChatMessage } from '@/lib/relay-chat-stream';
-import { parsePackageBlock, uploadCreatedPlugin, type CreatedPluginPackage } from '@/lib/plugin-creator/relay-creator';
+import { relayProvider } from '@/lib/relay-provider';
+import { creatorTools } from '@/lib/plugin-creator/creator-tools';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import { Button } from '@/components/ui/button';
@@ -27,30 +28,24 @@ interface Turn {
   streaming?: boolean;
 }
 
-const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户会用自然语言描述需求，你帮忙生成插件。
+const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户用自然语言描述需求，你帮忙生成并上传插件。
 
-当需求明确、信息足够时，输出**一个** \`\`\`lingfang-plugin JSON 代码块（前后不要额外解释），结构：
-{
-  "manifest": {
-    "id": "<kebab-case>",
-    "name": "<展示名>",
-    "version": "0.1.0",
-    "description": "<一句话>",
-    "runtime_type": "client" | "nodejs" | "python",
-    "entry": "<client: ui/index.html; nodejs: index.js; python: main.py>",
-    "visibility": "team",
-    "capabilities": [{ "kind": "ui.view", "reason": "<为何>", "risk": "low" }]
-  },
-  "files": [{ "path": "<相对路径>", "content": "<文件全文>" }]
-}
-约束：client 入口 ui/index.html（内联 CSS/JS）；nodejs 含 package.json+index.js；python 含 main.py+requirements.txt。文件路径禁绝对/空段/../。代码完整可运行。插件如需调 AI 必须用灵坊平台 sdk.llm.chat / sdk.image.generate。
-
-需求信息不够时，先用简短对话提问澄清（不要输出代码块）。每次只产出一个插件包。`;
+工作方式（agent）：
+- 信息不足时先简短提问澄清（不要调用工具）。
+- 需求明确、信息足够时，**调用 upload_plugin 工具**上传完整插件包（不要把插件代码作为普通文本输出）。
+- upload_plugin 的参数：id（kebab-case，仅小写字母/数字/连字符）、name、version（默认 0.1.0）、description、
+  runtime_type（client/nodejs/python）、entry（入口文件路径）、files（[{path, content}] 全部文件全文）。
+  - client → entry=ui/index.html（内联 CSS/JS）；
+  - nodejs → entry=index.js，files 含 package.json（无依赖用 {}）与 index.js；
+  - python → entry=main.py，files 含 requirements.txt（可空）与 main.py。
+- 工具返回 {ok, message}：成功则告诉用户「已上传 <name>」；失败则据 message 修正后重试。
+- 文件路径只能是相对路径，禁绝对/空段/..。
+- 插件如需调 AI，必须用灵坊平台 sdk.llm.chat / sdk.image.generate（见 relay-access skill），禁第三方接口。
+- 回复简短，不复述生成的全部文件内容（工具已上传）。`;
 
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
-
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const { session } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -60,8 +55,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
   const compressRef = useRef(emptyCompressState());
-  const [pkg, setPkg] = useState<CreatedPluginPackage | null>(null);
-  const [uploading, setUploading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -91,7 +84,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     const assistantIdx = turns.length + 1;
     setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true }]);
     setBusy(true);
-    setPkg(null);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -99,7 +91,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     try {
       // 系统提示词 = 基础提示 + 激活的 skills；relay 服务端还会注入"必须用灵坊服务"规则。
       const systemPrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
-      // 上下文自动压缩：超阈值时把较早的纯对话轮摘要成一条（保留近期原文 + 含插件包的轮）。
+      // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
       const built = await buildContextMessages({
         turns: turns.map((t) => ({ role: t.role, content: t.content })),
         currentInput: text,
@@ -110,28 +102,51 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       });
       compressRef.current = built.state;
       setCompressedHint(built.compressedCount);
-      const full = await streamChat({
+
+      // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 upload_plugin 上传。
+      // fullStream 同时给文本增量 + 工具调用/结果事件，实现 agent 闭环。
+      const result = streamText({
+        model: relayProvider().chat(tier),
         messages: built.messages,
-        tier,
-        signal: controller.signal,
-        onDelta: (delta) => {
+        tools: creatorTools,
+        stopWhen: stepCountIs(4), // 允许：生成 → 调 upload_plugin → 看结果 → 总结
+        abortSignal: controller.signal,
+      });
+
+      let uploadedName = '';
+      for await (const part of result.fullStream) {
+        if (part.type === 'text-delta') {
+          const delta = part.text;
           setTurns((prev) => {
             const next = [...prev];
             const cur = next[assistantIdx];
             if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: cur.content + delta };
             return next;
           });
-        },
-      });
-      // 结束流式标记；检测插件包。
+        } else if (part.type === 'tool-call') {
+          // 模型调用了工具：在气泡里显示调用态。
+          if (part.toolName === 'upload_plugin') {
+            setTurns((prev) => {
+              const next = [...prev];
+              const cur = next[assistantIdx];
+              if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: cur.content + '\n\n_[正在上传插件…]_' };
+              return next;
+            });
+          }
+        } else if (part.type === 'tool-result') {
+          const r = part.output as { ok: boolean; message: string; name?: string };
+          if (r?.ok && r.name) uploadedName = r.name;
+        }
+      }
+      // 流结束：取完整文本，清除流式标记；若工具已上传，提示并保留对话。
+      const full = await result.text;
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
         if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: full, streaming: false };
         return next;
       });
-      const detected = parsePackageBlock(full);
-      if (detected) setPkg(detected);
+      if (uploadedName) toast.success(`插件「${uploadedName}」已上传到团队空间`);
     } catch (e) {
       const aborted = (e as Error).name === 'AbortError';
       setTurns((prev) => {
@@ -153,21 +168,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   function toggleSkill(id: string) {
     setActiveSkillIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
-
-  async function upload() {
-    if (!pkg) return;
-    setUploading(true);
-    try {
-      await uploadCreatedPlugin(pkg);
-      toast.success(`插件「${pkg.manifest.name}」已上传到团队空间`);
-      setPkg(null);
-      onClose();
-    } catch (e) {
-      toast.error((e as ApiError).message || '上传失败');
-    } finally {
-      setUploading(false);
-    }
   }
 
   return (
@@ -248,21 +248,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {/* 产物预览 + 上传 */}
-        {pkg && (
-          <div className="shrink-0 border-t bg-muted/30 px-4 py-2.5">
-            <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
-              <div className="min-w-0 flex-1 text-sm">
-                <span className="font-medium">已生成插件：{pkg.manifest.name}</span>
-                <span className="ml-2 text-xs text-muted-foreground">{pkg.manifest.runtime_type} · {pkg.files.length} 文件</span>
-              </div>
-              <Button size="sm" onClick={upload} disabled={uploading}>
-                {uploading ? <Loader2Icon className="mr-1 size-3.5 animate-spin" /> : <UploadIcon className="mr-1 size-3.5" />}
-                上传到团队
-              </Button>
-            </div>
-          </div>
-        )}
+        {/* 上传由 agent 工具调用（upload_plugin）驱动，无需手动预览/上传栏。 */}
+
 
         {/* 输入区 */}
         <div className="shrink-0 border-t px-4 py-3">
