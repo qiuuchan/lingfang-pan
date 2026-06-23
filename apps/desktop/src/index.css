@@ -282,3 +282,35 @@
 
 /* 删除线（GFM） */
 .changelog-md del { opacity: 0.55; }
+/* === AI 创建器助手气泡 Markdown 排版（.creator-assistant-bubble）=== */
+/* 气泡内 Markdown 收紧间距、代码块/列表适配窄气泡。 */
+.creator-assistant-bubble > :first-child { margin-top: 0; }
+.creator-assistant-bubble > :last-child { margin-bottom: 0; }
+.creator-assistant-bubble p { margin: 0.4em 0; line-height: 1.6; }
+.creator-assistant-bubble h1, .creator-assistant-bubble h2, .creator-assistant-bubble h3 {
+  font-weight: 600; margin: 0.6em 0 0.3em; line-height: 1.3;
+}
+.creator-assistant-bubble h1 { font-size: 1.05rem; }
+.creator-assistant-bubble h2 { font-size: 1rem; }
+.creator-assistant-bubble h3 { font-size: 0.9rem; }
+.creator-assistant-bubble ul, .creator-assistant-bubble ol { margin: 0.4em 0; padding-left: 1.3em; }
+.creator-assistant-bubble li { margin: 0.2em 0; line-height: 1.55; }
+.creator-assistant-bubble ul { list-style: disc; }
+.creator-assistant-bubble ol { list-style: decimal; }
+.creator-assistant-bubble code:not(pre code) {
+  background: var(--muted); padding: 0.1em 0.35em; border-radius: 0.25rem;
+  font-size: 0.82em; font-family: ui-monospace, monospace;
+}
+.creator-assistant-bubble pre {
+  margin: 0.5em 0; padding: 0.7em; border-radius: 0.5rem; overflow-x: auto;
+  background: color-mix(in srgb, var(--muted) 60%, black 10%); font-size: 0.78rem;
+}
+.creator-assistant-bubble pre code { background: none; padding: 0; font-family: ui-monospace, monospace; }
+.creator-assistant-bubble blockquote {
+  margin: 0.4em 0; padding-left: 0.8em; border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+.creator-assistant-bubble a { color: var(--primary); text-decoration: underline; }
+.creator-assistant-bubble table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.8rem; }
+.creator-assistant-bubble th, .creator-assistant-bubble td { border: 1px solid var(--border); padding: 0.3em 0.5em; }
+.creator-assistant-bubble hr { margin: 0.6em 0; border: 0; border-top: 1px solid var(--border); }
