@@ -49,8 +49,26 @@ const PLUGIN_REFACTOR: Skill = {
 - 改完用一句话说明「改了哪个文件的哪一点」，不复述全文。`,
 };
 
+// 灵坊平台 AI 接入 skill：把中转 API 文档作为 skill 注入。
+// 这是「是否调用该 skill 的判断依据」——当生成的插件需要 AI 能力时，AI 据此 skill 知道
+// 必须且仅能调用灵坊平台 relay（sdk.llm.chat / sdk.image.generate），禁第三方接口。
+const RELAY_ACCESS: Skill = {
+  id: 'relay-access',
+  name: '灵坊平台 AI 接入',
+  description: '插件需调 AI 时用平台 relay（sdk.llm.chat / sdk.image.generate），禁第三方接口',
+  defaultActive: true,
+  prompt: `# 灵坊平台 AI 接入（需求约束）
+凡涉及 AI 对话/生图等 AI 能力的插件，**必须且仅能**调用灵坊平台提供的服务，禁止任何第三方或自定义接口。
+插件代码里用 @lingfang/plugin-sdk：
+- 对话：\`const reply = await sdk.llm.chat({ messages: [{role:'user', content:'...'}], model: 'fast' | 'premium' })\`
+  · model 仅 'fast'（快速版）或 'premium'（高级版），底层模型由平台统一配置，不要写死模型 id。
+- 生图：\`const { images } = await sdk.image.generate({ prompt: '...', model: 'premium' })\` 返回图片 url/base64 数组。
+- 这两个能力经平台中转计费（按团队灵石），插件无需也不可持有任何 API Key 或直连上游。
+插件 capabilities 需声明 { kind: 'llm.chat' } / { kind: 'image.generate' }。`,
+};
+
 // 注册表（未来新增 skill 在此追加，创建器与 UI 自动可见）。
-export const SKILLS: Skill[] = [OUTPUT_MINIMIZE, PLUGIN_REFACTOR];
+export const SKILLS: Skill[] = [OUTPUT_MINIMIZE, PLUGIN_REFACTOR, RELAY_ACCESS];
 
 /** 默认激活的 skill id 列表。 */
 export const DEFAULT_ACTIVE_SKILLS: string[] = SKILLS

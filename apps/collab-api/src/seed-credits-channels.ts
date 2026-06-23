@@ -18,31 +18,13 @@ const DEFAULT_AI_USAGE_GUARD_RULE =
 const adapter = createPrismaAdapter(process.env);
 const prisma = new PrismaClient({ adapter });
 
-/** 默认模型版本配置（快速版/高级版）。admin 部署后改为真实上游模型 id。 */
-const DEFAULT_TIERS = [
-  {
-    tier: 'FAST' as const,
-    label: '快速版',
-    chatModel: 'gpt-4o-mini',
-    imageModel: null,
-    temperature: 0.7,
-    maxTokens: 4096,
-  },
-  {
-    tier: 'PREMIUM' as const,
-    label: '高级版',
-    chatModel: 'claude-sonnet-4-6',
-    imageModel: 'dall-e-3',
-    temperature: 0.5,
-    maxTokens: 8192,
-  },
-];
+/** ModelTierConfig 已移除（版本=渠道标签）。默认版本配置随之删除。 */
 
-/** 默认模型定价（灵石）。PER_TOKEN_* 的 pricePerUnit = 每 1k token 灵石数。admin 可调整。 */
+/** 默认模型定价（灵石）。PER_TOKEN_* 的 pricePerUnit = 每 1M token 灵石数（v0.0.6 改为每百万）。admin 可调整。 */
 const DEFAULT_PRICING = [
-  // chat：按输入/输出 token
-  { capability: 'chat', model: 'gpt-4o-mini', label: 'GPT-4o mini（快速版）', unit: 'PER_TOKEN_INPUT' as const, pricePerUnit: 1, tier: 'FAST' as const },
-  { capability: 'chat', model: 'claude-sonnet-4-6', label: 'Claude Sonnet（高级版）', unit: 'PER_TOKEN_INPUT' as const, pricePerUnit: 3, tier: 'PREMIUM' as const },
+  // chat：每 1M token（例：每百万输入 token 1000 灵石 ≈ 500 token 扣 1 灵石）
+  { capability: 'chat', model: 'gpt-4o-mini', label: 'GPT-4o mini（快速版）', unit: 'PER_TOKEN_INPUT' as const, pricePerUnit: 1000, tier: 'FAST' as const },
+  { capability: 'chat', model: 'claude-sonnet-4-6', label: 'Claude Sonnet（高级版）', unit: 'PER_TOKEN_INPUT' as const, pricePerUnit: 3000, tier: 'PREMIUM' as const },
   // image：按张
   { capability: 'image', model: 'dall-e-3', label: 'DALL·E 3 生图', unit: 'PER_IMAGE' as const, pricePerUnit: 50, tier: null },
   { capability: 'image', model: 'dall-e-2', label: 'DALL·E 2 生图', unit: 'PER_IMAGE' as const, pricePerUnit: 20, tier: null },
@@ -59,15 +41,7 @@ const DEFAULT_SETTINGS = [
 ];
 
 async function main() {
-  // 模型版本配置：按 tier 主键 upsert。
-  for (const t of DEFAULT_TIERS) {
-    await prisma.modelTierConfig.upsert({
-      where: { tier: t.tier },
-      create: t,
-      update: {}, // 已存在则不改（admin 可能已自定义）
-    });
-    console.log(`tier seed 就绪：${t.tier}（${t.label} → ${t.chatModel}）`);
-  }
+  // ModelTierConfig 已移除（版本=渠道标签）。seed 不再配版本→固定模型。
 
   // 模型定价：按 (capability, model, tier) 唯一键跳过已存在。
   for (const p of DEFAULT_PRICING) {

@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'settings' | 'releases' | 'roles' | 'channels' | 'billing' | 'modelTiers' | 'credits' | 'callLogs' | 'apiKeys' | 'relayDocs';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'apiKeys';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -85,32 +85,44 @@ export type Plugin = {
 export type RoleScope = 'PLATFORM' | 'TEAM';
 export type PluginGrantSubject = 'USER' | 'ROLE';
 
-// === 计费与中转（镜像后端 billing 出参，见 packages/contract/src/billing.ts）===
+// === 计费与中转（资源池模型重构后，镜像后端 billing 出参）===
 export type ChannelProtocol = 'OPENAI' | 'ANTHROPIC';
-export type ChannelScopeKind = 'GLOBAL' | 'TEAM' | 'ROLE';
+export type ChannelKind = 'CHAT' | 'IMAGE';
 export type ChannelStatus = 'ENABLED' | 'DISABLED';
 export type PricingUnit = 'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE';
 export type ModelTier = 'FAST' | 'PREMIUM';
 export type ApiKeyStatus = 'ACTIVE' | 'DISABLED';
+export type PoolScope = 'SHARED' | 'DEDICATED';
 
-export type ChannelBinding = { id: string; scopeKind: ChannelScopeKind; scopeId: string };
+export type Pool = {
+  id: string;
+  name: string;
+  scope: PoolScope;
+  teamId: string | null;
+  description: string;
+  channelCount: number;
+  createdAt: string;
+};
+
+export type ChannelPoolRef = { id: string; name: string; scope: PoolScope; teamId: string | null };
+
 export type Channel = {
   id: string;
   name: string;
+  kind: ChannelKind;
+  tier: ModelTier;
   protocol: ChannelProtocol;
   provider: string;
+  poolId: string;
+  pool: ChannelPoolRef | null;
   baseUrl: string;
   upstreamKeyHint: string;
   hasUpstreamKey: boolean;
-  supportedModels: string[];
-  supportedTiers: ModelTier[];
+  models: string[];
   status: ChannelStatus;
-  priority: number;
-  weight: number;
   description: string;
   lastHealthAt: string | null;
   lastHealthOk: boolean | null;
-  bindings: ChannelBinding[];
   createdAt: string;
   updatedAt: string;
 };
@@ -126,18 +138,6 @@ export type ModelPricing = {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
-};
-
-export type ModelTierConfig = {
-  tier: ModelTier;
-  label: string;
-  chatModel: string;
-  imageModel: string | null;
-  temperature: number | null;
-  maxTokens: number | null;
-  extraParams: Record<string, unknown>;
-  createdAt?: string;
-  updatedAt?: string;
 };
 
 export type PlatformApiKeyPublic = {

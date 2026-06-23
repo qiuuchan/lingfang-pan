@@ -35,7 +35,7 @@ import { PluginGrantsController } from './plugin-grants.controller';
 import { AdminPermissionGroupsController, PermissionGroupsController } from './permission-groups.controller';
 import { PricingService } from './pricing.service';
 import { CreditService } from './credit.service';
-import { ChannelService, ChannelRouterService } from './channel.service';
+import { ChannelService, ChannelRouterService, PoolService } from './channel.service';
 import { PlatformApiKeyService } from './api-key.service';
 import { RelayController } from './relay/relay.controller';
 import { RelayService } from './relay/relay.service';
@@ -51,6 +51,6 @@ import { UserApiKeyController, UserCreditsController } from './user-billing.cont
   // RBAC：RoleService/PluginGrantService/PermissionGroupService 依赖 PrismaService + AuthService；PluginService 注入 PluginGrantService 做 availablePlugins 授权过滤。
   // 计费/中转：PricingService/CreditService/ChannelService(+Router)/PlatformApiKeyService/RelayService 构成中转计费闭环；
   // RelayController(@Public，DualAuthGuard 鉴权) + BillingController(admin) + UserApiKey/UserCreditsController(前台)。
-  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService,  EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PlatformApiKeyService, RelayService],
+  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService,  EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PoolService, PlatformApiKeyService, RelayService],
 })
 export class CollabModule {}

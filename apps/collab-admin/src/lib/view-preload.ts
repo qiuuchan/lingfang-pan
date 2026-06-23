@@ -11,13 +11,12 @@ const loaders: Record<View, () => Promise<unknown>> = {
   releases: () => import('@/components/releases-view'),
   roles: () => import('@/components/roles-view'),
   settings: () => import('@/components/settings-view'),
+  pools: () => import('@/components/billing/pools-view'),
   channels: () => import('@/components/billing/channels-view'),
   billing: () => import('@/components/billing/billing-view'),
-  modelTiers: () => import('@/components/billing/model-tiers-view'),
   credits: () => import('@/components/billing/credits-view'),
   callLogs: () => import('@/components/billing/call-logs-view'),
   apiKeys: () => import('@/components/billing/api-keys-view'),
-  relayDocs: () => import('@/components/billing/relay-docs-view'),
 };
 
 const loaded = new Set<View>();
