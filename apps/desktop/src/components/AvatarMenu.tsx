@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { AnimatePresence, motion } from 'framer-motion';
+import { MOTION } from '@/lib/motion';
 import {
   ChevronRightIcon,
   LogOutIcon,
@@ -45,7 +46,7 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, setView, openAccountSettings, openNotifications, openTeamAdmin } = useApp();
+  const { session, resetSession, setView, openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter } = useApp();
   const { theme, setTheme } = useTheme();
   // 项 11：退出登录确认弹窗。
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -108,7 +109,7 @@ export function AvatarMenu({
     { key: 'wallet', label: '钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('wallet'); onClose(); } },
     // 项 4：「切换团队」改名为「团队空间」。
     { key: 'switch-team', label: '团队空间', icon: RepeatIcon, visible: true, onClick: () => { openAccountSettings('team'); onClose(); } },
-    { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => go('plugins') },
+    { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => { openPluginCenter(); onClose(); } },
     // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
     { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
     // AI 创建插件入口为右下角 FAB（悬浮窗），不在此菜单。
@@ -147,7 +148,7 @@ export function AvatarMenu({
             initial={{ opacity: 0, scale: 0.96, y: 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            transition={{ duration: MOTION.menu, ease: 'easeOut' }}
           >
         {/* 头部：头像 + 显示名 + 租户 + 角色 */}
         <div className="flex items-center gap-3 border-b p-3">
@@ -185,8 +186,10 @@ export function AvatarMenu({
                   key={opt.value}
                   onClick={() => setTheme(opt.value)}
                   className={cn(
-                    'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs transition-colors',
-                    active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted',
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs transition-colors',
+                    active
+                      ? 'border-transparent bg-primary text-primary-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted',
                   )}
                 >
                   <OptIcon className="size-3.5" />
