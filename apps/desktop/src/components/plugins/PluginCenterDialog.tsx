@@ -1,8 +1,8 @@
 // PluginCenterDialog.tsx — 插件中心居中悬浮窗容器（路线 A）。
 //
-// 与 PanelDialog 区别：PanelDialog 自带单一 ScrollArea 包裹 children，不适配「左侧栏 + 右侧内容各自滚动」
-// 的两栏布局。本容器用裸 Dialog + DialogContent（大尺寸），body 自行分栏滚动（见 PluginCenterBody）。
-// 不复用 PanelDialog 以避免动公共组件波及其余五个悬浮窗。
+// 用裸 Dialog + DialogContent（大尺寸），body 单栏滚动（见 PluginCenterBody：本地/团队/市场三 Tab）。
+// 不复用 PanelDialog 以避免动公共组件波及其余悬浮窗。
+// 固定常用 / 历史使用已移至主侧边栏（首页按钮下方），不在本悬浮窗内。
 import { PuzzleIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -34,7 +34,7 @@ export function PluginCenterDialog({
           <DialogTitle className="flex items-center gap-2" data-tauri-drag-region>
             <PuzzleIcon className="size-4" />插件管理
           </DialogTitle>
-          <DialogDescription>本地运行、团队共享、市场发现都在这里；左侧可固定常用与查看历史。</DialogDescription>
+          <DialogDescription>本地运行、团队共享、市场发现都在这里；常用与历史插件可在左侧边栏快速打开。</DialogDescription>
         </DialogHeader>
         <PluginCenterBody tab={tab} onTabChange={onTabChange} onRun={onRun} onCreate={onCreate} />
       </DialogContent>
