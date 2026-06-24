@@ -1,0 +1,14 @@
+{"file":".trellis/spec/collab-api/backend/index.md","reason":"Backend verification checklist."}
+{"file":".trellis/spec/collab-api/backend/quality-and-contracts.md","reason":"Backend contract and quality checks."}
+{"file":".trellis/spec/collab-admin/frontend/index.md","reason":"Admin frontend verification checklist."}
+{"file":".trellis/spec/collab-admin/frontend/app-shell-and-api.md","reason":"Admin API/navigation verification."}
+{"file":".trellis/spec/collab-admin/frontend/ui-composition.md","reason":"Admin UI composition verification."}
+{"file":".trellis/spec/desktop/frontend/index.md","reason":"Desktop frontend verification checklist."}
+{"file":".trellis/spec/desktop/frontend/app-shell-and-state.md","reason":"Desktop state and persistence verification."}
+{"file":".trellis/spec/desktop/frontend/api-streaming-and-runtime.md","reason":"Desktop streaming/runtime verification."}
+{"file":".trellis/spec/desktop/frontend/ui-composition.md","reason":"Desktop UI composition verification."}
+{"file":".trellis/spec/desktop/frontend/plugin-creator-organization.md","reason":"Creator/chat organization verification."}
+{"file":".trellis/spec/lingfang-desktop/backend/index.md","reason":"Tauri/backend verification checklist."}
+{"file":".trellis/spec/lingfang-desktop/backend/updater-integration.md","reason":"Updater/config verification."}
+{"file":".trellis/spec/lingfang-desktop/backend/quality.md","reason":"Desktop backend quality verification."}
+{"file":".trellis/spec/guides/index.md","reason":"Shared cross-package verification guidance."}
