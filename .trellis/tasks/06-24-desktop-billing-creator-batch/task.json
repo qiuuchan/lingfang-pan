@@ -1,0 +1,31 @@
+{
+  "id": "desktop-billing-creator-batch",
+  "name": "desktop-billing-creator-batch",
+  "title": "桌面端计费钱包与创建器体验优化批次",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-06-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-24-billing-wallet",
+    "06-24-creator-askquestion",
+    "06-24-ui-interaction",
+    "06-24-review-package"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
