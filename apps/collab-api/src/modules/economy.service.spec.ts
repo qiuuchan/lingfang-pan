@@ -28,7 +28,7 @@ function mockPrisma() {
   const purchase = { findUnique: vi.fn(async () => null), create: vi.fn() };
   const balanceLedger = { create: vi.fn() };
   const auditLog = { create: vi.fn() };
-  const tx = { team, purchase, balanceLedger };
+  const tx = { team, purchase, balanceLedger, auditLog };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
   return {
     plugin: { findFirst: vi.fn() },
@@ -92,9 +92,9 @@ describe('EconomyService purchase（团队余额结算 + 通知埋点）', () =>
     }));
     // 流水：买家 DEBIT(plugin_purchase) + 卖家 CREDIT(plugin_sale)。
     const buyerLedger = prisma.__tx.balanceLedger.create.mock.calls.find((c) => c[0].data.direction === 'DEBIT');
-    expect(buyerLedger?.[0].data).toMatchObject({ teamId: 'team-buyer', amountCents: 1000, reason: 'plugin_purchase:plugin-1', actorUserId: 'buyer-1' });
+    expect(buyerLedger?.[0].data).toMatchObject({ teamId: 'team-buyer', amountCents: 1000, reason: 'plugin_purchase', actorUserId: 'buyer-1' });
     const sellerLedger = prisma.__tx.balanceLedger.create.mock.calls.find((c) => c[0].data.direction === 'CREDIT');
-    expect(sellerLedger?.[0].data).toMatchObject({ teamId: 'team-seller', amountCents: 1000, reason: 'plugin_sale:plugin-1', actorUserId: 'seller-1' });
+    expect(sellerLedger?.[0].data).toMatchObject({ teamId: 'team-seller', amountCents: 1000, reason: 'plugin_sale', actorUserId: 'seller-1' });
 
     expect(notifications.create).toHaveBeenCalledWith(
       'seller-1', 'purchase_sale', expect.any(String),
