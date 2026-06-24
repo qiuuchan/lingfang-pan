@@ -8,12 +8,12 @@
 // - 顶部搜索按钮（Task 6）：点击 / Ctrl+K 唤起 CommandPalette（背景模糊居中浮层，由 App 渲染）。
 // - 底部账户信息：点击 → 唤起 AvatarMenu（项 4，v4 富菜单形态，由 App 统一渲染）。团队管理 / 通知入口已迁入其中（项 3）。
 // - 样式沿用 v4 / 现有 shadcn token：bg-card、border-r、ghost 按钮、active 态 primary 高亮。
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PluginIcon, readPluginIcon } from '@/components/plugins/author-actions';
 import { cn } from '@/lib/utils';
-import type { View } from '@/lib/types';
+import type { LoadedPlugin, View } from '@/lib/types';
 import {
   HomeIcon,
   PackageIcon,
@@ -21,6 +21,9 @@ import {
   UserRoundIcon,
   ShieldCheckIcon,
   SearchIcon,
+  PinIcon,
+  PinOffIcon,
+  HistoryIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
@@ -73,8 +76,10 @@ export function Sidebar({
   /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
   onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, recentPlugins, openPluginCenter } = useApp();
+  const { session, view, setView, setRunningPlugin, pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, openPluginCenter } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
+  // 历史使用中已固定的项不重复展示，避免与「固定常用」区冗余。
+  const recentUnpinned = recentPlugins.filter((p) => !isPinned(p.id));
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
 
@@ -190,37 +195,51 @@ export function Sidebar({
             </Button>
           );
         })}
-      </nav>
 
-      {/* 项 9：最近使用的插件（运行插件时记入，置顶去重限量 5，按租户持久化）。空列表不渲染整块。 */}
-      {recentPlugins.length > 0 && (
-        <div className="shrink-0 border-t p-2">
-          {!collapsed && (
-            <div className="px-1 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-              最近使用
-            </div>
-          )}
-          <div className="flex flex-col gap-0.5">
-            {recentPlugins.map((p) => (
-              <button
+        {/* 固定常用（pinnedPlugins）：放在导航按钮下方。空列表不渲染该分区。 */}
+        {pinnedPlugins.length > 0 && (
+          <div className="mt-2 flex flex-col gap-0.5">
+            {!collapsed && (
+              <div className="flex items-center gap-1.5 px-1 pb-0.5 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+                <PinIcon className="size-3" />固定常用
+              </div>
+            )}
+            {pinnedPlugins.map((p) => (
+              <SidebarPluginItem
                 key={p.id}
-                type="button"
+                plugin={p}
+                collapsed={collapsed}
+                actionIcon={<PinOffIcon className="size-3.5" />}
+                actionTitle="取消固定"
+                onAction={() => unpinPlugin(p.id)}
                 onClick={() => { setRunningPlugin(p); }}
-                title={collapsed ? p.name : undefined}
-                className={cn(
-                  buttonVariants({ variant: 'ghost', size: 'sm' }),
-                  'h-9 gap-2.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
-                  collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
-                )}
-              >
-                {/* 侧栏小号图标：显式 size-5 覆盖 PluginIcon 默认 size-10（项 6 放大后默认偏大）。 */}
-                <PluginIcon icon={readPluginIcon(p)} className="size-5 shrink-0 rounded object-cover" />
-                {!collapsed && <span className="truncate text-sm">{p.name}</span>}
-              </button>
+              />
             ))}
           </div>
-        </div>
-      )}
+        )}
+
+        {/* 历史使用（recentPlugins，已固定的不重复）：运行插件时记入，置顶去重限量 5，按租户持久化。 */}
+        {recentUnpinned.length > 0 && (
+          <div className="mt-2 flex flex-col gap-0.5">
+            {!collapsed && (
+              <div className="flex items-center gap-1.5 px-1 pb-0.5 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+                <HistoryIcon className="size-3" />历史使用
+              </div>
+            )}
+            {recentUnpinned.map((p) => (
+              <SidebarPluginItem
+                key={p.id}
+                plugin={p}
+                collapsed={collapsed}
+                actionIcon={<PinIcon className="size-3.5" />}
+                actionTitle="固定常用"
+                onAction={() => pinPlugin(p)}
+                onClick={() => { setRunningPlugin(p); }}
+              />
+            ))}
+          </div>
+        )}
+      </nav>
 
       {/* 账户信息：点击弹出 AvatarMenu（项 4，v4 形态富菜单）。 */}
       <div className="border-t p-2">
@@ -255,5 +274,52 @@ export function Sidebar({
         />
       )}
     </aside>
+  );
+}
+
+// 侧栏插件项（固定常用 / 历史使用复用）：点击运行；hover 显示固定/取消固定按钮（折叠态不显示按钮）。
+function SidebarPluginItem({
+  plugin,
+  collapsed,
+  actionIcon,
+  actionTitle,
+  onAction,
+  onClick,
+}: {
+  plugin: LoadedPlugin;
+  collapsed: boolean;
+  actionIcon: ReactNode;
+  actionTitle: string;
+  onAction: () => void;
+  onClick: () => void;
+}) {
+  return (
+    <div className="group/item relative flex items-center">
+      <button
+        type="button"
+        onClick={onClick}
+        title={collapsed ? plugin.name : undefined}
+        className={cn(
+          buttonVariants({ variant: 'ghost', size: 'sm' }),
+          'h-9 flex-1 gap-2.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+          collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
+        )}
+      >
+        {/* 侧栏小号图标：显式 size-5 覆盖 PluginIcon 默认 size-10。 */}
+        <PluginIcon icon={readPluginIcon(plugin)} className="size-5 shrink-0 rounded object-cover" />
+        {!collapsed && <span className="truncate text-sm">{plugin.name}</span>}
+      </button>
+      {!collapsed && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title={actionTitle}
+          onClick={(e) => { e.stopPropagation(); onAction(); }}
+          className="absolute right-1 size-6 opacity-0 transition-opacity group-hover/item:opacity-100"
+        >
+          {actionIcon}
+        </Button>
+      )}
+    </div>
   );
 }
