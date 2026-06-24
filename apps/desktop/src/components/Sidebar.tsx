@@ -24,17 +24,20 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
-import { isPluginCenterView } from '@/lib/plugin-center';
 import { isTeamManager } from '@/lib/permissions';
 
-interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
+// 导航项：多数项是切 view（kind='view'）；「插件」项是打开插件中心悬浮窗（kind='plugin-center'，路线 A）。
+type NavItem =
+  | { kind: 'view'; v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
+  | { kind: 'plugin-center'; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean };
 
 const NAV: NavItem[] = [
-  { v: 'home', label: '首页', icon: HomeIcon },
+  { kind: 'view', v: 'home', label: '首页', icon: HomeIcon },
   // AI 创建插件入口为右下角 FAB（悬浮窗形态，非页面），不占侧栏导航位。
   // 项 3：团队管理入口迁至左下角 AvatarMenu，不再占用侧栏导航位。
-  { v: 'plugins', label: '插件', icon: PackageIcon },
-  { v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
+  // 路线 A：插件中心改为悬浮窗（openPluginCenter），不再是主区 view。
+  { kind: 'plugin-center', label: '插件', icon: PackageIcon },
+  { kind: 'view', v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -70,7 +73,7 @@ export function Sidebar({
   /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
   onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, recentPlugins } = useApp();
+  const { session, view, setView, setRunningPlugin, recentPlugins, openPluginCenter } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
@@ -121,7 +124,8 @@ export function Sidebar({
     document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? COLLAPSED_WIDTH : width}px`);
   }, [width, collapsed]);
 
-  const activeView = (v: View) => (v === 'plugins' ? isPluginCenterView(view) : view === v);
+  // 路线 A：插件中心是悬浮窗（无 view），其按钮不参与 view 高亮——恒非 active。
+  const activeView = (v: View) => view === v;
 
   return (
     <aside
@@ -155,16 +159,24 @@ export function Sidebar({
 
       {/* 主导航 */}
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {items.map(({ v, label, icon: Icon }) => {
-          const active = activeView(v);
+        {items.map((item) => {
+          const Icon = item.icon;
+          // 路线 A：插件中心项打开悬浮窗（非 view 切换），其余项切 view。
+          const isPluginCenter = item.kind === 'plugin-center';
+          const active = isPluginCenter ? false : activeView(item.v);
+          const key = isPluginCenter ? 'plugin-center' : item.v;
           return (
             <Button
-              key={v}
+              key={key}
               variant="ghost"
-              onClick={() => { setRunningPlugin(null); setView(v); }}
-              onFocus={() => preloadView(v)}
-              onMouseEnter={() => preloadView(v)}
-              title={collapsed ? label : undefined}
+              onClick={() => {
+                if (isPluginCenter) { openPluginCenter(); return; }
+                setRunningPlugin(null);
+                setView(item.v);
+              }}
+              onFocus={() => { if (!isPluginCenter) preloadView(item.v); }}
+              onMouseEnter={() => { if (!isPluginCenter) preloadView(item.v); }}
+              title={collapsed ? item.label : undefined}
               className={cn(
                 'h-9 shrink-0 gap-2.5 font-medium',
                 collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
@@ -174,7 +186,7 @@ export function Sidebar({
               )}
             >
               <Icon className="size-4 shrink-0" />
-              {!collapsed && label}
+              {!collapsed && item.label}
             </Button>
           );
         })}
@@ -193,7 +205,7 @@ export function Sidebar({
               <button
                 key={p.id}
                 type="button"
-                onClick={() => { setRunningPlugin(p); setView('plugins'); }}
+                onClick={() => { setRunningPlugin(p); }}
                 title={collapsed ? p.name : undefined}
                 className={cn(
                   buttonVariants({ variant: 'ghost', size: 'sm' }),

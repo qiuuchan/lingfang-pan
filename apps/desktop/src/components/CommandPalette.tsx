@@ -14,6 +14,7 @@ import { marketplaceSearchPath } from '@/lib/home-marketplace';
 import { Button } from '@/components/ui/button';
 import { SearchIcon } from 'lucide-react';
 import type { LoadedPlugin, View } from '@/lib/types';
+import type { PluginCenterTab } from '@/pages/plugins/use-plugin-center';
 
 export type SearchResultGroup = 'installed' | 'market' | 'action' | 'create';
 
@@ -45,7 +46,7 @@ const GROUPS: { key: SearchResultGroup; label: string }[] = [
 ];
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { setView, setRunningPlugin, pinnedPlugins, session } = useApp();
+  const { setView, setRunningPlugin, pinnedPlugins, session, openPluginCenter } = useApp();
   const [marketResults, setMarketResults] = useState<MarketHit[]>([]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -80,18 +81,23 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       id: `action-${v}`, title, description, group: 'action',
       action: () => { setRunningPlugin(null); setView(v); onClose(); }, actionLabel: '前往',
     });
+    // 路线 A：插件中心 / 市场改为打开插件中心悬浮窗（带初始 tab），不再切 view。
+    const openCenter = (tab: PluginCenterTab, title: string, description: string): SearchResult => ({
+      id: `action-plugin-center-${tab}`, title, description, group: 'action',
+      action: () => { openPluginCenter(tab); onClose(); }, actionLabel: '前往',
+    });
     const list: SearchResult[] = [
       go('home', '首页', '推荐插件与搜索'),
       go('creator', '创建插件', '用 AI 生成新插件'),
-      go('plugins', '我的插件', '本地与团队插件'),
-      go('market', '插件市场', '浏览发现插件'),
+      openCenter('local', '我的插件', '本地与团队插件'),
+      openCenter('market', '插件市场', '浏览发现插件'),
       go('settings', '设置', '通用、模型与计费、插件、更新'),
       go('wallet', '钱包', '余额与流水'),
     ];
     if (session.role === 'TEAM_ADMIN') list.push(go('team-admin', '团队管理', '成员/角色/审批'));
     if (session.isPlatformAdmin) list.push(go('review', '审核中心', '插件审核与发布'));
     return list;
-  }, [session.role, session.isPlatformAdmin, setRunningPlugin, setView, onClose]);
+  }, [session.role, session.isPlatformAdmin, setRunningPlugin, setView, openPluginCenter, onClose]);
 
   // 合并搜索结果。
   const recompute = useCallback((q: string, market: MarketHit[]) => {
@@ -101,7 +107,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       .slice(0, 5)
       .map((p: LoadedPlugin) => ({
         id: `installed-${p.id}`, title: p.name, description: '已安装', group: 'installed',
-        action: () => { setRunningPlugin(p); setView('plugins'); onClose(); }, actionLabel: '打开',
+        action: () => { setRunningPlugin(p); onClose(); }, actionLabel: '打开',
       }));
 
     const marketIds = new Set(pinnedPlugins.map((p) => p.id));
@@ -112,7 +118,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         id: `market-${p.id}`, title: p.name,
         description: p.description || `安装 ${p.install_count ?? 0} 次`,
         group: 'market', badge: p.is_free ? '免费' : undefined,
-        action: () => { setView('market'); onClose(); }, actionLabel: '前往',
+        action: () => { openPluginCenter('market'); onClose(); }, actionLabel: '前往',
       }));
 
     const acts = actions().filter(
@@ -131,7 +137,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     const merged = [...installed, ...marketHits, ...acts, ...create];
     setResults(merged);
     setFocusIndex(0);
-  }, [pinnedPlugins, actions, setRunningPlugin, setView, onClose]);
+  }, [pinnedPlugins, actions, setRunningPlugin, openPluginCenter, onClose]);
 
   // 防抖搜索：本地即时 + 市场 200ms 防抖。
   useEffect(() => {

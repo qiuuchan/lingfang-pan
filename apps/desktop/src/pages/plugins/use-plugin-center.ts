@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import type { LoadedPlugin, View } from '@/lib/types';
-import { pluginCenterTabFromView, pluginCenterViewForTab, type PluginCenterTab } from '@/lib/plugin-center';
+import type { LoadedPlugin } from '@/lib/types';
 import { parseManifest } from '@/lib/plugin-draft';
 import { ensurePluginPackagePersisted } from '@/lib/plugin-installation';
 import {
@@ -14,20 +13,9 @@ import { errorMessage, loadPlugins } from '../plugins-runtime';
 
 export const PLUGIN_PAGE_SIZE = 6;
 
-export function usePluginCenterTab(view: View, setView: (view: View) => void) {
-  const [activeTab, setActiveTab] = useState<PluginCenterTab>(() => pluginCenterTabFromView(view));
-  useEffect(() => {
-    if (view !== 'plugins') setActiveTab(pluginCenterTabFromView(view));
-  }, [view]);
-
-  const changeTab = useCallback((tab: PluginCenterTab) => {
-    setActiveTab(tab);
-    const nextView = pluginCenterViewForTab(tab);
-    if (view !== nextView) setView(nextView);
-  }, [setView, view]);
-
-  return { activeTab, changeTab };
-}
+// 路线 A：插件中心改为悬浮窗后，tab 不再映射 view（已删 plugins/author-center/market view）。
+// PluginCenterTab 类型随之内聚到本模块，供悬浮窗内部本地 state 使用。
+export type PluginCenterTab = 'local' | 'team' | 'market';
 
 export function useTeamPluginList(runningPlugin: LoadedPlugin | null) {
   const [items, setItems] = useState<LoadedPlugin[] | null>(null);

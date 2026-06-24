@@ -42,7 +42,7 @@ export function Home() {
             {recent.map((p: LoadedPlugin) => (
               <button
                 key={p.id}
-                onClick={() => { setRunningPlugin(p); setView('plugins'); }}
+                onClick={() => { setRunningPlugin(p); }}
                 className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/40 hover:text-primary"
                 title={p.name}
               >
