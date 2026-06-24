@@ -184,13 +184,13 @@ export function AvatarMenu({
                   key={opt.value}
                   onClick={() => setTheme(opt.value)}
                   className={cn(
-                    'flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs transition-colors',
+                    'flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-1.5 py-1.5 text-xs transition-colors',
                     active
                       ? 'border-transparent bg-primary text-primary-foreground'
                       : 'border-border text-muted-foreground hover:bg-muted',
                   )}
                 >
-                  <OptIcon className="size-3.5" />
+                  <OptIcon className="size-3.5 shrink-0" />
                   {opt.label}
                 </button>
               );
