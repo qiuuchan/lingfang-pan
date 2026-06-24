@@ -166,16 +166,29 @@ export class CreditService {
     return actualCharge;
   }
 
-  /** 全额退回预留（上游失败时，relay 在 finally 调）。幂等：仅当该 callLogId 已 reserve 时退。 */
+  /**
+   * 全额退回预留（上游失败时，relay 在失败路径调）。
+   *
+   * 真正幂等（R3-1）：只有「存在该 callLogId 的 reserve 流水」**且**「尚无终结流水
+   * （refund / llm_consume）」时才退。这样即使调用链未来出现「reconcile 后又 refund」
+   * 或「refund 被调两次」，余额也不会被错误加回（防"成功却被退款 → 平台漏计费"）。
+   * 此前仅检查「有 reserve 流水」，幂等性靠调用方纪律维持（脆弱），现收敛为流水状态机判定。
+   */
   async refund(teamId: string, cap: number, callLogId: string, actorUserId: string | null): Promise<void> {
     if (cap <= 0) return;
     await this.prisma.$transaction(async (tx) => {
-      // 仅当存在该 callLog 的 reserve 流水时退（防重复退）。
+      // 1) 必须曾预扣（无 reserve 流水说明没扣过钱，无需退）。
       const reserved = await tx.creditLedger.findFirst({
         where: { teamId, callLogId, source: 'reserve' },
         select: { id: true },
       });
       if (!reserved) return; // 无预留则不退（幂等）
+      // 2) 必须未终结（已 refund 退过 或 已 llm_consume 实扣，则本次为重复调用，不再退）。
+      const settled = await tx.creditLedger.findFirst({
+        where: { teamId, callLogId, source: { in: ['refund', 'llm_consume'] } },
+        select: { id: true },
+      });
+      if (settled) return; // 已终结，幂等 no-op
       await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: cap } } });
       await tx.creditLedger.create({
         data: { teamId, amount: cap, direction: 'CREDIT', source: 'refund', reason: '上游失败退回预扣', actorUserId, callLogId },

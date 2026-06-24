@@ -178,6 +178,10 @@ export class RelayService {
     return req.relayAuth;
   }
 
+  // 版本（fast/premium）下放渠道（R1）：tier 完全由渠道（Channel.tier 标签 + models[]）决定，
+  // 而非 API Key scope。API Key 的 `tier:fast`/`tier:premium` scope 仅为「展示性标签」，
+  // assertScope 只校验 chat/image/action 三种能力，**从不据 `tier:*` 限版**——这是有意为之：
+  // 若对 tier:* 启用强校验，存量未勾选对应 tier 的 key 会被 403（鉴权收紧的破坏性变更）。
   private assertScope(auth: RelayAuth, capability: 'chat' | 'image' | 'action') {
     if (auth.scopes.includes('*')) return;
     if (!auth.scopes.includes(capability)) throw new AppError(403, 'capability_denied', `API Key 未授权：${capability}`);
@@ -274,12 +278,26 @@ export class RelayService {
           const realCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
           const charged = await this.credits.reconcile(auth.teamId, cap, realCredits, pendingLog.id, auth.userId);
           finalized = true; // 成功路径手动置位（ensureFinalized 跳过，保留 usage/credits）
-          await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
+          // R3-2：钱已扣（reconcile 完成），finalizeLog 失败不得影响已成功的响应，
+          // 否则错误冒泡到外层 catch（此时 finalized===true，不会重复退款，但会把成功响应改写成错误）。
+          // 包 try/catch：失败记 warn（含 callLogId/charged）+ 重试一次 update，保证日志至少落 success 终态，
+          // 避免「扣了费但日志卡 pending/错态」的对账黑洞。
+          try {
+            await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
+          } catch (logErr) {
+            const msg = logErr instanceof Error ? logErr.message : String(logErr);
+            console.warn(`[relay] finalizeLog failed after successful charge (callLogId=${pendingLog.id}, charged=${charged}): ${msg}`);
+            try {
+              await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
+            } catch { /* 二次失败仅吞掉：响应已成功，扣费已正确，留 warn 供人工对账 */ }
+          }
           return;
         } catch (e) {
           lastError = e;
           if (res.headersSent) {
-            // 流式已发头：无法故障转移，退款 + 终态。
+            // 流式已发头：无法故障转移。R3-3 产品取舍——流式中断一律「全额退预扣、不计费」，
+            // 即使部分 chunk 已透传（利于用户、对平台有损，接受为 MVP；后续可按已收 usage 部分计费）。
+            // 这里不可能误扣用户：reconcile 仅在成功路径调用，发头后失败只走 refund。
             await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
             await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus: e instanceof UpstreamError ? e.httpStatus : 502, channelId: cand.id, model: cand.model });
             return;
