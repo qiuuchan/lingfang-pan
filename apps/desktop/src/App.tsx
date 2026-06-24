@@ -24,9 +24,10 @@ import { Onboarding } from '@/pages/Onboarding';
 import { SetupWizard } from '@/pages/SetupWizard';
 import { Home } from '@/pages/Home';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
-import { isPluginCenterView } from '@/lib/plugin-center';
+import type { PluginCenterTab } from '@/pages/plugins/use-plugin-center';
 
-const Plugins = lazy(() => import('./pages/Plugins').then((m) => ({ default: m.Plugins })));
+const PluginCenterDialog = lazy(() => import('@/components/plugins/PluginCenterDialog').then((m) => ({ default: m.PluginCenterDialog })));
+const PluginRunner = lazy(() => import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
 const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
 // 项 14：AccountDialog 已删，其承载的 Wallet/TeamHome/Settings 改为各自由 PanelDialog 包裹的独立悬浮窗，
@@ -64,6 +65,8 @@ interface AppContextValue {
   openNotifications: () => void;
   /** 项 5：打开团队管理居中悬浮窗。 */
   openTeamAdmin: () => void;
+  /** 路线 A：打开插件中心悬浮窗（可选初始 tab：本地/团队/市场）。 */
+  openPluginCenter: (tab?: PluginCenterTab) => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
@@ -247,6 +250,9 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   // 项 5：团队管理改为居中悬浮窗（原主区页面导航）。
   const [teamAdminOpen, setTeamAdminOpen] = useState(false);
+  // 路线 A：插件中心改为居中悬浮窗（取代原 plugins/author-center/market 主区页）。
+  const [pluginCenterOpen, setPluginCenterOpen] = useState(false);
+  const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('local');
   // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
@@ -298,6 +304,11 @@ export default function App() {
   const openNotifications = useCallback(() => setNotifOpen(true), []);
   // 项 5：打开团队管理居中悬浮窗。
   const openTeamAdmin = useCallback(() => setTeamAdminOpen(true), []);
+  // 路线 A：打开插件中心悬浮窗（带可选初始 tab，承接原 market 直达语义）。
+  const openPluginCenter = useCallback((tab?: PluginCenterTab) => {
+    if (tab) setPluginCenterTab(tab);
+    setPluginCenterOpen(true);
+  }, []);
 
   const setView = useCallback((nextView: View) => {
     if (nextView === 'settings') {
@@ -312,6 +323,12 @@ export default function App() {
       openAccountSettings('team');
       return;
     }
+    // 路线 A：'creator' 是悬浮窗（creatorOpen），非主区 view——拦截转为打开创建器。
+    // 承接 Home / CommandPalette / 新手任务清单 / 插件运行「继续修改」等所有 setView('creator') 调用。
+    if (nextView === 'creator') {
+      setCreatorOpen(true);
+      return;
+    }
     // 跳到其它页面时关闭所有功能悬浮窗 + 创建器（若开着），避免浮窗残留在新页面上。
     setWalletOpen(false);
     setTeamOpen(false);
@@ -320,7 +337,7 @@ export default function App() {
     setTeamAdminOpen(false);
     setNotifOpen(false);
     setViewState(nextView);
-  }, [openAccountSettings]);
+  }, [openAccountSettings, setCreatorOpen]);
 
   const saveBackendUrl = useCallback((url: string) => {
     if (!url.trim()) {
@@ -608,7 +625,7 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
-    openAccountSettings, openNotifications, openTeamAdmin,
+    openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFixPrompt, setPendingAutoFixPrompt,
     platformName, platformLogoUrl,
@@ -647,8 +664,7 @@ export default function App() {
 
   let body: ReactNode;
   if (view === 'home') body = <Home />;
-  else if (view === 'plugins' || view === 'author-center' || view === 'market') body = <Plugins />;
-  else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Plugins />;
+  else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Home />;
   else if (view === 'team-admin') body = <TeamAdmin />;
   else body = null;
 
@@ -671,11 +687,17 @@ export default function App() {
             ) : (
               <>
                 {/* 主体业务页：创建器悬浮窗关闭时始终可见（Task 9：创建器改为 overlay，不再替换底层 view）。 */}
-                {isPluginCenterView(view) && runningPlugin ? (
-                  // 插件运行态：全屏铺满（无 padding/max-w/边框），iframe 撑满整个主体区。
-                  // body 是懒加载组件，仍需 Suspense 兜底首次解析（此时 chunk 通常已加载，fallback 不闪现）。
+                {runningPlugin ? (
+                  // 路线 A：插件运行从 view 解耦——只要 runningPlugin 存在就全屏铺满运行，与任何 view 无关。
+                  // 返回（onBack）：清运行态 + 重开插件中心悬浮窗（保持「返回插件列表」语义）。
+                  // 全屏（无 padding/max-w/边框），iframe 撑满整个主体区。
                   <div className="min-h-0 flex-1">
-                    <Suspense fallback={null}>{body}</Suspense>
+                    <Suspense fallback={null}>
+                      <PluginRunner
+                        plugin={runningPlugin}
+                        onBack={() => { setRunningPlugin(null); openPluginCenter(); }}
+                      />
+                    </Suspense>
                   </div>
                 ) : (
                   // 组D：主体区 flex-col 布局——内容区 flex-1 独占滚动空间（overflow-y-auto），
@@ -717,13 +739,25 @@ export default function App() {
       <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新">
         <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>
       </PanelDialog>
-      <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="sm">
+      <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="auto">
         <ProfilePanel session={session} applySession={applySession} resetSession={resetSession} onClose={() => setProfileOpen(false)} />
       </PanelDialog>
       {/* 项 5：团队管理居中悬浮窗（TeamAdmin 页，仅团队管理员；权限门控在 AvatarMenu 入口）。 */}
       <PanelDialog open={teamAdminOpen} onOpenChange={setTeamAdminOpen} title="团队管理" size="lg">
         <Suspense fallback={<ListSkeleton rows={6} />}><TeamAdmin /></Suspense>
       </PanelDialog>
+      {/* 路线 A：插件中心居中悬浮窗（取代原 plugins/author-center/market 主区页）。
+          运行某插件 → 关闭本窗 + 设 runningPlugin（主体区全屏 overlay 接管）。 */}
+      <Suspense fallback={null}>
+        <PluginCenterDialog
+          open={pluginCenterOpen}
+          onOpenChange={setPluginCenterOpen}
+          tab={pluginCenterTab}
+          onTabChange={setPluginCenterTab}
+          onRun={(p) => { setPluginCenterOpen(false); setRunningPlugin(p); }}
+          onCreate={() => { setPluginCenterOpen(false); setCreatorOpen(true); }}
+        />
+      </Suspense>
       {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
       <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
       {/* 项 11：关窗询问悬浮窗（偏好 'ask' 时弹；tray/quit/cancel 三选项）。 */}

@@ -162,7 +162,10 @@ export interface LoadedPlugin {
 export type SettingsTab = 'general' | 'cli' | 'gateway' | 'plugins' | 'backend';
 export type AccountSettingsTab = 'account' | 'team' | 'wallet' | 'settings';
 
-export type View = 'home' | 'creator' | 'team' | 'team-admin' | 'plugins' | 'author-center' | 'settings' | 'market' | 'wallet' | 'review';
+// 路线 A：插件中心改为悬浮窗（pluginCenterOpen），原 'plugins' | 'author-center' | 'market'
+// 三个主区 view 已删除。'creator' 保留为 setView 拦截键（拦截后开创建器悬浮窗，非主区渲染）；
+// 'team' | 'settings' | 'wallet' 同为 setView 拦截转独立悬浮窗。
+export type View = 'home' | 'creator' | 'team' | 'team-admin' | 'settings' | 'wallet' | 'review';
 
 // RBAC：团队角色 + 权限码 + 插件授权（与后端 Role/PermissionEntry/PluginGrant + contract rbac.ts 对齐）。
 export type RoleScope = 'PLATFORM' | 'TEAM';
