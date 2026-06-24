@@ -422,3 +422,36 @@ Committed completed Collab platform work for MySQL provider switching, Redis-bac
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Desktop backend and UI fixes
+
+**Date**: 2026-06-24
+**Task**: Desktop backend and UI fixes
+**Branch**: `main`
+
+### Summary
+
+Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model access/pricing merge, desktop update/settings cleanup, team role display, creator history/status/non-streaming support, validation and task archive.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81a53e3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
