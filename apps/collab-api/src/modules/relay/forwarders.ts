@@ -8,6 +8,7 @@
 //  - 上游 key 仅作请求头临时使用，绝不记日志（pino redact 已覆盖 authorization 头）。
 //  - 失败：抛 UpstreamError携带 httpStatus/errorCode，RelayService 据此故障转移/退款/记日志。
 import type { Response as ExpressResponse } from 'express';
+import { openAiToAnthropicRequest, anthropicToOpenAiResponse, AnthropicStreamToOpenAi } from './protocol-convert';
 
 /** 上游错误（relay 据此故障转移到下一候选 + 记日志）。 */
 export class UpstreamError extends Error {
@@ -209,6 +210,106 @@ export async function forwardAnthropicMessages(args: {
     outputTokens: data.usage?.output_tokens ?? 0,
     images: 0,
   };
+}
+
+// === OpenAI 客户端 → Anthropic 渠道（协议转换） ===
+
+/**
+ * OpenAI chat 请求 → Anthropic 上游 → OpenAI 响应。
+ * 用于「桌面 @ai-sdk/openai 客户端」命中「ANTHROPIC 协议渠道」的场景：
+ * 请求体 OpenAI→Anthropic，响应（流式 SSE / 非流式 JSON）Anthropic→OpenAI，
+ * 使客户端的 OpenAI 解析器能正确读到 text/tool_calls（修复空响应 + 工具不可用）。
+ */
+export async function forwardOpenAiChatViaAnthropic(args: {
+  baseUrl: string;
+  upstreamKey: string;
+  body: OpenAiChatRequest;
+  res: ExpressResponse;
+}): Promise<ForwardResult> {
+  const stream = Boolean(args.body.stream);
+  const anthropicBody = openAiToAnthropicRequest(args.body as Record<string, unknown>);
+  const url = `${args.baseUrl}/v1/messages`;
+  const upstream = await upstreamFetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': args.upstreamKey,
+      'anthropic-version': '2023-06-01',
+      ...(stream ? { Accept: 'text/event-stream' } : {}),
+    },
+    body: JSON.stringify(anthropicBody),
+  });
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => '');
+    throw new UpstreamError(upstream.status, `上游返回 ${upstream.status}`, text.slice(0, 500));
+  }
+
+  const createdSec = Math.floor(Date.now() / 1000);
+  if (stream) {
+    return pipeAnthropicSseAsOpenAi(upstream, args.res, createdSec);
+  }
+  // 非流式：Anthropic JSON → OpenAI chat.completion JSON。
+  const data = (await upstream.json()) as { usage?: { input_tokens?: number; output_tokens?: number } };
+  const openai = anthropicToOpenAiResponse(data as never, createdSec);
+  args.res.status(200).json(openai);
+  return {
+    inputTokens: data.usage?.input_tokens ?? 0,
+    outputTokens: data.usage?.output_tokens ?? 0,
+    images: 0,
+  };
+}
+
+/**
+ * 读取 Anthropic 上游 SSE，逐事件转成 OpenAI chat.completion.chunk 下发，末尾补 [DONE]。
+ * 同时解析 usage（message_start.input_tokens + message_delta.output_tokens）供计费。
+ */
+async function pipeAnthropicSseAsOpenAi(
+  upstream: globalThis.Response,
+  res: ExpressResponse,
+  createdSec: number,
+): Promise<ForwardResult> {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
+  const converter = new AnthropicStreamToOpenAi(createdSec);
+  const reader = upstream.body?.getReader();
+  if (!reader) { res.write('data: [DONE]\n\n'); res.end(); return usage; }
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const handleEvent = (evt: string) => {
+    // usage 解析（与 parseAnthropicUsage 同源逻辑，避免重复扫描这里内联）。
+    const u = parseAnthropicUsage(evt);
+    if (u) {
+      if (u.inputTokens) usage.inputTokens = u.inputTokens;
+      if (u.outputTokens) usage.outputTokens = u.outputTokens;
+    }
+    for (const chunk of converter.consume(evt)) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const evt = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (evt.trim()) handleEvent(evt);
+      }
+    }
+    if (buffer.trim()) handleEvent(buffer);
+    res.write('data: [DONE]\n\n');
+  } finally {
+    reader.releaseLock?.();
+    res.end();
+  }
+  return usage;
 }
 
 // === SSE 透传 + usage 解析 ===

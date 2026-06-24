@@ -21,6 +21,7 @@ import type { RelayAuth } from '../../dual-auth.guard';
 import {
   UpstreamError,
   forwardOpenAiChat,
+  forwardOpenAiChatViaAnthropic,
   forwardOpenAiImage,
   forwardAnthropicMessages,
   forwardRawPassthrough,
@@ -95,10 +96,12 @@ export class RelayService {
       stream,
       requestSummary: { tier, temperature: body.temperature, stream },
       // 转发：把 model 替换为候选的真实上游模型 + 注入后的 messages。
+      // 客户端是 OpenAI 协议（/chat/completions）：命中 ANTHROPIC 渠道时做协议转换
+      // （请求 OpenAI→Anthropic、响应 Anthropic→OpenAI），否则直连 OpenAI 上游。
       forward: (upstreamKey, baseUrl, protocol, model) => {
         const upstreamBody = { ...body, model, messages: injectedMessages };
         if (protocol === 'ANTHROPIC') {
-          return forwardAnthropicMessages({ baseUrl, upstreamKey, body: upstreamBody as never, res });
+          return forwardOpenAiChatViaAnthropic({ baseUrl, upstreamKey, body: upstreamBody as never, res });
         }
         return forwardOpenAiChat({ baseUrl, upstreamKey, body: upstreamBody as never, res });
       },
