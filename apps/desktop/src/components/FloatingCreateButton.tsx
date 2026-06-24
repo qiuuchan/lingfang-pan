@@ -11,12 +11,12 @@ export function FloatingCreateButton({ open, onClick }: { open: boolean; onClick
       type="button"
       onClick={() => {
         setClicked(true);
-        window.setTimeout(() => setClicked(false), 260);
+        window.setTimeout(() => setClicked(false), 380);
         onClick();
       }}
       aria-label="创建插件"
       title="创建插件"
-      className={`absolute bottom-6 right-6 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all duration-200 hover:scale-105 active:scale-90 ${clicked ? 'scale-110 shadow-primary/40 ring-8 ring-primary/15' : ''}`}
+      className={`absolute bottom-6 right-6 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all duration-[var(--lf-dur-base)] hover:scale-105 active:scale-90 ${clicked ? 'scale-110 shadow-primary/40 ring-8 ring-primary/15' : ''}`}
     >
       <SparklesIcon className="size-5" />
     </button>

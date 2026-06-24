@@ -22,6 +22,20 @@ import { cn } from '@/lib/utils';
 /** 方向 → 初始位移：up/down 控制 y 轴，left/right 控制 x 轴。 */
 type Direction = 'up' | 'down' | 'left' | 'right';
 
+/** framer-motion 入场动画时长（秒）。集中定义便于「整体调慢且观感一致」。
+   与 index.css 的 --lf-dur-* CSS 变量是两套机制（CSS 变量供 Tailwind 工具类，这里供 framer-motion 数字 duration）。
+   入场类整体偏慢（约 ×1.4~1.5）；AnimatedNumber/Shimmer 属持续/循环类，单列且不随入场调慢以免拖沓。 */
+export const MOTION = {
+  fadeIn: 0.6,
+  slideIn: 0.65,
+  item: 0.55,
+  stagger: 0.1,
+  delayChildren: 0.06,
+  page: 0.4,
+  pageReduce: 0.18,
+  menu: 0.25,
+} as const;
+
 const DIRECTION_OFFSET: Record<Direction, { x?: number; y?: number }> = {
   up: { y: 24 },
   down: { y: -24 },
@@ -33,7 +47,7 @@ const DIRECTION_OFFSET: Record<Direction, { x?: number; y?: number }> = {
 export function FadeIn({
   children,
   delay = 0,
-  duration = 0.4,
+  duration = MOTION.fadeIn,
   className,
 }: {
   children: ReactNode;
@@ -60,7 +74,7 @@ export function SlideIn({
   children,
   direction = 'up',
   delay = 0,
-  duration = 0.45,
+  duration = MOTION.slideIn,
   className,
 }: {
   children: ReactNode;
@@ -94,14 +108,14 @@ const CONTAINER_VARIANTS: Variants = {
 
 const ITEM_VARIANTS: Variants = {
   hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+  show: { opacity: 1, y: 0, transition: { duration: MOTION.item, ease: 'easeOut' } },
 };
 
 export function StaggerContainer({
   children,
   className,
-  stagger = 0.07,
-  delayChildren = 0.05,
+  stagger = MOTION.stagger,
+  delayChildren = MOTION.delayChildren,
 }: {
   children: ReactNode;
   className?: string;
@@ -220,7 +234,7 @@ export function PageTransition({ viewKey, children }: { viewKey: string; childre
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={reduce ? { opacity: 0 } : { opacity: 0, y: -12 }}
-        transition={{ duration: reduce ? 0.15 : 0.25, ease: 'easeOut' }}
+        transition={{ duration: reduce ? MOTION.pageReduce : MOTION.page, ease: 'easeOut' }}
       >
         {children}
       </motion.div>

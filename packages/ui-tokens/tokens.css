@@ -8,4 +8,9 @@
   --lf-radius-md: 10px;
   --lf-spacing-md: 14px;
   --lf-font-sans: system-ui, sans-serif;
+  /* 界面动画时长 token（语义对齐用）。注意：桌面壳实际生效来源是 apps/desktop/src/index.css 的同名变量，
+     本文件仅注入到插件 iframe 容器；此处保留同名 token 以维持「设计令牌单一来源」的文档语义。 */
+  --lf-dur-fast: 200ms;
+  --lf-dur-base: 320ms;
+  --lf-dur-slow: 480ms;
 }
