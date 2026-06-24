@@ -15,7 +15,6 @@ import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
 import { FloatingCreateButton } from '@/components/FloatingCreateButton';
-import { FloatingCreator } from '@/components/creator/FloatingCreator';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
@@ -35,6 +34,7 @@ const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default:
 const Wallet = lazy(() => import('@/pages/Wallet').then((m) => ({ default: m.Wallet })));
 const TeamHome = lazy(() => import('@/pages/TeamHome').then((m) => ({ default: m.TeamHome })));
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
+const FloatingCreator = lazy(() => import('@/components/creator/FloatingCreator').then((m) => ({ default: m.FloatingCreator })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -695,7 +695,11 @@ export default function App() {
                 )}
 
                 {/* AI 创建插件：v4 形态悬浮窗（对话式流式，relay 后端）+ 右下角 FAB 入口。 */}
-                {creatorOpen && <FloatingCreator onClose={() => setCreatorOpen(false)} />}
+                {creatorOpen && (
+                  <Suspense fallback={null}>
+                    <FloatingCreator onClose={() => setCreatorOpen(false)} />
+                  </Suspense>
+                )}
                 <FloatingCreateButton open={creatorOpen} onClick={() => setCreatorOpen(true)} />
               </>
             )}

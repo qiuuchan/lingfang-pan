@@ -20,6 +20,8 @@ function manualChunks(id: string): string | undefined {
   if (id.includes('sonner')) return 'toast-vendor';
   // 图标库：lucide-react。
   if (id.includes('lucide-react')) return 'icons-vendor';
+  // AI 创建器：Vercel AI SDK / OpenAI provider 只在打开创建器时需要，避免进入首屏 chunk。
+  if (id.includes('/ai/') || id.includes('/@ai-sdk/')) return 'ai-vendor';
   // React 运行时：react / react-dom / scheduler（react-dom 依赖）单独成块（长期缓存）。
   if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'react-vendor';
   return undefined;
