@@ -26,8 +26,8 @@ export interface Skill {
 // 与基础提示词的「输出克制」互补——这里更具体地禁止样板/占位/注释类文件。
 const OUTPUT_MINIMIZE: Skill = {
   id: 'output-minimize',
-  name: '输出精简',
-  description: '只产必要文件，禁止样板与占位，降低 token 占用',
+  name: '精简产出',
+  description: '只生成必要文件，不产生多余说明或占位文件',
   defaultActive: true,
   prompt: `# 输出精简约束
 - 产出文件集合 = manifest + 入口文件 + 声明的依赖描述（requirements.txt / package.json）。仅此而已。
@@ -39,8 +39,8 @@ const OUTPUT_MINIMIZE: Skill = {
 // 增量重构 skill：修改已有插件时按「读—改—最小 diff」操作，避免全量重写。
 const PLUGIN_REFACTOR: Skill = {
   id: 'plugin-refactor',
-  name: '增量重构',
-  description: '改已有插件时先读后改、最小 diff，不重写未变文件',
+  name: '稳妥改动',
+  description: '修改已有插件时只动需要改的部分，不重写其余文件',
   defaultActive: true,
   prompt: `# 增量重构（修改已有插件）
 - 接到「改 / 调整 / 修」类指令时，第一步用 read_file 读取目标文件当前内容，再做最小改动写回。
@@ -54,8 +54,8 @@ const PLUGIN_REFACTOR: Skill = {
 // 必须且仅能调用灵坊平台 relay（sdk.llm.chat / sdk.image.generate），禁第三方接口。
 const RELAY_ACCESS: Skill = {
   id: 'relay-access',
-  name: '灵坊平台 AI 接入',
-  description: '插件需调 AI 时用平台 relay（sdk.llm.chat / sdk.image.generate），禁第三方接口',
+  name: '智能能力',
+  description: '插件需要 AI 能力时，自动接入平台统一的 AI 服务',
   defaultActive: true,
   prompt: `# 灵坊平台 AI 接入（需求约束）
 凡涉及 AI 对话/生图等 AI 能力的插件，**必须且仅能**调用灵坊平台提供的服务，禁止任何第三方或自定义接口。
@@ -67,8 +67,60 @@ const RELAY_ACCESS: Skill = {
 插件 capabilities 需声明 { kind: 'llm.chat' } / { kind: 'image.generate' }。`,
 };
 
+// 界面美化 skill：让生成的插件 UI 更精致、与平台风格一致。默认不激活（按需开启）。
+const UI_POLISH: Skill = {
+  id: 'ui-polish',
+  name: '界面美化',
+  description: '让插件界面更精致，配色与圆角贴合平台风格',
+  prompt: `# 界面美化
+- 插件 UI 优先使用平台注入的设计变量：颜色用 var(--lf-color-*)、圆角用 var(--lf-radius-md)、间距用 var(--lf-spacing-md)、字体用 var(--lf-font-sans)，不要硬编码色值。
+- 布局留白均匀、对齐统一；交互元素有 hover/active 反馈；避免拥挤与突兀的纯黑/纯白色块。
+- 不为美化引入额外的大型 UI 框架或图片资源，用原生 CSS 即可。`,
+};
+
+// 健壮性 skill：对输入与异常做基础防御，避免插件一遇到边界情况就崩。默认不激活。
+const ROBUSTNESS: Skill = {
+  id: 'robustness',
+  name: '健壮可靠',
+  description: '对空值、异常输入和失败做基础处理，避免插件崩溃',
+  prompt: `# 健壮可靠
+- 对用户输入做基础校验（空值、类型、范围），给出友好提示而非直接报错。
+- 对可能失败的操作（网络、解析、AI 调用）包 try/catch，失败时展示可读的错误信息并保持界面可用。
+- 不吞掉错误：捕获后要么提示用户、要么有兜底行为，不要静默失败。`,
+};
+
+// 中文优先 skill：界面文案与提示全程简体中文，面向非技术用户。默认不激活。
+const CHINESE_FIRST: Skill = {
+  id: 'chinese-first',
+  name: '中文优先',
+  description: '插件界面文案全程简体中文，面向普通用户',
+  prompt: `# 中文优先
+- 插件所有面向用户的文案（标题、按钮、提示、错误信息）一律用简体中文。
+- 用词通俗，避免技术术语；必要的英文专有名词保留即可。
+- 日期、数字、金额按中文习惯展示。`,
+};
+
+// 移动适配 skill：让插件在窄屏/触摸下也可用。默认不激活。
+const MOBILE_READY: Skill = {
+  id: 'mobile-ready',
+  name: '移动适配',
+  description: '让插件在窄屏和触摸操作下也能正常使用',
+  prompt: `# 移动适配
+- 布局用弹性/自适应（flex/grid + 百分比/最小宽度），窄屏下不溢出、不横向滚动。
+- 可点击元素留足触摸区域（建议 ≥ 40px），间距适当放大。
+- 避免依赖 hover 才能触发的关键操作，触摸设备上要有等效入口。`,
+};
+
 // 注册表（未来新增 skill 在此追加，创建器与 UI 自动可见）。
-export const SKILLS: Skill[] = [OUTPUT_MINIMIZE, PLUGIN_REFACTOR, RELAY_ACCESS];
+export const SKILLS: Skill[] = [
+  OUTPUT_MINIMIZE,
+  PLUGIN_REFACTOR,
+  RELAY_ACCESS,
+  UI_POLISH,
+  ROBUSTNESS,
+  CHINESE_FIRST,
+  MOBILE_READY,
+];
 
 /** 默认激活的 skill id 列表。 */
 export const DEFAULT_ACTIVE_SKILLS: string[] = SKILLS

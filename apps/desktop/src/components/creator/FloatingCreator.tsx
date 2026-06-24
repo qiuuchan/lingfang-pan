@@ -95,6 +95,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(true); // 「思考」模式默认开启：让模型更深入推理（systemPrompt 追加引导）
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [skillDialogOpen, setSkillDialogOpen] = useState(false); // Skill 居中悬浮窗开关（R3：由小 Popover 改为居中 Dialog + 背景模糊）
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
   const [compressing, setCompressing] = useState(false); // 压缩中指示
   const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具上传中指示
@@ -323,8 +324,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md">
-      <div className="flex h-[85vh] max-h-[800px] w-full max-w-[1100px] min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none">
+      <div className="flex h-[85vh] max-h-[800px] w-full max-w-[1100px] min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl animate-in zoom-in-95 fade-in slide-in-from-bottom-2 duration-[var(--lf-dur-base)] motion-reduce:animate-none">
         {/* 标题栏 */}
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
@@ -371,28 +372,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                 </PopoverContent>
               </Popover>
             )}
-            {/* Skill 选择器：动态拼装系统提示词（输出精简 / 增量重构 等，可开关）。 */}
-            <Popover>
-              <PopoverTrigger render={<Button variant="outline" size="sm" className="gap-1.5" title="Skill" />}>
-                <WrenchIcon className="size-3.5" />
-                Skill
-                {activeSkillIds.length > 0 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeSkillIds.length}</Badge>}
-              </PopoverTrigger>
-              <PopoverContent className="w-72" align="end">
-                <div className="text-xs font-medium text-muted-foreground">Skill（拼入系统提示词）</div>
-                <div className="mt-2 space-y-2">
-                  {SKILLS.map((s) => (
-                    <label key={s.id} className="flex cursor-pointer items-start gap-2 rounded-md p-1.5 hover:bg-muted">
-                      <Checkbox checked={activeSkillIds.includes(s.id)} onCheckedChange={() => toggleSkill(s.id)} className="mt-0.5" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium">{s.name}</div>
-                        <div className="text-xs text-muted-foreground">{s.description}</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
+            {/* 创建偏好（原 Skill）：改为居中悬浮窗（R3），去专业术语。 */}
+            <Button variant="outline" size="sm" className="gap-1.5" title="创建偏好" onClick={() => setSkillDialogOpen(true)}>
+              <WrenchIcon className="size-3.5" />
+              创建偏好
+              {activeSkillIds.length > 0 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeSkillIds.length}</Badge>}
+            </Button>
             {/* 版本切换 */}
             <div className="flex rounded-md border p-0.5">
               {(['fast', 'premium'] as const).map((t) => (
@@ -564,6 +549,34 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <span className="block text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
             </button>
           )) : <div className="py-8 text-center text-sm text-muted-foreground">暂无历史对话</div>}
+        </div>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={skillDialogOpen} onOpenChange={setSkillDialogOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>创建偏好</DialogTitle>
+          <DialogDescription>按需开启，让 AI 生成更符合预期的插件。</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[56vh] space-y-2 overflow-y-auto">
+          {SKILLS.map((s) => {
+            const checked = activeSkillIds.includes(s.id);
+            return (
+              <label
+                key={s.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${checked ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'}`}
+              >
+                <Checkbox checked={checked} onCheckedChange={() => toggleSkill(s.id)} className="mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{s.name}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{s.description}</div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={() => setSkillDialogOpen(false)}>完成</Button>
         </div>
       </DialogContent>
     </Dialog>
