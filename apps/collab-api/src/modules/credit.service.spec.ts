@@ -95,6 +95,31 @@ describe('CreditService reserve/reconcile/refund', () => {
     await svc.refund('t1', 200, 'log1', 'u1');
     expect(tx.teamCredit.update).not.toHaveBeenCalled();
   });
+
+  it('refund: reconcile 后（已有 llm_consume 终结流水）再调 refund 不重复退（R3-1 真正幂等）', async () => {
+    // 第 1 次 findFirst（reserve）命中 → 第 2 次 findFirst（终结流水 llm_consume）命中 → no-op。
+    tx.creditLedger.findFirst
+      .mockResolvedValueOnce({ id: 'ledger-reserve-1' }) // reserve 流水存在
+      .mockResolvedValueOnce({ id: 'ledger-consume-1' }); // 已 llm_consume 终结
+    await svc.refund('t1', 200, 'log1', 'u1');
+    expect(tx.teamCredit.update).not.toHaveBeenCalled();
+  });
+
+  it('refund: 连调两次只退一次（第二次因已有 refund 终结流水 no-op）', async () => {
+    // 第一次：reserve 命中 + 无终结流水 → 退款。
+    tx.creditLedger.findFirst
+      .mockResolvedValueOnce({ id: 'ledger-reserve-1' })
+      .mockResolvedValueOnce(null);
+    await svc.refund('t1', 200, 'log1', 'u1');
+    expect(tx.teamCredit.update).toHaveBeenCalledTimes(1);
+    // 第二次：reserve 仍命中，但已有 refund 终结流水 → no-op。
+    tx.teamCredit.update.mockClear();
+    tx.creditLedger.findFirst
+      .mockResolvedValueOnce({ id: 'ledger-reserve-1' })
+      .mockResolvedValueOnce({ id: 'ledger-refund-1' });
+    await svc.refund('t1', 200, 'log1', 'u1');
+    expect(tx.teamCredit.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('PricingService.computeCredits（间接验证单价换算语义）', () => {
