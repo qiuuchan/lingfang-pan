@@ -8,12 +8,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, type ApiError } from '@/lib/api';
 import { relayProvider } from '@/lib/relay-provider';
-import { creatorTools } from '@/lib/plugin-creator/creator-tools';
+import { createCreatorTools, type AskQuestionArgs, type AskQuestionResult } from '@/lib/plugin-creator/creator-tools';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import { Button } from '@/components/ui/button';
@@ -24,12 +24,31 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/markdown';
 
+interface QuestionPart {
+  type: 'question';
+  toolCallId: string;
+  question: string;
+  options?: { label: string; value: string }[];
+  allowFreeText: boolean;
+  multiSelect: boolean;
+  answer?: string;
+  answered: boolean;
+}
+interface ToolPart {
+  type: 'tool';
+  name: string;
+  ok?: boolean;
+}
+type TurnPart = QuestionPart | ToolPart;
+
 interface Turn {
   role: 'user' | 'assistant';
   content: string;
   /** 仅 assistant：本轮是否仍在流式输出中。 */
   streaming?: boolean;
   status?: 'generating' | 'done' | 'failed' | 'cancelled';
+  /** 结构化片段：提问卡片 / 工具调用指示（R2/R1 复用）。 */
+  parts?: TurnPart[];
 }
 
 interface CreatorConversation {
@@ -69,7 +88,7 @@ function makeConversationTitle(text: string) {
 const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户用自然语言描述需求，你帮忙生成并上传插件。
 
 工作方式（agent）：
-- 信息不足时先简短提问澄清（不要调用工具）。
+- 信息不足、需求有歧义、或需要用户在多个方案中做选择时，**必须调用 ask_question 工具**发起结构化提问，不要用纯文本提问。能用预设 options 就给选项，减少用户打字；只需自由输入时省略 options。
 - 需求明确、信息足够时，**调用 upload_plugin 工具**上传完整插件包（不要把插件代码作为普通文本输出）。
 - upload_plugin 的参数：id（kebab-case，仅小写字母/数字/连字符）、name、version（默认 0.1.0）、description、
   runtime_type（client/nodejs/python）、entry（入口文件路径）、files（[{path, content}] 全部文件全文）。
@@ -95,6 +114,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(true); // 「思考」模式默认开启：让模型更深入推理（systemPrompt 追加引导）
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0); // R3：历史列表分页页码（0-based）
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null); // R3：行内删除二次确认态
   const [skillDialogOpen, setSkillDialogOpen] = useState(false); // Skill 居中悬浮窗开关（R3：由小 Popover 改为居中 Dialog + 背景模糊）
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
   const [compressing, setCompressing] = useState(false); // 压缩中指示
@@ -106,6 +127,21 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // R2：悬挂的 ask_question deferred —— 用户作答后 resolve（人在环）。
+  // key=toolCallId，存 resolve/reject；切对话/取消/关窗时必须清掉防卡死。
+  const pendingAnswersRef = useRef<Map<string, { resolve: (r: AskQuestionResult) => void; reject: (e: unknown) => void }>>(new Map());
+  // 提问卡片的自由文本输入暂存（key=toolCallId）。
+  const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
+  // 多选暂存（key=toolCallId → 已选 value 集合）。
+  const [multiSelectDrafts, setMultiSelectDrafts] = useState<Record<string, string[]>>({});
+
+  // R2：清理所有悬挂的提问 deferred（取消/切对话/关窗时调用），避免 streamText 卡死。
+  function clearPendingAnswers() {
+    for (const [, d] of pendingAnswersRef.current) {
+      try { d.reject(new DOMException('cancelled', 'AbortError')); } catch { /* ignore */ }
+    }
+    pendingAnswersRef.current.clear();
+  }
 
   useEffect(() => {
     const loaded = loadConversations(session.userId, session.tenantId);
@@ -149,6 +185,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   function selectConversation(conversation: CreatorConversation) {
     abortRef.current?.abort();
+    clearPendingAnswers();
     setBusy(false);
     setUploadingViaTool(false);
     setCompressing(false);
@@ -163,6 +200,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   function newConversation() {
     abortRef.current?.abort();
+    clearPendingAnswers();
     setBusy(false);
     setTurns([]);
     setActiveConversationId(null);
@@ -173,6 +211,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setCompressedHint(0);
     try { localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
     setHistoryOpen(false);
+  }
+
+  // R3：删除单条历史对话。删的是当前会话时重置为新对话。
+  function deleteConversation(id: string) {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      saveConversations(session.userId, session.tenantId, next);
+      return next;
+    });
+    setConfirmDeleteId(null);
+    if (id === activeConversationId) newConversation();
   }
 
   // 拉当前 tier 的 chat 定价 → 取 contextWindow（供用量条 + 压缩阈值参考）。
@@ -198,6 +247,19 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns, uploadingViaTool, compressing]);
 
+  // R3：历史 Dialog 打开时重置分页到首页与清掉删除确认态。
+  useEffect(() => {
+    if (historyOpen) { setHistoryPage(0); setConfirmDeleteId(null); }
+  }, [historyOpen]);
+
+  // R3：删除后若当前页超出范围（空页且非首页），自动回退一页。
+  const PAGE_SIZE = 8;
+  const pageCount = Math.max(1, Math.ceil(conversations.length / PAGE_SIZE));
+  useEffect(() => {
+    if (historyPage > 0 && historyPage >= pageCount) setHistoryPage(pageCount - 1);
+  }, [historyPage, pageCount]);
+  const pagedConversations = conversations.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE);
+
   // Esc 关窗（无内层 overlay 打开时）。
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -205,11 +267,15 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const inner = document.querySelector('[role="dialog"][data-state="open"], [role="presentation"][data-state="open"]');
       if (inner) return; // 内层 overlay 优先
       abortRef.current?.abort();
+      clearPendingAnswers();
       onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  // 卸载（关窗）时清理悬挂的提问 deferred，防 streamText 卡死。
+  useEffect(() => () => clearPendingAnswers(), []);
 
   async function send() {
     const text = input.trim();
@@ -249,18 +315,45 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       compressRef.current = built.state;
       setCompressedHint(built.compressedCount);
 
-      // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 upload_plugin 上传。
-      // 文本 delta 流式累积进 assistant 气泡；tool-call/result 用独立指示器（不污染文本气泡）。
+      // R2：ask_question 人在环回调——写提问卡片到当前 assistant 气泡的 parts，
+      // 返回 deferred Promise；用户在卡片作答后 resolve，streamText 多步循环继续。
+      const onAskQuestion = (args: AskQuestionArgs, toolCallId: string): Promise<AskQuestionResult> => {
+        setTurns((prev) => {
+          const next = [...prev];
+          const cur = next[assistantIdx];
+          if (cur && cur.role === 'assistant') {
+            const part: QuestionPart = {
+              type: 'question',
+              toolCallId,
+              question: args.question,
+              options: args.options,
+              allowFreeText: args.allowFreeText ?? true,
+              multiSelect: args.multiSelect ?? false,
+              answered: false,
+            };
+            next[assistantIdx] = { ...cur, parts: [...(cur.parts ?? []), part] };
+          }
+          return next;
+        });
+        return new Promise<AskQuestionResult>((resolve, reject) => {
+          pendingAnswersRef.current.set(toolCallId, { resolve, reject });
+        });
+      };
+
+      // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 upload_plugin 上传 / ask_question 提问。
+      // 文本 delta 流式累积进 assistant 气泡；tool-call/result 用独立指示器或 parts 卡片。
       const result = streamText({
         model: relayProvider().chat(tier),
         messages: built.messages,
-        tools: creatorTools,
-        stopWhen: stepCountIs(4), // 允许：生成 → 调 upload_plugin → 看结果 → 总结
+        tools: createCreatorTools({ onAskQuestion }),
+        // 调大步数：留给「生成→提问→作答→继续生成→可能再问/再上传→总结」的多步循环。
+        stopWhen: stepCountIs(8),
         abortSignal: controller.signal,
       });
 
       let uploadedName = '';
       let uploadedMsg = '';
+      let sawToolCall = false; // R1：本轮是否有过工具调用（含 ask_question/upload）
       setReasoning('');
       for await (const part of result.fullStream) {
         if (part.type === 'reasoning-delta') {
@@ -278,21 +371,45 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             return next;
           });
         } else if (part.type === 'tool-call') {
-          // agent 工具调用：用独立指示器，不把文本塞进对话气泡（避免与后续 delta 混杂）。
+          sawToolCall = true;
+          // upload_plugin：独立上传指示器；ask_question：onAskQuestion 已写入提问卡片，此处无需额外处理。
           if (part.toolName === 'upload_plugin') setUploadingViaTool(true);
         } else if (part.type === 'tool-result') {
-          setUploadingViaTool(false);
-          const r = part.output as { ok: boolean; message: string; name?: string } | undefined;
-          if (r?.ok && r.name) { uploadedName = r.name; setPublishedName(r.name); }
-          else if (r && !r.ok) uploadedMsg = r.message;
+          if (part.toolName === 'upload_plugin') {
+            setUploadingViaTool(false);
+            const r = part.output as { ok: boolean; message: string; name?: string } | undefined;
+            if (r?.ok && r.name) { uploadedName = r.name; setPublishedName(r.name); }
+            else if (r && !r.ok) uploadedMsg = r.message;
+          }
+          // ask_question 的 tool-result：作答已由提交回调标记 answered，无需额外处理。
         }
       }
       // 流结束：清除流式标记（保留已累积的 delta 文本，不覆盖——result.text 是末步，会丢中间步骤）。
       // 多步 agent 的各步文本已通过 fullStream 累积进气泡；末步总结也已 delta 进来。
+      // R1 前端兜底：流正常结束但 content 为空时，避免裸露「无内容」——按情形给友好提示。
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
-        if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
+        if (!cur || cur.role !== 'assistant') return next;
+        const hasContent = cur.content.trim().length > 0;
+        const hasParts = (cur.parts?.length ?? 0) > 0; // 提问卡片等结构化内容也算「有内容」
+        if (hasContent || hasParts) {
+          next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
+        } else if (uploadedName) {
+          // 工具步可见化（H1）：只调了 upload 没说话 → 补占位文本，配合上方成功卡片。
+          next[assistantIdx] = { ...cur, content: '已为你生成并上传插件，详情见上方卡片。', streaming: false, status: 'done' };
+        } else if (reasoning.trim().length > 0) {
+          // reasoning 兜底（H2）：只输出了思考过程没有正文。
+          next[assistantIdx] = { ...cur, content: '模型仅输出了思考过程，可展开下方「思考过程」查看，或重试。', streaming: false, status: 'done' };
+        } else {
+          // 空响应安全网：无文本、无工具、无思考 → 友好提示并标记失败。
+          next[assistantIdx] = {
+            ...cur,
+            content: sawToolCall ? '本轮未返回文字说明，请重试或换用高级版。' : '模型未返回内容，请重试或换用高级版。',
+            streaming: false,
+            status: 'failed',
+          };
+        }
         return next;
       });
       if (uploadedName) toast.success(`插件「${uploadedName}」已上传到团队空间`);
@@ -316,10 +433,38 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   function stop() {
     abortRef.current?.abort();
+    clearPendingAnswers();
   }
 
   function toggleSkill(id: string) {
     setActiveSkillIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  // R2：用户在提问卡片作答 → 标记 parts 的该 question 为 answered + 写 answer，并 resolve 悬挂的 deferred，
+  // streamText 多步循环据此继续。turnIdx 用于定位气泡。
+  function answerQuestion(turnIdx: number, toolCallId: string, answer: string) {
+    const trimmed = answer.trim();
+    if (!trimmed) return;
+    setTurns((prev) => {
+      const next = [...prev];
+      const cur = next[turnIdx];
+      if (cur && cur.role === 'assistant' && cur.parts) {
+        next[turnIdx] = {
+          ...cur,
+          parts: cur.parts.map((p) =>
+            p.type === 'question' && p.toolCallId === toolCallId ? { ...p, answer: trimmed, answered: true } : p,
+          ),
+        };
+      }
+      return next;
+    });
+    const deferred = pendingAnswersRef.current.get(toolCallId);
+    if (deferred) {
+      deferred.resolve({ answer: trimmed });
+      pendingAnswersRef.current.delete(toolCallId);
+    }
+    setAnswerDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
+    setMultiSelectDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
   }
 
   return (
@@ -331,7 +476,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-2">
             <SparklesIcon className="size-4 text-primary" />
             <span className="text-sm font-medium">AI 创建插件</span>
-            <Badge variant="secondary" className="text-xs">{session.tenantName ?? '当前团队'}</Badge>
           </div>
           <div className="flex items-center gap-2">
             {/* 上下文自动压缩指示：超阈值时把早期对话轮摘要，保留近期+插件包。 */}
@@ -339,6 +483,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <Badge variant="outline" className="gap-1 text-xs" title="早期对话已自动摘要为上下文，控制 token">
                 已压缩 {compressedHint} 轮
               </Badge>
+            )}
+            {turns.length > 0 && (
+              <Button variant="outline" size="sm" className="gap-1.5" title="新建对话" onClick={newConversation}>
+                <PlusIcon className="size-3.5" />
+                新建对话
+              </Button>
             )}
             <Button variant="outline" size="sm" className="gap-1.5" title="对话历史" onClick={() => setHistoryOpen(true)}>
               <HistoryIcon className="size-3.5" />
@@ -389,11 +539,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <button type="button" onClick={onClose} aria-label="关闭" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
               <XIcon className="size-4" />
             </button>
-            {turns.length > 0 && (
-              <button type="button" onClick={newConversation} title="新建对话" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                <PlusIcon className="size-4" />
-              </button>
-            )}
           </div>
         </div>
 
@@ -421,7 +566,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                     <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground">
                       {t.content ? (
                         <Markdown>{t.content}</Markdown>
-                      ) : t.status === 'failed' ? (
+                      ) : (t.parts?.some((p) => p.type === 'question')) ? null : t.status === 'failed' ? (
                         <span className="text-destructive">调用失败</span>
                       ) : t.status === 'cancelled' ? (
                         <span className="text-muted-foreground">已取消</span>
@@ -430,6 +575,79 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                       ) : (
                         <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2Icon className="size-3 animate-spin" />生成中…</span>
                       )}
+                      {/* R2：提问卡片（Claude 风格）—— 渲染在文本之后，可作答并继续 agent 流程。 */}
+                      {t.parts?.map((p) => {
+                        if (p.type !== 'question') return null;
+                        const draft = answerDrafts[p.toolCallId] ?? '';
+                        const selected = multiSelectDrafts[p.toolCallId] ?? [];
+                        const submitMulti = () => {
+                          if (!selected.length) return;
+                          const labels = selected
+                            .map((v) => p.options?.find((o) => o.value === v)?.label ?? v)
+                            .join('、');
+                          answerQuestion(i, p.toolCallId, labels);
+                        };
+                        return (
+                          <div key={p.toolCallId} className="mt-2 rounded-xl border bg-background p-3">
+                            <div className="text-sm font-medium">{p.question}</div>
+                            {p.answered ? (
+                              <div className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+                                <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0 text-green-600" />
+                                <span>已回答：{p.answer}</span>
+                              </div>
+                            ) : (
+                              <div className="mt-2 space-y-2">
+                                {p.options && p.options.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {p.options.map((o) => {
+                                      const on = selected.includes(o.value);
+                                      return (
+                                        <button
+                                          key={o.value}
+                                          type="button"
+                                          onClick={() => {
+                                            if (p.multiSelect) {
+                                              setMultiSelectDrafts((prev) => {
+                                                const cur = prev[p.toolCallId] ?? [];
+                                                return { ...prev, [p.toolCallId]: on ? cur.filter((v) => v !== o.value) : [...cur, o.value] };
+                                              });
+                                            } else {
+                                              answerQuestion(i, p.toolCallId, o.label);
+                                            }
+                                          }}
+                                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'}`}
+                                        >
+                                          {o.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {p.multiSelect && p.options && p.options.length > 0 && (
+                                  <Button size="sm" className="h-7 px-3 text-xs" disabled={!selected.length} onClick={submitMulti}>
+                                    确认选择
+                                  </Button>
+                                )}
+                                {p.allowFreeText && (
+                                  <div className="flex items-end gap-1.5">
+                                    <Textarea
+                                      placeholder="或在此输入你的回答…"
+                                      value={draft}
+                                      onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [p.toolCallId]: e.target.value }))}
+                                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answerQuestion(i, p.toolCallId, draft); } }}
+                                      rows={1}
+                                      className="min-h-[32px] max-h-24 resize-none text-sm"
+                                    />
+                                    <Button size="sm" className="h-8 px-3 text-xs" disabled={!draft.trim()} onClick={() => answerQuestion(i, p.toolCallId, draft)}>
+                                      提交
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -537,19 +755,75 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
         <div className="max-h-[48vh] space-y-1 overflow-y-auto">
-          {conversations.length ? conversations.map((conversation) => (
-            <button
+          {conversations.length ? pagedConversations.map((conversation) => (
+            <div
               key={conversation.id}
-              type="button"
-              onClick={() => selectConversation(conversation)}
-              className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${conversation.id === activeConversationId ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
-              title={conversation.title}
+              className={`group relative flex items-center gap-2 rounded-md border px-3 py-2 transition-colors ${conversation.id === activeConversationId ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
             >
-              <span className="block truncate text-sm font-medium">{conversation.title}</span>
-              <span className="block text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => selectConversation(conversation)}
+                className="min-w-0 flex-1 text-left"
+                title={conversation.title}
+              >
+                <span className="block truncate text-sm font-medium">{conversation.title}</span>
+                <span className="block text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
+              </button>
+              {confirmDeleteId === conversation.id ? (
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={(e) => { e.stopPropagation(); deleteConversation(conversation.id); }}
+                  >
+                    确认删除
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                  >
+                    取消
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  title="删除该对话"
+                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(conversation.id); }}
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              )}
+            </div>
           )) : <div className="py-8 text-center text-sm text-muted-foreground">暂无历史对话</div>}
         </div>
+        {conversations.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={historyPage <= 0}
+              onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
+            >
+              上一页
+            </Button>
+            <span className="text-xs text-muted-foreground tabular-nums">第 {historyPage + 1} / {pageCount} 页</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={historyPage >= pageCount - 1}
+              onClick={() => setHistoryPage((p) => Math.min(pageCount - 1, p + 1))}
+            >
+              下一页
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
     <Dialog open={skillDialogOpen} onOpenChange={setSkillDialogOpen}>
