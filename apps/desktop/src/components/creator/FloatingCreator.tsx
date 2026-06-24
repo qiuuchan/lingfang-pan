@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, type ApiError } from '@/lib/api';
@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/markdown';
 
 interface Turn {
@@ -28,6 +29,41 @@ interface Turn {
   content: string;
   /** 仅 assistant：本轮是否仍在流式输出中。 */
   streaming?: boolean;
+  status?: 'generating' | 'done' | 'failed' | 'cancelled';
+}
+
+interface CreatorConversation {
+  id: string;
+  title: string;
+  turns: Turn[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const conversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-conversations:${tenantId || userId || 'none'}`;
+const selectedConversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-selected:${tenantId || userId || 'none'}`;
+
+function loadConversations(userId: string | null, tenantId: string | null): CreatorConversation[] {
+  try {
+    const raw = localStorage.getItem(conversationKey(userId, tenantId));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((item) => item && typeof item.id === 'string' && Array.isArray(item.turns)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveConversations(userId: string | null, tenantId: string | null, conversations: CreatorConversation[]) {
+  try {
+    localStorage.setItem(conversationKey(userId, tenantId), JSON.stringify(conversations.slice(0, 30)));
+  } catch {
+    /* localStorage 配额不足时放弃历史保存，当前对话仍可继续 */
+  }
+}
+
+function makeConversationTitle(text: string) {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length > 24 ? `${compact.slice(0, 24)}...` : compact || '新对话';
 }
 
 const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户用自然语言描述需求，你帮忙生成并上传插件。
@@ -51,11 +87,14 @@ const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户用自然
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const { session, recentPlugins } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [conversations, setConversations] = useState<CreatorConversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
-  const [thinking, setThinking] = useState(false); // 「思考」模式：让模型更深入推理（systemPrompt 追加引导）
+  const [thinking, setThinking] = useState(true); // 「思考」模式默认开启：让模型更深入推理（systemPrompt 追加引导）
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
   const [compressing, setCompressing] = useState(false); // 压缩中指示
   const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具上传中指示
@@ -66,6 +105,74 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const loaded = loadConversations(session.userId, session.tenantId);
+    setConversations(loaded);
+    let selected: string | null = null;
+    try { selected = localStorage.getItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
+    const active = loaded.find((conversation) => conversation.id === selected) ?? loaded[0] ?? null;
+    setActiveConversationId(active?.id ?? null);
+    setTurns(active?.turns ?? []);
+  }, [session.userId, session.tenantId]);
+
+  useEffect(() => {
+    if (!activeConversationId || turns.length === 0) return;
+    setConversations((prev) => {
+      const now = new Date().toISOString();
+      const next = prev.map((conversation) => conversation.id === activeConversationId ? { ...conversation, turns, updatedAt: now } : conversation);
+      saveConversations(session.userId, session.tenantId, next);
+      return next;
+    });
+  }, [activeConversationId, session.tenantId, session.userId, turns]);
+
+  function ensureConversation(firstUserText: string) {
+    if (activeConversationId) return activeConversationId;
+    const now = new Date().toISOString();
+    const conversation: CreatorConversation = {
+      id: `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: makeConversationTitle(firstUserText),
+      turns: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    setActiveConversationId(conversation.id);
+    try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
+    setConversations((prev) => {
+      const next = [conversation, ...prev].slice(0, 30);
+      saveConversations(session.userId, session.tenantId, next);
+      return next;
+    });
+    return conversation.id;
+  }
+
+  function selectConversation(conversation: CreatorConversation) {
+    abortRef.current?.abort();
+    setBusy(false);
+    setUploadingViaTool(false);
+    setCompressing(false);
+    setActiveConversationId(conversation.id);
+    setTurns(conversation.turns);
+    setReasoning('');
+    setPublishedName(null);
+    compressRef.current = emptyCompressState();
+    try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
+    setHistoryOpen(false);
+  }
+
+  function newConversation() {
+    abortRef.current?.abort();
+    setBusy(false);
+    setTurns([]);
+    setActiveConversationId(null);
+    setReasoning('');
+    setReferencedPlugin(null);
+    setPublishedName(null);
+    compressRef.current = emptyCompressState();
+    setCompressedHint(0);
+    try { localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
+    setHistoryOpen(false);
+  }
 
   // 拉当前 tier 的 chat 定价 → 取 contextWindow（供用量条 + 压缩阈值参考）。
   useEffect(() => {
@@ -107,9 +214,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
+    ensureConversation(text);
     const userTurn: Turn = { role: 'user', content: text };
     const assistantIdx = turns.length + 1;
-    setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true }]);
+    setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true, status: 'generating' }]);
     setBusy(true);
 
     const controller = new AbortController();
@@ -156,7 +264,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       for await (const part of result.fullStream) {
         if (part.type === 'reasoning-delta') {
           // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series），把思考增量单独累积展示。
-          setReasoning((prev) => prev + (part as { text?: string; delta?: string }).text || (part as { delta?: string }).delta || '');
+          const delta = (part as { text?: string; delta?: string }).text ?? (part as { delta?: string }).delta ?? '';
+          setReasoning((prev) => prev + delta);
         } else if (part.type === 'reasoning-end') {
           // 思考结束：不自动清——保留供用户展开查看（下轮 send 时 setReasoning('') 清空）。
         } else if (part.type === 'text-delta') {
@@ -164,7 +273,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           setTurns((prev) => {
             const next = [...prev];
             const cur = next[assistantIdx];
-            if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: cur.content + delta };
+            if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: cur.content + delta, status: 'generating' };
             return next;
           });
         } else if (part.type === 'tool-call') {
@@ -182,7 +291,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
-        if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, streaming: false };
+        if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
         return next;
       });
       if (uploadedName) toast.success(`插件「${uploadedName}」已上传到团队空间`);
@@ -194,7 +303,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
-        if (cur && cur.role === 'assistant') next[assistantIdx] = { role: 'assistant', content: aborted ? '（已取消）' : `⚠️ ${(e as Error).message}`, streaming: false };
+        if (cur && cur.role === 'assistant') next[assistantIdx] = { role: 'assistant', content: aborted ? '（已取消）' : `调用失败：${(e as Error).message}`, streaming: false, status: aborted ? 'cancelled' : 'failed' };
         return next;
       });
       if (!aborted) toast.error((e as ApiError).message || '生成失败');
@@ -213,6 +322,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   }
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md">
       <div className="flex h-[85vh] max-h-[800px] w-full max-w-[1100px] min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
         {/* 标题栏 */}
@@ -229,6 +339,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                 已压缩 {compressedHint} 轮
               </Badge>
             )}
+            <Button variant="outline" size="sm" className="gap-1.5" title="对话历史" onClick={() => setHistoryOpen(true)}>
+              <HistoryIcon className="size-3.5" />
+              历史
+            </Button>
             {/* 引用插件：选一个已有插件注入源码到上下文，让 agent 基于现有代码修改（#4） */}
             {recentPlugins.length > 0 && (
               <Popover>
@@ -291,7 +405,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <XIcon className="size-4" />
             </button>
             {turns.length > 0 && (
-              <button type="button" onClick={() => { setTurns([]); setReasoning(''); setReferencedPlugin(null); setPublishedName(null); compressRef.current = emptyCompressState(); setCompressedHint(0); }} title="新建对话" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <button type="button" onClick={newConversation} title="新建对话" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <PlusIcon className="size-4" />
               </button>
             )}
@@ -322,6 +436,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                     <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground">
                       {t.content ? (
                         <Markdown>{t.content}</Markdown>
+                      ) : t.status === 'failed' ? (
+                        <span className="text-destructive">调用失败</span>
+                      ) : t.status === 'cancelled' ? (
+                        <span className="text-muted-foreground">已取消</span>
+                      ) : !t.streaming ? (
+                        <span className="text-muted-foreground">无内容</span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2Icon className="size-3 animate-spin" />生成中…</span>
                       )}
@@ -419,5 +539,34 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </div>
+    <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>对话历史</DialogTitle>
+          <DialogDescription>选择历史对话后可继续之前的会话。</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-muted-foreground">最多保留最近 30 条</div>
+          <Button variant="outline" size="sm" onClick={newConversation}>
+            <PlusIcon className="size-3.5" />新建对话
+          </Button>
+        </div>
+        <div className="max-h-[48vh] space-y-1 overflow-y-auto">
+          {conversations.length ? conversations.map((conversation) => (
+            <button
+              key={conversation.id}
+              type="button"
+              onClick={() => selectConversation(conversation)}
+              className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${conversation.id === activeConversationId ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
+              title={conversation.title}
+            >
+              <span className="block truncate text-sm font-medium">{conversation.title}</span>
+              <span className="block text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
+            </button>
+          )) : <div className="py-8 text-center text-sm text-muted-foreground">暂无历史对话</div>}
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

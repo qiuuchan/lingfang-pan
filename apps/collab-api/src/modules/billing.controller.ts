@@ -6,14 +6,14 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { requireUser } from '../common';
+import { AppError, requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { ChannelService, PoolService } from './channel.service';
 import { PricingService } from './pricing.service';
 import { CreditService } from './credit.service';
 import { PlatformApiKeyService } from './api-key.service';
 import {
-  ApiKeyCreateDto, ChannelUpsertDto, CreditAdjustDto, PoolUpsertDto, PricingUpsertDto, TestChatDto, TestImageDto,
+  ChannelUpsertDto, CreditAdjustDto, PoolUpdateDto, PoolUpsertDto, PricingUpsertDto, TestChatDto, TestImageDto,
 } from './dto/billing.dto';
 import { PrismaService } from '../prisma.service';
 
@@ -47,7 +47,7 @@ export class BillingController {
   @Patch('pools/:id')
   @RequirePermission('platform.billing.channel.manage')
   @ApiOperation({ summary: '更新资源池（名称/说明）' })
-  updatePool(@Req() req: Request, @Param('id') id: string, @Body() body: PoolUpsertDto) {
+  updatePool(@Req() req: Request, @Param('id') id: string, @Body() body: PoolUpdateDto) {
     return this.pools.adminUpdate(requireUser(req).id, id, { name: body.name, description: body.description });
   }
 
@@ -137,6 +137,34 @@ export class BillingController {
       : await this.prisma.modelPricing.create({ data });
     await this.audit(requireUser(req).id, 'admin.pricing.upserted', row.id, { capability: row.capability, model: row.model, tier: row.tier, pricePerUnit: row.pricePerUnit });
     return { pricing: row };
+  }
+
+  @Patch('pricing/:id')
+  @RequirePermission('platform.billing.pricing.manage')
+  @ApiOperation({ summary: '按 ID 更新定价' })
+  async updatePricing(@Req() req: Request, @Param('id') id: string, @Body() body: PricingUpsertDto) {
+    const existing = await this.prisma.modelPricing.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new AppError(404, 'pricing_not_found', '定价不存在');
+    try {
+      const row = await this.prisma.modelPricing.update({
+        where: { id },
+        data: {
+          capability: body.capability,
+          model: body.model,
+          label: body.label ?? '',
+          unit: body.unit as never,
+          pricePerUnit: body.pricePerUnit,
+          tier: body.tier ?? null,
+          contextWindow: body.contextWindow ?? null,
+          enabled: body.enabled ?? true,
+        },
+      });
+      await this.audit(requireUser(req).id, 'admin.pricing.updated', row.id, { capability: row.capability, model: row.model, tier: row.tier, pricePerUnit: row.pricePerUnit });
+      return { pricing: row };
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2002') throw new AppError(409, 'conflict', '同能力、模型与版本的定价已存在');
+      throw error;
+    }
   }
 
   @Delete('pricing/:id')

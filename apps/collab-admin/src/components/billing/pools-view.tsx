@@ -39,7 +39,9 @@ export function PoolsView() {
             <TableRow key={p.id}>
               <TableCell className="font-medium">{p.name}</TableCell>
               <TableCell>{p.scope === 'SHARED' ? <Badge variant="success">共享</Badge> : <Badge variant="secondary">单团队</Badge>}</TableCell>
-              <TableCell className="text-muted-foreground">{p.scope === 'DEDICATED' ? (p.teamId?.slice(0, 8) ?? '—') : '全部团队'}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {p.scope === 'DEDICATED' ? (p.team?.name ?? p.teamId?.slice(0, 8) ?? '—') : '全部团队'}
+              </TableCell>
               <TableCell className="tabular-nums">{p.channelCount}</TableCell>
               <TableCell>
                 <ActionBar>
@@ -87,7 +89,7 @@ function PoolDialog({ pool, children, onRefresh }: { pool?: Pool; children: Reac
               <SelectContent><SelectItem value="SHARED">共享（全部团队）</SelectItem><SelectItem value="DEDICATED">单团队</SelectItem></SelectContent>
             </Select>
           </div>
-          {scope === 'DEDICATED' && <div className="space-y-2"><Label>团队 ID</Label><Input value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder="绑定团队的 id" disabled={!!pool} /></div>}
+          {scope === 'DEDICATED' && <div className="space-y-2"><Label>团队 ID</Label><Input value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder={pool?.team?.name ?? '绑定团队的 id'} disabled={!!pool} /></div>}
           <div className="space-y-2"><Label>说明</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div>
         </div>
         <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={submit}>{pool ? '保存' : '创建'}</Button></DialogFooter>

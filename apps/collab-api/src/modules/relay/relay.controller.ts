@@ -21,8 +21,8 @@ export class RelayController {
 
   @Get('models')
   @ApiOperation({ summary: '列出可用模型版本（仅快速版/高级版）' })
-  models() {
-    return this.relay.listModels();
+  models(@Req() req: Request) {
+    return this.relay.listModels(req);
   }
 
   @Post('chat/completions')

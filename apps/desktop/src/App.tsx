@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef, la
 import { Loader2Icon, XIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { api, apiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
+import { api, apiBase, clearApiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
 import { Sidebar } from '@/components/Sidebar';
@@ -323,12 +323,29 @@ export default function App() {
   }, [openAccountSettings]);
 
   const saveBackendUrl = useCallback((url: string) => {
+    if (!url.trim()) {
+      clearApiBase();
+      setBackendUrl(null);
+      setAuthToken(null);
+      clearStoredSession();
+      sessionRef.current = emptySession;
+      setSession(emptySession);
+      setBackendUnreachable(false);
+      setView('home');
+      return true;
+    }
     const normalized = normalizeBackendUrl(url);
     if (!normalized) return false;
     configureApiBase(normalized, { persist: true });
     setBackendUrl(normalized);
+    setAuthToken(null);
+    clearStoredSession();
+    sessionRef.current = emptySession;
+    setSession(emptySession);
+    setBackendUnreachable(false);
+    setView('home');
     return true;
-  }, []);
+  }, [setView]);
 
   // DESK-SHELL-03 修复：applySession / applyCollabSession 不再把 setAuthToken / saveStoredSession /
   // setView 等副作用放进 setSession updater（React 要求 updater 纯函数；StrictMode dev 下双调
@@ -648,9 +665,9 @@ export default function App() {
           />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {backendUnreachable ? (
-              // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗、切设置）。
-              // 「去设置」跳 backend tab 改地址，「重试」探测成功后派发 reachable 退出此态。
-              <BackendUnreachable onGoSettings={() => openAccountSettings('settings', 'backend')} />
+              // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗）。
+              // 「重试」探测成功后派发 reachable 退出此态。
+              <BackendUnreachable />
             ) : (
               <>
                 {/* 主体业务页：创建器悬浮窗关闭时始终可见（Task 9：创建器改为 overlay，不再替换底层 view）。 */}
@@ -693,7 +710,7 @@ export default function App() {
       <PanelDialog open={teamOpen} onOpenChange={setTeamOpen} title="切换团队" size="md">
         <Suspense fallback={<ListSkeleton rows={6} />}><TeamHome /></Suspense>
       </PanelDialog>
-      <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="CLI / 模型服务 / 插件 / 后端地址">
+      <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新">
         <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>
       </PanelDialog>
       <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="sm">

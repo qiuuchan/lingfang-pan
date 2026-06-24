@@ -42,6 +42,8 @@ export interface TeamInfo {
   slug: string;
   status: string;
   balanceCents: number;
+  allowPublicJoin?: boolean;
+  description?: string;
 }
 
 export interface PlatformInfo {

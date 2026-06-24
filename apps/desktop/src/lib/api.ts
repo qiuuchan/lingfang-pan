@@ -24,23 +24,34 @@ function readStoredBackendUrl(): string | null {
   }
 }
 
-/**
- * 后端地址已内置（app.config.json），不可在运行时修改。
- * 保留函数签名仅为向后兼容（旧调用点），实际为 no-op——地址始终取自 initApiBase 注入的内置值。
- */
-export function configureApiBase(_url: string | null | undefined, _opts: { persist?: boolean } = {}) {
-  return true;
+export function configureApiBase(url: string | null | undefined, opts: { persist?: boolean } = {}) {
+  const normalized = normalizeBackendUrl(url);
+  apiBaseUrl = normalized ?? '';
+  if (opts.persist) {
+    try {
+      if (normalized) localStorage.setItem(BACKEND_URL_STORAGE_KEY, normalized);
+      else localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
+    } catch {
+      /* localStorage 不可用则只更新当前会话 */
+    }
+  }
+  return Boolean(normalized);
 }
 
 export function clearApiBase() {
-  /* no-op：地址内置，不清除。 */
+  apiBaseUrl = '';
+  try { localStorage.removeItem(BACKEND_URL_STORAGE_KEY); } catch { /* ignore */ }
 }
 
 /**
- * 初始化后端地址：地址内置在 app.config.json（api_base），终端用户不可改。
- * 忽略历史的 localStorage backendUrl（旧版用户首次升级后会自动用内置地址）。
+ * 初始化后端地址：用户保存值优先，其次 app.config.json 的 api_base，最后为空进入配置入口。
  */
 export function initApiBase(defaultUrl?: string | null) {
+  const stored = readStoredBackendUrl();
+  if (stored) {
+    apiBaseUrl = stored;
+    return stored;
+  }
   const fallback = normalizeBackendUrl(defaultUrl);
   apiBaseUrl = fallback ?? '';
   return fallback;

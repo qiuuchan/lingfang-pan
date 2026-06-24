@@ -2,33 +2,39 @@
 // 这是团队管理线路的核心 UI，与平台管理（web collab-admin）形成两条干净分离的管理线路。
 // 5 个 tab：概览 / 成员管理 / 角色与权限 / 插件授权 / 邀请码与团队设置。
 // 后端：/api/teams/current/* （members/roles/plugins/grants/invitations/balance）。
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useApp } from '@/App';
 import { isTeamManager } from '@/lib/permissions';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { LoadingButton } from '@/components/loading-button';
 import { centsToYuan } from '@/lib/money';
-import type { Role, TeamInfo, TeamMember, PermissionEntry } from '@/lib/types';
+import type { TeamInfo, TeamMember, TeamProfile } from '@/lib/types';
 import { OverviewSkeleton, MembersTab, RolesTab, PluginGrantsTab, InvitationsTab } from './team-admin';
 
 export function TeamAdmin() {
   const { session } = useApp();
   const [tab, setTab] = useState('overview');
   const [team, setTeam] = useState<TeamInfo | null>(null);
+  const [profile, setProfile] = useState<TeamProfile | null>(null);
   const [memberCount, setMemberCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
   async function loadOverview() {
     setLoading(true);
     try {
-      const [teamRes, membersRes] = await Promise.all([
+      const [teamRes, membersRes, profileRes] = await Promise.all([
         api<{ team: TeamInfo }>('/api/teams/current'),
         api<{ members: TeamMember[] }>('/api/teams/current/members'),
+        api<{ team: TeamProfile }>('/api/teams/current/profile'),
       ]);
       setTeam(teamRes.team);
+      setProfile(profileRes.team);
       setMemberCount(membersRes.members.length);
     } catch (e) {
       toast.error((e as Error).message);
@@ -71,7 +77,7 @@ export function TeamAdmin() {
           </TabsList>
 
           <TabsContent value="overview">
-            <OverviewCard team={team} memberCount={memberCount} loading={loading} />
+            <OverviewCard team={team} profile={profile} memberCount={memberCount} loading={loading} onProfileSaved={setProfile} />
           </TabsContent>
           <TabsContent value="members">
             <MembersTab />
@@ -91,20 +97,82 @@ export function TeamAdmin() {
   );
 }
 
-function OverviewCard({ team, memberCount, loading }: { team: TeamInfo | null; memberCount: number; loading: boolean }) {
+function OverviewCard({
+  team,
+  profile,
+  memberCount,
+  loading,
+  onProfileSaved,
+}: {
+  team: TeamInfo | null;
+  profile: TeamProfile | null;
+  memberCount: number;
+  loading: boolean;
+  onProfileSaved: (profile: TeamProfile) => void;
+}) {
   if (loading && !team) return <OverviewSkeleton />;
   if (!team) return <div className="text-muted-foreground">团队信息加载失败</div>;
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card>
-        <CardHeader className="pb-2"><CardDescription>团队名称</CardDescription><CardTitle className="text-base">{team.name}</CardTitle></CardHeader>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2"><CardDescription>团队余额</CardDescription><CardTitle className="text-base">{centsToYuan(team.balanceCents)} 元</CardTitle></CardHeader>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2"><CardDescription>成员数</CardDescription><CardTitle className="text-base">{memberCount}</CardTitle></CardHeader>
-      </Card>
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2"><CardDescription>团队名称</CardDescription><CardTitle className="text-base">{team.name}</CardTitle></CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardDescription>团队余额</CardDescription><CardTitle className="text-base">{centsToYuan(team.balanceCents)} 元</CardTitle></CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2"><CardDescription>成员数</CardDescription><CardTitle className="text-base">{memberCount}</CardTitle></CardHeader>
+        </Card>
+      </div>
+      <TeamProfileCard profile={profile} onSaved={onProfileSaved} />
     </div>
+  );
+}
+
+function TeamProfileCard({ profile, onSaved }: { profile: TeamProfile | null; onSaved: (profile: TeamProfile) => void }) {
+  const [allowPublicJoin, setAllowPublicJoin] = useState(false);
+  const [description, setDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setAllowPublicJoin(profile?.allowPublicJoin ?? false);
+    setDescription(profile?.description ?? '');
+  }, [profile]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const result = await api<{ team: TeamProfile }>('/api/teams/current/profile', {
+        method: 'PATCH',
+        body: { allowPublicJoin, description },
+      });
+      onSaved(result.team);
+      toast.success('团队资料已更新');
+    } catch (error) {
+      if ((error as { status?: number }).status !== 401) toast.error((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>团队资料</CardTitle>
+        <CardDescription>团队简介与公开加入设置。</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Checkbox id="overview-allow-public" checked={allowPublicJoin} disabled={!profile} onCheckedChange={(value) => setAllowPublicJoin(Boolean(value))} />
+          <Label htmlFor="overview-allow-public">开放公开加入</Label>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="overview-team-description">团队简介</Label>
+          <Textarea id="overview-team-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={2} maxLength={500} placeholder="公开团队发现页展示，帮助用户判断是否加入" />
+        </div>
+        <LoadingButton loading={saving} onClick={() => { void save(); }} disabled={!profile}>保存资料</LoadingButton>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,6 +1,6 @@
-// 邀请码与团队设置 tab：从原 TeamManage.tsx 迁移邀请码生成/禁用 + 团队资料（公开加入开关/简介）。
+// 邀请码 tab：从原 TeamManage.tsx 迁移邀请码生成/禁用。
 // 后端：POST/GET/PATCH /api/teams/current/invitations、PATCH /api/teams/current/profile。
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -9,11 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import type { InvitationCode } from '@/lib/types';
 import { formatTime } from '@/lib/types';
 
@@ -139,64 +137,7 @@ export function InvitationsTab() {
           </Table>
         </CardContent>
       </Card>
-
-      <TeamProfileSection />
     </div>
-  );
-}
-
-/** 团队资料设置（公开加入开关 + 简介）。 */
-function TeamProfileSection() {
-  const [allowPublicJoin, setAllowPublicJoin] = useState<boolean | null>(null);
-  const [description, setDescription] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  async function loadProfile() {
-    try {
-      const r = await api<{ team: { allowPublicJoin: boolean; description: string } }>('/api/teams/current');
-      setAllowPublicJoin(r.team.allowPublicJoin);
-      setDescription(r.team.description || '');
-    } catch (e) {
-      if ((e as { status?: number }).status !== 401) toast.error((e as Error).message);
-    }
-  }
-
-  // 首次加载团队资料（所有 hooks 在条件 return 之前调用，见 spec app-shell-and-state.md Hook 规则）
-  useEffect(() => { void loadProfile(); }, []);
-
-  async function save() {
-    setSaving(true);
-    const body: Record<string, unknown> = {};
-    if (allowPublicJoin !== null) body.allowPublicJoin = allowPublicJoin;
-    body.description = description;
-    const ok = await runAction(
-      () => api('/api/teams/current/profile', { method: 'PATCH', body }),
-      '团队资料已更新',
-    );
-    setSaving(false);
-    if (!ok) { /* toast 已由 runAction 处理 */ }
-  }
-
-  return (
-    <Card>
-      <CardHeader><CardTitle>团队资料</CardTitle><CardDescription>设置团队简介与是否允许公开加入。</CardDescription></CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="allow-public"
-            checked={allowPublicJoin ?? false}
-            disabled={allowPublicJoin === null}
-            onCheckedChange={(v) => setAllowPublicJoin(Boolean(v))}
-          />
-          <Label htmlFor="allow-public">开放公开加入（出现在「发现公开团队」列表，用户可一键加入）</Label>
-        </div>
-        <div className="space-y-1">
-          <Label>团队简介</Label>
-          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} placeholder="公开团队发现页展示，帮助用户判断是否加入" />
-        </div>
-        <LoadingButton loading={saving} onClick={save} disabled={allowPublicJoin === null}>保存资料</LoadingButton>
-      </CardContent>
-    </Card>
   );
 }
 

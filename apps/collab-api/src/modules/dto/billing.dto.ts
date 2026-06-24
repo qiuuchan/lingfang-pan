@@ -25,6 +25,11 @@ export class PoolUpsertDto {
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
 }
 
+export class PoolUpdateDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+}
+
 // === 渠道 ===
 
 export class ChannelUpsertDto {

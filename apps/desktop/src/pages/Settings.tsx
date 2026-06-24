@@ -1,9 +1,8 @@
-// Settings.tsx — 设置页（三 Tab 化）。
+// Settings.tsx — 设置页。
 //
-// 三个 Tab（design §7.1）：
 // - cli：软件内置脚本运行环境状态（探测内置 Node.js/Python）。
-// - gateway：模型网关配置（拉后端目录 + 绑定，apiKey 加密存储）。
-// - backend：后端服务地址 Card（零功能改动，从原单 Card 布局搬入 Tab3）。
+// - gateway：模型与计费信息。
+// - updates：检查更新与更新日志。
 //
 // 顶层 state（design B13）：探测结果（runtimeResults）上提，
 // 不进 useApp；因为 TabsContent keepMounted 切 Tab 时不卸载，state 保留避免重探。
@@ -13,14 +12,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { errorMessage, type ApiError } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
 import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
 import type { ProbeResult, RuntimeTarget } from '@/lib/cli-types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
 import { Button } from '@/components/ui/button';
 import {
@@ -105,15 +102,13 @@ export function Settings({
     void probeAll();
   }, [probeAll]);
 
-  // 后端地址已内置（app.config.json），不再可配——原 testBackend/saveBackend 逻辑移除。
-
-  // === Tab3 检查更新逻辑（design §3.2） ===
+  // === 检查更新逻辑（design §3.2） ===
   // checkUpdate：backendUrl 空 → 友好提示；返 null → 已是最新；非 null → 弹 Dialog。
   // 错误（网络/验签元数据/endpoint 无效）走 catch toast（ApiError.message）。
   async function checkForUpdate() {
     const base = backendUrl || '';
     if (!base) {
-      toast.error('先在上方配置公司平台地址');
+      toast.error('当前未连接协作服务，无法检查更新');
       return;
     }
     setChecking(true);
@@ -210,31 +205,20 @@ export function Settings({
           <PluginsTab />
         </TabsContent>
 
-        {/* Tab3：后端服务地址（零功能改动搬入） */}
+        {/* Tab：检查更新 */}
         <TabsContent value="backend" keepMounted className="mt-4 focus-visible:outline-none">
-          {/* 后端地址已内置（app.config.json），不再在此可配。仅保留检查更新 Card。 */}
-
-          {/* 检查更新 Card：连接公司平台检查新版本，发现更新后可下载安装包并自动重启。 */}
           <Card className="w-full">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <RefreshCwIcon className="size-5 text-primary" />
-                <CardTitle>检查更新</CardTitle>
+                <CardTitle>更新</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <p className="text-sm text-muted-foreground">
-                连接公司平台检查新版本，发现更新后可下载安装包并自动重启。
-              </p>
-              <div className="text-xs text-muted-foreground">
-                平台地址（内置）：<span className="font-mono text-foreground">{backendUrl || '未配置'}</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
-                <Button variant="outline" onClick={() => setChangelogOpen(true)}>
-                  <HistoryIcon className="size-4" />查看更新日志
-                </Button>
-              </div>
+            <CardContent className="flex flex-wrap gap-2">
+              <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
+              <Button variant="outline" onClick={() => setChangelogOpen(true)}>
+                <HistoryIcon className="size-4" />查看更新日志
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

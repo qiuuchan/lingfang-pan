@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { PlusIcon, PencilIcon, Trash2Icon, ZapIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLoad, run } from '@/lib/helpers';
-import { Section, StatusBadge, ActionBar } from '@/components/shared';
+import { Section, ActionBar } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import type { Channel, ChannelKind, ChannelProtocol, ChannelStatus, ModelTier, Pool } from '@/lib/types';
+import type { Channel, ChannelKind, ChannelProtocol, ChannelStatus, ModelPricing, ModelTier, Pool, PricingUnit } from '@/lib/types';
 import { TestChannelDialog } from './test-channel-dialog';
 
 const PROVIDER_OPTIONS = [
@@ -40,7 +40,7 @@ export function ChannelsView() {
   useLoad(loadAll);
 
   return (
-    <Section title="渠道管理" description="聊天渠道 / 生图渠道 分开管理。每个渠道归属一个资源池、标记版本（快速/高级）、可配多个模型轮询。">
+    <Section title="模型接入" description="在同一视窗内接入上游模型、绑定资源池，并为模型配置灵石价格。聊天 / 生图按类型分开管理。">
       <Tabs defaultValue="CHAT">
         <TabsList><TabsTrigger value="CHAT">聊天渠道</TabsTrigger><TabsTrigger value="IMAGE">生图渠道</TabsTrigger></TabsList>
         <TabsContent value="CHAT" className="mt-4"><ChannelList kind="CHAT" list={chat} pools={pools} onRefresh={loadAll} /></TabsContent>
@@ -95,15 +95,16 @@ function ChannelList({ kind, list, pools, onRefresh }: { kind: ChannelKind; list
 type FormState = {
   name: string; protocol: ChannelProtocol; provider: string; tier: ModelTier; poolId: string;
   baseUrl: string; upstreamKey: string; modelsText: string; status: ChannelStatus; description: string;
+  pricingModel: string; pricingUnit: PricingUnit; pricePerUnit: number; contextWindow?: number;
 };
 
 function emptyForm(kind: ChannelKind, pools: Pool[]): FormState {
   const proto: ChannelProtocol = kind === 'IMAGE' ? 'OPENAI' : 'OPENAI';
-  return { name: '', protocol: proto, provider: 'openai', tier: 'FAST', poolId: pools[0]?.id ?? '', baseUrl: '', upstreamKey: '', modelsText: '', status: 'ENABLED', description: '' };
+  return { name: '', protocol: proto, provider: 'openai', tier: 'FAST', poolId: pools[0]?.id ?? '', baseUrl: '', upstreamKey: '', modelsText: '', status: 'ENABLED', description: '', pricingModel: '', pricingUnit: kind === 'IMAGE' ? 'PER_IMAGE' : 'PER_TOKEN_INPUT', pricePerUnit: 1, contextWindow: undefined };
 }
 
 function formFromChannel(c: Channel): FormState {
-  return { name: c.name, protocol: c.protocol, provider: c.provider, tier: c.tier, poolId: c.poolId, baseUrl: c.baseUrl, upstreamKey: '', modelsText: c.models.join('\n'), status: c.status, description: c.description };
+  return { name: c.name, protocol: c.protocol, provider: c.provider, tier: c.tier, poolId: c.poolId, baseUrl: c.baseUrl, upstreamKey: '', modelsText: c.models.join('\n'), status: c.status, description: c.description, pricingModel: c.models[0] ?? '', pricingUnit: c.kind === 'IMAGE' ? 'PER_IMAGE' : 'PER_TOKEN_INPUT', pricePerUnit: 1, contextWindow: undefined };
 }
 
 function parseModels(text: string): string[] {
@@ -113,8 +114,33 @@ function parseModels(text: string): string[] {
 function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?: Channel; kind: ChannelKind; pools: Pool[]; children: React.ReactNode; onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(channel ? formFromChannel(channel) : emptyForm(kind, pools));
+  const [pricingRows, setPricingRows] = useState<ModelPricing[]>([]);
   useEffect(() => { if (open) setForm(channel ? formFromChannel(channel) : emptyForm(kind, pools)); }, [open, channel, kind, pools]);
+  useEffect(() => {
+    if (!open) return;
+    let mounted = true;
+    api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing')
+      .then((r) => { if (mounted) setPricingRows(r.pricing ?? []); })
+      .catch(() => { if (mounted) setPricingRows([]); });
+    return () => { mounted = false; };
+  }, [open]);
   const patch = (n: Partial<FormState>) => setForm((f) => ({ ...f, ...n }));
+  const modelOptions = parseModels(form.modelsText);
+
+  useEffect(() => {
+    if (!open || form.pricingModel || modelOptions.length === 0) return;
+    patch({ pricingModel: modelOptions[0] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, modelOptions.join('\n')]);
+
+  useEffect(() => {
+    if (!open || !form.pricingModel) return;
+    const existing = pricingRows.find((p) => p.capability === (kind === 'CHAT' ? 'chat' : 'image') && p.model === form.pricingModel && (p.tier ?? null) === form.tier);
+    if (existing) {
+      patch({ pricingUnit: existing.unit, pricePerUnit: existing.pricePerUnit, contextWindow: existing.contextWindow ?? undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pricingRows, form.pricingModel, form.tier, kind]);
 
   async function submit() {
     if (!form.name.trim()) return toast.error('输入名称');
@@ -129,71 +155,129 @@ function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?
       ? await run(() => api(`/api/admin/billing/channels/${channel.id}`, { method: 'PATCH', body }).then(onRefresh), '渠道已更新')
       : await run(() => api('/api/admin/billing/channels', { method: 'POST', body: { ...body, upstreamKey: form.upstreamKey } }).then(onRefresh), '渠道已创建');
     if (!ok) return;
+    if (form.pricingModel.trim()) await savePricing(false);
     setOpen(false);
+  }
+
+  async function savePricing(showToast = true) {
+    const model = form.pricingModel.trim();
+    if (!model) {
+      if (showToast) toast.error('请选择要定价的模型');
+      return false;
+    }
+    const body = {
+      capability: kind === 'CHAT' ? 'chat' : 'image',
+      model,
+      label: model,
+      unit: form.pricingUnit,
+      pricePerUnit: form.pricePerUnit,
+      contextWindow: form.contextWindow,
+      tier: form.tier,
+      enabled: true,
+    };
+    const existing = pricingRows.find((p) => p.capability === body.capability && p.model === model && (p.tier ?? null) === form.tier);
+    const ok = existing
+      ? await run(() => api(`/api/admin/billing/pricing/${existing.id}`, { method: 'PATCH', body }).then(async () => {
+        const r = await api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing');
+        setPricingRows(r.pricing ?? []);
+      }), showToast ? '价格已保存' : '模型接入与价格已保存')
+      : await run(() => api('/api/admin/billing/pricing', { method: 'POST', body }).then(async () => {
+        const r = await api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing');
+        setPricingRows(r.pricing ?? []);
+      }), showToast ? '价格已保存' : '模型接入与价格已保存');
+    return ok;
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader><DialogTitle>{channel ? '编辑渠道' : `新增${kind === 'CHAT' ? '聊天' : '生图'}渠道`}</DialogTitle>
-          <DialogDescription>{kind === 'CHAT' ? '聊天渠道服务 /chat/completions、/messages' : '生图渠道服务 /images/generations、/images/edits（仅 OpenAI 协议）'}</DialogDescription></DialogHeader>
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2"><Label>名称</Label><Input value={form.name} onChange={(e) => patch({ name: e.target.value })} /></div>
-            <div className="space-y-2"><Label>版本</Label>
-              <Select value={form.tier} onValueChange={(v) => patch({ tier: v as ModelTier })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="FAST">快速</SelectItem><SelectItem value="PREMIUM">高级</SelectItem></SelectContent></Select>
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2"><Label>所属资源池</Label>
-              <Select value={form.poolId} onValueChange={(v) => patch({ poolId: v })}><SelectTrigger><SelectValue placeholder="选池" /></SelectTrigger><SelectContent>{pools.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}{p.scope === 'SHARED' ? '（共享）' : '（单团队）'}</SelectItem>)}</SelectContent></Select>
-            </div>
-            <div className="space-y-2"><Label>协议</Label>
-              <Select value={form.protocol} onValueChange={(v) => patch({ protocol: v as ChannelProtocol })} disabled={kind === 'IMAGE'}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="OPENAI">OpenAI</SelectItem><SelectItem value="ANTHROPIC" disabled={kind === 'IMAGE'}>Anthropic</SelectItem></SelectContent></Select>
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2"><Label>提供方</Label>
-              <Select value={form.provider} onValueChange={(v) => patch({ provider: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PROVIDER_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select>
-            </div>
-            <div className="space-y-2"><Label>上游基址</Label><Input value={form.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" /></div>
-          </div>
-          <div className="space-y-2"><Label>上游 API Key</Label><Input type="password" value={form.upstreamKey} onChange={(e) => patch({ upstreamKey: e.target.value })} placeholder={channel ? '（不改则保留原 key）' : 'sk-...'} /></div>
-          <div className="space-y-2">
-            <Label>可调用模型（轮询；从预设勾选或手输，一行一个）</Label>
-            {/* 预设模型快捷勾选（按 provider+kind 取，参考 model.dev 主流清单） */}
-            {getPresetModels(form.provider, kind).length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {getPresetModels(form.provider, kind).map((m) => {
-                  const current = parseModels(form.modelsText);
-                  const checked = current.includes(m.id);
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => {
-                        const next = checked ? current.filter((x) => x !== m.id) : [...current, m.id];
-                        patch({ modelsText: next.join('\n') });
-                      }}
-                      className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${checked ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
-                      title={`${m.label} · ${m.contextWindow ? (m.contextWindow / 1000) + 'K' : '生图'}${m.supportsReasoning ? ' · 支持思考' : ''}`}
-                    >
-                      {m.id}{m.supportsReasoning && ' 💭'}
-                    </button>
-                  );
-                })}
+          <DialogDescription>{kind === 'CHAT' ? '聊天模型服务 /chat/completions、/messages' : '生图模型服务 /images/generations、/images/edits（仅 OpenAI 协议）'}</DialogDescription></DialogHeader>
+        <Tabs defaultValue="access" className="space-y-4">
+          <TabsList><TabsTrigger value="access">接入配置</TabsTrigger><TabsTrigger value="pricing">价格配置</TabsTrigger></TabsList>
+          <TabsContent value="access" className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>名称</Label><Input value={form.name} onChange={(e) => patch({ name: e.target.value })} /></div>
+              <div className="space-y-2"><Label>版本</Label>
+                <Select value={form.tier} onValueChange={(v) => patch({ tier: v as ModelTier })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="FAST">快速</SelectItem><SelectItem value="PREMIUM">高级</SelectItem></SelectContent></Select>
               </div>
-            )}
-            <Textarea value={form.modelsText} onChange={(e) => patch({ modelsText: e.target.value })} placeholder={'gpt-4o\ngpt-4o-mini'} />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2"><Label>状态</Label>
-              <Select value={form.status} onValueChange={(v) => patch({ status: v as ChannelStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ENABLED">已启用</SelectItem><SelectItem value="DISABLED">已禁用</SelectItem></SelectContent></Select>
             </div>
-            <div className="space-y-2"><Label>说明</Label><Input value={form.description} onChange={(e) => patch({ description: e.target.value })} /></div>
-          </div>
-        </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>所属资源池</Label>
+                <Select value={form.poolId} onValueChange={(v) => patch({ poolId: v })}><SelectTrigger><SelectValue placeholder="选池" /></SelectTrigger><SelectContent>{pools.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}{p.scope === 'SHARED' ? '（共享）' : `（${p.team?.name ?? '单团队'}）`}</SelectItem>)}</SelectContent></Select>
+              </div>
+              <div className="space-y-2"><Label>协议</Label>
+                <Select value={form.protocol} onValueChange={(v) => patch({ protocol: v as ChannelProtocol })} disabled={kind === 'IMAGE'}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="OPENAI">OpenAI</SelectItem><SelectItem value="ANTHROPIC" disabled={kind === 'IMAGE'}>Anthropic</SelectItem></SelectContent></Select>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>提供方</Label>
+                <Select value={form.provider} onValueChange={(v) => patch({ provider: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PROVIDER_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select>
+              </div>
+              <div className="space-y-2"><Label>上游基址</Label><Input value={form.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" /></div>
+            </div>
+            <div className="space-y-2"><Label>上游 API Key</Label><Input type="password" value={form.upstreamKey} onChange={(e) => patch({ upstreamKey: e.target.value })} placeholder={channel ? '（不改则保留原 key）' : 'sk-...'} /></div>
+            <div className="space-y-2">
+              <Label>可调用模型（轮询；从预设勾选或手输，一行一个）</Label>
+              {getPresetModels(form.provider, kind).length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {getPresetModels(form.provider, kind).map((m) => {
+                    const current = parseModels(form.modelsText);
+                    const checked = current.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          const next = checked ? current.filter((x) => x !== m.id) : [...current, m.id];
+                          patch({ modelsText: next.join('\n'), pricingModel: next[0] ?? '' });
+                        }}
+                        className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${checked ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                        title={`${m.label} · ${m.contextWindow ? (m.contextWindow / 1000) + 'K' : '生图'}${m.supportsReasoning ? ' · 支持思考' : ''}`}
+                      >
+                        {m.id}{m.supportsReasoning && ' 思考'}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <Textarea value={form.modelsText} onChange={(e) => patch({ modelsText: e.target.value })} placeholder={'gpt-4o\ngpt-4o-mini'} />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>状态</Label>
+                <Select value={form.status} onValueChange={(v) => patch({ status: v as ChannelStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ENABLED">已启用</SelectItem><SelectItem value="DISABLED">已禁用</SelectItem></SelectContent></Select>
+              </div>
+              <div className="space-y-2"><Label>说明</Label><Input value={form.description} onChange={(e) => patch({ description: e.target.value })} /></div>
+            </div>
+          </TabsContent>
+          <TabsContent value="pricing" className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>模型</Label>
+                <Select value={form.pricingModel} onValueChange={(v) => patch({ pricingModel: v })} disabled={modelOptions.length === 0}>
+                  <SelectTrigger><SelectValue placeholder={modelOptions.length ? '选择模型' : '先填写可调用模型'} /></SelectTrigger>
+                  <SelectContent>{modelOptions.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2"><Label>计费单位</Label>
+                <Select value={form.pricingUnit} onValueChange={(v) => patch({ pricingUnit: v as PricingUnit })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PER_TOKEN_INPUT">每1M输入token</SelectItem>
+                    <SelectItem value="PER_TOKEN_OUTPUT">每1M输出token</SelectItem>
+                    <SelectItem value="PER_CALL">每次</SelectItem>
+                    <SelectItem value="PER_IMAGE">每张</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>单价（灵石）</Label><Input type="number" min={0} step="0.0001" value={form.pricePerUnit} onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })} /></div>
+              <div className="space-y-2"><Label>上下文窗口（token，可选）</Label><Input type="number" min={0} value={form.contextWindow ?? ''} onChange={(e) => patch({ contextWindow: e.target.value ? Number(e.target.value) : undefined })} /></div>
+            </div>
+            <div className="flex justify-end"><Button variant="outline" onClick={() => { void savePricing(true); }}>仅保存价格</Button></div>
+          </TabsContent>
+        </Tabs>
         <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={submit}>{channel ? '保存' : '创建'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
