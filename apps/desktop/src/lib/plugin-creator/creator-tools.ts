@@ -38,7 +38,7 @@ export const uploadPluginTool = tool({
         body: {
           manifest: {
             id: args.id, name: args.name, version: args.version, description: args.description,
-            runtime_type: args.runtime_type, entry: args.entry, visibility: 'team',
+            runtime_type: args.runtime_type, entry: args.entry, visibility: 'tenant',
             capabilities: [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low' }],
           },
           files: args.files,
