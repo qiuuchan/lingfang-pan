@@ -46,13 +46,30 @@ export class RelayService {
     @Inject(ChannelRouterService) private readonly router: ChannelRouterService,
   ) {}
 
-  /** GET /api/relay/v1/models —— 仅返回两个版本哨兵（协议层强制）。 */
-  async listModels() {
+  /** GET /api/relay/v1/models —— 返回两个版本哨兵，并在有鉴权上下文时附带可用资源池。 */
+  async listModels(req?: Request) {
+    const auth = req?.relayAuth ?? null;
+    const poolRefs = auth
+      ? await this.prisma.pool.findMany({
+        where: { OR: [{ scope: 'SHARED' }, { scope: 'DEDICATED', teamId: auth.teamId }] },
+        select: {
+          id: true,
+          name: true,
+          scope: true,
+          teamId: true,
+          channels: { where: { kind: 'CHAT', status: 'ENABLED' }, select: { tier: true } },
+        },
+        orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
+      })
+      : [];
+    const poolNamesFor = (tier: Tier) => poolRefs
+      .filter((pool) => pool.channels.some((channel) => channel.tier === tier))
+      .map((pool) => ({ id: pool.id, name: pool.name, scope: pool.scope, teamId: pool.teamId }));
     return {
       object: 'list',
       data: [
-        { id: 'fast', object: 'model', owned_by: 'lingfang', label: '快速版' },
-        { id: 'premium', object: 'model', owned_by: 'lingfang', label: '高级版' },
+        { id: 'fast', object: 'model', owned_by: 'lingfang', label: '快速版', resourcePools: poolNamesFor('FAST') },
+        { id: 'premium', object: 'model', owned_by: 'lingfang', label: '高级版', resourcePools: poolNamesFor('PREMIUM') },
       ],
     };
   }
@@ -276,7 +293,7 @@ export class RelayService {
         // 所有候选都因无定价被跳过：明确提示配价，而非笼统 upstream_error。
         const modelNames = Array.from(new Set(candidates.map((c) => c.model))).join('、');
         await ensureFinalized({ status: 'no_pricing', errorCode: 'pricing_not_configured', httpStatus: 503, channelId: null, model: modelNames || '(none)' });
-        throw new AppError(503, 'pricing_not_configured', `渠道模型未配置定价：${modelNames}。请在「计费配置」为这些模型添加定价。`);
+        throw new AppError(503, 'pricing_not_configured', `渠道模型未配置定价：${modelNames}。请在「模型接入」为这些模型添加定价。`);
       }
       const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
       await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });

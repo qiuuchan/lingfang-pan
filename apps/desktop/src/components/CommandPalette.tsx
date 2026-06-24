@@ -85,7 +85,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       go('creator', '创建插件', '用 AI 生成新插件'),
       go('plugins', '我的插件', '本地与团队插件'),
       go('market', '插件市场', '浏览发现插件'),
-      go('settings', '设置', '模型服务、运行环境、后端'),
+      go('settings', '设置', '通用、模型与计费、插件、更新'),
       go('wallet', '钱包', '余额与流水'),
     ];
     if (session.role === 'TEAM_ADMIN') list.push(go('team-admin', '团队管理', '成员/角色/审批'));

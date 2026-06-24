@@ -49,8 +49,8 @@ const STEPS: Step[] = [
   {
     key: 'provider',
     index: 2,
-    title: '配置模型渠道',
-    description: '在「渠道管理」页接入上游模型渠道并绑定范围，中转计费系统才能对外服务 AI 调用。',
+    title: '配置模型接入',
+    description: '在「模型接入」页接入上游模型、绑定资源池并配置价格，中转计费系统才能对外服务 AI 调用。',
     icon: ServerIcon,
     targetView: 'channels',
   },

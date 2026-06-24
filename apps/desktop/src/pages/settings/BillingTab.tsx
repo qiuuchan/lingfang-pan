@@ -25,7 +25,7 @@ interface ApiKeyRow {
   status: 'ACTIVE' | 'DISABLED'; lastUsedAt: string | null; expiresAt: string | null; createdAt: string;
 }
 interface ApiKeyCreated extends ApiKeyRow { plaintextKey: string; }
-interface RelayModel { id: string; label?: string }
+interface RelayModel { id: string; label?: string; resourcePools?: Array<{ id: string; name: string; scope: string; teamId: string | null }> }
 
 const SOURCE_LABEL: Record<string, string> = {
   signup_bonus: '注册赠送', llm_consume: 'AI 对话消费', image_consume: 'AI 生图消费',
@@ -151,7 +151,10 @@ export function BillingTab() {
         <CardContent>
           <div className="flex flex-wrap gap-2">
             {models.length ? models.map((m) => (
-              <Badge key={m.id} variant="secondary" className="text-sm">{m.label ?? (m.id === 'fast' ? '快速版' : '高级版')}</Badge>
+              <Badge key={m.id} variant="secondary" className="text-sm">
+                {m.label ?? (m.id === 'fast' ? '快速版' : '高级版')}
+                {m.resourcePools?.length ? ` · ${m.resourcePools.map((pool) => pool.name).join('、')}` : ' · 暂无可用资源池'}
+              </Badge>
             )) : <span className="text-sm text-muted-foreground">连接平台后显示</span>}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">底层模型由平台统一配置与管理。</p>

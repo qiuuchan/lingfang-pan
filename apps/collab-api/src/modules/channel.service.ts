@@ -32,7 +32,10 @@ export class PoolService {
   async adminList() {
     const pools = await this.prisma.pool.findMany({
       orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
-      include: { _count: { select: { channels: true } } },
+      include: {
+        team: { select: { id: true, name: true, slug: true } },
+        _count: { select: { channels: true } },
+      },
     });
     return {
       pools: pools.map((p) => ({
@@ -40,6 +43,7 @@ export class PoolService {
         name: p.name,
         scope: p.scope,
         teamId: p.teamId,
+        team: p.team ? { id: p.team.id, name: p.team.name, slug: p.team.slug } : null,
         description: p.description,
         channelCount: p._count.channels,
         createdAt: p.createdAt.toISOString(),
@@ -120,7 +124,7 @@ export class ChannelService {
     const channels = await this.prisma.channel.findMany({
       where,
       orderBy: [{ kind: 'asc' }, { tier: 'asc' }, { createdAt: 'asc' }],
-      include: { pool: { select: { id: true, name: true, scope: true, teamId: true } } },
+      include: { pool: { select: { id: true, name: true, scope: true, teamId: true, team: { select: { id: true, name: true, slug: true } } } } },
     });
     return { channels: channels.map((c) => this.adminView(c)) };
   }
@@ -323,7 +327,7 @@ export class ChannelService {
     id: string; name: string; kind: string; tier: string; protocol: string; provider: string;
     poolId: string; baseUrl: string; upstreamKeyHint: string; encryptedUpstreamKey: string;
     models: unknown; status: string; description: string; lastHealthAt: Date | null; lastHealthOk: boolean | null;
-    createdAt: Date; updatedAt: Date; pool?: { id: string; name: string; scope: string; teamId: string | null };
+    createdAt: Date; updatedAt: Date; pool?: { id: string; name: string; scope: string; teamId: string | null; team?: { id: string; name: string; slug: string } | null };
   }) {
     return {
       id: c.id,
@@ -333,7 +337,7 @@ export class ChannelService {
       protocol: c.protocol as 'OPENAI' | 'ANTHROPIC',
       provider: c.provider,
       poolId: c.poolId,
-      pool: c.pool ? { id: c.pool.id, name: c.pool.name, scope: c.pool.scope, teamId: c.pool.teamId } : null,
+      pool: c.pool ? { id: c.pool.id, name: c.pool.name, scope: c.pool.scope, teamId: c.pool.teamId, team: c.pool.team ?? null } : null,
       baseUrl: c.baseUrl,
       upstreamKeyHint: c.upstreamKeyHint,
       hasUpstreamKey: c.encryptedUpstreamKey.length > 0,

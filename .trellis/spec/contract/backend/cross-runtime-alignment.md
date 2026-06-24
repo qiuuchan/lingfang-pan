@@ -38,3 +38,56 @@ Role drift is high-risk: `TenantRole` includes `developer`, while current UI lab
 
 When frontend behavior branches on a new error code, add it to the shared contract or document why it remains route-local.
 
+## Scenario: Plugin Capability Kind Alignment
+
+### 1. Scope / Trigger
+- Trigger: adding, renaming, or removing plugin capability kinds crosses `packages/contract`, `apps/collab-api`, and `apps/desktop`.
+- Risk: desktop can generate a capability that passes local validation but is rejected by backend package normalization, or the backend can accept a capability that shared contract consumers reject.
+
+### 2. Signatures
+- Contract enum: `packages/contract/src/plugin.ts` `CapabilityKind`.
+- Backend whitelist: `apps/collab-api/src/modules/plugin-package.ts` `CAPABILITY_KINDS`.
+- Desktop draft normalization: `apps/desktop/src/lib/plugin-draft/manifest.ts` `FRONTEND_CAPABILITY_KINDS` and `FALLBACK_CAPABILITY`.
+
+### 3. Contracts
+- `CapabilityKind` must include every backend-accepted public capability kind.
+- Backend `CAPABILITY_KINDS` must reject unknown strings with a 400-style validation error during plugin package normalization.
+- Desktop fallback capability must be one of `CapabilityKind.options`; current code-assistant fallbacks use `code-assistant.run`, with `code-assistant.session` reserved for session capability metadata.
+
+### 4. Validation & Error Matrix
+- Contract missing a backend-accepted kind -> desktop/typecheck/tests fail before release.
+- Desktop fallback uses a bare or stale kind such as `code-assistant` -> backend rejects draft publish/package normalization.
+- Backend whitelist accepts a kind missing from `CapabilityKind` -> shared contract consumers reject otherwise valid backend data.
+
+### 5. Good/Base/Bad Cases
+- Good: `code-assistant.run` and `code-assistant.session` exist in both `CapabilityKind` and backend `CAPABILITY_KINDS`; desktop fallback uses `code-assistant.run`.
+- Base: adding `plugin.export` updates all three locations in the same change and includes a regression test.
+- Bad: adding `plugin.export` only to `apps/collab-api/src/modules/plugin-package.ts`.
+
+### 6. Tests Required
+- `pnpm -C packages/contract typecheck` verifies exported enum consumers compile.
+- `pnpm -C apps/desktop test` covers draft manifest normalization and fallback capability acceptance.
+- Backend plugin-package tests should assert unknown capability kinds are rejected and newly allowed kinds are accepted.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```ts
+// Backend only: contract and desktop still reject or omit this value.
+const CAPABILITY_KINDS = new Set(['code-assistant.run', 'plugin.export']);
+```
+
+Correct:
+
+```ts
+// packages/contract/src/plugin.ts
+export const CapabilityKind = z.enum(['code-assistant.run', 'code-assistant.session', 'plugin.export']);
+
+// apps/collab-api/src/modules/plugin-package.ts
+const CAPABILITY_KINDS = new Set(['code-assistant.run', 'code-assistant.session', 'plugin.export']);
+
+// apps/desktop/src/lib/plugin-draft/manifest.ts
+const FRONTEND_CAPABILITY_KINDS = new Set<CapabilityKindType>(CapabilityKind.options);
+```
+

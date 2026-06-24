@@ -16,6 +16,7 @@ const OPTIONS: { value: CloseAction; label: string }[] = [
 
 export function GeneralTab() {
   const [action, setAction] = useState<CloseAction>(loadCloseAction);
+  const selectedLabel = OPTIONS.find((option) => option.value === action)?.label ?? '每次询问';
 
   return (
     <Card className="w-full">
@@ -33,7 +34,7 @@ export function GeneralTab() {
           }}
         >
           <SelectTrigger id="close-action" className="w-72">
-            <SelectValue />
+            <SelectValue>{selectedLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {OPTIONS.map((o) => (

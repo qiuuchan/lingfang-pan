@@ -3,7 +3,6 @@ import {
   BoxesIcon,
   CheckCircleIcon,
   CloudCogIcon,
-  CoinsIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
   PlugIcon,
@@ -54,8 +53,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '计费与模型',
     items: [
       { view: 'pools', label: '资源池', icon: ServerIcon },
-      { view: 'channels', label: '渠道管理', icon: BoxesIcon },
-      { view: 'billing', label: '计费配置', icon: CoinsIcon },
+      { view: 'channels', label: '模型接入', icon: CloudCogIcon },
       { view: 'credits', label: '灵石账户', icon: ReceiptIcon },
       { view: 'callLogs', label: '调用日志', icon: ActivityIcon },
       { view: 'apiKeys', label: 'API Key 总览', icon: KeyRoundIcon },

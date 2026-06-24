@@ -24,6 +24,7 @@ export function MembersTab() {
   );
 
   const reload = useCallback(() => { void reloadMembers(); void reloadRoles(); }, [reloadMembers, reloadRoles]);
+  const roleNameById = new Map(roles.roles.map((role) => [role.id, role.name] as const));
 
   async function assignRole(member: TeamMember, roleId: string) {
     const ok = await runAction(
@@ -66,13 +67,14 @@ export function MembersTab() {
             {members.members.map((m) => {
               // RBAC：当前角色直接取后端关联 Role 的 name（含自定义角色）；
               // 分配下拉 value 用 teamRoleId（roleId），不再用 name 字符串反查。
+              const selectedRoleName = m.teamRoleId ? (roleNameById.get(m.teamRoleId) ?? m.roleName ?? undefined) : (m.roleName ?? undefined);
               return (
                 <TableRow key={m.userId}>
                   <TableCell className="font-medium">{m.user.displayName}</TableCell>
                   <TableCell className="text-muted-foreground">{m.user.email}</TableCell>
                   <TableCell>
                     <Badge variant={m.role === 'TEAM_ADMIN' ? 'default' : 'secondary'}>
-                      {m.roleName ?? (m.role === 'TEAM_ADMIN' ? '团队管理员' : '成员')}
+                      {m.roleName ?? (m.teamRoleId ? roleNameById.get(m.teamRoleId) : null) ?? (m.role === 'TEAM_ADMIN' ? '团队管理员' : '成员')}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -80,7 +82,11 @@ export function MembersTab() {
                       value={m.teamRoleId ?? undefined}
                       onValueChange={(roleId) => { if (roleId) assignRole(m, roleId); }}
                     >
-                      <SelectTrigger className="w-40"><SelectValue placeholder="选择角色" /></SelectTrigger>
+                      <SelectTrigger className="w-40">
+                        <SelectValue placeholder="选择角色">
+                          {selectedRoleName ?? '选择角色'}
+                        </SelectValue>
+                      </SelectTrigger>
                       <SelectContent>
                         {roles.roles.map((r) => (
                           <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>

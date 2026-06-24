@@ -7,6 +7,7 @@ import { useLoad, run } from '@/lib/helpers';
 import { Section, ActionBar } from '@/components/shared';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -53,7 +54,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
         <div className="space-y-2"><Label>模型/动作 key</Label>
           {isModelSelect ? (
             <Select value={form.model} onValueChange={(v) => patch({ model: v })}>
-              <SelectTrigger><SelectValue placeholder={modelOptions.length ? '选模型' : '（该类型渠道未配模型，先在渠道管理配模型）'} /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder={modelOptions.length ? '选模型' : '（该类型接入未配模型，先在模型接入配模型）'} /></SelectTrigger>
               <SelectContent>{modelOptions.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}</SelectContent>
             </Select>
           ) : (
@@ -87,7 +88,7 @@ export function BillingView() {
   }
 
   return (
-    <Section title="计费配置" description="模型灵石单价（后台可动态调整）+ 全局参数。前台版本对应底层模型在此决定价格。">
+    <Section title="模型价格" description="模型灵石单价（后台可动态调整）。新的模型价格也可以在「模型接入」弹窗内配置。">
       <CreatePricingDialog onRefresh={load}><Button><PlusIcon className="mr-1.5 size-4" />新增定价</Button></CreatePricingDialog>
       <div className="mt-3">
         <Table>
@@ -100,7 +101,13 @@ export function BillingView() {
                 <TableCell className="font-medium">{p.label || p.model}<div className="font-mono text-xs text-muted-foreground">{p.model}</div></TableCell>
                 <TableCell className="text-muted-foreground">{UNIT_LABEL[p.unit]}</TableCell>
                 <TableCell className="tabular-nums">{p.pricePerUnit}</TableCell>
-                <TableCell>{p.enabled ? '●' : '○'}</TableCell>
+                <TableCell>
+                  {p.enabled ? (
+                    <Badge variant="success" className="gap-1.5"><span className="size-2 rounded-full bg-emerald-500" />已启用</Badge>
+                  ) : (
+                    <Badge variant="secondary" className="gap-1.5"><span className="size-2 rounded-full bg-muted-foreground/60" />已禁用</Badge>
+                  )}
+                </TableCell>
                 <TableCell><ActionBar><EditPricingDialog pricing={p} onRefresh={load}><Button variant="outline" size="sm"><PencilIcon className="size-3.5" /></Button></EditPricingDialog><Button variant="destructive" size="sm" onClick={() => remove(p)}><Trash2Icon className="size-3.5" /></Button></ActionBar></TableCell>
               </TableRow>
             )) : <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">暂无定价</TableCell></TableRow>}
@@ -135,7 +142,7 @@ function EditPricingDialog({ pricing, children, onRefresh }: { pricing: ModelPri
   useEffect(() => { if (open) setForm({ capability: pricing.capability, model: pricing.model, label: pricing.label, unit: pricing.unit, pricePerUnit: pricing.pricePerUnit, contextWindow: (pricing as any).contextWindow, tier: pricing.tier, enabled: pricing.enabled }); }, [open, pricing]);
   async function save() {
     const body = { ...form, model: form.model.trim() };
-    if (!(await run(() => api('/api/admin/billing/pricing', { method: 'POST', body }).then(onRefresh), '定价已更新'))) return;
+    if (!(await run(() => api(`/api/admin/billing/pricing/${pricing.id}`, { method: 'PATCH', body }).then(onRefresh), '定价已更新'))) return;
     setOpen(false);
   }
   return (

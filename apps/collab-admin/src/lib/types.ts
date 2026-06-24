@@ -99,12 +99,13 @@ export type Pool = {
   name: string;
   scope: PoolScope;
   teamId: string | null;
+  team?: { id: string; name: string; slug: string } | null;
   description: string;
   channelCount: number;
   createdAt: string;
 };
 
-export type ChannelPoolRef = { id: string; name: string; scope: PoolScope; teamId: string | null };
+export type ChannelPoolRef = { id: string; name: string; scope: PoolScope; teamId: string | null; team?: { id: string; name: string; slug: string } | null };
 
 export type Channel = {
   id: string;
@@ -135,6 +136,7 @@ export type ModelPricing = {
   unit: PricingUnit;
   pricePerUnit: number;
   tier: ModelTier | null;
+  contextWindow?: number | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

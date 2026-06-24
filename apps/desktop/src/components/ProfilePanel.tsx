@@ -40,7 +40,7 @@ export function ProfilePanel({
   }, [session.displayName, session.email]);
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-4">
+    <div className="mx-auto flex max-w-lg flex-col gap-3">
       <AccountSummary session={session} />
       <ProfileForm
         displayName={displayName}
@@ -66,7 +66,7 @@ export function ProfilePanel({
 function AccountSummary({ session }: { session: Session }) {
   const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
   return (
-    <div className="rounded-lg border bg-muted/40 p-3 text-xs">
+    <div className="rounded-lg border bg-muted/40 p-2.5 text-xs">
       <div className="flex justify-between gap-3"><span className="text-muted-foreground">团队</span><span className="break-all text-right font-mono">{session.tenantName || '未加入'}</span></div>
       <div className="mt-1 flex justify-between gap-3"><span className="text-muted-foreground">角色</span><span className="text-right font-mono">{roleLabel}</span></div>
       <div className="mt-1 flex justify-between gap-3"><span className="text-muted-foreground">用户 ID</span><span className="break-all text-right font-mono">{session.userId || '-'}</span></div>
@@ -90,7 +90,7 @@ function ProfileForm({
   onSave: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5">
       <Label htmlFor="account-name">昵称</Label>
       <Input id="account-name" value={displayName} onChange={(event) => onDisplayNameChange(event.target.value)} placeholder="显示名称" />
       <Label htmlFor="account-email">邮箱</Label>
@@ -112,7 +112,7 @@ function PasswordForm({
   onSave: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 border-t pt-3">
+    <div className="flex flex-col gap-1.5 border-t pt-2">
       <Label htmlFor="account-password">重置密码</Label>
       <Input id="account-password" type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="新密码（至少 8 位）" />
       <Button variant="outline" onClick={onSave} disabled={saving}>{saving ? '重置中...' : '重置密码'}</Button>

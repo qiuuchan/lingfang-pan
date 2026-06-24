@@ -18,7 +18,7 @@ Reference files:
 ## Scenario: Backend URL Configuration Boundary
 
 ### 1. Scope / Trigger
-- Trigger: changing backend URL setup, app startup, `apiBase()`, Settings backend address UI, or connection testing.
+- Trigger: changing backend URL setup, app startup, `apiBase()`, login/setup address entry, update checks, or connection testing.
 
 ### 2. Signatures
 - `initApiBase(defaultUrl?: string | null) -> string | null`
@@ -32,27 +32,32 @@ Reference files:
 - URL priority: stored user value -> `app.config.json.api_base` -> empty setup state.
 - Valid URLs must use `http://` or `https://`; saved values are trimmed and trailing slash removed.
 - Empty backend URL blocks Auth, tenant selection, business API, and SSE requests.
+- Settings -> 更新 only exposes update actions (`checkUpdate`, changelog, install). It must not render platform/backend address inputs, save buttons, clear buttons, or current-address readouts.
+- Update checks use the current `apiBase()`/session backend URL internally. If no backend URL is active, show a plain update failure message rather than sending the user to Settings to configure an address.
 
 ### 4. Validation & Error Matrix
 - Empty URL -> setup card blocks app entry.
 - Invalid scheme or malformed URL -> Chinese validation error.
 - `/health` unreachable -> connection error mentioning backend URL, network, and CORS.
 - Saved URL changes -> reset current session because old token may belong to another backend.
+- Settings update tab contains address editing UI -> remove it; address editing belongs outside Settings.
+- Check update with no active backend URL -> toast `当前未连接协作服务，无法检查更新`.
 
 ### 5. Good/Base/Bad Cases
 - Good: packaged default is empty; first run shows backend setup and sends no business request.
 - Base: packaged default points to local backend; app can enter Auth immediately.
 - Bad: page directly concatenates its own backend URL instead of using `apiBase()`.
+- Bad: Settings card titled `平台地址与更新` with an editable backend URL field.
 
 ### 6. Tests Required
 - `pnpm -C apps/desktop typecheck`
 - `pnpm -C apps/desktop vite:build`
-- Manual/runtime check for first-run empty URL and Settings URL change when UI behavior is touched.
+- Manual/runtime check for first-run empty URL and Settings -> 更新 showing update-only controls when UI behavior is touched.
 
 ### 7. Wrong vs Correct
-Wrong: keep a hidden hardcoded `http://127.0.0.1:8787` fallback that bypasses user setup.
+Wrong: keep a hidden hardcoded `http://127.0.0.1:8787` fallback that bypasses user setup, or put backend URL editing back under Settings -> 更新.
 
-Correct: use the shared backend URL configuration layer and let empty config become an explicit setup state.
+Correct: use the shared backend URL configuration layer, let empty config become an explicit setup state, and keep Settings -> 更新 focused on update checking/installing only.
 
 ## Error Handling
 
