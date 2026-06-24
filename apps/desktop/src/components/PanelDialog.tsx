@@ -1,7 +1,7 @@
 // PanelDialog.tsx — 通用功能悬浮窗（项 14）：Dialog + 标题 + 可滚动内容区。
 //
-// 替代原 AccountDialog 的聚合 tab：钱包 / 切换团队 / 设置 / 个人资料 等功能各自一个
-// PanelDialog 实例，从 AvatarMenu 对应按钮打开。承载既有页面组件（Wallet / TeamHome /
+// 替代原 AccountDialog 的聚合 tab：团队钱包 / 设置 / 个人资料 等功能各自一个
+// PanelDialog 实例，从 AvatarMenu 对应按钮打开。承载既有页面组件（TeamWallet /
 // Settings 等），不在本组件内放业务逻辑——只提供统一的浮窗外壳（标题栏 + 拖拽 + 滚动）。
 import { type ReactNode } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';

@@ -4,8 +4,6 @@ import { AuthService } from './auth.service';
 import { badRequest, insufficientBalance, notFound } from '../common';
 import { NotificationService } from './notification.service';
 
-const SIGNUP_BONUS_CENTS = 1000;
-
 @Injectable()
 export class EconomyService {
   constructor(
@@ -14,49 +12,15 @@ export class EconomyService {
     @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
-  // 注册赠送 ¥10（1000 分）：首次访问钱包时 upsert，不改 auth.service 的注册流程。
-  // 同步写入 signup_bonus CREDIT 流水，保持与旧 Rust 经济系统一致（verify-economy.ps1 断言该流水存在）。
-  async ensureWallet(userId: string) {
-    // 修复 SCHEMA-01：此前 wallet.upsert 与流水 findFirst+create 分离，并发可重复发放 signup_bonus。
-    // 改用事务内幂等：upsert wallet 后在事务内查流水，无则创建，保证「首充流水唯一」不变量。
-    return this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.upsert({
-        where: { userId },
-        update: {},
-        create: { userId, balanceCents: SIGNUP_BONUS_CENTS },
-      });
-      // 仅当钱包是新创建（余额恰好等于赠送额且无任何流水）时补写 signup_bonus，
-      // 避免对已存在钱包重复发放。事务内行锁（wallet 行被 upsert 锁定）串行化并发。
-      const existing = await tx.walletTransaction.findFirst({ where: { userId, reason: 'signup_bonus' } });
-      if (!existing) {
-        await tx.walletTransaction.create({
-          data: { userId, amountCents: SIGNUP_BONUS_CENTS, direction: 'CREDIT', reason: 'signup_bonus' },
-        });
-      }
-      return wallet;
-    });
-  }
-
-  async getWallet(userId: string) {
-    const wallet = await this.ensureWallet(userId);
-    const txs = await this.prisma.walletTransaction.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
-    return {
-      balance_cents: wallet.balanceCents,
-      transactions: txs.map((t) => ({
-        id: t.id,
-        amount_cents: t.amountCents,
-        direction: t.direction.toLowerCase(),
-        reason: t.reason,
-        plugin_id: t.pluginId,
-        at: t.createdAt.toISOString(),
-      })),
-    };
-  }
-
+  /**
+   * 购买市场付费插件（R2：余额改团队共享，废弃个人钱包）。
+   *
+   * 资金口径（design §4，用户已拍板）：
+   *  - 买家扣款：从买家当前/主团队的 `Team.balanceCents` 原子条件扣款（防透支），写 BalanceLedger(DEBIT, plugin_purchase)。
+   *  - 卖家加款：进卖家当前/主团队的 `Team.balanceCents`，写 BalanceLedger(CREDIT, plugin_sale)。
+   *  - 个人 Wallet 已退役：不再读写 wallet/walletTransaction，不再发注册赠送。
+   *  - 幂等：已购买直接返回买家团队余额。
+   */
   async purchase(userId: string, pluginId: string) {
     const plugin = await this.prisma.plugin.findFirst({
       where: { id: pluginId, marketplace: true, reviewStatus: 'APPROVED', status: 'ENABLED' },
@@ -68,69 +32,80 @@ export class EconomyService {
     if (!sellerId) throw badRequest('插件无作者信息，无法结算');
     if (sellerId === userId) throw badRequest('不能购买自己的插件');
 
-    const membership = await this.auth.ensureCurrentTeam(userId);
+    // 买家当前/主团队（扣款账户）。
+    const buyerMembership = await this.auth.ensureCurrentTeam(userId);
+    const buyerTeamId = buyerMembership.teamId;
 
-    // 幂等：已购买直接返回。
+    // 幂等：已购买直接返回买家团队余额。
     const already = await this.prisma.purchase.findUnique({
       where: { pluginId_buyerUserId: { pluginId, buyerUserId: userId } },
     });
     if (already) {
-      const wallet = await this.ensureWallet(userId);
-      return { status: 'already_purchased' as const, balance_cents: wallet.balanceCents };
+      const team = await this.prisma.team.findUniqueOrThrow({ where: { id: buyerTeamId }, select: { balanceCents: true } });
+      return { status: 'already_purchased' as const, balance_cents: team.balanceCents };
     }
+
+    // 卖家当前/主团队（收益账户）。卖家未入团则无法结算收益（与买家同口径，防资金丢失）。
+    const sellerMembership = await this.auth.ensureCurrentTeam(sellerId);
+    const sellerTeamId = sellerMembership.teamId;
 
     const price = plugin.priceCents;
 
     await this.prisma.$transaction(async (tx) => {
-      // 条件扣款：余额不足则受影响行数为 0。
-      const debited = await tx.wallet.updateMany({
-        where: { userId, balanceCents: { gte: price } },
+      // 买家条件扣款：余额不足则受影响行数为 0（原子防透支，与 team.service.consume 同模式）。
+      const debited = await tx.team.updateMany({
+        where: { id: buyerTeamId, balanceCents: { gte: price } },
         data: { balanceCents: { decrement: price } },
       });
       if (debited.count === 0) throw insufficientBalance();
 
-      // 卖家加款（upsert 兜底缺失钱包行）。
-      await tx.wallet.upsert({
-        where: { userId: sellerId },
-        update: { balanceCents: { increment: price } },
-        create: { userId: sellerId, balanceCents: price },
+      // 卖家加款（进卖家团队余额池）。
+      await tx.team.update({
+        where: { id: sellerTeamId },
+        data: { balanceCents: { increment: price } },
       });
 
       await tx.purchase.create({
         data: {
           pluginId,
           buyerUserId: userId,
-          buyerTeamId: membership.teamId,
+          buyerTeamId,
           sellerUserId: sellerId,
           priceCents: price,
         },
       });
 
-      await tx.walletTransaction.create({
-        data: { userId, amountCents: price, direction: 'DEBIT', reason: 'purchase', pluginId, counterpartyUserId: sellerId },
+      // 团队余额流水：买家 DEBIT(plugin_purchase) / 卖家 CREDIT(plugin_sale)。
+      // reason 为 String 列，新增取值无需 schema 迁移。
+      await tx.balanceLedger.create({
+        data: { teamId: buyerTeamId, amountCents: price, direction: 'DEBIT', reason: `plugin_purchase:${pluginId}`, actorUserId: userId },
       });
-      await tx.walletTransaction.create({
-        data: { userId: sellerId, amountCents: price, direction: 'CREDIT', reason: 'sale', pluginId, counterpartyUserId: userId },
+      await tx.balanceLedger.create({
+        data: { teamId: sellerTeamId, amountCents: price, direction: 'CREDIT', reason: `plugin_sale:${pluginId}`, actorUserId: sellerId },
       });
     });
 
-    const wallet = await this.ensureWallet(userId);
-    // 购买审计：actor=买家，记录插件购买扣款事件（便于管理员追溯市场交易）。
-    // 在事务外审计（与 walletTransaction 流水分离：流水是财务账本，audit 是治理追溯）。
-    await this.audit(userId, 'wallet.purchase', 'Plugin', pluginId, { buyerTeamId: membership.teamId, sellerUserId: sellerId, priceCents: price });
+    const team = await this.prisma.team.findUniqueOrThrow({ where: { id: buyerTeamId }, select: { balanceCents: true } });
+    // 购买审计：actor=买家，记录团队购买扣款事件（便于管理员追溯市场交易 + 卖家收益团队）。
+    await this.audit(userId, 'wallet.purchase', 'Plugin', pluginId, {
+      buyerTeamId,
+      sellerUserId: sellerId,
+      sellerTeamId,
+      priceCents: price,
+    });
     // 通知卖家：插件售出，收入到账（触发失败不阻塞主操作）。
     try {
       await this.notifications.create(
         sellerId,
         'purchase_sale',
         '你的插件有新订单',
-        `你的插件「${plugin.name}」已被购买，¥${(price / 100).toFixed(2)} 已到账。`,
+        `你的插件「${plugin.name}」已被购买，¥${(price / 100).toFixed(2)} 已到账团队余额。`,
         { relatedType: 'Plugin', relatedId: pluginId },
       );
     } catch {
       // 通知触发失败不阻塞购买主流程。
     }
-    return { status: 'purchased' as const, plugin_id: pluginId, price_cents: price, balance_cents: wallet.balanceCents };
+    return { status: 'purchased' as const, plugin_id: pluginId, price_cents: price, balance_cents: team.balanceCents };
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {

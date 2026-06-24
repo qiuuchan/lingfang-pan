@@ -5,7 +5,7 @@ import { installMarketplacePluginPackage } from '@/lib/plugin-installation';
 import type { MarketPlugin } from './MarketplacePluginsSection';
 
 export function friendlyMarketplaceError(error: ApiError): string {
-  if (error.code === 'insufficient_balance') return '余额不足，去「账户设置 → 钱包」查看余额';
+  if (error.code === 'insufficient_balance') return '团队余额不足，去「团队钱包」查看余额';
   if (error.code === 'payment_required') return '该插件为付费插件，请先购买';
   return error.message;
 }
@@ -113,5 +113,5 @@ function showPurchaseError(error: ApiError, openWallet: () => void) {
     toast.error(friendlyMarketplaceError(error));
     return;
   }
-  toast.error('余额不足', { action: { label: '去钱包', onClick: openWallet } });
+  toast.error('团队余额不足', { action: { label: '去团队钱包', onClick: openWallet } });
 }

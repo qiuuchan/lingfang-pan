@@ -92,7 +92,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       openCenter('local', '我的插件', '本地与团队插件'),
       openCenter('market', '插件市场', '浏览发现插件'),
       go('settings', '设置', '通用、模型与计费、插件、更新'),
-      go('wallet', '钱包', '余额与流水'),
+      go('team-wallet', '团队钱包', '团队余额与灵石'),
     ];
     if (session.role === 'TEAM_ADMIN') list.push(go('team-admin', '团队管理', '成员/角色/审批'));
     if (session.isPlatformAdmin) list.push(go('review', '审核中心', '插件审核与发布'));

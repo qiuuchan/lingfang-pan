@@ -150,7 +150,7 @@ function MarketplaceDetail({
   const installed = plugin.installed ?? false;
   const canRate = plugin.can_rate ?? (isFree ? installed : purchased);
   const rateHint = isFree ? '安装后即可评分' : '购买后即可评分';
-  const detail = useMarketplaceDetail({ openWallet: () => openAccountSettings('wallet'), plugin, onReload });
+  const detail = useMarketplaceDetail({ openWallet: () => openAccountSettings('team-wallet'), plugin, onReload });
 
   return (
     <section className="flex flex-col gap-4">
