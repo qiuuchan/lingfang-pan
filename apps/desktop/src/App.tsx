@@ -30,10 +30,10 @@ const PluginCenterDialog = lazy(() => import('@/components/plugins/PluginCenterD
 const PluginRunner = lazy(() => import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
 const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
-// 项 14：AccountDialog 已删，其承载的 Wallet/TeamHome/Settings 改为各自由 PanelDialog 包裹的独立悬浮窗，
+// 项 14：AccountDialog 已删，其承载的功能改为各自由 PanelDialog 包裹的独立悬浮窗，
 // 在 App 顶层懒加载挂载（与原 AccountDialog 内的懒加载同款）。
-const Wallet = lazy(() => import('@/pages/Wallet').then((m) => ({ default: m.Wallet })));
-const TeamHome = lazy(() => import('@/pages/TeamHome').then((m) => ({ default: m.TeamHome })));
+// 06-24 计费钱包重构：原「钱包」(Wallet) + 「团队空间」(TeamHome) 两页合并为「团队钱包」(TeamWallet)。
+const TeamWallet = lazy(() => import('@/pages/TeamWallet').then((m) => ({ default: m.TeamWallet })));
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 const FloatingCreator = lazy(() => import('@/components/creator/FloatingCreator').then((m) => ({ default: m.FloatingCreator })));
 
@@ -244,8 +244,8 @@ export default function App() {
     try { localStorage.setItem('lf:creator-open', v ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
   }, []);
   // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
-  const [walletOpen, setWalletOpen] = useState(false);
-  const [teamOpen, setTeamOpen] = useState(false);
+  // 06-24：原 walletOpen + teamOpen 合并为单一 teamWalletOpen（团队钱包）。
+  const [teamWalletOpen, setTeamWalletOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   // 项 5：团队管理改为居中悬浮窗（原主区页面导航）。
@@ -292,11 +292,10 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false);
 
   // 项 14：路由到对应独立悬浮窗（保留原 openAccountSettings API，所有现有调用方零改动）。
-  // 'account' → 个人资料、'team' → 切换团队、'wallet' → 钱包、'settings' → 设置（可用 nextSettingsTab 指定子 tab）。
+  // 'account' → 个人资料、'team-wallet' → 团队钱包（余额+灵石）、'settings' → 设置（可用 nextSettingsTab 指定子 tab）。
   const openAccountSettings = useCallback((tab: AccountSettingsTab = 'account', nextSettingsTab?: SettingsTab) => {
     if (nextSettingsTab) setSettingsTab(nextSettingsTab);
-    if (tab === 'wallet') setWalletOpen(true);
-    else if (tab === 'team') setTeamOpen(true);
+    if (tab === 'team-wallet') setTeamWalletOpen(true);
     else if (tab === 'settings') setSettingsOpen(true);
     else setProfileOpen(true);
   }, []);
@@ -315,12 +314,8 @@ export default function App() {
       openAccountSettings('settings');
       return;
     }
-    if (nextView === 'wallet') {
-      openAccountSettings('wallet');
-      return;
-    }
-    if (nextView === 'team') {
-      openAccountSettings('team');
+    if (nextView === 'team-wallet') {
+      openAccountSettings('team-wallet');
       return;
     }
     // 路线 A：'creator' 是悬浮窗（creatorOpen），非主区 view——拦截转为打开创建器。
@@ -330,8 +325,7 @@ export default function App() {
       return;
     }
     // 跳到其它页面时关闭所有功能悬浮窗 + 创建器（若开着），避免浮窗残留在新页面上。
-    setWalletOpen(false);
-    setTeamOpen(false);
+    setTeamWalletOpen(false);
     setSettingsOpen(false);
     setProfileOpen(false);
     setTeamAdminOpen(false);
@@ -729,12 +723,10 @@ export default function App() {
         </div>
       </div>
       {/* 项 14：各功能独立悬浮窗（替代已删的 AccountDialog 聚合体）。每个由 AvatarMenu 对应按钮
-          经 openAccountSettings 路由打开；Wallet/TeamHome/Settings 懒加载，Suspense 兜底首次加载。 */}
-      <PanelDialog open={walletOpen} onOpenChange={setWalletOpen} title="钱包" size="md">
-        <Suspense fallback={<ListSkeleton rows={6} />}><Wallet /></Suspense>
-      </PanelDialog>
-      <PanelDialog open={teamOpen} onOpenChange={setTeamOpen} title="切换团队" size="md">
-        <Suspense fallback={<ListSkeleton rows={6} />}><TeamHome /></Suspense>
+          经 openAccountSettings 路由打开；TeamWallet/Settings 懒加载，Suspense 兜底首次加载。
+          06-24：原「钱包」+「团队空间」两窗合并为「团队钱包」（同页展示团队余额 + 团队灵石两类账户）。 */}
+      <PanelDialog open={teamWalletOpen} onOpenChange={setTeamWalletOpen} title="团队钱包" description="团队共享余额（插件市场）与灵石（AI 计费）" size="md">
+        <Suspense fallback={<ListSkeleton rows={6} />}><TeamWallet /></Suspense>
       </PanelDialog>
       <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新">
         <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>

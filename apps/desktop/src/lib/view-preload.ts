@@ -1,9 +1,8 @@
 import type { View } from '@/lib/types';
 
 const loaders: Partial<Record<View, () => Promise<unknown>>> = {
-  team: () => import('@/pages/TeamHome'),
+  'team-wallet': () => import('@/pages/TeamWallet'),
   'team-admin': () => import('@/pages/TeamAdmin'),
-  wallet: () => import('@/pages/Wallet'),
   review: () => import('@/pages/Review'),
   settings: () => import('@/pages/Settings'),
 };

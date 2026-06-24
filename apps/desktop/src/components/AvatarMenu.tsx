@@ -22,7 +22,6 @@ import {
   PuzzleIcon,
   WrenchIcon,
   HelpCircleIcon,
-  RepeatIcon,
   CpuIcon,
   SunIcon,
   MoonIcon,
@@ -101,14 +100,13 @@ export function AvatarMenu({
     onClick: () => void;
   };
 
-  // 上半部分菜单（个人资料 / 通知 / 钱包 / 团队空间 / 插件 / 团队管理 / 开发者 / 其他设置）。
+  // 上半部分菜单（个人资料 / 通知 / 团队钱包 / 插件 / 团队管理 / 开发者 / 其他设置）。
   const items: Item[] = [
     { key: 'profile', label: '个人资料', icon: UserRoundIcon, visible: true, onClick: () => { openAccountSettings('account'); onClose(); } },
     // 项 1：通知中心改为 App 顶层独立悬浮窗（openNotifications），不再嵌套本菜单内。
     { key: 'notif', label: '通知中心', icon: BellIcon, visible: true, badge: unread, onClick: () => { openNotifications(); onClose(); } },
-    { key: 'wallet', label: '钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('wallet'); onClose(); } },
-    // 项 4：「切换团队」改名为「团队空间」。
-    { key: 'switch-team', label: '团队空间', icon: RepeatIcon, visible: true, onClick: () => { openAccountSettings('team'); onClose(); } },
+    // 06-24：原「钱包」+「团队空间」两项合并为「团队钱包」（团队共享余额 + 灵石）。
+    { key: 'team-wallet', label: '团队钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('team-wallet'); onClose(); } },
     { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => { openPluginCenter(); onClose(); } },
     // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
     { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
