@@ -1,0 +1,14 @@
+{"file":".trellis/spec/collab-api/backend/index.md","reason":"Backend package entry point and pre-development checklist for API changes."}
+{"file":".trellis/spec/collab-api/backend/quality-and-contracts.md","reason":"Backend DTO/controller/service contract quality for billing and relay changes."}
+{"file":".trellis/spec/collab-admin/frontend/index.md","reason":"Admin frontend entry point and checklist for UI changes."}
+{"file":".trellis/spec/collab-admin/frontend/app-shell-and-api.md","reason":"Admin app API and navigation conventions for model access/billing changes."}
+{"file":".trellis/spec/collab-admin/frontend/ui-composition.md","reason":"Admin UI composition and density guidelines."}
+{"file":".trellis/spec/desktop/frontend/index.md","reason":"Desktop frontend entry point and checklist for settings/team/chat changes."}
+{"file":".trellis/spec/desktop/frontend/app-shell-and-state.md","reason":"Desktop state and persistence conventions."}
+{"file":".trellis/spec/desktop/frontend/api-streaming-and-runtime.md","reason":"Desktop relay streaming and runtime expectations."}
+{"file":".trellis/spec/desktop/frontend/ui-composition.md","reason":"Desktop UI composition and polish requirements."}
+{"file":".trellis/spec/desktop/frontend/plugin-creator-organization.md","reason":"Creator/chat organization conventions."}
+{"file":".trellis/spec/lingfang-desktop/backend/index.md","reason":"Tauri/backend entry point for updater/config integration."}
+{"file":".trellis/spec/lingfang-desktop/backend/updater-integration.md","reason":"Updater/backend URL integration guidance."}
+{"file":".trellis/spec/lingfang-desktop/backend/quality.md","reason":"Desktop backend quality expectations."}
+{"file":".trellis/spec/guides/index.md","reason":"Shared cross-package thinking guides."}
