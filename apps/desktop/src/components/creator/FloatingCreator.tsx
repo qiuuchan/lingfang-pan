@@ -274,8 +274,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  // 卸载（关窗）时清理悬挂的提问 deferred，防 streamText 卡死。
-  useEffect(() => () => clearPendingAnswers(), []);
+  // 卸载（关窗：X/点遮罩/父组件卸载）时中止流式请求 + 清理悬挂提问 deferred。
+  // 必须 abort，否则关窗时若仍在 text-delta 流式中，底层 relay 请求会在后台续跑并继续按团队计费（费用泄漏）。
+  useEffect(() => () => { abortRef.current?.abort(); clearPendingAnswers(); }, []);
 
   async function send() {
     const text = input.trim();
@@ -354,11 +355,13 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       let uploadedName = '';
       let uploadedMsg = '';
       let sawToolCall = false; // R1：本轮是否有过工具调用（含 ask_question/upload）
+      let reasoningText = ''; // 本轮思考累积（流末兜底判定用，避免读 reasoning state 的陈旧闭包）
       setReasoning('');
       for await (const part of result.fullStream) {
         if (part.type === 'reasoning-delta') {
           // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series），把思考增量单独累积展示。
           const delta = (part as { text?: string; delta?: string }).text ?? (part as { delta?: string }).delta ?? '';
+          reasoningText += delta;
           setReasoning((prev) => prev + delta);
         } else if (part.type === 'reasoning-end') {
           // 思考结束：不自动清——保留供用户展开查看（下轮 send 时 setReasoning('') 清空）。
@@ -398,8 +401,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         } else if (uploadedName) {
           // 工具步可见化（H1）：只调了 upload 没说话 → 补占位文本，配合上方成功卡片。
           next[assistantIdx] = { ...cur, content: '已为你生成并上传插件，详情见上方卡片。', streaming: false, status: 'done' };
-        } else if (reasoning.trim().length > 0) {
-          // reasoning 兜底（H2）：只输出了思考过程没有正文。
+        } else if (reasoningText.trim().length > 0) {
+          // reasoning 兜底（H2）：只输出了思考过程没有正文（用本轮累积的 reasoningText，非 state 闭包）。
           next[assistantIdx] = { ...cur, content: '模型仅输出了思考过程，可展开下方「思考过程」查看，或重试。', streaming: false, status: 'done' };
         } else {
           // 空响应安全网：无文本、无工具、无思考 → 友好提示并标记失败。
@@ -628,7 +631,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                                     确认选择
                                   </Button>
                                 )}
-                                {p.allowFreeText && (
+                                {/* 兜底：allowFreeText 为真，或既无选项也不允许自由输入（防死锁——否则卡片无任何作答控件，deferred 永不 resolve）时，都给自由输入框。 */}
+                                {(p.allowFreeText || !(p.options && p.options.length > 0)) && (
                                   <div className="flex items-end gap-1.5">
                                     <Textarea
                                       placeholder="或在此输入你的回答…"

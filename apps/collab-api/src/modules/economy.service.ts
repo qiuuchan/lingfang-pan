@@ -76,23 +76,27 @@ export class EconomyService {
       });
 
       // 团队余额流水：买家 DEBIT(plugin_purchase) / 卖家 CREDIT(plugin_sale)。
-      // reason 为 String 列，新增取值无需 schema 迁移。
+      // reason 为 String 列，用裸值（pluginId 已在 Purchase 表与下方审计 metadata，无需塞进 reason，前端按裸值显示中文标签）。
       await tx.balanceLedger.create({
-        data: { teamId: buyerTeamId, amountCents: price, direction: 'DEBIT', reason: `plugin_purchase:${pluginId}`, actorUserId: userId },
+        data: { teamId: buyerTeamId, amountCents: price, direction: 'DEBIT', reason: 'plugin_purchase', actorUserId: userId },
       });
       await tx.balanceLedger.create({
-        data: { teamId: sellerTeamId, amountCents: price, direction: 'CREDIT', reason: `plugin_sale:${pluginId}`, actorUserId: sellerId },
+        data: { teamId: sellerTeamId, amountCents: price, direction: 'CREDIT', reason: 'plugin_sale', actorUserId: sellerId },
+      });
+
+      // 购买审计入事务（对齐 team.service.consume 的 H4：保证余额变更必有审计，原子提交，杜绝「有流水无审计」破窗）。
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'wallet.purchase',
+          targetType: 'Plugin',
+          targetId: pluginId,
+          metadata: { buyerTeamId, sellerUserId: sellerId, sellerTeamId, priceCents: price } as object,
+        },
       });
     });
 
     const team = await this.prisma.team.findUniqueOrThrow({ where: { id: buyerTeamId }, select: { balanceCents: true } });
-    // 购买审计：actor=买家，记录团队购买扣款事件（便于管理员追溯市场交易 + 卖家收益团队）。
-    await this.audit(userId, 'wallet.purchase', 'Plugin', pluginId, {
-      buyerTeamId,
-      sellerUserId: sellerId,
-      sellerTeamId,
-      priceCents: price,
-    });
     // 通知卖家：插件售出，收入到账（触发失败不阻塞主操作）。
     try {
       await this.notifications.create(
@@ -106,9 +110,5 @@ export class EconomyService {
       // 通知触发失败不阻塞购买主流程。
     }
     return { status: 'purchased' as const, plugin_id: pluginId, price_cents: price, balance_cents: team.balanceCents };
-  }
-
-  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
   }
 }

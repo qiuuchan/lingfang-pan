@@ -46,11 +46,12 @@ export function TeamWallet() {
   useEffect(() => {
     void (async () => {
       const [b, c] = await Promise.all([
-        api<{ balanceCents: number }>('/api/teams/current/balance').catch(() => null),
-        api<CreditData>('/api/teams/current/credits').catch(() => null),
+        api<{ balanceCents: number }>('/api/teams/current/balance').catch((e) => { toast.error(`团队余额加载失败：${(e as ApiError).message}`); return null; }),
+        api<CreditData>('/api/teams/current/credits').catch((e) => { toast.error(`团队灵石加载失败：${(e as ApiError).message}`); return null; }),
       ]);
-      setBalanceCents(b?.balanceCents ?? 0);
-      setCredit(c);
+      // 失败保持 null（继续显示 Shimmer + 已 toast 报错），不要回退成 ¥0 误导用户以为余额为零。
+      if (b) setBalanceCents(b.balanceCents);
+      if (c) setCredit(c);
     })();
   }, []);
 
