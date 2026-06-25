@@ -39,6 +39,16 @@ export interface BuildResult {
   compressedCount: number;
   /** 更新后的压缩状态（调用方写回 ref）。 */
   state: CompressState;
+  /** 上下文查看面板用：各部分内容与 token 占比估算（让用户看清"模型到底看到了什么"）。 */
+  breakdown: {
+    systemPrompt: string;
+    summary: string;
+    /** 保留的原文历史轮（[{role, content}]）。 */
+    keptTurns: Array<{ role: string; content: string }>;
+    currentInput: string;
+    /** 粗略 token 估算（1 token ≈ 4 字符）。 */
+    estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+  };
 }
 
 interface BuildArgs {
@@ -78,14 +88,29 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
 
   // 未超阈值：原文返回。
   if (totalChars <= threshold) {
+    const keptTurns = turns.map((t) => ({ role: t.role, content: t.content }));
+    const historyChars = turns.reduce((s, t) => s + t.content.length, 0);
     return {
       messages: [
         { role: 'system', content: args.systemPrompt },
-        ...turns.map((t) => ({ role: t.role, content: t.content })),
+        ...keptTurns,
         { role: 'user', content: args.currentInput },
       ],
       compressedCount: 0,
       state,
+      breakdown: {
+        systemPrompt: args.systemPrompt,
+        summary: '',
+        keptTurns,
+        currentInput: args.currentInput,
+        estimatedTokens: {
+          system: Math.ceil(args.systemPrompt.length / 4),
+          summary: 0,
+          history: Math.ceil(historyChars / 4),
+          input: Math.ceil(args.currentInput.length / 4),
+          total: Math.ceil((args.systemPrompt.length + historyChars + args.currentInput.length) / 4),
+        },
+      },
     };
   }
 
@@ -133,9 +158,23 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
   for (const t of verbatim) messages.push({ role: t.role, content: t.content });
   messages.push({ role: 'user', content: args.currentInput });
 
+  const historyChars = verbatim.reduce((s, t) => s + t.content.length, 0);
   return {
     messages,
     compressedCount: newOnesToSummarize.length,
     state: { lastSummarizedIndex: nextLastIndex, summary: nextSummary },
+    breakdown: {
+      systemPrompt: args.systemPrompt,
+      summary: nextSummary,
+      keptTurns: verbatim.map((t) => ({ role: t.role, content: t.content })),
+      currentInput: args.currentInput,
+      estimatedTokens: {
+        system: Math.ceil(args.systemPrompt.length / 4),
+        summary: Math.ceil(nextSummary.length / 4),
+        history: Math.ceil(historyChars / 4),
+        input: Math.ceil(args.currentInput.length / 4),
+        total: Math.ceil((args.systemPrompt.length + nextSummary.length + historyChars + args.currentInput.length) / 4),
+      },
+    },
   };
 }

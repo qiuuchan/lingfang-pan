@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderUpIcon, FileUpIcon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderUpIcon, FileUpIcon, EyeIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, type ApiError } from '@/lib/api';
@@ -17,6 +17,7 @@ import { createCreatorTools, type AskQuestionArgs, type AskQuestionResult, type 
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
+import { ContextInspector } from '@/components/creator/ContextInspector';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import { Button } from '@/components/ui/button';
@@ -160,6 +161,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [userEdits, setUserEdits] = useState<Partial<StagedPlugin>>({});
   const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
   const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
+  const [contextBreakdown, setContextBreakdown] = useState<{ systemPrompt: string; summary: string; keptTurns: Array<{ role: string; content: string }>; currentInput: string; estimatedTokens: { system: number; summary: number; history: number; input: number; total: number } } | null>(null); // 上下文查看面板数据
+  const [contextInspectorOpen, setContextInspectorOpen] = useState(false); // 上下文查看面板开关
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -446,6 +449,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       setCompressing(false);
       compressRef.current = built.state;
       setCompressedHint(built.compressedCount);
+      setContextBreakdown(built.breakdown); // 捕获上下文分解数据供查看面板使用
 
       // R2：ask_question 人在环回调——写提问卡片到当前 assistant 气泡的 parts，
       // 返回 deferred Promise；用户在卡片作答后 resolve，streamText 多步循环继续。
@@ -927,7 +931,18 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <div className="mx-auto max-w-3xl">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span>上下文用量</span>
-                <span className="tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} token（{usagePct}%）{usagePct > 80 && ' · 即将自动压缩'}</span>
+                <div className="flex items-center gap-2">
+                  <span className="tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} token（{usagePct}%）{usagePct > 80 && ' · 即将自动压缩'}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setContextInspectorOpen(true)}
+                    className="h-5 gap-1 px-1.5 text-[10px]"
+                  >
+                    <EyeIcon className="size-3" />
+                    查看
+                  </Button>
+                </div>
               </div>
               <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-muted">
                 <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-amber-500' : 'bg-primary'} `} style={{ width: `${usagePct}%` }} />
@@ -1106,6 +1121,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* 上下文查看面板 */}
+    <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} />
     </>
   );
 }

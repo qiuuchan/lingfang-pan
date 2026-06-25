@@ -12,13 +12,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = "0.32"
 dirs = "5"
-# Tauri 自动更新插件（design §4.1）：检查更新 → 下载 → minisign 验签 → 安装。
-# endpoints 不写死在 tauri.conf.json（后端地址用户动态配置），由 updater.rs 运行时
-# app.updater_builder().endpoints() 注入；pubkey 内嵌 conf.json 验签。
-tauri-plugin-updater = "2"
-# url crate：tauri-plugin-updater 2.x 的 endpoints() 强制要求 Vec<Url>（非 String），
-# check_update 命令用 format! 拼出 URL 字符串后需 Url::parse 转换（design §4.5 预见的必要依赖）。
-url = "2"
+# 自制更新器（design §5）：check_update 调后端 /api/releases/latest 解析 JSON 判断有无更新，
+# download_update 下载安装包 + 流式 SHA-256 校验 + 调起安装目录的 updater.exe 覆盖重启。
+# 摆脱 tauri-plugin-updater 与 minisign 签名密钥（PRD R1/R6）。
+sha2 = "0.10"
 # fetch_models 命令（llm_fetch.rs）直连 LLM provider 的 /v1/models 拉取模型列表。
 # features=json 解析 OpenAI 兼容响应体；features=rustls-tls 复用 rustls 避免原生 OpenSSL/WinHTTP 依赖；
 # default-features=false 裁掉默认的 native-tls / charset / blocking 等不需要的 feature，减小产物体积。

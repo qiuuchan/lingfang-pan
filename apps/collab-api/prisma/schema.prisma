@@ -166,6 +166,44 @@ enum PluginGrantEffect {
   DENY
 }
 
+// === 帮助与反馈工单系统 ===
+// 工单分类（提交人选择，影响后台筛选）。OTHER 兜底，避免锁死枚举导致前端无法提交边缘问题。
+enum TicketCategory {
+  BUG
+  FEATURE
+  ACCOUNT
+  OTHER
+}
+
+// 工单状态机：OPEN(新建未处理) → IN_PROGRESS(管理员处理中) → RESOLVED(已解决待确认) → CLOSED(关闭只读)。
+// 用户在 RESOLVED 工单追加回复会自动回到 IN_PROGRESS；CLOSED 双方均不可追加（需重开则新建工单）。
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+// 工单优先级（管理员设置，默认 NORMAL）。
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+// 工单消息作者角色：USER(提交人) / ADMIN(后台管理员)。出参据此渲染对话气泡方向。
+enum TicketAuthorRole {
+  USER
+  ADMIN
+}
+
+// 附件类型：LOG(日志文本) / IMAGE(图片) / OTHER。由 MIME 推断，前端据此选图标/预览方式。
+enum TicketAttachmentKind {
+  LOG
+  IMAGE
+  OTHER
+}
+
 model User {
   id                     String                 @id @default(uuid())
   email                  String                 @unique
@@ -208,6 +246,8 @@ model User {
   creditLedgerActor      CreditLedger[]         @relation("CreditLedgerActor")
   createdApiKeys         PlatformApiKey[]       @relation("ApiKeyCreator")
   callLogs               LlmCallLog[]           @relation("CallLogCaller")
+  // 帮助与反馈工单：用户作为提交人。handlerUserId 为弱引用（不建强关系，与 auditLog.actorUserId 同风格）。
+  submittedTickets       Ticket[]               @relation("TicketSubmitter")
 
   @@index([platformRoleId])
 }
@@ -240,6 +280,8 @@ model Team {
   apiKeys         PlatformApiKey[]
   callLogs        LlmCallLog[]
   pools           Pool[]
+  // 帮助与反馈工单：提交时的当前团队（可空，删团队置空）。
+  tickets         Ticket[]
 
   // 公开团队发现查询索引：GET /api/teams/public 按 allowPublicJoin=true + status=ACTIVE 过滤。
   @@index([allowPublicJoin, status])
@@ -501,7 +543,9 @@ model Release {
 }
 
 // 版本产物（一个版本下多个平台/架构的安装包登记）。
-// url 为下载地址（外链，如 GitHub Release 直链或 CDN）；signature 为 Tauri updater 签名（base64，可选）。
+// url 为下载地址（外链，如 GitHub Release 直链或 CDN）。
+// sha256 为安装包内容的 SHA-256 十六进制摘要（上传时后端自动计算），自制更新器下载后比对校验完整性。
+// signature 为旧 Tauri updater minisign 签名（base64）——已废弃，列保留避免 migration 风险，不再写入/使用。
 // sizeBytes 用 Int（安装包 < 2GB，Int 上限 ~2.1GB 足够；避免 BigInt 的 JSON 序列化坑）。
 // filename 为展示用文件名（如 LingFang_1.0.0_x64-setup.exe）。
 // (releaseId, platform, arch) 唯一：同版本同平台同架构仅一个产物。
@@ -512,7 +556,8 @@ model ReleaseAsset {
   arch      AssetArch
   url       String // 下载直链（外链）
   filename  String        @default("") // 展示用文件名
-  signature String        @default("") // Tauri updater base64 签名（可选，未接入 updater 时为空）
+  sha256    String        @default("") // 安装包 SHA-256 十六进制摘要（上传时自动计算，更新器校验完整性）
+  signature String        @default("") // 【废弃】旧 Tauri updater minisign 签名，列保留不再使用
   sizeBytes Int? // 安装包字节大小（展示用，< 2GB）
   createdAt DateTime      @default(now())
   release   Release       @relation(fields: [releaseId], references: [id], onDelete: Cascade)
@@ -539,6 +584,65 @@ model Notification {
 
   @@index([userId, read])
   @@index([userId, createdAt])
+}
+
+// === 帮助与反馈工单 ===
+// 工单主体：关联提交人 userId + 提交时当前团队 teamId（可空）。
+// handlerUserId 为最近处理的管理员（弱引用，不建强关系；出参时按需 join displayName）。
+// lastReplyAt 为最近一条消息时间，列表按此倒序（活跃工单置顶）。
+model Ticket {
+  id            String             @id @default(uuid())
+  userId        String
+  teamId        String?
+  category      TicketCategory     @default(OTHER)
+  title         String
+  status        TicketStatus       @default(OPEN)
+  priority      TicketPriority     @default(NORMAL)
+  handlerUserId String?
+  lastReplyAt   DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  user          User               @relation("TicketSubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  team          Team?              @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  messages      TicketMessage[]
+  attachments   TicketAttachment[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([teamId, status])
+}
+
+// 工单消息（多轮对话）：每条由 USER 或 ADMIN 发出，按 createdAt 升序构成时间线。
+model TicketMessage {
+  id           String             @id @default(uuid())
+  ticketId     String
+  authorUserId String
+  authorRole   TicketAuthorRole
+  body         String
+  createdAt    DateTime           @default(now())
+  ticket       Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  attachments  TicketAttachment[]
+
+  @@index([ticketId, createdAt])
+}
+
+// 工单附件（日志/图片）：存后端本地磁盘 uploads/tickets/<ticketId>/<storedName>，不公开静态托管。
+// messageId=null 表示挂在工单首贴；否则挂在某条消息。下载经鉴权流式接口，仅提交人或管理员可读。
+model TicketAttachment {
+  id         String               @id @default(uuid())
+  ticketId   String
+  messageId  String?
+  filename   String
+  storedName String
+  mimeType   String
+  sizeBytes  Int
+  kind       TicketAttachmentKind @default(OTHER)
+  createdAt  DateTime             @default(now())
+  ticket     Ticket               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  message    TicketMessage?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([messageId])
 }
 
 // RBAC：权限码注册表镜像。权限码本体由后端 permission-codes.ts 预定义（代码单一事实来源），

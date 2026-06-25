@@ -42,3 +42,12 @@ export const RELEASE_STATUS = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
 export const ASSET_PLATFORM = ['WINDOWS', 'DARWIN', 'LINUX'] as const;
 /** 产物架构（与 AssetArch 对齐，X86_64 / AARCH64 / UNIVERSAL）。 */
 export const ASSET_ARCH = ['X86_64', 'AARCH64', 'UNIVERSAL'] as const;
+
+// === 帮助与反馈工单相关常量 ===
+
+/** 工单分类（与 TicketCategory 对齐）。 */
+export const TICKET_CATEGORY = ['BUG', 'FEATURE', 'ACCOUNT', 'OTHER'] as const;
+/** 工单状态（与 TicketStatus 对齐）。 */
+export const TICKET_STATUS = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const;
+/** 工单优先级（与 TicketPriority 对齐）。 */
+export const TICKET_PRIORITY = ['LOW', 'NORMAL', 'HIGH'] as const;

@@ -113,6 +113,10 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
   defineModule('PLATFORM', 'platform.release', '版本发布', 70, [
     { code: 'platform.release.manage', label: '管理版本发布', description: '发布/归档应用版本、上传产物' },
   ]),
+  defineModule('PLATFORM', 'platform.ticket', '工单反馈', 75, [
+    { code: 'platform.ticket.view', label: '查看工单', description: '查看用户提交的帮助与反馈工单及附件' },
+    { code: 'platform.ticket.manage', label: '处理工单', description: '回复工单、变更状态与优先级' },
+  ]),
   defineModule('PLATFORM', 'platform.admin', '平台管理员', 80, [
     { code: 'platform.admin.manage', label: '管理平台管理员', description: '任命/撤销平台管理员' },
   ]),

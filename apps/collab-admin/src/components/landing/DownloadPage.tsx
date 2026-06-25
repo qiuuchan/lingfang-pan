@@ -202,15 +202,15 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                 </div>
 
                 {status === 'ready' && release && (() => {
-                  // 签名状态数据驱动：遍历 assets 检查 signature 非空，避免文案承诺与数据不符。
+                  // 完整性校验状态数据驱动：遍历 assets 检查 sha256 非空，避免文案承诺与数据不符。
                   const assets = release.assets ?? [];
-                  const signedCount = assets.filter((a) => a.signature && a.signature.trim().length > 0).length;
-                  const signState = signedCount === 0 ? 'none' : signedCount === assets.length ? 'all' : 'partial';
+                  const hashedCount = assets.filter((a) => a.sha256 && a.sha256.trim().length > 0).length;
+                  const hashState = hashedCount === 0 ? 'none' : hashedCount === assets.length ? 'all' : 'partial';
                   const signText =
-                    signState === 'all'
-                      ? '所有安装包均提供签名校验，客户端可离线验证后安装。'
-                      : signState === 'partial'
-                        ? '部分安装包尚未登记签名，未签名产物客户端将跳过校验。'
+                    hashState === 'all'
+                      ? '所有安装包均提供 SHA-256 校验，客户端下载后比对哈希再安装。'
+                      : hashState === 'partial'
+                        ? '部分安装包尚未登记 SHA-256，未登记产物客户端将跳过完整性校验。'
                         : ''; // none → 隐藏该行
                   return (
                     <>

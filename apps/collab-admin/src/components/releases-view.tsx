@@ -473,7 +473,6 @@ function ReleaseDetail({
   const [uploadPlatform, setUploadPlatform] = useState<AssetPlatform>('WINDOWS');
   const [uploadArch, setUploadArch] = useState<AssetArch>('X86_64');
   const [file, setFile] = useState<File | null>(null);
-  const [sigFile, setSigFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
   // 外链登记表单。
@@ -481,10 +480,9 @@ function ReleaseDetail({
   const [linkArch, setLinkArch] = useState<AssetArch>('X86_64');
   const [linkUrl, setLinkUrl] = useState('');
   const [linkFilename, setLinkFilename] = useState('');
-  const [linkSignature, setLinkSignature] = useState('');
   const [linking, setLinking] = useState(false);
 
-  // 选安装包文件。.sig 需用户单独选（浏览器沙箱无法自动读同名 .sig），文件选择器有两个 input。
+  // 选安装包文件。
   function pickFile(f: File | null) {
     setFile(f);
   }
@@ -496,10 +494,9 @@ function ReleaseDetail({
     }
     setUploading(true);
     try {
-      await uploadAsset(release.id, file, uploadPlatform, uploadArch, sigFile ?? undefined);
-      toast.success('安装包已上传，下载链接已生成');
+      await uploadAsset(release.id, file, uploadPlatform, uploadArch);
+      toast.success('安装包已上传，下载链接与 SHA-256 已生成');
       setFile(null);
-      setSigFile(null);
       await onUploaded();
     } catch (e) {
       toast.error((e as Error).message || '上传失败');
@@ -520,13 +517,11 @@ function ReleaseDetail({
         arch: linkArch,
         url: linkUrl.trim(),
         filename: linkFilename.trim() || undefined,
-        signature: linkSignature.trim() || undefined,
       };
       await addAsset(release.id, input);
       toast.success('外链产物已登记');
       setLinkUrl('');
       setLinkFilename('');
-      setLinkSignature('');
       await onUploaded();
     } catch (e) {
       toast.error((e as Error).message || '登记失败');
@@ -554,7 +549,7 @@ function ReleaseDetail({
                 <TableHead>平台</TableHead>
                 <TableHead>架构</TableHead>
                 <TableHead>文件</TableHead>
-                <TableHead>签名</TableHead>
+                <TableHead>SHA-256</TableHead>
                 <TableHead>下载链接</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -572,7 +567,11 @@ function ReleaseDetail({
                     <TableCell>{PLATFORM_LABEL[a.platform]}</TableCell>
                     <TableCell>{ARCH_LABEL[a.arch]}</TableCell>
                     <TableCell className="max-w-[180px] truncate font-mono text-xs">{a.filename}</TableCell>
-                    <TableCell>{a.signature ? <Badge variant="default">已签</Badge> : <Badge variant="outline">无</Badge>}</TableCell>
+                    <TableCell>
+                      {a.sha256
+                        ? <span className="font-mono text-xs text-muted-foreground" title={a.sha256}>{a.sha256.slice(0, 12)}…</span>
+                        : <Badge variant="outline">无</Badge>}
+                    </TableCell>
                     <TableCell className="max-w-[200px] truncate font-mono text-xs text-muted-foreground">{a.url}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
@@ -627,15 +626,7 @@ function ReleaseDetail({
                 {file && <span className="ml-auto truncate text-xs font-medium">{file.name}</span>}
                 <input type="file" className="hidden" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
               </label>
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>签名文件（.sig，可选，updater 验签用）</Label>
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed p-3 transition hover:bg-muted/50">
-                <UploadIcon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">点击选择文件</span>
-                {sigFile && <span className="ml-auto truncate text-xs font-medium">{sigFile.name}</span>}
-                <input type="file" className="hidden" onChange={(e) => setSigFile(e.target.files?.[0] ?? null)} />
-              </label>
+              <p className="text-xs text-muted-foreground">上传后后端自动计算 SHA-256，客户端更新时据此校验安装包完整性。</p>
             </div>
           </div>
           <div className="mt-3 flex justify-end">
@@ -678,10 +669,6 @@ function ReleaseDetail({
             <div className="space-y-1.5">
               <Label>文件名（可选）</Label>
               <Input placeholder="LingFang_0.0.2_x64-setup.exe" value={linkFilename} onChange={(e) => setLinkFilename(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>签名（可选，base64）</Label>
-              <Input placeholder="dW50cnVzdGVk..." value={linkSignature} onChange={(e) => setLinkSignature(e.target.value)} />
             </div>
           </div>
           <div className="mt-3 flex justify-end">

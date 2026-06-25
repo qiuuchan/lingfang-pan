@@ -45,6 +45,16 @@ export class AppCacheService implements OnModuleInit, OnModuleDestroy {
   async delete(key: string): Promise<void> {
     await this.store.delete(key);
   }
+
+  /** 读原始字符串值（未命中返回 null）。供需要条件写入/手动控制 TTL 的场景（如搜索健康标记/结果缓存）。 */
+  async get(key: string): Promise<string | null> {
+    return this.store.get(key);
+  }
+
+  /** 写原始字符串值 + TTL。与 remember 区分：调用方自行决定是否写、写什么。 */
+  async set(key: string, value: string, ttlMs: number): Promise<void> {
+    await this.store.set(key, value, ttlMs);
+  }
 }
 
 @Injectable()

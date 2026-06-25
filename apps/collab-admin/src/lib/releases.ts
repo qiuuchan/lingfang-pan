@@ -10,6 +10,9 @@ export interface ReleaseAsset {
   arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL';
   url: string;
   filename: string;
+  /** 安装包 SHA-256 十六进制摘要（上传时后端自动计算，自制更新器校验完整性）。 */
+  sha256: string;
+  /** 【废弃】旧 Tauri updater minisign 签名，后端恒返空，仅为兼容保留。 */
   signature: string;
   sizeBytes: number | null;
 }
@@ -90,7 +93,7 @@ export function formatDate(iso: string | null | undefined): string {
 
 /** 平台展示信息。 */
 export const PLATFORM_META = {
-  WINDOWS: { label: 'Windows', arch: 'x64', ext: '.exe / .msi' },
+  WINDOWS: { label: 'Windows', arch: 'x64', ext: '.exe' },
   DARWIN: { label: 'macOS', arch: 'Apple Silicon / Intel', ext: '.dmg' },
   LINUX: { label: 'Linux', arch: 'x64 / arm64', ext: '.AppImage / .deb' },
 } as const;
@@ -162,7 +165,6 @@ export interface AssetCreateInput {
   arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL';
   url: string;
   filename?: string;
-  signature?: string;
   sizeBytes?: number;
 }
 
@@ -204,18 +206,17 @@ export function addAsset(id: string, input: AssetCreateInput) {
   return api<{ asset: ReleaseAsset }>(`/api/admin/releases/${id}/assets`, { method: 'POST', body: input });
 }
 
-/** POST /api/admin/releases/:id/assets/upload：上传安装包文件（multipart）+ 可选 .sig 签名。
- *  上传大文件需较长超时（120s），与默认 30s 区分。返回建好的 asset（含 /downloads/ 下载链接 + signature）。 */
+/** POST /api/admin/releases/:id/assets/upload：上传安装包文件（multipart）。
+ *  上传大文件需较长超时（120s），与默认 30s 区分。后端上传时自动计算 SHA-256 存入 asset.sha256。
+ *  返回建好的 asset（含 /downloads/ 下载链接 + sha256）。 */
 export async function uploadAsset(
   id: string,
   file: File,
   platform: 'WINDOWS' | 'DARWIN' | 'LINUX',
   arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL',
-  sigFile?: File,
 ): Promise<ReleaseAsset> {
   const form = new FormData();
   form.append('file', file);
-  if (sigFile) form.append('signature', sigFile);
   form.append('platform', platform);
   form.append('arch', arch);
   const data = await api<{ asset: ReleaseAsset }>(`/api/admin/releases/${id}/assets/upload`, {

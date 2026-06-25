@@ -14,7 +14,7 @@ import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import { errorMessage } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
-import { checkUpdate, downloadAndInstall, type UpdateMetadata } from '@/lib/updater';
+import { checkUpdate, downloadUpdate, type UpdateMetadata } from '@/lib/updater';
 import type { ProbeResult, RuntimeTarget } from '@/lib/cli-types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -127,24 +127,24 @@ export function Settings({
     }
   }
 
-  // 立即更新：downloadAndInstall 订阅 Channel 事件（Started/Progress/Finished）。
-  // Started 设 total，Progress 累加 downloaded，Finished 提示即将重启（Rust 侧 app.restart 自动执行）。
-  // 安装包验签失败/网络中断 → catch toast + 解锁。
-  // 修复 H1：成功路径的 downloadAndInstall 若 Rust 侧 app.restart 未触发（restart 失败被吞/平台异常），
-  // Promise 会 resolve 而进程未退出，此前仅 catch 解锁，Dialog 永久锁死（disablePointerDismissal + showCloseButton=false）。
-  // 现在成功 resolve 兜底解锁并提示用户手动重启，避免更新流程死锁只能强杀进程。
+  // 立即更新：downloadUpdate 订阅 Channel 事件（Started/Progress/Finished）。
+  // Started 设 total，Progress 累加 downloaded，Finished 表示下载完成 + SHA-256 校验通过。
+  // 之后 Rust 复制 updater.exe 到临时目录、调起它覆盖重启、app.exit()——进程退出，Promise 不再 resolve。
+  // SHA-256 校验失败 / 网络中断 → catch toast + 解锁（更新中止，主程序仍可用）。
+  // 兜底：若 Rust 因故未退出而 Promise resolve，解锁 Dialog 并提示手动重启，避免死锁。
   async function installUpdate() {
+    if (!updateMeta) return;
     setUpdateInstalling(true);
     let finished = false;
     try {
-      await downloadAndInstall((event) => {
+      await downloadUpdate(updateMeta, (event) => {
         if (event.event === 'Started') {
           setProgress({ downloaded: 0, total: event.data.contentLength });
         } else if (event.event === 'Progress') {
           setProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
         } else if (event.event === 'Finished') {
           finished = true;
-          toast.success('更新下载完成，即将重启');
+          toast.success('更新下载完成且校验通过，即将重启');
         }
       });
       // 成功 resolve 但进程未退出（Rust restart 失败兜底）：解锁 Dialog，提示手动重启。

@@ -151,6 +151,27 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v && !/^[A-Za-z0-9_-]{20,200}$/.test(v)) throw badRequest('giteeAccessToken 格式不合法（仅允许字母数字、下划线、连字符，20~200 字符）');
     return v;
   },
+  // 组E 搜索源：自建 SearXNG 实例 URL（免密钥元搜索）。空=不配自建，仅用内置公共实例兜底。
+  // 拼进 fetch URL（{base}/search?...），必须 http/https 防 javascript: 等危险协议；长度上限防滥用。
+  searxngUrl: (raw) => {
+    const v = raw.trim();
+    if (v && !/^https?:\/\//i.test(v)) throw badRequest('searxngUrl 必须是 http 或 https 链接');
+    if (v.length > 500) throw badRequest('searxngUrl 过长（上限 500 字符）');
+    return v;
+  },
+  // 组E Tavily 搜索 API 密钥（管理员可选配置；用户永不填）。空=不启用该源。
+  // Tavily key 形如 tvly-xx...，放宽到 URL-safe 字符 + 长度区间容未来格式变化。
+  tavilyApiKey: (raw) => {
+    const v = raw.trim();
+    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('tavilyApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
+    return v;
+  },
+  // 组E Brave Search API 密钥（管理员可选配置；用户永不填）。空=不启用该源。
+  braveApiKey: (raw) => {
+    const v = raw.trim();
+    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('braveApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
+    return v;
+  },
 };
 
 /** Gitee owner/repo 路径段校验：仅 [A-Za-z0-9._-]，首尾须字母数字，禁连续点（防 ..），长度 0 或 1~100。
@@ -172,7 +193,7 @@ function validateRepoSegment(key: string): (raw: string) => string {
 /** 密钥类 PlatformSetting key 集合：审计时对命中 key 脱敏（只记 {configured} 布尔，不记明文 value）。
  *  既有缺陷修复（本次随 giteeAccessToken 一并补）：updateSettings 原对 smtpPass/geetestCaptchaKey 也记明文。
  *  SECRET_KEYS 命中后审计 metadata 改记 {key, configured}，与 testCaptcha 同范式。 */
-const SECRET_KEYS = new Set(['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken']);
+const SECRET_KEYS = new Set(['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken', 'tavilyApiKey', 'braveApiKey']);
 
 /** 影响 MailService SMTP / 品牌缓存的 PlatformSetting key 集合。
  *  组A：更新这些 key 后调用 mail.invalidateSmtpCache()，保证 admin 保存后下一封邮件即读到新配置（AC1），

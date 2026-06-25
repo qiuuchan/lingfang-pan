@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'apiKeys';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'apiKeys' | 'tickets';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';

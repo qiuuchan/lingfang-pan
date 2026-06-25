@@ -5,6 +5,7 @@ import {
   CloudCogIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
+  LifeBuoyIcon,
   PlugIcon,
   ReceiptIcon,
   RocketIcon,
@@ -47,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { view: 'plugins', label: '插件管理', icon: PlugIcon },
       { view: 'applications', label: '审批管理', icon: CheckCircleIcon },
+      { view: 'tickets', label: '工单反馈', icon: LifeBuoyIcon },
     ],
   },
   {

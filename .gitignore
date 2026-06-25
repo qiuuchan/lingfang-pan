@@ -10,8 +10,12 @@ dist/
 apps/desktop/src-tauri/target/
 release/
 
-# 后端运行时上传目录（admin 发布管理上传的安装包，运行时产物不入仓）
+# 后端运行时上传目录（admin 发布管理上传的安装包，运行时产物不入仓）。
+# 生产持久化：docker-compose.collab.yml 挂 collab_downloads volume → /app/apps/collab-api/downloads
 apps/collab-api/downloads/
+# 后端运行时工单附件目录（用户提交的日志/图片，运行时产物不入仓）。
+# 生产持久化：docker-compose.collab.yml 挂 collab_uploads volume → /app/apps/collab-api/uploads
+apps/collab-api/uploads/
 
 # 运行 / 测试产物
 night_runs/
