@@ -27,9 +27,10 @@ anyhow = "1"
 raw-window-handle = "0.6"
 
 [target.'cfg(windows)'.dependencies]
-# 注册表（Uninstall key）/ 快捷方式（IShellLinkW COM）/ 进程等待（OpenProcess/WaitForSingleObject）。
-# DWM：Win11 原生圆角（DwmSetWindowAttribute，Win10 该属性失败 → 保持直角）；
-# WindowsAndMessaging：EnumThreadWindows 枚举本进程窗口拿 HWND。
+# 注册表（Uninstall key + 读 CurrentBuild 判 Win11）/ 快捷方式（IShellLinkW COM）/
+# 进程等待（OpenProcess/WaitForSingleObject）。
+# GDI（CreateRoundRectRgn）+ WindowsAndMessaging（SetWindowRgn/GetWindowRect）：
+# 给无边框窗口裁圆角形状（winit 无边框吃掉 NC 区，DWM 圆角失效，故改用窗口区域裁剪）。
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Security",
@@ -39,7 +40,7 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_Storage_FileSystem",
-  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

@@ -8,20 +8,20 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use windows_sys::Win32::Foundation::{CloseHandle, HWND, WAIT_OBJECT_0};
-use windows_sys::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
-};
+use windows_sys::Win32::Foundation::{CloseHandle, HWND, RECT, WAIT_OBJECT_0};
+use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
-    KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_DWORD,
+    REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 use windows_sys::Win32::System::Threading::{
     OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
 use crate::paths;
 
@@ -235,28 +235,77 @@ fn wide_buf_to_string(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..end])
 }
 
-/// 给指定窗口应用 Windows 11 原生圆角（DWMWCP_ROUND）。
+/// 读注册表 `CurrentBuild` 判断是否 Windows 11（build ≥ 22000）。
 ///
-/// 窗口为无边框（decorations=false），egui 的 window_rounding 只圆 egui 面板、
-/// 不影响真实 OS 窗口；需经 DWM 设置 DWMWA_WINDOW_CORNER_PREFERENCE 才有系统级圆角。
+/// Win11 与 Win10 的 dwMajorVersion 都是 10，唯一可靠区分是 build 号。
+/// 从 `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\CurrentBuild`(REG_SZ) 读取。
+/// 读不到时保守返回 false（按 Win10 处理 → 不圆角）。
+fn is_windows_11() -> bool {
+    unsafe {
+        let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+        let mut hkey: HKEY = std::ptr::null_mut();
+        if RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            subkey.as_ptr(),
+            0,
+            KEY_READ,
+            &mut hkey,
+        ) != 0
+        {
+            return false;
+        }
+        let name = wide("CurrentBuild");
+        let mut buf = [0u16; 32];
+        let mut len = (buf.len() * 2) as u32;
+        let rc = RegQueryValueExW(
+            hkey,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            buf.as_mut_ptr() as *mut u8,
+            &mut len,
+        );
+        RegCloseKey(hkey);
+        if rc != 0 {
+            return false;
+        }
+        let s = wide_buf_to_string(&buf);
+        s.trim().parse::<u32>().map(|b| b >= 22000).unwrap_or(false)
+    }
+}
+
+/// 给指定窗口应用圆角形状（仅 Windows 11）。
 ///
-/// 此 DWM 属性是 Windows 11（build 22000+）专属：在 Windows 10 上 DwmSetWindowAttribute
-/// 对该属性返回错误并保持直角——正好符合「Win10 不圆角」的需求，无需显式版本判断。
+/// winit 的无边框窗口（decorations=false）通过 WM_NCCALCSIZE 吃掉了非客户区，
+/// 导致 DWM 的 DWMWA_WINDOW_CORNER_PREFERENCE 无处作用（实测设置成功但窗口仍直角）。
+/// 这里改用 GDI 区域裁剪：CreateRoundRectRgn 造一个圆角矩形区域，SetWindowRgn 把窗口
+/// 裁成该形状——不依赖 DWM 边框，可靠生效。
+///
+/// Win10 不调用（区域裁剪在 Win10 上也会生效，但需求是「Win10 保持直角」），故先判版本。
 ///
 /// `hwnd` 由 eframe 的 `Frame::window_handle()` 提供（真实主窗口句柄）。
 pub fn set_window_rounding(hwnd: isize) {
-    if hwnd == 0 {
-        return;
+    if hwnd == 0 || !is_windows_11() {
+        return; // Win10 / 无效句柄：保持直角
     }
     unsafe {
-        let pref = DWMWCP_ROUND;
-        // Win10 上对该属性返回非 0（失败）→ 直角；Win11 上成功 → 圆角。
-        DwmSetWindowAttribute(
-            hwnd as HWND,
-            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-            &pref as *const _ as *const core::ffi::c_void,
-            std::mem::size_of_val(&pref) as u32,
-        );
+        let h = hwnd as HWND;
+        let mut rect: RECT = std::mem::zeroed();
+        if GetWindowRect(h, &mut rect) == 0 {
+            return;
+        }
+        let w = rect.right - rect.left;
+        let h_px = rect.bottom - rect.top;
+        if w <= 0 || h_px <= 0 {
+            return;
+        }
+        // Win11 标准窗口圆角半径约 8px → 直径 16；SetWindowRgn 用窗口本地坐标（0,0 起）。
+        const RADIUS: i32 = 16;
+        let rgn = CreateRoundRectRgn(0, 0, w + 1, h_px + 1, RADIUS, RADIUS);
+        if !rgn.is_null() {
+            // 第三参 true：立即重绘。系统接管该区域所有权，无需手动 DeleteObject。
+            SetWindowRgn(h, rgn, 1);
+        }
     }
 }
 

@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -42,8 +43,10 @@ struct InstallerApp {
     agreed: bool,
     logo: Option<egui::TextureHandle>,
     rx: Option<mpsc::Receiver<Progress>>,
-    /// Win11 原生圆角是否已应用（窗口创建后才生效，首帧起逐帧尝试直至成功）。
-    corners_applied: bool,
+    /// 已应用圆角时的窗口尺寸（用于切换简洁/自定义模式 resize 后重设区域）。
+    rounded_size: Option<[f32; 2]>,
+    /// 启动时刻：winit 在窗口显示后会重置窗口区域，需在启动后短时间内反复重设。
+    started: Instant,
 }
 
 /// 启动交互安装窗口。
@@ -60,7 +63,8 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         agreed: false,
         logo: None,
         rx: None,
-        corners_applied: false,
+        rounded_size: None,
+        started: Instant::now(),
     };
 
     let options = eframe::NativeOptions {
@@ -95,15 +99,21 @@ impl eframe::App for InstallerApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // 首帧获取真实窗口 HWND 并应用 Win11 原生圆角（窗口创建后才有句柄）。
-        if !self.corners_applied {
+        // Win11 圆角：winit 在窗口显示后会重置窗口区域，故启动后 1.2s 内每帧重设，
+        // 之后仅在切换简洁/自定义模式（窗口 resize）时重设。
+        let size = if self.custom_mode { CUSTOM_SIZE } else { SIMPLE_SIZE };
+        let warming = self.started.elapsed() < Duration::from_millis(1200);
+        if warming || self.rounded_size != Some(size) {
             use raw_window_handle::HasWindowHandle;
             if let Ok(rwh) = frame.window_handle() {
                 if let raw_window_handle::RawWindowHandle::Win32(w) = rwh.as_ref() {
                     platform::set_window_rounding(w.hwnd.get() as isize);
+                    self.rounded_size = Some(size);
                 }
             }
-            self.corners_applied = true;
+            if warming {
+                ctx.request_repaint_after(Duration::from_millis(50));
+            }
         }
 
         // 接收后台安装进度。
@@ -298,27 +308,11 @@ impl InstallerApp {
                     egui::Vec2::new(progress_width, rect.height())
                 );
 
-                // 主填充色
+                // 纯色填充（单一红色，不叠高光，避免看起来像两段颜色）
                 ui.painter().rect_filled(
                     progress_rect,
                     egui::Rounding::same(6.0),
                     theme::RED
-                );
-
-                // 添加高光效果（顶部稍亮）
-                let highlight_rect = egui::Rect::from_min_size(
-                    progress_rect.min,
-                    egui::Vec2::new(progress_rect.width(), progress_rect.height() * 0.4)
-                );
-                ui.painter().rect_filled(
-                    highlight_rect,
-                    egui::Rounding {
-                        nw: 6.0,
-                        ne: 6.0,
-                        sw: 0.0,
-                        se: 0.0,
-                    },
-                    egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)
                 );
             }
         });
