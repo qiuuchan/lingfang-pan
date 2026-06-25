@@ -58,19 +58,32 @@ export class PoolService {
       const team = await this.prisma.team.findUnique({ where: { id: input.teamId }, select: { id: true, name: true } });
       if (!team) throw badRequest('指定团队不存在');
     }
+    const data = {
+      name: input.name.trim(),
+      scope: input.scope,
+      teamId: input.scope === 'DEDICATED' ? input.teamId : null,
+      description: input.description ?? '',
+    };
     try {
-      const pool = await this.prisma.pool.create({
-        data: {
-          name: input.name.trim(),
-          scope: input.scope,
-          teamId: input.scope === 'DEDICATED' ? input.teamId : null,
-          description: input.description ?? '',
-        },
+      const pool = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.pool.create({ data });
+        await tx.auditLog.create({
+          data: {
+            actorUserId: actorId,
+            action: 'admin.pool.created',
+            targetType: 'Pool',
+            targetId: created.id,
+            metadata: { name: created.name, scope: created.scope, teamId: created.teamId },
+          },
+        });
+        return created;
       });
-      await this.audit(actorId, 'admin.pool.created', pool.id, { name: pool.name, scope: pool.scope, teamId: pool.teamId });
       return { pool };
-    } catch {
-      throw new AppError(409, 'conflict', '池名称已存在');
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2002') {
+        throw new AppError(409, 'conflict', '池名称已存在');
+      }
+      throw error;
     }
   }
 

@@ -94,7 +94,10 @@ pub(crate) fn resolve_npm_shim(cmd_path: &Path) -> Option<ResolvedShim> {
                     || cap.ends_with(".cjs"))
         })
         .last()?;
-    let path = PathBuf::from(raw.replace("%dp0%", &dp0.to_string_lossy()));
+    let path = expand_npm_shim_path(&raw, dp0);
+    if !path.is_file() {
+        return None;
+    }
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("exe") => Some(ResolvedShim {
             binary: path,
@@ -106,6 +109,22 @@ pub(crate) fn resolve_npm_shim(cmd_path: &Path) -> Option<ResolvedShim> {
         }),
         _ => None,
     }
+}
+
+#[cfg(windows)]
+fn expand_npm_shim_path(raw: &str, dp0: &Path) -> PathBuf {
+    for token in ["%~dp0", "%dp0%", "%basedir%", "%basedir:\\=/%"] {
+        if let Some(rest) = strip_var_prefix(raw, token) {
+            return dp0.join(rest.trim_start_matches(['\\', '/']));
+        }
+    }
+    PathBuf::from(raw)
+}
+
+#[cfg(windows)]
+fn strip_var_prefix<'a>(raw: &'a str, token: &str) -> Option<&'a str> {
+    let prefix = raw.get(..token.len())?;
+    prefix.eq_ignore_ascii_case(token).then_some(&raw[token.len()..])
 }
 
 #[cfg(windows)]
@@ -144,5 +163,28 @@ fn redact_arg(arg: &str) -> String {
         "[redacted]".to_string()
     } else {
         arg.to_string()
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn expand_npm_shim_path_supports_common_batch_prefixes() {
+        let dp0 = Path::new(r"C:\Users\me\AppData\Roaming\npm");
+
+        assert_eq!(
+            expand_npm_shim_path(r"%~dp0\node_modules\pnpm\bin\pnpm.cjs", dp0),
+            dp0.join(r"node_modules\pnpm\bin\pnpm.cjs"),
+        );
+        assert_eq!(
+            expand_npm_shim_path(r"%dp0%\node_modules\npm\bin\npm-cli.js", dp0),
+            dp0.join(r"node_modules\npm\bin\npm-cli.js"),
+        );
+        assert_eq!(
+            expand_npm_shim_path(r"%basedir%\node_modules\npm\bin\npm-cli.js", dp0),
+            dp0.join(r"node_modules\npm\bin\npm-cli.js"),
+        );
     }
 }
