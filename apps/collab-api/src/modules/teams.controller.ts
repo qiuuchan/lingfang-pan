@@ -5,7 +5,7 @@ import type { Request } from 'express';
 import { Public, requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { TeamService } from './team.service';
-import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto, UpdateTeamProfileDto } from './dto/teams.dto';
+import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto, UpdateTeamProfileDto, UpdateDefaultPoolDto } from './dto/teams.dto';
 
 /**
  * 公开团队发现控制器（Top1「注册即孤儿」解法）。
@@ -118,6 +118,13 @@ export class TeamsController {
   @ApiOperation({ summary: '消耗团队共享余额' })
   consume(@Req() req: Request, @Body() body: ConsumeBalanceDto) {
     return this.team.consume(requireUser(req).id, body);
+  }
+
+  @RequirePermission('team.profile.update')
+  @Patch('default-pool')
+  @ApiOperation({ summary: '设置团队默认资源池' })
+  updateDefaultPool(@Req() req: Request, @Body() body: UpdateDefaultPoolDto) {
+    return this.team.updateDefaultPool(requireUser(req).id, body.defaultPoolId);
   }
 }
 

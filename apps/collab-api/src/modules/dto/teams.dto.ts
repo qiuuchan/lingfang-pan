@@ -53,3 +53,14 @@ export class UpdateTeamProfileDto {
   @IsString()
   description?: string;
 }
+
+/**
+ * 设置团队默认资源池请求体 DTO。
+ * defaultPoolId 为空表示取消默认池子。
+ */
+export class UpdateDefaultPoolDto {
+  @ApiPropertyOptional({ description: '默认资源池 ID（null 表示取消设置）' })
+  @IsOptional()
+  @IsString()
+  defaultPoolId?: string | null;
+}

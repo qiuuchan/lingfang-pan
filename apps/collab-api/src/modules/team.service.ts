@@ -290,6 +290,32 @@ export class TeamService {
     return this.balance(userId);
   }
 
+  /**
+   * 设置团队默认资源池（team.profile.update 权限）。
+   * poolId 为 null 表示取消默认设置；非空时验证池子存在且团队有权使用。
+   */
+  async updateDefaultPool(userId: string, poolId: string | null | undefined) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const normalizedPoolId = poolId === null || poolId === undefined || poolId === '' ? null : poolId;
+
+    // 验证池子存在且团队有权使用（SHARED 或本团队的 DEDICATED）
+    if (normalizedPoolId) {
+      const pool = await this.prisma.pool.findUnique({ where: { id: normalizedPoolId }, select: { id: true, scope: true, teamId: true } });
+      if (!pool) throw notFound('资源池不存在');
+      if (pool.scope === 'DEDICATED' && pool.teamId !== membership.teamId) {
+        throw forbidden('该专用池不属于当前团队');
+      }
+    }
+
+    await this.prisma.team.update({
+      where: { id: membership.teamId },
+      data: { defaultPoolId: normalizedPoolId },
+    });
+
+    await this.audit(userId, 'team.default_pool.updated', 'Team', membership.teamId, { defaultPoolId: normalizedPoolId });
+    return { ok: true, defaultPoolId: normalizedPoolId };
+  }
+
   private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
     await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
   }

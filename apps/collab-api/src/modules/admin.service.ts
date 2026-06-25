@@ -402,12 +402,26 @@ export class AdminService {
     return { team };
   }
 
-  async adminUpdateTeam(actorId: string, id: string, input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED' }) {
+  async adminUpdateTeam(actorId: string, id: string, input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null }) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 XLOG-01：显式字段白名单（此前 data: input 直接透传，可静默改 balanceCents 绕过流水审计）。
-    const data: { name?: string; status?: 'ACTIVE' | 'SUSPENDED' } = {};
+    const data: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null } = {};
     if (input.name !== undefined) data.name = input.name;
     if (input.status !== undefined) data.status = input.status;
+    if (input.defaultPoolId !== undefined) {
+      // 验证池子存在且团队有权使用（SHARED 或本团队的 DEDICATED）
+      const normalizedPoolId = input.defaultPoolId === null || input.defaultPoolId === '' ? null : input.defaultPoolId;
+      if (normalizedPoolId) {
+        const pool = await this.prisma.pool.findUnique({ where: { id: normalizedPoolId }, select: { id: true, scope: true, teamId: true } });
+        if (!pool) throw notFound('资源池不存在');
+        const team = await this.prisma.team.findUnique({ where: { id }, select: { id: true } });
+        if (!team) throw notFound('团队不存在');
+        if (pool.scope === 'DEDICATED' && pool.teamId !== id) {
+          throw forbidden('该专用池不属于当前团队');
+        }
+      }
+      data.defaultPoolId = normalizedPoolId;
+    }
     const team = await this.prisma.team.update({ where: { id }, data });
     await this.audit(actorId, 'admin.team.updated', 'Team', id, data);
     return { team };

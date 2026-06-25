@@ -51,7 +51,7 @@ export function CallLogsView() {
         <Button variant="outline" size="sm" onClick={reload} disabled={loading}><RotateCwIcon className={`size-4 ${loading ? 'animate-spin' : ''}`} />刷新</Button>
       </div>
       <Table>
-        <TableHeader><TableRow><TableHead>时间</TableHead><TableHead>团队/用户</TableHead><TableHead>能力</TableHead><TableHead>模型</TableHead><TableHead>灵石</TableHead><TableHead>耗时</TableHead><TableHead>状态</TableHead><TableHead className="w-[60px]">详情</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>时间</TableHead><TableHead>团队/用户</TableHead><TableHead>能力</TableHead><TableHead>模型</TableHead><TableHead>池子</TableHead><TableHead>灵石</TableHead><TableHead>耗时</TableHead><TableHead>状态</TableHead><TableHead className="w-[60px]">详情</TableHead></TableRow></TableHeader>
         <TableBody>
           {paginated.length ? paginated.map((l) => (
             <TableRow key={l.id}>
@@ -59,6 +59,7 @@ export function CallLogsView() {
               <TableCell><div className="text-sm">{l.team?.name ?? l.teamId.slice(0, 8)}</div><div className="text-xs text-muted-foreground">{l.user?.email ?? '—'}</div></TableCell>
               <TableCell className="text-muted-foreground">{l.capability}</TableCell>
               <TableCell className="font-mono text-xs">{l.model}</TableCell>
+              <TableCell>{l.poolName ? <Badge variant="secondary">{l.poolName}</Badge> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
               <TableCell className="tabular-nums">{l.credits}</TableCell>
               <TableCell className="tabular-nums text-muted-foreground">{(l.durationMs / 1000).toFixed(1)}s</TableCell>
               <TableCell>{statusBadge(l.status)}</TableCell>
@@ -68,14 +69,14 @@ export function CallLogsView() {
                     ['模型', l.model], ['能力', l.capability], ['版本', l.tier ?? '—'],
                     ['输入 token', l.inputTokens], ['输出 token', l.outputTokens], ['生图张数', l.images],
                     ['灵石', l.credits], ['耗时', `${(l.durationMs / 1000).toFixed(2)}s`], ['HTTP', l.httpStatus ?? '—'],
-                    ['错误码', l.errorCode ?? '—'], ['渠道', l.channelId ?? '—'], ['IP', l.clientIp ?? '—'],
+                    ['错误码', l.errorCode ?? '—'], ['渠道', l.channelName ?? l.channelId ?? '—'], ['池子', l.poolName ?? '—'], ['IP', l.clientIp ?? '—'],
                   ]} />
                   <div className="text-xs text-muted-foreground">请求摘要</div>
                   <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs">{JSON.stringify(l.requestSummary, null, 2)}</pre>
                 </DialogContent></Dialog>
               </TableCell>
             </TableRow>
-          )) : <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">{loading ? '加载中…' : '暂无调用日志'}</TableCell></TableRow>}
+          )) : <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">{loading ? '加载中…' : '暂无调用日志'}</TableCell></TableRow>}
         </TableBody>
       </Table>
       <Pagination totalItems={totalItems} pageSize={pageSize} currentPage={page} onPageChange={setPage} onPageSizeChange={setPageSize} />

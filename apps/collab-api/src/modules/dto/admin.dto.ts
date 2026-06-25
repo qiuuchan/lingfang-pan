@@ -84,6 +84,11 @@ export class AdminUpdateTeamDto {
   @IsOptional()
   @IsEnum(TEAM_STATUS, { message: 'status 只允许 ACTIVE 或 SUSPENDED' })
   status?: (typeof TEAM_STATUS)[number];
+
+  @ApiPropertyOptional({ description: '默认资源池 ID（null 表示取消设置）' })
+  @IsOptional()
+  @IsString()
+  defaultPoolId?: string | null;
 }
 
 /** 指定团队管理员请求体 DTO。 */
