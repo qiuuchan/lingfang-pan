@@ -33,7 +33,19 @@ const OUTPUT_MINIMIZE: Skill = {
 - 产出文件集合 = manifest + 入口文件 + 声明的依赖描述（requirements.txt / package.json）。仅此而已。
 - 严禁产出：README、LICENSE、CHANGELOG、注释说明文件、占位 .gitkeep、与需求无关的「额外加分」脚本。
 - 一个文件能解决就不拆成多个；一段话能说清就不写一段。
-- 回复正文 ≤ 3 句：生成了什么类型、入口是什么、怎么用。不复述文件内容、不解释代码细节。`,
+- 回复正文 ≤ 3 句：生成了什么类型、入口是什么、怎么用。不复述文件内容、不解释代码细节。
+
+# stage_plugin 前自检清单（务必逐项核对，缺一不可）
+1. entry 必须真实存在于 files 数组中（路径完全一致），不是只写在 manifest 字段里。
+2. 按 runtime_type 补齐必需文件：
+   - client → entry=ui/index.html（HTML 内联 CSS/JS）。
+   - nodejs → entry=index.js，且 files 必含 package.json（无依赖时 dependencies 用 {}）。
+   - python → entry=main.py，且 files 必含 requirements.txt（无依赖时留空文件）。
+3. 所有文件路径为相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
+
+# 工具失败必须补齐重试
+- stage_plugin 返回 ok=false 时，**必须**先读懂 message 指出的缺漏，补齐对应文件或改正 entry/命名后**重新调用 stage_plugin**，直到 ok=true 才算完成。
+- 绝不在 stage_plugin 失败后就向用户报「已生成」——那是未完成状态，用户会拿到跑不起来的破损插件。`,
 };
 
 // 增量重构 skill：修改已有插件时按「读—改—最小 diff」操作，避免全量重写。
