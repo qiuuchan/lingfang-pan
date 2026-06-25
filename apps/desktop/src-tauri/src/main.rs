@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capability;
+mod draft_plugin;
 mod embedded_runtime;
 mod process_util;
 mod plugin_runner;
@@ -272,6 +273,12 @@ fn main() {
             plugin_store::write_plugin_files,
             plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,
+            draft_plugin::save_draft_plugin,
+            draft_plugin::list_draft_plugins,
+            draft_plugin::load_draft_plugin,
+            draft_plugin::delete_draft_plugin,
+            draft_plugin::list_draft_versions,
+            draft_plugin::restore_draft_version,
             update::check_update,
             update::download_update,
             plugin_security::verify_plugin_signature_command,

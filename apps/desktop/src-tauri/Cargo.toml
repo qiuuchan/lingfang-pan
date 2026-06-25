@@ -24,3 +24,5 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Syste
 # Task 14 插件签名校验：minisign 非对称验签（与 updater 同款，已传递依赖、直接声明复用已编译产物）。
 # verify_plugin_signature 用 PublicKey::from_base64 + verify 校验插件 manifest.sig。
 minisign-verify = "0.2"
+# 本地草稿插件：生成创建/更新时间戳（RFC 3339 格式）。
+chrono = "0.4"

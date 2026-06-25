@@ -3,7 +3,7 @@ import { Loader2Icon, XIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, clearApiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
-import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
+import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
@@ -80,6 +80,10 @@ interface AppContextValue {
   // 创建器读取并预填输入框 + 引用插件源码（不自动发送，用户点发送即修）。用完即清（null），无持久化必要。
   pendingAutoFix: PendingAutoFix | null;
   setPendingAutoFix: (fix: PendingAutoFix | null) => void;
+  // 草稿编辑跨页传递（task 06-25 增强）：草稿列表点「编辑」→ 设草稿+对话历史 → 跳创建器 →
+  // 创建器恢复对话轮次 + 引用草稿源码。用完即清（null）。
+  pendingDraftEdit: PendingDraftEdit | null;
+  setPendingDraftEdit: (edit: PendingDraftEdit | null) => void;
   // 云同步平台信息：platformName/logoUrl（GET /api/platform-info @Public），供侧栏 / 落地展示。
   // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
   platformName: string;
@@ -298,6 +302,8 @@ export default function App() {
   const bumpModelConfig = useCallback(() => undefined, []);
   // 一键修复：插件启动/运行报错时设结构化载荷（提示词 + 出错插件），跳创建器后预填并引用源码给 AI 修。
   const [pendingAutoFix, setPendingAutoFix] = useState<PendingAutoFix | null>(null);
+  // 草稿编辑（task 06-25 增强）：草稿列表点「编辑」设草稿+对话历史，跳创建器后恢复对话轮次。
+  const [pendingDraftEdit, setPendingDraftEdit] = useState<PendingDraftEdit | null>(null);
   // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
   // platformName 缺省 'LingFang'，logoUrl 缺省空串。admin 改名后全端拉同一值（侧栏 header 同步）。
   const [platformName, setPlatformName] = useState('灵坊');
@@ -670,6 +676,7 @@ export default function App() {
     openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
     modelConfigVersion, bumpModelConfig,
     pendingAutoFix, setPendingAutoFix,
+    pendingDraftEdit, setPendingDraftEdit,
     platformName, platformLogoUrl,
     openSearch,
   };

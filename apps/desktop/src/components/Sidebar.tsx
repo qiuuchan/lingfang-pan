@@ -304,11 +304,20 @@ function SidebarPluginItem({
           collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
         )}
       >
-        {/* 去图标后用插件名首字符占位（折叠态仅显示首字符，展开态显示全名）。 */}
+        {/* 去图标后用插件名首字符占位（折叠态仅显示首字符,展开态显示全名+草稿徽章）。 */}
         <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
           {plugin.name.trim().charAt(0) || '?'}
         </span>
-        {!collapsed && <span className="truncate text-sm">{plugin.name}</span>}
+        {!collapsed && (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm">{plugin.name}</span>
+            {plugin.draft && (
+              <span className="shrink-0 rounded border border-amber-500/30 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+                草稿
+              </span>
+            )}
+          </span>
+        )}
       </button>
       {!collapsed && (
         <Button
@@ -354,7 +363,16 @@ function SidebarRecentItem({
         <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
           {plugin.name.trim().charAt(0) || '?'}
         </span>
-        {!collapsed && <span className="truncate text-sm">{plugin.name}</span>}
+        {!collapsed && (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm">{plugin.name}</span>
+            {plugin.draft && (
+              <span className="shrink-0 rounded border border-amber-500/30 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 group-hover/item:opacity-0 dark:bg-amber-950/30 dark:text-amber-400">
+                草稿
+              </span>
+            )}
+          </span>
+        )}
       </button>
       {!collapsed && (
         <div className="absolute right-1 flex gap-0.5 opacity-0 transition-opacity group-hover/item:opacity-100">

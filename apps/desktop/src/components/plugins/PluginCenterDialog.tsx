@@ -36,7 +36,7 @@ export function PluginCenterDialog({
           </DialogTitle>
           <DialogDescription>本地运行、团队共享、市场发现都在这里；常用与历史插件可在左侧边栏快速打开。</DialogDescription>
         </DialogHeader>
-        <PluginCenterBody tab={tab} onTabChange={onTabChange} onRun={onRun} onCreate={onCreate} />
+        <PluginCenterBody tab={tab} onTabChange={onTabChange} onRun={onRun} onCreate={onCreate} onClose={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
