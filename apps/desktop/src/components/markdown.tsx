@@ -60,9 +60,9 @@ function CodeBlockActions({ getText }: { getText: () => string }) {
       type="button"
       onClick={onCopy}
       aria-label={state === 'copied' ? '已复制' : '复制代码'}
-      className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md bg-white/10 text-white/80 opacity-0 backdrop-blur-sm transition hover:bg-white/20 hover:text-white group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+      className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-lg bg-white/10 text-white/80 opacity-0 backdrop-blur-sm shadow-lg transition-all hover:scale-105 hover:bg-white/20 hover:text-white group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
     >
-      {state === 'copied' ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+      {state === 'copied' ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
     </button>
   );
 }
@@ -91,9 +91,9 @@ function fallbackCopy(text: string): boolean {
 // 复制按钮挂在外层包装 div，hover 时显形，避免常态视觉干扰。
 function PreBlock({ children }: { children?: ReactNode }) {
   return (
-    <div className="group relative my-1.5">
+    <div className="group relative my-2">
       <CodeBlockActions getText={() => extractText(children)} />
-      <pre className="max-h-96 overflow-auto rounded-md bg-[#0d1117] p-3 text-xs font-mono leading-relaxed">
+      <pre className="max-h-96 overflow-auto rounded-xl border border-white/10 bg-[#0d1117] p-4 text-xs font-mono leading-relaxed shadow-lg">
         {children}
       </pre>
     </div>
@@ -101,14 +101,14 @@ function PreBlock({ children }: { children?: ReactNode }) {
 }
 
 const COMPONENTS: Components = {
-  p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0 leading-relaxed">{children}</p>,
-  ul: ({ children }) => <ul className="my-1 list-disc pl-5">{children}</ul>,
-  ol: ({ children }) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
-  li: ({ children }) => <li className="my-0.5">{children}</li>,
-  h1: ({ children }) => <h1 className="my-1.5 text-base font-semibold">{children}</h1>,
-  h2: ({ children }) => <h2 className="my-1.5 text-sm font-semibold">{children}</h2>,
-  h3: ({ children }) => <h3 className="my-1 text-sm font-semibold">{children}</h3>,
-  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0 leading-relaxed">{children}</p>,
+  ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+  ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+  li: ({ children }) => <li className="my-0.5 leading-relaxed">{children}</li>,
+  h1: ({ children }) => <h1 className="my-2.5 text-lg font-bold tracking-tight">{children}</h1>,
+  h2: ({ children }) => <h2 className="my-2 text-base font-semibold tracking-tight">{children}</h2>,
+  h3: ({ children }) => <h3 className="my-1.5 text-sm font-semibold">{children}</h3>,
+  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
   // react-markdown v10 已移除 inline prop：fenced 代码块（带 ```lang）的 code 元素带
   // className="language-(\w+)"；inline code 无该前缀。据此区分两种观感。
   code: ({ className, children, ...props }) => {
@@ -124,7 +124,7 @@ const COMPONENTS: Components = {
     }
     // inline 代码：维持灰底药丸观感（与 fenced 暗色高亮块明确区分）
     return (
-      <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[0.85em] dark:bg-white/10" {...props}>
+      <code className="rounded-md bg-black/10 px-1.5 py-0.5 font-mono text-[0.85em] shadow-sm dark:bg-white/10" {...props}>
         {children}
       </code>
     );
@@ -132,24 +132,24 @@ const COMPONENTS: Components = {
   // pre 指向独立组件引用（hooks 必须在组件函数体内调用），
   // 复制按钮与最大高度/横向滚动均在此处提供。
   pre: PreBlock,
-  a: ({ children, href }) => <a href={href} className="text-primary underline underline-offset-2">{children}</a>,
+  a: ({ children, href }) => <a href={href} className="font-medium text-primary underline decoration-primary/30 underline-offset-2 transition-colors hover:decoration-primary">{children}</a>,
   // 表格美化：react-markdown 默认渲染为浏览器裸 table（无边框圆角、行间无分隔），
   // 在气泡内显得呆板。这里包一层圆角边框容器 + 表头底色 + 行分隔线 + 偶数行浅底，
   // 列数多时外层 overflow-x-auto 横向滚动（气泡 max-w 受限）。
   table: ({ children }) => (
-    <div className="my-3 overflow-x-auto rounded-lg border border-border/60">
+    <div className="my-3 overflow-x-auto rounded-xl border border-border/60 shadow-sm">
       <table className="w-full text-sm">{children}</table>
     </div>
   ),
   thead: ({ children }) => (
-    <thead className="border-b border-border/60 bg-muted/50 text-left">{children}</thead>
+    <thead className="border-b border-border/60 bg-muted/60 text-left">{children}</thead>
   ),
   // divide-y 画行间分隔线；偶数行浅底提升多行可读性（斑马纹）。
   tbody: ({ children }) => (
-    <tbody className="divide-y divide-border/40 [&_tr:nth-child(even)]:bg-muted/20">{children}</tbody>
+    <tbody className="divide-y divide-border/40 [&_tr:nth-child(even)]:bg-muted/30">{children}</tbody>
   ),
-  th: ({ children }) => <th className="px-3 py-2 font-semibold">{children}</th>,
-  td: ({ children }) => <td className="px-3 py-2 align-top">{children}</td>,
+  th: ({ children }) => <th className="px-4 py-2.5 font-semibold">{children}</th>,
+  td: ({ children }) => <td className="px-4 py-2.5 align-top">{children}</td>,
 };
 
 export function Markdown({ children }: { children: string }) {

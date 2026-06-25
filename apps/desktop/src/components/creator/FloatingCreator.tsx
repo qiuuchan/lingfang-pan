@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderUpIcon, FileUpIcon, EyeIcon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, type ApiError } from '@/lib/api';
@@ -166,8 +166,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null); // 文件夹导入（webkitdirectory）
-  const fileInputRef = useRef<HTMLInputElement>(null); // 文件导入（multiple）
+  const fileInputRef = useRef<HTMLInputElement>(null); // 文件/文件夹选择（支持多次累积）
+  const [selectedFiles, setSelectedFiles] = useState<Array<{ id: string; name: string; file: File }>>([]); // 已选文件列表
   // R2：悬挂的 ask_question deferred —— 用户作答后 resolve（人在环）。
   // key=toolCallId，存 resolve/reject；切对话/取消/关窗时必须清掉防卡死。
   const pendingAnswersRef = useRef<Map<string, { resolve: (r: AskQuestionResult) => void; reject: (e: unknown) => void }>>(new Map());
@@ -225,10 +225,30 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     toast.success(`插件「${name}」已提交到团队空间`);
   }
 
-  // 从本地文件/文件夹导入插件 → 转草稿进入预览/改信息/提交流程（移植已有插件）。
-  async function handleImport(fileList: FileList | null) {
+  // 处理文件选择（累积模式，支持多次选择）
+  function handleFileSelect(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
+    const newFiles = Array.from(fileList).map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+      file,
+    }));
+    setSelectedFiles((prev) => [...prev, ...newFiles]);
+  }
+
+  // 移除单个文件
+  function removeFile(id: string) {
+    setSelectedFiles((prev) => prev.filter((f) => f.id !== id));
+  }
+
+  // 从已选文件列表导入插件 → 转草稿进入预览/改信息/提交流程
+  async function importFromSelectedFiles() {
+    if (selectedFiles.length === 0) {
+      toast.error('未选择任何文件');
+      return;
+    }
     try {
+      const fileList = selectedFiles.map((f) => f.file);
       const result = await readLocalFiles(fileList);
       if (result.files.length === 0) {
         toast.error('未读取到可用的文本文件（可能都是二进制或超限）');
@@ -239,6 +259,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       setPublishedName(null);
       setUserEdits({});
       setStagedDraft(imported);
+      setSelectedFiles([]); // 导入成功后清空文件列表
       const skippedNote = result.skipped.length ? `，跳过 ${result.skipped.length} 个文件` : '';
       toast.success(`已导入「${imported.name}」（${result.files.length} 个文件${skippedNote}），可在右侧预览并修改后提交`);
       // 在对话区留一条记录，让 AI 知道当前草稿来自导入（draft 会注入 systemPrompt，可继续让 AI 改）。
@@ -652,22 +673,15 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-    {/* 隐藏文件输入：文件夹（webkitdirectory）+ 多文件。导入后转草稿。 */}
+    {/* 隐藏文件输入：支持文件夹（webkitdirectory）+ 多文件选择，可多次累积。 */}
     <input
-      ref={folderInputRef}
+      ref={fileInputRef}
       type="file"
       // webkitdirectory 为非标准属性，React 不识别故用 ref 透传；选目录时浏览器给目录下全部文件。
       {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
       multiple
       className="hidden"
-      onChange={(e) => { void handleImport(e.target.files); e.target.value = ''; }}
-    />
-    <input
-      ref={fileInputRef}
-      type="file"
-      multiple
-      className="hidden"
-      onChange={(e) => { void handleImport(e.target.files); e.target.value = ''; }}
+      onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
     />
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none">
       <div className={`flex h-[85vh] max-h-[800px] w-full ${draft ? 'max-w-[1540px]' : 'max-w-[1100px]'} min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl transition-[max-width] duration-300 animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`}>
@@ -694,35 +708,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <HistoryIcon className="size-3.5" />
               历史
             </Button>
-            {/* 导入本地插件（移植）：文件夹 / 文件两种入口，读取后进草稿态预览/改信息/提交 */}
-            <Popover>
-              <PopoverTrigger render={<Button variant="outline" size="sm" className="gap-1.5" title="从电脑导入已有插件" />}>
-                <FolderUpIcon className="size-3.5" />
-                导入
-              </PopoverTrigger>
-              <PopoverContent className="w-52" align="end">
-                <div className="text-xs font-medium text-muted-foreground">从电脑导入已有插件</div>
-                <div className="mt-1.5 space-y-0.5">
-                  <button
-                    type="button"
-                    onClick={() => folderInputRef.current?.click()}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
-                  >
-                    <FolderUpIcon className="size-3.5 shrink-0" />
-                    选择文件夹
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
-                  >
-                    <FileUpIcon className="size-3.5 shrink-0" />
-                    选择文件
-                  </button>
-                </div>
-                <div className="mt-1.5 text-[11px] text-muted-foreground">读取插件源码后可预览、改信息再提交。</div>
-              </PopoverContent>
-            </Popover>
             {/* 引用插件：选一个已有插件注入源码到上下文，让 agent 基于现有代码修改（#4） */}
             {recentPlugins.length > 0 && (
               <Popover>
@@ -775,34 +760,33 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
         {/* 对话区 */}
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
           {turns.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-              <SparklesIcon className="size-8 text-primary" />
-              <div className="text-sm text-muted-foreground">描述你想做的插件，AI 流式生成。多轮可追问修改。</div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {['番茄钟插件', 'Markdown 速记', '配色生成器'].map((s) => (
-                  <button key={s} type="button" onClick={() => setInput(s)} className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted">{s}</button>
-                ))}
+            <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
+              <div className="relative">
+                <div className="absolute inset-0 animate-pulse rounded-full bg-primary/20 blur-xl" />
+                <SparklesIcon className="relative size-12 text-primary" />
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                或
-                <button type="button" onClick={() => folderInputRef.current?.click()} className="mx-1 text-primary underline-offset-2 hover:underline">导入本地文件夹</button>
-                /
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="mx-1 text-primary underline-offset-2 hover:underline">文件</button>
-                移植已有插件
+              <div className="space-y-2">
+                <h3 className="text-lg font-medium">AI 插件创建器</h3>
+                <p className="text-sm text-muted-foreground max-w-md">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2.5">
+                {['番茄钟插件', 'Markdown 速记', '配色生成器'].map((s) => (
+                  <button key={s} type="button" onClick={() => setInput(s)} className="group rounded-full border border-border/60 bg-background/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary hover:shadow-md">{s}</button>
+                ))}
               </div>
             </div>
           ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-3">
+            <div className="mx-auto flex max-w-3xl flex-col gap-4">
               {turns.map((t, i) => (
-                <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   {t.role === 'user' ? (
-                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-gradient-to-br from-primary to-primary/90 px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
                       {t.content}
                     </div>
                   ) : (
-                    <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground">
+                    <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
                       {t.content ? (
                         <Markdown>{t.content}</Markdown>
                       ) : (t.parts?.some((p) => p.type === 'question')) ? null : t.status === 'failed' ? (
@@ -812,7 +796,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                       ) : !t.streaming ? (
                         <span className="text-muted-foreground">无内容</span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2Icon className="size-3 animate-spin" />生成中…</span>
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
                       )}
                       {/* R2：提问卡片（Claude 风格）—— 渲染在文本之后，可作答并继续 agent 流程。 */}
                       {t.parts?.map((p) => {
@@ -830,17 +814,22 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           answerQuestion(i, p.toolCallId, labels);
                         };
                         return (
-                          <div key={p.toolCallId} className="mt-2 rounded-xl border bg-background p-3">
-                            <div className="text-sm font-medium">{p.question}</div>
+                          <div key={p.toolCallId} className="mt-3 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-sm backdrop-blur-sm">
+                            <div className="flex items-start gap-2">
+                              <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                                <span className="text-xs font-bold">?</span>
+                              </div>
+                              <div className="flex-1 text-sm font-medium">{p.question}</div>
+                            </div>
                             {p.answered ? (
-                              <div className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
-                                <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0 text-green-600" />
-                                <span>已回答：{p.answer}</span>
+                              <div className="mt-3 flex items-start gap-2 rounded-lg border border-green-600/20 bg-green-50/50 px-3 py-2 dark:bg-green-950/20">
+                                <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-green-600" />
+                                <span className="text-xs text-muted-foreground">已回答：{p.answer}</span>
                               </div>
                             ) : (
-                              <div className="mt-2 space-y-2">
+                              <div className="mt-3 space-y-2.5">
                                 {p.options && p.options.length > 0 && (
-                                  <div className="flex flex-wrap gap-1.5">
+                                  <div className="flex flex-wrap gap-2">
                                     {p.options.map((o) => {
                                       const on = selected.includes(o.value);
                                       return (
@@ -857,7 +846,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                                               answerQuestion(i, p.toolCallId, o.label);
                                             }
                                           }}
-                                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'}`}
+                                          className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${on ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-border/60 bg-background/80 hover:border-primary/50 hover:bg-primary/5 hover:shadow-sm'}`}
                                         >
                                           {o.label}
                                         </button>
@@ -866,22 +855,24 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                                   </div>
                                 )}
                                 {p.multiSelect && p.options && p.options.length > 0 && (
-                                  <Button size="sm" className="h-7 px-3 text-xs" disabled={!selected.length} onClick={submitMulti}>
+                                  <Button size="sm" className="h-8 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!selected.length} onClick={submitMulti}>
+                                    <CheckCircle2Icon className="size-3.5" />
                                     确认选择
                                   </Button>
                                 )}
                                 {/* 兜底：allowFreeText 为真，或既无选项也不允许自由输入（防死锁——否则卡片无任何作答控件，deferred 永不 resolve）时，都给自由输入框。 */}
                                 {(p.allowFreeText || !(p.options && p.options.length > 0)) && (
-                                  <div className="flex items-end gap-1.5">
+                                  <div className="flex items-end gap-2">
                                     <Textarea
                                       placeholder="或在此输入你的回答…"
                                       value={draft}
                                       onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [p.toolCallId]: e.target.value }))}
                                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answerQuestion(i, p.toolCallId, draft); } }}
                                       rows={1}
-                                      className="min-h-[32px] max-h-24 resize-none text-sm"
+                                      className="min-h-[36px] max-h-24 resize-none rounded-lg border-border/60 text-sm shadow-sm"
                                     />
-                                    <Button size="sm" className="h-8 px-3 text-xs" disabled={!draft.trim()} onClick={() => answerQuestion(i, p.toolCallId, draft)}>
+                                    <Button size="sm" className="h-9 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!draft.trim()} onClick={() => answerQuestion(i, p.toolCallId, draft)}>
+                                      <SendIcon className="size-3.5" />
                                       提交
                                     </Button>
                                   </div>
@@ -899,12 +890,14 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           )}
           {/* 提交成功卡片：用户在右侧面板点提交、发布成功后告知「已提交到团队空间」 */}
           {publishedName && (
-            <div className="mx-auto mt-4 max-w-3xl">
-              <div className="flex items-center gap-3 rounded-xl border border-green-300 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950/30">
-                <CheckCircle2Icon className="size-5 shrink-0 text-green-600" />
-                <div className="flex-1 text-sm">
-                  <div className="font-medium">插件「{publishedName}」已提交到团队空间</div>
-                  <div className="text-xs text-muted-foreground">团队成员现可在插件中心看到并安装它。点「+」新建对话可继续创建下一个。</div>
+            <div className="mx-auto mt-6 max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-start gap-4 rounded-2xl border border-green-600/30 bg-gradient-to-br from-green-50 to-green-100/50 p-4 shadow-lg backdrop-blur-sm dark:from-green-950/30 dark:to-green-900/20">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-green-600 shadow-md">
+                  <CheckCircle2Icon className="size-5 text-white" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="font-semibold text-green-900 dark:text-green-100">插件「{publishedName}」已成功提交</div>
+                  <div className="text-sm text-green-800/80 dark:text-green-200/70">已发布到团队空间，团队成员现可在插件中心看到并安装。点击「+ 新建对话」继续创建下一个插件。</div>
                 </div>
               </div>
             </div>
@@ -913,12 +906,14 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
         {/* #3 思考流式输出（支持思考的模型才显示，不支持时 reasoning 为空自动隐藏） */}
         {reasoning && (
-          <div className="shrink-0 border-t bg-purple-50/50 px-4 py-2 dark:bg-purple-950/20">
+          <div className="shrink-0 border-t bg-gradient-to-r from-purple-50/80 via-purple-100/50 to-purple-50/80 px-6 py-3 dark:from-purple-950/30 dark:via-purple-900/20 dark:to-purple-950/30">
             <details className="mx-auto max-w-3xl">
-              <summary className="cursor-pointer text-xs font-medium text-purple-600 dark:text-purple-400">
-                💭 思考过程（{reasoning.length} 字）{busy && <Loader2Icon className="ml-1 inline size-3 animate-spin" />}
+              <summary className="flex cursor-pointer items-center gap-2 text-xs font-medium text-purple-600 transition-colors hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
+                <span className="text-base">💭</span>
+                <span>思考过程（{reasoning.length} 字）</span>
+                {busy && <Loader2Icon className="size-3.5 animate-spin" />}
               </summary>
-              <div className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+              <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-purple-200/50 bg-white/50 p-3 text-xs leading-relaxed text-muted-foreground backdrop-blur-sm dark:border-purple-800/30 dark:bg-purple-950/20">
                 {reasoning}
               </div>
             </details>
@@ -927,25 +922,25 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
         {/* #1 上下文用量条（contextWindow 配好后显示百分比） */}
         {contextWindow && turns.length > 0 && (
-          <div className="shrink-0 border-t px-4 py-1.5">
+          <div className="shrink-0 border-t bg-muted/20 px-6 py-2">
             <div className="mx-auto max-w-3xl">
-              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                <span>上下文用量</span>
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span className="font-medium">上下文用量</span>
                 <div className="flex items-center gap-2">
-                  <span className="tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} token（{usagePct}%）{usagePct > 80 && ' · 即将自动压缩'}</span>
+                  <span className="tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} token（{usagePct}%）{usagePct > 80 && <span className="ml-1 text-amber-600 dark:text-amber-400">· 即将自动压缩</span>}</span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setContextInspectorOpen(true)}
-                    className="h-5 gap-1 px-1.5 text-[10px]"
+                    className="h-6 gap-1 px-2 text-[10px]"
                   >
                     <EyeIcon className="size-3" />
                     查看
                   </Button>
                 </div>
               </div>
-              <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-muted">
-                <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-amber-500' : 'bg-primary'} `} style={{ width: `${usagePct}%` }} />
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted/60 shadow-inner">
+                <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-gradient-to-r from-amber-500 to-amber-600' : 'bg-gradient-to-r from-primary to-primary/80'} shadow-sm`} style={{ width: `${usagePct}%` }} />
               </div>
             </div>
           </div>
@@ -953,21 +948,66 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
         {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中） */}
         {(compressing || searchingQuery != null || uploadingViaTool) && (
-          <div className="shrink-0 border-t bg-muted/30 px-4 py-1.5">
-            <div className="mx-auto flex max-w-3xl items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2Icon className="size-3 animate-spin" />
-              {compressing
-                ? '正在压缩对话上下文…'
-                : searchingQuery != null
-                  ? `正在联网搜索：${searchingQuery}…`
-                  : 'AI 正在生成插件草稿…'}
+          <div className="shrink-0 border-t bg-gradient-to-r from-blue-50/50 via-indigo-50/50 to-blue-50/50 px-6 py-2.5 dark:from-blue-950/20 dark:via-indigo-950/20 dark:to-blue-950/20">
+            <div className="mx-auto flex max-w-3xl items-center gap-2 text-xs text-muted-foreground">
+              <Loader2Icon className="size-3.5 animate-spin text-primary" />
+              <span className="font-medium">
+                {compressing
+                  ? '正在压缩对话上下文…'
+                  : searchingQuery != null
+                    ? `正在联网搜索：${searchingQuery}…`
+                    : 'AI 正在生成插件草稿…'}
+              </span>
             </div>
           </div>
         )}
 
         {/* 输入区：思考开关 + Textarea + 发送/停止，三者同高对齐 */}
-        <div className="shrink-0 border-t px-4 py-3">
-          <div className="mx-auto flex max-w-3xl items-end gap-2">
+        <div className="shrink-0 border-t bg-gradient-to-b from-background to-muted/20 px-6 py-4">
+          {/* 已选文件列表 */}
+          {selectedFiles.length > 0 && (
+            <div className="mx-auto max-w-3xl mb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-muted-foreground">已选择 {selectedFiles.length} 个文件</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="h-7 gap-1.5 px-3 text-xs shadow-sm"
+                    onClick={() => void importFromSelectedFiles()}
+                    disabled={busy}
+                  >
+                    <PackageIcon className="size-3.5" />
+                    导入为插件
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setSelectedFiles([])}
+                  >
+                    清空
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedFiles.map((f) => (
+                  <Badge key={f.id} variant="secondary" className="gap-1.5 px-2.5 py-1.5 text-xs shadow-sm">
+                    <span className="max-w-[200px] truncate" title={f.name}>{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(f.id)}
+                      className="inline-flex shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20 transition-colors"
+                      aria-label="移除"
+                    >
+                      <XIcon className="size-3.5" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="mx-auto flex max-w-3xl items-end gap-2.5">
             {/* 思考开关：开启后模型做更深入推理（systemPrompt 追加思考引导） */}
             <Button
               type="button"
@@ -976,9 +1016,21 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               onClick={() => setThinking((v) => !v)}
               disabled={busy}
               title={thinking ? '思考模式已开启（深入推理）' : '开启思考模式'}
-              className="h-[40px] w-[40px] shrink-0"
+              className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105"
             >
-              <BrainIcon className="size-4" />
+              <BrainIcon className="size-4.5" />
+            </Button>
+            {/* 文件选择按钮：放在思考按钮旁边 */}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy}
+              title="选择文件或文件夹"
+              className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105"
+            >
+              <FolderIcon className="size-4.5" />
             </Button>
             <Textarea
               placeholder={thinking ? '思考模式：描述需求，模型会深入分析后生成…' : '描述插件需求，Enter 发送，Shift+Enter 换行'}
@@ -986,13 +1038,13 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
               rows={1}
-              className="min-h-[40px] max-h-32 resize-none"
+              className="min-h-[44px] max-h-36 resize-none rounded-xl border-border/60 px-4 py-3 text-sm shadow-sm transition-all focus-visible:shadow-md"
               disabled={busy}
             />
             {busy ? (
-              <Button variant="outline" size="icon" onClick={stop} title="停止" className="h-[40px] w-[40px] shrink-0"><XIcon className="size-4" /></Button>
+              <Button variant="outline" size="icon" onClick={stop} title="停止" className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105 hover:border-destructive hover:text-destructive"><XIcon className="size-4.5" /></Button>
             ) : (
-              <Button size="icon" onClick={() => void send()} disabled={!input.trim()} title="发送" className="h-[40px] w-[40px] shrink-0"><SendIcon className="size-4" /></Button>
+              <Button size="icon" onClick={() => void send()} disabled={!input.trim()} title="发送" className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105 disabled:opacity-50"><SendIcon className="size-4.5" /></Button>
             )}
           </div>
         </div>
