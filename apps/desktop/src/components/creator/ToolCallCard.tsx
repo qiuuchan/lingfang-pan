@@ -65,38 +65,52 @@ export function ToolCallCard({ data }: { data: ToolCardData }) {
   const summary = summarize(data);
 
   return (
-    <div className="mt-2 overflow-hidden rounded-xl border bg-background text-sm">
+    <div className="mt-3 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-background to-muted/20 text-sm shadow-sm backdrop-blur-sm">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/50"
+        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-all hover:bg-muted/40"
       >
-        <ChevronRightIcon className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`} />
-        <Icon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="font-medium">{meta.label}</span>
-        {summary && <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{summary}</span>}
+        <ChevronRightIcon className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+          data.status === 'running' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+          data.status === 'error' ? 'bg-destructive/10 text-destructive' :
+          'bg-green-600/10 text-green-600'
+        }`}>
+          <Icon className="size-4" />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="font-medium">{meta.label}</span>
+          {summary && <span className="truncate text-xs text-muted-foreground">{summary}</span>}
+        </div>
         <span className="ml-auto shrink-0">
           {data.status === 'running' ? (
-            <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
+            <Loader2Icon className="size-4 animate-spin text-blue-600 dark:text-blue-400" />
           ) : data.status === 'error' ? (
-            <XCircleIcon className="size-3.5 text-destructive" />
+            <XCircleIcon className="size-4 text-destructive" />
           ) : (
-            <CheckCircle2Icon className="size-3.5 text-green-600" />
+            <CheckCircle2Icon className="size-4 text-green-600" />
           )}
         </span>
       </button>
       {open && (
-        <div className="space-y-2 border-t bg-muted/20 px-3 py-2">
+        <div className="space-y-2.5 border-t border-border/30 bg-muted/30 px-4 py-3">
           {data.args !== undefined && (
             <div>
-              <div className="mb-0.5 text-[11px] font-medium text-muted-foreground">参数</div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-[11px] leading-relaxed">{pretty(data.args)}</pre>
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                <div className="size-1 rounded-full bg-primary" />
+                <span>参数</span>
+              </div>
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/40 bg-background/80 p-2.5 text-[11px] leading-relaxed shadow-sm backdrop-blur-sm">{pretty(data.args)}</pre>
             </div>
           )}
           {data.result !== undefined && (
             <div>
-              <div className="mb-0.5 text-[11px] font-medium text-muted-foreground">结果</div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-[11px] leading-relaxed">{pretty(data.result)}</pre>
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                <div className="size-1 rounded-full bg-green-600" />
+                <span>结果</span>
+              </div>
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/40 bg-background/80 p-2.5 text-[11px] leading-relaxed shadow-sm backdrop-blur-sm">{pretty(data.result)}</pre>
             </div>
           )}
         </div>
