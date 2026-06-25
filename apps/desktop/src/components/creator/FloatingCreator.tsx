@@ -517,8 +517,24 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       let stageErrMsg = '';
       let sawToolCall = false; // R1：本轮是否有过工具调用（含 ask_question/stage）
       let reasoningText = ''; // 本轮思考累积（流末兜底判定用，避免读 reasoning state 的陈旧闭包）
+      let streamError: string | null = null; // 捕获流中的错误消息（error 事件或 finish_reason='error'）
       setReasoning('');
       for await (const part of result.fullStream) {
+        // Vercel AI SDK 的 error 类型事件：捕获上游或 SDK 本身的错误。
+        if (part.type === 'error') {
+          streamError = (part as { error?: unknown }).error instanceof Error
+            ? ((part as { error: Error }).error.message)
+            : String((part as { error?: unknown }).error || '流式调用出错');
+          break;
+        }
+        // finish 事件中也可能携带错误信息（某些上游在 finish 时才报错）。
+        if (part.type === 'finish') {
+          const finishPart = part as unknown as { error?: { message?: string } };
+          if (finishPart.error?.message) {
+            streamError = finishPart.error.message;
+            break;
+          }
+        }
         if (part.type === 'reasoning-delta') {
           // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series），把思考增量单独累积展示。
           const delta = (part as { text?: string; delta?: string }).text ?? (part as { delta?: string }).delta ?? '';
@@ -571,7 +587,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         if (!cur || cur.role !== 'assistant') return next;
         const hasContent = cur.content.trim().length > 0;
         const hasParts = (cur.parts?.length ?? 0) > 0; // 提问卡片等结构化内容也算「有内容」
-        if (hasContent || hasParts) {
+        // 优先显示流中捕获的真实错误（part.type='error'），避免被空响应兜底掩盖。
+        if (streamError) {
+          next[assistantIdx] = { ...cur, content: `调用失败：${streamError}`, streaming: false, status: 'failed' };
+        } else if (hasContent || hasParts) {
           next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
         } else if (stagedName) {
           // 工具步可见化（H1）：只调了 stage 没说话 → 补占位文本，配合右侧草稿面板。
@@ -592,18 +611,41 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       });
       if (stagedName) toast.success(`草稿「${stagedName}」已生成，可在右侧预览并提交`);
       else if (stageErrMsg) toast.error(stageErrMsg);
+      else if (streamError) toast.error(`调用失败：${streamError}`); // 流错误也通过 toast 提醒
     } catch (e) {
       const aborted = (e as Error).name === 'AbortError';
       setUploadingViaTool(false);
       setSearchingQuery(null);
       setCompressing(false);
+      // 提取真实错误消息：优先使用 error.message，兜底为通用提示。
+      // Vercel AI SDK 在遇到上游错误时，可能会把错误包装在 Error 对象中，也可能直接抛字符串。
+      let errorMsg = '生成失败';
+      if (e instanceof Error) {
+        errorMsg = e.message || errorMsg;
+        // 某些情况下，AI SDK 会把原始响应包装在自定义属性中，尝试提取。
+        const errWithCause = e as Error & { cause?: unknown };
+        if (errWithCause.cause && typeof errWithCause.cause === 'object' && errWithCause.cause !== null && 'message' in errWithCause.cause) {
+          errorMsg = String((errWithCause.cause as { message: unknown }).message) || errorMsg;
+        }
+      } else if (typeof e === 'string') {
+        errorMsg = e;
+      } else if (e && typeof e === 'object' && 'message' in e) {
+        errorMsg = String((e as { message: unknown }).message) || errorMsg;
+      }
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
-        if (cur && cur.role === 'assistant') next[assistantIdx] = { role: 'assistant', content: aborted ? '（已取消）' : `调用失败：${(e as Error).message}`, streaming: false, status: aborted ? 'cancelled' : 'failed' };
+        if (cur && cur.role === 'assistant') {
+          next[assistantIdx] = {
+            role: 'assistant',
+            content: aborted ? '（已取消）' : `调用失败：${errorMsg}`,
+            streaming: false,
+            status: aborted ? 'cancelled' : 'failed',
+          };
+        }
         return next;
       });
-      if (!aborted) toast.error((e as ApiError).message || '生成失败');
+      if (!aborted) toast.error(errorMsg);
     } finally {
       setBusy(false);
       setSearchingQuery(null);

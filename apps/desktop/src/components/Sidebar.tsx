@@ -23,6 +23,7 @@ import {
   PinIcon,
   PinOffIcon,
   HistoryIcon,
+  XIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
@@ -75,7 +76,7 @@ export function Sidebar({
   /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
   onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, openPluginCenter } = useApp();
+  const { session, view, setView, setRunningPlugin, pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, removeFromRecent, openPluginCenter } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   // 历史使用中已固定的项不重复展示，避免与「固定常用」区冗余。
   const recentUnpinned = recentPlugins.filter((p) => !isPinned(p.id));
@@ -226,13 +227,12 @@ export function Sidebar({
               </div>
             )}
             {recentUnpinned.map((p) => (
-              <SidebarPluginItem
+              <SidebarRecentItem
                 key={p.id}
                 plugin={p}
                 collapsed={collapsed}
-                actionIcon={<PinIcon className="size-3.5" />}
-                actionTitle="固定常用"
-                onAction={() => pinPlugin(p)}
+                onPin={() => pinPlugin(p)}
+                onRemove={() => removeFromRecent(p.id)}
                 onClick={() => { setRunningPlugin(p); }}
               />
             ))}
@@ -320,6 +320,63 @@ function SidebarPluginItem({
         >
           {actionIcon}
         </Button>
+      )}
+    </div>
+  );
+}
+
+// 侧栏历史使用项：hover 显示双操作按钮（固定 + 移除）。
+function SidebarRecentItem({
+  plugin,
+  collapsed,
+  onPin,
+  onRemove,
+  onClick,
+}: {
+  plugin: LoadedPlugin;
+  collapsed: boolean;
+  onPin: () => void;
+  onRemove: () => void;
+  onClick: () => void;
+}) {
+  return (
+    <div className="group/item relative flex items-center">
+      <button
+        type="button"
+        onClick={onClick}
+        title={collapsed ? plugin.name : undefined}
+        className={cn(
+          buttonVariants({ variant: 'ghost', size: 'sm' }),
+          'h-9 flex-1 gap-2.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+          collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
+        )}
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
+          {plugin.name.trim().charAt(0) || '?'}
+        </span>
+        {!collapsed && <span className="truncate text-sm">{plugin.name}</span>}
+      </button>
+      {!collapsed && (
+        <div className="absolute right-1 flex gap-0.5 opacity-0 transition-opacity group-hover/item:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="固定常用"
+            onClick={(e) => { e.stopPropagation(); onPin(); }}
+            className="size-6"
+          >
+            <PinIcon className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="从历史中移除"
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="size-6 text-destructive hover:text-destructive"
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        </div>
       )}
     </div>
   );
