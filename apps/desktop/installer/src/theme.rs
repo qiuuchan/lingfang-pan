@@ -28,7 +28,7 @@ pub const LINK: Color32 = Color32::from_rgb(96, 150, 235);
 pub const TITLE_BAR_H: f32 = 40.0;
 
 /// 应用整体 egui 风格（深色、圆角、留白）。
-/// 改进：优化间距、圆角统一、更流畅的交互反馈。
+/// 改进：优化间距、Windows 11 风格圆角、更流畅的交互反馈。
 pub fn apply_style(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
 
@@ -40,12 +40,16 @@ pub fn apply_style(ctx: &egui::Context) {
     style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
     style.visuals.widgets.inactive.bg_fill = INPUT_BG;
     style.visuals.widgets.inactive.weak_bg_fill = INPUT_BG;
-    style.visuals.widgets.inactive.rounding = Rounding::same(6.0);
+    style.visuals.widgets.inactive.rounding = Rounding::same(8.0); // Windows 11 风格圆角
     style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 70, 70); // 悬停时稍亮
-    style.visuals.widgets.hovered.rounding = Rounding::same(6.0);
-    style.visuals.widgets.active.rounding = Rounding::same(6.0);
+    style.visuals.widgets.hovered.rounding = Rounding::same(8.0);
+    style.visuals.widgets.active.rounding = Rounding::same(8.0);
     style.visuals.selection.bg_fill = RED;
     style.visuals.selection.stroke = Stroke::new(1.0, RED);
+
+    // Windows 11 风格：更大的窗口圆角
+    style.visuals.window_rounding = Rounding::same(12.0);
+    style.visuals.menu_rounding = Rounding::same(8.0);
 
     use egui::TextStyle::*;
     style.text_styles = [
@@ -96,6 +100,7 @@ pub fn install_fonts(ctx: &egui::Context) {
 }
 
 /// 自定义标题栏：左侧标题文字，右侧关闭按钮，整条可拖动窗口。
+/// Windows 11 风格：更大圆角的关闭按钮。
 ///
 /// `over_red` 为 true 时（自定义模式横幅）用白色文字/浅色关闭图标。
 /// 返回是否点击了关闭按钮。
@@ -121,19 +126,19 @@ pub fn title_bar(ui: &mut egui::Ui, title: &str, over_red: bool) -> bool {
         fg,
     );
 
-    // 关闭按钮（右上角 X）。
+    // 关闭按钮（右上角 X）- Windows 11 风格圆角
     let btn = egui::Rect::from_center_size(
         egui::pos2(rect.max.x - 26.0, rect.center().y),
-        Vec2::splat(28.0),
+        Vec2::splat(32.0), // 稍大的点击区域
     );
     let btn_resp = ui.interact(btn, ui.id().with("close_btn"), Sense::click());
     if btn_resp.hovered() {
-        painter.rect_filled(btn, Rounding::same(4.0), Color32::from_rgb(232, 64, 60));
+        painter.rect_filled(btn, Rounding::same(6.0), Color32::from_rgb(232, 64, 60));
     }
     let x_color = if btn_resp.hovered() { Color32::WHITE } else { fg };
     let c = btn.center();
     let r = 6.0;
-    let stroke = Stroke::new(1.6, x_color);
+    let stroke = Stroke::new(1.8, x_color); // 稍粗的线条
     painter.line_segment([egui::pos2(c.x - r, c.y - r), egui::pos2(c.x + r, c.y + r)], stroke);
     painter.line_segment([egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)], stroke);
 
@@ -141,6 +146,7 @@ pub fn title_bar(ui: &mut egui::Ui, title: &str, over_red: bool) -> bool {
 }
 
 /// 主行动按钮（红色填充，大号，可指定宽度）。返回是否被点击。
+/// Windows 11 风格：更大圆角、平滑悬停效果。
 pub fn primary_button(ui: &mut egui::Ui, text: &str, width: f32, enabled: bool) -> bool {
     let (fill, text_color) = if enabled {
         (RED, Color32::WHITE)
@@ -150,7 +156,7 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, width: f32, enabled: bool) 
 
     let btn = egui::Button::new(RichText::new(text).color(text_color).size(17.0).strong())
         .fill(fill)
-        .rounding(Rounding::same(6.0))
+        .rounding(Rounding::same(8.0)) // Windows 11 风格圆角
         .min_size(Vec2::new(width, 56.0));
 
     let resp = ui.add_enabled(enabled, btn);

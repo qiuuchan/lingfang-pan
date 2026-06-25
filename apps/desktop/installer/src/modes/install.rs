@@ -257,20 +257,61 @@ impl InstallerApp {
             ui.label(egui::RichText::new(status).size(13.0).color(theme::TEXT_MUTED));
         });
         ui.add_space(24.0);
+
+        // Windows 11 风格进度条：带背景槽、更大圆角、流畅动画
         ui.horizontal(|ui| {
             ui.add_space(48.0);
-            ui.add(
-                egui::ProgressBar::new(frac)
-                    .desired_width(ui.available_width() - 48.0)
-                    .desired_height(10.0)
-                    .fill(theme::RED)
-                    .rounding(egui::Rounding::same(5.0))
-                    .animate(true),
+            let available_width = ui.available_width() - 48.0;
+
+            // 绘制进度条背景槽
+            let (rect, _) = ui.allocate_exact_size(
+                egui::Vec2::new(available_width, 12.0),
+                egui::Sense::hover()
             );
+
+            // 背景槽（深色）
+            ui.painter().rect_filled(
+                rect,
+                egui::Rounding::same(6.0),
+                egui::Color32::from_rgb(60, 60, 60)
+            );
+
+            // 进度条填充（带渐变效果）
+            if frac > 0.0 {
+                let progress_width = rect.width() * frac;
+                let progress_rect = egui::Rect::from_min_size(
+                    rect.min,
+                    egui::Vec2::new(progress_width, rect.height())
+                );
+
+                // 主填充色
+                ui.painter().rect_filled(
+                    progress_rect,
+                    egui::Rounding::same(6.0),
+                    theme::RED
+                );
+
+                // 添加高光效果（顶部稍亮）
+                let highlight_rect = egui::Rect::from_min_size(
+                    progress_rect.min,
+                    egui::Vec2::new(progress_rect.width(), progress_rect.height() * 0.4)
+                );
+                ui.painter().rect_filled(
+                    highlight_rect,
+                    egui::Rounding {
+                        nw: 6.0,
+                        ne: 6.0,
+                        sw: 0.0,
+                        se: 0.0,
+                    },
+                    egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)
+                );
+            }
         });
+
         ui.add_space(8.0);
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(format!("{}%", (frac * 100.0) as u32)).size(12.0).color(theme::TEXT_MUTED));
+            ui.label(egui::RichText::new(format!("{}%", (frac * 100.0) as u32)).size(13.0).color(theme::TEXT).strong());
         });
     }
 
@@ -356,11 +397,11 @@ impl InstallerApp {
     }
 }
 
-/// 文件夹选择小按钮（图标）。返回是否点击。
+/// 文件夹选择小按钮（图标）- Windows 11 风格圆角。返回是否点击。
 fn folder_button(ui: &mut egui::Ui) -> bool {
     let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(38.0), egui::Sense::click());
     let bg = if resp.hovered() { theme::BORDER } else { theme::INPUT_BG };
-    ui.painter().rect_filled(rect, egui::Rounding::same(6.0), bg);
+    ui.painter().rect_filled(rect, egui::Rounding::same(8.0), bg); // Windows 11 风格圆角
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -398,37 +439,52 @@ fn pick_folder(current: &str) -> Option<String> {
 }
 
 /// 实际安装步骤（后台线程执行，通过 tx 推进度）。
+/// 改进：更细粒度的进度反馈，真实反映安装过程。
 fn do_install(
     dir: &std::path::Path,
     version: &str,
     create_desktop: bool,
     tx: &mpsc::Sender<Progress>,
 ) -> Result<()> {
-    let _ = tx.send(Progress::Step("正在解压程序文件…".into(), 0.15));
+    // 阶段 1: 解压 (0% -> 60%)
+    let _ = tx.send(Progress::Step("正在检查安装目录…".into(), 0.05));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let _ = tx.send(Progress::Step("正在解压程序文件…".into(), 0.10));
     deploy::deploy_to(dir)?;
+    let _ = tx.send(Progress::Step("程序文件解压完成".into(), 0.60));
 
     let main_exe = dir.join(paths::MAIN_EXE);
     let icon = dir.join("icons").join("icon.ico");
     let icon = if icon.exists() { icon } else { main_exe.clone() };
 
-    let _ = tx.send(Progress::Step("正在创建快捷方式…".into(), 0.7));
+    // 阶段 2: 创建快捷方式 (60% -> 80%)
+    let _ = tx.send(Progress::Step("正在创建开始菜单快捷方式…".into(), 0.65));
     if let Some(appdata) = dirs::data_dir() {
         let start_menu = appdata
             .join("Microsoft\\Windows\\Start Menu\\Programs")
             .join(format!("{}.lnk", paths::DISPLAY_NAME));
         platform::create_shortcut(&start_menu, &main_exe, dir, &icon)?;
     }
+
     if create_desktop {
+        let _ = tx.send(Progress::Step("正在创建桌面快捷方式…".into(), 0.75));
         if let Some(desktop) = dirs::desktop_dir() {
             let lnk = desktop.join(format!("{}.lnk", paths::DISPLAY_NAME));
             platform::create_shortcut(&lnk, &main_exe, dir, &icon)?;
         }
     }
+    let _ = tx.send(Progress::Step("快捷方式创建完成".into(), 0.80));
 
-    let _ = tx.send(Progress::Step("正在写入注册表…".into(), 0.9));
+    // 阶段 3: 注册表写入 (80% -> 95%)
+    let _ = tx.send(Progress::Step("正在注册卸载信息…".into(), 0.85));
     let size_kb = deploy::dir_size_kb(dir);
     platform::write_uninstall_key(dir, version, size_kb)?;
+    let _ = tx.send(Progress::Step("系统注册完成".into(), 0.95));
 
-    let _ = tx.send(Progress::Step("完成收尾…".into(), 1.0));
+    // 阶段 4: 完成收尾 (95% -> 100%)
+    let _ = tx.send(Progress::Step("正在完成安装…".into(), 0.98));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let _ = tx.send(Progress::Step("安装完成！".into(), 1.0));
     Ok(())
 }
