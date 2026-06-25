@@ -4,10 +4,14 @@
 //! 保持二进制小巧）。注册表/进程用 windows-sys 原始 API。
 
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, HWND, WAIT_OBJECT_0};
+use windows_sys::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
@@ -20,6 +24,10 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::paths;
+
+/// 不弹出控制台窗口的进程创建标志（CREATE_NO_WINDOW）。
+/// 用于 PowerShell 创建快捷方式、cmd 自删除，避免一闪而过的黑窗。
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 注册表 Uninstall 根路径（HKCU，currentUser 安装免提权）。
 pub const UNINSTALL_ROOT: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
@@ -151,6 +159,7 @@ pub fn create_shortcut(lnk_path: &Path, target: &Path, working_dir: &Path, icon:
     );
     let status = std::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW) // 不弹 PowerShell 黑窗
         .status()
         .map_err(|e| anyhow!("调用 PowerShell 创建快捷方式失败：{e}"))?;
     if !status.success() {
@@ -216,6 +225,7 @@ pub fn schedule_self_delete(exe_path: &Path) {
     let cmd = format!("ping 127.0.0.1 -n 3 > nul & del /f /q \"{path}\"");
     let _ = std::process::Command::new("cmd")
         .args(["/c", &cmd])
+        .creation_flags(CREATE_NO_WINDOW) // 不弹 cmd 黑窗
         .spawn();
 }
 
@@ -223,6 +233,31 @@ pub fn schedule_self_delete(exe_path: &Path) {
 fn wide_buf_to_string(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16_lossy(&buf[..end])
+}
+
+/// 给指定窗口应用 Windows 11 原生圆角（DWMWCP_ROUND）。
+///
+/// 窗口为无边框（decorations=false），egui 的 window_rounding 只圆 egui 面板、
+/// 不影响真实 OS 窗口；需经 DWM 设置 DWMWA_WINDOW_CORNER_PREFERENCE 才有系统级圆角。
+///
+/// 此 DWM 属性是 Windows 11（build 22000+）专属：在 Windows 10 上 DwmSetWindowAttribute
+/// 对该属性返回错误并保持直角——正好符合「Win10 不圆角」的需求，无需显式版本判断。
+///
+/// `hwnd` 由 eframe 的 `Frame::window_handle()` 提供（真实主窗口句柄）。
+pub fn set_window_rounding(hwnd: isize) {
+    if hwnd == 0 {
+        return;
+    }
+    unsafe {
+        let pref = DWMWCP_ROUND;
+        // Win10 上对该属性返回非 0（失败）→ 直角；Win11 上成功 → 圆角。
+        DwmSetWindowAttribute(
+            hwnd as HWND,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &pref as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&pref) as u32,
+        );
+    }
 }
 
 #[cfg(test)]

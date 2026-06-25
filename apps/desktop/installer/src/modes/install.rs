@@ -42,6 +42,8 @@ struct InstallerApp {
     agreed: bool,
     logo: Option<egui::TextureHandle>,
     rx: Option<mpsc::Receiver<Progress>>,
+    /// Win11 原生圆角是否已应用（窗口创建后才生效，首帧起逐帧尝试直至成功）。
+    corners_applied: bool,
 }
 
 /// 启动交互安装窗口。
@@ -58,6 +60,7 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         agreed: false,
         logo: None,
         rx: None,
+        corners_applied: false,
     };
 
     let options = eframe::NativeOptions {
@@ -91,7 +94,18 @@ impl eframe::App for InstallerApp {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // 首帧获取真实窗口 HWND 并应用 Win11 原生圆角（窗口创建后才有句柄）。
+        if !self.corners_applied {
+            use raw_window_handle::HasWindowHandle;
+            if let Ok(rwh) = frame.window_handle() {
+                if let raw_window_handle::RawWindowHandle::Win32(w) = rwh.as_ref() {
+                    platform::set_window_rounding(w.hwnd.get() as isize);
+                }
+            }
+            self.corners_applied = true;
+        }
+
         // 接收后台安装进度。
         if let Some(rx) = &self.rx {
             while let Ok(msg) = rx.try_recv() {
