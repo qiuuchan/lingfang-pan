@@ -25,18 +25,7 @@ impl EmbeddedRuntime {
         Ok(Self { root })
     }
 
-    pub(crate) fn from_default_locations() -> Self {
-        let root = if let Some(override_dir) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR") {
-            PathBuf::from(override_dir)
-        } else {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .map(|path| path.join("runtimes"))
-                .unwrap_or_else(|| PathBuf::from("runtimes"))
-        };
-        Self { root }
-    }
-
+    #[cfg(test)]
     pub(crate) fn from_root(root: PathBuf) -> Self {
         Self { root }
     }
@@ -160,6 +149,7 @@ impl EmbeddedRuntime {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn is_runtime_command(command: &str) -> bool {
     normalize_command_name(command)
         .map(|name| {
