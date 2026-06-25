@@ -10,7 +10,7 @@ mod plugin_script;
 mod plugin_security;
 mod plugin_store;
 mod plugins;
-mod updater;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -220,7 +220,6 @@ fn quit_app(app: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let registry = Arc::new(CapabilityRegistry::default());
             let dir = builtin_dir(app);
@@ -230,8 +229,6 @@ fn main() {
                 registry,
                 plugins: loaded,
             });
-            // updater 全局 State：缓存 check_update 拿到的 Update，供 download_and_install 取用。
-            app.manage(updater::PendingUpdate(std::sync::Mutex::new(None)));
             // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
             // 组B 的 start_plugin/stop_plugin 经此 State 的 ensure_plugin_dir 解析插件目录，
             // scan_plugin_status 据此扫文件系统判 ready/incomplete/error + 合并组B 内存进程表判 running。
@@ -275,8 +272,8 @@ fn main() {
             plugin_store::write_plugin_files,
             plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,
-            updater::check_update,
-            updater::download_and_install,
+            update::check_update,
+            update::download_update,
             plugin_security::verify_plugin_signature_command,
             plugin_security::check_plugin_recall_command
         ])

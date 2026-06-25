@@ -77,11 +77,6 @@ export class ReleaseAssetCreateDto {
   @IsString()
   filename?: string;
 
-  @ApiPropertyOptional({ description: 'Tauri updater base64 签名（未接入 updater 时留空）' })
-  @IsOptional()
-  @IsString()
-  signature?: string;
-
   @ApiPropertyOptional({ description: '安装包字节大小（< 2GB）' })
   @IsOptional()
   @Type(() => Number)
@@ -124,30 +119,4 @@ export class ReleaseListQueryDto {
   @IsOptional()
   @IsEnum(RELEASE_CHANNEL)
   channel?: (typeof RELEASE_CHANNEL)[number];
-}
-
-/** GET /api/releases/tauri-update?channel=&platform=&arch=&current_version= 入参（Tauri updater 契约端点）。
- *  - 全可选：channel 缺省 STABLE；platform/arch 宽松接收（不强制 IsEnum），Tauri 上报值与后端枚举不匹配时
- *    service 找不到匹配 asset 即返 null → controller 返 204（Tauri updater 把非 200 当「无更新」）。
- *  - 注意 query key 用 current_version（下划线，Tauri updater 协议约定），与 latest 的 currentVersion 区分。 */
-export class ReleaseTauriQueryDto {
-  @ApiPropertyOptional({ description: '发布通道（默认 STABLE）', enum: RELEASE_CHANNEL })
-  @IsOptional()
-  @IsEnum(RELEASE_CHANNEL)
-  channel?: (typeof RELEASE_CHANNEL)[number];
-
-  @ApiPropertyOptional({ description: '产物平台（WINDOWS / DARWIN / LINUX，宽松接收任意字符串）' })
-  @IsOptional()
-  @IsString()
-  platform?: string;
-
-  @ApiPropertyOptional({ description: '产物架构（X86_64 / AARCH64 / UNIVERSAL，宽松接收任意字符串）' })
-  @IsOptional()
-  @IsString()
-  arch?: string;
-
-  @ApiPropertyOptional({ description: '当前版本（Tauri updater 上报，仅用于日志/审计，不参与版本判定）', example: '0.0.2' })
-  @IsOptional()
-  @IsString()
-  current_version?: string;
 }

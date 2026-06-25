@@ -45,7 +45,7 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, setView, openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter } = useApp();
+  const { session, resetSession, setView, openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback } = useApp();
   const { theme, setTheme } = useTheme();
   // 项 11：退出登录确认弹窗。
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -117,7 +117,7 @@ export function AvatarMenu({
 
   // 下半部分菜单（帮助）。项 9/10：「设置与快捷键」「本地权限与安全」已删除（统一并入「其他设置」）。
   const bottomItems: Item[] = [
-    { key: 'help', label: '帮助与反馈', icon: HelpCircleIcon, visible: true, onClick: () => window.open('https://lingfang.io/docs', '_blank') },
+    { key: 'help', label: '帮助与反馈', icon: HelpCircleIcon, visible: true, onClick: () => { openHelpFeedback(); onClose(); } },
   ];
 
   const themeOpts: { value: string; label: string; icon: typeof SunIcon }[] = [

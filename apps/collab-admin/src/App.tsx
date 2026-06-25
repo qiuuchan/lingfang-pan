@@ -54,6 +54,7 @@ const AdminsView = lazy(() => import('@/components/admins-view').then((m) => ({ 
 const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ default: m.AuditView })));
 const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
 const ReleasesView = lazy(() => import('@/components/releases-view').then((m) => ({ default: m.ReleasesView })));
+const TicketsView = lazy(() => import('@/components/tickets-view').then((m) => ({ default: m.TicketsView })));
 const RolesView = lazy(() => import('@/components/roles-view').then((m) => ({ default: m.RolesView })));
 // 计费与模型（资源池模型重构后）：资源池/渠道/计费/灵石/调用日志/API Key。
 const PoolsView = lazy(() => import('@/components/billing/pools-view').then((m) => ({ default: m.PoolsView })));
@@ -343,6 +344,7 @@ export default function App() {
                 {view === 'teams' && <TeamsView />}
                 {view === 'plugins' && <PluginsView />}
                 {view === 'applications' && <ApplicationsView />}
+                {view === 'tickets' && <TicketsView />}
                 {view === 'audit' && <AuditView />}
                 {view === 'releases' && <ReleasesView />}
                 {view === 'roles' && <RolesView />}

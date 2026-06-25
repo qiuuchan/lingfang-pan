@@ -30,7 +30,8 @@ services:
     ports:
       - "0.0.0.0:19006:19006"
     volumes:
-      - downloads:/app/downloads
+      - collab_downloads:/app/apps/collab-api/downloads
+      - collab_uploads:/app/apps/collab-api/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,4 +56,5 @@ services:
 
 volumes:
   collab_pgdata:
-  downloads:
+  collab_downloads:
+  collab_uploads:

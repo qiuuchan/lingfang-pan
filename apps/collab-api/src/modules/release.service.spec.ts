@@ -144,53 +144,19 @@ describe('ReleaseService', () => {
   });
 
   it('latest 的 platform/arch 过滤缩小 asset 范围', async () => {
-    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: null, createdAt: now };
-    const macAsset = { id: 'a2', platform: 'DARWIN', arch: 'AARCH64', url: 'u', filename: 'f', signature: '', sizeBytes: null, createdAt: now };
+    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: null, createdAt: now };
+    const macAsset = { id: 'a2', platform: 'DARWIN', arch: 'AARCH64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: null, createdAt: now };
     prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset, macAsset] }));
     const result = await service.latest({ platform: 'WINDOWS' });
     expect(result.assets).toHaveLength(1);
     expect(result.assets[0].platform).toBe('WINDOWS');
   });
 
-  // === tauriManifest：Tauri updater 契约端点的数据源 ===
-  // 字段名严格遵循 Tauri 契约（pub_date 下划线，非 camelCase），无更新返 null。
-
-  it('tauriManifest 有匹配 asset 时返回 Tauri 契约（精确字段名）', async () => {
-    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'https://x/LingFang_1.0.0_x64-setup.exe', filename: 'f', signature: 'dW50cnVzdGVk', sizeBytes: 1024, createdAt: now };
-    prisma.release.findFirst.mockResolvedValue(
-      makeRelease({ version: '1.0.0', publishedAt: now, notes: '## changelog', assets: [winAsset] }),
-    );
-    const manifest = await service.tauriManifest('STABLE', 'WINDOWS', 'X86_64');
-    expect(manifest).toEqual({
-      version: '1.0.0',
-      pub_date: now.toISOString(),
-      url: 'https://x/LingFang_1.0.0_x64-setup.exe',
-      signature: 'dW50cnVzdGVk',
-      notes: '## changelog',
-    });
-    // 关键约束：字段名必须是 Tauri 契约（下划线 pub_date），不能是 camelCase。
-    expect(manifest).not.toBeNull();
-    expect(Object.keys(manifest!)).toEqual(['version', 'pub_date', 'url', 'signature', 'notes']);
-  });
-
-  it('tauriManifest 将 /downloads 相对路径转换为 updater 可解析的绝对 URL', async () => {
-    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/setup.exe', filename: 'f', signature: 'dW50cnVzdGVk', sizeBytes: 1024, createdAt: now };
+  it('latest 的 asset 出参包含 sha256（自制更新器校验用）', async () => {
+    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'f', sha256: 'abc123', signature: '', sizeBytes: 100, createdAt: now };
     prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset] }));
-    const manifest = await service.tauriManifest('STABLE', 'WINDOWS', 'X86_64', 'https://api.example.com');
-    expect(manifest?.url).toBe('https://api.example.com/downloads/setup.exe');
-  });
-
-  it('tauriManifest 版本存在但无匹配平台 asset 时返回 null', async () => {
-    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: null, createdAt: now };
-    prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset] }));
-    const manifest = await service.tauriManifest('STABLE', 'LINUX', 'X86_64');
-    expect(manifest).toBeNull();
-  });
-
-  it('tauriManifest 无已发布版本时返回 null', async () => {
-    prisma.release.findFirst.mockResolvedValue(null);
-    const manifest = await service.tauriManifest('BETA', 'WINDOWS', 'X86_64');
-    expect(manifest).toBeNull();
+    const result = await service.latest({ platform: 'WINDOWS', arch: 'X86_64' });
+    expect(result.assets[0].sha256).toBe('abc123');
   });
 
   it('get 非 PUBLISHED 版本抛 not_found', async () => {
@@ -201,7 +167,7 @@ describe('ReleaseService', () => {
   it('addAsset 校验 release 存在且 platform/arch 写库', async () => {
     prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '1.0.0', channel: 'STABLE' });
     prisma.releaseAsset.create.mockResolvedValue({
-      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: 1024, createdAt: now,
+      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: 1024, createdAt: now,
     });
     const result = await service.addAsset('user-admin', 'release-1', {
       platform: 'WINDOWS', arch: 'X86_64', url: 'u',
@@ -227,7 +193,7 @@ describe('ReleaseService', () => {
   it('listAdmin 返回全部状态（含 DRAFT/ARCHIVED）且含 assets', async () => {
     prisma.release.findMany.mockResolvedValue([
       makeRelease({ id: 'r1', status: 'DRAFT', assets: [] }),
-      makeRelease({ id: 'r2', status: 'ARCHIVED', assets: [{ id: 'a', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', signature: '', sizeBytes: 1, createdAt: now }] }),
+      makeRelease({ id: 'r2', status: 'ARCHIVED', assets: [{ id: 'a', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: 1, createdAt: now }] }),
     ]);
     const result = await service.listAdmin('user-admin');
     expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -253,36 +219,27 @@ describe('ReleaseService', () => {
     expect(prisma.release.findMany).not.toHaveBeenCalled();
   });
 
-  it('uploadAsset 写文件 + 读 .sig 填 signature + 建 asset', async () => {
+  it('uploadAsset 写文件 + 自动计算 SHA-256 + 建 asset', async () => {
     prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '0.0.2', channel: 'STABLE' });
+    // buffer 'exe-content' 的 SHA-256（与 service 内 createHash 计算一致）。
+    const expectedSha = 'c4f69a3c35671f2fe0ef9e54b4e535541d89f7e45774ddb7d31cef7223320117';
     prisma.releaseAsset.create.mockResolvedValue({
-      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'setup.exe', signature: 'dW50cnVzdGVk', sizeBytes: 100, createdAt: now,
+      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'setup.exe', sha256: expectedSha, signature: '', sizeBytes: 100, createdAt: now,
     });
     const file = { originalname: 'setup.exe', buffer: Buffer.from('exe-content'), size: 100 };
-    const sigFile = { buffer: Buffer.from('dW50cnVzdGVk') };
-    const result = await service.uploadAsset('user-admin', 'release-1', file, sigFile, 'WINDOWS', 'X86_64');
-    expect(result.asset.signature).toBe('dW50cnVzdGVk');
+    const result = await service.uploadAsset('user-admin', 'release-1', file, 'WINDOWS', 'X86_64');
+    expect(result.asset.sha256).toBe(expectedSha);
     expect(prisma.releaseAsset.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64',
         url: expect.stringContaining('/downloads/'),
-        filename: 'setup.exe', signature: 'dW50cnVzdGVk', sizeBytes: 100,
+        filename: 'setup.exe', sha256: expectedSha, sizeBytes: 100,
       }),
     });
   });
 
-  it('uploadAsset 无 .sig 时 signature 留空', async () => {
-    prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '0.0.2', channel: 'STABLE' });
-    prisma.releaseAsset.create.mockResolvedValue({
-      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'setup.exe', signature: '', sizeBytes: 100, createdAt: now,
-    });
-    const file = { originalname: 'setup.exe', buffer: Buffer.from('exe'), size: 100 };
-    const result = await service.uploadAsset('user-admin', 'release-1', file, undefined, 'WINDOWS', 'X86_64');
-    expect(result.asset.signature).toBe('');
-  });
-
   it('uploadAsset 未传 file 抛 bad_request', async () => {
-    await expect(service.uploadAsset('user-admin', 'release-1', undefined, undefined)).rejects.toMatchObject({ status: 400 });
+    await expect(service.uploadAsset('user-admin', 'release-1', undefined)).rejects.toMatchObject({ status: 400 });
     expect(prisma.releaseAsset.create).not.toHaveBeenCalled();
   });
 });

@@ -21,7 +21,6 @@ import type { Release, ReleaseAsset } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AppError, badRequest, notFound } from '../common';
 import { AuthService } from './auth.service';
-import { absoluteUpdateAssetUrl } from './release-url';
 import type {
   ReleaseAssetCreateDto,
   ReleaseCreateDto,
@@ -59,37 +58,6 @@ export class ReleaseService {
     return {
       ...public_,
       updateAvailable: query.currentVersion ? this.isNewer(release.version, query.currentVersion) : undefined,
-    };
-  }
-
-  /** GET /api/releases/tauri-update：Tauri updater 契约端点的数据源。
-   *  - Tauri updater 期望 endpoint 返回固定 JSON：{version, pub_date, url, signature, notes}（单 asset）。
-   *  - 复用 latest 的查询逻辑（同 channel 内 isLatest=true + PUBLISHED），挑出 platform/arch 均匹配的单个 asset。
-   *  - 返回 null 表示无更新（无已发布版本 / 无匹配平台产物），controller 据此返 HTTP 204（Tauri 判无更新）。
-   *  - 字段名严格遵循 Tauri 契约（pub_date 下划线，非 camelCase），不可改。 */
-  async tauriManifest(channel: 'STABLE' | 'BETA', platform?: string, arch?: string, baseUrl?: string) {
-    const release = await this.prisma.release.findFirst({
-      where: { channel, status: 'PUBLISHED', isLatest: true },
-      include: { assets: true },
-    });
-    if (!release) return null;
-
-    // 挑 platform + arch 均匹配的单个 asset。
-    // platform/arch 宽松接收（Tauri 上报值未做枚举校验），不匹配即 null（contract：无 asset = 无更新）。
-    const asset = release.assets.find(
-      (a) => (!platform || a.platform === platform) && (!arch || a.arch === arch),
-    );
-    if (!asset) return null;
-
-    return {
-      version: release.version,
-      // 安全修复 H9：publishedAt 为 null 时不可用 new Date() 兜底——
-      // Tauri updater 假设「同版本同 pub_date」，每次请求都返回当前时间会误判有新版本反复下载。
-      // 已发布但缺 publishedAt 属异常状态，返 null 让 Tauri 忽略该字段（比不稳定值安全）。
-      pub_date: release.publishedAt ? release.publishedAt.toISOString() : null,
-      url: absoluteUpdateAssetUrl(asset.url, baseUrl),
-      signature: asset.signature,
-      notes: release.notes,
     };
   }
 
@@ -237,7 +205,6 @@ export class ReleaseService {
         arch: dto.arch,
         url: dto.url,
         filename: dto.filename ?? '',
-        signature: dto.signature ?? '',
         sizeBytes: dto.sizeBytes ?? null,
       },
     });
@@ -252,13 +219,11 @@ export class ReleaseService {
 
   /** POST /api/admin/releases/:id/assets/upload：上传安装包文件到 downloads/ 目录，自动创建 asset。
    *  文件名加随机前缀防冲突（同版本重新上传不覆盖旧文件），url 指向 /downloads/<filename>。
-   *  可选附带 .sig 签名文件（field name=signature），有则读内容填入 asset.signature（updater 验签用）；
-   *  无则 signature 留空（仅下载场景，不接 updater）。 */
+   *  上传时自动计算文件 SHA-256 存入 asset.sha256（自制更新器下载后比对校验完整性，替代旧 minisign 签名）。 */
   async uploadAsset(
     actorId: string,
     id: string,
     file: { originalname: string; buffer?: Buffer; path?: string; size?: number } | undefined,
-    sigFile: { buffer?: Buffer; path?: string } | undefined,
     platform?: string,
     arch?: string,
   ) {
@@ -283,18 +248,18 @@ export class ReleaseService {
       copyFileSync(file.path, filePath);
     }
 
-    // 读取上传的 .sig 签名文件内容（如有），填入 asset.signature（updater 验签用）。
-    // 替代旧的「读同名 .sig」逻辑——前端现在直接上传 .sig，不再依赖 downloads/ 目录同名文件。
-    let signature = '';
-    if (sigFile) {
-      try {
+    // 计算安装包 SHA-256（自制更新器下载后比对校验完整性，替代旧的 minisign 签名）。
+    // buffer 模式直接 hash 内存；diskStorage 模式从落盘文件流式读取（大安装包不撑爆内存）。
+    let sha256 = '';
+    try {
+      if (file.buffer) {
+        sha256 = createHash('sha256').update(file.buffer).digest('hex');
+      } else {
         const { readFileSync } = require('node:fs');
-        signature = sigFile.buffer
-          ? sigFile.buffer.toString('utf-8').trim()
-          : readFileSync(sigFile.path, 'utf-8').trim();
-      } catch {
-        // .sig 读取失败不阻断上传（signature 留空，降级为仅下载）。
+        sha256 = createHash('sha256').update(readFileSync(filePath)).digest('hex');
       }
+    } catch {
+      // hash 失败不阻断上传（sha256 留空，更新器会因校验缺失拒绝该 asset，但下载链接仍可用）。
     }
 
     // 构建公开下载 URL（相对路径，由当前后端地址拼接）。
@@ -307,7 +272,7 @@ export class ReleaseService {
         arch: (arch || 'X86_64') as ReleaseAsset['arch'],
         url,
         filename: file.originalname,
-        signature,
+        sha256,
         sizeBytes: file.size ?? null,
       },
     });
@@ -317,7 +282,7 @@ export class ReleaseService {
       platform: asset.platform,
       arch: asset.arch,
       sizeBytes: file.size,
-      hasSignature: signature.length > 0,
+      sha256,
     });
     return { asset: this.publicAsset(asset) };
   }
@@ -372,7 +337,7 @@ export class ReleaseService {
     };
   }
 
-  /** 产物出参：signature 在已接入 updater 后才有意义，仍返回（前端按需展示）。 */
+  /** 产物出参：sha256 供自制更新器校验完整性；signature 已废弃但保留出参（恒空，前端不再展示）。 */
   private publicAsset(asset: ReleaseAsset) {
     return {
       id: asset.id,
@@ -380,6 +345,7 @@ export class ReleaseService {
       arch: asset.arch,
       url: asset.url,
       filename: asset.filename,
+      sha256: asset.sha256,
       signature: asset.signature,
       sizeBytes: asset.sizeBytes,
     };

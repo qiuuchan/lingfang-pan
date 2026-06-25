@@ -41,7 +41,7 @@ export class TestEmailDto {
 /** 可被 reveal-secret 解密的敏感配置 key 白名单。
  *  这些 key 都按密钥类配置保存，审计时只记录 configured，不记录明文。
  *  在 DTO 层用 @IsIn 强制，配合 service 层兜底，杜绝通过 reveal-secret 读取任意 key。 */
-export const REVEALABLE_SECRET_KEYS = ['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken'] as const;
+export const REVEALABLE_SECRET_KEYS = ['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken', 'tavilyApiKey', 'braveApiKey'] as const;
 export type RevealableSecretKey = (typeof REVEALABLE_SECRET_KEYS)[number];
 
 /** POST /api/admin/settings/reveal-secret 入参：admin 当前密码 + 要查看的敏感 key。

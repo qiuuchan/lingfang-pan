@@ -177,6 +177,8 @@ interface ApiOptions {
   method?: string;
   body?: unknown;
   auth?: boolean;
+  // multipart 上传：传 FormData 时跳过 JSON.stringify 与 application/json 头（浏览器自动加 boundary）。
+  formData?: FormData;
   // 请求超时（毫秒）。DESK-01 / DESK-SHELL-02 修复：默认 30s，
   // 超时后 abort fetch 并抛友好错误，避免后端挂起时 UI 加载态永久冻结。
   timeoutMs?: number;
@@ -185,9 +187,12 @@ interface ApiOptions {
 // 默认请求超时（30s）。覆盖 fetch 原生「无超时」行为，与浏览器默认 connection timeout 解耦。
 const DEFAULT_API_TIMEOUT_MS = 30_000;
 
-export async function api<T = any>(path: string, { method = 'GET', body, auth = true, timeoutMs = DEFAULT_API_TIMEOUT_MS }: ApiOptions = {}): Promise<T> {
+export async function api<T = any>(path: string, { method = 'GET', body, auth = true, formData, timeoutMs = DEFAULT_API_TIMEOUT_MS }: ApiOptions = {}): Promise<T> {
   // 客户端标识：用于后端日志/来源区分，不作为验证码或权限信任边界。
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Client': 'desktop' };
+  // multipart 上传时不设 Content-Type，交给浏览器自动加 boundary（设了反而会破坏 multipart 解析）。
+  const isFormData = formData instanceof FormData;
+  const headers: Record<string, string> = { 'X-Client': 'desktop' };
+  if (!isFormData) headers['Content-Type'] = 'application/json';
   if (auth && authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
   const base = apiBase();
@@ -197,7 +202,7 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
   const controller = timeoutMs > 0 ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    res = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller?.signal });
+    res = await fetch(base + path, { method, headers, body: isFormData ? formData : (body ? JSON.stringify(body) : undefined), signal: controller?.signal });
   } catch (err) {
     // AbortError → 友好的超时提示；其余网络错误 → 连接失败提示。
     // R6：两类都属「后端不可达」，派发 BACKEND_UNREACHABLE_EVENT 让 App 渲染友好页（替代反复 toast）。

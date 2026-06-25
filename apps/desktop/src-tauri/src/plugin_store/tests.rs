@@ -379,6 +379,7 @@ fn plugin_meta_serializes_snake_case() {
         pid: Some(42),
         started_at: Some("123Z".into()),
         detail: None,
+        icon: None,
     };
     let json = serde_json::to_string(&meta).unwrap();
     assert!(json.contains("\"started_at\""));
