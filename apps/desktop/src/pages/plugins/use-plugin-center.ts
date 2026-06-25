@@ -14,6 +14,11 @@ import { errorMessage, loadPlugins } from '../plugins-runtime';
 
 export const PLUGIN_PAGE_SIZE = 6;
 
+function hasTauriRuntime(): boolean {
+  return typeof window !== 'undefined'
+    && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+}
+
 // 路线 A：插件中心改为悬浮窗后，tab 不再映射 view（已删 plugins/author-center/market view）。
 // PluginCenterTab 类型随之内聚到本模块，供悬浮窗内部本地 state 使用。
 // task 06-25：新增 'draft'（我的草稿）—— AI 创建器保存的本地草稿插件。
@@ -112,7 +117,9 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
   const openTeamPlugin = useCallback(async (plugin: LoadedPlugin) => {
     const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
     try {
-      if (!plugin.builtin && runtime !== 'cloud') await ensurePluginPackagePersisted(plugin);
+      // 浏览器直连 Vite 时没有 Tauri 文件系统，不能写入本地插件目录；
+      // 若后端已内联 files，可直接交给 PluginRunner 用 iframe 运行。
+      if (hasTauriRuntime() && !plugin.builtin && runtime !== 'cloud') await ensurePluginPackagePersisted(plugin);
       setRunningPlugin(plugin);
     } catch (caught) {
       toast.error(errorMessage(caught));

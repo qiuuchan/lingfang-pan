@@ -2,10 +2,28 @@
 //
 // 重点回归：AI 生成插件常漏文件（缺入口/依赖清单），校验须按 runtime 拦截并给可执行报错。
 import { describe, it, expect } from 'vitest';
-import { validateStagedFiles, validateStagedCompleteness } from '@/lib/plugin-creator/creator-tools';
+import {
+  validateStagedFiles,
+  validateStagedCompleteness,
+  withSyncedStagedManifest,
+  type StagedPlugin,
+} from '@/lib/plugin-creator/creator-tools';
 import type { DraftFile } from '@/lib/types';
 
 const f = (path: string, content = ''): DraftFile => ({ path, content });
+
+const stagedDraft = (patch: Partial<StagedPlugin> = {}): StagedPlugin => ({
+  id: 'e2e-smoke-20260625-2155',
+  name: 'E2E Smoke 20260625 2155',
+  version: '0.1.0',
+  description: '最小可运行前端插件，用于端到端测试。',
+  runtime_type: 'client',
+  entry: 'ui/index.html',
+  visibility: 'tenant',
+  capabilities: [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low', requires_admin: false }],
+  files: [f('ui/index.html', '<!doctype html><html></html>')],
+  ...patch,
+});
 
 describe('validateStagedFiles', () => {
   it('空文件集合报错', () => {
@@ -73,5 +91,43 @@ describe('validateStagedCompleteness', () => {
   it('基础校验失败优先返回（入口不在 files）', () => {
     const err = validateStagedCompleteness('python', 'main.py', [f('requirements.txt')]);
     expect(err).toBe('入口文件 main.py 不在 files 中');
+  });
+});
+
+describe('withSyncedStagedManifest', () => {
+  it('缺 manifest.json 时自动补齐清单文件', () => {
+    const synced = withSyncedStagedManifest(stagedDraft());
+
+    const manifestFile = synced.files.find((file) => file.path === 'manifest.json');
+    expect(manifestFile).toBeTruthy();
+
+    const parsed = JSON.parse(manifestFile?.content ?? '{}');
+    expect(parsed).toMatchObject({
+      id: 'e2e-smoke-20260625-2155',
+      name: 'E2E Smoke 20260625 2155',
+      version: '0.1.0',
+      description: '最小可运行前端插件，用于端到端测试。',
+      entry: 'ui/index.html',
+      runtime_type: 'client',
+      visibility: 'tenant',
+    });
+    expect(parsed.capabilities).toHaveLength(1);
+    expect(parsed.capabilities[0]).toMatchObject({ kind: 'ui.view' });
+    expect(synced.files.some((file) => file.path === 'ui/index.html')).toBe(true);
+  });
+
+  it('已有旧 manifest.json 时只替换不重复', () => {
+    const synced = withSyncedStagedManifest(stagedDraft({
+      name: 'Updated Name',
+      files: [
+        f('manifest.json', '{"name":"old"}'),
+        f('ui/index.html', '<html></html>'),
+      ],
+    }));
+
+    const manifests = synced.files.filter((file) => file.path === 'manifest.json');
+    expect(manifests).toHaveLength(1);
+    expect(JSON.parse(manifests[0].content).name).toBe('Updated Name');
+    expect(synced.files.some((file) => file.path === 'ui/index.html')).toBe(true);
   });
 });
