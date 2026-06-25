@@ -4,6 +4,7 @@
 // 后端：/api/teams/current/* （members/roles/plugins/grants/invitations/balance）。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { AnimatePresence, motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { useApp } from '@/App';
 import { isTeamManager } from '@/lib/permissions';
@@ -76,21 +77,41 @@ export function TeamAdmin() {
             <TabsTrigger value="invitations">邀请码与设置</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview">
-            <OverviewCard team={team} profile={profile} memberCount={memberCount} loading={loading} onProfileSaved={setProfile} />
-          </TabsContent>
-          <TabsContent value="members">
-            <MembersTab />
-          </TabsContent>
-          <TabsContent value="roles">
-            <RolesTab />
-          </TabsContent>
-          <TabsContent value="grants">
-            <PluginGrantsTab />
-          </TabsContent>
-          <TabsContent value="invitations">
-            <InvitationsTab />
-          </TabsContent>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={tab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {tab === 'overview' && (
+                <TabsContent value="overview">
+                  <OverviewCard team={team} profile={profile} memberCount={memberCount} loading={loading} onProfileSaved={setProfile} />
+                </TabsContent>
+              )}
+              {tab === 'members' && (
+                <TabsContent value="members">
+                  <MembersTab />
+                </TabsContent>
+              )}
+              {tab === 'roles' && (
+                <TabsContent value="roles">
+                  <RolesTab />
+                </TabsContent>
+              )}
+              {tab === 'grants' && (
+                <TabsContent value="grants">
+                  <PluginGrantsTab />
+                </TabsContent>
+              )}
+              {tab === 'invitations' && (
+                <TabsContent value="invitations">
+                  <InvitationsTab />
+                </TabsContent>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </Tabs>
       </div>
     </div>

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/App';
 import { errorMessage } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
@@ -59,6 +60,9 @@ export function Settings({
   onValueChange?: (value: string) => void;
 }) {
   const { backendUrl } = useApp();
+  // 当前激活 Tab（用于动画 key）：受控时用 value，否则用内部 state。
+  const [internalTab, setInternalTab] = useState('cli');
+  const currentTab = value !== undefined ? value : internalTab;
 
 
   // === Tab3 检查更新 state（design §3.2） ===
@@ -171,7 +175,7 @@ export function Settings({
     <div className="mx-auto w-full max-w-5xl">
       <Tabs
         // value 未传时走 defaultValue（非受控，保持原行为）；传了则受控，支持父组件定向跳 Tab。
-        {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli' })}
+        {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli', onValueChange: (v: unknown) => { if (typeof v === 'string') setInternalTab(v); } })}
       >
         <TabsList className="inline-flex w-fit max-w-full gap-1">
           <TabsTrigger value="general" className="px-3">通用</TabsTrigger>
@@ -181,47 +185,67 @@ export function Settings({
           <TabsTrigger value="backend" className="px-3">更新</TabsTrigger>
         </TabsList>
 
-        {/* 项 11：通用（关窗行为等应用级偏好） */}
-        <TabsContent value="general" keepMounted className="mt-4 focus-visible:outline-none">
-          <GeneralTab />
-        </TabsContent>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            {/* 项 11：通用（关窗行为等应用级偏好） */}
+            {currentTab === 'general' && (
+              <TabsContent value="general" keepMounted className="mt-4 focus-visible:outline-none">
+                <GeneralTab />
+              </TabsContent>
+            )}
 
-        {/* Tab1：脚本运行时管理 */}
-        <TabsContent value="cli" keepMounted className="mt-4 focus-visible:outline-none">
-          <CliRuntimeTab
-            runtimeResults={runtimeResults}
-            probing={probing}
-            onProbeAll={() => { void probeAll(); }}
-          />
-        </TabsContent>
+            {/* Tab1：脚本运行时管理 */}
+            {currentTab === 'cli' && (
+              <TabsContent value="cli" keepMounted className="mt-4 focus-visible:outline-none">
+                <CliRuntimeTab
+                  runtimeResults={runtimeResults}
+                  probing={probing}
+                  onProbeAll={() => { void probeAll(); }}
+                />
+              </TabsContent>
+            )}
 
-        {/* Tab2：模型与计费（团队灵石 + API Key + 版本，替代旧 BYOK ModelGatewayTab） */}
-        <TabsContent value="gateway" keepMounted className="mt-4 focus-visible:outline-none">
-          <BillingTab />
-        </TabsContent>
+            {/* Tab2：模型与计费（团队灵石 + API Key + 版本，替代旧 BYOK ModelGatewayTab） */}
+            {currentTab === 'gateway' && (
+              <TabsContent value="gateway" keepMounted className="mt-4 focus-visible:outline-none">
+                <BillingTab />
+              </TabsContent>
+            )}
 
-        {/* Tab：插件存放路径配置（组A，PRD 需求 6 / AC7） */}
-        <TabsContent value="plugins" keepMounted className="mt-4 focus-visible:outline-none">
-          <PluginsTab />
-        </TabsContent>
+            {/* Tab：插件存放路径配置（组A，PRD 需求 6 / AC7） */}
+            {currentTab === 'plugins' && (
+              <TabsContent value="plugins" keepMounted className="mt-4 focus-visible:outline-none">
+                <PluginsTab />
+              </TabsContent>
+            )}
 
-        {/* Tab：检查更新 */}
-        <TabsContent value="backend" keepMounted className="mt-4 focus-visible:outline-none">
-          <Card className="w-full">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <RefreshCwIcon className="size-5 text-primary" />
-                <CardTitle>更新</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
-              <Button variant="outline" onClick={() => setChangelogOpen(true)}>
-                <HistoryIcon className="size-4" />查看更新日志
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
+            {/* Tab：检查更新 */}
+            {currentTab === 'backend' && (
+              <TabsContent value="backend" keepMounted className="mt-4 focus-visible:outline-none">
+                <Card className="w-full">
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <RefreshCwIcon className="size-5 text-primary" />
+                      <CardTitle>更新</CardTitle>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-2">
+                    <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
+                    <Button variant="outline" onClick={() => setChangelogOpen(true)}>
+                      <HistoryIcon className="size-4" />查看更新日志
+                    </Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </Tabs>
 
       {/* 更新 Dialog（design §3.2/§3.3）：发现新版本时展示 changelog + 进度条 + 立即更新。
