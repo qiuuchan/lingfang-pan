@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, type Ref, type RefObject } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon, ExternalLinkIcon } from 'lucide-react';
+import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon, ExternalLinkIcon, WandSparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
 import { ScriptPreviewPanel } from '@/components/plugins/ScriptPreviewPanel';
+import { PluginLaunchScreen } from '@/components/plugins/PluginLaunchScreen';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { parseManifest } from '@/lib/plugin-draft';
 import type { ScriptRuntime } from '@/lib/plugin-script';
 import { dragRegionProps } from '@/lib/window-drag';
 import { openPluginInWindow } from '@/lib/plugin-window';
+import { ErrorBubble } from '@/components/chat/ErrorBubble';
+import { toCreatorError, type CreatorError } from '@/lib/creator-error';
 import {
-  errorMessage,
   handleRuntimeCall,
   loadPluginDocument,
   runtimeMessage,
@@ -24,7 +26,7 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 }
 
 export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
-  const { setCurrentDraft, setView, setRunningPlugin, session, setPendingAutoFixPrompt } = useApp();
+  const { setCurrentDraft, setView, setRunningPlugin, session, setPendingAutoFix } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
   const document = usePluginDocument(plugin, runtime);
@@ -33,7 +35,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
   const actions = usePluginRunnerActions({
     plugin,
     setCurrentDraft,
-    setPendingAutoFixPrompt,
+    setPendingAutoFix,
     setRunningPlugin,
     setView,
   });
@@ -57,6 +59,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
       <RunnerContent
         error={document.error}
         iframeRef={iframeRef}
+        loading={document.loading}
         onAutoFix={actions.handleAutoFix}
         onRefreshScript={() => setScriptPreviewKey((key) => key + 1)}
         plugin={plugin}
@@ -84,21 +87,27 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
 
 function usePluginDocument(plugin: LoadedPlugin, runtime: string) {
   const [srcDoc, setSrcDoc] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState<CreatorError | null>(null);
+  // 统一中转页：HTML 文档加载期间为 loading=true，展示统一「启动中」视觉，成功后切 iframe。
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isScriptRuntime(runtime) || runtime === 'cloud') return;
+    setLoading(true);
     void (async () => {
       try {
-        setError('');
+        setError(null);
         setSrcDoc(await loadPluginDocument(plugin));
       } catch (caught) {
-        setError(errorMessage(caught));
+        // HTML 插件入口读取/加载失败：包成结构化错误（标题+建议+raw），可让 AI 修。
+        setError(toCreatorError('entry_load_failed', caught));
+      } finally {
+        setLoading(false);
       }
     })();
   }, [plugin, runtime]);
 
-  return { error, srcDoc };
+  return { error, loading, srcDoc };
 }
 
 function usePluginBridge(plugin: LoadedPlugin, iframeRef: RefObject<HTMLIFrameElement>) {
@@ -117,6 +126,7 @@ function usePluginBridge(plugin: LoadedPlugin, iframeRef: RefObject<HTMLIFrameEl
 function RunnerContent({
   error,
   iframeRef,
+  loading,
   onAutoFix,
   onRefreshScript,
   plugin,
@@ -124,8 +134,9 @@ function RunnerContent({
   scriptPreviewKey,
   srcDoc,
 }: {
-  error: string;
+  error: CreatorError | null;
   iframeRef: Ref<HTMLIFrameElement>;
+  loading: boolean;
   onAutoFix: (stderr: string) => void;
   onRefreshScript: () => void;
   plugin: LoadedPlugin;
@@ -145,7 +156,7 @@ function RunnerContent({
     );
   }
   if (runtime === 'cloud') return <CloudRuntimeNotice plugin={plugin} />;
-  return <RunnerBody error={error} iframeRef={iframeRef} plugin={plugin} srcDoc={srcDoc} />;
+  return <RunnerBody error={error} iframeRef={iframeRef} loading={loading} onAutoFix={onAutoFix} plugin={plugin} srcDoc={srcDoc} />;
 }
 
 function ScriptRunner({
@@ -220,27 +231,46 @@ function RunnerHeader({
 function RunnerBody({
   error,
   iframeRef,
+  loading,
+  onAutoFix,
   plugin,
   srcDoc,
 }: {
-  error: string;
+  error: CreatorError | null;
   iframeRef: Ref<HTMLIFrameElement>;
+  loading: boolean;
+  onAutoFix: (stderr: string) => void;
   plugin: LoadedPlugin;
   srcDoc: string;
 }) {
+  // 仅对有源码的非内置插件提供「让 AI 修复」（内置插件源码不在前端，无法交 AI 改）。
+  const canAutoFix = !plugin.builtin && Boolean(plugin.files?.length);
+  if (error) {
+    return (
+      <div className="relative min-h-0 flex-1 bg-muted/30">
+        <div className="space-y-3 p-4">
+          <ErrorBubble error={error} />
+          {canAutoFix && (
+            <Button variant="outline" size="sm" onClick={() => onAutoFix(error.raw || error.title)}>
+              <WandSparklesIcon className="mr-1 size-3.5" />
+              让 AI 修复
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  // 统一中转页：HTML 文档加载中显示「启动中」，与脚本类启动体验一致。
+  if (loading) return <PluginLaunchScreen pluginName={plugin.name} hint="正在加载插件页面…" />;
   return (
     <div className="relative min-h-0 flex-1 bg-muted/30">
-      {error ? (
-        <p className="p-4 text-sm text-destructive">{error}</p>
-      ) : (
-        <iframe
-          ref={iframeRef}
-          title={plugin.name}
-          sandbox="allow-scripts allow-forms allow-popups"
-          srcDoc={srcDoc}
-          className="absolute inset-0 h-full w-full border-0 bg-white"
-        />
-      )}
+      <iframe
+        ref={iframeRef}
+        title={plugin.name}
+        sandbox="allow-scripts allow-forms allow-popups"
+        srcDoc={srcDoc}
+        className="absolute inset-0 h-full w-full border-0 bg-white"
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { ImageIcon, RocketIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { RocketIcon, PencilIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,17 +17,15 @@ import { api, type ApiError } from '@/lib/api';
 import { yuanToCents } from '@/lib/money';
 import type { LoadedPlugin } from '@/lib/types';
 import { dragRegionProps } from '@/lib/window-drag';
-import { PluginIcon, readPluginIcon } from './shared';
-
-const ICON_MAX_IMAGE_BYTES = 47 * 1024;
+import { readPluginIcon } from './shared';
 
 export function PluginMetaEditDialog({ plugin, onSaved }: { plugin: LoadedPlugin; onSaved?: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  // 去图标 UI 后仍保留 icon 值原样回写，避免编辑名称/描述时清空已有 manifest.icon。
   const [icon, setIcon] = useState('');
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -36,21 +34,6 @@ export function PluginMetaEditDialog({ plugin, onSaved }: { plugin: LoadedPlugin
       setIcon(readPluginIcon(plugin) || '');
     }
   }, [open, plugin]);
-
-  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    if (/svg/i.test(file.type)) return toast.error('图标不支持 SVG 格式，请使用 PNG/JPG/WebP');
-    if (!/^image\//i.test(file.type)) return toast.error('请选择图片文件');
-    if (file.size > ICON_MAX_IMAGE_BYTES) {
-      return toast.error(`图片过大（${Math.round(file.size / 1024)}KB），请压缩到 48KB 以内`);
-    }
-    const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === 'string') setIcon(reader.result); };
-    reader.onerror = () => toast.error('读取图片失败');
-    reader.readAsDataURL(file);
-  }
 
   async function save() {
     const trimmedName = name.trim();
@@ -74,12 +57,12 @@ export function PluginMetaEditDialog({ plugin, onSaved }: { plugin: LoadedPlugin
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!saving) setOpen(o); }}>
       <Button variant="ghost" size="icon-sm" title="编辑插件信息" onClick={() => setOpen(true)}>
-        <ImageIcon className="size-4" />
+        <PencilIcon className="size-4" />
       </Button>
       <DialogContent>
         <DialogHeader {...dragRegionProps}>
           <DialogTitle data-tauri-drag-region>编辑插件信息</DialogTitle>
-          <DialogDescription>修改名称、描述与图标，不影响源码与审核状态。</DialogDescription>
+          <DialogDescription>修改名称与描述，不影响源码与审核状态。</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -89,27 +72,6 @@ export function PluginMetaEditDialog({ plugin, onSaved }: { plugin: LoadedPlugin
           <div className="space-y-1.5">
             <Label htmlFor="plugin-meta-desc">描述</Label>
             <Textarea id="plugin-meta-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="一句话说明插件功能" />
-          </div>
-          <div className="space-y-1.5">
-            <Label>图标</Label>
-            <div className="flex items-center gap-3">
-              <PluginIcon icon={icon} className="size-10 rounded-lg object-cover" />
-              <div className="flex flex-col gap-1.5">
-                <Input
-                  value={/^data:image\//i.test(icon) ? '' : icon}
-                  onChange={(e) => setIcon(e.target.value)}
-                  placeholder="填 emoji（如 🧩）"
-                  className="w-40"
-                  disabled={/^data:image\//i.test(icon)}
-                />
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>选择图片</Button>
-                  {icon && <Button variant="ghost" size="sm" onClick={() => setIcon('')}>清除</Button>}
-                </div>
-              </div>
-              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={onPickFile} />
-            </div>
-            <p className="text-xs text-muted-foreground">支持 emoji 或图片（PNG/JPG/WebP，≤48KB，不支持 SVG）。</p>
           </div>
         </div>
         <DialogFooter>

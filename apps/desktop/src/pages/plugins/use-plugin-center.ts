@@ -68,8 +68,17 @@ export function useLocalPluginList(runningPlugin: LoadedPlugin | null) {
 export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => void) {
   const openLocalPlugin = useCallback(async (item: LocalPluginStatus) => {
     try {
+      // 统一中转页：所有本地插件（client/nodejs/python）都进 PluginRunner（= 统一启动中转页）。
+      // 读取 manifest.json（脚本类 ScriptPreviewPanel parseManifest 需要）+ 入口文件（HTML iframe 需要）。
+      // manifest 读取失败不阻断（HTML 插件可能无 manifest，回退仅入口文件）。
       const entryContent = await readLocalPluginFile(item.id, item.entry);
-      setRunningPlugin(localStatusToPlugin(item, entryContent));
+      let manifestContent: string | null = null;
+      try {
+        manifestContent = await readLocalPluginFile(item.id, 'manifest.json');
+      } catch {
+        manifestContent = null;
+      }
+      setRunningPlugin(localStatusToPlugin(item, entryContent, manifestContent));
     } catch (caught) {
       toast.error(`打开本地插件失败：${errorMessage(caught)}`);
     }
@@ -92,7 +101,11 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
   return { openLocalPlugin, openTeamPlugin, openLocalRoot };
 }
 
-function localStatusToPlugin(item: LocalPluginStatus, entryContent: string): LoadedPlugin {
+function localStatusToPlugin(item: LocalPluginStatus, entryContent: string, manifestContent: string | null): LoadedPlugin {
+  // 保留真实 runtime（之前硬编码 'client' 导致脚本类无法进 Runner），让 PluginRunner 正确分派：
+  // client→iframe，nodejs/python→ScriptPreviewPanel（中转页分阶段启动）。
+  const files = [{ path: item.entry, content: entryContent }];
+  if (manifestContent != null) files.unshift({ path: 'manifest.json', content: manifestContent });
   return {
     id: item.id,
     name: item.name,
@@ -100,8 +113,8 @@ function localStatusToPlugin(item: LocalPluginStatus, entryContent: string): Loa
     version: item.version,
     entry: item.entry,
     builtin: false,
-    runtime_type: 'client',
+    runtime_type: item.runtime,
     status: item.status,
-    files: [{ path: item.entry, content: entryContent }],
+    files,
   };
 }

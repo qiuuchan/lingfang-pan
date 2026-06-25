@@ -6,12 +6,10 @@ import type { LoadedPlugin } from '@/lib/types';
 import {
   isAuthorManaged,
   PluginDeleteDialog,
-  PluginIcon,
   PluginMetaEditDialog,
   PluginPriceEditDialog,
   PluginStatusToggle,
   PluginSubmitDialog,
-  readPluginIcon,
 } from '@/components/plugins/author-actions';
 
 const SOURCE_LABEL: Record<NonNullable<LoadedPlugin['source']>, string> = {
@@ -75,7 +73,6 @@ function TeamPluginSummary({
 }) {
   return (
     <>
-      <PluginIcon icon={readPluginIcon(plugin)} className="size-10 shrink-0 rounded-lg object-cover" />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{plugin.name}</span>

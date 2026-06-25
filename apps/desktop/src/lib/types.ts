@@ -134,6 +134,16 @@ export interface PluginDraft {
   [k: string]: unknown;
 }
 
+// 一键 AI 修复跨页载荷：插件启动/运行报错 → 跳创建器（FloatingCreator）预填。
+// 携带预填提示词（报错 + 修复指引）+ 出错插件（作为引用注入源码，让 AI 基于现有代码改）。
+// 创建器消费后即清空（用完即弃），不持久化。
+export interface PendingAutoFix {
+  /** 预填到创建器输入框的提示词：插件信息 + 报错 + 修复指引。 */
+  prompt: string;
+  /** 出错插件：作为 referencedPlugin 注入源码到上下文。 */
+  plugin: LoadedPlugin;
+}
+
 export interface LoadedPlugin {
   id: string;
   name: string;

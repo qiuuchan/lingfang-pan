@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { InfoIcon, PlayIcon, SquareIcon, Trash2Icon } from 'lucide-react';
+import { InfoIcon, SquareIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
-import { PluginIcon } from '@/components/plugins/author-actions';
 import {
   Dialog,
   DialogContent,
@@ -18,7 +17,6 @@ import type { DraftFile } from '@/lib/types';
 import {
   deletePlugin,
   readLocalPluginFile,
-  startPlugin,
   stopPlugin,
   STATUS_DISPLAY,
   STATUS_VARIANT,
@@ -79,12 +77,12 @@ function useLocalManifestState(item: LocalPluginStatus) {
 function useLocalRunState(item: LocalPluginStatus) {
   const [busy, setBusy] = useState(false);
 
-  async function toggleRun() {
+  // 仅保留「停止」便捷入口（运行中的脚本）。启动统一走「打开」进 PluginRunner 中转页。
+  async function stopRun() {
     setBusy(true);
     try {
-      if (item.status === 'running') await stopPlugin(item.id);
-      else await startPlugin(item.id);
-      toast.success(item.status === 'running' ? '插件已停止' : '插件已启动，运行在独立进程');
+      await stopPlugin(item.id);
+      toast.success('插件已停止');
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -92,7 +90,7 @@ function useLocalRunState(item: LocalPluginStatus) {
     }
   }
 
-  return { busy, toggleRun };
+  return { busy, stopRun };
 }
 
 function useLocalDeleteState(item: LocalPluginStatus, onDeleted: () => void) {
@@ -119,7 +117,6 @@ function useLocalDeleteState(item: LocalPluginStatus, onDeleted: () => void) {
 function LocalPluginSummary({ item }: { item: LocalPluginStatus }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3">
-      <PluginIcon icon={item.icon} className="size-10 shrink-0 rounded-lg object-cover" />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{item.name}</span>
@@ -143,8 +140,9 @@ function LocalPluginActions({
   row: LocalPluginRowState;
   onOpen: (item: LocalPluginStatus) => void;
 }) {
-  const isScript = item.runtime === 'nodejs' || item.runtime === 'python';
-  const canOpen = item.runtime === 'client' && item.status !== 'error';
+  const isRunning = item.status === 'running';
+  // 统一启动：所有运行时都通过「打开」进 PluginRunner 中转页（client→iframe，脚本→分阶段启动）。
+  // status==='error'/'incomplete' 也允许打开——中转页会显示具体错误 + 「让 AI 修复」，比禁用更有用。
   return (
     <div className="flex shrink-0 items-center gap-2">
       <span className="text-xs text-muted-foreground">v{item.version}</span>
@@ -154,27 +152,14 @@ function LocalPluginActions({
       <Button variant="ghost" size="icon-sm" onClick={() => row.setDeleteOpen(true)} title="删除本地插件">
         <Trash2Icon className="size-3.5" />
       </Button>
-      {isScript && <RunButton item={item} row={row} />}
-      {canOpen && <Button variant="default" size="sm" onClick={() => onOpen(item)}>打开</Button>}
+      {/* 运行中的脚本：便捷「停止」（无需进 Runner）。 */}
+      {isRunning && (
+        <LoadingButton variant="destructive" size="sm" loading={row.busy} onClick={row.stopRun}>
+          <SquareIcon className="size-3.5" />停止
+        </LoadingButton>
+      )}
+      <Button variant="default" size="sm" onClick={() => onOpen(item)}>打开</Button>
     </div>
-  );
-}
-
-function RunButton({ item, row }: { item: LocalPluginStatus; row: LocalPluginRowState }) {
-  const isRunning = item.status === 'running';
-  const disabled = item.status === 'incomplete' || item.status === 'error';
-  return (
-    <LoadingButton
-      variant={isRunning ? 'destructive' : 'default'}
-      size="sm"
-      loading={row.busy}
-      disabled={disabled}
-      onClick={row.toggleRun}
-      title={disabled ? '插件未就绪，无法运行' : undefined}
-    >
-      {isRunning ? <SquareIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />}
-      {isRunning ? '停止' : '运行'}
-    </LoadingButton>
   );
 }
 

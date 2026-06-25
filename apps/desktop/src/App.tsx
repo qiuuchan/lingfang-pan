@@ -3,8 +3,9 @@ import { Loader2Icon, XIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, clearApiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
-import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
+import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
+import { checkUpdate } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
@@ -30,6 +31,7 @@ const PluginCenterDialog = lazy(() => import('@/components/plugins/PluginCenterD
 const PluginRunner = lazy(() => import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
 const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
+const HelpFeedback = lazy(() => import('./pages/HelpFeedback').then((m) => ({ default: m.HelpFeedback })));
 // 项 14：AccountDialog 已删，其承载的功能改为各自由 PanelDialog 包裹的独立悬浮窗，
 // 在 App 顶层懒加载挂载（与原 AccountDialog 内的懒加载同款）。
 // 06-24 计费钱包重构：原「钱包」(Wallet) + 「团队空间」(TeamHome) 两页合并为「团队钱包」(TeamWallet)。
@@ -65,16 +67,18 @@ interface AppContextValue {
   openNotifications: () => void;
   /** 项 5：打开团队管理居中悬浮窗。 */
   openTeamAdmin: () => void;
+  /** 帮助与反馈：打开工单中心悬浮窗。 */
+  openHelpFeedback: () => void;
   /** 路线 A：打开插件中心悬浮窗（可选初始 tab：本地/团队/市场）。 */
   openPluginCenter: (tab?: PluginCenterTab) => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
   modelConfigVersion: number;
   bumpModelConfig: () => void;
-  // 一键修复跨页传递：Plugins 页运行崩溃 → 设 stderr prompt → 跳创建器 → 创建器读取并自动 send。
-  // 用完即清（null），无持久化必要。
-  pendingAutoFixPrompt: string | null;
-  setPendingAutoFixPrompt: (prompt: string | null) => void;
+  // 一键修复跨页传递：插件启动/运行报错 → 设结构化载荷（提示词 + 出错插件）→ 跳创建器 →
+  // 创建器读取并预填输入框 + 引用插件源码（不自动发送，用户点发送即修）。用完即清（null），无持久化必要。
+  pendingAutoFix: PendingAutoFix | null;
+  setPendingAutoFix: (fix: PendingAutoFix | null) => void;
   // 云同步平台信息：platformName/logoUrl（GET /api/platform-info @Public），供侧栏 / 落地展示。
   // admin 改名后全端拉同一值；未配置时为默认 'LingFang' 与空 logoUrl（前端用图标 fallback）。
   platformName: string;
@@ -250,6 +254,8 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   // 项 5：团队管理改为居中悬浮窗（原主区页面导航）。
   const [teamAdminOpen, setTeamAdminOpen] = useState(false);
+  // 帮助与反馈：工单中心悬浮窗。
+  const [helpFeedbackOpen, setHelpFeedbackOpen] = useState(false);
   // 路线 A：插件中心改为居中悬浮窗（取代原 plugins/author-center/market 主区页）。
   const [pluginCenterOpen, setPluginCenterOpen] = useState(false);
   const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('local');
@@ -281,8 +287,8 @@ export default function App() {
   // 保留 no-op 存根维持 useApp 形状稳定，避免大面积类型改动。
   const modelConfigVersion = 0;
   const bumpModelConfig = useCallback(() => undefined, []);
-  // 一键修复：Plugins 页设 stderr prompt，跳创建器后创建器读取并自动 send 给 AI 修。
-  const [pendingAutoFixPrompt, setPendingAutoFixPrompt] = useState<string | null>(null);
+  // 一键修复：插件启动/运行报错时设结构化载荷（提示词 + 出错插件），跳创建器后预填并引用源码给 AI 修。
+  const [pendingAutoFix, setPendingAutoFix] = useState<PendingAutoFix | null>(null);
   // 云同步平台信息：GET /api/platform-info（@Public），backendUrl 已配置时拉取。
   // platformName 缺省 'LingFang'，logoUrl 缺省空串。admin 改名后全端拉同一值（侧栏 header 同步）。
   const [platformName, setPlatformName] = useState('灵坊');
@@ -303,6 +309,8 @@ export default function App() {
   const openNotifications = useCallback(() => setNotifOpen(true), []);
   // 项 5：打开团队管理居中悬浮窗。
   const openTeamAdmin = useCallback(() => setTeamAdminOpen(true), []);
+  // 帮助与反馈：打开工单中心悬浮窗。
+  const openHelpFeedback = useCallback(() => setHelpFeedbackOpen(true), []);
   // 路线 A：打开插件中心悬浮窗（带可选初始 tab，承接原 market 直达语义）。
   const openPluginCenter = useCallback((tab?: PluginCenterTab) => {
     if (tab) setPluginCenterTab(tab);
@@ -501,6 +509,37 @@ export default function App() {
     };
   }, [backendUrl]);
 
+  // R9 启动静默检查更新：登录后后台查一次 /api/releases/latest，有更新弹非阻塞 toast 引导去设置页更新。
+  // 用 sessionStorage 标记「本次启动已检查」避免重复打扰（租户切换/重渲染不重复弹）。
+  // 失败静默（网络/无更新均不打扰），仅 Tauri 桌面环境执行（checkUpdate 走 Tauri 命令）。
+  useEffect(() => {
+    if (!backendUrl || !session.token) return;
+    const isTauri = Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+    if (!isTauri) return;
+    const FLAG = 'lf:update-checked-this-launch';
+    if (sessionStorage.getItem(FLAG)) return;
+    sessionStorage.setItem(FLAG, '1');
+
+    let cancelled = false;
+    checkUpdate(backendUrl)
+      .then((meta) => {
+        if (cancelled || !meta) return;
+        void import('sonner').then(({ toast }) => {
+          toast.info(`发现新版本 ${meta.version}`, {
+            description: '前往设置 → 检查更新可立即升级。',
+            action: { label: '去更新', onClick: () => openAccountSettings('settings', 'gateway') },
+            duration: 8000,
+          });
+        });
+      })
+      .catch(() => {
+        /* 静默：网络失败 / 无更新均不打扰用户 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl, session.token, openAccountSettings]);
+
   useEffect(() => {
     setPinnedPlugins(loadPins(session.tenantId));
   }, [session.tenantId]);
@@ -619,9 +658,9 @@ export default function App() {
     runningPlugin, setRunningPlugin,
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
     settingsTab, setSettingsTab,
-    openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter,
+    openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
     modelConfigVersion, bumpModelConfig,
-    pendingAutoFixPrompt, setPendingAutoFixPrompt,
+    pendingAutoFix, setPendingAutoFix,
     platformName, platformLogoUrl,
     openSearch,
   };
@@ -737,6 +776,10 @@ export default function App() {
       {/* 项 5：团队管理居中悬浮窗（TeamAdmin 页，仅团队管理员；权限门控在 AvatarMenu 入口）。 */}
       <PanelDialog open={teamAdminOpen} onOpenChange={setTeamAdminOpen} title="团队管理" size="lg">
         <Suspense fallback={<ListSkeleton rows={6} />}><TeamAdmin /></Suspense>
+      </PanelDialog>
+      {/* 帮助与反馈：工单中心悬浮窗（提交/查询/对话，入口在 AvatarMenu）。 */}
+      <PanelDialog open={helpFeedbackOpen} onOpenChange={setHelpFeedbackOpen} title="帮助与反馈" size="md">
+        <Suspense fallback={<ListSkeleton rows={4} />}><HelpFeedback /></Suspense>
       </PanelDialog>
       {/* 路线 A：插件中心居中悬浮窗（取代原 plugins/author-center/market 主区页）。
           运行某插件 → 关闭本窗 + 设 runningPlugin（主体区全屏 overlay 接管）。 */}
