@@ -144,6 +144,15 @@ export interface PendingAutoFix {
   plugin: LoadedPlugin;
 }
 
+// 草稿编辑跨页载荷：草稿列表点「编辑」→ 跳创建器恢复对话历史（task 06-25 增强）。
+// 携带草稿完整对象 + 对话轮次，创建器消费后恢复 turns + referencedPlugin。
+export interface PendingDraftEdit {
+  /** 草稿插件完整对象（含 files）。 */
+  draft: LoadedPlugin;
+  /** 对话轮次（从 _meta.turns 恢复）。 */
+  turns: unknown[];
+}
+
 export interface LoadedPlugin {
   id: string;
   name: string;
@@ -167,6 +176,18 @@ export interface LoadedPlugin {
   marketplace?: boolean;
   priceCents?: number;
   updatedAt?: string;
+  // 本地草稿插件标记（task 06-25-local-draft-storage）
+  draft?: boolean;
+  local?: boolean;
+  versionCount?: number; // 历史版本数（.versions/vN 目录数）
+  _meta?: {
+    createdAt: string;
+    updatedAt: string;
+    source: string;
+    publishedToTeam?: boolean;
+    conversationId?: string;
+    turns?: unknown; // 对话轮次（编辑时恢复）
+  };
 }
 
 export type SettingsTab = 'general' | 'cli' | 'gateway' | 'plugins' | 'backend';

@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import type { LoadedPlugin } from '@/lib/types';
 import { parseManifest } from '@/lib/plugin-draft';
 import { ensurePluginPackagePersisted } from '@/lib/plugin-installation';
+import { listDraftPlugins, deleteDraftPlugin, loadDraftPlugin } from '@/lib/draft-plugin';
 import {
   openPluginsRoot,
   readLocalPluginFile,
@@ -15,7 +16,8 @@ export const PLUGIN_PAGE_SIZE = 6;
 
 // 路线 A：插件中心改为悬浮窗后，tab 不再映射 view（已删 plugins/author-center/market view）。
 // PluginCenterTab 类型随之内聚到本模块，供悬浮窗内部本地 state 使用。
-export type PluginCenterTab = 'local' | 'team' | 'market';
+// task 06-25：新增 'draft'（我的草稿）—— AI 创建器保存的本地草稿插件。
+export type PluginCenterTab = 'local' | 'draft' | 'team' | 'market';
 
 export function useTeamPluginList(runningPlugin: LoadedPlugin | null) {
   const [items, setItems] = useState<LoadedPlugin[] | null>(null);
@@ -65,6 +67,29 @@ export function useLocalPluginList(runningPlugin: LoadedPlugin | null) {
   return { items, loading, reload };
 }
 
+// task 06-25：本地草稿插件列表（AI 创建器保存的草稿）。
+export function useDraftPluginList(runningPlugin: LoadedPlugin | null) {
+  const [items, setItems] = useState<LoadedPlugin[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    void listDraftPlugins()
+      .then((drafts) => setItems(drafts))
+      .catch((caught) => {
+        setItems((prev) => prev ?? []);
+        toast.error(`加载草稿失败：${errorMessage(caught)}`);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!runningPlugin) reload();
+  }, [runningPlugin, reload]);
+
+  return { items, loading, reload };
+}
+
 export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => void) {
   const openLocalPlugin = useCallback(async (item: LocalPluginStatus) => {
     try {
@@ -94,11 +119,21 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
     }
   }, [setRunningPlugin]);
 
+  // task 06-25：打开草稿插件（运行）—— 从本地文件系统加载完整源文件后运行。
+  const openDraftPlugin = useCallback(async (draft: LoadedPlugin) => {
+    try {
+      const fullDraft = await loadDraftPlugin(draft.id);
+      setRunningPlugin(fullDraft);
+    } catch (caught) {
+      toast.error(`打开草稿插件失败：${errorMessage(caught)}`);
+    }
+  }, [setRunningPlugin]);
+
   const openLocalRoot = useCallback(() => {
     void openPluginsRoot().catch((caught) => toast.error(errorMessage(caught)));
   }, []);
 
-  return { openLocalPlugin, openTeamPlugin, openLocalRoot };
+  return { openLocalPlugin, openTeamPlugin, openDraftPlugin, openLocalRoot };
 }
 
 function localStatusToPlugin(item: LocalPluginStatus, entryContent: string, manifestContent: string | null): LoadedPlugin {

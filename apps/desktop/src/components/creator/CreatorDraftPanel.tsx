@@ -1,7 +1,8 @@
-// CreatorDraftPanel —— 创建器右侧分栏：草稿预览 + 信息编辑 + 提交。
+// CreatorDraftPanel —— 创建器右侧分栏：草稿预览 + 信息编辑 + 保存本地。
 //
 // AI 通过 stage_plugin 暂存草稿后，这里实时预览效果并允许用户改信息（名字/描述、ID/版本、
-// 运行类型/入口、能力/可见性），用户也可继续对话让 AI 迭代。点「提交到团队空间」才真正发布。
+// 运行类型/入口、能力/可见性），用户也可继续对话让 AI 迭代。点「保存草稿到本地」写入本地文件系统，
+// 后续可在插件中心「我的草稿」查看、运行和发布到团队。
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Loader2Icon, SendIcon, FileCode2Icon, RefreshCwIcon, ChevronDownIcon } from 'lucide-react';
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { submitStagedPlugin, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { saveDraftPlugin } from '@/lib/draft-plugin';
 
 const RUNTIME_LABELS: Record<StagedPlugin['runtime_type'], string> = {
   client: '前端（软件内 iframe）',
@@ -48,12 +50,18 @@ export function CreatorDraftPanel({
   onChange,
   onSubmitted,
   busy,
+  conversationId,
+  turns,
 }: {
   draft: StagedPlugin;
   onChange: (patch: Partial<StagedPlugin>) => void;
   onSubmitted: (name: string) => void;
   /** 对话流式进行中：提交禁用，避免改了一半又被 AI 重新 stage 覆盖。 */
   busy: boolean;
+  /** 对话 ID（保存草稿时记录，供编辑时恢复）。 */
+  conversationId?: string | null;
+  /** 对话轮次（保存草稿时记录，供编辑时恢复）。 */
+  turns?: unknown[];
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
@@ -74,15 +82,33 @@ export function CreatorDraftPanel({
     onChange({ capabilities: next });
   }
 
-  async function handleSubmit() {
+  async function handleSaveDraft() {
     if (!draft.name.trim()) { toast.error('请填写插件名字'); return; }
     if (!idValid) { toast.error('插件 ID 仅允许小写字母/数字/连字符'); return; }
     if (entryMissing) { toast.error(`入口文件 ${draft.entry} 不在文件列表中`); return; }
     setSubmitting(true);
     try {
-      const r = await submitStagedPlugin(draft);
-      if (r.ok) onSubmitted(r.name);
-      else toast.error(r.message);
+      await saveDraftPlugin({
+        id: draft.id,
+        manifest: {
+          id: draft.id,
+          name: draft.name,
+          version: draft.version,
+          entry: draft.entry,
+          description: draft.description,
+          capabilities: draft.capabilities,
+          visibility: draft.visibility,
+          runtime_type: draft.runtime_type,
+          draft: true,
+        },
+        files: draft.files.map(f => [f.path, f.content]),
+        conversationId: conversationId ?? undefined,
+        turns: turns && turns.length > 0 ? JSON.stringify(turns) : undefined,
+      });
+      toast.success(`草稿「${draft.name}」已保存到本地`);
+      onSubmitted(draft.name);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
@@ -210,14 +236,14 @@ export function CreatorDraftPanel({
         )}
       </div>
 
-      {/* 提交栏 */}
+      {/* 保存草稿栏 */}
       <div className="shrink-0 border-t p-3">
-        <Button className="w-full gap-1.5" onClick={handleSubmit} disabled={submitting || busy}>
+        <Button className="w-full gap-1.5" onClick={handleSaveDraft} disabled={submitting || busy}>
           {submitting ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
-          {submitting ? '提交中…' : busy ? 'AI 生成中，请稍候…' : '提交到团队空间'}
+          {submitting ? '保存中…' : busy ? 'AI 生成中，请稍候…' : '保存草稿到本地'}
         </Button>
         <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-          提交前可继续对话让 AI 调整，或直接修改上方信息。
+          保存后可在插件中心「我的草稿」查看、运行和发布。
         </p>
       </div>
     </div>

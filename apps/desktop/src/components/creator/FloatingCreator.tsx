@@ -135,7 +135,7 @@ const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
-  const { session, recentPlugins, pendingAutoFix, setPendingAutoFix } = useApp();
+  const { session, recentPlugins, pendingAutoFix, setPendingAutoFix, pendingDraftEdit, setPendingDraftEdit } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [conversations, setConversations] = useState<CreatorConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -217,12 +217,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     });
   }
 
-  // 提交成功：清草稿态，显示成功卡片，刷新最近插件。
+  // 保存草稿成功：清草稿态，显示成功卡片。
   function onDraftSubmitted(name: string) {
     setPublishedName(name);
     setStagedDraft(null);
     setUserEdits({});
-    toast.success(`插件「${name}」已提交到团队空间`);
+    toast.success(`草稿「${name}」已保存到本地`);
   }
 
   // 处理文件选择（累积模式，支持多次选择）
@@ -422,6 +422,39 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setReferencedPlugin(pendingAutoFix.plugin);
     setPendingAutoFix(null);
   }, [pendingAutoFix, setPendingAutoFix]);
+
+  // 草稿编辑消费（task 06-25 增强）：草稿列表点「编辑」跳创建器时，pendingDraftEdit 携带草稿 + 对话历史。
+  // 此处恢复对话轮次 + 引用草稿源码，让用户继续上次对话修改草稿。消费即清。
+  useEffect(() => {
+    if (!pendingDraftEdit) return;
+    const { draft, turns: restoredTurns } = pendingDraftEdit;
+    // 恢复对话轮次。
+    if (Array.isArray(restoredTurns) && restoredTurns.length > 0) {
+      setTurns(restoredTurns as Turn[]);
+    }
+    // 引用草稿源码供 AI 修改。
+    setReferencedPlugin(draft);
+    // 恢复草稿到右侧面板（若 draft.files 存在且含 manifest 信息）。
+    if (draft.files && draft.files.length > 0) {
+      const raw = draft as LoadedPlugin & {
+        capabilities?: StagedPlugin['capabilities'];
+        visibility?: StagedPlugin['visibility'];
+      };
+      setStagedDraft({
+        id: draft.id,
+        name: draft.name,
+        version: draft.version,
+        entry: draft.entry,
+        description: draft.description || '',
+        capabilities: raw.capabilities ?? [],
+        visibility: raw.visibility ?? 'private',
+        runtime_type: (draft.runtime_type as StagedPlugin['runtime_type']) || 'client',
+        files: draft.files.map(f => ({ path: f.path, content: f.content })),
+      });
+      setUserEdits({});
+    }
+    setPendingDraftEdit(null);
+  }, [pendingDraftEdit, setPendingDraftEdit]);
 
   async function send() {
     const text = input.trim();
@@ -930,7 +963,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           )}
-          {/* 提交成功卡片：用户在右侧面板点提交、发布成功后告知「已提交到团队空间」 */}
+          {/* 保存成功卡片：用户在右侧面板点保存、草稿保存成功后告知「已保存到本地」 */}
           {publishedName && (
             <div className="mx-auto mt-6 max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex items-start gap-4 rounded-2xl border border-green-600/30 bg-gradient-to-br from-green-50 to-green-100/50 p-4 shadow-lg backdrop-blur-sm dark:from-green-950/30 dark:to-green-900/20">
@@ -938,8 +971,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                   <CheckCircle2Icon className="size-5 text-white" />
                 </div>
                 <div className="flex-1 space-y-1">
-                  <div className="font-semibold text-green-900 dark:text-green-100">插件「{publishedName}」已成功提交</div>
-                  <div className="text-sm text-green-800/80 dark:text-green-200/70">已发布到团队空间，团队成员现可在插件中心看到并安装。点击「+ 新建对话」继续创建下一个插件。</div>
+                  <div className="font-semibold text-green-900 dark:text-green-100">草稿「{publishedName}」已保存到本地</div>
+                  <div className="text-sm text-green-800/80 dark:text-green-200/70">已保存到本地插件目录，可在插件中心「我的草稿」查看、运行和发布到团队。点击「+ 新建对话」继续创建下一个插件。</div>
                 </div>
               </div>
             </div>
@@ -1098,6 +1131,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               onChange={patchDraft}
               onSubmitted={onDraftSubmitted}
               busy={busy}
+              conversationId={activeConversationId}
+              turns={turns}
             />
           )}
         </div>
