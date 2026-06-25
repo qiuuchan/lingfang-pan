@@ -751,10 +751,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                 </PopoverContent>
               </Popover>
             )}
-            {/* 创建偏好（原 Skill）：改为居中悬浮窗（R3），去专业术语。 */}
-            <Button variant="outline" size="sm" className="gap-1.5" title="创建偏好" onClick={() => setSkillDialogOpen(true)}>
+            {/* 技能（原 Skill）：改为居中悬浮窗（R3），去专业术语。 */}
+            <Button variant="outline" size="sm" className="gap-1.5" title="技能" onClick={() => setSkillDialogOpen(true)}>
               <WrenchIcon className="size-3.5" />
-              创建偏好
+              技能
               {activeSkillIds.length > 0 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeSkillIds.length}</Badge>}
             </Button>
             {/* 版本切换 */}
@@ -1096,7 +1096,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     <Dialog open={skillDialogOpen} onOpenChange={setSkillDialogOpen}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>创建偏好</DialogTitle>
+          <DialogTitle>技能</DialogTitle>
           <DialogDescription>按需开启，让 AI 生成更符合预期的插件。</DialogDescription>
         </DialogHeader>
         <div className="max-h-[56vh] space-y-2 overflow-y-auto">

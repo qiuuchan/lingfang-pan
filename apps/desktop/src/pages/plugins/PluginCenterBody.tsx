@@ -5,6 +5,7 @@
 // 运行某插件时调 onRun → App 设 runningPlugin（全屏 overlay 接管）并关闭本悬浮窗。
 // 固定常用 / 历史使用已移至主侧边栏（Sidebar，首页按钮下方），不在本悬浮窗内。
 import { FolderIcon, ServerIcon, StoreIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/App';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { LoadedPlugin } from '@/lib/types';
@@ -48,34 +49,50 @@ export function PluginCenterBody({
           <TabsTrigger value="team"><ServerIcon className="size-3.5" />团队插件</TabsTrigger>
           <TabsTrigger value="market"><StoreIcon className="size-3.5" />市场插件</TabsTrigger>
         </TabsList>
-        <TabsContent value="local" keepMounted className="mt-4 focus-visible:outline-none">
-          <LocalPluginsSection
-            items={local.items ?? []}
-            loading={local.loading}
-            onOpen={(item) => { void openers.openLocalPlugin(item); }}
-            onOpenRoot={openers.openLocalRoot}
-            onRefresh={local.reload}
-          />
-        </TabsContent>
-        <TabsContent value="team" keepMounted className="mt-4 focus-visible:outline-none">
-          <TeamPluginsSection
-            error={team.error}
-            isPinned={app.isPinned}
-            items={team.items}
-            page={team.page}
-            refreshing={team.refreshing}
-            setPage={team.setPage}
-            totalPages={totalTeamPages}
-            onCreate={onCreate}
-            onOpenMarket={() => onTabChange('market')}
-            onRefresh={team.refresh}
-            onRun={(plugin) => { void openers.openTeamPlugin(plugin); }}
-            onTogglePin={(plugin, pinned) => (pinned ? app.unpinPlugin(plugin.id) : app.pinPlugin(plugin))}
-          />
-        </TabsContent>
-        <TabsContent value="market" keepMounted className="mt-4 focus-visible:outline-none">
-          <MarketplacePluginsSection active={tab === 'market'} />
-        </TabsContent>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            {tab === 'local' && (
+              <TabsContent value="local" keepMounted className="mt-4 focus-visible:outline-none">
+                <LocalPluginsSection
+                  items={local.items ?? []}
+                  loading={local.loading}
+                  onOpen={(item) => { void openers.openLocalPlugin(item); }}
+                  onOpenRoot={openers.openLocalRoot}
+                  onRefresh={local.reload}
+                />
+              </TabsContent>
+            )}
+            {tab === 'team' && (
+              <TabsContent value="team" keepMounted className="mt-4 focus-visible:outline-none">
+                <TeamPluginsSection
+                  error={team.error}
+                  isPinned={app.isPinned}
+                  items={team.items}
+                  page={team.page}
+                  refreshing={team.refreshing}
+                  setPage={team.setPage}
+                  totalPages={totalTeamPages}
+                  onCreate={onCreate}
+                  onOpenMarket={() => onTabChange('market')}
+                  onRefresh={team.refresh}
+                  onRun={(plugin) => { void openers.openTeamPlugin(plugin); }}
+                  onTogglePin={(plugin, pinned) => (pinned ? app.unpinPlugin(plugin.id) : app.pinPlugin(plugin))}
+                />
+              </TabsContent>
+            )}
+            {tab === 'market' && (
+              <TabsContent value="market" keepMounted className="mt-4 focus-visible:outline-none">
+                <MarketplacePluginsSection active={tab === 'market'} />
+              </TabsContent>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </Tabs>
     </div>
   );
