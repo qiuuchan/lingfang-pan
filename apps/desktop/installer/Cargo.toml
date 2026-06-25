@@ -18,6 +18,8 @@ egui = "0.28"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # SHA-256 完整性校验（与后端 uploadAsset 计算的哈希比对）。
 sha2 = "0.10"
+# 窗口图标 PNG 解码（编译期内嵌图标 → 运行期解码为 RGBA，纯 Rust 轻量）。
+png = "0.17"
 # LOCALAPPDATA 等目录定位（与 src-tauri 同款 dirs 5）。
 dirs = "5"
 anyhow = "1"

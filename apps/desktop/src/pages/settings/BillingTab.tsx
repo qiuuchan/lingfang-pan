@@ -1,13 +1,13 @@
 // BillingTab —— 设置页「模型与计费」Tab（替代旧 ModelGatewayTab 的 BYOK）。
 //
 // 设计（见 docs/billing-and-relay-design.md §11.5.2 ①）：
-//  - 团队灵石余额 + 流水（GET /api/teams/current/credits + ledger）。
 //  - 我的 API Key 管理（GET/POST/DELETE /api/me/api-keys），明文仅创建时返回一次。
 //  - 模型版本只读展示（GET /api/relay/v1/models）。
 //  - 不再有「填 apiKey」输入框（需求 #4：不支持用户自定义接口）。
+//  - 团队灵石余额改在「团队钱包」页查看，本 Tab 不再展示。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { CoinsIcon, KeyRoundIcon, InfoIcon, PlusIcon, CopyIcon, Trash2Icon } from 'lucide-react';
+import { KeyRoundIcon, InfoIcon, PlusIcon, CopyIcon, Trash2Icon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,10 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
 
-interface CreditData { teamId: string; balance: number; }
-interface LedgerRow { id: string; amount: number; direction: 'CREDIT' | 'DEBIT'; source: string; reason: string; createdAt: string; }
 interface ApiKeyRow {
   id: string; name: string; keyPrefix: string; scopes: string[];
   status: 'ACTIVE' | 'DISABLED'; lastUsedAt: string | null; expiresAt: string | null; createdAt: string;
@@ -27,10 +24,6 @@ interface ApiKeyRow {
 interface ApiKeyCreated extends ApiKeyRow { plaintextKey: string; }
 interface RelayModel { id: string; label?: string; resourcePools?: Array<{ id: string; name: string; scope: string; teamId: string | null }> }
 
-const SOURCE_LABEL: Record<string, string> = {
-  signup_bonus: '注册赠送', llm_consume: 'AI 对话消费', image_consume: 'AI 生图消费',
-  reserve: '预扣', refund: '冲销/退回', admin_adjust: '管理员调整', purchase: '充值',
-};
 const SCOPE_OPTIONS = [
   { value: 'chat', label: '对话' },
   { value: 'image', label: '生图' },
@@ -44,11 +37,8 @@ function fmtTime(iso?: string | null): string {
 }
 
 export function BillingTab() {
-  const [credit, setCredit] = useState<CreditData | null>(null);
-  const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
   const [models, setModels] = useState<RelayModel[]>([]);
-  const [showLedger, setShowLedger] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(['chat', 'tier:fast']);
@@ -56,60 +46,18 @@ export function BillingTab() {
 
   const loadAll = async () => {
     try {
-      const [c, k, m] = await Promise.all([
-        api<CreditData>('/api/teams/current/credits').catch(() => null),
+      const [k, m] = await Promise.all([
         api<{ apiKeys: ApiKeyRow[] }>('/api/me/api-keys').catch(() => ({ apiKeys: [] })),
         api<{ data: RelayModel[] }>('/api/relay/v1/models').catch(() => ({ data: [] })),
       ]);
-      setCredit(c);
       setKeys(k.apiKeys);
       setModels(m.data);
     } catch { /* 401 由全局处理 */ }
   };
   useEffect(() => { void loadAll(); }, []);
 
-  const toggleLedger = async () => {
-    if (!showLedger && ledger.length === 0) {
-      try { const r = await api<{ ledger: LedgerRow[] }>('/api/teams/current/credits/ledger'); setLedger(r.ledger); }
-      catch (e) { toast.error((e as ApiError).message); }
-    }
-    setShowLedger(!showLedger);
-  };
-
   return (
     <div className="flex flex-col gap-4">
-      {/* 团队灵石余额 */}
-      <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><CoinsIcon className="size-5 text-primary" />团队灵石余额</CardTitle></CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">当前余额</div>
-          <div className="mt-1 text-4xl font-semibold tabular-nums">
-            {credit ? credit.balance.toLocaleString() : <Shimmer className="h-9 w-32" />} <span className="text-base font-normal text-muted-foreground">灵石</span>
-          </div>
-          <div className="mt-3">
-            <Button variant="outline" size="sm" onClick={() => void toggleLedger()}>{showLedger ? '隐藏流水' : '查看流水'}</Button>
-          </div>
-          {showLedger && (
-            <StaggerContainer className="mt-3 flex flex-col divide-y" stagger={0.04}>
-              {ledger.length ? ledger.map((t) => {
-                const credit_ = t.direction === 'CREDIT';
-                return (
-                  <StaggerItem key={t.id}>
-                    <div className="flex items-center gap-3 py-2">
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">{SOURCE_LABEL[t.source] ?? t.source}</div>
-                        <div className="text-xs text-muted-foreground">{fmtTime(t.createdAt)}</div>
-                      </div>
-                      <span className={`text-sm font-semibold tabular-nums ${credit_ ? 'text-green-600' : 'text-red-600'}`}>{credit_ ? '+' : '-'}{t.amount}</span>
-                    </div>
-                  </StaggerItem>
-                );
-              }) : <div className="py-3 text-sm text-muted-foreground">暂无流水</div>}
-            </StaggerContainer>
-          )}
-        </CardContent>
-      </Card>
-
       {/* 我的 API Key */}
       <Card>
         <CardHeader>

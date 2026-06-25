@@ -1,6 +1,7 @@
-//! 交互安装模式（egui，design §4）。
+//! 交互安装模式（egui 深色无边框，参考现代安装器）。
 //!
-//! 流程：确认目录 → 解压 → 快捷方式 → 注册表 → 完成。UI 用 theme 模块统一风格。
+//! 两种界面：简洁模式（居中 logo + 立即安装）与自定义模式（红色横幅 + 路径选择）。
+//! 右下角链接在两者间切换。流程：确认 → 解压 → 快捷方式 → 注册表 → 完成。
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -12,13 +13,15 @@ use crate::paths;
 use crate::platform;
 use crate::theme;
 
+/// 简洁模式窗口高度。
+const SIMPLE_SIZE: [f32; 2] = [480.0, 520.0];
+/// 自定义模式窗口高度。
+const CUSTOM_SIZE: [f32; 2] = [480.0, 640.0];
+
 /// 后台安装线程发给 UI 的消息。
 enum Progress {
-    /// 阶段文字 + 进度比例（0.0~1.0）。
     Step(String, f32),
-    /// 完成。
     Done,
-    /// 失败。
     Failed(String),
 }
 
@@ -34,7 +37,10 @@ struct InstallerApp {
     install_dir: String,
     version: String,
     phase: Phase,
+    custom_mode: bool,
     create_desktop: bool,
+    agreed: bool,
+    logo: Option<egui::TextureHandle>,
     rx: Option<mpsc::Receiver<Progress>>,
 }
 
@@ -47,15 +53,22 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         install_dir,
         version: env!("CARGO_PKG_VERSION").to_string(),
         phase: Phase::Confirm,
+        custom_mode: false,
         create_desktop: true,
+        agreed: false,
+        logo: None,
         rx: None,
     };
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([560.0, 440.0])
+            .with_inner_size(SIMPLE_SIZE)
+            .with_min_inner_size(SIMPLE_SIZE)
             .with_resizable(false)
-            .with_maximize_button(false),
+            .with_decorations(false) // 无边框，自绘标题栏
+            .with_transparent(false)
+            .with_maximize_button(false)
+            .with_icon(theme::window_icon().unwrap_or_default()),
         ..Default::default()
     };
     eframe::run_native(
@@ -64,6 +77,8 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         Box::new(|cc| {
             theme::install_fonts(&cc.egui_ctx);
             theme::apply_style(&cc.egui_ctx);
+            let mut app = app;
+            app.logo = theme::load_logo(&cc.egui_ctx);
             Ok(Box::new(app))
         }),
     )
@@ -72,6 +87,10 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
 }
 
 impl eframe::App for InstallerApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 接收后台安装进度。
         if let Some(rx) = &self.rx {
@@ -93,93 +112,223 @@ impl eframe::App for InstallerApp {
             ctx.request_repaint();
         }
 
-        // 顶部品牌横幅（占满宽度，无内边距）。
-        egui::TopBottomPanel::top("header")
-            .frame(egui::Frame::none())
-            .show_separator_line(false)
-            .show(ctx, |ui| {
-                theme::header(ui, paths::DISPLAY_NAME, &format!("版本 {}  ·  安装向导", self.version));
-            });
-
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::BG).inner_margin(egui::Margin::same(24.0)))
-            .show(ctx, |ui| {
-                match &self.phase {
-                    Phase::Confirm => self.view_confirm(ui),
-                    Phase::Installing { status, frac } => {
-                        let (s, f) = (status.clone(), *frac);
-                        view_installing(ui, &s, f);
+            .frame(egui::Frame::none().fill(theme::BG))
+            .show(ctx, |ui| match &self.phase {
+                Phase::Confirm => {
+                    if self.custom_mode {
+                        self.view_custom(ui, ctx);
+                    } else {
+                        self.view_simple(ui, ctx);
                     }
-                    Phase::Done => self.view_done(ui, ctx),
-                    Phase::Failed(e) => {
-                        let e = e.clone();
-                        view_failed(ui, ctx, &e);
-                    }
+                }
+                Phase::Installing { status, frac } => {
+                    let (s, f) = (status.clone(), *frac);
+                    self.view_progress(ui, ctx, &s, f);
+                }
+                Phase::Done => self.view_done(ui, ctx),
+                Phase::Failed(e) => {
+                    let e = e.clone();
+                    self.view_failed(ui, ctx, &e);
                 }
             });
     }
 }
 
 impl InstallerApp {
-    fn view_confirm(&mut self, ui: &mut egui::Ui) {
-        theme::card(ui, |ui| {
-            ui.label(egui::RichText::new("安装位置").size(14.0).strong());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.install_dir)
-                        .desired_width(ui.available_width() - 96.0)
-                        .margin(egui::Margin::symmetric(10.0, 8.0)),
-                );
-                if theme::secondary_button(ui, "浏览…") {
-                    if let Some(picked) = pick_folder(&self.install_dir) {
-                        self.install_dir = picked;
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new("将安装主程序、内置运行时与插件到上述目录。")
-                    .size(12.5)
-                    .color(theme::TEXT_MUTED),
-            );
-            ui.add_space(14.0);
-            ui.separator();
+    /// 简洁模式：标题栏 + 居中 logo/标题 + 立即安装 + 底部协议/自定义切换。
+    fn view_simple(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if theme::title_bar(ui, "安装程序", false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        ui.add_space(40.0);
+        theme::logo(ui, &self.logo, 110.0);
+        ui.add_space(14.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(paths::DISPLAY_NAME).size(24.0).color(theme::TEXT));
+        });
+
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            if theme::primary_button(ui, "立即安装", 300.0, self.agreed) {
+                self.start_install();
+            }
+        });
+
+        self.footer(ui, ctx, true);
+    }
+
+    /// 自定义模式：红色横幅 + 路径选择 + 立即安装 + 桌面快捷方式 + 底部协议/简洁切换。
+    fn view_custom(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        // 顶部红色横幅（含标题栏 + logo + 标题）。
+        let full_w = ui.available_width();
+        let banner_h = 210.0;
+        let (banner_rect, _) =
+            ui.allocate_exact_size(egui::Vec2::new(full_w, banner_h), egui::Sense::hover());
+        ui.painter().rect_filled(banner_rect, egui::Rounding::ZERO, theme::BANNER_RED);
+
+        // 在横幅区域内叠加标题栏与居中内容。
+        let mut close = false;
+        ui.allocate_ui_at_rect(banner_rect, |ui| {
+            close = theme::title_bar(ui, "安装程序", true);
+            ui.add_space(18.0);
+            theme::logo(ui, &self.logo, 96.0);
             ui.add_space(10.0);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new(paths::DISPLAY_NAME).size(22.0).color(egui::Color32::WHITE));
+            });
+        });
+        if close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        ui.add_space(34.0);
+        // 安装路径行。
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            ui.label(egui::RichText::new("安装路径：").size(14.0).color(theme::TEXT_MUTED));
+            // 为右侧文件夹按钮(38) + 间距(10) + 右边距(24) + TextEdit 自身边距/余量预留空间，
+            // 否则按钮会被挤出窗口右缘。
+            let reserved = 38.0 + 10.0 + 24.0 + 28.0;
+            let w = (ui.available_width() - reserved).max(60.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.install_dir)
+                    .desired_width(w)
+                    .vertical_align(egui::Align::Center)
+                    .margin(egui::Margin::symmetric(10.0, 9.0)),
+            );
+            ui.add_space(4.0);
+            if folder_button(ui) {
+                if let Some(picked) = pick_folder(&self.install_dir) {
+                    self.install_dir = picked;
+                }
+            }
+        });
+
+        ui.add_space(24.0);
+        ui.vertical_centered(|ui| {
+            if theme::primary_button(ui, "立即安装", 300.0, self.agreed) {
+                self.start_install();
+            }
+            ui.add_space(12.0);
             ui.checkbox(&mut self.create_desktop, "创建桌面快捷方式");
         });
 
-        ui.add_space(20.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::primary_button(ui, "开始安装") {
-                self.start_install();
-            }
+        self.footer(ui, ctx, false);
+    }
+
+    /// 底部固定区：左下协议勾选，右下模式切换链接。
+    /// `simple_now` 为 true 表示当前是简洁模式（链接显示「自定义安装」）。
+    fn footer(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, simple_now: bool) {
+        let avail = ui.available_height();
+        if avail > 44.0 {
+            ui.add_space(avail - 44.0);
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(18.0);
+            ui.checkbox(&mut self.agreed, "");
+            ui.label(egui::RichText::new("我已阅读并同意").size(13.0).color(theme::TEXT));
+            let _ = theme::link(ui, "《用户协议》");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(18.0);
+                let label = if simple_now { "自定义安装" } else { "快速安装" };
+                if theme::link(ui, label) {
+                    self.custom_mode = !self.custom_mode;
+                    let size = if self.custom_mode { CUSTOM_SIZE } else { SIMPLE_SIZE };
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size.into()));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(size.into()));
+                }
+            });
+        });
+        ui.add_space(14.0);
+    }
+
+    fn view_progress(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, status: &str, frac: f32) {
+        if theme::title_bar(ui, "安装程序", false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        ui.add_space(48.0);
+        theme::logo(ui, &self.logo, 96.0);
+        ui.add_space(30.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("正在安装").size(18.0).color(theme::TEXT).strong());
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(status).size(13.0).color(theme::TEXT_MUTED));
+        });
+        ui.add_space(24.0);
+        ui.horizontal(|ui| {
+            ui.add_space(48.0);
+            ui.add(
+                egui::ProgressBar::new(frac)
+                    .desired_width(ui.available_width() - 48.0)
+                    .desired_height(10.0)
+                    .fill(theme::RED)
+                    .rounding(egui::Rounding::same(5.0))
+                    .animate(true),
+            );
+        });
+        ui.add_space(8.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(format!("{}%", (frac * 100.0) as u32)).size(12.0).color(theme::TEXT_MUTED));
         });
     }
 
     fn view_done(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        theme::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("✓").size(26.0).color(theme::SUCCESS).strong());
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("安装完成").size(17.0).strong());
-                    ui.label(
-                        egui::RichText::new("已添加开始菜单快捷方式，可随时从控制面板卸载。")
-                            .size(12.5)
-                            .color(theme::TEXT_MUTED),
-                    );
-                });
-            });
+        if theme::title_bar(ui, "安装程序", false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        ui.add_space(44.0);
+        theme::logo(ui, &self.logo, 100.0);
+        ui.add_space(18.0);
+        theme::status_title(ui, true, "安装完成", 22.0);
+        ui.vertical_centered(|ui| {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("已添加快捷方式，可随时从控制面板卸载。")
+                    .size(13.0)
+                    .color(theme::TEXT_MUTED),
+            );
         });
-        ui.add_space(20.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::primary_button(ui, "立即启动") {
+        ui.add_space(36.0);
+        ui.vertical_centered(|ui| {
+            if theme::primary_button(ui, "立即启动", 300.0, true) {
                 let main = PathBuf::from(&self.install_dir).join(paths::MAIN_EXE);
                 let _ = std::process::Command::new(main).spawn();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            if theme::secondary_button(ui, "完成") {
+            ui.add_space(10.0);
+            if theme::link(ui, "完成并关闭") {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+    }
+
+    fn view_failed(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, err: &str) {
+        if theme::title_bar(ui, "安装程序", false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        ui.add_space(36.0);
+        theme::logo(ui, &self.logo, 96.0);
+        ui.add_space(18.0);
+        theme::status_title(ui, false, "安装失败", 20.0);
+        ui.add_space(14.0);
+        // 错误详情：左右留边距并自动换行，避免顶到窗口边缘。
+        ui.horizontal(|ui| {
+            ui.add_space(32.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width() - 32.0, 0.0),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(err).size(13.0).color(theme::TEXT_MUTED),
+                    );
+                },
+            );
+        });
+        ui.add_space(28.0);
+        ui.vertical_centered(|ui| {
+            if theme::primary_button(ui, "关闭", 200.0, true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -207,42 +356,22 @@ impl InstallerApp {
     }
 }
 
-fn view_installing(ui: &mut egui::Ui, status: &str, frac: f32) {
-    theme::card(ui, |ui| {
-        ui.label(egui::RichText::new("正在安装").size(16.0).strong());
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new(status).size(13.0).color(theme::TEXT_MUTED));
-        ui.add_space(14.0);
-        ui.add(
-            egui::ProgressBar::new(frac)
-                .desired_height(10.0)
-                .fill(theme::BRAND)
-                .animate(true),
-        );
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(format!("{}%", (frac * 100.0) as u32))
-                .size(12.0)
-                .color(theme::TEXT_MUTED),
-        );
-    });
+/// 文件夹选择小按钮（图标）。返回是否点击。
+fn folder_button(ui: &mut egui::Ui) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(38.0), egui::Sense::click());
+    let bg = if resp.hovered() { theme::BORDER } else { theme::INPUT_BG };
+    ui.painter().rect_filled(rect, egui::Rounding::same(6.0), bg);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "📁",
+        egui::FontId::proportional(18.0),
+        theme::TEXT,
+    );
+    resp.clicked()
 }
 
-fn view_failed(ui: &mut egui::Ui, ctx: &egui::Context, err: &str) {
-    theme::card(ui, |ui| {
-        ui.label(egui::RichText::new("✕ 安装失败").size(16.0).color(theme::DANGER).strong());
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new(err).size(13.0).color(theme::TEXT));
-    });
-    ui.add_space(20.0);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if theme::secondary_button(ui, "关闭") {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-    });
-}
-
-/// 调系统文件夹选择对话框（PowerShell，避免引入额外 crate）。返回所选路径或 None。
+/// 调系统文件夹选择对话框（PowerShell）。返回所选路径或 None。
 fn pick_folder(current: &str) -> Option<String> {
     let script = format!(
         "Add-Type -AssemblyName System.Windows.Forms; \
@@ -259,7 +388,6 @@ fn pick_folder(current: &str) -> Option<String> {
     if path.is_empty() {
         None
     } else {
-        // 选中的是父目录时附加应用名（让用户选「装到哪个文件夹下」）。
         let p = PathBuf::from(&path);
         if p.file_name().map(|n| n == paths::INSTALL_DIR_NAME).unwrap_or(false) {
             Some(path)
