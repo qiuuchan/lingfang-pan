@@ -8,7 +8,8 @@
 #
 # 产物里的 updater.exe = 干净 installer.exe（无 payload 尾部），供更新/卸载时运行（不带几百 MB 包袱）。
 #
-# 用法：pwsh tools/build-installer.ps1 [-SkipFrontend] [-OutputDir release]
+# 用法：pwsh tools/build-installer.ps1 [-OutputDir release]
+# 注：前端由 tauri build 的 beforeBuildCommand 自动编译，无需单独参数。
 param(
   [string]$OutputDir = 'release',
   [switch]$SkipFrontend
@@ -24,17 +25,24 @@ $conf = Get-Content -Raw -LiteralPath $confPath | ConvertFrom-Json
 $Version = $conf.version
 Write-Host "[1/7] 版本号：$Version"
 
-# --- 编译前端（vite）---
-if (-not $SkipFrontend) {
-  Write-Host '[2/7] 编译前端（pnpm vite:build）…'
-  pnpm --filter @lingfang/desktop vite:build
-} else {
-  Write-Host '[2/7] 跳过前端编译（-SkipFrontend）'
+# --- 编译主程序（tauri build --no-bundle，生产模式）+ installer（release）---
+# 关键：必须用 tauri build 而非裸 cargo build——tauri build 以「生产模式」编译，
+# 把前端（frontendDist=../dist）嵌入二进制并走 tauri://localhost 协议加载；
+# 裸 cargo build 会 fallback 到 devUrl(localhost:1420)，安装后白屏/拒绝连接。
+# --no-bundle：只产出 exe，不跑 NSIS/MSI 打包（bundle.active 已为 false，双保险）。
+# tauri build 会自动先跑 beforeBuildCommand（pnpm vite:build）编译前端，故无需单独 vite 步骤。
+Write-Host '[2-3/7] 编译主程序（tauri build --no-bundle，含前端嵌入）…'
+if ($SkipFrontend) {
+  Write-Host '  注意：tauri build 仍会执行 beforeBuildCommand 编译前端（-SkipFrontend 对其无效）'
+}
+Push-Location (Join-Path $Root 'apps/desktop')
+try {
+  pnpm exec tauri build --no-bundle
+  if ($LASTEXITCODE -ne 0) { throw "tauri build 失败（exit $LASTEXITCODE）" }
+} finally {
+  Pop-Location
 }
 
-# --- 编译主程序 + installer（release）---
-Write-Host '[3/7] 编译主程序 lingfang-desktop（release）…'
-cargo build --release -p lingfang-desktop
 Write-Host '[4/7] 编译 installer（release）…'
 cargo build --release -p lingfang-installer
 
@@ -51,15 +59,13 @@ $Staging = Join-Path $OutputDir "staging-$Version"
 if (Test-Path -LiteralPath $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Staging | Out-Null
 
-# 主程序 exe。
+# 主程序 exe（前端已嵌入二进制，无需单独 dist 目录）。
 Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $Staging 'lingfang-desktop.exe') -Force
 # updater.exe = 干净 installer.exe（无 payload）。
 Copy-Item -LiteralPath $InstallerExe -Destination (Join-Path $Staging 'updater.exe') -Force
 # 资源目录：runtimes / builtin-plugins（与 exe 同级，main.rs resource_dir 解析）。
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/runtimes') -Destination (Join-Path $Staging 'runtimes') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/builtin-plugins') -Destination (Join-Path $Staging 'builtin-plugins') -Recurse -Force
-# 前端产物（Tauri webview 加载的 HTML/JS/CSS，tauri.conf.json frontendDist 指向 ../dist）。
-Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/dist') -Destination (Join-Path $Staging 'dist') -Recurse -Force
 # 图标（卸载器/快捷方式用）。
 New-Item -ItemType Directory -Force -Path (Join-Path $Staging 'icons') | Out-Null
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/src-tauri/icons/icon.ico') -Destination (Join-Path $Staging 'icons/icon.ico') -Force
