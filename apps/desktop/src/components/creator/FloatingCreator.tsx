@@ -13,7 +13,7 @@ import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, type ApiError } from '@/lib/api';
 import { relayProvider } from '@/lib/relay-provider';
-import { createCreatorTools, type AskQuestionArgs, type AskQuestionResult, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { createCreatorTools, withSyncedStagedManifest, type AskQuestionArgs, type AskQuestionResult, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
@@ -210,8 +210,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     pendingAnswersRef.current.clear();
   }
 
-  // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先）。
-  const draft: StagedPlugin | null = stagedDraft ? { ...stagedDraft, ...userEdits } : null;
+  // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先），并始终同步 manifest.json。
+  const draft: StagedPlugin | null = stagedDraft ? withSyncedStagedManifest({ ...stagedDraft, ...userEdits }) : null;
 
   // stage_plugin 工具回调：AI 暂存草稿到右侧面板。
   // 同一插件 id 重新 stage（用户让 AI 改后再生成）保留用户已改的字段；换 id（新插件）则清空旧编辑。

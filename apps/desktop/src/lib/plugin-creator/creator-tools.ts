@@ -26,6 +26,36 @@ export interface StagedPlugin {
 
 const DEFAULT_CAPABILITY: PluginCapability = { kind: 'ui.view', reason: '展示插件界面', risk: 'low', requires_admin: false };
 
+type StagedPluginManifestSource = Omit<StagedPlugin, 'files'>;
+
+export function buildStagedManifest(draft: StagedPluginManifestSource) {
+  return {
+    id: draft.id,
+    name: draft.name,
+    version: draft.version,
+    description: draft.description,
+    runtime_type: draft.runtime_type,
+    entry: draft.entry,
+    visibility: draft.visibility,
+    capabilities: draft.capabilities.length ? draft.capabilities : [DEFAULT_CAPABILITY],
+  };
+}
+
+export function buildStagedManifestContent(draft: StagedPluginManifestSource): string {
+  return `${JSON.stringify(buildStagedManifest(draft), null, 2)}\n`;
+}
+
+export function withSyncedStagedManifest(draft: StagedPlugin): StagedPlugin {
+  const manifestFile: DraftFile = {
+    path: 'manifest.json',
+    content: buildStagedManifestContent(draft),
+  };
+  return {
+    ...draft,
+    files: [manifestFile, ...draft.files.filter((file) => file.path !== 'manifest.json')],
+  };
+}
+
 // 文件路径安全校验（禁绝对路径/空段/../反斜杠/隐藏段），与后端 cleanPath 行为对齐。
 // 隐藏段（以 . 开头，如 .env/.config）后端 cleanPath 会 400 拒绝，故在 stage 阶段就拦住，
 // 让 AI 据返回 message 立即修正，而不是等用户点提交才报错。
@@ -111,27 +141,19 @@ export interface StagePluginResult {
  * manifest 字段取用户编辑后的最终值（含改过的名字/能力/可见性）。
  */
 export async function submitStagedPlugin(draft: StagedPlugin): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
-  const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
+  const prepared = withSyncedStagedManifest(draft);
+  const err = validateStagedCompleteness(prepared.runtime_type, prepared.entry, prepared.files);
   if (err) return { ok: false, message: err };
   try {
     await api('/api/plugins/upload', {
       method: 'POST',
       body: {
-        manifest: {
-          id: draft.id,
-          name: draft.name,
-          version: draft.version,
-          description: draft.description,
-          runtime_type: draft.runtime_type,
-          entry: draft.entry,
-          visibility: draft.visibility,
-          capabilities: draft.capabilities.length ? draft.capabilities : [DEFAULT_CAPABILITY],
-        },
-        files: draft.files,
+        manifest: buildStagedManifest(prepared),
+        files: prepared.files,
         priceCents: 0,
       },
     });
-    return { ok: true, name: draft.name };
+    return { ok: true, name: prepared.name };
   } catch (e) {
     return { ok: false, message: `提交失败：${(e as ApiError).message || String(e)}` };
   }
@@ -230,9 +252,7 @@ export function createCreatorTools(opts: {
       '不要重复 stage 已经成功的同一版本——用户要继续改时会再次对话。',
     inputSchema: zodSchema(stageParams),
     execute: async (args: StageArgs): Promise<StagePluginResult> => {
-      const err = validateStagedCompleteness(args.runtime_type, args.entry, args.files);
-      if (err) return { ok: false, message: err };
-      opts.onStagePlugin({
+      const draft = withSyncedStagedManifest({
         id: args.id,
         name: args.name,
         version: args.version,
@@ -243,6 +263,9 @@ export function createCreatorTools(opts: {
         capabilities: [DEFAULT_CAPABILITY],
         files: args.files,
       });
+      const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
+      if (err) return { ok: false, message: err };
+      opts.onStagePlugin(draft);
       return { ok: true, message: `已生成插件「${args.name}」草稿，用户可在右侧预览并修改信息后提交。`, name: args.name };
     },
   });
