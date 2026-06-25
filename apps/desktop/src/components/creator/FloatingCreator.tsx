@@ -2,18 +2,21 @@
 //
 //  - 悬浮窗：App 渲染为全屏遮罩 + 居中面板（~85vh），不切 view，关窗即回原页。
 //  - 对话式：多轮聊天（用户/助手气泡），输入框在底部，Enter 发送。
-//  - 流式 + agent：Vercel AI SDK streamText 走 relay；模型生成插件后**自己调用 upload_plugin 工具**上传
-//    （不再吐代码块让用户手动点）。fullStream 给文本增量 + 工具调用/结果事件，UI 实时反馈。
+//  - 流式 + agent：Vercel AI SDK streamText 走 relay；模型生成插件后**调用 stage_plugin 工具**暂存为草稿
+//    （不直接发布）。草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderUpIcon, FileUpIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, type ApiError } from '@/lib/api';
 import { relayProvider } from '@/lib/relay-provider';
-import { createCreatorTools, type AskQuestionArgs, type AskQuestionResult } from '@/lib/plugin-creator/creator-tools';
+import { createCreatorTools, type AskQuestionArgs, type AskQuestionResult, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
+import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
+import { ToolCallCard } from '@/components/creator/ToolCallCard';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import { Button } from '@/components/ui/button';
@@ -36,8 +39,13 @@ interface QuestionPart {
 }
 interface ToolPart {
   type: 'tool';
+  toolCallId: string;
   name: string;
-  ok?: boolean;
+  /** 工具入参（用于卡片展开显示）。 */
+  args?: unknown;
+  /** 工具返回（用于卡片展开显示）。 */
+  result?: unknown;
+  status: 'running' | 'ok' | 'error';
 }
 type TurnPart = QuestionPart | ToolPart;
 
@@ -85,26 +93,48 @@ function makeConversationTitle(text: string) {
   return compact.length > 24 ? `${compact.slice(0, 24)}...` : compact || '新对话';
 }
 
-const SYSTEM_PROMPT = `你是灵坊平台的插件生成助手。用户用自然语言描述需求，你帮忙生成并上传插件。
+const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用自然语言描述需求，你通过调用工具自主完成插件的生成与打磨；用户预览满意后会自行点「提交」发布。
 
-工作方式（agent）：
-- 信息不足、需求有歧义、或需要用户在多个方案中做选择时，**必须调用 ask_question 工具**发起结构化提问，不要用纯文本提问。能用预设 options 就给选项，减少用户打字；只需自由输入时省略 options。
-- 需求明确、信息足够时，**调用 upload_plugin 工具**上传完整插件包（不要把插件代码作为普通文本输出）。
-- upload_plugin 的参数：id（kebab-case，仅小写字母/数字/连字符）、name、version（默认 0.1.0）、description、
-  runtime_type（client/nodejs/python）、entry（入口文件路径）、files（[{path, content}] 全部文件全文）。
-  - client → entry=ui/index.html（内联 CSS/JS）；
+# 角色与目标
+把模糊需求转成一个可运行、信息完整的插件草稿。你是 agent：能多步规划、主动调用工具、根据工具结果决定下一步，而不是一次性吐代码。
+
+# 工作流程
+1. 理解需求。信息不足、有歧义、或需在多方案间取舍时，**调用 ask_question** 结构化提问（能给 options 就给，减少用户打字），不要用纯文本提问。
+2. 需要外部知识（最新 API、库用法、第三方服务、训练数据外的事实）时，**调用 web_search**，基于结果归纳后再动手。
+3. 首次生成插件：**调用 stage_plugin** 暂存完整插件包为草稿（不要把代码作为普通文本输出）。
+4. 后续修改：**优先用 patch_draft_file 增量改单个文件**，而不是 stage_plugin 整包重发——这样省 token、更精准，且保留用户已改的信息和未动的文件。
+   - 改之前不确定结构/内容时，先 list_draft_files 看文件树，再 read_draft_file 读要改的文件。
+   - 只有当插件要整体重构、或换成完全不同的插件时，才重新 stage_plugin。
+5. 想避免重复造轮子或参考团队命名风格时，可调用 list_team_plugins。
+
+# 工具一览
+- ask_question(question, options?, allowFreeText?, multiSelect?) → { answer }
+- web_search(query, limit?) → { ok, results:[{title,url,snippet,source}] }
+- stage_plugin(id, name, version, description, runtime_type, entry, files) → { ok, message }
+- list_draft_files() → { ok, files:[路径] }
+- read_draft_file(path) → { ok, content }
+- patch_draft_file(path, content) → { ok }（覆盖式写整文件，非 diff；自动刷新预览）
+- list_team_plugins() → { ok, plugins:[{id,name,description,version,runtime_type}] }
+
+# 插件包规范（stage_plugin）
+- id：kebab-case，仅小写字母/数字/连字符。version 默认 0.1.0。
+- runtime_type 与入口：
+  - client → entry=ui/index.html（HTML 内联 CSS/JS）；
   - nodejs → entry=index.js，files 含 package.json（无依赖用 {}）与 index.js；
   - python → entry=main.py，files 含 requirements.txt（可空）与 main.py。
-- 工具返回 {ok, message}：成功则告诉用户「已上传 <name>」；失败则据 message 修正后重试。
-- 文件路径只能是相对路径，禁绝对/空段/..。
-- 插件如需调 AI，必须用灵坊平台 sdk.llm.chat / sdk.image.generate（见 relay-access skill），禁第三方接口。
-- 回复简短，不复述生成的全部文件内容（工具已上传）。`;
+- entry 必须存在于 files。文件路径只能是相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
+- 插件如需调用 AI，必须用灵坊平台 sdk.llm.chat / sdk.image.generate（见 relay-access skill），禁第三方接口。
+
+# 回复风格
+- 简洁。不复述工具已处理的完整文件内容（草稿已在右侧面板，用户看得到）。
+- 工具失败时读 message 修正后重试，不要把原始报错堆给用户。
+- 每完成一步用一两句话说清「做了什么、下一步建议」，把控制权交回用户。`;
 
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
 export function FloatingCreator({ onClose }: { onClose: () => void }) {
-  const { session, recentPlugins } = useApp();
+  const { session, recentPlugins, pendingAutoFix, setPendingAutoFix } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [conversations, setConversations] = useState<CreatorConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -119,14 +149,22 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [skillDialogOpen, setSkillDialogOpen] = useState(false); // Skill 居中悬浮窗开关（R3：由小 Popover 改为居中 Dialog + 背景模糊）
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
   const [compressing, setCompressing] = useState(false); // 压缩中指示
-  const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具上传中指示
+  const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具暂存草稿中指示
+  const [searchingQuery, setSearchingQuery] = useState<string | null>(null); // agent web_search 联网搜索中指示（展示关键词）
   const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
-  const [publishedName, setPublishedName] = useState<string | null>(null); // 已发布插件名（agent upload 成功后显示成功卡片）
+  const [publishedName, setPublishedName] = useState<string | null>(null); // 已发布插件名（用户提交成功后显示成功卡片）
+  // 草稿态：AI stage_plugin 暂存的插件 + 用户的手动编辑（覆盖 AI 字段，跨重新生成保留）。
+  // stagedDraft 是 AI 最新生成的原始草稿；userEdits 是用户在右侧面板改过的字段。
+  // 二者合并成展示用 draft；AI 重新 stage 同一 id 时 userEdits 保留，换 id 则清空。
+  const [stagedDraft, setStagedDraft] = useState<StagedPlugin | null>(null);
+  const [userEdits, setUserEdits] = useState<Partial<StagedPlugin>>({});
   const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
   const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null); // 文件夹导入（webkitdirectory）
+  const fileInputRef = useRef<HTMLInputElement>(null); // 文件导入（multiple）
   // R2：悬挂的 ask_question deferred —— 用户作答后 resolve（人在环）。
   // key=toolCallId，存 resolve/reject；切对话/取消/关窗时必须清掉防卡死。
   const pendingAnswersRef = useRef<Map<string, { resolve: (r: AskQuestionResult) => void; reject: (e: unknown) => void }>>(new Map());
@@ -141,6 +179,74 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       try { d.reject(new DOMException('cancelled', 'AbortError')); } catch { /* ignore */ }
     }
     pendingAnswersRef.current.clear();
+  }
+
+  // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先）。
+  const draft: StagedPlugin | null = stagedDraft ? { ...stagedDraft, ...userEdits } : null;
+
+  // stage_plugin 工具回调：AI 暂存草稿到右侧面板。
+  // 同一插件 id 重新 stage（用户让 AI 改后再生成）保留用户已改的字段；换 id（新插件）则清空旧编辑。
+  function onStagePlugin(next: StagedPlugin) {
+    setStagedDraft((prev) => {
+      if (prev && prev.id !== next.id) setUserEdits({});
+      return next;
+    });
+  }
+
+  // 用户在右侧面板编辑信息 → 累积到 userEdits（覆盖 AI 字段）。
+  function patchDraft(patch: Partial<StagedPlugin>) {
+    setUserEdits((prev) => ({ ...prev, ...patch }));
+  }
+
+  // 草稿 ref：供 agent 工具（read/list/patch_draft_file）读取最新草稿，避免 streamText 闭包读到旧值。
+  const draftRef = useRef<StagedPlugin | null>(draft);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+
+  // patch_draft_file 工具回调：新增/覆盖草稿单个文件，合并进 stagedDraft 并刷新预览（保留其余文件与用户编辑）。
+  function onPatchDraftFile(path: string, content: string) {
+    setStagedDraft((prev) => {
+      // 无 base 草稿不应发生（工具已校验），保险起见忽略。
+      if (!prev) return prev;
+      const files = prev.files.some((f) => f.path === path)
+        ? prev.files.map((f) => (f.path === path ? { ...f, content } : f))
+        : [...prev.files, { path, content }];
+      return { ...prev, files };
+    });
+  }
+
+  // 提交成功：清草稿态，显示成功卡片，刷新最近插件。
+  function onDraftSubmitted(name: string) {
+    setPublishedName(name);
+    setStagedDraft(null);
+    setUserEdits({});
+    toast.success(`插件「${name}」已提交到团队空间`);
+  }
+
+  // 从本地文件/文件夹导入插件 → 转草稿进入预览/改信息/提交流程（移植已有插件）。
+  async function handleImport(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    try {
+      const result = await readLocalFiles(fileList);
+      if (result.files.length === 0) {
+        toast.error('未读取到可用的文本文件（可能都是二进制或超限）');
+        return;
+      }
+      const imported = filesToStagedPlugin(result);
+      ensureConversation(`导入本地插件：${imported.name}`);
+      setPublishedName(null);
+      setUserEdits({});
+      setStagedDraft(imported);
+      const skippedNote = result.skipped.length ? `，跳过 ${result.skipped.length} 个文件` : '';
+      toast.success(`已导入「${imported.name}」（${result.files.length} 个文件${skippedNote}），可在右侧预览并修改后提交`);
+      // 在对话区留一条记录，让 AI 知道当前草稿来自导入（draft 会注入 systemPrompt，可继续让 AI 改）。
+      setTurns((prev) => [
+        ...prev,
+        { role: 'user', content: `（从本地导入了插件「${imported.name}」，共 ${result.files.length} 个文件）` },
+        { role: 'assistant', content: '已载入导入的插件为草稿，你可以在右侧预览、修改信息后提交，或告诉我要怎么改。', status: 'done' },
+      ]);
+    } catch (e) {
+      toast.error(`导入失败：${(e as Error).message || String(e)}`);
+    }
   }
 
   useEffect(() => {
@@ -188,11 +294,14 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     clearPendingAnswers();
     setBusy(false);
     setUploadingViaTool(false);
+    setSearchingQuery(null);
     setCompressing(false);
     setActiveConversationId(conversation.id);
     setTurns(conversation.turns);
     setReasoning('');
     setPublishedName(null);
+    setStagedDraft(null);
+    setUserEdits({});
     compressRef.current = emptyCompressState();
     try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
     setHistoryOpen(false);
@@ -207,6 +316,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setReasoning('');
     setReferencedPlugin(null);
     setPublishedName(null);
+    setStagedDraft(null);
+    setUserEdits({});
     compressRef.current = emptyCompressState();
     setCompressedHint(0);
     try { localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
@@ -278,6 +389,16 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   // 必须 abort，否则关窗时若仍在 text-delta 流式中，底层 relay 请求会在后台续跑并继续按团队计费（费用泄漏）。
   useEffect(() => () => { abortRef.current?.abort(); clearPendingAnswers(); }, []);
 
+  // 一键 AI 修复消费：插件启动/运行报错跳创建器时，pendingAutoFix 携带提示词 + 出错插件。
+  // 此处预填提示词到输入框 + 引用该插件源码（注入上下文），但不自动发送——用户确认后点发送即修。
+  // 消费即清（setPendingAutoFix(null)），避免下次打开创建器又被重复预填。
+  useEffect(() => {
+    if (!pendingAutoFix) return;
+    setInput(pendingAutoFix.prompt);
+    setReferencedPlugin(pendingAutoFix.plugin);
+    setPendingAutoFix(null);
+  }, [pendingAutoFix, setPendingAutoFix]);
+
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
@@ -301,7 +422,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const refPrompt = referencedPlugin?.files?.length
         ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
         : '';
-      const systemPrompt = basePrompt + thinkPrompt + refPrompt;
+      // 当前草稿注入：stage_plugin 的文件全文不在对话历史里（只在工具参数中），多轮修改时 AI 看不到上一版代码。
+      // 故把当前草稿（含用户在右侧改过的名字/信息）全文注入 systemPrompt，让 AI 基于它增量修改后再次 stage_plugin。
+      const draftPrompt = draft?.files?.length
+        ? `\n\n# 当前草稿（用户正在预览，要在此基础上修改）\n` +
+          `id：${draft.id}\n名字：${draft.name}\n版本：${draft.version}\n描述：${draft.description}\n` +
+          `runtime_type：${draft.runtime_type}\nentry：${draft.entry}\n` +
+          `请基于以下文件按用户新需求做增量修改（保留未变部分），改完**再次调用 stage_plugin 更新草稿**。` +
+          `若用户改了名字/描述等元信息（见上方），沿用这些值，不要擅自改回。\n\n当前文件：\n` +
+          draft.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')
+        : '';
+      const systemPrompt = basePrompt + thinkPrompt + refPrompt + draftPrompt;
       // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
       setCompressing(true);
       const built = await buildContextMessages({
@@ -341,20 +472,25 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         });
       };
 
-      // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 upload_plugin 上传 / ask_question 提问。
+      // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 stage_plugin 暂存草稿 / ask_question 提问。
       // 文本 delta 流式累积进 assistant 气泡；tool-call/result 用独立指示器或 parts 卡片。
       const result = streamText({
         model: relayProvider().chat(tier),
         messages: built.messages,
-        tools: createCreatorTools({ onAskQuestion }),
-        // 调大步数：留给「生成→提问→作答→继续生成→可能再问/再上传→总结」的多步循环。
+        tools: createCreatorTools({
+          onStagePlugin,
+          onAskQuestion,
+          getDraft: () => draftRef.current,
+          onPatchDraft: onPatchDraftFile,
+        }),
+        // 调大步数：留给「生成→提问→作答→继续生成→可能再问/再暂存→总结」的多步循环。
         stopWhen: stepCountIs(8),
         abortSignal: controller.signal,
       });
 
-      let uploadedName = '';
-      let uploadedMsg = '';
-      let sawToolCall = false; // R1：本轮是否有过工具调用（含 ask_question/upload）
+      let stagedName = '';
+      let stageErrMsg = '';
+      let sawToolCall = false; // R1：本轮是否有过工具调用（含 ask_question/stage）
       let reasoningText = ''; // 本轮思考累积（流末兜底判定用，避免读 reasoning state 的陈旧闭包）
       setReasoning('');
       for await (const part of result.fullStream) {
@@ -375,14 +511,28 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           });
         } else if (part.type === 'tool-call') {
           sawToolCall = true;
-          // upload_plugin：独立上传指示器；ask_question：onAskQuestion 已写入提问卡片，此处无需额外处理。
-          if (part.toolName === 'upload_plugin') setUploadingViaTool(true);
+          // 记录工具调用卡片（ask_question 除外——它已由 onAskQuestion 写成提问卡片，避免重复）。
+          if (part.toolName !== 'ask_question') {
+            upsertToolPart(assistantIdx, { toolCallId: part.toolCallId, name: part.toolName, args: part.input, status: 'running' });
+          }
+          // 兼容旧的全局指示器（顶部状态条）。
+          if (part.toolName === 'stage_plugin') setUploadingViaTool(true);
+          else if (part.toolName === 'web_search') {
+            const q = (part.input as { query?: string } | undefined)?.query ?? '';
+            setSearchingQuery(q || '联网搜索中');
+          }
         } else if (part.type === 'tool-result') {
-          if (part.toolName === 'upload_plugin') {
+          const output = part.output as { ok?: boolean } | undefined;
+          if (part.toolName !== 'ask_question') {
+            upsertToolPart(assistantIdx, { toolCallId: part.toolCallId, name: part.toolName, result: part.output, status: output?.ok === false ? 'error' : 'ok' });
+          }
+          if (part.toolName === 'stage_plugin') {
             setUploadingViaTool(false);
             const r = part.output as { ok: boolean; message: string; name?: string } | undefined;
-            if (r?.ok && r.name) { uploadedName = r.name; setPublishedName(r.name); }
-            else if (r && !r.ok) uploadedMsg = r.message;
+            if (r?.ok && r.name) stagedName = r.name;
+            else if (r && !r.ok) stageErrMsg = r.message;
+          } else if (part.toolName === 'web_search') {
+            setSearchingQuery(null);
           }
           // ask_question 的 tool-result：作答已由提交回调标记 answered，无需额外处理。
         }
@@ -398,9 +548,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         const hasParts = (cur.parts?.length ?? 0) > 0; // 提问卡片等结构化内容也算「有内容」
         if (hasContent || hasParts) {
           next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
-        } else if (uploadedName) {
-          // 工具步可见化（H1）：只调了 upload 没说话 → 补占位文本，配合上方成功卡片。
-          next[assistantIdx] = { ...cur, content: '已为你生成并上传插件，详情见上方卡片。', streaming: false, status: 'done' };
+        } else if (stagedName) {
+          // 工具步可见化（H1）：只调了 stage 没说话 → 补占位文本，配合右侧草稿面板。
+          next[assistantIdx] = { ...cur, content: '已为你生成插件草稿，可在右侧预览并修改信息后提交。', streaming: false, status: 'done' };
         } else if (reasoningText.trim().length > 0) {
           // reasoning 兜底（H2）：只输出了思考过程没有正文（用本轮累积的 reasoningText，非 state 闭包）。
           next[assistantIdx] = { ...cur, content: '模型仅输出了思考过程，可展开下方「思考过程」查看，或重试。', streaming: false, status: 'done' };
@@ -415,11 +565,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         }
         return next;
       });
-      if (uploadedName) toast.success(`插件「${uploadedName}」已上传到团队空间`);
-      else if (uploadedMsg) toast.error(uploadedMsg);
+      if (stagedName) toast.success(`草稿「${stagedName}」已生成，可在右侧预览并提交`);
+      else if (stageErrMsg) toast.error(stageErrMsg);
     } catch (e) {
       const aborted = (e as Error).name === 'AbortError';
       setUploadingViaTool(false);
+      setSearchingQuery(null);
       setCompressing(false);
       setTurns((prev) => {
         const next = [...prev];
@@ -430,6 +581,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       if (!aborted) toast.error((e as ApiError).message || '生成失败');
     } finally {
       setBusy(false);
+      setSearchingQuery(null);
       abortRef.current = null;
     }
   }
@@ -445,6 +597,30 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   // R2：用户在提问卡片作答 → 标记 parts 的该 question 为 answered + 写 answer，并 resolve 悬挂的 deferred，
   // streamText 多步循环据此继续。turnIdx 用于定位气泡。
+  // 工具调用卡片：按 toolCallId 写入/更新 assistant 气泡的 parts（tool-call 建卡，tool-result 补结果+状态）。
+  function upsertToolPart(turnIdx: number, patch: { toolCallId: string; name: string; args?: unknown; result?: unknown; status: 'running' | 'ok' | 'error' }) {
+    setTurns((prev) => {
+      const next = [...prev];
+      const cur = next[turnIdx];
+      if (!cur || cur.role !== 'assistant') return next;
+      const parts = [...(cur.parts ?? [])];
+      const idx = parts.findIndex((p) => p.type === 'tool' && p.toolCallId === patch.toolCallId);
+      if (idx >= 0) {
+        const existing = parts[idx] as ToolPart;
+        parts[idx] = {
+          ...existing,
+          ...patch,
+          // 结果阶段不覆盖已存的 args（tool-result 不带 input）。
+          args: patch.args !== undefined ? patch.args : existing.args,
+        };
+      } else {
+        parts.push({ type: 'tool', ...patch });
+      }
+      next[turnIdx] = { ...cur, parts };
+      return next;
+    });
+  }
+
   function answerQuestion(turnIdx: number, toolCallId: string, answer: string) {
     const trimmed = answer.trim();
     if (!trimmed) return;
@@ -472,8 +648,25 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   return (
     <>
+    {/* 隐藏文件输入：文件夹（webkitdirectory）+ 多文件。导入后转草稿。 */}
+    <input
+      ref={folderInputRef}
+      type="file"
+      // webkitdirectory 为非标准属性，React 不识别故用 ref 透传；选目录时浏览器给目录下全部文件。
+      {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+      multiple
+      className="hidden"
+      onChange={(e) => { void handleImport(e.target.files); e.target.value = ''; }}
+    />
+    <input
+      ref={fileInputRef}
+      type="file"
+      multiple
+      className="hidden"
+      onChange={(e) => { void handleImport(e.target.files); e.target.value = ''; }}
+    />
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none">
-      <div className="flex h-[85vh] max-h-[800px] w-full max-w-[1100px] min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl animate-in zoom-in-95 fade-in slide-in-from-bottom-2 duration-[var(--lf-dur-base)] motion-reduce:animate-none">
+      <div className={`flex h-[85vh] max-h-[800px] w-full ${draft ? 'max-w-[1540px]' : 'max-w-[1100px]'} min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl transition-[max-width] duration-300 animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`}>
         {/* 标题栏 */}
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
@@ -497,6 +690,35 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <HistoryIcon className="size-3.5" />
               历史
             </Button>
+            {/* 导入本地插件（移植）：文件夹 / 文件两种入口，读取后进草稿态预览/改信息/提交 */}
+            <Popover>
+              <PopoverTrigger render={<Button variant="outline" size="sm" className="gap-1.5" title="从电脑导入已有插件" />}>
+                <FolderUpIcon className="size-3.5" />
+                导入
+              </PopoverTrigger>
+              <PopoverContent className="w-52" align="end">
+                <div className="text-xs font-medium text-muted-foreground">从电脑导入已有插件</div>
+                <div className="mt-1.5 space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() => folderInputRef.current?.click()}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                  >
+                    <FolderUpIcon className="size-3.5 shrink-0" />
+                    选择文件夹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                  >
+                    <FileUpIcon className="size-3.5 shrink-0" />
+                    选择文件
+                  </button>
+                </div>
+                <div className="mt-1.5 text-[11px] text-muted-foreground">读取插件源码后可预览、改信息再提交。</div>
+              </PopoverContent>
+            </Popover>
             {/* 引用插件：选一个已有插件注入源码到上下文，让 agent 基于现有代码修改（#4） */}
             {recentPlugins.length > 0 && (
               <Popover>
@@ -545,6 +767,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        {/* 主体：左对话列 + 右草稿面板（有草稿时分栏） */}
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
         {/* 对话区 */}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {turns.length === 0 ? (
@@ -555,6 +780,13 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                 {['番茄钟插件', 'Markdown 速记', '配色生成器'].map((s) => (
                   <button key={s} type="button" onClick={() => setInput(s)} className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted">{s}</button>
                 ))}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                或
+                <button type="button" onClick={() => folderInputRef.current?.click()} className="mx-1 text-primary underline-offset-2 hover:underline">导入本地文件夹</button>
+                /
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="mx-1 text-primary underline-offset-2 hover:underline">文件</button>
+                移植已有插件
               </div>
             </div>
           ) : (
@@ -580,6 +812,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                       )}
                       {/* R2：提问卡片（Claude 风格）—— 渲染在文本之后，可作答并继续 agent 流程。 */}
                       {t.parts?.map((p) => {
+                        if (p.type === 'tool') {
+                          return <ToolCallCard key={p.toolCallId} data={p} />;
+                        }
                         if (p.type !== 'question') return null;
                         const draft = answerDrafts[p.toolCallId] ?? '';
                         const selected = multiSelectDrafts[p.toolCallId] ?? [];
@@ -658,21 +893,19 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           )}
-          {/* #4 发布成功卡片：agent upload_plugin 成功后明确告知用户「已发布到团队空间」 */}
+          {/* 提交成功卡片：用户在右侧面板点提交、发布成功后告知「已提交到团队空间」 */}
           {publishedName && (
             <div className="mx-auto mt-4 max-w-3xl">
               <div className="flex items-center gap-3 rounded-xl border border-green-300 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950/30">
                 <CheckCircle2Icon className="size-5 shrink-0 text-green-600" />
                 <div className="flex-1 text-sm">
-                  <div className="font-medium">插件「{publishedName}」已发布到团队空间</div>
+                  <div className="font-medium">插件「{publishedName}」已提交到团队空间</div>
                   <div className="text-xs text-muted-foreground">团队成员现可在插件中心看到并安装它。点「+」新建对话可继续创建下一个。</div>
                 </div>
               </div>
             </div>
           )}
         </div>
-
-        {/* 上传由 agent 工具调用（upload_plugin）驱动，无需手动预览/上传栏。 */}
 
         {/* #3 思考流式输出（支持思考的模型才显示，不支持时 reasoning 为空自动隐藏） */}
         {reasoning && (
@@ -703,12 +936,16 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* 状态指示（压缩中 / agent 工具上传中） */}
-        {(compressing || uploadingViaTool) && (
+        {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中） */}
+        {(compressing || searchingQuery != null || uploadingViaTool) && (
           <div className="shrink-0 border-t bg-muted/30 px-4 py-1.5">
             <div className="mx-auto flex max-w-3xl items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2Icon className="size-3 animate-spin" />
-              {compressing ? '正在压缩对话上下文…' : 'agent 正在上传插件…'}
+              {compressing
+                ? '正在压缩对话上下文…'
+                : searchingQuery != null
+                  ? `正在联网搜索：${searchingQuery}…`
+                  : 'AI 正在生成插件草稿…'}
             </div>
           </div>
         )}
@@ -743,6 +980,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               <Button size="icon" onClick={() => void send()} disabled={!input.trim()} title="发送" className="h-[40px] w-[40px] shrink-0"><SendIcon className="size-4" /></Button>
             )}
           </div>
+        </div>
+          </div>
+          {/* 右侧草稿面板：AI 暂存草稿后出现，实时预览 + 改信息 + 提交 */}
+          {draft && (
+            <CreatorDraftPanel
+              draft={draft}
+              onChange={patchDraft}
+              onSubmitted={onDraftSubmitted}
+              busy={busy}
+            />
+          )}
         </div>
       </div>
     </div>

@@ -11,7 +11,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useApp } from '@/App';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PluginIcon, readPluginIcon } from '@/components/plugins/author-actions';
 import { cn } from '@/lib/utils';
 import type { LoadedPlugin, View } from '@/lib/types';
 import {
@@ -305,8 +304,10 @@ function SidebarPluginItem({
           collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
         )}
       >
-        {/* 侧栏小号图标：显式 size-5 覆盖 PluginIcon 默认 size-10。 */}
-        <PluginIcon icon={readPluginIcon(plugin)} className="size-5 shrink-0 rounded object-cover" />
+        {/* 去图标后用插件名首字符占位（折叠态仅显示首字符，展开态显示全名）。 */}
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
+          {plugin.name.trim().charAt(0) || '?'}
+        </span>
         {!collapsed && <span className="truncate text-sm">{plugin.name}</span>}
       </button>
       {!collapsed && (

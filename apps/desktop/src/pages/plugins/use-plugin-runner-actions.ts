@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { LoadedPlugin, PluginDraft } from '@/lib/types';
+import type { LoadedPlugin, PendingAutoFix, PluginDraft } from '@/lib/types';
 import { writePluginFiles } from '@/lib/plugin-status';
 import { errorMessage } from '../plugins-runtime';
 
 type RunnerActionDeps = {
   plugin: LoadedPlugin;
   setCurrentDraft: (draft: PluginDraft | null) => void;
-  setPendingAutoFixPrompt: (prompt: string | null) => void;
+  setPendingAutoFix: (fix: PendingAutoFix | null) => void;
   setRunningPlugin: (plugin: LoadedPlugin | null) => void;
   setView: (view: 'creator') => void;
 };
@@ -15,7 +15,7 @@ type RunnerActionDeps = {
 export function usePluginRunnerActions({
   plugin,
   setCurrentDraft,
-  setPendingAutoFixPrompt,
+  setPendingAutoFix,
   setRunningPlugin,
   setView,
 }: RunnerActionDeps) {
@@ -25,7 +25,8 @@ export function usePluginRunnerActions({
     try {
       await persistPluginFiles(plugin);
       setCurrentDraft(draftFromPlugin(plugin));
-      setPendingAutoFixPrompt(autoFixPrompt(stderr));
+      // 结构化载荷：提示词（含插件信息 + 报错）+ 出错插件本体（创建器引用其源码注入上下文）。
+      setPendingAutoFix({ prompt: autoFixPrompt(stderr, plugin), plugin });
       setRunningPlugin(null);
       setView('creator');
     } catch (caught) {
@@ -65,6 +66,25 @@ function draftFromPlugin(plugin: LoadedPlugin): PluginDraft {
   };
 }
 
-function autoFixPrompt(stderr: string): string {
-  return `插件运行时报错，请定位并修复：\n\`\`\`\n${stderr}\n\`\`\`\n请修复问题并重新写出完整文件。`;
+const RUNTIME_LABEL: Record<NonNullable<LoadedPlugin['runtime_type']>, string> = {
+  client: '网页',
+  nodejs: 'Node.js',
+  python: 'Python',
+  cloud: '云端',
+};
+
+/**
+ * 构造一键修复提示词：带上插件信息（名称/运行时）+ 报错原文 + 修复指引。
+ * 创建器会另把插件源码作为引用注入上下文，故此处提示词只需指明"基于现有源码修"。
+ * 导出供单测覆盖文案构造。
+ */
+export function autoFixPrompt(stderr: string, plugin: LoadedPlugin): string {
+  const runtime = plugin.runtime_type ? RUNTIME_LABEL[plugin.runtime_type] : '未知';
+  return [
+    `插件「${plugin.name}」(${runtime}) 启动/运行报错，请定位并修复：`,
+    '```',
+    stderr.trim() || '(无错误输出)',
+    '```',
+    '请基于当前插件源码（已在上下文中）修复问题，并重新写出完整文件。',
+  ].join('\n');
 }
