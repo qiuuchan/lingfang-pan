@@ -1033,13 +1033,13 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                       {t.content}
                     </div>
                   ) : (
-                    <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
-                      {/* 链式渲染（OpenCodeUI 式）：按 parts 时序逐块展示 思考/文本/工具/提问。 */}
-                      {(t.parts && t.parts.length > 0) ? (
-                        t.parts.map((p, pi) => {
+                    // 链式渲染（OpenCodeUI 式）：每个 part 是独立卡片（思考一张、内容一张、工具一张…），纵向堆叠。
+                    (t.parts && t.parts.length > 0) ? (
+                      <div className="flex max-w-[85%] flex-col gap-2">
+                        {t.parts.map((p, pi) => {
                           if (p.type === 'reasoning') {
                             return (
-                              <details key={`r-${pi}`} className="mt-2 first:mt-0 rounded-lg border border-purple-200/50 bg-purple-50/40 px-3 py-2 dark:border-purple-800/30 dark:bg-purple-950/20" open={!p.done && t.streaming}>
+                              <details key={`r-${pi}`} className="overflow-hidden rounded-2xl border border-purple-200/50 bg-purple-50/40 px-4 py-2.5 shadow-sm backdrop-blur-sm dark:border-purple-800/30 dark:bg-purple-950/20" open={!p.done && t.streaming}>
                                 <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-purple-600 transition-colors hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
                                   <span className="text-sm">💭</span>
                                   <span>思考过程（{p.content.length} 字）</span>
@@ -1053,27 +1053,35 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           }
                           if (p.type === 'text') {
                             if (!p.content.trim()) return null;
-                            return <div key={`t-${pi}`} className="mt-2 first:mt-0"><Markdown>{p.content}</Markdown></div>;
+                            return (
+                              <div key={`t-${pi}`} className="creator-assistant-bubble overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
+                                <Markdown>{p.content}</Markdown>
+                              </div>
+                            );
                           }
                           if (p.type === 'tool') {
                             return <ToolCallCard key={p.toolCallId} data={p} />;
                           }
                           // question part
                           return renderQuestionCard(p, i);
-                        })
-                      ) : t.content ? (
-                        // 向后兼容：旧会话只有 content（无 parts），整段渲染。
-                        <Markdown>{t.content}</Markdown>
-                      ) : t.status === 'failed' ? (
-                        <span className="text-destructive">调用失败</span>
-                      ) : t.status === 'cancelled' ? (
-                        <span className="text-muted-foreground">已取消</span>
-                      ) : !t.streaming ? (
-                        <span className="text-muted-foreground">无内容</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
-                      )}
-                    </div>
+                        })}
+                      </div>
+                    ) : (
+                      // 向后兼容 / 兜底：旧会话只有 content 或无任何 part 时，单个气泡渲染。
+                      <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
+                        {t.content ? (
+                          <Markdown>{t.content}</Markdown>
+                        ) : t.status === 'failed' ? (
+                          <span className="text-destructive">调用失败</span>
+                        ) : t.status === 'cancelled' ? (
+                          <span className="text-muted-foreground">已取消</span>
+                        ) : !t.streaming ? (
+                          <span className="text-muted-foreground">无内容</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
               ))}

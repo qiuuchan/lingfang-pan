@@ -135,7 +135,7 @@ export class CreditService {
       // 未预扣模式：事后直接扣实际额。条件扣款防透支（余额不足则扣到 0，差额不追）。
       const actual = Math.max(0, realCredits);
       if (actual === 0) return 0;
-      await this.prisma.$transaction(async (tx) => {
+      return this.prisma.$transaction(async (tx) => {
         const account = await tx.teamCredit.findUnique({ where: { teamId } });
         const balance = account?.balance ?? 0;
         const charge = Math.min(actual, Math.max(0, balance));
@@ -145,8 +145,8 @@ export class CreditService {
             data: { teamId, amount: charge, direction: 'DEBIT', source: 'llm_consume', reason: 'AI 对话消费', actorUserId, callLogId },
           });
         }
+        return charge;
       });
-      return actual;
     }
     const actualCharge = Math.min(realCredits, cap); // cap 内全额计费，超出不收费（用户保护）
     await this.prisma.$transaction(async (tx) => {

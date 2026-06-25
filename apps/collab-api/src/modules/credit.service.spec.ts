@@ -61,6 +61,15 @@ describe('CreditService reserve/reconcile/refund', () => {
     expect(tx.teamCredit.updateMany).not.toHaveBeenCalled();
   });
 
+  it('reconcile: cap=0 返回真实扣款额而不是实际用量', async () => {
+    tx.teamCredit.findUnique.mockResolvedValueOnce({ balance: 120 });
+    const charged = await svc.reconcile('t1', 0, 200, 'log1', 'u1');
+    expect(charged).toBe(120);
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { decrement: 120 } } }));
+    const debitCreate = tx.creditLedger.create.mock.calls.find((c) => c[0].data.source === 'llm_consume');
+    expect(debitCreate?.[0].data.amount).toBe(120);
+  });
+
   it('reconcile: real<cap 时退回未用预留，actualCredits=min(real,cap)', async () => {
     // cap=200, real=50 → actual=50, refund=150
     const charged = await svc.reconcile('t1', 200, 50, 'log1', 'u1');

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ServerIcon } from 'lucide-react';
 import { useApp } from '@/App';
-import { api, isEmail, normalizeBackendUrl, testBackendUrl, type ApiError } from '@/lib/api';
+import { api, isEmail, type ApiError } from '@/lib/api';
 import type { CollabSessionResponse, PlatformInfo } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { dragRegionProps } from '@/lib/window-drag';
 
 export function Auth() {
-  const { applyCollabSession, backendUrl, saveBackendUrl } = useApp();
+  const { applyCollabSession, backendUrl } = useApp();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,10 +22,7 @@ export function Auth() {
   const [wantsTeamAdmin, setWantsTeamAdmin] = useState(false);
   const [teamName, setTeamName] = useState('');
   const [reason, setReason] = useState('');
-  const [backendUrlDraft, setBackendUrlDraft] = useState(backendUrl || '');
-  const [showBackendSettings, setShowBackendSettings] = useState(!backendUrl);
   const [loading, setLoading] = useState(false);
-  const [testingBackend, setTestingBackend] = useState(false);
 
   // 找回密码（Top5）：「忘记密码」对话框 + 「重置密码」对话框。
   // reset_token 从邮件链接的 URL query 解析（?reset_token=xxx），存在则自动打开重置密码对话框。
@@ -121,7 +117,7 @@ export function Auth() {
   }
 
   async function onLogin() {
-    if (!backendUrl) return toast.error('先在下方设置公司平台地址');
+    if (!backendUrl) return toast.error('平台地址未配置，请联系管理员');
     if (!isEmail(email)) return toast.error('邮箱格式不正确');
     if (!password) return toast.error('输入密码');
     setLoading(true);
@@ -136,7 +132,7 @@ export function Auth() {
   }
 
   async function onRegister() {
-    if (!backendUrl) return toast.error('先在下方设置公司平台地址');
+    if (!backendUrl) return toast.error('平台地址未配置，请联系管理员');
     if (!isEmail(email)) return toast.error('邮箱格式不正确（如 name@example.com）');
     if (password.length < 8) return toast.error('密码至少 8 位');
     if (wantsTeamAdmin && !teamName.trim()) return toast.error('填写要申请管理的团队名称');
@@ -165,23 +161,6 @@ export function Auth() {
       toast.error(err.code === 'conflict' ? '该邮箱已注册，请直接登录' : err.message);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function saveBackend() {
-    const normalized = normalizeBackendUrl(backendUrlDraft);
-    if (!normalized) return toast.error('服务地址需以 http:// 或 https:// 开头');
-    setTestingBackend(true);
-    try {
-      await testBackendUrl(normalized);
-      if (!saveBackendUrl(normalized)) return toast.error('公司平台地址格式不正确');
-      setBackendUrlDraft(normalized);
-      setShowBackendSettings(false);
-      toast.success('公司平台地址已保存');
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setTestingBackend(false);
     }
   }
 
@@ -234,41 +213,6 @@ export function Auth() {
                 <span>已有账号？</span><Button variant="link" className="h-auto p-0" onClick={() => setMode('login')}>去登录</Button>
               </p>
             )}
-          </div>
-          <div className="mt-2 border-t pt-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2 text-sm">
-                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <ServerIcon className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block font-medium text-foreground">公司平台地址</span>
-                  <span className="block truncate text-muted-foreground">{backendUrl || '未设置，登录和注册前需要先保存平台地址'}</span>
-                </span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowBackendSettings((value) => !value)}
-              >
-                {showBackendSettings ? '收起' : backendUrl ? '修改' : '设置'}
-              </Button>
-            </div>
-            <div className={cn('grid transition-all duration-300 ease-out', showBackendSettings ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
-              <div className="flex flex-col gap-3 overflow-hidden">
-                <Input
-                  placeholder="例如 http://127.0.0.1:3000 或 https://api.example.com"
-                  value={backendUrlDraft}
-                  onChange={(e) => setBackendUrlDraft(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && saveBackend()}
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <LoadingButton loading={testingBackend} onClick={saveBackend}>测试并保存</LoadingButton>
-                  <Button variant="outline" onClick={() => setBackendUrlDraft('http://127.0.0.1:3000')}>填入本机默认地址</Button>
-                </div>
-                <p className="text-xs text-muted-foreground">保存前会检测公司平台地址是否可用。</p>
-              </div>
-            </div>
           </div>
         </CardContent>
       </Card>

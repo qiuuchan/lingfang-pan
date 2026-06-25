@@ -691,6 +691,8 @@ export default function App() {
             <span>正在恢复登录…</span>
           </div>
         </Centered>
+        {/* 关窗询问悬浮窗：登录前的居中态也需渲染，否则关闭按钮 prevent_close 后无对话框、应用关不掉。 */}
+        <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} />
         <Toaster position="top-right" richColors closeButton />
       </AppContext.Provider>
     );
@@ -704,11 +706,11 @@ export default function App() {
     ) : (
       <Auth />
     );
-    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}>{authBody}</Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
+    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}>{authBody}</Centered><CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} /><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   if (session.onboarding && !['TEAM_SPACE', 'TEAM_ADMIN_SPACE'].includes(session.onboarding)) {
-    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}><Onboarding /></Centered><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
+    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}><Onboarding /></Centered><CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} /><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   let body: ReactNode;
