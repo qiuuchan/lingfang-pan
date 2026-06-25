@@ -24,13 +24,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon, SearchIcon, PowerIcon, LockIcon } from 'lucide-react';
+import { PlusIcon, PencilIcon, UserPlusIcon, DollarSignIcon, Trash2Icon, SearchIcon, PowerIcon, LockIcon, DatabaseIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/utils';
 import { useLoad, run, useGuardedAction } from '@/lib/helpers';
 import { StatusBadge, Section, InfoGrid } from '@/components/shared';
 import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { Team, TeamDetail, TeamMember, TeamStatus, User, LedgerDirection, PermissionEntry, Role } from '@/lib/types';
+import type { Team, TeamDetail, TeamMember, TeamStatus, User, LedgerDirection, PermissionEntry, Role, Pool } from '@/lib/types';
 import { yuanToCents, activeMembers, teamAdmins, adminNames, labelOf, formatTime } from '@/lib/types';
 import { RoleEditDialog } from '@/components/role-edit-dialog';
 
@@ -164,6 +164,8 @@ function TeamOverviewSheet({
   // 角色 tab 编辑/创建对话框状态
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [creatingRole, setCreatingRole] = useState(false);
+  // 可用资源池（概览 tab 默认池子选择器）
+  const [availablePools, setAvailablePools] = useState<Pool[]>([]);
 
   // 加载团队角色列表（成员 tab 角色下拉 + 角色 tab 共用）。供 changeRole / role CRUD 后刷新。
   const loadTeamRoles = async () => {
@@ -172,12 +174,13 @@ function TeamOverviewSheet({
     setTeamRoles(r.roles);
   };
 
-  // 详情打开时加载聚合视图 + 成员列表 + 团队角色 + 团队权限码。team 变化（列表刷新同步 active）时重载。
+  // 详情打开时加载聚合视图 + 成员列表 + 团队角色 + 团队权限码 + 可用资源池。team 变化（列表刷新同步 active）时重载。
   useEffect(() => {
     if (!team) {
       setDetail(null);
       setMembers([]);
       setTeamRoles([]);
+      setAvailablePools([]);
       return;
     }
     setTab('overview');
@@ -189,13 +192,16 @@ function TeamOverviewSheet({
       api<{ roles: Role[] }>(`/api/admin/teams/${team.id}/roles`).then((r) => r.roles),
       // 团队级权限码清单：角色编辑面板勾选树数据源（与桌面端 roles 端点同源）
       api<{ permissions: PermissionEntry[] }>(`/api/admin/teams/${team.id}/roles/permissions`),
+      // 可用资源池：概览 tab 默认池子选择器数据源
+      api<{ pools: Pool[] }>('/api/admin/billing/pools').then((r) => r.pools),
     ])
-      .then(([d, m, roles, perms]) => {
+      .then(([d, m, roles, perms, pools]) => {
         if (!mounted) return;
         setDetail(d);
         setMembers(m);
         setTeamRoles(roles);
         setTeamPermissions(perms.permissions);
+        setAvailablePools(pools);
       })
       .catch((e: Error & { status?: number }) => {
         if (!mounted) return;
@@ -247,6 +253,18 @@ function TeamOverviewSheet({
     ))) return;
   }
 
+  // 设置默认资源池：调用 PATCH /api/admin/teams/:id/default-pool。
+  async function updateDefaultPool(poolId: string | null) {
+    if (!(await run(
+      () =>
+        api(`/api/admin/teams/${team!.id}`, {
+          method: 'PATCH',
+          body: { defaultPoolId: poolId },
+        }).then(onRefresh),
+      '默认资源池已更新',
+    ))) return;
+  }
+
   return (
     <DetailSheet
       open={!!team}
@@ -286,7 +304,7 @@ function TeamOverviewSheet({
             <TabsTrigger value="ledger">流水</TabsTrigger>
           </TabsList>
 
-          {/* 概览：团队基础信息 + 余额流水摘要 + 活跃度画像。 */}
+          {/* 概览：团队基础信息 + 余额流水摘要 + 活跃度画像 + 默认资源池。 */}
           <TabsContent value="overview" className="space-y-4 pt-4">
             <InfoGrid
               items={[
@@ -308,6 +326,32 @@ function TeamOverviewSheet({
                 ]}
               />
             ) : null}
+            {/* 默认资源池选择器 */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <DatabaseIcon className="size-4" />
+                默认资源池
+              </Label>
+              <Select
+                value={team.defaultPoolId ?? 'none'}
+                onValueChange={(v) => updateDefaultPool(v === 'none' ? null : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="未设置" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">未设置</SelectItem>
+                  {availablePools.map((pool) => (
+                    <SelectItem key={pool.id} value={pool.id}>
+                      {pool.name} {pool.scope === 'DEDICATED' ? '(专用)' : '(共享)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                指定团队默认使用的资源池，影响 AI 调用的渠道选择。
+              </p>
+            </div>
             {team.description ? (
               <div>
                 <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">团队简介</div>

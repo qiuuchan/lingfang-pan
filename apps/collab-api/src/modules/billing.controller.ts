@@ -220,9 +220,20 @@ export class BillingController {
     const take = Math.min(200, Number(q.pageSize) || 50);
     const rows = await this.prisma.llmCallLog.findMany({
       where, orderBy: { createdAt: 'desc' }, take,
-      include: { team: { select: { name: true } }, user: { select: { email: true } } },
+      include: {
+        team: { select: { name: true } },
+        user: { select: { email: true } },
+        channel: { select: { id: true, name: true, pool: { select: { id: true, name: true } } } },
+      },
     });
-    return { logs: rows };
+    return {
+      logs: rows.map((r) => ({
+        ...r,
+        poolId: r.channel?.pool?.id ?? null,
+        poolName: r.channel?.pool?.name ?? null,
+        channelName: r.channel?.name ?? null,
+      })),
+    };
   }
 
   // === API Key 总览 ===

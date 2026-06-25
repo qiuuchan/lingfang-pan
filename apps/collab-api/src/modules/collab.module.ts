@@ -45,9 +45,11 @@ import { SearchController } from './search/search.controller';
 import { SearchService } from './search/search.service';
 import { TicketController, AdminTicketController } from './ticket.controller';
 import { TicketService } from './ticket.service';
+import { PoolsController } from './pools.controller';
+import { TeamPoolService } from './pools.service';
 
 @Module({
-  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, UserApiKeyController, UserCreditsController, SearchController, TicketController, AdminTicketController],
+  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, UserApiKeyController, UserCreditsController, SearchController, TicketController, AdminTicketController, PoolsController],
   // CollabModule 直接声明 AuthService（与 AuthModule 重复声明，历史架构；TeamService 等注入之），
   // 故 MailService / GeetestService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到它们。
   // NotificationService 无外部依赖（仅 PrismaService），被 AdminService/EconomyService 注入以在审核/购买成功后埋点触发通知。
@@ -55,6 +57,7 @@ import { TicketService } from './ticket.service';
   // RBAC：RoleService/PluginGrantService/PermissionGroupService 依赖 PrismaService + AuthService；PluginService 注入 PluginGrantService 做 availablePlugins 授权过滤。
   // 计费/中转：PricingService/CreditService/ChannelService(+Router)/PlatformApiKeyService/RelayService 构成中转计费闭环；
   // RelayController(@Public，DualAuthGuard 鉴权) + BillingController(admin) + UserApiKey/UserCreditsController(前台)。
-  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService,  EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PoolService, PlatformApiKeyService, RelayService, SearchService, TicketService],
+  // TeamPoolService：团队端获取可用资源池（PoolsController，区别于 PoolService 管理端 CRUD）。
+  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, AuthService, MailService, GeetestService, TeamService, PluginService, AdminService,  EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PoolService, PlatformApiKeyService, RelayService, SearchService, TicketService, TeamPoolService],
 })
 export class CollabModule {}

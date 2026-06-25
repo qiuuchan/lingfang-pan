@@ -46,6 +46,7 @@ export type Team = {
   allowPublicJoin?: boolean;
   description?: string;
   createdAt?: string;
+  defaultPoolId?: string | null;
 };
 
 // 插件完整字段：后端 publicPlugin（apps/collab-api/src/modules/plugin-package.ts）实际返回上述全部字段，
@@ -177,6 +178,10 @@ export type LlmCallLog = {
   createdAt: string;
   team?: { name: string };
   user?: { email: string } | null;
+  // 资源池信息（后端 billing.controller.ts callLogs 包含）
+  poolId?: string | null;
+  poolName?: string | null;
+  channelName?: string | null;
 };
 export type PluginGrantEffect = 'ALLOW' | 'DENY';
 
