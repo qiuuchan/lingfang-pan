@@ -40,6 +40,8 @@ struct UninstallApp {
     reason: Reason,
     feedback: String,
     logo: Option<egui::TextureHandle>,
+    /// Win11 原生圆角是否已应用（窗口创建后才生效，首帧起逐帧尝试直至成功）。
+    corners_applied: bool,
 }
 
 /// 启动交互卸载窗口。
@@ -65,6 +67,7 @@ pub fn run_interactive() -> Result<()> {
                 reason: Reason::NotNeeded,
                 feedback: String::new(),
                 logo: theme::load_logo(&cc.egui_ctx),
+                corners_applied: false,
             }))
         }),
     )
@@ -77,7 +80,18 @@ impl eframe::App for UninstallApp {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // 首帧获取真实窗口 HWND 并应用 Win11 原生圆角（窗口创建后才有句柄）。
+        if !self.corners_applied {
+            use raw_window_handle::HasWindowHandle;
+            if let Ok(rwh) = frame.window_handle() {
+                if let raw_window_handle::RawWindowHandle::Win32(w) = rwh.as_ref() {
+                    platform::set_window_rounding(w.hwnd.get() as isize);
+                }
+            }
+            self.corners_applied = true;
+        }
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(theme::BG))
             .show(ctx, |ui| {

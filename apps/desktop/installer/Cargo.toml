@@ -23,9 +23,13 @@ png = "0.17"
 # LOCALAPPDATA 等目录定位（与 src-tauri 同款 dirs 5）。
 dirs = "5"
 anyhow = "1"
+# 从 eframe Frame 取真实窗口 HWND（applyWin11 圆角）。版本须与 eframe 0.28 一致（0.6）。
+raw-window-handle = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 # 注册表（Uninstall key）/ 快捷方式（IShellLinkW COM）/ 进程等待（OpenProcess/WaitForSingleObject）。
+# DWM：Win11 原生圆角（DwmSetWindowAttribute，Win10 该属性失败 → 保持直角）；
+# WindowsAndMessaging：EnumThreadWindows 枚举本进程窗口拿 HWND。
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Security",
@@ -35,5 +39,7 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_Storage_FileSystem",
+  "Win32_Graphics_Dwm",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 

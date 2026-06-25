@@ -79,12 +79,17 @@ async function main() {
     }
   }
 
-  // 使用 PowerShell 打包（Windows 内置）
-  console.log('   使用 PowerShell Compress-Archive 打包...');
+  // 使用 Windows 内置 tar 打包（Windows 10+ 自带，支持 zip）
+  // 注意：tar 需要相对路径或 Unix 风格路径
+  console.log('   使用 tar 命令打包...');
   if (fs.existsSync(payloadZip)) fs.unlinkSync(payloadZip);
 
-  const psCmd = `Compress-Archive -Path "${tempDir}\\*" -DestinationPath "${payloadZip}" -CompressionLevel Optimal`;
-  await execAsync(psCmd, { shell: 'powershell.exe' });
+  // 转换为相对路径，避免 tar 误解析 P: 为远程主机
+  const relTempDir = path.relative(targetRelease, tempDir);
+  const relPayloadZip = path.basename(payloadZip);
+
+  const tarCmd = `cd "${targetRelease}" && tar -a -c -f "${relPayloadZip}" -C "${relTempDir}" .`;
+  await execAsync(tarCmd, { shell: 'cmd.exe' });
 
   // 清理临时目录
   fs.rmSync(tempDir, { recursive: true, force: true });
