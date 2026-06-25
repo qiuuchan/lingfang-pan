@@ -42,6 +42,52 @@ export function validateStagedFiles(entry: string, files: DraftFile[]): string |
   return null;
 }
 
+/**
+ * 完整性校验：在 validateStagedFiles 基础上，追加按 runtime_type 的「必需文件 + 入口命名」校验。
+ *
+ * 设计动机：AI 经常漏生成入口或依赖清单文件（如 python 缺 main.py/requirements.txt、
+ * nodejs 缺 index.js/package.json），旧校验放过后到运行/扫描阶段才报 manifest_missing / 入口缺失，
+ * 用户以为生成成功却跑不起来。此处在 stage（生成）、save（落盘）、submit（发布）三处统一拦截，
+ * 返回**可执行的中文报错**让 AI 据 message 立即补齐重试，而非把破损草稿放行。
+ *
+ * 返回错误信息字符串，或 null（结构完整）。
+ */
+export function validateStagedCompleteness(
+  runtime_type: 'client' | 'nodejs' | 'python',
+  entry: string,
+  files: DraftFile[],
+): string | null {
+  const base = validateStagedFiles(entry, files);
+  if (base) return base;
+
+  const has = (p: string) => files.some((f) => f.path === p);
+
+  switch (runtime_type) {
+    case 'client':
+      if (!entry.endsWith('.html')) {
+        return `前端（client）插件入口应为 HTML 文件（建议 ui/index.html），当前 entry=${entry}。请生成 HTML 入口并设为 entry。`;
+      }
+      break;
+    case 'nodejs':
+      if (entry !== 'index.js') {
+        return `Node.js 插件入口必须命名为 index.js（当前 entry=${entry}）。请把入口文件改名为 index.js 并同步 entry。`;
+      }
+      if (!has('package.json')) {
+        return 'Node.js 插件缺少 package.json，请补一个（无依赖时 dependencies 用 {} 即可），否则无法安装运行。';
+      }
+      break;
+    case 'python':
+      if (entry !== 'main.py') {
+        return `Python 插件入口必须命名为 main.py（当前 entry=${entry}）。请把入口文件改名为 main.py 并同步 entry。`;
+      }
+      if (!has('requirements.txt')) {
+        return 'Python 插件缺少 requirements.txt，请补一个（无依赖时留空文件即可），否则无法安装运行。';
+      }
+      break;
+  }
+  return null;
+}
+
 const stageParams = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, 'id 仅小写字母/数字/连字符'),
   name: z.string(),
@@ -65,7 +111,7 @@ export interface StagePluginResult {
  * manifest 字段取用户编辑后的最终值（含改过的名字/能力/可见性）。
  */
 export async function submitStagedPlugin(draft: StagedPlugin): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
-  const err = validateStagedFiles(draft.entry, draft.files);
+  const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
   if (err) return { ok: false, message: err };
   try {
     await api('/api/plugins/upload', {
@@ -184,7 +230,7 @@ export function createCreatorTools(opts: {
       '不要重复 stage 已经成功的同一版本——用户要继续改时会再次对话。',
     inputSchema: zodSchema(stageParams),
     execute: async (args: StageArgs): Promise<StagePluginResult> => {
-      const err = validateStagedFiles(args.entry, args.files);
+      const err = validateStagedCompleteness(args.runtime_type, args.entry, args.files);
       if (err) return { ok: false, message: err };
       opts.onStagePlugin({
         id: args.id,

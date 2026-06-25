@@ -7,6 +7,7 @@ import { FileEditIcon, PlayIcon, UploadIcon, Trash2Icon, RefreshCwIcon, PlusIcon
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useApp } from '@/App';
 import type { LoadedPlugin, PendingDraftEdit } from '@/lib/types';
 import {
@@ -45,6 +46,12 @@ export function DraftPluginsSection({
   const [loadingVersions, setLoadingVersions] = useState<string | null>(null);
   const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  // 待确认动作（删除草稿 / 回退版本）。用 shadcn 风格对话框替代原生 window.confirm。
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { kind: 'delete'; draftId: string; draftName: string }
+    | { kind: 'restore'; draftId: string; draftName: string; version: string }
+    | null
+  >(null);
 
   async function handleEdit(draft: LoadedPlugin) {
     try {
@@ -95,8 +102,11 @@ export function DraftPluginsSection({
     }
   }
 
-  async function handleDelete(draftId: string, draftName: string) {
-    if (!confirm(`确定删除草稿「${draftName}」吗？此操作不可撤销。`)) return;
+  function handleDelete(draftId: string, draftName: string) {
+    setPendingConfirm({ kind: 'delete', draftId, draftName });
+  }
+
+  async function performDelete(draftId: string, draftName: string) {
     setDeleting(draftId);
     try {
       await deleteDraftPlugin(draftId);
@@ -135,8 +145,11 @@ export function DraftPluginsSection({
     }
   }
 
-  async function handleRestoreVersion(draftId: string, draftName: string, version: string) {
-    if (!confirm(`确定回退草稿「${draftName}」到版本 ${version} 吗？当前内容会备份为新版本。`)) return;
+  function handleRestoreVersion(draftId: string, draftName: string, version: string) {
+    setPendingConfirm({ kind: 'restore', draftId, draftName, version });
+  }
+
+  async function performRestoreVersion(draftId: string, draftName: string, version: string) {
     setRestoringVersion(`${draftId}-${version}`);
     try {
       await restoreDraftVersion(draftId, version);
@@ -146,6 +159,18 @@ export function DraftPluginsSection({
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setRestoringVersion(null);
+    }
+  }
+
+  // 待确认动作执行：删除 / 回退共用同一对话框，按 kind 分派。
+  async function runPendingConfirm() {
+    const action = pendingConfirm;
+    if (!action) return;
+    setPendingConfirm(null);
+    if (action.kind === 'delete') {
+      await performDelete(action.draftId, action.draftName);
+    } else {
+      await performRestoreVersion(action.draftId, action.draftName, action.version);
     }
   }
 
@@ -243,6 +268,22 @@ export function DraftPluginsSection({
           />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        onOpenChange={(open) => { if (!open) setPendingConfirm(null); }}
+        title={pendingConfirm?.kind === 'restore' ? '回退到历史版本' : '删除草稿'}
+        description={
+          pendingConfirm?.kind === 'restore'
+            ? `确定回退草稿「${pendingConfirm.draftName}」到版本 ${pendingConfirm.version} 吗？当前内容会备份为新版本。`
+            : pendingConfirm
+              ? `确定删除草稿「${pendingConfirm.draftName}」吗？此操作不可撤销。`
+              : ''
+        }
+        confirmText={pendingConfirm?.kind === 'restore' ? '回退' : '删除'}
+        destructive={pendingConfirm?.kind === 'delete'}
+        onConfirm={runPendingConfirm}
+      />
     </div>
   );
 }

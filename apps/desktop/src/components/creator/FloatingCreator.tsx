@@ -48,15 +48,31 @@ interface ToolPart {
   result?: unknown;
   status: 'running' | 'ok' | 'error';
 }
-type TurnPart = QuestionPart | ToolPart;
+// OpenCodeUI 式链式渲染：把文本/思考也作为按时序排列的 part，
+// 让「思考块 + AI 输出 + 工具调用 + 思考 + 输出」按真实产生顺序逐块展示。
+interface TextPart {
+  type: 'text';
+  content: string;
+}
+interface ReasoningPart {
+  type: 'reasoning';
+  content: string;
+  /** 思考段是否已结束（reasoning-end 后置 true，UI 可停掉 loading）。 */
+  done?: boolean;
+}
+type TurnPart = QuestionPart | ToolPart | TextPart | ReasoningPart;
 
 interface Turn {
   role: 'user' | 'assistant';
+  /**
+   * 兼容字段：旧会话只有 content（无 parts）时回退渲染为单个文本块。
+   * 新流程文本/思考/工具/提问全部按时序进 parts，content 仅作为旧数据回退与兜底占位。
+   */
   content: string;
   /** 仅 assistant：本轮是否仍在流式输出中。 */
   streaming?: boolean;
   status?: 'generating' | 'done' | 'failed' | 'cancelled';
-  /** 结构化片段：提问卡片 / 工具调用指示（R2/R1 复用）。 */
+  /** 结构化片段：按时序排列的 文本 / 思考 / 工具调用 / 提问卡片。 */
   parts?: TurnPart[];
 }
 
@@ -66,6 +82,10 @@ interface CreatorConversation {
   turns: Turn[];
   createdAt: string;
   updatedAt: string;
+  /** 当前暂存的 AI 草稿（关窗重开 / 切回该会话时恢复右侧预览面板，修复重开右侧栏消失）。 */
+  stagedDraft?: StagedPlugin | null;
+  /** 用户在右侧面板改过的字段（与 stagedDraft 合并成展示用 draft）。 */
+  userEdits?: Partial<StagedPlugin>;
 }
 
 const conversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-conversations:${tenantId || userId || 'none'}`;
@@ -125,6 +145,12 @@ const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用
   - python → entry=main.py，files 含 requirements.txt（可空）与 main.py。
 - entry 必须存在于 files。文件路径只能是相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
 - 插件如需调用 AI，必须用灵坊平台 sdk.llm.chat / sdk.image.generate（见 relay-access skill），禁第三方接口。
+
+# stage_plugin 调用前必做的自检（缺一不可）
+1. entry 真实存在于 files（路径完全一致），不是只写在字段里。
+2. 按 runtime_type 补齐必需文件：client→ui/index.html；nodejs→index.js + package.json；python→main.py + requirements.txt。
+3. 路径都是合法相对路径。
+若 stage_plugin 返回 ok=false：按 message 补齐缺漏后**重新调用 stage_plugin 直到 ok=true**，不要在失败时就告诉用户「已生成」。
 
 # 回复风格
 - 简洁。不复述工具已处理的完整文件内容（草稿已在右侧面板，用户看得到）。
@@ -281,17 +307,23 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     const active = loaded.find((conversation) => conversation.id === selected) ?? loaded[0] ?? null;
     setActiveConversationId(active?.id ?? null);
     setTurns(active?.turns ?? []);
+    // 恢复右侧草稿面板：关窗重开 / 重登后，回填上次暂存的草稿与用户编辑（修复重开右侧栏消失）。
+    setStagedDraft(active?.stagedDraft ?? null);
+    setUserEdits(active?.userEdits ?? {});
   }, [session.userId, session.tenantId]);
 
   useEffect(() => {
-    if (!activeConversationId || turns.length === 0) return;
+    // turns 为空但有草稿（如刚导入未对话）也应持久化，故放宽空判定为「两者皆空才跳过」。
+    if (!activeConversationId || (turns.length === 0 && !stagedDraft)) return;
     setConversations((prev) => {
       const now = new Date().toISOString();
-      const next = prev.map((conversation) => conversation.id === activeConversationId ? { ...conversation, turns, updatedAt: now } : conversation);
+      const next = prev.map((conversation) => conversation.id === activeConversationId
+        ? { ...conversation, turns, stagedDraft, userEdits, updatedAt: now }
+        : conversation);
       saveConversations(session.userId, session.tenantId, next);
       return next;
     });
-  }, [activeConversationId, session.tenantId, session.userId, turns]);
+  }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, userEdits]);
 
   function ensureConversation(firstUserText: string) {
     if (activeConversationId) return activeConversationId;
@@ -324,8 +356,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setTurns(conversation.turns);
     setReasoning('');
     setPublishedName(null);
-    setStagedDraft(null);
-    setUserEdits({});
+    // 切回该会话时恢复其暂存草稿与用户编辑（右侧栏随之重现）。
+    setStagedDraft(conversation.stagedDraft ?? null);
+    setUserEdits(conversation.userEdits ?? {});
     compressRef.current = emptyCompressState();
     try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
     setHistoryOpen(false);
@@ -569,20 +602,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           }
         }
         if (part.type === 'reasoning-delta') {
-          // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series），把思考增量单独累积展示。
+          // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series）。
+          // 按时序写入 parts（链式渲染），同时保留全局 reasoning 兜底文本供流末判定。
           const delta = (part as { text?: string; delta?: string }).text ?? (part as { delta?: string }).delta ?? '';
           reasoningText += delta;
-          setReasoning((prev) => prev + delta);
+          appendReasoningDelta(assistantIdx, delta);
         } else if (part.type === 'reasoning-end') {
-          // 思考结束：不自动清——保留供用户展开查看（下轮 send 时 setReasoning('') 清空）。
+          // 思考段结束：标记当前 reasoning part done（停掉其 loading 指示）。
+          endReasoning(assistantIdx);
         } else if (part.type === 'text-delta') {
-          const delta = part.text;
-          setTurns((prev) => {
-            const next = [...prev];
-            const cur = next[assistantIdx];
-            if (cur && cur.role === 'assistant') next[assistantIdx] = { ...cur, content: cur.content + delta, status: 'generating' };
-            return next;
-          });
+          // 文本增量按时序写入 parts（被工具/思考打断后会自动开新 text 段，形成链式交错）。
+          appendTextDelta(assistantIdx, part.text);
         } else if (part.type === 'tool-call') {
           sawToolCall = true;
           // 记录工具调用卡片（ask_question 除外——它已由 onAskQuestion 写成提问卡片，避免重复）。
@@ -611,34 +641,42 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           // ask_question 的 tool-result：作答已由提交回调标记 answered，无需额外处理。
         }
       }
-      // 流结束：清除流式标记（保留已累积的 delta 文本，不覆盖——result.text 是末步，会丢中间步骤）。
-      // 多步 agent 的各步文本已通过 fullStream 累积进气泡；末步总结也已 delta 进来。
-      // R1 前端兜底：流正常结束但 content 为空时，避免裸露「无内容」——按情形给友好提示。
+      // 流结束：清除流式标记（保留已累积的 parts 时序内容）。
+      // 多步 agent 的各步文本/思考/工具已按时序进 parts；末步总结也已 delta 进来。
+      // R1 前端兜底：流正常结束但无任何可见内容时，避免裸露「无内容」——按情形给友好提示（写入新 text part）。
       setTurns((prev) => {
         const next = [...prev];
         const cur = next[assistantIdx];
         if (!cur || cur.role !== 'assistant') return next;
-        const hasContent = cur.content.trim().length > 0;
-        const hasParts = (cur.parts?.length ?? 0) > 0; // 提问卡片等结构化内容也算「有内容」
+        const parts = cur.parts ?? [];
+        // 「有内容」判定：有文本/工具/提问 part，或文本 part 含非空文字。
+        const hasText = parts.some((p) => p.type === 'text' && p.content.trim().length > 0);
+        const hasToolOrQuestion = parts.some((p) => p.type === 'tool' || p.type === 'question');
+        const hasReasoning = parts.some((p) => p.type === 'reasoning' && p.content.trim().length > 0);
+        // 兜底时追加一个 text part（保持链式渲染一致），而非写回旧 content。
+        const withFallbackText = (msg: string, status: Turn['status']): Turn => ({
+          ...cur,
+          parts: [...parts, { type: 'text', content: msg }],
+          streaming: false,
+          status,
+        });
         // 优先显示流中捕获的真实错误（part.type='error'），避免被空响应兜底掩盖。
         if (streamError) {
-          next[assistantIdx] = { ...cur, content: `调用失败：${streamError}`, streaming: false, status: 'failed' };
-        } else if (hasContent || hasParts) {
+          next[assistantIdx] = withFallbackText(`调用失败：${streamError}`, 'failed');
+        } else if (hasText || hasToolOrQuestion) {
           next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
         } else if (stagedName) {
           // 工具步可见化（H1）：只调了 stage 没说话 → 补占位文本，配合右侧草稿面板。
-          next[assistantIdx] = { ...cur, content: '已为你生成插件草稿，可在右侧预览并修改信息后提交。', streaming: false, status: 'done' };
-        } else if (reasoningText.trim().length > 0) {
-          // reasoning 兜底（H2）：只输出了思考过程没有正文（用本轮累积的 reasoningText，非 state 闭包）。
-          next[assistantIdx] = { ...cur, content: '模型仅输出了思考过程，可展开下方「思考过程」查看，或重试。', streaming: false, status: 'done' };
+          next[assistantIdx] = withFallbackText('已为你生成插件草稿，可在右侧预览并修改信息后提交。', 'done');
+        } else if (hasReasoning || reasoningText.trim().length > 0) {
+          // reasoning 兜底（H2）：只输出了思考过程没有正文（思考块已内联在气泡中可展开）。
+          next[assistantIdx] = withFallbackText('模型仅输出了思考过程，可展开上方「思考过程」查看，或重试。', 'done');
         } else {
           // 空响应安全网：无文本、无工具、无思考 → 友好提示并标记失败。
-          next[assistantIdx] = {
-            ...cur,
-            content: sawToolCall ? '本轮未返回文字说明，请重试或换用高级版。' : '模型未返回内容，请重试或换用高级版。',
-            streaming: false,
-            status: 'failed',
-          };
+          next[assistantIdx] = withFallbackText(
+            sawToolCall ? '本轮未返回文字说明，请重试或换用高级版。' : '模型未返回内容，请重试或换用高级版。',
+            'failed',
+          );
         }
         return next;
       });
@@ -721,6 +759,59 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     });
   }
 
+  // 文本增量：累积到 parts 末尾的 text part；若末尾不是 text（被 tool/reasoning/question 打断），则开新 text 段。
+  // 这样「输出→工具→再输出」会形成两个独立 text 块，保持链式时序。
+  function appendTextDelta(turnIdx: number, delta: string) {
+    setTurns((prev) => {
+      const next = [...prev];
+      const cur = next[turnIdx];
+      if (!cur || cur.role !== 'assistant') return next;
+      const parts = [...(cur.parts ?? [])];
+      const last = parts[parts.length - 1];
+      if (last && last.type === 'text') {
+        parts[parts.length - 1] = { ...last, content: last.content + delta };
+      } else {
+        parts.push({ type: 'text', content: delta });
+      }
+      next[turnIdx] = { ...cur, parts, status: 'generating' };
+      return next;
+    });
+  }
+
+  // 思考增量：累积到 parts 末尾未结束的 reasoning part；若末尾不是「未结束的 reasoning」则开新思考段。
+  function appendReasoningDelta(turnIdx: number, delta: string) {
+    setTurns((prev) => {
+      const next = [...prev];
+      const cur = next[turnIdx];
+      if (!cur || cur.role !== 'assistant') return next;
+      const parts = [...(cur.parts ?? [])];
+      const last = parts[parts.length - 1];
+      if (last && last.type === 'reasoning' && !last.done) {
+        parts[parts.length - 1] = { ...last, content: last.content + delta };
+      } else {
+        parts.push({ type: 'reasoning', content: delta });
+      }
+      next[turnIdx] = { ...cur, parts, status: 'generating' };
+      return next;
+    });
+  }
+
+  // 思考段结束：把 parts 末尾的 reasoning part 标记 done（停掉其 loading 指示）。
+  function endReasoning(turnIdx: number) {
+    setTurns((prev) => {
+      const next = [...prev];
+      const cur = next[turnIdx];
+      if (!cur || cur.role !== 'assistant') return next;
+      const parts = [...(cur.parts ?? [])];
+      const last = parts[parts.length - 1];
+      if (last && last.type === 'reasoning' && !last.done) {
+        parts[parts.length - 1] = { ...last, done: true };
+        next[turnIdx] = { ...cur, parts };
+      }
+      return next;
+    });
+  }
+
   function answerQuestion(turnIdx: number, toolCallId: string, answer: string) {
     const trimmed = answer.trim();
     if (!trimmed) return;
@@ -744,6 +835,87 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     }
     setAnswerDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
     setMultiSelectDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
+  }
+
+  // 渲染提问卡片（从 parts 链式渲染中调用，turnIdx 用于作答定位）。
+  function renderQuestionCard(p: QuestionPart, turnIdx: number) {
+    const draftText = answerDrafts[p.toolCallId] ?? '';
+    const selected = multiSelectDrafts[p.toolCallId] ?? [];
+    const submitMulti = () => {
+      if (!selected.length) return;
+      const labels = selected
+        .map((v) => p.options?.find((o) => o.value === v)?.label ?? v)
+        .join('、');
+      answerQuestion(turnIdx, p.toolCallId, labels);
+    };
+    return (
+      <div key={p.toolCallId} className="mt-3 first:mt-0 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-sm backdrop-blur-sm">
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <span className="text-xs font-bold">?</span>
+          </div>
+          <div className="flex-1 text-sm font-medium">{p.question}</div>
+        </div>
+        {p.answered ? (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-green-600/20 bg-green-50/50 px-3 py-2 dark:bg-green-950/20">
+            <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-green-600" />
+            <span className="text-xs text-muted-foreground">已回答：{p.answer}</span>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2.5">
+            {p.options && p.options.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {p.options.map((o) => {
+                  const on = selected.includes(o.value);
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => {
+                        if (p.multiSelect) {
+                          setMultiSelectDrafts((prev) => {
+                            const cur = prev[p.toolCallId] ?? [];
+                            return { ...prev, [p.toolCallId]: on ? cur.filter((v) => v !== o.value) : [...cur, o.value] };
+                          });
+                        } else {
+                          answerQuestion(turnIdx, p.toolCallId, o.label);
+                        }
+                      }}
+                      className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${on ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-border/60 bg-background/80 hover:border-primary/50 hover:bg-primary/5 hover:shadow-sm'}`}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {p.multiSelect && p.options && p.options.length > 0 && (
+              <Button size="sm" className="h-8 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!selected.length} onClick={submitMulti}>
+                <CheckCircle2Icon className="size-3.5" />
+                确认选择
+              </Button>
+            )}
+            {/* 兜底：allowFreeText 为真，或既无选项也不允许自由输入（防死锁——否则卡片无任何作答控件，deferred 永不 resolve）时，都给自由输入框。 */}
+            {(p.allowFreeText || !(p.options && p.options.length > 0)) && (
+              <div className="flex items-end gap-2">
+                <Textarea
+                  placeholder="或在此输入你的回答…"
+                  value={draftText}
+                  onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [p.toolCallId]: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answerQuestion(turnIdx, p.toolCallId, draftText); } }}
+                  rows={1}
+                  className="min-h-[36px] max-h-24 resize-none rounded-lg border-border/60 text-sm shadow-sm"
+                />
+                <Button size="sm" className="h-9 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!draftText.trim()} onClick={() => answerQuestion(turnIdx, p.toolCallId, draftText)}>
+                  <SendIcon className="size-3.5" />
+                  提交
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -862,9 +1034,37 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                     </div>
                   ) : (
                     <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
-                      {t.content ? (
+                      {/* 链式渲染（OpenCodeUI 式）：按 parts 时序逐块展示 思考/文本/工具/提问。 */}
+                      {(t.parts && t.parts.length > 0) ? (
+                        t.parts.map((p, pi) => {
+                          if (p.type === 'reasoning') {
+                            return (
+                              <details key={`r-${pi}`} className="mt-2 first:mt-0 rounded-lg border border-purple-200/50 bg-purple-50/40 px-3 py-2 dark:border-purple-800/30 dark:bg-purple-950/20" open={!p.done && t.streaming}>
+                                <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-purple-600 transition-colors hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
+                                  <span className="text-sm">💭</span>
+                                  <span>思考过程（{p.content.length} 字）</span>
+                                  {!p.done && t.streaming && <Loader2Icon className="size-3 animate-spin" />}
+                                </summary>
+                                <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                                  {p.content}
+                                </div>
+                              </details>
+                            );
+                          }
+                          if (p.type === 'text') {
+                            if (!p.content.trim()) return null;
+                            return <div key={`t-${pi}`} className="mt-2 first:mt-0"><Markdown>{p.content}</Markdown></div>;
+                          }
+                          if (p.type === 'tool') {
+                            return <ToolCallCard key={p.toolCallId} data={p} />;
+                          }
+                          // question part
+                          return renderQuestionCard(p, i);
+                        })
+                      ) : t.content ? (
+                        // 向后兼容：旧会话只有 content（无 parts），整段渲染。
                         <Markdown>{t.content}</Markdown>
-                      ) : (t.parts?.some((p) => p.type === 'question')) ? null : t.status === 'failed' ? (
+                      ) : t.status === 'failed' ? (
                         <span className="text-destructive">调用失败</span>
                       ) : t.status === 'cancelled' ? (
                         <span className="text-muted-foreground">已取消</span>
@@ -873,90 +1073,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                       ) : (
                         <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
                       )}
-                      {/* R2：提问卡片（Claude 风格）—— 渲染在文本之后，可作答并继续 agent 流程。 */}
-                      {t.parts?.map((p) => {
-                        if (p.type === 'tool') {
-                          return <ToolCallCard key={p.toolCallId} data={p} />;
-                        }
-                        if (p.type !== 'question') return null;
-                        const draft = answerDrafts[p.toolCallId] ?? '';
-                        const selected = multiSelectDrafts[p.toolCallId] ?? [];
-                        const submitMulti = () => {
-                          if (!selected.length) return;
-                          const labels = selected
-                            .map((v) => p.options?.find((o) => o.value === v)?.label ?? v)
-                            .join('、');
-                          answerQuestion(i, p.toolCallId, labels);
-                        };
-                        return (
-                          <div key={p.toolCallId} className="mt-3 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-sm backdrop-blur-sm">
-                            <div className="flex items-start gap-2">
-                              <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                                <span className="text-xs font-bold">?</span>
-                              </div>
-                              <div className="flex-1 text-sm font-medium">{p.question}</div>
-                            </div>
-                            {p.answered ? (
-                              <div className="mt-3 flex items-start gap-2 rounded-lg border border-green-600/20 bg-green-50/50 px-3 py-2 dark:bg-green-950/20">
-                                <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-green-600" />
-                                <span className="text-xs text-muted-foreground">已回答：{p.answer}</span>
-                              </div>
-                            ) : (
-                              <div className="mt-3 space-y-2.5">
-                                {p.options && p.options.length > 0 && (
-                                  <div className="flex flex-wrap gap-2">
-                                    {p.options.map((o) => {
-                                      const on = selected.includes(o.value);
-                                      return (
-                                        <button
-                                          key={o.value}
-                                          type="button"
-                                          onClick={() => {
-                                            if (p.multiSelect) {
-                                              setMultiSelectDrafts((prev) => {
-                                                const cur = prev[p.toolCallId] ?? [];
-                                                return { ...prev, [p.toolCallId]: on ? cur.filter((v) => v !== o.value) : [...cur, o.value] };
-                                              });
-                                            } else {
-                                              answerQuestion(i, p.toolCallId, o.label);
-                                            }
-                                          }}
-                                          className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${on ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-border/60 bg-background/80 hover:border-primary/50 hover:bg-primary/5 hover:shadow-sm'}`}
-                                        >
-                                          {o.label}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                                {p.multiSelect && p.options && p.options.length > 0 && (
-                                  <Button size="sm" className="h-8 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!selected.length} onClick={submitMulti}>
-                                    <CheckCircle2Icon className="size-3.5" />
-                                    确认选择
-                                  </Button>
-                                )}
-                                {/* 兜底：allowFreeText 为真，或既无选项也不允许自由输入（防死锁——否则卡片无任何作答控件，deferred 永不 resolve）时，都给自由输入框。 */}
-                                {(p.allowFreeText || !(p.options && p.options.length > 0)) && (
-                                  <div className="flex items-end gap-2">
-                                    <Textarea
-                                      placeholder="或在此输入你的回答…"
-                                      value={draft}
-                                      onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [p.toolCallId]: e.target.value }))}
-                                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answerQuestion(i, p.toolCallId, draft); } }}
-                                      rows={1}
-                                      className="min-h-[36px] max-h-24 resize-none rounded-lg border-border/60 text-sm shadow-sm"
-                                    />
-                                    <Button size="sm" className="h-9 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!draft.trim()} onClick={() => answerQuestion(i, p.toolCallId, draft)}>
-                                      <SendIcon className="size-3.5" />
-                                      提交
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
                     </div>
                   )}
                 </div>
@@ -979,21 +1095,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {/* #3 思考流式输出（支持思考的模型才显示，不支持时 reasoning 为空自动隐藏） */}
-        {reasoning && (
-          <div className="shrink-0 border-t bg-gradient-to-r from-purple-50/80 via-purple-100/50 to-purple-50/80 px-6 py-3 dark:from-purple-950/30 dark:via-purple-900/20 dark:to-purple-950/30">
-            <details className="mx-auto max-w-3xl">
-              <summary className="flex cursor-pointer items-center gap-2 text-xs font-medium text-purple-600 transition-colors hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
-                <span className="text-base">💭</span>
-                <span>思考过程（{reasoning.length} 字）</span>
-                {busy && <Loader2Icon className="size-3.5 animate-spin" />}
-              </summary>
-              <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-purple-200/50 bg-white/50 p-3 text-xs leading-relaxed text-muted-foreground backdrop-blur-sm dark:border-purple-800/30 dark:bg-purple-950/20">
-                {reasoning}
-              </div>
-            </details>
-          </div>
-        )}
+        {/* #3 思考流式输出已改为内联在 assistant 气泡中按时序链式展示（见 parts 渲染），
+            此处不再重复渲染底部全局思考条。reasoning state 仅用于流末兜底判定。 */}
 
         {/* #1 上下文用量条（contextWindow 配好后显示百分比） */}
         {contextWindow && turns.length > 0 && (

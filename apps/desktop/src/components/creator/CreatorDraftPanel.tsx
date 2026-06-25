@@ -5,13 +5,14 @@
 // 后续可在插件中心「我的草稿」查看、运行和发布到团队。
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2Icon, SendIcon, FileCode2Icon, RefreshCwIcon, ChevronDownIcon } from 'lucide-react';
+import { Loader2Icon, SendIcon, FileCode2Icon, RefreshCwIcon, ChevronDownIcon, AlertTriangleIcon, XCircleIcon, CheckCircle2Icon } from 'lucide-react';
 import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { submitStagedPlugin, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { submitStagedPlugin, validateStagedCompleteness, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { validatePluginStructure } from '@/lib/plugin-draft/manifest';
 import { saveDraftPlugin } from '@/lib/draft-plugin';
 
 const RUNTIME_LABELS: Record<StagedPlugin['runtime_type'], string> = {
@@ -71,6 +72,9 @@ export function CreatorDraftPanel({
   const entryMissing = !draft.files.some((f) => f.path === draft.entry);
   const idValid = /^[a-z0-9-]+$/.test(draft.id);
   const srcDoc = useMemo(() => buildPreview(draft), [draft]);
+  // 结构诊断：检测 manifest/入口/命名规范等结构问题，显式提示用户（fail 红 / warn 黄）。
+  const diagnostics = useMemo(() => validatePluginStructure(draft.files), [draft.files]);
+  const hasFail = diagnostics.some((d) => d.status === 'fail');
 
   const capKinds = ALLOWED_CAPABILITY_KINDS;
   const activeCaps = new Set(draft.capabilities.map((c) => c.kind));
@@ -86,6 +90,9 @@ export function CreatorDraftPanel({
     if (!draft.name.trim()) { toast.error('请填写插件名字'); return; }
     if (!idValid) { toast.error('插件 ID 仅允许小写字母/数字/连字符'); return; }
     if (entryMissing) { toast.error(`入口文件 ${draft.entry} 不在文件列表中`); return; }
+    // 完整性关卡：按 runtime 校验必需文件与入口命名，阻止把不完整草稿落盘（与 stage/submit 同一份校验）。
+    const completenessErr = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
+    if (completenessErr) { toast.error(completenessErr); return; }
     setSubmitting(true);
     try {
       await saveDraftPlugin({
@@ -236,11 +243,36 @@ export function CreatorDraftPanel({
         )}
       </div>
 
+      {/* 检查结果：结构诊断（缺 manifest/入口/命名不规范等），让用户即时看到缺漏。 */}
+      {diagnostics.length > 0 && (
+        <div className="shrink-0 space-y-1.5 border-t bg-background/40 px-3 py-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+            <AlertTriangleIcon className="size-3.5" />
+            检查结果
+          </div>
+          {diagnostics.map((d, i) => (
+            <div
+              key={i}
+              className={`flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-[11px] leading-relaxed ${
+                d.status === 'fail'
+                  ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              }`}
+            >
+              {d.status === 'fail'
+                ? <XCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+                : <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />}
+              <span>{d.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 保存草稿栏 */}
       <div className="shrink-0 border-t p-3">
-        <Button className="w-full gap-1.5" onClick={handleSaveDraft} disabled={submitting || busy}>
-          {submitting ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
-          {submitting ? '保存中…' : busy ? 'AI 生成中，请稍候…' : '保存草稿到本地'}
+        <Button className="w-full gap-1.5" onClick={handleSaveDraft} disabled={submitting || busy || hasFail}>
+          {submitting ? <Loader2Icon className="size-4 animate-spin" /> : hasFail ? <XCircleIcon className="size-4" /> : <SendIcon className="size-4" />}
+          {submitting ? '保存中…' : busy ? 'AI 生成中，请稍候…' : hasFail ? '请先修复检查结果中的问题' : '保存草稿到本地'}
         </Button>
         <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
           保存后可在插件中心「我的草稿」查看、运行和发布。
