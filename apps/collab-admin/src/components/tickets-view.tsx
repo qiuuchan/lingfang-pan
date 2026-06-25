@@ -201,7 +201,7 @@ export function TicketsView() {
 
   return (
     <Section title="帮助与反馈" description="处理用户提交的问题、建议与账号工单，可回复并变更状态。">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as typeof statusFilter); setPage(1); }}>
           <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
