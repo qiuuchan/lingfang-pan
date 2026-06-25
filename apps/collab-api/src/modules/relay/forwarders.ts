@@ -436,7 +436,7 @@ export function normalizeEventReasoning(rawEvent: string, inThinking: boolean): 
   if (!dataLine) return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
 
   let obj: {
-    choices?: { delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null }; finish_reason?: string | null }[];
+    choices?: { delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null; tool_calls?: unknown[] }; finish_reason?: string | null }[];
   };
   try { obj = JSON.parse(dataLine); } catch { return { out: `${rawEvent}\n\n`, nextInThinking: inThinking }; }
 
@@ -450,6 +450,17 @@ export function normalizeEventReasoning(rawEvent: string, inThinking: boolean): 
   }
   if (!delta) {
     return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
+  }
+
+  // 工具调用增量：思考与 tool_call 交错时（reasoning→tool_call→reasoning），
+  // 须先补 </think> 闭合当前思考块，再原样下发 tool_call chunk（inThinking=false）。
+  // 否则 <think> 跨越 tool_call 不闭合，后续 reasoning 段缺开标签，前端 extractReasoningMiddleware
+  // 认不出 → </think> 连同思考文本泄漏成可见正文。之后 reasoning 恢复时会自动重开 <think>。
+  const hasToolCall = Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0;
+  const reasoningField = delta.reasoning_content ?? delta.reasoning;
+  if (inThinking && hasToolCall && !(reasoningField && reasoningField.trim())) {
+    const closeChunk = { object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }] };
+    return { out: `data: ${JSON.stringify(closeChunk)}\n\n${rawEvent}\n\n`, nextInThinking: false };
   }
 
   const reasoning = delta.reasoning_content ?? delta.reasoning;

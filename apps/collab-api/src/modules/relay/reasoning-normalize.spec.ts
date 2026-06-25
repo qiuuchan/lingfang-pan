@@ -54,6 +54,39 @@ describe('normalizeEventReasoning', () => {
     expect(chunk.choices[0].delta.content).toBe('</think>我是 Step。');
   });
 
+  it('思考中遇到 tool_call 增量：先补 </think> 闭合，再原样下发 tool_call', () => {
+    const toolDelta = {
+      choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'gen', arguments: '' } }] } }],
+    };
+    const { out, nextInThinking } = normalizeEventReasoning(evt(toolDelta), true);
+    expect(nextInThinking).toBe(false);
+    const events = parseOut(out);
+    // 先补闭合 chunk，再原样 tool_call chunk。
+    expect(events[0].choices[0].delta.content).toBe('</think>');
+    expect(events[1].choices[0].delta.tool_calls[0].id).toBe('call_1');
+  });
+
+  it('reasoning→tool_call→reasoning 交错：每段思考都是闭合的独立 <think> 块', () => {
+    let inThinking = false;
+    const collected: string[] = [];
+    const feed = (raw: string) => {
+      const r = normalizeEventReasoning(raw, inThinking);
+      inThinking = r.nextInThinking;
+      for (const c of parseOut(r.out)) {
+        if (c.done) continue;
+        const d = c.choices?.[0]?.delta?.content;
+        if (d) collected.push(d);
+      }
+    };
+    feed(evt({ choices: [{ index: 0, delta: { reasoning_content: '思考A' } }] }));
+    feed(evt({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'gen', arguments: '{}' } }] } }] }));
+    feed(evt({ choices: [{ index: 0, delta: { reasoning_content: '思考B' } }] }));
+    feed('data: [DONE]');
+    const full = collected.join('');
+    // tool_call 处闭合后，第二段思考重开 <think>，末尾 DONE 再闭合。
+    expect(full).toBe('<think>思考A</think><think>思考B</think>');
+  });
+
   it('非思考态的正文增量原样下发', () => {
     const raw = evt({ choices: [{ index: 0, delta: { content: 'hello' } }] });
     const { out, nextInThinking } = normalizeEventReasoning(raw, false);
