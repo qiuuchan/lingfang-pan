@@ -263,6 +263,8 @@ model Team {
   // 团队简介：公开团队发现页展示，帮助用户判断是否加入。
   description     String               @default("")
   balanceCents    Int                  @default(0)
+  // 团队默认资源池：指定团队默认使用的池子，为空时使用 SHARED 池。
+  defaultPoolId   String?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   memberships     TeamMembership[]
@@ -279,12 +281,14 @@ model Team {
   creditLedger    CreditLedger[]
   apiKeys         PlatformApiKey[]
   callLogs        LlmCallLog[]
-  pools           Pool[]
+  pools           Pool[]               @relation("TeamDedicatedPools")
+  defaultPool     Pool?                @relation("TeamDefaultPool", fields: [defaultPoolId], references: [id], onDelete: SetNull)
   // 帮助与反馈工单：提交时的当前团队（可空，删团队置空）。
   tickets         Ticket[]
 
   // 公开团队发现查询索引：GET /api/teams/public 按 allowPublicJoin=true + status=ACTIVE 过滤。
   @@index([allowPublicJoin, status])
+  @@index([defaultPoolId])
 }
 
 model TeamMembership {
@@ -751,14 +755,15 @@ model PluginGrant {
 // 团队 T 可用的池 = 全部 SHARED 池 + scope=DEDICATED 且 teamId=T 的池；relay 在这些池的渠道中按 kind+tier 轮询。
 // 一个池可含多个渠道（聊天/生图混存）；渠道的 kind+tier 决定它服务哪类请求。
 model Pool {
-  id          String    @id @default(uuid())
-  name        String    @unique // 展示名（如「默认池」「A 企业专用池」）
-  scope       PoolScope @default(SHARED)
-  teamId      String? // scope=DEDICATED 时必填（应用层校验团队存在 + 唯一性）
-  description String    @default("")
-  createdAt   DateTime  @default(now())
-  team        Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  channels    Channel[]
+  id                String    @id @default(uuid())
+  name              String    @unique // 展示名（如「默认池」「A 企业专用池」）
+  scope             PoolScope @default(SHARED)
+  teamId            String? // scope=DEDICATED 时必填（应用层校验团队存在 + 唯一性）
+  description       String    @default("")
+  createdAt         DateTime  @default(now())
+  team              Team?     @relation("TeamDedicatedPools", fields: [teamId], references: [id], onDelete: Cascade)
+  channels          Channel[]
+  defaultForTeams   Team[]    @relation("TeamDefaultPool")
 }
 
 // 上游渠道：归属一个资源池，有类型（聊天/生图）+ 版本标签（快速/高级）+ 多个可轮询模型。
