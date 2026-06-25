@@ -91,16 +91,40 @@ export async function forwardOpenAiChat(args: {
   }
 
   if (payload.stream) {
-    return pipeSseAndExtractUsage(upstream, res, parseOpenAiUsage);
+    // 归一化 reasoning：部分上游（阶跃星辰/DeepSeek 系）用非标准 delta.reasoning_content 发思考内容，
+    // @ai-sdk/openai 的 chat 解析器不认该字段会丢弃 → 前端思考框收不到内容。
+    // 故在透传时把 reasoning 增量改写成 <think>…</think> 包裹的 content，前端用 extractReasoningMiddleware 提取。
+    return pipeOpenAiSseNormalizingReasoning(upstream, res);
   }
-  // 非流式：直接转发 JSON，解析 usage。
-  const data = (await upstream.json()) as { usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  // 非流式：转发 JSON，解析 usage。同时把 message.reasoning_content 归一化进 content（<think> 包裹）。
+  const data = (await upstream.json()) as {
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    choices?: { message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null } }[];
+  };
+  normalizeNonStreamReasoning(data);
   res.status(200).json(data);
   return {
     inputTokens: data.usage?.prompt_tokens ?? 0,
     outputTokens: data.usage?.completion_tokens ?? 0,
     images: 0,
   };
+}
+
+/** 非流式：把 choices[].message.reasoning_content 前置为 <think>…</think> 合入 content（与流式归一化对称）。 */
+function normalizeNonStreamReasoning(data: {
+  choices?: { message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null } }[];
+}): void {
+  for (const choice of data.choices ?? []) {
+    const msg = choice.message;
+    if (!msg) continue;
+    const reasoning = msg.reasoning_content ?? msg.reasoning;
+    if (reasoning && reasoning.trim()) {
+      msg.content = `<think>${reasoning}</think>${msg.content ?? ''}`;
+    }
+    // 删除非标准字段，避免下游困惑（content 已携带思考）。
+    delete msg.reasoning_content;
+    delete msg.reasoning;
+  }
 }
 
 // === OpenAI 协议（/v1/images/generations） ===
@@ -305,6 +329,20 @@ async function pipeAnthropicSseAsOpenAi(
     }
     if (buffer.trim()) handleEvent(buffer);
     res.write('data: [DONE]\n\n');
+  } catch (error) {
+    // 流式传输过程中出错：在 SSE 流中写入 OpenAI 格式的错误事件，而非直接中断。
+    // 这样前端 Vercel AI SDK 能正确解析到错误消息，避免空响应兜底掩盖真实原因。
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errorChunk = {
+      id: 'chatcmpl-error',
+      object: 'chat.completion.chunk',
+      created: createdSec,
+      model: 'unknown',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      error: { message: errMsg, type: 'upstream_error', code: 'stream_error' },
+    };
+    res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+    res.write('data: [DONE]\n\n');
   } finally {
     reader.releaseLock?.();
     res.end();
@@ -312,11 +350,140 @@ async function pipeAnthropicSseAsOpenAi(
   return usage;
 }
 
+// === SSE 透传 + reasoning 归一化 + usage 解析 ===
+
+/**
+ * OpenAI 协议流式归一化：把上游 SSE 的 delta.reasoning_content (非标准,DeepSeek/StepFun) 改写为
+ * `<think>...</think>` 包裹的 content 增量，供前端 extractReasoningMiddleware 提取。同时解析 usage。
+ * 用于修复：上游用 reasoning_content 发送思考内容 → @ai-sdk/openai 不认 → 前端思考框空白。
+ *
+ * 关键：思考须是**单个连续块**（<think>全部思考</think>正文），故用状态机——
+ * 首个 reasoning 增量前置 <think>，后续直接拼文本，首个正文增量前补 </think> 闭合。
+ */
+async function pipeOpenAiSseNormalizingReasoning(
+  upstream: globalThis.Response,
+  res: ExpressResponse,
+): Promise<ForwardResult> {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  let usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
+  let inThinking = false; // 已发 <think> 未闭合
+  const reader = upstream.body?.getReader();
+  if (!reader) { res.end(); return usage; }
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const handleEvent = (evt: string) => {
+    const { out, nextInThinking } = normalizeEventReasoning(evt, inThinking);
+    inThinking = nextInThinking;
+    res.write(out);
+    const parsed = parseOpenAiUsage(evt);
+    if (parsed) usage = { ...usage, ...parsed };
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const evt = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (evt.trim()) handleEvent(evt);
+      }
+    }
+    if (buffer.trim()) handleEvent(buffer);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errorChunk = {
+      id: 'chatcmpl-error', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'unknown',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      error: { message: errMsg, type: 'upstream_error', code: 'stream_error' },
+    };
+    res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+    res.write('data: [DONE]\n\n');
+  } finally {
+    reader.releaseLock?.();
+    res.end();
+  }
+  return usage;
+}
+
+/**
+ * 归一化单个 SSE 事件（状态机）：
+ * - reasoning 增量：首段前置 `<think>`（inThinking=true），后续直接拼文本，写入 delta.content。
+ * - 正文增量：若 inThinking，先补 `</think>` 闭合再拼正文（inThinking=false）。
+ * - finish/结束事件：若仍 inThinking，把 </think> 补在 delta.content 前闭合。
+ * 返回改写后的 SSE 文本 + 新的 inThinking 状态。
+ */
+export function normalizeEventReasoning(rawEvent: string, inThinking: boolean): { out: string; nextInThinking: boolean } {
+  let dataLine: string | null = null;
+  for (const line of rawEvent.split('\n')) {
+    const t = line.trim();
+    if (t.startsWith('data:')) { dataLine = t.slice(5).trim(); break; }
+  }
+  // 结束标记：若思考未闭合，补一个 </think> 的 content chunk 再 [DONE]。
+  if (dataLine === '[DONE]') {
+    if (inThinking) {
+      const closeChunk = { object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }] };
+      return { out: `data: ${JSON.stringify(closeChunk)}\n\ndata: [DONE]\n\n`, nextInThinking: false };
+    }
+    return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
+  }
+  if (!dataLine) return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
+
+  let obj: {
+    choices?: { delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null }; finish_reason?: string | null }[];
+  };
+  try { obj = JSON.parse(dataLine); } catch { return { out: `${rawEvent}\n\n`, nextInThinking: inThinking }; }
+
+  const choice = obj.choices?.[0];
+  const delta = choice?.delta;
+  // 收尾 chunk（带 finish_reason，delta 缺失或为空）：若思考未闭合，先补 </think> content chunk。
+  const deltaEmpty = !delta || (delta.content == null && delta.reasoning_content == null && delta.reasoning == null);
+  if (inThinking && choice?.finish_reason && deltaEmpty) {
+    const closeChunk = { object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }] };
+    return { out: `data: ${JSON.stringify(closeChunk)}\n\n${rawEvent}\n\n`, nextInThinking: false };
+  }
+  if (!delta) {
+    return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
+  }
+
+  const reasoning = delta.reasoning_content ?? delta.reasoning;
+  if (reasoning && reasoning.trim()) {
+    // reasoning 增量 → content，首段前置 <think>。
+    delta.content = (inThinking ? '' : '<think>') + reasoning;
+    delete delta.reasoning_content;
+    delete delta.reasoning;
+    return { out: `data: ${JSON.stringify(obj)}\n\n`, nextInThinking: true };
+  }
+
+  // 正文增量：若思考未闭合，先补 </think>。
+  if (inThinking && delta.content != null && delta.content !== '') {
+    delta.content = `</think>${delta.content}`;
+    // 顺带清理可能并存的空 reasoning 字段。
+    delete delta.reasoning_content;
+    delete delta.reasoning;
+    return { out: `data: ${JSON.stringify(obj)}\n\n`, nextInThinking: false };
+  }
+
+  // 其它（role chunk、空 delta 等）：清理非标准字段后原样下发。
+  if (delta.reasoning_content != null || delta.reasoning != null) {
+    delete delta.reasoning_content;
+    delete delta.reasoning;
+    return { out: `data: ${JSON.stringify(obj)}\n\n`, nextInThinking: inThinking };
+  }
+  return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
+}
+
 // === SSE 透传 + usage 解析 ===
 
 /**
  * 把上游 SSE body 逐 chunk 透传给 express res，同时扫描 chunk 提取 usage（最后一个带 usage 的事件）。
- * 调用方需已设置 SSE 响应头。
+ * 调用方需已设置 SSE 响应头。流式传输过程中如遇错误，在 SSE 流中写入错误事件，而非直接中断。
  */
 async function pipeSseAndExtractUsage(
   upstream: globalThis.Response,
@@ -357,6 +524,19 @@ async function pipeSseAndExtractUsage(
     }
     // flush 余量
     if (buffer) res.write(buffer);
+  } catch (error) {
+    // 流式传输过程中出错：在 SSE 流中写入 OpenAI 格式的错误事件。
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errorChunk = {
+      id: 'chatcmpl-error',
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: 'unknown',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      error: { message: errMsg, type: 'upstream_error', code: 'stream_error' },
+    };
+    res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+    res.write('data: [DONE]\n\n');
   } finally {
     reader.releaseLock?.();
     res.end();

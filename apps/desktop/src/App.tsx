@@ -59,6 +59,7 @@ interface AppContextValue {
   pinPlugin: (p: LoadedPlugin) => void;
   unpinPlugin: (id: string) => void;
   isPinned: (id: string) => boolean;
+  removeFromRecent: (id: string) => void;
   // 受控的 Settings 页 Tab（供新手任务清单「去设置 → 模型服务」等定向跳转）。
   settingsTab: SettingsTab;
   setSettingsTab: (tab: SettingsTab) => void;
@@ -277,6 +278,14 @@ export default function App() {
     if (!p) return;
     setRecentPlugins((prev) => {
       const next = [p, ...prev.filter((x) => x.id !== p.id)].slice(0, RECENT_MAX);
+      saveRecent(session.tenantId, next);
+      return next;
+    });
+  }, [session.tenantId]);
+  // 项 9：从「最近使用」中移除指定插件（侧栏历史区删除按钮用）。
+  const removeFromRecent = useCallback((pluginId: string) => {
+    setRecentPlugins((prev) => {
+      const next = prev.filter((x) => x.id !== pluginId);
       saveRecent(session.tenantId, next);
       return next;
     });
@@ -656,7 +665,7 @@ export default function App() {
     view, setView,
     currentDraft, setCurrentDraft,
     runningPlugin, setRunningPlugin,
-    pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned,
+    pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned, removeFromRecent,
     settingsTab, setSettingsTab,
     openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
     modelConfigVersion, bumpModelConfig,
