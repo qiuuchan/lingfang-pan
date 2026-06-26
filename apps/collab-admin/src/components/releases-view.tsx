@@ -86,6 +86,7 @@ const ARCH_OPTIONS: AssetArch[] = ['X86_64', 'AARCH64', 'UNIVERSAL'];
 
 const PLATFORM_LABEL: Record<AssetPlatform, string> = { WINDOWS: 'Windows', DARWIN: 'macOS', LINUX: 'Linux' };
 const ARCH_LABEL: Record<AssetArch, string> = { X86_64: 'x64', AARCH64: 'ARM64', UNIVERSAL: '通用' };
+const RELEASE_CHANNEL_LABEL: Record<ReleaseChannel, string> = { STABLE: '正式版', BETA: 'beta 测试版' };
 
 /** 版本状态 Badge 变体映射（StatusBadge 无此三态，自定义）。 */
 function statusBadge(status: AdminRelease['status']) {
@@ -223,6 +224,10 @@ export function ReleasesView() {
           </Button>
         </div>
 
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          正式版与 beta 测试版独立推送；发布 beta 不会影响正式版 latest。创建或发布前请确认当前通道。
+        </div>
+
         {/* 版本列表 */}
         <div className="rounded-xl border">
           <Table>
@@ -251,7 +256,7 @@ export function ReleasesView() {
                       v{r.version}
                       {r.isLatest && <Badge variant="default" className="ml-2">最新</Badge>}
                     </TableCell>
-                    <TableCell>{r.channel === 'STABLE' ? '正式版' : '测试版'}</TableCell>
+                    <TableCell>{RELEASE_CHANNEL_LABEL[r.channel]}</TableCell>
                     <TableCell className="max-w-[200px] truncate">{r.title || '—'}</TableCell>
                     <TableCell>{statusBadge(r.status)}</TableCell>
                     <TableCell>{r.assets.length}</TableCell>
@@ -402,7 +407,10 @@ export function ReleasesView() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>发布版本 v{confirmPublish?.version}</DialogTitle>
-              <DialogDescription>发布后立即对官网下载页与桌面端更新检查可见，且标记为该通道最新版本。确定发布？</DialogDescription>
+              <DialogDescription>
+                发布后立即对「{RELEASE_CHANNEL_LABEL[confirmPublish?.channel ?? 'STABLE']}」通道可见，并标记为该通道最新版本。
+                {confirmPublish?.channel === 'BETA' ? '不会影响正式版用户。' : '正式版会影响默认更新用户。'}确定发布？
+              </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmPublish(null)}>取消</Button>
@@ -416,7 +424,9 @@ export function ReleasesView() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>归档版本 v{confirmArchive?.version}</DialogTitle>
-              <DialogDescription>归档后不再作为最新版本，官网与更新检查不再展示。确定归档？</DialogDescription>
+              <DialogDescription>
+                归档后不再作为「{RELEASE_CHANNEL_LABEL[confirmArchive?.channel ?? 'STABLE']}」通道最新版本，官网与更新检查不再展示。确定归档？
+              </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmArchive(null)}>取消</Button>

@@ -43,6 +43,7 @@ use crate::process_util::{kill_child_tree, run_capture_with_env};
 use crate::embedded_runtime::EmbeddedRuntime;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
+use crate::plugin_llm_bridge::PluginLlmBridge;
 use crate::plugin_store::{sanitize_plugin_id, PluginStore};
 
 /// 插件运行时类型（与 plugin_store::PluginRuntime 对齐，serde lowercase）。
@@ -60,6 +61,7 @@ pub enum PluginRuntimeKind {
 struct PluginManifest {
     runtime: PluginRuntimeKind,
     entry: String,
+    capabilities: Vec<String>,
 }
 
 /// 解析 manifest.json 的 runtime_type + entry。
@@ -102,7 +104,21 @@ fn parse_manifest(plugin_dir: &std::path::Path) -> Result<PluginManifest, String
             PluginRuntimeKind::Python => "main.py".to_string(),
             PluginRuntimeKind::Nodejs => "index.js".to_string(),
         });
-    Ok(PluginManifest { runtime, entry })
+    let capabilities = v
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("kind")
+                        .and_then(|kind| kind.as_str())
+                        .map(|kind| kind.to_string())
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(PluginManifest { runtime, entry, capabilities })
 }
 
 /// 解析插件的持久化目录路径（plugins_root/<plugin_id>，canonicalize 防符号链接逃逸）。
@@ -654,6 +670,7 @@ pub fn start_plugin(
     app: tauri::AppHandle,
     store: tauri::State<'_, PluginStore>,
     process_table: tauri::State<'_, PluginProcessTable>,
+    bridge: tauri::State<'_, PluginLlmBridge>,
     plugin_id: String,
     api_base: Option<String>,
     auth_token: Option<String>,
@@ -738,14 +755,19 @@ pub fn start_plugin(
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
-    // 计费/中转：先经 runtime.env 注入运行时 PATH/pip/npm 变量，再追加 LF_API_BASE / LF_AUTH_TOKEN，
-    // 供 Python/Node 插件经 /api/relay/v1/* 调平台 AI 服务（按团队灵石计费；旧硬编码第三方 key 已移除）。
+    // 计费/中转：插件进程只拿 localhost 桥地址 + 一次性 token，不直接接触 JWT/API Key。
     let mut env = runtime.env(minimal_env());
-    if let Some(base) = api_base.as_ref().filter(|b| !b.is_empty()) {
-        env.push((OsString::from("LF_API_BASE"), OsString::from(base)));
-    }
-    if let Some(token) = auth_token.as_ref().filter(|t| !t.is_empty()) {
-        env.push((OsString::from("LF_AUTH_TOKEN"), OsString::from(token)));
+    let bridge_env = bridge.register_session(
+        &plugin_id,
+        api_base,
+        auth_token,
+        manifest.capabilities.iter().any(|kind| kind == "llm.chat"),
+        Duration::from_secs(12 * 60 * 60),
+    )?;
+    let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
+    if let Some(bridge_env) = bridge_env {
+        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"), OsString::from(bridge_env.url)));
+        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"), OsString::from(bridge_env.token)));
     }
     command.env_clear().envs(env);
     // Unix：setsid 建独立进程组（detached，stop_plugin 杀整组）。
@@ -772,10 +794,18 @@ pub fn start_plugin(
     }
     let mut child = command
         .spawn()
-        .map_err(|e| format!("启动插件进程失败：{e}"))?;
+        .map_err(|e| {
+            if let Some(token) = bridge_token.as_deref() {
+                bridge.revoke_token(token);
+            }
+            format!("启动插件进程失败：{e}")
+        })?;
     // 秒退判定：spawn 后短等待（800ms），若进程立即退出 = 崩溃，读 stderr 返回 plugin_crashed 错误。
     // 正常 GUI 插件会一直运行（超时即放行）。捕获 stderr 让用户看到 Python/Node 异常而非「无法启动」。
     if let Some(crash_err) = wait_for_crash(&mut child, Duration::from_millis(800)) {
+        if let Some(token) = bridge_token.as_deref() {
+            bridge.revoke_token(token);
+        }
         // 崩溃：进程已退出，child drop 回收。返回 plugin_crashed: 前缀（前端 catch 显示 stderr + 一键修复）。
         return Err(crash_err);
     }
@@ -854,6 +884,7 @@ fn truncate_stderr(s: &str, max_chars: usize) -> String {
 #[tauri::command]
 pub fn stop_plugin(
     process_table: tauri::State<'_, PluginProcessTable>,
+    bridge: tauri::State<'_, PluginLlmBridge>,
     plugin_id: String,
 ) -> Result<(), String> {
     if let Some((mut child, _started_at)) = process_table.take(&plugin_id) {
@@ -862,6 +893,7 @@ pub fn stop_plugin(
         let _ = child.kill();
         let _ = child.wait();
     }
+    bridge.revoke_plugin(&plugin_id);
     // 幂等：进程不存在直接 Ok（用户「停止一个已结束的插件」应成功）。
     Ok(())
 }
@@ -878,8 +910,10 @@ pub fn stop_plugin(
 pub fn delete_plugin(
     store: tauri::State<'_, PluginStore>,
     process_table: tauri::State<'_, PluginProcessTable>,
+    bridge: tauri::State<'_, PluginLlmBridge>,
     plugin_id: String,
 ) -> Result<(), String> {
+    bridge.revoke_plugin(&plugin_id);
     delete_plugin_dir(&store, &process_table, &plugin_id)
 }
 

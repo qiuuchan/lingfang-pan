@@ -54,6 +54,22 @@ function bridgeShim(pluginId: string): string {
           parent.postMessage({ __lf_call: true, id, pluginId: ${JSON.stringify(pluginId)}, kind, args }, '*');
         });
       };
+      window.sdk = {
+        invoke: (cap, args) => window.__lingfangInvoke(cap, args || {}),
+        llm: { chat: (input) => window.__lingfangInvoke('llm.chat', input || {}) },
+        image: { generate: (input) => window.__lingfangInvoke('image.generate', input || {}) },
+        net: { fetch: (input) => window.__lingfangInvoke('net.fetch', input || {}) },
+        storage: {
+          get: (key) => window.__lingfangInvoke('storage.kv', { op: 'get', key }),
+          set: (key, value) => window.__lingfangInvoke('storage.kv', { op: 'set', key, value }),
+        },
+        system: {
+          info: () => window.__lingfangInvoke('system.info', {}),
+          notify: (title, body) => window.__lingfangInvoke('system.notify', { title, body }),
+          requestPermission: (code, reason) => window.__lingfangInvoke('system.requestPermission', { code, reason }),
+        },
+        ui: { render: (c) => { document.body.insertAdjacentHTML('beforeend', '<pre>' + (typeof c === 'string' ? c : JSON.stringify(c, null, 2)) + '</pre>'); } },
+      };
     })();
   <\/script>`;
 }
@@ -120,6 +136,17 @@ function pluginFileContent(plugin: LoadedPlugin): string | null {
   return typeof file?.content === 'string' ? file.content : null;
 }
 
+function declaresCapability(plugin: LoadedPlugin, kind: string): boolean {
+  return (plugin.capabilities ?? []).some((capability) => {
+    if (typeof capability === 'string') return capability === kind;
+    return capability?.kind === kind;
+  });
+}
+
+function requireCapability(plugin: LoadedPlugin, kind: string): void {
+  if (!declaresCapability(plugin, kind)) throw new Error(`插件未声明能力: ${kind}`);
+}
+
 export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> {
   // SDK-06：tokensStyles() 前置到 shim 之前，使 --lf-* 变量在插件文档加载时即可用。
   // 顺序：tokens 样式 → 桥 shim → 插件 HTML（这样插件若自己定义 --lf-* 仍可覆盖宿主默认）。
@@ -177,6 +204,30 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
   if (kind === 'plugin.listSharedKeys') {
     return listSharedKeys(plugin.id);
   }
+  // storage.kv：HTML/client 插件的轻量本地存储。按插件隔离，避免不同插件 key 冲突。
+  if (kind === 'storage.kv') {
+    const op = String(args?.op ?? '');
+    const key = String(args?.key ?? '');
+    if (!key) throw new Error('storage.kv 缺少 key');
+    const storageKey = `lf:plugin-storage:${plugin.id}:${key}`;
+    if (op === 'get') {
+      const raw = localStorage.getItem(storageKey);
+      return raw ? JSON.parse(raw) : null;
+    }
+    if (op === 'set') {
+      localStorage.setItem(storageKey, JSON.stringify(args?.value));
+      return undefined;
+    }
+    throw new Error(`storage.kv 不支持的操作：${op}`);
+  }
+  if (kind === 'system.notify') {
+    const title = String(args?.title ?? '灵坊插件');
+    const body = args?.body == null ? undefined : String(args.body);
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body });
+    } catch { /* 浏览器通知不可用时静默降级 */ }
+    return undefined;
+  }
   // Task 14：系统级权限运行时授权。插件调 sdk.system.requestPermission → 弹确认框（记忆决策）。
   if (kind === 'system.requestPermission') {
     return requestSystemPermission(
@@ -186,29 +237,24 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
       String(args?.reason ?? ''),
     );
   }
-  if (isBuiltinPlugin(plugin)) {
-    // code-assistant CLI 已删除（AI 能力走 relay）；builtin 插件如需 AI 用 sdk.llm.chat/image.generate。
-    // R5 net.fetch：内置插件网络请求走 Rust plugin_net_fetch（绕 webview CORS）。
-    // 仅 manifest 声明了 net.fetch 的插件可用（Rust 侧二次校验）。返回 { status, headers, body }。
-    if (kind === 'net.fetch') {
-      return tauriInvoke('plugin_net_fetch', { pluginId: plugin.id, args: args || {} });
-    }
-    return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
-  }
   if (kind === 'llm.chat') {
+    requireCapability(plugin, 'llm.chat');
     // 计费/中转：llm.chat 走平台 relay（/api/relay/v1/chat/completions），用当前登录态 JWT 鉴权，
     // 消费扣团队灵石。relay 据前台版本哨兵（fast/premium）解析真实模型并注入系统提示词规则。
     // 契约：input = { messages, model?: 'fast'|'premium', stream? }。非流式聚合为字符串返回（兼容 sdk.llm.chat 的 Promise<string>）。
-    const input = (args || {}) as { messages: { role: string; content: string }[]; model?: string; stream?: boolean };
+    const input = (args || {}) as { messages?: { role: string; content: string }[]; model?: string; stream?: boolean };
+    const messages = Array.isArray(input.messages) ? input.messages : [];
+    if (messages.length === 0) throw new Error('llm.chat 缺少 messages');
     const tier = input.model === 'premium' ? 'premium' : 'fast';
     const res = await api<{ choices?: { message?: { content?: string } }[]; content?: string }>(
       '/api/relay/v1/chat/completions',
-      { method: 'POST', body: { model: tier, messages: input.messages, stream: false } },
+      { method: 'POST', body: { model: tier, messages, stream: false } },
     );
     // OpenAI 形状：choices[0].message.content；兜底 content 字段。
     return res.choices?.[0]?.message?.content ?? res.content ?? '';
   }
   if (kind === 'image.generate') {
+    requireCapability(plugin, 'image.generate');
     // 计费/中转：生图走 relay（/api/relay/v1/images/generations），按张计费。
     // 契约：input = { prompt, model?: 'fast'|'premium', size?, n? }。返回 { images: string[] }（url 或 base64）。
     const input = (args || {}) as { prompt: string; model?: string; size?: string; n?: number };
@@ -219,6 +265,15 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     );
     const images = (res.data ?? []).map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : '')).filter(Boolean);
     return { images };
+  }
+  if (isBuiltinPlugin(plugin)) {
+    // code-assistant CLI 已删除（AI 能力走 relay）；builtin 插件如需 AI 用 sdk.llm.chat/image.generate。
+    // R5 net.fetch：内置插件网络请求走 Rust plugin_net_fetch（绕 webview CORS）。
+    // 仅 manifest 声明了 net.fetch 的插件可用（Rust 侧二次校验）。返回 { status, headers, body }。
+    if (kind === 'net.fetch') {
+      return tauriInvoke('plugin_net_fetch', { pluginId: plugin.id, args: args || {} });
+    }
+    return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
   if (kind === 'plugin.upload') {
     return api('/api/plugins/upload', { method: 'POST', body: args || {} });

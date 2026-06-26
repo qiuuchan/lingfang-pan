@@ -15,7 +15,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/App';
 import { errorMessage } from '@/lib/api';
 import { probeScriptRuntime } from '@/lib/plugin-script';
-import { checkUpdate, downloadUpdate, type UpdateMetadata } from '@/lib/updater';
+import { checkUpdate, downloadUpdate, loadUpdateChannel, saveUpdateChannel, type UpdateChannel, type UpdateMetadata } from '@/lib/updater';
 import type { ProbeResult, RuntimeTarget } from '@/lib/cli-types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +35,7 @@ import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { BillingTab } from './settings/BillingTab';
 import { PluginsTab } from './settings/PluginsTab';
 import { GeneralTab } from './settings/GeneralTab';
+import { Checkbox } from '@/components/ui/checkbox';
 import { dragRegionProps } from '@/lib/window-drag';
 
 // 字节数转人类可读（design §3.3：total 未知时显示已下载量）。
@@ -74,6 +75,7 @@ export function Settings({
   const [progress, setProgress] = useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
   // 更新日志悬浮窗（ChangelogDialog）：检查更新卡片下方「查看更新日志」按钮触发。
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [updateChannel, setUpdateChannel] = useState<UpdateChannel>(() => loadUpdateChannel());
 
   // === Tab1 脚本运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
   const [runtimeResults, setRuntimeResults] = useState<Partial<Record<RuntimeTarget, ProbeResult | null>> | null>(null);
@@ -117,9 +119,9 @@ export function Settings({
     }
     setChecking(true);
     try {
-      const meta = await checkUpdate(base);
+      const meta = await checkUpdate(base, updateChannel);
       if (!meta) {
-        toast.success('当前已是最新版本');
+        toast.success(updateChannel === 'BETA' ? '当前已是最新 beta 版本' : '当前已是最新正式版本');
         return;
       }
       setProgress({ downloaded: 0, total: null });
@@ -129,6 +131,13 @@ export function Settings({
     } finally {
       setChecking(false);
     }
+  }
+
+  function toggleBetaUpdates(enabled: boolean) {
+    const next: UpdateChannel = enabled ? 'BETA' : 'STABLE';
+    setUpdateChannel(next);
+    saveUpdateChannel(next);
+    toast.success(enabled ? '已启用 beta 更新' : '已切回正式版更新');
   }
 
   // 立即更新：downloadUpdate 订阅 Channel 事件（Started/Progress/Finished）。
@@ -230,13 +239,24 @@ export function Settings({
               <TabsContent value="backend" keepMounted className="mt-4 focus-visible:outline-none">
                 <Card className="w-full">
                   <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <RefreshCwIcon className="size-5 text-primary" />
-                      <CardTitle>更新</CardTitle>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <RefreshCwIcon className="size-5 text-primary" />
+                        <CardTitle>更新</CardTitle>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                        <Checkbox checked={updateChannel === 'BETA'} onCheckedChange={(checked) => toggleBetaUpdates(Boolean(checked))} />
+                        <div className="leading-tight">
+                          <div className="font-medium">启用 beta 更新</div>
+                          <div className="text-xs text-muted-foreground">默认关闭，开启后优先检查测试版</div>
+                        </div>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="flex flex-wrap gap-2">
-                    <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>检查更新</LoadingButton>
+                    <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>
+                      检查{updateChannel === 'BETA' ? ' beta' : '正式版'}更新
+                    </LoadingButton>
                     <Button variant="outline" onClick={() => setChangelogOpen(true)}>
                       <HistoryIcon className="size-4" />查看更新日志
                     </Button>

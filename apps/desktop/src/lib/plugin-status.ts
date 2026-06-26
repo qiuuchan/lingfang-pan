@@ -144,8 +144,8 @@ export async function startPlugin(
       })
     : null;
   try {
-    // 计费/中转：把后端基址 + 登录态 token 注入插件进程环境（LF_API_BASE / LF_AUTH_TOKEN），
-    // 供 Python/Node 插件经 /api/relay/v1/* 调平台 AI 服务（按团队灵石计费，需求 #3：禁止第三方接口）。
+    // 计费/中转：把后端基址 + 登录态 token 交给宿主本地桥；插件进程只收到 localhost URL + 一次性 token，
+    // 不直接接触 JWT/API Key。
     return await tauriInvoke<{ pid: number; started_at: string }>('start_plugin', {
       pluginId,
       apiBase: apiBase(),

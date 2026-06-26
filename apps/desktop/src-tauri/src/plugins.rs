@@ -14,6 +14,7 @@ pub struct LoadedPlugin {
     pub version: String,
     pub description: String,
     pub entry: String,
+    pub capabilities: Vec<DeclaredCapability>,
     /// 插件资源目录的绝对路径（用于壳加载 entry HTML）。
     pub dir: String,
     pub builtin: bool,
@@ -71,6 +72,7 @@ fn parse_manifest(dir: &PathBuf) -> Option<(LoadedPlugin, Vec<DeclaredCapability
         version,
         description,
         entry,
+        capabilities: caps.clone(),
         dir: dir.to_string_lossy().to_string(),
         builtin: true,
     };

@@ -36,10 +36,12 @@ type Status = 'loading' | 'ready' | 'error';
 export function DownloadPage({ onBack }: { onBack: () => void }) {
   const [release, setRelease] = useState<Release | null>(null);
   const [status, setStatus] = useState<Status>('loading');
+  const [channel, setChannel] = useState<'STABLE' | 'BETA'>('STABLE');
 
   useEffect(() => {
     let aborted = false;
-    getLatestRelease()
+    setStatus('loading');
+    getLatestRelease(channel)
       .then((data) => {
         if (!aborted) {
           setRelease(data);
@@ -52,7 +54,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
     return () => {
       aborted = true;
     };
-  }, []);
+  }, [channel]);
 
   // 按平台去重，每个平台取第一个 asset。
   const assetsByPlatform = (release?.assets ?? []).reduce<Record<Platform, ReleaseAsset | undefined>>(
@@ -97,8 +99,24 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
               <span className="lf-section-label">download</span>
               <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">下载 LingFang 客户端</h1>
               <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
-                最新稳定版的各平台安装包。点击对应平台下载，客户端会自动检查后续更新。
+                最新稳定版的各平台安装包。需要提前体验测试版时，可手动切换到 beta 通道。
               </p>
+              <div className="mt-5 inline-flex rounded-lg border p-1" style={{ borderColor: 'var(--lf-border)', backgroundColor: 'var(--lf-bg-elevated)' }}>
+                <button
+                  className="rounded-md px-4 py-2 text-sm transition-colors"
+                  style={{ backgroundColor: channel === 'STABLE' ? 'var(--lf-accent)' : 'transparent', color: channel === 'STABLE' ? '#000' : 'var(--lf-fg-muted)' }}
+                  onClick={() => setChannel('STABLE')}
+                >
+                  正式版
+                </button>
+                <button
+                  className="rounded-md px-4 py-2 text-sm transition-colors"
+                  style={{ backgroundColor: channel === 'BETA' ? 'var(--lf-accent)' : 'transparent', color: channel === 'BETA' ? '#000' : 'var(--lf-fg-muted)' }}
+                  onClick={() => setChannel('BETA')}
+                >
+                  beta 测试版
+                </button>
+              </div>
             </div>
 
             <div className="mt-10">
@@ -110,7 +128,7 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                 >
                   <div>
                     <div className="lf-mono text-xs uppercase tracking-wider" style={{ color: 'var(--lf-accent)' }}>
-                      stable channel
+                      {channel === 'STABLE' ? 'stable channel' : 'beta channel'}
                     </div>
                     {status === 'ready' && release ? (
                       <>

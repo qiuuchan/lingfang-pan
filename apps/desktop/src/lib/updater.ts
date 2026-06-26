@@ -38,8 +38,24 @@ export type DownloadEvent =
   | { event: 'Progress'; data: { chunkLength: number } }
   | { event: 'Finished' };
 
-/** 更新通道（design R5：channel 走 STABLE；后端 release 模块当前仅 seed STABLE）。 */
-export const UPDATE_CHANNEL = 'STABLE';
+export type UpdateChannel = 'STABLE' | 'BETA';
+const UPDATE_CHANNEL_STORAGE_KEY = 'lf:update-channel';
+
+export function loadUpdateChannel(): UpdateChannel {
+  try {
+    return localStorage.getItem(UPDATE_CHANNEL_STORAGE_KEY) === 'BETA' ? 'BETA' : 'STABLE';
+  } catch {
+    return 'STABLE';
+  }
+}
+
+export function saveUpdateChannel(channel: UpdateChannel): void {
+  try { localStorage.setItem(UPDATE_CHANNEL_STORAGE_KEY, channel); } catch { /* localStorage 不可用则忽略 */ }
+}
+
+export function isBetaUpdateEnabled(): boolean {
+  return loadUpdateChannel() === 'BETA';
+}
 
 /** 进度回调类型（供 Settings 页订阅 Started/Progress/Finished）。 */
 export type DownloadEventHandler = (event: DownloadEvent) => void;
@@ -53,9 +69,9 @@ export type DownloadEventHandler = (event: DownloadEvent) => void;
  *
  * 错误：backendUrl 无效 / 网络失败 → throw String（ApiError.message）。
  */
-export function checkUpdate(backendUrl: string): Promise<UpdateMetadata | null> {
+export function checkUpdate(backendUrl: string, channel: UpdateChannel = loadUpdateChannel()): Promise<UpdateMetadata | null> {
   return tauriInvoke<UpdateMetadata | null>('check_update', {
-    channel: UPDATE_CHANNEL,
+    channel,
     backendUrl,
   });
 }

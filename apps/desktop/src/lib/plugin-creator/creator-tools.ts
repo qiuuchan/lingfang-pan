@@ -118,6 +118,14 @@ export function validateStagedCompleteness(
   return null;
 }
 
+const capabilityParams = z.object({
+  kind: z.enum(['ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch', 'clipboard', 'llm.chat', 'image.generate', 'storage.kv', 'system.info', 'system.screenshot', 'system.notify', 'code-assistant.run', 'code-assistant.session', 'plugin.upload', 'plugin.submitMarketplace']),
+  reason: z.string().default(''),
+  risk: z.enum(['none', 'low', 'medium', 'high']).default('low'),
+  requires_admin: z.boolean().default(false),
+  scope: z.record(z.unknown()).optional(),
+});
+
 const stageParams = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, 'id 仅小写字母/数字/连字符'),
   name: z.string(),
@@ -125,6 +133,7 @@ const stageParams = z.object({
   description: z.string().default(''),
   runtime_type: z.enum(['client', 'nodejs', 'python']),
   entry: z.string(),
+  capabilities: z.array(capabilityParams).optional().describe('插件需要的能力声明；调用平台 LLM 时必须包含 llm.chat。'),
   files: z.array(z.object({ path: z.string(), content: z.string() })).min(1),
 });
 type StageArgs = z.infer<typeof stageParams>;
@@ -216,6 +225,24 @@ export const patchDraftParams = z.object({
 });
 export type PatchDraftArgs = z.infer<typeof patchDraftParams>;
 
+function scanPluginIssues(draft: StagedPlugin | null) {
+  const issues: Array<{ level: 'error' | 'warning'; message: string }> = [];
+  if (!draft) return [{ level: 'error' as const, message: '当前还没有草稿，请先生成或导入插件。' }];
+  const prepared = withSyncedStagedManifest(draft);
+  const completeness = validateStagedCompleteness(prepared.runtime_type, prepared.entry, prepared.files);
+  if (completeness) issues.push({ level: 'error', message: completeness });
+  const hasLlmCall = prepared.files.some((file) => /sdk\.llm\.chat|llm\.chat|LINGFANG_PLUGIN_BRIDGE_URL/.test(file.content));
+  const declaresLlm = prepared.capabilities.some((cap) => cap.kind === 'llm.chat');
+  if (hasLlmCall && !declaresLlm) issues.push({ level: 'error', message: '插件使用了 LLM，但 manifest 未声明 llm.chat 能力。' });
+  const joined = prepared.files.map((file) => file.content).join('\n');
+  if (/sk-[A-Za-z0-9_-]{12,}/.test(joined)) issues.push({ level: 'error', message: '发现疑似硬编码 API Key，请移除密钥。' });
+  if (/api\.openai\.com|chat\/completions|v1\/messages|Authorization['"]?\s*:\s*['"]?Bearer/i.test(joined) && !/LINGFANG_PLUGIN_BRIDGE_URL/.test(joined)) {
+    issues.push({ level: 'warning', message: '发现疑似第三方模型直连接口，应改用 sdk.llm.chat 或脚本桥。' });
+  }
+  if (prepared.files.some((file) => !isSafePath(file.path))) issues.push({ level: 'error', message: '存在非法文件路径。' });
+  return issues;
+}
+
 /** 团队插件精简条目（list_team_plugins 返回，避免把全文塞给模型）。 */
 export interface TeamPluginBrief {
   id: string;
@@ -260,7 +287,7 @@ export function createCreatorTools(opts: {
         runtime_type: args.runtime_type,
         entry: args.entry,
         visibility: 'tenant',
-        capabilities: [DEFAULT_CAPABILITY],
+        capabilities: args.capabilities?.length ? args.capabilities : [DEFAULT_CAPABILITY],
         files: args.files,
       });
       const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
@@ -275,8 +302,8 @@ export function createCreatorTools(opts: {
       '当信息不足、需求有歧义、或需要用户在多个方案中选择时，调用此工具向用户发起结构化提问（不要用纯文本提问）。' +
       '能用预设 options 就给选项，减少用户打字。返回 { answer }：用户的回答，据此继续后续流程。',
     inputSchema: zodSchema(askQuestionParams),
-    execute: (args: AskQuestionArgs, { toolCallId }): Promise<AskQuestionResult> =>
-      opts.onAskQuestion(args, toolCallId),
+    execute: (args: AskQuestionArgs, context: { toolCallId: string }): Promise<AskQuestionResult> =>
+      opts.onAskQuestion(args, context.toolCallId),
   });
 
   const webSearchTool = tool({
@@ -367,10 +394,50 @@ export function createCreatorTools(opts: {
     },
   });
 
+  const checkPluginTool = tool({
+    description:
+      '检查当前草稿是否可运行、可提交：manifest、入口文件、运行时必需文件、路径安全、LLM 能力声明与平台 LLM 使用方式。' +
+      '生成或修改插件后必须调用。返回 { ok, issues, message }；ok=false 时应先修复再继续。',
+    inputSchema: zodSchema(z.object({})),
+    execute: async (): Promise<{ ok: boolean; issues: Array<{ level: 'error' | 'warning'; message: string }>; message: string }> => {
+      const issues = scanPluginIssues(opts.getDraft());
+      const blocking = issues.some((issue) => issue.level === 'error');
+      return {
+        ok: !blocking,
+        issues,
+        message: issues.length === 0 ? '检查通过。' : `检查发现 ${issues.length} 个问题，其中 ${issues.filter((i) => i.level === 'error').length} 个需要先修复。`,
+      };
+    },
+  });
+
+  const reviewPluginTool = tool({
+    description:
+      'Review 当前草稿的行为风险和发布质量，重点检查硬编码密钥、第三方 AI 直连、危险权限、运行时兼容与用户体验。' +
+      '提交前必须调用。返回 { ok, findings, message }。',
+    inputSchema: zodSchema(z.object({})),
+    execute: async (): Promise<{ ok: boolean; findings: Array<{ severity: 'blocker' | 'warning' | 'info'; message: string }>; message: string }> => {
+      const d = opts.getDraft();
+      const issues = scanPluginIssues(d);
+      const findings: Array<{ severity: 'blocker' | 'warning' | 'info'; message: string }> = issues.map((issue) => ({ severity: issue.level === 'error' ? 'blocker' : 'warning', message: issue.message }));
+      if (d) {
+        findings.push({ severity: 'info', message: `运行时：${d.runtime_type}；入口：${d.entry}；文件数：${d.files.length}` });
+        if (d.capabilities.length === 0) findings.push({ severity: 'warning', message: '未声明任何能力，若插件要调用平台服务请补充能力声明。' });
+      }
+      const blockers = findings.filter((finding) => finding.severity === 'blocker').length;
+      return {
+        ok: blockers === 0,
+        findings,
+        message: blockers === 0 ? 'Review 通过，可继续预览或提交。' : `Review 发现 ${blockers} 个阻断问题，请先修复。`,
+      };
+    },
+  });
+
   return {
     stage_plugin: stagePluginTool,
     ask_question: askQuestionTool,
     web_search: webSearchTool,
+    check_plugin: checkPluginTool,
+    review_plugin: reviewPluginTool,
     list_draft_files: listDraftFilesTool,
     read_draft_file: readDraftFileTool,
     patch_draft_file: patchDraftFileTool,

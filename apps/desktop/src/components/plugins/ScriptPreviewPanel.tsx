@@ -246,6 +246,7 @@ export function ScriptPreviewPanel({
         runtime,
         entry: manifest.entry,
         files: files.filter((file) => file.path !== 'manifest.json'),
+        capabilities: manifest.capabilities.map((capability) => capability.kind),
       });
       if (result.ok && !result.failure) {
         setPreviewRun({

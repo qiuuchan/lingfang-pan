@@ -239,7 +239,7 @@ body {
     <div class="sidebar-header">
       <h1>Markdown 笔记</h1>
      <button class="btn-new" id="btnNewNote">新建笔记</button>
-      <button class="btn-icon" id="btnConfig" title="上游 LLM 配置">⚙</button>
+      <button class="btn-icon" id="btnConfig" title="AI 总结使用灵坊平台 LLM，无需额外配置">AI</button>
    </div>
     <div class="search-box">
       <span class="search-icon">⌕</span>
@@ -303,28 +303,6 @@ body {
   </div>
 </div>
 
-<div class="modal-overlay" id="configModal">
-  <div class="modal">
-    <h3>上游 LLM 配置</h3>
-    <p style="margin-bottom:16px">配置 OpenAI 兼容的 API 用于 AI 总结</p>
-    <div style="margin-bottom:12px">
-      <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px">API 地址</label>
-      <input id="cfgApiUrl" style="width:100%;padding:8px 12px;font-size:14px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);outline:none" placeholder="如 https://api.openai.com/v1">
-    </div>
-    <div style="margin-bottom:12px">
-      <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px">API Key</label>
-      <input id="cfgApiKey" type="password" style="width:100%;padding:8px 12px;font-size:14px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);outline:none" placeholder="sk-...">
-    </div>
-    <div style="margin-bottom:16px">
-      <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px">模型名</label>
-      <input id="cfgModel" style="width:100%;padding:8px 12px;font-size:14px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);outline:none" placeholder="如 gpt-4o-mini">
-    </div>
-    <div class="modal-actions">
-      <button class="action-btn" id="btnCancelConfig">取消</button>
-      <button class="action-btn primary" id="btnSaveConfig">保存</button>
-    </div>
-  </div>
-</div>
 <script>
 /* ========== 状态 ========== */
 let notes = [];
@@ -551,41 +529,18 @@ function switchTab(tab) {
 async function handleSummary() {
   const note = notes.find(n => n.id === currentNoteId);
   if (!note || !note.content.trim()) { sdk.system.notify('请先输入笔记内容'); return; }
-  // 读取 LLM 配置，若未配置则提示并打开配置弹窗
-  const config = await sdk.storage.get('llm_config');
-  if (!config || !config.apiUrl || !config.apiKey || !config.model) {
-    openConfigModal();
-    const cd = document.getElementById('summaryContent');
-    cd.innerHTML = '<div class="summary-error">请先在⚙配置中填写 API 地址、Key 和模型</div>';
-    return;
-  }
   const btn = document.getElementById('btnSummary'), cd = document.getElementById('summaryContent');
   btn.disabled = true; btn.textContent = '总结中...';
   cd.innerHTML = '<div class="summary-loading"><div class="spinner"></div>AI 正在分析...</div>';
   try {
-    const res = await sdk.net.fetch({
-      url: config.apiUrl.replace(/\/+$/, '') + '/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + config.apiKey
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: 'system', content: '你是笔记总结助手，用简洁中文总结要点，分条列出' },
-          { role: 'user', content: '请总结以下笔记内容：\n\n' + note.content }
-        ]
-      })
+    const summary = await sdk.llm.chat({
+      model: 'fast',
+      messages: [
+        { role: 'system', content: '你是笔记总结助手，用简洁中文总结要点，分条列出。' },
+        { role: 'user', content: '请总结以下笔记内容：\n\n' + note.content }
+      ]
     });
-    if (res.status < 200 || res.status >= 300) {
-      let errMsg = 'API 返回状态码 ' + res.status;
-      try { const d = JSON.parse(res.body); if (d.error && d.error.message) errMsg += '：' + d.error.message; } catch {}
-      throw new Error(errMsg);
-    }
-    const data = JSON.parse(res.body);
-    const summary = data.choices?.[0]?.message?.content || '总结为空';
-    note.summary = summary;
+    note.summary = typeof summary === 'string' ? summary : (summary && summary.content) || '总结为空';
     note.updatedAt = nowISO(); await saveNotes();
     cd.innerHTML = escapeHtml(note.summary);
   } catch (err) {
@@ -595,36 +550,6 @@ async function handleSummary() {
   }
 }
 
-
-/* ========== LLM 配置弹窗 ========== */
-let llmConfig = null;
-
-async function loadLlmConfig() {
-  try { llmConfig = await sdk.storage.get('llm_config'); } catch { llmConfig = null; }
-}
-
-function openConfigModal() {
-  const modal = document.getElementById('configModal');
-  document.getElementById('cfgApiUrl').value = (llmConfig && llmConfig.apiUrl) || '';
-  document.getElementById('cfgApiKey').value = (llmConfig && llmConfig.apiKey) || '';
-  document.getElementById('cfgModel').value = (llmConfig && llmConfig.model) || '';
-  modal.classList.add('open');
-}
-
-function closeConfigModal() {
-  document.getElementById('configModal').classList.remove('open');
-}
-
-async function saveConfig() {
-  const apiUrl = document.getElementById('cfgApiUrl').value.trim();
-  const apiKey = document.getElementById('cfgApiKey').value.trim();
-  const model = document.getElementById('cfgModel').value.trim();
-  if (!apiUrl || !apiKey || !model) { sdk.system.notify('请填写完整配置'); return; }
-  llmConfig = { apiUrl, apiKey, model };
-  await sdk.storage.set('llm_config', llmConfig);
-  closeConfigModal();
-  sdk.system.notify('LLM 配置已保存');
-}
 
 /* ========== 分类/标签编辑弹窗 ========== */
 function handleMetaClick(type) {
@@ -650,12 +575,9 @@ function renderAll() { renderFilters(); renderNotesList(); renderCurrentNote(); 
 /* ========== 初始化 ========== */
 async function init() {
   await loadNotes();
-  await loadLlmConfig();
   if (notes.length > 0) currentNoteId = notes[0].id;
   renderAll();
-  document.getElementById('btnConfig').addEventListener('click', openConfigModal);
-  document.getElementById('btnCancelConfig').addEventListener('click', closeConfigModal);
-  document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
+  document.getElementById('btnConfig').addEventListener('click', () => sdk.system.notify('AI 总结已接入灵坊平台 LLM，无需配置第三方接口'));
   document.getElementById('btnNewNote').addEventListener('click', createNote);
   document.getElementById('searchInput').addEventListener('input', handleSearch);
   document.getElementById('filterSection').addEventListener('click', handleFilterClick);
