@@ -158,10 +158,12 @@ fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
 
 /// 探测 Python 插件是否需要创建 venv（首次慢，已建则 ensure 秒过）。
 /// 用于 start_plugin 发「安装依赖」阶段事件（前端据此决定是否展示安装动画）。
-/// 判定：venv 内 python 不存在 → 需要创建（+可能 pip install）。与 ensure_python_venv 的「已就绪跳过」逻辑对齐。
-fn needs_python_venv(plugin_dir: &std::path::Path) -> bool {
+/// 判定：venv 内 python 不存在 / pip 缺失 / home 路径与当前运行时不一致 → 需要创建。
+fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &EmbeddedRuntime) -> bool {
     let venv_dir = python_venv_dir(plugin_dir);
-    !venv_python(&venv_dir).is_file() || !venv_has_pip(&venv_dir)
+    !venv_python(&venv_dir).is_file()
+        || !venv_has_pip(&venv_dir)
+        || !venv_home_matches_host(&venv_dir, runtime)
 }
 
 /// 确保 Python 插件有可用 venv（PRD 需求 3 / AC3）。
@@ -177,8 +179,9 @@ fn ensure_python_venv(
 ) -> Result<PathBuf, String> {
     let venv_dir = python_venv_dir(plugin_dir);
     let py = venv_python(&venv_dir);
-    // 已有 venv 且解释器/pip 存在 → 跳过创建（但 requirements.txt 仍需检查是否装过，简化：每次 start 都补装幂等）。
-    if !py.is_file() || !venv_has_pip(&venv_dir) {
+    // 已有 venv 且解释器/pip 存在且 home 路径匹配 → 跳过创建。
+    // 路径不匹配时（跨机器迁移 / 安装路径变更 / 原始路径含 junction）自动重建。
+    if !py.is_file() || !venv_has_pip(&venv_dir) || !venv_home_matches_host(&venv_dir, runtime) {
         create_python_venv(runtime, plugin_dir, &venv_dir)?;
     }
     // 有 requirements.txt → pip install（幂等，已装依赖 pip 会跳过）。
@@ -229,6 +232,46 @@ fn venv_has_pip(venv_dir: &std::path::Path) -> bool {
         let name = entry.file_name().to_string_lossy().to_string();
         name.starts_with("python") && entry.path().join("site-packages").join("pip").is_dir()
     })
+}
+
+/// 校验已有 venv 的 pyvenv.cfg 中 `home` 路径是否与当前内置 Python 所在目录匹配。
+/// 不匹配时（例如应用安装路径变更、跨机器迁移、原始路径含 junction/symlink），
+/// 该 venv 不可用，需重建。
+fn venv_home_matches_host(
+    venv_dir: &std::path::Path,
+    runtime: &EmbeddedRuntime,
+) -> bool {
+    let host_py = match runtime.python() {
+        Some(path) => path,
+        None => return false,
+    };
+    let host_home = match host_py.parent() {
+        Some(parent) => normalize_for_comparison(parent),
+        None => return false,
+    };
+    let cfg_path = venv_dir.join("pyvenv.cfg");
+    let content = match std::fs::read_to_string(&cfg_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix("home = ") {
+            let venv_home = normalize_for_comparison(std::path::Path::new(value.trim()));
+            return venv_home == host_home;
+        }
+    }
+    false
+}
+
+/// 路径归一化：strip `\\?\` 前缀，统一分隔符为反斜杠，去除末尾分隔符，大小写不敏感。
+fn normalize_for_comparison(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy().to_string();
+    let s = s
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&s);
+    s.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
 }
 
 fn create_python_venv(
@@ -636,7 +679,7 @@ pub fn start_plugin(
     let (binary, args) = match manifest.runtime {
         PluginRuntimeKind::Python => {
             // Python：先探测是否需创建 venv / 装依赖（首次慢，已装则秒过），发对应阶段事件。
-            if needs_python_venv(&plugin_dir) {
+            if needs_python_venv(&plugin_dir, &runtime) {
                 emit_stage(
                     "deps_installing",
                     "正在创建 Python 虚拟环境并安装依赖（首次较慢）…",

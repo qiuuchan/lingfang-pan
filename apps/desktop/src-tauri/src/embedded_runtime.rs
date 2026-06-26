@@ -17,6 +17,17 @@ impl EmbeddedRuntime {
         let root = if let Some(override_dir) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR") {
             PathBuf::from(override_dir)
         } else {
+            // 开发态：CARGO_MANIFEST_DIR/../runtimes（与 builtin_dir 同模式，dev 时 resource_dir
+            // 指向 src-tauri/ 而非上层目录，回退到源码路径）。
+            let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .map(|p| p.join("runtimes"));
+            if let Some(d) = dev {
+                if d.exists() {
+                    return Ok(Self { root: d });
+                }
+            }
+            // 打包态：resource_dir()/runtimes
             app.path()
                 .resource_dir()
                 .map_err(|error| error.to_string())?
