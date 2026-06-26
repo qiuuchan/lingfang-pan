@@ -191,6 +191,22 @@ fn scan_incomplete_when_entry_missing() {
 }
 
 #[test]
+fn scan_incomplete_when_entry_points_to_directory() {
+    let store = temp_store("scan-entry-dir");
+    let dir = store.plugins_root().join("entry-dir");
+    fs::create_dir_all(dir.join("ui")).unwrap();
+    fs::write(
+        dir.join("manifest.json"),
+        r#"{"id":"entry-dir","name":"目录入口","entry":"ui"}"#,
+    )
+    .unwrap();
+
+    let metas = store.list_plugins();
+    assert_eq!(metas[0].status, PluginStatus::Incomplete);
+    assert!(metas[0].detail.as_deref().unwrap().contains("不是文件"));
+}
+
+#[test]
 fn scan_error_when_manifest_invalid_json() {
     let store = temp_store("scan-bad-json");
     let dir = store.plugins_root().join("bad");
@@ -348,6 +364,10 @@ fn read_plugin_file_blocks_traversal() {
         store.read_plugin_file("p", "ui/index.html").unwrap(),
         "hello"
     );
+    // 空路径会解析到插件目录本身，应返回明确错误而不是让 Windows 冒出 os error 5。
+    assert!(store.read_plugin_file("p", "").unwrap_err().contains("不能为空"));
+    // 目录路径不能当文件读取。
+    assert!(store.read_plugin_file("p", "ui").unwrap_err().contains("不是文件"));
     // 路径穿越被拒（../ 越出插件目录）。
     assert!(store.read_plugin_file("p", "../../etc/passwd").is_err());
     // 不存在文件报错。

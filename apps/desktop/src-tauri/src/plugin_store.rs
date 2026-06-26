@@ -332,6 +332,10 @@ impl PluginStore {
     /// 防路径穿越：canonicalize 目标后断言以插件目录为前缀（与 main.rs read_plugin_file 同款）。
     /// 二进制文件（非 UTF-8）读失败返回错误（前端按需处理）。
     pub fn read_plugin_file(&self, plugin_id: &str, file: &str) -> Result<String, String> {
+        let file = file.trim();
+        if file.is_empty() {
+            return Err("文件路径不能为空".to_string());
+        }
         let dir = self.plugin_dir(plugin_id)?;
         let base = dir
             .canonicalize()
@@ -342,6 +346,9 @@ impl PluginStore {
             .map_err(|e| format!("文件不存在：{e}"))?;
         if !target.starts_with(&base) {
             return Err("非法文件路径".to_string());
+        }
+        if target.is_dir() {
+            return Err(format!("目标不是文件：{file}"));
         }
         fs::read_to_string(&target).map_err(|e| format!("读取文件失败：{e}"))
     }
@@ -472,10 +479,15 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
         .to_string();
     let entry = parse_entry(v.get("entry"));
     let runtime = parse_runtime(v.get("runtime_type"));
-    // 入口文件存在性：manifest 合法但缺入口 → incomplete（与前端 parseStructuredPackage 同款语义）。
-    let entry_exists = !entry.is_empty() && dir.join(&entry).exists();
-    let (status, detail) = if entry_exists {
+    // 入口文件有效性：manifest 合法但缺入口/入口是目录 → incomplete（与读取命令只读文件保持一致）。
+    let entry_path = dir.join(&entry);
+    let (status, detail) = if !entry.is_empty() && entry_path.is_file() {
         (PluginStatus::Ready, None)
+    } else if !entry.is_empty() && entry_path.is_dir() {
+        (
+            PluginStatus::Incomplete,
+            Some(format!("入口路径 {entry} 不是文件")),
+        )
     } else {
         (
             PluginStatus::Incomplete,
