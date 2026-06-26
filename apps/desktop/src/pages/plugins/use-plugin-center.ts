@@ -101,12 +101,22 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
       // 统一中转页：所有本地插件（client/nodejs/python）都进 PluginRunner（= 统一启动中转页）。
       // 读取 manifest.json（脚本类 ScriptPreviewPanel parseManifest 需要）+ 入口文件（HTML iframe 需要）。
       // manifest 读取失败不阻断（HTML 插件可能无 manifest，回退仅入口文件）。
-      const entryContent = await readLocalPluginFile(item.id, item.entry);
       let manifestContent: string | null = null;
       try {
         manifestContent = await readLocalPluginFile(item.id, 'manifest.json');
       } catch {
         manifestContent = null;
+      }
+      let entryContent: string | null = null;
+      const entryPath = item.entry.trim();
+      if (entryPath) {
+        try {
+          entryContent = await readLocalPluginFile(item.id, entryPath);
+        } catch (caught) {
+          // incomplete/error 插件仍允许进入 Runner，由中转页展示缺失详情并提供修复入口；
+          // ready 插件入口读取失败才视为打开失败，避免静默吞掉真实 IO 问题。
+          if (item.status === 'ready') throw caught;
+        }
       }
       setRunningPlugin(localStatusToPlugin(item, entryContent, manifestContent));
     } catch (caught) {
@@ -143,11 +153,13 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
   return { openLocalPlugin, openTeamPlugin, openDraftPlugin, openLocalRoot };
 }
 
-function localStatusToPlugin(item: LocalPluginStatus, entryContent: string, manifestContent: string | null): LoadedPlugin {
+function localStatusToPlugin(item: LocalPluginStatus, entryContent: string | null, manifestContent: string | null): LoadedPlugin {
   // 保留真实 runtime（之前硬编码 'client' 导致脚本类无法进 Runner），让 PluginRunner 正确分派：
   // client→iframe，nodejs/python→ScriptPreviewPanel（中转页分阶段启动）。
-  const files = [{ path: item.entry, content: entryContent }];
+  const files: { path: string; content: string }[] = [];
   if (manifestContent != null) files.unshift({ path: 'manifest.json', content: manifestContent });
+  const entryPath = item.entry.trim();
+  if (entryPath && entryContent != null) files.push({ path: entryPath, content: entryContent });
   return {
     id: item.id,
     name: item.name,
