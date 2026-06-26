@@ -126,9 +126,20 @@ pub async fn check_update(
         .map_err(|e| e.to_string())?;
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
 
-    // 后端无已发布版本时返 404（release_not_found）→ 视为无更新。
+    // 后端无已发布版本时返 404（release_not_found）→ 视为无更新；其他错误必须暴露给前端。
     if !resp.status().is_success() {
-        return Ok(None);
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let detail = resp.text().await.unwrap_or_default();
+        let detail = detail.trim();
+        let suffix = if detail.is_empty() {
+            String::new()
+        } else {
+            format!("：{}", detail.chars().take(300).collect::<String>())
+        };
+        return Err(format!("检查更新失败，HTTP {status}{suffix}"));
     }
     let release: LatestRelease = resp.json().await.map_err(|e| e.to_string())?;
 

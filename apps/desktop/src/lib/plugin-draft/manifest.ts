@@ -183,6 +183,7 @@ export function parseManifest(files: DraftFile[]) {
   const manifestFile = files.find((file) => file.path === 'manifest.json');
   try {
     const parsed = JSON.parse(manifestFile?.content || '{}');
+    const runtimeType = parsed.runtime_type || parsed.runtimeType || 'client';
     return {
       id: parsed.id || parsed.name || 'generated-plugin',
       name: parsed.name || '未命名插件',
@@ -191,8 +192,8 @@ export function parseManifest(files: DraftFile[]) {
       title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : '',
       version: parsed.version || '0.1.0',
       description: parsed.description || '',
-      runtime_type: parsed.runtime_type || parsed.runtimeType || 'client',
-      entry: parsed.entry || 'ui/index.html',
+      runtime_type: runtimeType,
+      entry: parsed.entry || defaultEntryForRuntime(runtimeType),
       visibility: parsed.visibility || 'tenant',
       // 契约收敛：localStorage 读取的历史草稿（含旧字符串数组形态）在此统一收敛为合法对象数组。
       capabilities: normalizeCapabilities(parsed.capabilities),

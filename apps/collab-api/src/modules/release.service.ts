@@ -126,7 +126,7 @@ export class ReleaseService {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.release.findUnique({ where: { id } });
     if (!existing) throw notFound('版本不存在');
-    const data: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: Date | null } = {};
+    const data: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: Date | null; isLatest?: boolean } = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.channel !== undefined && dto.channel !== existing.channel) {
@@ -141,7 +141,35 @@ export class ReleaseService {
       // null = 清空首发时间，ISO 字符串 = 手动修正。
       data.publishedAt = dto.publishedAt ? new Date(dto.publishedAt) : null;
     }
-    const release = await this.prisma.release.update({ where: { id }, data });
+
+    const targetChannel = data.channel ?? existing.channel;
+    const movedLatestRelease = targetChannel !== existing.channel && existing.status === 'PUBLISHED' && existing.isLatest;
+    if (targetChannel !== existing.channel && existing.status !== 'PUBLISHED' && existing.isLatest) {
+      data.isLatest = false;
+    }
+
+    const release = movedLatestRelease
+      ? await this.prisma.$transaction(async (tx) => {
+        await tx.release.updateMany({
+          where: { channel: targetChannel, isLatest: true, id: { not: id } },
+          data: { isLatest: false },
+        });
+        const updated = await tx.release.update({ where: { id }, data: { ...data, isLatest: true } });
+        await tx.release.updateMany({
+          where: { channel: existing.channel, isLatest: true, id: { not: id } },
+          data: { isLatest: false },
+        });
+        const sourceLatest = await tx.release.findFirst({
+          where: { channel: existing.channel, status: 'PUBLISHED', id: { not: id } },
+          orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        });
+        if (sourceLatest) {
+          await tx.release.update({ where: { id: sourceLatest.id }, data: { isLatest: true } });
+        }
+        return updated;
+      })
+      : await this.prisma.release.update({ where: { id }, data });
+
     await this.audit(actorId, 'admin.release.updated', 'Release', release.id, { version: release.version, channel: release.channel });
     return { release: this.adminRelease(release) };
   }
