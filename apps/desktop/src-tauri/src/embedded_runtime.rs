@@ -17,13 +17,11 @@ impl EmbeddedRuntime {
         let root = if let Some(override_dir) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR") {
             PathBuf::from(override_dir)
         } else {
-            // 开发态：CARGO_MANIFEST_DIR/../runtimes（与 builtin_dir 同模式，dev 时 resource_dir
-            // 指向 src-tauri/ 而非上层目录，回退到源码路径）。
-            let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .map(|p| p.join("runtimes"));
-            if let Some(d) = dev {
-                if d.exists() {
+            // 开发态回退：仅在 debug 构建或 exe 位于 cargo target 目录时才检查源码路径。
+            // 生产安装版（release + 不在 target 目录）直接走 resource_dir()，避免
+            // CARGO_MANIFEST_DIR（编译时嵌入的绝对路径，如 P:\...）被误用。
+            if is_dev_context() {
+                if let Some(d) = dev_runtimes_dir() {
                     return Ok(Self { root: d });
                 }
             }
@@ -191,6 +189,29 @@ fn normalize_command_name(command: &str) -> Option<String> {
 
 fn first_existing(paths: Vec<PathBuf>) -> Option<PathBuf> {
     paths.into_iter().find(|path| path.is_file())
+}
+
+/// 判断当前是否运行在开发/CI 上下文中（debug 构建 或 exe 位于 cargo target 目录）。
+/// 生产安装版（release + 不在 target 目录）返回 false，直接走 resource_dir()。
+fn is_dev_context() -> bool {
+    cfg!(debug_assertions) || is_running_from_cargo_target()
+}
+
+fn is_running_from_cargo_target() -> bool {
+    std::env::current_exe().ok().map_or(false, |exe_path| {
+        // Walk up ancestors; if any segment is "target", we are in a cargo build tree.
+        // 向上遍历祖先目录，任意一段为 "target" 即判定为 cargo 编译目录。
+        exe_path
+            .ancestors()
+            .any(|a| a.file_name().map_or(false, |n| n == "target"))
+    })
+}
+
+fn dev_runtimes_dir() -> Option<PathBuf> {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("runtimes");
+    d.exists().then_some(d)
 }
 
 #[cfg(windows)]
