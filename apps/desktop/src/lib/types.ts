@@ -1,3 +1,4 @@
+import type { PluginCapability } from '@lingfang/contract';
 import { formatTimestamp } from './time';
 
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
@@ -169,6 +170,7 @@ export interface LoadedPlugin {
   // 来源：collab-api 的 publicPlugin 已返回该字段（plugin-package.ts 解析），内置插件未返回时回退 'client'。
   // task 06-16-plugin-system-rebuild 组C：Plugins.tsx 据此渲染「运行」/「打开」按钮分派。
   runtime_type?: 'client' | 'nodejs' | 'python' | 'cloud';
+  capabilities?: Array<PluginCapability | { kind?: string } | string>;
   files?: DraftFile[];
   manifest?: unknown;
   reviewStatus?: string;

@@ -138,6 +138,18 @@ describe('ReleaseService', () => {
     expect(result.updateAvailable).toBe(true);
   });
 
+  it('latest 按 channel 独立查询，beta 不影响 stable latest', async () => {
+    prisma.release.findFirst.mockResolvedValue(makeRelease({ channel: 'BETA', version: '1.1.0-beta.1' }));
+    const result = await service.latest({ channel: 'BETA', currentVersion: '1.0.0' });
+    expect(prisma.release.findFirst).toHaveBeenCalledWith({
+      where: { channel: 'BETA', status: 'PUBLISHED', isLatest: true },
+      include: { assets: { orderBy: { platform: 'asc' } } },
+    });
+    expect(result.channel).toBe('BETA');
+    expect(result.version).toBe('1.1.0-beta.1');
+    expect(result.updateAvailable).toBe(true);
+  });
+
   it('latest 无版本时抛 release_not_found', async () => {
     prisma.release.findFirst.mockResolvedValue(null);
     await expect(service.latest({ channel: 'BETA' })).rejects.toMatchObject({ status: 404, code: 'release_not_found' });

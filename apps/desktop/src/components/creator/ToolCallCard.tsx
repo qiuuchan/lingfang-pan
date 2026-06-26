@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import {
   ChevronRightIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon,
-  PackageIcon, GlobeIcon, FileTextIcon, FilePenIcon, FolderTreeIcon, BoxesIcon, WrenchIcon,
+  PackageIcon, GlobeIcon, FileTextIcon, FilePenIcon, FolderTreeIcon, BoxesIcon, WrenchIcon, ShieldCheckIcon, ClipboardCheckIcon,
 } from 'lucide-react';
 
 export interface ToolCardData {
@@ -23,6 +23,8 @@ const TOOL_META: Record<string, { icon: typeof PackageIcon; label: string }> = {
   read_draft_file: { icon: FileTextIcon, label: '读取草稿文件' },
   patch_draft_file: { icon: FilePenIcon, label: '修改草稿文件' },
   list_draft_files: { icon: FolderTreeIcon, label: '查看文件树' },
+  check_plugin: { icon: ClipboardCheckIcon, label: '检查插件' },
+  review_plugin: { icon: ShieldCheckIcon, label: 'Review 插件' },
   list_team_plugins: { icon: BoxesIcon, label: '查询团队插件' },
 };
 
@@ -40,6 +42,10 @@ function summarize(data: ToolCardData): string {
       return typeof a.name === 'string' ? a.name : (typeof a.id === 'string' ? a.id : '');
     case 'list_draft_files':
       return Array.isArray(r.files) ? `${r.files.length} 个文件` : '';
+    case 'check_plugin':
+      return Array.isArray(r.issues) ? `${r.issues.length} 个问题` : '';
+    case 'review_plugin':
+      return Array.isArray(r.findings) ? `${r.findings.length} 条结果` : '';
     case 'list_team_plugins':
       return Array.isArray(r.plugins) ? `${r.plugins.length} 个插件` : '';
     default:

@@ -18,11 +18,12 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+use crate::plugin_llm_bridge::PluginLlmBridge;
 use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutput};
 use crate::embedded_runtime::EmbeddedRuntime;
 
@@ -50,6 +51,12 @@ pub struct RunPluginScriptInput {
     /// 运行入口相对路径（如 src/index.js / main.py），须存在于 files 中。
     pub entry: String,
     pub files: Vec<ScriptFile>,
+    /// 当前 manifest 声明的能力 kind。用于本地 LLM 桥按声明放行。
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    /// 后端地址与登录态仅传给宿主桥，不直接注入脚本进程。
+    pub api_base: Option<String>,
+    pub auth_token: Option<String>,
     /// 超时毫秒，缺省 15000（design 决策③：无参数一次性运行，防死循环挂起 UI）。
     pub timeout_ms: Option<u64>,
 }
@@ -435,6 +442,7 @@ fn cleanup_sandbox_lru(sandbox_root: &Path, _current_plugin_id: &str) {
 #[tauri::command]
 pub fn run_plugin_script(
     app: tauri::AppHandle,
+    bridge: tauri::State<'_, PluginLlmBridge>,
     input: RunPluginScriptInput,
 ) -> Result<RunResult, String> {
     // 解释器探测前置：缺失直接返回友好错误（前端据 ProbeResult.hint 展示安装指引）。
@@ -490,9 +498,31 @@ pub fn run_plugin_script(
     // H2 修复：Python 追加 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1，避免 Windows 中文系统
     // 默认 GBK 编码导致 print 中文输出 UnicodeEncodeError 崩溃或乱码。
     // H4 修复：PYTHONPATH=<sandbox根> 让多文件插件的 import 能找到 sandbox 根目录的模块。
-    let env = runtime_env(input.runtime, &workspace, embedded.env(minimal_env()));
-    let captured: CapturedOutput =
-        run_capture_with_env(&binary, args, Some(&workspace), timeout, env)?;
+    let mut env = runtime_env(input.runtime, &workspace, embedded.env(minimal_env()));
+    let bridge_env = bridge.register_session(
+        &input.plugin_id,
+        input.api_base.clone(),
+        input.auth_token.clone(),
+        input.capabilities.iter().any(|kind| kind == "llm.chat"),
+        Duration::from_secs(30 * 60),
+    )?;
+    let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
+    if let Some(bridge_env) = bridge_env {
+        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"), OsString::from(bridge_env.url)));
+        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"), OsString::from(bridge_env.token)));
+    }
+    let captured: CapturedOutput = match run_capture_with_env(&binary, args, Some(&workspace), timeout, env) {
+        Ok(captured) => captured,
+        Err(error) => {
+            if let Some(token) = bridge_token {
+                bridge.revoke_token(&token);
+            }
+            return Err(error);
+        }
+    };
+    if let Some(token) = bridge_token {
+        bridge.revoke_token(&token);
+    }
     Ok(RunResult {
         stdout: captured.stdout,
         stderr: captured.stderr,

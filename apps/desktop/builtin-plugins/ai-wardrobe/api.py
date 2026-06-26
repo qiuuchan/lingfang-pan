@@ -1,11 +1,9 @@
 """AI 换装批量版 - API 调用
 
-计费/中转改造（见 docs/billing-and-relay-design.md §11）：
-  - 移除硬编码第三方 key 与地址（旧版直连 47.112.8.9:19081，违反需求 #3 且无法计费）。
-  - 改为经「灵坊平台中转」调用：从环境变量读 LF_API_BASE（后端基址）+ LF_AUTH_TOKEN（登录态 JWT
-    或平台 API Key），POST {LF_API_BASE}/api/relay/v1/images/edits，按张扣团队灵石。
-  - 宿主在拉起 Python 插件进程时注入 LF_API_BASE / LF_AUTH_TOKEN（见 plugin_runner minimal_env 扩展）。
-  - 缺失环境变量时抛清晰错误，绝不回退任何硬编码凭据。
+安全改造：
+  - 移除旧版硬编码第三方 key 与地址，避免密钥泄露和绕过平台计费。
+  - 当前平台脚本桥已支持文本 LLM；图片编辑能力需要后续平台 image edit 桥接后再启用。
+  - 在桥接完成前，本插件会给出明确错误，不回退任何第三方接口或本地密钥。
 """
 import io
 import os
@@ -37,15 +35,8 @@ def build_prompt(mode: str) -> str:
 
 
 def _relay_config() -> tuple[str, str]:
-    """读取平台中转配置：返回 (relay_url, auth_token)。缺失抛 ApiError。"""
-    base = os.environ.get("LF_API_BASE", "").rstrip("/")
-    token = os.environ.get("LF_AUTH_TOKEN", "")
-    if not base or not token:
-        raise ApiError(
-            "未配置平台中转凭据（LF_API_BASE / LF_AUTH_TOKEN）。"
-            "请在灵坊客户端「设置 → 模型与计费」确认已登录并连接平台后重试。"
-        )
-    return f"{base}/api/relay/v1/images/edits", token
+    """图片编辑能力尚未接入脚本桥；阻止回退到第三方接口。"""
+    raise ApiError("图片编辑能力正在迁移到灵坊平台桥，当前版本已禁用第三方直连接口。")
 
 
 def _open_as_png(path: str) -> tuple[str, bytes]:

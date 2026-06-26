@@ -57,12 +57,38 @@ function assertSerializable(value: unknown, label: string): void {
   }
 }
 
+type ScriptBridgeEnv = {
+  process?: { env?: Record<string, string | undefined> };
+  fetch?: typeof fetch;
+};
+
+async function invokeScriptBridge<T>(capability: string, args: unknown): Promise<T | null> {
+  if (capability !== 'llm.chat') return null;
+  const g = globalThis as unknown as ScriptBridgeEnv;
+  const url = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_URL;
+  const token = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_TOKEN;
+  if (!url || !token || typeof g.fetch !== 'function') return null;
+  const res = await g.fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-LingFang-Plugin-Token': token,
+    },
+    body: JSON.stringify(args ?? {}),
+  });
+  const data = await res.json().catch(() => ({})) as { content?: unknown; message?: string; error?: string };
+  if (!res.ok) throw new Error(data.message || data.error || `平台 LLM 调用失败：HTTP ${res.status}`);
+  return (typeof data.content === 'string' ? data.content : '') as T;
+}
+
 // 桥调用默认超时（与桌面 plugins-runtime.ts 的 RUNTIME_BRIDGE_TIMEOUT_MS 对齐）。
 // 宿主可能未注入带超时的桥（旧版或未升级的容器），SDK 自身加一层超时兜底。
 async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}, timeoutMs = DEFAULT_BRIDGE_TIMEOUT_MS): Promise<T> {
   const bridge = (globalThis as unknown as { __lingfangInvoke?: (c: string, a: unknown) => Promise<unknown> })
     .__lingfangInvoke;
   if (typeof bridge !== 'function') {
+    const scriptResult = await invokeScriptBridge<T>(capability, args);
+    if (scriptResult !== null) return scriptResult;
     throw new Error(`capability bridge 未注入: ${capability}`);
   }
   // SDK-04：用 Promise.race 加超时兜底，避免桥返回的 Promise 永不 settle。

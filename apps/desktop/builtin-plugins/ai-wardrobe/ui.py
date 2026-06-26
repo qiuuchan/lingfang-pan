@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QThread, QSize
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QLineEdit, QComboBox, QSpinBox,
+    QLabel, QPushButton, QLineEdit, QSpinBox,
     QGroupBox, QStackedWidget, QFileDialog, QMessageBox,
     QProgressBar, QListWidget, QListWidgetItem,
 )
@@ -60,28 +60,13 @@ class MainWindow(QMainWindow):
         parent.addLayout(row)
 
     def _build_settings(self, parent: QVBoxLayout):
-        group = QGroupBox("API 设置")
+        group = QGroupBox("平台 AI 设置")
         layout = QVBoxLayout(group)
+        hint = QLabel("AI 能力由灵坊平台统一中转与计费，无需填写第三方 API Key。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
-        # Key 行
-        key_row = QHBoxLayout()
-        key_row.addWidget(QLabel("API Key:"))
-        self._key_input = QLineEdit(
-            "sk-sQXtwgZlIFnvR2dvpgnOz7vj1gYhyxqFV6picL8iJk2lFKOO"
-        )
-        self._key_input.setEchoMode(QLineEdit.Password)
-        self._key_toggle = QPushButton("显示")
-        self._key_toggle.setFixedWidth(50)
-        key_row.addWidget(self._key_input)
-        key_row.addWidget(self._key_toggle)
-        layout.addLayout(key_row)
-
-        # 选项行
         opts = QHBoxLayout()
-        opts.addWidget(QLabel("API Group:"))
-        self._group_combo = QComboBox()
-        self._group_combo.addItems(["default", "A1", "A2", "A3"])
-        opts.addWidget(self._group_combo)
         opts.addWidget(QLabel("并发数:"))
         self._concurrency_spin = QSpinBox()
         self._concurrency_spin.setRange(1, 8)
@@ -171,7 +156,6 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         for mode, btn in self._mode_btns.items():
             btn.clicked.connect(lambda checked, m=mode: self._on_mode_changed(m))
-        self._key_toggle.clicked.connect(self._toggle_key)
         self._dir_btn.clicked.connect(self._select_dir)
         self._start_btn.clicked.connect(self._on_start)
         self._cancel_btn.clicked.connect(self._on_cancel)
@@ -185,14 +169,6 @@ class MainWindow(QMainWindow):
         for m, btn in self._mode_btns.items():
             btn.setChecked(m == mode)
         self._input_stack.setCurrentIndex(1 if mode == "批量换装" else 0)
-
-    def _toggle_key(self):
-        if self._key_input.echoMode() == QLineEdit.Password:
-            self._key_input.setEchoMode(QLineEdit.Normal)
-            self._key_toggle.setText("隐藏")
-        else:
-            self._key_input.setEchoMode(QLineEdit.Password)
-            self._key_toggle.setText("显示")
 
     def _select_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择输出目录")

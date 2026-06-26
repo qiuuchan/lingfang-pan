@@ -8,7 +8,7 @@
 //
 // 安全：run_plugin_script 是不受控执行通道（软隔离），见 plugin_script.rs 顶部注释与 design §6.1。
 
-import { tauriInvoke } from '@/lib/api';
+import { tauriInvoke, apiBase, getAuthToken } from '@/lib/api';
 import type { RunScriptResult } from '@/lib/creator-error';
 
 /** 脚本型运行时（仅 nodejs/python，不含 client/cloud）。与契约 RuntimeType 子集对齐。 */
@@ -48,6 +48,7 @@ export interface RunPluginScriptInput {
   runtime: ScriptRuntime;
   entry: string;
   files: ScriptFile[];
+  capabilities?: string[];
   /** 超时毫秒，缺省由 Rust 侧兜底 15000。 */
   timeoutMs?: number;
 }
@@ -71,6 +72,9 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
         runtime: input.runtime,
         entry: input.entry,
         files: input.files,
+        capabilities: input.capabilities ?? [],
+        api_base: apiBase(),
+        auth_token: getAuthToken() ?? '',
         timeout_ms: input.timeoutMs ?? null,
       },
     });

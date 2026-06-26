@@ -2,19 +2,19 @@
   "id": "builtin.notes",
   "name": "Markdown 笔记",
   "version": "0.1.0",
-  "description": "轻量 Markdown 笔记插件，支持分类/标签、全文搜索、AI 智能总结（直连上游 LLM）",
+  "description": "轻量 Markdown 笔记插件，支持分类/标签、全文搜索、AI 智能总结（使用灵坊平台 LLM）",
   "runtime_type": "client",
   "entry": "index.html",
   "capabilities": [
     {
       "kind": "storage.kv",
-      "reason": "持久化笔记数据与上游 LLM 配置",
+      "reason": "持久化笔记数据",
       "risk": "low",
       "requires_admin": false
     },
     {
-      "kind": "net.fetch",
-      "reason": "AI 总结时直接调用上游 LLM 接口（OpenAI 兼容 chat completions）",
+      "kind": "llm.chat",
+      "reason": "通过灵坊平台 LLM 生成笔记摘要",
       "risk": "medium",
       "requires_admin": false
     }

@@ -6,6 +6,7 @@ mod capability;
 mod draft_plugin;
 mod embedded_runtime;
 mod process_util;
+mod plugin_llm_bridge;
 mod plugin_runner;
 mod plugin_script;
 mod plugin_security;
@@ -241,6 +242,9 @@ fn main() {
             // task 06-16 组B：插件持久化运行引擎的内存进程表（plugin_id→Child 句柄）。
             // start_plugin/stop_plugin/get_plugin_status 经此 State spawn/take/kill 进程。
             app.manage(plugin_runner::PluginProcessTable::new());
+            // task 06-26：Node/Python 插件通过 localhost 一次性 token 调平台 LLM；
+            // 桥持有后端地址与登录态，插件进程不直接接触 JWT/API Key。
+            app.manage(plugin_llm_bridge::PluginLlmBridge::new());
             // 项 11：系统托盘（显示窗口 / 退出菜单 + 左键单击恢复）。
             setup_tray(app)?;
             Ok(())

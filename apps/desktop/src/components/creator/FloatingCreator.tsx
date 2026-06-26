@@ -5,7 +5,7 @@
 //  - 流式 + agent：Vercel AI SDK streamText 走 relay；模型生成插件后**调用 stage_plugin 工具**暂存为草稿
 //    （不直接发布）。草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { streamText, stepCountIs } from 'ai';
 import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon } from 'lucide-react';
@@ -61,6 +61,25 @@ interface ReasoningPart {
   done?: boolean;
 }
 type TurnPart = QuestionPart | ToolPart | TextPart | ReasoningPart;
+
+type WorkflowStepId = 'ask' | 'search' | 'check' | 'write' | 'review' | 'preview';
+type WorkflowStepStatus = 'pending' | 'active' | 'done' | 'blocked';
+
+const WORKFLOW_STEPS: Array<{ id: WorkflowStepId; label: string }> = [
+  { id: 'ask', label: '询问' },
+  { id: 'search', label: '搜索补充' },
+  { id: 'check', label: '检查' },
+  { id: 'write', label: '编写/修补' },
+  { id: 'review', label: 'Review' },
+  { id: 'preview', label: '预览/提交' },
+];
+
+function workflowStatusClass(status: WorkflowStepStatus): string {
+  if (status === 'done') return 'border-green-600/30 bg-green-600/10 text-green-700 dark:text-green-300';
+  if (status === 'active') return 'border-primary/40 bg-primary/10 text-primary';
+  if (status === 'blocked') return 'border-destructive/40 bg-destructive/10 text-destructive';
+  return 'border-border bg-muted/30 text-muted-foreground';
+}
 
 interface Turn {
   role: 'user' | 'assistant';
@@ -131,7 +150,9 @@ const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用
 # 工具一览
 - ask_question(question, options?, allowFreeText?, multiSelect?) → { answer }
 - web_search(query, limit?) → { ok, results:[{title,url,snippet,source}] }
-- stage_plugin(id, name, version, description, runtime_type, entry, files) → { ok, message }
+- stage_plugin(id, name, version, description, runtime_type, entry, capabilities?, files) → { ok, message }
+- check_plugin() → { ok, issues, message }
+- review_plugin() → { ok, findings, message }
 - list_draft_files() → { ok, files:[路径] }
 - read_draft_file(path) → { ok, content }
 - patch_draft_file(path, content) → { ok }（覆盖式写整文件，非 diff；自动刷新预览）
@@ -144,13 +165,21 @@ const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用
   - nodejs → entry=index.js，files 含 package.json（无依赖用 {}）与 index.js；
   - python → entry=main.py，files 含 requirements.txt（可空）与 main.py。
 - entry 必须存在于 files。文件路径只能是相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
-- 插件如需调用 AI，必须用灵坊平台 sdk.llm.chat / sdk.image.generate（见 relay-access skill），禁第三方接口。
+- 插件如需调用 AI，必须用灵坊平台能力，禁第三方接口：
+  - client/html：调用 sdk.llm.chat({ messages, model:'fast'|'premium' })。
+  - nodejs：优先使用 @lingfang/plugin-sdk 的 sdk.llm.chat；若手写，POST process.env.LINGFANG_PLUGIN_BRIDGE_URL，header X-LingFang-Plugin-Token=process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN。
+  - python：使用 urllib/request 或 requests 调用 os.environ['LINGFANG_PLUGIN_BRIDGE_URL']，header X-LingFang-Plugin-Token=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN']。
 
 # stage_plugin 调用前必做的自检（缺一不可）
 1. entry 真实存在于 files（路径完全一致），不是只写在字段里。
 2. 按 runtime_type 补齐必需文件：client→ui/index.html；nodejs→index.js + package.json；python→main.py + requirements.txt。
 3. 路径都是合法相对路径。
 若 stage_plugin 返回 ok=false：按 message 补齐缺漏后**重新调用 stage_plugin 直到 ok=true**，不要在失败时就告诉用户「已生成」。
+
+# 检查与 review
+- 首次生成或完成一轮修改后，先调用 check_plugin；若 ok=false，按 issues 修复后再次检查。
+- 提交前调用 review_plugin；blocker 必须修复，warning 需要向用户说明取舍。
+- 发现任何 sk- 密钥、第三方模型 endpoint、让用户输入上游 API Key 的 UI，都必须改为灵坊平台 LLM 能力。
 
 # 回复风格
 - 简洁。不复述工具已处理的完整文件内容（草稿已在右侧面板，用户看得到）。
@@ -212,6 +241,35 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
   // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先），并始终同步 manifest.json。
   const draft: StagedPlugin | null = stagedDraft ? withSyncedStagedManifest({ ...stagedDraft, ...userEdits }) : null;
+
+  const workflowStatuses = useMemo(() => {
+    const statuses: Record<WorkflowStepId, WorkflowStepStatus> = {
+      ask: 'pending',
+      search: 'pending',
+      check: 'pending',
+      write: draft ? 'done' : 'pending',
+      review: 'pending',
+      preview: draft ? 'active' : 'pending',
+    };
+    for (const turn of turns) {
+      for (const part of turn.parts ?? []) {
+        if (part.type === 'question') statuses.ask = part.answered ? 'done' : 'active';
+        if (part.type !== 'tool') continue;
+        const mapped: Partial<Record<string, WorkflowStepId>> = {
+          web_search: 'search',
+          check_plugin: 'check',
+          review_plugin: 'review',
+          stage_plugin: 'write',
+          patch_draft_file: 'write',
+        };
+        const step = mapped[part.name];
+        if (!step) continue;
+        statuses[step] = part.status === 'running' ? 'active' : part.status === 'error' ? 'blocked' : 'done';
+      }
+    }
+    if (publishedName) statuses.preview = 'done';
+    return statuses;
+  }, [draft, publishedName, turns]);
 
   // stage_plugin 工具回调：AI 暂存草稿到右侧面板。
   // 同一插件 id 重新 stage（用户让 AI 改后再生成）保留用户已改的字段；换 id（新插件）则清空旧编辑。
@@ -1006,6 +1064,21 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         {/* 主体：左对话列 + 右草稿面板（有草稿时分栏） */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
+        <div className="shrink-0 border-b bg-muted/10 px-6 py-2.5">
+          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 text-xs">
+            {WORKFLOW_STEPS.map((step, index) => {
+              const status = workflowStatuses[step.id];
+              return (
+                <div key={step.id} className="flex items-center gap-2">
+                  {index > 0 && <div className="h-px w-4 bg-border" />}
+                  <span className={`rounded-full border px-2.5 py-1 font-medium ${workflowStatusClass(status)}`}>
+                    {step.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         {/* 对话区 */}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
           {turns.length === 0 ? (

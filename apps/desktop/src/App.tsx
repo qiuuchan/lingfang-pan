@@ -5,7 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, clearApiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
-import { checkUpdate } from '@/lib/updater';
+import { checkUpdate, loadUpdateChannel } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
@@ -536,13 +536,14 @@ export default function App() {
     sessionStorage.setItem(FLAG, '1');
 
     let cancelled = false;
-    checkUpdate(backendUrl)
+    const channel = loadUpdateChannel();
+    checkUpdate(backendUrl, channel)
       .then((meta) => {
         if (cancelled || !meta) return;
         void import('sonner').then(({ toast }) => {
-          toast.info(`发现新版本 ${meta.version}`, {
-            description: '前往设置 → 检查更新可立即升级。',
-            action: { label: '去更新', onClick: () => openAccountSettings('settings', 'gateway') },
+          toast.info(`发现${channel === 'BETA' ? ' beta' : ''}新版本 ${meta.version}`, {
+            description: `前往设置 → 检查${channel === 'BETA' ? ' beta' : '正式版'}更新可立即升级。`,
+            action: { label: '去更新', onClick: () => openAccountSettings('settings', 'backend') },
             duration: 8000,
           });
         });

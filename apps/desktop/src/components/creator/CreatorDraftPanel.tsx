@@ -22,10 +22,9 @@ const RUNTIME_LABELS: Record<StagedPlugin['runtime_type'], string> = {
 };
 
 // 能力白名单：必须与后端 plugin-package.ts ALLOWED_CAPABILITIES 完全一致，否则勾选后端不认的能力会 400。
-// 注意：契约 CapabilityKind 含 image.generate，但后端白名单没有——故这里不直接用 CapabilityKind.options。
 const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'storage.kv',
+  'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
   'code-assistant.run', 'code-assistant.session', 'plugin.upload', 'plugin.submitMarketplace',
 ];
