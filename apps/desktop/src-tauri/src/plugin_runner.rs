@@ -544,6 +544,22 @@ fn ensure_node_dependencies(
     Ok(())
 }
 
+fn node_has_start_script(plugin_dir: &std::path::Path) -> Result<bool, String> {
+    let pkg_json = plugin_dir.join("package.json");
+    if !pkg_json.is_file() {
+        return Ok(false);
+    }
+    let raw =
+        std::fs::read_to_string(&pkg_json).map_err(|e| format!("读取 package.json 失败：{e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("package.json 解析失败：{e}"))?;
+    Ok(v.get("scripts")
+        .and_then(|scripts| scripts.get("start"))
+        .and_then(|start| start.as_str())
+        .map(|start| !start.trim().is_empty())
+        .unwrap_or(false))
+}
+
 // === 进程表（内存态，供 kill 句柄回收） ===
 
 /// 内存进程表条目：plugin_id → Child 句柄（Arc<Mutex<Option<Child>>> 支持多线程 take/kill）。
@@ -727,12 +743,12 @@ pub fn start_plugin(
             if !entry_abs.is_file() {
                 return Err(format!("Node 入口文件不存在：{}", entry_abs.display()));
             }
-            // 有 package.json + scripts.start → pnpm start（或 npm start）；否则裸 node entry。
-            if plugin_dir.join("package.json").is_file() {
+            // 仅当 package.json 声明 scripts.start 时才走 pnpm/npm start；否则裸 node entry。
+            if node_has_start_script(&plugin_dir)? {
                 if let Some(runner) = runtime.pnpm().or_else(|| runtime.npm()) {
                     (runner, vec!["start".to_string()])
                 } else {
-                    // 无 pnpm/npm：回退内置 node entry（package.json 可能仅声明元信息无 start）。
+                    // 无 pnpm/npm：回退内置 node entry。
                     let node = runtime.require_runtime_command("node")?;
                     (node, vec![entry_abs.to_string_lossy().to_string()])
                 }

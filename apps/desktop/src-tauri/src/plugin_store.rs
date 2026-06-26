@@ -447,13 +447,14 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
     // delete 会指向不存在的目录幂等 Ok 但没删（实战 bug）。
     let id_field = v.get("id").and_then(|x| x.as_str());
     let name_field = v.get("name").and_then(|x| x.as_str());
+    let runtime = parse_runtime(v.get("runtime_type"));
     if id_field.is_none() || name_field.is_none() {
         return PluginMeta {
             id: plugin_id.to_string(),
             name: name_field.unwrap_or(plugin_id).to_string(),
             status: PluginStatus::Error,
-            runtime: parse_runtime(v.get("runtime_type")),
-            entry: parse_entry(v.get("entry")),
+            runtime,
+            entry: parse_entry(v.get("entry"), runtime),
             description: parse_description(v.get("description")),
             version: parse_version(v.get("version")),
             icon: None,
@@ -470,8 +471,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
         .or(name_field)
         .unwrap_or(plugin_id)
         .to_string();
-    let entry = parse_entry(v.get("entry"));
-    let runtime = parse_runtime(v.get("runtime_type"));
+    let entry = parse_entry(v.get("entry"), runtime);
     // 入口文件存在性：manifest 合法但缺入口 → incomplete（与前端 parseStructuredPackage 同款语义）。
     let entry_exists = !entry.is_empty() && dir.join(&entry).exists();
     let (status, detail) = if entry_exists {
@@ -508,13 +508,17 @@ fn parse_runtime(value: Option<&Value>) -> PluginRuntime {
     }
 }
 
-/// 解析 manifest entry 字段（缺失回退 ui/index.html，与前端 LOCAL_DRAFT_ENTRY 一致）。
-fn parse_entry(value: Option<&Value>) -> String {
+/// 解析 manifest entry 字段（缺失时按 runtime 回退，与前端 defaultEntryForRuntime / start_plugin 对齐）。
+fn parse_entry(value: Option<&Value>, runtime: PluginRuntime) -> String {
     value
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "ui/index.html".to_string())
+        .unwrap_or_else(|| match runtime {
+            PluginRuntime::Client => "ui/index.html".to_string(),
+            PluginRuntime::Nodejs => "index.js".to_string(),
+            PluginRuntime::Python => "main.py".to_string(),
+        })
 }
 
 /// 解析 manifest description（缺失为空串）。

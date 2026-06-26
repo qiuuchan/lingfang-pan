@@ -125,6 +125,38 @@ describe('ReleaseService', () => {
     expect(prisma.__tx.release.update).toHaveBeenCalled();
   });
 
+  it('update 移动已发布 latest 到另一 channel 时重建两边 latest', async () => {
+    prisma.release.findUnique
+      .mockResolvedValueOnce(makeRelease({ id: 'release-1', channel: 'STABLE', version: '1.0.0', status: 'PUBLISHED', isLatest: true }))
+      .mockResolvedValueOnce(null);
+    prisma.__tx.release.update
+      .mockResolvedValueOnce(makeRelease({ id: 'release-1', channel: 'BETA', version: '1.0.0', isLatest: true }))
+      .mockResolvedValueOnce(makeRelease({ id: 'release-stable-prev', channel: 'STABLE', version: '0.9.0', isLatest: true }));
+    prisma.__tx.release.findFirst.mockResolvedValue(makeRelease({
+      id: 'release-stable-prev', channel: 'STABLE', version: '0.9.0', isLatest: false,
+    }));
+
+    const result = await service.update('user-admin', 'release-1', { channel: 'BETA' });
+
+    expect(result.release.channel).toBe('BETA');
+    expect(prisma.__tx.release.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { channel: 'BETA', isLatest: true, id: { not: 'release-1' } },
+      data: { isLatest: false },
+    });
+    expect(prisma.__tx.release.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'release-1' },
+      data: { channel: 'BETA', isLatest: true },
+    });
+    expect(prisma.__tx.release.findFirst).toHaveBeenCalledWith({
+      where: { channel: 'STABLE', status: 'PUBLISHED', id: { not: 'release-1' } },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+    expect(prisma.__tx.release.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'release-stable-prev' },
+      data: { isLatest: true },
+    });
+  });
+
   it('latest 仅返回 PUBLISHED+isLatest 版本', async () => {
     prisma.release.findFirst.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true }));
     const result = await service.latest({ channel: 'STABLE' });
