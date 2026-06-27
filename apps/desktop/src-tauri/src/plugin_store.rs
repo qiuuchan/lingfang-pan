@@ -129,6 +129,9 @@ pub struct PluginMeta {
     /// 状态诊断说明（缺文件/解析失败的具体原因，便于 UI 展示 incomplete/error 的修复引导）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// 是否为未发布草稿（manifest.draft===true）。AI 创建器统一写入 plugins_root，
+    /// 用 draft 标记区分"未发布草稿"与"已安装的团队/市场插件"，替代旧的 plugins-draft 双轨目录。
+    pub draft: bool,
 }
 
 /// 插件目录存储：负责配置读写 + 目录定位 + 状态扫描。
@@ -399,6 +402,75 @@ impl PluginStore {
         }
         Ok(())
     }
+
+    /// 列出插件目录下的所有源文件相对路径（递归，跳过运行时副产物目录）。
+    ///
+    /// Agent 的 Glob/列文件树工具底层。跳过 data/.venv/node_modules/.git 等运行时目录，
+    /// 只返回插件作者关心的源文件，避免把上千个依赖文件塞给模型。返回相对插件目录的正斜杠路径。
+    pub fn list_files(&self, plugin_id: &str) -> Result<Vec<String>, String> {
+        let dir = self.plugin_dir(plugin_id)?;
+        let base = dir
+            .canonicalize()
+            .map_err(|e| format!("插件目录不存在：{e}"))?;
+        let mut out: Vec<String> = Vec::new();
+        collect_source_paths(&base, &base, &mut out);
+        out.sort();
+        Ok(out)
+    }
+
+    /// 写单个文件到插件目录（Agent 的 Write 工具底层）。复用 write_files 的路径白名单校验。
+    pub fn write_single_file(&self, plugin_id: &str, path: &str, content: &str) -> Result<(), String> {
+        self.write_files(plugin_id, &[(path.to_string(), content.to_string())])
+    }
+
+    /// 设置插件 manifest 的 draft 标记（发布后置 false，转为正式插件）。
+    ///
+    /// 读 manifest.json → 改 draft 字段 → 写回（保留其它字段）。manifest 缺失/非法报错。
+    pub fn set_draft_flag(&self, plugin_id: &str, draft: bool) -> Result<(), String> {
+        let dir = self.plugin_dir(plugin_id)?;
+        let manifest_path = dir.join("manifest.json");
+        let raw = fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("读取 manifest 失败：{e}"))?;
+        let mut v: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|e| format!("解析 manifest 失败：{e}"))?;
+        v["draft"] = serde_json::Value::Bool(draft);
+        let pretty =
+            serde_json::to_string_pretty(&v).map_err(|e| format!("序列化 manifest 失败：{e}"))?;
+        fs::write(&manifest_path, pretty).map_err(|e| format!("写入 manifest 失败：{e}"))?;
+        Ok(())
+    }
+}
+
+/// 递归收集插件目录下的源文件相对路径（list_files 底层）。
+///
+/// 跳过运行时副产物目录（data/.venv/venv/node_modules/__pycache__/.git）与隐藏文件，
+/// 只保留插件作者编写的源文件。相对路径用正斜杠（跨平台一致，与 manifest entry 对齐）。
+fn collect_source_paths(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    const SKIP_DIRS: [&str; 6] = ["data", ".venv", "venv", "node_modules", "__pycache__", ".git"];
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        if path.is_dir() {
+            if SKIP_DIRS.contains(&name) || name.starts_with('.') {
+                continue;
+            }
+            collect_source_paths(base, &path, out);
+        } else if path.is_file() {
+            // 隐藏文件（.meta.json 等）跳过；其余按相对路径正斜杠收集。
+            if name.starts_with('.') {
+                continue;
+            }
+            if let Ok(rel) = path.strip_prefix(base) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
 }
 
 /// 扫描单个插件目录，判定 ready/incomplete/error（不含运行态，由命令层合并组B 进程表）。
@@ -426,6 +498,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
                 pid: None,
                 started_at: None,
                 detail: Some("缺少 manifest.json（AI 生成未完成）".to_string()),
+                draft: false,
             };
         }
     };
@@ -444,6 +517,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
                 pid: None,
                 started_at: None,
                 detail: Some(format!("manifest.json 解析失败：{e}")),
+                draft: false,
             };
         }
     };
@@ -468,6 +542,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
             pid: None,
             started_at: None,
             detail: Some("manifest.json 缺少 id 或 name 字段".to_string()),
+            draft: parse_draft(v.get("draft")),
         };
     }
     // title（用户命名，PRD 需求 1）优先，缺失回退 name（程序标识符），再缺失回退 id（目录名）。
@@ -506,6 +581,7 @@ fn scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta {
         pid: None,
         started_at: None,
         detail,
+        draft: parse_draft(v.get("draft")),
     }
 }
 
@@ -545,6 +621,12 @@ fn parse_version(value: Option<&Value>) -> String {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("0.0.0")
         .to_string()
+}
+
+/// 解析 manifest draft 标记（缺失/非 true 视为 false）。
+/// AI 创建器统一写入 plugins_root，用 manifest.draft===true 区分未发布草稿与已安装插件。
+fn parse_draft(value: Option<&Value>) -> bool {
+    value.and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
 /// 解析 manifest icon（缺失/空为 None；前端 PluginIcon 据此显示真实图标，None 回退默认 🧩）。
@@ -770,6 +852,38 @@ pub fn write_plugin_files(
 ) -> Result<(), String> {
     let pairs: Vec<(String, String)> = files.into_iter().map(|f| (f.path, f.content)).collect();
     state.write_files(&plugin_id, &pairs)
+}
+
+/// 命令：列出插件目录下所有源文件相对路径（Agent 的 Glob/列文件树工具）。
+/// 跳过 data/.venv/node_modules 等运行时目录，只返回源文件。
+#[tauri::command]
+pub fn list_plugin_files(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+) -> Result<Vec<String>, String> {
+    state.list_files(&plugin_id)
+}
+
+/// 命令：写单个文件到 plugins_root/<plugin_id>/（Agent 的 Write 工具）。
+/// path 白名单防穿越（write_files 内校验）。幂等覆盖。
+#[tauri::command]
+pub fn write_plugin_file(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    state.write_single_file(&plugin_id, &path, &content)
+}
+
+/// 命令：设置插件 manifest 的 draft 标记（发布后置 false 转正式插件）。
+#[tauri::command]
+pub fn set_plugin_draft_flag(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    draft: bool,
+) -> Result<(), String> {
+    state.set_draft_flag(&plugin_id, draft)
 }
 
 #[tauri::command]

@@ -1,19 +1,19 @@
-// FloatingCreator —— 悬浮窗 + 对话式 + 流式 AI 插件创建器（Vercel AI SDK agent）。
+// FloatingCreator —— 悬浮窗 + 对话式 + 流式 AI 插件创建器（OpenAI Agents SDK agent）。
 //
 //  - 悬浮窗：App 渲染为全屏遮罩 + 居中面板（~85vh），不切 view，关窗即回原页。
 //  - 对话式：多轮聊天（用户/助手气泡），输入框在底部，Enter 发送。
-//  - 流式 + agent：Vercel AI SDK streamText 走 relay；模型生成插件后**调用 stage_plugin 工具**暂存为草稿
-//    （不直接发布）。草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
+//  - 流式 + agent：OpenAI Agents SDK 走 relay；模型生成插件后调用 CreatePlugin 写入 plugins_root 草稿。
+//    草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { streamText, stepCountIs } from 'ai';
 import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
-import { api, type ApiError } from '@/lib/api';
-import { relayProvider } from '@/lib/relay-provider';
-import { createCreatorTools, withSyncedStagedManifest, type AskQuestionArgs, type AskQuestionResult, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { api, tauriInvoke } from '@/lib/api';
+import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { runPluginCreatorAgent } from '@/lib/agent/creator-adapter';
+import type { AskQuestionArgs, AskQuestionResult } from '@/lib/agent/tools';
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
@@ -62,23 +62,50 @@ interface ReasoningPart {
 }
 type TurnPart = QuestionPart | ToolPart | TextPart | ReasoningPart;
 
-type WorkflowStepId = 'ask' | 'search' | 'check' | 'write' | 'review' | 'preview';
-type WorkflowStepStatus = 'pending' | 'active' | 'done' | 'blocked';
+function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
+  if (!part || typeof part !== 'object') return null;
+  const raw = part as Record<string, unknown>;
+  switch (raw.type) {
+    case 'text':
+      return { type: 'text', content: typeof raw.content === 'string' ? raw.content : '' };
+    case 'reasoning':
+      return { type: 'reasoning', content: typeof raw.content === 'string' ? raw.content : '', done: raw.done === true };
+    case 'tool':
+      return {
+        type: 'tool',
+        toolCallId: typeof raw.toolCallId === 'string' ? raw.toolCallId : `legacy-tool-${index}`,
+        name: typeof raw.name === 'string' ? raw.name : 'Tool',
+        args: raw.args,
+        result: raw.result,
+        status: raw.status === 'ok' || raw.status === 'error' ? raw.status : 'running',
+      };
+    case 'question':
+      return {
+        type: 'question',
+        toolCallId: typeof raw.toolCallId === 'string' ? raw.toolCallId : `legacy-question-${index}`,
+        question: typeof raw.question === 'string' ? raw.question : '请补充信息',
+        options: Array.isArray(raw.options)
+          ? raw.options.flatMap((option) => {
+            if (!option || typeof option !== 'object') return [];
+            const item = option as Record<string, unknown>;
+            const label = typeof item.label === 'string' ? item.label : '';
+            const value = typeof item.value === 'string' ? item.value : label;
+            return label ? [{ label, value }] : [];
+          })
+          : undefined,
+        allowFreeText: raw.allowFreeText !== false,
+        multiSelect: raw.multiSelect === true,
+        answer: typeof raw.answer === 'string' ? raw.answer : undefined,
+        answered: raw.answered === true,
+      };
+    default:
+      return null;
+  }
+}
 
-const WORKFLOW_STEPS: Array<{ id: WorkflowStepId; label: string }> = [
-  { id: 'ask', label: '询问' },
-  { id: 'search', label: '搜索补充' },
-  { id: 'check', label: '检查' },
-  { id: 'write', label: '编写/修补' },
-  { id: 'review', label: 'Review' },
-  { id: 'preview', label: '预览/提交' },
-];
-
-function workflowStatusClass(status: WorkflowStepStatus): string {
-  if (status === 'done') return 'border-green-600/30 bg-green-600/10 text-green-700 dark:text-green-300';
-  if (status === 'active') return 'border-primary/40 bg-primary/10 text-primary';
-  if (status === 'blocked') return 'border-destructive/40 bg-destructive/10 text-destructive';
-  return 'border-border bg-muted/30 text-muted-foreground';
+function cleanTurnParts(parts: unknown): TurnPart[] {
+  if (!Array.isArray(parts)) return [];
+  return parts.flatMap((part, index) => normalizeTurnPart(part, index) ?? []);
 }
 
 interface Turn {
@@ -93,6 +120,25 @@ interface Turn {
   status?: 'generating' | 'done' | 'failed' | 'cancelled';
   /** 结构化片段：按时序排列的 文本 / 思考 / 工具调用 / 提问卡片。 */
   parts?: TurnPart[];
+}
+
+function cleanTurn(turn: unknown): Turn | null {
+  if (!turn || typeof turn !== 'object') return null;
+  const raw = turn as Record<string, unknown>;
+  if (raw.role !== 'user' && raw.role !== 'assistant') return null;
+  const next: Turn = {
+    role: raw.role,
+    content: typeof raw.content === 'string' ? raw.content : '',
+  };
+  if (raw.status === 'generating' || raw.status === 'done' || raw.status === 'failed' || raw.status === 'cancelled') {
+    next.status = raw.status;
+  }
+  if (raw.streaming === true) next.streaming = true;
+  if (raw.role === 'assistant') {
+    const parts = cleanTurnParts(raw.parts);
+    if (parts.length > 0) next.parts = parts;
+  }
+  return next;
 }
 
 interface CreatorConversation {
@@ -114,7 +160,20 @@ function loadConversations(userId: string | null, tenantId: string | null): Crea
   try {
     const raw = localStorage.getItem(conversationKey(userId, tenantId));
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.filter((item) => item && typeof item.id === 'string' && Array.isArray(item.turns)) : [];
+    return Array.isArray(arr) ? arr.flatMap((item): CreatorConversation[] => {
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      if (typeof record.id !== 'string' || !Array.isArray(record.turns)) return [];
+      return [{
+        id: record.id,
+        title: typeof record.title === 'string' ? record.title : '历史对话',
+        turns: record.turns.flatMap((turn) => cleanTurn(turn) ?? []),
+        createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
+        updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
+        stagedDraft: (record.stagedDraft ?? null) as StagedPlugin | null,
+        userEdits: record.userEdits && typeof record.userEdits === 'object' ? record.userEdits as Partial<StagedPlugin> : undefined,
+      }];
+    }) : [];
   } catch {
     return [];
   }
@@ -139,26 +198,26 @@ const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用
 把模糊需求转成一个可运行、信息完整的插件草稿。你是 agent：能多步规划、主动调用工具、根据工具结果决定下一步，而不是一次性吐代码。
 
 # 工作流程
-1. 理解需求。信息不足、有歧义、或需在多方案间取舍时，**调用 ask_question** 结构化提问（能给 options 就给，减少用户打字），不要用纯文本提问。
-2. 需要外部知识（最新 API、库用法、第三方服务、训练数据外的事实）时，**调用 web_search**，基于结果归纳后再动手。
-3. 首次生成插件：**调用 stage_plugin** 暂存完整插件包为草稿（不要把代码作为普通文本输出）。
-4. 后续修改：**优先用 patch_draft_file 增量改单个文件**，而不是 stage_plugin 整包重发——这样省 token、更精准，且保留用户已改的信息和未动的文件。
-   - 改之前不确定结构/内容时，先 list_draft_files 看文件树，再 read_draft_file 读要改的文件。
-   - 只有当插件要整体重构、或换成完全不同的插件时，才重新 stage_plugin。
-5. 想避免重复造轮子或参考团队命名风格时，可调用 list_team_plugins。
+1. 理解需求。信息不足、有歧义、或需在多方案间取舍时，**调用 AskQuestion** 结构化提问（能给 options 就给，减少用户打字），不要用纯文本提问。
+2. 需要外部知识（最新 API、库用法、第三方服务、训练数据外的事实）时，**调用 WebSearch**，基于结果归纳后再动手。
+3. 首次生成插件：**调用 CreatePlugin** 暂存完整插件包为草稿（不要把代码作为普通文本输出）。
+4. 后续修改：**优先用 Glob/Read/Edit/Write 增量修改 plugins_root 中的文件**，而不是 CreatePlugin 整包重发——这样省 token、更精准，且保留用户已改的信息和未动的文件。
+   - 改之前不确定结构/内容时，先 Glob 看文件树，再 Read 读要改的文件。
+   - Edit 必须先 Read 过目标文件；只有当插件要整体重构、或换成完全不同的插件时，才重新 CreatePlugin。
+5. 想避免重复造轮子或参考团队命名风格时，可调用 ListTeamPlugins。
 
 # 工具一览
-- ask_question(question, options?, allowFreeText?, multiSelect?) → { answer }
-- web_search(query, limit?) → { ok, results:[{title,url,snippet,source}] }
-- stage_plugin(id, name, version, description, runtime_type, entry, capabilities?, files) → { ok, message }
-- check_plugin() → { ok, issues, message }
-- review_plugin() → { ok, findings, message }
-- list_draft_files() → { ok, files:[路径] }
-- read_draft_file(path) → { ok, content }
-- patch_draft_file(path, content) → { ok }（覆盖式写整文件，非 diff；自动刷新预览）
-- list_team_plugins() → { ok, plugins:[{id,name,description,version,runtime_type}] }
+- AskQuestion(question, options?, allowFreeText?, multiSelect?) → 用户回答文本
+- WebSearch(query, limit?) → 搜索结果摘要
+- CreatePlugin(id, name, version, description, runtime_type, entry, capabilities?, files) → 创建 plugins_root/{id}/ 草稿
+- Check() → 完整性检查结果
+- Glob() → 当前插件文件路径列表
+- Read(path) → 文件内容（Edit 前必须先 Read）
+- Write(path, content) → 覆盖写完整文件
+- Edit(path, old_string, new_string, replace_all?) → 基于已 Read 内容替换文本
+- ListTeamPlugins() → 团队插件摘要
 
-# 插件包规范（stage_plugin）
+# 插件包规范（CreatePlugin）
 - id：kebab-case，仅小写字母/数字/连字符。version 默认 0.1.0。
 - runtime_type 与入口：
   - client → entry=ui/index.html（HTML 内联 CSS/JS）；
@@ -170,15 +229,34 @@ const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用
   - nodejs：优先使用 @lingfang/plugin-sdk 的 sdk.llm.chat；若手写，POST process.env.LINGFANG_PLUGIN_BRIDGE_URL，header X-LingFang-Plugin-Token=process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN。
   - python：使用 urllib/request 或 requests 调用 os.environ['LINGFANG_PLUGIN_BRIDGE_URL']，header X-LingFang-Plugin-Token=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN']。
 
-# stage_plugin 调用前必做的自检（缺一不可）
+# 运行环境（重要：不要编造不存在的限制）
+- Python 插件作为**独立进程**运行，自带 venv，requirements.txt 中声明依赖后 \`pip install\` 自动安装。
+- **支持桌面 GUI**：Python GUI 默认优先 Qt6，首选 PySide6（LGPL、包名稳定），PyQt6 可作为备选；按需把 PySide6/PyQt6 写入 requirements.txt 后会自动 pip install。tkinter 仅作为极简/无依赖兜底。
+- Node.js 插件同样独立进程运行，package.json 中 dependencies 自动 pnpm install。
+- **任何可通过 pip/npm 安装的库都能用**，不要假设功能不可用——除非你确认该库不存在。
+- 不要建议"改用 HTML/JS 前端替代"或"把 GUI 删掉"——如果用户要 GUI 插件，直接给对应 runtime_type 的完整实现。
+
+# 界面（runtime_type 与界面的对应关系，别纠结）
+- **"带界面的 Python 插件" = python runtime + Qt6 GUI 弹出独立桌面窗口**。默认用 PySide6（\`from PySide6.QtWidgets import QApplication, QWidget/QMainWindow, ...\`），entry=main.py 里直接写 GUI 代码，requirements.txt 写入 \`PySide6\`。运行时 Python 进程自己弹窗口。**不需要 ui.view 能力，也不是 HTML 面板。**
+- **"带界面的 Node.js 插件"** 同理：可用 Node GUI 库，或简单场景直接控制台交互。
+- **client 插件** 才是 HTML 界面：entry=ui/index.html，在软件内 iframe 渲染，需要 ui.view 能力。
+- 默认界面选择：Python GUI 优先用 Qt6/PySide6；只有用户明确要求“无额外依赖/极简内置库”时才退回 tkinter；不要再默认生成 tkinter。
+- 不要追问"界面显示在哪里/侧边栏还是弹窗"——Python GUI 就是独立桌面窗口，直接做。
+
+# 提问克制（避免连环追问惹烦用户）
+- 信息足够就**直接用合理默认值生成**，不要一次抛三四个问题。
+- 默认值示例：天气类插件用免费无需密钥的公开 API（如 wttr.in / open-meteo）；界面用 Qt6/PySide6；温度单位用摄氏度。
+- 只有当需求真有歧义、且默认值可能完全跑偏时，才用 AskQuestion 问**一个**最关键的问题。
+
+# CreatePlugin 调用前必做的自检（缺一不可）
 1. entry 真实存在于 files（路径完全一致），不是只写在字段里。
 2. 按 runtime_type 补齐必需文件：client→ui/index.html；nodejs→index.js + package.json；python→main.py + requirements.txt。
+   - Python GUI 插件若使用 Qt6，requirements.txt 必须包含 PySide6（或用户明确要求时用 PyQt6）。
 3. 路径都是合法相对路径。
-若 stage_plugin 返回 ok=false：按 message 补齐缺漏后**重新调用 stage_plugin 直到 ok=true**，不要在失败时就告诉用户「已生成」。
+若 CreatePlugin 返回错误：按错误信息补齐缺漏后**重新调用 CreatePlugin 直到成功**，不要在失败时就告诉用户「已生成」。
 
-# 检查与 review
-- 首次生成或完成一轮修改后，先调用 check_plugin；若 ok=false，按 issues 修复后再次检查。
-- 提交前调用 review_plugin；blocker 必须修复，warning 需要向用户说明取舍。
+# 检查
+- 首次生成或完成一轮修改后，先调用 Check；若发现问题，按返回内容修复后再次检查。
 - 发现任何 sk- 密钥、第三方模型 endpoint、让用户输入上游 API Key 的 UI，都必须改为灵坊平台 LLM 能力。
 
 # 回复风格
@@ -206,12 +284,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
   const [compressing, setCompressing] = useState(false); // 压缩中指示
   const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具暂存草稿中指示
-  const [searchingQuery, setSearchingQuery] = useState<string | null>(null); // agent web_search 联网搜索中指示（展示关键词）
+  const [searchingQuery, setSearchingQuery] = useState<string | null>(null); // agent WebSearch 联网搜索中指示（展示关键词）
   const [compressedHint, setCompressedHint] = useState(0); // 上次压缩的轮数（UI 指示）
   const [publishedName, setPublishedName] = useState<string | null>(null); // 已发布插件名（用户提交成功后显示成功卡片）
-  // 草稿态：AI stage_plugin 暂存的插件 + 用户的手动编辑（覆盖 AI 字段，跨重新生成保留）。
+  // 草稿态：AI CreatePlugin 暂存的插件 + 用户的手动编辑（覆盖 AI 字段，跨重新生成保留）。
   // stagedDraft 是 AI 最新生成的原始草稿；userEdits 是用户在右侧面板改过的字段。
-  // 二者合并成展示用 draft；AI 重新 stage 同一 id 时 userEdits 保留，换 id 则清空。
+  // 二者合并成展示用 draft；AI 重新 CreatePlugin 同一 id 时 userEdits 保留，换 id 则清空。
   const [stagedDraft, setStagedDraft] = useState<StagedPlugin | null>(null);
   const [userEdits, setUserEdits] = useState<Partial<StagedPlugin>>({});
   const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
@@ -223,7 +301,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null); // 文件/文件夹选择（支持多次累积）
   const [selectedFiles, setSelectedFiles] = useState<Array<{ id: string; name: string; file: File }>>([]); // 已选文件列表
-  // R2：悬挂的 ask_question deferred —— 用户作答后 resolve（人在环）。
+  // R2：悬挂的 AskQuestion deferred —— 用户作答后 resolve（人在环）。
   // key=toolCallId，存 resolve/reject；切对话/取消/关窗时必须清掉防卡死。
   const pendingAnswersRef = useRef<Map<string, { resolve: (r: AskQuestionResult) => void; reject: (e: unknown) => void }>>(new Map());
   // 提问卡片的自由文本输入暂存（key=toolCallId）。
@@ -231,7 +309,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   // 多选暂存（key=toolCallId → 已选 value 集合）。
   const [multiSelectDrafts, setMultiSelectDrafts] = useState<Record<string, string[]>>({});
 
-  // R2：清理所有悬挂的提问 deferred（取消/切对话/关窗时调用），避免 streamText 卡死。
+  // R2：清理所有悬挂的提问 deferred（取消/切对话/关窗时调用），避免 agent run 卡死。
   function clearPendingAnswers() {
     for (const [, d] of pendingAnswersRef.current) {
       try { d.reject(new DOMException('cancelled', 'AbortError')); } catch { /* ignore */ }
@@ -242,41 +320,15 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先），并始终同步 manifest.json。
   const draft: StagedPlugin | null = stagedDraft ? withSyncedStagedManifest({ ...stagedDraft, ...userEdits }) : null;
 
-  const workflowStatuses = useMemo(() => {
-    const statuses: Record<WorkflowStepId, WorkflowStepStatus> = {
-      ask: 'pending',
-      search: 'pending',
-      check: 'pending',
-      write: draft ? 'done' : 'pending',
-      review: 'pending',
-      preview: draft ? 'active' : 'pending',
-    };
-    for (const turn of turns) {
-      for (const part of turn.parts ?? []) {
-        if (part.type === 'question') statuses.ask = part.answered ? 'done' : 'active';
-        if (part.type !== 'tool') continue;
-        const mapped: Partial<Record<string, WorkflowStepId>> = {
-          web_search: 'search',
-          check_plugin: 'check',
-          review_plugin: 'review',
-          stage_plugin: 'write',
-          patch_draft_file: 'write',
-        };
-        const step = mapped[part.name];
-        if (!step) continue;
-        statuses[step] = part.status === 'running' ? 'active' : part.status === 'error' ? 'blocked' : 'done';
-      }
-    }
-    if (publishedName) statuses.preview = 'done';
-    return statuses;
-  }, [draft, publishedName, turns]);
-
-  // stage_plugin 工具回调：AI 暂存草稿到右侧面板。
-  // 同一插件 id 重新 stage（用户让 AI 改后再生成）保留用户已改的字段；换 id（新插件）则清空旧编辑。
-  function onStagePlugin(next: StagedPlugin) {
+  // CreatePlugin 工具回调：工具已写入 plugins_root/{id}/，这里同步右侧草稿预览状态。
+  // 同一插件 id 继续修改时保留用户已改字段；换 id（新插件）则清空旧编辑。
+  function onPluginCreated(pluginId: string, next: StagedPlugin) {
+    const synced = withSyncedStagedManifest(next);
+    draftRef.current = synced;
+    currentPluginIdRef.current = pluginId;
     setStagedDraft((prev) => {
       if (prev && prev.id !== next.id) setUserEdits({});
-      return next;
+      return synced;
     });
   }
 
@@ -285,20 +337,44 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setUserEdits((prev) => ({ ...prev, ...patch }));
   }
 
-  // 草稿 ref：供 agent 工具（read/list/patch_draft_file）读取最新草稿，避免 streamText 闭包读到旧值。
+  // 草稿 ref：供 Agent 工具回调读取最新插件 id，避免异步流闭包读到旧值。
   const draftRef = useRef<StagedPlugin | null>(draft);
-  useEffect(() => { draftRef.current = draft; }, [draft]);
+  const currentPluginIdRef = useRef<string | null>(draft?.id ?? null);
+  useEffect(() => {
+    draftRef.current = draft;
+    currentPluginIdRef.current = draft?.id ?? null;
+  }, [draft]);
 
-  // patch_draft_file 工具回调：新增/覆盖草稿单个文件，合并进 stagedDraft 并刷新预览（保留其余文件与用户编辑）。
-  function onPatchDraftFile(path: string, content: string) {
-    setStagedDraft((prev) => {
-      // 无 base 草稿不应发生（工具已校验），保险起见忽略。
-      if (!prev) return prev;
-      const files = prev.files.some((f) => f.path === path)
-        ? prev.files.map((f) => (f.path === path ? { ...f, content } : f))
-        : [...prev.files, { path, content }];
-      return { ...prev, files };
-    });
+  // Write/Edit 工具直接改 plugins_root，需要从真实目录重载文件刷新右侧预览。
+  async function refreshDraftFromRoot(pluginId = currentPluginIdRef.current) {
+    if (!pluginId) return;
+    try {
+      const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
+      const files = await Promise.all(
+        paths.map(async (path) => ({
+          path,
+          content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }),
+        })),
+      );
+      const manifestRaw = files.find((f) => f.path === 'manifest.json')?.content ?? '{}';
+      const manifest = JSON.parse(manifestRaw) as Partial<StagedPlugin> & { id?: string };
+      const next: StagedPlugin = withSyncedStagedManifest({
+        id: manifest.id || pluginId,
+        name: manifest.name || pluginId,
+        version: manifest.version || '0.1.0',
+        description: manifest.description || '',
+        runtime_type: manifest.runtime_type || 'client',
+        entry: manifest.entry || 'ui/index.html',
+        visibility: manifest.visibility || 'tenant',
+        capabilities: manifest.capabilities || [],
+        files,
+      });
+      draftRef.current = next;
+      currentPluginIdRef.current = next.id;
+      setStagedDraft(next);
+    } catch (e) {
+      console.error('刷新草稿失败:', e);
+    }
   }
 
   // 保存草稿成功：清草稿态，显示成功卡片。
@@ -501,7 +577,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   // 卸载（关窗：X/点遮罩/父组件卸载）时中止流式请求 + 清理悬挂提问 deferred。
-  // 必须 abort，否则关窗时若仍在 text-delta 流式中，底层 relay 请求会在后台续跑并继续按团队计费（费用泄漏）。
+  // 必须 abort，否则关窗时若 agent 仍在流式输出，底层 relay 请求会在后台续跑并继续按团队计费（费用泄漏）。
   useEffect(() => () => { abortRef.current?.abort(); clearPendingAnswers(); }, []);
 
   // 一键 AI 修复消费：插件启动/运行报错跳创建器时，pendingAutoFix 携带提示词 + 出错插件。
@@ -570,13 +646,13 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const refPrompt = referencedPlugin?.files?.length
         ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
         : '';
-      // 当前草稿注入：stage_plugin 的文件全文不在对话历史里（只在工具参数中），多轮修改时 AI 看不到上一版代码。
-      // 故把当前草稿（含用户在右侧改过的名字/信息）全文注入 systemPrompt，让 AI 基于它增量修改后再次 stage_plugin。
+      // 当前草稿注入：工具写入的文件全文不在对话历史里，多轮修改时 AI 看不到上一版代码。
+      // 故把当前草稿（含用户在右侧改过的名字/信息）全文注入 systemPrompt，让 AI 基于它增量修改。
       const draftPrompt = draft?.files?.length
         ? `\n\n# 当前草稿（用户正在预览，要在此基础上修改）\n` +
           `id：${draft.id}\n名字：${draft.name}\n版本：${draft.version}\n描述：${draft.description}\n` +
           `runtime_type：${draft.runtime_type}\nentry：${draft.entry}\n` +
-          `请基于以下文件按用户新需求做增量修改（保留未变部分），改完**再次调用 stage_plugin 更新草稿**。` +
+          `请基于以下文件按用户新需求做增量修改（保留未变部分），优先用 Read/Edit/Write 写回 plugins_root；整体重构时才再次调用 CreatePlugin。` +
           `若用户改了名字/描述等元信息（见上方），沿用这些值，不要擅自改回。\n\n当前文件：\n` +
           draft.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')
         : '';
@@ -596,8 +672,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       setCompressedHint(built.compressedCount);
       setContextBreakdown(built.breakdown); // 捕获上下文分解数据供查看面板使用
 
-      // R2：ask_question 人在环回调——写提问卡片到当前 assistant 气泡的 parts，
-      // 返回 deferred Promise；用户在卡片作答后 resolve，streamText 多步循环继续。
+      // R2：AskQuestion 人在环回调——写提问卡片到当前 assistant 气泡的 parts，
+      // 返回 deferred Promise；用户在卡片作答后 resolve，agent 多步循环继续。
       const onAskQuestion = (args: AskQuestionArgs, toolCallId: string): Promise<AskQuestionResult> => {
         setTurns((prev) => {
           const next = [...prev];
@@ -612,7 +688,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               multiSelect: args.multiSelect ?? false,
               answered: false,
             };
-            next[assistantIdx] = { ...cur, parts: [...(cur.parts ?? []), part] };
+            next[assistantIdx] = { ...cur, parts: [...cleanTurnParts(cur.parts), part] };
           }
           return next;
         });
@@ -621,84 +697,62 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         });
       };
 
-      // Vercel AI SDK：streamText 走 relay，工具调用让模型自己调 stage_plugin 暂存草稿 / ask_question 提问。
-      // 文本 delta 流式累积进 assistant 气泡；tool-call/result 用独立指示器或 parts 卡片。
-      const result = streamText({
-        model: relayProvider().chat(tier),
-        messages: built.messages,
-        tools: createCreatorTools({
-          onStagePlugin,
-          onAskQuestion,
-          getDraft: () => draftRef.current,
-          onPatchDraft: onPatchDraftFile,
-        }),
-        // 调大步数：留给「生成→提问→作答→继续生成→可能再问/再暂存→总结」的多步循环。
-        stopWhen: stepCountIs(8),
-        abortSignal: controller.signal,
-      });
-
       let stagedName = '';
       let stageErrMsg = '';
-      let sawToolCall = false; // R1：本轮是否有过工具调用（含 ask_question/stage）
+      let sawToolCall = false; // R1：本轮是否有过工具调用（含 AskQuestion/CreatePlugin）
       let reasoningText = ''; // 本轮思考累积（流末兜底判定用，避免读 reasoning state 的陈旧闭包）
       let streamError: string | null = null; // 捕获流中的错误消息（error 事件或 finish_reason='error'）
       setReasoning('');
-      for await (const part of result.fullStream) {
-        // Vercel AI SDK 的 error 类型事件：捕获上游或 SDK 本身的错误。
-        if (part.type === 'error') {
-          streamError = (part as { error?: unknown }).error instanceof Error
-            ? ((part as { error: Error }).error.message)
-            : String((part as { error?: unknown }).error || '流式调用出错');
-          break;
-        }
-        // finish 事件中也可能携带错误信息（某些上游在 finish 时才报错）。
-        if (part.type === 'finish') {
-          const finishPart = part as unknown as { error?: { message?: string } };
-          if (finishPart.error?.message) {
-            streamError = finishPart.error.message;
-            break;
-          }
-        }
-        if (part.type === 'reasoning-delta') {
-          // #3 思考流式输出：部分模型支持 reasoning（Claude/OpenAI o-series）。
-          // 按时序写入 parts（链式渲染），同时保留全局 reasoning 兜底文本供流末判定。
-          const delta = (part as { text?: string; delta?: string }).text ?? (part as { delta?: string }).delta ?? '';
-          reasoningText += delta;
-          appendReasoningDelta(assistantIdx, delta);
-        } else if (part.type === 'reasoning-end') {
-          // 思考段结束：标记当前 reasoning part done（停掉其 loading 指示）。
-          endReasoning(assistantIdx);
-        } else if (part.type === 'text-delta') {
-          // 文本增量按时序写入 parts（被工具/思考打断后会自动开新 text 段，形成链式交错）。
-          appendTextDelta(assistantIdx, part.text);
-        } else if (part.type === 'tool-call') {
-          sawToolCall = true;
-          // 记录工具调用卡片（ask_question 除外——它已由 onAskQuestion 写成提问卡片，避免重复）。
-          if (part.toolName !== 'ask_question') {
-            upsertToolPart(assistantIdx, { toolCallId: part.toolCallId, name: part.toolName, args: part.input, status: 'running' });
-          }
-          // 兼容旧的全局指示器（顶部状态条）。
-          if (part.toolName === 'stage_plugin') setUploadingViaTool(true);
-          else if (part.toolName === 'web_search') {
-            const q = (part.input as { query?: string } | undefined)?.query ?? '';
-            setSearchingQuery(q || '联网搜索中');
-          }
-        } else if (part.type === 'tool-result') {
-          const output = part.output as { ok?: boolean } | undefined;
-          if (part.toolName !== 'ask_question') {
-            upsertToolPart(assistantIdx, { toolCallId: part.toolCallId, name: part.toolName, result: part.output, status: output?.ok === false ? 'error' : 'ok' });
-          }
-          if (part.toolName === 'stage_plugin') {
-            setUploadingViaTool(false);
-            const r = part.output as { ok: boolean; message: string; name?: string } | undefined;
-            if (r?.ok && r.name) stagedName = r.name;
-            else if (r && !r.ok) stageErrMsg = r.message;
-          } else if (part.toolName === 'web_search') {
-            setSearchingQuery(null);
-          }
-          // ask_question 的 tool-result：作答已由提交回调标记 answered，无需额外处理。
-        }
-      }
+
+      // OpenAI Agents SDK：框架负责多步循环和工具调用；adapter 把事件写回现有 UI parts。
+      const agentResult = await runPluginCreatorAgent(
+        {
+          messages: built.messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+          tier,
+          extraInstructions: systemPrompt,
+          signal: controller.signal,
+          callbacks: {
+            appendTextDelta,
+            appendReasoningDelta: (turnIdx, delta) => {
+              reasoningText += delta;
+              appendReasoningDelta(turnIdx, delta);
+            },
+            endReasoning,
+            upsertToolPart: (turnIdx, patch) => {
+              sawToolCall = true;
+              upsertToolPart(turnIdx, patch);
+            },
+            getPluginId: () => currentPluginIdRef.current,
+            onPluginCreated: (pluginId, nextDraft) => {
+              stagedName = nextDraft.name;
+              setUploadingViaTool(false);
+              onPluginCreated(pluginId, nextDraft);
+            },
+            onFilesChanged: () => {
+              void refreshDraftFromRoot();
+            },
+            onAskQuestion,
+            onToolStart: (toolName, args) => {
+              sawToolCall = true;
+              if (toolName === 'CreatePlugin') setUploadingViaTool(true);
+              else if (toolName === 'WebSearch') {
+                const q = (args as { query?: string } | undefined)?.query ?? '';
+                setSearchingQuery(q || '联网搜索中');
+              }
+            },
+            onToolResult: (toolName, output) => {
+              if (toolName === 'CreatePlugin') {
+                setUploadingViaTool(false);
+                if (typeof output === 'string' && output.startsWith('错误')) stageErrMsg = output;
+              } else if (toolName === 'WebSearch') {
+                setSearchingQuery(null);
+              }
+            },
+          },
+        },
+        assistantIdx,
+      );
+      if (agentResult.error) streamError = agentResult.error;
       // 流结束：清除流式标记（保留已累积的 parts 时序内容）。
       // 多步 agent 的各步文本/思考/工具已按时序进 parts；末步总结也已 delta 进来。
       // R1 前端兜底：流正常结束但无任何可见内容时，避免裸露「无内容」——按情形给友好提示（写入新 text part）。
@@ -706,7 +760,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         const next = [...prev];
         const cur = next[assistantIdx];
         if (!cur || cur.role !== 'assistant') return next;
-        const parts = cur.parts ?? [];
+        const parts = cleanTurnParts(cur.parts);
         // 「有内容」判定：有文本/工具/提问 part，或文本 part 含非空文字。
         const hasText = parts.some((p) => p.type === 'text' && p.content.trim().length > 0);
         const hasToolOrQuestion = parts.some((p) => p.type === 'tool' || p.type === 'question');
@@ -792,14 +846,14 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   }
 
   // R2：用户在提问卡片作答 → 标记 parts 的该 question 为 answered + 写 answer，并 resolve 悬挂的 deferred，
-  // streamText 多步循环据此继续。turnIdx 用于定位气泡。
-  // 工具调用卡片：按 toolCallId 写入/更新 assistant 气泡的 parts（tool-call 建卡，tool-result 补结果+状态）。
+  // agent 多步循环据此继续。turnIdx 用于定位气泡。
+  // 工具调用卡片：按 toolCallId 写入/更新 assistant 气泡的 parts（调用建卡，结果补状态）。
   function upsertToolPart(turnIdx: number, patch: { toolCallId: string; name: string; args?: unknown; result?: unknown; status: 'running' | 'ok' | 'error' }) {
     setTurns((prev) => {
       const next = [...prev];
       const cur = next[turnIdx];
       if (!cur || cur.role !== 'assistant') return next;
-      const parts = [...(cur.parts ?? [])];
+      const parts = cleanTurnParts(cur.parts);
       const idx = parts.findIndex((p) => p.type === 'tool' && p.toolCallId === patch.toolCallId);
       if (idx >= 0) {
         const existing = parts[idx] as ToolPart;
@@ -824,7 +878,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const next = [...prev];
       const cur = next[turnIdx];
       if (!cur || cur.role !== 'assistant') return next;
-      const parts = [...(cur.parts ?? [])];
+      const parts = cleanTurnParts(cur.parts);
       const last = parts[parts.length - 1];
       if (last && last.type === 'text') {
         parts[parts.length - 1] = { ...last, content: last.content + delta };
@@ -842,7 +896,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const next = [...prev];
       const cur = next[turnIdx];
       if (!cur || cur.role !== 'assistant') return next;
-      const parts = [...(cur.parts ?? [])];
+      const parts = cleanTurnParts(cur.parts);
       const last = parts[parts.length - 1];
       if (last && last.type === 'reasoning' && !last.done) {
         parts[parts.length - 1] = { ...last, content: last.content + delta };
@@ -860,7 +914,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const next = [...prev];
       const cur = next[turnIdx];
       if (!cur || cur.role !== 'assistant') return next;
-      const parts = [...(cur.parts ?? [])];
+      const parts = cleanTurnParts(cur.parts);
       const last = parts[parts.length - 1];
       if (last && last.type === 'reasoning' && !last.done) {
         parts[parts.length - 1] = { ...last, done: true };
@@ -879,7 +933,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       if (cur && cur.role === 'assistant' && cur.parts) {
         next[turnIdx] = {
           ...cur,
-          parts: cur.parts.map((p) =>
+          parts: cleanTurnParts(cur.parts).map((p) =>
             p.type === 'question' && p.toolCallId === toolCallId ? { ...p, answer: trimmed, answered: true } : p,
           ),
         };
@@ -1064,21 +1118,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         {/* 主体：左对话列 + 右草稿面板（有草稿时分栏） */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-        <div className="shrink-0 border-b bg-muted/10 px-6 py-2.5">
-          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 text-xs">
-            {WORKFLOW_STEPS.map((step, index) => {
-              const status = workflowStatuses[step.id];
-              return (
-                <div key={step.id} className="flex items-center gap-2">
-                  {index > 0 && <div className="h-px w-4 bg-border" />}
-                  <span className={`rounded-full border px-2.5 py-1 font-medium ${workflowStatusClass(status)}`}>
-                    {step.label}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
         {/* 对话区 */}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
           {turns.length === 0 ? (
@@ -1092,7 +1131,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                 <p className="text-sm text-muted-foreground max-w-md">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
               </div>
               <div className="flex flex-wrap justify-center gap-2.5">
-                {['番茄钟插件', 'Markdown 速记', '配色生成器'].map((s) => (
+                {['做一个带界面的天气查询 Python 插件', '做一个带界面的待办事项 Node.js 插件', '做一个带界面的计算器插件'].map((s) => (
                   <button key={s} type="button" onClick={() => setInput(s)} className="group rounded-full border border-border/60 bg-background/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary hover:shadow-md">{s}</button>
                 ))}
               </div>
@@ -1107,18 +1146,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                     </div>
                   ) : (
                     // 链式渲染（OpenCodeUI 式）：每个 part 是独立卡片（思考一张、内容一张、工具一张…），纵向堆叠。
-                    (t.parts && t.parts.length > 0) ? (
+                    (cleanTurnParts(t.parts).length > 0) ? (
                       <div className="flex max-w-[85%] flex-col gap-2">
-                        {t.parts.map((p, pi) => {
+                        {cleanTurnParts(t.parts).map((p, pi) => {
                           if (p.type === 'reasoning') {
                             return (
-                              <details key={`r-${pi}`} className="overflow-hidden rounded-2xl border border-purple-200/50 bg-purple-50/40 px-4 py-2.5 shadow-sm backdrop-blur-sm dark:border-purple-800/30 dark:bg-purple-950/20" open={!p.done && t.streaming}>
-                                <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-purple-600 transition-colors hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
-                                  <span className="text-sm">💭</span>
-                                  <span>思考过程（{p.content.length} 字）</span>
-                                  {!p.done && t.streaming && <Loader2Icon className="size-3 animate-spin" />}
+                              <details key={`r-${pi}`} className="mt-1 overflow-hidden rounded-md border border-border/20 text-xs" open={!p.done && t.streaming}>
+                                <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+                                  {!p.done && t.streaming ? '✦ 思考中...' : '✦ 已思考'}
+                                  {!p.done && t.streaming && <Loader2Icon className="size-2.5 animate-spin" />}
                                 </summary>
-                                <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                                <div className="border-t border-border/10 bg-muted/10 px-2.5 py-1.5 max-h-36 overflow-y-auto whitespace-pre-wrap text-[10px] leading-relaxed text-muted-foreground/80">
                                   {p.content}
                                 </div>
                               </details>
@@ -1127,7 +1165,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           if (p.type === 'text') {
                             if (!p.content.trim()) return null;
                             return (
-                              <div key={`t-${pi}`} className="creator-assistant-bubble overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
+                              <div key={`t-${pi}`} className="overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm">
                                 <Markdown>{p.content}</Markdown>
                               </div>
                             );

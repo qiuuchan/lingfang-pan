@@ -3,7 +3,6 @@ import { toast } from 'sonner';
 import type { LoadedPlugin } from '@/lib/types';
 import { parseManifest } from '@/lib/plugin-draft';
 import { ensurePluginPackagePersisted } from '@/lib/plugin-installation';
-import { listDraftPlugins, deleteDraftPlugin, loadDraftPlugin } from '@/lib/draft-plugin';
 import {
   openPluginsRoot,
   readLocalPluginFile,
@@ -57,7 +56,7 @@ export function useLocalPluginList(runningPlugin: LoadedPlugin | null) {
   const reload = useCallback(() => {
     setLoading(true);
     void scanPluginStatus()
-      .then((nextItems) => setItems(nextItems))
+      .then((nextItems) => setItems(nextItems.filter((p) => !p.draft)))
       .catch((caught) => {
         setItems((prev) => prev ?? []);
         toast.error(`扫描本地插件失败：${errorMessage(caught)}`);
@@ -72,15 +71,35 @@ export function useLocalPluginList(runningPlugin: LoadedPlugin | null) {
   return { items, loading, reload };
 }
 
-// task 06-25：本地草稿插件列表（AI 创建器保存的草稿）。
+// task 06-26-agent-framework-rewrite：本地草稿插件列表
+// 数据源从 listDraftPlugins（废弃的 plugins-draft 双轨）改为 scanPluginStatus 过滤 draft:true
+// （统一 plugins_root 目录，manifest.draft===true 标记未发布草稿）。
 export function useDraftPluginList(runningPlugin: LoadedPlugin | null) {
   const [items, setItems] = useState<LoadedPlugin[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   const reload = useCallback(() => {
     setLoading(true);
-    void listDraftPlugins()
-      .then((drafts) => setItems(drafts))
+    void scanPluginStatus()
+      .then((all) => {
+        const drafts = all.filter((p) => p.draft);
+        // 把 LocalPluginStatus 映射为 LoadedPlugin 形态（草稿页兼容现有卡片接口）。
+        const mapped: LoadedPlugin[] = drafts.map((p) => ({
+          id: p.id,
+          name: p.name,
+          version: p.version,
+          description: p.description,
+          entry: p.entry,
+          builtin: false,
+          runtime_type: p.runtime,
+          status: p.status,
+          draft: true,
+          local: true,
+          versionCount: (p as any).versionCount ?? 0,
+          _meta: (p as any)._meta,
+        }));
+        setItems(mapped);
+      })
       .catch((caught) => {
         setItems((prev) => prev ?? []);
         toast.error(`加载草稿失败：${errorMessage(caught)}`);
@@ -136,15 +155,31 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
     }
   }, [setRunningPlugin]);
 
-  // task 06-25：打开草稿插件（运行）—— 从本地文件系统加载完整源文件后运行。
+  // task 06-26-agent-framework-rewrite：打开草稿插件 —— 统一走 openLocalPlugin 带运行时的启动路径。
+  // 草稿现在存在 plugins_root/{id}/（不是旧 plugins-draft 目录），manifest.draft===true 标记。
+  // 运行路径和正式本地插件完全一致：Python/Node 从真实目录启动（venv/node_modules 可用）。
   const openDraftPlugin = useCallback(async (draft: LoadedPlugin) => {
     try {
-      const fullDraft = await loadDraftPlugin(draft.id);
-      setRunningPlugin(fullDraft);
+      // 把草稿 LoadedPlugin 转为 LocalPluginStatus 后走 openLocalPlugin 同一条路径。
+      const status: LocalPluginStatus = {
+        id: draft.id,
+        name: draft.name,
+        status: (draft.status as LocalPluginStatus['status']) || 'ready',
+        runtime: (draft.runtime_type as LocalPluginStatus['runtime']) || 'client',
+        entry: draft.entry,
+        description: draft.description || '',
+        version: draft.version,
+        icon: undefined,
+        pid: null,
+        started_at: null,
+        detail: null,
+        draft: true,
+      };
+      openLocalPlugin(status);
     } catch (caught) {
       toast.error(`打开草稿插件失败：${errorMessage(caught)}`);
     }
-  }, [setRunningPlugin]);
+  }, [setRunningPlugin, openLocalPlugin]);
 
   const openLocalRoot = useCallback(() => {
     void openPluginsRoot().catch((caught) => toast.error(errorMessage(caught)));

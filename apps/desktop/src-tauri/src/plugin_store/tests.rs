@@ -400,6 +400,7 @@ fn plugin_meta_serializes_snake_case() {
         started_at: Some("123Z".into()),
         detail: None,
         icon: None,
+        draft: false,
     };
     let json = serde_json::to_string(&meta).unwrap();
     assert!(json.contains("\"started_at\""));
@@ -407,6 +408,8 @@ fn plugin_meta_serializes_snake_case() {
     assert!(json.contains("\"runtime\":\"python\""));
     // detail 为 None 时应跳过（skip_serializing_if）。
     assert!(!json.contains("\"detail\""));
+    // draft 始终序列化（非 Option），前端据此区分草稿/正式插件。
+    assert!(json.contains("\"draft\":false"));
 }
 
 #[test]

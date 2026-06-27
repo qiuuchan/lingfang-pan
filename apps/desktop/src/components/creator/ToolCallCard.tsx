@@ -1,11 +1,15 @@
-// ToolCallCard —— Claude Code 式工具调用卡片：图标 + 工具名 + 一行摘要 + 状态，可展开看参数/结果。
+// ToolCallCard —— Claude Code 风格精简工具调用卡片。
 //
-// 渲染在 assistant 气泡内（stage_plugin/web_search/read_draft_file/patch_draft_file/list_* 等），
-// ask_question 不走这里（它有独立的提问卡片）。
+// 克制的一行设计：小图标 + 工具名 + 灰色摘要 + 状态点，无渐变/blur/大阴影。
+// 可展开看参数/结果，展开内容同样精简（去阴影/去 blur/小字号）。
+// AskQuestion 不走这里（它有独立的提问卡片）。
+//
+// task 06-26-agent-framework-rewrite：更新 TOOL_META 为 Claude Code 命名 + 新工具，
+// 精简样式（rounded-md、size-4 行内图标、去渐变/blur/大阴影）。
 import { useState } from 'react';
 import {
   ChevronRightIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon,
-  PackageIcon, GlobeIcon, FileTextIcon, FilePenIcon, FolderTreeIcon, BoxesIcon, WrenchIcon, ShieldCheckIcon, ClipboardCheckIcon,
+  FileTextIcon, FilePenIcon, FolderTreeIcon, GlobeIcon, PackagePlusIcon, AlertCircleIcon, BoxesIcon, WrenchIcon, MessageCircleQuestionIcon,
 } from 'lucide-react';
 
 export interface ToolCardData {
@@ -16,16 +20,25 @@ export interface ToolCardData {
   status: 'running' | 'ok' | 'error';
 }
 
-// 工具名 → 图标 + 中文标签。
-const TOOL_META: Record<string, { icon: typeof PackageIcon; label: string }> = {
-  stage_plugin: { icon: PackageIcon, label: '生成插件草稿' },
-  web_search: { icon: GlobeIcon, label: '联网搜索' },
-  read_draft_file: { icon: FileTextIcon, label: '读取草稿文件' },
-  patch_draft_file: { icon: FilePenIcon, label: '修改草稿文件' },
-  list_draft_files: { icon: FolderTreeIcon, label: '查看文件树' },
-  check_plugin: { icon: ClipboardCheckIcon, label: '检查插件' },
-  review_plugin: { icon: ShieldCheckIcon, label: 'Review 插件' },
-  list_team_plugins: { icon: BoxesIcon, label: '查询团队插件' },
+// 工具名 → 图标 + 中文标签（Claude Code 风格命名）。
+const TOOL_META: Record<string, { icon: typeof FileTextIcon; label: string }> = {
+  Read: { icon: FileTextIcon, label: 'Read' },
+  Write: { icon: FilePenIcon, label: 'Write' },
+  Edit: { icon: FilePenIcon, label: 'Edit' },
+  Glob: { icon: FolderTreeIcon, label: 'Glob' },
+  CreatePlugin: { icon: PackagePlusIcon, label: 'CreatePlugin' },
+  Check: { icon: AlertCircleIcon, label: 'Check' },
+  WebSearch: { icon: GlobeIcon, label: 'WebSearch' },
+  AskQuestion: { icon: MessageCircleQuestionIcon, label: 'Ask' },
+  ListTeamPlugins: { icon: BoxesIcon, label: 'ListTeamPlugins' },
+  // 旧会话兼容：历史记录里可能仍有迁移前工具名。
+  stage_plugin: { icon: PackagePlusIcon, label: 'stage_plugin' },
+  web_search: { icon: GlobeIcon, label: 'web_search' },
+  read_draft_file: { icon: FileTextIcon, label: 'read_draft_file' },
+  patch_draft_file: { icon: FilePenIcon, label: 'patch_draft_file' },
+  list_draft_files: { icon: FolderTreeIcon, label: 'list_draft_files' },
+  check_plugin: { icon: AlertCircleIcon, label: 'check_plugin' },
+  list_team_plugins: { icon: BoxesIcon, label: 'list_team_plugins' },
 };
 
 /** 单行摘要：从 args/result 提炼一句话（不展开时显示）。 */
@@ -33,21 +46,31 @@ function summarize(data: ToolCardData): string {
   const a = (data.args ?? {}) as Record<string, unknown>;
   const r = (data.result ?? {}) as Record<string, unknown>;
   switch (data.name) {
+    case 'WebSearch':
     case 'web_search':
-      return typeof a.query === 'string' ? `“${a.query}”` : '';
+      return typeof a.query === 'string' ? `"${a.query}"` : '';
+    case 'Read':
+    case 'Write':
+    case 'Edit':
     case 'read_draft_file':
     case 'patch_draft_file':
       return typeof a.path === 'string' ? a.path : '';
+    case 'CreatePlugin':
     case 'stage_plugin':
       return typeof a.name === 'string' ? a.name : (typeof a.id === 'string' ? a.id : '');
+    case 'Glob':
     case 'list_draft_files':
-      return Array.isArray(r.files) ? `${r.files.length} 个文件` : '';
-    case 'check_plugin':
-      return Array.isArray(r.issues) ? `${r.issues.length} 个问题` : '';
-    case 'review_plugin':
-      return Array.isArray(r.findings) ? `${r.findings.length} 条结果` : '';
+      return Array.isArray((data.result as any)?.files) ? `${(data.result as any).files.length} 个文件` : '';
+    case 'Check':
+    case 'check_plugin': {
+      const txt = typeof data.result === 'string' ? data.result : '';
+      if (txt.includes('通过')) return '通过';
+      if (txt.includes('错误')) return '有问题';
+      return Array.isArray((data.result as any)?.issues) ? `${(data.result as any).issues.length} 个问题` : '';
+    }
+    case 'ListTeamPlugins':
     case 'list_team_plugins':
-      return Array.isArray(r.plugins) ? `${r.plugins.length} 个插件` : '';
+      return Array.isArray((data.result as any)?.plugins) ? `${(data.result as any).plugins.length} 个插件` : '';
     default:
       return '';
   }
@@ -55,10 +78,12 @@ function summarize(data: ToolCardData): string {
 
 function pretty(value: unknown): string {
   if (value == null) return '';
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    // 结果字符串过长时截断（卡片只为可见性，不是代码查看器）。
+    return value.length > 2000 ? `${value.slice(0, 2000)}...（已截断）` : value;
+  }
   try {
-    // stage_plugin 的 files 全文很长，截断展示（卡片只为可见性，不是代码查看器）。
-    return JSON.stringify(value, (_k, v) => (typeof v === 'string' && v.length > 2000 ? `${v.slice(0, 2000)}…（已截断）` : v), 2);
+    return JSON.stringify(value, (_k, v) => (typeof v === 'string' && v.length > 2000 ? `${v.slice(0, 2000)}...（已截断）` : v), 2);
   } catch {
     return String(value);
   }
@@ -71,52 +96,42 @@ export function ToolCallCard({ data }: { data: ToolCardData }) {
   const summary = summarize(data);
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-background to-muted/20 text-sm shadow-sm backdrop-blur-sm">
+    <div className="mt-2 overflow-hidden rounded-md border border-border/30 text-sm">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-all hover:bg-muted/40"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/30"
       >
-        <ChevronRightIcon className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
-        <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-          data.status === 'running' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
-          data.status === 'error' ? 'bg-destructive/10 text-destructive' :
-          'bg-green-600/10 text-green-600'
-        }`}>
-          <Icon className="size-4" />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="font-medium">{meta.label}</span>
-          {summary && <span className="truncate text-xs text-muted-foreground">{summary}</span>}
-        </div>
+        <ChevronRightIcon className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`} />
+        <Icon className={`size-3.5 shrink-0 ${
+          data.status === 'running' ? 'text-blue-500' :
+          data.status === 'error' ? 'text-destructive' :
+          'text-muted-foreground'
+        }`} />
+        <span className="font-medium text-xs">{meta.label}</span>
+        {summary && <span className="truncate text-xs text-muted-foreground/70">{summary}</span>}
         <span className="ml-auto shrink-0">
           {data.status === 'running' ? (
-            <Loader2Icon className="size-4 animate-spin text-blue-600 dark:text-blue-400" />
+            <Loader2Icon className="size-3 animate-spin text-blue-500" />
           ) : data.status === 'error' ? (
-            <XCircleIcon className="size-4 text-destructive" />
+            <XCircleIcon className="size-3 text-destructive" />
           ) : (
-            <CheckCircle2Icon className="size-4 text-green-600" />
+            <CheckCircle2Icon className="size-3 text-muted-foreground/50" />
           )}
         </span>
       </button>
       {open && (
-        <div className="space-y-2.5 border-t border-border/30 bg-muted/30 px-4 py-3">
+        <div className="space-y-2 border-t border-border/20 bg-muted/20 px-3 py-2">
           {data.args !== undefined && (
             <div>
-              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                <div className="size-1 rounded-full bg-primary" />
-                <span>参数</span>
-              </div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/40 bg-background/80 p-2.5 text-[11px] leading-relaxed shadow-sm backdrop-blur-sm">{pretty(data.args)}</pre>
+              <div className="mb-1 text-[10px] font-semibold text-muted-foreground">参数</div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/20 bg-background/60 p-2 text-[10px] leading-relaxed">{pretty(data.args)}</pre>
             </div>
           )}
           {data.result !== undefined && (
             <div>
-              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                <div className="size-1 rounded-full bg-green-600" />
-                <span>结果</span>
-              </div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/40 bg-background/80 p-2.5 text-[11px] leading-relaxed shadow-sm backdrop-blur-sm">{pretty(data.result)}</pre>
+              <div className="mb-1 text-[10px] font-semibold text-muted-foreground">结果</div>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/20 bg-background/60 p-2 text-[10px] leading-relaxed">{pretty(data.result)}</pre>
             </div>
           )}
         </div>

@@ -245,6 +245,16 @@ fn main() {
             // task 06-26：Node/Python 插件通过 localhost 一次性 token 调平台 LLM；
             // 桥持有后端地址与登录态，插件进程不直接接触 JWT/API Key。
             app.manage(plugin_llm_bridge::PluginLlmBridge::new());
+            // task 06-26-agent-framework-rewrite：一次性迁移——把旧 plugins-draft 草稿搬到
+            // 统一插件目录 plugins_root（manifest 加 draft:true），废弃双轨目录。
+            // 幂等：第二次启动目录已空则跳过。日志仅打 eprintln，迁移失败不阻断启动。
+            {
+                let store = app.state::<plugin_store::PluginStore>().inner().clone();
+                match draft_plugin::migrate_drafts_impl(app.handle(), &store) {
+                    Ok(msg) => eprintln!("[draft-migration] {msg}"),
+                    Err(e) => eprintln!("[draft-migration] 迁移失败（不阻断启动）: {e}"),
+                }
+            }
             // 项 11：系统托盘（显示窗口 / 退出菜单 + 左键单击恢复）。
             setup_tray(app)?;
             Ok(())
@@ -275,14 +285,12 @@ fn main() {
             plugin_store::scan_plugin_status,
             plugin_store::read_local_plugin_file,
             plugin_store::write_plugin_files,
+            plugin_store::list_plugin_files,
+            plugin_store::write_plugin_file,
+            plugin_store::set_plugin_draft_flag,
             plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,
-            draft_plugin::save_draft_plugin,
-            draft_plugin::list_draft_plugins,
-            draft_plugin::load_draft_plugin,
-            draft_plugin::delete_draft_plugin,
-            draft_plugin::list_draft_versions,
-            draft_plugin::restore_draft_version,
+            draft_plugin::migrate_drafts_to_root,
             update::check_update,
             update::download_update,
             plugin_security::verify_plugin_signature_command,

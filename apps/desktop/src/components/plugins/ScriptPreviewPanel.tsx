@@ -355,7 +355,7 @@ export function ScriptPreviewPanel({
               )}
               <p className="text-xs text-muted-foreground">
                 {runtime === 'python'
-                  ? '若插件是 GUI 应用（PyQt5/Tkinter 等），它会弹出独立窗口。'
+                  ? '若插件是 GUI 应用（Qt6/PySide6、PyQt6 或 tkinter 等），它会弹出独立窗口。'
                   : 'Node 服务在独立进程运行，按 package.json scripts.start 启动。'}
               </p>
             </div>

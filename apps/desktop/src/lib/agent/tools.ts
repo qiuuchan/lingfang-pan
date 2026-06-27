@@ -1,0 +1,358 @@
+// tools.ts —— OpenAI Agents SDK 工具集（Claude Code 风格命名，全部指向 plugins_root/{id}/）。
+//
+// 设计要点（task 06-26-agent-framework-rewrite）：
+// - 单一真相源：工具直接读写应用插件目录 plugins_root/{id}/（Rust plugin_store 命令），
+//   不再有 plugins-draft 内存/双轨。manifest.draft===true 标记未发布草稿。
+// - Claude Code 命名：Read / Write / Edit / Glob 对齐 Claude Code 内置工具语义；
+//   CreatePlugin / Check / WebSearch / AskQuestion / ListTeamPlugins 是领域工具，沿用 PascalCase。
+// - read-before-edit 不变式：Edit 前必须先 Read 过该文件（per-run 的 readPaths 跟踪），否则报错，
+//   迫使模型先看真实内容再改，避免盲目替换。
+// - HITL：AskQuestion 通过 onAskQuestion 回调挂起（UI 收集答案），与 Agents SDK 的 run 循环协作。
+import { tool } from '@openai/agents';
+import { z } from 'zod';
+import { api, type ApiError, tauriInvoke } from '@/lib/api';
+import {
+  validateStagedCompleteness,
+  isSafePath,
+  buildStagedManifestContent,
+  type StagedPlugin,
+} from '@/lib/plugin-creator/creator-tools';
+
+/** AskQuestion 作答结果（回灌给模型）。 */
+export interface AskQuestionResult {
+  answer: string;
+}
+
+/** AskQuestion 入参（结构化提问，人在环）。 */
+export interface AskQuestionArgs {
+  question: string;
+  options?: { label: string; value: string }[];
+  allowFreeText: boolean;
+  multiSelect: boolean;
+}
+
+/** 工具工厂入参：当前插件 id + HITL/刷新回调。 */
+export interface AgentToolsOptions {
+  /** 当前正在开发的插件目录 id（plugins_root/{id}/）。CreatePlugin 后由调用方更新。 */
+  getPluginId: () => string | null;
+  /** CreatePlugin 初始化插件目录后回调（调用方记录 id、刷新预览）。 */
+  onPluginCreated: (pluginId: string, draft: StagedPlugin) => void;
+  /** 任意写操作（Write/Edit）后回调，调用方刷新右侧预览。 */
+  onFilesChanged: () => void;
+  /** AskQuestion 人在环：返回等待用户作答的 Promise。 */
+  onAskQuestion: (args: AskQuestionArgs, toolCallId: string) => Promise<AskQuestionResult>;
+}
+
+/** 团队插件精简条目（ListTeamPlugins 返回）。 */
+interface TeamPluginBrief {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  runtime_type: string;
+}
+
+/**
+ * 构造 Agents SDK 工具集。读写全部落到 plugins_root/{id}/（Rust 命令），唯一真相源。
+ * readPaths 跟踪本 run 内已 Read 的文件，强制 Edit 前先 Read（read-before-edit 不变式）。
+ */
+export function createAgentTools(opts: AgentToolsOptions) {
+  // read-before-edit 跟踪：本次 agent run 内已 Read 过的文件路径。Edit 前校验。
+  const readPaths = new Set<string>();
+
+  function requirePluginId(): string {
+    const id = opts.getPluginId();
+    if (!id) {
+      throw new Error('当前还没有插件。请先用 CreatePlugin 创建插件目录，再读写文件。');
+    }
+    return id;
+  }
+
+  const Read = tool({
+    name: 'Read',
+    description:
+      '读取当前插件目录下某个文件的完整内容。修改文件前必须先 Read（read-before-edit）。' +
+      '返回文件文本内容；文件不存在时返回错误。',
+    parameters: z.object({
+      path: z.string().describe('相对插件目录的文件路径，如 ui/index.html / main.py'),
+    }),
+    async execute({ path }): Promise<string> {
+      const pluginId = requirePluginId();
+      if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
+      try {
+        const content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path });
+        readPaths.add(path);
+        return content;
+      } catch (e) {
+        return `读取失败：${e instanceof Error ? e.message : String(e)}。可先用 Glob 查看有哪些文件。`;
+      }
+    },
+  });
+
+  const Write = tool({
+    name: 'Write',
+    description:
+      '创建或覆盖当前插件目录下的单个文件（写入完整内容，不是 diff）。' +
+      '新建文件用 Write；修改已有文件优先用 Edit（更精准）。写入后预览自动刷新。',
+    parameters: z.object({
+      path: z.string().describe('相对插件目录的文件路径'),
+      content: z.string().describe('文件完整内容'),
+    }),
+    async execute({ path, content }): Promise<string> {
+      const pluginId = requirePluginId();
+      if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
+      try {
+        await tauriInvoke<void>('write_plugin_file', { pluginId, path, content });
+        readPaths.add(path); // 写过即视为已知内容，后续可直接 Edit
+        opts.onFilesChanged();
+        return `已写入 ${path}。`;
+      } catch (e) {
+        return `写入失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const Edit = tool({
+    name: 'Edit',
+    description:
+      '对当前插件目录下的已有文件做字符串替换。必须先 Read 过该文件才能 Edit（read-before-edit）。' +
+      'old_string 必须在文件中唯一匹配；replace_all=true 时替换全部匹配。',
+    parameters: z.object({
+      path: z.string().describe('相对插件目录的文件路径'),
+      old_string: z.string().describe('要替换的原文（需在文件中唯一，除非 replace_all）'),
+      new_string: z.string().describe('替换后的新文本'),
+      replace_all: z.boolean().default(false).describe('是否替换所有匹配'),
+    }),
+    async execute({ path, old_string, new_string, replace_all }): Promise<string> {
+      const pluginId = requirePluginId();
+      if (!isSafePath(path)) return `错误：非法文件路径 ${path}`;
+      if (!readPaths.has(path)) {
+        return `错误：必须先 Read(${path}) 再 Edit。请先读取文件看到真实内容。`;
+      }
+      let content: string;
+      try {
+        content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path });
+      } catch (e) {
+        return `读取失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      if (old_string === new_string) return '错误：old_string 与 new_string 相同，无需修改。';
+      const occurrences = content.split(old_string).length - 1;
+      if (occurrences === 0) return `错误：在 ${path} 中找不到 old_string，无法替换。请先 Read 确认原文。`;
+      if (occurrences > 1 && !replace_all) {
+        return `错误：old_string 在 ${path} 中出现 ${occurrences} 次（不唯一）。请提供更长的上下文，或设 replace_all=true。`;
+      }
+      const next = replace_all ? content.split(old_string).join(new_string) : content.replace(old_string, new_string);
+      try {
+        await tauriInvoke<void>('write_plugin_file', { pluginId, path, content: next });
+        opts.onFilesChanged();
+        return `已编辑 ${path}（替换 ${replace_all ? occurrences : 1} 处）。`;
+      } catch (e) {
+        return `写入失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const Glob = tool({
+    name: 'Glob',
+    description:
+      '列出当前插件目录下的全部源文件路径（文件树）。修改前先 Glob 了解结构，再 Read 具体文件。' +
+      '跳过 data/.venv/node_modules 等运行时目录。',
+    parameters: z.object({}),
+    async execute(): Promise<string> {
+      const pluginId = requirePluginId();
+      try {
+        const files = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
+        if (!files.length) return '插件目录为空。';
+        return files.join('\n');
+      } catch (e) {
+        return `列文件失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const CreatePlugin = tool({
+    name: 'CreatePlugin',
+    description:
+      '初始化一个新插件目录（写入 manifest.json，标记 draft:true）并落盘全部初始文件到应用插件目录。' +
+      '首次生成插件时调用；后续修改用 Read/Write/Edit。' +
+      '约束：entry 必须存在于 files；client→ui/index.html、nodejs→index.js(+package.json)、python→main.py(+requirements.txt)。',
+    parameters: z.object({
+      id: z.string().regex(/^[a-z0-9-]+$/, 'id 仅小写字母/数字/连字符'),
+      name: z.string(),
+      version: z.string().default('0.1.0'),
+      description: z.string().default(''),
+      runtime_type: z.enum(['client', 'nodejs', 'python']),
+      entry: z.string(),
+      capabilities: z
+        .array(
+          z.object({
+            kind: z.string(),
+            reason: z.string().default(''),
+            risk: z.enum(['none', 'low', 'medium', 'high']).default('low'),
+            requires_admin: z.boolean().default(false),
+          }),
+        )
+        .optional()
+        .describe('插件能力声明；调用平台 LLM 时必须含 llm.chat'),
+      files: z.array(z.object({ path: z.string(), content: z.string() })).min(1),
+    }),
+    async execute(args): Promise<string> {
+      const capabilities = (args.capabilities?.length
+        ? args.capabilities
+        : [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low' as const, requires_admin: false }]) as StagedPlugin['capabilities'];
+      const draft: StagedPlugin = {
+        id: args.id,
+        name: args.name,
+        version: args.version,
+        description: args.description,
+        runtime_type: args.runtime_type,
+        entry: args.entry,
+        visibility: 'tenant',
+        capabilities,
+        files: args.files,
+      };
+      const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
+      if (err) return `错误：${err}`;
+      // manifest.json（含 draft:true）+ 全部源文件落盘到 plugins_root/{id}/。
+      const manifestContent = buildStagedManifestContent(draft).replace(/\}\s*$/, ',\n  "draft": true\n}');
+      const files = [
+        { path: 'manifest.json', content: manifestContent },
+        ...draft.files.filter((f) => f.path !== 'manifest.json'),
+      ];
+      try {
+        await tauriInvoke<void>('write_plugin_files', { pluginId: args.id, files });
+        // 标记 draft（双保险：即使 manifest 文本拼接失败，也确保 draft 标记落地）。
+        await tauriInvoke<void>('set_plugin_draft_flag', { pluginId: args.id, draft: true });
+        draft.files.forEach((f) => readPaths.add(f.path));
+        readPaths.add('manifest.json');
+        opts.onPluginCreated(args.id, draft);
+        return `已创建插件「${args.name}」(${args.id})，落盘到本地插件目录，可在草稿页运行。`;
+      } catch (e) {
+        return `创建失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const Check = tool({
+    name: 'Check',
+    description:
+      '校验当前插件的完整性（入口/必需文件/路径合法/能力声明）。生成或修改后调用，按返回问题修复。',
+    parameters: z.object({}),
+    async execute(): Promise<string> {
+      const pluginId = requirePluginId();
+      let files: string[];
+      try {
+        files = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
+      } catch (e) {
+        return `读取插件失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      let manifestRaw = '';
+      try {
+        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'manifest.json' });
+      } catch {
+        return '错误：缺少 manifest.json。';
+      }
+      let manifest: { runtime_type?: string; entry?: string };
+      try {
+        manifest = JSON.parse(manifestRaw);
+      } catch {
+        return '错误：manifest.json 解析失败（JSON 非法）。';
+      }
+      const runtime = (manifest.runtime_type ?? 'client') as 'client' | 'nodejs' | 'python';
+      const entry = manifest.entry ?? '';
+      const draftFiles = files.map((p) => ({ path: p, content: '' }));
+      const err = validateStagedCompleteness(runtime, entry, draftFiles);
+      if (err) return `发现问题：${err}`;
+      return '校验通过：入口与必需文件齐备，路径合法。';
+    },
+  });
+
+  const WebSearch = tool({
+    name: 'WebSearch',
+    description:
+      '联网搜索：需要最新信息、查 API/库用法、了解第三方服务或核实事实时调用。无需配置。' +
+      '返回若干结果（标题/链接/摘要）。澄清需求请用 AskQuestion，不要用本工具替代。',
+    parameters: z.object({
+      query: z.string().min(1).describe('搜索关键词，尽量具体'),
+      limit: z.number().int().min(1).max(20).optional().describe('期望结果条数，默认 8'),
+    }),
+    async execute({ query, limit }): Promise<string> {
+      try {
+        const resp = await api<{ query: string; results: Array<{ title: string; url: string; snippet: string; source: string }> }>(
+          '/api/search',
+          { method: 'POST', body: { query, limit } },
+        );
+        const results = Array.isArray(resp.results) ? resp.results : [];
+        if (!results.length) return '未搜到结果，可换更具体的关键词重试。';
+        return results
+          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
+          .join('\n\n');
+      } catch (e) {
+        return `搜索失败：${(e as ApiError).message || String(e)}`;
+      }
+    },
+  });
+
+  const ListTeamPlugins = tool({
+    name: 'ListTeamPlugins',
+    description:
+      '列出当前团队已有插件（id/名字/描述/版本/运行类型）。用于避免重复造轮子、参考命名，或用户询问团队插件时。',
+    parameters: z.object({}),
+    async execute(): Promise<string> {
+      try {
+        const rows = await api<Array<{ id: string; name: string; description?: string; version?: string; runtime_type?: string }>>(
+          '/api/plugins/available',
+        );
+        const plugins: TeamPluginBrief[] = (Array.isArray(rows) ? rows : []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description ?? '',
+          version: p.version ?? '',
+          runtime_type: p.runtime_type ?? '',
+        }));
+        if (!plugins.length) return '团队暂无已有插件。';
+        return plugins.map((p) => `- ${p.name} (${p.id}) v${p.version} [${p.runtime_type}] ${p.description}`).join('\n');
+      } catch (e) {
+        return `查询失败：${(e as ApiError).message || String(e)}`;
+      }
+    },
+  });
+
+  const AskQuestion = tool({
+    name: 'AskQuestion',
+    description:
+      '信息不足、需求有歧义、或需用户在多方案间选择时，发起结构化提问（不要用纯文本提问）。' +
+      '能给 options 就给，减少用户打字。返回用户的回答。',
+    parameters: z.object({
+      question: z.string().describe('要澄清的问题，一句话'),
+      options: z
+        .array(z.object({ label: z.string(), value: z.string() }))
+        .optional()
+        .describe('可选预设选项；省略则只让用户自由输入'),
+      allowFreeText: z.boolean().default(true),
+      multiSelect: z.boolean().default(false),
+    }),
+    async execute(args, runContext): Promise<string> {
+      // toolCallId 用于 UI 关联提问卡片与挂起的 deferred。Agents SDK 在 runContext 暴露调用上下文。
+      const toolCallId = (runContext as { toolCall?: { id?: string } })?.toolCall?.id ?? `ask-${Date.now()}`;
+      const res = await opts.onAskQuestion(
+        {
+          question: args.question,
+          options: args.options,
+          allowFreeText: args.allowFreeText,
+          multiSelect: args.multiSelect,
+        },
+        toolCallId,
+      );
+      return res.answer;
+    },
+  });
+
+  return {
+    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion],
+    /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
+    resetReadTracking() {
+      readPaths.clear();
+    },
+  };
+}
