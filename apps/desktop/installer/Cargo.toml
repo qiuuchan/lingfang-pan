@@ -3,7 +3,7 @@
 # 自解压：app 文件追加到本 exe 尾部，运行期读取解压（design §2）。
 [package]
 name = "lingfang-installer"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 
 [[bin]]
@@ -43,4 +43,3 @@ windows-sys = { version = "0.59", features = [
   "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
 ] }
-

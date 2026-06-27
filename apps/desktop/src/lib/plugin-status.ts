@@ -56,6 +56,9 @@ export interface LocalPluginStatus {
   started_at: string | null;
   // 状态诊断说明（缺文件/解析失败的具体原因，便于 UI 展示 incomplete/error 的修复引导）。
   detail: string | null;
+  // 是否为未发布草稿（manifest.draft===true）。AI 创建器统一写入 plugins_root，
+  // 用 draft 区分未发布草稿与已安装的团队/市场插件，替代旧的 plugins-draft 双轨目录。
+  draft: boolean;
 }
 
 // === 状态展示文案（PRD AC2：状态 Badge 中文展示） ===

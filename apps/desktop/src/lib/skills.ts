@@ -7,7 +7,7 @@
 // 设计：
 // - 每个 skill 自带 id / 名称 / 描述 / prompt 片段。描述供 UI 展示与选择（此处不耦合 UI）。
 // - assembleSystemPrompt(base, activeIds) 纯函数拼装，base 为既有完整提示词，skills 追加其上。
-// - DEFAULT_ACTIVE_SKILLS：创建插件任务默认激活的 skill 集合（精简输出 + 增量重构）。
+// - DEFAULT_ACTIVE_SKILLS：创建插件任务默认激活的 skill 集合（精简输出 + Qt6 GUI + 增量重构）。
 //   对应 Task 12「针对创建插件任务，精简和优化大模型的输出格式和内容」。
 
 export interface Skill {
@@ -35,7 +35,7 @@ const OUTPUT_MINIMIZE: Skill = {
 - 一个文件能解决就不拆成多个；一段话能说清就不写一段。
 - 回复正文 ≤ 3 句：生成了什么类型、入口是什么、怎么用。不复述文件内容、不解释代码细节。
 
-# stage_plugin 前自检清单（务必逐项核对，缺一不可）
+# CreatePlugin 前自检清单（务必逐项核对，缺一不可）
 1. entry 必须真实存在于 files 数组中（路径完全一致），不是只写在 manifest 字段里。
 2. 按 runtime_type 补齐必需文件：
    - client → entry=ui/index.html（HTML 内联 CSS/JS）。
@@ -44,8 +44,8 @@ const OUTPUT_MINIMIZE: Skill = {
 3. 所有文件路径为相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
 
 # 工具失败必须补齐重试
-- stage_plugin 返回 ok=false 时，**必须**先读懂 message 指出的缺漏，补齐对应文件或改正 entry/命名后**重新调用 stage_plugin**，直到 ok=true 才算完成。
-- 绝不在 stage_plugin 失败后就向用户报「已生成」——那是未完成状态，用户会拿到跑不起来的破损插件。`,
+- CreatePlugin 或 Check 返回错误时，**必须**先读懂错误指出的缺漏，补齐对应文件或改正 entry/命名后重新调用工具，直到成功才算完成。
+- 绝不在 CreatePlugin 失败后就向用户报「已生成」——那是未完成状态，用户会拿到跑不起来的破损插件。`,
 };
 
 // 增量重构 skill：修改已有插件时按「读—改—最小 diff」操作，避免全量重写。
@@ -55,8 +55,8 @@ const PLUGIN_REFACTOR: Skill = {
   description: '修改已有插件时只动需要改的部分，不重写其余文件',
   defaultActive: true,
   prompt: `# 增量重构（修改已有插件）
-- 接到「改 / 调整 / 修」类指令时，第一步用 read_file 读取目标文件当前内容，再做最小改动写回。
-- 只 write_file 真正变化的文件；未变动的文件不重写、不复制。
+- 接到「改 / 调整 / 修」类指令时，第一步用 Read 读取目标文件当前内容，再做最小改动写回。
+- 只用 Edit/Write 写真正变化的文件；未变动的文件不重写、不复制。
 - 改动聚焦用户本次明确要求的一点；不顺手「优化」无关代码（避免引入回归）。
 - 改完用一句话说明「改了哪个文件的哪一点」，不复述全文。`,
 };
@@ -77,6 +77,21 @@ const RELAY_ACCESS: Skill = {
 - 生图：\`const { images } = await sdk.image.generate({ prompt: '...', model: 'premium' })\` 返回图片 url/base64 数组。
 - 这两个能力经平台中转计费（按团队灵石），插件无需也不可持有任何 API Key 或直连上游。
 插件 capabilities 需声明 { kind: 'llm.chat' } / { kind: 'image.generate' }。`,
+};
+
+// Python Qt6 GUI skill：把“带界面的 Python 插件”默认收敛到 PySide6 / Qt6，
+// 避免模型继续退回 tkinter 或误判成 client iframe。
+const PYTHON_QT6_GUI: Skill = {
+  id: 'python-qt6-gui',
+  name: 'Qt6 界面',
+  description: 'Python 带界面插件默认使用 PySide6 / Qt6 桌面窗口',
+  defaultActive: true,
+  prompt: `# Python Qt6 GUI 默认策略
+- 用户提到“带界面 / 窗口 / 桌面 GUI”的 Python 插件时，默认生成 runtime_type=python，entry=main.py，requirements.txt 必含 PySide6。
+- GUI 框架默认 PySide6 / Qt6：代码从 PySide6.QtWidgets 导入 QApplication、QWidget 或 QMainWindow，main.py 直接创建 QApplication 并 show 主窗口。
+- 用户明确要求 PyQt6 时才用 PyQt6；requirements.txt 对应写 PyQt6。
+- tkinter 只作为“无额外依赖 / 极简内置库”兜底，不能再作为默认 GUI 方案。
+- 不要把 Python GUI 需求改成 client/HTML，也不要追问窗口显示位置；Python GUI 就是独立桌面窗口。`,
 };
 
 // 界面美化 skill：让生成的插件 UI 更精致、与平台风格一致。默认不激活（按需开启）。
@@ -128,6 +143,7 @@ export const SKILLS: Skill[] = [
   OUTPUT_MINIMIZE,
   PLUGIN_REFACTOR,
   RELAY_ACCESS,
+  PYTHON_QT6_GUI,
   UI_POLISH,
   ROBUSTNESS,
   CHINESE_FIRST,

@@ -1,6 +1,6 @@
 // CreatorDraftPanel —— 创建器右侧分栏：草稿预览 + 信息编辑 + 保存本地。
 //
-// AI 通过 stage_plugin 暂存草稿后，这里实时预览效果并允许用户改信息（名字/描述、ID/版本、
+// AI 通过 CreatePlugin 写入 plugins_root 草稿后，这里实时预览效果并允许用户改信息（名字/描述、ID/版本、
 // 运行类型/入口、能力/可见性），用户也可继续对话让 AI 迭代。可直接提交到团队空间，
 // 也可在桌面环境点「保存草稿到本地」写入本地文件系统。
 import { useMemo, useState } from 'react';
@@ -118,7 +118,7 @@ export function CreatorDraftPanel({
     if (!validateDraftReady()) return;
     setSavingDraft(true);
     try {
-      await saveDraftPlugin({
+      const result = await saveDraftPlugin({
         id: preparedDraft.id,
         manifest: {
           ...buildStagedManifest(preparedDraft),
@@ -130,7 +130,7 @@ export function CreatorDraftPanel({
         conversationId: conversationId ?? undefined,
         turns: turns && turns.length > 0 ? JSON.stringify(turns) : undefined,
       });
-      toast.success(`草稿「${draft.name}」已保存到本地`);
+      toast.success(`草稿「${draft.name}」已保存到本地，实际写入 ${result.fileCount} 个文件`);
       onSubmitted(draft.name);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
