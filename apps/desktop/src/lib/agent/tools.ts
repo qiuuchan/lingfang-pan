@@ -296,7 +296,9 @@ export function createAgentTools(opts: AgentToolsOptions) {
       '返回若干结果（标题/链接/摘要）。澄清需求请用 AskQuestion，不要用本工具替代。',
     parameters: z.object({
       query: z.string().min(1).describe('搜索关键词，尽量具体'),
-      limit: z.number().int().min(1).max(20).optional().describe('期望结果条数，默认 8'),
+      // 容错：部分模型/中转会把数字序列化成字符串（如 "8"），
+      // 用 coerce 接受字符串并转成数字，避免 InvalidToolInputError（用户反馈的 WebSearch 失败根因）。
+      limit: z.coerce.number().int().min(1).max(20).optional().describe('期望结果条数，默认 8'),
     }),
     async execute({ query, limit }): Promise<string> {
       try {
