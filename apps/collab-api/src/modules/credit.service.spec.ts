@@ -27,6 +27,8 @@ function mockTx() {
 function mockPrisma(tx = mockTx()) {
   return {
     platformSetting: { findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({ value: where.key === 'creditSignupBonus' ? '1000' : where.key === 'creditReserveCapFast' ? '200' : '2000' })) },
+    creditLedger: { findMany: vi.fn(async () => []) },
+    llmCallLog: { findMany: vi.fn(async () => []) },
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
   } as unknown as PrismaService;
 }
@@ -91,6 +93,32 @@ describe('CreditService reserve/reconcile/refund', () => {
     expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { decrement: 200 } } }));
     const debitCreate = tx.creditLedger.create.mock.calls.find((c) => c[0].data.source === 'llm_consume');
     expect(debitCreate?.[0].data.amount).toBe(200);
+  });
+
+  it('reconcile: 四舍五入到两位小数，极小浮点噪声不扣款', async () => {
+    const charged = await svc.reconcile('t1', 0, -0.0005636999999999999, 'log1', 'u1');
+    expect(charged).toBe(0);
+    expect(tx.teamCredit.update).not.toHaveBeenCalled();
+    const consumeCreate = tx.creditLedger.create.mock.calls.find((c) => c[0].data.source === 'llm_consume');
+    expect(consumeCreate).toBeUndefined();
+
+    tx.teamCredit.findUnique.mockResolvedValueOnce({ balance: 500 });
+    const chargedRounded = await svc.reconcile('t1', 0, 1.235, 'log2', 'u1');
+    expect(chargedRounded).toBe(1.24);
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ data: { balance: { decrement: 1.24 } } }));
+  });
+
+  it('getLedger: 规整流水金额并附带调用日志 tier', async () => {
+    const now = new Date('2026-06-28T00:00:00.000Z');
+    vi.mocked(prisma.creditLedger.findMany).mockResolvedValueOnce([
+      { id: 'l1', teamId: 't1', amount: 1.235, direction: 'DEBIT', source: 'llm_consume', reason: 'AI 对话消费', actorUserId: 'u1', callLogId: 'log1', createdAt: now },
+      { id: 'l2', teamId: 't1', amount: -0.0005636999999999999, direction: 'DEBIT', source: 'llm_consume', reason: 'AI 对话消费', actorUserId: 'u1', callLogId: null, createdAt: now },
+    ] as never);
+    vi.mocked(prisma.llmCallLog.findMany).mockResolvedValueOnce([{ id: 'log1', tier: 'FAST' }] as never);
+
+    const rows = await svc.getLedger('t1');
+    expect(rows[0]).toMatchObject({ id: 'l1', amount: 1.24, tier: 'FAST' });
+    expect(rows[1]).toMatchObject({ id: 'l2', amount: 0, tier: null });
   });
 
   it('refund: 有 reserve 流水时全额退回', async () => {

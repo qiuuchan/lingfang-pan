@@ -37,7 +37,7 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <EyeIcon className="size-4" />
-            上下文查看
+            上下文窗口
           </DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-[calc(85vh-80px)]">

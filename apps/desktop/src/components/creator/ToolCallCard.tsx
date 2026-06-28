@@ -1,16 +1,13 @@
-// ToolCallCard —— Claude Code 风格精简工具调用卡片。
+// ToolCallCard —— agent 工具调用输出卡片。
 //
-// 克制的一行设计：小图标 + 工具名 + 灰色摘要 + 状态点，无渐变/blur/大阴影。
-// 可展开看参数/结果，展开内容同样精简（去阴影/去 blur/小字号）。
+// 参考 OpenCode 式输出：紧凑步骤行 + Input/Output 折叠面板，像 IDE 里的执行记录。
 // AskQuestion 不走这里（它有独立的提问卡片）。
-//
-// task 06-26-agent-framework-rewrite：更新 TOOL_META 为 Claude Code 命名 + 新工具，
-// 精简样式（rounded-md、size-4 行内图标、去渐变/blur/大阴影）。
 import { useState } from 'react';
 import {
   ChevronRightIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon,
   FileTextIcon, FilePenIcon, FolderTreeIcon, GlobeIcon, PackagePlusIcon, AlertCircleIcon, BoxesIcon, WrenchIcon, MessageCircleQuestionIcon,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface ToolCardData {
   toolCallId: string;
@@ -89,51 +86,83 @@ function pretty(value: unknown): string {
   }
 }
 
+function statusText(status: ToolCardData['status']): string {
+  if (status === 'running') return 'Running';
+  if (status === 'error') return 'Failed';
+  return 'Done';
+}
+
+function payloadMeta(value: unknown): string {
+  const text = pretty(value);
+  if (!text) return '';
+  const lines = text.split(/\r\n|\r|\n/).length;
+  return `${lines} ${lines === 1 ? 'line' : 'lines'} / ${text.length.toLocaleString()} chars`;
+}
+
+function PayloadBlock({ label, value }: { label: 'Input' | 'Output'; value: unknown }) {
+  const text = pretty(value);
+  if (!text) return null;
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border/30 bg-background/70">
+      <div className="flex h-8 items-center justify-between border-b border-border/20 bg-muted/20 px-3">
+        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+        <span className="text-[10px] tabular-nums text-muted-foreground/60">{payloadMeta(value)}</span>
+      </div>
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-5 text-foreground/85">{text}</pre>
+    </div>
+  );
+}
+
 export function ToolCallCard({ data }: { data: ToolCardData }) {
   const [open, setOpen] = useState(false);
   const meta = TOOL_META[data.name] ?? { icon: WrenchIcon, label: data.name };
   const Icon = meta.icon;
   const summary = summarize(data);
+  const status = statusText(data.status);
 
   return (
-    <div className="mt-2 overflow-hidden rounded-md border border-border/30 text-sm">
+    <div className="mt-2 overflow-hidden rounded-lg border border-border/40 bg-card/70 text-sm shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/30"
+        className="grid w-full grid-cols-[auto_auto_1fr_auto] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/25"
       >
-        <ChevronRightIcon className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`} />
-        <Icon className={`size-3.5 shrink-0 ${
-          data.status === 'running' ? 'text-blue-500' :
-          data.status === 'error' ? 'text-destructive' :
-          'text-muted-foreground'
-        }`} />
-        <span className="font-medium text-xs">{meta.label}</span>
-        {summary && <span className="truncate text-xs text-muted-foreground/70">{summary}</span>}
-        <span className="ml-auto shrink-0">
+        <ChevronRightIcon className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <span className="flex size-6 items-center justify-center rounded-md border border-border/40 bg-background/70">
+          <Icon className={cn(
+            'size-3.5 shrink-0',
+            data.status === 'running' && 'text-primary',
+            data.status === 'error' && 'text-destructive',
+            data.status === 'ok' && 'text-muted-foreground',
+          )} />
+        </span>
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="text-xs font-medium text-foreground">{meta.label}</span>
+            {summary ? <span className="truncate font-mono text-[11px] text-muted-foreground/70">{summary}</span> : null}
+          </span>
+        </span>
+        <span className={cn(
+          'flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium',
+          data.status === 'running' && 'border-primary/30 bg-primary/10 text-primary',
+          data.status === 'error' && 'border-destructive/30 bg-destructive/10 text-destructive',
+          data.status === 'ok' && 'border-border/40 bg-muted/20 text-muted-foreground',
+        )}>
           {data.status === 'running' ? (
-            <Loader2Icon className="size-3 animate-spin text-blue-500" />
+            <Loader2Icon className="size-3 animate-spin" />
           ) : data.status === 'error' ? (
-            <XCircleIcon className="size-3 text-destructive" />
+            <XCircleIcon className="size-3" />
           ) : (
-            <CheckCircle2Icon className="size-3 text-muted-foreground/50" />
+            <CheckCircle2Icon className="size-3" />
           )}
+          {status}
         </span>
       </button>
       {open && (
-        <div className="space-y-2 border-t border-border/20 bg-muted/20 px-3 py-2">
-          {data.args !== undefined && (
-            <div>
-              <div className="mb-1 text-[10px] font-semibold text-muted-foreground">参数</div>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/20 bg-background/60 p-2 text-[10px] leading-relaxed">{pretty(data.args)}</pre>
-            </div>
-          )}
-          {data.result !== undefined && (
-            <div>
-              <div className="mb-1 text-[10px] font-semibold text-muted-foreground">结果</div>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/20 bg-background/60 p-2 text-[10px] leading-relaxed">{pretty(data.result)}</pre>
-            </div>
-          )}
+        <div className="space-y-2 border-t border-border/25 bg-muted/10 px-3 py-3">
+          <PayloadBlock label="Input" value={data.args} />
+          <PayloadBlock label="Output" value={data.result} />
         </div>
       )}
     </div>

@@ -12,14 +12,16 @@ import type { BalanceLedger } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { centsToYuan } from '@/lib/money';
+import { Badge } from '@/components/ui/badge';
+import { centsToYuan, formatCreditAmount } from '@/lib/money';
+import { modelTierFromRecord, modelTierRequestLabel } from '@/lib/model-tier';
 import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
 
 interface CreditData { teamId: string; balance: number; }
 interface CreditLedgerRow { id: string; amount: number; direction: 'CREDIT' | 'DEBIT'; source: string; reason: string; createdAt: string; }
 
 // 流水统一行：悬浮窗内复用（余额/灵石两类各自格式化金额）。
-interface LedgerRow { id: string; label: string; createdAt: string; direction: 'CREDIT' | 'DEBIT'; amountText: string; }
+interface LedgerRow { id: string; label: string; createdAt: string; direction: 'CREDIT' | 'DEBIT'; amountText: string; tierText?: string; }
 
 // 灵石流水来源 → 中文。
 const CREDIT_SOURCE_LABEL: Record<string, string> = {
@@ -92,13 +94,17 @@ export function TeamWallet() {
     direction: t.direction,
     amountText: `${t.direction === 'CREDIT' ? '+' : '-'}${centsToYuan(t.amountCents)}`,
   }));
-  const creditRows: LedgerRow[] = creditLedger.map((t) => ({
-    id: t.id,
-    label: CREDIT_SOURCE_LABEL[t.source] ?? t.source,
-    createdAt: t.createdAt,
-    direction: t.direction,
-    amountText: `${t.direction === 'CREDIT' ? '+' : '-'}${t.amount}`,
-  }));
+  const creditRows: LedgerRow[] = creditLedger.map((t) => {
+    const tier = modelTierFromRecord(t);
+    return {
+      id: t.id,
+      label: CREDIT_SOURCE_LABEL[t.source] ?? t.source,
+      createdAt: t.createdAt,
+      direction: t.direction,
+      amountText: `${t.direction === 'CREDIT' ? '+' : '-'}${formatCreditAmount(t.amount)}`,
+      tierText: tier ? modelTierRequestLabel(tier) : undefined,
+    };
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -126,7 +132,7 @@ export function TeamWallet() {
         <CardContent>
           <div className="text-sm text-muted-foreground">团队共享灵石 · AI 对话计费</div>
           <div className="mt-1 text-4xl font-semibold tabular-nums">
-            {credit ? credit.balance.toLocaleString() : <Shimmer className="h-9 w-32" />}
+            {credit ? formatCreditAmount(credit.balance) : <Shimmer className="h-9 w-32" />}
             <span className="ml-1 text-base font-normal text-muted-foreground">灵石</span>
           </div>
           <div className="mt-3">
@@ -192,7 +198,10 @@ function LedgerDialog({
                   <StaggerItem key={t.id}>
                     <div className="flex items-center gap-3 py-2">
                       <div className="flex-1">
-                        <div className="text-sm font-medium">{t.label}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-medium">{t.label}</div>
+                          {t.tierText ? <Badge variant="outline" className="h-5 px-1.5 text-[11px]">{t.tierText}</Badge> : null}
+                        </div>
                         <div className="text-xs text-muted-foreground">{fmtTime(t.createdAt)}</div>
                       </div>
                       <span className={`text-sm font-semibold tabular-nums ${credit_ ? 'text-green-600' : 'text-red-600'}`}>

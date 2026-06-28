@@ -14,7 +14,7 @@ import { api, type ApiError, tauriInvoke } from '@/lib/api';
 import {
   validateStagedCompleteness,
   isSafePath,
-  buildStagedManifestContent,
+  buildStagedManifest,
   type StagedPlugin,
 } from '@/lib/plugin-creator/creator-tools';
 
@@ -50,6 +50,12 @@ interface TeamPluginBrief {
   description: string;
   version: string;
   runtime_type: string;
+}
+
+const fileContentSchema = z.union([z.string(), z.array(z.string())]).describe('文件完整内容；复杂多行源码可用字符串数组逐行传入。');
+
+function normalizeToolFileContent(content: string | string[]): string {
+  return Array.isArray(content) ? content.join('\n') : content;
 }
 
 /**
@@ -96,13 +102,13 @@ export function createAgentTools(opts: AgentToolsOptions) {
       '新建文件用 Write；修改已有文件优先用 Edit（更精准）。写入后预览自动刷新。',
     parameters: z.object({
       path: z.string().describe('相对插件目录的文件路径'),
-      content: z.string().describe('文件完整内容'),
+      content: fileContentSchema,
     }),
     async execute({ path, content }): Promise<string> {
       const pluginId = requirePluginId();
       if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
       try {
-        await tauriInvoke<void>('write_plugin_file', { pluginId, path, content });
+        await tauriInvoke<void>('write_plugin_file', { pluginId, path, content: normalizeToolFileContent(content) });
         readPaths.add(path); // 写过即视为已知内容，后续可直接 Edit
         opts.onFilesChanged();
         return `已写入 ${path}。`;
@@ -192,11 +198,16 @@ export function createAgentTools(opts: AgentToolsOptions) {
             requires_admin: z.boolean().default(false),
           }),
         )
+        .nullable()
         .optional()
         .describe('插件能力声明；调用平台 LLM 时必须含 llm.chat'),
-      files: z.array(z.object({ path: z.string(), content: z.string() })).min(1),
+      files: z.array(z.object({ path: z.string(), content: fileContentSchema })).min(1),
     }),
     async execute(args): Promise<string> {
+      const draftFiles = args.files.map((file) => ({
+        path: file.path,
+        content: normalizeToolFileContent(file.content),
+      }));
       const capabilities = (args.capabilities?.length
         ? args.capabilities
         : [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low' as const, requires_admin: false }]) as StagedPlugin['capabilities'];
@@ -209,12 +220,12 @@ export function createAgentTools(opts: AgentToolsOptions) {
         entry: args.entry,
         visibility: 'tenant',
         capabilities,
-        files: args.files,
+        files: draftFiles,
       };
       const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
       if (err) return `错误：${err}`;
       // manifest.json（含 draft:true）+ 全部源文件落盘到 plugins_root/{id}/。
-      const manifestContent = buildStagedManifestContent(draft).replace(/\}\s*$/, ',\n  "draft": true\n}');
+      const manifestContent = `${JSON.stringify({ ...buildStagedManifest(draft), draft: true }, null, 2)}\n`;
       const files = [
         { path: 'manifest.json', content: manifestContent },
         ...draft.files.filter((f) => f.path !== 'manifest.json'),
