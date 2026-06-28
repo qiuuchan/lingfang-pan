@@ -12,9 +12,16 @@
 //  - adjust：admin 加/扣款（写 admin_adjust 流水 + 审计）。
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { AppError, badRequest, insufficientBalance } from '../common';
+import { badRequest, insufficientBalance } from '../common';
 
 const DEFAULT_SIGNUP_BONUS = 1000;
+
+function roundCredits(value: number | null | undefined): number {
+  const n = value ?? 0;
+  if (!Number.isFinite(n)) return 0;
+  const rounded = Math.round(n * 100) / 100;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
 
 @Injectable()
 export class CreditService {
@@ -78,16 +85,29 @@ export class CreditService {
   /** 余额（含 ensureAccount）。 */
   async getBalance(teamId: string): Promise<number> {
     const account = await this.ensureAccount(teamId);
-    return account.balance;
+    return roundCredits(account.balance);
   }
 
   /** 流水（近 take 条，按时间倒序）。 */
   async getLedger(teamId: string, take = 100) {
-    return this.prisma.creditLedger.findMany({
+    const rows = await this.prisma.creditLedger.findMany({
       where: { teamId },
       orderBy: { createdAt: 'desc' },
       take,
     });
+    const callLogIds = Array.from(new Set(rows.map((row) => row.callLogId).filter((id): id is string => Boolean(id))));
+    if (!callLogIds.length) return rows.map((row) => ({ ...row, amount: roundCredits(row.amount) }));
+
+    const logs = await this.prisma.llmCallLog.findMany({
+      where: { teamId, id: { in: callLogIds } },
+      select: { id: true, tier: true },
+    });
+    const tierByLogId = new Map(logs.map((log) => [log.id, log.tier]));
+    return rows.map((row) => ({
+      ...row,
+      amount: roundCredits(row.amount),
+      tier: row.callLogId ? tierByLogId.get(row.callLogId) ?? null : null,
+    }));
   }
 
   /**
@@ -96,18 +116,19 @@ export class CreditService {
    * 写 reserve DEBIT 流水。返回预留额度（供 reconcile/refund 用）。
    */
   async reserve(teamId: string, cap: number, callLogId: string | null, actorUserId: string | null): Promise<number> {
-    if (cap <= 0) return 0;
+    const reserveCap = roundCredits(cap);
+    if (reserveCap <= 0) return 0;
     await this.ensureAccount(teamId);
     const result = await this.prisma.$transaction(async (tx) => {
       const debited = await tx.teamCredit.updateMany({
-        where: { teamId, balance: { gte: cap } },
-        data: { balance: { decrement: cap } },
+        where: { teamId, balance: { gte: reserveCap } },
+        data: { balance: { decrement: reserveCap } },
       });
       if (debited.count === 0) throw insufficientBalance();
       await tx.creditLedger.create({
-        data: { teamId, amount: cap, direction: 'DEBIT', source: 'reserve', reason: 'AI 调用预扣', actorUserId, callLogId },
+        data: { teamId, amount: reserveCap, direction: 'DEBIT', source: 'reserve', reason: 'AI 调用预扣', actorUserId, callLogId },
       });
-      return cap;
+      return reserveCap;
     });
     return result;
   }
@@ -131,14 +152,16 @@ export class CreditService {
   ): Promise<number> {
     // 确保团队灵石账户存在（cap<=0 事后计费路径下，reserve 不建账户，此处补建以扣除余额）。
     await this.ensureAccount(teamId);
-    if (cap <= 0) {
+    const reserveCap = roundCredits(cap);
+    const actualCredits = Math.max(0, roundCredits(realCredits));
+    if (reserveCap <= 0) {
       // 未预扣模式：事后直接扣实际额。条件扣款防透支（余额不足则扣到 0，差额不追）。
-      const actual = Math.max(0, realCredits);
+      const actual = actualCredits;
       if (actual === 0) return 0;
       return this.prisma.$transaction(async (tx) => {
         const account = await tx.teamCredit.findUnique({ where: { teamId } });
-        const balance = account?.balance ?? 0;
-        const charge = Math.min(actual, Math.max(0, balance));
+        const balance = roundCredits(account?.balance ?? 0);
+        const charge = roundCredits(Math.min(actual, Math.max(0, balance)));
         if (charge > 0) {
           await tx.teamCredit.update({ where: { teamId }, data: { balance: { decrement: charge } } });
           await tx.creditLedger.create({
@@ -148,12 +171,12 @@ export class CreditService {
         return charge;
       });
     }
-    const actualCharge = Math.min(realCredits, cap); // cap 内全额计费，超出不收费（用户保护）
+    const actualCharge = roundCredits(Math.min(actualCredits, reserveCap)); // cap 内全额计费，超出不收费（用户保护）
     await this.prisma.$transaction(async (tx) => {
       // 1) 退回全部预扣（与 reserve 的 DEBIT(cap) 对冲，balance 回到调用前）。
-      await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: cap } } });
+      await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: reserveCap } } });
       await tx.creditLedger.create({
-        data: { teamId, amount: cap, direction: 'CREDIT', source: 'refund', reason: '预扣退回', actorUserId, callLogId },
+        data: { teamId, amount: reserveCap, direction: 'CREDIT', source: 'refund', reason: '预扣退回', actorUserId, callLogId },
       });
       // 2) 实扣实际消费额（balance 真正减少 actualCharge）。
       if (actualCharge > 0) {
@@ -175,7 +198,8 @@ export class CreditService {
    * 此前仅检查「有 reserve 流水」，幂等性靠调用方纪律维持（脆弱），现收敛为流水状态机判定。
    */
   async refund(teamId: string, cap: number, callLogId: string, actorUserId: string | null): Promise<void> {
-    if (cap <= 0) return;
+    const reserveCap = roundCredits(cap);
+    if (reserveCap <= 0) return;
     await this.prisma.$transaction(async (tx) => {
       // 1) 必须曾预扣（无 reserve 流水说明没扣过钱，无需退）。
       const reserved = await tx.creditLedger.findFirst({
@@ -189,9 +213,9 @@ export class CreditService {
         select: { id: true },
       });
       if (settled) return; // 已终结，幂等 no-op
-      await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: cap } } });
+      await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: reserveCap } } });
       await tx.creditLedger.create({
-        data: { teamId, amount: cap, direction: 'CREDIT', source: 'refund', reason: '上游失败退回预扣', actorUserId, callLogId },
+        data: { teamId, amount: reserveCap, direction: 'CREDIT', source: 'refund', reason: '上游失败退回预扣', actorUserId, callLogId },
       });
     });
   }
@@ -204,23 +228,24 @@ export class CreditService {
     reason: string;
     actorUserId: string;
   }) {
-    if (args.amount <= 0) throw badRequest('金额必须为正数');
+    const amount = roundCredits(args.amount);
+    if (amount <= 0) throw badRequest('金额必须为正数');
     if (!args.reason.trim()) throw badRequest('请填写调整原因');
     await this.ensureAccount(args.teamId);
     return this.prisma.$transaction(async (tx) => {
       if (args.direction === 'CREDIT') {
-        await tx.teamCredit.update({ where: { teamId: args.teamId }, data: { balance: { increment: args.amount } } });
+        await tx.teamCredit.update({ where: { teamId: args.teamId }, data: { balance: { increment: amount } } });
       } else {
         const debited = await tx.teamCredit.updateMany({
-          where: { teamId: args.teamId, balance: { gte: args.amount } },
-          data: { balance: { decrement: args.amount } },
+          where: { teamId: args.teamId, balance: { gte: amount } },
+          data: { balance: { decrement: amount } },
         });
         if (debited.count === 0) throw insufficientBalance();
       }
       await tx.creditLedger.create({
         data: {
           teamId: args.teamId,
-          amount: args.amount,
+          amount,
           direction: args.direction,
           source: 'admin_adjust',
           reason: args.reason,
@@ -228,7 +253,7 @@ export class CreditService {
         },
       });
       const account = await tx.teamCredit.findUnique({ where: { teamId: args.teamId } });
-      return { balance: account?.balance ?? 0 };
+      return { balance: roundCredits(account?.balance ?? 0) };
     });
   }
 }

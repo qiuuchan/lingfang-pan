@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { modelTierLabel, normalizeModelTier } from '@/lib/model-tier';
 
 interface ApiKeyRow {
   id: string; name: string; keyPrefix: string; scopes: string[];
@@ -27,8 +28,8 @@ interface RelayModel { id: string; label?: string; resourcePools?: Array<{ id: s
 const SCOPE_OPTIONS = [
   { value: 'chat', label: '对话' },
   { value: 'image', label: '生图' },
-  { value: 'tier:fast', label: '快速版' },
-  { value: 'tier:premium', label: '高级版' },
+  { value: 'tier:fast', label: modelTierLabel('fast') },
+  { value: 'tier:premium', label: modelTierLabel('premium') },
 ];
 
 function fmtTime(iso?: string | null): string {
@@ -98,12 +99,15 @@ export function BillingTab() {
         <CardHeader><CardTitle className="flex items-center gap-2"><InfoIcon className="size-5 text-primary" />模型版本</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {models.length ? models.map((m) => (
-              <Badge key={m.id} variant="secondary" className="text-sm">
-                {m.label ?? (m.id === 'fast' ? '快速版' : '高级版')}
-                {m.resourcePools?.length ? ` · ${m.resourcePools.map((pool) => pool.name).join('、')}` : ' · 暂无可用资源池'}
-              </Badge>
-            )) : <span className="text-sm text-muted-foreground">连接平台后显示</span>}
+            {models.length ? models.map((m) => {
+              const tier = normalizeModelTier(m.id);
+              return (
+                <Badge key={m.id} variant="secondary" className="text-sm">
+                  {m.label ?? (tier ? modelTierLabel(tier) : m.id)}
+                  {m.resourcePools?.length ? ` · ${m.resourcePools.map((pool) => pool.name).join('、')}` : ' · 暂无可用资源池'}
+                </Badge>
+              );
+            }) : <span className="text-sm text-muted-foreground">连接平台后显示</span>}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">底层模型由平台统一配置与管理。</p>
         </CardContent>
@@ -186,4 +190,3 @@ async function revokeKey(id: string, onDone: () => void) {
     onDone();
   } catch (e) { toast.error((e as ApiError).message); }
 }
-

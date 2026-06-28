@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -180,6 +181,10 @@ export function Settings({
     setUpdateMeta(null);
   }
 
+  const progressPercent = progress.total && progress.total > 0
+    ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+    : null;
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <Tabs
@@ -239,12 +244,15 @@ export function Settings({
               <TabsContent value="backend" keepMounted className="mt-4 focus-visible:outline-none">
                 <Card className="w-full">
                   <CardHeader>
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                       <div className="flex items-center gap-2">
                         <RefreshCwIcon className="size-5 text-primary" />
-                        <CardTitle>更新</CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle>更新</CardTitle>
+                          <Badge variant={updateChannel === 'BETA' ? 'default' : 'secondary'}>{updateChannel === 'BETA' ? 'Beta' : '正式版'}</Badge>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
                         <Checkbox checked={updateChannel === 'BETA'} onCheckedChange={(checked) => toggleBetaUpdates(Boolean(checked))} />
                         <div className="leading-tight">
                           <div className="font-medium">启用 beta 更新</div>
@@ -253,13 +261,39 @@ export function Settings({
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="flex flex-wrap gap-2">
-                    <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>
-                      检查{updateChannel === 'BETA' ? ' beta' : '正式版'}更新
-                    </LoadingButton>
-                    <Button variant="outline" onClick={() => setChangelogOpen(true)}>
-                      <HistoryIcon className="size-4" />查看更新日志
-                    </Button>
+                  <CardContent className="space-y-4">
+                    <div className="rounded-lg border bg-background/40 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="text-sm font-medium">{updateChannel === 'BETA' ? 'Beta 通道' : '正式版通道'}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {backendUrl ? '已连接协作服务，可以检查更新。' : '当前未连接协作服务，无法检查更新。'}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>
+                            检查{updateChannel === 'BETA' ? ' beta' : '正式版'}更新
+                          </LoadingButton>
+                          <Button variant="outline" onClick={() => setChangelogOpen(true)}>
+                            <HistoryIcon className="size-4" />查看更新日志
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="rounded-lg border bg-muted/20 px-3 py-2">
+                        <div className="text-xs text-muted-foreground">版本通道</div>
+                        <div className="mt-1 text-sm font-medium">{updateChannel === 'BETA' ? 'Beta 优先' : '正式版优先'}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 px-3 py-2">
+                        <div className="text-xs text-muted-foreground">校验</div>
+                        <div className="mt-1 text-sm font-medium">SHA-256</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 px-3 py-2">
+                        <div className="text-xs text-muted-foreground">安装</div>
+                        <div className="mt-1 text-sm font-medium">下载后重启</div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -290,16 +324,17 @@ export function Settings({
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{progress.total !== null ? '下载中' : '下载中（未知总大小）'}</span>
                 <span>
-                  {progress.total !== null
-                    ? `${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`
+                  {progressPercent !== null
+                    ? `${progressPercent}%`
                     : `${formatBytes(progress.downloaded)}`}
                 </span>
               </div>
-              <progress
-                className="h-2 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary"
-                value={progress.downloaded}
-                max={progress.total ?? undefined}
-              />
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-300"
+                  style={{ width: progressPercent !== null ? `${progressPercent}%` : '36%' }}
+                />
+              </div>
               <p className="text-xs text-muted-foreground">下载完成后自动安装并重启，请勿关闭窗口。</p>
             </div>
           ) : null}

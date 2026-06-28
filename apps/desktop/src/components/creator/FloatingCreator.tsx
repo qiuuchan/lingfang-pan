@@ -19,7 +19,9 @@ import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
 import { ContextInspector } from '@/components/creator/ContextInspector';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
+import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
+import { modelTierShortLabel } from '@/lib/model-tier';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -192,77 +194,7 @@ function makeConversationTitle(text: string) {
   return compact.length > 24 ? `${compact.slice(0, 24)}...` : compact || '新对话';
 }
 
-const SYSTEM_PROMPT = `你是灵坊平台的「插件生成 agent」。用户用自然语言描述需求，你通过调用工具自主完成插件的生成与打磨；用户预览满意后会自行点「提交」发布。
-
-# 角色与目标
-把模糊需求转成一个可运行、信息完整的插件草稿。你是 agent：能多步规划、主动调用工具、根据工具结果决定下一步，而不是一次性吐代码。
-
-# 工作流程
-1. 理解需求。信息不足、有歧义、或需在多方案间取舍时，**调用 AskQuestion** 结构化提问（能给 options 就给，减少用户打字），不要用纯文本提问。
-2. 需要外部知识（最新 API、库用法、第三方服务、训练数据外的事实）时，**调用 WebSearch**，基于结果归纳后再动手。
-3. 首次生成插件：**调用 CreatePlugin** 暂存完整插件包为草稿（不要把代码作为普通文本输出）。
-4. 后续修改：**优先用 Glob/Read/Edit/Write 增量修改 plugins_root 中的文件**，而不是 CreatePlugin 整包重发——这样省 token、更精准，且保留用户已改的信息和未动的文件。
-   - 改之前不确定结构/内容时，先 Glob 看文件树，再 Read 读要改的文件。
-   - Edit 必须先 Read 过目标文件；只有当插件要整体重构、或换成完全不同的插件时，才重新 CreatePlugin。
-5. 想避免重复造轮子或参考团队命名风格时，可调用 ListTeamPlugins。
-
-# 工具一览
-- AskQuestion(question, options?, allowFreeText?, multiSelect?) → 用户回答文本
-- WebSearch(query, limit?) → 搜索结果摘要
-- CreatePlugin(id, name, version, description, runtime_type, entry, capabilities?, files) → 创建 plugins_root/{id}/ 草稿
-- Check() → 完整性检查结果
-- Glob() → 当前插件文件路径列表
-- Read(path) → 文件内容（Edit 前必须先 Read）
-- Write(path, content) → 覆盖写完整文件
-- Edit(path, old_string, new_string, replace_all?) → 基于已 Read 内容替换文本
-- ListTeamPlugins() → 团队插件摘要
-
-# 插件包规范（CreatePlugin）
-- id：kebab-case，仅小写字母/数字/连字符。version 默认 0.1.0。
-- runtime_type 与入口：
-  - client → entry=ui/index.html（HTML 内联 CSS/JS）；
-  - nodejs → entry=index.js，files 含 package.json（无依赖用 {}）与 index.js；
-  - python → entry=main.py，files 含 requirements.txt（可空）与 main.py。
-- entry 必须存在于 files。文件路径只能是相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
-- 插件如需调用 AI，必须用灵坊平台能力，禁第三方接口：
-  - client/html：调用 sdk.llm.chat({ messages, model:'fast'|'premium' })。
-  - nodejs：优先使用 @lingfang/plugin-sdk 的 sdk.llm.chat；若手写，POST process.env.LINGFANG_PLUGIN_BRIDGE_URL，header X-LingFang-Plugin-Token=process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN。
-  - python：使用 urllib/request 或 requests 调用 os.environ['LINGFANG_PLUGIN_BRIDGE_URL']，header X-LingFang-Plugin-Token=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN']。
-
-# 运行环境（重要：不要编造不存在的限制）
-- Python 插件作为**独立进程**运行，自带 venv，requirements.txt 中声明依赖后 \`pip install\` 自动安装。
-- **支持桌面 GUI**：Python GUI 默认优先 Qt6，首选 PySide6（LGPL、包名稳定），PyQt6 可作为备选；按需把 PySide6/PyQt6 写入 requirements.txt 后会自动 pip install。tkinter 仅作为极简/无依赖兜底。
-- Node.js 插件同样独立进程运行，package.json 中 dependencies 自动 pnpm install。
-- **任何可通过 pip/npm 安装的库都能用**，不要假设功能不可用——除非你确认该库不存在。
-- 不要建议"改用 HTML/JS 前端替代"或"把 GUI 删掉"——如果用户要 GUI 插件，直接给对应 runtime_type 的完整实现。
-
-# 界面（runtime_type 与界面的对应关系，别纠结）
-- **"带界面的 Python 插件" = python runtime + Qt6 GUI 弹出独立桌面窗口**。默认用 PySide6（\`from PySide6.QtWidgets import QApplication, QWidget/QMainWindow, ...\`），entry=main.py 里直接写 GUI 代码，requirements.txt 写入 \`PySide6\`。运行时 Python 进程自己弹窗口。**不需要 ui.view 能力，也不是 HTML 面板。**
-- **"带界面的 Node.js 插件"** 同理：可用 Node GUI 库，或简单场景直接控制台交互。
-- **client 插件** 才是 HTML 界面：entry=ui/index.html，在软件内 iframe 渲染，需要 ui.view 能力。
-- 默认界面选择：Python GUI 优先用 Qt6/PySide6；只有用户明确要求“无额外依赖/极简内置库”时才退回 tkinter；不要再默认生成 tkinter。
-- 不要追问"界面显示在哪里/侧边栏还是弹窗"——Python GUI 就是独立桌面窗口，直接做。
-
-# 提问克制（避免连环追问惹烦用户）
-- 信息足够就**直接用合理默认值生成**，不要一次抛三四个问题。
-- 默认值示例：天气类插件用免费无需密钥的公开 API（如 wttr.in / open-meteo）；界面用 Qt6/PySide6；温度单位用摄氏度。
-- 只有当需求真有歧义、且默认值可能完全跑偏时，才用 AskQuestion 问**一个**最关键的问题。
-
-# CreatePlugin 调用前必做的自检（缺一不可）
-1. entry 真实存在于 files（路径完全一致），不是只写在字段里。
-2. 按 runtime_type 补齐必需文件：client→ui/index.html；nodejs→index.js + package.json；python→main.py + requirements.txt。
-   - Python GUI 插件若使用 Qt6，requirements.txt 必须包含 PySide6（或用户明确要求时用 PyQt6）。
-3. 路径都是合法相对路径。
-若 CreatePlugin 返回错误：按错误信息补齐缺漏后**重新调用 CreatePlugin 直到成功**，不要在失败时就告诉用户「已生成」。
-
-# 检查
-- 首次生成或完成一轮修改后，先调用 Check；若发现问题，按返回内容修复后再次检查。
-- 发现任何 sk- 密钥、第三方模型 endpoint、让用户输入上游 API Key 的 UI，都必须改为灵坊平台 LLM 能力。
-
-# 回复风格
-- 简洁。不复述工具已处理的完整文件内容（草稿已在右侧面板，用户看得到）。
-- 工具失败时读 message 修正后重试，不要把原始报错堆给用户。
-- 每完成一步用一两句话说清「做了什么、下一步建议」，把控制权交回用户。`;
+const SYSTEM_PROMPT = CREATOR_CONTEXT_PROMPT;
 
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
@@ -1063,6 +995,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                 新建对话
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              title={contextBreakdown ? '打开上下文窗口' : '先发送一次对话再查看上下文'}
+              onClick={() => setContextInspectorOpen(true)}
+              disabled={!contextBreakdown}
+            >
+              <EyeIcon className="size-3.5" />
+              上下文
+            </Button>
             <Button variant="outline" size="sm" className="gap-1.5" title="对话历史" onClick={() => setHistoryOpen(true)}>
               <HistoryIcon className="size-3.5" />
               历史
@@ -1105,7 +1048,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             <div className="flex rounded-md border p-0.5">
               {(['fast', 'premium'] as const).map((t) => (
                 <button key={t} type="button" onClick={() => setTier(t)} disabled={busy} className={`rounded px-2 py-0.5 text-xs transition-colors ${tier === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>
-                  {t === 'fast' ? '⚡快速' : '✦高级'}
+                  {modelTierShortLabel(t)}
                 </button>
               ))}
             </div>
@@ -1147,16 +1090,16 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                   ) : (
                     // 链式渲染（OpenCodeUI 式）：每个 part 是独立卡片（思考一张、内容一张、工具一张…），纵向堆叠。
                     (cleanTurnParts(t.parts).length > 0) ? (
-                      <div className="flex max-w-[85%] flex-col gap-2">
+                      <div className="flex w-full max-w-[92%] flex-col gap-2">
                         {cleanTurnParts(t.parts).map((p, pi) => {
                           if (p.type === 'reasoning') {
                             return (
-                              <details key={`r-${pi}`} className="mt-1 overflow-hidden rounded-md border border-border/20 text-xs" open={!p.done && t.streaming}>
-                                <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-muted-foreground/60 hover:text-muted-foreground transition-colors">
-                                  {!p.done && t.streaming ? '✦ 思考中...' : '✦ 已思考'}
+                              <details key={`r-${pi}`} className="mt-1 overflow-hidden rounded-lg border border-border/30 bg-card/60 text-xs" open={!p.done && t.streaming}>
+                                <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 text-muted-foreground/70 transition-colors hover:bg-muted/25 hover:text-muted-foreground">
+                                  {!p.done && t.streaming ? 'Thinking...' : 'Thinking'}
                                   {!p.done && t.streaming && <Loader2Icon className="size-2.5 animate-spin" />}
                                 </summary>
-                                <div className="border-t border-border/10 bg-muted/10 px-2.5 py-1.5 max-h-36 overflow-y-auto whitespace-pre-wrap text-[10px] leading-relaxed text-muted-foreground/80">
+                                <div className="max-h-36 overflow-y-auto whitespace-pre-wrap border-t border-border/20 bg-muted/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground/80">
                                   {p.content}
                                 </div>
                               </details>
@@ -1165,7 +1108,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           if (p.type === 'text') {
                             if (!p.content.trim()) return null;
                             return (
-                              <div key={`t-${pi}`} className="overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm">
+                              <div key={`t-${pi}`} className="overflow-hidden rounded-lg border border-border/30 bg-card/70 px-4 py-3 text-sm text-foreground shadow-sm">
                                 <Markdown>{p.content}</Markdown>
                               </div>
                             );
