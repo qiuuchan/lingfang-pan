@@ -5,7 +5,7 @@
 import { run, type AgentInputItem } from '@openai/agents';
 import { buildPluginAgent } from './run';
 import { createThinkTagStreamParser } from './think-tags';
-import type { AskQuestionArgs, AskQuestionResult } from './tools';
+import type { AskQuestionArgs, AskQuestionResult, TodoItem } from './tools';
 import type { StagedPlugin } from '../plugin-creator/creator-tools';
 
 export interface CreatorAgentCallbacks {
@@ -28,6 +28,10 @@ export interface CreatorAgentCallbacks {
   onFilesChanged: () => void;
   /** AskQuestion 人在环提问。 */
   onAskQuestion: (args: AskQuestionArgs, toolCallId: string) => Promise<AskQuestionResult>;
+  /** 返回上一轮的 todo 清单（跨轮延续）。 */
+  getTodos: () => TodoItem[];
+  /** TodoWrite 变更后同步给 UI 持久化与渲染。 */
+  onTodoUpdate: (todos: TodoItem[]) => void;
   /** 顶部状态条兼容：工具开始/结束。 */
   onToolStart?: (toolName: string, args: unknown) => void;
   onToolResult?: (toolName: string, result: unknown) => void;
@@ -121,6 +125,8 @@ export async function runPluginCreatorAgent(input: CreatorAgentInput, turnIdx: n
     onPluginCreated: callbacks.onPluginCreated,
     onFilesChanged: callbacks.onFilesChanged,
     onAskQuestion: callbacks.onAskQuestion,
+    getTodos: callbacks.getTodos,
+    onTodoUpdate: callbacks.onTodoUpdate,
   });
   resetReadTracking();
   const agentMessages = messages.map(toAgentInputItem);

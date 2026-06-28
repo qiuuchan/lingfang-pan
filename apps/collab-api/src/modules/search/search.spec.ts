@@ -1,7 +1,7 @@
 // search/search.spec.ts —— 搜索去重/归一化 + provider 归一化 + 聚合容错单测。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { dedupeByUrl, normalizeUrl, SearchService } from './search.service';
-import { SearxngProvider, TavilyProvider, BraveProvider, type SearchResultItem } from './providers';
+import { SearxngProvider, TavilyProvider, BraveProvider, BingHtmlProvider, parseBingHtml, type SearchResultItem } from './providers';
 
 describe('normalizeUrl', () => {
   it('去尾斜杠 + 去 hash + 去追踪参数 + host 小写', () => {
@@ -62,6 +62,53 @@ describe('provider 结果归一化', () => {
   });
 });
 
+describe('BingHtmlProvider', () => {
+  it('恒视为已配置（免密钥、免实例）', () => {
+    expect(new BingHtmlProvider().isConfigured()).toBe(true);
+    expect(new BingHtmlProvider('https://cn.bing.com').isConfigured()).toBe(true);
+  });
+  it('解析 b_algo 块 → {title,url,snippet,source}，过滤空标题/空 url，截断到 limit', () => {
+    const html = [
+      '<ol id="b_results">',
+      '<li class="b_algo"><h2><a href="https://a.com/news">重大新闻</a></h2><p>这是摘要A</p></li>',
+      '<li class="b_algo"><h2><a href="https://b.com">标题B</a></h2><p>摘要B</p></li>',
+      '<li class="b_algo"><h2><a href="">空链接</a></h2></li>', // 空 url → 过滤
+      '<li class="b_algo"><h2><a href="https://c.com"></a></h2></li>', // 空标题 → 过滤
+      '</ol>',
+    ].join('');
+    const items = parseBingHtml(html, 5, 'bing');
+    expect(items).toEqual([
+      { title: '重大新闻', url: 'https://a.com/news', snippet: '这是摘要A', source: 'bing' },
+      { title: '标题B', url: 'https://b.com/', snippet: '摘要B', source: 'bing' },
+    ]);
+  });
+  it('limit 截断生效', () => {
+    const html = ['<ol><li class="b_algo"><h2><a href="https://a.com">A</a></h2></li>',
+      '<li class="b_algo"><h2><a href="https://b.com">B</a></h2></li></ol>'].join('');
+    expect(parseBingHtml(html, 1, 'bing')).toHaveLength(1);
+  });
+  it('页面改版/无 b_algo → 空数组（不抛错，上层当无结果处理）', () => {
+    expect(parseBingHtml('<html><body>no results here</body></html>', 8, 'bing')).toEqual([]);
+  });
+  it('解码 HTML 实体与去标签（标题/摘要含 <b>、&amp; 等）', () => {
+    const html = '<li class="b_algo"><h2><a href="https://x.com">A &amp; B <b>bold</b></a></h2><p>cat &amp; dog</p></li>';
+    const items = parseBingHtml(html, 5, 'bing');
+    expect(items[0].title).toBe('A & B bold');
+    expect(items[0].snippet).toBe('cat & dog');
+  });
+  it('fetch 成功时返回解析结果', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response('<li class="b_algo"><h2><a href="https://r.com">R</a></h2><p>s</p></li>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    ));
+    const items = await new BingHtmlProvider().search('q', 8, new AbortController().signal);
+    expect(items).toEqual([{ title: 'R', url: 'https://r.com/', snippet: 's', source: 'bing' }]);
+  });
+  it('fetch 非 2xx 抛错', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('err', { status: 503 })));
+    await expect(new BingHtmlProvider().search('q', 8, new AbortController().signal)).rejects.toThrow('503');
+  });
+});
+
 /** 构造一个带可控 settings + 可控 cache 的 SearchService。 */
 function makeService(settings: Record<string, string>) {
   const store = new Map<string, string>();
@@ -118,5 +165,26 @@ describe('SearchService 聚合容错', () => {
     const callsAfterFirst = fetchMock.mock.calls.length;
     await svc.search('缓存词'); // 第二次应命中缓存，不再 fetch
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('全源失败时 allSourcesFailed=true 并暴露诊断（即使空结果也作为错误信号）', async () => {
+    const { svc } = makeService({ searxngUrl: 'https://self.searx' });
+    // 所有源（含 Bing）均失败：fetch 全抛网络异常。
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('fetch failed'); }));
+    const out = await svc.search('全源故障关键词');
+    expect(out.results).toEqual([]);
+    expect(out.allSourcesFailed).toBe(true);
+    expect(out.sourcesUsed).toEqual([]);
+    expect(out.sourcesSkipped.length).toBeGreaterThan(0);
+  });
+
+  it('有源成功时 allSourcesFailed=false（真无结果不被误判为故障）', async () => {
+    const { svc } = makeService({ searxngUrl: 'https://self.searx' });
+    // searxng 成功但返回空 results（真无匹配）；Bing 返回非 HTML → 也解析为空。
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    ));
+    const out = await svc.search('无匹配关键词');
+    expect(out.allSourcesFailed).toBe(false);
   });
 });
