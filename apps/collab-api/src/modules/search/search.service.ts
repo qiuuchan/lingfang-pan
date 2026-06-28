@@ -15,6 +15,7 @@ import {
   SearxngProvider,
   TavilyProvider,
   BraveProvider,
+  BingHtmlProvider,
 } from './providers';
 
 export interface SearchResponse {
@@ -24,6 +25,8 @@ export interface SearchResponse {
   sourcesUsed: string[];
   /** 本次被跳过的源名 + 原因（健康禁用 / 未配置 / 失败），供诊断，不含密钥。 */
   sourcesSkipped: Array<{ source: string; reason: string }>;
+  /** 所有参与源都失败（无任何源返回成功）时为 true，前端据此区分「真无结果」与「全源故障」。 */
+  allSourcesFailed?: boolean;
 }
 
 /** 内置公共 SearXNG 实例（免密钥、支持 JSON、历史上大陆可达性较好）。
@@ -70,7 +73,7 @@ export class SearchService {
     };
   }
 
-  /** 组装本次参与聚合的 provider 列表（已配置者）。顺序即优先级：自建 SearXNG > 带密钥源 > 公共 SearXNG。 */
+  /** 组装本次参与聚合的 provider 列表（已配置者）。顺序即优先级：自建 SearXNG > 带密钥源 > 公共 SearXNG > Bing 兜底。 */
   private async buildProviders(): Promise<SearchProvider[]> {
     const cfg = await this.loadSettings();
     const providers: SearchProvider[] = [];
@@ -81,6 +84,9 @@ export class SearchService {
     if (cfg.braveApiKey) providers.push(new BraveProvider(cfg.braveApiKey));
     // 公共 SearXNG 兜底（免密钥，恒注入；不可达者由健康探测跳过）。
     PUBLIC_SEARXNG_INSTANCES.forEach((url, i) => providers.push(new SearxngProvider(url, `pub${i}`)));
+    // Bing HTML 兜底（免密钥、免实例、免管理员配置，大陆可达性最佳）：
+    // 作为最低优先级恒注入。即便所有 SearXNG 实例都被墙，也能保证 WebSearch 有结果。
+    providers.push(new BingHtmlProvider());
     return providers.filter((p) => p.isConfigured());
   }
 
@@ -155,13 +161,17 @@ export class SearchService {
     }
 
     const results = dedupeByUrl(merged).slice(0, MAX_LIMIT);
-    const response: SearchResponse = { query, results, sourcesUsed, sourcesSkipped };
+    // allSourcesFailed：没有任何源成功（sourcesUsed 为空）。即便空结果也应区分：
+    //  - 有源成功但确实无匹配（allSourcesFailed=false，真无结果）
+    //  - 全部源失败（allSourcesFailed=true，应作为错误暴露给用户/模型，而非静默「无结果」）
+    const allSourcesFailed = sourcesUsed.length === 0;
+    const response: SearchResponse = { query, results, sourcesUsed, sourcesSkipped, allSourcesFailed };
 
     // 仅当确有结果时缓存（空结果可能是临时全源故障，不缓存以便下次重试）。
     if (results.length > 0) {
       await this.cache.set(cacheKey, JSON.stringify(response), RESULT_CACHE_TTL_MS).catch(() => undefined);
     }
-    if (results.length === 0 && sourcesUsed.length === 0) {
+    if (allSourcesFailed) {
       this.logger.warn(`搜索「${query}」全部源不可用：${sourcesSkipped.map((s) => s.source).join(', ')}`);
     }
     return response;

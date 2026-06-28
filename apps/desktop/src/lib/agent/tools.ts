@@ -31,7 +31,14 @@ export interface AskQuestionArgs {
   multiSelect: boolean;
 }
 
-/** 工具工厂入参：当前插件 id + HITL/刷新回调。 */
+/** Todo 项（与 Claude Code 的 TodoWrite 一致：内容 + 状态 + 优先级）。 */
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  priority: 'high' | 'medium' | 'low';
+}
+
+/** 工具工厂入参：当前插件 id + HITL/刷新/Todo 回调。 */
 export interface AgentToolsOptions {
   /** 当前正在开发的插件目录 id（plugins_root/{id}/）。CreatePlugin 后由调用方更新。 */
   getPluginId: () => string | null;
@@ -41,6 +48,10 @@ export interface AgentToolsOptions {
   onFilesChanged: () => void;
   /** AskQuestion 人在环：返回等待用户作答的 Promise。 */
   onAskQuestion: (args: AskQuestionArgs, toolCallId: string) => Promise<AskQuestionResult>;
+  /** 返回上一轮保存的 todo 清单（跨轮延续，UI 持久化在 localStorage）。 */
+  getTodos: () => TodoItem[];
+  /** TodoWrite 变更后同步给 UI 持久化与渲染。 */
+  onTodoUpdate: (todos: TodoItem[]) => void;
 }
 
 /** 团队插件精简条目（ListTeamPlugins 返回）。 */
@@ -289,17 +300,32 @@ export function createAgentTools(opts: AgentToolsOptions) {
     }),
     async execute({ query, limit }): Promise<string> {
       try {
-        const resp = await api<{ query: string; results: Array<{ title: string; url: string; snippet: string; source: string }> }>(
+        const resp = await api<{
+          query: string;
+          results: Array<{ title: string; url: string; snippet: string; source: string }>;
+          // 后端诊断位：所有源都失败（fetch 失败/被墙）时为 true，与「真无结果」区分。
+          allSourcesFailed?: boolean;
+          sourcesSkipped?: Array<{ source: string; reason: string }>;
+        }>(
           '/api/search',
           { method: 'POST', body: { query, limit } },
         );
         const results = Array.isArray(resp.results) ? resp.results : [];
+        // 全源故障：以「错误：」前缀返回，触发 adapter 的 error 判定让工具卡片标红，
+        // 并把跳过的源摘要透出，便于用户/管理员定位（是网络/上游问题，而非真的无结果）。
+        if (results.length === 0 && resp.allSourcesFailed) {
+          const skipped = Array.isArray(resp.sourcesSkipped) ? resp.sourcesSkipped : [];
+          const detail = skipped.length
+            ? `（不可达源：${skipped.slice(0, 4).map((s) => s.source).join('、')}）`
+            : '';
+          return `错误：所有搜索源当前不可达，稍后重试或联系管理员配置搜索源。${detail}`;
+        }
         if (!results.length) return '未搜到结果，可换更具体的关键词重试。';
         return results
           .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
           .join('\n\n');
       } catch (e) {
-        return `搜索失败：${(e as ApiError).message || String(e)}`;
+        return `错误：搜索失败：${(e as ApiError).message || String(e)}`;
       }
     },
   });
@@ -359,8 +385,52 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  // Todo 列表：本 agent run 内的可变副本。run 开始时从 opts.getTodos() 读上一轮状态，
+  // 工具调用替换后调 opts.onTodoUpdate 同步给 UI 持久化（localStorage）。跨轮延续。
+  const todos: TodoItem[] = (opts.getTodos() ?? []).map((t) => ({ ...t }));
+
+  const TodoWrite = tool({
+    name: 'TodoWrite',
+    description:
+      '更新任务清单（用于复杂多步任务的进度跟踪）。传入完整清单替换当前状态；' +
+      '每完成一步就把对应项置 completed 并开始下一项。简单单步任务不必用。',
+    parameters: z.object({
+      todos: z
+        .array(
+          z.object({
+            content: z.string().describe('该步要做什么，一句话'),
+            status: z.enum(['pending', 'in_progress', 'completed']),
+            priority: z.enum(['high', 'medium', 'low']),
+          }),
+        )
+        .describe('完整任务清单（覆盖式替换）；同一时间至多一项 in_progress'),
+    }),
+    async execute(args): Promise<string> {
+      const next = args.todos ?? [];
+      // 校验：至多一项 in_progress（约束模型聚焦当前步骤，避免并行「进行中」混乱）。
+      const inProgress = next.filter((t) => t.status === 'in_progress').length;
+      if (inProgress > 1) {
+        return '错误：清单中同时进行中的任务超过 1 项。请把其余 in_progress 改回 pending 或 completed 后重试。';
+      }
+      // 覆盖式替换内部副本并同步 UI（持久化 + 渲染）。
+      todos.length = 0;
+      todos.push(...next.map((t) => ({ ...t })));
+      opts.onTodoUpdate(todos.map((t) => ({ ...t })));
+      if (todos.length === 0) return '已清空任务清单。';
+      const done = todos.filter((t) => t.status === 'completed').length;
+      const current = todos.find((t) => t.status === 'in_progress');
+      const summary = current ? `（当前：${current.content}）` : '';
+      const lines = todos.map((t, i) => {
+        const mark = t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '>' : ' ';
+        const tag = `[${t.priority}]`;
+        return `${i + 1}. [${mark}] ${tag} ${t.content}`;
+      });
+      return `已更新任务清单（${done}/${todos.length} 完成）${summary}：\n${lines.join('\n')}`;
+    },
+  });
+
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();

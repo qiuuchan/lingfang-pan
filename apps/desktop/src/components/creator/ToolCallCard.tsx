@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import {
   ChevronRightIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon,
-  FileTextIcon, FilePenIcon, FolderTreeIcon, GlobeIcon, PackagePlusIcon, AlertCircleIcon, BoxesIcon, WrenchIcon, MessageCircleQuestionIcon,
+  FileTextIcon, FilePenIcon, FolderTreeIcon, GlobeIcon, PackagePlusIcon, AlertCircleIcon, BoxesIcon, WrenchIcon, MessageCircleQuestionIcon, ListChecksIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +28,7 @@ const TOOL_META: Record<string, { icon: typeof FileTextIcon; label: string }> = 
   WebSearch: { icon: GlobeIcon, label: 'WebSearch' },
   AskQuestion: { icon: MessageCircleQuestionIcon, label: 'Ask' },
   ListTeamPlugins: { icon: BoxesIcon, label: 'ListTeamPlugins' },
+  TodoWrite: { icon: ListChecksIcon, label: 'Todo' },
   // 旧会话兼容：历史记录里可能仍有迁移前工具名。
   stage_plugin: { icon: PackagePlusIcon, label: 'stage_plugin' },
   web_search: { icon: GlobeIcon, label: 'web_search' },
@@ -68,6 +69,12 @@ function summarize(data: ToolCardData): string {
     case 'ListTeamPlugins':
     case 'list_team_plugins':
       return Array.isArray((data.result as any)?.plugins) ? `${(data.result as any).plugins.length} 个插件` : '';
+    case 'TodoWrite': {
+      const list = Array.isArray((a as any).todos) ? (a as any).todos as Array<{ status?: string }> : [];
+      if (!list.length) return '清空清单';
+      const done = list.filter((t) => t.status === 'completed').length;
+      return `${done}/${list.length} 完成`;
+    }
     default:
       return '';
   }

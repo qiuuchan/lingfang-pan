@@ -11,6 +11,7 @@ const WORKFLOW = `
 - 新建用 CreatePlugin；修改已有内容时先 Read，再用 Edit/Write。
 - 多行源码较长或包含大量引号/反斜杠时，先用 CreatePlugin 创建最小骨架，再用 Write 分文件写入完整源码；Write 的 content 可用字符串数组逐行传入。
 - 完成或修改后用 Check 校验。
+- 复杂多步任务（≥3 步、或多文件改动）先调用 TodoWrite 拆解成清单：每步开始时置 in_progress，完成后置 completed，再推进下一步；同一时间只允许一项 in_progress。简单单步任务不必用。
 - 详细的插件结构、运行时默认值和输出约束由追加的 skills 补充。
 - 回复保持简洁，只说做了什么和下一步建议。`;
 

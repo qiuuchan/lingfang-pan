@@ -7,16 +7,17 @@
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon, RotateCcwIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, tauriInvoke } from '@/lib/api';
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { runPluginCreatorAgent } from '@/lib/agent/creator-adapter';
-import type { AskQuestionArgs, AskQuestionResult } from '@/lib/agent/tools';
+import type { AskQuestionArgs, AskQuestionResult, TodoItem } from '@/lib/agent/tools';
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
+import { TodoPanel } from '@/components/creator/TodoPanel';
 import { ContextInspector } from '@/components/creator/ContextInspector';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
@@ -153,10 +154,30 @@ interface CreatorConversation {
   stagedDraft?: StagedPlugin | null;
   /** 用户在右侧面板改过的字段（与 stagedDraft 合并成展示用 draft）。 */
   userEdits?: Partial<StagedPlugin>;
+  /** TodoWrite 工具维护的任务清单（跨轮延续，随会话持久化到 localStorage）。 */
+  todos?: TodoItem[];
 }
 
 const conversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-conversations:${tenantId || userId || 'none'}`;
 const selectedConversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-selected:${tenantId || userId || 'none'}`;
+
+/** 归一化持久化的 todo 清单（容忍旧数据/非法值，status/priority 枚举校验）。 */
+function normalizeTodos(raw: unknown): TodoItem[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const validStatus = new Set(['pending', 'in_progress', 'completed']);
+  const validPriority = new Set(['high', 'medium', 'low']);
+  const out: TodoItem[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const content = typeof r.content === 'string' ? r.content : '';
+    if (!content.trim()) continue;
+    const status = validStatus.has(r.status as string) ? (r.status as TodoItem['status']) : 'pending';
+    const priority = validPriority.has(r.priority as string) ? (r.priority as TodoItem['priority']) : 'medium';
+    out.push({ content, status, priority });
+  }
+  return out;
+}
 
 function loadConversations(userId: string | null, tenantId: string | null): CreatorConversation[] {
   try {
@@ -174,6 +195,7 @@ function loadConversations(userId: string | null, tenantId: string | null): Crea
         updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
         stagedDraft: (record.stagedDraft ?? null) as StagedPlugin | null,
         userEdits: record.userEdits && typeof record.userEdits === 'object' ? record.userEdits as Partial<StagedPlugin> : undefined,
+        todos: normalizeTodos(record.todos),
       }];
     }) : [];
   } catch {
@@ -228,6 +250,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
   const [contextBreakdown, setContextBreakdown] = useState<{ systemPrompt: string; summary: string; keptTurns: Array<{ role: string; content: string }>; currentInput: string; estimatedTokens: { system: number; summary: number; history: number; input: number; total: number } } | null>(null); // 上下文查看面板数据
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false); // 上下文查看面板开关
+  const [todos, setTodos] = useState<TodoItem[]>([]); // 当前会话的 TodoWrite 任务清单（随会话持久化）
+  // 网络慢检测：流式进行中但长时间（>12s）无新 token 时，状态条提示「网络较慢」。
+  // lastTokenAt 记录最近一次收到流式增量的时间；netSlowTimerRef 定时检查并切换 networkSlow。
+  const lastTokenAtRef = useRef<number>(0);
+  const [networkSlow, setNetworkSlow] = useState(false);
+  const netSlowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -376,6 +404,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     // 恢复右侧草稿面板：关窗重开 / 重登后，回填上次暂存的草稿与用户编辑（修复重开右侧栏消失）。
     setStagedDraft(active?.stagedDraft ?? null);
     setUserEdits(active?.userEdits ?? {});
+    setTodos(active?.todos ?? []);
   }, [session.userId, session.tenantId]);
 
   useEffect(() => {
@@ -384,12 +413,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setConversations((prev) => {
       const now = new Date().toISOString();
       const next = prev.map((conversation) => conversation.id === activeConversationId
-        ? { ...conversation, turns, stagedDraft, userEdits, updatedAt: now }
+        ? { ...conversation, turns, stagedDraft, userEdits, todos: todos.length ? todos : undefined, updatedAt: now }
         : conversation);
       saveConversations(session.userId, session.tenantId, next);
       return next;
     });
-  }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, userEdits]);
+  }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, userEdits, todos]);
 
   function ensureConversation(firstUserText: string) {
     if (activeConversationId) return activeConversationId;
@@ -425,6 +454,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     // 切回该会话时恢复其暂存草稿与用户编辑（右侧栏随之重现）。
     setStagedDraft(conversation.stagedDraft ?? null);
     setUserEdits(conversation.userEdits ?? {});
+    setTodos(conversation.todos ?? []);
     compressRef.current = emptyCompressState();
     try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
     setHistoryOpen(false);
@@ -441,6 +471,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     setPublishedName(null);
     setStagedDraft(null);
     setUserEdits({});
+    setTodos([]);
     compressRef.current = emptyCompressState();
     setCompressedHint(0);
     try { localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
@@ -563,10 +594,57 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     const userTurn: Turn = { role: 'user', content: text };
     const assistantIdx = turns.length + 1;
     setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true, status: 'generating' }]);
+    await runAgentTurn(assistantIdx, text);
+  }
+
+  /**
+   * 重试最后一条失败的/已取消的 assistant 轮：复用其上一条 user 轮的输入，
+   * 清空失败轮的 parts 后重新发起 agent run。不新增 user 气泡，保持对话结构不变。
+   */
+  async function retry() {
+    if (busy) return;
+    // 找到最后一条 assistant 轮（失败/取消态），其上一条应为对应 user 轮。
+    // 用倒序 for 循环（避免 findLastIndex 在低 lib target 下不可用）。
+    let lastAssistantIdx = -1;
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === 'assistant') { lastAssistantIdx = i; break; }
+    }
+    if (lastAssistantIdx < 0) return;
+    const cur = turns[lastAssistantIdx];
+    if (cur.status !== 'failed' && cur.status !== 'cancelled') return;
+    // 取上一条 user 轮的输入作为重跑文本；找不到则放弃。
+    const userTurn = [...turns].slice(0, lastAssistantIdx).reverse().find((t) => t.role === 'user');
+    const userText = userTurn?.content ?? '';
+    if (!userText.trim()) return;
+    // 重置该轮：清空旧 parts 与 content，回到生成中态。
+    setTurns((prev) => {
+      const next = [...prev];
+      next[lastAssistantIdx] = { role: 'assistant', content: '', streaming: true, status: 'generating', parts: [] };
+      return next;
+    });
+    await runAgentTurn(lastAssistantIdx, userText);
+  }
+
+  /**
+   * 执行一次 agent run，把流式输出写回指定 assistant turn（runPluginCreatorAgent 的 UI 编排）。
+   * send() 新建 turn 后调用；retry() 复用既有 turn 后调用。二者共用此函数，避免逻辑重复。
+   * @param assistantIdx 要写入的 assistant 轮下标
+   * @param text 本轮用户输入（用于压缩与 currentInput）
+   */
+  async function runAgentTurn(assistantIdx: number, text: string) {
     setBusy(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
+
+    // 网络慢检测：本轮开始时重置 token 时间戳，启动每 3s 检查一次的定时器。
+    // 若距上次收到 token 超过 12s，置 networkSlow=true（状态条提示「网络较慢」）。
+    lastTokenAtRef.current = Date.now();
+    setNetworkSlow(false);
+    if (netSlowTimerRef.current) clearInterval(netSlowTimerRef.current);
+    netSlowTimerRef.current = setInterval(() => {
+      if (Date.now() - lastTokenAtRef.current > 12_000) setNetworkSlow(true);
+    }, 3_000);
 
     try {
       // 系统提示词 = 基础提示 + 激活的 skills（+ 思考模式追加深入推理引导）；relay 服务端还会注入"必须用灵坊服务"规则。
@@ -644,9 +722,15 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           extraInstructions: systemPrompt,
           signal: controller.signal,
           callbacks: {
-            appendTextDelta,
+            appendTextDelta: (turnIdx, delta) => {
+              lastTokenAtRef.current = Date.now();
+              setNetworkSlow(false);
+              appendTextDelta(turnIdx, delta);
+            },
             appendReasoningDelta: (turnIdx, delta) => {
               reasoningText += delta;
+              lastTokenAtRef.current = Date.now();
+              setNetworkSlow(false);
               appendReasoningDelta(turnIdx, delta);
             },
             endReasoning,
@@ -664,6 +748,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               void refreshDraftFromRoot();
             },
             onAskQuestion,
+            getTodos: () => todos,
+            onTodoUpdate: (next) => {
+              setTodos(next.map((t) => ({ ...t })));
+            },
             onToolStart: (toolName, args) => {
               sawToolCall = true;
               if (toolName === 'CreatePlugin') setUploadingViaTool(true);
@@ -764,6 +852,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false);
       setSearchingQuery(null);
+      setNetworkSlow(false);
+      if (netSlowTimerRef.current) { clearInterval(netSlowTimerRef.current); netSlowTimerRef.current = null; }
       abortRef.current = null;
     }
   }
@@ -771,6 +861,30 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   function stop() {
     abortRef.current?.abort();
     clearPendingAnswers();
+  }
+
+  /**
+   * 失败/取消的 assistant 轮底部「重试」按钮：点击用上一条 user 输入重新发起 agent run。
+   * 仅在非流式、状态为 failed/cancelled 时渲染（busy 时禁用，防止并发 run）。
+   */
+  function renderRetryButton(t: Turn) {
+    if (t.streaming || (t.status !== 'failed' && t.status !== 'cancelled')) return null;
+    const isCancel = t.status === 'cancelled';
+    return (
+      <div className="mt-2 flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { void retry(); }}
+          disabled={busy}
+          className="h-7 gap-1.5 px-2.5 text-xs"
+        >
+          <RotateCcwIcon className="size-3" />
+          {isCancel ? '继续' : '重试'}
+        </Button>
+        {busy && <span className="text-[11px] text-muted-foreground/60">正在生成中…</span>}
+      </div>
+    );
   }
 
   function toggleSkill(id: string) {
@@ -1081,6 +1195,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
+              {todos.length > 0 && <TodoPanel todos={todos} streaming={busy} />}
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   {t.role === 'user' ? (
@@ -1119,6 +1234,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           // question part
                           return renderQuestionCard(p, i);
                         })}
+                        {renderRetryButton(t)}
                       </div>
                     ) : (
                       // 向后兼容 / 兜底：旧会话只有 content 或无任何 part 时，单个气泡渲染。
@@ -1134,6 +1250,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                         ) : (
                           <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
                         )}
+                        {renderRetryButton(t)}
                       </div>
                     )
                   )}
@@ -1186,17 +1303,19 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中） */}
-        {(compressing || searchingQuery != null || uploadingViaTool) && (
-          <div className="shrink-0 border-t bg-gradient-to-r from-blue-50/50 via-indigo-50/50 to-blue-50/50 px-6 py-2.5 dark:from-blue-950/20 dark:via-indigo-950/20 dark:to-blue-950/20">
+        {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中 / 网络慢） */}
+        {(compressing || searchingQuery != null || uploadingViaTool || networkSlow) && (
+          <div className={`shrink-0 border-t px-6 py-2.5 ${networkSlow ? 'bg-gradient-to-r from-amber-50/60 via-orange-50/60 to-amber-50/60 dark:from-amber-950/20 dark:via-orange-950/20 dark:to-amber-950/20' : 'bg-gradient-to-r from-blue-50/50 via-indigo-50/50 to-blue-50/50 dark:from-blue-950/20 dark:via-indigo-950/20 dark:to-blue-950/20'}`}>
             <div className="mx-auto flex max-w-3xl items-center gap-2 text-xs text-muted-foreground">
-              <Loader2Icon className="size-3.5 animate-spin text-primary" />
+              <Loader2Icon className={`size-3.5 animate-spin ${networkSlow ? 'text-amber-600 dark:text-amber-400' : 'text-primary'}`} />
               <span className="font-medium">
-                {compressing
-                  ? '正在压缩对话上下文…'
-                  : searchingQuery != null
-                    ? `正在联网搜索：${searchingQuery}…`
-                    : 'AI 正在生成插件草稿…'}
+                {networkSlow
+                  ? '网络较慢，仍在等待响应…可点停止后重试'
+                  : compressing
+                    ? '正在压缩对话上下文…'
+                    : searchingQuery != null
+                      ? `正在联网搜索：${searchingQuery}…`
+                      : 'AI 正在生成插件草稿…'}
               </span>
             </div>
           </div>
