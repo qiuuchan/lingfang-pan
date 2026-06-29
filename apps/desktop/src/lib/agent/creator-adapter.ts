@@ -38,15 +38,46 @@ export interface CreatorAgentCallbacks {
 }
 
 export interface CreatorAgentInput {
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  /**
+   * 消息历史。role/content 为扁平文本；assistant 轮可附带 parts（工具调用与结果），
+   * 由 turnsToAgentItems 还原成 SDK 的 function_call/function_call_output 序列，
+   * 让重试/续跑时模型能看到「上轮已搜过 X、结果如下」而不必重跑工具。
+   */
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string; parts?: AgentMessagePart[] }>;
   tier: 'fast' | 'premium';
   extraInstructions?: string;
   callbacks: CreatorAgentCallbacks;
   signal?: AbortSignal;
 }
 
+/** assistant 轮的可序列化工具历史项（从 UI 的 ToolPart 映射而来）。 */
+export interface AgentMessagePart {
+  type: 'text' | 'tool_call' | 'tool_result';
+  /** tool_call/tool_result 共用：工具调用 id（function_call 的 call_id）。 */
+  toolCallId?: string;
+  /** tool_call：工具名；tool_result：同。 */
+  name?: string;
+  /** tool_call：入参对象（已解析）；tool_result：返回值字符串。 */
+  args?: unknown;
+  /** tool_result：工具返回（字符串或对象，序列化为 output）。 */
+  output?: unknown;
+  /** text：文本内容。 */
+  text?: string;
+}
+
 function toAgentInputItem(message: CreatorAgentInput['messages'][number]): AgentInputItem {
   if (message.role === 'assistant') {
+    // 若带 parts，把工具调用+结果序列化进 assistant 文本内容（而非 function_call 项——
+    // 本 SDK 的 aisdk 模型包装器用 Chat Completions 协议，不识别 function_call_output 输入项）。
+    // 这样模型续跑时能读到「上轮已搜过 X、结果是 Y」的文本，不必重跑工具（断点续）。
+    if (Array.isArray(message.parts) && message.parts.length > 0) {
+      const textContent = partsToAssistantText(message.parts, message.content);
+      return {
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: textContent }],
+      } as AgentInputItem;
+    }
     return {
       role: 'assistant',
       status: 'completed',
@@ -54,6 +85,36 @@ function toAgentInputItem(message: CreatorAgentInput['messages'][number]): Agent
     } as AgentInputItem;
   }
   return { role: message.role, content: message.content } as AgentInputItem;
+}
+
+/**
+ * 把工具历史 parts 序列化成 assistant 文本（供模型续跑时读取上轮已完成的工作）。
+ *
+ * 格式（让模型明白这是「我之前做过的」）：
+ *   [已调用工具 WebSearch] 入参: {"query":"tauri","limit":8}
+ *   [工具返回] 1. Tauri 2.0\n   https://tauri.app ...
+ *   （如有文本输出也拼上）
+ *
+ * 这样重试时模型读到「我已搜过且拿到结果」，直接基于结果继续，不重跑。
+ */
+function partsToAssistantText(parts: AgentMessagePart[], fallbackContent: string): string {
+  const chunks: string[] = [];
+  // 工具调用与其结果配对输出；文本 part 直接拼。
+  for (const p of parts) {
+    if (p.type === 'text' && p.text) {
+      chunks.push(p.text);
+    } else if (p.type === 'tool_call' && p.name) {
+      const argsStr = typeof p.args === 'string' ? p.args : JSON.stringify(p.args ?? {});
+      chunks.push(`[已调用工具 ${p.name}] 入参: ${argsStr}`);
+    } else if (p.type === 'tool_result' && p.name) {
+      const outStr = typeof p.output === 'string' ? p.output : JSON.stringify(p.output ?? '');
+      // 截断过长的工具输出，避免撑爆上下文（搜索结果可能很长）。
+      const trimmed = outStr.length > 1500 ? outStr.slice(0, 1500) + '…(已截断)' : outStr;
+      chunks.push(`[工具 ${p.name} 返回] ${trimmed}`);
+    }
+  }
+  const joined = chunks.join('\n').trim();
+  return joined || fallbackContent;
 }
 
 function parseJsonMaybe(value: unknown): unknown {
@@ -184,6 +245,16 @@ export async function runPluginCreatorAgent(input: CreatorAgentInput, turnIdx: n
   } catch (e) {
     const aborted = (e as Error).name === 'AbortError';
     if (aborted) return { interrupted: false }; // 用户取消不算错误
+    // 达到工具调用轮次上限（典型：WebSearch 反复搜不到收敛）：不当作硬错误，
+    // 而是给出可操作的中文提示（可点重试续跑，或换更具体的关键词），避免裸露英文报错。
+    // SDK 抛 MaxTurnsExceededError（name 于此判定，不依赖未导出的内部类）。
+    const isMaxTurns = (e as Error).name === 'MaxTurnsExceededError' || /Max turns \(\d+\) exceeded/i.test((e as Error).message || '');
+    if (isMaxTurns) {
+      return {
+        interrupted: false,
+        error: '已达到本回合工具调用次数上限（通常是反复联网搜索仍未收敛）。可换更具体的关键词，或点「重试」从上次进度继续。',
+      };
+    }
     return { interrupted: false, error: (e as Error).message || String(e) };
   }
 }
