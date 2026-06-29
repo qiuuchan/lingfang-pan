@@ -10,8 +10,8 @@
     "beforeBuildCommand": "pnpm vite:build"
   },
   "bundle": {
-    "active": false,
-    "targets": [],
+    "active": true,
+    "targets": ["nsis"],
     "resources": {
       "../builtin-plugins": "builtin-plugins",
       "../runtimes": "runtimes"
@@ -27,7 +27,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "languages": ["SimpChinese", "English"],
+        "installerIcon": "icons/icon.ico"
+      }
+    }
   },
   "app": {
     "withGlobalTauri": true,
