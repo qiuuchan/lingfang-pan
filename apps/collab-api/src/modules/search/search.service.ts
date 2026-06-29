@@ -16,7 +16,46 @@ import {
   TavilyProvider,
   BraveProvider,
   BingHtmlProvider,
+  GitHubProvider,
 } from './providers';
+
+/** 查询改写结果：剥离 site: 前缀后的裸查询 + 受限域名（用于路由/后过滤）。 */
+interface RewrittenQuery {
+  /** 去掉 site: 前缀后的查询词（供各源搜索）。 */
+  bare: string;
+  /** site: 指定的域名（小写，无 www），未指定则 null。 */
+  scopedDomain: string | null;
+}
+
+/**
+ * 改写查询：识别并剥离前缀 `site:<domain>` 操作符。
+ *
+ * 为什么需要它：Bing/SearXNG 的 HTML 搜索对 `site:` 操作符支持极不稳定（CN 索引常忽略它，
+ * 返回无关结果）。剥离后用裸查询搜，再由 SearchService 按域名后过滤结果——这样无论
+ * 搜索引擎是否支持 site:，结果都精准。
+ *
+ * 特例：`site:github.com` 时 SearchService 会优先路由到 GitHubProvider（原生 API 搜索，
+ * 远比网页 site: 准确）。
+ *
+ * @example
+ *   rewriteQuery('site:github.com douyin video download') → { bare: 'douyin video download', scopedDomain: 'github.com' }
+ *   rewriteQuery('tauri 教程') → { bare: 'tauri 教程', scopedDomain: null }
+ */
+function rewriteQuery(query: string): RewrittenQuery {
+  // 匹配开头的 site:domain（允许带/不带 www，末尾空格）。
+  const m = query.match(/^\s*site:(?:www\.)?([a-z0-9.-]+)\s+(.+)$/i);
+  if (!m) return { bare: query, scopedDomain: null };
+  const domain = m[1].toLowerCase();
+  const bare = m[2].trim();
+  // bare 可能为空（查询就是 "site:github.com"）——保留原查询作兜底搜索词。
+  return { bare: bare || query, scopedDomain: domain };
+}
+
+/** 主机名是否匹配受限域名（含 www 与否都算）。 */
+function hostMatchesDomain(host: string, domain: string): boolean {
+  const h = host.toLowerCase();
+  return h === domain || h === `www.${domain}` || h.endsWith(`.${domain}`);
+}
 
 export interface SearchResponse {
   query: string;
@@ -122,6 +161,12 @@ export class SearchService {
     }
 
     const providers = await this.buildProviders();
+    // 查询改写：剥离 site: 前缀。github.com 查询路由到原生 GitHubProvider（更准）。
+    const { bare: searchQuery, scopedDomain } = rewriteQuery(query);
+    if (scopedDomain === 'github.com') {
+      // 置顶 GitHub 源：site:github.com 时优先用 API 搜，不依赖网页 site: 操作符。
+      providers.unshift(new GitHubProvider());
+    }
     const sourcesUsed: string[] = [];
     const sourcesSkipped: Array<{ source: string; reason: string }> = [];
 
@@ -139,9 +184,10 @@ export class SearchService {
     }
 
     const controller = new AbortController();
+    // 用剥离 site: 后的裸查询搜各源（site: 操作符本身对各源不可靠）。
     const settled = await Promise.allSettled(
       healthy.map(async (p) => {
-        const items = await p.search(query, limit, controller.signal);
+        const items = await p.search(searchQuery, limit, controller.signal);
         return { name: p.name, items };
       }),
     );
@@ -160,7 +206,15 @@ export class SearchService {
       }
     }
 
-    const results = dedupeByUrl(merged).slice(0, MAX_LIMIT);
+    // 若指定了 site:<domain>（非 github，github 已走原生源），按域名后过滤结果，
+    // 确保只返回该域名的条目（搜索引擎的 site: 操作符不可靠，这里做权威过滤）。
+    const filtered = scopedDomain && scopedDomain !== 'github.com'
+      ? merged.filter((r) => {
+          try { return hostMatchesDomain(new URL(r.url).hostname, scopedDomain); }
+          catch { return false; }
+        })
+      : merged;
+    const results = dedupeByUrl(filtered).slice(0, MAX_LIMIT);
     // allSourcesFailed：没有任何源成功（sourcesUsed 为空）。即便空结果也应区分：
     //  - 有源成功但确实无匹配（allSourcesFailed=false，真无结果）
     //  - 全部源失败（allSourcesFailed=true，应作为错误暴露给用户/模型，而非静默「无结果」）

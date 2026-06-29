@@ -1,7 +1,7 @@
 // search/search.spec.ts —— 搜索去重/归一化 + provider 归一化 + 聚合容错单测。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { dedupeByUrl, normalizeUrl, SearchService } from './search.service';
-import { SearxngProvider, TavilyProvider, BraveProvider, BingHtmlProvider, parseBingHtml, type SearchResultItem } from './providers';
+import { SearxngProvider, TavilyProvider, BraveProvider, BingHtmlProvider, GitHubProvider, parseBingHtml, decodeBingUrl, type SearchResultItem } from './providers';
 
 describe('normalizeUrl', () => {
   it('去尾斜杠 + 去 hash + 去追踪参数 + host 小写', () => {
@@ -186,5 +186,104 @@ describe('SearchService 聚合容错', () => {
     ));
     const out = await svc.search('无匹配关键词');
     expect(out.allSourcesFailed).toBe(false);
+  });
+});
+
+describe('decodeBingUrl', () => {
+  it('直链原样返回', () => {
+    expect(decodeBingUrl('https://example.com/a/b')).toBe('https://example.com/a/b');
+  });
+  it('/search?url= 形态解出直链', () => {
+    expect(decodeBingUrl('https://www.bing.com/search?q=x&url=https%3A%2F%2Freal.com%2Fp'))
+      .toBe('https://real.com/p');
+  });
+  it('/ck/a?...&u=a1<base64url> 形态解出真实 URL', () => {
+    // base64url('https://github.com/yt-dlp/yt-dlp') 去填充 → a1 前缀
+    // https://github.com/yt-dlp/yt-dlp 的 base64 = aHR0cHM6Ly9naXRodWIuY29tL3l0LWRscC95dC1kbHA=
+    const u = 'a1aHR0cHM6Ly9naXRodWIuY29tL3l0LWRscC95dC1kbHA';
+    expect(decodeBingUrl(`https://www.bing.com/ck/a?u=${u}`)).toBe('https://github.com/yt-dlp/yt-dlp');
+  });
+  it('站内 bing 链接（非 ck/a、非 search）返回空串（丢弃，不产出垃圾）', () => {
+    expect(decodeBingUrl('https://www.bing.com/images/search?q=x')).toBe('');
+  });
+  it('解不出的 ck/a 返回空串', () => {
+    expect(decodeBingUrl('https://www.bing.com/ck/a?u=a1!!!invalid')).toBe('');
+  });
+});
+
+describe('GitHubProvider', () => {
+  it('恒可用（免密钥）', () => {
+    expect(new GitHubProvider().isConfigured()).toBe(true);
+  });
+  it('解析 GitHub Search API 响应 → {title,url,snippet,source}', async () => {
+    const apiResp = {
+      items: [
+        { full_name: 'yt-dlp/yt-dlp', html_url: 'https://github.com/yt-dlp/yt-dlp', description: 'A feature-rich downloader', stargazers_count: 90000, language: 'Python' },
+        { full_name: 'nil', html_url: 'https://github.com/x/y', description: '', stargazers_count: 5, language: null },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify(apiResp), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ));
+    const items = await new GitHubProvider().search('yt-dlp', 8, new AbortController().signal);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toEqual({
+      title: 'yt-dlp/yt-dlp',
+      url: 'https://github.com/yt-dlp/yt-dlp',
+      snippet: 'A feature-rich downloader | Python · ⭐90000',
+      source: 'github',
+    });
+    // 空 description 的项仍保留（有 url+title），snippet 只剩统计。
+    expect(items[1].snippet).toBe('⭐5');
+  });
+  it('403 限速抛错（让上层跳过回落其它源）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 403 })));
+    await expect(new GitHubProvider().search('x', 8, new AbortController().signal)).rejects.toThrow('403');
+  });
+});
+
+describe('rewriteQuery（site: 路由）', () => {
+  // 通过 SearchService.search 间接验证：site:github.com 触发 GitHubProvider。
+  it('site:github.com 查询路由到 GitHub 源', async () => {
+    const { svc } = makeService({}); // 无自建/密钥源，只有公共 SearXNG + Bing
+    const fetchMock = vi.fn();
+    fetchMock.mockImplementation(async (url: string) => {
+      // GitHub API 调用返回仓库；其它（searxng/bing）返回空，便于隔离观察 GitHub 路由。
+      if (url.startsWith('https://api.github.com/')) {
+        return new Response(JSON.stringify({ items: [{ full_name: 'a/b', html_url: 'https://github.com/a/b', description: 'd', stargazers_count: 1, language: 'Rust' }] }), { status: 200 });
+      }
+      // SearXNG/Bing 都返回无结果，确保结果只来自 GitHub。
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await svc.search('site:github.com rust web framework');
+    expect(out.sourcesUsed).toContain('github');
+    expect(out.results.some((r) => r.url.startsWith('https://github.com/'))).toBe(true);
+  });
+
+  it('site:非github 域名按 host 后过滤（只留该域名的结果）', async () => {
+    const { svc } = makeService({});
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ results: [
+        { title: 'A', url: 'https://stackoverflow.com/q/1', content: '' },
+        { title: 'B', url: 'https://example.com/x', content: '' },
+      ] }), { status: 200 }),
+    ));
+    const out = await svc.search('site:stackoverflow.com rust lifetime');
+    // 只保留 stackoverflow.com 的结果，example.com 被过滤掉。
+    expect(out.results.every((r) => r.url.includes('stackoverflow.com'))).toBe(true);
+    expect(out.results.some((r) => r.url.includes('example.com'))).toBe(false);
+  });
+
+  it('无 site: 的普通查询不过滤（全部结果保留）', async () => {
+    const { svc } = makeService({});
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ results: [
+        { title: 'A', url: 'https://a.com/', content: '' },
+        { title: 'B', url: 'https://b.com/', content: '' },
+      ] }), { status: 200 }),
+    ));
+    const out = await svc.search('普通查询');
+    expect(out.results.length).toBe(2);
   });
 });
