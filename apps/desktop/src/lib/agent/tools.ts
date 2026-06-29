@@ -296,11 +296,18 @@ export function createAgentTools(opts: AgentToolsOptions) {
       '返回若干结果（标题/链接/摘要）。澄清需求请用 AskQuestion，不要用本工具替代。',
     parameters: z.object({
       query: z.string().min(1).describe('搜索关键词，尽量具体'),
-      // 容错：部分模型/中转会把数字序列化成字符串（如 "8"），
-      // 用 coerce 接受字符串并转成数字，避免 InvalidToolInputError（用户反馈的 WebSearch 失败根因）。
-      limit: z.coerce.number().int().min(1).max(20).optional().describe('期望结果条数，默认 8'),
+      // limit 故意不在这里做强校验：不同模型/中转会发数字、字符串、null、空串甚至非法值，
+      // zod 严格校验任一不合法都触发 InvalidToolInputError（用户反馈的 WebSearch 失败根因）。
+      // 改为「宽松接收（含 null）+ execute 内手动归一化」，任何值都回落默认值，绝不报错。
+      limit: z.union([z.number(), z.string(), z.null()]).optional().describe('期望结果条数，默认 8'),
     }),
     async execute({ query, limit }): Promise<string> {
+      // 归一化 limit：接受 number/string，非法/越界一律回落默认 8，永不抛错。
+      const parsedLimit = (() => {
+        const n = typeof limit === 'string' ? Number(limit) : typeof limit === 'number' ? limit : NaN;
+        if (!Number.isFinite(n)) return 8;
+        return Math.min(20, Math.max(1, Math.trunc(n)));
+      })();
       try {
         const resp = await api<{
           query: string;
@@ -310,7 +317,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
           sourcesSkipped?: Array<{ source: string; reason: string }>;
         }>(
           '/api/search',
-          { method: 'POST', body: { query, limit } },
+          { method: 'POST', body: { query, limit: parsedLimit } },
         );
         const results = Array.isArray(resp.results) ? resp.results : [];
         // 全源故障：以「错误：」前缀返回，触发 adapter 的 error 判定让工具卡片标红，
