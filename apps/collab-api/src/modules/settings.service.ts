@@ -486,6 +486,24 @@ export class SettingsService {
     };
   }
 
+  /** GET /api/admin/settings/search：读搜索源配置（searxngUrl 明文 + tavily/brave 密钥用 hasXxx 布尔脱敏）。
+   *  复刻 getGiteeSettings 范式：密钥不回传明文，仅 hasXxx。仅平台 Admin 可调用。 */
+  async getSearchSettings(userId: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['searxngUrl', 'tavilyApiKey', 'braveApiKey'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    const tavilyKey = map.get('tavilyApiKey') ?? '';
+    const braveKey = map.get('braveApiKey') ?? '';
+    return {
+      searxngUrl: (map.get('searxngUrl') ?? '').trim(),
+      hasTavilyApiKey: tavilyKey.length > 0,
+      hasBraveApiKey: braveKey.length > 0,
+    };
+  }
+
   /** POST /api/admin/settings/test-gitee：测试 Gitee 配置是否可用（与极验 test-captcha / SMTP test-email 同模式）。
    *  仅平台 Admin 可调用。探测实际生产路径 GET /repos/{owner}/{repo}/releases?per_page=1（Bearer，8s 超时），
    *  按状态码判定根因（200 通 / 401 token 失效 / 403 缺 scope / 404 owner-repo 错 / 429 限流）。

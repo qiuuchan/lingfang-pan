@@ -419,6 +419,13 @@ export class AdminController {
   }
 
   @RequirePermission('platform.setting.manage')
+  @Get('settings/search')
+  @ApiOperation({ summary: '当前搜索源配置（searxngUrl 明文，tavily/brave 密钥脱敏）' })
+  searchSettings(@Req() req: Request) {
+    return this.settings.getSearchSettings(requireUser(req).id);
+  }
+
+  @RequirePermission('platform.setting.manage')
   @Post('settings/test-gitee')
   @ApiOperation({ summary: '测试 Gitee 配置是否可用（探测 releases 端点连通性，返成功/失败 + 错误信息）' })
   testGitee(@Req() req: Request) {
