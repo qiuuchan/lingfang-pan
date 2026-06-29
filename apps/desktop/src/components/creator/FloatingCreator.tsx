@@ -14,6 +14,7 @@ import { api, tauriInvoke } from '@/lib/api';
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { runPluginCreatorAgent } from '@/lib/agent/creator-adapter';
 import type { AskQuestionArgs, AskQuestionResult, TodoItem } from '@/lib/agent/tools';
+import type { AgentMessagePart } from '@/lib/agent/creator-adapter';
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
@@ -64,6 +65,44 @@ interface ReasoningPart {
   done?: boolean;
 }
 type TurnPart = QuestionPart | ToolPart | TextPart | ReasoningPart;
+
+/**
+ * 把 UI 的 TurnPart[]（按时序：文本/工具调用/工具结果）映射成可序列化的 AgentMessagePart[]，
+ * 供 creator-adapter 还原成 SDK 的 function_call / function_call_output 序列。
+ *
+ * 断点续的关键：重试时模型能看到「上轮已调用 WebSearch(query=x) 得到结果 Y」，
+ * 因此不必重跑搜索，直接从上次进度继续。
+ * - text part → text（output_text）
+ * - tool part(status=ok/error) → tool_call + 紧跟一个 tool_result（一一配对）
+ * - reasoning part → 跳过（思考内容不进工具续跑历史，避免噪音）
+ */
+function partsToAgentMessageParts(parts?: TurnPart[]): AgentMessagePart[] | undefined {
+  if (!parts || !parts.length) return undefined;
+  const out: AgentMessagePart[] = [];
+  for (const p of parts) {
+    if (p.type === 'text') {
+      if (p.content.trim()) out.push({ type: 'text', text: p.content });
+    } else if (p.type === 'tool') {
+      // 跳过 running 态（未完成的工具调用不应进历史）。
+      if (p.status === 'running') continue;
+      if (!p.toolCallId) continue;
+      out.push({
+        type: 'tool_call',
+        toolCallId: p.toolCallId,
+        name: p.name,
+        args: p.args,
+      });
+      out.push({
+        type: 'tool_result',
+        toolCallId: p.toolCallId,
+        name: p.name,
+        output: typeof p.result === 'string' ? p.result : JSON.stringify(p.result ?? ''),
+      });
+    }
+    // reasoning / question：跳过（不进工具历史）
+  }
+  return out.length ? out : undefined;
+}
 
 function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
   if (!part || typeof part !== 'object') return null;
@@ -622,7 +661,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       next[lastAssistantIdx] = { role: 'assistant', content: '', streaming: true, status: 'generating', parts: [] };
       return next;
     });
-    await runAgentTurn(lastAssistantIdx, userText);
+    // 重试模式：turns 里已含上一条 user 轮（紧邻被重置的 assistant 轮之前），
+    // 所以不应再追加 currentInput（否则用户消息重复）。传 isRetry=true 让 runAgentTurn 跳过追加。
+    await runAgentTurn(lastAssistantIdx, userText, { isRetry: true });
   }
 
   /**
@@ -630,8 +671,9 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
    * send() 新建 turn 后调用；retry() 复用既有 turn 后调用。二者共用此函数，避免逻辑重复。
    * @param assistantIdx 要写入的 assistant 轮下标
    * @param text 本轮用户输入（用于压缩与 currentInput）
+   * @param opts.isRetry 重试模式：turns 已含对应 user 轮，不重复追加 currentInput
    */
-  async function runAgentTurn(assistantIdx: number, text: string) {
+  async function runAgentTurn(assistantIdx: number, text: string, opts: { isRetry?: boolean } = {}) {
     setBusy(true);
 
     const controller = new AbortController();
@@ -669,9 +711,22 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const systemPrompt = basePrompt + thinkPrompt + refPrompt + draftPrompt;
       // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
       setCompressing(true);
+      // 构建消息：assistant 轮带上 parts（工具调用+结果），让重试/续跑时模型能看到上轮已完成的工作，
+      // 不必重跑 WebSearch 等工具（断点续的关键）。仅纳入 status==='done' 的 assistant 轮。
+      // 重试模式：turns 里已含被重置的失败 assistant 轮（generating），切片到 assistantIdx 之前，
+      // 并跳过追加 currentInput（对应 user 轮已在前面的 turns 里，避免重复）。
+      const historyTurns = opts.isRetry
+        ? turns.slice(0, assistantIdx)
+        : turns;
       const built = await buildContextMessages({
-        turns: turns.map((t) => ({ role: t.role, content: t.content })),
-        currentInput: text,
+        turns: historyTurns.map((t) => {
+          if (t.role === 'assistant' && t.status === 'done') {
+            return { role: t.role, content: t.content, parts: partsToAgentMessageParts(t.parts) };
+          }
+          return { role: t.role, content: t.content };
+        }),
+        currentInput: opts.isRetry ? '' : text,
+        skipAppendCurrent: opts.isRetry,
         systemPrompt,
         state: compressRef.current,
         tier,

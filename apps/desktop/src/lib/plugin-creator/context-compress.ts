@@ -52,10 +52,13 @@ export interface BuildResult {
 }
 
 interface BuildArgs {
-  /** 已发生的对话轮（user/assistant 交替），不含本次要发的输入。 */
-  turns: { role: 'user' | 'assistant'; content: string }[];
+  /** 已发生的对话轮（user/assistant 交替），不含本次要发的输入。
+   *  assistant 轮可带 parts（工具调用+结果），保留进 messages 让模型续跑时看到上轮工作。 */
+  turns: { role: 'user' | 'assistant'; content: string; parts?: unknown[] }[];
   /** 本次用户输入。 */
   currentInput: string;
+  /** 重试模式：turns 已含对应 user 轮，跳过追加 currentInput（避免用户消息重复）。 */
+  skipAppendCurrent?: boolean;
   /** 拼装好的基础系统提示词（含 skills）。 */
   systemPrompt: string;
   /** 压缩状态（in/out）。 */
@@ -86,16 +89,21 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
 
   const totalChars = turns.reduce((s, t) => s + t.content.length, 0);
 
-  // 未超阈值：原文返回。
+  // 未超阈值：原文返回。保留 assistant 的 parts（工具历史），让重试/续跑能断点续。
   if (totalChars <= threshold) {
-    const keptTurns = turns.map((t) => ({ role: t.role, content: t.content }));
+    const keptTurns = turns.map((t) =>
+      t.role === 'assistant' && Array.isArray(t.parts) && t.parts.length
+        ? { role: t.role, content: t.content, parts: t.parts }
+        : { role: t.role, content: t.content },
+    );
     const historyChars = turns.reduce((s, t) => s + t.content.length, 0);
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string; parts?: unknown[] }[] = [
+      { role: 'system', content: args.systemPrompt },
+      ...keptTurns,
+    ];
+    if (!args.skipAppendCurrent) messages.push({ role: 'user', content: args.currentInput });
     return {
-      messages: [
-        { role: 'system', content: args.systemPrompt },
-        ...keptTurns,
-        { role: 'user', content: args.currentInput },
-      ],
+      messages,
       compressedCount: 0,
       state,
       breakdown: {
@@ -156,7 +164,7 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
     messages.push({ role: 'system', content: `[历史上下文摘要]\n${nextSummary}` });
   }
   for (const t of verbatim) messages.push({ role: t.role, content: t.content });
-  messages.push({ role: 'user', content: args.currentInput });
+  if (!args.skipAppendCurrent) messages.push({ role: 'user', content: args.currentInput });
 
   const historyChars = verbatim.reduce((s, t) => s + t.content.length, 0);
   return {
