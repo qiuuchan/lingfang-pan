@@ -196,7 +196,11 @@ export async function runPluginCreatorAgent(input: CreatorAgentInput, turnIdx: n
     const result = await run(agent, agentMessages, {
       stream: true,
       signal,
-      maxTurns: 8,
+      // maxTurns：单次 run 的总轮次上限（每轮 = 一次模型调用 + 可能的工具调用）。
+      // 设 25：足够容纳探索性任务（多轮 WebSearch/WebFetch 抓取 + 分析 + 写代码），
+      // 同时仍是有限值，防止 agent 失控无限循环（如反复搜索相同词）。
+      // 联网搜索等需要多轮的工具调用不应被卡死，这里给足空间。
+      maxTurns: 25,
     });
     let sawRawTextDelta = false;
     const thinkParser = createThinkTagStreamParser({
@@ -245,14 +249,14 @@ export async function runPluginCreatorAgent(input: CreatorAgentInput, turnIdx: n
   } catch (e) {
     const aborted = (e as Error).name === 'AbortError';
     if (aborted) return { interrupted: false }; // 用户取消不算错误
-    // 达到工具调用轮次上限（典型：WebSearch 反复搜不到收敛）：不当作硬错误，
-    // 而是给出可操作的中文提示（可点重试续跑，或换更具体的关键词），避免裸露英文报错。
+    // 达到工具调用轮次上限：不当作硬错误（联网搜索多轮是正常的），
+    // 给出可操作的中文提示。调高了 maxTurns 后这很少触发，仅作失控兜底。
     // SDK 抛 MaxTurnsExceededError（name 于此判定，不依赖未导出的内部类）。
     const isMaxTurns = (e as Error).name === 'MaxTurnsExceededError' || /Max turns \(\d+\) exceeded/i.test((e as Error).message || '');
     if (isMaxTurns) {
       return {
         interrupted: false,
-        error: '已达到本回合工具调用次数上限（通常是反复联网搜索仍未收敛）。可换更具体的关键词，或点「重试」从上次进度继续。',
+        error: '本次对话步骤较多，已达到单轮处理上限。可点「重试」从上次进度继续，或把任务拆小分多轮完成。',
       };
     }
     return { interrupted: false, error: (e as Error).message || String(e) };
