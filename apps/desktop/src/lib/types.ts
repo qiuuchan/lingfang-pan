@@ -192,7 +192,7 @@ export interface LoadedPlugin {
   };
 }
 
-export type SettingsTab = 'general' | 'cli' | 'gateway' | 'plugins' | 'backend';
+export type SettingsTab = 'general' | 'cli' | 'gateway' | 'plugins' | 'backend' | 'about';
 // 06-24 计费钱包重构：原 'team' | 'wallet' 两个独立悬浮窗合并为 'team-wallet'（团队钱包）。
 export type AccountSettingsTab = 'account' | 'team-wallet' | 'settings';
 

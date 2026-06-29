@@ -36,6 +36,7 @@ import { CliRuntimeTab } from './settings/CliRuntimeTab';
 import { BillingTab } from './settings/BillingTab';
 import { PluginsTab } from './settings/PluginsTab';
 import { GeneralTab } from './settings/GeneralTab';
+import { AboutTab } from './settings/AboutTab';
 import { Checkbox } from '@/components/ui/checkbox';
 import { dragRegionProps } from '@/lib/window-drag';
 
@@ -196,8 +197,9 @@ export function Settings({
           <TabsTrigger value="cli" className="px-3">脚本运行环境</TabsTrigger>
           <TabsTrigger value="gateway" className="px-3">模型与计费</TabsTrigger>
           <TabsTrigger value="plugins" className="px-3">插件</TabsTrigger>
-          <TabsTrigger value="backend" className="px-3">更新</TabsTrigger>
-        </TabsList>
+  <TabsTrigger value="backend" className="px-3">更新</TabsTrigger>
+  <TabsTrigger value="about" className="px-3">关于</TabsTrigger>
+</TabsList>
 
         <AnimatePresence mode="wait">
           <motion.div
@@ -296,6 +298,17 @@ export function Settings({
                     </div>
                   </CardContent>
                 </Card>
+              </TabsContent>
+            )}
+
+            {/* Tab：关于 */}
+            {currentTab === 'about' && (
+              <TabsContent value="about" keepMounted className="mt-4 focus-visible:outline-none">
+                <AboutTab
+                  updateChannel={updateChannel}
+                  onToggleBeta={toggleBetaUpdates}
+                  onGotoUpdate={() => { onValueChange ? onValueChange('backend') : setInternalTab('backend'); }}
+                />
               </TabsContent>
             )}
           </motion.div>
