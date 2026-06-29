@@ -1144,7 +1144,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
     />
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none">
-      <div className={`flex h-[85vh] max-h-[800px] w-full ${draft ? 'max-w-[1540px]' : 'max-w-[1100px]'} min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl transition-[max-width] duration-300 animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`}>
+      <div className={`flex h-[85vh] max-h-[800px] w-full ${draft ? 'max-w-[1320px]' : 'max-w-[1100px]'} min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl transition-[max-width] duration-300 animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`}>
         {/* 标题栏 */}
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
