@@ -438,8 +438,82 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  const DateTime = tool({
+    name: 'DateTime',
+    description:
+      '获取当前的真实日期和时间。当用户提到「今天」「现在」「本周」「最近」等相对时间词、' +
+      '或需要把日期放进搜索查询（如「今日新闻」「2026年XX月XX日」）时，先调用本工具拿到准确日期，' +
+      '避免用训练数据里的旧日期。',
+    parameters: z.object({}).describe('无参数；直接返回当前日期时间'),
+    async execute(): Promise<string> {
+      const now = new Date();
+      const date = now.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+      });
+      const time = now.toLocaleTimeString('zh-CN', { hour12: false });
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const iso = now.toISOString().slice(0, 10);
+      return `当前时间：${date} ${time}（时区 ${tz}）\nISO 日期：${iso}`;
+    },
+  });
+
+  /**
+   * WebFetch —— 抓取网页正文。
+   *
+   * 为什么需要它：WebSearch 只返回搜索片段（snippet），拿不到网页正文。但很多问题的答案在
+   * 正文里（如「今日新闻头条」的内容、「某文档的 API 用法」、「教程的具体步骤」）。
+   * 典型用法：WebSearch 找到相关链接 → WebFetch 抓取该链接的正文。
+   *
+   * 实现：走后端 /api/search/fetch（后端调 Jina Reader 做正文抽取 + markdown 化）。
+   * 为什么不前端直连 Jina：客户端（尤其大陆网络）直连 r.jina.ai 被墙不可达，
+   * 但后端服务器可达。与 WebSearch 同一出口模式（前端 → 后端 → 上游）。
+   */
+  const WebFetch = tool({
+    name: 'WebFetch',
+    description:
+      '抓取指定 URL 网页的正文内容（自动抽取正文 + 转 markdown，去噪）。' +
+      'WebSearch 只返回摘要；要网页正文细节（新闻全文、文档原文、教程步骤）时，' +
+      '先用 WebSearch 找到链接，再用本工具抓正文。一次只抓一个 URL。',
+    parameters: z.object({
+      url: z.string().url().describe('要抓取的网页 URL（必须是完整 http(s):// 链接）'),
+      // maxLength 容错（与 WebSearch limit 同模式）：部分模型会把数字序列化成字符串/null。
+      maxLength: z.union([z.number(), z.string(), z.null()]).optional().describe('正文最大字符数，默认 6000'),
+    }),
+    async execute({ url, maxLength }): Promise<string> {
+      // 归一化 maxLength：非法值回落默认 6000，clamp 到 [500, 20000]。
+      const limit = (() => {
+        const n = typeof maxLength === 'string' ? Number(maxLength) : typeof maxLength === 'number' ? maxLength : NaN;
+        if (!Number.isFinite(n)) return 6_000;
+        return Math.min(20_000, Math.max(500, Math.trunc(n)));
+      })();
+      try {
+        const resp = await api<{
+          url: string;
+          content: string;
+          truncated: boolean;
+          fetchedVia: 'jina' | 'direct' | 'fail';
+          error?: string;
+        }>('/api/search/fetch', { method: 'POST', body: { url, maxLength: limit }, timeoutMs: 45_000 });
+        if (resp.fetchedVia === 'fail' || !resp.content) {
+          return `错误：抓取失败${resp.error ? `：${resp.error}` : '（网页不可达或为 JS 渲染页）'}。`;
+        }
+        const note = resp.truncated ? `\n\n（正文超过 ${limit} 字符，已截断；如需更多可加大 maxLength）` : '';
+        // fetchedVia=direct 表示用了降级抓取（质量较低），标注一下便于模型判断可信度。
+        const viaNote = resp.fetchedVia === 'direct' ? '（降级抓取，正文可能含噪音）' : '';
+        return `URL: ${url}${viaNote}\n\n${resp.content}${note}`;
+      } catch (e) {
+        // 网络错误 / 超时 → 错误前缀触发工具卡片标红。
+        const msg = (e as Error)?.message || String(e);
+        return `错误：抓取失败：${msg}`;
+      }
+    },
+  });
+
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();

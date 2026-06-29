@@ -230,6 +230,86 @@ export class SearchService {
     }
     return response;
   }
+
+  /**
+   * 抓取网页正文（WebFetch）。
+   *
+   * 为什么放后端：客户端（尤其大陆网络）直连 r.jina.ai 不可达（被墙），但后端服务器在
+   * 数据中心可达。前端 → 后端 /api/search/fetch → Jina Reader，与搜索同一出口模式。
+   *
+   * 实现：调 Jina Reader（r.jina.ai/<url>），它专为 LLM 优化——自动正文抽取 + 转 markdown，
+   * 去掉导航/广告/侧边栏噪音。返回 markdown 正文（已截断到 maxLength）。
+   *
+   * 容错：Jina 不可达时降级为「直接 fetch 原始 HTML + 去标签」，保证至少能拿到文本
+   * （质量不如 Jina，但比完全失败好）。
+   *
+   * @returns { url, content, truncated, fetchedVia } fetchedVia 标识实际抓取路径（jina/direct/fail）
+   */
+  async fetchPage(url: string, maxLength = 6_000): Promise<{
+    url: string;
+    content: string;
+    truncated: boolean;
+    fetchedVia: 'jina' | 'direct' | 'fail';
+    error?: string;
+  }> {
+    const limit = Math.min(20_000, Math.max(500, Math.trunc(maxLength)));
+
+    // 路径 1：Jina Reader（首选，正文抽取质量最高）。
+    // 注意：不用 fetchWithTimeout（它用 PROVIDER_TIMEOUT_MS=6s，对 Jina 太短），直接 fetch + 30s 超时。
+    try {
+      const jinaUrl = `https://r.jina.ai/${url}`;
+      const res = await fetch(jinaUrl, {
+        headers: {
+          Accept: 'text/markdown',
+          'X-Return-Format': 'markdown',
+          'User-Agent': 'Mozilla/5.0 (compatible; LingFangBot/1.0)',
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.trim()) {
+          const truncated = text.length > limit;
+          return { url, content: text.slice(0, limit), truncated, fetchedVia: 'jina' };
+        }
+      }
+      this.logger.warn(`Jina 抓取 ${url} 返回 ${res.status}，降级直接抓取`);
+    } catch (e) {
+      this.logger.warn(`Jina 抓取 ${url} 失败：${(e as Error).message}，降级直接抓取`);
+    }
+
+    // 路径 2：直接 fetch 原始 HTML + 粗暴去标签（Jina 不可达时的兜底，质量较低）。
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) {
+        return { url, content: '', truncated: false, fetchedVia: 'fail', error: `目标网页返回 ${res.status}` };
+      }
+      const html = await res.text();
+      // 去掉 script/style/nav/header/footer，再去标签，压空白。粗抽取，无正文识别。
+      const text = html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+        .replace(/<header[\s\S]*?<\/header>/gi, '')
+        .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;|&ensp;|&emsp;/g, ' ')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!text) return { url, content: '', truncated: false, fetchedVia: 'fail', error: '抓取到的正文为空（可能是 JS 渲染页）' };
+      const truncated = text.length > limit;
+      return { url, content: text.slice(0, limit), truncated, fetchedVia: 'direct' };
+    } catch (e) {
+      return { url, content: '', truncated: false, fetchedVia: 'fail', error: `抓取失败：${(e as Error).message}` };
+    }
+  }
 }
 
 /** 按规范化 URL 去重，保留首个出现（即更高优先级源）的条目。 */
