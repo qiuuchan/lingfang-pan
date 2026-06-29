@@ -17,19 +17,22 @@ impl EmbeddedRuntime {
         let root = if let Some(override_dir) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR") {
             PathBuf::from(override_dir)
         } else {
-            // 开发态回退：仅在 debug 构建或 exe 位于 cargo target 目录时才检查源码路径。
-            // 生产安装版（release + 不在 target 目录）直接走 resource_dir()，避免
-            // CARGO_MANIFEST_DIR（编译时嵌入的绝对路径，如 P:\...）被误用。
-            if is_dev_context() {
-                if let Some(d) = dev_runtimes_dir() {
-                    return Ok(Self { root: d });
-                }
+            // 自制安装器布局：runtimes/ 与 lingfang-desktop.exe 同级（build-installer.ps1 第 67 行
+            // Copy runtimes → staging 根目录）。这是最可靠的来源——不依赖 Tauri resource_dir
+            // （本应用 bundle.active:false，非 Tauri NSIS 安装，resource_dir 解析不可靠）。
+            if let Some(d) = exe_sibling_runtimes_dir() {
+                d
+            } else if let Some(d) = dev_runtimes_dir() {
+                // 开发态源码路径（CARGO_MANIFEST_DIR/../runtimes）存在则用，与 builtin_dir 一致。
+                // 生产安装环境该路径不存在（.exists() 守卫），自然不会命中。
+                d
+            } else {
+                // 兜底：Tauri 标准 resource_dir()/runtimes（Tauri bundle 安装时有效）。
+                app.path()
+                    .resource_dir()
+                    .map_err(|error| error.to_string())?
+                    .join("runtimes")
             }
-            // 打包态：resource_dir()/runtimes
-            app.path()
-                .resource_dir()
-                .map_err(|error| error.to_string())?
-                .join("runtimes")
         };
         Ok(Self { root })
     }
@@ -191,20 +194,27 @@ fn first_existing(paths: Vec<PathBuf>) -> Option<PathBuf> {
     paths.into_iter().find(|path| path.is_file())
 }
 
-/// 判断当前是否运行在开发/CI 上下文中（debug 构建 或 exe 位于 cargo target 目录）。
-/// 生产安装版（release + 不在 target 目录）返回 false，直接走 resource_dir()。
-fn is_dev_context() -> bool {
-    cfg!(debug_assertions) || is_running_from_cargo_target()
-}
-
-fn is_running_from_cargo_target() -> bool {
-    std::env::current_exe().ok().map_or(false, |exe_path| {
-        // Walk up ancestors; if any segment is "target", we are in a cargo build tree.
-        // 向上遍历祖先目录，任意一段为 "target" 即判定为 cargo 编译目录。
-        exe_path
-            .ancestors()
-            .any(|a| a.file_name().map_or(false, |n| n == "target"))
-    })
+/// 自制安装器布局：exe 同级目录下的 runtimes/（最可靠的运行时来源）。
+///
+/// build-installer.ps1 把 runtimes/ 与 lingfang-desktop.exe 一起复制到 staging 根目录，
+/// 安装后布局为 `<install_dir>/lingfang-desktop.exe` + `<install_dir>/runtimes/`。
+/// 用 current_exe() 的父目录定位，不依赖 Tauri resource_dir（本应用非 NSIS bundle）。
+fn exe_sibling_runtimes_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let runtimes = dir.join("runtimes");
+    // 仅当 runtimes 目录下确实有 python/node 二进制时才认定命中，避免误判空目录。
+    let has_runtime = windows_unix(
+        runtimes.join("python").join("python.exe"),
+        runtimes.join("python").join("bin").join("python"),
+    )
+    .into_iter()
+    .chain(windows_unix(
+        runtimes.join("nodejs").join("node.exe"),
+        runtimes.join("nodejs").join("bin").join("node"),
+    ))
+    .any(|p| p.is_file());
+    has_runtime.then_some(runtimes)
 }
 
 fn dev_runtimes_dir() -> Option<PathBuf> {
