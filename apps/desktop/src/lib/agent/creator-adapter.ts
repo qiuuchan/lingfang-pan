@@ -196,11 +196,12 @@ export async function runPluginCreatorAgent(input: CreatorAgentInput, turnIdx: n
     const result = await run(agent, agentMessages, {
       stream: true,
       signal,
-      // maxTurns：单次 run 的总轮次上限（每轮 = 一次模型调用 + 可能的工具调用）。
-      // 设 25：足够容纳探索性任务（多轮 WebSearch/WebFetch 抓取 + 分析 + 写代码），
-      // 同时仍是有限值，防止 agent 失控无限循环（如反复搜索相同词）。
-      // 联网搜索等需要多轮的工具调用不应被卡死，这里给足空间。
-      maxTurns: 25,
+      // maxTurns: null —— 不限制工具调用轮次。
+      // 联网搜索（WebSearch/WebFetch）等探索性任务经常需要多轮（换关键词、抓多个网页、对比），
+      // 硬上限会把正常搜索当错误拦截。改为不限轮次，由用户「停止」按钮（AbortController）兜底防失控。
+      // SDK 源码：if (state._maxTurns !== null && currentTurn > maxTurns) 才抛 MaxTurnsExceededError，
+      // 故传 null 即完全关闭该检查。
+      maxTurns: null,
     });
     let sawRawTextDelta = false;
     const thinkParser = createThinkTagStreamParser({
