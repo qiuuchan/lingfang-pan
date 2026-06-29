@@ -164,7 +164,8 @@ describe('WebFetch 工具', () => {
     const out = await callExecute(tools, 'WebFetch', { url: 'https://example.com', maxLength: '100' });
     expect(out).toContain('已截断');
     // 验证请求 body 里 maxLength 是归一化后的数字（100 → clamp 到 500）。
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    const callArgs = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(callArgs[1].body as string);
     expect(body.maxLength).toBe(500);
   });
 
