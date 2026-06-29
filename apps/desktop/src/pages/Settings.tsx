@@ -282,11 +282,7 @@ export function Settings({
                         </div>
                       </div>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <div className="rounded-lg border bg-muted/20 px-3 py-2">
-                        <div className="text-xs text-muted-foreground">版本通道</div>
-                        <div className="mt-1 text-sm font-medium">{updateChannel === 'BETA' ? 'Beta 优先' : '正式版优先'}</div>
-                      </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <div className="rounded-lg border bg-muted/20 px-3 py-2">
                         <div className="text-xs text-muted-foreground">校验</div>
                         <div className="mt-1 text-sm font-medium">SHA-256</div>
@@ -306,7 +302,6 @@ export function Settings({
               <TabsContent value="about" keepMounted className="mt-4 focus-visible:outline-none">
                 <AboutTab
                   updateChannel={updateChannel}
-                  onToggleBeta={toggleBetaUpdates}
                   onGotoUpdate={() => { onValueChange ? onValueChange('backend') : setInternalTab('backend'); }}
                 />
               </TabsContent>
