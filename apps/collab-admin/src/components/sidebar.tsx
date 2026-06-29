@@ -102,7 +102,7 @@ export function Sidebar({ groups, items, activeView, onSelect, header, footer }:
   const sidebarContent = (
     <div className="flex h-full flex-col gap-2">
       {header && <div className="shrink-0">{header}</div>}
-      <nav className="flex-1 space-y-2 overflow-y-auto py-1">
+      <nav className="flex-1 space-y-2 overflow-y-auto py-1 scrollbar-thin">
         {groups
           ? groups.map(renderGroup)
           : (items || []).map(renderItem)}

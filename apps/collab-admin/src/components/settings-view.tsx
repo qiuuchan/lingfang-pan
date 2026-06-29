@@ -10,6 +10,7 @@ import {
   SendIcon,
   ShieldCheckIcon,
   GitBranchIcon,
+  Loader2Icon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -91,6 +92,18 @@ const EMPTY_GITEE: GiteeSettings = {
   hasAccessToken: false,
 };
 
+// 组E 搜索源：searxngUrl 明文 + tavily/brave 密钥脱敏（hasXxx 布尔）。
+type SearchSettings = {
+  searxngUrl: string;
+  hasTavilyApiKey: boolean;
+  hasBraveApiKey: boolean;
+};
+const EMPTY_SEARCH: SearchSettings = {
+  searxngUrl: '',
+  hasTavilyApiKey: false,
+  hasBraveApiKey: false,
+};
+
 // framer-motion 卡片入场：stagger 错峰，使多卡依次滑入。
 const containerVariant = {
   hidden: {},
@@ -139,6 +152,15 @@ export function SettingsView() {
   const [giteeLoading, setGiteeLoading] = useState(true);
   const [giteeSaving, setGiteeSaving] = useState(false);
   const [giteeTesting, setGiteeTesting] = useState(false);
+
+  // 组E 搜索源：searxngUrl 明文 + tavily/brave 密钥脱敏。AI 联网搜索的源配置。
+  // 密钥 Draft 仅在输入新值时非空（留空保持不变，与 Gitee token 同款约定）。
+  const [search, setSearch] = useState<SearchSettings>(EMPTY_SEARCH);
+  const [searchDraft, setSearchDraft] = useState<SearchSettings>(EMPTY_SEARCH);
+  const [tavilyKeyDraft, setTavilyKeyDraft] = useState('');
+  const [braveKeyDraft, setBraveKeyDraft] = useState('');
+  const [searchLoading, setSearchLoading] = useState(true);
+  const [searchSaving, setSearchSaving] = useState(false);
 
   // 平台信息 / SMTP / 极验配置均从后端加载：平台信息走公开 platform-info，SMTP / 极验走 admin 端点。
   useEffect(() => {
@@ -211,6 +233,21 @@ export function SettingsView() {
       })
       .finally(() => {
         if (!cancelled) setGiteeLoading(false);
+      });
+    // GET /api/admin/settings/search：返回当前搜索源配置（tavily/brave 密钥脱敏 hasXxx）。
+    api<SearchSettings>('/api/admin/settings/search')
+      .then((data) => {
+        if (cancelled) return;
+        const next = { ...EMPTY_SEARCH, ...data };
+        setSearch(next);
+        setSearchDraft(next);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        toast.error(`搜索源配置加载失败：${(e as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setSearchLoading(false);
       });
     return () => {
       cancelled = true;
@@ -369,6 +406,35 @@ export function SettingsView() {
       toast.error((e as Error).message);
     } finally {
       setGiteeSaving(false);
+    }
+  }
+
+  // 组E 搜索源：保存（PATCH /api/admin/settings 批量 upsert）。
+  // 密钥 Draft 仅在输入新值时提交（留空保持不变，与 Gitee token 同款约定）。
+  async function saveSearchSettings() {
+    setSearchSaving(true);
+    try {
+      const entries: Array<{ key: string; value: string }> = [
+        { key: 'searxngUrl', value: searchDraft.searxngUrl.trim() },
+      ];
+      if (tavilyKeyDraft.length > 0) entries.push({ key: 'tavilyApiKey', value: tavilyKeyDraft });
+      if (braveKeyDraft.length > 0) entries.push({ key: 'braveApiKey', value: braveKeyDraft });
+      await api('/api/admin/settings', { method: 'PATCH', body: { settings: entries } });
+      // 同步本地快照 + 清空密钥草稿（后端已存新值，下次加载 hasXxx=true）。
+      const updated: SearchSettings = {
+        searxngUrl: searchDraft.searxngUrl.trim(),
+        hasTavilyApiKey: tavilyKeyDraft.length > 0 ? true : searchDraft.hasTavilyApiKey,
+        hasBraveApiKey: braveKeyDraft.length > 0 ? true : searchDraft.hasBraveApiKey,
+      };
+      setSearch(updated);
+      setSearchDraft(updated);
+      setTavilyKeyDraft('');
+      setBraveKeyDraft('');
+      toast.success('搜索源配置已保存');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSearchSaving(false);
     }
   }
 
@@ -894,6 +960,76 @@ export function SettingsView() {
                   ? `Gitee 已配置 · ${gitee.giteeOwner || 'yijianruyuan'}/${gitee.giteeRepo || 'lingfang'}`
                   : 'Gitee 未配置 · 更新日志降级显示「未配置」'}
             </Badge>
+          </div>
+        </Section>
+      </motion.div>
+
+      {/* 组E 搜索源（AI 联网搜索的源配置：自建 SearXNG + Tavily/Brave 密钥）。
+          未配置任何密钥时仅靠公共 SearXNG + Bing 兜底，大陆网络下公共源常不可达、
+          Bing 对数据中心 IP 易反爬，导致搜索无结果。配置 Tavily 或 Brave 密钥可显著改善。 */}
+      <motion.div variants={cardVariant}>
+        <Section
+          title="搜索源（AI 联网搜索）"
+          description="AI 的 WebSearch 工具用的搜索源。免密钥时有公共 SearXNG + Bing 兜底，但大陆网络下公共源常不可达、Bing 对服务器 IP 易反爬（中文新闻类查询可能返回空）。配置 Tavily 或 Brave 密钥可显著提升搜索成功率与质量。密钥脱敏不返回明文。"
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="searxng-url">自建 SearXNG 地址（可选，优先级最高）</Label>
+              <Input
+                id="searxng-url"
+                value={searchDraft.searxngUrl}
+                onChange={(e) => setSearchDraft({ ...searchDraft, searxngUrl: e.target.value })}
+                placeholder="https://searxng.your-domain.com"
+                disabled={searchLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">自部署的 SearXNG 实例地址（留空用公共源）。优先级高于 Tavily/Brave。</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tavily-key">Tavily API Key（推荐，专为 AI 优化）</Label>
+              <Input
+                id="tavily-key"
+                type="password"
+                value={tavilyKeyDraft}
+                onChange={(e) => setTavilyKeyDraft(e.target.value)}
+                placeholder={searchDraft.hasTavilyApiKey ? '已配置，留空保持不变' : 'tvly-xxxxxx（tavily.com 注册获取）'}
+                disabled={searchLoading}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                {searchDraft.hasTavilyApiKey ? '当前已配置，留空提交保持不变。' : 'tavily.com 注册，免费额度 1000 次/月。专为 AI 搜索优化。'}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="brave-key">Brave Search API Key（可选）</Label>
+              <Input
+                id="brave-key"
+                type="password"
+                value={braveKeyDraft}
+                onChange={(e) => setBraveKeyDraft(e.target.value)}
+                placeholder={searchDraft.hasBraveApiKey ? '已配置，留空保持不变' : 'BSAxxxxxx（brave.com/search/api 获取）'}
+                disabled={searchLoading}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                {searchDraft.hasBraveApiKey ? '当前已配置，留空提交保持不变。' : 'brave.com/search/api 注册，免费额度 2000 次/月。'}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-2">
+            <Badge variant={searchLoading ? 'secondary' : (searchDraft.hasTavilyApiKey || searchDraft.hasBraveApiKey ? 'default' : 'secondary')}>
+              {searchLoading
+                ? '加载中…'
+                : (searchDraft.hasTavilyApiKey || searchDraft.hasBraveApiKey)
+                  ? `已配置 ${[searchDraft.hasTavilyApiKey && 'Tavily', searchDraft.hasBraveApiKey && 'Brave'].filter(Boolean).join(' + ')}`
+                  : '未配置密钥 · 仅靠公共源兜底（大陆易无结果）'}
+            </Badge>
+            <Button onClick={saveSearchSettings} disabled={searchLoading || searchSaving}>
+              {searchSaving && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+              保存
+            </Button>
           </div>
         </Section>
       </motion.div>
