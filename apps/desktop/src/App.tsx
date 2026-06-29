@@ -786,7 +786,7 @@ export default function App() {
       <PanelDialog open={teamWalletOpen} onOpenChange={setTeamWalletOpen} title="团队钱包" description="团队共享余额（插件市场）与灵石（AI 计费）" size="md">
         <Suspense fallback={<ListSkeleton rows={6} />}><TeamWallet /></Suspense>
       </PanelDialog>
-      <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新">
+      <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新 / 关于">
         <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>
       </PanelDialog>
       <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="auto">

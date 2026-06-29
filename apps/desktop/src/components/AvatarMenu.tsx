@@ -23,6 +23,7 @@ import {
   WrenchIcon,
   HelpCircleIcon,
   CpuIcon,
+  InfoIcon,
   SunIcon,
   MoonIcon,
   MonitorIcon,
@@ -115,9 +116,10 @@ export function AvatarMenu({
     { key: 'other-settings', label: '其他设置', icon: CpuIcon, visible: true, onClick: () => { openAccountSettings('settings', 'general'); onClose(); } },
   ];
 
-  // 下半部分菜单（帮助）。项 9/10：「设置与快捷键」「本地权限与安全」已删除（统一并入「其他设置」）。
+  // 下半部分菜单（帮助 / 关于）。项 9/10：「设置与快捷键」「本地权限与安全」已删除（统一并入「其他设置」）。
   const bottomItems: Item[] = [
     { key: 'help', label: '帮助与反馈', icon: HelpCircleIcon, visible: true, onClick: () => { openHelpFeedback(); onClose(); } },
+    { key: 'about', label: '关于', icon: InfoIcon, visible: true, onClick: () => { openAccountSettings('settings', 'about'); onClose(); } },
   ];
 
   const themeOpts: { value: string; label: string; icon: typeof SunIcon }[] = [
