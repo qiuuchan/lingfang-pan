@@ -7,7 +7,8 @@ const WORKFLOW = `
 
 # 工作方式
 - 信息不全或有歧义时，先问一个关键问题。
-- 需要外部事实时再用 WebSearch。
+- 用户提到「今天/现在/最近」等相对时间，或要把日期放进搜索时，先用 DateTime 拿准确日期——不要凭训练数据猜日期。
+- 需要外部事实时再用 WebSearch（只返回搜索摘要）。要网页正文细节（新闻全文、文档原文、教程步骤）时：先用 WebSearch 找到链接，再用 WebFetch 抓正文。
 - 新建用 CreatePlugin；修改已有内容时先 Read，再用 Edit/Write。
 - 多行源码较长或包含大量引号/反斜杠时，先用 CreatePlugin 创建最小骨架，再用 Write 分文件写入完整源码；Write 的 content 可用字符串数组逐行传入。
 - 完成或修改后用 Check 校验。

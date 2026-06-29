@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import {
   ChevronRightIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon,
-  FileTextIcon, FilePenIcon, FolderTreeIcon, GlobeIcon, PackagePlusIcon, AlertCircleIcon, BoxesIcon, WrenchIcon, MessageCircleQuestionIcon, ListChecksIcon,
+  FileTextIcon, FilePenIcon, FolderTreeIcon, GlobeIcon, PackagePlusIcon, AlertCircleIcon, BoxesIcon, WrenchIcon, MessageCircleQuestionIcon, ListChecksIcon, CalendarClockIcon, FileDownIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,6 +29,8 @@ const TOOL_META: Record<string, { icon: typeof FileTextIcon; label: string }> = 
   AskQuestion: { icon: MessageCircleQuestionIcon, label: 'Ask' },
   ListTeamPlugins: { icon: BoxesIcon, label: 'ListTeamPlugins' },
   TodoWrite: { icon: ListChecksIcon, label: 'Todo' },
+  DateTime: { icon: CalendarClockIcon, label: '时间' },
+  WebFetch: { icon: FileDownIcon, label: '网页' },
   // 旧会话兼容：历史记录里可能仍有迁移前工具名。
   stage_plugin: { icon: PackagePlusIcon, label: 'stage_plugin' },
   web_search: { icon: GlobeIcon, label: 'web_search' },
@@ -75,6 +77,11 @@ function summarize(data: ToolCardData): string {
       const done = list.filter((t) => t.status === 'completed').length;
       return `${done}/${list.length} 完成`;
     }
+    case 'DateTime':
+      // result 形如「当前时间：2026年6月29日 周日 ...」，取日期部分摘要。
+      return typeof data.result === 'string' ? data.result.split('（')[0].replace('当前时间：', '') : '当前时间';
+    case 'WebFetch':
+      return typeof a.url === 'string' ? a.url.replace(/^https?:\/\//, '').slice(0, 40) : '';
     default:
       return '';
   }

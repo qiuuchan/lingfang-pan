@@ -8,7 +8,7 @@ import { Body, Controller, Inject, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { SearchService } from './search.service';
-import { SearchQueryDto } from './dto/search.dto';
+import { SearchQueryDto, WebFetchDto } from './dto/search.dto';
 
 @ApiTags('Search')
 @Controller('search')
@@ -20,5 +20,11 @@ export class SearchController {
   @ApiOperation({ summary: '多源聚合网络搜索（免用户密钥，内置默认启用，自动跳过不可达源）' })
   query(@Body() dto: SearchQueryDto) {
     return this.search.search(dto.query, dto.limit);
+  }
+
+  @Post('fetch')
+  @ApiOperation({ summary: '抓取网页正文（WebFetch，经正文抽取+markdown 化，服务端可达 Jina）' })
+  fetchPage(@Body() dto: WebFetchDto) {
+    return this.search.fetchPage(dto.url, dto.maxLength);
   }
 }
