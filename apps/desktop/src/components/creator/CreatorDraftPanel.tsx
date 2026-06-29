@@ -1,11 +1,11 @@
-// CreatorDraftPanel —— 创建器右侧分栏：草稿预览 + 信息编辑 + 保存本地。
+// CreatorDraftPanel —— 创建器右侧分栏：信息编辑 + 提交/保存。
 //
-// AI 通过 CreatePlugin 写入 plugins_root 草稿后，这里实时预览效果并允许用户改信息（名字/描述、ID/版本、
+// AI 通过 CreatePlugin 写入 plugins_root 草稿后，这里允许用户改信息（名字/描述、ID/版本、
 // 运行类型/入口、能力/可见性），用户也可继续对话让 AI 迭代。可直接提交到团队空间，
 // 也可在桌面环境点「保存草稿到本地」写入本地文件系统。
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2Icon, SendIcon, FileCode2Icon, RefreshCwIcon, ChevronDownIcon, AlertTriangleIcon, XCircleIcon, UploadIcon } from 'lucide-react';
+import { Loader2Icon, SendIcon, ChevronDownIcon, AlertTriangleIcon, XCircleIcon, UploadIcon } from 'lucide-react';
 import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,12 +15,6 @@ import { buildStagedManifest, submitStagedPlugin, validateStagedCompleteness, wi
 import { validatePluginStructure } from '@/lib/plugin-draft/manifest';
 import { saveDraftPlugin } from '@/lib/draft-plugin';
 
-const RUNTIME_LABELS: Record<StagedPlugin['runtime_type'], string> = {
-  client: '前端（软件内 iframe）',
-  nodejs: 'Node.js（独立进程）',
-  python: 'Python（独立进程）',
-};
-
 // 能力白名单：必须与后端 plugin-package.ts ALLOWED_CAPABILITIES 完全一致，否则勾选后端不认的能力会 400。
 const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
@@ -28,22 +22,6 @@ const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
   'system.info', 'system.screenshot', 'system.notify',
   'code-assistant.run', 'code-assistant.session', 'plugin.upload', 'plugin.submitMarketplace',
 ];
-
-/** 构造预览 srcDoc：注入宿主设计令牌 + sdk shim，再拼接入口 HTML（与 manifest.previewSrcDoc 行为一致）。 */
-function buildPreview(draft: StagedPlugin): string {
-  const html = draft.files.find((f) => f.path === draft.entry)?.content || '<p style="padding:24px;font-family:system-ui">无预览入口</p>';
-  const tokens = `<style data-lf-tokens>:root{--lf-color-primary:#2563eb;--lf-color-bg:#fafafa;--lf-color-text:#1a1a1a;--lf-color-border:#dddddd;--lf-radius-md:10px;--lf-spacing-md:14px;--lf-font-sans:system-ui,sans-serif;}</style>`;
-  const shim = `<script>
-    window.sdk = {
-      invoke: async (cap) => { alert('能力 ' + cap + ' 将在发布后由宿主网关提供'); },
-      llm: { chat: async () => '（预览态：发布后由灵坊平台执行）' },
-      image: { generate: async () => '（预览态：发布后由灵坊平台执行）' },
-      codeAssistant: { run: async () => '（预览态：发布后由本地代码助手执行）' },
-      ui: { render: (c) => { document.body.insertAdjacentHTML('beforeend', '<pre>' + (typeof c === 'string' ? c : JSON.stringify(c, null, 2)) + '</pre>'); } },
-    };
-  <\/script>`;
-  return tokens + shim + html;
-}
 
 export function CreatorDraftPanel({
   draft,
@@ -65,14 +43,11 @@ export function CreatorDraftPanel({
 }) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishingTeam, setPublishingTeam] = useState(false);
-  const [previewKey, setPreviewKey] = useState(0);
   const [infoOpen, setInfoOpen] = useState(true);
 
   const preparedDraft = useMemo(() => withSyncedStagedManifest(draft), [draft]);
-  const isClient = preparedDraft.runtime_type === 'client';
   const entryMissing = !preparedDraft.files.some((f) => f.path === preparedDraft.entry);
   const idValid = /^[a-z0-9-]+$/.test(preparedDraft.id);
-  const srcDoc = useMemo(() => buildPreview(preparedDraft), [preparedDraft]);
   // 结构诊断：检测 manifest/入口/命名规范等结构问题，显式提示用户（fail 红 / warn 黄）。
   const diagnostics = useMemo(() => validatePluginStructure(preparedDraft.files), [preparedDraft.files]);
   const hasFail = diagnostics.some((d) => d.status === 'fail');
@@ -143,49 +118,8 @@ export function CreatorDraftPanel({
 
   return (
     <div className="flex h-full w-[420px] shrink-0 flex-col border-l bg-muted/20">
-      {/* 预览区 */}
-      <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <FileCode2Icon className="size-3.5" />
-          草稿预览
-        </div>
-        {isClient && (
-          <button
-            type="button"
-            onClick={() => setPreviewKey((k) => k + 1)}
-            title="刷新预览"
-            className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <RefreshCwIcon className="size-3.5" />
-          </button>
-        )}
-      </div>
-      <div className="min-h-[200px] flex-1 overflow-hidden bg-white">
-        {isClient ? (
-          entryMissing ? (
-            <div className="flex h-full items-center justify-center p-4 text-center text-xs text-destructive">
-              入口文件 {preparedDraft.entry} 不存在，无法预览。可在下方改入口，或让 AI 重新生成。
-            </div>
-          ) : (
-            <iframe
-              key={previewKey}
-              title="草稿预览"
-              sandbox="allow-scripts allow-forms allow-popups"
-              srcDoc={srcDoc}
-              className="h-full w-full border-0"
-            />
-          )
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs text-muted-foreground">
-            <FileCode2Icon className="size-8 text-muted-foreground/40" />
-            <p>{RUNTIME_LABELS[draft.runtime_type]}插件在独立进程运行，无法在此可视化预览。</p>
-            <p>可核对下方信息与文件后提交，发布后在插件中心运行查看输出。</p>
-          </div>
-        )}
-      </div>
-
       {/* 信息编辑区 */}
-      <div className="flex max-h-[55%] shrink-0 flex-col border-t">
+      <div className="flex max-h-full shrink-0 flex-col">
         <button
           type="button"
           onClick={() => setInfoOpen((v) => !v)}
