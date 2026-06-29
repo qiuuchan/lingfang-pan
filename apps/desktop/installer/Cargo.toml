@@ -43,3 +43,8 @@ windows-sys = { version = "0.59", features = [
   "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Windows VERSIONINFO 资源（build.rs 嵌入）：给 installer.exe 补合法的版本元数据
+# （公司名/产品名/版本/文件描述），减少杀软把「匿名 dropper」误判为恶意的概率。
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
