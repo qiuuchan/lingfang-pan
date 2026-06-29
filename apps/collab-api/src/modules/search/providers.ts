@@ -153,8 +153,10 @@ export class BingHtmlProvider implements SearchProvider {
     return /^https?:\/\//i.test(this.baseUrl);
   }
   async search(query: string, limit: number, signal: AbortSignal): Promise<SearchResultItem[]> {
-    const url = `${this.baseUrl}/search?q=${encodeURIComponent(query)}&setlang=zh-Hans&cc=cn&ensearch=0`;
-    // ensearch=0 关闭国际版结果回退，强制中文区结果，提升大陆网络可达性下的相关性。
+    const url = `${this.baseUrl}/search?q=${encodeURIComponent(query)}&setlang=zh-Hans&cc=cn&ensearch=1`;
+    // ensearch=1 启用国际结果覆盖（cn.bing.com 默认走 CN 审查索引，会降权/过滤 GitHub、
+    // 英文技术内容，相关性差）。实测 ensearch=0 是强制 CN 索引，注释此前写反了。
+    // 国际 Bing 偶发不可达时由上层健康探测自动禁用，回落 SearXNG。
     const res = await fetchWithTimeout(
       url,
       {
@@ -211,21 +213,126 @@ export function parseBingHtml(html: string, limit: number, source: string): Sear
   return items;
 }
 
-/** Bing 偶尔把链接包成 /search?q=... 的跳转，尝试解出里面的 u 参数或直接返回原 url。 */
-function decodeBingUrl(raw: string): string {
+/**
+ * 解码 Bing 结果链接，尽量还原真实目标 URL。
+ *
+ * Bing HTML SERP 的链接常见三种形态：
+ *  1. 直链 https://example.com/...（直接返回）
+ *  2. /search?url=<直链>（旧跳转，已支持）
+ *  3. /ck/a?...&u=a1<base64url>（新跳转包装，a1 前缀 + base64url 编码的真实 URL）
+ *
+ * 形态 3 此前未处理 → 产出 bing.com/ck/a 垃圾 URL。现补齐 base64url 解码；
+ * 若解出仍是 bing 内部链接（ck/a、/search），返回空串让上层丢弃（不产出垃圾结果）。
+ *
+ * @returns 真实 URL；无法还原或仍是 bing 内部链接时返回 ''（调用方据此丢弃）。
+ */
+export function decodeBingUrl(raw: string): string {
   try {
     const u = new URL(raw, 'https://cn.bing.com');
-    if (/^\/search$/i.test(u.pathname)) {
-      // Bing 跳转链接形如 /search?q=...&url=... 或 /search?FORM=...&u=a1aHR0c...
+    const host = u.hostname;
+    const isBing = /(^|\.)bing\.com$/i.test(host);
+
+    // 形态 3：/ck/a?...&u=a1<base64url>
+    if (isBing && /^\/ck\/a$/i.test(u.pathname)) {
+      const uParam = u.searchParams.get('u') ?? '';
+      // a1 前缀后是 base64url（- _ 代替 + /，无填充）。
+      const decoded = decodeBase64UrlParam(uParam);
+      if (decoded && /^https?:\/\//i.test(decoded) && !/bing\.com\/ck\/a/i.test(decoded)) {
+        return decoded;
+      }
+      return ''; // 解不出或仍是内部跳转 → 丢弃
+    }
+
+    // 形态 2：/search?url=<直链>
+    if (isBing && /^\/search$/i.test(u.pathname)) {
       const direct = u.searchParams.get('url');
       if (direct) return direct;
+      return ''; // /search 但无 url 参数 → 内部跳转，丢弃
     }
-    // 站内相对路径不作为有效结果 url。
-    if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString();
+
+    // 形态 1：直链或站内相对路径。站内路径（/images、/videos 等）不作为有效结果。
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      if (isBing) return ''; // 其它 bing 站内页（非 ck/a、非 search）不算有效结果
+      return u.toString();
+    }
   } catch {
-    /* 解析失败兜底返回原值 */
+    /* 解析失败兜底：原值若像 URL 就返回，否则空串 */
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return '';
   }
   return raw;
+}
+
+/** 解码 Bing ck/a 的 u 参数：去 a1 前缀 + base64url 解码（补齐填充）。 */
+function decodeBase64UrlParam(param: string): string {
+  if (!param) return '';
+  // 去 a1 前缀（Bing 在 base64url 前加 'a1' 标记，有时还有其它单字符前缀）。
+  const m = param.match(/^a[0-9]+(.+)$/);
+  const payload = m ? m[1] : param;
+  if (!payload) return '';
+  try {
+    // base64url → base64：- → +，_ → /，按需补 =
+    let b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4;
+    if (pad) b64 += '='.repeat(4 - pad);
+    // Buffer 在 Node 18+ 可用；search 服务跑在 Node，非浏览器。
+    return Buffer.from(b64, 'base64').toString('utf-8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * GitHub 原生搜索源 —— 调 GitHub Search API 搜仓库，免密钥。
+ *
+ * 为什么需要它：抓 Bing 的 `site:github.com` 查询极不可靠（CN 索引降权 + site: 操作符常被忽略）。
+ * 直接走 GitHub API 精确搜仓库，准确性远高于网页搜索，尤其适合「找某类开源项目/库」的查询。
+ *
+ * 限速：免密钥 10 次/分钟/IP（GitHub 官方限制）。由 SearchService 的健康探测兜底——
+ * 触发限速（403 + rate limit）时本次失败、下次探测仍会重试。
+ * 仅在查询含 `site:github.com` 或由 SearchService 路由判定为「适合 GitHub」时启用。
+ */
+export class GitHubProvider implements SearchProvider {
+  readonly name = 'github';
+  isConfigured(): boolean {
+    return true; // 免密钥，恒可用
+  }
+  async search(query: string, limit: number, signal: AbortSignal): Promise<SearchResultItem[]> {
+    // GitHub Search API：q 为搜索词，sort=stars 按热度排（对「找项目」更相关）。
+    const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${Math.min(limit, 10)}`;
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          // GitHub API 要求带 UA，否则可能 403。
+          'User-Agent': 'lingfang-search/1.0',
+        },
+      },
+      signal,
+    );
+    if (!res.ok) {
+      // 403 常见为限速；抛错让上层跳过，回落其它源。
+      throw new Error(`GitHub 返回 ${res.status}`);
+    }
+    const data = (await res.json()) as { items?: Array<Record<string, unknown>> };
+    const items = Array.isArray(data.items) ? data.items : [];
+    return items.map((it) => {
+      const name = str(it.full_name) || str(it.name);
+      const htmlUrl = str(it.html_url);
+      const desc = str(it.description);
+      // snippet：描述 + ⭐星数 + 语言，便于模型判断相关性。
+      const stars = typeof it.stargazers_count === 'number' ? it.stargazers_count : 0;
+      const lang = str(it.language);
+      const extra = [lang, `⭐${stars}`].filter(Boolean).join(' · ');
+      return {
+        title: name,
+        url: htmlUrl,
+        snippet: [desc, extra].filter(Boolean).join(' | '),
+        source: this.name,
+      };
+    }).filter((r) => r.url && r.title);
+  }
 }
 
 /** 去除 HTML 标签并解码常见实体，得到纯文本用于标题/摘要展示。 */
@@ -240,7 +347,14 @@ function stripTags(html: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    // 兜底：其余数字实体（&#0183; 等）解码为字符，避免摘要里残留 &#xxxx;。
+    .replace(/&apos;/g, "'")
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '–')
+    // 兜底：数字实体（&#0183; / &#xNN; 等）解码为字符，避免摘要里残留实体。
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => {
+      const code = parseInt(h, 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    })
     .replace(/&#(\d+);/g, (_, n) => {
       const code = Number(n);
       return Number.isFinite(code) ? String.fromCodePoint(code) : '';
