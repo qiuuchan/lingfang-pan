@@ -231,6 +231,12 @@ export async function runPluginCreatorAgent(input: CreatorAgentInput, turnIdx: n
           const tool = toolCallFromItem(item);
           callbacks.upsertToolPart(turnIdx, { ...tool, status: 'running' });
           callbacks.onToolStart?.(tool.name, tool.args);
+          // 多步循环关键修复：tool_called 标志当前 turn 的模型输出已结束，
+          // 下一个 turn 会重新输出 <think>...</think>。重置 thinkParser 状态，
+          // 避免上一 turn 的 lastClosedReasoning/pendingAfterThinkText 残留
+          // 污染下一 turn 的文本分发（这是"思考泄漏到正文"的根因）。
+          thinkParser.reset();
+          sawRawTextDelta = false;
         } else if (name === 'tool_output' && item.type === 'tool_call_output_item') {
           const output = toolOutputFromItem(item);
           callbacks.upsertToolPart(turnIdx, output);

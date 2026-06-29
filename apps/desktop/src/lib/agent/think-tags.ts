@@ -12,6 +12,8 @@ export interface ThinkTagHandlers {
 export interface ThinkTagStreamParser {
   feed: (chunk: string) => void;
   flush: () => void;
+  /** 重置所有内部状态（多步 agent 循环中，每个 turn 的模型输出应从干净状态开始解析）。 */
+  reset: () => void;
 }
 
 function indexOfTag(text: string, tag: string): number {
@@ -106,7 +108,13 @@ export function createThinkTagStreamParser(handlers: ThinkTagHandlers): ThinkTag
         buffer = afterClose.replace(/^\s+/, '');
         return;
       }
-      emitText(beforeClose);
+      // 多步循环的"延续思考"模式：工具调用后，模型有时输出思考内容但省略 <think> 开标签，
+      // 只用 </think> 闭合（假设思考上下文从上轮延续）。此时 beforeClose 是思考而非正文，
+      // 必须当 reasoning 输出，否则会泄漏到正文区。
+      emitReasoning(beforeClose);
+      endReasoning();
+      buffer = afterClose.replace(/^\s+/, '');
+      return;
     } else if (pendingAfterThinkText && sawThinkTag) {
       const normalizedPending = normalizedReasoning(pendingAfterThinkText);
       if (!normalizedPending || normalizedPending === lastClosedReasoning || lastClosedReasoning.startsWith(normalizedPending)) {
@@ -186,6 +194,16 @@ export function createThinkTagStreamParser(handlers: ThinkTagHandlers): ThinkTag
         }
         flushPendingAfterThinkText(true);
       }
+    },
+    reset() {
+      // 多步 agent 循环：每个 turn 的模型输出独立，上一 turn 的 lastClosedReasoning /
+      // pendingAfterThinkText 不能残留，否则下一 turn 的正文会被误当「重复思考」吞掉/乱分发。
+      buffer = '';
+      inThink = false;
+      sawThinkTag = false;
+      currentReasoning = '';
+      lastClosedReasoning = '';
+      pendingAfterThinkText = '';
     },
   };
 }

@@ -285,7 +285,25 @@ export function createAgentTools(opts: AgentToolsOptions) {
       const draftFiles = files.map((p) => ({ path: p, content: '' }));
       const err = validateStagedCompleteness(runtime, entry, draftFiles);
       if (err) return `发现问题：${err}`;
-      return '校验通过：入口与必需文件齐备，路径合法。';
+      // 语法校验：读回所有源码文件，做括号配对 + 常见错误模式检查。
+      // 这是质量兜底——AI 可能写出语法错误代码（如 os.path.xxx 无效属性、括号不配对），
+      // Check 必须抓出来让模型自我修复，而不是"校验通过"放行跑不起来的插件。
+      const syntaxIssues: string[] = [];
+      const codeFiles = files.filter((p) => /\.(py|js|ts)$/i.test(p));
+      for (const filePath of codeFiles) {
+        let content = '';
+        try {
+          content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: filePath });
+        } catch {
+          continue;
+        }
+        const issue = checkCodeSyntax(filePath, content);
+        if (issue) syntaxIssues.push(issue);
+      }
+      if (syntaxIssues.length) {
+        return `错误：发现 ${syntaxIssues.length} 个语法问题，必须修复后再交付：\n${syntaxIssues.join('\n')}`;
+      }
+      return '校验通过：入口与必需文件齐备，路径合法，代码语法检查无问题。';
     },
   });
 
@@ -519,4 +537,76 @@ export function createAgentTools(opts: AgentToolsOptions) {
       readPaths.clear();
     },
   };
+}
+
+/**
+ * 代码语法粗校验（纯前端，不依赖 Python/Node 运行时）。
+ *
+ * 检查项：
+ *  - 括号配对：() [] {} 计数必须相等（不配对 = 几乎肯定语法错）。
+ *  - 字符串/注释感知：跳过字符串和注释内的括号，避免误报。
+ *  - 常见错误模式：os.path.xxx 无效属性、未闭合的字符串等。
+ *
+ * 不是精确语法分析（那需 py_compile），但能抓 AI 最常犯的粗错，
+ * 阻止"语法错却 Check 通过"的情况。返回问题描述或 null（无问题）。
+ */
+function checkCodeSyntax(filePath: string, content: string): string | null {
+  const issues: string[] = [];
+
+  // 1. 字符串/注释感知的括号配对检查。
+  //    逐字符扫描，跳过单引号/双引号字符串和注释（# ... for Python, // for JS）。
+  const stack: Array<{ char: string; line: number }> = [];
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  const opens = new Set(['(', '[', '{']);
+  let i = 0;
+  let line = 1;
+  let inString: string | null = null; // ' or " or """
+  let inComment = false;
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1] ?? '';
+    if (ch === '\n') { line++; inComment = false; i++; continue; }
+    if (inComment) { i++; continue; }
+    if (inString) {
+      if (ch === '\\') { i += 2; continue; } // 转义字符跳过
+      if (ch === inString) inString = null;
+      i++; continue;
+    }
+    // 进入注释（Python # 或 JS //）
+    if (ch === '#' || (ch === '/' && next === '/')) { inComment = true; i++; continue; }
+    // 进入字符串
+    if (ch === '"' || ch === "'") { inString = ch; i++; continue; }
+    // 括号
+    if (opens.has(ch)) { stack.push({ char: ch, line }); i++; continue; }
+    if (ch in pairs) {
+      if (stack.length === 0 || stack[stack.length - 1].char !== pairs[ch]) {
+        issues.push(`${filePath} 第 ${line} 行：括号 "${ch}" 不配对（多余或顺序错误）`);
+        // 不 break，继续找更多问题
+      } else {
+        stack.pop();
+      }
+      i++; continue;
+    }
+    i++;
+  }
+  if (stack.length > 0) {
+    const last = stack[stack.length - 1];
+    issues.push(`${filePath} 第 ${last.line} 行：括号 "${last.char}" 未闭合（缺少对应的右括号）`);
+  }
+
+  // 2. 常见 AI 错误模式：os.path.xxx 后面跟非法内容（如 os.path.ffmpeg）
+  //    匹配 os.path. 后接非下划线/字母开头的标识符
+  const invalidAttr = content.match(/os\.path\.([a-z][_a-z0-9]*)/gi);
+  // 已知的合法 os.path 属性
+  const validOsPath = new Set(['join', 'exists', 'isfile', 'isdir', 'dirname', 'basename', 'abspath', 'split', 'splitext', 'expanduser', 'normpath', 'realpath', 'relpath', 'getsize', 'getmtime', 'getatime', 'sep', 'altsep', 'linesep', 'curdir', 'pardir']);
+  if (invalidAttr) {
+    for (const m of invalidAttr) {
+      const attr = m.split('.').pop()!.toLowerCase();
+      if (!validOsPath.has(attr)) {
+        issues.push(`${filePath}：疑似无效属性 "${m}"（os.path.${attr} 不是标准方法）`);
+      }
+    }
+  }
+
+  return issues.length ? issues.slice(0, 5).join('；') : null;
 }
