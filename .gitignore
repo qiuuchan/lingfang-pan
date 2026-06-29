@@ -21,6 +21,10 @@ apps/collab-api/uploads/
 night_runs/
 apps/collab-api/prisma/.generated/
 *.log
+# Playwright：失败截图/HTML 报告/产物不入仓；但 *-snapshots/ 基线要提交（测试断言依据）。
+apps/desktop/test-results/
+apps/desktop/playwright-report/
+apps/desktop/playwright/.cache/
 *.db
 *.db-shm
 *.db-wal
