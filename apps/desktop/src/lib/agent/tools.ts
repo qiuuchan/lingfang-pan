@@ -63,10 +63,29 @@ interface TeamPluginBrief {
   runtime_type: string;
 }
 
-const fileContentSchema = z.union([z.string(), z.array(z.string())]).describe('文件完整内容；复杂多行源码可用字符串数组逐行传入。');
+// 文件内容 schema：宽松接收任意输入，在 execute 内归一化为字符串。
+// 模型对大段源码（含大量引号/反斜杠）有时会传成对象/嵌套结构/畸形值，
+// 严格 union 校验会直接抛 InvalidToolInputError（与 WebSearch.limit 同类根因），
+// 故用 unknown + 手动归一化兜底，永不因入参形状失败。
+const fileContentSchema = z.unknown().describe('文件完整内容（字符串）；复杂多行源码也可用字符串数组逐行传入。');
 
-function normalizeToolFileContent(content: string | string[]): string {
-  return Array.isArray(content) ? content.join('\n') : content;
+/**
+ * 把模型传入的文件内容归一化为字符串。
+ * 兜底所有畸形输入：数组→逐行 join、对象→取 content/text/value/body 字段、其它→String()。
+ * 目的是不让 content 形状触发 zod/JSON 解析失败（InvalidToolInputError）。
+ * 导出供单测验证容错语义（与 withRetryFetch 同样导出）。
+ */
+export function normalizeToolFileContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map((line) => String(line)).join('\n');
+  if (content != null && typeof content === 'object') {
+    const obj = content as Record<string, unknown>;
+    const picked = obj.content ?? obj.text ?? obj.value ?? obj.body ?? obj.code;
+    if (typeof picked === 'string') return picked;
+    if (Array.isArray(picked)) return picked.map((line) => String(line)).join('\n');
+    try { return JSON.stringify(content, null, 2); } catch { return String(content); }
+  }
+  return content == null ? '' : String(content);
 }
 
 /**
