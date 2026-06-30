@@ -169,7 +169,15 @@ function toolOutputFromItem(item: unknown) {
   const toolCallId = String(raw?.callId ?? raw?.call_id ?? raw?.id ?? `tool-${Date.now()}`);
   const name = String(raw?.name ?? raw?.function?.name ?? 'Tool');
   const result = parseJsonMaybe(raw?.output ?? (item as any)?.output ?? '');
-  const isError = raw?.status === 'incomplete' || (typeof result === 'string' && /^错误[:：]/.test(result));
+  const isError = raw?.status === 'incomplete'
+    || (typeof result === 'string'
+      // 中文工具错误（「错误：...」）+ SDK 吞成的英文工具错误（defaultToolErrorFunction 输出）。
+      // 后者来自 InvalidToolInputError 等 non-fatal 错误，原本会被误判成 ok（绿色卡片静默失败），
+      // 这里补匹配，让这类失败也标红可见。
+      && (/^错误[:：]/.test(result)
+        || /Invalid JSON input for tool/i.test(result)
+        || /An error occurred while running the tool/i.test(result)
+        || /InvalidToolInputError/i.test(result)));
   return { toolCallId, name, result, status: isError ? 'error' as const : 'ok' as const };
 }
 

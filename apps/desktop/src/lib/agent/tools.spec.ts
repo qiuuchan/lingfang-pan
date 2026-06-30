@@ -5,7 +5,7 @@
 // 工具工厂 createAgentTools 走 @openai/agents 的 tool()，execute 通过 mock 回调直接调用。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, setAuthToken } from '@/lib/api';
-import { createAgentTools, type AgentToolsOptions, type TodoItem } from './tools';
+import { createAgentTools, normalizeToolFileContent, type AgentToolsOptions, type TodoItem } from './tools';
 
 /** 构造最小可用的 AgentToolsOptions（所有回调 mock），返回捕获 todo 状态的容器。 */
 function makeOpts(initialTodos: TodoItem[] = []) {
@@ -174,5 +174,48 @@ describe('WebFetch 工具', () => {
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'WebFetch', { url: 'https://example.com' });
     expect(out).toMatch(/^错误[:：]/);
+  });
+});
+
+// normalizeToolFileContent：文件内容容错归一化。
+// 根因：模型对大段源码（含大量引号/反斜杠）有时传成对象/嵌套结构，严格 union 校验会抛
+// InvalidToolInputError（与 WebSearch.limit 同类失败）。这里验证任意畸形输入都能回落为合法字符串，
+// 不让 content 形状触发工具调用失败。
+describe('normalizeToolFileContent 文件内容容错', () => {
+  it('字符串原样返回', () => {
+    expect(normalizeToolFileContent('hello\nworld')).toBe('hello\nworld');
+  });
+
+  it('字符串数组逐行 join', () => {
+    expect(normalizeToolFileContent(['line1', 'line2', 'line3'])).toBe('line1\nline2\nline3');
+  });
+
+  it('对象取 content 字段', () => {
+    expect(normalizeToolFileContent({ content: 'code here' })).toBe('code here');
+  });
+
+  it('对象取其它常见字段名（text/value/body/code）', () => {
+    expect(normalizeToolFileContent({ text: 'a' })).toBe('a');
+    expect(normalizeToolFileContent({ value: 'b' })).toBe('b');
+    expect(normalizeToolFileContent({ body: 'c' })).toBe('c');
+    expect(normalizeToolFileContent({ code: 'd' })).toBe('d');
+  });
+
+  it('对象取数组字段（逐行 join）', () => {
+    expect(normalizeToolFileContent({ content: ['x', 'y'] })).toBe('x\ny');
+  });
+
+  it('对象无可识别字段 → JSON 序列化兜底', () => {
+    expect(normalizeToolFileContent({ foo: 1, bar: 2 })).toBe(JSON.stringify({ foo: 1, bar: 2 }, null, 2));
+  });
+
+  it('null/undefined → 空串', () => {
+    expect(normalizeToolFileContent(null)).toBe('');
+    expect(normalizeToolFileContent(undefined)).toBe('');
+  });
+
+  it('数字/布尔 → String()', () => {
+    expect(normalizeToolFileContent(42)).toBe('42');
+    expect(normalizeToolFileContent(true)).toBe('true');
   });
 });

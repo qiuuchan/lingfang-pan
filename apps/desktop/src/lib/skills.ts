@@ -42,6 +42,7 @@ const OUTPUT_MINIMIZE: Skill = {
    - nodejs → entry=index.js，且 files 必含 package.json（无依赖时 dependencies 用 {}）。
    - python → entry=main.py，且 files 必含 requirements.txt（无依赖时留空文件）。
 3. 所有文件路径为相对路径，禁绝对路径/空段/../、禁隐藏段（. 开头）。
+4. **CreatePlugin 只传最小骨架**：files 里每个文件只放占位骨架（导入 + 空主函数），**绝不放完整源码**。单文件超 60 行、或含模板字符串/正则/大量引号反斜杠时尤其要这样做——一次性塞进 CreatePlugin 会让 JSON 参数过长被截断或转义出错，工具必然失败。CreatePlugin 成功后再用 Write 逐个文件补完整内容。
 
 # 工具失败必须补齐重试
 - CreatePlugin 或 Check 返回错误时，**必须**先读懂错误指出的缺漏，补齐对应文件或改正 entry/命名后重新调用工具，直到成功才算完成。
