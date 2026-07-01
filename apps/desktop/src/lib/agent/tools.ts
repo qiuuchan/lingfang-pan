@@ -12,6 +12,7 @@ import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { api, type ApiError, tauriInvoke } from '@/lib/api';
 import { runPluginScript, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
+import { deletePluginFile, movePluginFile } from '@/lib/plugin-status';
 import {
   validateStagedCompleteness,
   isSafePath,
@@ -638,8 +639,147 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  /**
+   * DeleteFile —— 删除当前插件目录下的单个文件。
+   *
+   * 重构/清理场景：移除废弃文件、删掉旧版实现、清理临时文件。
+   * 此前只能覆盖（Write 空内容）不能真删，导致重构后多余文件残留。
+   * 复用 Rust delete_plugin_file（canonicalize 前缀断言防穿越，与 Read 同款安全）。
+   */
+  const DeleteFile = tool({
+    name: 'DeleteFile',
+    description:
+      '删除当前插件目录下的单个文件。重构或清理时移除不再需要的文件（如旧实现、临时文件、废弃模块）。' +
+      '删除目录请改用删除整个插件重建。删除是不可逆操作，确认文件确实不需要再调用。',
+    parameters: z.object({
+      path: z.string().describe('相对插件目录的文件路径，如 old-impl.py / utils/deprecated.js'),
+    }),
+    async execute({ path }): Promise<string> {
+      const pluginId = requirePluginId();
+      if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
+      try {
+        await deletePluginFile(pluginId, path);
+        readPaths.delete(path); // 清理 read-before-edit 跟踪（文件已不存在）
+        return `已删除 ${path}。`;
+      } catch (e) {
+        return `删除失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  /**
+   * MoveFile —— 移动或重命名当前插件目录下的文件。
+   *
+   * 重构场景：调整目录结构、重命名文件、把代码从单文件拆分到子目录。
+   * 比「Read 旧文件 → Write 新路径 → Delete 旧文件」三步更高效（原子 rename）。
+   * 复用 Rust move_plugin_file（段级路径校验防穿越 + 目标自动建子目录）。
+   */
+  const MoveFile = tool({
+    name: 'MoveFile',
+    description:
+      '移动或重命名当前插件目录下的文件。重构时调整文件位置/名字（如把 main.py 移到 src/main.py）。' +
+      '比「Read→Write新路径→删旧文件」更高效；目标已存在会覆盖；自动创建目标子目录。',
+    parameters: z.object({
+      from: z.string().describe('源文件路径（相对插件目录，须已存在）'),
+      to: z.string().describe('目标路径（相对插件目录）'),
+    }),
+    async execute({ from, to }): Promise<string> {
+      const pluginId = requirePluginId();
+      if (!isSafePath(from)) return `错误：非法源路径 ${from}`;
+      if (!isSafePath(to)) return `错误：非法目标路径 ${to}`;
+      if (from === to) return '错误：源路径与目标路径相同，无需移动。';
+      try {
+        await movePluginFile(pluginId, from, to);
+        // 更新 read-before-edit 跟踪：旧路径失效，新路径视为已知内容（已读）。
+        readPaths.delete(from);
+        readPaths.add(to);
+        return `已移动 ${from} → ${to}。`;
+      } catch (e) {
+        return `移动失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  /**
+   * Grep —— 在当前插件的所有源文件里搜索内容（正则匹配）。
+   *
+   * 重构/排查场景：找某个函数/类/变量在哪些文件被定义或引用，定位 import 关系、查找硬编码值。
+   * Glob 只列文件名不搜内容；Read 只看单个文件；Grep 跨文件搜索，是代码理解的基础能力。
+   * 实现纯前端：list_plugin_files + 逐文件 read + 正则匹配，避免新增 Rust 依赖。
+   * 匹配结果格式：`path:line: 匹配行内容`（grep -rn 风格，模型熟悉）。
+   */
+  const Grep = tool({
+    name: 'Grep',
+    description:
+      '在当前插件的所有源文件里搜索内容（支持正则）。用于查找函数/变量/字符串的定义与引用、' +
+      '定位 import 关系、排查硬编码值。返回匹配的 文件:行号:内容 列表。区分大小写。',
+    parameters: z.object({
+      pattern: z.string().min(1).describe('搜索的正则表达式，如 \\bdef\\s+main\\b 或 onClick'),
+      // glob 过滤同 Edit.replace_all：宽松接收，execute 内归一化。
+      glob: z.union([z.string(), z.null()]).optional().describe('可选：只搜匹配的文件（如 *.py / *.js），缺省搜全部源文件'),
+    }),
+    async execute({ pattern, glob }): Promise<string> {
+      const pluginId = requirePluginId();
+      // 编译正则（非法正则回落为字面量匹配，避免工具整体失败）。
+      let regex: RegExp;
+      try {
+        regex = new RegExp(pattern, 'u');
+      } catch {
+        regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u');
+      }
+      // 收集要搜的文件。
+      let files: string[];
+      try {
+        files = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
+      } catch (e) {
+        return `列文件失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      // glob 过滤（简单后缀/通配匹配，如 *.py / ui/*）。
+      const globStr = typeof glob === 'string' && glob.trim() ? glob.trim() : null;
+      if (globStr) {
+        const filterRe = new RegExp('^' + globStr.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'), 'u');
+        files = files.filter((f) => filterRe.test(f));
+      }
+      if (!files.length) return '没有匹配的文件可搜索。';
+      // 逐文件读取 + 搜索（限制单文件最多返回 20 个匹配，避免超长输出）。
+      const MAX_MATCHES_PER_FILE = 20;
+      const MAX_TOTAL = 60;
+      const results: string[] = [];
+      let total = 0;
+      for (const filePath of files) {
+        if (total >= MAX_TOTAL) break;
+        let content: string;
+        try {
+          content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: filePath });
+        } catch {
+          continue; // 二进制/读取失败跳过
+        }
+        const lines = content.split('\n');
+        let fileMatches = 0;
+        for (let i = 0; i < lines.length; i++) {
+          if (fileMatches >= MAX_MATCHES_PER_FILE) {
+            results.push(`${filePath}:(更多匹配已省略)`);
+            break;
+          }
+          if (regex.test(lines[i])) {
+            const snippet = lines[i].trim().slice(0, 200);
+            results.push(`${filePath}:${i + 1}: ${snippet}`);
+            fileMatches++;
+            total++;
+            if (total >= MAX_TOTAL) {
+              results.push(`(结果已达上限 ${MAX_TOTAL}，如需更多请缩小范围或换关键词)`);
+              break;
+            }
+          }
+        }
+      }
+      if (!results.length) return `未找到匹配「${pattern}」的内容。`;
+      return `找到 ${total} 处匹配：\n${results.join('\n')}`;
+    },
+  });
+
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, DeleteFile, MoveFile, Grep],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();
