@@ -2375,7 +2375,7 @@ dependencies = [
 
 [[package]]
 name = "lingfang-desktop"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -2392,7 +2392,7 @@ dependencies = [
 
 [[package]]
 name = "lingfang-installer"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
