@@ -19,6 +19,17 @@ const WORKFLOW = `
   1. **CreatePlugin 只传最小骨架**：manifest 必需字段 + 入口文件占位（nodejs→index.js 写「导入 + 空主函数」骨架 + package.json 写真实依赖；python→main.py 写「导入 + 空主函数」骨架 + requirements.txt；client→ui/index.html 写页面骨架）。CreatePlugin 的 files 数组里**每个文件内容都要短**（占位骨架即可）。
   2. **再用 Write 逐个补完整源码**：CreatePlugin 成功建目录后，对每个需要完整逻辑的文件单独调用 Write 写入真实内容。单文件源码 > 60 行、或含模板字符串/正则/大量引号反斜杠时，**必须**走这条分文件路径（一次性塞进 CreatePlugin 会让 JSON 参数过长被截断/转义出错导致工具失败）。
   绝不要在 CreatePlugin 之前用 Write；CreatePlugin 之后用 Write/Edit 精修。
+- **能力声明（capabilities）必须与代码实际一致**：CreatePlugin 时根据代码用到的能力声明 capabilities，不要漏。Check 会自动扫描代码检测缺漏并提示。能力清单与对应代码特征：
+  - llm.chat：调用平台 LLM（sdk.llm / LLM 桥）
+  - image.generate：调用平台生图（sdk.image）
+  - net.fetch：发起网络请求（requests / fetch / urllib / httpx / axios）
+  - fs.read：读取文件（open() / readFile / pathlib / os.path）
+  - fs.write：写入文件（open(w/a) / writeFile / shutil）
+  - clipboard：访问剪贴板（clipboard / pyperclip）
+  - storage.kv：本地存储（localStorage / sqlite / kv）
+  - system.notify：系统通知（notification / notify / toast）
+  - ui.view：展示界面（所有有 UI 的插件默认该有，client/HTML 必声明）
+  写完代码后检查：代码里 import 了什么、调了什么 API，就声明对应能力。漏声明会导致运行时被拒绝。
 - **TodoWrite 只调用一次**：任务开始时建清单，后续每完成一步更新状态即可，不要反复重建清单。
 - **完成后必须给用户简短总结**：做了什么插件、怎么运行、注意事项。不要只调工具不说话。
 - 完成或修改后用 Check 校验。

@@ -5,7 +5,7 @@
 // 工具工厂 createAgentTools 走 @openai/agents 的 tool()，execute 通过 mock 回调直接调用。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, setAuthToken } from '@/lib/api';
-import { createAgentTools, normalizeToolFileContent, type AgentToolsOptions, type TodoItem } from './tools';
+import { createAgentTools, normalizeToolFileContent, detectCapabilities, type AgentToolsOptions, type TodoItem } from './tools';
 
 // RunPlugin 测试需要 mock tauriInvoke（list/read 文件）+ runPluginScript（试跑）。
 // 用 vi.hoisted 拿到可在工厂内引用的 mock 引用，再 vi.mock 替换两个模块。
@@ -455,5 +455,68 @@ describe('Grep 工具', () => {
     const out = await callExecute(tools, 'Grep', { pattern: '(unclosed' });
     expect(out).toContain('main.py:1');
     expect(out).toContain('(unclosed');
+  });
+});
+
+describe('detectCapabilities 能力声明检测', () => {
+  it('检测网络请求 → net.fetch', () => {
+    const r = detectCapabilities(
+      [{ path: 'main.py', content: 'import requests\nrequests.get("http://x")' }],
+      [],
+    );
+    expect(r.detected).toContain('net.fetch');
+    expect(r.missing).toContain('net.fetch');
+  });
+
+  it('检测文件读写 → fs.read + fs.write', () => {
+    const r = detectCapabilities(
+      [{ path: 'main.py', content: 'with open("f.txt", "w") as f:\n    f.write("x")' }],
+      [],
+    );
+    expect(r.detected).toContain('fs.read');
+    expect(r.detected).toContain('fs.write');
+  });
+
+  it('检测平台 LLM 调用 → llm.chat', () => {
+    const r = detectCapabilities(
+      [{ path: 'main.py', content: 'result = sdk.llm.chat("hi")' }],
+      [],
+    );
+    expect(r.detected).toContain('llm.chat');
+  });
+
+  it('已声明的能力不计入 missing', () => {
+    const r = detectCapabilities(
+      [{ path: 'main.py', content: 'import requests' }],
+      ['net.fetch', 'ui.view'],
+    );
+    expect(r.detected).toContain('net.fetch');
+    expect(r.missing).toEqual([]); // net.fetch 已声明，不缺漏
+  });
+
+  it('代码无任何能力特征 → detected 为空', () => {
+    const r = detectCapabilities(
+      [{ path: 'main.py', content: 'def add(a, b):\n    return a + b' }],
+      ['ui.view'],
+    );
+    expect(r.detected).toEqual([]);
+    expect(r.missing).toEqual([]);
+  });
+
+  it('Node fetch 也检测为 net.fetch', () => {
+    const r = detectCapabilities(
+      [{ path: 'index.js', content: 'const res = await fetch(url)' }],
+      [],
+    );
+    expect(r.detected).toContain('net.fetch');
+  });
+
+  it('多文件合并检测', () => {
+    const r = detectCapabilities([
+      { path: 'main.py', content: 'import requests' },
+      { path: 'utils.py', content: 'open("f")' },
+    ], []);
+    expect(r.detected).toContain('net.fetch');
+    expect(r.detected).toContain('fs.read');
   });
 });

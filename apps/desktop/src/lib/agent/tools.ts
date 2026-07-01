@@ -295,7 +295,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
       } catch {
         return '错误：缺少 manifest.json。';
       }
-      let manifest: { runtime_type?: string; entry?: string };
+      let manifest: { runtime_type?: string; entry?: string; capabilities?: Array<{ kind?: string }> };
       try {
         manifest = JSON.parse(manifestRaw);
       } catch {
@@ -309,8 +309,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // 语法校验：读回所有源码文件，做括号配对 + 常见错误模式检查。
       // 这是质量兜底——AI 可能写出语法错误代码（如 os.path.xxx 无效属性、括号不配对），
       // Check 必须抓出来让模型自我修复，而不是"校验通过"放行跑不起来的插件。
+      // 同时收集 codeFiles 的 content，供后续能力声明检测复用（避免二次读取）。
       const syntaxIssues: string[] = [];
-      const codeFiles = files.filter((p) => /\.(py|js|ts)$/i.test(p));
+      const codeFileList: { path: string; content: string }[] = [];
+      const codeFiles = files.filter((p) => /\.(py|js|ts|html)$/i.test(p));
       for (const filePath of codeFiles) {
         let content = '';
         try {
@@ -318,13 +320,38 @@ export function createAgentTools(opts: AgentToolsOptions) {
         } catch {
           continue;
         }
-        const issue = checkCodeSyntax(filePath, content);
-        if (issue) syntaxIssues.push(issue);
+        codeFileList.push({ path: filePath, content });
+        // 语法校验只对 py/js/ts（HTML 无括号配对语义）。
+        if (/\.(py|js|ts)$/i.test(filePath)) {
+          const issue = checkCodeSyntax(filePath, content);
+          if (issue) syntaxIssues.push(issue);
+        }
       }
       if (syntaxIssues.length) {
         return `错误：发现 ${syntaxIssues.length} 个语法问题，必须修复后再交付：\n${syntaxIssues.join('\n')}`;
       }
-      return '校验通过：入口与必需文件齐备，路径合法，代码语法检查无问题。';
+      // 能力声明检测：扫描代码推断实际用到的能力，对比 manifest 声明，找出缺漏。
+      // 缺漏的能力运行时会被 capability 网关拒绝（如用了网络请求但没声明 net.fetch），
+      // Check 必须抓出来提示 AI 补充，让能力声明与代码实际一致。
+      const declaredKinds = (manifest.capabilities ?? []).map((c) => c.kind).filter((k): k is string => Boolean(k));
+      const capResult = detectCapabilities(codeFileList, declaredKinds);
+      if (capResult.missing.length) {
+        const hints = capResult.missing.map((k) => {
+          const rule = [
+            { kind: 'llm.chat', fix: '调用平台 LLM 须声明 llm.chat（capabilities 加 {kind:"llm.chat"}）' },
+            { kind: 'image.generate', fix: '调用平台生图须声明 image.generate' },
+            { kind: 'net.fetch', fix: '发起网络请求须声明 net.fetch' },
+            { kind: 'fs.read', fix: '读取文件须声明 fs.read' },
+            { kind: 'fs.write', fix: '写入文件须声明 fs.write' },
+            { kind: 'clipboard', fix: '访问剪贴板须声明 clipboard' },
+            { kind: 'storage.kv', fix: '使用本地存储须声明 storage.kv' },
+            { kind: 'system.notify', fix: '发送系统通知须声明 system.notify' },
+          ].find((r) => r.kind === k);
+          return `- ${k}：${rule?.fix ?? '代码用到了但未声明'}`;
+        }).join('\n');
+        return `发现问题：代码用到了以下能力但 manifest 未声明（运行时会被拒绝）：\n${hints}\n请用 CreatePlugin 或编辑 manifest.json 补充这些 capabilities 后重新 Check。`;
+      }
+      return '校验通过：入口与必需文件齐备，路径合法，代码语法检查无问题，能力声明与代码实际一致。';
     },
   });
 
@@ -787,6 +814,56 @@ export function createAgentTools(opts: AgentToolsOptions) {
       readPaths.clear();
     },
   };
+}
+
+/**
+ * 代码语法粗校验（纯前端，不依赖 Python/Node 运行时）。
+ *
+ * 检查项：
+/**
+ * 能力声明检测：扫描代码推断插件实际用到的能力，对比 manifest 声明，找出缺漏/多余。
+ *
+ * 解决问题：AI 创建插件时常漏声明能力（如用了网络请求却没声明 net.fetch），运行时被 capability
+ * 网关拒绝。本函数在 Check 时扫描代码特征（import/函数调用），自动推断用到的能力并对比声明，
+ * 缺漏时提示 AI 补充，让能力声明与代码实际一致。
+ *
+ * 检测规则（按代码特征匹配，宽松避免漏检）：
+ *  - 调平台 LLM/生图：sdk.llm / sdk.image / LLM 桥 → llm.chat / image.generate
+ *  - 网络请求：requests / fetch / urllib / http / aiohttp → net.fetch
+ *  - 文件读写：open( / fs.readFile / fs.writeFile / pathlib → fs.read + fs.write
+ *  - 剪贴板：clipboard / pyperclip → clipboard
+ *  - 存储：localStorage / kv / sqlite → storage.kv
+ *  - 系统通知：notify / notification / toast → system.notify
+ *
+ * 返回 { missing: 缺漏的能力, declared: 已声明的能力, detected: 检测到的能力 }。
+ * missing 非空时 Check 应提示 AI 补充。
+ */
+export function detectCapabilities(
+  codeFiles: { path: string; content: string }[],
+  declaredKinds: string[],
+): { missing: string[]; declared: string[]; detected: string[] } {
+  // 代码特征 → 能力 kind 的映射（正则，宽松匹配 import/调用/标识符）。
+  // 注意：ua.*（ui.view）默认所有有界面的插件都该有，不靠代码检测（HTML 插件必有界面）。
+  const rules: Array<{ kind: string; pattern: RegExp; desc: string }> = [
+    { kind: 'llm.chat', pattern: /sdk\.llm|llm\.chat|chat_completion|LLM_PLUGIN_BRIDGE|lingfang.*llm/i, desc: '调用了平台 LLM 能力' },
+    { kind: 'image.generate', pattern: /sdk\.image|image\.generate|generate_image/i, desc: '调用了平台生图能力' },
+    { kind: 'net.fetch', pattern: /\brequests\b|\bfetch\s*\(|urllib|aiohttp|http\.client|\bhttpx\b|axios/i, desc: '发起了网络请求' },
+    { kind: 'fs.read', pattern: /\bopen\s*\(|read_file|readFile|pathlib|os\.path\.|os\.listdir/i, desc: '读取了文件' },
+    { kind: 'fs.write', pattern: /open\s*\([^)]*['"][wa]|write_?file|\.write\s*\(|shutil\.(?:move|copy)/i, desc: '写入了文件' },
+    { kind: 'clipboard', pattern: /clipboard|pyperclip/i, desc: '访问了剪贴板' },
+    { kind: 'storage.kv', pattern: /localStorage|sessionStorage|sqlite|\.kv\b|key_value|keyvalue/i, desc: '使用了本地存储' },
+    { kind: 'system.notify', pattern: /notification|notify\s*\(|toast|plyer\.notification/i, desc: '发送了系统通知' },
+  ];
+  const detected = new Set<string>();
+  for (const { content } of codeFiles) {
+    for (const { kind, pattern } of rules) {
+      if (pattern.test(content)) detected.add(kind);
+    }
+  }
+  const detectedArr = Array.from(detected);
+  // 缺漏：检测到但没声明（运行时会被网关拒绝）。
+  const missing = detectedArr.filter((k) => !declaredKinds.includes(k));
+  return { missing, declared: declaredKinds, detected: detectedArr };
 }
 
 /**
