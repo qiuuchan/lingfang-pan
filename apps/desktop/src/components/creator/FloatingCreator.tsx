@@ -1252,7 +1252,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
-              {todos.length > 0 && <TodoPanel todos={todos} streaming={busy} />}
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   {t.role === 'user' ? (
@@ -1336,6 +1335,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
 
         {/* #3 思考流式输出已改为内联在 assistant 气泡中按时序链式展示（见 parts 渲染），
             此处不再重复渲染底部全局思考条。reasoning state 仅用于流末兜底判定。 */}
+
+        {/* 任务清单（底部折叠抽屉）：钉在对话区底部，默认折叠成窄横条，不占对话滚动空间。
+            有任务时才显示；点击向上展开明细。 */}
+        {todos.length > 0 && <TodoPanel todos={todos} streaming={busy} />}
 
         {/* #1 上下文用量条（contextWindow 配好后显示百分比） */}
         {contextWindow && turns.length > 0 && (

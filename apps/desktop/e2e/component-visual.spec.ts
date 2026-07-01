@@ -78,12 +78,25 @@ test.describe('TodoPanel 组件', () => {
     await page.waitForLoadState('networkidle');
   });
 
-  test('展示任务清单 + 进度百分比 + 进度条', async ({ page }) => {
-    const panel = page.locator('text=任务清单').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+  // 辅助：定位第 N 个 TodoPanel 容器（harness 挂了「进行中」「已完成」两个）。
+  // 新样式用 rounded-xl + 底部折叠抽屉风格。
+  const panelAt = (page: import('@playwright/test').Page, idx: number) =>
+    page.locator('text=任务清单').locator('xpath=ancestor::div[contains(@class,"rounded-xl")]').nth(idx);
+
+  test('折叠态显示标题 + 完成数 + 百分比', async ({ page }) => {
+    const panel = panelAt(page, 0);
     await expect(panel).toBeVisible();
-    // 1/4 完成 = 25%。
-    await expect(panel.getByText('1/4 完成')).toBeVisible();
+    // 折叠条显示 1/4 和 25%。
+    await expect(panel.getByText('1/4')).toBeVisible();
     await expect(panel.getByText('25%')).toBeVisible();
+  });
+
+  test('点击展开后显示任务明细 + 进度条', async ({ page }) => {
+    const panel = panelAt(page, 0);
+    // 折叠态：明细不可见。
+    await expect(panel.getByText('初始化插件目录')).toHaveCount(0);
+    // 点击折叠条展开。
+    await panel.getByRole('button').click();
     // 四项任务内容都在。
     await expect(panel.getByText('初始化插件目录')).toBeVisible();
     await expect(panel.getByText('编写核心逻辑')).toBeVisible();
@@ -92,7 +105,8 @@ test.describe('TodoPanel 组件', () => {
   });
 
   test('优先级标签颜色正确（高=红/中=橙/低=蓝）', async ({ page }) => {
-    const panel = page.locator('text=任务清单').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const panel = panelAt(page, 0);
+    await panel.getByRole('button').click(); // 展开
     const tags = panel.locator('span', { hasText: /^(高|中|低)$/ });
     // 高 → red, 中 → amber, 低 → sky（Tailwind 类）。
     await expect(tags.nth(0)).toHaveClass(/red/); // 初始化（高）
@@ -101,30 +115,39 @@ test.describe('TodoPanel 组件', () => {
     await expect(tags.nth(3)).toHaveClass(/sky/); // 文档（低）
   });
 
-  test('进行中任务有播放图标 + 高亮背景', async ({ page }) => {
-    const panel = page.locator('text=任务清单').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+  test('进行中任务高亮背景', async ({ page }) => {
+    const panel = panelAt(page, 0);
+    await panel.getByRole('button').click(); // 展开
     const item = panel.locator('li', { hasText: '编写核心逻辑' });
-    await expect(item).toHaveClass(/bg-primary\/5/);
+    await expect(item).toHaveClass(/bg-primary/);
   });
 
-  test('已完成任务有删除线 + 灰色', async ({ page }) => {
-    const panel = page.locator('text=任务清单').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+  test('已完成任务有删除线', async ({ page }) => {
+    const panel = panelAt(page, 0);
+    await panel.getByRole('button').click(); // 展开
     const item = panel.locator('li', { hasText: '初始化插件目录' });
     await expect(item.getByText('初始化插件目录')).toHaveClass(/line-through/);
   });
 
-  test('全部完成时显示绿色 + 对勾', async ({ page }) => {
-    // 第二个 TodoPanel（已完成态）：4/4 完成 = 100%。
-    const donePanel = page.locator('text=100%').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]');
+  test('全部完成时显示绿色徽标', async ({ page }) => {
+    // 第二个 TodoPanel（已完成态）：4/4 = 100%。
+    const donePanel = panelAt(page, 1);
     await expect(donePanel.getByText('100%')).toBeVisible();
-    await expect(donePanel.getByText('4/4 完成')).toBeVisible();
+    await expect(donePanel.getByText('4/4')).toBeVisible();
     // 徽标变绿（含 green 类）。
     const badge = donePanel.locator('span', { hasText: '100%' }).filter({ hasText: '100%' }).last();
     await expect(badge).toHaveClass(/green/);
   });
 
-  test('进行中面板截图', async ({ page }) => {
+  test('折叠态面板截图', async ({ page }) => {
     const section = page.locator('h2:has-text("进行中")').locator('xpath=following-sibling::div[1]');
-    await expect(section).toHaveScreenshot('todo-panel-active.png', { maxDiffPixelRatio: 0.05 });
+    await expect(section).toHaveScreenshot('todo-panel-collapsed.png', { maxDiffPixelRatio: 0.05 });
+  });
+
+  test('展开态面板截图', async ({ page }) => {
+    const panel = panelAt(page, 0);
+    await panel.getByRole('button').click(); // 展开
+    const section = page.locator('h2:has-text("进行中")').locator('xpath=following-sibling::div[1]');
+    await expect(section).toHaveScreenshot('todo-panel-expanded.png', { maxDiffPixelRatio: 0.05 });
   });
 });
