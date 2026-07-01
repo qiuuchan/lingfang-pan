@@ -48,6 +48,17 @@ export interface BuildResult {
     currentInput: string;
     /** 粗略 token 估算（中文为主，1 token ≈ 1.5 字符；英文约 4 字符/token，此处取中文偏向防低估）。 */
     estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+    /** 压缩进度（供 UI 显示「距离下次压缩还有多少」）。 */
+    compressInfo: {
+      /** 触发压缩的字符阈值。 */
+      threshold: number;
+      /** 当前全部历史轮的字符数。 */
+      currentChars: number;
+      /** 距离触发压缩还差多少字符（≤0 表示已达/超阈值，下次将压缩）。 */
+      remainingChars: number;
+      /** 压缩进度百分比（currentChars / threshold，0-100+）。 */
+      pct: number;
+    };
   };
 }
 
@@ -118,6 +129,12 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
           input: Math.ceil(args.currentInput.length / 1.5),
           total: Math.ceil((args.systemPrompt.length + historyChars + args.currentInput.length) / 1.5),
         },
+        compressInfo: {
+          threshold,
+          currentChars: totalChars,
+          remainingChars: threshold - totalChars,
+          pct: threshold > 0 ? Math.round((totalChars / threshold) * 100) : 0,
+        },
       },
     };
   }
@@ -184,6 +201,14 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
         history: Math.ceil(historyChars / 1.5),
         input: Math.ceil(args.currentInput.length / 1.5),
         total: Math.ceil((args.systemPrompt.length + nextSummary.length + historyChars + args.currentInput.length) / 1.5),
+      },
+      // 超阈值已压缩：compressInfo 反映压缩后的状态（verbatim 是压缩后保留的近期轮）。
+      // currentChars 用 verbatim（压缩后实际保留的历史），remainingChars 是距离下次再触发的余量。
+      compressInfo: {
+        threshold,
+        currentChars: historyChars,
+        remainingChars: threshold - historyChars,
+        pct: threshold > 0 ? Math.round((historyChars / threshold) * 100) : 0,
       },
     },
   };
