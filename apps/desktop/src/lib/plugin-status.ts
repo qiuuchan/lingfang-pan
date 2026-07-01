@@ -243,6 +243,24 @@ export function writePluginFiles(pluginId: string, files: { path: string; conten
 }
 
 /**
+ * 删除插件目录下的单个文件。
+ * path 白名单 + canonicalize 前缀断言防穿越（Rust 侧 delete_plugin_file）。
+ * 文件不存在返回错误（让调用方感知）；不允许删除目录（目录级删除走 deletePlugin）。
+ */
+export function deletePluginFile(pluginId: string, file: string): Promise<void> {
+  return tauriInvoke<void>('delete_plugin_file', { pluginId, file });
+}
+
+/**
+ * 移动/重命名插件目录下的文件（from → to，均为相对插件目录的路径）。
+ * 源文件须存在；目标若存在则覆盖；自动创建目标子目录。
+ * 防穿越校验与 writePluginFiles 一致（无 .. / 绝对路径）。
+ */
+export function movePluginFile(pluginId: string, from: string, to: string): Promise<void> {
+  return tauriInvoke<void>('move_plugin_file', { pluginId, from, to });
+}
+
+/**
  * 打开当前插件存放根目录。
  *
  * Rust 侧保证目录存在后交给系统文件管理器打开；失败时返回显式错误。

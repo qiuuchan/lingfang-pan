@@ -302,3 +302,119 @@ describe('RunPlugin 工具', () => {
     expect(out).toContain('运行时缺失');
   });
 });
+
+describe('DeleteFile 工具', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('已注册到工具集', () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    expect(tools.some((t) => t.name === 'DeleteFile')).toBe(true);
+  });
+
+  it('删除成功 → 返回已删除', async () => {
+    tauriInvokeMock.mockResolvedValue(undefined);
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'DeleteFile', { path: 'old-impl.py' });
+    expect(out).toContain('已删除 old-impl.py');
+    // 验证调了 delete_plugin_file 命令。
+    const call = tauriInvokeMock.mock.calls.find((c) => c[0] === 'delete_plugin_file');
+    expect(call).toBeTruthy();
+  });
+
+  it('文件不存在 → 返回删除失败', async () => {
+    tauriInvokeMock.mockRejectedValue(new Error('文件不存在'));
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'DeleteFile', { path: 'nope.py' });
+    expect(out).toContain('删除失败');
+  });
+
+  it('非法路径 → 直接拒绝（不调 Rust）', async () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'DeleteFile', { path: '../etc/passwd' });
+    expect(out).toContain('非法');
+    expect(tauriInvokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('MoveFile 工具', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('已注册到工具集', () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    expect(tools.some((t) => t.name === 'MoveFile')).toBe(true);
+  });
+
+  it('移动成功 → 返回 from → to', async () => {
+    tauriInvokeMock.mockResolvedValue(undefined);
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'MoveFile', { from: 'main.py', to: 'src/main.py' });
+    expect(out).toContain('main.py → src/main.py');
+    const call = tauriInvokeMock.mock.calls.find((c) => c[0] === 'move_plugin_file');
+    expect(call).toBeTruthy();
+  });
+
+  it('源=目标 → 返回相同错误（不调 Rust）', async () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'MoveFile', { from: 'a.py', to: 'a.py' });
+    expect(out).toMatch(/相同|非法/);
+  });
+});
+
+describe('Grep 工具', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('已注册到工具集', () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    expect(tools.some((t) => t.name === 'Grep')).toBe(true);
+  });
+
+  it('找到匹配 → 返回 文件:行号:内容', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'utils.py'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'main.py') return 'def main():\n    print("hello")\n';
+      if (file === 'utils.py') return 'def helper():\n    return 42\n';
+      return '';
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'Grep', { pattern: 'def ' });
+    expect(out).toContain('main.py:1');
+    expect(out).toContain('utils.py:1');
+    expect(out).toContain('def main');
+  });
+
+  it('无匹配 → 返回未找到', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_plugin_files') return ['main.py'];
+      return 'print(1)';
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'Grep', { pattern: 'nonexistent_symbol' });
+    expect(out).toContain('未找到');
+  });
+
+  it('glob 过滤 → 只搜匹配文件', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'index.js'];
+      return 'target_line';
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    await callExecute(tools, 'Grep', { pattern: 'target_line', glob: '*.py' });
+    // 只读了 main.py（*.py 过滤掉 index.js）。
+    const readFileCalls = tauriInvokeMock.mock.calls.filter((c) => c[0] === 'read_local_plugin_file');
+    expect(readFileCalls.length).toBe(1);
+    expect(readFileCalls[0][1].file).toBe('main.py');
+  });
+
+  it('非法正则 → 回落字面量匹配不报错', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_plugin_files') return ['main.py'];
+      return 'foo (unclosed bar';
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    // `(unclosed` 是非法正则（未闭合分组），应回落为字面量匹配。
+    const out = await callExecute(tools, 'Grep', { pattern: '(unclosed' });
+    expect(out).toContain('main.py:1');
+    expect(out).toContain('(unclosed');
+  });
+});

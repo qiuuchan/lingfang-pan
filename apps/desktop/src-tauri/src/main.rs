@@ -287,6 +287,8 @@ fn main() {
             plugin_store::write_plugin_files,
             plugin_store::list_plugin_files,
             plugin_store::write_plugin_file,
+            plugin_store::delete_plugin_file,
+            plugin_store::move_plugin_file,
             plugin_store::set_plugin_draft_flag,
             plugin_store::open_plugins_root,
             plugin_store::rename_plugin_dir,

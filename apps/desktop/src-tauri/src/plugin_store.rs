@@ -403,6 +403,84 @@ impl PluginStore {
         Ok(())
     }
 
+    /// 删除插件目录下的单个文件（delete_plugin_file 命令底层）。
+    ///
+    /// 防路径穿越：与 read_plugin_file 同款 canonicalize + starts_with 断言（文件须已存在，
+    /// canonicalize 不会失败）。文件不存在返回错误（让调用方感知，而非静默成功）。
+    /// 不允许删除目录（避免误删整个子树；目录级删除走 delete_plugin）。
+    pub fn delete_plugin_file(&self, plugin_id: &str, file: &str) -> Result<(), String> {
+        let file = file.trim();
+        if file.is_empty() {
+            return Err("文件路径不能为空".to_string());
+        }
+        let dir = self.plugin_dir(plugin_id)?;
+        let base = dir
+            .canonicalize()
+            .map_err(|e| format!("插件目录不存在：{e}"))?;
+        let target = base
+            .join(file)
+            .canonicalize()
+            .map_err(|e| format!("文件不存在：{e}"))?;
+        if !target.starts_with(&base) {
+            return Err("非法文件路径".to_string());
+        }
+        if target.is_dir() {
+            return Err(format!("目标是目录而非文件（删除目录请用 delete_plugin）：{file}"));
+        }
+        fs::remove_file(&target).map_err(|e| format!("删除文件失败（{file}）：{e}"))
+    }
+
+    /// 移动/重命名插件目录下的文件（move_plugin_file 命令底层）。
+    ///
+    /// 防路径穿越：与 write_files 同款段级校验（无 .. / 绝对路径）+ canonicalize 父目录前缀断言。
+    /// 源文件须存在（canonicalize 校验）；目标若已存在则覆盖（rename 语义，对重构场景合理）。
+    /// 自动创建目标子目录。不允许移动到目录（目标是目录时报错）。
+    pub fn move_plugin_file(&self, plugin_id: &str, from: &str, to: &str) -> Result<(), String> {
+        let from = from.trim();
+        let to = to.trim();
+        if from.is_empty() || to.is_empty() {
+            return Err("文件路径不能为空".to_string());
+        }
+        if from == to {
+            return Err("源路径与目标路径相同".to_string());
+        }
+        let dir = self.plugin_dir(plugin_id)?;
+        let base = dir
+            .canonicalize()
+            .map_err(|e| format!("插件目录不存在：{e}"))?;
+        // 源文件须存在 + 在 base 内。
+        let src = base
+            .join(from)
+            .canonicalize()
+            .map_err(|e| format!("源文件不存在：{e}"))?;
+        if !src.starts_with(&base) {
+            return Err("非法源路径".to_string());
+        }
+        if src.is_dir() {
+            return Err(format!("源是目录而非文件（移动目录暂不支持）：{from}"));
+        }
+        // 目标路径段级校验（防穿越，与 write_files 一致）。
+        let to_p = std::path::Path::new(to);
+        if to_p.is_absolute() || to.starts_with('/') || to.starts_with('\\') || to.contains(':') {
+            return Err(format!("非法目标路径（绝对路径）：{to}"));
+        }
+        if to_p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("非法目标路径（含 ..）：{to}"));
+        }
+        let dst = base.join(to_p);
+        let dst_parent = dst.parent().unwrap_or(std::path::Path::new(""));
+        if let Ok(parent_canon) = dst_parent.canonicalize() {
+            if !parent_canon.starts_with(&base) {
+                return Err(format!("非法目标路径（越出插件目录）：{to}"));
+            }
+        }
+        // 创建目标子目录（如 ui/）。
+        if let Some(parent_dir) = dst.parent() {
+            fs::create_dir_all(parent_dir).map_err(|e| format!("创建目标目录失败：{e}"))?;
+        }
+        fs::rename(&src, &dst).map_err(|e| format!("移动文件失败（{from} → {to}）：{e}"))
+    }
+
     /// 列出插件目录下的所有源文件相对路径（递归，跳过运行时副产物目录）。
     ///
     /// Agent 的 Glob/列文件树工具底层。跳过 data/.venv/node_modules/.git 等运行时目录，
@@ -884,6 +962,29 @@ pub fn set_plugin_draft_flag(
     draft: bool,
 ) -> Result<(), String> {
     state.set_draft_flag(&plugin_id, draft)
+}
+
+/// 命令：删除插件目录下的单个文件（Agent 的 DeleteFile 工具底层）。
+/// path 白名单 + canonicalize 前缀断言防穿越（与 read_local_plugin_file 同款）。
+#[tauri::command]
+pub fn delete_plugin_file(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    file: String,
+) -> Result<(), String> {
+    state.delete_plugin_file(&plugin_id, &file)
+}
+
+/// 命令：移动/重命名插件目录下的文件（Agent 的 MoveFile 工具底层）。
+/// from/to 均为相对插件目录的路径；源须存在，目标若存在则覆盖。
+#[tauri::command]
+pub fn move_plugin_file(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    state.move_plugin_file(&plugin_id, &from, &to)
 }
 
 #[tauri::command]
