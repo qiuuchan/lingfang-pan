@@ -95,19 +95,19 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View) => void } 
       </StaggerContainer>
 
       {/* AI 生成质量（调研报告 Top10 / A4）：调用次数 / 成功率 / 失败数。
-          后端基于 AuditLog（llm_binding.key_decrypted 调用代理 + plugin.uploaded 成功代理）聚合。 */}
+          后端基于 LlmCallLog（relay 每次 AI 调用记录）聚合，真实反映调用量与质量。 */}
       <div>
         <div className="mb-3 flex items-center gap-2">
           <SparklesIcon className="size-4 text-violet-500" />
           <h2 className="text-sm font-semibold">AI 生成质量</h2>
-          <span className="text-xs text-muted-foreground">基于审计日志聚合，调用代理为 key 解密次数</span>
+          <span className="text-xs text-muted-foreground">基于模型调用日志聚合</span>
         </div>
         <StaggerContainer className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" stagger={0.08}>
           <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
-            <GenerationStatCard label="本月调用" value={generation?.month.calls ?? 0} desc="AI 生成会话次数" icon={SparklesIcon} color="text-violet-500" animate loading={generation === null} />
+            <GenerationStatCard label="本月调用" value={generation?.month.calls ?? 0} desc="模型调用次数" icon={SparklesIcon} color="text-violet-500" animate loading={generation === null} />
           </StaggerItem>
           <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
-            <GenerationStatCard label="本月成功" value={generation?.month.success ?? 0} desc="成功上传插件数" icon={CheckCircleIcon} color="text-emerald-500" animate loading={generation === null} />
+            <GenerationStatCard label="本月成功" value={generation?.month.success ?? 0} desc="成功调用次数" icon={CheckCircleIcon} color="text-emerald-500" animate loading={generation === null} />
           </StaggerItem>
           <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
             <GenerationStatCard label="本月成功率" value={`${generation?.month.successRate ?? 0}%`} desc="成功 / 调用" icon={PercentIcon} color="text-blue-500" loading={generation === null} />

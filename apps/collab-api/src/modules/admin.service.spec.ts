@@ -12,13 +12,17 @@ import { forbidden } from '../common';
 
 function mockPrisma() {
   const auditLog = { count: vi.fn(async () => 0) };
+  const llmCallLog = {
+    count: vi.fn(async () => 0),
+    aggregate: vi.fn(async () => ({ _avg: { durationMs: null } })),
+  };
   const purchase = {
     aggregate: vi.fn(async () => ({ _sum: { priceCents: null } })),
     findMany: vi.fn(async () => []),
   };
   const plugin = { findMany: vi.fn(async () => []) };
   const user = { count: vi.fn(async () => 0) };
-  return { auditLog, purchase, plugin, user };
+  return { auditLog, llmCallLog, purchase, plugin, user };
 }
 
 function mockAuth() {
@@ -54,30 +58,37 @@ describe('AdminService stats', () => {
         throw forbidden('仅平台管理员可操作');
       });
       await expect(service.adminGenerationStats('user-member')).rejects.toMatchObject({ status: 403, code: 'forbidden' });
-      expect(prisma.auditLog.count).not.toHaveBeenCalled();
+      expect(prisma.llmCallLog.count).not.toHaveBeenCalled();
     });
 
-    it('按 audit 计数聚合调用/成功/失败/成功率', async () => {
-      // 4 次 count 调用顺序：monthCalls, monthSuccess, totalCalls, totalSuccess。
-      prisma.auditLog.count
-        .mockResolvedValueOnce(100) // 月调用
-        .mockResolvedValueOnce(80) // 月成功
-        .mockResolvedValueOnce(1000) // 累计调用
-        .mockResolvedValueOnce(750); // 累计成功
+    it('按 LlmCallLog 计数聚合调用/成功/失败/成功率 + 平均耗时', async () => {
+      // count 调用顺序：monthCalls, monthSuccess, monthFailed, totalCalls, totalSuccess, totalFailed。
+      prisma.llmCallLog.count
+        .mockResolvedValueOnce(100)  // 月总调用
+        .mockResolvedValueOnce(80)   // 月成功
+        .mockResolvedValueOnce(15)   // 月失败
+        .mockResolvedValueOnce(1000) // 累计总调用
+        .mockResolvedValueOnce(750)  // 累计成功
+        .mockResolvedValueOnce(200); // 累计失败
+      // aggregate 调用顺序：monthDuration, totalDuration。
+      prisma.llmCallLog.aggregate
+        .mockResolvedValueOnce({ _avg: { durationMs: 1234.5 } })
+        .mockResolvedValueOnce({ _avg: { durationMs: 1500 } });
       const result = await service.adminGenerationStats('user-admin');
-      expect(result.month).toEqual({ calls: 100, success: 80, failed: 20, successRate: 80 });
-      expect(result.total).toEqual({ calls: 1000, success: 750, failed: 250, successRate: 75 });
-      // 平均耗时字段保留为 null（audit 未记录 duration），前端不渲染 NaN。
-      expect(result.avgDurationMs).toBeNull();
+      expect(result.month).toEqual({ calls: 100, success: 80, failed: 15, successRate: 80 });
+      expect(result.total).toEqual({ calls: 1000, success: 750, failed: 200, successRate: 75 });
+      // 平均耗时来自 LlmCallLog.durationMs 的 avg（仅 success 行）。
+      expect(result.avgDurationMs).toBe(1234.5);
     });
 
-    it('调用次数为 0 时 successRate 兜底为 0（非 NaN）', async () => {
-      prisma.auditLog.count.mockResolvedValue(0);
+    it('调用次数为 0 时 successRate 兜底为 0（非 NaN），平均耗时为 null', async () => {
+      prisma.llmCallLog.count.mockResolvedValue(0);
+      prisma.llmCallLog.aggregate.mockResolvedValue({ _avg: { durationMs: null } });
       const result = await service.adminGenerationStats('user-admin');
       expect(result.month.successRate).toBe(0);
       expect(result.total.successRate).toBe(0);
-      // 失败数也兜底为 0，避免出现负数（Math.max(0, calls - success)）。
       expect(result.month.failed).toBe(0);
+      expect(result.avgDurationMs).toBeNull();
     });
   });
 
