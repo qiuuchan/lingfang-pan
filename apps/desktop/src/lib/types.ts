@@ -159,6 +159,9 @@ export interface LoadedPlugin {
   name: string;
   description?: string;
   version: string;
+  /** 已安装版本（PluginInstallation.version，仅已安装的市场插件有）。
+   *  前端对比 version（云端最新版）vs installedVersion 判断是否有更新。 */
+  installedVersion?: string;
   builtin?: boolean;
   entry: string;
   status?: string;

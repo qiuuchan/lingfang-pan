@@ -6,6 +6,7 @@
 // 固定常用 / 历史使用已移至主侧边栏（Sidebar，首页按钮下方），不在本悬浮窗内。
 import { FolderIcon, ServerIcon, StoreIcon, FileEditIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { toast } from 'sonner';
 import { useApp } from '@/App';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { LoadedPlugin } from '@/lib/types';
@@ -13,6 +14,7 @@ import { LocalPluginsSection } from './LocalPluginsSection';
 import { DraftPluginsSection } from './DraftPluginsSection';
 import { MarketplacePluginsSection } from './MarketplacePluginsSection';
 import { TeamPluginsSection } from './TeamPluginsSection';
+import { installMarketplacePluginPackage } from '@/lib/plugin-installation';
 import {
   PLUGIN_PAGE_SIZE,
   useLocalPluginList,
@@ -107,6 +109,16 @@ export function PluginCenterBody({
                   onRefresh={team.refresh}
                   onRun={(plugin) => { void openers.openTeamPlugin(plugin); }}
                   onTogglePin={(plugin, pinned) => (pinned ? app.unpinPlugin(plugin.id) : app.pinPlugin(plugin))}
+                  onUpdate={async (plugin) => {
+                    // 更新插件到最新版：重新调 installMarketplacePluginPackage（后端 update version + 返回最新 files，前端重新落盘）。
+                    try {
+                      await installMarketplacePluginPackage(plugin.id);
+                      toast.success(`已更新「${plugin.name}」到 v${plugin.version}`);
+                      team.refresh();
+                    } catch (e) {
+                      toast.error(`更新失败：${e instanceof Error ? e.message : String(e)}`);
+                    }
+                  }}
                 />
               </TabsContent>
             )}
