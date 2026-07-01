@@ -276,6 +276,63 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  /**
+   * UpdatePlugin —— 更新当前插件的元信息（版本号/名字/描述），写回 manifest.json。
+   *
+   * 修改插件代码后应升版本号（如 0.1.0 → 0.1.1），标识这是新版本。
+   * 此前 AI 改完代码不会改版本号，导致 manifest.version 停在旧值。
+   * 本工具读 manifest → 合并传入字段 → 写回，比手写 Edit manifest.json 更可靠（JSON 安全合并）。
+   * 不改 id/runtime_type/entry（这些是结构字段，改动应走重建）。
+   */
+  const UpdatePlugin = tool({
+    name: 'UpdatePlugin',
+    description:
+      '更新当前插件的元信息并写回 manifest.json。修改插件代码后调用此工具升版本号（如 0.1.0 → 0.1.1），' +
+      '也可同时更新名字/描述。version 必填（语义版本 x.y.z），name/description 选填（留空则不改）。',
+    parameters: z.object({
+      version: z.string().regex(/^\d+\.\d+\.\d+/, 'version 须为语义版本 x.y.z（如 0.1.1）').describe('新版本号，如 0.1.1 / 1.0.0'),
+      name: z.string().optional().describe('可选：新插件名（留空不改）'),
+      description: z.string().optional().describe('可选：新描述（留空不改）'),
+    }),
+    async execute({ version, name, description }): Promise<string> {
+      const pluginId = requirePluginId();
+      // 读当前 manifest。
+      let manifestRaw: string;
+      try {
+        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'manifest.json' });
+      } catch (e) {
+        return `错误：读取 manifest.json 失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      let manifest: Record<string, unknown>;
+      try {
+        manifest = JSON.parse(manifestRaw);
+      } catch {
+        return '错误：manifest.json 解析失败（JSON 非法），请先 Read 查看内容。';
+      }
+      // 版本号校验：不允许降级（新版 < 旧版）。语义版本比较。
+      const oldVersion = String(manifest.version ?? '0.0.0');
+      if (!isVersionNewer(version, oldVersion)) {
+        return `错误：新版本 ${version} 不大于当前版本 ${oldVersion}（版本号只能递增，不能降级或相同）。`;
+      }
+      // 合并字段（仅改传入的非空字段）。
+      const updated: Record<string, unknown> = { ...manifest, version };
+      if (name && name.trim()) updated.name = name.trim();
+      if (description !== undefined) updated.description = description;
+      // 写回。
+      try {
+        await tauriInvoke<void>('write_plugin_file', { pluginId, path: 'manifest.json', content: `${JSON.stringify(updated, null, 2)}\n` });
+        readPaths.add('manifest.json'); // 视为已知内容
+        opts.onFilesChanged();
+        const changes = [`版本 ${oldVersion} → ${version}`];
+        if (name && name.trim() && name.trim() !== manifest.name) changes.push(`名字 → ${name.trim()}`);
+        if (description !== undefined && description !== manifest.description) changes.push('描述已更新');
+        return `已更新插件元信息：${changes.join('，')}。`;
+      } catch (e) {
+        return `写入失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
   const Check = tool({
     name: 'Check',
     description:
@@ -808,7 +865,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
   });
 
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, DeleteFile, MoveFile, Grep],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, UpdatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, DeleteFile, MoveFile, Grep],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();
@@ -820,6 +877,23 @@ export function createAgentTools(opts: AgentToolsOptions) {
  * 代码语法粗校验（纯前端，不依赖 Python/Node 运行时）。
  *
  * 检查项：
+/**
+ * 语义版本比较：判断 newVer 是否严格大于 oldVer（同为 x.y.z 格式）。
+ * 用于 UpdatePlugin 防止降级。如 0.1.1 > 0.1.0 ✓，1.0.0 > 0.9.9 ✓，0.1.0 > 0.1.0 ✗。
+ * 非法格式（非 x.y.z）按 0.0.0 处理（视为更旧）。
+ */
+export function isVersionNewer(newVer: string, oldVer: string): boolean {
+  const parse = (v: string): [number, number, number] => {
+    const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
+  };
+  const [a1, a2, a3] = parse(newVer);
+  const [b1, b2, b3] = parse(oldVer);
+  if (a1 !== b1) return a1 > b1;
+  if (a2 !== b2) return a2 > b2;
+  return a3 > b3;
+}
+
 /**
  * 能力声明检测：扫描代码推断插件实际用到的能力，对比 manifest 声明，找出缺漏/多余。
  *

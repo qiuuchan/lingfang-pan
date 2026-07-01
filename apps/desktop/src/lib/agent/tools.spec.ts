@@ -5,7 +5,7 @@
 // 工具工厂 createAgentTools 走 @openai/agents 的 tool()，execute 通过 mock 回调直接调用。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, setAuthToken } from '@/lib/api';
-import { createAgentTools, normalizeToolFileContent, detectCapabilities, type AgentToolsOptions, type TodoItem } from './tools';
+import { createAgentTools, normalizeToolFileContent, detectCapabilities, isVersionNewer, type AgentToolsOptions, type TodoItem } from './tools';
 
 // RunPlugin 测试需要 mock tauriInvoke（list/read 文件）+ runPluginScript（试跑）。
 // 用 vi.hoisted 拿到可在工厂内引用的 mock 引用，再 vi.mock 替换两个模块。
@@ -455,6 +455,71 @@ describe('Grep 工具', () => {
     const out = await callExecute(tools, 'Grep', { pattern: '(unclosed' });
     expect(out).toContain('main.py:1');
     expect(out).toContain('(unclosed');
+  });
+});
+
+describe('isVersionNewer 语义版本比较', () => {
+  it('patch 位递增', () => {
+    expect(isVersionNewer('0.1.1', '0.1.0')).toBe(true);
+  });
+  it('minor 位递增', () => {
+    expect(isVersionNewer('0.2.0', '0.1.9')).toBe(true);
+  });
+  it('major 位递增', () => {
+    expect(isVersionNewer('1.0.0', '0.9.9')).toBe(true);
+  });
+  it('相同版本不算更新', () => {
+    expect(isVersionNewer('0.1.0', '0.1.0')).toBe(false);
+  });
+  it('降级不允许', () => {
+    expect(isVersionNewer('0.1.0', '0.1.1')).toBe(false);
+    expect(isVersionNewer('0.9.0', '1.0.0')).toBe(false);
+  });
+  it('非法格式按 0.0.0 处理', () => {
+    expect(isVersionNewer('0.0.1', 'abc')).toBe(true);
+    expect(isVersionNewer('abc', '0.0.0')).toBe(false);
+  });
+});
+
+describe('UpdatePlugin 工具', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('已注册到工具集', () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    expect(tools.some((t) => t.name === 'UpdatePlugin')).toBe(true);
+  });
+
+  it('升版本号成功 → 写回 manifest', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'read_local_plugin_file') return JSON.stringify({ id: 'p1', name: '老名字', version: '0.1.0', description: '旧' });
+      if (cmd === 'write_plugin_file') return undefined;
+      return undefined;
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'UpdatePlugin', { version: '0.1.1' });
+    expect(out).toContain('0.1.0 → 0.1.1');
+    // 验证写了 manifest.json。
+    const writeCall = tauriInvokeMock.mock.calls.find((c) => c[0] === 'write_plugin_file');
+    expect(writeCall).toBeTruthy();
+  });
+
+  it('降级被拒绝', async () => {
+    tauriInvokeMock.mockImplementation(async () => JSON.stringify({ version: '1.0.0' }));
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'UpdatePlugin', { version: '0.9.0' });
+    expect(out).toContain('不大于');
+    expect(out).toContain('降级');
+  });
+
+  it('同时更新名字和描述', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'read_local_plugin_file') return JSON.stringify({ name: '旧', version: '0.1.0', description: '旧描述' });
+      return undefined;
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'UpdatePlugin', { version: '0.2.0', name: '新名字', description: '新描述' });
+    expect(out).toContain('名字 → 新名字');
+    expect(out).toContain('描述已更新');
   });
 });
 
