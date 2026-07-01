@@ -38,6 +38,41 @@ function wireToTier(model: string): Tier {
   throw badRequest('model 仅支持 fast 或 premium');
 }
 
+/**
+ * 从最后一次上游错误中提取「根因摘要」，供调用日志 errorCode + 客户端响应 details 使用。
+ *
+ * 解决历史诊断盲区：上游（如 Kimi/Moonshot）返回 4xx 时，其 response body 含真实拒绝原因
+ * （schema 非法、内容违规、限流、key 失效等），forwarders.ts 已把它存进 UpstreamError.body。
+ * 但此前 relay 只抛写死的「上游模型调用失败」并把 body 丢弃，导致后台日志与前端都看不到根因，
+ * 用户只能看到无意义的「Bad Request」。本 helper 把 body 解析成可读摘要透传出来。
+ *
+ * 返回 { upstreamStatus, upstreamDetail }：
+ *  - upstreamStatus：上游 HTTP 状态码（无上游错误时为 null）。
+ *  - upstreamDetail：根因摘要（≤300 字符）。优先从 body 里抽 message/error 字段；无法解析则返回 body 原文截断。
+ */
+function extractUpstreamCause(error: unknown): { upstreamStatus: number | null; upstreamDetail: string | null } {
+  if (!(error instanceof UpstreamError)) return { upstreamStatus: null, upstreamDetail: null };
+  const body = (error.body ?? '').slice(0, 300);
+  // 尝试从 JSON body 抽取 message/error.message（OpenAI/Moonshot 错误体常见字段）。
+  try {
+    const parsed = JSON.parse(error.body ?? '') as { message?: string; error?: { message?: string } | string; msg?: string };
+    const msg = parsed.message ?? parsed.msg ?? (typeof parsed.error === 'object' ? parsed.error?.message : undefined);
+    if (msg && typeof msg === 'string') {
+      return { upstreamStatus: error.httpStatus, upstreamDetail: msg.slice(0, 300) };
+    }
+  } catch { /* body 非 JSON，回落到原文截断 */ }
+  return { upstreamStatus: error.httpStatus, upstreamDetail: body || null };
+}
+
+/** 拼接 errorCode：upstream_llm_error + 根因摘要，便于后台调用日志一眼定位。 */
+function upstreamErrorCode(error: unknown): string {
+  const { upstreamStatus, upstreamDetail } = extractUpstreamCause(error);
+  const tag = `upstream_${upstreamStatus ?? 'unknown'}`;
+  if (!upstreamDetail) return tag;
+  // 截断 100 字符，避免 errorCode 过长（数据库列 + 日志可读性）。
+  return `${tag}:${upstreamDetail.slice(0, 100)}`;
+}
+
 @Injectable()
 export class RelayService {
   constructor(
@@ -302,7 +337,7 @@ export class RelayService {
             // 即使部分 chunk 已透传（利于用户、对平台有损，接受为 MVP；后续可按已收 usage 部分计费）。
             // 这里不可能误扣用户：reconcile 仅在成功路径调用，发头后失败只走 refund。
             await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-            await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus: e instanceof UpstreamError ? e.httpStatus : 502, channelId: cand.id, model: cand.model });
+            await ensureFinalized({ status: 'upstream_error', errorCode: e instanceof UpstreamError ? upstreamErrorCode(e) : 'upstream_llm_error', httpStatus: e instanceof UpstreamError ? e.httpStatus : 502, channelId: cand.id, model: cand.model });
             return;
           }
           // 非流式：继续下一候选（故障转移）。
@@ -317,8 +352,12 @@ export class RelayService {
         throw new AppError(503, 'pricing_not_configured', `渠道模型未配置定价：${modelNames}。请在「模型接入」为这些模型添加定价。`);
       }
       const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
-      await ensureFinalized({ status: 'upstream_error', errorCode: 'upstream_llm_error', httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
-      throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败');
+      const { upstreamStatus, upstreamDetail } = extractUpstreamCause(lastError);
+      // errorCode 带上游根因摘要，后台「调用日志」可一眼看到 Kimi/Moonshot 真实拒绝原因。
+      const errorCode = lastError instanceof UpstreamError ? upstreamErrorCode(lastError) : 'upstream_llm_error';
+      await ensureFinalized({ status: 'upstream_error', errorCode, httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
+      // details 透传上游真实原因（status + body 摘要），客户端据此显示可读错误而非无意义 statusText。
+      throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败', { upstreamStatus, upstreamDetail });
     } catch (e) {
       // 任何未预期错误：退款兜底（防灵石泄漏）+ 确保日志终态，再原样抛给客户端。
       if (!finalized) {

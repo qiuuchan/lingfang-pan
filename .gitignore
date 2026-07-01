@@ -32,6 +32,7 @@ apps/desktop/playwright/.cache/
 *.sqlite3
 **/__pycache__/
 **/*.pyc
+.pnpm-store-tmp/
 
 # 本地态与密钥（永不入仓）
 .env
