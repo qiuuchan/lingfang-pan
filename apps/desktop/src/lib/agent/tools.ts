@@ -652,11 +652,13 @@ export function createAgentTools(opts: AgentToolsOptions) {
     description:
       '试运行当前插件（nodejs/python）并返回控制台输出（stdout/stderr）。' +
       '生成或修改代码后必须调用验证能否跑起来；若有报错，读取 stderr 信息修复后重试，直到正常运行。' +
-      'client(HTML) 插件不支持试跑（请在插件页用运行按钮预览）。',
+      'client(HTML) 插件不支持试跑（请在插件页用运行按钮预览）。' +
+      '需要 GUI 的插件（PySide6 等），传 args 如 ["--test"] 走无 GUI 测试模式（脚本据 sys.argv/process.argv 判断）。',
     parameters: z.object({
       entry: z.string().optional().describe('可选：指定入口文件（缺省用 manifest.entry）'),
+      args: z.array(z.string()).optional().describe('可选：传给脚本的命令行参数（如 ["--test"]），脚本通过 sys.argv/process.argv 读取'),
     }),
-    async execute({ entry }): Promise<string> {
+    async execute({ entry, args }): Promise<string> {
       const pluginId = requirePluginId();
       // 收集插件当前全部文件（磁盘上的最新内容）。
       let files: string[];
@@ -687,6 +689,22 @@ export function createAgentTools(opts: AgentToolsOptions) {
       const runtime = runtimeRaw as ScriptRuntime;
       const entryPath = entry?.trim() || manifest.entry || '';
       if (!entryPath) return '错误：manifest 未声明 entry，且未传入 entry 参数。';
+      // 预检（nodejs + scripts.start 需专属运行时）：若 package.json 声明了 scripts.start
+      // 且非简单 node <file>（如 electron .），裸 node 跑不了，提前拦截避免模型陷入死循环。
+      if (runtime === 'nodejs') {
+        const pkgFile = files.find((f) => f === 'package.json');
+        if (pkgFile) {
+          try {
+            const pkgRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'package.json' });
+            const pkg = JSON.parse(pkgRaw) as { scripts?: { start?: string } };
+            const start = pkg.scripts?.start?.trim() ?? '';
+            const isPlainNode = start.startsWith('node ') && start.trim().split(/\s+/).length === 2;
+            if (start && !isPlainNode) {
+              return `错误：该 Node 插件声明了 scripts.start（${start}），需要专属运行时而非裸 node 直跑，预览执行无法启动。请在「插件」页用「运行」按钮以独立进程启动（pnpm start）。`;
+            }
+          } catch { /* package.json 解析失败忽略，交给真实 node 错误兜底 */ }
+        }
+      }
       // 组装 ScriptFile[]（逐文件读回内容）。
       const scriptFiles: ScriptFile[] = [];
       for (const p of files) {
@@ -697,13 +715,14 @@ export function createAgentTools(opts: AgentToolsOptions) {
           return `错误：读取 ${p} 失败：${e instanceof Error ? e.message : String(e)}`;
         }
       }
-      // 调 Rust run_plugin_script（沙箱一次性执行 + 捕获输出）。
+      // 调 Rust run_plugin_script（沙箱一次性执行 + 捕获输出 + 透传 args）。
       const result = await runPluginScript({
         pluginId,
         runtime,
         entry: entryPath,
         files: scriptFiles,
         capabilities: [], // 试跑不注入 LLM 桥能力（纯验证代码能否跑）
+        args: args ?? [],
       });
       // 格式化为 AI 可读文本。
       const trim = (s: string, max: number) => s.length > max ? s.slice(0, max) + `\n…(已截断，共 ${s.length} 字符)` : s;
@@ -916,14 +935,20 @@ export function detectCapabilities(
   codeFiles: { path: string; content: string }[],
   declaredKinds: string[],
 ): { missing: string[]; declared: string[]; detected: string[] } {
-  // 代码特征 → 能力 kind 的映射（正则，宽松匹配 import/调用/标识符）。
+  // 代码特征 → 能力 kind 的映射（正则）。
   // 注意：ua.*（ui.view）默认所有有界面的插件都该有，不靠代码检测（HTML 插件必有界面）。
+  // fs.read/fs.write 收窄排除浏览器/HTTP API（window.open/document.open/res.write/stream.write 等），
+  // 避免对 client/HTML 插件误报（这些 API 不读写本地文件）。
   const rules: Array<{ kind: string; pattern: RegExp; desc: string }> = [
     { kind: 'llm.chat', pattern: /sdk\.llm|llm\.chat|chat_completion|LLM_PLUGIN_BRIDGE|lingfang.*llm/i, desc: '调用了平台 LLM 能力' },
     { kind: 'image.generate', pattern: /sdk\.image|image\.generate|generate_image/i, desc: '调用了平台生图能力' },
     { kind: 'net.fetch', pattern: /\brequests\b|\bfetch\s*\(|urllib|aiohttp|http\.client|\bhttpx\b|axios/i, desc: '发起了网络请求' },
-    { kind: 'fs.read', pattern: /\bopen\s*\(|read_file|readFile|pathlib|os\.path\.|os\.listdir/i, desc: '读取了文件' },
-    { kind: 'fs.write', pattern: /open\s*\([^)]*['"][wa]|write_?file|\.write\s*\(|shutil\.(?:move|copy)/i, desc: '写入了文件' },
+    // fs.read：Python open( 是文件读；JS 排除 window./document./process. 前缀（浏览器 API）。
+    // readFile 加词边界 \b 防匹配 myreadFile。pathlib/os.path 是 Python 文件操作。
+    { kind: 'fs.read', pattern: /(?<!window\.)(?<!document\.)(?<!process\.)\bopen\s*\(|\breadFile\b|\bread_file\b|\bpathlib\b|\bos\.path\.|\bos\.listdir\b/i, desc: '读取了文件' },
+    // fs.write：open(...'w'/'a') 是文件写（Python）；.write( 排除 res./stream./socket./process.stdout./document./response. 前缀。
+    // writeFile/fs.write/shutil 是明确的文件写操作。
+    { kind: 'fs.write', pattern: /open\s*\([^)]*['"][wa][^)]*\)|\bwriteFile\b|\bwrite_file\b|\bfs\.write\b|(?<!res\.)(?<!stream\.)(?<!socket\.)(?<!stdout\.)(?<!document\.)(?<!response\.)\.write\s*\(|\bshutil\.(?:move|copy)/i, desc: '写入了文件' },
     { kind: 'clipboard', pattern: /clipboard|pyperclip/i, desc: '访问了剪贴板' },
     { kind: 'storage.kv', pattern: /localStorage|sessionStorage|sqlite|\.kv\b|key_value|keyvalue/i, desc: '使用了本地存储' },
     { kind: 'system.notify', pattern: /notification|notify\s*\(|toast|plyer\.notification/i, desc: '发送了系统通知' },

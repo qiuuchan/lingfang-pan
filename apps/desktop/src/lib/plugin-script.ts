@@ -53,6 +53,8 @@ export interface RunPluginScriptInput {
   capabilities?: string[];
   /** 超时毫秒，缺省由 Rust 侧兜底 15000。 */
   timeoutMs?: number;
+  /** 传给脚本的命令行参数（如 ['--test']），脚本通过 sys.argv/process.argv 读取。 */
+  args?: string[];
 }
 
 /**
@@ -78,6 +80,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
         api_base: apiBase(),
         auth_token: getAuthToken() ?? '',
         timeout_ms: input.timeoutMs ?? null,
+        args: input.args ?? [],
       },
     });
   } catch (error) {
