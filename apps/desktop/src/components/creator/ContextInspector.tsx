@@ -1,12 +1,16 @@
-// ContextInspector —— 上下文查看面板：显示当前发给模型的 system 提示、压缩摘要、保留的历史轮、
-// 草稿文件清单、每部分 token 占比，让用户看清"模型到底看到了什么"。
+// ContextInspector —— 上下文窗口查看面板（Claude Code TUI / OpenCode 风格）。
 //
-// 从 FloatingCreator 接收 buildContextMessages 返回的 breakdown 结构，渲染成可折叠的分段面板。
+// 显示当前发给模型的 system 提示、压缩摘要、保留的历史轮、每部分 token 占比，
+// 以及「距离下次压缩还有多少」指示，让用户看清"模型到底看到了什么"。
+// 视觉参考：终端风格的 monospace 数字 + 堆叠条形图 + 压缩进度环。
 import { useState } from 'react';
-import { ChevronDownIcon, ChevronUpIcon, EyeIcon, FileTextIcon, ClockIcon, PencilIcon, ZapIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import {
+  ChevronDownIcon, ChevronUpIcon, EyeIcon, FileTextIcon, ClockIcon, PencilIcon,
+  GaugeIcon, LayersIcon,
+} from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 interface ContextBreakdown {
   systemPrompt: string;
@@ -14,10 +18,25 @@ interface ContextBreakdown {
   keptTurns: Array<{ role: string; content: string }>;
   currentInput: string;
   estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+  compressInfo: { threshold: number; currentChars: number; remainingChars: number; pct: number };
 }
 
-export function ContextInspector({ breakdown, open, onClose }: { breakdown: ContextBreakdown | null; open: boolean; onClose: () => void }) {
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['tokens']));
+export function ContextInspector({
+  breakdown,
+  open,
+  onClose,
+  modelTokens,
+  contextWindow,
+}: {
+  breakdown: ContextBreakdown | null;
+  open: boolean;
+  onClose: () => void;
+  /** 粗估当前对话总 token（含 system + history + input）。 */
+  modelTokens?: number;
+  /** 模型上下文窗口大小（token），null 表示未知。 */
+  contextWindow?: number | null;
+}) {
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['overview']));
 
   function toggle(key: string) {
     setExpandedSections((prev) => {
@@ -30,6 +49,12 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
 
   if (!breakdown) return null;
   const tok = breakdown.estimatedTokens;
+  const ci = breakdown.compressInfo;
+
+  // 模型窗口占比（若 contextWindow 已知）。
+  const winPct = contextWindow && contextWindow > 0 ? Math.min(100, Math.round(((modelTokens ?? tok.total) / contextWindow) * 100)) : null;
+  // 压缩进度状态：pct≥100 表示已达阈值下次将压缩；≥80 即将压缩。
+  const compressStatus = ci.pct >= 100 ? 'critical' : ci.pct >= 80 ? 'warning' : 'ok';
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -42,19 +67,90 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
         </DialogHeader>
         <ScrollArea className="max-h-[calc(85vh-80px)]">
           <div className="space-y-3 pr-4">
-            {/* Token 占比总览 */}
+            {/* === 总览仪表盘（Claude Code 风格：两个并排指标） === */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {/* 模型窗口占用 */}
+              <div className="rounded-lg border bg-card p-3">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <GaugeIcon className="size-3.5" />
+                  模型窗口
+                </div>
+                {winPct !== null ? (
+                  <>
+                    <div className="mb-1 flex items-baseline justify-between">
+                      <span className="font-mono text-lg font-semibold tabular-nums">{winPct}%</span>
+                      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{(modelTokens ?? tok.total).toLocaleString()} / {contextWindow!.toLocaleString()}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={cn(
+                          'h-full rounded-full transition-all',
+                          winPct > 90 ? 'bg-gradient-to-r from-red-500 to-red-600' : winPct > 70 ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-green-500',
+                        )}
+                        style={{ width: `${winPct}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-muted-foreground">未知窗口大小<br /><span className="font-mono text-xs">~{(modelTokens ?? tok.total).toLocaleString()} tokens</span></div>
+                )}
+              </div>
+
+              {/* 压缩进度（OpenCode 风格：距离下次压缩） */}
+              <div className="rounded-lg border bg-card p-3">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <LayersIcon className="size-3.5" />
+                  压缩进度
+                </div>
+                <div className="mb-1 flex items-baseline justify-between">
+                  <span className="font-mono text-lg font-semibold tabular-nums">{Math.min(100, ci.pct)}%</span>
+                  <span className={cn(
+                    'font-mono text-[11px] tabular-nums',
+                    compressStatus === 'critical' && 'text-red-600 dark:text-red-400',
+                    compressStatus === 'warning' && 'text-amber-600 dark:text-amber-400',
+                  )}>
+                    {ci.remainingChars > 0
+                      ? `还需 ${ci.remainingChars.toLocaleString()} 字符`
+                      : '已达阈值，下次将压缩'}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all',
+                      compressStatus === 'critical' ? 'bg-gradient-to-r from-red-500 to-red-600'
+                        : compressStatus === 'warning' ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                          : 'bg-gradient-to-r from-sky-500 to-blue-500',
+                    )}
+                    style={{ width: `${Math.min(100, ci.pct)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* === Token 堆叠条形图（OpenCode 风格：一段段彩色拼成总量） === */}
             <Section
-              icon={ZapIcon}
-              title="Token 占比"
+              icon={LayersIcon}
+              title="Token 构成"
               subtitle={`总计 ~${tok.total.toLocaleString()} tokens`}
-              expanded={expandedSections.has('tokens')}
-              onToggle={() => toggle('tokens')}
+              expanded={expandedSections.has('overview')}
+              onToggle={() => toggle('overview')}
             >
-              <div className="space-y-1.5 text-sm">
-                <TokenBar label="系统提示" value={tok.system} total={tok.total} color="bg-blue-500" />
-                {tok.summary > 0 && <TokenBar label="历史摘要" value={tok.summary} total={tok.total} color="bg-purple-500" />}
-                <TokenBar label="保留历史" value={tok.history} total={tok.total} color="bg-green-500" />
-                <TokenBar label="当前输入" value={tok.input} total={tok.total} color="bg-orange-500" />
+              {/* 堆叠总条 */}
+              {tok.total > 0 && (
+                <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                  <SegPct value={tok.system} total={tok.total} className="bg-blue-500" />
+                  {tok.summary > 0 && <SegPct value={tok.summary} total={tok.total} className="bg-purple-500" />}
+                  <SegPct value={tok.history} total={tok.total} className="bg-emerald-500" />
+                  <SegPct value={tok.input} total={tok.total} className="bg-orange-500" />
+                </div>
+              )}
+              {/* 分项明细 */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                <TokenLegend label="系统提示" value={tok.system} total={tok.total} color="bg-blue-500" />
+                {tok.summary > 0 && <TokenLegend label="历史摘要" value={tok.summary} total={tok.total} color="bg-purple-500" />}
+                <TokenLegend label="保留历史" value={tok.history} total={tok.total} color="bg-emerald-500" />
+                <TokenLegend label="当前输入" value={tok.input} total={tok.total} color="bg-orange-500" />
               </div>
             </Section>
 
@@ -66,7 +162,7 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
               expanded={expandedSections.has('system')}
               onToggle={() => toggle('system')}
             >
-              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 text-xs leading-relaxed">{breakdown.systemPrompt}</pre>
+              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs leading-relaxed">{breakdown.systemPrompt}</pre>
             </Section>
 
             {/* 历史摘要 */}
@@ -78,7 +174,7 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
                 expanded={expandedSections.has('summary')}
                 onToggle={() => toggle('summary')}
               >
-                <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 text-xs leading-relaxed">{breakdown.summary}</pre>
+                <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs leading-relaxed">{breakdown.summary}</pre>
               </Section>
             )}
 
@@ -93,8 +189,14 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
               <div className="space-y-2">
                 {breakdown.keptTurns.map((t, i) => (
                   <div key={i} className="rounded border bg-background p-2">
-                    <div className="mb-1 text-xs font-medium text-muted-foreground">{t.role === 'user' ? '用户' : 'AI'}</div>
-                    <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed">{t.content.slice(0, 500)}{t.content.length > 500 ? '…' : ''}</pre>
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <span className={cn(
+                        'inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium',
+                        t.role === 'user' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+                      )}>{t.role === 'user' ? '用户' : 'AI'}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">{t.content.length.toLocaleString()} 字符</span>
+                    </div>
+                    <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{t.content.slice(0, 500)}{t.content.length > 500 ? '…' : ''}</pre>
                   </div>
                 ))}
               </div>
@@ -108,12 +210,32 @@ export function ContextInspector({ breakdown, open, onClose }: { breakdown: Cont
               expanded={expandedSections.has('input')}
               onToggle={() => toggle('input')}
             >
-              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 text-xs leading-relaxed">{breakdown.currentInput}</pre>
+              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs leading-relaxed">{breakdown.currentInput}</pre>
             </Section>
           </div>
         </ScrollArea>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 堆叠条形图的一段（按占比计算宽度）。 */
+function SegPct({ value, total, className }: { value: number; total: number; className: string }) {
+  const pct = total > 0 ? (value / total) * 100 : 0;
+  if (pct <= 0) return null;
+  return <div className={cn('h-full', className)} style={{ width: `${pct}%` }} title={`${value.toLocaleString()} tokens (${pct.toFixed(1)}%)`} />;
+}
+
+/** Token 分项图例（色块 + 标签 + 数值）。 */
+function TokenLegend({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
+  const pct = total > 0 ? (value / total) * 100 : 0;
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={cn('size-2.5 shrink-0 rounded-sm', color)} />
+      <span className="text-muted-foreground">{label}</span>
+      <span className="ml-auto font-mono tabular-nums">{value.toLocaleString()}</span>
+      <span className="font-mono text-muted-foreground/60 tabular-nums">{pct.toFixed(0)}%</span>
+    </div>
   );
 }
 
@@ -141,27 +263,12 @@ function Section({
       >
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium">{title}</div>
-          <div className="text-xs text-muted-foreground">{subtitle}</div>
+          <div className="text-sm font-medium">{title}</div>
+          <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{subtitle}</div>
         </div>
         {expanded ? <ChevronUpIcon className="size-4 shrink-0" /> : <ChevronDownIcon className="size-4 shrink-0" />}
       </button>
       {expanded && <div className="border-t px-3 py-3">{children}</div>}
-    </div>
-  );
-}
-
-function TokenBar({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
-  const pct = total > 0 ? (value / total) * 100 : 0;
-  return (
-    <div>
-      <div className="mb-1 flex items-baseline justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono">{value.toLocaleString()} ({pct.toFixed(1)}%)</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
     </div>
   );
 }

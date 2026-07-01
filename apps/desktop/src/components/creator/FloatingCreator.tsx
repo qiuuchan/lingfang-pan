@@ -288,7 +288,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
   const [userEdits, setUserEdits] = useState<Partial<StagedPlugin>>({});
   const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
   const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
-  const [contextBreakdown, setContextBreakdown] = useState<{ systemPrompt: string; summary: string; keptTurns: Array<{ role: string; content: string }>; currentInput: string; estimatedTokens: { system: number; summary: number; history: number; input: number; total: number } } | null>(null); // 上下文查看面板数据
+  const [contextBreakdown, setContextBreakdown] = useState<{ systemPrompt: string; summary: string; keptTurns: Array<{ role: string; content: string }>; currentInput: string; estimatedTokens: { system: number; summary: number; history: number; input: number; total: number }; compressInfo: { threshold: number; currentChars: number; remainingChars: number; pct: number } } | null>(null); // 上下文查看面板数据
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false); // 上下文查看面板开关
   const [todos, setTodos] = useState<TodoItem[]>([]); // 当前会话的 TodoWrite 任务清单（随会话持久化）
   // 网络慢检测：流式进行中但长时间（>12s）无新 token 时，状态条提示「网络较慢」。
@@ -1633,7 +1633,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     </Dialog>
 
     {/* 上下文查看面板 */}
-    <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} />
+    <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={usedTokens} contextWindow={contextWindow} />
     </>
   );
 }
