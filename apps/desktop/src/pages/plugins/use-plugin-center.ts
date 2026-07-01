@@ -52,6 +52,7 @@ export function useTeamPluginList(runningPlugin: LoadedPlugin | null) {
 export function useLocalPluginList(runningPlugin: LoadedPlugin | null) {
   const [items, setItems] = useState<LocalPluginStatus[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -62,13 +63,14 @@ export function useLocalPluginList(runningPlugin: LoadedPlugin | null) {
         toast.error(`扫描本地插件失败：${errorMessage(caught)}`);
       })
       .finally(() => setLoading(false));
+    setPage(1);
   }, []);
 
   useEffect(() => {
     if (!runningPlugin) reload();
   }, [runningPlugin, reload]);
 
-  return { items, loading, reload };
+  return { items, loading, reload, page, setPage };
 }
 
 // task 06-26-agent-framework-rewrite：本地草稿插件列表

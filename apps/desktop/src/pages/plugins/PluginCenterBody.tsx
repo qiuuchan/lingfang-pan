@@ -46,6 +46,8 @@ export function PluginCenterBody({
 
   const totalTeam = team.items?.length ?? 0;
   const totalTeamPages = Math.max(1, Math.ceil(totalTeam / PLUGIN_PAGE_SIZE));
+  const totalLocal = local.items?.length ?? 0;
+  const totalLocalPages = Math.max(1, Math.ceil(totalLocal / PLUGIN_PAGE_SIZE));
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -69,6 +71,9 @@ export function PluginCenterBody({
                 <LocalPluginsSection
                   items={local.items ?? []}
                   loading={local.loading}
+                  page={local.page}
+                  setPage={local.setPage}
+                  totalPages={totalLocalPages}
                   onOpen={(item) => { void openers.openLocalPlugin(item); }}
                   onOpenRoot={openers.openLocalRoot}
                   onRefresh={local.reload}

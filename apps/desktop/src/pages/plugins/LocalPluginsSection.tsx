@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { FolderOpenIcon, PackageIcon, RefreshCwIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Pagination } from '@/components/pagination';
 import { Shimmer } from '@/lib/motion';
 import type { LocalPluginStatus } from '@/lib/plugin-status';
 import { LocalPluginRow } from './LocalPluginRow';
@@ -10,26 +11,36 @@ const PAGE_SIZE = 6;
 export function LocalPluginsSection({
   items,
   loading,
+  page,
+  setPage,
+  totalPages,
   onOpen,
   onOpenRoot,
   onRefresh,
 }: {
   items: LocalPluginStatus[];
   loading: boolean;
+  page: number;
+  setPage: (page: number) => void;
+  totalPages: number;
   onOpen: (item: LocalPluginStatus) => void;
   onOpenRoot: () => void;
   onRefresh: () => void;
 }) {
+  const pageItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   return (
     <section className="flex flex-col gap-3">
       <SectionHeader count={items.length} loading={loading} onOpenRoot={onOpenRoot} onRefresh={onRefresh} />
       {loading ? (
         <ListSkeleton />
       ) : items.length ? (
-        <div className="flex flex-col divide-y rounded-lg border">
-          {items.map((item) => (
-            <LocalPluginRow key={item.id} item={item} onOpen={onOpen} onDeleted={onRefresh} />
-          ))}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col divide-y rounded-lg border">
+            {pageItems.map((item) => (
+              <LocalPluginRow key={item.id} item={item} onOpen={onOpen} onDeleted={onRefresh} />
+            ))}
+          </div>
+          {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onChange={setPage} />}
         </div>
       ) : (
         <EmptyLocalPlugins />
