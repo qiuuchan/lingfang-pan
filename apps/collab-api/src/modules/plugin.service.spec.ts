@@ -36,6 +36,9 @@ function createService(options: {
       create: pluginCreate,
       update: pluginUpdate,
     },
+    pluginInstallation: {
+      findMany: vi.fn(async () => []),
+    },
     auditLog: {
       create: vi.fn(async () => ({})),
     },
@@ -51,7 +54,11 @@ function createService(options: {
   const grants = {
     resolvePluginAccess: vi.fn(async () => true),
   };
-  return { service: new PluginService(prisma as never, auth as never, grants as never), prisma, auth, grants };
+  // NotificationService mock：新版本推送通知（editPluginDraft 已上架更新时调用）。
+  const notifications = {
+    create: vi.fn(async () => ({})),
+  };
+  return { service: new PluginService(prisma as never, auth as never, grants as never, notifications as never), prisma, auth, grants, notifications };
 }
 
 const validPackage = {
@@ -265,5 +272,79 @@ describe('PluginService editPluginMeta', () => {
 
     await expect(service.editPluginMeta('user-1', 'plugin-1', {}))
       .rejects.toMatchObject({ code: 'bad_request' });
+  });
+});
+
+describe('PluginService editPluginDraft 已上架插件免重审更新', () => {
+  // 已上架插件（APPROVED + marketplace=true）更新源码：保留 APPROVED，不重置 DRAFT，直接生效。
+  function livePlugin(version = '1.0.0') {
+    return {
+      id: 'plugin-1',
+      teamId: 'team-1',
+      authorUserId: 'user-1',
+      name: '番茄钟',
+      version,
+      reviewStatus: 'APPROVED',
+      marketplace: true,
+      visibility: 'PUBLIC',
+      runtimeType: 'client',
+      entry: 'ui/index.html',
+      manifest: { id: 'timer', name: '番茄钟', version, runtime_type: 'client', entry: 'ui/index.html' },
+      files: [],
+      capabilities: [],
+      contentHash: 'old-hash',
+      status: 'ENABLED',
+      priceCents: 0,
+      installCount: 1,
+      ratingCount: 0,
+      ratingSum: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  function updatedPackage(version: string) {
+    return {
+      manifest: { ...validPackage.manifest, version, id: 'timer', name: '番茄钟', runtime_type: 'client', entry: 'ui/index.html' },
+      files: validPackage.files,
+    };
+  }
+
+  it('已上架插件升版本 → 保留 APPROVED + marketplace（不重审）', async () => {
+    const { service, prisma } = createService({ existingPlugin: livePlugin('1.0.0') });
+    const result = await service.editPluginDraft('user-1', 'plugin-1', updatedPackage('1.1.0') as never);
+    // 审核态保留 APPROVED + marketplace=true（未重置 DRAFT）。
+    expect(result.plugin.reviewStatus).toBe('APPROVED');
+    expect(prisma.plugin.update).toHaveBeenCalled();
+    const updateData = prisma.plugin.update.mock.calls[0][0].data;
+    expect(updateData.version).toBe('1.1.0');
+    expect(updateData.reviewStatus).toBeUndefined(); // 未传 reviewStatus = 不改
+  });
+
+  it('已上架插件降版本 → 拒绝（版本号只能递增）', async () => {
+    const { service } = createService({ existingPlugin: livePlugin('1.2.0') });
+    await expect(service.editPluginDraft('user-1', 'plugin-1', updatedPackage('1.1.0') as never))
+      .rejects.toMatchObject({ code: 'bad_request' });
+  });
+
+  it('已上架插件同版本 → 拒绝', async () => {
+    const { service } = createService({ existingPlugin: livePlugin('1.0.0') });
+    await expect(service.editPluginDraft('user-1', 'plugin-1', updatedPackage('1.0.0') as never))
+      .rejects.toMatchObject({ code: 'bad_request' });
+  });
+
+  it('已上架插件更新 → 推送新版本通知给旧版本用户', async () => {
+    const { service, notifications, prisma } = createService({ existingPlugin: livePlugin('1.0.0') });
+    // mock：1 个安装了旧版本的用户。
+    prisma.pluginInstallation.findMany.mockResolvedValueOnce([
+      { installedById: 'user-buyer', version: '1.0.0' },
+    ]);
+    await service.editPluginDraft('user-1', 'plugin-1', updatedPackage('1.1.0') as never);
+    // 应向旧版本用户推送 new_version 通知。
+    expect(notifications.create).toHaveBeenCalledWith(
+      'user-buyer', 'new_version', '插件有新版本',
+      expect.stringContaining('1.1.0'),
+      expect.objectContaining({ relatedType: 'Plugin', relatedId: 'plugin-1' }),
+    );
   });
 });
