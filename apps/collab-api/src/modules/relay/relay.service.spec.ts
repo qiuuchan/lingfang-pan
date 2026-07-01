@@ -187,6 +187,30 @@ describe('RelayService.executeRelay 计费时机（R3：未成功对话不净扣
     expect(credits.__net()).toBe(-200); // 封顶 cap
   });
 
+  it('场景6c developer role 归一化为 system：AI SDK v5 误把 system 转 developer，上游不认 → 转回 system', async () => {
+    // 根因（修复「Bad Request: tokenization failed」）：AI SDK v5 对非 gpt-3/4/chatgpt-4o/gpt-5-chat
+    // 开头的 modelId（灵坊用 fast/premium 哨兵）判为推理模型 → system 变 developer role。
+    // Moonshot/Kimi 不认 developer → 400。relay 在转发前统一 developer→system。
+    const { svc, router, pricing } = build(200);
+    router.selectCandidates.mockResolvedValueOnce([makeRouterCandidate('m1')]);
+    forwardOpenAiChat.mockResolvedValueOnce({ inputTokens: 10, outputTokens: 5, images: 0 });
+    pricing.computeCredits.mockReturnValueOnce(5);
+    const bodyWithDeveloper = {
+      model: 'fast',
+      messages: [
+        { role: 'developer', content: '你是助手' }, // AI SDK v5 转换后的 role
+        { role: 'user', content: 'hi' },
+      ],
+      stream: false,
+    };
+    await expect(svc.chatCompletions(makeReq(), makeRes(false), bodyWithDeveloper)).resolves.toBeUndefined();
+    // 断言：转发给上游的 messages 里 developer 已被归一化为 system。
+    const forwardedBody = forwardOpenAiChat.mock.calls[0][0].body;
+    expect(forwardedBody.messages[0].role).toBe('system');
+    expect(forwardedBody.messages[0].content).toBe('你是助手'); // 内容保留
+    expect(forwardedBody.messages.some((m: { role: string }) => m.role === 'developer')).toBe(false);
+  });
+
   it('场景7 成功（cap=0）：reconcile 条件扣款；refund 不调用；净变化=-real', async () => {
     const { svc, credits, router, pricing } = build(0);
     router.selectCandidates.mockResolvedValueOnce([makeRouterCandidate('m1')]);

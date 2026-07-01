@@ -73,6 +73,19 @@ function upstreamErrorCode(error: unknown): string {
   return `${tag}:${upstreamDetail.slice(0, 100)}`;
 }
 
+/**
+ * 把 messages 里的 `developer` role 归一化为 `system`（OpenAI 兼容上游统一认 system）。
+ *
+ * 背景：AI SDK v5 对非 gpt-3/4/chatgpt-4o/gpt-5-chat 开头的 modelId 视为推理模型，把 system message
+ * 转成 developer role。灵坊用 fast/premium 哨兵作 modelId，被误判为推理模型 → developer role。
+ * 而 Moonshot/Kimi 等上游不支持 developer role（tokenization failed → 400）。
+ * developer role 语义与 system 等价（OpenAI 用它区分推理模型的「开发者指令」），归一化为 system
+ * 对 OpenAI 系（gpt-5.5，兼容 system）和 Moonshot 系（只认 system）都安全。
+ */
+function normalizeDeveloperRole(messages: { role: string; content: string }[]): { role: string; content: string }[] {
+  return messages.map((m) => (m.role === 'developer' ? { ...m, role: 'system' } : m));
+}
+
 @Injectable()
 export class RelayService {
   constructor(
@@ -119,7 +132,13 @@ export class RelayService {
 
     // 注入系统提示词规则。
     const guardRule = await this.credits.readAiUsageGuardRule();
-    const messages = (body.messages as { role: string; content: string }[]) ?? [];
+    // 归一化 role：AI SDK v5（ai@5）对非 gpt-3/4/chatgpt-4o/gpt-5-chat 的 modelId 会把 system 转成
+    // developer role（OpenAI 新规范，line: getOpenAILanguageModelCapabilities → systemMessageMode）。
+    // 但灵坊用 fast/premium 哨兵作 modelId（不以这些前缀开头）→ 被误判为推理模型 → system 变 developer。
+    // Moonshot/Kimi（kimi-for-coding）等上游不认 developer role → tokenization failed → 400。
+    // 这里在转发前统一 developer→system：OpenAI 系（gpt-5.5）兼容 system，Moonshot 系只认 system，两边安全。
+    const rawMessages = (body.messages as { role: string; content: string }[]) ?? [];
+    const messages = normalizeDeveloperRole(rawMessages);
     const injectedMessages = guardRule?.trim()
       ? (guardRule ? this.injectGuard(messages, guardRule) : messages)
       : messages;
