@@ -21,6 +21,8 @@ type TeamPluginsSectionProps = {
   onRefresh: () => void;
   onRun: (plugin: LoadedPlugin) => void;
   onTogglePin: (plugin: LoadedPlugin, pinned: boolean) => void;
+  /** 更新插件到最新版（已安装且有新版时调用）。 */
+  onUpdate?: (plugin: LoadedPlugin) => void;
 };
 
 export function TeamPluginsSection({
@@ -36,6 +38,7 @@ export function TeamPluginsSection({
   onRefresh,
   onRun,
   onTogglePin,
+  onUpdate,
 }: TeamPluginsSectionProps) {
   const total = items?.length ?? 0;
   const pageItems = (items ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -57,6 +60,7 @@ export function TeamPluginsSection({
         onRefresh={onRefresh}
         onRun={onRun}
         onTogglePin={onTogglePin}
+        onUpdate={onUpdate}
       />
     </section>
   );
@@ -105,6 +109,7 @@ function TeamSectionBody({
   onRefresh,
   onRun,
   onTogglePin,
+  onUpdate,
 }: TeamSectionBodyProps) {
   if (items === null) return <ListSkeleton />;
   if (!total) return error ? null : <TeamEmptyState onCreate={onCreate} onOpenMarket={onOpenMarket} />;
@@ -116,6 +121,7 @@ function TeamSectionBody({
         onRefresh={onRefresh}
         onRun={onRun}
         onTogglePin={onTogglePin}
+        onUpdate={onUpdate}
       />
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
@@ -128,12 +134,14 @@ function TeamPluginRows({
   onRefresh,
   onRun,
   onTogglePin,
+  onUpdate,
 }: {
   isPinned: (id: string) => boolean;
   items: LoadedPlugin[];
   onRefresh: () => void;
   onRun: (plugin: LoadedPlugin) => void;
   onTogglePin: (plugin: LoadedPlugin, pinned: boolean) => void;
+  onUpdate?: (plugin: LoadedPlugin) => void;
 }) {
   return (
     <div className="flex flex-col divide-y rounded-lg border">
@@ -145,6 +153,7 @@ function TeamPluginRows({
           onChanged={onRefresh}
           onRun={onRun}
           onTogglePin={onTogglePin}
+          onUpdate={onUpdate}
         />
       ))}
     </div>

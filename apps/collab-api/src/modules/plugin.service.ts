@@ -85,7 +85,7 @@ export class PluginService {
       include: {
         installations: {
           where: { teamId: membership.teamId, status: 'ENABLED' },
-          select: { id: true },
+          select: { id: true, version: true },
         },
       },
       orderBy: [{ marketplace: 'asc' }, { updatedAt: 'desc' }],

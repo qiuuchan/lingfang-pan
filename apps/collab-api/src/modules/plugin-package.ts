@@ -211,20 +211,26 @@ export function publicPlugin(plugin: PublicPluginInput, currentTeamId?: string) 
 }
 
 export function publicAvailablePlugin(
-  plugin: PublicPluginInput & { installations?: unknown[] },
+  plugin: PublicPluginInput & { installations?: Array<{ version?: string }> },
   currentTeamId: string,
 ) {
   const public_ = publicPlugin(plugin, currentTeamId);
   const isOwnTeam = plugin.teamId === currentTeamId;
   if (isOwnTeam) return public_;
 
-  const isInstalled = (plugin.installations ?? []).length > 0;
+  const installations = plugin.installations ?? [];
+  const isInstalled = installations.length > 0;
+  // 已安装版本（PluginInstallation.version）：供前端对比 version（最新版）判断是否有更新。
+  // 一个团队对一个插件只有一条 ENABLED installation，取第一条。
+  const installedVersion = isInstalled ? installations[0]?.version : undefined;
   return {
     ...public_,
     files: isInstalled ? public_.files : undefined,
     manifest: isInstalled ? public_.manifest : undefined,
     reviewReason: undefined,
     reviewedById: undefined,
+    // installedVersion 仅在已安装时返回（未安装时 undefined，前端不显示更新按钮）。
+    installedVersion,
   };
 }
 
