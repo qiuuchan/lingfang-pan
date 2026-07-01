@@ -37,29 +37,39 @@ export class AdminService {
   }
 
   // 平台级 AI 生成质量看板（调研报告 Top10 / A4）。
-  // 首版复用现有 AuditLog 聚合，不新建 CliSessionLog 表（避免与组A schema 迁移冲突）：
-  //   - 调用次数：llm_binding.key_decrypted（桌面每次发起 AI 生成都会解密 key → 一次会话即一次调用代理）。
-  //   - 成功次数：plugin.uploaded（生成成功并上传团队云端，是产物落地的可靠信号）。
-  //   - 失败次数：调用 - 成功（近似估算，因 audit 不记录每次失败，仅作为质量趋势参考）。
-  //   - 全部基于 AuditLog count，零新表、零破坏式 DDL。
+  // 数据源：LlmCallLog（relay 每次 AI 调用都写一条，含 status/durationMs/credits，真实且准确）。
+  //   - 调用次数：LlmCallLog 总数（无论成功失败，发生过即算一次调用）。
+  //   - 成功次数：status = 'success'。
+  //   - 失败次数：status in (upstream_error/client_error/no_channel/no_pricing/insufficient_balance)。
+  //   - 平均耗时：avg(durationMs)（仅 success，失败请求耗时无质量参考意义）。
+  //
+  // 历史：首版基于 AuditLog 的 llm_binding.key_decrypted 统计（旧架构：桌面端发起生成会解密 LLM key）。
+  // 但灵坊现已改为 relay + JWT 架构（relay.service.ts），AI 调用不再解密 llm_binding key，
+  // 导致该审计日志不再产生、调用次数恒为旧值/0。改用 LlmCallLog 后数据准确反映真实调用量。
   async adminGenerationStats(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
     // 月度窗口：当前自然月起始 → 现在（取本月初便于运营观察近期质量趋势）。
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const [monthCalls, monthSuccess, totalCalls, totalSuccess] = await Promise.all([
-      this.prisma.auditLog.count({ where: { action: 'llm_binding.key_decrypted', createdAt: { gte: monthStart } } }),
-      this.prisma.auditLog.count({ where: { action: 'plugin.uploaded', createdAt: { gte: monthStart } } }),
-      this.prisma.auditLog.count({ where: { action: 'llm_binding.key_decrypted' } }),
-      this.prisma.auditLog.count({ where: { action: 'plugin.uploaded' } }),
+    // 失败状态集合（relay executeRelay 的所有非 success 终态）。
+    const failStatuses = ['upstream_error', 'client_error', 'no_channel', 'no_pricing', 'insufficient_balance'];
+    const [monthCalls, monthSuccess, monthFailed, monthDurationAgg, totalCalls, totalSuccess, totalFailed, totalDurationAgg] = await Promise.all([
+      this.prisma.llmCallLog.count({ where: { createdAt: { gte: monthStart } } }),
+      this.prisma.llmCallLog.count({ where: { status: 'success', createdAt: { gte: monthStart } } }),
+      this.prisma.llmCallLog.count({ where: { status: { in: failStatuses }, createdAt: { gte: monthStart } } }),
+      this.prisma.llmCallLog.aggregate({ where: { status: 'success', createdAt: { gte: monthStart } }, _avg: { durationMs: true } }),
+      this.prisma.llmCallLog.count({}),
+      this.prisma.llmCallLog.count({ where: { status: 'success' } }),
+      this.prisma.llmCallLog.count({ where: { status: { in: failStatuses } } }),
+      this.prisma.llmCallLog.aggregate({ where: { status: 'success' }, _avg: { durationMs: true } }),
     ]);
     const safeRate = (calls: number, success: number) => (calls > 0 ? Math.round((success / calls) * 1000) / 10 : 0);
     return {
       period: 'current_month',
-      month: { calls: monthCalls, success: monthSuccess, failed: Math.max(0, monthCalls - monthSuccess), successRate: safeRate(monthCalls, monthSuccess) },
-      total: { calls: totalCalls, success: totalSuccess, failed: Math.max(0, totalCalls - totalSuccess), successRate: safeRate(totalCalls, totalSuccess) },
-      // 平均耗时暂缺（audit 未记录 duration），保留字段便于前端预留展示位，避免 NaN。
-      avgDurationMs: null,
+      month: { calls: monthCalls, success: monthSuccess, failed: monthFailed, successRate: safeRate(monthCalls, monthSuccess) },
+      total: { calls: totalCalls, success: totalSuccess, failed: totalFailed, successRate: safeRate(totalCalls, totalSuccess) },
+      // 平均耗时：成功调用的 avg(durationMs)，null 时前端不渲染（Prisma 对无匹配行返回 null）。
+      avgDurationMs: monthDurationAgg._avg.durationMs ?? null,
     };
   }
 
