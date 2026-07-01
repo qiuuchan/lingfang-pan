@@ -4,7 +4,21 @@ import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, notFound, AppError } from '../common';
 import { AuthService } from './auth.service';
 import { PluginGrantService } from './plugin-grant.service';
+import { NotificationService } from './notification.service';
 import { ensurePluginManager, normalizePluginPackage, publicAvailablePlugin, publicPlugin, type PluginPackageInput } from './plugin-package';
+
+/** 语义版本比较：newVer 是否严格大于 oldVer（x.y.z）。非法格式按 0.0.0 处理。 */
+function isVersionNewer(newVer: string, oldVer: string): boolean {
+  const parse = (v: string): [number, number, number] => {
+    const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
+  };
+  const [a1, a2, a3] = parse(newVer);
+  const [b1, b2, b3] = parse(oldVer);
+  if (a1 !== b1) return a1 > b1;
+  if (a2 !== b2) return a2 > b2;
+  return a3 > b3;
+}
 
 @Injectable()
 export class PluginService {
@@ -12,6 +26,7 @@ export class PluginService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PluginGrantService) private readonly grants: PluginGrantService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   async uploadPlugin(userId: string, input: PluginPackageInput) {
@@ -181,11 +196,10 @@ export class PluginService {
     if (!plugin) throw notFound('插件不存在');
     ensurePluginManager(plugin, membership.teamId, userId, membership.role);
     if (plugin.reviewStatus === 'PENDING') throw conflict('审核中的插件不能编辑，请等待审核完成或联系平台管理员');
-    // 修复 PLUGIN-04：已 APPROVED+上架的插件不应被作者单方面重置为 DRAFT 下架，
-    // 否则已购买用户 detail/install 立即 404 且无下架审计。需平台管理员经 adminRejectPlugin 处理。
-    if (plugin.reviewStatus === 'APPROVED' && plugin.marketplace) {
-      throw conflict('已上架市场的插件需联系平台管理员下架后再编辑');
-    }
+
+    // 版本号校验：已上架插件更新时，新版本必须严格大于当前版本（防降级/同版本覆盖）。
+    // 首次草稿（无版本或 0.0.0）不校验。
+    const isLiveUpdate = plugin.reviewStatus === 'APPROVED' && plugin.marketplace;
 
     const normalized = normalizePluginPackage(input);
     const duplicated = await this.prisma.plugin.findUnique({
@@ -193,6 +207,37 @@ export class PluginService {
     });
     if (duplicated && duplicated.id !== id) throw conflict('团队内已存在相同内容的插件', { pluginId: duplicated.id });
 
+    // 已上架插件更新源码：保留 APPROVED + marketplace（不重审、不下架），直接生效。
+    // 产品决策：作者更新插件（改源码/升版本）无需管理员重新审核，新版直接推送给已安装用户。
+    // 安全权衡：接受作者替换已审核代码的风险（换取发布效率）；管理员仍可随时下架（adminRejectPlugin）。
+    if (isLiveUpdate) {
+      const oldVersion = plugin.version ?? '0.0.0';
+      if (!isVersionNewer(normalized.manifest.version, oldVersion)) {
+        throw badRequest(`已上架插件更新版本号必须大于当前版本 ${oldVersion}（不能降级或相同），请升版本号后重试。`);
+      }
+      const updated = await this.prisma.plugin.update({
+        where: { id },
+        data: {
+          name: normalized.manifest.name,
+          description: normalized.manifest.description,
+          version: normalized.manifest.version,
+          entry: normalized.manifest.entry,
+          runtimeType: normalized.runtimeType,
+          visibility: normalized.visibility,
+          files: normalized.files as unknown as Prisma.InputJsonValue,
+          manifest: normalized.manifest as unknown as Prisma.InputJsonValue,
+          capabilities: normalized.manifest.capabilities as unknown as Prisma.InputJsonValue,
+          contentHash: normalized.contentHash,
+          // 保留审核态：不重置 reviewStatus/marketplace，已购用户不受影响，新版直接生效。
+        },
+      });
+      await this.audit(userId, 'plugin.live.updated', 'Plugin', id, { teamId: membership.teamId, oldVersion, newVersion: normalized.manifest.version, contentHash: normalized.contentHash });
+      // 推送新版本通知给已安装旧版本的用户（复用 adminApprovePlugin 的推送逻辑）。
+      await this.notifyNewVersion(id, updated.name, normalized.manifest.version, oldVersion);
+      return { plugin: publicPlugin(updated, membership.teamId) };
+    }
+
+    // 未上架（DRAFT/REJECTED/已下架）：改源码打回 DRAFT 重审（原逻辑）。
     const updated = await this.prisma.plugin.update({
       where: { id },
       data: {
@@ -215,6 +260,36 @@ export class PluginService {
     });
     await this.audit(userId, 'plugin.draft.edited', 'Plugin', id, { teamId: membership.teamId, contentHash: normalized.contentHash });
     return { plugin: publicPlugin(updated, membership.teamId) };
+  }
+
+  /**
+   * 推送「新版本」通知给已安装旧版本的用户。
+   * 复用 adminApprovePlugin 的推送语义：向每位安装了旧版本（≠ newVersion）的用户发 new_version 通知。
+   * 触发失败不阻塞主流程（与审核通知同语义）。
+   */
+  private async notifyNewVersion(pluginId: string, pluginName: string, newVersion: string, oldVersion: string) {
+    try {
+      const installations = await this.prisma.pluginInstallation.findMany({
+        where: { pluginId, status: 'ENABLED' },
+        select: { installedById: true, version: true },
+      });
+      for (const inst of installations) {
+        if (!inst.installedById || inst.version === newVersion) continue;
+        try {
+          await this.notifications.create(
+            inst.installedById,
+            'new_version',
+            '插件有新版本',
+            `你安装的「${pluginName}」发布了新版本 v${newVersion}（当前 v${inst.version}），可在插件页更新。`,
+            { relatedType: 'Plugin', relatedId: pluginId },
+          );
+        } catch {
+          /* 单条通知失败不影响其它用户 */
+        }
+      }
+    } catch {
+      /* 查询安装记录失败不阻塞更新 */
+    }
   }
 
   /** 作者/团队管理员编辑插件元数据（名称/描述/图标），不改源码、不重算 contentHash、不重置审核态。
