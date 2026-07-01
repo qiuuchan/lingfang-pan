@@ -13,6 +13,10 @@ pub const INSTALL_DIR_NAME: &str = "LingFang";
 /// 应用显示名（开始菜单/快捷方式/控制面板展示）。
 pub const DISPLAY_NAME: &str = "灵坊工作台";
 
+/// 版本号（编译期从 Cargo.toml 读，与桌面端 tauri.conf.json 同步）。
+/// 用于安装器标题/界面显示版本。
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// 主程序可执行文件名。
 pub const MAIN_EXE: &str = "lingfang-desktop.exe";
 
