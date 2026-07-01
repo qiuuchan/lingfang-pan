@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { InfoIcon, SquareIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
 import {
@@ -29,16 +30,33 @@ export function LocalPluginRow({
   item,
   onOpen,
   onDeleted,
+  selectMode,
+  selected,
+  onToggleSelect,
 }: {
   item: LocalPluginStatus;
   onOpen: (item: LocalPluginStatus) => void;
   onDeleted: () => void;
+  /** 多选模式：true 时行首显示 checkbox，行内操作按钮隐藏。 */
+  selectMode?: boolean;
+  /** 当前是否被选中（仅 selectMode 时有意义）。 */
+  selected?: boolean;
+  /** 切换选中态（仅 selectMode 时调用）。 */
+  onToggleSelect?: (id: string) => void;
 }) {
   const row = useLocalPluginRow(item, onDeleted);
   return (
     <div className="group flex items-center justify-between gap-3 px-4 py-3.5 transition hover:bg-muted/60">
+      {selectMode && (
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelect?.(item.id)}
+          className="shrink-0"
+          aria-label={`选择 ${item.name}`}
+        />
+      )}
       <LocalPluginSummary item={item} />
-      <LocalPluginActions item={item} row={row} onOpen={onOpen} />
+      {!selectMode && <LocalPluginActions item={item} row={row} onOpen={onOpen} />}
       <LocalManifestDialog item={item} row={row} />
       <DeleteLocalPluginDialog item={item} row={row} />
     </div>
