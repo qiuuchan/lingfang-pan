@@ -1279,7 +1279,10 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                             if (!p.content.trim()) return null;
                             return (
                               <div key={`t-${pi}`} className="overflow-hidden rounded-lg border border-border/30 bg-card/70 px-4 py-3 text-sm text-foreground shadow-sm">
-                                <Markdown>{p.content}</Markdown>
+                                {/* break-words：错误信息（含上游根因、URL、长串）需正确换行，不撑破气泡。 */}
+                                <div className="break-words">
+                                  <Markdown>{p.content}</Markdown>
+                                </div>
                               </div>
                             );
                           }
