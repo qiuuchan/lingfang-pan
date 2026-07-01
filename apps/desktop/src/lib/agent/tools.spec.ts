@@ -7,6 +7,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, setAuthToken } from '@/lib/api';
 import { createAgentTools, normalizeToolFileContent, type AgentToolsOptions, type TodoItem } from './tools';
 
+// RunPlugin 测试需要 mock tauriInvoke（list/read 文件）+ runPluginScript（试跑）。
+// 用 vi.hoisted 拿到可在工厂内引用的 mock 引用，再 vi.mock 替换两个模块。
+const runPluginMock = vi.hoisted(() => vi.fn());
+const tauriInvokeMock = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/plugin-script', () => ({ runPluginScript: runPluginMock }));
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>();
+  return { ...actual, tauriInvoke: tauriInvokeMock };
+});
+
 /** 构造最小可用的 AgentToolsOptions（所有回调 mock），返回捕获 todo 状态的容器。 */
 function makeOpts(initialTodos: TodoItem[] = []) {
   let todos = [...initialTodos];
@@ -217,5 +227,78 @@ describe('normalizeToolFileContent 文件内容容错', () => {
   it('数字/布尔 → String()', () => {
     expect(normalizeToolFileContent(42)).toBe('42');
     expect(normalizeToolFileContent(true)).toBe('true');
+  });
+});
+
+describe('RunPlugin 工具', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('已注册到工具集', () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    expect(tools.some((t) => t.name === 'RunPlugin')).toBe(true);
+  });
+
+  it('成功运行 → ✅ + stdout', async () => {
+    // mock: list_plugin_files → ['main.py']; read → manifest + main.py 内容; runPluginScript → ok.
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      return "print('hello')";
+    });
+    runPluginMock.mockResolvedValueOnce({ ok: true, stdout: 'hello\n', stderr: '', exitCode: 0, elapsedMs: 120 });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'RunPlugin', {});
+    expect(out).toContain('运行成功');
+    expect(out).toContain('hello');
+    // 验证传给 runPluginScript 的参数：runtime=python, entry=main.py, 含 main.py 文件。
+    const callArgs = runPluginMock.mock.calls[0][0];
+    expect(callArgs.runtime).toBe('python');
+    expect(callArgs.entry).toBe('main.py');
+    expect(callArgs.files.some((f: { path: string }) => f.path === 'main.py')).toBe(true);
+  });
+
+  it('运行失败（非零退出码）→ ❌ + stderr 供模型修复', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      return 'print(x'; // 故意语法错
+    });
+    runPluginMock.mockResolvedValueOnce({
+      ok: false, stdout: '', stderr: 'SyntaxError: unexpected EOF', exitCode: 1, failure: 'nonzero_exit', elapsedMs: 80,
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'RunPlugin', {});
+    expect(out).toContain('运行失败');
+    expect(out).toContain('SyntaxError');
+    expect(out).toContain('退出码 1');
+  });
+
+  it('client 运行时不支持试跑 → 明确指引', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['ui/index.html', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'client', entry: 'ui/index.html' });
+      return '<html></html>';
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'RunPlugin', {});
+    expect(out).toContain('client');
+    expect(out).toMatch(/不支持试跑|运行按钮/);
+    expect(runPluginMock).not.toHaveBeenCalled(); // client 不调试跑
+  });
+
+  it('解释器缺失 → 运行时缺失提示', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      return 'print(1)';
+    });
+    runPluginMock.mockResolvedValueOnce({ ok: false, failure: 'interpreter_missing', stderr: '未检测到内置 Python' });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'RunPlugin', {});
+    expect(out).toContain('运行时缺失');
   });
 });

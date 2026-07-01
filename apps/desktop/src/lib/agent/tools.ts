@@ -11,6 +11,7 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { api, type ApiError, tauriInvoke } from '@/lib/api';
+import { runPluginScript, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
 import {
   validateStagedCompleteness,
   isSafePath,
@@ -549,8 +550,96 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  /**
+   * RunPlugin —— 试运行当前插件（nodejs/python）并返回 stdout/stderr。
+   *
+   * 闭环关键（对齐 Claude Code/Cline 的「写→跑→看报错→自修」）：
+   * - 生成或修改代码后调用，验证能否真正跑起来（而非仅靠 Check 的括号配对粗校验）。
+   * - 失败时返回真实 stderr（Python 的 Traceback、Node 的堆栈），据此修复后重试。
+   * - 复用 Rust 已实现的 run_plugin_script（沙箱 + 15s 超时 + UTF-8 + LLM 桥），接线即可。
+   *
+   * 限制：
+   * - 仅 nodejs/python 运行时可试跑；client（HTML）需在插件页用「运行」按钮预览（iframe 沙箱）。
+   * - nodejs 若声明 package.json + scripts.start（如 electron），需专属运行时，预览拦截并提示。
+   */
+  const RunPlugin = tool({
+    name: 'RunPlugin',
+    description:
+      '试运行当前插件（nodejs/python）并返回控制台输出（stdout/stderr）。' +
+      '生成或修改代码后必须调用验证能否跑起来；若有报错，读取 stderr 信息修复后重试，直到正常运行。' +
+      'client(HTML) 插件不支持试跑（请在插件页用运行按钮预览）。',
+    parameters: z.object({
+      entry: z.string().optional().describe('可选：指定入口文件（缺省用 manifest.entry）'),
+    }),
+    async execute({ entry }): Promise<string> {
+      const pluginId = requirePluginId();
+      // 收集插件当前全部文件（磁盘上的最新内容）。
+      let files: string[];
+      try {
+        files = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
+        if (!files.length) return '错误：插件目录为空，没有可运行的文件。';
+      } catch (e) {
+        return `错误：列文件失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      // 读 manifest 拿 runtime_type + entry。
+      let manifestRaw = '';
+      try {
+        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'manifest.json' });
+      } catch {
+        return '错误：缺少 manifest.json，无法确定运行时类型和入口。';
+      }
+      let manifest: { runtime_type?: string; entry?: string };
+      try {
+        manifest = JSON.parse(manifestRaw);
+      } catch {
+        return '错误：manifest.json 解析失败（JSON 非法）。';
+      }
+      const runtimeRaw = (manifest.runtime_type ?? 'client') as string;
+      // 仅 nodejs/python 可试跑；client/cloud 给出明确指引。
+      if (runtimeRaw !== 'nodejs' && runtimeRaw !== 'python') {
+        return `当前插件运行时为 ${runtimeRaw}，不支持试跑。client(HTML) 插件请在「插件」页用「运行」按钮预览。`;
+      }
+      const runtime = runtimeRaw as ScriptRuntime;
+      const entryPath = entry?.trim() || manifest.entry || '';
+      if (!entryPath) return '错误：manifest 未声明 entry，且未传入 entry 参数。';
+      // 组装 ScriptFile[]（逐文件读回内容）。
+      const scriptFiles: ScriptFile[] = [];
+      for (const p of files) {
+        try {
+          const content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: p });
+          scriptFiles.push({ path: p, content });
+        } catch (e) {
+          return `错误：读取 ${p} 失败：${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      // 调 Rust run_plugin_script（沙箱一次性执行 + 捕获输出）。
+      const result = await runPluginScript({
+        pluginId,
+        runtime,
+        entry: entryPath,
+        files: scriptFiles,
+        capabilities: [], // 试跑不注入 LLM 桥能力（纯验证代码能否跑）
+      });
+      // 格式化为 AI 可读文本。
+      const trim = (s: string, max: number) => s.length > max ? s.slice(0, max) + `\n…(已截断，共 ${s.length} 字符)` : s;
+      if (result.ok && !result.failure) {
+        const out = result.stdout?.trim() || '(无输出)';
+        return `✅ 运行成功（退出码 0，耗时 ${result.elapsedMs ?? '?'}ms）\n输出：\n${trim(out, 2000)}`;
+      }
+      if (result.failure === 'interpreter_missing') {
+        return `错误：运行时缺失。${result.stderr || ''}`;
+      }
+      if (result.failure === 'timeout') {
+        return `错误：运行超时（15s）。部分输出：\nstdout: ${trim(result.stdout || '', 1000)}\nstderr: ${trim(result.stderr || '', 1000)}`;
+      }
+      // nonzero_exit / spawn_failed：返回 stderr 供模型定位修复。
+      const exitInfo = result.exitCode != null ? `（退出码 ${result.exitCode}）` : '';
+      return `❌ 运行失败${exitInfo}：\nstderr:\n${trim(result.stderr || '(无 stderr)', 2000)}${result.stdout?.trim() ? `\n\nstdout:\n${trim(result.stdout, 1000)}` : ''}`;
+    },
+  });
+
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();
