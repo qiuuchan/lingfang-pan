@@ -51,6 +51,8 @@ export interface RunScriptResult {
   interpreter?: string;
   /** 执行耗时（毫秒），Rust RunResult.elapsed_ms 透传，前端状态条展示。 */
   elapsedMs?: number;
+  /** 依赖安装日志摘要（试跑前自动装依赖时记录，AI 据此判断装了什么/是否成功）。 */
+  installLog?: string;
 }
 
 /** 把任意 unknown 异常归一化为字符串（用于 raw 字段）。 */

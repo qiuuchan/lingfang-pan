@@ -275,6 +275,45 @@ describe('RunPlugin 工具', () => {
     expect(out).toContain('退出码 1');
   });
 
+  it('装依赖成功 → 输出含 [依赖] 前缀', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'requirements.txt', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'requirements.txt') return 'requests';
+      return "print('ok')";
+    });
+    runPluginMock.mockResolvedValueOnce({
+      ok: true, stdout: 'ok\n', stderr: '', exitCode: 0, elapsedMs: 100,
+      installLog: 'Python 依赖已就绪（venv: /path/py）',
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'RunPlugin', {});
+    expect(out).toContain('[依赖]');
+    expect(out).toContain('依赖已就绪');
+    expect(out).toContain('运行成功');
+  });
+
+  it('装依赖失败 → 输出含依赖安装失败原因', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'requirements.txt', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'requirements.txt') return 'nonexistent-pkg-xyz';
+      return 'print(1)';
+    });
+    // 装依赖失败：Rust 返回 exit_code=null + install_log 含「依赖安装失败」。
+    runPluginMock.mockResolvedValueOnce({
+      ok: false, failure: 'spawn_failed',
+      stderr: '依赖安装失败：pip install 失败：Could not find nonexistent-pkg-xyz',
+      installLog: '依赖安装失败：pip install 失败：Could not find nonexistent-pkg-xyz',
+    });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'RunPlugin', {});
+    expect(out).toContain('依赖安装失败');
+    expect(out).toContain('nonexistent-pkg-xyz');
+  });
+
   it('client 运行时不支持试跑 → 明确指引', async () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['ui/index.html', 'manifest.json'];
