@@ -58,8 +58,16 @@ describe('CreditService reserve/reconcile/refund', () => {
   });
 
   it('reserve: cap=0 跳过预扣（放行后计费兜底）', async () => {
+    // ensureAccount upsert 返回 balance=1000（>0），cap=0 放行。
     const cap = await svc.reserve('t1', 0, 'log1', 'u1');
     expect(cap).toBe(0);
+    expect(tx.teamCredit.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reserve: cap=0 但余额为 0 时拒绝调用（堵住刷到 0 后无限免费的漏费路径）', async () => {
+    // ensureAccount upsert 永久返回 balance=0（reserve + getBalance 内部各调一次 ensureAccount）→ 抛 402。
+    tx.teamCredit.upsert.mockResolvedValue({ balance: 0 });
+    await expect(svc.reserve('t1', 0, 'log1', 'u1')).rejects.toMatchObject({ status: 402 });
     expect(tx.teamCredit.updateMany).not.toHaveBeenCalled();
   });
 

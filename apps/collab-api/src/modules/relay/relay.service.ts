@@ -335,17 +335,26 @@ export class RelayService {
           const realCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
           const charged = await this.credits.reconcile(auth.teamId, cap, realCredits, pendingLog.id, auth.userId);
           finalized = true; // 成功路径手动置位（ensureFinalized 跳过，保留 usage/credits）
+          // 计费漏洞检测（usage_missing）：聊天调用成功但上游未返回任何 token usage（input/output 双 0）。
+          // 多见于上游网关不支持 stream_options.include_usage（部分国产/自建网关会忽略该参数），
+          // 导致 parseOpenAiUsage/parseAnthropicUsage 解析不到 → computeCredits 算出 0 → 用户实际消耗了上游 token 却未计费。
+          // 此处不改变成功语义（响应照常下发），仅在日志 errorCode 补标 usage_missing + 打 warn，便于后台对账筛出漏费渠道。
+          const usageMissing = kind === 'CHAT' && usage.inputTokens === 0 && usage.outputTokens === 0;
+          if (usageMissing) {
+            console.warn(`[relay] usage_missing: 上游未返回 token usage，本次可能漏计费 (callLogId=${pendingLog.id}, model=${cand.model}, charged=${charged})`);
+          }
           // R3-2：钱已扣（reconcile 完成），finalizeLog 失败不得影响已成功的响应，
           // 否则错误冒泡到外层 catch（此时 finalized===true，不会重复退款，但会把成功响应改写成错误）。
           // 包 try/catch：失败记 warn（含 callLogId/charged）+ 重试一次 update，保证日志至少落 success 终态，
           // 避免「扣了费但日志卡 pending/错态」的对账黑洞。
+          const successErrorCode = usageMissing ? 'usage_missing' : null;
           try {
-            await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
+            await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: successErrorCode, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
           } catch (logErr) {
             const msg = logErr instanceof Error ? logErr.message : String(logErr);
             console.warn(`[relay] finalizeLog failed after successful charge (callLogId=${pendingLog.id}, charged=${charged}): ${msg}`);
             try {
-              await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: null, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
+              await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: successErrorCode, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
             } catch { /* 二次失败仅吞掉：响应已成功，扣费已正确，留 warn 供人工对账 */ }
           }
           return;

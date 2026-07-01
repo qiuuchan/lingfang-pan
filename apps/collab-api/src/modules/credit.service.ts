@@ -117,7 +117,15 @@ export class CreditService {
    */
   async reserve(teamId: string, cap: number, callLogId: string | null, actorUserId: string | null): Promise<number> {
     const reserveCap = roundCredits(cap);
-    if (reserveCap <= 0) return 0;
+    if (reserveCap <= 0) {
+      // 事后计费模式（cap=0）：不预扣，放行后按实际用量扣。但须设最低门槛——
+      // 余额已为 0 时直接拒绝（402），否则用户可刷到 0 后无限免费调用（reconcile 的 cap=0 分支
+      // 会把 charge 算成 min(actual, max(0, balance))=0，等于不扣费）。此检查堵住该漏费路径。
+      await this.ensureAccount(teamId);
+      const balance = await this.getBalance(teamId);
+      if (balance <= 0) throw insufficientBalance();
+      return 0;
+    }
     await this.ensureAccount(teamId);
     const result = await this.prisma.$transaction(async (tx) => {
       const debited = await tx.teamCredit.updateMany({

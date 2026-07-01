@@ -57,6 +57,82 @@ function hostMatchesDomain(host: string, domain: string): boolean {
   return h === domain || h === `www.${domain}` || h.endsWith(`.${domain}`);
 }
 
+/**
+ * 判断 IPv4 是否落在私有/保留段（SSRF 防护）。
+ * 覆盖：回环(127)、私有(10/172.16-31/192.168)、链路本地(169.254)、运营商级 NAT(100.64/10)、
+ *       benchmark(198.18/15)、本网络(0)、组播与保留(224+/240+)。
+ */
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return false;
+  const [a, b] = parts;
+  return (
+    a === 0 ||                            // 0.0.0.0/8 本网络
+    a === 10 ||                           // 10.0.0.0/8 私有
+    a === 127 ||                          // 127.0.0.0/8 回环
+    (a === 172 && b >= 16 && b <= 31) ||   // 172.16.0.0/12 私有
+    (a === 192 && b === 168) ||            // 192.168.0.0/16 私有
+    (a === 169 && b === 254) ||            // 169.254.0.0/16 链路本地（含云元数据 169.254.169.254）
+    (a === 100 && b >= 64 && b <= 127) ||  // 100.64.0.0/10 运营商级 NAT
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmark
+    a >= 224                              // 224.0.0.0/4 组播 + 240.0.0.0/4 保留
+  );
+}
+
+/**
+ * 判断 IPv6 是否为内网/保留地址（SSRF 防护）。
+ * 覆盖：回环(::1)、未指定(::)、IPv4 映射(::ffff:x.x.x.x 内网)、唯一本地(fc00::/7)、链路本地(fe80::/10)。
+ */
+function isPrivateIPv6(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  if (lower === '::1' || lower === '::') return true;            // 回环 / 未指定
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // fc00::/7 唯一本地
+  if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true; // fe80::/10 链路本地
+  // IPv4 映射地址 ::ffff:a.b.c.d —— 提取内嵌 IPv4 再判。
+  const v4Mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4Mapped) return isPrivateIPv4(v4Mapped[1]);
+  return false;
+}
+
+/**
+ * SSRF 校验：拦截会令服务器抓取内网/云元数据/非 HTTP 协议的 URL。
+ *
+ * 防护范围：
+ *  - 协议仅允许 http/https（拒绝 file://、ftp://、gopher:// 等可触发协议级 SSRF）。
+ *  - hostname 为 IP 字面量时，拒绝所有私有/保留/回环/链路本地段。
+ *  - hostname 为 localhost / *.local 等本地解析域名时拒绝。
+ *
+ * 权衡（DNS rebinding）：本函数只校验 URL 字面量里的 IP；对域名形态，fetch 内部会做 DNS 解析，
+ * 理论上存在 rebinding（解析到内网 IP）。完整防护需在 fetch 前 pre-resolve 并 pin IP，但 Node fetch
+ * 不暴露此 hook。当前务实方案已能拦截最高危的「直接输入内网 IP」（如云元数据 169.254.169.254）。
+ *
+ * @returns null 表示安全可抓取；string 表示拒绝原因。
+ */
+export function assertSafeFetchUrl(rawUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return 'URL 格式非法';
+  }
+  // 协议白名单：仅 http/https。
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `不支持的协议：${parsed.protocol.replace(':', '')}（仅允许 http/https）`;
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ''); // 去掉 IPv6 方括号
+  // 本地解析域名。
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+    return `禁止抓取本地地址：${host}`;
+  }
+  // IP 字面量校验（区分 v4/v6）。
+  if (host.includes(':')) {
+    if (isPrivateIPv6(host)) return `禁止抓取内网地址：${host}`;
+  } else if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    if (isPrivateIPv4(host)) return `禁止抓取内网地址：${host}`;
+  }
+  return null;
+}
+
 export interface SearchResponse {
   query: string;
   results: SearchResultItem[];
@@ -254,6 +330,12 @@ export class SearchService {
   }> {
     const limit = Math.min(20_000, Math.max(500, Math.trunc(maxLength)));
 
+    // SSRF 防护：拒绝服务器抓取内网/云元数据/非 HTTP 协议的 URL。
+    // WebFetch 的 URL 来自用户（经 WebFetch 工具），服务器端 fetch 内网地址会泄漏内网服务/云凭证。
+    const ssrf = assertSafeFetchUrl(url);
+    if (ssrf) {
+      return { url, content: '', truncated: false, fetchedVia: 'fail', error: ssrf };
+    }
     // 路径 1：Jina Reader（首选，正文抽取质量最高）。
     // 注意：不用 fetchWithTimeout（它用 PROVIDER_TIMEOUT_MS=6s，对 Jina 太短），直接 fetch + 30s 超时。
     try {

@@ -1,6 +1,6 @@
 // search/search.spec.ts —— 搜索去重/归一化 + provider 归一化 + 聚合容错单测。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { dedupeByUrl, normalizeUrl, SearchService } from './search.service';
+import { dedupeByUrl, normalizeUrl, SearchService, assertSafeFetchUrl } from './search.service';
 import { SearxngProvider, TavilyProvider, BraveProvider, BingHtmlProvider, GitHubProvider, parseBingHtml, decodeBingUrl, type SearchResultItem } from './providers';
 
 describe('normalizeUrl', () => {
@@ -285,5 +285,47 @@ describe('rewriteQuery（site: 路由）', () => {
     ));
     const out = await svc.search('普通查询');
     expect(out.results.length).toBe(2);
+  });
+});
+
+// SSRF 防护：WebFetch 抓取内网/云元数据/非 HTTP 协议会泄漏内网服务与凭证，必须拦截。
+describe('assertSafeFetchUrl（SSRF 防护）', () => {
+  it('放行公网 http/https URL', () => {
+    expect(assertSafeFetchUrl('https://example.com/page')).toBeNull();
+    expect(assertSafeFetchUrl('http://8.8.8.8/')).toBeNull();
+    expect(assertSafeFetchUrl('https://api.github.com/users/octocat')).toBeNull();
+  });
+
+  it('拒绝云元数据地址（169.254.169.254 链路本地，最高危 SSRF 目标）', () => {
+    expect(assertSafeFetchUrl('http://169.254.169.254/latest/meta-data/')).toMatch(/内网/);
+  });
+
+  it('拒绝回环地址', () => {
+    expect(assertSafeFetchUrl('http://127.0.0.1:8080/')).toMatch(/内网/);
+    expect(assertSafeFetchUrl('http://localhost/admin')).toMatch(/本地/);
+    expect(assertSafeFetchUrl('http://[::1]/')).toMatch(/内网/);
+  });
+
+  it('拒绝私有网段（10/172.16/192.168）', () => {
+    expect(assertSafeFetchUrl('http://10.0.0.1/')).toMatch(/内网/);
+    expect(assertSafeFetchUrl('http://192.168.1.1/')).toMatch(/内网/);
+    expect(assertSafeFetchUrl('http://172.16.5.4/')).toMatch(/内网/);
+    expect(assertSafeFetchUrl('http://172.31.255.255/')).toMatch(/内网/);
+  });
+
+  it('拒绝非 http/https 协议', () => {
+    expect(assertSafeFetchUrl('ftp://example.com/file')).toMatch(/协议/);
+    expect(assertSafeFetchUrl('file:///etc/passwd')).toMatch(/协议/);
+    expect(assertSafeFetchUrl('gopher://x/')).toMatch(/协议/);
+  });
+
+  it('拒绝 .local / .localhost 本地解析域名', () => {
+    expect(assertSafeFetchUrl('http://my-service.local/')).toMatch(/本地/);
+    expect(assertSafeFetchUrl('http://foo.localhost/')).toMatch(/本地/);
+  });
+
+  it('非法 URL 返回错误', () => {
+    expect(assertSafeFetchUrl('not a url')).toMatch(/非法/);
+    expect(assertSafeFetchUrl('')).toMatch(/非法/);
   });
 });
