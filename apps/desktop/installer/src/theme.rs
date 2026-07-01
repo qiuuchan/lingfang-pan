@@ -169,6 +169,19 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, width: f32, enabled: bool) 
     resp.clicked()
 }
 
+/// 次要按钮（灰底白字），用于取消/次要操作。返回是否被点击。
+pub fn secondary_button(ui: &mut egui::Ui, text: &str, width: f32) -> bool {
+    let btn = egui::Button::new(RichText::new(text).color(TEXT).size(15.0))
+        .fill(Color32::from_rgb(60, 60, 68))
+        .rounding(Rounding::same(8.0))
+        .min_size(Vec2::new(width, 56.0));
+    let resp = ui.add(btn);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
 /// 内嵌可点击链接文字。返回是否被点击。
 pub fn link(ui: &mut egui::Ui, text: &str) -> bool {
     let resp = ui.add(egui::Label::new(RichText::new(text).color(LINK).size(13.0)).sense(Sense::click()));

@@ -34,6 +34,16 @@ pub fn run(mode: Mode) -> Result<()> {
 /// 静默安装/覆盖到 target（无 UI，更新或无人值守调用）。
 fn run_silent(target: Option<&str>) -> Result<()> {
     let dir = crate::paths::resolve_install_dir(target)?;
+    // 静默覆盖前确保主程序进程已关闭（运行中的 exe 会被 Windows 锁定导致覆盖失败）。
+    // 静默模式无 UI 交互，直接终止（与卸载器语义一致）。
+    #[cfg(target_os = "windows")]
+    {
+        let killed = crate::platform::kill_by_name(crate::paths::MAIN_EXE);
+        if killed > 0 {
+            crate::log_line(&format!("静默安装：已终止 {killed} 个运行中的主程序进程"));
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
     deploy::deploy_to(&dir)?;
     crate::log_line(&format!("静默安装完成：{dir:?}"));
     Ok(())

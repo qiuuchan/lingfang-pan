@@ -29,6 +29,8 @@ enum Progress {
 /// UI 当前阶段。
 enum Phase {
     Confirm,
+    /// 检测到主程序正在运行，询问用户是否关闭后继续。
+    ProcessRunning,
     Installing { status: String, frac: f32 },
     Done,
     Failed(String),
@@ -79,7 +81,7 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        &format!("{} 安装程序", paths::DISPLAY_NAME),
+        &format!("{} v{} 安装程序", paths::DISPLAY_NAME, paths::VERSION),
         options,
         Box::new(|cc| {
             theme::install_fonts(&cc.egui_ctx);
@@ -146,6 +148,7 @@ impl eframe::App for InstallerApp {
                         self.view_simple(ui, ctx);
                     }
                 }
+                Phase::ProcessRunning => self.view_process_running(ui, ctx),
                 Phase::Installing { status, frac } => {
                     let (s, f) = (status.clone(), *frac);
                     self.view_progress(ui, ctx, &s, f);
@@ -162,7 +165,7 @@ impl eframe::App for InstallerApp {
 impl InstallerApp {
     /// 简洁模式：标题栏 + 居中 logo/标题 + 立即安装 + 底部协议/自定义切换。
     fn view_simple(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        if theme::title_bar(ui, "安装程序", false) {
+        if theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
@@ -176,7 +179,7 @@ impl InstallerApp {
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
             if theme::primary_button(ui, "立即安装", 300.0, self.agreed) {
-                self.start_install();
+                self.begin_install();
             }
         });
 
@@ -195,7 +198,7 @@ impl InstallerApp {
         // 在横幅区域内叠加标题栏与居中内容。
         let mut close = false;
         ui.allocate_ui_at_rect(banner_rect, |ui| {
-            close = theme::title_bar(ui, "安装程序", true);
+            close = theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), true);
             ui.add_space(18.0);
             theme::logo(ui, &self.logo, 96.0);
             ui.add_space(10.0);
@@ -233,7 +236,7 @@ impl InstallerApp {
         ui.add_space(24.0);
         ui.vertical_centered(|ui| {
             if theme::primary_button(ui, "立即安装", 300.0, self.agreed) {
-                self.start_install();
+                self.begin_install();
             }
             ui.add_space(12.0);
             ui.checkbox(&mut self.create_desktop, "创建桌面快捷方式");
@@ -269,7 +272,7 @@ impl InstallerApp {
     }
 
     fn view_progress(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, status: &str, frac: f32) {
-        if theme::title_bar(ui, "安装程序", false) {
+        if theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ui.add_space(48.0);
@@ -324,7 +327,7 @@ impl InstallerApp {
     }
 
     fn view_done(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        if theme::title_bar(ui, "安装程序", false) {
+        if theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ui.add_space(44.0);
@@ -354,7 +357,7 @@ impl InstallerApp {
     }
 
     fn view_failed(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, err: &str) {
-        if theme::title_bar(ui, "安装程序", false) {
+        if theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ui.add_space(36.0);
@@ -380,6 +383,48 @@ impl InstallerApp {
             if theme::primary_button(ui, "关闭", 200.0, true) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        });
+    }
+
+    /// 开始安装的前置：检测主程序是否正在运行。
+    /// 若在运行 → 切 ProcessRunning 阶段（弹确认对话框，询问是否关闭后继续）。
+    /// 未运行 → 直接开始安装。
+    fn begin_install(&mut self) {
+        if platform::is_process_running(paths::MAIN_EXE) {
+            self.phase = Phase::ProcessRunning;
+        } else {
+            self.start_install();
+        }
+    }
+
+    /// 「检测到程序运行中」确认对话框：用户选关闭并继续 → kill 进程后安装；取消 → 回 Confirm。
+    fn view_process_running(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        ui.add_space(50.0);
+        ui.vertical_centered(|ui| {
+            ui.add_space(20.0);
+            ui.label(egui::RichText::new("⚠").size(48.0).color(egui::Color32::from_rgb(245, 158, 11)));
+            ui.add_space(16.0);
+            ui.label(egui::RichText::new(format!("检测到 {} 正在运行", paths::DISPLAY_NAME)).size(16.0).color(theme::TEXT));
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("安装前需要关闭正在运行的程序，否则文件可能被锁定导致安装失败。").size(13.0).color(theme::TEXT_MUTED));
+            ui.label(egui::RichText::new("是否关闭程序并继续安装？").size(13.0).color(theme::TEXT_MUTED));
+            ui.add_space(28.0);
+            ui.horizontal(|ui| {
+                ui.add_space(60.0);
+                if theme::primary_button(ui, "关闭并继续", 200.0, true) {
+                    let _ = platform::kill_by_name(paths::MAIN_EXE);
+                    // 等待进程完全退出（给系统一点时间释放文件锁）。
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    self.start_install();
+                }
+                ui.add_space(12.0);
+                if theme::secondary_button(ui, "取消", 120.0) {
+                    self.phase = Phase::Confirm;
+                }
+            });
         });
     }
 

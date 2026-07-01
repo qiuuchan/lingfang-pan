@@ -186,6 +186,34 @@ pub fn wait_for_pid(pid: u32, timeout_ms: u32) -> bool {
 /// 终止所有同名进程（卸载/更新前关主程序）。返回终止的进程数。
 ///
 /// 遍历系统进程快照，匹配 exe 文件名（不区分大小写），逐个 TerminateProcess。
+/// 检测指定名称的进程是否正在运行（遍历进程快照，匹配 exe 文件名，不终止）。
+/// 用于安装前检测主程序是否占用文件锁。
+pub fn is_process_running(exe_name: &str) -> bool {
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() {
+            return false;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = false;
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                let name = wide_buf_to_string(&entry.szExeFile);
+                if name.eq_ignore_ascii_case(exe_name) {
+                    found = true;
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+        found
+    }
+}
+
 pub fn kill_by_name(exe_name: &str) -> u32 {
     let mut killed = 0u32;
     unsafe {

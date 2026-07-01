@@ -66,7 +66,7 @@ export function LocalPluginRow({
 function useLocalPluginRow(item: LocalPluginStatus, onDeleted: () => void) {
   return {
     ...useLocalManifestState(item),
-    ...useLocalRunState(item),
+    ...useLocalRunState(item, onDeleted),
     ...useLocalDeleteState(item, onDeleted),
   };
 }
@@ -92,7 +92,7 @@ function useLocalManifestState(item: LocalPluginStatus) {
   return { manifestFiles, manifestOpen, openManifest, setManifestOpen };
 }
 
-function useLocalRunState(item: LocalPluginStatus) {
+function useLocalRunState(item: LocalPluginStatus, onStopped: () => void) {
   const [busy, setBusy] = useState(false);
 
   // 仅保留「停止」便捷入口（运行中的脚本）。启动统一走「打开」进 PluginRunner 中转页。
@@ -101,6 +101,9 @@ function useLocalRunState(item: LocalPluginStatus) {
     try {
       await stopPlugin(item.id);
       toast.success('插件已停止');
+      // 刷新列表状态：stopPlugin 后端已清理进程表，但前端列表是 scanPluginStatus 缓存快照，
+      // 不刷新会一直显示「运行中」（onStopped = 父组件的 reload/refresh）。
+      onStopped();
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
