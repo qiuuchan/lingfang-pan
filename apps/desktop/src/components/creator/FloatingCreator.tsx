@@ -7,7 +7,7 @@
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon, RotateCcwIcon } from 'lucide-react';
+import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon, RotateCcwIcon, CopyIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, tauriInvoke } from '@/lib/api';
@@ -31,6 +31,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/markdown';
+import { cn } from '@/lib/utils';
 
 interface QuestionPart {
   type: 'question';
@@ -944,6 +945,36 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     );
   }
 
+  // 复制按钮：hover 气泡时显示在右上角，点击复制文本到剪贴板。
+  // 用 navigator.clipboard（Tauri webview 满足 secure context），失败兜底 toast 提示手动选取。
+  function CopyButton({ text, className }: { text: string; className?: string }) {
+    const [copied, setCopied] = useState(false);
+    if (!text.trim()) return null;
+    return (
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            toast.success('已复制');
+            window.setTimeout(() => setCopied(false), 1500);
+          } catch {
+            toast.error('复制失败，请手动选取');
+          }
+        }}
+        title={copied ? '已复制' : '复制'}
+        className={cn(
+          'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-all hover:bg-background hover:text-foreground group-hover:opacity-100',
+          copied && 'opacity-100 text-green-600',
+          className,
+        )}
+      >
+        {copied ? <CheckCircle2Icon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+      </button>
+    );
+  }
+
   function toggleSkill(id: string) {
     setActiveSkillIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
@@ -1255,7 +1286,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   {t.role === 'user' ? (
-                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-gradient-to-br from-primary to-primary/90 px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
+                    <div className="group relative max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-gradient-to-br from-primary to-primary/90 px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
+                      <CopyButton text={t.content} className="bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/30 hover:text-primary-foreground" />
                       {t.content}
                     </div>
                   ) : (
@@ -1279,7 +1311,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           if (p.type === 'text') {
                             if (!p.content.trim()) return null;
                             return (
-                              <div key={`t-${pi}`} className="overflow-hidden rounded-lg border border-border/30 bg-card/70 px-4 py-3 text-sm text-foreground shadow-sm">
+                              <div key={`t-${pi}`} className="group relative overflow-hidden rounded-lg border border-border/30 bg-card/70 px-4 py-3 text-sm text-foreground shadow-sm">
+                                <CopyButton text={p.content} />
                                 {/* break-words：错误信息（含上游根因、URL、长串）需正确换行，不撑破气泡。 */}
                                 <div className="break-words">
                                   <Markdown>{p.content}</Markdown>
@@ -1297,7 +1330,8 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                       </div>
                     ) : (
                       // 向后兼容 / 兜底：旧会话只有 content 或无任何 part 时，单个气泡渲染。
-                      <div className="creator-assistant-bubble max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
+                      <div className="creator-assistant-bubble group relative max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
+                        {t.content && <CopyButton text={t.content} />}
                         {t.content ? (
                           <Markdown>{t.content}</Markdown>
                         ) : t.status === 'failed' ? (
