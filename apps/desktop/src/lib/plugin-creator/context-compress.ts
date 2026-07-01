@@ -46,7 +46,7 @@ export interface BuildResult {
     /** 保留的原文历史轮（[{role, content}]）。 */
     keptTurns: Array<{ role: string; content: string }>;
     currentInput: string;
-    /** 粗略 token 估算（1 token ≈ 4 字符）。 */
+    /** 粗略 token 估算（中文为主，1 token ≈ 1.5 字符；英文约 4 字符/token，此处取中文偏向防低估）。 */
     estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
   };
 }
@@ -112,11 +112,11 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
         keptTurns,
         currentInput: args.currentInput,
         estimatedTokens: {
-          system: Math.ceil(args.systemPrompt.length / 4),
+          system: Math.ceil(args.systemPrompt.length / 1.5),
           summary: 0,
-          history: Math.ceil(historyChars / 4),
-          input: Math.ceil(args.currentInput.length / 4),
-          total: Math.ceil((args.systemPrompt.length + historyChars + args.currentInput.length) / 4),
+          history: Math.ceil(historyChars / 1.5),
+          input: Math.ceil(args.currentInput.length / 1.5),
+          total: Math.ceil((args.systemPrompt.length + historyChars + args.currentInput.length) / 1.5),
         },
       },
     };
@@ -153,9 +153,11 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
       nextSummary = await chatComplete(summarizeInput, tier, args.signal);
       nextLastIndex = older.length - 1; // 已摘要到 older 区末
     } catch {
-      // 摘要失败（网络/限流）：降级为「丢弃最旧的可压缩轮」，保留近期原文，不更新摘要。
+      // 摘要失败（网络/限流）：不推进 lastSummarizedIndex，保留这些轮下次重试。
+      // 此前的做法是「标记为已摘要但 summary 不更新」= 静默丢弃这些轮（既没进摘要也没保留原文），
+      // 若含关键决策会丢失。改为不推进索引：下轮这些轮仍作为「未摘要的新轮」参与摘要重试。
       nextSummary = state.summary;
-      nextLastIndex = older.length - 1;
+      nextLastIndex = state.lastSummarizedIndex;
     }
   }
 
@@ -177,11 +179,11 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
       keptTurns: verbatim.map((t) => ({ role: t.role, content: t.content })),
       currentInput: args.currentInput,
       estimatedTokens: {
-        system: Math.ceil(args.systemPrompt.length / 4),
-        summary: Math.ceil(nextSummary.length / 4),
-        history: Math.ceil(historyChars / 4),
-        input: Math.ceil(args.currentInput.length / 4),
-        total: Math.ceil((args.systemPrompt.length + nextSummary.length + historyChars + args.currentInput.length) / 4),
+        system: Math.ceil(args.systemPrompt.length / 1.5),
+        summary: Math.ceil(nextSummary.length / 1.5),
+        history: Math.ceil(historyChars / 1.5),
+        input: Math.ceil(args.currentInput.length / 1.5),
+        total: Math.ceil((args.systemPrompt.length + nextSummary.length + historyChars + args.currentInput.length) / 1.5),
       },
     },
   };

@@ -698,15 +698,17 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       const refPrompt = referencedPlugin?.files?.length
         ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
         : '';
-      // 当前草稿注入：工具写入的文件全文不在对话历史里，多轮修改时 AI 看不到上一版代码。
-      // 故把当前草稿（含用户在右侧改过的名字/信息）全文注入 systemPrompt，让 AI 基于它增量修改。
+      // 当前草稿注入：只注入元信息 + 文件路径列表，正文让 agent 用 Read 按需取。
+      // 此前把全部文件全文注入 systemPrompt，但 context-compress 只压缩对话历史、对 systemPrompt
+      // 视而不见 → 草稿越大每轮固定开销越大，长任务下 systemPrompt 持续膨胀，完全绕过压缩。
+      // 改为路径列表后，agent 需要某文件时主动 Read（已有 read-before-edit 跟踪），上下文可控。
       const draftPrompt = draft?.files?.length
         ? `\n\n# 当前草稿（用户正在预览，要在此基础上修改）\n` +
           `id：${draft.id}\n名字：${draft.name}\n版本：${draft.version}\n描述：${draft.description}\n` +
           `runtime_type：${draft.runtime_type}\nentry：${draft.entry}\n` +
-          `请基于以下文件按用户新需求做增量修改（保留未变部分），优先用 Read/Edit/Write 写回 plugins_root；整体重构时才再次调用 CreatePlugin。` +
-          `若用户改了名字/描述等元信息（见上方），沿用这些值，不要擅自改回。\n\n当前文件：\n` +
-          draft.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')
+          `请基于以下文件按用户新需求做增量修改（保留未变部分）。需要查看某文件当前内容时用 Read 读取，再用 Edit/Write 改写；整体重构时才再次调用 CreatePlugin。` +
+          `若用户改了名字/描述等元信息（见上方），沿用这些值，不要擅自改回。\n\n当前文件（按需 Read 查看）：\n` +
+          draft.files.map((f) => `- ${f.path}`).join('\n')
         : '';
       const systemPrompt = basePrompt + thinkPrompt + refPrompt + draftPrompt;
       // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
