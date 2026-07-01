@@ -35,6 +35,8 @@ export interface RunResult {
   exit_code: number | null;
   timed_out: boolean;
   elapsed_ms: number;
+  /** 依赖安装日志摘要（试跑前自动装依赖时记录）。 */
+  install_log?: string | null;
 }
 
 /** 探测软件内置解释器是否可用 + 版本。缺失时 available=false 并带打包指引。 */
@@ -92,6 +94,13 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
     return { ok: false, failure: 'spawn_failed', stderr: message };
   }
 
+  // 依赖安装失败：Rust 在装依赖失败时返回 exit_code=null + install_log 含「依赖安装失败」。
+  // 此时插件根本没跑起来（不是运行失败），单列为 spawn_failed 语义（让 AI 读 installLog 修复依赖）。
+  const installLog = raw.install_log ?? undefined;
+  if (raw.exit_code === null && installLog && installLog.includes('依赖安装失败')) {
+    return { ok: false, failure: 'spawn_failed', stderr: installLog, installLog };
+  }
+
   if (raw.timed_out) {
     return {
       ok: true,
@@ -100,6 +109,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
       exitCode: raw.exit_code,
       failure: 'timeout',
       elapsedMs: raw.elapsed_ms,
+      installLog,
     };
   }
   if (raw.exit_code !== 0) {
@@ -110,6 +120,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
       exitCode: raw.exit_code,
       failure: 'nonzero_exit',
       elapsedMs: raw.elapsed_ms,
+      installLog,
     };
   }
   return {
@@ -118,6 +129,7 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
     stderr: raw.stderr,
     exitCode: raw.exit_code,
     elapsedMs: raw.elapsed_ms,
+    installLog,
   };
 }
 

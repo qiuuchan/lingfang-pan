@@ -623,19 +623,21 @@ export function createAgentTools(opts: AgentToolsOptions) {
       });
       // 格式化为 AI 可读文本。
       const trim = (s: string, max: number) => s.length > max ? s.slice(0, max) + `\n…(已截断，共 ${s.length} 字符)` : s;
+      // 依赖安装日志前缀（若有）：让 AI 知道装了什么/是否成功，便于判断依赖问题。
+      const installNote = result.installLog ? `[依赖] ${result.installLog}\n` : '';
       if (result.ok && !result.failure) {
         const out = result.stdout?.trim() || '(无输出)';
-        return `✅ 运行成功（退出码 0，耗时 ${result.elapsedMs ?? '?'}ms）\n输出：\n${trim(out, 2000)}`;
+        return `${installNote}✅ 运行成功（退出码 0，耗时 ${result.elapsedMs ?? '?'}ms）\n输出：\n${trim(out, 2000)}`;
       }
       if (result.failure === 'interpreter_missing') {
-        return `错误：运行时缺失。${result.stderr || ''}`;
+        return `${installNote}错误：运行时缺失。${result.stderr || ''}`;
       }
       if (result.failure === 'timeout') {
-        return `错误：运行超时（15s）。部分输出：\nstdout: ${trim(result.stdout || '', 1000)}\nstderr: ${trim(result.stderr || '', 1000)}`;
+        return `${installNote}错误：运行超时（15s）。部分输出：\nstdout: ${trim(result.stdout || '', 1000)}\nstderr: ${trim(result.stderr || '', 1000)}`;
       }
-      // nonzero_exit / spawn_failed：返回 stderr 供模型定位修复。
+      // nonzero_exit / spawn_failed（含装依赖失败）：返回 stderr 供模型定位修复。
       const exitInfo = result.exitCode != null ? `（退出码 ${result.exitCode}）` : '';
-      return `❌ 运行失败${exitInfo}：\nstderr:\n${trim(result.stderr || '(无 stderr)', 2000)}${result.stdout?.trim() ? `\n\nstdout:\n${trim(result.stdout, 1000)}` : ''}`;
+      return `${installNote}❌ 运行失败${exitInfo}：\nstderr:\n${trim(result.stderr || '(无 stderr)', 2000)}${result.stdout?.trim() ? `\n\nstdout:\n${trim(result.stdout, 1000)}` : ''}`;
     },
   });
 

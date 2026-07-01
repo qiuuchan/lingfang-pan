@@ -189,7 +189,7 @@ fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &EmbeddedRuntime) ->
 /// 3. 有 requirements.txt → `venv/.../pip install -r requirements.txt`（带超时，依赖多时较慢）。
 ///
 /// 失败处理（PRD Constraints）：venv 创建/pip install 失败返回友好错误（不崩），前端据 error 展示。
-fn ensure_python_venv(
+pub(crate) fn ensure_python_venv(
     runtime: &EmbeddedRuntime,
     plugin_dir: &std::path::Path,
 ) -> Result<PathBuf, String> {
@@ -437,7 +437,7 @@ fn captured_detail(captured: &crate::process_util::CapturedOutput) -> String {
 
 /// 最小白名单环境变量（与 plugin_script.rs::minimal_env 同语义，避免泄漏宿主 token/密钥到插件进程）。
 /// 本模块独立构造（不依赖 plugin_script.rs 的 pub(crate) 导出，保持模块自洽）。
-fn minimal_env() -> Vec<(OsString, OsString)> {
+pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
     let keys = [
         "PATH",
         "HOME",
@@ -490,7 +490,7 @@ fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
 /// 3. 无 package.json → 返回 Ok（Node 脚本可能裸 index.js 无依赖声明）。
 ///
 /// 失败处理：pnpm/npm install 失败返回友好错误（不崩）。
-fn ensure_node_dependencies(
+pub(crate) fn ensure_node_dependencies(
     runtime: &EmbeddedRuntime,
     plugin_dir: &std::path::Path,
 ) -> Result<(), String> {

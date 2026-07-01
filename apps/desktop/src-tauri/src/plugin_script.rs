@@ -26,6 +26,9 @@ use tauri::Manager;
 use crate::plugin_llm_bridge::PluginLlmBridge;
 use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutput};
 use crate::embedded_runtime::EmbeddedRuntime;
+// 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
+// 让试跑与持久化运行用同一套依赖管理逻辑（venv 创建/pip install/pnpm install），避免行为漂移。
+use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, minimal_env as runner_minimal_env};
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
 /// serde rename_all = lowercase：nodejs / python，与契约 RuntimeType 对齐。
@@ -79,6 +82,10 @@ pub struct RunResult {
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub elapsed_ms: u64,
+    /// 依赖安装日志摘要（试跑前自动装依赖时记录，供 AI 判断装了什么/是否成功）。
+    /// None 表示无需装依赖（无 requirements.txt/package.json 或已装缓存命中）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_log: Option<String>,
 }
 
 /// 安装指引文案（与前端 RUNTIME_INSTALL_HINT 镜像，缺失解释器时 Rust 侧也返回便于直接展示）。
@@ -154,26 +161,11 @@ fn probe_script_runtime_inner(
 }
 
 /// 最小白名单环境变量：仅保留解释器/依赖查找与系统调用必需项，裁掉宿主 token/密钥。
-/// 权衡（design §4.4）：依赖自定义环境变量的脚本在预览中行为可能与真实运行不一致，
-/// 但预览目标是「能跑起来看 stdout」，非「100% 复现生产环境」。
 ///
-/// pub(crate) 供插件预览测试和运行环境组合复用其 keys 白名单语义。
+/// 复用 plugin_runner::minimal_env（单一来源，避免两处 keys 数组漂移）。
+/// 保留本包装供 plugin_script/tests.rs 复用（测试直接调 minimal_env()）。
 pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
-    let keys = [
-        "PATH", // 解释器/依赖查找必须
-        "HOME",
-        "USERPROFILE", // Node/Python 用户级配置
-        "APPDATA",
-        "LOCALAPPDATA", // Windows npm/pip 缓存定位
-        "SystemRoot",
-        "TEMP",
-        "TMP", // Windows 系统调用与临时目录
-        "LANG",
-        "LC_ALL", // 区域，避免乱码
-    ];
-    keys.iter()
-        .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
-        .collect()
+    runner_minimal_env()
 }
 
 /// 在 minimal_env 基础上按运行时追加专属环境变量。
@@ -484,6 +476,62 @@ pub fn run_plugin_script(
         None,
         None,
     )?;
+
+    // 依赖安装：复用 plugin_runner 的 ensure_python_venv / ensure_node_dependencies。
+    // 此前试跑用裸解释器，缺 PySide6/requests 等依赖的插件必失败（ModuleNotFoundError），
+    // AI 无法真正验证插件可运行。现改为试跑前按 runtime 装依赖：
+    //  - Python：ensure_python_venv 创建 venv + pip install requirements.txt，返回 venv python 路径。
+    //    venv 建在 LOCALAPPDATA（Windows）按 sandbox 路径哈希，同 plugin_id 试跑复用（首次慢，后续秒过）。
+    //  - Node：ensure_node_dependencies 在 sandbox 装 node_modules，仍用裸 node 跑（node 自动解析 node_modules）。
+    // 装依赖失败不致命：记录到 install_log 返回给 AI（AI 据此修包名/版本），但若 Python venv 失败则无法运行，
+    // 直接返回错误（没有可用解释器）。
+    let mut run_binary = binary.clone();
+    let mut install_log: Option<String> = None;
+    match input.runtime {
+        ScriptRuntime::Python => {
+            match ensure_python_venv(&embedded, &sandbox_canon) {
+                Ok(venv_py) => {
+                    // venv 创建/pip install 可能发生了实际安装（首次）或全跳过（缓存命中）。
+                    // 简单判定：venv 是否本次新建（py 文件 mtime 近）——但更务实：只在 requirements.txt 存在时记一条。
+                    if sandbox_canon.join("requirements.txt").is_file() {
+                        install_log = Some(format!("Python 依赖已就绪（venv: {}）", venv_py.display()));
+                    }
+                    run_binary = venv_py;
+                }
+                Err(e) => {
+                    // venv/pip 失败：返回带原因的错误，AI 据此修复（如 requirements.txt 里包名错/版本冲突）。
+                    return Ok(RunResult {
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        exit_code: None,
+                        timed_out: false,
+                        elapsed_ms: 0,
+                        install_log: Some(format!("依赖安装失败：{e}")),
+                    });
+                }
+            }
+        }
+        ScriptRuntime::Nodejs => {
+            match ensure_node_dependencies(&embedded, &sandbox_canon) {
+                Ok(()) => {
+                    if sandbox_canon.join("package.json").is_file() {
+                        install_log = Some("Node 依赖已就绪（node_modules 就绪）".to_string());
+                    }
+                }
+                Err(e) => {
+                    return Ok(RunResult {
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        exit_code: None,
+                        timed_out: false,
+                        elapsed_ms: 0,
+                        install_log: Some(format!("依赖安装失败：{e}")),
+                    });
+                }
+            }
+        }
+    }
+
     let mut args: Vec<String> = Vec::new();
     // 解释器来自软件内置运行时，由 embedded_runtime 统一定位。
     // H1 修复：Python 追加 -u（无缓冲），避免管道块缓冲导致短输出在超时 kill 时丢失。
@@ -511,7 +559,7 @@ pub fn run_plugin_script(
         env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"), OsString::from(bridge_env.url)));
         env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"), OsString::from(bridge_env.token)));
     }
-    let captured: CapturedOutput = match run_capture_with_env(&binary, args, Some(&workspace), timeout, env) {
+    let captured: CapturedOutput = match run_capture_with_env(&run_binary, args, Some(&workspace), timeout, env) {
         Ok(captured) => captured,
         Err(error) => {
             if let Some(token) = bridge_token {
@@ -529,6 +577,7 @@ pub fn run_plugin_script(
         exit_code: captured.exit_code,
         timed_out: captured.timed_out,
         elapsed_ms: started.elapsed().as_millis() as u64,
+        install_log,
     })
 }
 
