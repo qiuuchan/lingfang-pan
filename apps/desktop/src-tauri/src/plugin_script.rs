@@ -62,6 +62,11 @@ pub struct RunPluginScriptInput {
     pub auth_token: Option<String>,
     /// 超时毫秒，缺省 15000（design 决策③：无参数一次性运行，防死循环挂起 UI）。
     pub timeout_ms: Option<u64>,
+    /// 传给脚本的命令行参数（sys.argv / process.argv）。
+    /// 用于 GUI 插件的「无 GUI 测试模式」（如 --test 走核心逻辑验证，不启动窗口）。
+    /// 参数在入口文件路径之后追加，不经过 shell 解析（直接作为 argv 元素，无注入风险）。
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 /// 解释器探测结果。
@@ -540,6 +545,9 @@ pub fn run_plugin_script(
         args.push("-u".to_string());
     }
     args.push(entry_canon.to_string_lossy().to_string());
+    // 追加调用方传入的 CLI 参数（如 --test），让脚本能通过 sys.argv / process.argv 读取。
+    // 参数直接作为 argv 元素传给子进程，不经 shell 解析，无命令注入风险。
+    args.extend(input.args.iter().cloned());
 
     let timeout = input.timeout_ms.unwrap_or(15_000);
     let started = Instant::now();

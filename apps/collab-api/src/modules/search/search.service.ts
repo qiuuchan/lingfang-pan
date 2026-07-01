@@ -88,10 +88,39 @@ function isPrivateIPv6(ip: string): boolean {
   if (lower === '::1' || lower === '::') return true;            // 回环 / 未指定
   if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // fc00::/7 唯一本地
   if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true; // fe80::/10 链路本地
-  // IPv4 映射地址 ::ffff:a.b.c.d —— 提取内嵌 IPv4 再判。
-  const v4Mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (v4Mapped) return isPrivateIPv4(v4Mapped[1]);
+  // IPv4 映射地址 ::ffff:a.b.c.d —— 但 Node URL 会把 http://[::ffff:127.0.0.1]/ 规范化为
+  // 十六进制压缩形式（如 ::ffff:7f00:1），点分十进制正则匹配不到 → 绕过。
+  // 用 node:net.isIP 判定后，对 IPv6 尝试用 dns/promises 反查不现实，改用：把 IPv6 的最后
+  // 两段（32 位）解析回 IPv4 再判。覆盖 ::ffff:7f00:1 / ::ffff:127.0.0.1 两种形式。
+  // 仅对 ::ffff: 前缀（IPv4-mapped）做此提取，其余 IPv6 按上面私有段判断。
+  if (lower.includes('ffff')) {
+    const v4 = extractEmbeddedIPv4(lower);
+    if (v4) return isPrivateIPv4(v4);
+  }
   return false;
+}
+
+/**
+ * 从 IPv4-mapped IPv6 地址（::ffff:x.x.x.x 或 ::ffff:XXXX:XXXX 十六进制压缩形式）
+ * 提取内嵌的 IPv4 点分十进制。用于 SSRF 防护——Node URL 会把 [::ffff:127.0.0.1] 规范化为
+ * ::ffff:7f00:1，简单正则匹配不到点分形式，需解析十六进制。
+ * 返回 null 表示无法提取（非 IPv4-mapped 或格式异常）。
+ */
+function extractEmbeddedIPv4(ipv6: string): string | null {
+  // 形式 1：::ffff:127.0.0.1（点分十进制，未压缩）。
+  const dotted = ipv6.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) return dotted[1];
+  // 形式 2：::ffff:7f00:0001（十六进制压缩，Node URL 规范化后常见）。
+  // 最后两段各是 16 位十六进制，拼成 32 位 IPv4。
+  const hex = ipv6.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    if (Number.isFinite(hi) && Number.isFinite(lo)) {
+      return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    }
+  }
+  return null;
 }
 
 /**

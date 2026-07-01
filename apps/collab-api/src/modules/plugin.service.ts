@@ -223,12 +223,13 @@ export class PluginService {
           version: normalized.manifest.version,
           entry: normalized.manifest.entry,
           runtimeType: normalized.runtimeType,
-          visibility: normalized.visibility,
+          // 保留原 visibility（不覆盖）：已上架插件是 PUBLIC，normalizePluginPackage 只产出
+          // TEAM/PRIVATE，覆盖会导致插件对新用户从市场消失（availablePlugins 靠 visibility=PUBLIC 匹配）。
           files: normalized.files as unknown as Prisma.InputJsonValue,
           manifest: normalized.manifest as unknown as Prisma.InputJsonValue,
           capabilities: normalized.manifest.capabilities as unknown as Prisma.InputJsonValue,
           contentHash: normalized.contentHash,
-          // 保留审核态：不重置 reviewStatus/marketplace，已购用户不受影响，新版直接生效。
+          // 保留审核态：不重置 reviewStatus/marketplace/visibility，已购用户不受影响，新版直接生效。
         },
       });
       await this.audit(userId, 'plugin.live.updated', 'Plugin', id, { teamId: membership.teamId, oldVersion, newVersion: normalized.manifest.version, contentHash: normalized.contentHash });

@@ -543,8 +543,11 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     return () => { mounted = false; };
   }, [tier]);
 
-  // 粗估当前对话 token 用量（≈ 全部 turns 字符数 / 3.5，中英文混合近似）。
-  const usedTokens = Math.round(turns.reduce((s, t) => s + t.content.length, 0) / 3.5);
+  // 当前对话 token 用量：优先用 contextBreakdown.estimatedTokens.total（与上下文窗口面板的
+  // 堆叠条同源，/1.5 中文偏向），无 breakdown 时 fallback 用 turns 字符数 / 1.5 粗估。
+  // 此前用 /3.5（旧系数），与 context-compress 的 /1.5 不一致，导致同一面板两个 token 数字矛盾。
+  const usedTokens = contextBreakdown?.estimatedTokens.total
+    ?? Math.round(turns.reduce((s, t) => s + t.content.length, 0) / 1.5);
   const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
 
   // 流式输出时自动滚到底。
@@ -942,36 +945,6 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
         </Button>
         {busy && <span className="text-[11px] text-muted-foreground/60">正在生成中…</span>}
       </div>
-    );
-  }
-
-  // 复制按钮：hover 气泡时显示在右上角，点击复制文本到剪贴板。
-  // 用 navigator.clipboard（Tauri webview 满足 secure context），失败兜底 toast 提示手动选取。
-  function CopyButton({ text, className }: { text: string; className?: string }) {
-    const [copied, setCopied] = useState(false);
-    if (!text.trim()) return null;
-    return (
-      <button
-        type="button"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            toast.success('已复制');
-            window.setTimeout(() => setCopied(false), 1500);
-          } catch {
-            toast.error('复制失败，请手动选取');
-          }
-        }}
-        title={copied ? '已复制' : '复制'}
-        className={cn(
-          'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-all hover:bg-background hover:text-foreground group-hover:opacity-100',
-          copied && 'opacity-100 text-green-600',
-          className,
-        )}
-      >
-        {copied ? <CheckCircle2Icon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-      </button>
     );
   }
 
@@ -1635,5 +1608,40 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     {/* 上下文查看面板 */}
     <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={usedTokens} contextWindow={contextWindow} />
     </>
+  );
+}
+
+/**
+ * 复制按钮（模块级组件）：hover 气泡时显示在右上角，点击复制文本到剪贴板。
+ *
+ * 必须是模块级组件（不能定义在 FloatingCreator 函数体内）——FloatingCreator 在流式输出期间
+ * 频繁重渲染（每来一个 token 一次），函数体内定义的组件会被视为新类型导致整棵子树重挂载，
+ * copied 状态丢失（绿色对勾闪现即消失）。模块级定义保证 useState 稳定。
+ */
+function CopyButton({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!text.trim()) return null;
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          toast.success('已复制');
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toast.error('复制失败，请手动选取');
+        }
+      }}
+      title={copied ? '已复制' : '复制'}
+      className={cn(
+        'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-all hover:bg-background hover:text-foreground group-hover:opacity-100',
+        copied && 'opacity-100 text-green-600',
+        className,
+      )}
+    >
+      {copied ? <CheckCircle2Icon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </button>
   );
 }

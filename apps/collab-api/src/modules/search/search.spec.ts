@@ -306,6 +306,16 @@ describe('assertSafeFetchUrl（SSRF 防护）', () => {
     expect(assertSafeFetchUrl('http://[::1]/')).toMatch(/内网/);
   });
 
+  it('拒绝 IPv4-mapped IPv6 绕过（Node URL 规范化为十六进制压缩形式）', () => {
+    // Node URL 会把 http://[::ffff:127.0.0.1]/ 规范化 hostname 为 ::ffff:7f00:1，
+    // 简单点分正则匹配不到 → 此前绕过。现提取十六进制内嵌 IPv4 再判。
+    expect(assertSafeFetchUrl('http://[::ffff:127.0.0.1]/')).toMatch(/内网/);
+    expect(assertSafeFetchUrl('http://[::ffff:169.254.169.254]/')).toMatch(/内网/); // 云元数据（最高危）
+    expect(assertSafeFetchUrl('http://[::ffff:10.0.0.1]/')).toMatch(/内网/);
+    // 十六进制压缩形式（7f00:1 = 127.0.0.1）。
+    expect(assertSafeFetchUrl('http://[::ffff:7f00:1]/')).toMatch(/内网/);
+  });
+
   it('拒绝私有网段（10/172.16/192.168）', () => {
     expect(assertSafeFetchUrl('http://10.0.0.1/')).toMatch(/内网/);
     expect(assertSafeFetchUrl('http://192.168.1.1/')).toMatch(/内网/);
