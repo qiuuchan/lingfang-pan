@@ -1,4 +1,4 @@
-import { AtSignIcon, BrainIcon, EyeIcon, FolderIcon, PackageIcon, SendIcon, XIcon } from 'lucide-react';
+import { AtSignIcon, BrainIcon, CircleIcon, FolderIcon, PackageIcon, SendIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -211,7 +211,7 @@ export function CreatorComposer({
                 aria-label="上下文"
                 className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
               >
-                <EyeIcon className="size-4" />
+                <CircleIcon className="size-4" />
               </button>
             )}
             <div className="flex shrink-0 items-center rounded-lg border border-border bg-muted/40 p-0.5">
