@@ -1,9 +1,10 @@
-import { BrainIcon, EyeIcon, FolderIcon, PackageIcon, SendIcon, XIcon } from 'lucide-react';
+import { AtSignIcon, BrainIcon, EyeIcon, FolderIcon, PackageIcon, SendIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { CreatorQuickTags } from '@/components/creator/CreatorWorkspaceChrome';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { modelTierShortLabel } from '@/lib/model-tier';
+import type { LoadedPlugin } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 export interface CreatorSelectedFile {
@@ -22,17 +23,19 @@ export function CreatorComposer({
   onOpenContext,
   onInputChange,
   onPickFiles,
-  onQuickPrompt,
   onRemoveFile,
   onSend,
+  onSelectReferencedPlugin,
   onSelectTier,
   onStop,
   onToggleThinking,
   placement,
+  recentPlugins,
   showContextButton = false,
   selectedFiles,
   thinking,
   tier,
+  referencedPlugin,
 }: {
   busy: boolean;
   canInspectContext: boolean;
@@ -43,20 +46,23 @@ export function CreatorComposer({
   onOpenContext: () => void;
   onInputChange: (value: string) => void;
   onPickFiles: () => void;
-  onQuickPrompt: (prompt: string) => void;
   onRemoveFile: (id: string) => void;
   onSend: () => void;
+  onSelectReferencedPlugin: (plugin: LoadedPlugin | null) => void;
   onSelectTier: (tier: 'fast' | 'premium') => void;
   onStop: () => void;
   onToggleThinking: () => void;
   placement: 'hero' | 'bottom';
+  recentPlugins: LoadedPlugin[];
   showContextButton?: boolean;
   selectedFiles: CreatorSelectedFile[];
   thinking: boolean;
   tier: 'fast' | 'premium';
+  referencedPlugin: LoadedPlugin | null;
 }) {
   const hero = placement === 'hero';
   const embeddedBottom = embedded && !hero;
+  const hasRecentPlugins = recentPlugins.length > 0;
   return (
     <div className={cn(
       hero ? 'w-full' : 'shrink-0',
@@ -101,12 +107,9 @@ export function CreatorComposer({
           </div>
         </div>
       )}
-      {/* Agent 风格输入容器：上方 Textarea（min-h-14 更高）+ 下方工具栏（左：附件/思考/模型，右：发送）。
-          参考 ChatGPT/Claude：工具按钮作为 ghost 按钮沉到底部行，输入区占据上方主要空间。 */}
-      <div className={cn(
-        'mx-auto max-w-3xl rounded-xl border border-border bg-card/90 shadow-lg backdrop-blur',
-        hero || embeddedBottom ? 'p-2' : 'p-2',
-      )}>
+      {/* Agent 风格输入容器：上方 Textarea（min-h-14 更高）+ 下方工具栏。
+          左侧：@ 引用插件 / 思考 / 附件；右侧：上下文（圆圈）/ 模型切换 / 发送。 */}
+      <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card/90 p-2 shadow-lg backdrop-blur">
         <Textarea
           placeholder={thinking ? '思考模式：描述需求，模型会深入分析后生成…' : '描述插件需求，Enter 发送，Shift+Enter 换行'}
           value={input}
@@ -121,20 +124,55 @@ export function CreatorComposer({
           className="max-h-40 min-h-14 resize-none border-0 bg-transparent px-2.5 py-2 text-sm shadow-none focus-visible:ring-0"
           disabled={busy}
         />
-        {/* 底部工具栏：左侧操作按钮 + 模型选择，右侧发送/停止。 */}
         <div className="flex items-center justify-between gap-1.5 px-1 pt-1">
+          {/* 左侧：@ 引用插件 + 思考 + 附件 */}
           <div className="flex items-center gap-1">
-            {showContextButton && (
-              <button
-                type="button"
-                onClick={onOpenContext}
-                disabled={busy || !canInspectContext}
-                title={canInspectContext ? '打开上下文' : '先发送一次对话再查看上下文'}
-                aria-label="上下文"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
-              >
-                <EyeIcon className="size-4" />
-              </button>
+            {hasRecentPlugins && (
+              <Popover>
+                <PopoverTrigger render={
+                  <button
+                    type="button"
+                    title="引用已有插件做修改"
+                    className={cn(
+                      'inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-sm font-medium transition-colors duration-150',
+                      referencedPlugin
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                    )}
+                  />
+                }>
+                  <AtSignIcon className="size-4" />
+                  {referencedPlugin && <span className="max-w-24 truncate text-xs">{referencedPlugin.name}</span>}
+                </PopoverTrigger>
+                <PopoverContent className="w-64 rounded-xl border-border bg-card shadow-lg" align="start">
+                  <div className="text-xs font-medium text-muted-foreground">引用已有插件（注入源码到上下文）</div>
+                  <div className="mt-1.5 max-h-60 space-y-0.5 overflow-y-auto">
+                    {recentPlugins.map((plugin) => (
+                      <button
+                        key={plugin.id}
+                        type="button"
+                        onClick={() => onSelectReferencedPlugin(referencedPlugin?.id === plugin.id ? null : plugin)}
+                        className={cn(
+                          'block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-150',
+                          referencedPlugin?.id === plugin.id ? 'bg-accent text-primary' : 'hover:bg-background',
+                        )}
+                        title={plugin.name}
+                      >
+                        {plugin.name}
+                      </button>
+                    ))}
+                  </div>
+                  {referencedPlugin && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectReferencedPlugin(null)}
+                      className="mt-1.5 w-full rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-background"
+                    >
+                      取消引用
+                    </button>
+                  )}
+                </PopoverContent>
+              </Popover>
             )}
             <button
               type="button"
@@ -143,14 +181,13 @@ export function CreatorComposer({
               title={thinking ? '思考模式已开启（深入推理）' : '开启思考模式'}
               aria-pressed={thinking}
               className={cn(
-                'inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-colors duration-150 disabled:opacity-40',
+                'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors duration-150 disabled:opacity-40',
                 thinking
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               <BrainIcon className="size-4" />
-              {thinking && <span>思考中</span>}
             </button>
             <button
               type="button"
@@ -162,8 +199,22 @@ export function CreatorComposer({
             >
               <FolderIcon className="size-4" />
             </button>
-            {/* 模型切换：胶囊式分段，当前态高亮 primary。 */}
-            <div className="ml-0.5 flex items-center rounded-lg border border-border bg-muted/40 p-0.5">
+          </div>
+          {/* 右侧：上下文（圆圈）/ 模型切换 / 发送 */}
+          <div className="flex items-center gap-1.5">
+            {showContextButton && (
+              <button
+                type="button"
+                onClick={onOpenContext}
+                disabled={busy || !canInspectContext}
+                title={canInspectContext ? '打开上下文' : '先发送一次对话再查看上下文'}
+                aria-label="上下文"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
+              >
+                <EyeIcon className="size-4" />
+              </button>
+            )}
+            <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5">
               {(['fast', 'premium'] as const).map((nextTier) => (
                 <button
                   key={nextTier}
@@ -179,30 +230,29 @@ export function CreatorComposer({
                 </button>
               ))}
             </div>
+            {busy ? (
+              <button
+                type="button"
+                onClick={onStop}
+                title="停止"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border text-muted-foreground shadow-sm transition-colors duration-150 hover:border-destructive hover:bg-destructive hover:text-destructive-foreground"
+              >
+                <XIcon className="size-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onSend}
+                disabled={!input.trim()}
+                title="发送"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <SendIcon className="size-4" />
+              </button>
+            )}
           </div>
-          {busy ? (
-            <button
-              type="button"
-              onClick={onStop}
-              title="停止"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border text-muted-foreground shadow-sm transition-colors duration-150 hover:border-destructive hover:bg-destructive hover:text-destructive-foreground"
-            >
-              <XIcon className="size-4" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onSend}
-              disabled={!input.trim()}
-              title="发送"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <SendIcon className="size-4" />
-            </button>
-          )}
         </div>
       </div>
-      {embedded && <CreatorQuickTags className="mx-auto mt-3 max-w-3xl" onSelect={onQuickPrompt} />}
     </div>
   );
 }

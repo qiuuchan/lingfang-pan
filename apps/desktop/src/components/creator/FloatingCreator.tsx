@@ -931,13 +931,6 @@ export function FloatingCreator({ onClose, variant = 'floating' }: { onClose: ()
     clearPendingAnswers();
   }
 
-  function applyQuickPrompt(prompt: string) {
-    setInput((prev) => {
-      const trimmed = prev.trim();
-      return trimmed ? `${trimmed}\n${prompt}` : prompt;
-    });
-  }
-
   function renderComposer(placement: 'hero' | 'bottom') {
     return (
       <CreatorComposer
@@ -950,17 +943,19 @@ export function FloatingCreator({ onClose, variant = 'floating' }: { onClose: ()
         onOpenContext={() => setContextInspectorOpen(true)}
         onInputChange={setInput}
         onPickFiles={() => fileInputRef.current?.click()}
-        onQuickPrompt={applyQuickPrompt}
         onRemoveFile={removeFile}
         onSend={() => { void send(); }}
+        onSelectReferencedPlugin={setReferencedPlugin}
         onSelectTier={setTier}
         onStop={stop}
         onToggleThinking={() => setThinking((v) => !v)}
         placement={placement}
+        recentPlugins={recentPlugins}
         showContextButton={embedded}
         selectedFiles={selectedFiles}
         thinking={thinking}
         tier={tier}
+        referencedPlugin={referencedPlugin}
       />
     );
   }
@@ -1214,9 +1209,6 @@ export function FloatingCreator({ onClose, variant = 'floating' }: { onClose: ()
             onNewConversation={newConversation}
             onOpenSkills={() => setSkillDialogOpen(true)}
             onSelectConversation={selectConversationById}
-            onSelectReferencedPlugin={setReferencedPlugin}
-            recentPlugins={recentPlugins}
-            referencedPlugin={referencedPlugin}
             turnsCount={turns.length}
           />
         )}
