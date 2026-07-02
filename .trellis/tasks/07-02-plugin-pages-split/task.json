@@ -3,7 +3,7 @@
   "name": "plugin-pages-split",
   "title": "插件页重构：运行/开发双子页 + Trae分段切换 + Claude风格创建器",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
