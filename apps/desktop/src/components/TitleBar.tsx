@@ -50,7 +50,7 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
   return (
     <div
       {...dragRegionProps}
-      className="flex h-9 shrink-0 select-none items-center justify-between border-b bg-background/80 backdrop-blur"
+      className="flex h-9 shrink-0 select-none items-center justify-between border-b border-[#E7E1D7] bg-[#F7F4EF]/95 backdrop-blur"
     >
       {/* 左侧：侧边栏折叠按钮 + 应用名 + 插件模式切换（无侧边栏场景仅留拖拽占位，保持窗口左右控制对齐） */}
       <div className="flex h-full items-center gap-1 px-2" {...dragRegionProps}>
@@ -68,7 +68,7 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
         <span className="px-1 text-xs font-medium text-muted-foreground" data-tauri-drag-region>{label}</span>
         {showPluginModeSwitch && (
           <div
-            className="ml-2 flex items-center rounded-lg border bg-muted/70 p-0.5 shadow-sm"
+            className="ml-2 flex items-center rounded-full border border-[#E7E1D7] bg-[#FBF9F5] p-0.5 shadow-sm"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -83,10 +83,10 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
                   title={mode.label}
                   onClick={() => onPluginModeChange?.(mode.value)}
                   className={cn(
-                    'inline-flex h-6 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
+                    'inline-flex h-6 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-all duration-150',
                     active
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                      ? 'bg-[#C4612F] text-white shadow-sm'
+                      : 'text-[#5C635D] hover:bg-[#F2E3D6] hover:text-[#1F2421]',
                   )}
                 >
                   <Icon className="size-3.5 shrink-0" />

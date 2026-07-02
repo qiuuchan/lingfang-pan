@@ -61,37 +61,37 @@ export function CreatorComposer({
     <div className={cn(
       hero ? 'w-full' : 'shrink-0',
       !hero && (embeddedBottom
-        ? 'bg-background/95 px-6 pb-5 pt-2'
-        : 'border-t bg-gradient-to-b from-background to-muted/20 px-6 py-4'),
+        ? 'bg-[#F7F4EF]/95 px-6 pb-5 pt-2 backdrop-blur'
+        : 'border-t border-[#E7E1D7] bg-gradient-to-b from-[#F7F4EF] to-[#FBF9F5] px-6 py-4'),
     )}>
       {selectedFiles.length > 0 && (
-        <div className={cn('mx-auto mb-3 max-w-3xl', hero && 'rounded-xl border bg-card/70 p-3 text-left shadow-lg')}>
+        <div className={cn('mx-auto mb-3 max-w-3xl', hero && 'rounded-xl border border-[#E7E1D7] bg-[#FFFFFF]/70 p-3 text-left shadow-lg backdrop-blur')}>
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">已选择 {selectedFiles.length} 个文件</span>
+            <span className="text-xs font-medium text-[#5C635D]">已选择 {selectedFiles.length} 个文件</span>
             <div className="flex items-center gap-2">
               <Button
                 variant="default"
                 size="sm"
-                className="h-7 gap-1.5 px-3 text-xs shadow-sm"
+                className="h-7 gap-1.5 rounded-full bg-[#C4612F] px-3 text-xs shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-[#A94E22] hover:shadow-md"
                 onClick={onImportFiles}
                 disabled={busy}
               >
                 <PackageIcon className="size-3.5" />
                 导入为插件
               </Button>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onClearFiles}>
+              <Button variant="ghost" size="sm" className="h-7 rounded-full px-2 text-xs text-[#5C635D] transition-colors duration-150 hover:bg-[#F2E3D6] hover:text-[#1F2421]" onClick={onClearFiles}>
                 清空
               </Button>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             {selectedFiles.map((file) => (
-              <Badge key={file.id} variant="secondary" className="gap-1.5 px-2.5 py-1.5 text-xs shadow-sm">
+              <Badge key={file.id} variant="secondary" className="gap-1.5 rounded-full border-[#E7E1D7] bg-[#F2E3D6] px-2.5 py-1.5 text-xs text-[#1F2421] shadow-sm">
                 <span className="max-w-[200px] truncate" title={file.name}>{file.name}</span>
                 <button
                   type="button"
                   onClick={() => onRemoveFile(file.id)}
-                  className="inline-flex shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted-foreground/20"
+                  className="inline-flex shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[#5C635D]/20"
                   aria-label="移除"
                 >
                   <XIcon className="size-3.5" />
@@ -103,7 +103,7 @@ export function CreatorComposer({
       )}
       <div className={cn(
         'mx-auto flex max-w-3xl items-end gap-1.5',
-        (hero || embeddedBottom) && 'rounded-xl border bg-card/90 p-1 shadow-xl shadow-black/20',
+        (hero || embeddedBottom) && 'rounded-xl border border-[#E7E1D7] bg-[#FFFFFF]/90 p-1 shadow-xl backdrop-blur',
       )}>
         {showContextButton && (
           <Button
@@ -114,7 +114,7 @@ export function CreatorComposer({
             disabled={busy || !canInspectContext}
             title={canInspectContext ? '打开上下文' : '先发送一次对话再查看上下文'}
             aria-label="上下文"
-            className="h-9 w-9 shrink-0 shadow-sm transition-all hover:scale-105"
+            className="h-9 w-9 shrink-0 rounded-xl border-[#E7E1D7] text-[#5C635D] shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-[#C4612F]/40 hover:bg-[#F2E3D6] hover:text-[#1F2421] hover:shadow-md"
           >
             <EyeIcon className="size-4" />
           </Button>
@@ -126,7 +126,10 @@ export function CreatorComposer({
           onClick={onToggleThinking}
           disabled={busy}
           title={thinking ? '思考模式已开启（深入推理）' : '开启思考模式'}
-          className="h-9 w-9 shrink-0 shadow-sm transition-all hover:scale-105"
+          className={cn(
+            'h-9 w-9 shrink-0 rounded-xl shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md',
+            thinking ? 'border-[#C4612F] bg-[#C4612F] text-white hover:bg-[#A94E22]' : 'border-[#E7E1D7] text-[#5C635D] hover:border-[#C4612F]/40 hover:bg-[#F2E3D6] hover:text-[#1F2421]',
+          )}
         >
           <BrainIcon className="size-4" />
         </Button>
@@ -137,11 +140,11 @@ export function CreatorComposer({
           onClick={onPickFiles}
           disabled={busy}
           title="选择文件或文件夹"
-          className="h-9 w-9 shrink-0 shadow-sm transition-all hover:scale-105"
+          className="h-9 w-9 shrink-0 rounded-xl border-[#E7E1D7] text-[#5C635D] shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-[#C4612F]/40 hover:bg-[#F2E3D6] hover:text-[#1F2421] hover:shadow-md"
         >
           <FolderIcon className="size-4" />
         </Button>
-        <div className="flex h-9 shrink-0 rounded-lg border bg-background/70 p-0.5">
+        <div className="flex h-9 shrink-0 rounded-xl border border-[#E7E1D7] bg-[#FBF9F5]/70 p-0.5 shadow-sm">
           {(['fast', 'premium'] as const).map((nextTier) => (
             <button
               key={nextTier}
@@ -149,8 +152,8 @@ export function CreatorComposer({
               onClick={() => onSelectTier(nextTier)}
               disabled={busy}
               className={cn(
-                'rounded-md px-2 text-xs font-medium transition-colors disabled:opacity-50',
-                tier === nextTier ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                'rounded-lg px-2 text-xs font-medium transition-all duration-150 disabled:opacity-50',
+                tier === nextTier ? 'bg-[#C4612F] text-white shadow-sm' : 'text-[#5C635D] hover:bg-[#F2E3D6] hover:text-[#1F2421]',
               )}
             >
               {modelTierShortLabel(nextTier)}
@@ -169,21 +172,21 @@ export function CreatorComposer({
           }}
           rows={1}
           className={cn(
-            '!min-h-9 max-h-24 resize-none px-3 py-1.5 text-sm shadow-sm transition-all focus-visible:shadow-md',
+            '!min-h-9 max-h-24 resize-none px-3 py-1.5 text-sm shadow-sm transition-all duration-150 focus-visible:shadow-md',
             hero
               ? 'rounded-lg border-0 bg-transparent shadow-none focus-visible:ring-0'
               : embeddedBottom
                 ? 'rounded-lg border-0 bg-transparent shadow-none focus-visible:ring-0'
-                : 'rounded-xl border-border/60',
+                : 'rounded-xl border-[#E7E1D7]/60',
           )}
           disabled={busy}
         />
         {busy ? (
-          <Button variant="outline" size="icon" onClick={onStop} title="停止" className="h-9 w-9 shrink-0 shadow-sm transition-all hover:scale-105 hover:border-destructive hover:text-destructive">
+          <Button variant="outline" size="icon" onClick={onStop} title="停止" className="h-9 w-9 shrink-0 rounded-xl border-[#E7E1D7] text-[#5C635D] shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-destructive hover:text-destructive hover:shadow-md">
             <XIcon className="size-4" />
           </Button>
         ) : (
-          <Button size="icon" onClick={onSend} disabled={!input.trim()} title="发送" className="h-9 w-9 shrink-0 shadow-sm transition-all hover:scale-105 disabled:opacity-50">
+          <Button size="icon" onClick={onSend} disabled={!input.trim()} title="发送" className="h-9 w-9 shrink-0 rounded-xl bg-[#C4612F] text-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:scale-105 hover:bg-[#A94E22] hover:shadow-md disabled:opacity-50">
             <SendIcon className="size-4" />
           </Button>
         )}
