@@ -1,9 +1,9 @@
-// PluginCenterBody.tsx — 插件中心悬浮窗主体（路线 A：取代原 Plugins.tsx 主区页）。
+// PluginCenterBody.tsx — 插件工作台「运行插件」主区内容。
 //
 // 本地 / 我的草稿 / 团队 / 市场四 Tab，复用原 Section 组件。
-// tab 受控（来自 PluginCenterDialog props），不再与 view 同步（路线 A 已删插件中心 view 体系）。
-// 运行某插件时调 onRun → App 设 runningPlugin（全屏 overlay 接管）并关闭本悬浮窗。
-// 固定常用 / 历史使用已移至主侧边栏（Sidebar，首页按钮下方），不在本悬浮窗内。
+// tab 受控（来自 App state），不再与 view 同步。
+// 运行某插件时调 onRun → App 设 runningPlugin（全屏接管主体区）。
+// 固定常用 / 历史使用已移至主侧边栏（Sidebar，首页按钮下方），不在本页重复展示。
 import { FolderIcon, ServerIcon, StoreIcon, FileEditIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -33,11 +33,11 @@ export function PluginCenterBody({
 }: {
   tab: PluginCenterTab;
   onTabChange: (tab: PluginCenterTab) => void;
-  /** 运行某插件：由 App 设 runningPlugin + 关闭悬浮窗。 */
+  /** 运行某插件：由 App 设 runningPlugin。 */
   onRun: (plugin: LoadedPlugin) => void;
   /** 打开创建器（团队空态「创建插件」入口）。 */
   onCreate: () => void;
-  /** 关闭插件中心对话框（草稿编辑时需要）。 */
+  /** 草稿编辑前的收尾回调；主区形态下通常为空操作。 */
   onClose: () => void;
 }) {
   const app = useApp();

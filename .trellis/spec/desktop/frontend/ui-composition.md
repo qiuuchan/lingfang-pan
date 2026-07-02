@@ -21,15 +21,16 @@ This is a work-focused app. Existing pages use restrained cards and dense lists,
 
 Current layout rules:
 - Auth is a centered full-screen state; tenant switching is a Dialog opened from the Sidebar user area.
-- The plugin creator page is a single-column conversation surface with a right-side details Sheet.
+- Plugin run and plugin development are independent main-area views. The title-bar segment switches between `run-plugins` (`PluginCenterBody`) and `develop-plugins` (`FloatingCreator` embedded layout), with `PageTransition` handling the simple view animation. `develop-plugins` intentionally takes over the main area and hides the outer app Sidebar while active.
+- The develop plugin page uses a Codex App / Claude-like dark workbench: left vertical creator navigation with inline history, centered title area, bottom-centered compact composer, quick chips below the composer, and an optional right-side draft panel when a staged plugin exists. Model selection belongs inside the composer, not in the left sidebar.
 - Other pages live in a centered `max-w-5xl` content column.
 - Lists commonly use `divide-y rounded-lg border` instead of nested cards.
 
 Reference files:
 - `apps/desktop/src/App.tsx`
-- `apps/desktop/src/pages/PluginCreatorHome.tsx`
-- `apps/desktop/src/pages/Market.tsx`
-- `apps/desktop/src/pages/Plugins.tsx`
+- `apps/desktop/src/components/TitleBar.tsx`
+- `apps/desktop/src/pages/plugins/PluginCenterBody.tsx`
+- `apps/desktop/src/components/creator/FloatingCreator.tsx`
 
 ## Copy And Language
 
@@ -56,4 +57,3 @@ Scrollbars are globally hidden (`scrollbar-width: none` + `*::-webkit-scrollbar 
 Reference files:
 - `apps/desktop/src/index.css`
 - `apps/desktop/src/main.tsx`
-

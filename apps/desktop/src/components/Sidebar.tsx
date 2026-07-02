@@ -29,17 +29,13 @@ import {
 import { preloadView } from '@/lib/view-preload';
 import { isTeamManager } from '@/lib/permissions';
 
-// 导航项：多数项是切 view（kind='view'）；「插件」项是打开插件中心悬浮窗（kind='plugin-center'，路线 A）。
-type NavItem =
-  | { kind: 'view'; v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
-  | { kind: 'plugin-center'; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean };
+// 导航项：切换主区 view。插件工作台在主区展示运行/开发两个模式。
+type NavItem = { kind: 'view'; v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean };
 
 const NAV: NavItem[] = [
   { kind: 'view', v: 'home', label: '首页', icon: HomeIcon },
-  // AI 创建插件入口为右下角 FAB（悬浮窗形态，非页面），不占侧栏导航位。
   // 项 3：团队管理入口迁至左下角 AvatarMenu，不再占用侧栏导航位。
-  // 路线 A：插件中心改为悬浮窗（openPluginCenter），不再是主区 view。
-  { kind: 'plugin-center', label: '插件', icon: PackageIcon },
+  { kind: 'view', v: 'run-plugins', label: '插件', icon: PackageIcon },
   { kind: 'view', v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
 ];
 
@@ -129,7 +125,6 @@ export function Sidebar({
     document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? COLLAPSED_WIDTH : width}px`);
   }, [width, collapsed]);
 
-  // 路线 A：插件中心是悬浮窗（无 view），其按钮不参与 view 高亮——恒非 active。
   const activeView = (v: View) => view === v;
 
   return (
@@ -166,21 +161,20 @@ export function Sidebar({
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
         {items.map((item) => {
           const Icon = item.icon;
-          // 路线 A：插件中心项打开悬浮窗（非 view 切换），其余项切 view。
-          const isPluginCenter = item.kind === 'plugin-center';
-          const active = isPluginCenter ? false : activeView(item.v);
-          const key = isPluginCenter ? 'plugin-center' : item.v;
+          const active = item.v === 'run-plugins'
+            ? view === 'run-plugins' || view === 'develop-plugins'
+            : activeView(item.v);
           return (
             <Button
-              key={key}
+              key={item.v}
               variant="ghost"
               onClick={() => {
-                if (isPluginCenter) { openPluginCenter(); return; }
+                if (item.v === 'run-plugins') { openPluginCenter(); return; }
                 setRunningPlugin(null);
                 setView(item.v);
               }}
-              onFocus={() => { if (!isPluginCenter) preloadView(item.v); }}
-              onMouseEnter={() => { if (!isPluginCenter) preloadView(item.v); }}
+              onFocus={() => { preloadView(item.v); }}
+              onMouseEnter={() => { preloadView(item.v); }}
               title={collapsed ? item.label : undefined}
               className={cn(
                 'h-9 shrink-0 gap-2.5 font-medium',

@@ -20,7 +20,6 @@ import {
   UsersIcon,
   UserRoundIcon,
   PuzzleIcon,
-  WrenchIcon,
   HelpCircleIcon,
   CpuIcon,
   InfoIcon,
@@ -34,7 +33,6 @@ import { useUnreadCount } from '@/components/NotificationCenter';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { View } from '@/lib/types';
 
 export function AvatarMenu({
   open,
@@ -46,7 +44,7 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, setView, openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback } = useApp();
+  const { session, resetSession, openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback } = useApp();
   const { theme, setTheme } = useTheme();
   // 项 11：退出登录确认弹窗。
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -87,11 +85,6 @@ export function AvatarMenu({
   const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role === 'TEAM_ADMIN' ? '管理员' : session.role ? '成员' : '已登录';
 
-  const go = (v: View) => {
-    setView(v);
-    onClose();
-  };
-
   type Item = {
     key: string;
     label: string;
@@ -111,7 +104,7 @@ export function AvatarMenu({
     { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => { openPluginCenter(); onClose(); } },
     // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
     { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
-    // AI 创建插件入口为右下角 FAB（悬浮窗），不在此菜单。
+    // 开发插件入口在标题栏模式切换与插件工作台内，不在此菜单重复放置。
     // 项 8：「LLM 设置」改为「其他设置」，点击进设置页第一个 tab（general）。
     { key: 'other-settings', label: '其他设置', icon: CpuIcon, visible: true, onClick: () => { openAccountSettings('settings', 'general'); onClose(); } },
   ];

@@ -4,7 +4,7 @@
 // 交互：全屏遮罩 backdrop-blur + 顶部居中浮层；Esc 关闭、方向键导航、Enter 执行。
 // 结果分组：已安装（固定插件）→ 市场（后端搜索）→ 动作（页面跳转）→ 创建（引导新建）。
 //
-// 与 v4 差异：main 无 setDetailPlugin，市场结果跳「市场」页；动作集合对齐 main 的 View 枚举；
+// 与 v4 差异：main 无 setDetailPlugin，市场结果跳插件工作台「市场插件」tab；动作集合对齐 main 的 View 枚举；
 // 类型 SearchResult/SearchResultGroup 本地定义（v4 放 types.ts，此处自洽避免污染主类型）。
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '@/App';
@@ -81,7 +81,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       id: `action-${v}`, title, description, group: 'action',
       action: () => { setRunningPlugin(null); setView(v); onClose(); }, actionLabel: '前往',
     });
-    // 路线 A：插件中心 / 市场改为打开插件中心悬浮窗（带初始 tab），不再切 view。
+    // 插件中心 / 市场进入主区插件工作台运行页（带初始 tab）。
     const openCenter = (tab: PluginCenterTab, title: string, description: string): SearchResult => ({
       id: `action-plugin-center-${tab}`, title, description, group: 'action',
       action: () => { openPluginCenter(tab); onClose(); }, actionLabel: '前往',

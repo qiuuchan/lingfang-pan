@@ -6,3 +6,8 @@ packages:
   - 'apps/collab-admin'
   - 'packages/*'
   - 'plugins/*'
+allowBuilds:
+  '@prisma/engines': set this to true or false
+  '@scarf/scarf': set this to true or false
+  esbuild: set this to true or false
+  prisma: set this to true or false

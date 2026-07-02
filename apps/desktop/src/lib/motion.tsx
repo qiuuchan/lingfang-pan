@@ -225,12 +225,13 @@ export function ListSkeleton({ rows = 4, className }: { rows?: number; className
 /** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade + slide。
  *  mode="wait" 保证旧视图退出后再挂载新视图，避免双视图同时撑开布局。
  *  仅 App.tsx 的视图容器使用（PluginCreatorHome 常驻挂载，不进此组件）。 */
-export function PageTransition({ viewKey, children }: { viewKey: string; children: ReactNode }) {
+export function PageTransition({ viewKey, children, className }: { viewKey: string; children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
   return (
     <AnimatePresence mode="wait">
       <motion.div
         key={viewKey}
+        className={className}
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={reduce ? { opacity: 0 } : { opacity: 0, y: -12 }}
