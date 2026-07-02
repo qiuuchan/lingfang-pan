@@ -1,9 +1,8 @@
-import { AtSignIcon, BrainIcon, CircleIcon, FolderIcon, PackageIcon, SendIcon, XIcon } from 'lucide-react';
+import { AtSignIcon, BrainIcon, CircleIcon, CrownIcon, FolderIcon, PackageIcon, SendIcon, XIcon, ZapIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { modelTierShortLabel } from '@/lib/model-tier';
 import type { LoadedPlugin } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -134,7 +133,7 @@ export function CreatorComposer({
                     type="button"
                     title="引用已有插件做修改"
                     className={cn(
-                      'inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-sm font-medium transition-colors duration-150',
+                      'inline-flex h-9 items-center gap-1 rounded-xl px-2.5 text-sm font-medium transition-colors duration-150',
                       referencedPlugin
                         ? 'bg-primary/10 text-primary'
                         : 'text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -181,9 +180,9 @@ export function CreatorComposer({
               title={thinking ? '思考模式已开启（深入推理）' : '开启思考模式'}
               aria-pressed={thinking}
               className={cn(
-                'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors duration-150 disabled:opacity-40',
+                'inline-flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-150 disabled:opacity-40',
                 thinking
-                  ? 'bg-primary/10 text-primary'
+                  ? 'bg-primary/10 text-primary shadow-sm'
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
@@ -195,13 +194,13 @@ export function CreatorComposer({
               disabled={busy}
               title="选择文件或文件夹"
               aria-label="附件"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
             >
               <FolderIcon className="size-4" />
             </button>
           </div>
-          {/* 右侧：上下文（圆圈）/ 模型切换 / 发送 */}
-          <div className="flex items-center gap-2.5">
+          {/* 右侧：上下文（圆角方形+阴影）/ 模型切换（图标）/ 发送。所有按钮统一 size-9 高度。 */}
+          <div className="flex items-center gap-2">
             {showContextButton && (
               <button
                 type="button"
@@ -209,28 +208,37 @@ export function CreatorComposer({
                 disabled={busy || !canInspectContext}
                 title={canInspectContext ? '打开上下文' : '先发送一次对话再查看上下文'}
                 aria-label="上下文"
-                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
+                className={cn(
+                  'inline-flex size-9 shrink-0 items-center justify-center rounded-xl shadow-sm transition-colors duration-150 disabled:opacity-40',
+                  canInspectContext
+                    ? 'bg-muted text-foreground hover:bg-accent'
+                    : 'bg-muted text-muted-foreground',
+                )}
               >
                 <CircleIcon className="size-4" />
               </button>
             )}
-            <div className="flex shrink-0 items-center rounded-lg border border-border bg-muted/40 p-0.5">
-              {(['fast', 'premium'] as const).map((nextTier) => (
+            {/* 模型切换：fast=闪电图标，premium=皇冠图标。 */}
+            <div className="flex shrink-0 items-center rounded-xl border border-border bg-muted/40 p-0.5">
+              {([
+                { tier: 'fast' as const, icon: ZapIcon, label: '快速' },
+                { tier: 'premium' as const, icon: CrownIcon, label: '高级' },
+              ]).map(({ tier: nextTier, icon: Icon, label }) => (
                 <button
                   key={nextTier}
                   type="button"
                   onClick={() => onSelectTier(nextTier)}
                   disabled={busy}
+                  title={label}
                   className={cn(
-                    'rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-150 disabled:opacity-50',
+                    'inline-flex size-8 items-center justify-center rounded-lg transition-all duration-150 disabled:opacity-50',
                     tier === nextTier ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                   )}
                 >
-                  {modelTierShortLabel(nextTier)}
+                  <Icon className="size-4" />
                 </button>
               ))}
             </div>
-            <div className="w-1 shrink-0" />
             {busy ? (
               <button
                 type="button"
