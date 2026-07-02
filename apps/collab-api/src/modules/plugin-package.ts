@@ -64,7 +64,7 @@ const ALLOWED_CAPABILITIES = new Set([
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
   'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
-  'code-assistant.run', 'code-assistant.session', 'plugin.upload', 'plugin.submitMarketplace',
+  'plugin.upload', 'plugin.submitMarketplace',
 ]);
 
 function cleanText(value: unknown, message: string) {

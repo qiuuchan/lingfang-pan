@@ -15,12 +15,21 @@ Unsupported capabilities must return an explicit `CapError`; do not add stub imp
 
 ## Current Capabilities
 
-Implemented today:
+Implemented in the Rust gateway (`capability.rs`):
 
 - `fs.read`: reads a file or lists a directory, restricted by manifest path prefixes
+- `fs.write`: writes a file, restricted by manifest path prefixes (parent-directory scope check; 1 MiB cap)
 - `system.info`: returns OS, architecture, hostname, CPU/memory, and uptime
+- `clipboard`: read/write system clipboard text (`arboard`); `{op:'read'}` → `{content}`, `{op:'write', text}` → `{}`
+- `system.screenshot`: captures the primary monitor and returns a PNG data URL (`xcap`). Privacy-sensitive — the TS runtime gates it behind `requestSystemPermission('screenshot')` before forwarding to the gateway.
 
-Known but not implemented locally: `fs.write`, `net.fetch`, `clipboard`, `storage.kv`, screenshots, notifications. These should fail unless a real implementation and manifest scope validation are added.
+Implemented elsewhere (not in the Rust gateway, listed for completeness):
+- `net.fetch`: builtin plugins via the `plugin_net_fetch` Tauri command (`main.rs`), bypassing webview CORS
+- `storage.kv`: client plugins via TS `localStorage` keyed `lf:plugin-storage:{pluginId}:{key}` (`plugins-runtime.ts`)
+- `system.notify` / `system.requestPermission`: handled in TS `invokeRuntime` (`plugins-runtime.ts`)
+- `ui.view` / `fs.pick` / `llm.chat` / `image.generate` / `plugin.*`: handled in TS `invokeRuntime` or the host bridge
+
+Removed from the contract: `code-assistant.run` / `code-assistant.session` were vestiges of a deleted local AI CLI subsystem; AI capabilities route through the platform relay (`llm.chat`). They are no longer declarable.
 
 ## Path Scope
 
@@ -66,3 +75,12 @@ If changing path authorization, keep explicit errors:
 Wrong: `requested_string.starts_with(allowed_string)`.
 
 Correct: `requested.canonicalize()?.starts_with(allowed.canonicalize()?)`.
+
+## Scenario: `fs.write` Scope
+
+`fs.write` reuses the path-prefix scope model but, because the write target may not yet exist, it canonicalizes and checks the target's **parent directory** against the allowed prefixes (not the target itself). Writes use the user-requested path verbatim once the parent is confirmed in scope.
+
+- Missing `path` -> `Exec("缺少 path 参数")`
+- Parent directory does not exist or is outside canonical scope -> `OutOfScope`
+- `content.len()` over `MAX_FS_WRITE_BYTES` (1 MiB) -> `Exec`
+- Authorized parent -> file written at requested path; returns `{ ok, bytes }`

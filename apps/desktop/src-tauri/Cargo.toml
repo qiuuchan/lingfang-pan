@@ -1,6 +1,6 @@
 [package]
 name = "lingfang-desktop"
-version = "0.0.14"
+version = "0.0.15"
 edition = "2021"
 
 [build-dependencies]
@@ -26,3 +26,9 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Syste
 minisign-verify = "0.2"
 # 本地草稿插件：生成创建/更新时间戳（RFC 3339 格式）。
 chrono = "0.4"
+# 插件能力：clipboard（剪贴板读写，纯 Rust 跨平台，无 Tauri 依赖）。
+arboard = "3"
+# 插件能力：system.screenshot（跨平台截屏，支持 Linux/macOS/Windows）。
+xcap = "0.9"
+# 插件能力：system.screenshot 截图 PNG → base64 data URL 编码。
+base64 = "0.22"

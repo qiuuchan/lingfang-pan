@@ -68,11 +68,12 @@ const FRONTEND_CAPABILITY_KINDS = new Set<CapabilityKindType>(CapabilityKind.opt
 // 合法 risk 取值（前端镜像后端 plugin-package.ts CapabilityRisk；契约 plugin.ts:16）。
 const FRONTEND_CAPABILITY_RISKS = new Set(['none', 'low', 'medium', 'high']);
 
-// 兜底能力：kind 必须命中白名单；旧字符串形态 code-assistant 归一到可执行能力。
+// 兜底能力：kind 必须命中白名单。无法识别的 kind 归一到无副作用的展示能力。
+// （code-assistant.run/.session 已随旧 CLI 子系统移除，不再作为兜底。）
 const FALLBACK_CAPABILITY = {
-  kind: 'code-assistant.run' as const,
-  reason: '执行',
-  risk: 'low' as const,
+  kind: 'ui.view' as const,
+  reason: '展示',
+  risk: 'none' as const,
   requires_admin: false,
 };
 

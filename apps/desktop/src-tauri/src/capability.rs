@@ -106,12 +106,14 @@ pub fn invoke(
     // 2+3) 按能力类型分派（含作用域校验 + 执行）
     match kind {
         "fs.read" => fs_read(&declared, args),
+        "fs.write" => fs_write(&declared, args),
         "system.info" => Ok(system_info()),
-        // 修复 CAP-04（low 契约错位）：manifest 已声明（find 已成功）但本地未实现的合法 kind
-        // （fs.write / net.fetch / clipboard / storage.kv / system.screenshot / notifications 等）
-        // 此前落入 other 分支返回 NotDeclared，文案「插件未声明能力」与事实矛盾。
-        // 改为 NotSupported，保留 NotDeclared 仅用于 find 失败场景，与 capability-gateway.md
-        // Error Matrix 语义对齐（undeclared vs 已声明但未实现）。
+        "clipboard" => clipboard_op(args),
+        "system.screenshot" => system_screenshot(),
+        // 未实现的合法 kind（如经 manifest 注入但运行时无对应分派）落到 NotSupported。
+        // 注意：net.fetch / storage.kv / system.notify / system.requestPermission /
+        // ui.view 等已在 TS invokeRuntime（plugins-runtime.ts）处理，不会到达本网关；
+        // 真正到此仍 NotSupported 的 kind 视为契约与实现错位。
         other => Err(CapError::NotSupported(other.to_string())),
     }
 }
@@ -168,6 +170,115 @@ fn fs_read(declared: &DeclaredCapability, args: &Value) -> Result<Value, CapErro
             .map_err(|_| CapError::Exec("文件读取失败（可能非 UTF-8）".to_string()))?;
         Ok(json!({ "content": content }))
     }
+}
+
+/// fs.write：写文件，强制**父目录**在 manifest 白名单内。
+///
+/// 与 fs.read 的关键差异：写文件目标可能尚不存在（新建文件），而 `canonicalize()` 要求路径存在。
+/// 故校验逻辑改为：对请求路径取 `parent`，canonicalize 父目录，校验父目录 starts_with 某个
+/// 已 canonicalize 的 allowed 前缀。父目录不存在或越权统一 OutOfScope（与 fs.read 不存在路径同语义）。
+/// 写入路径用用户请求的原始路径（已确认父目录在白名单内），不跟随 canonicalize 的符号链接解析结果。
+///
+/// 大小上限 MAX_FS_WRITE_BYTES = 1 MiB（与 fs.read 对称，防 OOM）。
+fn fs_write(declared: &DeclaredCapability, args: &Value) -> Result<Value, CapError> {
+    const MAX_FS_WRITE_BYTES: usize = 1024 * 1024;
+
+    let raw = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CapError::Exec("缺少 path 参数".to_string()))?;
+    let content = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if content.len() > MAX_FS_WRITE_BYTES {
+        return Err(CapError::Exec(format!(
+            "写入内容超过 {} 字节上限，请缩小范围",
+            MAX_FS_WRITE_BYTES
+        )));
+    }
+
+    // 校验父目录在白名单内（父目录需存在且可 canonicalize）。
+    let target = PathBuf::from(expand_path(raw));
+    let parent = target
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| CapError::OutOfScope(String::new()))?;
+    let canon_parent = parent
+        .canonicalize()
+        .map_err(|_| CapError::OutOfScope(String::new()))?;
+    let allowed = declared.paths.iter().any(|prefix| {
+        PathBuf::from(expand_path(prefix))
+            .canonicalize()
+            .map(|p| canon_parent.starts_with(p))
+            .unwrap_or(false)
+    });
+    if !allowed {
+        return Err(CapError::OutOfScope(String::new()));
+    }
+
+    std::fs::write(&target, content).map_err(|e| CapError::Exec(format!("文件写入失败：{e}")))?;
+    Ok(json!({ "ok": true, "bytes": content.len() }))
+}
+
+/// clipboard：读 / 写系统剪贴板文本。
+/// 契约（SDK sdk.clipboard）：{op:'read'} → {content}；{op:'write', text} → {}。
+fn clipboard_op(args: &Value) -> Result<Value, CapError> {
+    let op = args
+        .get("op")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CapError::Exec("缺少 op 参数".to_string()))?;
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| CapError::Exec(format!("无法访问剪贴板：{e}")))?;
+    match op {
+        "read" => {
+            let text = clipboard
+                .get_text()
+                .map_err(|e| CapError::Exec(format!("读取剪贴板失败：{e}")))?;
+            Ok(json!({ "content": text }))
+        }
+        "write" => {
+            let text = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            clipboard
+                .set_text(text)
+                .map_err(|e| CapError::Exec(format!("写入剪贴板失败：{e}")))?;
+            Ok(json!({ "ok": true }))
+        }
+        other => Err(CapError::Exec(format!("未知 clipboard op：{other}"))),
+    }
+}
+
+/// system.screenshot：截取主显示器一帧，返回 PNG data URL（base64）。
+/// 契约（SDK sdk.system.screenshot）：{} → {content: "data:image/png;base64,..."}。
+///
+/// 隐私：截屏是敏感能力。TS invokeRuntime 在转发本网关前会先调 requestSystemPermission
+/// 取得用户授权（plugins-runtime.ts），未授权不调用本函数。
+fn system_screenshot() -> Result<Value, CapError> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use xcap::image::codecs::png::PngEncoder;
+    use xcap::image::{ColorType, ImageEncoder};
+
+    // 取主显示器（Monitor::all 第一个）。
+    let monitor = xcap::Monitor::all()
+        .map_err(|e| CapError::Exec(format!("枚举显示器失败：{e}")))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| CapError::Exec("无可用显示器".to_string()))?;
+    let img = monitor
+        .capture_image()
+        .map_err(|e| CapError::Exec(format!("截屏失败：{e}")))?;
+
+    // 编码为 PNG。
+    let mut png_buf = Vec::with_capacity(img.len() / 2);
+    let (w, h) = img.dimensions();
+    PngEncoder::new(&mut png_buf)
+        .write_image(img.as_raw(), w, h, ColorType::Rgba8.into())
+        .map_err(|e| CapError::Exec(format!("PNG 编码失败：{e}")))?;
+    let b64 = STANDARD.encode(&png_buf);
+    Ok(json!({ "content": format!("data:image/png;base64,{b64}") }))
 }
 
 fn canonical_scoped_path(raw: &str, prefixes: &[String]) -> Result<PathBuf, CapError> {
@@ -371,17 +482,17 @@ mod tests {
     #[test]
     fn unimplemented_capability_returns_not_supported() {
         let registry = CapabilityRegistry::default();
-        // 先注册一个已声明但本地未实现的 kind（fs.write）。
+        // 注册一个已声明但本地无分派的伪 kind（fs.write 已实现，故用一个不存在分派的 kind）。
         registry.register(
             "test-plugin",
             vec![DeclaredCapability {
-                kind: "fs.write".to_string(),
+                kind: "fs.unreal".to_string(),
                 paths: vec![],
             }],
         );
-        // 调 invoke 时 find 成功（已声明），但 match 不命中 fs.read/system.info，
+        // 调 invoke 时 find 成功（已声明），但 match 不命中任何已实现分支，
         // 落入 other 分支应返回 NotSupported（而非 NotDeclared）。
-        let err = invoke(&registry, "test-plugin", "fs.write", &json!({})).unwrap_err();
+        let err = invoke(&registry, "test-plugin", "fs.unreal", &json!({})).unwrap_err();
         assert!(
             matches!(err, CapError::NotSupported(_)),
             "已声明但未实现应返回 NotSupported，实际 {err:?}"
@@ -398,5 +509,60 @@ mod tests {
             matches!(undeclared_err, CapError::NotDeclared(_)),
             "未声明的 kind 应返回 NotDeclared，实际 {undeclared_err:?}"
         );
+    }
+
+    // fs.write：授权子目录写成功 / 越权父级写拒绝 / 超大内容拒绝。
+    #[test]
+    fn fs_write_accepts_authorized_child_path() {
+        let root = temp_root("write-child");
+        let allowed = root.join("Docs");
+        fs::create_dir_all(&allowed).unwrap();
+        let cap = DeclaredCapability {
+            kind: "fs.write".to_string(),
+            paths: vec![allowed.to_string_lossy().to_string()],
+        };
+        let target = allowed.join("out.txt");
+        let req = json!({ "path": target.to_string_lossy(), "content": "hello" });
+        let result = fs_write(&cap, &req).expect("授权子目录写应成功");
+        assert_eq!(result["ok"], json!(true));
+        assert_eq!(result["bytes"], json!(5));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "hello");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fs_write_rejects_out_of_scope_parent() {
+        let root = temp_root("write-oos");
+        let allowed = root.join("Docs");
+        let secret = root.join("Secrets");
+        fs::create_dir_all(&allowed).unwrap();
+        fs::create_dir_all(&secret).unwrap();
+        let cap = DeclaredCapability {
+            kind: "fs.write".to_string(),
+            paths: vec![allowed.to_string_lossy().to_string()],
+        };
+        // 试图写到越权目录下的文件。
+        let req = json!({ "path": secret.join("stolen.txt").to_string_lossy(), "content": "x" });
+        let err = fs_write(&cap, &req).unwrap_err();
+        assert!(matches!(err, CapError::OutOfScope(_)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fs_write_rejects_oversized_content() {
+        let root = temp_root("write-oversize");
+        let allowed = root.join("Docs");
+        fs::create_dir_all(&allowed).unwrap();
+        let cap = DeclaredCapability {
+            kind: "fs.write".to_string(),
+            paths: vec![allowed.to_string_lossy().to_string()],
+        };
+        // 2 MiB 内容超 1 MiB 上限。
+        let big = "x".repeat(2 * 1024 * 1024);
+        let req = json!({ "path": allowed.join("huge.txt").to_string_lossy(), "content": big });
+        let err = fs_write(&cap, &req).unwrap_err();
+        assert!(matches!(err, CapError::Exec(_)));
+        assert!(err.to_string().contains("上限"));
+        let _ = fs::remove_dir_all(root);
     }
 }
