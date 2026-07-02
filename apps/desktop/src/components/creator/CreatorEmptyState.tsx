@@ -22,11 +22,11 @@ export function CreatorEmptyState({
       {embedded ? (
         <>
           <div className="space-y-3">
-            <div className="mx-auto flex size-12 items-center justify-center rounded-xl border border-[#E7E1D7] bg-[#FFFFFF] shadow-sm">
-              <SparklesIcon className="size-6 text-[#C4612F]" />
+            <div className="mx-auto flex size-12 items-center justify-center rounded-xl border border-border bg-card shadow-sm">
+              <SparklesIcon className="size-6 text-primary" />
             </div>
-            <h1 className="text-4xl font-semibold tracking-tight text-[#1F2421]">想做什么插件?</h1>
-            <p className="mx-auto max-w-xl text-base leading-7 text-[#5C635D]">
+            <h1 className="text-4xl font-semibold tracking-tight text-foreground">想做什么插件?</h1>
+            <p className="mx-auto max-w-xl text-base leading-7 text-muted-foreground">
               描述一个工作流、界面或自动化想法，我会生成插件草稿，并在右侧保留可编辑的提交面板。
             </p>
           </div>
@@ -35,12 +35,12 @@ export function CreatorEmptyState({
       ) : (
         <>
           <div className="relative">
-            <div className="absolute inset-0 animate-pulse rounded-full bg-[#C4612F]/20 blur-xl" />
-            <SparklesIcon className="relative size-12 text-[#C4612F]" />
+            <div className="absolute inset-0 animate-pulse rounded-full bg-primary/20 blur-xl" />
+            <SparklesIcon className="relative size-12 text-primary" />
           </div>
           <div className="space-y-2">
-            <h3 className="text-lg font-medium text-[#1F2421]">AI 插件创建器</h3>
-            <p className="max-w-md text-sm text-[#5C635D]">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
+            <h3 className="text-lg font-medium text-foreground">AI 插件创建器</h3>
+            <p className="max-w-md text-sm text-muted-foreground">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
           </div>
           <div className="flex flex-wrap justify-center gap-2.5">
             {FLOATING_PRESETS.map((preset) => (
@@ -48,7 +48,7 @@ export function CreatorEmptyState({
                 key={preset}
                 type="button"
                 onClick={() => onSelectPreset(preset)}
-                className="group rounded-full border border-[#E7E1D7] bg-[#FFFFFF]/80 px-4 py-2 text-xs font-medium text-[#5C635D] backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-[#C4612F]/50 hover:bg-[#F2E3D6] hover:text-[#C4612F] hover:shadow-md"
+                className="group rounded-full border border-border bg-card/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent hover:text-primary hover:shadow-md"
               >
                 {preset}
               </button>
