@@ -1,15 +1,10 @@
 import {
-  BookOpenIcon,
-  Code2Icon,
   EyeIcon,
   FileCode2Icon,
-  HeartIcon,
   HistoryIcon,
-  PenLineIcon,
   PlusIcon,
   SparklesIcon,
   Trash2Icon,
-  WandSparklesIcon,
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
@@ -26,41 +21,6 @@ type CreatorConversationSummary = {
   title: string;
   updatedAt: string;
 };
-
-const QUICK_TAGS = [
-  { label: 'Code', icon: Code2Icon, prompt: '做一个代码相关的插件，包含清晰的输入、运行结果和错误提示。' },
-  { label: 'Learn', icon: BookOpenIcon, prompt: '做一个学习辅助插件，可以拆解知识点、生成练习并追踪学习进度。' },
-  { label: 'Create', icon: WandSparklesIcon, prompt: '做一个创作工作流插件，帮助我从想法生成可用的内容或素材。' },
-  { label: 'Write', icon: PenLineIcon, prompt: '做一个写作插件，支持润色、改写、摘要和结构化输出。' },
-  { label: 'Life stuff', icon: HeartIcon, prompt: '做一个日常生活助手插件，帮助规划、记录或自动化琐事。' },
-] as const;
-
-export function CreatorQuickTags({
-  className,
-  onSelect,
-}: {
-  className?: string;
-  onSelect: (prompt: string) => void;
-}) {
-  return (
-    <div className={cn('flex flex-wrap justify-center gap-2', className)}>
-      {QUICK_TAGS.map((tag) => {
-        const Icon = tag.icon;
-        return (
-          <button
-            key={tag.label}
-            type="button"
-            onClick={() => onSelect(tag.prompt)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-card px-3.5 text-xs font-medium text-muted-foreground shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent hover:text-foreground hover:shadow-md"
-          >
-            <Icon className="size-3.5" />
-            {tag.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 export function CreatorFloatingTitleBar({
   activeSkillCount,
@@ -203,9 +163,6 @@ export function CreatorWorkspaceSidebar({
   onNewConversation,
   onOpenSkills,
   onSelectConversation,
-  onSelectReferencedPlugin,
-  recentPlugins,
-  referencedPlugin,
   turnsCount,
 }: {
   activeSkillCount: number;
@@ -221,73 +178,22 @@ export function CreatorWorkspaceSidebar({
   onNewConversation: () => void;
   onOpenSkills: () => void;
   onSelectConversation: (id: string) => void;
-  onSelectReferencedPlugin: (plugin: LoadedPlugin | null) => void;
-  recentPlugins: LoadedPlugin[];
-  referencedPlugin: LoadedPlugin | null;
   turnsCount: number;
 }) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-muted/40/70 text-foreground backdrop-blur">
-      <div className="flex items-center justify-between border-b border-border px-3 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-border bg-card/80 shadow-sm">
-            <SparklesIcon className="size-4 text-primary" />
-          </span>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">开发插件</div>
-            <div className="text-[11px] text-muted-foreground">AI plugin builder</div>
-          </div>
-        </div>
-      </div>
-
       <div className="flex-1 space-y-4 overflow-y-auto p-3">
         <div className="space-y-1.5">
-          <Button variant="default" size="sm" className="w-full justify-start gap-2 rounded-xl bg-primary shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md" disabled={busy} onClick={onNewConversation}>
-            <PlusIcon className="size-3.5" />
+          <Button variant="default" size="sm" className="h-10 w-full justify-start gap-2 rounded-xl bg-primary text-sm shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md" disabled={busy} onClick={onNewConversation}>
+            <PlusIcon className="size-4" />
             新建对话
-            {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-4 border-border px-1 text-[10px]">压缩 {compressedHint}</Badge>}
+            {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-5 border-border px-1.5 text-[10px]">压缩 {compressedHint}</Badge>}
           </Button>
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-xl text-muted-foreground transition-all duration-150 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground" onClick={onOpenSkills}>
-            <WrenchIcon className="size-3.5" />
+          <Button variant="ghost" size="sm" className="h-10 w-full justify-start gap-2 rounded-xl text-sm text-muted-foreground transition-all duration-150 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground" onClick={onOpenSkills}>
+            <WrenchIcon className="size-4" />
             技能
-            {activeSkillCount > 0 && <Badge variant="secondary" className="ml-auto h-4 bg-accent px-1 text-[10px] text-primary">{activeSkillCount}</Badge>}
+            {activeSkillCount > 0 && <Badge variant="secondary" className="ml-auto h-5 bg-accent px-1.5 text-[10px] text-primary">{activeSkillCount}</Badge>}
           </Button>
-          {recentPlugins.length > 0 && (
-            <Popover>
-              <PopoverTrigger render={<Button type="button" variant={referencedPlugin ? 'default' : 'ghost'} size="sm" className={cn('w-full justify-start gap-2 rounded-xl transition-all duration-150', referencedPlugin ? 'bg-primary hover:bg-primary/90' : 'text-muted-foreground hover:-translate-y-0.5 hover:bg-accent hover:text-foreground')} />}>
-                <FileCode2Icon className="size-3.5" />
-                <span className="min-w-0 flex-1 truncate text-left">{referencedPlugin ? referencedPlugin.name : '引用插件'}</span>
-              </PopoverTrigger>
-              <PopoverContent className="w-64 rounded-xl border-border bg-card shadow-lg" align="start">
-                <div className="text-xs font-medium text-muted-foreground">引用已有插件</div>
-                <div className="mt-1.5 max-h-60 space-y-0.5 overflow-y-auto">
-                  {recentPlugins.map((plugin) => (
-                    <button
-                      key={plugin.id}
-                      type="button"
-                      onClick={() => onSelectReferencedPlugin(referencedPlugin?.id === plugin.id ? null : plugin)}
-                      className={cn(
-                        'block w-full truncate rounded-xl px-2 py-1.5 text-left text-sm transition-all duration-150',
-                        referencedPlugin?.id === plugin.id ? 'bg-accent text-primary' : 'hover:bg-background',
-                      )}
-                      title={plugin.name}
-                    >
-                      {plugin.name}
-                    </button>
-                  ))}
-                </div>
-                {referencedPlugin && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectReferencedPlugin(null)}
-                    className="mt-1.5 w-full rounded-xl px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-background"
-                  >
-                    取消引用
-                  </button>
-                )}
-              </PopoverContent>
-            </Popover>
-          )}
         </div>
 
         <div className="space-y-2">

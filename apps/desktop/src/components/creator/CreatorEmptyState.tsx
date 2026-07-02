@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
-import { SparklesIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { SparklesIcon, Code2Icon, BookOpenIcon, WandSparklesIcon, PenLineIcon, HeartIcon } from 'lucide-react';
+
+const EMBEDDED_EXAMPLES = [
+  { icon: Code2Icon, title: '代码工具', prompt: '做一个带界面的代码格式化插件，支持多种语言' },
+  { icon: BookOpenIcon, title: '学习助手', prompt: '做一个能拆解知识点并生成练习题的学习插件' },
+  { icon: WandSparklesIcon, title: '创作工作流', prompt: '做一个从想法到文案的创作流程插件' },
+  { icon: PenLineIcon, title: '写作辅助', prompt: '做一个支持润色、改写和摘要的写作插件' },
+  { icon: HeartIcon, title: '生活助手', prompt: '做一个日常规划与记录的生活助手插件' },
+] as const;
 
 const FLOATING_PRESETS = [
   '做一个带界面的天气查询 Python 插件',
@@ -17,45 +24,65 @@ export function CreatorEmptyState({
   embedded: boolean;
   onSelectPreset: (prompt: string) => void;
 }) {
+  if (!embedded) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
+        <div className="relative">
+          <div className="absolute inset-0 animate-pulse rounded-full bg-primary/20 blur-xl" />
+          <SparklesIcon className="relative size-12 text-primary" />
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-lg font-medium text-foreground">AI 插件创建器</h3>
+          <p className="max-w-md text-sm text-muted-foreground">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2.5">
+          {FLOATING_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => onSelectPreset(preset)}
+              className="rounded-lg border border-border bg-background/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent hover:text-primary hover:shadow-md"
+            >
+              {preset}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={cn('flex h-full flex-col items-center justify-center gap-5 text-center', embedded && 'mx-auto max-w-4xl gap-6')}>
-      {embedded ? (
-        <>
-          <div className="space-y-3">
-            <div className="mx-auto flex size-12 items-center justify-center rounded-xl border border-border bg-card shadow-sm">
-              <SparklesIcon className="size-6 text-primary" />
-            </div>
-            <h1 className="text-4xl font-semibold tracking-tight text-foreground">想做什么插件?</h1>
-            <p className="mx-auto max-w-xl text-base leading-7 text-muted-foreground">
-              描述一个工作流、界面或自动化想法，我会生成插件草稿，并在右侧保留可编辑的提交面板。
-            </p>
-          </div>
-          {composer}
-        </>
-      ) : (
-        <>
-          <div className="relative">
-            <div className="absolute inset-0 animate-pulse rounded-full bg-primary/20 blur-xl" />
-            <SparklesIcon className="relative size-12 text-primary" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-lg font-medium text-foreground">AI 插件创建器</h3>
-            <p className="max-w-md text-sm text-muted-foreground">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-2.5">
-            {FLOATING_PRESETS.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => onSelectPreset(preset)}
-                className="group rounded-full border border-border bg-card/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent hover:text-primary hover:shadow-md"
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+    <div className="mx-auto flex h-full max-w-4xl flex-col items-center justify-center gap-8 text-center">
+      <div className="space-y-3">
+        <div className="mx-auto flex size-12 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+          <SparklesIcon className="size-6 text-primary" />
+        </div>
+        <h1 className="text-4xl font-semibold tracking-tight text-foreground">想做什么插件？</h1>
+        <p className="mx-auto max-w-xl text-base leading-7 text-muted-foreground">
+          描述一个工作流、界面或自动化想法，我会生成插件草稿，并在右侧保留可编辑的提交面板。
+        </p>
+      </div>
+      {composer}
+      {/* 例子卡片网格：点击直接填入输入框。 */}
+      <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-3">
+        {EMBEDDED_EXAMPLES.map((example) => {
+          const Icon = example.icon;
+          return (
+            <button
+              key={example.title}
+              type="button"
+              onClick={() => onSelectPreset(example.prompt)}
+              className="group flex flex-col items-start gap-2 rounded-xl border border-border bg-card/60 p-4 text-left shadow-sm backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-md"
+            >
+              <span className="flex size-9 items-center justify-center rounded-lg bg-accent text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                <Icon className="size-4.5" />
+              </span>
+              <span className="text-sm font-medium text-foreground">{example.title}</span>
+              <span className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{example.prompt}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
