@@ -558,6 +558,218 @@ pub(crate) fn ensure_node_dependencies(
     Ok(())
 }
 
+/// 插件是否声明了 Playwright 依赖（Node 的 package.json 或 Python 的 requirements.txt）。
+///
+/// 仅做名字匹配（`playwright` / `playwright-core` / `@playwright/test`），不解析版本。
+/// 用于决定是否触发浏览器二进制下载——避免给无关插件跑 ~150MB 的 chromium 下载。
+/// 与 `needs_node_install` 同款裸 JSON / 文本解析，不引新依赖。
+fn declares_playwright(plugin_dir: &std::path::Path) -> bool {
+    // Node：package.json 的 dependencies / devDependencies 里键名命中。
+    let pkg_json = plugin_dir.join("package.json");
+    if let Ok(raw) = std::fs::read_to_string(&pkg_json) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            for k in ["dependencies", "devDependencies"] {
+                if let Some(obj) = v.get(k).and_then(|x| x.as_object()) {
+                    for name in obj.keys() {
+                        if name == "playwright"
+                            || name == "playwright-core"
+                            || name == "@playwright/test"
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Python：requirements.txt 里任一行包名命中（容忍版本约束 / 注释）。
+    let req = plugin_dir.join("requirements.txt");
+    if let Ok(raw) = std::fs::read_to_string(&req) {
+        for line in raw.lines() {
+            // 取首个 token（剥离注释/空格），再去掉版本比较运算符后缀。
+            let mut name = line.split(['=', '<', '>', ';', '#', ' ', '\t']).next();
+            name = name.map(|s| s.trim().trim_start_matches('-'));
+            if matches!(name, Some("playwright")) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Playwright 浏览器默认安装根目录（与 Playwright 自身解析逻辑一致）。
+///
+/// - Windows：`%LOCALAPPDATA%\ms-playwright`（minimal_env 已转发 LOCALAPPDATA）。
+/// - Unix：`~/.cache/ms-playwright`（HOME 已转发）。
+/// 返回 None 表示无法定位用户目录（极罕见，跳过幂等检查走强制安装）。
+fn playwright_browsers_root() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("ms-playwright"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(|d| PathBuf::from(d).join(".cache").join("ms-playwright"))
+    }
+}
+
+/// 浏览器二进制是否已安装（幂等跳过判定）。
+///
+/// Playwright 每个 chromium 构建解压为 `chromium-<build>` 子目录（如 chromium-1228）。
+/// 任一存在即视为已装（不校验具体版本，避免每次启动都对版本号）——与 `node_modules` 跳过同义。
+fn playwright_chromium_installed() -> bool {
+    let Some(root) = playwright_browsers_root() else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.file_name()
+            .to_string_lossy()
+            .starts_with("chromium-")
+    })
+}
+
+/// 确保插件用到的 Playwright 浏览器二进制已下载（仅 chromium）。
+///
+/// 背景：装 `playwright` npm/pip 包**不会**下载浏览器，需额外 `playwright install`。
+/// 平台此前漏了这一步，导致插件 `browserType.launch()` 因 `chrome.exe` 缺失而崩溃
+/// （报「Executable doesn't exist at …\ms-playwright\chromium-1228\…」）。
+///
+/// 流程：
+/// 1. 未声明 playwright 依赖 → `Ok(())`（绝不给无关插件跑下载）。
+/// 2. 已有 chromium-<build> 目录 → 幂等跳过。
+/// 3. Node：优先 `node_modules/.bin/playwright install chromium`；无该 bin 则回退
+///    内置 node 跑 `npx playwright install chromium`（经 npmmirror，环境已配 registry）。
+///    Python：`<venv-python> -m playwright install chromium`。
+/// 4. env 注入 `PLAYWRIGHT_DOWNLOAD_HOST` 走国内镜像（默认海外 CDN 国内不可达/极慢）。
+///
+/// 失败：返回友好错误（带 stderr 摘要），冒泡到 start_plugin / 预览路径报错。
+/// 幂等：浏览器目录存在则秒过，重复启动无副作用。
+pub(crate) fn ensure_playwright_browsers(
+    runtime: &EmbeddedRuntime,
+    plugin_dir: &std::path::Path,
+) -> Result<(), String> {
+    if !declares_playwright(plugin_dir) {
+        return Ok(());
+    }
+    if playwright_chromium_installed() {
+        return Ok(());
+    }
+    // 注入镜像 host 的 env（在 runtime.env(minimal_env()) 基础上追加）。
+    let mut env = runtime.env(minimal_env());
+    env.push((
+        OsString::from("PLAYWRIGHT_DOWNLOAD_HOST"),
+        OsString::from(crate::embedded_runtime::PLAYWRIGHT_DOWNLOAD_HOST),
+    ));
+
+    // 解析 playwright CLI 入口：
+    // - Node：优先 node_modules/.bin/playwright（Windows 下 pnpm 装出的是 .cmd shim，
+    //   build_spawn_command 会识别 .cmd 后缀并 resolve，故这里取 .cmd 路径）。
+    //   无 bin → 回退内置 node 直接跑 node_modules/playwright-core/cli.js（playwright 包的
+    //   cli 在 playwright-core 里），避开 npx 的额外网络往返。
+    // - Python：用该插件的 venv python 跑 `python -m playwright install chromium`。
+    let node_pkg = plugin_dir.join("package.json").is_file();
+    let (bin, args) = if node_pkg {
+        let (pw_bin, cli_args) = resolve_node_playwright_cli(runtime, plugin_dir)?;
+        (pw_bin, cli_args)
+    } else {
+        let venv_dir = python_venv_dir(plugin_dir);
+        let py = venv_python(&venv_dir);
+        if !py.is_file() {
+            return Err(format!(
+                "Playwright 浏览器下载前缺少可用 venv python：{}（请先确保插件依赖已安装）",
+                py.display()
+            ));
+        }
+        (
+            py,
+            vec![
+                "-m".to_string(),
+                "playwright".to_string(),
+                "install".to_string(),
+                "chromium".to_string(),
+            ],
+        )
+    };
+
+    // chromium 约 150MB，镜像下载给 600s（与 pip/pnpm install 一致）。
+    let captured = run_capture_with_env(
+        &bin,
+        args,
+        Some(&plugin_dir.to_string_lossy()),
+        600_000,
+        env,
+    )
+    .map_err(|e| format!("Playwright 浏览器二进制下载失败：{e}"))?;
+    if captured.exit_code != Some(0) {
+        return Err(format!(
+            "Playwright 浏览器二进制下载失败（exit={:?}）：{}",
+            captured.exit_code,
+            captured_detail(&captured)
+        ));
+    }
+    Ok(())
+}
+
+/// 解析 Node 插件里 playwright CLI 的可执行入口。
+///
+/// 优先级：
+/// 1. `node_modules/.bin/playwright(.cmd)` —— pnpm/npm install 后会生成 shim，最稳。
+/// 2. 内置 node 直接跑 `node_modules/playwright-core/cli.js`（playwright 包的 cli 复用
+///    playwright-core 的入口）——无 .bin 时（如手动解压的 node_modules）兜底。
+/// 3. 都没有 → 报错（playwright 包未正确安装）。
+///
+/// 返回 (binary, args)，args 已含 `install chromium`。
+fn resolve_node_playwright_cli(
+    runtime: &EmbeddedRuntime,
+    plugin_dir: &std::path::Path,
+) -> Result<(PathBuf, Vec<String>), String> {
+    let bin_dir = plugin_dir.join("node_modules").join(".bin");
+    // Windows：pnpm/npm 生成的 shim 是 playwright.cmd；Unix：无扩展名。
+    #[cfg(windows)]
+    let bin_candidates = vec![bin_dir.join("playwright.cmd"), bin_dir.join("playwright")];
+    #[cfg(not(windows))]
+    let bin_candidates = vec![bin_dir.join("playwright")];
+
+    if let Some(bin) = bin_candidates.into_iter().find(|p| p.is_file()) {
+        return Ok((
+            bin,
+            vec!["install".to_string(), "chromium".to_string()],
+        ));
+    }
+
+    // 回退：内置 node + cli.js（playwright 包的 cli 实际在 playwright-core/cli.js）。
+    let cli_candidates = [
+        plugin_dir
+            .join("node_modules")
+            .join("playwright-core")
+            .join("cli.js"),
+        plugin_dir
+            .join("node_modules")
+            .join("playwright")
+            .join("cli.js"),
+    ];
+    if let Some(cli) = cli_candidates.into_iter().find(|p| p.is_file()) {
+        let node = runtime.require_runtime_command("node")?;
+        return Ok((
+            node,
+            vec![
+                entry_arg(&cli),
+                "install".to_string(),
+                "chromium".to_string(),
+            ],
+        ));
+    }
+
+    Err(
+        "声明了 playwright 依赖但找不到其 CLI（node_modules/.bin/playwright 与 cli.js 均缺失），\
+         请确认 playwright 包已正确安装"
+            .to_string(),
+    )
+}
+
 fn node_has_start_script(plugin_dir: &std::path::Path) -> Result<bool, String> {
     let pkg_json = plugin_dir.join("package.json");
     if !pkg_json.is_file() {
@@ -734,6 +946,8 @@ pub fn start_plugin(
             }
             // ensure_python_venv：venv 不存在则用内置 Python 创建 + 有 requirements.txt 则 pip install（幂等）。
             let py = ensure_python_venv(&runtime, &plugin_dir)?;
+            // 声明了 playwright 则补下载浏览器二进制（仅 chromium，国内镜像，幂等）。
+            ensure_playwright_browsers(&runtime, &plugin_dir)?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
                 return Err(format!("Python 入口文件不存在：{}", entry_abs.display()));
@@ -753,6 +967,8 @@ pub fn start_plugin(
             }
             // ensure_node_dependencies：有 package.json + 非空依赖且 node_modules 缺失 → 内置 pnpm/npm install（幂等）。
             ensure_node_dependencies(&runtime, &plugin_dir)?;
+            // 声明了 playwright 则补下载浏览器二进制（仅 chromium，国内镜像，幂等）。
+            ensure_playwright_browsers(&runtime, &plugin_dir)?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
                 return Err(format!("Node 入口文件不存在：{}", entry_abs.display()));

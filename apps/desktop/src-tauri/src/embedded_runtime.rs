@@ -6,6 +6,10 @@ use tauri::Manager;
 pub(crate) const PIP_INDEX_URL: &str = "https://pypi.tuna.tsinghua.edu.cn/simple";
 pub(crate) const PIP_TRUSTED_HOST: &str = "pypi.tuna.tsinghua.edu.cn";
 pub(crate) const NPM_REGISTRY: &str = "https://registry.npmmirror.com";
+/// Playwright 浏览器二进制下载镜像（国内加速，与 npmmirror 同源）。
+/// 默认从 cdn.playwright.dev 拉 chromium/wekit/firefox，国内极慢/失败。
+/// 设此 host 后 `playwright install` 走 npmmirror 的 binaries/playwright 镜像。
+pub(crate) const PLAYWRIGHT_DOWNLOAD_HOST: &str = "https://cdn.npmmirror.com/binaries/playwright";
 
 #[derive(Clone, Debug)]
 pub(crate) struct EmbeddedRuntime {

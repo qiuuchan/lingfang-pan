@@ -28,7 +28,7 @@ use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutpu
 use crate::embedded_runtime::EmbeddedRuntime;
 // 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
 // 让试跑与持久化运行用同一套依赖管理逻辑（venv 创建/pip install/pnpm install），避免行为漂移。
-use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, entry_arg, minimal_env as runner_minimal_env};
+use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, ensure_playwright_browsers, entry_arg, minimal_env as runner_minimal_env};
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
 /// serde rename_all = lowercase：nodejs / python，与契约 RuntimeType 对齐。
@@ -502,6 +502,12 @@ pub fn run_plugin_script(
                         install_log = Some(format!("Python 依赖已就绪（venv: {}）", venv_py.display()));
                     }
                     run_binary = venv_py;
+                    // 声明了 playwright 则补下载浏览器二进制（与正式运行路径一致，避免预览能跑而正式跑不起来）。
+                    // 失败不致命：记进 install_log 让 AI 知晓（缺浏览器会直接导致试跑崩溃，stderr 会被捕获）。
+                    if let Err(e) = ensure_playwright_browsers(&embedded, &sandbox_canon) {
+                        let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
+                        install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
+                    }
                 }
                 Err(e) => {
                     // venv/pip 失败：返回带原因的错误，AI 据此修复（如 requirements.txt 里包名错/版本冲突）。
@@ -521,6 +527,11 @@ pub fn run_plugin_script(
                 Ok(()) => {
                     if sandbox_canon.join("package.json").is_file() {
                         install_log = Some("Node 依赖已就绪（node_modules 就绪）".to_string());
+                    }
+                    // 同 Python 分支：声明了 playwright 则补下载浏览器二进制，失败记 install_log。
+                    if let Err(e) = ensure_playwright_browsers(&embedded, &sandbox_canon) {
+                        let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
+                        install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
                 }
                 Err(e) => {
