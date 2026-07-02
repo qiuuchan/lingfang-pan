@@ -168,7 +168,9 @@ async function testChat(plaintextKey: string): Promise<string> {
     throw new Error(detail);
   }
   const data = await res.json().catch(() => ({})) as { choices?: { message?: { content?: string } }[]; content?: string };
-  return data.choices?.[0]?.message?.content ?? data.content ?? '（空回复）';
+  const text = data.choices?.[0]?.message?.content ?? data.content ?? '';
+  if (text.trim().length === 0) throw new Error('平台返回成功但回复内容为空');
+  return text;
 }
 
 /** 测试生图能力：生成一张简单图片。返回可直接 <img> 的 src（url 或 data:base64）。 */
