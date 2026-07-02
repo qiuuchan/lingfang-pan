@@ -7,10 +7,13 @@ import {
   Trash2Icon,
   WrenchIcon,
   XIcon,
+  ChevronDownIcon,
+  UserRoundIcon,
 } from 'lucide-react';
 import type { LoadedPlugin } from '@/lib/types';
 import { modelTierShortLabel } from '@/lib/model-tier';
-import { Button } from '@/components/ui/button';
+import { useApp } from '@/App';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -20,6 +23,11 @@ type CreatorConversationSummary = {
   id: string;
   title: string;
   updatedAt: string;
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  TEAM_ADMIN: '团队管理员',
+  MEMBER: '成员',
 };
 
 export function CreatorFloatingTitleBar({
@@ -152,52 +160,86 @@ export function CreatorFloatingTitleBar({
 export function CreatorWorkspaceSidebar({
   activeSkillCount,
   busy,
+  collapsed,
   compressedHint,
   activeConversationId,
   confirmDeleteId,
   conversations,
-  draftName,
   onCancelDeleteConversation,
   onConfirmDeleteConversation,
   onDeleteConversation,
   onNewConversation,
   onOpenSkills,
   onSelectConversation,
-  turnsCount,
 }: {
   activeSkillCount: number;
   busy: boolean;
+  collapsed: boolean;
   compressedHint: number;
   activeConversationId: string | null;
   confirmDeleteId: string | null;
   conversations: CreatorConversationSummary[];
-  draftName?: string | null;
   onCancelDeleteConversation: () => void;
   onConfirmDeleteConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onNewConversation: () => void;
   onOpenSkills: () => void;
   onSelectConversation: (id: string) => void;
-  turnsCount: number;
 }) {
-  return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-muted/40/70 text-foreground backdrop-blur">
-      <div className="flex-1 space-y-4 overflow-y-auto p-3">
-        <div className="space-y-1.5">
-          <Button variant="default" size="sm" className="h-10 w-full justify-start gap-2 rounded-xl bg-primary text-sm shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md" disabled={busy} onClick={onNewConversation}>
-            <PlusIcon className="size-4" />
-            新建对话
-            {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-5 border-border px-1.5 text-[10px]">压缩 {compressedHint}</Badge>}
-          </Button>
-          <Button variant="ghost" size="sm" className="h-10 w-full justify-start gap-2 rounded-xl text-sm text-muted-foreground transition-all duration-150 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground" onClick={onOpenSkills}>
-            <WrenchIcon className="size-4" />
-            技能
-            {activeSkillCount > 0 && <Badge variant="secondary" className="ml-auto h-5 bg-accent px-1.5 text-[10px] text-primary">{activeSkillCount}</Badge>}
-          </Button>
-        </div>
+  const { session, openAvatarMenu } = useApp();
+  const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
+  const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
+  return (
+    <aside
+      className="relative flex h-full shrink-0 flex-col overflow-hidden border-r bg-card transition-[width] duration-200"
+      style={{ width: collapsed ? 56 : 224 }}
+    >
+      {/* 顶部操作：新建对话 + 技能。折叠态居中仅显图标。 */}
+      <div className="space-y-1.5 border-b p-2">
+        <Button
+          variant="default"
+          size="sm"
+          className={cn(
+            'h-10 gap-2 rounded-xl bg-primary text-sm shadow-sm transition-all duration-150 hover:bg-primary/90',
+            collapsed ? 'w-full justify-center px-0' : 'w-full justify-start px-3',
+          )}
+          disabled={busy}
+          onClick={onNewConversation}
+          title={collapsed ? '新建对话' : undefined}
+        >
+          <PlusIcon className="size-4 shrink-0" />
+          {!collapsed && (
+            <>
+              新建对话
+              {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-5 border-border px-1.5 text-[10px]">压缩 {compressedHint}</Badge>}
+            </>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            'h-10 gap-2 rounded-xl text-sm text-muted-foreground transition-all duration-150 hover:bg-accent hover:text-foreground',
+            collapsed ? 'w-full justify-center px-0' : 'w-full justify-start px-3',
+          )}
+          onClick={onOpenSkills}
+          title={collapsed ? '技能' : undefined}
+        >
+          <WrenchIcon className="size-4 shrink-0" />
+          {!collapsed && (
+            <>
+              技能
+              {activeSkillCount > 0 && <Badge variant="secondary" className="ml-auto h-5 bg-accent px-1.5 text-[10px] text-primary">{activeSkillCount}</Badge>}
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* 历史列表（仅展开态渲染；折叠态留空撑高）。 */}
+      {!collapsed ? (
+        <div className="flex-1 space-y-2 overflow-y-auto p-3">
+          <div className="flex items-center justify-between px-1 text-[11px] font-medium text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <HistoryIcon className="size-3.5" />
               历史
@@ -213,7 +255,7 @@ export function CreatorWorkspaceSidebar({
                   key={conversation.id}
                   className={cn(
                     'group flex items-center gap-1 rounded-xl border px-2 py-1.5 transition-all duration-150',
-                    active ? 'border-primary/40 bg-accent text-primary shadow-sm' : 'border-transparent hover:-translate-y-0.5 hover:border-border hover:bg-card hover:shadow-sm',
+                    active ? 'border-primary/40 bg-accent text-primary shadow-sm' : 'border-transparent hover:border-border hover:bg-muted',
                   )}
                 >
                   <button
@@ -238,7 +280,7 @@ export function CreatorWorkspaceSidebar({
                       </button>
                       <button
                         type="button"
-                        className="rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-background"
+                        className="rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
                         onClick={onCancelDeleteConversation}
                       >
                         取消
@@ -263,13 +305,29 @@ export function CreatorWorkspaceSidebar({
             )}
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1" />
+      )}
 
-      <div className="border-t border-border p-3 text-[11px] text-muted-foreground">
-        <div className="flex items-center justify-between">
-          <span>{turnsCount > 0 ? `${turnsCount} 条消息` : '新对话'}</span>
-          {draftName && <span className="max-w-24 truncate text-foreground" title={draftName}>{draftName}</span>}
-        </div>
+      {/* 底部用户按钮：与主侧栏共用样式，点击唤起 AvatarMenu。 */}
+      <div className="border-t p-2">
+        <button
+          type="button"
+          onClick={openAvatarMenu}
+          title={collapsed ? tenantLabel : undefined}
+          className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full gap-2 px-2 py-2', collapsed && 'justify-center px-0')}
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <UserRoundIcon className="size-4" />
+          </span>
+          {!collapsed && (
+            <span className="flex-1 truncate text-left text-xs">
+              <span className="block truncate font-medium text-foreground">{tenantLabel}</span>
+              <span className="block truncate text-muted-foreground">{roleLabel}</span>
+            </span>
+          )}
+          {!collapsed && <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />}
+        </button>
       </div>
     </aside>
   );
