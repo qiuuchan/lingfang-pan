@@ -26,13 +26,13 @@ type Direction = 'up' | 'down' | 'left' | 'right';
    与 index.css 的 --lf-dur-* CSS 变量是两套机制（CSS 变量供 Tailwind 工具类，这里供 framer-motion 数字 duration）。
    入场类整体偏慢（约 ×1.4~1.5）；AnimatedNumber/Shimmer 属持续/循环类，单列且不随入场调慢以免拖沓。 */
 export const MOTION = {
-  fadeIn: 0.6,
-  slideIn: 0.65,
-  item: 0.55,
-  stagger: 0.1,
+  fadeIn: 0.2,
+  slideIn: 0.25,
+  item: 0.2,
+  stagger: 0.08,
   delayChildren: 0.06,
-  page: 0.4,
-  pageReduce: 0.18,
+  page: 0.15,
+  pageReduce: 0.1,
   menu: 0.25,
 } as const;
 
@@ -222,7 +222,7 @@ export function ListSkeleton({ rows = 4, className }: { rows?: number; className
   );
 }
 
-/** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade + slide。
+/** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade only。
  *  mode="wait" 保证旧视图退出后再挂载新视图，避免双视图同时撑开布局。
  *  仅 App.tsx 的视图容器使用（PluginCreatorHome 常驻挂载，不进此组件）。 */
 export function PageTransition({ viewKey, children, className }: { viewKey: string; children: ReactNode; className?: string }) {
@@ -232,9 +232,9 @@ export function PageTransition({ viewKey, children, className }: { viewKey: stri
       <motion.div
         key={viewKey}
         className={className}
-        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={reduce ? { opacity: 0 } : { opacity: 0, y: -12 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         transition={{ duration: reduce ? MOTION.pageReduce : MOTION.page, ease: 'easeOut' }}
       >
         {children}

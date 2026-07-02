@@ -54,19 +54,19 @@ export function PluginCenterBody({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <Tabs value={tab} onValueChange={(value) => onTabChange((value || 'local') as PluginCenterTab)}>
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
-          <TabsTrigger value="local"><FolderIcon className="size-3.5" />本地插件</TabsTrigger>
-          <TabsTrigger value="draft"><FileEditIcon className="size-3.5" />我的草稿</TabsTrigger>
-          <TabsTrigger value="team"><ServerIcon className="size-3.5" />团队插件</TabsTrigger>
-          <TabsTrigger value="market"><StoreIcon className="size-3.5" />市场插件</TabsTrigger>
+        <TabsList className="grid w-full max-w-2xl grid-cols-4 rounded-xl border-[#E7E1D7] bg-[#FBF9F5]">
+          <TabsTrigger value="local" className="rounded-xl"><FolderIcon className="size-3.5" />本地插件</TabsTrigger>
+          <TabsTrigger value="draft" className="rounded-xl"><FileEditIcon className="size-3.5" />我的草稿</TabsTrigger>
+          <TabsTrigger value="team" className="rounded-xl"><ServerIcon className="size-3.5" />团队插件</TabsTrigger>
+          <TabsTrigger value="market" className="rounded-xl"><StoreIcon className="size-3.5" />市场插件</TabsTrigger>
         </TabsList>
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
           >
             {tab === 'local' && (
               <TabsContent value="local" keepMounted className="mt-4 focus-visible:outline-none">
