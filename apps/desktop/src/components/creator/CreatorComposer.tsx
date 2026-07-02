@@ -201,7 +201,7 @@ export function CreatorComposer({
             </button>
           </div>
           {/* 右侧：上下文（圆圈）/ 模型切换 / 发送 */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2.5">
             {showContextButton && (
               <button
                 type="button"
@@ -209,12 +209,12 @@ export function CreatorComposer({
                 disabled={busy || !canInspectContext}
                 title={canInspectContext ? '打开上下文' : '先发送一次对话再查看上下文'}
                 aria-label="上下文"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:opacity-40"
               >
                 <EyeIcon className="size-4" />
               </button>
             )}
-            <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5">
+            <div className="flex shrink-0 items-center rounded-lg border border-border bg-muted/40 p-0.5">
               {(['fast', 'premium'] as const).map((nextTier) => (
                 <button
                   key={nextTier}
@@ -230,12 +230,13 @@ export function CreatorComposer({
                 </button>
               ))}
             </div>
+            <div className="w-1 shrink-0" />
             {busy ? (
               <button
                 type="button"
                 onClick={onStop}
                 title="停止"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border text-muted-foreground shadow-sm transition-colors duration-150 hover:border-destructive hover:bg-destructive hover:text-destructive-foreground"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-border text-muted-foreground shadow-sm transition-colors duration-150 hover:border-destructive hover:bg-destructive hover:text-destructive-foreground"
               >
                 <XIcon className="size-4" />
               </button>
@@ -245,7 +246,7 @@ export function CreatorComposer({
                 onClick={onSend}
                 disabled={!input.trim()}
                 title="发送"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <SendIcon className="size-4" />
               </button>

@@ -61,7 +61,7 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
         <span className="px-0.5 text-base font-semibold text-foreground" data-tauri-drag-region>{label}</span>
         {showPluginModeSwitch && (
           <div
-            className="ml-1 flex items-center gap-0.5"
+            className="ml-2 flex items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -76,10 +76,10 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
                   title={mode.label}
                   onClick={() => onPluginModeChange?.(mode.value)}
                   className={cn(
-                    'inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-all duration-150',
+                    'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-all duration-150',
                     active
                       ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                      : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground',
                   )}
                 >
                   <Icon className="size-3.5 shrink-0" />
