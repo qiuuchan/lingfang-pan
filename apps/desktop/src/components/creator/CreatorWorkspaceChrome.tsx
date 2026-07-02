@@ -51,7 +51,7 @@ export function CreatorQuickTags({
             key={tag.label}
             type="button"
             onClick={() => onSelect(tag.prompt)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#E7E1D7] bg-[#FFFFFF] px-3.5 text-xs font-medium text-[#5C635D] shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-[#C4612F]/40 hover:bg-[#F2E3D6] hover:text-[#1F2421] hover:shadow-md"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-card px-3.5 text-xs font-medium text-muted-foreground shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent hover:text-foreground hover:shadow-md"
           >
             <Icon className="size-3.5" />
             {tag.label}
@@ -227,39 +227,39 @@ export function CreatorWorkspaceSidebar({
   turnsCount: number;
 }) {
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-[#E7E1D7] bg-[#FBF9F5]/70 text-[#1F2421] backdrop-blur">
-      <div className="flex items-center justify-between border-b border-[#E7E1D7] px-3 py-3">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-muted/40/70 text-foreground backdrop-blur">
+      <div className="flex items-center justify-between border-b border-border px-3 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-[#E7E1D7] bg-[#FFFFFF]/80 shadow-sm">
-            <SparklesIcon className="size-4 text-[#C4612F]" />
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-border bg-card/80 shadow-sm">
+            <SparklesIcon className="size-4 text-primary" />
           </span>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">开发插件</div>
-            <div className="text-[11px] text-[#5C635D]">AI plugin builder</div>
+            <div className="text-[11px] text-muted-foreground">AI plugin builder</div>
           </div>
         </div>
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto p-3">
         <div className="space-y-1.5">
-          <Button variant="default" size="sm" className="w-full justify-start gap-2 rounded-xl bg-[#C4612F] shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-[#A94E22] hover:shadow-md" disabled={busy} onClick={onNewConversation}>
+          <Button variant="default" size="sm" className="w-full justify-start gap-2 rounded-xl bg-primary shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md" disabled={busy} onClick={onNewConversation}>
             <PlusIcon className="size-3.5" />
             新建对话
-            {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-4 border-[#E7E1D7] px-1 text-[10px]">压缩 {compressedHint}</Badge>}
+            {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-4 border-border px-1 text-[10px]">压缩 {compressedHint}</Badge>}
           </Button>
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-xl text-[#5C635D] transition-all duration-150 hover:-translate-y-0.5 hover:bg-[#F2E3D6] hover:text-[#1F2421]" onClick={onOpenSkills}>
+          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-xl text-muted-foreground transition-all duration-150 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground" onClick={onOpenSkills}>
             <WrenchIcon className="size-3.5" />
             技能
-            {activeSkillCount > 0 && <Badge variant="secondary" className="ml-auto h-4 bg-[#F2E3D6] px-1 text-[10px] text-[#C4612F]">{activeSkillCount}</Badge>}
+            {activeSkillCount > 0 && <Badge variant="secondary" className="ml-auto h-4 bg-accent px-1 text-[10px] text-primary">{activeSkillCount}</Badge>}
           </Button>
           {recentPlugins.length > 0 && (
             <Popover>
-              <PopoverTrigger render={<Button type="button" variant={referencedPlugin ? 'default' : 'ghost'} size="sm" className={cn('w-full justify-start gap-2 rounded-xl transition-all duration-150', referencedPlugin ? 'bg-[#C4612F] hover:bg-[#A94E22]' : 'text-[#5C635D] hover:-translate-y-0.5 hover:bg-[#F2E3D6] hover:text-[#1F2421]')} />}>
+              <PopoverTrigger render={<Button type="button" variant={referencedPlugin ? 'default' : 'ghost'} size="sm" className={cn('w-full justify-start gap-2 rounded-xl transition-all duration-150', referencedPlugin ? 'bg-primary hover:bg-primary/90' : 'text-muted-foreground hover:-translate-y-0.5 hover:bg-accent hover:text-foreground')} />}>
                 <FileCode2Icon className="size-3.5" />
                 <span className="min-w-0 flex-1 truncate text-left">{referencedPlugin ? referencedPlugin.name : '引用插件'}</span>
               </PopoverTrigger>
-              <PopoverContent className="w-64 rounded-xl border-[#E7E1D7] bg-[#FFFFFF] shadow-lg" align="start">
-                <div className="text-xs font-medium text-[#5C635D]">引用已有插件</div>
+              <PopoverContent className="w-64 rounded-xl border-border bg-card shadow-lg" align="start">
+                <div className="text-xs font-medium text-muted-foreground">引用已有插件</div>
                 <div className="mt-1.5 max-h-60 space-y-0.5 overflow-y-auto">
                   {recentPlugins.map((plugin) => (
                     <button
@@ -268,7 +268,7 @@ export function CreatorWorkspaceSidebar({
                       onClick={() => onSelectReferencedPlugin(referencedPlugin?.id === plugin.id ? null : plugin)}
                       className={cn(
                         'block w-full truncate rounded-xl px-2 py-1.5 text-left text-sm transition-all duration-150',
-                        referencedPlugin?.id === plugin.id ? 'bg-[#F2E3D6] text-[#C4612F]' : 'hover:bg-[#F7F4EF]',
+                        referencedPlugin?.id === plugin.id ? 'bg-accent text-primary' : 'hover:bg-background',
                       )}
                       title={plugin.name}
                     >
@@ -280,7 +280,7 @@ export function CreatorWorkspaceSidebar({
                   <button
                     type="button"
                     onClick={() => onSelectReferencedPlugin(null)}
-                    className="mt-1.5 w-full rounded-xl px-2 py-1 text-xs text-[#5C635D] transition-colors duration-150 hover:bg-[#F7F4EF]"
+                    className="mt-1.5 w-full rounded-xl px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-background"
                   >
                     取消引用
                   </button>
@@ -291,12 +291,12 @@ export function CreatorWorkspaceSidebar({
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between px-2 text-[11px] font-medium text-[#5C635D]">
+          <div className="flex items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <HistoryIcon className="size-3.5" />
               历史
             </span>
-            {conversations.length > 0 && <Badge variant="secondary" className="h-4 bg-[#F2E3D6] px-1 text-[10px] text-[#C4612F]">{conversations.length}</Badge>}
+            {conversations.length > 0 && <Badge variant="secondary" className="h-4 bg-accent px-1 text-[10px] text-primary">{conversations.length}</Badge>}
           </div>
           <div className="space-y-1">
             {conversations.length ? conversations.slice(0, 12).map((conversation) => {
@@ -307,7 +307,7 @@ export function CreatorWorkspaceSidebar({
                   key={conversation.id}
                   className={cn(
                     'group flex items-center gap-1 rounded-xl border px-2 py-1.5 transition-all duration-150',
-                    active ? 'border-[#C4612F]/40 bg-[#F2E3D6] text-[#C4612F] shadow-sm' : 'border-transparent hover:-translate-y-0.5 hover:border-[#E7E1D7] hover:bg-[#FFFFFF] hover:shadow-sm',
+                    active ? 'border-primary/40 bg-accent text-primary shadow-sm' : 'border-transparent hover:-translate-y-0.5 hover:border-border hover:bg-card hover:shadow-sm',
                   )}
                 >
                   <button
@@ -317,7 +317,7 @@ export function CreatorWorkspaceSidebar({
                     title={conversation.title}
                   >
                     <span className="block truncate text-xs font-medium">{conversation.title}</span>
-                    <span className="block truncate text-[10px] text-[#5C635D]">
+                    <span className="block truncate text-[10px] text-muted-foreground">
                       {new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}
                     </span>
                   </button>
@@ -332,7 +332,7 @@ export function CreatorWorkspaceSidebar({
                       </button>
                       <button
                         type="button"
-                        className="rounded-full px-1.5 py-0.5 text-[10px] text-[#5C635D] hover:bg-[#F7F4EF]"
+                        className="rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-background"
                         onClick={onCancelDeleteConversation}
                       >
                         取消
@@ -343,7 +343,7 @@ export function CreatorWorkspaceSidebar({
                       type="button"
                       title="删除该对话"
                       onClick={() => onDeleteConversation(conversation.id)}
-                      className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[#5C635D] opacity-0 transition-all duration-150 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                     >
                       <Trash2Icon className="size-3.5" />
                     </button>
@@ -351,7 +351,7 @@ export function CreatorWorkspaceSidebar({
                 </div>
               );
             }) : (
-              <div className="rounded-xl border border-dashed border-[#E7E1D7] px-3 py-5 text-center text-xs text-[#5C635D]">
+              <div className="rounded-xl border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
                 暂无历史对话
               </div>
             )}
@@ -359,10 +359,10 @@ export function CreatorWorkspaceSidebar({
         </div>
       </div>
 
-      <div className="border-t border-[#E7E1D7] p-3 text-[11px] text-[#5C635D]">
+      <div className="border-t border-border p-3 text-[11px] text-muted-foreground">
         <div className="flex items-center justify-between">
           <span>{turnsCount > 0 ? `${turnsCount} 条消息` : '新对话'}</span>
-          {draftName && <span className="max-w-24 truncate text-[#1F2421]" title={draftName}>{draftName}</span>}
+          {draftName && <span className="max-w-24 truncate text-foreground" title={draftName}>{draftName}</span>}
         </div>
       </div>
     </aside>
