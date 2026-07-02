@@ -62,13 +62,24 @@ type ScriptBridgeEnv = {
   fetch?: typeof fetch;
 };
 
+// 脚本桥路由表：capability → localhost 桥路径（LINGFANG_PLUGIN_BRIDGE_URL 是基础 endpoint，不含路径后缀）。
+// Rust 端 plugin_llm_bridge.rs 的 route_request 据此分发：/llm/chat、/image/generate。
+const SCRIPT_BRIDGE_PATH: Record<string, string> = {
+  'llm.chat': '/llm/chat',
+  'image.generate': '/image/generate',
+};
+
+// Node.js / Python 脚本插件的本地桥回退：window.__lingfangInvoke 不存在时（脚本无 DOM）走 localhost HTTP 桥。
+// 桥用一次性 token 鉴权，宿主转发到平台 relay（不计费给脚本进程，真正计费在 relay 侧扣团队灵石）。
+// 支持能力：llm.chat（返回 {content:string}）、image.generate（返回 {images:string[]}）。
 async function invokeScriptBridge<T>(capability: string, args: unknown): Promise<T | null> {
-  if (capability !== 'llm.chat') return null;
+  const path = SCRIPT_BRIDGE_PATH[capability];
+  if (!path) return null;
   const g = globalThis as unknown as ScriptBridgeEnv;
-  const url = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_URL;
+  const base = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_URL;
   const token = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_TOKEN;
-  if (!url || !token || typeof g.fetch !== 'function') return null;
-  const res = await g.fetch(url, {
+  if (!base || !token || typeof g.fetch !== 'function') return null;
+  const res = await g.fetch(`${base}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -76,9 +87,16 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
     },
     body: JSON.stringify(args ?? {}),
   });
-  const data = await res.json().catch(() => ({})) as { content?: unknown; message?: string; error?: string };
-  if (!res.ok) throw new Error(data.message || data.error || `平台 LLM 调用失败：HTTP ${res.status}`);
-  return (typeof data.content === 'string' ? data.content : '') as T;
+  const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+  if (!res.ok) {
+    const msg = (data.message as string) || (data.error as string) || `平台调用失败：HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  if (capability === 'llm.chat') {
+    return (typeof data.content === 'string' ? data.content : '') as T;
+  }
+  // image.generate：返回 { images: string[] }
+  return { images: Array.isArray(data.images) ? (data.images as string[]) : [] } as T;
 }
 
 // 桥调用默认超时（与桌面 plugins-runtime.ts 的 RUNTIME_BRIDGE_TIMEOUT_MS 对齐）。

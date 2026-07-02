@@ -21,6 +21,7 @@ struct BridgeSession {
     api_base: String,
     auth_token: String,
     allow_llm_chat: bool,
+    allow_image_generate: bool,
     expires_at: Instant,
 }
 
@@ -54,18 +55,20 @@ impl PluginLlmBridge {
         Self::default()
     }
 
-    /// 注册一次插件脚本会话。返回给子进程的只有 localhost URL 与一次性 token。
+    /// 注册一次插件脚本会话。返回给子进程的只有 localhost endpoint（基础地址）与一次性 token。
+    /// 子进程经 SDK invokeScriptBridge 拼具体路径（/llm/chat、/image/generate）。
     pub fn register_session(
         &self,
         plugin_id: &str,
         api_base: Option<String>,
         auth_token: Option<String>,
         allow_llm_chat: bool,
+        allow_image_generate: bool,
         ttl: Duration,
     ) -> Result<Option<PluginBridgeEnv>, String> {
         let api_base = api_base.unwrap_or_default().trim().trim_end_matches('/').to_string();
         let auth_token = auth_token.unwrap_or_default().trim().to_string();
-        if api_base.is_empty() && auth_token.is_empty() && !allow_llm_chat {
+        if api_base.is_empty() && auth_token.is_empty() && !allow_llm_chat && !allow_image_generate {
             return Ok(None);
         }
         let endpoint = self.ensure_server()?;
@@ -75,6 +78,7 @@ impl PluginLlmBridge {
             api_base,
             auth_token,
             allow_llm_chat,
+            allow_image_generate,
             expires_at: Instant::now() + ttl,
         };
         self.inner
@@ -82,8 +86,9 @@ impl PluginLlmBridge {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .insert(token.clone(), session);
+        // url 现在返回基础 endpoint（不含路径后缀），由 SDK 拼具体路由。
         Ok(Some(PluginBridgeEnv {
-            url: format!("{endpoint}/llm/chat"),
+            url: endpoint,
             token,
         }))
     }
@@ -236,8 +241,8 @@ fn route_request(
     inner: &Arc<BridgeState>,
     request: HttpRequest,
 ) -> Result<Value, (u16, &'static str, String)> {
-    if request.method != "POST" || request.path != "/llm/chat" {
-        return Err((404, "not_found", "插件 LLM 本地桥仅支持 POST /llm/chat".to_string()));
+    if request.method != "POST" {
+        return Err((404, "not_found", "插件本地桥仅支持 POST 请求".to_string()));
     }
     let token = extract_token(&request.headers)
         .ok_or_else(|| (401, "unauthorized", "缺少插件桥 token".to_string()))?;
@@ -248,6 +253,15 @@ fn route_request(
     }
     .ok_or_else(|| (401, "unauthorized", "插件桥 token 无效或已过期".to_string()))?;
 
+    match request.path.as_str() {
+        "/llm/chat" => route_llm_chat(&session, request.body),
+        "/image/generate" => route_image_generate(&session, request.body),
+        other => Err((404, "not_found", format!("插件本地桥不支持的路由：{other}"))),
+    }
+}
+
+/// 处理 llm.chat：转发到平台 relay /api/relay/v1/chat/completions，返回 {content}。
+fn route_llm_chat(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<Value, (u16, &'static str, String)> {
     if !session.allow_llm_chat {
         return Err((403, "capability_denied", "插件未声明 llm.chat 能力".to_string()));
     }
@@ -255,7 +269,7 @@ fn route_request(
         return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台 LLM".to_string()));
     }
 
-    let body: Value = serde_json::from_slice(&request.body)
+    let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|error| (400, "bad_request", format!("JSON 解析失败：{error}")))?;
     let messages = body
         .get("messages")
@@ -274,10 +288,7 @@ fn route_request(
         "stream": false,
     });
     let url = format!("{}/api/relay/v1/chat/completions", session.api_base.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|error| (500, "bridge_init_failed", format!("初始化平台请求失败：{error}")))?;
+    let client = blocking_client();
     let resp = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -286,10 +297,78 @@ fn route_request(
         .json(&relay_body)
         .send()
         .map_err(|error| (502, "relay_request_failed", format!("平台 LLM 请求失败：{error}")))?;
+    let data = relay_response_json(resp)?;
+    let content = extract_chat_content(&data);
+    Ok(json!({ "content": content }))
+}
+
+/// 处理 image.generate：转发到平台 relay /api/relay/v1/images/generations，返回 {images:[...]}。
+fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<Value, (u16, &'static str, String)> {
+    if !session.allow_image_generate {
+        return Err((403, "capability_denied", "插件未声明 image.generate 能力".to_string()));
+    }
+    if session.api_base.is_empty() || session.auth_token.is_empty() {
+        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台生图".to_string()));
+    }
+
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|error| (400, "bad_request", format!("JSON 解析失败：{error}")))?;
+    let prompt = body
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| (400, "bad_request", "image.generate 缺少 prompt".to_string()))?
+        .to_string();
+    let model = match body.get("model").and_then(|value| value.as_str()) {
+        Some("premium") => "premium",
+        _ => "fast",
+    };
+    let n = body
+        .get("n")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(1)
+        .clamp(1, 4) as u32;
+    let size = body
+        .get("size")
+        .and_then(|value| value.as_str())
+        .unwrap_or("1024x1024")
+        .to_string();
+
+    let relay_body = json!({
+        "model": model,
+        "prompt": prompt,
+        "n": n,
+        "size": size,
+    });
+    let url = format!("{}/api/relay/v1/images/generations", session.api_base.trim_end_matches('/'));
+    let client = blocking_client();
+    let resp = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("X-Client", "desktop-plugin")
+        .bearer_auth(&session.auth_token)
+        .json(&relay_body)
+        .send()
+        .map_err(|error| (502, "relay_request_failed", format!("平台生图请求失败：{error}")))?;
+    let data = relay_response_json(resp)?;
+    let images = extract_image_urls(&data);
+    Ok(json!({ "images": images }))
+}
+
+/// 构建带超时的 blocking client（llm/生图共用）。
+fn blocking_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
+
+/// 解析平台 relay 响应：非 2xx 抽取 {message|error} 友好报错；成功返回 JSON Value。
+fn relay_response_json(resp: reqwest::blocking::Response) -> Result<Value, (u16, &'static str, String)> {
     let status = resp.status();
     let text = resp
         .text()
-        .map_err(|error| (502, "relay_response_failed", format!("读取平台 LLM 响应失败：{error}")))?;
+        .map_err(|error| (502, "relay_response_failed", format!("读取平台响应失败：{error}")))?;
     if !status.is_success() {
         let detail = serde_json::from_str::<Value>(&text)
             .ok()
@@ -302,10 +381,8 @@ fn route_request(
             .unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
         return Err((status.as_u16(), "relay_error", detail));
     }
-    let data: Value = serde_json::from_str(&text)
-        .map_err(|error| (502, "relay_response_invalid", format!("平台 LLM 响应不是 JSON：{error}")))?;
-    let content = extract_chat_content(&data);
-    Ok(json!({ "content": content }))
+    serde_json::from_str(&text)
+        .map_err(|error| (502, "relay_response_invalid", format!("平台响应不是 JSON：{error}")))
 }
 
 fn extract_token(headers: &HashMap<String, String>) -> Option<String> {
@@ -329,6 +406,29 @@ fn extract_chat_content(data: &Value) -> String {
         .or_else(|| data.get("output_text").and_then(|content| content.as_str()))
         .unwrap_or_default()
         .to_string()
+}
+
+/// 从 relay 生图响应抽取可直接展示的图片（url 或 data:base64）。
+/// 上游响应形如 { data: [{ url | b64_json }] }（OpenAI 兼容）。
+fn extract_image_urls(data: &Value) -> Vec<String> {
+    data.get("data")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("url")
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.to_string())
+                        .or_else(|| {
+                            item.get("b64_json")
+                                .and_then(|value| value.as_str())
+                                .map(|value| format!("data:image/png;base64,{value}"))
+                        })
+                })
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default()
 }
 
 fn http_json(status: u16, body: &Value) -> String {
@@ -368,6 +468,22 @@ mod tests {
     fn extract_content_from_openai_shape() {
         let data = json!({ "choices": [{ "message": { "content": "ok" } }] });
         assert_eq!(extract_chat_content(&data), "ok");
+    }
+
+    #[test]
+    fn extract_images_from_url_and_b64() {
+        // url 形态
+        let url_resp = json!({ "data": [{ "url": "https://example.com/a.png" }] });
+        assert_eq!(extract_image_urls(&url_resp), vec!["https://example.com/a.png".to_string()]);
+        // b64_json 形态：转 data:base64
+        let b64_resp = json!({ "data": [{ "b64_json": "AAAA" }] });
+        assert_eq!(extract_image_urls(&b64_resp), vec!["data:image/png;base64,AAAA".to_string()]);
+        // 多张
+        let multi = json!({ "data": [{ "url": "https://x/1.png" }, { "url": "https://x/2.png" }] });
+        assert_eq!(extract_image_urls(&multi).len(), 2);
+        // 缺 data
+        let empty = json!({});
+        assert!(extract_image_urls(&empty).is_empty());
     }
 
     #[test]

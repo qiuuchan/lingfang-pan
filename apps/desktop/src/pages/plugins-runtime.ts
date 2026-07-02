@@ -273,6 +273,19 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     if (kind === 'net.fetch') {
       return tauriInvoke('plugin_net_fetch', { pluginId: plugin.id, args: args || {} });
     }
+    // system.screenshot 是隐私敏感能力（截屏可能泄露屏幕内容）：转发 Rust 网关前先取得用户授权。
+    // 复用 system.requestPermission 机制（localStorage 记忆 + 弹窗），未授权直接抛错。
+    if (kind === 'system.screenshot') {
+      requireCapability(plugin, 'system.screenshot');
+      const decision = await requestSystemPermission(
+        plugin.id,
+        plugin.name,
+        'screenshot',
+        '截取当前屏幕画面',
+      );
+      if (!decision.granted) throw new Error('用户未授权截屏');
+      return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
+    }
     return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
   if (kind === 'plugin.upload') {

@@ -102,12 +102,14 @@ export function PluginCenterBody({
                   items={team.items}
                   page={team.page}
                   refreshing={team.refreshing}
+                  runningPlugin={app.runningPlugin}
                   setPage={team.setPage}
                   totalPages={totalTeamPages}
                   onCreate={onCreate}
                   onOpenMarket={() => onTabChange('market')}
                   onRefresh={team.refresh}
                   onRun={(plugin) => { void openers.openTeamPlugin(plugin); }}
+                  onStopPlugin={team.refresh}
                   onTogglePin={(plugin, pinned) => (pinned ? app.unpinPlugin(plugin.id) : app.pinPlugin(plugin))}
                   onUpdate={async (plugin) => {
                     // 更新插件到最新版：重新调 installMarketplacePluginPackage（后端 update version + 返回最新 files，前端重新落盘）。

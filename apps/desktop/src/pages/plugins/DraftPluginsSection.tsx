@@ -38,7 +38,7 @@ export function DraftPluginsSection({
   onCreate: () => void;
   onClose: () => void; // 关闭插件中心对话框
 }) {
-  const { setPendingDraftEdit } = useApp();
+  const { setPendingDraftEdit, setView } = useApp();
   const [publishing, setPublishing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -63,7 +63,10 @@ export function DraftPluginsSection({
       };
       setPendingDraftEdit(payload);
       onClose(); // 关闭插件中心
-      toast.success(`已加载草稿「${draft.name}」，点击右下角 + 按钮打开创建器继续编辑`);
+      // 编辑草稿时自动打开 AI 悬浮创建器（同 autoFix 范式：setView('creator') → App 拦截转 creatorOpen）。
+      // FloatingCreator 的 pendingDraftEdit 消费 effect 已就绪，会自动恢复对话轮次与草稿文件。
+      setView('creator');
+      toast.success(`已加载草稿「${draft.name}」，正在打开创建器继续编辑…`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }

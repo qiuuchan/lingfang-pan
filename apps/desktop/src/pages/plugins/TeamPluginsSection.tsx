@@ -23,6 +23,10 @@ type TeamPluginsSectionProps = {
   onTogglePin: (plugin: LoadedPlugin, pinned: boolean) => void;
   /** 更新插件到最新版（已安装且有新版时调用）。 */
   onUpdate?: (plugin: LoadedPlugin) => void;
+  /** 当前正在运行的插件（用于行内「运行中 / 停止」态）。 */
+  runningPlugin?: LoadedPlugin | null;
+  /** 脚本插件停止后刷新列表状态。 */
+  onStopPlugin?: () => void;
 };
 
 export function TeamPluginsSection({
@@ -39,6 +43,8 @@ export function TeamPluginsSection({
   onRun,
   onTogglePin,
   onUpdate,
+  runningPlugin,
+  onStopPlugin,
 }: TeamPluginsSectionProps) {
   const total = items?.length ?? 0;
   const pageItems = (items ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -52,6 +58,7 @@ export function TeamPluginsSection({
         items={items}
         page={page}
         pageItems={pageItems}
+        runningPlugin={runningPlugin}
         setPage={setPage}
         total={total}
         totalPages={totalPages}
@@ -59,6 +66,7 @@ export function TeamPluginsSection({
         onOpenMarket={onOpenMarket}
         onRefresh={onRefresh}
         onRun={onRun}
+        onStopPlugin={onStopPlugin}
         onTogglePin={onTogglePin}
         onUpdate={onUpdate}
       />
@@ -101,6 +109,7 @@ function TeamSectionBody({
   items,
   page,
   pageItems,
+  runningPlugin,
   setPage,
   total,
   totalPages,
@@ -108,6 +117,7 @@ function TeamSectionBody({
   onOpenMarket,
   onRefresh,
   onRun,
+  onStopPlugin,
   onTogglePin,
   onUpdate,
 }: TeamSectionBodyProps) {
@@ -120,8 +130,10 @@ function TeamSectionBody({
         items={pageItems}
         onRefresh={onRefresh}
         onRun={onRun}
+        onStopped={onStopPlugin ?? onRefresh}
         onTogglePin={onTogglePin}
         onUpdate={onUpdate}
+        runningPlugin={runningPlugin}
       />
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
@@ -133,15 +145,19 @@ function TeamPluginRows({
   items,
   onRefresh,
   onRun,
+  onStopped,
   onTogglePin,
   onUpdate,
+  runningPlugin,
 }: {
   isPinned: (id: string) => boolean;
   items: LoadedPlugin[];
   onRefresh: () => void;
   onRun: (plugin: LoadedPlugin) => void;
+  onStopped: () => void;
   onTogglePin: (plugin: LoadedPlugin, pinned: boolean) => void;
   onUpdate?: (plugin: LoadedPlugin) => void;
+  runningPlugin?: LoadedPlugin | null;
 }) {
   return (
     <div className="flex flex-col divide-y rounded-lg border">
@@ -149,9 +165,11 @@ function TeamPluginRows({
         <TeamPluginRow
           key={plugin.id}
           isPinned={isPinned(plugin.id)}
+          isRunning={runningPlugin?.id === plugin.id}
           plugin={plugin}
           onChanged={onRefresh}
           onRun={onRun}
+          onStopped={onStopped}
           onTogglePin={onTogglePin}
           onUpdate={onUpdate}
         />
