@@ -258,7 +258,7 @@ export class ChannelService {
           signal: controller.signal,
         });
         ok = res.ok;
-        if (ok) { const data = (await res.json()) as { content?: { text?: string }[] }; reply = data.content?.map((c) => c.text).filter(Boolean).join('') || '(空回复)'; message = '测试对话成功'; }
+        if (ok) { const data = (await res.json()) as { content?: { text?: string }[] }; reply = data.content?.map((c) => c.text).filter(Boolean).join('') ?? ''; message = '测试对话成功'; }
         else message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
       } else {
         const res = await fetch(`${base}/chat/completions`, {
@@ -268,8 +268,13 @@ export class ChannelService {
           signal: controller.signal,
         });
         ok = res.ok;
-        if (ok) { const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }; reply = data.choices?.[0]?.message?.content || '(空回复)'; message = '测试对话成功'; }
+        if (ok) { const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }; reply = data.choices?.[0]?.message?.content ?? ''; message = '测试对话成功'; }
         else message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+      }
+      // HTTP 200 不等于通过：必须有实际回复内容（对齐 adminTestImage 的 ok=Boolean(result) 校准）。
+      if (ok && reply.trim().length === 0) {
+        ok = false;
+        message = '上游返回 200 但回复内容为空（请检查模型/Key/配额）';
       }
     } catch (e) {
       message = `测试失败：${(e as Error).name === 'AbortError' ? '超时（30s）' : (e as Error).message}`;
