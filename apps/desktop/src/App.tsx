@@ -8,6 +8,7 @@ import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate, loadUpdateChannel } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
+import { PluginModeBar } from '@/components/PluginModeBar';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { PanelDialog } from '@/components/PanelDialog';
 import { ProfilePanel } from '@/components/ProfilePanel';
@@ -728,9 +729,9 @@ export default function App() {
         <TitleBar
           sidebarOpen={showAppSidebar ? sidebarOpen : undefined}
           onToggleSidebar={showAppSidebar ? () => setSidebarOpen((v) => !v) : undefined}
-          pluginMode={pluginTitleMode}
-          onPluginModeChange={openPluginWorkspaceMode}
         />
+        {/* 插件模式切换：独立于标题栏，渲染在「灵坊工作台」下方单独一行（直角 + 12px 圆角）。 */}
+        <PluginModeBar mode={pluginTitleMode} onChange={openPluginWorkspaceMode} />
         <div className="flex min-h-0 flex-1">
           {showAppSidebar && (
             <Sidebar
