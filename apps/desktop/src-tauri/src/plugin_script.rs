@@ -28,7 +28,7 @@ use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutpu
 use crate::embedded_runtime::EmbeddedRuntime;
 // 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
 // 让试跑与持久化运行用同一套依赖管理逻辑（venv 创建/pip install/pnpm install），避免行为漂移。
-use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, minimal_env as runner_minimal_env};
+use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, entry_arg, minimal_env as runner_minimal_env};
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
 /// serde rename_all = lowercase：nodejs / python，与契约 RuntimeType 对齐。
@@ -544,7 +544,7 @@ pub fn run_plugin_script(
     if input.runtime == ScriptRuntime::Python {
         args.push("-u".to_string());
     }
-    args.push(entry_canon.to_string_lossy().to_string());
+    args.push(entry_arg(&entry_canon));
     // 追加调用方传入的 CLI 参数（如 --test），让脚本能通过 sys.argv / process.argv 读取。
     // 参数直接作为 argv 元素传给子进程，不经 shell 解析，无命令注入风险。
     args.extend(input.args.iter().cloned());

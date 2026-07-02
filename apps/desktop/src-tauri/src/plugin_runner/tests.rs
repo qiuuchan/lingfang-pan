@@ -377,3 +377,18 @@ fn truncate_stderr_long_text_is_cut() {
     assert!(t.contains("已截断"), "超长 stderr 应截断并标注");
     assert!(t.chars().count() < long.chars().count());
 }
+
+// entry_arg：Windows canonicalize 产生的 `\\?\` 扩展长度前缀必须被 strip 掉，
+// 否则作为 node/python 子进程参数会致 node 在 run_main 阶段 lstat 失败崩溃。
+#[test]
+fn entry_arg_strips_verbatim_prefix() {
+    // 模拟 Windows canonicalize 结果（跨平台构造字符串路径校验 strip 逻辑）。
+    let verbatim = PathBuf::from(r"\\?\C:\Users\dev\plugin\index.js");
+    assert_eq!(entry_arg(&verbatim), r"C:\Users\dev\plugin\index.js");
+    // 无前缀的普通路径保持不变。
+    let normal = PathBuf::from(r"C:\Users\dev\plugin\index.js");
+    assert_eq!(entry_arg(&normal), r"C:\Users\dev\plugin\index.js");
+    // 非 Windows 路径不受影响。
+    let unix = PathBuf::from("/home/dev/plugin/index.js");
+    assert_eq!(entry_arg(&unix), "/home/dev/plugin/index.js");
+}

@@ -290,6 +290,20 @@ fn normalize_for_comparison(path: &std::path::Path) -> String {
         .to_ascii_lowercase()
 }
 
+/// 把入口绝对路径转为可安全传给 node/python 子进程的字符串。
+///
+/// 关键：ensure_plugin_dir 返回 canonicalize 后的路径，Windows 上带 `\\?\` 扩展长度前缀。
+/// 直接把这个字符串作为参数传给 node（如 `node "\\?\C:\...\index.js"`）会导致 node 在
+/// internal/modules/run_main 阶段 lstat 失败（报 `lstat 'C:'`）而崩溃——node 无法正确解析
+/// 该 verbatim 前缀路径。这里 strip 掉 `\\?\` 前缀，恢复普通 `C:\...` 形态。
+/// （与上方 normalize_for_comparison 同款 strip，但保留原大小写与分隔符，仅去前缀。）
+pub(crate) fn entry_arg(entry_abs: &std::path::Path) -> String {
+    let s = entry_abs.to_string_lossy().to_string();
+    s.strip_prefix(r"\\?\")
+        .map(|rest| rest.to_string())
+        .unwrap_or(s)
+}
+
 fn create_python_venv(
     runtime: &EmbeddedRuntime,
     plugin_dir: &std::path::Path,
@@ -726,7 +740,7 @@ pub fn start_plugin(
             }
             (
                 py,
-                vec!["-u".to_string(), entry_abs.to_string_lossy().to_string()],
+                vec!["-u".to_string(), entry_arg(&entry_abs)],
             )
         }
         PluginRuntimeKind::Nodejs => {
@@ -750,11 +764,11 @@ pub fn start_plugin(
                 } else {
                     // 无 pnpm/npm：回退内置 node entry。
                     let node = runtime.require_runtime_command("node")?;
-                    (node, vec![entry_abs.to_string_lossy().to_string()])
+                    (node, vec![entry_arg(&entry_abs)])
                 }
             } else {
                 let node = runtime.require_runtime_command("node")?;
-                (node, vec![entry_abs.to_string_lossy().to_string()])
+                (node, vec![entry_arg(&entry_abs)])
             }
         }
     };
