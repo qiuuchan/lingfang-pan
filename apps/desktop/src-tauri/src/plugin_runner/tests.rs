@@ -392,3 +392,97 @@ fn entry_arg_strips_verbatim_prefix() {
     let unix = PathBuf::from("/home/dev/plugin/index.js");
     assert_eq!(entry_arg(&unix), "/home/dev/plugin/index.js");
 }
+
+// === Playwright 依赖检测测试 ===
+//
+// 这些测试只覆盖「应否触发浏览器下载」的判定逻辑（declares_playwright），不真正下载
+// （~150MB + 网络）。ensure_playwright_browsers 的幂等跳过由 declares_playwright +
+// playwright_chromium_installed 组合保证，后者依赖真实 ms-playwright 目录，单测里不构造。
+
+#[test]
+fn declares_playwright_node_package_json() {
+    // dependencies 里有 playwright → 命中。
+    let tmp = temp_dir_unique("pw-node-yes");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("package.json"),
+        r#"{"dependencies":{"playwright":"^1.40.0","express":"^4.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(declares_playwright(&tmp));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn declares_playwright_node_core_and_test_variants() {
+    // playwright-core / @playwright/test 也算（都附带 cli，会触发 launch）。
+    let tmp = temp_dir_unique("pw-node-core");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("package.json"),
+        r#"{"devDependencies":{"@playwright/test":"^1.40.0"}}"#,
+    )
+    .unwrap();
+    assert!(declares_playwright(&tmp));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn declares_playwright_node_absent() {
+    // 无 playwright 依赖（仅其它包）→ 不命中，避免给无关插件跑下载。
+    let tmp = temp_dir_unique("pw-node-no");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("package.json"),
+        r#"{"dependencies":{"express":"^4.0.0","lodash":"^4.17.0"}}"#,
+    )
+    .unwrap();
+    assert!(!declares_playwright(&tmp));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn declares_playwright_python_requirements() {
+    // requirements.txt 含 playwright（容忍版本约束 / 注释 / 多行）。
+    let tmp = temp_dir_unique("pw-py-yes");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("requirements.txt"),
+        "requests==2.31.0\nplaywright>=1.40\n# playwright-core 不是 pip 包名，忽略\n",
+    )
+    .unwrap();
+    assert!(declares_playwright(&tmp));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn declares_playwright_python_absent() {
+    // requirements.txt 无 playwright → 不命中。
+    let tmp = temp_dir_unique("pw-py-no");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("requirements.txt"),
+        "requests==2.31.0\nbeautifulsoup4\n",
+    )
+    .unwrap();
+    assert!(!declares_playwright(&tmp));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn declares_playwright_empty_dir() {
+    // 无 package.json / requirements.txt → 不命中（裸脚本插件）。
+    let tmp = temp_dir_unique("pw-empty");
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(!declares_playwright(&tmp));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn playwright_mirror_host_is_npmmirror_cdn() {
+    // 防误改：镜像 host 必须指向 npmmirror binaries（国内可用），改回海外 CDN 会让下载失败。
+    assert_eq!(
+        crate::embedded_runtime::PLAYWRIGHT_DOWNLOAD_HOST,
+        "https://cdn.npmmirror.com/binaries/playwright"
+    );
+}
