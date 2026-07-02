@@ -44,24 +44,24 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
   return (
     <div
       {...dragRegionProps}
-      className="flex h-12 shrink-0 select-none items-center justify-between border-b bg-background/80 backdrop-blur"
+      className="flex h-14 shrink-0 select-none items-center justify-between border-b bg-background/80 backdrop-blur"
     >
-      <div className="flex h-full items-center gap-2 px-2.5" {...dragRegionProps}>
+      <div className="flex h-full items-center gap-2 px-3" {...dragRegionProps}>
         {hasSidebar && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onToggleSidebar!(); }}
-            className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             aria-label={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
             title={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
           >
-            {sidebarOpen ? <PanelLeftCloseIcon className="size-4.5" /> : <PanelLeftOpenIcon className="size-4.5" />}
+            {sidebarOpen ? <PanelLeftCloseIcon className="size-5" /> : <PanelLeftOpenIcon className="size-5" />}
           </button>
         )}
-        <span className="px-0.5 text-sm font-semibold text-foreground" data-tauri-drag-region>{label}</span>
+        <span className="px-0.5 text-base font-semibold text-foreground" data-tauri-drag-region>{label}</span>
         {showPluginModeSwitch && (
           <div
-            className="ml-1 flex items-center gap-1"
+            className="ml-1 flex items-center gap-0.5"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -76,13 +76,13 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
                   title={mode.label}
                   onClick={() => onPluginModeChange?.(mode.value)}
                   className={cn(
-                    'inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-sm font-medium transition-all duration-150',
+                    'inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-all duration-150',
                     active
                       ? 'bg-primary text-primary-foreground shadow-sm'
                       : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                   )}
                 >
-                  <Icon className="size-4 shrink-0" />
+                  <Icon className="size-3.5 shrink-0" />
                   <span>{mode.label}</span>
                 </button>
               );

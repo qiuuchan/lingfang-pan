@@ -262,7 +262,7 @@ const SYSTEM_PROMPT = CREATOR_CONTEXT_PROMPT;
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
-export function FloatingCreator({ onClose, variant = 'floating' }: { onClose: () => void; variant?: 'floating' | 'embedded' }) {
+export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapsed = false }: { onClose: () => void; variant?: 'floating' | 'embedded'; sidebarCollapsed?: boolean }) {
   const { session, recentPlugins, pendingAutoFix, setPendingAutoFix, pendingDraftEdit, setPendingDraftEdit } = useApp();
   const embedded = variant === 'embedded';
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -1199,17 +1199,16 @@ export function FloatingCreator({ onClose, variant = 'floating' }: { onClose: ()
             activeSkillCount={activeSkillIds.length}
             activeConversationId={activeConversationId}
             busy={busy}
+            collapsed={sidebarCollapsed}
             compressedHint={compressedHint}
             confirmDeleteId={confirmDeleteId}
             conversations={conversations}
-            draftName={draft?.name}
             onCancelDeleteConversation={() => setConfirmDeleteId(null)}
             onConfirmDeleteConversation={deleteConversation}
             onDeleteConversation={setConfirmDeleteId}
             onNewConversation={newConversation}
             onOpenSkills={() => setSkillDialogOpen(true)}
             onSelectConversation={selectConversationById}
-            turnsCount={turns.length}
           />
         )}
           <div className="flex min-w-0 flex-1 flex-col">

@@ -89,6 +89,8 @@ interface AppContextValue {
   platformLogoUrl: string;
   // Task 6/2：全局搜索悬浮窗开关。首页居中搜索框 / 侧栏搜索按钮 / Ctrl+K 共用此入口。
   openSearch: () => void;
+  /** 打开左下角用户菜单 AvatarMenu（主侧栏 + 开发插件侧栏底部用户按钮共用）。 */
+  openAvatarMenu: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -679,6 +681,7 @@ export default function App() {
     pendingDraftEdit, setPendingDraftEdit,
     platformName, platformLogoUrl,
     openSearch,
+    openAvatarMenu: () => setAvatarMenuOpen(true),
   };
 
   if (restoring) {
@@ -719,6 +722,8 @@ export default function App() {
   else if (view === 'team-admin') body = <TeamAdmin />;
   else body = null;
   const pluginTitleMode: PluginWorkspaceMode = view === 'develop-plugins' ? 'develop' : 'run';
+  // 开发插件页隐藏外层 Sidebar，但其侧边栏（CreatorWorkspaceSidebar）复用 sidebarOpen 控制折叠，
+  // 顶部标题栏的折叠按钮始终可用（控制当前可见的那个侧边栏）。
   const showAppSidebar = view !== 'develop-plugins';
 
   return (
@@ -726,8 +731,8 @@ export default function App() {
       <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
         {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 插件模式切换 + 窗口控制（最小化/最大化/关闭）。 */}
         <TitleBar
-          sidebarOpen={showAppSidebar ? sidebarOpen : undefined}
-          onToggleSidebar={showAppSidebar ? () => setSidebarOpen((v) => !v) : undefined}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
           pluginMode={pluginTitleMode}
           onPluginModeChange={openPluginWorkspaceMode}
         />
@@ -782,7 +787,7 @@ export default function App() {
                                 onClose={() => undefined}
                               />
                             ) : (
-                              <FloatingCreator variant="embedded" onClose={() => setViewState('run-plugins')} />
+                              <FloatingCreator variant="embedded" onClose={() => setViewState('run-plugins')} sidebarCollapsed={!sidebarOpen} />
                             )}
                           </PageTransition>
                         </Suspense>
