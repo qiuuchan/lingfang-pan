@@ -22,7 +22,7 @@ This is a work-focused app. Existing pages use restrained cards and dense lists,
 Current layout rules:
 - Auth is a centered full-screen state; tenant switching is a Dialog opened from the Sidebar user area.
 - Plugin run and plugin development are independent main-area views. The title-bar segment switches between `run-plugins` (`PluginCenterBody`) and `develop-plugins` (`FloatingCreator` embedded layout), with `PageTransition` handling the simple view animation. `develop-plugins` intentionally takes over the main area and hides the outer app Sidebar while active.
-- The develop plugin page uses a Codex App / Claude-like dark workbench: left vertical creator navigation with inline history, centered title area, bottom-centered compact composer, quick chips below the composer, and an optional right-side draft panel when a staged plugin exists. Model selection belongs inside the composer, not in the left sidebar.
+- The develop plugin page uses a Codex App / Claude-like creator workbench: left vertical creator navigation with inline history, centered title area, bottom-centered compact composer, quick chips below the composer, and an optional right-side draft panel when a staged plugin exists. Model selection belongs inside the composer, not in the left sidebar. Visual styling uses adaptive semantic tokens (not hardcoded hex) so it follows the active light/dark theme.
 - Other pages live in a centered `max-w-5xl` content column.
 - Lists commonly use `divide-y rounded-lg border` instead of nested cards.
 
