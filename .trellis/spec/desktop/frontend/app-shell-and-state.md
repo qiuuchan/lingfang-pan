@@ -13,6 +13,8 @@
 这是团队管理线路的核心 UI（与平台管理 web 端分离），含 5 个 tab：概览 / 成员管理 / 角色与权限 / 插件授权 / 邀请码与设置。子组件拆分在 `src/pages/team-admin/` 目录下（避免单文件过大，遵循 >1500 行必拆策略）。
 注意：`team-admin` 走主 body 渲染（不被 `setView` 拦截到 AccountDialog），与 `team`（走 AccountDialog tab）不同。入口在左下角 **AvatarMenu**（不在 Sidebar NAV，`teamAdminOnly` 标志已随入口迁出而停用）。
 
+**插件主界面（Plugins）**：插件拆成两个独立主区页面：`View = 'run-plugins'` 与 `View = 'develop-plugins'`。顶部 `TitleBar` 左侧显示「运行插件 / 开发插件」分段切换器；切换时直接进入对应 view 并关闭其它功能面板。`run-plugins` 渲染 `PluginCenterBody`（本地/草稿/团队/市场 tab），`develop-plugins` 渲染 `FloatingCreator variant="embedded"`，并在该 view 激活时不渲染 App 顶层 `Sidebar`，让 creator 自己的左侧导航接管历史与功能入口。`openPluginCenter(tab)` 保留为上下文 API，但语义是进入 `run-plugins` 并选中可选 tab，不再打开 Dialog。`setView('creator')` 是兼容入口，拦截后切到 `develop-plugins`，不要重新引入右下角 FAB 或创建器浮窗。
+
 会话状态只保存在内存中的 `Session`，`applySession` 同步更新 `lib/api.ts` 的模块级 auth token。不要在页面里直接维护第二份 token。
 
 Reference files:
@@ -34,7 +36,6 @@ Source pattern:
 部分外壳 UI 状态是**全局**（非租户隔离）的 localStorage 偏好：
 
 - `lf:sidebar-open`（`'1'/'0'`，首次无 key 默认折叠 `false`）—— 侧栏开合，`useState` 内联加载 + `useEffect([sidebarOpen])` 写盘。
-- `lf:creator-open`（`'1'/'0'`，默认 `false`）—— 创建器悬浮窗开关态。`creatorOpen` 用 `useState(loadCreatorOpen)` + 包装 `setCreatorOpen` 同步写盘；登出 `resetSession` 内 `setCreatorOpen(false)` 清态，避免下次登录自动弹。
 - `lf:sidebar-width`—— 侧栏展开态宽度（200–320，默认 224），拖拽结束写盘（见 `Sidebar.tsx`）。
 
 新增全局 UI 偏好时沿用「内联加载初值 + effect/包装 setter 写盘」模式，不要为单个布尔开新的状态库。
@@ -45,8 +46,8 @@ Source pattern:
 
 - 个人资料 / 钱包 / 切换团队 / 设置（含 LLM 设置→gateway 子 tab、本地权限与安全）→ 经 `openAccountSettings(tab)` 路由到对应 **PanelDialog** 独立悬浮窗（见下节）。
 - 通知中心 → `openNotifications()`（NotificationCenter 已提为 App 顶层独立悬浮窗，**不**嵌套在 AvatarMenu 内——嵌套会导致菜单的「点外关闭」误杀通知抽屉，见 bug 备注）。
-- 插件管理 / 团队管理（`team-admin`，`isTeamManager` 可见）→ `setView` 主区页面导航。
-- 开发者模式 → 创建器悬浮窗；帮助 → 外链；退出登录 → `resetSession`；主题切换 → `next-themes`。
+- 插件管理 → `openPluginCenter()` 进入 `run-plugins` 主界面；团队管理（`team-admin`，`isTeamManager` 可见）→ `openTeamAdmin()`。
+- 开发插件 → 顶部标题栏分段切换或 `setView('creator')` 兼容入口；帮助 → 外链；退出登录 → `resetSession`；主题切换 → `next-themes`。
 
 菜单内**不渲染**任何功能浮窗本体——浮窗都在 App 顶层挂载，菜单只发指令（防止菜单关闭时连带卸载浮窗）。`team-admin` 不在 Sidebar NAV（已迁入此菜单）；`review`（platformAdminOnly）仍在侧栏。
 
@@ -109,4 +110,3 @@ function Market() {
 ```
 
 所有 Hook（含依赖派生值的 `useEffect`）必须在任何条件 `return` 之前调用；派生值（如 `totalPages`）也一并上移到返回之前，避免「为了喂 Hook 把计算留下、却把 Hook 推到 return 后」。新增依赖列表 ESLint 修复或防御性补丁时尤其要警惕这点。
-

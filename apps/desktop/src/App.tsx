@@ -1,9 +1,9 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { Loader2Icon, XIcon } from 'lucide-react';
+import { Loader2Icon } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, clearApiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
-import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
+import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, PluginWorkspaceMode, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate, loadUpdateChannel } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
@@ -15,7 +15,6 @@ import { NotificationCenter } from '@/components/NotificationCenter';
 import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
-import { FloatingCreateButton } from '@/components/FloatingCreateButton';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
@@ -27,7 +26,7 @@ import { Home } from '@/pages/Home';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 import type { PluginCenterTab } from '@/pages/plugins/use-plugin-center';
 
-const PluginCenterDialog = lazy(() => import('@/components/plugins/PluginCenterDialog').then((m) => ({ default: m.PluginCenterDialog })));
+const PluginCenterBody = lazy(() => import('@/pages/plugins/PluginCenterBody').then((m) => ({ default: m.PluginCenterBody })));
 const PluginRunner = lazy(() => import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner })));
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
 const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
@@ -70,7 +69,7 @@ interface AppContextValue {
   openTeamAdmin: () => void;
   /** 帮助与反馈：打开工单中心悬浮窗。 */
   openHelpFeedback: () => void;
-  /** 路线 A：打开插件中心悬浮窗（可选初始 tab：本地/团队/市场）。 */
+  /** 打开主区插件工作台运行页（可选初始 tab：本地/团队/市场）。 */
   openPluginCenter: (tab?: PluginCenterTab) => void;
   // 模型配置刷新信号：设置页保存模型绑定后递增，对话页据此重新拉取生效模型，
   // 避免保存后必须重启应用才在模型选择器看到新模型（跨页面通信，无持久化必要）。
@@ -243,15 +242,6 @@ export default function App() {
   });
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
-  // v4 形态：AI 创建插件为悬浮窗（对话式流式），FAB 唤起，不切 view。
-  // 项 7：creatorOpen 开关态持久化（lf:creator-open），跨重启保留「上次是否打开」。
-  const [creatorOpen, setCreatorOpenState] = useState<boolean>(() => {
-    try { return localStorage.getItem('lf:creator-open') === '1'; } catch { return false; }
-  });
-  const setCreatorOpen = useCallback((v: boolean) => {
-    setCreatorOpenState(v);
-    try { localStorage.setItem('lf:creator-open', v ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
-  }, []);
   // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
   // 06-24：原 walletOpen + teamOpen 合并为单一 teamWalletOpen（团队钱包）。
   const [teamWalletOpen, setTeamWalletOpen] = useState(false);
@@ -261,8 +251,6 @@ export default function App() {
   const [teamAdminOpen, setTeamAdminOpen] = useState(false);
   // 帮助与反馈：工单中心悬浮窗。
   const [helpFeedbackOpen, setHelpFeedbackOpen] = useState(false);
-  // 路线 A：插件中心改为居中悬浮窗（取代原 plugins/author-center/market 主区页）。
-  const [pluginCenterOpen, setPluginCenterOpen] = useState(false);
   const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('local');
   // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
   const [notifOpen, setNotifOpen] = useState(false);
@@ -326,11 +314,28 @@ export default function App() {
   const openTeamAdmin = useCallback(() => setTeamAdminOpen(true), []);
   // 帮助与反馈：打开工单中心悬浮窗。
   const openHelpFeedback = useCallback(() => setHelpFeedbackOpen(true), []);
-  // 路线 A：打开插件中心悬浮窗（带可选初始 tab，承接原 market 直达语义）。
+
+  const closeFeaturePanels = useCallback(() => {
+    setTeamWalletOpen(false);
+    setSettingsOpen(false);
+    setProfileOpen(false);
+    setTeamAdminOpen(false);
+    setNotifOpen(false);
+  }, []);
+
+  // 打开运行插件主界面（带可选初始 tab，承接原 market 直达语义）。
   const openPluginCenter = useCallback((tab?: PluginCenterTab) => {
     if (tab) setPluginCenterTab(tab);
-    setPluginCenterOpen(true);
-  }, []);
+    closeFeaturePanels();
+    setRunningPlugin(null);
+    setViewState('run-plugins');
+  }, [closeFeaturePanels, setRunningPlugin]);
+
+  const openPluginWorkspaceMode = useCallback((mode: PluginWorkspaceMode) => {
+    closeFeaturePanels();
+    setRunningPlugin(null);
+    setViewState(mode === 'run' ? 'run-plugins' : 'develop-plugins');
+  }, [closeFeaturePanels, setRunningPlugin]);
 
   const setView = useCallback((nextView: View) => {
     if (nextView === 'settings') {
@@ -341,20 +346,18 @@ export default function App() {
       openAccountSettings('team-wallet');
       return;
     }
-    // 路线 A：'creator' 是悬浮窗（creatorOpen），非主区 view——拦截转为打开创建器。
+    // 'creator' 是兼容入口：拦截后切到独立的开发插件主界面。
     // 承接 Home / CommandPalette / 新手任务清单 / 插件运行「继续修改」等所有 setView('creator') 调用。
     if (nextView === 'creator') {
-      setCreatorOpen(true);
+      closeFeaturePanels();
+      setRunningPlugin(null);
+      setViewState('develop-plugins');
       return;
     }
-    // 跳到其它页面时关闭所有功能悬浮窗 + 创建器（若开着），避免浮窗残留在新页面上。
-    setTeamWalletOpen(false);
-    setSettingsOpen(false);
-    setProfileOpen(false);
-    setTeamAdminOpen(false);
-    setNotifOpen(false);
+    // 跳到其它页面时关闭所有功能悬浮窗，避免浮窗残留在新页面上。
+    closeFeaturePanels();
     setViewState(nextView);
-  }, [openAccountSettings, setCreatorOpen]);
+  }, [closeFeaturePanels, openAccountSettings, setRunningPlugin]);
 
   const saveBackendUrl = useCallback((url: string) => {
     if (!url.trim()) {
@@ -421,9 +424,7 @@ export default function App() {
     setSession(emptySession);
     setRunningPlugin(null);
     setView('home');
-    // 项 7：登出时关闭创建器并清除持久化（避免下次登录自动弹浮窗）。
-    setCreatorOpen(false);
-  }, [setCreatorOpen]);
+  }, [setRunningPlugin, setView]);
 
   // 启动时若本地存有 session，静默调 /api/auth/me 刷新；仅 token 真无效（401）才登出。
   // 网络/后端未启动时保留已恢复的 session，进主界面，下次启动重试。
@@ -603,8 +604,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Task 9：Esc 关闭创建器悬浮窗（与浮窗标题栏「返回（Esc）」提示一致）。
-  // 若创建器内部有 Dialog/Sheet 打开（历史/预览/上传命名等），Esc 优先交给它们关闭，不连带关浮窗。
   const pinPlugin = useCallback((p: LoadedPlugin) => {
     setPinnedPlugins((prev) => {
       if (prev.some((x) => x.id === p.id)) return prev;
@@ -719,18 +718,27 @@ export default function App() {
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Home />;
   else if (view === 'team-admin') body = <TeamAdmin />;
   else body = null;
+  const pluginTitleMode: PluginWorkspaceMode = view === 'develop-plugins' ? 'develop' : 'run';
+  const showAppSidebar = view !== 'develop-plugins';
 
   return (
     <AppContext.Provider value={ctx}>
       <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
         {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制（最小化/最大化/关闭）。 */}
-        <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+        <TitleBar
+          sidebarOpen={showAppSidebar ? sidebarOpen : undefined}
+          onToggleSidebar={showAppSidebar ? () => setSidebarOpen((v) => !v) : undefined}
+          pluginMode={pluginTitleMode}
+          onPluginModeChange={openPluginWorkspaceMode}
+        />
         <div className="flex min-h-0 flex-1">
-          <Sidebar
-            collapsed={!sidebarOpen}
-            onOpenSearch={() => setSearchOpen(true)}
-            onOpenAvatarMenu={() => setAvatarMenuOpen(true)}
-          />
+          {showAppSidebar && (
+            <Sidebar
+              collapsed={!sidebarOpen}
+              onOpenSearch={() => setSearchOpen(true)}
+              onOpenAvatarMenu={() => setAvatarMenuOpen(true)}
+            />
+          )}
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗）。
@@ -738,16 +746,19 @@ export default function App() {
               <BackendUnreachable />
             ) : (
               <>
-                {/* 主体业务页：创建器悬浮窗关闭时始终可见（Task 9：创建器改为 overlay，不再替换底层 view）。 */}
+                {/* 主体业务页：插件工作台在主区渲染，运行插件仍全屏接管主体区。 */}
                 {runningPlugin ? (
-                  // 路线 A：插件运行从 view 解耦——只要 runningPlugin 存在就全屏铺满运行，与任何 view 无关。
-                  // 返回（onBack）：清运行态 + 重开插件中心悬浮窗（保持「返回插件列表」语义）。
+                  // 插件运行从 view 解耦——只要 runningPlugin 存在就全屏铺满运行，与任何 view 无关。
+                  // 返回（onBack）：清运行态 + 回到插件工作台运行页（保持「返回插件列表」语义）。
                   // 全屏（无 padding/max-w/边框），iframe 撑满整个主体区。
                   <div className="min-h-0 flex-1">
                     <Suspense fallback={null}>
                       <PluginRunner
                         plugin={runningPlugin}
-                        onBack={() => { setRunningPlugin(null); openPluginCenter(); }}
+                        onBack={() => {
+                          setRunningPlugin(null);
+                          setViewState('run-plugins');
+                        }}
                       />
                     </Suspense>
                   </div>
@@ -758,23 +769,35 @@ export default function App() {
                   // Suspense 兜底懒加载 chunk（首次进入该 view 时），ListSkeleton 作占位；
                   // PageTransition 按 viewKey 切换做淡入/位移转场（尊重 useReducedMotion）。
                   <>
-                    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-                      <div className="mx-auto w-full max-w-6xl">
+                    {view === 'run-plugins' || view === 'develop-plugins' ? (
+                      <div className="min-h-0 flex-1 overflow-hidden">
                         <Suspense fallback={<ListSkeleton rows={6} />}>
-                          <PageTransition viewKey={view}>{body}</PageTransition>
+                          <PageTransition viewKey={view} className="flex h-full min-h-0 flex-col">
+                            {view === 'run-plugins' ? (
+                              <PluginCenterBody
+                                tab={pluginCenterTab}
+                                onTabChange={setPluginCenterTab}
+                                onRun={setRunningPlugin}
+                                onCreate={() => setViewState('develop-plugins')}
+                                onClose={() => undefined}
+                              />
+                            ) : (
+                              <FloatingCreator variant="embedded" onClose={() => setViewState('run-plugins')} />
+                            )}
+                          </PageTransition>
                         </Suspense>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                        <div className="mx-auto w-full max-w-6xl">
+                          <Suspense fallback={<ListSkeleton rows={6} />}>
+                            <PageTransition viewKey={view}>{body}</PageTransition>
+                          </Suspense>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
-
-                {/* AI 创建插件：v4 形态悬浮窗（对话式流式，relay 后端）+ 右下角 FAB 入口。 */}
-                {creatorOpen && (
-                  <Suspense fallback={null}>
-                    <FloatingCreator onClose={() => setCreatorOpen(false)} />
-                  </Suspense>
-                )}
-                <FloatingCreateButton open={creatorOpen} onClick={() => setCreatorOpen(true)} />
               </>
             )}
           </main>
@@ -800,18 +823,6 @@ export default function App() {
       <PanelDialog open={helpFeedbackOpen} onOpenChange={setHelpFeedbackOpen} title="帮助与反馈" size="md">
         <Suspense fallback={<ListSkeleton rows={4} />}><HelpFeedback /></Suspense>
       </PanelDialog>
-      {/* 路线 A：插件中心居中悬浮窗（取代原 plugins/author-center/market 主区页）。
-          运行某插件 → 关闭本窗 + 设 runningPlugin（主体区全屏 overlay 接管）。 */}
-      <Suspense fallback={null}>
-        <PluginCenterDialog
-          open={pluginCenterOpen}
-          onOpenChange={setPluginCenterOpen}
-          tab={pluginCenterTab}
-          onTabChange={setPluginCenterTab}
-          onRun={(p) => { setPluginCenterOpen(false); setRunningPlugin(p); }}
-          onCreate={() => { setPluginCenterOpen(false); setCreatorOpen(true); }}
-        />
-      </Suspense>
       {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
       <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
       {/* 项 11：关窗询问悬浮窗（偏好 'ask' 时弹；tray/quit/cancel 三选项）。 */}

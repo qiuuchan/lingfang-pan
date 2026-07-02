@@ -7,7 +7,7 @@
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { SparklesIcon, XIcon, SendIcon, Loader2Icon, WrenchIcon, BrainIcon, FileCode2Icon, PlusIcon, CheckCircle2Icon, HistoryIcon, Trash2Icon, FolderIcon, EyeIcon, PackageIcon, RotateCcwIcon, CopyIcon } from 'lucide-react';
+import { XIcon, SendIcon, Loader2Icon, PlusIcon, CheckCircle2Icon, Trash2Icon, EyeIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, tauriInvoke } from '@/lib/api';
@@ -20,15 +20,16 @@ import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
 import { TodoPanel } from '@/components/creator/TodoPanel';
 import { ContextInspector } from '@/components/creator/ContextInspector';
+import { CreatorFloatingTitleBar, CreatorWorkspaceSidebar } from '@/components/creator/CreatorWorkspaceChrome';
+import { CreatorComposer } from '@/components/creator/CreatorComposer';
+import { CreatorEmptyState } from '@/components/creator/CreatorEmptyState';
+import { CreatorCopyButton, CreatorRetryButton } from '@/components/creator/CreatorMessageActions';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
-import { modelTierShortLabel } from '@/lib/model-tier';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Markdown } from '@/components/markdown';
 import { cn } from '@/lib/utils';
@@ -261,8 +262,9 @@ const SYSTEM_PROMPT = CREATOR_CONTEXT_PROMPT;
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
-export function FloatingCreator({ onClose }: { onClose: () => void }) {
+export function FloatingCreator({ onClose, variant = 'floating' }: { onClose: () => void; variant?: 'floating' | 'embedded' }) {
   const { session, recentPlugins, pendingAutoFix, setPendingAutoFix, pendingDraftEdit, setPendingDraftEdit } = useApp();
+  const embedded = variant === 'embedded';
   const [turns, setTurns] = useState<Turn[]>([]);
   const [conversations, setConversations] = useState<CreatorConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -498,6 +500,11 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     compressRef.current = emptyCompressState();
     try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
     setHistoryOpen(false);
+  }
+
+  function selectConversationById(id: string) {
+    const conversation = conversations.find((item) => item.id === id);
+    if (conversation) selectConversation(conversation);
   }
 
   function newConversation() {
@@ -924,27 +931,37 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     clearPendingAnswers();
   }
 
-  /**
-   * 失败/取消的 assistant 轮底部「重试」按钮：点击用上一条 user 输入重新发起 agent run。
-   * 仅在非流式、状态为 failed/cancelled 时渲染（busy 时禁用，防止并发 run）。
-   */
-  function renderRetryButton(t: Turn) {
-    if (t.streaming || (t.status !== 'failed' && t.status !== 'cancelled')) return null;
-    const isCancel = t.status === 'cancelled';
+  function applyQuickPrompt(prompt: string) {
+    setInput((prev) => {
+      const trimmed = prev.trim();
+      return trimmed ? `${trimmed}\n${prompt}` : prompt;
+    });
+  }
+
+  function renderComposer(placement: 'hero' | 'bottom') {
     return (
-      <div className="mt-2 flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => { void retry(); }}
-          disabled={busy}
-          className="h-7 gap-1.5 px-2.5 text-xs"
-        >
-          <RotateCcwIcon className="size-3" />
-          {isCancel ? '继续' : '重试'}
-        </Button>
-        {busy && <span className="text-[11px] text-muted-foreground/60">正在生成中…</span>}
-      </div>
+      <CreatorComposer
+        busy={busy}
+        canInspectContext={!!contextBreakdown}
+        embedded={embedded}
+        input={input}
+        onClearFiles={() => setSelectedFiles([])}
+        onImportFiles={() => { void importFromSelectedFiles(); }}
+        onOpenContext={() => setContextInspectorOpen(true)}
+        onInputChange={setInput}
+        onPickFiles={() => fileInputRef.current?.click()}
+        onQuickPrompt={applyQuickPrompt}
+        onRemoveFile={removeFile}
+        onSend={() => { void send(); }}
+        onSelectTier={setTier}
+        onStop={stop}
+        onToggleThinking={() => setThinking((v) => !v)}
+        placement={placement}
+        showContextButton={embedded}
+        selectedFiles={selectedFiles}
+        thinking={thinking}
+        tier={tier}
+      />
     );
   }
 
@@ -1149,118 +1166,76 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
       className="hidden"
       onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
     />
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none">
-      <div className={`flex h-[85vh] max-h-[800px] w-full ${draft ? 'max-w-[1320px]' : 'max-w-[1100px]'} min-h-[480px] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl transition-[max-width] duration-300 animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`}>
-        {/* 标题栏 */}
-        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <SparklesIcon className="size-4 text-primary" />
-            <span className="text-sm font-medium">AI 创建插件</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* 上下文自动压缩指示：超阈值时把早期对话轮摘要，保留近期+插件包。 */}
-            {compressedHint > 0 && (
-              <Badge variant="outline" className="gap-1 text-xs" title="早期对话已自动摘要为上下文，控制 token">
-                已压缩 {compressedHint} 轮
-              </Badge>
-            )}
-            {turns.length > 0 && (
-              <Button variant="outline" size="sm" className="gap-1.5" title="新建对话" onClick={newConversation}>
-                <PlusIcon className="size-3.5" />
-                新建对话
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              title={contextBreakdown ? '打开上下文窗口' : '先发送一次对话再查看上下文'}
-              onClick={() => setContextInspectorOpen(true)}
-              disabled={!contextBreakdown}
-            >
-              <EyeIcon className="size-3.5" />
-              上下文
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" title="对话历史" onClick={() => setHistoryOpen(true)}>
-              <HistoryIcon className="size-3.5" />
-              历史
-            </Button>
-            {/* 引用插件：选一个已有插件注入源码到上下文，让 agent 基于现有代码修改（#4） */}
-            {recentPlugins.length > 0 && (
-              <Popover>
-                <PopoverTrigger render={<Button variant={referencedPlugin ? 'default' : 'outline'} size="sm" className="gap-1.5" title="引用已有插件做修改" />}>
-                  <FileCode2Icon className="size-3.5" />
-                  {referencedPlugin ? referencedPlugin.name.slice(0, 8) : '引用插件'}
-                </PopoverTrigger>
-                <PopoverContent className="w-64" align="end">
-                  <div className="text-xs font-medium text-muted-foreground">引用已有插件（注入源码到上下文）</div>
-                  <div className="mt-1.5 max-h-60 space-y-0.5 overflow-y-auto">
-                    {recentPlugins.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => { setReferencedPlugin(referencedPlugin?.id === p.id ? null : p); }}
-                        className={`block w-full truncate rounded px-2 py-1.5 text-left text-sm transition-colors ${referencedPlugin?.id === p.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}
-                        title={p.name}
-                      >
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                  {referencedPlugin && (
-                    <button type="button" onClick={() => setReferencedPlugin(null)} className="mt-1.5 w-full rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted">取消引用</button>
-                  )}
-                </PopoverContent>
-              </Popover>
-            )}
-            {/* 技能（原 Skill）：改为居中悬浮窗（R3），去专业术语。 */}
-            <Button variant="outline" size="sm" className="gap-1.5" title="技能" onClick={() => setSkillDialogOpen(true)}>
-              <WrenchIcon className="size-3.5" />
-              技能
-              {activeSkillIds.length > 0 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeSkillIds.length}</Badge>}
-            </Button>
-            {/* 版本切换 */}
-            <div className="flex rounded-md border p-0.5">
-              {(['fast', 'premium'] as const).map((t) => (
-                <button key={t} type="button" onClick={() => setTier(t)} disabled={busy} className={`rounded px-2 py-0.5 text-xs transition-colors ${tier === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>
-                  {modelTierShortLabel(t)}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={onClose} aria-label="关闭" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-              <XIcon className="size-4" />
-            </button>
-          </div>
-        </div>
+    <div className={cn(
+      embedded
+        ? 'flex h-full min-h-0 w-full bg-background'
+        : 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none',
+    )}>
+      <div className={cn(
+        'flex w-full overflow-hidden bg-background transition-[max-width] duration-300',
+        embedded
+          ? 'h-full min-h-0 border-0 shadow-none'
+          : `h-[85vh] max-h-[800px] ${draft ? 'max-w-[1320px]' : 'max-w-[1100px]'} min-h-[480px] flex-col rounded-2xl border shadow-2xl animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`,
+      )}>
+        {!embedded && (
+          <CreatorFloatingTitleBar
+            activeSkillCount={activeSkillIds.length}
+            busy={busy}
+            canInspectContext={!!contextBreakdown}
+            compressedHint={compressedHint}
+            onClose={onClose}
+            onNewConversation={newConversation}
+            onOpenContext={() => setContextInspectorOpen(true)}
+            onOpenHistory={() => setHistoryOpen(true)}
+            onOpenSkills={() => setSkillDialogOpen(true)}
+            onSelectReferencedPlugin={setReferencedPlugin}
+            onSelectTier={setTier}
+            recentPlugins={recentPlugins}
+            referencedPlugin={referencedPlugin}
+            tier={tier}
+            turnsCount={turns.length}
+          />
+        )}
 
         {/* 主体：左对话列 + 右草稿面板（有草稿时分栏） */}
         <div className="flex min-h-0 flex-1">
+          {embedded && (
+          <CreatorWorkspaceSidebar
+            activeSkillCount={activeSkillIds.length}
+            activeConversationId={activeConversationId}
+            busy={busy}
+            compressedHint={compressedHint}
+            confirmDeleteId={confirmDeleteId}
+            conversations={conversations}
+            draftName={draft?.name}
+            onCancelDeleteConversation={() => setConfirmDeleteId(null)}
+            onConfirmDeleteConversation={deleteConversation}
+            onDeleteConversation={setConfirmDeleteId}
+            onNewConversation={newConversation}
+            onOpenSkills={() => setSkillDialogOpen(true)}
+            onSelectConversation={selectConversationById}
+            onSelectReferencedPlugin={setReferencedPlugin}
+            recentPlugins={recentPlugins}
+            referencedPlugin={referencedPlugin}
+            turnsCount={turns.length}
+          />
+        )}
           <div className="flex min-w-0 flex-1 flex-col">
         {/* 对话区 */}
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+        <div ref={scrollRef} className={cn('min-h-0 flex-1 overflow-y-auto px-6 py-6', embedded && 'px-8 py-8')}>
           {turns.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
-              <div className="relative">
-                <div className="absolute inset-0 animate-pulse rounded-full bg-primary/20 blur-xl" />
-                <SparklesIcon className="relative size-12 text-primary" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-medium">AI 插件创建器</h3>
-                <p className="text-sm text-muted-foreground max-w-md">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2.5">
-                {['做一个带界面的天气查询 Python 插件', '做一个带界面的待办事项 Node.js 插件', '做一个带界面的计算器插件'].map((s) => (
-                  <button key={s} type="button" onClick={() => setInput(s)} className="group rounded-full border border-border/60 bg-background/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary hover:shadow-md">{s}</button>
-                ))}
-              </div>
-            </div>
+            <CreatorEmptyState
+              composer={embedded ? null : renderComposer('hero')}
+              embedded={embedded}
+              onSelectPreset={setInput}
+            />
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   {t.role === 'user' ? (
                     <div className="group relative max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-gradient-to-br from-primary to-primary/90 px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
-                      <CopyButton text={t.content} className="bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/30 hover:text-primary-foreground" />
+                      <CreatorCopyButton text={t.content} className="bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/30 hover:text-primary-foreground" />
                       {t.content}
                     </div>
                   ) : (
@@ -1285,7 +1260,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                             if (!p.content.trim()) return null;
                             return (
                               <div key={`t-${pi}`} className="group relative overflow-hidden rounded-lg border border-border/30 bg-card/70 px-4 py-3 text-sm text-foreground shadow-sm">
-                                <CopyButton text={p.content} />
+                                <CreatorCopyButton text={p.content} />
                                 {/* break-words：错误信息（含上游根因、URL、长串）需正确换行，不撑破气泡。 */}
                                 <div className="break-words">
                                   <Markdown>{p.content}</Markdown>
@@ -1299,12 +1274,12 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                           // question part
                           return renderQuestionCard(p, i);
                         })}
-                        {renderRetryButton(t)}
+                        <CreatorRetryButton busy={busy} status={t.status} streaming={t.streaming} onRetry={() => { void retry(); }} />
                       </div>
                     ) : (
                       // 向后兼容 / 兜底：旧会话只有 content 或无任何 part 时，单个气泡渲染。
                       <div className="creator-assistant-bubble group relative max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
-                        {t.content && <CopyButton text={t.content} />}
+                        {t.content && <CreatorCopyButton text={t.content} />}
                         {t.content ? (
                           <Markdown>{t.content}</Markdown>
                         ) : t.status === 'failed' ? (
@@ -1316,7 +1291,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
                         ) : (
                           <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
                         )}
-                        {renderRetryButton(t)}
+                        <CreatorRetryButton busy={busy} status={t.status} streaming={t.streaming} onRetry={() => { void retry(); }} />
                       </div>
                     )
                   )}
@@ -1391,92 +1366,7 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* 输入区：思考开关 + Textarea + 发送/停止，三者同高对齐 */}
-        <div className="shrink-0 border-t bg-gradient-to-b from-background to-muted/20 px-6 py-4">
-          {/* 已选文件列表 */}
-          {selectedFiles.length > 0 && (
-            <div className="mx-auto max-w-3xl mb-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-muted-foreground">已选择 {selectedFiles.length} 个文件</span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="h-7 gap-1.5 px-3 text-xs shadow-sm"
-                    onClick={() => void importFromSelectedFiles()}
-                    disabled={busy}
-                  >
-                    <PackageIcon className="size-3.5" />
-                    导入为插件
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => setSelectedFiles([])}
-                  >
-                    清空
-                  </Button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {selectedFiles.map((f) => (
-                  <Badge key={f.id} variant="secondary" className="gap-1.5 px-2.5 py-1.5 text-xs shadow-sm">
-                    <span className="max-w-[200px] truncate" title={f.name}>{f.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeFile(f.id)}
-                      className="inline-flex shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20 transition-colors"
-                      aria-label="移除"
-                    >
-                      <XIcon className="size-3.5" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="mx-auto flex max-w-3xl items-end gap-2.5">
-            {/* 思考开关：开启后模型做更深入推理（systemPrompt 追加思考引导） */}
-            <Button
-              type="button"
-              variant={thinking ? 'default' : 'outline'}
-              size="icon"
-              onClick={() => setThinking((v) => !v)}
-              disabled={busy}
-              title={thinking ? '思考模式已开启（深入推理）' : '开启思考模式'}
-              className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105"
-            >
-              <BrainIcon className="size-4.5" />
-            </Button>
-            {/* 文件选择按钮：放在思考按钮旁边 */}
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={busy}
-              title="选择文件或文件夹"
-              className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105"
-            >
-              <FolderIcon className="size-4.5" />
-            </Button>
-            <Textarea
-              placeholder={thinking ? '思考模式：描述需求，模型会深入分析后生成…' : '描述插件需求，Enter 发送，Shift+Enter 换行'}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
-              rows={1}
-              className="min-h-[44px] max-h-36 resize-none rounded-xl border-border/60 px-4 py-3 text-sm shadow-sm transition-all focus-visible:shadow-md"
-              disabled={busy}
-            />
-            {busy ? (
-              <Button variant="outline" size="icon" onClick={stop} title="停止" className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105 hover:border-destructive hover:text-destructive"><XIcon className="size-4.5" /></Button>
-            ) : (
-              <Button size="icon" onClick={() => void send()} disabled={!input.trim()} title="发送" className="h-[44px] w-[44px] shrink-0 shadow-sm transition-all hover:scale-105 disabled:opacity-50"><SendIcon className="size-4.5" /></Button>
-            )}
-          </div>
-        </div>
+        {(embedded || turns.length > 0) && renderComposer('bottom')}
           </div>
           {/* 右侧草稿面板：AI 暂存草稿后出现，实时预览 + 改信息 + 提交 */}
           {draft && (
@@ -1608,40 +1498,5 @@ export function FloatingCreator({ onClose }: { onClose: () => void }) {
     {/* 上下文查看面板 */}
     <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={usedTokens} contextWindow={contextWindow} />
     </>
-  );
-}
-
-/**
- * 复制按钮（模块级组件）：hover 气泡时显示在右上角，点击复制文本到剪贴板。
- *
- * 必须是模块级组件（不能定义在 FloatingCreator 函数体内）——FloatingCreator 在流式输出期间
- * 频繁重渲染（每来一个 token 一次），函数体内定义的组件会被视为新类型导致整棵子树重挂载，
- * copied 状态丢失（绿色对勾闪现即消失）。模块级定义保证 useState 稳定。
- */
-function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  if (!text.trim()) return null;
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setCopied(true);
-          toast.success('已复制');
-          window.setTimeout(() => setCopied(false), 1500);
-        } catch {
-          toast.error('复制失败，请手动选取');
-        }
-      }}
-      title={copied ? '已复制' : '复制'}
-      className={cn(
-        'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-all hover:bg-background hover:text-foreground group-hover:opacity-100',
-        copied && 'opacity-100 text-green-600',
-        className,
-      )}
-    >
-      {copied ? <CheckCircle2Icon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-    </button>
   );
 }

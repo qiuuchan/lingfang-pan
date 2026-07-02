@@ -54,7 +54,7 @@ export function Home() {
         </div>
       )}
 
-      {/* 创建插件入口（与右下角 FAB 互补，文字链形式）。 */}
+      {/* 创建插件入口：兼容 setView('creator')，App 会切到插件工作台的开发模式。 */}
       <button
         type="button"
         onClick={() => setView('creator')}

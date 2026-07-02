@@ -100,8 +100,7 @@ export function filesToStagedPlugin(result: ImportResult): StagedPlugin {
   // 名字：manifest.title > manifest.name > 根目录名 > id。
   const name = manifest.title || (hasManifest ? manifest.name : '') || rootName || id;
 
-  // 能力：有 manifest 用其声明；无 manifest 时 parseManifest 会兜底成 code-assistant.run（不适合导入场景），
-  // 故无 manifest 时显式用 ui.view 默认能力，避免给导入插件挂上意外的高权限能力。
+  // 能力：有 manifest 用其声明；无 manifest 时显式用 ui.view 默认能力，避免给导入插件挂上意外的高权限能力。
   const capabilities = hasManifest && manifest.capabilities.length
     ? (manifest.capabilities as PluginCapability[])
     : [DEFAULT_CAPABILITY];

@@ -59,9 +59,9 @@ describe('cleanPathFrontend', () => {
 
 describe('normalizeCapabilities', () => {
   it('合法对象数组：原样规范化（risk 缺省补 low）', () => {
-    const out = normalizeCapabilities([{ kind: 'code-assistant.run', reason: '执行', requires_admin: false }]);
+    const out = normalizeCapabilities([{ kind: 'ui.view', reason: '展示', requires_admin: false }]);
     expect(out).toEqual([
-      { kind: 'code-assistant.run', reason: '执行', risk: 'low', requires_admin: false },
+      { kind: 'ui.view', reason: '展示', risk: 'low', requires_admin: false },
     ]);
   });
 
@@ -79,19 +79,19 @@ describe('normalizeCapabilities', () => {
     // 关键回归点：绝不保留裸 code-assistant。
     const out = normalizeCapabilities(['code-assistant']);
     expect(out).toHaveLength(1);
-    expect(out[0].kind).toBe('code-assistant.run');
+    expect(out[0].kind).toBe('ui.view');
   });
 
   it('含非法 kind 的数组整体兜底', () => {
     const out = normalizeCapabilities([{ kind: 'code-assistant' }, { kind: 'ui.view' }]);
     expect(out).toHaveLength(1);
-    expect(out[0].kind).toBe('code-assistant.run');
+    expect(out[0].kind).toBe('ui.view');
   });
 
   it('空数组兜底（无能力时不影响后端接受空数组，但产出端给一个默认能力）', () => {
     const out = normalizeCapabilities([]);
     expect(out).toHaveLength(1);
-    expect(out[0].kind).toBe('code-assistant.run');
+    expect(out[0].kind).toBe('ui.view');
   });
 
   it('非数组兜底', () => {
@@ -107,7 +107,7 @@ describe('normalizeCapabilities', () => {
       // 转为 string 比较，规避 TS 对 CapabilityKind 字面量类型的过度收窄。
       const kinds = out.map((c) => String(c.kind));
       expect(kinds.every((k) => k !== 'code-assistant')).toBe(true);
-      expect(kinds.every((k) => k === 'code-assistant.run')).toBe(true);
+      expect(kinds.every((k) => k === 'ui.view')).toBe(true);
     }
   });
 
@@ -218,4 +218,3 @@ describe('validatePluginStructure', () => {
     expect(diags.some((d) => d.status === 'warn' && d.message.includes('main.py'))).toBe(true);
   });
 });
-

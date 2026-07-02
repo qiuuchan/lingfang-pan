@@ -18,8 +18,8 @@ function hasTauriRuntime(): boolean {
     && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
-// 路线 A：插件中心改为悬浮窗后，tab 不再映射 view（已删 plugins/author-center/market view）。
-// PluginCenterTab 类型随之内聚到本模块，供悬浮窗内部本地 state 使用。
+// 插件工作台主区展示后，tab 由 App 受控，不再拆成 plugins/author-center/market 多个 view。
+// PluginCenterTab 类型随之内聚到本模块。
 // task 06-25：新增 'draft'（我的草稿）—— AI 创建器保存的本地草稿插件。
 export type PluginCenterTab = 'local' | 'draft' | 'team' | 'market';
 
