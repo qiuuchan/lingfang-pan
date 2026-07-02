@@ -92,7 +92,7 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
       </div>
 
       {appWindow && (
-        <div className="flex h-full items-center">
+        <div className="flex h-full items-center gap-1 pr-2">
           <WinBtn title="最小化" onClick={() => appWindow.minimize()}>
             <MinusIcon className="size-4" />
           </WinBtn>
@@ -115,7 +115,7 @@ function WinBtn({ children, title, onClick, danger }: { children: ReactNode; tit
       title={title}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       className={cn(
-        'inline-flex h-full w-12 items-center justify-center text-muted-foreground transition-colors',
+        'inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors',
         danger ? 'hover:bg-destructive hover:text-destructive-foreground' : 'hover:bg-accent hover:text-foreground',
       )}
     >

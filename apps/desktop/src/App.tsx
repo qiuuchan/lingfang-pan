@@ -8,6 +8,7 @@ import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate, loadUpdateChannel } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
+import { WorkspaceTransition } from '@/components/WorkspaceTransition';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { PanelDialog } from '@/components/PanelDialog';
 import { ProfilePanel } from '@/components/ProfilePanel';
@@ -260,6 +261,8 @@ export default function App() {
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
+  // 工作区切换全屏过渡动画（运行↔开发插件切换时短暂显示）。
+  const [workspaceTransition, setWorkspaceTransition] = useState<{ active: boolean; mode: PluginWorkspaceMode }>({ active: false, mode: 'run' });
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPluginState] = useState<LoadedPlugin | null>(null);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
@@ -336,8 +339,16 @@ export default function App() {
   const openPluginWorkspaceMode = useCallback((mode: PluginWorkspaceMode) => {
     closeFeaturePanels();
     setRunningPlugin(null);
-    setViewState(mode === 'run' ? 'run-plugins' : 'develop-plugins');
-  }, [closeFeaturePanels, setRunningPlugin]);
+    // 当前已在目标模式则不重复触发动画。
+    const targetView = mode === 'run' ? 'run-plugins' : 'develop-plugins';
+    if (view === targetView) {
+      setViewState(targetView);
+      return;
+    }
+    setWorkspaceTransition({ active: true, mode });
+    setViewState(targetView);
+    window.setTimeout(() => setWorkspaceTransition((prev) => ({ ...prev, active: false })), 650);
+  }, [closeFeaturePanels, setRunningPlugin, view]);
 
   const setView = useCallback((nextView: View) => {
     if (nextView === 'settings') {
@@ -745,6 +756,7 @@ export default function App() {
             />
           )}
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <WorkspaceTransition active={workspaceTransition.active} mode={workspaceTransition.mode} />
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗）。
               // 「重试」探测成功后派发 reachable 退出此态。
