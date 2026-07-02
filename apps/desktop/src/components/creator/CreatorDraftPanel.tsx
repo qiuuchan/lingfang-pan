@@ -20,7 +20,7 @@ const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
   'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
-  'code-assistant.run', 'code-assistant.session', 'plugin.upload', 'plugin.submitMarketplace',
+  'plugin.upload', 'plugin.submitMarketplace',
 ];
 
 export function CreatorDraftPanel({
