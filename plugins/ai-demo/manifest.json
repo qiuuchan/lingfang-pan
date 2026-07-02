@@ -1,0 +1,13 @@
+{
+  "id": "com.lingfang.ai-demo",
+  "name": "AI 能力演示",
+  "version": "0.1.0",
+  "description": "演示 Node.js 脚本插件经平台本地桥调用大模型对话(llm.chat)与生图(image.generate)。启动后打开本地网页，分别点按钮即可实调平台 AI。",
+  "runtime_type": "nodejs",
+  "entry": "index.js",
+  "visibility": "tenant",
+  "capabilities": [
+    { "kind": "llm.chat", "reason": "演示调用平台大模型对话能力", "risk": "medium", "requires_admin": true },
+    { "kind": "image.generate", "reason": "演示调用平台生图能力", "risk": "medium", "requires_admin": true }
+  ]
+}

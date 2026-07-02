@@ -146,11 +146,17 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
   }, [setRunningPlugin]);
 
   const openTeamPlugin = useCallback(async (plugin: LoadedPlugin) => {
-    const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
+    const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type || 'client';
     try {
       // 浏览器直连 Vite 时没有 Tauri 文件系统，不能写入本地插件目录；
       // 若后端已内联 files，可直接交给 PluginRunner 用 iframe 运行。
       if (hasTauriRuntime() && !plugin.builtin && runtime !== 'cloud') await ensurePluginPackagePersisted(plugin);
+      // 脚本类（nodejs/python）必须有 files 才能解析入口与运行；缺 files 时（其它团队未安装插件后端不下发）
+      // 给出明确提示而非静默进入「显示源码」降级视图。
+      if ((runtime === 'nodejs' || runtime === 'python') && !plugin.files?.length && !plugin.builtin) {
+        toast.error('该插件尚未安装到本地，无法运行。请先点击「安装后运行」。');
+        return;
+      }
       setRunningPlugin(plugin);
     } catch (caught) {
       toast.error(errorMessage(caught));

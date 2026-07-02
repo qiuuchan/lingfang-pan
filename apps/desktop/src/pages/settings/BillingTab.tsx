@@ -7,10 +7,11 @@
 //  - 团队灵石余额改在「团队钱包」页查看，本 Tab 不再展示。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { KeyRoundIcon, InfoIcon, PlusIcon, CopyIcon, Trash2Icon } from 'lucide-react';
-import { api, type ApiError } from '@/lib/api';
+import { KeyRoundIcon, InfoIcon, PlusIcon, CopyIcon, Trash2Icon, SparklesIcon, ImageIcon } from 'lucide-react';
+import { api, apiBase, type ApiError } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -134,6 +135,137 @@ async function submitCreate(name: string, scopes: string[], onCreated: (k: ApiKe
   } catch (e) { toast.error((e as ApiError).message); }
 }
 
+// === API Key 即时测试（仅创建明文还在手上的当次可用）===
+//
+// 设计：relay 端点 /api/relay/v1/* 用 @Public() + DualAuthGuard，可用「平台 API Key(lf_ 前缀)」鉴权
+// （见 dual-auth.guard.ts:72 isPlatformKeyToken 分支）。这里直接用明文 key 作 Bearer 调 relay，
+// 验证对话(say hi)与生图能力是否可用，不经过桌面端登录态 JWT。
+
+type KeyTestKind = 'chat' | 'image';
+type KeyTestStatus = { kind: KeyTestKind; state: 'idle' | 'testing' | 'ok' | 'error'; text?: string; image?: string };
+
+/** 用平台 API Key 调 relay，返回 {status, detail}。失败抛 Error(友好 message)。 */
+async function callRelayWithKey(plaintextKey: string, path: string, body: Record<string, unknown>): Promise<Response> {
+  const base = apiBase();
+  if (!base) throw new Error('未配置平台地址');
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plaintextKey}` },
+    body: JSON.stringify(body),
+  });
+  return res;
+}
+
+/** 测试对话能力：发一句 say hi。返回助手回复文本。 */
+async function testChat(plaintextKey: string): Promise<string> {
+  const res = await callRelayWithKey(plaintextKey, '/api/relay/v1/chat/completions', {
+    model: 'fast',
+    messages: [{ role: 'user', content: 'say hi' }],
+    stream: false,
+  });
+  if (!res.ok) {
+    const detail = await readRelayError(res);
+    throw new Error(detail);
+  }
+  const data = await res.json().catch(() => ({})) as { choices?: { message?: { content?: string } }[]; content?: string };
+  return data.choices?.[0]?.message?.content ?? data.content ?? '（空回复）';
+}
+
+/** 测试生图能力：生成一张简单图片。返回可直接 <img> 的 src（url 或 data:base64）。 */
+async function testImage(plaintextKey: string): Promise<string> {
+  const res = await callRelayWithKey(plaintextKey, '/api/relay/v1/images/generations', {
+    model: 'fast',
+    prompt: '一只可爱的橙色小猫，简笔画风格',
+    n: 1,
+  });
+  if (!res.ok) {
+    const detail = await readRelayError(res);
+    throw new Error(detail);
+  }
+  const data = await res.json().catch(() => ({})) as { data?: { url?: string; b64_json?: string }[] };
+  const item = data.data?.[0];
+  if (!item) throw new Error('平台未返回图片');
+  return item.url ?? (item.b64_json ? `data:image/png;base64,${item.b64_json}` : '（无图片）');
+}
+
+/** 读取 relay 错误响应（{code,message}）并给能力相关的 403 友好提示。 */
+async function readRelayError(res: Response): Promise<string> {
+  let detail = `HTTP ${res.status}`;
+  try {
+    const err = await res.json();
+    detail = err.message || err.code || detail;
+  } catch { /* 忽略 */ }
+  if (res.status === 403 && /capability|denied|授权/i.test(detail)) {
+    return '该 Key 未授权此能力（请在能力范围勾选 对话 / 生图）';
+  }
+  return detail;
+}
+
+function KeyTestPanel({ plaintextKey }: { plaintextKey: string }) {
+  const [statuses, setStatuses] = useState<KeyTestStatus[]>([]);
+
+  async function run(kind: KeyTestKind) {
+    setStatuses((prev) => {
+      const rest = prev.filter((s) => s.kind !== kind);
+      return [...rest, { kind, state: 'testing' as const }];
+    });
+    try {
+      if (kind === 'chat') {
+        const text = await testChat(plaintextKey);
+        setStatuses((prev) => prev.map((s) => (s.kind === kind ? { ...s, state: 'ok', text } : s)));
+      } else {
+        const image = await testImage(plaintextKey);
+        setStatuses((prev) => prev.map((s) => (s.kind === kind ? { ...s, state: 'ok', image } : s)));
+      }
+      toast.success(kind === 'chat' ? '对话测试通过' : '生图测试通过');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setStatuses((prev) => prev.map((s) => (s.kind === kind ? { ...s, state: 'error', text: msg } : s)));
+      toast.error(`${kind === 'chat' ? '对话' : '生图'}测试失败：${msg}`);
+    }
+  }
+
+  const chat = statuses.find((s) => s.kind === 'chat');
+  const image = statuses.find((s) => s.kind === 'image');
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <SparklesIcon className="size-3.5" />
+        即时测试：用此 Key 实调平台 relay 验证能力是否可用
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <LoadingButton variant="outline" size="sm" loading={chat?.state === 'testing'} onClick={() => void run('chat')}>
+          <SparklesIcon className="size-3.5" />测试对话（say hi）
+        </LoadingButton>
+        <LoadingButton variant="outline" size="sm" loading={image?.state === 'testing'} onClick={() => void run('image')}>
+          <ImageIcon className="size-3.5" />测试生图
+        </LoadingButton>
+      </div>
+      {chat?.state === 'ok' && (
+        <div className="space-y-1 rounded-md border bg-background/60 p-2">
+          <div className="text-xs text-muted-foreground">对话回复</div>
+          <div className="whitespace-pre-wrap break-words text-sm">{chat.text}</div>
+        </div>
+      )}
+      {chat?.state === 'error' && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">{chat.text}</div>
+      )}
+      {image?.state === 'ok' && (
+        <div className="space-y-1 rounded-md border bg-background/60 p-2">
+          <div className="text-xs text-muted-foreground">生成图片</div>
+          {image.image ? (
+            <img src={image.image} alt="测试生成" className="max-h-40 rounded-md border" />
+          ) : <div className="text-xs text-muted-foreground">未返回图片</div>}
+        </div>
+      )}
+      {image?.state === 'error' && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">{image.text}</div>
+      )}
+    </div>
+  );
+}
+
 function CreateKeyDialog({
   open, onOpenChange, name, scopes, setName, setScopes, created, onSubmit,
 }: {
@@ -159,6 +291,7 @@ function CreateKeyDialog({
               <Input readOnly value={created.plaintextKey} className="font-mono text-xs" />
               <Button size="icon" onClick={() => { void navigator.clipboard?.writeText(created.plaintextKey); toast.success('已复制'); }}><CopyIcon className="size-4" /></Button>
             </div>
+            <KeyTestPanel plaintextKey={created.plaintextKey} />
             <DialogFooter><Button onClick={() => onOpenChange(false)}>我已保管</Button></DialogFooter>
           </div>
         ) : (

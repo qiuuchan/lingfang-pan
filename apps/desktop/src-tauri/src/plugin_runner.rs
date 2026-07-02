@@ -778,6 +778,7 @@ pub fn start_plugin(
         api_base,
         auth_token,
         manifest.capabilities.iter().any(|kind| kind == "llm.chat"),
+        manifest.capabilities.iter().any(|kind| kind == "image.generate"),
         Duration::from_secs(12 * 60 * 60),
     )?;
     let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());

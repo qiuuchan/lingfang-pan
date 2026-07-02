@@ -300,10 +300,7 @@ export function Settings({
             {/* Tab：关于 */}
             {currentTab === 'about' && (
               <TabsContent value="about" keepMounted className="mt-4 focus-visible:outline-none">
-                <AboutTab
-                  updateChannel={updateChannel}
-                  onGotoUpdate={() => { onValueChange ? onValueChange('backend') : setInternalTab('backend'); }}
-                />
+                <AboutTab />
               </TabsContent>
             )}
           </motion.div>

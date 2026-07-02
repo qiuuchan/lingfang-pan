@@ -560,6 +560,7 @@ pub fn run_plugin_script(
         input.api_base.clone(),
         input.auth_token.clone(),
         input.capabilities.iter().any(|kind| kind == "llm.chat"),
+        input.capabilities.iter().any(|kind| kind == "image.generate"),
         Duration::from_secs(30 * 60),
     )?;
     let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
