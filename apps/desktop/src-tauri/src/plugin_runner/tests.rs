@@ -121,33 +121,31 @@ fn minimal_env_excludes_sensitive_keys() {
 
 #[test]
 fn bundled_pip_wheel_dir_prefers_ensurepip_bundled() {
-    let root = temp_dir_unique("pip-wheel-dir");
-    let bundled = root
-        .join("python")
+    let python_dir = temp_dir_unique("pip-wheel-dir");
+    let bundled = python_dir
         .join("Lib")
         .join("ensurepip")
         .join("_bundled");
     std::fs::create_dir_all(&bundled).unwrap();
     std::fs::write(bundled.join("pip-25.0.1-py3-none-any.whl"), "").unwrap();
-    std::fs::write(root.join("python").join("pip-older.whl"), "").unwrap();
+    std::fs::write(python_dir.join("pip-older.whl"), "").unwrap();
 
-    let runtime = EmbeddedRuntime::from_root(root.clone());
+    let runtime = RuntimeResolver::from_dirs(Some(python_dir.clone()), None);
     assert_eq!(bundled_pip_wheel_dir(&runtime), Some(bundled));
 
-    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&python_dir);
 }
 
 #[test]
 fn bundled_pip_wheel_dir_falls_back_to_python_root() {
-    let root = temp_dir_unique("pip-wheel-root");
-    let python_root = root.join("python");
-    std::fs::create_dir_all(&python_root).unwrap();
-    std::fs::write(python_root.join("pip-25.0.1-py3-none-any.whl"), "").unwrap();
+    let python_dir = temp_dir_unique("pip-wheel-root");
+    std::fs::create_dir_all(&python_dir).unwrap();
+    std::fs::write(python_dir.join("pip-25.0.1-py3-none-any.whl"), "").unwrap();
 
-    let runtime = EmbeddedRuntime::from_root(root.clone());
-    assert_eq!(bundled_pip_wheel_dir(&runtime), Some(python_root));
+    let runtime = RuntimeResolver::from_dirs(Some(python_dir.clone()), None);
+    assert_eq!(bundled_pip_wheel_dir(&runtime), Some(python_dir.clone()));
 
-    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&python_dir);
 }
 
 #[test]
@@ -482,7 +480,7 @@ fn declares_playwright_empty_dir() {
 fn playwright_mirror_host_is_npmmirror_cdn() {
     // 防误改：镜像 host 必须指向 npmmirror binaries（国内可用），改回海外 CDN 会让下载失败。
     assert_eq!(
-        crate::embedded_runtime::PLAYWRIGHT_DOWNLOAD_HOST,
+        crate::runtime_resolver::PLAYWRIGHT_DOWNLOAD_HOST,
         "https://cdn.npmmirror.com/binaries/playwright"
     );
 }

@@ -3,7 +3,8 @@
 //! 职责：在桌面壳侧为 nodejs/python 运行时插件提供「无参数一次性预览执行」。
 //! 复用 code_assistant.rs 的子进程骨架（run_capture_with_env / resolve_workspace），
 //! 在 app_data_dir/plugin-sandbox/<plugin_id> 下落盘用户脚本后带超时运行。
-//! Node.js / Python 解释器只来自应用包内置 runtimes/ 目录，不回退系统 PATH。
+//! Node.js / Python 解释器由 runtime_resolver 统一定位（应用下载的便携版 / 用户指定 /
+//! 过渡期内置兜底），永不回退系统 PATH。
 //!
 //! 安全边界（design §6.1 明确留痕）：
 //! - 本通道是【不受控执行通道】，绕过 capability 网关（capability.rs 的声明式白名单
@@ -25,7 +26,7 @@ use tauri::Manager;
 
 use crate::plugin_llm_bridge::PluginLlmBridge;
 use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutput};
-use crate::embedded_runtime::EmbeddedRuntime;
+use crate::runtime_resolver::RuntimeResolver;
 // 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
 // 让试跑与持久化运行用同一套依赖管理逻辑（venv 创建/pip install/pnpm install），避免行为漂移。
 use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, ensure_playwright_browsers, entry_arg, minimal_env as runner_minimal_env};
@@ -93,15 +94,15 @@ pub struct RunResult {
     pub install_log: Option<String>,
 }
 
-/// 安装指引文案（与前端 RUNTIME_INSTALL_HINT 镜像，缺失解释器时 Rust 侧也返回便于直接展示）。
+/// 安装指引文案（缺失解释器时 Rust 侧也返回便于直接展示）。
 fn install_hint(runtime: ScriptRuntime) -> String {
     match runtime {
         ScriptRuntime::Nodejs => {
-            "未检测到软件内置 Node.js。请确认应用包内包含 runtimes/nodejs，并随安装包一起发布。"
+            "未检测到可用的 Node.js 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装的 Node.js 路径。"
                 .to_string()
         }
         ScriptRuntime::Python => {
-            "未检测到软件内置 Python。请确认应用包内包含 runtimes/python，并随安装包一起发布。"
+            "未检测到可用的 Python 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装的 Python 路径。"
                 .to_string()
         }
     }
@@ -114,18 +115,18 @@ pub fn probe_script_runtime(
     app: tauri::AppHandle,
     runtime: ScriptRuntime,
 ) -> Result<ProbeResult, String> {
-    let embedded = EmbeddedRuntime::from_app(&app)?;
-    probe_script_runtime_inner(&embedded, runtime)
+    let resolver = RuntimeResolver::resolve(&app)?;
+    probe_script_runtime_inner(&resolver, runtime)
 }
 
 fn probe_script_runtime_inner(
-    embedded: &EmbeddedRuntime,
+    resolver: &RuntimeResolver,
     runtime: ScriptRuntime,
 ) -> Result<ProbeResult, String> {
     let hint = install_hint(runtime);
     let binary = match runtime {
-        ScriptRuntime::Nodejs => embedded.node(),
-        ScriptRuntime::Python => embedded.python(),
+        ScriptRuntime::Nodejs => resolver.node(),
+        ScriptRuntime::Python => resolver.python(),
     };
     let Some(binary) = binary else {
         return Ok(ProbeResult {
@@ -140,7 +141,7 @@ fn probe_script_runtime_inner(
         vec!["--version".to_string()],
         None,
         5_000,
-        embedded.env(minimal_env()),
+        resolver.env(minimal_env()),
     ) {
         Ok(captured) if !captured.timed_out && captured.exit_code == Some(0) => {
             let raw_version = format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
@@ -443,8 +444,8 @@ pub fn run_plugin_script(
     input: RunPluginScriptInput,
 ) -> Result<RunResult, String> {
     // 解释器探测前置：缺失直接返回友好错误（前端据 ProbeResult.hint 展示安装指引）。
-    let embedded = EmbeddedRuntime::from_app(&app)?;
-    let probe = probe_script_runtime_inner(&embedded, input.runtime)?;
+    let resolver = RuntimeResolver::resolve(&app)?;
+    let probe = probe_script_runtime_inner(&resolver, input.runtime)?;
     if !probe.available {
         return Err(format!(
             "interpreter_missing:{}",
@@ -494,7 +495,7 @@ pub fn run_plugin_script(
     let mut install_log: Option<String> = None;
     match input.runtime {
         ScriptRuntime::Python => {
-            match ensure_python_venv(&embedded, &sandbox_canon) {
+            match ensure_python_venv(&resolver, &sandbox_canon) {
                 Ok(venv_py) => {
                     // venv 创建/pip install 可能发生了实际安装（首次）或全跳过（缓存命中）。
                     // 简单判定：venv 是否本次新建（py 文件 mtime 近）——但更务实：只在 requirements.txt 存在时记一条。
@@ -504,7 +505,7 @@ pub fn run_plugin_script(
                     run_binary = venv_py;
                     // 声明了 playwright 则补下载浏览器二进制（与正式运行路径一致，避免预览能跑而正式跑不起来）。
                     // 失败不致命：记进 install_log 让 AI 知晓（缺浏览器会直接导致试跑崩溃，stderr 会被捕获）。
-                    if let Err(e) = ensure_playwright_browsers(&embedded, &sandbox_canon) {
+                    if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon) {
                         let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
                         install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
@@ -523,13 +524,13 @@ pub fn run_plugin_script(
             }
         }
         ScriptRuntime::Nodejs => {
-            match ensure_node_dependencies(&embedded, &sandbox_canon) {
+            match ensure_node_dependencies(&resolver, &sandbox_canon) {
                 Ok(()) => {
                     if sandbox_canon.join("package.json").is_file() {
                         install_log = Some("Node 依赖已就绪（node_modules 就绪）".to_string());
                     }
                     // 同 Python 分支：声明了 playwright 则补下载浏览器二进制，失败记 install_log。
-                    if let Err(e) = ensure_playwright_browsers(&embedded, &sandbox_canon) {
+                    if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon) {
                         let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
                         install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
@@ -549,7 +550,7 @@ pub fn run_plugin_script(
     }
 
     let mut args: Vec<String> = Vec::new();
-    // 解释器来自软件内置运行时，由 embedded_runtime 统一定位。
+    // 解释器由 runtime_resolver 统一定位（应用管理的便携版 / 用户指定 / 过渡期内置兜底）。
     // H1 修复：Python 追加 -u（无缓冲），避免管道块缓冲导致短输出在超时 kill 时丢失。
     // H4 修复（多文件相对 import）：追加 PYTHONPATH=<sandbox根> env（见下方 runtime_env）。
     if input.runtime == ScriptRuntime::Python {
@@ -565,7 +566,7 @@ pub fn run_plugin_script(
     // H2 修复：Python 追加 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1，避免 Windows 中文系统
     // 默认 GBK 编码导致 print 中文输出 UnicodeEncodeError 崩溃或乱码。
     // H4 修复：PYTHONPATH=<sandbox根> 让多文件插件的 import 能找到 sandbox 根目录的模块。
-    let mut env = runtime_env(input.runtime, &workspace, embedded.env(minimal_env()));
+    let mut env = runtime_env(input.runtime, &workspace, resolver.env(minimal_env()));
     let bridge_env = bridge.register_session(
         &input.plugin_id,
         input.api_base.clone(),
