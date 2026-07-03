@@ -63,8 +63,8 @@ New-Item -ItemType Directory -Force -Path $Staging | Out-Null
 Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $Staging 'lingfang-desktop.exe') -Force
 # updater.exe = 干净 installer.exe（无 payload）。
 Copy-Item -LiteralPath $InstallerExe -Destination (Join-Path $Staging 'updater.exe') -Force
-# 资源目录：builtin-plugins（与 exe 同级，main.rs resource_dir 解析）。
-# 运行时（Python/Node）改为按需下载到用户目录（task 07-03），不再随安装包发布。
+# 资源目录：runtimes / builtin-plugins（与 exe 同级，main.rs resource_dir 解析）。
+Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/runtimes') -Destination (Join-Path $Staging 'runtimes') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/builtin-plugins') -Destination (Join-Path $Staging 'builtin-plugins') -Recurse -Force
 # 图标（卸载器/快捷方式用）。
 New-Item -ItemType Directory -Force -Path (Join-Path $Staging 'icons') | Out-Null

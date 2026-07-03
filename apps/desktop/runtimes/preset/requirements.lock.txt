@@ -1,0 +1,24 @@
+# 灵方桌面端内置 Python 运行时 —— 预装包精确锁定版本（pip freeze --all 产出）
+# 用途：复现 / 审计内置 site-packages 的确切版本。重装：
+#   python.exe -m pip install -r requirements.lock.txt
+# 调整想要的包请改 requirements.txt（带版本范围）后重跑安装脚本，再重新生成本文件。
+anyio==4.14.1
+beautifulsoup4==4.15.0
+certifi==2026.6.17
+charset-normalizer==3.4.7
+et_xmlfile==2.0.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+lxml==5.4.0
+openpyxl==3.1.5
+pillow==11.3.0
+pip==26.1.2
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+requests==2.34.2
+six==1.17.0
+soupsieve==2.8.4
+typing_extensions==4.15.0
+urllib3==2.7.0

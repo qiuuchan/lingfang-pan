@@ -1,0 +1,10 @@
+{
+  "//": "灵方桌面端内置 Node 运行时预装全局包清单（仅工具链档）",
+  "//purpose": "AI 创建的 Node/TS 插件能直接 tsc / tsx 跑 TypeScript，无需联网现装工具链。",
+  "//note": "刻意只装工具链（CLI 性质），不全局装 axios/lodash 等运行时库——Node 默认 require 不解析全局包目录，库应由插件自身 package.json 本地安装。",
+  "//install": "见同目录 install-presets.ps1 / install-presets.sh，全局装入 ../nodejs（npm prefix 即该目录）。",
+  "globals": {
+    "typescript": "5.6.x",
+    "tsx": "4.19.x"
+  }
+}
