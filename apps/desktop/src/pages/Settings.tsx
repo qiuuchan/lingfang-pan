@@ -1,22 +1,16 @@
 // Settings.tsx — 设置页。
 //
-// - cli：软件内置脚本运行环境状态（探测内置 Node.js/Python）。
+// - cli：脚本运行环境（应用管理/用户指定运行时 + 镜像源），自管理状态（RuntimeEnvTab）。
 // - gateway：模型与计费信息。
 // - updates：检查更新与更新日志。
 //
-// 顶层 state（design B13）：探测结果（runtimeResults）上提，
-// 不进 useApp；因为 TabsContent keepMounted 切 Tab 时不卸载，state 保留避免重探。
-// useRef 重入守卫（design B26）：probeAll 防止事件触发叠加并发探测。
-//
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/App';
 import { errorMessage } from '@/lib/api';
-import { probeScriptRuntime } from '@/lib/plugin-script';
 import { checkUpdate, downloadUpdate, loadUpdateChannel, saveUpdateChannel, type UpdateChannel, type UpdateMetadata } from '@/lib/updater';
-import type { ProbeResult, RuntimeTarget } from '@/lib/cli-types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -32,7 +26,7 @@ import {
 } from '@/components/ui/dialog';
 import { Markdown } from '@/components/markdown';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
-import { CliRuntimeTab } from './settings/CliRuntimeTab';
+import { RuntimeEnvTab } from './settings/RuntimeEnvTab';
 import { BillingTab } from './settings/BillingTab';
 import { PluginsTab } from './settings/PluginsTab';
 import { GeneralTab } from './settings/GeneralTab';
@@ -78,37 +72,6 @@ export function Settings({
   // 更新日志悬浮窗（ChangelogDialog）：检查更新卡片下方「查看更新日志」按钮触发。
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [updateChannel, setUpdateChannel] = useState<UpdateChannel>(() => loadUpdateChannel());
-
-  // === Tab1 脚本运行时 state（design B13，顶层缓存避免切 Tab 重探） ===
-  const [runtimeResults, setRuntimeResults] = useState<Partial<Record<RuntimeTarget, ProbeResult | null>> | null>(null);
-  const [probing, setProbing] = useState(false);
-  const probingRef = useRef(false); // B26 重入守卫
-
-  // 重新探测全部：并行 probe_script_runtime(nodejs/python)。
-  // probeScriptRuntime 可能 throw（探测失败），catch 后该项置 null。
-  const probeAll = useCallback(async () => {
-    if (probingRef.current) return; // 已在探测，跳过叠加。
-    probingRef.current = true;
-    setProbing(true);
-    try {
-      const runtimes = await Promise.all([
-        probeScriptRuntime('nodejs').then((r) => [r] as const).catch(() => [null] as const),
-        probeScriptRuntime('python').then((r) => [r] as const).catch(() => [null] as const),
-      ]);
-      setRuntimeResults({
-        nodejs: runtimes[0][0],
-        python: runtimes[1][0],
-      });
-    } finally {
-      probingRef.current = false;
-      setProbing(false);
-    }
-  }, []);
-
-  // 挂载探测一次。
-  useEffect(() => {
-    void probeAll();
-  }, [probeAll]);
 
   // === 检查更新逻辑（design §3.2） ===
   // checkUpdate：backendUrl 空 → 友好提示；返 null → 已是最新；非 null → 弹 Dialog。
@@ -219,11 +182,7 @@ export function Settings({
             {/* Tab1：脚本运行时管理 */}
             {currentTab === 'cli' && (
               <TabsContent value="cli" keepMounted className="mt-4 focus-visible:outline-none">
-                <CliRuntimeTab
-                  runtimeResults={runtimeResults}
-                  probing={probing}
-                  onProbeAll={() => { void probeAll(); }}
-                />
+                <RuntimeEnvTab />
               </TabsContent>
             )}
 
