@@ -5,28 +5,21 @@
 //!
 //! ## 「应用一定用自己管理的运行时」三条不变式
 //!
-//! 1. `resolve_runtime_command()` 永不查系统 PATH，只查 config（AppManaged / UserSpecified）
-//!    + Legacy 内置兜底（过渡期）。系统 PATH 仅由 `probe_system_runtime`（plugin_script）作信息展示。
+//! 1. `resolve_runtime_command()` 永不查系统 PATH，只查 Legacy 内置兜底（exe 同级 runtimes/）。
 //! 2. `env()` 清空宿主 PATH（`retain` 掉 key==PATH），只注入命中来源的 PATH ——
 //!    子进程内部 `subprocess.run("python")` / `child_process.exec("node")` 也只能命中应用管理的解释器。
-//! 3. `require_runtime_command()` 找不到返回结构化错误，前端引导下载/指定，**不静默回退**。
+//! 3. `require_runtime_command()` 找不到返回结构化错误，前端引导用户检查安装包完整性。
 //!
 //! ## 解析优先级
 //!
 //! `resolve(kind)` 顺序：
-//! 1. `config.user_specified_*`（用户手动指定的系统已装路径）→ UserSpecified
-//! 2. `config.app_managed_*`（应用下载的便携版登记）→ AppManaged
-//! 3. Legacy 内置目录兜底（exe 同级 runtimes/ / `LINGFANG_EMBEDDED_RUNTIME_DIR` / dev 源码路径）→ Legacy
-//! 4. 都没有 → `None`
-//!
-//! Legacy 兜底仅 Step 1–3 过渡期保留（让旧版本用户 / dev 不破坏现状），Step 4 删除 runtimes/ 后自然失效。
+//! 1. Legacy 内置目录（exe 同级 runtimes/ / `LINGFANG_EMBEDDED_RUNTIME_DIR` / dev 源码路径）→ Legacy
+//! 2. 都没有 → `None`（安装包损坏，引导重装）
 //!
 //! ## 目录布局约定
 //!
 //! `python_dir` / `node_dir` **直接含主 exe**（`python.exe` / `node.exe` 在该目录下）。
-//! - AppManaged：下载管线（runtime_download）保证解压后 exe 在 dir 根（strip 多余层级）。
-//! - UserSpecified：用户指定含 exe 的目录（如 `C:\Python312`、`C:\Program Files\nodejs`）。
-//! - Legacy：旧内置 `runtimes/python/` 和 `runtimes/nodejs/` 正好直接含 exe，无需布局转换。
+//! Legacy 内置 `runtimes/python/` 和 `runtimes/nodejs/` 正好直接含 exe，无需布局转换。
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -46,11 +39,7 @@ pub(crate) const PLAYWRIGHT_DOWNLOAD_HOST: &str = "https://cdn.npmmirror.com/bin
 /// 运行时来源（供 UI 状态展示 + 日志）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RuntimeSource {
-    /// 应用下载并管理的便携版。
-    AppManaged,
-    /// 用户在设置页手动指定的系统已装运行时路径。
-    UserSpecified,
-    /// 过渡期：仓库内 / exe 同级的旧内置 runtimes 目录（Step 4 删除 runtimes 后自然失效）。
+    /// exe 同级 runtimes/ 或 dev 源码路径内置（0.0.17 唯一来源）。
     Legacy,
 }
 
@@ -227,29 +216,11 @@ impl RuntimeResolver {
 
 // === 解析逻辑 ===
 
-/// 解析 Python：user_specified > app_managed > legacy 兜底。
+/// 解析 Python：仅 legacy 兜底。
 fn resolve_python<R: tauri::Runtime>(
-    config: &RuntimeConfig,
+    _config: &RuntimeConfig,
     app: &tauri::AppHandle<R>,
 ) -> Option<ResolvedRuntime> {
-    if let Some(dir_str) = config.user_specified_python.as_deref() {
-        let dir = PathBuf::from(dir_str.trim());
-        if python_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::UserSpecified,
-            });
-        }
-    }
-    if let Some(entry) = config.app_managed_python.as_ref() {
-        let dir = PathBuf::from(entry.dir.trim());
-        if python_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::AppManaged,
-            });
-        }
-    }
     if let Some(root) = legacy_runtimes_root(app) {
         let dir = root.join("python");
         if python_exe(&dir).is_file() {
@@ -262,29 +233,11 @@ fn resolve_python<R: tauri::Runtime>(
     None
 }
 
-/// 解析 Node：user_specified > app_managed > legacy 兜底。
+/// 解析 Node：仅 legacy 兜底。
 fn resolve_node<R: tauri::Runtime>(
-    config: &RuntimeConfig,
+    _config: &RuntimeConfig,
     app: &tauri::AppHandle<R>,
 ) -> Option<ResolvedRuntime> {
-    if let Some(dir_str) = config.user_specified_node.as_deref() {
-        let dir = PathBuf::from(dir_str.trim());
-        if node_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::UserSpecified,
-            });
-        }
-    }
-    if let Some(entry) = config.app_managed_node.as_ref() {
-        let dir = PathBuf::from(entry.dir.trim());
-        if node_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::AppManaged,
-            });
-        }
-    }
     if let Some(root) = legacy_runtimes_root(app) {
         let dir = root.join("nodejs");
         if node_exe(&dir).is_file() {
@@ -297,10 +250,10 @@ fn resolve_node<R: tauri::Runtime>(
     None
 }
 
-/// 旧内置 runtimes 根目录（过渡期兜底）。
+/// 内置 runtimes 根目录（0.0.17 唯一来源）。
 ///
-/// 来源优先级：`LINGFANG_EMBEDDED_RUNTIME_DIR` 环境变量 → exe 同级 runtimes/（自制安装器布局）
-/// → dev 源码路径（CARGO_MANIFEST_DIR/../runtimes）。Step 4 删除 runtimes 后全部自然失效。
+/// 来源优先级：`LINGFANG_EMBEDDED_RUNTIME_DIR` 环境变量 → exe 同级 runtimes/（发布安装包布局）
+/// → dev 源码路径（CARGO_MANIFEST_DIR/../runtimes）。
 fn legacy_runtimes_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
     if let Some(override_dir) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR") {
         let root = PathBuf::from(override_dir);

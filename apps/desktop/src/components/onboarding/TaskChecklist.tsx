@@ -64,31 +64,19 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
     setDone(loadProgress(session.userId, TASK_STEPS));
   }, [session.userId]);
 
-  // task 07-03 Step 6：第 1 步（脚本运行环境）完成判定改为「至少一个运行时就绪」。
-  // 探测成功且未勾选时自动置 true 并持久化（全完成则写 done）。探测失败静默——保留手动勾选兜底。
+  // task 07-03：第 1 步（脚本运行环境）内置运行时，直接标记完成。
   useEffect(() => {
-    let cancelled = false;
-    getRuntimeStatus()
-      .then((status) => {
-        if (cancelled) return;
-        const anyReady = status.python.available || status.node.available;
-        if (!anyReady) return;
-        setDone((prev) => {
-          if (prev[0]) return prev; // 已勾选，不重复处理。
-          const next = [...prev];
-          next[0] = true;
-          saveProgress(session.userId, next);
-          if (isAllDone(next)) {
-            saveDone(session.userId);
-            setCompleted(true);
-          }
-          return next;
-        });
-      })
-      .catch(() => {
-        /* 探测失败静默，保留手动勾选 */
-      });
-    return () => { cancelled = true; };
+    setDone((prev) => {
+      if (prev[0]) return prev; // 已勾选，不重复处理。
+      const next = [...prev];
+      next[0] = true;
+      saveProgress(session.userId, next);
+      if (next.every(Boolean)) {
+        saveDone(session.userId);
+        setCompleted(true);
+      }
+      return next;
+    });
   }, [session.userId]);
 
   const finishedCount = useMemo(() => done.filter(Boolean).length, [done]);
