@@ -43,7 +43,7 @@ use crate::runtime_config::{
 /// 默认 Python 版本（python-build-standalone install_only）。
 const DEFAULT_PYTHON_VERSION: &str = "3.12.13";
 /// python-build-standalone release tag（日期格式，随上游更新；如失效可在设置页覆盖或更新此处）。
-const DEFAULT_PYTHON_BUILD_TAG: &str = "2026032";
+const DEFAULT_PYTHON_BUILD_TAG: &str = "20260623";
 /// 默认 Node.js 版本（LTS，官方 win-x64 zip）。
 const DEFAULT_NODE_VERSION: &str = "22.21.1";
 
