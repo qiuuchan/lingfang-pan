@@ -18,7 +18,6 @@ import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
-import { RuntimeSetupGate } from '@/components/runtime/RuntimeSetupGate';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
 import { loadPlugins } from '@/pages/plugins-runtime';
 import { Auth } from '@/pages/Auth';
@@ -851,8 +850,6 @@ export default function App() {
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}
       <PermissionConsentDialog />
-      {/* task 07-03 Step 6：首启运行时引导（python+node 都缺且未标记 done 时弹卡，不阻塞 client 插件）。 */}
-      <RuntimeSetupGate />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );
