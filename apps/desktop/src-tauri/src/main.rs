@@ -4,7 +4,9 @@
 
 mod capability;
 mod draft_plugin;
-mod embedded_runtime;
+mod mirror_presets;
+mod runtime_config;
+mod runtime_resolver;
 mod process_util;
 mod plugin_llm_bridge;
 mod plugin_runner;

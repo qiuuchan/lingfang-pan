@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
 use crate::process_util::{kill_child_tree, run_capture_with_env};
-use crate::embedded_runtime::EmbeddedRuntime;
+use crate::runtime_resolver::RuntimeResolver;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
 use crate::plugin_llm_bridge::PluginLlmBridge;
@@ -175,7 +175,7 @@ fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
 /// 探测 Python 插件是否需要创建 venv（首次慢，已建则 ensure 秒过）。
 /// 用于 start_plugin 发「安装依赖」阶段事件（前端据此决定是否展示安装动画）。
 /// 判定：venv 内 python 不存在 / pip 缺失 / home 路径与当前运行时不一致 → 需要创建。
-fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &EmbeddedRuntime) -> bool {
+fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &RuntimeResolver) -> bool {
     let venv_dir = python_venv_dir(plugin_dir);
     !venv_python(&venv_dir).is_file()
         || !venv_has_pip(&venv_dir)
@@ -190,7 +190,7 @@ fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &EmbeddedRuntime) ->
 ///
 /// 失败处理（PRD Constraints）：venv 创建/pip install 失败返回友好错误（不崩），前端据 error 展示。
 pub(crate) fn ensure_python_venv(
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
 ) -> Result<PathBuf, String> {
     let venv_dir = python_venv_dir(plugin_dir);
@@ -255,7 +255,7 @@ fn venv_has_pip(venv_dir: &std::path::Path) -> bool {
 /// 该 venv 不可用，需重建。
 fn venv_home_matches_host(
     venv_dir: &std::path::Path,
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
 ) -> bool {
     let host_py = match runtime.python() {
         Some(path) => path,
@@ -305,7 +305,7 @@ pub(crate) fn entry_arg(entry_abs: &std::path::Path) -> String {
 }
 
 fn create_python_venv(
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
     venv_dir: &std::path::Path,
 ) -> Result<(), String> {
@@ -348,7 +348,7 @@ fn create_python_venv(
 }
 
 fn create_python_venv_without_pip(
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
     venv_dir: &std::path::Path,
 ) -> Result<(), String> {
@@ -417,11 +417,11 @@ fn create_python_venv_without_pip(
     Ok(())
 }
 
-fn bundled_pip_wheel_dir(runtime: &EmbeddedRuntime) -> Option<PathBuf> {
-    let python_root = runtime.root().join("python");
+fn bundled_pip_wheel_dir(runtime: &RuntimeResolver) -> Option<PathBuf> {
+    let python_dir = runtime.python_dir()?;
     [
-        python_root.join("Lib").join("ensurepip").join("_bundled"),
-        python_root.clone(),
+        python_dir.join("Lib").join("ensurepip").join("_bundled"),
+        python_dir.to_path_buf(),
     ]
     .into_iter()
     .find(|dir| contains_pip_wheel(dir))
@@ -505,7 +505,7 @@ fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
 ///
 /// 失败处理：pnpm/npm install 失败返回友好错误（不崩）。
 pub(crate) fn ensure_node_dependencies(
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
 ) -> Result<(), String> {
     let pkg_json = plugin_dir.join("package.json");
@@ -648,7 +648,7 @@ fn playwright_chromium_installed() -> bool {
 /// 失败：返回友好错误（带 stderr 摘要），冒泡到 start_plugin / 预览路径报错。
 /// 幂等：浏览器目录存在则秒过，重复启动无副作用。
 pub(crate) fn ensure_playwright_browsers(
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
 ) -> Result<(), String> {
     if !declares_playwright(plugin_dir) {
@@ -661,7 +661,7 @@ pub(crate) fn ensure_playwright_browsers(
     let mut env = runtime.env(minimal_env());
     env.push((
         OsString::from("PLAYWRIGHT_DOWNLOAD_HOST"),
-        OsString::from(crate::embedded_runtime::PLAYWRIGHT_DOWNLOAD_HOST),
+        OsString::from(crate::runtime_resolver::PLAYWRIGHT_DOWNLOAD_HOST),
     ));
 
     // 解析 playwright CLI 入口：
@@ -723,7 +723,7 @@ pub(crate) fn ensure_playwright_browsers(
 ///
 /// 返回 (binary, args)，args 已含 `install chromium`。
 fn resolve_node_playwright_cli(
-    runtime: &EmbeddedRuntime,
+    runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
 ) -> Result<(PathBuf, Vec<String>), String> {
     let bin_dir = plugin_dir.join("node_modules").join(".bin");
@@ -933,7 +933,7 @@ pub fn start_plugin(
     emit_stage("checking", "正在检查插件运行环境…");
     let plugin_dir = resolve_plugin_dir(&store, &plugin_id)?;
     let manifest = parse_manifest(&plugin_dir)?;
-    let runtime = EmbeddedRuntime::from_app(&app)?;
+    let runtime = RuntimeResolver::resolve(&app)?;
 
     let (binary, args) = match manifest.runtime {
         PluginRuntimeKind::Python => {

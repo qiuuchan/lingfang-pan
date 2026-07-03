@@ -746,7 +746,7 @@ pub fn sanitize_plugin_id(plugin_id: &str) -> Result<String, String> {
 
 // === JSON 读写辅助（复用 code_assistant::store 同款原子写策略，避免跨模块依赖） ===
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
+pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -754,7 +754,7 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
 /// 原子写 JSON：写到同目录临时文件再 rename 替换（与 code_assistant::store::write_json_atomically 同款）。
 ///
 /// 同目录保证 tmp 与目标在同文件系统（rename 原子语义的前提）。tmp 文件名带 pid + 纳秒时间戳避免并发覆盖。
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "目标路径无父目录".to_string())?;
