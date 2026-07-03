@@ -142,6 +142,12 @@ impl RuntimeResolver {
         self.python.as_ref().map(|r| r.dir.as_path())
     }
 
+    /// Node 主 exe 所在目录（供 UI 状态展示）。
+    #[allow(dead_code)]
+    pub(crate) fn node_dir(&self) -> Option<&Path> {
+        self.node.as_ref().map(|r| r.dir.as_path())
+    }
+
     pub(crate) fn python_source(&self) -> Option<&RuntimeSource> {
         self.python.as_ref().map(|r| &r.source)
     }

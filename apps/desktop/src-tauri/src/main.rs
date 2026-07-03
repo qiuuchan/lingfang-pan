@@ -5,6 +5,7 @@
 mod capability;
 mod draft_plugin;
 mod mirror_presets;
+mod runtime_commands;
 mod runtime_config;
 mod runtime_download;
 mod runtime_resolver;
@@ -279,6 +280,13 @@ fn main() {
             plugin_net_fetch,
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script,
+            runtime_commands::get_runtime_status,
+            runtime_commands::download_runtime,
+            runtime_commands::uninstall_runtime,
+            runtime_commands::get_runtime_config,
+            runtime_commands::set_mirror_config,
+            runtime_commands::set_user_specified_runtime,
+            runtime_commands::probe_system_runtime,
             plugin_runner::start_plugin,
             plugin_runner::stop_plugin,
             plugin_runner::delete_plugin,
