@@ -136,10 +136,10 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
   };
 }
 
-/** 内置运行时缺失指引文案（与 Rust install_hint 镜像）。 */
+/** 运行时缺失指引文案（与 Rust install_hint 镜像）。 */
 export const RUNTIME_INSTALL_HINT: Record<ScriptRuntime, string> = {
-  nodejs: '未检测到软件内置 Node.js。请确认应用包内包含 runtimes/nodejs，并随安装包一起发布。',
-  python: '未检测到软件内置 Python。请确认应用包内包含 runtimes/python，并随安装包一起发布。',
+  nodejs: '未检测到可用的 Node.js 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装路径。',
+  python: '未检测到可用的 Python 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装路径。',
 };
 
 /** 运行时显示名（UI 状态条展示）。 */

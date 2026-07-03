@@ -21,7 +21,7 @@ export const TASK_STEPS: TaskStep[] = [
   {
     icon: CpuIcon,
     title: '准备脚本运行环境',
-    description: '前往「设置 → 脚本运行环境」按需安装 Node.js 或 Python。',
+    description: '下载便携版 Node.js / Python（约 200MB），用于运行脚本型插件。',
     view: 'settings',
     settingsTab: 'cli',
   },
