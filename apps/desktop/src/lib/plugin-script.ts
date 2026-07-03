@@ -147,3 +147,46 @@ export const RUNTIME_LABEL: Record<ScriptRuntime, string> = {
   nodejs: 'Node.js',
   python: 'Python',
 };
+
+/** Rust run_plugin_shell 返回（snake_case）。 */
+export interface ShellResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  timed_out: boolean;
+  elapsed_ms: number;
+}
+
+/** runPluginShell 入参（前端 camelCase，封装层转 Rust snake_case）。 */
+export interface RunPluginShellInput {
+  pluginId: string;
+  command: string;
+  /** shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）。 */
+  shell?: 'cmd' | 'powershell' | 'pwsh';
+  /** 工作目录相对子路径（如 'src'），默认插件目录根；不能是绝对路径或含 .. */
+  cwd?: string;
+  /** 超时毫秒，默认 120000；长任务（playwright install）可调大。 */
+  timeoutMs?: number;
+  /** 运行时类型，决定 PATH 注入策略；省略则由 Rust 按文件存在性自动探测。 */
+  runtime?: 'python' | 'nodejs';
+}
+
+/**
+ * 在插件目录执行 shell 命令（Agent Bash 工具底层）。
+ *
+ * PATH 已注入应用管理的 Python/Node + 插件 venv（python）或 node_modules/.bin（nodejs）+
+ * 国内镜像源。命令失败（exit≠0）时仍返回结果（不抛异常），便于读 stderr 修复。
+ * cwd 锁定插件目录（防越权访问其它插件或系统目录）。
+ */
+export function runPluginShell(input: RunPluginShellInput): Promise<ShellResult> {
+  return tauriInvoke<ShellResult>('run_plugin_shell', {
+    input: {
+      plugin_id: input.pluginId,
+      command: input.command,
+      shell: input.shell ?? null,
+      cwd: input.cwd ?? null,
+      timeout_ms: input.timeoutMs ?? null,
+      runtime: input.runtime ?? null,
+    },
+  });
+}

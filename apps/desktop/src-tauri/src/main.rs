@@ -14,6 +14,7 @@ mod plugin_llm_bridge;
 mod plugin_runner;
 mod plugin_script;
 mod plugin_security;
+mod plugin_shell;
 mod plugin_store;
 mod plugins;
 mod update;
@@ -280,6 +281,7 @@ fn main() {
             plugin_net_fetch,
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script,
+            plugin_shell::run_plugin_shell,
             runtime_commands::get_runtime_status,
             runtime_commands::download_runtime,
             runtime_commands::uninstall_runtime,

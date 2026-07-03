@@ -132,7 +132,7 @@ fn resolve_plugin_dir(store: &PluginStore, plugin_id: &str) -> Result<PathBuf, S
 /// Python venv directory for a plugin.
 /// Windows keeps venvs in a short per-user cache because packages such as PySide6
 /// contain very deep wheel paths that can exceed the legacy 260-character limit.
-fn python_venv_dir(plugin_dir: &std::path::Path) -> PathBuf {
+pub(crate) fn python_venv_dir(plugin_dir: &std::path::Path) -> PathBuf {
     #[cfg(windows)]
     {
         let base = std::env::var_os("LOCALAPPDATA")
@@ -161,7 +161,7 @@ fn stable_path_hash(path: &std::path::Path) -> u64 {
 /// 探测 Python venv 内的解释器绝对路径（按 PRD 需求 3）。
 /// - Windows：Scripts/python.exe
 /// - Unix：bin/python
-fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
+pub(crate) fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
     #[cfg(windows)]
     {
         venv_dir.join("Scripts").join("python.exe")
