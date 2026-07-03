@@ -6,6 +6,7 @@ mod capability;
 mod draft_plugin;
 mod mirror_presets;
 mod runtime_config;
+mod runtime_download;
 mod runtime_resolver;
 mod process_util;
 mod plugin_llm_bridge;
