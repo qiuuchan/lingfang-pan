@@ -11,7 +11,7 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { api, type ApiError, tauriInvoke } from '@/lib/api';
-import { runPluginScript, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
+import { runPluginScript, runPluginShell, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
 import { deletePluginFile, movePluginFile } from '@/lib/plugin-status';
 import {
   validateStagedCompleteness,
@@ -745,6 +745,60 @@ export function createAgentTools(opts: AgentToolsOptions) {
   });
 
   /**
+   * Bash —— 在插件目录执行任意 shell 命令（Claude Code Bash 风格）。
+   *
+   * 解决 Agent 无法跑 `pip install` / `playwright install` / `npm install` 等命令的问题：
+   * 此前只能靠偷改代码触发依赖安装，不可靠。本工具直接给 Agent 一个 shell 通道，
+   * PATH 已注入应用管理的 Python/Node + 插件 venv / node_modules/.bin + 国内镜像源。
+   *
+   * 命令失败（exit≠0）仍返回结果（不抛异常），让 Agent 读 stderr 修复后重试，
+   * 与 RunPlugin 的「写→跑→看报错→自修」闭环同源。
+   */
+  const Bash = tool({
+    name: 'Bash',
+    description:
+      '在当前插件目录执行 shell 命令。默认 cmd（Windows）/ sh（Unix），可选 powershell/pwsh。' +
+      'PATH 已注入应用管理的 Python/Node + 当前插件的 venv（python 插件）或 node_modules/.bin（nodejs 插件）' +
+      '+ 国内镜像源（PIP_INDEX_URL/NPM_CONFIG_REGISTRY）。用于 `pip install xxx`、`playwright install chromium`、' +
+      '`npm install xxx`、任意命令。cwd 默认插件目录根，可传相对子路径。' +
+      '返回 stdout/stderr/exitCode；命令失败（exit≠0）时仍返回结果（不抛异常），便于读 stderr 修复后重试。',
+    parameters: z.object({
+      command: z.string().describe("shell 命令（如 'pip install requests' / 'playwright install chromium' / 'npm install axios'）"),
+      cwd: z.string().optional().describe('相对插件目录的子路径（如 src），默认插件目录根；不能是绝对路径或含 ..'),
+      shell: z.enum(['cmd', 'powershell', 'pwsh']).optional().describe('shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）'),
+      timeoutMs: z.number().optional().describe('超时毫秒，默认 120000；长任务（如 playwright install chromium ~150MB）可调到 600000'),
+    }),
+    async execute({ command, cwd, shell, timeoutMs }): Promise<string> {
+      const pluginId = opts.getPluginId();
+      if (!pluginId) return '错误：当前没有插件。请先 CreatePlugin 或打开已有插件。';
+      if (!command.trim()) return '错误：command 不能为空。';
+      try {
+        const r = await runPluginShell({
+          pluginId,
+          command,
+          cwd,
+          shell,
+          timeoutMs,
+          // runtime 省略，让 Rust 自动探测（按 requirements.txt / package.json 存在性）。
+        });
+        // 结构化输出（参考 RunPlugin 的格式）：header + stdout + stderr。
+        const header = r.timed_out
+          ? `⏱ 超时（${r.elapsed_ms}ms）`
+          : `退出码 ${r.exit_code ?? '?'}`;
+        const out = r.stdout.trim();
+        const err = r.stderr.trim();
+        if (!out && !err) return `【${header}】（无输出）`;
+        const parts = [`【${header}】`];
+        if (out) parts.push(`── stdout ──\n${out}`);
+        if (err) parts.push(`── stderr ──\n${err}`);
+        return parts.join('\n\n');
+      } catch (e) {
+        return `执行命令失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  /**
    * DeleteFile —— 删除当前插件目录下的单个文件。
    *
    * 重构/清理场景：移除废弃文件、删掉旧版实现、清理临时文件。
@@ -884,7 +938,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
   });
 
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, UpdatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, DeleteFile, MoveFile, Grep],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, UpdatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, Bash, DeleteFile, MoveFile, Grep],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();
