@@ -71,7 +71,8 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
       const next = [...prev];
       next[0] = true;
       saveProgress(session.userId, next);
-      if (next.every(Boolean)) {
+      // 仅当所有步骤都完成时才标记整体完成
+      if (isAllDone(next)) {
         saveDone(session.userId);
         setCompleted(true);
       }

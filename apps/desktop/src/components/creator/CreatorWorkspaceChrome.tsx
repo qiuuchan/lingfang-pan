@@ -66,8 +66,8 @@ export function CreatorFloatingTitleBar({
   return (
     <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
       <div className="flex items-center gap-2">
-        <SparklesIcon className="size-4 text-primary" />
-        <span className="text-sm font-medium">AI 创建插件</span>
+        <SparklesIcon className="size-4 text-foreground" />
+        <span className="font-mono text-sm font-medium">agent · 创建插件</span>
       </div>
       <div className="flex items-center gap-2">
         {compressedHint > 0 && (
@@ -201,7 +201,7 @@ export function CreatorWorkspaceSidebar({
           variant="default"
           size="sm"
           className={cn(
-            'h-10 gap-2 rounded-xl bg-primary text-sm shadow-sm transition-all duration-150 hover:bg-primary/90',
+            'h-9 gap-2 rounded-md bg-primary text-sm transition-colors duration-150 hover:bg-primary/90',
             collapsed ? 'w-full justify-center px-0' : 'w-full justify-start px-3',
           )}
           disabled={busy}
@@ -212,7 +212,7 @@ export function CreatorWorkspaceSidebar({
           {!collapsed && (
             <>
               新建对话
-              {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-5 border-border px-1.5 text-[10px]">压缩 {compressedHint}</Badge>}
+              {compressedHint > 0 && <Badge variant="outline" className="ml-auto h-5 border-border px-1.5 font-mono text-[10px]">压缩 {compressedHint}</Badge>}
             </>
           )}
         </Button>
@@ -220,7 +220,7 @@ export function CreatorWorkspaceSidebar({
           variant="ghost"
           size="sm"
           className={cn(
-            'h-10 gap-2 rounded-xl text-sm text-muted-foreground transition-all duration-150 hover:bg-accent hover:text-foreground',
+            'h-9 gap-2 rounded-md text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground',
             collapsed ? 'w-full justify-center px-0' : 'w-full justify-start px-3',
           )}
           onClick={onOpenSkills}
@@ -258,7 +258,7 @@ export function CreatorWorkspaceSidebar({
                 onClick={() => onSelectConversation(conversation.id)}
                 title={conversation.title}
                 className={cn(
-                  'mx-auto flex size-9 items-center justify-center rounded-lg text-xs font-medium transition-colors duration-150',
+                  'mx-auto flex size-9 items-center justify-center rounded-md font-mono text-xs font-medium transition-colors duration-150',
                   active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground',
                 )}
               >
@@ -270,8 +270,8 @@ export function CreatorWorkspaceSidebar({
             <div
               key={conversation.id}
               className={cn(
-                'group flex items-center gap-1 rounded-xl border px-2 py-1.5 transition-all duration-150',
-                active ? 'border-primary/40 bg-accent text-primary shadow-sm' : 'border-transparent hover:border-border hover:bg-muted',
+                'group flex items-center gap-1 rounded-md border px-2 py-1.5 transition-colors duration-150',
+                active ? 'border-primary/40 bg-accent text-primary' : 'border-transparent hover:border-border hover:bg-muted',
               )}
             >
               <button
@@ -281,7 +281,7 @@ export function CreatorWorkspaceSidebar({
                 title={conversation.title}
               >
                 <span className="block truncate text-xs font-medium">{conversation.title}</span>
-                <span className="block truncate text-[10px] text-muted-foreground">
+                <span className="block truncate font-mono text-[10px] text-muted-foreground">
                   {new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}
                 </span>
               </button>
@@ -289,14 +289,14 @@ export function CreatorWorkspaceSidebar({
                 <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground shadow-sm"
+                    className="rounded-sm bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground"
                     onClick={() => onConfirmDeleteConversation(conversation.id)}
                   >
                     删
                   </button>
                   <button
                     type="button"
-                    className="rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
+                    className="rounded-sm px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
                     onClick={onCancelDeleteConversation}
                   >
                     取消
@@ -307,7 +307,7 @@ export function CreatorWorkspaceSidebar({
                   type="button"
                   title="删除该对话"
                   onClick={() => onDeleteConversation(conversation.id)}
-                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-all duration-150 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                 >
                   <Trash2Icon className="size-3.5" />
                 </button>
@@ -316,7 +316,7 @@ export function CreatorWorkspaceSidebar({
           );
         }) : (
           !collapsed && (
-            <div className="rounded-xl border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
+            <div className="rounded-md border border-dashed border-border px-3 py-5 text-center font-mono text-xs text-muted-foreground">
               暂无历史对话
             </div>
           )

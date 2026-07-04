@@ -24,6 +24,7 @@ import { CreatorFloatingTitleBar, CreatorWorkspaceSidebar } from '@/components/c
 import { CreatorComposer } from '@/components/creator/CreatorComposer';
 import { CreatorEmptyState } from '@/components/creator/CreatorEmptyState';
 import { CreatorCopyButton, CreatorRetryButton } from '@/components/creator/CreatorMessageActions';
+import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
@@ -150,6 +151,22 @@ function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
 function cleanTurnParts(parts: unknown): TurnPart[] {
   if (!Array.isArray(parts)) return [];
   return parts.flatMap((part, index) => normalizeTurnPart(part, index) ?? []);
+}
+
+function mergeStreamingText(existing: string, delta: string): string {
+  if (!delta) return existing;
+  if (!existing) return delta;
+  if (delta.startsWith(existing)) return delta;
+  const dedupeMinLength = 12;
+  if (delta.trim().length >= dedupeMinLength && existing.endsWith(delta)) return existing;
+
+  const maxOverlap = Math.min(existing.length, delta.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    if (overlap >= dedupeMinLength && existing.endsWith(delta.slice(0, overlap))) {
+      return existing + delta.slice(overlap);
+    }
+  }
+  return existing + delta;
 }
 
 interface Turn {
@@ -1000,7 +1017,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       const parts = cleanTurnParts(cur.parts);
       const last = parts[parts.length - 1];
       if (last && last.type === 'text') {
-        parts[parts.length - 1] = { ...last, content: last.content + delta };
+        parts[parts.length - 1] = { ...last, content: mergeStreamingText(last.content, delta) };
       } else {
         parts.push({ type: 'text', content: delta });
       }
@@ -1080,17 +1097,17 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       answerQuestion(turnIdx, p.toolCallId, labels);
     };
     return (
-      <div key={p.toolCallId} className="mt-3 first:mt-0 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-sm backdrop-blur-sm">
+      <div key={p.toolCallId} className="rounded-xl border border-[#2a2a2c] bg-[#18181a] p-4 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
         <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <span className="text-xs font-bold">?</span>
+          <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-[#2a2a2c] text-[#e5e5e5]">
+            <span className="font-mono text-xs font-bold">?</span>
           </div>
           <div className="flex-1 text-sm font-medium">{p.question}</div>
         </div>
         {p.answered ? (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-green-600/20 bg-green-50/50 px-3 py-2 dark:bg-green-950/20">
-            <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-green-600" />
-            <span className="text-xs text-muted-foreground">已回答：{p.answer}</span>
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-[#3a3a3d] bg-[#202023] px-3 py-2">
+            <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[#e5e5e5]" />
+            <span className="text-xs text-[#b8b8bd]">已回答：{p.answer}</span>
           </div>
         ) : (
           <div className="mt-3 space-y-2.5">
@@ -1112,7 +1129,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
                           answerQuestion(turnIdx, p.toolCallId, o.label);
                         }
                       }}
-                      className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${on ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-border/60 bg-background/80 hover:border-primary/50 hover:bg-primary/5 hover:shadow-sm'}`}
+                      className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${on ? 'border-[#6f6f75] bg-[#2a2a2c] text-[#e5e5e5]' : 'border-[#2a2a2c] bg-[#151517] text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]'}`}
                     >
                       {o.label}
                     </button>
@@ -1121,7 +1138,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
               </div>
             )}
             {p.multiSelect && p.options && p.options.length > 0 && (
-              <Button size="sm" className="h-8 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!selected.length} onClick={submitMulti}>
+              <Button size="sm" className="h-8 gap-1.5 rounded-md bg-[#2a2a2c] px-3.5 text-xs text-[#e5e5e5] hover:bg-[#343437] disabled:text-[#6f7076]" disabled={!selected.length} onClick={submitMulti}>
                 <CheckCircle2Icon className="size-3.5" />
                 确认选择
               </Button>
@@ -1135,9 +1152,9 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
                   onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [p.toolCallId]: e.target.value }))}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answerQuestion(turnIdx, p.toolCallId, draftText); } }}
                   rows={1}
-                  className="min-h-[36px] max-h-24 resize-none rounded-lg border-border/60 text-sm shadow-sm"
+                  className="min-h-[36px] max-h-24 resize-none rounded-md border-[#2a2a2c] bg-[#151517] font-mono text-sm text-[#e5e5e5] placeholder:text-[#5a5a5c] focus-visible:border-[#3a3a3d] focus-visible:ring-0 dark:bg-[#151517]"
                 />
-                <Button size="sm" className="h-9 gap-1.5 px-3.5 text-xs shadow-sm" disabled={!draftText.trim()} onClick={() => answerQuestion(turnIdx, p.toolCallId, draftText)}>
+                <Button size="sm" className="h-9 gap-1.5 rounded-md bg-[#2a2a2c] px-3.5 text-xs text-[#e5e5e5] hover:bg-[#343437] disabled:text-[#6f7076]" disabled={!draftText.trim()} onClick={() => answerQuestion(turnIdx, p.toolCallId, draftText)}>
                   <SendIcon className="size-3.5" />
                   提交
                 </Button>
@@ -1170,7 +1187,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         'flex w-full overflow-hidden bg-background transition-[max-width] duration-300',
         embedded
           ? 'h-full min-h-0 border-0 shadow-none'
-          : `h-[85vh] max-h-[800px] ${draft ? 'max-w-[1320px]' : 'max-w-[1100px]'} min-h-[480px] flex-col rounded-2xl border shadow-2xl animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`,
+          : `h-[85vh] max-h-[800px] ${draft ? 'max-w-[1320px]' : 'max-w-[1100px]'} min-h-[480px] flex-col rounded-lg border shadow-xl animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`,
       )}>
         {!embedded && (
           <CreatorFloatingTitleBar
@@ -1213,7 +1230,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         )}
           <div className="flex min-w-0 flex-1 flex-col">
         {/* 对话区 */}
-        <div ref={scrollRef} className={cn('min-h-0 flex-1 overflow-y-auto px-6 py-6', embedded && 'px-8 py-8')}>
+        <div ref={scrollRef} className={cn('min-h-0 flex-1 overflow-y-auto px-5 py-8 [scrollbar-gutter:stable] sm:px-8', embedded && 'px-6 py-10 lg:px-10')}>
           {turns.length === 0 ? (
             <CreatorEmptyState
               composer={embedded ? null : renderComposer('hero')}
@@ -1221,27 +1238,27 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
               onSelectPreset={setInput}
             />
           ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-4">
+            <div className={cn(CREATOR_COLUMN_CLASS, 'flex flex-col gap-6')}>
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   {t.role === 'user' ? (
-                    <div className="group relative max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-gradient-to-br from-primary to-primary/90 px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
-                      <CreatorCopyButton text={t.content} className="bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/30 hover:text-primary-foreground" />
+                    <div className="group relative max-w-[72%] whitespace-pre-wrap break-words rounded-md bg-[#2a2a2c] px-4 py-2.5 text-sm leading-6 text-[#f0f0f2] shadow-[0_8px_22px_rgba(0,0,0,0.16)]">
+                      <CreatorCopyButton text={t.content} className="bg-white/10 text-[#f0f0f2] hover:bg-white/15 hover:text-white" />
                       {t.content}
                     </div>
                   ) : (
                     // 链式渲染（OpenCodeUI 式）：每个 part 是独立卡片（思考一张、内容一张、工具一张…），纵向堆叠。
                     (cleanTurnParts(t.parts).length > 0) ? (
-                      <div className="flex w-full max-w-[92%] flex-col gap-2">
+                      <div className="flex w-full flex-col gap-4">
                         {cleanTurnParts(t.parts).map((p, pi) => {
                           if (p.type === 'reasoning') {
                             return (
-                              <details key={`r-${pi}`} className="mt-1 overflow-hidden rounded-lg border border-border/30 bg-card/60 text-xs" open={!p.done && t.streaming}>
-                                <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 text-muted-foreground/70 transition-colors hover:bg-muted/25 hover:text-muted-foreground">
+                              <details key={`r-${pi}`} className="overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] text-xs shadow-[0_10px_28px_rgba(0,0,0,0.16)]" open={!p.done && t.streaming}>
+                                <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-mono font-medium text-[#b6b6ba] transition-colors hover:bg-[#202023] hover:text-[#f0f0f2]">
                                   {!p.done && t.streaming ? 'Thinking...' : 'Thinking'}
                                   {!p.done && t.streaming && <Loader2Icon className="size-2.5 animate-spin" />}
                                 </summary>
-                                <div className="max-h-36 overflow-y-auto whitespace-pre-wrap border-t border-border/20 bg-muted/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground/80">
+                                <div className="max-h-44 overflow-y-auto whitespace-pre-wrap break-words border-t border-[#2a2a2c] bg-[#151517] px-4 py-3 pr-5 font-mono text-[11px] leading-6 text-[#d7d7db]">
                                   {p.content}
                                 </div>
                               </details>
@@ -1250,7 +1267,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
                           if (p.type === 'text') {
                             if (!p.content.trim()) return null;
                             return (
-                              <div key={`t-${pi}`} className="group relative overflow-hidden rounded-lg border border-border/30 bg-card/70 px-4 py-3 text-sm text-foreground shadow-sm">
+                              <div key={`t-${pi}`} className="creator-assistant-bubble group relative overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] px-5 py-4 text-[15px] leading-7 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
                                 <CreatorCopyButton text={p.content} />
                                 {/* break-words：错误信息（含上游根因、URL、长串）需正确换行，不撑破气泡。 */}
                                 <div className="break-words">
@@ -1269,7 +1286,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
                       </div>
                     ) : (
                       // 向后兼容 / 兜底：旧会话只有 content 或无任何 part 时，单个气泡渲染。
-                      <div className="creator-assistant-bubble group relative max-w-[85%] overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-background to-muted/30 px-4 py-3 text-sm text-foreground shadow-sm backdrop-blur-sm">
+                      <div className="creator-assistant-bubble group relative w-full overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] px-5 py-4 text-[15px] leading-7 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
                         {t.content && <CreatorCopyButton text={t.content} />}
                         {t.content ? (
                           <Markdown>{t.content}</Markdown>
@@ -1292,9 +1309,9 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
           )}
           {/* 保存成功卡片：用户在右侧面板点保存、草稿保存成功后告知「已保存到本地」 */}
           {publishedName && (
-            <div className="mx-auto mt-6 max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-start gap-4 rounded-2xl border border-green-600/30 bg-gradient-to-br from-green-50 to-green-100/50 p-4 shadow-lg backdrop-blur-sm dark:from-green-950/30 dark:to-green-900/20">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-green-600 shadow-md">
+            <div className={cn(CREATOR_COLUMN_CLASS, 'mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500')}>
+              <div className="flex items-start gap-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-green-600">
                   <CheckCircle2Icon className="size-5 text-white" />
                 </div>
                 <div className="flex-1 space-y-1">
@@ -1316,11 +1333,11 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         {/* #1 上下文用量条（contextWindow 配好后显示百分比） */}
         {contextWindow && turns.length > 0 && (
           <div className="shrink-0 border-t bg-muted/20 px-6 py-2">
-            <div className="mx-auto max-w-3xl">
+            <div className={CREATOR_COLUMN_CLASS}>
               <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span className="font-medium">上下文用量</span>
+                <span className="font-mono font-medium">context</span>
                 <div className="flex items-center gap-2">
-                  <span className="tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} token（{usagePct}%）{usagePct > 80 && <span className="ml-1 text-amber-600 dark:text-amber-400">· 即将自动压缩</span>}</span>
+                  <span className="font-mono tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} tok（{usagePct}%）{usagePct > 80 && <span className="ml-1 text-amber-600 dark:text-amber-400">· 即将自动压缩</span>}</span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1332,8 +1349,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
                   </Button>
                 </div>
               </div>
-              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted/60 shadow-inner">
-                <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-gradient-to-r from-amber-500 to-amber-600' : 'bg-gradient-to-r from-primary to-primary/80'} shadow-sm`} style={{ width: `${usagePct}%` }} />
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
+                <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${usagePct}%` }} />
               </div>
             </div>
           </div>
@@ -1341,10 +1358,10 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
 
         {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中 / 网络慢） */}
         {(compressing || searchingQuery != null || uploadingViaTool || networkSlow) && (
-          <div className={`shrink-0 border-t px-6 py-2.5 ${networkSlow ? 'bg-gradient-to-r from-amber-50/60 via-orange-50/60 to-amber-50/60 dark:from-amber-950/20 dark:via-orange-950/20 dark:to-amber-950/20' : 'bg-gradient-to-r from-blue-50/50 via-indigo-50/50 to-blue-50/50 dark:from-blue-950/20 dark:via-indigo-950/20 dark:to-blue-950/20'}`}>
-            <div className="mx-auto flex max-w-3xl items-center gap-2 text-xs text-muted-foreground">
+          <div className={`shrink-0 border-t px-6 py-2.5 ${networkSlow ? 'bg-amber-500/5' : 'bg-muted/20'}`}>
+            <div className={cn(CREATOR_COLUMN_CLASS, 'flex items-center gap-2 font-mono text-xs text-[#a6a6ac]')}>
               <Loader2Icon className={`size-3.5 animate-spin ${networkSlow ? 'text-amber-600 dark:text-amber-400' : 'text-primary'}`} />
-              <span className="font-medium">
+              <span>
                 {networkSlow
                   ? '网络较慢，仍在等待响应…可点停止后重试'
                   : compressing
@@ -1398,7 +1415,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
                 title={conversation.title}
               >
                 <span className="block truncate text-sm font-medium">{conversation.title}</span>
-                <span className="block text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
+                <span className="block font-mono text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
               </button>
               {confirmDeleteId === conversation.id ? (
                 <div className="flex shrink-0 items-center gap-1">

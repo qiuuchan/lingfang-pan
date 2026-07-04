@@ -117,19 +117,19 @@ export function CreatorDraftPanel({
   const actionDisabled = publishingTeam || savingDraft || busy || hasFail;
 
   return (
-    <div className="flex h-full w-[420px] shrink-0 flex-col border-l bg-muted/20">
+    <div className="flex h-full w-[420px] shrink-0 flex-col border-l border-[#2a2a2c] bg-[#111112]">
       {/* 信息编辑区 */}
       <div className="flex max-h-full shrink-0 flex-col">
         <button
           type="button"
           onClick={() => setInfoOpen((v) => !v)}
-          className="flex shrink-0 items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50"
+          className="flex shrink-0 items-center justify-between border-b border-[#2a2a2c] px-4 py-3 pr-5 font-mono text-[11px] font-semibold text-[#c4c4c8] hover:bg-[#1c1c1e]"
         >
           <span>插件信息（提交前可修改）</span>
           <ChevronDownIcon className={`size-3.5 transition-transform ${infoOpen ? '' : '-rotate-90'}`} />
         </button>
         {infoOpen && (
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-3">
+          <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-4 py-4 pr-6">
             <Field label="名字">
               <Input value={draft.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="插件展示名" className="h-8 text-sm" />
             </Field>
@@ -149,7 +149,7 @@ export function CreatorDraftPanel({
                 <select
                   value={draft.runtime_type}
                   onChange={(e) => onChange({ runtime_type: e.target.value as StagedPlugin['runtime_type'] })}
-                  className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                  className="h-8 w-full rounded-md border border-[#2a2a2c] bg-[#1c1c1e] px-2 text-sm text-[#f0f0f2]"
                 >
                   <option value="client">前端 client</option>
                   <option value="nodejs">Node.js</option>
@@ -164,7 +164,7 @@ export function CreatorDraftPanel({
               <select
                 value={draft.visibility}
                 onChange={(e) => onChange({ visibility: e.target.value as StagedPlugin['visibility'] })}
-                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                className="h-8 w-full rounded-md border border-[#2a2a2c] bg-[#1c1c1e] px-2 text-sm text-[#f0f0f2]"
               >
                 <option value="tenant">团队可见</option>
                 <option value="private">仅自己</option>
@@ -179,7 +179,7 @@ export function CreatorDraftPanel({
                       key={kind}
                       type="button"
                       onClick={() => toggleCapability(kind)}
-                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${on ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                      className={`rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors ${on ? 'border-[#6f6f75] bg-[#2a2a2c] text-[#f5f5f7]' : 'border-[#2a2a2c] text-[#9b9ca2] hover:bg-[#1c1c1e] hover:text-[#f0f0f2]'}`}
                     >
                       {kind}
                     </button>
@@ -187,7 +187,7 @@ export function CreatorDraftPanel({
                 })}
               </div>
             </Field>
-            <div className="rounded-md border bg-background/60 px-2 py-1.5 text-[11px] text-muted-foreground">
+            <div className="rounded-lg border border-[#2a2a2c] bg-[#1c1c1e] px-2.5 py-2 font-mono text-[11px] text-[#b6b6ba]">
               <div className="flex items-center gap-1.5">
                 <Checkbox checked disabled className="size-3.5" />
                 包含 {preparedDraft.files.length} 个文件
@@ -199,8 +199,8 @@ export function CreatorDraftPanel({
 
       {/* 检查结果：结构诊断（缺 manifest/入口/命名不规范等），让用户即时看到缺漏。 */}
       {diagnostics.length > 0 && (
-        <div className="shrink-0 space-y-1.5 border-t bg-background/40 px-3 py-2">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        <div className="shrink-0 space-y-2 border-t border-[#2a2a2c] bg-[#151517] px-4 py-3 pr-6">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#c4c4c8]">
             <AlertTriangleIcon className="size-3.5" />
             检查结果
           </div>
@@ -223,18 +223,27 @@ export function CreatorDraftPanel({
       )}
 
       {/* 提交/保存草稿栏 */}
-      <div className="shrink-0 border-t p-3">
+      <div className="shrink-0 border-t border-[#2a2a2c] bg-[#111112] p-4 pr-6">
         <div className="space-y-2">
-          <Button className="w-full gap-1.5" onClick={() => { void handleSubmitToTeam(); }} disabled={actionDisabled}>
+          <Button
+            className="w-full gap-1.5 border border-[#2a2a2c] bg-[#252528] text-[#f5f5f7] shadow-none hover:bg-[#2a2a2c] hover:text-white disabled:bg-[#1c1c1e] disabled:text-[#6f7076]"
+            onClick={() => { void handleSubmitToTeam(); }}
+            disabled={actionDisabled}
+          >
             {publishingTeam ? <Loader2Icon className="size-4 animate-spin" /> : hasFail ? <XCircleIcon className="size-4" /> : <UploadIcon className="size-4" />}
             {publishingTeam ? '提交中…' : busy ? 'AI 生成中，请稍候…' : hasFail ? '请先修复检查结果中的问题' : '提交到团队空间'}
           </Button>
-          <Button variant="outline" className="w-full gap-1.5" onClick={() => { void handleSaveDraft(); }} disabled={actionDisabled}>
+          <Button
+            variant="outline"
+            className="w-full gap-1.5 border-[#2a2a2c] bg-[#1c1c1e] text-[#e5e5e5] shadow-none hover:bg-[#2a2a2c] hover:text-white disabled:bg-[#151517] disabled:text-[#6f7076]"
+            onClick={() => { void handleSaveDraft(); }}
+            disabled={actionDisabled}
+          >
             {savingDraft ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
             {savingDraft ? '保存中…' : '保存草稿到本地'}
           </Button>
         </div>
-        <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+        <p className="mt-2 text-center text-[11px] leading-5 text-[#7f8086]">
           提交后可在插件中心「团队插件」运行；保存本地需要桌面环境。
         </p>
       </div>
@@ -246,7 +255,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+        <label className="text-[11px] font-semibold text-[#b6b6ba]">{label}</label>
         {hint && <span className="text-[11px] text-destructive">{hint}</span>}
       </div>
       {children}

@@ -46,7 +46,7 @@ export function CreatorCopyButton({ text, className }: { text: string; className
       }}
       title={copied ? '已复制' : '复制'}
       className={cn(
-        'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-all hover:bg-background hover:text-foreground group-hover:opacity-100',
+        'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-sm border border-border/50 bg-card text-muted-foreground opacity-0 transition-all hover:bg-accent hover:text-foreground group-hover:opacity-100',
         copied && 'opacity-100 text-green-600',
         className,
       )}
