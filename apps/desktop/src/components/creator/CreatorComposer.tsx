@@ -5,9 +5,11 @@ import {
   ChevronDownIcon,
   CircleIcon,
   CrownIcon,
+  FolderOpenIcon,
   MicIcon,
   PackageIcon,
   PlusIcon,
+  RefreshCwIcon,
   SparklesIcon,
   XIcon,
   ZapIcon,
@@ -19,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import type { LoadedPlugin } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
+import type { CreatorMode } from '@/lib/plugin-creator/creator-input';
 
 export interface CreatorSelectedFile {
   id: string;
@@ -95,54 +98,77 @@ function ComposerIconButton({
 export function CreatorComposer({
   busy,
   canInspectContext,
+  compressHint,
   embedded,
   input,
+  mode,
   onClearFiles,
   onImportFiles,
   onOpenContext,
+  onOpenSkills,
+  onOpenWorkspace,
   onInputChange,
+  onModeChange,
+  onOptimizePrompt,
   onPickFiles,
+  onRefreshWorkspace,
   onRemoveFile,
   onSend,
   onSelectReferencedPlugin,
   onSelectTier,
   onStop,
-  onToggleThinking,
+  onToggleVoice,
   placement,
   recentPlugins,
   showContextButton = false,
   selectedFiles,
-  thinking,
+  activeSkillCount,
+  optimizingPrompt,
   tier,
   referencedPlugin,
+  voiceListening,
+  workspacePath,
+  workspacePluginId,
 }: {
+  activeSkillCount: number;
   busy: boolean;
   canInspectContext: boolean;
+  compressHint?: string;
   embedded: boolean;
   input: string;
+  mode: CreatorMode;
   onClearFiles: () => void;
   onImportFiles: () => void;
   onOpenContext: () => void;
+  onOpenSkills: () => void;
+  onOpenWorkspace: () => void;
   onInputChange: (value: string) => void;
+  onModeChange: (mode: CreatorMode) => void;
+  onOptimizePrompt: () => void;
   onPickFiles: () => void;
+  onRefreshWorkspace: () => void;
   onRemoveFile: (id: string) => void;
   onSend: () => void;
   onSelectReferencedPlugin: (plugin: LoadedPlugin | null) => void;
   onSelectTier: (tier: 'fast' | 'premium') => void;
   onStop: () => void;
-  onToggleThinking: () => void;
+  onToggleVoice: () => void;
   placement: 'hero' | 'bottom';
   recentPlugins: LoadedPlugin[];
   showContextButton?: boolean;
   selectedFiles: CreatorSelectedFile[];
-  thinking: boolean;
+  optimizingPrompt: boolean;
   tier: 'fast' | 'premium';
   referencedPlugin: LoadedPlugin | null;
+  voiceListening: boolean;
+  workspacePath: string | null;
+  workspacePluginId: string | null;
 }) {
   const hero = placement === 'hero';
   const embeddedBottom = embedded && !hero;
   const hasRecentPlugins = recentPlugins.length > 0;
-  const selectedModelLabel = 'Kimi-K2.7-Code';
+  const selectedModelLabel = tier === 'fast' ? '快速' : '高级';
+  const canOpenContext = showContextButton && canInspectContext;
   return (
     <div className={cn(
       hero ? 'w-full' : 'shrink-0',
@@ -189,7 +215,38 @@ export function CreatorComposer({
       )}
       <div className={CREATOR_COLUMN_CLASS}>
         <div className="rounded-2xl bg-[#1c1c1e] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.3)] sm:p-4">
-        <Textarea
+          {workspacePluginId && (
+            <div className="mb-3 flex min-w-0 items-center justify-between gap-2 rounded-xl bg-[#232326] px-3 py-2 text-[#a0a0a3]">
+              <div className="flex min-w-0 items-center gap-2">
+                <FolderOpenIcon className="size-4 shrink-0" />
+                <span className="shrink-0 text-xs font-medium">工作文件夹</span>
+                <span className="truncate font-mono text-[11px]" title={workspacePath ?? workspacePluginId}>
+                  {workspacePath ?? workspacePluginId}
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={onRefreshWorkspace}
+                  title="从工作文件夹刷新"
+                  aria-label="从工作文件夹刷新"
+                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[#2f2f32] hover:text-[#e5e5e5]"
+                >
+                  <RefreshCwIcon className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenWorkspace}
+                  title="打开工作文件夹"
+                  aria-label="打开工作文件夹"
+                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[#2f2f32] hover:text-[#e5e5e5]"
+                >
+                  <FolderOpenIcon className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+          <Textarea
           placeholder="今天帮你做些什么？@ 引用对话文件，/ 调用技能与指令"
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
@@ -206,13 +263,13 @@ export function CreatorComposer({
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <ComposerTagButton
-              active={thinking}
+              active={mode === 'plan'}
               disabled={busy}
               icon={BrainIcon}
-              onClick={onToggleThinking}
-              title={thinking ? 'Plan 已开启' : '开启 Plan'}
+              onClick={() => onModeChange(mode === 'plan' ? 'agent' : 'plan')}
+              title={mode === 'plan' ? '切换到 Agent 模式' : '切换到 Plan 模式'}
             >
-              Plan
+              {mode === 'plan' ? 'Plan' : 'Agent'}
             </ComposerTagButton>
             <Popover>
               <PopoverTrigger render={
@@ -223,7 +280,6 @@ export function CreatorComposer({
                   className="inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium text-[#a0a0a3] transition-colors duration-150 hover:bg-[#2a2a2c] hover:text-[#e5e5e5] focus-visible:ring-2 focus-visible:ring-[#55565a] disabled:cursor-not-allowed disabled:text-[#5a5a5c]"
                 />
               }>
-                <span className="inline-flex size-4 shrink-0 items-center justify-center rounded bg-[#2a2a2c] text-[10px] font-semibold text-[#a0a0a3]">K</span>
                 <span className="max-w-[8.75rem] truncate">{selectedModelLabel}</span>
                 <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
               </PopoverTrigger>
@@ -247,12 +303,24 @@ export function CreatorComposer({
                 ))}
               </PopoverContent>
             </Popover>
+            <ComposerTagButton
+              active={activeSkillCount > 0}
+              disabled={busy}
+              icon={SparklesIcon}
+              onClick={onOpenSkills}
+              title={`技能（已启用 ${activeSkillCount} 个）`}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                技能
+                <span className="rounded bg-[#2a2a2c] px-1.5 py-0.5 font-mono text-[10px] leading-none text-[#a0a0a3]">{activeSkillCount}</span>
+              </span>
+            </ComposerTagButton>
             {hasRecentPlugins ? (
               <Popover>
                 <PopoverTrigger render={
                   <button
                     type="button"
-                    title="调用技能"
+                    title={referencedPlugin ? `已引用插件：${referencedPlugin.name}` : '引用已有插件'}
                     className={cn(
                       'inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium transition-colors duration-150',
                       referencedPlugin
@@ -261,8 +329,8 @@ export function CreatorComposer({
                     )}
                   />
                 }>
-                  <SparklesIcon className="size-4 shrink-0" />
-                  <span className="truncate">{referencedPlugin?.name ?? '技能'}</span>
+                  <AtSignIcon className="size-4 shrink-0" />
+                  <span className="truncate">选择插件</span>
                   <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
                 </PopoverTrigger>
                 <PopoverContent className="w-64 rounded-xl border-[#2a2a2c] bg-[#1c1c1e] shadow-md" align="start">
@@ -295,34 +363,27 @@ export function CreatorComposer({
                 </PopoverContent>
               </Popover>
             ) : (
-              <ComposerTagButton disabled icon={SparklesIcon} title="暂无可调用技能">
-                技能
+              <ComposerTagButton disabled icon={AtSignIcon} title="暂无可引用插件">
+                选择插件
               </ComposerTagButton>
             )}
-            <ComposerTagButton
-              disabled={busy || !showContextButton || !canInspectContext}
-              icon={AtSignIcon}
-              onClick={showContextButton && canInspectContext ? onOpenContext : undefined}
-              title={canInspectContext ? '连接应用上下文' : '先发送一次对话再连接应用上下文'}
-            >
-              连应用
-            </ComposerTagButton>
           </div>
           <div className="flex shrink-0 items-center justify-end gap-1.5">
+            {compressHint && <span className="hidden font-mono text-[10px] text-[#6f7076] md:inline">{compressHint}</span>}
             <ComposerIconButton
-              disabled={busy || !showContextButton || !canInspectContext}
-              onClick={showContextButton && canInspectContext ? onOpenContext : undefined}
-              title={canInspectContext ? '打开上下文' : '先发送一次对话再查看上下文'}
+              disabled={busy || !canOpenContext}
+              onClick={canOpenContext ? onOpenContext : undefined}
+              title={canOpenContext ? '打开上下文' : '当前无法查看上下文'}
             >
               <CircleIcon className="size-5" />
             </ComposerIconButton>
             <ComposerIconButton disabled={busy} onClick={onPickFiles} title="上传附件">
               <PlusIcon className="size-5" />
             </ComposerIconButton>
-            <ComposerIconButton active={thinking} disabled={busy} onClick={onToggleThinking} title={thinking ? '关闭提示优化' : '提示词优化'}>
-              <SparklesIcon className="size-5" />
+            <ComposerIconButton active={optimizingPrompt} disabled={busy || optimizingPrompt || !input.trim()} onClick={onOptimizePrompt} title="优化提示词">
+              <SparklesIcon className={cn('size-5', optimizingPrompt && 'animate-pulse')} />
             </ComposerIconButton>
-            <ComposerIconButton disabled title="语音输入">
+            <ComposerIconButton active={voiceListening} disabled={busy} onClick={onToggleVoice} title={voiceListening ? '停止语音输入' : '语音输入'}>
               <MicIcon className="size-5" />
             </ComposerIconButton>
             {busy ? (

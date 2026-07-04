@@ -270,6 +270,14 @@ export function openPluginsRoot(): Promise<void> {
 }
 
 /**
+ * 打开指定插件的工作目录（plugins_root/<pluginId>/）。
+ * Rust 侧会先校验 pluginId 并确保目录存在，避免前端拼路径越界。
+ */
+export function openPluginDir(pluginId: string): Promise<void> {
+  return tauriInvoke<void>('open_plugin_dir', { pluginId });
+}
+
+/**
  * 读取插件存放根目录路径（PRD 需求 6 / AC7）。
  *
  * 组A Rust 后端契约（get_plugins_root）：

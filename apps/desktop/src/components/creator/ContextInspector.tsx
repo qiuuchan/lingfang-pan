@@ -58,69 +58,71 @@ export function ContextInspector({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-h-[85vh] max-w-3xl">
+      <DialogContent className="max-h-[85vh] max-w-3xl border-[#2a2a2c] bg-[#101012] p-0 text-[#e5e5e5] shadow-[0_24px_80px_rgba(0,0,0,0.5)]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <EyeIcon className="size-4" />
-            上下文窗口
+          <DialogTitle className="flex items-center gap-2 border-b border-[#242426] px-5 py-4 text-base">
+            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-[#1c1c1e] text-[#d7d7db]">
+              <EyeIcon className="size-4" />
+            </span>
+            <span>上下文窗口</span>
           </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="max-h-[calc(85vh-80px)]">
-          <div className="space-y-3 pr-4">
+        <ScrollArea className="max-h-[calc(85vh-64px)]">
+          <div className="space-y-3 p-5 pr-6">
             {/* === 总览仪表盘（Claude Code 风格：两个并排指标） === */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* 模型窗口占用 */}
-              <div className="rounded-lg border bg-card p-3">
-                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <div className="rounded-xl border border-[#2a2a2c] bg-[#18181a] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#a0a0a3]">
                   <GaugeIcon className="size-3.5" />
                   模型窗口
                 </div>
                 {winPct !== null ? (
                   <>
                     <div className="mb-1 flex items-baseline justify-between">
-                      <span className="font-mono text-lg font-semibold tabular-nums">{winPct}%</span>
-                      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{(modelTokens ?? tok.total).toLocaleString()} / {contextWindow!.toLocaleString()}</span>
+                      <span className="font-mono text-lg font-semibold tabular-nums text-[#f4f4f5]">{winPct}%</span>
+                      <span className="font-mono text-[11px] text-[#8a8a8f] tabular-nums">{(modelTokens ?? tok.total).toLocaleString()} / {contextWindow!.toLocaleString()}</span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div className="h-2 overflow-hidden rounded-full bg-[#2a2a2c]">
                       <div
                         className={cn(
                           'h-full rounded-full transition-all',
-                          winPct > 90 ? 'bg-gradient-to-r from-red-500 to-red-600' : winPct > 70 ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-green-500',
+                          winPct > 90 ? 'bg-red-500' : winPct > 70 ? 'bg-amber-500' : 'bg-emerald-500',
                         )}
                         style={{ width: `${winPct}%` }}
                       />
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm text-muted-foreground">未知窗口大小<br /><span className="font-mono text-xs">~{(modelTokens ?? tok.total).toLocaleString()} tokens</span></div>
+                  <div className="text-sm text-[#8a8a8f]">未知窗口大小<br /><span className="font-mono text-xs">~{(modelTokens ?? tok.total).toLocaleString()} tokens</span></div>
                 )}
               </div>
 
               {/* 压缩进度（OpenCode 风格：距离下次压缩） */}
-              <div className="rounded-lg border bg-card p-3">
-                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <div className="rounded-xl border border-[#2a2a2c] bg-[#18181a] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#a0a0a3]">
                   <LayersIcon className="size-3.5" />
                   压缩进度
                 </div>
                 <div className="mb-1 flex items-baseline justify-between">
-                  <span className="font-mono text-lg font-semibold tabular-nums">{Math.min(100, ci.pct)}%</span>
+                  <span className="font-mono text-lg font-semibold tabular-nums text-[#f4f4f5]">{Math.min(100, ci.pct)}%</span>
                   <span className={cn(
-                    'font-mono text-[11px] tabular-nums',
-                    compressStatus === 'critical' && 'text-red-600 dark:text-red-400',
-                    compressStatus === 'warning' && 'text-amber-600 dark:text-amber-400',
+                    'font-mono text-[11px] tabular-nums text-[#8a8a8f]',
+                    compressStatus === 'critical' && 'text-red-400',
+                    compressStatus === 'warning' && 'text-amber-400',
                   )}>
                     {ci.remainingChars > 0
                       ? `还需 ${ci.remainingChars.toLocaleString()} 字符`
                       : '已达阈值，下次将压缩'}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-2 overflow-hidden rounded-full bg-[#2a2a2c]">
                   <div
                     className={cn(
                       'h-full rounded-full transition-all',
-                      compressStatus === 'critical' ? 'bg-gradient-to-r from-red-500 to-red-600'
-                        : compressStatus === 'warning' ? 'bg-gradient-to-r from-amber-500 to-orange-500'
-                          : 'bg-gradient-to-r from-sky-500 to-blue-500',
+                      compressStatus === 'critical' ? 'bg-red-500'
+                        : compressStatus === 'warning' ? 'bg-amber-500'
+                          : 'bg-sky-500',
                     )}
                     style={{ width: `${Math.min(100, ci.pct)}%` }}
                   />
@@ -138,7 +140,7 @@ export function ContextInspector({
             >
               {/* 堆叠总条 */}
               {tok.total > 0 && (
-                <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full bg-[#2a2a2c]">
                   <SegPct value={tok.system} total={tok.total} className="bg-blue-500" />
                   {tok.summary > 0 && <SegPct value={tok.summary} total={tok.total} className="bg-purple-500" />}
                   <SegPct value={tok.history} total={tok.total} className="bg-emerald-500" />
@@ -162,7 +164,7 @@ export function ContextInspector({
               expanded={expandedSections.has('system')}
               onToggle={() => toggle('system')}
             >
-              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs leading-relaxed">{breakdown.systemPrompt}</pre>
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-[#101012] p-3 font-mono text-xs leading-relaxed text-[#d7d7db]">{breakdown.systemPrompt}</pre>
             </Section>
 
             {/* 历史摘要 */}
@@ -174,7 +176,7 @@ export function ContextInspector({
                 expanded={expandedSections.has('summary')}
                 onToggle={() => toggle('summary')}
               >
-                <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs leading-relaxed">{breakdown.summary}</pre>
+                <pre className="whitespace-pre-wrap break-words rounded-lg bg-[#101012] p-3 font-mono text-xs leading-relaxed text-[#d7d7db]">{breakdown.summary}</pre>
               </Section>
             )}
 
@@ -188,15 +190,15 @@ export function ContextInspector({
             >
               <div className="space-y-2">
                 {breakdown.keptTurns.map((t, i) => (
-                  <div key={i} className="rounded border bg-background p-2">
+                  <div key={i} className="rounded-lg border border-[#2a2a2c] bg-[#101012] p-2.5">
                     <div className="mb-1 flex items-center gap-1.5">
                       <span className={cn(
                         'inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium',
-                        t.role === 'user' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+                        t.role === 'user' ? 'bg-sky-500/10 text-sky-300' : 'bg-[#252528] text-[#a0a0a3]',
                       )}>{t.role === 'user' ? '用户' : 'AI'}</span>
-                      <span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">{t.content.length.toLocaleString()} 字符</span>
+                      <span className="font-mono text-[10px] text-[#6f7076] tabular-nums">{t.content.length.toLocaleString()} 字符</span>
                     </div>
-                    <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{t.content.slice(0, 500)}{t.content.length > 500 ? '…' : ''}</pre>
+                    <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-[#d7d7db]">{t.content.slice(0, 500)}{t.content.length > 500 ? '…' : ''}</pre>
                   </div>
                 ))}
               </div>
@@ -210,7 +212,7 @@ export function ContextInspector({
               expanded={expandedSections.has('input')}
               onToggle={() => toggle('input')}
             >
-              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs leading-relaxed">{breakdown.currentInput}</pre>
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-[#101012] p-3 font-mono text-xs leading-relaxed text-[#d7d7db]">{breakdown.currentInput}</pre>
             </Section>
           </div>
         </ScrollArea>
@@ -232,9 +234,9 @@ function TokenLegend({ label, value, total, color }: { label: string; value: num
   return (
     <div className="flex items-center gap-1.5">
       <span className={cn('size-2.5 shrink-0 rounded-sm', color)} />
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-[#a0a0a3]">{label}</span>
       <span className="ml-auto font-mono tabular-nums">{value.toLocaleString()}</span>
-      <span className="font-mono text-muted-foreground/60 tabular-nums">{pct.toFixed(0)}%</span>
+      <span className="font-mono text-[#6f7076] tabular-nums">{pct.toFixed(0)}%</span>
     </div>
   );
 }
@@ -255,20 +257,20 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border bg-card">
+    <div className="overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a]">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
+        className="flex w-full items-center gap-2 px-3.5 py-3 text-left transition-colors hover:bg-[#202023]"
       >
-        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <Icon className="size-4 shrink-0 text-[#8a8a8f]" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">{title}</div>
-          <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{subtitle}</div>
+          <div className="text-sm font-medium text-[#e5e5e5]">{title}</div>
+          <div className="font-mono text-[11px] text-[#8a8a8f] tabular-nums">{subtitle}</div>
         </div>
-        {expanded ? <ChevronUpIcon className="size-4 shrink-0" /> : <ChevronDownIcon className="size-4 shrink-0" />}
+        {expanded ? <ChevronUpIcon className="size-4 shrink-0 text-[#8a8a8f]" /> : <ChevronDownIcon className="size-4 shrink-0 text-[#8a8a8f]" />}
       </button>
-      {expanded && <div className="border-t px-3 py-3">{children}</div>}
+      {expanded && <div className="border-t border-[#2a2a2c] px-3.5 py-3">{children}</div>}
     </div>
   );
 }
