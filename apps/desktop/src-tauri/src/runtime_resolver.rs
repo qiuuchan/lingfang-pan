@@ -39,7 +39,7 @@ pub(crate) const PLAYWRIGHT_DOWNLOAD_HOST: &str = "https://cdn.npmmirror.com/bin
 /// 运行时来源（供 UI 状态展示 + 日志）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RuntimeSource {
-    /// exe 同级 runtimes/ 或 dev 源码路径内置（0.0.17 唯一来源）。
+    /// exe 同级 runtimes/ 或 dev 源码路径内置（0.0.18 唯一来源）。
     Legacy,
 }
 
@@ -250,7 +250,7 @@ fn resolve_node<R: tauri::Runtime>(
     None
 }
 
-/// 内置 runtimes 根目录（0.0.17 唯一来源）。
+/// 内置 runtimes 根目录（0.0.18 唯一来源）。
 ///
 /// 来源优先级：`LINGFANG_EMBEDDED_RUNTIME_DIR` 环境变量 → exe 同级 runtimes/（发布安装包布局）
 /// → dev 源码路径（CARGO_MANIFEST_DIR/../runtimes）。

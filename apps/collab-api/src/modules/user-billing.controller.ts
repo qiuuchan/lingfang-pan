@@ -1,7 +1,7 @@
-// UserBillingController —— 前台用户侧计费端点（/api/me/api-keys + /api/teams/current/credits）。
+// UserBillingController —— 前台团队侧计费端点（/api/teams/current/api-keys + /api/teams/current/credits）。
 //
 // 设计（见 docs/billing-and-relay-design.md §11.5.2）：
-//  - API Key 自助：/api/me/api-keys（创建/列表/吊销），归属当前团队。
+//  - 团队共享 API Key：/api/teams/current/api-keys（列表/轮换/吊销），仅团队管理员可操作。
 //  - 团队灵石：/api/teams/current/credits（余额+流水），权限 team.credits.view。
 import { Body, Controller, Delete, Get, Inject, Param, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -15,32 +15,35 @@ import { ApiKeyCreateDto } from './dto/billing.dto';
 
 @ApiTags('UserBilling')
 @ApiBearerAuth()
-@Controller('me/api-keys')
-export class UserApiKeyController {
+@Controller('teams/current/api-keys')
+export class TeamApiKeyController {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PlatformApiKeyService) private readonly apiKeys: PlatformApiKeyService,
   ) {}
 
   @Get()
-  @ApiOperation({ summary: '当前团队的 API Key 列表（脱敏）' })
+  @RequirePermission('team.api_key.manage')
+  @ApiOperation({ summary: '当前团队共享 API Key 列表（脱敏）' })
   async list(@Req() req: Request) {
     const membership = await this.auth.ensureCurrentTeam(requireUser(req).id);
-    return this.apiKeys.listForUser(requireUser(req).id, membership.team.id);
+    return this.apiKeys.listForTeam(membership.team.id);
   }
 
   @Post()
-  @ApiOperation({ summary: '创建 API Key（明文仅返回一次）' })
+  @RequirePermission('team.api_key.manage')
+  @ApiOperation({ summary: '轮换当前团队共享 API Key（明文仅返回一次）' })
   async create(@Req() req: Request, @Body() body: ApiKeyCreateDto) {
     const membership = await this.auth.ensureCurrentTeam(requireUser(req).id);
-    return this.apiKeys.createForUser(requireUser(req).id, membership.team.id, body);
+    return this.apiKeys.rotateForTeamAdmin(requireUser(req).id, membership.team.id, body);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: '吊销当前团队的 API Key' })
+  @RequirePermission('team.api_key.manage')
+  @ApiOperation({ summary: '吊销当前团队共享 API Key' })
   async revoke(@Req() req: Request, @Param('id') id: string) {
     const membership = await this.auth.ensureCurrentTeam(requireUser(req).id);
-    return this.apiKeys.revokeForUser(requireUser(req).id, membership.team.id, id);
+    return this.apiKeys.revokeForTeamAdmin(requireUser(req).id, membership.team.id, id);
   }
 }
 

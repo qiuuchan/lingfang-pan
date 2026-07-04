@@ -49,7 +49,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function Settings({
-  // 受控 Tab：默认 'cli'，支持父组件（如新手任务清单「去设置 → 模型服务」）定向跳转。
+  // 受控 Tab：默认 'cli'，支持父组件（如新手任务清单「去设置 → 模型与计费」）定向跳转。
   value,
   onValueChange,
 }: {
@@ -186,7 +186,7 @@ export function Settings({
               </TabsContent>
             )}
 
-            {/* Tab2：模型与计费（团队灵石 + API Key + 版本，替代旧 BYOK ModelGatewayTab） */}
+            {/* Tab2：模型与计费（只读模型版本 + 调用边界说明；不提供普通成员 API Key 配置） */}
             {currentTab === 'gateway' && (
               <TabsContent value="gateway" keepMounted className="mt-4 focus-visible:outline-none">
                 <BillingTab />

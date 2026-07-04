@@ -107,17 +107,18 @@ Generated drafts preview in a sandboxed iframe using `srcDoc`. Published databas
 
 Runtime rule:
 - Builtin plugin capabilities go through Tauri `invoke_capability`.
-- Database plugin `llm.chat` goes through `/llm/proxy`.
+- Database and builtin plugin AI capabilities go through the host bridge and platform relay (`/api/relay/v1/*`) with the current app login state or local script bridge token.
 - Unsupported capabilities must fail explicitly; do not pretend they succeeded.
-- Iframe messages must be bound to the active `Runner` plugin. The host ignores message-provided `pluginId` and sends `plugin.id` to Tauri or `/llm/proxy`.
-- The host injects `globalThis.__lingfangInvoke(capability,args)`; SDK-style `sdk.llm.chat` accepts `{ messages, model }`.
+- Iframe messages must be bound to the active `Runner` plugin. The host ignores message-provided `pluginId` and sends `plugin.id` to Tauri or relay.
+- The host injects `globalThis.__lingfangInvoke(capability,args)`; SDK-style AI calls are `sdk.llm.chat({ messages, model })` and `sdk.image.generate({ prompt, model, size, n })`.
+- Plugin UI/config must not expose API Key, API URL, baseUrl, provider, custom endpoint, Authorization header, bridge token, or upstream model service address. `model` remains allowed only as a platform model id such as `fast` or `premium`.
 - Plugin list loading may combine builtin and database sources, but source failures must be shown in-page instead of silently becoming an empty list.
 
 Reference files:
 - `apps/desktop/src/pages/Generator.tsx`
 - `apps/desktop/src/pages/Plugins.tsx`
 - `apps/desktop/src-tauri/src/capability.rs`
-- `apps/collab-api/src/modules/plugins.controller.ts` (LLM 代理 `/llm/proxy`，已由 apps/server 迁移至 apps/collab-api)
+- `apps/collab-api/src/modules/relay/relay.controller.ts`
 
 ## Scenario: Plugin Iframe Runtime Bridge
 
@@ -126,25 +127,32 @@ Reference files:
 
 ### 2. Signatures
 - Host bridge: `globalThis.__lingfangInvoke(capability: string, args: unknown) -> Promise<unknown>`
-- Database LLM call: `sdk.llm.chat({ messages, model }) -> Promise<string>`
-- Host proxy body: `{ plugin_id: plugin.id, messages, model }`
+- Chat call: `sdk.llm.chat({ messages, model }) -> Promise<string>`
+- Image call: `sdk.image.generate({ prompt, model, size, n }) -> Promise<{ images: string[] }>`
+- Host relay chat body: `{ model: 'fast' | 'premium', messages, stream: false }`
+- Host relay image body: `{ model: 'fast' | 'premium', prompt, n, size }`
 
 ### 3. Contracts
 - Host validates `ev.source === iframe.contentWindow`.
 - Host uses the active `LoadedPlugin.id`, not any `pluginId` included by iframe code.
 - Builtin plugins call Tauri `invoke_capability` with `{ pluginId: plugin.id, kind, args }`.
 - Database plugins may call only supported runtime capabilities; unsupported calls post an error reply.
+- `llm.chat` and `image.generate` require the plugin manifest capability. Missing capability fails before relay.
+- AI capability args may include `model`, but the host normalizes it to the platform tier (`premium` only when explicitly requested; otherwise `fast`).
+- Plugins never receive or persist platform API Key/JWT/local bridge token values.
 
 ### 4. Validation & Error Matrix
 - Message from another frame -> ignored.
 - Missing bridge -> SDK throws explicit bridge-not-injected error.
-- Database plugin calls non-`llm.chat` capability -> explicit error reply.
+- Database plugin calls unsupported capability -> explicit error reply.
+- Plugin calls `llm.chat` / `image.generate` without declaring the matching capability -> explicit error reply.
+- Plugin asks for API Key/API URL/provider configuration -> generation/prompt contract violation; remove the setting and use SDK AI capability.
 - Builtin or database source load fails -> page error text; do not fake an empty source.
 
 ### 5. Good/Base/Bad Cases
 - Good: malicious iframe sends another `pluginId`; host still invokes with active `plugin.id`.
-- Base: summarizer calls `sdk.llm.chat({ messages, model })`.
-- Bad: `sdk.llm.chat(messages, model)` or bare browser import from `@lingfang/plugin-sdk`.
+- Base: summarizer calls `sdk.llm.chat({ messages, model })`; image plugin calls `sdk.image.generate({ prompt, model })`.
+- Bad: `sdk.llm.chat(messages, model)`, direct `fetch` to an LLM provider, or any plugin settings field for API Key/API URL/provider.
 
 ### 6. Tests Required
 - `pnpm -C apps/desktop typecheck`

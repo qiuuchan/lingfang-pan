@@ -254,6 +254,73 @@ const role = await prisma.role.findUnique({ where: { id: teamRoleId }, select: {
 if (role?.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE) return true;
 ```
 
+## Scenario: Team Shared Relay API Key And Plugin AI Boundary
+
+### 1. Scope / Trigger
+- Trigger: 改 `PlatformApiKeyService`、`TeamApiKeyController`、`DualAuthGuard`、relay 鉴权、桌面设置/团队管理 API Key UI、插件 SDK AI 能力或生成提示词。
+
+### 2. Signatures
+- `GET /api/teams/current/api-keys -> { apiKeys: PlatformApiKeyPublic[] }`，需 `team.api_key.manage`
+- `POST /api/teams/current/api-keys ApiKeyCreateDto -> PlatformApiKeyCreated`，需 `team.api_key.manage`
+- `DELETE /api/teams/current/api-keys/:id -> { ok: true }`，需 `team.api_key.manage`
+- `PlatformApiKeyService.rotateForTeamAdmin(userId, teamId, { name?, scopes? }) -> PlatformApiKeyCreated`
+- 插件 AI 调用只允许：`sdk.llm.chat({ messages, model })` 与 `sdk.image.generate({ prompt, model, size, n })`
+
+### 3. Contracts
+- 普通成员和插件不得创建、查看、配置、保存或展示 API Key、API URL、baseUrl、provider、自定义模型接口或上游模型服务地址。
+- 团队共享 Key 只给外部 relay 兼容接入使用；插件/Agent 运行时通过宿主桥、本地桥 token 或登录态进入 `/api/relay/v1/*`。
+- `POST /api/teams/current/api-keys` 是轮换，不是追加创建：同团队所有 `ACTIVE` Key 先置为 `DISABLED`，再创建一个 `expiresAt=null` 的新 Key。
+- 明文 `plaintextKey` 只在轮换响应返回一次；列表和管理端总览永远不返回 `plaintextKey` 或 `keyHash`。
+- `model` 可以保留，但只表示平台模型标识（如 `fast` / `premium`），不得承载上游真实模型、地址或 provider 配置。
+
+### 4. Validation & Error Matrix
+- 无登录态 -> 401（全局鉴权）
+- 无 `team.api_key.manage` -> 403 `forbidden`
+- 当前用户无 ACTIVE 当前团队 -> 403/业务错误（由 `ensureCurrentTeam` 保持现有语义）
+- DELETE 非本团队 Key -> 404 `api_key_not_found`
+- `scopes` 为空或全是未知值 -> 默认 `['*']`
+- relay Bearer `lf_...` 无效/禁用/过期 -> `api_key_invalid` / `api_key_disabled`
+
+### 5. Good/Base/Bad Cases
+- Good: 团队管理员轮换 Key，旧 active Key 立即禁用，新 Key 明文只显示一次，外部系统用新 Key 调 relay。
+- Base: 插件调用 `sdk.llm.chat({ messages, model: 'fast' })`，宿主用登录态转发到 relay，插件代码里没有密钥字段。
+- Bad: 设置页或插件配置页出现 API Key/API URL/provider 输入框，或继续暴露 `/api/me/api-keys` 给普通用户自助创建。
+
+### 6. Tests Required
+- `api-key.service.spec.ts`: 轮换会禁用同团队 active Key、新 Key `expiresAt=null`、响应不含 `keyHash`。
+- `api-key.service.spec.ts`: `listForTeam` 只返回脱敏字段。
+- `pnpm -C apps/collab-api test` 覆盖后端回归；跨层 UI/SDK 改动还需桌面、contract、plugin-sdk typecheck。
+
+### 7. Wrong vs Correct
+Wrong:
+
+```ts
+await api('/api/me/api-keys', { method: 'POST', body: { name, scopes } });
+```
+
+Correct:
+
+```ts
+await api('/api/teams/current/api-keys', {
+  method: 'POST',
+  body: { name: '团队共享 Key', scopes: ['*'] },
+});
+```
+
+Wrong:
+
+```ts
+await fetch(userConfiguredApiUrl, {
+  headers: { Authorization: `Bearer ${userConfiguredApiKey}` },
+});
+```
+
+Correct:
+
+```ts
+await sdk.llm.chat({ messages, model: 'fast' });
+```
+
 ## Wrong vs Correct
 
 Wrong:

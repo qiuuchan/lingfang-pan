@@ -24,7 +24,7 @@ export function ApiKeysView() {
   }
 
   return (
-    <Section title="API Key 总览" description="全平台 API Key（平台发放，用于调 /api/relay/*）。仅支持吊销；创建由用户/团队在客户端完成。">
+    <Section title="API Key 总览" description="全平台 API Key（平台发放，用于调 /api/relay/*）。仅支持吊销；团队共享 Key 由团队管理员在桌面端轮换。">
       <Table>
         <TableHeader><TableRow><TableHead>Key 前缀</TableHead><TableHead>名称</TableHead><TableHead>团队</TableHead><TableHead>scopes</TableHead><TableHead>最近使用</TableHead><TableHead>状态</TableHead><TableHead className="w-[80px]">操作</TableHead></TableRow></TableHeader>
         <TableBody>

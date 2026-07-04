@@ -107,7 +107,7 @@ Authorization: Bearer <token>
 | GET | `/api/admin/billing/call-logs[?teamId&capability&status&...]` | 调用日志多维度查询 |
 | GET/DELETE | `/api/admin/billing/api-keys[/:id]` | API Key 总览/吊销 |
 | GET | `/api/admin/billing/relay-docs` | 接入文档（markdown） |
-| GET/POST/DELETE | `/api/me/api-keys[/:id]` | 当前团队 API Key 自助管理 |
+| GET/POST/DELETE | `/api/teams/current/api-keys[/:id]` | 当前团队共享 API Key 列表/轮换/吊销（需 `team.api_key.manage`） |
 | GET | `/api/teams/current/credits[/ledger]` | 当前团队灵石 |
 
 ## 插件云端分享 API

@@ -101,6 +101,22 @@ export interface BalanceLedger {
   createdAt: string;
 }
 
+export interface PlatformApiKeyPublic {
+  id: string;
+  teamId: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  status: 'ACTIVE' | 'DISABLED';
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface PlatformApiKeyCreated extends PlatformApiKeyPublic {
+  plaintextKey: string;
+}
+
 export type AssistantOutputStream = 'stdout' | 'stderr' | 'thought' | 'tool';
 
 export interface DraftTurnSegment {

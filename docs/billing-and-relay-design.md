@@ -20,8 +20,8 @@
 1. 参考 one-api / openai-forward，在 collab-api 内建 **OpenAI 兼容 + Anthropic 兼容** 的中转层，用 **OpenAI SDK + Anthropic SDK** 双协议转发。
 2. 引入虚拟货币 **灵石（Credit）**，按团队账户计费，**每模型单价后台全可配**（按 token / 按次 / 按张）。
 3. 所有系统提示词强制注入"AI 能力调用必须且仅能使用灵坊平台服务"规则。
-4. **平台发放 API Key**，后台管理多**渠道**并按公司/用户组限定适用范围；内置接入文档。
-5. 前台**移除自定义模型**，仅保留"**快速版 / 高级版**"两个后台配置的固定版本。
+4. **平台发放团队共享 API Key**，仅团队管理员轮换/吊销；插件与 Agent 不读取、不展示、不保存 Key。
+5. 前台**移除 API Key/API URL/provider/自定义端点配置**；插件仍可传平台模型标识（如 `fast` / `premium`）。
 6. 详尽**调用日志**，多维度查询。
 
 ---
@@ -30,9 +30,9 @@
 
 ```
 ┌─────────────────────────── apps/desktop（前台） ────────────────────────────┐
-│  创建器/聊天：仅「快速版/高级版」开关 → model='fast'|'premium'              │
-│  设置页：我的 API Key 管理 + 团队灵石余额（替代旧 ModelGatewayTab）          │
-│  Rust 运行时：apiUrl 指向 {backend}/api/relay，鉴权=平台 JWT 或 API Key      │
+│  创建器/聊天/生图：保留平台 model 标识（如 fast/premium），不暴露上游配置     │
+│  设置页：只读模型版本说明；团队共享 API Key 仅在团队管理页由管理员轮换        │
+│  运行时：插件/Agent 通过宿主桥或登录态调用 {backend}/api/relay               │
 └───────────────────────────────────┬─────────────────────────────────────────┘
                                      │  OpenAI/Anthropic 协议（含 SSE 流）
 ┌──────────────────────────── ▼ apps/collab-api ──────────────────────────────┐
@@ -139,9 +139,9 @@
 - 路由见 §4.3 步骤 3：范围命中 + 模型/版本命中 + 优先级 + 权重 + 故障转移（one-api 范式）。
 
 ### 6.2 平台 API Key
-- **不支持用户自定义接口**：删除桌面 `ModelGatewayTab` 的"填自己的 apiKey"。改为"**我的 API Key**"自助管理：`/api/me/api-keys`（GET 列表 / POST 创建 / DELETE 吊销）。创建时生成 `lf_<random>`，**明文仅返回一次**，库存 `sha256`（`keyHash`）。
-- Key 归属团队（`teamId`），消费扣该团队灵石。`scopes` 白名单限定能力（`chat`/`image`/`tier:fast`/`tier:premium`）。
-- 管理端 `/api/admin/api-keys` 提供全局总览/吊销（不做代创建）。
+- **不支持用户自定义接口**：桌面和插件不得提供 API Key、API URL、baseUrl、provider 或自定义模型接口配置。插件调用大模型/生图只能使用平台 SDK 能力，允许传 `model`，但它只能是平台模型标识。
+- 团队共享 Key 由团队管理员管理：`/api/teams/current/api-keys`（GET 列表 / POST 轮换 / DELETE 吊销，需 `team.api_key.manage`）。轮换时先禁用本团队 active Key，再生成新的无过期 `lf_<random>`，明文仅返回一次，库存只存 `sha256`（`keyHash`）。
+- Key 归属团队（`teamId`），用于外部 relay 兼容接入；插件和 Agent 不读取该 Key，运行时使用宿主桥、本地桥 token 或登录态进入 relay。管理端 `/api/admin/api-keys` 提供全局总览/吊销（不做代创建）。
 
 ### 6.3 接入文档（需求 #4 末点）
 - 后台内置"接入指引"页（`/api/admin/relay-docs` 返回 markdown，前端 `relay-docs-view.tsx` 用既有 `<Markdown>` 渲染）：覆盖 base url、鉴权头、chat/生图请求体示例、快速版/高级版 model 取值、错误码、灵石计费说明——**AI 插件开发者直接照抄**。文档源放 `apps/collab-api/src/modules/relay-docs.content.ts`，随版本一起维护。
@@ -197,9 +197,9 @@
 | **P1 Relay 核心** | `RelayController/Service` + `OpenAi/AnthropicForwarder` + 流式透传 + 版本路由 + 系统提示词注入 + 事务计费/日志 | `modules/relay.controller.ts`、`relay.service.ts`、`forwarders/*.ts` |
 | **P2 灵石账户** | `CreditService`（余额/流水/注册赠送/调整）+ 团队/个人余额接口 + `402` 错误链路 | `modules/credit.service.ts`、`credits.controller.ts` |
 | **P3 渠道与定价** | `ChannelService` + `ChannelRouterService` + `ModelPricing/Tier` CRUD + 渠道健康测试 | `modules/channel.service.ts`、`channel.controller.ts` |
-| **P4 API Key** | `PlatformApiKeyService` + `/api/me/api-keys` + `/api/admin/api-keys` | `modules/api-key.service.ts` |
+| **P4 API Key** | `PlatformApiKeyService` + `/api/teams/current/api-keys` + `/api/admin/api-keys` | `modules/api-key.service.ts` |
 | **P5 管理后台页** | collab-admin 新增视图：渠道、计费、版本、灵石、调用日志、接入文档；`NAV_GROUPS` 扩"计费与模型"分组 | `apps/collab-admin/src/components/{channels,billing,tiers,credits,call-logs,relay-docs}-view.tsx`、`lib/navigation.ts` |
-| **P6 桌面前台** | 删 `ModelGatewayTab` → "我的 API Key + 灵石余额"Tab；创建器改快速/高级版开关；Rust 重指向 relay | `pages/settings/*`、`lib/plugin-draft/providers.ts`、`src-tauri/src/llm_credentials.rs`、`code_assistant.rs` |
+| **P6 桌面前台** | 删 `ModelGatewayTab` → 设置页只读模型版本；团队共享 Key 进入团队管理页；插件/Agent 通过平台 SDK/relay 调用模型 | `pages/settings/*`、`pages/team-admin/*`、`lib/agent/*`、`packages/plugin-sdk/src/index.ts` |
 | **P7 生图与插件 SDK** | relay 生图端点 + `sdk.image.generate()` + ai-wardrobe 重写 + 接入文档 | `relay.service.ts`(image)、`packages/plugin-sdk/src/index.ts`、`builtin-plugins/ai-wardrobe/api.py` |
 | **P8 清理** | 弃用 `TenantLlmBinding`/`LlmGateway` drop；更新 `docs/03`、`collab-api.md`、`collab-desktop-client.md`、`02-domain` | 文档 |
 
@@ -361,10 +361,9 @@
 │ │  当前余额        8,200 灵石                                    │  │
 │ │  [查看流水 ▾]（展开最近 20 条：+注册赠送/-chat/sonnet/-image） │  │
 │ └────────────────────────────────────────────────────────────────┘  │
-│ ┌ 🔑 我的 API Key ──────────────────────────────────────────────┐  │
-│ │ 调用平台 AI 服务用的密钥（外部脚本/插件接入）。               │  │
-│ │ lf_3f9a****   测试key   [chat,fast]   06-22   [复制][吊销]    │  │
-│ │                                              [+ 新建 API Key] │  │
+│ ┌ 🔑 团队共享 API Key（团队管理页，仅管理员）──────────────────────┐  │
+│ │ 外部 relay 兼容接入使用；插件和 Agent 不读取、不展示此 Key。     │  │
+│ │ lf_3f9a****   团队共享 Key   [全部能力]   06-22   [轮换][吊销]  │  │
 │ └────────────────────────────────────────────────────────────────┘  │
 │ ┌ ℹ️ 模型版本 ──────────────────────────────────────────────────┐  │
 │ │ 当前可用：● 快速版（gpt-4o-mini）  ● 高级版（claude-sonnet）  │  │
@@ -373,7 +372,7 @@
 └────────────────────────────────────────────────────────────────────┘
 ```
 - **余额 Card**：`GET /api/teams/current/credits` → `Shimmer` 骨包余额 + `StaggerContainer` 流水（直接套 `Wallet.tsx` 的视觉范式，把 `centsToYuan` 换成"灵石整数"）。**不再有"填 apiKey"输入框**。
-- **API Key Card**：`GET /api/me/api-keys` 列表（`keyPrefix`+`name`+scopes Badge）。"新建"Dialog：名称 + scopes Checkbox(chat/image/tier:fast/tier:premium) → `POST /api/me/api-keys` → **明文 key 仅在创建 Dialog 内显示一次** + 复制按钮 + "请妥善保管"提示（仿业界 API Key 创建范式）。
+- **团队共享 API Key Card**：在团队管理页展示，需 `team.api_key.manage`。`GET /api/teams/current/api-keys` 列表（`keyPrefix`+`name`+scopes Badge）；`POST /api/teams/current/api-keys` 轮换并只在本次返回明文；`DELETE /api/teams/current/api-keys/:id` 吊销。
 - **模型版本 Card**：`GET /api/relay/v1/models` 回显 label，只读。
 
 #### ② 创建器/聊天模型选择器（`components/creator/*`、`plugin-draft/providers.ts`）
@@ -431,9 +430,9 @@ pnpm collab:api:seed              # seed 渠道/版本/定价 + 管理员
 pnpm collab:api:dev               # 起 NestJS（含 /api/docs Swagger）
 
 # P1/P2 闭环冒烟（curl）
-# 1) 创建平台 API Key（JWT 登录后）
-curl -X POST http://127.0.0.1:3000/api/me/api-keys -H 'Authorization: Bearer <jwt>' \
-  -d '{"name":"test","scopes":["chat","tier:fast"]}'
+# 1) 团队管理员轮换团队共享 API Key（JWT 登录后）
+curl -X POST http://127.0.0.1:3000/api/teams/current/api-keys -H 'Authorization: Bearer <jwt>' \
+  -d '{"name":"团队共享 Key","scopes":["*"]}'
 # 2) 经 relay 调快速版聊天（流式）
 curl -N http://127.0.0.1:3000/api/relay/v1/chat/completions \
   -H 'Authorization: Bearer lf_xxx' -H 'Content-Type: application/json' \
@@ -444,7 +443,7 @@ curl -N http://127.0.0.1:3000/api/relay/v1/chat/completions \
 pnpm collab:admin:dev             # 渠道/定价/灵石/日志 各页 CRUD + 查询
 
 # 桌面
-pnpm dev:desktop                  # 创建器仅"快速/高级版"开关；设置页显灵石余额+API Key
+pnpm dev:desktop                  # 创建器保留平台 model；设置页只读模型版本；团队管理页轮换共享 Key
 ```
 
 **单测要点**（沿用现有 `*.spec.ts`）：
