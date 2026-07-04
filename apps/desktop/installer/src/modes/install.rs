@@ -58,7 +58,7 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         .to_string();
     let app = InstallerApp {
         install_dir,
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: paths::VERSION.to_string(),
         phase: Phase::Confirm,
         custom_mode: false,
         create_desktop: true,
