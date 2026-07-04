@@ -6,10 +6,11 @@
 // 纯展示组件（不可编辑——状态由模型驱动，用户只看进度），与 ToolCallCard 风格一致。
 import { useState } from 'react';
 import {
-  ChevronUpIcon, Loader2Icon, CheckCircle2Icon, CircleIcon, ListChecksIcon, PlayCircleIcon,
+  ChevronUpIcon, Loader2Icon, CheckCircle2Icon, CircleIcon, ListChecksIcon,
 } from 'lucide-react';
 import type { TodoItem } from '@/lib/agent/tools';
 import { cn } from '@/lib/utils';
+import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 
 const PRIORITY_STYLE: Record<TodoItem['priority'], string> = {
   high: 'border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400',
@@ -35,109 +36,105 @@ export function TodoPanel({ todos, streaming }: { todos: TodoItem[]; streaming?:
   const currentItem = todos.find((t) => t.status === 'in_progress');
 
   return (
-    <div className="shrink-0 px-6">
-      <div className="mx-auto max-w-3xl">
+    <div className="shrink-0 px-5 py-4 sm:px-8 lg:px-10">
+      <div className={CREATOR_COLUMN_CLASS}>
         <div
           className={cn(
-            'overflow-hidden rounded-xl border shadow-lg backdrop-blur-md transition-all duration-200',
+            'overflow-hidden rounded-xl border shadow-[0_12px_30px_rgba(0,0,0,0.2)] transition-colors duration-200',
             open
-              ? 'border-border/50 bg-card/90 shadow-black/10'
-              : 'border-border/40 bg-card/70 shadow-black/5',
+              ? 'border-[#2a2a2c] bg-[#18181a]'
+              : 'border-[#2a2a2c] bg-[#18181a]',
           )}
         >
           {/* 折叠条（点击展开/收起） */}
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="group flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-muted/30"
+            className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[#202023]"
           >
-            <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/40 bg-background/70">
-              <ListChecksIcon className="size-3.5 shrink-0 text-primary" />
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[#303034] bg-[#202023]">
+              <ListChecksIcon className="size-4 shrink-0 text-[#d9d9dd]" />
             </span>
             <span className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="text-xs font-semibold text-foreground">任务清单</span>
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground/70">
+              <span className="text-sm font-semibold text-[#f0f0f2]">任务清单</span>
+              <span className="shrink-0 font-mono text-xs text-[#b8b8bd]">
                 {done}/{total}
               </span>
               {/* 折叠时显示当前进行项，让用户一眼看到 AI 在做什么 */}
               {!open && currentItem && (
-                <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
-                  <span className="text-muted-foreground/40">·</span>
-                  <Loader2Icon className="size-3 shrink-0 animate-spin text-primary" />
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-[#c4c4c8]">
+                  <span className="text-[#5a5a5c]">·</span>
+                  <Loader2Icon className="size-3.5 shrink-0 animate-spin text-[#f0f0f2]" />
                   <span className="truncate">{currentItem.content}</span>
                 </span>
               )}
             </span>
             {/* 进度条（折叠态紧凑显示在文字旁） */}
-            <div className="hidden h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted/60 sm:block">
+            <div className="hidden h-1.5 w-28 shrink-0 overflow-hidden rounded-full bg-[#2a2a2c] sm:block">
               <div
                 className={cn(
                   'h-full rounded-full transition-all duration-500',
-                  allDone
-                    ? 'bg-gradient-to-r from-green-500 to-emerald-500'
-                    : 'bg-gradient-to-r from-primary to-primary/80',
+                  allDone ? 'bg-[#e5e5e5]' : 'bg-[#d9d9dd]',
                 )}
                 style={{ width: `${pct}%` }}
               />
             </div>
             <span className={cn(
-              'flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums',
+              'flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums',
               allDone
-                ? 'border-green-600/30 bg-green-500/10 text-green-600 dark:text-green-400'
-                : 'border-primary/30 bg-primary/10 text-primary',
+                ? 'border-[#6f6f75]/50 bg-[#2a2a2c] text-[#e5e5e5]'
+                : 'border-[#6f6f75]/50 bg-[#2a2a2c] text-[#f5f5f7]',
             )}>
-              {hasActive ? <Loader2Icon className="size-3 animate-spin" /> : allDone ? <CheckCircle2Icon className="size-3" /> : <CircleIcon className="size-3" />}
+              {hasActive ? <Loader2Icon className="size-3.5 animate-spin" /> : allDone ? <CheckCircle2Icon className="size-3.5" /> : <CircleIcon className="size-3.5" />}
               {pct}%
             </span>
-            <ChevronUpIcon className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-200', !open && 'rotate-180')} />
+            <ChevronUpIcon className={cn('size-4 shrink-0 text-[#8d8d92] transition-transform duration-200', !open && 'rotate-180')} />
           </button>
 
           {/* 展开明细（向上展开） */}
           {open && (
-            <div className="border-t border-border/25 bg-muted/10 px-3.5 py-2.5">
+            <div className="border-t border-[#2a2a2c] bg-[#151517] px-4 py-4">
               {/* 顶部进度概览条（展开态） */}
               <div className="mb-2.5 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted/60">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#2a2a2c]">
                   <div
                     className={cn(
                       'h-full rounded-full transition-all duration-500',
-                      allDone
-                        ? 'bg-gradient-to-r from-green-500 to-emerald-500'
-                        : 'bg-gradient-to-r from-primary to-primary/80',
+                      allDone ? 'bg-[#e5e5e5]' : 'bg-[#d9d9dd]',
                     )}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums">{pct}%</span>
+                <span className="shrink-0 font-mono text-[11px] text-[#b8b8bd] tabular-nums">{pct}%</span>
               </div>
-              <ul className="max-h-52 space-y-0.5 overflow-y-auto pr-1">
+              <ul className="max-h-60 space-y-1 overflow-y-auto pr-3">
                 {todos.map((t, i) => {
                   const isCurrent = t.status === 'in_progress';
                   return (
                     <li
                       key={i}
                       className={cn(
-                        'flex items-start gap-2 rounded-md px-2 py-1.5 text-xs transition-colors',
-                        isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30',
+                        'flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
+                        isCurrent ? 'bg-[#202023]' : 'hover:bg-[#202023]',
                       )}
                     >
                       <span className="mt-0.5 shrink-0">
                         {t.status === 'completed' ? (
-                          <CheckCircle2Icon className="size-3.5 text-green-600 dark:text-green-400" />
+                          <CheckCircle2Icon className="size-4 text-[#e5e5e5]" />
                         ) : isCurrent ? (
-                          <Loader2Icon className="size-3.5 animate-spin text-primary" />
+                          <Loader2Icon className="size-4 animate-spin text-[#f0f0f2]" />
                         ) : (
-                          <CircleIcon className="size-3.5 text-muted-foreground/40" />
+                          <CircleIcon className="size-4 text-[#6f7076]" />
                         )}
                       </span>
                       <span
                         className={cn(
-                          'min-w-0 flex-1 leading-5',
+                          'min-w-0 flex-1 leading-6',
                           t.status === 'completed'
-                            ? 'text-muted-foreground/50 line-through'
+                            ? 'text-[#a0a0a3] line-through'
                             : isCurrent
-                              ? 'font-medium text-foreground'
-                              : 'text-muted-foreground',
+                              ? 'font-medium text-[#f0f0f2]'
+                              : 'text-[#c4c4c8]',
                         )}
                       >
                         {t.content}

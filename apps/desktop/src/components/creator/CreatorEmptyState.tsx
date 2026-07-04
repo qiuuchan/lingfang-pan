@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { SparklesIcon, Code2Icon, BookOpenIcon, WandSparklesIcon, PenLineIcon, HeartIcon } from 'lucide-react';
+import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 
 const EMBEDDED_EXAMPLES = [
   { icon: Code2Icon, title: '代码工具', prompt: '做一个带界面的代码格式化插件，支持多种语言' },
@@ -27,21 +28,20 @@ export function CreatorEmptyState({
   if (!embedded) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
-        <div className="relative">
-          <div className="absolute inset-0 animate-pulse rounded-full bg-primary/20 blur-xl" />
-          <SparklesIcon className="relative size-12 text-primary" />
+        <div className="flex size-12 items-center justify-center rounded-md border border-border bg-card">
+          <SparklesIcon className="size-6 text-foreground" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-medium text-foreground">AI 插件创建器</h3>
+          <h3 className="text-lg font-semibold text-foreground">AI 插件创建器</h3>
           <p className="max-w-md text-sm text-muted-foreground">描述你想做的插件，AI 流式生成完整代码。支持多轮对话追问修改，直到满意为止。</p>
         </div>
-        <div className="flex flex-wrap justify-center gap-2.5">
+        <div className="flex flex-wrap justify-center gap-2">
           {FLOATING_PRESETS.map((preset) => (
             <button
               key={preset}
               type="button"
               onClick={() => onSelectPreset(preset)}
-              className="rounded-lg border border-border bg-background/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent hover:text-primary hover:shadow-md"
+              className="rounded-md border border-border bg-card px-3.5 py-2 font-mono text-xs text-muted-foreground transition-colors duration-150 hover:border-muted-foreground/40 hover:bg-accent hover:text-foreground"
             >
               {preset}
             </button>
@@ -52,10 +52,11 @@ export function CreatorEmptyState({
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col items-center justify-center gap-8 text-center">
+    <div className={`${CREATOR_COLUMN_CLASS} flex h-full flex-col items-center justify-center gap-8 text-center`}>
       <div className="space-y-3">
-        <div className="mx-auto flex size-12 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
-          <SparklesIcon className="size-6 text-primary" />
+        <div className="mx-auto inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+          <SparklesIcon className="size-3.5 text-foreground" />
+          agent · 创建插件
         </div>
         <h1 className="text-4xl font-semibold tracking-tight text-foreground">想做什么插件？</h1>
         <p className="mx-auto max-w-xl text-base leading-7 text-muted-foreground">
@@ -64,7 +65,7 @@ export function CreatorEmptyState({
       </div>
       {composer}
       {/* 例子卡片网格：点击直接填入输入框。 */}
-      <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid w-full max-w-3xl grid-cols-2 gap-2.5 sm:grid-cols-3">
         {EMBEDDED_EXAMPLES.map((example) => {
           const Icon = example.icon;
           return (
@@ -72,13 +73,13 @@ export function CreatorEmptyState({
               key={example.title}
               type="button"
               onClick={() => onSelectPreset(example.prompt)}
-              className="group flex flex-col items-start gap-2 rounded-xl border border-border bg-card/60 p-4 text-left shadow-sm backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-md"
+              className="group flex flex-col items-start gap-2 rounded-md border border-border bg-card p-3.5 text-left transition-colors duration-150 hover:border-muted-foreground/40 hover:bg-accent"
             >
-              <span className="flex size-9 items-center justify-center rounded-lg bg-accent text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                <Icon className="size-4.5" />
+              <span className="flex size-8 items-center justify-center rounded-md border border-border bg-muted text-foreground transition-colors group-hover:border-primary group-hover:bg-primary group-hover:text-primary-foreground">
+                <Icon className="size-4" />
               </span>
               <span className="text-sm font-medium text-foreground">{example.title}</span>
-              <span className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{example.prompt}</span>
+              <span className="line-clamp-2 font-mono text-[11px] leading-relaxed text-muted-foreground">{example.prompt}</span>
             </button>
           );
         })}
