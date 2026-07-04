@@ -70,3 +70,5 @@ pnpm-lock.yaml
 
 # R4 换装逻辑来源（独立工具脚本，仅作复刻参考，不入仓）
 ai换装版本批量版.py
+.workbuddy/
+.codebuddy/settings.local.json
