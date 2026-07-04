@@ -1,0 +1,23 @@
+{
+  "id": "builtin.ai-example",
+  "name": "AI 能力实例",
+  "version": "0.1.0",
+  "description": "演示插件通过平台 SDK 调用大模型对话与生图能力。",
+  "runtime_type": "client",
+  "entry": "index.html",
+  "capabilities": [
+    {
+      "kind": "llm.chat",
+      "reason": "通过平台模型生成对话回复",
+      "risk": "medium",
+      "requires_admin": false
+    },
+    {
+      "kind": "image.generate",
+      "reason": "通过平台模型生成图片",
+      "risk": "medium",
+      "requires_admin": false
+    }
+  ],
+  "visibility": "tenant"
+}

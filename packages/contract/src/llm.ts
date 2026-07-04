@@ -1,6 +1,10 @@
-// LLM 相关契约（单 provider 云分发 + 无 provider UI）。
+// LLM 相关契约（旧 BYOK/provider 兼容层）。
 //
-// 设计（见 06-14-model-gateway-final-single-provider）：
+// 当前产品主链路已迁移到 `billing.ts` 的平台 relay：插件、Agent、桌面创建器均走
+// `/api/relay/v1/*`，用户界面不再提供个人 API Key / API URL / provider 配置。
+// 本文件保留旧 provider/binding schema 供历史类型引用；新模型调用契约不要从这里新增入口。
+//
+// 旧设计（06-14-model-gateway-final-single-provider）曾包含：
 //  - 应用界面零 provider 概念：用户只看到「一个 apiKey 输入 + 拉取模型 + 模型选择」。
 //  - 平台 Admin 维护多 provider（LlmGateway 表）+ 设一个「当前启用」（isActive=true，全表最多一条）。
 //  - 应用拉取当前启用 provider 的 apiUrl，用户填 key 用它。Admin 切 provider，用户无感知（重填 key + 拉模型）。

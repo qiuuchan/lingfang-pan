@@ -170,6 +170,9 @@ export const TEAM_MODULES: PermissionModuleDef[] = [
   defineModule('TEAM', 'team.credits', '团队灵石', 62, [
     { code: 'team.credits.view', label: '查看团队灵石', description: '查看本团队灵石余额与流水（AI 用量计费）' },
   ]),
+  defineModule('TEAM', 'team.api_key', 'AI 接入密钥', 64, [
+    { code: 'team.api_key.manage', label: '管理 AI 接入密钥', description: '轮换或吊销本团队用于平台 relay 接入的共享 API Key' },
+  ]),
   defineModule('TEAM', 'team.profile', '团队资料', 70, [
     { code: 'team.profile.update', label: '编辑团队资料', description: '编辑本团队名称、简介、公开加入开关' },
   ]),

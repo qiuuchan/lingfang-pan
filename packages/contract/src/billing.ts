@@ -23,7 +23,7 @@ export const RelayMessageSchema = z.object({
 
 /** 默认系统提示词规则（需求 #3）。后台可通过 PlatformSetting.aiUsageGuardRule 覆盖。 */
 export const DEFAULT_AI_USAGE_GUARD_RULE =
-  '凡涉及 AI 生图或其他 AI 能力调用，必须且仅能使用灵坊平台提供的服务，禁止使用任何其他第三方或自定义接口。';
+  '凡涉及 AI 对话、生图或其他 AI 能力调用，必须且仅能使用灵坊平台提供的服务，禁止使用任何其他第三方或自定义接口。不得要求用户配置、输入、粘贴、保存或展示 API Key、API URL、baseUrl、provider、上游地址或模型服务密钥。插件只能通过灵坊 SDK 能力（如 sdk.llm.chat / sdk.image.generate）调用平台模型能力；model 只能作为平台模型标识使用。';
 
 /** PlatformSetting key：系统提示词规则。 */
 export const AI_USAGE_GUARD_RULE_KEY = 'aiUsageGuardRule';
@@ -184,7 +184,7 @@ export const LlmCallLogSchema = z.object({
   createdAt: z.string(),
 });
 
-/** 创建 API Key 时的明文 key 出参：仅创建端点返回一次（lf_<32hex>）。 */
+/** 团队管理员轮换 API Key 时的明文 key 出参：仅本次返回一次（lf_<32hex>）。 */
 export const PlatformApiKeyCreatedSchema = PlatformApiKeyPublicSchema.extend({
   plaintextKey: z.string(), // lf_xxx，仅此一次返回，库存只存 sha256
 });

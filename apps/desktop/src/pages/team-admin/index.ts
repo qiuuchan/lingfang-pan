@@ -3,4 +3,5 @@ export { MembersTab } from './MembersTab';
 export { RolesTab } from './RolesTab';
 export { PluginGrantsTab } from './PluginGrantsTab';
 export { InvitationsTab } from './InvitationsTab';
+export { TeamApiKeysTab } from './TeamApiKeysTab';
 export { OverviewSkeleton } from './shared';

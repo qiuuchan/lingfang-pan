@@ -155,7 +155,8 @@ export const sdk = {
     screenshot: () => invoke<string>('system.screenshot', {}),
     notify: (title: string, body?: string) => invoke<void>('system.notify', { title, body }),
   },
-  // 不含 base_url / key / 供应商：实际路由到租户绑定的第三方网关（见 docs/03）。
+  // 不含 apiKey / apiUrl / baseUrl / provider：实际路由由平台 relay + 团队渠道配置决定。
+  // model 仅是平台模型标识（fast / premium），不是上游地址或密钥配置。
   llm: {
     chat: (input: ChatInput) => invoke<string>('llm.chat', input),
   },

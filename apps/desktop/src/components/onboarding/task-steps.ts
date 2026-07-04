@@ -3,7 +3,7 @@
 // 每步：图标 + 标题 + 说明 + 跳转目标 View +（Settings 页落地 Tab）。
 // 步骤顺序即推荐完成顺序，调整顺序会改变 localStorage 进度数组语义（按下标存），故顺序稳定。
 
-import { CpuIcon, KeyRoundIcon, MessageSquareIcon, EyeIcon, UploadCloudIcon } from 'lucide-react';
+import { CpuIcon, SparklesIcon, MessageSquareIcon, EyeIcon, UploadCloudIcon } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsTab, View } from '@/lib/types';
 
@@ -26,9 +26,9 @@ export const TASK_STEPS: TaskStep[] = [
     settingsTab: 'cli',
   },
   {
-    icon: KeyRoundIcon,
-    title: '配置模型服务',
-    description: '前往「设置 → 模型服务」填写你的 API 密钥并拉取可用模型。',
+    icon: SparklesIcon,
+    title: '确认模型服务',
+    description: '前往「设置 → 模型与计费」查看平台模型版本；密钥由管理员统一维护。',
     view: 'settings',
     settingsTab: 'gateway',
   },
