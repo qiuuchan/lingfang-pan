@@ -11,11 +11,21 @@ import { XIcon, SendIcon, Loader2Icon, PlusIcon, CheckCircle2Icon, Trash2Icon, E
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, tauriInvoke } from '@/lib/api';
+import { chatComplete, type ChatMessage } from '@/lib/relay-chat-stream';
+import { getPluginsRoot, openPluginDir, openPluginsRoot, writePluginFiles } from '@/lib/plugin-status';
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { runPluginCreatorAgent } from '@/lib/agent/creator-adapter';
 import type { AskQuestionArgs, AskQuestionResult, TodoItem } from '@/lib/agent/tools';
 import type { AgentMessagePart } from '@/lib/agent/creator-adapter';
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
+import {
+  buildPromptOptimizerMessages,
+  composeModelInput,
+  creatorModePrompt,
+  formatAttachmentContext,
+  summarizeAttachmentDisplay,
+  type CreatorMode,
+} from '@/lib/plugin-creator/creator-input';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
 import { TodoPanel } from '@/components/creator/TodoPanel';
@@ -176,11 +186,33 @@ interface Turn {
    * 新流程文本/思考/工具/提问全部按时序进 parts，content 仅作为旧数据回退与兜底占位。
    */
   content: string;
+  /** 发给模型的完整内容。用户气泡可只显示摘要，附件全文放这里进入上下文。 */
+  modelContent?: string;
   /** 仅 assistant：本轮是否仍在流式输出中。 */
   streaming?: boolean;
   status?: 'generating' | 'done' | 'failed' | 'cancelled';
   /** 结构化片段：按时序排列的 文本 / 思考 / 工具调用 / 提问卡片。 */
   parts?: TurnPart[];
+}
+
+type ContextBreakdown = {
+  systemPrompt: string;
+  summary: string;
+  keptTurns: Array<{ role: string; content: string }>;
+  currentInput: string;
+  estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+  compressInfo: { threshold: number; currentChars: number; remainingChars: number; pct: number };
+};
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: { resultIndex?: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
 }
 
 function cleanTurn(turn: unknown): Turn | null {
@@ -202,6 +234,19 @@ function cleanTurn(turn: unknown): Turn | null {
   return next;
 }
 
+function stripModelContent(turn: Turn): Turn {
+  const persisted = { ...turn };
+  delete persisted.modelContent;
+  return persisted;
+}
+
+function sanitizeConversationForStorage(conversation: CreatorConversation): CreatorConversation {
+  return {
+    ...conversation,
+    turns: conversation.turns.map(stripModelContent),
+  };
+}
+
 interface CreatorConversation {
   id: string;
   title: string;
@@ -210,6 +255,8 @@ interface CreatorConversation {
   updatedAt: string;
   /** 当前暂存的 AI 草稿（关窗重开 / 切回该会话时恢复右侧预览面板，修复重开右侧栏消失）。 */
   stagedDraft?: StagedPlugin | null;
+  /** 当前对话绑定的插件工作目录 id（plugins_root/{id}）。AI 工具 Read/Write/RunPlugin 以它为准。 */
+  workspacePluginId?: string | null;
   /** 用户在右侧面板改过的字段（与 stagedDraft 合并成展示用 draft）。 */
   userEdits?: Partial<StagedPlugin>;
   /** TodoWrite 工具维护的任务清单（跨轮延续，随会话持久化到 localStorage）。 */
@@ -252,6 +299,7 @@ function loadConversations(userId: string | null, tenantId: string | null): Crea
         createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
         updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
         stagedDraft: (record.stagedDraft ?? null) as StagedPlugin | null,
+        workspacePluginId: typeof record.workspacePluginId === 'string' ? record.workspacePluginId : null,
         userEdits: record.userEdits && typeof record.userEdits === 'object' ? record.userEdits as Partial<StagedPlugin> : undefined,
         todos: normalizeTodos(record.todos),
       }];
@@ -263,7 +311,10 @@ function loadConversations(userId: string | null, tenantId: string | null): Crea
 
 function saveConversations(userId: string | null, tenantId: string | null, conversations: CreatorConversation[]) {
   try {
-    localStorage.setItem(conversationKey(userId, tenantId), JSON.stringify(conversations.slice(0, 30)));
+    localStorage.setItem(
+      conversationKey(userId, tenantId),
+      JSON.stringify(conversations.slice(0, 30).map(sanitizeConversationForStorage)),
+    );
   } catch {
     /* localStorage 配额不足时放弃历史保存，当前对话仍可继续 */
   }
@@ -276,6 +327,94 @@ function makeConversationTitle(text: string) {
 
 const SYSTEM_PROMPT = CREATOR_CONTEXT_PROMPT;
 
+function defaultEntryForRuntime(runtime: StagedPlugin['runtime_type']) {
+  if (runtime === 'python') return 'main.py';
+  if (runtime === 'nodejs') return 'index.js';
+  return 'ui/index.html';
+}
+
+function normalizeLoadedRuntime(runtime: LoadedPlugin['runtime_type']): StagedPlugin['runtime_type'] {
+  return runtime === 'python' || runtime === 'nodejs' ? runtime : 'client';
+}
+
+function recordFromMaybeJson(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object') return value as Record<string, unknown>;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+const KNOWN_CAPABILITY_KINDS = new Set([
+  'ui.view',
+  'fs.pick',
+  'fs.read',
+  'fs.write',
+  'net.fetch',
+  'clipboard',
+  'llm.chat',
+  'image.generate',
+  'storage.kv',
+  'system.info',
+  'system.screenshot',
+  'system.notify',
+  'plugin.upload',
+  'plugin.submitMarketplace',
+]);
+
+function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const rawKind = typeof item === 'string'
+      ? item.trim()
+      : item && typeof item === 'object' && typeof (item as Record<string, unknown>).kind === 'string'
+        ? String((item as Record<string, unknown>).kind).trim()
+        : '';
+    if (!KNOWN_CAPABILITY_KINDS.has(rawKind)) {
+      return [];
+    }
+    const raw = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const risk = raw.risk === 'none' || raw.risk === 'medium' || raw.risk === 'high' ? raw.risk : 'low';
+    return [{
+      kind: rawKind,
+      reason: typeof raw.reason === 'string' ? raw.reason : '',
+      risk,
+      requires_admin: raw.requires_admin === true,
+    } as StagedPlugin['capabilities'][number]];
+  });
+}
+
+function stagedPluginFromLoadedPlugin(plugin: LoadedPlugin, files = plugin.files ?? []): StagedPlugin {
+  const manifestFile = files.find((file) => file.path === 'manifest.json');
+  const fileManifest = recordFromMaybeJson(manifestFile?.content);
+  const pluginManifest = recordFromMaybeJson(plugin.manifest);
+  const manifest = { ...pluginManifest, ...fileManifest };
+  const runtime = normalizeLoadedRuntime((manifest.runtime_type as LoadedPlugin['runtime_type']) ?? plugin.runtime_type);
+  const stringField = (key: string, fallback: string) => {
+    const value = manifest[key];
+    return typeof value === 'string' && value.trim() ? value : fallback;
+  };
+  return withSyncedStagedManifest({
+    id: plugin.id,
+    name: stringField('name', plugin.name || plugin.id),
+    version: stringField('version', plugin.version || '0.1.0'),
+    description: stringField('description', plugin.description || ''),
+    runtime_type: runtime,
+    entry: stringField('entry', plugin.entry || defaultEntryForRuntime(runtime)),
+    visibility: manifest.visibility === 'private' ? 'private' : 'tenant',
+    capabilities: normalizeCapabilities(manifest.capabilities ?? plugin.capabilities),
+    files,
+  });
+}
+
+function joinDisplayPath(root: string | null, pluginId: string | null) {
+  if (!root || !pluginId) return pluginId;
+  return `${root.replace(/[\\/]+$/, '')}\\${pluginId}`;
+}
+
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
@@ -287,14 +426,19 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
+  const [creatorMode, setCreatorMode] = useState<CreatorMode>('agent');
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(true); // 「思考」模式默认开启：让模型更深入推理（systemPrompt 追加引导）
+  const [optimizingPrompt, setOptimizingPrompt] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyPage, setHistoryPage] = useState(0); // R3：历史列表分页页码（0-based）
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null); // R3：行内删除二次确认态
   const [skillDialogOpen, setSkillDialogOpen] = useState(false); // Skill 居中悬浮窗开关（R3：由小 Popover 改为居中 Dialog + 背景模糊）
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
+  const [workspacePluginId, setWorkspacePluginId] = useState<string | null>(null); // 当前对话绑定的插件工作目录 id。
+  const [pluginsRoot, setPluginsRoot] = useState<string | null>(null); // 展示工作目录路径用，真相源仍在 Rust。
   const [compressing, setCompressing] = useState(false); // 压缩中指示
   const [uploadingViaTool, setUploadingViaTool] = useState(false); // agent 工具暂存草稿中指示
   const [searchingQuery, setSearchingQuery] = useState<string | null>(null); // agent WebSearch 联网搜索中指示（展示关键词）
@@ -307,16 +451,12 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const [userEdits, setUserEdits] = useState<Partial<StagedPlugin>>({});
   const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
   const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
-  const [contextBreakdown, setContextBreakdown] = useState<{ systemPrompt: string; summary: string; keptTurns: Array<{ role: string; content: string }>; currentInput: string; estimatedTokens: { system: number; summary: number; history: number; input: number; total: number }; compressInfo: { threshold: number; currentChars: number; remainingChars: number; pct: number } } | null>(null); // 上下文查看面板数据
+  const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null); // 上下文查看面板数据
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false); // 上下文查看面板开关
   const [todos, setTodos] = useState<TodoItem[]>([]); // 当前会话的 TodoWrite 任务清单（随会话持久化）
-  // 网络慢检测：流式进行中但长时间（>12s）无新 token 时，状态条提示「网络较慢」。
-  // lastTokenAt 记录最近一次收到流式增量的时间；netSlowTimerRef 定时检查并切换 networkSlow。
-  const lastTokenAtRef = useRef<number>(0);
-  const [networkSlow, setNetworkSlow] = useState(false);
-  const netSlowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const compressRef = useRef(emptyCompressState());
   const abortRef = useRef<AbortController | null>(null);
+  const speechRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null); // 文件/文件夹选择（支持多次累积）
   const [selectedFiles, setSelectedFiles] = useState<Array<{ id: string; name: string; file: File }>>([]); // 已选文件列表
@@ -345,6 +485,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     const synced = withSyncedStagedManifest(next);
     draftRef.current = synced;
     currentPluginIdRef.current = pluginId;
+    setWorkspacePluginId(pluginId);
     setStagedDraft((prev) => {
       if (prev && prev.id !== next.id) setUserEdits({});
       return synced;
@@ -361,12 +502,12 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const currentPluginIdRef = useRef<string | null>(draft?.id ?? null);
   useEffect(() => {
     draftRef.current = draft;
-    currentPluginIdRef.current = draft?.id ?? null;
-  }, [draft]);
+    currentPluginIdRef.current = workspacePluginId ?? draft?.id ?? null;
+  }, [draft, workspacePluginId]);
 
   // Write/Edit 工具直接改 plugins_root，需要从真实目录重载文件刷新右侧预览。
-  async function refreshDraftFromRoot(pluginId = currentPluginIdRef.current) {
-    if (!pluginId) return;
+  async function refreshDraftFromRoot(pluginId = currentPluginIdRef.current): Promise<boolean> {
+    if (!pluginId) return false;
     try {
       const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
       const files = await Promise.all(
@@ -377,22 +518,26 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       );
       const manifestRaw = files.find((f) => f.path === 'manifest.json')?.content ?? '{}';
       const manifest = JSON.parse(manifestRaw) as Partial<StagedPlugin> & { id?: string };
+      const runtime = normalizeLoadedRuntime(manifest.runtime_type);
       const next: StagedPlugin = withSyncedStagedManifest({
         id: manifest.id || pluginId,
         name: manifest.name || pluginId,
         version: manifest.version || '0.1.0',
         description: manifest.description || '',
-        runtime_type: manifest.runtime_type || 'client',
-        entry: manifest.entry || 'ui/index.html',
+        runtime_type: runtime,
+        entry: manifest.entry || defaultEntryForRuntime(runtime),
         visibility: manifest.visibility || 'tenant',
-        capabilities: manifest.capabilities || [],
+        capabilities: normalizeCapabilities(manifest.capabilities),
         files,
       });
       draftRef.current = next;
-      currentPluginIdRef.current = next.id;
+      currentPluginIdRef.current = pluginId;
+      setWorkspacePluginId(pluginId);
       setStagedDraft(next);
+      return true;
     } catch (e) {
       console.error('刷新草稿失败:', e);
+      return false;
     }
   }
 
@@ -400,6 +545,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   function onDraftSubmitted(name: string) {
     setPublishedName(name);
     setStagedDraft(null);
+    setWorkspacePluginId(null);
     setUserEdits({});
     toast.success(`草稿「${name}」已保存到本地`);
   }
@@ -462,22 +608,37 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setTurns(active?.turns ?? []);
     // 恢复右侧草稿面板：关窗重开 / 重登后，回填上次暂存的草稿与用户编辑（修复重开右侧栏消失）。
     setStagedDraft(active?.stagedDraft ?? null);
+    setWorkspacePluginId(active?.workspacePluginId ?? active?.stagedDraft?.id ?? null);
     setUserEdits(active?.userEdits ?? {});
     setTodos(active?.todos ?? []);
   }, [session.userId, session.tenantId]);
 
   useEffect(() => {
+    let cancelled = false;
+    void getPluginsRoot()
+      .then((root) => {
+        if (!cancelled) setPluginsRoot(root);
+      })
+      .catch(() => {
+        if (!cancelled) setPluginsRoot(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     // turns 为空但有草稿（如刚导入未对话）也应持久化，故放宽空判定为「两者皆空才跳过」。
-    if (!activeConversationId || (turns.length === 0 && !stagedDraft)) return;
+    if (!activeConversationId || (turns.length === 0 && !stagedDraft && !workspacePluginId)) return;
     setConversations((prev) => {
       const now = new Date().toISOString();
       const next = prev.map((conversation) => conversation.id === activeConversationId
-        ? { ...conversation, turns, stagedDraft, userEdits, todos: todos.length ? todos : undefined, updatedAt: now }
+        ? { ...conversation, turns, stagedDraft, workspacePluginId, userEdits, todos: todos.length ? todos : undefined, updatedAt: now }
         : conversation);
       saveConversations(session.userId, session.tenantId, next);
       return next;
     });
-  }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, userEdits, todos]);
+  }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, workspacePluginId, userEdits, todos]);
 
   function ensureConversation(firstUserText: string) {
     if (activeConversationId) return activeConversationId;
@@ -512,6 +673,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setPublishedName(null);
     // 切回该会话时恢复其暂存草稿与用户编辑（右侧栏随之重现）。
     setStagedDraft(conversation.stagedDraft ?? null);
+    setWorkspacePluginId(conversation.workspacePluginId ?? conversation.stagedDraft?.id ?? null);
     setUserEdits(conversation.userEdits ?? {});
     setTodos(conversation.todos ?? []);
     compressRef.current = emptyCompressState();
@@ -534,6 +696,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setReferencedPlugin(null);
     setPublishedName(null);
     setStagedDraft(null);
+    setWorkspacePluginId(null);
     setUserEdits({});
     setTodos([]);
     compressRef.current = emptyCompressState();
@@ -573,6 +736,149 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const usedTokens = contextBreakdown?.estimatedTokens.total
     ?? Math.round(turns.reduce((s, t) => s + t.content.length, 0) / 1.5);
   const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
+  const compressInfo = contextBreakdown?.compressInfo;
+  const compressHint = compressInfo
+    ? (compressInfo.remainingChars > 0
+      ? `还差 ${compressInfo.remainingChars.toLocaleString()} 字压缩`
+      : '下次将压缩')
+    : undefined;
+
+  function buildContextPreviewBreakdown(args: {
+    historyTurns: Array<{ role: 'user' | 'assistant'; content: string }>;
+    currentInput: string;
+    systemPrompt: string;
+  }): ContextBreakdown {
+    const threshold = 5000;
+    const summary = compressRef.current.summary;
+    const historyChars = args.historyTurns.reduce((sum, turn) => sum + turn.content.length, 0);
+    return {
+      systemPrompt: args.systemPrompt,
+      summary,
+      keptTurns: args.historyTurns,
+      currentInput: args.currentInput,
+      estimatedTokens: {
+        system: Math.ceil(args.systemPrompt.length / 1.5),
+        summary: Math.ceil(summary.length / 1.5),
+        history: Math.ceil(historyChars / 1.5),
+        input: Math.ceil(args.currentInput.length / 1.5),
+        total: Math.ceil((args.systemPrompt.length + summary.length + historyChars + args.currentInput.length) / 1.5),
+      },
+      compressInfo: {
+        threshold,
+        currentChars: historyChars,
+        remainingChars: threshold - historyChars,
+        pct: threshold > 0 ? Math.round((historyChars / threshold) * 100) : 0,
+      },
+    };
+  }
+
+  function buildSystemPrompt() {
+    const basePrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
+    const modePrompt = creatorModePrompt(creatorMode);
+    const thinkPrompt = thinking
+      ? `\n\n# 思考模式（已开启）\n请对需求做更深入的分析与推理：先拆解需求要点、权衡实现方案、再生成更严谨完整的代码。宁可多花时间也要保证质量与边界处理。`
+      : '';
+    const refPrompt = referencedPlugin?.files?.length
+      ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
+      : '';
+    const draftPrompt = draft?.files?.length
+      ? `\n\n# 当前草稿（用户正在编辑）\n` +
+        `插件名：${draft.name}\n版本：${draft.version}\n运行时：${draft.runtime_type}\n入口：${draft.entry}\n描述：${draft.description || '无'}\n` +
+        `请基于以下文件按用户新需求做增量修改（保留未变部分）。需要查看某文件当前内容时用 Read 读取，再用 Edit/Write 改写；整体重构时才再次调用 CreatePlugin。` +
+        `若用户改了名字/描述等元信息（见上方），沿用这些值，不要擅自改回。\n\n当前文件（按需 Read 查看）：\n` +
+        draft.files.map((f) => `- ${f.path}`).join('\n')
+      : '';
+    return basePrompt + modePrompt + thinkPrompt + refPrompt + draftPrompt;
+  }
+
+  async function buildAttachmentContextFromSelection() {
+    if (selectedFiles.length === 0) return { context: '', fileCount: 0, skippedCount: 0 };
+    const result = await readLocalFiles(selectedFiles.map((item) => item.file));
+    return {
+      context: formatAttachmentContext(result.files, result.skipped),
+      fileCount: result.files.length,
+      skippedCount: result.skipped.length,
+    };
+  }
+
+  async function bindPluginWorkspace(plugin: LoadedPlugin, options: { showToast?: boolean } = {}) {
+    setReferencedPlugin(plugin);
+    setWorkspacePluginId(plugin.id);
+    currentPluginIdRef.current = plugin.id;
+    setPublishedName(null);
+    setUserEdits({});
+
+    if (plugin.files?.length) {
+      try {
+        await writePluginFiles(plugin.id, plugin.files.map((file) => ({ path: file.path, content: file.content })));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '写入插件工作目录失败');
+      }
+    }
+
+    const refreshed = await refreshDraftFromRoot(plugin.id);
+    if (!refreshed && plugin.files?.length) {
+      const staged = stagedPluginFromLoadedPlugin(plugin, plugin.files.map((file) => ({ path: file.path, content: file.content })));
+      draftRef.current = staged;
+      setStagedDraft(staged);
+    }
+
+    if (options.showToast !== false) {
+      toast.success(`已绑定插件工作文件夹：${plugin.name}`);
+    }
+  }
+
+  function handleSelectReferencedPlugin(plugin: LoadedPlugin | null) {
+    if (!plugin) {
+      setReferencedPlugin(null);
+      if (!draftRef.current) {
+        setWorkspacePluginId(null);
+        currentPluginIdRef.current = null;
+      }
+      return;
+    }
+    void bindPluginWorkspace(plugin);
+  }
+
+  async function openWorkspaceFolder() {
+    const pluginId = currentPluginIdRef.current;
+    try {
+      if (pluginId) await openPluginDir(pluginId);
+      else await openPluginsRoot();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '打开工作文件夹失败');
+    }
+  }
+
+  async function refreshWorkspaceFolder() {
+    const pluginId = currentPluginIdRef.current;
+    if (!pluginId) {
+      toast.error('当前还没有绑定插件工作文件夹');
+      return;
+    }
+    const ok = await refreshDraftFromRoot(pluginId);
+    if (ok) toast.success('已从工作文件夹刷新源码');
+    else toast.error('刷新工作文件夹失败');
+  }
+
+  async function openContextInspector() {
+    try {
+      const attachment = await buildAttachmentContextFromSelection();
+      const currentInput = composeModelInput(input, attachment.context);
+      const historyTurns = turns.map((t) => ({
+        role: t.role,
+        content: t.modelContent ?? t.content,
+      }));
+      setContextBreakdown(buildContextPreviewBreakdown({
+        historyTurns,
+        currentInput,
+        systemPrompt: buildSystemPrompt(),
+      }));
+      setContextInspectorOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '上下文预览失败');
+    }
+  }
 
   // 流式输出时自动滚到底。
   useEffect(() => {
@@ -608,7 +914,11 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
 
   // 卸载（关窗：X/点遮罩/父组件卸载）时中止流式请求 + 清理悬挂提问 deferred。
   // 必须 abort，否则关窗时若 agent 仍在流式输出，底层 relay 请求会在后台续跑并继续按团队计费（费用泄漏）。
-  useEffect(() => () => { abortRef.current?.abort(); clearPendingAnswers(); }, []);
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    speechRef.current?.stop();
+    clearPendingAnswers();
+  }, []);
 
   // 一键 AI 修复消费：插件启动/运行报错跳创建器时，pendingAutoFix 携带提示词 + 出错插件。
   // 此处预填提示词到输入框 + 引用该插件源码（注入上下文），但不自动发送——用户确认后点发送即修。
@@ -616,7 +926,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   useEffect(() => {
     if (!pendingAutoFix) return;
     setInput(pendingAutoFix.prompt);
-    setReferencedPlugin(pendingAutoFix.plugin);
+    void bindPluginWorkspace(pendingAutoFix.plugin, { showToast: false });
     setPendingAutoFix(null);
   }, [pendingAutoFix, setPendingAutoFix]);
 
@@ -629,25 +939,11 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     if (Array.isArray(restoredTurns) && restoredTurns.length > 0) {
       setTurns(restoredTurns as Turn[]);
     }
-    // 引用草稿源码供 AI 修改。
-    setReferencedPlugin(draft);
+    // 绑定草稿插件工作目录，后续 Read/Write 直接操作 plugins_root/{id}/。
+    void bindPluginWorkspace(draft, { showToast: false });
     // 恢复草稿到右侧面板（若 draft.files 存在且含 manifest 信息）。
     if (draft.files && draft.files.length > 0) {
-      const raw = draft as LoadedPlugin & {
-        capabilities?: StagedPlugin['capabilities'];
-        visibility?: StagedPlugin['visibility'];
-      };
-      setStagedDraft({
-        id: draft.id,
-        name: draft.name,
-        version: draft.version,
-        entry: draft.entry,
-        description: draft.description || '',
-        capabilities: raw.capabilities ?? [],
-        visibility: raw.visibility ?? 'private',
-        runtime_type: (draft.runtime_type as StagedPlugin['runtime_type']) || 'client',
-        files: draft.files.map(f => ({ path: f.path, content: f.content })),
-      });
+      setStagedDraft(stagedPluginFromLoadedPlugin(draft, draft.files.map(f => ({ path: f.path, content: f.content }))));
       setUserEdits({});
     }
     setPendingDraftEdit(null);
@@ -658,10 +954,25 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     if (!text || busy) return;
     setInput('');
     ensureConversation(text);
-    const userTurn: Turn = { role: 'user', content: text };
+    let modelText = text;
+    let displayText = text;
+    try {
+      const attachment = await buildAttachmentContextFromSelection();
+      modelText = composeModelInput(text, attachment.context);
+      const attachmentSummary = summarizeAttachmentDisplay(attachment.fileCount, attachment.skippedCount);
+      if (attachmentSummary) {
+        displayText = `${text}\n\n[${attachmentSummary}]`;
+        setSelectedFiles([]);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '附件读取失败');
+      setInput(text);
+      return;
+    }
+    const userTurn: Turn = { role: 'user', content: displayText, modelContent: modelText };
     const assistantIdx = turns.length + 1;
     setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true, status: 'generating' }]);
-    await runAgentTurn(assistantIdx, text);
+    await runAgentTurn(assistantIdx, modelText);
   }
 
   /**
@@ -681,7 +992,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     if (cur.status !== 'failed' && cur.status !== 'cancelled') return;
     // 取上一条 user 轮的输入作为重跑文本；找不到则放弃。
     const userTurn = [...turns].slice(0, lastAssistantIdx).reverse().find((t) => t.role === 'user');
-    const userText = userTurn?.content ?? '';
+    const userText = userTurn?.modelContent ?? userTurn?.content ?? '';
     if (!userText.trim()) return;
     // 重置该轮：清空旧 parts 与 content，回到生成中态。
     setTurns((prev) => {
@@ -707,38 +1018,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // 网络慢检测：本轮开始时重置 token 时间戳，启动每 3s 检查一次的定时器。
-    // 若距上次收到 token 超过 12s，置 networkSlow=true（状态条提示「网络较慢」）。
-    lastTokenAtRef.current = Date.now();
-    setNetworkSlow(false);
-    if (netSlowTimerRef.current) clearInterval(netSlowTimerRef.current);
-    netSlowTimerRef.current = setInterval(() => {
-      if (Date.now() - lastTokenAtRef.current > 12_000) setNetworkSlow(true);
-    }, 3_000);
-
     try {
-      // 系统提示词 = 基础提示 + 激活的 skills（+ 思考模式追加深入推理引导）；relay 服务端还会注入"必须用灵坊服务"规则。
-      const basePrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
-      const thinkPrompt = thinking
-        ? `\n\n# 思考模式（已开启）\n请对需求做更深入的分析与推理：先拆解需求要点、权衡实现方案、再生成更严谨完整的代码。宁可多花时间也要保证质量与边界处理。`
-        : '';
-      // 引用现有插件：把其全部文件源码注入 systemPrompt，让 agent 基于现有代码做修改（而非从零生成）。
-      const refPrompt = referencedPlugin?.files?.length
-        ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
-        : '';
-      // 当前草稿注入：只注入元信息 + 文件路径列表，正文让 agent 用 Read 按需取。
-      // 此前把全部文件全文注入 systemPrompt，但 context-compress 只压缩对话历史、对 systemPrompt
-      // 视而不见 → 草稿越大每轮固定开销越大，长任务下 systemPrompt 持续膨胀，完全绕过压缩。
-      // 改为路径列表后，agent 需要某文件时主动 Read（已有 read-before-edit 跟踪），上下文可控。
-      const draftPrompt = draft?.files?.length
-        ? `\n\n# 当前草稿（用户正在预览，要在此基础上修改）\n` +
-          `id：${draft.id}\n名字：${draft.name}\n版本：${draft.version}\n描述：${draft.description}\n` +
-          `runtime_type：${draft.runtime_type}\nentry：${draft.entry}\n` +
-          `请基于以下文件按用户新需求做增量修改（保留未变部分）。需要查看某文件当前内容时用 Read 读取，再用 Edit/Write 改写；整体重构时才再次调用 CreatePlugin。` +
-          `若用户改了名字/描述等元信息（见上方），沿用这些值，不要擅自改回。\n\n当前文件（按需 Read 查看）：\n` +
-          draft.files.map((f) => `- ${f.path}`).join('\n')
-        : '';
-      const systemPrompt = basePrompt + thinkPrompt + refPrompt + draftPrompt;
+      const systemPrompt = buildSystemPrompt();
       // 上下文自动压缩：超阈值时摘要较早对话轮（保留近期 + 含插件包的轮）。
       setCompressing(true);
       // 构建消息：assistant 轮带上 parts（工具调用+结果），让重试/续跑时模型能看到上轮已完成的工作，
@@ -750,10 +1031,11 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         : turns;
       const built = await buildContextMessages({
         turns: historyTurns.map((t) => {
+          const content = t.modelContent ?? t.content;
           if (t.role === 'assistant' && t.status === 'done') {
-            return { role: t.role, content: t.content, parts: partsToAgentMessageParts(t.parts) };
+            return { role: t.role, content, parts: partsToAgentMessageParts(t.parts) };
           }
-          return { role: t.role, content: t.content };
+          return { role: t.role, content };
         }),
         currentInput: opts.isRetry ? '' : text,
         skipAppendCurrent: opts.isRetry,
@@ -802,20 +1084,16 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       // OpenAI Agents SDK：框架负责多步循环和工具调用；adapter 把事件写回现有 UI parts。
       const agentResult = await runPluginCreatorAgent(
         {
-          messages: built.messages as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+          messages: built.messages as ChatMessage[],
           tier,
           extraInstructions: systemPrompt,
           signal: controller.signal,
           callbacks: {
             appendTextDelta: (turnIdx, delta) => {
-              lastTokenAtRef.current = Date.now();
-              setNetworkSlow(false);
               appendTextDelta(turnIdx, delta);
             },
             appendReasoningDelta: (turnIdx, delta) => {
               reasoningText += delta;
-              lastTokenAtRef.current = Date.now();
-              setNetworkSlow(false);
               appendReasoningDelta(turnIdx, delta);
             },
             endReasoning,
@@ -937,8 +1215,6 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     } finally {
       setBusy(false);
       setSearchingQuery(null);
-      setNetworkSlow(false);
-      if (netSlowTimerRef.current) { clearInterval(netSlowTimerRef.current); netSlowTimerRef.current = null; }
       abortRef.current = null;
     }
   }
@@ -948,31 +1224,111 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     clearPendingAnswers();
   }
 
+  async function optimizePrompt() {
+    const text = input.trim();
+    if (!text || optimizingPrompt || busy) return;
+    setOptimizingPrompt(true);
+    try {
+      const optimized = await chatComplete(buildPromptOptimizerMessages(text), tier);
+      const next = optimized.trim();
+      if (!next) {
+        toast.error('提示词优化未返回内容');
+        return;
+      }
+      setInput(next);
+      toast.success('已优化提示词');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '提示词优化失败');
+    } finally {
+      setOptimizingPrompt(false);
+    }
+  }
+
+  function toggleVoiceInput() {
+    if (voiceListening) {
+      speechRef.current?.stop();
+      setVoiceListening(false);
+      return;
+    }
+
+    const SpeechCtor = (window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    }).SpeechRecognition ?? (window as unknown as {
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    }).webkitSpeechRecognition;
+
+    if (!SpeechCtor) {
+      toast.error('当前环境暂不支持本地语音输入');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechCtor();
+      speechRef.current = recognition;
+      recognition.lang = 'zh-CN';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.onresult = (event) => {
+        const transcripts: string[] = [];
+        for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
+          const item = event.results[i];
+          const text = item?.[0]?.transcript?.trim();
+          if (item?.isFinal && text) transcripts.push(text);
+        }
+        if (transcripts.length > 0) {
+          setInput((prev) => `${prev}${prev.trim() ? '\n' : ''}${transcripts.join('\n')}`);
+        }
+      };
+      recognition.onerror = (event) => {
+        setVoiceListening(false);
+        toast.error(event.error ? `语音输入失败：${event.error}` : '语音输入失败');
+      };
+      recognition.onend = () => setVoiceListening(false);
+      recognition.start();
+      setVoiceListening(true);
+    } catch (error) {
+      setVoiceListening(false);
+      toast.error(error instanceof Error ? error.message : '语音输入启动失败');
+    }
+  }
+
   function renderComposer(placement: 'hero' | 'bottom') {
     return (
       <CreatorComposer
+        activeSkillCount={activeSkillIds.length}
         busy={busy}
-        canInspectContext={!!contextBreakdown}
+        canInspectContext
+        compressHint={compressHint}
         embedded={embedded}
         input={input}
+        mode={creatorMode}
         onClearFiles={() => setSelectedFiles([])}
         onImportFiles={() => { void importFromSelectedFiles(); }}
-        onOpenContext={() => setContextInspectorOpen(true)}
+        onOpenContext={() => { void openContextInspector(); }}
+        onOpenSkills={() => setSkillDialogOpen(true)}
+        onOpenWorkspace={() => { void openWorkspaceFolder(); }}
         onInputChange={setInput}
+        onModeChange={setCreatorMode}
+        onOptimizePrompt={() => { void optimizePrompt(); }}
         onPickFiles={() => fileInputRef.current?.click()}
+        onRefreshWorkspace={() => { void refreshWorkspaceFolder(); }}
         onRemoveFile={removeFile}
         onSend={() => { void send(); }}
-        onSelectReferencedPlugin={setReferencedPlugin}
+        onSelectReferencedPlugin={handleSelectReferencedPlugin}
         onSelectTier={setTier}
         onStop={stop}
-        onToggleThinking={() => setThinking((v) => !v)}
+        onToggleVoice={toggleVoiceInput}
         placement={placement}
         recentPlugins={recentPlugins}
         showContextButton={embedded}
         selectedFiles={selectedFiles}
-        thinking={thinking}
+        optimizingPrompt={optimizingPrompt}
         tier={tier}
         referencedPlugin={referencedPlugin}
+        voiceListening={voiceListening}
+        workspacePath={joinDisplayPath(pluginsRoot, workspacePluginId)}
+        workspacePluginId={workspacePluginId}
       />
     );
   }
@@ -1193,14 +1549,14 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
           <CreatorFloatingTitleBar
             activeSkillCount={activeSkillIds.length}
             busy={busy}
-            canInspectContext={!!contextBreakdown}
+            canInspectContext
             compressedHint={compressedHint}
             onClose={onClose}
             onNewConversation={newConversation}
-            onOpenContext={() => setContextInspectorOpen(true)}
+            onOpenContext={() => { void openContextInspector(); }}
             onOpenHistory={() => setHistoryOpen(true)}
             onOpenSkills={() => setSkillDialogOpen(true)}
-            onSelectReferencedPlugin={setReferencedPlugin}
+            onSelectReferencedPlugin={handleSelectReferencedPlugin}
             onSelectTier={setTier}
             recentPlugins={recentPlugins}
             referencedPlugin={referencedPlugin}
@@ -1337,11 +1693,14 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
               <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                 <span className="font-mono font-medium">context</span>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono tabular-nums">{usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} tok（{usagePct}%）{usagePct > 80 && <span className="ml-1 text-amber-600 dark:text-amber-400">· 即将自动压缩</span>}</span>
+                  <span className="font-mono tabular-nums">
+                    {usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} tok（{usagePct}%）
+                    {compressHint && <span className="ml-1 text-amber-600 dark:text-amber-400">· {compressHint}</span>}
+                  </span>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setContextInspectorOpen(true)}
+                    onClick={() => { void openContextInspector(); }}
                     className="h-6 gap-1 px-2 text-[10px]"
                   >
                     <EyeIcon className="size-3" />
@@ -1356,19 +1715,17 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
           </div>
         )}
 
-        {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中 / 网络慢） */}
-        {(compressing || searchingQuery != null || uploadingViaTool || networkSlow) && (
-          <div className={`shrink-0 border-t px-6 py-2.5 ${networkSlow ? 'bg-amber-500/5' : 'bg-muted/20'}`}>
+        {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中） */}
+        {(compressing || searchingQuery != null || uploadingViaTool) && (
+          <div className="shrink-0 border-t bg-muted/20 px-6 py-2.5">
             <div className={cn(CREATOR_COLUMN_CLASS, 'flex items-center gap-2 font-mono text-xs text-[#a6a6ac]')}>
-              <Loader2Icon className={`size-3.5 animate-spin ${networkSlow ? 'text-amber-600 dark:text-amber-400' : 'text-primary'}`} />
+              <Loader2Icon className="size-3.5 animate-spin text-primary" />
               <span>
-                {networkSlow
-                  ? '网络较慢，仍在等待响应…可点停止后重试'
-                  : compressing
-                    ? '正在压缩对话上下文…'
-                    : searchingQuery != null
-                      ? `正在联网搜索：${searchingQuery}…`
-                      : 'AI 正在生成插件草稿…'}
+                {compressing
+                  ? '正在压缩对话上下文…'
+                  : searchingQuery != null
+                    ? `正在联网搜索：${searchingQuery}…`
+                    : 'AI 正在生成插件草稿…'}
               </span>
             </div>
           </div>

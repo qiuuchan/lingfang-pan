@@ -3,7 +3,7 @@
 # 自解压：app 文件追加到本 exe 尾部，运行期读取解压（design §2）。
 [package]
 name = "lingfang-installer"
-version = "0.0.16"
+version = "0.0.17"
 edition = "2021"
 
 [[bin]]

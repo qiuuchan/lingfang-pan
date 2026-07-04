@@ -68,7 +68,7 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
 
       {showPluginModeSwitch ? (
         <div
-          className="flex items-center gap-1 rounded-xl bg-[#252528] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_8px_24px_rgba(0,0,0,0.18)]"
+          className="flex items-center gap-1 rounded-xl bg-[#252528] p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_8px_24px_rgba(0,0,0,0.18)]"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
@@ -83,13 +83,13 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
                 title={mode.label}
                 onClick={() => onPluginModeChange?.(mode.value)}
                 className={cn(
-                  'inline-flex h-8 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors duration-150',
+                  'inline-flex h-7 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors duration-150',
                   active
                     ? 'bg-[#3a3a3c] text-white shadow-[0_1px_0_rgba(255,255,255,0.06),0_8px_18px_rgba(0,0,0,0.18)]'
                     : 'bg-transparent text-[#8a8a8f] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]',
                 )}
               >
-                <Icon className="size-4 shrink-0" />
+                <Icon className="size-3.5 shrink-0" />
                 <span>{mode.label}</span>
               </button>
             );
@@ -100,7 +100,7 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
       )}
 
       {appWindow && (
-        <div className="flex h-full items-center justify-end gap-1 pr-2">
+        <div className="flex h-full items-center justify-end gap-1.5 pr-2.5">
           <WinBtn title="最小化" onClick={() => appWindow.minimize()}>
             <MinusIcon className="size-4" />
           </WinBtn>
@@ -123,8 +123,8 @@ function WinBtn({ children, title, onClick, danger }: { children: ReactNode; tit
       title={title}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       className={cn(
-        'inline-flex size-8 items-center justify-center rounded-lg text-[#8a8a8f] transition-colors',
-        danger ? 'hover:bg-[#ff5f57]/10 hover:text-[#ff5f57]' : 'hover:bg-[#2a2a2c] hover:text-[#e5e5e5]',
+        'inline-flex h-8 w-10 items-center justify-center rounded-md text-[#8a8a8f] transition-colors',
+        danger ? 'hover:bg-[#ff5f57]/15 hover:text-[#ff5f57]' : 'hover:bg-[#2a2a2c] hover:text-[#e5e5e5]',
       )}
     >
       {children}

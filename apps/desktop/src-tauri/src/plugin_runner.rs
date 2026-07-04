@@ -988,6 +988,18 @@ pub fn start_plugin(
             }
         }
     };
+    let launch_diagnostics = format!(
+        "启动诊断：\n- 运行时：{:?}\n- 插件目录：{}\n- 入口：{}\n- 命令：{}\n- 参数：{}",
+        manifest.runtime,
+        plugin_dir.display(),
+        manifest.entry,
+        binary.display(),
+        if args.is_empty() {
+            "(无)".to_string()
+        } else {
+            args.join(" ")
+        }
+    );
 
     // 依赖就绪，即将 spawn 入口进程 → 发 starting 阶段（前端切换到「启动中」动画）。
     emit_stage("starting", "正在启动插件进程…");
@@ -1049,7 +1061,9 @@ pub fn start_plugin(
         })?;
     // 秒退判定：spawn 后短等待（800ms），若进程立即退出 = 崩溃，读 stderr 返回 plugin_crashed 错误。
     // 正常 GUI 插件会一直运行（超时即放行）。捕获 stderr 让用户看到 Python/Node 异常而非「无法启动」。
-    if let Some(crash_err) = wait_for_crash(&mut child, Duration::from_millis(800)) {
+    if let Some(crash_err) =
+        wait_for_crash_with_diagnostics(&mut child, Duration::from_millis(800), &launch_diagnostics)
+    {
         if let Some(token) = bridge_token.as_deref() {
             bridge.revoke_token(token);
         }
@@ -1082,6 +1096,14 @@ pub fn start_plugin(
 ///
 /// 抽成纯函数便于单测（不依赖 tauri::State）。try_wait 轮询（非 wait 阻塞）避免阻塞 start_plugin 命令。
 pub(crate) fn wait_for_crash(child: &mut std::process::Child, timeout: Duration) -> Option<String> {
+    wait_for_crash_with_diagnostics(child, timeout, "")
+}
+
+fn wait_for_crash_with_diagnostics(
+    child: &mut std::process::Child,
+    timeout: Duration,
+    diagnostics: &str,
+) -> Option<String> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -1097,8 +1119,15 @@ pub(crate) fn wait_for_crash(child: &mut std::process::Child, timeout: Duration)
                     })
                     .unwrap_or_default();
                 let truncated = truncate_stderr(&stderr_text, 2000);
+                let detail = if diagnostics.trim().is_empty() {
+                    truncated
+                } else if truncated.trim().is_empty() {
+                    format!("(进程未输出 stderr)\n\n{diagnostics}")
+                } else {
+                    format!("{truncated}\n\n{diagnostics}")
+                };
                 return Some(format!(
-                    "plugin_crashed:插件启动后立即退出（{status}）\n{truncated}"
+                    "plugin_crashed:插件启动后立即退出（{status}）\n{detail}"
                 ));
             }
             Ok(None) => {

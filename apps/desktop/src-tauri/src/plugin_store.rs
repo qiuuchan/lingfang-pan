@@ -994,6 +994,15 @@ pub fn open_plugins_root(state: tauri::State<'_, PluginStore>) -> Result<(), Str
     open_directory(&root)
 }
 
+#[tauri::command]
+pub fn open_plugin_dir(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+) -> Result<(), String> {
+    let dir = state.ensure_plugin_dir(&plugin_id)?;
+    open_directory(&dir)
+}
+
 fn open_directory(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut command = {

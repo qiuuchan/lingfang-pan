@@ -299,6 +299,7 @@ fn main() {
             plugin_store::move_plugin_file,
             plugin_store::set_plugin_draft_flag,
             plugin_store::open_plugins_root,
+            plugin_store::open_plugin_dir,
             plugin_store::rename_plugin_dir,
             draft_plugin::migrate_drafts_to_root,
             update::check_update,
