@@ -2,7 +2,7 @@
 //
 // 验证「同一时间至多一项 in_progress」不变式（防止模型把所有任务都标进行中导致 UI 混乱），
 // 以及 todo 跨轮延续（getTodos 回灌 → onTodoUpdate 同步）。
-// 工具工厂 createAgentTools 走 @openai/agents 的 tool()，execute 通过 mock 回调直接调用。
+// betav2：工具走自建 defineTool（ToolDefinition），execute(args, ctx) 直接收对象返回 ToolResult。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, setAuthToken } from '@/lib/api';
 import { createAgentTools, normalizeToolFileContent, detectCapabilities, isVersionNewer, type AgentToolsOptions, type TodoItem } from './tools';
@@ -31,12 +31,14 @@ function makeOpts(initialTodos: TodoItem[] = []) {
   return { opts, read: () => todos };
 }
 
-/** 从 tool() 返回的 Tool 里取出 invoke 并调用（@openai/agents 的契约：invoke(runContext, inputString)）。
- *  input 必须是 JSON 字符串（SDK 内部 parser(input) 会 JSON.parse）；execute 被包在 invoke 里。 */
+/** 从 ToolDefinition 里取出 execute 并调用（betav2 自建契约：execute(args, ctx) → ToolResult）。
+ *  返回 ToolResult；旧测试断言 data 字符串（兼容：ok 时取 data）。 */
 async function callExecute(tools: ReturnType<typeof createAgentTools>['tools'], name: string, args: unknown) {
   const t = tools.find((x) => x.name === name);
   if (!t) throw new Error(`tool ${name} not found`);
-  return (t as unknown as { invoke: (ctx: unknown, input: string) => Promise<string> }).invoke({}, JSON.stringify(args));
+  const result = await t.execute(args, { toolCallId: 'test-call', signal: new AbortController().signal });
+  // 旧断言期望字符串；ToolResult.ok 时 data 是字符串，!ok 时 error 是字符串。
+  return result.ok ? String(result.data ?? '') : String(result.error ?? '');
 }
 
 describe('TodoWrite 工具', () => {
