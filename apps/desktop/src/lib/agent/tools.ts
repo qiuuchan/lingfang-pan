@@ -8,7 +8,6 @@
 // - read-before-edit 不变式：Edit 前必须先 Read 过该文件（per-run 的 readPaths 跟踪），否则报错，
 //   迫使模型先看真实内容再改，避免盲目替换。
 // - HITL：AskQuestion 通过 onAskQuestion 回调挂起（UI 收集答案），与 Agents SDK 的 run 循环协作。
-import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { api, type ApiError, tauriInvoke } from '@/lib/api';
 import { runPluginScript, runPluginShell, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
@@ -19,6 +18,46 @@ import {
   buildStagedManifest,
   type StagedPlugin,
 } from '@/lib/plugin-creator/creator-tools';
+import type { ToolDefinition, ToolResult, ToolContext } from './types';
+
+/**
+ * 自建工具定义辅助（取代 @openai/agents 的 tool() 工厂）。
+ *
+ * 渐进迁移策略：execute 可返回 string（兼容现有 18 个工具的字符串返回）或 ToolResult。
+ *  - 字符串以「错误：」「错误:」「读取失败」「写入失败」等前缀开头 → 自动转 { ok:false, error }
+ *  - 其余字符串 → { ok:true, data: string }
+ *  - ToolResult → 原样
+ *
+ * parameters 接受 zod schema，内部用 zod 4 原生 toJSONSchema() 转 JSON Schema（给 relay tools 参数）。
+ * 这样现有工具定义只需把 tool({...}) 换成 defineTool({...})，execute 体零改动。
+ */
+type ZodSchema = z.ZodType;
+interface LegacyToolOptions {
+  name: string;
+  description: string;
+  parameters: ZodSchema;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  execute: (args: any, ctx?: ToolContext) => Promise<string | ToolResult>;
+}
+function defineTool(opts: LegacyToolOptions): ToolDefinition {
+  return {
+    name: opts.name,
+    description: opts.description,
+    // zod 4 原生 toJSONSchema()，转成 OpenAI function calling 期望的 JSON Schema。
+    parameters: typeof (opts.parameters as ZodSchema & { toJSONSchema?: () => Record<string, unknown> }).toJSONSchema === 'function'
+      ? (opts.parameters as ZodSchema & { toJSONSchema: () => Record<string, unknown> }).toJSONSchema()
+      : { type: 'object', properties: {}, additionalProperties: true },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async execute(args: any, ctx): Promise<ToolResult> {
+      const raw = await opts.execute(args, ctx);
+      if (typeof raw !== 'string') return raw;
+      // 字符串结果：按约定前缀判定 ok/error（兼容现有工具返回）。
+      const isErr = /^错误[:：]/.test(raw)
+        || /^(读取|写入|执行|创建|删除|移动|解析|安装|运行)失败/.test(raw);
+      return isErr ? { ok: false, error: raw } : { ok: true, data: raw };
+    },
+  };
+}
 
 /** AskQuestion 作答结果（回灌给模型）。 */
 export interface AskQuestionResult {
@@ -106,7 +145,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     return id;
   }
 
-  const Read = tool({
+  const Read = defineTool({
     name: 'Read',
     description:
       '读取当前插件目录下某个文件的完整内容。修改文件前必须先 Read（read-before-edit）。' +
@@ -127,7 +166,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const Write = tool({
+  const Write = defineTool({
     name: 'Write',
     description:
       '创建或覆盖当前插件目录下的单个文件（写入完整内容，不是 diff）。' +
@@ -150,7 +189,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const Edit = tool({
+  const Edit = defineTool({
     name: 'Edit',
     description:
       '对当前插件目录下的已有文件做字符串替换。必须先 Read 过该文件才能 Edit（read-before-edit）。' +
@@ -190,7 +229,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const Glob = tool({
+  const Glob = defineTool({
     name: 'Glob',
     description:
       '列出当前插件目录下的全部源文件路径（文件树）。修改前先 Glob 了解结构，再 Read 具体文件。' +
@@ -208,7 +247,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const CreatePlugin = tool({
+  const CreatePlugin = defineTool({
     name: 'CreatePlugin',
     description:
       '初始化一个新插件目录（写入 manifest.json，标记 draft:true）并落盘全部初始文件到应用插件目录。' +
@@ -235,8 +274,9 @@ export function createAgentTools(opts: AgentToolsOptions) {
         .describe('插件能力声明；调用平台 LLM 时必须含 llm.chat'),
       files: z.array(z.object({ path: z.string(), content: fileContentSchema })).min(1),
     }),
-    async execute(args): Promise<string> {
-      const draftFiles = args.files.map((file) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async execute(args: any) {
+      const draftFiles = (args.files as Array<{ path: string; content: unknown }>).map((file) => ({
         path: file.path,
         content: normalizeToolFileContent(file.content),
       }));
@@ -284,7 +324,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * 本工具读 manifest → 合并传入字段 → 写回，比手写 Edit manifest.json 更可靠（JSON 安全合并）。
    * 不改 id/runtime_type/entry（这些是结构字段，改动应走重建）。
    */
-  const UpdatePlugin = tool({
+  const UpdatePlugin = defineTool({
     name: 'UpdatePlugin',
     description:
       '更新当前插件的元信息并写回 manifest.json。修改插件代码后调用此工具升版本号（如 0.1.0 → 0.1.1），' +
@@ -333,7 +373,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const Check = tool({
+  const Check = defineTool({
     name: 'Check',
     description:
       '校验当前插件的完整性（入口/必需文件/路径合法/能力声明）。生成或修改后调用，按返回问题修复。',
@@ -412,7 +452,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const WebSearch = tool({
+  const WebSearch = defineTool({
     name: 'WebSearch',
     description:
       '联网搜索：需要最新信息、查 API/库用法、了解第三方服务或核实事实时调用。无需配置。' +
@@ -462,7 +502,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const ListTeamPlugins = tool({
+  const ListTeamPlugins = defineTool({
     name: 'ListTeamPlugins',
     description:
       '列出当前团队已有插件（id/名字/描述/版本/运行类型）。用于避免重复造轮子、参考命名，或用户询问团队插件时。',
@@ -487,7 +527,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const AskQuestion = tool({
+  const AskQuestion = defineTool({
     name: 'AskQuestion',
     description:
       '信息不足、需求有歧义、或需用户在多方案间选择时，发起结构化提问（不要用纯文本提问）。' +
@@ -501,9 +541,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
       allowFreeText: z.boolean().default(true),
       multiSelect: z.boolean().default(false),
     }),
-    async execute(args, runContext): Promise<string> {
-      // toolCallId 用于 UI 关联提问卡片与挂起的 deferred。Agents SDK 在 runContext 暴露调用上下文。
-      const toolCallId = (runContext as { toolCall?: { id?: string } })?.toolCall?.id ?? `ask-${Date.now()}`;
+    async execute(args, ctx): Promise<string> {
+      // toolCallId 用于 UI 关联提问卡片与挂起的 deferred。
+      // 自建循环通过 ToolContext 注入 toolCallId（取代旧 SDK 从 runContext 挖的方式）。
+      const toolCallId = ctx?.toolCallId ?? `ask-${Date.now()}`;
       const res = await opts.onAskQuestion(
         {
           question: args.question,
@@ -521,7 +562,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
   // 工具调用替换后调 opts.onTodoUpdate 同步给 UI 持久化（localStorage）。跨轮延续。
   const todos: TodoItem[] = (opts.getTodos() ?? []).map((t) => ({ ...t }));
 
-  const TodoWrite = tool({
+  const TodoWrite = defineTool({
     name: 'TodoWrite',
     description:
       '更新任务清单（用于复杂多步任务的进度跟踪）。传入完整清单替换当前状态；' +
@@ -537,8 +578,8 @@ export function createAgentTools(opts: AgentToolsOptions) {
         )
         .describe('完整任务清单（覆盖式替换）；同一时间至多一项 in_progress'),
     }),
-    async execute(args): Promise<string> {
-      const next = args.todos ?? [];
+    async execute(args: { todos?: TodoItem[] }) {
+      const next: TodoItem[] = args.todos ?? [];
       // 校验：至多一项 in_progress（约束模型聚焦当前步骤，避免并行「进行中」混乱）。
       const inProgress = next.filter((t) => t.status === 'in_progress').length;
       if (inProgress > 1) {
@@ -561,7 +602,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
-  const DateTime = tool({
+  const DateTime = defineTool({
     name: 'DateTime',
     description:
       '获取当前的真实日期和时间。当用户提到「今天」「现在」「本周」「最近」等相对时间词、' +
@@ -594,7 +635,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * 为什么不前端直连 Jina：客户端（尤其大陆网络）直连 r.jina.ai 被墙不可达，
    * 但后端服务器可达。与 WebSearch 同一出口模式（前端 → 后端 → 上游）。
    */
-  const WebFetch = tool({
+  const WebFetch = defineTool({
     name: 'WebFetch',
     description:
       '抓取指定 URL 网页的正文内容（自动抽取正文 + 转 markdown，去噪）。' +
@@ -647,7 +688,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * - 仅 nodejs/python 运行时可试跑；client（HTML）需在插件页用「运行」按钮预览（iframe 沙箱）。
    * - nodejs 若声明 package.json + scripts.start（如 electron），需专属运行时，预览拦截并提示。
    */
-  const RunPlugin = tool({
+  const RunPlugin = defineTool({
     name: 'RunPlugin',
     description:
       '试运行当前插件（nodejs/python）并返回控制台输出（stdout/stderr）。' +
@@ -754,7 +795,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * 命令失败（exit≠0）仍返回结果（不抛异常），让 Agent 读 stderr 修复后重试，
    * 与 RunPlugin 的「写→跑→看报错→自修」闭环同源。
    */
-  const Bash = tool({
+  const Bash = defineTool({
     name: 'Bash',
     description:
       '在当前插件目录执行 shell 命令。默认 cmd（Windows）/ sh（Unix），可选 powershell/pwsh。' +
@@ -805,7 +846,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * 此前只能覆盖（Write 空内容）不能真删，导致重构后多余文件残留。
    * 复用 Rust delete_plugin_file（canonicalize 前缀断言防穿越，与 Read 同款安全）。
    */
-  const DeleteFile = tool({
+  const DeleteFile = defineTool({
     name: 'DeleteFile',
     description:
       '删除当前插件目录下的单个文件。重构或清理时移除不再需要的文件（如旧实现、临时文件、废弃模块）。' +
@@ -833,7 +874,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * 比「Read 旧文件 → Write 新路径 → Delete 旧文件」三步更高效（原子 rename）。
    * 复用 Rust move_plugin_file（段级路径校验防穿越 + 目标自动建子目录）。
    */
-  const MoveFile = tool({
+  const MoveFile = defineTool({
     name: 'MoveFile',
     description:
       '移动或重命名当前插件目录下的文件。重构时调整文件位置/名字（如把 main.py 移到 src/main.py）。' +
@@ -867,7 +908,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
    * 实现纯前端：list_plugin_files + 逐文件 read + 正则匹配，避免新增 Rust 依赖。
    * 匹配结果格式：`path:line: 匹配行内容`（grep -rn 风格，模型熟悉）。
    */
-  const Grep = tool({
+  const Grep = defineTool({
     name: 'Grep',
     description:
       '在当前插件的所有源文件里搜索内容（支持正则）。用于查找函数/变量/字符串的定义与引用、' +

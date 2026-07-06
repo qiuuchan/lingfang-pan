@@ -27,11 +27,14 @@ export function buildPluginAgent(opts: BuildAgentOptions) {
   const instructions = opts.extraInstructions
     ? `${AGENT_INSTRUCTIONS}\n\n${opts.extraInstructions}`
     : AGENT_INSTRUCTIONS;
+  // betav2 过渡期：tools 已迁移到自建 ToolDefinition[]，但本文件仍用 SDK Agent。
+  // 阶段 4 store 接入后，run.ts/creator-adapter.ts/model.ts 将整体删除。
   const agent = new Agent({
     name: 'LingFang Plugin Creator',
     instructions,
     model: agentModel(opts.tier),
-    tools,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools: tools as any,
   });
   return { agent, resetReadTracking };
 }
