@@ -23,8 +23,6 @@
     "collab:admin:build": "pnpm -C apps/collab-admin build"
   },
   "dependencies": {
-    "@openai/agents": "^0.12.0",
-    "@openai/agents-extensions": "^0.12.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
