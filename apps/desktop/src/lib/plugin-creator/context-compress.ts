@@ -74,12 +74,29 @@ interface BuildArgs {
   systemPrompt: string;
   /** 压缩状态（in/out）。 */
   state: CompressState;
-  /** 触发压缩的累计字符阈值（超过则压缩更早的对话轮）。默认 5000。 */
+  /** 触发压缩的累计字符阈值（超过则压缩更早的对话轮）。
+   *  优先用 contextWindow 推算；都未传则保守默认（见 DEFAULT_THRESHOLD_CHARS）。 */
   threshold?: number;
+  /** 真实上下文窗口（token，来自 relay /models）。提供后按 contextWindow×0.7 推算阈值，
+   *  取代旧的 5000 字符硬编码（betav2 阶段5：解决问题2的根因）。 */
+  contextWindow?: number;
   /** 原文保留的最近轮数（每轮 user+assistant）。默认 4。 */
   recentWindowTurns?: number;
   tier?: 'fast' | 'premium';
   signal?: AbortSignal;
+}
+
+/** token → 字符估算系数（中文偏向，1 token ≈ 1.5 字符；与 breakdown.estimatedTokens 一致）。 */
+const CHARS_PER_TOKEN = 1.5;
+/** 预算占比：留 30% 给 system prompt + 当前输入 + 输出。 */
+const CONTEXT_BUDGET_RATIO = 0.7;
+/** 无 contextWindow 时的保守默认阈值（字符）。对应约 6700 token，远高于旧 5000 字符。 */
+const DEFAULT_THRESHOLD_CHARS = 10_000;
+
+/** 据 contextWindow（token）推算压缩阈值（字符）。 */
+function thresholdFromContextWindow(contextWindow: number | undefined): number {
+  if (!contextWindow || contextWindow <= 0) return DEFAULT_THRESHOLD_CHARS;
+  return Math.floor(contextWindow * CONTEXT_BUDGET_RATIO * CHARS_PER_TOKEN);
 }
 
 /**
@@ -92,7 +109,9 @@ interface BuildArgs {
  *  3. messages = [system, 摘要(若有), ...保留的原文轮(按原序), 当前输入]。
  */
 export async function buildContextMessages(args: BuildArgs): Promise<BuildResult> {
-  const threshold = args.threshold ?? 5000;
+  // betav2 阶段5：threshold 优先用显式传入，其次从 contextWindow 推算（token×占比×字符系数），
+  // 最后保守默认。取代旧 5000 字符硬编码——256000 token 窗口下约到 270K 字符才压缩。
+  const threshold = args.threshold ?? thresholdFromContextWindow(args.contextWindow);
   const recentWindow = args.recentWindowTurns ?? 4;
   const tier = args.tier ?? 'fast';
   const turns = args.turns;

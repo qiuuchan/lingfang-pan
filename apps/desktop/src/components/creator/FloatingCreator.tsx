@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { XIcon, SendIcon, Loader2Icon, PlusIcon, CheckCircle2Icon, Trash2Icon, EyeIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
-import { api, tauriInvoke } from '@/lib/api';
+import { tauriInvoke } from '@/lib/api';
 import { chatComplete } from '@/lib/relay-chat-stream';
 import { getPluginsRoot, openPluginDir, openPluginsRoot } from '@/lib/plugin-status';
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
@@ -42,6 +42,7 @@ import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
+import { fetchContextWindow } from '@/lib/relay-models';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -685,17 +686,14 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     if (id === activeConversationId) newConversation();
   }
 
-  // 拉当前 tier 的 chat 定价 → 取 contextWindow（供用量条 + 压缩阈值参考）。
+  // betav2 阶段5：从 relay /models 拉 contextWindow（普通用户可访问，取代旧 admin pricing 端点）。
+  // 供用量条 + 上下文压缩阈值参考。失败走保守默认（fetchContextWindow 内部处理）。
   useEffect(() => {
     let mounted = true;
-    api<{ pricing: { contextWindow?: number | null; tier?: string; capability: string }[] }>('/api/admin/billing/pricing')
-      .then((r) => {
-        if (!mounted) return;
-        // 取当前 tier（或不限 tier）的 chat 定价的 contextWindow。
-        const chatRow = r.pricing?.find((p) => p.capability === 'chat' && (p.tier === tier.toUpperCase() || p.tier == null));
-        setContextWindow(chatRow?.contextWindow ?? null);
-      })
-      .catch(() => undefined);
+    void fetchContextWindow().then((cw) => {
+      if (!mounted) return;
+      setContextWindow(tier === 'fast' ? cw.fast : cw.premium);
+    });
     return () => { mounted = false; };
   }, [tier]);
 
@@ -717,7 +715,10 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     currentInput: string;
     systemPrompt: string;
   }): ContextBreakdown {
-    const threshold = 5000;
+    // betav2 阶段5：阈值与 buildContextMessages 同源（contextWindow 推算），不再硬编码 5000。
+    const threshold = contextWindow
+      ? Math.floor(contextWindow * 0.7 * 1.5)
+      : 10_000;
     const summary = compressRef.current.summary;
     const historyChars = args.historyTurns.reduce((sum, turn) => sum + turn.content.length, 0);
     return {
@@ -1010,6 +1011,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         systemPrompt,
         state: compressRef.current,
         tier,
+        contextWindow: contextWindow ?? undefined, // betav2 阶段5：真实窗口推算压缩阈值
         signal: controller.signal,
       });
       setCompressing(false);
