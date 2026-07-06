@@ -15,6 +15,7 @@
 import { create } from 'zustand';
 import { tauriInvoke } from '@/lib/api';
 import { writePluginFiles } from '@/lib/plugin-status';
+import { filterWritableFiles } from '@/lib/draft-plugin';
 import type { LoadedPlugin } from '@/lib/types';
 import {
   withSyncedStagedManifest,
@@ -66,12 +67,15 @@ function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
  */
 async function buildDraftFromRoot(pluginId: string): Promise<StagedPlugin> {
   const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
-  const files = await Promise.all(
+  const allFiles = await Promise.all(
     paths.map(async (path) => ({
       path,
       content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }),
     })),
   );
+  // 过滤掉二进制占位文件（图标/图片等非 UTF-8，Rust 返回占位标记）。
+  // 这些文件保留在磁盘上，但不进草稿的 files 数组（避免占位文本污染预览/写回）。
+  const files = filterWritableFiles(allFiles);
   const manifestRaw = files.find((f) => f.path === 'manifest.json')?.content ?? '{}';
   const manifest = JSON.parse(manifestRaw) as Partial<StagedPlugin> & { runtime_type?: unknown };
   const runtime = normalizeLoadedRuntime(manifest.runtime_type);
@@ -147,11 +151,15 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
     set({ binding: true, bindError: null });
     try {
       // 1. 如果插件带 files（云端/草稿恢复），先写盘（确保磁盘有完整文件）。
+      //    过滤掉二进制占位文件（Rust 对非 UTF-8 文件的兜底返回，写回会覆盖原二进制）。
       if (plugin.files?.length) {
-        await writePluginFiles(
-          plugin.id,
-          plugin.files.map((f) => ({ path: f.path, content: f.content })),
-        );
+        const writable = filterWritableFiles(plugin.files);
+        if (writable.length) {
+          await writePluginFiles(
+            plugin.id,
+            writable.map((f) => ({ path: f.path, content: f.content })),
+          );
+        }
       }
 
       // 2. 从磁盘重载（原子：写盘已完成，扫到的是完整文件，不再有竞态）。
@@ -178,7 +186,7 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
             entry: plugin.entry || defaultEntryForRuntime(runtime),
             visibility: 'tenant',
             capabilities: normalizeCapabilities(plugin.capabilities),
-            files: plugin.files.map((f) => ({ path: f.path, content: f.content })),
+            files: filterWritableFiles(plugin.files).map((f) => ({ path: f.path, content: f.content })),
           });
           set({
             pluginId: plugin.id,

@@ -333,7 +333,9 @@ impl PluginStore {
     /// 读取插件目录下指定文件内容（read_local_plugin_file 命令底层）。
     ///
     /// 防路径穿越：canonicalize 目标后断言以插件目录为前缀（与 main.rs read_plugin_file 同款）。
-    /// 二进制文件（非 UTF-8）读失败返回错误（前端按需处理）。
+    /// 二进制文件（非 UTF-8，如 PNG/ICO 图标）返回占位标记而非报错——
+    /// 草稿加载/扫描会遍历目录全部文件，二进制报错会让整个加载失败（videodl-gui 等
+    /// 含图标资源的插件无法编辑）。占位标记让前端能跳过二进制继续加载文本文件。
     pub fn read_plugin_file(&self, plugin_id: &str, file: &str) -> Result<String, String> {
         let file = file.trim();
         if file.is_empty() {
@@ -353,7 +355,17 @@ impl PluginStore {
         if target.is_dir() {
             return Err(format!("目标不是文件：{file}"));
         }
-        fs::read_to_string(&target).map_err(|e| format!("读取文件失败：{e}"))
+        // 先读字节，再尝试 UTF-8 解码。失败说明是二进制文件（图标/图片等），
+        // 返回占位标记让前端能识别并跳过，而不是让整个草稿加载失败。
+        let bytes = fs::read(&target).map_err(|e| format!("读取文件失败：{e}"))?;
+        match String::from_utf8(bytes.clone()) {
+            Ok(text) => Ok(text),
+            Err(_) => {
+                // 二进制文件：返回占位标记（含大小信息，便于前端展示/跳过）。
+                let size = bytes.len();
+                Ok(format!("[binary file, {size} bytes, non-UTF-8 — 已跳过读取]"))
+            }
+        }
     }
 
     /// 批量写插件文件到 plugins_root/<plugin_id>/（修改已有插件时落盘云端 files）。
