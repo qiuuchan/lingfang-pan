@@ -95,7 +95,7 @@ export class RelayService {
     @Inject(ChannelRouterService) private readonly router: ChannelRouterService,
   ) {}
 
-  /** GET /api/relay/v1/models —— 返回两个版本哨兵，并在有鉴权上下文时附带可用资源池。 */
+  /** GET /api/relay/v1/models —— 返回两个版本哨兵，并在有鉴权上下文时附带可用资源池 + contextWindow。 */
   async listModels(req?: Request) {
     const auth = req?.relayAuth ?? null;
     const poolRefs = auth
@@ -114,11 +114,34 @@ export class RelayService {
     const poolNamesFor = (tier: Tier) => poolRefs
       .filter((pool) => pool.channels.some((channel) => channel.tier === tier))
       .map((pool) => ({ id: pool.id, name: pool.name, scope: pool.scope, teamId: pool.teamId }));
+
+    // contextWindow：按 tier 查候选模型定价行的最小 contextWindow（保守预算）。
+    // 不依赖 teamId（contextWindow 是模型固有属性，与团队无关），任何已登录用户都能拿到。
+    // 前端据此动态计算上下文压缩阈值，取代硬编码的 5000 字符。
+    const [fastWindow, premiumWindow] = await Promise.all([
+      this.pricing.lookupMinContextWindow({ tier: 'FAST' }),
+      this.pricing.lookupMinContextWindow({ tier: 'PREMIUM' }),
+    ]);
+
     return {
       object: 'list',
       data: [
-        { id: 'fast', object: 'model', owned_by: 'lingfang', label: '快速版', resourcePools: poolNamesFor('FAST') },
-        { id: 'premium', object: 'model', owned_by: 'lingfang', label: '高级版', resourcePools: poolNamesFor('PREMIUM') },
+        {
+          id: 'fast',
+          object: 'model',
+          owned_by: 'lingfang',
+          label: '快速版',
+          resourcePools: poolNamesFor('FAST'),
+          contextWindow: fastWindow,
+        },
+        {
+          id: 'premium',
+          object: 'model',
+          owned_by: 'lingfang',
+          label: '高级版',
+          resourcePools: poolNamesFor('PREMIUM'),
+          contextWindow: premiumWindow,
+        },
       ],
     };
   }

@@ -35,6 +35,38 @@ export class PricingService {
   }
 
   /**
+   * 查某 tier 下所有候选模型的最小 contextWindow（保守上下文预算）。
+   *
+   * 用途：relay /models 端点暴露给前端，让 agent 循环知道当前 tier 的真实上下文窗口，
+   * 据此做上下文压缩阈值（取代桌面端硬编码的 5000 字符）。
+   *
+   * 实现：按 (capability='chat', tier) 查全部启用定价行的 contextWindow，过滤 null 取最小值。
+   * 不复用 ChannelRouterService.selectCandidates —— 那会做 round-robin 打乱且只返回单个候选模型，
+   * 这里需要"该 tier 下所有可能命中的模型"的交集下界（最保守）。
+   *
+   * @returns 最小 contextWindow（token）；无任何带 contextWindow 的定价行 → null（前端走保守默认）。
+   */
+  async lookupMinContextWindow(args: {
+    tier: 'FAST' | 'PREMIUM';
+  }): Promise<number | null> {
+    // tier 候选：精确匹配 tier 或不限版本（null）。nullable enum 用 OR 处理。
+    const rows = await this.prisma.modelPricing.findMany({
+      where: {
+        capability: 'chat',
+        enabled: true,
+        contextWindow: { not: null },
+        OR: [{ tier: args.tier }, { tier: null }],
+      },
+      select: { contextWindow: true },
+    });
+    const windows = rows
+      .map((r) => r.contextWindow)
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+    if (windows.length === 0) return null;
+    return Math.min(...windows);
+  }
+
+  /**
    * 把用量 + 单价换算成灵石。
    *  - PER_TOKEN_*：pricePerUnit = 每 1M token 的灵石数。actual = tokens × pricePerUnit / 1_000_000（浮点，保留精度）。
    *  - PER_CALL：固定 pricePerUnit。
