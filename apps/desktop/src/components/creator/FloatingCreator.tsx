@@ -142,6 +142,28 @@ function mergeStreamingText(existing: string, delta: string): string {
   return existing + delta;
 }
 
+/**
+ * 检测 delta 是否是已有文本的重复输出（整段重复，非流式重叠）。
+ *
+ * 上游模型在多轮工具调用后，有时会把上一轮的总结/分析整段重新输出一遍
+ * （表现为几百字的完整段落重复 3-6 次）。mergeStreamingText 的流式重叠
+ * 去重（12 字符阈值）检测不到这种整段重复。
+ *
+ * 本函数检查：delta（≥40 字符）是否作为子串已存在于 existing 中。
+ * 是则判定为重复，返回 null（调用方跳过该 delta）。
+ */
+function detectDuplicateOutput(existing: string, delta: string): string | null {
+  const trimmed = delta.trim();
+  if (trimmed.length < 40) return null; // 太短不判定（可能是正常的短句重复）
+  if (existing.includes(trimmed)) return null; // 已包含完整 delta → 重复
+  // 部分重叠检查：delta 的前 60 字符在 existing 里出现，且 delta 很长 → 大概率重复
+  if (trimmed.length >= 60) {
+    const head = trimmed.slice(0, 60);
+    if (existing.includes(head)) return null;
+  }
+  return delta; // 非重复，正常追加
+}
+
 interface Turn {
   role: 'user' | 'assistant';
   /**
@@ -1377,9 +1399,18 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       if (!cur || cur.role !== 'assistant') return next;
       const parts = cleanTurnParts(cur.parts);
       const last = parts[parts.length - 1];
+
+      // 整段重复检测：上游模型在多轮工具调用后会整段复述之前的总结/分析。
+      // 检查当前 turn 的所有 text parts（不只末尾的），delta 已存在则跳过。
+      // 这解决"几百字总结重复 5-6 次"的问题（跨 tool turn 的 text part 重复）。
+      const allText = parts.filter((p): p is TextPart => p.type === 'text').map((p) => p.content).join('\n');
       if (last && last.type === 'text') {
-        parts[parts.length - 1] = { ...last, content: mergeStreamingText(last.content, delta) };
+        const deduped = detectDuplicateOutput(allText, delta);
+        if (deduped === null) return next; // 判定为重复，跳过
+        parts[parts.length - 1] = { ...last, content: mergeStreamingText(last.content, deduped) };
       } else {
+        // 新建 text part 前也检查（跨 part 重复）
+        if (detectDuplicateOutput(allText, delta) === null) return next;
         parts.push({ type: 'text', content: delta });
       }
       next[turnIdx] = { ...cur, parts, status: 'generating' };
