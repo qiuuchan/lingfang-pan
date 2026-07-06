@@ -82,8 +82,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
     const pendingToolCalls: PendingCall[] = [];
     let hasUsage = false;
 
+    let streamed: StreamResult | null = null;
     try {
-      const streamed = await streamChatCompletion({
+      streamed = await streamChatCompletion({
         messages: working,
         tools: chatTools,
         tier,
@@ -117,8 +118,6 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
       });
       // 流正常结束：flush thinkParser 残留（未闭合 <think> 等）。
       thinkParser.flush();
-      void streamed; // streamed 是最终 assistant text，但 assistantText 已累积，无需用
-      void hasUsage;
     } catch (error) {
       thinkParser.flush();
       const err = error as Error;
@@ -126,6 +125,38 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
       if (err.name === 'AbortError' || signal.aborted) return { status: 'aborted', toolCallCount };
       // 其他错误：归类返回（重试已在 streamChatCompletion 内部尽力）。
       return { status: 'failed', error: err.message || String(err), toolCallCount };
+    }
+
+    // 检测上游 max_tokens 截断（finish_reason='length'）。
+    // 此时 tool_calls 的 arguments 必然不完整（JSON 被切断），不能执行。
+    // 回灌明确错误让模型分块重试（如先 Write 部分内容，再 Edit 追加）。
+    if (streamed && streamed.finishReason === 'length' && pendingToolCalls.length > 0) {
+      const truncatedCall = pendingToolCalls[0];
+      callbacks.onToolCall({
+        toolCallId: truncatedCall.id,
+        name: truncatedCall.function.name,
+        args: { _truncated: true, receivedChars: truncatedCall.function.arguments.length },
+      });
+      const truncErr = `输出因长度限制被截断（已收到 ${truncatedCall.function.arguments.length} 字符的参数，JSON 不完整）。请把文件内容拆成更小的块：先 Write 文件的前半部分，再用 Edit 逐步追加后续内容，每次不超过 6000 字符。`;
+      callbacks.onToolOutput({
+        toolCallId: truncatedCall.id,
+        name: truncatedCall.function.name,
+        result: truncErr,
+        ok: false,
+      });
+      // 把截断的工具调用（标记为失败）+ 错误回灌进 working，让模型看到并分块重试。
+      working.push({
+        role: 'assistant',
+        content: assistantText || null,
+        tool_calls: pendingToolCalls.map(({ _index, ...rest }) => {
+          void _index;
+          return rest;
+        }),
+      });
+      working.push({ role: 'tool', tool_call_id: truncatedCall.id, content: truncErr });
+      // 清空 pendingToolCalls，跳过下面的工具执行段，直接进入下一轮循环。
+      pendingToolCalls.length = 0;
+      continue;
     }
 
     // 无工具调用：模型给了最终答案，循环结束。
@@ -232,7 +263,7 @@ interface StreamOptions {
  * 内部带 429/503 指数退避重试（连接错误由 withRetryFetch 处理）。
  * 返回最终 assistant 完整文本。失败抛错（已尽力重试）。
  */
-async function streamChatCompletion(opts: StreamOptions): Promise<string> {
+async function streamChatCompletion(opts: StreamOptions): Promise<StreamResult> {
   const body = {
     model: opts.tier,
     messages: opts.messages,
@@ -240,6 +271,11 @@ async function streamChatCompletion(opts: StreamOptions): Promise<string> {
     tool_choice: opts.tools.length ? 'auto' : undefined,
     stream: true,
     temperature: 0.4,
+    // max_tokens：不传时上游用默认值（Anthropic 默认仅 4096），
+    // 大文件工具调用的 arguments JSON 很容易超限被截断（表现为
+    // "Unterminated string at position N"）。设 16384 足够覆盖
+    // 大段源码的单次工具调用输出，避免 arguments 被上游 token 限制切断。
+    max_tokens: 16_384,
     stream_options: { include_usage: true },
   };
 
@@ -302,7 +338,7 @@ async function streamChatCompletion(opts: StreamOptions): Promise<string> {
       if (text) opts.onDelta(text);
       const tcs = extractToolCalls(data);
       if (tcs.length) opts.onToolCallDelta(tcs);
-      return text;
+      return { text, finishReason: 'stop' };
     }
 
     // 真正的 SSE 流解析。
@@ -312,14 +348,21 @@ async function streamChatCompletion(opts: StreamOptions): Promise<string> {
   throw lastErr ?? new Error('模型调用失败，已重试多次仍不可达。');
 }
 
-/** 消费 SSE 流，解析 content/tool_calls/usage 增量。 */
-async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<string> {
+/** 流式响应结果：文本 + 上游停止原因（'length'=max_tokens 截断，'tool_calls'/'stop'=正常）。 */
+interface StreamResult {
+  text: string;
+  finishReason: string;
+}
+
+/** 消费 SSE 流，解析 content/tool_calls/usage/finish_reason 增量。 */
+async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<StreamResult> {
   const reader = res.body?.getReader();
   if (!reader) throw new Error('无法读取模型响应流');
 
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  let finishReason = '';
 
   const consumeEvent = (evt: string) => {
     for (const line of evt.split('\n')) {
@@ -333,6 +376,7 @@ async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<str
             content?: string | null;
             tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
           };
+          finish_reason?: string | null;
         }>;
         usage?: { prompt_tokens?: number; completion_tokens?: number };
         error?: { message?: string };
@@ -355,6 +399,11 @@ async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<str
       if (delta?.tool_calls?.length) {
         opts.onToolCallDelta(delta.tool_calls);
       }
+      // 捕获 finish_reason（流结束时上游告知停止原因）。
+      // 'length' = 因 max_tokens 截断（arguments 可能不完整）；
+      // 'tool_calls'/'stop' = 正常结束。
+      const fr = obj.choices?.[0]?.finish_reason;
+      if (fr) finishReason = fr;
       if (obj.usage) {
         opts.onUsage({ promptTokens: obj.usage.prompt_tokens, completionTokens: obj.usage.completion_tokens });
       }
@@ -380,7 +429,7 @@ async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<str
   } finally {
     reader.releaseLock?.();
   }
-  return fullText;
+  return { text: fullText, finishReason };
 }
 
 /** 非流式响应提取 content。 */

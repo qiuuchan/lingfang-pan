@@ -44,6 +44,11 @@ function toolCallDelta(index: number, opts: { id?: string; name?: string; argume
   };
 }
 
+/** 构造 finish_reason chunk（流结束时上游告知停止原因）。 */
+function finishChunk(reason: string) {
+  return { choices: [{ index: 0, delta: {}, finish_reason: reason }] };
+}
+
 /** 构造一个返回给定 SSE 的 fetch mock（含 usage chunk）。 */
 function mockFetchOnce(sseText: string) {
   const encoder = new TextEncoder();
@@ -74,15 +79,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function makeCallbacks(): LoopCallbacks & { calls: string[] } {
+function makeCallbacks(): LoopCallbacks & { calls: string[]; outputs: Array<{ name: string; result: unknown; ok: boolean }> } {
   const calls: string[] = [];
+  const outputs: Array<{ name: string; result: unknown; ok: boolean }> = [];
   return {
     calls,
+    outputs,
     onTextDelta: (d) => calls.push(`text:${d}`),
     onReasoningDelta: (d) => calls.push(`reasoning:${d}`),
     onReasoningEnd: () => calls.push('reasoningEnd'),
     onToolCall: (c) => calls.push(`toolCall:${c.name}`),
-    onToolOutput: (o) => calls.push(`toolOutput:${o.name}:${o.ok ? 'ok' : 'err'}`),
+    onToolOutput: (o) => {
+      calls.push(`toolOutput:${o.name}:${o.ok ? 'ok' : 'err'}`);
+      outputs.push({ name: o.name, result: o.result, ok: o.ok });
+    },
   };
 }
 
@@ -288,5 +298,51 @@ describe('runAgentLoop', () => {
     expect(executeCalled).toBe(false);
     // 工具输出应该是 error（参数解析失败错误回灌）
     expect(cbs.calls.some((c) => c.startsWith('toolOutput:Write:err'))).toBe(true);
+  });
+
+  it('max_tokens 截断（finish_reason=length）：不执行工具，回灌分块提示', async () => {
+    // 模拟上游因 max_tokens 截断：arguments 只传了一半，finish_reason='length'
+    const fetch1 = sseBody([
+      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: '{"path":"big.py","content":"xxx' }),
+      finishChunk('length'), // 截断信号
+    ]);
+    // 第二轮：模型看到分块提示后，改用小块写入
+    const fetch2 = sseBody([contentDelta('好的，我分块写')]);
+
+    let callCount = 0;
+    let executeCalled = false;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      const encoder = new TextEncoder();
+      const text = callCount === 1 ? fetch1 : fetch2;
+      const stream = new ReadableStream({
+        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    });
+
+    const writeTool: ToolDefinition = {
+      name: 'Write',
+      description: '写文件',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      execute: async () => {
+        executeCalled = true; // 截断时不应执行
+        return { ok: true, data: '不应到达' };
+      },
+    };
+    const cbs = makeCallbacks();
+    await runAgentLoop({
+      messages: [{ role: 'user', content: '写大文件' }],
+      tools: [writeTool],
+      tier: 'fast',
+      signal: new AbortController().signal,
+      callbacks: cbs,
+    });
+    // 关键：截断时不执行工具
+    expect(executeCalled).toBe(false);
+    // 回灌的错误应包含分块提示
+    const truncOutput = cbs.outputs.find((o) => o.name === 'Write' && !o.ok);
+    expect(truncOutput).toBeTruthy();
+    expect(String(truncOutput?.result)).toMatch(/截断|拆成更小|分块/);
   });
 });

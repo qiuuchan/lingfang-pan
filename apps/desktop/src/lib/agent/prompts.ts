@@ -19,6 +19,11 @@ const WORKFLOW = `
   1. **CreatePlugin 只传最小骨架**：manifest 必需字段 + 入口文件占位（nodejs→index.js 写「导入 + 空主函数」骨架 + package.json 写真实依赖；python→main.py 写「导入 + 空主函数」骨架 + requirements.txt；client→ui/index.html 写页面骨架）。CreatePlugin 的 files 数组里**每个文件内容都要短**（占位骨架即可）。
   2. **再用 Write 逐个补完整源码**：CreatePlugin 成功建目录后，对每个需要完整逻辑的文件单独调用 Write 写入真实内容。单文件源码 > 60 行、或含模板字符串/正则/大量引号反斜杠时，**必须**走这条分文件路径（一次性塞进 CreatePlugin 会让 JSON 参数过长被截断/转义出错导致工具失败）。
   绝不要在 CreatePlugin 之前用 Write；CreatePlugin 之后用 Write/Edit 精修。
+- **大文件分块写入**（关键）：单次 Write 的 content 超过 **6000 字符**时，模型的输出会被上游 token 限制截断，导致参数不完整、写入失败。遇到大文件（完整 GUI 模块、长源码等）时：
+  1. 先用 Write 写入文件的**前半部分**（≤ 6000 字符），在末尾留一个明确的分割标记（如 "# === 待续 ==="）。
+  2. 再用 **Edit** 把分割标记替换为后续内容（Edit 的 old_string→new_string 同样受长度限制，若追加部分仍超 6000 字符，继续分块）。
+  3. 重复直到完整文件写入，最后删除分割标记。
+  若收到"输出因长度限制被截断"的错误，立即切换到分块策略，不要原样重试整个文件。
 - **能力声明（capabilities）必须与代码实际一致**：CreatePlugin 时根据代码用到的能力声明 capabilities，不要漏。Check 会自动扫描代码检测缺漏并提示。能力清单与对应代码特征：
   - llm.chat：调用平台 LLM（sdk.llm / LLM 桥）
   - image.generate：调用平台生图（sdk.image）
