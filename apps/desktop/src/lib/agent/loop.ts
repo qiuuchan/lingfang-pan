@@ -152,26 +152,42 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
       toolCallCount++;
 
       // 解析工具入参（模型 arguments 是 JSON 字符串增量拼成的）。
-      let args: unknown = {};
-      try {
-        args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-      } catch {
-        // 模型传了畸形 JSON arguments：仍通知工具开始，用空对象执行（工具内部容错）。
-        args = {};
+      const rawArgs = call.function.arguments;
+      let args: Record<string, unknown> = {};
+      let parseError: string | null = null;
+      if (rawArgs) {
+        try {
+          args = JSON.parse(rawArgs) as Record<string, unknown>;
+        } catch (e) {
+          // arguments 拼接后非法 JSON：可能是流式分片没拼全，或模型传了畸形 JSON。
+          // 关键修复（betav2）：不能静默 fallback 到 {} 再执行——那会让工具收到空参数
+          // （表现为 path=undefined），模型却以为成功了。必须把错误回灌给模型，
+          // 让它看到"参数解析失败"并重试传入完整参数。
+          parseError = `参数解析失败（收到 ${rawArgs.length} 字符的非法 JSON）：${e instanceof Error ? e.message : String(e)}`;
+          console.warn('[agent] tool arguments parse failed', {
+            tool: call.function.name,
+            argsLength: rawArgs.length,
+            argsHead: rawArgs.slice(0, 200),
+          });
+        }
       }
 
       callbacks.onToolCall({ toolCallId: call.id, name: call.function.name, args });
 
-      const def = toolMap.get(call.function.name);
       let result: ToolResult;
-      if (!def) {
-        result = { ok: false, error: `工具 ${call.function.name} 不存在` };
+      if (parseError) {
+        // 参数解析失败：不执行工具，把错误回灌让模型重试。
+        result = { ok: false, error: parseError };
       } else {
-        try {
-          result = await def.execute(args, { toolCallId: call.id, signal });
-        } catch (e) {
-          // 工具 execute 抛错（不应发生，但兜底）：封装为结构化错误。
-          result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+        const def = toolMap.get(call.function.name);
+        if (!def) {
+          result = { ok: false, error: `工具 ${call.function.name} 不存在` };
+        } else {
+          try {
+            result = await def.execute(args, { toolCallId: call.id, signal });
+          } catch (e) {
+            result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+          }
         }
       }
 
