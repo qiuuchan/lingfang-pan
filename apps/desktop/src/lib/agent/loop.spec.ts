@@ -194,4 +194,99 @@ describe('runAgentLoop', () => {
     const result = await promise;
     expect(result.status).toBe('aborted');
   });
+
+  it('大文件 arguments 分片拼接：12000 字符 content 切多 chunk 仍能正确解析', async () => {
+    // 模拟模型写一个大文件：arguments 被切成多个 chunk（真实场景：长 content 分片下发）
+    const bigContent = 'x'.repeat(12000);
+    const fullArgs = JSON.stringify({ path: 'big.py', content: bigContent });
+    // 把 fullArgs 切成 4 段（模拟 SSE 分片）
+    const chunkSize = Math.ceil(fullArgs.length / 4);
+    const argChunks = [];
+    for (let i = 0; i < fullArgs.length; i += chunkSize) {
+      argChunks.push(fullArgs.slice(i, i + chunkSize));
+    }
+
+    const fetch1Chunks = [toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: argChunks[0] ?? '' })];
+    for (let i = 1; i < argChunks.length; i++) {
+      fetch1Chunks.push(toolCallDelta(0, { arguments: argChunks[i] }));
+    }
+    const fetch1 = sseBody(fetch1Chunks);
+    const fetch2 = sseBody([contentDelta('完成')]);
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      const encoder = new TextEncoder();
+      const text = callCount === 1 ? fetch1 : fetch2;
+      const stream = new ReadableStream({
+        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    });
+
+    let capturedArgs: unknown = null;
+    const writeTool: ToolDefinition = {
+      name: 'Write',
+      description: '写文件',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      execute: async (args) => {
+        capturedArgs = args;
+        return { ok: true, data: '已写入' };
+      },
+    };
+    const cbs = makeCallbacks();
+    const result = await runAgentLoop({
+      messages: [{ role: 'user', content: '写大文件' }],
+      tools: [writeTool],
+      tier: 'fast',
+      signal: new AbortController().signal,
+      callbacks: cbs,
+    });
+    expect(result.status).toBe('done');
+    expect(cbs.calls).toContain('toolOutput:Write:ok');
+    // 关键断言：分片拼接后参数完整，不是 {}
+    expect(capturedArgs).toEqual({ path: 'big.py', content: bigContent });
+  });
+
+  it('畸形 arguments：解析失败时回灌错误给模型，不静默用 {} 执行', async () => {
+    // 模型传了被截断的 arguments（缺少闭合 }）
+    const fetch1 = sseBody([
+      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: '{"path":"gui.py","content":"miss' }),
+    ]);
+    const fetch2 = sseBody([contentDelta('好的，我重新传完整参数')]);
+
+    let callCount = 0;
+    let executeCalled = false;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      const encoder = new TextEncoder();
+      const text = callCount === 1 ? fetch1 : fetch2;
+      const stream = new ReadableStream({
+        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    });
+
+    const writeTool: ToolDefinition = {
+      name: 'Write',
+      description: '写文件',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      execute: async () => {
+        executeCalled = true; // 不应该被调用
+        return { ok: true, data: '不应到达' };
+      },
+    };
+    const cbs = makeCallbacks();
+    await runAgentLoop({
+      messages: [{ role: 'user', content: '写文件' }],
+      tools: [writeTool],
+      tier: 'fast',
+      signal: new AbortController().signal,
+      callbacks: cbs,
+    });
+    // 关键：execute 不应被调用（参数解析失败时不执行工具）
+    expect(executeCalled).toBe(false);
+    // 工具输出应该是 error（参数解析失败错误回灌）
+    expect(cbs.calls.some((c) => c.startsWith('toolOutput:Write:err'))).toBe(true);
+  });
 });

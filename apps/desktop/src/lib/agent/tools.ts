@@ -176,6 +176,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
       content: fileContentSchema,
     }),
     async execute({ path, content }): Promise<string> {
+      if (!path || typeof path !== 'string') return '错误：缺少必需参数 path（文件路径）。请传入 path 和 content 两个参数。';
       const pluginId = requirePluginId();
       if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
       try {
