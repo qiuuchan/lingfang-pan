@@ -6,9 +6,8 @@
 //    草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
 //  - pluginId 单一真相源：经 PluginCreatorSession store（session/store.ts），消除旧 5 副本竞态。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { XIcon, SendIcon, Loader2Icon, PlusIcon, CheckCircle2Icon, Trash2Icon, EyeIcon } from 'lucide-react';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { tauriInvoke } from '@/lib/api';
@@ -31,23 +30,17 @@ import {
   type CreatorMode,
 } from '@/lib/plugin-creator/creator-input';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
-import { ToolCallCard } from '@/components/creator/ToolCallCard';
-import { TodoPanel } from '@/components/creator/TodoPanel';
 import { ContextInspector } from '@/components/creator/ContextInspector';
 import { CreatorFloatingTitleBar, CreatorWorkspaceSidebar } from '@/components/creator/CreatorWorkspaceChrome';
 import { CreatorComposer } from '@/components/creator/CreatorComposer';
 import { CreatorEmptyState } from '@/components/creator/CreatorEmptyState';
-import { CreatorCopyButton, CreatorRetryButton } from '@/components/creator/CreatorMessageActions';
-import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
-import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS, SKILLS } from '@/lib/skills';
+import { CreatorMessageList } from '@/components/creator/CreatorMessageList';
+import { CreatorHistoryDialog } from '@/components/creator/CreatorHistoryDialog';
+import { CreatorSkillsDialog } from '@/components/creator/CreatorSkillsDialog';
+import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import { fetchContextWindow } from '@/lib/relay-models';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Markdown } from '@/components/markdown';
 import { cn } from '@/lib/utils';
 
 interface QuestionPart {
@@ -1453,86 +1446,6 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setMultiSelectDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
   }
 
-  // 渲染提问卡片（从 parts 链式渲染中调用，turnIdx 用于作答定位）。
-  function renderQuestionCard(p: QuestionPart, turnIdx: number) {
-    const draftText = answerDrafts[p.toolCallId] ?? '';
-    const selected = multiSelectDrafts[p.toolCallId] ?? [];
-    const submitMulti = () => {
-      if (!selected.length) return;
-      const labels = selected
-        .map((v) => p.options?.find((o) => o.value === v)?.label ?? v)
-        .join('、');
-      answerQuestion(turnIdx, p.toolCallId, labels);
-    };
-    return (
-      <div key={p.toolCallId} className="rounded-xl border border-[#2a2a2c] bg-[#18181a] p-4 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-[#2a2a2c] text-[#e5e5e5]">
-            <span className="font-mono text-xs font-bold">?</span>
-          </div>
-          <div className="flex-1 text-sm font-medium">{p.question}</div>
-        </div>
-        {p.answered ? (
-          <div className="mt-3 flex items-start gap-2 rounded-md border border-[#3a3a3d] bg-[#202023] px-3 py-2">
-            <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[#e5e5e5]" />
-            <span className="text-xs text-[#b8b8bd]">已回答：{p.answer}</span>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-2.5">
-            {p.options && p.options.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {p.options.map((o) => {
-                  const on = selected.includes(o.value);
-                  return (
-                    <button
-                      key={o.value}
-                      type="button"
-                      onClick={() => {
-                        if (p.multiSelect) {
-                          setMultiSelectDrafts((prev) => {
-                            const cur = prev[p.toolCallId] ?? [];
-                            return { ...prev, [p.toolCallId]: on ? cur.filter((v) => v !== o.value) : [...cur, o.value] };
-                          });
-                        } else {
-                          answerQuestion(turnIdx, p.toolCallId, o.label);
-                        }
-                      }}
-                      className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${on ? 'border-[#6f6f75] bg-[#2a2a2c] text-[#e5e5e5]' : 'border-[#2a2a2c] bg-[#151517] text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]'}`}
-                    >
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {p.multiSelect && p.options && p.options.length > 0 && (
-              <Button size="sm" className="h-8 gap-1.5 rounded-md bg-[#2a2a2c] px-3.5 text-xs text-[#e5e5e5] hover:bg-[#343437] disabled:text-[#6f7076]" disabled={!selected.length} onClick={submitMulti}>
-                <CheckCircle2Icon className="size-3.5" />
-                确认选择
-              </Button>
-            )}
-            {/* 兜底：allowFreeText 为真，或既无选项也不允许自由输入（防死锁——否则卡片无任何作答控件，deferred 永不 resolve）时，都给自由输入框。 */}
-            {(p.allowFreeText || !(p.options && p.options.length > 0)) && (
-              <div className="flex items-end gap-2">
-                <Textarea
-                  placeholder="或在此输入你的回答…"
-                  value={draftText}
-                  onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [p.toolCallId]: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); answerQuestion(turnIdx, p.toolCallId, draftText); } }}
-                  rows={1}
-                  className="min-h-[36px] max-h-24 resize-none rounded-md border-[#2a2a2c] bg-[#151517] font-mono text-sm text-[#e5e5e5] placeholder:text-[#5a5a5c] focus-visible:border-[#3a3a3d] focus-visible:ring-0 dark:bg-[#151517]"
-                />
-                <Button size="sm" className="h-9 gap-1.5 rounded-md bg-[#2a2a2c] px-3.5 text-xs text-[#e5e5e5] hover:bg-[#343437] disabled:text-[#6f7076]" disabled={!draftText.trim()} onClick={() => answerQuestion(turnIdx, p.toolCallId, draftText)}>
-                  <SendIcon className="size-3.5" />
-                  提交
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <>
@@ -1597,150 +1510,40 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
           />
         )}
           <div className="flex min-w-0 flex-1 flex-col">
-        {/* 对话区 */}
-        <div ref={scrollRef} className={cn('min-h-0 flex-1 overflow-y-auto px-5 py-8 [scrollbar-gutter:stable] sm:px-8', embedded && 'px-6 py-10 lg:px-10')}>
-          {turns.length === 0 ? (
-            <CreatorEmptyState
-              composer={embedded ? null : renderComposer('hero')}
-              embedded={embedded}
-              onSelectPreset={setInput}
-            />
-          ) : (
-            <div className={cn(CREATOR_COLUMN_CLASS, 'flex flex-col gap-6')}>
-              {turns.map((t, i) => (
-                <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                  {t.role === 'user' ? (
-                    <div className="group relative max-w-[72%] whitespace-pre-wrap break-words rounded-md bg-[#2a2a2c] px-4 py-2.5 text-sm leading-6 text-[#f0f0f2] shadow-[0_8px_22px_rgba(0,0,0,0.16)]">
-                      <CreatorCopyButton text={t.content} className="bg-white/10 text-[#f0f0f2] hover:bg-white/15 hover:text-white" />
-                      {t.content}
-                    </div>
-                  ) : (
-                    // 链式渲染（OpenCodeUI 式）：每个 part 是独立卡片（思考一张、内容一张、工具一张…），纵向堆叠。
-                    (cleanTurnParts(t.parts).length > 0) ? (
-                      <div className="flex w-full flex-col gap-4">
-                        {cleanTurnParts(t.parts).map((p, pi) => {
-                          if (p.type === 'reasoning') {
-                            return (
-                              <details key={`r-${pi}`} className="overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] text-xs shadow-[0_10px_28px_rgba(0,0,0,0.16)]" open={!p.done && t.streaming}>
-                                <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-mono font-medium text-[#b6b6ba] transition-colors hover:bg-[#202023] hover:text-[#f0f0f2]">
-                                  {!p.done && t.streaming ? 'Thinking...' : 'Thinking'}
-                                  {!p.done && t.streaming && <Loader2Icon className="size-2.5 animate-spin" />}
-                                </summary>
-                                <div className="max-h-44 overflow-y-auto whitespace-pre-wrap break-words border-t border-[#2a2a2c] bg-[#151517] px-4 py-3 pr-5 font-mono text-[11px] leading-6 text-[#d7d7db]">
-                                  {p.content}
-                                </div>
-                              </details>
-                            );
-                          }
-                          if (p.type === 'text') {
-                            if (!p.content.trim()) return null;
-                            return (
-                              <div key={`t-${pi}`} className="creator-assistant-bubble group relative overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] px-5 py-4 text-[15px] leading-7 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
-                                <CreatorCopyButton text={p.content} />
-                                {/* break-words：错误信息（含上游根因、URL、长串）需正确换行，不撑破气泡。 */}
-                                <div className="break-words">
-                                  <Markdown>{p.content}</Markdown>
-                                </div>
-                              </div>
-                            );
-                          }
-                          if (p.type === 'tool') {
-                            return <ToolCallCard key={p.toolCallId} data={p} />;
-                          }
-                          // question part
-                          return renderQuestionCard(p, i);
-                        })}
-                        <CreatorRetryButton busy={busy} status={t.status} streaming={t.streaming} onRetry={() => { void retry(); }} />
-                      </div>
-                    ) : (
-                      // 向后兼容 / 兜底：旧会话只有 content 或无任何 part 时，单个气泡渲染。
-                      <div className="creator-assistant-bubble group relative w-full overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] px-5 py-4 text-[15px] leading-7 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
-                        {t.content && <CreatorCopyButton text={t.content} />}
-                        {t.content ? (
-                          <Markdown>{t.content}</Markdown>
-                        ) : t.status === 'failed' ? (
-                          <span className="text-destructive">调用失败</span>
-                        ) : t.status === 'cancelled' ? (
-                          <span className="text-muted-foreground">已取消</span>
-                        ) : !t.streaming ? (
-                          <span className="text-muted-foreground">无内容</span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
-                        )}
-                        <CreatorRetryButton busy={busy} status={t.status} streaming={t.streaming} onRetry={() => { void retry(); }} />
-                      </div>
-                    )
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {/* 保存成功卡片：用户在右侧面板点保存、草稿保存成功后告知「已保存到本地」 */}
-          {publishedName && (
-            <div className={cn(CREATOR_COLUMN_CLASS, 'mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500')}>
-              <div className="flex items-start gap-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-green-600">
-                  <CheckCircle2Icon className="size-5 text-white" />
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="font-semibold text-green-900 dark:text-green-100">草稿「{publishedName}」已保存到本地</div>
-                  <div className="text-sm text-green-800/80 dark:text-green-200/70">已保存到本地插件目录，可在插件中心「我的草稿」查看、运行和发布到团队。点击「+ 新建对话」继续创建下一个插件。</div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* #3 思考流式输出已改为内联在 assistant 气泡中按时序链式展示（见 parts 渲染），
-            此处不再重复渲染底部全局思考条。reasoning state 仅用于流末兜底判定。 */}
-
-        {/* 任务清单（底部折叠抽屉）：钉在对话区底部，默认折叠成窄横条，不占对话滚动空间。
-            有任务时才显示；点击向上展开明细。 */}
-        {todos.length > 0 && <TodoPanel todos={todos} streaming={busy} />}
-
-        {/* #1 上下文用量条（contextWindow 配好后显示百分比） */}
-        {contextWindow && turns.length > 0 && (
-          <div className="shrink-0 border-t bg-muted/20 px-6 py-2">
-            <div className={CREATOR_COLUMN_CLASS}>
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span className="font-mono font-medium">context</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono tabular-nums">
-                    {usedTokens.toLocaleString()} / {contextWindow.toLocaleString()} tok（{usagePct}%）
-                    {compressHint && <span className="ml-1 text-amber-600 dark:text-amber-400">· {compressHint}</span>}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => { void openContextInspector(); }}
-                    className="h-6 gap-1 px-2 text-[10px]"
-                  >
-                    <EyeIcon className="size-3" />
-                    查看
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
-                <div className={`h-full rounded-full transition-all duration-300 ${usagePct > 80 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${usagePct}%` }} />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 状态指示（压缩中 / 联网搜索中 / agent 工具上传中） */}
-        {(compressing || searchingQuery != null || uploadingViaTool) && (
-          <div className="shrink-0 border-t bg-muted/20 px-6 py-2.5">
-            <div className={cn(CREATOR_COLUMN_CLASS, 'flex items-center gap-2 font-mono text-xs text-[#a6a6ac]')}>
-              <Loader2Icon className="size-3.5 animate-spin text-primary" />
-              <span>
-                {compressing
-                  ? '正在压缩对话上下文…'
-                  : searchingQuery != null
-                    ? `正在联网搜索：${searchingQuery}…`
-                    : 'AI 正在生成插件草稿…'}
-              </span>
-            </div>
-          </div>
+        {turns.length === 0 && !embedded ? (
+          <CreatorEmptyState
+            composer={renderComposer('hero')}
+            embedded={embedded}
+            onSelectPreset={setInput}
+          />
+        ) : turns.length === 0 ? (
+          <CreatorEmptyState composer={null} embedded={embedded} onSelectPreset={setInput} />
+        ) : (
+          <CreatorMessageList
+            turns={turns}
+            busy={busy}
+            scrollRef={scrollRef}
+            embedded={embedded}
+            answerDrafts={answerDrafts}
+            multiSelectDrafts={multiSelectDrafts}
+            todos={todos}
+            publishedName={publishedName}
+            contextWindow={contextWindow}
+            usedTokens={usedTokens}
+            usagePct={usagePct}
+            compressHint={compressHint ?? ''}
+            compressing={compressing}
+            searchingQuery={searchingQuery}
+            uploadingViaTool={uploadingViaTool}
+            onAnswer={answerQuestion}
+            onAnswerDraftChange={(toolCallId, text) => setAnswerDrafts((prev) => ({ ...prev, [toolCallId]: text }))}
+            onToggleMultiSelect={(toolCallId, value) => setMultiSelectDrafts((prev) => {
+              const cur = prev[toolCallId] ?? [];
+              return { ...prev, [toolCallId]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
+            })}
+            onRetry={() => { void retry(); }}
+            onOpenContext={() => { void openContextInspector(); }}
+          />
         )}
 
         {(embedded || turns.length > 0) && renderComposer('bottom')}
@@ -1759,118 +1562,30 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         </div>
       </div>
     </div>
-    <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>对话历史</DialogTitle>
-          <DialogDescription>选择历史对话后可继续之前的会话。</DialogDescription>
-        </DialogHeader>
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-muted-foreground">最多保留最近 30 条</div>
-          <Button variant="outline" size="sm" onClick={newConversation}>
-            <PlusIcon className="size-3.5" />新建对话
-          </Button>
-        </div>
-        <div className="max-h-[48vh] space-y-1 overflow-y-auto">
-          {conversations.length ? pagedConversations.map((conversation) => (
-            <div
-              key={conversation.id}
-              className={`group relative flex items-center gap-2 rounded-md border px-3 py-2 transition-colors ${conversation.id === activeConversationId ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
-            >
-              <button
-                type="button"
-                onClick={() => selectConversation(conversation)}
-                className="min-w-0 flex-1 text-left"
-                title={conversation.title}
-              >
-                <span className="block truncate text-sm font-medium">{conversation.title}</span>
-                <span className="block font-mono text-xs text-muted-foreground">{new Date(conversation.updatedAt).toLocaleString('zh-CN', { hour12: false })}</span>
-              </button>
-              {confirmDeleteId === conversation.id ? (
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={(e) => { e.stopPropagation(); deleteConversation(conversation.id); }}
-                  >
-                    确认删除
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                  >
-                    取消
-                  </Button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  title="删除该对话"
-                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(conversation.id); }}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </button>
-              )}
-            </div>
-          )) : <div className="py-8 text-center text-sm text-muted-foreground">暂无历史对话</div>}
-        </div>
-        {conversations.length > PAGE_SIZE && (
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              disabled={historyPage <= 0}
-              onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
-            >
-              上一页
-            </Button>
-            <span className="text-xs text-muted-foreground tabular-nums">第 {historyPage + 1} / {pageCount} 页</span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              disabled={historyPage >= pageCount - 1}
-              onClick={() => setHistoryPage((p) => Math.min(pageCount - 1, p + 1))}
-            >
-              下一页
-            </Button>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-    <Dialog open={skillDialogOpen} onOpenChange={setSkillDialogOpen}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>技能</DialogTitle>
-          <DialogDescription>按需开启，让 AI 生成更符合预期的插件。</DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[56vh] space-y-2 overflow-y-auto">
-          {SKILLS.map((s) => {
-            const checked = activeSkillIds.includes(s.id);
-            return (
-              <label
-                key={s.id}
-                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${checked ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'}`}
-              >
-                <Checkbox checked={checked} onCheckedChange={() => toggleSkill(s.id)} className="mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">{s.name}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">{s.description}</div>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={() => setSkillDialogOpen(false)}>完成</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <CreatorHistoryDialog
+      open={historyOpen}
+      onOpenChange={setHistoryOpen}
+      conversations={conversations}
+      activeConversationId={activeConversationId}
+      page={historyPage}
+      pageCount={pageCount}
+      confirmDeleteId={confirmDeleteId}
+      onSelect={(id) => {
+        const target = conversations.find((c) => c.id === id);
+        if (target) selectConversation(target);
+      }}
+      onNewConversation={newConversation}
+      onRequestDelete={setConfirmDeleteId}
+      onConfirmDelete={deleteConversation}
+      onCancelDelete={() => setConfirmDeleteId(null)}
+      onPageChange={setHistoryPage}
+    />
+    <CreatorSkillsDialog
+      open={skillDialogOpen}
+      onOpenChange={setSkillDialogOpen}
+      activeSkillIds={activeSkillIds}
+      onToggle={toggleSkill}
+    />
 
     {/* 上下文查看面板 */}
     <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={usedTokens} contextWindow={contextWindow} />
