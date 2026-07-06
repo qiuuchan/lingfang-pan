@@ -6,6 +6,26 @@
 import { errorMessage, tauriInvoke } from './api';
 import type { LoadedPlugin, DraftFile } from './types';
 
+/**
+ * 二进制文件占位标记（Rust read_plugin_file 对非 UTF-8 文件返回此字符串）。
+ *
+ * 草稿加载会遍历目录全部文件，二进制文件（PNG/ICO 图标等）无法作为 UTF-8 文本返回，
+ * Rust 层返回此占位让前端能继续加载其余文本文件，而不是整个加载失败。
+ *
+ * 写回磁盘时必须跳过占位文件（否则会用占位文本覆盖原二进制内容）。
+ */
+const BINARY_PLACEHOLDER_PREFIX = '[binary file,';
+
+/** 判断文件内容是否为二进制占位标记（Rust 层对非 UTF-8 文件的兜底返回）。 */
+export function isBinaryPlaceholder(content: string): boolean {
+  return content.startsWith(BINARY_PLACEHOLDER_PREFIX);
+}
+
+/** 过滤掉二进制占位文件（写回磁盘时调用，避免占位文本覆盖原二进制）。 */
+export function filterWritableFiles<T extends { content: string }>(files: T[]): T[] {
+  return files.filter((f) => !isBinaryPlaceholder(f.content));
+}
+
 export interface SaveDraftArgs {
   id: string;
   manifest: Record<string, unknown>;
@@ -61,12 +81,14 @@ function normalizeRuntime(value: unknown): LoadedPlugin['runtime_type'] {
 
 async function readPluginFiles(pluginId: string): Promise<DraftFile[]> {
   const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
-  return Promise.all(
+  const all = await Promise.all(
     paths.map(async (path) => ({
       path,
       content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }),
     })),
   );
+  // 过滤掉二进制占位文件（图标/图片等非 UTF-8，Rust 返回占位标记）。
+  return filterWritableFiles(all);
 }
 
 /**
@@ -92,7 +114,10 @@ export async function saveDraftPlugin(args: SaveDraftArgs): Promise<SaveDraftPlu
       { path: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` },
       ...args.files
         .filter(([path]) => path !== 'manifest.json')
-        .map(([path, content]) => ({ path, content })),
+        .map(([path, content]) => ({ path, content }))
+        // 跳过二进制占位文件：它们是 Rust 对非 UTF-8 文件的兜底返回，
+        // 写回会用占位文本覆盖原二进制（图标/图片等）。
+        .filter((f) => !isBinaryPlaceholder(f.content)),
     ];
     await tauriInvoke<void>('write_plugin_files', { pluginId: args.id, files });
     await tauriInvoke<void>('set_plugin_draft_flag', { pluginId: args.id, draft: true });
