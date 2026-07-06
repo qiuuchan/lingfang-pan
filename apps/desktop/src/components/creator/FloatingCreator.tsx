@@ -1,9 +1,10 @@
-// FloatingCreator —— 悬浮窗 + 对话式 + 流式 AI 插件创建器（OpenAI Agents SDK agent）。
+// FloatingCreator —— 悬浮窗 + 对话式 + 流式 AI 插件创建器（betav2：自建 agent 循环）。
 //
 //  - 悬浮窗：App 渲染为全屏遮罩 + 居中面板（~85vh），不切 view，关窗即回原页。
 //  - 对话式：多轮聊天（用户/助手气泡），输入框在底部，Enter 发送。
-//  - 流式 + agent：OpenAI Agents SDK 走 relay；模型生成插件后调用 CreatePlugin 写入 plugins_root 草稿。
+//  - 流式 + agent：自建轻量 agent 循环（loop.ts）走 relay；模型生成插件后调用 CreatePlugin 写入 plugins_root 草稿。
 //    草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
+//  - pluginId 单一真相源：经 PluginCreatorSession store（session/store.ts），消除旧 5 副本竞态。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -11,12 +12,15 @@ import { XIcon, SendIcon, Loader2Icon, PlusIcon, CheckCircle2Icon, Trash2Icon, E
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
 import { api, tauriInvoke } from '@/lib/api';
-import { chatComplete, type ChatMessage } from '@/lib/relay-chat-stream';
-import { getPluginsRoot, openPluginDir, openPluginsRoot, writePluginFiles } from '@/lib/plugin-status';
+import { chatComplete } from '@/lib/relay-chat-stream';
+import { getPluginsRoot, openPluginDir, openPluginsRoot } from '@/lib/plugin-status';
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
-import { runPluginCreatorAgent } from '@/lib/agent/creator-adapter';
+import { runAgentLoop } from '@/lib/agent/loop';
+import { createAgentTools } from '@/lib/agent/tools';
+import { turnsToMessages } from '@/lib/agent/history';
+import type { ChatMessage, LoopCallbacks } from '@/lib/agent/types';
+import { usePluginCreatorStore } from '@/lib/agent/session/store';
 import type { AskQuestionArgs, AskQuestionResult, TodoItem } from '@/lib/agent/tools';
-import type { AgentMessagePart } from '@/lib/agent/creator-adapter';
 import { readLocalFiles, filesToStagedPlugin } from '@/lib/plugin-creator/import-local';
 import {
   buildPromptOptimizerMessages,
@@ -79,43 +83,8 @@ interface ReasoningPart {
 }
 type TurnPart = QuestionPart | ToolPart | TextPart | ReasoningPart;
 
-/**
- * 把 UI 的 TurnPart[]（按时序：文本/工具调用/工具结果）映射成可序列化的 AgentMessagePart[]，
- * 供 creator-adapter 还原成 SDK 的 function_call / function_call_output 序列。
- *
- * 断点续的关键：重试时模型能看到「上轮已调用 WebSearch(query=x) 得到结果 Y」，
- * 因此不必重跑搜索，直接从上次进度继续。
- * - text part → text（output_text）
- * - tool part(status=ok/error) → tool_call + 紧跟一个 tool_result（一一配对）
- * - reasoning part → 跳过（思考内容不进工具续跑历史，避免噪音）
- */
-function partsToAgentMessageParts(parts?: TurnPart[]): AgentMessagePart[] | undefined {
-  if (!parts || !parts.length) return undefined;
-  const out: AgentMessagePart[] = [];
-  for (const p of parts) {
-    if (p.type === 'text') {
-      if (p.content.trim()) out.push({ type: 'text', text: p.content });
-    } else if (p.type === 'tool') {
-      // 跳过 running 态（未完成的工具调用不应进历史）。
-      if (p.status === 'running') continue;
-      if (!p.toolCallId) continue;
-      out.push({
-        type: 'tool_call',
-        toolCallId: p.toolCallId,
-        name: p.name,
-        args: p.args,
-      });
-      out.push({
-        type: 'tool_result',
-        toolCallId: p.toolCallId,
-        name: p.name,
-        output: typeof p.result === 'string' ? p.result : JSON.stringify(p.result ?? ''),
-      });
-    }
-    // reasoning / question：跳过（不进工具历史）
-  }
-  return out.length ? out : undefined;
-}
+// 历史还原改用 turnsToMessages（原生 function calling，见 agent/history.ts）。
+// 旧的 partsToAgentMessageParts 文本化方案已删除（betav2 阶段3）。
 
 function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
   if (!part || typeof part !== 'object') return null;
@@ -801,29 +770,27 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     };
   }
 
+  // betav2：bindPlugin 委托给 store（原子操作：串行 await 写盘+refresh，消除竞态）。
+  // store 内部统一维护 pluginId 单一真相源 + aiDraft；此处同步本地视图（兼容过渡期）。
+  // 阶段4c 完整迁移后，本地 stagedDraft/workspacePluginId/currentPluginIdRef 将删除。
   async function bindPluginWorkspace(plugin: LoadedPlugin, options: { showToast?: boolean } = {}) {
     setReferencedPlugin(plugin);
-    setWorkspacePluginId(plugin.id);
-    currentPluginIdRef.current = plugin.id;
     setPublishedName(null);
+
+    await usePluginCreatorStore.getState().bindPlugin(plugin);
+
+    // 从 store 同步到本地视图（过渡期兼容）。
+    const storeState = usePluginCreatorStore.getState();
+    currentPluginIdRef.current = storeState.pluginId;
+    setWorkspacePluginId(storeState.pluginId);
+    if (storeState.aiDraft) {
+      setStagedDraft(storeState.aiDraft);
+    }
     setUserEdits({});
 
-    if (plugin.files?.length) {
-      try {
-        await writePluginFiles(plugin.id, plugin.files.map((file) => ({ path: file.path, content: file.content })));
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : '写入插件工作目录失败');
-      }
-    }
-
-    const refreshed = await refreshDraftFromRoot(plugin.id);
-    if (!refreshed && plugin.files?.length) {
-      const staged = stagedPluginFromLoadedPlugin(plugin, plugin.files.map((file) => ({ path: file.path, content: file.content })));
-      draftRef.current = staged;
-      setStagedDraft(staged);
-    }
-
-    if (options.showToast !== false) {
+    if (storeState.bindError) {
+      toast.error(storeState.bindError);
+    } else if (options.showToast !== false) {
       toast.success(`已绑定插件工作文件夹：${plugin.name}`);
     }
   }
@@ -1033,7 +1000,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         turns: historyTurns.map((t) => {
           const content = t.modelContent ?? t.content;
           if (t.role === 'assistant' && t.status === 'done') {
-            return { role: t.role, content, parts: partsToAgentMessageParts(t.parts) };
+            // parts 透传给 buildContextMessages 做压缩判断；最终历史还原由 turnsToMessages 完成。
+            return { role: t.role, content, parts: t.parts as unknown[] };
           }
           return { role: t.role, content };
         }),
@@ -1081,61 +1049,100 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       let streamError: string | null = null; // 捕获流中的错误消息（error 事件或 finish_reason='error'）
       setReasoning('');
 
-      // OpenAI Agents SDK：框架负责多步循环和工具调用；adapter 把事件写回现有 UI parts。
-      const agentResult = await runPluginCreatorAgent(
-        {
-          messages: built.messages as ChatMessage[],
-          tier,
-          extraInstructions: systemPrompt,
-          signal: controller.signal,
-          callbacks: {
-            appendTextDelta: (turnIdx, delta) => {
-              appendTextDelta(turnIdx, delta);
-            },
-            appendReasoningDelta: (turnIdx, delta) => {
-              reasoningText += delta;
-              appendReasoningDelta(turnIdx, delta);
-            },
-            endReasoning,
-            upsertToolPart: (turnIdx, patch) => {
-              sawToolCall = true;
-              upsertToolPart(turnIdx, patch);
-            },
-            getPluginId: () => currentPluginIdRef.current,
-            onPluginCreated: (pluginId, nextDraft) => {
-              stagedName = nextDraft.name;
-              setUploadingViaTool(false);
-              onPluginCreated(pluginId, nextDraft);
-            },
-            onFilesChanged: () => {
-              void refreshDraftFromRoot();
-            },
-            onAskQuestion,
-            getTodos: () => todos,
-            onTodoUpdate: (next) => {
-              setTodos(next.map((t) => ({ ...t })));
-            },
-            onToolStart: (toolName, args) => {
-              sawToolCall = true;
-              if (toolName === 'CreatePlugin') setUploadingViaTool(true);
-              else if (toolName === 'WebSearch') {
-                const q = (args as { query?: string } | undefined)?.query ?? '';
-                setSearchingQuery(q || '联网搜索中');
-              }
-            },
-            onToolResult: (toolName, output) => {
-              if (toolName === 'CreatePlugin') {
-                setUploadingViaTool(false);
-                if (typeof output === 'string' && output.startsWith('错误')) stageErrMsg = output;
-              } else if (toolName === 'WebSearch') {
-                setSearchingQuery(null);
-              }
-            },
-          },
+      // betav2：自建 agent 循环（loop.ts），替代旧 runPluginCreatorAgent（creator-adapter）。
+      // 历史还原用 turnsToMessages（原生 function calling）处理原始 UI turns（含完整工具 parts），
+      // 压缩摘要作为额外 system 消息注入（保留 buildContextMessages 的压缩能力，但不让它丢工具历史）。
+      const loopMessages: ChatMessage[] = [{ role: 'system', content: systemPrompt }];
+      if (built.breakdown.summary.trim()) {
+        loopMessages.push({ role: 'system', content: `[历史上下文摘要]\n${built.breakdown.summary}` });
+      }
+      // 用原始 turns（含完整 parts）还原原生 function calling 历史。
+      loopMessages.push(...turnsToMessages(
+        historyTurns.map((t) => ({
+          role: t.role,
+          content: t.modelContent ?? t.content,
+          parts: t.parts as unknown as import('@/lib/agent/history').HistoryPart[] | undefined,
+          status: t.status,
+        })) as import('@/lib/agent/history').HistoryTurn[],
+        opts.isRetry ? '' : text,
+        opts.isRetry,
+      ));
+
+      const { tools, resetReadTracking } = createAgentTools({
+        getPluginId: () => usePluginCreatorStore.getState().pluginId,
+        onPluginCreated: (pluginId, nextDraft) => {
+          stagedName = nextDraft.name;
+          setUploadingViaTool(false);
+          usePluginCreatorStore.getState().createPlugin(pluginId, nextDraft);
+          // 同步本地 stagedDraft（persist effect 等仍读它，阶段4c 完整迁移后删除）
+          setStagedDraft(nextDraft);
+          setWorkspacePluginId(pluginId);
+          currentPluginIdRef.current = pluginId;
         },
-        assistantIdx,
-      );
+        onFilesChanged: () => {
+          void usePluginCreatorStore.getState().refreshDraft().then(() => {
+            // 同步本地草稿视图
+            const storeDraft = usePluginCreatorStore.getState().aiDraft;
+            if (storeDraft) setStagedDraft(storeDraft);
+          });
+        },
+        onAskQuestion,
+        getTodos: () => todos,
+        onTodoUpdate: (next) => setTodos(next.map((t) => ({ ...t }))),
+      });
+      resetReadTracking();
+
+      const loopCallbacks: LoopCallbacks = {
+        onTextDelta: (delta) => appendTextDelta(assistantIdx, delta),
+        onReasoningDelta: (delta) => {
+          reasoningText += delta;
+          appendReasoningDelta(assistantIdx, delta);
+        },
+        onReasoningEnd: () => endReasoning(assistantIdx),
+        onToolCall: (call) => {
+          sawToolCall = true;
+          upsertToolPart(assistantIdx, {
+            toolCallId: call.toolCallId,
+            name: call.name,
+            args: call.args,
+            status: 'running',
+          });
+          // 兼容旧 onToolStart 行为（顶部状态条提示）
+          if (call.name === 'CreatePlugin') setUploadingViaTool(true);
+          else if (call.name === 'WebSearch') {
+            const q = (call.args as { query?: string } | undefined)?.query ?? '';
+            setSearchingQuery(q || '联网搜索中');
+          }
+        },
+        onToolOutput: (output) => {
+          upsertToolPart(assistantIdx, {
+            toolCallId: output.toolCallId,
+            name: output.name,
+            result: output.result,
+            status: output.ok ? 'ok' : 'error',
+          });
+          // 兼容旧 onToolResult 行为
+          if (output.name === 'CreatePlugin') {
+            setUploadingViaTool(false);
+            if (!output.ok && typeof output.result === 'string' && output.result.startsWith('错误')) {
+              stageErrMsg = output.result;
+            }
+          } else if (output.name === 'WebSearch') {
+            setSearchingQuery(null);
+          }
+        },
+      };
+
+      const agentResult = await runAgentLoop({
+        messages: loopMessages,
+        tools,
+        tier,
+        signal: controller.signal,
+        callbacks: loopCallbacks,
+      });
       if (agentResult.error) streamError = agentResult.error;
+      // betav2：runAgentLoop 返回 status，aborted（用户取消）不算错误，走 cancelled 终态。
+      const wasAborted = agentResult.status === 'aborted';
       // 流结束：清除流式标记（保留已累积的 parts 时序内容）。
       // 多步 agent 的各步文本/思考/工具已按时序进 parts；末步总结也已 delta 进来。
       // R1 前端兜底：流正常结束但无任何可见内容时，避免裸露「无内容」——按情形给友好提示（写入新 text part）。
@@ -1158,6 +1165,9 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         // 优先显示流中捕获的真实错误（part.type='error'），避免被空响应兜底掩盖。
         if (streamError) {
           next[assistantIdx] = withFallbackText(`调用失败：${streamError}`, 'failed');
+        } else if (wasAborted) {
+          // 用户取消：保留已生成的 parts（部分输出仍可见），标记 cancelled。
+          next[assistantIdx] = { ...cur, streaming: false, status: 'cancelled' };
         } else if (hasText || hasToolOrQuestion) {
           next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
         } else if (stagedName) {
