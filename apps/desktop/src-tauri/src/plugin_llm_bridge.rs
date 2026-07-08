@@ -241,8 +241,12 @@ fn route_request(
     inner: &Arc<BridgeState>,
     request: HttpRequest,
 ) -> Result<Value, (u16, &'static str, String)> {
-    if request.method != "POST" {
-        return Err((404, "not_found", "插件本地桥仅支持 POST 请求".to_string()));
+    // 按路由分发 HTTP method：GET /v1/models 允许（供第三方 SDK 连通性探测），
+    // 其余路由保持仅 POST。先校验 method 再校验 token，避免对错误 method 暴露鉴权细节。
+    let path = request.path.as_str();
+    let is_get_models = request.method == "GET" && path == "/v1/models";
+    if !is_get_models && request.method != "POST" {
+        return Err((404, "not_found", "插件本地桥仅支持 POST 请求（GET 仅 /v1/models）".to_string()));
     }
     let token = extract_token(&request.headers)
         .ok_or_else(|| (401, "unauthorized", "缺少插件桥 token".to_string()))?;
@@ -253,9 +257,14 @@ fn route_request(
     }
     .ok_or_else(|| (401, "unauthorized", "插件桥 token 无效或已过期".to_string()))?;
 
-    match request.path.as_str() {
+    match path {
+        // 灵坊自有形状（SDK 内部用）：返回 {content} / {images} 包装。
         "/llm/chat" => route_llm_chat(&session, request.body),
         "/image/generate" => route_image_generate(&session, request.body),
+        // OpenAI 兼容形状（第三方 SDK 直连用）：透传 relay 完整响应，不包装。
+        "/v1/chat/completions" if request.method == "POST" => route_v1_chat_completions(&session, request.body),
+        "/v1/images/generations" if request.method == "POST" => route_v1_images_generations(&session, request.body),
+        "/v1/models" if request.method == "GET" => route_v1_models(),
         other => Err((404, "not_found", format!("插件本地桥不支持的路由：{other}"))),
     }
 }
@@ -353,6 +362,125 @@ fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<
     let data = relay_response_json(resp)?;
     let images = extract_image_urls(&data);
     Ok(json!({ "images": images }))
+}
+
+/// GET /v1/models：返回平台档位哨兵（fast/premium），供 openai SDK 连通性探测。
+/// 复用任意有效 token 的会话即可（不泄密，故不要求具体 capability）。
+fn route_v1_models() -> Result<Value, (u16, &'static str, String)> {
+    Ok(json!({
+        "object": "list",
+        "data": [
+            { "id": "fast", "object": "model", "created": 0, "owned_by": "lingfang" },
+            { "id": "premium", "object": "model", "created": 0, "owned_by": "lingfang" },
+        ]
+    }))
+}
+
+/// POST /v1/chat/completions：OpenAI 兼容透传。
+/// 与 route_llm_chat 的区别：**直接返回 relay 的完整 OpenAI 响应**（choices[].message），
+/// 不再抽取成 {content}，以便第三方 openai SDK / @ai-sdk/openai 等直连消费。
+/// gate 复用 allow_llm_chat（语义上仍是 llm.chat 能力）。
+fn route_v1_chat_completions(
+    session: &BridgeSession,
+    body_bytes: Vec<u8>,
+) -> Result<Value, (u16, &'static str, String)> {
+    if !session.allow_llm_chat {
+        return Err((403, "capability_denied", "插件未声明 llm.chat 能力".to_string()));
+    }
+    if session.api_base.is_empty() || session.auth_token.is_empty() {
+        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台 LLM".to_string()));
+    }
+
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|error| (400, "bad_request", format!("JSON 解析失败：{error}")))?;
+    let messages = body
+        .get("messages")
+        .and_then(|value| value.as_array())
+        .filter(|items| !items.is_empty())
+        .cloned()
+        .ok_or_else(|| (400, "bad_request", "/v1/chat/completions 缺少 messages".to_string()))?;
+    // model 归一化为平台档位哨兵（上游 SDK 传 gpt-4o 等会被归一化）。
+    let model = match body.get("model").and_then(|value| value.as_str()) {
+        Some("premium") => "premium",
+        _ => "fast",
+    };
+
+    // 仅转发桥关心的字段；丢弃 stream/temperature 等可能让 relay 困惑的开关（relay 固定非流式）。
+    let relay_body = json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+    });
+    let url = format!("{}/api/relay/v1/chat/completions", session.api_base.trim_end_matches('/'));
+    let client = blocking_client();
+    let resp = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("X-Client", "desktop-plugin")
+        .bearer_auth(&session.auth_token)
+        .json(&relay_body)
+        .send()
+        .map_err(|error| (502, "relay_request_failed", format!("平台 LLM 请求失败：{error}")))?;
+    // 透传 relay 完整响应（不抽取 content）。
+    relay_response_json(resp)
+}
+
+/// POST /v1/images/generations：OpenAI 兼容透传。
+/// 与 route_image_generate 的区别：**直接返回 relay 的完整 OpenAI 响应**（{data:[{url|b64_json}]}），
+/// 不再抽取成 {images}，以便第三方图像 SDK 直连消费。
+/// gate 复用 allow_image_generate。
+fn route_v1_images_generations(
+    session: &BridgeSession,
+    body_bytes: Vec<u8>,
+) -> Result<Value, (u16, &'static str, String)> {
+    if !session.allow_image_generate {
+        return Err((403, "capability_denied", "插件未声明 image.generate 能力".to_string()));
+    }
+    if session.api_base.is_empty() || session.auth_token.is_empty() {
+        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台生图".to_string()));
+    }
+
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|error| (400, "bad_request", format!("JSON 解析失败：{error}")))?;
+    let prompt = body
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| (400, "bad_request", "/v1/images/generations 缺少 prompt".to_string()))?
+        .to_string();
+    let model = match body.get("model").and_then(|value| value.as_str()) {
+        Some("premium") => "premium",
+        _ => "fast",
+    };
+    let n = body
+        .get("n")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(1)
+        .clamp(1, 4) as u32;
+    let size = body
+        .get("size")
+        .and_then(|value| value.as_str())
+        .unwrap_or("1024x1024")
+        .to_string();
+
+    let relay_body = json!({
+        "model": model,
+        "prompt": prompt,
+        "n": n,
+        "size": size,
+    });
+    let url = format!("{}/api/relay/v1/images/generations", session.api_base.trim_end_matches('/'));
+    let client = blocking_client();
+    let resp = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("X-Client", "desktop-plugin")
+        .bearer_auth(&session.auth_token)
+        .json(&relay_body)
+        .send()
+        .map_err(|error| (502, "relay_request_failed", format!("平台生图请求失败：{error}")))?;
+    // 透传 relay 完整响应（不抽取 images）。
+    relay_response_json(resp)
 }
 
 /// 构建带超时的 blocking client（llm/生图共用）。
@@ -494,5 +622,127 @@ mod tests {
         headers.clear();
         headers.insert("x-lingfang-plugin-token".to_string(), "xyz".to_string());
         assert_eq!(extract_token(&headers).as_deref(), Some("xyz"));
+    }
+
+    #[test]
+    fn v1_models_returns_fast_and_premium() {
+        let data = route_v1_models().expect("/v1/models 应返回模型列表");
+        let ids: Vec<&str> = data
+            .get("data")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("id").and_then(|value| value.as_str()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(ids, vec!["fast", "premium"]);
+    }
+
+    /// 构造一个空的 BridgeState + 带有效 token 的会话，用于 route_request 分发测试。
+    fn route_with_session(method: &str, path: &str, allow_llm: bool, allow_image: bool) -> Result<Value, (u16, &'static str, String)> {
+        let bridge = PluginLlmBridge::new();
+        // 注入一个会话：用公开的 register_session 需要 api_base/auth_token，但 route_request
+        // 只读 sessions map。这里走 ensure_server + 直接构造 session 的最小路径不便（私有），
+        // 故改用一个 token 走 register_session（即便后端凭证为空，路由分发在 capability/凭证
+        // 校验前就能被 method/404 拦截，足以覆盖本测试关心的分发逻辑）。
+        let _env = bridge.register_session(
+            "test-plugin",
+            Some("http://127.0.0.1:0".to_string()),
+            Some("dummy".to_string()),
+            allow_llm,
+            allow_image,
+            Duration::from_secs(60),
+        );
+        // 取出刚注册的 token（register_session 返回 Result<Option<PluginBridgeEnv>, String>）。
+        let env = _env.expect("register_session 应 Ok").expect("register_session 应返回桥环境");
+        let mut headers = HashMap::new();
+        headers.insert("x-lingfang-plugin-token".to_string(), env.token);
+        let request = HttpRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            headers,
+            body: Vec::new(),
+        };
+        route_request(&bridge.inner, request)
+    }
+
+    #[test]
+    fn route_request_rejects_get_on_legacy_chat_route() {
+        // GET /llm/chat 不在允许的 GET 名单（只有 /v1/models 允许 GET），应被 method 守卫拒绝。
+        let result = route_with_session("GET", "/llm/chat", true, false);
+        assert!(result.is_err());
+        let (status, code, _) = result.unwrap_err();
+        assert_eq!(status, 404);
+        assert_eq!(code, "not_found");
+    }
+
+    #[test]
+    fn route_request_allows_get_v1_models() {
+        // GET /v1/models 应放行并返回模型列表（不依赖 capability）。
+        let result = route_with_session("GET", "/v1/models", false, false);
+        let data = result.expect("GET /v1/models 应成功");
+        let ids: Vec<&str> = data
+            .get("data")
+            .and_then(|value| value.as_array())
+            .map(|items| items.iter().filter_map(|item| item.get("id").and_then(|v| v.as_str())).collect())
+            .unwrap_or_default();
+        assert_eq!(ids, vec!["fast", "premium"]);
+    }
+
+    #[test]
+    fn route_request_v1_chat_denied_without_llm_capability() {
+        // 未声明 llm.chat（allow_llm=false）时，POST /v1/chat/completions 应 403 capability_denied。
+        // 提供有效 token 但 body 缺 messages 也会先命中 capability gate（gate 在 body 校验前）。
+        let bridge = PluginLlmBridge::new();
+        let env = bridge
+            .register_session("test-plugin", Some("http://127.0.0.1:0".to_string()), Some("dummy".to_string()), false, false, Duration::from_secs(60))
+            .expect("register_session 应 Ok").expect("register_session 应返回桥环境");
+        let mut headers = HashMap::new();
+        headers.insert("x-lingfang-plugin-token".to_string(), env.token);
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/chat/completions".to_string(),
+            headers,
+            body: b"{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}".to_vec(),
+        };
+        let result = route_request(&bridge.inner, request);
+        assert!(result.is_err());
+        let (status, code, _) = result.unwrap_err();
+        assert_eq!(status, 403);
+        assert_eq!(code, "capability_denied");
+    }
+
+    #[test]
+    fn route_request_v1_images_denied_without_image_capability() {
+        // 未声明 image.generate 时，POST /v1/images/generations 应 403 capability_denied。
+        let bridge = PluginLlmBridge::new();
+        let env = bridge
+            .register_session("test-plugin", Some("http://127.0.0.1:0".to_string()), Some("dummy".to_string()), true, false, Duration::from_secs(60))
+            .expect("register_session 应 Ok").expect("register_session 应返回桥环境");
+        let mut headers = HashMap::new();
+        headers.insert("x-lingfang-plugin-token".to_string(), env.token);
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/images/generations".to_string(),
+            headers,
+            body: b"{\"model\":\"dall-e-3\",\"prompt\":\"cat\"}".to_vec(),
+        };
+        let result = route_request(&bridge.inner, request);
+        assert!(result.is_err());
+        let (status, code, _) = result.unwrap_err();
+        assert_eq!(status, 403);
+        assert_eq!(code, "capability_denied");
+    }
+
+    #[test]
+    fn route_request_unknown_path_is_404() {
+        // 未知路径即便 method 正确也应 404。
+        let result = route_with_session("POST", "/v1/unknown", true, true);
+        assert!(result.is_err());
+        let (status, code, _) = result.unwrap_err();
+        assert_eq!(status, 404);
+        assert_eq!(code, "not_found");
     }
 }

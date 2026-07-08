@@ -14,6 +14,7 @@ pub struct LoadedPlugin {
     pub version: String,
     pub description: String,
     pub entry: String,
+    pub runtime_type: String,
     pub capabilities: Vec<DeclaredCapability>,
     /// 插件资源目录的绝对路径（用于壳加载 entry HTML）。
     pub dir: String,
@@ -42,6 +43,11 @@ fn parse_manifest(dir: &PathBuf) -> Option<(LoadedPlugin, Vec<DeclaredCapability
         .get("entry")
         .and_then(|x| x.as_str())
         .unwrap_or("index.html")
+        .to_string();
+    let runtime_type = v
+        .get("runtime_type")
+        .and_then(|x| x.as_str())
+        .unwrap_or("client")
         .to_string();
 
     // 解析 capabilities，并展开 fs.* 的路径模板。
@@ -72,6 +78,7 @@ fn parse_manifest(dir: &PathBuf) -> Option<(LoadedPlugin, Vec<DeclaredCapability
         version,
         description,
         entry,
+        runtime_type,
         capabilities: caps.clone(),
         dir: dir.to_string_lossy().to_string(),
         builtin: true,
@@ -122,4 +129,32 @@ pub fn load_builtin_plugins(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_manifest_exports_runtime_type() {
+        let dir = std::env::temp_dir().join(format!(
+            "lf-builtin-plugin-runtime-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"builtin.test","name":"Test","entry":"main.py","runtime_type":"python"}"#,
+        )
+        .unwrap();
+
+        let (plugin, _) = parse_manifest(&dir).expect("manifest should parse");
+
+        assert_eq!(plugin.runtime_type, "python");
+        assert_eq!(plugin.entry, "main.py");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

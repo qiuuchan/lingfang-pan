@@ -39,6 +39,20 @@ sdk.image.generate({ prompt, model, size, n });
 
 Script plugins without `globalThis.__lingfangInvoke` may use the SDK's local HTTP bridge fallback through `LINGFANG_PLUGIN_BRIDGE_URL` + one-time `LINGFANG_PLUGIN_BRIDGE_TOKEN`; plugin authors still must not read, print, persist, or expose that token in UI.
 
+## OpenAI-Compatible Bridge Routes (for third-party SDKs)
+
+The local bridge (`apps/desktop/src-tauri/src/plugin_llm_bridge.rs`) also serves standard OpenAI-compatible routes so that third-party code using the `openai` SDK / `@ai-sdk/openai` / `openai-python` can point `base_url` directly at `LINGFANG_PLUGIN_BRIDGE_URL` and bypass `@lingfang/plugin-sdk` entirely. This is how vendored third-party projects (e.g. MoneyPrinterTurbo, Pixelle-Video, huobao-drama) route their LLM + image calls to the platform model without a proxy shim.
+
+| Route | Method | Behavior | Gate |
+|---|---|---|---|
+| `/v1/chat/completions` | POST | **Pass-through**: forwards to platform relay `/api/relay/v1/chat/completions` and returns the full OpenAI response (`choices[].message`) **unwrapped** (NOT as `{content}`). `model` is normalized to `fast`/`premium` sentinel; upstream fields like `quality`/`response_format`/`extra_body` are tolerated and ignored. | reuses `llm.chat` capability (`allow_llm_chat`) |
+| `/v1/images/generations` | POST | **Pass-through**: forwards to relay `/api/relay/v1/images/generations`, returns full OpenAI response `{data:[{url|b64_json}]}` **unwrapped** (NOT as `{images}`). | reuses `image.generate` capability (`allow_image_generate`) |
+| `/v1/models` | GET | Returns `{object:list, data:[{id:fast},{id:premium}]}` for SDK connectivity probing. | any valid token (no capability required) |
+
+Contrast with the legacy SDK-shaped routes (`/llm/chat` → `{content}`, `/image/generate` → `{images}`), which wrap responses for `@lingfang/plugin-sdk`'s `invoke()`. The `/v1/*` routes do NOT wrap — third-party SDKs consume raw OpenAI format. The SDK's `sdk.llm.chat()` continues to use `/llm/chat`; `/v1/*` is purely for code that bypasses the SDK.
+
+The method guard is per-route: only `GET /v1/models` is allowed as GET; all other routes remain POST-only.
+
 ## Generated Plugin Expectations
 
 AI-generated plugins may use SDK-style calls only for capabilities declared in `manifest.json`. The generation prompt and validation currently forbid direct `import`, `require`, `fetch`, `XMLHttpRequest`, and `eval` in generated UI files.

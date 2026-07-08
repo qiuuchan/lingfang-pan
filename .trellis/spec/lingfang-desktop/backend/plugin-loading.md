@@ -19,6 +19,7 @@ Reference file:
 - `entry`
 
 `version`, `description`, and `entry` have defaults. Capabilities are parsed from `capabilities[]`; `fs.*` path templates are expanded through `expand_path()`.
+`runtime_type` is also exported on `LoadedPlugin` and defaults to `client`; script builtin plugins depend on this field so the frontend does not mistake `main.py` / `index.js` for iframe HTML.
 
 Reference files:
 - `apps/desktop/src-tauri/src/plugins.rs`
@@ -30,4 +31,3 @@ Do not silently register partially parsed capabilities. The current loader skips
 ## Resource Reading
 
 `read_plugin_file()` canonicalizes both plugin base dir and target file, then requires the target to stay under base. Keep that path traversal guard for every future file read command.
-

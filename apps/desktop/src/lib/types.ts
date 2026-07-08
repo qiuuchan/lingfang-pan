@@ -186,7 +186,7 @@ export interface LoadedPlugin {
   // 权限规则（与后端 ensurePluginManager 一致）：作者本人 或 当前用户是 TEAM_ADMIN 可改。
   authorUserId?: string;
   // 运行时类型（manifest.runtime_type）：决定插件运行方式（client=软件内 iframe，nodejs/python=独立进程）。
-  // 来源：collab-api 的 publicPlugin 已返回该字段（plugin-package.ts 解析），内置插件未返回时回退 'client'。
+  // 来源：collab-api 的 publicPlugin 与桌面端内置插件 manifest 解析。
   // task 06-16-plugin-system-rebuild 组C：Plugins.tsx 据此渲染「运行」/「打开」按钮分派。
   runtime_type?: 'client' | 'nodejs' | 'python' | 'cloud';
   capabilities?: Array<PluginCapability | { kind?: string } | string>;

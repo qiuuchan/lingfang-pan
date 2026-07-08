@@ -32,6 +32,7 @@ import {
 } from '@/lib/plugin-script';
 import {
   scanPluginStatus,
+  startBuiltinPlugin,
   startPlugin,
   stopPlugin,
   getPluginStatus,
@@ -70,6 +71,7 @@ export function ScriptPreviewPanel({
   pluginId,
   files,
   runtime,
+  builtin = false,
   previewKey,
   onRefresh,
   onRequestFix,
@@ -78,6 +80,7 @@ export function ScriptPreviewPanel({
   pluginId?: string;
   files: DraftFile[];
   runtime: ScriptRuntime;
+  builtin?: boolean;
   previewKey: number;
   onRefresh: () => void;
   // 一键修复：plugin_crashed 时把 stderr 传回父组件（创建器）调 send 让 AI 修。无则不显示按钮。
@@ -187,7 +190,8 @@ export function ScriptPreviewPanel({
     setPersistentRun({ status: 'starting', stage: 'checking', stageMessage: '正在检查插件运行环境…' });
     try {
       // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
-      const result = await startPlugin(pluginId, (progress: PluginStartProgress) => {
+      const start = builtin ? startBuiltinPlugin : startPlugin;
+      const result = await start(pluginId, (progress: PluginStartProgress) => {
         setPersistentRun({ status: 'starting', stage: progress.stage, stageMessage: progress.message });
       });
       setPersistentRun({ status: 'running', pid: result.pid, startedAt: result.started_at });
@@ -217,7 +221,7 @@ export function ScriptPreviewPanel({
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
       }
     }
-  }, [pluginId, runtime]);
+  }, [builtin, pluginId, runtime]);
 
   const handleStop = useCallback(async () => {
     if (!pluginId) return;
