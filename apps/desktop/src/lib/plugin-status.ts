@@ -139,6 +139,27 @@ export async function startPlugin(
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
 ): Promise<{ pid: number; started_at: string }> {
+  return startPluginCommand('start_plugin', pluginId, onProgress);
+}
+
+/**
+ * 启动内置脚本插件（builtin-plugins 下的 Python/Node）。
+ *
+ * 内置插件 id 可包含点号（如 builtin.ai-python-example），不能走 plugins_root
+ * 的目录白名单；后端会从已加载内置插件表定位资源目录，再复用同一套脚本启动逻辑。
+ */
+export async function startBuiltinPlugin(
+  pluginId: string,
+  onProgress?: (progress: PluginStartProgress) => void,
+): Promise<{ pid: number; started_at: string }> {
+  return startPluginCommand('start_builtin_plugin', pluginId, onProgress);
+}
+
+async function startPluginCommand(
+  command: 'start_plugin' | 'start_builtin_plugin',
+  pluginId: string,
+  onProgress?: (progress: PluginStartProgress) => void,
+): Promise<{ pid: number; started_at: string }> {
   // 订阅阶段事件（仅本次启动期间），完成后解绑避免泄漏。
   const unlisten = onProgress
     ? await tauriListen<PluginStartProgress>('plugin:start-progress', (event) => {
@@ -149,7 +170,7 @@ export async function startPlugin(
   try {
     // 计费/中转：把后端基址 + 登录态 token 交给宿主本地桥；插件进程只收到 localhost URL + 一次性 token，
     // 不直接接触 JWT/API Key。
-    return await tauriInvoke<{ pid: number; started_at: string }>('start_plugin', {
+    return await tauriInvoke<{ pid: number; started_at: string }>(command, {
       pluginId,
       apiBase: apiBase(),
       authToken: getAuthToken() ?? '',
@@ -309,4 +330,14 @@ export function setPluginsRoot(path: string): Promise<string> {
  */
 export function readLocalPluginFile(pluginId: string, file: string): Promise<string> {
   return tauriInvoke<string>('read_local_plugin_file', { pluginId, file });
+}
+
+/**
+ * 列出本地插件目录下的源文件相对路径（递归，跳过 data/.venv/node_modules 等运行时目录）。
+ *
+ * 组A Rust 后端契约（list_plugin_files）：只返回插件作者关心的源文件，正斜杠相对路径。
+ * 用于「本地插件上传」时枚举要上传的文件（与 FloatingCreator/agent store 的内联 tauriInvoke 同语义）。
+ */
+export function listPluginFiles(pluginId: string): Promise<string[]> {
+  return tauriInvoke<string[]>('list_plugin_files', { pluginId });
 }

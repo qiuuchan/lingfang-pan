@@ -24,6 +24,8 @@ function createService(options: { existingPlugin?: unknown; membershipRole?: 'ME
   const prisma = {
     plugin: {
       findUnique: pluginFindUnique,
+      // uploadPlugin 按 manifest.id 查同 id 插件（升级判定）；此 spec 走全新创建路径，返回 null。
+      findFirst: vi.fn(async () => null),
       create: pluginCreate,
     },
     auditLog: {

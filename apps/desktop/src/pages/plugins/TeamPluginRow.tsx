@@ -7,7 +7,9 @@ import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
 import { fmtYuan } from '@/lib/money';
 import { installMarketplacePluginPackage } from '@/lib/plugin-installation';
+import { resolvePluginRuntime } from '@/lib/plugin-runtime';
 import { stopPlugin } from '@/lib/plugin-status';
+import { isVersionNewer } from '@/lib/version';
 import { errorMessage } from '../plugins-runtime';
 import type { DraftFile, LoadedPlugin } from '@/lib/types';
 import {
@@ -69,7 +71,7 @@ export function TeamPluginRow({
   const isDisabled = plugin.status === 'DISABLED';
   // 有更新：已安装且云端版本 > 已安装版本。
   const hasUpdate = Boolean(plugin.installedVersion && isVersionNewer(plugin.version, plugin.installedVersion));
-  const runtime = plugin.runtime_type || 'client';
+  const runtime = resolvePluginRuntime(plugin);
   return (
     <div className="group flex items-center justify-between gap-3 px-4 py-3.5 transition hover:bg-muted/60">
       <TeamPluginSummary authorManaged={authorManaged} isDisabled={isDisabled} plugin={plugin} runtime={runtime} source={source} />
@@ -169,7 +171,7 @@ function TeamPluginActions({
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoFiles, setInfoFiles] = useState<DraftFile[]>([]);
 
-  const runtime = plugin.runtime_type || 'client';
+  const runtime = resolvePluginRuntime(plugin);
   // 是否可运行：后端为本团队 / 内置 / 已安装的插件下发 files（plugin-package.ts:213）。
   // 其余插件（其他团队未安装）无 files，脚本类无法运行——引导先安装。
   const hasFiles = Boolean(plugin.files?.length);
@@ -210,10 +212,10 @@ function TeamPluginActions({
     // 未安装（其他团队插件无 files）：先安装落盘，再刷新后运行。
     setInstalling(true);
     try {
-      await installMarketplacePluginPackage(plugin.id);
+      const installed = await installMarketplacePluginPackage(plugin.id);
       toast.success(`已安装「${plugin.name}」`);
       onChanged();
-      onRun(plugin);
+      onRun({ ...installed, runtime_type: resolvePluginRuntime(installed) });
     } catch (e) {
       toast.error(`安装失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -313,15 +315,4 @@ async function readLocalManifest(pluginId: string): Promise<string | null> {
   }
 }
 
-/** 语义版本比较：newVer 是否严格大于 oldVer（x.y.z）。非法格式按 0.0.0 处理。 */
-function isVersionNewer(newVer: string, oldVer: string): boolean {
-  const parse = (v: string): [number, number, number] => {
-    const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
-  };
-  const [a1, a2, a3] = parse(newVer);
-  const [b1, b2, b3] = parse(oldVer);
-  if (a1 !== b1) return a1 > b1;
-  if (a2 !== b2) return a2 > b2;
-  return a3 > b3;
-}
+// isVersionNewer 已抽到 @/lib/version（与 plugin-package-zip 等共用），不再在此文件重复定义。

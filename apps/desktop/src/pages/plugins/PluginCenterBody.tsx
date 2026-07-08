@@ -79,6 +79,9 @@ export function PluginCenterBody({
                   onOpen={(item) => { void openers.openLocalPlugin(item); }}
                   onOpenRoot={openers.openLocalRoot}
                   onRefresh={local.reload}
+                  // 发布到团队/市场成功后：本地列表（去掉可能的残留）+ 团队列表（新发布项才会出现）都刷新。
+                  // 此前只刷新本地，导致用户切到「团队插件」看不到刚发布的插件（缓存陈旧）。
+                  onPublished={() => { local.reload(); team.refresh(); }}
                 />
               </TabsContent>
             )}

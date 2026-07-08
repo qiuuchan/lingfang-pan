@@ -216,13 +216,18 @@ export function publicAvailablePlugin(
 ) {
   const public_ = publicPlugin(plugin, currentTeamId);
   const isOwnTeam = plugin.teamId === currentTeamId;
-  if (isOwnTeam) return public_;
-
   const installations = plugin.installations ?? [];
   const isInstalled = installations.length > 0;
   // 已安装版本（PluginInstallation.version）：供前端对比 version（最新版）判断是否有更新。
   // 一个团队对一个插件只有一条 ENABLED installation，取第一条。
   const installedVersion = isInstalled ? installations[0]?.version : undefined;
+  if (isOwnTeam) {
+    // 本团队插件也注入 installedVersion：作者/团队成员在本机安装了旧版时，
+    // 团队 tab 同样需要显示「更新」按钮（hasUpdate = installedVersion && isVersionNewer）。
+    // files/manifest 本团队始终可见（作者视角），故不按 isInstalled 隐藏。
+    return { ...public_, installedVersion };
+  }
+
   return {
     ...public_,
     files: isInstalled ? public_.files : undefined,
