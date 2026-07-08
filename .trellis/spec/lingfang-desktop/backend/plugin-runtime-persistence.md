@@ -543,9 +543,9 @@ Reference files:
 - `apps/desktop/src/App.tsx`（`pendingAutoFixPrompt` 跨页 state）
 - `apps/desktop/src/pages/Plugins.tsx`（`handleAutoFix`）+ `PluginCreatorHome.tsx`（effect 自动 send）
 
-## 本地/草稿插件 ZIP 导入导出（`.lfplugin` v2，2026-07-07）
+## 本地/草稿插件 ZIP 导入导出（`.lfplugin` v3，2026-07-08）
 
-`.lfplugin` = **ZIP 压缩包**（v2；旧 JSON 单文件 v1 已废弃、无存量文件、spec 无记录，不做兼容）。本地插件与草稿插件共用同一导出/导入通道。
+`.lfplugin` = **ZIP 压缩包**（v3 支持二进制；v2 纯文本向后兼容；旧 JSON 单文件 v1 已废弃、无存量文件、spec 无记录，不做兼容）。本地插件与草稿插件共用同一导出/导入通道。v3 起支持含 vendored 上游源码（字体/图片/音频等二进制）的大插件完整导入导出。
 
 ### 1. Scope / Trigger
 - Trigger: changing `plugin-package-zip.ts`（`exportPluginToZip`/`parsePluginZip`/`materializeZipPlugin`）、`LocalPluginsSection` 的「导入」按钮、`LocalPluginRow` 的「导出」按钮、`DraftPluginsSection` 的导入/导出，或 `.lfplugin` 包格式。
@@ -555,58 +555,71 @@ Reference files:
 - 解析（不落盘）: `parsePluginZip(file: File) -> Promise<ZipImportResult>`
 - 物化（落盘）: `materializeZipPlugin(result: ZipImportResult, existingIds: string[]) -> Promise<{ id, source }>`
 - 前端 hook: `useLocalImport(existingIds, onDone) -> { inputRef, importing, preview, editingName, setEditingName, pickFile, onFilePicked, confirmImport, cancelImport }`
-- 复用 Tauri 命令: `list_plugin_files` / `read_local_plugin_file` / `write_plugin_files` / `set_plugin_draft_flag`（**零 Rust 改动**）。
+- Tauri 命令: `list_plugin_files` / `read_local_plugin_file` / `read_local_plugin_file_bytes`（v3 新增，读二进制 base64）/ `write_plugin_files`（文本批量）/ `write_plugin_file_bytes`（v3 新增，写二进制 base64）/ `set_plugin_draft_flag`。
 - 复用: `saveDraftPlugin`（draft 落点）/ `dedupeImportId`（id 去重）/ `safePluginId`（合法化）。
 
-### 3. Contracts — `.lfplugin` ZIP 包结构
+### 3. Contracts — `.lfplugin` ZIP 包结构（v3）
 ```
 <id>.lfplugin  (ZIP, DEFLATE)
-├── _meta.json       { "format": "lingfang-plugin", "version": 2, "source": "local"|"draft", "exportedAt": ISO, "name": 展示名 }
+├── _meta.json       { "format": "lingfang-plugin", "version": 3, "source": "local"|"draft", "exportedAt": ISO, "name": 展示名, "binaryFiles": ["icon.png", "vendor/x/font.ttf"] }
 ├── manifest.json    磁盘原始 manifest（含 capabilities/visibility/runtime_type 等全部字段，非重新生成）
-├── <源文件>          main.py / index.js / ui/index.html / requirements.txt / ...
-└── ...              （仅文本；二进制不进包）
+├── <文本源文件>      main.py / index.js / ui/index.html / requirements.txt / ...（UTF-8 直存）
+└── <二进制源文件>    字体/图片/音频（base64 编码存，路径列入 _meta.binaryFiles）
 ```
-- `version: 2` 区分旧 JSON 单文件 v1（format:`lingfang-plugin-bundle`）；遇 v1 报「旧版 JSON 格式，请重新导出」。
+- `version`: 3（当前写入）。读取接受 v2（纯文本，无 binaryFiles 字段，按文本处理）与 v3；v1（旧 JSON 单文件 `lingfang-plugin-bundle`）报「旧版 JSON 格式，请重新导出」。
+- `binaryFiles`（v3 新增）：列出 ZIP 内以 base64 存的二进制文件路径。导入时这些 entry 用 `async('base64')` 读 + `write_plugin_file_bytes` 写真实字节；文本 entry 仍用 `async('string')` + `write_plugin_files`。
 - `source`：导出时按来源记（本地→`local`，草稿→`draft`），导入时据此决定落点（见下）。
 
-### 3a. Contracts — 导出
-- `exportPluginToZip`：`list_plugin_files(pluginId)` 取源文件 → 逐个 `read_local_plugin_file` → `isBinaryPlaceholder` 判定**跳过二进制并计数** → manifest.json 用磁盘原文件（保留全部字段）+ `_meta.json` 标识 + 其余源文件 → JSZip `generateAsync({type:'blob',compression:'DEFLATE'})` → 浏览器下载 `<id>.lfplugin`。
-- 二进制处理：`read_local_plugin_file` 对非 UTF-8 返回占位字符串，**无读二进制字节命令** → ZIP 包只含文本文件，与全应用（import-local/saveDraftPlugin/local-upload）一致。缺失 manifest.json → 报「插件缺少 manifest.json，无法导出」。
+### 3a. Contracts — 导出（v3）
+- `exportPluginToZip`：`list_plugin_files(pluginId)` 取源文件 → 逐个 `read_local_plugin_file` → `isBinaryPlaceholder` 判定：
+  - **文本**：直存 `zip.file(path, content)`。
+  - **二进制**（v3）：改读 `read_local_plugin_file_bytes`（base64）→ `zip.file(path, base64, {base64:true})`，路径记入 `binaryFiles`（**不再跳过**）。
+  manifest.json 用磁盘原文件（保留全部字段）+ `_meta.json`（version:3 + binaryFiles）→ JSZip `generateAsync({type:'blob',compression:'DEFLATE'})` → 浏览器下载 `<id>.lfplugin`。缺失 manifest.json → 报「插件缺少 manifest.json，无法导出」。
+- 二进制读路径：`read_local_plugin_file` 对非 UTF-8 返回占位字符串（向后兼容旧消费者）；`read_local_plugin_file_bytes` 返回真实字节的 base64（v3 导出专用）。
 
-### 3b. Contracts — 导入落点（按来源保持）
-- `parsePluginZip`：`file.arrayBuffer()` → `JSZip.loadAsync`（用 arrayBuffer 喂，浏览器/node 都稳定）→ 校验 `_meta.json`（format/version/source）→ 读 `manifest.json` 取 id/name → 收集其余源文件（跳过 `_meta.json`/`manifest.json`/`__MACOSX/`/`.DS_Store`）。
+### 3b. Contracts — 导入落点（按来源保持 + 二进制分流）
+- `parsePluginZip`：`file.arrayBuffer()` → `JSZip.loadAsync` → 校验 `_meta.json`（format/version∈{2,3}/source）→ 读 `binaryFiles`（v3；v2 为空集）→ 读 `manifest.json` 取 id/name → 收集其余源文件：`binaryFiles` 名单内用 `async('base64')` + 标 `binary:true`，其余 `async('string')`（跳过 `_meta.json`/`manifest.json`/`__MACOSX/`/`.DS_Store`）。
 - **非 ZIP** → `rejectLegacyJsonOrInvalid`：尝试按 JSON 解析，命中旧 v1 给重新导出引导，否则报「不是有效的 ZIP 包」。
-- `materializeZipPlugin`：`finalId = dedupeImportId(safePluginId(result.id), existingIds)`（冲突追加 -2/-3，**绝不覆盖**）。
-  - **source==='draft'** → `saveDraftPlugin({id:finalId, manifest:{...result.manifest, id:finalId}, files})`（内部强制 draft:true，落「我的草稿」）。
-  - **source==='local'/缺失** → `writePluginFiles(finalId, [manifest.json + files])`（非草稿，立即可运行，落「本地插件」）。
+- `materializeZipPlugin`：拆分文本/二进制 → 文本走批量写，二进制逐个 `writePluginFileBytes`（base64 解码写字节）。`finalId = dedupeImportId(safePluginId(result.id), existingIds)`（冲突追加 -2/-3，**绝不覆盖**；版本升级见下）。
+  - **source==='draft'** → `saveDraftPlugin`（文本 files）+ 二进制逐个 `writePluginFileBytes`（saveDraftPlugin 走文本路径，二进制需单独写）。
+  - **source==='local'/缺失** → `writePluginFiles`（manifest + 文本 files）+ 二进制逐个 `writePluginFileBytes`。
   - 用户改名写入 `manifest.title`（保留原 name），使导入后列表展示用新名。
 - 导入前弹确认对话框（`ImportConfirmDialog`）：展示 runtime/entry/文件数 + 草稿来源提示（source=draft 时黄色提示「将出现在我的草稿」），允许改名 → 改名影响最终 plugin_id 与 manifest.title。
+
+### 3c. Contracts — 版本感知覆盖（manifest.id 同一性）
+- `materializeZipPlugin(result, existingIds, existingVersions?)`：`existingVersions` 是 id→version 映射。
+- `isUpgrade = existingVersions[baseId] && isVersionNewer(incomingVersion, existingVersion)`。
+- 升级 → `finalId = baseId`（覆盖，不 dedupe），`upgraded: true`；非升级 → `finalId = dedupeImportId(baseId, existingIds)`，`upgraded: false`。
 
 ### 4. Validation & Error Matrix
 - 文件非 ZIP 且非旧 JSON → `parsePluginZip` 抛「文件不是有效的 ZIP 包」。
 - 旧 JSON v1 → 抛「这是旧版 JSON 格式的 .lfplugin（v1），请用当前版本重新导出后再导入」。
 - `_meta.json` format 不符 → 抛「文件不是灵坊插件包（_meta.json format 不符）」。
-- version 不为 2 → 抛「插件包版本 vN 不受支持，请用当前版本重新导出」。
+- version 不为 2 或 3 → 抛「插件包版本 vN 不受支持，请用当前版本重新导出（支持 v2/v3）」。
 - 缺 `_meta.json`（ZIP 内）→ 抛「文件不是有效的灵坊插件包（缺少 _meta.json）」。
 - 缺 `manifest.json` → 抛「插件包缺少 manifest.json」。
 - manifest 缺 id → 抛「manifest.json 缺少 id 字段」。
 - 无源文件 → 抛「插件包没有可导入的源文件」。
 - 导入确认时名称为空 → toast「插件名称不能为空」，不落盘。
-- `write_plugin_files`/`saveDraftPlugin` 失败（非法路径/IO）→ toast 透传错误，不显示导入成功。
+- `write_plugin_files`/`write_plugin_file_bytes`/`saveDraftPlugin` 失败（非法路径/IO）→ toast 透传错误，不显示导入成功。
 
 ### 5. Good/Base/Bad Cases
-- Good: 本地插件 videodl 点「导出」→ 下载 `videodl.lfplugin`（ZIP，含 _meta/manifest/main.py/requirements.txt，二进制跳过）→ 本地 tab「导入」选该包 → 确认 → 本地列表出现 videodl 可运行。
+- Good: 本地插件 videodl 点「导出」→ 下载 `videodl.lfplugin`（v3 ZIP，含 _meta(version:3,binaryFiles)/manifest/main.py/requirements.txt，二进制以 base64 进包）→ 本地 tab「导入」选该包 → 确认 → 本地列表出现 videodl 可运行，二进制字节一致。
+- Good: 含 vendored 源码（字体/音频二进制）的插件（如 moneyprinter-turbo）导出 → 导入 → 字体/音频文件字节完整还原（经 write_plugin_file_bytes）。
 - Good: 草稿点「导出」（source=draft）→ 草稿 tab「导入」→ 落「我的草稿」（draft:true）。
 - Good: 本地导出包在草稿 tab 导入 → source=local 仍落本地（按来源保持，不因导入入口变草稿）。
+- Good: 旧 v2 包（无 binaryFiles）导入 → 按纯文本处理，向后兼容不报错。
 - Base: 包内无 _meta.json.source（旧导出工具）→ 兜底按 local（更安全：至少能运行）。
-- Bad: 导出时把读到的二进制占位文本塞进包 → 导入回写乱码占位覆盖；正确做法 isBinaryPlaceholder 跳过。
-- Bad: 导入时 id 冲突直接 write_plugin_files → 覆盖现有插件；正确做法 dedupeImportId 追加 -2。
+- Bad: 二进制文件走 writePluginFiles（文本路径）→ base64 字符串当文本写入，字节损坏；正确做法 writePluginFileBytes 解码后写字节。
+- Bad: 导入时 id 冲突直接 write_plugin_files → 覆盖现有插件；正确做法 dedupeImportId 追加 -2（或版本升级覆盖）。
 - Bad: source=draft 走 writePluginFiles → manifest 无 draft 标记，出现在本地而非草稿；正确做法 source=draft 走 saveDraftPlugin。
 
 ### 6. Tests Required
-- 前端单测: `plugin-package-zip.spec.ts` 覆盖：导出→解析往返（含 _meta version:2/source/manifest/源文件、二进制跳过）、source=draft 走 saveDraftPlugin / source=local 走 writePluginFiles、id 冲突 dedupe、旧 JSON v1 报错、非 ZIP 报错、缺 _meta/缺 manifest/version 不符报错。
+- 前端单测: `plugin-package-zip.spec.ts` 覆盖：导出→解析往返（v3，含二进制 base64 + binaryFiles + binary:true 标记）、物化分流（文本 writePluginFiles + 二进制 writePluginFileBytes）、source=draft 走 saveDraftPlugin / source=local 走 writePluginFiles、id 冲突 dedupe、版本升级覆盖、v2 包向后兼容、旧 JSON v1 报错、非 ZIP 报错、缺 _meta/缺 manifest/version 不符报错。
 - 前端单测: `use-local-import.spec.ts::dedupeImportId`（纯函数，保留）。
-- Full checks: `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `pnpm -C apps/desktop vite:build`。
+- 后端单测: `plugin-package.spec.ts` 覆盖 binary base64 大小计量、单文件超限、点开头文件名放行、.. 仍拒。
+- Rust 单测: `plugin_store/tests.rs` 覆盖 write_file_bytes（写二进制/建子目录/拒穿越/拒绝对路径）、read_plugin_file_bytes（base64 往返/拒穿越）。
+- Full checks: `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `pnpm -C apps/collab-api test`, `cargo test -p lingfang-desktop`。
 
 ### 7. Wrong vs Correct
 

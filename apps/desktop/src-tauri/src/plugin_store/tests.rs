@@ -471,3 +471,58 @@ fn write_files_rejects_absolute_path() {
         .unwrap_err();
     assert!(err.contains("非法"));
 }
+
+// === 二进制读写（.lfplugin v3 导入/导出路径）===
+
+#[test]
+fn write_file_bytes_writes_binary_content() {
+    let store = temp_store("write-bytes");
+    // 非 UTF-8 字节序列（模拟字体/图片二进制）：0x89 PNG 头 + 任意字节。
+    let bytes: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0xff, 0x00, 0xfe];
+    store.write_file_bytes("p", "assets/icon.png", bytes).unwrap();
+    let dir = store.plugin_dir("p").unwrap();
+    let written = fs::read(dir.join("assets").join("icon.png")).unwrap();
+    assert_eq!(written, bytes);
+}
+
+#[test]
+fn write_file_bytes_creates_subdirs() {
+    let store = temp_store("write-bytes-subdir");
+    store.write_file_bytes("p", "vendor/x/y/font.ttf", b"abc").unwrap();
+    let dir = store.plugin_dir("p").unwrap();
+    assert_eq!(fs::read(dir.join("vendor").join("x").join("y").join("font.ttf")).unwrap(), b"abc");
+}
+
+#[test]
+fn write_file_bytes_rejects_traversal_path() {
+    let store = temp_store("write-bytes-traversal");
+    let err = store.write_file_bytes("p", "../escape.bin", b"x").unwrap_err();
+    assert!(err.contains("非法") || err.contains(".."));
+}
+
+#[test]
+fn write_file_bytes_rejects_absolute_path() {
+    let store = temp_store("write-bytes-absolute");
+    let err = store.write_file_bytes("p", "C:/escape.bin", b"x").unwrap_err();
+    assert!(err.contains("非法"));
+}
+
+#[test]
+fn read_plugin_file_bytes_roundtrips_binary() {
+    let store = temp_store("read-bytes");
+    let bytes: &[u8] = &[0x00, 0x01, 0x02, 0xff, 0xfe, 0x89];
+    store.write_file_bytes("p", "bin.dat", bytes).unwrap();
+    // 读回应为 base64 编码。
+    let b64 = store.read_plugin_file_bytes("p", "bin.dat").unwrap();
+    use base64::{engine::general_purpose, Engine as _};
+    let decoded = general_purpose::STANDARD.decode(b64).unwrap();
+    assert_eq!(decoded, bytes);
+}
+
+#[test]
+fn read_plugin_file_bytes_rejects_traversal() {
+    let store = temp_store("read-bytes-traversal");
+    store.write_file_bytes("p", "ok.bin", b"x").unwrap();
+    let err = store.read_plugin_file_bytes("p", "../escape").unwrap_err();
+    assert!(err.contains("非法") || err.contains("不存在"));
+}

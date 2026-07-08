@@ -5,6 +5,11 @@ import { badRequest, conflict, forbidden } from '../common';
 export type PluginFileInput = {
   path: string;
   content: string;
+  /**
+   * 是否为二进制文件。true 时 content 为 base64 编码的字节（与 .lfplugin v3 导入/导出对称）。
+   * 大小计量按 base64 解码后的字节数。默认 false（content 为 UTF-8 文本）。
+   */
+  binary?: boolean;
 };
 
 export type PluginManifestInput = {
@@ -42,9 +47,11 @@ export type NormalizedPluginPackage = {
   contentHash: string;
 };
 
-const MAX_PLUGIN_FILES = 80;
-const MAX_PLUGIN_FILE_BYTES = 256 * 1024;
-const MAX_PLUGIN_TOTAL_BYTES = 2 * 1024 * 1024;
+// 上传限制（v3 起支持 vendored 大包 + 二进制）：
+// 文件数 300（vendored 树文件多）、单文件 60MiB（字体/音频可达 ~55M）、总 300MiB（MPT 完整 ~200M）。
+const MAX_PLUGIN_FILES = 300;
+const MAX_PLUGIN_FILE_BYTES = 60 * 1024 * 1024;
+const MAX_PLUGIN_TOTAL_BYTES = 300 * 1024 * 1024;
 
 // 合法 runtime_type 白名单（与契约 RuntimeType 四值一致）。
 // nodejs/python 为脚本型运行时：上传云端仅做源码托管，预览执行由桌面壳本地完成（见 R3）。
@@ -79,7 +86,7 @@ function cleanPath(value: unknown) {
   if (path.startsWith('/') || path.startsWith('~') || /^[a-zA-Z]:\//.test(path)) throw badRequest('插件文件路径不能是绝对路径', { path });
   const segments = path.split('/');
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) throw badRequest('插件文件路径不能包含空段或 ..', { path });
-  if (segments.some((segment) => segment.startsWith('.'))) throw badRequest('插件文件路径不能包含隐藏系统路径', { path });
+  // 允许点开头的文件名（如 .gitignore/.npmrc，vendored 源码树常见）；仍拒 `.``/`..``/空段（上面已校验）。
   return path;
 }
 
@@ -108,11 +115,13 @@ export function normalizePluginPackage(input: PluginPackageInput): NormalizedPlu
     if (seen.has(path)) throw conflict('插件文件路径重复', { path });
     seen.add(path);
     if (typeof file.content !== 'string') throw badRequest('插件文件内容必须是字符串', { path });
-    const bytes = Buffer.byteLength(file.content, 'utf8');
+    // 二进制文件（binary:true）：content 为 base64，按解码后字节数计量（避免 33% 膨胀误判）。
+    // 文本文件：按 UTF-8 字节数计量。
+    const bytes = file.binary ? Buffer.from(file.content, 'base64').length : Buffer.byteLength(file.content, 'utf8');
     if (bytes > MAX_PLUGIN_FILE_BYTES) throw badRequest('单个插件文件过大', { path, limitBytes: MAX_PLUGIN_FILE_BYTES });
     totalBytes += bytes;
     if (totalBytes > MAX_PLUGIN_TOTAL_BYTES) throw badRequest('插件包总大小超限', { limitBytes: MAX_PLUGIN_TOTAL_BYTES });
-    return { path, content: file.content };
+    return { path, content: file.content, ...(file.binary ? { binary: true } : {}) };
   }).sort((a, b) => a.path.localeCompare(b.path));
 
   if (!seen.has(entry)) throw badRequest('manifest.entry 指向的文件不存在', { entry });

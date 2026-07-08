@@ -97,3 +97,54 @@ describe('normalizePluginPackage runtime_type 映射', () => {
     expect(pkg.manifest.entry).toBe('src/index.js');
   });
 });
+
+describe('normalizePluginPackage 二进制 + 路径放行（v3）', () => {
+  it('binary:true 文件按 base64 解码后字节数计量（非 UTF-8 字符串长度）', () => {
+    // 3 字节 → base64 "AAAA"（4 字符）。若按 utf8 字符串长度会算 4，按解码应算 3。
+    const b64 = Buffer.from('abc').toString('base64'); // "YWJj"
+    const pkg = normalizePluginPackage({
+      manifest: { id: 'b', name: 'b', version: '0.1.0', runtime_type: 'python', entry: 'main.py', capabilities: [] },
+      files: [
+        { path: 'main.py', content: 'print(1)' },
+        { path: 'icon.png', content: b64, binary: true },
+      ],
+    });
+    // 不抛错即说明未超单文件限（base64 4 字符 < 60MiB）；二进制标记透传。
+    expect(pkg.files.some((f) => f.path === 'icon.png' && f.binary === true)).toBe(true);
+  });
+
+  it('binary 文件超 60MiB 解码字节 → 报单个文件过大', () => {
+    // 构造一个解码后 > 60MiB 的 base64 串（64MiB 全 0）。
+    const big = Buffer.alloc(64 * 1024 * 1024, 0).toString('base64');
+    expect(() => normalizePluginPackage({
+      manifest: { id: 'big', name: 'big', version: '0.1.0', runtime_type: 'python', entry: 'main.py', capabilities: [] },
+      files: [
+        { path: 'main.py', content: 'print(1)' },
+        { path: 'font.ttf', content: big, binary: true },
+      ],
+    })).toThrow(/单个插件文件过大/);
+  });
+
+  it('允许点开头的文件名（如 .gitignore/.npmrc，vendored 树常见）', () => {
+    const pkg = normalizePluginPackage({
+      manifest: { id: 'v', name: 'v', version: '0.1.0', runtime_type: 'python', entry: 'main.py', capabilities: [] },
+      files: [
+        { path: 'main.py', content: 'print(1)' },
+        { path: '.gitignore', content: 'node_modules\n' },
+        { path: 'vendor/x/.npmrc', content: 'registry=https://example.com\n' },
+      ],
+    });
+    expect(pkg.files.some((f) => f.path === '.gitignore')).toBe(true);
+    expect(pkg.files.some((f) => f.path === 'vendor/x/.npmrc')).toBe(true);
+  });
+
+  it('仍拒绝空段与 .. 穿越（即使放开了点开头）', () => {
+    expect(() => normalizePluginPackage({
+      manifest: { id: 't', name: 't', version: '0.1.0', runtime_type: 'python', entry: 'main.py', capabilities: [] },
+      files: [
+        { path: 'main.py', content: 'print(1)' },
+        { path: '../escape.txt', content: 'x' },
+      ],
+    })).toThrow(/空段|\.\./);
+  });
+});

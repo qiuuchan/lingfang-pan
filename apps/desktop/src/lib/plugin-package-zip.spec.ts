@@ -1,8 +1,8 @@
 // plugin-package-zip.spec.ts —— `.lfplugin` ZIP 包导出/导入单测。
 //
 // 验证：
-// - 导出：枚举源文件 + 读内容（跳过二进制占位）→ JSZip 打包 → 含 _meta.json(version:2,source)/manifest.json/源文件。
-// - 导入：解析 ZIP → 校验格式/版本 → 按 source 落点（draft→saveDraftPlugin draft:true，local→writePluginFiles 非草稿）。
+// - 导出（v3）：枚举源文件 + 读内容；文本直存、二进制读 base64 存（记入 _meta.binaryFiles）→ 含 _meta.json(version:3)/manifest.json/源文件。
+// - 导入：解析 ZIP → 校验格式/版本（接受 v2/v3）→ 按 source 落点（draft→saveDraftPlugin，local→writePluginFiles）→ 二进制走 writePluginFileBytes。
 // - 旧 JSON v1 → 报「旧版 JSON 格式」。
 //
 // 测试环境为 node（无 document/URL），exportPluginToZip 的下载触发需 mock document/URL 捕获 blob。
@@ -12,12 +12,16 @@ import JSZip from 'jszip';
 // vi.hoisted 拿到工厂内可引用的 mock 引用。
 const listPluginFilesMock = vi.hoisted(() => vi.fn());
 const readLocalPluginFileMock = vi.hoisted(() => vi.fn());
+const readLocalPluginFileBytesMock = vi.hoisted(() => vi.fn());
 const writePluginFilesMock = vi.hoisted(() => vi.fn());
+const writePluginFileBytesMock = vi.hoisted(() => vi.fn());
 const saveDraftPluginMock = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/plugin-status', () => ({
   listPluginFiles: listPluginFilesMock,
   readLocalPluginFile: readLocalPluginFileMock,
+  readLocalPluginFileBytes: readLocalPluginFileBytesMock,
   writePluginFiles: writePluginFilesMock,
+  writePluginFileBytes: writePluginFileBytesMock,
 }));
 vi.mock('@/lib/draft-plugin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/draft-plugin')>();
@@ -40,7 +44,9 @@ const PYTHON_MANIFEST = JSON.stringify({
 beforeEach(() => {
   listPluginFilesMock.mockReset();
   readLocalPluginFileMock.mockReset();
+  readLocalPluginFileBytesMock.mockReset();
   writePluginFilesMock.mockReset();
+  writePluginFileBytesMock.mockReset();
   saveDraftPluginMock.mockReset();
 });
 
@@ -67,8 +73,8 @@ afterEach(() => {
 });
 
 describe('exportPluginToZip + parsePluginZip 往返', () => {
-  it('python 插件导出 → 再解析：含 _meta.json(version:2,source)/manifest.json/源文件，二进制占位被跳过', async () => {
-    // 导出：list_plugin_files 返回含二进制占位的文件，read 对二进制返回占位字符串。
+  it('python 插件导出 → 再解析：含 _meta.json(version:3,source)/manifest.json/源文件，二进制以 base64 进包', async () => {
+    // 导出：list_plugin_files 返回含二进制占位的文件，read 对二进制返回占位字符串 → 改读 bytes(base64)。
     listPluginFilesMock.mockResolvedValue(['manifest.json', 'main.py', 'requirements.txt', 'icon.png']);
     readLocalPluginFileMock.mockImplementation(async (_id: string, file: string) => {
       if (file === 'manifest.json') return PYTHON_MANIFEST;
@@ -77,13 +83,16 @@ describe('exportPluginToZip + parsePluginZip 往返', () => {
       if (file === 'icon.png') return '[binary file, 1024 bytes, non-UTF-8 — 已跳过读取]';
       return '';
     });
+    // 二进制文件改读 bytes：返回固定 base64（"abc" 的 base64），往返校验用。
+    const ICON_B64 = btoa('abc');
+    readLocalPluginFileBytesMock.mockResolvedValue(ICON_B64);
     const captured: { blob: Blob | null; filename: string | null } = { blob: null, filename: null };
     const anchor = stubDocumentDownload(captured);
 
     const result = await exportPluginToZip('videodl', 'local');
     expect(result.name).toBe('视频下载器'); // title 优先
-    expect(result.skipped).toBe(1); // icon.png 二进制跳过
-    expect(result.fileCount).toBe(3); // manifest + main.py + requirements.txt
+    expect(result.skipped).toBe(0); // v3：二进制不再跳过
+    expect(result.fileCount).toBe(4); // manifest + main.py + requirements.txt + icon.png(二进制)
     expect(captured.blob).toBeTruthy();
     expect(anchor.download).toBe('videodl.lfplugin');
 
@@ -94,8 +103,37 @@ describe('exportPluginToZip + parsePluginZip 往返', () => {
     expect(parsed.id).toBe('videodl');
     expect(parsed.name).toBe('视频下载器');
     expect(parsed.manifest.runtime_type).toBe('python');
-    expect(parsed.files.map((f) => f.path).sort()).toEqual(['main.py', 'requirements.txt']);
-    expect(parsed.files.some((f) => f.path === 'icon.png')).toBe(false); // 二进制未进包
+    // 文本文件 + 二进制文件都在，二进制标 binary:true 且 content 为 base64。
+    const iconEntry = parsed.files.find((f) => f.path === 'icon.png');
+    expect(iconEntry).toBeTruthy();
+    expect(iconEntry!.binary).toBe(true);
+    expect(iconEntry!.content).toBe(ICON_B64); // base64 原样保留
+    const textEntry = parsed.files.find((f) => f.path === 'main.py');
+    expect(textEntry!.binary).toBeFalsy();
+    expect(textEntry!.content).toBe('print(1)');
+  });
+
+  it('物化：二进制文件走 writePluginFileBytes，文本走 writePluginFiles（base64 解码后字节一致）', async () => {
+    // 用上一条的导出结果（含二进制 icon.png）物化，校验写盘分流。
+    listPluginFilesMock.mockResolvedValue(['manifest.json', 'main.py', 'icon.png']);
+    readLocalPluginFileMock.mockImplementation(async (_id: string, file: string) => {
+      if (file === 'manifest.json') return PYTHON_MANIFEST;
+      if (file === 'main.py') return 'print(1)';
+      if (file === 'icon.png') return '[binary file, 1024 bytes, non-UTF-8 — 已跳过读取]';
+      return '';
+    });
+    const ICON_B64 = btoa('binary-content-payload');
+    readLocalPluginFileBytesMock.mockResolvedValue(ICON_B64);
+    const captured: { blob: Blob | null; filename: string | null } = { blob: null, filename: null };
+    stubDocumentDownload(captured);
+    await exportPluginToZip('videodl', 'local');
+
+    const parsed = await parsePluginZip(new File([captured.blob!], 'videodl.lfplugin'));
+    await materializeZipPlugin(parsed, ['other']);
+    // 文本批量写一次（含 manifest + main.py）。
+    expect(writePluginFilesMock).toHaveBeenCalledTimes(1);
+    // 二进制逐个写字节一次（icon.png，contentBase64 = 原 base64）。
+    expect(writePluginFileBytesMock).toHaveBeenCalledWith('videodl', 'icon.png', ICON_B64);
   });
 
   it('草稿源导出 → source=draft', async () => {
@@ -203,12 +241,23 @@ describe('parsePluginZip 错误处理', () => {
     await expect(parsePluginZip(new File([blob], 'x.lfplugin'))).rejects.toThrow(/缺少 _meta\.json/);
   });
 
-  it('version 不为 2 → 报版本不受支持', async () => {
+  it('version 为 99（不支持）→ 报版本不受支持', async () => {
     const zip = new JSZip();
     zip.file('_meta.json', JSON.stringify({ format: 'lingfang-plugin', version: 99, source: 'local', exportedAt: 'now', name: 'x' }));
     zip.file('manifest.json', JSON.stringify({ id: 'x', name: 'x' }));
     const blob = await zip.generateAsync({ type: 'blob' });
     await expect(parsePluginZip(new File([blob], 'x.lfplugin'))).rejects.toThrow(/版本.*不受支持/);
+  });
+
+  it('v2 包（无 binaryFiles）向后兼容：按纯文本解析', async () => {
+    const zip = new JSZip();
+    zip.file('_meta.json', JSON.stringify({ format: 'lingfang-plugin', version: 2, source: 'local', exportedAt: 'now', name: 'x' }));
+    zip.file('manifest.json', JSON.stringify({ id: 'x', name: 'x', version: '0.1.0', runtime_type: 'python', entry: 'main.py' }));
+    zip.file('main.py', 'print(1)');
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const parsed = await parsePluginZip(new File([blob], 'x.lfplugin'));
+    expect(parsed.files.some((f) => f.binary)).toBe(false); // v2 无二进制标记
+    expect(parsed.files.find((f) => f.path === 'main.py')!.content).toBe('print(1)');
   });
 
   it('缺 manifest.json → 报缺 manifest', async () => {

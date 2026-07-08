@@ -1,19 +1,28 @@
 // plugin-package-zip.ts —— `.lfplugin` ZIP 包导出/导入（本地插件 & 草稿插件通用）。
 //
-// `.lfplugin` v2 = ZIP 包，结构：
-//   _meta.json   { format: 'lingfang-plugin', version: 2, source: 'local'|'draft', exportedAt, name }
+// `.lfplugin` v3 = ZIP 包，结构：
+//   _meta.json   { format: 'lingfang-plugin', version: 3, source, exportedAt, name, binaryFiles?: string[] }
 //   manifest.json  原始 manifest（含 capabilities/visibility/runtime_type 等全部字段）
-//   <源文件>       main.py / index.js / ui/index.html / requirements.txt / ...
+//   <文本源文件>    main.py / index.js / ui/index.html / requirements.txt / ...（UTF-8 直存）
+//   <二进制源文件>  字体/图片/音频（base64 编码存，路径列入 _meta.binaryFiles）
 //
 // 设计要点：
-// - 二进制处理：read_local_plugin_file 对非 UTF-8 返回占位字符串，全应用统一跳过二进制
-//   （import-local/saveDraftPlugin/local-upload 同款）。ZIP 包亦只含文本文件，二进制跳过并计数提示。
+// - 二进制处理（v3）：导出时 readLocalPluginFile 命中占位 → 改 readLocalPluginFileBytes 取 base64 →
+//   zip.file(path, base64, {base64:true})，路径记入 _meta.binaryFiles。导入时按名单用
+//   entry.async('base64') 读 + writePluginFileBytes 写真实字节。文本文件仍走 async('string') + writePluginFiles。
+// - v2 向后兼容：旧包无 binaryFiles 字段，按纯文本处理（二进制本就被 v2 导出跳过，无丢失）。
 // - 导入落点按 _meta.json.source：'draft' → saveDraftPlugin(draft:true)；'local'/缺失 → writePluginFiles(非草稿, 可运行)。
 // - id 去重：与已有本地/草稿插件冲突时 dedupeImportId 追加 -2/-3，绝不覆盖现有目录。
 // - manifest.json 用磁盘原文件（非重新生成），保留所有字段；导入时原样物化。
 // - 旧 JSON 单文件 v1 格式已废弃（无存量文件、spec 无记录），遇 v1 报错引导重新导出。
 import JSZip from 'jszip';
-import { listPluginFiles, readLocalPluginFile, writePluginFiles } from '@/lib/plugin-status';
+import {
+  listPluginFiles,
+  readLocalPluginFile,
+  readLocalPluginFileBytes,
+  writePluginFiles,
+  writePluginFileBytes,
+} from '@/lib/plugin-status';
 import { isBinaryPlaceholder, saveDraftPlugin } from '@/lib/draft-plugin';
 import { safePluginId } from '@/lib/plugin-draft';
 import { isVersionNewer } from '@/lib/version';
@@ -23,19 +32,22 @@ import type { DraftFile } from '@/lib/types';
 /** 包内来源标记：决定导入后落草稿还是本地。 */
 export type PluginPackageSource = 'local' | 'draft';
 
-/** _meta.json 内容（包标识 + 来源 + 导出时间）。 */
+/** _meta.json 内容（包标识 + 来源 + 导出时间 + 二进制文件名单）。 */
 interface PackageMeta {
   format: 'lingfang-plugin';
-  version: 2;
+  version: 2 | 3;
   source: PluginPackageSource;
   exportedAt: string;
   name: string;
+  /** v3：二进制文件路径名单（content 在 ZIP 里以 base64 存）。v2 包无此字段。 */
+  binaryFiles?: string[];
 }
 
 const META_FILE = '_meta.json';
 const MANIFEST_FILE = 'manifest.json';
 const PLUGIN_FORMAT = 'lingfang-plugin' as const;
-const PLUGIN_VERSION = 2;
+/** 当前写入版本（v3 支持二进制）。读取时接受 v2（向后兼容，按纯文本处理）。 */
+const PLUGIN_VERSION = 3;
 
 /** 不进 ZIP 包的文件（_meta.json 是包标识，单独生成；manifest.json 单独加保证用磁盘原文件）。 */
 function isMetaOrManifest(path: string): boolean {
@@ -66,12 +78,23 @@ export async function exportPluginToZip(
   let skipped = 0;
   let displayName = pluginId;
   let manifestText = '';
+  const binaryFiles: string[] = [];
 
-  // 逐个读内容；二进制占位跳过；manifest.json 单独收存（用磁盘原文件，非重新生成）。
+  // 逐个读内容；二进制占位 → 改读 base64 真实字节并记入 binaryFiles（不再跳过）。
+  // manifest.json 单独收存（用磁盘原文件，非重新生成）。
   for (const path of paths) {
     const content = await readLocalPluginFile(pluginId, path);
     if (isBinaryPlaceholder(content)) {
-      skipped += 1;
+      if (path === MANIFEST_FILE) {
+        // manifest.json 不可能是二进制；若命中说明异常，跳过避免损坏。
+        skipped += 1;
+        continue;
+      }
+      // 二进制文件：读 base64 真实字节，以 base64 存入 ZIP，路径记入名单。
+      const b64 = await readLocalPluginFileBytes(pluginId, path);
+      zip.file(path, b64, { base64: true });
+      binaryFiles.push(path);
+      fileCount += 1;
       continue;
     }
     if (path === MANIFEST_FILE) {
@@ -102,6 +125,7 @@ export async function exportPluginToZip(
     source,
     exportedAt: new Date().toISOString(),
     name: displayName,
+    ...(binaryFiles.length > 0 ? { binaryFiles } : {}),
   };
   zip.file(META_FILE, `${JSON.stringify(meta, null, 2)}\n`);
 
@@ -168,10 +192,12 @@ export async function parsePluginZip(file: File): Promise<ZipImportResult> {
   if (meta.format !== PLUGIN_FORMAT) {
     throw new Error('文件不是灵坊插件包（_meta.json format 不符）');
   }
-  if (meta.version !== PLUGIN_VERSION) {
-    throw new Error(`插件包版本 v${meta.version} 不受支持，请用当前版本重新导出（支持 v${PLUGIN_VERSION}）`);
+  // 接受 v2（纯文本，向后兼容）与 v3（支持二进制）。v1（旧 JSON 单文件）在 rejectLegacyJsonOrInvalid 拦截。
+  if (meta.version !== 2 && meta.version !== 3) {
+    throw new Error(`插件包版本 v${meta.version} 不受支持，请用当前版本重新导出（支持 v2/v3）`);
   }
   const source: PluginPackageSource = meta.source === 'draft' ? 'draft' : 'local';
+  const binarySet = new Set(meta.binaryFiles ?? []);
 
   // manifest.json 必须存在（定位 id + 保留字段）。
   const manifestEntry = resolvedZip.file(MANIFEST_FILE);
@@ -192,6 +218,7 @@ export async function parsePluginZip(file: File): Promise<ZipImportResult> {
     || rawId;
 
   // 收集其余源文件（跳过 _meta.json/manifest.json，均已单独处理）。
+  // 二进制文件（_meta.binaryFiles 名单）：读 base64，标 binary:true；文本文件：读 UTF-8 字符串。
   const files: DraftFile[] = [];
   const entries = Object.values(resolvedZip.files);
   for (const entry of entries) {
@@ -199,8 +226,13 @@ export async function parsePluginZip(file: File): Promise<ZipImportResult> {
     if (isMetaOrManifest(entry.name)) continue;
     // 跳过 macOS 打包脏文件（__MACOSX/、.DS_Store）与目录占位。
     if (entry.name.startsWith('__MACOSX/') || entry.name.endsWith('.DS_Store')) continue;
-    const content = await entry.async('string');
-    files.push({ path: entry.name, content });
+    if (binarySet.has(entry.name)) {
+      const b64 = await entry.async('base64');
+      files.push({ path: entry.name, content: b64, binary: true });
+    } else {
+      const content = await entry.async('string');
+      files.push({ path: entry.name, content });
+    }
   }
   if (files.length === 0) {
     throw new Error('插件包没有可导入的源文件');
@@ -247,17 +279,29 @@ export async function materializeZipPlugin(
   // 升级判定：现有同 id 插件 + 包版本严格更高 → 覆盖原 id（不 dedupe）。
   const isUpgrade = Boolean(existingVersion) && isVersionNewer(incomingVersion, existingVersion!);
   const finalId = isUpgrade ? baseId : dedupeImportId(baseId, existingIds);
+
+  // 拆分文本/二进制文件：文本走批量写，二进制逐个写字节（writePluginFileBytes）。
+  const textFiles = result.files.filter((f) => !f.binary);
+  const binaryFiles = result.files.filter((f) => f.binary);
+
   if (result.source === 'draft') {
     await saveDraftPlugin({
       id: finalId,
       manifest: { ...result.manifest, id: finalId },
-      files: result.files.map((f) => [f.path, f.content] as [string, string]),
+      files: textFiles.map((f) => [f.path, f.content] as [string, string]),
     });
+    // 二进制文件单独写字节（saveDraftPlugin 走文本路径，二进制会被 isBinaryPlaceholder 误过滤）。
+    for (const f of binaryFiles) {
+      await writePluginFileBytes(finalId, f.path, f.content);
+    }
   } else {
     await writePluginFiles(finalId, [
       { path: MANIFEST_FILE, content: `${JSON.stringify({ ...result.manifest, id: finalId }, null, 2)}\n` },
-      ...result.files.map((f) => ({ path: f.path, content: f.content })),
+      ...textFiles.map((f) => ({ path: f.path, content: f.content })),
     ]);
+    for (const f of binaryFiles) {
+      await writePluginFileBytes(finalId, f.path, f.content);
+    }
   }
   return { id: finalId, source: result.source, upgraded: isUpgrade };
 }
