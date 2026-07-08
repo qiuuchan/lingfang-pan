@@ -1,11 +1,12 @@
 // creator-tools.spec.ts —— 完整性校验单测（validateStagedCompleteness / validateStagedFiles）。
 //
 // 重点回归：AI 生成插件常漏文件（缺入口/依赖清单），校验须按 runtime 拦截并给可执行报错。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   validateStagedFiles,
   validateStagedCompleteness,
   withSyncedStagedManifest,
+  submitStagedPlugin,
   type StagedPlugin,
 } from '@/lib/plugin-creator/creator-tools';
 import type { DraftFile } from '@/lib/types';
@@ -129,5 +130,56 @@ describe('withSyncedStagedManifest', () => {
     expect(manifests).toHaveLength(1);
     expect(JSON.parse(manifests[0].content).name).toBe('Updated Name');
     expect(synced.files.some((file) => file.path === 'ui/index.html')).toBe(true);
+  });
+});
+
+// submitStagedPlugin：POST /api/plugins/upload。后端返回 { plugin, upgraded?, deduplicated? }。
+// 关键契约：透传 plugin.id（本地行「发布到市场」需 upload 后拿 id 再调 submit-marketplace）
+// 与 upgraded（前端据其给「升级」/「已发布」不同提示）。
+const apiMock = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/api', () => ({ api: apiMock, ApiError: class extends Error {} }));
+
+describe('submitStagedPlugin', () => {
+  beforeEach(() => { apiMock.mockReset(); });
+
+  it('成功返回 { ok:true, name, id }（透传 plugin.id）', async () => {
+    apiMock.mockResolvedValueOnce({ plugin: { id: 'p1' }, upgraded: false });
+    const result = await submitStagedPlugin(stagedDraft());
+    expect(result).toEqual({ ok: true, name: 'E2E Smoke 20260625 2155', id: 'p1', upgraded: false });
+    // 校验请求体含 manifest + files + priceCents:0。
+    const [path, opts] = apiMock.mock.calls[0];
+    expect(path).toBe('/api/plugins/upload');
+    expect(opts.method).toBe('POST');
+    expect(opts.body.priceCents).toBe(0);
+    expect(opts.body.files.some((file: DraftFile) => file.path === 'manifest.json')).toBe(true);
+  });
+
+  it('升级路径（upgraded:true）同样返回 id', async () => {
+    apiMock.mockResolvedValueOnce({ plugin: { id: 'p-existing' }, upgraded: true });
+    const result = await submitStagedPlugin(stagedDraft());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.id).toBe('p-existing');
+      expect(result.upgraded).toBe(true);
+    }
+  });
+
+  it('完整性校验失败时返回错误信息（不发请求）', async () => {
+    // python 入口必须是 main.py；此处用 client 草稿但入口缺失场景另测，这里用 python 缺 requirements.txt。
+    const result = await submitStagedPlugin(stagedDraft({
+      runtime_type: 'python',
+      entry: 'main.py',
+      files: [f('main.py', 'print(1)')],
+    }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain('requirements.txt');
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it('api 抛错时返回 ok:false + message', async () => {
+    apiMock.mockRejectedValueOnce(Object.assign(new Error('网络错误'), { message: '网络错误' }));
+    const result = await submitStagedPlugin(stagedDraft());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain('网络错误');
   });
 });

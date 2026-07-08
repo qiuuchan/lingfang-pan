@@ -301,6 +301,67 @@ describe('AdminService 通知埋点', () => {
   });
 });
 
+// === 审核 DRAFT 插件：管理员可直接审核草稿（不再要求作者先提交审核）===
+// 守卫已放宽：DRAFT/PENDING → APPROVED/REJECTED 均允许；APPROVED/REJECTED 等终态抛 conflict。
+// 这覆盖问题「后台无法把插件状态从草稿改为已审核」：此前 DRAFT 被守卫挡在 409。
+describe('AdminService 审核 DRAFT 插件', () => {
+  let prisma: ReturnType<typeof mockPrismaForReview>;
+  let auth: ReturnType<typeof mockAuthForReview>;
+  let notifications: ReturnType<typeof mockNotifications>;
+  let service: AdminService;
+
+  beforeEach(() => {
+    prisma = mockPrismaForReview();
+    auth = mockAuthForReview();
+    notifications = mockNotifications();
+    // @ts-expect-error mock 不实现完整 PrismaService 接口。
+    service = new AdminService(prisma, auth, notifications);
+  });
+
+  it('adminApprovePlugin 对 DRAFT 草稿直接审核通过（→ APPROVED + marketplace + PUBLIC）', async () => {
+    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'DRAFT' }));
+    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }));
+    const result = await service.adminApprovePlugin('user-admin', 'p1');
+    expect(result.plugin.reviewStatus).toBe('APPROVED');
+    expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'p1' },
+      data: expect.objectContaining({ reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }),
+    }));
+    // 仍写 PluginReview 记录 + 通知作者（与 PENDING 路径一致）。
+    expect(prisma.pluginReview.create).toHaveBeenCalledTimes(1);
+    expect(notifications.create).toHaveBeenCalledWith(
+      'author-1', 'plugin_approved', expect.any(String), expect.any(String),
+      { relatedType: 'Plugin', relatedId: 'p1' },
+    );
+  });
+
+  it('adminRejectPlugin 对 DRAFT 草稿可直接驳回（→ REJECTED，附原因通知作者）', async () => {
+    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'DRAFT' }));
+    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'REJECTED' }));
+    await service.adminRejectPlugin('user-admin', 'p1', '描述不符');
+    expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'p1' },
+      data: expect.objectContaining({ reviewStatus: 'REJECTED' }),
+    }));
+    expect(notifications.create).toHaveBeenCalledWith(
+      'author-1', 'plugin_rejected', expect.any(String), expect.stringContaining('描述不符'),
+      { relatedType: 'Plugin', relatedId: 'p1' },
+    );
+  });
+
+  it('adminApprovePlugin 对 APPROVED 终态抛 conflict（不能重复审核）', async () => {
+    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'APPROVED', marketplace: true }));
+    await expect(service.adminApprovePlugin('user-admin', 'p1')).rejects.toMatchObject({ status: 409 });
+    expect(prisma.plugin.update).not.toHaveBeenCalled();
+  });
+
+  it('adminRejectPlugin 对 REJECTED 终态抛 conflict（不能重复驳回）', async () => {
+    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'REJECTED' }));
+    await expect(service.adminRejectPlugin('user-admin', 'p1')).rejects.toMatchObject({ status: 409 });
+    expect(prisma.plugin.update).not.toHaveBeenCalled();
+  });
+});
+
 // === 组B 团队管理完善：成员列表 / 角色切换 / 状态启停 / 详情聚合 ===
 // 覆盖 4 个新方法，关键断言：
 //  - 非平台管理员被 ensurePlatformAdmin 拒绝（403）。

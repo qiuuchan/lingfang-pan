@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  CheckSquareIcon, FolderOpenIcon, PackageIcon, RefreshCwIcon, Trash2Icon, XIcon,
+  CheckSquareIcon, FolderInputIcon, FolderOpenIcon, Loader2Icon, PackageIcon, RefreshCwIcon, Trash2Icon, XIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
@@ -9,11 +9,14 @@ import { Pagination } from '@/components/pagination';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Shimmer } from '@/lib/motion';
 import { dragRegionProps } from '@/lib/window-drag';
 import type { LocalPluginStatus } from '@/lib/plugin-status';
 import { deletePlugin } from '@/lib/plugin-status';
 import { LocalPluginRow } from './LocalPluginRow';
+import { useLocalImport } from './use-local-import';
 
 const PAGE_SIZE = 6;
 
@@ -26,6 +29,7 @@ export function LocalPluginsSection({
   onOpen,
   onOpenRoot,
   onRefresh,
+  onPublished,
 }: {
   items: LocalPluginStatus[];
   loading: boolean;
@@ -35,9 +39,15 @@ export function LocalPluginsSection({
   onOpen: (item: LocalPluginStatus) => void;
   onOpenRoot: () => void;
   onRefresh: () => void;
+  /** 发布到团队/市场成功后：父组件应刷新本地 + 团队列表（团队列表才会出现新发布项）。 */
+  onPublished: () => void;
 }) {
   // 多选删除：selectMode 开启后行首出现 checkbox，header 切换为批量操作栏。
   const bulk = useBulkDelete(items, onRefresh);
+  // 本地导入：选 .lfplugin 压缩包 → 物化为可运行本地插件（非草稿）。
+  // existingVersions 供版本感知覆盖（包版本更高 → 覆盖升级同 id 插件，不改名）。
+  const existingVersions = Object.fromEntries(items.map((p) => [p.id, p.version]));
+  const localImport = useLocalImport(items.map((p) => p.id), onRefresh, existingVersions);
   const pageItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   return (
     <section className="flex flex-col gap-3">
@@ -54,6 +64,8 @@ export function LocalPluginsSection({
         onEnterSelect={bulk.enter}
         onExitSelect={bulk.exit}
         onBulkDelete={bulk.openDelete}
+        onImport={localImport.pickFile}
+        importing={localImport.importing}
         onOpenRoot={onOpenRoot}
         onRefresh={onRefresh}
       />
@@ -68,6 +80,7 @@ export function LocalPluginsSection({
                 item={item}
                 onOpen={onOpen}
                 onDeleted={onRefresh}
+                onPublished={onPublished}
                 selectMode={bulk.selectMode}
                 selected={bulk.selected.has(item.id)}
                 onToggleSelect={bulk.toggle}
@@ -86,6 +99,15 @@ export function LocalPluginsSection({
         onCancel={bulk.closeDelete}
         onConfirm={bulk.confirmDelete}
       />
+      {/* 隐藏 .lfplugin 压缩包选择 input：用户选 ZIP 包 → 解析 → 确认 → 物化。 */}
+      <input
+        ref={localImport.inputRef}
+        type="file"
+        accept=".lfplugin"
+        className="hidden"
+        onChange={(e) => { void localImport.onFilePicked(e.target.files?.[0]); e.target.value = ''; }}
+      />
+      <ImportConfirmDialog localImport={localImport} />
     </section>
   );
 }
@@ -158,6 +180,8 @@ function SectionHeader({
   onEnterSelect,
   onExitSelect,
   onBulkDelete,
+  onImport,
+  importing,
   onOpenRoot,
   onRefresh,
 }: {
@@ -173,6 +197,8 @@ function SectionHeader({
   onEnterSelect: () => void;
   onExitSelect: () => void;
   onBulkDelete: () => void;
+  onImport: () => void;
+  importing: boolean;
   onOpenRoot: () => void;
   onRefresh: () => void;
 }) {
@@ -207,6 +233,10 @@ function SectionHeader({
           </>
         ) : (
           <>
+            <Button variant="ghost" size="sm" onClick={onImport} disabled={importing} title="从 .lfplugin 压缩包导入插件">
+              {importing ? <Loader2Icon className="size-3.5 animate-spin" /> : <FolderInputIcon className="size-3.5" />}
+              导入
+            </Button>
             <Button variant="ghost" size="sm" onClick={onEnterSelect} disabled={loading || count === 0} title="多选删除">
               <CheckSquareIcon className="size-3.5" />选择
             </Button>
@@ -220,6 +250,68 @@ function SectionHeader({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 导入确认对话框：读到的 StagedPlugin 展示 name/runtime/entry + 跳过文件数，
+ * 允许用户改名（影响最终 plugin_id 与 manifest.name），确认后物化落盘。
+ */
+function ImportConfirmDialog({
+  localImport,
+}: {
+  localImport: ReturnType<typeof useLocalImport>;
+}) {
+  const preview = localImport.preview;
+  const open = Boolean(preview);
+  const RUNTIME_LABEL: Record<string, string> = { client: '前端', nodejs: 'Node.js', python: 'Python' };
+  const runtime = typeof preview?.manifest?.runtime_type === 'string' ? preview.manifest.runtime_type : 'client';
+  const entry = typeof preview?.manifest?.entry === 'string' ? preview.manifest.entry : '';
+  const fileCount = preview?.files.length ?? 0;
+  const isDraftSource = preview?.source === 'draft';
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !localImport.importing) localImport.cancelImport(); }}>
+      <DialogContent showCloseButton={false} className="sm:max-w-md">
+        <DialogHeader {...dragRegionProps}>
+          <DialogTitle data-tauri-drag-region>导入插件包</DialogTitle>
+          <DialogDescription>
+            将把 .lfplugin 压缩包内的插件保存到本地。可在此处修改名称后确认导入。
+          </DialogDescription>
+        </DialogHeader>
+        {preview && (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="local-import-name">插件名称</Label>
+              <Input
+                id="local-import-name"
+                value={localImport.editingName}
+                onChange={(e) => localImport.setEditingName(e.target.value)}
+                maxLength={80}
+                placeholder="插件名称"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <div>运行类型：{RUNTIME_LABEL[runtime] ?? runtime}</div>
+              {entry && <div>入口文件：{entry}</div>}
+              <div>文件数：{fileCount}</div>
+              {/* 来源标记提示：草稿源包会落到草稿，非本地列表。 */}
+              {isDraftSource && (
+                <div className="text-amber-600 dark:text-amber-400">
+                  该包标记为草稿来源，导入后将出现在「我的草稿」（非本地插件）。
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={localImport.cancelImport} disabled={localImport.importing}>取消</Button>
+          <LoadingButton loading={localImport.importing} onClick={() => { void localImport.confirmImport(); }}>
+            确认导入
+          </LoadingButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

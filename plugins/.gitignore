@@ -1,0 +1,14 @@
+# 这四个插件封装第三方开源项目，含 vendored 上游源码（体积大 + 上游许可证），
+# 按要求不入 git。部署时由用户从发布产物（.lfplugin / release zip）获取。
+/facefusion/
+/moneyprinter-turbo/
+/pixelle-video/
+/huobao-drama/
+
+# Python 缓存
+__pycache__/
+*.pyc
+# 插件运行数据（data/ 由框架或运行时生成）
+*/data/
+# node_modules（nodejs 插件依赖由平台 pnpm install 生成）
+*/node_modules/

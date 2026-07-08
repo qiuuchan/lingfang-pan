@@ -1,0 +1,12 @@
+{
+  "id": "videodl",
+  "name": "视频下载器",
+  "version": "0.1.1",
+  "description": "基于 videofetch + PySide6 的视频下载 GUI：粘贴链接→解析→选择→下载。支持 B站/抖音/YouTube/快手/小红书等 100+ 平台。HLS 源（B站/腾讯/爱奇艺等）需系统安装 FFmpeg（建议另装 N_m3u8DL-RE）。仅用于学习用途，请遵守各平台版权与会员规则。",
+  "runtime_type": "python",
+  "entry": "main.py",
+  "capabilities": [
+    { "kind": "ui.view", "reason": "展示下载器 GUI 窗口", "risk": "none", "requires_admin": false }
+  ],
+  "visibility": "tenant"
+}

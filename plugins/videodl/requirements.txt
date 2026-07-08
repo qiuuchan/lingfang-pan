@@ -1,0 +1,2 @@
+videofetch
+PySide6>=6.7

@@ -111,15 +111,24 @@ export function validateStagedCompleteness(
 
 /**
  * submitStagedPlugin：用户在预览面板点「提交到团队空间」时调用，真正上传发布。
+ *
+ * 后端 uploadPlugin 现在按 manifest.id 识别同插件：团队内已有同 id 插件 → 走升级（editPluginDraft
+ * in-place 更新，返回 upgraded:true）；否则新建；同 contentHash → 去重。
+ * 调用方据 upgraded 给「升级」/「已发布」不同提示。
+ *
+ * 返回 id（后端 plugin.id）：本地行「发布到市场」需要在 upload 后拿到 plugin.id 再调
+ * submit-marketplace，故从 res.plugin.id 透传出来（升级/去重路径同样有 plugin.id）。
  */
 export async function submitStagedPlugin(
   draft: StagedPlugin,
-): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; name: string; id?: string; upgraded?: boolean } | { ok: false; message: string }> {
   const prepared = withSyncedStagedManifest(draft);
   const err = validateStagedCompleteness(prepared.runtime_type, prepared.entry, prepared.files);
   if (err) return { ok: false, message: err };
   try {
-    await api('/api/plugins/upload', {
+    // 后端返回 { plugin, upgraded?, deduplicated? }：upgraded=true 表示升级覆盖了团队内同 id 插件。
+    // plugin.id 始终存在（uploadPlugin 无论新建/升级/去重都返回 publicPlugin(plugin, ...)）。
+    const res = await api<{ plugin: { id: string }; upgraded?: boolean; deduplicated?: boolean }>('/api/plugins/upload', {
       method: 'POST',
       body: {
         manifest: buildStagedManifest(prepared),
@@ -127,7 +136,7 @@ export async function submitStagedPlugin(
         priceCents: 0,
       },
     });
-    return { ok: true, name: prepared.name };
+    return { ok: true, name: prepared.name, id: res.plugin?.id, upgraded: res.upgraded === true };
   } catch (e) {
     return { ok: false, message: `提交失败：${(e as ApiError).message || String(e)}` };
   }

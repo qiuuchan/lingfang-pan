@@ -341,8 +341,9 @@ function PluginDetailSheet({
             {plugin.marketplace ? (
               <PluginDelistDialog plugin={plugin} busy={delistBusy} onConfirm={delistGuard} onRefresh={onRefresh} />
             ) : null}
-            {/* 审核通过/驳回：仅 PENDING 显示。后端 POST /api/admin/plugins/:id/approve|reject。 */}
-            {plugin.reviewStatus === 'PENDING' ? (
+            {/* 审核通过/驳回：PENDING（作者已提交审核）或 DRAFT（管理员可直接审核草稿，跳过作者提交）显示。
+                后端 POST /api/admin/plugins/:id/approve|reject 守卫已放宽支持 DRAFT/PENDING。 */}
+            {plugin.reviewStatus === 'PENDING' || plugin.reviewStatus === 'DRAFT' ? (
               <>
                 <Button
                   variant="default"

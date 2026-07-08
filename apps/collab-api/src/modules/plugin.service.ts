@@ -38,6 +38,21 @@ export class PluginService {
     });
     if (existing) return { plugin: publicPlugin(existing, membership.teamId), deduplicated: true };
 
+    // 同 manifest.id + 同团队 已存在 → 视为同插件的版本升级，委托 editPluginDraft 做 in-place 更新
+    // （含权限校验 + 版本校验 + 通知已安装用户）。manifest.id 由 normalizePluginPackage 规范化（trim）。
+    // 这让「上传 0.0.1 后再上传 0.0.2」覆盖同一插件行，而非创建无关联的新 UUID 行。
+    const manifestId = normalized.manifest.id;
+    if (manifestId) {
+      const sameLogical = await this.prisma.plugin.findFirst({
+        where: { teamId: membership.teamId, manifest: { path: ['id'], equals: manifestId } },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (sameLogical) {
+        const { plugin } = await this.editPluginDraft(userId, sameLogical.id, input);
+        return { plugin, upgraded: true };
+      }
+    }
+
     const plugin = await this.prisma.plugin.create({
       data: {
         name: normalized.manifest.name,

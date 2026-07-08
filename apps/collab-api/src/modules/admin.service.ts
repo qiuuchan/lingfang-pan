@@ -668,7 +668,9 @@ export class AdminService {
     await this.auth.ensurePlatformAdmin(actorId);
     const plugin = await this.prisma.plugin.findUnique({ where: { id } });
     if (!plugin) throw notFound('插件不存在');
-    if (plugin.reviewStatus !== 'PENDING') throw conflict('插件不在审核中');
+    // 允许管理员对草稿(DRAFT)或待审(PENDING)插件直接通过审核。
+    // DRAFT 场景：作者未主动提交市场审核时，管理员可在后台插件详情直接上架（跳过作者提交步骤）。
+    if (plugin.reviewStatus !== 'PENDING' && plugin.reviewStatus !== 'DRAFT') throw conflict('插件不在审核中且非草稿，无法直接审核');
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.plugin.update({
         where: { id },
@@ -725,7 +727,8 @@ export class AdminService {
     await this.auth.ensurePlatformAdmin(actorId);
     const plugin = await this.prisma.plugin.findUnique({ where: { id } });
     if (!plugin) throw notFound('插件不存在');
-    if (plugin.reviewStatus !== 'PENDING') throw conflict('插件不在审核中');
+    // 同 adminApprovePlugin：允许驳回 DRAFT/PENDING（管理员可对未提交审核的草稿打回并附原因）。
+    if (plugin.reviewStatus !== 'PENDING' && plugin.reviewStatus !== 'DRAFT') throw conflict('插件不在审核中且非草稿，无法驳回');
     const reviewReason = reason?.trim() || '未通过平台审核';
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.plugin.update({

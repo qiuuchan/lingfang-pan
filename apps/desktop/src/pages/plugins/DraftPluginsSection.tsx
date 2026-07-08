@@ -15,11 +15,13 @@ import {
   loadDraftPlugin,
   listDraftVersions,
   restoreDraftVersion,
-  exportDraftPlugin,
-  parseDraftBundle,
-  importDraftBundle,
   type DraftVersion,
 } from '@/lib/draft-plugin';
+import {
+  exportPluginToZip,
+  parsePluginZip,
+  materializeZipPlugin,
+} from '@/lib/plugin-package-zip';
 import { submitStagedPlugin, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { formatTimestamp } from '@/lib/time';
 
@@ -93,7 +95,12 @@ export function DraftPluginsSection({
         files: (fullDraft.files || []).map(f => ({ path: f.path, content: f.content })),
       });
       if (result.ok) {
-        toast.success(`插件「${draft.name}」已发布到团队`);
+        // upgraded=true：团队内已有同 manifest.id 插件，本次为版本升级覆盖。
+        if (result.upgraded) {
+          toast.success(`插件「${draft.name}」已升级到 v${draft.version}（团队内已有该插件，已覆盖旧版本）`);
+        } else {
+          toast.success(`插件「${draft.name}」已发布到团队`);
+        }
         onRefresh();
       } else {
         toast.error(result.message);
@@ -125,8 +132,9 @@ export function DraftPluginsSection({
   async function handleExport(draft: LoadedPlugin) {
     setExporting(draft.id);
     try {
-      await exportDraftPlugin(draft.id, new Date().toISOString());
-      toast.success(`草稿「${draft.name}」已导出`);
+      const { name, fileCount, skipped } = await exportPluginToZip(draft.id, 'draft');
+      const skipNote = skipped > 0 ? `，跳过 ${skipped} 个二进制文件` : '';
+      toast.success(`草稿「${name}」已导出（${fileCount} 个文件${skipNote}）`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -137,9 +145,14 @@ export function DraftPluginsSection({
   async function handleImport(file: File) {
     setImporting(true);
     try {
-      const bundle = await parseDraftBundle(file);
-      const name = await importDraftBundle(bundle);
-      toast.success(`草稿「${name}」已导入`);
+      const result = await parsePluginZip(file);
+      const existingIds = items.map((d) => d.id);
+      const { id, source } = await materializeZipPlugin(result, existingIds);
+      if (source === 'local') {
+        toast.success(`已导入「${result.name}」为本地插件（包标记为本地来源），可在「本地插件」查看`);
+      } else {
+        toast.success(`草稿「${result.name}」已导入`);
+      }
       onRefresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));

@@ -5,9 +5,13 @@ const now = new Date('2026-06-12T00:00:00.000Z');
 
 function createService(options: {
   existingPlugin?: unknown;
+  /** 同 manifest.id 匹配到的已有插件（uploadPlugin 升级路径用）；默认 null=无同 id 插件。 */
+  sameLogicalPlugin?: unknown;
   membershipRole?: 'MEMBER' | 'TEAM_ADMIN';
 } = {}) {
   const pluginFindUnique = vi.fn(async () => options.existingPlugin || null);
+  // findFirst：uploadPlugin 按 manifest.id 查同 id 插件（升级判定）。默认无。
+  const pluginFindFirst = vi.fn(async () => options.sameLogicalPlugin || null);
   const pluginCreate = vi.fn(async ({ data }) => ({
     id: 'plugin-1',
     ...data,
@@ -33,6 +37,7 @@ function createService(options: {
   const prisma = {
     plugin: {
       findUnique: pluginFindUnique,
+      findFirst: pluginFindFirst,
       create: pluginCreate,
       update: pluginUpdate,
     },
@@ -157,6 +162,43 @@ describe('CollabService plugin cloud sharing', () => {
       },
       files: validPackage.files,
     })).rejects.toMatchObject({ code: 'bad_request' });
+  });
+
+  it('同 manifest.id 不同版本 → 委托 editPluginDraft in-place 升级（upgraded:true，不新建）', async () => {
+    // 团队内已有 manifest.id='timer' v0.1.0（未上架 DRAFT）；上传同 id 的 v0.2.0。
+    const sameLogical = existingPluginRecord({ id: 'plugin-existing', version: '0.1.0' });
+    // existingPlugin 同时作 update mock 的基底（保证 createdAt/updatedAt 等 publicPlugin 需要的字段）。
+    const { service, prisma } = createService({ sameLogicalPlugin: sameLogical, existingPlugin: sameLogical });
+    // findUnique：第一次（contentHash 去重）返回 null；editPluginDraft 内两次（按 id→plugin、contentHash 重复→null）。
+    let findUniqueCalls = 0;
+    (prisma.plugin.findUnique as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      findUniqueCalls += 1;
+      // 第 1、3 次（contentHash 查询）返回 null；第 2 次（按 id）返回 sameLogical。
+      return findUniqueCalls === 2 ? sameLogical : null;
+    });
+
+    const upgradePackage = {
+      manifest: { ...validPackage.manifest, version: '0.2.0' },
+      files: [{ path: 'ui/index.html', content: '<div>v2</div>' }],
+    };
+    const result = await service.uploadPlugin('user-1', upgradePackage);
+
+    expect(result.upgraded).toBe(true);
+    // 委托 editPluginDraft → 走 update（不 create）。
+    expect(prisma.plugin.update).toHaveBeenCalled();
+    expect(prisma.plugin.create).not.toHaveBeenCalled();
+    // version 升级到 0.2.0。
+    expect(result.plugin.version).toBe('0.2.0');
+  });
+
+  it('无同 manifest.id → 全新创建（deduplicated:false, 无 upgraded）', async () => {
+    const { service, prisma } = createService(); // sameLogical 默认 null
+
+    const result = await service.uploadPlugin('user-1', validPackage);
+
+    expect(result.deduplicated).toBe(false);
+    expect(result.upgraded).toBeUndefined();
+    expect(prisma.plugin.create).toHaveBeenCalled();
   });
 });
 
