@@ -31,6 +31,10 @@ Implemented elsewhere (not in the Rust gateway, listed for completeness):
 
 Removed from the contract: `code-assistant.run` / `code-assistant.session` were vestiges of a deleted local AI CLI subsystem; AI capabilities route through the platform relay (`llm.chat`). They are no longer declarable.
 
+### OpenAI-Compatible Bridge Routes (no new capability kind)
+
+The host bridge (`plugin_llm_bridge.rs`) also serves OpenAI-compatible routes so third-party SDKs (openai-python, `@ai-sdk/openai`) can point `base_url` at `LINGFANG_PLUGIN_BRIDGE_URL` directly: `POST /v1/chat/completions` and `POST /v1/images/generations` pass the relay response through **unwrapped** (raw OpenAI shape), plus `GET /v1/models` for connectivity probing. These routes **reuse the existing `llm.chat` / `image.generate` capability gates** (`allow_llm_chat` / `allow_image_generate`) — no new `CapabilityKind` was added. The legacy SDK-shaped routes (`/llm/chat` → `{content}`, `/image/generate` → `{images}`) remain for `@lingfang/plugin-sdk`'s `invoke()`. Method dispatch is per-route: only `GET /v1/models` accepts GET; all others are POST-only.
+
 ## Path Scope
 
 `expand_path()` supports `$HOME`. `fs_read()` must canonicalize the requested path and each allowed prefix before checking `requested.starts_with(prefix)` as `PathBuf`s. String prefix checks are forbidden because `Documents2` and `Documents/../Secrets` can bypass them.

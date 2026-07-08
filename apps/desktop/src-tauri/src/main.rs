@@ -42,6 +42,40 @@ fn list_plugins(state: tauri::State<AppState>) -> Vec<LoadedPlugin> {
     state.plugins.clone()
 }
 
+/// 命令：启动内置脚本插件（builtin-plugins 下的 nodejs/python）。
+///
+/// 内置插件 id 允许 `builtin.xxx` 这种点号命名，不能直接复用 plugins_root 的
+/// plugin_id 白名单目录解析；这里用已加载插件表定位资源目录，再复用 plugin_runner
+/// 的按目录启动逻辑，避免把 main.py/index.js 当 HTML iframe 渲染。
+#[tauri::command]
+fn start_builtin_plugin(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    process_table: tauri::State<plugin_runner::PluginProcessTable>,
+    bridge: tauri::State<plugin_llm_bridge::PluginLlmBridge>,
+    plugin_id: String,
+    api_base: Option<String>,
+    auth_token: Option<String>,
+) -> Result<plugin_runner::StartPluginResult, String> {
+    let plugin = state
+        .plugins
+        .iter()
+        .find(|plugin| plugin.id == plugin_id)
+        .ok_or_else(|| format!("内置插件不存在: {plugin_id}"))?;
+    let plugin_dir = std::path::Path::new(&plugin.dir)
+        .canonicalize()
+        .map_err(|error| format!("内置插件目录不可用：{error}"))?;
+    plugin_runner::start_plugin_from_dir(
+        &app,
+        process_table.inner(),
+        bridge.inner(),
+        &plugin_id,
+        plugin_dir,
+        api_base,
+        auth_token,
+    )
+}
+
 /// 命令：插件网络请求（R5 net.fetch capability）。
 ///
 /// 内置可信插件经前端桥调用 sdk.net.fetch 时走此命令：从 Rust 进程发起 HTTP 请求，
@@ -275,6 +309,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             quit_app,
             list_plugins,
+            start_builtin_plugin,
             read_plugin_file,
             invoke_capability,
             plugin_net_fetch,

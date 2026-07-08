@@ -917,7 +917,29 @@ pub fn start_plugin(
     api_base: Option<String>,
     auth_token: Option<String>,
 ) -> Result<StartPluginResult, String> {
+    let plugin_dir = resolve_plugin_dir(&store, &plugin_id)?;
+    start_plugin_from_dir(
+        &app,
+        process_table.inner(),
+        bridge.inner(),
+        &plugin_id,
+        plugin_dir,
+        api_base,
+        auth_token,
+    )
+}
+
+pub(crate) fn start_plugin_from_dir(
+    app: &tauri::AppHandle,
+    process_table: &PluginProcessTable,
+    bridge: &PluginLlmBridge,
+    plugin_id: &str,
+    plugin_dir: PathBuf,
+    api_base: Option<String>,
+    auth_token: Option<String>,
+) -> Result<StartPluginResult, String> {
     use tauri::Emitter;
+    let plugin_id = plugin_id.to_string();
     // 阶段事件辅助：emit 失败不阻断启动（UI 无监听者或通道错误时静默降级为同步等待）。
     let emit_stage = |stage: &str, message: &str| {
         let _ = app.emit(
@@ -931,9 +953,8 @@ pub fn start_plugin(
     };
 
     emit_stage("checking", "正在检查插件运行环境…");
-    let plugin_dir = resolve_plugin_dir(&store, &plugin_id)?;
     let manifest = parse_manifest(&plugin_dir)?;
-    let runtime = RuntimeResolver::resolve(&app)?;
+    let runtime = RuntimeResolver::resolve(app)?;
 
     let (binary, args) = match manifest.runtime {
         PluginRuntimeKind::Python => {

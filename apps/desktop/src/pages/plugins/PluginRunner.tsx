@@ -8,8 +8,8 @@ import { ScriptPreviewPanel } from '@/components/plugins/ScriptPreviewPanel';
 import { PluginLaunchScreen } from '@/components/plugins/PluginLaunchScreen';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
-import { parseManifest } from '@/lib/plugin-draft';
 import type { ScriptRuntime } from '@/lib/plugin-script';
+import { resolvePluginRuntime } from '@/lib/plugin-runtime';
 import { dragRegionProps } from '@/lib/window-drag';
 import { openPluginInWindow } from '@/lib/plugin-window';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
@@ -28,7 +28,7 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
   const { setCurrentDraft, setView, setRunningPlugin, session, setPendingAutoFix } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type;
+  const runtime = resolvePluginRuntime(plugin);
   const document = usePluginDocument(plugin, runtime);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [scriptPreviewKey, setScriptPreviewKey] = useState(0);
@@ -76,7 +76,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
           id: plugin.id,
           name: plugin.name,
           version: plugin.version,
-          runtime_type: plugin.runtime_type,
+          runtime_type: runtime,
           entry: plugin.entry,
           description: plugin.description,
         }}
@@ -178,6 +178,7 @@ function ScriptRunner({
         pluginId={plugin.id}
         files={plugin.files || []}
         runtime={runtime}
+        builtin={plugin.source === 'builtin' || Boolean(plugin.builtin)}
         previewKey={previewKey}
         onRefresh={onRefresh}
         onRequestFix={onAutoFix}

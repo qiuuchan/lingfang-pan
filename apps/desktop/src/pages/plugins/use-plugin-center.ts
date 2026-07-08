@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import type { LoadedPlugin } from '@/lib/types';
-import { parseManifest } from '@/lib/plugin-draft';
 import { ensurePluginPackagePersisted } from '@/lib/plugin-installation';
+import { resolvePluginRuntime } from '@/lib/plugin-runtime';
 import {
   openPluginsRoot,
   readLocalPluginFile,
@@ -146,7 +146,7 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
   }, [setRunningPlugin]);
 
   const openTeamPlugin = useCallback(async (plugin: LoadedPlugin) => {
-    const runtime = plugin.runtime_type || parseManifest(plugin.files || []).runtime_type || 'client';
+    const runtime = resolvePluginRuntime(plugin);
     try {
       // 浏览器直连 Vite 时没有 Tauri 文件系统，不能写入本地插件目录；
       // 若后端已内联 files，可直接交给 PluginRunner 用 iframe 运行。
@@ -157,7 +157,7 @@ export function usePluginOpeners(setRunningPlugin: (plugin: LoadedPlugin) => voi
         toast.error('该插件尚未安装到本地，无法运行。请先点击「安装后运行」。');
         return;
       }
-      setRunningPlugin(plugin);
+      setRunningPlugin({ ...plugin, runtime_type: runtime });
     } catch (caught) {
       toast.error(errorMessage(caught));
     }
