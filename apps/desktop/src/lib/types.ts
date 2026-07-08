@@ -134,6 +134,12 @@ export interface DraftTurn {
 export interface DraftFile {
   path: string;
   content: string;
+  /**
+   * 是否为二进制文件。true 时 content 为 base64 编码的字节（.lfplugin v3 导入/导出路径用，
+   * 写盘走 write_plugin_file_bytes 命令）。默认 false（content 为 UTF-8 文本）。
+   * 可选字段，向后兼容旧消费者（默认当文本处理）。
+   */
+  binary?: boolean;
 }
 
 export interface DraftDiagnostic {

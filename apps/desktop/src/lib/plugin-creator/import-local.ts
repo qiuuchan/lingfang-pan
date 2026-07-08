@@ -9,12 +9,12 @@ import type { DraftFile } from '@/lib/types';
 
 const DEFAULT_CAPABILITY: PluginCapability = { kind: 'ui.view', reason: '展示插件界面', risk: 'low', requires_admin: false };
 
-// 后端单文件 256KB / 总 2MB / 最多 80 文件上限（plugin-package.ts）。前端导入时先按这些限制过滤+提示。
-const MAX_FILES = 80;
-const MAX_FILE_BYTES = 256 * 1024;
-const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
+// 与后端 plugin-package.ts 上传限制一致（v3 起支持 vendored 大包 + 二进制）。
+const MAX_FILES = 300;
+const MAX_FILE_BYTES = 60 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 300 * 1024 * 1024;
 
-// 文本文件扩展名白名单：插件源码均为文本。二进制（图片/字体等）用 file.text() 会乱码且撑爆体积，导入时跳过。
+// 文本文件扩展名白名单：白名单内走 file.text()（UTF-8）；其余按二进制处理（arrayBuffer → base64）。
 const TEXT_EXTENSIONS = new Set([
   'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'json', 'jsonc',
   'py', 'pyi', 'txt', 'md', 'markdown', 'yml', 'yaml', 'toml', 'ini', 'cfg',
@@ -25,6 +25,17 @@ function isTextPath(path: string): boolean {
   const dot = path.lastIndexOf('.');
   if (dot < 0) return true; // 无扩展名（如 Dockerfile、LICENSE）按文本处理。
   return TEXT_EXTENSIONS.has(path.slice(dot + 1).toLowerCase());
+}
+
+/** ArrayBuffer → 标准 base64 字符串（无换行），供 writePluginFileBytes 写盘。 */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000; // 避免超大数组 callstack 溢出，分块拼接。
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
 
 /** 从浏览器 File 列表读取文本文件，归一为 {path, content}[]（path 去掉顶层目录名）。 */
@@ -56,13 +67,19 @@ export async function readLocalFiles(fileList: FileList | File[]): Promise<Impor
     const path = checked.value;
     // 跳过常见无关目录（依赖/版本控制/venv），避免把 node_modules 等整个塞进来。
     if (/(^|\/)(node_modules|\.git|\.venv|__pycache__|dist|build)\//.test(`/${path}`)) continue;
-    if (!isTextPath(path)) { skipped.push(`${path}（二进制，已跳过）`); continue; }
-    if (file.size > MAX_FILE_BYTES) { skipped.push(`${path}（超 256KB，已跳过）`); continue; }
-    if (files.length >= MAX_FILES) { skipped.push(`${path}（超 80 文件上限）`); continue; }
-    if (totalBytes + file.size > MAX_TOTAL_BYTES) { skipped.push(`${path}（超 2MB 总量上限）`); continue; }
-    const content = await file.text();
-    totalBytes += file.size;
-    files.push({ path, content });
+    if (file.size > MAX_FILE_BYTES) { skipped.push(`${path}（超 ${MAX_FILE_BYTES / 1024 / 1024}MiB，已跳过）`); continue; }
+    if (files.length >= MAX_FILES) { skipped.push(`${path}（超 ${MAX_FILES} 文件上限）`); continue; }
+    if (totalBytes + file.size > MAX_TOTAL_BYTES) { skipped.push(`${path}（超 ${MAX_TOTAL_BYTES / 1024 / 1024}MiB 总量上限）`); continue; }
+    if (isTextPath(path)) {
+      const content = await file.text();
+      totalBytes += file.size;
+      files.push({ path, content });
+    } else {
+      // 二进制文件：读 arrayBuffer → base64，标 binary:true（写盘走 writePluginFileBytes）。
+      const b64 = arrayBufferToBase64(await file.arrayBuffer());
+      totalBytes += file.size;
+      files.push({ path, content: b64, binary: true });
+    }
   }
 
   return { files, skipped, rootName };

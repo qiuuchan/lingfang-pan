@@ -378,34 +378,7 @@ impl PluginStore {
     pub fn write_files(&self, plugin_id: &str, files: &[(String, String)]) -> Result<(), String> {
         let base = self.ensure_plugin_dir(plugin_id)?;
         for (path, content) in files {
-            // path 白名单：拒绝对路径穿越（与 read 的 canonicalize+starts_with 同语义，但写时文件不存在，
-            // 改为校验 path 段不含 .. + 绝对路径，再 join 后规范化父目录校验）。
-            if path.is_empty() {
-                return Err(format!("非法文件路径：{path}"));
-            }
-            let p = std::path::Path::new(path);
-            // 绝对路径（Windows 盘符 C:\ 或 Unix /）一律拒。
-            if p.is_absolute()
-                || path.starts_with('/')
-                || path.starts_with('\\')
-                || path.contains(':')
-            {
-                return Err(format!("非法文件路径（绝对路径）：{path}"));
-            }
-            // 段级校验：任一段为 .. 视为穿越。
-            if p.components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
-                return Err(format!("非法文件路径（含 ..）：{path}"));
-            }
-            let target = base.join(p);
-            // 校验规范化后仍在 base 内（防符号链接等绕过）。
-            let parent = target.parent().unwrap_or(std::path::Path::new(""));
-            if let Ok(parent_canon) = parent.canonicalize() {
-                if !parent_canon.starts_with(&base) {
-                    return Err(format!("非法文件路径（越出插件目录）：{path}"));
-                }
-            }
+            let target = self.resolve_write_target(&base, path)?;
             // 创建子目录（如 ui/）。
             if let Some(parent_dir) = target.parent() {
                 fs::create_dir_all(parent_dir).map_err(|e| format!("创建文件目录失败：{e}"))?;
@@ -413,6 +386,78 @@ impl PluginStore {
             fs::write(&target, content).map_err(|e| format!("写入文件失败（{path}）：{e}"))?;
         }
         Ok(())
+    }
+
+    /// 写单个文件的**字节**（二进制文件，如字体/图片/音频）。
+    /// 与 write_files 同款 path 白名单，仅 content 是 &[u8] 而非 &str。
+    /// .lfplugin v3 导入路径：二进制文件经前端 base64 解码后走此方法（见 write_plugin_file_bytes 命令）。
+    pub fn write_file_bytes(&self, plugin_id: &str, path: &str, bytes: &[u8]) -> Result<(), String> {
+        let base = self.ensure_plugin_dir(plugin_id)?;
+        let target = self.resolve_write_target(&base, path)?;
+        if let Some(parent_dir) = target.parent() {
+            fs::create_dir_all(parent_dir).map_err(|e| format!("创建文件目录失败：{e}"))?;
+        }
+        fs::write(&target, bytes).map_err(|e| format!("写入文件失败（{path}）：{e}"))?;
+        Ok(())
+    }
+
+    /// 读取插件目录下指定文件的**字节**（base64 编码返回），对称于 read_plugin_file。
+    /// 用于 .lfplugin 导出：二进制文件需读真实字节而非占位标记。
+    pub fn read_plugin_file_bytes(&self, plugin_id: &str, file: &str) -> Result<String, String> {
+        let file = file.trim();
+        if file.is_empty() {
+            return Err("文件路径不能为空".to_string());
+        }
+        let dir = self.plugin_dir(plugin_id)?;
+        let base = dir
+            .canonicalize()
+            .map_err(|e| format!("插件目录不存在：{e}"))?;
+        let target = base
+            .join(file)
+            .canonicalize()
+            .map_err(|e| format!("文件不存在：{e}"))?;
+        if !target.starts_with(&base) {
+            return Err("非法文件路径".to_string());
+        }
+        if target.is_dir() {
+            return Err(format!("目标不是文件：{file}"));
+        }
+        let bytes = fs::read(&target).map_err(|e| format!("读取文件失败：{e}"))?;
+        // base64 标准编码（无换行），前端用 atob / base64 解码。
+        use base64::{engine::general_purpose, Engine as _};
+        Ok(general_purpose::STANDARD.encode(&bytes))
+    }
+
+    /// 解析写操作的合法目标路径（write_files / write_file_bytes 共用）。
+    /// path 白名单：拒空、绝对路径、含 `..`、越出插件目录（防穿越与符号链接绕过）。
+    fn resolve_write_target(
+        &self,
+        base: &std::path::Path,
+        path: &str,
+    ) -> Result<std::path::PathBuf, String> {
+        if path.is_empty() {
+            return Err(format!("非法文件路径：{path}"));
+        }
+        let p = std::path::Path::new(path);
+        // 绝对路径（Windows 盘符 C:\ 或 Unix /）一律拒。
+        if p.is_absolute() || path.starts_with('/') || path.starts_with('\\') || path.contains(':') {
+            return Err(format!("非法文件路径（绝对路径）：{path}"));
+        }
+        // 段级校验：任一段为 .. 视为穿越。
+        if p.components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(format!("非法文件路径（含 ..）：{path}"));
+        }
+        let target = base.join(p);
+        // 校验规范化后仍在 base 内（防符号链接等绕过）。
+        let parent = target.parent().unwrap_or(std::path::Path::new(""));
+        if let Ok(parent_canon) = parent.canonicalize() {
+            if !parent_canon.starts_with(base) {
+                return Err(format!("非法文件路径（越出插件目录）：{path}"));
+            }
+        }
+        Ok(target)
     }
 
     /// 删除插件目录下的单个文件（delete_plugin_file 命令底层）。
@@ -925,6 +970,17 @@ pub fn read_local_plugin_file(
     state.read_plugin_file(&plugin_id, &file)
 }
 
+/// 命令：读取本地插件文件的**字节**（base64 编码返回），对称于 read_local_plugin_file。
+/// .lfplugin v3 导出路径用：二进制文件（字体/图片/音频）需读真实字节而非占位标记。
+#[tauri::command]
+pub fn read_local_plugin_file_bytes(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    file: String,
+) -> Result<String, String> {
+    state.read_plugin_file_bytes(&plugin_id, &file)
+}
+
 /// 单个文件入参（path 相对插件目录，content 文件内容）。
 #[derive(serde::Deserialize)]
 pub struct PluginFileInput {
@@ -942,6 +998,22 @@ pub fn write_plugin_files(
 ) -> Result<(), String> {
     let pairs: Vec<(String, String)> = files.into_iter().map(|f| (f.path, f.content)).collect();
     state.write_files(&plugin_id, &pairs)
+}
+
+/// 命令：写单个**二进制**文件到 plugins_root/<plugin_id>/（.lfplugin v3 导入路径用）。
+/// content_base64 为标准 base64 编码的字节，解码后走 write_file_bytes（与 write_files 同款 path 白名单）。
+#[tauri::command]
+pub fn write_plugin_file_bytes(
+    state: tauri::State<'_, PluginStore>,
+    plugin_id: String,
+    path: String,
+    content_base64: String,
+) -> Result<(), String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let bytes = general_purpose::STANDARD
+        .decode(content_base64.as_bytes())
+        .map_err(|e| format!("base64 解码失败（{path}）：{e}"))?;
+    state.write_file_bytes(&plugin_id, &path, &bytes)
 }
 
 /// 命令：列出插件目录下所有源文件相对路径（Agent 的 Glob/列文件树工具）。

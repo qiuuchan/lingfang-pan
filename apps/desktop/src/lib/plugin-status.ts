@@ -264,6 +264,15 @@ export function writePluginFiles(pluginId: string, files: { path: string; conten
 }
 
 /**
+ * 写单个**二进制**文件到 plugins_root/<pluginId>/（.lfplugin v3 导入路径用）。
+ * contentBase64 为标准 base64 编码的字节，Rust 侧 write_plugin_file_bytes 解码后写盘。
+ * path 白名单防穿越与 writePluginFiles 一致。幂等覆盖，自动建子目录。
+ */
+export function writePluginFileBytes(pluginId: string, path: string, contentBase64: string): Promise<void> {
+  return tauriInvoke<void>('write_plugin_file_bytes', { pluginId, path, contentBase64 });
+}
+
+/**
  * 删除插件目录下的单个文件。
  * path 白名单 + canonicalize 前缀断言防穿越（Rust 侧 delete_plugin_file）。
  * 文件不存在返回错误（让调用方感知）；不允许删除目录（目录级删除走 deletePlugin）。
@@ -330,6 +339,15 @@ export function setPluginsRoot(path: string): Promise<string> {
  */
 export function readLocalPluginFile(pluginId: string, file: string): Promise<string> {
   return tauriInvoke<string>('read_local_plugin_file', { pluginId, file });
+}
+
+/**
+ * 读取本地插件文件的**字节**（base64 编码返回），对称于 readLocalPluginFile。
+ * .lfplugin v3 导出路径用：二进制文件（字体/图片/音频）需读真实字节而非占位标记。
+ * 组A Rust 后端契约（read_local_plugin_file_bytes）。
+ */
+export function readLocalPluginFileBytes(pluginId: string, file: string): Promise<string> {
+  return tauriInvoke<string>('read_local_plugin_file_bytes', { pluginId, file });
 }
 
 /**
