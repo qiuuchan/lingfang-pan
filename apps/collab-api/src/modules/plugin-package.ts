@@ -48,8 +48,9 @@ export type NormalizedPluginPackage = {
 };
 
 // 上传限制（v3 起支持 vendored 大包 + 二进制）：
-// 文件数 300（vendored 树文件多）、单文件 60MiB（字体/音频可达 ~55M）、总 300MiB（MPT 完整 ~200M）。
-const MAX_PLUGIN_FILES = 300;
+// 文件数 1500（完整 vendored 上游源码树 + 模板/预览图可达上千文件，如 Pixelle-Video）、
+// 单文件 60MiB（字体/音频可达 ~55M）、总 300MiB（MPT 完整 ~200M）。
+const MAX_PLUGIN_FILES = 1500;
 const MAX_PLUGIN_FILE_BYTES = 60 * 1024 * 1024;
 const MAX_PLUGIN_TOTAL_BYTES = 300 * 1024 * 1024;
 
@@ -95,7 +96,7 @@ export function normalizePluginPackage(input: PluginPackageInput): NormalizedPlu
   const rawFiles = input.files;
   if (!manifest || typeof manifest !== 'object') throw badRequest('manifest 不能为空');
   if (!Array.isArray(rawFiles) || rawFiles.length === 0) throw badRequest('files 不能为空');
-  if (rawFiles.length > MAX_PLUGIN_FILES) throw badRequest('插件文件数量超限');
+  if (rawFiles.length > MAX_PLUGIN_FILES) throw badRequest('插件文件数量超限', { count: rawFiles.length, limit: MAX_PLUGIN_FILES });
 
   const name = cleanText(manifest.name, '插件名称不能为空');
   const version = cleanText(manifest.version || '0.1.0', '插件版本不能为空');
