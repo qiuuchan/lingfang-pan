@@ -1095,7 +1095,13 @@ impl PluginProcessTable {
     }
 
     /// 注册新启动的插件进程（若同 plugin_id 已有旧进程，先杀旧再覆盖，避免泄漏）。
-    fn register(&self, plugin_id: &str, child: Child, started_at: String) -> u32 {
+    /// 返回 Child 共享句柄的 Arc（供退出监视线程轮询 try_wait，不 take）。
+    pub(crate) fn register_with_handle(
+        &self,
+        plugin_id: &str,
+        child: Child,
+        started_at: String,
+    ) -> (u32, Arc<Mutex<Option<Child>>>) {
         let arc = Arc::new(Mutex::new(Some(child)));
         let pid = {
             let guard = arc.lock().unwrap_or_else(|p| p.into_inner());
@@ -1109,7 +1115,7 @@ impl PluginProcessTable {
                 let _ = old_child.wait();
             }
         }
-        pid
+        (pid, arc)
     }
 
     /// take 出插件进程（停止时用），返回 (Child, started_at) 或 None。
@@ -1179,6 +1185,16 @@ pub struct PluginOutput {
     pub plugin_id: String,
     pub stream: String,
     pub line: String,
+}
+
+/// 插件进程退出事件 payload（emit 到 `plugin:exited`，前端切到 exited 态保留日志面板）。
+/// rename_all=camelCase：同 PluginOutput，前端按 pluginId 过滤需驼峰。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginExited {
+    pub plugin_id: String,
+    pub exit_code: Option<i32>,
+    pub stderr_tail: String,
 }
 
 /// get_plugin_status 返回值（扩展契约，供前端判定 running/stopped 刷新）。
@@ -1663,13 +1679,92 @@ pub(crate) fn start_plugin_from_dir(
     }
     // 存活：reader 线程持续逐行 emit plugin:output（进程活着期间一直流），无需额外排空。
     let started_at = now_iso();
-    let pid = process_table.register(&plugin_id, child, started_at.clone());
+    let (pid, child_arc) = process_table.register_with_handle(&plugin_id, child, started_at.clone());
     log_launch(format!("启动成功：pid={pid}"));
     // 运行态仅存内存进程表（组A scan_plugin_status 经 process_table.is_running 合并判定 running，
     // 不落 DB——PRD 需求 2「状态不存 DB」，重启后所有插件从文件系统重判 ready）。
-    // 前端另有 2.5s 轮询 getPluginStatus 兜底：进程退出后 UI 自动回到 idle + toast 提示。
-    let _ = app; // app 不再用（退出监视线程已删），保留参数兼容签名。
+    // 退出监视线程：进程退出时 emit `plugin:exited` 事件（payload: pluginId, exitCode, stderrTail），
+    // 前端据此即时切到 exited 态（保留日志面板 + 进程信息），不依赖 2.5s 轮询兜底。
+    spawn_exit_watcher(app.clone(), &plugin_id, child_arc, std::sync::Arc::clone(&stderr_buf));
     Ok(StartPluginResult { pid, started_at })
+}
+
+/// 退出监视线程：轮询 try_wait 判定进程退出，退出时 emit `plugin:exited` 事件。
+///
+/// 不 take Child（避免与 stop_plugin 的 take 竞争——stop 仍能拿到 Child 调 kill）。
+/// 每 500ms try_wait 一次：返回 Some(status) = 退出；返回 None = 继续轮询；Arc 内 None = 已被
+/// stop_plugin take 走（前端已主动解绑监听，不会收到事件，无副作用）。
+///
+/// stderr_buf 是 reader 线程累积的全文，取尾部 ≤4000 字符作为 stderrTail 供前端展示。
+fn spawn_exit_watcher(
+    app: tauri::AppHandle,
+    plugin_id: &str,
+    child_arc: Arc<Mutex<Option<Child>>>,
+    stderr_buf: Arc<Mutex<String>>,
+) {
+    use tauri::Emitter;
+    let pid_str = plugin_id.to_string();
+    std::thread::spawn(move || {
+        // 轮询 try_wait（不 take，stop_plugin 仍能 take+kill）。
+        // 上限 24h 防泄漏（极端：进程永不退出 + 用户不关 app）。
+        let max_iters = 24 * 3600 * 2; // 500ms × 2 × 3600 × 24
+        let mut exit_code: Option<i32> = None;
+        let mut exited = false;
+        for _ in 0..max_iters {
+            std::thread::sleep(Duration::from_millis(500));
+            let mut guard = child_arc.lock().unwrap_or_else(|p| p.into_inner());
+            match guard.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        exit_code = status.code();
+                        exited = true;
+                        // 不 take（让 process_table.is_running 的下次调用清表回收，
+                        // 或 stop_plugin 的 take 拿到已退出的 Child 做 wait 回收）。
+                        break;
+                    }
+                    Ok(None) => { /* 仍在运行，继续轮询 */ }
+                    Err(_) => {
+                        exited = true;
+                        break;
+                    }
+                },
+                None => {
+                    // Arc 内 None = 已被 stop_plugin take 走（用户主动停止）。
+                    // 前端 handleStop 已解绑 plugin:exited 监听，不会收到事件，直接退出。
+                    return;
+                }
+            }
+        }
+        if !exited {
+            return; // 24h 超时，防泄漏兜底退出。
+        }
+        // 读 stderr 尾部（≤4000 字符），供前端展示。
+        let stderr_tail = stderr_buf
+            .lock()
+            .map(|b| {
+                let s = b.as_str();
+                if s.chars().count() <= 4000 {
+                    s.to_string()
+                } else {
+                    s.chars()
+                        .rev()
+                        .take(4000)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect()
+                }
+            })
+            .unwrap_or_default();
+        let _ = app.emit(
+            "plugin:exited",
+            PluginExited {
+                plugin_id: pid_str,
+                exit_code,
+                stderr_tail,
+            },
+        );
+    });
 }
 
 /// spawn 后短等待判定进程是否秒退（崩溃）。

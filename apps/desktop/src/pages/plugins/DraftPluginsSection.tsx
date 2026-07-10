@@ -23,6 +23,8 @@ import {
   materializeZipPlugin,
 } from '@/lib/plugin-package-zip';
 import { submitStagedPlugin, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import type { UploadProgress } from '@/lib/plugin-upload';
+import { UploadProgressDialog, type UploadStage } from '@/components/plugins/UploadProgressDialog';
 import { formatTimestamp } from '@/lib/time';
 
 export function DraftPluginsSection({
@@ -47,6 +49,12 @@ export function DraftPluginsSection({
   const [importing, setImporting] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState<string | null>(null);
   const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
+  // 上传进度弹窗状态。
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage>('reading');
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | undefined>(undefined);
+  const [uploadPluginName, setUploadPluginName] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
   // 待确认动作（删除草稿 / 回退版本）。用 shadcn 风格对话框替代原生 window.confirm。
   const [pendingConfirm, setPendingConfirm] = useState<
@@ -76,6 +84,11 @@ export function DraftPluginsSection({
 
   async function handlePublish(draft: LoadedPlugin) {
     setPublishing(draft.id);
+    setUploadPluginName(draft.name);
+    setUploadStage('reading');
+    setUploadOpen(true);
+    setUploadError(undefined);
+    setUploadProgress(null);
     try {
       const fullDraft = await loadDraftPlugin(draft.id);
       // load_draft_plugin 返回的对象把 manifest 字段平铺到顶层（含 capabilities/visibility）。
@@ -83,6 +96,7 @@ export function DraftPluginsSection({
         capabilities?: StagedPlugin['capabilities'];
         visibility?: StagedPlugin['visibility'];
       };
+      setUploadStage('uploading');
       const result = await submitStagedPlugin({
         id: fullDraft.id,
         name: fullDraft.name,
@@ -93,8 +107,9 @@ export function DraftPluginsSection({
         visibility: raw.visibility ?? 'private',
         runtime_type: (fullDraft.runtime_type as StagedPlugin['runtime_type']) || 'client',
         files: (fullDraft.files || []).map(f => ({ path: f.path, content: f.content })),
-      });
+      }, (info) => setUploadProgress({ ...info }));
       if (result.ok) {
+        setUploadStage('done');
         // upgraded=true：团队内已有同 manifest.id 插件，本次为版本升级覆盖。
         if (result.upgraded) {
           toast.success(`插件「${draft.name}」已升级到 v${draft.version}（团队内已有该插件，已覆盖旧版本）`);
@@ -103,10 +118,15 @@ export function DraftPluginsSection({
         }
         onRefresh();
       } else {
+        setUploadStage('error');
+        setUploadError(result.message);
         toast.error(result.message);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadStage('error');
+      setUploadError(msg);
+      toast.error(msg);
     } finally {
       setPublishing(null);
     }
@@ -299,6 +319,14 @@ export function DraftPluginsSection({
         confirmText={pendingConfirm?.kind === 'restore' ? '回退' : '删除'}
         destructive={pendingConfirm?.kind === 'delete'}
         onConfirm={runPendingConfirm}
+      />
+      <UploadProgressDialog
+        open={uploadOpen}
+        stage={uploadStage}
+        progress={uploadProgress}
+        pluginName={uploadPluginName}
+        errorMessage={uploadError}
+        onClose={() => setUploadOpen(false)}
       />
     </div>
   );

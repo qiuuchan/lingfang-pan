@@ -17,6 +17,7 @@ mod plugin_shell;
 mod plugin_store;
 mod plugins;
 mod update;
+mod upload;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -341,6 +342,7 @@ fn main() {
             draft_plugin::migrate_drafts_to_root,
             update::check_update,
             update::download_update,
+            upload::upload_plugin,
             plugin_security::verify_plugin_signature_command,
             plugin_security::check_plugin_recall_command
         ])

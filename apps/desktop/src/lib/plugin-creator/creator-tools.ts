@@ -4,6 +4,7 @@
 // 本文件只保留 UI/提交/校验可复用的无框架工具函数，避免再次引入 ai tool() 双轨。
 import type { PluginCapability } from '@lingfang/contract';
 import { api, type ApiError } from '@/lib/api';
+import { uploadPlugin, type UploadProgress } from '@/lib/plugin-upload';
 import type { DraftFile } from '@/lib/types';
 
 /** 暂存的插件草稿：AI 生成的 manifest 字段 + 全部文件。供前端预览/编辑/提交。 */
@@ -121,20 +122,32 @@ export function validateStagedCompleteness(
  */
 export async function submitStagedPlugin(
   draft: StagedPlugin,
+  onProgress?: (info: UploadProgress) => void,
 ): Promise<{ ok: true; name: string; id?: string; upgraded?: boolean } | { ok: false; message: string }> {
   const prepared = withSyncedStagedManifest(draft);
   const err = validateStagedCompleteness(prepared.runtime_type, prepared.entry, prepared.files);
   if (err) return { ok: false, message: err };
   try {
+    const manifest = buildStagedManifest(prepared);
+    // 有 onProgress 时走 Rust upload_plugin（Channel 进度推送），无时走 fetch api()（小插件快路径）。
+    if (onProgress) {
+      const res = await uploadPlugin(
+        { manifest, files: prepared.files, priceCents: 0 },
+        onProgress,
+      );
+      return { ok: true, name: prepared.name, id: res.plugin?.id, upgraded: res.upgraded === true };
+    }
     // 后端返回 { plugin, upgraded?, deduplicated? }：upgraded=true 表示升级覆盖了团队内同 id 插件。
     // plugin.id 始终存在（uploadPlugin 无论新建/升级/去重都返回 publicPlugin(plugin, ...)）。
+    // 大插件（含 vendor/ 内嵌上游源码）JSON payload 可达数 MB，默认 30s 超时可能不够，放宽到 120s。
     const res = await api<{ plugin: { id: string }; upgraded?: boolean; deduplicated?: boolean }>('/api/plugins/upload', {
       method: 'POST',
       body: {
-        manifest: buildStagedManifest(prepared),
+        manifest,
         files: prepared.files,
         priceCents: 0,
       },
+      timeoutMs: 120_000,
     });
     return { ok: true, name: prepared.name, id: res.plugin?.id, upgraded: res.upgraded === true };
   } catch (e) {

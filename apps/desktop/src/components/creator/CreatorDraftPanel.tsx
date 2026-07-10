@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { buildStagedManifest, submitStagedPlugin, validateStagedCompleteness, withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import type { UploadProgress } from '@/lib/plugin-upload';
+import { UploadProgressDialog, type UploadStage } from '@/components/plugins/UploadProgressDialog';
 import { validatePluginStructure } from '@/lib/plugin-draft/manifest';
 import { saveDraftPlugin } from '@/lib/draft-plugin';
 import { cn } from '@/lib/utils';
@@ -50,6 +52,11 @@ export function CreatorDraftPanel({
   const [publishingTeam, setPublishingTeam] = useState(false);
   const [infoOpen, setInfoOpen] = useState(true);
   const [filesOpen, setFilesOpen] = useState(true);
+  // 上传进度弹窗状态。
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage>('uploading');
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | undefined>(undefined);
 
   const preparedDraft = useMemo(() => withSyncedStagedManifest(draft), [draft]);
   const entryMissing = !preparedDraft.files.some((f) => f.path === preparedDraft.entry);
@@ -81,15 +88,25 @@ export function CreatorDraftPanel({
   async function handleSubmitToTeam() {
     if (!validateDraftReady()) return;
     setPublishingTeam(true);
+    setUploadOpen(true);
+    setUploadStage('uploading');
+    setUploadProgress(null);
+    setUploadError(undefined);
     try {
-      const result = await submitStagedPlugin(preparedDraft);
+      const result = await submitStagedPlugin(preparedDraft, (info) => setUploadProgress({ ...info }));
       if (result.ok) {
+        setUploadStage('done');
         toast.success(`插件「${result.name}」已提交到团队空间`);
       } else {
+        setUploadStage('error');
+        setUploadError(result.message);
         toast.error(result.message);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadStage('error');
+      setUploadError(msg);
+      toast.error(msg);
     } finally {
       setPublishingTeam(false);
     }
@@ -311,6 +328,14 @@ export function CreatorDraftPanel({
           </p>
         </div>
       </div>
+      <UploadProgressDialog
+        open={uploadOpen}
+        stage={uploadStage}
+        progress={uploadProgress}
+        pluginName={draft.name}
+        errorMessage={uploadError}
+        onClose={() => setUploadOpen(false)}
+      />
     </aside>
   );
 }
