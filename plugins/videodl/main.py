@@ -47,6 +47,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# 同目录模块：从分享文案里抠出干净 URL，再交给 videofetch 解析。
+# 用户从 App 分享面板复制的文字常含 emoji/中文/标点，直接丢给 videofetch 会
+# 干扰 host 判定甚至触发上游 NoneType 崩溃；先提取纯 URL 大幅提升稳健性。
+from url_extractor import extract_first_url
+
 # 默认下载目录：插件相对路径 data/downloads（框架 ensure_plugin_dir 已创建 data/）。
 # cwd = 插件目录，故相对路径 data/downloads 落在插件持久化目录下。
 DEFAULT_DOWNLOAD_DIR = os.path.join("data", "downloads")
@@ -101,6 +106,50 @@ def resolve_download_dir(chosen: str) -> str:
     return target
 
 
+# === videofetch 上游补丁 ======================================================
+
+# 补丁是否已打（幂等，进程内只打一次）。
+_videodl_patched = False
+
+
+def import_videodl():
+    """import videofetch（import 名为 videodl）并打上游补丁，返回 videodl 模块。
+
+    延迟 import：首次才触发 videofetch 较重的模块初始化，且便于 import 失败时给出
+    友好提示而非启动即崩。
+
+    上游 bug（videodl.modules.grabber.WebMediaGrabber.isprobablydirectmedia）：
+    BaseVideoClient.get 在 max_retries 次重试全部失败时返回 None（而非抛异常），原方法
+    直接在 None 上调 .raise_for_status()，抛 AttributeError——它不是 requests.
+    RequestException，未被该方法的 except 捕获，从而让 VideoClient.parsefromurl 整体
+    崩溃。表现：解析任意「探测失败」的链接（如小红书短链 xhslink.com）时直接
+    AttributeError 退出，连后续的平台专用客户端（RednoteVideoClient）都没机会跑。
+
+    修复：在外层兜底，把逃逸的 AttributeError 视作「不是直链」返回 (False, None)，
+    让解析流程继续走平台专用 / 通用解析器，而非整体崩溃。补丁幂等，只打一次。
+    """
+    global _videodl_patched
+    from videodl import videodl
+    if not _videodl_patched:
+        # WebMediaGrabber 已在 videodl/videodl.py 顶层 re-export，直接取用，
+        # 保证与 VideoClient.web_media_grabber 是同一个类对象。
+        grabber_cls = getattr(videodl, "WebMediaGrabber", None)
+        if grabber_cls is not None:
+            _orig_isprobablydirectmedia = grabber_cls.isprobablydirectmedia
+
+            def _safe_isprobablydirectmedia(self, url, request_overrides=None):
+                try:
+                    return _orig_isprobablydirectmedia(self, url, request_overrides)
+                except AttributeError:
+                    # self.get() 重试耗尽返回 None 时，原方法在 None 上调
+                    # raise_for_status 抛 AttributeError；兜底为「非直链」让解析继续。
+                    return (False, None)
+
+            grabber_cls.isprobablydirectmedia = _safe_isprobablydirectmedia
+        _videodl_patched = True
+    return videodl
+
+
 # === 后台线程：解析与下载（避免阻塞 Qt 事件循环）===============================
 
 
@@ -120,9 +169,8 @@ class ParseWorker(QThread):
 
     def run(self):  # noqa: D401 - QThread 入口
         try:
-            # 延迟 import：首次会触发 videofetch 较重的模块初始化，且便于在 import 失败时
-            # 给出友好提示而非启动即崩。
-            from videodl import videodl
+            # import videofetch 并打上游补丁（见 import_videodl），补丁幂等只打一次。
+            videodl = import_videodl()
 
             # videofetch 的 VideoClient.__init__ 有 bug：默认参数 allowed_video_sources=None，
             # 而 `set(None)` 会抛 TypeError。空列表会走 `if not allowed_video_sources` 分支
@@ -155,7 +203,8 @@ class DownloadWorker(QThread):
 
     def run(self):  # noqa: D401 - QThread 入口
         try:
-            from videodl import videodl
+            # import videofetch 并打上游补丁（见 import_videodl），补丁幂等只打一次。
+            videodl = import_videodl()
 
             # 同 ParseWorker：传 [] 绕过 videofetch 的 VideoClient.__init__ 的 set(None) 崩溃，
             # 并等价于「使用全部支持的平台」。
@@ -211,7 +260,7 @@ class VideoDownloaderWindow(QMainWindow):
         url_row = QHBoxLayout()
         url_label = QLabel("视频链接：")
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("粘贴 B站 / 抖音 / YouTube / 小红书 等视频链接")
+        self.url_input.setPlaceholderText("粘贴链接或分享文案（自动提取其中的 URL）")
         self.url_input.returnPressed.connect(self._on_parse)
         self.parse_btn = QPushButton("解析")
         self.parse_btn.setObjectName("primary")
@@ -265,9 +314,15 @@ class VideoDownloaderWindow(QMainWindow):
 
     # --- 解析 ---
     def _on_parse(self):
-        url = self.url_input.text().strip()
-        if not url:
+        raw = self.url_input.text().strip()
+        if not raw:
             QMessageBox.warning(self, "提示", "请先粘贴视频链接。")
+            return
+        # 从「脏文本」里抠出第一个干净 URL（处理分享面板文案：emoji/中文/标点 +
+        # 短链）。若已是纯 URL 则原样返回，无副作用。
+        url = extract_first_url(raw)
+        if not url:
+            QMessageBox.warning(self, "提示", "未在输入中识别到有效的 http(s) 链接。")
             return
         # 复用解析期间禁用按钮，防止并发触发多个 worker。
         self.parse_btn.setEnabled(False)
@@ -275,6 +330,9 @@ class VideoDownloaderWindow(QMainWindow):
         self.download_btn.setEnabled(False)
         self.result_list.clear()
         self._infos = []
+        # 若用户粘的是脏文本（抠出的 URL 与原文本不同），提示已提取，便于排查。
+        if url != raw:
+            self._log(f"已从输入文本提取链接：{url}")
         self._log(f"正在解析：{url}")
 
         self._parse_worker = ParseWorker(url)
