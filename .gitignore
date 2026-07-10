@@ -10,6 +10,16 @@ dist/
 apps/desktop/src-tauri/target/
 release/
 
+# 大体积运行时二进制 / 第三方 .lfplugin（不入仓，超过 Gitee 100MB 单文件限制）
+# 这些文件是本地构建/分发产物，需单独传输：
+#   - FFmpeg 运行时：构建时 tauri.conf.json resources 从 ../runtimes 打包进安装包
+#   - opencode.exe：本地代码助手二进制
+#   - 大型第三方插件包：单独分发，不纳入版本控制
+apps/desktop/runtimes/ffmpeg/ffmpeg.exe
+apps/desktop/runtimes/ffmpeg/ffprobe.exe
+apps/desktop/opencode/bin/opencode.exe
+plugins/moneyprinter-turbo.lfplugin
+
 # 后端运行时上传目录（admin 发布管理上传的安装包，运行时产物不入仓）。
 # 生产持久化：docker-compose.collab.yml 挂 collab_downloads volume → /app/apps/collab-api/downloads
 apps/collab-api/downloads/
