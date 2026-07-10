@@ -101,8 +101,8 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 
 #### 3. Contracts
 - Python/Node runtimes are application resources under Tauri `bundle.resources` target `runtimes`.
-- Windows layout: `runtimes/python/python.exe`, `runtimes/python/Scripts/pip.exe`, `runtimes/nodejs/node.exe`, `runtimes/nodejs/npm.cmd|npm.exe|npm`, `runtimes/nodejs/pnpm.cmd|pnpm.exe|pnpm`.
-- Unix layout: `runtimes/python/bin/python`, `runtimes/python/bin/pip`, `runtimes/nodejs/bin/node`, `runtimes/nodejs/bin/npm|pnpm`.
+- Windows layout: `runtimes/python/python.exe`, `runtimes/python/Scripts/pip.exe`, `runtimes/nodejs/node.exe`, `runtimes/nodejs/npm.cmd|npm.exe|npm`, `runtimes/nodejs/pnpm.cmd|pnpm.exe|pnpm`, `runtimes/ffmpeg/ffmpeg.exe`, `runtimes/ffmpeg/ffprobe.exe`.
+- Unix layout: `runtimes/python/bin/python`, `runtimes/python/bin/pip`, `runtimes/nodejs/bin/node`, `runtimes/nodejs/bin/npm|pnpm`, `runtimes/ffmpeg/bin/ffmpeg`.
 - `LINGFANG_EMBEDDED_RUNTIME_DIR` may override the runtime root for tests/dev diagnostics.
 - `probe_script_runtime` only probes embedded binaries and must never scan system `PATH`.
 - `run_plugin_script` preview execution uses only embedded Python/Node and injects the embedded runtime environment.
@@ -110,8 +110,9 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - `python_venv_dir(plugin_dir)` must return `<plugin_dir>/.venv` on non-Windows and `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>` on Windows; the hash is derived from the normalized plugin path so the same plugin reuses the same short venv.
 - Python venv creation must verify pip after `python -m venv`; if standard `venv`/`ensurepip` fails or leaves no pip, retry with embedded `python -m venv --without-pip` and bootstrap pip via embedded `python -m pip --python <venv-python> install --no-index --find-links <embedded-pip-wheel-dir> --upgrade pip`.
 - Embedded pip wheel discovery must prefer `runtimes/python/Lib/ensurepip/_bundled/pip-*.whl` and may fall back to `runtimes/python/pip-*.whl` for older packaged layouts; it must not download pip or use host Python.
-- `run_command` maps `python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, and `pnpm` to embedded runtime commands only. External absolute paths for those command names are rejected.
-- Embedded env replaces `PATH` with embedded runtime directories and injects China mirrors: `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`, `PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn`, `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`, `npm_config_registry=https://registry.npmmirror.com`.
+- `run_command` maps `python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, `pnpm`, and `ffmpeg` to embedded runtime commands only. External absolute paths for those command names are rejected.
+- **FFmpeg 作为第三内置运行时**（2026-07-09 新增）：`runtimes/ffmpeg/ffmpeg.exe` 进 PATH，插件 `shutil.which("ffmpeg")` 自动命中内置版本，无需宿主机安装。`RuntimeResolver` 有 `ffmpeg: Option<ResolvedRuntime>` 字段，`resolve_runtime_command("ffmpeg")` 返回绝对路径（给直接 spawn ffmpeg 的插件）。多数插件走 `shutil.which`（靠 `path_value()` 把 `runtimes/ffmpeg/` 加进 PATH），无需调 `resolve_runtime_command`。缺失时返回 None（不阻断启动，插件自行降级）。facefusion / videodl 等依赖 FFmpeg 的插件**零改动**即可用。
+- Embedded env replaces `PATH` with embedded runtime directories (node + node/bin + python + python/Scripts + python/bin + **ffmpeg**) + **Windows system directories (System32 / System32\Wbem / System32\WindowsPowerShell\v1.0)** and injects China mirrors: `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`, `PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn`, `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`, `npm_config_registry=https://registry.npmmirror.com`. **System32 必须保留**：python.exe/node.exe 启动加载依赖 DLL（VCRUNTIME、api-ms-win-* 等）需 System32 在 PATH；PS launcher 的 `cmd /c pause`、插件内 `shutil.which("ffmpeg")` 也需 System32。清空宿主 PATH 是安全边界，但 System32 是 OS 基础设施，不可省（2026-07-09 修复 facefusion「进程未输出任何内容」秒退根因）。
 
 #### 4. Validation & Error Matrix
 - missing `runtimes/python` -> Python probe returns `available=false` with packaging hint; Python preview/start fail with embedded-runtime guidance.
@@ -542,6 +543,76 @@ Reference files:
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`plugin_crashed:` catch + 「让 AI 修复」按钮）
 - `apps/desktop/src/App.tsx`（`pendingAutoFixPrompt` 跨页 state）
 - `apps/desktop/src/pages/Plugins.tsx`（`handleAutoFix`）+ `PluginCreatorHome.tsx`（effect 自动 send）
+
+## 插件进程启动：直接 spawn + stderr piped（2026-07-09，PS launcher 方案已回退）
+
+**当前实现**（跨平台统一）：`start_plugin_from_dir` 直接 spawn 入口进程（python/node），`stdin=null`、`stdout=Stdio::piped()`、`stderr=Stdio::piped()`（**两者都 piped 逐行流**），800ms 秒退判定 try_wait 判退出 + 从 stderr 缓冲读全文做崩溃诊断。Unix 用 `setsid` 进程组分离，Windows 用 `CREATE_NEW_PROCESS_GROUP`（不加 `CREATE_NEW_CONSOLE`，不弹 cmd 窗口）。
+
+### 全阶段输出实时流 `plugin:output`（2026-07-09 新增）
+**推翻 PRD 需求 5/9「不在 UI 内嵌终端」**：现在全阶段（venv 创建 / pip install / python 运行）的 stdout+stderr 逐行实时流到 app 内日志面板。
+- `plugin:output` 事件 payload：`{ plugin_id, stream: "stdout"|"stderr", line }`，逐行 emit。
+- **命名陷阱（2026-07-09 实测修复）**：`PluginOutput` / `PluginStartProgress` struct **必须** `#[serde(rename_all = "camelCase")]`。Tauri `emit` 的事件 payload 不像命令返回值那样自动转驼峰，seria 默认是 snake_case（`plugin_id`）；而前端按 `event.payload.pluginId === pluginId` 过滤。漏加会导致前端 onOutput/onProgress 回调因字段恒 undefined 而全部静默失效——面板永远显示「（等待输出…）」。
+- **流式运行函数** `run_streamed_with_env(binary, args, cwd, timeout, env, on_line)`（`process_util/capture.rs`）：spawn stdout+stderr piped，开两个后台线程逐行读，每行调 `on_line(line, is_stderr)` 回调（调用方据此 emit plugin:output）；主线程 try_wait 轮询 + 超时 kill；返回 CapturedOutput 供错误诊断。
+- **StreamCtx**（`plugin_runner.rs`）：携带 `app: AppHandle` + `plugin_id`，`make_line_callback()` 返回 emit plugin:output 的闭包。持久化运行传 Some，创建期预览传 None（不流式）。
+- **run_with_optional_stream**：Some(ctx) → 流式；None → 静默捕获（run_capture_with_env）。
+- venv/pip/node/playwright 各阶段（create_python_venv / install_and_smoke / smoke_test_venv / ensure_node_dependencies / ensure_playwright_browsers）都接收 `stream: Option<&StreamCtx>`，Some 时输出实时流到前端。
+- **spawn 入口进程**：stdout+stderr 各开一个 reader 线程逐行 emit；stderr 同时累积到共享缓冲（Arc<Mutex<String>>），供 800ms 秒退时读全文做崩溃诊断。
+- **PYTHONIOENCODING=utf-8**：spawn env 注入（Windows 中文系统默认 GBK，不设逐行读会乱码）。
+
+### 前端日志面板
+- `PluginLogPanel`（`components/plugins/PluginLogPanel.tsx`）：深色终端风格（`bg-[#0d1117] text-[#e6edf3] font-mono`），行缓冲 + 自动滚到底 + stderr 红色 + 复制按钮。
+- `useLogBuffer` hook：累积 `PluginOutputEvent[]` → `LogLine[]`。
+- `ScriptPreviewPanel` 在 starting/running/error 三阶段都渲染 `<PluginLogPanel>`（starting 看 pip install 进度，running 看应用日志，error 保留 traceback）。`handleStart` 传 `onOutput` 回调 + 存 `unlistenOutput`（停止/卸载时解绑）。
+- `startPlugin`/`startBuiltinPlugin` 增加可选 `onOutput?: (e: PluginOutputEvent) => void`，返回值含 `unlistenOutput`（进程活着期间持续流，startPlugin resolve 后仍保留监听）。
+
+**已回退的 PS launcher 方案**（曾尝试，已删除）：曾用 PowerShell launcher + `CREATE_NEW_CONSOLE` 弹独立 cmd 窗口 + `Tee-Object` 落 `.launcher.log` + 后台 `spawn_exit_watcher` 轮询退出 emit `plugin:exited`。但故障面太多（stdio 继承空 stdin 致 PS Read-Host EOF 秒退、Tee-Object 默认 UTF-16LE 致 read 乱码、verbatim 路径致 PS 解析异常），远程排查不动，回退到最简单的直接 spawn + stderr piped。已删除：`write_launcher_ps1` / `spawn_windows_console` / `spawn_exit_watcher` / `parse_exit_code_from_log` / `wait_for_crash_with_log*` / `PluginExited` / `PluginProcessTable::clone_handle` / `read_log_tail` / `decode_log_bytes` / `launcher_log_path`。
+
+**前端兼容**：`plugin:exited` 事件不再触发（监听器无害保留）；2.5s 轮询 `getPluginStatus`（`is_running` try_wait）兜底，进程退出后 UI 自动回 idle + toast。800ms 内秒退仍由同步 `plugin_crashed:` 前缀路径完整覆盖（含 stderr + ErrorBubble + AI 修复）。唯一回归：800ms 后才退出的插件看不到 stderr 错误卡片（只有通用 toast）。
+
+### 启动流水线日志 `data/.launch.log`（保留）
+- `append_launch_log(plugin_dir, msg)` 追加带时间戳的一行到 `<plugin_dir>/data/.launch.log`（best-effort）。
+- `start_plugin_from_dir` 各节点记录：启动开始、manifest/runtime 解析、venv/依赖就绪、spawn 命令、秒退诊断、启动成功 pid。
+
+### 崩溃转储 `data/.crash.log`（保留）
+800ms 秒退时写完整崩溃转储到 `<plugin_dir>/data/.crash.log`（覆盖式）：
+- `write_crash_dump(plugin_dir, cmdline, cwd, env_dump, crash_err, output)` 写入：时间戳、完整复现命令、cwd、环境变量（脱敏）、平台诊断串、piped stderr 全文。
+- env_dump 在 env move 进 spawn 之前捕获，`start_plugin_from_dir` 在 spawn 前构造 `cmdline_str` / `cwd_str` / `env_dump` 快照。
+- `wait_for_crash_with_diagnostics_capturing`（跨平台）秒退时把 piped stderr 回传 out_capture -> 写转储。
+- 崩溃错误信息追加手动复现段（完整命令 + cwd + `.crash.log` 路径）。
+
+### Tests Required
+- Rust: `strip_verbatim_prefix`（去前缀/无前缀不变）、`append_launch_log`（追加 + 时间戳）、`write_crash_dump`（含命令/env/输出）、venv 自愈冒烟（9 个）、`wait_for_crash`（秒退/存活）。
+- Full check: `cargo test --bin lingfang-desktop`。
+
+Reference files:
+- `apps/desktop/src-tauri/src/plugin_runner.rs`（`start_plugin_from_dir` / `wait_for_crash_with_diagnostics_capturing` / `write_crash_dump` / `append_launch_log` / `strip_verbatim_prefix`）
+
+## Python venv 依赖损坏自愈（2026-07-09）
+
+**问题**：pip 装出的包可能被杀软（Windows Defender 在解压 wheel 时锁文件）/磁盘残缺写坏——典型表现：streamlit 的某个 `.py` 混入 NUL 字节 → `python -m streamlit run` 在 runpy 解析阶段抛 `SyntaxError: source code string cannot contain null bytes`，退出码 1。但平台的 venv 逻辑（`ensure_python_venv`）只看 `python.exe` 是否存在 + `pip install -r` 是否幂等成功（exit 0），**永远检测不到这种落盘后损坏**，且 pip install 幂等（已装跳过）不会重装坏包 → 死锁：用户只能手动删 `%LOCALAPPDATA%\LingFang\python-venvs\venv-<hash>` 目录。
+
+### 自愈流程（`ensure_python_venv`，Rust）
+1. 原有：venv 不存在/home 不匹配 → `create_python_venv`。
+2. **新增快路径**：读 `requirements.txt` 内容算指纹（哈希 + salt），与 venv 目录下 `.lfdeps-verified` 标记比对——命中且 venv python 存在 → 直接返回（冷启动秒过，不跑 pip 也不跑冒烟）。
+3. 标记未命中 → `install_and_smoke`（单次尝试）：
+   - `pip install -r requirements.txt`（幂等，600s 超时）。
+   - **import 冒烟**（`smoke_test_venv`）：用 venv python 跑生成的 `.lf-smoke.py`，逐个 `importlib.import_module` requirements.txt 里的关键依赖。
+   - 冒烟脚本异常分类：只把 **文件损坏类**（`SyntaxError`/`ValueError` null bytes/`OSError`/`UnicodeDecodeError` + 部分 `ImportError` 链含 OSError）当损坏信号 → exit 2；`ModuleNotFoundError`（包名≠import名/可选依赖缺失）和其它运行期异常放过；超时（卡网络/重初始化）不当坏。
+   - 冒烟通过 → 写 `.lfdeps-verified` 标记。
+4. `install_and_smoke` 返回损坏错误 → **删整个 venv**（`remove_dir_all_with_retry`，带 AV 锁重试 + Windows rmdir 降级）→ `create_python_venv` 重建 → `install_and_smoke` 再试一次。仍失败 → 返回友好错误（前端展示「pip install 失败」类，不崩）。
+
+### 包名 → import 名映射
+- requirements.txt 里是 PyPI distribution 名，冒烟需要真正的 import 名。
+- `dist_to_import_name`：已知不一致的硬编码表（`pillow→PIL`、`opencv-python→cv2`、`pyyaml→yaml`、`beautifulsoup4→bs4`、`python-magic→magic`、`scikit-learn→sklearn` 等）。
+- 未列出的用 `normalize_import_name` 兜底：去版本约束（`>=`/`==`/`<`）、去 extras（`[x]`）、去 environment marker（`;`）、`-`/`.` → `_`。
+- `parse_requirements_dist_names`：跳过注释/空行/`-r`/`-e`/`--option`/URL（含 `://`）/路径行。
+
+### Tests Required
+- Rust: `parse_requirements_dist_names`（基础/跳 option+URL/空）、`dist_to_import_name`（已知映射/未知 None）、`normalize_import_name`（去版本+分隔符替换）、`smoke_import_names`（映射优先+标准化兜底/dedup+sorted）、`deps_fingerprint`（确定性+内容敏感）、`deps_verified_marker` round-trip、`build_smoke_script`（含 import 名 + exit 码 0/2）。
+- Full check: `cargo test --bin lingfang-desktop`。
+
+Reference files:
+- `apps/desktop/src-tauri/src/plugin_runner.rs`（`ensure_python_venv` / `install_and_smoke` / `smoke_test_venv` / `build_smoke_script` / `parse_requirements_dist_names` / `dist_to_import_name` / `normalize_import_name` / `smoke_import_names` / `deps_fingerprint` / `deps_verified_matches` / `write_deps_verified` / `deps_verified_marker` / `DEPS_VERIFIED_SALT`）
 
 ## 本地/草稿插件 ZIP 导入导出（`.lfplugin` v3，2026-07-08）
 
