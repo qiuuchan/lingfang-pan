@@ -31,6 +31,8 @@ import {
 } from '@/lib/plugin-status';
 import { loadLocalPluginAsStaged } from '@/lib/plugin-creator/local-upload';
 import { submitStagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import type { UploadProgress } from '@/lib/plugin-upload';
+import { UploadProgressDialog, type UploadStage } from '@/components/plugins/UploadProgressDialog';
 import { exportPluginToZip } from '@/lib/plugin-package-zip';
 import { errorMessage } from '../plugins-runtime';
 
@@ -71,6 +73,14 @@ export function LocalPluginRow({
       <LocalManifestDialog item={item} row={row} />
       <DeleteLocalPluginDialog item={item} row={row} />
       {!item.draft && <PublishToMarketDialog item={item} row={row} />}
+      <UploadProgressDialog
+        open={row.uploadOpen}
+        stage={row.uploadStage}
+        progress={row.uploadProgress}
+        pluginName={item.name}
+        errorMessage={row.uploadError}
+        onClose={() => row.setUploadOpen(false)}
+      />
     </div>
   );
 }
@@ -149,13 +159,39 @@ function useLocalPublishState(item: LocalPluginStatus, onPublished: () => void) 
   // 「发布到市场」定价弹窗：用户填定价后确认才走 upload + submit-marketplace。
   const [marketOpen, setMarketOpen] = useState(false);
   const [priceYuan, setPriceYuan] = useState('');
+  // 上传进度弹窗状态。
+  const [uploadStage, setUploadStage] = useState<UploadStage>('reading');
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | undefined>(undefined);
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  /** 上传插件并显示进度弹窗（publishLocalToTeam 和 confirmPublishToMarket 共用）。 */
+  async function uploadWithProgress(
+    staged: Awaited<ReturnType<typeof loadLocalPluginAsStaged>>,
+  ): Promise<{ ok: true; id?: string; upgraded?: boolean; name: string } | { ok: false; message: string }> {
+    setUploadOpen(true);
+    setUploadStage('uploading');
+    setUploadProgress(null);
+    setUploadError(undefined);
+    const result = await submitStagedPlugin(staged, (info) => setUploadProgress({ ...info }));
+    if (result.ok) {
+      setUploadStage('done');
+    } else {
+      setUploadStage('error');
+      setUploadError(result.message);
+    }
+    return result;
+  }
 
   async function publishLocalToTeam() {
     setMenuOpen(false);
     setPublishing(true);
+    setUploadStage('reading');
+    setUploadOpen(true);
+    setUploadError(undefined);
     try {
       const staged = await loadLocalPluginAsStaged(item.id);
-      const result = await submitStagedPlugin(staged);
+      const result = await uploadWithProgress(staged);
       if (result.ok) {
         // upgraded=true：团队内已有同 manifest.id 插件，本次为版本升级覆盖。
         if (result.upgraded) {
@@ -168,6 +204,8 @@ function useLocalPublishState(item: LocalPluginStatus, onPublished: () => void) 
         toast.error(result.message);
       }
     } catch (err) {
+      setUploadStage('error');
+      setUploadError(errorMessage(err));
       toast.error(errorMessage(err));
     } finally {
       setPublishing(false);
@@ -184,9 +222,12 @@ function useLocalPublishState(item: LocalPluginStatus, onPublished: () => void) 
   /** 确认发布到市场：upload 到团队 → 拿 plugin.id → submit-marketplace 进入审核队列。 */
   async function confirmPublishToMarket() {
     setPublishing(true);
+    setUploadStage('reading');
+    setUploadOpen(true);
+    setUploadError(undefined);
     try {
       const staged = await loadLocalPluginAsStaged(item.id);
-      const result = await submitStagedPlugin(staged);
+      const result = await uploadWithProgress(staged);
       if (!result.ok) {
         toast.error(result.message);
         return;
@@ -231,6 +272,11 @@ function useLocalPublishState(item: LocalPluginStatus, onPublished: () => void) 
     publishLocalToTeam,
     openMarketDialog,
     confirmPublishToMarket,
+    uploadOpen,
+    setUploadOpen,
+    uploadStage,
+    uploadProgress,
+    uploadError,
   };
 }
 

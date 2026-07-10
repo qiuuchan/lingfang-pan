@@ -54,13 +54,16 @@ type ProbeState =
   | { status: 'ready'; binary?: string; version?: string };
 
 // 组C 持久化运行态：独立进程运行（不再嵌入式终端回显）。
-// running/stopping 都带 pid+startedAt，便于停止失败时回退到 running 态保留进程信息。
+// running/stopping/exited 都带 pid+startedAt，便于停止失败时回退到 running 态保留进程信息。
 // starting 态带 stage + stageMessage（来自 Rust plugin:start-progress 事件），渲染分阶段进度动画。
+// exited 态：进程已结束（正常退出 / 上游关闭 / 外部 kill），但保留日志面板供排查——
+//   不像 idle 那样清空上下文，让用户能看到崩溃/退出的完整输出。
 type PersistentRunState =
   | { status: 'idle' }
   | { status: 'starting'; stage: PluginStartStage; stageMessage: string }
   | { status: 'running'; pid: number; startedAt: string }
   | { status: 'stopping'; pid: number; startedAt: string }
+  | { status: 'exited'; pid: number; startedAt: string; exitCode: number | null; clean: boolean }
   | { status: 'error'; error: CreatorError };
 
 // 创建期预览运行态（保留 R3 一次性 sandbox 执行语义）。
@@ -173,8 +176,9 @@ export function ScriptPreviewPanel({
 
   // Task 4b 修复：插件进程自行退出（脚本跑完 / 用户关掉插件窗口 / 外部 kill）时，
   // Rust 进程表 try_wait 会清表，但前端不轮询就不知道，「强制关闭」按钮常驻、状态卡 running。
-  // 此处仅在「前端认为 running」时每 2.5s 轮询 get_plugin_status，running=false 即回退 idle，
-  // 按钮恢复「运行」。停止/启动态不轮询（避免与 handleStart/handleStop 状态机打架）。
+  // 此处仅在「前端认为 running」时每 2.5s 轮询 get_plugin_status，running=false 即切到 exited 态，
+  // 保留进程信息 + 日志面板（不再清回 idle，否则输出全没了，无法排查）。
+  // 停止/启动态不轮询（避免与 handleStart/handleStop 状态机打架）。
   useEffect(() => {
     if (!usePersistent || persistentRun.status !== 'running') return;
     let cancelled = false;
@@ -183,8 +187,11 @@ export function ScriptPreviewPanel({
         const status = await getPluginStatus(pluginId!);
         if (cancelled) return;
         if (!status.running) {
-          // 进程已退出：回退 idle（保留一次 toast 提示，避免用户困惑按钮为何自己变回「运行」）。
-          setPersistentRun({ status: 'idle' });
+          // 进程已退出：切到 exited（保留 pid/startedAt + 日志面板），不回 idle。
+          // exitCode 信息 Rust 此处不返回（轮询只给 running bool），用 null 表示「已退出但退出码未知」。
+          setPersistentRun((prev) => prev.status === 'running'
+            ? { status: 'exited', pid: prev.pid, startedAt: prev.startedAt, exitCode: null, clean: true }
+            : prev);
           toast.info('插件进程已结束');
         }
       } catch {
@@ -213,8 +220,7 @@ export function ScriptPreviewPanel({
       // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
       const start = builtin ? startBuiltinPlugin : startPlugin;
       // onExited 接收 plugin:exited 事件（进程退出时触发）：
-      // 非 0 退出 → 复用 plugin_crashed 错误路径（ErrorBubble + AI 修复）；
-      // 0 退出 → plugin_exited_clean（正常退出但进程已结束，可重试）。
+      // 切到 exited 态保留日志面板（exitCode 区分干净退出 vs 异常退出，但都保留输出供排查）。
       // onOutput 接收 plugin:output 事件（全阶段逐行输出，实时追加到日志面板）。
       const result = await start(
         pluginId,
@@ -222,18 +228,18 @@ export function ScriptPreviewPanel({
           setPersistentRun({ status: 'starting', stage: progress.stage, stageMessage: progress.message });
         },
         (info: PluginExitedInfo) => {
+          // 保留当前 pid/startedAt（从 persistentRun 读，但回调闭包可能拿不到最新态，故用 result 兜底）。
+          setPersistentRun((prev) => ({
+            status: 'exited' as const,
+            pid: prev.status === 'running' ? prev.pid : result.pid,
+            startedAt: prev.status === 'running' ? prev.startedAt : result.started_at,
+            exitCode: info.exitCode,
+            clean: info.exitCode === 0,
+          }));
           if (info.exitCode === 0) {
-            setPersistentRun({
-              status: 'error',
-              error: toCreatorError('plugin_exited_clean', undefined),
-            });
+            toast.info('插件进程已正常退出');
           } else {
-            // 非零退出：stderrTail 作为 raw（含完整 traceback），复用 plugin_crashed 错误卡片 + AI 修复。
-            const stderr = info.stderrTail || `进程退出码 ${info.exitCode ?? '?'}`;
-            setPersistentRun({
-              status: 'error',
-              error: { ...toCreatorError('plugin_crashed', new Error(stderr)), raw: stderr },
-            });
+            toast.error(`插件进程异常退出（码 ${info.exitCode ?? '?'}）`);
           }
         },
         (e) => logBuffer.append(e),
@@ -420,6 +426,41 @@ export function ScriptPreviewPanel({
           {persistentRun.status === 'stopping' && (
             <div className="flex h-32 items-center justify-center rounded-lg border bg-muted/40 text-sm text-muted-foreground">
               正在停止进程…
+            </div>
+          )}
+          {persistentRun.status === 'exited' && (
+            <div className="space-y-3">
+              <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'}`} />
+                  <span className={`font-medium ${persistentRun.clean ? 'text-amber-600 dark:text-amber-400' : 'text-destructive'}`}>
+                    {persistentRun.clean ? '插件进程已结束' : '插件进程异常退出'}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  进程 PID：<span className="font-mono text-foreground">{persistentRun.pid}</span>
+                  {persistentRun.exitCode != null && (
+                    <span className="ml-3">退出码：<span className={`font-mono ${persistentRun.clean ? 'text-foreground' : 'text-destructive'}`}>{persistentRun.exitCode}</span></span>
+                  )}
+                </div>
+                {persistentRun.startedAt && (
+                  <div className="text-xs text-muted-foreground">
+                    启动时间：<span className="font-mono text-foreground">{formatTimestamp(persistentRun.startedAt)}</span>
+                  </div>
+                )}
+                {!persistentRun.clean && onRequestFix && logBuffer.lines.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-1"
+                    onClick={() => onRequestFix(logBuffer.lines.map((l) => l.text).join('\n'))}
+                  >
+                    <WandSparklesIcon className="mr-1 size-3.5" />
+                    让 AI 修复
+                  </Button>
+                )}
+              </div>
+              <PluginLogPanel lines={logBuffer.lines} />
             </div>
           )}
           {persistentRun.status === 'error' && (
