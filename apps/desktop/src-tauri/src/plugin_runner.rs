@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 // - run_capture_with_env：带超时的同步运行（用于 venv 创建 / pip install / pnpm install 等阻塞阶段）。
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
-use crate::process_util::{kill_child_tree, run_capture_with_env};
+use crate::process_util::{kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput};
 use crate::runtime_resolver::RuntimeResolver;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
@@ -187,52 +187,102 @@ fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &RuntimeResolver) ->
 /// 1. 检查 venv 是否存在且 venv_python 可执行 → 已就绪直接返回。
 /// 2. 不存在 → 使用软件内置 Python → `python -m venv <venv_dir>`（带超时，venv 创建可能慢）。
 /// 3. 有 requirements.txt → `venv/.../pip install -r requirements.txt`（带超时，依赖多时较慢）。
+/// 4. pip install 后跑 import 冒烟（检测落盘损坏，如 .py 混入 NUL 字节）；损坏则删 venv
+///    重建 + 重装 + 再冒烟一次（自愈）。通过则写 `.lfdeps-verified` 标记，下次启动标记命中跳过冒烟。
 ///
 /// 失败处理（PRD Constraints）：venv 创建/pip install 失败返回友好错误（不崩），前端据 error 展示。
 pub(crate) fn ensure_python_venv(
     runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
+    stream: Option<&StreamCtx>,
 ) -> Result<PathBuf, String> {
     let venv_dir = python_venv_dir(plugin_dir);
     let py = venv_python(&venv_dir);
+    let requirements = plugin_dir.join("requirements.txt");
+    let requirements_content = std::fs::read_to_string(&requirements).ok();
+
     // 已有 venv 且解释器/pip 存在且 home 路径匹配 → 跳过创建。
     // 路径不匹配时（跨机器迁移 / 安装路径变更 / 原始路径含 junction）自动重建。
     if !py.is_file() || !venv_has_pip(&venv_dir) || !venv_home_matches_host(&venv_dir, runtime) {
-        create_python_venv(runtime, plugin_dir, &venv_dir)?;
+        create_python_venv(runtime, plugin_dir, &venv_dir, stream)?;
     }
-    // 有 requirements.txt → pip install（幂等，已装依赖 pip 会跳过）。
-    let requirements = plugin_dir.join("requirements.txt");
-    if requirements.is_file() {
-        // pip install 可能下载大包，给 600s 超时。用 venv python -m pip，避开 Windows pip.exe
-        // 启动器在嵌入式/搬迁目录里解析解释器路径不稳的问题。
-        let pip_args = vec![
-            "-m".to_string(),
-            "pip".to_string(),
-            "install".to_string(),
-            "--no-input".to_string(),
-            "-r".to_string(),
-            requirements.to_string_lossy().to_string(),
-        ];
-        let captured = run_capture_with_env(
-            &py,
-            pip_args,
-            Some(&plugin_dir.to_string_lossy()),
-            600_000,
-            runtime.env(minimal_env()),
-        )
-        .map_err(|e| format!("pip install 失败：{e}"))?;
-        if captured.exit_code != Some(0) {
-            return Err(format!(
-                "pip install 失败（exit={:?}）：{}",
-                captured.exit_code,
-                captured_detail(&captured),
-            ));
+
+    // 有 requirements.txt → 先装依赖再冒烟。装依赖幂等（已装 pip 跳过）；冒烟自愈。
+    if let Some(content) = requirements_content.as_deref() {
+        // 冷启动快路径：标记命中（上次冒烟通过 + requirements 未变）→ 跳过 pip install + 冒烟。
+        if deps_verified_matches(&venv_dir, content) {
+            // 标记命中仍需确认 venv python 存在（极端：标记在但 python 被手动删了）。
+            if py.is_file() {
+                return Ok(py);
+            }
         }
+        // 装依赖 + 冒烟。冒烟失败 → 删 venv 重建 + 重装 + 再冒烟（自愈一次）。
+        install_and_smoke(runtime, plugin_dir, &venv_dir, &py, content, stream).or_else(|first_err| {
+            // 自愈：删 venv → 重建 → 重装 → 再冒烟。只重试一次（真正损坏/磁盘坏会再次失败）。
+            let _ = remove_dir_all_with_retry(&venv_dir);
+            create_python_venv(runtime, plugin_dir, &venv_dir, stream)?;
+            install_and_smoke(runtime, plugin_dir, &venv_dir, &py, content, stream)
+                .map_err(|retry_err| format!("{first_err}\n重建后仍失败：{retry_err}"))
+        })?;
     }
     if !py.is_file() {
         return Err(format!("venv 创建后仍找不到解释器：{}", py.display()));
     }
     Ok(py)
+}
+
+/// 装依赖 + 冒烟自愈的单次尝试（被 ensure_python_venv 调，失败时由上层删 venv 重试一次）。
+/// 步骤：pip install（幂等）→ import 冒烟 → 通过则写标记。冒烟检测到损坏直接返回 Err。
+fn install_and_smoke(
+    runtime: &RuntimeResolver,
+    plugin_dir: &std::path::Path,
+    venv_dir: &std::path::Path,
+    py: &PathBuf,
+    requirements_content: &str,
+    stream: Option<&StreamCtx>,
+) -> Result<(), String> {
+    // pip install（幂等，已装依赖 pip 会跳过）。可能下载大包，给 600s 超时。
+    // 用 venv python -m pip，避开 Windows pip.exe 启动器在嵌入式/搬迁目录里解析解释器路径不稳的问题。
+    let pip_args = vec![
+        "-m".to_string(),
+        "pip".to_string(),
+        "install".to_string(),
+        "--no-input".to_string(),
+        "-r".to_string(),
+        plugin_dir
+            .join("requirements.txt")
+            .to_string_lossy()
+            .to_string(),
+    ];
+    let captured = run_with_optional_stream(
+        py,
+        pip_args,
+        Some(&plugin_dir.to_string_lossy()),
+        600_000,
+        runtime.env(minimal_env()),
+        stream,
+    )
+    .map_err(|e| format!("pip install 失败：{e}"))?;
+    if captured.exit_code != Some(0) {
+        return Err(format!(
+            "pip install 失败（exit={:?}）：{}",
+            captured.exit_code,
+            captured_detail(&captured),
+        ));
+    }
+    // import 冒烟：检测落盘损坏（.py 混入 NUL 字节 / 坏 C 扩展等）。
+    match smoke_test_venv(py, venv_dir, requirements_content, runtime, stream) {
+        Ok(true) => {
+            write_deps_verified(venv_dir, requirements_content);
+            Ok(())
+        }
+        Ok(false) => {
+            // 超时/启动失败等不确定情况：放过（不当坏包误删），写标记以便下次跳过。
+            write_deps_verified(venv_dir, requirements_content);
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn venv_has_pip(venv_dir: &std::path::Path) -> bool {
@@ -248,6 +298,233 @@ fn venv_has_pip(venv_dir: &std::path::Path) -> bool {
         let name = entry.file_name().to_string_lossy().to_string();
         name.starts_with("python") && entry.path().join("site-packages").join("pip").is_dir()
     })
+}
+
+// === venv 完整性自愈：pip 装出的包可能被杀软/磁盘残缺写坏（典型：streamlit 的 .py 混入
+// NUL 字节 → `python -m streamlit` 在 runpy 解析阶段抛 SyntaxError: source code string
+// cannot contain null bytes，退出码 1，但平台 venv 逻辑只看 python.exe 是否存在 + pip install
+// 是否幂等成功（exit 0），永远检测不到这种落盘后损坏，导致死锁：只能手动删 venv。
+// 自愈：venv 就绪后做一次 import 冒烟（import requirements.txt 里的关键依赖），坏包能被
+// importlib 捕获 → 删 venv 重建 + 重装 → 再冒烟一次。通过则写 `.lfdeps-verified` 标记
+// （内容 = requirements 哈希 + salt），下次启动标记匹配就跳过冒烟（保持冷启动秒过）。
+
+/// smoke test 标记的 salt：venv 内部 ABI 等不纳入判定，requirements 变了才重测。
+const DEPS_VERIFIED_SALT: &str = "v1";
+
+/// 已知「PyPI 包名 ≠ import 名」的映射。requirements.txt 里的名字是 PyPI distribution 名，
+/// import 冒烟需要真正的 import 名。覆盖实际遇到的；未列出的用 normalization 兜底。
+fn dist_to_import_name(dist: &str) -> Option<&'static str> {
+    match dist.to_ascii_lowercase().as_str() {
+        "pillow" => Some("PIL"),
+        "opencv-python" | "opencv-python-headless" | "opencv-contrib-python" => Some("cv2"),
+        "opencv-python-rolling" => Some("cv2"),
+        "pyyaml" => Some("yaml"),
+        "beautifulsoup4" => Some("bs4"),
+        "python-magic" => Some("magic"),
+        "python-dotenv" => Some("dotenv"),
+        "pyjwt" => Some("jwt"),
+        "scikit-learn" => Some("sklearn"),
+        "scikit-image" => Some("skimage"),
+        "google-api-python-client" => Some("googleapiclient"),
+        "google-cloud-storage" => Some("google.cloud.storage"),
+        "psycopg2-binary" | "psycopg2" => Some("psycopg2"),
+        "pyobjc-core" | "pyobjc" => None, // 平台特定，跳过
+        _ => None,
+    }
+}
+
+/// 把 distribution 名标准化为候选 import 名（处理 `-`/`_` → 去版本/环境标记）。
+/// 仅做 normalization：去掉 `>=`/`==` 等版本约束与 `;` extras，把 `-`/`.` 换 `_`。
+fn normalize_import_name(raw: &str) -> String {
+    // 去掉版本约束（pip requirement 语法）：`pkg>=1.0,<2` → `pkg`；`pkg[extra]` → `pkg`。
+    let no_version = raw
+        .split(|c: char| matches!(c, '>' | '<' | '=' | '!' | '~' | ';' | '['))
+        .next()
+        .unwrap_or("")
+        .trim();
+    no_version.replace(['-', '.'], "_")
+}
+
+/// 解析 requirements.txt 提取顶层 distribution 名（忽略注释/空行/-r/-e/--option/URL 行）。
+/// 返回原始 distribution 名（未标准化，供 dist_to_import_name 匹配）。
+fn parse_requirements_dist_names(content: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // 跳过 pip 指令行（-r / -e / --index-url / -c 等）。
+        if line.starts_with('-') {
+            continue;
+        }
+        // 跳过 editable / 直接路径 / git+URL（含 `://` 或 `@ git` 或以路径分隔符开头）。
+        if line.contains("://") || line.starts_with('.') || line.contains("@ ") {
+            continue;
+        }
+        // 去掉 environment marker（`;`）和 extras（`[`）后取 distribution 名部分。
+        let name_part = line.split([';', '[']).next().unwrap_or("").trim();
+        // 去掉版本约束。
+        let name = name_part
+            .split(|c: char| matches!(c, '>' | '<' | '=' | '!' | '~'))
+            .next()
+            .unwrap_or("")
+            .trim();
+        if name.is_empty() {
+            continue;
+        }
+        names.push(name.to_string());
+    }
+    names
+}
+
+/// 把 distribution 名映射为冒烟要 import 的模块名（优先用已知映射表，否则标准化兜底）。
+fn smoke_import_names(dist_names: &[String]) -> Vec<String> {
+    let mut result = Vec::with_capacity(dist_names.len());
+    for dist in dist_names {
+        if let Some(known) = dist_to_import_name(dist) {
+            result.push(known.to_string());
+        } else {
+            let normalized = normalize_import_name(dist);
+            if !normalized.is_empty() {
+                result.push(normalized);
+            }
+        }
+    }
+    result.sort();
+    result.dedup();
+    result
+}
+
+/// 计算 requirements.txt 内容 + salt 的指纹，用于 `.lfdeps-verified` 标记比对。
+/// requirements 变了 / salt 变了（逻辑升级）→ 标记失效 → 重跑冒烟。
+fn deps_fingerprint(requirements_content: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    requirements_content.hash(&mut hasher);
+    DEPS_VERIFIED_SALT.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// `.lfdeps-verified` 标记文件路径（与 venv 同目录，venv 重建时随之消失）。
+fn deps_verified_marker(venv_dir: &std::path::Path) -> PathBuf {
+    venv_dir.join(".lfdeps-verified")
+}
+
+/// 标记是否命中（venv 存在 + 标记内容 == 当前 requirements 指纹）。
+fn deps_verified_matches(venv_dir: &std::path::Path, requirements_content: &str) -> bool {
+    let expected = deps_fingerprint(requirements_content);
+    std::fs::read_to_string(deps_verified_marker(venv_dir))
+        .map(|actual| actual.trim() == expected)
+        .unwrap_or(false)
+}
+
+/// 写 `.lfdeps-verified` 标记（冒烟通过后调用）。
+fn write_deps_verified(venv_dir: &std::path::Path, requirements_content: &str) {
+    let _ = std::fs::write(
+        deps_verified_marker(venv_dir),
+        deps_fingerprint(requirements_content),
+    );
+}
+
+/// 生成冒烟测试 Python 脚本：逐个 `importlib.import_module`，捕获异常分类。
+/// 只把「文件损坏类」异常（SyntaxError/ValueError "null bytes"/OSError/UnicodeDecodeError）
+/// 当作 venv 损坏信号；ModuleNotFoundError（包名≠import名/可选依赖缺失）和其他运行期异常
+/// 都放过（不当坏包误判）。脚本退出码：0 = 干净，2 = 检测到损坏（stderr 打印坏包名+原因）。
+fn build_smoke_script(import_names: &[String]) -> String {
+    // 把 import 名序列化进脚本（用 repr 安全转义）。脚本逻辑独立于 Rust 运行时，便于单测。
+    let names_literal = format!(
+        "[{}]",
+        import_names
+            .iter()
+            .map(|n| format!("{n:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    format!(
+        r#"import importlib, sys, traceback
+names = {names_literal}
+corrupt = []
+for name in names:
+    try:
+        importlib.import_module(name)
+    except ModuleNotFoundError:
+        # 包名与 import 名不一致 / 可选依赖缺失 → 不是损坏，跳过。
+        pass
+    except ImportError as e:
+        # import 自身失败但不是「找不到模块」：可能是坏 C 扩展（ImportError 但有 DLL 加载失败）。
+        # 仅当异常链指向 OSError / ValueError(null bytes) 时才算损坏。
+        msg = str(e).lower()
+        cause = "".join(traceback.format_exception(type(e), e, e.__traceback__)).lower()
+        if "null byte" in cause or "null byte" in msg or "errno" in cause and "oserror" in cause:
+            corrupt.append((name, repr(e)))
+        # 其余 ImportError（如缺 DLL 但文件完好）不当坏包。
+    except (SyntaxError, ValueError, OSError, UnicodeDecodeError) as e:
+        # 文件内容损坏（NUL 字节 / 残缺 .py / 坏 C 扩展）→ 明确是 venv 损坏信号。
+        corrupt.append((name, repr(e)))
+    except BaseException:
+        # 其它运行期异常（包 import 时执行了网络/IO）不当坏包。
+        pass
+if corrupt:
+    for name, reason in corrupt:
+        sys.stderr.write("CORRUPT:" + name + " " + reason + "\n")
+    sys.exit(2)
+sys.exit(0)
+"#
+    )
+}
+
+/// 对已就绪 venv 跑 import 冒烟。返回 Ok(true) 干净 / Ok(false) 超时（放过，不当坏）。
+/// Err(String) = 检测到损坏（含坏包名+原因），调用方应删 venv 重建。
+fn smoke_test_venv(
+    py: &PathBuf,
+    venv_dir: &std::path::Path,
+    requirements_content: &str,
+    runtime: &RuntimeResolver,
+    stream: Option<&StreamCtx>,
+) -> Result<bool, String> {
+    let dist_names = parse_requirements_dist_names(requirements_content);
+    let import_names = smoke_import_names(&dist_names);
+    if import_names.is_empty() {
+        return Ok(true); // 无依赖可测，视为干净。
+    }
+    let script = build_smoke_script(&import_names);
+    // 写入 venv 内临时文件（venv 目录可写），运行后删除。
+    let script_path = venv_dir.join(".lf-smoke.py");
+    if let Err(e) = std::fs::write(&script_path, &script) {
+        // 写脚本失败（venv 只读？）不当坏包，放过。
+        return Ok(true);
+    }
+    let captured = run_with_optional_stream(
+        py,
+        vec![script_path.to_string_lossy().to_string()],
+        None,
+        60_000,
+        runtime.env(minimal_env()),
+        stream,
+    );
+    let _ = std::fs::remove_file(&script_path);
+    match captured {
+        Ok(out) => {
+            if out.exit_code == Some(0) {
+                Ok(true)
+            } else if out.timed_out {
+                // 冒烟超时（某个包 import 时卡网络/重初始化）→ 不当坏，放过避免误删。
+                Ok(false)
+            } else if out.exit_code == Some(2) {
+                // 检测到损坏。
+                let detail = if out.stderr.trim().is_empty() {
+                    "未知包".to_string()
+                } else {
+                    out.stderr.trim().to_string()
+                };
+                Err(format!("venv 依赖损坏：{detail}"))
+            } else {
+                // 其它退出码（罕见，如 import 名拼写导致非 2 退出）→ 放过。
+                Ok(false)
+            }
+        }
+        Err(_) => Ok(false), // 启动失败不当坏（极端情况放过）。
+    }
 }
 
 /// 校验已有 venv 的 pyvenv.cfg 中 `home` 路径是否与当前内置 Python 所在目录匹配。
@@ -308,6 +585,7 @@ fn create_python_venv(
     runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
     venv_dir: &std::path::Path,
+    stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
     let host_py = runtime.require_runtime_command("python")?;
     // 上一次失败可能留下半截 venv（尤其 ensurepip 失败后 Scripts/python.exe 已存在但 pip 不完整）。
@@ -321,12 +599,13 @@ fn create_python_venv(
         "--clear".to_string(),
         venv_dir.to_string_lossy().to_string(),
     ];
-    let captured = run_capture_with_env(
+    let captured = run_with_optional_stream(
         &host_py,
         venv_args,
         Some(&plugin_dir.to_string_lossy()),
         300_000,
         runtime.env(minimal_env()),
+        stream,
     )
     .map_err(|e| format!("创建 venv 失败：{e}"))?;
     if captured.exit_code == Some(0) && venv_has_pip(venv_dir) {
@@ -343,7 +622,7 @@ fn create_python_venv(
         )
     };
     let _ = remove_dir_all_with_retry(venv_dir);
-    create_python_venv_without_pip(runtime, plugin_dir, venv_dir)
+    create_python_venv_without_pip(runtime, plugin_dir, venv_dir, stream)
         .map_err(|fallback_error| format!("{primary_error}\n备用创建也失败：{fallback_error}"))
 }
 
@@ -351,6 +630,7 @@ fn create_python_venv_without_pip(
     runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
     venv_dir: &std::path::Path,
+    stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
     let host_py = runtime.require_runtime_command("python")?;
     let venv_args = vec![
@@ -360,12 +640,13 @@ fn create_python_venv_without_pip(
         "--clear".to_string(),
         venv_dir.to_string_lossy().to_string(),
     ];
-    let captured = run_capture_with_env(
+    let captured = run_with_optional_stream(
         &host_py,
         venv_args,
         Some(&plugin_dir.to_string_lossy()),
         300_000,
         runtime.env(minimal_env()),
+        stream,
     )
     .map_err(|e| format!("创建无 pip venv 失败：{e}"))?;
     if captured.exit_code != Some(0) {
@@ -394,12 +675,13 @@ fn create_python_venv_without_pip(
         "--upgrade".to_string(),
         "pip".to_string(),
     ];
-    let captured = run_capture_with_env(
+    let captured = run_with_optional_stream(
         &host_py,
         pip_args,
         Some(&plugin_dir.to_string_lossy()),
         300_000,
         runtime.env(minimal_env()),
+        stream,
     )
     .map_err(|e| format!("安装 venv pip 失败：{e}"))?;
     if captured.exit_code != Some(0) {
@@ -507,6 +789,7 @@ fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
 pub(crate) fn ensure_node_dependencies(
     runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
+    stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
     let pkg_json = plugin_dir.join("package.json");
     if !pkg_json.is_file() {
@@ -540,12 +823,13 @@ pub(crate) fn ensure_node_dependencies(
         return Err("未找到软件内置 pnpm 或 npm，请确认 Node.js 运行时已随应用打包".to_string());
     };
     // install 可能下载大依赖，给 600s 超时。
-    let captured = run_capture_with_env(
+    let captured = run_with_optional_stream(
         &bin,
         install_args,
         Some(&plugin_dir.to_string_lossy()),
         600_000,
         runtime.env(minimal_env()),
+        stream,
     )
     .map_err(|e| format!("依赖安装失败：{e}"))?;
     if captured.exit_code != Some(0) {
@@ -650,6 +934,7 @@ fn playwright_chromium_installed() -> bool {
 pub(crate) fn ensure_playwright_browsers(
     runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
+    stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
     if !declares_playwright(plugin_dir) {
         return Ok(());
@@ -695,12 +980,13 @@ pub(crate) fn ensure_playwright_browsers(
     };
 
     // chromium 约 150MB，镜像下载给 600s（与 pip/pnpm install 一致）。
-    let captured = run_capture_with_env(
+    let captured = run_with_optional_stream(
         &bin,
         args,
         Some(&plugin_dir.to_string_lossy()),
         600_000,
         env,
+        stream,
     )
     .map_err(|e| format!("Playwright 浏览器二进制下载失败：{e}"))?;
     if captured.exit_code != Some(0) {
@@ -873,11 +1159,26 @@ pub struct StartPluginResult {
 
 /// 启动阶段进度事件 payload（emit 到 `plugin:start-progress`，前端渲染分阶段动画）。
 /// stage 取值：checking / deps_installing / starting（最终结果由命令返回值交付，不在此事件）。
+/// rename_all=camelCase：Tauri emit 事件 payload 不自动转驼峰（仅命令返回值转），
+/// 前端过滤 `event.payload.pluginId === pluginId`，故需 serde 显式转驼峰，否则字段恒为 undefined 过滤全失效。
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginStartProgress {
     pub plugin_id: String,
     pub stage: String,
     pub message: String,
+}
+
+/// 插件进程输出事件 payload（emit 到 `plugin:output`，前端日志面板实时显示）。
+/// stream: "stdout" | "stderr"；line 是一行文本（不含换行）。
+/// 全阶段复用：venv 创建 / pip install / python 运行 的输出都经此事件流到前端。
+/// rename_all=camelCase：同 PluginStartProgress，前端按 pluginId 过滤需驼峰。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginOutput {
+    pub plugin_id: String,
+    pub stream: String,
+    pub line: String,
 }
 
 /// get_plugin_status 返回值（扩展契约，供前端判定 running/stopped 刷新）。
@@ -886,6 +1187,127 @@ pub struct PluginProcessStatus {
     pub running: bool,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
+}
+
+/// 流式输出上下文：携带 app 句柄 + plugin_id，供 venv/pip/spawn 各阶段 emit `plugin:output`。
+/// 持久化运行（start_plugin_from_dir）传入 Some；创建期预览（plugin_script.rs）传 None（不流式）。
+pub(crate) struct StreamCtx {
+    pub app: tauri::AppHandle,
+    pub plugin_id: String,
+}
+
+impl StreamCtx {
+    /// 构造 on_line 回调（供 run_streamed_with_env）：每行 emit plugin:output 事件。
+    /// 回调 move 进 reader 线程，故返回 Box<dyn FnMut + Send>。
+    fn make_line_callback(&self) -> Box<dyn FnMut(&str, bool) + Send + 'static> {
+        use tauri::Emitter;
+        let app = self.app.clone();
+        let plugin_id = self.plugin_id.clone();
+        Box::new(move |line: &str, is_stderr: bool| {
+            let _ = app.emit(
+                "plugin:output",
+                PluginOutput {
+                    plugin_id: plugin_id.clone(),
+                    stream: if is_stderr { "stderr".to_string() } else { "stdout".to_string() },
+                    line: line.to_string(),
+                },
+            );
+        })
+    }
+}
+
+/// 按是否提供 StreamCtx 选择流式/捕获运行。
+/// Some(ctx) → run_streamed_with_env（逐行 emit plugin:output）；None → run_capture_with_env（静默）。
+fn run_with_optional_stream(
+    binary: &PathBuf,
+    args: Vec<String>,
+    workspace_dir: Option<&str>,
+    timeout_ms: u64,
+    env: Vec<(OsString, OsString)>,
+    stream: Option<&StreamCtx>,
+) -> Result<CapturedOutput, String> {
+    match stream {
+        Some(ctx) => run_streamed_with_env(binary, args, workspace_dir, timeout_ms, env, ctx.make_line_callback()),
+        None => run_capture_with_env(binary, args, workspace_dir, timeout_ms, env),
+    }
+}
+
+/// strip verbatim `\\?\` 前缀（Windows 扩展长度路径），恢复普通 C:\... 形态。
+/// canonicalize 后的路径带此前缀；崩溃转储的复现命令路径需 strip 掉以便用户直接复制执行。
+fn strip_verbatim_prefix(s: &str) -> String {
+    s.strip_prefix(r"\\?\")
+        .map(|rest| rest.to_string())
+        .unwrap_or_else(|| s.to_string())
+}
+
+/// 崩溃转储文件路径：`<plugin_dir>/data/.crash.log`（覆盖，每次崩溃重写）。
+/// 800ms 秒退时写入完整诊断（命令/cwd/env/退出码/stderr），
+/// 供用户手动复现 + 排查（远程看不到进程输出时的兜底诊断）。
+fn crash_log_path(plugin_dir: &std::path::Path) -> PathBuf {
+    plugin_dir.join("data").join(".crash.log")
+}
+
+/// 写崩溃转储到 `.crash.log`（覆盖）。best-effort，失败静默。
+/// 内容：时间戳、完整命令、cwd、env（脱敏）、退出码、stderr、launcher.log 全文。
+fn write_crash_dump(
+    plugin_dir: &std::path::Path,
+    cmdline: &str,
+    cwd: &str,
+    env_dump: &[String],
+    crash_err: &str,
+    stderr_or_log: &str,
+) {
+    let path = crash_log_path(plugin_dir);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let mut content = String::new();
+    content.push_str(&format!("# 灵坊插件崩溃转储（{now}）\n"));
+    content.push_str("# 本文件在插件 800ms 内秒退时自动生成，含完整诊断信息。\n");
+    content.push_str("# 如需手动复现，在 PowerShell/cmd 中执行下方「复现命令」。\n\n");
+    content.push_str(&format!("## 插件目录\n{cwd}\n\n"));
+    content.push_str(&format!("## 复现命令\n{cmdline}\n"));
+    content.push_str(&format!("（cwd = {cwd}）\n\n"));
+    content.push_str(&format!("## 环境变量（{} 项，敏感值已脱敏）\n", env_dump.len()));
+    for line in env_dump {
+        content.push_str(&format!("  {line}\n"));
+    }
+    content.push_str("\n## 平台诊断\n");
+    content.push_str(crash_err);
+    content.push_str("\n\n## 进程输出（stderr）\n");
+    content.push_str(if stderr_or_log.trim().is_empty() {
+        "(空 — 进程未输出任何 stderr，可能是解释器/入口损坏)"
+    } else {
+        stderr_or_log
+    });
+    content.push('\n');
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::File::create(&path) {
+        let _ = f.write_all(content.as_bytes());
+    }
+}
+
+/// 启动流水线日志：`<plugin_dir>/data/.launch.log`（追加，每次启动一段）。
+/// 记录 venv/pip/smoke/spawn 各阶段事件 + 错误，便于排查「启动失败但看不到任何信息」。
+fn launch_log_path(plugin_dir: &std::path::Path) -> PathBuf {
+    plugin_dir.join("data").join(".launch.log")
+}
+
+/// 追加一行到启动流水线日志（带时间戳）。失败静默（日志是 best-effort 诊断，不阻断启动）。
+fn append_launch_log(plugin_dir: &std::path::Path, msg: &str) {
+    let path = launch_log_path(plugin_dir);
+    // 确保 data 目录存在（与 write_launcher_ps1 同款）。
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("[{now}] {msg}\n");
+    // append（create+append）；用 OpenOptions 避免 read+rewrite 的竞态。
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 /// 命令：启动插件作为独立进程（PRD 需求 5/7/9 / AC5）。
@@ -952,9 +1374,30 @@ pub(crate) fn start_plugin_from_dir(
         );
     };
 
+    // 启动流水线日志（追加到 data/.launch.log）：记录每次启动尝试的各阶段 + 错误。
+    // 用闭包捕获 plugin_dir（值已 move 进函数），每个关键节点 append 一行。
+    let log_launch = |msg: String| append_launch_log(&plugin_dir, &msg);
+    log_launch(format!(
+        "==== 启动插件 {plugin_id}（目录 {}）====",
+        plugin_dir.display()
+    ));
+
     emit_stage("checking", "正在检查插件运行环境…");
-    let manifest = parse_manifest(&plugin_dir)?;
-    let runtime = RuntimeResolver::resolve(app)?;
+    let manifest = parse_manifest(&plugin_dir).map_err(|e| {
+        log_launch(format!("manifest 解析失败：{e}"));
+        e
+    })?;
+    log_launch(format!("manifest: runtime={:?} entry={}", manifest.runtime, manifest.entry));
+    let runtime = RuntimeResolver::resolve(app).map_err(|e| {
+        log_launch(format!("运行时解析失败：{e}"));
+        e
+    })?;
+
+    // 流式输出上下文：venv/pip/spawn 各阶段经此 emit plugin:output 事件到前端日志面板。
+    let stream_ctx = StreamCtx {
+        app: app.clone(),
+        plugin_id: plugin_id.clone(),
+    };
 
     let (binary, args) = match manifest.runtime {
         PluginRuntimeKind::Python => {
@@ -966,12 +1409,18 @@ pub(crate) fn start_plugin_from_dir(
                 );
             }
             // ensure_python_venv：venv 不存在则用内置 Python 创建 + 有 requirements.txt 则 pip install（幂等）。
-            let py = ensure_python_venv(&runtime, &plugin_dir)?;
+            let py = ensure_python_venv(&runtime, &plugin_dir, Some(&stream_ctx)).map_err(|e| {
+                log_launch(format!("venv/依赖准备失败：{e}"));
+                e
+            })?;
+            log_launch(format!("venv 就绪：{}", py.display()));
             // 声明了 playwright 则补下载浏览器二进制（仅 chromium，国内镜像，幂等）。
-            ensure_playwright_browsers(&runtime, &plugin_dir)?;
+            ensure_playwright_browsers(&runtime, &plugin_dir, Some(&stream_ctx))?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
-                return Err(format!("Python 入口文件不存在：{}", entry_abs.display()));
+                let e = format!("Python 入口文件不存在：{}", entry_abs.display());
+                log_launch(e.clone());
+                return Err(e);
             }
             (
                 py,
@@ -987,12 +1436,18 @@ pub(crate) fn start_plugin_from_dir(
                 );
             }
             // ensure_node_dependencies：有 package.json + 非空依赖且 node_modules 缺失 → 内置 pnpm/npm install（幂等）。
-            ensure_node_dependencies(&runtime, &plugin_dir)?;
+            ensure_node_dependencies(&runtime, &plugin_dir, Some(&stream_ctx)).map_err(|e| {
+                log_launch(format!("Node 依赖准备失败：{e}"));
+                e
+            })?;
+            log_launch("Node 依赖就绪".to_string());
             // 声明了 playwright 则补下载浏览器二进制（仅 chromium，国内镜像，幂等）。
-            ensure_playwright_browsers(&runtime, &plugin_dir)?;
+            ensure_playwright_browsers(&runtime, &plugin_dir, Some(&stream_ctx))?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
-                return Err(format!("Node 入口文件不存在：{}", entry_abs.display()));
+                let e = format!("Node 入口文件不存在：{}", entry_abs.display());
+                log_launch(e.clone());
+                return Err(e);
             }
             // 仅当 package.json 声明 scripts.start 时才走 pnpm/npm start；否则裸 node entry。
             if node_has_start_script(&plugin_dir)? {
@@ -1024,15 +1479,6 @@ pub(crate) fn start_plugin_from_dir(
 
     // 依赖就绪，即将 spawn 入口进程 → 发 starting 阶段（前端切换到「启动中」动画）。
     emit_stage("starting", "正在启动插件进程…");
-    // detached spawn：stdout null（GUI 输出不进 UI，PRD 需求 9），stderr piped（捕获崩溃异常）。
-    // 子进程 cwd = 插件目录（让插件能读写自身 data/ 子目录等相对路径）。
-    let mut command = std::process::Command::new(&binary);
-    command
-        .current_dir(&plugin_dir)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
     // 计费/中转：插件进程只拿 localhost 桥地址 + 一次性 token，不直接接触 JWT/API Key。
     let mut env = runtime.env(minimal_env());
@@ -1049,8 +1495,54 @@ pub(crate) fn start_plugin_from_dir(
         env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"), OsString::from(bridge_env.url)));
         env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"), OsString::from(bridge_env.token)));
     }
-    command.env_clear().envs(env);
-    // Unix：setsid 建独立进程组（detached，stop_plugin 杀整组）。
+    // Python: 强制 UTF-8 输出（Windows 中文系统默认 GBK，不设逐行读会乱码）。
+    env.push((OsString::from("PYTHONIOENCODING"), OsString::from("utf-8")));
+
+    // crash_context：在 env move 前捕获完整命令/cwd/env 快照，供崩溃转储 .crash.log 用。
+    let cwd_str = strip_verbatim_prefix(&plugin_dir.to_string_lossy());
+    let cmdline_str = format!(
+        "{} {}",
+        strip_verbatim_prefix(&binary.to_string_lossy()),
+        if args.is_empty() {
+            String::new()
+        } else {
+            args.iter()
+                .map(|a| {
+                    if a.contains(' ') || a.is_empty() {
+                        format!("\"{a}\"")
+                    } else {
+                        a.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    );
+    // env 快照（脱敏：隐藏桥 token 值，只保留 key=存在标记）。
+    let env_dump: Vec<String> = env
+        .iter()
+        .map(|(k, v)| {
+            let key = k.to_string_lossy();
+            if key.contains("TOKEN") || key.contains("SECRET") || key.contains("KEY") {
+                format!("{key}=<hidden>")
+            } else {
+                format!("{key}={}", v.to_string_lossy())
+            }
+        })
+        .collect();
+    log_launch(format!("spawn：{cmdline_str}"));
+
+    // 直接 spawn 入口进程（跨平台）：stdout+stderr 都 piped，逐行 emit plugin:output 到前端日志面板。
+    let mut command = std::process::Command::new(&binary);
+    command
+        .current_dir(&plugin_dir)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env_clear()
+        .envs(env);
+    // Unix：setsid 做进程组分离（stop kill 用）。Windows：CREATE_NEW_PROCESS_GROUP 同理。
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -1061,53 +1553,122 @@ pub(crate) fn start_plugin_from_dir(
             });
         }
     }
-    // Windows：CREATE_NEW_PROCESS_GROUP（detached + stop_plugin 的 taskkill /T 波及整组）。
-    // 注意：**不**叠加 CREATE_NO_WINDOW —— GUI 插件（PySide6/Tkinter）需要能弹窗口，
-    // CREATE_NO_WINDOW 会抑制控制台窗口但不影响 GUI 窗口；但为安全起见对 Python/Node 这种
-    // 可能含 GUI 的进程保留控制台弹出能力（用户可见插件输出，符合「外部窗口」语义）。
-    // 仅设 CREATE_NEW_PROCESS_GROUP 让进程组隔离（kill 整组）。
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        // CREATE_NEW_PROCESS_GROUP（0x0200）：进程组隔离，便于 stop_plugin kill 整组。
+        command.creation_flags(0x0000_0200);
     }
-    let mut child = command
-        .spawn()
-        .map_err(|e| {
-            if let Some(token) = bridge_token.as_deref() {
-                bridge.revoke_token(token);
-            }
-            format!("启动插件进程失败：{e}")
-        })?;
-    // 秒退判定：spawn 后短等待（800ms），若进程立即退出 = 崩溃，读 stderr 返回 plugin_crashed 错误。
-    // 正常 GUI 插件会一直运行（超时即放行）。捕获 stderr 让用户看到 Python/Node 异常而非「无法启动」。
-    if let Some(crash_err) =
-        wait_for_crash_with_diagnostics(&mut child, Duration::from_millis(800), &launch_diagnostics)
-    {
+    let mut child = command.spawn().map_err(|e| {
+        log_launch(format!("spawn 失败：{e}"));
         if let Some(token) = bridge_token.as_deref() {
             bridge.revoke_token(token);
         }
-        // 崩溃：进程已退出，child drop 回收。返回 plugin_crashed: 前缀（前端 catch 显示 stderr + 一键修复）。
-        return Err(crash_err);
-    }
-    // 存活 = 正常运行：stderr pipe 交后台线程排空（防 pipe 满阻塞进程），读后丢弃不进 UI。
-    if let Some(mut stderr) = child.stderr.take() {
+        format!("启动插件进程失败：{e}")
+    })?;
+
+    // 取出 stdout/stderr pipe，开两个 reader 线程逐行 emit plugin:output（实时流到前端日志面板）。
+    // 同时累积 stderr 到共享缓冲，供 800ms 秒退时的崩溃诊断读全文。
+    let on_line = stream_ctx.make_line_callback();
+    let on_line = std::sync::Arc::new(std::sync::Mutex::new(on_line));
+    let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+
+    if let Some(stdout) = child.stdout.take() {
+        let on_line = std::sync::Arc::clone(&on_line);
         std::thread::spawn(move || {
-            use std::io::Read;
-            let mut buf = [0u8; 1024];
-            loop {
-                match stderr.read(&mut buf) {
-                    Ok(0) | Err(_) => break, // 进程退出或 pipe 关闭
-                    _ => { /* 丢弃，不进 UI */ }
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines() {
+                match line {
+                    Ok(text) => {
+                        if let Ok(mut cb) = on_line.lock() {
+                            cb(&text, false);
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
         });
     }
+    if let Some(stderr) = child.stderr.take() {
+        let on_line = std::sync::Arc::clone(&on_line);
+        let buf = std::sync::Arc::clone(&stderr_buf);
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stderr).lines() {
+                match line {
+                    Ok(text) => {
+                        if let Ok(mut cb) = on_line.lock() {
+                            cb(&text, true);
+                        }
+                        if let Ok(mut b) = buf.lock() {
+                            b.push_str(&text);
+                            b.push('\n');
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // 800ms 秒退判定：只 try_wait 判进程是否退出（不 take stderr，reader 线程持续读到 EOF）。
+    // 秒退时从 stderr_buf 读已累积的全文做崩溃诊断（reader 线程在进程退出后会读完剩余 pipe）。
+    let deadline = std::time::Instant::now() + Duration::from_millis(800);
+    let mut crashed_status: Option<std::process::ExitStatus> = None;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                crashed_status = Some(status);
+                break;
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    break; // 存活 800ms = 正常运行
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => break, // try_wait 异常，保守当正常运行
+        }
+    }
+    if let Some(status) = crashed_status {
+        // 进程秒退 = 崩溃。等 reader 线程读完 pipe 尾部（进程已退出，pipe 即将 EOF）。
+        std::thread::sleep(Duration::from_millis(150));
+        let stderr_text = stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+        let truncated = truncate_stderr(&stderr_text, 2000);
+        let detail = if truncated.trim().is_empty() {
+            format!("(进程未输出 stderr)\n\n{launch_diagnostics}")
+        } else {
+            format!("{truncated}\n\n{launch_diagnostics}")
+        };
+        let crash_err = format!("plugin_crashed:插件启动后立即退出（{status}）\n{detail}");
+        // 写崩溃转储 .crash.log（完整命令/cwd/env/stderr），供用户手动复现排查。
+        let crash_path = crash_log_path(&plugin_dir);
+        write_crash_dump(&plugin_dir, &cmdline_str, &cwd_str, &env_dump, &crash_err, &stderr_text);
+        log_launch(format!("进程秒退（800ms 内退出）：{crash_err}"));
+        log_launch(format!("崩溃转储已写入：{}", crash_path.display()));
+        if let Some(token) = bridge_token.as_deref() {
+            bridge.revoke_token(token);
+        }
+        // 增强错误信息：附手动复现命令 + .crash.log 路径，引导用户直接复现。
+        let crash_path_str = strip_verbatim_prefix(&crash_path.to_string_lossy());
+        return Err(format!(
+            "{crash_err}\n\n\
+             ── 手动复现 ──\n\
+             在终端中执行（cwd 设为插件目录）：\n\
+             {cmdline_str}\n\
+             （cwd = {cwd_str}）\n\n\
+             完整崩溃转储（含环境变量、输出）已写入：\n\
+             {crash_path_str}"
+        ));
+    }
+    // 存活：reader 线程持续逐行 emit plugin:output（进程活着期间一直流），无需额外排空。
     let started_at = now_iso();
     let pid = process_table.register(&plugin_id, child, started_at.clone());
+    log_launch(format!("启动成功：pid={pid}"));
     // 运行态仅存内存进程表（组A scan_plugin_status 经 process_table.is_running 合并判定 running，
     // 不落 DB——PRD 需求 2「状态不存 DB」，重启后所有插件从文件系统重判 ready）。
+    // 前端另有 2.5s 轮询 getPluginStatus 兜底：进程退出后 UI 自动回到 idle + toast 提示。
+    let _ = app; // app 不再用（退出监视线程已删），保留参数兼容签名。
     Ok(StartPluginResult { pid, started_at })
 }
 
@@ -1116,20 +1677,26 @@ pub(crate) fn start_plugin_from_dir(
 /// - 存活（超时未退）= 正常运行：返回 None（调用方继续注册进程表）。
 ///
 /// 抽成纯函数便于单测（不依赖 tauri::State）。try_wait 轮询（非 wait 阻塞）避免阻塞 start_plugin 命令。
+#[cfg(test)]
 pub(crate) fn wait_for_crash(child: &mut std::process::Child, timeout: Duration) -> Option<String> {
-    wait_for_crash_with_diagnostics(child, timeout, "")
+    let mut capture = String::new();
+    wait_for_crash_with_diagnostics_capturing(child, timeout, "", &mut capture)
 }
 
-fn wait_for_crash_with_diagnostics(
+/// 秒退判定 + 把读到的 stderr 回传到 out_capture（供崩溃转储 .crash.log）。
+///
+/// 直接读 piped stderr（确定性捕获，跨平台）。stderr piped 由调用方的 spawn 设置；
+/// 进程秒退（依赖缺失/语法错/解释器损坏）→ 读 stderr 全文 → 返回 plugin_crashed 错误。
+fn wait_for_crash_with_diagnostics_capturing(
     child: &mut std::process::Child,
     timeout: Duration,
     diagnostics: &str,
+    out_capture: &mut String,
 ) -> Option<String> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                // 进程已退出 = 崩溃，读 stderr。
                 let stderr_text = child
                     .stderr
                     .take()
@@ -1139,6 +1706,7 @@ fn wait_for_crash_with_diagnostics(
                         s.read_to_string(&mut buf).ok().map(|_| buf)
                     })
                     .unwrap_or_default();
+                *out_capture = stderr_text.clone();
                 let truncated = truncate_stderr(&stderr_text, 2000);
                 let detail = if diagnostics.trim().is_empty() {
                     truncated

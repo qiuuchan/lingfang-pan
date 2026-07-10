@@ -18,7 +18,7 @@ pub(crate) use binary::find_binaries_in_path;
 pub(crate) use binary::find_binary;
 #[cfg(all(windows, test))]
 pub(crate) use binary::resolve_npm_shim;
-pub(crate) use capture::{run_capture_with_env, CapturedOutput};
+pub(crate) use capture::{run_capture_with_env, run_streamed_with_env, CapturedOutput};
 pub(crate) use tree::kill_child_tree;
 
 /// 解析 workspace 目录：优先用传入值，缺失则用 default_root/claude-sandbox，再缺失用 cwd。

@@ -133,13 +133,20 @@ export function scanPluginStatus(): Promise<LocalPluginStatus[]> {
  * 启动阶段事件：onProgress 回调接收 Rust emit 的 `plugin:start-progress` 事件（checking /
  * deps_installing / starting），供前端渲染分阶段进度动画。回调在 startPlugin resolve/reject 后自动解绑。
  *
- * 返回启动信息（pid + started_at），前端据此刷新 status==='running'。
+ * 进程退出事件（Windows cmd 窗口路径）：onExited 回调接收 Rust emit 的 `plugin:exited` 事件
+ * （payload: { pluginId, exitCode, stderrTail }），在进程退出时触发，供前端切「进程已结束」态。
+ * 与 onProgress 不同，onExited 的监听在 startPlugin resolve 后**仍保留**（进程可能很久后才退出），
+ * 调用方需在停止/卸载时调返回的 unlisten 解绑。
+ *
+ * 返回启动信息（pid + started_at + unlistenExited），前端据此刷新 status==='running'。
  */
 export async function startPlugin(
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
-): Promise<{ pid: number; started_at: string }> {
-  return startPluginCommand('start_plugin', pluginId, onProgress);
+  onExited?: (info: PluginExitedInfo) => void,
+  onOutput?: (e: PluginOutputEvent) => void,
+): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  return startPluginCommand('start_plugin', pluginId, onProgress, onExited, onOutput);
 }
 
 /**
@@ -151,32 +158,68 @@ export async function startPlugin(
 export async function startBuiltinPlugin(
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
-): Promise<{ pid: number; started_at: string }> {
-  return startPluginCommand('start_builtin_plugin', pluginId, onProgress);
+  onExited?: (info: PluginExitedInfo) => void,
+  onOutput?: (e: PluginOutputEvent) => void,
+): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  return startPluginCommand('start_builtin_plugin', pluginId, onProgress, onExited, onOutput);
+}
+
+/** 插件进程退出事件 payload（与 Rust PluginExited 对齐）。 */
+export interface PluginExitedInfo {
+  pluginId: string;
+  /** 进程退出码；null 表示无法解析（前端按非零/异常处理）。 */
+  exitCode: number | null;
+  /** 日志文件尾部（≤4000 字符），含 stdout+stderr，供 ErrorBubble 显示。 */
+  stderrTail: string;
+}
+
+/** 插件进程输出事件 payload（与 Rust PluginOutput 对齐）。逐行流式，供日志面板实时显示。 */
+export interface PluginOutputEvent {
+  pluginId: string;
+  /** 输出流：stdout 或 stderr。 */
+  stream: 'stdout' | 'stderr';
+  /** 一行文本（不含换行）。 */
+  line: string;
 }
 
 async function startPluginCommand(
   command: 'start_plugin' | 'start_builtin_plugin',
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
-): Promise<{ pid: number; started_at: string }> {
+  onExited?: (info: PluginExitedInfo) => void,
+  onOutput?: (e: PluginOutputEvent) => void,
+): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
   // 订阅阶段事件（仅本次启动期间），完成后解绑避免泄漏。
-  const unlisten = onProgress
+  const unlistenProgress = onProgress
     ? await tauriListen<PluginStartProgress>('plugin:start-progress', (event) => {
         // 仅处理本次启动插件的进度事件（同插件并发启动时按 pluginId 过滤）。
         if (event.payload?.pluginId === pluginId) onProgress(event.payload);
       })
     : null;
+  // 订阅退出事件（进程退出时触发，可能很久后；监听保留到调用方调 unlistenExited 解绑）。
+  const unlistenExited = onExited
+    ? await tauriListen<PluginExitedInfo>('plugin:exited', (event) => {
+        if (event.payload?.pluginId === pluginId) onExited(event.payload);
+      })
+    : undefined;
+  // 订阅输出事件（全阶段：venv/pip/python 输出逐行流；进程活着期间持续，监听保留到 unlistenOutput 解绑）。
+  const unlistenOutput = onOutput
+    ? await tauriListen<PluginOutputEvent>('plugin:output', (event) => {
+        if (event.payload?.pluginId === pluginId) onOutput(event.payload);
+      })
+    : undefined;
   try {
     // 计费/中转：把后端基址 + 登录态 token 交给宿主本地桥；插件进程只收到 localhost URL + 一次性 token，
     // 不直接接触 JWT/API Key。
-    return await tauriInvoke<{ pid: number; started_at: string }>(command, {
+    const result = await tauriInvoke<{ pid: number; started_at: string }>(command, {
       pluginId,
       apiBase: apiBase(),
       authToken: getAuthToken() ?? '',
     });
+    return { ...result, unlistenExited, unlistenOutput };
   } finally {
-    unlisten?.();
+    // 进度事件解绑（启动完成即不再需要）；退出/输出事件保留（进程退出时才触发/活着期间持续流）。
+    unlistenProgress?.();
   }
 }
 

@@ -3,8 +3,9 @@
 // 双模式（PRD AC3/AC5/AC8 + 保留创建期预览能力）：
 // 1. 持久化运行（pluginId 提供时，从 Plugins Runner 进入）：调 start_plugin / stop_plugin。
 //    Python 用 .venv 隔离 + pip install（若有 requirements.txt）；Node 用 pnpm install + pnpm start。
-//    作为独立进程运行（外部窗口/终端），软件内仅显示「运行中」状态 + 进程信息 + 「停止」按钮。
-//    PRD 需求 5/9：Python/Node 独立运行在外部，不在软件 UI 内嵌入终端输出。
+//    作为独立进程运行，软件内显示「运行中」状态 + 进程信息 + 「停止」按钮 + **实时输出日志面板**
+//    （全阶段：venv 创建 / pip install / python 运行的 stdout+stderr 逐行流式显示）。
+//    PRD 需求 5/9「不在 UI 内嵌终端」已于 2026-07-09 变更为「全阶段输出实时显示在 app 内日志面板」。
 // 2. 创建期预览（pluginId 缺失时，从 PreviewPanel/PreviewDrawer 进入）：调 run_plugin_script。
 //    一次性 sandbox 执行（创建期插件尚未持久化，无法走独立进程），软件内终端回显 stdout/stderr。
 //    保留 R3 行为：创建对话中即时预览生成出的脚本是否能跑通。
@@ -15,7 +16,7 @@
 // - runtime：nodejs/python，决定 RUNTIME_LABEL 文案与探测策略。
 //
 // 缺失解释器降级：两种模式都保留 probe 探测 + 安装指引（start/run 均依赖解释器存在）。
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { PlayIcon, RefreshCwIcon, SquareIcon, TerminalIcon, Code2Icon, Loader2Icon, CheckIcon, WandSparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -38,7 +39,9 @@ import {
   getPluginStatus,
   type PluginStartProgress,
   type PluginStartStage,
+  type PluginExitedInfo,
 } from '@/lib/plugin-status';
+import { PluginLogPanel, useLogBuffer } from '@/components/plugins/PluginLogPanel';
 import { parseManifest } from '@/lib/plugin-draft';
 import { formatTimestamp } from '@/lib/time';
 import { errorMessage } from '@/pages/plugins-runtime';
@@ -102,6 +105,18 @@ export function ScriptPreviewPanel({
   );
   // 模式判定：有 pluginId 走持久化独立进程，无则走创建期 sandbox 预览。
   const usePersistent = Boolean(pluginId);
+
+  // plugin:exited 监听解绑句柄（进程退出事件可能很久后才触发，需保留监听到停止/卸载）。
+  const unlistenExitedRef = useRef<(() => void) | null>(null);
+  // plugin:output 监听解绑句柄（进程活着期间持续流输出，需保留监听到停止/卸载）。
+  const unlistenOutputRef = useRef<(() => void) | null>(null);
+  // 实时输出日志缓冲（全阶段：venv/pip/python 输出逐行累积）。
+  const logBuffer = useLogBuffer();
+  // 卸载时解绑退出 + 输出监听，避免泄漏 + 旧插件输出后误更新已卸载组件状态。
+  useEffect(() => () => {
+    unlistenExitedRef.current?.();
+    unlistenOutputRef.current?.();
+  }, []);
 
   // 探测解释器（design §3.5：首次进入先 probe）。start/run 均依赖解释器存在，缺失时前置拦截。
   const doProbe = useCallback(async () => {
@@ -188,12 +203,44 @@ export function ScriptPreviewPanel({
     if (!pluginId) return;
     // 初始 checking 阶段（Rust 进 start_plugin 会先 emit checking，但立即设置避免 UI 空窗）。
     setPersistentRun({ status: 'starting', stage: 'checking', stageMessage: '正在检查插件运行环境…' });
+    // 清理上一次启动遗留的退出/输出监听 + 清空日志（重复启动场景）。
+    unlistenExitedRef.current?.();
+    unlistenExitedRef.current = null;
+    unlistenOutputRef.current?.();
+    unlistenOutputRef.current = null;
+    logBuffer.clear();
     try {
       // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
       const start = builtin ? startBuiltinPlugin : startPlugin;
-      const result = await start(pluginId, (progress: PluginStartProgress) => {
-        setPersistentRun({ status: 'starting', stage: progress.stage, stageMessage: progress.message });
-      });
+      // onExited 接收 plugin:exited 事件（进程退出时触发）：
+      // 非 0 退出 → 复用 plugin_crashed 错误路径（ErrorBubble + AI 修复）；
+      // 0 退出 → plugin_exited_clean（正常退出但进程已结束，可重试）。
+      // onOutput 接收 plugin:output 事件（全阶段逐行输出，实时追加到日志面板）。
+      const result = await start(
+        pluginId,
+        (progress: PluginStartProgress) => {
+          setPersistentRun({ status: 'starting', stage: progress.stage, stageMessage: progress.message });
+        },
+        (info: PluginExitedInfo) => {
+          if (info.exitCode === 0) {
+            setPersistentRun({
+              status: 'error',
+              error: toCreatorError('plugin_exited_clean', undefined),
+            });
+          } else {
+            // 非零退出：stderrTail 作为 raw（含完整 traceback），复用 plugin_crashed 错误卡片 + AI 修复。
+            const stderr = info.stderrTail || `进程退出码 ${info.exitCode ?? '?'}`;
+            setPersistentRun({
+              status: 'error',
+              error: { ...toCreatorError('plugin_crashed', new Error(stderr)), raw: stderr },
+            });
+          }
+        },
+        (e) => logBuffer.append(e),
+      );
+      // 保存退出/输出监听解绑句柄（停止/卸载时调用）。
+      if (result.unlistenExited) unlistenExitedRef.current = result.unlistenExited;
+      if (result.unlistenOutput) unlistenOutputRef.current = result.unlistenOutput;
       setPersistentRun({ status: 'running', pid: result.pid, startedAt: result.started_at });
       toast.success(`${RUNTIME_LABEL[runtime]} 插件已启动，运行在独立进程`);
     } catch (error) {
@@ -221,10 +268,15 @@ export function ScriptPreviewPanel({
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
       }
     }
-  }, [builtin, pluginId, runtime]);
+  }, [builtin, pluginId, runtime, logBuffer]);
 
   const handleStop = useCallback(async () => {
     if (!pluginId) return;
+    // 解绑退出/输出监听（主动停止时不再需要通知；stop_plugin 杀进程后事件会 emit 但状态已 idle）。
+    unlistenExitedRef.current?.();
+    unlistenExitedRef.current = null;
+    unlistenOutputRef.current?.();
+    unlistenOutputRef.current = null;
     setPersistentRun((prev) => (prev.status === 'running' ? { status: 'stopping', pid: prev.pid, startedAt: prev.startedAt } : prev));
     try {
       await stopPlugin(pluginId);
@@ -333,35 +385,36 @@ export function ScriptPreviewPanel({
             {entryFile && <span>入口：{manifest.entry}</span>}
           </div>
 
-          {/* 运行状态展示（PRD 需求 5：软件内显示「插件运行中」+ 进程信息 + 「强制关闭」按钮） */}
+          {/* 运行状态展示（PRD 需求 5：软件内显示「插件运行中」+ 进程信息 + 「强制关闭」按钮 + 实时输出） */}
           {persistentRun.status === 'idle' && (
             <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center text-sm text-muted-foreground">
               <p>插件将以独立进程运行（{runtime === 'python' ? '使用 .venv 隔离环境' : '使用 pnpm install + start'}）。</p>
-              <p className="text-xs">点击「运行」启动；运行输出在插件自身的窗口/控制台。</p>
+              <p className="text-xs">点击「运行」启动；启动和运行的所有输出会实时显示在下方。</p>
             </div>
           )}
           {persistentRun.status === 'starting' && (
-            <StartProgressView stage={persistentRun.stage} message={persistentRun.stageMessage} runtime={runtime} />
+            <div className="space-y-3">
+              <StartProgressView stage={persistentRun.stage} message={persistentRun.stageMessage} runtime={runtime} />
+              <PluginLogPanel lines={logBuffer.lines} />
+            </div>
           )}
           {persistentRun.status === 'running' && (
-            <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">插件运行中</span>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                进程 PID：<span className="font-mono text-foreground">{persistentRun.pid}</span>
-              </div>
-              {persistentRun.startedAt && (
-                <div className="text-xs text-muted-foreground">
-                  启动时间：<span className="font-mono text-foreground">{formatTimestamp(persistentRun.startedAt)}</span>
+            <div className="space-y-3">
+              <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">插件运行中</span>
                 </div>
-              )}
-              <p className="text-xs text-muted-foreground">
-                {runtime === 'python'
-                  ? '若插件是 GUI 应用（Qt6/PySide6、PyQt6 或 tkinter 等），它会弹出独立窗口。'
-                  : 'Node 服务在独立进程运行，按 package.json scripts.start 启动。'}
-              </p>
+                <div className="text-xs text-muted-foreground">
+                  进程 PID：<span className="font-mono text-foreground">{persistentRun.pid}</span>
+                </div>
+                {persistentRun.startedAt && (
+                  <div className="text-xs text-muted-foreground">
+                    启动时间：<span className="font-mono text-foreground">{formatTimestamp(persistentRun.startedAt)}</span>
+                  </div>
+                )}
+              </div>
+              <PluginLogPanel lines={logBuffer.lines} />
             </div>
           )}
           {persistentRun.status === 'stopping' && (
@@ -383,6 +436,8 @@ export function ScriptPreviewPanel({
                   让 AI 修复
                 </Button>
               )}
+              {/* 崩溃时保留日志面板（含 traceback），方便定位。 */}
+              {logBuffer.lines.length > 0 && <PluginLogPanel lines={logBuffer.lines} />}
             </>
           )}
 

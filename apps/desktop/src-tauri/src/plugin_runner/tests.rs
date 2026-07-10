@@ -484,3 +484,186 @@ fn playwright_mirror_host_is_npmmirror_cdn() {
         "https://cdn.npmmirror.com/binaries/playwright"
     );
 }
+
+// === 路径清理测试 ===
+
+#[test]
+fn strip_verbatim_prefix_removes_prefix() {
+    assert_eq!(
+        strip_verbatim_prefix(r"\\?\C:\Users\test\plugin"),
+        r"C:\Users\test\plugin"
+    );
+    // 无前缀不变。
+    assert_eq!(strip_verbatim_prefix(r"C:\Users\test\plugin"), r"C:\Users\test\plugin");
+    assert_eq!(strip_verbatim_prefix("/home/user/plugin"), "/home/user/plugin");
+}
+
+// === venv 自愈冒烟测试 ===
+
+#[test]
+fn parse_requirements_dist_names_basic() {
+    let content = "\
+requests>=2.28
+pillow>=10.0.0,<12
+# 注释行
+streamlit==1.40.0
+
+-r other.txt
+uvicorn[standard]>=0.32.0
+git+https://github.com/x/y.git
+-e ./local-pkg
+";
+    let names = parse_requirements_dist_names(content);
+    assert_eq!(
+        names,
+        vec!["requests", "pillow", "streamlit", "uvicorn"]
+    );
+}
+
+#[test]
+fn parse_requirements_dist_names_skips_options_and_urls() {
+    let content = "\
+--index-url https://pypi.org/simple
+-c constraints.txt
+numpy
+scipy @ git+https://github.com/scipy/scipy.git
+";
+    let names = parse_requirements_dist_names(content);
+    // git+URL 行（含 ://）跳过，--option / -c 跳过，只留 numpy。
+    assert_eq!(names, vec!["numpy"]);
+}
+
+#[test]
+fn parse_requirements_dist_names_empty() {
+    assert!(parse_requirements_dist_names("").is_empty());
+    assert!(parse_requirements_dist_names("# just a comment\n\n").is_empty());
+}
+
+#[test]
+fn dist_to_import_name_known_mappings() {
+    assert_eq!(dist_to_import_name("pillow"), Some("PIL"));
+    assert_eq!(dist_to_import_name("Pillow"), Some("PIL"));
+    assert_eq!(dist_to_import_name("opencv-python"), Some("cv2"));
+    assert_eq!(dist_to_import_name("opencv-python-headless"), Some("cv2"));
+    assert_eq!(dist_to_import_name("pyyaml"), Some("yaml"));
+    assert_eq!(dist_to_import_name("beautifulsoup4"), Some("bs4"));
+    assert_eq!(dist_to_import_name("scikit-learn"), Some("sklearn"));
+}
+
+#[test]
+fn dist_to_import_name_unknown_returns_none() {
+    assert_eq!(dist_to_import_name("requests"), None);
+    assert_eq!(dist_to_import_name("streamlit"), None);
+}
+
+#[test]
+fn normalize_import_name_strips_version_and_replaces_separators() {
+    assert_eq!(normalize_import_name("python-magic"), "python_magic");
+    assert_eq!(normalize_import_name("google.api"), "google_api");
+    assert_eq!(normalize_import_name("streamlit"), "streamlit");
+}
+
+#[test]
+fn smoke_import_names_uses_known_mapping_then_normalization() {
+    let dists = vec![
+        "pillow".to_string(),
+        "streamlit".to_string(),
+        "fastapi-cli".to_string(),
+        "opencv-python".to_string(),
+    ];
+    let imports = smoke_import_names(&dists);
+    // PIL（映射）、cv2（映射）、streamlit（标准化原样）、fastapi_cli（标准化 -→_）。
+    assert!(imports.contains(&"PIL".to_string()));
+    assert!(imports.contains(&"cv2".to_string()));
+    assert!(imports.contains(&"streamlit".to_string()));
+    assert!(imports.contains(&"fastapi_cli".to_string()));
+}
+
+#[test]
+fn smoke_import_names_dedup_and_sorted() {
+    let dists = vec![
+        "zlib".to_string(),
+        "abc".to_string(),
+        "abc".to_string(),
+    ];
+    let imports = smoke_import_names(&dists);
+    assert_eq!(imports, vec!["abc".to_string(), "zlib".to_string()]);
+}
+
+#[test]
+fn deps_fingerprint_is_deterministic_and_content_sensitive() {
+    let a = deps_fingerprint("pillow\nstreamlit");
+    let a2 = deps_fingerprint("pillow\nstreamlit");
+    let b = deps_fingerprint("pillow\nstreamlit\nrequests");
+    assert_eq!(a, a2, "相同内容应相同");
+    assert_ne!(a, b, "内容变了指纹应变");
+}
+
+#[test]
+fn deps_verified_marker_round_trip() {
+    let tmp = temp_dir_unique("deps-marker");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let content = "pillow>=10\nstreamlit";
+    // 初始无标记 → 不命中。
+    assert!(!deps_verified_matches(&tmp, content));
+    // 写标记后 → 命中。
+    write_deps_verified(&tmp, content);
+    assert!(deps_verified_matches(&tmp, content));
+    // 内容变了 → 标记失效。
+    assert!(!deps_verified_matches(&tmp, "pillow>=10\nstreamlit\nnumpy"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn build_smoke_script_contains_import_names_and_exit_codes() {
+    let imports = vec!["PIL".to_string(), "streamlit".to_string()];
+    let script = build_smoke_script(&imports);
+    // 脚本应包含两个 import 名。
+    assert!(script.contains("\"PIL\""));
+    assert!(script.contains("\"streamlit\""));
+    // 损坏退出码 2，干净退出码 0。
+    assert!(script.contains("sys.exit(2)"));
+    assert!(script.contains("sys.exit(0)"));
+    // 逐个 import（不一次全 import）。
+    assert!(script.contains("importlib.import_module"));
+}
+
+#[test]
+fn write_crash_dump_contains_repro_command_and_env_and_output() {
+    let tmp = temp_dir_unique("crash-dump");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let env_dump = vec![
+        "PATH=/usr/bin".to_string(),
+        "LINGFANG_PLUGIN_BRIDGE_TOKEN=<hidden>".to_string(),
+    ];
+    write_crash_dump(
+        &tmp,
+        "python -u main.py",
+        "/tmp/plugin",
+        &env_dump,
+        "plugin_crashed:插件启动后立即退出（exit code: 1）",
+        "Traceback: ImportError: No module named foo",
+    );
+    let content = std::fs::read_to_string(crash_log_path(&tmp)).unwrap();
+    // 含复现命令。
+    assert!(content.contains("python -u main.py"), "转储应含复现命令");
+    // 含 cwd。
+    assert!(content.contains("/tmp/plugin"));
+    // 含 env（脱敏 token）。
+    assert!(content.contains("PATH=/usr/bin"));
+    assert!(content.contains("LINGFANG_PLUGIN_BRIDGE_TOKEN=<hidden>"));
+    // 含进程输出。
+    assert!(content.contains("Traceback: ImportError"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn write_crash_dump_notes_empty_output() {
+    let tmp = temp_dir_unique("crash-empty");
+    std::fs::create_dir_all(&tmp).unwrap();
+    write_crash_dump(&tmp, "py main.py", "/p", &[], "crash err", "");
+    let content = std::fs::read_to_string(crash_log_path(&tmp)).unwrap();
+    // 空输出时应有提示（帮助定位「PS 未运行 / 解释器损坏」）。
+    assert!(content.contains("空"), "空输出应有诊断提示");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
