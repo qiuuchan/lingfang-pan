@@ -2,6 +2,16 @@
 
 本文件记录灵方桌面端面向用户的版本变更。
 
+## v0.0.23
+
+### 问题修复
+
+- **修复 FaceFusion 模型下载仍走 GitHub（国内极慢）的问题**：v0.0.22 声称把模型下载源切到了国内镜像 hf-mirror.com，但实际没生效——上游 facefusion 的 `download_providers` 默认值是 `['github', 'huggingface']`，按顺序先 ping GitHub，GitHub 通了就直接用，hf-mirror 永远轮不到。`facefusion.ini` 里虽写了 `download_providers = huggingface`，但该配置在插件安装目录下未被正确读取，回退到全量默认值。现已改为在启动命令行显式传 `--download-providers huggingface github`（hf-mirror 优先，GitHub 兜底），命令行参数优先级最高，直接钉死下载源顺序。修复后模型下载速度从 50–150 kB/s 提升到镜像正常速度。
+- **修复 FaceFusion hash 文件下载被跳过导致校验失败（`validating hash for nsfw_* failed`）**：上游 facefusion 的 `conditional_download` 用 HEAD 请求拿 Content-Length 决定是否需要下载。hf-mirror 对文件走 xet CDN（302 重定向），HEAD 在重定向环境下拿不到 content-length（返回 0），于是 `initial_size(0) < download_size(0)` 为 False，**直接跳过下载**——hash 文件根本没创建，校验永远失败。已修复 `download.py`：`download_size == 0` 时仍发起下载（让 curl 自己跟随重定向完成传输），并改用进程轮询替代纯大小比较来判断下载完成。
+- **修复 FaceFusion yoloface_8n 等模型校验失败导致启动退出（退出码 2）**：若 `.assets/models/` 里有之前（github 慢速下载 / 中断）留下的残缺 `.onnx`，其大小 >= 错误的 download_size，facefusion 就会跳过下载，直接 hash 校验失败退出。现已在启动上游前扫描所有 `.onnx`：对每个有对应 `.hash` 文件的模型做 crc32 校验，不过就删掉残缺文件强制重下。
+- **FaceFusion 启动失败自动重试**：模型下载/验证失败（退出码 2）时，自动清理残缺的 `.onnx` 和 `.hash` 文件后重新启动上游，最多重试 3 次。hf-mirror 偶发抖动（xet CDN 不稳定、签名过期）不再导致用户卡在首次启动。
+- **修复 FaceFusion 模型文件删除时 WinError 32（文件被占用）**：curl 子进程下载完成后可能未完全释放文件句柄，导致 facefusion 删除校验失败的残缺 `.onnx` 时报 `PermissionError: [WinError 32]`。已在 `download.py` 中确保 curl 进程完全退出（`wait` + `kill` 兜底）后再继续，避免文件锁竞争。
+
 ## v0.0.22
 
 本次更新主要做了三件事：大插件上传现在有实时进度条（百分比 + 速度 + 已传大小）、FaceFusion 在别的电脑上启动失败的问题修好了、插件报错退出后日志面板不再清空。
