@@ -22,6 +22,7 @@ export type CreatorErrorKind =
   | 'run_spawn_failed' // 预览执行进程拉起失败（来自 R3）
   | 'manifest_missing' // 持久化运行时 manifest 缺失（temp 目录空，AI 未产出）
   | 'plugin_crashed' // 持久化运行启动后秒退（插件代码异常，附 stderr）
+  | 'plugin_exited_clean' // 持久化运行进程正常退出（exit 0，但进程已结束；可能上游主动关闭）
   | 'entry_load_failed' // 客户端(HTML)插件入口文件读取/加载失败
   | 'unknown';
 
@@ -80,6 +81,7 @@ const TITLE_MAP: Record<CreatorErrorKind, string> = {
   run_spawn_failed: '预览执行无法启动',
   manifest_missing: '插件未生成完成',
   plugin_crashed: '插件启动后立即退出',
+  plugin_exited_clean: '插件进程已结束',
   entry_load_failed: '插件无法加载',
   unknown: '发生未知错误',
 };
@@ -99,6 +101,7 @@ const DETAIL_MAP: Record<CreatorErrorKind, string> = {
   run_spawn_failed: '进程无法拉起，可能是解释器路径无效或脚本文件不存在。',
   manifest_missing: '该插件目录缺少 manifest.json（可能是创建时 AI 未完成产出）。请继续对话让 AI 补全，或重新创建插件。',
   plugin_crashed: '插件代码运行时抛出异常导致进程立即退出。请查看下方错误信息定位并修复（或点「让 AI 修复」自动修）。',
+  plugin_exited_clean: '插件进程已正常退出（退出码 0）。可能是上游服务主动关闭、配置导致提前结束，或运行完成。可重新启动继续使用。',
   entry_load_failed: '读取或加载插件入口文件失败，可能是入口路径不存在、文件损坏或内容异常。可点「让 AI 修复」交给 AI 定位。',
   unknown: '请稍后重试，或查看下方原始信息。',
 };
@@ -120,6 +123,8 @@ const RETRYABLE_MAP: Record<CreatorErrorKind, boolean> = {
   manifest_missing: false,
   // 插件崩溃需先修代码，重试运行无效（用「让 AI 修复」自动修）。
   plugin_crashed: false,
+  // 正常退出可重试（进程结束不是代码错误，重新启动即可）。
+  plugin_exited_clean: true,
   // 入口加载失败需先修源码/路径，重试加载多半无效（用「让 AI 修复」自动修）。
   entry_load_failed: false,
   unknown: true,

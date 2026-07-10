@@ -495,7 +495,7 @@ pub fn run_plugin_script(
     let mut install_log: Option<String> = None;
     match input.runtime {
         ScriptRuntime::Python => {
-            match ensure_python_venv(&resolver, &sandbox_canon) {
+            match ensure_python_venv(&resolver, &sandbox_canon, None) {
                 Ok(venv_py) => {
                     // venv 创建/pip install 可能发生了实际安装（首次）或全跳过（缓存命中）。
                     // 简单判定：venv 是否本次新建（py 文件 mtime 近）——但更务实：只在 requirements.txt 存在时记一条。
@@ -505,7 +505,7 @@ pub fn run_plugin_script(
                     run_binary = venv_py;
                     // 声明了 playwright 则补下载浏览器二进制（与正式运行路径一致，避免预览能跑而正式跑不起来）。
                     // 失败不致命：记进 install_log 让 AI 知晓（缺浏览器会直接导致试跑崩溃，stderr 会被捕获）。
-                    if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon) {
+                    if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon, None) {
                         let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
                         install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
@@ -524,13 +524,13 @@ pub fn run_plugin_script(
             }
         }
         ScriptRuntime::Nodejs => {
-            match ensure_node_dependencies(&resolver, &sandbox_canon) {
+            match ensure_node_dependencies(&resolver, &sandbox_canon, None) {
                 Ok(()) => {
                     if sandbox_canon.join("package.json").is_file() {
                         install_log = Some("Node 依赖已就绪（node_modules 就绪）".to_string());
                     }
                     // 同 Python 分支：声明了 playwright 则补下载浏览器二进制，失败记 install_log。
-                    if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon) {
+                    if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon, None) {
                         let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
                         install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
