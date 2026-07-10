@@ -57,6 +57,9 @@ struct ResolvedRuntime {
 pub(crate) struct RuntimeResolver {
     python: Option<ResolvedRuntime>,
     node: Option<ResolvedRuntime>,
+    // FFmpeg 作为第三内置运行时（runtimes/ffmpeg/）：插件进程 PATH 自动包含，
+    // shutil.which("ffmpeg") 直接命中内置版本，插件无需宿主机安装 ffmpeg。
+    ffmpeg: Option<ResolvedRuntime>,
     config: RuntimeConfig,
 }
 
@@ -66,7 +69,13 @@ impl RuntimeResolver {
         let config = RuntimeConfigStore::from_app(app)?.read();
         let python = resolve_python(&config, app);
         let node = resolve_node(&config, app);
-        Ok(Self { python, node, config })
+        let ffmpeg = resolve_ffmpeg(&config, app);
+        Ok(Self {
+            python,
+            node,
+            ffmpeg,
+            config,
+        })
     }
 
     /// 测试构造：直接指定 python_dir / node_dir（标 Legacy 来源）。
@@ -84,6 +93,7 @@ impl RuntimeResolver {
         Self {
             python,
             node,
+            ffmpeg: None,
             config: RuntimeConfig::default(),
         }
     }
@@ -103,7 +113,28 @@ impl RuntimeResolver {
             dir,
             source: RuntimeSource::Legacy,
         });
-        Self { python, node, config }
+        Self {
+            python,
+            node,
+            ffmpeg: None,
+            config,
+        }
+    }
+
+    /// 测试构造：指定 ffmpeg_dir（标 Legacy 来源）。python/node 默认 None，
+    /// 专用于 ffmpeg 进 PATH 的测试。
+    #[cfg(test)]
+    pub(crate) fn from_dirs_with_ffmpeg(ffmpeg_dir: Option<PathBuf>) -> Self {
+        let ffmpeg = ffmpeg_dir.map(|dir| ResolvedRuntime {
+            dir,
+            source: RuntimeSource::Legacy,
+        });
+        Self {
+            python: None,
+            node: None,
+            ffmpeg,
+            config: RuntimeConfig::default(),
+        }
     }
 
     pub(crate) fn python(&self) -> Option<PathBuf> {
@@ -126,6 +157,11 @@ impl RuntimeResolver {
         self.node.as_ref().and_then(|r| pnpm_exe(&r.dir))
     }
 
+    /// FFmpeg 主 exe 绝对路径（runtimes/ffmpeg/ffmpeg.exe）。
+    pub(crate) fn ffmpeg(&self) -> Option<PathBuf> {
+        self.ffmpeg.as_ref().map(|r| ffmpeg_exe(&r.dir))
+    }
+
     /// Python 主 exe 所在目录（供 bundled_pip_wheel_dir 推导 ensurepip/_bundled 路径）。
     pub(crate) fn python_dir(&self) -> Option<&Path> {
         self.python.as_ref().map(|r| r.dir.as_path())
@@ -137,6 +173,12 @@ impl RuntimeResolver {
         self.node.as_ref().map(|r| r.dir.as_path())
     }
 
+    /// FFmpeg 主 exe 所在目录（runtimes/ffmpeg/）。
+    #[allow(dead_code)]
+    pub(crate) fn ffmpeg_dir(&self) -> Option<&Path> {
+        self.ffmpeg.as_ref().map(|r| r.dir.as_path())
+    }
+
     pub(crate) fn python_source(&self) -> Option<&RuntimeSource> {
         self.python.as_ref().map(|r| &r.source)
     }
@@ -144,6 +186,11 @@ impl RuntimeResolver {
     #[allow(dead_code)]
     pub(crate) fn node_source(&self) -> Option<&RuntimeSource> {
         self.node.as_ref().map(|r| &r.source)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn ffmpeg_source(&self) -> Option<&RuntimeSource> {
+        self.ffmpeg.as_ref().map(|r| &r.source)
     }
 
     #[allow(dead_code)]
@@ -159,6 +206,9 @@ impl RuntimeResolver {
             Some("node" | "nodejs") => self.node(),
             Some("npm") => self.npm(),
             Some("pnpm") => self.pnpm(),
+            // FFmpeg 内置运行时：给需要绝对路径直接 spawn ffmpeg 的插件。
+            // 多数插件走 shutil.which("ffmpeg")——靠 path_value() 把 runtimes/ffmpeg/ 加进 PATH 命中。
+            Some("ffmpeg") => self.ffmpeg(),
             _ => None,
         }
     }
@@ -198,7 +248,16 @@ impl RuntimeResolver {
         env
     }
 
-    /// 拼接命中来源的 PATH 值（node + node/bin + python + python/Scripts + python/bin）。
+    /// 拼接命中来源的 PATH 值（node + node/bin + python + python/Scripts + python/bin
+    /// + ffmpeg + Windows 系统目录 System32 / Wbem / PowerShell）。
+    ///
+    /// **必须追加系统目录**：进程清空宿主 PATH 后，若 PATH 不含 System32，python.exe / node.exe
+    /// 启动时加载依赖 DLL（VCRUNTIME、api-ms-win-* 等）会因搜索路径缺失而立即崩溃（输出任何 stderr
+    /// 之前退出）；且 PS launcher 的 `cmd /c pause`、插件内 `shutil.which("ffmpeg")` 等
+    /// 也需 System32。这是 Windows 沙盒的通行做法：PATH 可受限，但 System32 必须保留。
+    ///
+    /// **ffmpeg 内置运行时进 PATH**：把 runtimes/ffmpeg/ 加到 PATH，插件的
+    /// `shutil.which("ffmpeg")` 直接命中内置版本，无需宿主机安装 ffmpeg。
     pub(crate) fn path_value(&self) -> OsString {
         let mut paths = Vec::new();
         if let Some(node) = &self.node {
@@ -209,6 +268,25 @@ impl RuntimeResolver {
             push_if_dir(&mut paths, python.dir.clone());
             push_if_dir(&mut paths, python.dir.join("Scripts"));
             push_if_dir(&mut paths, python.dir.join("bin"));
+        }
+        if let Some(ffmpeg) = &self.ffmpeg {
+            push_if_dir(&mut paths, ffmpeg.dir.clone());
+        }
+        // 追加 Windows 系统目录（System32 + Wbem + PowerShell），保证 OS 基础工具/DLL 可达。
+        #[cfg(windows)]
+        {
+            let sysroot = std::env::var_os("SystemRoot")
+                .unwrap_or_else(|| OsString::from("C:\\Windows"));
+            let sysroot = PathBuf::from(sysroot);
+            push_if_dir(&mut paths, sysroot.join("System32"));
+            push_if_dir(&mut paths, sysroot.join("System32").join("Wbem"));
+            push_if_dir(
+                &mut paths,
+                sysroot
+                    .join("System32")
+                    .join("WindowsPowerShell")
+                    .join("v1.0"),
+            );
         }
         std::env::join_paths(paths).unwrap_or_default()
     }
@@ -250,6 +328,25 @@ fn resolve_node<R: tauri::Runtime>(
     None
 }
 
+/// 解析 FFmpeg：仅 legacy 兜底（runtimes/ffmpeg/ffmpeg.exe）。
+/// 与 python/nodejs 同构，作为第三内置运行时。缺失时返回 None（不阻断插件启动，
+/// 仅 shutil.which("ffmpeg") 找不到——插件自行降级或报缺 ffmpeg）。
+fn resolve_ffmpeg<R: tauri::Runtime>(
+    _config: &RuntimeConfig,
+    app: &tauri::AppHandle<R>,
+) -> Option<ResolvedRuntime> {
+    if let Some(root) = legacy_runtimes_root(app) {
+        let dir = root.join("ffmpeg");
+        if ffmpeg_exe(&dir).is_file() {
+            return Some(ResolvedRuntime {
+                dir,
+                source: RuntimeSource::Legacy,
+            });
+        }
+    }
+    None
+}
+
 /// 内置 runtimes 根目录（0.0.18 唯一来源）。
 ///
 /// 来源优先级：`LINGFANG_EMBEDDED_RUNTIME_DIR` 环境变量 → exe 同级 runtimes/（发布安装包布局）
@@ -259,6 +356,7 @@ fn legacy_runtimes_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<
         let root = PathBuf::from(override_dir);
         if root.join("python").join(python_exe_name()).is_file()
             || root.join("nodejs").join(node_exe_name()).is_file()
+            || root.join("ffmpeg").join(ffmpeg_exe_name()).is_file()
         {
             return Some(root);
         }
@@ -313,6 +411,24 @@ fn node_exe_name() -> &'static str {
 #[cfg(not(windows))]
 fn node_exe_name() -> &'static str {
     "node"
+}
+
+#[cfg(windows)]
+fn ffmpeg_exe(dir: &Path) -> PathBuf {
+    dir.join("ffmpeg.exe")
+}
+#[cfg(not(windows))]
+fn ffmpeg_exe(dir: &Path) -> PathBuf {
+    dir.join("bin").join("ffmpeg")
+}
+
+#[cfg(windows)]
+fn ffmpeg_exe_name() -> &'static str {
+    "ffmpeg.exe"
+}
+#[cfg(not(windows))]
+fn ffmpeg_exe_name() -> &'static str {
+    "ffmpeg"
 }
 
 fn pip_exe(dir: &Path) -> Option<PathBuf> {
@@ -383,7 +499,7 @@ fn exe_sibling_runtimes_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     let runtimes = dir.join("runtimes");
-    // 仅当 runtimes 目录下确实有 python/node 二进制时才认定命中，避免误判空目录。
+    // 仅当 runtimes 目录下确实有 python/node/ffmpeg 二进制时才认定命中，避免误判空目录。
     let has_runtime = windows_unix(
         runtimes.join("python").join("python.exe"),
         runtimes.join("python").join("bin").join("python"),
@@ -392,6 +508,10 @@ fn exe_sibling_runtimes_dir() -> Option<PathBuf> {
     .chain(windows_unix(
         runtimes.join("nodejs").join("node.exe"),
         runtimes.join("nodejs").join("bin").join("node"),
+    ))
+    .chain(windows_unix(
+        runtimes.join("ffmpeg").join("ffmpeg.exe"),
+        runtimes.join("ffmpeg").join("bin").join("ffmpeg"),
     ))
     .any(|p| p.is_file());
     has_runtime.then_some(runtimes)
@@ -464,6 +584,19 @@ mod tests {
         assert!(!contains("PATH", "host-path"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn path_value_includes_windows_system32() {
+        // System32 必须在 PATH 里：python/node 启动加载依赖 DLL、PS launcher 的 cmd /c pause、
+        // 插件内 shutil.which("ffmpeg") 等都依赖 System32。清空宿主 PATH 后必须补回。
+        let r = RuntimeResolver::from_dirs(None, None);
+        let path = r.path_value().to_string_lossy().to_string();
+        assert!(
+            path.to_ascii_lowercase().contains("system32"),
+            "PATH 应含 System32，实际：{path}"
+        );
+    }
+
     #[test]
     fn env_uses_configured_mirrors() {
         let mut config = RuntimeConfig::default();
@@ -498,5 +631,67 @@ mod tests {
         let config = RuntimeConfig::default();
         let _r = RuntimeResolver::from_dirs_with_config(None, None, config);
         assert!(_r.python_source().is_none() || _r.python_source().is_some());
+    }
+
+    // === ffmpeg 内置运行时（第三运行时）测试 ===
+
+    #[test]
+    fn ffmpeg_none_when_not_configured() {
+        // 无 ffmpeg 配置 → ffmpeg() / ffmpeg_dir() / ffmpeg_source() 全 None。
+        let r = RuntimeResolver::from_dirs(None, None);
+        assert!(r.ffmpeg().is_none());
+        assert!(r.ffmpeg_dir().is_none());
+        assert!(r.ffmpeg_source().is_none());
+        // resolve_runtime_command 也 None。
+        assert!(r.resolve_runtime_command("ffmpeg").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ffmpeg_dir_in_path_when_configured() {
+        // 临时目录建 fake ffmpeg.exe → ffmpeg dir 应进 PATH（关键：插件 shutil.which 命中靠此）。
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-ffmpeg-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("ffmpeg.exe"), b"fake").unwrap();
+        let r = RuntimeResolver::from_dirs_with_ffmpeg(Some(tmp.clone()));
+        let path = r.path_value().to_string_lossy().to_string();
+        assert!(
+            path.contains(&tmp.to_string_lossy().to_string()),
+            "PATH 应含 ffmpeg 目录，实际：{path}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_ffmpeg_by_name() {
+        // 命名归一化：ffmpeg / ffmpeg.exe / FFMPEG 都解析到 ffmpeg 运行时。
+        let tmp = std::env::temp_dir().join(format!(
+            "lf-ffmpeg-name-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // 跨平台：Windows 建 ffmpeg.exe，Unix 建 bin/ffmpeg。
+        #[cfg(windows)]
+        std::fs::write(tmp.join("ffmpeg.exe"), b"fake").unwrap();
+        #[cfg(not(windows))]
+        {
+            std::fs::create_dir_all(tmp.join("bin")).unwrap();
+            std::fs::write(tmp.join("bin").join("ffmpeg"), b"fake").unwrap();
+        }
+        let r = RuntimeResolver::from_dirs_with_ffmpeg(Some(tmp.clone()));
+        assert!(r.resolve_runtime_command("ffmpeg").is_some());
+        assert!(r.resolve_runtime_command("FFMPEG").is_some());
+        #[cfg(windows)]
+        assert!(r.resolve_runtime_command("ffmpeg.exe").is_some());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
