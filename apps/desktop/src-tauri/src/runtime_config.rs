@@ -1,11 +1,10 @@
 //! 运行时配置持久化（runtime-config.json）。
 //!
-//! 真相源在 Rust 侧（前端只读镜像）：记录镜像源选择（mirrors），仅此而已。
-//! 内置运行时不需配置（Legacy 兜底自动命中）。
+//! 真相源在 Rust 侧：记录应用管理运行时、用户显式指定路径和镜像源。
 //!
 //! 落盘到 `{runtime_data_root}/.lingfang/runtime-config.json`，原子写复用 plugin_store 的 write_json。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -18,10 +17,29 @@ const META_DIR: &str = ".lingfang";
 const CONFIG_FILE: &str = "runtime-config.json";
 
 /// 运行时配置（整体序列化到 runtime-config.json，camelCase 对齐前端）。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedEntry {
+    pub version: String,
+    pub dir: String,
+    pub installed_at: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeConfig {
     #[serde(default)]
+    pub user_specified_python: Option<String>,
+    #[serde(default)]
+    pub user_specified_node: Option<String>,
+    #[serde(default)]
+    pub app_managed_python: Option<ManagedEntry>,
+    #[serde(default)]
+    pub app_managed_node: Option<ManagedEntry>,
+    #[serde(default)]
     pub mirrors: MirrorConfig,
+    #[serde(default)]
+    pub download_mirror_base: Option<String>,
 }
 
 /// 配置存储句柄（封装文件路径 + 读写操作）。
@@ -58,7 +76,7 @@ impl RuntimeConfigStore {
 }
 
 /// 运行时数据根目录（仅镜像源配置需持久化）。
-fn runtime_data_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
+pub(crate) fn runtime_data_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     if let Some(dir) = std::env::var_os("LINGFANG_RUNTIME_DIR") {
         return PathBuf::from(dir);
     }
@@ -73,6 +91,14 @@ fn runtime_data_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
         .or_else(|| app.path().app_local_data_dir().ok())
         .unwrap_or_else(std::env::temp_dir);
     base.join("LingFang").join("runtimes")
+}
+
+pub(crate) fn runtime_executable_dir(path: &Path) -> PathBuf {
+    if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent().unwrap_or(path).to_path_buf()
+    }
 }
 
 #[cfg(test)]
@@ -105,8 +131,10 @@ mod tests {
         let store = RuntimeConfigStore::from_path(path.clone());
         let mut cfg = RuntimeConfig::default();
         cfg.mirrors.pip_id = "aliyun".to_string();
+        cfg.user_specified_python = Some("C:\\Python312\\python.exe".to_string());
         store.write(&cfg).unwrap();
         let read_back = store.read();
         assert_eq!(read_back.mirrors.pip_id, "aliyun");
+        assert_eq!(read_back.user_specified_python.as_deref(), Some("C:\\Python312\\python.exe"));
     }
 }

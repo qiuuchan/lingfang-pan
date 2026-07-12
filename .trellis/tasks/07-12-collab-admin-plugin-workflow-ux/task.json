@@ -1,0 +1,32 @@
+{
+  "id": "collab-admin-plugin-workflow-ux",
+  "name": "collab-admin-plugin-workflow-ux",
+  "title": "优化后台管理端样式与插件审批动线",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-07-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "betav2",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-12-admin-ui-foundation",
+    "07-12-admin-governance-center",
+    "07-12-admin-core-data-loading",
+    "07-12-admin-billing-data-loading",
+    "07-12-admin-dashboard-settings-lazy"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -21,7 +21,7 @@ This is a work-focused app. Existing pages use restrained cards and dense lists,
 
 Current layout rules:
 - Auth is a centered full-screen state; tenant switching is a Dialog opened from the Sidebar user area.
-- Plugin run and plugin development are independent main-area views. The title-bar segment switches between `run-plugins` (`PluginCenterBody`) and `develop-plugins` (`CreatorWorkspace`), with `PageTransition` handling the simple view animation. `develop-plugins` intentionally takes over the main area and hides the outer app Sidebar while active.
+- Plugin run uses the main-area `run-plugins` view. AI plugin creation normally opens `CreatorWorkspace` in a large top-level Dialog from the bottom-right floating action; the existing `develop-plugins` full workspace remains available for draft editing and hides the outer app Sidebar while active.
 - The develop plugin page is a single Agent workbench: left conversation/history navigation, one centered thread column (`max-w-[52rem]`), a bottom compact composer, and an optional right-side Artifact Inspector when a staged plugin exists. Do not add a second creator toolbar, modal creator shell, or message-area context bar.
 - Composer permanent controls are limited to add/more, Agent/Plan, model, the single context-usage entry, and send/stop. Skills, files/folders, referenced plugins, prompt optimization, voice, and workspace actions belong in the composer more menu or context chips.
 - The Artifact Inspector is not a second conversation/context window. It owns staged plugin metadata, files, diagnostics, save, and publish actions, using a responsive width of `clamp(360px, 30vw, 420px)`.

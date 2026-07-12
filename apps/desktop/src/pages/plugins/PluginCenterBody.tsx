@@ -3,6 +3,7 @@ import {
   ArchiveRestoreIcon,
   BoxIcon,
   DownloadIcon,
+  FileArchiveIcon,
   FileEditIcon,
   HistoryIcon,
   Loader2Icon,
@@ -16,24 +17,27 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
+import { PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import type { LoadedPlugin } from '@/lib/types';
 import {
   buyMarketplacePackage,
   copyInstallationToDraft,
   downloadRelease,
   importLocalArtifact,
+  getPluginPackageDetail,
   listInstallations,
   listMarketplaceRegistry,
   listTeamRegistry,
   loadInstalledPlugin,
   loadDraftWorkspacePlugin,
   rollbackInstallation,
+  selectPluginArtifact,
   uninstallInstallation,
   type Installation,
   type RegistryCatalogItem,
@@ -148,6 +152,15 @@ export function PluginCenterBody({
     }
   };
 
+  const chooseImportArtifact = async () => {
+    try {
+      const selected = await selectPluginArtifact();
+      if (selected) setImportPath(selected);
+    } catch (caught) {
+      toast.error(errorMessage(caught, '选择插件制品失败'));
+    }
+  };
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <div className="mx-auto max-w-6xl">
@@ -247,7 +260,7 @@ export function PluginCenterBody({
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>导入本地插件</DialogTitle><DialogDescription>导入 `.lfplugin` v4 压缩包并校验后登记为本机安装项。</DialogDescription></DialogHeader>
-          <Input value={importPath} onChange={(event) => setImportPath(event.target.value)} placeholder="C:\\path\\plugin.lfplugin" />
+          <div className="flex gap-2"><Input value={importPath} onChange={(event) => setImportPath(event.target.value)} placeholder="选择 .lfplugin 文件（开发环境可输入路径）" /><Button variant="outline" size="icon" title="选择插件制品" onClick={() => void chooseImportArtifact()}><FileArchiveIcon /></Button></div>
           <DialogFooter><Button variant="outline" onClick={() => setImportOpen(false)}>取消</Button><Button disabled={!importPath.trim() || busyKey === 'local-import'} onClick={async () => {
             setBusyKey('local-import');
             try { await importLocalArtifact(importPath.trim()); toast.success('本地插件已导入'); setImportOpen(false); setImportPath(''); await reload(); }
@@ -336,6 +349,7 @@ function CatalogList({ items, installed, loading, busyKey, marketplace, onDownlo
               <div className="flex flex-wrap items-center gap-2">
                 <span className="truncate font-medium">{item.package.name}</span>
                 <Badge variant="outline">v{item.latestRelease.version}</Badge>
+                <PluginSourceBadge sourceKind={item.latestRelease.sourceKind} sourceLabel={item.latestRelease.sourceLabel} ingestChannel={item.latestRelease.ingestChannel} />
                 {marketplace && <Badge variant="secondary">{(item.priceCents || 0) === 0 ? '免费' : `¥${((item.priceCents || 0) / 100).toFixed(2)}`}</Badge>}
               </div>
               <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{item.package.description || '暂无描述'}</p>
@@ -365,7 +379,7 @@ function TransferProgressBar({ progress }: { progress: TransferProgress }) {
 }
 
 function SourceBadge({ origin }: { origin: Installation['origin'] }) {
-  return <Badge variant="secondary">{{ builtin: '内置', local: '本地导入', team: '团队', marketplace: '市场' }[origin]}</Badge>;
+  return <Badge variant="secondary">安装来源：{{ builtin: '内置', local: '本地导入', team: '团队', marketplace: '市场' }[origin]}</Badge>;
 }
 
 function dependencyLabel(status: Installation['activeRelease']['dependencyStatus']) {
@@ -386,7 +400,7 @@ function PackageHistoryDialog({ packageInfo, onClose }: { packageInfo: RegistryP
   useEffect(() => {
     if (!packageInfo) return;
     setLoading(true);
-    void api<{ releases: RegistryRelease[] }>(`/api/plugin-packages/${packageInfo.id}`)
+    void getPluginPackageDetail(packageInfo.id)
       .then((response) => setReleases(response.releases))
       .catch((caught) => toast.error(errorMessage(caught, '版本历史加载失败')))
       .finally(() => setLoading(false));
@@ -398,7 +412,7 @@ function PackageHistoryDialog({ packageInfo, onClose }: { packageInfo: RegistryP
         <div className="max-h-80 divide-y overflow-y-auto rounded-lg border">
           {loading ? <ListLoading /> : releases.map((release) => (
             <div key={release.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <div><div className="font-medium">v{release.version}</div><div className="font-mono text-xs text-muted-foreground">{release.sha256.slice(0, 16)}...</div></div>
+              <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">v{release.version}</span><PluginSourceBadge sourceKind={release.sourceKind} sourceLabel={release.sourceLabel} ingestChannel={release.ingestChannel} /></div><div className="mt-1 font-mono text-xs text-muted-foreground">{release.sha256.slice(0, 16)}...</div></div>
               <Badge variant={release.status === 'PUBLISHED' ? 'secondary' : 'outline'}>{release.status === 'PUBLISHED' ? '可下载' : '已撤回'}</Badge>
             </div>
           ))}

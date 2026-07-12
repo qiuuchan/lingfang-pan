@@ -1,6 +1,9 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 type PaginationProps = {
@@ -12,7 +15,41 @@ type PaginationProps = {
   pageSizeOptions?: number[];
 };
 
+type PaginationIconButtonProps = Omit<ComponentProps<typeof Button>, 'aria-label' | 'children'> & {
+  label: string;
+  icon: ReactNode;
+  wrapperClassName?: string;
+};
+
 const DEFAULT_SIZES = [10, 20, 50];
+
+function PaginationIconButton({
+  label,
+  icon,
+  className,
+  wrapperClassName,
+  ...props
+}: PaginationIconButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cn('inline-flex', wrapperClassName)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className={cn('size-8', className)}
+            aria-label={label}
+            {...props}
+          >
+            {icon}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function Pagination({
   totalItems,
@@ -22,117 +59,122 @@ export function Pagination({
   onPageSizeChange,
   pageSizeOptions = DEFAULT_SIZES,
 }: PaginationProps) {
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const start = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const end = Math.min(currentPage * pageSize, totalItems);
+  const totalPages = Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize)));
+  const activePage = Math.min(Math.max(1, currentPage), totalPages);
 
-  // Generate visible page numbers
   const pages: (number | 'ellipsis')[] = [];
   if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
+    for (let page = 1; page <= totalPages; page += 1) pages.push(page);
   } else {
     pages.push(1);
-    if (currentPage > 3) pages.push('ellipsis');
-    for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
-      pages.push(i);
+    if (activePage > 3) pages.push('ellipsis');
+    for (
+      let page = Math.max(2, activePage - 1);
+      page <= Math.min(totalPages - 1, activePage + 1);
+      page += 1
+    ) {
+      pages.push(page);
     }
-    if (currentPage < totalPages - 2) pages.push('ellipsis');
+    if (activePage < totalPages - 2) pages.push('ellipsis');
     pages.push(totalPages);
   }
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-4">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span>每页</span>
+    <div className="flex items-center justify-between gap-2 pt-4">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <span className="hidden sm:inline">每页</span>
         <Select
           value={String(pageSize)}
-          onValueChange={(v) => {
-            onPageSizeChange(Number(v));
+          onValueChange={(value) => {
+            onPageSizeChange(Number(value));
             onPageChange(1);
           }}
         >
-          <SelectTrigger className="h-8 w-[70px]">
+          <SelectTrigger className="h-8 w-[4.5rem]" aria-label="每页条数">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {pageSizeOptions.map((s) => (
-              <SelectItem key={s} value={String(s)}>{s}</SelectItem>
+            {pageSizeOptions.map((size) => (
+              <SelectItem key={size} value={String(size)}>
+                {size} 条
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <span>条，共 {totalItems} 条</span>
+        <span className="hidden whitespace-nowrap sm:inline">共 {totalItems} 条</span>
       </div>
 
-      <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-8"
-          disabled={currentPage <= 1}
+      <nav className="flex shrink-0 items-center gap-1" aria-label="分页">
+        <PaginationIconButton
+          label="第一页"
+          icon={<ChevronsLeftIcon className="size-3.5" />}
+          wrapperClassName="hidden sm:inline-flex"
+          disabled={activePage <= 1}
           onClick={() => onPageChange(1)}
-        >
-          <ChevronsLeftIcon className="size-3.5" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-8"
-          disabled={currentPage <= 1}
-          onClick={() => onPageChange(currentPage - 1)}
-        >
-          <ChevronLeftIcon className="size-3.5" />
-        </Button>
+        />
+        <PaginationIconButton
+          label="上一页"
+          icon={<ChevronLeftIcon className="size-3.5" />}
+          disabled={activePage <= 1}
+          onClick={() => onPageChange(activePage - 1)}
+        />
 
-        {pages.map((p, i) =>
-          p === 'ellipsis' ? (
-            <span key={`e-${i}`} className="w-8 text-center text-sm text-muted-foreground">…</span>
-          ) : (
-            <Button
-              key={p}
-              variant={p === currentPage ? 'default' : 'outline'}
-              size="icon"
-              className={cn('size-8 text-xs', p === currentPage && 'pointer-events-none')}
-              onClick={() => onPageChange(p)}
-            >
-              {p}
-            </Button>
-          ),
-        )}
+        <span className="min-w-14 text-center text-sm tabular-nums text-muted-foreground sm:hidden">
+          {activePage}/{totalPages}
+        </span>
 
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-8"
-          disabled={currentPage >= totalPages}
-          onClick={() => onPageChange(currentPage + 1)}
-        >
-          <ChevronRightIcon className="size-3.5" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-8"
-          disabled={currentPage >= totalPages}
+        <div className="hidden items-center gap-1 sm:flex">
+          {pages.map((page, index) =>
+            page === 'ellipsis' ? (
+              <span
+                key={`ellipsis-${index}`}
+                className="w-8 text-center text-sm text-muted-foreground"
+                aria-hidden="true"
+              >
+                …
+              </span>
+            ) : (
+              <Button
+                key={page}
+                type="button"
+                variant={page === activePage ? 'default' : 'outline'}
+                size="icon"
+                className={cn('size-8 text-xs', page === activePage && 'pointer-events-none')}
+                aria-label={`第 ${page} 页`}
+                aria-current={page === activePage ? 'page' : undefined}
+                tabIndex={page === activePage ? -1 : undefined}
+                onClick={() => onPageChange(page)}
+              >
+                {page}
+              </Button>
+            ),
+          )}
+        </div>
+
+        <PaginationIconButton
+          label="下一页"
+          icon={<ChevronRightIcon className="size-3.5" />}
+          disabled={activePage >= totalPages}
+          onClick={() => onPageChange(activePage + 1)}
+        />
+        <PaginationIconButton
+          label="最后一页"
+          icon={<ChevronsRightIcon className="size-3.5" />}
+          wrapperClassName="hidden sm:inline-flex"
+          disabled={activePage >= totalPages}
           onClick={() => onPageChange(totalPages)}
-        >
-          <ChevronsRightIcon className="size-3.5" />
-        </Button>
-      </div>
+        />
+      </nav>
     </div>
   );
 }
 
-/** Hook for client-side pagination */
-import { useState, useMemo, useEffect } from 'react';
-
+/** @deprecated Prefer server-side pagination for remotely loaded collections. */
 export function usePagination<T>(items: T[], defaultPageSize = 10) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
 
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  // ADMIN-VIEW-06 修复：派生 effectivePage = min(page, totalPages)，
-  // 让本次渲染立即用有效页计算 paginated，避免旧实现「本次渲染用越界 page 得空数组→短暂渲染空态→
-  // setTimeout 下一 tick 重置」的闪烁。
   const effectivePage = Math.min(page, totalPages);
 
   const paginated = useMemo(() => {
@@ -140,8 +182,6 @@ export function usePagination<T>(items: T[], defaultPageSize = 10) {
     return items.slice(start, start + pageSize);
   }, [items, effectivePage, pageSize]);
 
-  // ADMIN-VIEW-06：在 effect（提交阶段）而非渲染体内同步 page 到有效范围。
-  // 列表收缩使当前页越界时，下一渲染 effectivePage 已夹到 totalPages，无空态闪烁。
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);

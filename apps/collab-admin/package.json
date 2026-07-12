@@ -7,10 +7,12 @@
     "dev": "vite --host 0.0.0.0 --port 19005",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 19005",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
+    "@lingfang/contract": "workspace:*",
     "@radix-ui/react-dialog": "^1.1.16",
     "@radix-ui/react-label": "^2.1.9",
     "@radix-ui/react-popover": "^1.1.16",

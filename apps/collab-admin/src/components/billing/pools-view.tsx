@@ -1,11 +1,11 @@
 // 资源池管理：SHARED 共享 / DEDICATED 单团队。渠道归属池；relay 按团队可用池路由。
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { PlusIcon, Trash2Icon, PencilIcon } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useLoad, run } from '@/lib/helpers';
+import { run } from '@/lib/helpers';
 import { Section, ActionBar } from '@/components/shared';
-import { usePagination, Pagination } from '@/components/ui/pagination';
+import { Pagination } from '@/components/ui/pagination';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,9 +17,11 @@ import type { Pool, PoolScope } from '@/lib/types';
 
 export function PoolsView() {
   const [pools, setPools] = useState<Pool[]>([]);
-  const load = () => api<{ pools: Pool[] }>('/api/admin/billing/pools').then((r) => setPools(r.pools ?? []));
-  useLoad(load);
-  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(pools);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalItems, setTotalItems] = useState(0);
+  const load = useCallback(() => api<{ items: Pool[]; total: number }>(`/api/admin/billing/pools?page=${page}&pageSize=${pageSize}`).then((r) => { setPools(r.items); setTotalItems(r.total); }), [page, pageSize]);
+  useEffect(() => { void load(); }, [load]);
 
   async function remove(p: Pool) {
     if (!window.confirm(`确认删除资源池「${p.name}」？池内渠道一并删除。`)) return;
@@ -35,7 +37,7 @@ export function PoolsView() {
       <Table>
         <TableHeader><TableRow><TableHead>名称</TableHead><TableHead>范围</TableHead><TableHead>团队</TableHead><TableHead>渠道数</TableHead><TableHead className="w-[160px]">操作</TableHead></TableRow></TableHeader>
         <TableBody>
-          {paginated.length ? paginated.map((p) => (
+          {pools.length ? pools.map((p) => (
             <TableRow key={p.id}>
               <TableCell className="font-medium">{p.name}</TableCell>
               <TableCell>{p.scope === 'SHARED' ? <Badge variant="success">共享</Badge> : <Badge variant="secondary">单团队</Badge>}</TableCell>

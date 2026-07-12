@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, notFound } from '../common';
 import { AuthService } from './auth.service';
+import { normalizeAdminPage } from './admin-data-loading';
 import {
   PERMISSION_CODE_SET,
   permissionCodesByScope,
@@ -10,6 +12,39 @@ import {
   SYSTEM_TEAM_ADMIN_ROLE_CODE,
   type PermissionScope,
 } from './permissions/permission-codes';
+
+type RoleListQuery = {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+};
+
+const ROLE_DETAIL_SELECT = {
+  id: true,
+  name: true,
+  code: true,
+  scope: true,
+  teamId: true,
+  isSystem: true,
+  description: true,
+  permissions: true,
+  createdAt: true,
+  updatedAt: true,
+} as const satisfies Prisma.RoleSelect;
+
+const PLATFORM_ROLE_LIST_SELECT = {
+  ...ROLE_DETAIL_SELECT,
+  _count: { select: { users: true } },
+} as const satisfies Prisma.RoleSelect;
+
+const TEAM_ROLE_LIST_SELECT = {
+  ...ROLE_DETAIL_SELECT,
+  _count: {
+    select: {
+      memberships: { where: { status: 'ACTIVE' } },
+    },
+  },
+} as const satisfies Prisma.RoleSelect;
 
 /** 公共 Role 序列化：转 HTTP 响应（对齐 contract Role schema camelCase）。 */
 function publicRole(
@@ -42,6 +77,49 @@ function publicRole(
   };
 }
 
+function roleSummary(
+  role: {
+    id: string;
+    name: string;
+    code: string | null;
+    scope: 'PLATFORM' | 'TEAM';
+    teamId: string | null;
+    isSystem: boolean;
+    description: string;
+    permissions: string[];
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  memberCount: number,
+) {
+  return {
+    id: role.id,
+    name: role.name,
+    code: role.code,
+    scope: role.scope,
+    teamId: role.teamId,
+    isSystem: role.isSystem,
+    description: role.description,
+    permissionCount: role.permissions.length,
+    memberCount,
+    createdAt: role.createdAt.toISOString(),
+    updatedAt: role.updatedAt.toISOString(),
+  };
+}
+
+function roleListWhere(scope: PermissionScope, teamId: string | null, query: RoleListQuery): Prisma.RoleWhereInput {
+  const where: Prisma.RoleWhereInput = { scope, teamId };
+  const keyword = query.q?.trim();
+  if (keyword) {
+    where.OR = [
+      { name: { contains: keyword, mode: 'insensitive' } },
+      { code: { contains: keyword, mode: 'insensitive' } },
+      { description: { contains: keyword, mode: 'insensitive' } },
+    ];
+  }
+  return where;
+}
+
 @Injectable()
 export class RoleService {
   constructor(
@@ -58,21 +136,34 @@ export class RoleService {
 
   // ============ 平台角色（scope=PLATFORM，平台管理员在 web 端管理） ============
 
-  /** 列出全部平台级角色（含成员数）。需 platform.role.manage 权限。 */
-  async listPlatformRoles(userId: string) {
+  /** Platform role summaries are paginated; full permissions are loaded by getPlatformRole. */
+  async listPlatformRoles(userId: string, query: RoleListQuery = {}) {
     await this.auth.ensurePermission(userId, 'platform.role.manage');
-    const roles = await this.prisma.role.findMany({
-      where: { scope: 'PLATFORM' },
-      orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }],
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where = roleListWhere('PLATFORM', null, query);
+    const [roles, total] = await Promise.all([
+      this.prisma.role.findMany({
+        where,
+        orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        skip,
+        take: pageSize,
+        select: PLATFORM_ROLE_LIST_SELECT,
+      }),
+      this.prisma.role.count({ where }),
+    ]);
+    const items = roles.map(({ _count, ...role }) => roleSummary(role, _count.users));
+    return { items, total, page, pageSize };
+  }
+
+  async getPlatformRole(userId: string, roleId: string) {
+    await this.auth.ensurePermission(userId, 'platform.role.manage');
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: ROLE_DETAIL_SELECT,
     });
-    // 成员数：平台角色通过 User.platformRoleId 关联
-    const counts = await this.prisma.user.groupBy({
-      by: ['platformRoleId'],
-      where: { platformRoleId: { in: roles.map((r) => r.id) } },
-      _count: { _all: true },
-    });
-    const countMap = new Map(counts.map((c) => [c.platformRoleId, c._count._all]));
-    return { roles: roles.map((r) => publicRole(r, countMap.get(r.id) ?? 0)) };
+    if (!role || role.scope !== 'PLATFORM') throw notFound('平台角色不存在');
+    const memberCount = await this.prisma.user.count({ where: { platformRoleId: roleId } });
+    return { role: publicRole(role, memberCount) };
   }
 
   /** 创建平台角色。需 platform.role.manage 权限。 */
@@ -289,21 +380,45 @@ export class RoleService {
     return team;
   }
 
-  /** 列出指定团队的全部角色（含成员数）。需 platform.team.role.manage 权限。 */
-  async listTeamRolesForTeam(userId: string, teamId: string) {
+  /** Read-only governance remains available for suspended teams. */
+  private async assertTeamExists(teamId: string) {
+    const team = await this.prisma.team.findUnique({ where: { id: teamId }, select: { id: true } });
+    if (!team) throw notFound('团队不存在');
+    return team;
+  }
+
+  /** Managed-team role summaries are paginated; permissions are loaded by getTeamRoleForTeam. */
+  async listTeamRolesForTeam(userId: string, teamId: string, query: RoleListQuery = {}) {
     await this.auth.ensurePermission(userId, 'platform.team.role.manage');
-    await this.assertTeamManaged(teamId);
-    const roles = await this.prisma.role.findMany({
-      where: { scope: 'TEAM', teamId },
-      orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }],
+    await this.assertTeamExists(teamId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where = roleListWhere('TEAM', teamId, query);
+    const [roles, total] = await Promise.all([
+      this.prisma.role.findMany({
+        where,
+        orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        skip,
+        take: pageSize,
+        select: TEAM_ROLE_LIST_SELECT,
+      }),
+      this.prisma.role.count({ where }),
+    ]);
+    const items = roles.map(({ _count, ...role }) => roleSummary(role, _count.memberships));
+    return { items, total, page, pageSize };
+  }
+
+  async getTeamRoleForTeam(userId: string, teamId: string, roleId: string) {
+    await this.auth.ensurePermission(userId, 'platform.team.role.manage');
+    await this.assertTeamExists(teamId);
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: ROLE_DETAIL_SELECT,
     });
-    const counts = await this.prisma.teamMembership.groupBy({
-      by: ['teamRoleId'],
-      where: { teamRoleId: { in: roles.map((r) => r.id) }, status: 'ACTIVE' },
-      _count: { _all: true },
+    if (!role || role.scope !== 'TEAM' || role.teamId !== teamId) throw notFound('团队角色不存在');
+    const memberCount = await this.prisma.teamMembership.count({
+      where: { teamRoleId: roleId, status: 'ACTIVE' },
     });
-    const countMap = new Map(counts.map((c) => [c.teamRoleId, c._count._all]));
-    return { roles: roles.map((r) => publicRole(r, countMap.get(r.id) ?? 0)) };
+    return { role: publicRole(role, memberCount) };
   }
 
   /** 为指定团队创建角色。需 platform.team.role.manage 权限。 */

@@ -12,11 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { buildStagedManifest, validateStagedCompleteness, withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
-import type { UploadProgress } from '@/lib/plugin-upload';
-import { UploadProgressDialog, type UploadStage } from '@/components/plugins/UploadProgressDialog';
+import { PublishPluginDialog } from '@/components/plugins/PublishPluginDialog';
 import { validatePluginStructure } from '@/lib/plugin-draft/manifest';
 import { cn } from '@/lib/utils';
-import { persistDraftWorkspace, publishDraftWorkspace } from '@/lib/plugin-registry';
+import { persistDraftWorkspace } from '@/lib/plugin-registry';
 
 // 能力白名单：必须与后端 plugin-package.ts ALLOWED_CAPABILITIES 完全一致，否则勾选后端不认的能力会 400。
 const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
@@ -57,13 +56,8 @@ export function CreatorDraftPanel({
   onWorkspacePersisted: (workspaceId: string) => void;
 }) {
   const [savingDraft, setSavingDraft] = useState(false);
-  const [publishingTeam, setPublishingTeam] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<InspectorTab>('overview');
-  // 上传进度弹窗状态。
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadStage, setUploadStage] = useState<UploadStage>('uploading');
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
-  const [uploadError, setUploadError] = useState<string | undefined>(undefined);
 
   const preparedDraft = useMemo(() => withSyncedStagedManifest(draft), [draft]);
   const entryMissing = !preparedDraft.files.some((f) => f.path === preparedDraft.entry);
@@ -92,31 +86,9 @@ export function CreatorDraftPanel({
     return true;
   }
 
-  async function handleSubmitToTeam() {
+  function handleOpenPublish() {
     if (!validateDraftReady()) return;
-    setPublishingTeam(true);
-    setUploadOpen(true);
-    setUploadStage('uploading');
-    setUploadProgress(null);
-    setUploadError(undefined);
-    try {
-      const workspace = await persistPreparedWorkspace(preparedDraft, workspaceId ?? undefined, conversationId);
-      onWorkspacePersisted(workspace.workspaceId);
-      const result = await publishDraftWorkspace(workspace, (info) => setUploadProgress({
-        uploaded: info.transferred,
-        total: info.total || 0,
-        speed: 0,
-      }));
-      setUploadStage('done');
-      toast.success(`插件「${preparedDraft.name}」已发布团队版本 v${result.release.version}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setUploadStage('error');
-      setUploadError(msg);
-      toast.error(msg);
-    } finally {
-      setPublishingTeam(false);
-    }
+    setPublishOpen(true);
   }
 
   async function handleSaveDraft() {
@@ -134,7 +106,7 @@ export function CreatorDraftPanel({
     }
   }
 
-  const actionDisabled = publishingTeam || savingDraft || busy || hasFail;
+  const actionDisabled = savingDraft || busy || hasFail;
 
   return (
     <aside className="flex h-full w-[clamp(360px,30vw,420px)] shrink-0 flex-col border-l bg-card text-card-foreground">
@@ -323,11 +295,11 @@ export function CreatorDraftPanel({
         <div className="flex flex-col gap-2.5">
           <Button
             className="h-10 w-full rounded-lg px-6 text-sm font-medium shadow-none"
-            onClick={() => { void handleSubmitToTeam(); }}
+            onClick={handleOpenPublish}
             disabled={actionDisabled}
           >
-            {publishingTeam ? <Loader2Icon data-icon="inline-start" className="animate-spin" /> : hasFail ? <XCircleIcon data-icon="inline-start" /> : <UploadIcon data-icon="inline-start" />}
-            {publishingTeam ? '提交中…' : busy ? 'AI 生成中，请稍候…' : hasFail ? '请先修复检查结果中的问题' : '提交到团队空间'}
+            {hasFail ? <XCircleIcon data-icon="inline-start" /> : <UploadIcon data-icon="inline-start" />}
+            {busy ? 'AI 生成中，请稍候…' : hasFail ? '请先修复检查结果中的问题' : '发布插件'}
           </Button>
           <Button
             variant="outline"
@@ -343,13 +315,21 @@ export function CreatorDraftPanel({
           提交后可在插件中心「团队插件」运行；保存本地需要桌面环境。
         </p>
       </div>
-      <UploadProgressDialog
-        open={uploadOpen}
-        stage={uploadStage}
-        progress={uploadProgress}
-        pluginName={draft.name}
-        errorMessage={uploadError}
-        onClose={() => setUploadOpen(false)}
+      <PublishPluginDialog
+        open={publishOpen}
+        onOpenChange={setPublishOpen}
+        draft={preparedDraft}
+        defaultSourceKind={preparedDraft.sourceKind || 'LINGFANG_CREATOR'}
+        defaultSourceLabel={preparedDraft.sourceLabel || '灵枋创建器'}
+        onPrepareWorkspace={async () => {
+          const workspace = await persistPreparedWorkspace(preparedDraft, workspaceId ?? undefined, conversationId);
+          onWorkspacePersisted(workspace.workspaceId);
+          return workspace;
+        }}
+        onPublished={(result) => {
+          toast.success(`插件「${preparedDraft.name}」已发布 v${result.release?.version || preparedDraft.version}`);
+          onSubmitted(preparedDraft.name);
+        }}
       />
     </aside>
   );
@@ -368,6 +348,8 @@ async function persistPreparedWorkspace(
     version: draft.version,
     runtime: draft.runtime_type,
     conversationId,
+    sourceKind: draft.sourceKind || 'LINGFANG_CREATOR',
+    sourceLabel: draft.sourceLabel || '灵枋创建器',
     files: [
       { path: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` },
       ...draft.files.filter((file) => file.path !== 'manifest.json'),

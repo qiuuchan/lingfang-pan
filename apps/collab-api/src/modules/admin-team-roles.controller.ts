@@ -1,11 +1,11 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { RoleService } from './role.service';
-import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
+import { CreateRoleDto, RoleListQueryDto, UpdateRoleDto } from './dto/role.dto';
 
 /**
  * 平台管理员代管团队角色控制器（web 端 collab-admin 团队详情「角色」tab 使用）。
@@ -35,9 +35,15 @@ export class AdminTeamRolesController {
   }
 
   @Get(':id/roles')
-  @ApiOperation({ summary: '列出指定团队的全部角色（含成员数，平台管理员代管）' })
-  list(@Req() req: Request, @Param('id') id: string) {
-    return this.role.listTeamRolesForTeam(requireUser(req).id, id);
+  @ApiOperation({ summary: '分页列出指定团队角色摘要（平台管理员代管）' })
+  list(@Req() req: Request, @Param('id') id: string, @Query() query: RoleListQueryDto) {
+    return this.role.listTeamRolesForTeam(requireUser(req).id, id, query);
+  }
+
+  @Get(':id/roles/:roleId')
+  @ApiOperation({ summary: '指定团队角色详情（含 permissions）' })
+  detail(@Req() req: Request, @Param('id') id: string, @Param('roleId') roleId: string) {
+    return this.role.getTeamRoleForTeam(requireUser(req).id, id, roleId);
   }
 
   @Post(':id/roles')

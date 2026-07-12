@@ -2,7 +2,7 @@
 
 # LingFang
 
-**基于 AI 的插件生成与协作平台** —— 自然语言生成插件，沙箱预览，三种 AI 编码助手注入，统一后端支撑桌面端、官网与管理后台。
+**基于 AI 的插件创建与协作平台** —— 使用 OpenAI Agents SDK 对话创建插件，本地隔离预览，并通过统一后端完成发布、治理、模型 relay 与团队协作。
 
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-339933?logo=node.js&logoColor=white)](#环境要求)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A5%209-F69220?logo=pnpm&logoColor=white)](#环境要求)
@@ -40,7 +40,7 @@
 
 LingFang 是一个 monorepo 形态的 AI 插件平台，核心能力是用对话式自然语言生成可运行的插件，并通过统一的 `collab-api` 后端串联起三端：
 
-- **桌面客户端**（Tauri 2 + React）—— AI 插件生成器、三种 CLI 编码助手、模型网关、沙箱预览、检查更新、市场、钱包、团队。
+- **桌面客户端**（Tauri 2 + React）—— Agents SDK 插件创建器、本地工作区与隔离运行、检查更新、市场、钱包、团队。
 - **管理后台 + 官网落地页**（React + shadcn/ui，二合一）—— 未登录展示官网，登录后进入后台管理用户/团队/插件/审批/审计。
 - **统一后端**（NestJS + Prisma + PostgreSQL/MySQL，可选 Redis）—— 鉴权、插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台 API。
 
@@ -57,13 +57,11 @@ LingFang 是一个 monorepo 形态的 AI 插件平台，核心能力是用对话
 - **结构化输出** —— 生成器产出结构化草稿（manifest + 文件 + 能力声明），支持 `client` / `nodejs` / `python` / `cloud` 四类运行时。
 - **沙箱即时预览** —— 生成结果在桌面端内置沙箱中即时预览运行。
 
-### 三种 CLI 编码助手注入
+### Agent 创建工作区
 
-- **claude / codex / opencode** —— 桌面壳（Rust）自动检测本地 CLI 可用性，会话级隔离配置注入：
-  - 从后端拉取租户绑定的 `apiKey` + `apiUrl`，key 明文仅在 Rust 进程内流转，不进前端。
-  - codex/opencode 写入会话级临时配置文件（`cli-configs/<sessionId>/`），claude 走环境变量。
-  - 用户选定模型透传到 codex `config.toml` 与 opencode `json` 的 `lingfang/<model>`。
-- **探针与会话管理** —— 启动/停止/列表/重命名/删除会话、读取 transcript、保存草稿、扫描 workspace 产出插件文件。
+- **OpenAI Agents SDK + 平台 relay** —— 创建器通过统一 Agent 会话调用模型，不依赖用户机器上的 CLI 编码助手。
+- **结构化工具链** —— Agent 读取、写入和验证工作区文件，前端展示对话、草稿、诊断与发布状态。
+- **本地运行边界** —— Python/Node 插件只使用 Runtime Resolver 选定的应用管理或用户显式指定运行时，不静默回退系统 PATH。
 
 ### 模型网关
 
@@ -112,8 +110,8 @@ LingFang 是一个 monorepo 形态的 AI 插件平台，核心能力是用对话
 ```mermaid
 graph TB
     subgraph Desktop["桌面客户端 Tauri 2 + React"]
-        Gen["AI 插件生成器（SSE 流式）"]
-        Cli["三种 CLI 编码助手（claude/codex/opencode）"]
+        Gen["AI 插件创建器（流式对话）"]
+        Cli["OpenAI Agents SDK 创建工作区"]
         Sandbox["沙箱预览"]
         Updater["检查更新（minisign）"]
         Market["插件市场 / 钱包 / 团队"]
@@ -147,7 +145,7 @@ graph TB
 | 子系统 | 技术栈 | 数据库 | 职责 |
 |--------|--------|--------|------|
 | `apps/collab-api` | NestJS 11 + Prisma 7 + Express 5 | PostgreSQL / MySQL，Redis 可选 | 鉴权、插件生成、LLM 代理、市场、钱包、多租户团队、RBAC、管理后台、版本发布、通知 |
-| `apps/desktop` | Tauri 2 + React 18 + Vite 6 | —（经 collab-api） | 桌面端 UI、AI 生成器、CLI 注入、内置插件、本地命令（Rust） |
+| `apps/desktop` | Tauri 2 + React 18 + Vite 6 | —（经 collab-api） | 桌面端 UI、Agent 创建器、插件运行与安装、本地命令（Rust） |
 | `apps/collab-admin` | React 18 + shadcn/ui + Tailwind 4 | —（经 collab-api） | 官网落地页 + Web 管理后台（二合一） |
 | `packages/contract` | Zod | — | 前后端共享契约（类型唯一真源） |
 | `packages/plugin-sdk` | TypeScript | — | 插件作者用的能力客户端 SDK |
@@ -360,7 +358,7 @@ lingfang-platform/
 │   │   │   ├── components/           chat / creator / onboarding / ui（shadcn）
 │   │   │   └── lib/                  api / cli / conversations / plugin-draft / updater 等
 │   │   ├── src-tauri/                Rust 桌面壳
-│   │   │   └── src/                  main / plugins / capability / code_assistant / cli_config / llm_* / updater
+│   │   │   └── src/                  main / runtime_resolver / plugin_package_manager / capability / updater
 │   │   └── builtin-plugins/          内置插件：file-explorer / system-info / todo-list
 │   ├── collab-api/                   NestJS 统一后端（Prisma + PostgreSQL/MySQL :3000）
 │   │   ├── src/
@@ -497,7 +495,7 @@ PostgreSQL 使用 `prisma/migrations/` 中的迁移 SQL；MySQL 使用运行时�
 | [协作部署](docs/collab-deployment.md) | Docker 与手动部署 |
 | [桌面客户端](docs/collab-desktop-client.md) | 桌面端说明 |
 | [管理端指南](docs/collab-admin-guide.md) | 管理后台使用 |
-| [插件工作台实跑测试](docs/plugin-workbench-real-cli-test.md) | 三 CLI 实测记录 |
+| [插件工作台实跑测试](docs/plugin-workbench-real-cli-test.md) | 历史 CLI 实测记录 |
 | [ADR](docs/adr/) | 架构决策记录（5 篇）：桌面壳选型 / LLM 第三方网关 / 多租户持久化 / 插件能力沙箱 / Monorepo 工程 |
 
 ---

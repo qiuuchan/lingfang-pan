@@ -1,20 +1,21 @@
 // import-local.ts —— 从电脑本地文件/文件夹导入插件，转成草稿（StagedPlugin）以复用预览/改信息/提交流程。
 //
-// 用纯前端 <input type="file">（文件夹用 webkitdirectory）读取，file.text() 拿内容、webkitRelativePath
-// 拿相对路径，零原生（Tauri/Rust）改动。导入后进入草稿态，用户可预览、改信息、继续让 AI 改、再提交。
+// 用纯前端 <input type="file">（文件夹用 webkitdirectory）读取字节，webkitRelativePath 拿相对路径，
+// 零原生（Tauri/Rust）改动。导入后进入草稿态，用户可预览、改信息、继续让 AI 改、再提交。
 import type { PluginCapability } from '@lingfang/contract';
 import { parseManifest, safePluginId, cleanPathFrontend } from '@/lib/plugin-draft';
 import type { StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { EXTERNAL_TOOL_PROVENANCE } from '@/lib/plugin-provenance';
 import type { DraftFile } from '@/lib/types';
 
 const DEFAULT_CAPABILITY: PluginCapability = { kind: 'ui.view', reason: '展示插件界面', risk: 'low', requires_admin: false };
 
-// 与后端 plugin-package.ts 上传限制一致（v3 起支持 vendored 大包 + 二进制）。
-const MAX_FILES = 300;
+// v4 ZIP 总上限为 1500 entries；固定 _meta.json + manifest.json 占 2 条。
+export const MAX_SOURCE_FILES = 1498;
 const MAX_FILE_BYTES = 60 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 300 * 1024 * 1024;
 
-// 文本文件扩展名白名单：白名单内走 file.text()（UTF-8）；其余按二进制处理（arrayBuffer → base64）。
+// 文本文件扩展名白名单：白名单内尝试 fatal UTF-8 解码；失败或其余扩展名按二进制处理。
 const TEXT_EXTENSIONS = new Set([
   'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'json', 'jsonc',
   'py', 'pyi', 'txt', 'md', 'markdown', 'yml', 'yaml', 'toml', 'ini', 'cfg',
@@ -38,10 +39,20 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-/** 从浏览器 File 列表读取文本文件，归一为 {path, content}[]（path 去掉顶层目录名）。 */
+function decodeUtf8(buffer: ArrayBuffer): string | null {
+  try {
+    // ignoreBOM keeps U+FEFF in the string so a later UTF-8 write preserves
+    // the original BOM bytes instead of silently changing the file.
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buffer);
+  } catch {
+    return null;
+  }
+}
+
+/** 从浏览器 File 列表读取文件，归一为 tagged DraftFile[]（path 去掉顶层目录名）。 */
 export interface ImportResult {
   files: DraftFile[];
-  skipped: string[]; // 跳过的文件（二进制/超限/非法路径），UI 提示用。
+  skipped: string[]; // 跳过的文件（超限/非法路径），UI 提示用。
   rootName: string; // 推断的根目录名（用作插件 id 兜底）。
 }
 
@@ -65,21 +76,19 @@ export async function readLocalFiles(fileList: FileList | File[]): Promise<Impor
     const checked = cleanPathFrontend(stripped);
     if (!checked.ok) { skipped.push(`${stripped}（路径非法）`); continue; }
     const path = checked.value;
-    // 跳过常见无关目录（依赖/版本控制/venv），避免把 node_modules 等整个塞进来。
-    if (/(^|\/)(node_modules|\.git|\.venv|__pycache__|dist|build)\//.test(`/${path}`)) continue;
+    // 跳过依赖、版本控制和运行缓存。dist/build 可能包含真实入口，必须保留。
+    if (/(^|\/)(node_modules|\.git|\.venv|venv|__pycache__|\.pytest_cache|\.mypy_cache)\//.test(`/${path}`)) continue;
     if (file.size > MAX_FILE_BYTES) { skipped.push(`${path}（超 ${MAX_FILE_BYTES / 1024 / 1024}MiB，已跳过）`); continue; }
-    if (files.length >= MAX_FILES) { skipped.push(`${path}（超 ${MAX_FILES} 文件上限）`); continue; }
-    if (totalBytes + file.size > MAX_TOTAL_BYTES) { skipped.push(`${path}（超 ${MAX_TOTAL_BYTES / 1024 / 1024}MiB 总量上限）`); continue; }
-    if (isTextPath(path)) {
-      const content = await file.text();
-      totalBytes += file.size;
-      files.push({ path, content });
-    } else {
-      // 二进制文件：读 arrayBuffer → base64，标 binary:true（写盘走 writePluginFileBytes）。
-      const b64 = arrayBufferToBase64(await file.arrayBuffer());
-      totalBytes += file.size;
-      files.push({ path, content: b64, binary: true });
+    if (files.length >= MAX_SOURCE_FILES) {
+      skipped.push(`${path}（超 ${MAX_SOURCE_FILES} 个源码文件上限；v4 制品 1500 条目含 2 个固定元数据文件）`);
+      continue;
     }
+    if (totalBytes + file.size > MAX_TOTAL_BYTES) { skipped.push(`${path}（超 ${MAX_TOTAL_BYTES / 1024 / 1024}MiB 总量上限）`); continue; }
+    const buffer = await file.arrayBuffer();
+    const text = isTextPath(path) ? decodeUtf8(buffer) : null;
+    totalBytes += file.size;
+    if (text !== null) files.push({ path, content: text });
+    else files.push({ path, content: arrayBufferToBase64(buffer), binary: true });
   }
 
   return { files, skipped, rootName };
@@ -94,7 +103,7 @@ export function filesToStagedPlugin(result: ImportResult): StagedPlugin {
   // 运行类型：manifest 优先；无 manifest 时按入口文件启发式。
   const runtimeRaw = manifest.runtime_type;
   let runtime: StagedPlugin['runtime_type'] =
-    runtimeRaw === 'nodejs' || runtimeRaw === 'python' ? runtimeRaw : 'client';
+    runtimeRaw === 'cloud' || runtimeRaw === 'nodejs' || runtimeRaw === 'python' ? runtimeRaw : 'client';
   if (!hasManifest) {
     if (files.some((f) => f.path === 'main.py')) runtime = 'python';
     else if (files.some((f) => f.path === 'index.js')) runtime = 'nodejs';
@@ -133,5 +142,6 @@ export function filesToStagedPlugin(result: ImportResult): StagedPlugin {
     visibility,
     capabilities,
     files,
+    ...EXTERNAL_TOOL_PROVENANCE,
   };
 }

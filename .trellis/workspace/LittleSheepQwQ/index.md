@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-07-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~523 | Active |
+| `journal-1.md` | ~555 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-07-12 | 完善插件导入、发布与治理系统 | - | `betav2` |
 | 15 | 2026-07-12 | 重构插件创建 Agent 工作区 | `d9ec6517` | `betav2` |
 | 14 | 2026-07-12 | 插件制品仓库与管理系统生产收口 | `0d55c9d2` | `betav2` |
 | 13 | 2026-06-24 | Desktop backend and UI fixes | `81a53e3` | `main` |

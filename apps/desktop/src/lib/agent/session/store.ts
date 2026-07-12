@@ -13,9 +13,9 @@
 //     消除"写盘未完成就扫磁盘"的竞态（问题1根因）
 //  3. pluginId === aiDraft.id === 磁盘目录 id（统一以目录 id 为准，不再 manifest.id || pluginId）
 import { create } from 'zustand';
-import { tauriInvoke } from '@/lib/api';
-import { writePluginFiles } from '@/lib/plugin-status';
-import { filterWritableFiles } from '@/lib/draft-plugin';
+import { errorMessage } from '@/lib/api';
+import { CREATOR_PROVENANCE } from '@/lib/plugin-provenance';
+import { readWorkspaceFiles, writeWorkspaceFiles } from '@/lib/plugin-status';
 import type { LoadedPlugin } from '@/lib/types';
 import {
   withSyncedStagedManifest,
@@ -25,7 +25,7 @@ import {
 // === 工具函数（从 FloatingCreator 迁移，保持逻辑一致）===
 
 function normalizeLoadedRuntime(value: unknown): StagedPlugin['runtime_type'] {
-  return value === 'python' || value === 'nodejs' ? value : 'client';
+  return value === 'cloud' || value === 'python' || value === 'nodejs' ? value : 'client';
 }
 
 function defaultEntryForRuntime(runtime: StagedPlugin['runtime_type']): string {
@@ -65,18 +65,13 @@ function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
  * 迁移自 FloatingCreator.refreshDraftFromRoot，但统一以目录 id（pluginId）为唯一 id，
  * 不再 manifest.id || pluginId（消除 stagedDraft.id 与目录 id 分裂）。
  */
-async function buildDraftFromRoot(pluginId: string): Promise<StagedPlugin> {
-  const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
-  const allFiles = await Promise.all(
-    paths.map(async (path) => ({
-      path,
-      content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }),
-    })),
-  );
-  // 过滤掉二进制占位文件（图标/图片等非 UTF-8，Rust 返回占位标记）。
-  // 这些文件保留在磁盘上，但不进草稿的 files 数组（避免占位文本污染预览/写回）。
-  const files = filterWritableFiles(allFiles);
-  const manifestRaw = files.find((f) => f.path === 'manifest.json')?.content ?? '{}';
+async function buildDraftFromRoot(
+  pluginId: string,
+  provenance?: Pick<StagedPlugin, 'sourceKind' | 'sourceLabel'>,
+): Promise<StagedPlugin> {
+  const files = await readWorkspaceFiles(pluginId);
+  const manifestFile = files.find((file) => file.path === 'manifest.json');
+  const manifestRaw = manifestFile && !manifestFile.binary ? manifestFile.content : '{}';
   const manifest = JSON.parse(manifestRaw) as Partial<StagedPlugin> & { runtime_type?: unknown };
   const runtime = normalizeLoadedRuntime(manifest.runtime_type);
   return withSyncedStagedManifest({
@@ -89,6 +84,8 @@ async function buildDraftFromRoot(pluginId: string): Promise<StagedPlugin> {
     visibility: manifest.visibility || 'tenant',
     capabilities: normalizeCapabilities(manifest.capabilities),
     files,
+    sourceKind: provenance?.sourceKind ?? CREATOR_PROVENANCE.sourceKind,
+    sourceLabel: provenance?.sourceLabel ?? CREATOR_PROVENANCE.sourceLabel,
   });
 }
 
@@ -150,21 +147,18 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
 
     set({ binding: true, bindError: null });
     try {
-      // 1. 如果插件带 files（云端/草稿恢复），先写盘（确保磁盘有完整文件）。
-      //    过滤掉二进制占位文件（Rust 对非 UTF-8 文件的兜底返回，写回会覆盖原二进制）。
+      // 1. 如果插件带 files（云端/草稿恢复），先按 tagged payload 写盘。
+      //    binary 文件走字节命令，不能写回为 UTF-8 占位字符串。
       if (plugin.files?.length) {
-        const writable = filterWritableFiles(plugin.files);
-        if (writable.length) {
-          await writePluginFiles(
-            plugin.id,
-            writable.map((f) => ({ path: f.path, content: f.content })),
-          );
-        }
+        await writeWorkspaceFiles(plugin.id, plugin.files);
       }
 
       // 2. 从磁盘重载（原子：写盘已完成，扫到的是完整文件，不再有竞态）。
       try {
-        const draft = await buildDraftFromRoot(plugin.id);
+        const draft = await buildDraftFromRoot(plugin.id, {
+          sourceKind: plugin._meta?.sourceKind,
+          sourceLabel: plugin._meta?.sourceLabel,
+        });
         set({
           pluginId: plugin.id,
           referencedPlugin: plugin,
@@ -186,7 +180,9 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
             entry: plugin.entry || defaultEntryForRuntime(runtime),
             visibility: 'tenant',
             capabilities: normalizeCapabilities(plugin.capabilities),
-            files: filterWritableFiles(plugin.files).map((f) => ({ path: f.path, content: f.content })),
+            files: plugin.files,
+            sourceKind: plugin._meta?.sourceKind ?? 'UNKNOWN',
+            sourceLabel: plugin._meta?.sourceLabel ?? '',
           });
           set({
             pluginId: plugin.id,
@@ -210,13 +206,17 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
     } catch (e) {
       set({
         binding: false,
-        bindError: e instanceof Error ? e.message : '绑定插件工作目录失败',
+        bindError: errorMessage(e, '绑定插件工作目录失败'),
       });
     }
   },
 
   createPlugin: (pluginId, draft) => {
-    const synced = withSyncedStagedManifest(draft);
+    const synced = withSyncedStagedManifest({
+      ...draft,
+      sourceKind: draft.sourceKind ?? CREATOR_PROVENANCE.sourceKind,
+      sourceLabel: draft.sourceLabel ?? CREATOR_PROVENANCE.sourceLabel,
+    });
     const prev = get().aiDraft;
     set({
       pluginId,
@@ -234,7 +234,11 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
     const { pluginId } = get();
     if (!pluginId) return false;
     try {
-      const draft = await buildDraftFromRoot(pluginId);
+      const current = get().aiDraft;
+      const draft = await buildDraftFromRoot(pluginId, current ? {
+        sourceKind: current.sourceKind,
+        sourceLabel: current.sourceLabel,
+      } : undefined);
       set({ aiDraft: draft });
       return true;
     } catch {

@@ -5,7 +5,7 @@ import type { Request } from 'express';
 import { requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { RoleService } from './role.service';
-import { AssignMemberRoleDto, CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
+import { AssignMemberRoleDto, CreateRoleDto, RoleListQueryDto, UpdateRoleDto } from './dto/role.dto';
 
 /**
  * 平台角色管理控制器（web 端 collab-admin 使用）。
@@ -17,6 +17,7 @@ import { AssignMemberRoleDto, CreateRoleDto, UpdateRoleDto } from './dto/role.dt
 export class AdminRolesController {
   constructor(@Inject(RoleService) private readonly role: RoleService) {}
 
+  @RequirePermission('platform.role.manage')
   @Get('permissions')
   @ApiOperation({ summary: '列出平台级权限码清单（角色编辑页勾选面板数据源）' })
   listPermissions() {
@@ -25,9 +26,16 @@ export class AdminRolesController {
 
   @RequirePermission('platform.role.manage')
   @Get()
-  @ApiOperation({ summary: '列出全部平台级角色（含成员数）' })
-  list(@Req() req: Request) {
-    return this.role.listPlatformRoles(requireUser(req).id);
+  @ApiOperation({ summary: '分页列出平台级角色摘要' })
+  list(@Req() req: Request, @Query() query: RoleListQueryDto) {
+    return this.role.listPlatformRoles(requireUser(req).id, query);
+  }
+
+  @RequirePermission('platform.role.manage')
+  @Get(':id')
+  @ApiOperation({ summary: '平台角色详情（含 permissions）' })
+  detail(@Req() req: Request, @Param('id') id: string) {
+    return this.role.getPlatformRole(requireUser(req).id, id);
   }
 
   @RequirePermission('platform.role.manage')

@@ -5,6 +5,7 @@
 export * from './identity';
 export * from './plugin';
 export * from './plugin-registry';
+export * from './admin-governance';
 export * from './draft';
 export * from './llm';
 export * from './rbac';

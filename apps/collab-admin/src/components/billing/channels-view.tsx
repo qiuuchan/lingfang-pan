@@ -5,9 +5,9 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { PlusIcon, PencilIcon, Trash2Icon, ZapIcon } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useLoad, run } from '@/lib/helpers';
+import { run } from '@/lib/helpers';
 import { Section, ActionBar } from '@/components/shared';
-import { usePagination, Pagination } from '@/components/ui/pagination';
+import { Pagination } from '@/components/ui/pagination';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -26,58 +26,53 @@ const PROVIDER_OPTIONS = [
 ];
 
 export function ChannelsView() {
-  const [chat, setChat] = useState<Channel[]>([]);
-  const [image, setImage] = useState<Channel[]>([]);
-  const [pools, setPools] = useState<Pool[]>([]);
-  const loadAll = async () => {
-    const [c, i, p] = await Promise.all([
-      api<{ channels: Channel[] }>('/api/admin/billing/channels?kind=CHAT').catch(() => ({ channels: [] })),
-      api<{ channels: Channel[] }>('/api/admin/billing/channels?kind=IMAGE').catch(() => ({ channels: [] })),
-      api<{ pools: Pool[] }>('/api/admin/billing/pools').catch(() => ({ pools: [] })),
-    ]);
-    setChat(c.channels ?? []); setImage(i.channels ?? []); setPools(p.pools ?? []);
-  };
-  useLoad(loadAll);
-
   return (
     <Section title="模型接入" description="在同一视窗内接入上游模型、绑定资源池，并为模型配置灵石价格。聊天 / 生图按类型分开管理。">
       <Tabs defaultValue="CHAT">
         <TabsList><TabsTrigger value="CHAT">聊天渠道</TabsTrigger><TabsTrigger value="IMAGE">生图渠道</TabsTrigger></TabsList>
-        <TabsContent value="CHAT" className="mt-4"><ChannelList kind="CHAT" list={chat} pools={pools} onRefresh={loadAll} /></TabsContent>
-        <TabsContent value="IMAGE" className="mt-4"><ChannelList kind="IMAGE" list={image} pools={pools} onRefresh={loadAll} /></TabsContent>
+        <TabsContent value="CHAT" className="mt-4"><ChannelList kind="CHAT" /></TabsContent>
+        <TabsContent value="IMAGE" className="mt-4"><ChannelList kind="IMAGE" /></TabsContent>
       </Tabs>
     </Section>
   );
 }
 
-function ChannelList({ kind, list, pools, onRefresh }: { kind: ChannelKind; list: Channel[]; pools: Pool[]; onRefresh: () => void }) {
-  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(list);
+function ChannelList({ kind }: { kind: ChannelKind }) {
+  const [list, setList] = useState<Array<Channel & { modelCount?: number }>>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalItems, setTotalItems] = useState(0);
   const [testing, setTesting] = useState<Channel | null>(null);
+  const load = async () => {
+    const result = await api<{ items: Array<Channel & { modelCount?: number }>; total: number }>(`/api/admin/billing/channels?kind=${kind}&page=${page}&pageSize=${pageSize}`);
+    setList(result.items); setTotalItems(result.total);
+  };
+  useEffect(() => { void load(); }, [kind, page, pageSize]);
 
   async function remove(ch: Channel) {
     if (!window.confirm(`确认删除渠道「${ch.name}」？`)) return;
-    await run(() => api(`/api/admin/billing/channels/${ch.id}`, { method: 'DELETE' }).then(onRefresh), '渠道已删除');
+    await run(() => api(`/api/admin/billing/channels/${ch.id}`, { method: 'DELETE' }).then(load), '渠道已删除');
   }
 
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-sm text-muted-foreground">{totalItems} 个{kind === 'CHAT' ? '聊天' : '生图'}渠道</div>
-        <ChannelDialog kind={kind} pools={pools} onRefresh={onRefresh}><Button><PlusIcon className="mr-1.5 size-4" />新增{kind === 'CHAT' ? '聊天' : '生图'}渠道</Button></ChannelDialog>
+        <ChannelDialog kind={kind} pools={[]} onRefresh={load}><Button><PlusIcon className="mr-1.5 size-4" />新增{kind === 'CHAT' ? '聊天' : '生图'}渠道</Button></ChannelDialog>
       </div>
       <Table>
         <TableHeader><TableRow><TableHead>名称</TableHead><TableHead>版本</TableHead><TableHead>所属池</TableHead><TableHead>模型数</TableHead><TableHead>健康</TableHead><TableHead className="w-[280px]">操作</TableHead></TableRow></TableHeader>
         <TableBody>
-          {paginated.length ? paginated.map((ch) => (
+          {list.length ? list.map((ch) => (
             <TableRow key={ch.id}>
               <TableCell className="font-medium">{ch.name}<div className="font-mono text-xs text-muted-foreground">{ch.protocol} · {ch.provider}</div></TableCell>
               <TableCell><Badge variant="outline">{ch.tier === 'FAST' ? '快速' : '高级'}</Badge></TableCell>
               <TableCell className="text-muted-foreground">{ch.pool?.name ?? ch.poolId.slice(0, 8)}</TableCell>
-              <TableCell className="tabular-nums">{ch.models.length}</TableCell>
+              <TableCell className="tabular-nums">{ch.modelCount ?? ch.models?.length ?? 0}</TableCell>
               <TableCell>{ch.lastHealthOk == null ? <span className="text-muted-foreground">未测</span> : ch.lastHealthOk ? <Badge variant="success">通</Badge> : <Badge variant="destructive">异常</Badge>}</TableCell>
               <TableCell>
                 <ActionBar>
-                  <ChannelDialog channel={ch} kind={kind} pools={pools} onRefresh={onRefresh}><Button variant="outline" size="sm"><PencilIcon className="mr-1 size-3.5" />编辑</Button></ChannelDialog>
+                  <ChannelDialog channel={ch} kind={kind} pools={[]} onRefresh={load}><Button variant="outline" size="sm"><PencilIcon className="mr-1 size-3.5" />编辑</Button></ChannelDialog>
                   <Button variant="outline" size="sm" onClick={() => setTesting(ch)}><ZapIcon className="mr-1 size-3.5" />测试</Button>
                   <Button variant="destructive" size="sm" onClick={() => remove(ch)}><Trash2Icon className="mr-1 size-3.5" /></Button>
                 </ActionBar>
@@ -87,7 +82,7 @@ function ChannelList({ kind, list, pools, onRefresh }: { kind: ChannelKind; list
         </TableBody>
       </Table>
       <Pagination totalItems={totalItems} pageSize={pageSize} currentPage={page} onPageChange={setPage} onPageSizeChange={setPageSize} />
-      {testing && <TestChannelDialog channel={testing} onDone={onRefresh} onClose={() => setTesting(null)} />}
+      {testing && <TestChannelDialog channel={testing} onDone={load} onClose={() => setTesting(null)} />}
     </div>
   );
 }
@@ -115,15 +110,22 @@ function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(channel ? formFromChannel(channel) : emptyForm(kind, pools));
   const [pricingRows, setPricingRows] = useState<ModelPricing[]>([]);
-  useEffect(() => { if (open) setForm(channel ? formFromChannel(channel) : emptyForm(kind, pools)); }, [open, channel, kind, pools]);
+  const [availablePools, setAvailablePools] = useState(pools);
   useEffect(() => {
     if (!open) return;
     let mounted = true;
-    api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing')
-      .then((r) => { if (mounted) setPricingRows(r.pricing ?? []); })
-      .catch(() => { if (mounted) setPricingRows([]); });
+    void Promise.all([
+      api<{ items: Pool[] }>('/api/admin/billing/pools?page=1&pageSize=50'),
+      api<{ items: ModelPricing[] }>('/api/admin/billing/pricing?page=1&pageSize=100'),
+      channel ? api<{ channel: Channel }>(`/api/admin/billing/channels/${channel.id}`) : Promise.resolve({ channel: null }),
+    ]).then(([poolResult, pricingResult, detailResult]) => {
+      if (!mounted) return;
+      setAvailablePools(poolResult.items);
+      setPricingRows(pricingResult.items);
+      setForm(detailResult.channel ? formFromChannel(detailResult.channel) : emptyForm(kind, poolResult.items));
+    });
     return () => { mounted = false; };
-  }, [open]);
+  }, [open, channel, kind]);
   const patch = (n: Partial<FormState>) => setForm((f) => ({ ...f, ...n }));
   const modelOptions = parseModels(form.modelsText);
 
@@ -178,12 +180,12 @@ function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?
     const existing = pricingRows.find((p) => p.capability === body.capability && p.model === model && (p.tier ?? null) === form.tier);
     const ok = existing
       ? await run(() => api(`/api/admin/billing/pricing/${existing.id}`, { method: 'PATCH', body }).then(async () => {
-        const r = await api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing');
-        setPricingRows(r.pricing ?? []);
+        const r = await api<{ items: ModelPricing[] }>('/api/admin/billing/pricing?page=1&pageSize=100');
+        setPricingRows(r.items);
       }), showToast ? '价格已保存' : '模型接入与价格已保存')
       : await run(() => api('/api/admin/billing/pricing', { method: 'POST', body }).then(async () => {
-        const r = await api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing');
-        setPricingRows(r.pricing ?? []);
+        const r = await api<{ items: ModelPricing[] }>('/api/admin/billing/pricing?page=1&pageSize=100');
+        setPricingRows(r.items);
       }), showToast ? '价格已保存' : '模型接入与价格已保存');
     return ok;
   }
@@ -205,7 +207,7 @@ function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label>所属资源池</Label>
-                <Select value={form.poolId} onValueChange={(v) => patch({ poolId: v })}><SelectTrigger><SelectValue placeholder="选池" /></SelectTrigger><SelectContent>{pools.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}{p.scope === 'SHARED' ? '（共享）' : `（${p.team?.name ?? '单团队'}）`}</SelectItem>)}</SelectContent></Select>
+                <Select value={form.poolId} onValueChange={(v) => patch({ poolId: v })}><SelectTrigger><SelectValue placeholder="选池" /></SelectTrigger><SelectContent>{availablePools.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}{p.scope === 'SHARED' ? '（共享）' : `（${p.team?.name ?? '单团队'}）`}</SelectItem>)}</SelectContent></Select>
               </div>
               <div className="space-y-2"><Label>协议</Label>
                 <Select value={form.protocol} onValueChange={(v) => patch({ protocol: v as ChannelProtocol })} disabled={kind === 'IMAGE'}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="OPENAI">OpenAI</SelectItem><SelectItem value="ANTHROPIC" disabled={kind === 'IMAGE'}>Anthropic</SelectItem></SelectContent></Select>

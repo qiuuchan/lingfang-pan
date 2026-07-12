@@ -39,15 +39,15 @@
 
 ## Acceptance Criteria
 
-- [ ] 安装包不再含 `runtimes/`，体积下降约 200MB；冷启动时若运行时未就绪，弹出 RuntimeSetupGate 引导。
-- [ ] 引导卡一键下载 Python + Node，进度条走完，状态变「应用管理 · vX」；下载完成即激活，Resolver 命中。
-- [ ] 创建一个 `requirements.txt` 含 requests 的 Python 插件，RunPlugin 能用应用管理的 venv 装包并运行；改 pip 镜像源后新建 venv 用新源。
-- [ ] 创建一个 nodejs 插件（package.json 含 start），持久化运行成功。
-- [ ] 卸载某运行时后，对应类型插件运行报 RuntimeMissing 引导下载，**不静默回退系统 PATH**。
-- [ ] 设置页手动指定系统已装 Python 路径，状态变「用户指定」，Python 插件用它跑通（opt-in 复用）。
-- [ ] Agent 创建器让 AI 写并运行 Python 插件，进程路径来自应用管理运行时，不是系统 python。
-- [ ] 现有 builtin-plugins（calculator/python、2048/nodejs、notes/client）全部回归通过。
-- [ ] `cargo test` 通过（resolver 优先级/降级、下载校验、env 镜像切换）。
+- [x] 安装包不再含 `runtimes/`，体积下降约 200MB；冷启动时若运行时未就绪，弹出 RuntimeSetupGate 引导。
+- [x] 引导卡一键下载 Python + Node，进度条走完，状态变「应用管理 · vX」；下载完成即激活，Resolver 命中。
+- [x] 创建一个 `requirements.txt` 含 requests 的 Python 插件，RunPlugin 能用应用管理的 venv 装包并运行；改 pip 镜像源后新建 venv 用新源。
+- [x] 创建一个 nodejs 插件（package.json 含 start），持久化运行成功。
+- [x] 卸载某运行时后，对应类型插件运行报 RuntimeMissing 引导下载，**不静默回退系统 PATH**。
+- [x] 设置页手动指定系统已装 Python 路径，状态变「用户指定」，Python 插件用它跑通（opt-in 复用）。
+- [x] Agent 创建器让 AI 写并运行 Python 插件，进程路径来自应用管理运行时，不是系统 python。
+- [x] 现有 builtin-plugins（calculator/python、2048/nodejs、notes/client）全部回归通过。
+- [x] `cargo test` 通过（resolver 优先级/降级、下载校验、env 镜像切换）。
 
 ## Out Of Scope
 

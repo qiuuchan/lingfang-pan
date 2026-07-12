@@ -1,28 +1,67 @@
-import { Channel } from '@tauri-apps/api/core';
+import { Channel, isTauri } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import type {
   DraftWorkspace,
   LocalPluginInstallation,
+  MarketplaceListingProjection,
   PluginCatalogItem,
+  PluginManagementItem,
+  PluginPackageDetail,
   PluginPackageSummary,
+  PluginReleaseSourceKind,
   PluginReleaseSummary,
 } from '@lingfang/contract';
-import { api, apiBase, getAuthToken, tauriInvoke } from '@/lib/api';
+import { api, apiBase, errorMessage, getAuthToken, tauriInvoke } from '@/lib/api';
 import type { DraftFile, LoadedPlugin } from '@/lib/types';
 import { conversationKey, selectedConversationKey } from '@/lib/plugin-creator/creator-session';
+import {
+  isPluginSourceKind,
+  normalizePluginProvenance,
+  sanitizePluginSourceLabel,
+  type PluginProvenance,
+} from '@/lib/plugin-provenance';
+import { readWorkspaceFiles as readTaggedWorkspaceFiles, writeWorkspaceFiles } from '@/lib/plugin-status';
 
 export type RegistryCatalogItem = PluginCatalogItem;
 export type RegistryPackage = PluginPackageSummary;
 export type RegistryRelease = PluginReleaseSummary;
+export type RegistryManagementItem = PluginManagementItem;
+export type RegistryPackageDetail = PluginPackageDetail;
+export type RegistryListing = MarketplaceListingProjection;
+export type RegistryPackageStatus = RegistryPackage['governanceStatus'];
+export type RegistryReleaseStatus = RegistryRelease['status'];
+export type RegistrySourceKind = PluginReleaseSourceKind;
 export type Installation = LocalPluginInstallation;
 export type Workspace = DraftWorkspace;
+export type { MarketplaceListingProjection, PluginManagementItem, PluginPackageDetail, PluginReleaseSourceKind } from '@lingfang/contract';
+export type { PluginProvenance } from '@/lib/plugin-provenance';
+export { DEFAULT_SOURCE_LABELS, normalizePluginProvenance } from '@/lib/plugin-provenance';
 export const INSTALLATIONS_CHANGED_EVENT = 'lf:plugin-installations-changed';
+
+function normalizeWorkspace(workspace: Workspace): Workspace {
+  const sourceKind = isPluginSourceKind(workspace.sourceKind) ? workspace.sourceKind : 'UNKNOWN';
+  return { ...workspace, sourceKind, sourceLabel: sanitizePluginSourceLabel(workspace.sourceLabel) };
+}
+
+export type PluginArtifactInspection = {
+  sha256: string;
+  sizeBytes: number;
+  uncompressedSizeBytes: number;
+  manifest: Record<string, unknown>;
+  files: Array<{ path: string; sizeBytes: number }>;
+};
+
+export type RegistryPublishResult = {
+  package: RegistryPackage;
+  release: RegistryRelease;
+};
 
 function notifyInstallationsChanged() {
   window.dispatchEvent(new CustomEvent(INSTALLATIONS_CHANGED_EVENT));
 }
 
 export type TransferProgress = {
-  stage: 'packing' | 'downloading' | 'verifying' | 'installing' | 'uploading' | 'finished';
+  stage: 'inspecting' | 'packing' | 'downloading' | 'verifying' | 'installing' | 'uploading' | 'finished';
   message: string;
   transferred: number;
   total: number | null;
@@ -73,6 +112,31 @@ function progressChannel(onProgress?: (progress: TransferProgress) => void) {
   return channel;
 }
 
+/**
+ * Open the native .lfplugin picker. Browser-only development and tests return
+ * null so callers can keep a manual-path fallback without triggering a Tauri
+ * error toast.
+ */
+export async function selectPluginArtifact(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const options = {
+    multiple: false as const,
+    directory: false as const,
+    filters: [{ name: 'LingFang Plugin', extensions: ['lfplugin'] }],
+  };
+  try {
+    const selected = await openDialog(options);
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    return typeof path === 'string' && path.trim() ? path : null;
+  } catch (caught) {
+    throw new Error(errorMessage(caught, '选择插件制品失败'));
+  }
+}
+
+export function inspectLocalArtifact(artifactPath: string): Promise<PluginArtifactInspection> {
+  return tauriInvoke<PluginArtifactInspection>('inspect_lfplugin_v4', { artifactPath });
+}
+
 export async function listInstallations(): Promise<Installation[]> {
   return tauriInvoke<Installation[]>('list_plugin_installations');
 }
@@ -85,6 +149,221 @@ export async function listTeamRegistry(): Promise<RegistryCatalogItem[]> {
 export async function listMarketplaceRegistry(): Promise<RegistryCatalogItem[]> {
   const response = await api<{ items: RegistryCatalogItem[] }>('/api/plugin-registry/marketplace');
   return response.items;
+}
+
+export async function listPluginManagement(): Promise<RegistryManagementItem[]> {
+  const response = await api<{ items: RegistryManagementItem[] }>('/api/plugin-registry/manage');
+  return response.items;
+}
+
+export function getPluginPackageDetail(packageId: string): Promise<RegistryPackageDetail> {
+  return api<RegistryPackageDetail>(`/api/plugin-packages/${encodeURIComponent(packageId)}`);
+}
+
+export async function submitReleaseToMarketplace(
+  releaseId: string,
+  priceCents?: number,
+): Promise<{ release: RegistryRelease }> {
+  return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/submit-marketplace`, {
+    method: 'POST',
+    body: priceCents === undefined ? {} : { priceCents },
+  });
+}
+
+export async function withdrawMarketplaceSubmission(
+  releaseId: string,
+  reason?: string,
+): Promise<{ release: RegistryRelease }> {
+  return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/withdraw-marketplace`, {
+    method: 'POST',
+    body: reason?.trim() ? { reason: reason.trim() } : {},
+  });
+}
+
+export function updatePluginPackageStatus(
+  packageId: string,
+  status: RegistryPackageStatus,
+): Promise<{ package: RegistryPackage; listing: RegistryListing | null }> {
+  return api(`/api/plugin-packages/${encodeURIComponent(packageId)}/status`, {
+    method: 'PATCH',
+    body: { status },
+  });
+}
+
+export function updatePluginReleaseStatus(
+  releaseId: string,
+  status: RegistryReleaseStatus,
+): Promise<{ release: RegistryRelease; listing: RegistryListing | null }> {
+  return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/status`, {
+    method: 'PATCH',
+    body: { status },
+  });
+}
+
+export function updateOwnerMarketplaceStatus(
+  packageId: string,
+  status: 'ACTIVE' | 'DELISTED',
+  reason?: string,
+): Promise<{ packageId: string; listing: RegistryListing }> {
+  return api(`/api/plugin-packages/${encodeURIComponent(packageId)}/marketplace-status`, {
+    method: 'PATCH',
+    body: { status, ...(reason?.trim() ? { reason: reason.trim() } : {}) },
+  });
+}
+
+export type PluginPublishTarget = 'team' | 'marketplace';
+export type PluginPublishPhase =
+  | 'idle'
+  | 'uploading'
+  | 'team_published'
+  | 'submitting_market'
+  | 'done'
+  | 'team_failed'
+  | 'market_failed';
+
+export type PluginPublishState = {
+  target: PluginPublishTarget;
+  phase: PluginPublishPhase;
+  priceCents?: number;
+  result?: RegistryPublishResult;
+  error?: string;
+};
+
+export type PluginPublishAction =
+  | { type: 'start_upload' }
+  | { type: 'team_published'; result: RegistryPublishResult }
+  | { type: 'start_market_submission' }
+  | { type: 'market_submitted'; result: RegistryPublishResult }
+  | { type: 'complete' }
+  | { type: 'team_failed'; error: string }
+  | { type: 'market_failed'; error: string };
+
+export function createPluginPublishState(target: PluginPublishTarget, priceCents?: number): PluginPublishState {
+  return { target, phase: 'idle', priceCents };
+}
+
+export function pluginPublishReducer(
+  state: PluginPublishState,
+  action: PluginPublishAction,
+): PluginPublishState {
+  switch (action.type) {
+    case 'start_upload':
+      return { target: state.target, phase: 'uploading', priceCents: state.priceCents };
+    case 'team_published':
+      return { ...state, phase: 'team_published', result: action.result, error: undefined };
+    case 'start_market_submission':
+      if (!state.result) return state;
+      return { ...state, phase: 'submitting_market', error: undefined };
+    case 'market_submitted':
+      return { ...state, phase: 'done', result: action.result, error: undefined };
+    case 'complete':
+      if (!state.result) return state;
+      return { ...state, phase: 'done', error: undefined };
+    case 'team_failed':
+      return { target: state.target, phase: 'team_failed', priceCents: state.priceCents, error: action.error };
+    case 'market_failed':
+      if (!state.result) return state;
+      return { ...state, phase: 'market_failed', error: action.error };
+  }
+}
+
+function publishStateEmitter(
+  target: PluginPublishTarget,
+  priceCents?: number,
+  onState?: (state: PluginPublishState) => void,
+) {
+  let state = createPluginPublishState(target, priceCents);
+  return {
+    dispatch(action: PluginPublishAction) {
+      state = pluginPublishReducer(state, action);
+      onState?.(state);
+      return state;
+    },
+  };
+}
+
+async function reconcileMarketplaceSubmission(
+  published: RegistryPublishResult,
+): Promise<RegistryPublishResult | null> {
+  try {
+    const detail = await getPluginPackageDetail(published.package.id);
+    const release = detail.releases.find((item) => item.id === published.release.id);
+    if (!release || (release.marketReviewStatus !== 'PENDING' && release.marketReviewStatus !== 'APPROVED')) {
+      return null;
+    }
+    return { package: detail.package, release };
+  } catch {
+    return null;
+  }
+}
+
+async function submitMarketplaceOrReconcile(
+  published: RegistryPublishResult,
+  priceCents?: number,
+): Promise<RegistryPublishResult> {
+  try {
+    const submitted = await submitReleaseToMarketplace(published.release.id, priceCents);
+    return { ...published, release: submitted.release };
+  } catch (caught) {
+    const reconciled = await reconcileMarketplaceSubmission(published);
+    if (reconciled) return reconciled;
+    throw caught;
+  }
+}
+
+/**
+ * Publish the immutable team release first, then optionally submit that exact
+ * release to marketplace review. A marketplace error returns market_failed
+ * with the release retained, making a retry incapable of re-uploading it.
+ */
+export async function publishPluginRelease(options: {
+  target: PluginPublishTarget;
+  publishTeam: () => Promise<RegistryPublishResult>;
+  priceCents?: number;
+  onState?: (state: PluginPublishState) => void;
+}): Promise<PluginPublishState> {
+  const state = publishStateEmitter(options.target, options.priceCents, options.onState);
+  state.dispatch({ type: 'start_upload' });
+  let published: RegistryPublishResult;
+  try {
+    published = await options.publishTeam();
+  } catch (caught) {
+    return state.dispatch({ type: 'team_failed', error: errorMessage(caught, '发布团队版本失败') });
+  }
+  state.dispatch({ type: 'team_published', result: published });
+  if (options.target === 'team') return state.dispatch({ type: 'complete' });
+  state.dispatch({ type: 'start_market_submission' });
+  try {
+    const submitted = await submitMarketplaceOrReconcile(published, options.priceCents);
+    return state.dispatch({ type: 'market_submitted', result: submitted });
+  } catch (caught) {
+    return state.dispatch({ type: 'market_failed', error: errorMessage(caught, '团队版本已发布，但提交市场审核失败') });
+  }
+}
+
+/** Retry only the review submission retained by a market_failed state. */
+export async function retryMarketplaceSubmission(
+  failed: PluginPublishState,
+  priceCents?: number,
+  onState?: (state: PluginPublishState) => void,
+): Promise<PluginPublishState> {
+  if (failed.phase !== 'market_failed' || !failed.result) {
+    throw new Error('当前发布状态没有可重试的市场提审');
+  }
+  let state = pluginPublishReducer(failed, { type: 'start_market_submission' });
+  onState?.(state);
+  const effectivePriceCents = priceCents ?? failed.priceCents;
+  try {
+    const submitted = await submitMarketplaceOrReconcile(failed.result, effectivePriceCents);
+    state = pluginPublishReducer(state, { type: 'market_submitted', result: submitted });
+  } catch (caught) {
+    state = pluginPublishReducer(state, {
+      type: 'market_failed',
+      error: errorMessage(caught, '重试提交市场审核失败'),
+    });
+  }
+  onState?.(state);
+  return state;
 }
 
 export async function loadInstalledPlugin(installationId: string): Promise<LoadedPlugin> {
@@ -178,6 +457,26 @@ export async function importLocalArtifact(artifactPath: string): Promise<Install
   return installation;
 }
 
+export async function publishLocalArtifact(
+  artifactPath: string,
+  options: Partial<PluginProvenance> & { packageId?: string } = {},
+  onProgress?: (progress: TransferProgress) => void,
+): Promise<RegistryPublishResult> {
+  const { base, token } = connection();
+  const provenance = normalizePluginProvenance(options, 'LOCAL_ARTIFACT');
+  return tauriInvoke<RegistryPublishResult>('publish_local_artifact', {
+    input: {
+      apiBase: base,
+      authToken: token,
+      artifactPath,
+      packageId: options.packageId || undefined,
+      sourceKind: provenance.sourceKind,
+      sourceLabel: provenance.sourceLabel,
+    },
+    onEvent: progressChannel(onProgress),
+  });
+}
+
 export async function buyMarketplacePackage(packageId: string): Promise<void> {
   await api(`/api/plugin-packages/${packageId}/purchase`, { method: 'POST' });
 }
@@ -215,7 +514,8 @@ export async function uninstallInstallation(installationId: string): Promise<voi
 }
 
 export async function listDraftWorkspaces(): Promise<Workspace[]> {
-  return tauriInvoke<Workspace[]>('list_draft_workspaces');
+  const workspaces = await tauriInvoke<Workspace[]>('list_draft_workspaces');
+  return workspaces.map(normalizeWorkspace);
 }
 
 export async function createDraftWorkspace(input: {
@@ -224,8 +524,14 @@ export async function createDraftWorkspace(input: {
   version: string;
   runtime: 'client' | 'cloud' | 'nodejs' | 'python';
   conversationId?: string | null;
+  sourceKind?: PluginReleaseSourceKind;
+  sourceLabel?: string;
 }): Promise<Workspace> {
-  return tauriInvoke('create_draft_workspace', { input });
+  const provenance = normalizePluginProvenance(input, 'LINGFANG_CREATOR');
+  const workspace = await tauriInvoke<Workspace>('create_draft_workspace', {
+    input: { ...input, ...provenance },
+  });
+  return normalizeWorkspace(workspace);
 }
 
 export async function deleteDraftWorkspace(workspaceId: string): Promise<void> {
@@ -233,11 +539,11 @@ export async function deleteDraftWorkspace(workspaceId: string): Promise<void> {
 }
 
 export async function importDraftWorkspace(artifactPath: string): Promise<Workspace> {
-  return tauriInvoke('import_draft_workspace', { artifactPath });
+  return normalizeWorkspace(await tauriInvoke<Workspace>('import_draft_workspace', { artifactPath }));
 }
 
 export async function copyInstallationToDraft(installationId: string): Promise<Workspace> {
-  return tauriInvoke('copy_installation_to_draft_workspace', { installationId });
+  return normalizeWorkspace(await tauriInvoke<Workspace>('copy_installation_to_draft_workspace', { installationId }));
 }
 
 export function deleteLocalCreatorConversation(
@@ -263,30 +569,55 @@ export function deleteLocalCreatorConversation(
   }
 }
 
-export async function publishDraftWorkspace(
+export type PublishWorkspaceOptions = Partial<PluginProvenance> & { packageId?: string };
+
+export function publishDraftWorkspace(
   workspace: Workspace,
   onProgress?: (progress: TransferProgress) => void,
-): Promise<{ package: RegistryPackage; release: RegistryRelease }> {
+  options?: PublishWorkspaceOptions,
+): Promise<RegistryPublishResult>;
+export function publishDraftWorkspace(
+  workspace: Workspace,
+  options?: PublishWorkspaceOptions,
+  onProgress?: (progress: TransferProgress) => void,
+): Promise<RegistryPublishResult>;
+export async function publishDraftWorkspace(
+  workspace: Workspace,
+  optionsOrProgress?: PublishWorkspaceOptions | ((progress: TransferProgress) => void),
+  progressOrOptions?: PublishWorkspaceOptions | ((progress: TransferProgress) => void),
+): Promise<RegistryPublishResult> {
   const { base, token } = connection();
-  return tauriInvoke('publish_draft_workspace', {
+  const options = typeof optionsOrProgress === 'object' && optionsOrProgress !== null
+    ? optionsOrProgress
+    : (typeof progressOrOptions === 'object' && progressOrOptions !== null ? progressOrOptions : {});
+  const onProgress = typeof optionsOrProgress === 'function'
+    ? optionsOrProgress
+    : (typeof progressOrOptions === 'function' ? progressOrOptions : undefined);
+  const provenance = normalizePluginProvenance({
+    sourceKind: options.sourceKind ?? workspace.sourceKind,
+    sourceLabel: options.sourceLabel ?? workspace.sourceLabel,
+  }, workspace.sourceKind || 'UNKNOWN');
+  return tauriInvoke<RegistryPublishResult>('publish_draft_workspace', {
     input: {
       apiBase: base,
       authToken: token,
       workspaceId: workspace.workspaceId,
-      packageId: undefined,
+      packageId: options.packageId || undefined,
+      sourceKind: provenance.sourceKind,
+      sourceLabel: provenance.sourceLabel,
     },
     onEvent: progressChannel(onProgress),
   });
 }
 
+export function readWorkspaceFiles(workspaceId: string): Promise<DraftFile[]> {
+  return readTaggedWorkspaceFiles(workspaceId);
+}
+
 export async function loadDraftWorkspacePlugin(workspace: Workspace): Promise<LoadedPlugin> {
-  const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId: workspace.workspaceId });
-  const files = await Promise.all(paths.map(async (path) => ({
-    path,
-    content: await tauriInvoke<string>('read_local_plugin_file', { pluginId: workspace.workspaceId, file: path }),
-  })));
+  const files = await readWorkspaceFiles(workspace.workspaceId);
   const manifestFile = files.find((file) => file.path === 'manifest.json');
-  const manifest = manifestFile ? JSON.parse(manifestFile.content) as Record<string, unknown> : {};
+  const manifest = manifestFile && !manifestFile.binary ? JSON.parse(manifestFile.content) as Record<string, unknown> : {};
   return {
     id: workspace.workspaceId,
     name: workspace.title,
@@ -303,6 +634,8 @@ export async function loadDraftWorkspacePlugin(workspace: Workspace): Promise<Lo
       createdAt: workspace.createdAt,
       updatedAt: workspace.updatedAt,
       source: 'workspace',
+      sourceKind: workspace.sourceKind,
+      sourceLabel: workspace.sourceLabel,
       conversationId: workspace.conversationId || undefined,
     },
   };
@@ -320,6 +653,8 @@ export async function persistDraftWorkspace(input: {
   version: string;
   runtime: 'client' | 'cloud' | 'nodejs' | 'python';
   conversationId?: string | null;
+  sourceKind?: PluginReleaseSourceKind;
+  sourceLabel?: string;
   files: DraftFile[];
 }): Promise<Workspace> {
   const workspaces = await listDraftWorkspaces();
@@ -332,14 +667,20 @@ export async function persistDraftWorkspace(input: {
       version: input.version,
       runtime: input.runtime,
       conversationId: input.conversationId,
+      sourceKind: input.sourceKind,
+      sourceLabel: input.sourceLabel,
     });
   }
-  await tauriInvoke('write_plugin_files', {
-    pluginId: workspace.workspaceId,
-    files: input.files,
-  });
-  return tauriInvoke('sync_draft_workspace_metadata', {
+  await writeWorkspaceFiles(workspace.workspaceId, input.files);
+  const provenance = normalizePluginProvenance({
+    sourceKind: input.sourceKind ?? workspace.sourceKind,
+    sourceLabel: input.sourceLabel ?? workspace.sourceLabel,
+  }, workspace.sourceKind || 'LINGFANG_CREATOR');
+  const synced = await tauriInvoke<Workspace>('sync_draft_workspace_metadata', {
     workspaceId: workspace.workspaceId,
     conversationId: input.conversationId,
+    sourceKind: provenance.sourceKind,
+    sourceLabel: provenance.sourceLabel,
   });
+  return normalizeWorkspace(synced);
 }

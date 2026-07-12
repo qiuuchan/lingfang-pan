@@ -63,8 +63,7 @@ New-Item -ItemType Directory -Force -Path $Staging | Out-Null
 Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $Staging 'lingfang-desktop.exe') -Force
 # updater.exe = 干净 installer.exe（无 payload）。
 Copy-Item -LiteralPath $InstallerExe -Destination (Join-Path $Staging 'updater.exe') -Force
-# 资源目录：runtimes / builtin-plugins（与 exe 同级，main.rs resource_dir 解析）。
-Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/runtimes') -Destination (Join-Path $Staging 'runtimes') -Recurse -Force
+# 静态资源：脚本运行时由应用按需下载，不进入安装包。
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/builtin-plugins') -Destination (Join-Path $Staging 'builtin-plugins') -Recurse -Force
 # 图标（卸载器/快捷方式用）。
 New-Item -ItemType Directory -Force -Path (Join-Path $Staging 'icons') | Out-Null
@@ -74,7 +73,7 @@ Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/src-tauri/icons/icon.ico')
 Write-Host '[6/7] 压缩 payload + 拼接自解压 EXE…'
 $PayloadZip = Join-Path $OutputDir "payload-$Version.zip"
 if (Test-Path -LiteralPath $PayloadZip) { Remove-Item -LiteralPath $PayloadZip -Force }
-# 压缩 staging/* （不含 staging 顶层目录，使 zip 内路径为 lingfang-desktop.exe / runtimes/...）。
+# 压缩 staging/*（不含 staging 顶层目录）。
 Compress-Archive -Path (Join-Path $Staging '*') -DestinationPath $PayloadZip -CompressionLevel Optimal
 
 # --- 拼接 [installer.exe][payload.zip][trailer] → Setup.exe ---

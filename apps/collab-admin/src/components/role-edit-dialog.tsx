@@ -3,7 +3,7 @@
 //
 // 设计：
 //  - 受控 open（onClose 关闭）；传入 role 表示编辑（含 isSystem 锁定），不传表示创建。
-//  - onSubmit：调用方提供提交函数（创建 POST / 更新 PATCH 各自对应后端端点），返回 Promise<boolean>。
+//  - onSubmit：调用方提供提交函数（创建 POST / 更新 PATCH 各自对应后端端点），失败时抛出错误。
 //    抽组件的关键：不同 scope 的提交 URL/方法不同，由调用方注入，组件内部不关心后端路径。
 //  - 系统角色（isSystem=true）：编码 + 权限锁定（后端也会拒绝），仅可改 name/description。
 //  - code 校验正则与后端 ROLE_CODE_PATTERN 一致（小写字母/数字开头，可含下划线/连字符）。
@@ -29,7 +29,7 @@ import { PermissionChecklist } from '@/components/role-permission-checklist';
 const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /** 角色编辑/创建对话框（平台/团队通用）。
- *  - onSubmit：调用方注入提交逻辑，成功返回 true（组件内部已用 run 包裹做 toast 反馈）。
+ *  - onSubmit：调用方注入提交逻辑，组件内部统一用 run 处理反馈与失败保留。
  *  - title/titleVerb：标题与按钮文案（创建/保存），供不同调用方语义化展示。 */
 export function RoleEditDialog({
   role,
@@ -46,7 +46,7 @@ export function RoleEditDialog({
   title: string;
   description?: string;
   onClose: () => void;
-  onSubmit: (body: { name?: string; code?: string; description?: string; permissions?: string[] }) => Promise<boolean>;
+  onSubmit: (body: { name?: string; code?: string; description?: string; permissions?: string[] }) => Promise<unknown>;
 }) {
   const isSystem = role?.isSystem ?? false;
   const [name, setName] = useState(role?.name ?? '');
@@ -85,6 +85,7 @@ export function RoleEditDialog({
     }
     const body = {
       name: name.trim(),
+      description: descriptionText.trim(),
       // 系统角色不允许改权限/编码（后端会拒绝），这里也不传 code/permissions 字段
       ...(isSystem ? {} : { code: trimmedCode || undefined, permissions: [...selected] }),
     };

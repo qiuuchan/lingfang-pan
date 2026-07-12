@@ -2,18 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../prisma.service';
-import { badRequest, conflict, forbidden, slugify, unauthorized } from '../common';
+import { badRequest, conflict, forbidden, unauthorized } from '../common';
 import { MailService } from './mail.service';
 import { GeetestService, type GeetestCaptchaParams, type GeetestScene } from './geetest.service';
-import {
-  TEAM_PERMISSIONS,
-  SYSTEM_TEAM_ADMIN_ROLE_CODE,
-  SYSTEM_TEAM_MEMBER_ROLE_CODE,
-} from './permissions/permission-codes';
-
-/** 系统成员只读基线权限（与 seed-rbac.ts 保持一致）。 */
-const MEMBER_BASELINE_PERMISSIONS = ['team.dashboard.view', 'team.plugin.list', 'team.balance.view'];
-
 export type OnboardingState =
   | 'NEEDS_INVITATION'
   | 'PENDING_APPROVAL'
@@ -585,51 +576,4 @@ export class AuthService {
     return perms;
   }
 
-  async createTeamForApplication(applicationId: string, reviewerId: string) {
-    await this.ensurePlatformAdmin(reviewerId);
-    const application = await this.prisma.teamAdminApplication.findUnique({ where: { id: applicationId }, include: { user: true } });
-    if (!application) throw badRequest('申请不存在');
-    if (application.status !== 'PENDING') throw conflict('该申请已处理');
-    const slug = `${slugify(application.teamName)}-${application.id.slice(0, 6)}`;
-    return this.prisma.$transaction(async (tx) => {
-      const team = await tx.team.create({ data: { name: application.teamName, slug } });
-      // RBAC：新建团队时补两条团队级系统角色（确定性 id 便于 seed 幂等 + 应用层识别），
-      // 并把申请人 membership 指向系统团队管理员（双写 teamRole 枚举保持兼容）。
-      const teamAdminRoleId = `team-admin-${team.id}`;
-      const teamMemberRoleId = `team-member-${team.id}`;
-      await tx.role.create({
-        data: {
-          id: teamAdminRoleId,
-          name: '系统团队管理员',
-          code: SYSTEM_TEAM_ADMIN_ROLE_CODE,
-          scope: 'TEAM',
-          teamId: team.id,
-          isSystem: true,
-          description: '内置团队管理员角色，拥有全部团队权限',
-          permissions: TEAM_PERMISSIONS.map((p) => p.code),
-        },
-      });
-      await tx.role.create({
-        data: {
-          id: teamMemberRoleId,
-          name: '系统成员',
-          code: SYSTEM_TEAM_MEMBER_ROLE_CODE,
-          scope: 'TEAM',
-          teamId: team.id,
-          isSystem: true,
-          description: '内置成员角色，拥有只读基线权限',
-          permissions: MEMBER_BASELINE_PERMISSIONS,
-        },
-      });
-      await tx.teamMembership.create({
-        data: { teamId: team.id, userId: application.userId, role: 'TEAM_ADMIN', teamRoleId: teamAdminRoleId },
-      });
-      await tx.teamAdminApplication.update({
-        where: { id: application.id },
-        data: { status: 'APPROVED', reviewedById: reviewerId, reviewedAt: new Date() },
-      });
-      await tx.auditLog.create({ data: { actorUserId: reviewerId, action: 'team_admin_application.approved', targetType: 'TeamAdminApplication', targetId: application.id, metadata: { teamId: team.id } } });
-      return team;
-    });
-  }
 }

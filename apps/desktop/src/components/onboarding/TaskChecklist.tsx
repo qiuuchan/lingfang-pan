@@ -64,20 +64,21 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
     setDone(loadProgress(session.userId, TASK_STEPS));
   }, [session.userId]);
 
-  // task 07-03：第 1 步（脚本运行环境）内置运行时，直接标记完成。
+  // task 07-03：至少一个应用管理/用户指定运行时就绪时完成第 1 步。
   useEffect(() => {
-    setDone((prev) => {
-      if (prev[0]) return prev; // 已勾选，不重复处理。
-      const next = [...prev];
-      next[0] = true;
-      saveProgress(session.userId, next);
-      // 仅当所有步骤都完成时才标记整体完成
-      if (isAllDone(next)) {
-        saveDone(session.userId);
-        setCompleted(true);
-      }
-      return next;
-    });
+    let cancelled = false;
+    void getRuntimeStatus().then((status) => {
+      if (cancelled || (!status.python.available && !status.node.available)) return;
+      setDone((prev) => {
+        if (prev[0]) return prev;
+        const next = [...prev];
+        next[0] = true;
+        saveProgress(session.userId, next);
+        if (isAllDone(next)) { saveDone(session.userId); setCompleted(true); }
+        return next;
+      });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
   }, [session.userId]);
 
   const finishedCount = useMemo(() => done.filter(Boolean).length, [done]);

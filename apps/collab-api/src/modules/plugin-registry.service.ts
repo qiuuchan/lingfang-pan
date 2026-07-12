@@ -12,7 +12,37 @@ import { PrismaService } from '../prisma.service';
 import { ARTIFACT_STORE, type ArtifactDownload, type ArtifactStore } from './artifact-store';
 import { AuthService } from './auth.service';
 import { inspectPluginArtifact, PLUGIN_ARTIFACT_MAX_BYTES } from './plugin-artifact';
-import { compareStrictSemVer, parseStrictSemVer } from './plugin-semver';
+import {
+  ADMIN_PACKAGE_DETAIL_SELECT,
+  ADMIN_PACKAGE_LIST_SELECT,
+  ADMIN_RELEASE_CORE_SELECT,
+  ADMIN_RELEASE_FILES_SELECT,
+  ADMIN_RELEASE_MANIFEST_SELECT,
+  ADMIN_RELEASE_REVIEW_SELECT,
+  ADMIN_RELEASE_SUMMARY_SELECT,
+  adminListingProjection,
+  adminPackageDetail as projectAdminPackageDetail,
+  adminPackageListItem,
+  adminPackageWhere,
+  adminReleaseCore as projectAdminReleaseCore,
+  adminReleaseReview,
+  adminReleaseSummary,
+  groupAdminReleases,
+  normalizeAdminPage,
+  normalizeFileManifest,
+  normalizeRequiredReason,
+  type AdminPageQuery,
+  type AdminPluginPackageQuery,
+} from './plugin-registry-admin';
+import {
+  highestSemVer,
+  listingJson,
+  normalizeReleaseSource,
+  packageJson,
+  releaseJson,
+  type ReleaseSourceHeaders,
+} from './plugin-registry-model';
+import { parseStrictSemVer } from './plugin-semver';
 
 type UploadResult = { path: string; directory: string; sha256: string; sizeBytes: number };
 
@@ -25,42 +55,6 @@ function isPrerelease(version: string): boolean {
   return !parsed || parsed.prerelease !== null;
 }
 
-function releaseJson(release: {
-  id: string; packageId: string; version: string; manifest: unknown; sha256: string; sizeBytes: number;
-  status: string; marketReviewStatus: string; targetPlatform: string; reviewReason?: string; createdAt: Date;
-}) {
-  return {
-    id: release.id,
-    packageId: release.packageId,
-    version: release.version,
-    manifest: release.manifest,
-    sha256: release.sha256,
-    sizeBytes: release.sizeBytes,
-    status: release.status,
-    marketReviewStatus: release.marketReviewStatus,
-    targetPlatform: release.targetPlatform,
-    ...(release.reviewReason === undefined ? {} : { reviewReason: release.reviewReason }),
-    createdAt: release.createdAt.toISOString(),
-  };
-}
-
-function packageJson(pkg: {
-  id: string; ownerTeamId: string; authorUserId: string | null; manifestId: string; name: string; description: string;
-  governanceStatus: string; createdAt: Date; updatedAt: Date;
-}) {
-  return {
-    id: pkg.id,
-    ownerTeamId: pkg.ownerTeamId,
-    authorUserId: pkg.authorUserId,
-    manifestId: pkg.manifestId,
-    name: pkg.name,
-    description: pkg.description,
-    governanceStatus: pkg.governanceStatus,
-    createdAt: pkg.createdAt.toISOString(),
-    updatedAt: pkg.updatedAt.toISOString(),
-  };
-}
-
 @Injectable()
 export class PluginRegistryService {
   constructor(
@@ -68,6 +62,114 @@ export class PluginRegistryService {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(ARTIFACT_STORE) private readonly artifacts: ArtifactStore,
   ) {}
+
+  private async serializableTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        const retryable = error instanceof Prisma.PrismaClientKnownRequestError
+          && (error.code === 'P2034' || error.code === 'P2002');
+        if (!retryable) throw error;
+        if (attempt === 4) throw conflict('插件状态发生并发冲突，请重试');
+      }
+    }
+    throw conflict('插件状态发生并发冲突，请重试');
+  }
+
+  private async currentTeamPackage(userId: string, packageId: string) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const pkg = await this.prisma.pluginPackage.findUnique({ where: { id: packageId }, include: { listing: true } });
+    if (!pkg || pkg.ownerTeamId !== membership.teamId) throw notFound('插件包不存在');
+    return { membership, pkg };
+  }
+
+  private async ensurePackageActor(
+    userId: string,
+    pkg: { authorUserId: string | null },
+    membership: { role: string },
+    permission: string,
+  ): Promise<void> {
+    if (pkg.authorUserId === userId || membership.role === 'TEAM_ADMIN') return;
+    await this.auth.ensurePermission(userId, permission);
+  }
+
+  private async assertListingCanActivate(
+    tx: Prisma.TransactionClient,
+    packageId: string,
+    listing: { currentReleaseId: string | null },
+  ) {
+    const pkg = await tx.pluginPackage.findUnique({ where: { id: packageId } });
+    if (!pkg || pkg.governanceStatus !== 'ACTIVE') throw conflict('只有活动插件包可以恢复市场上架');
+    if (!listing.currentReleaseId) throw conflict('市场 listing 没有可恢复的当前发行版');
+    const release = await tx.pluginRelease.findUnique({ where: { id: listing.currentReleaseId } });
+    if (!release || release.packageId !== packageId || release.status !== 'PUBLISHED' || release.marketReviewStatus !== 'APPROVED') {
+      throw conflict('市场当前发行版不满足恢复条件');
+    }
+    return release;
+  }
+
+  private async changeMarketplaceListingStatus(
+    actorUserId: string,
+    packageId: string,
+    status: 'ACTIVE' | 'DELISTED',
+    actorKind: 'OWNER' | 'PLATFORM',
+    reason: string,
+    expectedCurrentReleaseId?: string,
+  ) {
+    const normalizedReason = String(reason || '').trim().slice(0, 500);
+    return this.serializableTransaction(async (tx) => {
+      const listing = await tx.marketplaceListing.findUnique({ where: { packageId } });
+      if (!listing) throw notFound('市场 listing 不存在');
+      if (status === 'DELISTED') {
+        const claimed = await tx.marketplaceListing.updateMany({
+          where: {
+            id: listing.id,
+            status: 'ACTIVE',
+            ...(expectedCurrentReleaseId ? { currentReleaseId: expectedCurrentReleaseId } : {}),
+          },
+          data: {
+            status: 'DELISTED',
+            delistedBy: actorKind,
+            delistReason: normalizedReason,
+            delistedAt: new Date(),
+            delistedByUserId: actorUserId,
+          },
+        });
+        if (claimed.count !== 1) throw conflict('插件包当前未上架');
+      } else {
+        if (listing.status !== 'DELISTED' || listing.delistedBy !== actorKind) {
+          throw conflict(actorKind === 'OWNER' ? '只有作者主动下架的插件可由团队恢复' : '只有平台暂停的插件可由平台恢复');
+        }
+        await this.assertListingCanActivate(tx, packageId, listing);
+        const claimed = await tx.marketplaceListing.updateMany({
+          where: { id: listing.id, status: 'DELISTED', delistedBy: actorKind },
+          data: {
+            status: 'ACTIVE',
+            delistedBy: null,
+            delistReason: '',
+            delistedAt: null,
+            delistedByUserId: null,
+          },
+        });
+        if (claimed.count !== 1) throw conflict('市场 listing 状态已变化，请刷新后重试');
+      }
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: actorKind === 'OWNER'
+            ? status === 'ACTIVE' ? 'plugin.marketplace.relisted' : 'plugin.marketplace.delisted'
+            : status === 'ACTIVE' ? 'admin.plugin_package.relisted' : 'admin.plugin_package.delisted',
+          targetType: 'PluginPackage',
+          targetId: packageId,
+          metadata: { status, actorKind, reason: normalizedReason },
+        },
+      });
+      return tx.marketplaceListing.findUnique({ where: { id: listing.id } });
+    });
+  }
 
   private async spoolUpload(stream: Readable, contentLength?: number): Promise<UploadResult> {
     if (contentLength !== undefined && (!Number.isFinite(contentLength) || contentLength <= 0 || contentLength > PLUGIN_ARTIFACT_MAX_BYTES)) {
@@ -99,8 +201,15 @@ export class PluginRegistryService {
     }
   }
 
-  async publishTeamRelease(userId: string, stream: Readable, packageId?: string, contentLength?: number) {
+  async publishTeamRelease(
+    userId: string,
+    stream: Readable,
+    packageId?: string,
+    contentLength?: number,
+    sourceHeaders: ReleaseSourceHeaders = {},
+  ) {
     const membership = await this.auth.ensureCurrentTeam(userId);
+    const source = normalizeReleaseSource(sourceHeaders);
     let staged: UploadResult;
     try {
       staged = await this.spoolUpload(stream, contentLength);
@@ -119,7 +228,7 @@ export class PluginRegistryService {
       let pkg = packageId ? await this.prisma.pluginPackage.findUnique({ where: { id: packageId } }) : null;
       if (pkg) {
         if (pkg.ownerTeamId !== membership.teamId) throw forbidden('不能发布到其他团队的插件包');
-        if (pkg.authorUserId !== userId && membership.role !== 'TEAM_ADMIN') throw forbidden('仅作者或团队管理员可发布新版本');
+        await this.ensurePackageActor(userId, pkg, membership, 'team.plugin.edit_draft');
         if (pkg.manifestId !== inspected.manifest.id) throw conflict('manifest.id 与目标插件包不一致');
       } else if (packageId) {
         throw notFound('插件包不存在');
@@ -127,10 +236,11 @@ export class PluginRegistryService {
         pkg = await this.prisma.pluginPackage.findUnique({
           where: { ownerTeamId_manifestId: { ownerTeamId: membership.teamId, manifestId: inspected.manifest.id } },
         });
-        if (pkg && pkg.authorUserId !== userId && membership.role !== 'TEAM_ADMIN') throw forbidden('仅作者或团队管理员可发布新版本');
+        if (pkg) await this.ensurePackageActor(userId, pkg, membership, 'team.plugin.edit_draft');
       }
 
       if (!pkg) {
+        if (membership.role !== 'TEAM_ADMIN') await this.auth.ensurePermission(userId, 'team.plugin.upload');
         pkg = await this.prisma.pluginPackage.create({
           data: {
             ownerTeamId: membership.teamId,
@@ -150,8 +260,10 @@ export class PluginRegistryService {
 
       artifactKey = `${pkg.id}/${inspected.manifest.version}/${staged.sha256}.lfplugin`;
       await this.artifacts.promote(staged.path, artifactKey, staged.sha256);
-      const release = await this.prisma.$transaction(async (tx) => {
-        await tx.pluginPackage.update({
+      const published = await this.serializableTransaction(async (tx) => {
+        const activePackage = await tx.pluginPackage.findUnique({ where: { id: pkg!.id } });
+        if (!activePackage || activePackage.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能发布新版本');
+        const updatedPackage = await tx.pluginPackage.update({
           where: { id: pkg!.id },
           data: { name: inspected.manifest.name, description: inspected.manifest.description },
         });
@@ -164,6 +276,9 @@ export class PluginRegistryService {
             artifactKey: artifactKey!,
             sha256: staged.sha256,
             sizeBytes: staged.sizeBytes,
+            sourceKind: source.sourceKind,
+            sourceLabel: source.sourceLabel,
+            ingestChannel: source.ingestChannel,
             createdById: userId,
           },
         });
@@ -173,13 +288,21 @@ export class PluginRegistryService {
             action: 'plugin.release.published',
             targetType: 'PluginRelease',
             targetId: created.id,
-            metadata: { packageId: pkg!.id, version: created.version, sha256: staged.sha256, sizeBytes: staged.sizeBytes },
+            metadata: {
+              packageId: pkg!.id,
+              version: created.version,
+              sha256: staged.sha256,
+              sizeBytes: staged.sizeBytes,
+              sourceKind: source.sourceKind,
+              sourceLabel: source.sourceLabel,
+              ingestChannel: source.ingestChannel,
+            },
           },
         });
-        return created;
+        return { release: created, package: updatedPackage };
       });
       await rm(staged.directory, { recursive: true, force: true });
-      return { package: packageJson(pkg), release: releaseJson(release) };
+      return { package: packageJson(published.package), release: releaseJson(published.release) };
     } catch (error) {
       await rm(staged.directory, { recursive: true, force: true });
       if (artifactKey) {
@@ -203,12 +326,30 @@ export class PluginRegistryService {
     });
     return {
       items: packages.flatMap((pkg) => {
-        const latest = pkg.releases.reduce<(typeof pkg.releases)[number] | null>(
-          (current, release) => !current || compareStrictSemVer(release.version, current.version) > 0 ? release : current,
-          null,
-        );
+        const latest = highestSemVer(pkg.releases);
         return latest ? [{ package: packageJson(pkg), latestRelease: releaseJson(latest) }] : [];
       }),
+    };
+  }
+
+  async managementCatalog(userId: string) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const packages = await this.prisma.pluginPackage.findMany({
+      where: { ownerTeamId: membership.teamId },
+      include: { releases: true, listing: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return {
+      items: packages.map((pkg) => ({
+        package: packageJson(pkg),
+        latestRelease: (() => {
+          const latest = highestSemVer(pkg.releases);
+          return latest ? releaseJson(latest) : null;
+        })(),
+        releaseCount: pkg.releases.length,
+        pendingReviewCount: pkg.releases.filter((release) => release.marketReviewStatus === 'PENDING').length,
+        listing: listingJson(pkg.listing),
+      })),
     };
   }
 
@@ -254,7 +395,7 @@ export class PluginRegistryService {
       releases: pkg.releases
         .filter((release) => isOwnerTeam || release.marketReviewStatus === 'APPROVED')
         .map(releaseJson),
-      listing: pkg.listing ? { priceCents: pkg.listing.priceCents, status: pkg.listing.status, currentReleaseId: pkg.listing.currentReleaseId } : null,
+      listing: listingJson(pkg.listing),
       entitled: pkg.listing?.priceCents === 0 || entitlement > 0,
     };
   }
@@ -323,20 +464,39 @@ export class PluginRegistryService {
     return { ok: true };
   }
 
-  async submitMarketplace(userId: string, releaseId: string, priceCents = 0) {
+  async adminArtifactDownload(actorId: string, releaseId: string): Promise<{ download: ArtifactDownload; release: ReturnType<typeof releaseJson> }> {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
+    if (!release) throw notFound('发行版不存在');
+    const download = await this.artifacts.download(release.artifactKey);
+    await this.audit(actorId, 'admin.plugin_release.artifact_downloaded', 'PluginRelease', release.id, {
+      packageId: release.packageId,
+      sha256: release.sha256,
+      marketReviewStatus: release.marketReviewStatus,
+    });
+    return { download, release: releaseJson(release) };
+  }
+
+  async submitMarketplace(userId: string, releaseId: string, priceCents?: number) {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId }, include: { package: true } });
     if (!release || release.package.ownerTeamId !== membership.teamId) throw notFound('发行版不存在');
-    if (release.package.authorUserId !== userId && membership.role !== 'TEAM_ADMIN') throw forbidden('仅作者或团队管理员可提交审核');
+    await this.ensurePackageActor(userId, release.package, membership, 'team.plugin.submit_marketplace');
+    if (release.package.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能提交市场');
     if (release.status !== 'PUBLISHED') throw conflict('已撤回发行版不能提交市场');
     if (isPrerelease(release.version)) throw badRequest('市场只允许正式 SemVer 版本');
-    if (release.marketReviewStatus === 'PENDING' || release.marketReviewStatus === 'APPROVED') throw conflict('该版本已提交或已通过审核');
-    const normalizedPrice = Math.max(0, Math.floor(Number(priceCents) || 0));
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.pluginRelease.update({
-        where: { id: releaseId },
+    const updated = await this.serializableTransaction(async (tx) => {
+      const activePackage = await tx.pluginPackage.findUnique({ where: { id: release.packageId } });
+      if (!activePackage || activePackage.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能提交市场');
+      const listing = await tx.marketplaceListing.findUnique({ where: { packageId: release.packageId } });
+      const normalizedPrice = priceCents === undefined
+        ? listing?.priceCents ?? 0
+        : Math.max(0, Math.floor(Number(priceCents) || 0));
+      const claimed = await tx.pluginRelease.updateMany({
+        where: { id: releaseId, status: 'PUBLISHED', marketReviewStatus: { in: ['DRAFT', 'REJECTED'] } },
         data: { marketReviewStatus: 'PENDING', reviewReason: '', reviewedById: null, reviewedAt: null },
       });
+      if (claimed.count !== 1) throw conflict('该版本已提交、已通过审核或状态已变化');
       await tx.marketplaceListing.upsert({
         where: { packageId: release.packageId },
         update: { priceCents: normalizedPrice },
@@ -344,9 +504,161 @@ export class PluginRegistryService {
       });
       await tx.pluginReleaseReview.create({ data: { releaseId, status: 'PENDING', reason: '作者提交审核' } });
       await tx.auditLog.create({ data: { actorUserId: userId, action: 'plugin.release.marketplace_submitted', targetType: 'PluginRelease', targetId: releaseId, metadata: { packageId: release.packageId, priceCents: normalizedPrice } } });
-      return next;
+      return tx.pluginRelease.findUnique({ where: { id: releaseId } });
     });
+    if (!updated) throw notFound('发行版不存在');
     return { release: releaseJson(updated) };
+  }
+
+  async withdrawMarketplaceSubmission(userId: string, releaseId: string, reason: string) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId }, include: { package: true } });
+    if (!release || release.package.ownerTeamId !== membership.teamId) throw notFound('发行版不存在');
+    await this.ensurePackageActor(userId, release.package, membership, 'team.plugin.submit_marketplace');
+    const reviewReason = String(reason || '').trim().slice(0, 500) || '作者撤回市场申请';
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.pluginRelease.updateMany({
+        where: { id: releaseId, status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+        data: { marketReviewStatus: 'DRAFT', reviewReason, reviewedById: null, reviewedAt: null },
+      });
+      if (claimed.count !== 1) throw conflict('发行版不在可撤回的待审核状态');
+      await tx.pluginReleaseReview.create({ data: { releaseId, status: 'DRAFT', reason: reviewReason } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'plugin.release.marketplace_withdrawn',
+          targetType: 'PluginRelease',
+          targetId: releaseId,
+          metadata: { packageId: release.packageId, reason: reviewReason },
+        },
+      });
+      return tx.pluginRelease.findUnique({ where: { id: releaseId } });
+    });
+    if (!updated) throw notFound('发行版不存在');
+    return { release: releaseJson(updated) };
+  }
+
+  async updatePackageStatus(userId: string, packageId: string, status: 'ACTIVE' | 'ARCHIVED') {
+    if (status !== 'ACTIVE' && status !== 'ARCHIVED') throw badRequest('插件包状态无效');
+    const { membership, pkg } = await this.currentTeamPackage(userId, packageId);
+    await this.ensurePackageActor(userId, pkg, membership, 'team.plugin.edit_metadata');
+    if (pkg.governanceStatus === status) return { package: packageJson(pkg), listing: listingJson(pkg.listing) };
+    const expected = status === 'ARCHIVED' ? 'ACTIVE' : 'ARCHIVED';
+    const result = await this.serializableTransaction(async (tx) => {
+      if (status === 'ARCHIVED') {
+        const pendingReviews = await tx.pluginRelease.count({ where: { packageId, marketReviewStatus: 'PENDING' } });
+        if (pendingReviews > 0) throw conflict('请先撤回待审核发行版再归档插件包');
+      }
+      const claimed = await tx.pluginPackage.updateMany({ where: { id: packageId, governanceStatus: expected }, data: { governanceStatus: status } });
+      if (claimed.count !== 1) throw conflict('插件包状态已变化，请刷新后重试');
+      if (status === 'ARCHIVED') {
+        await tx.marketplaceListing.updateMany({
+          where: { packageId, status: 'ACTIVE' },
+          data: {
+            status: 'DELISTED',
+            delistedBy: 'OWNER',
+            delistReason: '插件包已归档',
+            delistedAt: new Date(),
+            delistedByUserId: userId,
+          },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: status === 'ARCHIVED' ? 'plugin.package.archived' : 'plugin.package.restored',
+          targetType: 'PluginPackage',
+          targetId: packageId,
+          metadata: { from: expected, to: status },
+        },
+      });
+      return {
+        package: await tx.pluginPackage.findUnique({ where: { id: packageId } }),
+        listing: await tx.marketplaceListing.findUnique({ where: { packageId } }),
+      };
+    });
+    if (!result.package) throw notFound('插件包不存在');
+    return { package: packageJson(result.package), listing: listingJson(result.listing) };
+  }
+
+  async updateReleaseStatus(userId: string, releaseId: string, status: 'PUBLISHED' | 'YANKED') {
+    if (status !== 'PUBLISHED' && status !== 'YANKED') throw badRequest('发行版状态无效');
+    const release = await this.prisma.pluginRelease.findUnique({
+      where: { id: releaseId },
+      include: { package: { include: { listing: true } } },
+    });
+    if (!release) throw notFound('发行版不存在');
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    if (release.package.ownerTeamId !== membership.teamId) throw notFound('发行版不存在');
+    await this.ensurePackageActor(userId, release.package, membership, 'team.plugin.edit_draft');
+    if (release.status === status) return { release: releaseJson(release), listing: listingJson(release.package.listing) };
+    if (status === 'PUBLISHED' && release.package.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能恢复发行版');
+    const expected = status === 'YANKED' ? 'PUBLISHED' : 'YANKED';
+    const reason = status === 'YANKED' ? '作者撤回发行版' : '';
+    const result = await this.serializableTransaction(async (tx) => {
+      if (status === 'PUBLISHED') {
+        const activePackage = await tx.pluginPackage.findUnique({ where: { id: release.packageId } });
+        if (!activePackage || activePackage.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能恢复发行版');
+      }
+      const wasPending = status === 'YANKED' && release.marketReviewStatus === 'PENDING';
+      const claimed = await tx.pluginRelease.updateMany({
+        where: {
+          id: releaseId,
+          status: expected,
+          ...(status === 'YANKED' ? { marketReviewStatus: release.marketReviewStatus } : {}),
+        },
+        data: {
+          status,
+          ...(wasPending ? { marketReviewStatus: 'DRAFT' as const, reviewReason: reason, reviewedById: null, reviewedAt: null } : {}),
+        },
+      });
+      if (claimed.count !== 1) throw conflict('发行版状态已变化，请刷新后重试');
+      if (status === 'YANKED') {
+        await tx.marketplaceListing.updateMany({
+          where: { packageId: release.packageId, currentReleaseId: releaseId, status: 'ACTIVE' },
+          data: {
+            status: 'DELISTED',
+            delistedBy: 'OWNER',
+            delistReason: reason,
+            delistedAt: new Date(),
+            delistedByUserId: userId,
+          },
+        });
+      }
+      if (wasPending) await tx.pluginReleaseReview.create({ data: { releaseId, status: 'DRAFT', reason } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: status === 'YANKED' ? 'plugin.release.yanked' : 'plugin.release.restored',
+          targetType: 'PluginRelease',
+          targetId: releaseId,
+          metadata: { packageId: release.packageId, from: expected, to: status },
+        },
+      });
+      return {
+        release: await tx.pluginRelease.findUnique({ where: { id: releaseId } }),
+        listing: await tx.marketplaceListing.findUnique({ where: { packageId: release.packageId } }),
+      };
+    });
+    if (!result.release) throw notFound('发行版不存在');
+    return { release: releaseJson(result.release), listing: listingJson(result.listing) };
+  }
+
+  async updateOwnerMarketplaceStatus(userId: string, packageId: string, status: 'ACTIVE' | 'DELISTED', reason: string) {
+    if (status !== 'ACTIVE' && status !== 'DELISTED') throw badRequest('市场状态无效');
+    const { membership, pkg } = await this.currentTeamPackage(userId, packageId);
+    await this.ensurePackageActor(userId, pkg, membership, 'team.plugin.submit_marketplace');
+    const listing = await this.changeMarketplaceListingStatus(userId, packageId, status, 'OWNER', reason);
+    return { packageId, listing: listingJson(listing) };
+  }
+
+  async updatePlatformMarketplaceStatus(actorId: string, packageId: string, status: 'ACTIVE' | 'DELISTED', reason: string) {
+    if (status !== 'ACTIVE' && status !== 'DELISTED') throw badRequest('市场状态无效');
+    await this.auth.ensurePlatformAdmin(actorId);
+    const pkg = await this.prisma.pluginPackage.findUnique({ where: { id: packageId } });
+    if (!pkg) throw notFound('插件包不存在');
+    const listing = await this.changeMarketplaceListingStatus(actorId, packageId, status, 'PLATFORM', reason);
+    return { packageId, listing: listingJson(listing) };
   }
 
   async purchase(userId: string, packageId: string) {
@@ -420,6 +732,142 @@ export class PluginRegistryService {
     }
   }
 
+  async adminPackages(actorId: string, query: AdminPluginPackageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where = adminPackageWhere(query);
+    const [packages, total] = await Promise.all([
+      this.prisma.pluginPackage.findMany({
+        where,
+        select: ADMIN_PACKAGE_LIST_SELECT,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.pluginPackage.count({ where }),
+    ]);
+    const packageIds = packages.map((pkg) => pkg.id);
+    const releases = packageIds.length === 0
+      ? []
+      : await this.prisma.pluginRelease.findMany({
+          where: { packageId: { in: packageIds } },
+          select: ADMIN_RELEASE_SUMMARY_SELECT,
+        });
+    const releasesByPackage = groupAdminReleases(releases);
+    return {
+      items: packages.map((pkg) => adminPackageListItem(pkg, releasesByPackage.get(pkg.id) ?? [])),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async adminPackageDetail(actorId: string, packageId: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const pkg = await this.prisma.pluginPackage.findUnique({
+      where: { id: packageId },
+      select: ADMIN_PACKAGE_DETAIL_SELECT,
+    });
+    if (!pkg) throw notFound('插件包不存在');
+    const [releaseCount, pendingReviewCount] = await Promise.all([
+      this.prisma.pluginRelease.count({ where: { packageId } }),
+      this.prisma.pluginRelease.count({ where: { packageId, marketReviewStatus: 'PENDING' } }),
+    ]);
+    return projectAdminPackageDetail(pkg, releaseCount, pendingReviewCount);
+  }
+
+  async adminPackageReleases(actorId: string, packageId: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const pkg = await this.prisma.pluginPackage.findUnique({
+      where: { id: packageId },
+      select: { id: true, listing: { select: { status: true, currentReleaseId: true } } },
+    });
+    if (!pkg) throw notFound('插件包不存在');
+    const [releases, total] = await Promise.all([
+      this.prisma.pluginRelease.findMany({
+        where: { packageId },
+        select: ADMIN_RELEASE_SUMMARY_SELECT,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.pluginRelease.count({ where: { packageId } }),
+    ]);
+    return {
+      items: releases.map((release) => adminReleaseSummary(release, pkg.listing)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async adminReleaseCore(actorId: string, releaseId: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const release = await this.prisma.pluginRelease.findUnique({
+      where: { id: releaseId },
+      select: ADMIN_RELEASE_CORE_SELECT,
+    });
+    if (!release) throw notFound('发行版不存在');
+    return projectAdminReleaseCore(release);
+  }
+
+  async adminReleaseManifest(actorId: string, releaseId: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const release = await this.prisma.pluginRelease.findUnique({
+      where: { id: releaseId },
+      select: ADMIN_RELEASE_MANIFEST_SELECT,
+    });
+    if (!release) throw notFound('发行版不存在');
+    return { releaseId: release.id, manifest: release.manifest };
+  }
+
+  async adminReleaseFiles(actorId: string, releaseId: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const release = await this.prisma.pluginRelease.findUnique({
+      where: { id: releaseId },
+      select: ADMIN_RELEASE_FILES_SELECT,
+    });
+    if (!release) throw notFound('发行版不存在');
+    const files = normalizeFileManifest(release.fileManifest);
+    return {
+      items: files.slice(skip, skip + pageSize),
+      total: files.length,
+      page,
+      pageSize,
+    };
+  }
+
+  async adminReleaseReviews(actorId: string, releaseId: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId }, select: { id: true } });
+    if (!release) throw notFound('发行版不存在');
+    const [reviews, total] = await Promise.all([
+      this.prisma.pluginReleaseReview.findMany({
+        where: { releaseId },
+        select: ADMIN_RELEASE_REVIEW_SELECT,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.pluginReleaseReview.count({ where: { releaseId } }),
+    ]);
+    return {
+      items: reviews.map(adminReleaseReview),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async delistPackage(actorId: string, packageId: string, reason: string) {
+    const normalizedReason = normalizeRequiredReason(reason, '请填写 1 到 500 字符的下架原因');
+    const result = await this.updatePlatformMarketplaceStatus(actorId, packageId, 'DELISTED', normalizedReason);
+    return { ...result, listing: adminListingProjection(result.listing) };
+  }
+
   async pendingReviews(actorId: string) {
     await this.auth.ensurePlatformAdmin(actorId);
     const releases = await this.prisma.pluginRelease.findMany({
@@ -442,7 +890,11 @@ export class PluginRegistryService {
         package: packageJson(release.package),
         release: releaseJson(release),
         listingStatus: release.package.listing?.status ?? null,
+        currentReleaseId: release.package.listing?.currentReleaseId ?? null,
+        isMarketplaceCurrent: release.package.listing?.status === 'ACTIVE'
+          && release.package.listing.currentReleaseId === release.id,
         priceCents: release.package.listing?.priceCents ?? null,
+        listing: listingJson(release.package.listing),
       })),
     };
   }
@@ -450,51 +902,112 @@ export class PluginRegistryService {
   async reviewDetail(actorId: string, releaseId: string) {
     await this.auth.ensurePlatformAdmin(actorId);
     const release = await this.prisma.pluginRelease.findUnique({
-      where: { id: releaseId }, include: { package: true, reviews: { orderBy: { createdAt: 'desc' } } },
+      where: { id: releaseId }, include: { package: { include: { listing: true } }, reviews: { orderBy: { createdAt: 'desc' } } },
     });
     if (!release) throw notFound('发行版不存在');
-    return { package: packageJson(release.package), release: releaseJson(release), fileManifest: release.fileManifest, reviews: release.reviews.map((review) => ({ ...review, createdAt: review.createdAt.toISOString() })) };
+    return {
+      package: packageJson(release.package),
+      release: releaseJson(release),
+      listing: listingJson(release.package.listing),
+      isMarketplaceCurrent: release.package.listing?.status === 'ACTIVE'
+        && release.package.listing.currentReleaseId === release.id,
+      fileManifest: release.fileManifest,
+      reviews: release.reviews.map((review) => ({ ...review, createdAt: review.createdAt.toISOString() })),
+    };
   }
 
   async approveRelease(actorId: string, releaseId: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
+    const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId }, include: { package: true } });
     if (!release || release.marketReviewStatus !== 'PENDING') throw conflict('发行版不在待审核状态');
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.pluginRelease.update({ where: { id: releaseId }, data: { marketReviewStatus: 'APPROVED', reviewReason: '', reviewedById: actorId, reviewedAt: new Date() } });
-      await tx.marketplaceListing.update({ where: { packageId: release.packageId }, data: { currentReleaseId: releaseId, status: 'ACTIVE' } });
+    if (release.status !== 'PUBLISHED' || release.package.governanceStatus !== 'ACTIVE') {
+      throw conflict('只有活动插件包中的已发布发行版可以通过审核');
+    }
+    const result = await this.serializableTransaction(async (tx) => {
+      const activePackage = await tx.pluginPackage.findUnique({ where: { id: release.packageId } });
+      if (!activePackage || activePackage.governanceStatus !== 'ACTIVE') {
+        throw conflict('已归档插件包不能通过市场审核');
+      }
+      const claimed = await tx.pluginRelease.updateMany({
+        where: { id: releaseId, status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+        data: { marketReviewStatus: 'APPROVED', reviewReason: '', reviewedById: actorId, reviewedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw conflict('发行版审核状态已变化，请刷新后重试');
+      const candidates = await tx.pluginRelease.findMany({
+        where: { packageId: release.packageId, status: 'PUBLISHED', marketReviewStatus: 'APPROVED' },
+        select: { id: true, version: true },
+      });
+      const current = highestSemVer(candidates);
+      if (!current) throw conflict('没有可上架的已通过发行版');
+      const listing = await tx.marketplaceListing.findUnique({ where: { packageId: release.packageId } });
+      const delisted = listing?.status === 'DELISTED';
+      await tx.marketplaceListing.upsert({
+        where: { packageId: release.packageId },
+        update: delisted
+          ? { currentReleaseId: current.id }
+          : {
+              currentReleaseId: current.id,
+              status: 'ACTIVE',
+              delistedBy: null,
+              delistReason: '',
+              delistedAt: null,
+              delistedByUserId: null,
+            },
+        create: { packageId: release.packageId, currentReleaseId: current.id, status: 'ACTIVE' },
+      });
       await tx.pluginReleaseReview.create({ data: { releaseId, reviewerId: actorId, status: 'APPROVED' } });
-      await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin_release.approved', targetType: 'PluginRelease', targetId: releaseId, metadata: { packageId: release.packageId, version: release.version } } });
-      return next;
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'admin.plugin_release.approved',
+          targetType: 'PluginRelease',
+          targetId: releaseId,
+          metadata: { packageId: release.packageId, version: release.version, currentReleaseId: current.id },
+        },
+      });
+      return { release: await tx.pluginRelease.findUnique({ where: { id: releaseId } }), currentReleaseId: current.id };
     });
-    return { release: releaseJson(updated) };
+    if (!result.release) throw notFound('发行版不存在');
+    return { release: releaseJson(result.release), currentReleaseId: result.currentReleaseId };
   }
 
   async rejectRelease(actorId: string, releaseId: string, reason: string) {
     await this.auth.ensurePlatformAdmin(actorId);
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
     if (!release || release.marketReviewStatus !== 'PENDING') throw conflict('发行版不在待审核状态');
-    const reviewReason = String(reason || '').trim() || '未通过平台审核';
+    const reviewReason = normalizeRequiredReason(reason, '请填写 1 到 500 字符的驳回原因');
     const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.pluginRelease.update({ where: { id: releaseId }, data: { marketReviewStatus: 'REJECTED', reviewReason, reviewedById: actorId, reviewedAt: new Date() } });
+      const claimed = await tx.pluginRelease.updateMany({
+        where: { id: releaseId, status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+        data: { marketReviewStatus: 'REJECTED', reviewReason, reviewedById: actorId, reviewedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw conflict('发行版审核状态已变化，请刷新后重试');
       await tx.pluginReleaseReview.create({ data: { releaseId, reviewerId: actorId, status: 'REJECTED', reason: reviewReason } });
       await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin_release.rejected', targetType: 'PluginRelease', targetId: releaseId, metadata: { packageId: release.packageId, version: release.version, reason: reviewReason } } });
-      return next;
+      return tx.pluginRelease.findUnique({ where: { id: releaseId } });
     });
+    if (!updated) throw notFound('发行版不存在');
     return { release: releaseJson(updated) };
   }
 
   async delistRelease(actorId: string, releaseId: string, reason: string) {
     await this.auth.ensurePlatformAdmin(actorId);
+    const normalizedReason = normalizeRequiredReason(reason, '请填写 1 到 500 字符的下架原因');
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
     if (!release) throw notFound('发行版不存在');
     const listing = await this.prisma.marketplaceListing.findUnique({ where: { packageId: release.packageId } });
-    if (!listing || listing.status !== 'ACTIVE') throw conflict('插件包当前未上架');
-    await this.prisma.$transaction([
-      this.prisma.marketplaceListing.update({ where: { id: listing.id }, data: { status: 'DELISTED' } }),
-      this.prisma.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin_package.delisted', targetType: 'PluginPackage', targetId: release.packageId, metadata: { releaseId, reason: String(reason || '').trim() } } }),
-    ]);
-    return { packageId: release.packageId, status: 'DELISTED' as const };
+    if (!listing || listing.status !== 'ACTIVE' || listing.currentReleaseId !== releaseId) {
+      throw conflict('只有市场当前发行版可以触发下架');
+    }
+    const updated = await this.changeMarketplaceListingStatus(
+      actorId,
+      release.packageId,
+      'DELISTED',
+      'PLATFORM',
+      normalizedReason,
+      releaseId,
+    );
+    return { packageId: release.packageId, status: 'DELISTED' as const, listing: listingJson(updated) };
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {

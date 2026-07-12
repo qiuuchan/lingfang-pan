@@ -44,7 +44,9 @@ fn main() -> ExitCode {
 /// 失败静默（日志本身不应阻断主流程）。
 pub fn log_line(msg: &str) {
     use std::io::Write;
-    let Ok(dir) = paths::default_install_dir() else { return };
+    let Ok(dir) = paths::default_install_dir() else {
+        return;
+    };
     let logs = dir.join("logs");
     if std::fs::create_dir_all(&logs).is_err() {
         return;

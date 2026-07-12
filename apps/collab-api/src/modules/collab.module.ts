@@ -48,12 +48,12 @@ import { TicketService } from './ticket.service';
 import { PoolsController } from './pools.controller';
 import { TeamPoolService } from './pools.service';
 import { ARTIFACT_STORE, createArtifactStore } from './artifact-store';
-import { AdminPluginRegistryController, PluginRegistryController } from './plugin-registry.controller';
+import { AdminPluginPackageController, AdminPluginRegistryController, PluginRegistryController } from './plugin-registry.controller';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginArtifactCleanupService } from './plugin-artifact-cleanup.service';
 
 @Module({
-  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, PluginRegistryController, AdminPluginRegistryController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, TeamApiKeyController, UserCreditsController, SearchController, TicketController, AdminTicketController, PoolsController],
+  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, PluginRegistryController, AdminPluginRegistryController, AdminPluginPackageController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, TeamApiKeyController, UserCreditsController, SearchController, TicketController, AdminTicketController, PoolsController],
   // CollabModule 直接声明 AuthService（与 AuthModule 重复声明，历史架构；TeamService 等注入之），
   // 故 MailService / GeetestService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到它们。
   // NotificationService 无外部依赖（仅 PrismaService），被 AdminService/EconomyService 注入以在审核/购买成功后埋点触发通知。

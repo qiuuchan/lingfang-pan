@@ -4,6 +4,7 @@
 // 注意：PluginManifest 的 visibility 仍仅允许 private/tenant（上传入口不应携带 public，
 // public 由市场审核赋予），不要改。
 import { z } from 'zod';
+import { StrictSemVer } from './semver.ts';
 
 // 运行时类型四值：client（浏览器侧 HTML/iframe）/ cloud（云端执行）/
 // nodejs / python（脚本型，由桌面壳本地预览执行，见 R3）。
@@ -24,7 +25,7 @@ export type CapabilityRisk = z.infer<typeof CapabilityRisk>;
 // manifest 边界字段为 snake_case，与 manifest.json 自洽（运行时实际在用，不要改 camelCase）。
 export const PluginCapability = z.object({
   kind: CapabilityKind,
-  reason: z.string().default(''),
+  reason: z.string().max(500).default(''),
   risk: CapabilityRisk.default('low'),
   requires_admin: z.boolean().default(false),
   scope: z.record(z.unknown()).optional(),
@@ -34,15 +35,15 @@ export type PluginCapability = z.infer<typeof PluginCapability>;
 // 插件清单（也是 AI 生成时必须产出的 manifest.json 结构）。
 // manifest 边界字段为 snake_case，与 manifest.json 自洽。
 export const PluginManifest = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  version: z.string().min(1),
-  description: z.string().default(''),
+  id: z.string().trim().min(1).max(128),
+  name: z.string().trim().min(1).max(128),
+  version: StrictSemVer,
+  description: z.string().max(4096).default(''),
   runtime_type: RuntimeType.default('client'),
-  entry: z.string().min(1),
+  entry: z.string().trim().min(1).max(512),
   // manifest 上传入口 visibility 仅允许 private/tenant；public 由审核流程赋予，不在上传字段。
   visibility: z.enum(['private', 'tenant']).default('tenant'),
-  capabilities: z.array(PluginCapability).default([]),
+  capabilities: z.array(PluginCapability).max(64).default([]),
 });
 export type PluginManifest = z.infer<typeof PluginManifest>;
 

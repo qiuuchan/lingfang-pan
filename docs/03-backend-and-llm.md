@@ -1,6 +1,8 @@
-# 多租户后台与第三方 LLM 网关
+# 多租户后台与第三方 LLM 网关（历史参考）
 
-> 当前实现 · 2026-06-11 · 上游 [愿景与架构](01-vision-and-architecture.md)、[领域模型](02-domain-and-plugins.md)
+> **状态：已被替代。** 本文记录早期后端与 LLM 方案，不代表当前实现。当前后端为 NestJS + Prisma `apps/collab-api`，AI 创建器使用 OpenAI Agents SDK 与平台 relay。请以 [当前架构](./01-vision-and-architecture.md)、[领域与插件](./02-domain-and-plugins.md) 和 [协作 API](./collab-api.md) 为准。
+
+> 历史方案 · 2026-06-11 · 上游 [愿景与架构](01-vision-and-architecture.md)、[领域模型](02-domain-and-plugins.md)
 > 决策：服务端 [ADR-0003](adr/0003-multi-tenant-persistence.md)、LLM [ADR-0002](adr/0002-llm-third-party-gateway.md)
 
 ---

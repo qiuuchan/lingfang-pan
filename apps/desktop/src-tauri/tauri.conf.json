@@ -14,12 +14,10 @@
     "targets": [
       "nsis"
     ],
-    "resources": {
-      "../runtimes": "runtimes"
-    },
+    "resources": {},
     "copyright": "© 2026 灵坊工作台",
     "shortDescription": "灵坊工作台 协作平台桌面客户端",
-    "longDescription": "灵坊工作台 协作平台桌面客户端：AI 插件创建、团队协作、插件市场与钱包，支持本地代码助手与多种运行时插件。",
+    "longDescription": "灵坊工作台 协作平台桌面客户端：AI 插件创建、团队协作、插件市场与钱包，脚本运行时按需下载。",
     "publisher": "灵坊工作台",
     "category": "Productivity",
     "icon": [

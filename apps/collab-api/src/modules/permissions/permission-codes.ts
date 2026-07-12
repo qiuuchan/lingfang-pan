@@ -288,7 +288,7 @@ export const teamMemberRoleId = (teamId: string) => `team-member-${teamId}`;
 
 // === 内置系统角色 code（与 migration 20260622100000 回填一致）===
 // 系统团队管理员检测应基于 code（而非 name 字符串比较，避免脆弱）。
-// 凡是创建内置角色的地方（auth.service createTeamForApplication、setup、seed-admin、seed-rbac）必须写对应 code。
+// 凡是创建内置角色的地方（setup、seed-admin、seed-rbac、管理端审批事务）必须写对应 code。
 
 /** 系统平台管理员角色 code。 */
 export const SYSTEM_PLATFORM_ADMIN_ROLE_CODE = 'platform_admin';

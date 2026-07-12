@@ -11,6 +11,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma.service';
 import { AppError, badRequest } from '../common';
 import { PLATFORM_KEY_PREFIX } from '../dual-auth.guard';
+import { normalizeBillingPage, type BillingPageQuery } from './admin-billing-data';
 
 /** 生成明文 key：lf_ + 32 hex（256 位熵）。 */
 function generatePlaintextKey(): string {
@@ -102,12 +103,23 @@ export class PlatformApiKeyService {
   }
 
   /** admin 总览（全部团队）。 */
-  async adminList() {
-    const keys = await this.prisma.platformApiKey.findMany({
+  async adminList(query: BillingPageQuery & { status?: string } = {}) {
+    const { page, pageSize, skip, q } = normalizeBillingPage(query);
+    const where = {
+      ...(query.status ? { status: query.status as 'ACTIVE' | 'DISABLED' } : {}),
+      ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' as const } }, { keyPrefix: { contains: q, mode: 'insensitive' as const } }, { team: { name: { contains: q, mode: 'insensitive' as const } } }] } : {}),
+    };
+    const [keys, total] = await this.prisma.$transaction([
+      this.prisma.platformApiKey.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
-      include: { team: { select: { name: true } } },
-    });
-    return { apiKeys: keys.map((k) => ({ ...this.publicView(k), teamName: k.team.name })) };
+      skip,
+      take: pageSize,
+      select: { id: true, teamId: true, name: true, keyPrefix: true, scopes: true, status: true, lastUsedAt: true, expiresAt: true, createdAt: true, team: { select: { name: true } } },
+      }),
+      this.prisma.platformApiKey.count({ where }),
+    ]);
+    return { items: keys.map((k) => ({ ...this.publicView(k), teamName: k.team.name })), total, page, pageSize };
   }
 
   /** admin 吊销任意 key。 */

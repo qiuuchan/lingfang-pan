@@ -1,7 +1,7 @@
 // 灵石账户视图：团队余额总览 + 调整 + 流水。见 docs/billing-and-relay-design.md §11.5.1 ④。
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { useLoad, run } from '@/lib/helpers';
+import { run } from '@/lib/helpers';
 import { Section } from '@/components/shared';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -9,8 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Pagination } from '@/components/ui/pagination';
 
-type TeamRow = { id: string; name: string; balance: number; _count?: { memberships: number } };
+type TeamRow = { id: string; name: string; balance: number; memberCount: number };
 type LedgerRow = { id: string; amount: number; direction: 'CREDIT' | 'DEBIT'; source: string; reason: string; actorUserId: string | null; createdAt: string };
 
 function sourceLabel(s: string): string {
@@ -19,15 +20,14 @@ function sourceLabel(s: string): string {
 
 export function CreditsView() {
   const [teams, setTeams] = useState<TeamRow[]>([]);
-  const load = async () => {
-    const tr = await api<{ teams: TeamRow[] }>('/api/admin/teams');
-    const withBal = await Promise.all(tr.teams.map(async (t: any) => {
-      try { const b = await api<{ balance: number }>(`/api/admin/billing/credits/teams/${t.id}`); return { ...t, balance: b.balance }; }
-      catch { return { ...t, balance: 0 }; }
-    }));
-    setTeams(withBal);
-  };
-  useLoad(load);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const load = useCallback(async () => {
+    const result = await api<{ items: TeamRow[]; total: number }>(`/api/admin/billing/credits/teams?page=${page}&pageSize=${pageSize}`);
+    setTeams(result.items); setTotal(result.total);
+  }, [page, pageSize]);
+  useEffect(() => { void load(); }, [load]);
 
   return (
     <Section title="灵石账户" description="团队灵石（AI 用量计费货币，独立于人民币余额）总览与调整。">
@@ -38,7 +38,7 @@ export function CreditsView() {
             <TableRow key={t.id}>
               <TableCell className="font-medium">{t.name}</TableCell>
               <TableCell className="tabular-nums">{t.balance.toLocaleString()}</TableCell>
-              <TableCell className="text-muted-foreground">{t._count?.memberships ?? '—'}</TableCell>
+              <TableCell className="text-muted-foreground">{t.memberCount}</TableCell>
               <TableCell>
                 <AdjustDialog team={t} onSaved={load}><Button variant="outline" size="sm">调整余额</Button></AdjustDialog>{' '}
                 <LedgerDialog team={t}><Button variant="outline" size="sm">查看流水</Button></LedgerDialog>
@@ -47,6 +47,7 @@ export function CreditsView() {
           )) : <TableRow><TableCell colSpan={4} className="py-8 text-center text-muted-foreground">暂无团队</TableCell></TableRow>}
         </TableBody>
       </Table>
+      <Pagination totalItems={total} pageSize={pageSize} currentPage={page} onPageChange={setPage} onPageSizeChange={setPageSize} />
     </Section>
   );
 }
@@ -81,7 +82,7 @@ function LedgerDialog({ team, children }: { team: TeamRow; children: React.React
   useEffect(() => {
     if (!open) return;
     let mounted = true;
-    api<{ ledger: LedgerRow[] }>(`/api/admin/billing/credits/teams/${team.id}/ledger`).then((r) => mounted && setRows(r.ledger)).catch(() => undefined);
+    api<{ items: LedgerRow[] }>(`/api/admin/billing/credits/teams/${team.id}/ledger?page=1&pageSize=50`).then((r) => mounted && setRows(r.items)).catch(() => undefined);
     return () => { mounted = false; };
   }, [open, team.id]);
   return (

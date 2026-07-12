@@ -9,9 +9,10 @@
 //   迫使模型先看真实内容再改，避免盲目替换。
 // - HITL：AskQuestion 通过 onAskQuestion 回调挂起（UI 收集答案），与 Agents SDK 的 run 循环协作。
 import { z } from 'zod';
-import { api, type ApiError, tauriInvoke } from '@/lib/api';
+import { api, errorMessage, type ApiError, tauriInvoke } from '@/lib/api';
+import { CREATOR_PROVENANCE } from '@/lib/plugin-provenance';
 import { runPluginScript, runPluginShell, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
-import { deletePluginFile, movePluginFile } from '@/lib/plugin-status';
+import { deletePluginFile, movePluginFile, writeWorkspaceFiles } from '@/lib/plugin-status';
 import {
   validateStagedCompleteness,
   isSafePath,
@@ -255,13 +256,13 @@ export function createAgentTools(opts: AgentToolsOptions) {
     description:
       '初始化一个插件草稿工作区并写入 manifest.json 与全部初始文件。' +
       '首次生成插件时调用；后续修改用 Read/Write/Edit。' +
-      '约束：entry 必须存在于 files；client→ui/index.html、nodejs→index.js(+package.json)、python→main.py(+requirements.txt)。',
+      '约束：entry 必须存在于 files；client/cloud 通常为 ui/index.html、nodejs→index.js(+package.json)、python→main.py(+requirements.txt)。',
     parameters: z.object({
       id: z.string().regex(/^[a-z0-9-]+$/, 'id 仅小写字母/数字/连字符'),
       name: z.string(),
       version: z.string().default('0.1.0'),
       description: z.string().default(''),
-      runtime_type: z.enum(['client', 'nodejs', 'python']),
+      runtime_type: z.enum(['client', 'cloud', 'nodejs', 'python']),
       entry: z.string(),
       capabilities: z
         .array(
@@ -296,6 +297,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
         visibility: 'tenant',
         capabilities,
         files: draftFiles,
+        ...CREATOR_PROVENANCE,
       };
       const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
       if (err) return `错误：${err}`;
@@ -316,13 +318,20 @@ export function createAgentTools(opts: AgentToolsOptions) {
               version: draft.version,
               runtime: draft.runtime_type,
               conversationId,
+              sourceKind: draft.sourceKind,
+              sourceLabel: draft.sourceLabel,
             },
           });
           workspaceId = workspace.workspaceId;
           createdWorkspaceId = workspaceId;
         }
-        await tauriInvoke<void>('write_plugin_files', { pluginId: workspaceId, files });
-        await tauriInvoke('sync_draft_workspace_metadata', { workspaceId, conversationId });
+        await writeWorkspaceFiles(workspaceId, files);
+        await tauriInvoke('sync_draft_workspace_metadata', {
+          workspaceId,
+          conversationId,
+          sourceKind: draft.sourceKind,
+          sourceLabel: draft.sourceLabel,
+        });
         draft.files.forEach((f) => readPaths.add(f.path));
         readPaths.add('manifest.json');
         opts.onPluginCreated(workspaceId, draft);
@@ -331,7 +340,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
         if (createdWorkspaceId) {
           await tauriInvoke('delete_draft_workspace', { workspaceId: createdWorkspaceId }).catch(() => undefined);
         }
-        return `创建失败：${e instanceof Error ? e.message : String(e)}`;
+        return `创建失败：${errorMessage(e, '草稿工作区创建失败')}`;
       }
     },
   });
@@ -418,7 +427,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
       } catch {
         return '错误：manifest.json 解析失败（JSON 非法）。';
       }
-      const runtime = (manifest.runtime_type ?? 'client') as 'client' | 'nodejs' | 'python';
+      const runtime = (manifest.runtime_type ?? 'client') as StagedPlugin['runtime_type'];
       const entry = manifest.entry ?? '';
       const draftFiles = files.map((p) => ({ path: p, content: '' }));
       const err = validateStagedCompleteness(runtime, entry, draftFiles);

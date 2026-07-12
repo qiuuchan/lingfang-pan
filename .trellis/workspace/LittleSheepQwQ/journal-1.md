@@ -521,3 +521,35 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 完善插件导入、发布与治理系统
+
+**Date**: 2026-07-12
+**Task**: 完善插件导入、发布与治理系统
+**Package**: collab-admin
+**Branch**: `betav2`
+
+### Summary
+
+完成 v4 registry 来源与生命周期、桌面本地 .lfplugin/源码发布团队或市场、管理端 package/release 治理与 v4 Dashboard 指标；contract 27/27、collab-api 708/708、collab-admin Playwright 6/6，类型检查、构建和桌面/Rust 既有质量门均通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

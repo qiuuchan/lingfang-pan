@@ -151,6 +151,9 @@ export interface AdminRelease extends Release {
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 }
 
+/** 写操作只返回版本核心字段；完整 assets 仅由详情端点按需返回。 */
+export type AdminReleaseCore = Omit<AdminRelease, 'assets'>;
+
 /** 创建版本入参（POST /api/admin/releases）。 */
 export interface ReleaseCreateInput {
   version: string;
@@ -168,22 +171,14 @@ export interface AssetCreateInput {
   sizeBytes?: number;
 }
 
-/** GET /api/admin/releases：版本列表（含 DRAFT/ARCHIVED）。channel 可选过滤。 */
-export async function listAdminReleases(channel?: 'STABLE' | 'BETA'): Promise<AdminRelease[]> {
-  const q = channel ? `?channel=${channel}` : '';
-  const data = await api<{ releases: AdminRelease[] }>(`/api/admin/releases${q}`);
-  return data.releases ?? [];
-}
-
 /** POST /api/admin/releases：创建 DRAFT 版本。 */
 export function createRelease(input: ReleaseCreateInput) {
-  return api<{ release: AdminRelease }>('/api/admin/releases', { method: 'POST', body: input });
+  return api<{ release: AdminReleaseCore }>('/api/admin/releases', { method: 'POST', body: input });
 }
 
-/** PATCH /api/admin/releases/:id：改 title/notes。 */
 /** PATCH /api/admin/releases/:id：更新 title/notes/channel/publishedAt。 */
 export function updateRelease(id: string, body: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: string | null }) {
-  return api<{ release: AdminRelease }>(`/api/admin/releases/${id}`, { method: 'PATCH', body });
+  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}`, { method: 'PATCH', body });
 }
 
 /** DELETE /api/admin/releases/:id：删除版本（级联删 assets）。 */
@@ -193,12 +188,12 @@ export function deleteRelease(id: string) {
 
 /** POST /api/admin/releases/:id/publish：发布。 */
 export function publishRelease(id: string) {
-  return api<{ release: AdminRelease }>(`/api/admin/releases/${id}/publish`, { method: 'POST' });
+  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}/publish`, { method: 'POST' });
 }
 
 /** POST /api/admin/releases/:id/archive：归档。 */
 export function archiveRelease(id: string) {
-  return api<{ release: AdminRelease }>(`/api/admin/releases/${id}/archive`, { method: 'POST' });
+  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}/archive`, { method: 'POST' });
 }
 
 /** POST /api/admin/releases/:id/assets：登记外链产物。 */
@@ -242,4 +237,3 @@ export function absoluteDownloadUrl(url: string): string {
 export function openDownload(url: string) {
   window.open(absoluteDownloadUrl(url), '_blank');
 }
-

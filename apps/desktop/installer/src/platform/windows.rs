@@ -8,7 +8,9 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, HWND, RECT, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -143,7 +145,12 @@ unsafe fn set_dword(hkey: HKEY, name: &str, value: u32) -> Result<()> {
 /// 创建快捷方式（.lnk）——用 PowerShell WScript.Shell（避免 COM vtable 绑定）。
 ///
 /// `lnk_path` 为目标 .lnk 路径，`target` 为指向的 exe，`icon` 为图标路径（通常即 target）。
-pub fn create_shortcut(lnk_path: &Path, target: &Path, working_dir: &Path, icon: &Path) -> Result<()> {
+pub fn create_shortcut(
+    lnk_path: &Path,
+    target: &Path,
+    working_dir: &Path,
+    icon: &Path,
+) -> Result<()> {
     // PowerShell 脚本：用单引号包裹路径，内部单引号转义为两个单引号。
     let esc = |p: &Path| p.to_string_lossy().replace('\'', "''");
     let script = format!(
@@ -324,14 +331,7 @@ fn is_windows_11() -> bool {
     unsafe {
         let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
         let mut hkey: HKEY = std::ptr::null_mut();
-        if RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            0,
-            KEY_READ,
-            &mut hkey,
-        ) != 0
-        {
+        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey.as_ptr(), 0, KEY_READ, &mut hkey) != 0 {
             return false;
         }
         let name = wide("CurrentBuild");

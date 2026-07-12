@@ -81,7 +81,7 @@ selectedConversationKey(userId, tenantId); // lf:creator-selected:<owner>
 
 关键断言：
 
-- 通过真实 `插件 -> 开发插件` 路径进入 `CreatorWorkspace`。
+- 普通页面通过真实“AI 创建插件”浮动按钮进入顶层 Dialog；草稿继续编辑通过 `develop-plugins` 进入全屏工作区。
 - 页面只有一个上下文详情入口，没有 message-area `context` 栏。
 - more 菜单可访问文件、文件夹、技能、提示词优化和语音。
 - tenant-scoped 历史和 staged draft 可恢复，Artifact Inspector 可切到文件标签。

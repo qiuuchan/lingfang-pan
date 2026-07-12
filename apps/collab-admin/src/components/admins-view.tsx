@@ -1,429 +1,175 @@
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { useEffect, useState, type FormEvent } from 'react';
+import { PencilIcon, PlusIcon, SearchIcon } from 'lucide-react';
+import { AsyncResource } from '@/components/ui/async-resource';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import { Pagination } from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
   TableCell,
+  TableCellAction,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { DetailSheet } from '@/components/ui/detail-sheet';
-import { PlusIcon, PencilIcon, ShieldOffIcon, BanIcon, Trash2Icon, ActivityIcon } from 'lucide-react';
-import { api } from '@/lib/api';
-import { useLoad, run } from '@/lib/helpers';
-import { StatusBadge, Section, InfoGrid } from '@/components/shared';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { usePagination, Pagination } from '@/components/ui/pagination';
-import type { AuditLog, User, UserStatus } from '@/lib/types';
-import { labelOf, formatTime, actionLabel, targetLabel } from '@/lib/types';
+import { Section, StatusBadge } from '@/components/shared';
+import { adminCoreApi } from '@/components/admin-core/api';
+import { usePageCorrection } from '@/components/admin-core/pagination';
+import { CreateAccountDialog, EditAccountDialog } from '@/components/admin-core/user-account-dialogs';
+import { UserDetailSheet } from '@/components/admin-core/user-detail-sheet';
+import type { UserSummary } from '@/components/admin-core/types';
+import { useAsyncResource } from '@/lib/async-resource';
+import type { UserStatus } from '@/lib/types';
+
+type StatusFilter = 'ALL' | UserStatus;
 
 export function AdminsView() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [activeAdmin, setActiveAdmin] = useState<User | null>(null);
-  const load = () => api<{ users: User[] }>('/api/admin/users').then((r) => setUsers(r.users));
-  useLoad(load);
+  const [draftQuery, setDraftQuery] = useState('');
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('ALL');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [selected, setSelected] = useState<UserSummary | null>(null);
 
-  const admins = useMemo(() => users.filter((u) => u.platformRole === 'PLATFORM_ADMIN'), [users]);
-  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(admins);
-
-  async function toggleBan(user: User) {
-    const newStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
-    await run(
-      () => api(`/api/admin/users/${user.id}`, { method: 'PATCH', body: { status: newStatus, platformRole: 'PLATFORM_ADMIN' } }).then(load),
-      newStatus === 'DISABLED' ? '管理员已封禁' : '管理员已解封',
-    );
-  }
-
-  return (
-    <div className="space-y-8">
-      <Section title="平台管理员" description="平台管理员拥有全局管理权限，在此页面管理。">
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <div className="text-sm text-muted-foreground">{totalItems} 个管理员</div>
-            </div>
-            <CreateAdminDialog onRefresh={load}>
-              <Button>
-                <PlusIcon className="mr-1.5 size-4" />
-                创建平台管理员
-              </Button>
-            </CreateAdminDialog>
-          </div>
-
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>邮箱</TableHead>
-                <TableHead>显示名</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>角色</TableHead>
-                <TableHead className="w-[240px]">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginated.length ? (
-                paginated.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.email}</TableCell>
-                    <TableCell>{user.displayName}</TableCell>
-                    <TableCell><StatusBadge value={user.status} /></TableCell>
-                    <TableCell><StatusBadge value={user.platformRole} /></TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <EditAdminDialog user={user} onRefresh={load}>
-                          <Button variant="outline" size="sm">
-                            <PencilIcon className="mr-1 size-3.5" />
-                            编辑
-                          </Button>
-                        </EditAdminDialog>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setActiveAdmin(user)}
-                        >
-                          <ActivityIcon className="mr-1 size-3.5" />
-                          操作记录
-                        </Button>
-                        <Button
-                          variant={user.status === 'ACTIVE' ? 'ghost' : 'outline'}
-                          size="sm"
-                          onClick={() => toggleBan(user)}
-                        >
-                          <BanIcon className="mr-1 size-3.5" />
-                          {user.status === 'ACTIVE' ? '封禁' : '解封'}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    暂无平台管理员
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-          <Pagination
-            totalItems={totalItems}
-            pageSize={pageSize}
-            currentPage={page}
-            onPageChange={setPage}
-            onPageSizeChange={setPageSize}
-          />
-        </div>
-      </Section>
-
-      {/* 管理员操作记录抽屉：拉取该 admin 作为 actor 的审计日志（按时间倒序）。 */}
-      <AdminActivitySheet admin={activeAdmin} onOpenChange={(o) => !o && setActiveAdmin(null)} />
-    </div>
-  );
-}
-
-/** --- Create Admin Dialog --- */
-function CreateAdminDialog({ children, onRefresh }: { children: React.ReactNode; onRefresh: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [password, setPassword] = useState('ChangeMe123!');
-
-  async function create() {
-    if (!email.trim()) return toast.error('输入邮箱');
-    // ADMIN-VIEW-04 修复：仅成功才关闭对话框并清空表单。
-    if (!(await run(
-      () =>
-        api('/api/admin/users', {
-          method: 'POST',
-          body: { email, password, displayName: displayName || email, platformRole: 'PLATFORM_ADMIN' },
-        }).then(onRefresh),
-      '平台管理员已创建',
-    ))) return;
-    setOpen(false);
-    setEmail('');
-    setDisplayName('');
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>创建平台管理员</DialogTitle>
-          <DialogDescription>创建的账号直接拥有平台级管理权限。</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>邮箱</Label>
-            <Input placeholder="admin@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>显示名</Label>
-            <Input placeholder="默认使用邮箱" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>初始密码</Label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={create}>创建</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** --- Edit Admin Dialog (edit + demote combined) --- */
-function EditAdminDialog({
-  user,
-  children,
-  onRefresh,
-}: {
-  user: User;
-  children: React.ReactNode;
-  onRefresh: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState('info');
-  const [editEmail, setEditEmail] = useState(user.email);
-  const [editName, setEditName] = useState(user.displayName);
-  const [editStatus, setEditStatus] = useState<UserStatus>(user.status);
-  const [editPassword, setEditPassword] = useState('');
-
-  function handleOpen(open: boolean) {
-    if (open) {
-      setEditEmail(user.email);
-      setEditName(user.displayName);
-      setEditStatus(user.status);
-      setEditPassword('');
-      setTab('info');
-    }
-    setOpen(open);
-  }
-
-  async function save() {
-    if (!editEmail.trim()) return toast.error('输入邮箱');
-    const body: Record<string, unknown> = {
-      email: editEmail.trim(),
-      displayName: editName,
-      status: editStatus,
+  const admins = useAsyncResource(
+    (signal) => adminCoreApi.users({
+      page,
+      pageSize,
+      q: query || undefined,
+      status: status === 'ALL' ? undefined : status,
       platformRole: 'PLATFORM_ADMIN',
-    };
-    if (editPassword.trim()) body.password = editPassword;
-    // ADMIN-VIEW-04 修复：仅成功才关闭对话框，失败保留草稿。
-    if (!(await run(
-      () =>
-        api(`/api/admin/users/${user.id}`, { method: 'PATCH', body }).then(onRefresh),
-      '平台管理员信息已更新',
-    ))) return;
-    setOpen(false);
-  }
-
-  async function demote() {
-    // 使用专用 platform-role 端点（仅改角色，禁止自改自身 + 独立审计 admin.user.role_changed + tokenVersion++ 作废旧 token）。
-    if (!(await run(
-      () =>
-        api(`/api/admin/users/${user.id}/platform-role`, {
-          method: 'PATCH',
-          body: { platformRole: 'NONE' },
-        }).then(onRefresh),
-      '已降级为普通用户',
-    ))) return;
-    setOpen(false);
-  }
-
-  async function deleteUser() {
-    if (!window.confirm(`确认永久删除管理员 ${user.email}？此操作不可恢复。`)) return;
-    if (!(await run(
-      () => api(`/api/admin/users/${user.id}`, { method: 'DELETE' }).then(onRefresh),
-      '管理员已删除',
-    ))) return;
-    setOpen(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>编辑管理员</DialogTitle>
-          <DialogDescription>{user.email}</DialogDescription>
-        </DialogHeader>
-
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="info">基本信息</TabsTrigger>
-            <TabsTrigger value="role">权限管理</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="info" className="space-y-4">
-            <InfoGrid
-              items={[
-                ['管理员 ID', user.id],
-                ['当前角色', labelOf(user.platformRole)],
-              ]}
-            />
-            <div className="space-y-2">
-              <Label>邮箱</Label>
-              <Input
-                type="email"
-                placeholder="admin@example.com"
-                value={editEmail}
-                onChange={(e) => setEditEmail(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>昵称</Label>
-              <Input
-                placeholder="显示名称"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>新密码（留空不修改）</Label>
-              <Input
-                type="password"
-                placeholder="留空则不修改密码"
-                value={editPassword}
-                onChange={(e) => setEditPassword(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>状态</Label>
-              <Select value={editStatus} onValueChange={(v) => setEditStatus(v as UserStatus)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ACTIVE">正常</SelectItem>
-                  <SelectItem value="DISABLED">已禁用</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={save} className="w-full">保存修改</Button>
-          </TabsContent>
-
-          <TabsContent value="role" className="space-y-4">
-            <InfoGrid
-              items={[
-                ['邮箱', user.email],
-                ['当前角色', labelOf(user.platformRole)],
-              ]}
-            />
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                降级后该用户将失去所有平台管理权限，变为普通用户。
-              </p>
-              <Button variant="destructive" onClick={demote} className="w-full">
-                <ShieldOffIcon className="mr-1.5 size-4" />
-                降级为普通用户
-              </Button>
-            </div>
-            <div className="mt-4 space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-              <p className="text-sm font-medium text-destructive">危险操作</p>
-              <p className="text-xs text-muted-foreground">
-                永久删除该管理员及其所有关联数据，此操作不可恢复。
-              </p>
-              <Button variant="destructive" onClick={deleteUser} className="w-full">
-                <Trash2Icon className="mr-1.5 size-4" />
-                删除管理员
-              </Button>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+    }, signal),
+    [page, pageSize, query, status],
+    { isEmpty: (data) => data.items.length === 0 },
   );
-}
 
-/** 管理员操作记录抽屉：拉取该 admin 作为 actor 的审计日志（/api/admin/admins/:id/activity）。
- *  按 createdAt 倒序展示，含 action 中文说明 + 对象 + 时间，便于审计该管理员的治理操作。 */
-function AdminActivitySheet({
-  admin,
-  onOpenChange,
-}: {
-  admin: User | null;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [loading, setLoading] = useState(false);
+  usePageCorrection(admins.data, page, pageSize, setPage);
 
   useEffect(() => {
-    if (!admin) {
-      setLogs([]);
-      return;
-    }
-    setLoading(true);
-    api<{ logs: AuditLog[] }>(`/api/admin/admins/${admin.id}/activity`)
-      .then((r) => setLogs(r.logs))
-      .catch(() => setLogs([]))
-      .finally(() => setLoading(false));
-  }, [admin]);
+    if (!selected || !admins.data) return;
+    const latest = admins.data.items.find((admin) => admin.id === selected.id);
+    if (latest) setSelected(latest);
+  }, [admins.data, selected?.id]);
+
+  function applySearch(event: FormEvent) {
+    event.preventDefault();
+    setPage(1);
+    setQuery(draftQuery.trim());
+  }
 
   return (
-    <DetailSheet
-      open={!!admin}
-      onOpenChange={onOpenChange}
-      title={admin?.displayName || admin?.email || ''}
-      description={admin?.email}
+    <Section
+      title="平台管理员"
+      description="平台管理员账号与操作记录。"
+      actions={(
+        <CreateAccountDialog kind="admin" onChanged={admins.reload}>
+          <Button type="button">
+            <PlusIcon className="size-4" />
+            创建管理员
+          </Button>
+        </CreateAccountDialog>
+      )}
     >
-      {admin ? (
-        <>
-          <div>
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">管理员信息</div>
-            <InfoGrid
-              items={[
-                ['管理员 ID', admin.id],
-                ['邮箱', admin.email],
-                ['状态', <StatusBadge key="s" value={admin.status} />],
-                ['角色', <StatusBadge key="r" value={admin.platformRole} />],
-              ]}
+      <div className="space-y-4">
+        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={applySearch}>
+          <div className="relative min-w-0 flex-1 sm:max-w-sm">
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={draftQuery}
+              onChange={(event) => setDraftQuery(event.target.value)}
+              placeholder="搜索邮箱或显示名"
+              className="pl-9"
             />
           </div>
+          <Select
+            value={status}
+            onValueChange={(value) => {
+              setStatus(value as StatusFilter);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-36" aria-label="管理员状态">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">全部状态</SelectItem>
+              <SelectItem value="ACTIVE">正常</SelectItem>
+              <SelectItem value="DISABLED">已禁用</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button type="submit" variant="outline">
+            <SearchIcon className="size-4" />
+            搜索
+          </Button>
+        </form>
 
-          <div>
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <ActivityIcon className="size-3.5" />
-              操作记录（最近 50 条）
-            </div>
-            {loading ? (
-              <p className="text-sm text-muted-foreground">加载中…</p>
-            ) : logs.length ? (
-              <div className="space-y-1.5">
-                {logs.map((log) => (
-                  <div key={log.id} className="rounded-xl border px-3 py-2 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{actionLabel(log.action)}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{formatTime(log.createdAt)}</span>
-                    </div>
-                    {log.targetType ? (
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        对象：{targetLabel(log.targetType)}{log.targetId ? ` · ${log.targetId.slice(0, 8)}` : ''}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">暂无操作记录</p>
-            )}
-          </div>
-        </>
-      ) : null}
-    </DetailSheet>
+        <AsyncResource
+          status={admins.status}
+          error={admins.error}
+          retry={admins.reload}
+          emptyFallback={<div className="py-12 text-center text-sm text-muted-foreground">暂无符合条件的平台管理员</div>}
+        >
+          {admins.data ? (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>邮箱</TableHead>
+                    <TableHead className="hidden sm:table-cell">显示名</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead className="hidden md:table-cell">角色</TableHead>
+                    <TableHead className="w-24 text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {admins.data.items.map((admin) => (
+                    <TableRow key={admin.id}>
+                      <TableCell>
+                        <TableCellAction
+                          aria-label={`查看管理员详情：${admin.email}`}
+                          aria-haspopup="dialog"
+                          onClick={() => setSelected(admin)}
+                        >
+                          <span className="block max-w-48 truncate">{admin.email}</span>
+                          <span className="mt-0.5 block max-w-48 truncate text-xs font-normal text-muted-foreground sm:hidden">
+                            {admin.displayName || '—'}
+                          </span>
+                        </TableCellAction>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">{admin.displayName || '—'}</TableCell>
+                      <TableCell><StatusBadge value={admin.status} /></TableCell>
+                      <TableCell className="hidden md:table-cell"><StatusBadge value={admin.platformRole} /></TableCell>
+                      <TableCell className="text-right">
+                        <EditAccountDialog user={admin} kind="admin" onChanged={admins.reload}>
+                          <Button type="button" variant="ghost" size="icon" aria-label={`编辑管理员：${admin.email}`}>
+                            <PencilIcon className="size-4" />
+                          </Button>
+                        </EditAccountDialog>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                totalItems={admins.data.total}
+                pageSize={pageSize}
+                currentPage={page}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+              />
+            </>
+          ) : null}
+        </AsyncResource>
+      </div>
+
+      <UserDetailSheet
+        user={selected}
+        mode="admin"
+        onOpenChange={(open) => { if (!open) setSelected(null); }}
+        onChanged={admins.reload}
+      />
+    </Section>
   );
 }

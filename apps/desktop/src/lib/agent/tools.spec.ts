@@ -264,16 +264,24 @@ describe('CreatePlugin 草稿工作区', () => {
       'sync_draft_workspace_metadata',
     ]);
     expect(tauriInvokeMock.mock.calls[0]?.[1]).toEqual({
-      input: expect.objectContaining({ conversationId: 'conv-test' }),
+      input: expect.objectContaining({
+        conversationId: 'conv-test',
+        sourceKind: 'LINGFANG_CREATOR',
+        sourceLabel: '灵枋创建器',
+      }),
     });
     const writeArgs = tauriInvokeMock.mock.calls[1]?.[1] as { pluginId: string; files: Array<{ path: string; content: string }> };
     expect(writeArgs.pluginId).toBe('11111111-1111-4111-8111-111111111111');
     expect(tauriInvokeMock.mock.calls[2]?.[1]).toEqual({
       workspaceId: '11111111-1111-4111-8111-111111111111',
       conversationId: 'conv-test',
+      sourceKind: 'LINGFANG_CREATOR',
+      sourceLabel: '灵枋创建器',
     });
     const manifest = JSON.parse(writeArgs.files.find((file) => file.path === 'manifest.json')!.content);
     expect(manifest).not.toHaveProperty('draft');
+    expect(manifest).not.toHaveProperty('sourceKind');
+    expect(manifest).not.toHaveProperty('sourceLabel');
     expect(opts.onPluginCreated).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', expect.objectContaining({ id: 'demo-plugin' }));
   });
 

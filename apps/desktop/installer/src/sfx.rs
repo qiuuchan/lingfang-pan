@@ -123,8 +123,7 @@ pub fn extract_payload(exe_path: &Path, dest_dir: &Path) -> Result<usize> {
         if let Some(parent) = out_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut out = File::create(&out_path)
-            .with_context(|| format!("写入 {out_path:?} 失败"))?;
+        let mut out = File::create(&out_path).with_context(|| format!("写入 {out_path:?} 失败"))?;
         std::io::copy(&mut entry, &mut out)?;
         count += 1;
     }
@@ -187,8 +186,8 @@ mod tests {
         {
             let cursor = std::io::Cursor::new(&mut zip_buf);
             let mut zw = zip::ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             zw.start_file("lingfang-desktop.exe", opts).unwrap();
             zw.write_all(b"FAKE-MAIN-EXE").unwrap();
             zw.start_file("runtimes/python/marker.txt", opts).unwrap();

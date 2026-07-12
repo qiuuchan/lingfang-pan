@@ -7,11 +7,41 @@ import { parseStrictSemVer } from './plugin-semver';
 export const PLUGIN_ARTIFACT_MAX_BYTES = 300 * 1024 * 1024;
 export const PLUGIN_ARTIFACT_MAX_FILES = 1500;
 export const PLUGIN_ARTIFACT_MAX_FILE_BYTES = 60 * 1024 * 1024;
+export const PLUGIN_ARTIFACT_MAX_METADATA_BYTES = 256 * 1024;
 const MAX_PATH_BYTES = 512;
+const MAX_MANIFEST_ID_LENGTH = 128;
+const MAX_MANIFEST_NAME_LENGTH = 128;
+const MAX_MANIFEST_DESCRIPTION_LENGTH = 4096;
+const MAX_MANIFEST_ENTRY_LENGTH = 512;
+const MAX_MANIFEST_CAPABILITIES = 64;
+const MAX_CAPABILITY_REASON_LENGTH = 500;
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
 const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
+
+const RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python'] as const;
+const VISIBILITIES = ['private', 'tenant'] as const;
+const CAPABILITY_KINDS = [
+  'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
+  'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
+  'system.info', 'system.screenshot', 'system.notify',
+  'plugin.upload', 'plugin.submitMarketplace',
+] as const;
+const CAPABILITY_RISKS = ['none', 'low', 'medium', 'high'] as const;
+
+type RuntimeType = typeof RUNTIME_TYPES[number];
+type PluginVisibility = typeof VISIBILITIES[number];
+type CapabilityKind = typeof CAPABILITY_KINDS[number];
+type CapabilityRisk = typeof CAPABILITY_RISKS[number];
+
+type PluginCapability = {
+  kind: CapabilityKind;
+  reason: string;
+  risk: CapabilityRisk;
+  requires_admin: boolean;
+  scope?: Record<string, unknown>;
+};
 
 type ZipEntry = {
   path: string;
@@ -32,8 +62,10 @@ export type InspectedPluginArtifact = {
     name: string;
     version: string;
     description: string;
-    runtime_type: 'client' | 'cloud' | 'nodejs' | 'python';
+    runtime_type: RuntimeType;
     entry: string;
+    visibility: PluginVisibility;
+    capabilities: PluginCapability[];
   };
   files: Array<{ path: string; sizeBytes: number }>;
   uncompressedSizeBytes: number;
@@ -278,18 +310,98 @@ function parseJsonObject(buffer: Buffer, path: string): Record<string, unknown> 
   }
 }
 
+function isAllowedValue<const T extends readonly string[]>(values: T, value: string): value is T[number] {
+  return (values as readonly string[]).includes(value);
+}
+
+function manifestString(
+  input: Record<string, unknown>,
+  field: string,
+  maxLength?: number,
+  options: { defaultValue?: string; trim?: boolean } = {},
+): string {
+  const raw = input[field] === undefined ? options.defaultValue : input[field];
+  if (typeof raw !== 'string') throw badRequest(`manifest.${field} 必须是字符串`);
+  if (maxLength !== undefined && raw.length > maxLength) {
+    throw badRequest(`manifest.${field} 长度不能超过 ${maxLength}`, { field, limit: maxLength });
+  }
+  const value = options.trim ? raw.trim() : raw;
+  if (!value) throw badRequest(`manifest.${field} 不能为空`);
+  return value;
+}
+
+function validateCapabilities(input: unknown): PluginCapability[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) throw badRequest('manifest.capabilities 必须是数组');
+  if (input.length > MAX_MANIFEST_CAPABILITIES) {
+    throw badRequest(`manifest.capabilities 不能超过 ${MAX_MANIFEST_CAPABILITIES} 项`, {
+      count: input.length,
+      limit: MAX_MANIFEST_CAPABILITIES,
+    });
+  }
+  return input.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw badRequest('manifest.capabilities 条目必须是对象', { index });
+    }
+    const capability = raw as Record<string, unknown>;
+    if (typeof capability.kind !== 'string' || !isAllowedValue(CAPABILITY_KINDS, capability.kind)) {
+      throw badRequest('manifest.capabilities.kind 不受支持', { index, kind: capability.kind });
+    }
+    const reason = capability.reason === undefined ? '' : capability.reason;
+    if (typeof reason !== 'string') throw badRequest('manifest.capabilities.reason 必须是字符串', { index });
+    if (reason.length > MAX_CAPABILITY_REASON_LENGTH) {
+      throw badRequest(`manifest.capabilities.reason 长度不能超过 ${MAX_CAPABILITY_REASON_LENGTH}`, {
+        index,
+        limit: MAX_CAPABILITY_REASON_LENGTH,
+      });
+    }
+    const risk = capability.risk === undefined ? 'low' : capability.risk;
+    if (typeof risk !== 'string' || !isAllowedValue(CAPABILITY_RISKS, risk)) {
+      throw badRequest('manifest.capabilities.risk 不受支持', { index, risk });
+    }
+    const requiresAdmin = capability.requires_admin === undefined ? false : capability.requires_admin;
+    if (typeof requiresAdmin !== 'boolean') {
+      throw badRequest('manifest.capabilities.requires_admin 必须是布尔值', { index });
+    }
+    const scope = capability.scope;
+    if (scope !== undefined && (!scope || typeof scope !== 'object' || Array.isArray(scope))) {
+      throw badRequest('manifest.capabilities.scope 必须是对象', { index });
+    }
+    return {
+      kind: capability.kind,
+      reason,
+      risk,
+      requires_admin: requiresAdmin,
+      ...(scope === undefined ? {} : { scope: scope as Record<string, unknown> }),
+    };
+  });
+}
+
 function validateManifest(input: Record<string, unknown>, paths: Set<string>): InspectedPluginArtifact['manifest'] {
-  const id = String(input.id || '').trim();
-  const name = String(input.name || '').trim();
-  const version = String(input.version || '').trim();
-  const description = String(input.description || '');
-  const runtime = String(input.runtime_type || '').toLowerCase();
-  const entry = safePath(String(input.entry || ''));
-  if (!id || !name || !version) throw badRequest('manifest.json 缺少 id、name 或 version');
+  const id = manifestString(input, 'id', MAX_MANIFEST_ID_LENGTH, { trim: true });
+  const name = manifestString(input, 'name', MAX_MANIFEST_NAME_LENGTH, { trim: true });
+  const version = manifestString(input, 'version', undefined, { trim: true });
+  const description = input.description === undefined ? '' : input.description;
+  if (typeof description !== 'string') throw badRequest('manifest.description 必须是字符串');
+  if (description.length > MAX_MANIFEST_DESCRIPTION_LENGTH) {
+    throw badRequest(`manifest.description 长度不能超过 ${MAX_MANIFEST_DESCRIPTION_LENGTH}`, {
+      field: 'description',
+      limit: MAX_MANIFEST_DESCRIPTION_LENGTH,
+    });
+  }
+  const runtime = input.runtime_type === undefined ? 'client' : input.runtime_type;
+  if (typeof runtime !== 'string' || !isAllowedValue(RUNTIME_TYPES, runtime)) {
+    throw badRequest('manifest.runtime_type 不受支持');
+  }
+  const entry = safePath(manifestString(input, 'entry', MAX_MANIFEST_ENTRY_LENGTH));
+  const visibility = input.visibility === undefined ? 'tenant' : input.visibility;
+  if (typeof visibility !== 'string' || !isAllowedValue(VISIBILITIES, visibility)) {
+    throw badRequest('manifest.visibility 只允许 private 或 tenant');
+  }
+  const capabilities = validateCapabilities(input.capabilities);
   if (!parseStrictSemVer(version)) throw badRequest('manifest.version 必须是严格 SemVer', { version });
-  if (!['client', 'cloud', 'nodejs', 'python'].includes(runtime)) throw badRequest('manifest.runtime_type 不受支持');
   if (!paths.has(entry)) throw badRequest('manifest.entry 指向的文件不存在', { entry });
-  return { ...input, id, name, version, description, runtime_type: runtime as InspectedPluginArtifact['manifest']['runtime_type'], entry };
+  return { ...input, id, name, version, description, runtime_type: runtime, entry, visibility, capabilities };
 }
 
 export async function inspectPluginArtifact(filePath: string): Promise<InspectedPluginArtifact> {
@@ -298,6 +410,14 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
   const metaEntry = byPath.get('_meta.json');
   const manifestEntry = byPath.get('manifest.json');
   if (!metaEntry || !manifestEntry) throw badRequest('v4 制品必须包含 _meta.json 和 manifest.json');
+  for (const entry of [metaEntry, manifestEntry]) {
+    if (entry.uncompressedSize > PLUGIN_ARTIFACT_MAX_METADATA_BYTES) {
+      throw badRequest(`${entry.path} 大小不能超过 256KiB`, {
+        path: entry.path,
+        limitBytes: PLUGIN_ARTIFACT_MAX_METADATA_BYTES,
+      });
+    }
+  }
   let metaBytes: Buffer | null = null;
   let manifestBytes: Buffer | null = null;
   for (const entry of entries) {

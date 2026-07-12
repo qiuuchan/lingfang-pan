@@ -8,8 +8,52 @@ import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 import { NotificationService } from './notification.service';
 import { publicPlugin } from './plugin-package';
-import { SYSTEM_PLATFORM_ADMIN_ROLE_ID, SYSTEM_TEAM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
-import { auditActionCategory, AUDIT_ACTION_LABEL, AUDIT_CATEGORIES, type AuditCategoryKey } from './audit-actions';
+import {
+  SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+  SYSTEM_TEAM_ADMIN_ROLE_CODE,
+  teamAdminRoleId,
+  teamMemberRoleId,
+} from './permissions/permission-codes';
+import { AUDIT_CATEGORIES } from './audit-actions';
+import {
+  adminApplicationDetail,
+  adminApplicationDetailSelect,
+  type AdminApplicationListQuery,
+  adminApplicationSummary,
+  adminApplicationSummarySelect,
+  applicationTeamSystemRoles,
+  buildAdminApplicationListQuery,
+} from './admin-applications';
+import {
+  ADMIN_ACTIVITY_SELECT,
+  ADMIN_AUDIT_DETAIL_SELECT,
+  ADMIN_AUDIT_SUMMARY_SELECT,
+  ADMIN_TEAM_DETAIL_SELECT,
+  ADMIN_TEAM_LEDGER_SELECT,
+  ADMIN_TEAM_MEMBER_SELECT,
+  ADMIN_TEAM_PLUGIN_SELECT,
+  ADMIN_TEAM_PURCHASE_SELECT,
+  ADMIN_TEAM_SUMMARY_SELECT,
+  ADMIN_USER_LOGIN_SELECT,
+  ADMIN_USER_OPTION_SELECT,
+  ADMIN_USER_SUMMARY_SELECT,
+  ADMIN_USER_TEAM_SELECT,
+  ADMIN_WALLET_TRANSACTION_SELECT,
+  adminAuditDetail,
+  adminAuditSummary,
+  adminAuditWhere,
+  adminTeamOrderBy,
+  adminTeamWhere,
+  adminUserOrderBy,
+  adminUserOption,
+  adminUserSummary,
+  adminUserWhere,
+  normalizeAdminPage,
+  type AdminAuditListQuery,
+  type AdminPageQuery,
+  type AdminTeamListQuery,
+  type AdminUserListQuery,
+} from './admin-data-loading';
 
 @Injectable()
 export class AdminService {
@@ -23,17 +67,32 @@ export class AdminService {
 
   async adminDashboard(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
-    // ADMIN-VIEW-03 修复：原仅返回 enabledPlugins，仪表盘「已禁用插件」待办数硬编码 0。
-    // 现补一次 status='DISABLED' 的 plugin 计数，返回 disabledPlugins 让前端读到真实值。
-    const [users, teams, pendingApplications, plugins, disabledPlugins, pendingPluginReviews] = await Promise.all([
+    const [
+      users,
+      teams,
+      pendingApplications,
+      pendingPluginReviews,
+      activePluginPackages,
+      activeMarketplaceListings,
+      delistedMarketplaceListings,
+    ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.team.count(),
       this.prisma.teamAdminApplication.count({ where: { status: 'PENDING' } }),
-      this.prisma.plugin.count({ where: { status: 'ENABLED' } }),
-      this.prisma.plugin.count({ where: { status: 'DISABLED' } }),
-      this.prisma.plugin.count({ where: { reviewStatus: 'PENDING' } }),
+      this.prisma.pluginRelease.count({ where: { marketReviewStatus: 'PENDING' } }),
+      this.prisma.pluginPackage.count({ where: { governanceStatus: 'ACTIVE' } }),
+      this.prisma.marketplaceListing.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.marketplaceListing.count({ where: { status: 'DELISTED' } }),
     ]);
-    return { users, teams, pendingApplications, enabledPlugins: plugins, disabledPlugins, pendingPluginReviews };
+    return {
+      users,
+      teams,
+      pendingApplications,
+      pendingPluginReviews,
+      activePluginPackages,
+      activeMarketplaceListings,
+      delistedMarketplaceListings,
+    };
   }
 
   // 平台级 AI 生成质量看板（调研报告 Top10 / A4）。
@@ -122,10 +181,35 @@ export class AdminService {
     };
   }
 
-  async adminUsers(userId: string) {
+  async adminUsers(userId: string, query: AdminUserListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
-    const users = await this.prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
-    return { users: users.map(publicUser) };
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where = adminUserWhere(query);
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        orderBy: adminUserOrderBy(query),
+        skip,
+        take: pageSize,
+        select: ADMIN_USER_SUMMARY_SELECT,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+    return { items: rows.map(adminUserSummary), total, page, pageSize };
+  }
+
+  async adminUserOptions(userId: string, query: { q?: string; limit?: number } = {}) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const pageSize = Math.min(50, Math.max(1, Math.floor(query.limit ?? 20)));
+    const where = adminUserWhere({ q: query.q, status: 'ACTIVE' });
+    const rows = await this.prisma.user.findMany({
+      where,
+      orderBy: [{ displayName: 'asc' }, { email: 'asc' }, { id: 'asc' }],
+      take: pageSize,
+      select: ADMIN_USER_OPTION_SELECT,
+    });
+    const items = rows.map(adminUserOption);
+    return { items, total: items.length, page: 1, pageSize };
   }
 
   async adminCreateUser(actorId: string, input: { email: string; password: string; displayName?: string; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
@@ -207,59 +291,101 @@ export class AdminService {
     return { user: publicUser(user) };
   }
 
-  // 用户详情聚合视图：登录历史（from AuditLog，含 success/failed/refresh/logout）+ 钱包 + 团队 memberships。
-  // 供管理端用户详情抽屉渲染完整画像。全部基于现有表聚合，零新表、零破坏式 DDL。
-  //   - 登录历史：actorUserId = userId 的审计记录按时间倒序（含 auth.login.success/failed/token.refreshed/logout）。
-  //   - 钱包：一对一关联 Wallet，不存在则 balanceCents: 0。
-  //   - 团队 memberships：含 team 字段，按 joinedAt 倒序（最近加入在前）。
   async adminUserDetail(actorId: string, id: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: ADMIN_USER_SUMMARY_SELECT,
+    });
     if (!user) throw notFound('用户不存在');
-    // 并发聚合：登录历史（auth.* 审计）+ 钱包 + 团队 memberships + 钱包流水。
-    const [loginHistory, wallet, memberships, walletTxs] = await Promise.all([
-      // 登录历史：actor=该用户 + action 以 auth. 开头（login.success/failed/token.refreshed/logout/email.verified/password.reset）。
-      this.prisma.auditLog.findMany({
-        where: { actorUserId: id, action: { startsWith: 'auth.' } },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: { id: true, action: true, metadata: true, createdAt: true },
-      }),
-      this.prisma.wallet.findUnique({ where: { userId: id } }),
-      this.prisma.teamMembership.findMany({
-        where: { userId: id },
-        include: { team: true },
-        orderBy: { joinedAt: 'desc' },
-      }),
-      // 钱包流水：最近 10 条，便于在用户详情看消费轨迹。
-      this.prisma.walletTransaction.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' }, take: 10 }),
-    ]);
-    return {
-      user: { ...publicUser(user), createdAt: user.createdAt, emailVerified: user.emailVerified },
-      loginHistory: loginHistory.map((l) => ({
-        id: l.id,
-        action: l.action,
-        metadata: l.metadata,
-        // createdAt 转 ISO 字符串（与 notification.publicNotification 风格一致）。
-        createdAt: l.createdAt.toISOString(),
-      })),
-      wallet: { balanceCents: wallet?.balanceCents ?? 0 },
-      teams: memberships.map((m) => ({
-        teamId: m.teamId,
-        role: m.role,
-        status: m.status,
-        joinedAt: m.joinedAt.toISOString(),
-        team: { id: m.team.id, name: m.team.name, slug: m.team.slug, status: m.team.status, balanceCents: m.team.balanceCents },
-      })),
-      walletTransactions: walletTxs.map((t) => ({
-        id: t.id,
-        amountCents: t.amountCents,
-        direction: t.direction,
-        reason: t.reason,
-        pluginId: t.pluginId,
-        createdAt: t.createdAt.toISOString(),
-      })),
+    return { user: adminUserSummary(user) };
+  }
+
+  async adminUserLogins(actorId: string, id: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    await this.ensureAdminUserExists(id);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.AuditLogWhereInput = {
+      actorUserId: id,
+      action: { startsWith: 'auth.' },
     };
+    const [rows, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_USER_LOGIN_SELECT,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+    const items = rows.map((log) => ({
+      id: log.id,
+      action: log.action,
+      createdAt: log.createdAt,
+    }));
+    return { items, total, page, pageSize };
+  }
+
+  async adminUserTeams(actorId: string, id: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    await this.ensureAdminUserExists(id);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.TeamMembershipWhereInput = { userId: id };
+    const [rows, total] = await Promise.all([
+      this.prisma.teamMembership.findMany({
+        where,
+        orderBy: [{ joinedAt: 'desc' }, { teamId: 'asc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_USER_TEAM_SELECT,
+      }),
+      this.prisma.teamMembership.count({ where }),
+    ]);
+    const items = rows.map((membership) => ({
+      teamId: membership.teamId,
+      userId: membership.userId,
+      role: membership.role,
+      status: membership.status,
+      teamRoleId: membership.teamRoleId,
+      joinedAt: membership.joinedAt,
+      team: {
+        id: membership.team.id,
+        name: membership.team.name,
+        slug: membership.team.slug,
+        status: membership.team.status,
+        balanceCents: membership.team.balanceCents,
+      },
+    }));
+    return { items, total, page, pageSize };
+  }
+
+  async adminUserWallet(actorId: string, id: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    await this.ensureAdminUserExists(id);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.WalletTransactionWhereInput = { userId: id };
+    const [wallet, rows, total] = await Promise.all([
+      this.prisma.wallet.findUnique({ where: { userId: id }, select: { balanceCents: true } }),
+      this.prisma.walletTransaction.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_WALLET_TRANSACTION_SELECT,
+      }),
+      this.prisma.walletTransaction.count({ where }),
+    ]);
+    const items = rows.map((transaction) => ({
+      id: transaction.id,
+      amountCents: transaction.amountCents,
+      direction: transaction.direction,
+      reason: transaction.reason,
+      pluginId: transaction.pluginId,
+      counterpartyUserId: transaction.counterpartyUserId,
+      createdAt: transaction.createdAt,
+    }));
+    return { items, total, page, pageSize, balanceCents: wallet?.balanceCents ?? 0 };
   }
 
   // 管理员强制重置用户密码：生成临时密码（12 位 base64url 随机串），写库 + 通知用户（站内信 + 邮件），
@@ -357,42 +483,57 @@ export class AdminService {
     return { user: publicUser(user) };
   }
 
-  // 管理员操作记录：该管理员作为 actor 的所有审计日志（按时间倒序），供管理员详情页展示操作历史。
-  // 复用 auditLogs 的脱敏策略（select 白名单字段，不返 passwordHash/tokenVersion）。
-  async adminActivity(actorId: string, targetUserId: string) {
+  async adminActivity(actorId: string, targetUserId: string, query: AdminPageQuery = {}) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const logs = await this.prisma.auditLog.findMany({
-      where: { actorUserId: targetUserId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: { actor: { select: { id: true, email: true, displayName: true, platformRole: true, status: true } } },
-    });
-    return { logs };
+    await this.ensureAdminUserExists(targetUserId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.AuditLogWhereInput = { actorUserId: targetUserId };
+    const [rows, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_ACTIVITY_SELECT,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+    const items = rows.map((log) => ({
+      id: log.id,
+      action: log.action,
+      targetType: log.targetType,
+      targetId: log.targetId,
+      createdAt: log.createdAt,
+    }));
+    return { items, total, page, pageSize };
   }
 
-  async adminTeams(userId: string) {
+  async adminTeams(userId: string, query: AdminTeamListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
-    const teams = await this.prisma.team.findMany({
-      orderBy: { createdAt: 'desc' },
-      // 组E 性能：无上限的全表扫描在团队数膨胀时拖慢响应并放大内存。take:200 与 adminUsers 一致，
-      // 配合前端分页（前端已用 usePagination），足以覆盖管理端首屏。后续如需翻页可加分页 query 参数。
-      take: 200,
-      include: {
-        memberships: {
-          where: { status: 'ACTIVE' },
-          include: { user: true },
-          orderBy: { joinedAt: 'asc' },
-        },
-      },
-    });
-    return {
-      teams: teams.map((team) => ({
-        ...team,
-        memberships: undefined,
-        members: team.memberships.map((membership) => ({ ...membership, user: publicUser(membership.user) })),
-        memberCount: team.memberships.length,
-      })),
-    };
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where = adminTeamWhere(query);
+    const [rows, total] = await Promise.all([
+      this.prisma.team.findMany({
+        where,
+        orderBy: adminTeamOrderBy(query),
+        skip,
+        take: pageSize,
+        select: ADMIN_TEAM_SUMMARY_SELECT,
+      }),
+      this.prisma.team.count({ where }),
+    ]);
+    const items = rows.map((team) => ({
+      id: team.id,
+      name: team.name,
+      slug: team.slug,
+      status: team.status,
+      balanceCents: team.balanceCents,
+      defaultPoolId: team.defaultPoolId,
+      createdAt: team.createdAt,
+      updatedAt: team.updatedAt,
+      memberCount: team._count.memberships,
+    }));
+    return { items, total, page, pageSize };
   }
 
   async adminCreateTeam(actorId: string, input: { name: string; slug?: string; balanceCents?: number }) {
@@ -463,22 +604,58 @@ export class AdminService {
     if (!team || team.status !== 'ACTIVE') throw notFound('团队不存在或已挂起');
     const targetUser = await this.prisma.user.findUnique({ where: { id: input.userId }, select: { status: true } });
     if (!targetUser || targetUser.status !== 'ACTIVE') throw notFound('用户不存在或已禁用');
-    const membership = await this.prisma.teamMembership.upsert({
-      where: { teamId_userId: { teamId, userId: input.userId } },
-      create: { teamId, userId: input.userId, role: 'TEAM_ADMIN', status: 'ACTIVE' },
-      update: { role: 'TEAM_ADMIN', status: 'ACTIVE' },
+    const membership = await this.prisma.$transaction(async (tx) => {
+      const teamRoleId = await this.ensureSystemTeamRole(tx, teamId, 'TEAM_ADMIN');
+      const updated = await tx.teamMembership.upsert({
+        where: { teamId_userId: { teamId, userId: input.userId } },
+        create: { teamId, userId: input.userId, role: 'TEAM_ADMIN', teamRoleId, status: 'ACTIVE' },
+        update: { role: 'TEAM_ADMIN', teamRoleId, status: 'ACTIVE' },
+      });
+      await tx.user.update({
+        where: { id: input.userId },
+        data: { tokenVersion: { increment: 1 } },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'admin.team_admin.assigned',
+          targetType: 'User',
+          targetId: input.userId,
+          metadata: { teamId, teamRoleId },
+        },
+      });
+      return updated;
     });
-    await this.audit(actorId, 'admin.team_admin.assigned', 'User', input.userId, { teamId });
     return { membership };
   }
 
   async adminRevokeTeamAdmin(actorId: string, teamId: string, targetUserId: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    // 修复 ADMIN-08：update 在记录不存在时抛 P2025，此前被吞成 500，现显式前置存在性校验返回 404。
-    const existing = await this.prisma.teamMembership.findUnique({ where: { teamId_userId: { teamId, userId: targetUserId } } });
-    if (!existing) throw notFound('团队成员关系不存在');
-    const membership = await this.prisma.teamMembership.update({ where: { teamId_userId: { teamId, userId: targetUserId } }, data: { role: 'MEMBER' } });
-    await this.audit(actorId, 'admin.team_admin.revoked', 'User', targetUserId, { teamId });
+    const membership = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.teamMembership.findUnique({
+        where: { teamId_userId: { teamId, userId: targetUserId } },
+      });
+      if (!existing) throw notFound('团队成员关系不存在');
+      const teamRoleId = await this.ensureSystemTeamRole(tx, teamId, 'MEMBER');
+      const updated = await tx.teamMembership.update({
+        where: { teamId_userId: { teamId, userId: targetUserId } },
+        data: { role: 'MEMBER', teamRoleId },
+      });
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: { tokenVersion: { increment: 1 } },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'admin.team_admin.revoked',
+          targetType: 'User',
+          targetId: targetUserId,
+          metadata: { teamId, teamRoleId },
+        },
+      });
+      return updated;
+    });
     return { membership };
   }
 
@@ -512,21 +689,47 @@ export class AdminService {
     return this.prisma.team.findUnique({ where: { id: teamId } });
   }
 
-  // 管理端团队成员列表：返回该团队全部成员（含 role/status/joinedAt + 脱敏 user）。
-  // 与 adminTeams 一致按 joinedAt asc 排序（先加入在前，便于查看团队组建时间线）。
-  // 不做状态过滤：管理端需查看 REMOVED 成员以审计「移除历史」，不同于 currentMembers 仅返回 ACTIVE。
-  async adminTeamMembers(userId: string, teamId: string) {
+  async adminTeamMembers(userId: string, teamId: string, query: AdminPageQuery & { q?: string } = {}) {
     await this.auth.ensurePlatformAdmin(userId);
-    const exists = await this.prisma.team.findUnique({ where: { id: teamId }, select: { id: true } });
-    if (!exists) throw notFound('团队不存在');
-    const memberships = await this.prisma.teamMembership.findMany({
-      where: { teamId },
-      include: { user: true },
-      orderBy: { joinedAt: 'asc' },
-    });
-    return {
-      members: memberships.map((m) => ({ teamId: m.teamId, userId: m.userId, role: m.role, status: m.status, joinedAt: m.joinedAt, teamRoleId: m.teamRoleId, user: publicUser(m.user) })),
-    };
+    await this.ensureAdminTeamExists(teamId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.TeamMembershipWhereInput = { teamId };
+    const keyword = query.q?.trim();
+    if (keyword) {
+      where.user = {
+        is: {
+          OR: [
+            { email: { contains: keyword, mode: 'insensitive' } },
+            { displayName: { contains: keyword, mode: 'insensitive' } },
+          ],
+        },
+      };
+    }
+    const [rows, total] = await Promise.all([
+      this.prisma.teamMembership.findMany({
+        where,
+        orderBy: [{ joinedAt: 'asc' }, { userId: 'asc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_TEAM_MEMBER_SELECT,
+      }),
+      this.prisma.teamMembership.count({ where }),
+    ]);
+    const items = rows.map((membership) => ({
+      teamId: membership.teamId,
+      userId: membership.userId,
+      role: membership.role,
+      status: membership.status,
+      teamRoleId: membership.teamRoleId,
+      joinedAt: membership.joinedAt,
+      user: adminUserOption(membership.user),
+      teamRole: membership.teamRole ? {
+        id: membership.teamRole.id,
+        name: membership.teamRole.name,
+        code: membership.teamRole.code,
+      } : null,
+    }));
+    return { items, total, page, pageSize };
   }
 
   // 调整团队成员角色。平台 Admin 可在任意团队内为成员切换角色。
@@ -534,7 +737,7 @@ export class AdminService {
   // 此方法是「双向/任意」单一端点：前端成员 tab 角色下拉直接切换，可传枚举或 roleId（child-4 D7）。
   //
   // 输入兼容两种形态（service 双分支处理）：
-  //  - { role: 'TEAM_ADMIN' | 'MEMBER' }：旧枚举（向后兼容旧前端），仅切换 role 字段，不动 teamRoleId。
+  //  - { role: 'TEAM_ADMIN' | 'MEMBER' }：旧枚举（向后兼容旧前端），映射到对应系统角色并双写。
   //  - { roleId: '<role-id>' }：指定任意团队自定义角色（child-4 D7 新前端用），双写 teamRoleId + role 枚举
   //    （系统团队管理员 code → TEAM_ADMIN，否则 MEMBER），与 RoleService.assignMemberRole 同款语义。
   //  - 两者都未传：400 拒绝（DTO 用 @IsOptional 放宽，运行时显式校验）。
@@ -554,28 +757,67 @@ export class AdminService {
       if (existing.teamRoleId === role.id && existing.role === nextRole) {
         return { membership: existing };
       }
-      const membership = await this.prisma.teamMembership.update({
-        where: { teamId_userId: { teamId, userId: targetUserId } },
-        data: { teamRoleId: role.id, role: nextRole },
-      });
-      await this.audit(actorId, 'team.member.role_changed', 'User', targetUserId, {
-        teamId,
-        from: existing.role,
-        to: nextRole,
-        fromRoleId: existing.teamRoleId,
-        toRoleId: role.id,
-        managed: true,
+      const membership = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.teamMembership.update({
+          where: { teamId_userId: { teamId, userId: targetUserId } },
+          data: { teamRoleId: role.id, role: nextRole },
+        });
+        await tx.user.update({
+          where: { id: targetUserId },
+          data: { tokenVersion: { increment: 1 } },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorUserId: actorId,
+            action: 'team.member.role_changed',
+            targetType: 'User',
+            targetId: targetUserId,
+            metadata: {
+              teamId,
+              from: existing.role,
+              to: nextRole,
+              fromRoleId: existing.teamRoleId,
+              toRoleId: role.id,
+              managed: true,
+            },
+          },
+        });
+        return updated;
       });
       return { membership };
     }
 
     // === 分支 2：role 枚举形态（旧前端兼容）===
     if (input.role === undefined) throw badRequest('必须提供 role 或 roleId');
-    // 幂等优化：已是目标角色则不重复写审计，避免无变更操作污染审计日志。
-    if (existing.role === input.role) return { membership: existing };
-    const membership = await this.prisma.teamMembership.update({ where: { teamId_userId: { teamId, userId: targetUserId } }, data: { role: input.role } });
-    // action 统一前缀分类（team.member.role_changed）：审计 action 按模块分类，便于 audit-view 筛选。
-    await this.audit(actorId, 'team.member.role_changed', 'User', targetUserId, { teamId, from: existing.role, to: input.role });
+    const expectedRoleId = input.role === 'TEAM_ADMIN' ? teamAdminRoleId(teamId) : teamMemberRoleId(teamId);
+    if (existing.role === input.role && existing.teamRoleId === expectedRoleId) return { membership: existing };
+    const membership = await this.prisma.$transaction(async (tx) => {
+      const teamRoleId = await this.ensureSystemTeamRole(tx, teamId, input.role!);
+      const updated = await tx.teamMembership.update({
+        where: { teamId_userId: { teamId, userId: targetUserId } },
+        data: { role: input.role, teamRoleId },
+      });
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: { tokenVersion: { increment: 1 } },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'team.member.role_changed',
+          targetType: 'User',
+          targetId: targetUserId,
+          metadata: {
+            teamId,
+            from: existing.role,
+            to: input.role,
+            fromRoleId: existing.teamRoleId,
+            toRoleId: teamRoleId,
+          },
+        },
+      });
+      return updated;
+    });
     return { membership };
   }
 
@@ -595,61 +837,151 @@ export class AdminService {
     return { team: updated };
   }
 
-  // 团队详情聚合视图：成员数 + 插件数 + 最近购买记录 + 余额流水摘要。
-  // 供管理端详情抽屉展示团队活跃度画像。全部基于现有表聚合，零新表、零破坏式 DDL。
-  //   - 成员数：ACTIVE 成员计数（不含 REMOVED）。
-  //   - 插件数：该团队拥有的 plugin 总数（teamId 关联）。
-  //   - 购买记录：该团队作为买方（buyerTeamId）的最近 10 笔购买。
-  //   - 余额流水摘要：CREDIT/DEBIT 合计金额 + 最近 10 条流水。
   async adminTeamDetail(userId: string, teamId: string) {
     await this.auth.ensurePlatformAdmin(userId);
-    const team = await this.prisma.team.findUnique({ where: { id: teamId } });
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: ADMIN_TEAM_DETAIL_SELECT,
+    });
     if (!team) throw notFound('团队不存在');
-    // 并发聚合：成员计数 + 插件列表 + 购买记录 + 流水聚合 + 最近流水。
-    const [memberCount, plugins, purchases, ledgerAgg, recentLedger] = await Promise.all([
+    const [memberCount, roleCount, pluginCount, purchaseCount, ledgerAgg] = await Promise.all([
       this.prisma.teamMembership.count({ where: { teamId, status: 'ACTIVE' } }),
-      // 插件列表仅取治理所需字段，不返 files/manifest（大 Json，列表不需要）。
-      this.prisma.plugin.findMany({
-        where: { teamId },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: { id: true, name: true, status: true, visibility: true, reviewStatus: true, marketplace: true, priceCents: true, installCount: true, createdAt: true, updatedAt: true },
-      }),
-      // 购买记录：该团队作为买方的最近交易（含插件名，便于审计展示）。
-      this.prisma.purchase.findMany({
-        where: { buyerTeamId: teamId },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        include: {
-          plugin: { select: { id: true, name: true } },
-          package: { select: { id: true, name: true } },
-        },
-      }),
-      // 流水聚合：CREDIT 合计 - DEBIT 合计 = 累计净流入（与 balanceCents 互校，发现账实不一致）。
+      this.prisma.role.count({ where: { scope: 'TEAM', teamId } }),
+      this.prisma.plugin.count({ where: { teamId } }),
+      this.prisma.purchase.count({ where: { buyerTeamId: teamId } }),
       this.prisma.balanceLedger.groupBy({
         by: ['direction'],
         where: { teamId },
         _sum: { amountCents: true },
       }),
-      this.prisma.balanceLedger.findMany({ where: { teamId }, orderBy: { createdAt: 'desc' }, take: 10 }),
     ]);
     const creditSum = ledgerAgg.find((g) => g.direction === 'CREDIT')?._sum.amountCents ?? 0;
     const debitSum = ledgerAgg.find((g) => g.direction === 'DEBIT')?._sum.amountCents ?? 0;
     return {
-      team,
+      team: {
+        id: team.id,
+        name: team.name,
+        slug: team.slug,
+        status: team.status,
+        allowPublicJoin: team.allowPublicJoin,
+        description: team.description,
+        balanceCents: team.balanceCents,
+        defaultPoolId: team.defaultPoolId,
+        createdAt: team.createdAt,
+        updatedAt: team.updatedAt,
+      },
       memberCount,
-      pluginCount: plugins.length,
-      plugins,
-      purchases: purchases.map((p) => ({
-        id: p.id,
-        pluginId: p.pluginId,
-        packageId: p.packageId,
-        pluginName: p.package?.name ?? p.plugin?.name ?? '未知插件',
-        priceCents: p.priceCents,
-        createdAt: p.createdAt,
-      })),
+      roleCount,
+      pluginCount,
+      purchaseCount,
       ledgerSummary: { totalCreditCents: creditSum, totalDebitCents: debitSum, netCents: creditSum - debitSum },
-      recentLedger,
+    };
+  }
+
+  async adminTeamPlugins(userId: string, teamId: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(userId);
+    await this.ensureAdminTeamExists(teamId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.PluginWhereInput = { teamId };
+    const [rows, total] = await Promise.all([
+      this.prisma.plugin.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_TEAM_PLUGIN_SELECT,
+      }),
+      this.prisma.plugin.count({ where }),
+    ]);
+    const items = rows.map((plugin) => ({
+      id: plugin.id,
+      name: plugin.name,
+      status: plugin.status,
+      visibility: plugin.visibility,
+      reviewStatus: plugin.reviewStatus,
+      marketplace: plugin.marketplace,
+      priceCents: plugin.priceCents,
+      installCount: plugin.installCount,
+      createdAt: plugin.createdAt,
+      updatedAt: plugin.updatedAt,
+    }));
+    return { items, total, page, pageSize };
+  }
+
+  async adminTeamPurchases(userId: string, teamId: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(userId);
+    await this.ensureAdminTeamExists(teamId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.PurchaseWhereInput = { buyerTeamId: teamId };
+    const [rows, total] = await Promise.all([
+      this.prisma.purchase.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_TEAM_PURCHASE_SELECT,
+      }),
+      this.prisma.purchase.count({ where }),
+    ]);
+    const items = rows.map((purchase) => ({
+      id: purchase.id,
+      pluginId: purchase.pluginId,
+      packageId: purchase.packageId,
+      pluginName: purchase.package?.name ?? purchase.plugin?.name ?? '未知插件',
+      priceCents: purchase.priceCents,
+      buyerUserId: purchase.buyerUserId,
+      sellerUserId: purchase.sellerUserId,
+      createdAt: purchase.createdAt,
+    }));
+    return { items, total, page, pageSize };
+  }
+
+  async adminTeamLedger(userId: string, teamId: string, query: AdminPageQuery = {}) {
+    await this.auth.ensurePlatformAdmin(userId);
+    await this.ensureAdminTeamExists(teamId);
+    const { page, pageSize, skip } = normalizeAdminPage(query);
+    const where: Prisma.BalanceLedgerWhereInput = { teamId };
+    const [rows, total, ledgerAgg] = await Promise.all([
+      this.prisma.balanceLedger.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_TEAM_LEDGER_SELECT,
+      }),
+      this.prisma.balanceLedger.count({ where }),
+      this.prisma.balanceLedger.groupBy({
+        by: ['direction'],
+        where,
+        _sum: { amountCents: true },
+      }),
+    ]);
+    const totalCreditCents = ledgerAgg.find((entry) => entry.direction === 'CREDIT')?._sum.amountCents ?? 0;
+    const totalDebitCents = ledgerAgg.find((entry) => entry.direction === 'DEBIT')?._sum.amountCents ?? 0;
+    const items = rows.map((entry) => ({
+      id: entry.id,
+      teamId: entry.teamId,
+      amountCents: entry.amountCents,
+      direction: entry.direction,
+      reason: entry.reason,
+      actorUserId: entry.actorUserId,
+      createdAt: entry.createdAt,
+      actor: entry.actor ? {
+        id: entry.actor.id,
+        email: entry.actor.email,
+        displayName: entry.actor.displayName,
+      } : null,
+    }));
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      summary: {
+        totalCreditCents,
+        totalDebitCents,
+        netCents: totalCreditCents - totalDebitCents,
+      },
     };
   }
 
@@ -882,143 +1214,170 @@ export class AdminService {
     };
   }
 
-  async adminApplications(userId: string) {
+  async adminApplications(userId: string, query: AdminApplicationListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
-    // include reviewedBy 以便前端展示申请处理人（未处理时为 null）。
-    // 安全修复 B1：include: { user: true } 会原样返回整行 User（含 passwordHash/tokenVersion），
-    // 经 Nest 序列化泄漏凭据哈希。与 adminUsers 等接口一致，出参按 publicUser 白名单脱敏。
-    // 组E 性能：take:200 上限防全表扫描（TeamAdminApplication 表随申请累积膨胀，无上限会拖慢响应）。
-    // status/createdAt 已有 @@index([status, createdAt]) 支撑，后续如需按状态过滤可加 where。
-    const applications = await this.prisma.teamAdminApplication.findMany({ include: { user: true, reviewedBy: true }, orderBy: { createdAt: 'desc' }, take: 200 });
+    const { page, pageSize, skip, where } = buildAdminApplicationListQuery(query);
+    const [applications, total] = await Promise.all([
+      this.prisma.teamAdminApplication.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: adminApplicationSummarySelect,
+      }),
+      this.prisma.teamAdminApplication.count({ where }),
+    ]);
     return {
-      applications: applications.map((a) => ({
-        ...a,
-        user: publicUser(a.user),
-        reviewedBy: a.reviewedBy ? publicUser(a.reviewedBy) : null,
-      })),
+      items: applications.map(adminApplicationSummary),
+      total,
+      page,
+      pageSize,
     };
   }
 
+  async adminApplication(userId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const application = await this.prisma.teamAdminApplication.findUnique({
+      where: { id },
+      select: adminApplicationDetailSelect,
+    });
+    if (!application) throw notFound('申请不存在');
+    return { application: adminApplicationDetail(application) };
+  }
+
   async approveApplication(actorId: string, id: string) {
-    // createTeamForApplication 内部已 ensurePlatformAdmin + 校验状态，返回建好的团队。
-    const team = await this.auth.createTeamForApplication(id, actorId);
-    // 通知申请者：团队管理员申请已通过（触发失败不阻塞主操作）。
-    // createTeamForApplication 已保证 application 存在且 status 已转 APPROVED，此处直接读申请者 userId。
-    const application = await this.prisma.teamAdminApplication.findUnique({ where: { id }, select: { userId: true, teamName: true } });
-    if (application?.userId) {
-      try {
-        await this.notifications.create(
-          application.userId,
-          'application_approved',
-          '团队管理员申请已通过',
-          `你的团队管理员申请已通过，团队「${application.teamName}」已创建。`,
-          { relatedType: 'Team', relatedId: team.id },
-        );
-      } catch {
-        // 通知触发失败不阻塞主流程。
-      }
+    await this.auth.ensurePlatformAdmin(actorId);
+    const result = await this.prisma.$transaction(async (tx) => {
+      const application = await tx.teamAdminApplication.findUnique({
+        where: { id },
+        select: { id: true, userId: true, teamName: true },
+      });
+      if (!application) throw notFound('申请不存在');
+
+      const reviewedAt = new Date();
+      const claimed = await tx.teamAdminApplication.updateMany({
+        where: { id, status: 'PENDING' },
+        data: { status: 'APPROVED', reviewReason: '', reviewedById: actorId, reviewedAt },
+      });
+      if (claimed.count !== 1) throw conflict('该申请已处理');
+
+      const team = await tx.team.create({
+        data: {
+          name: application.teamName,
+          slug: `${slugify(application.teamName)}-${application.id.slice(0, 6)}`,
+        },
+      });
+      const systemRoles = applicationTeamSystemRoles(team.id);
+      for (const role of systemRoles.roles) await tx.role.create({ data: role });
+      await tx.teamMembership.create({
+        data: {
+          teamId: team.id,
+          userId: application.userId,
+          role: 'TEAM_ADMIN',
+          teamRoleId: systemRoles.adminRoleId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'team_admin_application.approved',
+          targetType: 'TeamAdminApplication',
+          targetId: id,
+          metadata: { teamId: team.id },
+        },
+      });
+      return { team, application };
+    });
+
+    try {
+      await this.notifications.create(
+        result.application.userId,
+        'application_approved',
+        '团队管理员申请已通过',
+        `你的团队管理员申请已通过，团队「${result.application.teamName}」已创建。`,
+        { relatedType: 'Team', relatedId: result.team.id },
+      );
+    } catch {
+      // 通知失败不回滚已提交的审批事务。
     }
-    return { team };
+    return { team: result.team };
   }
 
   async rejectApplication(actorId: string, id: string, reason?: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    // 修复 AUTH-02 / XSM-01 / ADMIN-05：此前无 status==='PENDING' 守卫，
-    // 可把已 APPROVED（已建团）的申请改回 REJECTED，造成状态与团队数据不一致。
-    const application = await this.prisma.teamAdminApplication.findUnique({ where: { id } });
-    if (!application) throw notFound('申请不存在');
-    if (application.status !== 'PENDING') throw conflict('该申请已处理');
-    const updated = await this.prisma.teamAdminApplication.update({ where: { id }, data: { status: 'REJECTED', reviewReason: reason || '', reviewedById: actorId, reviewedAt: new Date() } });
-    await this.audit(actorId, 'team_admin_application.rejected', 'TeamAdminApplication', id, { reason });
-    // 通知申请者：团队管理员申请未通过（触发失败不阻塞主操作）。
+    const reviewReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!reviewReason || reviewReason.length > 500) throw badRequest('驳回原因需为 1-500 字');
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const application = await tx.teamAdminApplication.findUnique({
+        where: { id },
+        select: { id: true, userId: true, teamName: true },
+      });
+      if (!application) throw notFound('申请不存在');
+
+      const reviewedAt = new Date();
+      const claimed = await tx.teamAdminApplication.updateMany({
+        where: { id, status: 'PENDING' },
+        data: { status: 'REJECTED', reviewReason, reviewedById: actorId, reviewedAt },
+      });
+      if (claimed.count !== 1) throw conflict('该申请已处理');
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          action: 'team_admin_application.rejected',
+          targetType: 'TeamAdminApplication',
+          targetId: id,
+          metadata: { reason: reviewReason },
+        },
+      });
+      const updated = await tx.teamAdminApplication.findUnique({
+        where: { id },
+        select: adminApplicationDetailSelect,
+      });
+      if (!updated) throw notFound('申请不存在');
+      return { application, updated };
+    });
+
     try {
       await this.notifications.create(
-        application.userId,
+        result.application.userId,
         'application_rejected',
         '团队管理员申请未通过',
-        `你的团队管理员申请未通过${reason ? `：${reason}` : ''}。`,
+        `你的团队管理员申请未通过：${reviewReason}。`,
         { relatedType: 'TeamAdminApplication', relatedId: id },
       );
     } catch {
-      // 通知触发失败不阻塞主流程。
+      // 通知失败不回滚已提交的审批事务。
     }
-    return { application: updated };
+    return { application: adminApplicationDetail(result.updated) };
   }
 
-  /**
-   * 审计日志列表（支持分类筛选 + 关键词搜索 + 操作者/对象过滤）。
-   *
-   * 过滤策略（组D 审计完善）：
-   *  - category：按 action 前缀分类筛选。Prisma 无「前缀 LIKE」原生支持，需取该分类下所有已知 action，
-   *    再用 action: { in: [...] } 过滤。未注册 action 的分类靠 auditActionCategory 推断，但无法在 DB 层
-   *    按「推断分类」过滤（DB 只认 action 字面量）。故分类筛选采用「该分类下所有已注册 + 前缀匹配」组合：
-   *    已注册 action 用显式列表，未注册的用 startsWith 前缀（覆盖未来新增的同前缀 action）。
-   *  - q：关键词搜索，匹配 action / actor email / targetId（OR 组合）。
-   *  - actorId / targetType：精确过滤。
-   *  - category + q 同时存在：两组条件 AND 串联（交集），见 AUDIT-OR 修复。
-   *
-   * 性能：AuditLog 已有 createdAt + actorUserId 索引；action 无索引但 take: 200 + orderBy createdAt desc
-   * 使扫描面可控。如未来量大可加 action 索引（非破坏式迁移）。
-   */
-  async auditLogs(
-    userId: string,
-    filters: { category?: AuditCategoryKey; q?: string; actorId?: string; targetType?: string } = {},
-  ) {
+  async auditLogs(userId: string, filters: AdminAuditListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
-    // 安全修复 B2：include: { actor: true } 会原样返回整行 User（含 passwordHash/tokenVersion），
-    // 与 adminApplications 同类凭据泄漏。改用 select 显式挑白名单字段，杜绝哈希外泄。
-    const where: Prisma.AuditLogWhereInput = {};
-    if (filters.actorId) where.actorUserId = filters.actorId;
-    if (filters.targetType) where.targetType = filters.targetType;
+    const { page, pageSize, skip } = normalizeAdminPage(filters);
+    const where = adminAuditWhere(filters);
+    const [rows, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: pageSize,
+        select: ADMIN_AUDIT_SUMMARY_SELECT,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+    return { items: rows.map(adminAuditSummary), total, page, pageSize };
+  }
 
-    // 分类筛选：组合「已注册 action 列表 + 前缀 startsWith」，覆盖注册表与未来同前缀新增。
-    // category OR 组：满足该分类下任一 action 条件。
-    let categoryConditions: Prisma.AuditLogWhereInput[] | null = null;
-    if (filters.category) {
-      const prefix = this.categoryPrefix(filters.category);
-      const conditions: Prisma.AuditLogWhereInput[] = [];
-      if (prefix) conditions.push({ action: { startsWith: prefix } });
-      // 已注册的 action（含跨前缀归类，如 platform_admin.bootstrap → system）。
-      const registered = this.registeredActionsByCategory(filters.category);
-      if (registered.length > 0) conditions.push({ action: { in: registered } });
-      if (conditions.length > 0) categoryConditions = conditions;
-    }
-
-    // 关键词搜索：action / actor email / targetId 模糊匹配（OR 组合）。
-    // actor email 需走 relation 查询（actor 是 User 关联），用 actor: { email: { contains } }。
-    let keywordConditions: Prisma.AuditLogWhereInput[] | null = null;
-    if (filters.q) {
-      const kw = filters.q.trim();
-      if (kw) {
-        keywordConditions = [
-          { action: { contains: kw, mode: 'insensitive' } },
-          { targetId: { contains: kw, mode: 'insensitive' } },
-          { actor: { email: { contains: kw, mode: 'insensitive' } } },
-        ];
-      }
-    }
-
-    // 修复 AUDIT-OR：此前 category 与 q 的条件被扁平合并进同一个 where.OR，
-    // 形成 (category 条件 OR keyword 条件) 的并集，而非预期的 (category) AND (keyword) 交集，
-    // 导致管理员同时筛选分类 + 关键词时结果范围被错误扩大。
-    // 现按「各自独立 OR 组、整体 AND 串联」构建：
-    //  - 两者皆有：where.AND = [ { OR: category }, { OR: keyword } ]（交集，语义正确）。
-    //  - 仅其一：where.OR = 该组（与历史单独筛选行为一致）。
-    if (categoryConditions && keywordConditions) {
-      where.AND = [{ OR: categoryConditions }, { OR: keywordConditions }];
-    } else if (categoryConditions) {
-      where.OR = categoryConditions;
-    } else if (keywordConditions) {
-      where.OR = keywordConditions;
-    }
-
-    const logs = await this.prisma.auditLog.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: { actor: { select: { id: true, email: true, displayName: true, platformRole: true, status: true } } },
+  async auditLog(userId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const log = await this.prisma.auditLog.findUnique({
+      where: { id },
+      select: ADMIN_AUDIT_DETAIL_SELECT,
     });
-    return { logs };
+    if (!log) throw notFound('审计日志不存在');
+    return { log: adminAuditDetail(log) };
   }
 
   /**
@@ -1030,24 +1389,30 @@ export class AdminService {
     return { categories: AUDIT_CATEGORIES };
   }
 
-  /** 分类 → 主前缀（用于 DB startsWith 过滤，覆盖未来同前缀新增 action）。 */
-  private categoryPrefix(category: AuditCategoryKey): string | null {
-    const map: Record<AuditCategoryKey, string | null> = {
-      auth: 'auth.',
-      team: 'team.',
-      plugin: 'plugin.',
-      marketplace: 'marketplace.',
-      wallet: 'wallet.',
-      llm: 'llm_binding.',
-      admin: 'admin.',
-      system: null, // system 含 admin.setting. / platform_admin.，无单一前缀，仅靠注册表。
-    };
-    return map[category];
+  private async ensureSystemTeamRole(
+    tx: Prisma.TransactionClient,
+    teamId: string,
+    legacyRole: 'TEAM_ADMIN' | 'MEMBER',
+  ) {
+    const roleId = legacyRole === 'TEAM_ADMIN' ? teamAdminRoleId(teamId) : teamMemberRoleId(teamId);
+    const role = applicationTeamSystemRoles(teamId).roles.find((candidate) => candidate.id === roleId);
+    if (!role) throw notFound('团队系统角色未初始化');
+    await tx.role.upsert({
+      where: { id: roleId },
+      create: role,
+      update: {},
+    });
+    return roleId;
   }
 
-  /** 分类 → 该分类下所有已注册 action（含跨前缀归类的，如 team 含 invitation. / team_admin_application.）。 */
-  private registeredActionsByCategory(category: AuditCategoryKey): string[] {
-    return Object.keys(AUDIT_ACTION_LABEL).filter((action) => auditActionCategory(action) === category);
+  private async ensureAdminUserExists(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: { id: true } });
+    if (!user) throw notFound('用户不存在');
+  }
+
+  private async ensureAdminTeamExists(id: string) {
+    const team = await this.prisma.team.findUnique({ where: { id }, select: { id: true } });
+    if (!team) throw notFound('团队不存在');
   }
 
   private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {

@@ -17,9 +17,12 @@ use crate::cli::Mode;
 pub fn run(mode: Mode) -> Result<()> {
     match mode {
         Mode::Silent { target } => run_silent(target.as_deref()),
-        Mode::Update { target, setup, wait_pid, restart } => {
-            run_update(target.as_deref(), &setup, wait_pid, restart)
-        }
+        Mode::Update {
+            target,
+            setup,
+            wait_pid,
+            restart,
+        } => run_update(target.as_deref(), &setup, wait_pid, restart),
         #[cfg(windows)]
         Mode::Install { target } => install::run_interactive(target.as_deref()),
         #[cfg(windows)]

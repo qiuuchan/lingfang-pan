@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'plugins' | 'applications' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'apiKeys' | 'tickets';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'governance' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'apiKeys' | 'tickets';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -42,7 +42,7 @@ export type Team = {
   balanceCents: number;
   memberCount?: number;
   members?: TeamMember[];
-  // 后端 adminTeams 返回完整 Team 行（...team 展开），补充管理端详情所需字段。
+  // 列表只返回摘要；以下字段由 /api/admin/teams/:id/detail 按需补充。
   allowPublicJoin?: boolean;
   description?: string;
   createdAt?: string;
@@ -302,6 +302,9 @@ const AUDIT_PREFIX_CATEGORY: Array<{ prefix: string; category: AuditCategoryKey 
   { prefix: 'llm_binding.', category: 'llm' },
   { prefix: 'invitation.', category: 'team' },
   { prefix: 'team_admin_application.', category: 'team' },
+  { prefix: 'role.', category: 'team' },
+  { prefix: 'plugin.grant.', category: 'team' },
+  { prefix: 'permission_group.', category: 'team' },
   { prefix: 'team.', category: 'team' },
   { prefix: 'plugin.marketplace.', category: 'marketplace' },
   { prefix: 'marketplace.', category: 'marketplace' },
@@ -428,6 +431,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'auth.register': '注册账号',
   'auth.login.success': '登录成功',
   'auth.login.failed': '登录失败',
+  'auth.login.locked': '账号登录已锁定',
   'auth.logout': '退出登录',
   'auth.token.refreshed': '刷新会话令牌',
   'auth.password.reset': '重置密码',
@@ -476,6 +480,11 @@ export const ACTION_LABEL: Record<string, string> = {
   'admin.plugin.created': '登记平台插件',
   'admin.plugin.unlisted': '下架市场插件',
   'admin.plugin.delisted': '下架市场插件',
+  'admin.plugin_release.approved': '审核通过插件发行版',
+  'admin.plugin_release.rejected': '驳回插件发行版',
+  'admin.plugin_release.artifact_downloaded': '下载插件发行版制品',
+  'admin.plugin_package.delisted': '平台暂停市场插件包',
+  'admin.plugin_package.relisted': '平台恢复市场插件包',
   'admin.llm_provider.created': '创建 LLM Provider',
   'admin.llm_provider.updated': '更新 LLM Provider',
   'admin.llm_provider.deleted': '删除 LLM Provider',
@@ -493,20 +502,28 @@ export const ACTION_LABEL: Record<string, string> = {
   // === system（平台配置）===
   'admin.setting.updated': '更新平台设置',
   'admin.setting.test_email': '测试 SMTP 邮件',
+  'admin.setting.test_captcha': '测试验证码配置',
+  'admin.setting.test_gitee': '测试 Gitee 配置',
+  'admin.setting.secret_revealed': '查看敏感配置明文',
   'platform_admin.bootstrap': '引导平台管理员',
   // === rbac（角色与插件授权）===
   'role.created': '创建角色',
   'role.updated': '更新角色',
   'role.deleted': '删除角色',
   'role.assigned': '分配成员角色',
+  'role.revoked': '撤销成员角色',
   'plugin.grant.set': '设置插件授权',
   'plugin.grant.removed': '移除插件授权',
+  'permission_group.upserted': '修改权限分组名',
+  'permission_group.reset': '重置权限分组名',
 };
 
 export const TARGET_LABEL: Record<string, string> = {
   User: '用户',
   Team: '团队',
   Plugin: '插件',
+  PluginPackage: '插件包',
+  PluginRelease: '插件发行版',
   TeamAdminApplication: '团队管理员申请',
   InvitationCode: '邀请码',
   TenantLlmBinding: 'LLM 绑定',

@@ -49,3 +49,53 @@
 Wrong：`Promise.all(local, team, market)` 任一远端失败就清空整个插件中心。
 
 Correct：先独立加载 local ledger，远端 catalog 使用单独 loading/error 状态。
+
+## Scenario: Local Artifact Publishing And Lifecycle Workbench
+
+### 1. Scope / Trigger
+
+- 修改本地 `.lfplugin` 选择、Creator/草稿发布、已发布治理、来源展示或市场提审重试时适用。
+
+### 2. Signatures
+
+- Native picker：`selectPluginArtifact() -> Promise<string | null>`，Tauri 使用 `@tauri-apps/plugin-dialog.open()`；浏览器返回 `null` 并保留路径输入测试回退。
+- 发布编排：`publishPluginRelease({ target, publishTeam, priceCents, onState }) -> PluginPublishState`。
+- 部分成功重试：`retryMarketplaceSubmission(failedState, priceCents?, onState?)`，只能接受带 `result.release.id` 的 `market_failed`。
+- 管理 API：`listPluginManagement`、`getPluginPackageDetail`、`updatePluginPackageStatus`、`updatePluginReleaseStatus`、`submit/withdrawReleaseToMarketplace`、`updateOwnerMarketplaceStatus`。
+- 发布来源：`sourceKind + sourceLabel + ingestChannel`；安装来源继续使用 installation origin，不得复用发布来源文案。
+
+### 3. Contracts
+
+- `.lfplugin` 上传前必须 inspect 并显示 name/version/runtime/entry/fileCount；路径变化或检查失败必须清空旧摘要，未 inspect 不可发布。
+- 市场目标固定为“先生成不可覆盖的团队 release，再提交该 release 审核”。提审失败保留 release ID，关闭或重试都不得重新上传同版本。
+- 提交响应丢失时按 package detail 对账；同一 release 已为 `PENDING/APPROVED` 视为提交成功。
+- `DraftPlugins` 只含“本地草稿 / 已发布”两个工作台 Tab；已发布详情按需加载 releases，并独立呈现 package/release/review/listing 四轴状态。
+- package 有待审 release 时不能归档；归档 package 内的 yanked release 不能恢复；owner relist 只在 package active 且存在 approved/current release 时开放。
+- source kind 使用共享映射，source label 最长 80 字且不得携带本机绝对路径；发布来源 badge 同时显示 ingest channel。
+- 小于等于 `767px` 时 App 初始及跨入断点会自动折叠侧栏到 56px；用户仍可从标题栏显式展开。
+
+### 4. Validation & Error Matrix
+
+- 非 Tauri -> picker 返回 `null`，不弹错误；原生取消 -> `null`。
+- 路径为空或摘要为空 -> 发布按钮禁用；检查失败 -> 错误可见且旧摘要不可继续使用。
+- 团队上传失败 -> `team_failed`，没有可重试 release；市场提审失败 -> `market_failed`，显示“只重试市场提审”。
+- 状态 API 失败 -> 保留当前 UI 投影并展示后端 message；成功后同时刷新 manage list 与已打开 detail。
+- `DELISTED + delistedBy=PLATFORM` -> owner 不可 relist；显示平台下架方和原因。
+
+### 5. Good/Base/Bad Cases
+
+- Good：外部 IDE 生成 `.lfplugin` -> 原生选择 -> inspect -> 团队发布 -> 市场提审失败 -> 只重试提审，Tauri upload 仅一次。
+- Base：Creator 草稿发布到团队，workspace 保留，已发布列表立即刷新并显示“灵枋创建器 · 桌面端”。
+- Bad：路径改变后继续显示上一个 artifact 摘要，或提审失败后再次调用 `publish_local_artifact`。
+
+### 6. Tests Required
+
+- Vitest：官方 picker/cancel/browser fallback、provenance 清理、publish reducer、丢失响应对账、tagged binary workspace round trip。
+- Playwright：本地 artifact inspect、市场部分成功与仅重试、已发布详情、`1440x900` 与 `390x844` 的无溢出和主内容可读宽度。
+- 门禁：`pnpm -C apps/desktop test`、`typecheck`、`vite:build`。
+
+### 7. Wrong vs Correct
+
+Wrong：组件各自拼 Tauri/API payload，市场失败时重新调用 workspace/artifact upload，并用本地路径充当 source label。
+
+Correct：组件只调用 `plugin-registry.ts`；团队 release 是重试锚点，来源经 `normalizePluginProvenance` 清理，市场重试只调用 submit endpoint。

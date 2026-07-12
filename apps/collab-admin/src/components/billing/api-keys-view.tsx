@@ -1,10 +1,10 @@
 // API Key 总览视图（平台管理员视角，仅吊销）。见 docs/billing-and-relay-design.md §11.5.1 ⑥。
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Trash2Icon } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useLoad, run } from '@/lib/helpers';
+import { run } from '@/lib/helpers';
 import { Section, ActionBar } from '@/components/shared';
-import { usePagination, Pagination } from '@/components/ui/pagination';
+import { Pagination } from '@/components/ui/pagination';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,9 +14,11 @@ type Row = PlatformApiKeyPublic & { teamName?: string };
 
 export function ApiKeysView() {
   const [keys, setKeys] = useState<Row[]>([]);
-  const load = () => api<{ apiKeys: Row[] }>('/api/admin/billing/api-keys').then((r) => setKeys(r.apiKeys));
-  useLoad(load);
-  const { paginated, page, setPage, pageSize, setPageSize, totalItems } = usePagination(keys);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalItems, setTotalItems] = useState(0);
+  const load = useCallback(() => api<{ items: Row[]; total: number }>(`/api/admin/billing/api-keys?page=${page}&pageSize=${pageSize}`).then((r) => { setKeys(r.items); setTotalItems(r.total); }), [page, pageSize]);
+  useEffect(() => { void load(); }, [load]);
 
   async function revoke(k: Row) {
     if (!window.confirm(`吊销 API Key「${k.keyPrefix}…」（${k.name}）？吊销后立即失效。`)) return;
@@ -28,7 +30,7 @@ export function ApiKeysView() {
       <Table>
         <TableHeader><TableRow><TableHead>Key 前缀</TableHead><TableHead>名称</TableHead><TableHead>团队</TableHead><TableHead>scopes</TableHead><TableHead>最近使用</TableHead><TableHead>状态</TableHead><TableHead className="w-[80px]">操作</TableHead></TableRow></TableHeader>
         <TableBody>
-          {paginated.length ? paginated.map((k) => (
+          {keys.length ? keys.map((k) => (
             <TableRow key={k.id}>
               <TableCell className="font-mono text-xs">{k.keyPrefix}…</TableCell>
               <TableCell className="font-medium">{k.name}</TableCell>

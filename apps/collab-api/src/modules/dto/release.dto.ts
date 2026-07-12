@@ -2,9 +2,9 @@
 // 字段白名单由全局 ValidationPipe（whitelist + forbidNonWhitelisted）强制，杜绝越权字段透传。
 // 所有字段 camelCase（与 /api/releases/* 及 /api/admin/releases/* 契约一致）。
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUrl, Matches, Max, Min, MinLength } from 'class-validator';
-import { ASSET_ARCH, ASSET_PLATFORM, RELEASE_CHANNEL } from './enums';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ASSET_ARCH, ASSET_PLATFORM, RELEASE_CHANNEL, RELEASE_STATUS } from './enums';
 
 /** semver 正则（宽松，支持 1.0.0 / 1.0.0-beta，不严格校验 prerelease 复杂规则，够用且可读）。 */
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -55,6 +55,41 @@ export class ReleaseUpdateDto {
   @IsOptional()
   @IsString()
   publishedAt?: string | null;
+}
+
+/** GET /api/admin/releases：轻量摘要列表分页与筛选。 */
+export class AdminReleaseListQueryDto {
+  @ApiPropertyOptional({ description: '页码（从 1 开始，默认 1）', example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'page 必须是整数' })
+  @Min(1, { message: 'page 至少为 1' })
+  page?: number;
+
+  @ApiPropertyOptional({ description: '每页条数（1-100，默认 20）', example: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'pageSize 必须是整数' })
+  @Min(1, { message: 'pageSize 至少为 1' })
+  @Max(100, { message: 'pageSize 最多为 100' })
+  pageSize?: number;
+
+  @ApiPropertyOptional({ description: '发布通道', enum: RELEASE_CHANNEL })
+  @IsOptional()
+  @IsEnum(RELEASE_CHANNEL, { message: 'channel 只允许 STABLE 或 BETA' })
+  channel?: (typeof RELEASE_CHANNEL)[number];
+
+  @ApiPropertyOptional({ description: '发布状态', enum: RELEASE_STATUS })
+  @IsOptional()
+  @IsEnum(RELEASE_STATUS, { message: 'status 只允许 DRAFT、PUBLISHED 或 ARCHIVED' })
+  status?: (typeof RELEASE_STATUS)[number];
+
+  @ApiPropertyOptional({ description: '版本号或标题关键词' })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
 }
 
 /** POST /api/admin/releases/:id/assets 入参：登记一个平台产物（外链下载地址）。 */

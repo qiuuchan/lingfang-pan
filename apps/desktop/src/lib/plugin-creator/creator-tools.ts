@@ -2,7 +2,7 @@
 //
 // Agent 工具壳已迁移到 lib/agent/tools.ts（OpenAI Agents SDK，PascalCase 工具名），
 // 本文件只保留 UI/校验可复用的无框架工具函数，发布统一走 DraftWorkspace v4 制品流程。
-import type { PluginCapability } from '@lingfang/contract';
+import type { PluginCapability, PluginReleaseSourceKind } from '@lingfang/contract';
 import type { DraftFile } from '@/lib/types';
 
 /** 暂存的插件草稿：AI 生成的 manifest 字段 + 全部文件。供前端预览/编辑/提交。 */
@@ -11,11 +11,14 @@ export interface StagedPlugin {
   name: string;
   version: string;
   description: string;
-  runtime_type: 'client' | 'nodejs' | 'python';
+  runtime_type: 'client' | 'cloud' | 'nodejs' | 'python';
   entry: string;
   visibility: 'private' | 'tenant';
   capabilities: PluginCapability[];
   files: DraftFile[];
+  /** Release provenance; kept out of manifest.json and local file contents. */
+  sourceKind?: PluginReleaseSourceKind;
+  sourceLabel?: string;
 }
 
 const DEFAULT_CAPABILITY: PluginCapability = {
@@ -73,7 +76,7 @@ export function validateStagedFiles(entry: string, files: DraftFile[]): string |
  * 完整性校验：在 validateStagedFiles 基础上，追加按 runtime_type 的「必需文件 + 入口命名」校验。
  */
 export function validateStagedCompleteness(
-  runtime_type: 'client' | 'nodejs' | 'python',
+  runtime_type: StagedPlugin['runtime_type'],
   entry: string,
   files: DraftFile[],
 ): string | null {
@@ -103,6 +106,10 @@ export function validateStagedCompleteness(
       if (!has('requirements.txt')) {
         return 'Python 插件缺少 requirements.txt，请补一个（无依赖时留空文件即可），否则无法安装运行。';
       }
+      break;
+    case 'cloud':
+      // Cloud execution owns its entry contract server-side; the shared base
+      // validation still requires the declared entry to exist in files.
       break;
   }
   return null;

@@ -1,6 +1,6 @@
-// tool-card.spec.ts — develop-plugins 页面式 CreatorWorkspace 验收。
+// tool-card.spec.ts — 顶层 Dialog 内 CreatorWorkspace 验收。
 //
-// 通过真实的“插件”→“开发插件”入口进入工作区，覆盖空状态、紧凑 composer、
+// 通过真实的“AI 创建插件”入口进入工作区，覆盖空状态、紧凑 composer、
 // 单一上下文详情入口，以及从 localStorage 恢复会话与插件草稿 Inspector。
 import { test, expect } from '@playwright/test';
 import {
@@ -54,9 +54,12 @@ const persistedCreatorFixture: CreatorWorkspaceFixture = {
 };
 
 test.describe('CreatorWorkspace', () => {
-  test('通过 develop-plugins 入口显示页面式空状态', async ({ page }) => {
+  test('通过 AI 创建插件入口显示工作区空状态', async ({ page }) => {
     await openCreatorWorkspace(page);
 
+    const creatorDialog = page.getByRole('dialog', { name: 'AI 创建插件' });
+    await expect(creatorDialog).toBeVisible();
+    expect(await creatorDialog.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(900);
     await expect(page.getByText('插件 Agent', { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '描述你想构建的插件' })).toBeVisible();
     await expect(page.getByText('还没有历史会话', { exact: true })).toBeVisible();

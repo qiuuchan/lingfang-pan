@@ -8,6 +8,7 @@
 
 - 改登录态、页面切换、导航、命令面板或懒加载 view 时，先读 [app-shell-and-api.md](./app-shell-and-api.md)。
 - 改后台业务视图、设置页、发布页或大组件拆分时，先读 [ui-composition.md](./ui-composition.md)。
+- 改 v4 插件 package/release 治理、来源筛选、审核、下架或恢复时，先读 [plugin-governance.md](./plugin-governance.md)。
 - 改后端 API payload、错误码或认证行为时，同时读 `.trellis/spec/collab-api/backend/index.md`。
 
 ## Package Shape

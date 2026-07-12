@@ -103,7 +103,7 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - Python/Node runtimes are application resources under Tauri `bundle.resources` target `runtimes`.
 - Windows layout: `runtimes/python/python.exe`, `runtimes/python/Scripts/pip.exe`, `runtimes/nodejs/node.exe`, `runtimes/nodejs/npm.cmd|npm.exe|npm`, `runtimes/nodejs/pnpm.cmd|pnpm.exe|pnpm`, `runtimes/ffmpeg/ffmpeg.exe`, `runtimes/ffmpeg/ffprobe.exe`.
 - Unix layout: `runtimes/python/bin/python`, `runtimes/python/bin/pip`, `runtimes/nodejs/bin/node`, `runtimes/nodejs/bin/npm|pnpm`, `runtimes/ffmpeg/bin/ffmpeg`.
-- `LINGFANG_EMBEDDED_RUNTIME_DIR` may override the runtime root for tests/dev diagnostics.
+- `LINGFANG_RUNTIME_DIR` may override the application-managed runtime data root for tests/dev diagnostics. It does not make system PATH an execution source.
 - `probe_script_runtime` only probes embedded binaries and must never scan system `PATH`.
 - `run_plugin_script` preview execution uses only embedded Python/Node and injects the embedded runtime environment.
 - `start_plugin` persistent execution creates Python venvs with embedded Python, installs Python deps through the venv pip with embedded env, and uses embedded Node/pnpm/npm for Node install/start.
@@ -614,9 +614,11 @@ Reference files:
 Reference files:
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`ensure_python_venv` / `install_and_smoke` / `smoke_test_venv` / `build_smoke_script` / `parse_requirements_dist_names` / `dist_to_import_name` / `normalize_import_name` / `smoke_import_names` / `deps_fingerprint` / `deps_verified_matches` / `write_deps_verified` / `deps_verified_marker` / `DEPS_VERIFIED_SALT`）
 
-## 本地/草稿插件 ZIP 导入导出（`.lfplugin` v3，2026-07-08）
+## Legacy: 本地/草稿插件 ZIP 导入导出（`.lfplugin` v3，2026-07-08）
 
-`.lfplugin` = **ZIP 压缩包**（v3 支持二进制；v2 纯文本向后兼容；旧 JSON 单文件 v1 已废弃、无存量文件、spec 无记录，不做兼容）。本地插件与草稿插件共用同一导出/导入通道。v3 起支持含 vendored 上游源码（字体/图片/音频等二进制）的大插件完整导入导出。
+> **Superseded**：本节记录已移除的前端 JSZip v2/v3 路径，仅供历史迁移排查。当前生产格式、安装/草稿导入和发布一律使用 Rust `.lfplugin` v4，契约见 [plugin-package-manager.md](./plugin-package-manager.md)。不得恢复 `plugin-package-zip.ts` 或让 WebView 缓冲制品。
+
+旧 `.lfplugin` v3 是 ZIP 压缩包（v3 支持二进制；v2 纯文本向后兼容）。以下内容不是当前实现契约。
 
 ### 1. Scope / Trigger
 - Trigger: changing `plugin-package-zip.ts`（`exportPluginToZip`/`parsePluginZip`/`materializeZipPlugin`）、`LocalPluginsSection` 的「导入」按钮、`LocalPluginRow` 的「导出」按钮、`DraftPluginsSection` 的导入/导出，或 `.lfplugin` 包格式。

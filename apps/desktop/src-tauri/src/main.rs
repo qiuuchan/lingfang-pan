@@ -19,6 +19,7 @@ mod plugins;
 mod process_util;
 mod runtime_commands;
 mod runtime_config;
+mod runtime_download;
 mod runtime_resolver;
 mod update;
 mod upload;
@@ -251,6 +252,7 @@ fn quit_app(app: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
             // 组B 的 start_plugin/stop_plugin 经此 State 的 ensure_plugin_dir 解析插件目录，
@@ -329,6 +331,10 @@ fn main() {
             runtime_commands::get_runtime_status,
             runtime_commands::get_runtime_config,
             runtime_commands::set_mirror_config,
+            runtime_commands::download_runtime,
+            runtime_commands::uninstall_runtime,
+            runtime_commands::set_user_specified_runtime,
+            runtime_commands::probe_system_runtime,
             plugin_runner::start_plugin,
             plugin_runner::stop_plugin,
             plugin_runner::delete_plugin,
@@ -359,6 +365,7 @@ fn main() {
             plugin_package_manager::commands::start_installed_plugin,
             plugin_package_manager::commands::stop_installed_plugin,
             plugin_package_manager::commands::list_draft_workspaces,
+            plugin_package_manager::commands::read_draft_workspace_files,
             plugin_package_manager::commands::create_draft_workspace,
             plugin_package_manager::commands::import_draft_workspace,
             plugin_package_manager::commands::copy_installation_to_draft_workspace,
@@ -370,6 +377,7 @@ fn main() {
             plugin_package_manager::commands::sha256_lfplugin,
             plugin_package_manager::network::download_plugin_release,
             plugin_package_manager::network::publish_draft_workspace,
+            plugin_package_manager::network::publish_local_artifact,
             draft_plugin::migrate_drafts_to_root,
             update::check_update,
             update::download_update,

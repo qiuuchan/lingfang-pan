@@ -135,12 +135,22 @@ pub fn title_bar(ui: &mut egui::Ui, title: &str, over_red: bool) -> bool {
     if btn_resp.hovered() {
         painter.rect_filled(btn, Rounding::same(6.0), Color32::from_rgb(232, 64, 60));
     }
-    let x_color = if btn_resp.hovered() { Color32::WHITE } else { fg };
+    let x_color = if btn_resp.hovered() {
+        Color32::WHITE
+    } else {
+        fg
+    };
     let c = btn.center();
     let r = 6.0;
     let stroke = Stroke::new(1.8, x_color); // 稍粗的线条
-    painter.line_segment([egui::pos2(c.x - r, c.y - r), egui::pos2(c.x + r, c.y + r)], stroke);
-    painter.line_segment([egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)], stroke);
+    painter.line_segment(
+        [egui::pos2(c.x - r, c.y - r), egui::pos2(c.x + r, c.y + r)],
+        stroke,
+    );
+    painter.line_segment(
+        [egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)],
+        stroke,
+    );
 
     btn_resp.clicked()
 }
@@ -151,7 +161,10 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, width: f32, enabled: bool) 
     let (fill, text_color) = if enabled {
         (RED, Color32::WHITE)
     } else {
-        (Color32::from_rgb(90, 70, 70), Color32::from_rgb(170, 150, 150))
+        (
+            Color32::from_rgb(90, 70, 70),
+            Color32::from_rgb(170, 150, 150),
+        )
     };
 
     let btn = egui::Button::new(RichText::new(text).color(text_color).size(17.0).strong())
@@ -184,7 +197,8 @@ pub fn secondary_button(ui: &mut egui::Ui, text: &str, width: f32) -> bool {
 
 /// 内嵌可点击链接文字。返回是否被点击。
 pub fn link(ui: &mut egui::Ui, text: &str) -> bool {
-    let resp = ui.add(egui::Label::new(RichText::new(text).color(LINK).size(13.0)).sense(Sense::click()));
+    let resp =
+        ui.add(egui::Label::new(RichText::new(text).color(LINK).size(13.0)).sense(Sense::click()));
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -208,21 +222,33 @@ pub fn status_icon(ui: &mut egui::Ui, ok: bool, diameter: f32) {
     if ok {
         // 对勾：调整比例使其更美观
         painter.line_segment(
-            [egui::pos2(c.x - r * 0.9, c.y), egui::pos2(c.x - r * 0.15, c.y + r * 0.75)],
+            [
+                egui::pos2(c.x - r * 0.9, c.y),
+                egui::pos2(c.x - r * 0.15, c.y + r * 0.75),
+            ],
             stroke,
         );
         painter.line_segment(
-            [egui::pos2(c.x - r * 0.15, c.y + r * 0.75), egui::pos2(c.x + r * 0.95, c.y - r * 0.65)],
+            [
+                egui::pos2(c.x - r * 0.15, c.y + r * 0.75),
+                egui::pos2(c.x + r * 0.95, c.y - r * 0.65),
+            ],
             stroke,
         );
     } else {
         // 叉：使用对称的 X 形状
         painter.line_segment(
-            [egui::pos2(c.x - r * 0.85, c.y - r * 0.85), egui::pos2(c.x + r * 0.85, c.y + r * 0.85)],
+            [
+                egui::pos2(c.x - r * 0.85, c.y - r * 0.85),
+                egui::pos2(c.x + r * 0.85, c.y + r * 0.85),
+            ],
             stroke,
         );
         painter.line_segment(
-            [egui::pos2(c.x - r * 0.85, c.y + r * 0.85), egui::pos2(c.x + r * 0.85, c.y - r * 0.85)],
+            [
+                egui::pos2(c.x - r * 0.85, c.y + r * 0.85),
+                egui::pos2(c.x + r * 0.85, c.y - r * 0.85),
+            ],
             stroke,
         );
     }
@@ -235,7 +261,8 @@ pub fn logo(ui: &mut egui::Ui, tex: &Option<egui::TextureHandle>, size: f32) {
             ui.add(egui::Image::new(t).fit_to_exact_size(Vec2::splat(size)));
         } else {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-            ui.painter().circle_stroke(rect.center(), size * 0.4, Stroke::new(3.0, TEXT_MUTED));
+            ui.painter()
+                .circle_stroke(rect.center(), size * 0.4, Stroke::new(3.0, TEXT_MUTED));
         }
     });
 }
@@ -245,11 +272,9 @@ pub fn status_title(ui: &mut egui::Ui, ok: bool, title: &str, font_size: f32) {
     let color = if ok { SUCCESS } else { RED };
     let icon_d = font_size + 2.0;
     // 估算整体宽度：图标 + 间距 + 文字。文字宽用字符数粗估（CJK 约等于字号宽）。
-    let galley = ui.painter().layout_no_wrap(
-        title.to_owned(),
-        FontId::proportional(font_size),
-        color,
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap(title.to_owned(), FontId::proportional(font_size), color);
     let total_w = icon_d + 8.0 + galley.size().x;
     let avail = ui.available_width();
     let indent = ((avail - total_w) * 0.5).max(0.0);
@@ -272,7 +297,11 @@ pub fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
 pub fn window_icon() -> Option<egui::IconData> {
     const PNG: &[u8] = include_bytes!("../../src-tauri/icons/64x64.png");
     let (rgba, width, height) = decode_png(PNG)?;
-    Some(egui::IconData { rgba, width, height })
+    Some(egui::IconData {
+        rgba,
+        width,
+        height,
+    })
 }
 
 /// 解码 PNG → (RGBA8, width, height)。
