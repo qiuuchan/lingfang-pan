@@ -157,8 +157,8 @@ pub async fn save_draft_plugin(
         }
         fs::write(&file_path, file.content)
             .map_err(|e| format!("写入文件 {} 失败: {}", file.path, e))?;
-        let metadata = fs::metadata(&file_path)
-            .map_err(|e| format!("核验文件 {} 失败: {}", file.path, e))?;
+        let metadata =
+            fs::metadata(&file_path).map_err(|e| format!("核验文件 {} 失败: {}", file.path, e))?;
         if !metadata.is_file() {
             return Err(format!("核验文件 {} 失败：目标不是文件", file.path));
         }
@@ -257,12 +257,19 @@ pub async fn list_draft_plugins(app: AppHandle) -> Result<Vec<serde_json::Value>
             let versions_dir = plugin_dir.join(".versions");
             let version_count = if versions_dir.exists() {
                 fs::read_dir(&versions_dir)
-                    .map(|entries| entries.filter(|e| e.as_ref().map(|e| e.path().is_dir()).unwrap_or(false)).count())
+                    .map(|entries| {
+                        entries
+                            .filter(|e| e.as_ref().map(|e| e.path().is_dir()).unwrap_or(false))
+                            .count()
+                    })
                     .unwrap_or(0)
             } else {
                 0
             };
-            obj.insert("versionCount".to_string(), serde_json::Value::from(version_count));
+            obj.insert(
+                "versionCount".to_string(),
+                serde_json::Value::from(version_count),
+            );
         }
 
         drafts.push(manifest);
@@ -285,8 +292,8 @@ pub async fn load_draft_plugin(app: AppHandle, id: String) -> Result<serde_json:
     let manifest_path = plugin_dir.join("manifest.json");
     let manifest_text =
         fs::read_to_string(&manifest_path).map_err(|e| format!("读取 manifest 失败: {}", e))?;
-    let mut manifest: serde_json::Value = serde_json::from_str(&manifest_text)
-        .map_err(|e| format!("解析 manifest 失败: {}", e))?;
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&manifest_text).map_err(|e| format!("解析 manifest 失败: {}", e))?;
 
     // 递归读取所有源文件（排除隐藏目录/文件和 manifest.json），保留 ui/index.html 等相对路径。
     let mut files = Vec::new();
@@ -501,7 +508,9 @@ fn prepare_draft_files(
         });
     }
     if !seen.contains(&entry_norm) {
-        return Err(format!("入口文件 {entry_norm} 不在源文件列表中，未创建插件文件"));
+        return Err(format!(
+            "入口文件 {entry_norm} 不在源文件列表中，未创建插件文件"
+        ));
     }
     Ok(prepared)
 }
@@ -594,8 +603,7 @@ fn copy_plugin_files(src: &Path, dst: &Path) -> Result<(), String> {
             fs::create_dir_all(&target).map_err(|e| format!("创建备份目录失败: {}", e))?;
             copy_plugin_files(&path, &target)?;
         } else if path.is_file() && (file_name == "manifest.json" || !file_name.starts_with('.')) {
-            fs::copy(&path, &target)
-                .map_err(|e| format!("复制文件 {} 失败: {}", file_name, e))?;
+            fs::copy(&path, &target).map_err(|e| format!("复制文件 {} 失败: {}", file_name, e))?;
         }
     }
     Ok(())
@@ -676,7 +684,9 @@ pub fn migrate_drafts_impl(
     }
     // 旧目录为空则删除。
     let _ = fs::remove_dir_all(&draft_dir);
-    Ok(format!("迁移完成：{migrated} 个草稿已迁移，跳过 {skipped} 个。"))
+    Ok(format!(
+        "迁移完成：{migrated} 个草稿已迁移，跳过 {skipped} 个。"
+    ))
 }
 
 #[cfg(test)]
@@ -718,13 +728,21 @@ mod tests {
         assert_eq!(files[0].path, "ui/index.html");
         assert_eq!(normalize_rel_path(&files[0].rel_path), "ui/index.html");
 
-        for bad_path in ["../index.html", "/tmp/index.html", "C:/tmp/index.html", "ui/.env"] {
+        for bad_path in [
+            "../index.html",
+            "/tmp/index.html",
+            "C:/tmp/index.html",
+            "ui/.env",
+        ] {
             let err = prepare_draft_files(
                 vec![(bad_path.to_string(), "x".to_string())],
                 "ui/index.html",
             )
             .unwrap_err();
-            assert!(err.contains("文件路径"), "unexpected error for {bad_path}: {err}");
+            assert!(
+                err.contains("文件路径"),
+                "unexpected error for {bad_path}: {err}"
+            );
         }
     }
 

@@ -124,7 +124,9 @@ fn expand_npm_shim_path(raw: &str, dp0: &Path) -> PathBuf {
 #[cfg(windows)]
 fn strip_var_prefix<'a>(raw: &'a str, token: &str) -> Option<&'a str> {
     let prefix = raw.get(..token.len())?;
-    prefix.eq_ignore_ascii_case(token).then_some(&raw[token.len()..])
+    prefix
+        .eq_ignore_ascii_case(token)
+        .then_some(&raw[token.len()..])
 }
 
 #[cfg(windows)]

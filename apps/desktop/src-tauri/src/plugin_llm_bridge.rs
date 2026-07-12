@@ -66,9 +66,14 @@ impl PluginLlmBridge {
         allow_image_generate: bool,
         ttl: Duration,
     ) -> Result<Option<PluginBridgeEnv>, String> {
-        let api_base = api_base.unwrap_or_default().trim().trim_end_matches('/').to_string();
+        let api_base = api_base
+            .unwrap_or_default()
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
         let auth_token = auth_token.unwrap_or_default().trim().to_string();
-        if api_base.is_empty() && auth_token.is_empty() && !allow_llm_chat && !allow_image_generate {
+        if api_base.is_empty() && auth_token.is_empty() && !allow_llm_chat && !allow_image_generate
+        {
             return Ok(None);
         }
         let endpoint = self.ensure_server()?;
@@ -164,10 +169,17 @@ impl PluginLlmBridge {
 }
 
 fn handle_connection(inner: Arc<BridgeState>, mut stream: TcpStream) {
-    let response = match read_request(&mut stream).and_then(|request| route_request(&inner, request)) {
-        Ok(body) => http_json(200, &body),
-        Err((status, code, message)) => http_json(status, &json!(BridgeError { error: code, message })),
-    };
+    let response =
+        match read_request(&mut stream).and_then(|request| route_request(&inner, request)) {
+            Ok(body) => http_json(200, &body),
+            Err((status, code, message)) => http_json(
+                status,
+                &json!(BridgeError {
+                    error: code,
+                    message
+                }),
+            ),
+        };
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
 }
@@ -230,7 +242,12 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, (u16, &'static st
         body.extend_from_slice(&buf[..n]);
     }
     body.truncate(content_length);
-    Ok(HttpRequest { method, path, headers, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn find_header_end(raw: &[u8]) -> Option<usize> {
@@ -246,12 +263,19 @@ fn route_request(
     let path = request.path.as_str();
     let is_get_models = request.method == "GET" && path == "/v1/models";
     if !is_get_models && request.method != "POST" {
-        return Err((404, "not_found", "插件本地桥仅支持 POST 请求（GET 仅 /v1/models）".to_string()));
+        return Err((
+            404,
+            "not_found",
+            "插件本地桥仅支持 POST 请求（GET 仅 /v1/models）".to_string(),
+        ));
     }
     let token = extract_token(&request.headers)
         .ok_or_else(|| (401, "unauthorized", "缺少插件桥 token".to_string()))?;
     let session = {
-        let mut sessions = inner.sessions.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut sessions = inner
+            .sessions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         sessions.retain(|_, session| session.expires_at > Instant::now());
         sessions.get(&token).cloned()
     }
@@ -262,20 +286,35 @@ fn route_request(
         "/llm/chat" => route_llm_chat(&session, request.body),
         "/image/generate" => route_image_generate(&session, request.body),
         // OpenAI 兼容形状（第三方 SDK 直连用）：透传 relay 完整响应，不包装。
-        "/v1/chat/completions" if request.method == "POST" => route_v1_chat_completions(&session, request.body),
-        "/v1/images/generations" if request.method == "POST" => route_v1_images_generations(&session, request.body),
+        "/v1/chat/completions" if request.method == "POST" => {
+            route_v1_chat_completions(&session, request.body)
+        }
+        "/v1/images/generations" if request.method == "POST" => {
+            route_v1_images_generations(&session, request.body)
+        }
         "/v1/models" if request.method == "GET" => route_v1_models(),
         other => Err((404, "not_found", format!("插件本地桥不支持的路由：{other}"))),
     }
 }
 
 /// 处理 llm.chat：转发到平台 relay /api/relay/v1/chat/completions，返回 {content}。
-fn route_llm_chat(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<Value, (u16, &'static str, String)> {
+fn route_llm_chat(
+    session: &BridgeSession,
+    body_bytes: Vec<u8>,
+) -> Result<Value, (u16, &'static str, String)> {
     if !session.allow_llm_chat {
-        return Err((403, "capability_denied", "插件未声明 llm.chat 能力".to_string()));
+        return Err((
+            403,
+            "capability_denied",
+            "插件未声明 llm.chat 能力".to_string(),
+        ));
     }
     if session.api_base.is_empty() || session.auth_token.is_empty() {
-        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台 LLM".to_string()));
+        return Err((
+            401,
+            "unauthorized",
+            "缺少后端地址或登录凭证，无法调用平台 LLM".to_string(),
+        ));
     }
 
     let body: Value = serde_json::from_slice(&body_bytes)
@@ -296,7 +335,10 @@ fn route_llm_chat(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<Value,
         "messages": messages,
         "stream": false,
     });
-    let url = format!("{}/api/relay/v1/chat/completions", session.api_base.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/relay/v1/chat/completions",
+        session.api_base.trim_end_matches('/')
+    );
     let client = blocking_client();
     let resp = client
         .post(url)
@@ -305,19 +347,36 @@ fn route_llm_chat(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<Value,
         .bearer_auth(&session.auth_token)
         .json(&relay_body)
         .send()
-        .map_err(|error| (502, "relay_request_failed", format!("平台 LLM 请求失败：{error}")))?;
+        .map_err(|error| {
+            (
+                502,
+                "relay_request_failed",
+                format!("平台 LLM 请求失败：{error}"),
+            )
+        })?;
     let data = relay_response_json(resp)?;
     let content = extract_chat_content(&data);
     Ok(json!({ "content": content }))
 }
 
 /// 处理 image.generate：转发到平台 relay /api/relay/v1/images/generations，返回 {images:[...]}。
-fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<Value, (u16, &'static str, String)> {
+fn route_image_generate(
+    session: &BridgeSession,
+    body_bytes: Vec<u8>,
+) -> Result<Value, (u16, &'static str, String)> {
     if !session.allow_image_generate {
-        return Err((403, "capability_denied", "插件未声明 image.generate 能力".to_string()));
+        return Err((
+            403,
+            "capability_denied",
+            "插件未声明 image.generate 能力".to_string(),
+        ));
     }
     if session.api_base.is_empty() || session.auth_token.is_empty() {
-        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台生图".to_string()));
+        return Err((
+            401,
+            "unauthorized",
+            "缺少后端地址或登录凭证，无法调用平台生图".to_string(),
+        ));
     }
 
     let body: Value = serde_json::from_slice(&body_bytes)
@@ -349,7 +408,10 @@ fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<
         "n": n,
         "size": size,
     });
-    let url = format!("{}/api/relay/v1/images/generations", session.api_base.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/relay/v1/images/generations",
+        session.api_base.trim_end_matches('/')
+    );
     let client = blocking_client();
     let resp = client
         .post(url)
@@ -358,7 +420,13 @@ fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> Result<
         .bearer_auth(&session.auth_token)
         .json(&relay_body)
         .send()
-        .map_err(|error| (502, "relay_request_failed", format!("平台生图请求失败：{error}")))?;
+        .map_err(|error| {
+            (
+                502,
+                "relay_request_failed",
+                format!("平台生图请求失败：{error}"),
+            )
+        })?;
     let data = relay_response_json(resp)?;
     let images = extract_image_urls(&data);
     Ok(json!({ "images": images }))
@@ -385,10 +453,18 @@ fn route_v1_chat_completions(
     body_bytes: Vec<u8>,
 ) -> Result<Value, (u16, &'static str, String)> {
     if !session.allow_llm_chat {
-        return Err((403, "capability_denied", "插件未声明 llm.chat 能力".to_string()));
+        return Err((
+            403,
+            "capability_denied",
+            "插件未声明 llm.chat 能力".to_string(),
+        ));
     }
     if session.api_base.is_empty() || session.auth_token.is_empty() {
-        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台 LLM".to_string()));
+        return Err((
+            401,
+            "unauthorized",
+            "缺少后端地址或登录凭证，无法调用平台 LLM".to_string(),
+        ));
     }
 
     let body: Value = serde_json::from_slice(&body_bytes)
@@ -398,7 +474,13 @@ fn route_v1_chat_completions(
         .and_then(|value| value.as_array())
         .filter(|items| !items.is_empty())
         .cloned()
-        .ok_or_else(|| (400, "bad_request", "/v1/chat/completions 缺少 messages".to_string()))?;
+        .ok_or_else(|| {
+            (
+                400,
+                "bad_request",
+                "/v1/chat/completions 缺少 messages".to_string(),
+            )
+        })?;
     // model 归一化为平台档位哨兵（上游 SDK 传 gpt-4o 等会被归一化）。
     let model = match body.get("model").and_then(|value| value.as_str()) {
         Some("premium") => "premium",
@@ -411,7 +493,10 @@ fn route_v1_chat_completions(
         "messages": messages,
         "stream": false,
     });
-    let url = format!("{}/api/relay/v1/chat/completions", session.api_base.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/relay/v1/chat/completions",
+        session.api_base.trim_end_matches('/')
+    );
     let client = blocking_client();
     let resp = client
         .post(url)
@@ -420,7 +505,13 @@ fn route_v1_chat_completions(
         .bearer_auth(&session.auth_token)
         .json(&relay_body)
         .send()
-        .map_err(|error| (502, "relay_request_failed", format!("平台 LLM 请求失败：{error}")))?;
+        .map_err(|error| {
+            (
+                502,
+                "relay_request_failed",
+                format!("平台 LLM 请求失败：{error}"),
+            )
+        })?;
     // 透传 relay 完整响应（不抽取 content）。
     relay_response_json(resp)
 }
@@ -434,10 +525,18 @@ fn route_v1_images_generations(
     body_bytes: Vec<u8>,
 ) -> Result<Value, (u16, &'static str, String)> {
     if !session.allow_image_generate {
-        return Err((403, "capability_denied", "插件未声明 image.generate 能力".to_string()));
+        return Err((
+            403,
+            "capability_denied",
+            "插件未声明 image.generate 能力".to_string(),
+        ));
     }
     if session.api_base.is_empty() || session.auth_token.is_empty() {
-        return Err((401, "unauthorized", "缺少后端地址或登录凭证，无法调用平台生图".to_string()));
+        return Err((
+            401,
+            "unauthorized",
+            "缺少后端地址或登录凭证，无法调用平台生图".to_string(),
+        ));
     }
 
     let body: Value = serde_json::from_slice(&body_bytes)
@@ -446,7 +545,13 @@ fn route_v1_images_generations(
         .get("prompt")
         .and_then(|value| value.as_str())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| (400, "bad_request", "/v1/images/generations 缺少 prompt".to_string()))?
+        .ok_or_else(|| {
+            (
+                400,
+                "bad_request",
+                "/v1/images/generations 缺少 prompt".to_string(),
+            )
+        })?
         .to_string();
     let model = match body.get("model").and_then(|value| value.as_str()) {
         Some("premium") => "premium",
@@ -469,7 +574,10 @@ fn route_v1_images_generations(
         "n": n,
         "size": size,
     });
-    let url = format!("{}/api/relay/v1/images/generations", session.api_base.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/relay/v1/images/generations",
+        session.api_base.trim_end_matches('/')
+    );
     let client = blocking_client();
     let resp = client
         .post(url)
@@ -478,7 +586,13 @@ fn route_v1_images_generations(
         .bearer_auth(&session.auth_token)
         .json(&relay_body)
         .send()
-        .map_err(|error| (502, "relay_request_failed", format!("平台生图请求失败：{error}")))?;
+        .map_err(|error| {
+            (
+                502,
+                "relay_request_failed",
+                format!("平台生图请求失败：{error}"),
+            )
+        })?;
     // 透传 relay 完整响应（不抽取 images）。
     relay_response_json(resp)
 }
@@ -492,16 +606,23 @@ fn blocking_client() -> reqwest::blocking::Client {
 }
 
 /// 解析平台 relay 响应：非 2xx 抽取 {message|error} 友好报错；成功返回 JSON Value。
-fn relay_response_json(resp: reqwest::blocking::Response) -> Result<Value, (u16, &'static str, String)> {
+fn relay_response_json(
+    resp: reqwest::blocking::Response,
+) -> Result<Value, (u16, &'static str, String)> {
     let status = resp.status();
-    let text = resp
-        .text()
-        .map_err(|error| (502, "relay_response_failed", format!("读取平台响应失败：{error}")))?;
+    let text = resp.text().map_err(|error| {
+        (
+            502,
+            "relay_response_failed",
+            format!("读取平台响应失败：{error}"),
+        )
+    })?;
     if !status.is_success() {
         let detail = serde_json::from_str::<Value>(&text)
             .ok()
             .and_then(|value| {
-                value.get("message")
+                value
+                    .get("message")
                     .or_else(|| value.get("error"))
                     .and_then(|value| value.as_str())
                     .map(|value| value.to_string())
@@ -509,8 +630,13 @@ fn relay_response_json(resp: reqwest::blocking::Response) -> Result<Value, (u16,
             .unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
         return Err((status.as_u16(), "relay_error", detail));
     }
-    serde_json::from_str(&text)
-        .map_err(|error| (502, "relay_response_invalid", format!("平台响应不是 JSON：{error}")))
+    serde_json::from_str(&text).map_err(|error| {
+        (
+            502,
+            "relay_response_invalid",
+            format!("平台响应不是 JSON：{error}"),
+        )
+    })
 }
 
 fn extract_token(headers: &HashMap<String, String>) -> Option<String> {
@@ -519,7 +645,11 @@ fn extract_token(headers: &HashMap<String, String>) -> Option<String> {
     }
     headers
         .get("authorization")
-        .and_then(|value| value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")))
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
         .map(|value| value.trim().to_string())
 }
 
@@ -602,10 +732,16 @@ mod tests {
     fn extract_images_from_url_and_b64() {
         // url 形态
         let url_resp = json!({ "data": [{ "url": "https://example.com/a.png" }] });
-        assert_eq!(extract_image_urls(&url_resp), vec!["https://example.com/a.png".to_string()]);
+        assert_eq!(
+            extract_image_urls(&url_resp),
+            vec!["https://example.com/a.png".to_string()]
+        );
         // b64_json 形态：转 data:base64
         let b64_resp = json!({ "data": [{ "b64_json": "AAAA" }] });
-        assert_eq!(extract_image_urls(&b64_resp), vec!["data:image/png;base64,AAAA".to_string()]);
+        assert_eq!(
+            extract_image_urls(&b64_resp),
+            vec!["data:image/png;base64,AAAA".to_string()]
+        );
         // 多张
         let multi = json!({ "data": [{ "url": "https://x/1.png" }, { "url": "https://x/2.png" }] });
         assert_eq!(extract_image_urls(&multi).len(), 2);
@@ -641,7 +777,12 @@ mod tests {
     }
 
     /// 构造一个空的 BridgeState + 带有效 token 的会话，用于 route_request 分发测试。
-    fn route_with_session(method: &str, path: &str, allow_llm: bool, allow_image: bool) -> Result<Value, (u16, &'static str, String)> {
+    fn route_with_session(
+        method: &str,
+        path: &str,
+        allow_llm: bool,
+        allow_image: bool,
+    ) -> Result<Value, (u16, &'static str, String)> {
         let bridge = PluginLlmBridge::new();
         // 注入一个会话：用公开的 register_session 需要 api_base/auth_token，但 route_request
         // 只读 sessions map。这里走 ensure_server + 直接构造 session 的最小路径不便（私有），
@@ -656,7 +797,9 @@ mod tests {
             Duration::from_secs(60),
         );
         // 取出刚注册的 token（register_session 返回 Result<Option<PluginBridgeEnv>, String>）。
-        let env = _env.expect("register_session 应 Ok").expect("register_session 应返回桥环境");
+        let env = _env
+            .expect("register_session 应 Ok")
+            .expect("register_session 应返回桥环境");
         let mut headers = HashMap::new();
         headers.insert("x-lingfang-plugin-token".to_string(), env.token);
         let request = HttpRequest {
@@ -686,7 +829,12 @@ mod tests {
         let ids: Vec<&str> = data
             .get("data")
             .and_then(|value| value.as_array())
-            .map(|items| items.iter().filter_map(|item| item.get("id").and_then(|v| v.as_str())).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("id").and_then(|v| v.as_str()))
+                    .collect()
+            })
             .unwrap_or_default();
         assert_eq!(ids, vec!["fast", "premium"]);
     }
@@ -697,15 +845,24 @@ mod tests {
         // 提供有效 token 但 body 缺 messages 也会先命中 capability gate（gate 在 body 校验前）。
         let bridge = PluginLlmBridge::new();
         let env = bridge
-            .register_session("test-plugin", Some("http://127.0.0.1:0".to_string()), Some("dummy".to_string()), false, false, Duration::from_secs(60))
-            .expect("register_session 应 Ok").expect("register_session 应返回桥环境");
+            .register_session(
+                "test-plugin",
+                Some("http://127.0.0.1:0".to_string()),
+                Some("dummy".to_string()),
+                false,
+                false,
+                Duration::from_secs(60),
+            )
+            .expect("register_session 应 Ok")
+            .expect("register_session 应返回桥环境");
         let mut headers = HashMap::new();
         headers.insert("x-lingfang-plugin-token".to_string(), env.token);
         let request = HttpRequest {
             method: "POST".to_string(),
             path: "/v1/chat/completions".to_string(),
             headers,
-            body: b"{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}".to_vec(),
+            body: b"{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
+                .to_vec(),
         };
         let result = route_request(&bridge.inner, request);
         assert!(result.is_err());
@@ -719,8 +876,16 @@ mod tests {
         // 未声明 image.generate 时，POST /v1/images/generations 应 403 capability_denied。
         let bridge = PluginLlmBridge::new();
         let env = bridge
-            .register_session("test-plugin", Some("http://127.0.0.1:0".to_string()), Some("dummy".to_string()), true, false, Duration::from_secs(60))
-            .expect("register_session 应 Ok").expect("register_session 应返回桥环境");
+            .register_session(
+                "test-plugin",
+                Some("http://127.0.0.1:0".to_string()),
+                Some("dummy".to_string()),
+                true,
+                false,
+                Duration::from_secs(60),
+            )
+            .expect("register_session 应 Ok")
+            .expect("register_session 应返回桥环境");
         let mut headers = HashMap::new();
         headers.insert("x-lingfang-plugin-token".to_string(), env.token);
         let request = HttpRequest {
