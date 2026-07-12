@@ -619,3 +619,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: 内置 Windows 基础运行时
+
+**Date**: 2026-07-13
+**Task**: 内置 Windows 基础运行时
+**Branch**: `betav2`
+
+### Summary
+
+将 Node.js、Python、FFmpeg 和 Playwright Chromium 作为 Windows x64 内置运行时接入桌面开发与两条安装链；移除下载、系统探测和自定义路径，统一插件与 Agent 使用 bundled-only resolver；为满足 Gitee 100MB 单对象限制，将 chrome.dll 以普通 Git 分片提交并在开发/构建前离线还原。代码、前端和运行时校验通过；Windows 安装包生成及干净虚拟机离线 smoke test 未在 macOS 主机执行，作为归档时的已知未验证项保留。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31ecf14b` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
