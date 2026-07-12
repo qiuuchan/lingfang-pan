@@ -11,6 +11,7 @@
 - **修复 FaceFusion yoloface_8n 等模型校验失败导致启动退出（退出码 2）**：若 `.assets/models/` 里有之前（github 慢速下载 / 中断）留下的残缺 `.onnx`，其大小 >= 错误的 download_size，facefusion 就会跳过下载，直接 hash 校验失败退出。现已在启动上游前扫描所有 `.onnx`：对每个有对应 `.hash` 文件的模型做 crc32 校验，不过就删掉残缺文件强制重下。
 - **FaceFusion 启动失败自动重试**：模型下载/验证失败（退出码 2）时，自动清理残缺的 `.onnx` 和 `.hash` 文件后重新启动上游，最多重试 3 次。hf-mirror 偶发抖动（xet CDN 不稳定、签名过期）不再导致用户卡在首次启动。
 - **修复 FaceFusion 模型文件删除时 WinError 32（文件被占用）**：curl 子进程下载完成后可能未完全释放文件句柄，导致 facefusion 删除校验失败的残缺 `.onnx` 时报 `PermissionError: [WinError 32]`。已在 `download.py` 中确保 curl 进程完全退出（`wait` + `kill` 兜底）后再继续，避免文件锁竞争。
+- **FaceFusion 启动前预检导入**：在拉起上游 facefusion 子进程前，先执行 `import facefusion.core` 预检。若 venv 依赖损坏（cv2/numpy/onnxruntime 缺失或损坏）或 vendor 目录不完整，预检会打印**完整的 Python traceback**（而非被日志面板截断），并给出具体的修复建议（删除 venv 目录让平台重建）。
 
 ## v0.0.22
 
