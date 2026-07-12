@@ -1,10 +1,12 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import {
   CheckCircleIcon,
   InfoIcon,
   LogOutIcon,
+  MenuIcon,
   RefreshCwIcon,
+  SearchIcon,
   ShieldCheckIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,8 +26,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
-import { Sidebar, type SidebarNavGroup } from '@/components/sidebar';
-import { Footer } from '@/components/Footer';
+import { Sidebar, type SidebarNavGroup, type SidebarSlotContext } from '@/components/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { CommandPalette, useCommandPalette } from '@/components/command-palette';
 import { Landing } from '@/components/landing/Landing';
@@ -37,6 +38,7 @@ import { SetupWizard } from '@/components/setup-wizard';
 // 落地页四件套（Landing/LoginPage/DownloadPage/ChangelogPage）保持静态 import——
 // 它们走未登录快速路径，且 Landing 是首屏，懒加载反而增加首次可交互延迟。
 import { OnboardingWizard, ONBOARDING_DONE_KEY } from '@/components/onboarding-wizard';
+import type { GovernanceIntent } from '@/components/governance/types';
 import { NAV_GROUPS, VIEW_LABEL, VIEW_GROUP } from '@/lib/navigation';
 import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
 import { initTheme } from '@/lib/theme';
@@ -48,8 +50,7 @@ import pkg from '../package.json';
 const Dashboard = lazy(() => import('@/components/dashboard').then((m) => ({ default: m.Dashboard })));
 const UsersView = lazy(() => import('@/components/users-view').then((m) => ({ default: m.UsersView })));
 const TeamsView = lazy(() => import('@/components/teams-view').then((m) => ({ default: m.TeamsView })));
-const PluginsView = lazy(() => import('@/components/plugins-view').then((m) => ({ default: m.PluginsView })));
-const ApplicationsView = lazy(() => import('@/components/applications-view').then((m) => ({ default: m.ApplicationsView })));
+const GovernanceView = lazy(() => import('@/components/governance-view').then((m) => ({ default: m.GovernanceView })));
 const AdminsView = lazy(() => import('@/components/admins-view').then((m) => ({ default: m.AdminsView })));
 const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ default: m.AuditView })));
 const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
@@ -76,10 +77,13 @@ export default function App() {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [checking, setChecking] = useState(!!getToken());
   const [view, setView] = useState<View>('dashboard');
+  const [governanceIntent, setGovernanceIntent] = useState<GovernanceIntent>({ tab: 'plugins', nonce: 0 });
   // 未登录态的落地页视图：首页 / 登录页 / 下载页 / 更新日志页（各自独立全屏页，状态机 AJAX 切换，无路由库）。
   const [landingView, setLandingView] = useState<'home' | 'login' | 'download' | 'changelog'>('home');
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<string | null>(null);
   // 首次登录引导向导：session 建立时若本机无完成标记则弹出。
@@ -173,6 +177,18 @@ export default function App() {
     setSession(null);
   }
 
+  function navigate(nextView: View, intent?: Omit<GovernanceIntent, 'nonce'>) {
+    if (nextView === 'governance') {
+      setGovernanceIntent((current) => ({
+        tab: intent?.tab ?? 'plugins',
+        reviewStatus: intent?.reviewStatus,
+        applicationStatus: intent?.applicationStatus,
+        nonce: current.nonce + 1,
+      }));
+    }
+    setView(nextView);
+  }
+
   async function checkUpdate() {
     setCheckingUpdate(true);
     setUpdateResult(null);
@@ -200,7 +216,7 @@ export default function App() {
 
   if (checking || setupChecking) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+      <div className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground">
         检查中…
       </div>
     );
@@ -236,10 +252,9 @@ export default function App() {
   const currentLabel = VIEW_LABEL[view];
   const currentGroup = VIEW_GROUP[view];
 
-  const sidebarHeader = (
-    <div className="rounded-xl border bg-card p-3 shadow-sm">
-      <div className="flex items-center gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary text-primary-foreground">
+  const sidebarHeader = ({ compact }: SidebarSlotContext) => (
+    <div className={compact ? 'flex justify-center py-1' : 'flex items-center gap-3 px-2 py-1'}>
+      <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary text-primary-foreground">
           {/* logoUrl 有值显示图片，无值 fallback ShieldCheckIcon 默认图标。 */}
           {platformLogoUrl ? (
             <img
@@ -249,118 +264,132 @@ export default function App() {
               referrerPolicy="no-referrer"
             />
           ) : (
-            <ShieldCheckIcon className="size-5" />
+            <ShieldCheckIcon className="size-4" />
           )}
-        </div>
+      </div>
+      {!compact && (
         <div className="min-w-0">
           {/* 云同步平台名：展示后端 platformName（admin 可在「设置 → 平台信息」改名）。 */}
           <div className="truncate text-sm font-semibold">{platformName}</div>
           <div className="text-xs text-muted-foreground">Platform Admin</div>
         </div>
-      </div>
+      )}
     </div>
   );
 
-  const sidebarFooter = (
-    <div className="space-y-1">
-      <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground break-all">
-        {session.user.email}
-      </div>
+  const sidebarFooter = ({ compact }: SidebarSlotContext) => (
+    <div className="space-y-1 border-t pt-2">
+      {!compact && (
+        <div className="truncate px-3 py-1 text-xs text-muted-foreground" title={session.user.email}>
+          {session.user.email}
+        </div>
+      )}
       <button
+        type="button"
+        aria-label="退出登录"
+        title={compact ? '退出登录' : undefined}
         onClick={() => setLogoutOpen(true)}
-        className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+        className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${compact ? 'justify-center' : 'gap-3'}`}
       >
         <LogOutIcon className="size-4" />
-        退出登录
+        {!compact && '退出登录'}
       </button>
       <button
+        type="button"
+        aria-label="关于"
+        title={compact ? '关于' : undefined}
         onClick={() => setAboutOpen(true)}
-        className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${compact ? 'justify-center' : 'gap-3'}`}
       >
         <InfoIcon className="size-4" />
-        关于
+        {!compact && '关于'}
       </button>
     </div>
   );
 
   return (
     <TooltipProvider>
-      {/* 固定视口高度 + overflow-hidden：侧栏 stretch 撑满不滚动。
-          main flex-col：header（shrink-0）+ 内容滚动区（flex-1 overflow-y-auto）+ Footer（shrink-0）。
-          Footer 固定在视口底部，不随主内容滚动（与桌面端一致）。 */}
-      <div className="flex h-screen overflow-hidden bg-muted/30">
+      <div className="flex h-dvh overflow-hidden bg-background">
         <Sidebar
           groups={navGroups}
           activeView={view}
-          onSelect={(v) => setView(v as View)}
+          onSelect={(v) => navigate(v as View)}
           header={sidebarHeader}
           footer={sidebarFooter}
+          mobileOpen={mobileNavOpen}
+          onMobileOpenChange={setMobileNavOpen}
+          mobileTriggerRef={mobileNavTriggerRef}
+          showMobileTrigger={false}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden px-4 pt-14 sm:pt-8 lg:px-8 lg:pt-8">
-          {/* Header */}
-          <header className="mb-6 shrink-0 rounded-2xl border bg-background p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              {/* 面包屑：分组 / 视图，分组为可点击返回仪表盘的链接 */}
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem>
-                    <BreadcrumbLink
-                      className="cursor-pointer"
-                      onClick={() => setView('dashboard')}
-                    >
-                      {currentGroup}
-                    </BreadcrumbLink>
-                  </BreadcrumbItem>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage>{currentLabel}</BreadcrumbPage>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-              {/* Cmd+K 快捷搜索入口 */}
-              <button
-                onClick={() => commandPalette.setOpen(true)}
-                className="flex items-center gap-2 rounded-lg border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b bg-background px-4 sm:px-5 lg:px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              <Button
+                ref={mobileNavTriggerRef}
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-9 shrink-0 lg:hidden"
+                aria-label="打开导航菜单"
+                aria-expanded={mobileNavOpen}
+                onClick={() => setMobileNavOpen(true)}
               >
-                <span>快捷搜索</span>
-                <kbd className="rounded border bg-background px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
-              </button>
+                <MenuIcon className="size-4" />
+              </Button>
+              <div className="min-w-0">
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem>
+                      <BreadcrumbLink className="cursor-pointer" onClick={() => navigate('dashboard')}>
+                        {currentGroup}
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>{currentLabel}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+                <h1 className="truncate text-lg font-semibold text-foreground sm:text-xl">{currentLabel}</h1>
+              </div>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">{currentLabel}</h1>
-            <p className="text-sm text-muted-foreground">
-              平台级治理入口：账号、团队、插件、审批和审计统一在这里处理。
-            </p>
+            <button
+              type="button"
+              aria-label="打开快捷搜索"
+              onClick={() => commandPalette.setOpen(true)}
+              className="flex h-9 shrink-0 items-center gap-2 rounded-lg border bg-background px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:px-3"
+            >
+              <SearchIcon className="size-4" />
+              <span className="hidden sm:inline">快捷搜索</span>
+              <kbd className="hidden rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] md:inline">⌘K</kbd>
+            </button>
           </header>
 
-          {/* 内容滚动区：flex-1 独占滚动空间，Footer 在外层 flex-col 末尾 shrink-0 固定。 */}
-          <div className="min-h-0 flex-1 overflow-y-auto pb-8">
-            {/* Views with transition：各 View 懒加载，Suspense 用列表骨架兜底首次加载。 */}
-            <PageTransition viewKey={view}>
-              <Suspense fallback={<ListSkeleton rows={6} />}>
-                {view === 'dashboard' && <Dashboard onNavigate={setView} />}
-                {view === 'users' && <UsersView />}
-                {view === 'platformAdmins' && <AdminsView />}
-                {view === 'teams' && <TeamsView />}
-                {view === 'plugins' && <PluginsView />}
-                {view === 'applications' && <ApplicationsView />}
-                {view === 'tickets' && <TicketsView />}
-                {view === 'audit' && <AuditView />}
-                {view === 'releases' && <ReleasesView />}
-                {view === 'roles' && <RolesView />}
-                {view === 'pools' && <PoolsView />}
-                {view === 'channels' && <ChannelsView />}
-                {view === 'billing' && <BillingView />}
-                {view === 'credits' && <CreditsView />}
-                {view === 'callLogs' && <CallLogsView />}
-                {view === 'apiKeys' && <ApiKeysView />}
-                {view === 'settings' && <SettingsView />}
-              </Suspense>
-            </PageTransition>
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+            <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-5 lg:p-6">
+              <PageTransition viewKey={view}>
+                <Suspense fallback={<ListSkeleton rows={6} />}>
+                  {view === 'dashboard' && <Dashboard onNavigate={navigate} />}
+                  {view === 'users' && <UsersView />}
+                  {view === 'platformAdmins' && <AdminsView />}
+                  {view === 'teams' && <TeamsView />}
+                  {view === 'governance' && <GovernanceView key={governanceIntent.nonce} intent={governanceIntent} />}
+                  {view === 'tickets' && <TicketsView />}
+                  {view === 'audit' && <AuditView />}
+                  {view === 'releases' && <ReleasesView />}
+                  {view === 'roles' && <RolesView />}
+                  {view === 'pools' && <PoolsView />}
+                  {view === 'channels' && <ChannelsView />}
+                  {view === 'billing' && <BillingView />}
+                  {view === 'credits' && <CreditsView />}
+                  {view === 'callLogs' && <CallLogsView />}
+                  {view === 'apiKeys' && <ApiKeysView />}
+                  {view === 'settings' && <SettingsView />}
+                </Suspense>
+              </PageTransition>
+            </div>
           </div>
-
-          {/* 页脚：固定在视口底部（shrink-0），不随主内容滚动。 */}
-          <Footer />
         </main>
       </div>
 
@@ -392,7 +421,7 @@ export default function App() {
             <DialogDescription>平台管理端</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid gap-1 rounded-xl border bg-muted/20 p-3 text-sm">
+            <div className="grid gap-1 rounded-lg border bg-muted/20 p-3 text-sm">
               <div className="grid gap-1 sm:grid-cols-[80px_1fr]">
                 <span className="text-muted-foreground">版本</span>
                 <span className="font-mono text-xs text-foreground">v{pkg.version || '0.0.0'}</span>
@@ -449,7 +478,7 @@ export default function App() {
           「去完成」会跳转到对应 view 并关闭向导；「跳过」/「完成」均写入完成标记。 */}
       {onboardingOpen && (
         <OnboardingWizard
-          onNavigate={(v) => setView(v)}
+          onNavigate={(v) => navigate(v)}
           onClose={() => setOnboardingOpen(false)}
         />
       )}
@@ -459,7 +488,7 @@ export default function App() {
       <CommandPalette
         open={commandPalette.open}
         onOpenChange={commandPalette.setOpen}
-        onSelect={(v) => setView(v)}
+        onSelect={(v) => navigate(v)}
       />
     </TooltipProvider>
   );

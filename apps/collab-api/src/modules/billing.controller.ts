@@ -16,6 +16,7 @@ import {
   ChannelUpsertDto, CreditAdjustDto, PoolUpdateDto, PoolUpsertDto, PricingUpsertDto, TestChatDto, TestImageDto,
 } from './dto/billing.dto';
 import { PrismaService } from '../prisma.service';
+import { normalizeBillingPage, type BillingPageQuery } from './admin-billing-data';
 
 @ApiTags('Billing')
 @ApiBearerAuth()
@@ -35,7 +36,7 @@ export class BillingController {
   @Get('pools')
   @RequirePermission('platform.billing.channel.manage')
   @ApiOperation({ summary: '资源池列表' })
-  listPools() { return this.pools.adminList(); }
+  listPools(@Query() query: BillingPageQuery) { return this.pools.adminList(query); }
 
   @Post('pools')
   @RequirePermission('platform.billing.channel.manage')
@@ -63,9 +64,14 @@ export class BillingController {
   @Get('channels')
   @RequirePermission('platform.billing.channel.manage')
   @ApiOperation({ summary: '渠道列表（可选 kind 过滤 CHAT/IMAGE）' })
-  listChannels(@Query('kind') kind?: 'CHAT' | 'IMAGE') {
-    return this.channels.adminList(kind);
+  listChannels(@Query('kind') kind: 'CHAT' | 'IMAGE' | undefined, @Query() query: BillingPageQuery) {
+    return this.channels.adminList(kind, query);
   }
+
+  @Get('channels/:id')
+  @RequirePermission('platform.billing.channel.manage')
+  @ApiOperation({ summary: '渠道详情（按需加载接入参数和模型）' })
+  channelDetail(@Param('id') id: string) { return this.channels.adminDetail(id); }
 
   @Post('channels')
   @RequirePermission('platform.billing.channel.manage')
@@ -114,9 +120,14 @@ export class BillingController {
   @Get('pricing')
   @RequirePermission('platform.billing.pricing.manage')
   @ApiOperation({ summary: '模型定价列表' })
-  async listPricing() {
-    const rows = await this.prisma.modelPricing.findMany({ orderBy: [{ capability: 'asc' }, { model: 'asc' }] });
-    return { pricing: rows };
+  async listPricing(@Query() query: BillingPageQuery & { capability?: string; tier?: 'FAST' | 'PREMIUM' }) {
+    const { page, pageSize, skip, q } = normalizeBillingPage(query);
+    const where = { ...(query.capability ? { capability: query.capability } : {}), ...(query.tier ? { tier: query.tier } : {}), ...(q ? { OR: [{ model: { contains: q, mode: 'insensitive' as const } }, { label: { contains: q, mode: 'insensitive' as const } }] } : {}) };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.modelPricing.findMany({ where, orderBy: [{ capability: 'asc' }, { model: 'asc' }], skip, take: pageSize }),
+      this.prisma.modelPricing.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
   }
 
   @Post('pricing')
@@ -178,6 +189,19 @@ export class BillingController {
 
   // === 灵石 ===
 
+  @Get('credits/teams')
+  @RequirePermission('platform.billing.call_log.view')
+  @ApiOperation({ summary: '团队灵石余额分页摘要（只读、无账户创建副作用）' })
+  async creditTeams(@Query() query: BillingPageQuery & { status?: 'ACTIVE' | 'SUSPENDED' }) {
+    const { page, pageSize, skip, q } = normalizeBillingPage(query);
+    const where = { ...(query.status ? { status: query.status } : {}), ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' as const } }, { slug: { contains: q, mode: 'insensitive' as const } }] } : {}) };
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.team.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: pageSize, select: { id: true, name: true, slug: true, status: true, creditAccount: { select: { balance: true } }, _count: { select: { memberships: true } } } }),
+      this.prisma.team.count({ where }),
+    ]);
+    return { items: rows.map((row) => ({ id: row.id, name: row.name, slug: row.slug, status: row.status, balance: row.creditAccount?.balance ?? 0, memberCount: row._count.memberships })), total, page, pageSize };
+  }
+
   @Get('credits/teams/:teamId')
   @RequirePermission('platform.billing.call_log.view')
   @ApiOperation({ summary: '团队灵石余额' })
@@ -189,8 +213,14 @@ export class BillingController {
   @Get('credits/teams/:teamId/ledger')
   @RequirePermission('platform.billing.call_log.view')
   @ApiOperation({ summary: '团队灵石流水' })
-  async teamLedger(@Param('teamId') teamId: string) {
-    return { ledger: await this.credits.getLedger(teamId, 200) };
+  async teamLedger(@Param('teamId') teamId: string, @Query() query: BillingPageQuery) {
+    const { page, pageSize, skip } = normalizeBillingPage(query);
+    const where = { teamId };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.creditLedger.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: pageSize }),
+      this.prisma.creditLedger.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
   }
 
   @Post('credits/teams/:teamId/adjustments')
@@ -217,23 +247,39 @@ export class BillingController {
     if (q.model) where.model = q.model;
     if (q.apiKeyId) where.apiKeyId = q.apiKeyId;
     if (q.from || q.to) where.createdAt = { gte: q.from ? new Date(q.from) : undefined, lte: q.to ? new Date(q.to) : undefined };
-    const take = Math.min(200, Number(q.pageSize) || 50);
-    const rows = await this.prisma.llmCallLog.findMany({
-      where, orderBy: { createdAt: 'desc' }, take,
-      include: {
+    if (q.q) where.OR = [{ model: { contains: q.q, mode: 'insensitive' } }, { requestId: { contains: q.q, mode: 'insensitive' } }];
+    const { page, pageSize, skip } = normalizeBillingPage(q);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.llmCallLog.findMany({
+      where, orderBy: { createdAt: 'desc' }, skip, take: pageSize,
+      select: {
+        id: true, teamId: true, userId: true, apiKeyId: true, channelId: true, capability: true, tier: true, model: true,
+        inputTokens: true, outputTokens: true, images: true, durationMs: true, credits: true, status: true, httpStatus: true,
+        errorCode: true, requestId: true, createdAt: true,
         team: { select: { name: true } },
         user: { select: { email: true } },
         channel: { select: { id: true, name: true, pool: { select: { id: true, name: true } } } },
       },
-    });
+      }),
+      this.prisma.llmCallLog.count({ where }),
+    ]);
     return {
-      logs: rows.map((r) => ({
+      items: rows.map((r) => ({
         ...r,
         poolId: r.channel?.pool?.id ?? null,
         poolName: r.channel?.pool?.name ?? null,
         channelName: r.channel?.name ?? null,
-      })),
+      })), total, page, pageSize,
     };
+  }
+
+  @Get('call-logs/:id')
+  @RequirePermission('platform.billing.call_log.view')
+  @ApiOperation({ summary: '调用日志详情（含脱敏请求摘要与客户端 IP）' })
+  async callLogDetail(@Param('id') id: string) {
+    const log = await this.prisma.llmCallLog.findUnique({ where: { id }, include: { team: { select: { name: true } }, user: { select: { email: true } }, channel: { select: { id: true, name: true } } } });
+    if (!log) throw new AppError(404, 'call_log_not_found', '调用日志不存在');
+    return { log };
   }
 
   // === API Key 总览 ===
@@ -241,7 +287,7 @@ export class BillingController {
   @Get('api-keys')
   @RequirePermission('platform.billing.api_key.manage')
   @ApiOperation({ summary: '全平台 API Key 总览' })
-  adminListApiKeys() { return this.apiKeys.adminList(); }
+  adminListApiKeys(@Query() query: BillingPageQuery & { status?: string }) { return this.apiKeys.adminList(query); }
 
   @Delete('api-keys/:id')
   @RequirePermission('platform.billing.api_key.manage')

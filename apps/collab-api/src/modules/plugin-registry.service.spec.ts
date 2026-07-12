@@ -30,6 +30,9 @@ function releaseRow(version: string, id = version) {
     status: 'PUBLISHED',
     marketReviewStatus: 'PENDING',
     targetPlatform: 'windows-x64',
+    sourceKind: 'UNKNOWN',
+    sourceLabel: '',
+    ingestChannel: 'API',
     reviewReason: '',
     createdAt: now,
   };
@@ -71,6 +74,65 @@ describe('PluginRegistryService', () => {
     );
     const result = await registry.teamCatalog('user');
     expect(result.items[0]?.latestRelease.version).toBe('2.0.0');
+  });
+
+  it('projects release provenance through both team and management catalogs', async () => {
+    const externalRelease = {
+      ...releaseRow('2.0.0', 'external-release'),
+      sourceKind: 'EXTERNAL_TOOL',
+      sourceLabel: 'Cursor workspace',
+      ingestChannel: 'DESKTOP',
+    };
+    const listing = {
+      id: 'listing-1',
+      packageId: packageRow().id,
+      priceCents: 0,
+      status: 'DELISTED',
+      currentReleaseId: 'external-release',
+      delistedBy: 'OWNER',
+      delistReason: 'maintenance',
+      delistedAt: now,
+      delistedByUserId: 'owner-user',
+    };
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([packageRow([externalRelease])])
+      .mockResolvedValueOnce([{ ...packageRow([externalRelease]), governanceStatus: 'ARCHIVED', listing }]);
+    const registry = service(
+      { pluginPackage: { findMany } },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId }) },
+    );
+
+    await expect(registry.teamCatalog('owner-user')).resolves.toMatchObject({
+      items: [{
+        latestRelease: {
+          id: 'external-release',
+          sourceKind: 'EXTERNAL_TOOL',
+          sourceLabel: 'Cursor workspace',
+          ingestChannel: 'DESKTOP',
+        },
+      }],
+    });
+    await expect(registry.managementCatalog('owner-user')).resolves.toMatchObject({
+      items: [{
+        package: { governanceStatus: 'ARCHIVED' },
+        latestRelease: {
+          id: 'external-release',
+          sourceKind: 'EXTERNAL_TOOL',
+          sourceLabel: 'Cursor workspace',
+          ingestChannel: 'DESKTOP',
+        },
+        releaseCount: 1,
+        pendingReviewCount: 1,
+        listing: { status: 'DELISTED', delistedBy: 'OWNER', delistedAt: now.toISOString() },
+      }],
+    });
+    expect(findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { ownerTeamId: packageRow().ownerTeamId, governanceStatus: 'ACTIVE' },
+    }));
+    expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: { ownerTeamId: packageRow().ownerTeamId },
+      include: { releases: true, listing: true },
+    }));
   });
 
   it('denies a team runtime when the current user has an explicit deny grant', async () => {
@@ -141,27 +203,555 @@ describe('PluginRegistryService', () => {
     expect(download).not.toHaveBeenCalled();
   });
 
-  it('approval switches the marketplace listing to the reviewed release transactionally', async () => {
-    const listingUpdate = vi.fn().mockResolvedValue({});
-    const releaseUpdate = vi.fn().mockResolvedValue({ ...releaseRow('2.0.0', 'release-2'), marketReviewStatus: 'APPROVED' });
+  it('rechecks package activity, claims approval, and keeps the highest approved SemVer current', async () => {
+    const reviewed = {
+      ...releaseRow('2.9.0', 'release-reviewed'),
+      package: packageRow(),
+    };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const listingUpsert = vi.fn().mockResolvedValue({});
+    const activePackageFindUnique = vi.fn()
+      .mockResolvedValueOnce({ ...packageRow(), governanceStatus: 'ARCHIVED' })
+      .mockResolvedValueOnce(packageRow());
+    const listingFindUnique = vi.fn().mockResolvedValue(null);
     const tx = {
-      pluginRelease: { update: releaseUpdate },
-      marketplaceListing: { update: listingUpdate },
+      pluginPackage: { findUnique: activePackageFindUnique },
+      pluginRelease: {
+        updateMany,
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'release-reviewed', version: '2.9.0' },
+          { id: 'release-current', version: '10.0.0' },
+        ]),
+        findUnique: vi.fn().mockResolvedValue({ ...reviewed, marketReviewStatus: 'APPROVED' }),
+      },
+      marketplaceListing: { findUnique: listingFindUnique, upsert: listingUpsert },
       pluginReleaseReview: { create: vi.fn().mockResolvedValue({}) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
     const registry = service(
       {
-        pluginRelease: { findUnique: vi.fn().mockResolvedValue(releaseRow('2.0.0', 'release-2')) },
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(reviewed) },
         $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
       },
       { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) },
     );
-    await registry.approveRelease('admin', 'release-2');
-    expect(listingUpdate).toHaveBeenCalledWith({
-      where: { packageId: packageRow().id },
-      data: { currentReleaseId: 'release-2', status: 'ACTIVE' },
+
+    await expect(registry.approveRelease('admin', 'release-reviewed'))
+      .rejects.toMatchObject({ code: 'conflict' });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(listingUpsert).not.toHaveBeenCalled();
+    expect(tx.pluginReleaseReview.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+
+    await expect(registry.approveRelease('admin', 'release-reviewed')).resolves.toMatchObject({
+      currentReleaseId: 'release-current',
+      release: { id: 'release-reviewed', marketReviewStatus: 'APPROVED' },
     });
+    expect(activePackageFindUnique).toHaveBeenCalledTimes(2);
+    expect(activePackageFindUnique).toHaveBeenNthCalledWith(1, { where: { id: packageRow().id } });
+    expect(activePackageFindUnique).toHaveBeenNthCalledWith(2, { where: { id: packageRow().id } });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'release-reviewed', status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+      data: expect.objectContaining({ marketReviewStatus: 'APPROVED', reviewedById: 'admin' }),
+    });
+    expect(tx.pluginRelease.findMany).toHaveBeenCalledWith({
+      where: { packageId: packageRow().id, status: 'PUBLISHED', marketReviewStatus: 'APPROVED' },
+      select: { id: true, version: true },
+    });
+    expect(listingFindUnique).toHaveBeenCalledWith({ where: { packageId: packageRow().id } });
+    expect(listingUpsert).toHaveBeenCalledWith({
+      where: { packageId: packageRow().id },
+      update: {
+        currentReleaseId: 'release-current',
+        status: 'ACTIVE',
+        delistedBy: null,
+        delistReason: '',
+        delistedAt: null,
+        delistedByUserId: null,
+      },
+      create: { packageId: packageRow().id, currentReleaseId: 'release-current', status: 'ACTIVE' },
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'admin.plugin_release.approved',
+        metadata: expect.objectContaining({ currentReleaseId: 'release-current' }),
+      }),
+    });
+  });
+
+  it.each(['PLATFORM', 'OWNER'] as const)(
+    'keeps a %s delist while approval advances the stored release pointer',
+    async (delistedBy) => {
+    const reviewed = {
+      ...releaseRow('2.0.0', 'release-reviewed'),
+      package: packageRow(),
+    };
+    const suspendedListing = {
+      id: 'listing-1',
+      packageId: packageRow().id,
+      status: 'DELISTED',
+      currentReleaseId: 'release-old',
+      priceCents: 0,
+      delistedBy,
+      delistReason: 'policy review',
+      delistedAt: now,
+      delistedByUserId: 'admin-original',
+    };
+    const listingUpsert = vi.fn().mockResolvedValue({});
+    const tx = {
+      pluginPackage: { findUnique: vi.fn().mockResolvedValue(packageRow()) },
+      pluginRelease: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([{ id: 'release-reviewed', version: '2.0.0' }]),
+        findUnique: vi.fn().mockResolvedValue({ ...reviewed, marketReviewStatus: 'APPROVED' }),
+      },
+      marketplaceListing: { findUnique: vi.fn().mockResolvedValue(suspendedListing), upsert: listingUpsert },
+      pluginReleaseReview: { create: vi.fn().mockResolvedValue({}) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const registry = service(
+      {
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(reviewed) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      },
+      { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) },
+    );
+
+    await expect(registry.approveRelease('admin-next', 'release-reviewed')).resolves.toMatchObject({
+      currentReleaseId: 'release-reviewed',
+    });
+    expect(listingUpsert).toHaveBeenCalledWith({
+      where: { packageId: packageRow().id },
+      update: { currentReleaseId: 'release-reviewed' },
+      create: { packageId: packageRow().id, currentReleaseId: 'release-reviewed', status: 'ACTIVE' },
+    });
+    },
+  );
+
+  it.each([
+    ['approval', (registry: PluginRegistryService) => registry.approveRelease('admin', 'release-claim')],
+    ['rejection', (registry: PluginRegistryService) => registry.rejectRelease('admin', 'release-claim', 'invalid')],
+  ])('%s returns conflict without review or audit when the terminal-state claim is lost', async (_name, run) => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const reviewCreate = vi.fn();
+    const auditCreate = vi.fn();
+    const listingUpsert = vi.fn();
+    const tx = {
+      pluginPackage: { findUnique: vi.fn().mockResolvedValue(packageRow()) },
+      pluginRelease: { updateMany, findMany: vi.fn(), findUnique: vi.fn() },
+      marketplaceListing: { findUnique: vi.fn(), upsert: listingUpsert },
+      pluginReleaseReview: { create: reviewCreate },
+      auditLog: { create: auditCreate },
+    };
+    const registry = service(
+      {
+        pluginRelease: {
+          findUnique: vi.fn().mockResolvedValue({
+            ...releaseRow('1.0.0', 'release-claim'),
+            package: packageRow(),
+          }),
+        },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      },
+      { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) },
+    );
+
+    await expect(run(registry)).rejects.toMatchObject({ code: 'conflict' });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'release-claim', status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+    }));
+    expect(tx.pluginPackage.findUnique).toHaveBeenCalledTimes(_name === 'approval' ? 1 : 0);
+    expect(tx.pluginRelease.findMany).not.toHaveBeenCalled();
+    expect(listingUpsert).not.toHaveBeenCalled();
+    expect(reviewCreate).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks packages with pending reviews, then atomically archives and owner-delists', async () => {
+    const activeListing = {
+      id: 'listing-1',
+      packageId: packageRow().id,
+      priceCents: 0,
+      status: 'ACTIVE',
+      currentReleaseId: 'release-current',
+      delistedBy: null,
+      delistReason: '',
+      delistedAt: null,
+      delistedByUserId: null,
+    };
+    const packageUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const listingUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const auditCreate = vi.fn().mockResolvedValue({});
+    const pendingReviewCount = vi.fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0);
+    const tx = {
+      pluginRelease: { count: pendingReviewCount },
+      pluginPackage: {
+        updateMany: packageUpdateMany,
+        findUnique: vi.fn().mockResolvedValue({ ...packageRow(), governanceStatus: 'ARCHIVED' }),
+      },
+      marketplaceListing: {
+        updateMany: listingUpdateMany,
+        findUnique: vi.fn().mockResolvedValue({
+          ...activeListing,
+          status: 'DELISTED',
+          delistedBy: 'OWNER',
+          delistReason: '插件包已归档',
+          delistedAt: now,
+          delistedByUserId: 'owner-user',
+        }),
+      },
+      auditLog: { create: auditCreate },
+    };
+    const transaction = vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx));
+    const registry = service(
+      {
+        pluginPackage: { findUnique: vi.fn().mockResolvedValue({ ...packageRow(), listing: activeListing }) },
+        $transaction: transaction,
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'TEAM_ADMIN' }) },
+    );
+
+    await expect(registry.updatePackageStatus('owner-user', packageRow().id, 'ARCHIVED'))
+      .rejects.toMatchObject({ code: 'conflict' });
+    expect(packageUpdateMany).not.toHaveBeenCalled();
+    expect(listingUpdateMany).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+
+    await expect(registry.updatePackageStatus('owner-user', packageRow().id, 'ARCHIVED')).resolves.toMatchObject({
+      package: { governanceStatus: 'ARCHIVED' },
+      listing: { status: 'DELISTED', delistedBy: 'OWNER', delistReason: '插件包已归档' },
+    });
+    expect(pendingReviewCount).toHaveBeenCalledTimes(2);
+    expect(pendingReviewCount).toHaveBeenNthCalledWith(1, {
+      where: { packageId: packageRow().id, marketReviewStatus: 'PENDING' },
+    });
+    expect(pendingReviewCount).toHaveBeenNthCalledWith(2, {
+      where: { packageId: packageRow().id, marketReviewStatus: 'PENDING' },
+    });
+    expect(packageUpdateMany).toHaveBeenCalledWith({
+      where: { id: packageRow().id, governanceStatus: 'ACTIVE' },
+      data: { governanceStatus: 'ARCHIVED' },
+    });
+    expect(listingUpdateMany).toHaveBeenCalledWith({
+      where: { packageId: packageRow().id, status: 'ACTIVE' },
+      data: {
+        status: 'DELISTED',
+        delistedBy: 'OWNER',
+        delistReason: '插件包已归档',
+        delistedAt: expect.any(Date),
+        delistedByUserId: 'owner-user',
+      },
+    });
+    expect(auditCreate).toHaveBeenCalledOnce();
+    expect(transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents owners from restoring a platform delist while allowing the platform to restore it', async () => {
+    const platformListing = {
+      id: 'listing-1',
+      packageId: packageRow().id,
+      priceCents: 0,
+      status: 'DELISTED',
+      currentReleaseId: 'release-current',
+      delistedBy: 'PLATFORM',
+      delistReason: 'policy review',
+      delistedAt: now,
+      delistedByUserId: 'admin',
+    };
+    const ownerTx = {
+      marketplaceListing: { findUnique: vi.fn().mockResolvedValue(platformListing), updateMany: vi.fn() },
+      pluginPackage: { findUnique: vi.fn() },
+      pluginRelease: { findUnique: vi.fn() },
+      auditLog: { create: vi.fn() },
+    };
+    const ownerRegistry = service(
+      {
+        pluginPackage: { findUnique: vi.fn().mockResolvedValue({ ...packageRow(), listing: platformListing }) },
+        $transaction: vi.fn(async (callback: (client: typeof ownerTx) => unknown) => callback(ownerTx)),
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'TEAM_ADMIN' }) },
+    );
+
+    await expect(ownerRegistry.updateOwnerMarketplaceStatus('owner-user', packageRow().id, 'ACTIVE', 'resume'))
+      .rejects.toMatchObject({ code: 'conflict' });
+    expect(ownerTx.marketplaceListing.updateMany).not.toHaveBeenCalled();
+    expect(ownerTx.auditLog.create).not.toHaveBeenCalled();
+
+    const activeListing = {
+      ...platformListing,
+      status: 'ACTIVE',
+      delistedBy: null,
+      delistReason: '',
+      delistedAt: null,
+      delistedByUserId: null,
+    };
+    const listingFindUnique = vi.fn()
+      .mockResolvedValueOnce(platformListing)
+      .mockResolvedValueOnce(activeListing);
+    const platformUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const platformAuditCreate = vi.fn().mockResolvedValue({});
+    const platformTx = {
+      marketplaceListing: { findUnique: listingFindUnique, updateMany: platformUpdateMany },
+      pluginPackage: { findUnique: vi.fn().mockResolvedValue(packageRow()) },
+      pluginRelease: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...releaseRow('2.0.0', 'release-current'),
+          marketReviewStatus: 'APPROVED',
+        }),
+      },
+      auditLog: { create: platformAuditCreate },
+    };
+    const platformRegistry = service(
+      {
+        pluginPackage: { findUnique: vi.fn().mockResolvedValue(packageRow()) },
+        $transaction: vi.fn(async (callback: (client: typeof platformTx) => unknown) => callback(platformTx)),
+      },
+      { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) },
+    );
+
+    await expect(platformRegistry.updatePlatformMarketplaceStatus('admin', packageRow().id, 'ACTIVE', 'cleared'))
+      .resolves.toMatchObject({ listing: { status: 'ACTIVE', delistedBy: null } });
+    expect(platformUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'listing-1', status: 'DELISTED', delistedBy: 'PLATFORM' },
+      data: {
+        status: 'ACTIVE',
+        delistedBy: null,
+        delistReason: '',
+        delistedAt: null,
+        delistedByUserId: null,
+      },
+    });
+    expect(platformAuditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: 'admin.plugin_package.relisted' }),
+    });
+  });
+
+  it('rejects release-based delist for a non-current marketplace release', async () => {
+    const transaction = vi.fn();
+    const registry = service(
+      {
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(releaseRow('1.0.0', 'release-old')) },
+        marketplaceListing: {
+          findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', currentReleaseId: 'release-current' }),
+        },
+        $transaction: transaction,
+      },
+      { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) },
+    );
+
+    await expect(registry.delistRelease('admin', 'release-old', 'policy'))
+      .rejects.toMatchObject({ code: 'conflict' });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not delist after approval concurrently switches the marketplace current release', async () => {
+    const listingUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const tx = {
+      marketplaceListing: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'listing-1',
+          status: 'ACTIVE',
+          currentReleaseId: 'release-new',
+        }),
+        updateMany: listingUpdateMany,
+      },
+      auditLog: { create: vi.fn() },
+    };
+    const registry = service(
+      {
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(releaseRow('1.0.0', 'release-old')) },
+        marketplaceListing: {
+          findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', currentReleaseId: 'release-old' }),
+        },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      },
+      { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) },
+    );
+
+    await expect(registry.delistRelease('admin', 'release-old', 'policy'))
+      .rejects.toMatchObject({ code: 'conflict' });
+    expect(listingUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'listing-1', status: 'ACTIVE', currentReleaseId: 'release-old' },
+      data: expect.objectContaining({ status: 'DELISTED', delistedBy: 'PLATFORM' }),
+    });
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('withdraws a pending marketplace submission back to draft with review history and audit', async () => {
+    const release = {
+      ...releaseRow('1.0.0', 'release-withdraw'),
+      package: packageRow(),
+    };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const reviewCreate = vi.fn().mockResolvedValue({});
+    const auditCreate = vi.fn().mockResolvedValue({});
+    const tx = {
+      pluginRelease: {
+        updateMany,
+        findUnique: vi.fn().mockResolvedValue({
+          ...releaseRow('1.0.0', 'release-withdraw'),
+          marketReviewStatus: 'DRAFT',
+          reviewReason: 'author changed scope',
+        }),
+      },
+      pluginReleaseReview: { create: reviewCreate },
+      auditLog: { create: auditCreate },
+    };
+    const registry = service(
+      {
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(release) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'TEAM_ADMIN' }) },
+    );
+
+    await expect(registry.withdrawMarketplaceSubmission('owner-user', 'release-withdraw', '  author changed scope  '))
+      .resolves.toMatchObject({ release: { marketReviewStatus: 'DRAFT', reviewReason: 'author changed scope' } });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'release-withdraw', status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+      data: {
+        marketReviewStatus: 'DRAFT',
+        reviewReason: 'author changed scope',
+        reviewedById: null,
+        reviewedAt: null,
+      },
+    });
+    expect(reviewCreate).toHaveBeenCalledWith({
+      data: { releaseId: 'release-withdraw', status: 'DRAFT', reason: 'author changed scope' },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: 'plugin.release.marketplace_withdrawn' }),
+    });
+  });
+
+  it.each([
+    { label: 'pending non-current', marketReviewStatus: 'PENDING', currentReleaseId: 'release-current', delistCount: 0, resetsReview: true },
+    { label: 'approved marketplace current', marketReviewStatus: 'APPROVED', currentReleaseId: 'release-yank', delistCount: 1, resetsReview: false },
+  ])('yanks a $label release without violating review or listing invariants', async ({ marketReviewStatus, currentReleaseId, delistCount, resetsReview }) => {
+    const activeListing = {
+      id: 'listing-1',
+      packageId: packageRow().id,
+      priceCents: 0,
+      status: 'ACTIVE',
+      currentReleaseId,
+      delistedBy: null,
+      delistReason: '',
+      delistedAt: null,
+      delistedByUserId: null,
+    };
+    const release = {
+      ...releaseRow('1.0.0', 'release-yank'),
+      marketReviewStatus,
+      package: { ...packageRow(), listing: activeListing },
+    };
+    const releaseUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const listingUpdateMany = vi.fn().mockResolvedValue({ count: delistCount });
+    const reviewCreate = vi.fn().mockResolvedValue({});
+    const finalListing = delistCount === 1
+      ? {
+          ...activeListing,
+          status: 'DELISTED',
+          delistedBy: 'OWNER',
+          delistReason: '作者撤回发行版',
+          delistedAt: now,
+          delistedByUserId: 'owner-user',
+        }
+      : activeListing;
+    const tx = {
+      pluginRelease: {
+        updateMany: releaseUpdateMany,
+        findUnique: vi.fn().mockResolvedValue({
+          ...releaseRow('1.0.0', 'release-yank'),
+          status: 'YANKED',
+          marketReviewStatus: resetsReview ? 'DRAFT' : marketReviewStatus,
+          reviewReason: resetsReview ? '作者撤回发行版' : '',
+        }),
+      },
+      marketplaceListing: {
+        updateMany: listingUpdateMany,
+        findUnique: vi.fn().mockResolvedValue(finalListing),
+      },
+      pluginReleaseReview: { create: reviewCreate },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const registry = service(
+      {
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(release) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'TEAM_ADMIN' }) },
+    );
+
+    await expect(registry.updateReleaseStatus('owner-user', 'release-yank', 'YANKED')).resolves.toMatchObject({
+      release: {
+        status: 'YANKED',
+        marketReviewStatus: resetsReview ? 'DRAFT' : marketReviewStatus,
+      },
+      listing: { status: delistCount === 1 ? 'DELISTED' : 'ACTIVE' },
+    });
+    expect(releaseUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'release-yank', status: 'PUBLISHED', marketReviewStatus },
+      data: resetsReview
+        ? {
+            status: 'YANKED',
+            marketReviewStatus: 'DRAFT',
+            reviewReason: '作者撤回发行版',
+            reviewedById: null,
+            reviewedAt: null,
+          }
+        : { status: 'YANKED' },
+    });
+    expect(listingUpdateMany).toHaveBeenCalledWith({
+      where: { packageId: packageRow().id, currentReleaseId: 'release-yank', status: 'ACTIVE' },
+      data: {
+        status: 'DELISTED',
+        delistedBy: 'OWNER',
+        delistReason: '作者撤回发行版',
+        delistedAt: expect.any(Date),
+        delistedByUserId: 'owner-user',
+      },
+    });
+    if (resetsReview) {
+      expect(reviewCreate).toHaveBeenCalledWith({
+        data: { releaseId: 'release-yank', status: 'DRAFT', reason: '作者撤回发行版' },
+      });
+    } else {
+      expect(reviewCreate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not yank across a concurrent marketplace submission', async () => {
+    const release = {
+      ...releaseRow('1.0.0', 'release-race'),
+      marketReviewStatus: 'DRAFT',
+      package: { ...packageRow(), listing: null },
+    };
+    const releaseUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const tx = {
+      pluginRelease: { updateMany: releaseUpdateMany },
+      marketplaceListing: { updateMany: vi.fn(), findUnique: vi.fn() },
+      pluginReleaseReview: { create: vi.fn() },
+      auditLog: { create: vi.fn() },
+    };
+    const registry = service(
+      {
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(release) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'TEAM_ADMIN' }) },
+    );
+
+    await expect(registry.updateReleaseStatus('owner-user', 'release-race', 'YANKED'))
+      .rejects.toMatchObject({ code: 'conflict' });
+    expect(releaseUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'release-race', status: 'PUBLISHED', marketReviewStatus: 'DRAFT' },
+      data: { status: 'YANKED' },
+    });
+    expect(tx.marketplaceListing.updateMany).not.toHaveBeenCalled();
+    expect(tx.pluginReleaseReview.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('creates a paid package order, balanced ledgers, audit, and entitlement in one transaction', async () => {

@@ -25,8 +25,7 @@ pub fn deploy_to(install_dir: &Path) -> Result<usize> {
     }
 
     // 1) 自解压 app 文件到安装目录。
-    let count = sfx::extract_payload(&self_exe, install_dir)
-        .context("自解压 app 文件失败")?;
+    let count = sfx::extract_payload(&self_exe, install_dir).context("自解压 app 文件失败")?;
 
     // 2) 确保安装目录有 updater.exe。payload 内通常已含 updater.exe（= installer 副本）；
     //    若 payload 未含（防御），则复制本 exe 过去。但本 exe 含 payload 尾部，复制后体积偏大——
@@ -44,7 +43,9 @@ pub fn deploy_to(install_dir: &Path) -> Result<usize> {
 pub fn dir_size_kb(dir: &Path) -> u32 {
     fn walk(dir: &Path) -> u64 {
         let mut total = 0u64;
-        let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return 0;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {

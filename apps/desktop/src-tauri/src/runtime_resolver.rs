@@ -5,29 +5,25 @@
 //!
 //! ## 「应用一定用自己管理的运行时」三条不变式
 //!
-//! 1. `resolve_runtime_command()` 永不查系统 PATH，只查 Legacy 内置兜底（exe 同级 runtimes/）。
+//! 1. `resolve_runtime_command()` 永不查系统 PATH，只查配置中的用户指定与应用管理目录。
 //! 2. `env()` 清空宿主 PATH（`retain` 掉 key==PATH），只注入命中来源的 PATH ——
 //!    子进程内部 `subprocess.run("python")` / `child_process.exec("node")` 也只能命中应用管理的解释器。
 //! 3. `require_runtime_command()` 找不到返回结构化错误，前端引导用户检查安装包完整性。
 //!
 //! ## 解析优先级
 //!
-//! `resolve(kind)` 顺序：
-//! 1. Legacy 内置目录（exe 同级 runtimes/ / `LINGFANG_EMBEDDED_RUNTIME_DIR` / dev 源码路径）→ Legacy
-//! 2. 都没有 → `None`（安装包损坏，引导重装）
+//! `resolve(kind)` 顺序：UserSpecified → AppManaged → None。
 //!
 //! ## 目录布局约定
 //!
 //! `python_dir` / `node_dir` **直接含主 exe**（`python.exe` / `node.exe` 在该目录下）。
-//! Legacy 内置 `runtimes/python/` 和 `runtimes/nodejs/` 正好直接含 exe，无需布局转换。
+//! 配置中的目录直接包含主 exe；非 Windows 平台使用常规 `bin/` 布局。
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use tauri::Manager;
-
 use crate::mirror_presets::{extract_host, resolve_npm_url, resolve_pip_url, MirrorConfig};
-use crate::runtime_config::{RuntimeConfig, RuntimeConfigStore};
+use crate::runtime_config::{runtime_executable_dir, RuntimeConfig, RuntimeConfigStore};
 
 /// Playwright 浏览器二进制下载镜像（国内加速，固定 npmmirror CDN）。
 ///
@@ -39,8 +35,8 @@ pub(crate) const PLAYWRIGHT_DOWNLOAD_HOST: &str = "https://cdn.npmmirror.com/bin
 /// 运行时来源（供 UI 状态展示 + 日志）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RuntimeSource {
-    /// exe 同级 runtimes/ 或 dev 源码路径内置（0.0.18 唯一来源）。
-    Legacy,
+    AppManaged,
+    UserSpecified,
 }
 
 /// 单个运行时的解析结果（dir + 来源）。
@@ -78,17 +74,17 @@ impl RuntimeResolver {
         })
     }
 
-    /// 测试构造：直接指定 python_dir / node_dir（标 Legacy 来源）。
+    /// 测试构造：直接指定 python_dir / node_dir（标 AppManaged 来源）。
     /// 用 None 表示该运行时未配置，供 env()/require_* 的缺失路径测试。
     #[cfg(test)]
     pub(crate) fn from_dirs(python_dir: Option<PathBuf>, node_dir: Option<PathBuf>) -> Self {
         let python = python_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::Legacy,
+            source: RuntimeSource::AppManaged,
         });
         let node = node_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::Legacy,
+            source: RuntimeSource::AppManaged,
         });
         Self {
             python,
@@ -107,11 +103,11 @@ impl RuntimeResolver {
     ) -> Self {
         let python = python_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::Legacy,
+            source: RuntimeSource::AppManaged,
         });
         let node = node_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::Legacy,
+            source: RuntimeSource::AppManaged,
         });
         Self {
             python,
@@ -121,13 +117,13 @@ impl RuntimeResolver {
         }
     }
 
-    /// 测试构造：指定 ffmpeg_dir（标 Legacy 来源）。python/node 默认 None，
+    /// 测试构造：指定 ffmpeg_dir（标 AppManaged 来源）。python/node 默认 None，
     /// 专用于 ffmpeg 进 PATH 的测试。
     #[cfg(test)]
     pub(crate) fn from_dirs_with_ffmpeg(ffmpeg_dir: Option<PathBuf>) -> Self {
         let ffmpeg = ffmpeg_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::Legacy,
+            source: RuntimeSource::AppManaged,
         });
         Self {
             python: None,
@@ -305,85 +301,48 @@ impl RuntimeResolver {
 
 // === 解析逻辑 ===
 
-/// 解析 Python：仅 legacy 兜底。
-fn resolve_python<R: tauri::Runtime>(
-    _config: &RuntimeConfig,
-    app: &tauri::AppHandle<R>,
-) -> Option<ResolvedRuntime> {
-    if let Some(root) = legacy_runtimes_root(app) {
-        let dir = root.join("python");
-        if python_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::Legacy,
-            });
-        }
-    }
-    None
+/// 解析 Python：用户显式指定优先，其次应用管理版本。
+fn resolve_python<R: tauri::Runtime>(config: &RuntimeConfig, _app: &tauri::AppHandle<R>) -> Option<ResolvedRuntime> {
+    resolve_configured(
+        config.user_specified_python.as_deref(),
+        config.app_managed_python.as_ref().map(|entry| entry.dir.as_str()),
+        python_exe,
+    )
 }
 
-/// 解析 Node：仅 legacy 兜底。
-fn resolve_node<R: tauri::Runtime>(
-    _config: &RuntimeConfig,
-    app: &tauri::AppHandle<R>,
-) -> Option<ResolvedRuntime> {
-    if let Some(root) = legacy_runtimes_root(app) {
-        let dir = root.join("nodejs");
-        if node_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::Legacy,
-            });
-        }
-    }
-    None
+/// 解析 Node：用户显式指定优先，其次应用管理版本。
+fn resolve_node<R: tauri::Runtime>(config: &RuntimeConfig, _app: &tauri::AppHandle<R>) -> Option<ResolvedRuntime> {
+    resolve_configured(
+        config.user_specified_node.as_deref(),
+        config.app_managed_node.as_ref().map(|entry| entry.dir.as_str()),
+        node_exe,
+    )
 }
 
-/// 解析 FFmpeg：仅 legacy 兜底（runtimes/ffmpeg/ffmpeg.exe）。
-/// 与 python/nodejs 同构，作为第三内置运行时。缺失时返回 None（不阻断插件启动，
-/// 仅 shutil.which("ffmpeg") 找不到——插件自行降级或报缺 ffmpeg）。
+/// FFmpeg 不属于本任务的按需运行时，未配置时返回 None。
 fn resolve_ffmpeg<R: tauri::Runtime>(
     _config: &RuntimeConfig,
-    app: &tauri::AppHandle<R>,
+    _app: &tauri::AppHandle<R>,
 ) -> Option<ResolvedRuntime> {
-    if let Some(root) = legacy_runtimes_root(app) {
-        let dir = root.join("ffmpeg");
-        if ffmpeg_exe(&dir).is_file() {
-            return Some(ResolvedRuntime {
-                dir,
-                source: RuntimeSource::Legacy,
-            });
-        }
-    }
     None
 }
 
-/// 内置 runtimes 根目录（0.0.18 唯一来源）。
-///
-/// 来源优先级：`LINGFANG_EMBEDDED_RUNTIME_DIR` 环境变量 → exe 同级 runtimes/（发布安装包布局）
-/// → dev 源码路径（CARGO_MANIFEST_DIR/../runtimes）。
-fn legacy_runtimes_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
-    if let Some(override_dir) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR") {
-        let root = PathBuf::from(override_dir);
-        if root.join("python").join(python_exe_name()).is_file()
-            || root.join("nodejs").join(node_exe_name()).is_file()
-            || root.join("ffmpeg").join(ffmpeg_exe_name()).is_file()
-        {
-            return Some(root);
+fn resolve_configured(
+    user_path: Option<&str>,
+    managed_path: Option<&str>,
+    executable: fn(&Path) -> PathBuf,
+) -> Option<ResolvedRuntime> {
+    for (path, source) in [
+        (user_path, RuntimeSource::UserSpecified),
+        (managed_path, RuntimeSource::AppManaged),
+    ] {
+        let Some(path) = path else { continue };
+        let dir = runtime_executable_dir(Path::new(path));
+        if executable(&dir).is_file() {
+            return Some(ResolvedRuntime { dir, source });
         }
     }
-    if let Some(d) = exe_sibling_runtimes_dir() {
-        return Some(d);
-    }
-    if let Some(d) = dev_runtimes_dir() {
-        return Some(d);
-    }
-    // 兜底：Tauri 标准 resource_dir/runtimes（Tauri bundle 安装时有效，本应用一般不走，保留作最后尝试）。
-    app.path()
-        .resource_dir()
-        .ok()
-        .map(|d| d.join("runtimes"))
-        .filter(|d| d.is_dir())
+    None
 }
 
 // === exe 路径辅助（跨平台） ===
@@ -407,39 +366,12 @@ fn node_exe(dir: &Path) -> PathBuf {
 }
 
 #[cfg(windows)]
-fn python_exe_name() -> &'static str {
-    "python.exe"
-}
-#[cfg(not(windows))]
-fn python_exe_name() -> &'static str {
-    "python"
-}
-
-#[cfg(windows)]
-fn node_exe_name() -> &'static str {
-    "node.exe"
-}
-#[cfg(not(windows))]
-fn node_exe_name() -> &'static str {
-    "node"
-}
-
-#[cfg(windows)]
 fn ffmpeg_exe(dir: &Path) -> PathBuf {
     dir.join("ffmpeg.exe")
 }
 #[cfg(not(windows))]
 fn ffmpeg_exe(dir: &Path) -> PathBuf {
     dir.join("bin").join("ffmpeg")
-}
-
-#[cfg(windows)]
-fn ffmpeg_exe_name() -> &'static str {
-    "ffmpeg.exe"
-}
-#[cfg(not(windows))]
-fn ffmpeg_exe_name() -> &'static str {
-    "ffmpeg"
 }
 
 fn pip_exe(dir: &Path) -> Option<PathBuf> {
@@ -505,48 +437,6 @@ fn push_if_dir(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-/// 自制安装器布局：exe 同级目录下的 runtimes/（最可靠的 legacy 来源）。
-///
-/// build-installer.ps1 把 runtimes/ 与 lingfang-desktop.exe 一起复制到 staging 根目录，
-/// 安装后布局为 `<install_dir>/lingfang-desktop.exe` + `<install_dir>/runtimes/`。
-fn exe_sibling_runtimes_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let runtimes = dir.join("runtimes");
-    // 仅当 runtimes 目录下确实有 python/node/ffmpeg 二进制时才认定命中，避免误判空目录。
-    let has_runtime = windows_unix(
-        runtimes.join("python").join("python.exe"),
-        runtimes.join("python").join("bin").join("python"),
-    )
-    .into_iter()
-    .chain(windows_unix(
-        runtimes.join("nodejs").join("node.exe"),
-        runtimes.join("nodejs").join("bin").join("node"),
-    ))
-    .chain(windows_unix(
-        runtimes.join("ffmpeg").join("ffmpeg.exe"),
-        runtimes.join("ffmpeg").join("bin").join("ffmpeg"),
-    ))
-    .any(|p| p.is_file());
-    has_runtime.then_some(runtimes)
-}
-
-/// dev 源码路径：CARGO_MANIFEST_DIR/../runtimes（开发态，生产不存在）。
-fn dev_runtimes_dir() -> Option<PathBuf> {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .join("runtimes");
-    d.exists().then_some(d)
-}
-
-#[cfg(windows)]
-fn windows_unix(windows: PathBuf, _unix: PathBuf) -> Vec<PathBuf> {
-    vec![windows]
-}
-#[cfg(not(windows))]
-fn windows_unix(_windows: PathBuf, unix: PathBuf) -> Vec<PathBuf> {
-    vec![unix]
-}
 #[cfg(windows)]
 fn windows_unix_many(windows: Vec<PathBuf>, _unix: Vec<PathBuf>) -> Vec<PathBuf> {
     windows
@@ -641,10 +531,24 @@ mod tests {
 
     #[test]
     fn resolve_prefers_user_specified_over_app_managed() {
-        // 简化版：仅 Legacy 来源，测试占位（验证编译不破坏）。
-        let config = RuntimeConfig::default();
-        let _r = RuntimeResolver::from_dirs_with_config(None, None, config);
-        assert!(_r.python_source().is_none() || _r.python_source().is_some());
+        let root = std::env::temp_dir().join(format!("lf-runtime-resolver-{}", uuid::Uuid::new_v4()));
+        let user = root.join("user");
+        let managed = root.join("managed");
+        #[cfg(windows)]
+        let relative = PathBuf::from("python.exe");
+        #[cfg(not(windows))]
+        let relative = PathBuf::from("bin/python");
+        std::fs::create_dir_all(user.join(relative.parent().unwrap_or(Path::new("")))).unwrap();
+        std::fs::create_dir_all(managed.join(relative.parent().unwrap_or(Path::new("")))).unwrap();
+        std::fs::write(user.join(&relative), b"fake").unwrap();
+        std::fs::write(managed.join(&relative), b"fake").unwrap();
+        let resolved = resolve_configured(
+            Some(user.to_string_lossy().as_ref()),
+            Some(managed.to_string_lossy().as_ref()),
+            python_exe,
+        ).unwrap();
+        assert_eq!(resolved.source, RuntimeSource::UserSpecified);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     // === ffmpeg 内置运行时（第三运行时）测试 ===

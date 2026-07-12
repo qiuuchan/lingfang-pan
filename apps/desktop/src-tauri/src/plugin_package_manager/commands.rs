@@ -5,9 +5,9 @@ use crate::plugin_llm_bridge::PluginLlmBridge;
 use crate::plugin_runner::{self, PluginProcessTable, StartPluginResult};
 
 use super::{
-    CreateWorkspaceInput, DependencyStatus, DraftWorkspace, InstallArtifactInput,
-    InstallationOrigin, InstalledPluginPayload, LocalInstallation, PackWorkspaceResult,
-    PluginPackageManager,
+    CreateWorkspaceInput, DependencyStatus, DraftWorkspace, DraftWorkspaceFilePayload,
+    InstallArtifactInput, InstallationOrigin, InstalledPluginPayload, LocalInstallation,
+    PackWorkspaceResult, PluginPackageManager, PluginReleaseSourceKind,
 };
 
 #[tauri::command]
@@ -152,6 +152,14 @@ pub(crate) fn list_draft_workspaces(
 }
 
 #[tauri::command]
+pub(crate) fn read_draft_workspace_files(
+    manager: tauri::State<'_, PluginPackageManager>,
+    workspace_id: String,
+) -> Result<Vec<DraftWorkspaceFilePayload>, String> {
+    manager.read_workspace_files(&workspace_id)
+}
+
+#[tauri::command]
 pub(crate) fn create_draft_workspace(
     manager: tauri::State<'_, PluginPackageManager>,
     input: CreateWorkspaceInput,
@@ -208,8 +216,10 @@ pub(crate) fn sync_draft_workspace_metadata(
     manager: tauri::State<'_, PluginPackageManager>,
     workspace_id: String,
     conversation_id: Option<String>,
+    source_kind: Option<PluginReleaseSourceKind>,
+    source_label: Option<String>,
 ) -> Result<DraftWorkspace, String> {
-    manager.sync_workspace_metadata(&workspace_id, conversation_id)
+    manager.sync_workspace_metadata(&workspace_id, conversation_id, source_kind, source_label)
 }
 
 #[tauri::command]

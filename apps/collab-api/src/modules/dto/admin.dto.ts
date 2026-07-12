@@ -1,7 +1,113 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, IsEmail, MinLength } from 'class-validator';
+import { ApplicationStatus } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
+import { IsEmail, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { BALANCE_DIRECTION, PLATFORM_ROLE, PLUGIN_STATUS, PLUGIN_VISIBILITY, TEAM_ROLE, TEAM_STATUS, USER_STATUS } from './enums';
+
+export const ADMIN_SORT_ORDER = ['asc', 'desc'] as const;
+export const ADMIN_USER_SORT = ['createdAt', 'updatedAt', 'email', 'displayName'] as const;
+export const ADMIN_TEAM_SORT = ['createdAt', 'updatedAt', 'name', 'balanceCents'] as const;
+
+/** Shared bounded pagination query for admin read models. */
+export class AdminPageQueryDto {
+  @ApiPropertyOptional({ description: '页码（从 1 开始，默认 1）', example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'page 必须是整数' })
+  @Min(1, { message: 'page 至少为 1' })
+  page?: number;
+
+  @ApiPropertyOptional({ description: '每页条数（1-100，默认 20）', example: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'pageSize 必须是整数' })
+  @Min(1, { message: 'pageSize 至少为 1' })
+  @Max(100, { message: 'pageSize 最多为 100' })
+  pageSize?: number;
+}
+
+/** GET /api/admin/users list query. */
+export class AdminUsersQueryDto extends AdminPageQueryDto {
+  @ApiPropertyOptional({ description: '邮箱或展示名称关键词' })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
+
+  @ApiPropertyOptional({ description: '用户状态', enum: USER_STATUS })
+  @IsOptional()
+  @IsEnum(USER_STATUS, { message: 'status 只允许 ACTIVE 或 DISABLED' })
+  status?: (typeof USER_STATUS)[number];
+
+  @ApiPropertyOptional({ description: '平台角色', enum: PLATFORM_ROLE })
+  @IsOptional()
+  @IsEnum(PLATFORM_ROLE, { message: 'platformRole 只允许 NONE 或 PLATFORM_ADMIN' })
+  platformRole?: (typeof PLATFORM_ROLE)[number];
+
+  @ApiPropertyOptional({ description: '排序字段', enum: ADMIN_USER_SORT })
+  @IsOptional()
+  @IsEnum(ADMIN_USER_SORT, { message: 'sort 字段不受支持' })
+  sort?: (typeof ADMIN_USER_SORT)[number];
+
+  @ApiPropertyOptional({ description: '排序方向', enum: ADMIN_SORT_ORDER })
+  @IsOptional()
+  @IsEnum(ADMIN_SORT_ORDER, { message: 'order 只允许 asc 或 desc' })
+  order?: (typeof ADMIN_SORT_ORDER)[number];
+}
+
+/** GET /api/admin/users/options bounded selector query. */
+export class AdminUserOptionsQueryDto {
+  @ApiPropertyOptional({ description: '邮箱或展示名称关键词' })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
+
+  @ApiPropertyOptional({ description: '最大返回条数（1-50，默认 20）', example: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'limit 必须是整数' })
+  @Min(1, { message: 'limit 至少为 1' })
+  @Max(50, { message: 'limit 最多为 50' })
+  limit?: number;
+}
+
+/** GET /api/admin/teams list query. */
+export class AdminTeamsQueryDto extends AdminPageQueryDto {
+  @ApiPropertyOptional({ description: '团队名称或 slug 关键词' })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
+
+  @ApiPropertyOptional({ description: '团队状态', enum: TEAM_STATUS })
+  @IsOptional()
+  @IsEnum(TEAM_STATUS, { message: 'status 只允许 ACTIVE 或 SUSPENDED' })
+  status?: (typeof TEAM_STATUS)[number];
+
+  @ApiPropertyOptional({ description: '排序字段', enum: ADMIN_TEAM_SORT })
+  @IsOptional()
+  @IsEnum(ADMIN_TEAM_SORT, { message: 'sort 字段不受支持' })
+  sort?: (typeof ADMIN_TEAM_SORT)[number];
+
+  @ApiPropertyOptional({ description: '排序方向', enum: ADMIN_SORT_ORDER })
+  @IsOptional()
+  @IsEnum(ADMIN_SORT_ORDER, { message: 'order 只允许 asc 或 desc' })
+  order?: (typeof ADMIN_SORT_ORDER)[number];
+}
+
+/** Team members support a DB-side user search; other team tabs use AdminPageQueryDto. */
+export class AdminTeamMembersQueryDto extends AdminPageQueryDto {
+  @ApiPropertyOptional({ description: '成员邮箱或展示名称关键词' })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
+}
 
 /** 管理端创建用户请求体 DTO。 */
 export class AdminCreateUserDto {
@@ -181,12 +287,43 @@ export class AdminUpdatePluginDto {
   visibility?: (typeof PLUGIN_VISIBILITY)[number];
 }
 
-/** 驳回团队管理员申请请求体 DTO。reason 可选。 */
-export class AdminRejectApplicationDto {
-  @ApiPropertyOptional({ description: '驳回原因' })
+/** GET /api/admin/team-admin-applications 查询参数。 */
+export class AdminApplicationsQueryDto {
+  @ApiPropertyOptional({ description: '页码（从 1 开始，默认 1）', example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'page 必须是整数' })
+  @Min(1, { message: 'page 至少为 1' })
+  page?: number;
+
+  @ApiPropertyOptional({ description: '每页条数（1-100，默认 20）', example: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'pageSize 必须是整数' })
+  @Min(1, { message: 'pageSize 至少为 1' })
+  @Max(100, { message: 'pageSize 最多为 100' })
+  pageSize?: number;
+
+  @ApiPropertyOptional({ description: '团队名、申请人邮箱或展示名称关键词' })
   @IsOptional()
   @IsString()
-  reason?: string;
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
+
+  @ApiPropertyOptional({ description: '申请状态', enum: ApplicationStatus })
+  @IsOptional()
+  @IsEnum(ApplicationStatus, { message: 'status 只允许 PENDING、APPROVED 或 REJECTED' })
+  status?: ApplicationStatus;
+}
+
+/** 驳回团队管理员申请请求体 DTO。 */
+export class AdminRejectApplicationDto {
+  @ApiProperty({ description: '驳回原因（1-500 字）' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MinLength(1, { message: '驳回原因不能为空' })
+  @MaxLength(500, { message: '驳回原因最多为 500 字' })
+  reason!: string;
 }
 
 /** 调整团队成员角色请求体 DTO。
@@ -228,7 +365,7 @@ export class AdminPlatformRoleDto {
  *  actorId / targetType：精确过滤。全部可选。 */
 export const AUDIT_CATEGORY = ['auth', 'team', 'plugin', 'marketplace', 'wallet', 'llm', 'admin', 'system'] as const;
 
-export class AdminAuditLogsQueryDto {
+export class AdminAuditLogsQueryDto extends AdminPageQueryDto {
   @ApiPropertyOptional({ description: '分类筛选', enum: AUDIT_CATEGORY })
   @IsOptional()
   @IsEnum(AUDIT_CATEGORY, { message: 'category 只允许 auth/team/plugin/marketplace/wallet/llm/admin/system' })
@@ -236,7 +373,9 @@ export class AdminAuditLogsQueryDto {
 
   @ApiPropertyOptional({ description: '关键词搜索（action / actor email / targetId）' })
   @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
 
   @ApiPropertyOptional({ description: '操作者用户 ID（精确过滤）' })
@@ -247,5 +386,6 @@ export class AdminAuditLogsQueryDto {
   @ApiPropertyOptional({ description: '对象类型（精确过滤，如 User/Team/Plugin）' })
   @IsOptional()
   @IsString()
+  @MaxLength(100, { message: 'targetType 最多为 100 字' })
   targetType?: string;
 }

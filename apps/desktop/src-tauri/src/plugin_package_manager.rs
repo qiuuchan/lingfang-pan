@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,8 +12,8 @@ use uuid::Uuid;
 
 use crate::builtin_plugin_index::parse_builtin_index;
 use crate::plugin_artifact_v4::{
-    extract_artifact, inspect_artifact, package_workspace, sha256_bytes, sha256_file,
-    InspectedArtifact,
+    collect_workspace_source_files, extract_artifact, inspect_artifact, package_workspace,
+    sha256_bytes, sha256_file, InspectedArtifact,
 };
 use crate::plugin_store::{read_json, write_json, PluginStore};
 
@@ -95,6 +96,112 @@ pub(crate) enum DraftDiagnosticStatus {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum PluginReleaseSourceKind {
+    LingfangCreator,
+    ExternalTool,
+    LocalArtifact,
+    CopiedInstallation,
+    Api,
+    LegacyMigration,
+    #[default]
+    Unknown,
+}
+
+impl PluginReleaseSourceKind {
+    pub(crate) fn as_header_value(self) -> &'static str {
+        match self {
+            Self::LingfangCreator => "LINGFANG_CREATOR",
+            Self::ExternalTool => "EXTERNAL_TOOL",
+            Self::LocalArtifact => "LOCAL_ARTIFACT",
+            Self::CopiedInstallation => "COPIED_INSTALLATION",
+            Self::Api => "API",
+            Self::LegacyMigration => "LEGACY_MIGRATION",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    fn default_label(self) -> &'static str {
+        match self {
+            Self::LingfangCreator => "灵枋创建器",
+            Self::ExternalTool => "外部开发工具",
+            Self::LocalArtifact => "本地 .lfplugin 制品",
+            Self::CopiedInstallation => "已安装插件副本",
+            Self::Api => "API",
+            Self::LegacyMigration => "旧版迁移",
+            Self::Unknown => "来源未知",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseProvenance {
+    pub source_kind: PluginReleaseSourceKind,
+    pub source_label: String,
+}
+
+fn source_label_contains_absolute_path(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("file://") || value.contains("\\\\") {
+        return true;
+    }
+    let chars: Vec<char> = value.chars().collect();
+    for index in 0..chars.len() {
+        let previous_is_boundary = index == 0
+            || chars[index - 1].is_whitespace()
+            || matches!(chars[index - 1], '(' | '[' | '{' | '"' | '\'' | '=' | ':');
+        if chars[index] == '~'
+            && previous_is_boundary
+            && chars
+                .get(index + 1)
+                .is_some_and(|next| matches!(next, '/' | '\\'))
+        {
+            return true;
+        }
+        if chars[index].is_ascii_alphabetic()
+            && previous_is_boundary
+            && chars.get(index + 1) == Some(&':')
+            && chars
+                .get(index + 2)
+                .is_some_and(|next| matches!(next, '/' | '\\'))
+        {
+            return true;
+        }
+        if chars[index] == '/'
+            && previous_is_boundary
+            && chars
+                .get(index + 1)
+                .is_some_and(|next| !next.is_whitespace() && *next != '/')
+        {
+            return true;
+        }
+    }
+    false
+}
+
+pub(crate) fn normalize_release_provenance(
+    source_kind: PluginReleaseSourceKind,
+    source_label: Option<&str>,
+) -> Result<ReleaseProvenance, String> {
+    let candidate = source_label.unwrap_or_default().trim();
+    let candidate = if candidate.is_empty() || source_label_contains_absolute_path(candidate) {
+        source_kind.default_label()
+    } else {
+        candidate
+    };
+    if candidate.chars().any(char::is_control) {
+        return Err("插件来源标签不能包含控制字符".to_string());
+    }
+    if candidate.chars().count() > 80 {
+        return Err("插件来源标签不能超过 80 个字符".to_string());
+    }
+    Ok(ReleaseProvenance {
+        source_kind,
+        source_label: candidate.to_string(),
+    })
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DraftWorkspace {
@@ -104,6 +211,10 @@ pub(crate) struct DraftWorkspace {
     pub manifest_id: String,
     pub current_version: String,
     pub runtime: String,
+    #[serde(default)]
+    pub source_kind: PluginReleaseSourceKind,
+    #[serde(default)]
+    pub source_label: String,
     pub conversation_id: Option<String>,
     pub diagnostic_status: DraftDiagnosticStatus,
     pub content_sha256: Option<String>,
@@ -170,6 +281,10 @@ pub(crate) struct CreateWorkspaceInput {
     pub version: String,
     pub runtime: String,
     pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<PluginReleaseSourceKind>,
+    #[serde(default)]
+    pub source_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -205,6 +320,31 @@ pub(crate) struct PublishWorkspaceInput {
     pub auth_token: String,
     pub workspace_id: String,
     pub package_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<PluginReleaseSourceKind>,
+    #[serde(default)]
+    pub source_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublishLocalArtifactInput {
+    pub api_base: String,
+    pub auth_token: String,
+    pub artifact_path: String,
+    pub package_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<PluginReleaseSourceKind>,
+    #[serde(default)]
+    pub source_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DraftWorkspaceFilePayload {
+    pub path: String,
+    pub content: String,
+    pub binary: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -559,6 +699,10 @@ impl PluginPackageManager {
                     .get("runtime_type")
                     .and_then(Value::as_str)
                     .unwrap_or("client")
+                    .to_string(),
+                source_kind: PluginReleaseSourceKind::LegacyMigration,
+                source_label: PluginReleaseSourceKind::LegacyMigration
+                    .default_label()
                     .to_string(),
                 conversation_id: None,
                 diagnostic_status: DraftDiagnosticStatus::Idle,
@@ -1133,6 +1277,39 @@ impl PluginPackageManager {
         workspaces
     }
 
+    pub(crate) fn workspace(&self, workspace_id: &str) -> Result<DraftWorkspace, String> {
+        self.read_workspaces()
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .ok_or_else(|| "草稿工作区不存在".to_string())
+    }
+
+    pub(crate) fn read_workspace_files(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<DraftWorkspaceFilePayload>, String> {
+        let workspace = self.workspace(workspace_id)?;
+        let mut payloads = Vec::new();
+        for (relative, path) in collect_workspace_source_files(Path::new(&workspace.path))? {
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("读取草稿文件 {relative} 失败：{error}"))?;
+            match String::from_utf8(bytes) {
+                Ok(content) => payloads.push(DraftWorkspaceFilePayload {
+                    path: relative,
+                    content,
+                    binary: false,
+                }),
+                Err(error) => payloads.push(DraftWorkspaceFilePayload {
+                    path: relative,
+                    content: general_purpose::STANDARD.encode(error.into_bytes()),
+                    binary: true,
+                }),
+            }
+        }
+        Ok(payloads)
+    }
+
     pub(crate) fn create_workspace(
         &self,
         input: CreateWorkspaceInput,
@@ -1151,6 +1328,12 @@ impl PluginPackageManager {
         ) {
             return Err("草稿 runtime 不受支持".to_string());
         }
+        let provenance = normalize_release_provenance(
+            input
+                .source_kind
+                .unwrap_or(PluginReleaseSourceKind::LingfangCreator),
+            input.source_label.as_deref(),
+        )?;
         let workspace_id = Uuid::new_v4().to_string();
         let path = self.workspaces_root().join(&workspace_id);
         fs::create_dir_all(&path).map_err(|error| format!("创建草稿工作区失败：{error}"))?;
@@ -1190,6 +1373,8 @@ impl PluginPackageManager {
             manifest_id: manifest_id.to_string(),
             current_version: input.version,
             runtime: input.runtime,
+            source_kind: provenance.source_kind,
+            source_label: provenance.source_label,
             conversation_id: input.conversation_id,
             diagnostic_status: DraftDiagnosticStatus::Idle,
             content_sha256: None,
@@ -1207,7 +1392,11 @@ impl PluginPackageManager {
         Ok(workspace)
     }
 
-    pub(crate) fn import_workspace(&self, artifact_path: &Path) -> Result<DraftWorkspace, String> {
+    fn import_workspace_with_provenance(
+        &self,
+        artifact_path: &Path,
+        provenance: ReleaseProvenance,
+    ) -> Result<DraftWorkspace, String> {
         let inspected = inspect_artifact(artifact_path)?;
         let manifest_id = inspected
             .manifest
@@ -1241,6 +1430,8 @@ impl PluginPackageManager {
             manifest_id: manifest_id.to_string(),
             current_version: version.to_string(),
             runtime: runtime.to_string(),
+            source_kind: provenance.source_kind,
+            source_label: provenance.source_label,
             conversation_id: None,
             diagnostic_status: DraftDiagnosticStatus::Idle,
             // content_sha256 records the last published artifact, not the import source.
@@ -1259,6 +1450,12 @@ impl PluginPackageManager {
         Ok(workspace)
     }
 
+    pub(crate) fn import_workspace(&self, artifact_path: &Path) -> Result<DraftWorkspace, String> {
+        let provenance =
+            normalize_release_provenance(PluginReleaseSourceKind::LocalArtifact, None)?;
+        self.import_workspace_with_provenance(artifact_path, provenance)
+    }
+
     pub(crate) fn copy_installation_to_workspace(
         &self,
         installation_id: &str,
@@ -1270,7 +1467,9 @@ impl PluginPackageManager {
             Uuid::new_v4()
         ));
         package_workspace(Path::new(&installation.active_release.path), &artifact_path)?;
-        let result = self.import_workspace(&artifact_path);
+        let provenance =
+            normalize_release_provenance(PluginReleaseSourceKind::CopiedInstallation, None)?;
+        let result = self.import_workspace_with_provenance(&artifact_path, provenance);
         let _ = fs::remove_file(artifact_path);
         result
     }
@@ -1280,12 +1479,7 @@ impl PluginPackageManager {
         workspace_id: &str,
         output_path: Option<&Path>,
     ) -> Result<PackWorkspaceResult, String> {
-        let workspace = self
-            .read_workspaces()
-            .workspaces
-            .into_iter()
-            .find(|workspace| workspace.workspace_id == workspace_id)
-            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        let workspace = self.workspace(workspace_id)?;
         let output = output_path.map(Path::to_path_buf).unwrap_or_else(|| {
             self.cache_root()
                 .join(format!("workspace-{workspace_id}.lfplugin"))
@@ -1303,12 +1497,7 @@ impl PluginPackageManager {
         version: &str,
         content_sha256: &str,
     ) -> Result<(), String> {
-        let workspace = self
-            .read_workspaces()
-            .workspaces
-            .into_iter()
-            .find(|workspace| workspace.workspace_id == workspace_id)
-            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        let workspace = self.workspace(workspace_id)?;
         if workspace.last_published_version.as_deref() == Some(version) {
             return Err("版本号未提升，不能重复发布".to_string());
         }
@@ -1403,6 +1592,8 @@ impl PluginPackageManager {
         &self,
         workspace_id: &str,
         conversation_id: Option<String>,
+        source_kind: Option<PluginReleaseSourceKind>,
+        source_label: Option<String>,
     ) -> Result<DraftWorkspace, String> {
         let _guard = lock_or_recover(&self.file_lock);
         let mut ledger = self.read_workspaces();
@@ -1436,6 +1627,18 @@ impl PluginPackageManager {
             .to_string();
         if conversation_id.is_some() {
             workspace.conversation_id = conversation_id;
+        }
+        if source_kind.is_some() || source_label.is_some() {
+            let kind = source_kind.unwrap_or(workspace.source_kind);
+            let existing_label = workspace.source_label.clone();
+            let label = match source_label.as_deref() {
+                Some(label) => Some(label),
+                None if source_kind.is_none() => Some(existing_label.as_str()),
+                None => None,
+            };
+            let provenance = normalize_release_provenance(kind, label)?;
+            workspace.source_kind = provenance.source_kind;
+            workspace.source_label = provenance.source_label;
         }
         workspace.updated_at = Utc::now().to_rfc3339();
         let result = workspace.clone();

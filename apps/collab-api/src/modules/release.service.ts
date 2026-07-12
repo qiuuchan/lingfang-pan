@@ -17,12 +17,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { createWriteStream, mkdirSync } from 'node:fs';
-import type { Release, ReleaseAsset } from '@prisma/client';
+import type { Prisma, Release, ReleaseAsset } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AppError, badRequest, notFound } from '../common';
 import { AuthService } from './auth.service';
 import type {
   ReleaseAssetCreateDto,
+  AdminReleaseListQueryDto,
   ReleaseCreateDto,
   ReleaseLatestQueryDto,
   ReleaseListQueryDto,
@@ -83,17 +84,64 @@ export class ReleaseService {
     return { release: this.publicRelease(release, release.assets) };
   }
 
-  /** GET /api/admin/releases：Admin 版本列表（含 DRAFT/PUBLISHED/ARCHIVED 全部状态）。
-   *  与公开 list 的差异：不过滤 status（admin 需管理 DRAFT/ARCHIVED）、含 assets、按 updatedAt desc。
-   *  channel 可选过滤；ensurePlatformAdmin 与其他 admin 写方法一致（首行校验）。 */
-  async listAdmin(actorId: string, channel?: 'STABLE' | 'BETA') {
+  /** GET /api/admin/releases：Admin 版本摘要分页，不返回 notes/assets。 */
+  async listAdmin(
+    actorId: string,
+    query: AdminReleaseListQueryDto | 'STABLE' | 'BETA' = {},
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const releases = await this.prisma.release.findMany({
-      where: channel ? { channel } : undefined,
-      orderBy: { updatedAt: 'desc' },
+    const filters: AdminReleaseListQueryDto = typeof query === 'string' ? { channel: query } : query;
+    const page = Math.max(1, Math.floor(filters.page ?? 1));
+    const pageSize = Math.min(100, Math.max(1, Math.floor(filters.pageSize ?? 20)));
+    const where: Prisma.ReleaseWhereInput = {};
+    if (filters.channel) where.channel = filters.channel;
+    if (filters.status) where.status = filters.status;
+    const keyword = filters.q?.trim();
+    if (keyword) {
+      where.OR = [
+        { version: { contains: keyword, mode: 'insensitive' } },
+        { title: { contains: keyword, mode: 'insensitive' } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.release.findMany({
+        where,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          version: true,
+          channel: true,
+          status: true,
+          title: true,
+          isLatest: true,
+          publishedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: { select: { assets: true } },
+        },
+      }),
+      this.prisma.release.count({ where }),
+    ]);
+    return {
+      items: items.map((release) => this.adminReleaseSummary(release)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  /** GET /api/admin/releases/:id：按打开对象加载完整说明与产物。 */
+  async getAdmin(actorId: string, id: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const release = await this.prisma.release.findUnique({
+      where: { id },
       include: { assets: { orderBy: [{ platform: 'asc' }, { arch: 'asc' }] } },
     });
-    return { releases: releases.map((r) => this.adminReleaseWithAssets(r, r.assets)) };
+    if (!release) throw notFound('版本不存在');
+    return { release: this.adminReleaseWithAssets(release, release.assets) };
   }
 
   // === 平台 Admin 写方法 ===
@@ -357,11 +405,37 @@ export class ReleaseService {
     };
   }
 
-  /** Admin 列表出参：在 adminRelease 基础上保留产物，供管理页按 status 渲染操作按钮。 */
+  /** Admin 详情出参：在核心字段基础上按需附带产物。 */
   private adminReleaseWithAssets(release: Release, assets: ReleaseAsset[]) {
     return {
       ...this.adminRelease(release),
       assets: assets.map((a) => this.publicAsset(a)),
+    };
+  }
+
+  private adminReleaseSummary(release: {
+    id: string;
+    version: string;
+    channel: string;
+    status: string;
+    title: string;
+    isLatest: boolean;
+    publishedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    _count: { assets: number };
+  }) {
+    return {
+      id: release.id,
+      version: release.version,
+      channel: release.channel,
+      status: release.status,
+      title: release.title,
+      isLatest: release.isLatest,
+      publishedAt: release.publishedAt ? release.publishedAt.toISOString() : null,
+      createdAt: release.createdAt.toISOString(),
+      updatedAt: release.updatedAt.toISOString(),
+      assetCount: release._count.assets,
     };
   }
 

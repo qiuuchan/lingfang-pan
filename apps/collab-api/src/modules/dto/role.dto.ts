@@ -1,9 +1,34 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 /** 角色编码格式：小写字母/数字开头，允许小写字母、数字、下划线、连字符，1-64 字符。 */
 const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/** Bounded role list query used by platform admin and managed-team role views. */
+export class RoleListQueryDto {
+  @ApiPropertyOptional({ description: '页码（从 1 开始，默认 1）', example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'page 必须是整数' })
+  @Min(1, { message: 'page 至少为 1' })
+  page?: number;
+
+  @ApiPropertyOptional({ description: '每页条数（1-100，默认 20）', example: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'pageSize 必须是整数' })
+  @Min(1, { message: 'pageSize 至少为 1' })
+  @Max(100, { message: 'pageSize 最多为 100' })
+  pageSize?: number;
+
+  @ApiPropertyOptional({ description: '角色名称、编码或描述关键词' })
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(200, { message: 'q 最多为 200 字' })
+  q?: string;
+}
 
 /** 创建角色请求体 DTO。permissions 为权限码数组（必须来自注册表白名单，service 层校验）。 */
 export class CreateRoleDto {

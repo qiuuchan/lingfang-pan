@@ -54,6 +54,7 @@ import {
   type Turn,
 } from '@/lib/plugin-creator/creator-session';
 import { fetchContextWindow } from '@/lib/relay-models';
+import { readWorkspaceFiles } from '@/lib/plugin-registry';
 
 // 历史还原改用 turnsToMessages（原生 function calling，见 agent/history.ts）。
 // 旧的 partsToAgentMessageParts 文本化方案已删除（betav2 阶段3）。
@@ -86,8 +87,8 @@ function defaultEntryForRuntime(runtime: StagedPlugin['runtime_type']) {
   return 'ui/index.html';
 }
 
-function normalizeLoadedRuntime(runtime: LoadedPlugin['runtime_type']): StagedPlugin['runtime_type'] {
-  return runtime === 'python' || runtime === 'nodejs' ? runtime : 'client';
+export function normalizeLoadedRuntime(runtime: LoadedPlugin['runtime_type']): StagedPlugin['runtime_type'] {
+  return runtime === 'cloud' || runtime === 'python' || runtime === 'nodejs' ? runtime : 'client';
 }
 
 function recordFromMaybeJson(value: unknown): Record<string, unknown> {
@@ -140,8 +141,8 @@ function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
   });
 }
 
-function stagedPluginFromLoadedPlugin(plugin: LoadedPlugin, files = plugin.files ?? []): StagedPlugin {
-  const manifestFile = files.find((file) => file.path === 'manifest.json');
+export function stagedPluginFromLoadedPlugin(plugin: LoadedPlugin, files = plugin.files ?? []): StagedPlugin {
+  const manifestFile = files.find((file) => file.path === 'manifest.json' && !file.binary);
   const fileManifest = recordFromMaybeJson(manifestFile?.content);
   const pluginManifest = recordFromMaybeJson(plugin.manifest);
   const manifest = { ...pluginManifest, ...fileManifest };
@@ -160,7 +161,15 @@ function stagedPluginFromLoadedPlugin(plugin: LoadedPlugin, files = plugin.files
     visibility: manifest.visibility === 'private' ? 'private' : 'tenant',
     capabilities: normalizeCapabilities(manifest.capabilities ?? plugin.capabilities),
     files,
+    sourceKind: plugin._meta?.sourceKind,
+    sourceLabel: plugin._meta?.sourceLabel,
   });
+}
+
+export function referencedPluginPrompt(plugin: LoadedPlugin | null): string {
+  const textFiles = plugin?.files?.filter((file) => !file.binary) ?? [];
+  if (!plugin || textFiles.length === 0) return '';
+  return `\n\n# 参考插件（用户要基于此修改）\n插件名：${plugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${textFiles.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}`;
 }
 
 function joinDisplayPath(root: string | null, pluginId: string | null) {
@@ -258,14 +267,8 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
   async function refreshDraftFromRoot(pluginId = currentPluginIdRef.current): Promise<boolean> {
     if (!pluginId) return false;
     try {
-      const paths = await tauriInvoke<string[]>('list_plugin_files', { pluginId });
-      const files = await Promise.all(
-        paths.map(async (path) => ({
-          path,
-          content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }),
-        })),
-      );
-      const manifestRaw = files.find((f) => f.path === 'manifest.json')?.content ?? '{}';
+      const files = await readWorkspaceFiles(pluginId);
+      const manifestRaw = files.find((f) => f.path === 'manifest.json' && !f.binary)?.content ?? '{}';
       const manifest = JSON.parse(manifestRaw) as Partial<StagedPlugin> & { id?: string };
       const runtime = normalizeLoadedRuntime(manifest.runtime_type);
       const next: StagedPlugin = withSyncedStagedManifest({
@@ -278,6 +281,8 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
         visibility: manifest.visibility || 'tenant',
         capabilities: normalizeCapabilities(manifest.capabilities),
         files,
+        sourceKind: draftRef.current?.sourceKind,
+        sourceLabel: draftRef.current?.sourceLabel,
       });
       draftRef.current = next;
       currentPluginIdRef.current = pluginId;
@@ -554,9 +559,7 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
     const basePrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
     const modePrompt = creatorModePrompt(creatorMode);
     const thinkPrompt = `\n\n# 深度思考\n请先拆解需求、权衡实现方案，再生成严谨完整的代码；保证边界处理与可验证性。`;
-    const refPrompt = referencedPlugin?.files?.length
-      ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
-      : '';
+    const refPrompt = referencedPluginPrompt(referencedPlugin);
     const draftPrompt = draft?.files?.length
       ? `\n\n# 当前草稿（用户正在编辑）\n` +
         `插件名：${draft.name}\n版本：${draft.version}\n运行时：${draft.runtime_type}\n入口：${draft.entry}\n描述：${draft.description || '无'}\n` +
@@ -710,7 +713,7 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
     void bindPluginWorkspace(draft, { showToast: false });
     // 恢复草稿到右侧面板（若 draft.files 存在且含 manifest 信息）。
     if (draft.files && draft.files.length > 0) {
-      setStagedDraft(stagedPluginFromLoadedPlugin(draft, draft.files.map(f => ({ path: f.path, content: f.content }))));
+      setStagedDraft(stagedPluginFromLoadedPlugin(draft, draft.files));
       setUserEdits({});
     }
     setPendingDraftEdit(null);

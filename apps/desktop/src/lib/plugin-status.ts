@@ -337,6 +337,38 @@ export function writePluginFileBytes(pluginId: string, path: string, contentBase
 }
 
 /**
+ * Tagged workspace file payload returned by the desktop workspace reader.
+ * Text content is UTF-8; binary content is standard base64 and must never be
+ * passed through a text writer.
+ */
+export interface LocalPluginFilePayload {
+  path: string;
+  content: string;
+  binary: boolean;
+}
+
+/** Read a draft workspace without losing non-UTF-8 files. */
+export function readWorkspaceFiles(workspaceId: string): Promise<LocalPluginFilePayload[]> {
+  return tauriInvoke<LocalPluginFilePayload[]>('read_draft_workspace_files', { workspaceId });
+}
+
+/**
+ * Persist a mixed text/binary workspace file set. The Rust text batch command
+ * deliberately remains text-only; binary entries take the byte command so
+ * PNGs, fonts, and other assets retain their exact bytes.
+ */
+export async function writeWorkspaceFiles(
+  workspaceId: string,
+  files: Array<{ path: string; content: string; binary?: boolean }>,
+): Promise<void> {
+  const textFiles = files.filter((file) => !file.binary).map(({ path, content }) => ({ path, content }));
+  if (textFiles.length) await writePluginFiles(workspaceId, textFiles);
+  for (const file of files) {
+    if (file.binary) await writePluginFileBytes(workspaceId, file.path, file.content);
+  }
+}
+
+/**
  * 删除插件目录下的单个文件。
  * path 白名单 + canonicalize 前缀断言防穿越（Rust 侧 delete_plugin_file）。
  * 文件不存在返回错误（让调用方感知）；不允许删除目录（目录级删除走 deletePlugin）。

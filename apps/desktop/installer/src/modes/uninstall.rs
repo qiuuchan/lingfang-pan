@@ -118,14 +118,22 @@ impl UninstallApp {
         theme::logo(ui, &self.logo, 96.0);
         ui.add_space(10.0);
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(paths::DISPLAY_NAME).size(22.0).color(theme::TEXT));
+            ui.label(
+                egui::RichText::new(paths::DISPLAY_NAME)
+                    .size(22.0)
+                    .color(theme::TEXT),
+            );
         });
 
         ui.add_space(28.0);
         // 卸载原因（单选）。
         ui.horizontal(|ui| {
             ui.add_space(24.0);
-            ui.label(egui::RichText::new("卸载原因：").size(14.0).color(theme::TEXT_MUTED));
+            ui.label(
+                egui::RichText::new("卸载原因：")
+                    .size(14.0)
+                    .color(theme::TEXT_MUTED),
+            );
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -139,7 +147,11 @@ impl UninstallApp {
         ui.add_space(18.0);
         ui.horizontal(|ui| {
             ui.add_space(24.0);
-            ui.label(egui::RichText::new("意见反馈（可选）：").size(14.0).color(theme::TEXT_MUTED));
+            ui.label(
+                egui::RichText::new("意见反馈（可选）：")
+                    .size(14.0)
+                    .color(theme::TEXT_MUTED),
+            );
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -175,7 +187,11 @@ impl UninstallApp {
         theme::status_title(ui, true, "已卸载完成", 22.0);
         ui.vertical_centered(|ui| {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("感谢使用，期待再次相见。").size(13.0).color(theme::TEXT_MUTED));
+            ui.label(
+                egui::RichText::new("感谢使用，期待再次相见。")
+                    .size(13.0)
+                    .color(theme::TEXT_MUTED),
+            );
         });
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {

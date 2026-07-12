@@ -1,19 +1,22 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-export function Button({
+export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'default' | 'outline' | 'ghost' | 'destructive';
+  size?: 'default' | 'sm' | 'icon';
+};
+
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button({
   className,
   variant = 'default',
   size = 'default',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'default' | 'outline' | 'ghost' | 'destructive';
-  size?: 'default' | 'sm' | 'icon';
-}) {
+}, ref) {
   return (
     <button
+      ref={ref}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium leading-none shadow-sm transition-colors disabled:pointer-events-none disabled:opacity-50 whitespace-nowrap',
+        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg text-sm font-medium leading-none shadow-sm transition-colors disabled:pointer-events-none disabled:opacity-50',
         size === 'default' && 'min-h-10 px-4 py-2',
         size === 'sm' && 'h-8 px-3 py-1 text-xs',
         size === 'icon' && 'size-10',
@@ -26,4 +29,4 @@ export function Button({
       {...props}
     />
   );
-}
+});

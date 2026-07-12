@@ -7,18 +7,24 @@ import { RequirePermission } from './auth.decorators';
 import { AdminService } from './admin.service';
 import {
   AdminAdjustBalanceDto,
+  AdminApplicationsQueryDto,
   AdminAuditLogsQueryDto,
   AdminCreateTeamDto,
   AdminCreateUserDto,
+  AdminPageQueryDto,
   AdminPlatformRoleDto,
   AdminRejectApplicationDto,
   AdminSetTeamAdminDto,
+  AdminTeamMembersQueryDto,
+  AdminTeamsQueryDto,
   AdminUpdateMemberRoleDto,
   AdminUpdateTeamDto,
   AdminUpdateTeamStatusDto,
   AdminUpdateUserDto,
+  AdminUserOptionsQueryDto,
+  AdminUsersQueryDto,
 } from './dto/admin.dto';
-import { ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
+import { AdminReleaseListQueryDto, ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
 import { RevealSecretDto, UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
 import { ReleaseService } from './release.service';
 import { SettingsService } from './settings.service';
@@ -57,8 +63,15 @@ export class AdminController {
   @RequirePermission('platform.user.list')
   @Get('users')
   @ApiOperation({ summary: '用户列表' })
-  users(@Req() req: Request) {
-    return this.admin.adminUsers(requireUser(req).id);
+  users(@Req() req: Request, @Query() query: AdminUsersQueryDto) {
+    return this.admin.adminUsers(requireUser(req).id, query);
+  }
+
+  @RequirePermission('platform.user.list')
+  @Get('users/options')
+  @ApiOperation({ summary: '用户选择器候选项（有界、按需加载）' })
+  userOptions(@Req() req: Request, @Query() query: AdminUserOptionsQueryDto) {
+    return this.admin.adminUserOptions(requireUser(req).id, query);
   }
 
   @RequirePermission('platform.user.create')
@@ -84,9 +97,30 @@ export class AdminController {
 
   @RequirePermission('platform.user.list')
   @Get('users/:id/detail')
-  @ApiOperation({ summary: '用户详情（登录历史 + 钱包 + 团队 memberships + 钱包流水）' })
+  @ApiOperation({ summary: '用户概览详情' })
   userDetail(@Req() req: Request, @Param('id') id: string) {
     return this.admin.adminUserDetail(requireUser(req).id, id);
+  }
+
+  @RequirePermission('platform.user.list')
+  @Get('users/:id/logins')
+  @ApiOperation({ summary: '用户登录历史（分页）' })
+  userLogins(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminUserLogins(requireUser(req).id, id, query);
+  }
+
+  @RequirePermission('platform.user.list')
+  @Get('users/:id/teams')
+  @ApiOperation({ summary: '用户团队关系（分页）' })
+  userTeams(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminUserTeams(requireUser(req).id, id, query);
+  }
+
+  @RequirePermission('platform.user.list')
+  @Get('users/:id/wallet')
+  @ApiOperation({ summary: '用户钱包流水（分页）' })
+  userWallet(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminUserWallet(requireUser(req).id, id, query);
   }
 
   @RequirePermission('platform.user.reset_password')
@@ -106,8 +140,8 @@ export class AdminController {
   @RequirePermission('platform.team.list')
   @Get('teams')
   @ApiOperation({ summary: '团队列表' })
-  teams(@Req() req: Request) {
-    return this.admin.adminTeams(requireUser(req).id);
+  teams(@Req() req: Request, @Query() query: AdminTeamsQueryDto) {
+    return this.admin.adminTeams(requireUser(req).id, query);
   }
 
   @RequirePermission('platform.team.create')
@@ -155,8 +189,8 @@ export class AdminController {
   @RequirePermission('platform.team.list')
   @Get('teams/:id/members')
   @ApiOperation({ summary: '团队成员列表（含 role/status/joinedAt）' })
-  teamMembers(@Req() req: Request, @Param('id') id: string) {
-    return this.admin.adminTeamMembers(requireUser(req).id, id);
+  teamMembers(@Req() req: Request, @Param('id') id: string, @Query() query: AdminTeamMembersQueryDto) {
+    return this.admin.adminTeamMembers(requireUser(req).id, id, query);
   }
 
   @RequirePermission('platform.team.member.role')
@@ -175,9 +209,30 @@ export class AdminController {
 
   @RequirePermission('platform.team.list')
   @Get('teams/:id/detail')
-  @ApiOperation({ summary: '团队详情（成员数 + 插件数 + 购买记录 + 余额流水摘要）' })
+  @ApiOperation({ summary: '团队概览详情与聚合计数' })
   teamDetail(@Req() req: Request, @Param('id') id: string) {
     return this.admin.adminTeamDetail(requireUser(req).id, id);
+  }
+
+  @RequirePermission('platform.team.list')
+  @Get('teams/:id/plugins')
+  @ApiOperation({ summary: '团队插件列表（分页）' })
+  teamPlugins(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminTeamPlugins(requireUser(req).id, id, query);
+  }
+
+  @RequirePermission('platform.team.list')
+  @Get('teams/:id/purchases')
+  @ApiOperation({ summary: '团队购买记录（分页）' })
+  teamPurchases(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminTeamPurchases(requireUser(req).id, id, query);
+  }
+
+  @RequirePermission('platform.team.list')
+  @Get('teams/:id/ledger')
+  @ApiOperation({ summary: '团队余额流水（分页）' })
+  teamLedger(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminTeamLedger(requireUser(req).id, id, query);
   }
 
   @RequirePermission('platform.plugin.list_all')
@@ -246,8 +301,15 @@ export class AdminController {
   @RequirePermission('platform.application.review')
   @Get('team-admin-applications')
   @ApiOperation({ summary: '团队管理员申请列表' })
-  applications(@Req() req: Request) {
-    return this.admin.adminApplications(requireUser(req).id);
+  applications(@Req() req: Request, @Query() query: AdminApplicationsQueryDto) {
+    return this.admin.adminApplications(requireUser(req).id, query);
+  }
+
+  @RequirePermission('platform.application.review')
+  @Get('team-admin-applications/:id')
+  @ApiOperation({ summary: '团队管理员申请详情' })
+  application(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.adminApplication(requireUser(req).id, id);
   }
 
   @RequirePermission('platform.application.review')
@@ -272,6 +334,13 @@ export class AdminController {
   }
 
   @RequirePermission('platform.audit.view')
+  @Get('audit-logs/:id')
+  @ApiOperation({ summary: '审计日志详情（含 metadata）' })
+  auditLog(@Req() req: Request, @Param('id') id: string) {
+    return this.admin.auditLog(requireUser(req).id, id);
+  }
+
+  @RequirePermission('platform.audit.view')
   @Get('audit-categories')
   @ApiOperation({ summary: '审计分类元数据（key + 中文 + 说明，供前端筛选下拉）' })
   auditCategories(@Req() req: Request) {
@@ -281,8 +350,8 @@ export class AdminController {
   @RequirePermission('platform.audit.view')
   @Get('admins/:id/activity')
   @ApiOperation({ summary: '管理员操作记录（actorUserId 维度的审计日志）' })
-  adminActivity(@Req() req: Request, @Param('id') id: string) {
-    return this.admin.adminActivity(requireUser(req).id, id);
+  adminActivity(@Req() req: Request, @Param('id') id: string, @Query() query: AdminPageQueryDto) {
+    return this.admin.adminActivity(requireUser(req).id, id, query);
   }
 
   // 旧 LLM provider 目录（/admin/llm-providers）已随 BYOK 移除：渠道管理迁移至
@@ -292,9 +361,16 @@ export class AdminController {
 
   @RequirePermission('platform.release.manage')
   @Get('releases')
-  @ApiOperation({ summary: '版本列表（含 DRAFT/PUBLISHED/ARCHIVED 全部状态，Admin）' })
-  listReleases(@Req() req: Request, @Query('channel') channel?: 'STABLE' | 'BETA') {
-    return this.releases.listAdmin(requireUser(req).id, channel);
+  @ApiOperation({ summary: '版本摘要列表（分页，Admin）' })
+  listReleases(@Req() req: Request, @Query() query: AdminReleaseListQueryDto) {
+    return this.releases.listAdmin(requireUser(req).id, query);
+  }
+
+  @RequirePermission('platform.release.manage')
+  @Get('releases/:id')
+  @ApiOperation({ summary: '版本详情（含说明与产物）' })
+  getRelease(@Req() req: Request, @Param('id') id: string) {
+    return this.releases.getAdmin(requireUser(req).id, id);
   }
 
   @RequirePermission('platform.release.manage')

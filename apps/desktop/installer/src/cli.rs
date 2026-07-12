@@ -29,12 +29,18 @@ pub enum Mode {
 /// 从 argv（不含程序名）解析模式。解析失败返回 Err(说明)。
 pub fn parse_args(args: &[String]) -> Result<Mode, String> {
     // 第一个非 -- 前缀的 token 视为子命令；缺省为 install。
-    let sub = args.iter().find(|a| !a.starts_with("--")).map(|s| s.as_str());
+    let sub = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(|s| s.as_str());
 
     let target = flag_value(args, "--target");
     let setup = flag_value(args, "--setup");
     let wait_pid = flag_value(args, "--wait-pid")
-        .map(|v| v.parse::<u32>().map_err(|_| format!("--wait-pid 非法：{v}")))
+        .map(|v| {
+            v.parse::<u32>()
+                .map_err(|_| format!("--wait-pid 非法：{v}"))
+        })
         .transpose()?;
     let restart = has_flag(args, "--restart");
     let silent = has_flag(args, "--silent");
@@ -43,7 +49,12 @@ pub fn parse_args(args: &[String]) -> Result<Mode, String> {
         Some("uninstall") => Ok(Mode::Uninstall),
         Some("update") => {
             let setup = setup.ok_or_else(|| "update 模式缺少 --setup <path>".to_string())?;
-            Ok(Mode::Update { target, setup, wait_pid, restart })
+            Ok(Mode::Update {
+                target,
+                setup,
+                wait_pid,
+                restart,
+            })
         }
         Some("install") | None => {
             if silent {
@@ -93,7 +104,9 @@ mod tests {
         let args = v(&["install", "--silent", "--target", "C:\\X"]);
         assert_eq!(
             parse_args(&args).unwrap(),
-            Mode::Silent { target: Some("C:\\X".into()) }
+            Mode::Silent {
+                target: Some("C:\\X".into())
+            }
         );
     }
 
@@ -102,15 +115,23 @@ mod tests {
         let args = v(&["--silent", "--target=C:\\Y"]);
         assert_eq!(
             parse_args(&args).unwrap(),
-            Mode::Silent { target: Some("C:\\Y".into()) }
+            Mode::Silent {
+                target: Some("C:\\Y".into())
+            }
         );
     }
 
     #[test]
     fn update_full() {
         let args = v(&[
-            "update", "--target", "C:\\X", "--setup", "C:\\tmp\\s.exe",
-            "--wait-pid", "1234", "--restart",
+            "update",
+            "--target",
+            "C:\\X",
+            "--setup",
+            "C:\\tmp\\s.exe",
+            "--wait-pid",
+            "1234",
+            "--restart",
         ]);
         assert_eq!(
             parse_args(&args).unwrap(),

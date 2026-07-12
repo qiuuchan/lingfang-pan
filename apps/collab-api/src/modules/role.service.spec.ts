@@ -11,6 +11,7 @@ function mockPrisma() {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
+      count: vi.fn(async () => 0),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -81,6 +82,42 @@ describe('RoleService 团队角色 + 平台角色', () => {
       const result = await service.listPermissions('PLATFORM');
       expect(result.permissions.length).toBeGreaterThan(0);
       expect(result.permissions.every((p) => p.scope === 'PLATFORM')).toBe(true);
+    });
+  });
+
+  describe('平台角色动态加载', () => {
+    it('列表分页仅返回 permissionCount，并让 findMany/count 共用 where', async () => {
+      prisma.role.findMany.mockResolvedValueOnce([{
+        ...makeRole({ scope: 'PLATFORM', teamId: null, permissions: ['platform.dashboard.view', 'platform.user.list'] }),
+        _count: { users: 3 },
+      }]);
+      prisma.role.count.mockResolvedValueOnce(9);
+
+      const result = await service.listPlatformRoles('admin-1', { page: 2, pageSize: 5, q: 'custom' });
+
+      const listArgs = prisma.role.findMany.mock.calls[0][0] as Record<string, any>;
+      const countArgs = prisma.role.count.mock.calls[0][0] as Record<string, any>;
+      expect(listArgs).toMatchObject({ skip: 5, take: 5 });
+      expect(countArgs.where).toBe(listArgs.where);
+      expect(result).toMatchObject({ total: 9, page: 2, pageSize: 5 });
+      expect(result.items[0]).toMatchObject({ permissionCount: 2, memberCount: 3 });
+      expect(result.items[0]).not.toHaveProperty('permissions');
+    });
+
+    it('详情按 id 返回完整 permissions', async () => {
+      prisma.role.findUnique.mockResolvedValueOnce(makeRole({
+        scope: 'PLATFORM', teamId: null, permissions: ['platform.dashboard.view'],
+      }));
+      prisma.user.count.mockResolvedValueOnce(2);
+
+      const result = await service.getPlatformRole('admin-1', 'role-1');
+
+      expect(result.role.permissions).toEqual(['platform.dashboard.view']);
+      expect(result.role.memberCount).toBe(2);
+      expect(prisma.role.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'role-1' },
+        select: expect.objectContaining({ permissions: true }),
+      }));
     });
   });
 
@@ -283,14 +320,30 @@ describe('RoleService 团队角色 + 平台角色', () => {
       }));
     });
 
+    it('listTeamRolesForTeam 返回摘要而非 permissions', async () => {
+      prisma.role.findMany.mockResolvedValueOnce([{
+        ...makeRole({ teamId: 'team-2', permissions: ['team.dashboard.view'] }),
+        _count: { memberships: 4 },
+      }]);
+      prisma.role.count.mockResolvedValueOnce(1);
+
+      const result = await service.listTeamRolesForTeam('admin-1', 'team-2', { page: 1, pageSize: 10 });
+
+      expect(result.items[0]).toMatchObject({ permissionCount: 1, memberCount: 4 });
+      expect(result.items[0]).not.toHaveProperty('permissions');
+    });
+
     it('listTeamRolesForTeam 团队不存在拒绝 404', async () => {
       prisma.team.findUnique.mockResolvedValue(null);
       await expect(service.listTeamRolesForTeam('admin-1', 'nope')).rejects.toMatchObject({ status: 404 });
     });
 
-    it('listTeamRolesForTeam 团队已停用拒绝 403', async () => {
+    it('listTeamRolesForTeam 团队已停用仍允许只读审查', async () => {
       prisma.team.findUnique.mockResolvedValue({ id: 'team-2', status: 'SUSPENDED' });
-      await expect(service.listTeamRolesForTeam('admin-1', 'team-2')).rejects.toMatchObject({ status: 403 });
+      prisma.role.findMany.mockResolvedValue([]);
+      await expect(service.listTeamRolesForTeam('admin-1', 'team-2')).resolves.toEqual({
+        items: [], total: 0, page: 1, pageSize: 20,
+      });
     });
 
     it('createTeamRoleForTeam 正常创建（写入 teamId 参数）', async () => {

@@ -1,15 +1,13 @@
-// runtime-config.ts — 运行时配置前端封装（简化版：仅状态展示 + 镜像源配置）。
-//
-// 内置运行时（legacy）：应用安装包自带 Python/Node，无需下载。
-// 镜像源：可配置 pip/npm 镜像源，仅注入本应用子进程。
+// runtime-config.ts — 应用管理/用户指定运行时与镜像源的 Tauri 契约。
 
+import { Channel } from '@tauri-apps/api/core';
 import { tauriInvoke } from '@/lib/api';
 
 /** 脚本型运行时种类（与 plugin-script ScriptRuntime 同语义，复用字面量）。 */
 export type RuntimeKind = 'nodejs' | 'python';
 
-/** 运行时来源（简化版：仅 legacy=内置）。 */
-export type RuntimeSource = 'legacy';
+/** 运行时来源。系统 PATH 不属于可执行来源。 */
+export type RuntimeSource = 'appManaged' | 'userSpecified';
 
 /** Rust get_runtime_status 单项（camelCase）。 */
 export interface RuntimeStatus {
@@ -35,8 +33,32 @@ export interface MirrorConfig {
 
 /** Rust get_runtime_config 返回（简化版：仅 mirrors）。 */
 export interface RuntimeConfig {
+  userSpecifiedPython?: string | null;
+  userSpecifiedNode?: string | null;
+  appManagedPython?: ManagedEntry | null;
+  appManagedNode?: ManagedEntry | null;
   mirrors: MirrorConfig;
+  downloadMirrorBase?: string | null;
 }
+
+export interface ManagedEntry {
+  version: string;
+  dir: string;
+  installedAt: string;
+}
+
+export interface SystemRuntimeProbe {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  meetsMinimum: boolean;
+}
+
+export type RuntimeDownloadEvent =
+  | { event: 'Started'; data: { kind: string; total: number | null } }
+  | { event: 'Progress'; data: { kind: string; downloaded: number; total: number | null } }
+  | { event: 'Stage'; data: { kind: string; stage: string } }
+  | { event: 'Finished'; data: { kind: string; version: string } };
 
 // === 镜像源预置清单（与 Rust mirror_presets.rs 对齐；改一处需同步两侧） ===
 
@@ -80,6 +102,24 @@ export function setMirrorConfig(mirrors: MirrorConfig) {
   return tauriInvoke<void>('set_mirror_config', { mirrors });
 }
 
+export function downloadRuntime(kind: RuntimeKind, onEvent: (event: RuntimeDownloadEvent) => void, version?: string) {
+  const channel = new Channel<RuntimeDownloadEvent>();
+  channel.onmessage = onEvent;
+  return tauriInvoke<void>('download_runtime', { kind, version, onEvent: channel });
+}
+
+export function uninstallRuntime(kind: RuntimeKind) {
+  return tauriInvoke<void>('uninstall_runtime', { kind });
+}
+
+export function setUserSpecifiedRuntime(kind: RuntimeKind, path: string | null) {
+  return tauriInvoke<void>('set_user_specified_runtime', { kind, path });
+}
+
+export function probeSystemRuntime(kind: RuntimeKind) {
+  return tauriInvoke<SystemRuntimeProbe>('probe_system_runtime', { kind });
+}
+
 // === UI 辅助 ===
 
 /** 运行时显示名（与 plugin-script RUNTIME_LABEL 同步，独立导出避免循环依赖）。 */
@@ -90,7 +130,8 @@ export const RUNTIME_LABEL: Record<RuntimeKind, string> = {
 
 /** 来源 Badge 文案 + 样式 key。 */
 export const SOURCE_LABEL: Record<RuntimeSource, string> = {
-  legacy: '内置',
+  appManaged: '应用管理',
+  userSpecified: '用户指定',
 };
 
 /** 把版本字符串归一化展示（去 "Python "/"v" 前缀）。 */

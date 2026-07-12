@@ -77,48 +77,48 @@ function DialogOverlay({
 }
 
 /** 内容：scale + fade（spring 弹性）。Radix Content 用 forceMount + asChild 让 motion.div 接管渲染与动画。 */
-function DialogContent({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+const DialogContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(function DialogContent({ className, children, ...props }, ref) {
   const { open } = React.useContext(DialogRootCtx);
   const reduce = useReducedMotion();
+  // Closed portals must unmount; otherwise a parent Sheet can leave a nested
+  // confirmation portal under aria-hidden when it opens later.
   return (
-    <DialogPrimitive.Portal forceMount>
-      <AnimatePresence>
-        {open ? (
-          // 单一 fixed 定位容器（AnimatePresence 直接子元素需有 key 才能触发退场）。
-          // 内含 Overlay（absolute 撑满）+ Content（absolute 居中），二者同步进退场。
-          // Radix Overlay 提供「点击遮罩关闭」，Content 提供焦点陷阱 / ESC 关闭。
-          <div key="dialog-motion-root" className="fixed inset-0 z-50">
-            <DialogOverlay />
-            <DialogPrimitive.Content asChild forceMount {...props}>
-              <motion.div
-                className={cn(
-                  'absolute left-[50%] top-[50%] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border bg-background p-6 shadow-lg',
-                  className,
-                )}
-                initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-                animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
-                exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
-                transition={reduce
-                  ? { duration: 0.12 }
-                  : { type: 'spring', stiffness: 320, damping: 30 }}
-              >
-                {children}
-                <DialogPrimitive.Close className="absolute right-4 top-4 rounded-lg opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-                  <XIcon className="size-4" />
-                  <span className="sr-only">关闭</span>
-                </DialogPrimitive.Close>
-              </motion.div>
-            </DialogPrimitive.Content>
-          </div>
-        ) : null}
-      </AnimatePresence>
+    <DialogPrimitive.Portal>
+      <div>
+        <AnimatePresence>
+          {open ? (
+            <div key="dialog-motion-root" className="fixed inset-0 z-[60]">
+              <DialogOverlay />
+              <DialogPrimitive.Content ref={ref} asChild forceMount {...props}>
+                <motion.div
+                  className={cn(
+                    'absolute left-[50%] top-[50%] grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-5 shadow-lg sm:p-6',
+                    className,
+                  )}
+                  initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+                  animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+                  exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
+                  transition={reduce
+                    ? { duration: 0.12 }
+                    : { type: 'spring', stiffness: 320, damping: 30 }}
+                >
+                  {children}
+                  <DialogPrimitive.Close className="absolute right-4 top-4 rounded-lg opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+                    <XIcon className="size-4" />
+                    <span className="sr-only">关闭</span>
+                  </DialogPrimitive.Close>
+                </motion.div>
+              </DialogPrimitive.Content>
+            </div>
+          ) : null}
+        </AnimatePresence>
+      </div>
     </DialogPrimitive.Portal>
   );
-}
+});
 
 function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn('flex flex-col gap-1.5 text-center sm:text-left', className)} {...props} />;
@@ -151,7 +151,7 @@ function DialogDescription({
   );
 }
 
-// DialogPortal 保留导出以兼容旧调用方（实际 Portal 已在 DialogContent 内强制挂载）。
+// DialogPortal 保留导出以兼容旧调用方；DialogContent 只在打开时挂载 Portal。
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   return <DialogPrimitive.Portal {...props} />;
 }

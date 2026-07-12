@@ -19,12 +19,13 @@ function SheetPortal({ ...props }: React.ComponentProps<typeof SheetPrimitive.Po
   return <SheetPrimitive.Portal {...props} />;
 }
 
-function SheetOverlay({
-  className,
-  ...props
-}: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
+const SheetOverlay = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
+>(function SheetOverlay({ className, ...props }, ref) {
   return (
     <SheetPrimitive.Overlay
+      ref={ref}
       className={cn(
         'fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         className,
@@ -32,7 +33,7 @@ function SheetOverlay({
       {...props}
     />
   );
-}
+});
 
 const sheetVariants = {
   default: 'inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm',
@@ -43,16 +44,15 @@ type SheetContentProps = React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: keyof typeof sheetVariants;
 };
 
-function SheetContent({
-  side = 'default',
-  className,
-  children,
-  ...props
-}: SheetContentProps) {
+const SheetContent = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Content>,
+  SheetContentProps
+>(function SheetContent({ side = 'default', className, children, ...props }, ref) {
   return (
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content
+        ref={ref}
         className={cn(
           'fixed z-50 gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500',
           sheetVariants[side],
@@ -68,7 +68,7 @@ function SheetContent({
       </SheetPrimitive.Content>
     </SheetPortal>
   );
-}
+});
 
 function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn('flex flex-col gap-1.5 text-center sm:text-left', className)} {...props} />;

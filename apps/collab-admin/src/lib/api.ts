@@ -10,6 +10,7 @@ export const UNAUTHORIZED_EVENT = 'lf:collab-admin:unauthorized';
 export interface ApiError extends Error {
   code?: string;
   requestId?: string;
+  kind?: 'http' | 'network' | 'timeout';
   // HTTP 状态码（ADMIN-01 / ADMIN-06）：调用方可据此精确判定失败场景，不依赖脆弱的字符串匹配。
   status?: number;
 }
@@ -43,36 +44,43 @@ export interface ApiOptions {
   formData?: FormData;
   // 请求超时（毫秒）。默认 30s。
   timeoutMs?: number;
+  // 调用方取消信号。用于视图卸载、筛选切换和详情切换时主动终止旧请求。
+  signal?: AbortSignal;
   // ADMIN-01：标记为 refresh 请求自身，避免 refresh 失败时递归派发 UNAUTHORIZED 导致重复清 session。
   _isRefresh?: boolean;
   // ADMIN-01：标记请求已因 401 重放过一次，防止 refresh 后仍 401 时无限递归重试。
   _retried?: boolean;
 }
 
-// 续签尝试的并发去重锁：避免多个 in-flight 请求同时 401 时并发触发多次 refresh。
+// 续签尝试按 token 去重：同一会话的多个 in-flight 请求同时 401 时只触发一次 refresh，
+// 新登录会话则不等待旧 token 的 refresh，避免旧请求覆盖或清理新 token。
 // ADMIN-01 修复：管理端全链路此前从不调用 /api/auth/refresh，token 过期后无续签机制。
 // 此处在首个 401 时尝试一次 refresh（仅当当前 token 仍有效），refresh 成功则重放原请求；
 // refresh 失败或已过期则派发 UNAUTHORIZED 事件，由 App.tsx 清 session 回登录页。
-let refreshInFlight: Promise<string | null> | null = null;
+const refreshInFlight = new Map<string, Promise<string | null>>();
 
-async function tryRefresh(): Promise<string | null> {
-  if (!token) return null;
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+async function tryRefresh(requestToken: string): Promise<string | null> {
+  if (token !== requestToken) return null;
+  const existing = refreshInFlight.get(requestToken);
+  if (existing) return existing;
+  const pending = (async () => {
     try {
       const next = await api<{ token?: string }>('/api/auth/refresh', { method: 'POST', auth: true, _isRefresh: true });
-      if (next?.token) {
+      // refresh 返回时用户可能已重新登录；旧会话的结果不得覆盖新 token。
+      if (next?.token && token === requestToken) {
         setToken(next.token);
         return next.token;
       }
       return null;
     } catch {
       return null;
-    } finally {
-      refreshInFlight = null;
     }
   })();
-  return refreshInFlight;
+  refreshInFlight.set(requestToken, pending);
+  void pending.finally(() => {
+    if (refreshInFlight.get(requestToken) === pending) refreshInFlight.delete(requestToken);
+  });
+  return pending;
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
@@ -80,50 +88,98 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   // 否则默认 JSON：Content-Type: application/json + JSON.stringify(body)。
   const isFormData = options.formData instanceof FormData;
   const headers: Record<string, string> = isFormData ? {} : { 'Content-Type': 'application/json' };
-  if (options.auth !== false && token) headers.Authorization = `Bearer ${token}`;
+  // 冻结本次请求实际携带的 token，401 返回时据此判断响应是否已属于旧会话。
+  const requestToken = options.auth !== false ? token : null;
+  if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
   let response: Response;
-  // ADMIN-06：用 AbortController 兜底挂起的 fetch。
+  let data: unknown;
+  // ADMIN-06：用 AbortController 兜底挂起的 fetch，并把调用方取消转发给同一请求。
   const timeoutMs = options.timeoutMs ?? DEFAULT_API_TIMEOUT_MS;
-  const controller = timeoutMs > 0 ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const controller = new AbortController();
+  let abortSource: 'external' | 'timeout' | null = null;
+  const abortFromCaller = () => {
+    if (controller.signal.aborted) return;
+    abortSource = 'external';
+    controller.abort(options.signal?.reason);
+  };
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  const timer = timeoutMs > 0
+    ? setTimeout(() => {
+        if (controller.signal.aborted) return;
+        abortSource = 'timeout';
+        controller.abort();
+      }, timeoutMs)
+    : null;
   try {
     response = await fetch(`${apiBase()}${path}`, {
       method: options.method || 'GET',
       headers,
       body: isFormData ? options.formData : (options.body ? JSON.stringify(options.body) : undefined),
-      signal: controller?.signal,
+      signal: controller.signal,
     });
-  } catch (err) {
-    // AbortError → 友好的超时提示；其余网络错误 → 连接失败提示。
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('后端响应超时，请检查网络或后端服务状态后重试。');
+    try {
+      data = await response.json() as unknown;
+    } catch (err) {
+      // 主动取消或超时也会中断 body 读取，必须交给外层按来源分类；普通非 JSON 响应沿用空对象兜底。
+      if (controller.signal.aborted) throw err;
+      data = {};
     }
-    throw new Error(`无法连接协作平台 API（${apiBase()}）`);
+  } catch (err) {
+    // 调用方取消保留 AbortError 语义，领域 hook 可静默忽略；内部超时仍提供友好错误。
+    if (abortSource === 'external') {
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      throw new DOMException('请求已取消。', 'AbortError');
+    }
+    if (abortSource === 'timeout') {
+      const error = new Error('后端响应超时，请检查网络或后端服务状态后重试。') as ApiError;
+      error.code = 'request_timeout';
+      error.kind = 'timeout';
+      throw error;
+    }
+    const error = new Error(`无法连接协作平台 API（${apiBase()}）`) as ApiError;
+    error.code = 'network_error';
+    error.kind = 'network';
+    throw error;
   } finally {
     if (timer) clearTimeout(timer);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
-  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.message || response.statusText) as ApiError;
-    error.code = data.code;
-    error.requestId = data.requestId;
+    const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+    const error = new Error(typeof payload.message === 'string' ? payload.message : response.statusText) as ApiError;
+    error.code = typeof payload.code === 'string' ? payload.code : undefined;
+    error.requestId = typeof payload.requestId === 'string' ? payload.requestId : undefined;
+    error.kind = 'http';
     error.status = response.status;
-    // ADMIN-01：仅在「带 token 的 auth 请求 + HTTP 401 + 尚未重试过」时尝试 refresh 一次并重放；
-    // refresh 本身（_isRefresh）失败不递归，直接派发 UNAUTHORIZED 让 App.tsx 清 session。
-    // _retried 防止重放后仍 401 时无限递归（refresh 返回的 token 也失效 → 不再重试）。
-    if (response.status === 401 && options.auth !== false && token && !options._isRefresh && !options._retried) {
-      const refreshed = await tryRefresh();
-      if (refreshed) {
-        // 续签成功，重放原请求（用新 token），标记 _retried 防止再次 401 递归。
+    // refresh 请求自身失败时只把错误交给 tryRefresh；不能递归刷新或直接清 session。
+    if (response.status === 401 && options.auth !== false && !options._isRefresh) {
+      const replayWithCurrentToken = () => {
         const { _isRefresh: _, _retried: __, ...rest } = options;
         return api<T>(path, { ...rest, _retried: true });
+      };
+
+      // 401 晚到时若会话已变化，响应只代表旧 token。使用最新 token 重放，禁止旧请求触发 refresh/clear。
+      if (token !== requestToken) {
+        if (token) return replayWithCurrentToken();
+        throw error;
       }
-    }
-    // 续签失败或已无 token：派发 UNAUTHORIZED 事件让 App.tsx 清 session 回登录页。
-    // refresh 请求自身的 401 也走此分支（_isRefresh 已跳过上面的 tryRefresh 重放）。
-    if (response.status === 401 && options.auth !== false && !options._isRefresh) {
-      setToken(null);
-      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* 浏览器环境兜底 */ }
+
+      // 同一 token 只尝试一次 refresh；并发 401 共享该 token 对应的刷新请求。
+      if (requestToken && !options._retried) {
+        await tryRefresh(requestToken);
+        // refresh 成功或等待期间发生了重新登录时，均用当前 token 重放原请求。
+        if (token !== requestToken) {
+          if (token) return replayWithCurrentToken();
+          throw error;
+        }
+      }
+
+      // 只有发出请求的 token 仍是当前会话时，才允许清理登录态。
+      if (token === requestToken) {
+        setToken(null);
+        try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* 浏览器环境兜底 */ }
+      }
     }
     throw error;
   }
@@ -142,10 +198,10 @@ export interface DashboardData {
   users: number;
   teams: number;
   pendingApplications: number;
-  enabledPlugins: number;
-  // ADMIN-VIEW-03 修复：仪表盘「已禁用插件」待办数此前硬编码 0，
-  // 后端 /api/admin/dashboard 现返回该指标；前端读取后端值，避免假数据。
-  disabledPlugins?: number;
+  pendingPluginReviews: number;
+  activePluginPackages: number;
+  activeMarketplaceListings: number;
+  delistedMarketplaceListings: number;
 }
 
 // AI 生成质量看板（调研报告 Top10 / A4）。后端复用 AuditLog 聚合：

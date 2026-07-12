@@ -21,7 +21,7 @@ export const TASK_STEPS: TaskStep[] = [
   {
     icon: CpuIcon,
     title: '准备脚本运行环境',
-    description: '应用内置 Python 与 Node.js 运行时，无需单独安装',
+    description: '下载应用管理的便携版 Python / Node.js，或显式采用电脑上已有的版本。',
     view: 'settings',
     settingsTab: 'cli',
   },

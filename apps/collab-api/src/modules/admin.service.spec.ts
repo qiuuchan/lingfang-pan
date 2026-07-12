@@ -9,6 +9,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { AdminService } from './admin.service';
 import { forbidden } from '../common';
+import { auditActionCategory, auditActionLabel } from './audit-actions';
 
 function mockPrisma() {
   const auditLog = { count: vi.fn(async () => 0) };
@@ -20,9 +21,25 @@ function mockPrisma() {
     aggregate: vi.fn(async () => ({ _sum: { priceCents: null } })),
     findMany: vi.fn(async () => []),
   };
-  const plugin = { findMany: vi.fn(async () => []) };
+  const plugin = { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) };
+  const pluginRelease = { count: vi.fn(async () => 0) };
+  const pluginPackage = { count: vi.fn(async () => 0) };
+  const marketplaceListing = { count: vi.fn(async () => 0) };
   const user = { count: vi.fn(async () => 0) };
-  return { auditLog, llmCallLog, purchase, plugin, user };
+  const team = { count: vi.fn(async () => 0) };
+  const teamAdminApplication = { count: vi.fn(async () => 0) };
+  return {
+    auditLog,
+    llmCallLog,
+    purchase,
+    plugin,
+    pluginRelease,
+    pluginPackage,
+    marketplaceListing,
+    user,
+    team,
+    teamAdminApplication,
+  };
 }
 
 function mockAuth() {
@@ -50,6 +67,38 @@ describe('AdminService stats', () => {
     notifications = mockNotifications();
     // @ts-expect-error mock 不实现完整 PrismaService 接口，仅测用到的方法。
     service = new AdminService(prisma, auth, notifications);
+  });
+
+  describe('adminDashboard', () => {
+    it('插件指标全部来自 v4 registry 状态', async () => {
+      prisma.user.count.mockResolvedValueOnce(12);
+      prisma.team.count.mockResolvedValueOnce(4);
+      prisma.teamAdminApplication.count.mockResolvedValueOnce(2);
+      prisma.pluginRelease.count.mockResolvedValueOnce(5);
+      prisma.pluginPackage.count.mockResolvedValueOnce(8);
+      prisma.marketplaceListing.count.mockResolvedValueOnce(6).mockResolvedValueOnce(3);
+
+      const result = await service.adminDashboard('user-admin');
+
+      expect(result).toEqual({
+        users: 12,
+        teams: 4,
+        pendingApplications: 2,
+        pendingPluginReviews: 5,
+        activePluginPackages: 8,
+        activeMarketplaceListings: 6,
+        delistedMarketplaceListings: 3,
+      });
+      expect(prisma.pluginRelease.count).toHaveBeenCalledWith({
+        where: { marketReviewStatus: 'PENDING' },
+      });
+      expect(prisma.pluginPackage.count).toHaveBeenCalledWith({
+        where: { governanceStatus: 'ACTIVE' },
+      });
+      expect(prisma.marketplaceListing.count).toHaveBeenNthCalledWith(1, { where: { status: 'ACTIVE' } });
+      expect(prisma.marketplaceListing.count).toHaveBeenNthCalledWith(2, { where: { status: 'DELISTED' } });
+      expect(prisma.plugin.count).not.toHaveBeenCalled();
+    });
   });
 
   describe('adminGenerationStats', () => {
@@ -162,10 +211,21 @@ describe('AdminService stats', () => {
   });
 });
 
-// === 通知埋点契约：审核/申请结果触发 NotificationService.create（触发失败不阻塞主操作）===
-// 覆盖 4 个埋点：adminApprovePlugin / adminRejectPlugin / approveApplication / rejectApplication。
-// 关键断言：notifications.create 被以正确的 userId（authorUserId / 申请者 userId）+ type 调用，
-// 且 create 抛错时主流程仍正常返回（不阻塞）。
+describe('v4 plugin registry audit labels', () => {
+  it.each([
+    ['admin.plugin_release.approved', '审核通过插件发行版'],
+    ['admin.plugin_release.rejected', '驳回插件发行版'],
+    ['admin.plugin_release.artifact_downloaded', '下载插件发行版制品'],
+    ['admin.plugin_package.delisted', '平台暂停市场插件包'],
+    ['admin.plugin_package.relisted', '平台恢复市场插件包'],
+  ])('%s 使用中文标签并归入平台管理', (action, label) => {
+    expect(auditActionLabel(action)).toBe(label);
+    expect(auditActionCategory(action)).toBe('admin');
+  });
+});
+
+// === 通知埋点契约：插件审核结果触发 NotificationService.create（触发失败不阻塞主操作）===
+// 申请治理的事务与通知时机由 admin-applications.service.spec.ts 聚焦覆盖。
 const NOW = new Date('2026-06-15T00:00:00.000Z');
 
 // plugin 完整字段：publicPlugin(plugin-package.ts) 会读 createdAt/updatedAt/ratingSum/installCount 等，
@@ -205,12 +265,9 @@ function mockPrismaForReview() {
   const plugin = { findUnique: vi.fn(async () => null), update: vi.fn() };
   const pluginReview = { create: vi.fn() };
   const auditLog = { create: vi.fn() };
-  const teamAdminApplication = { findUnique: vi.fn(async () => null), update: vi.fn() };
-  const team = { create: vi.fn() };
-  const teamMembership = { create: vi.fn() };
-  const tx = { plugin, pluginReview, auditLog, teamAdminApplication, team, teamMembership };
+  const tx = { plugin, pluginReview, auditLog };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
-  return { plugin, pluginReview, auditLog, teamAdminApplication, team, teamMembership, $transaction };
+  return { plugin, pluginReview, auditLog, $transaction };
 }
 
 function mockAuthForReview() {
@@ -218,8 +275,6 @@ function mockAuthForReview() {
     ensurePlatformAdmin: vi.fn(),
     ensureCurrentTeam: vi.fn(),
     ensureTeamAdmin: vi.fn(),
-    // createTeamForApplication：approveApplication 委托此方法建团（内部事务）。
-    createTeamForApplication: vi.fn(),
   };
 }
 
@@ -272,33 +327,6 @@ describe('AdminService 通知埋点', () => {
     expect(result.plugin.reviewStatus).toBe('APPROVED');
   });
 
-  it('approveApplication 触发通知申请者 userId（type=application_approved）', async () => {
-    // createTeamForApplication 建团后回读申请者 userId 触发通知。
-    auth.createTeamForApplication.mockResolvedValueOnce({ id: 'team-1', name: '团队X', slug: 'tuangan-x' });
-    prisma.teamAdminApplication.findUnique.mockResolvedValueOnce({ id: 'app-1', userId: 'applier-1', teamName: '团队X' });
-    const result = await service.approveApplication('user-admin', 'app-1');
-    expect(result.team.id).toBe('team-1');
-    expect(notifications.create).toHaveBeenCalledWith(
-      'applier-1', 'application_approved', expect.any(String), expect.any(String),
-      { relatedType: 'Team', relatedId: 'team-1' },
-    );
-  });
-
-  it('rejectApplication 触发通知申请者 userId（type=application_rejected）', async () => {
-    prisma.teamAdminApplication.findUnique.mockResolvedValueOnce({ id: 'app-1', userId: 'applier-1', teamName: '团队X', status: 'PENDING' });
-    prisma.teamAdminApplication.update.mockResolvedValueOnce({ id: 'app-1', status: 'REJECTED' });
-    await service.rejectApplication('user-admin', 'app-1', '资料不全');
-    expect(notifications.create).toHaveBeenCalledWith(
-      'applier-1', 'application_rejected', expect.any(String), expect.stringContaining('资料不全'),
-      { relatedType: 'TeamAdminApplication', relatedId: 'app-1' },
-    );
-  });
-
-  it('rejectApplication 对已处理申请抛 conflict（不触发通知）', async () => {
-    prisma.teamAdminApplication.findUnique.mockResolvedValueOnce({ id: 'app-1', userId: 'applier-1', status: 'APPROVED' });
-    await expect(service.rejectApplication('user-admin', 'app-1')).rejects.toMatchObject({ status: 409 });
-    expect(notifications.create).not.toHaveBeenCalled();
-  });
 });
 
 // === 审核 DRAFT 插件：管理员可直接审核草稿（不再要求作者先提交审核）===
@@ -370,13 +398,16 @@ describe('AdminService 审核 DRAFT 插件', () => {
 //  - adminTeamDetail 聚合成员数 + 插件数 + 购买 + 流水摘要（空表兜底非 NaN）。
 function mockPrismaForTeam() {
   const team = { findUnique: vi.fn(), update: vi.fn() };
-  const teamMembership = { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(async () => 0), update: vi.fn() };
-  const role = { findUnique: vi.fn() };
-  const plugin = { findMany: vi.fn(async () => []) };
-  const purchase = { findMany: vi.fn(async () => []) };
-  const balanceLedger = { groupBy: vi.fn(async () => []), findMany: vi.fn(async () => []) };
+  const user = { findUnique: vi.fn(), update: vi.fn() };
+  const teamMembership = { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(async () => 0), update: vi.fn(), upsert: vi.fn() };
+  const role = { findUnique: vi.fn(), count: vi.fn(async () => 0), upsert: vi.fn(async ({ create }) => create) };
+  const plugin = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
+  const purchase = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
+  const balanceLedger = { groupBy: vi.fn(async () => []), findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
   const auditLog = { create: vi.fn() };
-  return { team, teamMembership, role, plugin, purchase, balanceLedger, auditLog };
+  const tx = { team, user, teamMembership, role, plugin, purchase, balanceLedger, auditLog };
+  const $transaction = vi.fn(async (cb: (client: typeof tx) => Promise<unknown>) => cb(tx));
+  return { ...tx, $transaction };
 }
 
 describe('AdminService 团队管理完善（组B）', () => {
@@ -411,14 +442,57 @@ describe('AdminService 团队管理完善（组B）', () => {
       const now = new Date('2026-06-15T00:00:00.000Z');
       prisma.team.findUnique.mockResolvedValueOnce({ id: 't1' });
       prisma.teamMembership.findMany.mockResolvedValueOnce([
-        { teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', status: 'ACTIVE', joinedAt: now, user: { id: 'u1', email: 'a@x.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE', passwordHash: 'secret', tokenVersion: 1 } },
-        { teamId: 't1', userId: 'u2', role: 'MEMBER', status: 'ACTIVE', joinedAt: now, user: { id: 'u2', email: 'b@x.com', displayName: 'B', status: 'ACTIVE', platformRole: 'NONE', passwordHash: 'secret', tokenVersion: 1 } },
+        { teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', status: 'ACTIVE', teamRoleId: null, joinedAt: now, teamRole: null, user: { id: 'u1', email: 'a@x.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE', passwordHash: 'secret', tokenVersion: 1 } },
+        { teamId: 't1', userId: 'u2', role: 'MEMBER', status: 'ACTIVE', teamRoleId: null, joinedAt: now, teamRole: null, user: { id: 'u2', email: 'b@x.com', displayName: 'B', status: 'ACTIVE', platformRole: 'NONE', passwordHash: 'secret', tokenVersion: 1 } },
       ]);
       const result = await service.adminTeamMembers('user-admin', 't1');
-      expect(result.members).toHaveLength(2);
+      expect(result.items).toHaveLength(2);
       // publicUser 脱敏：不得携带 passwordHash / tokenVersion。
-      expect(result.members[0].user).toEqual({ id: 'u1', email: 'a@x.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE' });
-      expect(result.members[0]).not.toHaveProperty('user.passwordHash');
+      expect(result.items[0].user).toEqual({ id: 'u1', email: 'a@x.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE' });
+      expect(result.items[0]).not.toHaveProperty('user.passwordHash');
+      expect(result).toMatchObject({ total: 0, page: 1, pageSize: 20 });
+    });
+  });
+
+  describe('团队管理员 RBAC 双写', () => {
+    it('adminSetTeamAdmin 写系统 team_admin roleId 并吊销旧 token', async () => {
+      prisma.team.findUnique.mockResolvedValueOnce({ id: 't1', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', status: 'ACTIVE' });
+      prisma.teamMembership.upsert.mockResolvedValueOnce({
+        teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1', status: 'ACTIVE',
+      });
+
+      await service.adminSetTeamAdmin('user-admin', 't1', { userId: 'u1' });
+
+      expect(prisma.role.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'team-admin-t1' } }));
+      expect(prisma.teamMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        create: expect.objectContaining({ role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1' }),
+        update: expect.objectContaining({ role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1' }),
+      }));
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { tokenVersion: { increment: 1 } },
+      });
+    });
+
+    it('adminRevokeTeamAdmin 写系统 team_member roleId 并吊销旧 token', async () => {
+      prisma.teamMembership.findUnique.mockResolvedValueOnce({
+        teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1', status: 'ACTIVE',
+      });
+      prisma.teamMembership.update.mockResolvedValueOnce({
+        teamId: 't1', userId: 'u1', role: 'MEMBER', teamRoleId: 'team-member-t1', status: 'ACTIVE',
+      });
+
+      await service.adminRevokeTeamAdmin('user-admin', 't1', 'u1');
+
+      expect(prisma.role.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'team-member-t1' } }));
+      expect(prisma.teamMembership.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { role: 'MEMBER', teamRoleId: 'team-member-t1' },
+      }));
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { tokenVersion: { increment: 1 } },
+      });
     });
   });
 
@@ -429,7 +503,7 @@ describe('AdminService 团队管理完善（组B）', () => {
     });
 
     it('角色未变化时幂等返回（不写审计、不调用 update）', async () => {
-      prisma.teamMembership.findUnique.mockResolvedValueOnce({ teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', status: 'ACTIVE' });
+      prisma.teamMembership.findUnique.mockResolvedValueOnce({ teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1', status: 'ACTIVE' });
       const result = await service.adminUpdateMemberRole('user-admin', 't1', 'u1', { role: 'TEAM_ADMIN' });
       expect(result.membership.role).toBe('TEAM_ADMIN');
       expect(prisma.teamMembership.update).not.toHaveBeenCalled();
@@ -438,10 +512,22 @@ describe('AdminService 团队管理完善（组B）', () => {
 
     it('切换角色时写审计 action=team.member.role_changed（含 from/to）', async () => {
       prisma.teamMembership.findUnique.mockResolvedValueOnce({ teamId: 't1', userId: 'u1', role: 'MEMBER', status: 'ACTIVE' });
-      prisma.teamMembership.update.mockResolvedValueOnce({ teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', status: 'ACTIVE' });
+      prisma.teamMembership.update.mockResolvedValueOnce({ teamId: 't1', userId: 'u1', role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1', status: 'ACTIVE' });
       await service.adminUpdateMemberRole('user-admin', 't1', 'u1', { role: 'TEAM_ADMIN' });
+      expect(prisma.teamMembership.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { role: 'TEAM_ADMIN', teamRoleId: 'team-admin-t1' },
+      }));
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { tokenVersion: { increment: 1 } },
+      });
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ action: 'team.member.role_changed', targetType: 'User', targetId: 'u1', metadata: { teamId: 't1', from: 'MEMBER', to: 'TEAM_ADMIN' } }),
+        data: expect.objectContaining({
+          action: 'team.member.role_changed',
+          targetType: 'User',
+          targetId: 'u1',
+          metadata: expect.objectContaining({ teamId: 't1', from: 'MEMBER', to: 'TEAM_ADMIN', toRoleId: 'team-admin-t1' }),
+        }),
       }));
     });
 
@@ -453,6 +539,10 @@ describe('AdminService 团队管理完善（组B）', () => {
       await service.adminUpdateMemberRole('user-admin', 't1', 'u1', { roleId: 'team-admin-t1' });
       expect(prisma.teamMembership.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ teamRoleId: 'team-admin-t1', role: 'TEAM_ADMIN' }),
+      }));
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: { tokenVersion: { increment: 1 } },
       }));
     });
 
@@ -536,32 +626,39 @@ describe('AdminService 团队管理完善（组B）', () => {
       await expect(service.adminTeamDetail('user-admin', 'missing')).rejects.toMatchObject({ status: 404, code: 'not_found' });
     });
 
-    it('聚合成员数/插件数/购买/流水摘要（空表兜底非 NaN）', async () => {
-      prisma.team.findUnique.mockResolvedValueOnce({ id: 't1', name: '团队A', balanceCents: 0 });
+    it('只返回概览计数与流水摘要，不捆绑关联列表', async () => {
+      prisma.team.findUnique.mockResolvedValueOnce({
+        id: 't1', name: '团队A', slug: 'team-a', status: 'ACTIVE', allowPublicJoin: false,
+        description: '', balanceCents: 0, defaultPoolId: null,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'), updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+      });
       prisma.teamMembership.count.mockResolvedValueOnce(5);
-      prisma.plugin.findMany.mockResolvedValueOnce([{ id: 'p1', name: '插件A', status: 'ENABLED', visibility: 'TEAM', reviewStatus: 'APPROVED', marketplace: true, priceCents: 0, installCount: 3 }]);
-      prisma.purchase.findMany.mockResolvedValueOnce([
-        { id: 'po1', pluginId: 'p2', packageId: null, priceCents: 1000, createdAt: new Date('2026-06-01T00:00:00.000Z'), plugin: { id: 'p2', name: '外部插件' }, package: null },
-        { id: 'po2', pluginId: null, packageId: 'pkg-2', priceCents: 1200, createdAt: new Date('2026-07-01T00:00:00.000Z'), plugin: null, package: { id: 'pkg-2', name: 'v4 插件' } },
-      ]);
+      prisma.role.count.mockResolvedValueOnce(3);
+      prisma.plugin.count.mockResolvedValueOnce(2);
+      prisma.purchase.count.mockResolvedValueOnce(7);
       prisma.balanceLedger.groupBy.mockResolvedValueOnce([
         { direction: 'CREDIT', _sum: { amountCents: 5000 } },
         { direction: 'DEBIT', _sum: { amountCents: 2000 } },
       ]);
-      prisma.balanceLedger.findMany.mockResolvedValueOnce([{ id: 'l1', teamId: 't1', amountCents: 5000, direction: 'CREDIT', reason: 'initial_balance' }]);
 
       const result = await service.adminTeamDetail('user-admin', 't1');
       expect(result.memberCount).toBe(5);
-      expect(result.pluginCount).toBe(1);
-      expect(result.plugins[0].name).toBe('插件A');
-      expect(result.purchases[0]).toMatchObject({ pluginName: '外部插件', priceCents: 1000 });
-      expect(result.purchases[1]).toMatchObject({ pluginId: null, packageId: 'pkg-2', pluginName: 'v4 插件', priceCents: 1200 });
+      expect(result.roleCount).toBe(3);
+      expect(result.pluginCount).toBe(2);
+      expect(result.purchaseCount).toBe(7);
+      expect(result).not.toHaveProperty('plugins');
+      expect(result).not.toHaveProperty('purchases');
+      expect(result).not.toHaveProperty('recentLedger');
       // CREDIT 5000 - DEBIT 2000 = 3000 净流入。
       expect(result.ledgerSummary).toEqual({ totalCreditCents: 5000, totalDebitCents: 2000, netCents: 3000 });
     });
 
     it('无流水时摘要兜底为 0（非 NaN）', async () => {
-      prisma.team.findUnique.mockResolvedValueOnce({ id: 't1', name: '团队A', balanceCents: 0 });
+      prisma.team.findUnique.mockResolvedValueOnce({
+        id: 't1', name: '团队A', slug: 'team-a', status: 'ACTIVE', allowPublicJoin: false,
+        description: '', balanceCents: 0, defaultPoolId: null,
+        createdAt: new Date(), updatedAt: new Date(),
+      });
       prisma.balanceLedger.groupBy.mockResolvedValueOnce([]);
       const result = await service.adminTeamDetail('user-admin', 't1');
       expect(result.ledgerSummary).toEqual({ totalCreditCents: 0, totalDebitCents: 0, netCents: 0 });
@@ -745,7 +842,11 @@ describe('AdminService 插件管理完善（组A）', () => {
 //  - actor_target_filter：精确过滤 actorId / targetType。
 //  - auditCategories：返回 8 个分类元数据。
 function mockPrismaForAuditLogs() {
-  const auditLog = { findMany: vi.fn(async () => [] as unknown[]) };
+  const auditLog = {
+    findMany: vi.fn(async () => [] as unknown[]),
+    findUnique: vi.fn(),
+    count: vi.fn(async () => 0),
+  };
   return { auditLog };
 }
 
@@ -779,13 +880,15 @@ describe('AdminService auditLogs 过滤', () => {
     expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
   });
 
-  it('无过滤参数时 where 为空对象（全量拉取）', async () => {
+  it('无过滤参数时使用默认分页，并让 findMany/count 共用 where', async () => {
     await service.auditLogs('user-admin', {});
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {},
-      orderBy: { createdAt: 'desc' },
-      take: 200,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: 0,
+      take: 20,
     }));
+    expect(prisma.auditLog.count).toHaveBeenCalledWith({ where: {} });
   });
 
   it('category=auth 过滤构造 where.OR（前缀 startsWith + 已注册 action 列表）', async () => {
@@ -798,14 +901,17 @@ describe('AdminService auditLogs 过滤', () => {
     expect(call.where.OR).toContainEqual({ action: { startsWith: 'auth.' } });
   });
 
-  it('category=system 无单一前缀，仅靠已注册 action 列表（含 admin.setting.* / platform_admin.bootstrap）', async () => {
+  it('category=system 覆盖未注册的配置/引导/system 前缀与已注册 action', async () => {
     await service.auditLogs('user-admin', { category: 'system' });
     const call = prisma.auditLog.findMany.mock.calls[0][0] as { where: { OR?: unknown[] } };
-    // system 分类无 startsWith（返回 null），仅有已注册 action 列表。
     expect(call.where.OR).toBeDefined();
-    expect(call.where.OR).toHaveLength(1);
-    // 列表中应含 platform_admin.bootstrap（显式归 system 的跨前缀 action）。
-    const inClause = call.where.OR[0] as { action: { in: string[] } };
+    expect(call.where.OR).toContainEqual({ action: { startsWith: 'admin.setting' } });
+    expect(call.where.OR).toContainEqual({ action: { startsWith: 'platform_admin' } });
+    expect(call.where.OR).toContainEqual({ action: { startsWith: 'system.' } });
+    const inClause = call.where.OR!.find((condition) => {
+      const candidate = condition as { action?: { in?: string[] } };
+      return Array.isArray(candidate.action?.in);
+    }) as { action: { in: string[] } };
     expect(inClause.action.in).toContain('platform_admin.bootstrap');
     expect(inClause.action.in).toContain('admin.setting.updated');
   });
@@ -862,17 +968,16 @@ describe('AdminService auditLogs 过滤', () => {
   it('actor select 白名单不含 passwordHash/tokenVersion（防凭据泄漏）', async () => {
     await service.auditLogs('user-admin', {});
     const call = prisma.auditLog.findMany.mock.calls[0][0] as {
-      include: { actor: { select: Record<string, boolean> } };
+      select: { actor: { select: Record<string, boolean> }; metadata?: boolean };
     };
-    expect(call.include.actor.select).toEqual({
+    expect(call.select.actor.select).toEqual({
       id: true,
       email: true,
       displayName: true,
-      platformRole: true,
-      status: true,
     });
-    expect(call.include.actor.select).not.toHaveProperty('passwordHash');
-    expect(call.include.actor.select).not.toHaveProperty('tokenVersion');
+    expect(call.select).not.toHaveProperty('metadata');
+    expect(call.select.actor.select).not.toHaveProperty('passwordHash');
+    expect(call.select.actor.select).not.toHaveProperty('tokenVersion');
   });
 
   it('auditCategories 返回 8 个分类元数据', async () => {
@@ -892,10 +997,10 @@ describe('AdminService auditLogs 过滤', () => {
 //  - adminActivity：非管理员拒绝；返回 actor 维度审计日志。
 function mockPrismaForUser() {
   const user = { findUnique: vi.fn(), update: vi.fn(), count: vi.fn(async () => 0) };
-  const auditLog = { findMany: vi.fn(async () => []), create: vi.fn() };
+  const auditLog = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0), create: vi.fn() };
   const wallet = { findUnique: vi.fn(async () => null) };
-  const teamMembership = { findMany: vi.fn(async () => []) };
-  const walletTransaction = { findMany: vi.fn(async () => []) };
+  const teamMembership = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
+  const walletTransaction = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
   const tx = { user, auditLog };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
   return { user, auditLog, wallet, teamMembership, walletTransaction, $transaction };
@@ -935,32 +1040,25 @@ describe('AdminService 用户管理 + 平台管理员管理完善（组C）', ()
       await expect(service.adminUserDetail('user-admin', 'missing')).rejects.toMatchObject({ status: 404, code: 'not_found' });
     });
 
-    it('聚合登录历史 + 钱包 + 团队 memberships（钱包不存在兜底 0）', async () => {
+    it('只返回白名单 overview，关联时间线不随详情预加载', async () => {
       const now = new Date('2026-06-15T00:00:00.000Z');
       prisma.user.findUnique.mockResolvedValueOnce({
         id: 'u1', email: 'a@x.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE',
-        createdAt: now, emailVerified: null, passwordHash: 'secret', tokenVersion: 1,
+        platformRoleId: null, createdAt: now, updatedAt: now, emailVerified: null,
+        passwordHash: 'secret', tokenVersion: 1,
       });
-      prisma.auditLog.findMany.mockResolvedValueOnce([
-        { id: 'log1', action: 'auth.login.success', metadata: { email: 'a@x.com' }, createdAt: now },
-      ]);
-      prisma.wallet.findUnique.mockResolvedValueOnce(null); // 钱包不存在
-      prisma.teamMembership.findMany.mockResolvedValueOnce([
-        { teamId: 't1', role: 'MEMBER', status: 'ACTIVE', joinedAt: now, team: { id: 't1', name: '团队A', slug: 'team-a', status: 'ACTIVE', balanceCents: 1000 } },
-      ]);
-      prisma.walletTransaction.findMany.mockResolvedValueOnce([]);
 
       const result = await service.adminUserDetail('user-admin', 'u1');
-      // user 经 publicUser 脱敏 + 补 createdAt/emailVerified。
       expect(result.user).toMatchObject({ id: 'u1', email: 'a@x.com', platformRole: 'NONE' });
       expect(result.user).not.toHaveProperty('passwordHash');
       expect(result.user).not.toHaveProperty('tokenVersion');
-      // 钱包不存在时 balanceCents 兜底 0（非 null）。
-      expect(result.wallet).toEqual({ balanceCents: 0 });
-      expect(result.loginHistory).toHaveLength(1);
-      // createdAt 转 ISO 字符串。
-      expect(result.loginHistory[0].createdAt).toBe('2026-06-15T00:00:00.000Z');
-      expect(result.teams[0]).toMatchObject({ teamId: 't1', role: 'MEMBER' });
+      expect(result).toEqual({ user: result.user });
+      expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
+      expect(prisma.teamMembership.findMany).not.toHaveBeenCalled();
+      expect(prisma.walletTransaction.findMany).not.toHaveBeenCalled();
+      const call = prisma.user.findUnique.mock.calls[0][0] as { select: Record<string, boolean> };
+      expect(call.select).not.toHaveProperty('passwordHash');
+      expect(call.select).not.toHaveProperty('tokenVersion');
     });
   });
 
@@ -1109,17 +1207,17 @@ describe('AdminService 用户管理 + 平台管理员管理完善（组C）', ()
     });
 
     it('返回 actor 维度审计日志（actor select 白名单脱敏）', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'admin-1' });
       prisma.auditLog.findMany.mockResolvedValueOnce([]);
       await service.adminActivity('user-admin', 'admin-1');
       const call = prisma.auditLog.findMany.mock.calls[0][0] as {
         where: { actorUserId: string };
-        include: { actor: { select: Record<string, boolean> } };
+        select: Record<string, boolean>;
       };
       expect(call.where.actorUserId).toBe('admin-1');
-      // actor select 白名单不含 passwordHash/tokenVersion。
-      expect(call.include.actor.select).not.toHaveProperty('passwordHash');
-      expect(call.include.actor.select).not.toHaveProperty('tokenVersion');
+      expect(call.select).not.toHaveProperty('metadata');
+      expect(call.select).not.toHaveProperty('actor');
+      expect(prisma.auditLog.count).toHaveBeenCalledWith({ where: call.where });
     });
   });
 });
-

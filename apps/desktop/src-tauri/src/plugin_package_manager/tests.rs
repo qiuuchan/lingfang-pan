@@ -196,6 +196,11 @@ fn installed_release_can_be_copied_to_workspace_then_uninstalled_with_data() {
     let workspace = manager
         .copy_installation_to_workspace(&installed.installation_id)
         .unwrap();
+    assert_eq!(
+        workspace.source_kind,
+        PluginReleaseSourceKind::CopiedInstallation
+    );
+    assert_eq!(workspace.source_label, "已安装插件副本");
     assert!(Path::new(&workspace.path).join("main.py").is_file());
     assert!(!Path::new(&workspace.path).join("data").exists());
 
@@ -439,6 +444,11 @@ fn imported_workspace_is_publishable_the_first_time() {
     let (artifact_path, _) = artifact(&root, "1.0.0", "print('imported')");
     let workspace = manager.import_workspace(&artifact_path).unwrap();
     assert!(workspace.content_sha256.is_none());
+    assert_eq!(
+        workspace.source_kind,
+        PluginReleaseSourceKind::LocalArtifact
+    );
+    assert_eq!(workspace.source_label, "本地 .lfplugin 制品");
 
     let packed = manager
         .pack_workspace(&workspace.workspace_id, None)
@@ -446,6 +456,86 @@ fn imported_workspace_is_publishable_the_first_time() {
     assert!(manager
         .ensure_workspace_publishable(&workspace.workspace_id, "1.0.0", &packed.artifact.sha256,)
         .is_ok());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_provenance_defaults_old_ledgers_and_tracks_creator_updates() {
+    let (manager, root) = manager();
+    let workspace = manager
+        .create_workspace(CreateWorkspaceInput {
+            title: "Creator Draft".to_string(),
+            manifest_id: "creator-draft".to_string(),
+            version: "0.1.0".to_string(),
+            runtime: "client".to_string(),
+            conversation_id: Some("conversation-1".to_string()),
+            source_kind: None,
+            source_label: None,
+        })
+        .unwrap();
+    assert_eq!(
+        workspace.source_kind,
+        PluginReleaseSourceKind::LingfangCreator
+    );
+    assert_eq!(workspace.source_label, "灵枋创建器");
+    assert_eq!(
+        serde_json::to_value(&workspace).unwrap()["sourceKind"],
+        "LINGFANG_CREATOR"
+    );
+
+    let synced = manager
+        .sync_workspace_metadata(
+            &workspace.workspace_id,
+            None,
+            Some(PluginReleaseSourceKind::ExternalTool),
+            Some("/Users/private/external-plugin".to_string()),
+        )
+        .unwrap();
+    assert_eq!(synced.source_kind, PluginReleaseSourceKind::ExternalTool);
+    assert_eq!(synced.source_label, "外部开发工具");
+
+    let mut ledger: Value = read_json(&manager.workspaces_path()).unwrap();
+    let item = ledger["workspaces"][0].as_object_mut().unwrap();
+    item.remove("sourceKind");
+    item.remove("sourceLabel");
+    write_json(&manager.workspaces_path(), &ledger).unwrap();
+    let restored = manager.list_workspaces().pop().unwrap();
+    assert_eq!(restored.source_kind, PluginReleaseSourceKind::Unknown);
+    assert!(restored.source_label.is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn tagged_workspace_reader_roundtrips_utf8_and_binary_bytes() {
+    let (manager, root) = manager();
+    let workspace = manager
+        .create_workspace(CreateWorkspaceInput {
+            title: "Binary Draft".to_string(),
+            manifest_id: "binary-draft".to_string(),
+            version: "0.1.0".to_string(),
+            runtime: "client".to_string(),
+            conversation_id: None,
+            source_kind: Some(PluginReleaseSourceKind::ExternalTool),
+            source_label: Some("Cursor workspace".to_string()),
+        })
+        .unwrap();
+    let binary = [0_u8, 159, 146, 150, 255, 10];
+    fs::write(Path::new(&workspace.path).join("notes.txt"), "中文 text").unwrap();
+    fs::write(Path::new(&workspace.path).join("icon.png"), binary).unwrap();
+
+    let files = manager
+        .read_workspace_files(&workspace.workspace_id)
+        .unwrap();
+    let text = files.iter().find(|file| file.path == "notes.txt").unwrap();
+    assert!(!text.binary);
+    assert_eq!(text.content, "中文 text");
+    let image = files.iter().find(|file| file.path == "icon.png").unwrap();
+    assert!(image.binary);
+    assert_eq!(
+        general_purpose::STANDARD.decode(&image.content).unwrap(),
+        binary
+    );
+    assert!(files.iter().all(|file| file.path != "_meta.json"));
     let _ = fs::remove_dir_all(root);
 }
 

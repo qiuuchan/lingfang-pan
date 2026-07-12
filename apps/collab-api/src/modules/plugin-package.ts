@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { badRequest, conflict, forbidden } from '../common';
+import { parseStrictSemVer } from './plugin-semver';
 
 export type PluginFileInput = {
   path: string;
@@ -53,6 +54,12 @@ export type NormalizedPluginPackage = {
 const MAX_PLUGIN_FILES = 1500;
 const MAX_PLUGIN_FILE_BYTES = 60 * 1024 * 1024;
 const MAX_PLUGIN_TOTAL_BYTES = 300 * 1024 * 1024;
+const MAX_MANIFEST_ID_LENGTH = 128;
+const MAX_MANIFEST_NAME_LENGTH = 128;
+const MAX_MANIFEST_DESCRIPTION_LENGTH = 4096;
+const MAX_MANIFEST_ENTRY_LENGTH = 512;
+const MAX_MANIFEST_CAPABILITIES = 64;
+const MAX_CAPABILITY_REASON_LENGTH = 500;
 
 // 合法 runtime_type 白名单（与契约 RuntimeType 四值一致）。
 // nodejs/python 为脚本型运行时：上传云端仅做源码托管，预览执行由桌面壳本地完成（见 R3）。
@@ -74,10 +81,20 @@ const ALLOWED_CAPABILITIES = new Set([
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
 ]);
+const ALLOWED_CAPABILITY_RISKS = new Set(['none', 'low', 'medium', 'high']);
 
-function cleanText(value: unknown, message: string) {
-  const text = String(value || '').trim();
-  if (!text) throw badRequest(message);
+function manifestString(
+  value: unknown,
+  field: string,
+  options: { defaultValue?: string; maxLength?: number; trim?: boolean; allowEmpty?: boolean } = {},
+) {
+  const raw = value === undefined ? options.defaultValue : value;
+  if (typeof raw !== 'string') throw badRequest(`manifest.${field} 必须是字符串`);
+  const text = options.trim ? raw.trim() : raw;
+  if (!options.allowEmpty && !text) throw badRequest(`manifest.${field} 不能为空`);
+  if (options.maxLength !== undefined && text.length > options.maxLength) {
+    throw badRequest(`manifest.${field} 长度不能超过 ${options.maxLength}`, { field, limit: options.maxLength });
+  }
   return text;
 }
 
@@ -91,22 +108,101 @@ function cleanPath(value: unknown) {
   return path;
 }
 
-export function normalizePluginPackage(input: PluginPackageInput): NormalizedPluginPackage {
-  const manifest = input.manifest;
-  const rawFiles = input.files;
-  if (!manifest || typeof manifest !== 'object') throw badRequest('manifest 不能为空');
-  if (!Array.isArray(rawFiles) || rawFiles.length === 0) throw badRequest('files 不能为空');
-  if (rawFiles.length > MAX_PLUGIN_FILES) throw badRequest('插件文件数量超限', { count: rawFiles.length, limit: MAX_PLUGIN_FILES });
-
-  const name = cleanText(manifest.name, '插件名称不能为空');
-  const version = cleanText(manifest.version || '0.1.0', '插件版本不能为空');
-  const entry = cleanPath(manifest.entry || 'ui/index.html');
-  const runtime = String(manifest.runtime_type || manifest.runtimeType || 'client').toLowerCase();
+function normalizedRuntime(manifest: PluginManifestInput) {
+  const snakeCase = manifest.runtime_type;
+  const raw = snakeCase === undefined || snakeCase === '' ? manifest.runtimeType : snakeCase;
+  const value = raw === undefined || raw === '' ? 'client' : raw;
+  if (typeof value !== 'string') throw badRequest('manifest.runtime_type 必须是字符串');
+  const runtime = value.toLowerCase();
   if (!ALLOWED_RUNTIME_TYPES.includes(runtime as typeof ALLOWED_RUNTIME_TYPES[number])) {
     throw badRequest('runtime_type 只允许 client / cloud / nodejs / python');
   }
-  const visibilityValue = String(manifest.visibility || 'tenant').toLowerCase();
-  if (visibilityValue !== 'tenant' && visibilityValue !== 'private') throw badRequest('visibility 只允许 tenant 或 private');
+  return runtime as typeof ALLOWED_RUNTIME_TYPES[number];
+}
+
+function normalizedVisibility(value: unknown) {
+  const raw = value === undefined || value === '' ? 'tenant' : value;
+  if (typeof raw !== 'string') throw badRequest('manifest.visibility 必须是字符串');
+  const visibility = raw.toLowerCase();
+  if (visibility !== 'tenant' && visibility !== 'private') {
+    throw badRequest('visibility 只允许 tenant 或 private');
+  }
+  return visibility;
+}
+
+function normalizedCapabilities(input: unknown): NormalizedPluginPackage['manifest']['capabilities'] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) throw badRequest('manifest.capabilities 必须是数组');
+  if (input.length > MAX_MANIFEST_CAPABILITIES) {
+    throw badRequest(`manifest.capabilities 不能超过 ${MAX_MANIFEST_CAPABILITIES} 项`, {
+      count: input.length,
+      limit: MAX_MANIFEST_CAPABILITIES,
+    });
+  }
+  return input.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw badRequest('manifest.capabilities 条目必须是对象', { index });
+    }
+    const capability = raw as Record<string, unknown>;
+    const kind = capability.kind;
+    if (typeof kind !== 'string' || !ALLOWED_CAPABILITIES.has(kind)) {
+      throw badRequest('插件能力不在允许范围内', { index, kind });
+    }
+    const reason = capability.reason === undefined ? '' : capability.reason;
+    if (typeof reason !== 'string') {
+      throw badRequest('manifest.capabilities.reason 必须是字符串', { index });
+    }
+    if (reason.length > MAX_CAPABILITY_REASON_LENGTH) {
+      throw badRequest(`manifest.capabilities.reason 长度不能超过 ${MAX_CAPABILITY_REASON_LENGTH}`, {
+        index,
+        limit: MAX_CAPABILITY_REASON_LENGTH,
+      });
+    }
+    const risk = capability.risk === undefined ? 'low' : capability.risk;
+    if (typeof risk !== 'string' || !ALLOWED_CAPABILITY_RISKS.has(risk)) {
+      throw badRequest('插件能力 risk 不合法', { index, kind, risk });
+    }
+    const requiresAdmin = capability.requires_admin === undefined ? false : capability.requires_admin;
+    if (typeof requiresAdmin !== 'boolean') {
+      throw badRequest('manifest.capabilities.requires_admin 必须是布尔值', { index });
+    }
+    const scope = capability.scope;
+    if (scope !== undefined && (!scope || typeof scope !== 'object' || Array.isArray(scope))) {
+      throw badRequest('manifest.capabilities.scope 必须是对象', { index });
+    }
+    return {
+      kind,
+      reason,
+      risk,
+      requires_admin: requiresAdmin,
+      ...(scope === undefined ? {} : { scope }),
+    };
+  });
+}
+
+export function normalizePluginPackage(input: PluginPackageInput): NormalizedPluginPackage {
+  const manifest = input.manifest;
+  const rawFiles = input.files;
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw badRequest('manifest 不能为空');
+  if (!Array.isArray(rawFiles) || rawFiles.length === 0) throw badRequest('files 不能为空');
+  if (rawFiles.length > MAX_PLUGIN_FILES) throw badRequest('插件文件数量超限', { count: rawFiles.length, limit: MAX_PLUGIN_FILES });
+
+  const name = manifestString(manifest.name, 'name', { maxLength: MAX_MANIFEST_NAME_LENGTH, trim: true });
+  const id = manifestString(manifest.id, 'id', { defaultValue: name, maxLength: MAX_MANIFEST_ID_LENGTH, trim: true });
+  const version = manifestString(manifest.version, 'version', { defaultValue: '0.1.0', trim: true });
+  if (!parseStrictSemVer(version)) throw badRequest('manifest.version 必须是严格 SemVer', { version });
+  const description = manifestString(manifest.description, 'description', {
+    defaultValue: '',
+    maxLength: MAX_MANIFEST_DESCRIPTION_LENGTH,
+    allowEmpty: true,
+  });
+  const entry = cleanPath(manifestString(manifest.entry, 'entry', {
+    defaultValue: 'ui/index.html',
+    maxLength: MAX_MANIFEST_ENTRY_LENGTH,
+    trim: true,
+  }));
+  const runtime = normalizedRuntime(manifest);
+  const visibilityValue = normalizedVisibility(manifest.visibility);
 
   const seen = new Set<string>();
   let totalBytes = 0;
@@ -126,26 +222,14 @@ export function normalizePluginPackage(input: PluginPackageInput): NormalizedPlu
   }).sort((a, b) => a.path.localeCompare(b.path));
 
   if (!seen.has(entry)) throw badRequest('manifest.entry 指向的文件不存在', { entry });
-  const capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities.map((capability) => {
-    const kind = String(capability?.kind || '').trim();
-    if (!ALLOWED_CAPABILITIES.has(kind)) throw badRequest('插件能力不在允许范围内', { kind });
-    const risk = String(capability?.risk || 'low');
-    if (!['none', 'low', 'medium', 'high'].includes(risk)) throw badRequest('插件能力 risk 不合法', { kind, risk });
-    return {
-      kind,
-      reason: String(capability?.reason || ''),
-      risk,
-      requires_admin: Boolean(capability?.requires_admin),
-      ...(capability?.scope === undefined ? {} : { scope: capability.scope }),
-    };
-  }) : [];
+  const capabilities = normalizedCapabilities(manifest.capabilities);
 
   const normalizedManifest = {
-    id: String(manifest.id || name).trim(),
+    id,
     name,
     version,
-    description: String(manifest.description || ''),
-    runtime_type: runtime as 'client' | 'cloud' | 'nodejs' | 'python',
+    description,
+    runtime_type: runtime,
     entry,
     visibility: visibilityValue as 'private' | 'tenant',
     capabilities,

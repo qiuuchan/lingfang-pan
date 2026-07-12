@@ -1,4 +1,4 @@
-import type { PluginCapability } from '@lingfang/contract';
+import type { PluginCapability, PluginReleaseSourceKind } from '@lingfang/contract';
 import { formatTimestamp } from './time';
 
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
@@ -216,6 +216,9 @@ export interface LoadedPlugin {
     createdAt: string;
     updatedAt: string;
     source: string;
+    /** Release/workspace provenance; never contains a local absolute path. */
+    sourceKind?: PluginReleaseSourceKind;
+    sourceLabel?: string;
     publishedToTeam?: boolean;
     conversationId?: string;
     turns?: unknown; // 对话轮次（编辑时恢复）

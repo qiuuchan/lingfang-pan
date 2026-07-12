@@ -21,6 +21,7 @@
     "@lingfang/contract": "workspace:*",
     "@lingfang/ui-tokens": "workspace:^",
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "ai": "^5.0.204",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

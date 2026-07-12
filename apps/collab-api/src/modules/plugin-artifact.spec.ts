@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { inspectPluginArtifact } from './plugin-artifact';
+import { inspectPluginArtifact, PLUGIN_ARTIFACT_MAX_METADATA_BYTES } from './plugin-artifact';
 
 type Entry = {
   name: string;
@@ -88,7 +88,18 @@ function makeZip(entries: Entry[]): Buffer {
 }
 
 const meta = Buffer.from(JSON.stringify({ format: 'lingfang-plugin', formatVersion: 4 }));
-const manifest = Buffer.from(JSON.stringify({ id: 'demo', name: 'Demo', version: '1.0.0', runtime_type: 'python', entry: 'main.py' }));
+const baseManifest = { id: 'demo', name: 'Demo', version: '1.0.0', runtime_type: 'python', entry: 'main.py' };
+const manifest = manifestBytes();
+
+function manifestBytes(overrides: Record<string, unknown> = {}) {
+  return Buffer.from(JSON.stringify({ ...baseManifest, ...overrides }));
+}
+
+function paddedJson(value: Record<string, unknown>, size: number) {
+  const json = Buffer.from(JSON.stringify(value));
+  if (json.length > size) throw new Error('test JSON exceeds requested padded size');
+  return Buffer.concat([json, Buffer.alloc(size - json.length, 0x20)]);
+}
 
 async function inspect(entries: Entry[]) {
   return inspectZip(makeZip(entries));
@@ -111,6 +122,163 @@ describe('inspectPluginArtifact', () => {
     ]);
     expect(result.manifest.version).toBe('1.0.0');
     expect(result.files).toEqual(expect.arrayContaining([{ path: 'main.py', sizeBytes: 8 }]));
+  });
+
+  it('applies manifest contract defaults and normalizes capability defaults', async () => {
+    const result = await inspect([
+      { name: '_meta.json', content: meta },
+      {
+        name: 'manifest.json',
+        content: Buffer.from(JSON.stringify({
+          id: 'demo',
+          name: 'Demo',
+          version: '1.0.0',
+          entry: 'main.py',
+          capabilities: [
+            { kind: 'ui.view' },
+            {
+              kind: 'plugin.submitMarketplace',
+              reason: '提交市场审核',
+              risk: 'high',
+              requires_admin: true,
+              scope: { channel: 'marketplace' },
+            },
+          ],
+        })),
+      },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ]);
+    expect(result.manifest).toMatchObject({
+      description: '',
+      runtime_type: 'client',
+      visibility: 'tenant',
+      capabilities: [
+        { kind: 'ui.view', reason: '', risk: 'low', requires_admin: false },
+        {
+          kind: 'plugin.submitMarketplace',
+          reason: '提交市场审核',
+          risk: 'high',
+          requires_admin: true,
+          scope: { channel: 'marketplace' },
+        },
+      ],
+    });
+  });
+
+  it('accepts manifest fields, metadata and capabilities exactly at their limits', async () => {
+    const entry = `src/${'e'.repeat(508)}`;
+    const result = await inspect([
+      {
+        name: '_meta.json',
+        content: paddedJson({ format: 'lingfang-plugin', formatVersion: 4 }, PLUGIN_ARTIFACT_MAX_METADATA_BYTES),
+      },
+      {
+        name: 'manifest.json',
+        content: paddedJson({
+          id: 'i'.repeat(128),
+          name: 'n'.repeat(128),
+          version: '1.0.0',
+          description: 'd'.repeat(4096),
+          runtime_type: 'python',
+          entry,
+          visibility: 'private',
+          capabilities: Array.from({ length: 64 }, () => ({
+            kind: 'ui.view',
+            reason: 'r'.repeat(500),
+            risk: 'low',
+            requires_admin: false,
+          })),
+        }, PLUGIN_ARTIFACT_MAX_METADATA_BYTES),
+      },
+      { name: entry, content: Buffer.from('print(1)') },
+    ]);
+    expect(result.manifest.id).toHaveLength(128);
+    expect(result.manifest.description).toHaveLength(4096);
+    expect(result.manifest.entry).toHaveLength(512);
+    expect(result.manifest.capabilities).toHaveLength(64);
+  });
+
+  it.each(['_meta.json', 'manifest.json'])('rejects oversized %s before collecting it', async (oversizedPath) => {
+    const oversized = Buffer.alloc(PLUGIN_ARTIFACT_MAX_METADATA_BYTES + 1, 0x20);
+    await expect(inspect([
+      { name: '_meta.json', content: oversizedPath === '_meta.json' ? oversized : meta },
+      { name: 'manifest.json', content: oversizedPath === 'manifest.json' ? oversized : manifest },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(/大小不能超过 256KiB/);
+  });
+
+  it.each([
+    ['id', { id: 'i'.repeat(129) }, /manifest\.id 长度不能超过 128/],
+    ['id with surrounding whitespace', { id: ` ${'i'.repeat(128)} ` }, /manifest\.id 长度不能超过 128/],
+    ['name', { name: 'n'.repeat(129) }, /manifest\.name 长度不能超过 128/],
+    ['description', { description: 'd'.repeat(4097) }, /manifest\.description 长度不能超过 4096/],
+    ['entry', { entry: 'e'.repeat(513) }, /manifest\.entry 长度不能超过 512/],
+  ])('rejects an oversized manifest %s', async (_field, overrides, message) => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes(overrides) },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(message);
+  });
+
+  it.each([
+    ['id', { id: 123 }],
+    ['name', { name: false }],
+    ['description', { description: [] }],
+    ['entry', { entry: { path: 'main.py' } }],
+  ])('rejects a non-string manifest %s instead of coercing it', async (_field, overrides) => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes(overrides) },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(/必须是字符串/);
+  });
+
+  it.each([
+    ['runtime_type', { runtime_type: 'PYTHON' }, /runtime_type 不受支持/],
+    ['visibility', { visibility: 'public' }, /visibility 只允许 private 或 tenant/],
+  ])('rejects an invalid manifest %s enum', async (_field, overrides, message) => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes(overrides) },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(message);
+  });
+
+  it('rejects a manifest entry that is not present in the artifact', async () => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes({ entry: 'missing.py' }) },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(/entry 指向的文件不存在/);
+  });
+
+  it('rejects more than 64 capabilities', async () => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta },
+      {
+        name: 'manifest.json',
+        content: manifestBytes({ capabilities: Array.from({ length: 65 }, () => ({ kind: 'ui.view' })) }),
+      },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(/不能超过 64 项/);
+  });
+
+  it.each([
+    ['array shape', {}, /capabilities 必须是数组/],
+    ['entry shape', [null], /条目必须是对象/],
+    ['kind', [{ kind: 'shell.exec' }], /kind 不受支持/],
+    ['reason type', [{ kind: 'ui.view', reason: 1 }], /reason 必须是字符串/],
+    ['reason length', [{ kind: 'ui.view', reason: 'r'.repeat(501) }], /reason 长度不能超过 500/],
+    ['risk', [{ kind: 'ui.view', risk: 'critical' }], /risk 不受支持/],
+    ['requires_admin', [{ kind: 'ui.view', requires_admin: 'false' }], /requires_admin 必须是布尔值/],
+    ['scope', [{ kind: 'ui.view', scope: [] }], /scope 必须是对象/],
+  ])('rejects an invalid capability %s', async (_field, capabilities, message) => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes({ capabilities }) },
+      { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(message);
   });
 
   it('accepts a consistent non-ZIP64 data descriptor entry', async () => {

@@ -17,7 +17,7 @@ import type { Prisma, Ticket, TicketMessage, TicketAttachment } from '@prisma/cl
 import { PrismaService } from '../prisma.service';
 import { AuthService } from './auth.service';
 import { NotificationService } from './notification.service';
-import { badRequest, notFound } from '../common';
+import { badRequest, conflict, notFound } from '../common';
 import {
   validateAttachments,
   inferAttachmentKind,
@@ -33,6 +33,25 @@ import {
 
 /** 工单附件根目录（后端 cwd 下，不入仓，不公开静态托管）。 */
 const UPLOADS_ROOT = ['uploads', 'tickets'];
+
+const ADMIN_TICKET_SUMMARY_SELECT = {
+  id: true,
+  userId: true,
+  teamId: true,
+  category: true,
+  title: true,
+  status: true,
+  priority: true,
+  handlerUserId: true,
+  lastReplyAt: true,
+  createdAt: true,
+  updatedAt: true,
+  user: { select: { id: true, displayName: true, email: true } },
+  team: { select: { id: true, name: true } },
+  _count: { select: { messages: true, attachments: true } },
+} as const satisfies Prisma.TicketSelect;
+
+type AdminTicketSummaryRow = Prisma.TicketGetPayload<{ select: typeof ADMIN_TICKET_SUMMARY_SELECT }>;
 
 export interface TicketViewer {
   userId: string;
@@ -118,23 +137,27 @@ export class TicketService {
 
   /** POST /api/tickets/:id/messages：用户追加回复（+附件）。CLOSED 不可追加；RESOLVED→IN_PROGRESS。 */
   async addUserMessage(userId: string, id: string, input: { body?: string }, files: UploadedFileLike[]) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
-    if (!ticket || ticket.userId !== userId) throw notFound('工单不存在');
-    if (ticket.status === 'CLOSED') throw badRequest('工单已关闭，无法追加回复（如需继续请新建工单）');
     const body = cleanBody(input.body, files.length > 0);
     if (!body && files.length === 0) throw badRequest('请填写内容或上传附件');
     validateAttachments(files);
 
-    const message = await this.prisma.ticketMessage.create({
-      data: { ticketId: id, authorUserId: userId, authorRole: 'USER', body },
+    const message = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.ticket.findUnique({ where: { id } });
+      if (!ticket || ticket.userId !== userId) throw notFound('工单不存在');
+      if (ticket.status === 'CLOSED') throw badRequest('工单已关闭，无法追加回复（如需继续请新建工单）');
+
+      const nextStatus = nextStatusOnUserReply(ticket.status as TicketStatusValue);
+      const claimed = await tx.ticket.updateMany({
+        where: { id, userId, status: ticket.status },
+        data: { status: nextStatus, lastReplyAt: new Date() },
+      });
+      if (claimed.count !== 1) throw conflict('工单状态已变化，请刷新后重试');
+
+      return tx.ticketMessage.create({
+        data: { ticketId: id, authorUserId: userId, authorRole: 'USER', body },
+      });
     });
     if (files.length > 0) await this.persistAttachments(id, message.id, files);
-
-    const nextStatus = nextStatusOnUserReply(ticket.status as TicketStatusValue);
-    await this.prisma.ticket.update({
-      where: { id },
-      data: { status: nextStatus, lastReplyAt: new Date() },
-    });
     return this.getForUser(userId, id);
   }
 
@@ -153,14 +176,10 @@ export class TicketService {
     const [items, total] = await Promise.all([
       this.prisma.ticket.findMany({
         where,
-        orderBy: { lastReplyAt: 'desc' },
+        orderBy: [{ lastReplyAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: {
-          user: { select: { id: true, displayName: true, email: true } },
-          team: { select: { id: true, name: true } },
-          _count: { select: { messages: true, attachments: true } },
-        },
+        select: ADMIN_TICKET_SUMMARY_SELECT,
       }),
       this.prisma.ticket.count({ where }),
     ]);
@@ -172,7 +191,7 @@ export class TicketService {
     const handlerMap = new Map(handlers.map((h) => [h.id, h.displayName]));
 
     return {
-      tickets: items.map((t) => this.adminTicketSummary(t, handlerMap.get(t.handlerUserId ?? '') ?? null)),
+      items: items.map((t) => this.adminTicketSummary(t, handlerMap.get(t.handlerUserId ?? '') ?? null)),
       total,
       page,
       pageSize,
@@ -188,25 +207,31 @@ export class TicketService {
 
   /** POST /api/admin/tickets/:id/messages：管理员回复（+附件）。OPEN→IN_PROGRESS，记 handler + 审计 + 通知。 */
   async addAdminMessage(actorId: string, id: string, input: { body?: string }, files: UploadedFileLike[]) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) throw notFound('工单不存在');
-    if (ticket.status === 'CLOSED') throw badRequest('工单已关闭，无法追加回复');
     const body = cleanBody(input.body, files.length > 0);
     if (!body && files.length === 0) throw badRequest('请填写内容或上传附件');
     validateAttachments(files);
 
-    const message = await this.prisma.ticketMessage.create({
-      data: { ticketId: id, authorUserId: actorId, authorRole: 'ADMIN', body },
-    });
-    if (files.length > 0) await this.persistAttachments(id, message.id, files);
+    const result = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.ticket.findUnique({ where: { id } });
+      if (!ticket) throw notFound('工单不存在');
+      if (ticket.status === 'CLOSED') throw badRequest('工单已关闭，无法追加回复');
 
-    const nextStatus = nextStatusOnAdminReply(ticket.status as TicketStatusValue);
-    await this.prisma.ticket.update({
-      where: { id },
-      data: { status: nextStatus, handlerUserId: actorId, lastReplyAt: new Date() },
+      const nextStatus = nextStatusOnAdminReply(ticket.status as TicketStatusValue);
+      const claimed = await tx.ticket.updateMany({
+        where: { id, status: ticket.status },
+        data: { status: nextStatus, handlerUserId: actorId, lastReplyAt: new Date() },
+      });
+      if (claimed.count !== 1) throw conflict('工单状态已变化，请刷新后重试');
+
+      const message = await tx.ticketMessage.create({
+        data: { ticketId: id, authorUserId: actorId, authorRole: 'ADMIN', body },
+      });
+      return { ticket, message, nextStatus };
     });
-    await this.audit(actorId, 'admin.ticket.replied', id, { status: nextStatus });
-    this.notify(ticket.userId, '工单收到新回复', `您的工单「${ticket.title}」收到管理员回复`, id);
+    if (files.length > 0) await this.persistAttachments(id, result.message.id, files);
+
+    await this.audit(actorId, 'admin.ticket.replied', id, { status: result.nextStatus });
+    this.notify(result.ticket.userId, '工单收到新回复', `您的工单「${result.ticket.title}」收到管理员回复`, id);
     return this.getAdmin(id);
   }
 
@@ -226,13 +251,23 @@ export class TicketService {
     }
     if (input.priority !== undefined) data.priority = input.priority as Ticket['priority'];
 
-    const updated = await this.prisma.ticket.update({ where: { id }, data });
+    if (input.status !== undefined) {
+      const claimed = await this.prisma.ticket.updateMany({
+        where: { id, status: ticket.status },
+        data,
+      });
+      if (claimed.count !== 1) throw conflict('工单状态已变化，请刷新后重试');
+    } else {
+      await this.prisma.ticket.update({ where: { id }, data });
+    }
+    const nextStatus = input.status ?? ticket.status;
+    const nextPriority = input.priority ?? ticket.priority;
     await this.audit(actorId, 'admin.ticket.status_changed', id, {
-      status: updated.status,
-      priority: updated.priority,
+      status: nextStatus,
+      priority: nextPriority,
     });
     if (input.status !== undefined && input.status !== ticket.status) {
-      this.notify(ticket.userId, '工单状态更新', `您的工单「${ticket.title}」状态变更为 ${this.statusLabel(updated.status)}`, id);
+      this.notify(ticket.userId, '工单状态更新', `您的工单「${ticket.title}」状态变更为 ${this.statusLabel(nextStatus)}`, id);
     }
     return this.getAdmin(id);
   }
@@ -352,11 +387,7 @@ export class TicketService {
   }
 
   private adminTicketSummary(
-    t: Ticket & {
-      user?: { id: string; displayName: string; email: string };
-      team?: { id: string; name: string } | null;
-      _count?: { messages: number; attachments: number };
-    },
+    t: AdminTicketSummaryRow,
     handlerName: string | null,
   ) {
     return {

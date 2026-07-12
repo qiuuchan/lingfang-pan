@@ -1,24 +1,38 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { labelOf } from '@/lib/types';
 
-export function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+export function Section({
+  title,
+  description,
+  actions,
+  children,
+  className,
+}: {
+  title: string;
+  description: string;
+  actions?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+    <section className={cn('space-y-4', className)}>
+      <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
+        </div>
+        {actions ? <div className="shrink-0">{actions}</div> : null}
+      </div>
+      <div>{children}</div>
+    </section>
   );
 }
 
 export function Panel({ title, description, children }: { title: string; description: string; children?: ReactNode }) {
   return (
-    <div className="rounded-xl border bg-muted/20 p-4">
+    <div className="rounded-lg border bg-muted/20 p-4">
       <div className="mb-3">
         <div className="font-medium">{title}</div>
         <div className="text-sm text-muted-foreground">{description}</div>
@@ -30,14 +44,16 @@ export function Panel({ title, description, children }: { title: string; descrip
 
 export function InfoGrid({ items }: { items: Array<[string, ReactNode]> }) {
   return (
-    <div className="grid gap-2 rounded-xl border bg-muted/20 p-3 text-sm">
+    <dl className="divide-y rounded-lg border text-sm">
       {items.map(([label, value]) => (
-        <div key={label} className="grid gap-1 sm:grid-cols-[96px_1fr]">
-          <div className="text-muted-foreground">{label}</div>
-          <div className="min-w-0 break-all text-foreground">{value || '—'}</div>
+        <div key={label} className="grid gap-1 px-3 py-2.5 sm:grid-cols-[112px_1fr] sm:gap-3">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 break-all text-foreground">
+            {value === null || value === undefined || value === '' ? '—' : value}
+          </dd>
         </div>
       ))}
-    </div>
+    </dl>
   );
 }
 
@@ -62,5 +78,5 @@ export function StatusBadge({ value }: { value: string }) {
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
 
 export function ActionBar({ children }: { children: ReactNode }) {
-  return <div className="flex items-center gap-2">{children}</div>;
+  return <div className="flex flex-wrap items-center gap-2">{children}</div>;
 }

@@ -1,7 +1,5 @@
 # 依赖
 node_modules/
-!apps/desktop/runtimes/nodejs/node_modules/
-!apps/desktop/runtimes/nodejs/node_modules/**
 target/
 dist/
 **/dist/
@@ -12,11 +10,8 @@ release/
 
 # 大体积运行时二进制 / 第三方 .lfplugin（不入仓，超过 Gitee 100MB 单文件限制）
 # 这些文件是本地构建/分发产物，需单独传输：
-#   - FFmpeg 运行时：构建时 tauri.conf.json resources 从 ../runtimes 打包进安装包
 #   - opencode.exe：本地代码助手二进制
 #   - 大型第三方插件包：单独分发，不纳入版本控制
-apps/desktop/runtimes/ffmpeg/ffmpeg.exe
-apps/desktop/runtimes/ffmpeg/ffprobe.exe
 apps/desktop/opencode/bin/opencode.exe
 plugins/moneyprinter-turbo.lfplugin
 # 所有 .lfplugin 插件包均为本地构建/分发产物（超 Gitee 100MB 单文件限制），

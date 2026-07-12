@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma.service';
 import { AppError, badRequest } from '../common';
 import { decryptApiKey, encryptApiKey, getLlmKey, maskApiKey } from '../crypto/credential-cipher';
 import { LLM_PROVIDER } from './dto/enums';
+import { normalizeBillingPage, type BillingPageQuery } from './admin-billing-data';
 
 /** relay 选中的渠道（含解密后的明文上游 key + 本次要用的 model）。 */
 export interface RoutedChannel {
@@ -29,16 +30,24 @@ export interface RoutedChannel {
 export class PoolService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async adminList() {
-    const pools = await this.prisma.pool.findMany({
+  async adminList(query: BillingPageQuery = {}) {
+    const { page, pageSize, skip, q } = normalizeBillingPage(query);
+    const where = q ? { name: { contains: q, mode: 'insensitive' as const } } : {};
+    const [pools, total] = await this.prisma.$transaction([
+      this.prisma.pool.findMany({
+      where,
       orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
+      skip,
+      take: pageSize,
       include: {
         team: { select: { id: true, name: true, slug: true } },
         _count: { select: { channels: true } },
       },
-    });
+      }),
+      this.prisma.pool.count({ where }),
+    ]);
     return {
-      pools: pools.map((p) => ({
+      items: pools.map((p) => ({
         id: p.id,
         name: p.name,
         scope: p.scope,
@@ -47,7 +56,7 @@ export class PoolService {
         description: p.description,
         channelCount: p._count.channels,
         createdAt: p.createdAt.toISOString(),
-      })),
+      })), total, page, pageSize,
     };
   }
 
@@ -132,14 +141,35 @@ export interface ChannelUpsertInput {
 export class ChannelService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async adminList(kind?: 'CHAT' | 'IMAGE') {
-    const where = kind ? { kind } : undefined;
-    const channels = await this.prisma.channel.findMany({
+  async adminList(kind?: 'CHAT' | 'IMAGE', query: BillingPageQuery = {}) {
+    const { page, pageSize, skip, q } = normalizeBillingPage(query);
+    const where = { ...(kind ? { kind } : {}), ...(q ? { name: { contains: q, mode: 'insensitive' as const } } : {}) };
+    const [channels, total] = await this.prisma.$transaction([
+      this.prisma.channel.findMany({
       where,
       orderBy: [{ kind: 'asc' }, { tier: 'asc' }, { createdAt: 'asc' }],
+      skip,
+      take: pageSize,
+      include: { pool: { select: { id: true, name: true, scope: true, teamId: true, team: { select: { id: true, name: true, slug: true } } } } },
+      }),
+      this.prisma.channel.count({ where }),
+    ]);
+    return { items: channels.map((c) => this.adminSummary(c)), total, page, pageSize };
+  }
+
+  async adminDetail(id: string) {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id },
       include: { pool: { select: { id: true, name: true, scope: true, teamId: true, team: { select: { id: true, name: true, slug: true } } } } },
     });
-    return { channels: channels.map((c) => this.adminView(c)) };
+    if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
+    return { channel: this.adminView(channel) };
+  }
+
+  private adminSummary(c: Parameters<ChannelService['adminView']>[0]) {
+    const view = this.adminView(c);
+    const { baseUrl: _baseUrl, models: _models, description: _description, ...summary } = view;
+    return { ...summary, modelCount: Array.isArray(_models) ? _models.length : 0 };
   }
 
   async adminCreate(actorId: string, input: ChannelUpsertInput) {

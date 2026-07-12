@@ -1,0 +1,30 @@
+{
+  "id": "plugin-import-publishing-governance",
+  "name": "plugin-import-publishing-governance",
+  "title": "完善插件导入、发布与治理系统",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-07-12",
+  "completedAt": "2026-07-12",
+  "branch": null,
+  "base_branch": "betav2",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-12-plugin-registry-provenance-lifecycle",
+    "07-12-desktop-plugin-import-publish",
+    "07-12-plugin-governance-source-status"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

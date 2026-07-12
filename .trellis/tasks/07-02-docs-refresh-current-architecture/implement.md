@@ -1,5 +1,7 @@
 # Refresh project docs to match current architecture - Implementation
 
+> 完成记录（2026-07-12）：README 与当前事实文档已按 NestJS/Prisma、Agents SDK + relay、package/release/listing 和按需运行时重写；根目录历史设计已增加状态声明与权威文档跳转。
+
 ## Ordered Checklist
 
 1. Refresh the main entry doc.

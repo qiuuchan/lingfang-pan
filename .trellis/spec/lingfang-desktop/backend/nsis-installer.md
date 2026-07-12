@@ -52,7 +52,7 @@ pnpm --filter @lingfang/desktop tauri build --bundles nsis
 ## resources 打包约束
 
 - `bundle.resources` 用 source→target 对象映射，如 `"../builtin-plugins": "builtin-plugins"`。
-- 软件内置脚本运行时必须同样通过 resources 打包：`"../runtimes": "runtimes"`。打包目录需包含 `python/` 与 `nodejs/` 子目录，运行时探测和插件执行只读取该资源目录，不回退系统 PATH。
+- Python/Node 不进入安装包 resources。应用首次需要时下载带固定 SHA256 的便携制品到用户应用数据目录；Resolver 只接受 AppManaged 或 UserSpecified 配置，不回退系统 PATH。
 - **支持 glob 包含，不支持排除语法**（无 `!`/`exclude`）。要排除 `__pycache__` 等：要么用精确包含 glob（会丢目录结构），要么 `beforeBuildCommand` 预清理，要么源目录本身保持干净。
 - builtin-plugins 必须打进包（quality.md 约束）：解包用 `7z l <exe>` 验证 `builtin-plugins/` 下各插件 manifest + 源码齐全。
 - runtimes 体积较大，打包前应确认目录中只包含发布所需文件；不要包含开发缓存、下载包或用户级配置。

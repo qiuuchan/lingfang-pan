@@ -28,8 +28,7 @@ pub const UNINSTALL_KEY_NAME: &str = "com.lingfang.desktop";
 
 /// 默认安装目录：`%LOCALAPPDATA%\LingFang`。
 pub fn default_install_dir() -> Result<PathBuf> {
-    let base = dirs::data_local_dir()
-        .ok_or_else(|| anyhow!("无法定位 LOCALAPPDATA 目录"))?;
+    let base = dirs::data_local_dir().ok_or_else(|| anyhow!("无法定位 LOCALAPPDATA 目录"))?;
     Ok(base.join(INSTALL_DIR_NAME))
 }
 

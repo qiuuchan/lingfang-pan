@@ -121,6 +121,37 @@ fn collect_files(root: &Path, directory: &Path, out: &mut Vec<PathBuf>) -> Resul
     Ok(())
 }
 
+pub(crate) fn collect_workspace_source_files(
+    workspace: &Path,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    let mut paths = Vec::new();
+    collect_files(workspace, workspace, &mut paths)?;
+    paths.retain(|path| {
+        path.strip_prefix(workspace)
+            .ok()
+            .is_some_and(|relative| relative != Path::new("_meta.json"))
+    });
+
+    let mut files = Vec::with_capacity(paths.len());
+    let mut total = 0_u64;
+    for path in paths {
+        let relative = path
+            .strip_prefix(workspace)
+            .map_err(|_| "插件文件越出工作区".to_string())?;
+        let normalized = normalized_relative(relative)?;
+        let size = fs::metadata(&path)
+            .map_err(|error| format!("读取插件文件信息失败：{error}"))?
+            .len();
+        if size > MAX_UNCOMPRESSED_BYTES.saturating_sub(total) {
+            return Err("插件文件总量超过 300MiB".to_string());
+        }
+        total += size;
+        files.push((normalized, path));
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(files)
+}
+
 pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| format!("读取制品失败：{error}"))?;
     let mut hash = Sha256::new();
@@ -155,22 +186,8 @@ pub(crate) fn package_workspace(
     .map_err(|error| format!("manifest.json 格式错误：{error}"))?;
     validate_manifest(&manifest)?;
 
-    let mut source_files = Vec::new();
-    collect_files(workspace, workspace, &mut source_files)?;
-    source_files.retain(|path| {
-        path.strip_prefix(workspace)
-            .ok()
-            .map(|relative| {
-                relative != Path::new("manifest.json") && relative != Path::new("_meta.json")
-            })
-            .unwrap_or(false)
-    });
-    source_files.sort_by_key(|path| {
-        path.strip_prefix(workspace)
-            .ok()
-            .and_then(|relative| normalized_relative(relative).ok())
-            .unwrap_or_default()
-    });
+    let mut source_files = collect_workspace_source_files(workspace)?;
+    source_files.retain(|(name, _)| name != "manifest.json");
     if source_files.len() + 2 > MAX_FILES {
         return Err("插件文件数量超过 1500".to_string());
     }
@@ -193,11 +210,7 @@ pub(crate) fn package_workspace(
         .map_err(|error| format!("序列化 manifest.json 失败：{error}"))?;
     zip.write_all(&manifest_bytes)
         .map_err(|error| format!("写入 manifest.json 失败：{error}"))?;
-    for path in source_files {
-        let relative = path
-            .strip_prefix(workspace)
-            .map_err(|_| "插件文件越出工作区".to_string())?;
-        let name = normalized_relative(relative)?;
+    for (name, path) in source_files {
         zip.start_file(&name, options)
             .map_err(|error| format!("写入制品条目 {name} 失败：{error}"))?;
         let mut source =
@@ -556,5 +569,36 @@ mod tests {
         assert!(extract_artifact(&artifact, &destination).is_err());
         assert!(!destination.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn write_file_count_workspace(root: &Path, source_files: usize) {
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("manifest.json"), r#"{"id":"count-demo","name":"Count","version":"1.0.0","runtime_type":"python","entry":"main.py"}"#).unwrap();
+        fs::write(root.join("main.py"), "print('ok')").unwrap();
+        for index in 1..source_files {
+            fs::write(root.join("src").join(format!("file-{index}.txt")), "x").unwrap();
+        }
+    }
+
+    #[test]
+    fn archive_file_limit_includes_two_v4_metadata_entries() {
+        let accepted = temp("file-limit-accepted");
+        write_file_count_workspace(&accepted, MAX_FILES - 2);
+        let accepted_artifact =
+            std::env::temp_dir().join(format!("accepted-{}.lfplugin", uuid::Uuid::new_v4()));
+        let inspected = package_workspace(&accepted, &accepted_artifact).unwrap();
+        assert_eq!(inspected.files.len(), MAX_FILES);
+
+        let rejected = temp("file-limit-rejected");
+        write_file_count_workspace(&rejected, MAX_FILES - 1);
+        let rejected_artifact =
+            std::env::temp_dir().join(format!("rejected-{}.lfplugin", uuid::Uuid::new_v4()));
+        let error = package_workspace(&rejected, &rejected_artifact).unwrap_err();
+        assert!(error.contains("文件数量超过 1500"));
+
+        let _ = fs::remove_dir_all(accepted);
+        let _ = fs::remove_dir_all(rejected);
+        let _ = fs::remove_file(accepted_artifact);
+        let _ = fs::remove_file(rejected_artifact);
     }
 }

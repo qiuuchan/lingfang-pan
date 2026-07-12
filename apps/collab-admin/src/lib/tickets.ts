@@ -64,7 +64,7 @@ export interface TicketDetail {
 }
 
 export interface AdminTicketListResult {
-  tickets: TicketSummary[];
+  items: TicketSummary[];
   total: number;
   page: number;
   pageSize: number;
@@ -100,7 +100,7 @@ export interface AdminTicketListQuery {
 }
 
 /** 工单列表（筛选 + 分页）。 */
-export async function listAdminTickets(query: AdminTicketListQuery): Promise<AdminTicketListResult> {
+export async function listAdminTickets(query: AdminTicketListQuery, signal?: AbortSignal): Promise<AdminTicketListResult> {
   const params = new URLSearchParams();
   if (query.status) params.set('status', query.status);
   if (query.category) params.set('category', query.category);
@@ -109,7 +109,7 @@ export async function listAdminTickets(query: AdminTicketListQuery): Promise<Adm
   if (query.page) params.set('page', String(query.page));
   if (query.pageSize) params.set('pageSize', String(query.pageSize));
   const qs = params.toString();
-  return api<AdminTicketListResult>(`/api/admin/tickets${qs ? `?${qs}` : ''}`);
+  return api<AdminTicketListResult>(`/api/admin/tickets${qs ? `?${qs}` : ''}`, { signal });
 }
 
 /** 工单详情。 */

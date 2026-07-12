@@ -25,6 +25,15 @@ function makePackage(runtime_type: string, entry = 'main.py') {
   };
 }
 
+function packageWithManifest(overrides: Record<string, unknown>, files?: Array<{ path: string; content: string }>) {
+  const base = makePackage('python');
+  return {
+    ...base,
+    manifest: { ...base.manifest, ...overrides },
+    ...(files ? { files } : {}),
+  } as unknown as Parameters<typeof normalizePluginPackage>[0];
+}
+
 describe('normalizePluginPackage runtime_type 映射', () => {
   it('client → CLIENT（回归保护）', () => {
     const pkg = normalizePluginPackage(makePackage('client', 'main.py'));
@@ -57,11 +66,22 @@ describe('normalizePluginPackage runtime_type 映射', () => {
     const pkg = normalizePluginPackage({
       manifest: {
         id: 'x', name: 'x', version: '0.1.0', runtimeType: 'NODEJS', entry: 'main.py',
-        capabilities: [],
+        visibility: 'PRIVATE', capabilities: [],
       },
       files: [{ path: 'main.py', content: 'console.log(1)' }],
     });
     expect(pkg.runtimeType).toBe('NODEJS');
+    expect(pkg.visibility).toBe('PRIVATE');
+  });
+
+  it('空 runtime_type/visibility 保留旧入口的别名和默认容错', () => {
+    const pkg = normalizePluginPackage(packageWithManifest({
+      runtime_type: '',
+      runtimeType: 'PYTHON',
+      visibility: '',
+    }));
+    expect(pkg.runtimeType).toBe('PYTHON');
+    expect(pkg.visibility).toBe('TEAM');
   });
 
   it('非法 runtime（如 rust）抛 badRequest', () => {
@@ -95,6 +115,116 @@ describe('normalizePluginPackage runtime_type 映射', () => {
     });
     expect(pkg.runtimeType).toBe('NODEJS');
     expect(pkg.manifest.entry).toBe('src/index.js');
+  });
+});
+
+describe('normalizePluginPackage manifest 核心约束', () => {
+  it('trim 后接受字段、能力数量和能力内容恰好位于上限', () => {
+    const entry = `src/${'e'.repeat(508)}`;
+    const pkg = normalizePluginPackage(packageWithManifest({
+      id: ` ${'i'.repeat(128)} `,
+      name: ` ${'n'.repeat(128)} `,
+      version: ' 1.2.3-beta.1+build.5 ',
+      description: 'd'.repeat(4096),
+      entry: ` ${entry} `,
+      capabilities: Array.from({ length: 64 }, () => ({
+        kind: 'ui.view',
+        reason: 'r'.repeat(500),
+        risk: 'high',
+        requires_admin: true,
+        scope: { surface: 'desktop' },
+      })),
+    }, [{ path: entry, content: 'ok' }]));
+
+    expect(pkg.manifest.id).toHaveLength(128);
+    expect(pkg.manifest.name).toHaveLength(128);
+    expect(pkg.manifest.version).toBe('1.2.3-beta.1+build.5');
+    expect(pkg.manifest.description).toHaveLength(4096);
+    expect(pkg.manifest.entry).toHaveLength(512);
+    expect(pkg.manifest.capabilities).toHaveLength(64);
+    expect(pkg.manifest.capabilities[0]).toMatchObject({
+      reason: 'r'.repeat(500),
+      requires_admin: true,
+      scope: { surface: 'desktop' },
+    });
+  });
+
+  it.each([
+    ['id', { id: 'i'.repeat(129) }, /manifest\.id 长度不能超过 128/],
+    ['name', { name: 'n'.repeat(129) }, /manifest\.name 长度不能超过 128/],
+    ['description', { description: 'd'.repeat(4097) }, /manifest\.description 长度不能超过 4096/],
+    ['entry', { entry: 'e'.repeat(513) }, /manifest\.entry 长度不能超过 512/],
+  ])('拒绝超过上限的 manifest.%s', (_field, overrides, message) => {
+    expect(() => normalizePluginPackage(packageWithManifest(overrides))).toThrow(message);
+  });
+
+  it.each([
+    ['id', { id: 123 }],
+    ['name', { name: false }],
+    ['version', { version: 100 }],
+    ['description', { description: null }],
+    ['entry', { entry: { path: 'main.py' } }],
+  ])('拒绝非字符串 manifest.%s', (_field, overrides) => {
+    expect(() => normalizePluginPackage(packageWithManifest(overrides))).toThrow(/必须是字符串/);
+  });
+
+  it.each([
+    ['id', { id: '   ' }],
+    ['name', { name: '\n\t' }],
+  ])('拒绝 trim 后为空的 manifest.%s', (_field, overrides) => {
+    expect(() => normalizePluginPackage(packageWithManifest(overrides))).toThrow(/不能为空/);
+  });
+
+  it.each(['1.0', '01.0.0', 'v1.0.0', '1.0.0-', '1.0.0+'])('拒绝非严格 SemVer：%s', (version) => {
+    expect(() => normalizePluginPackage(packageWithManifest({ version }))).toThrow(/严格 SemVer/);
+  });
+
+  it('entry 先 trim 再按既有安全路径规则校验', () => {
+    const pkg = normalizePluginPackage(packageWithManifest({ entry: ' main.py ' }));
+    expect(pkg.manifest.entry).toBe('main.py');
+    expect(() => normalizePluginPackage(packageWithManifest({ entry: '../main.py' }))).toThrow(/空段|\.\./);
+  });
+
+  it('缺失 capabilities 默认空数组', () => {
+    const pkg = normalizePluginPackage(packageWithManifest({ capabilities: undefined }));
+    expect(pkg.manifest.capabilities).toEqual([]);
+  });
+
+  it('拒绝超过 64 项的 capabilities', () => {
+    expect(() => normalizePluginPackage(packageWithManifest({
+      capabilities: Array.from({ length: 65 }, () => ({ kind: 'ui.view' })),
+    }))).toThrow(/不能超过 64 项/);
+  });
+
+  it.each([
+    ['array shape', {}, /capabilities 必须是数组/],
+    ['entry shape', [null], /条目必须是对象/],
+    ['kind type', [{ kind: 1 }], /能力不在允许范围内/],
+    ['kind whitelist', [{ kind: ' shell.exec ' }], /能力不在允许范围内/],
+    ['reason type', [{ kind: 'ui.view', reason: 1 }], /reason 必须是字符串/],
+    ['reason length', [{ kind: 'ui.view', reason: 'r'.repeat(501) }], /reason 长度不能超过 500/],
+    ['risk type', [{ kind: 'ui.view', risk: false }], /risk 不合法/],
+    ['risk whitelist', [{ kind: 'ui.view', risk: 'critical' }], /risk 不合法/],
+    ['requires_admin', [{ kind: 'ui.view', requires_admin: 'false' }], /requires_admin 必须是布尔值/],
+    ['scope array', [{ kind: 'ui.view', scope: [] }], /scope 必须是对象/],
+    ['scope null', [{ kind: 'ui.view', scope: null }], /scope 必须是对象/],
+  ])('拒绝非法 capability %s', (_field, capabilities, message) => {
+    expect(() => normalizePluginPackage(packageWithManifest({ capabilities }))).toThrow(message);
+  });
+
+  it('requires_admin 仅在缺失时默认 false', () => {
+    const pkg = normalizePluginPackage(packageWithManifest({ capabilities: [{ kind: 'ui.view' }] }));
+    expect(pkg.manifest.capabilities).toEqual([
+      { kind: 'ui.view', reason: '', risk: 'low', requires_admin: false },
+    ]);
+  });
+
+  it.each([
+    ['runtime_type', { runtime_type: false }, /runtime_type 必须是字符串/],
+    ['runtimeType', { runtime_type: undefined, runtimeType: {} }, /runtime_type 必须是字符串/],
+    ['visibility', { visibility: [] }, /visibility 必须是字符串/],
+  ])('拒绝用 String 隐式转换非法 manifest.%s 结构', (_field, overrides, message) => {
+    expect(() => normalizePluginPackage(packageWithManifest(overrides))).toThrow(message);
   });
 });
 

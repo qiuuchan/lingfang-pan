@@ -57,6 +57,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'auth.register': '注册账号',
   'auth.login.success': '登录成功',
   'auth.login.failed': '登录失败',
+  'auth.login.locked': '账号登录已锁定',
   'auth.logout': '退出登录',
   'auth.token.refreshed': '刷新会话令牌',
   'auth.password.reset': '重置密码',
@@ -129,6 +130,11 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'admin.plugin.updated': '更新插件治理状态',
   'admin.plugin.unlisted': '下架市场插件',
   'admin.plugin.delisted': '下架市场插件',
+  'admin.plugin_release.approved': '审核通过插件发行版',
+  'admin.plugin_release.rejected': '驳回插件发行版',
+  'admin.plugin_release.artifact_downloaded': '下载插件发行版制品',
+  'admin.plugin_package.delisted': '平台暂停市场插件包',
+  'admin.plugin_package.relisted': '平台恢复市场插件包',
   'admin.llm_provider.created': '创建 LLM Provider',
   'admin.llm_provider.updated': '更新 LLM Provider',
   'admin.llm_provider.deleted': '删除 LLM Provider',
@@ -143,6 +149,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // === system（平台配置/启动）===
   'admin.setting.updated': '更新平台设置',
   'admin.setting.test_email': '测试 SMTP 邮件',
+  'admin.setting.test_captcha': '测试验证码配置',
+  'admin.setting.test_gitee': '测试 Gitee 配置',
   'admin.setting.secret_revealed': '查看敏感配置明文',
   'platform_admin.bootstrap': '引导平台管理员',
 };

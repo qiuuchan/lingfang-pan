@@ -1,15 +1,14 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
-import { Loader2Icon } from 'lucide-react';
+import { Loader2Icon, SparklesIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { api, apiBase, clearApiBase, configureApiBase, errorMessage, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
-import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, PluginWorkspaceMode, Session, SettingsTab, View } from '@/lib/types';
+import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate, loadUpdateChannel } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
-import { WorkspaceTransition } from '@/components/WorkspaceTransition';
 import { BackendUnreachable } from '@/components/BackendUnreachable';
 import { PanelDialog } from '@/components/PanelDialog';
 import { ProfilePanel } from '@/components/ProfilePanel';
@@ -17,8 +16,11 @@ import { NotificationCenter } from '@/components/NotificationCenter';
 import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
+import { RuntimeSetupGate } from '@/components/runtime/RuntimeSetupGate';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
@@ -134,6 +136,17 @@ function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
 // 项 9：最近使用插件（与 pins 同构：租户隔离、置顶去重、限量 5）。运行插件时记入，侧栏分区展示。
 const RECENT_MAX = 5;
 const recentKey = (tenantId: string | null) => `lf:recent:${tenantId || 'none'}`;
+const COMPACT_SIDEBAR_QUERY = '(max-width: 767px)';
+
+function loadSidebarOpen(): boolean {
+  try {
+    if (typeof window !== 'undefined' && window.matchMedia?.(COMPACT_SIDEBAR_QUERY).matches) return false;
+    return localStorage.getItem('lf:sidebar-open') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function loadRecent(tenantId: string | null): string[] {
   try {
     const raw = localStorage.getItem(recentKey(tenantId));
@@ -259,12 +272,10 @@ export default function App() {
   // 后续请求成功或 testBackendUrl 探测通过时派发 reachable → false，恢复正常业务页。
   const [backendUnreachable, setBackendUnreachable] = useState(false);
   const [view, setViewState] = useState<View>('home');
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
-    // 默认折叠：首次无 key → getItem 返回 null → !== '1' → false。
-    try { return localStorage.getItem('lf:sidebar-open') === '1'; } catch { return false; }
-  });
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(loadSidebarOpen);
   // Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 或侧边栏搜索按钮唤起。
   const [searchOpen, setSearchOpen] = useState(false);
+  const [creatorFloatingOpen, setCreatorFloatingOpen] = useState(false);
   // 项 14：AccountDialog 已拆为独立悬浮窗——每个功能各自一个 open state，由 openAccountSettings 路由分发。
   // 06-24：原 walletOpen + teamOpen 合并为单一 teamWalletOpen（团队钱包）。
   const [teamWalletOpen, setTeamWalletOpen] = useState(false);
@@ -282,8 +293,6 @@ export default function App() {
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
-  // 工作区切换全屏过渡动画（运行↔开发插件切换时短暂显示）。
-  const [workspaceTransition, setWorkspaceTransition] = useState<{ active: boolean; mode: PluginWorkspaceMode }>({ active: false, mode: 'run' });
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPluginState] = useState<LoadedPlugin | null>(null);
   const runningPluginRequestRef = useRef(0);
@@ -408,20 +417,6 @@ export default function App() {
     setRunningPlugin(null);
     setViewState('run-plugins');
   }, [closeFeaturePanels, setRunningPlugin]);
-
-  const openPluginWorkspaceMode = useCallback((mode: PluginWorkspaceMode) => {
-    closeFeaturePanels();
-    setRunningPlugin(null);
-    // 当前已在目标模式则不重复触发动画。
-    const targetView = mode === 'run' ? 'run-plugins' : 'develop-plugins';
-    if (view === targetView) {
-      setViewState(targetView);
-      return;
-    }
-    setWorkspaceTransition({ active: true, mode });
-    setViewState(targetView);
-    window.setTimeout(() => setWorkspaceTransition((prev) => ({ ...prev, active: false })), 650);
-  }, [closeFeaturePanels, setRunningPlugin, view]);
 
   const setView = useCallback((nextView: View) => {
     if (nextView === 'settings') {
@@ -686,7 +681,18 @@ export default function App() {
     return () => { cancelled = true; };
   }, [session.tenantId]);
 
-  // 侧栏开合持久化：用户切换后写盘，跨重启保留（首次无 key 默认折叠，见上 useState 初值）。
+  // 小视口进入时自动收起一次，保留标题栏按钮供用户按需重新展开。
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const media = window.matchMedia(COMPACT_SIDEBAR_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setSidebarOpen(false);
+    };
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
+
+  // 侧栏开合持久化：用户切换后写盘，跨重启保留；小视口默认折叠。
   useEffect(() => {
     try { localStorage.setItem('lf:sidebar-open', sidebarOpen ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
   }, [sidebarOpen]);
@@ -842,7 +848,6 @@ export default function App() {
   else if (view === 'team-admin') body = <TeamAdmin />;
   else if (view === 'draft-plugins') body = <DraftPlugins />;
   else body = null;
-  const pluginTitleMode: PluginWorkspaceMode = view === 'develop-plugins' ? 'develop' : 'run';
   // 开发插件页隐藏外层 Sidebar，但其侧边栏（CreatorWorkspaceSidebar）复用 sidebarOpen 控制折叠，
   // 顶部标题栏的折叠按钮始终可用（控制当前可见的那个侧边栏）。
   const showAppSidebar = view !== 'develop-plugins';
@@ -850,12 +855,10 @@ export default function App() {
   return (
     <AppContext.Provider value={ctx}>
       <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-        {/* 自定义标题栏：侧边栏折叠按钮 + 应用名 + 插件模式切换 + 窗口控制（最小化/最大化/关闭）。 */}
+        {/* 紧凑自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制。 */}
         <TitleBar
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
-          pluginMode={view === 'run-plugins' || view === 'develop-plugins' ? pluginTitleMode : undefined}
-          onPluginModeChange={view === 'run-plugins' || view === 'develop-plugins' ? openPluginWorkspaceMode : undefined}
         />
         <div className="flex min-h-0 flex-1">
           {showAppSidebar && (
@@ -866,7 +869,6 @@ export default function App() {
             />
           )}
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <WorkspaceTransition active={workspaceTransition.active} mode={workspaceTransition.mode} />
             {backendUnreachable ? (
               // R6 后端不可达：替换业务页为友好页（保留 TitleBar/Sidebar，用户仍可拖窗）。
               // 「重试」探测成功后派发 reachable 退出此态。
@@ -958,8 +960,30 @@ export default function App() {
       <AvatarMenu open={avatarMenuOpen} onClose={() => setAvatarMenuOpen(false)} collapsed={!sidebarOpen} />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {view !== 'develop-plugins' && !creatorFloatingOpen && (
+        <Button
+          type="button"
+          size="lg"
+          className="fixed bottom-6 right-6 z-40 h-12 gap-2 rounded-lg px-4 shadow-lg"
+          onClick={() => setCreatorFloatingOpen(true)}
+          title="打开 AI 插件创建器"
+        >
+          <SparklesIcon className="size-4" />
+          <span>AI 创建插件</span>
+        </Button>
+      )}
+      <Dialog open={creatorFloatingOpen} onOpenChange={setCreatorFloatingOpen}>
+        <DialogContent className="flex h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1500px]">
+          <DialogTitle className="sr-only">AI 创建插件</DialogTitle>
+          <DialogDescription className="sr-only">通过 AI 对话创建、编辑并发布插件</DialogDescription>
+          <Suspense fallback={<ListSkeleton rows={8} />}>
+            <CreatorWorkspace onClose={() => setCreatorFloatingOpen(false)} />
+          </Suspense>
+        </DialogContent>
+      </Dialog>
       {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}
       <PermissionConsentDialog />
+      <RuntimeSetupGate />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );

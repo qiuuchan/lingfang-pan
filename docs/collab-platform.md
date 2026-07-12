@@ -1,100 +1,33 @@
-# 三平台多租户协作系统
+# 协作平台概览
 
-## 平台边界
+> 本文描述当前平台，不再记录已完成的旧服务迁移过程。
 
-```mermaid
-graph TD
-  Desktop[前台：apps/desktop 本地客户端]
-  Admin[管理端：apps/collab-admin 网页端]
-  API[后端：apps/collab-api NestJS]
-  DB[(PostgreSQL)]
+LingFang 协作平台由一个 NestJS 后端、一个桌面客户端和一个 Web 管理端组成。三端共享身份、团队、RBAC、插件发行、市场、relay、灵石计费、通知和更新发布能力。
 
-  Member[普通用户] --> Desktop
-  TeamAdmin[团队管理员] --> Desktop
-  PlatformAdmin[平台管理员] --> Admin
+## 服务组成
 
-  Desktop --> API
-  Admin --> API
-  API --> DB
-  API --> Docs[Swagger /api/docs]
-```
+| 模块 | 路径 | 职责 |
+|---|---|---|
+| 协作 API | `apps/collab-api` | 云端业务、Prisma 数据访问、鉴权和审计 |
+| 桌面端 | `apps/desktop` | 创建、预览、安装和运行插件 |
+| 管理端 | `apps/collab-admin` | 平台治理、配置、计费、用户和团队管理 |
+| 契约 | `packages/contract` | 跨层 schema 与类型 |
 
-- 前台：普通用户和团队管理员使用本地客户端。
-- 管理端：平台管理员使用网页端。
-- 后端：所有认证、权限、团队、插件、余额、审批和审计都在统一 API 中完成。
+## 主要业务
 
-## 角色
+- 用户登录后选择或创建团队，权限由平台/团队两级角色决定。
+- 桌面工作区发布为 package release，平台按发行版审核并维护市场 listing。
+- 插件市场安装使用不可变制品、摘要校验和本地安装账本。
+- 创建器和插件 AI 请求通过 relay，后端统一路由模型渠道并结算灵石。
+- 管理端通过治理中心处理插件发行和团队管理员申请，通过分页 API 管理增长型集合。
 
-| 角色 | 入口 | 能力 |
-| --- | --- | --- |
-| 平台管理员 | 网页管理端 | 用户、团队、插件、审批、余额、审计 |
-| 团队管理员 | 本地客户端 | 所属团队成员、邀请码、余额流水 |
-| 普通用户 | 本地客户端 | 加入团队、查看团队空间、使用可用插件 |
+## 部署边界
 
-平台管理员登录本地客户端时会被提示使用网页管理端。普通用户或团队管理员登录网页管理端时会被拒绝。
+`collab-api` 使用 PostgreSQL 或 MySQL，可选 Redis 缓存。`collab-admin` 是静态 SPA。桌面端通过用户配置的平台地址访问 API，并通过签名 updater 端点获取更新。
 
-## 初始管理员
+部署和接口细节见：
 
-初始平台管理员由 `apps/collab-api` 的 seed/bootstrap 创建：
-
-```bash
-pnpm -C apps/collab-api seed:admin
-```
-
-需要环境变量：
-
-- `PLATFORM_ADMIN_BOOTSTRAP_ENABLED=true`
-- `PLATFORM_ADMIN_EMAIL`
-- `PLATFORM_ADMIN_PASSWORD`
-- `PLATFORM_ADMIN_NAME`
-
-规则：
-
-- 如果已经存在平台管理员，不重复创建，也不覆盖密码。
-- 如果邮箱已存在且尚无平台管理员，则提升该用户为平台管理员。
-- 生产初始化完成后建议关闭 `PLATFORM_ADMIN_BOOTSTRAP_ENABLED`。
-
-## 业务流程
-
-1. 平台管理员通过 seed 创建初始账号。
-2. 平台管理员登录网页管理端，创建团队、设置余额、启用插件。
-3. 普通用户在本地客户端注册，输入邀请码加入团队。
-4. 团队管理员在本地客户端注册时提交申请。
-5. 平台管理员在网页管理端审批团队管理员申请。
-6. 团队管理员在本地客户端管理成员、邀请码和余额流水。
-7. 插件启用/禁用由平台管理员控制，本地客户端只显示启用插件。
-
-## 数据隔离
-
-- 团队域数据必须归属某个团队。
-- 团队管理员只能访问所属团队。
-- 普通用户只能访问所属团队授权数据。
-- 平台管理员接口统一放在 `/api/admin/*`，由后端校验平台角色。
-
-## 双后端 → collab-api 收敛现状（2026-06-13）
-
-> 本节说明平台当前正从 Rust 双后端形态收敛到统一 NestJS collab-api 的进展与约束。**活跃后端契约权威为 [docs/collab-api.md](collab-api.md)。**
-
-### 收敛方向
-
-- 当前正在将桌面客户端（`apps/desktop`）从 Rust **apps/server**（`:8787`，路径**无 `/api` 前缀**）收敛到 NestJS **collab-api**（`:3000`，路径**带 `/api` 前缀**）。
-- LLM 生成、钱包、市场、审核、`/llm/*`、`/marketplace/*`、`/wallet`、`/admin/review/*` 已在 commit `7ef4bf0` 迁移到 collab-api（迁移映射见 [docs/03-backend-and-llm.md](03-backend-and-llm.md) §2.2）。
-- Rust apps/server 仅保留身份、租户、插件草稿 CRUD 与目录安装/授权的旧契约骨架（实际路由见 [docs/03-backend-and-llm.md](03-backend-and-llm.md) §2.1）。
-
-### 多团队切换功能已移除
-
-- 旧的 `TenantSelect` 多团队切换（对应 Rust 的 `POST /auth/switch-tenant`）**已移除**。
-- collab-api 采用「**单当前团队** + 邀请码」模型：普通用户通过 `POST /api/invitations/redeem` 凭邀请码加入团队，团队管理员通过 `POST /api/team-admin-applications` 提交申请、由平台管理员审批后获得团队。
-- 团队归属与权限以 collab-api 的当前团队上下文为准，不再支持运行时在多个团队间切换。
-
-### JWT 不互通（临时约束）
-
-- Rust apps/server 与 collab-api 当前的 **JWT claims 结构与签名 secret 不互通**，两套后端各自签发/校验 token。
-- 收敛完成（桌面端全面切到 collab-api）后，将统一为 collab-api 的 JWT 契约，apps/server 的鉴权随之退役。
-- 在收敛过渡期内，桌面端面向哪个后端，就使用哪个后端的登录态，不跨后端复用 token。
-
-### 权威契约指引
-
-- 活跃后端（团队/插件/余额/审批/审计/LLM 代理）契约：[docs/collab-api.md](collab-api.md)。
-- 部署与端口：[docs/collab-deployment.md](collab-deployment.md)。
-- 旧 Rust 路由与迁移脉络（仅历史保留）：[docs/03-backend-and-llm.md](03-backend-and-llm.md)。
+- [协作 API](./collab-api.md)
+- [部署指南](./collab-deployment.md)
+- [管理端指南](./collab-admin-guide.md)
+- [桌面客户端](./collab-desktop-client.md)

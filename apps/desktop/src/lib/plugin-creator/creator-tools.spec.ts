@@ -22,6 +22,8 @@ const stagedDraft = (patch: Partial<StagedPlugin> = {}): StagedPlugin => ({
   visibility: 'tenant',
   capabilities: [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low', requires_admin: false }],
   files: [f('ui/index.html', '<!doctype html><html></html>')],
+  sourceKind: 'LINGFANG_CREATOR',
+  sourceLabel: '灵枋创建器',
   ...patch,
 });
 
@@ -88,6 +90,10 @@ describe('validateStagedCompleteness', () => {
     });
   });
 
+  it('cloud 保留声明的现有入口，不套用 client/node/python 命名约束', () => {
+    expect(validateStagedCompleteness('cloud', 'cloud/handler.ts', [f('cloud/handler.ts')])).toBeNull();
+  });
+
   it('基础校验失败优先返回（入口不在 files）', () => {
     const err = validateStagedCompleteness('python', 'main.py', [f('requirements.txt')]);
     expect(err).toBe('入口文件 main.py 不在 files 中');
@@ -113,6 +119,8 @@ describe('withSyncedStagedManifest', () => {
     });
     expect(parsed.capabilities).toHaveLength(1);
     expect(parsed.capabilities[0]).toMatchObject({ kind: 'ui.view' });
+    expect(parsed).not.toHaveProperty('sourceKind');
+    expect(parsed).not.toHaveProperty('sourceLabel');
     expect(synced.files.some((file) => file.path === 'ui/index.html')).toBe(true);
   });
 

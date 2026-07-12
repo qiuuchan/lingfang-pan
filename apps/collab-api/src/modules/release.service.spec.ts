@@ -34,6 +34,7 @@ function mockPrisma() {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
+    count: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
   };
@@ -234,33 +235,63 @@ describe('ReleaseService', () => {
     expect(prisma.releaseAsset.delete).not.toHaveBeenCalled();
   });
 
-  it('listAdmin 返回全部状态（含 DRAFT/ARCHIVED）且含 assets', async () => {
+  it('listAdmin 返回服务端分页摘要且排除 notes/assets', async () => {
     prisma.release.findMany.mockResolvedValue([
-      makeRelease({ id: 'r1', status: 'DRAFT', assets: [] }),
-      makeRelease({ id: 'r2', status: 'ARCHIVED', assets: [{ id: 'a', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: 1, createdAt: now }] }),
+      makeRelease({ id: 'r1', status: 'DRAFT', _count: { assets: 0 } }),
+      makeRelease({ id: 'r2', status: 'ARCHIVED', _count: { assets: 1 } }),
     ]);
-    const result = await service.listAdmin('user-admin');
+    prisma.release.count.mockResolvedValue(2);
+    const result = await service.listAdmin('user-admin', { page: 1, pageSize: 20 });
     expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      skip: 0,
+      take: 20,
+      select: expect.objectContaining({
+        _count: { select: { assets: true } },
+      }),
     }));
-    expect(result.releases).toHaveLength(2);
-    expect(result.releases[0].status).toBe('DRAFT');
-    expect(result.releases[1].status).toBe('ARCHIVED');
-    expect(result.releases[1].assets).toHaveLength(1);
+    expect(result).toMatchObject({ total: 2, page: 1, pageSize: 20 });
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).not.toHaveProperty('notes');
+    expect(result.items[0]).not.toHaveProperty('assets');
+    expect(result.items[1].assetCount).toBe(1);
   });
 
-  it('listAdmin channel 过滤传入 where', async () => {
+  it('listAdmin channel/status/q 过滤与 count 共用同一 where', async () => {
     prisma.release.findMany.mockResolvedValue([]);
-    await service.listAdmin('user-admin', 'BETA');
+    prisma.release.count.mockResolvedValue(0);
+    await service.listAdmin('user-admin', { channel: 'BETA', status: 'DRAFT', q: 'preview' });
+    const where = {
+      channel: 'BETA',
+      status: 'DRAFT',
+      OR: [
+        { version: { contains: 'preview', mode: 'insensitive' } },
+        { title: { contains: 'preview', mode: 'insensitive' } },
+      ],
+    };
     expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { channel: 'BETA' },
+      where,
     }));
+    expect(prisma.release.count).toHaveBeenCalledWith({ where });
   });
 
   it('listAdmin 非 platform admin 被拒（403）', async () => {
     auth.ensurePlatformAdmin.mockRejectedValueOnce(forbidden('需要平台管理员'));
     await expect(service.listAdmin('user-member')).rejects.toMatchObject({ status: 403 });
     expect(prisma.release.findMany).not.toHaveBeenCalled();
+  });
+
+  it('getAdmin 仅在打开详情后返回 notes 与 assets', async () => {
+    prisma.release.findUnique.mockResolvedValue(makeRelease({
+      assets: [{ id: 'a', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: 1, createdAt: now }],
+    }));
+    const result = await service.getAdmin('user-admin', 'release-1');
+    expect(prisma.release.findUnique).toHaveBeenCalledWith({
+      where: { id: 'release-1' },
+      include: { assets: { orderBy: [{ platform: 'asc' }, { arch: 'asc' }] } },
+    });
+    expect(result.release.notes).toBe('## 1.0.0');
+    expect(result.release.assets).toHaveLength(1);
   });
 
   it('uploadAsset 写文件 + 自动计算 SHA-256 + 建 asset', async () => {
