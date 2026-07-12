@@ -99,7 +99,8 @@ function emptyForm(kind: ChannelKind, pools: Pool[]): FormState {
 }
 
 function formFromChannel(c: Channel): FormState {
-  return { name: c.name, protocol: c.protocol, provider: c.provider, tier: c.tier, poolId: c.poolId, baseUrl: c.baseUrl, upstreamKey: '', modelsText: c.models.join('\n'), status: c.status, description: c.description, pricingModel: c.models[0] ?? '', pricingUnit: c.kind === 'IMAGE' ? 'PER_IMAGE' : 'PER_TOKEN_INPUT', pricePerUnit: 1, contextWindow: undefined };
+  const models = Array.isArray(c.models) ? c.models : [];
+  return { name: c.name, protocol: c.protocol, provider: c.provider, tier: c.tier, poolId: c.poolId, baseUrl: c.baseUrl, upstreamKey: '', modelsText: models.join('\n'), status: c.status, description: c.description, pricingModel: models[0] ?? '', pricingUnit: c.kind === 'IMAGE' ? 'PER_IMAGE' : 'PER_TOKEN_INPUT', pricePerUnit: 1, contextWindow: undefined };
 }
 
 function parseModels(text: string): string[] {

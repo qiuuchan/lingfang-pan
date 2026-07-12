@@ -61,7 +61,7 @@ LingFang 是一个 monorepo 形态的 AI 插件平台，核心能力是用对话
 
 - **OpenAI Agents SDK + 平台 relay** —— 创建器通过统一 Agent 会话调用模型，不依赖用户机器上的 CLI 编码助手。
 - **结构化工具链** —— Agent 读取、写入和验证工作区文件，前端展示对话、草稿、诊断与发布状态。
-- **本地运行边界** —— Python/Node 插件只使用 Runtime Resolver 选定的应用管理或用户显式指定运行时，不静默回退系统 PATH。
+- **本地运行边界** —— 插件运行、创建、预览和依赖安装只使用安装包与仓库内置的 Python、Node.js、FFmpeg、Chromium，不回退系统 PATH。
 
 ### 模型网关
 
@@ -343,7 +343,7 @@ pnpm -C apps/collab-admin preview   # Vite 内置 preview（开发用，不推�
 docker compose -f docker-compose.collab.yml up -d
 ```
 
-该编排默认包含：`postgres:16`（`lingfang_collab` 库，宿主 `:5434`）+ `collab-api`（自动 `prisma:generate` / `prisma:deploy` + seed + `start`）+ `collab-admin`（构建注入 API 地址后 preview）。配置见 `.env.collab.example`。
+该编排默认包含：`postgres:16`（`lingfang_collab` 库，宿主 `:5434`）+ `collab-api`（自动 `prisma:generate` / `prisma:deploy` + seed + `start`）+ `collab-admin`（Nginx 托管静态资源并将同源 `/api/` 反代到 API 容器）。配置见 `.env.collab.example`；生产部署前必须替换 JWT、初始管理员密码和 `LLM_KEY_ENCRYPTION_KEY` 示例值。
 
 ---
 
