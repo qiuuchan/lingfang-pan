@@ -138,8 +138,8 @@ export async function runPluginScript(input: RunPluginScriptInput): Promise<RunS
 
 /** 运行时缺失指引文案（与 Rust install_hint 镜像）。 */
 export const RUNTIME_INSTALL_HINT: Record<ScriptRuntime, string> = {
-  nodejs: '未检测到可用的 Node.js 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装路径。',
-  python: '未检测到可用的 Python 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装路径。',
+  nodejs: '未检测到软件内置 Node.js。安装包可能不完整，请重新安装灵坊工作台。',
+  python: '未检测到软件内置 Python。安装包可能不完整，请重新安装灵坊工作台。',
 };
 
 /** 运行时显示名（UI 状态条展示）。 */
@@ -165,7 +165,7 @@ export interface RunPluginShellInput {
   shell?: 'cmd' | 'powershell' | 'pwsh';
   /** 工作目录相对子路径（如 'src'），默认插件目录根；不能是绝对路径或含 .. */
   cwd?: string;
-  /** 超时毫秒，默认 120000；长任务（playwright install）可调大。 */
+  /** 超时毫秒，默认 120000；安装大型依赖时可调大。 */
   timeoutMs?: number;
   /** 运行时类型，决定 PATH 注入策略；省略则由 Rust 按文件存在性自动探测。 */
   runtime?: 'python' | 'nodejs';
@@ -174,8 +174,8 @@ export interface RunPluginShellInput {
 /**
  * 在插件目录执行 shell 命令（Agent Bash 工具底层）。
  *
- * PATH 已注入应用管理的 Python/Node + 插件 venv（python）或 node_modules/.bin（nodejs）+
- * 国内镜像源。命令失败（exit≠0）时仍返回结果（不抛异常），便于读 stderr 修复。
+ * PATH 已注入软件内置 Python/Node/FFmpeg/Chromium + 插件 venv（python）或
+ * node_modules/.bin（nodejs）+ 国内镜像源。命令失败时仍返回结果，便于读 stderr 修复。
  * cwd 锁定插件目录（防越权访问其它插件或系统目录）。
  */
 export function runPluginShell(input: RunPluginShellInput): Promise<ShellResult> {

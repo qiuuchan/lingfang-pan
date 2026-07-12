@@ -109,15 +109,15 @@ fn materialize_writes_files_and_detects_escape() {
 
 #[test]
 fn install_hint_covers_both_runtimes() {
-    // 新文案引导去设置页下载/指定，不再提"软件内置 runtimes/"。
+    // 内置运行时缺失属于安装损坏，不提供下载或系统路径旁路。
     let node_hint = install_hint(ScriptRuntime::Nodejs);
     let py_hint = install_hint(ScriptRuntime::Python);
     assert!(
-        node_hint.contains("Node.js") && node_hint.contains("设置"),
+        node_hint.contains("Node.js") && node_hint.contains("重新安装"),
         "Node 提示：{node_hint}"
     );
     assert!(
-        py_hint.contains("Python") && py_hint.contains("设置"),
+        py_hint.contains("Python") && py_hint.contains("重新安装"),
         "Python 提示：{py_hint}"
     );
 }

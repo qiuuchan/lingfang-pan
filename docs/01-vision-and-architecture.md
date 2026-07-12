@@ -34,7 +34,7 @@ collab-admin (React) ----------------> collab-api
 
 `apps/desktop` 是 Tauri 2 桌面应用。React 负责产品工作区，Rust 壳负责本机文件、进程、插件安装账本、运行时解析和更新。AI 创建链路位于 `src/lib/agent/` 与 `src/components/creator/`，通过 OpenAI Agents SDK 连接平台 relay；已删除的本地 CLI 助手链路不是当前架构。
 
-Python 和 Node 插件只通过应用的 Runtime Resolver 启动。Resolver 使用应用管理或用户显式指定的运行时，不静默回退系统 PATH。client 插件运行在受控 WebView/iframe 边界。
+Python 和 Node 插件只通过应用的 Runtime Resolver 启动。Resolver 仅使用仓库与安装包内置的 Python、Node.js、FFmpeg、Chromium，不回退系统 PATH。client 插件运行在受控 WebView/iframe 边界。
 
 ### 协作后端
 

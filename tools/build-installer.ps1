@@ -25,6 +25,11 @@ $conf = Get-Content -Raw -LiteralPath $confPath | ConvertFrom-Json
 $Version = $conf.version
 Write-Host "[1/7] 版本号：$Version"
 
+node scripts/materialize-bundled-runtimes.mjs
+if ($LASTEXITCODE -ne 0) { throw "内置运行时还原失败（exit $LASTEXITCODE）" }
+node scripts/verify-bundled-runtimes.mjs
+if ($LASTEXITCODE -ne 0) { throw "内置运行时校验失败（exit $LASTEXITCODE）" }
+
 # --- 编译主程序（tauri build --no-bundle，生产模式）+ installer（release）---
 # 关键：必须用 tauri build 而非裸 cargo build——tauri build 以「生产模式」编译，
 # 把前端（frontendDist=../dist）嵌入二进制并走 tauri://localhost 协议加载；
@@ -63,8 +68,12 @@ New-Item -ItemType Directory -Force -Path $Staging | Out-Null
 Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $Staging 'lingfang-desktop.exe') -Force
 # updater.exe = 干净 installer.exe（无 payload）。
 Copy-Item -LiteralPath $InstallerExe -Destination (Join-Path $Staging 'updater.exe') -Force
-# 静态资源：脚本运行时由应用按需下载，不进入安装包。
+# 静态资源：两条安装链共用仓库内同一套完整运行时。
+Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/runtimes') -Destination (Join-Path $Staging 'runtimes') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/builtin-plugins') -Destination (Join-Path $Staging 'builtin-plugins') -Recurse -Force
+$StagingRuntimes = Join-Path $Staging 'runtimes'
+node scripts/verify-bundled-runtimes.mjs $StagingRuntimes
+if ($LASTEXITCODE -ne 0) { throw "staging 内置运行时校验失败（exit $LASTEXITCODE）" }
 # 图标（卸载器/快捷方式用）。
 New-Item -ItemType Directory -Force -Path (Join-Path $Staging 'icons') | Out-Null
 Copy-Item -LiteralPath (Join-Path $Root 'apps/desktop/src-tauri/icons/icon.ico') -Destination (Join-Path $Staging 'icons/icon.ico') -Force

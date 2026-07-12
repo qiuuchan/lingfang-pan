@@ -3,8 +3,7 @@
 //! 职责：在桌面壳侧为 nodejs/python 运行时插件提供「无参数一次性预览执行」。
 //! 复用 code_assistant.rs 的子进程骨架（run_capture_with_env / resolve_workspace），
 //! 在 app_data_dir/plugin-sandbox/<plugin_id> 下落盘用户脚本后带超时运行。
-//! Node.js / Python 解释器由 runtime_resolver 统一定位（应用下载的便携版 / 用户指定 /
-//! 过渡期内置兜底），永不回退系统 PATH。
+//! Node.js / Python 解释器由 runtime_resolver 统一定位到软件内置资源，永不回退系统 PATH。
 //!
 //! 安全边界（design §6.1 明确留痕）：
 //! - 本通道是【不受控执行通道】，绕过 capability 网关（capability.rs 的声明式白名单
@@ -101,12 +100,10 @@ pub struct RunResult {
 fn install_hint(runtime: ScriptRuntime) -> String {
     match runtime {
         ScriptRuntime::Nodejs => {
-            "未检测到可用的 Node.js 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装的 Node.js 路径。"
-                .to_string()
+            "未检测到软件内置 Node.js。安装包可能不完整，请重新安装灵坊工作台。".to_string()
         }
         ScriptRuntime::Python => {
-            "未检测到可用的 Python 运行时。请前往「设置 → 脚本运行环境」下载便携版或指定已安装的 Python 路径。"
-                .to_string()
+            "未检测到软件内置 Python。安装包可能不完整，请重新安装灵坊工作台。".to_string()
         }
     }
 }
@@ -507,7 +504,7 @@ pub fn run_plugin_script(
                             Some(format!("Python 依赖已就绪（venv: {}）", venv_py.display()));
                     }
                     run_binary = venv_py;
-                    // 声明了 playwright 则补下载浏览器二进制（与正式运行路径一致，避免预览能跑而正式跑不起来）。
+                    // 声明了 playwright 则校验内置浏览器（与正式运行路径一致）。
                     // 失败不致命：记进 install_log 让 AI 知晓（缺浏览器会直接导致试跑崩溃，stderr 会被捕获）。
                     if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon, None) {
                         let prev = install_log
@@ -536,7 +533,7 @@ pub fn run_plugin_script(
                     if sandbox_canon.join("package.json").is_file() {
                         install_log = Some("Node 依赖已就绪（node_modules 就绪）".to_string());
                     }
-                    // 同 Python 分支：声明了 playwright 则补下载浏览器二进制，失败记 install_log。
+                    // 同 Python 分支：声明了 playwright 则校验内置浏览器，失败记 install_log。
                     if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon, None) {
                         let prev = install_log
                             .take()
@@ -560,7 +557,7 @@ pub fn run_plugin_script(
     }
 
     let mut args: Vec<String> = Vec::new();
-    // 解释器由 runtime_resolver 统一定位（应用管理的便携版 / 用户指定 / 过渡期内置兜底）。
+    // 解释器由 runtime_resolver 统一定位到软件内置资源。
     // H1 修复：Python 追加 -u（无缓冲），避免管道块缓冲导致短输出在超时 kill 时丢失。
     // H4 修复（多文件相对 import）：追加 PYTHONPATH=<sandbox根> env（见下方 runtime_env）。
     if input.runtime == ScriptRuntime::Python {

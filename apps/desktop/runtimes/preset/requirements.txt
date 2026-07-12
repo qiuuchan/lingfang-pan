@@ -1,0 +1,26 @@
+# 灵方桌面端内置 Python 运行时预装包清单（轻量通用档）
+#
+# 用途：AI 创建的插件常用的网络请求 / HTML 解析 / 配置 / 日期 / Excel / 图片处理。
+# 体积取舍：刻意不含 numpy/pandas/scipy 等大型科学计算库，保持安装包轻量。
+# 安装：见同目录 install-presets.ps1 / install-presets.sh，装入 ../python 的 site-packages。
+# 全部固定主版本上限，避免未来大版本破坏内置环境的可复现性。
+
+# HTTP 客户端
+requests>=2.32,<3
+httpx>=0.27,<1
+
+# HTML / XML 解析
+beautifulsoup4>=4.12,<5
+lxml>=5.2,<6
+
+# 配置 / 序列化
+PyYAML>=6.0,<7
+
+# 日期时间
+python-dateutil>=2.9,<3
+
+# Excel / 表格
+openpyxl>=3.1,<4
+
+# 图片处理
+pillow>=10.3,<12

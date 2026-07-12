@@ -24,9 +24,14 @@ $conf = Get-Content -Raw -LiteralPath $confPath | ConvertFrom-Json
 $Version = $conf.version
 Write-Host "[1/4] 版本号：$Version"
 
+node scripts/materialize-bundled-runtimes.mjs
+if ($LASTEXITCODE -ne 0) { throw "内置运行时还原失败（exit $LASTEXITCODE）" }
+node scripts/verify-bundled-runtimes.mjs
+if ($LASTEXITCODE -ne 0) { throw "内置运行时校验失败（exit $LASTEXITCODE）" }
+
 # --- tauri build（出 NSIS 包）---
 # tauri.conf.json 已配 bundle.active=true + targets=["nsis"]，故直接 tauri build。
-# 自动跑 beforeBuildCommand（pnpm vite:build）编译前端 + 嵌入 + NSIS 打包。
+# 自动跑 beforeBuildCommand（运行时校验 + pnpm vite:build）编译前端 + 嵌入 + NSIS 打包。
 # 首次构建会自动下载 NSIS 工具链（Tauri 自带），稍慢。
 Write-Host '[2/4] tauri build（含前端编译 + NSIS 打包）…'
 Push-Location (Join-Path $Root 'apps/desktop')

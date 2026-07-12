@@ -1,42 +1,37 @@
 //! 统一运行时解析器（runtime_resolver）。
 //!
-//! 所有 Python / Node 进程调用的**唯一入口**：plugin_runner（持久化执行）、
+//! 所有 Python / Node / FFmpeg / Chromium 进程调用的**唯一入口**：plugin_runner（持久化执行）、
 //! plugin_script（预览执行 + probe）、Agent 工具链（经 Tauri 命令间接）全部经此解析。
 //!
 //! ## 「应用一定用自己管理的运行时」三条不变式
 //!
-//! 1. `resolve_runtime_command()` 永不查系统 PATH，只查配置中的用户指定与应用管理目录。
+//! 1. `resolve_runtime_command()` 永不查系统 PATH，只查应用内置 `runtimes/`。
 //! 2. `env()` 清空宿主 PATH（`retain` 掉 key==PATH），只注入命中来源的 PATH ——
 //!    子进程内部 `subprocess.run("python")` / `child_process.exec("node")` 也只能命中应用管理的解释器。
 //! 3. `require_runtime_command()` 找不到返回结构化错误，前端引导用户检查安装包完整性。
 //!
 //! ## 解析优先级
 //!
-//! `resolve(kind)` 顺序：UserSpecified → AppManaged → None。
+//! `resolve()` 只解析应用内置目录；缺失时返回 None 并提示安装包损坏。
 //!
 //! ## 目录布局约定
 //!
-//! `python_dir` / `node_dir` **直接含主 exe**（`python.exe` / `node.exe` 在该目录下）。
-//! 配置中的目录直接包含主 exe；非 Windows 平台使用常规 `bin/` 布局。
+//! 本项目正式发布目标仅 Windows x64，Python / Node / FFmpeg 主 exe 直接位于各自目录根。
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use crate::mirror_presets::{extract_host, resolve_npm_url, resolve_pip_url, MirrorConfig};
-use crate::runtime_config::{runtime_executable_dir, RuntimeConfig, RuntimeConfigStore};
+use tauri::Manager;
 
-/// Playwright 浏览器二进制下载镜像（国内加速，固定 npmmirror CDN）。
-///
-/// 与 npm registry 解耦：npm 源用户可配（清华/阿里/...），但 playwright 浏览器二进制
-/// 只 npmmirror 有稳定镜像，故固定。`playwright install` 默认从 cdn.playwright.dev 拉
-/// chromium/wekit/firefox，国内极慢/失败；设此 host 后走 npmmirror 的 binaries/playwright 镜像。
-pub(crate) const PLAYWRIGHT_DOWNLOAD_HOST: &str = "https://cdn.npmmirror.com/binaries/playwright";
+use crate::mirror_presets::{extract_host, resolve_npm_url, resolve_pip_url, MirrorConfig};
+
+pub(crate) const PLAYWRIGHT_CHROMIUM_REVISION: &str = "1228";
+pub(crate) const PLAYWRIGHT_CHROMIUM_VERSION: &str = "149.0.7827.55";
 
 /// 运行时来源（供 UI 状态展示 + 日志）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RuntimeSource {
-    AppManaged,
-    UserSpecified,
+    Bundled,
 }
 
 /// 单个运行时的解析结果（dir + 来源）。
@@ -51,85 +46,92 @@ struct ResolvedRuntime {
 
 /// 统一运行时解析器：所有 Python / Node 调用的唯一入口。
 pub(crate) struct RuntimeResolver {
+    root: Option<PathBuf>,
     python: Option<ResolvedRuntime>,
     node: Option<ResolvedRuntime>,
-    // FFmpeg 作为第三内置运行时（runtimes/ffmpeg/）：插件进程 PATH 自动包含，
-    // shutil.which("ffmpeg") 直接命中内置版本，插件无需宿主机安装 ffmpeg。
     ffmpeg: Option<ResolvedRuntime>,
-    config: RuntimeConfig,
+    chromium: Option<ResolvedRuntime>,
+    mirrors: MirrorConfig,
 }
 
 impl RuntimeResolver {
-    /// 从 config + 文件系统解析当前生效的运行时。
+    /// 从应用内置目录解析当前生效的运行时。
     pub(crate) fn resolve<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<Self, String> {
-        let config = RuntimeConfigStore::from_app(app)?.read();
-        let python = resolve_python(&config, app);
-        let node = resolve_node(&config, app);
-        let ffmpeg = resolve_ffmpeg(&config, app);
+        let root = bundled_runtimes_root(app);
+        let python = resolve_bundled(&root, "python", python_exe);
+        let node = resolve_bundled(&root, "nodejs", node_exe);
+        let ffmpeg = resolve_bundled(&root, "ffmpeg", ffmpeg_exe);
+        let chromium = root.as_ref().and_then(|root| {
+            let dir = root.join("chromium");
+            chromium_runtime_complete(&dir).then_some(ResolvedRuntime {
+                dir,
+                source: RuntimeSource::Bundled,
+            })
+        });
         Ok(Self {
+            root,
             python,
             node,
             ffmpeg,
-            config,
+            chromium,
+            mirrors: MirrorConfig::default(),
         })
     }
 
-    /// 测试构造：直接指定 python_dir / node_dir（标 AppManaged 来源）。
+    /// 测试构造：直接指定 python_dir / node_dir（标 Bundled 来源）。
     /// 用 None 表示该运行时未配置，供 env()/require_* 的缺失路径测试。
     #[cfg(test)]
     pub(crate) fn from_dirs(python_dir: Option<PathBuf>, node_dir: Option<PathBuf>) -> Self {
         let python = python_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::AppManaged,
+            source: RuntimeSource::Bundled,
         });
         let node = node_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::AppManaged,
+            source: RuntimeSource::Bundled,
         });
         Self {
+            root: None,
             python,
             node,
             ffmpeg: None,
-            config: RuntimeConfig::default(),
+            chromium: None,
+            mirrors: MirrorConfig::default(),
         }
     }
 
-    /// 测试构造：带 config（测镜像注入）。
-    #[cfg(test)]
-    pub(crate) fn from_dirs_with_config(
-        python_dir: Option<PathBuf>,
-        node_dir: Option<PathBuf>,
-        config: RuntimeConfig,
-    ) -> Self {
-        let python = python_dir.map(|dir| ResolvedRuntime {
-            dir,
-            source: RuntimeSource::AppManaged,
-        });
-        let node = node_dir.map(|dir| ResolvedRuntime {
-            dir,
-            source: RuntimeSource::AppManaged,
-        });
-        Self {
-            python,
-            node,
-            ffmpeg: None,
-            config,
-        }
-    }
-
-    /// 测试构造：指定 ffmpeg_dir（标 AppManaged 来源）。python/node 默认 None，
+    /// 测试构造：指定 ffmpeg_dir（标 Bundled 来源）。python/node 默认 None，
     /// 专用于 ffmpeg 进 PATH 的测试。
     #[cfg(test)]
     pub(crate) fn from_dirs_with_ffmpeg(ffmpeg_dir: Option<PathBuf>) -> Self {
         let ffmpeg = ffmpeg_dir.map(|dir| ResolvedRuntime {
             dir,
-            source: RuntimeSource::AppManaged,
+            source: RuntimeSource::Bundled,
         });
         Self {
+            root: None,
             python: None,
             node: None,
             ffmpeg,
-            config: RuntimeConfig::default(),
+            chromium: None,
+            mirrors: MirrorConfig::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_root(root: PathBuf) -> Self {
+        let chromium_dir = root.join("chromium");
+        let chromium = chromium_runtime_complete(&chromium_dir).then_some(ResolvedRuntime {
+            dir: chromium_dir,
+            source: RuntimeSource::Bundled,
+        });
+        Self {
+            root: Some(root),
+            python: None,
+            node: None,
+            ffmpeg: None,
+            chromium,
+            mirrors: MirrorConfig::default(),
         }
     }
 
@@ -162,6 +164,17 @@ impl RuntimeResolver {
         self.ffmpeg.as_ref().map(|r| ffmpeg_exe(&r.dir))
     }
 
+    pub(crate) fn chromium(&self) -> Option<PathBuf> {
+        self.chromium.as_ref().map(|r| chromium_exe(&r.dir))
+    }
+
+    pub(crate) fn playwright_browsers_dir(&self) -> Option<PathBuf> {
+        self.root
+            .as_ref()
+            .map(|root| root.join("chromium").join("ms-playwright"))
+            .filter(|dir| dir.is_dir())
+    }
+
     /// Python 主 exe 所在目录（供 bundled_pip_wheel_dir 推导 ensurepip/_bundled 路径）。
     pub(crate) fn python_dir(&self) -> Option<&Path> {
         self.python.as_ref().map(|r| r.dir.as_path())
@@ -179,6 +192,10 @@ impl RuntimeResolver {
         self.ffmpeg.as_ref().map(|r| r.dir.as_path())
     }
 
+    pub(crate) fn chromium_dir(&self) -> Option<&Path> {
+        self.chromium.as_ref().map(|r| r.dir.as_path())
+    }
+
     pub(crate) fn python_source(&self) -> Option<&RuntimeSource> {
         self.python.as_ref().map(|r| &r.source)
     }
@@ -193,9 +210,13 @@ impl RuntimeResolver {
         self.ffmpeg.as_ref().map(|r| &r.source)
     }
 
+    pub(crate) fn chromium_source(&self) -> Option<&RuntimeSource> {
+        self.chromium.as_ref().map(|r| &r.source)
+    }
+
     #[allow(dead_code)]
     pub(crate) fn mirrors(&self) -> &MirrorConfig {
-        &self.config.mirrors
+        &self.mirrors
     }
 
     /// 按命令名解析运行时绝对路径（永不查系统 PATH）。
@@ -210,16 +231,15 @@ impl RuntimeResolver {
             // FFmpeg 内置运行时：给需要绝对路径直接 spawn ffmpeg 的插件。
             // 多数插件走 shutil.which("ffmpeg")——靠 path_value() 把 runtimes/ffmpeg/ 加进 PATH 命中。
             Some("ffmpeg") => self.ffmpeg(),
+            Some("chromium" | "chrome") => self.chromium(),
             _ => None,
         }
     }
 
-    /// 按命令名解析运行时绝对路径，缺失返回结构化错误（前端引导下载/指定）。
+    /// 按命令名解析运行时绝对路径，缺失时提示安装包损坏。
     pub(crate) fn require_runtime_command(&self, command: &str) -> Result<PathBuf, String> {
         self.resolve_runtime_command(command).ok_or_else(|| {
-            format!(
-                "未找到运行时命令 {command}。请在「设置 → 脚本运行环境」下载便携版或指定已安装的 Python / Node.js 路径。"
-            )
+            format!("未找到内置运行时命令 {command}。安装包可能不完整，请重新安装灵坊工作台。")
         })
     }
 
@@ -229,8 +249,8 @@ impl RuntimeResolver {
         env.retain(|(key, _)| !key.eq_ignore_ascii_case(OsStr::new("PATH")));
         env.push((OsString::from("PATH"), self.path_value()));
 
-        let pip_url = resolve_pip_url(&self.config.mirrors);
-        let npm_url = resolve_npm_url(&self.config.mirrors);
+        let pip_url = resolve_pip_url(&self.mirrors);
+        let npm_url = resolve_npm_url(&self.mirrors);
         env.push((OsString::from("PIP_INDEX_URL"), OsString::from(&pip_url)));
         if let Some(host) = extract_host(&pip_url) {
             env.push((OsString::from("PIP_TRUSTED_HOST"), OsString::from(host)));
@@ -252,6 +272,16 @@ impl RuntimeResolver {
             OsString::from("COREPACK_ENABLE_DOWNLOAD_PROMPT"),
             OsString::from("0"),
         ));
+        env.push((
+            OsString::from("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"),
+            OsString::from("1"),
+        ));
+        if let Some(dir) = self.playwright_browsers_dir() {
+            env.push((
+                OsString::from("PLAYWRIGHT_BROWSERS_PATH"),
+                dir.into_os_string(),
+            ));
+        }
         env
     }
 
@@ -279,6 +309,11 @@ impl RuntimeResolver {
         if let Some(ffmpeg) = &self.ffmpeg {
             push_if_dir(&mut paths, ffmpeg.dir.clone());
         }
+        if let Some(chromium) = self.chromium() {
+            if let Some(dir) = chromium.parent() {
+                push_if_dir(&mut paths, dir.to_path_buf());
+            }
+        }
         // 追加 Windows 系统目录（System32 + Wbem + PowerShell），保证 OS 基础工具/DLL 可达。
         #[cfg(windows)]
         {
@@ -301,48 +336,42 @@ impl RuntimeResolver {
 
 // === 解析逻辑 ===
 
-/// 解析 Python：用户显式指定优先，其次应用管理版本。
-fn resolve_python<R: tauri::Runtime>(config: &RuntimeConfig, _app: &tauri::AppHandle<R>) -> Option<ResolvedRuntime> {
-    resolve_configured(
-        config.user_specified_python.as_deref(),
-        config.app_managed_python.as_ref().map(|entry| entry.dir.as_str()),
-        python_exe,
-    )
-}
-
-/// 解析 Node：用户显式指定优先，其次应用管理版本。
-fn resolve_node<R: tauri::Runtime>(config: &RuntimeConfig, _app: &tauri::AppHandle<R>) -> Option<ResolvedRuntime> {
-    resolve_configured(
-        config.user_specified_node.as_deref(),
-        config.app_managed_node.as_ref().map(|entry| entry.dir.as_str()),
-        node_exe,
-    )
-}
-
-/// FFmpeg 不属于本任务的按需运行时，未配置时返回 None。
-fn resolve_ffmpeg<R: tauri::Runtime>(
-    _config: &RuntimeConfig,
-    _app: &tauri::AppHandle<R>,
-) -> Option<ResolvedRuntime> {
-    None
-}
-
-fn resolve_configured(
-    user_path: Option<&str>,
-    managed_path: Option<&str>,
+fn resolve_bundled(
+    root: &Option<PathBuf>,
+    subdir: &str,
     executable: fn(&Path) -> PathBuf,
 ) -> Option<ResolvedRuntime> {
-    for (path, source) in [
-        (user_path, RuntimeSource::UserSpecified),
-        (managed_path, RuntimeSource::AppManaged),
-    ] {
-        let Some(path) = path else { continue };
-        let dir = runtime_executable_dir(Path::new(path));
-        if executable(&dir).is_file() {
-            return Some(ResolvedRuntime { dir, source });
+    let dir = root.as_ref()?.join(subdir);
+    executable(&dir).is_file().then_some(ResolvedRuntime {
+        dir,
+        source: RuntimeSource::Bundled,
+    })
+}
+
+fn bundled_runtimes_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR").map(PathBuf::from) {
+        if root.is_dir() {
+            return Some(root);
         }
     }
-    None
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let root = parent.join("runtimes");
+            if root.is_dir() {
+                return Some(root);
+            }
+        }
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let root = resource_dir.join("runtimes");
+        if root.is_dir() {
+            return Some(root);
+        }
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("runtimes");
+    root.is_dir().then_some(root)
 }
 
 // === exe 路径辅助（跨平台） ===
@@ -372,6 +401,26 @@ fn ffmpeg_exe(dir: &Path) -> PathBuf {
 #[cfg(not(windows))]
 fn ffmpeg_exe(dir: &Path) -> PathBuf {
     dir.join("bin").join("ffmpeg")
+}
+
+fn chromium_exe(dir: &Path) -> PathBuf {
+    dir.join("ms-playwright")
+        .join(format!("chromium-{PLAYWRIGHT_CHROMIUM_REVISION}"))
+        .join("chrome-win64")
+        .join("chrome.exe")
+}
+
+fn chromium_headless_exe(dir: &Path) -> PathBuf {
+    dir.join("ms-playwright")
+        .join(format!(
+            "chromium_headless_shell-{PLAYWRIGHT_CHROMIUM_REVISION}"
+        ))
+        .join("chrome-headless-shell-win64")
+        .join("chrome-headless-shell.exe")
+}
+
+fn chromium_runtime_complete(dir: &Path) -> bool {
+    chromium_exe(dir).is_file() && chromium_headless_exe(dir).is_file()
 }
 
 fn pip_exe(dir: &Path) -> Option<PathBuf> {
@@ -502,52 +551,40 @@ mod tests {
     }
 
     #[test]
-    fn env_uses_configured_mirrors() {
-        let mut config = RuntimeConfig::default();
-        config.mirrors.pip_id = "aliyun".to_string();
-        config.mirrors.npm_id = "huawei".to_string();
-        let r = RuntimeResolver::from_dirs_with_config(None, None, config);
-        let env = r.env(vec![]);
-        let contains = |key: &str, value: &str| {
-            env.iter()
-                .any(|(k, v)| k.to_string_lossy() == key && v.to_string_lossy() == value)
-        };
-        assert!(contains(
-            "PIP_INDEX_URL",
-            "https://mirrors.aliyun.com/pypi/simple/"
-        ));
-        assert!(contains(
-            "NPM_CONFIG_REGISTRY",
-            "https://repo.huaweicloud.com/repository/npm/"
-        ));
-    }
-
-    #[test]
     fn require_runtime_command_errors_when_missing() {
         let r = RuntimeResolver::from_dirs(None, None);
         let err = r.require_runtime_command("python").unwrap_err();
-        assert!(err.contains("设置"), "错误应引导去设置：{err}");
+        assert!(err.contains("重新安装"), "错误应引导重新安装：{err}");
     }
 
     #[test]
-    fn resolve_prefers_user_specified_over_app_managed() {
-        let root = std::env::temp_dir().join(format!("lf-runtime-resolver-{}", uuid::Uuid::new_v4()));
-        let user = root.join("user");
-        let managed = root.join("managed");
-        #[cfg(windows)]
-        let relative = PathBuf::from("python.exe");
-        #[cfg(not(windows))]
-        let relative = PathBuf::from("bin/python");
-        std::fs::create_dir_all(user.join(relative.parent().unwrap_or(Path::new("")))).unwrap();
-        std::fs::create_dir_all(managed.join(relative.parent().unwrap_or(Path::new("")))).unwrap();
-        std::fs::write(user.join(&relative), b"fake").unwrap();
-        std::fs::write(managed.join(&relative), b"fake").unwrap();
-        let resolved = resolve_configured(
-            Some(user.to_string_lossy().as_ref()),
-            Some(managed.to_string_lossy().as_ref()),
-            python_exe,
-        ).unwrap();
-        assert_eq!(resolved.source, RuntimeSource::UserSpecified);
+    fn chromium_command_and_playwright_env_use_bundled_root() {
+        let root =
+            std::env::temp_dir().join(format!("lf-runtime-resolver-{}", uuid::Uuid::new_v4()));
+        let chrome = root
+            .join("chromium/ms-playwright")
+            .join(format!("chromium-{PLAYWRIGHT_CHROMIUM_REVISION}"))
+            .join("chrome-win64/chrome.exe");
+        let headless = root
+            .join("chromium/ms-playwright")
+            .join(format!(
+                "chromium_headless_shell-{PLAYWRIGHT_CHROMIUM_REVISION}"
+            ))
+            .join("chrome-headless-shell-win64/chrome-headless-shell.exe");
+        std::fs::create_dir_all(chrome.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(headless.parent().unwrap()).unwrap();
+        std::fs::write(&chrome, b"fake").unwrap();
+        std::fs::write(&headless, b"fake").unwrap();
+        let r = RuntimeResolver::from_root(root.clone());
+        assert_eq!(r.resolve_runtime_command("chrome.exe"), Some(chrome));
+        let env = r.env(vec![]);
+        assert!(env.iter().any(|(key, value)| {
+            key == "PLAYWRIGHT_BROWSERS_PATH"
+                && value == &root.join("chromium/ms-playwright").into_os_string()
+        }));
+        assert!(env
+            .iter()
+            .any(|(key, value)| { key == "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" && value == "1" }));
         let _ = std::fs::remove_dir_all(root);
     }
 

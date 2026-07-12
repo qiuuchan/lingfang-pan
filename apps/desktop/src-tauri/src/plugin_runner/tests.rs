@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(windows)]
 use crate::process_util::find_binary;
 
 #[test]
@@ -390,9 +391,7 @@ fn entry_arg_strips_verbatim_prefix() {
 
 // === Playwright 依赖检测测试 ===
 //
-// 这些测试只覆盖「应否触发浏览器下载」的判定逻辑（declares_playwright），不真正下载
-// （~150MB + 网络）。ensure_playwright_browsers 的幂等跳过由 declares_playwright +
-// playwright_chromium_installed 组合保证，后者依赖真实 ms-playwright 目录，单测里不构造。
+// 这些测试覆盖「是否需要内置浏览器」的判定，不执行任何网络下载。
 
 #[test]
 fn declares_playwright_node_package_json() {
@@ -424,7 +423,7 @@ fn declares_playwright_node_core_and_test_variants() {
 
 #[test]
 fn declares_playwright_node_absent() {
-    // 无 playwright 依赖（仅其它包）→ 不命中，避免给无关插件跑下载。
+    // 无 playwright 依赖（仅其它包）→ 不命中，不要求浏览器文件。
     let tmp = temp_dir_unique("pw-node-no");
     std::fs::create_dir_all(&tmp).unwrap();
     std::fs::write(
@@ -474,12 +473,32 @@ fn declares_playwright_empty_dir() {
 }
 
 #[test]
-fn playwright_mirror_host_is_npmmirror_cdn() {
-    // 防误改：镜像 host 必须指向 npmmirror binaries（国内可用），改回海外 CDN 会让下载失败。
-    assert_eq!(
-        crate::runtime_resolver::PLAYWRIGHT_DOWNLOAD_HOST,
-        "https://cdn.npmmirror.com/binaries/playwright"
-    );
+fn playwright_requires_bundled_full_and_headless_revision() {
+    let plugin = temp_dir_unique("pw-bundled-plugin");
+    let root = temp_dir_unique("pw-bundled-runtime");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("package.json"),
+        r#"{"dependencies":{"playwright":"1.61.1"}}"#,
+    )
+    .unwrap();
+    let browsers = root.join("chromium/ms-playwright");
+    let revision = crate::runtime_resolver::PLAYWRIGHT_CHROMIUM_REVISION;
+    let chrome = browsers
+        .join(format!("chromium-{revision}"))
+        .join("chrome-win64/chrome.exe");
+    let headless = browsers
+        .join(format!("chromium_headless_shell-{revision}"))
+        .join("chrome-headless-shell-win64/chrome-headless-shell.exe");
+    std::fs::create_dir_all(chrome.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(headless.parent().unwrap()).unwrap();
+    std::fs::write(&chrome, b"fake").unwrap();
+    let runtime = RuntimeResolver::from_root(root.clone());
+    assert!(ensure_playwright_browsers(&runtime, &plugin, None).is_err());
+    std::fs::write(&headless, b"fake").unwrap();
+    assert!(ensure_playwright_browsers(&runtime, &plugin, None).is_ok());
+    let _ = std::fs::remove_dir_all(plugin);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 // === 路径清理测试 ===

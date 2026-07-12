@@ -4,8 +4,8 @@
 //! - plugin_script：一次性预览跑入口（python main.py / node index.js）。
 //! - plugin_runner：持久化独立进程运行入口。
 //! - plugin_shell（本模块）：在插件目录执行**任意 shell 命令**（cmd/powershell/pwsh/sh），
-//!   等同 Claude Code 的 Bash 工具。让 Agent 能 `pip install` / `playwright install` /
-//!   `npm install` / 任意命令，不再依赖 AI 偷偷改代码触发依赖安装。
+//!   等同 Claude Code 的 Bash 工具。Agent 可执行 `pip install` / `npm install` 等开发命令；
+//!   Playwright 浏览器由软件内置，禁止通过 shell 再次安装。
 //!
 //! 安全边界（与 plugin_runner/plugin_script 同款留痕）：
 //! - 本通道是【不受控执行通道】，等同 Claude Code bash——用户权限运行的命令可执行任意操作
@@ -15,7 +15,7 @@
 //!   前缀断言（必须在 plugin_dir 内），复用 plugin_store::write_files 的同款校验思路。
 //!
 //! PATH 注入策略：
-//! - 起点 `resolver.env(minimal_env())`：已注入应用管理的 Python/Node PATH + 国内镜像源
+//! - 起点 `resolver.env(minimal_env())`：已注入软件内置 Python/Node/FFmpeg/Chromium PATH + 国内镜像源
 //!   （PIP_INDEX_URL / NPM_CONFIG_REGISTRY）。
 //! - **prepend 插件专属路径**到 PATH：python 插件 prepend venv（venv/Scripts 或 venv/bin），
 //!   nodejs 插件 prepend node_modules/.bin。让 `pip` / `playwright` / `npx` 等命令命中插件内依赖。
@@ -37,7 +37,7 @@ use crate::runtime_resolver::RuntimeResolver;
 #[derive(Clone, Debug, Deserialize)]
 pub struct RunPluginShellInput {
     pub plugin_id: String,
-    /// 要执行的 shell 命令（如 `pip install requests` / `playwright install chromium`）。
+    /// 要执行的 shell 命令（如 `pip install requests` / `npm install axios`）。
     pub command: String,
     /// shell 类型："cmd" | "powershell" | "pwsh"。缺省 "cmd"（非 Windows 走 /bin/sh，本字段忽略）。
     #[serde(default)]
@@ -45,7 +45,7 @@ pub struct RunPluginShellInput {
     /// 工作目录相对子路径（如 "src"），缺省/空 = 插件目录根。拒绝对路径 / .. / 盘符。
     #[serde(default)]
     pub cwd: Option<String>,
-    /// 超时毫秒，缺省 120_000（长任务如 playwright install 可调大）。
+    /// 超时毫秒，缺省 120_000。
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     /// 运行时类型："python" | "nodejs"，决定 PATH 注入策略。None 自动探测（按文件存在性）。
@@ -86,6 +86,9 @@ pub fn run_plugin_shell(
     store: tauri::State<'_, PluginStore>,
     input: RunPluginShellInput,
 ) -> Result<ShellResult, String> {
+    if requests_playwright_browser_install(&input.command) {
+        return Err("Chromium 已由软件内置，禁止下载或安装第二套 Playwright 浏览器".to_string());
+    }
     // 1. 插件目录（canonicalize 防符号链接逃逸）。
     let plugin_dir = store.ensure_plugin_dir(&input.plugin_id)?;
 
@@ -138,6 +141,15 @@ pub fn run_plugin_shell(
         timed_out: captured.timed_out,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+fn requests_playwright_browser_install(command: &str) -> bool {
+    let normalized = command
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    normalized.contains("playwright install")
 }
 
 /// 解析 cwd：None/空 → 插件目录；子路径段级校验 + canonicalize 前缀断言（防越权）。
@@ -438,6 +450,19 @@ mod tests {
         // 无任何标志文件 → 默认 nodejs。
         assert_eq!(detect_runtime(&dir), ShellRuntime::Nodejs);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn blocks_playwright_browser_install_commands() {
+        assert!(requests_playwright_browser_install(
+            "npx playwright install chromium"
+        ));
+        assert!(requests_playwright_browser_install(
+            "python -m playwright   install chromium"
+        ));
+        assert!(!requests_playwright_browser_install(
+            "npm install playwright"
+        ));
     }
 
     #[test]

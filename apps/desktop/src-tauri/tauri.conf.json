@@ -6,18 +6,21 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "pnpm vite",
-    "beforeBuildCommand": "pnpm vite:build"
+    "beforeDevCommand": "pnpm runtime:prepare && pnpm vite",
+    "beforeBuildCommand": "pnpm build:frontend"
   },
   "bundle": {
     "active": true,
     "targets": [
       "nsis"
     ],
-    "resources": {},
+    "resources": {
+      "../builtin-plugins": "builtin-plugins",
+      "../runtimes": "runtimes"
+    },
     "copyright": "© 2026 灵坊工作台",
     "shortDescription": "灵坊工作台 协作平台桌面客户端",
-    "longDescription": "灵坊工作台 协作平台桌面客户端：AI 插件创建、团队协作、插件市场与钱包，脚本运行时按需下载。",
+    "longDescription": "灵坊工作台 协作平台桌面客户端：AI 插件创建、团队协作、插件市场与钱包，内置完整插件运行环境。",
     "publisher": "灵坊工作台",
     "category": "Productivity",
     "icon": [

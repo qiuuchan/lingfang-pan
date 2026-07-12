@@ -818,9 +818,9 @@ export function createAgentTools(opts: AgentToolsOptions) {
   /**
    * Bash —— 在插件目录执行任意 shell 命令（Claude Code Bash 风格）。
    *
-   * 解决 Agent 无法跑 `pip install` / `playwright install` / `npm install` 等命令的问题：
+   * 解决 Agent 无法跑 `pip install` / `npm install` 等命令的问题：
    * 此前只能靠偷改代码触发依赖安装，不可靠。本工具直接给 Agent 一个 shell 通道，
-   * PATH 已注入应用管理的 Python/Node + 插件 venv / node_modules/.bin + 国内镜像源。
+   * PATH 已注入软件内置环境 + 插件 venv / node_modules/.bin + 国内镜像源。
    *
    * 命令失败（exit≠0）仍返回结果（不抛异常），让 Agent 读 stderr 修复后重试，
    * 与 RunPlugin 的「写→跑→看报错→自修」闭环同源。
@@ -829,15 +829,15 @@ export function createAgentTools(opts: AgentToolsOptions) {
     name: 'Bash',
     description:
       '在当前插件目录执行 shell 命令。默认 cmd（Windows）/ sh（Unix），可选 powershell/pwsh。' +
-      'PATH 已注入应用管理的 Python/Node + 当前插件的 venv（python 插件）或 node_modules/.bin（nodejs 插件）' +
-      '+ 国内镜像源（PIP_INDEX_URL/NPM_CONFIG_REGISTRY）。用于 `pip install xxx`、`playwright install chromium`、' +
-      '`npm install xxx`、任意命令。cwd 默认插件目录根，可传相对子路径。' +
+      'PATH 已注入软件内置 Python/Node/FFmpeg/Chromium + 当前插件的 venv（python 插件）或 node_modules/.bin（nodejs 插件）' +
+      '+ 国内镜像源（PIP_INDEX_URL/NPM_CONFIG_REGISTRY）。用于 `pip install xxx`、`npm install xxx` 等命令；' +
+      'Chromium 已内置，禁止执行 playwright install。cwd 默认插件目录根，可传相对子路径。' +
       '返回 stdout/stderr/exitCode；命令失败（exit≠0）时仍返回结果（不抛异常），便于读 stderr 修复后重试。',
     parameters: z.object({
-      command: z.string().describe("shell 命令（如 'pip install requests' / 'playwright install chromium' / 'npm install axios'）"),
+      command: z.string().describe("shell 命令（如 'pip install requests' / 'npm install axios'）"),
       cwd: z.string().optional().describe('相对插件目录的子路径（如 src），默认插件目录根；不能是绝对路径或含 ..'),
       shell: z.enum(['cmd', 'powershell', 'pwsh']).optional().describe('shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）'),
-      timeoutMs: z.number().optional().describe('超时毫秒，默认 120000；长任务（如 playwright install chromium ~150MB）可调到 600000'),
+      timeoutMs: z.number().optional().describe('超时毫秒，默认 120000；安装大型依赖时可按需调大'),
     }),
     async execute({ command, cwd, shell, timeoutMs }): Promise<string> {
       const pluginId = opts.getPluginId();

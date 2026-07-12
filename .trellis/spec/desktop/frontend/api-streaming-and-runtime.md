@@ -120,6 +120,40 @@ Reference files:
 - `apps/desktop/src-tauri/src/capability.rs`
 - `apps/collab-api/src/modules/relay/relay.controller.ts`
 
+## Scenario: Bundled Runtime Status Is Read-Only
+
+### 1. Scope / Trigger
+- Trigger: changing runtime settings, onboarding environment checks, or `get_runtime_status` frontend types.
+
+### 2. Signatures
+- `getRuntimeStatus() -> Promise<Record<'python'|'node'|'ffmpeg'|'chromium', RuntimeStatus>>`
+- `RuntimeStatus = { available, source, version, binaryPath, error }`
+
+### 3. Contracts
+- `source` is only `bundled|null`; the frontend has no download, uninstall, system probe, mirror selector, or custom path command.
+- Runtime settings show four stable rows with availability, version, binary path/error, and an icon-only refresh command.
+- Onboarding marks environment confirmation complete only when all four bundled statuses are available.
+
+### 4. Validation & Error Matrix
+- Tauri command rejects/fails -> preserve the page and show a toast; do not invent available state.
+- one runtime missing -> show that row as missing and retain the other three real statuses.
+- version probe fails but binary exists -> show bundled path plus the backend error.
+
+### 5. Good/Base/Bad Cases
+- Good: four bundled rows show versions and installed paths without actions.
+- Base: loading displays a fixed-height spinner without shifting layout.
+- Bad: reintroducing a download button or `RuntimeSetupGate` creates a second runtime source.
+
+### 6. Tests Required
+- `pnpm -C apps/desktop typecheck`
+- `pnpm -C apps/desktop test`
+- `pnpm -C apps/desktop build:frontend` (includes runtime verification)
+
+### 7. Wrong vs Correct
+Wrong: expose `downloadRuntime`, `probeSystemRuntime`, or a user path picker.
+
+Correct: call only `getRuntimeStatus()` and render the returned bundled state.
+
 ## Scenario: Plugin Iframe Runtime Bridge
 
 ### 1. Scope / Trigger

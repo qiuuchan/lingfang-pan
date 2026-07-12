@@ -41,10 +41,7 @@ arboard = "3"
 xcap = "0.9"
 # 插件能力：system.screenshot 截图 PNG → base64 data URL 编码。
 base64 = "0.22"
-# 运行时按需下载（task 07-03 step 2）：portable Python/Node 解压、版本号比较、SHA256 已由 sha2 覆盖。
-# zip 解压 Node 官方 zip；flate2+tar 解压 python-build-standalone 的 .tar.gz（install_only）。
+# 插件制品读写与版本校验。
 zip = "2"
-flate2 = "1"
-tar = "0.4"
 semver = "1"
 uuid = { version = "1", features = ["v4"] }
