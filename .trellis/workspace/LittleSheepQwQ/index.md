@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
-- **Last Active**: 2026-06-24
+- **Total Sessions**: 14
+- **Last Active**: 2026-07-12
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~457 | Active |
+| `journal-1.md` | ~490 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-07-12 | 插件制品仓库与管理系统生产收口 | `0d55c9d2` | `betav2` |
 | 13 | 2026-06-24 | Desktop backend and UI fixes | `81a53e3` | `main` |
 | 12 | 2026-06-23 | 完成 desktop 外壳与插件体验 14 项调整并归档 | `bce8803`, `f72f4d3` | `main` |
 | 11 | 2026-06-18 | 完成桌面插件管理体验优化 | `1b997f3` | `main` |
