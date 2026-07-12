@@ -16,11 +16,21 @@ use serde::{Deserialize, Serialize};
 pub struct MirrorConfig {
     #[serde(default, rename = "pipId", alias = "pipId")]
     pub pip_id: String,
-    #[serde(default, rename = "pipUrl", alias = "pipUrl", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "pipUrl",
+        alias = "pipUrl",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pip_url: Option<String>,
     #[serde(default, rename = "npmId", alias = "npmId")]
     pub npm_id: String,
-    #[serde(default, rename = "npmUrl", alias = "npmUrl", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "npmUrl",
+        alias = "npmUrl",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub npm_url: Option<String>,
 }
 
@@ -40,7 +50,10 @@ pub const PIP_PRESETS: &[(&str, &str)] = &[
     ("tsinghua", "https://pypi.tuna.tsinghua.edu.cn/simple"),
     ("aliyun", "https://mirrors.aliyun.com/pypi/simple/"),
     ("tencent", "https://mirrors.cloud.tencent.com/pypi/simple"),
-    ("huawei", "https://repo.huaweicloud.com/repository/pypi/simple"),
+    (
+        "huawei",
+        "https://repo.huaweicloud.com/repository/pypi/simple",
+    ),
     ("official", "https://pypi.org/simple"),
 ];
 
@@ -61,7 +74,12 @@ pub const CUSTOM_ID: &str = "custom";
 /// 否则按 `pip_id` 查 PIP_PRESETS；查无回退到预置默认（清华）。
 pub fn resolve_pip_url(config: &MirrorConfig) -> String {
     if config.pip_id == CUSTOM_ID {
-        if let Some(url) = config.pip_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(url) = config
+            .pip_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             return url.to_string();
         }
     }
@@ -75,7 +93,12 @@ pub fn resolve_pip_url(config: &MirrorConfig) -> String {
 /// 解析当前生效的 npm 源 URL（语义同 resolve_pip_url）。
 pub fn resolve_npm_url(config: &MirrorConfig) -> String {
     if config.npm_id == CUSTOM_ID {
-        if let Some(url) = config.npm_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(url) = config
+            .npm_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             return url.to_string();
         }
     }
@@ -108,7 +131,10 @@ mod tests {
     #[test]
     fn default_mirrors_are_tsinghua_and_npmmirror() {
         let m = MirrorConfig::default();
-        assert_eq!(resolve_pip_url(&m), "https://pypi.tuna.tsinghua.edu.cn/simple");
+        assert_eq!(
+            resolve_pip_url(&m),
+            "https://pypi.tuna.tsinghua.edu.cn/simple"
+        );
         assert_eq!(resolve_npm_url(&m), "https://registry.npmmirror.com");
     }
 
@@ -141,7 +167,10 @@ mod tests {
             extract_host("https://pypi.tuna.tsinghua.edu.cn/simple"),
             Some("pypi.tuna.tsinghua.edu.cn".to_string())
         );
-        assert_eq!(extract_host("https://registry.npmmirror.com"), Some("registry.npmmirror.com".to_string()));
+        assert_eq!(
+            extract_host("https://registry.npmmirror.com"),
+            Some("registry.npmmirror.com".to_string())
+        );
         assert_eq!(extract_host("not-a-url"), None);
     }
 }

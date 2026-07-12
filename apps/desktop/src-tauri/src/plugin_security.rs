@@ -33,7 +33,10 @@ pub struct PluginSignatureStatus {
 }
 
 /// 读取插件签名状态：manifest.sig + manifest.json + 配置的公钥。
-pub fn verify_plugin_signature(store: &PluginStore, plugin_id: &str) -> Result<PluginSignatureStatus, String> {
+pub fn verify_plugin_signature(
+    store: &PluginStore,
+    plugin_id: &str,
+) -> Result<PluginSignatureStatus, String> {
     let dir = store.plugin_dir(plugin_id)?;
     let sig_path = dir.join("manifest.sig");
     let manifest_path = dir.join("manifest.json");
@@ -66,10 +69,8 @@ pub fn verify_plugin_signature(store: &PluginStore, plugin_id: &str) -> Result<P
         }
     };
 
-    let pubkey = PublicKey::from_base64(&pubkey_str)
-        .map_err(|e| format!("公钥格式非法：{e}"))?;
-    let sig_text = fs::read_to_string(&sig_path)
-        .map_err(|e| format!("读取签名文件失败：{e}"))?;
+    let pubkey = PublicKey::from_base64(&pubkey_str).map_err(|e| format!("公钥格式非法：{e}"))?;
+    let sig_text = fs::read_to_string(&sig_path).map_err(|e| format!("读取签名文件失败：{e}"))?;
     let signature = Signature::decode(&sig_text).map_err(|e| format!("签名格式非法：{e}"))?;
     let message = fs::read(&manifest_path).map_err(|e| format!("读取 manifest 失败：{e}"))?;
 
@@ -97,7 +98,9 @@ fn read_pubkey(store: &PluginStore) -> Result<Option<String>, String> {
             return Ok(Some(trimmed.to_string()));
         }
     }
-    Ok(std::env::var("LINGFANG_PLUGIN_PUBKEY").ok().filter(|s| !s.is_empty()))
+    Ok(std::env::var("LINGFANG_PLUGIN_PUBKEY")
+        .ok()
+        .filter(|s| !s.is_empty()))
 }
 
 // === 版本召回 ===
@@ -115,25 +118,53 @@ pub struct PluginRecallInfo {
 }
 
 /// 查询某插件当前安装版本是否被召回。
-pub fn check_plugin_recall(store: &PluginStore, plugin_id: &str, installed_version: &str) -> PluginRecallInfo {
+pub fn check_plugin_recall(
+    store: &PluginStore,
+    plugin_id: &str,
+    installed_version: &str,
+) -> PluginRecallInfo {
     let path = store.plugins_root().join(".recalled.json");
     let Ok(raw) = fs::read_to_string(&path) else {
-        return PluginRecallInfo { recalled: false, version: String::new(), reason: String::new() };
+        return PluginRecallInfo {
+            recalled: false,
+            version: String::new(),
+            reason: String::new(),
+        };
     };
     let Ok(map) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return PluginRecallInfo { recalled: false, version: String::new(), reason: String::new() };
+        return PluginRecallInfo {
+            recalled: false,
+            version: String::new(),
+            reason: String::new(),
+        };
     };
     let recalled_version = map.get(plugin_id).and_then(|v| v.as_str()).unwrap_or("");
     if recalled_version.is_empty() {
-        return PluginRecallInfo { recalled: false, version: String::new(), reason: String::new() };
+        return PluginRecallInfo {
+            recalled: false,
+            version: String::new(),
+            reason: String::new(),
+        };
     }
     if recalled_version != installed_version {
         // 该插件有被召回的版本，但当前安装版本不同 → 不影响。
-        return PluginRecallInfo { recalled: false, version: String::new(), reason: String::new() };
+        return PluginRecallInfo {
+            recalled: false,
+            version: String::new(),
+            reason: String::new(),
+        };
     }
     let reason_key = format!("_reason_{plugin_id}");
-    let reason = map.get(&reason_key).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    PluginRecallInfo { recalled: true, version: recalled_version.to_string(), reason }
+    let reason = map
+        .get(&reason_key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    PluginRecallInfo {
+        recalled: true,
+        version: recalled_version.to_string(),
+        reason,
+    }
 }
 
 // === Tauri 命令封装（供前端 invoke） ===
@@ -188,7 +219,8 @@ mod tests {
         let store = temp_store("recall");
         std::fs::write(
             store.plugins_root().join(".recalled.json"),
-            serde_json::json!({ "vuln-plugin": "1.2.3", "_reason_vuln-plugin": "存在安全漏洞" }).to_string(),
+            serde_json::json!({ "vuln-plugin": "1.2.3", "_reason_vuln-plugin": "存在安全漏洞" })
+                .to_string(),
         )
         .unwrap();
         // 命中：版本一致 → recalled=true。

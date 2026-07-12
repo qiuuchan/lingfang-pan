@@ -112,8 +112,14 @@ fn install_hint_covers_both_runtimes() {
     // 新文案引导去设置页下载/指定，不再提"软件内置 runtimes/"。
     let node_hint = install_hint(ScriptRuntime::Nodejs);
     let py_hint = install_hint(ScriptRuntime::Python);
-    assert!(node_hint.contains("Node.js") && node_hint.contains("设置"), "Node 提示：{node_hint}");
-    assert!(py_hint.contains("Python") && py_hint.contains("设置"), "Python 提示：{py_hint}");
+    assert!(
+        node_hint.contains("Node.js") && node_hint.contains("设置"),
+        "Node 提示：{node_hint}"
+    );
+    assert!(
+        py_hint.contains("Python") && py_hint.contains("设置"),
+        "Python 提示：{py_hint}"
+    );
 }
 
 // 解释器实跑测试：仅在宿主存在对应解释器时执行，否则跳过（不标记失败）。

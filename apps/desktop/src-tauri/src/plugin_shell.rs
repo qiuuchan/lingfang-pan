@@ -28,9 +28,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::process_util::run_capture_with_env;
 use crate::plugin_runner::{minimal_env, python_venv_dir, venv_python};
 use crate::plugin_store::PluginStore;
+use crate::process_util::run_capture_with_env;
 use crate::runtime_resolver::RuntimeResolver;
 
 /// run_plugin_shell 命令入参（前端传 camelCase，封装层转 snake_case）。
@@ -96,13 +96,16 @@ pub fn run_plugin_shell(
     let resolver = RuntimeResolver::resolve(&app)?;
 
     // 4. runtime 探测 / 校验。
-    let runtime = match input.runtime.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let runtime = match input
+        .runtime
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some("python") => ShellRuntime::Python,
         Some("nodejs") => ShellRuntime::Nodejs,
         Some(other) => {
-            return Err(format!(
-                "runtime 仅支持 python/nodejs（收到 {other:?}）"
-            ));
+            return Err(format!("runtime 仅支持 python/nodejs（收到 {other:?}）"));
         }
         None => detect_runtime(&plugin_dir),
     };
@@ -141,10 +144,7 @@ pub fn run_plugin_shell(
 ///
 /// 段级校验与 plugin_store::write_files 同款（拒绝对路径 / 含 `..` / 含盘符 / 含 `:`），
 /// join 后 canonicalize 断言以 plugin_dir 为前缀（防符号链接绕过）。
-pub(crate) fn resolve_cwd(
-    plugin_dir: &Path,
-    cwd: Option<&str>,
-) -> Result<PathBuf, String> {
+pub(crate) fn resolve_cwd(plugin_dir: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
     let raw = cwd.unwrap_or("").trim();
     if raw.is_empty() {
         // 缺省 = 插件目录根（已 canonicalize，直接返回）。
@@ -474,8 +474,9 @@ mod tests {
     #[test]
     fn resolve_shell_binary_pwsh_errors_when_missing() {
         // pwsh 通常未装，应报错；若恰好装了（ProgramFiles\PowerShell\7\pwsh.exe 存在）则跳过断言。
-        let program_files =
-            std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+        let program_files = std::env::var_os("ProgramFiles")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
         let pwsh = program_files.join("PowerShell").join("7").join("pwsh.exe");
         if pwsh.is_file() {
             let (binary, flag) = resolve_shell_binary(ShellKind::Pwsh).unwrap();

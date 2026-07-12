@@ -59,7 +59,8 @@ pub async fn upload_plugin(
     on_event: Channel<UploadEvent>,
 ) -> Result<serde_json::Value, String> {
     // 序列化 payload 为 bytes（与前端 JSON.stringify 等价，但由 Rust 侧做以避免前端传 bytes 跨 IPC）。
-    let body_bytes = serde_json::to_vec(&payload).map_err(|e| format!("序列化上传 payload 失败：{e}"))?;
+    let body_bytes =
+        serde_json::to_vec(&payload).map_err(|e| format!("序列化上传 payload 失败：{e}"))?;
     let total_bytes = body_bytes.len() as u64;
 
     let _ = on_event.send(UploadEvent::Started { total_bytes });
@@ -67,9 +68,8 @@ pub async fn upload_plugin(
     // 构建流式 body：把 bytes 切成 chunk，每 yield 一个 emit Progress。
     // wrap_stream 接受 Stream<Item = Result<Bytes, E>>，这里用 futures util 的 stream。
     let on_event_clone = on_event.clone();
-    let chunk_stream = futures_util::stream::unfold(
-        (body_bytes, 0usize),
-        move |(data, mut offset)| {
+    let chunk_stream =
+        futures_util::stream::unfold((body_bytes, 0usize), move |(data, mut offset)| {
             let on_event = on_event_clone.clone();
             async move {
                 if offset >= data.len() {
@@ -80,10 +80,12 @@ pub async fn upload_plugin(
                 let take = end - offset;
                 offset = end;
                 let _ = on_event.send(UploadEvent::Progress { chunk_length: take });
-                Some((Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::copy_from_slice(chunk)), (data, offset)))
+                Some((
+                    Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::copy_from_slice(chunk)),
+                    (data, offset),
+                ))
             }
-        },
-    );
+        });
 
     let stream_body = reqwest::Body::wrap_stream(chunk_stream);
 
@@ -104,9 +106,10 @@ pub async fn upload_plugin(
         .map_err(|e| format!("上传请求失败：{e}"))?;
 
     let status = resp.status();
-    let response_json: serde_json::Value = resp.json().await.map_err(|e| {
-        format!("解析后端响应失败（HTTP {status}）：{e}")
-    })?;
+    let response_json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析后端响应失败（HTTP {status}）：{e}"))?;
 
     if !status.is_success() {
         let message = response_json
@@ -142,7 +145,9 @@ mod tests {
 
     #[test]
     fn upload_event_progress_serializes() {
-        let ev = UploadEvent::Progress { chunk_length: 65536 };
+        let ev = UploadEvent::Progress {
+            chunk_length: 65536,
+        };
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains(r#""event":"Progress""#));
         assert!(json.contains(r#""chunkLength":65536"#));
@@ -160,7 +165,8 @@ mod tests {
 
     #[test]
     fn upload_payload_deserializes() {
-        let json = r#"{"manifest":{"id":"test"},"files":[{"path":"x.js","content":"y"}],"priceCents":0}"#;
+        let json =
+            r#"{"manifest":{"id":"test"},"files":[{"path":"x.js","content":"y"}],"priceCents":0}"#;
         let payload: UploadPayload = serde_json::from_str(json).unwrap();
         assert_eq!(payload.price_cents, 0);
         assert_eq!(payload.files.len(), 1);

@@ -187,10 +187,7 @@ fn fs_write(declared: &DeclaredCapability, args: &Value) -> Result<Value, CapErr
         .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CapError::Exec("缺少 path 参数".to_string()))?;
-    let content = args
-        .get("content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
     if content.len() > MAX_FS_WRITE_BYTES {
         return Err(CapError::Exec(format!(
             "写入内容超过 {} 字节上限，请缩小范围",
@@ -228,8 +225,8 @@ fn clipboard_op(args: &Value) -> Result<Value, CapError> {
         .get("op")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CapError::Exec("缺少 op 参数".to_string()))?;
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| CapError::Exec(format!("无法访问剪贴板：{e}")))?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| CapError::Exec(format!("无法访问剪贴板：{e}")))?;
     match op {
         "read" => {
             let text = clipboard
@@ -238,10 +235,7 @@ fn clipboard_op(args: &Value) -> Result<Value, CapError> {
             Ok(json!({ "content": text }))
         }
         "write" => {
-            let text = args
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
             clipboard
                 .set_text(text)
                 .map_err(|e| CapError::Exec(format!("写入剪贴板失败：{e}")))?;

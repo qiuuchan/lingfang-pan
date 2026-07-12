@@ -170,7 +170,6 @@ where
     })
 }
 
-
 fn wait_for_capture(
     mut child: std::process::Child,
     timeout_ms: u64,

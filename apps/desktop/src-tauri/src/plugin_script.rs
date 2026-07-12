@@ -29,7 +29,10 @@ use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutpu
 use crate::runtime_resolver::RuntimeResolver;
 // 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
 // 让试跑与持久化运行用同一套依赖管理逻辑（venv 创建/pip install/pnpm install），避免行为漂移。
-use crate::plugin_runner::{ensure_python_venv, ensure_node_dependencies, ensure_playwright_browsers, entry_arg, minimal_env as runner_minimal_env};
+use crate::plugin_runner::{
+    ensure_node_dependencies, ensure_playwright_browsers, ensure_python_venv, entry_arg,
+    minimal_env as runner_minimal_env,
+};
 
 /// 运行时语言枚举（仅脚本型，不含 client/cloud）。
 /// serde rename_all = lowercase：nodejs / python，与契约 RuntimeType 对齐。
@@ -500,13 +503,17 @@ pub fn run_plugin_script(
                     // venv 创建/pip install 可能发生了实际安装（首次）或全跳过（缓存命中）。
                     // 简单判定：venv 是否本次新建（py 文件 mtime 近）——但更务实：只在 requirements.txt 存在时记一条。
                     if sandbox_canon.join("requirements.txt").is_file() {
-                        install_log = Some(format!("Python 依赖已就绪（venv: {}）", venv_py.display()));
+                        install_log =
+                            Some(format!("Python 依赖已就绪（venv: {}）", venv_py.display()));
                     }
                     run_binary = venv_py;
                     // 声明了 playwright 则补下载浏览器二进制（与正式运行路径一致，避免预览能跑而正式跑不起来）。
                     // 失败不致命：记进 install_log 让 AI 知晓（缺浏览器会直接导致试跑崩溃，stderr 会被捕获）。
                     if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon, None) {
-                        let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
+                        let prev = install_log
+                            .take()
+                            .map(|s| format!("{s}\n"))
+                            .unwrap_or_default();
                         install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
                 }
@@ -531,7 +538,10 @@ pub fn run_plugin_script(
                     }
                     // 同 Python 分支：声明了 playwright 则补下载浏览器二进制，失败记 install_log。
                     if let Err(e) = ensure_playwright_browsers(&resolver, &sandbox_canon, None) {
-                        let prev = install_log.take().map(|s| format!("{s}\n")).unwrap_or_default();
+                        let prev = install_log
+                            .take()
+                            .map(|s| format!("{s}\n"))
+                            .unwrap_or_default();
                         install_log = Some(format!("{prev}Playwright 浏览器：{e}"));
                     }
                 }
@@ -572,23 +582,33 @@ pub fn run_plugin_script(
         input.api_base.clone(),
         input.auth_token.clone(),
         input.capabilities.iter().any(|kind| kind == "llm.chat"),
-        input.capabilities.iter().any(|kind| kind == "image.generate"),
+        input
+            .capabilities
+            .iter()
+            .any(|kind| kind == "image.generate"),
         Duration::from_secs(30 * 60),
     )?;
     let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
     if let Some(bridge_env) = bridge_env {
-        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"), OsString::from(bridge_env.url)));
-        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"), OsString::from(bridge_env.token)));
+        env.push((
+            OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"),
+            OsString::from(bridge_env.url),
+        ));
+        env.push((
+            OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"),
+            OsString::from(bridge_env.token),
+        ));
     }
-    let captured: CapturedOutput = match run_capture_with_env(&run_binary, args, Some(&workspace), timeout, env) {
-        Ok(captured) => captured,
-        Err(error) => {
-            if let Some(token) = bridge_token {
-                bridge.revoke_token(&token);
+    let captured: CapturedOutput =
+        match run_capture_with_env(&run_binary, args, Some(&workspace), timeout, env) {
+            Ok(captured) => captured,
+            Err(error) => {
+                if let Some(token) = bridge_token {
+                    bridge.revoke_token(&token);
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-    };
+        };
     if let Some(token) = bridge_token {
         bridge.revoke_token(&token);
     }
