@@ -14,7 +14,7 @@
 
 `src/lib/api.ts` 是唯一通用请求入口：
 
-- `apiBase()` 读取 `VITE_API_BASE_URL` 或 `VITE_COLLAB_API_BASE`，默认 `http://localhost:19006`。
+- `apiBase()` 读取 `VITE_API_BASE_URL` 或 `VITE_COLLAB_API_BASE`；开发环境默认 `http://localhost:19006`，生产构建默认同源。
 - 默认请求超时为 `30_000` ms。
 - 401 时先尝试 `/api/auth/refresh`，成功后重放原请求一次。
 - refresh 失败或仍 401 时清 token 并派发 `UNAUTHORIZED_EVENT`。
@@ -34,6 +34,67 @@ Correct:
 
 ```ts
 if ((error as ApiError).status === 401) reset();
+```
+
+## Scenario: Collab Admin Docker Same-Origin Deployment
+
+### 1. Scope / Trigger
+
+- Trigger: changing `apps/collab-admin/Dockerfile`, workspace dependencies, `apiBase()`, Compose build args, or production env examples.
+
+### 2. Signatures
+
+- `apiBase() -> string`: explicit `VITE_API_BASE_URL` / `VITE_COLLAB_API_BASE`, otherwise `http://localhost:19006` in Vite dev and `''` in production.
+- Admin container: Nginx listens on `19005`, serves `/usr/share/nginx/html`, proxies `/api/` to `http://collab-api:19006`.
+- Required production API env: `JWT_SECRET` length >= 16 and `LLM_KEY_ENCRYPTION_KEY` exactly 64 hex characters.
+
+### 3. Contracts
+
+- A blank production API build arg means same-origin requests such as `/api/health`; it must not fall back to the browser host's `localhost:19006`.
+- The admin runtime image owns the `/api/` reverse proxy. Compose must not depend on an undeclared host Nginx for its default path.
+- Every `workspace:*` dependency used by the admin build must have its `package.json` copied before `pnpm install` and its source copied before `pnpm ... build`.
+- `.env.collab.example` must list every production startup-required env key. Secret-shaped examples must be documented as replacement-only values.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| Contract manifest/source absent in Docker build context | Admin TypeScript build fails; fix Docker `COPY`, never suppress resulting `any` errors |
+| Blank API build args in production | Browser requests same-origin `/api/*` through container Nginx |
+| Explicit external API build arg | Browser requests that origin directly |
+| Missing/invalid `LLM_KEY_ENCRYPTION_KEY` | API exits at startup with the required 64-hex error |
+| API container unavailable | Admin static page remains available; `/api/*` returns 502 until API recovers |
+
+### 5. Good/Base/Bad Cases
+
+- Good: fresh Compose volumes run migrations and seeds, all three containers stay up, and both `:19006/api/health` and `:19005/api/health` return 200.
+- Base: standalone Vite development still uses `http://localhost:19006` without extra env configuration.
+- Bad: using a static-only `serve` image while building with blank API args; the browser either calls its own localhost or receives the SPA HTML for `/api/*`.
+
+### 6. Tests Required
+
+- Run admin typecheck/build both on the host and through `docker compose ... build` to catch missing workspace source.
+- Run `docker compose ... config`, then start with fresh volumes and assert PostgreSQL healthy, API stable (not restarting), and direct/proxied health endpoints return 200 JSON.
+- Use an authenticated browser smoke test for every `NAV_GROUPS` view and inspect console/API logs for uncaught errors and 5xx responses.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```dockerfile
+COPY apps/collab-admin apps/collab-admin
+RUN pnpm -C apps/collab-admin build
+# workspace:* package source was never copied
+```
+
+Correct:
+
+```dockerfile
+COPY packages/contract/package.json packages/contract/package.json
+RUN pnpm install --filter @lingfang/collab-admin...
+COPY packages/contract packages/contract
+COPY apps/collab-admin apps/collab-admin
+RUN pnpm -C apps/collab-admin build
 ```
 
 ## Scenario: 可取消请求与 token 感知的 401 重放
