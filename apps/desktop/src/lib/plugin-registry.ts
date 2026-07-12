@@ -8,6 +8,7 @@ import type {
 } from '@lingfang/contract';
 import { api, apiBase, getAuthToken, tauriInvoke } from '@/lib/api';
 import type { DraftFile, LoadedPlugin } from '@/lib/types';
+import { conversationKey, selectedConversationKey } from '@/lib/plugin-creator/creator-session';
 
 export type RegistryCatalogItem = PluginCatalogItem;
 export type RegistryPackage = PluginPackageSummary;
@@ -245,9 +246,8 @@ export function deleteLocalCreatorConversation(
   tenantId: string | null,
 ): void {
   if (!conversationId) return;
-  const owner = tenantId || userId || 'none';
-  const conversationsKey = `lf:creator-conversations:${owner}`;
-  const selectedKey = `lf:creator-selected:${owner}`;
+  const conversationsKey = conversationKey(userId, tenantId);
+  const selectedKey = selectedConversationKey(userId, tenantId);
   try {
     const raw = localStorage.getItem(conversationsKey);
     const conversations = raw ? JSON.parse(raw) as unknown : [];

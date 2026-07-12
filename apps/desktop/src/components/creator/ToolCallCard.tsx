@@ -118,12 +118,12 @@ function PayloadBlock({ label, value }: { label: 'Input' | 'Output'; value: unkn
   if (!text) return null;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[#2a2a2c] bg-[#121214]">
-      <div className="flex h-9 items-center justify-between border-b border-[#2a2a2c] bg-[#18181a] px-4">
-        <span className="font-mono text-[11px] font-semibold text-[#d5d5d8]">{label}</span>
-        <span className="font-mono text-[10px] tabular-nums text-[#7f8086]">{payloadMeta(value)}</span>
+    <div className="overflow-hidden rounded-lg border border-border/70 bg-background/70">
+      <div className="flex h-9 items-center justify-between border-b border-border/70 bg-muted/40 px-4">
+        <span className="font-mono text-[11px] font-semibold text-foreground">{label}</span>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{payloadMeta(value)}</span>
       </div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words px-4 py-3 pr-6 font-mono text-[11px] leading-6 text-[#e0e0e4]">{text}</pre>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words px-4 py-3 pr-6 font-mono text-[11px] leading-6 text-foreground">{text}</pre>
     </div>
   );
 }
@@ -136,32 +136,32 @@ export function ToolCallCard({ data }: { data: ToolCardData }) {
   const status = statusText(data.status);
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-[#2a2a2c] bg-[#18181a] text-sm shadow-[0_10px_28px_rgba(0,0,0,0.18)]">
+    <div className="my-3 overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="grid w-full grid-cols-[auto_auto_1fr_auto] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[#202023]"
+        className="grid w-full grid-cols-[auto_auto_1fr_auto] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
       >
-        <ChevronRightIcon className={cn('size-3.5 shrink-0 text-[#8d8d92] transition-transform', open && 'rotate-90')} />
-        <span className="flex size-8 items-center justify-center rounded-lg border border-[#303034] bg-[#202023]">
+        <ChevronRightIcon className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <span className="flex size-8 items-center justify-center rounded-md border border-border/70 bg-muted">
           <Icon className={cn(
             'size-4 shrink-0',
-            data.status === 'running' && 'text-[#f5f5f7]',
+            data.status === 'running' && 'text-primary',
             data.status === 'error' && 'text-destructive',
-            data.status === 'ok' && 'text-[#e5e5e5]',
+            data.status === 'ok' && 'text-emerald-600 dark:text-emerald-400',
           )} />
         </span>
         <span className="min-w-0">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="font-mono text-sm font-semibold text-[#f0f0f2]">{meta.label}</span>
-            {summary ? <span className="truncate font-mono text-xs text-[#9b9ca2]">{summary}</span> : null}
+            <span className="font-mono text-sm font-semibold text-foreground">{meta.label}</span>
+            {summary ? <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span> : null}
           </span>
         </span>
         <span className={cn(
-          'flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-[11px] font-semibold',
-          data.status === 'running' && 'border-[#6f6f75]/50 bg-[#2a2a2c] text-[#f5f5f7]',
+          'flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[11px] font-semibold',
+          data.status === 'running' && 'border-primary/30 bg-primary/10 text-primary',
           data.status === 'error' && 'border-destructive/40 bg-destructive/15 text-destructive',
-          data.status === 'ok' && 'border-[#6f6f75]/50 bg-[#2a2a2c] text-[#e5e5e5]',
+          data.status === 'ok' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
         )}>
           {data.status === 'running' ? (
             <Loader2Icon className="size-3.5 animate-spin" />
@@ -174,7 +174,7 @@ export function ToolCallCard({ data }: { data: ToolCardData }) {
         </span>
       </button>
       {open && (
-        <div className="space-y-3 border-t border-[#2a2a2c] bg-[#151517] px-4 py-4">
+        <div className="space-y-3 border-t border-border/70 bg-muted/20 px-4 py-4">
           <PayloadBlock label="Input" value={data.args} />
           <PayloadBlock label="Output" value={data.result} />
         </div>

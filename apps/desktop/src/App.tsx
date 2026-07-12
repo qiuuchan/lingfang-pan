@@ -45,7 +45,7 @@ const HelpFeedback = lazy(() => import('./pages/HelpFeedback').then((m) => ({ de
 // 06-24 计费钱包重构：原「钱包」(Wallet) + 「团队空间」(TeamHome) 两页合并为「团队钱包」(TeamWallet)。
 const TeamWallet = lazy(() => import('@/pages/TeamWallet').then((m) => ({ default: m.TeamWallet })));
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
-const FloatingCreator = lazy(() => import('@/components/creator/FloatingCreator').then((m) => ({ default: m.FloatingCreator })));
+const CreatorWorkspace = lazy(() => import('@/components/creator/CreatorWorkspace').then((m) => ({ default: m.CreatorWorkspace })));
 const DraftPlugins = lazy(() => import('@/pages/DraftPlugins').then((m) => ({ default: m.DraftPlugins })));
 
 interface AppContextValue {
@@ -909,7 +909,7 @@ export default function App() {
                                 onClose={() => undefined}
                               />
                             ) : (
-                              <FloatingCreator variant="embedded" onClose={() => { setViewState(creatorReturnView); setCreatorReturnView('run-plugins'); }} sidebarCollapsed={!sidebarOpen} />
+                              <CreatorWorkspace onClose={() => { setViewState(creatorReturnView); setCreatorReturnView('run-plugins'); }} sidebarCollapsed={!sidebarOpen} />
                             )}
                           </PageTransition>
                         </Suspense>

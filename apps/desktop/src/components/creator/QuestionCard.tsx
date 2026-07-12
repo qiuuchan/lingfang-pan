@@ -1,11 +1,12 @@
 // QuestionCard.tsx —— AskQuestion 工具的人在环提问卡片。
 //
-// 从 FloatingCreator.renderQuestionCard 抽取（betav2 阶段4c）。
+// 从 CreatorWorkspace 的提问渲染逻辑抽取（betav2 阶段4c）。
 // 卡片展示问题 + 选项按钮（单选/多选）+ 自由文本输入框。
 // 用户作答后调 onAnswer，由父组件 resolve 悬挂的 deferred（agent 循环继续）。
 import { CheckCircle2Icon, SendIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 export interface QuestionCardProps {
   question: string;
@@ -37,17 +38,17 @@ export function QuestionCard(props: QuestionCardProps) {
     onAnswer(labels);
   };
   return (
-    <div className="rounded-xl border border-[#2a2a2c] bg-[#18181a] p-4 text-[#e8e8eb] shadow-[0_10px_28px_rgba(0,0,0,0.16)]">
+    <div className="rounded-lg border border-border/70 bg-card/60 p-4 text-foreground shadow-sm">
       <div className="flex items-start gap-2">
-        <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-[#2a2a2c] text-[#e5e5e5]">
+        <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
           <span className="font-mono text-xs font-bold">?</span>
         </div>
         <div className="flex-1 text-sm font-medium">{question}</div>
       </div>
       {answered ? (
-        <div className="mt-3 flex items-start gap-2 rounded-md border border-[#3a3a3d] bg-[#202023] px-3 py-2">
-          <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[#e5e5e5]" />
-          <span className="text-xs text-[#b8b8bd]">已回答：{answer}</span>
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2">
+          <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <span className="text-xs text-muted-foreground">已回答：{answer}</span>
         </div>
       ) : (
         <div className="mt-3 space-y-2.5">
@@ -66,7 +67,10 @@ export function QuestionCard(props: QuestionCardProps) {
                         onAnswer(o.label);
                       }
                     }}
-                    className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${on ? 'border-[#6f6f75] bg-[#2a2a2c] text-[#e5e5e5]' : 'border-[#2a2a2c] bg-[#151517] text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]'}`}
+                    className={cn(
+                      'rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
+                      on ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
+                    )}
                   >
                     {o.label}
                   </button>
@@ -75,7 +79,7 @@ export function QuestionCard(props: QuestionCardProps) {
             </div>
           )}
           {multiSelect && options && options.length > 0 && (
-            <Button size="sm" className="h-8 gap-1.5 rounded-md bg-[#2a2a2c] px-3.5 text-xs text-[#e5e5e5] hover:bg-[#343437] disabled:text-[#6f7076]" disabled={!selected.length} onClick={submitMulti}>
+            <Button size="sm" className="h-8 gap-1.5 rounded-md px-3.5 text-xs" disabled={!selected.length} onClick={submitMulti}>
               <CheckCircle2Icon className="size-3.5" />
               确认选择
             </Button>
@@ -89,9 +93,9 @@ export function QuestionCard(props: QuestionCardProps) {
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onAnswer(draftText); } }}
                 rows={1}
-                className="min-h-[36px] max-h-24 resize-none rounded-md border-[#2a2a2c] bg-[#151517] font-mono text-sm text-[#e5e5e5] placeholder:text-[#5a5a5c] focus-visible:border-[#3a3a3d] focus-visible:ring-0 dark:bg-[#151517]"
+                className="min-h-9 max-h-24 resize-none rounded-md border-input bg-background font-mono text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
               />
-              <Button size="sm" className="h-9 gap-1.5 rounded-md bg-[#2a2a2c] px-3.5 text-xs text-[#e5e5e5] hover:bg-[#343437] disabled:text-[#6f7076]" disabled={!draftText.trim()} onClick={() => onAnswer(draftText)}>
+              <Button size="sm" className="h-9 gap-1.5 rounded-md px-3.5 text-xs" disabled={!draftText.trim()} onClick={() => onAnswer(draftText)}>
                 <SendIcon className="size-3.5" />
                 提交
               </Button>

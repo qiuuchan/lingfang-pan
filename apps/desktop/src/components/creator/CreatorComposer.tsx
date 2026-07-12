@@ -1,22 +1,25 @@
+import { useState, type ComponentType, type ReactNode } from 'react';
 import {
   ArrowUpIcon,
   AtSignIcon,
   BrainIcon,
+  CheckIcon,
   ChevronDownIcon,
-  CircleIcon,
   CrownIcon,
   FolderOpenIcon,
+  GaugeIcon,
   MicIcon,
   PackageIcon,
+  PaperclipIcon,
   PlusIcon,
   RefreshCwIcon,
   SparklesIcon,
+  SquareIcon,
+  WandSparklesIcon,
   XIcon,
   ZapIcon,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { LoadedPlugin } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -29,77 +32,66 @@ export interface CreatorSelectedFile {
   file: File;
 }
 
-function ComposerTagButton({
-  active,
+const CONTROL_CLASS = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45';
+
+function MenuAction({
   children,
   disabled,
   icon: Icon,
   onClick,
-  title,
 }: {
-  active?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
   disabled?: boolean;
-  icon: React.ComponentType<{ className?: string }>;
-  onClick?: () => void;
-  title: string;
+  icon: ComponentType<{ className?: string }>;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
       disabled={disabled}
-      title={title}
-      className={cn(
-        'inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium transition-colors duration-150',
-        'text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5] focus-visible:ring-2 focus-visible:ring-[#55565a]',
-        'disabled:cursor-not-allowed disabled:text-[#5a5a5c] disabled:opacity-70',
-        active && 'bg-[#2a2a2c] text-[#e5e5e5]',
-      )}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
     >
-      <Icon className="size-4 shrink-0" />
-      <span className="truncate">{children}</span>
-      <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate">{children}</span>
     </button>
   );
 }
 
-function ComposerIconButton({
+function SelectOption({
   active,
   children,
-  disabled,
+  icon: Icon,
   onClick,
-  title,
 }: {
-  active?: boolean;
-  children: React.ReactNode;
-  disabled?: boolean;
-  onClick?: () => void;
-  title: string;
+  active: boolean;
+  children: ReactNode;
+  icon: ComponentType<{ className?: string }>;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={title}
       className={cn(
-        'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-[#a0a0a3] transition-colors duration-150',
-        'hover:bg-[#2a2a2c] hover:text-[#e5e5e5] focus-visible:ring-2 focus-visible:ring-[#55565a] disabled:cursor-not-allowed disabled:text-[#5a5a5c]',
-        active && 'bg-[#2a2a2c] text-[#e5e5e5]',
+        'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent',
+        active && 'bg-accent text-accent-foreground',
       )}
     >
-      {children}
+      <Icon className="size-4 text-muted-foreground" />
+      <span className="flex-1">{children}</span>
+      {active && <CheckIcon className="size-3.5 text-primary" />}
     </button>
   );
 }
 
 export function CreatorComposer({
+  activeSkillCount,
   busy,
   canInspectContext,
   compressHint,
-  embedded,
+  contextUsagePct,
+  contextUsageLabel,
   input,
   mode,
   onClearFiles,
@@ -111,6 +103,7 @@ export function CreatorComposer({
   onModeChange,
   onOptimizePrompt,
   onPickFiles,
+  onPickFolder,
   onRefreshWorkspace,
   onRemoveFile,
   onSend,
@@ -118,11 +111,8 @@ export function CreatorComposer({
   onSelectTier,
   onStop,
   onToggleVoice,
-  placement,
   recentPlugins,
-  showContextButton = false,
   selectedFiles,
-  activeSkillCount,
   optimizingPrompt,
   tier,
   referencedPlugin,
@@ -134,7 +124,8 @@ export function CreatorComposer({
   busy: boolean;
   canInspectContext: boolean;
   compressHint?: string;
-  embedded: boolean;
+  contextUsagePct: number | null;
+  contextUsageLabel?: string;
   input: string;
   mode: CreatorMode;
   onClearFiles: () => void;
@@ -146,6 +137,7 @@ export function CreatorComposer({
   onModeChange: (mode: CreatorMode) => void;
   onOptimizePrompt: () => void;
   onPickFiles: () => void;
+  onPickFolder: () => void;
   onRefreshWorkspace: () => void;
   onRemoveFile: (id: string) => void;
   onSend: () => void;
@@ -153,9 +145,7 @@ export function CreatorComposer({
   onSelectTier: (tier: 'fast' | 'premium') => void;
   onStop: () => void;
   onToggleVoice: () => void;
-  placement: 'hero' | 'bottom';
   recentPlugins: LoadedPlugin[];
-  showContextButton?: boolean;
   selectedFiles: CreatorSelectedFile[];
   optimizingPrompt: boolean;
   tier: 'fast' | 'premium';
@@ -164,254 +154,183 @@ export function CreatorComposer({
   workspacePath: string | null;
   workspacePluginId: string | null;
 }) {
-  const hero = placement === 'hero';
-  const embeddedBottom = embedded && !hero;
-  const hasRecentPlugins = recentPlugins.length > 0;
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const selectedModelLabel = tier === 'fast' ? '快速' : '高级';
-  const canOpenContext = showContextButton && canInspectContext;
+  const hasContextChips = selectedFiles.length > 0 || referencedPlugin != null || workspacePluginId != null;
+
+  function runMoreAction(action: () => void) {
+    setMoreOpen(false);
+    action();
+  }
+
   return (
-    <div className={cn(
-      hero ? 'w-full' : 'shrink-0',
-      !hero && (embeddedBottom
-        ? 'bg-background px-3 pb-6 pt-3 sm:px-6'
-        : 'bg-background px-3 py-4 sm:px-6'),
-      )}>
-      {selectedFiles.length > 0 && (
-        <div className={cn(CREATOR_COLUMN_CLASS, 'mb-3', hero && 'rounded-md border border-border bg-card p-3 text-left shadow-sm')}>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[11px] font-medium text-muted-foreground">{selectedFiles.length} file(s) selected</span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="default"
-                size="sm"
-                className="h-7 gap-1.5 rounded-md px-3 text-xs transition-colors duration-150 hover:bg-primary/90"
-                onClick={onImportFiles}
-                disabled={busy}
-              >
-                <PackageIcon className="size-3.5" />
-                导入为插件
-              </Button>
-              <Button variant="ghost" size="sm" className="h-7 rounded-md px-2 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground" onClick={onClearFiles}>
-                清空
-              </Button>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {selectedFiles.map((file) => (
-              <Badge key={file.id} variant="secondary" className="gap-1.5 rounded-md border-border bg-muted px-2.5 py-1.5 font-mono text-[11px] text-foreground">
-                <span className="max-w-[200px] truncate" title={file.name}>{file.name}</span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveFile(file.id)}
-                  className="inline-flex shrink-0 items-center justify-center rounded-sm transition-colors hover:bg-muted-foreground/20"
-                  aria-label="移除"
-                >
-                  <XIcon className="size-3.5" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
+    <div className="shrink-0 bg-background/95 px-3 pb-4 pt-2 backdrop-blur-sm sm:px-5 sm:pb-5">
       <div className={CREATOR_COLUMN_CLASS}>
-        <div className="rounded-2xl bg-[#1c1c1e] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.3)] sm:p-4">
-          {workspacePluginId && (
-            <div className="mb-3 flex min-w-0 items-center justify-between gap-2 rounded-xl bg-[#232326] px-3 py-2 text-[#a0a0a3]">
-              <div className="flex min-w-0 items-center gap-2">
-                <FolderOpenIcon className="size-4 shrink-0" />
-                <span className="shrink-0 text-xs font-medium">工作文件夹</span>
-                <span className="truncate font-mono text-[11px]" title={workspacePath ?? workspacePluginId}>
-                  {workspacePath ?? workspacePluginId}
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={onRefreshWorkspace}
-                  title="从工作文件夹刷新"
-                  aria-label="从工作文件夹刷新"
-                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[#2f2f32] hover:text-[#e5e5e5]"
-                >
-                  <RefreshCwIcon className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenWorkspace}
-                  title="打开工作文件夹"
-                  aria-label="打开工作文件夹"
-                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[#2f2f32] hover:text-[#e5e5e5]"
-                >
-                  <FolderOpenIcon className="size-3.5" />
-                </button>
-              </div>
+        <div className="overflow-hidden rounded-lg border border-border/80 bg-card shadow-lg transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:shadow-xl">
+          {hasContextChips && (
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2">
+              {workspacePluginId && (
+                <div className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  <button type="button" onClick={onOpenWorkspace} className="inline-flex min-w-0 items-center gap-1.5 hover:text-foreground" title={workspacePath ?? workspacePluginId}>
+                    <FolderOpenIcon className="size-3.5 shrink-0" />
+                    <span className="max-w-44 truncate">{workspacePath ?? workspacePluginId}</span>
+                  </button>
+                  <button type="button" onClick={onRefreshWorkspace} className="rounded-sm p-0.5 hover:bg-accent hover:text-foreground" title="刷新工作区" aria-label="刷新工作区">
+                    <RefreshCwIcon className="size-3" />
+                  </button>
+                </div>
+              )}
+              {referencedPlugin && (
+                <div className="inline-flex min-w-0 items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs text-primary">
+                  <AtSignIcon className="size-3.5 shrink-0" />
+                  <span className="max-w-36 truncate">{referencedPlugin.name}</span>
+                  <button type="button" onClick={() => onSelectReferencedPlugin(null)} className="rounded-sm p-0.5 hover:bg-primary/10" title="取消引用" aria-label="取消引用">
+                    <XIcon className="size-3" />
+                  </button>
+                </div>
+              )}
+              {selectedFiles.slice(0, 4).map((file) => (
+                <div key={file.id} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  <PaperclipIcon className="size-3.5 shrink-0" />
+                  <span className="max-w-32 truncate" title={file.name}>{file.name}</span>
+                  <button type="button" onClick={() => onRemoveFile(file.id)} className="rounded-sm p-0.5 hover:bg-accent hover:text-foreground" title="移除文件" aria-label="移除文件">
+                    <XIcon className="size-3" />
+                  </button>
+                </div>
+              ))}
+              {selectedFiles.length > 4 && <span className="text-xs text-muted-foreground">+{selectedFiles.length - 4}</span>}
             </div>
           )}
+
           <Textarea
-          placeholder="今天帮你做些什么？@ 引用对话文件，/ 调用技能与指令"
-          value={input}
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              onSend();
-            }
-          }}
-          rows={1}
-          className="max-h-44 min-h-24 resize-none border-0 bg-transparent px-0 py-0 text-base leading-7 text-[#f4f4f5] shadow-none outline-none placeholder:text-[#5a5a5c] focus-visible:border-0 focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 md:text-sm dark:bg-transparent dark:disabled:bg-transparent"
-          disabled={busy}
-        />
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <ComposerTagButton
-              active={mode === 'plan'}
-              disabled={busy}
-              icon={BrainIcon}
-              onClick={() => onModeChange(mode === 'plan' ? 'agent' : 'plan')}
-              title={mode === 'plan' ? '切换到 Agent 模式' : '切换到 Plan 模式'}
-            >
-              {mode === 'plan' ? 'Plan' : 'Agent'}
-            </ComposerTagButton>
-            <Popover>
-              <PopoverTrigger render={
-                <button
-                  type="button"
-                  disabled={busy}
-                  title="选择模型档位"
-                  className="inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium text-[#a0a0a3] transition-colors duration-150 hover:bg-[#2a2a2c] hover:text-[#e5e5e5] focus-visible:ring-2 focus-visible:ring-[#55565a] disabled:cursor-not-allowed disabled:text-[#5a5a5c]"
-                />
-              }>
-                <span className="max-w-[8.75rem] truncate">{selectedModelLabel}</span>
-                <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
-              </PopoverTrigger>
-              <PopoverContent className="w-44 rounded-xl border-[#2a2a2c] bg-[#1c1c1e] p-1 shadow-md" align="start">
-                {([
-                  { tier: 'fast' as const, icon: ZapIcon, label: '快速' },
-                  { tier: 'premium' as const, icon: CrownIcon, label: '高级' },
-                ]).map(({ tier: nextTier, icon: Icon, label }) => (
-                  <button
-                    key={nextTier}
-                    type="button"
-                    onClick={() => onSelectTier(nextTier)}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150',
-                      tier === nextTier ? 'bg-[#2a2a2c] text-[#e5e5e5]' : 'text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]',
-                    )}
-                  >
-                    <Icon className="size-4" />
-                    {label}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
-            <ComposerTagButton
-              active={activeSkillCount > 0}
-              disabled={busy}
-              icon={SparklesIcon}
-              onClick={onOpenSkills}
-              title={`技能（已启用 ${activeSkillCount} 个）`}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                技能
-                <span className="rounded bg-[#2a2a2c] px-1.5 py-0.5 font-mono text-[10px] leading-none text-[#a0a0a3]">{activeSkillCount}</span>
-              </span>
-            </ComposerTagButton>
-            {hasRecentPlugins ? (
-              <Popover>
+            placeholder="描述要创建或修改的插件…"
+            value={input}
+            onChange={(event) => onInputChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                onSend();
+              }
+            }}
+            rows={1}
+            className="max-h-40 min-h-12 resize-none border-0 bg-transparent px-3.5 py-2.5 text-sm leading-6 shadow-none outline-none placeholder:text-muted-foreground/60 focus-visible:border-0 focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 dark:bg-transparent dark:disabled:bg-transparent"
+            disabled={busy}
+          />
+
+          <div className="flex min-h-10 items-center justify-between gap-2 border-t border-border/60 px-2 py-1">
+            <div className="flex min-w-0 items-center gap-1">
+              <Popover open={moreOpen} onOpenChange={setMoreOpen}>
                 <PopoverTrigger render={
                   <button
                     type="button"
-                    title={referencedPlugin ? `已引用插件：${referencedPlugin.name}` : '引用已有插件'}
-                    className={cn(
-                      'inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium transition-colors duration-150',
-                      referencedPlugin
-                        ? 'bg-[#2a2a2c] text-[#e5e5e5]'
-                        : 'text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]',
-                    )}
+                    className={cn(CONTROL_CLASS, 'relative size-8 px-0')}
+                    title="添加上下文与更多操作"
+                    aria-label="添加上下文与更多操作"
                   />
                 }>
-                  <AtSignIcon className="size-4 shrink-0" />
-                  <span className="truncate">选择插件</span>
-                  <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+                  <PlusIcon className="size-4" />
                 </PopoverTrigger>
-                <PopoverContent className="w-64 rounded-xl border-[#2a2a2c] bg-[#1c1c1e] shadow-md" align="start">
-                  <div className="text-xs font-medium text-[#a0a0a3]">引用已有插件（注入源码到上下文）</div>
-                  <div className="mt-1.5 max-h-60 space-y-0.5 overflow-y-auto">
-                    {recentPlugins.map((plugin) => (
-                      <button
-                        key={plugin.id}
-                        type="button"
-                        onClick={() => onSelectReferencedPlugin(referencedPlugin?.id === plugin.id ? null : plugin)}
-                        className={cn(
-                          'block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-150',
-                          referencedPlugin?.id === plugin.id ? 'bg-[#2a2a2c] text-[#e5e5e5]' : 'text-[#a0a0a3] hover:bg-[#2a2a2c] hover:text-[#e5e5e5]',
-                        )}
-                        title={plugin.name}
-                      >
-                        {plugin.name}
-                      </button>
-                    ))}
-                  </div>
-                  {referencedPlugin && (
-                    <button
-                      type="button"
-                      onClick={() => onSelectReferencedPlugin(null)}
-                      className="mt-1.5 w-full rounded-lg px-2 py-1 text-xs text-[#8d8d92] transition-colors duration-150 hover:bg-[#2a2a2c] hover:text-[#e5e5e5]"
-                    >
-                      取消引用
-                    </button>
+                <PopoverContent className="w-72 p-2" align="start" side="top" sideOffset={8}>
+                  <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">添加到本轮</div>
+                  <MenuAction icon={PaperclipIcon} onClick={() => runMoreAction(onPickFiles)}>选择文件</MenuAction>
+                  <MenuAction icon={FolderOpenIcon} onClick={() => runMoreAction(onPickFolder)}>选择文件夹</MenuAction>
+                  {selectedFiles.length > 0 && (
+                    <>
+                      <MenuAction icon={PackageIcon} disabled={busy} onClick={() => runMoreAction(onImportFiles)}>将已选文件导入为插件</MenuAction>
+                      <MenuAction icon={XIcon} onClick={() => runMoreAction(onClearFiles)}>清空已选文件</MenuAction>
+                    </>
+                  )}
+                  <MenuAction icon={SparklesIcon} onClick={() => runMoreAction(onOpenSkills)}>技能（已启用 {activeSkillCount} 个）</MenuAction>
+                  <MenuAction icon={WandSparklesIcon} disabled={busy || optimizingPrompt || !input.trim()} onClick={() => runMoreAction(onOptimizePrompt)}>
+                    {optimizingPrompt ? '正在优化提示词…' : '优化提示词'}
+                  </MenuAction>
+                  <MenuAction icon={MicIcon} disabled={busy} onClick={() => runMoreAction(onToggleVoice)}>{voiceListening ? '停止语音输入' : '语音输入'}</MenuAction>
+
+                  {workspacePluginId && (
+                    <>
+                      <div className="my-1 border-t" />
+                      <MenuAction icon={FolderOpenIcon} onClick={() => runMoreAction(onOpenWorkspace)}>打开插件工作区</MenuAction>
+                      <MenuAction icon={RefreshCwIcon} onClick={() => runMoreAction(onRefreshWorkspace)}>刷新插件工作区</MenuAction>
+                    </>
+                  )}
+
+                  {recentPlugins.length > 0 && (
+                    <>
+                      <div className="my-1 border-t" />
+                      <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">引用已有插件</div>
+                      <div className="max-h-40 overflow-y-auto">
+                        {recentPlugins.map((plugin) => {
+                          const active = referencedPlugin?.id === plugin.id;
+                          return (
+                            <button
+                              key={plugin.id}
+                              type="button"
+                              onClick={() => runMoreAction(() => onSelectReferencedPlugin(active ? null : plugin))}
+                              className={cn('flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent', active && 'bg-accent')}
+                            >
+                              <AtSignIcon className="size-4 shrink-0 text-muted-foreground" />
+                              <span className="min-w-0 flex-1 truncate">{plugin.name}</span>
+                              {active && <CheckIcon className="size-3.5 text-primary" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
                 </PopoverContent>
               </Popover>
-            ) : (
-              <ComposerTagButton disabled icon={AtSignIcon} title="暂无可引用插件">
-                选择插件
-              </ComposerTagButton>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center justify-end gap-1.5">
-            {compressHint && <span className="hidden font-mono text-[10px] text-[#6f7076] md:inline">{compressHint}</span>}
-            <ComposerIconButton
-              disabled={busy || !canOpenContext}
-              onClick={canOpenContext ? onOpenContext : undefined}
-              title={canOpenContext ? '打开上下文' : '当前无法查看上下文'}
-            >
-              <CircleIcon className="size-5" />
-            </ComposerIconButton>
-            <ComposerIconButton disabled={busy} onClick={onPickFiles} title="上传附件">
-              <PlusIcon className="size-5" />
-            </ComposerIconButton>
-            <ComposerIconButton active={optimizingPrompt} disabled={busy || optimizingPrompt || !input.trim()} onClick={onOptimizePrompt} title="优化提示词">
-              <SparklesIcon className={cn('size-5', optimizingPrompt && 'animate-pulse')} />
-            </ComposerIconButton>
-            <ComposerIconButton active={voiceListening} disabled={busy} onClick={onToggleVoice} title={voiceListening ? '停止语音输入' : '语音输入'}>
-              <MicIcon className="size-5" />
-            </ComposerIconButton>
-            {busy ? (
-              <button
-                type="button"
-                onClick={onStop}
-                title="停止"
-                aria-label="停止"
-                className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-[#2a2a2c] text-[#a0a0a3] transition-colors duration-150 hover:bg-[#343437] hover:text-[#e5e5e5] focus-visible:ring-2 focus-visible:ring-[#55565a]"
-              >
-                <XIcon className="size-5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onSend}
-                disabled={!input.trim()}
-                title="发送"
-                aria-label="发送"
-                className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-[#2a2a2c] text-[#a0a0a3] transition-colors duration-150 hover:bg-[#343437] hover:text-[#e5e5e5] focus-visible:ring-2 focus-visible:ring-[#55565a] disabled:cursor-not-allowed disabled:text-[#5a5a5c]"
-              >
-                <ArrowUpIcon className="size-4" />
-              </button>
-            )}
+
+              <Popover open={modeOpen} onOpenChange={setModeOpen}>
+                <PopoverTrigger render={<button type="button" disabled={busy} className={CONTROL_CLASS} title="选择工作模式" />}>
+                  <BrainIcon className="size-3.5" />
+                  <span>{mode === 'plan' ? 'Plan' : 'Agent'}</span>
+                  <ChevronDownIcon className="size-3 opacity-65" />
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-2" align="start" side="top" sideOffset={8}>
+                  <SelectOption active={mode === 'agent'} icon={SparklesIcon} onClick={() => { onModeChange('agent'); setModeOpen(false); }}>Agent</SelectOption>
+                  <SelectOption active={mode === 'plan'} icon={BrainIcon} onClick={() => { onModeChange('plan'); setModeOpen(false); }}>Plan</SelectOption>
+                </PopoverContent>
+              </Popover>
+
+              <Popover open={modelOpen} onOpenChange={setModelOpen}>
+                <PopoverTrigger render={<button type="button" disabled={busy} className={CONTROL_CLASS} title="选择模型档位" />}>
+                  <span>{selectedModelLabel}</span>
+                  <ChevronDownIcon className="size-3 opacity-65" />
+                </PopoverTrigger>
+                <PopoverContent className="w-44 p-2" align="start" side="top" sideOffset={8}>
+                  <SelectOption active={tier === 'fast'} icon={ZapIcon} onClick={() => { onSelectTier('fast'); setModelOpen(false); }}>快速</SelectOption>
+                  <SelectOption active={tier === 'premium'} icon={CrownIcon} onClick={() => { onSelectTier('premium'); setModelOpen(false); }}>高级</SelectOption>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              {canInspectContext && contextUsagePct != null && (
+                <button
+                  type="button"
+                  onClick={onOpenContext}
+                  className={cn(CONTROL_CLASS, contextUsagePct >= 80 && 'text-amber-600 dark:text-amber-400')}
+                  title={`查看上下文详情${contextUsageLabel ? ` · ${contextUsageLabel}` : ''}${compressHint ? ` · ${compressHint}` : ''}`}
+                >
+                  <GaugeIcon className="size-3.5" />
+                  <span className="font-mono tabular-nums">{contextUsagePct === 0 ? '<1%' : `${contextUsagePct}%`}</span>
+                </button>
+              )}
+              {busy ? (
+                <button type="button" onClick={onStop} title="停止" aria-label="停止" className="inline-flex size-9 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <SquareIcon className="size-3.5 fill-current" />
+                </button>
+              ) : (
+                <button type="button" onClick={onSend} disabled={!input.trim()} title="发送" aria-label="发送" className="inline-flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40">
+                  <ArrowUpIcon className="size-4" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
-        </div>
-        <p className="mt-3 text-center text-[11px] text-[#5a5a5c]">内容由 AI 生成，请核实重要信息</p>
+        <p className="mt-2 text-center text-[10px] text-muted-foreground/60">AI 生成内容可能有误，请在发布前检查</p>
       </div>
     </div>
   );

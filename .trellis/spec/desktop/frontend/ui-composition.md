@@ -21,8 +21,11 @@ This is a work-focused app. Existing pages use restrained cards and dense lists,
 
 Current layout rules:
 - Auth is a centered full-screen state; tenant switching is a Dialog opened from the Sidebar user area.
-- Plugin run and plugin development are independent main-area views. The title-bar segment switches between `run-plugins` (`PluginCenterBody`) and `develop-plugins` (`FloatingCreator` embedded layout), with `PageTransition` handling the simple view animation. `develop-plugins` intentionally takes over the main area and hides the outer app Sidebar while active.
-- The develop plugin page uses a Codex App / Claude-like creator workbench: left vertical creator navigation with inline history, centered title area, bottom-centered compact composer, quick chips below the composer, and an optional right-side draft panel when a staged plugin exists. Model selection belongs inside the composer, not in the left sidebar. Visual styling uses adaptive semantic tokens (not hardcoded hex) so it follows the active light/dark theme.
+- Plugin run and plugin development are independent main-area views. The title-bar segment switches between `run-plugins` (`PluginCenterBody`) and `develop-plugins` (`CreatorWorkspace`), with `PageTransition` handling the simple view animation. `develop-plugins` intentionally takes over the main area and hides the outer app Sidebar while active.
+- The develop plugin page is a single Agent workbench: left conversation/history navigation, one centered thread column (`max-w-[52rem]`), a bottom compact composer, and an optional right-side Artifact Inspector when a staged plugin exists. Do not add a second creator toolbar, modal creator shell, or message-area context bar.
+- Composer permanent controls are limited to add/more, Agent/Plan, model, the single context-usage entry, and send/stop. Skills, files/folders, referenced plugins, prompt optimization, voice, and workspace actions belong in the composer more menu or context chips.
+- The Artifact Inspector is not a second conversation/context window. It owns staged plugin metadata, files, diagnostics, save, and publish actions, using a responsive width of `clamp(360px, 30vw, 420px)`.
+- Creator styling must use adaptive semantic tokens (not hardcoded hex) across messages, tool calls, todos, questions, composer, context details, and the Artifact Inspector so light/dark themes remain coherent.
 - Other pages live in a centered `max-w-5xl` content column.
 - Lists commonly use `divide-y rounded-lg border` instead of nested cards.
 
@@ -30,7 +33,7 @@ Reference files:
 - `apps/desktop/src/App.tsx`
 - `apps/desktop/src/components/TitleBar.tsx`
 - `apps/desktop/src/pages/plugins/PluginCenterBody.tsx`
-- `apps/desktop/src/components/creator/FloatingCreator.tsx`
+- `apps/desktop/src/components/creator/CreatorWorkspace.tsx`
 
 ## Copy And Language
 
