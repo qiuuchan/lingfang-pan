@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
+- **Total Sessions**: 19
 - **Last Active**: 2026-07-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~621 | Active |
+| `journal-1.md` | ~654 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-07-13 | 内置 Windows 基础运行时 | `31ecf14b` | `betav2` |
 | 18 | 2026-07-13 | 修复管理后台页面与 Docker 部署 | `b1190110` | `betav2` |
 | 17 | 2026-07-12 | 完成运行时、文档与管理端治理任务 | `daedc018` | `betav2` |
 | 16 | 2026-07-12 | 完善插件导入、发布与治理系统 | - | `betav2` |
