@@ -455,3 +455,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 插件制品仓库与管理系统生产收口
+
+**Date**: 2026-07-12
+**Task**: 插件制品仓库与管理系统生产收口
+**Branch**: `betav2`
+
+### Summary
+
+完成 .lfplugin v4 制品仓库、release 级审核与权益、本机原子安装账本、独立草稿工作区和三 Tab 插件中心；补齐市场未审核 release 隔离、全 ZIP 条目 EOF/CRC 校验及 pending cloud 延迟激活，完成全量类型检查、测试和生产构建。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0d55c9d2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
