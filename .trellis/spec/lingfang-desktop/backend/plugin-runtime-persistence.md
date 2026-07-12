@@ -87,74 +87,75 @@ const runtime = resolvePluginRuntime(plugin);
 const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 ```
 
-### Scenario: Embedded Python / Node Runtime Boundary
+### Scenario: Bundled-Only Windows Runtime Boundary
 
 #### 1. Scope / Trigger
-- Trigger: changing `embedded_runtime`, `plugin_script::probe_script_runtime`, Python/Node preview execution, persistent plugin start, dependency installation, code assistant `run_command`, or Tauri bundle resources.
+- Trigger: changing `runtime_resolver`, runtime status, plugin preview/start/shell, dependency installation, Playwright support, runtime assets, or Tauri bundle resources.
 
 #### 2. Signatures
-- `EmbeddedRuntime::from_app(app) -> Result<EmbeddedRuntime, String>`
+- `RuntimeResolver::resolve(app) -> Result<RuntimeResolver, String>`
 - `probe_script_runtime(app, runtime: ScriptRuntime) -> Result<ProbeResult, String>`
 - `run_plugin_script(app, input) -> Result<RunResult, String>`
 - `start_plugin(app, store, process_table, plugin_id) -> Result<StartPluginResult, String>`
-- `run_command(workspace, command, args, cwd) -> Result<Value, String>`
+- `run_plugin_shell(app, store, input) -> Result<ShellResult, String>`
+- `get_runtime_status(app) -> Result<{python,node,ffmpeg,chromium}, String>`
 
 #### 3. Contracts
-- Python/Node runtimes are application resources under Tauri `bundle.resources` target `runtimes`.
-- Windows layout: `runtimes/python/python.exe`, `runtimes/python/Scripts/pip.exe`, `runtimes/nodejs/node.exe`, `runtimes/nodejs/npm.cmd|npm.exe|npm`, `runtimes/nodejs/pnpm.cmd|pnpm.exe|pnpm`, `runtimes/ffmpeg/ffmpeg.exe`, `runtimes/ffmpeg/ffprobe.exe`.
-- Unix layout: `runtimes/python/bin/python`, `runtimes/python/bin/pip`, `runtimes/nodejs/bin/node`, `runtimes/nodejs/bin/npm|pnpm`, `runtimes/ffmpeg/bin/ffmpeg`.
-- `LINGFANG_RUNTIME_DIR` may override the application-managed runtime data root for tests/dev diagnostics. It does not make system PATH an execution source.
-- `probe_script_runtime` only probes embedded binaries and must never scan system `PATH`.
-- `run_plugin_script` preview execution uses only embedded Python/Node and injects the embedded runtime environment.
-- `start_plugin` persistent execution creates Python venvs with embedded Python, installs Python deps through the venv pip with embedded env, and uses embedded Node/pnpm/npm for Node install/start.
+- Windows x64 runtime assets are ordinary Git files under `apps/desktop/runtimes/`; do not use Git LFS or build-time downloads. Files above Gitee's 100 MB object limit are committed as fixed parts under `apps/desktop/runtime-parts/` and materialized atomically before development or packaging; installers must not copy the parts directory.
+- Tauri resources and the custom SFX both map that exact directory to installed `runtimes/`.
+- Layout: `python/python.exe`, `python/Scripts/pip.cmd`, `nodejs/node.exe`, `nodejs/npm.cmd`, `nodejs/pnpm.cmd`, `ffmpeg/{ffmpeg,ffprobe}.exe`, and `chromium/ms-playwright/{chromium,chromium_headless_shell}-1228/...`.
+- `runtime-lock.json` owns versions, key-file sizes, SHA256, and any `materializedFiles` part lists. `scripts/materialize-bundled-runtimes.mjs` reconstructs those files offline; `scripts/verify-bundled-runtimes.mjs` verifies the result and the installed Playwright package version/revision before every release build.
+- Resolver priority is `LINGFANG_EMBEDDED_RUNTIME_DIR` (tests) -> exe sibling -> Tauri resource dir -> debug repository dir. No user config, downloaded runtime directory, or system PATH participates.
+- Preview, persistent start, builtin script start, creator execution, dependency installation, and Agent shell all use `RuntimeResolver`.
 - `python_venv_dir(plugin_dir)` must return `<plugin_dir>/.venv` on non-Windows and `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>` on Windows; the hash is derived from the normalized plugin path so the same plugin reuses the same short venv.
 - Python venv creation must verify pip after `python -m venv`; if standard `venv`/`ensurepip` fails or leaves no pip, retry with embedded `python -m venv --without-pip` and bootstrap pip via embedded `python -m pip --python <venv-python> install --no-index --find-links <embedded-pip-wheel-dir> --upgrade pip`.
 - Embedded pip wheel discovery must prefer `runtimes/python/Lib/ensurepip/_bundled/pip-*.whl` and may fall back to `runtimes/python/pip-*.whl` for older packaged layouts; it must not download pip or use host Python.
-- `run_command` maps `python`, `python3`, `py`, `pip`, `pip3`, `node`, `nodejs`, `npm`, `pnpm`, and `ffmpeg` to embedded runtime commands only. External absolute paths for those command names are rejected.
-- **FFmpeg 作为第三内置运行时**（2026-07-09 新增）：`runtimes/ffmpeg/ffmpeg.exe` 进 PATH，插件 `shutil.which("ffmpeg")` 自动命中内置版本，无需宿主机安装。`RuntimeResolver` 有 `ffmpeg: Option<ResolvedRuntime>` 字段，`resolve_runtime_command("ffmpeg")` 返回绝对路径（给直接 spawn ffmpeg 的插件）。多数插件走 `shutil.which`（靠 `path_value()` 把 `runtimes/ffmpeg/` 加进 PATH），无需调 `resolve_runtime_command`。缺失时返回 None（不阻断启动，插件自行降级）。facefusion / videodl 等依赖 FFmpeg 的插件**零改动**即可用。
-- Embedded env replaces `PATH` with embedded runtime directories (node + node/bin + python + python/Scripts + python/bin + **ffmpeg**) + **Windows system directories (System32 / System32\Wbem / System32\WindowsPowerShell\v1.0)** and injects China mirrors: `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`, `PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn`, `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`, `npm_config_registry=https://registry.npmmirror.com`. **System32 必须保留**：python.exe/node.exe 启动加载依赖 DLL（VCRUNTIME、api-ms-win-* 等）需 System32 在 PATH；PS launcher 的 `cmd /c pause`、插件内 `shutil.which("ffmpeg")` 也需 System32。清空宿主 PATH 是安全边界，但 System32 是 OS 基础设施，不可省（2026-07-09 修复 facefusion「进程未输出任何内容」秒退根因）。
+- `resolve_runtime_command` maps Python/pip/uv, Node/npm/pnpm, FFmpeg, and `chrome|chromium` to bundled absolute paths only.
+- Child env replaces host PATH with bundled runtime/plugin-local directories plus required Windows system directories and injects `PLAYWRIGHT_BROWSERS_PATH=<bundled>/chromium/ms-playwright` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.
+- `ensure_playwright_browsers` validates both full Chromium and headless shell at revision 1228; it never invokes Playwright install. Agent shell rejects commands containing `playwright install`.
 
 #### 4. Validation & Error Matrix
-- missing `runtimes/python` -> Python probe returns `available=false` with packaging hint; Python preview/start fail with embedded-runtime guidance.
-- missing `runtimes/nodejs` -> Node probe returns `available=false` with packaging hint; Node preview/start fail with embedded-runtime guidance.
-- host Python/Node installed but embedded runtime missing -> still unavailable; do not fall back to host.
+- missing/modified key file -> runtime verifier fails the build with the relative path.
+- missing Python/Node -> status is unavailable and preview/start says the installation is incomplete; host installations remain ignored.
+- missing full Chromium or headless shell revision -> Playwright plugin start fails with a reinstall/incompatible revision error; never download a replacement.
+- Playwright package version/revision differs from `runtime-lock.json` -> verifier fails before frontend/release build.
+- Agent shell requests `playwright install ...` -> reject before starting a shell process.
 - embedded Python `ensurepip` fails while creating venv -> remove the partial venv directory, create a `--without-pip` venv, install pip from bundled wheel with embedded `pip --python`, then continue requirements install through the venv Python.
 - Windows plugin path is deep and `requirements.txt` contains PySide6 -> venv path must stay under `%LOCALAPPDATA%/LingFang/python-venvs/...`; do not require users to enable system Long Path support.
 - embedded Python cannot find any bundled `pip-*.whl` during fallback -> fail explicitly with a packaging error; do not fetch pip from the network.
-- `run_command("C:/Python/python.exe", ...)` or `run_command("/usr/bin/node", ...)` -> reject because runtime commands cannot use external absolute paths.
-- `run_command("git", ...)` -> may still use host `PATH`; the restriction is specific to Python/Node runtime commands.
-- dependency install needs network -> pip/npm/pnpm use the configured China mirrors by default.
+- dependency install needs network -> pip/npm/pnpm use fixed application child-process mirrors; browser binaries are never dependency downloads.
 
 #### 5. Good/Base/Bad Cases
-- Good: application bundle contains `runtimes/python` and `runtimes/nodejs`; probes show embedded paths, preview/start install dependencies through mirrors.
+- Good: a clean Windows machine runs Python, Node, FFmpeg, and Playwright Chromium from installed `runtimes/` while offline.
 - Base: a Node plugin without package dependencies runs embedded `node entry`.
-- Bad: host has Python installed but bundle lacks `runtimes/python`; probe must still report missing embedded runtime.
-- Bad: code assistant asks to run `pip install` and it resolves to system pip; this leaks outside the supported plugin runtime.
+- Bad: settings offers download/system probe/custom path controls, creating a second runtime truth source.
+- Bad: code assistant runs `playwright install chromium`, writing a user-cache or mutating installed browser payload.
 - Bad: venv creation retries with host `python -m ensurepip` or downloads pip from PyPI; this breaks the embedded runtime boundary and China mirror contract.
 
 #### 6. Tests Required
-- `embedded_runtime::tests::runtime_commands_are_detected_by_name`
-- `embedded_runtime::tests::env_replaces_path_and_adds_cn_mirrors`
+- `runtime_resolver::tests::runtime_commands_are_detected_by_name`
+- `runtime_resolver::tests::chromium_command_and_playwright_env_use_bundled_root`
+- `runtime_commands::tests::missing_runtime_is_read_only_packaging_error`
 - `plugin_runner::tests::bundled_pip_wheel_dir_prefers_ensurepip_bundled`
 - `plugin_runner::tests::bundled_pip_wheel_dir_falls_back_to_python_root`
-- `plugin_runner::tests::contains_pip_wheel_ignores_non_pip_wheels`
-- `plugin_runner::tests::python_venv_dir_uses_short_cache_on_windows`
+- `plugin_runner::tests::playwright_requires_bundled_full_and_headless_revision`
+- `plugin_shell::tests::blocks_playwright_browser_install_commands`
 - `plugin_script::tests::install_hint_covers_both_runtimes`
-- Existing preview/process-tree tests may use host binaries only for low-level process cleanup coverage; production probe/start paths must remain embedded-only.
+- `pnpm -C apps/desktop runtime:verify`, Rust tests, frontend tests/typecheck/build.
 
 #### 7. Wrong vs Correct
 
 Wrong:
 ```rust
-let binary = find_binary("python").unwrap();
-run_capture_with_env(&binary, args, None, 5_000, minimal_env())?;
+Command::new("python").args(args).spawn()?;
+Command::new("playwright").args(["install", "chromium"]).spawn()?;
 ```
 
 Correct:
 ```rust
-let embedded = EmbeddedRuntime::from_app(&app)?;
-let binary = embedded.require_runtime_command("python")?;
-run_capture_with_env(&binary, args, None, 5_000, embedded.env(minimal_env()))?;
+let runtime = RuntimeResolver::resolve(&app)?;
+let binary = runtime.require_runtime_command("python")?;
+run_capture_with_env(&binary, args, None, 5_000, runtime.env(minimal_env()))?;
 ```
 
 Reference files:

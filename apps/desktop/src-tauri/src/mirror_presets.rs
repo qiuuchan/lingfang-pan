@@ -1,14 +1,14 @@
 //! 运行时包管理器镜像源预置清单（pip / npm）。
 //!
-//! 用途：runtime_resolver 在启动插件子进程时把选中的镜像源注入环境变量
+//! 用途：runtime_resolver 在启动插件子进程时把默认镜像源注入环境变量
 //! （`PIP_INDEX_URL` / `NPM_CONFIG_REGISTRY`），让 pip / npm 走国内源加速。
 //!
 //! 仅注入本应用启动的子进程，不写系统全局配置（pip.ini / .npmrc），避免污染用户其它项目。
-//! 用户在「设置 → 脚本运行环境」选源后，选择持久化到 runtime-config.json 的 mirrors 字段。
+//! 运行时来源固定为软件内置资源；镜像只影响插件业务依赖安装。
 
 use serde::{Deserialize, Serialize};
 
-/// 镜像源选择（持久化到 runtime-config.json）。
+/// 镜像源选择。当前产品使用 Default，保留解析函数供内部测试与未来受控配置使用。
 ///
 /// `*_id` 为预置源 id（见 PIP_PRESETS / NPM_PRESETS）或 `"custom"`；
 /// `*_url` 仅在 `*_id == "custom"` 时使用。空 id 在 resolve 时回退到预置默认（清华 / npmmirror）。

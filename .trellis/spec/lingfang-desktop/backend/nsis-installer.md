@@ -52,10 +52,12 @@ pnpm --filter @lingfang/desktop tauri build --bundles nsis
 ## resources 打包约束
 
 - `bundle.resources` 用 source→target 对象映射，如 `"../builtin-plugins": "builtin-plugins"`。
-- Python/Node 不进入安装包 resources。应用首次需要时下载带固定 SHA256 的便携制品到用户应用数据目录；Resolver 只接受 AppManaged 或 UserSpecified 配置，不回退系统 PATH。
+- `bundle.resources` 必须同时包含 `../builtin-plugins -> builtin-plugins` 与 `../runtimes -> runtimes`。正式包缺少 Python、Node.js、FFmpeg 或 Chromium 任一项都属于构建失败。
+- 两条安装链只读取仓库 `apps/desktop/runtimes/`；构建不得联网下载或使用用户缓存。大型运行时作为普通 Git 文件提交，不使用 Git LFS；超过 Gitee 100 MB 单对象限制的文件必须由锁清单列出的 `apps/desktop/runtime-parts/` 固定分片在构建前离线原子还原。不得把 `runtime-parts/` 加入 Tauri/SFX resources，安装包只包含还原后的完整文件。
+- `beforeDevCommand`、`beforeBuildCommand` 和发布脚本必须先运行 `runtime:prepare` 再运行 `runtime:verify`，校验分片还原结果、`runtime-lock.json` 的关键文件大小/SHA256以及 Playwright Chromium revision。
 - **支持 glob 包含，不支持排除语法**（无 `!`/`exclude`）。要排除 `__pycache__` 等：要么用精确包含 glob（会丢目录结构），要么 `beforeBuildCommand` 预清理，要么源目录本身保持干净。
 - builtin-plugins 必须打进包（quality.md 约束）：解包用 `7z l <exe>` 验证 `builtin-plugins/` 下各插件 manifest + 源码齐全。
-- runtimes 体积较大，打包前应确认目录中只包含发布所需文件；不要包含开发缓存、下载包或用户级配置。
+- runtimes 体积较大，打包前应确认目录中只包含锁定的发布文件；不要包含下载压缩包或用户级配置。
 
 ## 验证清单（改 NSIS 配置后）
 

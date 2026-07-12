@@ -20,7 +20,6 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
-import { RuntimeSetupGate } from '@/components/runtime/RuntimeSetupGate';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
@@ -983,7 +982,6 @@ export default function App() {
       </Dialog>
       {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}
       <PermissionConsentDialog />
-      <RuntimeSetupGate />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );

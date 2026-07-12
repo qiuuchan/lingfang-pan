@@ -66,7 +66,7 @@ pnpm -C apps/desktop build
 pnpm dist
 ```
 
-桌面安装包包含应用和必要静态资源。Python/Node 运行时由应用按需下载到用户目录，不应作为大型资源打进安装包。更新产物通过 Tauri updater 签名和平台 release 目录分发。
+桌面安装包必须携带仓库 `apps/desktop/runtimes/` 中版本锁定的 Python、Node.js、FFmpeg、Chromium。构建前校验关键文件大小与 SHA256，缺失时禁止产出安装包；更新产物通过 Tauri updater 签名和平台 release 目录分发。
 
 ## 文档约定
 

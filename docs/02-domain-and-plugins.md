@@ -33,7 +33,7 @@
 | `nodejs` | 桌面子进程 | 使用 Resolver 选定的 Node 与隔离依赖目录 |
 | `cloud` | 平台服务 | 由平台能力和契约约束，不在本地脚本进程执行 |
 
-Python/Node 的系统 PATH 只可用于信息探测；执行来源必须是应用管理运行时或用户显式指定路径。
+插件运行、创建、预览、依赖安装和 Agent shell 的执行来源必须是软件内置运行时，不探测或使用系统 Python/Node/FFmpeg/Chromium。
 
 ## 创建与发布
 

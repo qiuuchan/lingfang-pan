@@ -64,11 +64,11 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
     setDone(loadProgress(session.userId, TASK_STEPS));
   }, [session.userId]);
 
-  // task 07-03：至少一个应用管理/用户指定运行时就绪时完成第 1 步。
+  // 四项内置运行时全部可用时自动完成环境确认步骤。
   useEffect(() => {
     let cancelled = false;
     void getRuntimeStatus().then((status) => {
-      if (cancelled || (!status.python.available && !status.node.available)) return;
+      if (cancelled || Object.values(status).some((runtime) => !runtime.available)) return;
       setDone((prev) => {
         if (prev[0]) return prev;
         const next = [...prev];

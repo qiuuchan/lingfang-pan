@@ -8,8 +8,10 @@ dist/
 apps/desktop/src-tauri/target/
 release/
 
-# 大体积运行时二进制 / 第三方 .lfplugin（不入仓，超过 Gitee 100MB 单文件限制）
-# 这些文件是本地构建/分发产物，需单独传输：
+# 超过 Gitee 100MB 单文件限制的本地生成文件。
+# Chromium chrome.dll 由仓库内 64 MiB 分片自动还原，完整文件不重复入仓。
+apps/desktop/runtimes/chromium/ms-playwright/chromium-1228/chrome-win64/chrome.dll
+# 下列文件是本地构建/分发产物，需单独传输：
 #   - opencode.exe：本地代码助手二进制
 #   - 大型第三方插件包：单独分发，不纳入版本控制
 apps/desktop/opencode/bin/opencode.exe

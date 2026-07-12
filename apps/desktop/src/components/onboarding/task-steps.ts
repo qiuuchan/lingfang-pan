@@ -20,8 +20,8 @@ export interface TaskStep {
 export const TASK_STEPS: TaskStep[] = [
   {
     icon: CpuIcon,
-    title: '准备脚本运行环境',
-    description: '下载应用管理的便携版 Python / Node.js，或显式采用电脑上已有的版本。',
+    title: '确认内置运行环境',
+    description: '查看 Python、Node.js、FFmpeg 和 Chromium 是否已随软件正确加载。',
     view: 'settings',
     settingsTab: 'cli',
   },

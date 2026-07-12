@@ -18,8 +18,6 @@ mod plugin_store;
 mod plugins;
 mod process_util;
 mod runtime_commands;
-mod runtime_config;
-mod runtime_download;
 mod runtime_resolver;
 mod update;
 mod upload;
@@ -329,12 +327,6 @@ fn main() {
             plugin_script::run_plugin_script,
             plugin_shell::run_plugin_shell,
             runtime_commands::get_runtime_status,
-            runtime_commands::get_runtime_config,
-            runtime_commands::set_mirror_config,
-            runtime_commands::download_runtime,
-            runtime_commands::uninstall_runtime,
-            runtime_commands::set_user_specified_runtime,
-            runtime_commands::probe_system_runtime,
             plugin_runner::start_plugin,
             plugin_runner::stop_plugin,
             plugin_runner::delete_plugin,

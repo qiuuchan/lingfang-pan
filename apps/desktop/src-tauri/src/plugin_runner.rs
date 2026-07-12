@@ -961,174 +961,33 @@ fn declares_playwright(plugin_dir: &std::path::Path) -> bool {
     false
 }
 
-/// Playwright 浏览器默认安装根目录（与 Playwright 自身解析逻辑一致）。
-///
-/// - Windows：`%LOCALAPPDATA%\ms-playwright`（minimal_env 已转发 LOCALAPPDATA）。
-/// - Unix：`~/.cache/ms-playwright`（HOME 已转发）。
-/// 返回 None 表示无法定位用户目录（极罕见，跳过幂等检查走强制安装）。
-fn playwright_browsers_root() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("ms-playwright"))
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var_os("HOME").map(|d| PathBuf::from(d).join(".cache").join("ms-playwright"))
-    }
-}
-
-/// 浏览器二进制是否已安装（幂等跳过判定）。
-///
-/// Playwright 每个 chromium 构建解压为 `chromium-<build>` 子目录（如 chromium-1228）。
-/// 任一存在即视为已装（不校验具体版本，避免每次启动都对版本号）——与 `node_modules` 跳过同义。
-fn playwright_chromium_installed() -> bool {
-    let Some(root) = playwright_browsers_root() else {
-        return false;
-    };
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return false;
-    };
-    entries
-        .flatten()
-        .any(|e| e.file_name().to_string_lossy().starts_with("chromium-"))
-}
-
-/// 确保插件用到的 Playwright 浏览器二进制已下载（仅 chromium）。
-///
-/// 背景：装 `playwright` npm/pip 包**不会**下载浏览器，需额外 `playwright install`。
-/// 平台此前漏了这一步，导致插件 `browserType.launch()` 因 `chrome.exe` 缺失而崩溃
-/// （报「Executable doesn't exist at …\ms-playwright\chromium-1228\…」）。
-///
-/// 流程：
-/// 1. 未声明 playwright 依赖 → `Ok(())`（绝不给无关插件跑下载）。
-/// 2. 已有 chromium-<build> 目录 → 幂等跳过。
-/// 3. Node：优先 `node_modules/.bin/playwright install chromium`；无该 bin 则回退
-///    内置 node 跑 `npx playwright install chromium`（经 npmmirror，环境已配 registry）。
-///    Python：`<venv-python> -m playwright install chromium`。
-/// 4. env 注入 `PLAYWRIGHT_DOWNLOAD_HOST` 走国内镜像（默认海外 CDN 国内不可达/极慢）。
-///
-/// 失败：返回友好错误（带 stderr 摘要），冒泡到 start_plugin / 预览路径报错。
-/// 幂等：浏览器目录存在则秒过，重复启动无副作用。
+/// Playwright 插件只允许使用应用内置 Chromium，不写用户缓存，也不联网下载浏览器。
 pub(crate) fn ensure_playwright_browsers(
     runtime: &RuntimeResolver,
     plugin_dir: &std::path::Path,
-    stream: Option<&StreamCtx>,
+    _stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
     if !declares_playwright(plugin_dir) {
         return Ok(());
     }
-    if playwright_chromium_installed() {
+    let root = runtime.playwright_browsers_dir().ok_or_else(|| {
+        "未找到应用内置 Playwright 浏览器目录，安装包可能不完整，请重新安装".to_string()
+    })?;
+    let revision = crate::runtime_resolver::PLAYWRIGHT_CHROMIUM_REVISION;
+    let chromium = root
+        .join(format!("chromium-{revision}"))
+        .join("chrome-win64")
+        .join("chrome.exe");
+    let headless = root
+        .join(format!("chromium_headless_shell-{revision}"))
+        .join("chrome-headless-shell-win64")
+        .join("chrome-headless-shell.exe");
+    if chromium.is_file() && headless.is_file() {
         return Ok(());
     }
-    // 注入镜像 host 的 env（在 runtime.env(minimal_env()) 基础上追加）。
-    let mut env = runtime.env(minimal_env());
-    env.push((
-        OsString::from("PLAYWRIGHT_DOWNLOAD_HOST"),
-        OsString::from(crate::runtime_resolver::PLAYWRIGHT_DOWNLOAD_HOST),
-    ));
-
-    // 解析 playwright CLI 入口：
-    // - Node：优先 node_modules/.bin/playwright（Windows 下 pnpm 装出的是 .cmd shim，
-    //   build_spawn_command 会识别 .cmd 后缀并 resolve，故这里取 .cmd 路径）。
-    //   无 bin → 回退内置 node 直接跑 node_modules/playwright-core/cli.js（playwright 包的
-    //   cli 在 playwright-core 里），避开 npx 的额外网络往返。
-    // - Python：用该插件的 venv python 跑 `python -m playwright install chromium`。
-    let node_pkg = plugin_dir.join("package.json").is_file();
-    let (bin, args) = if node_pkg {
-        let (pw_bin, cli_args) = resolve_node_playwright_cli(runtime, plugin_dir)?;
-        (pw_bin, cli_args)
-    } else {
-        let venv_dir = python_venv_dir(plugin_dir);
-        let py = venv_python(&venv_dir);
-        if !py.is_file() {
-            return Err(format!(
-                "Playwright 浏览器下载前缺少可用 venv python：{}（请先确保插件依赖已安装）",
-                py.display()
-            ));
-        }
-        (
-            py,
-            vec![
-                "-m".to_string(),
-                "playwright".to_string(),
-                "install".to_string(),
-                "chromium".to_string(),
-            ],
-        )
-    };
-
-    // chromium 约 150MB，镜像下载给 600s（与 pip/pnpm install 一致）。
-    let captured = run_with_optional_stream(
-        &bin,
-        args,
-        Some(&plugin_dir.to_string_lossy()),
-        600_000,
-        env,
-        stream,
-    )
-    .map_err(|e| format!("Playwright 浏览器二进制下载失败：{e}"))?;
-    if captured.exit_code != Some(0) {
-        return Err(format!(
-            "Playwright 浏览器二进制下载失败（exit={:?}）：{}",
-            captured.exit_code,
-            captured_detail(&captured)
-        ));
-    }
-    Ok(())
-}
-
-/// 解析 Node 插件里 playwright CLI 的可执行入口。
-///
-/// 优先级：
-/// 1. `node_modules/.bin/playwright(.cmd)` —— pnpm/npm install 后会生成 shim，最稳。
-/// 2. 内置 node 直接跑 `node_modules/playwright-core/cli.js`（playwright 包的 cli 复用
-///    playwright-core 的入口）——无 .bin 时（如手动解压的 node_modules）兜底。
-/// 3. 都没有 → 报错（playwright 包未正确安装）。
-///
-/// 返回 (binary, args)，args 已含 `install chromium`。
-fn resolve_node_playwright_cli(
-    runtime: &RuntimeResolver,
-    plugin_dir: &std::path::Path,
-) -> Result<(PathBuf, Vec<String>), String> {
-    let bin_dir = plugin_dir.join("node_modules").join(".bin");
-    // Windows：pnpm/npm 生成的 shim 是 playwright.cmd；Unix：无扩展名。
-    #[cfg(windows)]
-    let bin_candidates = vec![bin_dir.join("playwright.cmd"), bin_dir.join("playwright")];
-    #[cfg(not(windows))]
-    let bin_candidates = vec![bin_dir.join("playwright")];
-
-    if let Some(bin) = bin_candidates.into_iter().find(|p| p.is_file()) {
-        return Ok((bin, vec!["install".to_string(), "chromium".to_string()]));
-    }
-
-    // 回退：内置 node + cli.js（playwright 包的 cli 实际在 playwright-core/cli.js）。
-    let cli_candidates = [
-        plugin_dir
-            .join("node_modules")
-            .join("playwright-core")
-            .join("cli.js"),
-        plugin_dir
-            .join("node_modules")
-            .join("playwright")
-            .join("cli.js"),
-    ];
-    if let Some(cli) = cli_candidates.into_iter().find(|p| p.is_file()) {
-        let node = runtime.require_runtime_command("node")?;
-        return Ok((
-            node,
-            vec![
-                entry_arg(&cli),
-                "install".to_string(),
-                "chromium".to_string(),
-            ],
-        ));
-    }
-
-    Err(
-        "声明了 playwright 依赖但找不到其 CLI（node_modules/.bin/playwright 与 cli.js 均缺失），\
-         请确认 playwright 包已正确安装"
-            .to_string(),
-    )
+    Err(format!(
+        "应用内置 Chromium revision {revision} 不完整或与插件 Playwright 不兼容，请重新安装"
+    ))
 }
 
 fn node_has_start_script(plugin_dir: &std::path::Path) -> Result<bool, String> {
@@ -1526,7 +1385,7 @@ pub(crate) fn start_plugin_from_dir(
                 e
             })?;
             log_launch(format!("venv 就绪：{}", py.display()));
-            // 声明了 playwright 则补下载浏览器二进制（仅 chromium，国内镜像，幂等）。
+            // 声明了 playwright 则校验安装包内置 Chromium revision。
             ensure_playwright_browsers(&runtime, &plugin_dir, Some(&stream_ctx))?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {
@@ -1550,7 +1409,7 @@ pub(crate) fn start_plugin_from_dir(
                 e
             })?;
             log_launch("Node 依赖就绪".to_string());
-            // 声明了 playwright 则补下载浏览器二进制（仅 chromium，国内镜像，幂等）。
+            // 声明了 playwright 则校验安装包内置 Chromium revision。
             ensure_playwright_browsers(&runtime, &plugin_dir, Some(&stream_ctx))?;
             let entry_abs = plugin_dir.join(&manifest.entry);
             if !entry_abs.is_file() {

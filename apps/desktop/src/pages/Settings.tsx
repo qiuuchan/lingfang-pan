@@ -1,6 +1,6 @@
 // Settings.tsx — 设置页。
 //
-// - cli：脚本运行环境（应用管理/用户指定运行时 + 镜像源），自管理状态（RuntimeEnvTab）。
+// - cli：软件内置运行环境的只读状态（RuntimeEnvTab）。
 // - gateway：模型与计费信息。
 // - updates：检查更新与更新日志。
 //
