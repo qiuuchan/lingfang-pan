@@ -8,7 +8,7 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use windows_sys::Win32::Foundation::{CloseHandle, HWND, RECT, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -19,7 +19,8 @@ use windows_sys::Win32::System::Registry::{
     REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    OpenProcess, QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
@@ -183,12 +184,91 @@ pub fn wait_for_pid(pid: u32, timeout_ms: u32) -> bool {
     }
 }
 
-/// 终止所有同名进程（卸载/更新前关主程序）。返回终止的进程数。
+/// 取某 PID 的完整 exe 路径（用 QueryFullProcessImageNameW，Win32 风格，带盘符）。
+/// 失败（无权限/进程已退出）返回 None。
+unsafe fn query_process_image_path(pid: u32) -> Option<String> {
+    let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+    if h.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 1024];
+    let mut len = (buf.len() - 1) as u32; // 留位置给结尾 NUL
+    let rc = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len);
+    CloseHandle(h);
+    if rc == 0 {
+        return None;
+    }
+    // len 不含 NUL，直接按长度截断。
+    Some(String::from_utf16_lossy(&buf[..len as usize]))
+}
+
+/// 判断路径 `child` 是否位于目录 `parent` 之下（任意深度，大小写不敏感）。
+/// 二者先 canonicalize（解析符号链接/相对段/盘符大小写），失败时退回原字符串比较。
+fn path_is_under(child: &Path, parent: &Path) -> bool {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let child = canon(child);
+    let parent = canon(parent);
+    // child 必须以 parent 为前缀（组件级别），且更长（不是 parent 自己）。
+    child.starts_with(&parent) && child.as_os_str().len() > parent.as_os_str().len()
+}
+
+/// 终止所有「exe 路径位于 install_dir 之下」的进程，并等待它们真正退出以释放文件锁。
 ///
-/// 遍历系统进程快照，匹配 exe 文件名（不区分大小写），逐个 TerminateProcess。
-/// 检测指定名称的进程是否正在运行（遍历进程快照，匹配 exe 文件名，不终止）。
-/// 用于安装前检测主程序是否占用文件锁。
-pub fn is_process_running(exe_name: &str) -> bool {
+/// 覆盖主程序 + runtimes/* 下被拉起的子进程（python / node / ffmpeg …），避免只杀主程序
+/// 导致 runtimes/python/python.exe 仍被占用、自解压覆盖失败（os error 32）。
+///
+/// 仅按路径前缀匹配，不会误杀系统同名进程（如系统 python.exe）。返回终止的进程数。
+pub fn kill_app_processes(install_dir: &Path) -> u32 {
+    let mut handles: Vec<HANDLE> = Vec::new();
+    let mut killed = 0u32;
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() {
+            return 0;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                let pid = entry.th32ProcessID;
+                // 取该进程完整 exe 路径，判断是否落在 install_dir 之下。
+                let under = query_process_image_path(pid)
+                    .map(|p| path_is_under(Path::new(&p), install_dir))
+                    .unwrap_or(false);
+                if under {
+                    let h = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
+                    if !h.is_null() {
+                        if TerminateProcess(h, 0) != 0 {
+                            killed += 1;
+                            handles.push(h);
+                        } else {
+                            // TerminateProcess 失败也关句柄，避免泄漏。
+                            CloseHandle(h);
+                        }
+                    }
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+
+        // 等所有被终止的进程真正退出（最多 5s），确保 OS 释放 exe/dll 文件锁。
+        // WaitForSingleObject 在进程退出时变 signaled。超时不阻塞流程（best-effort）。
+        for h in &handles {
+            if WaitForSingleObject(*h, 5_000) == WAIT_TIMEOUT {
+                // 仍在跑：不再等，留给 OS 后续回收。
+            }
+            CloseHandle(*h);
+        }
+    }
+    killed
+}
+
+/// 检测是否有「exe 路径位于 install_dir 之下」的进程在运行（不终止）。
+/// 用于安装前判断是否需要弹「程序运行中」确认框——主程序或其子进程都算。
+pub fn is_app_running(install_dir: &Path) -> bool {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot.is_null() {
@@ -199,8 +279,11 @@ pub fn is_process_running(exe_name: &str) -> bool {
         let mut found = false;
         if Process32FirstW(snapshot, &mut entry) != 0 {
             loop {
-                let name = wide_buf_to_string(&entry.szExeFile);
-                if name.eq_ignore_ascii_case(exe_name) {
+                let pid = entry.th32ProcessID;
+                if query_process_image_path(pid)
+                    .map(|p| path_is_under(Path::new(&p), install_dir))
+                    .unwrap_or(false)
+                {
                     found = true;
                     break;
                 }
@@ -212,37 +295,6 @@ pub fn is_process_running(exe_name: &str) -> bool {
         CloseHandle(snapshot);
         found
     }
-}
-
-pub fn kill_by_name(exe_name: &str) -> u32 {
-    let mut killed = 0u32;
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot.is_null() {
-            return 0;
-        }
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        if Process32FirstW(snapshot, &mut entry) != 0 {
-            loop {
-                let name = wide_buf_to_string(&entry.szExeFile);
-                if name.eq_ignore_ascii_case(exe_name) {
-                    let h = OpenProcess(PROCESS_TERMINATE, 0, entry.th32ProcessID);
-                    if !h.is_null() {
-                        if TerminateProcess(h, 0) != 0 {
-                            killed += 1;
-                        }
-                        CloseHandle(h);
-                    }
-                }
-                if Process32NextW(snapshot, &mut entry) == 0 {
-                    break;
-                }
-            }
-        }
-        CloseHandle(snapshot);
-    }
-    killed
 }
 
 /// 计划自删除：用 cmd 延迟删除本 exe（自己运行时不能删自己，延迟到进程退出后）。

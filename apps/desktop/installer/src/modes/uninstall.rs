@@ -224,9 +224,9 @@ impl UninstallApp {
 fn do_uninstall() -> Result<()> {
     let install_dir = paths::default_install_dir()?;
 
-    // 1) 关闭运行中的主进程。
-    let killed = platform::kill_by_name(paths::MAIN_EXE);
-    crate::log_line(&format!("卸载：终止 {killed} 个主进程"));
+    // 1) 关闭运行中的进程：主程序 + runtimes 子进程（按路径匹配，不漏 python.exe 等孤儿）。
+    let killed = platform::kill_app_processes(&install_dir);
+    crate::log_line(&format!("卸载：终止 {killed} 个占用安装目录的进程"));
 
     // 2) 删快捷方式。
     if let Some(appdata) = dirs::data_dir() {

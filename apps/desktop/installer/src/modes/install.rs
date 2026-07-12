@@ -386,18 +386,22 @@ impl InstallerApp {
         });
     }
 
-    /// 开始安装的前置：检测主程序是否正在运行。
+    /// 开始安装的前置：检测主程序（或其 runtimes 子进程）是否正在运行。
     /// 若在运行 → 切 ProcessRunning 阶段（弹确认对话框，询问是否关闭后继续）。
     /// 未运行 → 直接开始安装。
+    ///
+    /// 按安装目录路径匹配，覆盖主程序 + runtimes/python.exe / node.exe 等被拉起的子进程——
+    /// 仅杀主程序会留下占用 python.exe 的孤儿进程，导致自解压覆盖时 os error 32。
     fn begin_install(&mut self) {
-        if platform::is_process_running(paths::MAIN_EXE) {
+        let dir = PathBuf::from(&self.install_dir);
+        if platform::is_app_running(&dir) {
             self.phase = Phase::ProcessRunning;
         } else {
             self.start_install();
         }
     }
 
-    /// 「检测到程序运行中」确认对话框：用户选关闭并继续 → kill 进程后安装；取消 → 回 Confirm。
+    /// 「检测到程序运行中」确认对话框：用户选关闭并继续 → kill 占用安装目录的进程后安装；取消 → 回 Confirm。
     fn view_process_running(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if theme::title_bar(ui, &format!("安装程序 v{}", paths::VERSION), false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -415,9 +419,10 @@ impl InstallerApp {
             ui.horizontal(|ui| {
                 ui.add_space(60.0);
                 if theme::primary_button(ui, "关闭并继续", 200.0, true) {
-                    let _ = platform::kill_by_name(paths::MAIN_EXE);
-                    // 等待进程完全退出（给系统一点时间释放文件锁）。
-                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    // 终止「exe 路径落在安装目录下」的所有进程（主程序 + runtimes 子进程），
+                    // 并在 kill_app_processes 内部等待它们退出以释放文件锁。
+                    let dir = PathBuf::from(&self.install_dir);
+                    let _ = platform::kill_app_processes(&dir);
                     self.start_install();
                 }
                 ui.add_space(12.0);
