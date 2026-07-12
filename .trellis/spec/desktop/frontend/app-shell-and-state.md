@@ -13,7 +13,7 @@
 这是团队管理线路的核心 UI（与平台管理 web 端分离），含 5 个 tab：概览 / 成员管理 / 角色与权限 / 插件授权 / 邀请码与设置。子组件拆分在 `src/pages/team-admin/` 目录下（避免单文件过大，遵循 >1500 行必拆策略）。
 注意：`team-admin` 走主 body 渲染（不被 `setView` 拦截到 AccountDialog），与 `team`（走 AccountDialog tab）不同。入口在左下角 **AvatarMenu**（不在 Sidebar NAV，`teamAdminOnly` 标志已随入口迁出而停用）。
 
-**插件主界面（Plugins）**：`run-plugins` 只渲染“已安装 / 团队库 / 插件市场”三个 Tab；`draft-plugins` 是保留普通应用侧边栏的独立主导航页面。`develop-plugins` 渲染 `FloatingCreator variant="embedded"` 并由 creator 自己管理编辑历史；从草稿页进入时关闭 creator 必须回到 `draft-plugins`。TitleBar 不再显示“运行/开发”模式切换。`openPluginCenter(tab)` 进入 `run-plugins`，`setView('creator')` 仅作为兼容入口切到 `develop-plugins`。
+**插件主界面（Plugins）**：`run-plugins` 只渲染“已安装 / 团队库 / 插件市场”三个 Tab；`draft-plugins` 是保留普通应用侧边栏的独立主导航页面。`develop-plugins` 渲染单一页面组件 `CreatorWorkspace`，由其管理会话历史和 Artifact Inspector；不要重新引入 `variant="floating"` 或悬浮 creator 壳。从草稿页进入时关闭 creator 必须回到 `draft-plugins`。TitleBar 在 `run-plugins` / `develop-plugins` 间显示“运行插件 / 开发插件”切换。`openPluginCenter(tab)` 进入 `run-plugins`，`setView('creator')` 仅作为兼容入口切到 `develop-plugins`。
 
 会话状态只保存在内存中的 `Session`，`applySession` 同步更新 `lib/api.ts` 的模块级 auth token。不要在页面里直接维护第二份 token。
 

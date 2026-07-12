@@ -1,6 +1,6 @@
 // CreatorSkillsDialog.tsx —— 技能（Skills）选择弹窗。
 //
-// 从 FloatingCreator 抽取（betav2 阶段4c）。勾选技能动态拼装进系统提示词。
+// 从 CreatorWorkspace 抽取（betav2 阶段4c）。勾选技能动态拼装进系统提示词。
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';

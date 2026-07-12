@@ -1,7 +1,7 @@
-// FloatingCreator —— 悬浮窗 + 对话式 + 流式 AI 插件创建器（betav2：自建 agent 循环）。
+// CreatorWorkspace —— 页面式插件 Agent 工作区（betav2：自建 agent 循环）。
 //
-//  - 悬浮窗：App 渲染为全屏遮罩 + 居中面板（~85vh），不切 view，关窗即回原页。
-//  - 对话式：多轮聊天（用户/助手气泡），输入框在底部，Enter 发送。
+//  - 页面式：左侧会话历史 + 中间单一对话流 + 右侧按需出现的插件产物 Inspector。
+//  - 对话式：多轮聊天，紧凑输入框固定在主对话流底部，Enter 发送。
 //  - 流式 + agent：自建轻量 agent 循环（loop.ts）走 relay；模型生成插件后调用 CreatePlugin 写入 plugins_root 草稿。
 //    草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
 //  - pluginId 单一真相源：经 PluginCreatorSession store（session/store.ts），消除旧 5 副本竞态。
@@ -31,154 +31,32 @@ import {
 } from '@/lib/plugin-creator/creator-input';
 import { CreatorDraftPanel } from '@/components/creator/CreatorDraftPanel';
 import { ContextInspector } from '@/components/creator/ContextInspector';
-import { CreatorFloatingTitleBar, CreatorWorkspaceSidebar } from '@/components/creator/CreatorWorkspaceChrome';
+import { CreatorWorkspaceSidebar } from '@/components/creator/CreatorWorkspaceChrome';
 import { CreatorComposer } from '@/components/creator/CreatorComposer';
 import { CreatorEmptyState } from '@/components/creator/CreatorEmptyState';
 import { CreatorMessageList } from '@/components/creator/CreatorMessageList';
-import { CreatorHistoryDialog } from '@/components/creator/CreatorHistoryDialog';
 import { CreatorSkillsDialog } from '@/components/creator/CreatorSkillsDialog';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
+import {
+  cleanTurnParts,
+  detectDuplicateOutput,
+  loadConversations,
+  makeConversationTitle,
+  mergeStreamingText,
+  saveConversations,
+  selectedConversationKey,
+  type CreatorConversation,
+  type QuestionPart,
+  type TextPart,
+  type ToolPart,
+  type Turn,
+} from '@/lib/plugin-creator/creator-session';
 import { fetchContextWindow } from '@/lib/relay-models';
-import { cn } from '@/lib/utils';
-
-interface QuestionPart {
-  type: 'question';
-  toolCallId: string;
-  question: string;
-  options?: { label: string; value: string }[];
-  allowFreeText: boolean;
-  multiSelect: boolean;
-  answer?: string;
-  answered: boolean;
-}
-interface ToolPart {
-  type: 'tool';
-  toolCallId: string;
-  name: string;
-  /** 工具入参（用于卡片展开显示）。 */
-  args?: unknown;
-  /** 工具返回（用于卡片展开显示）。 */
-  result?: unknown;
-  status: 'running' | 'ok' | 'error';
-}
-// OpenCodeUI 式链式渲染：把文本/思考也作为按时序排列的 part，
-// 让「思考块 + AI 输出 + 工具调用 + 思考 + 输出」按真实产生顺序逐块展示。
-interface TextPart {
-  type: 'text';
-  content: string;
-}
-interface ReasoningPart {
-  type: 'reasoning';
-  content: string;
-  /** 思考段是否已结束（reasoning-end 后置 true，UI 可停掉 loading）。 */
-  done?: boolean;
-}
-type TurnPart = QuestionPart | ToolPart | TextPart | ReasoningPart;
 
 // 历史还原改用 turnsToMessages（原生 function calling，见 agent/history.ts）。
 // 旧的 partsToAgentMessageParts 文本化方案已删除（betav2 阶段3）。
-
-function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
-  if (!part || typeof part !== 'object') return null;
-  const raw = part as Record<string, unknown>;
-  switch (raw.type) {
-    case 'text':
-      return { type: 'text', content: typeof raw.content === 'string' ? raw.content : '' };
-    case 'reasoning':
-      return { type: 'reasoning', content: typeof raw.content === 'string' ? raw.content : '', done: raw.done === true };
-    case 'tool':
-      return {
-        type: 'tool',
-        toolCallId: typeof raw.toolCallId === 'string' ? raw.toolCallId : `legacy-tool-${index}`,
-        name: typeof raw.name === 'string' ? raw.name : 'Tool',
-        args: raw.args,
-        result: raw.result,
-        status: raw.status === 'ok' || raw.status === 'error' ? raw.status : 'running',
-      };
-    case 'question':
-      return {
-        type: 'question',
-        toolCallId: typeof raw.toolCallId === 'string' ? raw.toolCallId : `legacy-question-${index}`,
-        question: typeof raw.question === 'string' ? raw.question : '请补充信息',
-        options: Array.isArray(raw.options)
-          ? raw.options.flatMap((option) => {
-            if (!option || typeof option !== 'object') return [];
-            const item = option as Record<string, unknown>;
-            const label = typeof item.label === 'string' ? item.label : '';
-            const value = typeof item.value === 'string' ? item.value : label;
-            return label ? [{ label, value }] : [];
-          })
-          : undefined,
-        allowFreeText: raw.allowFreeText !== false,
-        multiSelect: raw.multiSelect === true,
-        answer: typeof raw.answer === 'string' ? raw.answer : undefined,
-        answered: raw.answered === true,
-      };
-    default:
-      return null;
-  }
-}
-
-function cleanTurnParts(parts: unknown): TurnPart[] {
-  if (!Array.isArray(parts)) return [];
-  return parts.flatMap((part, index) => normalizeTurnPart(part, index) ?? []);
-}
-
-function mergeStreamingText(existing: string, delta: string): string {
-  if (!delta) return existing;
-  if (!existing) return delta;
-  if (delta.startsWith(existing)) return delta;
-  const dedupeMinLength = 12;
-  if (delta.trim().length >= dedupeMinLength && existing.endsWith(delta)) return existing;
-
-  const maxOverlap = Math.min(existing.length, delta.length);
-  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-    if (overlap >= dedupeMinLength && existing.endsWith(delta.slice(0, overlap))) {
-      return existing + delta.slice(overlap);
-    }
-  }
-  return existing + delta;
-}
-
-/**
- * 检测 delta 是否是已有文本的重复输出（整段重复，非流式重叠）。
- *
- * 上游模型在多轮工具调用后，有时会把上一轮的总结/分析整段重新输出一遍
- * （表现为几百字的完整段落重复 3-6 次）。mergeStreamingText 的流式重叠
- * 去重（12 字符阈值）检测不到这种整段重复。
- *
- * 本函数检查：delta（≥40 字符）是否作为子串已存在于 existing 中。
- * 是则判定为重复，返回 null（调用方跳过该 delta）。
- */
-function detectDuplicateOutput(existing: string, delta: string): string | null {
-  const trimmed = delta.trim();
-  if (trimmed.length < 40) return null; // 太短不判定（可能是正常的短句重复）
-  if (existing.includes(trimmed)) return null; // 已包含完整 delta → 重复
-  // 部分重叠检查：delta 的前 60 字符在 existing 里出现，且 delta 很长 → 大概率重复
-  if (trimmed.length >= 60) {
-    const head = trimmed.slice(0, 60);
-    if (existing.includes(head)) return null;
-  }
-  return delta; // 非重复，正常追加
-}
-
-interface Turn {
-  role: 'user' | 'assistant';
-  /**
-   * 兼容字段：旧会话只有 content（无 parts）时回退渲染为单个文本块。
-   * 新流程文本/思考/工具/提问全部按时序进 parts，content 仅作为旧数据回退与兜底占位。
-   */
-  content: string;
-  /** 发给模型的完整内容。用户气泡可只显示摘要，附件全文放这里进入上下文。 */
-  modelContent?: string;
-  /** 仅 assistant：本轮是否仍在流式输出中。 */
-  streaming?: boolean;
-  status?: 'generating' | 'done' | 'failed' | 'cancelled';
-  /** 结构化片段：按时序排列的 文本 / 思考 / 工具调用 / 提问卡片。 */
-  parts?: TurnPart[];
-}
 
 type ContextBreakdown = {
   systemPrompt: string;
@@ -198,116 +76,6 @@ interface SpeechRecognitionLike {
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
-}
-
-function cleanTurn(turn: unknown): Turn | null {
-  if (!turn || typeof turn !== 'object') return null;
-  const raw = turn as Record<string, unknown>;
-  if (raw.role !== 'user' && raw.role !== 'assistant') return null;
-  const next: Turn = {
-    role: raw.role,
-    content: typeof raw.content === 'string' ? raw.content : '',
-  };
-  if (raw.status === 'generating' || raw.status === 'done' || raw.status === 'failed' || raw.status === 'cancelled') {
-    next.status = raw.status;
-  }
-  if (raw.streaming === true) next.streaming = true;
-  if (raw.role === 'assistant') {
-    const parts = cleanTurnParts(raw.parts);
-    if (parts.length > 0) next.parts = parts;
-  }
-  return next;
-}
-
-function stripModelContent(turn: Turn): Turn {
-  const persisted = { ...turn };
-  delete persisted.modelContent;
-  return persisted;
-}
-
-function sanitizeConversationForStorage(conversation: CreatorConversation): CreatorConversation {
-  return {
-    ...conversation,
-    turns: conversation.turns.map(stripModelContent),
-  };
-}
-
-interface CreatorConversation {
-  id: string;
-  title: string;
-  turns: Turn[];
-  createdAt: string;
-  updatedAt: string;
-  /** 当前暂存的 AI 草稿（关窗重开 / 切回该会话时恢复右侧预览面板，修复重开右侧栏消失）。 */
-  stagedDraft?: StagedPlugin | null;
-  /** 当前对话绑定的 DraftWorkspace UUID。AI 工具 Read/Write/RunPlugin 以它为准。 */
-  workspacePluginId?: string | null;
-  /** 用户在右侧面板改过的字段（与 stagedDraft 合并成展示用 draft）。 */
-  userEdits?: Partial<StagedPlugin>;
-  /** TodoWrite 工具维护的任务清单（跨轮延续，随会话持久化到 localStorage）。 */
-  todos?: TodoItem[];
-}
-
-const conversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-conversations:${tenantId || userId || 'none'}`;
-const selectedConversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-selected:${tenantId || userId || 'none'}`;
-
-/** 归一化持久化的 todo 清单（容忍旧数据/非法值，status/priority 枚举校验）。 */
-function normalizeTodos(raw: unknown): TodoItem[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const validStatus = new Set(['pending', 'in_progress', 'completed']);
-  const validPriority = new Set(['high', 'medium', 'low']);
-  const out: TodoItem[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const r = item as Record<string, unknown>;
-    const content = typeof r.content === 'string' ? r.content : '';
-    if (!content.trim()) continue;
-    const status = validStatus.has(r.status as string) ? (r.status as TodoItem['status']) : 'pending';
-    const priority = validPriority.has(r.priority as string) ? (r.priority as TodoItem['priority']) : 'medium';
-    out.push({ content, status, priority });
-  }
-  return out;
-}
-
-function loadConversations(userId: string | null, tenantId: string | null): CreatorConversation[] {
-  try {
-    const raw = localStorage.getItem(conversationKey(userId, tenantId));
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.flatMap((item): CreatorConversation[] => {
-      if (!item || typeof item !== 'object') return [];
-      const record = item as Record<string, unknown>;
-      if (typeof record.id !== 'string' || !Array.isArray(record.turns)) return [];
-      return [{
-        id: record.id,
-        title: typeof record.title === 'string' ? record.title : '历史对话',
-        turns: record.turns.flatMap((turn) => cleanTurn(turn) ?? []),
-        createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
-        updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
-        stagedDraft: (record.stagedDraft ?? null) as StagedPlugin | null,
-        workspacePluginId: typeof record.workspacePluginId === 'string' ? record.workspacePluginId : null,
-        userEdits: record.userEdits && typeof record.userEdits === 'object' ? record.userEdits as Partial<StagedPlugin> : undefined,
-        todos: normalizeTodos(record.todos),
-      }];
-    }) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveConversations(userId: string | null, tenantId: string | null, conversations: CreatorConversation[]) {
-  try {
-    localStorage.setItem(
-      conversationKey(userId, tenantId),
-      JSON.stringify(conversations.slice(0, 30).map(sanitizeConversationForStorage)),
-    );
-  } catch {
-    /* localStorage 配额不足时放弃历史保存，当前对话仍可继续 */
-  }
-}
-
-function makeConversationTitle(text: string) {
-  const compact = text.replace(/\s+/g, ' ').trim();
-  return compact.length > 24 ? `${compact.slice(0, 24)}...` : compact || '新对话';
 }
 
 const SYSTEM_PROMPT = CREATOR_CONTEXT_PROMPT;
@@ -403,9 +171,8 @@ function joinDisplayPath(root: string | null, pluginId: string | null) {
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
-export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapsed = false }: { onClose: () => void; variant?: 'floating' | 'embedded'; sidebarCollapsed?: boolean }) {
+export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClose: () => void; sidebarCollapsed?: boolean }) {
   const { session, recentPlugins, pendingAutoFix, setPendingAutoFix, pendingDraftEdit, setPendingDraftEdit } = useApp();
-  const embedded = variant === 'embedded';
   const [turns, setTurns] = useState<Turn[]>([]);
   const [conversations, setConversations] = useState<CreatorConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -414,11 +181,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const [creatorMode, setCreatorMode] = useState<CreatorMode>('agent');
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>(DEFAULT_ACTIVE_SKILLS);
   const [busy, setBusy] = useState(false);
-  const [thinking, setThinking] = useState(true); // 「思考」模式默认开启：让模型更深入推理（systemPrompt 追加引导）
   const [optimizingPrompt, setOptimizingPrompt] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyPage, setHistoryPage] = useState(0); // R3：历史列表分页页码（0-based）
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null); // R3：行内删除二次确认态
   const [skillDialogOpen, setSkillDialogOpen] = useState(false); // Skill 居中悬浮窗开关（R3：由小 Popover 改为居中 Dialog + 背景模糊）
   const [referencedPlugin, setReferencedPlugin] = useState<LoadedPlugin | null>(null); // 引用的现有插件（让 agent 基于其代码修改）
@@ -435,7 +199,6 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const [stagedDraft, setStagedDraft] = useState<StagedPlugin | null>(null);
   const [userEdits, setUserEdits] = useState<Partial<StagedPlugin>>({});
   const [contextWindow, setContextWindow] = useState<number | null>(null); // 当前 tier 模型的上下文窗口（token）
-  const [reasoning, setReasoning] = useState(''); // 当前轮思考内容流式累积（支持思考输出的模型）
   const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null); // 上下文查看面板数据
   const [contextInspectorOpen, setContextInspectorOpen] = useState(false); // 上下文查看面板开关
   const [todos, setTodos] = useState<TodoItem[]>([]); // 当前会话的 TodoWrite 任务清单（随会话持久化）
@@ -443,7 +206,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   const abortRef = useRef<AbortController | null>(null);
   const speechRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // 文件/文件夹选择（支持多次累积）
+  const fileInputRef = useRef<HTMLInputElement>(null); // 文件选择（支持多次累积）
+  const folderInputRef = useRef<HTMLInputElement>(null); // 文件夹选择（webkitdirectory）。
   const [selectedFiles, setSelectedFiles] = useState<Array<{ id: string; name: string; file: File }>>([]); // 已选文件列表
   // R2：悬挂的 AskQuestion deferred —— 用户作答后 resolve（人在环）。
   // key=toolCallId，存 resolve/reject；切对话/取消/关窗时必须清掉防卡死。
@@ -661,7 +425,13 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setCompressing(false);
     setActiveConversationId(conversation.id);
     setTurns(conversation.turns);
-    setReasoning('');
+    setInput('');
+    setSelectedFiles([]);
+    setReferencedPlugin(null);
+    setContextBreakdown(null);
+    setContextInspectorOpen(false);
+    setAnswerDrafts({});
+    setMultiSelectDrafts({});
     setPublishedName(null);
     // 切回该会话时恢复其暂存草稿与用户编辑（右侧栏随之重现）。
     setStagedDraft(conversation.stagedDraft ?? null);
@@ -676,10 +446,10 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setTodos(conversation.todos ?? []);
     compressRef.current = emptyCompressState();
     try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
-    setHistoryOpen(false);
   }
 
   function selectConversationById(id: string) {
+    if (busy) return;
     const conversation = conversations.find((item) => item.id === id);
     if (conversation) selectConversation(conversation);
   }
@@ -690,8 +460,13 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setBusy(false);
     setTurns([]);
     setActiveConversationId(null);
-    setReasoning('');
+    setInput('');
+    setSelectedFiles([]);
     setReferencedPlugin(null);
+    setContextBreakdown(null);
+    setContextInspectorOpen(false);
+    setAnswerDrafts({});
+    setMultiSelectDrafts({});
     setPublishedName(null);
     setStagedDraft(null);
     setWorkspacePluginId(null);
@@ -702,11 +477,11 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     compressRef.current = emptyCompressState();
     setCompressedHint(0);
     try { localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
-    setHistoryOpen(false);
   }
 
   // R3：删除单条历史对话。删的是当前会话时重置为新对话。
   function deleteConversation(id: string) {
+    if (busy) return;
     setConversations((prev) => {
       const next = prev.filter((c) => c.id !== id);
       saveConversations(session.userId, session.tenantId, next);
@@ -727,11 +502,14 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     return () => { mounted = false; };
   }, [tier]);
 
-  // 当前对话 token 用量：优先用 contextBreakdown.estimatedTokens.total（与上下文窗口面板的
-  // 堆叠条同源，/1.5 中文偏向），无 breakdown 时 fallback 用 turns 字符数 / 1.5 粗估。
-  // 此前用 /3.5（旧系数），与 context-compress 的 /1.5 不一致，导致同一面板两个 token 数字矛盾。
-  const usedTokens = contextBreakdown?.estimatedTokens.total
-    ?? Math.round(turns.reduce((s, t) => s + t.content.length, 0) / 1.5);
+  // Composer 始终使用实时对话估算，避免打开过一次 ContextInspector 后沿用旧 breakdown。
+  const usedTokens = Math.round((
+    buildSystemPrompt().length
+    + turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content).length, 0)
+    + input.length
+    + selectedFiles.reduce((sum, item) => sum + item.file.size, 0)
+  ) / 1.5);
+  const inspectorTokens = contextBreakdown?.estimatedTokens.total ?? usedTokens;
   const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
   const compressInfo = contextBreakdown?.compressInfo;
   const compressHint = compressInfo
@@ -775,9 +553,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   function buildSystemPrompt() {
     const basePrompt = assembleSystemPrompt(SYSTEM_PROMPT, activeSkillIds);
     const modePrompt = creatorModePrompt(creatorMode);
-    const thinkPrompt = thinking
-      ? `\n\n# 思考模式（已开启）\n请对需求做更深入的分析与推理：先拆解需求要点、权衡实现方案、再生成更严谨完整的代码。宁可多花时间也要保证质量与边界处理。`
-      : '';
+    const thinkPrompt = `\n\n# 深度思考\n请先拆解需求、权衡实现方案，再生成严谨完整的代码；保证边界处理与可验证性。`;
     const refPrompt = referencedPlugin?.files?.length
       ? `\n\n# 参考插件（用户要基于此修改）\n插件名：${referencedPlugin.name}\n请在此基础上按用户需求修改，保留未变文件，只改必要部分（增量重构）。\n\n当前文件：\n${referencedPlugin.files.map((f) => `--- ${f.path} ---\n${f.content}`).join('\n\n')}`
       : '';
@@ -883,19 +659,6 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns, uploadingViaTool, compressing]);
 
-  // R3：历史 Dialog 打开时重置分页到首页与清掉删除确认态。
-  useEffect(() => {
-    if (historyOpen) { setHistoryPage(0); setConfirmDeleteId(null); }
-  }, [historyOpen]);
-
-  // R3：删除后若当前页超出范围（空页且非首页），自动回退一页。
-  const PAGE_SIZE = 8;
-  const pageCount = Math.max(1, Math.ceil(conversations.length / PAGE_SIZE));
-  useEffect(() => {
-    if (historyPage > 0 && historyPage >= pageCount) setHistoryPage(pageCount - 1);
-  }, [historyPage, pageCount]);
-  const pagedConversations = conversations.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE);
-
   // Esc 关窗（无内层 overlay 打开时）。
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -956,6 +719,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
+    stopVoiceInput();
     setInput('');
     const conversationId = ensureConversation(text);
     let modelText = text;
@@ -1089,7 +853,6 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       let sawToolCall = false; // R1：本轮是否有过工具调用（含 AskQuestion/CreatePlugin）
       let reasoningText = ''; // 本轮思考累积（流末兜底判定用，避免读 reasoning state 的陈旧闭包）
       let streamError: string | null = null; // 捕获流中的错误消息（error 事件或 finish_reason='error'）
-      setReasoning('');
 
       // betav2：自建 agent 循环（loop.ts），替代旧 runPluginCreatorAgent（creator-adapter）。
       // 历史还原用 turnsToMessages（原生 function calling）处理原始 UI turns（含完整工具 parts），
@@ -1299,8 +1062,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
 
   function toggleVoiceInput() {
     if (voiceListening) {
-      speechRef.current?.stop();
-      setVoiceListening(false);
+      stopVoiceInput();
       return;
     }
 
@@ -1346,14 +1108,29 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     }
   }
 
-  function renderComposer(placement: 'hero' | 'bottom') {
+  function stopVoiceInput() {
+    const recognition = speechRef.current;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.stop();
+      speechRef.current = null;
+    }
+    setVoiceListening(false);
+  }
+
+  function renderComposer() {
+    const hasInspectableContext = turns.length > 0 || input.trim().length > 0 || selectedFiles.length > 0 || referencedPlugin != null || draft != null;
+    const contextUsageLabel = contextWindow
+      ? `${usedTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens${compressedHint > 0 ? ` · 已压缩 ${compressedHint} 轮` : ''}`
+      : `约 ${usedTokens.toLocaleString()} tokens${compressedHint > 0 ? ` · 已压缩 ${compressedHint} 轮` : ''}`;
     return (
       <CreatorComposer
         activeSkillCount={activeSkillIds.length}
         busy={busy}
-        canInspectContext
+        canInspectContext={hasInspectableContext}
         compressHint={compressHint}
-        embedded={embedded}
+        contextUsagePct={hasInspectableContext ? usagePct : null}
+        contextUsageLabel={contextUsageLabel}
         input={input}
         mode={creatorMode}
         onClearFiles={() => setSelectedFiles([])}
@@ -1365,6 +1142,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         onModeChange={setCreatorMode}
         onOptimizePrompt={() => { void optimizePrompt(); }}
         onPickFiles={() => fileInputRef.current?.click()}
+        onPickFolder={() => folderInputRef.current?.click()}
         onRefreshWorkspace={() => { void refreshWorkspaceFolder(); }}
         onRemoveFile={removeFile}
         onSend={() => { void send(); }}
@@ -1372,9 +1150,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
         onSelectTier={setTier}
         onStop={stop}
         onToggleVoice={toggleVoiceInput}
-        placement={placement}
         recentPlugins={recentPlugins}
-        showContextButton={embedded}
         selectedFiles={selectedFiles}
         optimizingPrompt={optimizingPrompt}
         tier={tier}
@@ -1506,89 +1282,49 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
 
   return (
     <>
-    {/* 隐藏文件输入：支持文件夹（webkitdirectory）+ 多文件选择，可多次累积。 */}
+    {/* 隐藏输入：普通文件与文件夹分开，避免 webkitdirectory 阻断单文件选择。 */}
     <input
       ref={fileInputRef}
       type="file"
-      // webkitdirectory 为非标准属性，React 不识别故用 ref 透传；选目录时浏览器给目录下全部文件。
+      multiple
+      className="hidden"
+      onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
+    />
+    <input
+      ref={folderInputRef}
+      type="file"
+      // webkitdirectory 为非标准属性，React 不识别故用属性透传；选目录时浏览器给目录下全部文件。
       {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
       multiple
       className="hidden"
       onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
     />
-    <div className={cn(
-      embedded
-        ? 'flex h-full min-h-0 w-full bg-background'
-        : 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md animate-in fade-in duration-[var(--lf-dur-base)] motion-reduce:animate-none',
-    )}>
-      <div className={cn(
-        'flex w-full overflow-hidden bg-background transition-[max-width] duration-300',
-        embedded
-          ? 'h-full min-h-0 border-0 shadow-none'
-          : `h-[85vh] max-h-[800px] ${draft ? 'max-w-[1320px]' : 'max-w-[1100px]'} min-h-[480px] flex-col rounded-lg border shadow-xl animate-in zoom-in-95 fade-in slide-in-from-bottom-2 motion-reduce:animate-none`,
-      )}>
-        {!embedded && (
-          <CreatorFloatingTitleBar
-            activeSkillCount={activeSkillIds.length}
-            busy={busy}
-            canInspectContext
-            compressedHint={compressedHint}
-            onClose={onClose}
-            onNewConversation={newConversation}
-            onOpenContext={() => { void openContextInspector(); }}
-            onOpenHistory={() => setHistoryOpen(true)}
-            onOpenSkills={() => setSkillDialogOpen(true)}
-            onSelectReferencedPlugin={handleSelectReferencedPlugin}
-            onSelectTier={setTier}
-            recentPlugins={recentPlugins}
-            referencedPlugin={referencedPlugin}
-            tier={tier}
-            turnsCount={turns.length}
-          />
-        )}
-
-        {/* 主体：左对话列 + 右草稿面板（有草稿时分栏） */}
-        <div className="flex min-h-0 flex-1">
-          {embedded && (
-          <CreatorWorkspaceSidebar
-            activeSkillCount={activeSkillIds.length}
+    <div className="flex h-full min-h-0 w-full overflow-hidden bg-background">
+      <CreatorWorkspaceSidebar
             activeConversationId={activeConversationId}
             busy={busy}
             collapsed={sidebarCollapsed}
-            compressedHint={compressedHint}
             confirmDeleteId={confirmDeleteId}
             conversations={conversations}
             onCancelDeleteConversation={() => setConfirmDeleteId(null)}
             onConfirmDeleteConversation={deleteConversation}
             onDeleteConversation={setConfirmDeleteId}
             onNewConversation={newConversation}
-            onOpenSkills={() => setSkillDialogOpen(true)}
             onSelectConversation={selectConversationById}
-          />
-        )}
-          <div className="flex min-w-0 flex-1 flex-col">
-        {turns.length === 0 && !embedded ? (
-          <CreatorEmptyState
-            composer={renderComposer('hero')}
-            embedded={embedded}
-            onSelectPreset={setInput}
-          />
-        ) : turns.length === 0 ? (
-          <CreatorEmptyState composer={null} embedded={embedded} onSelectPreset={setInput} />
+      />
+      <div className="flex min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+        {turns.length === 0 ? (
+          <CreatorEmptyState onSelectPreset={setInput} />
         ) : (
           <CreatorMessageList
             turns={turns}
             busy={busy}
             scrollRef={scrollRef}
-            embedded={embedded}
             answerDrafts={answerDrafts}
             multiSelectDrafts={multiSelectDrafts}
             todos={todos}
             publishedName={publishedName}
-            contextWindow={contextWindow}
-            usedTokens={usedTokens}
-            usagePct={usagePct}
-            compressHint={compressHint ?? ''}
             compressing={compressing}
             searchingQuery={searchingQuery}
             uploadingViaTool={uploadingViaTool}
@@ -1599,46 +1335,24 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
               return { ...prev, [toolCallId]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
             })}
             onRetry={() => { void retry(); }}
-            onOpenContext={() => { void openContextInspector(); }}
           />
         )}
-
-        {(embedded || turns.length > 0) && renderComposer('bottom')}
-          </div>
-          {/* 右侧草稿面板：AI 暂存草稿后出现，实时预览 + 改信息 + 提交 */}
-          {draft && (
-            <CreatorDraftPanel
-              draft={draft}
-              onChange={patchDraft}
-              onSubmitted={onDraftSubmitted}
-              busy={busy}
-              conversationId={activeConversationId}
-              turns={turns}
-              workspaceId={workspacePluginId}
-              onWorkspacePersisted={onWorkspacePersisted}
-            />
-          )}
+        {renderComposer()}
         </div>
+        {draft && (
+          <CreatorDraftPanel
+            draft={draft}
+            onChange={patchDraft}
+            onSubmitted={onDraftSubmitted}
+            busy={busy}
+            conversationId={activeConversationId}
+            turns={turns}
+            workspaceId={workspacePluginId}
+            onWorkspacePersisted={onWorkspacePersisted}
+          />
+        )}
       </div>
     </div>
-    <CreatorHistoryDialog
-      open={historyOpen}
-      onOpenChange={setHistoryOpen}
-      conversations={conversations}
-      activeConversationId={activeConversationId}
-      page={historyPage}
-      pageCount={pageCount}
-      confirmDeleteId={confirmDeleteId}
-      onSelect={(id) => {
-        const target = conversations.find((c) => c.id === id);
-        if (target) selectConversation(target);
-      }}
-      onNewConversation={newConversation}
-      onRequestDelete={setConfirmDeleteId}
-      onConfirmDelete={deleteConversation}
-      onCancelDelete={() => setConfirmDeleteId(null)}
-      onPageChange={setHistoryPage}
-    />
     <CreatorSkillsDialog
       open={skillDialogOpen}
       onOpenChange={setSkillDialogOpen}
@@ -1647,7 +1361,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     />
 
     {/* 上下文查看面板 */}
-    <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={usedTokens} contextWindow={contextWindow} />
+    <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={inspectorTokens} contextWindow={contextWindow} />
     </>
   );
 }

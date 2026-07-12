@@ -12,7 +12,7 @@
 // 带 tool_calls 的 assistant 消息之后（OpenAI 协议要求）。
 import type { ChatMessage, FunctionToolCall } from './types';
 
-/** UI Turn 的工具历史项（从 ToolPart 映射而来，与 FloatingCreator 的 TurnPart 对齐）。 */
+/** UI Turn 的工具历史项（从 ToolPart 映射而来，与 CreatorWorkspace 的 TurnPart 对齐）。 */
 export interface TurnToolPart {
   type: 'tool';
   toolCallId: string;
@@ -32,7 +32,7 @@ export interface TurnTextPart {
 /** UI Turn 的可序列化 part（history 只关心 text/tool，reasoning/question 不进历史）。 */
 export type HistoryPart = TurnTextPart | TurnToolPart;
 
-/** 输入 Turn 结构（与 FloatingCreator 的 Turn 兼容，只取 history 需要的字段）。 */
+/** 输入 Turn 结构（与 CreatorWorkspace 的 Turn 兼容，只取 history 需要的字段）。 */
 export interface HistoryTurn {
   role: 'user' | 'assistant';
   content: string;
