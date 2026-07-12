@@ -54,6 +54,7 @@ export class MeService {
       purchases: purchases.map((p) => ({
         id: p.id,
         pluginId: p.pluginId,
+        packageId: p.packageId,
         sellerUserId: p.sellerUserId,
         priceCents: p.priceCents,
         createdAt: p.createdAt,

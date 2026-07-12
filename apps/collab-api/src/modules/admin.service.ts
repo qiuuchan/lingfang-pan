@@ -620,7 +620,10 @@ export class AdminService {
         where: { buyerTeamId: teamId },
         orderBy: { createdAt: 'desc' },
         take: 10,
-        include: { plugin: { select: { id: true, name: true } } },
+        include: {
+          plugin: { select: { id: true, name: true } },
+          package: { select: { id: true, name: true } },
+        },
       }),
       // 流水聚合：CREDIT 合计 - DEBIT 合计 = 累计净流入（与 balanceCents 互校，发现账实不一致）。
       this.prisma.balanceLedger.groupBy({
@@ -637,7 +640,14 @@ export class AdminService {
       memberCount,
       pluginCount: plugins.length,
       plugins,
-      purchases: purchases.map((p) => ({ id: p.id, pluginId: p.pluginId, pluginName: p.plugin.name, priceCents: p.priceCents, createdAt: p.createdAt })),
+      purchases: purchases.map((p) => ({
+        id: p.id,
+        pluginId: p.pluginId,
+        packageId: p.packageId,
+        pluginName: p.package?.name ?? p.plugin?.name ?? '未知插件',
+        priceCents: p.priceCents,
+        createdAt: p.createdAt,
+      })),
       ledgerSummary: { totalCreditCents: creditSum, totalDebitCents: debitSum, netCents: creditSum - debitSum },
       recentLedger,
     };

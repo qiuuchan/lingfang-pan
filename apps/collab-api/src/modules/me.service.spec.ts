@@ -63,7 +63,10 @@ describe('MeService 数据导出 + 账号注销', () => {
     it('并行查询五类数据（authorUserId/buyerUserId/userId 过滤）', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE', createdAt: new Date() });
       prisma.plugin.findMany.mockResolvedValue([{ id: 'p1', name: '插件A', version: '1.0.0', description: 'd', visibility: 'PUBLIC', reviewStatus: 'APPROVED', marketplace: true, priceCents: 100, createdAt: new Date() }]);
-      prisma.purchase.findMany.mockResolvedValue([{ id: 'pu1', pluginId: 'p2', sellerUserId: 'u2', priceCents: 200, createdAt: new Date() }]);
+      prisma.purchase.findMany.mockResolvedValue([
+        { id: 'pu1', pluginId: 'p2', packageId: null, sellerUserId: 'u2', priceCents: 200, createdAt: new Date() },
+        { id: 'pu2', pluginId: null, packageId: 'pkg-2', sellerUserId: 'u3', priceCents: 300, createdAt: new Date() },
+      ]);
       prisma.walletTransaction.findMany.mockResolvedValue([{ id: 'w1', amountCents: 1000, direction: 'CREDIT', reason: 'signup_bonus', pluginId: null, createdAt: new Date() }]);
       prisma.teamMembership.findMany.mockResolvedValue([{ teamId: 't1', role: 'MEMBER', status: 'ACTIVE', joinedAt: new Date(), team: { id: 't1', name: '团队A', slug: 'a' } }]);
 
@@ -74,7 +77,8 @@ describe('MeService 数据导出 + 账号注销', () => {
       expect(result.plugins[0]).toMatchObject({ id: 'p1', name: '插件A', priceCents: 100 });
       // purchases 按 buyerUserId 过滤。
       expect(prisma.purchase.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { buyerUserId: 'u1' } }));
-      expect(result.purchases).toHaveLength(1);
+      expect(result.purchases).toHaveLength(2);
+      expect(result.purchases[1]).toMatchObject({ pluginId: null, packageId: 'pkg-2', priceCents: 300 });
       // wallet 按 userId 过滤。
       expect(prisma.walletTransaction.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'u1' } }));
       expect(result.wallet).toHaveLength(1);

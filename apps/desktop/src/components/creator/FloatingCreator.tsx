@@ -240,7 +240,7 @@ interface CreatorConversation {
   updatedAt: string;
   /** 当前暂存的 AI 草稿（关窗重开 / 切回该会话时恢复右侧预览面板，修复重开右侧栏消失）。 */
   stagedDraft?: StagedPlugin | null;
-  /** 当前对话绑定的插件工作目录 id（plugins_root/{id}）。AI 工具 Read/Write/RunPlugin 以它为准。 */
+  /** 当前对话绑定的 DraftWorkspace UUID。AI 工具 Read/Write/RunPlugin 以它为准。 */
   workspacePluginId?: string | null;
   /** 用户在右侧面板改过的字段（与 stagedDraft 合并成展示用 draft）。 */
   userEdits?: Partial<StagedPlugin>;
@@ -464,7 +464,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先），并始终同步 manifest.json。
   const draft: StagedPlugin | null = stagedDraft ? withSyncedStagedManifest({ ...stagedDraft, ...userEdits }) : null;
 
-  // CreatePlugin 工具回调：工具已写入 plugins_root/{id}/，这里同步右侧草稿预览状态。
+  // CreatePlugin 工具回调：工具已写入 workspaces/{workspaceId}/，这里同步右侧草稿预览状态。
   // 同一插件 id 继续修改时保留用户已改字段；换 id（新插件）则清空旧编辑。
   function onPluginCreated(pluginId: string, next: StagedPlugin) {
     const synced = withSyncedStagedManifest(next);
@@ -526,13 +526,14 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     }
   }
 
-  // 保存草稿成功：清草稿态，显示成功卡片。
+  // 保存草稿成功后继续停留在同一 workspace，后续编辑不能创建第二条草稿。
   function onDraftSubmitted(name: string) {
     setPublishedName(name);
-    setStagedDraft(null);
-    setWorkspacePluginId(null);
-    setUserEdits({});
-    toast.success(`草稿「${name}」已保存到本地`);
+  }
+
+  function onWorkspacePersisted(workspaceId: string) {
+    currentPluginIdRef.current = workspaceId;
+    setWorkspacePluginId(workspaceId);
   }
 
   // 处理文件选择（累积模式，支持多次选择）
@@ -593,7 +594,13 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setTurns(active?.turns ?? []);
     // 恢复右侧草稿面板：关窗重开 / 重登后，回填上次暂存的草稿与用户编辑（修复重开右侧栏消失）。
     setStagedDraft(active?.stagedDraft ?? null);
-    setWorkspacePluginId(active?.workspacePluginId ?? active?.stagedDraft?.id ?? null);
+    const activeWorkspaceId = active?.workspacePluginId ?? active?.stagedDraft?.id ?? null;
+    setWorkspacePluginId(activeWorkspaceId);
+    currentPluginIdRef.current = activeWorkspaceId;
+    usePluginCreatorStore.getState().clearDraft();
+    if (activeWorkspaceId && active?.stagedDraft) {
+      usePluginCreatorStore.getState().createPlugin(activeWorkspaceId, active.stagedDraft);
+    }
     setUserEdits(active?.userEdits ?? {});
     setTodos(active?.todos ?? []);
   }, [session.userId, session.tenantId]);
@@ -658,7 +665,13 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setPublishedName(null);
     // 切回该会话时恢复其暂存草稿与用户编辑（右侧栏随之重现）。
     setStagedDraft(conversation.stagedDraft ?? null);
-    setWorkspacePluginId(conversation.workspacePluginId ?? conversation.stagedDraft?.id ?? null);
+    const conversationWorkspaceId = conversation.workspacePluginId ?? conversation.stagedDraft?.id ?? null;
+    setWorkspacePluginId(conversationWorkspaceId);
+    currentPluginIdRef.current = conversationWorkspaceId;
+    usePluginCreatorStore.getState().clearDraft();
+    if (conversationWorkspaceId && conversation.stagedDraft) {
+      usePluginCreatorStore.getState().createPlugin(conversationWorkspaceId, conversation.stagedDraft);
+    }
     setUserEdits(conversation.userEdits ?? {});
     setTodos(conversation.todos ?? []);
     compressRef.current = emptyCompressState();
@@ -682,6 +695,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     setPublishedName(null);
     setStagedDraft(null);
     setWorkspacePluginId(null);
+    currentPluginIdRef.current = null;
+    usePluginCreatorStore.getState().clearDraft();
     setUserEdits({});
     setTodos([]);
     compressRef.current = emptyCompressState();
@@ -918,11 +933,17 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
   useEffect(() => {
     if (!pendingDraftEdit) return;
     const { draft, turns: restoredTurns } = pendingDraftEdit;
-    // 恢复对话轮次。
-    if (Array.isArray(restoredTurns) && restoredTurns.length > 0) {
+    const conversationId = draft._meta?.conversationId;
+    const storedConversation = conversationId
+      ? conversations.find((conversation) => conversation.id === conversationId)
+      : undefined;
+    // 工作区 conversationId 是首选真相；旧草稿载荷仍兼容直接携带 turns。
+    if (storedConversation) {
+      selectConversation(storedConversation);
+    } else if (Array.isArray(restoredTurns) && restoredTurns.length > 0) {
       setTurns(restoredTurns as Turn[]);
     }
-    // 绑定草稿插件工作目录，后续 Read/Write 直接操作 plugins_root/{id}/。
+    // 绑定草稿工作区，后续 Read/Write 直接操作 workspaces/{workspaceId}/。
     void bindPluginWorkspace(draft, { showToast: false });
     // 恢复草稿到右侧面板（若 draft.files 存在且含 manifest 信息）。
     if (draft.files && draft.files.length > 0) {
@@ -930,13 +951,13 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       setUserEdits({});
     }
     setPendingDraftEdit(null);
-  }, [pendingDraftEdit, setPendingDraftEdit]);
+  }, [conversations, pendingDraftEdit, setPendingDraftEdit]);
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
-    ensureConversation(text);
+    const conversationId = ensureConversation(text);
     let modelText = text;
     let displayText = text;
     try {
@@ -955,7 +976,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     const userTurn: Turn = { role: 'user', content: displayText, modelContent: modelText };
     const assistantIdx = turns.length + 1;
     setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true, status: 'generating' }]);
-    await runAgentTurn(assistantIdx, modelText);
+    await runAgentTurn(assistantIdx, modelText, { conversationId });
   }
 
   /**
@@ -985,7 +1006,7 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
     });
     // 重试模式：turns 里已含上一条 user 轮（紧邻被重置的 assistant 轮之前），
     // 所以不应再追加 currentInput（否则用户消息重复）。传 isRetry=true 让 runAgentTurn 跳过追加。
-    await runAgentTurn(lastAssistantIdx, userText, { isRetry: true });
+    await runAgentTurn(lastAssistantIdx, userText, { isRetry: true, conversationId: activeConversationId });
   }
 
   /**
@@ -995,7 +1016,11 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
    * @param text 本轮用户输入（用于压缩与 currentInput）
    * @param opts.isRetry 重试模式：turns 已含对应 user 轮，不重复追加 currentInput
    */
-  async function runAgentTurn(assistantIdx: number, text: string, opts: { isRetry?: boolean } = {}) {
+  async function runAgentTurn(
+    assistantIdx: number,
+    text: string,
+    opts: { isRetry?: boolean; conversationId?: string | null } = {},
+  ) {
     setBusy(true);
 
     const controller = new AbortController();
@@ -1086,7 +1111,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
       ));
 
       const { tools, resetReadTracking } = createAgentTools({
-        getPluginId: () => usePluginCreatorStore.getState().pluginId,
+        getPluginId: () => currentPluginIdRef.current,
+        getConversationId: () => opts.conversationId ?? activeConversationId,
         onPluginCreated: (pluginId, nextDraft) => {
           stagedName = nextDraft.name;
           setUploadingViaTool(false);
@@ -1588,6 +1614,8 @@ export function FloatingCreator({ onClose, variant = 'floating', sidebarCollapse
               busy={busy}
               conversationId={activeConversationId}
               turns={turns}
+              workspaceId={workspacePluginId}
+              onWorkspacePersisted={onWorkspacePersisted}
             />
           )}
         </div>

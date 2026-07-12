@@ -73,6 +73,26 @@ enum PluginReviewStatus {
   REJECTED
 }
 
+enum PluginPackageStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum PluginArtifactStatus {
+  PUBLISHED
+  YANKED
+}
+
+enum MarketplaceListingStatus {
+  DRAFT
+  ACTIVE
+  DELISTED
+}
+
+enum PluginEntitlementKind {
+  PURCHASED
+}
+
 // 发布通道：STABLE 正式版（官网默认展示、桌面端默认检查），BETA 预览版（自愿接入）。
 enum ReleaseChannel {
   STABLE
@@ -233,6 +253,9 @@ model User {
   authoredPlugins        Plugin[]               @relation("PluginAuthor")
   reviewedPlugins        Plugin[]               @relation("PluginReviewer")
   pluginReviews          PluginReview[]         @relation("PluginReviewReviewer")
+  authoredPluginPackages PluginPackage[]        @relation("PluginPackageAuthor")
+  createdPluginReleases  PluginRelease[]        @relation("PluginReleaseCreator")
+  pluginReleaseReviews   PluginReleaseReview[]  @relation("PluginReleaseReviewer")
   wallet                 Wallet?
   walletTransactions     WalletTransaction[]
   purchasesBuyer         Purchase[]             @relation("PurchaseBuyer")
@@ -272,6 +295,8 @@ model Team {
   ledger          BalanceLedger[]
   plugins         Plugin[]
   installations   PluginInstallation[]
+  pluginPackages  PluginPackage[]
+  pluginEntitlements PluginEntitlement[]
   // RBAC：团队级自定义角色（scope=TEAM，teamId 指向本团队）+ 团队插件授权记录。
   roles           Role[]
   pluginGrants    PluginGrant[]
@@ -429,6 +454,105 @@ model PluginReview {
   @@index([status, createdAt])
 }
 
+// v4 registry: package identity is stable while every release points at one immutable ZIP artifact.
+model PluginPackage {
+  id               String              @id @default(uuid())
+  ownerTeamId      String
+  authorUserId     String?
+  manifestId       String
+  name             String
+  description      String              @default("")
+  governanceStatus PluginPackageStatus @default(ACTIVE)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  ownerTeam        Team                @relation(fields: [ownerTeamId], references: [id], onDelete: Restrict)
+  author           User?               @relation("PluginPackageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  releases         PluginRelease[]     @relation("PluginPackageReleases")
+  listing          MarketplaceListing?
+  entitlements     PluginEntitlement[]
+  purchases        Purchase[]
+  grants           PluginGrant[]       @relation("PluginPackageGrants")
+
+  @@unique([ownerTeamId, manifestId])
+  @@index([ownerTeamId, governanceStatus, updatedAt])
+  @@index([authorUserId, createdAt])
+}
+
+model PluginRelease {
+  id                 String                @id @default(uuid())
+  packageId          String
+  version            String
+  manifest           Json
+  fileManifest       Json                  @default("[]")
+  artifactKey        String                @unique
+  sha256             String
+  sizeBytes          Int
+  targetPlatform     String                @default("windows-x64")
+  status             PluginArtifactStatus  @default(PUBLISHED)
+  marketReviewStatus PluginReviewStatus    @default(DRAFT)
+  reviewReason       String                @default("")
+  reviewedById       String?
+  reviewedAt         DateTime?
+  createdById        String?
+  createdAt          DateTime              @default(now())
+  package            PluginPackage         @relation("PluginPackageReleases", fields: [packageId], references: [id], onDelete: Restrict)
+  creator            User?                 @relation("PluginReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  reviews            PluginReleaseReview[]
+  currentForListings MarketplaceListing[]  @relation("MarketplaceCurrentRelease")
+
+  @@unique([packageId, version])
+  @@index([packageId, status, createdAt])
+  @@index([marketReviewStatus, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model MarketplaceListing {
+  id               String                   @id @default(uuid())
+  packageId        String                   @unique
+  currentReleaseId String?
+  priceCents       Int                      @default(0)
+  status           MarketplaceListingStatus @default(DRAFT)
+  installCount     Int                      @default(0)
+  ratingCount      Int                      @default(0)
+  ratingSum        Int                      @default(0)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  package          PluginPackage            @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  currentRelease   PluginRelease?           @relation("MarketplaceCurrentRelease", fields: [currentReleaseId], references: [id], onDelete: SetNull)
+
+  @@index([status, updatedAt])
+  @@index([currentReleaseId])
+}
+
+model PluginEntitlement {
+  id         String                @id @default(uuid())
+  teamId     String
+  packageId  String
+  kind       PluginEntitlementKind @default(PURCHASED)
+  purchaseId String?               @unique
+  createdAt  DateTime              @default(now())
+  team       Team                  @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  package    PluginPackage         @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  purchase   Purchase?             @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, packageId])
+  @@index([packageId, createdAt])
+}
+
+model PluginReleaseReview {
+  id         String             @id @default(uuid())
+  releaseId  String
+  reviewerId String?
+  status     PluginReviewStatus
+  reason     String             @default("")
+  createdAt  DateTime           @default(now())
+  release    PluginRelease      @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+  reviewer   User?              @relation("PluginReleaseReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([releaseId, createdAt])
+  @@index([status, createdAt])
+}
+
 model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?
@@ -484,19 +608,24 @@ model WalletTransaction {
 }
 
 model Purchase {
-  id           String   @id @default(uuid())
-  pluginId     String
+  id           String             @id @default(uuid())
+  pluginId     String?
+  packageId    String?
   buyerUserId  String
   buyerTeamId  String
   sellerUserId String
   priceCents   Int
-  createdAt    DateTime @default(now())
-  plugin       Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
-  buyer        User     @relation("PurchaseBuyer", fields: [buyerUserId], references: [id])
-  seller       User     @relation("PurchaseSeller", fields: [sellerUserId], references: [id])
+  createdAt    DateTime           @default(now())
+  plugin       Plugin?            @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  package      PluginPackage?     @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  buyer        User               @relation("PurchaseBuyer", fields: [buyerUserId], references: [id])
+  seller       User               @relation("PurchaseSeller", fields: [sellerUserId], references: [id])
+  entitlement  PluginEntitlement?
 
   @@unique([pluginId, buyerUserId])
+  @@unique([packageId, buyerTeamId])
   @@index([buyerUserId])
+  @@index([packageId])
   // 组E 性能：按买方团队聚合的高频查询索引。adminTeamDetail 用 buyerTeamId + createdAt desc
   // 拉最近 10 笔购买，此前 buyerTeamId 无索引走全表扫描；按租户的财务聚合同样受益。
   @@index([buyerTeamId, createdAt])
@@ -724,18 +853,22 @@ model Role {
 model PluginGrant {
   id          String             @id @default(uuid())
   teamId      String
-  pluginId    String
+  pluginId    String?
+  packageId   String?
   subjectKind PluginGrantSubject
   subjectId   String
   effect      PluginGrantEffect
   createdBy   String?
   createdAt   DateTime           @default(now())
   team        Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  plugin      Plugin             @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  plugin      Plugin?            @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  package     PluginPackage?     @relation("PluginPackageGrants", fields: [packageId], references: [id], onDelete: Cascade)
   creator     User?              @relation("PluginGrantCreator", fields: [createdBy], references: [id], onDelete: SetNull)
 
   @@unique([teamId, pluginId, subjectKind, subjectId])
+  @@unique([teamId, packageId, subjectKind, subjectId])
   @@index([teamId, pluginId])
+  @@index([teamId, packageId])
 }
 
 // ============================================================

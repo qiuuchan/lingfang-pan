@@ -5,7 +5,7 @@
 // - 阶段提示：「正在读取插件文件…」→「正在上传…（XX%）」→「上传完成」/「上传失败」
 // - 上传中不可关闭（避免误触中断），完成后自动关闭或手动关闭。
 //
-// 进度数据来源：submitStagedPlugin → uploadPlugin（Rust Channel UploadEvent）。
+// 进度数据来源：publishDraftWorkspace（Rust v4 制品 Channel 事件）。
 // 与 Settings.tsx 的下载进度条同款样式（inline bar，非 shadcn Progress 组件）。
 import { Loader2Icon, CheckCircle2Icon, XCircleIcon, UploadIcon } from 'lucide-react';
 import {

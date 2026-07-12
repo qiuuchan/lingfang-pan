@@ -149,6 +149,10 @@ impl RuntimeResolver {
         self.python.as_ref().and_then(|r| pip_exe(&r.dir))
     }
 
+    pub(crate) fn uv(&self) -> Option<PathBuf> {
+        self.python.as_ref().and_then(|r| uv_exe(&r.dir))
+    }
+
     pub(crate) fn npm(&self) -> Option<PathBuf> {
         self.node.as_ref().and_then(|r| npm_exe(&r.dir))
     }
@@ -203,6 +207,7 @@ impl RuntimeResolver {
         match normalize_command_name(command).as_deref() {
             Some("python" | "python3" | "py") => self.python(),
             Some("pip" | "pip3") => self.pip(),
+            Some("uv") => self.uv(),
             Some("node" | "nodejs") => self.node(),
             Some("npm") => self.npm(),
             Some("pnpm") => self.pnpm(),
@@ -239,8 +244,14 @@ impl RuntimeResolver {
             OsString::from("1"),
         ));
         env.push((OsString::from("PIP_NO_INPUT"), OsString::from("1")));
-        env.push((OsString::from("NPM_CONFIG_REGISTRY"), OsString::from(&npm_url)));
-        env.push((OsString::from("npm_config_registry"), OsString::from(&npm_url)));
+        env.push((
+            OsString::from("NPM_CONFIG_REGISTRY"),
+            OsString::from(&npm_url),
+        ));
+        env.push((
+            OsString::from("npm_config_registry"),
+            OsString::from(&npm_url),
+        ));
         env.push((
             OsString::from("COREPACK_ENABLE_DOWNLOAD_PROMPT"),
             OsString::from("0"),
@@ -275,8 +286,8 @@ impl RuntimeResolver {
         // 追加 Windows 系统目录（System32 + Wbem + PowerShell），保证 OS 基础工具/DLL 可达。
         #[cfg(windows)]
         {
-            let sysroot = std::env::var_os("SystemRoot")
-                .unwrap_or_else(|| OsString::from("C:\\Windows"));
+            let sysroot =
+                std::env::var_os("SystemRoot").unwrap_or_else(|| OsString::from("C:\\Windows"));
             let sysroot = PathBuf::from(sysroot);
             push_if_dir(&mut paths, sysroot.join("System32"));
             push_if_dir(&mut paths, sysroot.join("System32").join("Wbem"));
@@ -442,24 +453,27 @@ fn pip_exe(dir: &Path) -> Option<PathBuf> {
     ))
 }
 
-fn npm_exe(dir: &Path) -> Option<PathBuf> {
+fn uv_exe(dir: &Path) -> Option<PathBuf> {
     first_existing(windows_unix_many(
         vec![
-            dir.join("npm.cmd"),
-            dir.join("npm.exe"),
-            dir.join("npm"),
+            dir.join("uv.exe"),
+            dir.join("Scripts").join("uv.exe"),
+            dir.join("uv"),
         ],
+        vec![dir.join("bin").join("uv"), dir.join("uv")],
+    ))
+}
+
+fn npm_exe(dir: &Path) -> Option<PathBuf> {
+    first_existing(windows_unix_many(
+        vec![dir.join("npm.cmd"), dir.join("npm.exe"), dir.join("npm")],
         vec![dir.join("bin").join("npm"), dir.join("npm")],
     ))
 }
 
 fn pnpm_exe(dir: &Path) -> Option<PathBuf> {
     first_existing(windows_unix_many(
-        vec![
-            dir.join("pnpm.cmd"),
-            dir.join("pnpm.exe"),
-            dir.join("pnpm"),
-        ],
+        vec![dir.join("pnpm.cmd"), dir.join("pnpm.exe"), dir.join("pnpm")],
         vec![dir.join("bin").join("pnpm"), dir.join("pnpm")],
     ))
 }
@@ -551,7 +565,7 @@ mod tests {
         let r = RuntimeResolver::from_dirs(None, None);
         assert!(r.resolve_runtime_command("node").is_none()); // 未配置 → None
         assert!(r.resolve_runtime_command("git").is_none()); // 非运行时命令
-        // 名字归一化（带后缀也能识别），但因未配置 exe 仍 None。
+                                                             // 名字归一化（带后缀也能识别），但因未配置 exe 仍 None。
         assert!(r.resolve_runtime_command("python.exe").is_none());
     }
 
@@ -574,12 +588,12 @@ mod tests {
             "PIP_INDEX_URL",
             "https://pypi.tuna.tsinghua.edu.cn/simple"
         ));
-        assert!(contains("NPM_CONFIG_REGISTRY", "https://registry.npmmirror.com"));
-        // trusted host 从 pip url 提取。
         assert!(contains(
-            "PIP_TRUSTED_HOST",
-            "pypi.tuna.tsinghua.edu.cn"
+            "NPM_CONFIG_REGISTRY",
+            "https://registry.npmmirror.com"
         ));
+        // trusted host 从 pip url 提取。
+        assert!(contains("PIP_TRUSTED_HOST", "pypi.tuna.tsinghua.edu.cn"));
         // 宿主 PATH 被清空（替换为命中来源的 PATH，无运行时则为空）。
         assert!(!contains("PATH", "host-path"));
     }

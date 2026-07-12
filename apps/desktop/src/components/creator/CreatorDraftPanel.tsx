@@ -10,12 +10,12 @@ import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { buildStagedManifest, submitStagedPlugin, validateStagedCompleteness, withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import { buildStagedManifest, validateStagedCompleteness, withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import type { UploadProgress } from '@/lib/plugin-upload';
 import { UploadProgressDialog, type UploadStage } from '@/components/plugins/UploadProgressDialog';
 import { validatePluginStructure } from '@/lib/plugin-draft/manifest';
-import { saveDraftPlugin } from '@/lib/draft-plugin';
 import { cn } from '@/lib/utils';
+import { persistDraftWorkspace, publishDraftWorkspace } from '@/lib/plugin-registry';
 
 // 能力白名单：必须与后端 plugin-package.ts ALLOWED_CAPABILITIES 完全一致，否则勾选后端不认的能力会 400。
 const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
@@ -37,6 +37,8 @@ export function CreatorDraftPanel({
   busy,
   conversationId,
   turns,
+  workspaceId,
+  onWorkspacePersisted,
 }: {
   draft: StagedPlugin;
   onChange: (patch: Partial<StagedPlugin>) => void;
@@ -47,6 +49,9 @@ export function CreatorDraftPanel({
   conversationId?: string | null;
   /** 对话轮次（保存草稿时记录，供编辑时恢复）。 */
   turns?: unknown[];
+  /** 当前编辑的 DraftWorkspace UUID；保存和发布必须复用它。 */
+  workspaceId?: string | null;
+  onWorkspacePersisted: (workspaceId: string) => void;
 }) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishingTeam, setPublishingTeam] = useState(false);
@@ -93,15 +98,15 @@ export function CreatorDraftPanel({
     setUploadProgress(null);
     setUploadError(undefined);
     try {
-      const result = await submitStagedPlugin(preparedDraft, (info) => setUploadProgress({ ...info }));
-      if (result.ok) {
-        setUploadStage('done');
-        toast.success(`插件「${result.name}」已提交到团队空间`);
-      } else {
-        setUploadStage('error');
-        setUploadError(result.message);
-        toast.error(result.message);
-      }
+      const workspace = await persistPreparedWorkspace(preparedDraft, workspaceId ?? undefined, conversationId);
+      onWorkspacePersisted(workspace.workspaceId);
+      const result = await publishDraftWorkspace(workspace, (info) => setUploadProgress({
+        uploaded: info.transferred,
+        total: info.total || 0,
+        speed: 0,
+      }));
+      setUploadStage('done');
+      toast.success(`插件「${preparedDraft.name}」已发布团队版本 v${result.release.version}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setUploadStage('error');
@@ -116,19 +121,9 @@ export function CreatorDraftPanel({
     if (!validateDraftReady()) return;
     setSavingDraft(true);
     try {
-      const result = await saveDraftPlugin({
-        id: preparedDraft.id,
-        manifest: {
-          ...buildStagedManifest(preparedDraft),
-          draft: true,
-        },
-        files: preparedDraft.files
-          .filter((f) => f.path !== 'manifest.json')
-          .map(f => [f.path, f.content]),
-        conversationId: conversationId ?? undefined,
-        turns: turns && turns.length > 0 ? JSON.stringify(turns) : undefined,
-      });
-      toast.success(`草稿「${draft.name}」已保存到本地，实际写入 ${result.fileCount} 个文件`);
+      const workspace = await persistPreparedWorkspace(preparedDraft, workspaceId ?? undefined, conversationId);
+      onWorkspacePersisted(workspace.workspaceId);
+      toast.success(`草稿「${draft.name}」已保存到工作区`);
       onSubmitted(draft.name);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -338,6 +333,26 @@ export function CreatorDraftPanel({
       />
     </aside>
   );
+}
+
+async function persistPreparedWorkspace(
+  draft: StagedPlugin,
+  preferredWorkspaceId?: string,
+  conversationId?: string | null,
+) {
+  const manifest = buildStagedManifest(draft);
+  return persistDraftWorkspace({
+    preferredWorkspaceId,
+    title: draft.name,
+    manifestId: draft.id,
+    version: draft.version,
+    runtime: draft.runtime_type,
+    conversationId,
+    files: [
+      { path: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` },
+      ...draft.files.filter((file) => file.path !== 'manifest.json'),
+    ],
+  });
 }
 
 function PanelSection({ title, children, withDivider = true }: { title: string; children: React.ReactNode; withDivider?: boolean }) {

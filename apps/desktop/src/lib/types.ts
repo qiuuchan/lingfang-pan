@@ -188,6 +188,11 @@ export interface LoadedPlugin {
   entry: string;
   status?: string;
   source?: 'builtin' | 'published' | 'installed' | 'platform' | 'team' | 'marketplace';
+  installationId?: string;
+  packageId?: string;
+  installationOrigin?: 'builtin' | 'local' | 'team' | 'marketplace';
+  /** 用户显式运行后预览的 pending client 制品；iframe onLoad 成功后才能原子激活。 */
+  pendingActivation?: { releaseId: string };
   // 作者用户 ID（来自后端 publicPlugin.authorUserId）：用于前端判断「能否修改该插件」。
   // 权限规则（与后端 ensurePluginManager 一致）：作者本人 或 当前用户是 TEAM_ADMIN 可改。
   authorUserId?: string;
@@ -225,7 +230,7 @@ export type AccountSettingsTab = 'account' | 'team-wallet' | 'settings';
 // 'creator' 保留为 setView 拦截键（拦截后切到 develop-plugins）；
 // 'team-wallet' | 'settings' 同为 setView 拦截转独立悬浮窗。
 export type PluginWorkspaceMode = 'run' | 'develop';
-export type View = 'home' | 'run-plugins' | 'develop-plugins' | 'creator' | 'team-wallet' | 'team-admin' | 'settings' | 'review';
+export type View = 'home' | 'run-plugins' | 'develop-plugins' | 'draft-plugins' | 'creator' | 'team-wallet' | 'team-admin' | 'settings' | 'review';
 
 // RBAC：团队角色 + 权限码 + 插件授权（与后端 Role/PermissionEntry/PluginGrant + contract rbac.ts 对齐）。
 export type RoleScope = 'PLATFORM' | 'TEAM';
@@ -280,7 +285,8 @@ export interface Role {
 export interface PluginGrantRow {
   id: string;
   teamId: string;
-  pluginId: string;
+  pluginId?: string | null;
+  packageId?: string | null;
   subjectKind: PluginGrantSubject;
   subjectId: string;
   effect: PluginGrantEffect;

@@ -15,7 +15,6 @@
       "nsis"
     ],
     "resources": {
-      "../builtin-plugins": "builtin-plugins",
       "../runtimes": "runtimes"
     },
     "copyright": "© 2026 灵坊工作台",

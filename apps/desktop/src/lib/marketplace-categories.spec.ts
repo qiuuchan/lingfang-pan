@@ -7,7 +7,7 @@ import {
   CATEGORIES,
   type CategoryKey,
 } from './marketplace-categories';
-import type { MarketPlugin } from '@/pages/plugins/MarketplacePluginsSection';
+import type { MarketPlugin } from './marketplace-categories';
 
 function plug(name: string, description = '', extra: Partial<MarketPlugin> = {}): MarketPlugin {
   return { id: name, name, description, ...extra } as MarketPlugin;

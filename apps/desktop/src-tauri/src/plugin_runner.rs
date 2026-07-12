@@ -39,7 +39,9 @@ use serde::{Deserialize, Serialize};
 // - run_capture_with_env：带超时的同步运行（用于 venv 创建 / pip install / pnpm install 等阻塞阶段）。
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
-use crate::process_util::{kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput};
+use crate::process_util::{
+    kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput,
+};
 use crate::runtime_resolver::RuntimeResolver;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
@@ -118,7 +120,11 @@ fn parse_manifest(plugin_dir: &std::path::Path) -> Result<PluginManifest, String
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    Ok(PluginManifest { runtime, entry, capabilities })
+    Ok(PluginManifest {
+        runtime,
+        entry,
+        capabilities,
+    })
 }
 
 /// 解析插件的持久化目录路径（plugins_root/<plugin_id>，canonicalize 防符号链接逃逸）。
@@ -177,9 +183,18 @@ pub(crate) fn venv_python(venv_dir: &std::path::Path) -> PathBuf {
 /// 判定：venv 内 python 不存在 / pip 缺失 / home 路径与当前运行时不一致 → 需要创建。
 fn needs_python_venv(plugin_dir: &std::path::Path, runtime: &RuntimeResolver) -> bool {
     let venv_dir = python_venv_dir(plugin_dir);
-    !venv_python(&venv_dir).is_file()
+    if !venv_python(&venv_dir).is_file()
         || !venv_has_pip(&venv_dir)
         || !venv_home_matches_host(&venv_dir, runtime)
+    {
+        return true;
+    }
+    ["uv.lock", "requirements.txt"].iter().any(|name| {
+        std::fs::read_to_string(plugin_dir.join(name))
+            .ok()
+            .map(|content| !deps_verified_matches(&venv_dir, &content))
+            .unwrap_or(false)
+    })
 }
 
 /// 确保 Python 插件有可用 venv（PRD 需求 3 / AC3）。
@@ -200,11 +215,49 @@ pub(crate) fn ensure_python_venv(
     let py = venv_python(&venv_dir);
     let requirements = plugin_dir.join("requirements.txt");
     let requirements_content = std::fs::read_to_string(&requirements).ok();
+    let uv_lock = plugin_dir.join("uv.lock");
+    let uv_lock_content = std::fs::read_to_string(&uv_lock).ok();
 
     // 已有 venv 且解释器/pip 存在且 home 路径匹配 → 跳过创建。
     // 路径不匹配时（跨机器迁移 / 安装路径变更 / 原始路径含 junction）自动重建。
     if !py.is_file() || !venv_has_pip(&venv_dir) || !venv_home_matches_host(&venv_dir, runtime) {
         create_python_venv(runtime, plugin_dir, &venv_dir, stream)?;
+    }
+
+    if let Some(content) = uv_lock_content.as_deref() {
+        if !deps_verified_matches(&venv_dir, content) {
+            let uv = runtime.uv().ok_or_else(|| {
+                "插件包含 uv.lock，但应用运行时缺少 uv，无法执行冻结安装".to_string()
+            })?;
+            let mut env = runtime.env(minimal_env());
+            env.push((
+                std::ffi::OsString::from("UV_PROJECT_ENVIRONMENT"),
+                venv_dir.as_os_str().to_os_string(),
+            ));
+            let captured = run_with_optional_stream(
+                &uv,
+                vec![
+                    "sync".to_string(),
+                    "--frozen".to_string(),
+                    "--project".to_string(),
+                    plugin_dir.to_string_lossy().to_string(),
+                ],
+                Some(&plugin_dir.to_string_lossy()),
+                600_000,
+                env,
+                stream,
+            )
+            .map_err(|error| format!("uv sync --frozen 失败：{error}"))?;
+            if captured.exit_code != Some(0) {
+                return Err(format!(
+                    "uv sync --frozen 失败（exit={:?}）：{}",
+                    captured.exit_code,
+                    captured_detail(&captured)
+                ));
+            }
+            write_deps_verified(&venv_dir, content);
+        }
+        return Ok(py);
     }
 
     // 有 requirements.txt → 先装依赖再冒烟。装依赖幂等（已装 pip 跳过）；冒烟自愈。
@@ -217,13 +270,15 @@ pub(crate) fn ensure_python_venv(
             }
         }
         // 装依赖 + 冒烟。冒烟失败 → 删 venv 重建 + 重装 + 再冒烟（自愈一次）。
-        install_and_smoke(runtime, plugin_dir, &venv_dir, &py, content, stream).or_else(|first_err| {
-            // 自愈：删 venv → 重建 → 重装 → 再冒烟。只重试一次（真正损坏/磁盘坏会再次失败）。
-            let _ = remove_dir_all_with_retry(&venv_dir);
-            create_python_venv(runtime, plugin_dir, &venv_dir, stream)?;
-            install_and_smoke(runtime, plugin_dir, &venv_dir, &py, content, stream)
-                .map_err(|retry_err| format!("{first_err}\n重建后仍失败：{retry_err}"))
-        })?;
+        install_and_smoke(runtime, plugin_dir, &venv_dir, &py, content, stream).or_else(
+            |first_err| {
+                // 自愈：删 venv → 重建 → 重装 → 再冒烟。只重试一次（真正损坏/磁盘坏会再次失败）。
+                let _ = remove_dir_all_with_retry(&venv_dir);
+                create_python_venv(runtime, plugin_dir, &venv_dir, stream)?;
+                install_and_smoke(runtime, plugin_dir, &venv_dir, &py, content, stream)
+                    .map_err(|retry_err| format!("{first_err}\n重建后仍失败：{retry_err}"))
+            },
+        )?;
     }
     if !py.is_file() {
         return Err(format!("venv 创建后仍找不到解释器：{}", py.display()));
@@ -241,13 +296,15 @@ fn install_and_smoke(
     requirements_content: &str,
     stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
-    // pip install（幂等，已装依赖 pip 会跳过）。可能下载大包，给 600s 超时。
-    // 用 venv python -m pip，避开 Windows pip.exe 启动器在嵌入式/搬迁目录里解析解释器路径不稳的问题。
+    // requirements.txt 统一通过 uv pip install 写入当前安装项 venv。
+    let uv = runtime
+        .uv()
+        .ok_or_else(|| "插件包含 requirements.txt，但应用运行时缺少 uv".to_string())?;
     let pip_args = vec![
-        "-m".to_string(),
         "pip".to_string(),
         "install".to_string(),
-        "--no-input".to_string(),
+        "--python".to_string(),
+        py.to_string_lossy().to_string(),
         "-r".to_string(),
         plugin_dir
             .join("requirements.txt")
@@ -255,7 +312,7 @@ fn install_and_smoke(
             .to_string(),
     ];
     let captured = run_with_optional_stream(
-        py,
+        &uv,
         pip_args,
         Some(&plugin_dir.to_string_lossy()),
         600_000,
@@ -530,10 +587,7 @@ fn smoke_test_venv(
 /// 校验已有 venv 的 pyvenv.cfg 中 `home` 路径是否与当前内置 Python 所在目录匹配。
 /// 不匹配时（例如应用安装路径变更、跨机器迁移、原始路径含 junction/symlink），
 /// 该 venv 不可用，需重建。
-fn venv_home_matches_host(
-    venv_dir: &std::path::Path,
-    runtime: &RuntimeResolver,
-) -> bool {
+fn venv_home_matches_host(venv_dir: &std::path::Path, runtime: &RuntimeResolver) -> bool {
     let host_py = match runtime.python() {
         Some(path) => path,
         None => return false,
@@ -559,9 +613,7 @@ fn venv_home_matches_host(
 /// 路径归一化：strip `\\?\` 前缀，统一分隔符为反斜杠，去除末尾分隔符，大小写不敏感。
 fn normalize_for_comparison(path: &std::path::Path) -> String {
     let s = path.to_string_lossy().to_string();
-    let s = s
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&s);
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
     s.replace('/', "\\")
         .trim_end_matches('\\')
         .to_ascii_lowercase()
@@ -753,6 +805,8 @@ pub(crate) fn minimal_env() -> Vec<(OsString, OsString)> {
 
 // === Node pnpm 管理 ===
 
+const NODE_DEPS_READY_MARKER: &str = ".lingfang-deps-ready";
+
 /// 探测 Node 插件是否需要 pnpm install（首次慢，node_modules 已在则 ensure 秒过）。
 /// 用于 start_plugin 发「安装依赖」阶段事件。与 ensure_node_dependencies 的「已装跳过」逻辑对齐：
 /// 有 package.json + 非空依赖 且 node_modules 缺失 → 需要安装。
@@ -761,7 +815,11 @@ fn needs_node_install(plugin_dir: &std::path::Path) -> bool {
     if !pkg_json.is_file() {
         return false;
     }
-    if plugin_dir.join("node_modules").is_dir() {
+    if plugin_dir
+        .join("node_modules")
+        .join(NODE_DEPS_READY_MARKER)
+        .is_file()
+    {
         return false;
     }
     // 仅当声明了非空依赖才真正需要 install（与 ensure_node_dependencies 的 has_deps 判定一致）。
@@ -810,12 +868,29 @@ pub(crate) fn ensure_node_dependencies(
     if !has_deps {
         return Ok(());
     }
-    // node_modules 存在视为已装（幂等跳过，避免每次 start 重复 install 拖慢）。
-    if plugin_dir.join("node_modules").is_dir() {
+    // 只认成功安装标记；失败留下的半成品 node_modules 必须重试。
+    if plugin_dir
+        .join("node_modules")
+        .join(NODE_DEPS_READY_MARKER)
+        .is_file()
+    {
         return Ok(());
     }
-    // 优先软件内置 pnpm，回退软件内置 npm。禁止使用系统 npm/pnpm。
-    let (bin, install_args) = if let Some(pnpm) = runtime.pnpm() {
+    // 锁文件决定冻结安装器；存在锁文件时不允许退化为普通 install。
+    let (bin, install_args) = if plugin_dir.join("pnpm-lock.yaml").is_file() {
+        let pnpm = runtime
+            .pnpm()
+            .ok_or_else(|| "插件包含 pnpm-lock.yaml，但应用运行时缺少 pnpm".to_string())?;
+        (
+            pnpm,
+            vec!["install".to_string(), "--frozen-lockfile".to_string()],
+        )
+    } else if plugin_dir.join("package-lock.json").is_file() {
+        let npm = runtime
+            .npm()
+            .ok_or_else(|| "插件包含 package-lock.json，但应用运行时缺少 npm".to_string())?;
+        (npm, vec!["ci".to_string()])
+    } else if let Some(pnpm) = runtime.pnpm() {
         (pnpm, vec!["install".to_string()])
     } else if let Some(npm) = runtime.npm() {
         (npm, vec!["install".to_string()])
@@ -839,6 +914,11 @@ pub(crate) fn ensure_node_dependencies(
             captured.stderr.trim()
         ));
     }
+    std::fs::write(
+        plugin_dir.join("node_modules").join(NODE_DEPS_READY_MARKER),
+        b"ready\n",
+    )
+    .map_err(|error| format!("写入 Node 依赖完成标记失败：{error}"))?;
     Ok(())
 }
 
@@ -908,11 +988,9 @@ fn playwright_chromium_installed() -> bool {
     let Ok(entries) = std::fs::read_dir(&root) else {
         return false;
     };
-    entries.flatten().any(|e| {
-        e.file_name()
-            .to_string_lossy()
-            .starts_with("chromium-")
-    })
+    entries
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with("chromium-"))
 }
 
 /// 确保插件用到的 Playwright 浏览器二进制已下载（仅 chromium）。
@@ -1020,10 +1098,7 @@ fn resolve_node_playwright_cli(
     let bin_candidates = vec![bin_dir.join("playwright")];
 
     if let Some(bin) = bin_candidates.into_iter().find(|p| p.is_file()) {
-        return Ok((
-            bin,
-            vec!["install".to_string(), "chromium".to_string()],
-        ));
+        return Ok((bin, vec!["install".to_string(), "chromium".to_string()]));
     }
 
     // 回退：内置 node + cli.js（playwright 包的 cli 实际在 playwright-core/cli.js）。
@@ -1224,7 +1299,11 @@ impl StreamCtx {
                 "plugin:output",
                 PluginOutput {
                     plugin_id: plugin_id.clone(),
-                    stream: if is_stderr { "stderr".to_string() } else { "stdout".to_string() },
+                    stream: if is_stderr {
+                        "stderr".to_string()
+                    } else {
+                        "stdout".to_string()
+                    },
                     line: line.to_string(),
                 },
             );
@@ -1243,7 +1322,14 @@ fn run_with_optional_stream(
     stream: Option<&StreamCtx>,
 ) -> Result<CapturedOutput, String> {
     match stream {
-        Some(ctx) => run_streamed_with_env(binary, args, workspace_dir, timeout_ms, env, ctx.make_line_callback()),
+        Some(ctx) => run_streamed_with_env(
+            binary,
+            args,
+            workspace_dir,
+            timeout_ms,
+            env,
+            ctx.make_line_callback(),
+        ),
         None => run_capture_with_env(binary, args, workspace_dir, timeout_ms, env),
     }
 }
@@ -1285,7 +1371,10 @@ fn write_crash_dump(
     content.push_str(&format!("## 插件目录\n{cwd}\n\n"));
     content.push_str(&format!("## 复现命令\n{cmdline}\n"));
     content.push_str(&format!("（cwd = {cwd}）\n\n"));
-    content.push_str(&format!("## 环境变量（{} 项，敏感值已脱敏）\n", env_dump.len()));
+    content.push_str(&format!(
+        "## 环境变量（{} 项，敏感值已脱敏）\n",
+        env_dump.len()
+    ));
     for line in env_dump {
         content.push_str(&format!("  {line}\n"));
     }
@@ -1321,7 +1410,11 @@ fn append_launch_log(plugin_dir: &std::path::Path, msg: &str) {
     let line = format!("[{now}] {msg}\n");
     // append（create+append）；用 OpenOptions 避免 read+rewrite 的竞态。
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -1403,7 +1496,10 @@ pub(crate) fn start_plugin_from_dir(
         log_launch(format!("manifest 解析失败：{e}"));
         e
     })?;
-    log_launch(format!("manifest: runtime={:?} entry={}", manifest.runtime, manifest.entry));
+    log_launch(format!(
+        "manifest: runtime={:?} entry={}",
+        manifest.runtime, manifest.entry
+    ));
     let runtime = RuntimeResolver::resolve(app).map_err(|e| {
         log_launch(format!("运行时解析失败：{e}"));
         e
@@ -1438,10 +1534,7 @@ pub(crate) fn start_plugin_from_dir(
                 log_launch(e.clone());
                 return Err(e);
             }
-            (
-                py,
-                vec!["-u".to_string(), entry_arg(&entry_abs)],
-            )
+            (py, vec!["-u".to_string(), entry_arg(&entry_abs)])
         }
         PluginRuntimeKind::Nodejs => {
             // Node：先探测是否需 pnpm install（首次慢，node_modules 已在则秒过），发对应阶段事件。
@@ -1503,13 +1596,22 @@ pub(crate) fn start_plugin_from_dir(
         api_base,
         auth_token,
         manifest.capabilities.iter().any(|kind| kind == "llm.chat"),
-        manifest.capabilities.iter().any(|kind| kind == "image.generate"),
+        manifest
+            .capabilities
+            .iter()
+            .any(|kind| kind == "image.generate"),
         Duration::from_secs(12 * 60 * 60),
     )?;
     let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
     if let Some(bridge_env) = bridge_env {
-        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"), OsString::from(bridge_env.url)));
-        env.push((OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"), OsString::from(bridge_env.token)));
+        env.push((
+            OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"),
+            OsString::from(bridge_env.url),
+        ));
+        env.push((
+            OsString::from("LINGFANG_PLUGIN_BRIDGE_TOKEN"),
+            OsString::from(bridge_env.token),
+        ));
     }
     // Python: 强制 UTF-8 输出（Windows 中文系统默认 GBK，不设逐行读会乱码）。
     env.push((OsString::from("PYTHONIOENCODING"), OsString::from("utf-8")));
@@ -1659,7 +1761,14 @@ pub(crate) fn start_plugin_from_dir(
         let crash_err = format!("plugin_crashed:插件启动后立即退出（{status}）\n{detail}");
         // 写崩溃转储 .crash.log（完整命令/cwd/env/stderr），供用户手动复现排查。
         let crash_path = crash_log_path(&plugin_dir);
-        write_crash_dump(&plugin_dir, &cmdline_str, &cwd_str, &env_dump, &crash_err, &stderr_text);
+        write_crash_dump(
+            &plugin_dir,
+            &cmdline_str,
+            &cwd_str,
+            &env_dump,
+            &crash_err,
+            &stderr_text,
+        );
         log_launch(format!("进程秒退（800ms 内退出）：{crash_err}"));
         log_launch(format!("崩溃转储已写入：{}", crash_path.display()));
         if let Some(token) = bridge_token.as_deref() {
@@ -1679,13 +1788,19 @@ pub(crate) fn start_plugin_from_dir(
     }
     // 存活：reader 线程持续逐行 emit plugin:output（进程活着期间一直流），无需额外排空。
     let started_at = now_iso();
-    let (pid, child_arc) = process_table.register_with_handle(&plugin_id, child, started_at.clone());
+    let (pid, child_arc) =
+        process_table.register_with_handle(&plugin_id, child, started_at.clone());
     log_launch(format!("启动成功：pid={pid}"));
     // 运行态仅存内存进程表（组A scan_plugin_status 经 process_table.is_running 合并判定 running，
     // 不落 DB——PRD 需求 2「状态不存 DB」，重启后所有插件从文件系统重判 ready）。
     // 退出监视线程：进程退出时 emit `plugin:exited` 事件（payload: pluginId, exitCode, stderrTail），
     // 前端据此即时切到 exited 态（保留日志面板 + 进程信息），不依赖 2.5s 轮询兜底。
-    spawn_exit_watcher(app.clone(), &plugin_id, child_arc, std::sync::Arc::clone(&stderr_buf));
+    spawn_exit_watcher(
+        app.clone(),
+        &plugin_id,
+        child_arc,
+        std::sync::Arc::clone(&stderr_buf),
+    );
     Ok(StartPluginResult { pid, started_at })
 }
 
@@ -1847,13 +1962,21 @@ pub fn stop_plugin(
     bridge: tauri::State<'_, PluginLlmBridge>,
     plugin_id: String,
 ) -> Result<(), String> {
+    stop_plugin_by_id(&process_table, &bridge, &plugin_id)
+}
+
+pub(crate) fn stop_plugin_by_id(
+    process_table: &PluginProcessTable,
+    bridge: &PluginLlmBridge,
+    plugin_id: &str,
+) -> Result<(), String> {
     if let Some((mut child, _started_at)) = process_table.take(&plugin_id) {
         // kill_child_tree 发进程组/树 kill 信号（不 wait），这里补 wait 回收 Child 句柄。
         kill_child_tree(&child);
         let _ = child.kill();
         let _ = child.wait();
     }
-    bridge.revoke_plugin(&plugin_id);
+    bridge.revoke_plugin(plugin_id);
     // 幂等：进程不存在直接 Ok（用户「停止一个已结束的插件」应成功）。
     Ok(())
 }

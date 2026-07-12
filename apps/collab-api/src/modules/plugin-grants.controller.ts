@@ -16,23 +16,23 @@ import { SetPluginGrantDto } from './dto/role.dto';
  */
 @ApiTags('PluginGrants')
 @ApiBearerAuth()
-@Controller('teams/current/plugins')
+@Controller('teams/current/plugin-packages')
 export class PluginGrantsController {
   constructor(@Inject(PluginGrantService) private readonly grants: PluginGrantService) {}
 
   @RequirePermission('team.plugin.grant.manage')
   @Get(':id/grants')
   @ApiOperation({ summary: '列出某插件在当前团队的全部授权' })
-  list(@Req() req: Request, @Param('id') pluginId: string) {
-    return this.grants.listGrants(requireUser(req).id, pluginId);
+  list(@Req() req: Request, @Param('id') packageId: string) {
+    return this.grants.listGrants(requireUser(req).id, packageId);
   }
 
   @RequirePermission('team.plugin.grant.manage')
   @Post(':id/grants')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({ summary: '设置/更新插件授权（user 或 role，allow 或 deny）' })
-  set(@Req() req: Request, @Param('id') pluginId: string, @Body() dto: SetPluginGrantDto) {
-    return this.grants.setGrant(requireUser(req).id, pluginId, dto);
+  set(@Req() req: Request, @Param('id') packageId: string, @Body() dto: SetPluginGrantDto) {
+    return this.grants.setGrant(requireUser(req).id, packageId, dto);
   }
 
   @RequirePermission('team.plugin.grant.manage')
@@ -40,10 +40,10 @@ export class PluginGrantsController {
   @ApiOperation({ summary: '移除插件授权（恢复默认可用）' })
   remove(
     @Req() req: Request,
-    @Param('id') pluginId: string,
+    @Param('id') packageId: string,
     @Query('subjectKind') subjectKind: 'USER' | 'ROLE',
     @Query('subjectId') subjectId: string,
   ) {
-    return this.grants.removeGrant(requireUser(req).id, pluginId, subjectKind, subjectId);
+    return this.grants.removeGrant(requireUser(req).id, packageId, subjectKind, subjectId);
   }
 }

@@ -122,10 +122,7 @@ fn minimal_env_excludes_sensitive_keys() {
 #[test]
 fn bundled_pip_wheel_dir_prefers_ensurepip_bundled() {
     let python_dir = temp_dir_unique("pip-wheel-dir");
-    let bundled = python_dir
-        .join("Lib")
-        .join("ensurepip")
-        .join("_bundled");
+    let bundled = python_dir.join("Lib").join("ensurepip").join("_bundled");
     std::fs::create_dir_all(&bundled).unwrap();
     std::fs::write(bundled.join("pip-25.0.1-py3-none-any.whl"), "").unwrap();
     std::fs::write(python_dir.join("pip-older.whl"), "").unwrap();
@@ -494,8 +491,14 @@ fn strip_verbatim_prefix_removes_prefix() {
         r"C:\Users\test\plugin"
     );
     // 无前缀不变。
-    assert_eq!(strip_verbatim_prefix(r"C:\Users\test\plugin"), r"C:\Users\test\plugin");
-    assert_eq!(strip_verbatim_prefix("/home/user/plugin"), "/home/user/plugin");
+    assert_eq!(
+        strip_verbatim_prefix(r"C:\Users\test\plugin"),
+        r"C:\Users\test\plugin"
+    );
+    assert_eq!(
+        strip_verbatim_prefix("/home/user/plugin"),
+        "/home/user/plugin"
+    );
 }
 
 // === venv 自愈冒烟测试 ===
@@ -514,10 +517,7 @@ git+https://github.com/x/y.git
 -e ./local-pkg
 ";
     let names = parse_requirements_dist_names(content);
-    assert_eq!(
-        names,
-        vec!["requests", "pillow", "streamlit", "uvicorn"]
-    );
+    assert_eq!(names, vec!["requests", "pillow", "streamlit", "uvicorn"]);
 }
 
 #[test]
@@ -581,11 +581,7 @@ fn smoke_import_names_uses_known_mapping_then_normalization() {
 
 #[test]
 fn smoke_import_names_dedup_and_sorted() {
-    let dists = vec![
-        "zlib".to_string(),
-        "abc".to_string(),
-        "abc".to_string(),
-    ];
+    let dists = vec!["zlib".to_string(), "abc".to_string(), "abc".to_string()];
     let imports = smoke_import_names(&dists);
     assert_eq!(imports, vec!["abc".to_string(), "zlib".to_string()]);
 }

@@ -16,7 +16,8 @@
     "seed:admin": "tsx src/seed-admin.ts",
     "seed:rbac": "tsx src/seed-rbac.ts",
     "seed:billing": "tsx src/seed-credits-channels.ts",
-    "seed:releases": "tsx src/seed-releases.ts"
+    "seed:releases": "tsx src/seed-releases.ts",
+    "plugin-registry:migrate": "tsx src/migrate-plugin-registry-v4.ts"
   },
   "prisma": {
     "seed": "tsx src/seed-admin.ts"

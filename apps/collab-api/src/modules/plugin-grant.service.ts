@@ -8,7 +8,8 @@ import { SYSTEM_TEAM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
 function publicGrant(grant: {
   id: string;
   teamId: string;
-  pluginId: string;
+  pluginId?: string | null;
+  packageId?: string | null;
   subjectKind: 'USER' | 'ROLE';
   subjectId: string;
   effect: 'ALLOW' | 'DENY';
@@ -18,7 +19,8 @@ function publicGrant(grant: {
   return {
     id: grant.id,
     teamId: grant.teamId,
-    pluginId: grant.pluginId,
+    pluginId: grant.pluginId ?? null,
+    packageId: grant.packageId ?? null,
     subjectKind: grant.subjectKind,
     subjectId: grant.subjectId,
     effect: grant.effect,
@@ -35,24 +37,24 @@ export class PluginGrantService {
   ) {}
 
   /** 列出某插件在当前团队的全部授权。需 team.plugin.grant.manage 权限。 */
-  async listGrants(userId: string, pluginId: string) {
+  async listGrants(userId: string, packageId: string) {
     await this.auth.ensurePermission(userId, 'team.plugin.grant.manage');
     const m = await this.resolveCurrentTeam(userId);
-    const plugin = await this.prisma.plugin.findUnique({ where: { id: pluginId } });
-    if (!plugin) throw notFound('插件不存在');
+    const pluginPackage = await this.prisma.pluginPackage.findUnique({ where: { id: packageId } });
+    if (!pluginPackage || pluginPackage.ownerTeamId !== m.teamId) throw notFound('插件包不存在');
     const grants = await this.prisma.pluginGrant.findMany({
-      where: { teamId: m.teamId, pluginId },
+      where: { teamId: m.teamId, packageId },
       orderBy: { createdAt: 'desc' },
     });
     return { grants: grants.map(publicGrant) };
   }
 
   /** 设置/更新插件授权（upsert 语义：同 teamId+pluginId+subjectKind+subjectId 存在则更新 effect）。 */
-  async setGrant(userId: string, pluginId: string, input: { subjectKind: 'USER' | 'ROLE'; subjectId: string; effect: 'ALLOW' | 'DENY' }) {
+  async setGrant(userId: string, packageId: string, input: { subjectKind: 'USER' | 'ROLE'; subjectId: string; effect: 'ALLOW' | 'DENY' }) {
     await this.auth.ensurePermission(userId, 'team.plugin.grant.manage');
     const m = await this.resolveCurrentTeam(userId);
-    const plugin = await this.prisma.plugin.findUnique({ where: { id: pluginId } });
-    if (!plugin) throw notFound('插件不存在');
+    const pluginPackage = await this.prisma.pluginPackage.findUnique({ where: { id: packageId } });
+    if (!pluginPackage || pluginPackage.ownerTeamId !== m.teamId) throw notFound('插件包不存在');
 
     // 校验主体有效性
     if (input.subjectKind === 'USER') {
@@ -67,9 +69,9 @@ export class PluginGrantService {
 
     const grant = await this.prisma.pluginGrant.upsert({
       where: {
-        teamId_pluginId_subjectKind_subjectId: {
+        teamId_packageId_subjectKind_subjectId: {
           teamId: m.teamId,
-          pluginId,
+          packageId,
           subjectKind: input.subjectKind,
           subjectId: input.subjectId,
         },
@@ -77,26 +79,26 @@ export class PluginGrantService {
       update: { effect: input.effect },
       create: {
         teamId: m.teamId,
-        pluginId,
+        packageId,
         subjectKind: input.subjectKind,
         subjectId: input.subjectId,
         effect: input.effect,
         createdBy: userId,
       },
     });
-    await this.audit(userId, 'plugin.grant.set', 'PluginGrant', grant.id, { teamId: m.teamId, pluginId, subjectKind: input.subjectKind, subjectId: input.subjectId, effect: input.effect });
+    await this.audit(userId, 'plugin.grant.set', 'PluginGrant', grant.id, { teamId: m.teamId, packageId, subjectKind: input.subjectKind, subjectId: input.subjectId, effect: input.effect });
     return { grant: publicGrant(grant) };
   }
 
   /** 移除插件授权（恢复默认）。 */
-  async removeGrant(userId: string, pluginId: string, subjectKind: 'USER' | 'ROLE', subjectId: string) {
+  async removeGrant(userId: string, packageId: string, subjectKind: 'USER' | 'ROLE', subjectId: string) {
     await this.auth.ensurePermission(userId, 'team.plugin.grant.manage');
     const m = await this.resolveCurrentTeam(userId);
     const grant = await this.prisma.pluginGrant.findUnique({
       where: {
-        teamId_pluginId_subjectKind_subjectId: {
+        teamId_packageId_subjectKind_subjectId: {
           teamId: m.teamId,
-          pluginId,
+          packageId,
           subjectKind,
           subjectId,
         },
@@ -104,7 +106,7 @@ export class PluginGrantService {
     });
     if (!grant) throw notFound('授权记录不存在');
     await this.prisma.pluginGrant.delete({ where: { id: grant.id } });
-    await this.audit(userId, 'plugin.grant.removed', 'PluginGrant', grant.id, { teamId: m.teamId, pluginId, subjectKind, subjectId });
+    await this.audit(userId, 'plugin.grant.removed', 'PluginGrant', grant.id, { teamId: m.teamId, packageId, subjectKind, subjectId });
     return { ok: true };
   }
 

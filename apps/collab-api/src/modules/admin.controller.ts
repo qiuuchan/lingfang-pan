@@ -2,21 +2,18 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, 
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { requireUser } from '../common';
+import { clientUpgradeRequired, requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { AdminService } from './admin.service';
 import {
   AdminAdjustBalanceDto,
   AdminAuditLogsQueryDto,
-  AdminCreatePluginDto,
   AdminCreateTeamDto,
   AdminCreateUserDto,
   AdminPlatformRoleDto,
   AdminRejectApplicationDto,
-  AdminRejectPluginDto,
   AdminSetTeamAdminDto,
   AdminUpdateMemberRoleDto,
-  AdminUpdatePluginDto,
   AdminUpdateTeamDto,
   AdminUpdateTeamStatusDto,
   AdminUpdateUserDto,
@@ -186,65 +183,64 @@ export class AdminController {
   @RequirePermission('platform.plugin.list_all')
   @Get('plugins')
   @ApiOperation({ summary: '平台插件列表' })
-  plugins(@Req() req: Request) {
-    return this.admin.adminPlugins(requireUser(req).id);
+  plugins() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.review')
   @Get('plugins/review-pending')
   @ApiOperation({ summary: '待审核市场插件列表' })
-  reviewPendingPlugins(@Req() req: Request) {
-    return this.admin.adminPluginReviewPending(requireUser(req).id);
+  reviewPendingPlugins() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.edit')
   @Post('plugins')
   @ApiOperation({ summary: '拒绝管理端新增平台插件' })
-  createPlugin(@Req() req: Request, @Body() body: AdminCreatePluginDto) {
-    void body;
-    return this.admin.adminCreatePlugin(requireUser(req).id);
+  createPlugin() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.review')
   @Post('plugins/:id/approve')
   @ApiOperation({ summary: '审核通过市场插件' })
-  approvePlugin(@Req() req: Request, @Param('id') id: string) {
-    return this.admin.adminApprovePlugin(requireUser(req).id, id);
+  approvePlugin() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.review')
   @Post('plugins/:id/reject')
   @ApiOperation({ summary: '驳回市场插件' })
-  rejectPlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminRejectPluginDto) {
-    return this.admin.adminRejectPlugin(requireUser(req).id, id, body.reason);
+  rejectPlugin() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.edit')
   @Patch('plugins/:id')
   @ApiOperation({ summary: '更新平台插件（名称/描述/版本/定价/可见性/状态）' })
-  updatePlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdatePluginDto) {
-    return this.admin.adminUpdatePlugin(requireUser(req).id, id, body);
+  updatePlugin() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.review')
   @Post('plugins/:id/delist')
   @ApiOperation({ summary: '下架市场插件（marketplace=false + reviewStatus=DRAFT + 通知作者）' })
-  delistPlugin(@Req() req: Request, @Param('id') id: string, @Body() body: AdminRejectPluginDto) {
-    return this.admin.adminDelistPlugin(requireUser(req).id, id, body.reason);
+  delistPlugin() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.delete')
   @Delete('plugins/:id')
   @ApiOperation({ summary: '物理删除插件（admin，任意，含已上架，级联清安装/购买记录）' })
-  deletePlugin(@Req() req: Request, @Param('id') id: string) {
-    return this.admin.adminDeletePlugin(requireUser(req).id, id);
+  deletePlugin() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.plugin.list_all')
   @Get('plugins/:id/audit-history')
   @ApiOperation({ summary: '插件审核历史（PluginReview 时间线）' })
-  pluginAuditHistory(@Req() req: Request, @Param('id') id: string) {
-    return this.admin.adminPluginAuditHistory(requireUser(req).id, id);
+  pluginAuditHistory() {
+    throw clientUpgradeRequired();
   }
 
   @RequirePermission('platform.application.review')

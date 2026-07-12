@@ -4,6 +4,7 @@
 //  CONTRACT-09 修复）
 export * from './identity';
 export * from './plugin';
+export * from './plugin-registry';
 export * from './draft';
 export * from './llm';
 export * from './rbac';

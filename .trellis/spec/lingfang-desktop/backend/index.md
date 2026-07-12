@@ -8,6 +8,7 @@
 
 - 改内置插件扫描、manifest 解析或资源目录时，先读 [plugin-loading.md](./plugin-loading.md)。
 - 改用户/AI 创建插件的持久化目录、venv/pnpm 运行、进程管理、命名链路时，先读 [plugin-runtime-persistence.md](./plugin-runtime-persistence.md)。
+- 改 `.lfplugin`、安装账本、更新/回滚/卸载或草稿工作区时，先读 [plugin-package-manager.md](./plugin-package-manager.md)。
 - 改本地能力、路径校验或 Tauri command 时，先读 [capability-gateway.md](./capability-gateway.md)。
 - 改代码助手对话引擎（SSE 流式、思考内容、工具调用、多轮续轮）时，先读 [sdk-runtime-engine.md](./sdk-runtime-engine.md)。
 - 改检查更新、tauri-plugin-updater、版本发布契约时，先读 [updater-integration.md](./updater-integration.md)。

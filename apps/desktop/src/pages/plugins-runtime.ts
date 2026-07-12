@@ -288,12 +288,8 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     }
     return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
   }
-  if (kind === 'plugin.upload') {
-    return api('/api/plugins/upload', { method: 'POST', body: args || {} });
-  }
-  if (kind === 'plugin.submitMarketplace') {
-    const pluginId = String(args?.pluginId || plugin.id);
-    return api(`/api/plugins/${pluginId}/submit-marketplace`, { method: 'POST', body: { priceCents: args?.priceCents } });
+  if (kind === 'plugin.upload' || kind === 'plugin.submitMarketplace') {
+    throw new Error('运行中的插件不能发布制品；请在草稿工作区打包并发布具体发行版。');
   }
   throw new Error(`运行态暂不支持的能力：${kind}`);
 }
@@ -309,24 +305,4 @@ export async function handleRuntimeCall(
   } catch (error) {
     frame.contentWindow?.postMessage({ __lf_reply: true, id: message.id, error: errorMessage(error) }, '*');
   }
-}
-
-function mergePlugins(builtin: LoadedPlugin[], db: LoadedPlugin[]): LoadedPlugin[] {
-  const builtinTagged = builtin.map((plugin) => ({ ...plugin, source: 'builtin' as const }));
-  const seen = new Set(builtinTagged.map((plugin) => plugin.id));
-  return [...builtinTagged, ...db.filter((plugin) => !seen.has(plugin.id))];
-}
-
-export async function loadPlugins(): Promise<{ plugins: LoadedPlugin[]; error: string }> {
-  const [builtin, db] = await Promise.allSettled([
-    tauriInvoke<LoadedPlugin[]>('list_plugins'),
-    api<{ plugins: LoadedPlugin[] }>('/api/plugins/available').then((result) => result.plugins.map((plugin) => ({ ...plugin, version: plugin.version || '1.0.0', entry: plugin.entry || 'ui/index.html', source: plugin.source || 'platform' as const }))),
-  ]);
-  const builtinPlugins = builtin.status === 'fulfilled' ? builtin.value : [];
-  const dbPlugins = db.status === 'fulfilled' ? db.value : [];
-  const errors = [
-    builtin.status === 'rejected' ? `内置插件加载失败：${errorMessage(builtin.reason)}` : '',
-    db.status === 'rejected' ? `数据库插件加载失败：${errorMessage(db.reason)}` : '',
-  ].filter(Boolean);
-  return { plugins: mergePlugins(builtinPlugins, dbPlugins), error: errors.join('；') };
 }

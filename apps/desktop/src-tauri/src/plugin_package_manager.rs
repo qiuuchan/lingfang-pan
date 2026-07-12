@@ -1,0 +1,1445 @@
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::builtin_plugin_index::parse_builtin_index;
+use crate::plugin_artifact_v4::{
+    extract_artifact, inspect_artifact, package_workspace, sha256_bytes, sha256_file,
+    InspectedArtifact,
+};
+use crate::plugin_store::{read_json, write_json, PluginStore};
+
+pub(crate) mod commands;
+mod helpers;
+pub(crate) mod network;
+
+use helpers::*;
+
+#[cfg(test)]
+mod tests;
+
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum InstallationOrigin {
+    Builtin,
+    Local,
+    Team,
+    Marketplace,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DependencyStatus {
+    Pending,
+    Preparing,
+    Ready,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstalledRelease {
+    pub release_id: String,
+    pub version: String,
+    pub sha256: String,
+    pub path: String,
+    pub dependency_status: DependencyStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalInstallation {
+    pub installation_id: String,
+    pub package_id: String,
+    pub origin: InstallationOrigin,
+    pub protected: bool,
+    pub active_release: InstalledRelease,
+    pub pending_release: Option<InstalledRelease>,
+    pub previous_release: Option<InstalledRelease>,
+    pub data_path: String,
+    pub installed_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallationLedger {
+    #[serde(default = "schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    installations: Vec<LocalInstallation>,
+}
+
+fn schema_version() -> u32 {
+    1
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DraftDiagnosticStatus {
+    Idle,
+    Checking,
+    Ready,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DraftWorkspace {
+    pub workspace_id: String,
+    pub title: String,
+    pub path: String,
+    pub manifest_id: String,
+    pub current_version: String,
+    pub runtime: String,
+    pub conversation_id: Option<String>,
+    pub diagnostic_status: DraftDiagnosticStatus,
+    pub content_sha256: Option<String>,
+    pub last_published_release_id: Option<String>,
+    pub last_published_version: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceLedger {
+    #[serde(default = "schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    workspaces: Vec<DraftWorkspace>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyMigrationJournal {
+    #[serde(default = "schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    completed_directories: Vec<String>,
+    #[serde(default)]
+    failures: Vec<LegacyMigrationFailure>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyMigrationFailure {
+    directory: String,
+    error: String,
+    at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPluginAuditEvent {
+    action: String,
+    target_id: String,
+    detail: Value,
+    at: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstallArtifactInput {
+    pub artifact_path: String,
+    pub expected_sha256: Option<String>,
+    pub package_id: Option<String>,
+    pub release_id: Option<String>,
+    pub origin: InstallationOrigin,
+    #[serde(default)]
+    pub protected: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateWorkspaceInput {
+    pub title: String,
+    pub manifest_id: String,
+    pub version: String,
+    pub runtime: String,
+    pub conversation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PackWorkspaceResult {
+    pub artifact_path: String,
+    pub artifact: InspectedArtifact,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstalledPluginPayload {
+    pub installation: LocalInstallation,
+    pub manifest: Value,
+    pub entry_content: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DownloadReleaseInput {
+    pub api_base: String,
+    pub auth_token: String,
+    pub package_id: String,
+    pub release_id: String,
+    pub sha256: String,
+    pub origin: InstallationOrigin,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublishWorkspaceInput {
+    pub api_base: String,
+    pub auth_token: String,
+    pub workspace_id: String,
+    pub package_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "event", content = "data")]
+pub(crate) enum PackageTransferEvent {
+    #[serde(rename_all = "camelCase")]
+    Stage { stage: String, message: String },
+    #[serde(rename_all = "camelCase")]
+    Started { total_bytes: Option<u64> },
+    #[serde(rename_all = "camelCase")]
+    Progress { chunk_length: usize },
+    #[serde(rename_all = "camelCase")]
+    Finished,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PluginPackageManager {
+    anchor_meta: PathBuf,
+    plugins_root: PathBuf,
+    file_lock: Arc<Mutex<()>>,
+}
+
+impl PluginPackageManager {
+    pub(crate) fn new(store: &PluginStore) -> Result<Self, String> {
+        let manager = Self {
+            anchor_meta: store.metadata_root(),
+            plugins_root: store.plugins_root(),
+            file_lock: Arc::new(Mutex::new(())),
+        };
+        for directory in [
+            manager.installed_root(),
+            manager.cache_root(),
+            manager.workspaces_root(),
+            manager.staging_root(),
+        ] {
+            fs::create_dir_all(directory)
+                .map_err(|error| format!("创建插件包目录失败：{error}"))?;
+        }
+        if !manager.installations_path().exists() {
+            write_json(
+                &manager.installations_path(),
+                &InstallationLedger {
+                    schema_version: 1,
+                    installations: vec![],
+                },
+            )?;
+        }
+        if !manager.workspaces_path().exists() {
+            write_json(
+                &manager.workspaces_path(),
+                &WorkspaceLedger {
+                    schema_version: 1,
+                    workspaces: vec![],
+                },
+            )?;
+        }
+        Ok(manager)
+    }
+
+    fn installations_path(&self) -> PathBuf {
+        self.anchor_meta.join("installations-v1.json")
+    }
+
+    fn workspaces_path(&self) -> PathBuf {
+        self.anchor_meta.join("workspaces-v1.json")
+    }
+
+    fn migration_journal_path(&self) -> PathBuf {
+        self.anchor_meta.join("plugin-layout-migration-v1.json")
+    }
+
+    fn audit_path(&self) -> PathBuf {
+        self.anchor_meta.join("plugin-audit-v1.json")
+    }
+
+    fn audit(&self, action: &str, target_id: &str, detail: Value) {
+        let mut events: Vec<LocalPluginAuditEvent> =
+            read_json(&self.audit_path()).unwrap_or_default();
+        events.push(LocalPluginAuditEvent {
+            action: action.to_string(),
+            target_id: target_id.to_string(),
+            detail,
+            at: Utc::now().to_rfc3339(),
+        });
+        if events.len() > 2_000 {
+            events.drain(..events.len() - 2_000);
+        }
+        let _ = write_json(&self.audit_path(), &events);
+    }
+
+    fn installed_root(&self) -> PathBuf {
+        self.plugins_root.join("installed")
+    }
+
+    fn cache_root(&self) -> PathBuf {
+        self.plugins_root.join("cache")
+    }
+
+    fn workspaces_root(&self) -> PathBuf {
+        self.plugins_root.join("workspaces")
+    }
+
+    fn staging_root(&self) -> PathBuf {
+        self.plugins_root.join(".lingfang-staging")
+    }
+
+    fn read_installations(&self) -> InstallationLedger {
+        read_json(&self.installations_path()).unwrap_or_else(|| InstallationLedger {
+            schema_version: 1,
+            installations: vec![],
+        })
+    }
+
+    fn write_installations(&self, ledger: &InstallationLedger) -> Result<(), String> {
+        write_json(&self.installations_path(), ledger)
+    }
+
+    fn read_workspaces(&self) -> WorkspaceLedger {
+        read_json(&self.workspaces_path()).unwrap_or_else(|| WorkspaceLedger {
+            schema_version: 1,
+            workspaces: vec![],
+        })
+    }
+
+    fn write_workspaces(&self, ledger: &WorkspaceLedger) -> Result<(), String> {
+        write_json(&self.workspaces_path(), ledger)
+    }
+
+    pub(crate) fn list_installations(&self) -> Vec<LocalInstallation> {
+        self.read_installations().installations
+    }
+
+    pub(crate) fn register_builtins(
+        &self,
+        index_json: &str,
+        artifacts: &[(&str, &[u8])],
+    ) -> Result<usize, String> {
+        let index = parse_builtin_index(index_json)?;
+        let mut bundled = HashMap::with_capacity(artifacts.len());
+        for &(file_name, bytes) in artifacts {
+            if bundled.insert(file_name, bytes).is_some() {
+                return Err(format!("内置插件包包含重复制品：{file_name}"));
+            }
+        }
+        if bundled.len() != index.artifacts.len() {
+            return Err("内置插件索引与随包制品数量不一致".to_string());
+        }
+        for artifact in &index.artifacts {
+            let bytes = bundled
+                .get(artifact.artifact_file.as_str())
+                .ok_or_else(|| format!("内置插件制品缺失：{}", artifact.artifact_file))?;
+            if bytes.len() as u64 != artifact.size_bytes {
+                return Err(format!(
+                    "内置插件制品大小与索引不一致：{}",
+                    artifact.manifest_id
+                ));
+            }
+            let actual_sha256 = sha256_bytes(bytes);
+            if actual_sha256 != artifact.sha256 {
+                return Err(format!(
+                    "内置插件制品 SHA-256 与索引不一致：{}",
+                    artifact.manifest_id
+                ));
+            }
+        }
+
+        let existing: HashMap<String, LocalInstallation> = self
+            .list_installations()
+            .into_iter()
+            .map(|installation| (installation.package_id.clone(), installation))
+            .collect();
+        let mut registered = 0;
+        for artifact in index.artifacts {
+            if let Some(installation) = existing.get(&artifact.package_id) {
+                if installation.origin != InstallationOrigin::Builtin || !installation.protected {
+                    return Err(format!(
+                        "内置插件包 ID 已被非受保护安装占用：{}",
+                        artifact.package_id
+                    ));
+                }
+                let same_release = [
+                    Some(&installation.active_release),
+                    installation.pending_release.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                .find(|release| release.release_id == artifact.release_id);
+                if let Some(release) = same_release {
+                    if release.sha256 != artifact.sha256 {
+                        return Err(format!(
+                            "内置插件同一发行版的 SHA-256 已变化：{}",
+                            artifact.release_id
+                        ));
+                    }
+                    if !Path::new(&release.path).join("manifest.json").is_file() {
+                        return Err(format!(
+                            "内置插件已安装发行版目录不可用：{}",
+                            artifact.release_id
+                        ));
+                    }
+                    continue;
+                }
+            }
+
+            let bytes = bundled
+                .get(artifact.artifact_file.as_str())
+                .expect("bundle was validated above");
+            let artifact_path = self.materialize_builtin_artifact(&artifact.sha256, bytes)?;
+            let inspected = inspect_artifact(&artifact_path)?;
+            if inspected.manifest.get("id").and_then(Value::as_str)
+                != Some(artifact.manifest_id.as_str())
+                || inspected.manifest.get("version").and_then(Value::as_str)
+                    != Some(artifact.version.as_str())
+            {
+                return Err(format!(
+                    "内置插件制品 manifest 与索引不一致：{}",
+                    artifact.manifest_id
+                ));
+            }
+            self.install(InstallArtifactInput {
+                artifact_path: artifact_path.to_string_lossy().to_string(),
+                expected_sha256: Some(artifact.sha256),
+                package_id: Some(artifact.package_id),
+                release_id: Some(artifact.release_id),
+                origin: InstallationOrigin::Builtin,
+                protected: true,
+            })?;
+            registered += 1;
+        }
+        Ok(registered)
+    }
+
+    fn materialize_builtin_artifact(&self, sha256: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        let destination = self.cache_root().join(format!("{sha256}.lfplugin"));
+        if destination.is_file() && sha256_file(&destination).as_deref() == Ok(sha256) {
+            return Ok(destination);
+        }
+        let temporary = self
+            .staging_root()
+            .join(format!("builtin-artifact-{}.tmp", Uuid::new_v4()));
+        let result = (|| {
+            let mut output = File::create(&temporary)
+                .map_err(|error| format!("创建内置插件暂存制品失败：{error}"))?;
+            output
+                .write_all(bytes)
+                .map_err(|error| format!("写入内置插件暂存制品失败：{error}"))?;
+            output
+                .sync_all()
+                .map_err(|error| format!("同步内置插件暂存制品失败：{error}"))?;
+            if destination.exists() {
+                fs::remove_file(&destination)
+                    .map_err(|error| format!("替换损坏的内置插件缓存失败：{error}"))?;
+            }
+            fs::rename(&temporary, &destination)
+                .map_err(|error| format!("提交内置插件缓存失败：{error}"))?;
+            Ok::<(), String>(())
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_file(temporary);
+            return Err(error);
+        }
+        Ok(destination)
+    }
+
+    pub(crate) fn migrate_legacy_layout(&self) -> Result<(usize, usize), String> {
+        let mut journal: LegacyMigrationJournal =
+            read_json(&self.migration_journal_path()).unwrap_or_default();
+        let completed: std::collections::HashSet<String> =
+            journal.completed_directories.iter().cloned().collect();
+        let mut migrated = 0;
+        let mut failed = 0;
+        let entries = fs::read_dir(&self.plugins_root)
+            .map_err(|error| format!("读取旧插件目录失败：{error}"))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if matches!(
+                name.as_str(),
+                ".lingfang" | ".lingfang-staging" | "installed" | "cache" | "workspaces"
+            ) || completed.contains(&name)
+            {
+                continue;
+            }
+            let manifest_path = path.join("manifest.json");
+            if !manifest_path.is_file() {
+                continue;
+            }
+            match self.migrate_one_legacy_directory(&name, &path) {
+                Ok(()) => {
+                    journal.completed_directories.push(name.clone());
+                    journal.failures.retain(|failure| failure.directory != name);
+                    migrated += 1;
+                }
+                Err(error) => {
+                    journal.failures.retain(|failure| failure.directory != name);
+                    journal.failures.push(LegacyMigrationFailure {
+                        directory: name.clone(),
+                        error: error.clone(),
+                        at: Utc::now().to_rfc3339(),
+                    });
+                    self.audit(
+                        "plugin.layout_migration.failed",
+                        &name,
+                        serde_json::json!({ "error": error }),
+                    );
+                    failed += 1;
+                }
+            }
+            write_json(&self.migration_journal_path(), &journal)?;
+        }
+        Ok((migrated, failed))
+    }
+
+    fn migrate_one_legacy_directory(&self, name: &str, path: &Path) -> Result<(), String> {
+        let mut manifest: Value = read_json(&path.join("manifest.json"))
+            .ok_or_else(|| "旧插件 manifest.json 无法读取".to_string())?;
+        let is_draft = manifest
+            .get("draft")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if is_draft {
+            if let Some(object) = manifest.as_object_mut() {
+                object.remove("draft");
+            }
+            let workspace_id = Uuid::new_v4().to_string();
+            let destination = self.workspaces_root().join(&workspace_id);
+            fs::rename(path, &destination).map_err(|error| format!("迁移草稿目录失败：{error}"))?;
+            let now = Utc::now().to_rfc3339();
+            let workspace = DraftWorkspace {
+                workspace_id,
+                title: manifest
+                    .get("title")
+                    .or_else(|| manifest.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(name)
+                    .to_string(),
+                path: destination.to_string_lossy().to_string(),
+                manifest_id: manifest
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or(name)
+                    .to_string(),
+                current_version: manifest
+                    .get("version")
+                    .and_then(Value::as_str)
+                    .unwrap_or("0.1.0")
+                    .to_string(),
+                runtime: manifest
+                    .get("runtime_type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("client")
+                    .to_string(),
+                conversation_id: None,
+                diagnostic_status: DraftDiagnosticStatus::Idle,
+                content_sha256: None,
+                last_published_release_id: None,
+                last_published_version: None,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            let previous_ledger = self.read_workspaces();
+            let mut ledger = previous_ledger.clone();
+            ledger.workspaces.push(workspace);
+            if let Err(error) = self.write_workspaces(&ledger) {
+                return match fs::rename(&destination, path) {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => {
+                        Err(format!("{error}；草稿目录回退失败：{rollback_error}"))
+                    }
+                };
+            }
+            if let Err(error) = write_json(&destination.join("manifest.json"), &manifest) {
+                let ledger_rollback = self.write_workspaces(&previous_ledger).err();
+                let directory_rollback = fs::rename(&destination, path).err();
+                let mut detail = format!("清理草稿 manifest.draft 失败：{error}");
+                if let Some(rollback_error) = ledger_rollback {
+                    detail.push_str(&format!("；草稿账本回退失败：{rollback_error}"));
+                }
+                if let Some(rollback_error) = directory_rollback {
+                    detail.push_str(&format!("；草稿目录回退失败：{rollback_error}"));
+                }
+                return Err(detail);
+            }
+            return Ok(());
+        }
+
+        let artifact_path = self
+            .cache_root()
+            .join(format!("legacy-{}.lfplugin", Uuid::new_v4()));
+        let artifact = package_workspace(path, &artifact_path)?;
+        let manifest_id = manifest.get("id").and_then(Value::as_str).unwrap_or(name);
+        let backup = self
+            .staging_root()
+            .join(format!("legacy-layout-{}", Uuid::new_v4()));
+        fs::rename(path, &backup).map_err(|error| format!("暂存旧插件目录失败：{error}"))?;
+        let installed = match self.install(InstallArtifactInput {
+            artifact_path: artifact_path.to_string_lossy().to_string(),
+            expected_sha256: Some(artifact.sha256.clone()),
+            package_id: Some(format!("local:{manifest_id}")),
+            release_id: Some(format!("legacy-{}", &artifact.sha256[..16])),
+            origin: InstallationOrigin::Local,
+            protected: false,
+        }) {
+            Ok(installed) => installed,
+            Err(error) => {
+                let _ = fs::remove_file(&artifact_path);
+                return match fs::rename(&backup, path) {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => {
+                        Err(format!("{error}；旧插件目录回退失败：{rollback_error}"))
+                    }
+                };
+            }
+        };
+        let _ = fs::remove_file(&artifact_path);
+        let old_data = backup.join("data");
+        let new_data = PathBuf::from(&installed.data_path);
+        if old_data.is_dir() {
+            if let Err(error) = copy_directory_contents(&old_data, &new_data) {
+                let uninstall_error = self.uninstall(&installed.installation_id).err();
+                let restore_error = fs::rename(&backup, path).err();
+                let mut detail = error;
+                if let Some(rollback_error) = uninstall_error {
+                    detail.push_str(&format!("；新安装项回退失败：{rollback_error}"));
+                }
+                if let Some(rollback_error) = restore_error {
+                    detail.push_str(&format!("；旧插件目录回退失败：{rollback_error}"));
+                }
+                return Err(detail);
+            }
+        }
+        if let Err(error) = fs::remove_dir_all(&backup) {
+            self.audit(
+                "plugin.layout_migration.cleanup_deferred",
+                name,
+                serde_json::json!({ "path": backup, "error": error.to_string() }),
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn installation(&self, installation_id: &str) -> Result<LocalInstallation, String> {
+        self.read_installations()
+            .installations
+            .into_iter()
+            .find(|installation| installation.installation_id == installation_id)
+            .ok_or_else(|| "本机安装项不存在".to_string())
+    }
+
+    pub(crate) fn install(&self, input: InstallArtifactInput) -> Result<LocalInstallation, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let artifact_path = PathBuf::from(&input.artifact_path);
+        let inspected = inspect_artifact(&artifact_path)?;
+        if let Some(expected) = input.expected_sha256.as_deref() {
+            if !expected.eq_ignore_ascii_case(&inspected.sha256) {
+                self.audit(
+                    "plugin.artifact.sha_failed",
+                    input.release_id.as_deref().unwrap_or("local"),
+                    serde_json::json!({ "expected": expected, "actual": inspected.sha256 }),
+                );
+                return Err(format!(
+                    "插件制品 SHA-256 校验失败：期望 {expected}，实际 {}",
+                    inspected.sha256
+                ));
+            }
+        }
+        let manifest_id = inspected
+            .manifest
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "manifest.id 缺失".to_string())?;
+        let version = inspected
+            .manifest
+            .get("version")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "manifest.version 缺失".to_string())?;
+        let runtime = inspected
+            .manifest
+            .get("runtime_type")
+            .and_then(Value::as_str)
+            .unwrap_or("client");
+        let package_id = input
+            .package_id
+            .unwrap_or_else(|| format!("local:{manifest_id}"));
+        let release_id = input
+            .release_id
+            .unwrap_or_else(|| format!("local-{}", &inspected.sha256[..16]));
+        validate_storage_segment(&release_id, "releaseId")?;
+        let mut ledger = self.read_installations();
+        let existing_index = ledger
+            .installations
+            .iter()
+            .position(|installation| installation.package_id == package_id);
+        if let Some(index) = existing_index {
+            let current = &ledger.installations[index];
+            if current.pending_release.is_some() {
+                return Err("已有待激活版本，请先完成启动验证或回滚后再更新".to_string());
+            }
+            if current.active_release.release_id == release_id
+                || current
+                    .pending_release
+                    .as_ref()
+                    .map(|release| release.release_id.as_str())
+                    == Some(release_id.as_str())
+            {
+                return Err("该发行版已经安装且不可覆盖".to_string());
+            }
+        }
+        let installation_id = existing_index
+            .map(|index| ledger.installations[index].installation_id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let installation_root = self.installed_root().join(&installation_id);
+        let final_package = installation_root
+            .join("releases")
+            .join(&release_id)
+            .join("package");
+        if final_package.exists() {
+            return Err("发行版目录已存在，拒绝覆盖".to_string());
+        }
+        let staging = self.staging_root().join(Uuid::new_v4().to_string());
+        let staging_package = staging.join("package");
+        if let Err(error) = extract_artifact(&artifact_path, &staging_package) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        let shared_data = installation_root.join("data");
+        if let Err(error) = fs::create_dir_all(&shared_data) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!("创建插件 data 目录失败：{error}"));
+        }
+        if let Err(error) =
+            create_directory_link(&staging_package.join("data"), &shared_data, "共享 data")
+        {
+            let _ = fs::remove_dir_all(&staging);
+            if existing_index.is_none() {
+                let _ = fs::remove_dir_all(&installation_root);
+            }
+            return Err(error);
+        }
+        if runtime == "nodejs" {
+            let node_modules = installation_root
+                .join("environments")
+                .join(&release_id)
+                .join("node_modules");
+            if let Err(error) = fs::create_dir_all(&node_modules)
+                .map_err(|error| format!("创建 Node 运行环境失败：{error}"))
+                .and_then(|_| {
+                    create_directory_link(
+                        &staging_package.join("node_modules"),
+                        &node_modules,
+                        "Node 运行环境",
+                    )
+                })
+            {
+                let _ = fs::remove_dir_all(&staging);
+                remove_release_environment_path(&installation_root, &release_id);
+                if existing_index.is_none() {
+                    let _ = fs::remove_dir_all(&installation_root);
+                }
+                return Err(error);
+            }
+        }
+        if let Some(parent) = final_package.parent() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                let _ = fs::remove_dir_all(&staging);
+                remove_release_environment_path(&installation_root, &release_id);
+                if existing_index.is_none() {
+                    let _ = fs::remove_dir_all(&installation_root);
+                }
+                return Err(format!("创建发行版目录失败：{error}"));
+            }
+        }
+        if let Err(error) = fs::rename(&staging_package, &final_package) {
+            let _ = fs::remove_dir_all(&staging);
+            remove_release_environment_path(&installation_root, &release_id);
+            if existing_index.is_none() {
+                let _ = fs::remove_dir_all(&installation_root);
+            }
+            return Err(format!("提交发行版目录失败：{error}"));
+        }
+        let _ = fs::remove_dir_all(&staging);
+        let cache_path = self
+            .cache_root()
+            .join(format!("{}.lfplugin", inspected.sha256));
+        if !cache_path.exists() {
+            if let Err(error) = fs::copy(&artifact_path, &cache_path) {
+                remove_release_directory(&final_package.to_string_lossy());
+                remove_release_environment_path(&installation_root, &release_id);
+                if existing_index.is_none() {
+                    let _ = fs::remove_dir_all(&installation_root);
+                }
+                return Err(format!("缓存插件制品失败：{error}"));
+            }
+        }
+        let now = Utc::now().to_rfc3339();
+        let release = InstalledRelease {
+            release_id: release_id.clone(),
+            version: version.to_string(),
+            sha256: inspected.sha256,
+            path: final_package.to_string_lossy().to_string(),
+            dependency_status: DependencyStatus::Pending,
+        };
+        let previous_ledger = ledger.clone();
+        if let Some(index) = existing_index {
+            ledger.installations[index].pending_release = Some(release);
+            ledger.installations[index].updated_at = now;
+        } else {
+            ledger.installations.push(LocalInstallation {
+                installation_id: installation_id.clone(),
+                package_id: package_id.clone(),
+                origin: input.origin,
+                protected: input.protected,
+                active_release: release,
+                pending_release: None,
+                previous_release: None,
+                data_path: shared_data.to_string_lossy().to_string(),
+                installed_at: now.clone(),
+                updated_at: now,
+            });
+        }
+        if let Err(error) = self.write_installations(&ledger) {
+            let _ = fs::remove_dir_all(final_package.parent().unwrap_or(&final_package));
+            remove_release_environment_path(&installation_root, &release_id);
+            if existing_index.is_none() {
+                let _ = fs::remove_dir_all(&installation_root);
+            }
+            let _ = self.write_installations(&previous_ledger);
+            return Err(format!("写入安装账本失败：{error}"));
+        }
+        self.audit(
+            "plugin.installation.installed",
+            &installation_id,
+            serde_json::json!({ "packageId": package_id.clone(), "releaseId": release_id }),
+        );
+        ledger
+            .installations
+            .into_iter()
+            .find(|installation| installation.package_id == package_id)
+            .ok_or_else(|| "安装账本写入后无法读取安装项".to_string())
+    }
+
+    pub(crate) fn selected_release(
+        &self,
+        installation_id: &str,
+    ) -> Result<(LocalInstallation, InstalledRelease, bool), String> {
+        let installation = self.installation(installation_id)?;
+        if let Some(pending) = installation.pending_release.clone() {
+            Ok((installation, pending, true))
+        } else {
+            let active = installation.active_release.clone();
+            Ok((installation, active, false))
+        }
+    }
+
+    pub(crate) fn load_installed_plugin(
+        &self,
+        installation_id: &str,
+    ) -> Result<InstalledPluginPayload, String> {
+        let installation = self.installation(installation_id)?;
+        let release = installation.active_release.clone();
+        self.load_release_payload(installation, &release)
+    }
+
+    pub(crate) fn preview_pending_plugin(
+        &self,
+        installation_id: &str,
+    ) -> Result<InstalledPluginPayload, String> {
+        let installation = self.installation(installation_id)?;
+        let pending = installation
+            .pending_release
+            .clone()
+            .ok_or_else(|| "没有待激活发行版".to_string())?;
+        self.load_release_payload(installation, &pending)
+    }
+
+    pub(crate) fn activate_pending_client_plugin(
+        &self,
+        installation_id: &str,
+    ) -> Result<LocalInstallation, String> {
+        let preview = self.preview_pending_plugin(installation_id)?;
+        let runtime = preview
+            .manifest
+            .get("runtime_type")
+            .and_then(Value::as_str)
+            .unwrap_or("client");
+        if !matches!(runtime, "client" | "cloud") {
+            return Err("Node/Python 待更新版本必须在进程成功启动后激活".to_string());
+        }
+        self.activate_pending(installation_id)
+    }
+
+    fn load_release_payload(
+        &self,
+        installation: LocalInstallation,
+        release: &InstalledRelease,
+    ) -> Result<InstalledPluginPayload, String> {
+        let package = PathBuf::from(&release.path);
+        let manifest: Value = read_json(&package.join("manifest.json"))
+            .ok_or_else(|| "已安装插件 manifest.json 无法读取".to_string())?;
+        let entry = manifest
+            .get("entry")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "已安装插件 manifest.entry 缺失".to_string())?;
+        let entry_path = package.join(entry);
+        let canonical_package = package
+            .canonicalize()
+            .map_err(|error| format!("已安装插件目录不可用：{error}"))?;
+        let canonical_entry = entry_path
+            .canonicalize()
+            .map_err(|error| format!("已安装插件入口不可用：{error}"))?;
+        if !canonical_entry.starts_with(&canonical_package) || !canonical_entry.is_file() {
+            return Err("已安装插件入口越出发行版目录".to_string());
+        }
+        let entry_content = fs::read_to_string(&canonical_entry)
+            .map_err(|error| format!("已安装插件入口不是 UTF-8 文本：{error}"))?;
+        Ok(InstalledPluginPayload {
+            installation,
+            manifest,
+            entry_content,
+        })
+    }
+
+    pub(crate) fn mark_dependency_status(
+        &self,
+        installation_id: &str,
+        release_id: &str,
+        status: DependencyStatus,
+    ) -> Result<(), String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_installations();
+        let installation = ledger
+            .installations
+            .iter_mut()
+            .find(|installation| installation.installation_id == installation_id)
+            .ok_or_else(|| "本机安装项不存在".to_string())?;
+        let target = if installation.active_release.release_id == release_id {
+            Some(&mut installation.active_release)
+        } else if installation
+            .pending_release
+            .as_ref()
+            .map(|release| release.release_id.as_str())
+            == Some(release_id)
+        {
+            installation.pending_release.as_mut()
+        } else if installation
+            .previous_release
+            .as_ref()
+            .map(|release| release.release_id.as_str())
+            == Some(release_id)
+        {
+            installation.previous_release.as_mut()
+        } else {
+            None
+        }
+        .ok_or_else(|| "安装项中不存在该发行版".to_string())?;
+        target.dependency_status = status;
+        installation.updated_at = Utc::now().to_rfc3339();
+        self.write_installations(&ledger)
+    }
+
+    pub(crate) fn activate_pending(
+        &self,
+        installation_id: &str,
+    ) -> Result<LocalInstallation, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_installations();
+        let installation = ledger
+            .installations
+            .iter_mut()
+            .find(|installation| installation.installation_id == installation_id)
+            .ok_or_else(|| "本机安装项不存在".to_string())?;
+        let obsolete_previous = installation.previous_release.take();
+        let mut pending = installation
+            .pending_release
+            .take()
+            .ok_or_else(|| "没有待激活发行版".to_string())?;
+        pending.dependency_status = DependencyStatus::Ready;
+        let old_active = std::mem::replace(&mut installation.active_release, pending);
+        installation.previous_release = Some(old_active);
+        installation.updated_at = Utc::now().to_rfc3339();
+        let result = installation.clone();
+        self.write_installations(&ledger)?;
+        self.audit(
+            "plugin.installation.activated",
+            installation_id,
+            serde_json::json!({ "releaseId": result.active_release.release_id }),
+        );
+        if let Some(obsolete) = obsolete_previous {
+            remove_release_environment(&obsolete.path);
+            remove_release_directory(&obsolete.path);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn discard_pending(
+        &self,
+        installation_id: &str,
+        reason: &str,
+    ) -> Result<LocalInstallation, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_installations();
+        let installation = ledger
+            .installations
+            .iter_mut()
+            .find(|installation| installation.installation_id == installation_id)
+            .ok_or_else(|| "本机安装项不存在".to_string())?;
+        let pending = installation
+            .pending_release
+            .take()
+            .ok_or_else(|| "没有待激活发行版".to_string())?;
+        installation.updated_at = Utc::now().to_rfc3339();
+        let result = installation.clone();
+        self.write_installations(&ledger)?;
+        self.audit(
+            "plugin.installation.pending_discarded",
+            installation_id,
+            serde_json::json!({ "releaseId": pending.release_id, "reason": reason }),
+        );
+        remove_release_environment(&pending.path);
+        remove_release_directory(&pending.path);
+        Ok(result)
+    }
+
+    pub(crate) fn rollback(&self, installation_id: &str) -> Result<LocalInstallation, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_installations();
+        let installation = ledger
+            .installations
+            .iter_mut()
+            .find(|installation| installation.installation_id == installation_id)
+            .ok_or_else(|| "本机安装项不存在".to_string())?;
+        let previous = installation
+            .previous_release
+            .take()
+            .ok_or_else(|| "没有可回滚的上一版本".to_string())?;
+        let old_active = std::mem::replace(&mut installation.active_release, previous);
+        installation.previous_release = Some(old_active);
+        let abandoned_pending = installation.pending_release.take();
+        installation.updated_at = Utc::now().to_rfc3339();
+        let result = installation.clone();
+        self.write_installations(&ledger)?;
+        self.audit(
+            "plugin.installation.rolled_back",
+            installation_id,
+            serde_json::json!({ "releaseId": result.active_release.release_id }),
+        );
+        if let Some(pending) = abandoned_pending {
+            remove_release_environment(&pending.path);
+            remove_release_directory(&pending.path);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn uninstall(&self, installation_id: &str) -> Result<(), String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_installations();
+        let index = ledger
+            .installations
+            .iter()
+            .position(|installation| installation.installation_id == installation_id)
+            .ok_or_else(|| "本机安装项不存在".to_string())?;
+        if ledger.installations[index].protected {
+            return Err("内置插件受保护，不能卸载".to_string());
+        }
+        let previous_ledger = ledger.clone();
+        let installation = ledger.installations.remove(index);
+        let root = self.installed_root().join(&installation.installation_id);
+        let trash = self
+            .staging_root()
+            .join(format!("uninstall-{}", Uuid::new_v4()));
+        if root.exists() {
+            fs::rename(&root, &trash).map_err(|error| format!("暂存待卸载插件失败：{error}"))?;
+        }
+        for release in [
+            Some(&installation.active_release),
+            installation.pending_release.as_ref(),
+            installation.previous_release.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Err(error) = remove_external_python_environment(&release.path) {
+                let rollback_error = trash
+                    .exists()
+                    .then(|| fs::rename(&trash, &root).err())
+                    .flatten();
+                let detail = rollback_error.map_or_else(
+                    || error.clone(),
+                    |rollback_error| format!("{error}；恢复插件目录失败：{rollback_error}"),
+                );
+                self.audit(
+                    "plugin.installation.uninstall_failed",
+                    installation_id,
+                    serde_json::json!({ "stage": "runtime_cleanup", "error": detail.clone() }),
+                );
+                return Err(detail);
+            }
+        }
+        if let Err(error) = self.write_installations(&ledger) {
+            if trash.exists() {
+                let _ = fs::rename(&trash, &root);
+            }
+            return Err(format!("写入卸载账本失败：{error}"));
+        }
+        if trash.exists() {
+            if let Err(error) = fs::remove_dir_all(&trash) {
+                let _ = fs::rename(&trash, &root);
+                let _ = self.write_installations(&previous_ledger);
+                return Err(format!("删除插件代码和数据失败：{error}"));
+            }
+        }
+        self.audit(
+            "plugin.installation.uninstalled",
+            installation_id,
+            serde_json::json!({ "packageId": installation.package_id }),
+        );
+        Ok(())
+    }
+
+    pub(crate) fn list_workspaces(&self) -> Vec<DraftWorkspace> {
+        let mut workspaces = self.read_workspaces().workspaces;
+        workspaces.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        workspaces
+    }
+
+    pub(crate) fn create_workspace(
+        &self,
+        input: CreateWorkspaceInput,
+    ) -> Result<DraftWorkspace, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let title = input.title.trim();
+        let manifest_id = input.manifest_id.trim();
+        if title.is_empty() || manifest_id.is_empty() {
+            return Err("草稿标题和 manifestId 不能为空".to_string());
+        }
+        semver::Version::parse(input.version.trim())
+            .map_err(|_| "草稿版本必须是严格 SemVer".to_string())?;
+        if !matches!(
+            input.runtime.as_str(),
+            "client" | "cloud" | "nodejs" | "python"
+        ) {
+            return Err("草稿 runtime 不受支持".to_string());
+        }
+        let workspace_id = Uuid::new_v4().to_string();
+        let path = self.workspaces_root().join(&workspace_id);
+        fs::create_dir_all(&path).map_err(|error| format!("创建草稿工作区失败：{error}"))?;
+        let manifest = serde_json::json!({
+            "id": manifest_id,
+            "name": title,
+            "version": input.version,
+            "description": "",
+            "runtime_type": input.runtime,
+            "entry": if input.runtime == "python" { "main.py" } else if input.runtime == "nodejs" { "index.js" } else { "ui/index.html" },
+            "visibility": "tenant",
+            "capabilities": []
+        });
+        let initialize = (|| {
+            write_json(&path.join("manifest.json"), &manifest)?;
+            let entry = manifest
+                .get("entry")
+                .and_then(Value::as_str)
+                .unwrap_or("ui/index.html");
+            let entry_path = path.join(entry);
+            if let Some(parent) = entry_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("创建草稿入口目录失败：{error}"))?;
+            }
+            fs::write(&entry_path, default_entry(input.runtime.as_str()))
+                .map_err(|error| format!("创建草稿入口失败：{error}"))
+        })();
+        if let Err(error) = initialize {
+            let _ = fs::remove_dir_all(&path);
+            return Err(error);
+        }
+        let now = Utc::now().to_rfc3339();
+        let workspace = DraftWorkspace {
+            workspace_id,
+            title: title.to_string(),
+            path: path.to_string_lossy().to_string(),
+            manifest_id: manifest_id.to_string(),
+            current_version: input.version,
+            runtime: input.runtime,
+            conversation_id: input.conversation_id,
+            diagnostic_status: DraftDiagnosticStatus::Idle,
+            content_sha256: None,
+            last_published_release_id: None,
+            last_published_version: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let mut ledger = self.read_workspaces();
+        ledger.workspaces.push(workspace.clone());
+        if let Err(error) = self.write_workspaces(&ledger) {
+            let _ = fs::remove_dir_all(&path);
+            return Err(error);
+        }
+        Ok(workspace)
+    }
+
+    pub(crate) fn import_workspace(&self, artifact_path: &Path) -> Result<DraftWorkspace, String> {
+        let inspected = inspect_artifact(artifact_path)?;
+        let manifest_id = inspected
+            .manifest
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("imported");
+        let title = inspected
+            .manifest
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(manifest_id);
+        let version = inspected
+            .manifest
+            .get("version")
+            .and_then(Value::as_str)
+            .unwrap_or("0.1.0");
+        let runtime = inspected
+            .manifest
+            .get("runtime_type")
+            .and_then(Value::as_str)
+            .unwrap_or("client");
+        let _guard = lock_or_recover(&self.file_lock);
+        let workspace_id = Uuid::new_v4().to_string();
+        let path = self.workspaces_root().join(&workspace_id);
+        extract_artifact(artifact_path, &path)?;
+        let now = Utc::now().to_rfc3339();
+        let workspace = DraftWorkspace {
+            workspace_id,
+            title: title.to_string(),
+            path: path.to_string_lossy().to_string(),
+            manifest_id: manifest_id.to_string(),
+            current_version: version.to_string(),
+            runtime: runtime.to_string(),
+            conversation_id: None,
+            diagnostic_status: DraftDiagnosticStatus::Idle,
+            // content_sha256 records the last published artifact, not the import source.
+            content_sha256: None,
+            last_published_release_id: None,
+            last_published_version: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let mut ledger = self.read_workspaces();
+        ledger.workspaces.push(workspace.clone());
+        if let Err(error) = self.write_workspaces(&ledger) {
+            let _ = fs::remove_dir_all(&path);
+            return Err(error);
+        }
+        Ok(workspace)
+    }
+
+    pub(crate) fn copy_installation_to_workspace(
+        &self,
+        installation_id: &str,
+    ) -> Result<DraftWorkspace, String> {
+        let installation = self.installation(installation_id)?;
+        let artifact_path = self.cache_root().join(format!(
+            "workspace-copy-{}-{}.lfplugin",
+            installation_id,
+            Uuid::new_v4()
+        ));
+        package_workspace(Path::new(&installation.active_release.path), &artifact_path)?;
+        let result = self.import_workspace(&artifact_path);
+        let _ = fs::remove_file(artifact_path);
+        result
+    }
+
+    pub(crate) fn pack_workspace(
+        &self,
+        workspace_id: &str,
+        output_path: Option<&Path>,
+    ) -> Result<PackWorkspaceResult, String> {
+        let workspace = self
+            .read_workspaces()
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        let output = output_path.map(Path::to_path_buf).unwrap_or_else(|| {
+            self.cache_root()
+                .join(format!("workspace-{workspace_id}.lfplugin"))
+        });
+        let artifact = package_workspace(Path::new(&workspace.path), &output)?;
+        Ok(PackWorkspaceResult {
+            artifact_path: output.to_string_lossy().to_string(),
+            artifact,
+        })
+    }
+
+    fn ensure_workspace_publishable(
+        &self,
+        workspace_id: &str,
+        version: &str,
+        content_sha256: &str,
+    ) -> Result<(), String> {
+        let workspace = self
+            .read_workspaces()
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        if workspace.last_published_version.as_deref() == Some(version) {
+            return Err("版本号未提升，不能重复发布".to_string());
+        }
+        if workspace.content_sha256.as_deref() == Some(content_sha256) {
+            return Err("草稿内容未变化，不能重复发布".to_string());
+        }
+        if let Some(previous) = workspace.last_published_version.as_deref() {
+            let previous =
+                semver::Version::parse(previous).map_err(|_| "历史发布版本损坏".to_string())?;
+            let next = semver::Version::parse(version)
+                .map_err(|_| "发布版本必须是严格 SemVer".to_string())?;
+            if next <= previous {
+                return Err(format!("发布版本必须高于 {previous}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn mark_workspace_published(
+        &self,
+        workspace_id: &str,
+        release_id: &str,
+        version: &str,
+        content_sha256: &str,
+    ) -> Result<DraftWorkspace, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_workspaces();
+        let workspace = ledger
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        if workspace.last_published_version.as_deref() == Some(version)
+            || workspace.content_sha256.as_deref() == Some(content_sha256)
+        {
+            return Err("草稿内容未变化或版本号未提升，不能重复发布".to_string());
+        }
+        if let Some(previous) = workspace.last_published_version.as_deref() {
+            let previous =
+                semver::Version::parse(previous).map_err(|_| "历史发布版本损坏".to_string())?;
+            let next = semver::Version::parse(version)
+                .map_err(|_| "发布版本必须是严格 SemVer".to_string())?;
+            if next <= previous {
+                return Err(format!("发布版本必须高于 {previous}"));
+            }
+        }
+        workspace.last_published_release_id = Some(release_id.to_string());
+        workspace.last_published_version = Some(version.to_string());
+        workspace.current_version = version.to_string();
+        workspace.content_sha256 = Some(content_sha256.to_string());
+        workspace.updated_at = Utc::now().to_rfc3339();
+        let result = workspace.clone();
+        self.write_workspaces(&ledger)?;
+        Ok(result)
+    }
+
+    pub(crate) fn delete_workspace(&self, workspace_id: &str) -> Result<(), String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_workspaces();
+        let index = ledger
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.workspace_id == workspace_id)
+            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        let previous_ledger = ledger.clone();
+        let workspace = ledger.workspaces.remove(index);
+        let path = PathBuf::from(workspace.path);
+        let trash = self
+            .staging_root()
+            .join(format!("workspace-delete-{}", Uuid::new_v4()));
+        if path.exists() {
+            fs::rename(&path, &trash).map_err(|error| format!("暂存待删除草稿失败：{error}"))?;
+        }
+        if let Err(error) = self.write_workspaces(&ledger) {
+            if trash.exists() {
+                let _ = fs::rename(&trash, &path);
+            }
+            let _ = self.write_workspaces(&previous_ledger);
+            return Err(error);
+        }
+        if trash.exists() {
+            if let Err(error) = fs::remove_dir_all(&trash) {
+                let _ = fs::rename(&trash, &path);
+                let _ = self.write_workspaces(&previous_ledger);
+                return Err(format!("删除草稿工作区失败：{error}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn sync_workspace_metadata(
+        &self,
+        workspace_id: &str,
+        conversation_id: Option<String>,
+    ) -> Result<DraftWorkspace, String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger = self.read_workspaces();
+        let workspace = ledger
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .ok_or_else(|| "草稿工作区不存在".to_string())?;
+        let manifest: Value = read_json(&PathBuf::from(&workspace.path).join("manifest.json"))
+            .ok_or_else(|| "草稿 manifest.json 无法读取".to_string())?;
+        workspace.title = manifest
+            .get("title")
+            .or_else(|| manifest.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or(&workspace.title)
+            .to_string();
+        workspace.manifest_id = manifest
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or(&workspace.manifest_id)
+            .to_string();
+        workspace.current_version = manifest
+            .get("version")
+            .and_then(Value::as_str)
+            .unwrap_or(&workspace.current_version)
+            .to_string();
+        workspace.runtime = manifest
+            .get("runtime_type")
+            .and_then(Value::as_str)
+            .unwrap_or(&workspace.runtime)
+            .to_string();
+        if conversation_id.is_some() {
+            workspace.conversation_id = conversation_id;
+        }
+        workspace.updated_at = Utc::now().to_rfc3339();
+        let result = workspace.clone();
+        self.write_workspaces(&ledger)?;
+        Ok(result)
+    }
+}

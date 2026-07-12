@@ -1,5 +1,5 @@
 // 插件授权 tab：列出团队可用插件，为每个插件按 user/role 设置 allow/deny。
-// 后端：GET /api/plugins/available（已按 grant 过滤）、GET/POST/DELETE /api/teams/current/plugins/:id/grants。
+// 后端：GET /api/plugin-registry/team、GET/POST/DELETE /api/teams/current/plugin-packages/:id/grants。
 // 授权语义（后端 resolvePluginAccess）：deny 优先、user 级优先于 role 级、团队管理员默认放行。
 import { useCallback, useState } from 'react';
 import { api } from '@/lib/api';
@@ -13,18 +13,19 @@ import { Badge } from '@/components/ui/badge';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import type { LoadedPlugin, PluginGrantRow, PluginGrantSubject, PluginGrantEffect, Role, TeamMember } from '@/lib/types';
+import type { PluginGrantRow, PluginGrantSubject, PluginGrantEffect, Role, TeamMember } from '@/lib/types';
+import type { RegistryCatalogItem } from '@/lib/plugin-registry';
 
-interface AvailablePlugins { plugins: LoadedPlugin[] }
+interface AvailablePlugins { items: RegistryCatalogItem[] }
 interface GrantsResp { grants: PluginGrantRow[] }
 interface RolesResp { roles: Role[] }
 interface MembersResp { members: TeamMember[] }
 
 export function PluginGrantsTab() {
   const [available, reloadAvailable, loadingAvailable] = useTeamResource<AvailablePlugins>(
-    '/api/plugins/available',
+    '/api/plugin-registry/team',
     (r) => r as AvailablePlugins,
-    { plugins: [] },
+    { items: [] },
   );
   const [members, reloadMembers] = useTeamResource<MembersResp>(
     '/api/teams/current/members',
@@ -36,7 +37,7 @@ export function PluginGrantsTab() {
     (r) => r as RolesResp,
     { roles: [] },
   );
-  const [editingPlugin, setEditingPlugin] = useState<LoadedPlugin | null>(null);
+  const [editingPlugin, setEditingPlugin] = useState<RegistryCatalogItem | null>(null);
   const [grants, setGrants] = useState<PluginGrantRow[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(false);
 
@@ -44,11 +45,11 @@ export function PluginGrantsTab() {
     void reloadAvailable(); void reloadMembers(); void reloadRoles();
   }, [reloadAvailable, reloadMembers, reloadRoles]);
 
-  async function openGrants(plugin: LoadedPlugin) {
+  async function openGrants(plugin: RegistryCatalogItem) {
     setEditingPlugin(plugin);
     setGrantsLoading(true);
     try {
-      const r = await api<GrantsResp>(`/api/teams/current/plugins/${plugin.id}/grants`);
+      const r = await api<GrantsResp>(`/api/teams/current/plugin-packages/${plugin.package.id}/grants`);
       setGrants(r.grants);
     } catch (e) {
       setGrants([]);
@@ -59,7 +60,7 @@ export function PluginGrantsTab() {
 
   async function reloadGrants() {
     if (!editingPlugin) return;
-    const r = await api<GrantsResp>(`/api/teams/current/plugins/${editingPlugin.id}/grants`);
+    const r = await api<GrantsResp>(`/api/teams/current/plugin-packages/${editingPlugin.package.id}/grants`);
     setGrants(r.grants);
   }
 
@@ -83,12 +84,12 @@ export function PluginGrantsTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {available.plugins.map((p) => {
-              const count = editingPlugin?.id === p.id ? grants.length : 0;
+            {available.items.map((p) => {
+              const count = editingPlugin?.package.id === p.package.id ? grants.length : 0;
               return (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.name}</TableCell>
-                  <TableCell><Badge variant="secondary">{p.source ?? 'team'}</Badge></TableCell>
+                <TableRow key={p.package.id}>
+                  <TableCell className="font-medium">{p.package.name}</TableCell>
+                  <TableCell><Badge variant="secondary">团队库</Badge></TableCell>
                   <TableCell>{count}</TableCell>
                   <TableCell className="text-right">
                     <Button variant="outline" size="sm" onClick={() => openGrants(p)}>管理授权</Button>
@@ -96,7 +97,7 @@ export function PluginGrantsTab() {
                 </TableRow>
               );
             })}
-            {available.plugins.length === 0 && (
+            {available.items.length === 0 && (
               <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">暂无可用插件</TableCell></TableRow>
             )}
           </TableBody>
@@ -121,7 +122,7 @@ export function PluginGrantsTab() {
 function GrantsDialog({
   plugin, grants, loading, members, roles, onClose, onChanged,
 }: {
-  plugin: LoadedPlugin;
+  plugin: RegistryCatalogItem;
   grants: PluginGrantRow[];
   loading: boolean;
   members: TeamMember[];
@@ -142,7 +143,7 @@ function GrantsDialog({
     if (!subjectId) return;
     setSaving(true);
     const ok = await runAction(
-      () => api(`/api/teams/current/plugins/${plugin.id}/grants`, {
+      () => api(`/api/teams/current/plugin-packages/${plugin.package.id}/grants`, {
         method: 'POST', body: { subjectKind, subjectId, effect },
       }),
       '授权已设置',
@@ -153,7 +154,7 @@ function GrantsDialog({
 
   async function handleRemove(grant: PluginGrantRow) {
     const ok = await runAction(
-      () => api(`/api/teams/current/plugins/${plugin.id}/grants?subjectKind=${grant.subjectKind}&subjectId=${grant.subjectId}`, { method: 'DELETE' }),
+      () => api(`/api/teams/current/plugin-packages/${plugin.package.id}/grants?subjectKind=${grant.subjectKind}&subjectId=${grant.subjectId}`, { method: 'DELETE' }),
       '授权已移除',
     );
     if (ok) await onChanged();
@@ -172,7 +173,7 @@ function GrantsDialog({
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>插件授权：{plugin.name}</DialogTitle>
+          <DialogTitle>插件授权：{plugin.package.name}</DialogTitle>
           <DialogDescription>为用户或角色设置 allow/deny。deny 优先，无规则默认可用。</DialogDescription>
         </DialogHeader>
 

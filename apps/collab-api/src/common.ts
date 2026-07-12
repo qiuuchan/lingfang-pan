@@ -33,6 +33,7 @@ export const forbidden = (message = '权限不足') => new AppError(403, 'forbid
 export const notFound = (message = '资源不存在') => new AppError(404, 'not_found', message);
 export const conflict = (message: string, details?: unknown) => new AppError(409, 'conflict', message, details);
 export const insufficientBalance = () => new AppError(402, 'insufficient_balance', '钱包余额不足');
+export const clientUpgradeRequired = () => new AppError(426, 'client_upgrade_required', '旧插件协议已停用，请升级桌面客户端后重试');
 
 export function slugify(input: string) {
   const base = input

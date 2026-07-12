@@ -540,7 +540,10 @@ describe('AdminService 团队管理完善（组B）', () => {
       prisma.team.findUnique.mockResolvedValueOnce({ id: 't1', name: '团队A', balanceCents: 0 });
       prisma.teamMembership.count.mockResolvedValueOnce(5);
       prisma.plugin.findMany.mockResolvedValueOnce([{ id: 'p1', name: '插件A', status: 'ENABLED', visibility: 'TEAM', reviewStatus: 'APPROVED', marketplace: true, priceCents: 0, installCount: 3 }]);
-      prisma.purchase.findMany.mockResolvedValueOnce([{ id: 'po1', pluginId: 'p2', priceCents: 1000, createdAt: new Date('2026-06-01T00:00:00.000Z'), plugin: { id: 'p2', name: '外部插件' } }]);
+      prisma.purchase.findMany.mockResolvedValueOnce([
+        { id: 'po1', pluginId: 'p2', packageId: null, priceCents: 1000, createdAt: new Date('2026-06-01T00:00:00.000Z'), plugin: { id: 'p2', name: '外部插件' }, package: null },
+        { id: 'po2', pluginId: null, packageId: 'pkg-2', priceCents: 1200, createdAt: new Date('2026-07-01T00:00:00.000Z'), plugin: null, package: { id: 'pkg-2', name: 'v4 插件' } },
+      ]);
       prisma.balanceLedger.groupBy.mockResolvedValueOnce([
         { direction: 'CREDIT', _sum: { amountCents: 5000 } },
         { direction: 'DEBIT', _sum: { amountCents: 2000 } },
@@ -552,6 +555,7 @@ describe('AdminService 团队管理完善（组B）', () => {
       expect(result.pluginCount).toBe(1);
       expect(result.plugins[0].name).toBe('插件A');
       expect(result.purchases[0]).toMatchObject({ pluginName: '外部插件', priceCents: 1000 });
+      expect(result.purchases[1]).toMatchObject({ pluginId: null, packageId: 'pkg-2', pluginName: 'v4 插件', priceCents: 1200 });
       // CREDIT 5000 - DEBIT 2000 = 3000 净流入。
       expect(result.ledgerSummary).toEqual({ totalCreditCents: 5000, totalDebitCents: 2000, netCents: 3000 });
     });
@@ -1118,5 +1122,4 @@ describe('AdminService 用户管理 + 平台管理员管理完善（组C）', ()
     });
   });
 });
-
 
