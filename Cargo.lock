@@ -2924,7 +2924,7 @@ dependencies = [
 
 [[package]]
 name = "lingfang-desktop"
-version = "0.0.22"
+version = "0.0.23"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2952,7 +2952,7 @@ dependencies = [
 
 [[package]]
 name = "lingfang-installer"
-version = "0.0.22"
+version = "0.0.23"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
