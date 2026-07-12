@@ -488,3 +488,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: 重构插件创建 Agent 工作区
+
+**Date**: 2026-07-12
+**Task**: 重构插件创建 Agent 工作区
+**Branch**: `betav2`
+
+### Summary
+
+将插件创建器收口为单一 CreatorWorkspace Agent 应用，精简 composer 与上下文入口，重构会话侧栏和 Artifact Inspector，并补齐流式、会话及 E2E 回归。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9ec6517` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
