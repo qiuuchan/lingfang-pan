@@ -586,3 +586,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: 修复管理后台页面与 Docker 部署
+
+**Date**: 2026-07-13
+**Task**: 修复管理后台页面与 Docker 部署
+**Branch**: `betav2`
+
+### Summary
+
+修复渠道 models 缺失导致的页面崩溃；补齐管理端 Docker 工作区依赖，改用 Nginx 提供 SPA 与同源 API 代理；补充生产必填密钥示例；验证 15 个后台页面、渠道 CRUD、710 项后端测试及全新卷 Docker 启动链路。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1190110` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
