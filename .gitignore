@@ -19,6 +19,9 @@ apps/desktop/runtimes/ffmpeg/ffmpeg.exe
 apps/desktop/runtimes/ffmpeg/ffprobe.exe
 apps/desktop/opencode/bin/opencode.exe
 plugins/moneyprinter-turbo.lfplugin
+# 所有 .lfplugin 插件包均为本地构建/分发产物（超 Gitee 100MB 单文件限制），
+# 单独传输不入仓。下方 git rm --cached 已把历史遗留的追踪移除。
+plugins/*.lfplugin
 
 # 后端运行时上传目录（admin 发布管理上传的安装包，运行时产物不入仓）。
 # 生产持久化：docker-compose.collab.yml 挂 collab_downloads volume → /app/apps/collab-api/downloads
@@ -70,18 +73,15 @@ apps/desktop/playwright/.cache/
 
 # 个人 AI 工具配置（仓库不为任何单一 AI 工具绑定）
 .claude/
-.cursor/
+.cursor/    
 .codex/
 .opencode/
 .zcode/
 .agents/
-.kimi-code/
+.kimi-code/ 
 pnpm-lock.yaml
 
 # R4 换装逻辑来源（独立工具脚本，仅作复刻参考，不入仓）
 ai换装版本批量版.py
 .workbuddy/
 .codebuddy/settings.local.json
-plugins/facefusion.lfplugin
-plugins/huobao-drama.lfplugin
-plugins/pixelle-video.lfplugin
