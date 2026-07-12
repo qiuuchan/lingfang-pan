@@ -553,3 +553,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 完成运行时、文档与管理端治理任务
+
+**Date**: 2026-07-12
+**Task**: 完成运行时、文档与管理端治理任务
+**Branch**: `betav2`
+
+### Summary
+
+完成文档架构刷新、按需 Python/Node Runtime Resolver 与下载引导、管理端治理中心和所有增长型列表动态加载；通过契约/API/前端/Rust/E2E 与多视口检查，并归档 8 个任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `daedc018` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
