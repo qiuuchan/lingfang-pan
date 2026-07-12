@@ -14,7 +14,7 @@
 // 注：这些 Rust 命令由组A（目录管理）/组B（venv+pnpm 运行）实现，本封装层按契约先行落地，
 // 后端实现后即生效；命令未实现时 tauriInvoke 抛错，前端按 errorMessage 友好降级（不崩）。
 
-import { tauriInvoke, tauriListen, apiBase, getAuthToken } from '@/lib/api';
+import { api, tauriInvoke, tauriListen, apiBase, getAuthToken } from '@/lib/api';
 
 // === 动态状态（PRD 需求 2：状态动态获取，不存 DB） ===
 
@@ -56,8 +56,7 @@ export interface LocalPluginStatus {
   started_at: string | null;
   // 状态诊断说明（缺文件/解析失败的具体原因，便于 UI 展示 incomplete/error 的修复引导）。
   detail: string | null;
-  // 是否为未发布草稿（manifest.draft===true）。AI 创建器统一写入 plugins_root，
-  // 用 draft 区分未发布草稿与已安装的团队/市场插件，替代旧的 plugins-draft 双轨目录。
+  // 旧目录迁移兼容标记；新草稿的唯一事实源是 DraftWorkspace ledger。
   draft: boolean;
 }
 
@@ -164,6 +163,22 @@ export async function startBuiltinPlugin(
   return startPluginCommand('start_builtin_plugin', pluginId, onProgress, onExited, onOutput);
 }
 
+export async function startInstalledPlugin(
+  installationId: string,
+  packageId: string,
+  origin: 'builtin' | 'local' | 'team' | 'marketplace',
+  onProgress?: (progress: PluginStartProgress) => void,
+  onExited?: (info: PluginExitedInfo) => void,
+  onOutput?: (e: PluginOutputEvent) => void,
+): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  let teamAccessGranted = false;
+  if (origin === 'team') {
+    await api(`/api/plugin-packages/${packageId}/runtime-access`, { method: 'POST' });
+    teamAccessGranted = true;
+  }
+  return startPluginCommand('start_installed_plugin', installationId, onProgress, onExited, onOutput, { teamAccessGranted });
+}
+
 /** 插件进程退出事件 payload（与 Rust PluginExited 对齐）。 */
 export interface PluginExitedInfo {
   pluginId: string;
@@ -183,11 +198,12 @@ export interface PluginOutputEvent {
 }
 
 async function startPluginCommand(
-  command: 'start_plugin' | 'start_builtin_plugin',
+  command: 'start_plugin' | 'start_builtin_plugin' | 'start_installed_plugin',
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
   onExited?: (info: PluginExitedInfo) => void,
   onOutput?: (e: PluginOutputEvent) => void,
+  extraArgs?: Record<string, unknown>,
 ): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
   // 订阅阶段事件（仅本次启动期间），完成后解绑避免泄漏。
   const unlistenProgress = onProgress
@@ -212,9 +228,10 @@ async function startPluginCommand(
     // 计费/中转：把后端基址 + 登录态 token 交给宿主本地桥；插件进程只收到 localhost URL + 一次性 token，
     // 不直接接触 JWT/API Key。
     const result = await tauriInvoke<{ pid: number; started_at: string }>(command, {
-      pluginId,
+      ...(command === 'start_installed_plugin' ? { installationId: pluginId } : { pluginId }),
       apiBase: apiBase(),
       authToken: getAuthToken() ?? '',
+      ...extraArgs,
     });
     return { ...result, unlistenExited, unlistenOutput };
   } finally {
@@ -233,6 +250,10 @@ async function startPluginCommand(
  */
 export function stopPlugin(pluginId: string): Promise<void> {
   return tauriInvoke<void>('stop_plugin', { pluginId });
+}
+
+export function stopInstalledPlugin(installationId: string): Promise<void> {
+  return tauriInvoke<void>('stop_installed_plugin', { installationId });
 }
 
 /**

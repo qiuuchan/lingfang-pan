@@ -34,7 +34,9 @@ import {
 import {
   scanPluginStatus,
   startBuiltinPlugin,
+  startInstalledPlugin,
   startPlugin,
+  stopInstalledPlugin,
   stopPlugin,
   getPluginStatus,
   type PluginStartProgress,
@@ -78,6 +80,8 @@ export function ScriptPreviewPanel({
   files,
   runtime,
   builtin = false,
+  installedOrigin,
+  packageId,
   previewKey,
   onRefresh,
   onRequestFix,
@@ -87,6 +91,8 @@ export function ScriptPreviewPanel({
   files: DraftFile[];
   runtime: ScriptRuntime;
   builtin?: boolean;
+  installedOrigin?: 'builtin' | 'local' | 'team' | 'marketplace';
+  packageId?: string;
   previewKey: number;
   onRefresh: () => void;
   // 一键修复：plugin_crashed 时把 stderr 传回父组件（创建器）调 send 让 AI 修。无则不显示按钮。
@@ -218,7 +224,11 @@ export function ScriptPreviewPanel({
     logBuffer.clear();
     try {
       // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
-      const start = builtin ? startBuiltinPlugin : startPlugin;
+      const start = builtin
+        ? startBuiltinPlugin
+        : installedOrigin && packageId
+          ? (id: string, onProgress?: (progress: PluginStartProgress) => void, onExited?: (info: PluginExitedInfo) => void, onOutput?: Parameters<typeof startPlugin>[3]) => startInstalledPlugin(id, packageId, installedOrigin, onProgress, onExited, onOutput)
+          : startPlugin;
       // onExited 接收 plugin:exited 事件（进程退出时触发）：
       // 切到 exited 态保留日志面板（exitCode 区分干净退出 vs 异常退出，但都保留输出供排查）。
       // onOutput 接收 plugin:output 事件（全阶段逐行输出，实时追加到日志面板）。
@@ -274,7 +284,7 @@ export function ScriptPreviewPanel({
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
       }
     }
-  }, [builtin, pluginId, runtime, logBuffer]);
+  }, [builtin, installedOrigin, packageId, pluginId, runtime, logBuffer]);
 
   const handleStop = useCallback(async () => {
     if (!pluginId) return;
@@ -285,7 +295,8 @@ export function ScriptPreviewPanel({
     unlistenOutputRef.current = null;
     setPersistentRun((prev) => (prev.status === 'running' ? { status: 'stopping', pid: prev.pid, startedAt: prev.startedAt } : prev));
     try {
-      await stopPlugin(pluginId);
+      if (installedOrigin) await stopInstalledPlugin(pluginId);
+      else await stopPlugin(pluginId);
       setPersistentRun({ status: 'idle' });
       toast.success('插件已停止');
     } catch (error) {
@@ -296,7 +307,7 @@ export function ScriptPreviewPanel({
         return prev;
       });
     }
-  }, [pluginId]);
+  }, [installedOrigin, pluginId]);
 
   // === 创建期预览运行：run_plugin_script 一次性 sandbox 执行 ===
   const handlePreviewRun = useCallback(async () => {

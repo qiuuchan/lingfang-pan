@@ -3,7 +3,14 @@
 // 不依赖后端新增字段：根据插件的 name / description / capabilities / runtime 做关键词匹配，
 // 自动归入预设分类。匹配优先级按 CATEGORIES 数组顺序（更具体的分类放前面，兜底 'other'）。
 // 后端若将来下发 category 字段，可在此优先采用（见 categorizePlugin 注释）。
-import type { MarketPlugin } from '@/pages/plugins/MarketplacePluginsSection';
+export interface MarketPlugin {
+  id: string;
+  name: string;
+  description?: string;
+  manifest?: unknown;
+  capabilities?: unknown[];
+  [key: string]: unknown;
+}
 
 export type CategoryKey =
   | 'ai'
@@ -82,7 +89,10 @@ function pluginText(plugin: MarketPlugin): string {
   if (Array.isArray(plugin.capabilities)) {
     for (const cap of plugin.capabilities) {
       if (typeof cap === 'string') parts.push(cap);
-      else if (cap && typeof cap === 'object' && typeof cap.kind === 'string') parts.push(cap.kind);
+      else if (cap && typeof cap === 'object') {
+        const kind = (cap as Record<string, unknown>).kind;
+        if (typeof kind === 'string') parts.push(kind);
+      }
     }
   }
   // runtime_type 若挂在 MarketPlugin 上也纳入（部分后端会带）。

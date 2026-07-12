@@ -10,6 +10,7 @@
 - 修改 HTTP、SSE、静态配置、插件运行 iframe 或 Tauri 调用时，先读 [api-streaming-and-runtime.md](./api-streaming-and-runtime.md)。
 - 修改页面 UI、shadcn/base-ui 组件或样式时，先读 [ui-composition.md](./ui-composition.md)。
 - 修改插件创建首页、对话草稿、`plugin-draft` 解析/合并或 creator 组件拆分时，先读 [plugin-creator-organization.md](./plugin-creator-organization.md)。
+- 修改插件中心目录边界、本机安装操作或独立草稿页面时，先读 [plugin-registry-ui.md](./plugin-registry-ui.md)。
 - 跨服务端、契约、SDK 或 Tauri 时，同时读对应 package/layer 的 spec 和 `.trellis/spec/guides/cross-layer-thinking-guide.md`。
 
 ## Package Shape

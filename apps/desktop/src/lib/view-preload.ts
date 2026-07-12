@@ -3,6 +3,7 @@ import type { View } from '@/lib/types';
 const loaders: Partial<Record<View, () => Promise<unknown>>> = {
   'run-plugins': () => import('@/pages/plugins/PluginCenterBody'),
   'develop-plugins': () => import('@/components/creator/FloatingCreator'),
+  'draft-plugins': () => import('@/pages/DraftPlugins'),
   'team-wallet': () => import('@/pages/TeamWallet'),
   'team-admin': () => import('@/pages/TeamAdmin'),
   review: () => import('@/pages/Review'),

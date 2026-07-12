@@ -365,9 +365,15 @@ fn read_plugin_file_blocks_traversal() {
         "hello"
     );
     // 空路径会解析到插件目录本身，应返回明确错误而不是让 Windows 冒出 os error 5。
-    assert!(store.read_plugin_file("p", "").unwrap_err().contains("不能为空"));
+    assert!(store
+        .read_plugin_file("p", "")
+        .unwrap_err()
+        .contains("不能为空"));
     // 目录路径不能当文件读取。
-    assert!(store.read_plugin_file("p", "ui").unwrap_err().contains("不是文件"));
+    assert!(store
+        .read_plugin_file("p", "ui")
+        .unwrap_err()
+        .contains("不是文件"));
     // 路径穿越被拒（../ 越出插件目录）。
     assert!(store.read_plugin_file("p", "../../etc/passwd").is_err());
     // 不存在文件报错。
@@ -479,7 +485,9 @@ fn write_file_bytes_writes_binary_content() {
     let store = temp_store("write-bytes");
     // 非 UTF-8 字节序列（模拟字体/图片二进制）：0x89 PNG 头 + 任意字节。
     let bytes: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0xff, 0x00, 0xfe];
-    store.write_file_bytes("p", "assets/icon.png", bytes).unwrap();
+    store
+        .write_file_bytes("p", "assets/icon.png", bytes)
+        .unwrap();
     let dir = store.plugin_dir("p").unwrap();
     let written = fs::read(dir.join("assets").join("icon.png")).unwrap();
     assert_eq!(written, bytes);
@@ -488,22 +496,31 @@ fn write_file_bytes_writes_binary_content() {
 #[test]
 fn write_file_bytes_creates_subdirs() {
     let store = temp_store("write-bytes-subdir");
-    store.write_file_bytes("p", "vendor/x/y/font.ttf", b"abc").unwrap();
+    store
+        .write_file_bytes("p", "vendor/x/y/font.ttf", b"abc")
+        .unwrap();
     let dir = store.plugin_dir("p").unwrap();
-    assert_eq!(fs::read(dir.join("vendor").join("x").join("y").join("font.ttf")).unwrap(), b"abc");
+    assert_eq!(
+        fs::read(dir.join("vendor").join("x").join("y").join("font.ttf")).unwrap(),
+        b"abc"
+    );
 }
 
 #[test]
 fn write_file_bytes_rejects_traversal_path() {
     let store = temp_store("write-bytes-traversal");
-    let err = store.write_file_bytes("p", "../escape.bin", b"x").unwrap_err();
+    let err = store
+        .write_file_bytes("p", "../escape.bin", b"x")
+        .unwrap_err();
     assert!(err.contains("非法") || err.contains(".."));
 }
 
 #[test]
 fn write_file_bytes_rejects_absolute_path() {
     let store = temp_store("write-bytes-absolute");
-    let err = store.write_file_bytes("p", "C:/escape.bin", b"x").unwrap_err();
+    let err = store
+        .write_file_bytes("p", "C:/escape.bin", b"x")
+        .unwrap_err();
     assert!(err.contains("非法"));
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Ref, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type Ref, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon, ExternalLinkIcon, WandSparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,13 @@ import { dragRegionProps } from '@/lib/window-drag';
 import { openPluginInWindow } from '@/lib/plugin-window';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
 import { toCreatorError, type CreatorError } from '@/lib/creator-error';
+import { errorMessage } from '@/lib/api';
+import {
+  activatePendingClientPlugin,
+  discardPendingPluginUpdate,
+  loadInstalledPlugin,
+  requiresRunnerActivation,
+} from '@/lib/plugin-registry';
 import {
   handleRuntimeCall,
   loadPluginDocument,
@@ -26,23 +33,22 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 }
 
 export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
-  const { setCurrentDraft, setView, setRunningPlugin, session, setPendingAutoFix } = useApp();
+  const { setCurrentDraft, setView, setRunningPlugin, setPendingAutoFix, setPendingDraftEdit } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const runtime = resolvePluginRuntime(plugin);
   const document = usePluginDocument(plugin, runtime);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [scriptPreviewKey, setScriptPreviewKey] = useState(0);
+  const pendingInteractive = usePendingInteractiveActivation(plugin, document.error, setRunningPlugin);
   const actions = usePluginRunnerActions({
     plugin,
     setCurrentDraft,
     setPendingAutoFix,
+    setPendingDraftEdit,
     setRunningPlugin,
     setView,
   });
-  const canEdit = !plugin.builtin
-    && plugin.source === 'team'
-    && (plugin.authorUserId === session.userId || session.role === 'TEAM_ADMIN')
-    && Boolean(plugin.files?.length);
+  const canEdit = !plugin.builtin && Boolean(plugin.installationId || plugin.draft);
   usePluginBridge(plugin, iframeRef);
 
   return (
@@ -51,6 +57,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         plugin={plugin}
         editing={actions.editing}
         canEdit={canEdit}
+        canPopOut={!plugin.pendingActivation}
         onBack={onBack}
         onEdit={actions.editInGenerator}
         onShowManifest={() => setManifestOpen(true)}
@@ -66,6 +73,8 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         runtime={runtime}
         scriptPreviewKey={scriptPreviewKey}
         srcDoc={document.srcDoc}
+        onFrameLoad={pendingInteractive.onReady}
+        onFrameError={pendingInteractive.onError}
       />
       <PluginManifestDialog
         open={manifestOpen}
@@ -83,6 +92,74 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
       />
     </div>
   );
+}
+
+function usePendingInteractiveActivation(
+  plugin: LoadedPlugin,
+  documentError: CreatorError | null,
+  setRunningPlugin: (plugin: LoadedPlugin | null) => void,
+) {
+  const settlingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const isPendingInteractive = Boolean(
+    plugin.pendingActivation
+    && plugin.installationId
+    && requiresRunnerActivation(plugin.runtime_type),
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    settlingRef.current = false;
+  }, [plugin.id, plugin.pendingActivation?.releaseId]);
+
+  const restoreActive = useCallback(async (reason: string) => {
+    if (!isPendingInteractive || !plugin.installationId || settlingRef.current) return;
+    settlingRef.current = true;
+    try {
+      await discardPendingPluginUpdate(plugin.installationId, reason);
+      const active = await loadInstalledPlugin(plugin.installationId);
+      if (mountedRef.current) setRunningPlugin(active);
+      toast.error(`${reason}，已恢复活动版本`);
+    } catch (caught) {
+      toast.error(`待更新版本启动失败：${errorMessage(caught, reason)}`);
+    }
+  }, [isPendingInteractive, plugin.installationId, setRunningPlugin]);
+
+  useEffect(() => {
+    if (!documentError) return;
+    void restoreActive(documentError.raw || documentError.title || '待更新插件入口加载失败');
+  }, [documentError, restoreActive]);
+
+  const onReady = useCallback(() => {
+    if (!isPendingInteractive || !plugin.installationId || settlingRef.current) return;
+    settlingRef.current = true;
+    void activatePendingClientPlugin(plugin.installationId)
+      .then(() => loadInstalledPlugin(plugin.installationId!))
+      .then((active) => {
+        if (mountedRef.current) setRunningPlugin(active);
+        toast.success(`已激活 v${active.version}`);
+      })
+      .catch(async (caught) => {
+        const reason = errorMessage(caught, '待更新版本激活失败');
+        try {
+          await discardPendingPluginUpdate(plugin.installationId!, reason);
+          const active = await loadInstalledPlugin(plugin.installationId!);
+          if (mountedRef.current) setRunningPlugin(active);
+        } catch {
+          // 激活失败时 ledger 仍保留旧 active；清理失败信息由原始错误一并提示。
+        }
+        toast.error(`${reason}，已保留活动版本`);
+      });
+  }, [isPendingInteractive, plugin.installationId, setRunningPlugin]);
+
+  return {
+    onReady,
+    onError: () => { void restoreActive('待更新插件运行入口加载失败'); },
+  };
 }
 
 function usePluginDocument(plugin: LoadedPlugin, runtime: string) {
@@ -133,6 +210,8 @@ function RunnerContent({
   runtime,
   scriptPreviewKey,
   srcDoc,
+  onFrameLoad,
+  onFrameError,
 }: {
   error: CreatorError | null;
   iframeRef: Ref<HTMLIFrameElement>;
@@ -143,6 +222,8 @@ function RunnerContent({
   runtime: string;
   scriptPreviewKey: number;
   srcDoc: string;
+  onFrameLoad: () => void;
+  onFrameError: () => void;
 }) {
   if (isScriptRuntime(runtime)) {
     return (
@@ -155,8 +236,8 @@ function RunnerContent({
       />
     );
   }
-  if (runtime === 'cloud') return <CloudRuntimeNotice plugin={plugin} />;
-  return <RunnerBody error={error} iframeRef={iframeRef} loading={loading} onAutoFix={onAutoFix} plugin={plugin} srcDoc={srcDoc} />;
+  if (runtime === 'cloud') return <CloudRuntimeNotice plugin={plugin} onReady={onFrameLoad} />;
+  return <RunnerBody error={error} iframeRef={iframeRef} loading={loading} onAutoFix={onAutoFix} plugin={plugin} srcDoc={srcDoc} onFrameLoad={onFrameLoad} onFrameError={onFrameError} />;
 }
 
 function ScriptRunner({
@@ -179,6 +260,8 @@ function ScriptRunner({
         files={plugin.files || []}
         runtime={runtime}
         builtin={plugin.source === 'builtin' || Boolean(plugin.builtin)}
+        installedOrigin={plugin.installationOrigin}
+        packageId={plugin.packageId}
         previewKey={previewKey}
         onRefresh={onRefresh}
         onRequestFix={onAutoFix}
@@ -191,6 +274,7 @@ function RunnerHeader({
   plugin,
   editing,
   canEdit,
+  canPopOut,
   onBack,
   onEdit,
   onShowManifest,
@@ -199,6 +283,7 @@ function RunnerHeader({
   plugin: LoadedPlugin;
   editing: boolean;
   canEdit: boolean;
+  canPopOut: boolean;
   onBack: () => void;
   onEdit: () => void;
   onShowManifest: () => void;
@@ -213,7 +298,7 @@ function RunnerHeader({
           <InfoIcon className="size-4" />详情
         </Button>
         {/* Task 15 多窗口：把插件弹出到独立窗口运行（一插件一窗口，聚焦即不重复创建）。 */}
-        <Button variant="ghost" size="sm" title="在新窗口打开" onClick={onPopOut}>
+        <Button variant="ghost" size="sm" title={canPopOut ? '在新窗口打开' : '待更新版本激活后可在新窗口打开'} disabled={!canPopOut} onClick={onPopOut}>
           <ExternalLinkIcon className="size-4" />新窗口
         </Button>
         {canEdit && (
@@ -236,6 +321,8 @@ function RunnerBody({
   onAutoFix,
   plugin,
   srcDoc,
+  onFrameLoad,
+  onFrameError,
 }: {
   error: CreatorError | null;
   iframeRef: Ref<HTMLIFrameElement>;
@@ -243,6 +330,8 @@ function RunnerBody({
   onAutoFix: (stderr: string) => void;
   plugin: LoadedPlugin;
   srcDoc: string;
+  onFrameLoad: () => void;
+  onFrameError: () => void;
 }) {
   // 仅对有源码的非内置插件提供「让 AI 修复」（内置插件源码不在前端，无法交 AI 改）。
   const canAutoFix = !plugin.builtin && Boolean(plugin.files?.length);
@@ -270,13 +359,16 @@ function RunnerBody({
         title={plugin.name}
         sandbox="allow-scripts allow-forms allow-popups"
         srcDoc={srcDoc}
+        onLoad={onFrameLoad}
+        onError={onFrameError}
         className="absolute inset-0 h-full w-full border-0 bg-white"
       />
     </div>
   );
 }
 
-function CloudRuntimeNotice({ plugin }: { plugin: LoadedPlugin }) {
+function CloudRuntimeNotice({ plugin, onReady }: { plugin: LoadedPlugin; onReady: () => void }) {
+  useEffect(() => { onReady(); }, [onReady]);
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/30 p-6">
       <div className="flex max-w-md flex-col items-center gap-3 text-center">

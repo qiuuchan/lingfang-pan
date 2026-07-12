@@ -10,6 +10,7 @@
 
 - 改 API、错误码、认证、平台管理员、Prisma 查询、迁移或测试配置时，先读 [quality-and-contracts.md](./quality-and-contracts.md)。
 - 改插件、市场、钱包、LLM 或跨桌面契约时，同时读 `.trellis/spec/contract/backend/index.md` 和 `.trellis/spec/desktop/frontend/api-streaming-and-runtime.md`。
+- 改插件包、发行版、市场审核、权益或制品存储时，先读 [plugin-package-registry.md](./plugin-package-registry.md)。
 - 改发布更新接口时，同时读 `.trellis/spec/lingfang-desktop/backend/updater-integration.md`。
 
 ## Package Shape

@@ -339,7 +339,8 @@ export type TeamLedgerEntry = {
 
 export type TeamPurchaseEntry = {
   id: string;
-  pluginId: string;
+  pluginId: string | null;
+  packageId: string | null;
   pluginName: string;
   priceCents: number;
   createdAt: string;

@@ -119,7 +119,7 @@ interface PluginCreatorState {
    */
   bindPlugin: (plugin: LoadedPlugin) => Promise<void>;
   /**
-   * CreatePlugin 工具回调：工具已写入 plugins_root/{id}/，同步草稿预览。
+   * CreatePlugin 工具回调：工具已写入 workspaces/{workspaceId}/，同步草稿预览。
    * 替代旧 onPluginCreated，收口多处 setState。
    */
   createPlugin: (pluginId: string, draft: StagedPlugin) => void;

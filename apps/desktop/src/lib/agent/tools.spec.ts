@@ -22,6 +22,7 @@ function makeOpts(initialTodos: TodoItem[] = []) {
   let todos = [...initialTodos];
   const opts: AgentToolsOptions = {
     getPluginId: () => 'test-plugin',
+    getConversationId: () => 'conv-test',
     onPluginCreated: vi.fn(),
     onFilesChanged: vi.fn(),
     onAskQuestion: vi.fn(async () => ({ answer: 'ok' })),
@@ -229,6 +230,96 @@ describe('normalizeToolFileContent 文件内容容错', () => {
   it('数字/布尔 → String()', () => {
     expect(normalizeToolFileContent(42)).toBe('42');
     expect(normalizeToolFileContent(true)).toBe('true');
+  });
+});
+
+describe('CreatePlugin 草稿工作区', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  const createArgs = {
+    id: 'demo-plugin',
+    name: 'Demo',
+    version: '0.1.0',
+    description: '',
+    runtime_type: 'client',
+    entry: 'ui/index.html',
+    capabilities: [],
+    files: [{ path: 'ui/index.html', content: '<main>demo</main>' }],
+  };
+
+  it('先创建 workspace，再写文件并同步 ledger 元数据', async () => {
+    tauriInvokeMock.mockImplementation(async (command: string) => {
+      if (command === 'create_draft_workspace') return { workspaceId: '11111111-1111-4111-8111-111111111111' };
+      return undefined;
+    });
+    const { opts } = makeOpts();
+    opts.getPluginId = () => null;
+
+    const out = await callExecute(createAgentTools(opts).tools, 'CreatePlugin', createArgs);
+
+    expect(out).toContain('保存到草稿工作区');
+    expect(tauriInvokeMock.mock.calls.map(([command]) => command)).toEqual([
+      'create_draft_workspace',
+      'write_plugin_files',
+      'sync_draft_workspace_metadata',
+    ]);
+    expect(tauriInvokeMock.mock.calls[0]?.[1]).toEqual({
+      input: expect.objectContaining({ conversationId: 'conv-test' }),
+    });
+    const writeArgs = tauriInvokeMock.mock.calls[1]?.[1] as { pluginId: string; files: Array<{ path: string; content: string }> };
+    expect(writeArgs.pluginId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(tauriInvokeMock.mock.calls[2]?.[1]).toEqual({
+      workspaceId: '11111111-1111-4111-8111-111111111111',
+      conversationId: 'conv-test',
+    });
+    const manifest = JSON.parse(writeArgs.files.find((file) => file.path === 'manifest.json')!.content);
+    expect(manifest).not.toHaveProperty('draft');
+    expect(opts.onPluginCreated).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', expect.objectContaining({ id: 'demo-plugin' }));
+  });
+
+  it('已有 workspace 时沿用同一 ID，不创建第二条草稿', async () => {
+    tauriInvokeMock.mockResolvedValue(undefined);
+    const { opts } = makeOpts();
+    opts.getPluginId = () => '22222222-2222-4222-8222-222222222222';
+
+    await callExecute(createAgentTools(opts).tools, 'CreatePlugin', createArgs);
+
+    expect(tauriInvokeMock).not.toHaveBeenCalledWith('create_draft_workspace', expect.anything());
+    expect(tauriInvokeMock).toHaveBeenCalledWith('write_plugin_files', expect.objectContaining({
+      pluginId: '22222222-2222-4222-8222-222222222222',
+    }));
+    expect(opts.onPluginCreated).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222', expect.anything());
+  });
+});
+
+describe('ListTeamPlugins registry catalog', () => {
+  beforeEach(() => {
+    configureApiBase('http://test.local');
+    setAuthToken('test-token');
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    configureApiBase(null);
+    setAuthToken(null);
+  });
+
+  it('读取团队 registry 的嵌套 package/release 数据', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      items: [{
+        package: { manifestId: 'team.demo', name: '团队 Demo', description: '说明' },
+        latestRelease: { version: '1.2.3', manifest: { runtime_type: 'nodejs' } },
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await callExecute(createAgentTools(makeOpts().opts).tools, 'ListTeamPlugins', {});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://test.local/api/plugin-registry/team',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(out).toContain('团队 Demo (team.demo) v1.2.3 [nodejs] 说明');
   });
 });
 

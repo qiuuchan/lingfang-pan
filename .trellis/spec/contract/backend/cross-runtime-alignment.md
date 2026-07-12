@@ -4,6 +4,8 @@
 
 The project rule is contract first: behavior changes that cross runtime boundaries start in `packages/contract`, then server and desktop follow.
 
+When a contract module is executed directly by Node's TypeScript ESM support, relative runtime imports must include the `.ts` extension. Keep `allowImportingTsExtensions: true` in the contract tsconfig and in any package, such as `plugin-sdk`, that maps `@lingfang/contract` directly to `packages/contract/src`. Validate both the contract runtime tests and source-mapped consumer typechecks.
+
 Reference docs:
 - `docs/02-domain-and-plugins.md`
 - `docs/04-engineering.md`
@@ -90,4 +92,3 @@ const CAPABILITY_KINDS = new Set(['code-assistant.run', 'code-assistant.session'
 // apps/desktop/src/lib/plugin-draft/manifest.ts
 const FRONTEND_CAPABILITY_KINDS = new Set<CapabilityKindType>(CapabilityKind.options);
 ```
-

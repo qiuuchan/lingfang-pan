@@ -2,31 +2,34 @@
 //! 极简工作台 + 插件加载器 + capability 权限网关。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod builtin_plugin_bundle;
+mod builtin_plugin_index;
 mod capability;
 mod draft_plugin;
 mod mirror_presets;
-mod runtime_commands;
-mod runtime_config;
-mod runtime_resolver;
-mod process_util;
+mod plugin_artifact_v4;
 mod plugin_llm_bridge;
+mod plugin_package_manager;
 mod plugin_runner;
 mod plugin_script;
 mod plugin_security;
 mod plugin_shell;
 mod plugin_store;
 mod plugins;
+mod process_util;
+mod runtime_commands;
+mod runtime_config;
+mod runtime_resolver;
 mod update;
 mod upload;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::WindowEvent;
+use tauri::{Emitter, Manager};
 
 use capability::CapabilityRegistry;
 use plugins::LoadedPlugin;
@@ -198,24 +201,6 @@ fn invoke_capability(
 // code_assistant CLI（ClaudeCode/Codex 子进程）已整体移除：AI 能力统一走平台 relay（见 docs/billing-and-relay-design.md）。
 // 原 code_assistant_* / fetch_models / test_llm_chat 命令及 mod code_assistant / llm_credentials / llm_fetch 一并删除。
 
-/// 定位内置插件目录：开发态用源码路径，打包态用资源目录。
-fn builtin_dir(app: &tauri::App) -> PathBuf {
-    // 开发态：CARGO_MANIFEST_DIR/../builtin-plugins
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|p| p.join("builtin-plugins"));
-    if let Some(d) = dev {
-        if d.exists() {
-            return d;
-        }
-    }
-    // 打包态：资源目录下的 builtin-plugins
-    app.path()
-        .resource_dir()
-        .map(|r| r.join("builtin-plugins"))
-        .unwrap_or_else(|_| PathBuf::from("builtin-plugins"))
-}
-
 // 项 11：系统托盘 + 关窗最小化到托盘。
 //
 // 托盘图标：左键单击 / 右键菜单「显示窗口」→ 显示并聚焦主窗口；菜单「退出」→ app.exit(0)。
@@ -245,7 +230,12 @@ fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
         })
         .on_tray_icon_event(|tray, event| {
             // 左键单击恢复窗口（右键由系统触发菜单）。
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
                 show_main_window(tray.app_handle());
             }
         })
@@ -262,14 +252,6 @@ fn quit_app(app: tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let registry = Arc::new(CapabilityRegistry::default());
-            let dir = builtin_dir(app);
-            let loaded = plugins::load_builtin_plugins(&dir, &registry);
-            eprintln!("已加载 {} 个内置插件（目录 {:?}）", loaded.len(), dir);
-            app.manage(AppState {
-                registry,
-                plugins: loaded,
-            });
             // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
             // 组B 的 start_plugin/stop_plugin 经此 State 的 ensure_plugin_dir 解析插件目录，
             // scan_plugin_status 据此扫文件系统判 ready/incomplete/error + 合并组B 内存进程表判 running。
@@ -277,23 +259,50 @@ fn main() {
             let plugin_store = plugin_store::PluginStore::new(
                 &app.path().app_data_dir().map_err(|e| e.to_string())?,
             )?;
+            match draft_plugin::migrate_drafts_impl(app.handle(), &plugin_store) {
+                Ok(message) => eprintln!("[legacy-draft-import] {message}"),
+                Err(error) => eprintln!("[legacy-draft-import] 迁移失败（保留旧目录）：{error}"),
+            }
+            let plugin_package_manager =
+                plugin_package_manager::PluginPackageManager::new(&plugin_store)?;
+            match plugin_package_manager.migrate_legacy_layout() {
+                Ok((migrated, failed)) => {
+                    eprintln!("[plugin-v4-migration] migrated={migrated} failed={failed}")
+                }
+                Err(error) => {
+                    eprintln!("[plugin-v4-migration] 启动迁移失败（保留旧目录）：{error}")
+                }
+            }
+            match plugin_package_manager.register_builtins(
+                builtin_plugin_bundle::INDEX_JSON,
+                builtin_plugin_bundle::ARTIFACTS,
+            ) {
+                Ok(count) => eprintln!("[plugin-v4-builtins] registered={count}"),
+                Err(error) => eprintln!("[plugin-v4-builtins] 注册失败：{error}"),
+            }
+            let registry = Arc::new(CapabilityRegistry::default());
+            let builtin_release_dirs = plugin_package_manager
+                .list_installations()
+                .into_iter()
+                .filter(|installation| {
+                    installation.origin == plugin_package_manager::InstallationOrigin::Builtin
+                })
+                .map(|installation| std::path::PathBuf::from(installation.active_release.path))
+                .collect();
+            let loaded = plugins::load_builtin_plugins_from_dirs(builtin_release_dirs, &registry);
+            eprintln!("已从本机安装账本加载 {} 个内置插件", loaded.len());
+            app.manage(AppState {
+                registry,
+                plugins: loaded,
+            });
             app.manage(plugin_store);
+            app.manage(plugin_package_manager);
             // task 06-16 组B：插件持久化运行引擎的内存进程表（plugin_id→Child 句柄）。
             // start_plugin/stop_plugin/get_plugin_status 经此 State spawn/take/kill 进程。
             app.manage(plugin_runner::PluginProcessTable::new());
             // task 06-26：Node/Python 插件通过 localhost 一次性 token 调平台 LLM；
             // 桥持有后端地址与登录态，插件进程不直接接触 JWT/API Key。
             app.manage(plugin_llm_bridge::PluginLlmBridge::new());
-            // task 06-26-agent-framework-rewrite：一次性迁移——把旧 plugins-draft 草稿搬到
-            // 统一插件目录 plugins_root（manifest 加 draft:true），废弃双轨目录。
-            // 幂等：第二次启动目录已空则跳过。日志仅打 eprintln，迁移失败不阻断启动。
-            {
-                let store = app.state::<plugin_store::PluginStore>().inner().clone();
-                match draft_plugin::migrate_drafts_impl(app.handle(), &store) {
-                    Ok(msg) => eprintln!("[draft-migration] {msg}"),
-                    Err(e) => eprintln!("[draft-migration] 迁移失败（不阻断启动）: {e}"),
-                }
-            }
             // 项 11：系统托盘（显示窗口 / 退出菜单 + 左键单击恢复）。
             setup_tray(app)?;
             Ok(())
@@ -339,6 +348,28 @@ fn main() {
             plugin_store::open_plugins_root,
             plugin_store::open_plugin_dir,
             plugin_store::rename_plugin_dir,
+            plugin_package_manager::commands::list_plugin_installations,
+            plugin_package_manager::commands::install_plugin_artifact,
+            plugin_package_manager::commands::load_installed_plugin,
+            plugin_package_manager::commands::preview_pending_installed_plugin,
+            plugin_package_manager::commands::activate_pending_client_plugin,
+            plugin_package_manager::commands::discard_pending_plugin_update,
+            plugin_package_manager::commands::rollback_plugin_installation,
+            plugin_package_manager::commands::uninstall_plugin_installation,
+            plugin_package_manager::commands::start_installed_plugin,
+            plugin_package_manager::commands::stop_installed_plugin,
+            plugin_package_manager::commands::list_draft_workspaces,
+            plugin_package_manager::commands::create_draft_workspace,
+            plugin_package_manager::commands::import_draft_workspace,
+            plugin_package_manager::commands::copy_installation_to_draft_workspace,
+            plugin_package_manager::commands::pack_draft_workspace,
+            plugin_package_manager::commands::mark_draft_workspace_published,
+            plugin_package_manager::commands::delete_draft_workspace,
+            plugin_package_manager::commands::sync_draft_workspace_metadata,
+            plugin_package_manager::commands::inspect_lfplugin_v4,
+            plugin_package_manager::commands::sha256_lfplugin,
+            plugin_package_manager::network::download_plugin_release,
+            plugin_package_manager::network::publish_draft_workspace,
             draft_plugin::migrate_drafts_to_root,
             update::check_update,
             update::download_update,

@@ -1,8 +1,9 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { Loader2Icon } from 'lucide-react';
+import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { api, apiBase, clearApiBase, configureApiBase, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
+import { api, apiBase, clearApiBase, configureApiBase, errorMessage, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
 import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, PluginWorkspaceMode, Session, SettingsTab, View } from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate, loadUpdateChannel } from '@/lib/updater';
@@ -19,13 +20,20 @@ import { CommandPalette } from '@/components/CommandPalette';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
-import { loadPlugins } from '@/pages/plugins-runtime';
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
 import { SetupWizard } from '@/pages/SetupWizard';
 import { Home } from '@/pages/Home';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
-import type { PluginCenterTab } from '@/pages/plugins/use-plugin-center';
+import type { PluginCenterTab } from '@/pages/plugins/PluginCenterBody';
+import {
+  checkRuntimeAccess,
+  discardPendingPluginUpdate,
+  INSTALLATIONS_CHANGED_EVENT,
+  listInstallations,
+  loadInstalledPlugin,
+  previewPendingInstalledPlugin,
+} from '@/lib/plugin-registry';
 
 const PluginCenterBody = lazy(() => import('@/pages/plugins/PluginCenterBody').then((m) => ({ default: m.PluginCenterBody })));
 const PluginRunner = lazy(() => import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner })));
@@ -38,6 +46,7 @@ const HelpFeedback = lazy(() => import('./pages/HelpFeedback').then((m) => ({ de
 const TeamWallet = lazy(() => import('@/pages/TeamWallet').then((m) => ({ default: m.TeamWallet })));
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 const FloatingCreator = lazy(() => import('@/components/creator/FloatingCreator').then((m) => ({ default: m.FloatingCreator })));
+const DraftPlugins = lazy(() => import('@/pages/DraftPlugins').then((m) => ({ default: m.DraftPlugins })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -103,18 +112,18 @@ export function useApp() {
 }
 
 const pinKey = (tenantId: string | null) => `lf:pins:${tenantId || 'none'}`;
-function loadPins(tenantId: string | null): LoadedPlugin[] {
+function loadPins(tenantId: string | null): string[] {
   try {
     const raw = localStorage.getItem(pinKey(tenantId));
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) ? arr.map((item) => typeof item === 'string' ? item : item?.installationId || item?.id).filter((item): item is string => Boolean(item)) : [];
   } catch {
     return [];
   }
 }
 function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
   try {
-    localStorage.setItem(pinKey(tenantId), JSON.stringify(pins));
+    localStorage.setItem(pinKey(tenantId), JSON.stringify(pins.map((plugin) => plugin.installationId).filter(Boolean)));
   } catch (err) {
     // DESK-SHELL-04 修复：配额满 / localStorage 被禁用时不再静默吞错，
     // 给用户可见提示（持久化失败会导致下次重启「固定插件丢失」，需提示）。
@@ -125,20 +134,31 @@ function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
 // 项 9：最近使用插件（与 pins 同构：租户隔离、置顶去重、限量 5）。运行插件时记入，侧栏分区展示。
 const RECENT_MAX = 5;
 const recentKey = (tenantId: string | null) => `lf:recent:${tenantId || 'none'}`;
-function loadRecent(tenantId: string | null): LoadedPlugin[] {
+function loadRecent(tenantId: string | null): string[] {
   try {
     const raw = localStorage.getItem(recentKey(tenantId));
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) ? arr.map((item) => typeof item === 'string' ? item : item?.installationId || item?.id).filter((item): item is string => Boolean(item)) : [];
   } catch {
     return [];
   }
 }
 function saveRecent(tenantId: string | null, recent: LoadedPlugin[]) {
   try {
-    localStorage.setItem(recentKey(tenantId), JSON.stringify(recent));
+    localStorage.setItem(recentKey(tenantId), JSON.stringify(recent.map((plugin) => plugin.installationId).filter(Boolean)));
   } catch (err) {
     reportPersistenceFailure(err);
+  }
+}
+
+async function hydrateInstallationPreferences(ids: string[]): Promise<LoadedPlugin[]> {
+  if (!ids.length) return [];
+  try {
+    const installed = new Set((await listInstallations()).map((item) => item.installationId));
+    const loaded = await Promise.all(ids.filter((id) => installed.has(id)).map((id) => loadInstalledPlugin(id).catch(() => null)));
+    return loaded.filter((plugin): plugin is LoadedPlugin => Boolean(plugin));
+  } catch {
+    return [];
   }
 }
 
@@ -254,7 +274,8 @@ export default function App() {
   const [teamAdminOpen, setTeamAdminOpen] = useState(false);
   // 帮助与反馈：工单中心悬浮窗。
   const [helpFeedbackOpen, setHelpFeedbackOpen] = useState(false);
-  const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('local');
+  const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('installed');
+  const [creatorReturnView, setCreatorReturnView] = useState<'run-plugins' | 'draft-plugins'>('run-plugins');
   // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
@@ -265,19 +286,71 @@ export default function App() {
   const [workspaceTransition, setWorkspaceTransition] = useState<{ active: boolean; mode: PluginWorkspaceMode }>({ active: false, mode: 'run' });
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPluginState] = useState<LoadedPlugin | null>(null);
+  const runningPluginRequestRef = useRef(0);
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
   // 项 9：最近使用插件（与 pinnedPlugins 同构，按 tenantId 持久化隔离）。
   const [recentPlugins, setRecentPlugins] = useState<LoadedPlugin[]>([]);
   // 项 9：包装 setRunningPlugin —— 运行插件时记入「最近使用」（置顶、去重、限量 RECENT_MAX、按租户持久化）。
   // 保留 ctx 上 setRunningPlugin 原签名，所有现有调用方（Sidebar/Home/Plugins 等）自动走包装逻辑。
-  const setRunningPlugin = useCallback((p: LoadedPlugin | null) => {
-    setRunningPluginState(p);
-    if (!p) return;
-    setRecentPlugins((prev) => {
-      const next = [p, ...prev.filter((x) => x.id !== p.id)].slice(0, RECENT_MAX);
-      saveRecent(session.tenantId, next);
-      return next;
-    });
+  const setRunningPlugin = useCallback((plugin: LoadedPlugin | null) => {
+    const requestId = ++runningPluginRequestRef.current;
+    if (!plugin) {
+      setRunningPluginState(null);
+      return;
+    }
+    const commit = (prepared: LoadedPlugin) => {
+      if (runningPluginRequestRef.current !== requestId) return;
+      setRunningPluginState(prepared);
+      if (!prepared.installationId) return;
+      setRecentPlugins((prev) => {
+        const next = [prepared, ...prev.filter((item) => item.id !== prepared.id)].slice(0, RECENT_MAX);
+        saveRecent(session.tenantId, next);
+        return next;
+      });
+    };
+    if (!plugin.installationId) {
+      commit(plugin);
+      return;
+    }
+
+    const isCurrent = () => runningPluginRequestRef.current === requestId;
+    void (async () => {
+      try {
+        const installations = await listInstallations();
+        if (!isCurrent()) return;
+        const installation = installations.find((item) => item.installationId === plugin.installationId);
+        if (!installation) throw new Error('本机安装项不存在或已卸载');
+
+        if (installation.origin === 'team') {
+          await checkRuntimeAccess(installation.packageId);
+          if (!isCurrent()) return;
+        }
+
+        if (!installation.pendingRelease) {
+          commit(plugin);
+          return;
+        }
+
+        let pending: LoadedPlugin;
+        try {
+          pending = await previewPendingInstalledPlugin(installation.installationId);
+        } catch (caught) {
+          if (!isCurrent()) return;
+          const reason = errorMessage(caught, '待更新版本校验失败');
+          await discardPendingPluginUpdate(installation.installationId, reason);
+          if (!isCurrent()) return;
+          toast.error(`${reason}，已恢复活动版本`);
+          commit(await loadInstalledPlugin(installation.installationId));
+          return;
+        }
+        if (!isCurrent()) return;
+
+        // client/cloud 由 Runner 成功挂载后激活；Node/Python 由进程成功启动后激活。
+        commit(pending);
+      } catch (caught) {
+        if (isCurrent()) toast.error(errorMessage(caught, '插件运行准备失败'));
+      }
+    })();
   }, [session.tenantId]);
   // 项 9：从「最近使用」中移除指定插件（侧栏历史区删除按钮用）。
   const removeFromRecent = useCallback((pluginId: string) => {
@@ -362,15 +435,19 @@ export default function App() {
     // 'creator' 是兼容入口：拦截后切到独立的开发插件主界面。
     // 承接 Home / CommandPalette / 新手任务清单 / 插件运行「继续修改」等所有 setView('creator') 调用。
     if (nextView === 'creator') {
+      setCreatorReturnView(view === 'draft-plugins' ? 'draft-plugins' : 'run-plugins');
       closeFeaturePanels();
       setRunningPlugin(null);
       setViewState('develop-plugins');
       return;
     }
+    if (nextView === 'develop-plugins') {
+      setCreatorReturnView(view === 'draft-plugins' ? 'draft-plugins' : 'run-plugins');
+    }
     // 跳到其它页面时关闭所有功能悬浮窗，避免浮窗残留在新页面上。
     closeFeaturePanels();
     setViewState(nextView);
-  }, [closeFeaturePanels, openAccountSettings, setRunningPlugin]);
+  }, [closeFeaturePanels, openAccountSettings, setRunningPlugin, view]);
 
   const saveBackendUrl = useCallback((url: string) => {
     if (!url.trim()) {
@@ -571,12 +648,42 @@ export default function App() {
   }, [backendUrl, session.token, openAccountSettings]);
 
   useEffect(() => {
-    setPinnedPlugins(loadPins(session.tenantId));
+    let cancelled = false;
+    const pinIds = loadPins(session.tenantId);
+    void hydrateInstallationPreferences(pinIds).then((plugins) => {
+      if (cancelled) return;
+      setPinnedPlugins(plugins);
+      savePins(session.tenantId, plugins);
+    });
+    return () => { cancelled = true; };
+  }, [session.tenantId]);
+
+  useEffect(() => {
+    const refreshPreferences = () => {
+      void hydrateInstallationPreferences(loadPins(session.tenantId)).then((plugins) => {
+        setPinnedPlugins(plugins);
+        savePins(session.tenantId, plugins);
+      });
+      void hydrateInstallationPreferences(loadRecent(session.tenantId)).then((plugins) => {
+        const next = plugins.slice(0, RECENT_MAX);
+        setRecentPlugins(next);
+        saveRecent(session.tenantId, next);
+      });
+    };
+    window.addEventListener(INSTALLATIONS_CHANGED_EVENT, refreshPreferences);
+    return () => window.removeEventListener(INSTALLATIONS_CHANGED_EVENT, refreshPreferences);
   }, [session.tenantId]);
 
   // 项 9：租户切换 / 登录态变化时重载「最近使用」插件列表。
   useEffect(() => {
-    setRecentPlugins(loadRecent(session.tenantId));
+    let cancelled = false;
+    const recentIds = loadRecent(session.tenantId);
+    void hydrateInstallationPreferences(recentIds).then((plugins) => {
+      if (cancelled) return;
+      setRecentPlugins(plugins.slice(0, RECENT_MAX));
+      saveRecent(session.tenantId, plugins.slice(0, RECENT_MAX));
+    });
+    return () => { cancelled = true; };
   }, [session.tenantId]);
 
   // 侧栏开合持久化：用户切换后写盘，跨重启保留（首次无 key 默认折叠，见上 useState 初值）。
@@ -593,9 +700,10 @@ export default function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const { plugins } = await loadPlugins();
+        const installations = await listInstallations();
         if (cancelled) return;
-        const target = plugins.find((p) => p.id === targetId);
+        const installation = installations.find((item) => item.installationId === targetId);
+        const target = installation ? await loadInstalledPlugin(installation.installationId) : null;
         if (target) setRunningPlugin(target);
       } catch {
         /* 加载失败静默：用户仍可手动在侧栏打开插件 */
@@ -618,6 +726,7 @@ export default function App() {
   }, []);
 
   const pinPlugin = useCallback((p: LoadedPlugin) => {
+    if (!p.installationId) return;
     setPinnedPlugins((prev) => {
       if (prev.some((x) => x.id === p.id)) return prev;
       const next = [...prev, p];
@@ -731,6 +840,7 @@ export default function App() {
   if (view === 'home') body = <Home />;
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Home />;
   else if (view === 'team-admin') body = <TeamAdmin />;
+  else if (view === 'draft-plugins') body = <DraftPlugins />;
   else body = null;
   const pluginTitleMode: PluginWorkspaceMode = view === 'develop-plugins' ? 'develop' : 'run';
   // 开发插件页隐藏外层 Sidebar，但其侧边栏（CreatorWorkspaceSidebar）复用 sidebarOpen 控制折叠，
@@ -744,8 +854,8 @@ export default function App() {
         <TitleBar
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
-          pluginMode={pluginTitleMode}
-          onPluginModeChange={openPluginWorkspaceMode}
+          pluginMode={view === 'run-plugins' || view === 'develop-plugins' ? pluginTitleMode : undefined}
+          onPluginModeChange={view === 'run-plugins' || view === 'develop-plugins' ? openPluginWorkspaceMode : undefined}
         />
         <div className="flex min-h-0 flex-1">
           {showAppSidebar && (
@@ -799,7 +909,7 @@ export default function App() {
                                 onClose={() => undefined}
                               />
                             ) : (
-                              <FloatingCreator variant="embedded" onClose={() => setViewState('run-plugins')} sidebarCollapsed={!sidebarOpen} />
+                              <FloatingCreator variant="embedded" onClose={() => { setViewState(creatorReturnView); setCreatorReturnView('run-plugins'); }} sidebarCollapsed={!sidebarOpen} />
                             )}
                           </PageTransition>
                         </Suspense>

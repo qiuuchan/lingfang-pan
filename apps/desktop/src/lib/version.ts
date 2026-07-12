@@ -1,7 +1,7 @@
 // version.ts —— 语义版本比较工具（semver x.y.z）。
 //
 // 桌面端唯一权威实现，供 TeamPluginRow（团队/市场插件「更新」判断）与
-// plugin-package-zip（本地包导入版本感知覆盖）共用。后端有等价实现（plugin.service.ts::isVersionNewer），
+// 插件列表版本比较共用。后端有等价实现（plugin.service.ts::isVersionNewer），
 // 逻辑保持一致（非法格式按 0.0.0、严格大于、逐段比较）。
 
 /** 把版本字符串解析为 [major, minor, patch]；非法格式回退 [0,0,0]。 */

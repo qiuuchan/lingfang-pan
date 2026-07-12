@@ -1,38 +1,41 @@
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { ShieldCheckIcon, ClipboardCheckIcon } from 'lucide-react';
-import { api, type ApiError } from '@/lib/api';
-import { fmtYuan } from '@/lib/money';
+import { api, errorMessage } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { LoadingButton } from '@/components/loading-button';
 import { StaggerContainer, StaggerItem, Shimmer } from '@/lib/motion';
 
-interface PendingPlugin {
-  id: string;
-  name: string;
-  version: string;
-  description?: string;
-  // 修复 DESK-REVIEW-01：后端 publicPlugin(...) 返回 priceCents（驼峰）+ updatedAt，
-  // 此前声明 price_cents / is_free / at（蛇形 + 不存在字段），导致 p.is_free 恒 undefined（falsy）→
-  // Badge variant 恒 'default'；fmtYuan(p.price_cents) 命中 undefined → money.ts:6 c===0 return '免费' →
-  // 付费插件价格徽标永远显示「免费」。改为与后端契约对齐（camelCase）。
-  priceCents: number;
-  updatedAt?: string;
+interface PendingRelease {
+  package: {
+    id: string;
+    manifestId: string;
+    name: string;
+    description: string;
+  };
+  release: {
+    id: string;
+    version: string;
+    sha256: string;
+    sizeBytes: number;
+    targetPlatform: 'windows-x64';
+  };
+  fileManifest: Array<{ path: string; sizeBytes: number }>;
 }
 
 export function Review() {
-  const [list, setList] = useState<PendingPlugin[] | null>(null);
+  const [list, setList] = useState<PendingRelease[] | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const { plugins } = await api<{ plugins: PendingPlugin[] }>('/api/admin/plugins/review-pending');
-      setList(plugins);
+      const { items } = await api<{ items: PendingRelease[] }>('/api/admin/plugin-releases/review-pending');
+      setList(items);
     } catch (e) {
-      toast.error((e as ApiError).message);
+      toast.error(errorMessage(e, '待审核发行版加载失败'));
       setList([]);
     }
   }, []);
@@ -42,10 +45,10 @@ export function Review() {
   async function approve(id: string) {
     setBusy(id);
     try {
-      await api(`/api/admin/plugins/${id}/approve`, { method: 'POST' });
+      await api(`/api/admin/plugin-releases/${id}/approve`, { method: 'POST' });
       toast.success('已通过审核');
       await load();
-    } catch (e) { toast.error((e as ApiError).message); }
+    } catch (e) { toast.error(errorMessage(e, '审核操作失败')); }
     finally { setBusy(null); }
   }
 
@@ -54,10 +57,10 @@ export function Review() {
     if (!reason) return toast.error('填写未通过原因');
     setBusy(id);
     try {
-      await api(`/api/admin/plugins/${id}/reject`, { method: 'POST', body: { reason } });
+      await api(`/api/admin/plugin-releases/${id}/reject`, { method: 'POST', body: { reason } });
       toast.success('已驳回');
       await load();
-    } catch (e) { toast.error((e as ApiError).message); }
+    } catch (e) { toast.error(errorMessage(e, '审核操作失败')); }
     finally { setBusy(null); }
   }
 
@@ -74,26 +77,26 @@ export function Review() {
           </div>
         ) : list.length ? (
           <StaggerContainer className="flex flex-col gap-3" stagger={0.06}>
-            {list.map((p) => (
-              <StaggerItem key={p.id} whileHover={{ y: -2, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
+            {list.map((item) => (
+              <StaggerItem key={item.release.id} whileHover={{ y: -2, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
                 <div className="rounded-lg border p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-medium">{p.name} <span className="text-sm font-normal text-muted-foreground">v{p.version}</span></div>
-                      <div className="mt-0.5 text-sm text-muted-foreground">{p.description || '作者未填写描述'}</div>
-                      <div className="mt-1 font-mono text-xs text-muted-foreground">{p.id}</div>
+                    <div className="min-w-0">
+                      <div className="font-medium">{item.package.name} <span className="text-sm font-normal text-muted-foreground">v{item.release.version}</span></div>
+                      <div className="mt-0.5 text-sm text-muted-foreground">{item.package.description || '作者未填写描述'}</div>
+                      <div className="mt-1 font-mono text-xs text-muted-foreground">{item.package.manifestId} · {item.release.sha256.slice(0, 16)}...</div>
                     </div>
-                    <Badge variant={p.priceCents === 0 ? 'secondary' : 'default'}>{fmtYuan(p.priceCents)}</Badge>
+                    <Badge variant="secondary">{formatBytes(item.release.sizeBytes)} · {item.fileManifest.length} 个文件</Badge>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <Input
                       placeholder="未通过原因（驳回时必填）"
-                      value={reasons[p.id] || ''}
-                      onChange={(e) => setReasons((r) => ({ ...r, [p.id]: e.target.value }))}
+                      value={reasons[item.release.id] || ''}
+                      onChange={(e) => setReasons((r) => ({ ...r, [item.release.id]: e.target.value }))}
                       className="flex-1"
                     />
-                    <LoadingButton loading={busy === p.id} onClick={() => approve(p.id)}>通过</LoadingButton>
-                    <LoadingButton variant="destructive" loading={busy === p.id} onClick={() => reject(p.id)}>驳回</LoadingButton>
+                    <LoadingButton loading={busy === item.release.id} onClick={() => approve(item.release.id)}>通过</LoadingButton>
+                    <LoadingButton variant="destructive" loading={busy === item.release.id} onClick={() => reject(item.release.id)}>驳回</LoadingButton>
                   </div>
                 </div>
               </StaggerItem>
@@ -109,4 +112,10 @@ export function Review() {
       </CardContent>
     </Card>
   );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }

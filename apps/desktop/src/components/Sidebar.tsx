@@ -24,6 +24,7 @@ import {
   PinOffIcon,
   HistoryIcon,
   XIcon,
+  FileEditIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { kind: 'view', v: 'home', label: '首页', icon: HomeIcon },
   // 项 3：团队管理入口迁至左下角 AvatarMenu，不再占用侧栏导航位。
   { kind: 'view', v: 'run-plugins', label: '插件', icon: PackageIcon },
+  { kind: 'view', v: 'draft-plugins', label: '草稿', icon: FileEditIcon },
   { kind: 'view', v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
 ];
 

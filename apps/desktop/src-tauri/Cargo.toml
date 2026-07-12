@@ -5,6 +5,11 @@ edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+zip = "2"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -41,3 +46,4 @@ zip = "2"
 flate2 = "1"
 tar = "0.4"
 semver = "1"
+uuid = { version = "1", features = ["v4"] }

@@ -9,12 +9,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '@/App';
 import { cn } from '@/lib/utils';
-import { api, type ApiError } from '@/lib/api';
-import { marketplaceSearchPath } from '@/lib/home-marketplace';
 import { Button } from '@/components/ui/button';
 import { SearchIcon } from 'lucide-react';
 import type { LoadedPlugin, View } from '@/lib/types';
-import type { PluginCenterTab } from '@/pages/plugins/use-plugin-center';
+import { listMarketplaceRegistry, type RegistryCatalogItem } from '@/lib/plugin-registry';
+import type { PluginCenterTab } from '@/pages/plugins/PluginCenterBody';
 
 export type SearchResultGroup = 'installed' | 'market' | 'action' | 'create';
 
@@ -28,16 +27,6 @@ export interface SearchResult {
   action: () => void;
 }
 
-// 市场搜索返回的精简结构（MarketPlugin 子集，足够展示标题/描述/计数）。
-interface MarketHit {
-  id: string;
-  name: string;
-  description?: string;
-  install_count?: number;
-  is_free?: boolean;
-  avg_score?: number;
-}
-
 const GROUPS: { key: SearchResultGroup; label: string }[] = [
   { key: 'installed', label: '已安装' },
   { key: 'market', label: '市场' },
@@ -47,22 +36,23 @@ const GROUPS: { key: SearchResultGroup; label: string }[] = [
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { setView, setRunningPlugin, pinnedPlugins, session, openPluginCenter } = useApp();
-  const [marketResults, setMarketResults] = useState<MarketHit[]>([]);
+  const [marketCatalog, setMarketCatalog] = useState<RegistryCatalogItem[]>([]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [focusIndex, setFocusIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const queryRef = useRef('');
 
   // 打开时重置 + 聚焦。
   useEffect(() => {
     if (open) {
       setQuery('');
       setResults([]);
-      setMarketResults([]);
+      setMarketCatalog([]);
       setFocusIndex(0);
       const t = setTimeout(() => inputRef.current?.focus(), 50);
+      void listMarketplaceRegistry()
+        .then(setMarketCatalog)
+        .catch(() => { /* 市场不可达时仍保留本地插件与动作搜索。 */ });
       return () => clearTimeout(t);
     }
   }, [open]);
@@ -89,8 +79,10 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     const list: SearchResult[] = [
       go('home', '首页', '推荐插件与搜索'),
       go('creator', '创建插件', '用 AI 生成新插件'),
-      openCenter('local', '我的插件', '本地与团队插件'),
+      openCenter('installed', '已安装插件', '本机可运行插件'),
+      openCenter('team', '团队插件库', '团队已发布版本'),
       openCenter('market', '插件市场', '浏览发现插件'),
+      go('draft-plugins', '草稿管理', '管理插件开发工作区'),
       go('settings', '设置', '通用、模型与计费、插件、更新'),
       go('team-wallet', '团队钱包', '团队余额与灵石'),
     ];
@@ -100,7 +92,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   }, [session.role, session.isPlatformAdmin, setRunningPlugin, setView, openPluginCenter, onClose]);
 
   // 合并搜索结果。
-  const recompute = useCallback((q: string, market: MarketHit[]) => {
+  const recompute = useCallback((q: string, market: RegistryCatalogItem[]) => {
     const lower = q.toLowerCase();
     const installed: SearchResult[] = pinnedPlugins
       .filter((p) => p.name.toLowerCase().includes(lower))
@@ -110,14 +102,23 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         action: () => { setRunningPlugin(p); onClose(); }, actionLabel: '打开',
       }));
 
-    const marketIds = new Set(pinnedPlugins.map((p) => p.id));
+    const installedPackageIds = new Set(pinnedPlugins.map((p) => p.packageId).filter(Boolean));
     const marketHits: SearchResult[] = market
-      .filter((p) => !marketIds.has(p.id))
+      .filter((item) => {
+        if (installedPackageIds.has(item.package.id)) return false;
+        const searchable = [
+          item.package.name,
+          item.package.description,
+          item.package.manifestId,
+          item.latestRelease.version,
+        ];
+        return searchable.some((value) => value.toLowerCase().includes(lower));
+      })
       .slice(0, 5)
-      .map((p) => ({
-        id: `market-${p.id}`, title: p.name,
-        description: p.description || `安装 ${p.install_count ?? 0} 次`,
-        group: 'market', badge: p.is_free ? '免费' : undefined,
+      .map((item) => ({
+        id: `market-${item.package.id}`, title: item.package.name,
+        description: item.package.description || item.package.manifestId,
+        group: 'market', badge: (item.priceCents || 0) === 0 ? '免费' : undefined,
         action: () => { openPluginCenter('market'); onClose(); }, actionLabel: '前往',
       }));
 
@@ -139,27 +140,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     setFocusIndex(0);
   }, [pinnedPlugins, actions, setRunningPlugin, openPluginCenter, onClose]);
 
-  // 防抖搜索：本地即时 + 市场 200ms 防抖。
+  // Registry catalog 不提供搜索接口；目录只拉取一次，输入时与本地结果一起即时过滤。
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
     const q = query.trim();
-    if (!q) { setResults([]); setMarketResults([]); return; }
-    queryRef.current = query;
-    // 本地结果立即出。
-    recompute(query, marketResults);
-    debounceRef.current = setTimeout(() => {
-      api<{ plugins: MarketHit[] }>(marketplaceSearchPath(query))
-        .then((res) => setMarketResults(res.plugins || []))
-        .catch((e: ApiError) => { /* 后端不可达静默，本地结果仍可用 */ void e; });
-    }, 200);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
-
-  // 市场结果到达后重算。
-  useEffect(() => {
-    if (queryRef.current.trim()) recompute(queryRef.current, marketResults);
-  }, [marketResults, recompute]);
+    if (!q) { setResults([]); return; }
+    recompute(query, marketCatalog);
+  }, [marketCatalog, query, recompute]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIndex((i) => Math.min(i + 1, results.length - 1)); }

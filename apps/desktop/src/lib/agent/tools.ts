@@ -1,8 +1,8 @@
-// tools.ts —— OpenAI Agents SDK 工具集（Claude Code 风格命名，全部指向 plugins_root/{id}/）。
+// tools.ts —— OpenAI Agents SDK 工具集（Claude Code 风格命名，全部指向草稿 workspace）。
 //
 // 设计要点（task 06-26-agent-framework-rewrite）：
-// - 单一真相源：工具直接读写应用插件目录 plugins_root/{id}/（Rust plugin_store 命令），
-//   不再有 plugins-draft 内存/双轨。manifest.draft===true 标记未发布草稿。
+// - 单一真相源：工具直接读写 workspaces/{workspaceId}/（Rust plugin_store 命令），
+//   DraftWorkspace ledger 管理生命周期，manifest 不携带草稿状态。
 // - Claude Code 命名：Read / Write / Edit / Glob 对齐 Claude Code 内置工具语义；
 //   CreatePlugin / Check / WebSearch / AskQuestion / ListTeamPlugins 是领域工具，沿用 PascalCase。
 // - read-before-edit 不变式：Edit 前必须先 Read 过该文件（per-run 的 readPaths 跟踪），否则报错，
@@ -81,8 +81,10 @@ export interface TodoItem {
 
 /** 工具工厂入参：当前插件 id + HITL/刷新/Todo 回调。 */
 export interface AgentToolsOptions {
-  /** 当前正在开发的插件目录 id（plugins_root/{id}/）。CreatePlugin 后由调用方更新。 */
+  /** 当前正在开发的 workspaceId。CreatePlugin 后由调用方更新。 */
   getPluginId: () => string | null;
+  /** 当前编辑对话 ID；workspace 创建时立即持久化关联。 */
+  getConversationId: () => string | null;
   /** CreatePlugin 初始化插件目录后回调（调用方记录 id、刷新预览）。 */
   onPluginCreated: (pluginId: string, draft: StagedPlugin) => void;
   /** 任意写操作（Write/Edit）后回调，调用方刷新右侧预览。 */
@@ -130,7 +132,7 @@ export function normalizeToolFileContent(content: unknown): string {
 }
 
 /**
- * 构造 Agents SDK 工具集。读写全部落到 plugins_root/{id}/（Rust 命令），唯一真相源。
+   * 构造 Agents SDK 工具集。读写全部落到 workspaces/{workspaceId}/（Rust 命令），唯一真相源。
  * readPaths 跟踪本 run 内已 Read 的文件，强制 Edit 前先 Read（read-before-edit 不变式）。
  */
 export function createAgentTools(opts: AgentToolsOptions) {
@@ -251,7 +253,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
   const CreatePlugin = defineTool({
     name: 'CreatePlugin',
     description:
-      '初始化一个新插件目录（写入 manifest.json，标记 draft:true）并落盘全部初始文件到应用插件目录。' +
+      '初始化一个插件草稿工作区并写入 manifest.json 与全部初始文件。' +
       '首次生成插件时调用；后续修改用 Read/Write/Edit。' +
       '约束：entry 必须存在于 files；client→ui/index.html、nodejs→index.js(+package.json)、python→main.py(+requirements.txt)。',
     parameters: z.object({
@@ -297,21 +299,38 @@ export function createAgentTools(opts: AgentToolsOptions) {
       };
       const err = validateStagedCompleteness(draft.runtime_type, draft.entry, draft.files);
       if (err) return `错误：${err}`;
-      // manifest.json（含 draft:true）+ 全部源文件落盘到 plugins_root/{id}/。
-      const manifestContent = `${JSON.stringify({ ...buildStagedManifest(draft), draft: true }, null, 2)}\n`;
+      const manifestContent = `${JSON.stringify(buildStagedManifest(draft), null, 2)}\n`;
       const files = [
         { path: 'manifest.json', content: manifestContent },
         ...draft.files.filter((f) => f.path !== 'manifest.json'),
       ];
+      let workspaceId = opts.getPluginId();
+      const conversationId = opts.getConversationId();
+      let createdWorkspaceId: string | null = null;
       try {
-        await tauriInvoke<void>('write_plugin_files', { pluginId: args.id, files });
-        // 标记 draft（双保险：即使 manifest 文本拼接失败，也确保 draft 标记落地）。
-        await tauriInvoke<void>('set_plugin_draft_flag', { pluginId: args.id, draft: true });
+        if (!workspaceId) {
+          const workspace = await tauriInvoke<{ workspaceId: string }>('create_draft_workspace', {
+            input: {
+              title: draft.name,
+              manifestId: draft.id,
+              version: draft.version,
+              runtime: draft.runtime_type,
+              conversationId,
+            },
+          });
+          workspaceId = workspace.workspaceId;
+          createdWorkspaceId = workspaceId;
+        }
+        await tauriInvoke<void>('write_plugin_files', { pluginId: workspaceId, files });
+        await tauriInvoke('sync_draft_workspace_metadata', { workspaceId, conversationId });
         draft.files.forEach((f) => readPaths.add(f.path));
         readPaths.add('manifest.json');
-        opts.onPluginCreated(args.id, draft);
-        return `已创建插件「${args.name}」(${args.id})，落盘到本地插件目录，可在草稿页运行。`;
+        opts.onPluginCreated(workspaceId, draft);
+        return `已创建插件「${args.name}」(${args.id})，保存到草稿工作区，可在草稿页继续管理。`;
       } catch (e) {
+        if (createdWorkspaceId) {
+          await tauriInvoke('delete_draft_workspace', { workspaceId: createdWorkspaceId }).catch(() => undefined);
+        }
         return `创建失败：${e instanceof Error ? e.message : String(e)}`;
       }
     },
@@ -510,15 +529,16 @@ export function createAgentTools(opts: AgentToolsOptions) {
     parameters: z.object({}),
     async execute(): Promise<string> {
       try {
-        const rows = await api<Array<{ id: string; name: string; description?: string; version?: string; runtime_type?: string }>>(
-          '/api/plugins/available',
-        );
-        const plugins: TeamPluginBrief[] = (Array.isArray(rows) ? rows : []).map((p) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description ?? '',
-          version: p.version ?? '',
-          runtime_type: p.runtime_type ?? '',
+        const response = await api<{ items: Array<{
+          package: { manifestId: string; name: string; description: string };
+          latestRelease: { version: string; manifest: { runtime_type: string } };
+        }> }>('/api/plugin-registry/team');
+        const plugins: TeamPluginBrief[] = response.items.map((item) => ({
+          id: item.package.manifestId,
+          name: item.package.name,
+          description: item.package.description,
+          version: item.latestRelease.version,
+          runtime_type: item.latestRelease.manifest.runtime_type,
         }));
         if (!plugins.length) return '团队暂无已有插件。';
         return plugins.map((p) => `- ${p.name} (${p.id}) v${p.version} [${p.runtime_type}] ${p.description}`).join('\n');

@@ -150,6 +150,10 @@ pub struct PluginStore {
 }
 
 impl PluginStore {
+    pub(crate) fn metadata_root(&self) -> PathBuf {
+        self.anchor_root.join(META_DIR)
+    }
+
     /// 构造存储：创建 anchor_root（app_data_dir/plugins）+ 默认 plugins_root（app_data/plugins）。
     /// 失败返回字符串错误（启动期调用）。
     pub fn new(app_data_dir: &Path) -> Result<Self, String> {
@@ -238,7 +242,12 @@ impl PluginStore {
     /// 单个插件目录：plugins_root/<plugin_id>/。plugin_id 走段级白名单校验防路径穿越。
     pub fn plugin_dir(&self, plugin_id: &str) -> Result<PathBuf, String> {
         let safe_id = sanitize_plugin_id(plugin_id)?;
-        Ok(self.plugins_root().join(safe_id))
+        let root = self.plugins_root();
+        let workspace = root.join("workspaces").join(&safe_id);
+        if workspace.is_dir() {
+            return Ok(workspace);
+        }
+        Ok(root.join(safe_id))
     }
 
     /// 确保插件目录存在（不存在则 create_dir_all）。返回规范化的插件目录绝对路径。
@@ -319,6 +328,12 @@ impl PluginStore {
                 Some(n) => n.to_string(),
                 None => continue,
             };
+            if matches!(
+                dir_name.as_str(),
+                "installed" | "cache" | "workspaces" | ".lingfang-staging"
+            ) {
+                continue;
+            }
             if sanitize_plugin_id(&dir_name).is_err() {
                 // 隐藏目录（.lingfang）/含非法字符目录名：跳过，避免误解析。
                 continue;
@@ -363,7 +378,9 @@ impl PluginStore {
             Err(_) => {
                 // 二进制文件：返回占位标记（含大小信息，便于前端展示/跳过）。
                 let size = bytes.len();
-                Ok(format!("[binary file, {size} bytes, non-UTF-8 — 已跳过读取]"))
+                Ok(format!(
+                    "[binary file, {size} bytes, non-UTF-8 — 已跳过读取]"
+                ))
             }
         }
     }
@@ -391,7 +408,12 @@ impl PluginStore {
     /// 写单个文件的**字节**（二进制文件，如字体/图片/音频）。
     /// 与 write_files 同款 path 白名单，仅 content 是 &[u8] 而非 &str。
     /// .lfplugin v3 导入路径：二进制文件经前端 base64 解码后走此方法（见 write_plugin_file_bytes 命令）。
-    pub fn write_file_bytes(&self, plugin_id: &str, path: &str, bytes: &[u8]) -> Result<(), String> {
+    pub fn write_file_bytes(
+        &self,
+        plugin_id: &str,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<(), String> {
         let base = self.ensure_plugin_dir(plugin_id)?;
         let target = self.resolve_write_target(&base, path)?;
         if let Some(parent_dir) = target.parent() {
@@ -440,7 +462,8 @@ impl PluginStore {
         }
         let p = std::path::Path::new(path);
         // 绝对路径（Windows 盘符 C:\ 或 Unix /）一律拒。
-        if p.is_absolute() || path.starts_with('/') || path.starts_with('\\') || path.contains(':') {
+        if p.is_absolute() || path.starts_with('/') || path.starts_with('\\') || path.contains(':')
+        {
             return Err(format!("非法文件路径（绝对路径）：{path}"));
         }
         // 段级校验：任一段为 .. 视为穿越。
@@ -482,7 +505,9 @@ impl PluginStore {
             return Err("非法文件路径".to_string());
         }
         if target.is_dir() {
-            return Err(format!("目标是目录而非文件（删除目录请用 delete_plugin）：{file}"));
+            return Err(format!(
+                "目标是目录而非文件（删除目录请用 delete_plugin）：{file}"
+            ));
         }
         fs::remove_file(&target).map_err(|e| format!("删除文件失败（{file}）：{e}"))
     }
@@ -521,7 +546,10 @@ impl PluginStore {
         if to_p.is_absolute() || to.starts_with('/') || to.starts_with('\\') || to.contains(':') {
             return Err(format!("非法目标路径（绝对路径）：{to}"));
         }
-        if to_p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if to_p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(format!("非法目标路径（含 ..）：{to}"));
         }
         let dst = base.join(to_p);
@@ -554,7 +582,12 @@ impl PluginStore {
     }
 
     /// 写单个文件到插件目录（Agent 的 Write 工具底层）。复用 write_files 的路径白名单校验。
-    pub fn write_single_file(&self, plugin_id: &str, path: &str, content: &str) -> Result<(), String> {
+    pub fn write_single_file(
+        &self,
+        plugin_id: &str,
+        path: &str,
+        content: &str,
+    ) -> Result<(), String> {
         self.write_files(plugin_id, &[(path.to_string(), content.to_string())])
     }
 
@@ -564,8 +597,8 @@ impl PluginStore {
     pub fn set_draft_flag(&self, plugin_id: &str, draft: bool) -> Result<(), String> {
         let dir = self.plugin_dir(plugin_id)?;
         let manifest_path = dir.join("manifest.json");
-        let raw = fs::read_to_string(&manifest_path)
-            .map_err(|e| format!("读取 manifest 失败：{e}"))?;
+        let raw =
+            fs::read_to_string(&manifest_path).map_err(|e| format!("读取 manifest 失败：{e}"))?;
         let mut v: serde_json::Value =
             serde_json::from_str(&raw).map_err(|e| format!("解析 manifest 失败：{e}"))?;
         v["draft"] = serde_json::Value::Bool(draft);
@@ -581,7 +614,14 @@ impl PluginStore {
 /// 跳过运行时副产物目录（data/.venv/venv/node_modules/__pycache__/.git）与隐藏文件，
 /// 只保留插件作者编写的源文件。相对路径用正斜杠（跨平台一致，与 manifest entry 对齐）。
 fn collect_source_paths(base: &Path, dir: &Path, out: &mut Vec<String>) {
-    const SKIP_DIRS: [&str; 6] = ["data", ".venv", "venv", "node_modules", "__pycache__", ".git"];
+    const SKIP_DIRS: [&str; 6] = [
+        "data",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".git",
+    ];
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
