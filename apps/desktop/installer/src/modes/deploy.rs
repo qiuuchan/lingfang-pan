@@ -12,6 +12,18 @@ use crate::{paths, sfx};
 pub fn deploy_to(install_dir: &Path) -> Result<usize> {
     let self_exe = std::env::current_exe().context("无法定位自身可执行文件")?;
 
+    // 0) 防御性终止：覆盖前关闭「exe 路径落在 install_dir 之下」的所有进程
+    //    （主程序 + runtimes/python.exe / node.exe / ffmpeg.exe 等子进程）。
+    //    只杀主程序会留下占着 python.exe 的孤儿进程，导致自解压覆盖时 os error 32。
+    //    交互安装此前已杀过一遍，此处为幂等兜底（无运行进程则空操作）。
+    #[cfg(target_os = "windows")]
+    {
+        let killed = crate::platform::kill_app_processes(install_dir);
+        if killed > 0 {
+            crate::log_line(&format!("部署前终止 {killed} 个占用安装目录的进程"));
+        }
+    }
+
     // 1) 自解压 app 文件到安装目录。
     let count = sfx::extract_payload(&self_exe, install_dir)
         .context("自解压 app 文件失败")?;
