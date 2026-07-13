@@ -652,3 +652,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: 平台托管插件 AI 调用
+
+**Date**: 2026-07-13
+**Task**: 平台托管插件 AI 调用
+**Branch**: `betav2`
+
+### Summary
+
+完成插件 Chat/生图平台托管调用、JWT 当前团队额度计费、外部 relay Key 删除、统一 AI 政策门禁、精确发行版运行授权及桌面/Rust/SDK 跨层接线；全量测试、构建和双数据库 Prisma 校验通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d03d6d9` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
