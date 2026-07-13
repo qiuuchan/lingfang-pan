@@ -21,7 +21,7 @@
 - 安装顺序：inspect/SHA -> staging 安全解压 -> data link -> rename immutable release -> cache -> atomic ledger。
 - 更新写 `pendingRelease`；只有依赖准备且进程成功启动后才激活，保留一个 previous release。
 - client/cloud 更新先用 `preview_pending_installed_plugin` 读取待激活入口，iframe 成功加载后再调用 `activate_pending_client_plugin`；列表 hydration 始终读取 active。
-- Python：`uv.lock -> uv sync --frozen`，`requirements.txt -> uv pip install --python`；Node：pnpm frozen 或 `npm ci`。
+- Python：`uv.lock -> uv sync --frozen`（需要内置 uv，缺失即报错）；`requirements.txt -> uv pip install --python`，应用未随 uv 时回退 `<venv-python> -m pip install --no-input`；Node：pnpm frozen 或 `npm ci`。
 - 卸载通过 rename 到 staging 保证账本失败可回退，成功后删除代码、data 和外置 Python venv；builtin protected 禁止卸载。
 - `.lfplugin` 不保存 draft/source/install 状态。导入目标由调用页面决定。
 - 内置源码只作为构建输入；`build.rs` 在 `OUT_DIR` 生成确定性 v4 制品和 SHA 索引并嵌入二进制，启动时经同一安装器注册，生产资源不携带源码目录。

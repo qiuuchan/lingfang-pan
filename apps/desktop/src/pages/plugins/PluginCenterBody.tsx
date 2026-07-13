@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ArchiveRestoreIcon,
   BoxIcon,
@@ -6,6 +6,7 @@ import {
   FileArchiveIcon,
   FileEditIcon,
   HistoryIcon,
+  InfoIcon,
   Loader2Icon,
   PackageCheckIcon,
   RefreshCwIcon,
@@ -48,6 +49,12 @@ import {
 
 export type PluginCenterTab = 'installed' | 'team' | 'market';
 
+/** 详情弹窗的数据源：已安装走 LoadedPlugin+Installation；团队/市场走 RegistryCatalogItem。
+ *  两种来源字段不完全对称（已安装 activeRelease 无 sizeBytes/createdAt/sourceKind），弹窗按可用字段渲染。 */
+type DetailTarget =
+  | { kind: 'installed'; plugin: LoadedPlugin; installation: Installation }
+  | { kind: 'catalog'; item: RegistryCatalogItem; marketplace: boolean };
+
 export function PluginCenterBody({
   tab,
   onTabChange,
@@ -71,6 +78,7 @@ export function PluginCenterBody({
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<Installation | null>(null);
   const [historyPackage, setHistoryPackage] = useState<RegistryPackage | null>(null);
+  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importPath, setImportPath] = useState('');
 
@@ -193,6 +201,7 @@ export function PluginCenterBody({
               plugins={installedPlugins}
               loading={localLoading}
               onRun={onRun}
+              onDetail={(plugin, installation) => setDetailTarget({ kind: 'installed', plugin, installation })}
               onRollback={async (installation) => {
                 setBusyKey(installation.installationId);
                 try {
@@ -215,6 +224,7 @@ export function PluginCenterBody({
               installed={byPackage}
               busyKey={busyKey}
               onDownload={(item) => void installCatalogItem(item, 'team')}
+              onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: false })}
               onHistory={(item) => setHistoryPackage(item.package)}
             />
           </TabsContent>
@@ -227,6 +237,7 @@ export function PluginCenterBody({
               busyKey={busyKey}
               marketplace
               onDownload={(item) => void buyAndDownload(item)}
+              onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: true })}
               onHistory={(item) => setHistoryPackage(item.package)}
             />
           </TabsContent>
@@ -257,6 +268,7 @@ export function PluginCenterBody({
       </Dialog>
 
       <PackageHistoryDialog packageInfo={historyPackage} onClose={() => setHistoryPackage(null)} />
+      <PluginDetailDialog target={detailTarget} onClose={() => setDetailTarget(null)} onRun={onRun} />
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>导入本地插件</DialogTitle><DialogDescription>导入 `.lfplugin` v4 压缩包并校验后登记为本机安装项。</DialogDescription></DialogHeader>
@@ -273,11 +285,12 @@ export function PluginCenterBody({
   );
 }
 
-function InstalledList({ installations, plugins, loading, onRun, onRollback, onUninstall, onCopyDraft, busyKey }: {
+function InstalledList({ installations, plugins, loading, onRun, onDetail, onRollback, onUninstall, onCopyDraft, busyKey }: {
   installations: Installation[];
   plugins: Record<string, LoadedPlugin>;
   loading: boolean;
   onRun: (plugin: LoadedPlugin) => void;
+  onDetail: (plugin: LoadedPlugin, installation: Installation) => void;
   onRollback: (installation: Installation) => void;
   onUninstall: (installation: Installation) => void;
   onCopyDraft: (installation: Installation) => void;
@@ -307,6 +320,7 @@ function InstalledList({ installations, plugins, loading, onRun, onRollback, onU
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button size="sm" disabled={!plugin || busy} onClick={() => plugin && onRun(plugin)}>运行</Button>
+              <Button variant="outline" size="icon-sm" title="插件详情" disabled={!plugin || busy} onClick={() => plugin && onDetail(plugin, installation)}><InfoIcon /></Button>
               <Button variant="outline" size="icon-sm" title="复制为草稿后编辑" disabled={busy} onClick={() => onCopyDraft(installation)}><FileEditIcon /></Button>
               {installation.previousRelease && (
                 <Button variant="outline" size="icon-sm" title="回滚到上一版本" disabled={busy} onClick={() => onRollback(installation)}>
@@ -324,13 +338,14 @@ function InstalledList({ installations, plugins, loading, onRun, onRollback, onU
   );
 }
 
-function CatalogList({ items, installed, loading, busyKey, marketplace, onDownload, onHistory }: {
+function CatalogList({ items, installed, loading, busyKey, marketplace, onDownload, onDetail, onHistory }: {
   items: RegistryCatalogItem[];
   installed: Map<string, Installation>;
   loading: boolean;
   busyKey: string;
   marketplace?: boolean;
   onDownload: (item: RegistryCatalogItem) => void;
+  onDetail: (item: RegistryCatalogItem) => void;
   onHistory: (item: RegistryCatalogItem) => void;
 }) {
   if (loading) return <ListLoading />;
@@ -355,6 +370,7 @@ function CatalogList({ items, installed, loading, busyKey, marketplace, onDownlo
               <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{item.package.description || '暂无描述'}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <Button variant="ghost" size="icon-sm" title="插件详情" onClick={() => onDetail(item)}><InfoIcon /></Button>
               <Button variant="ghost" size="icon-sm" title="版本历史" onClick={() => onHistory(item)}><HistoryIcon /></Button>
               <Button size="sm" variant={downloaded ? 'secondary' : 'default'} disabled={downloaded || busy} onClick={() => onDownload(item)}>
                 {busy ? <Loader2Icon className="animate-spin" /> : needsPurchase ? <ShoppingCartIcon /> : local ? <RefreshCwIcon /> : <DownloadIcon />}
@@ -420,4 +436,116 @@ function PackageHistoryDialog({ packageInfo, onClose }: { packageInfo: RegistryP
       </DialogContent>
     </Dialog>
   );
+}
+
+/** 插件详情弹窗：显示插件介绍（description 全文）+ 关键元信息。
+ *  两种来源（已安装 / 团队市场）字段不完全对称：
+ *  - 已安装 activeRelease 是 LocalPluginReleaseRef（无 sizeBytes/createdAt/sourceKind，有 dependencyStatus）。
+ *  - 团队市场 latestRelease 是 PluginReleaseSummary（有 sizeBytes/createdAt/sourceKind/manifest，无 dependencyStatus）。
+ *  弹窗按各来源可用字段渲染，缺失字段直接不显示。 */
+function PluginDetailDialog({ target, onClose, onRun }: {
+  target: DetailTarget | null;
+  onClose: () => void;
+  onRun: (plugin: LoadedPlugin) => void;
+}) {
+  // 字段抽取：把两种来源统一成 { name, description, version, runtimeType, origin, meta } 便于渲染。
+  const view = useMemo(() => {
+    if (!target) return null;
+    if (target.kind === 'installed') {
+      const { plugin, installation } = target;
+      const release = installation.activeRelease;
+      return {
+        name: plugin.name,
+        description: plugin.description,
+        version: release.version,
+        runtimeType: plugin.runtime_type,
+        origin: <SourceBadge origin={installation.origin} />,
+        meta: {
+          依赖: dependencyLabel(release.dependencyStatus),
+          ...(installation.protected ? { 受保护: '是' } : {}),
+          ...(release.sha256 ? { 指纹: `${release.sha256.slice(0, 16)}...` } : {}),
+        } as Record<string, string>,
+        onRunPlugin: plugin,
+      };
+    }
+    const { item, marketplace } = target;
+    const release = item.latestRelease;
+    const priceCents = item.priceCents ?? 0;
+    return {
+      name: item.package.name,
+      description: item.package.description,
+      version: release.version,
+      runtimeType: release.manifest?.runtime_type,
+      origin: <PluginSourceBadge sourceKind={release.sourceKind} sourceLabel={release.sourceLabel} ingestChannel={release.ingestChannel} />,
+      meta: {
+        ...(marketplace ? { 价格: priceCents === 0 ? '免费' : `¥${(priceCents / 100).toFixed(2)}` } : {}),
+        ...(release.sizeBytes ? { 大小: formatBytes(release.sizeBytes) } : {}),
+        ...(release.sha256 ? { 指纹: `${release.sha256.slice(0, 16)}...` } : {}),
+        ...(item.package.updatedAt ? { 更新时间: formatDate(item.package.updatedAt) } : {}),
+      } as Record<string, string>,
+      onRunPlugin: null as LoadedPlugin | null,
+    };
+  }, [target]);
+
+  return (
+    <Dialog open={Boolean(target)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{view?.name ?? '插件详情'}</DialogTitle>
+          <DialogDescription>插件介绍与版本信息。</DialogDescription>
+        </DialogHeader>
+        {view && (
+          <div className="space-y-4">
+            {/* 介绍（核心）：whitespace-pre-wrap 保留 manifest 里可能的多行 */}
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-muted-foreground">插件介绍</div>
+              <p className="whitespace-pre-wrap break-words text-sm">
+                {view.description?.trim() ? view.description : <span className="text-muted-foreground">暂无描述</span>}
+              </p>
+            </div>
+            {/* 元信息：版本/运行时/来源 + 各来源特有字段 */}
+            <div className="divide-y rounded-lg border">
+              <DetailRow label="版本">{view.version}</DetailRow>
+              {view.runtimeType && <DetailRow label="运行时">{runtimeTypeLabel(view.runtimeType)}</DetailRow>}
+              <DetailRow label="来源">{view.origin}</DetailRow>
+              {Object.entries(view.meta).map(([label, value]) => (
+                <DetailRow key={label} label={label}>{value}</DetailRow>
+              ))}
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          {view?.onRunPlugin && (
+            <Button variant="default" onClick={() => { onClose(); onRun(view.onRunPlugin!); }}>运行</Button>
+          )}
+          <Button variant="outline" onClick={onClose}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 text-right">{children}</span>
+    </div>
+  );
+}
+
+function runtimeTypeLabel(type: string): string {
+  return { client: '软件内（iframe）', nodejs: 'Node.js 独立进程', python: 'Python 独立进程', cloud: '云端' }[type] ?? type;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleDateString('zh-CN');
 }
