@@ -685,3 +685,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: 精简 AI 创建器侧栏
+
+**Date**: 2026-07-13
+**Task**: 精简 AI 创建器侧栏
+**Branch**: `betav2`
+
+### Summary
+
+精简 CreatorWorkspace 侧栏：去掉底部账号区，默认折叠并用 lf:creator-sidebar-open 独立记忆；与应用主侧栏解耦，同步 E2E 与 plugin-creator 规范。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d979160342b51453aabd70abfb164f94cdd83ab0` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
