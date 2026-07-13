@@ -13,21 +13,28 @@ export function resolvePrismaInvocation(
   command: PrismaCliCommand,
   provider: DatabaseProvider,
   schemaPath: string,
+  options: { acceptDataLoss?: boolean } = {},
 ): PrismaInvocation {
   if (command === 'generate') return { args: ['generate', '--schema', schemaPath] };
   if (command === 'validate') return { args: ['validate', '--schema', schemaPath] };
-  if (command === 'migrate') return { args: migrationArgs(provider, schemaPath) };
-  return { args: deployArgs(provider, schemaPath) };
+  if (command === 'migrate') return { args: migrationArgs(provider, schemaPath, options.acceptDataLoss === true) };
+  return { args: deployArgs(provider, schemaPath, options.acceptDataLoss === true) };
 }
 
-function migrationArgs(provider: DatabaseProvider, schemaPath: string): string[] {
-  if (provider === 'mysql') return ['db', 'push', '--schema', schemaPath];
+function migrationArgs(provider: DatabaseProvider, schemaPath: string, acceptDataLoss: boolean): string[] {
+  if (provider === 'mysql') return mysqlPushArgs(schemaPath, acceptDataLoss);
   return ['migrate', 'dev', '--schema', schemaPath];
 }
 
-function deployArgs(provider: DatabaseProvider, schemaPath: string): string[] {
-  if (provider === 'mysql') return ['db', 'push', '--schema', schemaPath];
+function deployArgs(provider: DatabaseProvider, schemaPath: string, acceptDataLoss: boolean): string[] {
+  if (provider === 'mysql') return mysqlPushArgs(schemaPath, acceptDataLoss);
   return ['migrate', 'deploy', '--schema', schemaPath];
+}
+
+function mysqlPushArgs(schemaPath: string, acceptDataLoss: boolean): string[] {
+  const args = ['db', 'push', '--schema', schemaPath];
+  if (acceptDataLoss) args.push('--accept-data-loss');
+  return args;
 }
 
 function parseCommand(raw: string | undefined): PrismaCliCommand {
@@ -41,7 +48,10 @@ async function main(): Promise<void> {
     ? resolveDatabaseProvider(process.env)
     : resolveDatabaseConfig(process.env).provider;
   const schemaPath = await ensurePrismaSchemaForEnv(process.env);
-  const invocation = resolvePrismaInvocation(command, provider, schemaPath);
+  const invocation = resolvePrismaInvocation(command, provider, schemaPath, {
+    // Destructive MySQL schema changes require an explicit one-shot operator opt-in.
+    acceptDataLoss: process.env.PRISMA_MYSQL_ACCEPT_DATA_LOSS_ONCE === '1',
+  });
   const result = spawnSync('prisma', invocation.args, { stdio: 'inherit', shell: process.platform === 'win32' });
   if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;

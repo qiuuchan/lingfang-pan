@@ -115,6 +115,8 @@ describe('pending installation bridge', () => {
       installationId: installation.installationId,
       packageId: installation.packageId,
       version: '2.0.0',
+      releaseId: 'pending',
+      releaseSha256: 'b'.repeat(64),
       pendingActivation: { releaseId: 'pending' },
     });
     expect(plugin.files).toContainEqual({ path: 'ui/index.html', content: '<main>pending</main>' });

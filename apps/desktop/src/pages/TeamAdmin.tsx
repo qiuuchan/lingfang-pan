@@ -1,13 +1,13 @@
 // 团队管理控制面板（桌面端顶级页面，仅团队管理员可见）。
 // 这是团队管理线路的核心 UI，与平台管理（web collab-admin）形成两条干净分离的管理线路。
-// Tab：概览 / 成员管理 / 角色与权限 / 插件授权 / AI 接入密钥 / 邀请码与团队设置。
+// Tab：概览 / 成员管理 / 角色与权限 / 插件授权 / 邀请码与团队设置。
 // 后端：/api/teams/current/* （members/roles/plugins/grants/invitations/balance）。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api } from '@/lib/api';
 import { useApp } from '@/App';
-import { hasPermission, isTeamManager } from '@/lib/permissions';
+import { isTeamManager } from '@/lib/permissions';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { LoadingButton } from '@/components/loading-button';
 import { centsToYuan } from '@/lib/money';
 import type { TeamInfo, TeamMember, TeamProfile } from '@/lib/types';
-import { OverviewSkeleton, MembersTab, RolesTab, PluginGrantsTab, InvitationsTab, TeamApiKeysTab } from './team-admin';
+import { OverviewSkeleton, MembersTab, RolesTab, PluginGrantsTab, InvitationsTab } from './team-admin';
 
 export function TeamAdmin() {
   const { session } = useApp();
@@ -25,7 +25,6 @@ export function TeamAdmin() {
   const [profile, setProfile] = useState<TeamProfile | null>(null);
   const [memberCount, setMemberCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const canManageApiKeys = hasPermission(session.permissions, 'team.api_key.manage');
 
   async function loadOverview() {
     setLoading(true);
@@ -75,7 +74,6 @@ export function TeamAdmin() {
             <TabsTrigger value="members">成员管理</TabsTrigger>
             <TabsTrigger value="roles">角色与权限</TabsTrigger>
             <TabsTrigger value="grants">插件授权</TabsTrigger>
-            {canManageApiKeys ? <TabsTrigger value="api-keys">AI 接入密钥</TabsTrigger> : null}
             <TabsTrigger value="invitations">邀请码与设置</TabsTrigger>
           </TabsList>
 
@@ -105,11 +103,6 @@ export function TeamAdmin() {
               {tab === 'grants' && (
                 <TabsContent value="grants">
                   <PluginGrantsTab />
-                </TabsContent>
-              )}
-              {canManageApiKeys && tab === 'api-keys' && (
-                <TabsContent value="api-keys">
-                  <TeamApiKeysTab />
                 </TabsContent>
               )}
               {tab === 'invitations' && (

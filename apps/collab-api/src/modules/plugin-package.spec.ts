@@ -219,6 +219,21 @@ describe('normalizePluginPackage manifest 核心约束', () => {
     ]);
   });
 
+  it('AI capability 忽略旧 requires_admin:true 并规范化为 false', () => {
+    const pkg = normalizePluginPackage(packageWithManifest({
+      capabilities: [
+        { kind: 'llm.chat', requires_admin: true },
+        { kind: 'image.generate', requires_admin: true },
+        { kind: 'fs.read', requires_admin: true },
+      ],
+    }));
+    expect(pkg.manifest.capabilities.map((capability) => [capability.kind, capability.requires_admin])).toEqual([
+      ['llm.chat', false],
+      ['image.generate', false],
+      ['fs.read', true],
+    ]);
+  });
+
   it.each([
     ['runtime_type', { runtime_type: false }, /runtime_type 必须是字符串/],
     ['runtimeType', { runtime_type: undefined, runtimeType: {} }, /runtime_type 必须是字符串/],

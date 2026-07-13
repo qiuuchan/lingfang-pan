@@ -13,11 +13,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PrismaService } from '../../prisma.service';
-import { AppError, badRequest } from '../../common';
+import { AppError } from '../../common';
 import { PricingService } from '../pricing.service';
 import { CreditService, type ReserveTicket } from '../credit.service';
 import { ChannelRouterService } from '../channel.service';
-import type { RelayAuth } from '../../dual-auth.guard';
+import type { RelayAuth } from '../../relay-team.guard';
 import {
   UpstreamError,
   forwardOpenAiChat,
@@ -35,7 +35,17 @@ type Kind = 'CHAT' | 'IMAGE';
 function wireToTier(model: string): Tier {
   if (model === 'fast') return 'FAST';
   if (model === 'premium') return 'PREMIUM';
-  throw badRequest('model 仅支持 fast 或 premium');
+  throw new AppError(400, 'unsupported_model', 'model 仅支持 fast 或 premium');
+}
+
+type ClientSource = 'platform' | 'plugin_runtime' | 'plugin_test';
+
+/** X-Client is untrusted telemetry and never participates in billing or auth. */
+export function clientSourceFromRequest(req: Request): ClientSource {
+  const source = req.header('x-client');
+  if (source === 'desktop-plugin') return 'plugin_runtime';
+  if (source === 'desktop-plugin-test') return 'plugin_test';
+  return 'platform';
 }
 
 /**
@@ -95,7 +105,7 @@ export class RelayService {
     @Inject(ChannelRouterService) private readonly router: ChannelRouterService,
   ) {}
 
-  /** GET /api/relay/v1/models —— 返回两个版本哨兵，并在有鉴权上下文时附带可用资源池 + contextWindow。 */
+  /** GET /api/relay/v1/models —— 返回当前团队实际可用的版本哨兵、资源池与 contextWindow。 */
   async listModels(req?: Request) {
     const auth = req?.relayAuth ?? null;
     const poolRefs = auth
@@ -123,34 +133,35 @@ export class RelayService {
       this.pricing.lookupMinContextWindow({ tier: 'PREMIUM' }),
     ]);
 
+    const data = [
+      {
+        id: 'fast',
+        object: 'model',
+        owned_by: 'lingfang',
+        label: '快速版',
+        resourcePools: poolNamesFor('FAST'),
+        contextWindow: fastWindow,
+      },
+      {
+        id: 'premium',
+        object: 'model',
+        owned_by: 'lingfang',
+        label: '高级版',
+        resourcePools: poolNamesFor('PREMIUM'),
+        contextWindow: premiumWindow,
+      },
+    ].filter((model) => model.resourcePools.length > 0);
+
     return {
       object: 'list',
-      data: [
-        {
-          id: 'fast',
-          object: 'model',
-          owned_by: 'lingfang',
-          label: '快速版',
-          resourcePools: poolNamesFor('FAST'),
-          contextWindow: fastWindow,
-        },
-        {
-          id: 'premium',
-          object: 'model',
-          owned_by: 'lingfang',
-          label: '高级版',
-          resourcePools: poolNamesFor('PREMIUM'),
-          contextWindow: premiumWindow,
-        },
-      ],
+      data,
     };
   }
 
   /** POST /api/relay/v1/chat/completions（OpenAI 协议）。 */
   async chatCompletions(req: Request, res: Response, body: Record<string, unknown>) {
     const auth = this.requireAuth(req);
-    this.assertScope(auth, 'chat');
-    const tier = wireToTier(String(body.model ?? ''));
+    const tier = wireToTier(String(body.model ?? 'fast'));
     const stream = Boolean(body.stream);
 
     // 注入系统提示词规则。
@@ -188,8 +199,7 @@ export class RelayService {
   /** POST /api/relay/v1/messages（Anthropic 协议）。 */
   async messages(req: Request, res: Response, body: Record<string, unknown>) {
     const auth = this.requireAuth(req);
-    this.assertScope(auth, 'chat');
-    const tier = wireToTier(String(body.model ?? ''));
+    const tier = wireToTier(String(body.model ?? 'fast'));
     const stream = Boolean(body.stream);
     const guardRule = await this.credits.readAiUsageGuardRule();
     const systemField = guardRule?.trim()
@@ -212,8 +222,7 @@ export class RelayService {
   /** POST /api/relay/v1/images/generations（OpenAI 协议，按张计费）。 */
   async imageGenerations(req: Request, res: Response, body: Record<string, unknown>) {
     const auth = this.requireAuth(req);
-    this.assertScope(auth, 'image');
-    const tier = wireToTier(String(body.model ?? ''));
+    const tier = wireToTier(String(body.model ?? 'fast'));
     const n = Math.min(10, Math.max(1, Number(body.n ?? 1) || 1));
 
     return this.executeRelay(req, res, {
@@ -232,7 +241,6 @@ export class RelayService {
   /** POST /api/relay/v1/images/edits（multipart 透传，按张计费）。 */
   async imageEditsPassthrough(req: Request, res: Response) {
     const auth = this.requireAuth(req);
-    this.assertScope(auth, 'image');
     const tier = this.resolveTierFromQuery(req);
     const contentType = String(req.headers['content-type'] ?? 'application/octet-stream');
     return this.executeRelay(req, res, {
@@ -256,15 +264,6 @@ export class RelayService {
   private requireAuth(req: Request): RelayAuth {
     if (!req.relayAuth) throw new AppError(401, 'unauthorized', '未鉴权');
     return req.relayAuth;
-  }
-
-  // 版本（fast/premium）下放渠道（R1）：tier 完全由渠道（Channel.tier 标签 + models[]）决定，
-  // 而非 API Key scope。API Key 的 `tier:fast`/`tier:premium` scope 仅为「展示性标签」，
-  // assertScope 只校验 chat/image/action 三种能力，**从不据 `tier:*` 限版**——这是有意为之：
-  // 若对 tier:* 启用强校验，存量未勾选对应 tier 的 key 会被 403（鉴权收紧的破坏性变更）。
-  private assertScope(auth: RelayAuth, capability: 'chat' | 'image' | 'action') {
-    if (auth.scopes.includes('*')) return;
-    if (!auth.scopes.includes(capability)) throw new AppError(403, 'capability_denied', `API Key 未授权：${capability}`);
   }
 
   private resolveTierFromQuery(req: Request): Tier {
@@ -305,7 +304,6 @@ export class RelayService {
       data: {
         teamId: auth.teamId,
         userId: auth.userId,
-        apiKeyId: auth.apiKeyId,
         capability,
         tier,
         model: '(pending)',
@@ -313,6 +311,7 @@ export class RelayService {
         requestId,
         requestSummary: plan.requestSummary as never,
         clientIp,
+        clientSource: clientSourceFromRequest(req),
         credits: 0,
       },
     });
@@ -400,7 +399,7 @@ export class RelayService {
         // 所有候选都因无定价被跳过：明确提示配价，而非笼统 upstream_error。
         const modelNames = Array.from(new Set(candidates.map((c) => c.model))).join('、');
         await ensureFinalized({ status: 'no_pricing', errorCode: 'pricing_not_configured', httpStatus: 503, channelId: null, model: modelNames || '(none)' });
-        throw new AppError(503, 'pricing_not_configured', `渠道模型未配置定价：${modelNames}。请在「模型接入」为这些模型添加定价。`);
+        throw new AppError(503, 'pricing_not_configured', '当前模型版本暂不可用，请联系平台管理员配置定价');
       }
       const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
       const { upstreamStatus, upstreamDetail } = extractUpstreamCause(lastError);

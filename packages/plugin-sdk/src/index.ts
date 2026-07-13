@@ -12,9 +12,86 @@ type PluginFile = { path: string; content: string };
 type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
 type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
 
+export type PluginAiErrorInit = {
+  code?: string;
+  status?: number;
+  requestId?: string;
+  cause?: unknown;
+};
+
+export class PluginAiError extends Error {
+  readonly code?: string;
+  readonly status?: number;
+  readonly requestId?: string;
+
+  constructor(message: string, init: PluginAiErrorInit = {}) {
+    super(message, { cause: init.cause });
+    this.name = 'PluginAiError';
+    this.code = init.code;
+    this.status = init.status;
+    this.requestId = init.requestId;
+  }
+}
+
 // SDK-04 修复：桥层调用默认 30s 超时，避免宿主不回复（容器卸载、后端 hang 等）时插件 await 永久挂起。
 // 超时后 reject 友好错误。宿主若已自带超时（如桌面 plugins-runtime.ts 的 30s）则两者取先到者。
 const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
+const AI_BRIDGE_TIMEOUT_MS = 180_000;
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function pluginAiError(error: unknown, fallback: PluginAiErrorInit & { message?: string } = {}): PluginAiError {
+  if (error instanceof PluginAiError) return error;
+  const source = record(error);
+  const nested = record(source.error);
+  const message = nonEmptyString(nested.message)
+    ?? nonEmptyString(source.message)
+    ?? (error instanceof Error ? nonEmptyString(error.message) : undefined)
+    ?? fallback.message
+    ?? '平台 AI 调用失败';
+  const statusValue = nested.status ?? source.status ?? fallback.status;
+  return new PluginAiError(message, {
+    code: nonEmptyString(nested.code)
+      ?? nonEmptyString(source.code)
+      ?? (nonEmptyString(source.message) ? nonEmptyString(source.error) : undefined)
+      ?? fallback.code,
+    status: typeof statusValue === 'number' ? statusValue : undefined,
+    requestId: nonEmptyString(nested.requestId) ?? nonEmptyString(source.requestId) ?? fallback.requestId,
+    cause: error,
+  });
+}
+
+function platformModel(value: unknown): 'fast' | 'premium' {
+  if (value === undefined) return 'fast';
+  if (value === 'fast' || value === 'premium') return value;
+  throw new PluginAiError('仅支持平台模型档位 fast 或 premium', {
+    code: 'unsupported_model',
+    status: 400,
+  });
+}
+
+function localhostBridgeBase(value: string): string {
+  try {
+    const url = new URL(value);
+    const loopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
+    if (url.protocol !== 'http:' || !loopback || url.username || url.password || (url.pathname !== '/' && url.pathname !== '')) {
+      throw new Error('invalid bridge URL');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch (cause) {
+    throw new PluginAiError('宿主注入的本地桥地址无效', {
+      code: 'bridge_invalid',
+      status: 503,
+      cause,
+    });
+  }
+}
 
 // SDK-05 修复：net.fetch 的 init 可能含 AbortSignal / 函数等不可结构化克隆字段，
 // postMessage 会抛 DataCloneError。这里白名单过滤为可序列化字段。
@@ -70,27 +147,35 @@ const SCRIPT_BRIDGE_PATH: Record<string, string> = {
 };
 
 // Node.js / Python 脚本插件的本地桥回退：window.__lingfangInvoke 不存在时（脚本无 DOM）走 localhost HTTP 桥。
-// 桥用一次性 token 鉴权，宿主转发到平台 relay（不计费给脚本进程，真正计费在 relay 侧扣团队灵石）。
+// 桥用当前进程会话 token 鉴权，宿主转发到平台 relay（真正计费在 relay 侧扣当前团队灵石）。
 // 支持能力：llm.chat（返回 {content:string}）、image.generate（返回 {images:string[]}）。
 async function invokeScriptBridge<T>(capability: string, args: unknown): Promise<T | null> {
   const path = SCRIPT_BRIDGE_PATH[capability];
   if (!path) return null;
   const g = globalThis as unknown as ScriptBridgeEnv;
-  const base = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_URL;
+  const baseValue = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_URL;
   const token = g.process?.env?.LINGFANG_PLUGIN_BRIDGE_TOKEN;
-  if (!base || !token || typeof g.fetch !== 'function') return null;
+  if (!baseValue || !token || typeof g.fetch !== 'function') return null;
+  const base = localhostBridgeBase(baseValue);
+  const input = record(args);
+  const body = capability === 'llm.chat' || capability === 'image.generate'
+    ? { ...input, model: platformModel(input.model) }
+    : input;
   const res = await g.fetch(`${base}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-LingFang-Plugin-Token': token,
     },
-    body: JSON.stringify(args ?? {}),
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({})) as Record<string, unknown>;
   if (!res.ok) {
-    const msg = (data.message as string) || (data.error as string) || `平台调用失败：HTTP ${res.status}`;
-    throw new Error(msg);
+    throw pluginAiError(data, {
+      status: res.status,
+      requestId: res.headers.get('x-request-id') ?? undefined,
+      message: `平台调用失败：HTTP ${res.status}`,
+    });
   }
   if (capability === 'llm.chat') {
     return (typeof data.content === 'string' ? data.content : '') as T;
@@ -104,21 +189,38 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
 async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}, timeoutMs = DEFAULT_BRIDGE_TIMEOUT_MS): Promise<T> {
   const bridge = (globalThis as unknown as { __lingfangInvoke?: (c: string, a: unknown) => Promise<unknown> })
     .__lingfangInvoke;
-  if (typeof bridge !== 'function') {
-    const scriptResult = await invokeScriptBridge<T>(capability, args);
-    if (scriptResult !== null) return scriptResult;
-    throw new Error(`capability bridge 未注入: ${capability}`);
-  }
+  const operation = typeof bridge === 'function'
+    ? bridge(capability, args) as Promise<T>
+    : (async () => {
+        const scriptResult = await invokeScriptBridge<T>(capability, args);
+        if (scriptResult !== null) return scriptResult;
+        throw new Error(`capability bridge 未注入: ${capability}`);
+      })();
   // SDK-04：用 Promise.race 加超时兜底，避免桥返回的 Promise 永不 settle。
-  if (timeoutMs <= 0) return bridge(capability, args) as Promise<T>;
+  if (timeoutMs <= 0) return operation;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`capability 调用超时: ${capability}`)), timeoutMs);
   });
   try {
-    return await Promise.race([bridge(capability, args) as Promise<T>, timeout]);
+    return await Promise.race([operation, timeout]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+async function invokeAi<T>(capability: 'llm.chat' | 'image.generate', input: Record<string, unknown>): Promise<T> {
+  const args = { ...input, model: platformModel(input.model) };
+  try {
+    return await invoke<T>(capability, args, AI_BRIDGE_TIMEOUT_MS);
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message.startsWith('capability 调用超时:');
+    const bridgeUnavailable = error instanceof Error && error.message.startsWith('capability bridge 未注入:');
+    throw pluginAiError(error, timedOut
+      ? { code: 'request_timeout', status: 408, message: `平台 AI 调用超时: ${capability}` }
+      : bridgeUnavailable
+        ? { code: 'bridge_unavailable', status: 503 }
+        : { code: 'plugin_ai_error' });
   }
 }
 
@@ -158,13 +260,13 @@ export const sdk = {
   // 不含 apiKey / apiUrl / baseUrl / provider：实际路由由平台 relay + 团队渠道配置决定。
   // model 仅是平台模型标识（fast / premium），不是上游地址或密钥配置。
   llm: {
-    chat: (input: ChatInput) => invoke<string>('llm.chat', input),
+    chat: (input: ChatInput) => invokeAi<string>('llm.chat', input),
   },
   // 计费/中转：生图走平台 relay（/api/relay/v1/images/generations），按张计费，按团队灵石结算。
   // 输入 prompt 必填；model 默认 fast；返回 { images: string[] }（url 或 data:base64）。
   // 系统提示词已由平台强制注入：必须且仅能使用灵坊平台服务（需求 #3）。
   image: {
-    generate: (input: ImageGenerateInput) => invoke<ImageGenerateResult>('image.generate', input),
+    generate: (input: ImageGenerateInput) => invokeAi<ImageGenerateResult>('image.generate', input),
   },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),

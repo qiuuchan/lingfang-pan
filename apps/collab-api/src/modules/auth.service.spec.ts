@@ -605,4 +605,36 @@ describe('AuthService 找回密码 + 重置密码', () => {
       expect(String(mail.sendEmailVerification.mock.calls[0][1])).toContain('verify_token=');
     });
   });
+
+  describe('团队上下文 session', () => {
+    it('在 JWT 中签名一次选定的 teamId 和 teamContextVersion', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        email: 'a@b.com',
+        displayName: 'A',
+        status: 'ACTIVE',
+        platformRole: 'NONE',
+        platformRoleId: null,
+        tokenVersion: 4,
+        teamContextVersion: 7,
+        emailVerified: null,
+        memberships: [{
+          teamId: 't-newest',
+          role: 'MEMBER',
+          teamRoleId: null,
+          team: { id: 't-newest', name: 'T', slug: 't', status: 'ACTIVE' },
+        }],
+      });
+      prisma.teamAdminApplication.findFirst.mockResolvedValue(null);
+
+      const session = await service.sessionAfterTeamContextChange('u1');
+      const payload = jwt.verify(session.token!, process.env.JWT_SECRET!) as jwt.JwtPayload;
+      expect(payload).toMatchObject({
+        sub: 'u1',
+        teamId: 't-newest',
+        teamContextVersion: 7,
+        tokenVersion: 4,
+      });
+    });
+  });
 });

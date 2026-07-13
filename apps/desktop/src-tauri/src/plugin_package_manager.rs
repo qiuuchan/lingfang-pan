@@ -30,6 +30,27 @@ fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
+fn read_tagged_source_files(root: &Path) -> Result<Vec<DraftWorkspaceFilePayload>, String> {
+    let mut payloads = Vec::new();
+    for (relative, path) in collect_workspace_source_files(root)? {
+        let bytes =
+            fs::read(&path).map_err(|error| format!("读取插件源文件 {relative} 失败：{error}"))?;
+        match String::from_utf8(bytes) {
+            Ok(content) => payloads.push(DraftWorkspaceFilePayload {
+                path: relative,
+                content,
+                binary: false,
+            }),
+            Err(error) => payloads.push(DraftWorkspaceFilePayload {
+                path: relative,
+                content: general_purpose::STANDARD.encode(error.into_bytes()),
+                binary: true,
+            }),
+        }
+    }
+    Ok(payloads)
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum InstallationOrigin {
@@ -345,6 +366,13 @@ pub(crate) struct DraftWorkspaceFilePayload {
     pub path: String,
     pub content: String,
     pub binary: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstalledPluginPolicySource {
+    pub manifest: Value,
+    pub files: Vec<DraftWorkspaceFilePayload>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1027,6 +1055,67 @@ impl PluginPackageManager {
         self.load_release_payload(installation, &pending)
     }
 
+    pub(crate) fn read_installed_plugin_policy_source(
+        &self,
+        installation_id: &str,
+        pending: bool,
+    ) -> Result<InstalledPluginPolicySource, String> {
+        let installation = self.installation(installation_id)?;
+        let release = if pending {
+            installation
+                .pending_release
+                .as_ref()
+                .ok_or_else(|| "已安装插件没有待预检发行版".to_string())?
+        } else {
+            &installation.active_release
+        };
+        let package = self.checked_release_package_path(
+            &installation.installation_id,
+            &release.release_id,
+            &release.path,
+        )?;
+        let files = read_tagged_source_files(&package)?;
+        let manifest_file = files
+            .iter()
+            .find(|file| file.path == "manifest.json")
+            .ok_or_else(|| "已安装插件发行版缺少 manifest.json".to_string())?;
+        if manifest_file.binary {
+            return Err("已安装插件 manifest.json 不是 UTF-8 文本".to_string());
+        }
+        let manifest = serde_json::from_str(&manifest_file.content)
+            .map_err(|error| format!("已安装插件 manifest.json 格式错误：{error}"))?;
+        Ok(InstalledPluginPolicySource { manifest, files })
+    }
+
+    fn checked_release_package_path(
+        &self,
+        installation_id: &str,
+        release_id: &str,
+        ledger_path: &str,
+    ) -> Result<PathBuf, String> {
+        validate_storage_segment(installation_id, "installationId")?;
+        validate_storage_segment(release_id, "releaseId")?;
+        let installed_root = self
+            .installed_root()
+            .canonicalize()
+            .map_err(|error| format!("已安装插件根目录不可用：{error}"))?;
+        let expected = self
+            .installed_root()
+            .join(installation_id)
+            .join("releases")
+            .join(release_id)
+            .join("package")
+            .canonicalize()
+            .map_err(|error| format!("已安装插件发行版目录不可用：{error}"))?;
+        let actual = Path::new(ledger_path)
+            .canonicalize()
+            .map_err(|error| format!("安装账本中的发行版目录不可用：{error}"))?;
+        if actual != expected || !actual.starts_with(&installed_root) || !actual.is_dir() {
+            return Err("安装账本中的发行版路径越出对应 package 目录".to_string());
+        }
+        Ok(actual)
+    }
+
     pub(crate) fn activate_pending_client_plugin(
         &self,
         installation_id: &str,
@@ -1290,24 +1379,7 @@ impl PluginPackageManager {
         workspace_id: &str,
     ) -> Result<Vec<DraftWorkspaceFilePayload>, String> {
         let workspace = self.workspace(workspace_id)?;
-        let mut payloads = Vec::new();
-        for (relative, path) in collect_workspace_source_files(Path::new(&workspace.path))? {
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("读取草稿文件 {relative} 失败：{error}"))?;
-            match String::from_utf8(bytes) {
-                Ok(content) => payloads.push(DraftWorkspaceFilePayload {
-                    path: relative,
-                    content,
-                    binary: false,
-                }),
-                Err(error) => payloads.push(DraftWorkspaceFilePayload {
-                    path: relative,
-                    content: general_purpose::STANDARD.encode(error.into_bytes()),
-                    binary: true,
-                }),
-            }
-        }
-        Ok(payloads)
+        read_tagged_source_files(Path::new(&workspace.path))
     }
 
     pub(crate) fn create_workspace(

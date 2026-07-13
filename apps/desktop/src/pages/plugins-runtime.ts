@@ -2,6 +2,8 @@ import { api, tauriInvoke, type ApiError } from '@/lib/api';
 import type { LoadedPlugin } from '@/lib/types';
 import { setSharedData, getSharedData, listSharedKeys } from '@/lib/plugin-shared-data';
 import { requestSystemPermission } from '@/lib/plugin-permissions';
+import { pluginModelTier } from '@/lib/model-tier';
+import { assertInstalledPluginAiPolicy, assertPluginAiPolicy, policyManifest } from '@/lib/plugin-ai-policy';
 // SDK-06 修复：tokens.css 头注释与 spec（ui-tokens/frontend/tokens.md）均声明「宿主注入到所有插件容器」，
 // 但此前 apps/desktop 既未 import 也未在 srcDoc 注入，插件 var(--lf-color-*) 解析为空、设计令牌机制失效。
 // 现通过 Vite ?inline 把 tokens.css 内容内联为 <style> 前置到每个插件运行态文档，
@@ -25,6 +27,7 @@ function tokensStyles(): string {
 // 的回复（falsy），子端会误判成功并 resolve(undefined)。改为基于存在性判定（'error' in m），
 // 空 error 回填默认文案，避免吞错当成功。
 const RUNTIME_BRIDGE_TIMEOUT_MS = 30_000;
+const AI_BRIDGE_TIMEOUT_MS = 180_000;
 function bridgeShim(pluginId: string): string {
   return `<script>
     (function () {
@@ -35,7 +38,13 @@ function bridgeShim(pluginId: string): string {
           const { resolve, reject, timer } = pending[m.id]; delete pending[m.id];
           if (timer) clearTimeout(timer);
           // RT-07：基于存在性判定（'error' in m）而非真值，空串 error 回填默认文案。
-          if ('error' in m) reject(new Error(m.error || '操作失败'));
+          if ('error' in m) {
+            const detail = m.error && typeof m.error === 'object' ? m.error : { message: m.error };
+            const error = new Error(detail.message || '操作失败');
+            error.name = detail.name || 'Error';
+            error.code = detail.code; error.status = detail.status; error.requestId = detail.requestId;
+            reject(error);
+          }
           else resolve(m.result);
         }
       });
@@ -49,7 +58,7 @@ function bridgeShim(pluginId: string): string {
           const id = ++seq;
           const timer = setTimeout(() => {
             if (pending[id]) { delete pending[id]; reject(new Error('父端响应超时')); }
-          }, ${RUNTIME_BRIDGE_TIMEOUT_MS});
+          }, (kind === 'llm.chat' || kind === 'image.generate') ? ${AI_BRIDGE_TIMEOUT_MS} : ${RUNTIME_BRIDGE_TIMEOUT_MS});
           pending[id] = { resolve, reject, timer };
           parent.postMessage({ __lf_call: true, id, pluginId: ${JSON.stringify(pluginId)}, kind, args }, '*');
         });
@@ -86,7 +95,13 @@ function sdkShim(pluginId: string): string {
         if (m && m.__lf_reply !== undefined && pending[m.id]) {
           const { resolve, reject, timer } = pending[m.id]; delete pending[m.id];
           if (timer) clearTimeout(timer);
-          if ('error' in m) reject(new Error(m.error || '操作失败'));
+          if ('error' in m) {
+            const detail = m.error && typeof m.error === 'object' ? m.error : { message: m.error };
+            const error = new Error(detail.message || '操作失败');
+            error.name = detail.name || 'Error';
+            error.code = detail.code; error.status = detail.status; error.requestId = detail.requestId;
+            reject(error);
+          }
           else resolve(m.result);
         }
       });
@@ -95,7 +110,7 @@ function sdkShim(pluginId: string): string {
           const id = ++seq;
           const timer = setTimeout(() => {
             if (pending[id]) { delete pending[id]; reject(new Error('父端响应超时')); }
-          }, ${RUNTIME_BRIDGE_TIMEOUT_MS});
+          }, (kind === 'llm.chat' || kind === 'image.generate') ? ${AI_BRIDGE_TIMEOUT_MS} : ${RUNTIME_BRIDGE_TIMEOUT_MS});
           pending[id] = { resolve, reject, timer };
           parent.postMessage({ __lf_call: true, id, pluginId: ${JSON.stringify(pluginId)}, kind, args }, '*');
         });
@@ -147,7 +162,16 @@ function requireCapability(plugin: LoadedPlugin, kind: string): void {
   if (!declaresCapability(plugin, kind)) throw new Error(`插件未声明能力: ${kind}`);
 }
 
+export function pluginRelayClientSource(plugin: LoadedPlugin): 'desktop-plugin' | 'desktop-plugin-test' {
+  return plugin.draft ? 'desktop-plugin-test' : 'desktop-plugin';
+}
+
 export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> {
+  if (plugin.installationOrigin === 'local' && plugin.installationId) {
+    await assertInstalledPluginAiPolicy(plugin.installationId, Boolean(plugin.pendingActivation));
+  } else if ((plugin.draft || plugin.local) && plugin.files?.length) {
+    await assertPluginAiPolicy(policyManifest(plugin.files), plugin.files);
+  }
   // SDK-06：tokensStyles() 前置到 shim 之前，使 --lf-* 变量在插件文档加载时即可用。
   // 顺序：tokens 样式 → 桥 shim → 插件 HTML（这样插件若自己定义 --lf-* 仍可覆盖宿主默认）。
   if (isBuiltinPlugin(plugin)) {
@@ -190,6 +214,25 @@ export function errorMessage(error: unknown): string {
   const apiMsg = (error as ApiError).message;
   if (typeof apiMsg === 'string' && apiMsg.length > 0) return apiMsg;
   return String(error);
+}
+
+export type RuntimeErrorPayload = {
+  name: string;
+  message: string;
+  code?: string;
+  status?: number;
+  requestId?: string;
+};
+
+export function runtimeErrorPayload(error: unknown): RuntimeErrorPayload {
+  const source = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  return {
+    name: typeof source.name === 'string' ? source.name : 'Error',
+    message: errorMessage(error),
+    code: typeof source.code === 'string' ? source.code : undefined,
+    status: typeof source.status === 'number' ? source.status : undefined,
+    requestId: typeof source.requestId === 'string' ? source.requestId : undefined,
+  };
 }
 
 async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMessage['args']) {
@@ -245,10 +288,15 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     const input = (args || {}) as { messages?: { role: string; content: string }[]; model?: string; stream?: boolean };
     const messages = Array.isArray(input.messages) ? input.messages : [];
     if (messages.length === 0) throw new Error('llm.chat 缺少 messages');
-    const tier = input.model === 'premium' ? 'premium' : 'fast';
+    const tier = pluginModelTier(input.model);
     const res = await api<{ choices?: { message?: { content?: string } }[]; content?: string }>(
       '/api/relay/v1/chat/completions',
-      { method: 'POST', body: { model: tier, messages, stream: false } },
+      {
+        method: 'POST',
+        body: { model: tier, messages, stream: false },
+        timeoutMs: AI_BRIDGE_TIMEOUT_MS,
+        clientSource: pluginRelayClientSource(plugin),
+      },
     );
     // OpenAI 形状：choices[0].message.content；兜底 content 字段。
     return res.choices?.[0]?.message?.content ?? res.content ?? '';
@@ -258,10 +306,15 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     // 计费/中转：生图走 relay（/api/relay/v1/images/generations），按张计费。
     // 契约：input = { prompt, model?: 'fast'|'premium', size?, n? }。返回 { images: string[] }（url 或 base64）。
     const input = (args || {}) as { prompt: string; model?: string; size?: string; n?: number };
-    const tier = input.model === 'premium' ? 'premium' : 'fast';
+    const tier = pluginModelTier(input.model);
     const res = await api<{ data?: { url?: string; b64_json?: string }[] }>(
       '/api/relay/v1/images/generations',
-      { method: 'POST', body: { model: tier, prompt: input.prompt, n: input.n ?? 1, size: input.size } },
+      {
+        method: 'POST',
+        body: { model: tier, prompt: input.prompt, n: input.n ?? 1, size: input.size },
+        timeoutMs: AI_BRIDGE_TIMEOUT_MS,
+        clientSource: pluginRelayClientSource(plugin),
+      },
     );
     const images = (res.data ?? []).map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : '')).filter(Boolean);
     return { images };
@@ -303,6 +356,6 @@ export async function handleRuntimeCall(
     const result = await invokeRuntime(plugin, message.kind ?? '', message.args);
     frame.contentWindow?.postMessage({ __lf_reply: true, id: message.id, result }, '*');
   } catch (error) {
-    frame.contentWindow?.postMessage({ __lf_reply: true, id: message.id, error: errorMessage(error) }, '*');
+    frame.contentWindow?.postMessage({ __lf_reply: true, id: message.id, error: runtimeErrorPayload(error) }, '*');
   }
 }

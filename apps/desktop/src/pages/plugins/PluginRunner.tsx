@@ -261,7 +261,11 @@ function ScriptRunner({
         runtime={runtime}
         builtin={plugin.source === 'builtin' || Boolean(plugin.builtin)}
         installedOrigin={plugin.installationOrigin}
+        policyPreflight={Boolean(plugin.draft || plugin.local || plugin.installationOrigin === 'local')}
+        pendingActivation={Boolean(plugin.pendingActivation)}
         packageId={plugin.packageId}
+        releaseId={plugin.releaseId}
+        releaseSha256={plugin.releaseSha256}
         previewKey={previewKey}
         onRefresh={onRefresh}
         onRequestFix={onAutoFix}

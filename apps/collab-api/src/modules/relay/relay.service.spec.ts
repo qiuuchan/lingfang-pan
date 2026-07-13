@@ -22,7 +22,7 @@ vi.mock('./forwarders', async (importOriginal) => {
   };
 });
 
-import { RelayService } from './relay.service';
+import { RelayService, clientSourceFromRequest } from './relay.service';
 import * as forwarders from './forwarders';
 import { UpstreamError } from './forwarders';
 
@@ -70,14 +70,18 @@ function makeRouterCandidate(model = 'gpt-x') {
 
 function build(cap: number, opts: Parameters<typeof makeCredits>[1] = {}) {
   const prisma = {
+    pool: {
+      findMany: vi.fn(async () => []),
+    },
     llmCallLog: {
-      create: vi.fn(async () => ({ id: 'log1' })),
-      update: vi.fn(async () => ({})),
+      create: vi.fn(async (_args: unknown) => ({ id: 'log1' })),
+      update: vi.fn(async (_args: unknown) => ({})),
     },
   };
   const credits = makeCredits(cap, opts);
   const pricing = {
     lookupPrice: vi.fn(async () => ({ unit: 'PER_TOKEN_OUTPUT', pricePerUnit: 1000 })),
+    lookupMinContextWindow: vi.fn(async () => null),
     computeCredits: vi.fn(() => 0),
   };
   const router = {
@@ -91,7 +95,7 @@ function build(cap: number, opts: Parameters<typeof makeCredits>[1] = {}) {
 
 function makeReq() {
   return {
-    relayAuth: { teamId: 't1', userId: 'u1', apiKeyId: 'k1', scopes: ['chat', 'image'] },
+    relayAuth: { teamId: 't1', userId: 'u1' },
     header: vi.fn(() => undefined),
     query: {},
     headers: {},
@@ -104,9 +108,56 @@ function makeRes(headersSent = false) {
 
 const chatBody = { model: 'fast', messages: [{ role: 'user', content: 'hi' }], stream: false };
 
+describe('relay client source telemetry', () => {
+  it.each([
+    ['desktop-plugin', 'plugin_runtime'],
+    ['desktop-plugin-test', 'plugin_test'],
+    ['unknown', 'platform'],
+    [undefined, 'platform'],
+  ])('maps %s to %s without changing auth', (header, expected) => {
+    const req = { header: vi.fn(() => header) } as never;
+    expect(clientSourceFromRequest(req)).toBe(expected);
+  });
+});
+
 describe('RelayService.executeRelay 计费时机（R3：未成功对话不净扣费）', () => {
   beforeEach(() => {
     forwardOpenAiChat.mockReset();
+  });
+
+  it('省略 model 默认使用 fast，并记录平台来源且不写 apiKeyId', async () => {
+    const { svc, prisma, router } = build(0);
+    router.selectCandidates.mockResolvedValueOnce([]);
+    await expect(svc.chatCompletions(makeReq(), makeRes(false), {
+      messages: [{ role: 'user', content: 'hi' }],
+    })).rejects.toMatchObject({ code: 'no_channel_available' });
+    expect(router.selectCandidates).toHaveBeenCalledWith(expect.objectContaining({ tier: 'FAST', teamId: 't1' }));
+    const data = prisma.llmCallLog.create.mock.calls[0]?.[0]?.data;
+    expect(data).toMatchObject({ teamId: 't1', userId: 'u1', clientSource: 'platform' });
+    expect(data).not.toHaveProperty('apiKeyId');
+  });
+
+  it('未知 model 返回稳定 unsupported_model 且不创建计费日志', async () => {
+    const { svc, prisma } = build(0);
+    await expect(svc.chatCompletions(makeReq(), makeRes(false), {
+      model: 'gpt-real-name',
+      messages: [{ role: 'user', content: 'hi' }],
+    })).rejects.toMatchObject({ status: 400, code: 'unsupported_model' });
+    expect(prisma.llmCallLog.create).not.toHaveBeenCalled();
+  });
+
+  it('models 只返回当前团队资源池实际启用的聊天档位', async () => {
+    const { svc, prisma, pricing } = build(0);
+    prisma.pool.findMany.mockResolvedValue([
+      {
+        id: 'pool-fast', name: 'Fast', scope: 'SHARED', teamId: null,
+        channels: [{ tier: 'FAST' }],
+      },
+    ]);
+    pricing.lookupMinContextWindow.mockResolvedValueOnce(8192).mockResolvedValueOnce(null);
+    const result = await svc.listModels(makeReq());
+    expect(result.data.map((model) => model.id)).toEqual(['fast']);
+    expect(result.data[0]).toMatchObject({ contextWindow: 8192, resourcePools: [{ id: 'pool-fast' }] });
   });
 
   it('场景1 余额不足（cap>0）：reserve 抛 402；reconcile/refund 均不调用；净变化=0', async () => {
@@ -134,7 +185,11 @@ describe('RelayService.executeRelay 计费时机（R3：未成功对话不净扣
     router.selectCandidates.mockResolvedValueOnce([makeRouterCandidate('m1'), makeRouterCandidate('m2')]);
     pricing.lookupPrice.mockResolvedValue(null); // 所有候选都无定价
     await expect(svc.chatCompletions(makeReq(), makeRes(false), { ...chatBody }))
-      .rejects.toMatchObject({ status: 503, code: 'pricing_not_configured' });
+      .rejects.toMatchObject({
+        status: 503,
+        code: 'pricing_not_configured',
+        message: '当前模型版本暂不可用，请联系平台管理员配置定价',
+      });
     expect(credits.reconcile).not.toHaveBeenCalled();
     expect(credits.refund).toHaveBeenCalledTimes(1);
     expect(credits.__net()).toBe(0);

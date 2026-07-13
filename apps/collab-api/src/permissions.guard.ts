@@ -19,7 +19,7 @@ const RESOLVED_PERMS_KEY = '__resolvedPermissions';
  *  1. 无 @RequirePermission metadata → 放行（交给 @Public 或无权限要求的路由，由 service 内部自校验）。
  *  2. 取请求声明的权限码，按 scope 分两组：平台级（platform.*）/ 团队级（team.*）。
  *  3. 平台级权限：查 User.platformRoleId → Role.permissions，取并集。
- *  4. 团队级权限：解析当前团队 membership（ensureCurrentTeam 同款逻辑：joinedAt desc + ACTIVE + team ACTIVE）
+ *  4. 团队级权限：精确解析 JWT teamId 对应的 membership（ACTIVE + team ACTIVE）
  *     → teamRoleId → Role.permissions。
  *  5. OR 语义：声明的任一权限码命中已解析权限集即放行；否则 forbidden()。
  *  6. 请求级缓存：同 request 多次解析复用（permissionSet + resolvedTeamMembership）。
@@ -90,9 +90,9 @@ export class PermissionsGuard implements CanActivate {
     }
 
     if (needTeam) {
-      const membership = await this.resolveCurrentTeamMembership(user.id);
+      const membership = await this.resolveCurrentTeamMembership(user.id, user.teamId);
       // SUSPENDED 团队不解析团队权限（与 AuthService.ensureCurrentTeam 同款拦截语义：TEAM-03 修复）。
-      if (membership?.teamRoleId && membership.team.status === 'ACTIVE') {
+      if (membership?.status === 'ACTIVE' && membership.teamRoleId && membership.team.status === 'ACTIVE') {
         const role = await this.prisma.role.findUnique({
           where: { id: membership.teamRoleId },
           select: { permissions: true },
@@ -106,15 +106,14 @@ export class PermissionsGuard implements CanActivate {
   }
 
   /**
-   * 解析当前团队 membership（与 AuthService.ensureCurrentTeam 同款语义）：
-   * 取最近一条 ACTIVE membership（joinedAt desc），且团队须 ACTIVE，否则返回 null。
+   * 精确解析 JWT 绑定团队 membership，且团队须 ACTIVE，否则返回 null。
    * 抽到此处供 guard 自解析，避免与 AuthService 循环依赖。
    */
-  private async resolveCurrentTeamMembership(userId: string) {
-    return this.prisma.teamMembership.findFirst({
-      where: { userId, status: 'ACTIVE' },
+  private async resolveCurrentTeamMembership(userId: string, teamId: string | null) {
+    if (!teamId) return null;
+    return this.prisma.teamMembership.findUnique({
+      where: { teamId_userId: { teamId, userId } },
       include: { team: { select: { status: true } } },
-      orderBy: { joinedAt: 'desc' },
     });
   }
 }

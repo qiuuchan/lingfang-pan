@@ -613,7 +613,7 @@ export class AdminService {
       });
       await tx.user.update({
         where: { id: input.userId },
-        data: { tokenVersion: { increment: 1 } },
+        data: { tokenVersion: { increment: 1 }, teamContextVersion: { increment: 1 } },
       });
       await tx.auditLog.create({
         data: {
@@ -1276,6 +1276,10 @@ export class AdminService {
           role: 'TEAM_ADMIN',
           teamRoleId: systemRoles.adminRoleId,
         },
+      });
+      await tx.user.update({
+        where: { id: application.userId },
+        data: { teamContextVersion: { increment: 1 } },
       });
       await tx.auditLog.create({
         data: {

@@ -45,7 +45,7 @@ use crate::process_util::{
 use crate::runtime_resolver::RuntimeResolver;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
 // 避免重复实现（DRY）：plugin_id 白名单 / canonicalize 前缀断言 / 目录定位全走组A。
-use crate::plugin_llm_bridge::PluginLlmBridge;
+use crate::plugin_llm_bridge::{PluginBridgeClientSource, PluginLlmBridge};
 use crate::plugin_store::{sanitize_plugin_id, PluginStore};
 
 /// 插件运行时类型（与 plugin_store::PluginRuntime 对齐，serde lowercase）。
@@ -1072,19 +1072,27 @@ impl PluginProcessTable {
         };
         let (arc, started_at) = arc_started?;
         let mut guard = arc.lock().unwrap_or_else(|p| p.into_inner());
-        match guard.as_mut() {
+        let running_pid = match guard.as_mut() {
             Some(child) => match child.try_wait() {
-                Ok(None) => Some((child.id(), started_at)),
-                Ok(Some(_)) | Err(_) => {
-                    // 已退出：take Child 回收 + 清表条目。
-                    let _ = guard.take();
-                    let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-                    map.remove(plugin_id);
-                    None
-                }
+                Ok(None) => Some(child.id()),
+                Ok(Some(_)) | Err(_) => None,
             },
             None => None,
+        };
+        drop(guard);
+        if let Some(pid) = running_pid {
+            return Some((pid, started_at));
         }
+        // 只删除仍指向本次 Arc 的条目，避免自然退出与同 id 替换并发时误删新进程。
+        // Child 由退出监视线程持有的 Arc 回收，该线程仍可观察退出并撤销精确 bridge token。
+        let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if map
+            .get(plugin_id)
+            .is_some_and(|(current, _)| Arc::ptr_eq(current, &arc))
+        {
+            map.remove(plugin_id);
+        }
+        None
     }
 }
 
@@ -1448,7 +1456,7 @@ pub(crate) fn start_plugin_from_dir(
     // 依赖就绪，即将 spawn 入口进程 → 发 starting 阶段（前端切换到「启动中」动画）。
     emit_stage("starting", "正在启动插件进程…");
     // env_clear + 白名单：避免泄漏宿主 token/密钥到插件进程（与 plugin_script.rs 同语义）。
-    // 计费/中转：插件进程只拿 localhost 桥地址 + 一次性 token，不直接接触 JWT/API Key。
+    // 计费/中转：插件进程只拿 localhost 桥地址 + 进程会话 token，不直接接触 JWT/API Key。
     let mut env = runtime.env(minimal_env());
     let bridge_env = bridge.register_session(
         &plugin_id,
@@ -1459,6 +1467,7 @@ pub(crate) fn start_plugin_from_dir(
             .capabilities
             .iter()
             .any(|kind| kind == "image.generate"),
+        PluginBridgeClientSource::PluginRuntime,
         Duration::from_secs(12 * 60 * 60),
     )?;
     let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
@@ -1647,6 +1656,8 @@ pub(crate) fn start_plugin_from_dir(
     }
     // 存活：reader 线程持续逐行 emit plugin:output（进程活着期间一直流），无需额外排空。
     let started_at = now_iso();
+    // 替换同 id 进程时仅保留本次会话；旧 watcher 使用精确 token 撤销，不会误伤新会话。
+    bridge.revoke_plugin_except(&plugin_id, bridge_token.as_deref());
     let (pid, child_arc) =
         process_table.register_with_handle(&plugin_id, child, started_at.clone());
     log_launch(format!("启动成功：pid={pid}"));
@@ -1659,6 +1670,8 @@ pub(crate) fn start_plugin_from_dir(
         &plugin_id,
         child_arc,
         std::sync::Arc::clone(&stderr_buf),
+        bridge.clone(),
+        bridge_token,
     );
     Ok(StartPluginResult { pid, started_at })
 }
@@ -1675,6 +1688,8 @@ fn spawn_exit_watcher(
     plugin_id: &str,
     child_arc: Arc<Mutex<Option<Child>>>,
     stderr_buf: Arc<Mutex<String>>,
+    bridge: PluginLlmBridge,
+    bridge_token: Option<String>,
 ) {
     use tauri::Emitter;
     let pid_str = plugin_id.to_string();
@@ -1704,13 +1719,16 @@ fn spawn_exit_watcher(
                 },
                 None => {
                     // Arc 内 None = 已被 stop_plugin take 走（用户主动停止）。
-                    // 前端 handleStop 已解绑 plugin:exited 监听，不会收到事件，直接退出。
+                    // stop/replace 已同步撤销对应桥会话，直接退出。
                     return;
                 }
             }
         }
         if !exited {
             return; // 24h 超时，防泄漏兜底退出。
+        }
+        if let Some(token) = bridge_token {
+            bridge.revoke_token(&token);
         }
         // 读 stderr 尾部（≤4000 字符），供前端展示。
         let stderr_tail = stderr_buf

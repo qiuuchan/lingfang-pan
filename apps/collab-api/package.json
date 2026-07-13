@@ -10,14 +10,15 @@
     "test": "vitest run",
     "prisma:generate": "tsx src/prisma-cli.ts generate",
     "prisma:migrate": "tsx src/prisma-cli.ts migrate",
-    "prisma:deploy": "tsx src/prisma-cli.ts deploy",
+    "prisma:deploy": "tsx src/prisma-cli.ts deploy && tsx src/cleanup-retired-permissions.ts",
     "prisma:validate": "tsx src/prisma-cli.ts validate",
     "db:setup": "pnpm prisma:generate && pnpm prisma:deploy && pnpm seed:admin && pnpm seed:rbac && pnpm seed:billing && pnpm seed:releases",
     "seed:admin": "tsx src/seed-admin.ts",
     "seed:rbac": "tsx src/seed-rbac.ts",
     "seed:billing": "tsx src/seed-credits-channels.ts",
     "seed:releases": "tsx src/seed-releases.ts",
-    "plugin-registry:migrate": "tsx src/migrate-plugin-registry-v4.ts"
+    "plugin-registry:migrate": "tsx src/migrate-plugin-registry-v4.ts",
+    "plugin-ai-policy:audit": "tsx src/audit-plugin-ai-policy.ts"
   },
   "prisma": {
     "seed": "tsx src/seed-admin.ts"

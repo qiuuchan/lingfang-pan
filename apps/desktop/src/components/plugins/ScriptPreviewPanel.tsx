@@ -48,6 +48,8 @@ import { parseManifest } from '@/lib/plugin-draft';
 import { formatTimestamp } from '@/lib/time';
 import { errorMessage } from '@/pages/plugins-runtime';
 import type { DraftFile } from '@/lib/types';
+import { requiresRegistryRuntimeAccess } from '@/lib/plugin-runtime-access';
+import { assertInstalledPluginAiPolicy, assertPluginAiPolicy } from '@/lib/plugin-ai-policy';
 
 type ProbeState =
   | { status: 'idle' }
@@ -81,7 +83,11 @@ export function ScriptPreviewPanel({
   runtime,
   builtin = false,
   installedOrigin,
+  policyPreflight = false,
+  pendingActivation = false,
   packageId,
+  releaseId,
+  releaseSha256,
   previewKey,
   onRefresh,
   onRequestFix,
@@ -92,7 +98,11 @@ export function ScriptPreviewPanel({
   runtime: ScriptRuntime;
   builtin?: boolean;
   installedOrigin?: 'builtin' | 'local' | 'team' | 'marketplace';
+  policyPreflight?: boolean;
+  pendingActivation?: boolean;
   packageId?: string;
+  releaseId?: string;
+  releaseSha256?: string;
   previewKey: number;
   onRefresh: () => void;
   // 一键修复：plugin_crashed 时把 stderr 传回父组件（创建器）调 send 让 AI 修。无则不显示按钮。
@@ -223,11 +233,27 @@ export function ScriptPreviewPanel({
     unlistenOutputRef.current = null;
     logBuffer.clear();
     try {
+      if (installedOrigin === 'local') {
+        await assertInstalledPluginAiPolicy(pluginId, pendingActivation);
+      } else if (policyPreflight) {
+        await assertPluginAiPolicy(manifest as unknown as Record<string, unknown>, files);
+      }
       // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
+      if (installedOrigin && requiresRegistryRuntimeAccess(installedOrigin) && (!releaseId || !releaseSha256)) {
+        throw new Error('已安装插件缺少发行版标识，无法校验运行权限');
+      }
       const start = builtin
         ? startBuiltinPlugin
         : installedOrigin && packageId
-          ? (id: string, onProgress?: (progress: PluginStartProgress) => void, onExited?: (info: PluginExitedInfo) => void, onOutput?: Parameters<typeof startPlugin>[3]) => startInstalledPlugin(id, packageId, installedOrigin, onProgress, onExited, onOutput)
+          ? (id: string, onProgress?: (progress: PluginStartProgress) => void, onExited?: (info: PluginExitedInfo) => void, onOutput?: Parameters<typeof startPlugin>[3]) => startInstalledPlugin(
+              id,
+              packageId,
+              installedOrigin,
+              { releaseId: releaseId ?? '', sha256: releaseSha256 ?? '' },
+              onProgress,
+              onExited,
+              onOutput,
+            )
           : startPlugin;
       // onExited 接收 plugin:exited 事件（进程退出时触发）：
       // 切到 exited 态保留日志面板（exitCode 区分干净退出 vs 异常退出，但都保留输出供排查）。
@@ -284,7 +310,7 @@ export function ScriptPreviewPanel({
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
       }
     }
-  }, [builtin, installedOrigin, packageId, pluginId, runtime, logBuffer]);
+  }, [builtin, files, installedOrigin, manifest, packageId, pendingActivation, pluginId, policyPreflight, releaseId, releaseSha256, runtime, logBuffer]);
 
   const handleStop = useCallback(async () => {
     if (!pluginId) return;
@@ -314,12 +340,16 @@ export function ScriptPreviewPanel({
     if (!entryFile) return;
     setPreviewRun({ status: 'running' });
     try {
+      await assertPluginAiPolicy(manifest as unknown as Record<string, unknown>, files);
+      const capabilities = manifest.capabilities.map((capability) => capability.kind);
+      const usesAi = capabilities.some((kind) => kind === 'llm.chat' || kind === 'image.generate');
       const result = await runPluginScript({
         pluginId: pluginId || manifest.id,
         runtime,
         entry: manifest.entry,
         files: files.filter((file) => file.path !== 'manifest.json'),
-        capabilities: manifest.capabilities.map((capability) => capability.kind),
+        capabilities,
+        timeoutMs: usesAi ? 180_000 : undefined,
       });
       if (result.ok && !result.failure) {
         setPreviewRun({

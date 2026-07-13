@@ -101,22 +101,6 @@ export interface BalanceLedger {
   createdAt: string;
 }
 
-export interface PlatformApiKeyPublic {
-  id: string;
-  teamId: string;
-  name: string;
-  keyPrefix: string;
-  scopes: string[];
-  status: 'ACTIVE' | 'DISABLED';
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-}
-
-export interface PlatformApiKeyCreated extends PlatformApiKeyPublic {
-  plaintextKey: string;
-}
-
 export type AssistantOutputStream = 'stdout' | 'stderr' | 'thought' | 'tool';
 
 export interface DraftTurnSegment {
@@ -190,6 +174,8 @@ export interface LoadedPlugin {
   source?: 'builtin' | 'published' | 'installed' | 'platform' | 'team' | 'marketplace';
   installationId?: string;
   packageId?: string;
+  releaseId?: string;
+  releaseSha256?: string;
   installationOrigin?: 'builtin' | 'local' | 'team' | 'marketplace';
   /** 用户显式运行后预览的 pending client 制品；iframe onLoad 成功后才能原子激活。 */
   pendingActivation?: { releaseId: string };

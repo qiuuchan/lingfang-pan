@@ -20,6 +20,12 @@ function statusBadge(s: string) {
   return <Badge variant="secondary">{s}</Badge>;
 }
 
+function clientSourceLabel(source: LlmCallLog['clientSource']) {
+  if (source === 'plugin_runtime') return '插件运行';
+  if (source === 'plugin_test') return '插件测试';
+  return '平台';
+}
+
 export function CallLogsView() {
   const [logs, setLogs] = useState<LlmCallLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,13 +61,14 @@ export function CallLogsView() {
         <Button variant="outline" size="sm" onClick={reload} disabled={loading}><RotateCwIcon className={`size-4 ${loading ? 'animate-spin' : ''}`} />刷新</Button>
       </div>
       <Table>
-        <TableHeader><TableRow><TableHead>时间</TableHead><TableHead>团队/用户</TableHead><TableHead>能力</TableHead><TableHead>模型</TableHead><TableHead>池子</TableHead><TableHead>灵石</TableHead><TableHead>耗时</TableHead><TableHead>状态</TableHead><TableHead className="w-[60px]">详情</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>时间</TableHead><TableHead>团队/用户</TableHead><TableHead>能力</TableHead><TableHead>客户端来源</TableHead><TableHead>模型</TableHead><TableHead>池子</TableHead><TableHead>灵石</TableHead><TableHead>耗时</TableHead><TableHead>状态</TableHead><TableHead className="w-[60px]">详情</TableHead></TableRow></TableHeader>
         <TableBody>
           {logs.length ? logs.map((l) => (
             <TableRow key={l.id}>
               <TableCell className="text-xs text-muted-foreground">{new Date(l.createdAt).toLocaleString('zh-CN', { hour12: false })}</TableCell>
               <TableCell><div className="text-sm">{l.team?.name ?? l.teamId.slice(0, 8)}</div><div className="text-xs text-muted-foreground">{l.user?.email ?? '—'}</div></TableCell>
               <TableCell className="text-muted-foreground">{l.capability}</TableCell>
+              <TableCell><Badge variant="secondary">{clientSourceLabel(l.clientSource)}</Badge></TableCell>
               <TableCell className="font-mono text-xs">{l.model}</TableCell>
               <TableCell>{l.poolName ? <Badge variant="secondary">{l.poolName}</Badge> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
               <TableCell className="tabular-nums">{l.credits}</TableCell>
@@ -71,7 +78,7 @@ export function CallLogsView() {
                 <CallLogDetail summary={l} />
               </TableCell>
             </TableRow>
-          )) : <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">{loading ? '加载中…' : '暂无调用日志'}</TableCell></TableRow>}
+          )) : <TableRow><TableCell colSpan={10} className="py-8 text-center text-muted-foreground">{loading ? '加载中…' : '暂无调用日志'}</TableCell></TableRow>}
         </TableBody>
       </Table>
       <Pagination totalItems={totalItems} pageSize={pageSize} currentPage={page} onPageChange={setPage} onPageSizeChange={setPageSize} />
@@ -91,7 +98,7 @@ function CallLogDetail({ summary }: { summary: LlmCallLog }) {
   const log = detail ?? summary;
   return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="size-8"><EyeIcon className="size-4" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>调用详情</DialogTitle></DialogHeader>
     {!detail ? <div className="py-8 text-center text-sm text-muted-foreground">加载详情…</div> : <><InfoGrid items={[
-      ['模型', log.model], ['能力', log.capability], ['版本', log.tier ?? '—'], ['输入 token', log.inputTokens], ['输出 token', log.outputTokens], ['生图张数', log.images],
+      ['模型', log.model], ['能力', log.capability], ['客户端来源（自报）', clientSourceLabel(log.clientSource)], ['版本', log.tier ?? '—'], ['输入 token', log.inputTokens], ['输出 token', log.outputTokens], ['生图张数', log.images],
       ['灵石', log.credits], ['耗时', `${(log.durationMs / 1000).toFixed(2)}s`], ['HTTP', log.httpStatus ?? '—'], ['错误码', log.errorCode ?? '—'], ['渠道', log.channelName ?? log.channelId ?? '—'], ['池子', log.poolName ?? '—'], ['IP', log.clientIp ?? '—'],
     ]} /><div className="text-xs text-muted-foreground">请求摘要</div><pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs">{JSON.stringify(log.requestSummary, null, 2)}</pre></>}
   </DialogContent></Dialog>;

@@ -111,6 +111,9 @@ describe('CollabService plugin cloud sharing', () => {
       installCount: 0,
       ratingCount: 0,
       ratingSum: 0,
+      aiPolicyVersion: 1,
+      aiPolicyStatus: 'PASSED',
+      aiPolicyReason: '',
       createdAt: now,
       updatedAt: now,
     };

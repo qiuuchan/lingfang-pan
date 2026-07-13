@@ -33,6 +33,9 @@ function releaseRow(version: string, id = version) {
     sourceKind: 'UNKNOWN',
     sourceLabel: '',
     ingestChannel: 'API',
+    aiPolicyVersion: 1,
+    aiPolicyStatus: 'PASSED',
+    aiPolicyReason: '',
     reviewReason: '',
     createdAt: now,
   };
@@ -43,12 +46,17 @@ function service(prisma: Record<string, unknown>, auth: Record<string, unknown>,
 }
 
 function marketplaceListing(priceCents = 1200) {
+  const currentRelease = {
+    ...releaseRow('1.0.0', 'release-1'),
+    marketReviewStatus: 'APPROVED',
+  };
   return {
     id: 'listing-1',
     packageId: packageRow().id,
     currentReleaseId: 'release-1',
     priceCents,
     status: 'ACTIVE',
+    currentRelease,
     package: {
       ...packageRow(),
       ownerTeamId: 'seller-team',
@@ -145,8 +153,31 @@ describe('PluginRegistryService', () => {
       },
       { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: '22222222-2222-4222-8222-222222222222', role: 'MEMBER', teamRoleId: null }) },
     );
-    await expect(registry.runtimeAccess('user', packageRow().id)).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(registry.runtimeAccess('user', packageRow().id, 'release-1', 'a'.repeat(64)))
+      .rejects.toMatchObject({ code: 'forbidden' });
     expect(auditCreate).toHaveBeenCalledOnce();
+  });
+
+  it('binds runtime access to the exact published release and artifact digest', async () => {
+    const release = releaseRow('1.0.0', 'release-1');
+    const findRelease = vi.fn().mockResolvedValue(release);
+    const registry = service(
+      {
+        pluginPackage: { findUnique: vi.fn().mockResolvedValue({ ...packageRow(), listing: null }) },
+        pluginGrant: { findMany: vi.fn().mockResolvedValue([]) },
+        pluginRelease: { findUnique: findRelease },
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'MEMBER', teamRoleId: null }) },
+    );
+
+    await expect(registry.runtimeAccess('user', packageRow().id, release.id, release.sha256)).resolves.toMatchObject({
+      allowed: true,
+      mode: 'online-team-membership',
+    });
+    expect(findRelease).toHaveBeenCalledWith({ where: { id: release.id } });
+
+    await expect(registry.runtimeAccess('user', packageRow().id, release.id, 'b'.repeat(64)))
+      .rejects.toMatchObject({ code: 'plugin_release_mismatch' });
   });
 
   it('shows every release to the owner team but only approved releases to marketplace consumers', async () => {
@@ -255,7 +286,13 @@ describe('PluginRegistryService', () => {
       data: expect.objectContaining({ marketReviewStatus: 'APPROVED', reviewedById: 'admin' }),
     });
     expect(tx.pluginRelease.findMany).toHaveBeenCalledWith({
-      where: { packageId: packageRow().id, status: 'PUBLISHED', marketReviewStatus: 'APPROVED' },
+      where: {
+        packageId: packageRow().id,
+        status: 'PUBLISHED',
+        marketReviewStatus: 'APPROVED',
+        aiPolicyVersion: 1,
+        aiPolicyStatus: 'PASSED',
+      },
       select: { id: true, version: true },
     });
     expect(listingFindUnique).toHaveBeenCalledWith({ where: { packageId: packageRow().id } });

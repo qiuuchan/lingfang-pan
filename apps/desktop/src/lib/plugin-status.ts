@@ -14,7 +14,13 @@
 // 注：这些 Rust 命令由组A（目录管理）/组B（venv+pnpm 运行）实现，本封装层按契约先行落地，
 // 后端实现后即生效；命令未实现时 tauriInvoke 抛错，前端按 errorMessage 友好降级（不崩）。
 
-import { api, tauriInvoke, tauriListen, apiBase, getAuthToken } from '@/lib/api';
+import { tauriInvoke, tauriListen, apiBase, getAuthToken } from '@/lib/api';
+import {
+  checkRuntimeAccess,
+  requiresRegistryRuntimeAccess,
+  type InstalledPluginOrigin,
+  type RuntimeAccessRelease,
+} from '@/lib/plugin-runtime-access';
 
 // === 动态状态（PRD 需求 2：状态动态获取，不存 DB） ===
 
@@ -166,17 +172,18 @@ export async function startBuiltinPlugin(
 export async function startInstalledPlugin(
   installationId: string,
   packageId: string,
-  origin: 'builtin' | 'local' | 'team' | 'marketplace',
+  origin: InstalledPluginOrigin,
+  release: RuntimeAccessRelease,
   onProgress?: (progress: PluginStartProgress) => void,
   onExited?: (info: PluginExitedInfo) => void,
   onOutput?: (e: PluginOutputEvent) => void,
 ): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
-  let teamAccessGranted = false;
-  if (origin === 'team') {
-    await api(`/api/plugin-packages/${packageId}/runtime-access`, { method: 'POST' });
-    teamAccessGranted = true;
+  let registryAccessGranted = false;
+  if (requiresRegistryRuntimeAccess(origin)) {
+    await checkRuntimeAccess(packageId, release);
+    registryAccessGranted = true;
   }
-  return startPluginCommand('start_installed_plugin', installationId, onProgress, onExited, onOutput, { teamAccessGranted });
+  return startPluginCommand('start_installed_plugin', installationId, onProgress, onExited, onOutput, { registryAccessGranted });
 }
 
 /** 插件进程退出事件 payload（与 Rust PluginExited 对齐）。 */

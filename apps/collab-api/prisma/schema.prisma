@@ -189,12 +189,6 @@ enum ModelTierId {
   PREMIUM
 }
 
-// 计费/中转 · 平台 API Key 状态。ACTIVE 可用 / DISABLED 已吊销。
-enum ApiKeyStatus {
-  ACTIVE
-  DISABLED
-}
-
 // RBAC：插件授权主体类型。USER 针对具体用户；ROLE 针对某角色下全部成员。
 enum PluginGrantSubject {
   USER
@@ -257,6 +251,8 @@ model User {
   platformRoleId         String?
   // token 版本号：禁用/降级用户时自增，使已签发的旧 JWT 在 JwtAuthGuard 校验时失效（ADMIN-02/AUTH-01/XERR-02）。
   tokenVersion           Int                    @default(0)
+  // 当前团队会话上下文版本：membership 改变时自增，使旧 JWT/插件 bridge 立即失效。
+  teamContextVersion     Int                    @default(0)
   // 账户级密码重试锁定（组B）：连续密码错误累计计数，达阈值后置 lockedUntil 锁定。
   // 与 throttler（IP 级限流）正交：throttler 防单 IP 暴力扫描，本字段防定向爆破单账户。
   failedLoginAttempts    Int                    @default(0)
@@ -286,9 +282,8 @@ model User {
   platformSettingUpdates PlatformSetting[]      @relation("SettingUpdater")
   pluginGrantsCreated    PluginGrant[]          @relation("PluginGrantCreator")
   notifications          Notification[]
-  // 计费/中转反向关系：用户作为灵石流水触发者、平台 API Key 创建者、调用日志发起者。
+  // 计费/中转反向关系：用户作为灵石流水触发者、调用日志发起者。
   creditLedgerActor      CreditLedger[]         @relation("CreditLedgerActor")
-  createdApiKeys         PlatformApiKey[]       @relation("ApiKeyCreator")
   callLogs               LlmCallLog[]           @relation("CallLogCaller")
   // 帮助与反馈工单：用户作为提交人。handlerUserId 为弱引用（不建强关系，与 auditLog.actorUserId 同风格）。
   submittedTickets       Ticket[]               @relation("TicketSubmitter")
@@ -297,40 +292,39 @@ model User {
 }
 
 model Team {
-  id              String               @id @default(uuid())
-  name            String
-  slug            String               @unique
-  status          TeamStatus           @default(ACTIVE)
+  id                 String               @id @default(uuid())
+  name               String
+  slug               String               @unique
+  status             TeamStatus           @default(ACTIVE)
   // 团队是否开放公开加入：true 时出现在「发现公开团队」列表，普通用户可一键直接加入（无需邀请码）。
   // 默认 false：团队管理员需在 TeamManage 主动开启（避免新建团队立刻被任意用户加入）。
-  allowPublicJoin Boolean              @default(false)
+  allowPublicJoin    Boolean              @default(false)
   // 团队简介：公开团队发现页展示，帮助用户判断是否加入。
-  description     String               @default("")
-  balanceCents    Int                  @default(0)
+  description        String               @default("")
+  balanceCents       Int                  @default(0)
   // 团队默认资源池：指定团队默认使用的池子，为空时使用 SHARED 池。
-  defaultPoolId   String?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  memberships     TeamMembership[]
-  invitations     InvitationCode[]
-  ledger          BalanceLedger[]
-  plugins         Plugin[]
-  installations   PluginInstallation[]
-  pluginPackages  PluginPackage[]
+  defaultPoolId      String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  memberships        TeamMembership[]
+  invitations        InvitationCode[]
+  ledger             BalanceLedger[]
+  plugins            Plugin[]
+  installations      PluginInstallation[]
+  pluginPackages     PluginPackage[]
   pluginEntitlements PluginEntitlement[]
   // RBAC：团队级自定义角色（scope=TEAM，teamId 指向本团队）+ 团队插件授权记录。
-  roles           Role[]
-  pluginGrants    PluginGrant[]
-  // 计费/中转反向关系：团队灵石账户、灵石流水、平台 API Key、调用日志。
+  roles              Role[]
+  pluginGrants       PluginGrant[]
+  // 计费/中转反向关系：团队灵石账户、灵石流水、调用日志。
   // 注：ChannelBinding.scopeId 为多态列（不建 FK），故 Team 不持有 channelBindings 反向关系。
-  creditAccount   TeamCredit?
-  creditLedger    CreditLedger[]
-  apiKeys         PlatformApiKey[]
-  callLogs        LlmCallLog[]
-  pools           Pool[]               @relation("TeamDedicatedPools")
-  defaultPool     Pool?                @relation("TeamDefaultPool", fields: [defaultPoolId], references: [id], onDelete: SetNull)
+  creditAccount      TeamCredit?
+  creditLedger       CreditLedger[]
+  callLogs           LlmCallLog[]
+  pools              Pool[]               @relation("TeamDedicatedPools")
+  defaultPool        Pool?                @relation("TeamDefaultPool", fields: [defaultPoolId], references: [id], onDelete: SetNull)
   // 帮助与反馈工单：提交时的当前团队（可空，删团队置空）。
-  tickets         Ticket[]
+  tickets            Ticket[]
 
   // 公开团队发现查询索引：GET /api/teams/public 按 allowPublicJoin=true + status=ACTIVE 过滤。
   @@index([allowPublicJoin, status])
@@ -405,39 +399,42 @@ model BalanceLedger {
 }
 
 model Plugin {
-  id            String               @id @default(uuid())
-  name          String
-  description   String               @default("")
-  version       String               @default("0.1.0")
-  entry         String               @default("ui/index.html")
-  runtimeType   PluginRuntimeType    @default(CLIENT)
-  status        PluginStatus         @default(ENABLED)
-  visibility    PluginVisibility     @default(TEAM)
-  teamId        String?
-  authorUserId  String?
-  files         Json                 @default("[]")
-  manifest      Json                 @default("{}")
-  capabilities  Json                 @default("[]")
-  contentHash   String               @default("")
-  reviewStatus  PluginReviewStatus   @default(DRAFT)
-  reviewReason  String               @default("")
-  reviewedById  String?
-  reviewedAt    DateTime?
-  marketplace   Boolean              @default(false)
-  priceCents    Int                  @default(0)
-  installCount  Int                  @default(0)
-  ratingCount   Int                  @default(0)
-  ratingSum     Int                  @default(0)
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  team          Team?                @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  author        User?                @relation("PluginAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
-  reviewedBy    User?                @relation("PluginReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  installations PluginInstallation[]
-  reviews       PluginReview[]
-  purchases     Purchase[]
-  ratings       PluginRating[]
-  pluginGrants  PluginGrant[]
+  id              String               @id @default(uuid())
+  name            String
+  description     String               @default("")
+  version         String               @default("0.1.0")
+  entry           String               @default("ui/index.html")
+  runtimeType     PluginRuntimeType    @default(CLIENT)
+  status          PluginStatus         @default(ENABLED)
+  visibility      PluginVisibility     @default(TEAM)
+  teamId          String?
+  authorUserId    String?
+  files           Json                 @default("[]")
+  manifest        Json                 @default("{}")
+  capabilities    Json                 @default("[]")
+  contentHash     String               @default("")
+  reviewStatus    PluginReviewStatus   @default(DRAFT)
+  reviewReason    String               @default("")
+  reviewedById    String?
+  reviewedAt      DateTime?
+  marketplace     Boolean              @default(false)
+  priceCents      Int                  @default(0)
+  installCount    Int                  @default(0)
+  ratingCount     Int                  @default(0)
+  ratingSum       Int                  @default(0)
+  aiPolicyVersion Int                  @default(0)
+  aiPolicyStatus  String               @default("UNCHECKED")
+  aiPolicyReason  String               @default("")
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  team            Team?                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  author          User?                @relation("PluginAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  reviewedBy      User?                @relation("PluginReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  installations   PluginInstallation[]
+  reviews         PluginReview[]
+  purchases       Purchase[]
+  ratings         PluginRating[]
+  pluginGrants    PluginGrant[]
 
   @@unique([teamId, contentHash])
   @@index([teamId, status, visibility])
@@ -500,29 +497,32 @@ model PluginPackage {
 }
 
 model PluginRelease {
-  id                 String                @id @default(uuid())
+  id                 String                  @id @default(uuid())
   packageId          String
   version            String
   manifest           Json
-  fileManifest       Json                  @default("[]")
-  artifactKey        String                @unique
+  fileManifest       Json                    @default("[]")
+  artifactKey        String                  @unique
   sha256             String
   sizeBytes          Int
-  targetPlatform     String                @default("windows-x64")
+  targetPlatform     String                  @default("windows-x64")
   sourceKind         PluginReleaseSourceKind @default(UNKNOWN)
-  sourceLabel        String                @default("")
-  ingestChannel      PluginIngestChannel   @default(API)
-  status             PluginArtifactStatus  @default(PUBLISHED)
-  marketReviewStatus PluginReviewStatus    @default(DRAFT)
-  reviewReason       String                @default("")
+  sourceLabel        String                  @default("")
+  ingestChannel      PluginIngestChannel     @default(API)
+  status             PluginArtifactStatus    @default(PUBLISHED)
+  marketReviewStatus PluginReviewStatus      @default(DRAFT)
+  reviewReason       String                  @default("")
   reviewedById       String?
   reviewedAt         DateTime?
   createdById        String?
-  createdAt          DateTime              @default(now())
-  package            PluginPackage         @relation("PluginPackageReleases", fields: [packageId], references: [id], onDelete: Restrict)
-  creator            User?                 @relation("PluginReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  aiPolicyVersion    Int                     @default(0)
+  aiPolicyStatus     String                  @default("UNCHECKED")
+  aiPolicyReason     String                  @default("")
+  createdAt          DateTime                @default(now())
+  package            PluginPackage           @relation("PluginPackageReleases", fields: [packageId], references: [id], onDelete: Restrict)
+  creator            User?                   @relation("PluginReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   reviews            PluginReleaseReview[]
-  currentForListings MarketplaceListing[]  @relation("MarketplaceCurrentRelease")
+  currentForListings MarketplaceListing[]    @relation("MarketplaceCurrentRelease")
 
   @@unique([packageId, version])
   @@index([packageId, status, createdAt])
@@ -831,13 +831,13 @@ model PermissionEntry {
 // 仅覆盖显示名，不可新增/删除权限码本身。isSystem=true 为内置行（seed 写入，不可删）；isSystem=false 为管理员自定义覆盖行。
 // 复合主键 (scope, groupKey)：同一 scope 下 groupKey 唯一。
 model PermissionGroup {
-  scope      RoleScope
-  groupKey   String
+  scope       RoleScope
+  groupKey    String
   displayName String
-  sortOrder  Int      @default(0)
-  isSystem   Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  sortOrder   Int       @default(0)
+  isSystem    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@id([scope, groupKey])
   @@index([scope, sortOrder])
@@ -906,8 +906,7 @@ model PluginGrant {
 //  - TeamCredit 独立于 Team.balanceCents（人民币·市场用）：本表是 AI 用量计费的虚拟货币「灵石」。
 //  - 预扣 cap + 实算冲销：CreditLedger.source=reserve 记预扣，llm_consume/image_consume 记实扣，
 //    refund 记上游失败回退；同一 callLogId 串联一次调用的全部账务变动。
-//  - 上游真实 key 复用 credential-cipher（AES-256-GCM）加密存 Channel.encryptedUpstreamKey；
-//    PlatformApiKey 只存 sha256(keyHash)，明文仅创建时返回一次。
+//  - 上游真实 key 复用 credential-cipher（AES-256-GCM）加密存 Channel.encryptedUpstreamKey。
 //  - LlmCallLog 是计费/日志咽喉的唯一事实来源，多维索引覆盖管理端查询。
 // ============================================================
 
@@ -916,15 +915,15 @@ model PluginGrant {
 // 团队 T 可用的池 = 全部 SHARED 池 + scope=DEDICATED 且 teamId=T 的池；relay 在这些池的渠道中按 kind+tier 轮询。
 // 一个池可含多个渠道（聊天/生图混存）；渠道的 kind+tier 决定它服务哪类请求。
 model Pool {
-  id                String    @id @default(uuid())
-  name              String    @unique // 展示名（如「默认池」「A 企业专用池」）
-  scope             PoolScope @default(SHARED)
-  teamId            String? // scope=DEDICATED 时必填（应用层校验团队存在 + 唯一性）
-  description       String    @default("")
-  createdAt         DateTime  @default(now())
-  team              Team?     @relation("TeamDedicatedPools", fields: [teamId], references: [id], onDelete: Cascade)
-  channels          Channel[]
-  defaultForTeams   Team[]    @relation("TeamDefaultPool")
+  id              String    @id @default(uuid())
+  name            String    @unique // 展示名（如「默认池」「A 企业专用池」）
+  scope           PoolScope @default(SHARED)
+  teamId          String? // scope=DEDICATED 时必填（应用层校验团队存在 + 唯一性）
+  description     String    @default("")
+  createdAt       DateTime  @default(now())
+  team            Team?     @relation("TeamDedicatedPools", fields: [teamId], references: [id], onDelete: Cascade)
+  channels        Channel[]
+  defaultForTeams Team[]    @relation("TeamDefaultPool")
 }
 
 // 上游渠道：归属一个资源池，有类型（聊天/生图）+ 版本标签（快速/高级）+ 多个可轮询模型。
@@ -936,8 +935,8 @@ model Pool {
 // protocol: OPENAI（/chat/completions + /images/generations）/ ANTHROPIC（/v1/messages）。
 //           IMAGE 渠道仅支持 OPENAI 协议（Anthropic 无原生生图 API）。
 model Channel {
-  id                   String           @id @default(uuid())
-  name                 String           @unique // 展示名（如「OpenAI 官方」）
+  id                   String          @id @default(uuid())
+  name                 String          @unique // 展示名（如「OpenAI 官方」）
   kind                 ChannelKind // CHAT 聊天 / IMAGE 生图
   tier                 ModelTierId // FAST 快速 / PREMIUM 高级
   protocol             ChannelProtocol
@@ -945,15 +944,15 @@ model Channel {
   poolId               String
   baseUrl              String // 上游基址（规范化去尾斜杠，如 https://api.openai.com/v1）
   encryptedUpstreamKey String // base64(iv||tag||ciphertext)
-  upstreamKeyHint      String           @default("") // 脱敏串（非敏感，明文存库）
-  models               Json             @default("[]") // string[]，自定义多个上游模型，轮询调用
-  status               ChannelStatus    @default(ENABLED)
-  description          String           @default("")
+  upstreamKeyHint      String          @default("") // 脱敏串（非敏感，明文存库）
+  models               Json            @default("[]") // string[]，自定义多个上游模型，轮询调用
+  status               ChannelStatus   @default(ENABLED)
+  description          String          @default("")
   lastHealthAt         DateTime?
   lastHealthOk         Boolean?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  pool                 Pool             @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  pool                 Pool            @relation(fields: [poolId], references: [id], onDelete: Cascade)
   callLogs             LlmCallLog[]
 
   @@index([poolId, status])
@@ -1000,17 +999,17 @@ model CreditLedger {
 //   PER_CALL / PER_IMAGE 时 pricePerUnit = 每次/每张固定灵石数。
 // tier: 可选——同模型不同版本不同价（null 表示该模型所有版本同价）。
 model ModelPricing {
-  id            String      @id @default(uuid())
+  id            String       @id @default(uuid())
   capability    String // chat / image / action
   model         String // 上游模型 id 或动作 key
-  label         String      @default("") // 展示名
+  label         String       @default("") // 展示名
   unit          PricingUnit
   pricePerUnit  Float // 灵石（PER_TOKEN_* 时为每 1M token 价，支持小数）
   tier          ModelTierId? // 可选版本绑定
   contextWindow Int? // 该模型最大上下文窗口（token），供前端上下文用量管理与压缩阈值参考
-  enabled       Boolean     @default(true)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  enabled       Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   @@unique([capability, model, tier])
   @@index([capability, enabled])
@@ -1022,64 +1021,39 @@ model ModelPricing {
 // ModelTierConfig 已移除：版本现由「打了 tier 标签的渠道池」决定，渠道内 models[] 轮询。
 // 旧的 tier→固定底层模型映射不再需要。
 
-
-// 平台 API Key（平台发放给团队，用于调 /api/relay/*）。
-// 明文格式 lf_<32 hex>；keyHash=sha256(明文) 存库（凭据类不存密文/脱敏，只存哈希用于比对查找）。
-// keyPrefix: 展示前缀（lf_ + 明文前 8 位），列表展示用（非敏感）。
-// teamId: 归属团队（消费扣该团队灵石）。scopes: 能力白名单（chat/image/tier:fast/tier:premium）。
-model PlatformApiKey {
-  id          String        @id @default(uuid())
-  teamId      String
-  name        String        @default("") // 用户给的备注名
-  keyPrefix   String // 展示前缀（lf_xxxxxxxx）
-  keyHash     String        @unique // sha256(明文)
-  scopes      String[]      @default([]) // 能力白名单：chat/image/tier:fast/tier:premium
-  status      ApiKeyStatus  @default(ACTIVE)
-  createdById String?
-  lastUsedAt  DateTime?
-  expiresAt   DateTime?
-  createdAt   DateTime      @default(now())
-  team        Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  createdBy   User?         @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  callLogs    LlmCallLog[]
-
-  @@index([teamId, status])
-  @@index([keyHash])
-}
-
 // 调用日志（每次 relay 调用一条）。管理端多维度查询的事实来源。
 // status: success / upstream_error / client_error / insufficient_balance / rate_limited。
 // requestSummary: 脱敏元数据（model/temperature/size/n 等），**不存 prompt 全文**（PII + 体积）。
 // credits: 本次实扣灵石（冲销后净额；失败回退为 0）。callLogId 串联 CreditLedger 账务。
 model LlmCallLog {
-  id             String        @id @default(uuid())
+  id             String       @id @default(uuid())
   teamId         String
-  userId         String? // 发起者（API Key 调用时可能为空）
-  apiKeyId       String?
+  userId         String? // 发起者；插件 relay 仅接受登录 JWT，因此正常调用必有 userId。
   channelId      String?
   capability     String // chat / image / action
   tier           ModelTierId?
   model          String // 实际上游模型 id
-  inputTokens    Int           @default(0)
-  outputTokens   Int           @default(0)
-  images         Int           @default(0) // 生图张数
-  durationMs     Int           @default(0)
-  credits        Float         @default(0) // 本次实扣灵石（支持小数）
+  inputTokens    Int          @default(0)
+  outputTokens   Int          @default(0)
+  images         Int          @default(0) // 生图张数
+  durationMs     Int          @default(0)
+  credits        Float        @default(0) // 本次实扣灵石（支持小数）
   status         String // success/upstream_error/client_error/insufficient_balance/rate_limited
   httpStatus     Int?
   errorCode      String?
   requestId      String? // x-request-id（排障串联）
-  requestSummary Json          @default("{}") // 脱敏元数据（不含 prompt 全文）
+  requestSummary Json         @default("{}") // 脱敏元数据（不含 prompt 全文）
   clientIp       String?
-  createdAt      DateTime      @default(now())
-  team           Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  user           User?         @relation("CallLogCaller", fields: [userId], references: [id], onDelete: SetNull)
-  apiKey         PlatformApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
-  channel        Channel?      @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  // 客户端自报来源，仅作遥测；不参与鉴权、路由、定价或扣费。
+  clientSource   String       @default("platform")
+  createdAt      DateTime     @default(now())
+  team           Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user           User?        @relation("CallLogCaller", fields: [userId], references: [id], onDelete: SetNull)
+  channel        Channel?     @relation(fields: [channelId], references: [id], onDelete: SetNull)
 
   @@index([teamId, createdAt])
   @@index([userId, createdAt])
-  @@index([apiKeyId, createdAt])
+  @@index([clientSource, createdAt])
   @@index([capability, createdAt])
   @@index([status, createdAt])
   @@index([model, createdAt])

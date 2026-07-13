@@ -1,7 +1,7 @@
 // BillingTab —— 设置页「模型与计费」Tab。
 //
 // 普通成员不在这里创建、填写或查看 API Key/API URL。插件和 Agent 统一通过宿主桥/登录态
-// 调用平台 relay；团队共享 API Key 只在团队管理页由管理员轮换，用于外部 relay 接入。
+// 调用平台 relay，并且只消耗当前会话团队额度。
 import { useEffect, useState } from 'react';
 import { InfoIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -84,9 +84,9 @@ export function BillingTab() {
               </p>
             </div>
             <div className="rounded-lg border bg-muted/20 p-3">
-              <div className="text-sm font-medium">团队共享 API Key</div>
+              <div className="text-sm font-medium">团队额度</div>
               <p className="mt-1 text-xs text-muted-foreground">
-                仅团队管理员可在「团队管理」中轮换或吊销，用于外部兼容接入。
+                对话与生图统一消耗当前会话团队的灵石，不会切换到其他团队或个人额度。
               </p>
             </div>
           </div>

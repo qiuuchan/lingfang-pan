@@ -115,6 +115,19 @@ describe('normalizeCapabilities', () => {
     const out = normalizeCapabilities([{ kind: 'fs.read', scope: { paths: ['/tmp'] } }]);
     expect(out[0].scope).toEqual({ paths: ['/tmp'] });
   });
+
+  it('AI 能力忽略旧 requires_admin=true，非 AI 能力保持通用语义', () => {
+    const out = normalizeCapabilities([
+      { kind: 'llm.chat', requires_admin: true },
+      { kind: 'image.generate', requires_admin: true },
+      { kind: 'fs.read', requires_admin: true },
+    ]);
+    expect(out.map((capability) => [capability.kind, capability.requires_admin])).toEqual([
+      ['llm.chat', false],
+      ['image.generate', false],
+      ['fs.read', true],
+    ]);
+  });
 });
 
 // === buildFallbackEntryHtml ===

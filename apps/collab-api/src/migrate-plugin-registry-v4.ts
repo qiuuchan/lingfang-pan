@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, open, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { Prisma } from '@prisma/client';
-import { createArtifactStore } from './modules/artifact-store';
+import { createArtifactStore, type ArtifactDownload } from './modules/artifact-store';
+import { assertPluginAiPolicy } from './modules/plugin-ai-policy-enforcement';
 import { inspectPluginArtifact } from './modules/plugin-artifact';
 import { PrismaService } from './prisma.service';
 
@@ -44,6 +47,16 @@ async function sha256File(path: string) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
   return hash.digest('hex');
+}
+
+async function writeDownload(download: ArtifactDownload, path: string): Promise<void> {
+  if (download.kind === 'stream') {
+    await pipeline(download.stream as Readable, createWriteStream(path, { flags: 'wx' }));
+    return;
+  }
+  const response = await fetch(download.url);
+  if (!response.ok || !response.body) throw new Error(`artifact download failed: ${response.status}`);
+  await pipeline(Readable.fromWeb(response.body as never), createWriteStream(path, { flags: 'wx' }));
 }
 
 async function writeV4Artifact(path: string, manifest: Record<string, unknown>, files: LegacyFile[]): Promise<void> {
@@ -158,6 +171,7 @@ async function main() {
         const artifactPath = join(directory, 'artifact.lfplugin');
         await writeV4Artifact(artifactPath, manifest, files);
         const inspected = await inspectPluginArtifact(artifactPath);
+        let policy = assertPluginAiPolicy({ manifest: inspected.manifest, files: inspected.policyFiles });
         const sha256 = await sha256File(artifactPath);
         const sizeBytes = (await stat(artifactPath)).size;
         const existingPackage = await prisma.pluginPackage.findUnique({
@@ -166,6 +180,20 @@ async function main() {
         const existingRelease = existingPackage
           ? await prisma.pluginRelease.findUnique({ where: { packageId_version: { packageId: existingPackage.id, version: inspected.manifest.version } } })
           : null;
+        if (existingRelease) {
+          if (existingRelease.sha256 !== sha256 || existingRelease.sizeBytes !== sizeBytes) {
+            throw new Error('existing release artifact does not match the legacy plugin content');
+          }
+          const existingArtifactPath = join(directory, 'existing-artifact.lfplugin');
+          await writeDownload(await artifacts.download(existingRelease.artifactKey), existingArtifactPath);
+          const actualSha256 = await sha256File(existingArtifactPath);
+          const actualSizeBytes = (await stat(existingArtifactPath)).size;
+          if (actualSha256 !== existingRelease.sha256 || actualSizeBytes !== existingRelease.sizeBytes) {
+            throw new Error('existing release artifact integrity check failed');
+          }
+          const existingInspected = await inspectPluginArtifact(existingArtifactPath);
+          policy = assertPluginAiPolicy({ manifest: existingInspected.manifest, files: existingInspected.policyFiles });
+        }
         if (!apply) {
           if (existingRelease) summary.skipped += 1;
           else summary.migrated += 1;
@@ -196,10 +224,23 @@ async function main() {
               reviewedAt: plugin.reviewedAt,
               createdById: plugin.authorUserId,
               createdAt: plugin.createdAt,
+              aiPolicyVersion: policy.policyVersion,
+              aiPolicyStatus: 'PASSED',
+              aiPolicyReason: '',
             },
           });
         }
         await prisma.$transaction(async (tx) => {
+          if (existingRelease) {
+            await tx.pluginRelease.update({
+              where: { id: release.id },
+              data: {
+                aiPolicyVersion: policy.policyVersion,
+                aiPolicyStatus: 'PASSED',
+                aiPolicyReason: '',
+              },
+            });
+          }
           if (plugin.marketplace && plugin.reviewStatus === 'APPROVED') {
             await tx.marketplaceListing.upsert({
               where: { packageId: pkg.id },

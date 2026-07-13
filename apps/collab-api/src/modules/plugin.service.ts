@@ -5,6 +5,8 @@ import { badRequest, conflict, forbidden, notFound, AppError } from '../common';
 import { AuthService } from './auth.service';
 import { PluginGrantService } from './plugin-grant.service';
 import { NotificationService } from './notification.service';
+import { PLUGIN_AI_POLICY_VERSION } from './plugin-ai-policy';
+import { assertPluginAiPolicy } from './plugin-ai-policy-enforcement';
 import { ensurePluginManager, normalizePluginPackage, publicAvailablePlugin, publicPlugin, type PluginPackageInput } from './plugin-package';
 
 /** 语义版本比较：newVer 是否严格大于 oldVer（x.y.z）。非法格式按 0.0.0 处理。 */
@@ -33,10 +35,19 @@ export class PluginService {
     const membership = await this.auth.ensureCurrentTeam(userId);
     if (membership.team.status !== 'ACTIVE') throw forbidden('团队当前不可上传插件');
     const normalized = normalizePluginPackage(input);
+    const policy = assertPluginAiPolicy({ manifest: normalized.manifest, files: normalized.files });
     const existing = await this.prisma.plugin.findUnique({
       where: { teamId_contentHash: { teamId: membership.teamId, contentHash: normalized.contentHash } },
     });
-    if (existing) return { plugin: publicPlugin(existing, membership.teamId), deduplicated: true };
+    if (existing) {
+      const checked = existing.aiPolicyVersion === policy.policyVersion && existing.aiPolicyStatus === 'PASSED'
+        ? existing
+        : await this.prisma.plugin.update({
+            where: { id: existing.id },
+            data: { aiPolicyVersion: policy.policyVersion, aiPolicyStatus: 'PASSED', aiPolicyReason: '' },
+          });
+      return { plugin: publicPlugin(checked, membership.teamId), deduplicated: true };
+    }
 
     // 同 manifest.id + 同团队 已存在 → 视为同插件的版本升级，委托 editPluginDraft 做 in-place 更新
     // （含权限校验 + 版本校验 + 通知已安装用户）。manifest.id 由 normalizePluginPackage 规范化（trim）。
@@ -70,6 +81,9 @@ export class PluginService {
         reviewStatus: 'DRAFT',
         marketplace: false,
         priceCents: Math.max(0, Number(input.priceCents || 0)),
+        aiPolicyVersion: policy.policyVersion,
+        aiPolicyStatus: 'PASSED',
+        aiPolicyReason: '',
       },
     });
     await this.audit(userId, 'plugin.uploaded', 'Plugin', plugin.id, { teamId: membership.teamId, contentHash: normalized.contentHash });
@@ -90,6 +104,8 @@ export class PluginService {
     const plugins = await this.prisma.plugin.findMany({
       where: {
         status: 'ENABLED',
+        aiPolicyVersion: PLUGIN_AI_POLICY_VERSION,
+        aiPolicyStatus: 'PASSED',
         OR: [
           { teamId: membership.teamId, visibility: 'TEAM' },
           { teamId: membership.teamId, visibility: 'PRIVATE', authorUserId: userId },
@@ -121,6 +137,9 @@ export class PluginService {
     if (!plugin) throw notFound('插件不存在');
     ensurePluginManager(plugin, membership.teamId, userId, membership.role);
     if (plugin.status !== 'ENABLED') throw forbidden('已禁用插件不能提交市场');
+    if (plugin.aiPolicyVersion !== PLUGIN_AI_POLICY_VERSION || plugin.aiPolicyStatus !== 'PASSED') {
+      throw new AppError(409, 'plugin_ai_policy_required', '插件需要通过当前 AI 使用政策检查后才能提交');
+    }
     if (plugin.reviewStatus === 'PENDING') throw conflict('插件已在审核中');
 
     // 修复 PPK-03：显式区分 undefined（保持原价）与 0（免费化），此前 0 被 || 吞掉无法改免费。
@@ -217,6 +236,7 @@ export class PluginService {
     const isLiveUpdate = plugin.reviewStatus === 'APPROVED' && plugin.marketplace;
 
     const normalized = normalizePluginPackage(input);
+    const policy = assertPluginAiPolicy({ manifest: normalized.manifest, files: normalized.files });
     const duplicated = await this.prisma.plugin.findUnique({
       where: { teamId_contentHash: { teamId: membership.teamId, contentHash: normalized.contentHash } },
     });
@@ -244,6 +264,9 @@ export class PluginService {
           manifest: normalized.manifest as unknown as Prisma.InputJsonValue,
           capabilities: normalized.manifest.capabilities as unknown as Prisma.InputJsonValue,
           contentHash: normalized.contentHash,
+          aiPolicyVersion: policy.policyVersion,
+          aiPolicyStatus: 'PASSED',
+          aiPolicyReason: '',
           // 保留审核态：不重置 reviewStatus/marketplace/visibility，已购用户不受影响，新版直接生效。
         },
       });
@@ -267,6 +290,9 @@ export class PluginService {
         manifest: normalized.manifest as unknown as Prisma.InputJsonValue,
         capabilities: normalized.manifest.capabilities as unknown as Prisma.InputJsonValue,
         contentHash: normalized.contentHash,
+        aiPolicyVersion: policy.policyVersion,
+        aiPolicyStatus: 'PASSED',
+        aiPolicyReason: '',
         reviewStatus: 'DRAFT',
         reviewReason: '',
         reviewedById: null,

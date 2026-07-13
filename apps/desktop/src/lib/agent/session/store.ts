@@ -17,6 +17,7 @@ import { errorMessage } from '@/lib/api';
 import { CREATOR_PROVENANCE } from '@/lib/plugin-provenance';
 import { readWorkspaceFiles, writeWorkspaceFiles } from '@/lib/plugin-status';
 import type { LoadedPlugin } from '@/lib/types';
+import { capabilityRequiresAdmin } from '@/lib/plugin-capabilities';
 import {
   withSyncedStagedManifest,
   type StagedPlugin,
@@ -55,7 +56,7 @@ function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
       kind: rawKind,
       reason: typeof raw.reason === 'string' ? raw.reason : '',
       risk,
-      requires_admin: raw.requires_admin === true,
+      requires_admin: capabilityRequiresAdmin(rawKind, raw.requires_admin),
     } as StagedPlugin['capabilities'][number]];
   });
 }

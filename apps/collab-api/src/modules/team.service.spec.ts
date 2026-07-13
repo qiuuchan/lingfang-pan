@@ -14,14 +14,16 @@ function mockPrisma() {
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
   };
-  const teamMembership = { upsert: vi.fn() };
+  const teamMembership = { upsert: vi.fn(), findUnique: vi.fn(), update: vi.fn() };
+  const user = { update: vi.fn() };
   const auditLog = { create: vi.fn() };
   // 邀请码模型：createInvitation 用 create，redeemInvitation 用 findUnique + 事务内 updateMany。
   const invitationCode = { create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) };
   const tx = {
-    teamMembership: { upsert: teamMembership.upsert },
+    teamMembership: { upsert: teamMembership.upsert, update: teamMembership.update },
     auditLog: { create: auditLog.create },
     invitationCode: { updateMany: invitationCode.updateMany },
+    user,
   };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
   return { team, teamMembership, auditLog, invitationCode, $transaction, __tx: tx };
@@ -32,6 +34,7 @@ function mockAuth() {
     ensureTeamAdmin: vi.fn(),
     ensureCurrentTeam: vi.fn(),
     me: vi.fn(async (userId: string) => ({ user: { id: userId }, team: { id: 'team-1' } })),
+    sessionAfterTeamContextChange: vi.fn(async (userId: string) => ({ user: { id: userId }, team: { id: 'team-1' }, token: 'new-token' })),
   };
 }
 
@@ -103,9 +106,13 @@ describe('TeamService 公开团队发现 + 直接加入 + 资料', () => {
       expect(prisma.__tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ action: 'team.public_joined', targetId: 't1' }),
       }));
-      // 返回 auth.me（最新 session）。
-      expect(auth.me).toHaveBeenCalledWith('u1');
-      expect(result).toEqual({ user: { id: 'u1' }, team: { id: 'team-1' } });
+      expect(prisma.__tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { teamContextVersion: { increment: 1 } },
+      });
+      // 返回带新 token 的团队上下文 session。
+      expect(auth.sessionAfterTeamContextChange).toHaveBeenCalledWith('u1');
+      expect(result).toEqual({ user: { id: 'u1' }, team: { id: 'team-1' }, token: 'new-token' });
     });
   });
 
@@ -141,6 +148,24 @@ describe('TeamService 公开团队发现 + 直接加入 + 资料', () => {
       prisma.team.findUniqueOrThrow.mockResolvedValue({ id: 't1', name: '团队A', allowPublicJoin: false, description: '' });
       await service.updateTeamProfile('u1', {});
       expect(prisma.team.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeMember 团队会话吊销', () => {
+    it('移除 membership 与递增目标用户 teamContextVersion 在同一事务完成', async () => {
+      auth.ensureTeamAdmin.mockResolvedValue({ teamId: 't1', role: 'TEAM_ADMIN' });
+      prisma.teamMembership.findUnique.mockResolvedValue({ userId: 'member-1', role: 'MEMBER', status: 'ACTIVE' });
+
+      await expect(service.removeMember('admin-1', 'member-1')).resolves.toEqual({ ok: true });
+
+      expect(prisma.__tx.teamMembership.update).toHaveBeenCalledWith({
+        where: { teamId_userId: { teamId: 't1', userId: 'member-1' } },
+        data: { status: 'REMOVED' },
+      });
+      expect(prisma.__tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'member-1' },
+        data: { teamContextVersion: { increment: 1 } },
+      });
     });
   });
 

@@ -165,6 +165,59 @@ describe('inspectPluginArtifact', () => {
     });
   });
 
+  it('normalizes AI admin flags away and collects source text for the policy scanner', async () => {
+    const result = await inspect([
+      { name: '_meta.json', content: meta },
+      {
+        name: 'manifest.json',
+        content: Buffer.from(JSON.stringify({
+          id: 'ai-demo',
+          name: 'AI Demo',
+          version: '1.0.0',
+          runtime_type: 'python',
+          entry: 'main.py',
+          capabilities: [{ kind: 'llm.chat', requires_admin: true }],
+        })),
+      },
+      { name: 'main.py', content: Buffer.from("print('hello')") },
+      { name: 'icon.png', content: Buffer.from([0, 1, 2, 3]) },
+    ]);
+    expect(result.manifest.capabilities).toEqual([
+      { kind: 'llm.chat', reason: '', risk: 'low', requires_admin: false },
+    ]);
+    expect(result.policyFiles).toEqual([{ path: 'main.py', content: "print('hello')" }]);
+  });
+
+  it('always collects an extensionless manifest entry as executable UTF-8 text', async () => {
+    const result = await inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes({ entry: 'run' }) },
+      { name: 'run', content: Buffer.from("print('hello')") },
+    ]);
+    expect(result.policyFiles).toEqual([{ path: 'run', content: "print('hello')" }]);
+  });
+
+  it.each([
+    ['NUL', Buffer.from([0x70, 0x00, 0x79])],
+    ['invalid UTF-8', Buffer.from([0xc3, 0x28])],
+  ])('marks an extensionless entry containing %s as unscannable', async (_label, content) => {
+    const result = await inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes({ entry: 'run' }) },
+      { name: 'run', content },
+    ]);
+    expect(result.policyFiles).toEqual([{ path: 'run', scanError: 'invalid_utf8' }]);
+  });
+
+  it.each(['worker.mts', 'worker.cts'])('collects %s for policy scanning', async (entry) => {
+    const result = await inspect([
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes({ entry }) },
+      { name: entry, content: Buffer.from('export default 1') },
+    ]);
+    expect(result.policyFiles).toEqual([{ path: entry, content: 'export default 1' }]);
+  });
+
   it('accepts manifest fields, metadata and capabilities exactly at their limits', async () => {
     const entry = `src/${'e'.repeat(508)}`;
     const result = await inspect([

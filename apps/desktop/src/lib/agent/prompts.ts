@@ -39,9 +39,13 @@ const WORKFLOW = `
   - 插件不得出现 API Key、API URL、baseUrl、provider、上游地址或自定义模型接口配置项，也不得让用户输入、粘贴或保存这些值。
   - 调用大模型只能使用平台能力：client/HTML 用 sdk.llm.chat({ messages, model })，脚本插件用 @lingfang/plugin-sdk 的 sdk.llm.chat({ messages, model }) 或宿主注入的本地桥。
   - 调用生图只能使用平台能力：sdk.image.generate({ prompt, model, size, n })。
-  - model 可以保留，但只能是平台模型标识（如 fast / premium），不得写上游真实模型名作为密钥/地址配置的一部分。
-  - 不得通过 fetch、XMLHttpRequest、requests、axios、openai/anthropic 第三方 SDK 等方式直连任何大模型或生图服务；普通网络请求仍必须声明 net.fetch。
-  - 不得读取、打印、保存或展示任何密钥、token、桥 token、Authorization 头或模型服务地址。AI 能力不可用时，只提示用户登录灵坊或联系团队管理员。
+  - Node/Python 脚本也可使用标准 OpenAI 客户端，但 base URL 必须且只能由 LINGFANG_PLUGIN_BRIDGE_URL 拼接 /v1，token 必须且只能直接取 LINGFANG_PLUGIN_BRIDGE_TOKEN；严禁非空 fallback、自定义值或用户配置。
+    - Node: \`new OpenAI({ baseURL: process.env.LINGFANG_PLUGIN_BRIDGE_URL + '/v1', apiKey: process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN })\`
+    - Python: \`OpenAI(base_url=os.environ['LINGFANG_PLUGIN_BRIDGE_URL'] + '/v1', api_key=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN'])\`
+  - model 可以省略（默认 fast），显式值只能是 fast / premium，不得写上游真实模型名。
+  - AI capability 的 requires_admin 必须为 false；团队成员运行已获访问权且 manifest 已声明能力的插件时不需要管理员二次授权。
+  - 不得通过 fetch、XMLHttpRequest、requests、axios、anthropic 或其他第三方客户端直连任何大模型或生图服务；普通网络请求仍必须声明 net.fetch。
+  - 不得打印、保存或展示任何密钥、token、桥 token、Authorization 头或模型服务地址。AI 能力不可用时，展示平台返回的产品错误，不引导用户填写密钥。
 - **修改已有插件后必须升版本号**：用 UpdatePlugin 工具更新 manifest 的版本号（如 0.1.0 → 0.1.1）。版本号只能递增不能降级。修了 bug/小改 patch 位（0.1.0→0.1.1），加新功能 minor 位（0.1.1→0.2.0），大改/不兼容 major 位（1.0.0）。不要直接 Edit manifest.json 改版本（容易破坏 JSON 结构），用 UpdatePlugin 安全合并。
 - **TodoWrite 只调用一次**：任务开始时建清单，后续每完成一步更新状态即可，不要反复重建清单。
 - **完成后必须给用户简短总结**：做了什么插件、怎么运行、注意事项。不要只调工具不说话。

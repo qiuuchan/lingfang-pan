@@ -197,6 +197,11 @@ export class AuthService {
     return this.sessionFor(userId, false);
   }
 
+  /** Membership changes must return a newly signed team-bound session. */
+  async sessionAfterTeamContextChange(userId: string) {
+    return this.sessionFor(userId, true);
+  }
+
   async refresh(userId: string) {
     // token 刷新审计：记录滑动续签事件（actor=用户自身），便于安全审计追踪会话活跃度。
     // 失败（sessionFor 抛 unauthorized）时不审计，与 login.failed 区分（refresh 失败多为 token 过期，非恶意）。
@@ -375,6 +380,7 @@ export class AuthService {
       orderBy: { createdAt: 'desc' },
     });
     const membership = user.memberships[0] || null;
+    const teamContextVersion = Number.isInteger(user.teamContextVersion) ? user.teamContextVersion : 0;
 
     // RBAC：解析当前用户的全部权限码，随 session 下发给前端做入口门控（替代旧枚举判定）。
     // 平台角色权限（User.platformRoleId）+ 团队角色权限（membership.teamRoleId，仅团队 ACTIVE 时）。
@@ -382,7 +388,9 @@ export class AuthService {
 
     const onboarding: OnboardingState = this.resolveOnboarding(user.platformRole, membership?.role, application?.status, permissions);
     const payload = {
-      token: includeToken ? this.issueToken(user.id, user.email, user.platformRole, user.tokenVersion) : undefined,
+      token: includeToken
+        ? this.issueToken(user.id, user.email, user.platformRole, user.tokenVersion, membership?.teamId ?? null, teamContextVersion)
+        : undefined,
       user: {
         id: user.id,
         email: user.email,
@@ -441,7 +449,14 @@ export class AuthService {
     return 'NEEDS_INVITATION';
   }
 
-  private issueToken(userId: string, email: string, platformRole: string, tokenVersion: number) {
+  private issueToken(
+    userId: string,
+    email: string,
+    platformRole: string,
+    tokenVersion: number,
+    teamId: string | null,
+    teamContextVersion: number,
+  ) {
     const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as SignOptions['expiresIn'] };
     // payload 携带 tokenVersion，JwtAuthGuard 校验时与库比对实现吊销（ADMIN-02/AUTH-01）。
     // 与 main.ts 启动断言 + security.ts 的 JwtAuthGuard 对齐：JWT_SECRET 缺失时直接抛错而非回退弱默认值
@@ -449,7 +464,7 @@ export class AuthService {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET 未配置，无法签发 token');
     return jwt.sign(
-      { sub: userId, email, platformRole, tokenVersion },
+      { sub: userId, email, platformRole, tokenVersion, teamId, teamContextVersion },
       secret as Secret,
       options,
     );
@@ -498,6 +513,18 @@ export class AuthService {
     if (!membership) throw forbidden('请先加入团队');
     // 修复 TEAM-03：SUSPENDED 团队的成员不应能继续消耗余额/生成邀请码/操作成员。
     // 此前所有 team.service 接口经此入口但都不校验 team.status，与 plugin.service.ts:17 已认可的语义对齐。
+    if (membership.team.status !== 'ACTIVE') throw forbidden('团队当前不可用');
+    return membership;
+  }
+
+  /** Resolve one exact team membership rather than inferring it from join order. */
+  async ensureTeamMembership(userId: string, teamId: string | null) {
+    if (!teamId) throw forbidden('请先加入团队');
+    const membership = await this.prisma.teamMembership.findUnique({
+      where: { teamId_userId: { teamId, userId } },
+      include: { team: true, user: true },
+    });
+    if (!membership || membership.status !== 'ACTIVE') throw forbidden('当前团队成员关系已失效');
     if (membership.team.status !== 'ACTIVE') throw forbidden('团队当前不可用');
     return membership;
   }

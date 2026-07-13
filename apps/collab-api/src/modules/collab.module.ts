@@ -36,11 +36,11 @@ import { AdminPermissionGroupsController, PermissionGroupsController } from './p
 import { PricingService } from './pricing.service';
 import { CreditService } from './credit.service';
 import { ChannelService, ChannelRouterService, PoolService } from './channel.service';
-import { PlatformApiKeyService } from './api-key.service';
 import { RelayController } from './relay/relay.controller';
 import { RelayService } from './relay/relay.service';
 import { BillingController } from './billing.controller';
-import { TeamApiKeyController, UserCreditsController } from './user-billing.controller';
+import { UserCreditsController } from './user-billing.controller';
+import { RelayTeamGuard } from '../relay-team.guard';
 import { SearchController } from './search/search.controller';
 import { SearchService } from './search/search.service';
 import { TicketController, AdminTicketController } from './ticket.controller';
@@ -51,17 +51,18 @@ import { ARTIFACT_STORE, createArtifactStore } from './artifact-store';
 import { AdminPluginPackageController, AdminPluginRegistryController, PluginRegistryController } from './plugin-registry.controller';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginArtifactCleanupService } from './plugin-artifact-cleanup.service';
+import { PluginAiPolicyController } from './plugin-ai-policy.controller';
 
 @Module({
-  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, PluginRegistryController, AdminPluginRegistryController, AdminPluginPackageController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, TeamApiKeyController, UserCreditsController, SearchController, TicketController, AdminTicketController, PoolsController],
+  controllers: [MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, PluginAiPolicyController, PluginRegistryController, AdminPluginRegistryController, AdminPluginPackageController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, UserCreditsController, SearchController, TicketController, AdminTicketController, PoolsController],
   // CollabModule 直接声明 AuthService（与 AuthModule 重复声明，历史架构；TeamService 等注入之），
   // 故 MailService / GeetestService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到它们。
   // NotificationService 无外部依赖（仅 PrismaService），被 AdminService/EconomyService 注入以在审核/购买成功后埋点触发通知。
   // GiteeChangelogService 被 SettingsService（缓存失效钩子）与 ChangelogController 注入，需在此提供。
   // RBAC：RoleService/PluginGrantService/PermissionGroupService 依赖 PrismaService + AuthService；PluginService 注入 PluginGrantService 做 availablePlugins 授权过滤。
-  // 计费/中转：PricingService/CreditService/ChannelService(+Router)/PlatformApiKeyService/RelayService 构成中转计费闭环；
-  // RelayController(@Public，DualAuthGuard 鉴权) + BillingController(admin) + TeamApiKey/UserCreditsController(前台)。
+  // 计费/中转：PricingService/CreditService/ChannelService(+Router)/RelayService 构成中转计费闭环；
+  // RelayController 使用全局 JWT + RelayTeamGuard；BillingController(admin) + UserCreditsController(前台)。
   // TeamPoolService：团队端获取可用资源池（PoolsController，区别于 PoolService 管理端 CRUD）。
-  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, { provide: ARTIFACT_STORE, useFactory: () => createArtifactStore(process.env) }, AuthService, MailService, GeetestService, TeamService, PluginService, PluginRegistryService, PluginArtifactCleanupService, AdminService,  EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PoolService, PlatformApiKeyService, RelayService, SearchService, TicketService, TeamPoolService],
+  providers: [PrismaService, { provide: AppCacheService, useClass: CacheService }, { provide: ARTIFACT_STORE, useFactory: () => createArtifactStore(process.env) }, AuthService, MailService, GeetestService, TeamService, PluginService, PluginRegistryService, PluginArtifactCleanupService, AdminService,  EconomyService, MarketplaceService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PoolService, RelayService, RelayTeamGuard, SearchService, TicketService, TeamPoolService],
 })
 export class CollabModule {}

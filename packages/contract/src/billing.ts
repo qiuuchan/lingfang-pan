@@ -4,8 +4,7 @@
 //  - relay 端点暴露 OpenAI/Anthropic 双协议；请求体里的 model 字段用「版本哨兵」'fast'/'premium'
 //    （小写，前台固定二选一），后端据 ModelTierConfig 映射到真实上游模型。
 //  - 错误码扩展 ErrorCode：计费/中转专用码与 collab-api common.ts AppError.code 对齐。
-//  - 管理端出参 schema（Channel/ModelPricing/ModelTierConfig/PlatformApiKey/LlmCallLog）：
-//    PlatformApiKey 永不回 keyHash/明文 key，只回 keyPrefix（凭据安全）。
+//  - 管理端出参 schema（Channel/ModelPricing/ModelTierConfig/LlmCallLog）。
 //  - ChatMessage / 系统提示词规则注入函数复用：relay 与 sdk 共享 injectSystemGuardRule。
 import { z } from 'zod';
 
@@ -50,7 +49,7 @@ export type Tier = z.infer<typeof TierSchema>;
 
 /** POST /api/relay/v1/chat/completions 入参（OpenAI chat shape，model 限版本哨兵）。 */
 export const ChatRelayInputSchema = z.object({
-  model: TierSchema,
+  model: TierSchema.default('fast'),
   messages: z.array(RelayMessageSchema).min(1),
   temperature: z.number().optional(),
   max_tokens: z.number().int().positive().optional(),
@@ -61,7 +60,7 @@ export type ChatRelayInput = z.infer<typeof ChatRelayInputSchema>;
 
 /** POST /api/relay/v1/messages 入参（Anthropic messages shape，model 限版本哨兵）。 */
 export const MessagesRelayInputSchema = z.object({
-  model: TierSchema,
+  model: TierSchema.default('fast'),
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string() })).min(1),
   system: z.string().optional(),
   max_tokens: z.number().int().positive().optional(),
@@ -72,14 +71,14 @@ export type MessagesRelayInput = z.infer<typeof MessagesRelayInputSchema>;
 
 /** POST /api/relay/v1/images/generations 入参（按张计费）。 */
 export const ImageRelayInputSchema = z.object({
-  model: TierSchema,
+  model: TierSchema.default('fast'),
   prompt: z.string().min(1),
   n: z.number().int().positive().max(10).optional(),
   size: z.string().optional(),
 });
 export type ImageRelayInput = z.infer<typeof ImageRelayInputSchema>;
 
-/** GET /api/relay/v1/models 出参：仅返回两个版本（协议层强制）。 */
+/** GET /api/relay/v1/models 出参：返回当前团队资源池实际可用的 fast/premium 子集。 */
 export const RelayModelSchema = z.object({
   id: TierSchema,
   object: z.literal('model').optional(),
@@ -96,9 +95,7 @@ export const BillingErrorCode = z.enum([
   'unsupported_model', // 400：model 非版本哨兵且不在白名单
   'no_channel_available', // 503：无渠道可服务该团队/版本
   'upstream_llm_error', // 502：上游 provider 返回错误
-  'api_key_invalid', // 401：平台 API Key 不存在/已过期
-  'api_key_disabled', // 403：平台 API Key 已吊销
-  'capability_denied', // 403：API Key 的 scopes 不含本次能力
+  'capability_denied', // 403：插件 manifest 未声明本次能力
   'reserve_failed', // 402：预扣失败（并发或配置异常）
 ]);
 export type BillingErrorCode = z.infer<typeof BillingErrorCode>;
@@ -148,25 +145,12 @@ export const ModelTierConfigSchema = z.object({
   extraParams: z.record(z.unknown()),
 });
 
-export const PlatformApiKeyPublicSchema = z.object({
-  id: z.string(),
-  teamId: z.string(),
-  name: z.string(),
-  keyPrefix: z.string(),
-  scopes: z.array(z.string()),
-  status: z.enum(['ACTIVE', 'DISABLED']),
-  lastUsedAt: z.string().nullable(),
-  expiresAt: z.string().nullable(),
-  createdAt: z.string(),
-});
-export type PlatformApiKeyPublic = z.infer<typeof PlatformApiKeyPublicSchema>;
-
 export const LlmCallLogSchema = z.object({
   id: z.string(),
   teamId: z.string(),
   userId: z.string().nullable(),
-  apiKeyId: z.string().nullable(),
   channelId: z.string().nullable(),
+  clientSource: z.enum(['platform', 'plugin_runtime', 'plugin_test']),
   capability: z.string(),
   tier: TierSchema.nullable(),
   model: z.string(),
@@ -182,9 +166,4 @@ export const LlmCallLogSchema = z.object({
   requestSummary: z.record(z.unknown()),
   clientIp: z.string().nullable(),
   createdAt: z.string(),
-});
-
-/** 团队管理员轮换 API Key 时的明文 key 出参：仅本次返回一次（lf_<32hex>）。 */
-export const PlatformApiKeyCreatedSchema = PlatformApiKeyPublicSchema.extend({
-  plaintextKey: z.string(), // lf_xxx，仅此一次返回，库存只存 sha256
 });

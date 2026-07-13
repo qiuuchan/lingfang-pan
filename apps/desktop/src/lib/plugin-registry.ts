@@ -407,6 +407,8 @@ function installedPayloadToPlugin(
     id: payload.installation.installationId,
     installationId: payload.installation.installationId,
     packageId: payload.installation.packageId,
+    releaseId: release.releaseId,
+    releaseSha256: release.sha256,
     installationOrigin: payload.installation.origin,
     pendingActivation: pendingReleaseId ? { releaseId: pendingReleaseId } : undefined,
     name: String(manifest.name || payload.installation.packageId),
@@ -483,19 +485,15 @@ export async function buyMarketplacePackage(packageId: string): Promise<void> {
 
 export async function startInstalledPlugin(
   plugin: LoadedPlugin,
-  teamAccessGranted: boolean,
+  registryAccessGranted: boolean,
 ): Promise<{ pid: number; started_at: string }> {
   const { base, token } = connection();
   return tauriInvoke('start_installed_plugin', {
     installationId: plugin.installationId || plugin.id,
-    teamAccessGranted,
+    registryAccessGranted,
     apiBase: base,
     authToken: token,
   });
-}
-
-export async function checkRuntimeAccess(packageId: string): Promise<void> {
-  await api(`/api/plugin-packages/${packageId}/runtime-access`, { method: 'POST' });
 }
 
 export async function stopInstalledPlugin(installationId: string): Promise<void> {

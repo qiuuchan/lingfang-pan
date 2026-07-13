@@ -19,4 +19,19 @@ describe('resolvePrismaInvocation', () => {
       'prisma/.generated/mysql/schema.prisma',
     ]);
   });
+
+  it('only adds MySQL accept-data-loss after explicit one-shot opt-in', () => {
+    expect(resolvePrismaInvocation(
+      'deploy',
+      'mysql',
+      'prisma/.generated/mysql/schema.prisma',
+      { acceptDataLoss: true },
+    ).args).toEqual([
+      'db',
+      'push',
+      '--schema',
+      'prisma/.generated/mysql/schema.prisma',
+      '--accept-data-loss',
+    ]);
+  });
 });

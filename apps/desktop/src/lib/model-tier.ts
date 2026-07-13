@@ -1,5 +1,21 @@
 export type ModelTier = 'fast' | 'premium';
 
+export class UnsupportedModelTierError extends Error {
+  readonly code = 'unsupported_model';
+  readonly status = 400;
+
+  constructor() {
+    super('仅支持平台模型档位 fast 或 premium');
+    this.name = 'UnsupportedModelTierError';
+  }
+}
+
+export function pluginModelTier(value: unknown): ModelTier {
+  if (value === undefined) return 'fast';
+  if (value === 'fast' || value === 'premium') return value;
+  throw new UnsupportedModelTierError();
+}
+
 export function normalizeModelTier(value: unknown): ModelTier | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toLowerCase().replace(/^tier:/, '');

@@ -1,20 +1,20 @@
-// RelayController —— /api/relay/v1/* 模型中转端点（@Public，由 DualAuthGuard 鉴权）。
+// RelayController —— /api/relay/v1/* 模型中转端点（JWT + 精确团队 membership 鉴权）。
 //
 // 设计（见 docs/billing-and-relay-design.md §4.1）：
-//  - @Public() 跳过全局 JwtAuthGuard；DualAuthGuard 已在它之前注册，对 /api/relay 路径完成
-//    「平台 API Key 或 JWT」双鉴权，并把结果挂在 req.relayAuth。
+//  - 全局 JwtAuthGuard 校验签名团队 claim，RelayTeamGuard 精确校验 membership/team 状态。
 //  - 收紧限流：relay 是计费咽喉，默认 60/min 过宽，收紧到 30/min/IP（防刷灵石）。
 //  - body 透传给 RelayService（按协议 shape 处理），class-validator 不强约束（保留上游兼容字段）。
-import { Body, Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Inject, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { Public } from '../../common';
 import { Throttle } from '@nestjs/throttler';
+import { RelayTeamGuard } from '../../relay-team.guard';
 import { RelayService } from './relay.service';
 
 @ApiTags('Relay')
+@ApiBearerAuth()
 @Controller('relay/v1')
-@Public()
+@UseGuards(RelayTeamGuard)
 @Throttle({ default: { limit: 30, ttl: 60_000 } })
 export class RelayController {
   constructor(@Inject(RelayService) private readonly relay: RelayService) {}

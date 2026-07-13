@@ -77,7 +77,10 @@ const RELAY_ACCESS: Skill = {
   · model 仅 'fast'（快速版）或 'premium'（高级版），底层模型由平台统一配置，不要写死模型 id。
 - 生图：\`const { images } = await sdk.image.generate({ prompt: '...', model: 'premium' })\` 返回图片 url/base64 数组。
 - 这两个能力经平台中转计费（按团队灵石），插件无需也不可持有任何 API Key 或直连上游。
-插件 capabilities 需声明 { kind: 'llm.chat' } / { kind: 'image.generate' }。`,
+- Node/Python 可使用标准 OpenAI 客户端，但 baseURL/base_url 只能是宿主注入的 LINGFANG_PLUGIN_BRIDGE_URL + '/v1'，apiKey/api_key 只能直接取 LINGFANG_PLUGIN_BRIDGE_TOKEN，不能提供 fallback 或用户配置。
+  · Node: \`new OpenAI({ baseURL: process.env.LINGFANG_PLUGIN_BRIDGE_URL + '/v1', apiKey: process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN })\`
+  · Python: \`OpenAI(base_url=os.environ['LINGFANG_PLUGIN_BRIDGE_URL'] + '/v1', api_key=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN'])\`
+插件 capabilities 需声明 { kind: 'llm.chat', requires_admin: false } / { kind: 'image.generate', requires_admin: false }。`,
 };
 
 // Python Qt6 GUI skill：把“带界面的 Python 插件”默认收敛到 PySide6 / Qt6，

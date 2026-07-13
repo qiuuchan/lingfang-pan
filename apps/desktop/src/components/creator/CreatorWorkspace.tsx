@@ -55,6 +55,7 @@ import {
 } from '@/lib/plugin-creator/creator-session';
 import { fetchContextWindow } from '@/lib/relay-models';
 import { readWorkspaceFiles } from '@/lib/plugin-registry';
+import { capabilityRequiresAdmin } from '@/lib/plugin-capabilities';
 
 // 历史还原改用 turnsToMessages（原生 function calling，见 agent/history.ts）。
 // 旧的 partsToAgentMessageParts 文本化方案已删除（betav2 阶段3）。
@@ -136,7 +137,7 @@ function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
       kind: rawKind,
       reason: typeof raw.reason === 'string' ? raw.reason : '',
       risk,
-      requires_admin: raw.requires_admin === true,
+      requires_admin: capabilityRequiresAdmin(rawKind, raw.requires_admin),
     } as StagedPlugin['capabilities'][number]];
   });
 }

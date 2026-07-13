@@ -8,7 +8,24 @@ import {
   ALL_PERMISSIONS,
   PLATFORM_PERMISSIONS,
   TEAM_PERMISSIONS,
+  stripRetiredPermissions,
 } from './permission-codes';
+
+describe('stripRetiredPermissions 外部 relay 权限清理', () => {
+  it('从系统/自定义角色确定性移除全部废弃码并保持幂等', () => {
+    const first = stripRetiredPermissions([
+      'team.dashboard.view',
+      'team.api_key.manage',
+      'platform.billing.api_key.manage',
+      'platform.billing.relay_docs.view',
+    ]);
+    expect(first).toEqual({ permissions: ['team.dashboard.view'], changed: true });
+    expect(stripRetiredPermissions(first.permissions)).toEqual({
+      permissions: ['team.dashboard.view'],
+      changed: false,
+    });
+  });
+});
 
 describe('expandLegacyPermissions 旧码扩张', () => {
   it('team.plugin.edit → [edit_metadata, edit_draft, edit_price]，其余权限保留', () => {

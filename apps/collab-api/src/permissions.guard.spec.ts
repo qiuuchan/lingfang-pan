@@ -23,7 +23,7 @@ function mockPrisma() {
       findUnique: vi.fn(),
     },
     teamMembership: {
-      findFirst: vi.fn(),
+      findUnique: vi.fn(),
     },
   };
 }
@@ -89,34 +89,38 @@ describe('PermissionsGuard', () => {
     const guard = new PermissionsGuard(mockReflector({ permissions: ['platform.user.list'] }), prisma);
     // platformRoleId 为 null，guard 的 needPlatform && user.platformRoleId 条件为 false，不查 role
     await expect(
-      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } })),
+      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } })),
     ).rejects.toMatchObject({ status: 403 });
     expect(prisma.role.findUnique).not.toHaveBeenCalled();
   });
 
   it('团队权限命中放行：解析当前 membership.teamRoleId → Role.permissions', async () => {
     const guard = new PermissionsGuard(mockReflector({ permissions: ['team.member.invite'] }), prisma);
-    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.teamMembership.findUnique.mockResolvedValue({ status: 'ACTIVE', teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
     prisma.role.findUnique.mockResolvedValue({ permissions: ['team.member.invite'] });
-    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } }));
+    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } }));
+    expect(prisma.teamMembership.findUnique).toHaveBeenCalledWith({
+      where: { teamId_userId: { teamId: 't1', userId: 'u1' } },
+      include: { team: { select: { status: true } } },
+    });
     expect(ok).toBe(true);
   });
 
   it('团队 SUSPENDED 时 teamRoleId 不解析权限，团队权限拒绝', async () => {
     const guard = new PermissionsGuard(mockReflector({ permissions: ['team.member.invite'] }), prisma);
-    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'SUSPENDED' } });
+    prisma.teamMembership.findUnique.mockResolvedValue({ status: 'ACTIVE', teamRoleId: 'role-t-1', team: { status: 'SUSPENDED' } });
     // SUSPENDED 时 guard 不会解析 teamRoleId 权限（与 AuthService.ensureCurrentTeam 同款语义），
     // perms 不含 team.member.invite → hit=false → throw forbidden(403)
     await expect(
-      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } })),
+      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } })),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it('无团队 membership 时团队权限拒绝', async () => {
     const guard = new PermissionsGuard(mockReflector({ permissions: ['team.member.invite'] }), prisma);
-    prisma.teamMembership.findFirst.mockResolvedValue(null);
+    prisma.teamMembership.findUnique.mockResolvedValue(null);
     await expect(
-      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } })),
+      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } })),
     ).rejects.toMatchObject({ status: 403 });
   });
 
@@ -125,9 +129,9 @@ describe('PermissionsGuard', () => {
       mockReflector({ permissions: ['team.member.invite', 'team.member.remove'] }),
       prisma,
     );
-    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.teamMembership.findUnique.mockResolvedValue({ status: 'ACTIVE', teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
     prisma.role.findUnique.mockResolvedValue({ permissions: ['team.member.remove'] }); // 只命中 remove
-    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } }));
+    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } }));
     expect(ok).toBe(true);
   });
 
@@ -140,9 +144,9 @@ describe('PermissionsGuard', () => {
       }),
       prisma,
     );
-    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.teamMembership.findUnique.mockResolvedValue({ status: 'ACTIVE', teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
     prisma.role.findUnique.mockResolvedValue({ permissions: ['team.member.role.assign'] });
-    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } }));
+    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } }));
     expect(ok).toBe(true);
   });
 
@@ -153,10 +157,10 @@ describe('PermissionsGuard', () => {
       }),
       prisma,
     );
-    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.teamMembership.findUnique.mockResolvedValue({ status: 'ACTIVE', teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
     prisma.role.findUnique.mockResolvedValue({ permissions: ['team.dashboard.view'] }); // 四码均未命中
     await expect(
-      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null } })),
+      guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: null, teamId: 't1' } })),
     ).rejects.toMatchObject({ status: 403 });
   });
 
@@ -168,9 +172,9 @@ describe('PermissionsGuard', () => {
     // 平台角色命中
     prisma.role.findUnique.mockResolvedValueOnce({ permissions: ['platform.user.list'] });
     // 团队也 mock（虽未命中也不影响，因 OR 语义平台已命中）
-    prisma.teamMembership.findFirst.mockResolvedValue({ teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
+    prisma.teamMembership.findUnique.mockResolvedValue({ status: 'ACTIVE', teamRoleId: 'role-t-1', team: { status: 'ACTIVE' } });
     prisma.role.findUnique.mockResolvedValueOnce({ permissions: [] });
-    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: 'role-p-1' } }));
+    const ok = await guard.canActivate(mockContext({ user: { id: 'u1', platformRoleId: 'role-p-1', teamId: 't1' } }));
     expect(ok).toBe(true);
   });
 

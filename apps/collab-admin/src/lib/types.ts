@@ -1,4 +1,4 @@
-export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'governance' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'apiKeys' | 'tickets';
+export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'governance' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'tickets';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -92,7 +92,6 @@ export type ChannelKind = 'CHAT' | 'IMAGE';
 export type ChannelStatus = 'ENABLED' | 'DISABLED';
 export type PricingUnit = 'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE';
 export type ModelTier = 'FAST' | 'PREMIUM';
-export type ApiKeyStatus = 'ACTIVE' | 'DISABLED';
 export type PoolScope = 'SHARED' | 'DEDICATED';
 
 export type Pool = {
@@ -143,24 +142,12 @@ export type ModelPricing = {
   updatedAt: string;
 };
 
-export type PlatformApiKeyPublic = {
-  id: string;
-  teamId: string;
-  name: string;
-  keyPrefix: string;
-  scopes: string[];
-  status: ApiKeyStatus;
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-};
-
 export type LlmCallLog = {
   id: string;
   teamId: string;
   userId: string | null;
-  apiKeyId: string | null;
   channelId: string | null;
+  clientSource: 'platform' | 'plugin_runtime' | 'plugin_test';
   capability: string;
   tier: ModelTier | null;
   model: string;

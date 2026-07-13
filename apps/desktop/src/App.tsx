@@ -27,8 +27,8 @@ import { SetupWizard } from '@/pages/SetupWizard';
 import { Home } from '@/pages/Home';
 import { ListSkeleton, PageTransition } from '@/lib/motion';
 import type { PluginCenterTab } from '@/pages/plugins/PluginCenterBody';
+import { checkRuntimeAccess, requiresRegistryRuntimeAccess } from '@/lib/plugin-runtime-access';
 import {
-  checkRuntimeAccess,
   discardPendingPluginUpdate,
   INSTALLATIONS_CHANGED_EVENT,
   listInstallations,
@@ -329,8 +329,9 @@ export default function App() {
         const installation = installations.find((item) => item.installationId === plugin.installationId);
         if (!installation) throw new Error('本机安装项不存在或已卸载');
 
-        if (installation.origin === 'team') {
-          await checkRuntimeAccess(installation.packageId);
+        if (requiresRegistryRuntimeAccess(installation.origin)) {
+          const selectedRelease = installation.pendingRelease ?? installation.activeRelease;
+          await checkRuntimeAccess(installation.packageId, selectedRelease);
           if (!isCurrent()) return;
         }
 
@@ -443,30 +444,37 @@ export default function App() {
     setViewState(nextView);
   }, [closeFeaturePanels, openAccountSettings, setRunningPlugin, view]);
 
+  const revokePluginBridgeSessions = useCallback(async () => {
+    try {
+      await tauriInvoke<void>('revoke_all_plugin_bridge_sessions');
+    } catch {
+      // Web 预览或旧壳没有该命令时继续清理本地会话；服务端 JWT version 仍是最终防线。
+    }
+  }, []);
+
   const saveBackendUrl = useCallback((url: string) => {
-    if (!url.trim()) {
-      clearApiBase();
-      setBackendUrl(null);
+    const resetForBackendChange = (nextUrl: string | null) => {
+      if (nextUrl) configureApiBase(nextUrl, { persist: true });
+      else clearApiBase();
+      setBackendUrl(nextUrl);
       setAuthToken(null);
       clearStoredSession();
       sessionRef.current = emptySession;
       setSession(emptySession);
       setBackendUnreachable(false);
       setView('home');
+    };
+    if (!url.trim()) {
+      if (sessionRef.current.token) void revokePluginBridgeSessions().finally(() => resetForBackendChange(null));
+      else resetForBackendChange(null);
       return true;
     }
     const normalized = normalizeBackendUrl(url);
     if (!normalized) return false;
-    configureApiBase(normalized, { persist: true });
-    setBackendUrl(normalized);
-    setAuthToken(null);
-    clearStoredSession();
-    sessionRef.current = emptySession;
-    setSession(emptySession);
-    setBackendUnreachable(false);
-    setView('home');
+    if (sessionRef.current.token) void revokePluginBridgeSessions().finally(() => resetForBackendChange(normalized));
+    else resetForBackendChange(normalized);
     return true;
-  }, [setView]);
+  }, [revokePluginBridgeSessions, setView]);
 
   // DESK-SHELL-03 修复：applySession / applyCollabSession 不再把 setAuthToken / saveStoredSession /
   // setView 等副作用放进 setSession updater（React 要求 updater 纯函数；StrictMode dev 下双调
@@ -477,21 +485,35 @@ export default function App() {
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   const applySession = useCallback((patch: Partial<Session>) => {
-    const next = { ...sessionRef.current, ...patch };
-    setAuthToken(next.token);
-    saveStoredSession(next);
-    sessionRef.current = next;
-    setSession(next);
-  }, []);
+    const previous = sessionRef.current;
+    const next = { ...previous, ...patch };
+    const commit = () => {
+      setAuthToken(next.token);
+      saveStoredSession(next);
+      sessionRef.current = next;
+      setSession(next);
+    };
+    const teamContextChanged = Boolean(previous.token)
+      && (next.token !== previous.token || next.tenantId !== previous.tenantId);
+    if (teamContextChanged) void revokePluginBridgeSessions().finally(commit);
+    else commit();
+  }, [revokePluginBridgeSessions]);
 
   const applyCollabSession = useCallback((payload: CollabSessionResponse) => {
-    const next = sessionFromPayload(payload, sessionRef.current.token);
-    setAuthToken(next.token);
-    saveStoredSession(next);
-    sessionRef.current = next;
-    setView('home');
-    setSession(next);
-  }, []);
+    const previous = sessionRef.current;
+    const next = sessionFromPayload(payload, previous.token);
+    const commit = () => {
+      setAuthToken(next.token);
+      saveStoredSession(next);
+      sessionRef.current = next;
+      setView('home');
+      setSession(next);
+    };
+    const teamContextChanged = Boolean(previous.token)
+      && (next.token !== previous.token || next.tenantId !== previous.tenantId);
+    if (teamContextChanged) void revokePluginBridgeSessions().finally(commit);
+    else commit();
+  }, [revokePluginBridgeSessions, setView]);
 
   const refreshSession = useCallback(async () => {
     const payload = await api<CollabSessionResponse>('/api/auth/me');
@@ -499,16 +521,20 @@ export default function App() {
   }, [applyCollabSession]);
 
   const resetSession = useCallback(() => {
-    setAuthToken(null);
-    clearStoredSession();
-    // DESK-SHELL-07 修复：登出时清空 currentDraft，避免同机下一登录用户短暂看到上一用户的草稿。
-    // App 始终挂载（登出渲染 Auth 不卸载），useState 不会自动重置。
-    setCurrentDraft(null);
-    sessionRef.current = emptySession;
-    setSession(emptySession);
-    setRunningPlugin(null);
-    setView('home');
-  }, [setRunningPlugin, setView]);
+    const commit = () => {
+      setAuthToken(null);
+      clearStoredSession();
+      // DESK-SHELL-07 修复：登出时清空 currentDraft，避免同机下一登录用户短暂看到上一用户的草稿。
+      // App 始终挂载（登出渲染 Auth 不卸载），useState 不会自动重置。
+      setCurrentDraft(null);
+      sessionRef.current = emptySession;
+      setSession(emptySession);
+      setRunningPlugin(null);
+      setView('home');
+    };
+    if (sessionRef.current.token) void revokePluginBridgeSessions().finally(commit);
+    else commit();
+  }, [revokePluginBridgeSessions, setRunningPlugin, setView]);
 
   // 启动时若本地存有 session，静默调 /api/auth/me 刷新；仅 token 真无效（401）才登出。
   // 网络/后端未启动时保留已恢复的 session，进主界面，下次启动重试。

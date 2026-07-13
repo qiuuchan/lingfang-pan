@@ -49,6 +49,9 @@ function releaseSummary(version: string, id: string) {
     sourceKind: version === '1.10.0' ? 'EXTERNAL_TOOL' : 'API',
     sourceLabel: version === '1.10.0' ? 'Cursor' : '',
     ingestChannel: version === '1.10.0' ? 'DESKTOP' : 'API',
+    aiPolicyVersion: 1,
+    aiPolicyStatus: 'PASSED',
+    aiPolicyReason: '',
     createdAt: now,
   };
 }
