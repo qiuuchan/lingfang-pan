@@ -112,8 +112,8 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View, intent?: O
       )}
 
       <div className="flex flex-wrap gap-2">
-        <Button variant={generationOpen ? 'default' : 'outline'} onClick={() => setGenerationOpen(true)}><SparklesIcon className="size-4" />生成质量</Button>
-        <Button variant={financeOpen ? 'default' : 'outline'} onClick={() => setFinanceOpen(true)}><WalletIcon className="size-4" />财务分析</Button>
+        <Button variant={generationOpen ? 'default' : 'outline'} onClick={() => setGenerationOpen((open) => !open)}><SparklesIcon className="size-4" />生成质量</Button>
+        <Button variant={financeOpen ? 'default' : 'outline'} onClick={() => setFinanceOpen((open) => !open)}><WalletIcon className="size-4" />财务分析</Button>
       </div>
 
       {/* AI 生成质量（调研报告 Top10 / A4）：调用次数 / 成功率 / 失败数。
