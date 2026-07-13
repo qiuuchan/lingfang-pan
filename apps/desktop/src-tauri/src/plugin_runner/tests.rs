@@ -157,6 +157,77 @@ fn contains_pip_wheel_ignores_non_pip_wheels() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// `resolve_requirements_install_command`：应用内置 uv 时走 `uv pip install --python`。
+/// 锁定契约：requirements.txt 装依赖首选 uv（快、缓存复用），命中后命令形状必须稳定。
+#[test]
+fn resolve_requirements_install_uses_uv_when_bundled() {
+    let python_dir = temp_dir_unique("req-install-uv");
+    std::fs::create_dir_all(&python_dir).unwrap();
+    // 让 runtime.uv() 命中：在 python_dir 下放一个匹配平台的 uv 可执行文件（空文件即可，只看 is_file）。
+    #[cfg(windows)]
+    std::fs::write(python_dir.join("uv.exe"), "").unwrap();
+    #[cfg(not(windows))]
+    std::fs::write(python_dir.join("bin").join("uv"), b"").map(|_| ()).unwrap_or_else(|_| {
+        std::fs::create_dir_all(python_dir.join("bin")).unwrap();
+        std::fs::write(python_dir.join("bin").join("uv"), "").unwrap()
+    });
+    let runtime = RuntimeResolver::from_dirs(Some(python_dir.clone()), None);
+
+    let venv = python_venv_dir(&python_dir);
+    let py = venv_python(&venv);
+    let requirements = python_dir.join("requirements.txt");
+    let (program, args) = resolve_requirements_install_command(&runtime, &py, &requirements);
+
+    // 命中的就是 uv 路径（与 runtime.uv() 一致），命令形状：pip install --python <venv> -r <req>。
+    assert_eq!(program, runtime.uv().unwrap());
+    assert_eq!(
+        args,
+        vec![
+            "pip".to_string(),
+            "install".to_string(),
+            "--python".to_string(),
+            py.to_string_lossy().to_string(),
+            "-r".to_string(),
+            requirements.to_string_lossy().to_string(),
+        ]
+    );
+
+    let _ = std::fs::remove_dir_all(&python_dir);
+}
+
+/// `resolve_requirements_install_command`：应用未随 uv 时回退 `<venv-python> -m pip install`。
+/// 这是当前 Windows 制品的实际路径（uv 未打包），也是修复「插件包含 requirements.txt，但应用运行时缺少 uv」
+/// 死锁的关键契约——requirements.txt 必须能装，不能像 uv.lock 那样因缺 uv 直接报错。
+#[test]
+fn resolve_requirements_install_falls_back_to_pip_when_uv_missing() {
+    let python_dir = temp_dir_unique("req-install-no-uv");
+    std::fs::create_dir_all(&python_dir).unwrap();
+    // 不放任何 uv 文件 → runtime.uv() 返回 None（与当前 Windows 制品一致）。
+    let runtime = RuntimeResolver::from_dirs(Some(python_dir.clone()), None);
+    assert!(runtime.uv().is_none());
+
+    let venv = python_venv_dir(&python_dir);
+    let py = venv_python(&venv);
+    let requirements = python_dir.join("requirements.txt");
+    let (program, args) = resolve_requirements_install_command(&runtime, &py, &requirements);
+
+    // 回退到 venv python -m pip install --no-input -r ...（venv 由 create_python_venv 建好并带 pip）。
+    assert_eq!(program, py);
+    assert_eq!(
+        args,
+        vec![
+            "-m".to_string(),
+            "pip".to_string(),
+            "install".to_string(),
+            "--no-input".to_string(),
+            "-r".to_string(),
+            requirements.to_string_lossy().to_string(),
+        ]
+    );
+
+    let _ = std::fs::remove_dir_all(&python_dir);
+}
+
 #[test]
 fn process_table_register_and_is_running() {
     // 注册一个会立即退出的进程（true/exit 0），验证 is_running 在退出后返回 None 且自动清表。
@@ -273,6 +344,90 @@ fn temp_dir_unique(prefix: &str) -> PathBuf {
             .unwrap()
             .as_nanos()
     ))
+}
+
+/// 端到端集成测试：用真实内置 Python（LINGFANG_EMBEDDED_RUNTIME_DIR）跑 ensure_python_venv，
+/// 验证 requirements.txt 在无 uv 时回退 venv python -m pip install 真的能装上依赖。
+///
+/// 标 `#[ignore]`：需要内置 runtimes + 网络（清华 PyPI 镜像），不进默认 `cargo test`。
+/// 手动跑：`LINGFANG_EMBEDDED_RUNTIME_DIR=... cargo test -p lingfang-desktop ensure_python_venv_installs_requirements_without_uv -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn ensure_python_venv_installs_requirements_without_uv() {
+    let python_root = std::env::var_os("LINGFANG_EMBEDDED_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            // 兜底：开发机内置 runtimes 目录（apps/desktop/runtimes）。
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("runtimes")
+        });
+    let python_dir = python_root.join("python");
+    let python_exe = python_dir.join("python.exe");
+    if !python_exe.is_file() {
+        panic!(
+            "内置 Python 不存在：{}（设 LINGFANG_EMBEDDED_RUNTIME_DIR 指向 runtimes 目录）",
+            python_exe.display()
+        );
+    }
+    let runtime = RuntimeResolver::from_dirs(Some(python_dir.clone()), None);
+    // 契约前置：内置 runtimes 不带 uv（否则本测试场景不成立）。
+    assert!(
+        runtime.uv().is_none(),
+        "本测试要求内置 runtimes 无 uv，但 uv() 命中了 {:?}",
+        runtime.uv()
+    );
+
+    // 临时插件目录：requirements.txt + main.py。
+    let plugin_dir = temp_dir_unique("req-e2e");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        plugin_dir.join("requirements.txt"),
+        "requests==2.32.3\n",
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("main.py"),
+        "import requests\nprint('requests', requests.__version__)\n",
+    )
+    .unwrap();
+
+    // 这一步在旧二进制（缺 uv）上会返回 Err「插件包含 requirements.txt，但应用运行时缺少 uv」。
+    // 修复后应返回 venv python 路径（venv 创建 + pip install 成功 + 冒烟通过）。
+    let result = ensure_python_venv(&runtime, &plugin_dir, None);
+    let py_path = result.expect("ensure_python_venv 应在无 uv 时回退 pip 安装成功");
+
+    // 返回的是 venv 内 python，应真实存在。
+    assert!(
+        py_path.is_file(),
+        "返回的 venv python 不存在：{}",
+        py_path.display()
+    );
+    // .lfdeps-verified 标记应已写入（冒烟通过）。
+    assert!(
+        python_venv_dir(&plugin_dir).join(".lfdeps-verified").is_file(),
+        "依赖已装但未写 .lfdeps-verified 标记"
+    );
+
+    // 用 venv python 执行 main.py，确认依赖真能 import。
+    let out = std::process::Command::new(&py_path)
+        .arg(plugin_dir.join("main.py"))
+        .output()
+        .expect("跑 venv python 失败");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "main.py 非零退出：{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("requests 2.32.3"),
+        "requests 未正确 import，stdout={stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&plugin_dir);
+    let _ = std::fs::remove_dir_all(python_venv_dir(&plugin_dir));
 }
 
 // === delete_plugin_dir 测试 ===

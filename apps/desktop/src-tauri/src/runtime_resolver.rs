@@ -255,6 +255,11 @@ impl RuntimeResolver {
         if let Some(host) = extract_host(&pip_url) {
             env.push((OsString::from("PIP_TRUSTED_HOST"), OsString::from(host)));
         }
+        // uv 故意不读 PIP_INDEX_URL（astral-sh/uv#6925），必须用 UV_* 变量，否则 uv pip install /
+        // uv sync 会回退官方 PyPI（国内慢/超时）。同时注入 UV_DEFAULT_INDEX（新版首选）和
+        // UV_INDEX_URL（pip 兼容别名，老版 uv 用），让任一版本的 uv 都命中清华源。
+        env.push((OsString::from("UV_DEFAULT_INDEX"), OsString::from(&pip_url)));
+        env.push((OsString::from("UV_INDEX_URL"), OsString::from(&pip_url)));
         env.push((
             OsString::from("PIP_DISABLE_PIP_VERSION_CHECK"),
             OsString::from("1"),
@@ -533,6 +538,16 @@ mod tests {
         ));
         // trusted host 从 pip url 提取。
         assert!(contains("PIP_TRUSTED_HOST", "pypi.tuna.tsinghua.edu.cn"));
+        // uv 不读 PIP_INDEX_URL（astral-sh/uv#6925），必须额外注入 UV_* 变量，
+        // 否则 uv pip install / uv sync 回退官方 PyPI。两个别名都应等于清华源。
+        assert!(contains(
+            "UV_DEFAULT_INDEX",
+            "https://pypi.tuna.tsinghua.edu.cn/simple"
+        ));
+        assert!(contains(
+            "UV_INDEX_URL",
+            "https://pypi.tuna.tsinghua.edu.cn/simple"
+        ));
         // 宿主 PATH 被清空（替换为命中来源的 PATH，无运行时则为空）。
         assert!(!contains("PATH", "host-path"));
     }

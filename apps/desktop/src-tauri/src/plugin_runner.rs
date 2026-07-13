@@ -7,8 +7,9 @@
 //!   （Python GUI 自己弹窗口，Node 输出在它自己的控制台），进程表记录 pid 供软件显示「运行中」+ 强制关闭。
 //!
 //! 运行流程（PRD 需求 3/5/7/9）：
-//! - Python：检测 venv → 不存在则用软件内置 Python 创建 venv → 有 requirements.txt 则
-//!   `venv/.../pip install -r requirements.txt`（清华 PyPI 镜像）→ detached `venv/.../python main.py`。
+//! - Python：检测 venv → 不存在则用软件内置 Python 创建 venv → 有 requirements.txt 则装依赖
+//!   （优先 `uv pip install --python`，应用未随 uv 时回退 `venv/.../python -m pip install`，清华 PyPI 镜像）
+//!   → detached `venv/.../python main.py`。
 //!   Windows 下 venv 放在短路径缓存，避免 PySide6 等深层 wheel 触发 260 字符路径限制。
 //! - Node：有 package.json + dependencies 则用软件内置 pnpm/npm install（npmmirror）→ detached pnpm/npm start。
 //!
@@ -286,6 +287,47 @@ pub(crate) fn ensure_python_venv(
     Ok(py)
 }
 
+/// 选 requirements.txt 的安装命令。
+///
+/// - 应用内置了 uv（`runtime.uv()` 命中）→ `uv pip install --python <venv-python> -r ...`
+///   （快、解析器更宽容、缓存复用好）。
+/// - 没有 uv（当前 Windows 制品未随 uv）→ 回退 `<venv-python> -m pip install --no-input -r ...`。
+///   venv 由 `create_python_venv` 建好并带 pip（ensurepip 引导），所以一定可执行。
+///
+/// 这是 requirements.txt 的契约：必须能装，不能因 uv 缺失而直接报错（与 uv.lock 不同——
+/// uv.lock 的冻结安装无等价回退，仍由 `ensure_python_venv` 的 uv.lock 分支单独要求 uv）。
+///
+/// 抽成纯函数便于单元测试：`install_and_smoke` 会真实 spawn 子进程，不便在 CI 里跑 pip。
+fn resolve_requirements_install_command(
+    runtime: &RuntimeResolver,
+    py: &PathBuf,
+    requirements_path: &std::path::Path,
+) -> (PathBuf, Vec<String>) {
+    let requirements_arg = requirements_path.to_string_lossy().to_string();
+    if let Some(uv) = runtime.uv() {
+        let args = vec![
+            "pip".to_string(),
+            "install".to_string(),
+            "--python".to_string(),
+            py.to_string_lossy().to_string(),
+            "-r".to_string(),
+            requirements_arg,
+        ];
+        (uv, args)
+    } else {
+        // 回退：venv python -m pip。--no-input 关闭交互提示（与历史 requirements 装依赖行为一致）。
+        let args = vec![
+            "-m".to_string(),
+            "pip".to_string(),
+            "install".to_string(),
+            "--no-input".to_string(),
+            "-r".to_string(),
+            requirements_arg,
+        ];
+        (py.clone(), args)
+    }
+}
+
 /// 装依赖 + 冒烟自愈的单次尝试（被 ensure_python_venv 调，失败时由上层删 venv 重试一次）。
 /// 步骤：pip install（幂等）→ import 冒烟 → 通过则写标记。冒烟检测到损坏直接返回 Err。
 fn install_and_smoke(
@@ -296,24 +338,16 @@ fn install_and_smoke(
     requirements_content: &str,
     stream: Option<&StreamCtx>,
 ) -> Result<(), String> {
-    // requirements.txt 统一通过 uv pip install 写入当前安装项 venv。
-    let uv = runtime
-        .uv()
-        .ok_or_else(|| "插件包含 requirements.txt，但应用运行时缺少 uv".to_string())?;
-    let pip_args = vec![
-        "pip".to_string(),
-        "install".to_string(),
-        "--python".to_string(),
-        py.to_string_lossy().to_string(),
-        "-r".to_string(),
-        plugin_dir
-            .join("requirements.txt")
-            .to_string_lossy()
-            .to_string(),
-    ];
+    // requirements.txt 装依赖：优先 uv pip install --python（快、可缓存），uv 未随包时回退到
+    // venv 自带 `python -m pip install`（venv 由 create_python_venv 建好并带 pip，详见
+    // plugin-runtime-persistence.md 的 Bundled-Only Windows Runtime Boundary 契约）。
+    // requirements.txt 必须能装——不能像 uv.lock 那样在缺 uv 时直接报错。
+    let requirements_path = plugin_dir.join("requirements.txt");
+    let (install_program, install_args) =
+        resolve_requirements_install_command(runtime, py, &requirements_path);
     let captured = run_with_optional_stream(
-        &uv,
-        pip_args,
+        &install_program,
+        install_args,
         Some(&plugin_dir.to_string_lossy()),
         600_000,
         runtime.env(minimal_env()),

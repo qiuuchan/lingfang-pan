@@ -33,7 +33,7 @@ Reference files:
 | `nodejs` | `package.json` scripts.start | 软件内置 pnpm/npm start 独立进程 | 「运行」/「停止」+ 状态 |
 
 - 前端运行分流必须通过共享解析器读取运行时，优先级为 `plugin.manifest.runtime_type/runtimeType` → `plugin.files[].manifest.json` → `plugin.runtime_type` → `client`。不要让列表层的旧默认值 `client` 覆盖 manifest 里的 `python`/`nodejs`。
-- **Python**：`ensure_python_venv` 检测 `python_venv_dir(plugin_dir)` → 不存在则用软件内置 `runtimes/python` 创建 venv（300s）→ 有 `requirements.txt` 则 `venv/.../pip install -r`（600s，幂等，清华 PyPI 镜像）→ `venv` 内 Python `-u main.py`。Windows 的 venv 不放插件目录，改放 `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>`，避免 PySide6 等深层 wheel 在默认 Roaming 插件目录下触发 260 字符路径限制。
+- **Python**：`ensure_python_venv` 检测 `python_venv_dir(plugin_dir)` → 不存在则用软件内置 `runtimes/python` 创建 venv（300s）→ 有 `uv.lock` 则 `uv sync --frozen`（需内置 uv，缺失即报错），有 `requirements.txt` 则装依赖（优先 `uv pip install --python`，应用未随 uv 时回退 `venv/.../python -m pip install --no-input`，600s，幂等，清华 PyPI 镜像）→ `venv` 内 Python `-u main.py`。Windows 的 venv 不放插件目录，改放 `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>`，避免 PySide6 等深层 wheel 在默认 Roaming 插件目录下触发 260 字符路径限制。
 - **Node**：`ensure_node_dependencies` 有 `package.json` + 非空依赖 + `node_modules` 缺失 → 软件内置 `runtimes/nodejs` 下的 `pnpm install`，缺 pnpm 时回退内置 `npm install`（600s，npmmirror）→ 内置 `pnpm start` / `npm start`，无 package 脚本时内置 `node entry`。
 - **HTML**：`read_local_plugin_file` 读取 entry HTML → iframe srcDoc 渲染。iframe 去 `allow-same-origin` 形成 opaque origin，防越权访问 parent.__TAURI__/localStorage。
 
@@ -112,6 +112,7 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - Embedded pip wheel discovery must prefer `runtimes/python/Lib/ensurepip/_bundled/pip-*.whl` and may fall back to `runtimes/python/pip-*.whl` for older packaged layouts; it must not download pip or use host Python.
 - `resolve_runtime_command` maps Python/pip/uv, Node/npm/pnpm, FFmpeg, and `chrome|chromium` to bundled absolute paths only.
 - Child env replaces host PATH with bundled runtime/plugin-local directories plus required Windows system directories and injects `PLAYWRIGHT_BROWSERS_PATH=<bundled>/chromium/ms-playwright` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.
+- Child env injects pip mirror via `PIP_INDEX_URL` + `PIP_TRUSTED_HOST` (清华源默认), npm via `NPM_CONFIG_REGISTRY`/`npm_config_registry` (npmmirror 默认). uv **不读 `PIP_INDEX_URL`**（astral-sh/uv#6925），必须额外注入 `UV_DEFAULT_INDEX` + `UV_INDEX_URL`（同清华源），否则 `uv pip install` / `uv sync` 回退官方 PyPI。两个 uv 别名都注入以兼容新旧版本。
 - `ensure_playwright_browsers` validates both full Chromium and headless shell at revision 1228; it never invokes Playwright install. Agent shell rejects commands containing `playwright install`.
 
 #### 4. Validation & Error Matrix
@@ -123,7 +124,9 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - embedded Python `ensurepip` fails while creating venv -> remove the partial venv directory, create a `--without-pip` venv, install pip from bundled wheel with embedded `pip --python`, then continue requirements install through the venv Python.
 - Windows plugin path is deep and `requirements.txt` contains PySide6 -> venv path must stay under `%LOCALAPPDATA%/LingFang/python-venvs/...`; do not require users to enable system Long Path support.
 - embedded Python cannot find any bundled `pip-*.whl` during fallback -> fail explicitly with a packaging error; do not fetch pip from the network.
-- dependency install needs network -> pip/npm/pnpm use fixed application child-process mirrors; browser binaries are never dependency downloads.
+- dependency install needs network -> pip/npm/pnpm/uv use fixed application child-process mirrors; browser binaries are never dependency downloads.
+- uv branch omits `UV_DEFAULT_INDEX`/`UV_INDEX_URL` -> `uv pip install`/`uv sync` silently fall back to official PyPI (uv ignores `PIP_INDEX_URL`, see astral-sh/uv#6925); China users hit slow/timeout. Both aliases must be injected.
+- plugin has `requirements.txt` but bundled runtime has no uv -> must fall back to `<venv-python> -m pip install --no-input`; only `uv.lock` may hard-require uv (no equivalent fallback). Never fail requirements install with a "缺少 uv" error.
 
 #### 5. Good/Base/Bad Cases
 - Good: a clean Windows machine runs Python, Node, FFmpeg, and Playwright Chromium from installed `runtimes/` while offline.
@@ -134,10 +137,13 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 
 #### 6. Tests Required
 - `runtime_resolver::tests::runtime_commands_are_detected_by_name`
+- `runtime_resolver::tests::env_replaces_path_and_adds_default_mirrors`
 - `runtime_resolver::tests::chromium_command_and_playwright_env_use_bundled_root`
 - `runtime_commands::tests::missing_runtime_is_read_only_packaging_error`
 - `plugin_runner::tests::bundled_pip_wheel_dir_prefers_ensurepip_bundled`
 - `plugin_runner::tests::bundled_pip_wheel_dir_falls_back_to_python_root`
+- `plugin_runner::tests::resolve_requirements_install_uses_uv_when_bundled`
+- `plugin_runner::tests::resolve_requirements_install_falls_back_to_pip_when_uv_missing`
 - `plugin_runner::tests::playwright_requires_bundled_full_and_headless_revision`
 - `plugin_shell::tests::blocks_playwright_browser_install_commands`
 - `plugin_script::tests::install_hint_covers_both_runtimes`
