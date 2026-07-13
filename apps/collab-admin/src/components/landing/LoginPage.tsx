@@ -150,18 +150,28 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               初始账号在系统部署时创建。
             </p>
 
-            <div className="mt-6 space-y-4">
+            {/* form + 标准 autocomplete：允许浏览器邮箱建议 / 密码管理器填充登录凭据。 */}
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submit();
+              }}
+            >
               <div>
-                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--lf-fg-muted)' }}>
+                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--lf-fg-muted)' }} htmlFor="admin-login-email">
                   邮箱
                 </label>
                 <input
-                  type="text"
+                  id="admin-login-email"
+                  name="username"
+                  type="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && submit()}
-                  autoComplete="off"
-                  spellCheck={false}
+                  autoComplete="username"
                   className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
                   style={{
                     backgroundColor: 'var(--lf-bg-elevated)',
@@ -171,15 +181,16 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--lf-fg-muted)' }}>
+                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--lf-fg-muted)' }} htmlFor="admin-login-password">
                   密码
                 </label>
                 <input
+                  id="admin-login-password"
+                  name="password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && submit()}
-                  autoComplete="new-password"
+                  autoComplete="current-password"
                   className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
                   style={{
                     backgroundColor: 'var(--lf-bg-elevated)',
@@ -198,15 +209,15 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                   {loginCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
                 </div>
               )}
-            </div>
 
-            <button
-              onClick={submit}
-              disabled={loading}
-              className="lf-btn-primary mt-6 w-full justify-center text-base"
-            >
-              {loading ? '登录中…' : '登录管理端'}
-            </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="lf-btn-primary mt-6 w-full justify-center text-base"
+              >
+                {loading ? '登录中…' : '登录管理端'}
+              </button>
+            </form>
 
             {/* 忘记密码入口：调管理端专用端点发重置邮件 */}
             <div className="mt-3 text-center">
@@ -231,7 +242,13 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
             <DialogDescription>输入注册邮箱，我们会发送密码重置链接到你的邮箱。</DialogDescription>
           </DialogHeader>
           <input
-            type="text"
+            id="admin-forgot-email"
+            name="email"
+            type="email"
+            inputMode="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="email"
             placeholder="注册邮箱"
             value={forgotEmail}
             onChange={(e) => setForgotEmail(e.target.value)}
