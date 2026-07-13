@@ -60,11 +60,25 @@ test.describe('CreatorWorkspace', () => {
     const creatorDialog = page.getByRole('dialog', { name: 'AI 创建插件' });
     await expect(creatorDialog).toBeVisible();
     expect(await creatorDialog.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(900);
+    const creatorSidebar = creatorDialog.locator('aside').first();
+    await expect(page.getByRole('button', { name: '展开创建器侧边栏' })).toBeVisible();
+    await expect(creatorSidebar).toHaveCSS('width', '60px');
+    await expect(page.getByText('插件 Agent', { exact: true })).toHaveCount(0);
+    await expect(creatorSidebar.getByText('测试团队', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '展开创建器侧边栏' }).click();
     await expect(page.getByText('插件 Agent', { exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '描述你想构建的插件' })).toBeVisible();
     await expect(page.getByText('还没有历史会话', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '收起创建器侧边栏' })).toBeVisible();
+    await expect(creatorSidebar).toHaveCSS('width', '240px');
+    await expect(page.getByRole('heading', { name: '描述你想构建的插件' })).toBeVisible();
     await expect(page.getByPlaceholder('描述要创建或修改的插件…')).toBeVisible();
     await expect(page.getByText('AI 插件创建器', { exact: true })).toHaveCount(0);
+
+    await creatorDialog.locator('[data-slot="dialog-close"]').click();
+    await expect(creatorDialog).toBeHidden();
+    await enterCreatorWorkspace(page);
+    await expect(page.getByRole('button', { name: '收起创建器侧边栏' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'AI 创建插件' }).locator('aside').first()).toHaveCSS('width', '240px');
   });
 
   test('精简 composer 的加号菜单承载高级操作', async ({ page }) => {
@@ -106,6 +120,7 @@ test.describe('CreatorWorkspace', () => {
   test('恢复持久化会话与插件草稿 Inspector', async ({ page }) => {
     await openCreatorWorkspace(page, persistedCreatorFixture);
 
+    await page.getByRole('button', { name: '展开创建器侧边栏' }).click();
     await expect(page.getByText('持久化计算器会话', { exact: true })).toBeVisible();
     await expect(page.getByText('做一个可以连续计算的网页计算器插件', { exact: true })).toBeVisible();
     await expect(page.getByText('插件草稿已经准备好，可以在右侧继续检查。', { exact: true })).toBeVisible();

@@ -873,9 +873,9 @@ export default function App() {
   else if (view === 'team-admin') body = <TeamAdmin />;
   else if (view === 'draft-plugins') body = <DraftPlugins />;
   else body = null;
-  // 开发插件页隐藏外层 Sidebar，但其侧边栏（CreatorWorkspaceSidebar）复用 sidebarOpen 控制折叠，
-  // 顶部标题栏的折叠按钮始终可用（控制当前可见的那个侧边栏）。
+  // 开发插件页隐藏外层 Sidebar；创建器会话侧栏维护自己的折叠偏好与切换入口。
   const showAppSidebar = view !== 'develop-plugins';
+  const showAppSidebarToggle = view !== 'develop-plugins';
 
   return (
     <AppContext.Provider value={ctx}>
@@ -883,7 +883,7 @@ export default function App() {
         {/* 紧凑自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制。 */}
         <TitleBar
           sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          onToggleSidebar={showAppSidebarToggle ? () => setSidebarOpen((v) => !v) : undefined}
         />
         <div className="flex min-h-0 flex-1">
           {showAppSidebar && (
@@ -936,7 +936,7 @@ export default function App() {
                                 onClose={() => undefined}
                               />
                             ) : (
-                              <CreatorWorkspace onClose={() => { setViewState(creatorReturnView); setCreatorReturnView('run-plugins'); }} sidebarCollapsed={!sidebarOpen} />
+                              <CreatorWorkspace onClose={() => { setViewState(creatorReturnView); setCreatorReturnView('run-plugins'); }} />
                             )}
                           </PageTransition>
                         </Suspense>
