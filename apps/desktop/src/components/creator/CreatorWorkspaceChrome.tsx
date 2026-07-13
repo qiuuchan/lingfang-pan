@@ -1,13 +1,11 @@
 import {
-  BotIcon,
-  ChevronDownIcon,
   HistoryIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   PlusIcon,
   Trash2Icon,
-  UserRoundIcon,
 } from 'lucide-react';
-import { useApp } from '@/App';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -15,11 +13,6 @@ type CreatorConversationSummary = {
   id: string;
   title: string;
   updatedAt: string;
-};
-
-const ROLE_LABEL: Record<string, string> = {
-  TEAM_ADMIN: '团队管理员',
-  MEMBER: '成员',
 };
 
 export function CreatorWorkspaceSidebar({
@@ -33,6 +26,7 @@ export function CreatorWorkspaceSidebar({
   onDeleteConversation,
   onNewConversation,
   onSelectConversation,
+  onToggleCollapsed,
 }: {
   activeConversationId: string | null;
   busy: boolean;
@@ -44,27 +38,30 @@ export function CreatorWorkspaceSidebar({
   onDeleteConversation: (id: string) => void;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
+  onToggleCollapsed: () => void;
 }) {
-  const { session, openAvatarMenu } = useApp();
-  const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
-  const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
-
   return (
     <aside
       className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border/70 bg-card/55 transition-[width] duration-200"
       style={{ width: collapsed ? 60 : 240 }}
     >
       <div className="border-b border-border/70 p-2">
-        <div className={cn('mb-2 flex h-9 items-center gap-2 px-2', collapsed && 'justify-center px-0')}>
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <BotIcon className="size-4" />
-          </span>
+        <div className={cn('mb-2 flex h-9 items-center gap-2', collapsed ? 'justify-center' : 'justify-between pl-2')}>
           {!collapsed && (
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium text-foreground">插件 Agent</span>
               <span className="block text-[10px] text-muted-foreground">创建工作区</span>
             </span>
           )}
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? '展开创建器侧边栏' : '收起创建器侧边栏'}
+            title={collapsed ? '展开创建器侧边栏' : '收起创建器侧边栏'}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {collapsed ? <PanelLeftOpenIcon className="size-4" /> : <PanelLeftCloseIcon className="size-4" />}
+          </button>
         </div>
         <Button
           variant="outline"
@@ -153,26 +150,6 @@ export function CreatorWorkspaceSidebar({
             !collapsed && <div className="px-3 py-8 text-center text-xs text-muted-foreground">还没有历史会话</div>
           )}
         </div>
-      </div>
-
-      <div className="border-t border-border/70 p-2">
-        <button
-          type="button"
-          onClick={openAvatarMenu}
-          title={collapsed ? tenantLabel : undefined}
-          className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full gap-2 rounded-md px-2 py-2', collapsed && 'justify-center px-0')}
-        >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <UserRoundIcon className="size-4" />
-          </span>
-          {!collapsed && (
-            <span className="min-w-0 flex-1 text-left text-xs">
-              <span className="block truncate font-medium text-foreground">{tenantLabel}</span>
-              <span className="block truncate text-muted-foreground">{roleLabel}</span>
-            </span>
-          )}
-          {!collapsed && <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />}
-        </button>
       </div>
     </aside>
   );

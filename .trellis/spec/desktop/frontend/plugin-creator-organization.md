@@ -16,9 +16,10 @@
 ```ts
 export function CreatorWorkspace(props: {
   onClose: () => void;
-  sidebarCollapsed?: boolean;
 }): JSX.Element
 ```
+
+创建器会话侧栏维护独立的全局 UI 偏好 `lf:creator-sidebar-open`：首次无 key 默认折叠，用户切换后跨浮窗/全屏入口复用；不要把它重新绑定到应用主侧栏 `lf:sidebar-open`。侧栏自身提供展开/收起按钮，底部不渲染账号头像或团队菜单。
 
 不要重新添加：
 
@@ -99,6 +100,6 @@ Wrong:
 Correct:
 
 ```tsx
-<CreatorWorkspace onClose={handleClose} sidebarCollapsed={!sidebarOpen} />
-// Composer 是唯一上下文入口，MessageList 只渲染 thread/status。
+<CreatorWorkspace onClose={handleClose} />
+// 创建器侧栏自行维护 lf:creator-sidebar-open；Composer 是唯一上下文入口，MessageList 只渲染 thread/status。
 ```

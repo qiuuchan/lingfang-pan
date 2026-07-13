@@ -178,13 +178,24 @@ function joinDisplayPath(root: string | null, pluginId: string | null) {
   return `${root.replace(/[\\/]+$/, '')}\\${pluginId}`;
 }
 
+const CREATOR_SIDEBAR_OPEN_KEY = 'lf:creator-sidebar-open';
+
+function loadCreatorSidebarOpen() {
+  try {
+    return localStorage.getItem(CREATOR_SIDEBAR_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
-export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClose: () => void; sidebarCollapsed?: boolean }) {
+export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   const { session, recentPlugins, pendingAutoFix, setPendingAutoFix, pendingDraftEdit, setPendingDraftEdit } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [conversations, setConversations] = useState<CreatorConversation[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(loadCreatorSidebarOpen);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [tier, setTier] = useState<'fast' | 'premium'>('fast');
@@ -233,6 +244,14 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
       try { d.reject(new DOMException('cancelled', 'AbortError')); } catch { /* ignore */ }
     }
     pendingAnswersRef.current.clear();
+  }
+
+  function toggleSidebar() {
+    setSidebarOpen((current) => {
+      const next = !current;
+      try { localStorage.setItem(CREATOR_SIDEBAR_OPEN_KEY, next ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
+      return next;
+    });
   }
 
   // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先），并始终同步 manifest.json。
@@ -1307,7 +1326,7 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
       <CreatorWorkspaceSidebar
             activeConversationId={activeConversationId}
             busy={busy}
-            collapsed={sidebarCollapsed}
+            collapsed={!sidebarOpen}
             confirmDeleteId={confirmDeleteId}
             conversations={conversations}
             onCancelDeleteConversation={() => setConfirmDeleteId(null)}
@@ -1315,6 +1334,7 @@ export function CreatorWorkspace({ onClose, sidebarCollapsed = false }: { onClos
             onDeleteConversation={setConfirmDeleteId}
             onNewConversation={newConversation}
             onSelectConversation={selectConversationById}
+            onToggleCollapsed={toggleSidebar}
       />
       <div className="flex min-w-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">

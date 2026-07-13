@@ -107,7 +107,7 @@ export async function openApp(
 /** 从当前登录态主页按真实产品路径进入开发插件 Agent 工作区。 */
 export async function enterCreatorWorkspace(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'AI 创建插件', exact: true }).click();
-  await page.getByText('插件 Agent', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
+  await page.getByRole('button', { name: /创建器侧边栏/ }).waitFor({ state: 'visible', timeout: 10_000 });
 }
 
 /** 打开已登录且已进入顶层创建器 Dialog 的 CreatorWorkspace。 */
