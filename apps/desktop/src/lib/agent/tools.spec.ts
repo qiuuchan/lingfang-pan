@@ -11,7 +11,13 @@ import { createAgentTools, normalizeToolFileContent, detectCapabilities, isVersi
 // 用 vi.hoisted 拿到可在工厂内引用的 mock 引用，再 vi.mock 替换两个模块。
 const runPluginMock = vi.hoisted(() => vi.fn());
 const tauriInvokeMock = vi.hoisted(() => vi.fn());
+const assertPolicyMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('@/lib/plugin-script', () => ({ runPluginScript: runPluginMock }));
+vi.mock('@/lib/plugin-ai-policy', () => ({
+  assertPluginAiPolicy: assertPolicyMock,
+  checkPluginAiPolicy: vi.fn().mockResolvedValue({ policyVersion: 1, ok: true, diagnostics: [], requiredCapabilities: [], truncated: false }),
+  policyDiagnosticMessage: vi.fn(() => ''),
+}));
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>();
   return { ...actual, tauriInvoke: tauriInvokeMock };
@@ -357,6 +363,27 @@ describe('RunPlugin 工具', () => {
     expect(callArgs.runtime).toBe('python');
     expect(callArgs.entry).toBe('main.py');
     expect(callArgs.files.some((f: { path: string }) => f.path === 'main.py')).toBe(true);
+  });
+
+  it('AI 试跑透传 manifest 能力并使用 180 秒超时', async () => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
+      const file = (args?.file as string) ?? '';
+      if (file === 'manifest.json') return JSON.stringify({
+        runtime_type: 'python',
+        entry: 'main.py',
+        capabilities: [{ kind: 'llm.chat', requires_admin: true }],
+      });
+      return "print('hello')";
+    });
+    runPluginMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', exitCode: 0, elapsedMs: 1 });
+
+    await callExecute(createAgentTools(makeOpts().opts).tools, 'RunPlugin', {});
+
+    expect(runPluginMock).toHaveBeenCalledWith(expect.objectContaining({
+      capabilities: ['llm.chat'],
+      timeoutMs: 180_000,
+    }));
   });
 
   it('运行失败（非零退出码）→ ❌ + stderr 供模型修复', async () => {

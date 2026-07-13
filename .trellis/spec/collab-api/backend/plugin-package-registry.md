@@ -110,6 +110,90 @@ Wrong：先 `findUnique` 检查 listing current，再在另一个事务中按 pa
 
 Correct：在同一 Serializable transaction 的 `updateMany` 中匹配 `status='ACTIVE'` 与 `currentReleaseId=expectedReleaseId`，count 非 1 直接返回 409，并保留 delist metadata。
 
+## Scenario: Platform-only Plugin AI Policy And Exact Runtime Release
+
+### 1. Scope / Trigger
+
+- 修改插件 AI capability、上传/发布政策、存量盘点、桌面安装预检、脚本启动或 `runtime-access` 时适用。
+- 该边界跨 `collab-api`、桌面 TypeScript、Tauri/Rust 和插件 SDK；任何一层只校验 package id 都会让旧或失败发行版借同包新版本获得权限。
+
+### 2. Signatures
+
+```text
+POST /api/plugins/policy/check
+body: { manifest: object, files: Array<{ path, content, binary? }> }
+
+POST /api/plugin-packages/:packageId/runtime-access
+body: { releaseId: string, sha256: 64-char lowercase hex }
+
+read_installed_plugin_policy_source
+input: { installationId: string, pending: boolean }
+output: { manifest: object, files: Array<{ path, content, binary }> }
+```
+
+DB gate：`Plugin.aiPolicyVersion/aiPolicyStatus` 与
+`PluginRelease.aiPolicyVersion/aiPolicyStatus/aiPolicyReason`。运行版本必须是精确
+`releaseId + sha256 + PUBLISHED + current policy PASSED`。
+
+### 3. Contracts
+
+- `plugin-ai-policy.ts` 是服务端单一权威规则；创建器和已安装插件把完整 manifest、源码与依赖声明提交给检查 API，不复制扫描规则。
+- `manifest.entry` 无论扩展名都必须作为 UTF-8 可执行文本扫描；`.mts` / `.cts` 也属于文本源码。
+- 入口缺失、binary、非法 UTF-8、NUL、超过 4 MiB，依赖声明超过 256 KiB，或总文本超过 32 MiB均 fail closed。
+- manifest 只在模型语义祖先下拒绝 `provider/baseUrl/apiKey/...`；普通业务字段（如 `weather.provider`）不能因插件声明 AI capability 被误伤。任意 manifest 字符串中的已知模型端点或 secret 仍必须拒绝。
+- 标准 OpenAI-compatible 客户端只允许 `openai` / `@ai-sdk/openai`，且构造器必须实际绑定宿主注入的 bridge URL + `/v1` 与 bridge token；仅在文件中提到环境变量不算绑定。
+- 已安装预检必须读取账本精确 active 或 pending release 的完整 package 目录；账本路径 canonicalize 后必须等于预期安装目录，不能只返回 manifest + entry。
+- 桌面启动或激活前把实际 active/pending `releaseId + sha256` 发给 `runtime-access`。package 内其他已通过版本不能替代当前版本。
+- AI capability 的旧 `requires_admin:true` 统一规范化为 `false`；manifest capability 与既有插件访问权仍是门禁，但不新增 AI 管理员审批。
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| 政策诊断非空 | 400 `plugin_ai_policy_failed`，不发布/不试跑 |
+| releaseId 不属于 package | 403/404，具体发行版不可运行 |
+| SHA 与 release 不匹配 | 409 `plugin_release_mismatch` |
+| release 非 `PUBLISHED` 或非当前政策 `PASSED` | 409 `plugin_ai_policy_required` |
+| 已安装 pending 不存在 | Tauri command 返回明确裸字符串错误 |
+| 安装账本 release 路径越界 | Tauri command 拒绝，不读取越界文件 |
+| 平台检查不可达且 AI 相关内容未缓存通过 | fail closed |
+
+### 5. Good/Base/Bad Cases
+
+- Good：pending release 的完整源码通过政策，桌面携带该 pending 的 id/SHA 请求授权，脚本启动成功；激活后 active 指向同一发行版。
+- Base：普通天气插件有 `weather.provider = "open-meteo"`，无模型端点或 SDK，政策通过。
+- Bad：只传 package id，或当前 FAILED release 借同包另一 PASSED release 获得 runtime access。
+- Bad：无扩展名入口、标成 binary 的 Python/JS 入口或超大依赖文件被跳过扫描。
+
+### 6. Tests Required
+
+- `plugin-ai-policy.spec.ts`：无扩展名/.mts/.cts、entry missing/binary/NUL/超限、manifest 普通 provider、manifest endpoint/secret、默认 OpenAI 构造器与精确 bridge 绑定。
+- `plugin-artifact.spec.ts`：先解析 manifest，再强制读取精确 entry；非法 UTF-8/CRC/大小失败且不创建 release。
+- `plugin-registry.service.spec.ts`：精确 release+SHA 成功，package/release/SHA 不匹配拒绝，FAILED/YANKED/旧 policy 不可恢复或购买。
+- 桌面：active/pending runtime-access payload、已安装完整源码 command 调用与政策缓存失效。
+- Rust：active/pending 精确选择、嵌套源码/依赖完整返回、binary base64 标记、路径越界和 pending 缺失。
+
+### 7. Wrong vs Correct
+
+Wrong：
+
+```ts
+await api(`/api/plugin-packages/${packageId}/runtime-access`, { method: 'POST' });
+```
+
+Correct：
+
+```ts
+await api(`/api/plugin-packages/${packageId}/runtime-access`, {
+  method: 'POST',
+  body: { releaseId: active.releaseId, sha256: active.sha256 },
+});
+```
+
+Wrong：只按扩展名收集政策文件，导致 `manifest.entry = "runner"` 被跳过。
+
+Correct：先解析 manifest，再无条件把精确 entry 当作受限 UTF-8 可执行文本读取，同时继续消费 ZIP 全部条目到 EOF 并校验大小与 CRC。
+
 ## Scenario: Admin Package Governance Projection
 
 ### 1. Scope / Trigger

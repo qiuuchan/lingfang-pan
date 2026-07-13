@@ -471,7 +471,10 @@ describe('AdminService 团队管理完善（组B）', () => {
       }));
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
-        data: { tokenVersion: { increment: 1 } },
+        data: {
+          tokenVersion: { increment: 1 },
+          teamContextVersion: { increment: 1 },
+        },
       });
     });
 

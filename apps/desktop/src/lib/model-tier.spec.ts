@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { modelTierFromRecord, modelTierLabel, modelTierRequestLabel, normalizeModelTier } from './model-tier';
+import { modelTierFromRecord, modelTierLabel, modelTierRequestLabel, normalizeModelTier, pluginModelTier } from './model-tier';
 
 describe('model tier helpers', () => {
   it('normalizes common tier wire values', () => {
@@ -17,5 +17,12 @@ describe('model tier helpers', () => {
   it('uses consistent labels', () => {
     expect(modelTierLabel('fast')).toBe('快速版');
     expect(modelTierRequestLabel('premium')).toBe('高级请求');
+  });
+
+  it('defaults an omitted plugin model and rejects unknown upstream names', () => {
+    expect(pluginModelTier(undefined)).toBe('fast');
+    expect(pluginModelTier('premium')).toBe('premium');
+    expect(() => pluginModelTier('gpt-4o')).toThrow(expect.objectContaining({ code: 'unsupported_model' }));
+    expect(() => pluginModelTier(null)).toThrow(expect.objectContaining({ code: 'unsupported_model' }));
   });
 });

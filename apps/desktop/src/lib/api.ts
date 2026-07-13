@@ -147,6 +147,7 @@ export interface ApiError extends Error {
   // HTTP 状态码（DESK-06 / ACCT-01 修复）：api() 把 res.status 挂到错误对象上，
   // 调用方可据此精确判定「后端未实现 404/405」等场景，不再依赖脆弱的字符串匹配。
   status?: number;
+  requestId?: string;
 }
 
 // 统一错误信息提取（DESK-UPDATE-01 修复）：tauriInvoke 调 Tauri 命令时，Rust 侧
@@ -182,16 +183,18 @@ interface ApiOptions {
   // 请求超时（毫秒）。DESK-01 / DESK-SHELL-02 修复：默认 30s，
   // 超时后 abort fetch 并抛友好错误，避免后端挂起时 UI 加载态永久冻结。
   timeoutMs?: number;
+  /** 非可信客户端来源遥测；只允许宿主边界选择，插件不能传任意 header。 */
+  clientSource?: 'desktop' | 'desktop-plugin' | 'desktop-plugin-test';
 }
 
 // 默认请求超时（30s）。覆盖 fetch 原生「无超时」行为，与浏览器默认 connection timeout 解耦。
 const DEFAULT_API_TIMEOUT_MS = 30_000;
 
-export async function api<T = any>(path: string, { method = 'GET', body, auth = true, formData, timeoutMs = DEFAULT_API_TIMEOUT_MS }: ApiOptions = {}): Promise<T> {
+export async function api<T = any>(path: string, { method = 'GET', body, auth = true, formData, timeoutMs = DEFAULT_API_TIMEOUT_MS, clientSource = 'desktop' }: ApiOptions = {}): Promise<T> {
   // 客户端标识：用于后端日志/来源区分，不作为验证码或权限信任边界。
   // multipart 上传时不设 Content-Type，交给浏览器自动加 boundary（设了反而会破坏 multipart 解析）。
   const isFormData = formData instanceof FormData;
-  const headers: Record<string, string> = { 'X-Client': 'desktop' };
+  const headers: Record<string, string> = { 'X-Client': clientSource };
   if (!isFormData) headers['Content-Type'] = 'application/json';
   if (auth && authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
@@ -219,9 +222,12 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
   dispatchBackendReachable();
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.message || data.error || res.statusText) as ApiError;
-    err.code = data.code || data.error;
+    const nested = data.error && typeof data.error === 'object' ? data.error : {};
+    const errorText = typeof data.error === 'string' ? data.error : undefined;
+    const err = new Error(data.message || nested.message || errorText || res.statusText) as ApiError;
+    err.code = data.code || nested.code || (data.message ? errorText : undefined);
     err.status = res.status;
+    err.requestId = data.requestId || nested.requestId || res.headers.get('x-request-id') || undefined;
     // 401 全局拦截（DESK-TOKEN-01 / DESK-03）：仅在 auth 请求且 HTTP 401 时派发，
     // 由 App.tsx 监听器调用 resetSession（避免业务页陷入反复报错却不回登录页）。
     // 业务页的 toast 仍会照常抛出（瞬时反馈），此处不阻断 throw 流程。

@@ -6,7 +6,6 @@ import { PrismaService } from './prisma.service';
 import { AuthModule } from './modules/auth.module';
 import { CollabModule } from './modules/collab.module';
 import { JwtAuthGuard } from './security';
-import { DualAuthGuard } from './dual-auth.guard';
 import { PermissionsGuard } from './permissions.guard';
 import { HealthController, ReadinessService } from './health.controller';
 import { AppCacheService, CacheService } from './cache.service';
@@ -94,9 +93,6 @@ function buildRedactPaths(): string[] {
     { provide: AppCacheService, useClass: CacheService },
     ReadinessService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    // DualAuthGuard 必须在 JwtAuthGuard 之前：它对非 /api/relay 路径直接放行，
-    // 对 /api/relay 路径完成「平台 API Key 或 JWT」双鉴权（relay 端点用 @Public() 跳过 JwtAuthGuard）。
-    { provide: APP_GUARD, useClass: DualAuthGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // RBAC 权限守卫：在 JwtAuthGuard 之后（user 已解析），按 @RequirePermission 校验。
     // 未声明权限要求的路由放行（向后兼容），由 service 内部 ensureXxx 兜底。

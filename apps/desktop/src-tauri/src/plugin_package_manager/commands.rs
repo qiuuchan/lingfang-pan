@@ -6,8 +6,8 @@ use crate::plugin_runner::{self, PluginProcessTable, StartPluginResult};
 
 use super::{
     CreateWorkspaceInput, DependencyStatus, DraftWorkspace, DraftWorkspaceFilePayload,
-    InstallArtifactInput, InstallationOrigin, InstalledPluginPayload, LocalInstallation,
-    PackWorkspaceResult, PluginPackageManager, PluginReleaseSourceKind,
+    InstallArtifactInput, InstallationOrigin, InstalledPluginPayload, InstalledPluginPolicySource,
+    LocalInstallation, PackWorkspaceResult, PluginPackageManager, PluginReleaseSourceKind,
 };
 
 #[tauri::command]
@@ -39,6 +39,15 @@ pub(crate) fn preview_pending_installed_plugin(
     installation_id: String,
 ) -> Result<InstalledPluginPayload, String> {
     manager.preview_pending_plugin(&installation_id)
+}
+
+#[tauri::command]
+pub(crate) fn read_installed_plugin_policy_source(
+    manager: tauri::State<'_, PluginPackageManager>,
+    installation_id: String,
+    pending: bool,
+) -> Result<InstalledPluginPolicySource, String> {
+    manager.read_installed_plugin_policy_source(&installation_id, pending)
 }
 
 #[tauri::command]
@@ -87,13 +96,17 @@ pub(crate) fn start_installed_plugin(
     process_table: tauri::State<'_, PluginProcessTable>,
     bridge: tauri::State<'_, PluginLlmBridge>,
     installation_id: String,
-    team_access_granted: Option<bool>,
+    registry_access_granted: Option<bool>,
     api_base: Option<String>,
     auth_token: Option<String>,
 ) -> Result<StartPluginResult, String> {
     let (installation, release, is_pending) = manager.selected_release(&installation_id)?;
-    if installation.origin == InstallationOrigin::Team && team_access_granted != Some(true) {
-        return Err("团队插件运行前必须完成在线成员与授权校验".to_string());
+    if matches!(
+        installation.origin,
+        InstallationOrigin::Team | InstallationOrigin::Marketplace
+    ) && registry_access_granted != Some(true)
+    {
+        return Err("远端插件运行前必须完成在线访问权与发行版校验".to_string());
     }
     manager.mark_dependency_status(
         &installation_id,

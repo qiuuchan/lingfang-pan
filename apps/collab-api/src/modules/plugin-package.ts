@@ -174,7 +174,8 @@ function normalizedCapabilities(input: unknown): NormalizedPluginPackage['manife
       kind,
       reason,
       risk,
-      requires_admin: requiresAdmin,
+      // AI 能力只以 manifest 声明作为运行门禁，不保留管理员审批语义。
+      requires_admin: kind === 'llm.chat' || kind === 'image.generate' ? false : requiresAdmin,
       ...(scope === undefined ? {} : { scope }),
     };
   });
@@ -270,6 +271,9 @@ export type PublicPluginInput = {
   ratingSum: number;
   createdAt: Date;
   updatedAt: Date;
+  aiPolicyVersion?: number;
+  aiPolicyStatus?: string;
+  aiPolicyReason?: string;
 };
 
 export function publicPlugin(plugin: PublicPluginInput, currentTeamId?: string) {
@@ -299,6 +303,9 @@ export function publicPlugin(plugin: PublicPluginInput, currentTeamId?: string) 
     ratingCount: plugin.ratingCount,
     ratingSum: plugin.ratingSum,
     source: plugin.teamId === currentTeamId ? 'team' : plugin.marketplace ? 'marketplace' : 'platform',
+    aiPolicyVersion: plugin.aiPolicyVersion ?? 0,
+    aiPolicyStatus: plugin.aiPolicyStatus || 'UNCHECKED',
+    aiPolicyReason: plugin.aiPolicyReason || '',
     createdAt: plugin.createdAt.toISOString(),
     updatedAt: plugin.updatedAt.toISOString(),
   };

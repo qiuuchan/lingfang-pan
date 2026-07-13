@@ -16,7 +16,6 @@ const loaders: Record<View, () => Promise<unknown>> = {
   billing: () => import('@/components/billing/billing-view'),
   credits: () => import('@/components/billing/credits-view'),
   callLogs: () => import('@/components/billing/call-logs-view'),
-  apiKeys: () => import('@/components/billing/api-keys-view'),
 };
 
 const loaded = new Set<View>();

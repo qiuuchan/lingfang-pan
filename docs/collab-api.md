@@ -94,7 +94,7 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/relay/v1/chat/completions` | OpenAI 兼容聊天转发（`@Public`，DualAuthGuard 鉴权：平台 API Key 或 JWT；SSE 流式；扣团队灵石） |
+| POST | `/api/relay/v1/chat/completions` | OpenAI 兼容聊天转发（JWT 当前团队鉴权；SSE 流式；扣当前团队灵石） |
 | POST | `/api/relay/v1/messages` | Anthropic 兼容消息转发 |
 | POST | `/api/relay/v1/images/generations` | AI 生图（按张计费） |
 | POST | `/api/relay/v1/images/edits` | 生图编辑（multipart 透传，按张计费） |
@@ -105,10 +105,8 @@ Authorization: Bearer <token>
 | GET | `/api/admin/billing/credits/teams/:teamId[/ledger]` | 团队灵石余额/流水 |
 | POST | `/api/admin/billing/credits/teams/:teamId/adjustments` | 调整团队灵石 |
 | GET | `/api/admin/billing/call-logs[?teamId&capability&status&...]` | 调用日志多维度查询 |
-| GET/DELETE | `/api/admin/billing/api-keys[/:id]` | API Key 总览/吊销 |
-| GET | `/api/admin/relay-docs` | Relay 接入文档（markdown） |
-| GET/POST/DELETE | `/api/teams/current/api-keys[/:id]` | 当前团队共享 API Key 列表/轮换/吊销（需 `team.api_key.manage`） |
 | GET | `/api/teams/current/credits[/ledger]` | 当前团队灵石 |
+| POST | `/api/plugins/policy/check` | 插件 AI 使用政策预检（上传/发布仍由服务端强制门禁） |
 
 ## 插件云端分享 API
 

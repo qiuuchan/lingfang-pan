@@ -47,6 +47,184 @@ fn node_artifact(root: &Path) -> (PathBuf, InspectedArtifact) {
     (output, inspected)
 }
 
+fn install_for_policy(
+    manager: &PluginPackageManager,
+    artifact_path: &Path,
+    artifact: &InspectedArtifact,
+    package_id: &str,
+    release_id: &str,
+) -> LocalInstallation {
+    manager
+        .install(InstallArtifactInput {
+            artifact_path: artifact_path.to_string_lossy().to_string(),
+            expected_sha256: Some(artifact.sha256.clone()),
+            package_id: Some(package_id.to_string()),
+            release_id: Some(release_id.to_string()),
+            origin: InstallationOrigin::Team,
+            protected: false,
+        })
+        .unwrap()
+}
+
+#[test]
+fn installed_policy_source_selects_exact_active_or_pending_release() {
+    let (manager, root) = manager();
+    let (active_path, active_artifact) = artifact(&root, "1.0.0", "print('active')");
+    let installed = install_for_policy(
+        &manager,
+        &active_path,
+        &active_artifact,
+        "policy-package",
+        "active-release",
+    );
+    let (pending_path, pending_artifact) = artifact(&root, "1.1.0", "print('pending')");
+    install_for_policy(
+        &manager,
+        &pending_path,
+        &pending_artifact,
+        "policy-package",
+        "pending-release",
+    );
+
+    let active = manager
+        .read_installed_plugin_policy_source(&installed.installation_id, false)
+        .unwrap();
+    let pending = manager
+        .read_installed_plugin_policy_source(&installed.installation_id, true)
+        .unwrap();
+    assert_eq!(active.manifest["version"], "1.0.0");
+    assert_eq!(pending.manifest["version"], "1.1.0");
+    assert_eq!(
+        active
+            .files
+            .iter()
+            .find(|file| file.path == "main.py")
+            .unwrap()
+            .content,
+        "print('active')"
+    );
+    assert_eq!(
+        pending
+            .files
+            .iter()
+            .find(|file| file.path == "main.py")
+            .unwrap()
+            .content,
+        "print('pending')"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn installed_policy_source_collects_manifest_dependencies_and_nested_sources() {
+    let (manager, root) = manager();
+    let workspace = root.join("complete-policy-source");
+    fs::create_dir_all(workspace.join("src/lib")).unwrap();
+    fs::write(
+        workspace.join("manifest.json"),
+        r#"{"id":"complete-policy","name":"Complete","version":"1.0.0","runtime_type":"nodejs","entry":"src/index.js","capabilities":[{"kind":"llm.chat"}]}"#,
+    )
+    .unwrap();
+    fs::write(workspace.join("src/index.js"), "require('./lib/chat')").unwrap();
+    fs::write(workspace.join("src/lib/chat.js"), "module.exports = 'chat'").unwrap();
+    fs::write(
+        workspace.join("package.json"),
+        r#"{"dependencies":{"openai":"^6.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(workspace.join("requirements.txt"), "openai==1.0.0\n").unwrap();
+    let artifact_path = root.join("complete-policy.lfplugin");
+    let inspected = package_workspace(&workspace, &artifact_path).unwrap();
+    let installed = install_for_policy(
+        &manager,
+        &artifact_path,
+        &inspected,
+        "complete-policy-package",
+        "complete-policy-release",
+    );
+
+    let source = manager
+        .read_installed_plugin_policy_source(&installed.installation_id, false)
+        .unwrap();
+    let paths = source
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"manifest.json"));
+    assert!(paths.contains(&"package.json"));
+    assert!(paths.contains(&"requirements.txt"));
+    assert!(paths.contains(&"src/index.js"));
+    assert!(paths.contains(&"src/lib/chat.js"));
+    assert_eq!(source.manifest["id"], "complete-policy");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn installed_policy_source_tags_binary_files_as_base64() {
+    let (manager, root) = manager();
+    let workspace = root.join("binary-policy-source");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("manifest.json"),
+        r#"{"id":"binary-policy","name":"Binary","version":"1.0.0","runtime_type":"client","entry":"index.html"}"#,
+    )
+    .unwrap();
+    fs::write(workspace.join("index.html"), "<main>ok</main>").unwrap();
+    let binary = [0_u8, 159, 146, 150, 255, 10];
+    fs::write(workspace.join("icon.png"), binary).unwrap();
+    let artifact_path = root.join("binary-policy.lfplugin");
+    let inspected = package_workspace(&workspace, &artifact_path).unwrap();
+    let installed = install_for_policy(
+        &manager,
+        &artifact_path,
+        &inspected,
+        "binary-policy-package",
+        "binary-policy-release",
+    );
+
+    let source = manager
+        .read_installed_plugin_policy_source(&installed.installation_id, false)
+        .unwrap();
+    let image = source
+        .files
+        .iter()
+        .find(|file| file.path == "icon.png")
+        .unwrap();
+    assert!(image.binary);
+    assert_eq!(
+        general_purpose::STANDARD.decode(&image.content).unwrap(),
+        binary
+    );
+    assert!(
+        !source
+            .files
+            .iter()
+            .find(|file| file.path == "index.html")
+            .unwrap()
+            .binary
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn installed_policy_source_fails_when_pending_release_is_missing() {
+    let (manager, root) = manager();
+    let (artifact_path, inspected) = artifact(&root, "1.0.0", "print('active')");
+    let installed = install_for_policy(
+        &manager,
+        &artifact_path,
+        &inspected,
+        "no-pending-package",
+        "active-only-release",
+    );
+    let error = manager
+        .read_installed_plugin_policy_source(&installed.installation_id, true)
+        .unwrap_err();
+    assert!(error.contains("没有待预检发行版"));
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn checksum_failure_leaves_ledger_unchanged() {
     let (manager, root) = manager();

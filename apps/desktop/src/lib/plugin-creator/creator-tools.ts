@@ -4,6 +4,7 @@
 // 本文件只保留 UI/校验可复用的无框架工具函数，发布统一走 DraftWorkspace v4 制品流程。
 import type { PluginCapability, PluginReleaseSourceKind } from '@lingfang/contract';
 import type { DraftFile } from '@/lib/types';
+import { normalizeAiCapabilityAdmin } from '@/lib/plugin-capabilities';
 
 /** 暂存的插件草稿：AI 生成的 manifest 字段 + 全部文件。供前端预览/编辑/提交。 */
 export interface StagedPlugin {
@@ -39,7 +40,8 @@ export function buildStagedManifest(draft: StagedPluginManifestSource) {
     runtime_type: draft.runtime_type,
     entry: draft.entry,
     visibility: draft.visibility,
-    capabilities: draft.capabilities.length ? draft.capabilities : [DEFAULT_CAPABILITY],
+    capabilities: (draft.capabilities.length ? draft.capabilities : [DEFAULT_CAPABILITY])
+      .map(normalizeAiCapabilityAdmin),
   };
 }
 

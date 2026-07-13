@@ -11,6 +11,8 @@ export type Sha256Hex = z.infer<typeof Sha256Hex>;
 export const PluginPackageGovernanceStatus = z.enum(['ACTIVE', 'ARCHIVED']);
 export const PluginReleaseStatus = z.enum(['PUBLISHED', 'YANKED']);
 export const PluginReleaseReviewStatus = z.enum(['DRAFT', 'PENDING', 'APPROVED', 'REJECTED']);
+export const PluginAiPolicyStatus = z.enum(['UNCHECKED', 'PASSED', 'FAILED']);
+export type PluginAiPolicyStatus = z.infer<typeof PluginAiPolicyStatus>;
 export const MarketplaceListingStatus = z.enum(['DRAFT', 'ACTIVE', 'DELISTED']);
 export const PluginReleaseSourceKind = z.enum([
   'LINGFANG_CREATOR',
@@ -62,6 +64,9 @@ export const PluginReleaseSummary = z.object({
   sourceKind: PluginReleaseSourceKind,
   sourceLabel: PluginReleaseSourceLabel,
   ingestChannel: PluginIngestChannel,
+  aiPolicyVersion: z.number().int().nonnegative().default(0),
+  aiPolicyStatus: PluginAiPolicyStatus.default('UNCHECKED'),
+  aiPolicyReason: z.string().max(1000).default(''),
   createdAt: z.string().datetime(),
 });
 export type PluginReleaseSummary = z.infer<typeof PluginReleaseSummary>;
@@ -104,6 +109,12 @@ export const UpdatePluginReleaseStatusRequest = z.object({
 });
 export type UpdatePluginReleaseStatusRequest = z.infer<typeof UpdatePluginReleaseStatusRequest>;
 
+export const PluginRuntimeAccessRequest = z.object({
+  releaseId: z.string().min(1),
+  sha256: Sha256Hex,
+});
+export type PluginRuntimeAccessRequest = z.infer<typeof PluginRuntimeAccessRequest>;
+
 export const UpdateMarketplaceListingStatusRequest = z.object({
   status: z.enum(['ACTIVE', 'DELISTED']),
   reason: z.string().max(500).optional(),
@@ -130,6 +141,9 @@ export const AdminPluginReleaseSummary = z.object({
   sourceKind: PluginReleaseSourceKind,
   sourceLabel: PluginReleaseSourceLabel,
   ingestChannel: PluginIngestChannel,
+  aiPolicyVersion: z.number().int().nonnegative().default(0),
+  aiPolicyStatus: PluginAiPolicyStatus.default('UNCHECKED'),
+  aiPolicyReason: z.string().max(1000).default(''),
   createdAt: z.string().datetime(),
 }).strict();
 export type AdminPluginReleaseSummary = z.infer<typeof AdminPluginReleaseSummary>;
@@ -218,6 +232,9 @@ export const AdminPluginReleaseCore = z.object({
   sourceKind: PluginReleaseSourceKind,
   sourceLabel: PluginReleaseSourceLabel,
   ingestChannel: PluginIngestChannel,
+  aiPolicyVersion: z.number().int().nonnegative().default(0),
+  aiPolicyStatus: PluginAiPolicyStatus.default('UNCHECKED'),
+  aiPolicyReason: z.string().max(1000).default(''),
   createdAt: z.string().datetime(),
 }).strict();
 export type AdminPluginReleaseCore = z.infer<typeof AdminPluginReleaseCore>;

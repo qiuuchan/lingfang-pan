@@ -2,6 +2,13 @@ import { createReadStream } from 'node:fs';
 import { open, stat, type FileHandle } from 'node:fs/promises';
 import { createInflateRaw } from 'node:zlib';
 import { badRequest } from '../common';
+import {
+  decodePluginAiPolicyText,
+  isPluginAiPolicyTextPath,
+  PLUGIN_AI_POLICY_MAX_TOTAL_BYTES,
+  pluginAiPolicyTextLimit,
+  type PluginAiPolicyFile,
+} from './plugin-ai-policy';
 import { parseStrictSemVer } from './plugin-semver';
 
 export const PLUGIN_ARTIFACT_MAX_BYTES = 300 * 1024 * 1024;
@@ -68,6 +75,7 @@ export type InspectedPluginArtifact = {
     capabilities: PluginCapability[];
   };
   files: Array<{ path: string; sizeBytes: number }>;
+  policyFiles: PluginAiPolicyFile[];
   uncompressedSizeBytes: number;
 };
 
@@ -371,7 +379,8 @@ function validateCapabilities(input: unknown): PluginCapability[] {
       kind: capability.kind,
       reason,
       risk,
-      requires_admin: requiresAdmin,
+      // llm.chat/image.generate 不保留管理员审批语义；旧 manifest 值统一归一化。
+      requires_admin: capability.kind === 'llm.chat' || capability.kind === 'image.generate' ? false : requiresAdmin,
       ...(scope === undefined ? {} : { scope: scope as Record<string, unknown> }),
     };
   });
@@ -418,21 +427,47 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
       });
     }
   }
-  let metaBytes: Buffer | null = null;
-  let manifestBytes: Buffer | null = null;
-  for (const entry of entries) {
-    const output = await consumeEntry(filePath, entry, entry === metaEntry || entry === manifestEntry);
-    if (entry === metaEntry) metaBytes = output;
-    if (entry === manifestEntry) manifestBytes = output;
-  }
+  const metaBytes = await consumeEntry(filePath, metaEntry, true);
+  const manifestBytes = await consumeEntry(filePath, manifestEntry, true);
   if (!metaBytes || !manifestBytes) throw badRequest('v4 制品缺少可读取的元数据');
   const meta = parseJsonObject(metaBytes, '_meta.json');
   if (meta.format !== 'lingfang-plugin' || meta.formatVersion !== 4) throw badRequest('只支持 .lfplugin v4 制品');
   const manifestRaw = parseJsonObject(manifestBytes, 'manifest.json');
   const manifest = validateManifest(manifestRaw, new Set(byPath.keys()));
+  const policyFiles: PluginAiPolicyFile[] = [];
+  let collectedPolicyBytes = 0;
+  let totalLimitReported = false;
+  for (const entry of entries) {
+    if (entry === metaEntry || entry === manifestEntry) continue;
+    const policyCandidate = entry.path === manifest.entry || isPluginAiPolicyTextPath(entry.path);
+    let collectPolicy = false;
+    if (policyCandidate) {
+      if (entry.uncompressedSize > pluginAiPolicyTextLimit(entry.path)) {
+        policyFiles.push({
+          path: entry.path,
+          scanError: entry.path.toLowerCase().endsWith('package.json')
+            || entry.path.toLowerCase().endsWith('requirements.txt')
+            || entry.path.toLowerCase().endsWith('pyproject.toml')
+            ? 'dependency_too_large'
+            : 'too_large',
+        });
+      } else if (collectedPolicyBytes + entry.uncompressedSize > PLUGIN_AI_POLICY_MAX_TOTAL_BYTES) {
+        if (!totalLimitReported) {
+          policyFiles.push({ path: entry.path, scanError: 'total_too_large' });
+          totalLimitReported = true;
+        }
+      } else {
+        collectedPolicyBytes += entry.uncompressedSize;
+        collectPolicy = true;
+      }
+    }
+    const output = await consumeEntry(filePath, entry, collectPolicy);
+    if (collectPolicy && output) policyFiles.push(decodePluginAiPolicyText(entry.path, output));
+  }
   return {
     manifest,
     files: entries.map((entry) => ({ path: entry.path, sizeBytes: entry.uncompressedSize })),
+    policyFiles,
     uncompressedSizeBytes: entries.reduce((sum, entry) => sum + entry.uncompressedSize, 0),
   };
 }

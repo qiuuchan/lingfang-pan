@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use crate::plugin_llm_bridge::PluginLlmBridge;
+use crate::plugin_llm_bridge::{PluginBridgeClientSource, PluginLlmBridge};
 use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutput};
 use crate::runtime_resolver::RuntimeResolver;
 // 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
@@ -583,9 +583,11 @@ pub fn run_plugin_script(
             .capabilities
             .iter()
             .any(|kind| kind == "image.generate"),
+        PluginBridgeClientSource::PluginTest,
         Duration::from_secs(30 * 60),
     )?;
     let bridge_token = bridge_env.as_ref().map(|env| env.token.clone());
+    let _bridge_guard = bridge.revoke_on_drop(bridge_token);
     if let Some(bridge_env) = bridge_env {
         env.push((
             OsString::from("LINGFANG_PLUGIN_BRIDGE_URL"),
@@ -597,18 +599,7 @@ pub fn run_plugin_script(
         ));
     }
     let captured: CapturedOutput =
-        match run_capture_with_env(&run_binary, args, Some(&workspace), timeout, env) {
-            Ok(captured) => captured,
-            Err(error) => {
-                if let Some(token) = bridge_token {
-                    bridge.revoke_token(&token);
-                }
-                return Err(error);
-            }
-        };
-    if let Some(token) = bridge_token {
-        bridge.revoke_token(&token);
-    }
+        run_capture_with_env(&run_binary, args, Some(&workspace), timeout, env)?;
     Ok(RunResult {
         stdout: captured.stdout,
         stderr: captured.stderr,

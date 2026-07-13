@@ -87,9 +87,13 @@ export class TeamService {
         // RBAC：重新激活时回填系统成员角色（REMOVED 前可能已清空 teamRoleId）。
         update: { status: 'ACTIVE', role: 'MEMBER', teamRoleId: teamMemberRoleId(invite.teamId), joinedAt: new Date() },
       });
+      await tx.user.update({
+        where: { id: userId },
+        data: { teamContextVersion: { increment: 1 } },
+      });
       await tx.auditLog.create({ data: { actorUserId: userId, action: 'invitation.redeemed', targetType: 'InvitationCode', targetId: invite.id, metadata: { teamId: invite.teamId } } });
     });
-    return this.auth.me(userId);
+    return this.auth.sessionAfterTeamContextChange(userId);
   }
 
   async currentTeam(userId: string) {
@@ -149,11 +153,15 @@ export class TeamService {
         // RBAC：重新激活时回填系统成员角色。
         update: { status: 'ACTIVE', role: 'MEMBER', teamRoleId: teamMemberRoleId(teamId), joinedAt: new Date() },
       });
+      await tx.user.update({
+        where: { id: userId },
+        data: { teamContextVersion: { increment: 1 } },
+      });
       await tx.auditLog.create({
         data: { actorUserId: userId, action: 'team.public_joined', targetType: 'Team', targetId: teamId, metadata: { teamId } },
       });
     });
-    return this.auth.me(userId);
+    return this.auth.sessionAfterTeamContextChange(userId);
   }
 
   async currentMembers(userId: string) {
@@ -185,8 +193,19 @@ export class TeamService {
     const target = await this.prisma.teamMembership.findUnique({ where: { teamId_userId: { teamId: membership.teamId, userId } } });
     if (!target) throw notFound('成员不存在');
     if (target.role === 'TEAM_ADMIN') throw forbidden('不能移除团队管理员');
-    await this.prisma.teamMembership.update({ where: { teamId_userId: { teamId: membership.teamId, userId } }, data: { status: 'REMOVED' } });
-    await this.audit(actorId, 'team.member.removed', 'User', userId, { teamId: membership.teamId });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.teamMembership.update({
+        where: { teamId_userId: { teamId: membership.teamId, userId } },
+        data: { status: 'REMOVED' },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: { teamContextVersion: { increment: 1 } },
+      });
+      await tx.auditLog.create({
+        data: { actorUserId: actorId, action: 'team.member.removed', targetType: 'User', targetId: userId, metadata: { teamId: membership.teamId } },
+      });
+    });
     return { ok: true };
   }
 

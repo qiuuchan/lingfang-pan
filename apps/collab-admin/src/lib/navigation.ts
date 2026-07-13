@@ -2,7 +2,6 @@ import {
   ActivityIcon,
   BoxesIcon,
   CloudCogIcon,
-  KeyRoundIcon,
   LayoutDashboardIcon,
   LifeBuoyIcon,
   GavelIcon,
@@ -56,7 +55,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: 'channels', label: '模型接入', icon: CloudCogIcon },
       { view: 'credits', label: '灵石账户', icon: ReceiptIcon },
       { view: 'callLogs', label: '调用日志', icon: ActivityIcon },
-      { view: 'apiKeys', label: 'API Key 总览', icon: KeyRoundIcon },
     ],
   },
   {

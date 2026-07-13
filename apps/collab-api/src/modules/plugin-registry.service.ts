@@ -11,6 +11,8 @@ import { AppError, badRequest, conflict, forbidden, insufficientBalance, notFoun
 import { PrismaService } from '../prisma.service';
 import { ARTIFACT_STORE, type ArtifactDownload, type ArtifactStore } from './artifact-store';
 import { AuthService } from './auth.service';
+import { PLUGIN_AI_POLICY_VERSION } from './plugin-ai-policy';
+import { assertPluginAiPolicy } from './plugin-ai-policy-enforcement';
 import { inspectPluginArtifact, PLUGIN_ARTIFACT_MAX_BYTES } from './plugin-artifact';
 import {
   ADMIN_PACKAGE_DETAIL_SELECT,
@@ -53,6 +55,12 @@ function assertStrictSemVer(version: string): void {
 function isPrerelease(version: string): boolean {
   const parsed = parseStrictSemVer(version);
   return !parsed || parsed.prerelease !== null;
+}
+
+function assertCurrentAiPolicy(release: { aiPolicyVersion: number; aiPolicyStatus: string }): void {
+  if (release.aiPolicyVersion !== PLUGIN_AI_POLICY_VERSION || release.aiPolicyStatus !== 'PASSED') {
+    throw new AppError(409, 'plugin_ai_policy_required', '插件发行版尚未通过当前 AI 使用政策检查');
+  }
 }
 
 @Injectable()
@@ -108,6 +116,7 @@ export class PluginRegistryService {
     if (!release || release.packageId !== packageId || release.status !== 'PUBLISHED' || release.marketReviewStatus !== 'APPROVED') {
       throw conflict('市场当前发行版不满足恢复条件');
     }
+    assertCurrentAiPolicy(release);
     return release;
   }
 
@@ -224,6 +233,7 @@ export class PluginRegistryService {
     try {
       const inspected = await inspectPluginArtifact(staged.path);
       assertStrictSemVer(inspected.manifest.version);
+      const policy = assertPluginAiPolicy({ manifest: inspected.manifest, files: inspected.policyFiles });
 
       let pkg = packageId ? await this.prisma.pluginPackage.findUnique({ where: { id: packageId } }) : null;
       if (pkg) {
@@ -280,6 +290,9 @@ export class PluginRegistryService {
             sourceLabel: source.sourceLabel,
             ingestChannel: source.ingestChannel,
             createdById: userId,
+            aiPolicyVersion: policy.policyVersion,
+            aiPolicyStatus: 'PASSED',
+            aiPolicyReason: '',
           },
         });
         await tx.auditLog.create({
@@ -321,7 +334,15 @@ export class PluginRegistryService {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const packages = await this.prisma.pluginPackage.findMany({
       where: { ownerTeamId: membership.teamId, governanceStatus: 'ACTIVE' },
-      include: { releases: { where: { status: 'PUBLISHED' } } },
+      include: {
+        releases: {
+          where: {
+            status: 'PUBLISHED',
+            aiPolicyVersion: PLUGIN_AI_POLICY_VERSION,
+            aiPolicyStatus: 'PASSED',
+          },
+        },
+      },
       orderBy: { updatedAt: 'desc' },
     });
     return {
@@ -369,6 +390,8 @@ export class PluginRegistryService {
       items: listings.flatMap((listing) => listing.currentRelease
         && listing.currentRelease.status === 'PUBLISHED'
         && listing.currentRelease.marketReviewStatus === 'APPROVED'
+        && listing.currentRelease.aiPolicyVersion === PLUGIN_AI_POLICY_VERSION
+        && listing.currentRelease.aiPolicyStatus === 'PASSED'
         ? [{
             package: packageJson(listing.package),
             latestRelease: releaseJson(listing.currentRelease),
@@ -393,7 +416,11 @@ export class PluginRegistryService {
     return {
       package: packageJson(pkg),
       releases: pkg.releases
-        .filter((release) => isOwnerTeam || release.marketReviewStatus === 'APPROVED')
+        .filter((release) => isOwnerTeam || (
+          release.marketReviewStatus === 'APPROVED'
+          && release.aiPolicyVersion === PLUGIN_AI_POLICY_VERSION
+          && release.aiPolicyStatus === 'PASSED'
+        ))
         .map(releaseJson),
       listing: listingJson(pkg.listing),
       entitled: pkg.listing?.priceCents === 0 || entitlement > 0,
@@ -439,6 +466,7 @@ export class PluginRegistryService {
   async artifactDownload(userId: string, releaseId: string): Promise<{ download: ArtifactDownload; release: ReturnType<typeof releaseJson> }> {
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
     if (!release || release.status === 'YANKED') throw notFound('插件发行版不存在或已撤回');
+    assertCurrentAiPolicy(release);
     const access = await this.resolvePackageAccess(userId, release.packageId);
     if (access.source === 'marketplace' && release.marketReviewStatus !== 'APPROVED') {
       throw forbidden('该市场发行版尚未通过审核');
@@ -448,8 +476,20 @@ export class PluginRegistryService {
     return { download, release: releaseJson(release) };
   }
 
-  async runtimeAccess(userId: string, packageId: string) {
+  async runtimeAccess(userId: string, packageId: string, releaseId: string, sha256: string) {
     const access = await this.resolvePackageAccess(userId, packageId);
+    const release = await this.prisma.pluginRelease.findUnique({
+      where: {
+        id: releaseId,
+      },
+    });
+    if (!release || release.packageId !== packageId || release.sha256 !== sha256 || release.status !== 'PUBLISHED') {
+      throw new AppError(409, 'plugin_release_mismatch', '本机插件版本与平台发行版不一致，请重新下载');
+    }
+    assertCurrentAiPolicy(release);
+    if (access.source === 'marketplace' && release.marketReviewStatus !== 'APPROVED') {
+      throw forbidden('该市场发行版尚未通过审核');
+    }
     if (access.source !== 'team') return { allowed: true, mode: 'local-entitlement' as const };
     return { allowed: true, mode: 'online-team-membership' as const, checkedAt: new Date().toISOString() };
   }
@@ -481,6 +521,7 @@ export class PluginRegistryService {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId }, include: { package: true } });
     if (!release || release.package.ownerTeamId !== membership.teamId) throw notFound('发行版不存在');
+    assertCurrentAiPolicy(release);
     await this.ensurePackageActor(userId, release.package, membership, 'team.plugin.submit_marketplace');
     if (release.package.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能提交市场');
     if (release.status !== 'PUBLISHED') throw conflict('已撤回发行版不能提交市场');
@@ -593,6 +634,7 @@ export class PluginRegistryService {
     await this.ensurePackageActor(userId, release.package, membership, 'team.plugin.edit_draft');
     if (release.status === status) return { release: releaseJson(release), listing: listingJson(release.package.listing) };
     if (status === 'PUBLISHED' && release.package.governanceStatus !== 'ACTIVE') throw conflict('已归档插件包不能恢复发行版');
+    if (status === 'PUBLISHED') assertCurrentAiPolicy(release);
     const expected = status === 'YANKED' ? 'PUBLISHED' : 'YANKED';
     const reason = status === 'YANKED' ? '作者撤回发行版' : '';
     const result = await this.serializableTransaction(async (tx) => {
@@ -663,8 +705,15 @@ export class PluginRegistryService {
 
   async purchase(userId: string, packageId: string) {
     const membership = await this.auth.ensureCurrentTeam(userId);
-    const listing = await this.prisma.marketplaceListing.findUnique({ where: { packageId }, include: { package: true } });
+    const listing = await this.prisma.marketplaceListing.findUnique({
+      where: { packageId },
+      include: { package: true, currentRelease: true },
+    });
     if (!listing || listing.status !== 'ACTIVE' || !listing.currentReleaseId) throw notFound('市场插件不存在或未上架');
+    if (!listing.currentRelease || listing.currentRelease.status !== 'PUBLISHED' || listing.currentRelease.marketReviewStatus !== 'APPROVED') {
+      throw notFound('市场插件不存在或未上架');
+    }
+    assertCurrentAiPolicy(listing.currentRelease);
     if (listing.package.ownerTeamId === membership.teamId) throw conflict('不能购买本团队发布的插件');
     const existing = await this.prisma.pluginEntitlement.findUnique({ where: { teamId_packageId: { teamId: membership.teamId, packageId } } });
     if (existing) return { entitled: true, entitlementId: existing.id, purchaseId: existing.purchaseId };
@@ -920,6 +969,7 @@ export class PluginRegistryService {
     await this.auth.ensurePlatformAdmin(actorId);
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId }, include: { package: true } });
     if (!release || release.marketReviewStatus !== 'PENDING') throw conflict('发行版不在待审核状态');
+    assertCurrentAiPolicy(release);
     if (release.status !== 'PUBLISHED' || release.package.governanceStatus !== 'ACTIVE') {
       throw conflict('只有活动插件包中的已发布发行版可以通过审核');
     }
@@ -934,7 +984,13 @@ export class PluginRegistryService {
       });
       if (claimed.count !== 1) throw conflict('发行版审核状态已变化，请刷新后重试');
       const candidates = await tx.pluginRelease.findMany({
-        where: { packageId: release.packageId, status: 'PUBLISHED', marketReviewStatus: 'APPROVED' },
+        where: {
+          packageId: release.packageId,
+          status: 'PUBLISHED',
+          marketReviewStatus: 'APPROVED',
+          aiPolicyVersion: PLUGIN_AI_POLICY_VERSION,
+          aiPolicyStatus: 'PASSED',
+        },
         select: { id: true, version: true },
       });
       const current = highestSemVer(candidates);

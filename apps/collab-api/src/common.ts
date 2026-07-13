@@ -12,6 +12,10 @@ export interface AuthUser {
   platformRole: 'NONE' | 'PLATFORM_ADMIN';
   /** token 版本号，与 user.tokenVersion 比对以实现吊销（见 JwtAuthGuard）。 */
   tokenVersion: number;
+  /** JWT 签名绑定的当前团队；null 表示签发时没有 ACTIVE membership。 */
+  teamId: string | null;
+  /** 当前团队上下文版本，与 User.teamContextVersion 比对以吊销旧团队会话。 */
+  teamContextVersion: number;
   /** RBAC：用户挂的平台级角色 id（scope=PLATFORM），由 JwtAuthGuard 回查时填充。null 表示无平台角色。 */
   platformRoleId?: string | null;
 }

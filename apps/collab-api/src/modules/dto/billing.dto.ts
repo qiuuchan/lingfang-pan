@@ -71,15 +71,6 @@ export class CreditAdjustDto {
   @ApiProperty() @IsString() @IsNotEmpty() reason!: string;
 }
 
-// === API Key ===
-
-export class ApiKeyCreateDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
-  @ApiPropertyOptional({ type: [String], description: '能力白名单：chat/image；空数组默认全能力。tier 标签仅展示，不做强限版' })
-  @IsOptional() @IsArray() @IsString({ each: true }) scopes?: string[];
-  @ApiPropertyOptional({ description: '兼容旧客户端；团队共享 Key 固定不过期' }) @IsOptional() @IsBoolean() noExpire?: boolean;
-}
-
 // === 渠道测试 ===
 
 export class TestChatDto {

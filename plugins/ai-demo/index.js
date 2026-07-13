@@ -7,8 +7,8 @@
 // plugin_llm_bridge.rs）：
 //  - 桌面壳 start_plugin 启动本进程时，注入两个环境变量：
 //      LINGFANG_PLUGIN_BRIDGE_URL  = http://127.0.0.1:<port>   （基础 endpoint）
-//      LINGFANG_PLUGIN_BRIDGE_TOKEN = lfpb_...                  （一次性会话 token）
-//  - 脚本不持有用户 JWT / 平台 API Key；只需把 token 放进请求头 X-LingFang-Plugin-Token，
+//      LINGFANG_PLUGIN_BRIDGE_TOKEN = <session token>            （当前进程会话）
+//  - 脚本不持有用户 JWT 或上游密钥；宿主注入的会话 token 只用于当前运行周期，
 //    桥会校验 manifest 声明的能力（llm.chat / image.generate），再以宿主登录态转发到平台 relay
 //    并计费扣团队灵石。这是「脚本插件安全调用平台 AI」的标准范式。
 //  - 路由：POST <BRIDGE_URL>/llm/chat（body: {messages, model}，返回 {content}）
@@ -22,9 +22,9 @@ const http = require('http');
 const net = require('net');
 const { exec } = require('child_process');
 
-// 平台本地桥地址与 token（由桌面壳注入）。缺省时给出明确提示。
-const BRIDGE_URL = process.env.LINGFANG_PLUGIN_BRIDGE_URL || '';
-const BRIDGE_TOKEN = process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN || '';
+// 平台本地桥地址与 token 只能直接取宿主注入值，不提供自定义 fallback。
+const BRIDGE_URL = process.env.LINGFANG_PLUGIN_BRIDGE_URL;
+const BRIDGE_TOKEN = process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN;
 
 const PORT_START = 41984;
 const PORT_END = 42084;
@@ -53,7 +53,7 @@ function findFreePort(start, end) {
  */
 function callBridge(path, body) {
   if (!BRIDGE_URL || !BRIDGE_TOKEN) {
-    return Promise.reject(new Error('未检测到平台本地桥环境变量（LINGFANG_PLUGIN_BRIDGE_URL/TOKEN）。请在桌面客户端中以 nodejs 插件方式运行，而非直接 node index.js。'));
+    return Promise.reject(new Error('平台本地桥不可用，请在桌面客户端中以 nodejs 插件方式运行。'));
   }
   // BRIDGE_URL 形如 http://127.0.0.1:port，拆出 host/port。
   const m = BRIDGE_URL.match(/^http:\/\/([^:/]+)(?::(\d+))?/);
@@ -163,7 +163,6 @@ async function main() {
   server.listen(port, '127.0.0.1', () => {
     const addr = `http://127.0.0.1:${port}`;
     console.log(`[ai-demo] 服务已启动：${addr}`);
-    console.log(`[ai-demo] 桥地址：${BRIDGE_URL || '（未注入，仅静态展示）'}`);
     // 自动打开浏览器（错误忽略：某些环境无 GUI）。
     const open = process.platform === 'win32' ? 'start ""' : process.platform === 'darwin' ? 'open' : 'xdg-open';
     exec(`${open} ${addr}`, () => undefined);

@@ -101,7 +101,9 @@ export function withRetryFetch(): typeof fetch {
 export function relayProvider() {
   const openai = createOpenAI({
     baseURL: `${apiBase()}/api/relay/v1`,
-    apiKey: getAuthToken() || 'no-auth', // relay 的 DualAuthGuard 读 Authorization: Bearer
+    // createOpenAI 用 apiKey 字段生成 Bearer header；这里承载的是当前登录 JWT，
+    // relay 仍由全局 JWT + 当前团队守卫鉴权，不存在客户端模型密钥。
+    apiKey: getAuthToken() || 'no-auth',
     headers: { 'X-Client': 'desktop' },
     // 连接级重试：瞬断（DNS 抖动 / 连接重置 / 网络不可达）由 fetch 层指数退避重试，
     // 多数「网络不好」场景在此层吸收，不必每次都让用户手动点重试。

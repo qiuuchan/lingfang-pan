@@ -76,6 +76,9 @@ export function releaseJson(release: {
   sourceLabel?: string;
   ingestChannel?: string;
   reviewReason?: string;
+  aiPolicyVersion?: number;
+  aiPolicyStatus?: string;
+  aiPolicyReason?: string;
   createdAt: Date;
 }) {
   return {
@@ -92,6 +95,9 @@ export function releaseJson(release: {
     sourceLabel: release.sourceLabel || '',
     ingestChannel: release.ingestChannel || 'API',
     ...(release.reviewReason === undefined ? {} : { reviewReason: release.reviewReason }),
+    aiPolicyVersion: release.aiPolicyVersion ?? 0,
+    aiPolicyStatus: release.aiPolicyStatus || 'UNCHECKED',
+    aiPolicyReason: release.aiPolicyReason || '',
     createdAt: release.createdAt.toISOString(),
   };
 }

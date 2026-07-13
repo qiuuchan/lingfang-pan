@@ -7,7 +7,7 @@
   "entry": "index.js",
   "visibility": "tenant",
   "capabilities": [
-    { "kind": "llm.chat", "reason": "演示调用平台大模型对话能力", "risk": "medium", "requires_admin": true },
-    { "kind": "image.generate", "reason": "演示调用平台生图能力", "risk": "medium", "requires_admin": true }
+    { "kind": "llm.chat", "reason": "演示调用平台大模型对话能力", "risk": "medium", "requires_admin": false },
+    { "kind": "image.generate", "reason": "演示调用平台生图能力", "risk": "medium", "requires_admin": false }
   ]
 }

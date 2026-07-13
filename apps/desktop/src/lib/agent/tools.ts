@@ -20,6 +20,8 @@ import {
   type StagedPlugin,
 } from '@/lib/plugin-creator/creator-tools';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
+import { normalizeAiCapabilityAdmin } from '@/lib/plugin-capabilities';
+import { assertPluginAiPolicy, checkPluginAiPolicy, policyDiagnosticMessage } from '@/lib/plugin-ai-policy';
 
 /**
  * 自建工具定义辅助（取代 @openai/agents 的 tool() 工厂）。
@@ -286,7 +288,8 @@ export function createAgentTools(opts: AgentToolsOptions) {
       }));
       const capabilities = (args.capabilities?.length
         ? args.capabilities
-        : [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low' as const, requires_admin: false }]) as StagedPlugin['capabilities'];
+        : [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low' as const, requires_admin: false }])
+        .map(normalizeAiCapabilityAdmin) as StagedPlugin['capabilities'];
       const draft: StagedPlugin = {
         id: args.id,
         name: args.name,
@@ -476,6 +479,23 @@ export function createAgentTools(opts: AgentToolsOptions) {
           return `- ${k}：${rule?.fix ?? '代码用到了但未声明'}`;
         }).join('\n');
         return `发现问题：代码用到了以下能力但 manifest 未声明（运行时会被拒绝）：\n${hints}\n请用 CreatePlugin 或编辑 manifest.json 补充这些 capabilities 后重新 Check。`;
+      }
+      const policyFiles: ScriptFile[] = [];
+      for (const path of files) {
+        try {
+          policyFiles.push({ path, content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }) });
+        } catch {
+          return `错误：无法读取 ${path}，平台 AI 使用政策检查失败，已阻止试跑。`;
+        }
+      }
+      let policy;
+      try {
+        policy = await checkPluginAiPolicy(manifest as unknown as Record<string, unknown>, policyFiles);
+      } catch (error) {
+        return `错误：平台 AI 使用政策检查失败，已阻止试跑：${errorMessage(error, '平台不可用')}`;
+      }
+      if (!policy.ok) {
+        return `发现问题：插件未通过平台 AI 使用政策检查：\n${policyDiagnosticMessage(policy)}`;
       }
       return '校验通过：入口与必需文件齐备，路径合法，代码语法检查无问题，能力声明与代码实际一致。';
     },
@@ -746,7 +766,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
       } catch {
         return '错误：缺少 manifest.json，无法确定运行时类型和入口。';
       }
-      let manifest: { runtime_type?: string; entry?: string };
+      let manifest: { runtime_type?: string; entry?: string; capabilities?: Array<string | { kind?: string }> };
       try {
         manifest = JSON.parse(manifestRaw);
       } catch {
@@ -786,13 +806,24 @@ export function createAgentTools(opts: AgentToolsOptions) {
           return `错误：读取 ${p} 失败：${e instanceof Error ? e.message : String(e)}`;
         }
       }
+      try {
+        await assertPluginAiPolicy(manifest as unknown as Record<string, unknown>, scriptFiles);
+      } catch (error) {
+        return `错误：${errorMessage(error, '平台 AI 使用政策检查失败，已阻止试跑')}`;
+      }
+      const capabilities = (manifest.capabilities ?? []).flatMap((capability) => {
+        const kind = typeof capability === 'string' ? capability : capability?.kind;
+        return typeof kind === 'string' && kind ? [kind] : [];
+      });
+      const usesAi = capabilities.some((kind) => kind === 'llm.chat' || kind === 'image.generate');
       // 调 Rust run_plugin_script（沙箱一次性执行 + 捕获输出 + 透传 args）。
       const result = await runPluginScript({
         pluginId,
         runtime,
         entry: entryPath,
         files: scriptFiles,
-        capabilities: [], // 试跑不注入 LLM 桥能力（纯验证代码能否跑）
+        capabilities,
+        timeoutMs: usesAi ? 180_000 : undefined,
         args: args ?? [],
       });
       // 格式化为 AI 可读文本。

@@ -6,7 +6,7 @@ import {
   ImageRelayInputSchema,
   injectSystemGuardRule,
   DEFAULT_AI_USAGE_GUARD_RULE,
-  PlatformApiKeyPublicSchema,
+  LlmCallLogSchema,
   RelayModelsResponseSchema,
 } from './billing.ts';
 
@@ -59,6 +59,11 @@ test('ChatRelayInputSchema rejects custom model ids (protocol enforces two tiers
   assert.equal(bad.success, false);
 });
 
+test('relay schemas default an omitted model to fast', () => {
+  const parsed = ChatRelayInputSchema.parse({ messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal(parsed.model, 'fast');
+});
+
 test('ImageRelayInputSchema enforces prompt + tier + bounds n', () => {
   assert.equal(
     ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'a cat' }).success,
@@ -76,15 +81,12 @@ test('ImageRelayInputSchema enforces prompt + tier + bounds n', () => {
   );
 });
 
-// 需求 #4：API Key 出参永不回明文/keyHash，只回 keyPrefix。
-test('PlatformApiKeyPublicSchema does not leak plaintextKey or keyHash', () => {
-  const publicShape = PlatformApiKeyPublicSchema.shape;
-  assert.equal('plaintextKey' in publicShape, false);
-  assert.equal('keyHash' in publicShape, false);
-  assert.equal('keyPrefix' in publicShape, true);
+test('LlmCallLogSchema exposes client telemetry without an API key relation', () => {
+  assert.equal('clientSource' in LlmCallLogSchema.shape, true);
+  assert.equal('apiKeyId' in LlmCallLogSchema.shape, false);
 });
 
-test('RelayModelsResponseSchema lists exactly the two tiers', () => {
+test('RelayModelsResponseSchema accepts the available fast/premium tier subset', () => {
   const parsed = RelayModelsResponseSchema.parse({
     data: [{ id: 'fast' }, { id: 'premium' }],
   });

@@ -99,7 +99,7 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
   defineModule('PLATFORM', 'platform.llm', '模型服务', 60, [
     { code: 'platform.llm.provider.manage', label: '管理模型服务', description: '管理 LLM 网关目录、激活 provider（旧 BYOK，过渡期保留）' },
   ]),
-  // 计费与模型中转（Relay + 灵石）：渠道管理 / 模型定价 / 版本配置 / 灵石账户 / 调用日志 / API Key 总览 / 接入文档。
+  // 计费与模型中转（Relay + 灵石）：渠道管理 / 模型定价 / 版本配置 / 灵石账户 / 调用日志。
   // 这些是平台级运营资源，仅平台管理员可操作（团队级灵石查看走 team.credits.view，见下）。
   defineModule('PLATFORM', 'platform.billing', '计费与中转', 62, [
     { code: 'platform.billing.channel.manage', label: '管理渠道', description: '管理上游渠道、范围绑定、优先级/权重、健康测试' },
@@ -107,8 +107,6 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
     { code: 'platform.billing.tier.manage', label: '管理模型版本', description: '配置快速版/高级版的底层模型与参数' },
     { code: 'platform.billing.credit.adjust', label: '调整团队灵石', description: '为团队灵石账户加款/扣款' },
     { code: 'platform.billing.call_log.view', label: '查看调用日志', description: '查看全平台 AI 调用日志（多维度查询）' },
-    { code: 'platform.billing.api_key.manage', label: '管理 API Key', description: '查看/吊销全平台的平台 API Key' },
-    { code: 'platform.billing.relay_docs.view', label: '查看接入文档', description: '查看中转接入指引（管理员侧）' },
   ]),
   defineModule('PLATFORM', 'platform.release', '版本发布', 70, [
     { code: 'platform.release.manage', label: '管理版本发布', description: '发布/归档应用版本、上传产物' },
@@ -169,9 +167,6 @@ export const TEAM_MODULES: PermissionModuleDef[] = [
   // 计费/中转 · 团队灵石（AI 用量计费货币，独立于人民币余额）。普通成员可查；调整仅平台 Admin。
   defineModule('TEAM', 'team.credits', '团队灵石', 62, [
     { code: 'team.credits.view', label: '查看团队灵石', description: '查看本团队灵石余额与流水（AI 用量计费）' },
-  ]),
-  defineModule('TEAM', 'team.api_key', 'AI 接入密钥', 64, [
-    { code: 'team.api_key.manage', label: '管理 AI 接入密钥', description: '轮换或吊销本团队用于平台 relay 接入的共享 API Key' },
   ]),
   defineModule('TEAM', 'team.profile', '团队资料', 70, [
     { code: 'team.profile.update', label: '编辑团队资料', description: '编辑本团队名称、简介、公开加入开关' },
@@ -248,6 +243,18 @@ export const LEGACY_PERMISSION_EXPANSION: Record<string, string[]> = {
 
 /** 旧权限码集合（快速判断某码是否已废弃，需扩张）。 */
 export const LEGACY_PERMISSION_CODES: Set<string> = new Set(Object.keys(LEGACY_PERMISSION_EXPANSION));
+
+/** Permissions retired with external relay-key access. They must never survive in custom roles. */
+export const RETIRED_PERMISSION_CODES = new Set([
+  'team.api_key.manage',
+  'platform.billing.api_key.manage',
+  'platform.billing.relay_docs.view',
+]);
+
+export function stripRetiredPermissions(current: readonly string[]): { permissions: string[]; changed: boolean } {
+  const permissions = current.filter((code) => !RETIRED_PERMISSION_CODES.has(code));
+  return { permissions, changed: permissions.length !== current.length };
+}
 
 /**
  * 把一个角色的当前权限码数组按 LEGACY_PERMISSION_EXPANSION 扩张为新码集合（幂等纯函数）。

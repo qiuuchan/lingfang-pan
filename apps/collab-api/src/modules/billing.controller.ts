@@ -11,7 +11,6 @@ import { RequirePermission } from './auth.decorators';
 import { ChannelService, PoolService } from './channel.service';
 import { PricingService } from './pricing.service';
 import { CreditService } from './credit.service';
-import { PlatformApiKeyService } from './api-key.service';
 import {
   ChannelUpsertDto, CreditAdjustDto, PoolUpdateDto, PoolUpsertDto, PricingUpsertDto, TestChatDto, TestImageDto,
 } from './dto/billing.dto';
@@ -27,7 +26,6 @@ export class BillingController {
     @Inject(ChannelService) private readonly channels: ChannelService,
     @Inject(PricingService) private readonly pricing: PricingService,
     @Inject(CreditService) private readonly credits: CreditService,
-    @Inject(PlatformApiKeyService) private readonly apiKeys: PlatformApiKeyService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
@@ -245,7 +243,7 @@ export class BillingController {
     if (q.capability) where.capability = q.capability;
     if (q.status) where.status = q.status;
     if (q.model) where.model = q.model;
-    if (q.apiKeyId) where.apiKeyId = q.apiKeyId;
+    if (q.clientSource) where.clientSource = q.clientSource;
     if (q.from || q.to) where.createdAt = { gte: q.from ? new Date(q.from) : undefined, lte: q.to ? new Date(q.to) : undefined };
     if (q.q) where.OR = [{ model: { contains: q.q, mode: 'insensitive' } }, { requestId: { contains: q.q, mode: 'insensitive' } }];
     const { page, pageSize, skip } = normalizeBillingPage(q);
@@ -253,7 +251,7 @@ export class BillingController {
       this.prisma.llmCallLog.findMany({
       where, orderBy: { createdAt: 'desc' }, skip, take: pageSize,
       select: {
-        id: true, teamId: true, userId: true, apiKeyId: true, channelId: true, capability: true, tier: true, model: true,
+        id: true, teamId: true, userId: true, clientSource: true, channelId: true, capability: true, tier: true, model: true,
         inputTokens: true, outputTokens: true, images: true, durationMs: true, credits: true, status: true, httpStatus: true,
         errorCode: true, requestId: true, createdAt: true,
         team: { select: { name: true } },
@@ -280,20 +278,6 @@ export class BillingController {
     const log = await this.prisma.llmCallLog.findUnique({ where: { id }, include: { team: { select: { name: true } }, user: { select: { email: true } }, channel: { select: { id: true, name: true } } } });
     if (!log) throw new AppError(404, 'call_log_not_found', '调用日志不存在');
     return { log };
-  }
-
-  // === API Key 总览 ===
-
-  @Get('api-keys')
-  @RequirePermission('platform.billing.api_key.manage')
-  @ApiOperation({ summary: '全平台 API Key 总览' })
-  adminListApiKeys(@Query() query: BillingPageQuery & { status?: string }) { return this.apiKeys.adminList(query); }
-
-  @Delete('api-keys/:id')
-  @RequirePermission('platform.billing.api_key.manage')
-  @ApiOperation({ summary: '吊销任意 API Key' })
-  adminRevokeApiKey(@Req() req: Request, @Param('id') id: string) {
-    return this.apiKeys.adminRevoke(requireUser(req).id, id);
   }
 
   private async audit(actorUserId: string, action: string, targetId: string | undefined, metadata: unknown) {

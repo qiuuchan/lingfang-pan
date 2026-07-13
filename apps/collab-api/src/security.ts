@@ -43,6 +43,8 @@ export class JwtAuthGuard implements CanActivate {
       if (!secret) throw unauthorized('服务端未配置密钥');
       payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as jwt.JwtPayload;
       if (!payload.sub || !payload.email) throw unauthorized();
+      if (payload.teamId !== null && typeof payload.teamId !== 'string') throw unauthorized();
+      if (!Number.isInteger(payload.teamContextVersion)) throw unauthorized();
     } catch {
       throw unauthorized('登录已过期，请重新登录');
     }
@@ -51,11 +53,14 @@ export class JwtAuthGuard implements CanActivate {
     // RBAC：顺带 select platformRoleId 供 PermissionsGuard 解析平台角色权限（避免二次查库）。
     const user = await this.prisma.user.findUnique({
       where: { id: String(payload.sub) },
-      select: { status: true, tokenVersion: true, platformRole: true, platformRoleId: true },
+      select: { status: true, tokenVersion: true, teamContextVersion: true, platformRole: true, platformRoleId: true },
     });
     if (!user || user.status !== 'ACTIVE') throw unauthorized('账号已被禁用，请联系管理员');
     if (payload.tokenVersion !== undefined && Number(payload.tokenVersion) !== user.tokenVersion) {
       throw unauthorized('登录已过期，请重新登录');
+    }
+    if (Number(payload.teamContextVersion) !== user.teamContextVersion) {
+      throw unauthorized('团队会话已变更，请重新登录');
     }
 
     request.user = {
@@ -63,6 +68,8 @@ export class JwtAuthGuard implements CanActivate {
       email: String(payload.email),
       platformRole: user.platformRole === 'PLATFORM_ADMIN' ? 'PLATFORM_ADMIN' : 'NONE',
       tokenVersion: user.tokenVersion,
+      teamId: payload.teamId,
+      teamContextVersion: user.teamContextVersion,
       platformRoleId: user.platformRoleId,
     };
     return true;

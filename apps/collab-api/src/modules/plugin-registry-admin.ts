@@ -65,6 +65,9 @@ export const ADMIN_RELEASE_SUMMARY_SELECT = {
   sourceKind: true,
   sourceLabel: true,
   ingestChannel: true,
+  aiPolicyVersion: true,
+  aiPolicyStatus: true,
+  aiPolicyReason: true,
   createdAt: true,
 } as const satisfies Prisma.PluginReleaseSelect;
 
@@ -81,6 +84,9 @@ export const ADMIN_RELEASE_CORE_SELECT = {
   status: true,
   marketReviewStatus: true,
   reviewReason: true,
+  aiPolicyVersion: true,
+  aiPolicyStatus: true,
+  aiPolicyReason: true,
   reviewedById: true,
   reviewedAt: true,
   createdAt: true,
@@ -194,6 +200,9 @@ function latestReleaseSummary(release: AdminReleaseSummaryRow | null) {
     sourceKind: release.sourceKind,
     sourceLabel: release.sourceLabel,
     ingestChannel: release.ingestChannel,
+    aiPolicyVersion: release.aiPolicyVersion,
+    aiPolicyStatus: release.aiPolicyStatus,
+    aiPolicyReason: release.aiPolicyReason,
     createdAt: release.createdAt.toISOString(),
   };
 }
@@ -260,6 +269,9 @@ export function adminReleaseSummary(
     sourceKind: release.sourceKind,
     sourceLabel: release.sourceLabel,
     ingestChannel: release.ingestChannel,
+    aiPolicyVersion: release.aiPolicyVersion,
+    aiPolicyStatus: release.aiPolicyStatus,
+    aiPolicyReason: release.aiPolicyReason,
     isMarketplaceCurrent: listing?.status === 'ACTIVE' && listing.currentReleaseId === release.id,
     createdAt: release.createdAt.toISOString(),
   };
@@ -281,6 +293,9 @@ export function adminReleaseCore(release: AdminReleaseCoreRow) {
       status: release.status,
       marketReviewStatus: release.marketReviewStatus,
       reviewReason: release.reviewReason,
+      aiPolicyVersion: release.aiPolicyVersion,
+      aiPolicyStatus: release.aiPolicyStatus,
+      aiPolicyReason: release.aiPolicyReason,
       reviewedById: release.reviewedById,
       reviewedAt: iso(release.reviewedAt),
       createdAt: release.createdAt.toISOString(),

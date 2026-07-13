@@ -42,13 +42,14 @@ function createHarness() {
   };
   const role = { create: vi.fn(async () => ({})) };
   const teamMembership = { create: vi.fn(async () => ({})) };
+  const user = { update: vi.fn(async () => ({})) };
   const auditLog = {
     create: vi.fn(async () => {
       events.push('audit');
       return {};
     }),
   };
-  const tx = { teamAdminApplication, team, role, teamMembership, auditLog };
+  const tx = { teamAdminApplication, team, role, teamMembership, user, auditLog };
   const $transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => {
     events.push('transaction:start');
     try {
@@ -60,7 +61,7 @@ function createHarness() {
       throw error;
     }
   });
-  const prisma = { teamAdminApplication, team, role, teamMembership, auditLog, $transaction };
+  const prisma = { teamAdminApplication, team, role, teamMembership, user, auditLog, $transaction };
   const auth = { ensurePlatformAdmin: vi.fn(async () => ({})) };
   const notifications = {
     create: vi.fn(async () => {
@@ -178,6 +179,10 @@ describe('AdminService team admin application governance', () => {
         role: 'TEAM_ADMIN',
         teamRoleId: 'team-admin-team-1',
       }),
+    });
+    expect(harness.prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'applicant-1' },
+      data: { teamContextVersion: { increment: 1 } },
     });
     expect(harness.prisma.auditLog.create).toHaveBeenCalledTimes(1);
     expect(harness.events.indexOf('transaction:commit')).toBeLessThan(harness.events.indexOf('notification'));

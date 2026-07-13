@@ -25,6 +25,7 @@ import {
   teamMemberRoleId,
   expandLegacyPermissions,
   LEGACY_PERMISSION_CODES,
+  stripRetiredPermissions,
   type PermissionScope,
 } from './modules/permissions/permission-codes';
 
@@ -165,9 +166,10 @@ async function migrateLegacyPermissionCodes() {
   // 计算每个角色需要写入的权限集（只有变化的才纳入事务）
   const updates: { id: string; permissions: string[] }[] = [];
   for (const role of roles) {
-    const { permissions, changed } = expandLegacyPermissions(role.permissions ?? []);
-    if (changed) {
-      updates.push({ id: role.id, permissions });
+    const expanded = expandLegacyPermissions(role.permissions ?? []);
+    const retired = stripRetiredPermissions(expanded.permissions);
+    if (expanded.changed || retired.changed) {
+      updates.push({ id: role.id, permissions: retired.permissions });
     }
   }
 

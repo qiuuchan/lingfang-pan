@@ -1,5 +1,6 @@
 import { CapabilityKind, RuntimeType, type CapabilityKind as CapabilityKindType, type PluginCapability } from '@lingfang/contract';
 import type { DraftDiagnostic, DraftFile, LoadedPlugin } from '@/lib/types';
+import { capabilityRequiresAdmin } from '@/lib/plugin-capabilities';
 
 const LOCAL_DRAFT_ENTRY = 'ui/index.html';
 
@@ -108,7 +109,7 @@ export function normalizeCapabilities(parsed: unknown, fallback: PluginCapabilit
         kind: c.kind as CapabilityKindType,
         reason: typeof c.reason === 'string' ? c.reason : '',
         risk: risk as PluginCapability['risk'],
-        requires_admin: Boolean(c.requires_admin),
+        requires_admin: capabilityRequiresAdmin(c.kind, c.requires_admin),
       };
       // scope 仅在显式提供时透传（与后端 plugin-package.ts:112 行为一致）。
       return c.scope === undefined ? base : { ...base, scope: c.scope as Record<string, unknown> };

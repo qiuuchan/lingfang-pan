@@ -8,6 +8,7 @@ import {
   AdminPluginPageQueryDto,
   AdminPluginReasonDto,
   PluginLifecycleReasonDto,
+  PluginRuntimeAccessDto,
   UpdateMarketplaceListingStatusDto,
   UpdatePluginPackageStatusDto,
   UpdatePluginReleaseStatusDto,
@@ -105,8 +106,8 @@ export class PluginRegistryController {
   }
 
   @Post('plugin-packages/:id/runtime-access')
-  runtimeAccess(@Req() req: Request, @Param('id') id: string) {
-    return this.registry.runtimeAccess(requireUser(req).id, id);
+  runtimeAccess(@Req() req: Request, @Param('id') id: string, @Body() body: PluginRuntimeAccessDto) {
+    return this.registry.runtimeAccess(requireUser(req).id, id, body.releaseId, body.sha256);
   }
 
   @Post('plugin-releases/:id/report-integrity-failure')

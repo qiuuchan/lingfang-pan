@@ -34,6 +34,7 @@ describe('PluginRegistryService upload provenance', () => {
       meta: { format: 'lingfang-plugin', formatVersion: 4 },
       manifest,
       files: [{ path: 'main.js', sizeBytes: 17, sha256: 'b'.repeat(64) }],
+      policyFiles: [{ path: 'main.js', content: 'console.log("ok")' }],
     } as never);
 
     const pkg = {
