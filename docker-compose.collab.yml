@@ -27,11 +27,13 @@ services:
       DATABASE_URL: postgresql://lingfang:lingfang@postgres:5432/lingfang_collab?schema=public
       PORT: 19006
       NODE_ENV: production
+      PLUGIN_ARTIFACT_DIR: /app/apps/collab-api/artifacts/plugins
     ports:
       - "0.0.0.0:19006:19006"
     volumes:
       - collab_downloads:/app/apps/collab-api/downloads
       - collab_uploads:/app/apps/collab-api/uploads
+      - collab_plugin_artifacts:/app/apps/collab-api/artifacts/plugins
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,3 +60,4 @@ volumes:
   collab_pgdata:
   collab_downloads:
   collab_uploads:
+  collab_plugin_artifacts:
