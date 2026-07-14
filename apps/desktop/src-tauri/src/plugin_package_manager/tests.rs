@@ -390,7 +390,11 @@ fn installed_release_can_be_copied_to_workspace_then_uninstalled_with_data() {
 }
 
 #[test]
-fn node_dependencies_live_outside_the_immutable_release_directory() {
+fn nodejs_install_does_not_precreate_node_modules_junction() {
+    // 回归：nodejs 插件安装时不得预建 node_modules 联接到 environments/。
+    // pnpm 9.x 在 Windows 上对已存在的 node_modules junction 做 mkdir 会 ENOTDIR，
+    // 导致带依赖的 nodejs 插件 pnpm install 失败。node_modules 应由首次启动时
+    // pnpm 以真实目录形式创建在 package/ 内。
     let (manager, root) = manager();
     let (path, artifact) = node_artifact(&root);
     let installed = manager
@@ -404,10 +408,25 @@ fn node_dependencies_live_outside_the_immutable_release_directory() {
         })
         .unwrap();
     let package = Path::new(&installed.active_release.path);
-    let linked = package.join("node_modules");
-    let environment = linked.canonicalize().unwrap();
-    assert!(!environment.starts_with(package.canonicalize().unwrap()));
-    assert!(environment.ends_with(Path::new("environments/release-node/node_modules")));
+    // 安装后不应存在预建的 node_modules（junction 或目录）——它由 pnpm 在首次启动时创建。
+    assert!(
+        !package.join("node_modules").exists(),
+        "安装阶段不应预建 node_modules"
+    );
+    // environments/{release_id}/node_modules 也不应被预建（那是旧 junction 的目标）。
+    let installation_root = package
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .expect("package 应位于 installations/<id>/releases/<release>/package");
+    let env_node_modules = installation_root
+        .join("environments")
+        .join("release-node")
+        .join("node_modules");
+    assert!(
+        !env_node_modules.exists(),
+        "不应预建 environments node_modules 目录"
+    );
     let _ = fs::remove_dir_all(root);
 }
 

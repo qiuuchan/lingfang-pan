@@ -20,7 +20,11 @@
     "collab:api:start": "pnpm -C apps/collab-api start",
     "collab:api:build": "pnpm -C apps/collab-api build",
     "collab:admin:dev": "pnpm -C apps/collab-admin dev",
-    "collab:admin:build": "pnpm -C apps/collab-admin build"
+    "collab:admin:build": "pnpm -C apps/collab-admin build",
+    "plugin:create": "pnpm -C packages/plugin-sdk exec lingfang-plugin create",
+    "plugin:validate": "pnpm -C packages/plugin-sdk exec lingfang-plugin validate",
+    "plugin:build": "pnpm -C packages/plugin-sdk exec lingfang-plugin build",
+    "plugin:publish": "pnpm -C packages/plugin-sdk exec lingfang-plugin publish"
   },
   "dependencies": {
     "zod": "^4.4.3"

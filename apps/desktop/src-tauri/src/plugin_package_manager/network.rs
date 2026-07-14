@@ -154,6 +154,47 @@ fn prepare_local_artifact(
     Ok((path, inspected, provenance))
 }
 
+/// 把下载制品时的非 2xx 响应渲染成可读错误提示。
+///
+/// 服务端返回标准错误体 `{code, message, requestId}`：对已知 code 给出中文语义提示，
+/// 否则保留 HTTP 状态码与原始 body 便于排查；并尽量附上 requestId（编号 #…）供报修。
+fn render_download_error(status: reqwest::StatusCode, body: &str) -> String {
+    let parsed = serde_json::from_str::<Value>(body).ok();
+    let code = parsed
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let request_id = parsed
+        .as_ref()
+        .and_then(|value| value.get("requestId"))
+        .and_then(Value::as_str);
+
+    let request_suffix = |id: Option<&str>| match id {
+        Some(id) if !id.is_empty() => format!("（编号 #{id}，报修时提供）"),
+        _ => String::new(),
+    };
+
+    let hint = match code {
+        "plugin_artifact_unavailable" => Some("制品文件已被清理或不可用，请联系作者重新发布"),
+        "not_found" => Some("插件发行版不存在或已撤回"),
+        "forbidden" => Some("没有该插件的使用授权"),
+        "payment_required" => Some("当前团队尚未购买该插件"),
+        "plugin_ai_policy_required" => Some("该插件未通过当前 AI 使用政策检查"),
+        "client_upgrade_required" => Some("插件协议已停用，请升级桌面客户端后重试"),
+        _ => None,
+    };
+    if let Some(hint) = hint {
+        return format!("下载插件制品失败：{hint}{}", request_suffix(request_id));
+    }
+    let suffix = request_suffix(request_id);
+    if suffix.is_empty() {
+        format!("下载插件制品失败（HTTP {status}）：{body}")
+    } else {
+        format!("下载插件制品失败（HTTP {status}）{suffix}：{body}")
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn download_plugin_release(
     manager: tauri::State<'_, PluginPackageManager>,
@@ -180,7 +221,7 @@ pub(crate) async fn download_plugin_release(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("下载插件制品失败（HTTP {status}）：{body}"));
+        return Err(render_download_error(status, &body));
     }
     let total = response.content_length();
     let _ = on_event.send(PackageTransferEvent::Started { total_bytes: total });
@@ -340,6 +381,7 @@ pub(crate) async fn publish_local_artifact(
 mod tests {
     use super::*;
     use crate::plugin_artifact_v4::package_workspace;
+    use reqwest::StatusCode;
 
     fn temp(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("lingfang-network-{name}-{}", Uuid::new_v4()))
@@ -395,5 +437,34 @@ mod tests {
             .source_label
             .contains(root.to_string_lossy().as_ref()));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn render_download_error_maps_known_codes() {
+        let unavailable = r#"{"code":"plugin_artifact_unavailable","message":"x","requestId":"abc-123"}"#;
+        let msg = render_download_error(StatusCode::GONE, unavailable);
+        assert!(msg.contains("制品文件已被清理"));
+        assert!(msg.contains("abc-123"));
+
+        let not_found = r#"{"code":"not_found","requestId":"r-1"}"#;
+        assert!(render_download_error(StatusCode::NOT_FOUND, not_found).contains("不存在或已撤回"));
+
+        let forbidden = r#"{"code":"forbidden","requestId":"r-2"}"#;
+        assert!(render_download_error(StatusCode::FORBIDDEN, forbidden).contains("使用授权"));
+
+        let policy = r#"{"code":"plugin_ai_policy_required","requestId":"r-3"}"#;
+        assert!(render_download_error(StatusCode::CONFLICT, policy).contains("AI 使用政策"));
+    }
+
+    #[test]
+    fn render_download_error_falls_back_for_unknown_body() {
+        let msg = render_download_error(StatusCode::INTERNAL_SERVER_ERROR, "not json");
+        assert!(msg.contains("HTTP 500"));
+        assert!(msg.contains("not json"));
+
+        let internal = r#"{"code":"internal_error","requestId":"r-4"}"#;
+        let msg = render_download_error(StatusCode::INTERNAL_SERVER_ERROR, internal);
+        assert!(msg.contains("HTTP 500"));
+        assert!(msg.contains("r-4"));
     }
 }

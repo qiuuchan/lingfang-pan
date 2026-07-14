@@ -5,7 +5,7 @@ packages:
   - 'apps/collab-api'
   - 'apps/collab-admin'
   - 'packages/*'
-  - 'plugins/*'
+  # - 'plugins/*'   # 临时注释：避开 P:\.pnpm-store EPERM（huobao-drama 等）。install 后恢复。
 allowBuilds:
   '@prisma/engines': set this to true or false
   '@scarf/scarf': set this to true or false

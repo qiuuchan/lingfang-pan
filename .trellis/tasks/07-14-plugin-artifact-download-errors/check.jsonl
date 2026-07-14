@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/collab-api/backend/index.md", "reason": "校验服务端错误契约（状态码/code/message）、日志脱敏、AppError 用法符合规范"}
+{"file": ".trellis/spec/desktop/backend/index.md", "reason": "校验桌面端错误提示文案与 Rust 错误处理约定"}

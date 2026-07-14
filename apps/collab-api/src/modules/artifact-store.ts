@@ -10,6 +10,14 @@ export type ArtifactDownload =
   | { kind: 'stream'; stream: NodeJS.ReadableStream; sizeBytes: number }
   | { kind: 'redirect'; url: string };
 
+/** 制品在存储后端中不存在（已被清理或从未落盘）。service 层据此映射 HTTP 410。 */
+export class ArtifactUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ArtifactUnavailableError';
+  }
+}
+
 export interface ArtifactStore {
   promote(tempPath: string, artifactKey: string, sha256: string): Promise<void>;
   download(artifactKey: string): Promise<ArtifactDownload>;
@@ -59,7 +67,15 @@ export class FilesystemArtifactStore implements ArtifactStore {
 
   async download(artifactKey: string): Promise<ArtifactDownload> {
     const path = this.pathFor(artifactKey);
-    const info = await stat(path);
+    let info: Awaited<ReturnType<typeof stat>>;
+    try {
+      info = await stat(path);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'ENOENT') {
+        throw new ArtifactUnavailableError(`artifact not found: ${artifactKey}`);
+      }
+      throw new Error(`读取制品失败：${artifactKey}`, { cause: error });
+    }
     return { kind: 'stream', stream: createReadStream(path), sizeBytes: info.size };
   }
 
@@ -179,7 +195,11 @@ export class S3ArtifactStore implements ArtifactStore {
   }
 
   async download(artifactKey: string): Promise<ArtifactDownload> {
-    return { kind: 'redirect', url: this.presignedGet(artifactKey) };
+    try {
+      return { kind: 'redirect', url: this.presignedGet(artifactKey) };
+    } catch (error) {
+      throw new Error(`生成制品下载地址失败：${artifactKey}`, { cause: error });
+    }
   }
 
   async delete(artifactKey: string): Promise<void> {

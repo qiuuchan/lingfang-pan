@@ -856,11 +856,6 @@ impl PluginPackageManager {
             .get("version")
             .and_then(Value::as_str)
             .ok_or_else(|| "manifest.version 缺失".to_string())?;
-        let runtime = inspected
-            .manifest
-            .get("runtime_type")
-            .and_then(Value::as_str)
-            .unwrap_or("client");
         let package_id = input
             .package_id
             .unwrap_or_else(|| format!("local:{manifest_id}"));
@@ -919,29 +914,12 @@ impl PluginPackageManager {
             }
             return Err(error);
         }
-        if runtime == "nodejs" {
-            let node_modules = installation_root
-                .join("environments")
-                .join(&release_id)
-                .join("node_modules");
-            if let Err(error) = fs::create_dir_all(&node_modules)
-                .map_err(|error| format!("创建 Node 运行环境失败：{error}"))
-                .and_then(|_| {
-                    create_directory_link(
-                        &staging_package.join("node_modules"),
-                        &node_modules,
-                        "Node 运行环境",
-                    )
-                })
-            {
-                let _ = fs::remove_dir_all(&staging);
-                remove_release_environment_path(&installation_root, &release_id);
-                if existing_index.is_none() {
-                    let _ = fs::remove_dir_all(&installation_root);
-                }
-                return Err(error);
-            }
-        }
+        // 注意：nodejs 插件**不**在此预建 node_modules 联接到 environments/。
+        // pnpm 9.x 在 Windows 上无法在一个已存在的 node_modules junction 上 mkdir（ENOTDIR），
+        // 会让带依赖的 nodejs 插件安装失败。故 node_modules 由 ensure_node_dependencies 在
+        // 首次启动时让 pnpm 以真实目录形式创建在 package/ 内。每个 release 有独立目录，
+        // 原本 junction 指向的 environments/{release_id}/node_modules 也不跨 release 共享，
+        // 故取消该联接无功能损失。Python venv 仍走 environments/（见 python_venv_dir）。
         if let Some(parent) = final_package.parent() {
             if let Err(error) = fs::create_dir_all(parent) {
                 let _ = fs::remove_dir_all(&staging);

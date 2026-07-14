@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { FilesystemArtifactStore } from './artifact-store';
+import { ArtifactUnavailableError, FilesystemArtifactStore } from './artifact-store';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -40,6 +40,13 @@ describe('FilesystemArtifactStore', () => {
     const root = await mkdtemp(join(tmpdir(), 'artifact-store-'));
     const store = new FilesystemArtifactStore(root);
     await expect(store.download('../escape')).rejects.toThrow(/Invalid artifact key/);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('throws ArtifactUnavailableError when the artifact file is missing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'artifact-store-'));
+    const store = new FilesystemArtifactStore(root);
+    await expect(store.download('pkg/1.0.0/missing.lfplugin')).rejects.toBeInstanceOf(ArtifactUnavailableError);
     await rm(root, { recursive: true, force: true });
   });
 
