@@ -90,7 +90,7 @@ pub(crate) fn uninstall_plugin_installation(
 }
 
 #[tauri::command]
-pub(crate) fn start_installed_plugin(
+pub(crate) async fn start_installed_plugin(
     app: tauri::AppHandle,
     manager: tauri::State<'_, PluginPackageManager>,
     process_table: tauri::State<'_, PluginProcessTable>,
@@ -113,15 +113,28 @@ pub(crate) fn start_installed_plugin(
         &release.release_id,
         DependencyStatus::Preparing,
     )?;
-    let started = plugin_runner::start_plugin_from_dir(
-        &app,
-        &process_table,
-        &bridge,
-        &installation_id,
-        PathBuf::from(&release.path),
-        api_base,
-        auth_token,
-    );
+    // venv/pip/pnpm 装依赖是几十秒~数分钟的阻塞子进程等待，必须 offload 到阻塞线程池：
+    // 同步命令跑在 Tauri 主线程上会让窗口"未响应"，且 emit 的 plugin:output /
+    // plugin:start-progress 事件需主线程投递，阻塞期间排队发不出去（前端日志面板收不到实时输出）。
+    // start_plugin_from_dir 内部 app.emit 走 Emitter trait（线程安全），从 worker 线程发即可。
+    let app_handle = app.clone();
+    let process_table = process_table.inner().clone();
+    let bridge = bridge.inner().clone();
+    let release_path = PathBuf::from(&release.path);
+    let installation_id_for_runner = installation_id.clone();
+    let started = tauri::async_runtime::spawn_blocking(move || {
+        plugin_runner::start_plugin_from_dir(
+            &app_handle,
+            &process_table,
+            &bridge,
+            &installation_id_for_runner,
+            release_path,
+            api_base,
+            auth_token,
+        )
+    })
+    .await
+    .map_err(|join_error| format!("插件启动任务异常退出：{join_error}"))?;
     match started {
         Ok(result) => {
             manager.mark_dependency_status(
