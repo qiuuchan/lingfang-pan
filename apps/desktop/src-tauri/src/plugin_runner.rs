@@ -1061,7 +1061,10 @@ fn node_has_start_script(plugin_dir: &std::path::Path) -> Result<bool, String> {
 /// - 持有 Child 句柄，stop_plugin 经此 kill（必须有句柄才能发信号）。
 /// - scan_plugin_status（组A）调 is_running 叠加 running；重启后内存表清空 → 所有插件从文件系统重判 ready。
 /// - get_plugin_status 命令直接查本表（try_wait 实时判定，比 scan 更准）。
-#[derive(Default)]
+///
+/// Clone：内部仅一个 `Arc<Mutex<...>>`，clone 共享同一张表（仅 bump 引用计数）。
+/// 供 `start_*` async 命令把 owned clone move 进 `spawn_blocking` 闭包（State 借用不满足 'static）。
+#[derive(Clone, Default)]
 pub struct PluginProcessTable {
     /// plugin_id → (Child 句柄, started_at ISO 字符串)。
     inner: Arc<Mutex<HashMap<String, (Arc<Mutex<Option<Child>>>, String)>>>,
@@ -1352,7 +1355,7 @@ fn append_launch_log(plugin_dir: &std::path::Path, msg: &str) {
 /// - `starting`：依赖就绪，正在拉起入口进程。
 /// 最终结果仍由命令返回值（Ok=pid / Err=错误）交付，事件仅驱动 UI 进度。
 #[tauri::command]
-pub fn start_plugin(
+pub async fn start_plugin(
     app: tauri::AppHandle,
     store: tauri::State<'_, PluginStore>,
     process_table: tauri::State<'_, PluginProcessTable>,
@@ -1362,15 +1365,25 @@ pub fn start_plugin(
     auth_token: Option<String>,
 ) -> Result<StartPluginResult, String> {
     let plugin_dir = resolve_plugin_dir(&store, &plugin_id)?;
-    start_plugin_from_dir(
-        &app,
-        process_table.inner(),
-        bridge.inner(),
-        &plugin_id,
-        plugin_dir,
-        api_base,
-        auth_token,
-    )
+    // venv/pip/pnpm 装依赖是长时间阻塞子进程等待，offload 到阻塞线程池避免卡主线程
+    // （窗口"未响应" + emit 事件投递不出去）。与 start_installed_plugin 同理。
+    let app_handle = app.clone();
+    let process_table = process_table.inner().clone();
+    let bridge = bridge.inner().clone();
+    let plugin_id_for_runner = plugin_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        start_plugin_from_dir(
+            &app_handle,
+            &process_table,
+            &bridge,
+            &plugin_id_for_runner,
+            plugin_dir,
+            api_base,
+            auth_token,
+        )
+    })
+    .await
+    .map_err(|join_error| format!("插件启动任务异常退出：{join_error}"))?
 }
 
 pub(crate) fn start_plugin_from_dir(

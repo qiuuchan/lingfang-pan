@@ -51,11 +51,11 @@ fn list_plugins(state: tauri::State<AppState>) -> Vec<LoadedPlugin> {
 /// plugin_id 白名单目录解析；这里用已加载插件表定位资源目录，再复用 plugin_runner
 /// 的按目录启动逻辑，避免把 main.py/index.js 当 HTML iframe 渲染。
 #[tauri::command]
-fn start_builtin_plugin(
+async fn start_builtin_plugin(
     app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    process_table: tauri::State<plugin_runner::PluginProcessTable>,
-    bridge: tauri::State<plugin_llm_bridge::PluginLlmBridge>,
+    state: tauri::State<'_, AppState>,
+    process_table: tauri::State<'_, plugin_runner::PluginProcessTable>,
+    bridge: tauri::State<'_, plugin_llm_bridge::PluginLlmBridge>,
     plugin_id: String,
     api_base: Option<String>,
     auth_token: Option<String>,
@@ -68,15 +68,25 @@ fn start_builtin_plugin(
     let plugin_dir = std::path::Path::new(&plugin.dir)
         .canonicalize()
         .map_err(|error| format!("内置插件目录不可用：{error}"))?;
-    plugin_runner::start_plugin_from_dir(
-        &app,
-        process_table.inner(),
-        bridge.inner(),
-        &plugin_id,
-        plugin_dir,
-        api_base,
-        auth_token,
-    )
+    // venv/pip/pnpm 装依赖是长时间阻塞子进程等待，offload 到阻塞线程池避免卡主线程
+    // （窗口"未响应" + emit 事件投递不出去）。与 start_installed_plugin 同理。
+    let app_handle = app.clone();
+    let process_table = process_table.inner().clone();
+    let bridge = bridge.inner().clone();
+    let plugin_id_for_runner = plugin_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        plugin_runner::start_plugin_from_dir(
+            &app_handle,
+            &process_table,
+            &bridge,
+            &plugin_id_for_runner,
+            plugin_dir,
+            api_base,
+            auth_token,
+        )
+    })
+    .await
+    .map_err(|join_error| format!("插件启动任务异常退出：{join_error}"))?
 }
 
 /// 命令：插件网络请求（R5 net.fetch capability）。
