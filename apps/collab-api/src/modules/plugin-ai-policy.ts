@@ -3,7 +3,7 @@ export const PLUGIN_AI_POLICY_MAX_TEXT_FILE_BYTES = 4 * 1024 * 1024;
 export const PLUGIN_AI_POLICY_MAX_DEPENDENCY_BYTES = 256 * 1024;
 export const PLUGIN_AI_POLICY_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
-export type PluginAiCapability = 'llm.chat' | 'image.generate';
+export type PluginAiCapability = 'llm.chat' | 'image.generate' | 'image.edit';
 
 export type PluginAiPolicyDiagnostic = {
   code:
@@ -46,7 +46,7 @@ const TEXT_EXTENSIONS = new Set([
   '.py', '.svelte', '.toml', '.ts', '.tsx', '.txt', '.vue', '.yaml', '.yml',
 ]);
 const DEPENDENCY_FILES = new Set(['package.json', 'requirements.txt', 'pyproject.toml']);
-const AI_CAPABILITIES = new Set<PluginAiCapability>(['llm.chat', 'image.generate']);
+const AI_CAPABILITIES = new Set<PluginAiCapability>(['llm.chat', 'image.generate', 'image.edit']);
 const ALLOWED_OPENAI_PACKAGES = new Set(['openai', '@ai-sdk/openai']);
 const FORBIDDEN_NODE_PACKAGES = new Set([
   '@anthropic-ai/sdk', '@google/generative-ai', '@google/genai', 'cohere-ai', 'groq-sdk',
@@ -293,6 +293,9 @@ function detectCapabilities(text: string, required: Set<PluginAiCapability>): vo
   }
   if (/sdk\.image\.generate\s*\(|__lingfangInvoke\s*\(\s*['"]image\.generate['"]|\.images\.(?:generate|generations)\s*\(|\/v1\/images\/generations/i.test(text)) {
     required.add('image.generate');
+  }
+  if (/sdk\.image\.edit\s*\(|__lingfangInvoke\s*\(\s*['"]image\.edit['"]|\.images\.edit\s*\(|\/v1\/images\/edits|\/image\/edit/i.test(text)) {
+    required.add('image.edit');
   }
 }
 

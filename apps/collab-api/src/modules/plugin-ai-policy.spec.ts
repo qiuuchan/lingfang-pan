@@ -193,6 +193,16 @@ describe('plugin AI policy', () => {
     ]));
   });
 
+  it('requires image.edit capability when source calls the image edit bridge route', () => {
+    const result = policy([{
+      path: 'index.js',
+      content: `await fetch(bridge + '/image/edit', { method: 'POST', body: JSON.stringify({ prompt: '换装', images: [] }) });`,
+    }]);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.capability.missing', capability: 'image.edit' }),
+    );
+  });
+
   it('fails closed for unscannable executable text', () => {
     const result = checkPluginAiPolicy({
       manifest: { id: 'demo', name: 'Demo', capabilities: [] },
@@ -246,6 +256,7 @@ describe('plugin AI policy', () => {
     'apps/desktop/builtin-plugins/ai-example',
     'apps/desktop/builtin-plugins/ai-python-example',
     'plugins/ai-demo',
+    'plugins/ai-outfit-test',
   ])('keeps bundled platform-AI fixture compliant: %s', async (directory) => {
     const fixture = await bundledFixture(directory);
     expect(checkPluginAiPolicy(fixture)).toMatchObject({ ok: true });

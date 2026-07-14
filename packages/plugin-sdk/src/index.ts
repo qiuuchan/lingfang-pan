@@ -8,6 +8,15 @@ type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 type ChatInput = { messages: ChatMessage[]; model?: 'fast' | 'premium' };
 type ImageGenerateInput = { prompt: string; model?: 'fast' | 'premium'; size?: string; n?: number };
 type ImageGenerateResult = { images: string[] };
+type ImageEditImage = { filename: string; mimeType: string; data: string };
+type ImageEditInput = {
+  prompt: string;
+  images: ImageEditImage[];
+  model?: 'fast' | 'premium';
+  size?: string;
+  n?: number;
+};
+type ImageEditResult = { images: string[] };
 type PluginFile = { path: string; content: string };
 type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
 type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
@@ -144,6 +153,7 @@ type ScriptBridgeEnv = {
 const SCRIPT_BRIDGE_PATH: Record<string, string> = {
   'llm.chat': '/llm/chat',
   'image.generate': '/image/generate',
+  'image.edit': '/image/edit',
 };
 
 // Node.js / Python 脚本插件的本地桥回退：window.__lingfangInvoke 不存在时（脚本无 DOM）走 localhost HTTP 桥。
@@ -209,7 +219,7 @@ async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}
   }
 }
 
-async function invokeAi<T>(capability: 'llm.chat' | 'image.generate', input: Record<string, unknown>): Promise<T> {
+async function invokeAi<T>(capability: 'llm.chat' | 'image.generate' | 'image.edit', input: Record<string, unknown>): Promise<T> {
   const args = { ...input, model: platformModel(input.model) };
   try {
     return await invoke<T>(capability, args, AI_BRIDGE_TIMEOUT_MS);
@@ -267,6 +277,9 @@ export const sdk = {
   // 系统提示词已由平台强制注入：必须且仅能使用灵坊平台服务（需求 #3）。
   image: {
     generate: (input: ImageGenerateInput) => invokeAi<ImageGenerateResult>('image.generate', input),
+    // 计费/中转：图片编辑（带参考图）走平台 relay（/api/relay/v1/images/edits），multipart 透传，按张计费。
+    // 输入 prompt + images（参考图，data 为 base64 无前缀）；model 默认 fast；返回 { images: string[] }（url 或 data:base64）。
+    edit: (input: ImageEditInput) => invokeAi<ImageEditResult>('image.edit', input),
   },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),
@@ -286,6 +299,9 @@ export type {
   ChatInput,
   ImageGenerateInput,
   ImageGenerateResult,
+  ImageEditImage,
+  ImageEditInput,
+  ImageEditResult,
   PluginFile,
   PluginUploadInput,
   PluginSubmitMarketplaceInput,

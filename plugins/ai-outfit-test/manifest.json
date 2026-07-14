@@ -1,0 +1,12 @@
+{
+  "id": "com.lingfang.ai-outfit-test",
+  "name": "AI换装测试",
+  "version": "0.1.0",
+  "description": "AI 换装测试插件（Node.js 脚本插件）：经平台本地桥 image.edit 能力上传参考图（目标模特 + 服装参考），调用平台图片编辑生成换装/换内搭/换头等结果。仅用于测试平台「带参考图的图片编辑」能力，模型调用经平台桥转发并按团队灵石计费，无需配置任何密钥。",
+  "runtime_type": "nodejs",
+  "entry": "index.js",
+  "visibility": "tenant",
+  "capabilities": [
+    { "kind": "image.edit", "reason": "调用平台图片编辑能力（带参考图的换装生成）", "risk": "medium", "requires_admin": false }
+  ]
+}

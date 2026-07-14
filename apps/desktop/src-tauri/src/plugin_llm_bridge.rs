@@ -13,6 +13,11 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+
+// 请求体上限：image.edit 携带 base64 参考图（JSON），单次可达数十 MB；localhost 桥且 token 鉴权，放宽到 64 MiB。
+const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
+
 type BridgeResult<T> = Result<T, BridgeError>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +42,7 @@ struct BridgeSession {
     auth_token: String,
     allow_llm_chat: bool,
     allow_image_generate: bool,
+    allow_image_edit: bool,
     client_source: PluginBridgeClientSource,
     expires_at: Instant,
 }
@@ -140,6 +146,7 @@ impl PluginLlmBridge {
         auth_token: Option<String>,
         allow_llm_chat: bool,
         allow_image_generate: bool,
+        allow_image_edit: bool,
         client_source: PluginBridgeClientSource,
         ttl: Duration,
     ) -> Result<Option<PluginBridgeEnv>, String> {
@@ -149,7 +156,7 @@ impl PluginLlmBridge {
             .trim_end_matches('/')
             .to_string();
         let auth_token = auth_token.unwrap_or_default().trim().to_string();
-        if !allow_llm_chat && !allow_image_generate {
+        if !allow_llm_chat && !allow_image_generate && !allow_image_edit {
             return Ok(None);
         }
         let endpoint = self.ensure_server()?;
@@ -160,6 +167,7 @@ impl PluginLlmBridge {
             auth_token,
             allow_llm_chat,
             allow_image_generate,
+            allow_image_edit,
             client_source,
             expires_at: Instant::now() + ttl,
         };
@@ -329,7 +337,7 @@ fn read_request(stream: &mut TcpStream) -> BridgeResult<HttpRequest> {
         .get("content-length")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    if content_length > 1024 * 1024 {
+    if content_length > MAX_BODY_BYTES {
         return Err(BridgeError::new(413, "payload_too_large", "请求体过大"));
     }
     let body_start = header_end + 4;
@@ -384,6 +392,7 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
         // 灵坊自有形状（SDK 内部用）：返回 {content} / {images} 包装。
         "/llm/chat" => route_llm_chat(&session, request.body),
         "/image/generate" => route_image_generate(&session, request.body),
+        "/image/edit" => route_image_edit(&session, request.body),
         // OpenAI 兼容形状（第三方 SDK 直连用）：透传 relay 完整响应，不包装。
         "/v1/chat/completions" if request.method == "POST" => {
             route_v1_chat_completions(&session, request.body)
@@ -472,6 +481,195 @@ fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
     let data = relay_post_json(session, "/api/relay/v1/images/generations", &relay_body)?;
     let images = extract_image_urls(&data);
     Ok(json!({ "images": images }))
+}
+
+/// 处理 image.edit：参考图 + prompt，重建 multipart 转发到平台 relay
+/// /api/relay/v1/images/edits（multipart 透传，按张计费），返回 {images:[...]}。
+///
+/// 与 image.generate 的区别：携带参考图（image[]），走 relay 的 images/edits 透传。
+/// 上游 model 名不由此处填写——桥只持有平台档位 fast/premium，由 relay 侧按命中渠道
+/// 注入上游 model（与 images/generations 对齐）。tier 经 query 传 relay 供计费/选渠道。
+fn route_image_edit(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+    if !session.allow_image_edit {
+        return Err(BridgeError::new(
+            403,
+            "capability_denied",
+            "插件未声明 image.edit 能力",
+        ));
+    }
+    ensure_platform_session(session, "图片编辑")?;
+
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|_| BridgeError::new(400, "bad_request", "请求体不是有效 JSON"))?;
+    let prompt = body
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| BridgeError::new(400, "bad_request", "image.edit 缺少 prompt"))?
+        .to_string();
+    let images = body
+        .get("images")
+        .and_then(|value| value.as_array())
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| {
+            BridgeError::new(400, "bad_request", "image.edit 缺少 images（至少 1 张参考图）")
+        })?;
+    let tier = parse_model_tier(&body)?;
+    let n = body
+        .get("n")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(1)
+        .clamp(1, 4) as u32;
+    let size = body
+        .get("size")
+        .and_then(|value| value.as_str())
+        .unwrap_or("1024x1024")
+        .to_string();
+
+    // base64 → 原始字节。参考图可能很大，故 read_request 的 body 上限已放宽（见 MAX_BODY_BYTES）。
+    let mut decoded: Vec<(String, String, Vec<u8>)> = Vec::with_capacity(images.len());
+    for (index, item) in images.iter().enumerate() {
+        let filename = sanitize_filename(
+            item.get("filename").and_then(|value| value.as_str()).unwrap_or("image"),
+        );
+        let mime = item
+            .get("mimeType")
+            .and_then(|value| value.as_str())
+            .or_else(|| item.get("mime_type").and_then(|value| value.as_str()))
+            .unwrap_or("image/jpeg")
+            .to_string();
+        let data_b64 = item
+            .get("data")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| {
+                BridgeError::new(
+                    400,
+                    "bad_request",
+                    format!("image.edit 第 {index} 张图片缺少 data(base64)"),
+                )
+            })?;
+        let bytes = BASE64_STANDARD
+            .decode(data_b64.trim())
+            .map_err(|_| {
+                BridgeError::new(
+                    400,
+                    "bad_request",
+                    format!("image.edit 第 {index} 张图片 data 不是合法 base64"),
+                )
+            })?;
+        if bytes.is_empty() {
+            return Err(BridgeError::new(
+                400,
+                "bad_request",
+                format!("image.edit 第 {index} 张图片数据为空"),
+            ));
+        }
+        decoded.push((filename, mime, bytes));
+    }
+
+    let (multipart_body, content_type) = build_image_edit_multipart(&prompt, &decoded, n, &size);
+    let path = format!("/api/relay/v1/images/edits?model={tier}");
+    let data = relay_post_raw(session, &path, &content_type, &multipart_body)?;
+    let images_out = extract_image_urls(&data);
+    if images_out.is_empty() {
+        return Err(BridgeError::new(
+            502,
+            "relay_response_invalid",
+            "平台未返回编辑后的图片",
+        ));
+    }
+    Ok(json!({ "images": images_out }))
+}
+
+/// 构建 multipart/form-data 请求体（参考 OpenAI /v1/images/edits 形状）。
+/// 不含 model 字段——由 relay 侧注入上游命中模型。
+fn build_image_edit_multipart(
+    prompt: &str,
+    images: &[(String, String, Vec<u8>)],
+    n: u32,
+    size: &str,
+) -> (Vec<u8>, String) {
+    let boundary = "lfImgEdit7Q2v9sL3p0aZ";
+    let mut body = Vec::new();
+    push_text_part(&mut body, boundary, "prompt", prompt);
+    for (filename, mime, data) in images {
+        push_file_part(&mut body, boundary, filename, mime, data);
+    }
+    push_text_part(&mut body, boundary, "n", &n.to_string());
+    push_text_part(&mut body, boundary, "size", size);
+    push_text_part(&mut body, boundary, "response_format", "b64_json");
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    (body, format!("multipart/form-data; boundary={boundary}"))
+}
+
+fn push_text_part(body: &mut Vec<u8>, boundary: &str, name: &str, value: &str) {
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\nContent-Type: text/plain\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(value.as_bytes());
+    body.extend_from_slice(b"\r\n");
+}
+
+fn push_file_part(body: &mut Vec<u8>, boundary: &str, filename: &str, mime: &str, data: &[u8]) {
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(data);
+    body.extend_from_slice(b"\r\n");
+}
+
+/// 过滤文件名中的路径分隔符与特殊字符，防止 multipart 头注入。
+fn sanitize_filename(raw: &str) -> String {
+    let base = raw.split(['/', '\\']).last().unwrap_or(raw);
+    let cleaned: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "image".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// 转发原始字节（multipart）到平台 relay，返回解析后的 JSON。
+/// 与 relay_post_json 的区别：携带自定义 Content-Type + 原始请求体；超时放宽到 10 分钟（图片编辑耗时高）。
+fn relay_post_raw(
+    session: &BridgeSession,
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+) -> BridgeResult<Value> {
+    let request_id = Uuid::new_v4().to_string();
+    let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(600))
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+        .post(url)
+        .header("Content-Type", content_type)
+        .header("X-Client", session.client_source.x_client())
+        .header("X-Request-Id", &request_id)
+        .bearer_auth(&session.auth_token)
+        .body(body.to_vec())
+        .send()
+        .map_err(|_| {
+            BridgeError::new(502, "relay_request_failed", "无法连接平台模型服务，请稍后重试")
+                .with_request_id(request_id.clone())
+        })?;
+    relay_response_json(response, &request_id)
 }
 
 /// GET /v1/models：透传当前团队实际可用的平台档位，供 OpenAI SDK 连通性探测。
@@ -833,6 +1031,7 @@ mod tests {
                 Some("jwt".to_string()),
                 false,
                 false,
+                false,
                 PluginBridgeClientSource::PluginRuntime,
                 Duration::from_secs(60),
             )
@@ -979,6 +1178,7 @@ mod tests {
             auth_token: "jwt".to_string(),
             allow_llm_chat: true,
             allow_image_generate: false,
+            allow_image_edit: false,
             client_source: PluginBridgeClientSource::PluginTest,
             expires_at: Instant::now() + Duration::from_secs(60),
         };
@@ -1034,6 +1234,7 @@ mod tests {
             auth_token: "jwt".to_string(),
             allow_llm_chat: true,
             allow_image_generate: false,
+            allow_image_edit: false,
             client_source: PluginBridgeClientSource::PluginRuntime,
             expires_at: Instant::now() + Duration::from_secs(60),
         };
@@ -1095,6 +1296,7 @@ mod tests {
                     auth_token: "dummy".to_string(),
                     allow_llm_chat: allow_llm,
                     allow_image_generate: allow_image,
+                    allow_image_edit: false,
                     client_source: PluginBridgeClientSource::PluginRuntime,
                     expires_at: Instant::now() + Duration::from_secs(60),
                 },
@@ -1202,5 +1404,86 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.status, 404);
         assert_eq!(error.code, "not_found");
+    }
+
+    #[test]
+    fn route_image_edit_denied_without_capability() {
+        // 未声明 image.edit（allow_image_edit=false）时，POST /image/edit 应 403 capability_denied。
+        let result = route_with_session("POST", "/image/edit", true, true);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert_eq!(error.status, 403);
+        assert_eq!(error.code, "capability_denied");
+    }
+
+    #[test]
+    fn route_image_edit_builds_multipart_and_extracts_images() {
+        // mock relay 返回一张 b64 图片，并捕获桥转发的 multipart 请求。
+        let (endpoint, request_rx) = spawn_relay_response(
+            200,
+            json!({ "data": [{ "b64_json": "AAAA" }] }),
+        );
+        let session = BridgeSession {
+            plugin_id: "test-plugin".to_string(),
+            api_base: endpoint,
+            auth_token: "jwt".to_string(),
+            allow_llm_chat: false,
+            allow_image_generate: false,
+            allow_image_edit: true,
+            client_source: PluginBridgeClientSource::PluginRuntime,
+            expires_at: Instant::now() + Duration::from_secs(60),
+        };
+        let body = serde_json::to_vec(&json!({
+            "prompt": "换装",
+            "images": [{ "filename": "model.jpg", "mimeType": "image/jpeg", "data": "UE5HREFUQQ==" }],
+            "model": "fast",
+            "n": 1,
+            "size": "1024x1024",
+        }))
+        .expect("请求体应可序列化");
+        let data = route_image_edit(&session, body).expect("image.edit 应成功");
+        assert_eq!(data["images"][0], "data:image/png;base64,AAAA");
+
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("应收到 relay 转发请求");
+        let text = String::from_utf8_lossy(&request.body);
+        // multipart 含 prompt 与参考图解码字节，不含 model 字段（由 relay 注入上游模型）。
+        assert!(text.contains("name=\"prompt\""));
+        assert!(text.contains("换装"));
+        assert!(text.contains("name=\"image[]\"; filename=\"model.jpg\""));
+        assert!(text.contains("PNGDATA"), "参考图 base64 应解码为原始字节");
+        assert!(!text.contains("name=\"model\""), "桥不应填写 model 字段");
+        // tier 经 query 传 relay 供计费/选渠道。
+        assert!(request.path.starts_with("/api/relay/v1/images/edits"));
+        assert!(request.path.contains("model=fast"));
+        assert!(request
+            .headers
+            .get("content-type")
+            .map(String::as_str)
+            .unwrap_or("")
+            .starts_with("multipart/form-data"));
+    }
+
+    #[test]
+    fn route_image_edit_rejects_invalid_input() {
+        let (endpoint, _request_rx) = spawn_relay_response(200, json!({ "data": [] }));
+        let session = BridgeSession {
+            plugin_id: "test-plugin".to_string(),
+            api_base: endpoint,
+            auth_token: "jwt".to_string(),
+            allow_llm_chat: false,
+            allow_image_generate: false,
+            allow_image_edit: true,
+            client_source: PluginBridgeClientSource::PluginRuntime,
+            expires_at: Instant::now() + Duration::from_secs(60),
+        };
+        let case = |body: Value| route_image_edit(&session, serde_json::to_vec(&body).unwrap());
+        // 缺 prompt
+        assert_eq!(case(json!({ "images": [{ "filename": "a.jpg", "data": "UE5HREFUQQ==" }] })).unwrap_err().status, 400);
+        // 缺 images
+        assert_eq!(case(json!({ "prompt": "x" })).unwrap_err().status, 400);
+        // 非法 base64
+        assert_eq!(case(json!({ "prompt": "x", "images": [{ "filename": "a.jpg", "data": "!!!not-base64!!!" }] })).unwrap_err().status, 400);
     }
 }

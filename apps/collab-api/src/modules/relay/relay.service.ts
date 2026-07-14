@@ -249,10 +249,14 @@ export class RelayService {
       tier,
       stream: false,
       requestSummary: { tier, endpoint: 'images/edits', contentType },
-      forward: async (upstreamKey, baseUrl) => {
+      forward: async (upstreamKey, baseUrl, _protocol, model) => {
         const rawBody = await readRawBody(req);
+        // 桥只持有平台档位（fast/premium），上游真实模型名由 relay 按命中渠道注入，
+        // 与 images/generations 由 relay 覆盖 model 的行为对齐（CONTRACT: model 仅作平台标识）。
+        const injected = injectMultipartModel(contentType, Buffer.from(rawBody), model);
         const fr = await forwardRawPassthrough({
-          baseUrl, upstreamKey, path: 'images/edits', method: 'POST', contentType, rawBody: Buffer.from(rawBody), res,
+          baseUrl, upstreamKey, path: 'images/edits', method: 'POST',
+          contentType: injected.contentType, rawBody: injected.body, res,
         });
         return fr;
       },
@@ -454,4 +458,37 @@ function readRawBody(req: Request): Promise<Uint8Array> {
     req.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
     req.on('error', reject);
   });
+}
+
+/**
+ * 向 multipart/form-data 请求体注入上游 model 字段（image.edit 用）。
+ * 插件桥只持有平台档位 fast/premium，不知上游真实模型名；此处按命中渠道的 model 注入，
+ * 与 images/generations 由 relay 覆盖 model 的行为对齐。若 body 已含 model 字段则保留（直连客户端优先）。
+ *
+ * 实现：从 Content-Type 解析 boundary，在闭合分隔符 `--{boundary}--` 前插入一个 model part。
+ * 不做完整 multipart 解析——定位闭合分隔符即可（用 lastIndexOf 避开图片二进制中偶然出现的同形字节）。
+ */
+export function injectMultipartModel(
+  contentType: string,
+  rawBody: Buffer,
+  model: string,
+): { contentType: string; body: Buffer } {
+  const boundaryMatch = /boundary=("?)([^";\r\n]+)\1/i.exec(contentType);
+  if (!boundaryMatch) return { contentType, body: rawBody };
+  const boundary = boundaryMatch[2]!;
+  if (rawBody.includes(Buffer.from('name="model"')) || rawBody.includes(Buffer.from('name=model'))) {
+    return { contentType, body: rawBody };
+  }
+  const closing = Buffer.from(`--${boundary}--`);
+  const closeIdx = rawBody.lastIndexOf(closing);
+  if (closeIdx < 0) return { contentType, body: rawBody };
+  const safeModel = model.replace(/[\r\n]/g, '');
+  const part = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\nContent-Type: text/plain\r\n\r\n${safeModel}\r\n`,
+    'utf8',
+  );
+  return {
+    contentType,
+    body: Buffer.concat([rawBody.subarray(0, closeIdx), part, rawBody.subarray(closeIdx)]),
+  };
 }

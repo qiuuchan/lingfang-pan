@@ -31,7 +31,7 @@ const RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python'] as const;
 const VISIBILITIES = ['private', 'tenant'] as const;
 const CAPABILITY_KINDS = [
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
+  'clipboard', 'llm.chat', 'image.generate', 'image.edit', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
 ] as const;
@@ -379,8 +379,13 @@ function validateCapabilities(input: unknown): PluginCapability[] {
       kind: capability.kind,
       reason,
       risk,
-      // llm.chat/image.generate 不保留管理员审批语义；旧 manifest 值统一归一化。
-      requires_admin: capability.kind === 'llm.chat' || capability.kind === 'image.generate' ? false : requiresAdmin,
+      // llm.chat/image.generate/image.edit 不保留管理员审批语义；旧 manifest 值统一归一化。
+      requires_admin:
+        capability.kind === 'llm.chat'
+        || capability.kind === 'image.generate'
+        || capability.kind === 'image.edit'
+          ? false
+          : requiresAdmin,
       ...(scope === undefined ? {} : { scope: scope as Record<string, unknown> }),
     };
   });
