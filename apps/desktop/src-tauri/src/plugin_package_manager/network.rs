@@ -111,7 +111,7 @@ async fn upload_artifact_file(
         api_base.trim_end_matches('/')
     );
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(600))
+        .timeout(Duration::from_secs(1800))
         .build()
         .map_err(|error| format!("创建插件上传客户端失败：{error}"))?;
     let response = client
@@ -123,17 +123,26 @@ async fn upload_artifact_file(
         .await
         .map_err(|error| format!("上传插件制品失败：{error}"))?;
     let status = response.status();
-    let response_json: Value = response
-        .json()
-        .await
-        .map_err(|error| format!("解析发布响应失败（HTTP {status}）：{error}"))?;
+    // 先读 body 文本再判定：服务端 / 网关返回非 JSON（如 Node 408、nginx HTML 错误页）时，
+    // 直接 .json() 会吞掉响应体只剩「error decoding response body」无从排查。改为先 text()
+    // 再按状态码分流，非 JSON 响应体原样回显，定位是服务端 JSON 错误还是网关层超时。
+    let body_text = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        let message = response_json
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("未知错误");
-        return Err(format!("发布插件失败（HTTP {status}）：{message}"));
+        let parsed = serde_json::from_str::<Value>(&body_text).ok();
+        let message = parsed
+            .as_ref()
+            .and_then(|value| value.get("message"))
+            .and_then(Value::as_str);
+        return Err(match message {
+            Some(msg) => format!("发布插件失败（HTTP {status}）：{msg}"),
+            None if body_text.trim().is_empty() => {
+                format!("发布插件失败（HTTP {status}）：服务端未返回响应体（常见于网关/Node 请求超时，如大制品上传超过服务端 requestTimeout）")
+            }
+            None => format!("发布插件失败（HTTP {status}）：{}", body_text.trim()),
+        });
     }
+    let response_json: Value = serde_json::from_str(&body_text)
+        .map_err(|error| format!("解析发布响应失败（HTTP {status}）：{error}"))?;
     Ok(response_json)
 }
 
