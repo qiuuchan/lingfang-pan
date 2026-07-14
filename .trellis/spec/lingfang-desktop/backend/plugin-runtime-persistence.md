@@ -226,6 +226,8 @@ terminate_windows_process(pid);
 
 启动阶段事件：`start_plugin` 在 `checking → deps_installing（按需）→ starting` 三阶段 emit `plugin:start-progress` 事件（`PluginStartProgress` payload），前端据此渲染分阶段进度动画。`needs_python_venv` / `needs_node_install` 探测是否真需装依赖，仅首次慢启动发安装阶段。
 
+**线程模型约束（必遵）**：`start_plugin` / `start_installed_plugin` / `start_builtin_plugin` 三个 Tauri 命令必须声明为 `async fn`，并把 `start_plugin_from_dir`（含 `ensure_python_venv` / `ensure_node_dependencies` 的 venv 创建 + pip/pnpm install，可能几十秒到数分钟）经 `tauri::async_runtime::spawn_blocking` 丢到阻塞线程池——**不能**在命令体里同步直接调用。Tauri 2 同步命令跑在主线程（webview 事件循环）上，长阻塞会让窗口"未响应"，且上方的 `plugin:start-progress` / `plugin:output` emit 事件需主线程投递，阻塞期间排队发不出去（前端日志面板收不到实时输出，转圈动画因走合成器线程仍转）。`spawn_blocking` 闭包需 `Send + 'static`，`tauri::State` 借用不能 move 进去：`PluginProcessTable` / `PluginLlmBridge` / `AppHandle` 先 `.inner().clone()` / `.clone()` 拿 owned 值再 move（`PluginProcessTable` 内部是 `Arc<Mutex<…>>`，clone 共享同一张表）。命令前后的快速步骤（`selected_release` / `mark_dependency_status` / `activate_pending` 等毫秒级 JSON 读写）留在 async 体内直接执行，无需 offload。任何新增的、会做子进程 wait / 大文件 IO / 网络请求的 Tauri 命令同样必须 async + `spawn_blocking`，参考既有 `download_plugin_release`、`plugin_net_fetch`。
+
 Reference files:
 - `apps/desktop/src-tauri/src/plugin_runner.rs`
 - `apps/desktop/src/lib/plugin-status.ts`（`startPlugin` 的 `onProgress` 回调订阅事件）
