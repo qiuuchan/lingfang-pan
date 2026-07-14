@@ -129,6 +129,14 @@ async function bootstrap() {
   }
 
   const port = Number(process.env.PORT || 3000);
+
+  // 大制品上传超时修复：.lfplugin 制品可达 300MB（如 moneyprinter-turbo 内嵌字体/音乐资源），
+  // 经慢链路上传总耗时易超过 Node 22 默认 server.requestTimeout（5min），Node 会在请求途中返回
+  // 408 Request Timeout（非 JSON body，桌面端报「解析发布响应失败：error decoding response body」），
+  // 导致插件发布失败。放宽到可配置值（默认 30min，覆盖 300MB 慢上传）；collab-api 部署在反代后、
+  // 真实超时由反代统一管控，body 上限 300MB（json limit）仍兜底最大体积。
+  app.getHttpServer().requestTimeout = Number(process.env.HTTP_REQUEST_TIMEOUT_MS ?? 30 * 60 * 1000);
+
   await app.listen(port, '0.0.0.0');
 }
 
