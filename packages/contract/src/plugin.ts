@@ -13,7 +13,7 @@ export type RuntimeType = z.infer<typeof RuntimeType>;
 
 export const CapabilityKind = z.enum([
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
+  'clipboard', 'llm.chat', 'image.generate', 'image.edit', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
 ]);

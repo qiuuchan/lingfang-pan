@@ -22,7 +22,7 @@ vi.mock('./forwarders', async (importOriginal) => {
   };
 });
 
-import { RelayService, clientSourceFromRequest } from './relay.service';
+import { RelayService, clientSourceFromRequest, injectMultipartModel } from './relay.service';
 import * as forwarders from './forwarders';
 import { UpstreamError } from './forwarders';
 
@@ -285,5 +285,74 @@ describe('RelayService.executeRelay 计费时机（R3：未成功对话不净扣
       .rejects.toMatchObject({ status: 502, code: 'upstream_llm_error' });
     expect(credits.reconcile).not.toHaveBeenCalled();
     expect(credits.__net()).toBe(0); // cap=0 refund no-op，无净扣
+  });
+});
+
+describe('injectMultipartModel', () => {
+  /** 构造一个最小 multipart（无 model 字段），形状与桥 route_image_edit 输出一致。 */
+  function buildBody(boundary: string, fields: Array<[name: string, value: string]>, file?: Buffer) {
+    const parts: Buffer[] = [];
+    for (const [name, value] of fields) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: text/plain\r\n\r\n${value}\r\n`,
+      ));
+    }
+    if (file) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="a.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`,
+      ));
+      parts.push(file);
+      parts.push(Buffer.from('\r\n'));
+    }
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+    return Buffer.concat(parts);
+  }
+
+  it('在闭合分隔符前注入上游 model 字段，保留原有字段与文件字节', () => {
+    const boundary = 'b1';
+    const contentType = `multipart/form-data; boundary=${boundary}`;
+    const fileBytes = Buffer.from('PNGDATA');
+    const body = buildBody(boundary, [['prompt', '换装']], fileBytes);
+    const out = injectMultipartModel(contentType, body, 'dall-e-3');
+    const text = out.body.toString('utf8');
+    expect(out.contentType).toBe(contentType);
+    expect(text).toContain('name="prompt"');
+    expect(text).toContain('换装');
+    expect(text).toContain('PNGDATA'); // 文件字节未损坏
+    expect(text).toContain('name="model"');
+    expect(text).toContain('dall-e-3');
+    // model 注入在闭合分隔符之前，闭合仍位于末尾。
+    const modelIdx = text.indexOf('name="model"');
+    const closeIdx = text.lastIndexOf(`--${boundary}--`);
+    expect(closeIdx).toBeGreaterThan(modelIdx);
+    expect(text.endsWith(`--${boundary}--\r\n`)).toBe(true);
+    // 仅注入一次 model。
+    expect(text.match(/name="model"/g)?.length).toBe(1);
+  });
+
+  it('body 已含 model 字段时不重复注入（直连客户端自带的 model 优先）', () => {
+    const boundary = 'b2';
+    const contentType = `multipart/form-data; boundary=${boundary}`;
+    const body = buildBody(boundary, [['prompt', 'x'], ['model', 'gpt-x']]);
+    const out = injectMultipartModel(contentType, body, 'dall-e-3');
+    expect(out.body.equals(body)).toBe(true);
+    expect(out.body.toString('utf8').match(/name="model"/g)?.length).toBe(1);
+  });
+
+  it('非 multipart（无 boundary）原样返回', () => {
+    const body = Buffer.from('{"prompt":"x"}');
+    const out = injectMultipartModel('application/json', body, 'dall-e-3');
+    expect(out.body.equals(body)).toBe(true);
+  });
+
+  it('model 含 CRLF 时被剥离，防止 multipart 头注入', () => {
+    const boundary = 'b3';
+    const contentType = `multipart/form-data; boundary=${boundary}`;
+    const body = buildBody(boundary, [['prompt', 'x']]);
+    const out = injectMultipartModel(contentType, body, 'evil\r\nX-Inject: 1');
+    const text = out.body.toString('utf8');
+    // CRLF 被剥离 → "X-Inject" 不会出现在新行首伪造头，而是合入 model 值单行。
+    expect(text).not.toContain('\r\nX-Inject');
+    expect(text).toContain('evil');
   });
 });

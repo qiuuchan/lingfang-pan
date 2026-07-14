@@ -1526,6 +1526,10 @@ pub(crate) fn start_plugin_from_dir(
             .capabilities
             .iter()
             .any(|kind| kind == "image.generate"),
+        manifest
+            .capabilities
+            .iter()
+            .any(|kind| kind == "image.edit"),
         PluginBridgeClientSource::PluginRuntime,
         Duration::from_secs(12 * 60 * 60),
     )?;
