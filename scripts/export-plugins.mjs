@@ -45,10 +45,13 @@ function parseArgs(argv) {
 
 /** 递归枚举插件源文件相对路径（对齐 plugin_artifact_v4 collect_files 的跳过规则）。 */
 function listPluginFiles(pluginDir) {
-	// 若插件根存在 vendor.tar.gz，则跳过原始 vendor/ 目录：vendored 上游源码已压缩进归档，
-	// 避免重复打进包，也避免包内出现大量文本文件触发 AI 政策扫描（第三方端点/密钥字段）。
-	// 无 vendor.tar.gz 的插件（如 moneyprinter-turbo）保持原行为，vendor/ 照常打入。
-	const skipTopLevel = existsSync(join(pluginDir, 'vendor.tar.gz')) ? new Set(['vendor']) : null;
+	// 若插件根存在 vendor 归档（整包 vendor.tar.gz 或分卷 vendor.tar.gz.partNN），则跳过原始
+	// vendor/ 目录：vendored 上游源码已压缩进归档，避免重复打进包，也避免包内出现大量文本文件
+	// 触发 AI 政策扫描（第三方端点/密钥字段）。分卷用于上游体积大、单文件超 60MiB 制品上限时
+	// （如 moneyprinter-turbo 的字体/音乐资源），launcher 首启流式拼接解压。
+	const hasVendorArchive = existsSync(join(pluginDir, 'vendor.tar.gz'))
+		|| readdirSync(pluginDir).some((n) => /^vendor\.tar\.gz\.part\d+$/.test(n));
+	const skipTopLevel = hasVendorArchive ? new Set(['vendor']) : null;
 	const results = [];
 	const walk = (dir, atRoot) => {
 		let entries;
