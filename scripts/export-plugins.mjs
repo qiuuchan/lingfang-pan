@@ -45,26 +45,31 @@ function parseArgs(argv) {
 
 /** 递归枚举插件源文件相对路径（对齐 plugin_artifact_v4 collect_files 的跳过规则）。 */
 function listPluginFiles(pluginDir) {
+	// 若插件根存在 vendor.tar.gz，则跳过原始 vendor/ 目录：vendored 上游源码已压缩进归档，
+	// 避免重复打进包，也避免包内出现大量文本文件触发 AI 政策扫描（第三方端点/密钥字段）。
+	// 无 vendor.tar.gz 的插件（如 moneyprinter-turbo）保持原行为，vendor/ 照常打入。
+	const skipTopLevel = existsSync(join(pluginDir, 'vendor.tar.gz')) ? new Set(['vendor']) : null;
 	const results = [];
-	const walk = (dir) => {
+	const walk = (dir, atRoot) => {
 		let entries;
 		try { entries = readdirSync(dir); } catch { return; }
 		for (const name of entries) {
 			// dotfiles / dot-dirs 跳过（覆盖 .assets 等；.git/.venv 等也在 SKIP_SEGMENTS）。
 			if (name.startsWith('.')) continue;
 			if (SKIP_SEGMENTS.has(name)) continue;
+			if (atRoot && skipTopLevel && skipTopLevel.has(name)) continue;
 			const full = join(dir, name);
 			let st;
 			try { st = statSync(full); } catch { continue; }
 			if (st.isDirectory()) {
-				walk(full);
+				walk(full, false);
 			} else {
 				const rel = relative(pluginDir, full).split(sep).join('/');
 				results.push(rel);
 			}
 		}
 	};
-	walk(pluginDir);
+	walk(pluginDir, true);
 	return results.sort();
 }
 

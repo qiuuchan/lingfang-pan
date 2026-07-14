@@ -43,6 +43,8 @@ apps/desktop/playwright/.cache/
 **/__pycache__/
 **/*.pyc
 .pnpm-store-tmp/
+.omo/
+.pnpm-store/
 
 # 本地态与密钥（永不入仓）
 .env

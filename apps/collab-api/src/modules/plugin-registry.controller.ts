@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { requireUser } from '../common';
+import { ensureRequestId, requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import {
   AdminPluginPackageListQueryDto,
@@ -66,7 +66,7 @@ export class PluginRegistryController {
 
   @Get('plugin-releases/:id/artifact')
   async artifact(@Req() req: Request, @Res() res: Response, @Param('id') id: string) {
-    const result = await this.registry.artifactDownload(requireUser(req).id, id);
+    const result = await this.registry.artifactDownload(requireUser(req).id, id, ensureRequestId(req));
     if (result.download.kind === 'redirect') return res.redirect(302, result.download.url);
     res.setHeader('content-type', 'application/vnd.lingfang.plugin+zip');
     res.setHeader('content-length', String(result.download.sizeBytes));
@@ -143,7 +143,7 @@ export class AdminPluginRegistryController {
   @RequirePermission('platform.plugin.review')
   @Get(':id/artifact')
   async artifact(@Req() req: Request, @Res() res: Response, @Param('id') id: string) {
-    const result = await this.registry.adminArtifactDownload(requireUser(req).id, id);
+    const result = await this.registry.adminArtifactDownload(requireUser(req).id, id, ensureRequestId(req));
     if (result.download.kind === 'redirect') return res.redirect(302, result.download.url);
     res.setHeader('content-type', 'application/vnd.lingfang.plugin+zip');
     res.setHeader('content-length', String(result.download.sizeBytes));

@@ -4,12 +4,12 @@ import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Readable } from 'node:stream';
 import { AppError, badRequest, conflict, forbidden, insufficientBalance, notFound } from '../common';
 import { PrismaService } from '../prisma.service';
-import { ARTIFACT_STORE, type ArtifactDownload, type ArtifactStore } from './artifact-store';
+import { ARTIFACT_STORE, type ArtifactDownload, ArtifactUnavailableError, type ArtifactStore } from './artifact-store';
 import { AuthService } from './auth.service';
 import { PLUGIN_AI_POLICY_VERSION } from './plugin-ai-policy';
 import { assertPluginAiPolicy } from './plugin-ai-policy-enforcement';
@@ -65,6 +65,8 @@ function assertCurrentAiPolicy(release: { aiPolicyVersion: number; aiPolicyStatu
 
 @Injectable()
 export class PluginRegistryService {
+  private readonly logger = new Logger(PluginRegistryService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
@@ -463,7 +465,7 @@ export class PluginRegistryService {
     throw new AppError(402, 'payment_required', '当前团队尚未购买该插件');
   }
 
-  async artifactDownload(userId: string, releaseId: string): Promise<{ download: ArtifactDownload; release: ReturnType<typeof releaseJson> }> {
+  async artifactDownload(userId: string, releaseId: string, requestId?: string): Promise<{ download: ArtifactDownload; release: ReturnType<typeof releaseJson> }> {
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
     if (!release || release.status === 'YANKED') throw notFound('插件发行版不存在或已撤回');
     assertCurrentAiPolicy(release);
@@ -471,7 +473,7 @@ export class PluginRegistryService {
     if (access.source === 'marketplace' && release.marketReviewStatus !== 'APPROVED') {
       throw forbidden('该市场发行版尚未通过审核');
     }
-    const download = await this.artifacts.download(release.artifactKey);
+    const download = await this.downloadArtifact(release, requestId);
     await this.audit(userId, 'plugin.artifact.downloaded', 'PluginRelease', release.id, { packageId: release.packageId, sha256: release.sha256 });
     return { download, release: releaseJson(release) };
   }
@@ -504,17 +506,42 @@ export class PluginRegistryService {
     return { ok: true };
   }
 
-  async adminArtifactDownload(actorId: string, releaseId: string): Promise<{ download: ArtifactDownload; release: ReturnType<typeof releaseJson> }> {
+  async adminArtifactDownload(actorId: string, releaseId: string, requestId?: string): Promise<{ download: ArtifactDownload; release: ReturnType<typeof releaseJson> }> {
     await this.auth.ensurePlatformAdmin(actorId);
     const release = await this.prisma.pluginRelease.findUnique({ where: { id: releaseId } });
     if (!release) throw notFound('发行版不存在');
-    const download = await this.artifacts.download(release.artifactKey);
+    const download = await this.downloadArtifact(release, requestId);
     await this.audit(actorId, 'admin.plugin_release.artifact_downloaded', 'PluginRelease', release.id, {
       packageId: release.packageId,
       sha256: release.sha256,
       marketReviewStatus: release.marketReviewStatus,
     });
     return { download, release: releaseJson(release) };
+  }
+
+  private async downloadArtifact(
+    release: { id: string; packageId: string; artifactKey: string; sha256: string },
+    requestId?: string,
+  ): Promise<ArtifactDownload> {
+    try {
+      return await this.artifacts.download(release.artifactKey);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      const context = {
+        requestId,
+        releaseId: release.id,
+        packageId: release.packageId,
+        artifactKey: release.artifactKey,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      };
+      if (error instanceof ArtifactUnavailableError) {
+        this.logger.warn(context, '插件制品不可用：文件已被清理或未落盘');
+        throw new AppError(410, 'plugin_artifact_unavailable', '制品文件不可用，可能已被清理，请联系作者重新发布');
+      }
+      this.logger.error(context, '插件制品下载失败：存储后端异常');
+      throw error;
+    }
   }
 
   async submitMarketplace(userId: string, releaseId: string, priceCents?: number) {

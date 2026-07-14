@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
+import { ArtifactUnavailableError } from './artifact-store';
 import { PluginRegistryService } from './plugin-registry.service';
 
 const now = new Date('2026-07-11T00:00:00.000Z');
@@ -232,6 +233,34 @@ describe('PluginRegistryService', () => {
     );
     await expect(registry.artifactDownload('buyer-user', 'pending-release')).rejects.toMatchObject({ code: 'forbidden' });
     expect(download).not.toHaveBeenCalled();
+  });
+
+  it('maps a missing artifact file to a 410 plugin_artifact_unavailable error', async () => {
+    const download = vi.fn().mockRejectedValue(new ArtifactUnavailableError('artifact not found: pkg/1.0.0/hash.lfplugin'));
+    const auditCreate = vi.fn();
+    const registry = service(
+      {
+        pluginRelease: {
+          findUnique: vi.fn().mockResolvedValue({
+            ...releaseRow('1.0.0', 'release-1'),
+            artifactKey: 'pkg/1.0.0/hash.lfplugin',
+          }),
+        },
+        pluginPackage: {
+          findUnique: vi.fn().mockResolvedValue({ ...packageRow(), ownerTeamId: 'owner-team' }),
+        },
+        auditLog: { create: auditCreate },
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: 'owner-team', role: 'TEAM_ADMIN', teamRoleId: null }) },
+      { download },
+    );
+    await expect(registry.artifactDownload('owner-user', 'release-1', 'req-1')).rejects.toMatchObject({
+      status: 410,
+      code: 'plugin_artifact_unavailable',
+    });
+    expect(download).toHaveBeenCalledWith('pkg/1.0.0/hash.lfplugin');
+    // 下载失败时不应写入"已下载"审计
+    expect(auditCreate).not.toHaveBeenCalled();
   });
 
   it('rechecks package activity, claims approval, and keeps the highest approved SemVer current', async () => {

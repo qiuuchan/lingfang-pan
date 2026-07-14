@@ -1,4 +1,4 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, SetMetadata } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger, SetMetadata } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -39,6 +39,18 @@ export const conflict = (message: string, details?: unknown) => new AppError(409
 export const insufficientBalance = () => new AppError(402, 'insufficient_balance', '钱包余额不足');
 export const clientUpgradeRequired = () => new AppError(426, 'client_upgrade_required', '旧插件协议已停用，请升级桌面客户端后重试');
 
+/**
+ * 取或生成请求级 requestId 并回写到 req.headers，确保 service 日志、异常响应、
+ * pino HTTP 日志三处使用同一个值。客户端未传 x-request-id 时由首个调用方生成。
+ */
+export function ensureRequestId(req: Request): string {
+  const existing = req.header('x-request-id');
+  if (existing) return existing;
+  const generated = randomUUID();
+  req.headers['x-request-id'] = generated;
+  return generated;
+}
+
 export function slugify(input: string) {
   const base = input
     .trim()
@@ -64,11 +76,13 @@ export function requireUser(req: Request): AuthUser {
 
 @Catch()
 export class AppExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger('AppExceptionFilter');
+
   catch(error: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const request = ctx.getRequest<Request>();
     const response = ctx.getResponse<Response>();
-    const requestId = request.header('x-request-id') || randomUUID();
+    const requestId = ensureRequestId(request);
 
     if (error instanceof AppError) {
       response.status(error.status).json({
@@ -105,6 +119,13 @@ export class AppExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    this.logger.error({
+      requestId,
+      method: request.method,
+      url: request.path,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+    }, '未处理异常：已返回 500');
     response.status(500).json({
       code: 'internal_error',
       message: '服务内部错误',

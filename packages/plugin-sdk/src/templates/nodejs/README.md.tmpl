@@ -1,0 +1,18 @@
+# {{name}}
+
+## 能力
+
+本插件当前支持的能力：
+__CAPABILITIES_LIST__
+
+## 本地预览
+
+1. 将插件目录复制到 `apps/desktop/builtin-plugins/{{name}}/`
+2. 重启桌面端 dev：`pnpm -C apps/desktop dev`
+3. 桌面端"插件"页可见该插件，点"运行"测试
+
+## 发布步骤
+
+1. `lingfang-plugin validate`  - 校验插件合法性
+2. `lingfang-plugin build`     - 打包 .lfplugin 制品
+3. `lingfang-plugin publish`   - 发布到插件注册中心

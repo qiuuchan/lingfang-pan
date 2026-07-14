@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/collab-api/backend/index.md", "reason": "collab-api 服务端约定：artifactDownload 错误映射、AppExceptionFilter、Logger 使用需符合后端规范"}
+{"file": ".trellis/spec/desktop/backend/index.md", "reason": "桌面端 Rust backend 约定：network.rs 错误提示映射需符合桌面端规范"}

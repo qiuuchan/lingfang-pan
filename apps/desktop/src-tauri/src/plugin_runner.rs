@@ -910,6 +910,18 @@ pub(crate) fn ensure_node_dependencies(
     {
         return Ok(());
     }
+    // 安全网：旧版安装流程曾给 nodejs 插件预建 node_modules 联接到 environments/，
+    // pnpm 9.x 在该联接上 mkdir 会 ENOTDIR。若 node_modules 解析到 plugin_dir 之外
+    // （联接到 environments/，无论目标是否失效），先移除联接点让 pnpm 以真实目录重建。
+    // 真实的 node_modules 目录（canonicalize 后仍在 plugin_dir 内）不受影响。
+    let node_modules_path = plugin_dir.join("node_modules");
+    let needs_clear_link = match node_modules_path.canonicalize() {
+        Ok(resolved) => !resolved.starts_with(plugin_dir),
+        Err(_) => true, // 联接目标失效（悬空）
+    };
+    if needs_clear_link {
+        let _ = std::fs::remove_dir(&node_modules_path);
+    }
     // 锁文件决定冻结安装器；存在锁文件时不允许退化为普通 install。
     let (bin, install_args) = if plugin_dir.join("pnpm-lock.yaml").is_file() {
         let pnpm = runtime
