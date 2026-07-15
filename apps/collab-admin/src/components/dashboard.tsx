@@ -167,7 +167,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View, intent?: O
             {null}
           </AsyncResource>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid items-start gap-4 lg:grid-cols-2">
             <StaggerContainer className="grid gap-4 sm:grid-cols-2" stagger={0.08}>
               <StaggerItem whileHover={{ y: -4, transition: { type: 'spring', stiffness: 300, damping: 18 } }}>
                 <GenerationStatCard label="本月 GMV" value={money(finance?.month.gmvCents ?? 0)} desc="本月交易总额" icon={WalletIcon} color="text-emerald-500" loading={finance === null} />
