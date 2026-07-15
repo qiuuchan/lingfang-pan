@@ -13,3 +13,4 @@
 ## Quality Check
 
 - SDK typecheck: `pnpm -C packages/plugin-sdk typecheck`
+- When producing `.lfplugin` artifacts, see [plugin-packaging.md](./plugin-packaging.md) — use the `lingfang-plugin build` CLI, never hand-rolled zips (v4 requires `_meta.json`).

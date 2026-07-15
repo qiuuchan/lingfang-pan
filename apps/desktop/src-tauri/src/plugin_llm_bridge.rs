@@ -486,7 +486,7 @@ fn route_image_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
 /// 处理 image.edit：参考图 + prompt，重建 multipart 转发到平台 relay
 /// /api/relay/v1/images/edits（multipart 透传，按张计费），返回 {images:[...]}。
 ///
-/// 与 image.generate 的区别：携带参考图（image[]），走 relay 的 images/edits 透传。
+/// 与 image.generate 的区别：携带参考图（image 字段，多张以多个同名 part），走 relay 的 images/edits 透传。
 /// 上游 model 名不由此处填写——桥只持有平台档位 fast/premium，由 relay 侧按命中渠道
 /// 注入上游 model（与 images/generations 对齐）。tier 经 query 传 relay 供计费/选渠道。
 fn route_image_edit(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
@@ -614,9 +614,12 @@ fn push_text_part(body: &mut Vec<u8>, boundary: &str, name: &str, value: &str) {
 }
 
 fn push_file_part(body: &mut Vec<u8>, boundary: &str, filename: &str, mime: &str, data: &[u8]) {
+    // 字段名用 "image"（OpenAI /v1/images/edits 标准单值字段）。
+    // 曾用 "image[]"，但上游 images/edits 不认 image[]（实测 502 upstream_llm_error），只认 image。
+    // 多张参考图以多个同名 "image" part 传递。
     body.extend_from_slice(
         format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
         )
         .as_bytes(),
     );
@@ -1451,7 +1454,7 @@ mod tests {
         // multipart 含 prompt 与参考图解码字节，不含 model 字段（由 relay 注入上游模型）。
         assert!(text.contains("name=\"prompt\""));
         assert!(text.contains("换装"));
-        assert!(text.contains("name=\"image[]\"; filename=\"model.jpg\""));
+        assert!(text.contains("name=\"image\"; filename=\"model.jpg\""));
         assert!(text.contains("PNGDATA"), "参考图 base64 应解码为原始字节");
         assert!(!text.contains("name=\"model\""), "桥不应填写 model 字段");
         // tier 经 query 传 relay 供计费/选渠道。
