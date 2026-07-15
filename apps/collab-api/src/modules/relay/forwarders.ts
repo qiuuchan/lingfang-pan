@@ -29,11 +29,18 @@ export interface ForwardResult {
 }
 
 const UPSTREAM_TIMEOUT_MS = 60_000; // 上游超时 60s（含 chat 流式）：超时即 abort，防日志卡 pending。
+// 图片编辑（images/edits，含换装等参考图生成）上游耗时远高于 chat：单图常 ~60s，多图换装 120s+。
+// 若沿用 60s 会在出图完成前掐断 → upstream_llm_error(upstreamStatus:null)。故 image 透传单独放宽。
+const UPSTREAM_IMAGE_TIMEOUT_MS = 300_000; // 图片编辑上游超时 5 分钟。
 
 /** 通用上游 fetch（带超时）。 */
-async function upstreamFetch(url: string, init: RequestInit): Promise<globalThis.Response> {
+async function upstreamFetch(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number = UPSTREAM_TIMEOUT_MS,
+): Promise<globalThis.Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -175,7 +182,7 @@ export async function forwardRawPassthrough(args: {
     method: args.method,
     headers: { 'Content-Type': args.contentType, Authorization: `Bearer ${args.upstreamKey}` },
     body: new Uint8Array(args.rawBody),
-  });
+  }, UPSTREAM_IMAGE_TIMEOUT_MS);
   await ensureOk(upstream);
   // 尝试解析 JSON 取图片数；非 JSON（少见）默认按 1 张。
   let images = 1;
