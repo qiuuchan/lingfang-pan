@@ -1,0 +1,4 @@
+Pillow>=10.0.0
+requests>=2.28.0
+# 拖放支持（可选，缺失时自动降级为点击/粘贴上传，不阻断功能）
+tkinterdnd2>=0.4.0; platform_system == "Windows"
