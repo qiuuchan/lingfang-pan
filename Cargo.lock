@@ -2914,7 +2914,7 @@ dependencies = [
 
 [[package]]
 name = "lingfang-desktop"
-version = "0.0.25"
+version = "0.0.26"
 dependencies = [
  "arboard",
  "base64 0.22.1",
