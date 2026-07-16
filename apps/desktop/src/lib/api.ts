@@ -1,6 +1,10 @@
 const BACKEND_URL_STORAGE_KEY = 'lf:backendUrl';
 const AUTH_TOKEN_STORAGE_KEY = 'lf:authToken';
-let apiBaseUrl = '';
+
+// 后端地址写死：始终使用正式域名，不允许用户/缓存/app.config 覆盖。
+// configureApiBase / clearApiBase / initApiBase 均忽略入参与已存旧值，强制回归此地址。
+export const FIXED_BACKEND_URL = 'https://lingfang.guiyuanzi.com';
+let apiBaseUrl: string = FIXED_BACKEND_URL;
 
 const trimTrailingSlash = (url: string) => url.replace(/\/+$/, '');
 
@@ -25,36 +29,34 @@ function readStoredBackendUrl(): string | null {
 }
 
 export function configureApiBase(url: string | null | undefined, opts: { persist?: boolean } = {}) {
-  const normalized = normalizeBackendUrl(url);
-  apiBaseUrl = normalized ?? '';
-  if (opts.persist) {
-    try {
-      if (normalized) localStorage.setItem(BACKEND_URL_STORAGE_KEY, normalized);
-      else localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
-    } catch {
-      /* localStorage 不可用则只更新当前会话 */
-    }
-  }
-  return Boolean(normalized);
+  // 写死后端地址：忽略入参，始终用 FIXED_BACKEND_URL；顺带清掉旧缓存避免残留。
+  void url; void opts;
+  apiBaseUrl = FIXED_BACKEND_URL;
+  try { localStorage.removeItem(BACKEND_URL_STORAGE_KEY); } catch { /* ignore */ }
+  return true;
 }
 
 export function clearApiBase() {
-  apiBaseUrl = '';
+  // 写死：即使「清空」也保持 FIXED_BACKEND_URL（登出等场景不会让后端地址变空）。
+  apiBaseUrl = FIXED_BACKEND_URL;
   try { localStorage.removeItem(BACKEND_URL_STORAGE_KEY); } catch { /* ignore */ }
 }
 
 /**
- * 初始化后端地址：用户保存值优先，其次 app.config.json 的 api_base，最后为空进入配置入口。
+ * 初始化后端地址：写死为 FIXED_BACKEND_URL，忽略 app.config 与已存旧值，
+ * 并清理可能残留的旧地址（如 http://106.12.131.38:19006）。
  */
 export function initApiBase(defaultUrl?: string | null) {
-  const stored = readStoredBackendUrl();
-  if (stored) {
-    apiBaseUrl = stored;
-    return stored;
-  }
-  const fallback = normalizeBackendUrl(defaultUrl);
-  apiBaseUrl = fallback ?? '';
-  return fallback;
+  void defaultUrl;
+  apiBaseUrl = FIXED_BACKEND_URL;
+  try {
+    // 清掉历史上可能存下的非写死地址，确保不会再被读到（虽已不参与解析，但保持干净）。
+    const stored = readStoredBackendUrl();
+    if (stored && stored !== FIXED_BACKEND_URL) {
+      localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
+    }
+  } catch { /* ignore */ }
+  return FIXED_BACKEND_URL;
 }
 
 export function setApiBase(url: string | null | undefined) {
@@ -63,6 +65,7 @@ export function setApiBase(url: string | null | undefined) {
 export function apiBase() {
   return apiBaseUrl;
 }
+
 
 export async function testBackendUrl(url: string): Promise<void> {
   const normalized = normalizeBackendUrl(url);
