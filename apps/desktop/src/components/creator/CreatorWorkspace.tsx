@@ -7,6 +7,7 @@
 //  - pluginId 单一真相源：经 PluginCreatorSession store（session/store.ts），消除旧 5 副本竞态。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
 import { useEffect, useRef, useState } from 'react';
+import { XIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
@@ -1322,7 +1323,17 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       className="hidden"
       onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
     />
-    <div className="flex h-full min-h-0 w-full overflow-hidden bg-background">
+    <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
+      {/* 关闭/退出创建器：浮窗（替代 Dialog 默认 X）与全屏模式共用，浅色/深色均可见（z-50 防被内容遮挡）。 */}
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="关闭创建插件"
+        title="关闭创建插件"
+        className="absolute right-3 top-3 z-50 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <XIcon className="size-4" />
+      </button>
       <CreatorWorkspaceSidebar
             activeConversationId={activeConversationId}
             busy={busy}

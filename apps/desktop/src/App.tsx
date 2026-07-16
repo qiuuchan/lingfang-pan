@@ -988,17 +988,17 @@ export default function App() {
       {view !== 'develop-plugins' && !creatorFloatingOpen && (
         <Button
           type="button"
-          size="lg"
-          className="fixed bottom-6 right-6 z-40 h-12 gap-2 rounded-lg px-4 shadow-lg"
+          size="icon"
+          className="fixed bottom-6 right-6 z-40 size-12 rounded-xl shadow-lg"
           onClick={() => setCreatorFloatingOpen(true)}
           title="打开 AI 插件创建器"
+          aria-label="打开 AI 插件创建器"
         >
-          <SparklesIcon className="size-4" />
-          <span>AI 创建插件</span>
+          <SparklesIcon className="size-5" />
         </Button>
       )}
       <Dialog open={creatorFloatingOpen} onOpenChange={setCreatorFloatingOpen}>
-        <DialogContent className="flex h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1500px]">
+        <DialogContent showCloseButton={false} className="flex h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1500px]">
           <DialogTitle className="sr-only">AI 创建插件</DialogTitle>
           <DialogDescription className="sr-only">通过 AI 对话创建、编辑并发布插件</DialogDescription>
           <Suspense fallback={<ListSkeleton rows={8} />}>

@@ -30,6 +30,10 @@ function manualChunks(id: string): string | undefined {
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
+  define: {
+    // 构建期注入本次打包时间（ISO），供「关于」页展示构建时间；dev 模式下为 dev server 启动时刻。
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   server: { port: 1420, strictPort: true },
   build: {
     outDir: 'dist',
