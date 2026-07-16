@@ -19,7 +19,6 @@ import {
   SettingsIcon,
   UsersIcon,
   UserRoundIcon,
-  PuzzleIcon,
   HelpCircleIcon,
   CpuIcon,
   InfoIcon,
@@ -44,7 +43,7 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback } = useApp();
+  const { session, resetSession, openAccountSettings, openNotifications, openTeamAdmin, openHelpFeedback } = useApp();
   const { theme, setTheme } = useTheme();
   // 项 11：退出登录确认弹窗。
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -101,7 +100,6 @@ export function AvatarMenu({
     { key: 'notif', label: '通知中心', icon: BellIcon, visible: true, badge: unread, onClick: () => { openNotifications(); onClose(); } },
     // 06-24：原「钱包」+「团队空间」两项合并为「团队钱包」（团队共享余额 + 灵石）。
     { key: 'team-wallet', label: '团队钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('team-wallet'); onClose(); } },
-    { key: 'plugins', label: '插件管理', icon: PuzzleIcon, visible: true, onClick: () => { openPluginCenter(); onClose(); } },
     // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
     { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
     // 开发插件入口在标题栏模式切换与插件工作台内，不在此菜单重复放置。

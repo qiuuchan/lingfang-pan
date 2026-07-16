@@ -12,6 +12,13 @@ import { Badge } from '@/components/ui/badge';
 // 兜底版本（非 Tauri 环境展示）：构建时由 vite 注入。
 import pkg from '../../../package.json';
 
+/** 把 ISO 构建时间格式化为本地可读串（解析失败原样返回）。 */
+function formatBuildTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 interface AppInfo {
   name: string;
   version: string;
@@ -72,6 +79,10 @@ export function AboutTab() {
             <div className="rounded-lg border bg-muted/20 px-3 py-2">
               <div className="text-xs text-muted-foreground">版本号</div>
               <div className="mt-1 truncate font-mono text-sm font-medium" title={info ? `v${info.version}` : ''}>{info ? `v${info.version}` : '加载中…'}</div>
+            </div>
+            <div className="rounded-lg border bg-muted/20 px-3 py-2 sm:col-span-2">
+              <div className="text-xs text-muted-foreground">构建时间</div>
+              <div className="mt-1 truncate font-mono text-sm font-medium" title={__BUILD_TIME__}>{formatBuildTime(__BUILD_TIME__)}</div>
             </div>
           </div>
         </CardContent>
