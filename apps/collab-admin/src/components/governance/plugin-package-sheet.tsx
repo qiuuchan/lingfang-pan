@@ -57,6 +57,7 @@ import type {
   PluginPackageDetail,
   PluginPackageSummary,
   PluginReleaseCore,
+  PluginReleaseSummary,
   PluginReviewSummary,
 } from '@/components/governance/types';
 import { useAsyncResource } from '@/lib/async-resource';
@@ -193,7 +194,7 @@ export function PluginPackageSheet({
       return;
     }
     setSelectedReleaseId((current) => (
-      current && items.some((release) => release.id === current) ? current : items[0].id
+      current && items.some((release: PluginReleaseSummary) => release.id === current) ? current : items[0].id
     ));
   }, [releases.data]);
 
@@ -353,7 +354,7 @@ export function PluginPackageSheet({
               >
                 <SelectTrigger className="w-full sm:w-64" aria-label="选择发行版"><SelectValue placeholder="选择发行版" /></SelectTrigger>
                 <SelectContent>
-                  {releases.data.items.map((release) => (
+                  {releases.data.items.map((release: PluginReleaseSummary) => (
                     <SelectItem key={release.id} value={release.id}>
                       v{release.version} · {reviewLabel(release.marketReviewStatus)}
                       {release.isMarketplaceCurrent ? ' · 市场当前版' : ''}
@@ -556,7 +557,7 @@ function FilesView({
           <Table>
             <TableHeader><TableRow><TableHead>路径</TableHead><TableHead className="w-28">大小</TableHead></TableRow></TableHeader>
             <TableBody>
-              {resource.data.items.map((file) => (
+              {resource.data.items.map((file: PluginFileSummary) => (
                 <TableRow key={file.path}>
                   <TableCell className="max-w-0 break-all font-mono text-xs">{file.path}</TableCell>
                   <TableCell>{formatBytes(file.sizeBytes)}</TableCell>
@@ -585,7 +586,7 @@ function ReviewsView({
       {resource.data && (
         <>
           <div className="divide-y rounded-lg border">
-            {resource.data.items.map((review) => (
+            {resource.data.items.map((review: PluginReviewSummary) => (
               <div key={review.id} className="grid gap-2 px-3 py-3 text-sm sm:grid-cols-[7rem_1fr_auto]">
                 <ReviewBadge value={review.status} />
                 <div className="min-w-0 break-words">{review.reason || '无补充说明'}</div>

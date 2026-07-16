@@ -128,7 +128,7 @@ export function ApplicationsTab({ initialStatus }: { initialStatus?: Application
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {applications.data.items.map((application) => (
+                  {applications.data.items.map((application: TeamAdminApplicationSummary) => (
                     <TableRow key={application.id}>
                       <TableCell>
                         <TableCellAction
