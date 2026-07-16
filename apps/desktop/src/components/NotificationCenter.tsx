@@ -7,10 +7,26 @@
 // UI：右侧 Sheet 抽屉，列出通知（未读加粗 + 类型色点），支持「全部已读」。时间用 lib/time relativeTime。
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { CheckCheckIcon, Loader2Icon, BellIcon } from 'lucide-react';
+import {
+  BellIcon,
+  BellRingIcon,
+  CheckCheckIcon,
+  CircleCheckBigIcon,
+  Clock3Icon,
+  InfoIcon,
+  KeyRoundIcon,
+  Loader2Icon,
+  PackageCheckIcon,
+  PackageXIcon,
+  ShoppingBagIcon,
+  SparklesIcon,
+  StoreIcon,
+  type LucideIcon,
+} from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { LoadingButton } from '@/components/loading-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -18,19 +34,19 @@ import { relativeTime } from '@/lib/time';
 import type { NotificationItem, NotificationsResponse } from '@/lib/types';
 
 // 语义类型 → 展示元数据（色点 + 中文标签）。未知类型降级 info/「通知」。
-interface TypeMeta { dot: string; label: string }
+interface TypeMeta { icon: LucideIcon; iconClass: string; iconBg: string; label: string }
 const TYPE_META: Record<string, TypeMeta> = {
-  plugin_approved: { dot: 'bg-emerald-500', label: '插件过审' },
-  plugin_rejected: { dot: 'bg-rose-500', label: '插件未过审' },
-  plugin_delisted: { dot: 'bg-amber-500', label: '插件下架' },
-  application_approved: { dot: 'bg-emerald-500', label: '入驻通过' },
-  application_rejected: { dot: 'bg-rose-500', label: '入驻未通过' },
-  password_reset_by_admin: { dot: 'bg-blue-500', label: '密码重置' },
-  purchased: { dot: 'bg-emerald-500', label: '购买成功' },
-  purchase_sale: { dot: 'bg-blue-500', label: '消费动态' },
-  new_version: { dot: 'bg-violet-500', label: '新版本' },
+  plugin_approved: { icon: PackageCheckIcon, iconClass: 'text-emerald-600 dark:text-emerald-400', iconBg: 'bg-emerald-500/10', label: '插件过审' },
+  plugin_rejected: { icon: PackageXIcon, iconClass: 'text-destructive', iconBg: 'bg-destructive/10', label: '插件未过审' },
+  plugin_delisted: { icon: PackageXIcon, iconClass: 'text-amber-600 dark:text-amber-400', iconBg: 'bg-amber-500/10', label: '插件下架' },
+  application_approved: { icon: StoreIcon, iconClass: 'text-emerald-600 dark:text-emerald-400', iconBg: 'bg-emerald-500/10', label: '入驻通过' },
+  application_rejected: { icon: StoreIcon, iconClass: 'text-destructive', iconBg: 'bg-destructive/10', label: '入驻未通过' },
+  password_reset_by_admin: { icon: KeyRoundIcon, iconClass: 'text-primary', iconBg: 'bg-primary/10', label: '密码重置' },
+  purchased: { icon: ShoppingBagIcon, iconClass: 'text-emerald-600 dark:text-emerald-400', iconBg: 'bg-emerald-500/10', label: '购买成功' },
+  purchase_sale: { icon: ShoppingBagIcon, iconClass: 'text-primary', iconBg: 'bg-primary/10', label: '消费动态' },
+  new_version: { icon: SparklesIcon, iconClass: 'text-violet-600 dark:text-violet-400', iconBg: 'bg-violet-500/10', label: '新版本' },
 };
-const DEFAULT_META: TypeMeta = { dot: 'bg-blue-500', label: '通知' };
+const DEFAULT_META: TypeMeta = { icon: InfoIcon, iconClass: 'text-primary', iconBg: 'bg-primary/10', label: '通知' };
 
 function metaFor(type: string): TypeMeta {
   return TYPE_META[type] || DEFAULT_META;
@@ -113,31 +129,48 @@ export function NotificationCenter({
           <DialogDescription>插件过审、新版本推送、消费等消息汇总在此。</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center justify-end border-b px-4 py-2">
-          <Button
-            variant="ghost"
+        <div className="flex items-center justify-between gap-4 border-b bg-muted/20 px-5 py-3">
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <BellRingIcon className="size-3.5 text-primary" />
+              <strong className="font-semibold text-foreground">{unread}</strong> 条未读
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <CircleCheckBigIcon className="size-3.5" />
+              {Math.max(0, items.length - unread)} 条已读
+            </span>
+          </div>
+          <LoadingButton
+            variant="outline"
             size="sm"
             onClick={markAllRead}
+            loading={marking}
             disabled={marking || unread === 0}
-            className="text-xs text-muted-foreground"
+            className="text-xs"
           >
-            {marking ? <Loader2Icon className="mr-1 size-3 animate-spin" /> : <CheckCheckIcon className="mr-1 size-3" />}
+            {!marking && <CheckCheckIcon />}
             全部已读
-          </Button>
+          </LoadingButton>
         </div>
 
         {loading && data === null ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            <Loader2Icon className="mr-2 size-4 animate-spin" />加载中…
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+            <span className="flex size-11 items-center justify-center rounded-full bg-muted">
+              <Loader2Icon className="size-5 animate-spin text-primary" />
+            </span>
+            正在同步通知…
           </div>
         ) : items.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-            <BellIcon className="size-8 text-muted-foreground/40" />
-            <span>暂无通知</span>
+          <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+            <span className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
+              <BellIcon className="size-6" />
+            </span>
+            <h3 className="mt-4 text-sm font-semibold text-foreground">消息已经处理完毕</h3>
+            <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">插件审核、版本更新和团队消费动态会集中显示在这里。</p>
           </div>
         ) : (
-          <ScrollArea className="flex-1">
-            <div className="divide-y">
+          <ScrollArea className="min-h-0 flex-1 bg-muted/15">
+            <div className="m-4 divide-y overflow-hidden rounded-xl border bg-card shadow-sm">
               {items.map((n) => (
                 <NotificationRow key={n.id} item={n} onRead={() => void markOneRead(n.id)} />
               ))}
@@ -151,28 +184,30 @@ export function NotificationCenter({
 
 function NotificationRow({ item, onRead }: { item: NotificationItem; onRead: () => void }) {
   const meta = metaFor(item.type);
+  const TypeIcon = meta.icon;
   return (
-    <div className={cn('flex gap-3 px-4 py-3 transition-colors hover:bg-muted/40', !item.read && 'bg-primary/[0.03]')}>
-      <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', meta.dot)} />
+    <div className={cn('group flex gap-3.5 px-4 py-3.5 transition-colors hover:bg-muted/35', !item.read && 'bg-primary/[0.04]')}>
+      <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-full', meta.iconBg, meta.iconClass)}>
+        <TypeIcon className="size-4" />
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <span className={cn('truncate text-sm', !item.read ? 'font-semibold text-foreground' : 'text-foreground/80')}>
             {item.title}
           </span>
-          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{meta.label}</span>
-          {!item.read && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+          <span className="shrink-0 rounded-full border bg-background px-2 py-0.5 text-[10px] text-muted-foreground">{meta.label}</span>
+          {!item.read && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary ring-2 ring-primary/15" />}
         </div>
-        {item.body && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.body}</p>}
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-[10px] text-muted-foreground/70">{relativeTime(item.createdAt, '')}</span>
+        {item.body && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{item.body}</p>}
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/80">
+            <Clock3Icon className="size-3" />{relativeTime(item.createdAt, '')}
+          </span>
           {!item.read && (
-            <button
-              type="button"
-              onClick={onRead}
-              className="text-[10px] text-primary hover:underline"
-            >
+            <Button type="button" variant="ghost" size="xs" onClick={onRead} className="h-6 px-2 text-[10px] text-primary opacity-80 hover:text-primary group-hover:opacity-100">
+              <CheckCheckIcon className="size-3" />
               标为已读
-            </button>
+            </Button>
           )}
         </div>
       </div>
