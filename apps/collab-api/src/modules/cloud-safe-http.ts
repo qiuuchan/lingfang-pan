@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
@@ -199,7 +199,7 @@ export class SafeOutboundHttpClient {
   private readonly defaultTimeoutMs: number;
   private readonly defaultResponseLimitBytes: number;
 
-  constructor(options: SafeOutboundHttpOptions = {}) {
+  constructor(@Optional() options: SafeOutboundHttpOptions = {}) {
     this.resolver = options.resolver ?? defaultSafeHttpResolver;
     this.transport = options.transport ?? defaultSafeHttpTransport;
     this.allowedPorts = new Set(options.allowedPorts ?? DEFAULT_ALLOWED_PORTS);
