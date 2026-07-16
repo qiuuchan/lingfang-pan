@@ -125,7 +125,7 @@ class App:
     def __init__(self, root):
         log_info("应用启动")
         self.root = root
-        self.root.title("AI详情页海报生成器 v0.2.2")
+        self.root.title("AI详情页海报生成器 v0.2.3")
         self.root.geometry("1600x900")
         self.root.configure(bg='#f0f2f5')
         try:
@@ -3036,89 +3036,61 @@ class App:
             self.gpt55_loading = None
 
     def _add_gpt55_message(self, role, content, img_paths=None, silent=False):
-        align = 'w' if role == 'ai' else 'e'
-        avatar_bg = '#3b82f6' if role == 'ai' else '#555'
-        avatar_text = 'GPT' if role == 'ai' else '我'
-        bubble_bg = '#F5F5F5' if role == 'ai' else '#DBEAFE'
-        text_fg = '#333333'
+        is_ai = role == 'ai'
+        bubble_bg = '#F5F5F5' if is_ai else '#DBEAFE'
+        text_fg = '#1f2937' if is_ai else '#1e3a8a'
         timestamp = datetime.now().strftime("%H:%M")
+        font_body = ('Consolas', 10) if self.gpt55_mode == 'code' else ('Arial', 10)
 
-        row_frame = tk.Frame(self.gpt55_chat_frame, bg='#121212')
-        row_frame.pack(fill=tk.X, padx=16, pady=4)
+        # 一行 = 头像 + 气泡（气泡贴边，不占满，符合聊天 App 习惯）
+        row = tk.Frame(self.gpt55_chat_frame, bg='#121212')
+        row.pack(fill=tk.X, padx=12, pady=8)
 
-        avatar = tk.Label(row_frame, text=avatar_text, bg=avatar_bg, fg='white',
-                          font=('Arial', 10, 'bold'), width=4, height=2, relief='flat')
-        avatar.pack(side=tk.LEFT if role == 'ai' else tk.RIGHT, padx=8)
+        avatar = tk.Label(row, text=('GPT' if is_ai else '我'),
+                          bg=('#3b82f6' if is_ai else '#6b7280'), fg='white',
+                          font=('Arial', 9, 'bold'), width=3, height=2)
+        avatar.pack(side=(tk.LEFT if is_ai else tk.RIGHT), padx=(0, 8), anchor='n')
 
-        bubble = tk.Frame(row_frame, bg=bubble_bg)
-        bubble.pack(side=tk.LEFT if role == 'ai' else tk.RIGHT, padx=4, fill=tk.X, expand=True)
+        bubble = tk.Frame(row, bg=bubble_bg)
+        bubble.pack(side=(tk.LEFT if is_ai else tk.RIGHT), anchor='n')
 
-        # 图片显示
+        # 图片（仅用户）
         if role == 'user' and img_paths:
-            img_frame = tk.Frame(bubble, bg=bubble_bg)
-            img_frame.pack(fill=tk.X, pady=4)
+            ifrm = tk.Frame(bubble, bg=bubble_bg)
+            ifrm.pack(fill=tk.X, padx=10, pady=(10, 2))
             for ip in img_paths:
                 try:
-                    img = Image.open(ip)
-                    img.thumbnail((100, 100), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(img)
-                    lbl = tk.Label(img_frame, image=photo, bg=bubble_bg)
-                    lbl.image = photo
-                    lbl.pack(side=tk.LEFT, padx=2)
-                except:
+                    im = Image.open(ip); im.thumbnail((120, 120), Image.LANCZOS)
+                    ph = ImageTk.PhotoImage(im)
+                    lb = tk.Label(ifrm, image=ph, bg=bubble_bg); lb.image = ph
+                    lb.pack(side=tk.LEFT, padx=3)
+                except Exception:
                     pass
 
-        # 文字内容：使用Text控件，支持拖选
+        # 文字：单个 Text 整体渲染，宽度固定 62 字符、高度按 displaylines 自适应。
+        # 旧版拆 title/body 且 height=1，多行回复被裁成 1 行 → "显示一坨"。
         if content:
-            # 代码模式使用等宽字体
-            if self.gpt55_mode == "code":
-                font_body = ('Consolas', 10)
-                font_title = ('Consolas', 12, 'bold')
-            else:
-                font_body = ('Arial', 10)
-                font_title = ('Arial', 12, 'bold')
+            t = tk.Text(bubble, width=62, wrap=tk.WORD, font=font_body, bg=bubble_bg, fg=text_fg,
+                        bd=0, relief='flat', highlightthickness=0, padx=14, pady=10,
+                        spacing1=2, spacing3=2)
+            t.insert('1.0', content.rstrip())
+            t.configure(state=tk.DISABLED)
+            t.pack()
+            self._make_text_selectable(t)
+            self._fit_text(t)
 
-            lines = content.split('\n')
-            title = lines[0].strip() if lines else ""
-            body = '\n'.join(lines[1:]).strip() if len(lines) > 1 else ""
-
-            if title:
-                title_text = tk.Text(bubble, wrap=tk.WORD, font=font_title, bg=bubble_bg, fg=text_fg,
-                                     bd=0, relief='flat', highlightthickness=0, padx=12, pady=8, height=1)
-                title_text.insert('1.0', title)
-                title_text.configure(state=tk.DISABLED)
-                title_text.pack(fill=tk.X)
-                self._make_text_selectable(title_text)
-            if body:
-                body_text = tk.Text(bubble, wrap=tk.WORD, font=font_body, bg=bubble_bg, fg='#555555',
-                                    bd=0, relief='flat', highlightthickness=0, padx=12, pady=8, height=1)
-                body_text.insert('1.0', body)
-                body_text.configure(state=tk.DISABLED)
-                body_text.pack(fill=tk.X)
-                self._make_text_selectable(body_text)
-            if not title and not body:
-                plain_text = tk.Text(bubble, wrap=tk.WORD, font=font_body, bg=bubble_bg, fg=text_fg,
-                                     bd=0, relief='flat', highlightthickness=0, padx=12, pady=8, height=1)
-                plain_text.insert('1.0', content)
-                plain_text.configure(state=tk.DISABLED)
-                plain_text.pack(fill=tk.X)
-                self._make_text_selectable(plain_text)
-
-        # 复制按钮和发送到模块按钮
-        action_frame = tk.Frame(bubble, bg=bubble_bg)
-        action_frame.pack(fill=tk.X, padx=12, pady=(0,4))
+        # 操作栏：复制 / 发送到模块 / 时间戳
+        act = tk.Frame(bubble, bg=bubble_bg)
+        act.pack(fill=tk.X, padx=10, pady=(0, 8))
         if content:
-            copy_btn = tk.Button(action_frame, text="复制", font=('Arial',8), bg='#e0e0e0', relief='flat',
-                                 command=lambda c=content: self.root.clipboard_append(c))
-            copy_btn.pack(side=tk.LEFT, padx=2)
-        # 发送到模块按钮（仅对AI消息）
-        if role == 'ai':
-            send_to_module_btn = tk.Button(action_frame, text="发送到模块", font=('Arial',8), bg='#90EE90', relief='flat',
-                                          command=lambda c=content: self._send_gpt_to_module(c))
-            send_to_module_btn.pack(side=tk.LEFT, padx=2)
-
-        time_lbl = tk.Label(row_frame, text=timestamp, bg='#121212', fg='#888', font=('Arial', 8))
-        time_lbl.pack(side=tk.LEFT if role == 'ai' else tk.RIGHT, padx=8)
+            tk.Button(act, text="复制", font=('Arial', 8), bg='#e5e7eb', fg='#374151',
+                      relief='flat', bd=0, padx=8,
+                      command=lambda c=content: self.root.clipboard_append(c)).pack(side=tk.LEFT, padx=2)
+        if is_ai:
+            tk.Button(act, text="发送到模块", font=('Arial', 8), bg='#bfdbfe', fg='#1e40af',
+                      relief='flat', bd=0, padx=8,
+                      command=lambda c=content: self._send_gpt_to_module(c)).pack(side=tk.LEFT, padx=2)
+        tk.Label(act, text=timestamp, bg=bubble_bg, fg='#9ca3af', font=('Arial', 8)).pack(side=tk.RIGHT)
 
         self.gpt55_chat_canvas.update_idletasks()
         self.gpt55_chat_canvas.yview_moveto(1.0)
@@ -3151,6 +3123,21 @@ class App:
         mod.widgets['prompt'].insert("1.0", prompt)
         mod.prompt = prompt
         self.status.set(f"已创建模块: {title}")
+
+    def _fit_text(self, text_widget):
+        """按 wrapping 实际显示行数自适应 Text 高度（修复旧版 height=1 把多行裁成 1 行）。"""
+        def apply():
+            try:
+                text_widget.update_idletasks()
+                counts = text_widget.count('1.0', 'end-1c', 'displaylines')
+                n = counts[0] if counts else 1
+            except Exception:
+                n = max(1, int(text_widget.index('end-1c').split('.')[0]))
+            try:
+                text_widget.configure(height=max(1, n))
+            except Exception:
+                pass
+        self.gpt55_win.after_idle(apply)
 
     def _make_text_selectable(self, text_widget):
         text_widget.bind("<Button-1>", lambda e: text_widget.focus_set())
