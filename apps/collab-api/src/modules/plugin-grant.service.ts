@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { badRequest, forbidden, notFound } from '../common';
 import { AuthService } from './auth.service';
-import { SYSTEM_TEAM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
 
 /** 插件授权行序列化：转 HTTP 响应（对齐 contract PluginGrantRow camelCase）。 */
 function publicGrant(grant: {
@@ -113,25 +112,12 @@ export class PluginGrantService {
   /**
    * 授权解析：判断某用户在某团队能否使用某插件。
    *
-   * 语义（deny 优先，user 级优先于 role 级，团队管理员默认放行）：
-   *  1. 团队管理员（系统团队管理员角色）→ 默认放行（不受 grant 限制，否则会锁死自己）。
-   *  2. 查 user 级 grant：有 DENY → 拒绝；有 ALLOW → 放行。
-   *  3. 查 role 级 grant（用户当前团队角色）：有 DENY → 拒绝；有 ALLOW → 放行。
-   *  4. 无任何 grant → 放行（默认可用，grant 是「显式收紧」而非「显式放开」）。
+   * 语义：user 级优先于 role 级，同级 DENY 优先，无 grant 默认放行。
+   * 管理员没有运行时隐式绕过；管理能力仅由 RBAC 权限控制。
    *
    * 供 PluginService.availablePlugins 过滤 + 桌面端运行时二次校验。
    */
   async resolvePluginAccess(teamId: string, pluginId: string, userId: string, teamRoleId: string | null): Promise<boolean> {
-    // 1. 团队管理员默认放行
-    if (teamRoleId) {
-      const role = await this.prisma.role.findUnique({
-        where: { id: teamRoleId },
-        select: { isSystem: true, code: true },
-      });
-      // 基于 code 检测（不依赖 name 字符串，更稳健，见 SYSTEM_TEAM_ADMIN_ROLE_CODE）
-      if (role?.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE) return true;
-    }
-
     const orConditions: Array<{ subjectKind: 'USER' | 'ROLE'; subjectId: string }> = [
       { subjectKind: 'USER', subjectId: userId },
     ];

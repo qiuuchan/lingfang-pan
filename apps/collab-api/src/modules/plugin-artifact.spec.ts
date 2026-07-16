@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { inspectPluginArtifact, PLUGIN_ARTIFACT_MAX_METADATA_BYTES } from './plugin-artifact';
+import { inspectPluginArtifact, PLUGIN_ARTIFACT_MAX_METADATA_BYTES, readPluginArtifactEntry } from './plugin-artifact';
 
 type Entry = {
   name: string;
@@ -113,7 +113,26 @@ async function inspectZip(zip: Buffer) {
   finally { await rm(directory, { recursive: true, force: true }); }
 }
 
+async function readEntry(entries: Entry[], path: string) {
+  const directory = await mkdtemp(join(tmpdir(), 'plugin-artifact-entry-test-'));
+  const artifactPath = join(directory, 'test.lfplugin');
+  await writeFile(artifactPath, makeZip(entries));
+  try { return await readPluginArtifactEntry(artifactPath, path); }
+  finally { await rm(directory, { recursive: true, force: true }); }
+}
+
 describe('inspectPluginArtifact', () => {
+  it('reads one preview resource with canonical path, inflate, and CRC validation', async () => {
+    const entries = [
+      { name: '_meta.json', content: meta },
+      { name: 'manifest.json', content: manifestBytes({ runtime_type: 'client', entry: 'ui/index.html' }) },
+      { name: 'ui/index.html', content: Buffer.from('<h1>Preview</h1>'), compression: 8 as const },
+    ];
+    await expect(readEntry(entries, 'ui/index.html')).resolves.toEqual(Buffer.from('<h1>Preview</h1>'));
+    await expect(readEntry(entries, '../secret')).rejects.toMatchObject({ status: 400 });
+    await expect(readEntry(entries.map((entry) => entry.name === 'ui/index.html' ? { ...entry, crc32: 1 } : entry), 'ui/index.html')).rejects.toMatchObject({ status: 400 });
+  });
+
   it('reads a valid v4 ZIP without loading source files into the response', async () => {
     const result = await inspect([
       { name: '_meta.json', content: meta },
@@ -122,6 +141,22 @@ describe('inspectPluginArtifact', () => {
     ]);
     expect(result.manifest.version).toBe('1.0.0');
     expect(result.files).toEqual(expect.arrayContaining([{ path: 'main.py', sizeBytes: 8 }]));
+  });
+
+  it('freezes a root README.md and rejects invalid README bytes', async () => {
+    const result = await inspect([
+      { name: '_meta.json', content: meta }, { name: 'manifest.json', content: manifest },
+      { name: 'README.md', content: Buffer.from('# Demo\n\n**Hello**') }, { name: 'main.py', content: Buffer.from('print(1)') },
+    ]);
+    expect(result.readmeMarkdown).toBe('# Demo\n\n**Hello**');
+    await expect(inspect([
+      { name: '_meta.json', content: meta }, { name: 'manifest.json', content: manifest },
+      { name: 'README.md', content: Buffer.alloc(256 * 1024 + 1, 0x61) }, { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(/README\.md 不能超过 256 KiB/);
+    await expect(inspect([
+      { name: '_meta.json', content: meta }, { name: 'manifest.json', content: manifest },
+      { name: 'README.md', content: Buffer.from([0xc3, 0x28]) }, { name: 'main.py', content: Buffer.from('print(1)') },
+    ])).rejects.toThrow(/README\.md 必须是 UTF-8/);
   });
 
   it('applies manifest contract defaults and normalizes capability defaults', async () => {
@@ -392,6 +427,15 @@ describe('inspectPluginArtifact', () => {
       { name: '_meta.json', content: meta }, { name: 'manifest.json', content: manifest },
       { name: 'main.py', content: Buffer.from('x') }, { name: 'main.py', content: Buffer.from('y') },
     ])).rejects.toThrow(/重复路径/);
+  });
+
+  it('rejects paths that collide on Windows case-insensitive filesystems', async () => {
+    await expect(inspect([
+      { name: '_meta.json', content: meta }, { name: 'manifest.json', content: manifest },
+      { name: 'README.md', content: Buffer.from('# trusted') },
+      { name: 'readme.md', content: Buffer.from('# shadow') },
+      { name: 'main.py', content: Buffer.from('x') },
+    ])).rejects.toThrow(/Windows 大小写冲突路径/);
   });
 
   it('rejects a symlink entry and oversized declared output before extraction', async () => {

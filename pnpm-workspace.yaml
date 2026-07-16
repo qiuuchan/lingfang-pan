@@ -4,6 +4,8 @@ packages:
   - 'apps/desktop'
   - 'apps/collab-api'
   - 'apps/collab-admin'
+  - 'apps/web'
+  - 'apps/plugin-preview'
   - 'packages/*'
   # - 'plugins/*'   # 临时注释：避开 P:\.pnpm-store EPERM（huobao-drama 等）。install 后恢复。
 allowBuilds:

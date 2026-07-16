@@ -4,6 +4,7 @@ import { setSharedData, getSharedData, listSharedKeys } from '@/lib/plugin-share
 import { requestSystemPermission } from '@/lib/plugin-permissions';
 import { pluginModelTier } from '@/lib/model-tier';
 import { assertInstalledPluginAiPolicy, assertPluginAiPolicy, policyManifest } from '@/lib/plugin-ai-policy';
+import { invokeInstalledPluginAction } from '@/lib/plugin-action-runtime';
 // SDK-06 修复：tokens.css 头注释与 spec（ui-tokens/frontend/tokens.md）均声明「宿主注入到所有插件容器」，
 // 但此前 apps/desktop 既未 import 也未在 srcDoc 注入，插件 var(--lf-color-*) 解析为空、设计令牌机制失效。
 // 现通过 Vite ?inline 把 tokens.css 内容内联为 <style> 前置到每个插件运行态文档，
@@ -28,6 +29,7 @@ function tokensStyles(): string {
 // 空 error 回填默认文案，避免吞错当成功。
 const RUNTIME_BRIDGE_TIMEOUT_MS = 30_000;
 const AI_BRIDGE_TIMEOUT_MS = 180_000;
+const ACTION_BRIDGE_TIMEOUT_MS = 24 * 60 * 60 * 1000 + 30_000;
 function bridgeShim(pluginId: string): string {
   return `<script>
     (function () {
@@ -58,13 +60,14 @@ function bridgeShim(pluginId: string): string {
           const id = ++seq;
           const timer = setTimeout(() => {
             if (pending[id]) { delete pending[id]; reject(new Error('父端响应超时')); }
-          }, (kind === 'llm.chat' || kind === 'image.generate') ? ${AI_BRIDGE_TIMEOUT_MS} : ${RUNTIME_BRIDGE_TIMEOUT_MS});
+          }, kind === 'actions.call' ? ${ACTION_BRIDGE_TIMEOUT_MS} : (kind === 'llm.chat' || kind === 'image.generate') ? ${AI_BRIDGE_TIMEOUT_MS} : ${RUNTIME_BRIDGE_TIMEOUT_MS});
           pending[id] = { resolve, reject, timer };
           parent.postMessage({ __lf_call: true, id, pluginId: ${JSON.stringify(pluginId)}, kind, args }, '*');
         });
       };
       window.sdk = {
         invoke: (cap, args) => window.__lingfangInvoke(cap, args || {}),
+        actions: { call: (dependencyId, input, options) => window.__lingfangInvoke('actions.call', { dependency_id: dependencyId, input: input || {}, ...(options && options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {}) }) },
         llm: { chat: (input) => window.__lingfangInvoke('llm.chat', input || {}) },
         image: { generate: (input) => window.__lingfangInvoke('image.generate', input || {}) },
         net: { fetch: (input) => window.__lingfangInvoke('net.fetch', input || {}) },
@@ -110,7 +113,7 @@ function sdkShim(pluginId: string): string {
           const id = ++seq;
           const timer = setTimeout(() => {
             if (pending[id]) { delete pending[id]; reject(new Error('父端响应超时')); }
-          }, (kind === 'llm.chat' || kind === 'image.generate') ? ${AI_BRIDGE_TIMEOUT_MS} : ${RUNTIME_BRIDGE_TIMEOUT_MS});
+          }, kind === 'actions.call' ? ${ACTION_BRIDGE_TIMEOUT_MS} : (kind === 'llm.chat' || kind === 'image.generate') ? ${AI_BRIDGE_TIMEOUT_MS} : ${RUNTIME_BRIDGE_TIMEOUT_MS});
           pending[id] = { resolve, reject, timer };
           parent.postMessage({ __lf_call: true, id, pluginId: ${JSON.stringify(pluginId)}, kind, args }, '*');
         });
@@ -118,6 +121,7 @@ function sdkShim(pluginId: string): string {
       window.__lingfangInvoke = (cap, args) => call(cap, args || {});
       window.sdk = {
         invoke: (cap, args) => call(cap, args || {}),
+        actions: { call: (dependencyId, input, options) => call('actions.call', { dependency_id: dependencyId, input: input || {}, ...(options && options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {}) }) },
         fs: {
           pick: () => Promise.reject(new Error('文件能力需将插件作为内置插件分发')),
           read: () => Promise.reject(new Error('文件能力需将插件作为内置插件分发')),
@@ -199,7 +203,15 @@ export function runtimeMessage(data: unknown): RuntimeMessage | null {
   if (!data || typeof data !== 'object') return null;
   const message = data as RuntimeMessage;
   if (!message.__lf_call || typeof message.kind !== 'string') return null;
-  return message;
+  // Rebuild the allowlisted shape instead of returning the untrusted object.
+  // This drops pluginId/teamId/token/principal fields an iframe may append;
+  // caller identity always comes from the active LoadedPlugin owned by host.
+  return { __lf_call: true, id: message.id, kind: message.kind, args: message.args };
+}
+
+export function runtimeMessageFromFrame(event: MessageEvent, frame: HTMLIFrameElement): RuntimeMessage | null {
+  if (event.origin !== 'null' || event.source !== frame.contentWindow) return null;
+  return runtimeMessage(event.data);
 }
 
 export function errorMessage(error: unknown): string {
@@ -236,6 +248,11 @@ export function runtimeErrorPayload(error: unknown): RuntimeErrorPayload {
 }
 
 async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMessage['args']) {
+  if (kind === 'actions.call') {
+    // The iframe only supplies a dependency alias and payload. Caller identity
+    // comes from the active LoadedPlugin owned by the host, never message.pluginId.
+    return invokeInstalledPluginAction(plugin, args);
+  }
   // Task 5：插件间数据互通（共享存储）。两类插件共用前端 localStorage 存储，pluginId 取自宿主侧
   // RuntimeMessage.pluginId（不由调用方自报，防 B 冒充 A 写入）。读取需显式传 sourcePluginId。
   if (kind === 'plugin.setSharedData') {

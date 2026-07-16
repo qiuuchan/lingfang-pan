@@ -250,6 +250,19 @@ describe('validateCommand — requirements_invalid_format (python)', () => {
   });
 });
 
+describe('validateCommand — README.md contract', () => {
+  it('rejects an oversized or non-UTF-8 root README', async () => {
+    const dir = await tempDir();
+    await mkdir(path.join(dir, 'ui'), { recursive: true });
+    await writeFile(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'com.test.readme', name: 'README', version: '1.0.0', description: '', runtime_type: 'client', entry: 'ui/index.html', visibility: 'tenant', capabilities: [] }));
+    await writeFile(path.join(dir, 'ui/index.html'), '<main></main>');
+    await writeFile(path.join(dir, 'README.md'), Buffer.alloc(256 * 1024 + 1, 0x61));
+    expect((await runValidate(dir)).errors.some((error) => error.code === 'readme_too_large')).toBe(true);
+    await writeFile(path.join(dir, 'README.md'), Buffer.from([0xc3, 0x28]));
+    expect((await runValidate(dir)).errors.some((error) => error.code === 'readme_invalid_utf8')).toBe(true);
+  });
+});
+
 // ── JSON 输出模式 ──────────────────────────────────────────────────
 
 describe('validateCommand — JSON 输出', () => {

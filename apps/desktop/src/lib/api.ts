@@ -178,6 +178,7 @@ interface ApiOptions {
   method?: string;
   body?: unknown;
   auth?: boolean;
+  headers?: Record<string, string>;
   // multipart 上传：传 FormData 时跳过 JSON.stringify 与 application/json 头（浏览器自动加 boundary）。
   formData?: FormData;
   // 请求超时（毫秒）。DESK-01 / DESK-SHELL-02 修复：默认 30s，
@@ -190,11 +191,11 @@ interface ApiOptions {
 // 默认请求超时（30s）。覆盖 fetch 原生「无超时」行为，与浏览器默认 connection timeout 解耦。
 const DEFAULT_API_TIMEOUT_MS = 30_000;
 
-export async function api<T = any>(path: string, { method = 'GET', body, auth = true, formData, timeoutMs = DEFAULT_API_TIMEOUT_MS, clientSource = 'desktop' }: ApiOptions = {}): Promise<T> {
+export async function api<T = any>(path: string, { method = 'GET', body, auth = true, headers: extraHeaders, formData, timeoutMs = DEFAULT_API_TIMEOUT_MS, clientSource = 'desktop' }: ApiOptions = {}): Promise<T> {
   // 客户端标识：用于后端日志/来源区分，不作为验证码或权限信任边界。
   // multipart 上传时不设 Content-Type，交给浏览器自动加 boundary（设了反而会破坏 multipart 解析）。
   const isFormData = formData instanceof FormData;
-  const headers: Record<string, string> = { 'X-Client': clientSource };
+  const headers: Record<string, string> = { ...extraHeaders, 'X-Client': clientSource };
   if (!isFormData) headers['Content-Type'] = 'application/json';
   if (auth && authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
@@ -237,6 +238,47 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
     throw err;
   }
   return data as T;
+}
+
+/**
+ * Download a non-JSON response through the same authenticated desktop API
+ * boundary.  This is deliberately tiny (currently used by team-admin JSONL
+ * exports) so pages never hand-roll Bearer headers or expose the session token.
+ */
+export async function apiDownload(path: string, { timeoutMs = DEFAULT_API_TIMEOUT_MS, clientSource = 'desktop' }: { timeoutMs?: number; clientSource?: ApiOptions['clientSource'] } = {}): Promise<Blob> {
+  const base = apiBase();
+  if (!base) throw new Error('尚未配置后端服务地址，请先填写后端 URL。');
+  const headers: Record<string, string> = { 'X-Client': clientSource };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response: Response;
+  try {
+    response = await fetch(base + path, { method: 'GET', headers, signal: controller?.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      dispatchBackendUnreachable();
+      throw new Error('后端响应超时，请检查网络或后端服务状态后重试。');
+    }
+    dispatchBackendUnreachable();
+    throw new Error(`无法连接后端（${base}）。请检查后端地址、网络和跨域配置。`);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  dispatchBackendReachable();
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const nested = data.error && typeof data.error === 'object' ? data.error : {};
+    const error = new Error(data.message || nested.message || response.statusText) as ApiError;
+    error.code = data.code || nested.code;
+    error.status = response.status;
+    error.requestId = data.requestId || nested.requestId || response.headers.get('x-request-id') || undefined;
+    if (response.status === 401) {
+      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* webview 可能无 CustomEvent */ }
+    }
+    throw error;
+  }
+  return response.blob();
 }
 
 export const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());

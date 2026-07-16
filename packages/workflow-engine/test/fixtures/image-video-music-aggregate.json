@@ -1,0 +1,134 @@
+{
+  "workflow_input": {
+    "prompt": "日落时分的海边灯塔"
+  },
+  "definition": {
+    "definition_version": "1",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      },
+      "required": ["prompt"],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "package": { "$ref": "lingfang://schemas/artifact-ref/v1" },
+        "video": { "$ref": "lingfang://schemas/artifact-ref/v1" },
+        "music": { "$ref": "lingfang://schemas/artifact-ref/v1" }
+      },
+      "required": ["package", "video", "music"],
+      "additionalProperties": false
+    },
+    "nodes": [
+      {
+        "node_id": "image",
+        "declared_version_range": "^1.2.0",
+        "target": {
+          "package_id": "demo.image-plugin",
+          "release_id": "rel-image-1.4.2",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "action_id": "image.generate",
+          "action_contract_version": "1.2.0",
+          "action_surface_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "depends_on": [],
+        "input_bindings": [
+          {
+            "target_pointer": "/prompt",
+            "source": { "kind": "workflow_input", "source_pointer": "/prompt" }
+          }
+        ],
+        "retry_limit": 0
+      },
+      {
+        "node_id": "video",
+        "declared_version_range": "~2.3.0",
+        "target": {
+          "package_id": "demo.video-plugin",
+          "release_id": "rel-video-2.3.7",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "action_id": "video.from-image",
+          "action_contract_version": "2.1.0",
+          "action_surface_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "depends_on": ["image"],
+        "input_bindings": [
+          {
+            "target_pointer": "/image",
+            "source": { "kind": "node_output", "node_id": "image", "source_pointer": "/image" }
+          },
+          {
+            "target_pointer": "/duration_seconds",
+            "source": { "kind": "literal", "value": 8 }
+          }
+        ],
+        "retry_limit": 1
+      },
+      {
+        "node_id": "music",
+        "declared_version_range": "^3.0.0",
+        "target": {
+          "package_id": "demo.music-plugin",
+          "release_id": "rel-music-3.1.0",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "action_id": "music.compose",
+          "action_contract_version": "3.0.1",
+          "action_surface_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "depends_on": ["image"],
+        "input_bindings": [
+          {
+            "target_pointer": "/cover_image",
+            "source": { "kind": "node_output", "node_id": "image", "source_pointer": "/image" }
+          },
+          {
+            "target_pointer": "/mood",
+            "source": { "kind": "literal", "value": "cinematic" }
+          }
+        ],
+        "retry_limit": 1
+      },
+      {
+        "node_id": "aggregate",
+        "declared_version_range": "1.x",
+        "target": {
+          "package_id": "demo.media-aggregate-plugin",
+          "release_id": "rel-aggregate-1.0.5",
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "action_id": "media.aggregate",
+          "action_contract_version": "1.0.0",
+          "action_surface_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "depends_on": ["video", "music"],
+        "input_bindings": [
+          {
+            "target_pointer": "/video",
+            "source": { "kind": "node_output", "node_id": "video", "source_pointer": "/video" }
+          },
+          {
+            "target_pointer": "/music",
+            "source": { "kind": "node_output", "node_id": "music", "source_pointer": "/music" }
+          }
+        ],
+        "retry_limit": 0
+      }
+    ],
+    "output_bindings": [
+      {
+        "target_pointer": "/package",
+        "source": { "kind": "node_output", "node_id": "aggregate", "source_pointer": "/package" }
+      },
+      {
+        "target_pointer": "/video",
+        "source": { "kind": "node_output", "node_id": "video", "source_pointer": "/video" }
+      },
+      {
+        "target_pointer": "/music",
+        "source": { "kind": "node_output", "node_id": "music", "source_pointer": "/music" }
+      }
+    ]
+  }
+}

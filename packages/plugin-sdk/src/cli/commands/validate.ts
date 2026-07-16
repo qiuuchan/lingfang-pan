@@ -5,6 +5,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { validateManifest, type ManifestResult } from '../../manifest/index.ts';
 import type { PluginManifest } from '@lingfang/contract';
+import { validateRootReadme } from '../util/readme.ts';
 
 export interface ValidateOptions {
   path?: string;
@@ -90,6 +91,8 @@ export async function validateCommand(_argv: string[], opts?: ValidateOptions): 
   // 4. 目录结构检查（仅 manifest 通过后执行）
   const dirErrors = checkDirectoryStructure(pluginPath, manifest);
   errors.push(...dirErrors);
+  const readmeError = validateRootReadme(pluginPath);
+  if (readmeError) errors.push(readmeError);
 
   printResult(manifestPath, errors, opts?.json ?? false);
 

@@ -1,18 +1,41 @@
 # {{name}}
 
-## 能力
+{{description}}
+
+## 功能简介
+
+在这里介绍插件解决的问题和主要能力。
+
+## 使用方式
+
+说明典型使用步骤、输入输出和注意事项。
+
+## 能力与权限
 
 本插件当前支持的能力：
 __CAPABILITIES_LIST__
 
-## 本地预览
+## 数据与隐私
 
-1. 将插件目录复制到 `apps/desktop/builtin-plugins/{{name}}/`
-2. 重启桌面端 dev：`pnpm -C apps/desktop dev`
-3. 桌面端"插件"页可见该插件，点"运行"测试
+说明插件读取、写入和共享的数据。
 
-## 发布步骤
+## 本地检查与预览
 
-1. `lingfang-plugin validate`  - 校验插件合法性
-2. `lingfang-plugin build`     - 打包 .lfplugin 制品
-3. `lingfang-plugin publish`   - 发布到插件注册中心
+```bash
+lingfang-plugin validate
+```
+
+在灵坊桌面端的插件开发页打开本项目，预览 `ui/index.html` 的实际界面和能力调用。
+
+## 构建与发布
+
+```bash
+lingfang-plugin build
+lingfang-plugin publish
+```
+
+README 会随当前发行版一起冻结；修改说明后需要发布新版本。
+
+## 限制
+
+说明当前版本的已知限制和不支持场景。

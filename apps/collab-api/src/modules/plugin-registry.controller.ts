@@ -9,18 +9,26 @@ import {
   AdminPluginReasonDto,
   PluginLifecycleReasonDto,
   PluginRuntimeAccessDto,
+
   UpdateMarketplaceListingStatusDto,
   UpdatePluginPackageStatusDto,
   UpdatePluginReleaseStatusDto,
 } from './dto/plugin-registry.dto';
+import { MarketplacePurchaseDto } from './dto/marketplace-commerce.dto';
+import { MarketplaceCommerceService } from './marketplace-commerce.service';
 import { SubmitMarketplaceDto } from './dto/plugins.dto';
 import { PluginRegistryService } from './plugin-registry.service';
+import { MarketplaceDiscoveryService } from './marketplace-discovery.service';
 
 @ApiTags('Plugin Registry')
 @ApiBearerAuth()
 @Controller()
 export class PluginRegistryController {
-  constructor(@Inject(PluginRegistryService) private readonly registry: PluginRegistryService) {}
+  constructor(
+    @Inject(PluginRegistryService) private readonly registry: PluginRegistryService,
+    @Inject(MarketplaceCommerceService) private readonly commerce: MarketplaceCommerceService,
+    @Inject(MarketplaceDiscoveryService) private readonly discovery: MarketplaceDiscoveryService,
+  ) {}
 
   @RequirePermission('team.plugin.upload', 'team.plugin.edit_draft')
   @Post('plugin-registry/releases')
@@ -56,12 +64,22 @@ export class PluginRegistryController {
 
   @Get('plugin-registry/marketplace')
   marketplace(@Req() req: Request) {
-    return this.registry.marketplaceCatalog(requireUser(req).id);
+    return this.discovery.catalogForTeam(requireUser(req).id);
   }
 
   @Get('plugin-packages/:id')
   detail(@Req() req: Request, @Param('id') id: string) {
     return this.registry.packageDetail(requireUser(req).id, id);
+  }
+
+  @Get('plugin-releases/:id')
+  releaseDetail(@Req() req: Request, @Param('id') id: string) {
+    return this.registry.releaseDetail(requireUser(req).id, id);
+  }
+
+  @Get('plugin-releases/:id/workflow-upgrades')
+  workflowUpgrades(@Req() req: Request, @Param('id') id: string) {
+    return this.registry.workflowUpgradeSuggestions(requireUser(req).id, id);
   }
 
   @Get('plugin-releases/:id/artifact')
@@ -117,8 +135,16 @@ export class PluginRegistryController {
 
   @RequirePermission('team.plugin.install')
   @Post('plugin-packages/:id/purchase')
-  purchase(@Req() req: Request, @Param('id') id: string) {
-    return this.registry.purchase(requireUser(req).id, id);
+  async purchase(@Req() req: Request, @Param('id') id: string, @Headers('idempotency-key') idempotencyKey: string | undefined, @Body() body: MarketplacePurchaseDto) {
+    const disposition = await this.commerce.purchaseDisposition();
+    if (disposition === 'LEGACY') return this.registry.purchase(requireUser(req).id, id, body.expectedPriceVersion);
+    const result = await this.commerce.purchaseV2(requireUser(req).id, {
+      packageId: id,
+      expectedPriceVersion: body.expectedPriceVersion,
+      idempotencyKey,
+      campaignToken: body.campaignToken,
+    });
+    return { ...result, entitlementId: result.entitlement_id, purchaseId: result.purchase_id };
   }
 }
 

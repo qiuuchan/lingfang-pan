@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import type { PluginGrantRow, PluginGrantSubject, PluginGrantEffect, Role, TeamMember } from '@/lib/types';
 import type { RegistryCatalogItem } from '@/lib/plugin-registry';
+import { PluginPolicyCard } from './PluginPolicyCard';
 
 interface AvailablePlugins { items: RegistryCatalogItem[] }
 interface GrantsResp { grants: PluginGrantRow[] }
@@ -65,7 +66,7 @@ export function PluginGrantsTab() {
   }
 
   return (
-    <Card>
+    <div className="space-y-4"><PluginPolicyCard /><Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <div>
           <CardTitle>插件授权</CardTitle>
@@ -115,7 +116,7 @@ export function PluginGrantsTab() {
           onChanged={reloadGrants}
         />
       )}
-    </Card>
+    </Card></div>
   );
 }
 

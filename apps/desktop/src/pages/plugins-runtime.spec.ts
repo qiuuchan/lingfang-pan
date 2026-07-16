@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoadedPlugin } from '@/lib/types';
-import { handleRuntimeCall, loadPluginDocument, pluginRelayClientSource, runtimeErrorPayload } from './plugins-runtime';
+import { handleRuntimeCall, loadPluginDocument, pluginRelayClientSource, runtimeErrorPayload, runtimeMessageFromFrame } from './plugins-runtime';
 
 function plugin(overrides: Partial<LoadedPlugin> = {}): LoadedPlugin {
   return {
@@ -20,6 +20,41 @@ describe('plugin iframe AI runtime', () => {
     const document = await loadPluginDocument(plugin());
     expect(document).toContain('180000');
     expect(document).toContain('error.requestId = detail.requestId');
+    expect(document).toContain("call('actions.call'");
+    expect(document).not.toContain('request_idempotency_key');
+    expect(document).not.toContain('LINGFANG_PLUGIN_BRIDGE_TOKEN');
+    expect(document).not.toContain('Authorization');
+    expect(document).not.toContain('auth_token');
+  });
+
+  it('accepts bridge calls only from the current opaque-origin frame', () => {
+    const contentWindow = {} as Window;
+    const frame = { contentWindow } as HTMLIFrameElement;
+    const data = { __lf_call: true, id: 1, kind: 'actions.call', args: { dependency_id: 'video_generator' } };
+    expect(runtimeMessageFromFrame({ origin: 'null', source: contentWindow, data } as MessageEvent, frame)).toMatchObject({ kind: 'actions.call' });
+    expect(runtimeMessageFromFrame({ origin: 'https://attacker.example', source: contentWindow, data } as MessageEvent, frame)).toBeNull();
+    expect(runtimeMessageFromFrame({ origin: 'null', source: {} as Window, data } as MessageEvent, frame)).toBeNull();
+  });
+
+  it('ignores spoofed principal and token fields from iframe messages', () => {
+    const contentWindow = {} as Window;
+    const frame = { contentWindow } as HTMLIFrameElement;
+    const data = {
+      __lf_call: true,
+      id: 1,
+      pluginId: 'spoofed-plugin',
+      teamId: 'spoofed-team',
+      token: 'stolen-token',
+      kind: 'actions.call',
+      args: { dependency_id: 'video_generator' },
+    };
+    const message = runtimeMessageFromFrame({ origin: 'null', source: contentWindow, data } as MessageEvent, frame);
+    expect(message).toMatchObject({ kind: 'actions.call', args: { dependency_id: 'video_generator' } });
+    // The host passes only the active LoadedPlugin to handleRuntimeCall; no
+    // iframe-supplied principal/token field exists in the typed message shape.
+    expect(message).not.toHaveProperty('token');
+    expect(message).not.toHaveProperty('teamId');
+    expect(message).not.toHaveProperty('pluginId');
   });
 
   it('rejects unknown upstream model names before relay and preserves the code', async () => {

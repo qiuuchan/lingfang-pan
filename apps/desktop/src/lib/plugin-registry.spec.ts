@@ -26,7 +26,11 @@ vi.mock('@/lib/api', () => ({
 
 import {
   activatePendingClientPlugin,
+  buyMarketplacePackage,
   createDraftWorkspace,
+  createWorkflowUpgradeDraft,
+  getMarketplaceOwnerQuality,
+  getPluginReleaseDetail,
   getPluginPackageDetail,
   inspectLocalArtifact,
   listPluginManagement,
@@ -42,6 +46,7 @@ import {
   requiresRunnerActivation,
   selectPluginArtifact,
   submitReleaseToMarketplace,
+  submitMarketplaceQualityAppeal,
   updateOwnerMarketplaceStatus,
   updatePluginPackageStatus,
   updatePluginReleaseStatus,
@@ -103,6 +108,7 @@ describe('pending installation bridge', () => {
         entry: 'ui/index.html',
       },
       entryContent: '<main>pending</main>',
+      readmeMarkdown: '# Pending README',
     });
 
     const plugin = await previewPendingInstalledPlugin(installation.installationId);
@@ -118,6 +124,7 @@ describe('pending installation bridge', () => {
       releaseId: 'pending',
       releaseSha256: 'b'.repeat(64),
       pendingActivation: { releaseId: 'pending' },
+      readmeMarkdown: '# Pending README',
     });
     expect(plugin.files).toContainEqual({ path: 'ui/index.html', content: '<main>pending</main>' });
   });
@@ -171,6 +178,7 @@ describe('registry management api', () => {
     apiMock
       .mockResolvedValueOnce({ items: ['managed'] })
       .mockResolvedValueOnce({ package: { id: 'package' } })
+      .mockResolvedValueOnce({ release: { id: 'release', readme_markdown: '# Demo' } })
       .mockResolvedValueOnce({ release: { id: 'release' } })
       .mockResolvedValueOnce({ release: { id: 'release' } })
       .mockResolvedValueOnce({ package: { id: 'package' }, listing: null })
@@ -179,6 +187,7 @@ describe('registry management api', () => {
 
     await listPluginManagement();
     await getPluginPackageDetail('package/id');
+    await getPluginReleaseDetail('release/id');
     await submitReleaseToMarketplace('release/id', 990);
     await withdrawMarketplaceSubmission('release/id', '  wait  ');
     await updatePluginPackageStatus('package/id', 'ARCHIVED');
@@ -188,6 +197,7 @@ describe('registry management api', () => {
     expect(apiMock.mock.calls).toEqual([
       ['/api/plugin-registry/manage'],
       ['/api/plugin-packages/package%2Fid'],
+      ['/api/plugin-releases/release%2Fid'],
       ['/api/plugin-releases/release%2Fid/submit-marketplace', { method: 'POST', body: { priceCents: 990 } }],
       ['/api/plugin-releases/release%2Fid/withdraw-marketplace', { method: 'POST', body: { reason: 'wait' } }],
       ['/api/plugin-packages/package%2Fid/status', { method: 'PATCH', body: { status: 'ARCHIVED' } }],
@@ -197,6 +207,32 @@ describe('registry management api', () => {
         body: { status: 'DELISTED', reason: 'owner request' },
       }],
     ]);
+  });
+
+  it('paid purchase always sends the opaque string price version and an idempotency key', async () => {
+    const version = `pv1.${'a'.repeat(43)}`;
+    await buyMarketplacePackage('package-1', version);
+    expect(apiMock).toHaveBeenCalledWith('/api/plugin-packages/package-1/purchase', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': expect.stringMatching(/^[0-9a-f-]{36}$/i) },
+      body: { expectedPriceVersion: version },
+    });
+  });
+
+  it('rejects a missing or legacy price token before purchase', async () => {
+    await expect(buyMarketplacePackage('package-1', 'base_old')).rejects.toThrow('市场价格版本无效');
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it('loads the exact owner quality snapshot and submits an appeal through the shared api boundary', async () => {
+    apiMock.mockResolvedValueOnce({ packageId: 'package/id', snapshot: null }).mockResolvedValueOnce({ ticket: { id: 'ticket-1' } });
+    await getMarketplaceOwnerQuality('package/id');
+    await submitMarketplaceQualityAppeal('package/id', '快照数据异常');
+    expect(apiMock.mock.calls).toEqual([
+      ['/api/plugin-packages/package%2Fid/quality'],
+      ['/api/plugin-packages/package%2Fid/quality-appeals', { method: 'POST', body: { body: '快照数据异常' } }],
+    ]);
+    apiMock.mockReset();
   });
 });
 
@@ -336,6 +372,32 @@ describe('binary workspace round trip', () => {
         sourceLabel: '灵枋创建器',
       },
     });
+  });
+
+  it('creates a separate workflow draft for upgrade adoption and never mutates the release API', async () => {
+    const currentTarget = { package_id: 'package-image', release_id: 'release-image-1', sha256: 'a'.repeat(64), action_id: 'render', action_contract_version: '1.0.0', action_surface_sha256: 'b'.repeat(64) };
+    const definition = { definition_version: '1', input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false }, output_schema: { type: 'object', properties: {}, required: [], additionalProperties: false }, nodes: [{ node_id: 'image', declared_version_range: '^1.0.0', target: currentTarget, depends_on: [], input_bindings: [], retry_limit: 0 }], output_bindings: [] };
+    const sourceFiles = [
+      { path: 'manifest.json', content: JSON.stringify({ id: 'workflow.demo', name: 'Workflow', version: '1.0.0', runtime_type: 'workflow', entry: 'workflow.json' }), binary: false },
+      { path: 'workflow.json', content: JSON.stringify(definition), binary: false },
+    ];
+    const upgradedWorkspace = { ...workspace, currentVersion: '1.0.1', runtime: 'workflow' as const };
+    tauriInvokeMock.mockImplementation(async (command: string) => {
+      if (command === 'create_draft_workspace') return upgradedWorkspace;
+      if (command === 'list_draft_workspaces') return [upgradedWorkspace];
+      if (command === 'sync_draft_workspace_metadata') return upgradedWorkspace;
+      if (command === 'read_draft_workspace_files') return sourceFiles.map((file) => file.path === 'manifest.json' ? { ...file, content: JSON.stringify({ id: 'workflow.demo', name: 'Workflow', version: '1.0.1', runtime_type: 'workflow', entry: 'workflow.json' }) } : file);
+      return undefined;
+    });
+
+    const draft = await createWorkflowUpgradeDraft({ id: 'workflow-release', name: 'Workflow', version: '1.0.0', entry: 'workflow.json', runtime_type: 'workflow', releaseId: 'workflow-release', releaseSha256: 'f'.repeat(64), files: sourceFiles }, [{ node_id: 'image', declared_version_range: '^1.0.0', current_version: '1.0.0', current_target: currentTarget, suggested_version: '1.2.0', suggested_target: { ...currentTarget, release_id: 'release-image-2', sha256: 'c'.repeat(64), action_surface_sha256: 'd'.repeat(64) }, reason: 'compatible' }]);
+
+    expect(draft.draft).toBe(true);
+    expect(tauriInvokeMock).toHaveBeenCalledWith('create_draft_workspace', { input: expect.objectContaining({ manifestId: 'workflow.demo', version: '1.0.1', runtime: 'workflow' }) });
+    const writeCall = tauriInvokeMock.mock.calls.find(([command]) => command === 'write_plugin_files');
+    const writtenWorkflow = writeCall?.[1]?.files.find((file: { path: string }) => file.path === 'workflow.json');
+    expect(JSON.parse(writtenWorkflow.content).nodes[0]).toMatchObject({ declared_version_range: '^1.0.0', target: { release_id: 'release-image-2' } });
+    expect(apiMock).not.toHaveBeenCalled();
   });
 
   it('writes text in one batch and binary files through the byte command', async () => {

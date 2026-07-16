@@ -152,13 +152,34 @@ const COMPONENTS: Components = {
   td: ({ children }) => <td className="px-4 py-2.5 align-top">{children}</td>,
 };
 
-export function Markdown({ children }: { children: string }) {
+export function safePluginReadmeHref(href: string | undefined): string | null {
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+export function Markdown({ children, pluginReadme = false }: { children: string; pluginReadme?: boolean }) {
+  const components = pluginReadme ? {
+    ...COMPONENTS,
+    a: ({ children: linkChildren, href }: { children?: ReactNode; href?: string }) => {
+      const safeHref = safePluginReadmeHref(href);
+      return safeHref
+        ? <a href={safeHref} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline decoration-primary/30 underline-offset-2">{linkChildren}</a>
+        : <span className="text-muted-foreground" title="插件说明仅支持 HTTP(S) 外部链接">{linkChildren}</span>;
+    },
+    img: ({ alt }: { alt?: string }) => <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">[图片未显示{alt ? `：${alt}` : ''}]</span>,
+  } satisfies Components : COMPONENTS;
   return (
     <div className="text-sm">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
-        components={COMPONENTS}
+        components={components}
+        skipHtml={pluginReadme}
       >
         {children}
       </ReactMarkdown>

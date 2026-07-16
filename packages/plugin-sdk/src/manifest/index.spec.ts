@@ -28,6 +28,9 @@ function validManifest(overrides?: Partial<PluginManifest>): PluginManifest {
     entry: 'ui/index.html',
     visibility: 'tenant',
     capabilities: [],
+    actions: [],
+    action_dependencies: [],
+    shared_namespaces: [],
     ...overrides,
   } satisfies PluginManifest;
 }

@@ -56,6 +56,66 @@ Wrong：按 `createdAt` 当作最新版，并覆盖旧制品。
 
 Correct：创建不可变 `PluginRelease`，catalog 按 SemVer 或审核通过的 `currentReleaseId` 投影。
 
+## Scenario: Immutable Plugin README Detail
+
+### 1. Scope / Trigger
+
+- 修改 `.lfplugin` 检查、发行版详情、插件中心详情页、SDK create/validate/build 或插件开发文档时适用。
+
+### 2. Signatures
+
+- 制品根目录：`README.md`，可选、大小写精确。
+- DB：`PluginRelease.readmeMarkdown String @default("")`。
+- `GET /api/plugin-releases/:id -> { release: PluginReleaseDetail }`。
+- `PluginReleaseDetail = PluginReleaseSummary + readme_markdown`；目录、包详情和状态变更仍返回 `PluginReleaseSummary`。
+
+### 3. Contracts
+
+- `manifest.description` 是列表/搜索短摘要；根 `README.md` 是详情正文真源。
+- README 按原始字节最大 256 KiB，必须是合法 UTF-8，并随不可变 release 冻结。
+- 只有精确发行版详情响应返回 `readme_markdown`；catalog、package history、publish/status/review/download 等响应不得夹带正文。
+- 桌面已安装项读取本机制品 README；团队库/市场按精确 release id 延迟请求。空 README 回退短摘要。
+- 插件 README 使用安全 GFM：不启用 raw HTML，不加载图片，仅允许绝对 HTTP(S) 外链。
+- SDK `validate` 与 `build` 复用同一 README 边界；`create` 的 client/nodejs/python 模板都生成 README。
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| README > 256 KiB | SDK/服务端拒绝，`README.md 不能超过 256 KiB` |
+| README 非 UTF-8 | SDK/服务端拒绝，`README.md 必须是 UTF-8 文本` |
+| README 缺失或为空 | 允许发布，详情页显示 `manifest.description` |
+| 非 owner 请求未审核/不可访问 release | 精确详情返回 forbidden，不泄漏 README |
+| raw HTML、图片、相对或危险协议链接 | UI 不执行、不加载、不可点击 |
+
+### 5. Good/Base/Bad Cases
+
+- Good：`1.2.0` 的 README 只在请求 `1.2.0` release id 时返回，桌面关闭或切换详情后旧请求不能覆盖新内容。
+- Base：旧插件没有 README，仍可安装和运行，详情显示短摘要。
+- Bad：把 README 加入 catalog/latestRelease、允许后台覆盖已发布说明，或复用 package 最新 README 展示历史 release。
+
+### 6. Tests Required
+
+- contract：`PluginReleaseDetail` 接受 256 KiB 内正文并拒绝超限；summary 不包含 README 字段。
+- collab-api：ZIP 提取、UTF-8/大小校验、release 冻结、精确详情访问、所有非详情投影无 `readme_markdown`。
+- desktop：GFM 表格/代码正常；raw HTML、图片、`javascript:`/`data:`/相对链接不可用；已安装 payload 保留 README；远端 helper 按 release id 请求。
+- plugin-sdk：三种模板含 README；validate/build 在打包前拒绝超限和非法 UTF-8。
+
+### 7. Wrong vs Correct
+
+Wrong：
+
+```ts
+return { latestRelease: releaseJson(release) }; // releaseJson 含 readme_markdown
+```
+
+Correct：
+
+```ts
+return { latestRelease: releaseJson(release) }; // summary only
+return { release: releaseDetailJson(release) }; // exact detail only
+```
+
 ## Scenario: Release Provenance And Lifecycle Governance
 
 ### 1. Scope / Trigger

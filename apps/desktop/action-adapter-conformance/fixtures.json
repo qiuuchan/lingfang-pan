@@ -1,0 +1,116 @@
+{
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["good", "base", "artifact", "bad_output", "handler_error", "timeout", "cancel"]
+      },
+      "message": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 64
+      },
+      "artifact": {
+        "$ref": "lingfang://schemas/artifact-ref/v1"
+      }
+    },
+    "required": ["mode", "message"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "ok": { "type": "boolean" },
+      "echoed": { "type": "string", "minLength": 2, "maxLength": 64 },
+      "artifact": { "$ref": "lingfang://schemas/artifact-ref/v1" }
+    },
+    "required": ["ok", "echoed"],
+    "additionalProperties": false
+  },
+  "cases": [
+    {
+      "id": "good",
+      "input": { "mode": "good", "message": "hello" },
+      "expected_output": { "ok": true, "echoed": "hello" }
+    },
+    {
+      "id": "base",
+      "input": { "mode": "base", "message": "base" },
+      "expected_output": { "ok": true, "echoed": "base" }
+    },
+    {
+      "id": "artifact",
+      "input": {
+        "mode": "artifact",
+        "message": "artifact",
+        "artifact": {
+          "type": "artifact_ref",
+          "artifact_id": "artifact-fixture-1",
+          "media_type": "image/png",
+          "size_bytes": 4,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authorization": {
+            "scope": "TEAM",
+            "team_id": "team-fixture",
+            "handle": "fixture-handle"
+          }
+        }
+      },
+      "expected_output": {
+        "ok": true,
+        "echoed": "artifact",
+        "artifact": {
+          "type": "artifact_ref",
+          "artifact_id": "artifact-fixture-1",
+          "media_type": "image/png",
+          "size_bytes": 4,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authorization": {
+            "scope": "TEAM",
+            "team_id": "team-fixture",
+            "handle": "fixture-handle"
+          }
+        }
+      }
+    },
+    {
+      "id": "bad_input",
+      "input": { "mode": "good", "message": "x" },
+      "expected_error": "action_input_invalid"
+    },
+    {
+      "id": "bad_artifact",
+      "input": {
+        "mode": "artifact",
+        "message": "artifact",
+        "artifact": {
+          "type": "artifact_ref",
+          "artifact_id": "artifact-fixture-1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expected_error": "action_input_invalid"
+    },
+    {
+      "id": "bad_output",
+      "input": { "mode": "bad_output", "message": "broken" },
+      "expected_error": "action_output_invalid"
+    },
+    {
+      "id": "handler_error",
+      "input": { "mode": "handler_error", "message": "failure" },
+      "expected_error": "action_execution_failed"
+    },
+    {
+      "id": "timeout",
+      "input": { "mode": "timeout", "message": "timeout" },
+      "expected_error": "action_timeout"
+    },
+    {
+      "id": "cancel",
+      "input": { "mode": "cancel", "message": "cancel" },
+      "expected_error": "action_cancelled"
+    }
+  ]
+}
