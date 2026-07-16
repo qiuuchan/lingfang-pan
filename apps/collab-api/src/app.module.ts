@@ -9,6 +9,9 @@ import { JwtAuthGuard } from './security';
 import { PermissionsGuard } from './permissions.guard';
 import { HealthController, ReadinessService } from './health.controller';
 import { AppCacheService, CacheService } from './cache.service';
+import { WebMarketplaceModule } from './modules/web-marketplace/web-marketplace.module';
+import { AutomationModule } from './automation/automation.module';
+import { SharedRealtimeModule } from './shared-realtime/shared-realtime.module';
 
 /**
  * 结构化日志（nestjs-pino）配置。
@@ -86,6 +89,9 @@ function buildRedactPaths(): string[] {
     ]),
     AuthModule,
     CollabModule,
+    WebMarketplaceModule,
+    AutomationModule.forRoot(),
+    SharedRealtimeModule.forRoot(),
   ],
   controllers: [HealthController],
   providers: [

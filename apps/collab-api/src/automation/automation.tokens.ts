@@ -1,0 +1,2 @@
+export const AUTOMATION_CONFIG = Symbol('AUTOMATION_CONFIG');
+export const AUTOMATION_QUEUE = Symbol('AUTOMATION_QUEUE');

@@ -4,15 +4,19 @@ import type {
   DraftWorkspace,
   LocalPluginInstallation,
   MarketplaceListingProjection,
+  MarketplaceOwnerQuality,
   PluginCatalogItem,
   PluginManagementItem,
   PluginPackageDetail,
   PluginPackageSummary,
   PluginReleaseSourceKind,
+  PluginReleaseDetail,
   PluginReleaseSummary,
 } from '@lingfang/contract';
 import { api, apiBase, errorMessage, getAuthToken, tauriInvoke } from '@/lib/api';
 import type { DraftFile, LoadedPlugin } from '@/lib/types';
+import type { WorkflowUpgradeSuggestion } from '@lingfang/contract';
+import { applyWorkflowUpgradeSuggestions } from '@/lib/workflow-runtime';
 import { conversationKey, selectedConversationKey } from '@/lib/plugin-creator/creator-session';
 import {
   isPluginSourceKind,
@@ -25,9 +29,11 @@ import { readWorkspaceFiles as readTaggedWorkspaceFiles, writeWorkspaceFiles } f
 export type RegistryCatalogItem = PluginCatalogItem;
 export type RegistryPackage = PluginPackageSummary;
 export type RegistryRelease = PluginReleaseSummary;
+export type RegistryReleaseDetail = PluginReleaseDetail;
 export type RegistryManagementItem = PluginManagementItem;
 export type RegistryPackageDetail = PluginPackageDetail;
 export type RegistryListing = MarketplaceListingProjection;
+export type RegistryOwnerQuality = MarketplaceOwnerQuality;
 export type RegistryPackageStatus = RegistryPackage['governanceStatus'];
 export type RegistryReleaseStatus = RegistryRelease['status'];
 export type RegistrySourceKind = PluginReleaseSourceKind;
@@ -77,6 +83,7 @@ type InstalledPayload = {
   installation: Installation;
   manifest: Record<string, unknown>;
   entryContent: string;
+  readmeMarkdown: string;
 };
 
 function connection() {
@@ -158,6 +165,21 @@ export async function listPluginManagement(): Promise<RegistryManagementItem[]> 
 
 export function getPluginPackageDetail(packageId: string): Promise<RegistryPackageDetail> {
   return api<RegistryPackageDetail>(`/api/plugin-packages/${encodeURIComponent(packageId)}`);
+}
+
+export function getPluginReleaseDetail(releaseId: string): Promise<{ release: PluginReleaseDetail }> {
+  return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}`);
+}
+
+export function getMarketplaceOwnerQuality(packageId: string): Promise<RegistryOwnerQuality> {
+  return api(`/api/plugin-packages/${encodeURIComponent(packageId)}/quality`);
+}
+
+export function submitMarketplaceQualityAppeal(packageId: string, body: string): Promise<unknown> {
+  return api(`/api/plugin-packages/${encodeURIComponent(packageId)}/quality-appeals`, {
+    method: 'POST',
+    body: { body },
+  });
 }
 
 export async function submitReleaseToMarketplace(
@@ -413,6 +435,7 @@ function installedPayloadToPlugin(
     pendingActivation: pendingReleaseId ? { releaseId: pendingReleaseId } : undefined,
     name: String(manifest.name || payload.installation.packageId),
     description: String(manifest.description || ''),
+    readmeMarkdown: payload.readmeMarkdown || '',
     version: release.version,
     entry,
     runtime_type: runtime,
@@ -479,8 +502,13 @@ export async function publishLocalArtifact(
   });
 }
 
-export async function buyMarketplacePackage(packageId: string): Promise<void> {
-  await api(`/api/plugin-packages/${packageId}/purchase`, { method: 'POST' });
+export async function buyMarketplacePackage(packageId: string, expectedPriceVersion: string): Promise<void> {
+  if (!/^pv1\.[A-Za-z0-9_-]{43}$/.test(expectedPriceVersion)) throw new Error('市场价格版本无效，请刷新插件目录后重试');
+  await api(`/api/plugin-packages/${packageId}/purchase`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: { expectedPriceVersion },
+  });
 }
 
 export async function startInstalledPlugin(
@@ -520,7 +548,7 @@ export async function createDraftWorkspace(input: {
   title: string;
   manifestId: string;
   version: string;
-  runtime: 'client' | 'cloud' | 'nodejs' | 'python';
+  runtime: 'client' | 'cloud' | 'nodejs' | 'python' | 'workflow';
   conversationId?: string | null;
   sourceKind?: PluginReleaseSourceKind;
   sourceLabel?: string;
@@ -639,6 +667,45 @@ export async function loadDraftWorkspacePlugin(workspace: Workspace): Promise<Lo
   };
 }
 
+export async function createWorkflowUpgradeDraft(
+  plugin: LoadedPlugin,
+  suggestions: WorkflowUpgradeSuggestion[],
+): Promise<LoadedPlugin> {
+  if (plugin.runtime_type !== 'workflow' || !plugin.files?.length) throw new Error('当前工作流没有可复制的发行版文件');
+  const manifestFile = plugin.files.find((file) => file.path === 'manifest.json' && !file.binary);
+  if (!manifestFile) throw new Error('当前工作流缺少 manifest.json');
+  let manifest: Record<string, unknown>;
+  try { manifest = JSON.parse(manifestFile.content) as Record<string, unknown>; }
+  catch { throw new Error('当前工作流 manifest.json 无法解析'); }
+  const manifestId = String(manifest.id || '').trim();
+  if (!manifestId) throw new Error('当前工作流 manifest ID 无效');
+  const adopted = applyWorkflowUpgradeSuggestions(plugin.files, plugin.entry, suggestions);
+  const workspace = await createDraftWorkspace({
+    title: `${plugin.name} 升级草稿`,
+    manifestId,
+    version: adopted.version,
+    runtime: 'workflow',
+    sourceKind: 'LINGFANG_CREATOR',
+    sourceLabel: '工作流升级建议',
+  });
+  try {
+    const synced = await persistDraftWorkspace({
+      preferredWorkspaceId: workspace.workspaceId,
+      title: workspace.title,
+      manifestId,
+      version: adopted.version,
+      runtime: 'workflow',
+      sourceKind: 'LINGFANG_CREATOR',
+      sourceLabel: '工作流升级建议',
+      files: adopted.files,
+    });
+    return loadDraftWorkspacePlugin(synced);
+  } catch (error) {
+    await deleteDraftWorkspace(workspace.workspaceId).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function exportDraftWorkspace(workspaceId: string): Promise<string> {
   const result = await tauriInvoke<{ artifactPath: string }>('pack_draft_workspace', { workspaceId });
   return result.artifactPath;
@@ -649,7 +716,7 @@ export async function persistDraftWorkspace(input: {
   title: string;
   manifestId: string;
   version: string;
-  runtime: 'client' | 'cloud' | 'nodejs' | 'python';
+  runtime: 'client' | 'cloud' | 'nodejs' | 'python' | 'workflow';
   conversationId?: string | null;
   sourceKind?: PluginReleaseSourceKind;
   sourceLabel?: string;

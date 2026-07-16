@@ -109,12 +109,11 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
   });
 
   describe('resolvePluginAccess', () => {
-    it('团队管理员（系统团队管理员角色）默认放行，不查 grant', async () => {
-      // 基于 code 检测（不依赖 name 字符串）
-      prisma.role.findUnique.mockResolvedValue({ isSystem: true, code: 'team_admin' });
+    it('团队管理员没有运行时绕过，显式 DENY 仍生效', async () => {
+      prisma.pluginGrant.findMany.mockResolvedValue([{ subjectKind: 'USER', effect: 'DENY' }]);
       const ok = await service.resolvePluginAccess('team-1', 'plugin-1', 'admin-1', 'team-admin-team-1');
-      expect(ok).toBe(true);
-      expect(prisma.pluginGrant.findMany).not.toHaveBeenCalled();
+      expect(ok).toBe(false);
+      expect(prisma.pluginGrant.findMany).toHaveBeenCalledOnce();
     });
 
     it('user 级 DENY 优先，拒绝', async () => {

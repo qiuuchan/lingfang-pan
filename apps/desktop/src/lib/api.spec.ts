@@ -40,4 +40,16 @@ describe('api structured errors', () => {
 
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ 'X-Client': 'desktop-plugin-test' });
   });
+
+  it('forwards host-owned idempotency headers without losing standard headers', async () => {
+    configureApiBase('https://platform.example');
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api('/api/plugin-packages/package-1/purchase', { method: 'POST', headers: { 'Idempotency-Key': 'purchase-1' }, body: { expectedPriceVersion: 'pv1.token' } });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'purchase-1',
+      'X-Client': 'desktop',
+    });
+  });
 });

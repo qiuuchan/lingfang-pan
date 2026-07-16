@@ -13,6 +13,7 @@ pub(crate) const MAX_ARCHIVE_BYTES: u64 = 300 * 1024 * 1024;
 pub(crate) const MAX_UNCOMPRESSED_BYTES: u64 = 300 * 1024 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 60 * 1024 * 1024;
 pub(crate) const MAX_FILES: usize = 1500;
+const MAX_README_BYTES: u64 = 256 * 1024;
 
 const EXCLUDED_SEGMENTS: &[&str] = &[
     "data",
@@ -249,7 +250,7 @@ fn validate_manifest(manifest: &Value) -> Result<(), String> {
     semver::Version::parse(version)
         .map_err(|_| format!("manifest.version 不是严格 SemVer：{version}"))?;
     let runtime = object["runtime_type"].as_str().unwrap_or_default();
-    if !matches!(runtime, "client" | "cloud" | "nodejs" | "python") {
+    if !matches!(runtime, "client" | "cloud" | "nodejs" | "python" | "workflow") {
         return Err("manifest.runtime_type 不受支持".to_string());
     }
     normalized_relative(Path::new(object["entry"].as_str().unwrap_or_default()))?;
@@ -281,6 +282,7 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
         return Err("插件文件数量超限".to_string());
     }
     let mut seen = HashSet::new();
+    let mut windows_seen = HashSet::new();
     let mut files = Vec::with_capacity(zip.len());
     let mut total = 0_u64;
     let mut meta: Option<Value> = None;
@@ -293,6 +295,9 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
         validate_zip_path(&name)?;
         if !seen.insert(name.clone()) {
             return Err(format!("制品包含重复路径：{name}"));
+        }
+        if !windows_seen.insert(name.to_lowercase()) {
+            return Err(format!("制品包含 Windows 大小写冲突路径：{name}"));
         }
         if entry.is_dir() {
             return Err(format!("制品不能包含目录条目：{name}"));
@@ -312,8 +317,11 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
             return Err("插件解压总量超过 300MiB".to_string());
         }
         let read_limit = declared_size.saturating_add(1).min(MAX_FILE_BYTES + 1);
+        if name == "README.md" && declared_size > MAX_README_BYTES {
+            return Err("README.md 不能超过 256 KiB".to_string());
+        }
         let mut metadata_buffer = None;
-        let actual_size = if name == "_meta.json" || name == "manifest.json" {
+        let actual_size = if name == "_meta.json" || name == "manifest.json" || name == "README.md" {
             let mut buffer = Vec::with_capacity(declared_size as usize);
             entry
                 .by_ref()
@@ -336,7 +344,10 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
         if total > MAX_UNCOMPRESSED_BYTES {
             return Err("插件解压总量超过 300MiB".to_string());
         }
-        if name == "_meta.json" || name == "manifest.json" {
+        if name == "README.md" {
+            let buffer = metadata_buffer.expect("README entry was buffered above");
+            std::str::from_utf8(&buffer).map_err(|_| "README.md 必须是 UTF-8 文本".to_string())?;
+        } else if name == "_meta.json" || name == "manifest.json" {
             let buffer = metadata_buffer.expect("metadata entry was buffered above");
             let value: Value = serde_json::from_slice(&buffer)
                 .map_err(|error| format!("{name} 格式错误：{error}"))?;
@@ -546,6 +557,31 @@ mod tests {
 
         let error = inspect_artifact(&artifact).unwrap_err();
         assert!(error.contains("数据或运行缓存"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inspection_validates_root_readme_contract() {
+        let root = temp("readme-contract");
+        fs::create_dir_all(&root).unwrap();
+        let invalid_utf8 = root.join("invalid-utf8.lfplugin");
+        write_test_zip(&invalid_utf8, &[("README.md", &[0xc3, 0x28])]);
+        assert!(inspect_artifact(&invalid_utf8).unwrap_err().contains("UTF-8"));
+
+        let oversized = root.join("oversized.lfplugin");
+        let bytes = vec![b'a'; MAX_README_BYTES as usize + 1];
+        write_test_zip(&oversized, &[("README.md", bytes.as_slice())]);
+        assert!(inspect_artifact(&oversized).unwrap_err().contains("256 KiB"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inspection_rejects_windows_case_collisions() {
+        let root = temp("windows-case-collision");
+        fs::create_dir_all(&root).unwrap();
+        let artifact = root.join("collision.lfplugin");
+        write_test_zip(&artifact, &[("README.md", b"# trusted"), ("readme.md", b"# shadow")]);
+        assert!(inspect_artifact(&artifact).unwrap_err().contains("Windows 大小写冲突"));
         let _ = fs::remove_dir_all(root);
     }
 

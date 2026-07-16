@@ -24,9 +24,10 @@ import {
 import {
   handleRuntimeCall,
   loadPluginDocument,
-  runtimeMessage,
+  runtimeMessageFromFrame,
 } from '../plugins-runtime';
-import { usePluginRunnerActions } from './use-plugin-runner-actions';
+import { draftFromPlugin, usePluginRunnerActions } from './use-plugin-runner-actions';
+import { WorkflowRunner } from './workflow/WorkflowRunner';
 
 function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
   return runtime === 'nodejs' || runtime === 'python';
@@ -49,6 +50,12 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
     setView,
   });
   const canEdit = !plugin.builtin && Boolean(plugin.installationId || plugin.draft);
+  const openAdoptedWorkflowDraft = useCallback((draft: LoadedPlugin) => {
+    setCurrentDraft(draftFromPlugin(draft));
+    setPendingDraftEdit({ draft, turns: [] });
+    setRunningPlugin(null);
+    setView('creator');
+  }, [setCurrentDraft, setPendingDraftEdit, setRunningPlugin, setView]);
   usePluginBridge(plugin, iframeRef);
 
   return (
@@ -57,7 +64,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         plugin={plugin}
         editing={actions.editing}
         canEdit={canEdit}
-        canPopOut={!plugin.pendingActivation}
+        canPopOut={!plugin.pendingActivation && runtime !== 'workflow'}
         onBack={onBack}
         onEdit={actions.editInGenerator}
         onShowManifest={() => setManifestOpen(true)}
@@ -75,6 +82,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         srcDoc={document.srcDoc}
         onFrameLoad={pendingInteractive.onReady}
         onFrameError={pendingInteractive.onError}
+        onAdoptedWorkflowDraft={openAdoptedWorkflowDraft}
       />
       <PluginManifestDialog
         open={manifestOpen}
@@ -169,7 +177,7 @@ function usePluginDocument(plugin: LoadedPlugin, runtime: string) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isScriptRuntime(runtime) || runtime === 'cloud') return;
+    if (isScriptRuntime(runtime) || runtime === 'cloud' || runtime === 'workflow') return;
     setLoading(true);
     void (async () => {
       try {
@@ -190,9 +198,10 @@ function usePluginDocument(plugin: LoadedPlugin, runtime: string) {
 function usePluginBridge(plugin: LoadedPlugin, iframeRef: RefObject<HTMLIFrameElement>) {
   useEffect(() => {
     const handler = async (ev: MessageEvent) => {
-      const message = runtimeMessage(ev.data);
       const frame = iframeRef.current;
-      if (!message || !frame || ev.source !== frame.contentWindow) return;
+      if (!frame) return;
+      const message = runtimeMessageFromFrame(ev, frame);
+      if (!message) return;
       await handleRuntimeCall(plugin, frame, message);
     };
     window.addEventListener('message', handler);
@@ -212,6 +221,7 @@ function RunnerContent({
   srcDoc,
   onFrameLoad,
   onFrameError,
+  onAdoptedWorkflowDraft,
 }: {
   error: CreatorError | null;
   iframeRef: Ref<HTMLIFrameElement>;
@@ -224,6 +234,7 @@ function RunnerContent({
   srcDoc: string;
   onFrameLoad: () => void;
   onFrameError: () => void;
+  onAdoptedWorkflowDraft: (draft: LoadedPlugin) => void;
 }) {
   if (isScriptRuntime(runtime)) {
     return (
@@ -237,6 +248,7 @@ function RunnerContent({
     );
   }
   if (runtime === 'cloud') return <CloudRuntimeNotice plugin={plugin} onReady={onFrameLoad} />;
+  if (runtime === 'workflow') return <WorkflowRunner plugin={plugin} onReady={onFrameLoad} onAdoptedDraft={onAdoptedWorkflowDraft} />;
   return <RunnerBody error={error} iframeRef={iframeRef} loading={loading} onAutoFix={onAutoFix} plugin={plugin} srcDoc={srcDoc} onFrameLoad={onFrameLoad} onFrameError={onFrameError} />;
 }
 

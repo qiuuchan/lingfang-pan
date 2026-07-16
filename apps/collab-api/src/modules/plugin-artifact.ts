@@ -27,7 +27,7 @@ const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
 const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
 
-const RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python'] as const;
+const RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python', 'workflow'] as const;
 const VISIBILITIES = ['private', 'tenant'] as const;
 const CAPABILITY_KINDS = [
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
@@ -77,6 +77,8 @@ export type InspectedPluginArtifact = {
   files: Array<{ path: string; sizeBytes: number }>;
   policyFiles: PluginAiPolicyFile[];
   uncompressedSizeBytes: number;
+  readmeMarkdown: string;
+  workflowDefinition: Record<string, unknown> | null;
 };
 
 function safePath(raw: string): string {
@@ -197,6 +199,7 @@ async function readEntries(filePath: string): Promise<ZipEntry[]> {
   const central = await readExactly(filePath, centralOffset, centralSize);
   const entries: ZipEntry[] = [];
   const paths = new Set<string>();
+  const windowsPaths = new Set<string>();
   let offset = 0;
   let totalBytes = 0;
   while (offset < central.length) {
@@ -223,6 +226,9 @@ async function readEntries(filePath: string): Promise<ZipEntry[]> {
     const path = safePath(rawName);
     if (paths.has(path)) throw badRequest('插件制品包含重复路径', { path });
     paths.add(path);
+    const windowsPath = path.toLocaleLowerCase('en-US');
+    if (windowsPaths.has(windowsPath)) throw badRequest('插件制品包含 Windows 大小写冲突路径', { path });
+    windowsPaths.add(windowsPath);
     const unixMode = (externalAttributes >>> 16) & 0xffff;
     if ((unixMode & 0o170000) === 0o120000) throw badRequest('插件制品不能包含符号链接', { path });
     if (uncompressedSize > PLUGIN_ARTIFACT_MAX_FILE_BYTES || compressedSize > PLUGIN_ARTIFACT_MAX_BYTES) {
@@ -413,9 +419,53 @@ function validateManifest(input: Record<string, unknown>, paths: Set<string>): I
     throw badRequest('manifest.visibility 只允许 private 或 tenant');
   }
   const capabilities = validateCapabilities(input.capabilities);
+  const actions = validateActionDeclarations(input.actions, runtime, paths);
+  const actionDependencies = validateActionDependencies(input.action_dependencies);
+  if (runtime === 'workflow' && !actions.some((action) => action.action_id === 'default')) throw badRequest('workflow manifest 必须导出 default action');
   if (!parseStrictSemVer(version)) throw badRequest('manifest.version 必须是严格 SemVer', { version });
   if (!paths.has(entry)) throw badRequest('manifest.entry 指向的文件不存在', { entry });
-  return { ...input, id, name, version, description, runtime_type: runtime, entry, visibility, capabilities };
+  return { ...input, id, name, version, description, runtime_type: runtime, entry, visibility, capabilities, actions, action_dependencies: actionDependencies };
+}
+
+function validateActionDeclarations(input: unknown, runtime: RuntimeType, paths: Set<string>): Record<string, unknown>[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > 32) throw badRequest('manifest.actions 必须是最多 32 项的数组');
+  const ids = new Set<string>();
+  return input.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('manifest.actions 条目必须是对象', { index });
+    const action = raw as Record<string, unknown>;
+    const actionId = String(action.action_id || '');
+    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(actionId) || ids.has(actionId)) throw badRequest('manifest.actions.action_id 无效或重复', { index });
+    ids.add(actionId);
+    if (!parseStrictSemVer(String(action.action_contract_version || ''))) throw badRequest('manifest.actions.action_contract_version 必须是严格 SemVer', { index });
+    if (!action.input_schema || typeof action.input_schema !== 'object' || !action.output_schema || typeof action.output_schema !== 'object') throw badRequest('manifest action 必须声明 input_schema 和 output_schema', { index });
+    const handler = action.handler;
+    if (runtime === 'cloud' || runtime === 'workflow') {
+      if (handler !== undefined) throw badRequest(`${runtime} action 不能声明包内 handler`, { index });
+    } else {
+      if (!handler || typeof handler !== 'object' || Array.isArray(handler)) throw badRequest('本地 action 必须声明 handler', { index });
+      const entry = safePath(String((handler as Record<string, unknown>).entry || ''));
+      if (!paths.has(entry)) throw badRequest('manifest action handler 指向的文件不存在', { index, entry });
+      const callable = runtime === 'python' ? (handler as Record<string, unknown>).callable : (handler as Record<string, unknown>).export;
+      if (typeof callable !== 'string' || !/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(callable)) throw badRequest('manifest action handler 导出名称无效', { index });
+    }
+    return action;
+  });
+}
+
+function validateActionDependencies(input: unknown): Record<string, unknown>[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > 64) throw badRequest('manifest.action_dependencies 必须是最多 64 项的数组');
+  const ids = new Set<string>();
+  return input.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('manifest.action_dependencies 条目必须是对象', { index });
+    const dependency = raw as Record<string, unknown>;
+    const id = String(dependency.dependency_id || '');
+    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(id) || ids.has(id)) throw badRequest('manifest action dependency id 无效或重复', { index });
+    ids.add(id);
+    for (const field of ['package_id', 'release_version_range', 'action_id', 'action_contract_version_range']) if (typeof dependency[field] !== 'string' || !String(dependency[field]).trim()) throw badRequest(`manifest action dependency ${field} 无效`, { index });
+    return dependency;
+  });
 }
 
 export async function inspectPluginArtifact(filePath: string): Promise<InspectedPluginArtifact> {
@@ -442,6 +492,8 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
   const policyFiles: PluginAiPolicyFile[] = [];
   let collectedPolicyBytes = 0;
   let totalLimitReported = false;
+  let readmeMarkdown = '';
+  let workflowDefinition: Record<string, unknown> | null = null;
   for (const entry of entries) {
     if (entry === metaEntry || entry === manifestEntry) continue;
     const policyCandidate = entry.path === manifest.entry || isPluginAiPolicyTextPath(entry.path);
@@ -466,15 +518,55 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
         collectPolicy = true;
       }
     }
-    const output = await consumeEntry(filePath, entry, collectPolicy);
+    const workflowEntry = manifest.runtime_type === 'workflow' && entry.path === manifest.entry;
+    if (workflowEntry && entry.uncompressedSize > 256 * 1024) throw badRequest('workflow.json 不能超过 256 KiB');
+    if (entry.path === 'README.md' && entry.uncompressedSize > PLUGIN_ARTIFACT_MAX_METADATA_BYTES) {
+      throw badRequest('README.md 不能超过 256 KiB');
+    }
+    const output = await consumeEntry(filePath, entry, collectPolicy || entry.path === 'README.md' || workflowEntry);
+    if (manifest.runtime_type === 'workflow' && entry.path === manifest.entry && output) workflowDefinition = validateWorkflowDefinition(parseJsonObject(output, manifest.entry));
+    if (entry.path === 'README.md' && output) {
+      if (output.length > PLUGIN_ARTIFACT_MAX_METADATA_BYTES) throw badRequest('README.md 不能超过 256 KiB');
+      try { readmeMarkdown = new TextDecoder('utf-8', { fatal: true }).decode(output); }
+      catch { throw badRequest('README.md 必须是 UTF-8 文本'); }
+    }
     if (collectPolicy && output) policyFiles.push(decodePluginAiPolicyText(entry.path, output));
   }
+  if (manifest.runtime_type === 'workflow' && !workflowDefinition) throw badRequest('workflow 制品缺少可读取的 workflow.json');
   return {
     manifest,
     files: entries.map((entry) => ({ path: entry.path, sizeBytes: entry.uncompressedSize })),
     policyFiles,
     uncompressedSizeBytes: entries.reduce((sum, entry) => sum + entry.uncompressedSize, 0),
+    readmeMarkdown,
+    workflowDefinition,
   };
+}
+
+/**
+ * Read one already-validated immutable artifact entry for the Web preview
+ * resource service. The path goes through the same canonical ZIP path checks
+ * as upload inspection, and the entry is fully inflated with size + CRC
+ * verification before any bytes are returned to the browser-facing service.
+ */
+export async function readPluginArtifactEntry(filePath: string, rawPath: string): Promise<Buffer> {
+  const path = safePath(rawPath);
+  const entries = await readEntries(filePath);
+  const entry = entries.find((candidate) => candidate.path === path);
+  if (!entry) throw badRequest('插件预览资源不存在', { path });
+  const output = await consumeEntry(filePath, entry, true);
+  if (!output) throw badRequest('插件预览资源不可读取', { path });
+  return output;
+}
+
+function validateWorkflowDefinition(definition: Record<string, unknown>): Record<string, unknown> {
+  if (definition.definition_version !== '1' || !Array.isArray(definition.nodes) || definition.nodes.length < 1 || definition.nodes.length > 64 || !Array.isArray(definition.output_bindings)) throw badRequest('workflow.json 不是有效的 WorkflowDefinition V1');
+  const ids = new Set<string>(); const dependencies = new Map<string, string[]>(); let edgeCount = 0;
+  definition.nodes.forEach((raw, index) => { if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('workflow node 必须是对象', { index }); const node = raw as Record<string, unknown>; const id = String(node.node_id || ''); if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || ids.has(id)) throw badRequest('workflow node_id 无效或重复', { index }); if (!Array.isArray(node.depends_on) || !Array.isArray(node.input_bindings) || ![0, 1, 2].includes(Number(node.retry_limit))) throw badRequest('workflow node 结构无效', { index }); ids.add(id); dependencies.set(id, node.depends_on.map(String)); edgeCount += node.depends_on.length; });
+  if (edgeCount > 256) throw badRequest('workflow 依赖边不能超过 256 条');
+  for (const [id, values] of dependencies) for (const dependency of values) if (!ids.has(dependency) || dependency === id) throw badRequest('workflow 包含未知依赖或自依赖', { nodeId: id, dependency });
+  const visiting = new Set<string>(); const visited = new Set<string>(); const visit = (id: string) => { if (visiting.has(id)) throw badRequest('workflow 不能包含循环依赖', { nodeId: id }); if (visited.has(id)) return; visiting.add(id); dependencies.get(id)?.forEach(visit); visiting.delete(id); visited.add(id); }; ids.forEach(visit);
+  return definition;
 }
 
 export function artifactReadStream(filePath: string) {

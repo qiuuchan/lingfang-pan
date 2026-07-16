@@ -1,8 +1,13 @@
 // create 命令测试 — 覆盖各 runtime 一行式创建 + 交互式补全
 // 使用临时目录，测试后自动清理。
 
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { validateManifest } from '../../manifest/index.ts';
+
+const templatesRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../templates');
 
 // 注意：createCommand 依赖 process.cwd() 与文件系统，不易做单元测试。
 // 本 spec 覆盖 id 推导逻辑 + manifest 校验的核心流程。
@@ -137,6 +142,22 @@ describe('create 命令 — manifest 校验', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.errors.some((e) => e.code === 'entry_runtime_mismatch')).toBe(true);
+    }
+  });
+});
+
+describe('create 命令 — README 模板', () => {
+  it('三种 runtime 都生成面向详情页的完整 README 骨架', async () => {
+    for (const runtime of ['client', 'nodejs', 'python']) {
+      const readme = await readFile(path.join(templatesRoot, runtime, 'README.md.tmpl'), 'utf8');
+      expect(readme).toContain('# {{name}}');
+      expect(readme).toContain('## 功能简介');
+      expect(readme).toContain('## 使用方式');
+      expect(readme).toContain('## 能力与权限');
+      expect(readme).toContain('__CAPABILITIES_LIST__');
+      expect(readme).toContain('## 数据与隐私');
+      expect(readme).toContain('## 本地检查与预览');
+      expect(readme).toContain('## 构建与发布');
     }
   });
 });
