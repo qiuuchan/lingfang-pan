@@ -161,7 +161,7 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {packages.data.items.map((item) => (
+                  {packages.data.items.map((item: PluginPackageSummary) => (
                     <TableRow key={item.id}>
                       <TableCell>
                         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
