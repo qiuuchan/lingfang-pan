@@ -4,13 +4,12 @@
 //  - 卡片 1「团队余额」（人民币，分）：插件市场购买/销售。GET /api/teams/current/balance + /balance-ledger。
 //  - 卡片 2「团队灵石」（Float）：AI 对话/生图计费。GET /api/teams/current/credits + /credits/ledger。
 // 两类账户明确区分用途、各自独立流水，不混显、不换算。
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import type { MarketplaceOrderListItem, MarketplaceOrderPage, MarketplaceStatementPage } from '@lingfang/contract';
 import { toast } from 'sonner';
-import { CoinsIcon, ReceiptTextIcon, WalletIcon } from 'lucide-react';
+import { ArrowDownLeftIcon, ArrowUpRightIcon, CoinsIcon, HistoryIcon, ReceiptTextIcon, ShoppingBagIcon, SparklesIcon, StoreIcon, WalletIcon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import type { BalanceLedger } from '@/lib/types';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -131,51 +130,55 @@ export function TeamWallet() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 卡片 1：团队余额（人民币）——插件市场购买/销售。 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><WalletIcon className="size-5 text-primary" />团队余额</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">团队共享余额 · 插件市场购买</div>
-          <div className="mt-1 text-4xl font-semibold tabular-nums">
-            {balanceCents === null ? <Shimmer className="h-9 w-40" /> : centsToYuan(balanceCents)}
-          </div>
-          <div className="mt-3">
-            <Button variant="outline" size="sm" onClick={() => void openBalanceLedger()}>查看流水</Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 md:grid-cols-2">
+        <AccountCard
+          icon={<WalletIcon />}
+          eyebrow="插件市场账户"
+          title="团队余额"
+          description="用于购买插件许可，销售收入也会进入此账户。"
+          value={balanceCents === null ? null : centsToYuan(balanceCents)}
+          loadingWidth="w-40"
+          accent="primary"
+          onLedger={() => void openBalanceLedger()}
+        />
+        <AccountCard
+          icon={<CoinsIcon />}
+          eyebrow="AI 计费账户"
+          title="团队灵石"
+          description="用于 AI 对话与生图调用，与人民币余额独立核算。"
+          value={credit ? formatCreditAmount(credit.balance) : null}
+          unit="灵石"
+          loadingWidth="w-32"
+          accent="violet"
+          onLedger={() => void openCreditLedger()}
+        />
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><ReceiptTextIcon className="size-5 text-primary" />市场财务</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">查看当前团队的插件订单、退款状态与卖家待结算明细。</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => void openMarketplace('buyer')}>购买订单</Button>
-            <Button variant="outline" size="sm" onClick={() => void openMarketplace('seller')}>卖家对账</Button>
+      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <div className="flex items-start gap-3 border-b bg-muted/25 p-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <ReceiptTextIcon className="size-5" />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold">市场财务</h3>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">查看团队的插件订单、退款进度和卖家结算情况。</p>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* 卡片 2：团队灵石——AI 对话/生图计费。 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><CoinsIcon className="size-5 text-primary" />团队灵石</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">团队共享灵石 · AI 对话计费</div>
-          <div className="mt-1 text-4xl font-semibold tabular-nums">
-            {credit ? formatCreditAmount(credit.balance) : <Shimmer className="h-9 w-32" />}
-            <span className="ml-1 text-base font-normal text-muted-foreground">灵石</span>
-          </div>
-          <div className="mt-3">
-            <Button variant="outline" size="sm" onClick={() => void openCreditLedger()}>查看流水</Button>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+        <div className="grid gap-px bg-border sm:grid-cols-2">
+          <FinanceAction
+            icon={<ShoppingBagIcon />}
+            title="购买订单"
+            description="查看许可费用、订单状态与退款期限"
+            onClick={() => void openMarketplace('buyer')}
+          />
+          <FinanceAction
+            icon={<StoreIcon />}
+            title="卖家对账"
+            description="查看销售收入、退款状态与待结算金额"
+            onClick={() => void openMarketplace('seller')}
+          />
+        </div>
+      </section>
 
       {/* 流水悬浮窗：余额 / 灵石各一。 */}
       <LedgerDialog
@@ -205,6 +208,59 @@ export function TeamWallet() {
   );
 }
 
+function AccountCard({ icon, eyebrow, title, description, value, unit, loadingWidth, accent, onLedger }: {
+  icon: ReactNode;
+  eyebrow: string;
+  title: string;
+  description: string;
+  value: string | null;
+  unit?: string;
+  loadingWidth: string;
+  accent: 'primary' | 'violet';
+  onLedger: () => void;
+}) {
+  const violet = accent === 'violet';
+  return (
+    <section className="relative overflow-hidden rounded-xl border bg-card p-5 shadow-sm">
+      <div className={`absolute -right-10 -top-10 size-32 rounded-full blur-3xl ${violet ? 'bg-violet-500/10' : 'bg-primary/10'}`} />
+      <div className="relative flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className={`flex size-10 items-center justify-center rounded-full ${violet ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400' : 'bg-primary/10 text-primary'} [&_svg]:size-5`}>
+            {icon}
+          </span>
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{eyebrow}</p>
+            <h3 className="text-sm font-semibold">{title}</h3>
+          </div>
+        </div>
+        <SparklesIcon className={`size-4 ${violet ? 'text-violet-500/50' : 'text-primary/40'}`} />
+      </div>
+      <div className="relative mt-6 flex min-h-10 items-baseline">
+        {value === null ? <Shimmer className={`h-9 ${loadingWidth}`} /> : <span className="text-3xl font-semibold tracking-tight tabular-nums">{value}</span>}
+        {value !== null && unit && <span className="ml-1.5 text-sm text-muted-foreground">{unit}</span>}
+      </div>
+      <p className="relative mt-2 min-h-9 text-xs leading-relaxed text-muted-foreground">{description}</p>
+      <Button variant="outline" size="sm" className="relative mt-4 w-full justify-between" onClick={onLedger}>
+        <span className="inline-flex items-center gap-1.5"><HistoryIcon />查看账户流水</span>
+        <ArrowUpRightIcon />
+      </Button>
+    </section>
+  );
+}
+
+function FinanceAction({ icon, title, description, onClick }: { icon: ReactNode; title: string; description: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="group flex items-center gap-3 bg-card p-4 text-left transition-colors hover:bg-muted/35">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary [&_svg]:size-4">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{description}</span>
+      </span>
+      <ArrowUpRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-primary" />
+    </button>
+  );
+}
+
 function MarketplaceOrdersDialog({ view, onOpenChange, loaded, rows, sellerPendingCents }: {
   view: 'buyer' | 'seller' | null;
   onOpenChange: (open: boolean) => void;
@@ -214,15 +270,17 @@ function MarketplaceOrdersDialog({ view, onOpenChange, loaded, rows, sellerPendi
 }) {
   const seller = view === 'seller';
   return <Dialog open={Boolean(view)} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-2xl">
+    <DialogContent className="overflow-hidden p-0 sm:max-w-2xl">
+      <div className="border-b bg-muted/25 px-5 py-4">
       <DialogHeader>
-        <DialogTitle>{seller ? '卖家市场对账' : '插件购买订单'}</DialogTitle>
+        <DialogTitle className="flex items-center gap-2">{seller ? <StoreIcon className="size-4 text-primary" /> : <ShoppingBagIcon className="size-4 text-primary" />}{seller ? '卖家市场对账' : '插件购买订单'}</DialogTitle>
         <DialogDescription>{seller ? `待结算卖家金额 ${centsToYuan(sellerPendingCents)}，以订单状态实时聚合。` : '许可费用使用团队人民币余额；AI 调用产生的灵石费用不随许可退款返还。'}</DialogDescription>
       </DialogHeader>
-      <div className="max-h-[60vh] overflow-y-auto">
-        {!loaded ? <div className="flex flex-col gap-2">{Array.from({ length: 4 }).map((_, index) => <Shimmer className="h-16 w-full" key={index} />)}</div>
-          : rows.length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">暂无订单</div>
-            : <div className="divide-y">{rows.map((row) => <div className="flex items-start justify-between gap-4 py-3" key={row.id}>
+      </div>
+      <div className="max-h-[60vh] overflow-y-auto p-4">
+        {!loaded ? <div className="flex flex-col gap-2">{Array.from({ length: 4 }).map((_, index) => <Shimmer className="h-16 w-full rounded-lg" key={index} />)}</div>
+          : rows.length === 0 ? <EmptyFinanceState icon={seller ? <StoreIcon /> : <ShoppingBagIcon />} text="暂无订单记录" />
+            : <div className="divide-y overflow-hidden rounded-xl border">{rows.map((row) => <div className="flex items-start justify-between gap-4 bg-card p-3.5" key={row.id}>
               <div><div className="text-sm font-medium">{row.package_name}</div><div className="text-xs text-muted-foreground">{fmtTime(row.created_at)}{row.refundable_until && !seller ? ` · 退款申请截止 ${fmtTime(row.refundable_until)}` : ''}</div></div>
               <div className="text-right"><div className="text-sm font-semibold tabular-nums">{centsToYuan(seller ? row.seller_cents : row.price_cents)}</div><Badge variant="outline">{marketplaceStatus(row.status)}</Badge></div>
             </div>)}</div>}
@@ -253,23 +311,28 @@ function LedgerDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="overflow-hidden p-0 sm:max-w-lg">
+        <div className="border-b bg-muted/25 px-5 py-4">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><HistoryIcon className="size-4 text-primary" />{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <div className="max-h-[56vh] overflow-y-auto">
+        </div>
+        <div className="max-h-[56vh] overflow-y-auto p-4">
           {!loaded ? (
             <div className="flex flex-col gap-2 py-2">
-              {Array.from({ length: 4 }).map((_, i) => <Shimmer key={i} className="h-10 w-full" />)}
+              {Array.from({ length: 4 }).map((_, i) => <Shimmer key={i} className="h-12 w-full rounded-lg" />)}
             </div>
           ) : rows.length ? (
-            <StaggerContainer className="flex flex-col divide-y" stagger={0.04}>
+            <StaggerContainer className="flex flex-col divide-y overflow-hidden rounded-xl border" stagger={0.04}>
               {rows.map((t) => {
                 const credit_ = t.direction === 'CREDIT';
                 return (
                   <StaggerItem key={t.id}>
-                    <div className="flex items-center gap-3 py-2">
+                    <div className="flex items-center gap-3 bg-card p-3.5">
+                      <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${credit_ ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
+                        {credit_ ? <ArrowDownLeftIcon className="size-4" /> : <ArrowUpRightIcon className="size-4" />}
+                      </span>
                       <div className="flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="text-sm font-medium">{t.label}</div>
@@ -277,7 +340,7 @@ function LedgerDialog({
                         </div>
                         <div className="text-xs text-muted-foreground">{fmtTime(t.createdAt)}</div>
                       </div>
-                      <span className={`text-sm font-semibold tabular-nums ${credit_ ? 'text-green-600' : 'text-red-600'}`}>
+                      <span className={`text-sm font-semibold tabular-nums ${credit_ ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>
                         {t.amountText}
                       </span>
                     </div>
@@ -286,10 +349,19 @@ function LedgerDialog({
               })}
             </StaggerContainer>
           ) : (
-            <div className="py-8 text-center text-sm text-muted-foreground">暂无流水</div>
+            <EmptyFinanceState icon={<HistoryIcon />} text="暂无流水记录" />
           )}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function EmptyFinanceState({ icon, text }: { icon: ReactNode; text: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-10 text-center text-sm text-muted-foreground">
+      <span className="flex size-11 items-center justify-center rounded-full bg-muted [&_svg]:size-5">{icon}</span>
+      <span className="mt-3">{text}</span>
+    </div>
   );
 }
