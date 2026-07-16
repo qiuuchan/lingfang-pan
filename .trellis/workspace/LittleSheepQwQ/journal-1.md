@@ -785,3 +785,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: 美化账户与团队管理页面
+
+**Date**: 2026-07-16
+**Task**: 美化账户与团队管理页面
+**Branch**: `betav2`
+
+### Summary
+
+统一美化个人资料、通知中心、团队钱包和团队管理页面，保留现有业务逻辑并通过桌面端类型检查、生产构建及 331 项测试。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7690cb1f` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
