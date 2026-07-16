@@ -347,7 +347,7 @@ type DiscoveryRow = {
   featuredAt: Date | null;
   featuredUntil: Date | null;
   updatedAt: Date;
-  package: { id: string; ownerTeamId: string; name: string; description: string; governanceStatus: string; updatedAt: Date; author: { displayName: string } | null };
+  package: { id: string; ownerTeamId: string; name: string; description: string; governanceStatus: string; createdAt: Date; updatedAt: Date; author: { displayName: string } | null };
   currentRelease: { id: string; packageId: string; version: string; manifest: unknown; actionSurfaceManifest: unknown; sha256: string; sizeBytes: number; targetPlatform: string; status: string; marketReviewStatus: string; aiPolicyVersion: number; aiPolicyStatus: string; createdAt: Date };
 };
 type DiscoveryRowWithSnapshot = DiscoveryRow & { snapshot: any | null };
@@ -371,7 +371,7 @@ const DISCOVERY_SELECT = {
   featuredAt: true,
   featuredUntil: true,
   updatedAt: true,
-  package: { select: { id: true, ownerTeamId: true, name: true, description: true, governanceStatus: true, updatedAt: true, author: { select: { displayName: true } } } },
+  package: { select: { id: true, ownerTeamId: true, name: true, description: true, governanceStatus: true, createdAt: true, updatedAt: true, author: { select: { displayName: true } } } },
   currentRelease: { select: { id: true, packageId: true, version: true, manifest: true, actionSurfaceManifest: true, sha256: true, sizeBytes: true, targetPlatform: true, status: true, marketReviewStatus: true, aiPolicyVersion: true, aiPolicyStatus: true, createdAt: true } },
 } as const;
 
