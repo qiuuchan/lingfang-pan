@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  ArchiveRestoreIcon,
   BoxIcon,
   DownloadIcon,
-  FileArchiveIcon,
-  FileEditIcon,
   HistoryIcon,
   InfoIcon,
   Loader2Icon,
@@ -13,27 +10,24 @@ import {
   ShoppingCartIcon,
   StoreIcon,
   Trash2Icon,
-  UploadIcon,
   UsersIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MARKETPLACE_CATEGORY_LABELS } from '@lingfang/contract';
-import { useApp } from '@/App';
-import { PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
+import { pluginSourceText, PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
 import { Markdown } from '@/components/markdown';
+import { Pagination } from '@/components/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/api';
 import type { LoadedPlugin } from '@/lib/types';
 import {
   buyMarketplacePackage,
-  copyInstallationToDraft,
   downloadRelease,
-  importLocalArtifact,
   getMarketplaceOwnerQuality,
   getPluginPackageDetail,
   getPluginReleaseDetail,
@@ -41,9 +35,6 @@ import {
   listMarketplaceRegistry,
   listTeamRegistry,
   loadInstalledPlugin,
-  loadDraftWorkspacePlugin,
-  rollbackInstallation,
-  selectPluginArtifact,
   submitMarketplaceQualityAppeal,
   uninstallInstallation,
   type Installation,
@@ -53,6 +44,14 @@ import {
   type RegistryRelease,
   type TransferProgress,
 } from '@/lib/plugin-registry';
+import {
+  catalogSourceKinds,
+  filterCatalogItems,
+  filterInstallations,
+  paginateItems,
+  type CatalogSourceFilter,
+  type InstallationOriginFilter,
+} from './plugin-center-list';
 
 export type PluginCenterTab = 'installed' | 'team' | 'market';
 
@@ -73,7 +72,6 @@ export function PluginCenterBody({
   onCreate: () => void;
   onClose: () => void;
 }) {
-  const { setCurrentDraft, setPendingDraftEdit, setView } = useApp();
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<Record<string, LoadedPlugin>>({});
   const [team, setTeam] = useState<RegistryCatalogItem[]>([]);
@@ -86,8 +84,12 @@ export function PluginCenterBody({
   const [uninstallTarget, setUninstallTarget] = useState<Installation | null>(null);
   const [historyPackage, setHistoryPackage] = useState<RegistryPackage | null>(null);
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importPath, setImportPath] = useState('');
+  const [installedOrigin, setInstalledOrigin] = useState<InstallationOriginFilter>('all');
+  const [teamSource, setTeamSource] = useState<CatalogSourceFilter>('all');
+  const [marketSource, setMarketSource] = useState<CatalogSourceFilter>('all');
+  const [installedPage, setInstalledPage] = useState(1);
+  const [teamPage, setTeamPage] = useState(1);
+  const [marketPage, setMarketPage] = useState(1);
 
   const reload = useCallback(async () => {
     setLocalLoading(true);
@@ -125,6 +127,25 @@ export function PluginCenterBody({
   useEffect(() => { void reload(); }, [reload]);
 
   const byPackage = useMemo(() => new Map(installations.map((item) => [item.packageId, item])), [installations]);
+  const teamSources = useMemo(() => catalogSourceKinds(team), [team]);
+  const marketSources = useMemo(() => catalogSourceKinds(market), [market]);
+  const installedResult = useMemo(() => paginateItems(filterInstallations(installations, installedOrigin), installedPage), [installations, installedOrigin, installedPage]);
+  const teamResult = useMemo(() => paginateItems(filterCatalogItems(team, teamSource), teamPage), [team, teamSource, teamPage]);
+  const marketResult = useMemo(() => paginateItems(filterCatalogItems(market, marketSource), marketPage), [market, marketSource, marketPage]);
+
+  useEffect(() => {
+    if (teamSource !== 'all' && !teamSources.includes(teamSource)) {
+      setTeamSource('all');
+      setTeamPage(1);
+    }
+  }, [teamSource, teamSources]);
+
+  useEffect(() => {
+    if (marketSource !== 'all' && !marketSources.includes(marketSource)) {
+      setMarketSource('all');
+      setMarketPage(1);
+    }
+  }, [marketSource, marketSources]);
 
   const installCatalogItem = async (item: RegistryCatalogItem, origin: 'team' | 'marketplace') => {
     setBusyKey(item.latestRelease.id);
@@ -155,30 +176,6 @@ export function PluginCenterBody({
     }
   };
 
-  const copyToDraft = async (installation: Installation) => {
-    setBusyKey(installation.installationId);
-    try {
-      const workspace = await copyInstallationToDraft(installation.installationId);
-      const plugin = await loadDraftWorkspacePlugin(workspace);
-      setCurrentDraft({ id: plugin.id, status: 'ready', files: plugin.files || [], turns: [], diagnostics: [] });
-      setPendingDraftEdit({ draft: plugin, turns: [] });
-      setView('develop-plugins');
-    } catch (caught) {
-      toast.error(errorMessage(caught, '复制为草稿失败'));
-    } finally {
-      setBusyKey('');
-    }
-  };
-
-  const chooseImportArtifact = async () => {
-    try {
-      const selected = await selectPluginArtifact();
-      if (selected) setImportPath(selected);
-    } catch (caught) {
-      toast.error(errorMessage(caught, '选择插件制品失败'));
-    }
-  };
-
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <div className="mx-auto max-w-6xl">
@@ -188,7 +185,6 @@ export function PluginCenterBody({
             <p className="text-sm text-muted-foreground">本机安装项是唯一运行入口</p>
           </div>
           <div className="flex items-center gap-2">
-            {tab === 'installed' && <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><UploadIcon />导入</Button>}
             <Button variant="outline" size="sm" onClick={() => void reload()} disabled={localLoading || catalogLoading}>
               <RefreshCwIcon className={localLoading || catalogLoading ? 'animate-spin' : ''} />刷新
             </Button>
@@ -198,7 +194,13 @@ export function PluginCenterBody({
         {error && <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
         {progress && <TransferProgressBar progress={progress} />}
 
-        <Tabs value={tab} onValueChange={(value) => onTabChange(value as PluginCenterTab)}>
+        <Tabs value={tab} onValueChange={(value) => {
+          const nextTab = value as PluginCenterTab;
+          if (nextTab === 'installed') setInstalledPage(1);
+          if (nextTab === 'team') setTeamPage(1);
+          if (nextTab === 'market') setMarketPage(1);
+          onTabChange(nextTab);
+        }}>
           <TabsList className="grid w-full max-w-xl grid-cols-3">
             <TabsTrigger value="installed"><PackageCheckIcon />已安装</TabsTrigger>
             <TabsTrigger value="team"><UsersIcon />团队库</TabsTrigger>
@@ -206,30 +208,36 @@ export function PluginCenterBody({
           </TabsList>
 
           <TabsContent value="installed" className="mt-4">
+            <SourceFilter
+              value={installedOrigin}
+              onChange={(value) => { setInstalledOrigin(value as InstallationOriginFilter); setInstalledPage(1); }}
+              options={[
+                { value: 'builtin', label: '内置' },
+                { value: 'local', label: '本地导入' },
+                { value: 'team', label: '团队' },
+                { value: 'marketplace', label: '市场' },
+              ]}
+            />
             <InstalledList
-              installations={installations}
+              installations={installedResult.items}
               plugins={installedPlugins}
               loading={localLoading}
               onRun={onRun}
               onDetail={(plugin, installation) => setDetailTarget({ kind: 'installed', plugin, installation })}
-              onRollback={async (installation) => {
-                setBusyKey(installation.installationId);
-                try {
-                  await rollbackInstallation(installation.installationId);
-                  toast.success('已切换到上一版本');
-                  await reload();
-                } catch (caught) { toast.error(errorMessage(caught, '回滚失败')); }
-                finally { setBusyKey(''); }
-              }}
               onUninstall={setUninstallTarget}
-              onCopyDraft={(installation) => void copyToDraft(installation)}
               busyKey={busyKey}
             />
+            <Pagination page={installedResult.currentPage} totalPages={installedResult.totalPages} onChange={setInstalledPage} />
           </TabsContent>
 
           <TabsContent value="team" className="mt-4">
+            <SourceFilter
+              value={teamSource}
+              onChange={(value) => { setTeamSource(value as CatalogSourceFilter); setTeamPage(1); }}
+              options={teamSources.map((source) => ({ value: source, label: pluginSourceText(source) }))}
+            />
             <CatalogList
-              items={team}
+              items={teamResult.items}
               loading={catalogLoading}
               installed={byPackage}
               busyKey={busyKey}
@@ -237,18 +245,26 @@ export function PluginCenterBody({
               onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: false })}
               onHistory={(item) => setHistoryPackage(item.package)}
             />
+            <Pagination page={teamResult.currentPage} totalPages={teamResult.totalPages} onChange={setTeamPage} />
           </TabsContent>
 
           <TabsContent value="market" className="mt-4">
-            <MarketplaceDiscoveryGroups
-              items={market}
+            <SourceFilter
+              value={marketSource}
+              onChange={(value) => { setMarketSource(value as CatalogSourceFilter); setMarketPage(1); }}
+              options={marketSources.map((source) => ({ value: source, label: pluginSourceText(source) }))}
+            />
+            <CatalogList
+              items={marketResult.items}
               loading={catalogLoading}
               installed={byPackage}
               busyKey={busyKey}
+              marketplace
               onDownload={(item) => void buyAndDownload(item)}
               onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: true })}
               onHistory={(item) => setHistoryPackage(item.package)}
             />
+            <Pagination page={marketResult.currentPage} totalPages={marketResult.totalPages} onChange={setMarketPage} />
           </TabsContent>
         </Tabs>
       </div>
@@ -278,48 +294,35 @@ export function PluginCenterBody({
 
       <PackageHistoryDialog packageInfo={historyPackage} onClose={() => setHistoryPackage(null)} />
       <PluginDetailDialog target={detailTarget} onClose={() => setDetailTarget(null)} onRun={onRun} />
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>导入本地插件</DialogTitle><DialogDescription>导入 `.lfplugin` v4 压缩包并校验后登记为本机安装项。</DialogDescription></DialogHeader>
-          <div className="flex gap-2"><Input value={importPath} onChange={(event) => setImportPath(event.target.value)} placeholder="选择 .lfplugin 文件（开发环境可输入路径）" /><Button variant="outline" size="icon" title="选择插件制品" onClick={() => void chooseImportArtifact()}><FileArchiveIcon /></Button></div>
-          <DialogFooter><Button variant="outline" onClick={() => setImportOpen(false)}>取消</Button><Button disabled={!importPath.trim() || busyKey === 'local-import'} onClick={async () => {
-            setBusyKey('local-import');
-            try { await importLocalArtifact(importPath.trim()); toast.success('本地插件已导入'); setImportOpen(false); setImportPath(''); await reload(); }
-            catch (caught) { toast.error(errorMessage(caught, '导入失败')); }
-            finally { setBusyKey(''); }
-          }}>{busyKey === 'local-import' ? <Loader2Icon className="animate-spin" /> : <UploadIcon />}导入</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
 
-function MarketplaceDiscoveryGroups(props: Omit<Parameters<typeof CatalogList>[0], 'marketplace'>) {
-  if (props.loading) return <ListLoading />;
-  if (!props.items.length) return <EmptyState icon={StoreIcon} text="市场暂无可下载插件" />;
-  const featured = props.items.filter((item) => item.qualityTier === 'FEATURED');
-  const recentQuality = props.items.filter((item) => item.qualityTier === 'QUALITY').slice(0, 8);
-  const categoryPopular = props.items.filter((item) => item.qualityTier !== 'FEATURED').slice(0, 12);
-  const sections = [
-    { key: 'featured', title: '精选', description: '平台人工推荐，仍需满足上架和安全门禁', items: featured },
-    { key: 'popular', title: '分类热门', description: '按持久质量投影与市场表现稳定排序', items: categoryPopular },
-    { key: 'quality', title: '近期优质', description: '最近通过公开质量规则的插件', items: recentQuality },
-  ].filter((section) => section.items.length > 0);
-  return <div className="space-y-5">{sections.map((section) => <section key={section.key}>
-    <div className="mb-2"><h2 className="text-sm font-semibold">{section.title}</h2><p className="text-xs text-muted-foreground">{section.description}</p></div>
-    <CatalogList {...props} items={section.items} loading={false} marketplace />
-  </section>)}</div>;
+function SourceFilter({ value, options, onChange }: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="mb-3 flex justify-end">
+      <Select value={value} onValueChange={(next) => next && onChange(next)}>
+        <SelectTrigger className="w-44" aria-label="筛选插件来源"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部来源</SelectItem>
+          {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
-function InstalledList({ installations, plugins, loading, onRun, onDetail, onRollback, onUninstall, onCopyDraft, busyKey }: {
+function InstalledList({ installations, plugins, loading, onRun, onDetail, onUninstall, busyKey }: {
   installations: Installation[];
   plugins: Record<string, LoadedPlugin>;
   loading: boolean;
   onRun: (plugin: LoadedPlugin) => void;
   onDetail: (plugin: LoadedPlugin, installation: Installation) => void;
-  onRollback: (installation: Installation) => void;
   onUninstall: (installation: Installation) => void;
-  onCopyDraft: (installation: Installation) => void;
   busyKey: string;
 }) {
   if (loading) return <ListLoading />;
@@ -347,12 +350,6 @@ function InstalledList({ installations, plugins, loading, onRun, onDetail, onRol
             <div className="flex shrink-0 items-center gap-2">
               <Button size="sm" disabled={!plugin || busy} onClick={() => plugin && onRun(plugin)}>运行</Button>
               <Button variant="outline" size="icon-sm" title="插件详情" disabled={!plugin || busy} onClick={() => plugin && onDetail(plugin, installation)}><InfoIcon /></Button>
-              <Button variant="outline" size="icon-sm" title="复制为草稿后编辑" disabled={busy} onClick={() => onCopyDraft(installation)}><FileEditIcon /></Button>
-              {installation.previousRelease && (
-                <Button variant="outline" size="icon-sm" title="回滚到上一版本" disabled={busy} onClick={() => onRollback(installation)}>
-                  <ArchiveRestoreIcon />
-                </Button>
-              )}
               <Button variant="ghost" size="icon-sm" title={installation.protected ? '内置插件不可卸载' : '卸载'} disabled={installation.protected || busy} onClick={() => onUninstall(installation)}>
                 {busy ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
               </Button>
