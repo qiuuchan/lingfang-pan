@@ -2,8 +2,37 @@ import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/commo
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import jwt from 'jsonwebtoken';
+import { timingSafeEqual } from 'node:crypto';
 import { PrismaService } from './prisma.service';
-import { IS_PUBLIC_KEY, unauthorized, type AuthUser } from './common';
+import { AppError, IS_PUBLIC_KEY, unauthorized, type AuthUser } from './common';
+
+export const WEB_SESSION_COOKIE = 'lingfang_web_session';
+export const WEB_CSRF_COOKIE = 'lingfang_web_csrf';
+
+function cookieValue(request: Request, name: string): string {
+  const header = request.header('cookie') || '';
+  for (const part of header.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); } catch { return ''; }
+  }
+  return '';
+}
+
+export function webSessionToken(request: Request): string {
+  const path = request.path || request.originalUrl || '';
+  return path.startsWith('/web/') || path.startsWith('/api/web/') ? cookieValue(request, WEB_SESSION_COOKIE) : '';
+}
+
+export function requireWebCsrf(request: Request): void {
+  const expected = cookieValue(request, WEB_CSRF_COOKIE);
+  const supplied = request.header('x-csrf-token') || '';
+  const valid = expected && supplied && expected.length === supplied.length
+    && timingSafeEqual(Buffer.from(expected), Buffer.from(supplied));
+  if (!valid) {
+    throw new AppError(403, 'csrf_invalid', 'CSRF 校验失败，请刷新页面后重试');
+  }
+}
 
 /**
  * 全局 JWT 守卫。
@@ -32,8 +61,12 @@ export class JwtAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request & { user?: AuthUser }>();
     const header = request.header('authorization') || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const cookieToken = bearer ? '' : webSessionToken(request);
+    const token = bearer || cookieToken;
     if (!token) throw unauthorized();
+
+    if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase())) requireWebCsrf(request);
 
     let payload: jwt.JwtPayload;
     try {

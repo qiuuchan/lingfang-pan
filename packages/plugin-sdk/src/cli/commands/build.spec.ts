@@ -186,3 +186,19 @@ describe('buildCommand — manifest_validation_failed', () => {
     expect(result!.errors[0].code).toBe('manifest_validation_failed');
   });
 });
+
+describe('buildCommand — README.md contract', () => {
+  it('fails before packing an oversized or non-UTF-8 README', async () => {
+    const dir = await tempDir();
+    await writeFile(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'com.test.readme', name: 'README', version: '1.0.0', description: '', runtime_type: 'client', entry: 'index.html', visibility: 'tenant', capabilities: [] }));
+    await writeFile(path.join(dir, 'index.html'), '<main></main>');
+    await writeFile(path.join(dir, 'README.md'), Buffer.alloc(256 * 1024 + 1, 0x61));
+    const oversized = await runBuild(dir);
+    expect(oversized.exitCode).toBe(1);
+    expect(oversized.result?.errors[0]?.code).toBe('readme_too_large');
+    await writeFile(path.join(dir, 'README.md'), Buffer.from([0xc3, 0x28]));
+    const invalidUtf8 = await runBuild(dir);
+    expect(invalidUtf8.exitCode).toBe(1);
+    expect(invalidUtf8.result?.errors[0]?.code).toBe('readme_invalid_utf8');
+  });
+});

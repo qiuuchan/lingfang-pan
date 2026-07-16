@@ -110,6 +110,141 @@ enum MarketplaceDelistActor {
   PLATFORM
 }
 
+enum MarketplaceSettlementVersion {
+  LEGACY_V1
+  SETTLEMENT_V2
+}
+
+enum MarketplaceOrderStatus {
+  PENDING_SETTLEMENT
+  REFUND_REQUESTED
+  SETTLED
+  REFUNDED
+}
+
+enum MarketplaceEntitlementStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum MarketplaceCommerceWriterMode {
+  LEGACY
+  DRAINING
+  SETTLEMENT_V2
+  PAUSED
+}
+
+enum MarketplaceSettlementJobRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum MarketplacePlatformAccountKind {
+  MARKETPLACE_CLEARING
+  MARKETPLACE_REVENUE
+}
+
+enum MarketplaceLedgerEntryKind {
+  BUYER_PURCHASE_DEBIT
+  PLATFORM_PURCHASE_CLEARING_CREDIT
+  BUYER_REFUND_CREDIT
+  PLATFORM_REFUND_CLEARING_DEBIT
+  PLATFORM_SETTLEMENT_CLEARING_DEBIT
+  SELLER_SETTLEMENT_CREDIT
+  PLATFORM_SETTLEMENT_CREDIT
+}
+
+enum MarketplaceRefundRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum MarketplaceCampaignStatus {
+  DRAFT
+  PUBLISHED
+  CANCELED
+}
+
+enum MarketplaceAttributionKind {
+  ORGANIC
+  CAMPAIGN
+}
+
+enum MarketplacePurchaseResultKind {
+  ENTITLED_EXISTING
+  ORDER_CREATED
+}
+
+enum MarketplaceCategory {
+  AI
+  PRODUCTIVITY
+  DEV
+  DATA
+  MEDIA
+  FILES
+  NETWORK
+  SYSTEM
+  OTHER
+}
+
+enum MarketplaceQualityTier {
+  LISTED
+  QUALITY
+  FEATURED
+}
+
+enum MarketplaceMetricKind {
+  INSTALL_SUCCEEDED
+  RUN_SUCCEEDED
+  RUN_FAILED
+  RATING_CHANGED
+  PURCHASED
+  REFUNDED
+  SECURITY_BLOCKED
+  SECURITY_CLEARED
+}
+
+enum MarketplaceMetricSource {
+  DESKTOP_HOST
+  CLOUD_RUNTIME
+  WORKFLOW_RUNTIME
+  REGISTRY
+  COMMERCE
+  SECURITY
+}
+
+enum MarketplaceUsageOutcome {
+  SUCCEEDED
+  FAILED
+  CANCELED
+  EXCLUDED
+}
+
+enum MarketplaceEligibilityKind {
+  LISTING
+  RELEASE
+}
+
+enum MarketplaceRefundMetricState {
+  AVAILABLE
+  NOT_APPLICABLE
+  INSUFFICIENT_SAMPLE
+  DATA_UNAVAILABLE
+}
+
+enum MarketplaceQualityComputationKind {
+  DAILY
+  MANUAL
+}
+
+enum MarketplaceQualityComputationStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 enum PluginEntitlementKind {
   PURCHASED
 }
@@ -201,6 +336,124 @@ enum PluginGrantEffect {
   DENY
 }
 
+enum ActionInvocationKind {
+  STANDARD
+  PREVIEW
+}
+enum ActionInvocationStatus {
+  AUTHORIZED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  TIMED_OUT
+}
+enum RuntimeArtifactStatus {
+  ACTIVE
+  DELETED
+}
+enum RuntimeArtifactGrantTarget {
+  INVOCATION
+  LOGICAL_EFFECT
+  PRINCIPAL_IMPORT
+  WORKFLOW_RUN
+  SHARED_VALUE
+}
+enum WorkflowExecutionScope {
+  PRODUCTION
+  PREVIEW
+}
+enum WorkflowExecutionTarget {
+  DESKTOP
+  CLOUD
+}
+enum WorkflowRunStatus {
+  PENDING
+  RUNNING
+  FAILING
+  SUCCEEDED
+  FAILED
+  CANCELING
+  CANCELED
+}
+enum WorkflowStepStatus {
+  PENDING
+  READY
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  CANCELED
+}
+enum DesktopExecutorSessionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+enum CloudDeploymentEnvironment {
+  PREVIEW
+  PRODUCTION
+}
+enum CloudDeploymentStatus {
+  DRAFT
+  VERIFYING
+  READY
+  DISABLED
+  RETIRED
+}
+enum AutomationScheduleKind {
+  ONCE
+  DAILY
+  WEEKLY
+}
+enum AutomationScheduleStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  MISSED
+  DELETED
+}
+enum AutomationScheduleSyncState {
+  PENDING
+  SYNCED
+  ERROR
+}
+enum AutomationOutboxKind {
+  UPSERT_SCHEDULE
+  REMOVE_SCHEDULE
+  ENQUEUE_RUN
+  ENQUEUE_ACTION
+  CANCEL_RUN
+}
+enum AutomationOutboxStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+enum SharedNamespaceOwnerKind {
+  PACKAGE
+  WORKFLOW
+}
+enum SharedChangeEventKind {
+  UPSERT
+  DELETE
+}
+enum CloudUsageSourceKind {
+  ACTION_INVOCATION
+  WORKFLOW_ATTEMPT
+}
+enum CloudUsageEventKind {
+  EXECUTION
+}
+enum CloudUsageOutcome {
+  SUCCEEDED
+  FAILED
+  CANCELED
+  TIMED_OUT
+  RESULT_UNKNOWN
+}
+
 // === 帮助与反馈工单系统 ===
 // 工单分类（提交人选择，影响后台筛选）。OTHER 兜底，避免锁死枚举导致前端无法提交边缘问题。
 enum TicketCategory {
@@ -277,10 +530,23 @@ model User {
   walletTransactions     WalletTransaction[]
   purchasesBuyer         Purchase[]             @relation("PurchaseBuyer")
   purchasesSeller        Purchase[]             @relation("PurchaseSeller")
+  purchasesRefunded      Purchase[]             @relation("PurchaseRefunder")
+  marketplaceRefundRequests MarketplaceRefundRequest[] @relation("MarketplaceRefundRequester")
+  marketplaceRefundReviews MarketplaceRefundRequest[] @relation("MarketplaceRefundReviewer")
+  marketplaceDiscountsCreated MarketplaceDiscount[] @relation("MarketplaceDiscountCreator")
+  marketplaceDiscountsCanceled MarketplaceDiscount[] @relation("MarketplaceDiscountCanceler")
+  marketplaceCampaignsCreated MarketplaceCampaign[] @relation("MarketplaceCampaignCreator")
+  marketplaceCampaignsPublished MarketplaceCampaign[] @relation("MarketplaceCampaignPublisher")
   pluginRatings          PluginRating[]         @relation("PluginRater")
   auditLogs              AuditLog[]             @relation("AuditActor")
   platformSettingUpdates PlatformSetting[]      @relation("SettingUpdater")
   pluginGrantsCreated    PluginGrant[]          @relation("PluginGrantCreator")
+  pluginPolicyRevisions  TeamPluginPolicyRevision[] @relation("PluginPolicyRevisionCreator")
+  actionInvocations      ActionInvocation[] @relation("ActionInvocationPrincipal")
+  workflowRuns           WorkflowRun[] @relation("WorkflowRunPrincipal")
+  desktopExecutorSessions DesktopExecutorSession[]
+  automationSchedules     AutomationSchedule[]
+  webPreviewSessions      WebPreviewSession[]
   notifications          Notification[]
   // 计费/中转反向关系：用户作为灵石流水触发者、调用日志发起者。
   creditLedgerActor      CreditLedger[]         @relation("CreditLedgerActor")
@@ -313,9 +579,25 @@ model Team {
   installations      PluginInstallation[]
   pluginPackages     PluginPackage[]
   pluginEntitlements PluginEntitlement[]
+  marketplacePurchasesBuyer Purchase[] @relation("PurchaseBuyerTeam")
+  marketplacePurchasesSeller Purchase[] @relation("PurchaseSellerTeam")
+  marketplacePurchaseIdempotencies MarketplacePurchaseIdempotency[]
+  marketplaceRefundRequests MarketplaceRefundRequest[]
   // RBAC：团队级自定义角色（scope=TEAM，teamId 指向本团队）+ 团队插件授权记录。
   roles              Role[]
   pluginGrants       PluginGrant[]
+  pluginPolicy       TeamPluginPolicy?
+  pluginPolicyRevisions TeamPluginPolicyRevision[]
+  actionInvocations ActionInvocation[]
+  runtimeArtifacts RuntimeArtifact[]
+  workflowRuns WorkflowRun[]
+  desktopExecutorSessions DesktopExecutorSession[]
+  cloudActionDeployments CloudActionDeployment[]
+  automationSchedules AutomationSchedule[]
+  webPreviewSessions WebPreviewSession[]
+  cloudUsageEvents CloudUsageEvent[]
+  sharedNamespaces PluginSharedNamespace[]
+  sharedStateOutbox SharedStateOutbox[]
   // 计费/中转反向关系：团队灵石账户、灵石流水、调用日志。
   // 注：ChannelBinding.scopeId 为多态列（不建 FK），故 Team 不持有 channelBindings 反向关系。
   creditAccount      TeamCredit?
@@ -386,16 +668,24 @@ model InvitationCode {
 
 model BalanceLedger {
   id          String          @id @default(uuid())
-  teamId      String
+  teamId      String?
+  platformAccountId String?
+  purchaseId  String?
+  marketplaceEntryKind MarketplaceLedgerEntryKind?
   amountCents Int
   direction   LedgerDirection
   reason      String
   actorUserId String?
   createdAt   DateTime        @default(now())
-  team        Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team        Team?           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  platformAccount MarketplacePlatformAccount? @relation(fields: [platformAccountId], references: [id], onDelete: Restrict)
+  purchase    Purchase?       @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
   actor       User?           @relation("LedgerActor", fields: [actorUserId], references: [id])
 
   @@index([teamId, createdAt])
+  @@index([platformAccountId, createdAt])
+  @@index([purchaseId, createdAt])
+  @@unique([purchaseId, marketplaceEntryKind])
 }
 
 model Plugin {
@@ -489,6 +779,8 @@ model PluginPackage {
   listing          MarketplaceListing?
   entitlements     PluginEntitlement[]
   purchases        Purchase[]
+  marketplaceDiscounts MarketplaceDiscount[]
+  marketplaceCampaignItems MarketplaceCampaignItem[]
   grants           PluginGrant[]       @relation("PluginPackageGrants")
 
   @@unique([ownerTeamId, manifestId])
@@ -501,6 +793,9 @@ model PluginRelease {
   packageId          String
   version            String
   manifest           Json
+  readmeMarkdown     String                  @default("") @db.Text
+  packagePolicySurfaceSha256 String          @default("0000000000000000000000000000000000000000000000000000000000000000")
+  actionSurfaceManifest Json                 @default("[]")
   fileManifest       Json                    @default("[]")
   artifactKey        String                  @unique
   sha256             String
@@ -523,6 +818,11 @@ model PluginRelease {
   creator            User?                   @relation("PluginReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   reviews            PluginReleaseReview[]
   currentForListings MarketplaceListing[]    @relation("MarketplaceCurrentRelease")
+  workflowRelease    WorkflowRelease?
+  cloudDeployments   CloudActionDeployment[]
+  cloudRoutes        CloudActionRouting[]
+  marketplacePurchases Purchase[]
+  webPreviewSessions WebPreviewSession[]
 
   @@unique([packageId, version])
   @@index([packageId, status, createdAt])
@@ -535,6 +835,7 @@ model MarketplaceListing {
   packageId        String                   @unique
   currentReleaseId String?
   priceCents       Int                      @default(0)
+  priceRevision    Int                      @default(1)
   status           MarketplaceListingStatus @default(DRAFT)
   delistedBy       MarketplaceDelistActor?
   delistReason     String                   @default("")
@@ -543,6 +844,24 @@ model MarketplaceListing {
   installCount     Int                      @default(0)
   ratingCount      Int                      @default(0)
   ratingSum        Int                      @default(0)
+  category         MarketplaceCategory      @default(OTHER)
+  currentReleaseActivatedAt DateTime?
+  pointerRevision  Int                      @default(0)
+  listingEligibleSince DateTime?
+  releaseEligibleSince DateTime?
+  eligibilityRevision Int                   @default(0)
+  eligibilityGateDigest String              @default("")
+  qualityTier      MarketplaceQualityTier   @default(LISTED)
+  qualitySnapshotId String?
+  qualityQualifiedAt DateTime?
+  qualityBlockedAt DateTime?
+  qualityBlockedByUserId String?
+  qualityBlockedReason String               @default("")
+  featuredAt       DateTime?
+  featuredUntil    DateTime?
+  featuredByUserId String?
+  featuredReason   String                   @default("")
+  featuredRank     Int?
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
   package          PluginPackage            @relation(fields: [packageId], references: [id], onDelete: Restrict)
@@ -550,6 +869,191 @@ model MarketplaceListing {
 
   @@index([status, updatedAt])
   @@index([currentReleaseId])
+  @@index([category, status, qualityTier])
+  @@index([qualityTier, qualityQualifiedAt])
+  @@index([featuredUntil, featuredRank])
+}
+
+model MarketplaceListingReleaseActivation {
+  id              String   @id @default(uuid())
+  listingId       String
+  releaseId       String
+  activatedAt     DateTime
+  changedByUserId String?
+  source          String
+  pointerRevision Int
+  createdAt       DateTime @default(now())
+
+  @@unique([listingId, pointerRevision])
+  @@index([listingId, activatedAt])
+  @@index([releaseId, activatedAt])
+}
+
+model MarketplaceListingEligibilityEpoch {
+  id                 String                     @id @default(uuid())
+  listingId          String
+  releaseId          String?
+  kind               MarketplaceEligibilityKind
+  generation         Int
+  startedAt          DateTime
+  endedAt            DateTime?
+  startReason        String
+  endReason          String?
+  gateSnapshotDigest String
+  createdAt          DateTime                   @default(now())
+
+  @@unique([listingId, kind, generation])
+  @@index([listingId, kind, startedAt])
+  @@index([releaseId, kind, startedAt])
+}
+
+model MarketplaceMetricEvent {
+  id             String                  @id @default(uuid())
+  idempotencyKey String                  @unique
+  packageId      String
+  releaseId      String
+  teamId         String?
+  kind           MarketplaceMetricKind
+  source         MarketplaceMetricSource
+  sourceRecordId String
+  value          Int?
+  metadata       Json?
+  occurredAt     DateTime
+  recordedAt     DateTime                @default(now())
+
+  @@index([packageId, kind, occurredAt])
+  @@index([packageId, releaseId, kind, occurredAt])
+  @@index([teamId, occurredAt])
+  @@index([recordedAt])
+}
+
+model MarketplaceUsageSession {
+  id           String                   @id @default(uuid())
+  packageId    String
+  releaseId    String
+  sha256       String
+  teamId       String
+  userId       String
+  issuedAt     DateTime                 @default(now())
+  expiresAt    DateTime
+  completedAt  DateTime?
+  outcome      MarketplaceUsageOutcome?
+  failureClass String?
+  createdAt    DateTime                 @default(now())
+
+  @@index([teamId, userId, expiresAt])
+  @@index([packageId, releaseId, completedAt])
+}
+
+model MarketplaceRating {
+  id          String   @id @default(uuid())
+  packageId   String
+  teamId      String
+  score       Int
+  comment     String   @default("")
+  revision    Int      @default(1)
+  createdById String
+  updatedById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([packageId, teamId])
+  @@index([packageId, updatedAt])
+}
+
+model MarketplaceRatingRevision {
+  id          String   @id @default(uuid())
+  ratingId    String
+  packageId   String
+  teamId      String
+  revision    Int
+  score       Int
+  recordedAt  DateTime
+  sourceKind  String
+  sourceId    String
+  actorUserId String
+
+  @@unique([ratingId, revision])
+  @@index([packageId, teamId, recordedAt])
+  @@index([packageId, recordedAt])
+}
+
+model MarketplaceQualitySnapshot {
+  id                        String                       @id @default(uuid())
+  packageId                 String
+  releaseId                 String
+  currentReleaseActivatedAt DateTime
+  listingEligibleSince      DateTime?
+  releaseEligibleSince      DateTime?
+  eligibilityRevision       Int
+  policyVersion             Int
+  factWatermark             DateTime
+  computationRevision       BigInt
+  windowStart               DateTime
+  windowEnd                 DateTime
+  computedAt                DateTime                     @default(now())
+  listingAgeDays            Int
+  currentReleaseAgeDays     Int
+  activeTeams30d            Int
+  installTeams30d           Int
+  observedRuns30d           Int
+  failedRuns30d             Int
+  failureRateBps            Int?
+  ratingTeams               Int
+  ratingSum                 Int
+  averageRatingTenths       Int?
+  refundMetricState         MarketplaceRefundMetricState
+  maturedPaidOrders90d      Int
+  approvedRefunds90d        Int
+  refundRateBps             Int?
+  securityIncidents90d      Int
+  anomalyReviewRequired     Boolean                      @default(false)
+  autoQualified             Boolean
+  reasons                   Json
+
+  @@unique([packageId, releaseId, currentReleaseActivatedAt, eligibilityRevision, policyVersion, factWatermark, computationRevision])
+  @@index([packageId, releaseId, factWatermark, computationRevision])
+  @@index([autoQualified, computedAt])
+}
+
+model MarketplaceQualityComputation {
+  id                        String                              @id @default(uuid())
+  jobKey                    String                              @unique
+  kind                      MarketplaceQualityComputationKind
+  packageId                 String
+  releaseId                 String
+  currentReleaseActivatedAt DateTime
+  pointerRevision           Int
+  eligibilityRevision       Int
+  requestedFactWatermark    DateTime
+  status                    MarketplaceQualityComputationStatus @default(RUNNING)
+  snapshotId                String?
+  errorCode                 String?
+  startedAt                 DateTime                            @default(now())
+  finishedAt                DateTime?
+
+  @@index([packageId, startedAt])
+  @@index([status, startedAt])
+}
+
+model WebPreviewSession {
+  id String @id @default(uuid())
+  userId String
+  teamId String
+  packageId String
+  releaseId String
+  releaseSha256 String
+  mode String
+  nonceSha256 String @unique
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  release PluginRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@index([userId, teamId, expiresAt])
+  @@index([releaseId, expiresAt])
 }
 
 model PluginEntitlement {
@@ -558,13 +1062,22 @@ model PluginEntitlement {
   packageId  String
   kind       PluginEntitlementKind @default(PURCHASED)
   purchaseId String?               @unique
+  status MarketplaceEntitlementStatus @default(ACTIVE)
+  activatedAt DateTime             @default(now())
+  revokedAt DateTime?
+  revokedByPurchaseId String?
+  revokedReason String              @default("")
   createdAt  DateTime              @default(now())
   team       Team                  @relation(fields: [teamId], references: [id], onDelete: Restrict)
   package    PluginPackage         @relation(fields: [packageId], references: [id], onDelete: Restrict)
-  purchase   Purchase?             @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  purchase   Purchase?             @relation("EntitlementPurchase", fields: [purchaseId], references: [id], onDelete: Restrict)
+  revokedByPurchase Purchase?      @relation("EntitlementRevokedByPurchase", fields: [revokedByPurchaseId], references: [id], onDelete: Restrict)
+  idempotencyRecords MarketplacePurchaseIdempotency[]
 
   @@unique([teamId, packageId])
   @@index([packageId, createdAt])
+  @@index([teamId, packageId, status])
+  @@index([revokedByPurchaseId])
 }
 
 model PluginReleaseReview {
@@ -639,24 +1152,191 @@ model Purchase {
   id           String             @id @default(uuid())
   pluginId     String?
   packageId    String?
+  releaseId    String?
   buyerUserId  String
   buyerTeamId  String
   sellerUserId String
+  sellerTeamId String?
   priceCents   Int
+  currencyCode String @default("CNY")
+  listPriceCents Int @default(0)
+  discountAmountCents Int @default(0)
+  platformFeeBps Int @default(0)
+  platformAmountCents Int @default(0)
+  sellerAmountCents Int @default(0)
+  settlementVersion MarketplaceSettlementVersion @default(LEGACY_V1)
+  priceRevision Int @default(1)
+  priceVersion String @default("legacy-v1")
+  discountId String?
+  discountRevision Int?
+  campaignId String?
+  campaignItemId String?
+  attributionKind MarketplaceAttributionKind @default(ORGANIC)
+  status MarketplaceOrderStatus @default(SETTLED)
+  settleAt DateTime?
+  refundableUntil DateTime?
+  settledAt DateTime?
+  refundedAt DateTime?
+  refundedByUserId String?
+  refundReason String @default("")
+  idempotencyKey String?
   createdAt    DateTime           @default(now())
   plugin       Plugin?            @relation(fields: [pluginId], references: [id], onDelete: Cascade)
   package      PluginPackage?     @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  release      PluginRelease?     @relation(fields: [releaseId], references: [id], onDelete: Restrict)
   buyer        User               @relation("PurchaseBuyer", fields: [buyerUserId], references: [id])
   seller       User               @relation("PurchaseSeller", fields: [sellerUserId], references: [id])
-  entitlement  PluginEntitlement?
+  buyerTeam    Team               @relation("PurchaseBuyerTeam", fields: [buyerTeamId], references: [id], onDelete: Restrict)
+  sellerTeam   Team?              @relation("PurchaseSellerTeam", fields: [sellerTeamId], references: [id], onDelete: Restrict)
+  refundedBy   User?              @relation("PurchaseRefunder", fields: [refundedByUserId], references: [id], onDelete: SetNull)
+  discount     MarketplaceDiscount? @relation(fields: [discountId], references: [id], onDelete: Restrict)
+  campaign     MarketplaceCampaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  campaignItem MarketplaceCampaignItem? @relation(fields: [campaignItemId], references: [id], onDelete: Restrict)
+  entitlement  PluginEntitlement? @relation("EntitlementPurchase")
+  revokedEntitlements PluginEntitlement[] @relation("EntitlementRevokedByPurchase")
+  refundRequest MarketplaceRefundRequest?
+  ledgerEntries BalanceLedger[]
+  idempotencyRecords MarketplacePurchaseIdempotency[]
 
   @@unique([pluginId, buyerUserId])
-  @@unique([packageId, buyerTeamId])
+  @@index([packageId, buyerTeamId])
   @@index([buyerUserId])
   @@index([packageId])
+  @@index([releaseId])
+  @@index([sellerTeamId, status, createdAt])
+  @@index([status, settleAt])
+  @@index([discountId])
+  @@index([campaignId])
   // 组E 性能：按买方团队聚合的高频查询索引。adminTeamDetail 用 buyerTeamId + createdAt desc
   // 拉最近 10 笔购买，此前 buyerTeamId 无索引走全表扫描；按租户的财务聚合同样受益。
   @@index([buyerTeamId, createdAt])
+}
+
+model MarketplaceCommerceState {
+  id String @id @default("singleton")
+  writerMode MarketplaceCommerceWriterMode @default(LEGACY)
+  writerGeneration Int @default(0)
+  settlementV2ActivatedAt DateTime?
+  pausedAt DateTime?
+  pauseReason String @default("")
+  lastSettlementJobAt DateTime?
+  lastSettlementJobStatus MarketplaceSettlementJobRunStatus?
+  lastSettlementJobScanned Int @default(0)
+  lastSettlementJobSettled Int @default(0)
+  lastSettlementJobSkipped Int @default(0)
+  lastSettlementJobError String @default("")
+  lastReconciliationAt DateTime?
+  lastReconciliationStatus String @default("")
+  lastReconciliationReport Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MarketplacePlatformAccount {
+  id String @id
+  kind MarketplacePlatformAccountKind @unique
+  currencyCode String @default("CNY")
+  balanceCents Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ledgerEntries BalanceLedger[]
+}
+
+model MarketplacePurchaseIdempotency {
+  id String @id @default(uuid())
+  buyerTeamId String
+  key String
+  packageId String
+  requestDigest String
+  resultKind MarketplacePurchaseResultKind
+  purchaseId String?
+  entitlementId String
+  responseJson Json
+  createdAt DateTime @default(now())
+  buyerTeam Team @relation(fields: [buyerTeamId], references: [id], onDelete: Restrict)
+  purchase Purchase? @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  entitlement PluginEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Restrict)
+
+  @@unique([buyerTeamId, key])
+  @@index([packageId, createdAt])
+  @@index([purchaseId])
+}
+
+model MarketplaceRefundRequest {
+  id String @id @default(uuid())
+  purchaseId String @unique
+  requesterUserId String
+  buyerTeamId String
+  reason String
+  requestedAt DateTime @default(now())
+  status MarketplaceRefundRequestStatus @default(PENDING)
+  reviewedByUserId String?
+  reviewedAt DateTime?
+  reviewReason String @default("")
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  requester User @relation("MarketplaceRefundRequester", fields: [requesterUserId], references: [id], onDelete: Restrict)
+  buyerTeam Team @relation(fields: [buyerTeamId], references: [id], onDelete: Restrict)
+  reviewedBy User? @relation("MarketplaceRefundReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([buyerTeamId, status, requestedAt])
+  @@index([status, requestedAt])
+}
+
+model MarketplaceDiscount {
+  id String @id @default(uuid())
+  packageId String
+  revision Int @default(1)
+  priceCents Int
+  startsAt DateTime
+  endsAt DateTime
+  createdByUserId String
+  canceledAt DateTime?
+  canceledByUserId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  package PluginPackage @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  createdBy User @relation("MarketplaceDiscountCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  canceledBy User? @relation("MarketplaceDiscountCanceler", fields: [canceledByUserId], references: [id], onDelete: SetNull)
+  purchases Purchase[]
+
+  @@index([packageId, startsAt, endsAt])
+  @@index([packageId, canceledAt])
+}
+
+model MarketplaceCampaign {
+  id String @id @default(uuid())
+  slug String @unique
+  name String
+  description String @default("")
+  startsAt DateTime
+  endsAt DateTime
+  status MarketplaceCampaignStatus @default(DRAFT)
+  createdByUserId String
+  publishedByUserId String?
+  publishedAt DateTime?
+  canceledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy User @relation("MarketplaceCampaignCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  publishedBy User? @relation("MarketplaceCampaignPublisher", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  items MarketplaceCampaignItem[]
+  purchases Purchase[]
+
+  @@index([status, startsAt, endsAt])
+}
+
+model MarketplaceCampaignItem {
+  id String @id @default(uuid())
+  campaignId String
+  packageId String
+  rank Int
+  campaign MarketplaceCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  package PluginPackage @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  purchases Purchase[]
+
+  @@unique([campaignId, packageId])
+  @@unique([campaignId, rank])
+  @@index([packageId])
 }
 
 model PluginRating {
@@ -897,6 +1577,570 @@ model PluginGrant {
   @@unique([teamId, packageId, subjectKind, subjectId])
   @@index([teamId, pluginId])
   @@index([teamId, packageId])
+}
+
+model TeamPluginPolicy {
+  id               String                    @id @default(uuid())
+  teamId           String                    @unique
+  activeRevisionId String?                   @unique
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  team             Team                      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  activeRevision   TeamPluginPolicyRevision? @relation("ActivePluginPolicyRevision", fields: [activeRevisionId], references: [id], onDelete: SetNull)
+  revisions        TeamPluginPolicyRevision[] @relation("PluginPolicyRevisions")
+}
+
+model TeamPluginPolicyRevision {
+  id               String            @id @default(uuid())
+  policyId         String
+  teamId           String
+  revision         Int
+  schemaVersion    Int               @default(1)
+  enforcementMode String             @default("ENFORCE")
+  document         Json
+  documentSha256   String
+  createdById      String?
+  sourceRevisionId String?
+  changeReason     String            @default("")
+  createdAt        DateTime          @default(now())
+  policy           TeamPluginPolicy  @relation("PluginPolicyRevisions", fields: [policyId], references: [id], onDelete: Cascade)
+  activeForPolicy  TeamPluginPolicy? @relation("ActivePluginPolicyRevision")
+  team             Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy        User?             @relation("PluginPolicyRevisionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([teamId, revision])
+  @@index([policyId, createdAt])
+  @@index([sourceRevisionId])
+}
+
+model ActionInvocation {
+  id                    String                 @id @default(uuid())
+  teamId                String
+  principalUserId       String?
+  kind                  ActionInvocationKind
+  status                ActionInvocationStatus @default(AUTHORIZED)
+  packageId             String
+  releaseId             String
+  releaseSha256         String
+  actionId              String
+  actionContractVersion String
+  actionSurfaceSha256   String
+  callerKind            String
+  callerId              String
+  requestId             String
+  requestScopeKey       String                 @unique
+  requestIdempotencyKey String
+  effectIdempotencyKey  String?
+  rootInvocationId      String?
+  parentInvocationId    String?
+  policyRevision        Int
+  requiredOperations    Json                   @default("[]")
+  input                 Json
+  inputSha256           String
+  output                Json?
+  outputSha256          String?
+  authorizationDecision Json?
+  executionBinding      Json?
+  cloudDeploymentId     String?
+  cloudRoutingGeneration Int?
+  cloudEnvironment      CloudDeploymentEnvironment?
+  callChain             Json                   @default("[]")
+  deadlineAt            DateTime
+  startedAt             DateTime?
+  completedAt           DateTime?
+  errorCode             String                 @default("")
+  errorMessage          String                 @default("")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  team                  Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  principal             User?                  @relation("ActionInvocationPrincipal", fields: [principalUserId], references: [id], onDelete: SetNull)
+  parent                ActionInvocation?      @relation("NestedActionInvocations", fields: [parentInvocationId], references: [id], onDelete: Restrict)
+  children              ActionInvocation[]     @relation("NestedActionInvocations")
+  artifacts             RuntimeArtifact[]
+  workflowStepAttempt   WorkflowStepAttempt?
+  cloudDeployment       CloudActionDeployment? @relation(fields: [cloudDeploymentId], references: [id], onDelete: Restrict)
+
+  @@index([teamId, status, createdAt])
+  @@index([releaseId, actionId, createdAt])
+  @@index([rootInvocationId, createdAt])
+  @@index([parentInvocationId])
+  @@index([cloudDeploymentId, status])
+}
+
+model RuntimeArtifact {
+  id                  String                 @id @default(uuid())
+  teamId              String
+  creatorInvocationId String?
+  executionKind       ActionInvocationKind
+  objectKey           String                 @unique
+  mediaType           String
+  sizeBytes           Int
+  sha256              String
+  status              RuntimeArtifactStatus  @default(ACTIVE)
+  retainUntil         DateTime
+  effectReplayUntil   DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime               @default(now())
+  team                Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  creatorInvocation   ActionInvocation?      @relation(fields: [creatorInvocationId], references: [id], onDelete: SetNull)
+  grants              RuntimeArtifactGrant[]
+  holds               RuntimeArtifactHold[]
+  sharedValueEdges    PluginSharedValueArtifact[]
+
+  @@unique([id, executionKind])
+  @@index([teamId, status, retainUntil])
+  @@index([creatorInvocationId])
+}
+
+model RuntimeArtifactGrant {
+  id            String                     @id @default(uuid())
+  artifactId    String
+  executionKind ActionInvocationKind
+  targetKind    RuntimeArtifactGrantTarget
+  targetId      String
+  scopeDigest   String
+  subjectKey    String
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime                   @default(now())
+  artifact      RuntimeArtifact            @relation(fields: [artifactId, executionKind], references: [id, executionKind], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([artifactId, executionKind, subjectKey])
+  @@index([targetKind, targetId, expiresAt])
+}
+
+model RuntimeArtifactHold {
+  id            String               @id @default(uuid())
+  artifactId    String
+  executionKind ActionInvocationKind
+  holderKind    String
+  holderId      String
+  purpose       String
+  scopeDigest   String
+  holderKey     String
+  retainUntil   DateTime
+  releasedAt    DateTime?
+  createdAt     DateTime             @default(now())
+  artifact      RuntimeArtifact      @relation(fields: [artifactId, executionKind], references: [id, executionKind], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([artifactId, executionKind, holderKey])
+  @@index([holderKind, holderId, retainUntil])
+}
+
+model PluginSharedNamespace {
+  id                  String                    @id @default(uuid())
+  teamId              String
+  ownerKind           SharedNamespaceOwnerKind
+  ownerId             String
+  name                String
+  generation          Int                       @default(1)
+  deletedAt           DateTime?
+  activeSchemaVersion Int                       @default(1)
+  nextValueRevision   BigInt                    @default(0)
+  nextChangeCursor    BigInt                    @default(0)
+  usedBytes           Int                       @default(0)
+  quotaBytes          Int                       @default(10485760)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  team                Team                      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  values              PluginSharedValue[]
+  artifacts           PluginSharedValueArtifact[]
+  changes             SharedStateOutbox[]
+
+  @@unique([teamId, ownerKind, ownerId, name])
+  @@index([teamId, deletedAt])
+  @@index([ownerKind, ownerId])
+}
+
+model PluginSharedValue {
+  id                  String                    @id @default(uuid())
+  namespaceId         String
+  namespaceGeneration Int
+  key                 String
+  valueJson           Json
+  schemaVersion       Int
+  valueBytes          Int
+  revision            BigInt
+  createdByUserId     String?
+  createdByPackageId  String?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  namespace            PluginSharedNamespace    @relation(fields: [namespaceId], references: [id], onDelete: Cascade)
+  artifacts            PluginSharedValueArtifact[]
+
+  @@unique([namespaceId, key])
+  @@index([namespaceId, revision])
+  @@index([namespaceId, namespaceGeneration])
+}
+
+model PluginSharedValueArtifact {
+  id                  String             @id @default(uuid())
+  namespaceId         String
+  namespaceGeneration Int
+  key                 String
+  valueRevision       BigInt
+  artifactId          String
+  jsonPointer         String
+  executionKind       ActionInvocationKind @default(STANDARD)
+  namespace            PluginSharedNamespace @relation(fields: [namespaceId], references: [id], onDelete: Cascade)
+  value               PluginSharedValue @relation(fields: [namespaceId, key], references: [namespaceId, key], onDelete: Cascade)
+  artifact            RuntimeArtifact @relation(fields: [artifactId, executionKind], references: [id, executionKind], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([namespaceId, namespaceGeneration, key, valueRevision, artifactId, jsonPointer])
+  @@index([artifactId, executionKind])
+  @@index([namespaceId, namespaceGeneration, key, valueRevision])
+}
+
+model SharedStateOutbox {
+  id                  String             @id @default(uuid())
+  teamId              String
+  namespaceId         String
+  namespaceGeneration Int
+  cursor              BigInt
+  key                 String
+  revision            BigInt
+  schemaVersion       Int?
+  eventKind           SharedChangeEventKind
+  createdAt           DateTime           @default(now())
+  publishedAt         DateTime?
+  attempts            Int                @default(0)
+  team                Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  namespace            PluginSharedNamespace @relation(fields: [namespaceId], references: [id], onDelete: Cascade)
+
+  @@unique([namespaceId, cursor])
+  @@index([namespaceId, cursor])
+  @@index([teamId, createdAt])
+  @@index([publishedAt, createdAt])
+}
+
+model WorkflowRelease {
+  pluginReleaseId  String                @id
+  definitionVersion String
+  definitionSha256 String
+  definitionJson  Json
+  frozenClosure   Json                  @default("[]")
+  inputSchema     Json
+  outputSchema    Json
+  cloudEligible   Boolean               @default(false)
+  expandedNodeCount Int
+  maxParallelism  Int
+  createdAt       DateTime              @default(now())
+  pluginRelease   PluginRelease         @relation(fields: [pluginReleaseId], references: [id], onDelete: Cascade)
+  nodes           WorkflowReleaseNode[]
+  runs            WorkflowRun[]
+  schedules       AutomationSchedule[]
+}
+
+model WorkflowReleaseNode {
+  id                    String          @id @default(uuid())
+  workflowReleaseId     String
+  nodeId                String
+  declaredVersionRange  String
+  packageId             String
+  releaseId             String
+  sha256                 String
+  actionId              String
+  actionContractVersion String
+  actionSurfaceSha256   String
+  executionSemantics    String
+  cloudCapable          Boolean         @default(false)
+  retryLimit            Int             @default(0)
+  dependsOn             Json            @default("[]")
+  inputBindings         Json            @default("[]")
+  workflowRelease       WorkflowRelease @relation(fields: [workflowReleaseId], references: [pluginReleaseId], onDelete: Cascade)
+
+  @@unique([workflowReleaseId, nodeId])
+  @@index([releaseId, actionId])
+}
+
+model WorkflowRun {
+  id                    String                  @id @default(uuid())
+  teamId                String
+  principalUserId       String?
+  workflowReleaseId     String
+  executionScope        WorkflowExecutionScope
+  executionTarget       WorkflowExecutionTarget
+  status                WorkflowRunStatus       @default(PENDING)
+  requestScopeSha256    String
+  idempotencyKey        String
+  requestDigest         String
+  inputDigest           String
+  rootLogicalExecutionId String
+  planSha256            String
+  frozenPlan            Json
+  input                 Json
+  output                Json?
+  policyRevision        Int
+  authorizationDecision Json
+  rootRunId             String?
+  parentStepAttemptId   String?
+  triggerKind           String
+  deadlineAt            DateTime
+  resultRetainUntil     DateTime
+  desktopExecutorSessionId String?
+  desktopInventorySha256 String?
+  scheduleId            String?
+  scheduleGeneration    Int?
+  scheduledFor          DateTime?
+  occurrenceKey         String?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  errorCode             String                  @default("")
+  errorMessage          String                  @default("")
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  team                  Team                    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  principal             User?                   @relation("WorkflowRunPrincipal", fields: [principalUserId], references: [id], onDelete: SetNull)
+  workflowRelease       WorkflowRelease         @relation(fields: [workflowReleaseId], references: [pluginReleaseId], onDelete: Restrict)
+  desktopExecutorSession DesktopExecutorSession? @relation(fields: [desktopExecutorSessionId, teamId, desktopInventorySha256], references: [id, teamId, inventorySha256], onDelete: Restrict)
+  attempts              WorkflowStepAttempt[]
+  schedule              AutomationSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  cloudBindings         WorkflowRunCloudBinding[]
+
+  @@unique([requestScopeSha256, idempotencyKey])
+  @@index([teamId, status, createdAt])
+  @@index([workflowReleaseId, createdAt])
+  @@index([rootRunId, createdAt])
+  @@index([desktopExecutorSessionId])
+  @@unique([scheduleId, scheduleGeneration, occurrenceKey])
+  @@index([scheduleId, scheduledFor])
+}
+
+model WorkflowStepAttempt {
+  id                 String             @id @default(uuid())
+  runId              String
+  nodeId             String
+  fullNodePath       String
+  attempt            Int
+  status             WorkflowStepStatus @default(PENDING)
+  actionInvocationId String?            @unique
+  requestKey         String
+  effectKey          String?
+  input              Json?
+  inputSha256        String?
+  output             Json?
+  outputSha256       String?
+  packageId          String
+  releaseId          String
+  releaseSha256      String
+  actionId           String
+  actionContractVersion String
+  actionSurfaceSha256 String
+  executionSemantics String
+  retryLimit         Int
+  leaseTokenSha256   String?
+  leaseExpiresAt     DateTime?
+  leaseHeartbeatAt   DateTime?
+  transportJobId     String?
+  deliveryState      String             @default("NONE")
+  transportRequestSha256 String?
+  transportResponseSha256 String?
+  endpointHttpStatus Int?
+  requestBytes       Int                @default(0)
+  responseBytes      Int                @default(0)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  errorCode          String             @default("")
+  errorMessage       String             @default("")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  run                WorkflowRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  actionInvocation   ActionInvocation?  @relation(fields: [actionInvocationId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, nodeId, attempt])
+  @@index([runId, status])
+  @@index([runId, leaseExpiresAt])
+  @@index([transportJobId])
+}
+
+model CloudActionDeployment {
+  id String @id @default(uuid())
+  teamId String
+  packageId String
+  releaseId String
+  sha256 String
+  actionId String
+  actionContractVersion String
+  actionSurfaceSha256 String
+  environment CloudDeploymentEnvironment
+  deploymentKey String
+  supersedesDeploymentId String?
+  endpointUrl String
+  secretCiphertext String
+  secretVersion Int @default(1)
+  status CloudDeploymentStatus @default(DRAFT)
+  timeoutMs Int @default(30000)
+  maxConcurrency Int @default(4)
+  rateLimitPerMinute Int @default(60)
+  responseLimitBytes Int @default(1048576)
+  lastHealthAt DateTime?
+  lastHealthOk Boolean?
+  lastHealthErrorCode String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  release PluginRelease @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+  supersedes CloudActionDeployment? @relation("CloudDeploymentRotation", fields: [supersedesDeploymentId], references: [id], onDelete: Restrict)
+  rotations CloudActionDeployment[] @relation("CloudDeploymentRotation")
+  stableRoutes CloudActionRouting[] @relation("CloudStableDeployment")
+  candidateRoutes CloudActionRouting[] @relation("CloudCandidateDeployment")
+  invocations ActionInvocation[]
+  workflowBindings WorkflowRunCloudBinding[]
+  usageEvents CloudUsageEvent[]
+
+  @@unique([releaseId, actionId, actionContractVersion, actionSurfaceSha256, environment, deploymentKey])
+  @@index([teamId, status, createdAt])
+  @@index([packageId, releaseId, sha256])
+  @@index([supersedesDeploymentId])
+}
+
+model CloudActionRouting {
+  id String @id @default(uuid())
+  releaseId String
+  actionId String
+  actionContractVersion String
+  actionSurfaceSha256 String
+  environment CloudDeploymentEnvironment
+  stableDeploymentId String
+  candidateDeploymentId String?
+  candidatePercent Int @default(0)
+  generation Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  release PluginRelease @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+  stableDeployment CloudActionDeployment @relation("CloudStableDeployment", fields: [stableDeploymentId], references: [id], onDelete: Restrict)
+  candidateDeployment CloudActionDeployment? @relation("CloudCandidateDeployment", fields: [candidateDeploymentId], references: [id], onDelete: Restrict)
+
+  @@unique([releaseId, actionId, actionContractVersion, actionSurfaceSha256, environment])
+  @@index([stableDeploymentId])
+  @@index([candidateDeploymentId])
+}
+
+model WorkflowRunCloudBinding {
+  id String @id @default(uuid())
+  runId String
+  nodePath String
+  deploymentId String
+  routingGeneration Int
+  environment CloudDeploymentEnvironment
+  policyDecisionId String
+  createdAt DateTime @default(now())
+  run WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  deployment CloudActionDeployment @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, nodePath])
+  @@index([deploymentId])
+}
+
+model AutomationSchedule {
+  id String @id @default(uuid())
+  teamId String
+  createdByUserId String
+  workflowReleaseId String
+  workflowReleaseSha256 String
+  kind AutomationScheduleKind
+  timeZone String?
+  runAt DateTime?
+  localTime String?
+  dayOfWeek Int?
+  inputJson Json
+  inputSchemaSha256 String
+  status AutomationScheduleStatus @default(ACTIVE)
+  generation Int @default(1)
+  schedulerKey String
+  nextRunAt DateTime?
+  lastScheduledFor DateTime?
+  lastRunId String?
+  consecutiveFailures Int @default(0)
+  syncState AutomationScheduleSyncState @default(PENDING)
+  syncErrorCode String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy User @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  workflowRelease WorkflowRelease @relation(fields: [workflowReleaseId], references: [pluginReleaseId], onDelete: Restrict)
+  runs WorkflowRun[]
+
+  @@unique([teamId, schedulerKey])
+  @@index([teamId, status, nextRunAt])
+  @@index([workflowReleaseId, status])
+  @@index([createdByUserId, status])
+}
+
+model AutomationOutbox {
+  id String @id @default(uuid())
+  kind AutomationOutboxKind
+  aggregateId String
+  generation Int
+  payload Json
+  status AutomationOutboxStatus @default(PENDING)
+  availableAt DateTime @default(now())
+  attempts Int @default(0)
+  lockedBy String?
+  lockedUntil DateTime?
+  lastErrorCode String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([kind, aggregateId, generation])
+  @@index([status, availableAt])
+  @@index([lockedUntil])
+}
+
+model CloudUsageEvent {
+  id String @id @default(uuid())
+  teamId String
+  sourceKind CloudUsageSourceKind
+  sourceId String
+  eventKind CloudUsageEventKind @default(EXECUTION)
+  packageId String
+  releaseId String
+  releaseSha256 String
+  actionId String
+  actionContractVersion String
+  actionSurfaceSha256 String
+  deploymentId String
+  executionScope WorkflowExecutionScope
+  durationMs Int
+  requestBytes Int @default(0)
+  responseBytes Int @default(0)
+  artifactInputBytes Int @default(0)
+  artifactOutputBytes Int @default(0)
+  outcome CloudUsageOutcome
+  pricingDimensions Json @default("{}")
+  occurredAt DateTime
+  createdAt DateTime @default(now())
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  deployment CloudActionDeployment @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceKind, sourceId, eventKind])
+  @@index([teamId, occurredAt])
+  @@index([deploymentId, occurredAt])
+  @@index([releaseId, actionId, occurredAt])
+}
+
+model DesktopExecutorSession {
+  id                 String                       @id @default(uuid())
+  teamId             String
+  userId             String
+  deviceId           String
+  inventorySchemaVersion String                     @default("1")
+  inventorySha256    String
+  inventory          Json
+  tokenSha256        String                       @unique
+  status             DesktopExecutorSessionStatus @default(ACTIVE)
+  expiresAt          DateTime
+  lastHeartbeatAt    DateTime
+  revokedAt          DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  team               Team                         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user               User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs               WorkflowRun[]
+
+  @@index([teamId, userId, status, expiresAt])
+  @@index([deviceId, status])
+  @@unique([id, teamId, inventorySha256])
 }
 
 // ============================================================

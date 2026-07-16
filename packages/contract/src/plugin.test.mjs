@@ -8,15 +8,17 @@ import {
   MarketplaceListingProjection,
   PluginManagementItem,
   PluginPackageDetail,
+  PluginReleaseDetail,
   PluginReleaseSummary,
   StrictSemVer,
   UpdateMarketplaceListingStatusRequest,
 } from './plugin-registry.ts';
 import { PluginDraft, PluginDraftStatus, PluginDraftDiagnostic } from './draft.ts';
 
-test('owner and admin default to allowed when no grant matches', () => {
+test('all roles default to allowed when no grant matches while governance owns high-risk defaults', () => {
   assert.equal(resolveGrant([], 'u1', 'owner'), true);
   assert.equal(resolveGrant([], 'u1', 'admin'), true);
+  assert.equal(resolveGrant([], 'u1', 'member'), true);
 });
 
 test('deny grant still overrides owner default allow', () => {
@@ -186,6 +188,20 @@ test('release provenance rejects unknown enums and source labels over 80 charact
   assert.equal(PluginReleaseSummary.safeParse({ ...base, ingestChannel: 'CLI' }).success, false);
   assert.equal(PluginReleaseSummary.safeParse({ ...base, sourceLabel: 'x'.repeat(81) }).success, false);
   assert.equal(PluginReleaseSummary.safeParse({ ...base, sourceLabel: 'VS\u0000Code' }).success, false);
+});
+
+test('exact release detail carries bounded immutable README markdown', () => {
+  const base = {
+    id: '11111111-1111-4111-8111-111111111111',
+    packageId: '22222222-2222-4222-8222-222222222222',
+    version: '1.0.0',
+    manifest: { id: 'demo.plugin', name: 'Demo', version: '1.0.0', entry: 'main.py', runtime_type: 'python' },
+    sha256: 'a'.repeat(64), sizeBytes: 1024, status: 'PUBLISHED', marketReviewStatus: 'DRAFT',
+    targetPlatform: 'windows-x64', sourceKind: 'API', sourceLabel: '', ingestChannel: 'API',
+    createdAt: '2026-07-11T00:00:00.000Z',
+  };
+  assert.equal(PluginReleaseDetail.safeParse({ ...base, readme_markdown: '# Demo' }).success, true);
+  assert.equal(PluginReleaseDetail.safeParse({ ...base, readme_markdown: 'x'.repeat(256 * 1024 + 1) }).success, false);
 });
 
 test('management and package detail contracts project listing lifecycle metadata', () => {

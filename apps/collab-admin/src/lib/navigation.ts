@@ -45,6 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '内容',
     items: [
       { view: 'governance', label: '治理中心', icon: GavelIcon },
+      { view: 'marketplaceCommerce', label: '市场财务', icon: ReceiptIcon },
       { view: 'tickets', label: '工单反馈', icon: LifeBuoyIcon },
     ],
   },

@@ -6,11 +6,12 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -35,7 +36,7 @@ impl PluginBridgeClientSource {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct BridgeSession {
     plugin_id: String,
     api_base: String,
@@ -43,14 +44,26 @@ struct BridgeSession {
     allow_llm_chat: bool,
     allow_image_generate: bool,
     allow_image_edit: bool,
+    action_invocation_id: Option<String>,
+    action_context: Option<Arc<ActionRuntimeContext>>,
     client_source: PluginBridgeClientSource,
     expires_at: Instant,
+}
+
+#[derive(Clone)]
+struct ActionRuntimeContext {
+    app: AppHandle,
+    manager: crate::plugin_package_manager::PluginPackageManager,
+    package_id: String,
+    release_id: String,
+    sha256: String,
 }
 
 #[derive(Default)]
 struct BridgeState {
     endpoint: Mutex<Option<String>>,
     sessions: Mutex<HashMap<String, BridgeSession>>,
+    action_requests: Mutex<HashMap<String, mpsc::Sender<Result<Value, Value>>>>,
 }
 
 #[derive(Clone, Default)]
@@ -168,6 +181,8 @@ impl PluginLlmBridge {
             allow_llm_chat,
             allow_image_generate,
             allow_image_edit,
+            action_invocation_id: None,
+            action_context: None,
             client_source,
             expires_at: Instant::now() + ttl,
         };
@@ -181,6 +196,33 @@ impl PluginLlmBridge {
             url: endpoint,
             token,
         }))
+    }
+
+    pub fn register_action_session(
+        &self,
+        plugin_id: &str,
+        api_base: String,
+        auth_token: String,
+        invocation_id: String,
+        app: AppHandle,
+        manager: crate::plugin_package_manager::PluginPackageManager,
+        package_id: String,
+        release_id: String,
+        sha256: String,
+        ttl: Duration,
+    ) -> Result<PluginBridgeEnv, String> {
+        if api_base.trim().is_empty() || auth_token.trim().is_empty() || invocation_id.trim().is_empty() {
+            return Err("Action bridge 缺少平台 session 或 invocation".to_string());
+        }
+        let endpoint = self.ensure_server()?;
+        let token = issue_token();
+        self.inner.sessions.lock().unwrap_or_else(|poison| poison.into_inner()).insert(token.clone(), BridgeSession {
+            plugin_id: plugin_id.to_string(), api_base: api_base.trim().trim_end_matches('/').to_string(), auth_token: auth_token.trim().to_string(),
+            allow_llm_chat: false, allow_image_generate: false, allow_image_edit: false, action_invocation_id: Some(invocation_id),
+            action_context: Some(Arc::new(ActionRuntimeContext { app, manager, package_id, release_id, sha256 })),
+            client_source: PluginBridgeClientSource::PluginRuntime, expires_at: Instant::now() + ttl,
+        });
+        Ok(PluginBridgeEnv { url: endpoint, token })
     }
 
     pub fn revoke_token(&self, token: &str) {
@@ -271,6 +313,17 @@ fn issue_token() -> String {
 #[tauri::command]
 pub fn revoke_all_plugin_bridge_sessions(bridge: tauri::State<'_, PluginLlmBridge>) {
     bridge.revoke_all();
+}
+
+#[tauri::command]
+pub fn respond_plugin_action_bridge(
+    bridge: tauri::State<'_, PluginLlmBridge>,
+    request_id: String,
+    result: Option<Value>,
+    error: Option<Value>,
+) -> Result<(), String> {
+    let sender = bridge.inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&request_id).ok_or_else(|| "Action bridge request 已失效".to_string())?;
+    sender.send(match error { Some(error) => Err(error), None => Ok(result.unwrap_or_else(|| json!({}))) }).map_err(|_| "Action bridge 响应接收端已关闭".to_string())
 }
 
 fn handle_connection(inner: Arc<BridgeState>, mut stream: TcpStream) {
@@ -393,6 +446,10 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
         "/llm/chat" => route_llm_chat(&session, request.body),
         "/image/generate" => route_image_generate(&session, request.body),
         "/image/edit" => route_image_edit(&session, request.body),
+        "/actions/call" => route_action_call(inner, &session, request.body),
+        "/artifacts/create" => route_action_artifact(&session, "", request.body),
+        "/artifacts/materialize" => route_action_artifact(&session, "/materialize", request.body),
+        "/artifacts/import" => route_action_artifact(&session, "/import", request.body),
         // OpenAI 兼容形状（第三方 SDK 直连用）：透传 relay 完整响应，不包装。
         "/v1/chat/completions" if request.method == "POST" => {
             route_v1_chat_completions(&session, request.body)
@@ -407,6 +464,45 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
             format!("插件本地桥不支持的路由：{other}"),
         )),
     }
+}
+
+fn route_action_call(inner: &Arc<BridgeState>, session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+    ensure_platform_session(session, "Nested Action")?;
+    let parent_id = session.action_invocation_id.as_deref().ok_or_else(|| BridgeError::new(403, "action_dependency_denied", "当前脚本不在 Action invocation 中"))?;
+    let context = session.action_context.as_ref().ok_or_else(|| BridgeError::new(503, "action_runtime_unavailable", "Action runtime context 不可用"))?;
+    let body: Value = serde_json::from_slice(&body_bytes).map_err(|_| BridgeError::new(400, "action_input_invalid", "actions.call 请求体不是有效 JSON"))?;
+    let _dependency_id = body.get("dependency_id").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).ok_or_else(|| BridgeError::new(400, "action_dependency_denied", "actions.call 缺少 dependency_id"))?;
+    body.get("input").filter(|value| value.is_object()).ok_or_else(|| BridgeError::new(400, "action_input_invalid", "Action input 必须是 JSON 对象"))?;
+    let caller = context.manager.action_caller_descriptor(&context.package_id, &context.release_id, &context.sha256).map_err(|error| BridgeError::new(403, "action_dependency_denied", error))?;
+    let request_id = Uuid::new_v4().to_string();
+    let (sender, receiver) = mpsc::channel();
+    inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).insert(request_id.clone(), sender);
+    if let Err(error) = context.app.emit("plugin-action-bridge-call", json!({ "request_id": request_id, "parent_invocation_id": parent_id, "caller": caller, "args": body })) {
+        inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&request_id);
+        return Err(BridgeError::new(503, "action_runtime_unavailable", format!("发送 Action bridge 请求失败：{error}")));
+    }
+    match receiver.recv_timeout(Duration::from_secs(24 * 60 * 60 + 30)) {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(error)) => Err(BridgeError::new(error.get("status").and_then(Value::as_u64).unwrap_or(500) as u16, error.get("code").and_then(Value::as_str).unwrap_or("action_execution_failed"), error.get("message").and_then(Value::as_str).unwrap_or("Nested Action 执行失败"))),
+        Err(_) => { inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&request_id); Err(BridgeError::new(504, "action_timeout", "等待桌面 Action host 响应超时")) }
+    }
+}
+
+fn route_action_artifact(session: &BridgeSession, suffix: &str, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+    ensure_platform_session(session, "Action artifact")?;
+    let invocation_id = session.action_invocation_id.as_deref().ok_or_else(|| BridgeError::new(403, "action_artifact_invalid", "当前脚本不在 Action invocation 中"))?;
+    let body: Value = serde_json::from_slice(&body_bytes).map_err(|_| BridgeError::new(400, "action_artifact_invalid", "Artifact 请求体不是有效 JSON"))?;
+    let path = format!("/api/plugin-actions/invocations/{invocation_id}/artifacts{suffix}");
+    let value = relay_post_json(session, &path, &body)?;
+    if suffix == "/materialize" {
+        return Ok(json!({
+            "dataBase64": value.get("data_base64"),
+            "mediaType": value.get("media_type"),
+            "sizeBytes": value.get("size_bytes"),
+            "sha256": value.get("sha256"),
+        }));
+    }
+    Ok(value)
 }
 
 /// 处理 llm.chat：转发到平台 relay /api/relay/v1/chat/completions，返回 {content}。
@@ -1182,6 +1278,8 @@ mod tests {
             allow_llm_chat: true,
             allow_image_generate: false,
             allow_image_edit: false,
+            action_invocation_id: None,
+            action_context: None,
             client_source: PluginBridgeClientSource::PluginTest,
             expires_at: Instant::now() + Duration::from_secs(60),
         };
@@ -1200,6 +1298,26 @@ mod tests {
             Some("desktop-plugin-test")
         );
         assert!(request.headers.contains_key("x-request-id"));
+    }
+
+    #[test]
+    fn action_artifact_route_binds_the_host_invocation_without_leaking_jwt_in_body() {
+        let (endpoint, request_rx) = spawn_relay_response(200, json!({ "type": "artifact_ref", "artifact_id": "artifact-1" }));
+        let session = BridgeSession {
+            plugin_id: "test-plugin".to_string(), api_base: endpoint, auth_token: "secret-jwt".to_string(),
+            allow_llm_chat: false, allow_image_generate: false, allow_image_edit: false,
+            action_invocation_id: Some("invocation-1".to_string()), action_context: None,
+            client_source: PluginBridgeClientSource::PluginRuntime, expires_at: Instant::now() + Duration::from_secs(60),
+        };
+        let result = route_action_artifact(&session, "", serde_json::to_vec(&json!({ "data_base64": "UE5H", "media_type": "image/png" })).unwrap()).expect("artifact create 应代理成功");
+        assert_eq!(result["artifact_id"], "artifact-1");
+        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到 artifact 请求");
+        assert_eq!(request.path, "/api/plugin-actions/invocations/invocation-1/artifacts");
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["data_base64"], "UE5H");
+        assert!(body.get("auth_token").is_none());
+        assert!(body.get("invocation_id").is_none());
+        assert_eq!(request.headers.get("authorization").map(String::as_str), Some("Bearer secret-jwt"));
     }
 
     fn spawn_relay_response(status: u16, body: Value) -> (String, mpsc::Receiver<HttpRequest>) {
@@ -1238,6 +1356,8 @@ mod tests {
             allow_llm_chat: true,
             allow_image_generate: false,
             allow_image_edit: false,
+            action_invocation_id: None,
+            action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
             expires_at: Instant::now() + Duration::from_secs(60),
         };
@@ -1300,6 +1420,8 @@ mod tests {
                     allow_llm_chat: allow_llm,
                     allow_image_generate: allow_image,
                     allow_image_edit: false,
+                    action_invocation_id: None,
+                    action_context: None,
                     client_source: PluginBridgeClientSource::PluginRuntime,
                     expires_at: Instant::now() + Duration::from_secs(60),
                 },
@@ -1433,6 +1555,8 @@ mod tests {
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: true,
+            action_invocation_id: None,
+            action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
             expires_at: Instant::now() + Duration::from_secs(60),
         };
@@ -1478,6 +1602,8 @@ mod tests {
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: true,
+            action_invocation_id: None,
+            action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
             expires_at: Instant::now() + Duration::from_secs(60),
         };

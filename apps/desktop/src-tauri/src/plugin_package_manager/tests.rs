@@ -737,11 +737,58 @@ fn tagged_workspace_reader_roundtrips_utf8_and_binary_bytes() {
 }
 
 #[test]
+fn installed_payload_preserves_the_release_readme() {
+    let (manager, root) = manager();
+    let workspace = root.join(format!("readme-source-{}", Uuid::new_v4()));
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("manifest.json"),
+        r#"{"id":"readme-demo","name":"README Demo","version":"1.0.0","runtime_type":"client","entry":"index.html"}"#,
+    )
+    .unwrap();
+    fs::write(workspace.join("index.html"), "<main>demo</main>").unwrap();
+    fs::write(workspace.join("README.md"), "# README Demo\n\nRelease details.").unwrap();
+    let artifact_path = root.join("readme-demo.lfplugin");
+    let artifact = package_workspace(&workspace, &artifact_path).unwrap();
+
+    let installation = manager
+        .install(InstallArtifactInput {
+            artifact_path: artifact_path.to_string_lossy().to_string(),
+            expected_sha256: Some(artifact.sha256),
+            package_id: Some("readme-package".to_string()),
+            release_id: Some("readme-release".to_string()),
+            origin: InstallationOrigin::Local,
+            protected: false,
+        })
+        .unwrap();
+    let payload = manager
+        .load_installed_plugin(&installation.installation_id)
+        .unwrap();
+
+    assert_eq!(payload.readme_markdown, "# README Demo\n\nRelease details.");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn environment_cleanup_errors_are_returned() {
     let root = std::env::temp_dir().join(format!("lingfang-env-cleanup-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let not_a_directory = root.join("environment");
     fs::write(&not_a_directory, "occupied").unwrap();
     assert!(remove_environment_directory(&not_a_directory).is_err());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn legacy_invalid_readme_degrades_without_disabling_the_installation() {
+    let root = std::env::temp_dir().join(format!("lingfang-legacy-readme-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let readme = root.join("README.md");
+    fs::write(&readme, [0xc3, 0x28]).unwrap();
+    assert!(load_legacy_readme(&readme).is_empty());
+    fs::write(&readme, vec![b'a'; 256 * 1024 + 1]).unwrap();
+    assert!(load_legacy_readme(&readme).is_empty());
+    fs::write(&readme, "# 可用说明").unwrap();
+    assert_eq!(load_legacy_readme(&readme), "# 可用说明");
     let _ = fs::remove_dir_all(root);
 }

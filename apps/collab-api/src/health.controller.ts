@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from './common';
 import { PrismaService } from './prisma.service';
+import { AutomationReadinessService } from './automation/automation-readiness.service';
 
 // 运行时读取 package.json 的 version（源文件位于 src/、产物位于 dist/，二者各上一级即项目根的 package.json）。
 // 不用 import 的原因：tsconfig 未启用 resolveJsonModule，且 rootDir=src 会拒绝引入 src 外的 .json。
@@ -22,17 +23,18 @@ const { version } = require('../package.json') as { version: string };
  */
 @Injectable()
 export class ReadinessService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(AutomationReadinessService) private readonly automation: AutomationReadinessService) {}
 
-  async check(): Promise<{ status: 'ok' | 'degraded'; db: 'up' | 'down' }> {
+  async check() {
     try {
       // $queryRaw tagged template：Prisma 安全的原生查询入口（防注入）。
       // SELECT 1 仅校验连接可用，无副作用。
       await this.prisma.$queryRaw`SELECT 1`;
-      return { status: 'ok', db: 'up' };
+      const automation = await this.automation.check();
+      return { status: automation.status === 'degraded' ? 'degraded' as const : 'ok' as const, db: 'up' as const, automation };
     } catch {
       // DB 不可达：返 degraded + 503，让反代/探活摘除流量，而非重启进程（进程本身健康）。
-      return { status: 'degraded', db: 'down' };
+      return { status: 'degraded' as const, db: 'down' as const, automation: null };
     }
   }
 }
@@ -40,7 +42,7 @@ export class ReadinessService {
 @ApiTags('Health')
 @Controller()
 export class HealthController {
-  constructor(@Inject(ReadinessService) private readonly readiness: ReadinessService) {}
+  constructor(@Inject(ReadinessService) private readonly readiness: ReadinessService, @Inject(AutomationReadinessService) private readonly automation: AutomationReadinessService) {}
 
   @Public()
   @Get('health')
@@ -66,9 +68,13 @@ export class HealthController {
   @ApiOperation({ summary: '服务就绪检查（readiness，含数据库探活）' })
   async ready(@Res({ passthrough: true }) res: Response) {
     const result = await this.readiness.check();
-    if (result.db === 'down') {
+    if (result.status === 'degraded') {
       res.status(HttpStatus.SERVICE_UNAVAILABLE); // 503
     }
     return result;
   }
+
+  @Get('api/automation/metrics')
+  @ApiOperation({ summary: '自动化队列与 Endpoint 基础指标' })
+  metrics() { return this.automation.metrics(); }
 }

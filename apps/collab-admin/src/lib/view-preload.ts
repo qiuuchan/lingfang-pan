@@ -6,6 +6,7 @@ const loaders: Record<View, () => Promise<unknown>> = {
   platformAdmins: () => import('@/components/admins-view'),
   teams: () => import('@/components/teams-view'),
   governance: () => import('@/components/governance-view'),
+  marketplaceCommerce: () => import('@/components/marketplace-commerce-view'),
   tickets: () => import('@/components/tickets-view'),
   audit: () => import('@/components/audit-view'),
   releases: () => import('@/components/releases-view'),

@@ -51,6 +51,7 @@ const Dashboard = lazy(() => import('@/components/dashboard').then((m) => ({ def
 const UsersView = lazy(() => import('@/components/users-view').then((m) => ({ default: m.UsersView })));
 const TeamsView = lazy(() => import('@/components/teams-view').then((m) => ({ default: m.TeamsView })));
 const GovernanceView = lazy(() => import('@/components/governance-view').then((m) => ({ default: m.GovernanceView })));
+const MarketplaceCommerceView = lazy(() => import('@/components/marketplace-commerce-view').then((m) => ({ default: m.MarketplaceCommerceView })));
 const AdminsView = lazy(() => import('@/components/admins-view').then((m) => ({ default: m.AdminsView })));
 const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ default: m.AuditView })));
 const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
@@ -374,6 +375,7 @@ export default function App() {
                   {view === 'platformAdmins' && <AdminsView />}
                   {view === 'teams' && <TeamsView />}
                   {view === 'governance' && <GovernanceView key={governanceIntent.nonce} intent={governanceIntent} />}
+                  {view === 'marketplaceCommerce' && <MarketplaceCommerceView />}
                   {view === 'tickets' && <TicketsView />}
                   {view === 'audit' && <AuditView />}
                   {view === 'releases' && <ReleasesView />}

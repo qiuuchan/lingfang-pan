@@ -37,7 +37,7 @@ export type NormalizedPluginPackage = {
     name: string;
     version: string;
     description: string;
-    runtime_type: 'client' | 'cloud' | 'nodejs' | 'python';
+    runtime_type: 'client' | 'cloud' | 'nodejs' | 'python' | 'workflow';
     entry: string;
     visibility: 'private' | 'tenant';
     capabilities: Array<{ kind: string; reason: string; risk: string; requires_admin: boolean; scope?: unknown }>;
@@ -63,7 +63,7 @@ const MAX_CAPABILITY_REASON_LENGTH = 500;
 
 // 合法 runtime_type 白名单（与契约 RuntimeType 四值一致）。
 // nodejs/python 为脚本型运行时：上传云端仅做源码托管，预览执行由桌面壳本地完成（见 R3）。
-const ALLOWED_RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python'] as const;
+const ALLOWED_RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python', 'workflow'] as const;
 
 // 运行时类型映射表（小写 manifest 值 → Prisma 枚举大写）。
 // 头号陷阱修复（design §4.1）：原 `runtime === 'client' ? 'CLIENT' : 'CLOUD'` 三元
@@ -115,7 +115,7 @@ function normalizedRuntime(manifest: PluginManifestInput) {
   if (typeof value !== 'string') throw badRequest('manifest.runtime_type 必须是字符串');
   const runtime = value.toLowerCase();
   if (!ALLOWED_RUNTIME_TYPES.includes(runtime as typeof ALLOWED_RUNTIME_TYPES[number])) {
-    throw badRequest('runtime_type 只允许 client / cloud / nodejs / python');
+    throw badRequest('runtime_type 只允许 client / cloud / nodejs / python / workflow');
   }
   return runtime as typeof ALLOWED_RUNTIME_TYPES[number];
 }

@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -14,6 +15,7 @@ pub(crate) struct CapturedOutput {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
+    pub cancelled: bool,
 }
 
 pub(crate) fn run_captured_inner(
@@ -40,6 +42,7 @@ pub(crate) fn run_captured_inner(
     wait_for_capture(
         command.spawn().map_err(|error| error.to_string())?,
         timeout_ms,
+        None,
     )
 }
 
@@ -51,6 +54,33 @@ pub(crate) fn run_capture_with_env(
     env: Vec<(OsString, OsString)>,
 ) -> Result<CapturedOutput, String> {
     run_captured_inner(binary, args, workspace_dir, timeout_ms, Some(&env))
+}
+
+pub(crate) fn run_capture_with_env_and_cancel(
+    binary: &PathBuf,
+    args: Vec<String>,
+    workspace_dir: Option<&str>,
+    timeout_ms: u64,
+    env: Vec<(OsString, OsString)>,
+    cancel: &AtomicBool,
+) -> Result<CapturedOutput, String> {
+    let mut command = build_spawn_command(binary, &args);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(workspace_dir) = workspace_dir {
+        command.current_dir(workspace_dir);
+    }
+    command
+        .env_clear()
+        .envs(env.iter().map(|(key, value)| (key.clone(), value.clone())));
+    prepare_process_group(&mut command);
+    wait_for_capture(
+        command.spawn().map_err(|error| error.to_string())?,
+        timeout_ms,
+        Some(cancel),
+    )
 }
 
 /// 流式运行子进程：stdout/stderr 逐行回调 + 主线程轮询等退出 + 超时 kill。
@@ -167,12 +197,14 @@ where
         stderr,
         exit_code,
         timed_out,
+        cancelled: false,
     })
 }
 
 fn wait_for_capture(
     mut child: std::process::Child,
     timeout_ms: u64,
+    cancel: Option<&AtomicBool>,
 ) -> Result<CapturedOutput, String> {
     let started = Instant::now();
     loop {
@@ -181,17 +213,25 @@ fn wait_for_capture(
             .map_err(|error| error.to_string())?
             .is_some()
         {
-            return child_output(child, false);
+            return child_output(child, false, false);
+        }
+        if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            kill_child_tree(&child);
+            return child_output(child, false, true);
         }
         if started.elapsed().as_millis() > timeout_ms as u128 {
             kill_child_tree(&child);
-            return child_output(child, true);
+            return child_output(child, true, false);
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
-fn child_output(child: std::process::Child, timed_out: bool) -> Result<CapturedOutput, String> {
+fn child_output(
+    child: std::process::Child,
+    timed_out: bool,
+    cancelled: bool,
+) -> Result<CapturedOutput, String> {
     let output = child
         .wait_with_output()
         .map_err(|error| error.to_string())?;
@@ -200,5 +240,6 @@ fn child_output(child: std::process::Child, timed_out: bool) -> Result<CapturedO
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code(),
         timed_out,
+        cancelled,
     })
 }

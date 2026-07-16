@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:update": "playwright test --update-snapshots"
+    "test:e2e:update": "playwright test --update-snapshots",
+    "test:action-conformance:client": "playwright test --config action-adapter-conformance/playwright.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.109",
@@ -23,6 +24,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@lingfang/contract": "workspace:*",
     "@lingfang/ui-tokens": "workspace:^",
+    "@lingfang/workflow-engine": "workspace:*",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "ai": "^5.0.204",

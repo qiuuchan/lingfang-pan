@@ -2,7 +2,7 @@ import type { DraftFile, LoadedPlugin } from '@/lib/types';
 
 export type PluginRuntimeType = NonNullable<LoadedPlugin['runtime_type']>;
 
-const RUNTIME_TYPES = new Set<PluginRuntimeType>(['client', 'nodejs', 'python', 'cloud']);
+const RUNTIME_TYPES = new Set<PluginRuntimeType>(['client', 'nodejs', 'python', 'cloud', 'workflow']);
 
 function normalizeRuntime(value: unknown): PluginRuntimeType | null {
   if (typeof value !== 'string') return null;

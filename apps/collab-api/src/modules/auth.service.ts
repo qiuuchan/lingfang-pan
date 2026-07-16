@@ -202,6 +202,20 @@ export class AuthService {
     return this.sessionFor(userId, true);
   }
 
+  async webSession(userId: string, teamId: string | null, includeToken = false) {
+    return this.sessionFor(userId, includeToken, teamId);
+  }
+
+  async switchWebTeam(userId: string, teamId: string) {
+    const membership = await this.prisma.teamMembership.findFirst({
+      where: { userId, teamId, status: 'ACTIVE', team: { status: 'ACTIVE' } },
+      select: { teamId: true },
+    });
+    if (!membership) throw forbidden('无法切换到该团队');
+    await this.prisma.user.update({ where: { id: userId }, data: { teamContextVersion: { increment: 1 } } });
+    return this.sessionFor(userId, true, teamId);
+  }
+
   async refresh(userId: string) {
     // token 刷新审计：记录滑动续签事件（actor=用户自身），便于安全审计追踪会话活跃度。
     // 失败（sessionFor 抛 unauthorized）时不审计，与 login.failed 区分（refresh 失败多为 token 过期，非恶意）。
@@ -367,7 +381,7 @@ export class AuthService {
     return { ok: true, message: '验证邮件已发送，请查收' };
   }
 
-  private async sessionFor(userId: string, includeToken = true) {
+  private async sessionFor(userId: string, includeToken = true, preferredTeamId?: string | null) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { memberships: { where: { status: 'ACTIVE' }, include: { team: true }, orderBy: { joinedAt: 'desc' } } },
@@ -379,7 +393,10 @@ export class AuthService {
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
     });
-    const membership = user.memberships[0] || null;
+    const membership = preferredTeamId === undefined
+      ? user.memberships[0] || null
+      : user.memberships.find((candidate) => candidate.teamId === preferredTeamId && candidate.team.status === 'ACTIVE') || null;
+    if (preferredTeamId && !membership) throw forbidden('当前团队会话已失效');
     const teamContextVersion = Number.isInteger(user.teamContextVersion) ? user.teamContextVersion : 0;
 
     // RBAC：解析当前用户的全部权限码，随 session 下发给前端做入口门控（替代旧枚举判定）。

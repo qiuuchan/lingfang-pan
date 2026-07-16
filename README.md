@@ -488,6 +488,7 @@ PostgreSQL 使用 `prisma/migrations/` 中的迁移 SQL；MySQL 使用运行时�
 |------|------|
 | [愿景与架构](docs/01-vision-and-architecture.md) | 产品定位、系统设计 |
 | [领域模型与插件](docs/02-domain-and-plugins.md) | 实体契约、插件清单、SDK |
+| [插件开发说明](docs/plugin-development.md) | Manifest、README、Runtime、能力与 CLI 发布流程 |
 | [后端与 LLM](docs/03-backend-and-llm.md) | API 设计、鉴权、网关 |
 | [工程规范](docs/04-engineering.md) | Monorepo 约定、配置隔离 |
 | [协作平台架构](docs/collab-platform.md) | 多租户架构 |

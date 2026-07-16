@@ -4,7 +4,15 @@
 //  CONTRACT-09 修复）
 export * from './identity';
 export * from './plugin';
+export * from './plugin-action';
+export * from './plugin-workflow';
+export * from './plugin-cloud-automation';
 export * from './plugin-registry';
+export * from './marketplace-discovery';
+export * from './marketplace-commerce';
+export * from './plugin-governance';
+export * from './plugin-shared-state';
+export * from './web-plugin-center';
 export * from './admin-governance';
 export * from './draft';
 export * from './llm';
