@@ -46,6 +46,18 @@ fn list_plugins(state: tauri::State<AppState>) -> Vec<LoadedPlugin> {
     state.plugins.clone()
 }
 
+/// 命令：切换开发者工具（控制台）。右键菜单「控制台」调用。
+#[tauri::command]
+fn toggle_devtools(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_devtools_open() {
+            window.close_devtools();
+        } else {
+            window.open_devtools();
+        }
+    }
+}
+
 /// 命令：启动内置脚本插件（builtin-plugins 下的 nodejs/python）。
 ///
 /// 内置插件 id 允许 `builtin.xxx` 这种点号命名，不能直接复用 plugins_root 的
@@ -331,6 +343,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             quit_app,
             list_plugins,
+            toggle_devtools,
             start_builtin_plugin,
             read_plugin_file,
             invoke_capability,

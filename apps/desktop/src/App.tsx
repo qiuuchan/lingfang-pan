@@ -16,6 +16,7 @@ import { NotificationCenter } from '@/components/NotificationCenter';
 import { CloseBehaviorDialog } from '@/components/CloseBehaviorDialog';
 import { AvatarMenu } from '@/components/AvatarMenu';
 import { CommandPalette } from '@/components/CommandPalette';
+import { ContextMenu } from '@/components/ContextMenu';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 
@@ -880,6 +881,7 @@ export default function App() {
   return (
     <AppContext.Provider value={ctx}>
       <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+        <ContextMenu />
         {/* 紧凑自定义标题栏：侧边栏折叠按钮 + 应用名 + 窗口控制。 */}
         <TitleBar
           sidebarOpen={sidebarOpen}
