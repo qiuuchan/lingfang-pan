@@ -17,6 +17,8 @@ WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/contract ./packages/contract
+COPY --from=build /app/packages/workflow-engine ./packages/workflow-engine
 COPY --from=build /app/apps/collab-api ./apps/collab-api
 EXPOSE 19006
 CMD ["node", "apps/collab-api/dist/main.js"]
