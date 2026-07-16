@@ -30,11 +30,14 @@ describe('PluginRegistryService upload provenance', () => {
       visibility: 'team',
       capabilities: [],
     };
+    const readmeMarkdown = '# External Demo\n\nImported safely.';
     vi.mocked(inspectPluginArtifact).mockResolvedValue({
       meta: { format: 'lingfang-plugin', formatVersion: 4 },
       manifest,
       files: [{ path: 'main.js', sizeBytes: 17, sha256: 'b'.repeat(64) }],
       policyFiles: [{ path: 'main.js', content: 'console.log("ok")' }],
+      readmeMarkdown,
+      workflowDefinition: null,
     } as never);
 
     const pkg = {
@@ -100,6 +103,7 @@ describe('PluginRegistryService upload provenance', () => {
         sourceLabel: 'Cursor workspace',
         ingestChannel: 'DESKTOP',
         createdById: userId,
+        readmeMarkdown,
       }),
     });
     expect(auditCreate).toHaveBeenCalledWith({
@@ -118,6 +122,7 @@ describe('PluginRegistryService upload provenance', () => {
       sourceLabel: 'Cursor workspace',
       ingestChannel: 'DESKTOP',
     });
+    expect(result.release).not.toHaveProperty('readme_markdown');
     expect(artifacts.promote).toHaveBeenCalledOnce();
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,

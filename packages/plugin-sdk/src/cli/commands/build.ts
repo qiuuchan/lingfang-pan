@@ -8,6 +8,7 @@ import { packWorkspace } from '../util/archive.ts';
 import { log } from '../log.ts';
 import { parseArgs } from '../parser.ts';
 import { pathExists } from '../util/fs.ts';
+import { validateRootReadme } from '../util/readme.ts';
 
 export interface BuildOptions {
   path?: string; // 默认 process.cwd()
@@ -100,6 +101,9 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
       opts?.json ?? false,
     );
   }
+
+  const readmeError = validateRootReadme(pluginPath);
+  if (readmeError) return printError(readmeError.code, readmeError.message, opts?.json ?? false);
 
   // 5. 打包
   let packResult;

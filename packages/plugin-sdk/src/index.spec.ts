@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PluginAiError, sdk } from './index';
+import { PluginActionError, PluginAiError, sdk } from './index';
 
 type TestGlobal = typeof globalThis & {
   __lingfangInvoke?: (capability: string, args: unknown) => Promise<unknown>;
@@ -103,5 +103,120 @@ describe('plugin AI SDK', () => {
       code: 'bridge_invalid',
       status: 503,
     });
+  });
+});
+
+describe('plugin shared SDK', () => {
+  it('uses a separate typed bridge without touching legacy local storage', async () => {
+    const bridge = vi.fn().mockResolvedValue({ key: 'asset', value: { id: 1 }, schema_version: 1, revision: '2' });
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+    await expect(sdk.shared.compareAndSet({
+      namespace: 'project.assets', key: 'asset', value: { id: 1 }, schema_version: 1, expected_revision: '1',
+    })).resolves.toMatchObject({ revision: '2' });
+    expect(bridge).toHaveBeenCalledWith('shared.compare_and_set', {
+      namespace: 'project.assets', key: 'asset', value: { id: 1 }, schema_version: 1, expected_revision: '1',
+    });
+  });
+
+  it('rejects non-serializable shared values before invoking the host', async () => {
+    const bridge = vi.fn();
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+    const value: Record<string, unknown> = {};
+    value.self = value;
+    expect(() => sdk.shared.set({ namespace: 'project.assets', key: 'asset', value, schema_version: 1 })).toThrow('不可序列化');
+    expect(bridge).not.toHaveBeenCalled();
+  });
+});
+
+describe('plugin action SDK', () => {
+  it('sends only the dependency alias, input and opaque effect hint to the trusted host', async () => {
+    const bridge = vi.fn().mockResolvedValue({ artifact: 'video-1' });
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+
+    await expect(sdk.actions.call('video_generator', { image: 'artifact-1' }, {
+      idempotencyKey: 'scene-7',
+    })).resolves.toEqual({ artifact: 'video-1' });
+
+    expect(bridge).toHaveBeenCalledWith('actions.call', {
+      dependency_id: 'video_generator',
+      input: { image: 'artifact-1' },
+      idempotency_key: 'scene-7',
+    });
+    expect(bridge.mock.calls[0]?.[1]).not.toHaveProperty('request_idempotency_key');
+    expect(bridge.mock.calls[0]?.[1]).not.toHaveProperty('signal');
+  });
+
+  it('preserves stable host action errors', async () => {
+    (globalThis as TestGlobal).__lingfangInvoke = vi.fn().mockRejectedValue({
+      message: '目标 runtime 暂不可用',
+      code: 'action_runtime_unavailable',
+      status: 503,
+      requestId: 'req-action-1',
+    });
+
+    const error = await sdk.actions.call('video_generator', {}).catch((caught) => caught);
+    expect(error).toBeInstanceOf(PluginActionError);
+    expect(error).toMatchObject({
+      code: 'action_runtime_unavailable',
+      status: 503,
+      requestId: 'req-action-1',
+    });
+  });
+
+  it('maps a missing bridge and an already-aborted signal to stable action errors', async () => {
+    await expect(sdk.actions.call('video_generator', {})).rejects.toMatchObject({
+      code: 'action_runtime_unavailable',
+    });
+
+    const bridge = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+    await expect(sdk.actions.call('video_generator', {}, { signal: controller.signal })).rejects.toMatchObject({
+      code: 'action_cancelled',
+    });
+    expect(bridge).not.toHaveBeenCalled();
+  });
+});
+
+describe('plugin artifact SDK', () => {
+  const ref = {
+    type: 'artifact_ref' as const,
+    artifact_id: 'artifact-1',
+    media_type: 'image/png',
+    size_bytes: 4,
+    sha256: 'a'.repeat(64),
+    authorization: { scope: 'TEAM' as const, team_id: 'team-1', handle: 'signed-handle' },
+  };
+
+  it('sends typed bytes without exposing storage or authorization internals', async () => {
+    const bridge = vi.fn().mockResolvedValue(ref);
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+    await expect(sdk.artifacts.create({ dataBase64: 'UE5H', mediaType: 'image/png' })).resolves.toEqual(ref);
+    expect(bridge).toHaveBeenCalledWith('artifacts.create', { data_base64: 'UE5H', media_type: 'image/png' });
+    expect(bridge.mock.calls[0]?.[1]).not.toHaveProperty('objectKey');
+    expect(bridge.mock.calls[0]?.[1]).not.toHaveProperty('token');
+    expect(bridge.mock.calls[0]?.[1]).not.toHaveProperty('request_idempotency_key');
+  });
+
+  it('validates signed refs before materialize/import reaches the host', async () => {
+    const bridge = vi.fn().mockResolvedValue({ dataBase64: 'UE5H', mediaType: 'image/png', sizeBytes: 4, sha256: 'a'.repeat(64) });
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+    await sdk.artifacts.materialize(ref);
+    expect(bridge).toHaveBeenCalledWith('artifacts.materialize', { artifact_ref: ref });
+    expect(() => sdk.artifacts.import({ ...ref, sha256: 'bad' } as never)).toThrow(expect.objectContaining({ code: 'action_artifact_invalid' }));
+  });
+
+  it('uses localhost artifact routes without leaking the bridge token into JSON', async () => {
+    env().LINGFANG_PLUGIN_BRIDGE_URL = 'http://127.0.0.1:12345';
+    env().LINGFANG_PLUGIN_BRIDGE_TOKEN = 'session-token';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(ref), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(sdk.artifacts.create({ dataBase64: 'UE5H', mediaType: 'image/png' })).resolves.toEqual(ref);
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:12345/artifacts/create', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-LingFang-Plugin-Token': 'session-token' }),
+      body: JSON.stringify({ data_base64: 'UE5H', media_type: 'image/png' }),
+    }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('token');
   });
 });

@@ -17,13 +17,16 @@ import {
   UsersIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { MARKETPLACE_CATEGORY_LABELS } from '@lingfang/contract';
 import { useApp } from '@/App';
 import { PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
+import { Markdown } from '@/components/markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/api';
 import type { LoadedPlugin } from '@/lib/types';
 import {
@@ -31,7 +34,9 @@ import {
   copyInstallationToDraft,
   downloadRelease,
   importLocalArtifact,
+  getMarketplaceOwnerQuality,
   getPluginPackageDetail,
+  getPluginReleaseDetail,
   listInstallations,
   listMarketplaceRegistry,
   listTeamRegistry,
@@ -39,10 +44,12 @@ import {
   loadDraftWorkspacePlugin,
   rollbackInstallation,
   selectPluginArtifact,
+  submitMarketplaceQualityAppeal,
   uninstallInstallation,
   type Installation,
   type RegistryCatalogItem,
   type RegistryPackage,
+  type RegistryOwnerQuality,
   type RegistryRelease,
   type TransferProgress,
 } from '@/lib/plugin-registry';
@@ -137,7 +144,10 @@ export function PluginCenterBody({
   const buyAndDownload = async (item: RegistryCatalogItem) => {
     setBusyKey(item.package.id);
     try {
-      if (!item.entitled && (item.priceCents || 0) > 0) await buyMarketplacePackage(item.package.id);
+      if (!item.entitled && (item.priceCents || 0) > 0) {
+        if (!item.priceVersion) throw new Error('市场价格信息已过期，请刷新后重试');
+        await buyMarketplacePackage(item.package.id, item.priceVersion);
+      }
       await installCatalogItem(item, 'marketplace');
     } catch (caught) {
       toast.error(errorMessage(caught, '购买失败'));
@@ -230,12 +240,11 @@ export function PluginCenterBody({
           </TabsContent>
 
           <TabsContent value="market" className="mt-4">
-            <CatalogList
+            <MarketplaceDiscoveryGroups
               items={market}
               loading={catalogLoading}
               installed={byPackage}
               busyKey={busyKey}
-              marketplace
               onDownload={(item) => void buyAndDownload(item)}
               onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: true })}
               onHistory={(item) => setHistoryPackage(item.package)}
@@ -283,6 +292,23 @@ export function PluginCenterBody({
       </Dialog>
     </div>
   );
+}
+
+function MarketplaceDiscoveryGroups(props: Omit<Parameters<typeof CatalogList>[0], 'marketplace'>) {
+  if (props.loading) return <ListLoading />;
+  if (!props.items.length) return <EmptyState icon={StoreIcon} text="市场暂无可下载插件" />;
+  const featured = props.items.filter((item) => item.qualityTier === 'FEATURED');
+  const recentQuality = props.items.filter((item) => item.qualityTier === 'QUALITY').slice(0, 8);
+  const categoryPopular = props.items.filter((item) => item.qualityTier !== 'FEATURED').slice(0, 12);
+  const sections = [
+    { key: 'featured', title: '精选', description: '平台人工推荐，仍需满足上架和安全门禁', items: featured },
+    { key: 'popular', title: '分类热门', description: '按持久质量投影与市场表现稳定排序', items: categoryPopular },
+    { key: 'quality', title: '近期优质', description: '最近通过公开质量规则的插件', items: recentQuality },
+  ].filter((section) => section.items.length > 0);
+  return <div className="space-y-5">{sections.map((section) => <section key={section.key}>
+    <div className="mb-2"><h2 className="text-sm font-semibold">{section.title}</h2><p className="text-xs text-muted-foreground">{section.description}</p></div>
+    <CatalogList {...props} items={section.items} loading={false} marketplace />
+  </section>)}</div>;
 }
 
 function InstalledList({ installations, plugins, loading, onRun, onDetail, onRollback, onUninstall, onCopyDraft, busyKey }: {
@@ -366,6 +392,8 @@ function CatalogList({ items, installed, loading, busyKey, marketplace, onDownlo
                 <Badge variant="outline">v{item.latestRelease.version}</Badge>
                 <PluginSourceBadge sourceKind={item.latestRelease.sourceKind} sourceLabel={item.latestRelease.sourceLabel} ingestChannel={item.latestRelease.ingestChannel} />
                 {marketplace && <Badge variant="secondary">{(item.priceCents || 0) === 0 ? '免费' : `¥${((item.priceCents || 0) / 100).toFixed(2)}`}</Badge>}
+                {marketplace && <QualityTierBadge tier={item.qualityTier} />}
+                {marketplace && item.category && <Badge variant="outline">{MARKETPLACE_CATEGORY_LABELS[item.category]}</Badge>}
               </div>
               <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{item.package.description || '暂无描述'}</p>
             </div>
@@ -382,6 +410,13 @@ function CatalogList({ items, installed, loading, busyKey, marketplace, onDownlo
       })}
     </div>
   );
+}
+
+function QualityTierBadge({ tier }: { tier?: RegistryCatalogItem['qualityTier'] }) {
+  const value = tier ?? 'LISTED';
+  return <Badge variant={value === 'FEATURED' ? 'default' : value === 'QUALITY' ? 'secondary' : 'outline'}>
+    {{ LISTED: '已上架', QUALITY: '优质', FEATURED: '精选' }[value]}
+  </Badge>;
 }
 
 function TransferProgressBar({ progress }: { progress: TransferProgress }) {
@@ -448,6 +483,45 @@ function PluginDetailDialog({ target, onClose, onRun }: {
   onClose: () => void;
   onRun: (plugin: LoadedPlugin) => void;
 }) {
+  const [remoteReadme, setRemoteReadme] = useState<{ releaseId: string; markdown: string } | null>(null);
+  const [readmeLoading, setReadmeLoading] = useState(false);
+  const [readmeError, setReadmeError] = useState('');
+  const [ownerQuality, setOwnerQuality] = useState<RegistryOwnerQuality | null>(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
+  useEffect(() => {
+    if (!target || target.kind !== 'catalog') {
+      setRemoteReadme(null);
+      setReadmeError('');
+      return;
+    }
+    let active = true;
+    setReadmeLoading(true);
+    setReadmeError('');
+    void getPluginReleaseDetail(target.item.latestRelease.id)
+      .then(({ release }) => {
+        if (!active) return;
+        setRemoteReadme({ releaseId: release.id, markdown: release.readme_markdown || '' });
+      })
+      .catch((caught) => active && setReadmeError(errorMessage(caught, '插件详情加载失败')))
+      .finally(() => active && setReadmeLoading(false));
+    return () => { active = false; };
+  }, [target]);
+
+  useEffect(() => {
+    if (!target || target.kind !== 'catalog' || target.marketplace) {
+      setOwnerQuality(null);
+      setQualityLoading(false);
+      return;
+    }
+    let active = true;
+    setQualityLoading(true);
+    void getMarketplaceOwnerQuality(target.item.package.id)
+      .then((value) => active && setOwnerQuality(value))
+      .catch((caught) => active && toast.error(errorMessage(caught, '质量快照加载失败')))
+      .finally(() => active && setQualityLoading(false));
+    return () => { active = false; };
+  }, [target]);
+
   // 字段抽取：把两种来源统一成 { name, description, version, runtimeType, origin, meta } 便于渲染。
   const view = useMemo(() => {
     if (!target) return null;
@@ -457,6 +531,7 @@ function PluginDetailDialog({ target, onClose, onRun }: {
       return {
         name: plugin.name,
         description: plugin.description,
+        readmeMarkdown: plugin.readmeMarkdown,
         version: release.version,
         runtimeType: plugin.runtime_type,
         origin: <SourceBadge origin={installation.origin} />,
@@ -474,6 +549,7 @@ function PluginDetailDialog({ target, onClose, onRun }: {
     return {
       name: item.package.name,
       description: item.package.description,
+      readmeMarkdown: remoteReadme?.releaseId === release.id ? remoteReadme.markdown : '',
       version: release.version,
       runtimeType: release.manifest?.runtime_type,
       origin: <PluginSourceBadge sourceKind={release.sourceKind} sourceLabel={release.sourceLabel} ingestChannel={release.ingestChannel} />,
@@ -485,36 +561,49 @@ function PluginDetailDialog({ target, onClose, onRun }: {
       } as Record<string, string>,
       onRunPlugin: null as LoadedPlugin | null,
     };
-  }, [target]);
+  }, [remoteReadme, target]);
 
   return (
     <Dialog open={Boolean(target)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{view?.name ?? '插件详情'}</DialogTitle>
-          <DialogDescription>插件介绍与版本信息。</DialogDescription>
+      <DialogContent className="flex h-[85vh] max-h-[85vh] w-[94vw] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+        <DialogHeader className="border-b px-6 py-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <DialogTitle className="text-xl">{view?.name ?? '插件详情'}</DialogTitle>
+            {view && <Badge variant="secondary">v{view.version}</Badge>}
+            {view?.origin}
+          </div>
+          <DialogDescription>{view?.description?.trim() || '查看插件功能、权限与版本信息。'}</DialogDescription>
         </DialogHeader>
         {view && (
-          <div className="space-y-4">
-            {/* 介绍（核心）：whitespace-pre-wrap 保留 manifest 里可能的多行 */}
-            <div className="space-y-1.5">
-              <div className="text-xs font-medium text-muted-foreground">插件介绍</div>
-              <p className="whitespace-pre-wrap break-words text-sm">
-                {view.description?.trim() ? view.description : <span className="text-muted-foreground">暂无描述</span>}
-              </p>
+          <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1fr)_16rem]">
+            <div className="min-h-0 overflow-y-auto px-6 py-5">
+              <div className="mb-4 text-sm font-semibold">详情</div>
+              {readmeLoading && target?.kind === 'catalog' ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2Icon className="size-4 animate-spin" />正在加载插件说明…</div>
+                : readmeError ? <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{readmeError}</div>
+                  : view.readmeMarkdown?.trim() ? <Markdown pluginReadme>{view.readmeMarkdown}</Markdown>
+                    : <p className="whitespace-pre-wrap break-words text-sm">{view.description?.trim() || <span className="text-muted-foreground">暂无描述</span>}</p>}
+              {target?.kind === 'catalog' && !target.marketplace && (
+                <div className="mt-6 border-t pt-5">
+                  {qualityLoading ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2Icon className="size-4 animate-spin" />正在加载质量快照…</div>
+                    : ownerQuality ? <DesktopOwnerQuality quality={ownerQuality} onSubmitted={() => getMarketplaceOwnerQuality(target.item.package.id).then(setOwnerQuality)} />
+                      : <p className="text-sm text-muted-foreground">该插件尚无可用的作者质量投影。</p>}
+                </div>
+              )}
             </div>
-            {/* 元信息：版本/运行时/来源 + 各来源特有字段 */}
-            <div className="divide-y rounded-lg border">
+            <aside className="overflow-y-auto border-t bg-muted/20 p-5 md:border-l md:border-t-0">
+              <div className="mb-3 text-sm font-semibold">更多信息</div>
+              <div className="divide-y rounded-lg border bg-background">
               <DetailRow label="版本">{view.version}</DetailRow>
               {view.runtimeType && <DetailRow label="运行时">{runtimeTypeLabel(view.runtimeType)}</DetailRow>}
               <DetailRow label="来源">{view.origin}</DetailRow>
               {Object.entries(view.meta).map(([label, value]) => (
                 <DetailRow key={label} label={label}>{value}</DetailRow>
               ))}
-            </div>
+              </div>
+            </aside>
           </div>
         )}
-        <DialogFooter>
+        <DialogFooter className="border-t px-6 py-4">
           {view?.onRunPlugin && (
             <Button variant="default" onClick={() => { onClose(); onRun(view.onRunPlugin!); }}>运行</Button>
           )}
@@ -524,6 +613,45 @@ function PluginDetailDialog({ target, onClose, onRun }: {
     </Dialog>
   );
 }
+
+const QUALITY_REASON_LABELS: Record<string, string> = {
+  hard_gate_failed: '当前上架、审核或安全门禁未通过',
+  listing_age_insufficient: '连续上架时间不足', release_age_insufficient: '当前发行版观察时间不足',
+  insufficient_active_teams: '近 30 天活跃团队不足', insufficient_observed_runs: '近 30 天可观测运行样本不足',
+  failure_rate_high: '插件归因失败率过高', insufficient_rating_teams: '合格评分团队不足', average_rating_low: '平均评分未达标',
+  refund_data_unavailable: '退款数据暂不可用', insufficient_matured_paid_orders: '成熟付费订单样本不足', refund_rate_high: '获批退款率过高',
+  security_blocked: '存在未解决的安全问题', anomaly_review_required: '指标异常，等待人工复核', quality_blocked: '平台已暂停自动晋级',
+};
+
+function DesktopOwnerQuality({ quality, onSubmitted }: { quality: RegistryOwnerQuality; onSubmitted: () => Promise<unknown> }) {
+  const [appeal, setAppeal] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const snapshot = quality.snapshot;
+  const metrics = snapshot?.metrics;
+  return <section className="space-y-4">
+    <div><h3 className="font-semibold">作者质量视图</h3><p className="text-xs text-muted-foreground">等级 {{ LISTED: '已上架', QUALITY: '优质', FEATURED: '精选' }[quality.tier]}{snapshot ? ` · 计算于 ${new Date(snapshot.computed_at).toLocaleString()}` : ''}</p></div>
+    {!snapshot ? <p className="text-sm text-muted-foreground">尚无质量快照。</p> : <>
+      <div className="grid gap-2 text-sm sm:grid-cols-2">
+        <QualityMetric label="连续上架" value={`${metrics!.listing_age_days} 天`} />
+        <QualityMetric label="发行版观察" value={`${metrics!.current_release_age_days} 天`} />
+        <QualityMetric label="30 天活跃团队" value={metrics!.active_teams_30d} />
+        <QualityMetric label="30 天运行 / 失败" value={`${metrics!.observed_runs_30d} / ${metrics!.failed_runs_30d}`} />
+        <QualityMetric label="失败率" value={qualityPercent(metrics!.failure_rate_bps)} />
+        <QualityMetric label="评分团队 / 平均分" value={`${metrics!.rating_teams} / ${metrics!.average_rating_tenths == null ? '数据不足' : (metrics!.average_rating_tenths / 10).toFixed(1)}`} />
+        <QualityMetric label="90 天成熟订单 / 退款" value={`${metrics!.matured_paid_orders_90d} / ${metrics!.approved_refunds_90d}`} />
+        <QualityMetric label="退款率" value={metrics!.refund_metric_state === 'NOT_APPLICABLE' ? '不适用' : qualityPercent(metrics!.refund_rate_bps)} />
+      </div>
+      <div><div className="text-sm font-medium">未达标原因</div>{snapshot.reasons.length ? <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">{snapshot.reasons.map((reason) => <li key={reason.code}>{QUALITY_REASON_LABELS[reason.code] ?? reason.code}{reason.actual == null ? '' : `（${reason.actual}${reason.threshold == null ? '' : ` / ${reason.threshold}`}）`}</li>)}</ul> : <p className="mt-1 text-sm text-muted-foreground">当前快照已满足自动优质规则。</p>}</div>
+      <div className="space-y-2"><Textarea rows={4} maxLength={10000} value={appeal} onChange={(event) => setAppeal(event.target.value)} placeholder="说明指标或排除原因异常的具体依据" /><Button size="sm" disabled={!appeal.trim() || submitting} onClick={async () => { setSubmitting(true); try { await submitMarketplaceQualityAppeal(quality.packageId, appeal.trim()); setAppeal(''); toast.success('申诉工单已创建'); await onSubmitted(); } catch (caught) { toast.error(errorMessage(caught, '申诉提交失败')); } finally { setSubmitting(false); } }}>{submitting && <Loader2Icon className="animate-spin" />}提交申诉</Button></div>
+    </>}
+  </section>;
+}
+
+function QualityMetric({ label, value }: { label: string; value: ReactNode }) {
+  return <div className="rounded-lg border bg-muted/20 p-2"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 font-medium">{value}</div></div>;
+}
+
+function qualityPercent(value: number | null) { return value == null ? '数据不足' : `${(value / 100).toFixed(2)}%`; }
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -535,7 +663,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 function runtimeTypeLabel(type: string): string {
-  return { client: '软件内（iframe）', nodejs: 'Node.js 独立进程', python: 'Python 独立进程', cloud: '云端' }[type] ?? type;
+  return { client: '软件内（iframe）', nodejs: 'Node.js 独立进程', python: 'Python 独立进程', cloud: '云端', workflow: '工作流' }[type] ?? type;
 }
 
 function formatBytes(bytes: number): string {

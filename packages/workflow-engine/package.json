@@ -1,0 +1,9 @@
+{
+  "name": "@lingfang/workflow-engine",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "node --test" },
+  "dependencies": { "@dagrejs/graphlib": "^4.0.1", "@lingfang/contract": "workspace:*" },
+  "devDependencies": { "typescript": "^5" }
+}

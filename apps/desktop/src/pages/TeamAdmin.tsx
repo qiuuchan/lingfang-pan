@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { LoadingButton } from '@/components/loading-button';
 import { centsToYuan } from '@/lib/money';
 import type { TeamInfo, TeamMember, TeamProfile } from '@/lib/types';
-import { OverviewSkeleton, MembersTab, RolesTab, PluginGrantsTab, InvitationsTab } from './team-admin';
+import { OverviewSkeleton, MembersTab, RolesTab, PluginGrantsTab, InvitationsTab, SharedStateTab, CloudAutomationTab } from './team-admin';
 
 export function TeamAdmin() {
   const { session } = useApp();
@@ -74,6 +74,8 @@ export function TeamAdmin() {
             <TabsTrigger value="members">成员管理</TabsTrigger>
             <TabsTrigger value="roles">角色与权限</TabsTrigger>
             <TabsTrigger value="grants">插件授权</TabsTrigger>
+            <TabsTrigger value="shared-state">共享状态</TabsTrigger>
+            <TabsTrigger value="cloud">Cloud 自动化</TabsTrigger>
             <TabsTrigger value="invitations">邀请码与设置</TabsTrigger>
           </TabsList>
 
@@ -105,6 +107,12 @@ export function TeamAdmin() {
                   <PluginGrantsTab />
                 </TabsContent>
               )}
+              {tab === 'shared-state' && (
+                <TabsContent value="shared-state">
+                  <SharedStateTab />
+                </TabsContent>
+              )}
+              {tab === 'cloud' && <TabsContent value="cloud"><CloudAutomationTab /></TabsContent>}
               {tab === 'invitations' && (
                 <TabsContent value="invitations">
                   <InvitationsTab />

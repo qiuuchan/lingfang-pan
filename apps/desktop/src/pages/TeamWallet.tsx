@@ -5,8 +5,9 @@
 //  - 卡片 2「团队灵石」（Float）：AI 对话/生图计费。GET /api/teams/current/credits + /credits/ledger。
 // 两类账户明确区分用途、各自独立流水，不混显、不换算。
 import { useEffect, useState } from 'react';
+import type { MarketplaceOrderListItem, MarketplaceOrderPage, MarketplaceStatementPage } from '@lingfang/contract';
 import { toast } from 'sonner';
-import { CoinsIcon, WalletIcon } from 'lucide-react';
+import { CoinsIcon, ReceiptTextIcon, WalletIcon } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import type { BalanceLedger } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,6 +20,7 @@ import { Shimmer, StaggerContainer, StaggerItem } from '@/lib/motion';
 
 interface CreditData { teamId: string; balance: number; }
 interface CreditLedgerRow { id: string; amount: number; direction: 'CREDIT' | 'DEBIT'; source: string; reason: string; createdAt: string; }
+type MarketplaceOrderRow = MarketplaceOrderListItem;
 
 // 流水统一行：悬浮窗内复用（余额/灵石两类各自格式化金额）。
 interface LedgerRow { id: string; label: string; createdAt: string; direction: 'CREDIT' | 'DEBIT'; amountText: string; tierText?: string; }
@@ -50,6 +52,11 @@ export function TeamWallet() {
   const [creditLedger, setCreditLedger] = useState<CreditLedgerRow[]>([]);
   const [creditLedgerOpen, setCreditLedgerOpen] = useState(false);
   const [creditLedgerLoaded, setCreditLedgerLoaded] = useState(false);
+  const [marketplaceView, setMarketplaceView] = useState<'buyer' | 'seller' | null>(null);
+  const [buyerOrders, setBuyerOrders] = useState<MarketplaceOrderRow[]>([]);
+  const [sellerOrders, setSellerOrders] = useState<MarketplaceOrderRow[]>([]);
+  const [sellerPendingCents, setSellerPendingCents] = useState(0);
+  const [marketplaceLoaded, setMarketplaceLoaded] = useState({ buyer: false, seller: false });
 
   useEffect(() => {
     void (async () => {
@@ -85,6 +92,22 @@ export function TeamWallet() {
         setCreditLedgerLoaded(true);
       } catch (e) { toast.error((e as ApiError).message); }
     }
+  };
+
+  const openMarketplace = async (view: 'buyer' | 'seller') => {
+    setMarketplaceView(view);
+    if (marketplaceLoaded[view]) return;
+    try {
+      if (view === 'buyer') {
+        const result = await api<MarketplaceOrderPage>('/api/teams/current/plugin-purchases?pageSize=50');
+        setBuyerOrders(result.items);
+      } else {
+        const result = await api<MarketplaceStatementPage>('/api/teams/current/marketplace-statement?pageSize=50&timezone=Asia%2FShanghai');
+        setSellerOrders(result.items);
+        setSellerPendingCents((result.summary.by_status?.PENDING_SETTLEMENT?.seller_cents ?? 0) + (result.summary.by_status?.REFUND_REQUESTED?.seller_cents ?? 0));
+      }
+      setMarketplaceLoaded((current) => ({ ...current, [view]: true }));
+    } catch (e) { toast.error((e as ApiError).message); }
   };
 
   const balanceRows: LedgerRow[] = balanceLedger.map((t) => ({
@@ -124,6 +147,19 @@ export function TeamWallet() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><ReceiptTextIcon className="size-5 text-primary" />市场财务</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">查看当前团队的插件订单、退款状态与卖家待结算明细。</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => void openMarketplace('buyer')}>购买订单</Button>
+            <Button variant="outline" size="sm" onClick={() => void openMarketplace('seller')}>卖家对账</Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 卡片 2：团队灵石——AI 对话/生图计费。 */}
       <Card>
         <CardHeader>
@@ -158,8 +194,45 @@ export function TeamWallet() {
         loaded={creditLedgerLoaded}
         rows={creditRows}
       />
+      <MarketplaceOrdersDialog
+        view={marketplaceView}
+        onOpenChange={(open) => !open && setMarketplaceView(null)}
+        loaded={marketplaceView ? marketplaceLoaded[marketplaceView] : false}
+        rows={marketplaceView === 'seller' ? sellerOrders : buyerOrders}
+        sellerPendingCents={sellerPendingCents}
+      />
     </div>
   );
+}
+
+function MarketplaceOrdersDialog({ view, onOpenChange, loaded, rows, sellerPendingCents }: {
+  view: 'buyer' | 'seller' | null;
+  onOpenChange: (open: boolean) => void;
+  loaded: boolean;
+  rows: MarketplaceOrderRow[];
+  sellerPendingCents: number;
+}) {
+  const seller = view === 'seller';
+  return <Dialog open={Boolean(view)} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>{seller ? '卖家市场对账' : '插件购买订单'}</DialogTitle>
+        <DialogDescription>{seller ? `待结算卖家金额 ${centsToYuan(sellerPendingCents)}，以订单状态实时聚合。` : '许可费用使用团队人民币余额；AI 调用产生的灵石费用不随许可退款返还。'}</DialogDescription>
+      </DialogHeader>
+      <div className="max-h-[60vh] overflow-y-auto">
+        {!loaded ? <div className="flex flex-col gap-2">{Array.from({ length: 4 }).map((_, index) => <Shimmer className="h-16 w-full" key={index} />)}</div>
+          : rows.length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">暂无订单</div>
+            : <div className="divide-y">{rows.map((row) => <div className="flex items-start justify-between gap-4 py-3" key={row.id}>
+              <div><div className="text-sm font-medium">{row.package_name}</div><div className="text-xs text-muted-foreground">{fmtTime(row.created_at)}{row.refundable_until && !seller ? ` · 退款申请截止 ${fmtTime(row.refundable_until)}` : ''}</div></div>
+              <div className="text-right"><div className="text-sm font-semibold tabular-nums">{centsToYuan(seller ? row.seller_cents : row.price_cents)}</div><Badge variant="outline">{marketplaceStatus(row.status)}</Badge></div>
+            </div>)}</div>}
+      </div>
+    </DialogContent>
+  </Dialog>;
+}
+
+function marketplaceStatus(status: string) {
+  return ({ PENDING_SETTLEMENT: '待结算', REFUND_REQUESTED: '退款审核中', SETTLED: '已结算', REFUNDED: '已退款' } as Record<string, string>)[status] ?? status;
 }
 
 // 流水悬浮窗：居中 Dialog 展示一类账户的流水明细。

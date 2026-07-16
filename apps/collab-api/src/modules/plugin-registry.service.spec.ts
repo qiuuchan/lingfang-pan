@@ -42,8 +42,9 @@ function releaseRow(version: string, id = version) {
   };
 }
 
-function service(prisma: Record<string, unknown>, auth: Record<string, unknown>, artifacts: Record<string, unknown> = {}) {
-  return new PluginRegistryService(prisma as never, auth as never, artifacts as never);
+function service(prisma: Record<string, unknown>, auth: Record<string, unknown>, artifacts: Record<string, unknown> = {}, governance: Record<string, unknown> = {}) {
+  const defaultGovernance = { authorizeRelease: vi.fn().mockImplementation(async (_userId, expected) => ({ decision: { allowed: true }, source: 'team', release: releaseRow('1.0.0', expected.releaseId) })) };
+  return new PluginRegistryService(prisma as never, auth as never, artifacts as never, { ...defaultGovernance, ...governance } as never);
 }
 
 function marketplaceListing(priceCents = 1200) {
@@ -56,6 +57,7 @@ function marketplaceListing(priceCents = 1200) {
     packageId: packageRow().id,
     currentReleaseId: 'release-1',
     priceCents,
+    priceRevision: 1,
     status: 'ACTIVE',
     currentRelease,
     package: {
@@ -75,7 +77,7 @@ const buyerMembership = {
 describe('PluginRegistryService', () => {
   it('selects the team catalog latest release by SemVer rather than publish time', async () => {
     const findMany = vi.fn().mockResolvedValue([
-      packageRow([releaseRow('1.9.0'), releaseRow('2.0.0-rc.1'), releaseRow('2.0.0')]),
+      packageRow([releaseRow('1.9.0'), releaseRow('2.0.0-rc.1'), { ...releaseRow('2.0.0'), readmeMarkdown: '# Large detail' }]),
     ]);
     const registry = service(
       { pluginPackage: { findMany } },
@@ -83,6 +85,46 @@ describe('PluginRegistryService', () => {
     );
     const result = await registry.teamCatalog('user');
     expect(result.items[0]?.latestRelease.version).toBe('2.0.0');
+    expect(result.items[0]?.latestRelease).not.toHaveProperty('readme_markdown');
+  });
+
+  it('returns immutable README only from the exact release detail endpoint', async () => {
+    const release = {
+      ...releaseRow('2.0.0', 'release-detail'),
+      readmeMarkdown: '# Demo\n\nRelease documentation.',
+      package: { ...packageRow(), listing: null },
+    };
+    const findUnique = vi.fn().mockResolvedValue(release);
+    const registry = service(
+      { pluginRelease: { findUnique } },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId }) },
+    );
+
+    await expect(registry.releaseDetail('owner-user', 'release-detail')).resolves.toMatchObject({
+      release: {
+        id: 'release-detail',
+        readme_markdown: '# Demo\n\nRelease documentation.',
+      },
+    });
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: 'release-detail' },
+      include: { package: { include: { listing: true } } },
+    });
+  });
+
+  it('keeps README out of non-detail release projections', async () => {
+    const release = {
+      ...releaseRow('2.0.0', 'release-summary'),
+      readmeMarkdown: '# Private detail payload',
+      package: { ...packageRow(), listing: null },
+    };
+    const registry = service(
+      { pluginRelease: { findUnique: vi.fn().mockResolvedValue(release) } },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'TEAM_ADMIN' }) },
+    );
+
+    const result = await registry.updateReleaseStatus('owner-user', 'release-summary', 'PUBLISHED');
+    expect(result.release).not.toHaveProperty('readme_markdown');
   });
 
   it('projects release provenance through both team and management catalogs', async () => {
@@ -140,7 +182,7 @@ describe('PluginRegistryService', () => {
     }));
     expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: { ownerTeamId: packageRow().ownerTeamId },
-      include: { releases: true, listing: true },
+      include: { releases: { select: expect.not.objectContaining({ readmeMarkdown: true }) }, listing: true },
     }));
   });
 
@@ -149,19 +191,26 @@ describe('PluginRegistryService', () => {
     const registry = service(
       {
         pluginPackage: { findUnique: vi.fn().mockResolvedValue({ ...packageRow(), listing: null }) },
+        pluginRelease: { findUnique: vi.fn().mockResolvedValue(releaseRow('1.0.0', 'release-1')) },
         pluginGrant: { findMany: vi.fn().mockResolvedValue([{ subjectKind: 'USER', effect: 'DENY' }]) },
         auditLog: { create: auditCreate },
       },
       { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: '22222222-2222-4222-8222-222222222222', role: 'MEMBER', teamRoleId: null }) },
+      {},
+      { authorizeRelease: vi.fn().mockRejectedValue(Object.assign(new Error('插件策略拒绝操作'), { code: 'forbidden' })) },
     );
     await expect(registry.runtimeAccess('user', packageRow().id, 'release-1', 'a'.repeat(64)))
       .rejects.toMatchObject({ code: 'forbidden' });
-    expect(auditCreate).toHaveBeenCalledOnce();
+    expect(auditCreate).not.toHaveBeenCalled();
   });
 
   it('binds runtime access to the exact published release and artifact digest', async () => {
     const release = releaseRow('1.0.0', 'release-1');
     const findRelease = vi.fn().mockResolvedValue(release);
+    const authorizeRelease = vi.fn().mockImplementation(async (_userId, expected) => {
+      if (expected.sha256 !== release.sha256) throw Object.assign(new Error('发行版不匹配'), { code: 'plugin_release_mismatch' });
+      return { decision: { allowed: true }, source: 'team', release };
+    });
     const registry = service(
       {
         pluginPackage: { findUnique: vi.fn().mockResolvedValue({ ...packageRow(), listing: null }) },
@@ -169,13 +218,16 @@ describe('PluginRegistryService', () => {
         pluginRelease: { findUnique: findRelease },
       },
       { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: packageRow().ownerTeamId, role: 'MEMBER', teamRoleId: null }) },
+      {},
+      { authorizeRelease },
     );
 
     await expect(registry.runtimeAccess('user', packageRow().id, release.id, release.sha256)).resolves.toMatchObject({
       allowed: true,
       mode: 'online-team-membership',
     });
-    expect(findRelease).toHaveBeenCalledWith({ where: { id: release.id } });
+    expect(findRelease).not.toHaveBeenCalled();
+    expect(authorizeRelease).toHaveBeenCalledWith('user', { releaseId: release.id, packageId: packageRow().id, sha256: release.sha256 }, ['run_local']);
 
     await expect(registry.runtimeAccess('user', packageRow().id, release.id, 'b'.repeat(64)))
       .rejects.toMatchObject({ code: 'plugin_release_mismatch' });
@@ -230,6 +282,7 @@ describe('PluginRegistryService', () => {
       },
       { ensureCurrentTeam: vi.fn().mockResolvedValue(buyerMembership) },
       { download },
+      { authorizeRelease: vi.fn().mockRejectedValue(Object.assign(new Error('市场发行版未通过审核'), { code: 'forbidden' })) },
     );
     await expect(registry.artifactDownload('buyer-user', 'pending-release')).rejects.toMatchObject({ code: 'forbidden' });
     expect(download).not.toHaveBeenCalled();
@@ -253,6 +306,7 @@ describe('PluginRegistryService', () => {
       },
       { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: 'owner-team', role: 'TEAM_ADMIN', teamRoleId: null }) },
       { download },
+      { authorizeRelease: vi.fn().mockResolvedValue({ decision: { allowed: true }, source: 'team', release: { ...releaseRow('1.0.0', 'release-1'), artifactKey: 'pkg/1.0.0/hash.lfplugin' } }) },
     );
     await expect(registry.artifactDownload('owner-user', 'release-1', 'req-1')).rejects.toMatchObject({
       status: 410,
@@ -826,6 +880,7 @@ describe('PluginRegistryService', () => {
     const ledgerCreate = vi.fn().mockResolvedValue({});
     const auditCreate = vi.fn().mockResolvedValue({});
     const tx = {
+      marketplaceListing: { findUnique: vi.fn().mockResolvedValue({ priceCents: 1200, priceRevision: 1, status: 'ACTIVE', currentReleaseId: 'release-1' }) },
       purchase: { create: purchaseCreate },
       team: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -851,13 +906,16 @@ describe('PluginRegistryService', () => {
       purchaseId: 'purchase-1',
     });
     expect(purchaseCreate).toHaveBeenCalledWith({
-      data: {
+      data: expect.objectContaining({
         packageId: packageRow().id,
         buyerUserId: 'buyer-user',
         buyerTeamId: 'buyer-team',
         sellerUserId: 'seller-user',
         priceCents: 1200,
-      },
+        listPriceCents: 1200,
+        discountAmountCents: 0,
+        priceVersion: expect.stringMatching(/^pv1\.[A-Za-z0-9_-]{43}$/),
+      }),
     });
     expect(tx.team.updateMany).toHaveBeenCalledWith({
       where: { id: 'buyer-team', balanceCents: { gte: 1200 } },
@@ -888,8 +946,18 @@ describe('PluginRegistryService', () => {
     expect(transaction).toHaveBeenCalledOnce();
   });
 
-  it('returns free marketplace packages without creating an entitlement or financial transaction', async () => {
-    const transaction = vi.fn();
+  it('creates and reuses a free marketplace acquisition without moving balances or ledgers', async () => {
+    const purchaseCreate = vi.fn().mockResolvedValue({ id: 'purchase-free' });
+    const entitlementCreate = vi.fn().mockResolvedValue({ id: 'entitlement-free', purchaseId: 'purchase-free' });
+    const tx = {
+      marketplaceListing: { findUnique: vi.fn().mockResolvedValue({ priceCents: 0, priceRevision: 1, status: 'ACTIVE', currentReleaseId: 'release-1' }) },
+      purchase: { create: purchaseCreate },
+      team: { updateMany: vi.fn(), update: vi.fn() },
+      balanceLedger: { create: vi.fn() },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+      pluginEntitlement: { create: entitlementCreate },
+    };
+    const transaction = vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx));
     const registry = service(
       {
         marketplaceListing: { findUnique: vi.fn().mockResolvedValue(marketplaceListing(0)) },
@@ -901,9 +969,64 @@ describe('PluginRegistryService', () => {
 
     await expect(registry.purchase('buyer-user', packageRow().id)).resolves.toEqual({
       entitled: true,
-      entitlementId: null,
-      purchaseId: null,
+      entitlementId: 'entitlement-free',
+      purchaseId: 'purchase-free',
     });
+    expect(purchaseCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
+      packageId: packageRow().id,
+      priceCents: 0,
+      listPriceCents: 0,
+      discountAmountCents: 0,
+    }) });
+    expect(entitlementCreate).toHaveBeenCalledWith({ data: { teamId: 'buyer-team', packageId: packageRow().id, purchaseId: 'purchase-free' } });
+    expect(tx.team.updateMany).not.toHaveBeenCalled();
+    expect(tx.team.update).not.toHaveBeenCalled();
+    expect(tx.balanceLedger.create).not.toHaveBeenCalled();
+
+    const existingRegistry = service(
+      {
+        marketplaceListing: { findUnique: vi.fn().mockResolvedValue(marketplaceListing(0)) },
+        pluginEntitlement: { findUnique: vi.fn().mockResolvedValue({ id: 'entitlement-free', purchaseId: 'purchase-free' }) },
+        $transaction: vi.fn(),
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue(buyerMembership) },
+    );
+    await expect(existingRegistry.purchase('buyer-user', packageRow().id)).resolves.toEqual({
+      entitled: true,
+      entitlementId: 'entitlement-free',
+      purchaseId: 'purchase-free',
+    });
+  });
+
+  it('fences the legacy immediate-credit writer when cutover enters DRAINING', async () => {
+    const transaction = vi.fn();
+    const registry = service(
+      {
+        marketplaceCommerceState: { findUnique: vi.fn().mockResolvedValue({ writerMode: 'DRAINING', writerGeneration: 3 }) },
+        marketplaceListing: { findUnique: vi.fn() },
+        pluginEntitlement: { findUnique: vi.fn() },
+        $transaction: transaction,
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue(buyerMembership) },
+    );
+
+    await expect(registry.purchase('buyer-user', packageRow().id)).rejects.toMatchObject({ code: 'marketplace_commerce_paused' });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale expected price version before legacy entitlement or money writes', async () => {
+    const findEntitlement = vi.fn();
+    const transaction = vi.fn();
+    const registry = service(
+      {
+        marketplaceListing: { findUnique: vi.fn().mockResolvedValue(marketplaceListing()) },
+        pluginEntitlement: { findUnique: findEntitlement },
+        $transaction: transaction,
+      },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue(buyerMembership) },
+    );
+    await expect(registry.purchase('buyer-user', packageRow().id, `pv1.${'x'.repeat(43)}`)).rejects.toMatchObject({ code: 'marketplace_price_changed' });
+    expect(findEntitlement).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
   });
 
@@ -955,6 +1078,7 @@ describe('PluginRegistryService', () => {
 
   it('rolls back before seller credit, ledgers, audit, and entitlement when the buyer balance is insufficient', async () => {
     const tx = {
+      marketplaceListing: { findUnique: vi.fn().mockResolvedValue({ priceCents: 1200, priceRevision: 1, status: 'ACTIVE', currentReleaseId: 'release-1' }) },
       purchase: { create: vi.fn().mockResolvedValue({ id: 'purchase-1' }) },
       team: {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),

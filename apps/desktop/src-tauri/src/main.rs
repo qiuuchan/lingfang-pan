@@ -21,6 +21,7 @@ mod runtime_commands;
 mod runtime_resolver;
 mod update;
 mod upload;
+mod workflow_executor;
 
 use std::sync::Arc;
 
@@ -307,6 +308,7 @@ fn main() {
             });
             app.manage(plugin_store);
             app.manage(plugin_package_manager);
+            app.manage(workflow_executor::WorkflowExecutorState::default());
             // task 06-16 组B：插件持久化运行引擎的内存进程表（plugin_id→Child 句柄）。
             // start_plugin/stop_plugin/get_plugin_status 经此 State spawn/take/kill 进程。
             app.manage(plugin_runner::PluginProcessTable::new());
@@ -336,6 +338,7 @@ fn main() {
             plugin_script::probe_script_runtime,
             plugin_script::run_plugin_script,
             plugin_llm_bridge::revoke_all_plugin_bridge_sessions,
+            plugin_llm_bridge::respond_plugin_action_bridge,
             plugin_shell::run_plugin_shell,
             runtime_commands::get_runtime_status,
             plugin_runner::start_plugin,
@@ -382,6 +385,18 @@ fn main() {
             plugin_package_manager::network::download_plugin_release,
             plugin_package_manager::network::publish_draft_workspace,
             plugin_package_manager::network::publish_local_artifact,
+            workflow_executor::workflow_executor_create_session,
+            workflow_executor::workflow_executor_heartbeat,
+            workflow_executor::workflow_executor_revoke,
+            workflow_executor::workflow_executor_start_run,
+            workflow_executor::workflow_executor_preflight,
+            workflow_executor::workflow_executor_claim,
+            workflow_executor::workflow_executor_attempt_heartbeat,
+            workflow_executor::workflow_executor_complete_attempt,
+            workflow_executor::workflow_executor_fail_attempt,
+            workflow_executor::workflow_executor_execute_attempt,
+            workflow_executor::workflow_executor_execute_action,
+            workflow_executor::workflow_executor_read_client_action_handler,
             draft_plugin::migrate_drafts_to_root,
             update::check_update,
             update::download_update,

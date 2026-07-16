@@ -2,5 +2,7 @@
 export { MembersTab } from './MembersTab';
 export { RolesTab } from './RolesTab';
 export { PluginGrantsTab } from './PluginGrantsTab';
+export { SharedStateTab } from './SharedStateTab';
+export { CloudAutomationTab } from './CloudAutomationTab';
 export { InvitationsTab } from './InvitationsTab';
 export { OverviewSkeleton } from './shared';

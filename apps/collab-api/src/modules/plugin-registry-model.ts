@@ -62,11 +62,13 @@ export function normalizeReleaseSource(headers: ReleaseSourceHeaders = {}): Norm
   };
 }
 
-export function releaseJson(release: {
+type ReleaseJsonInput = {
   id: string;
   packageId: string;
   version: string;
   manifest: unknown;
+  readmeMarkdown?: string;
+  packagePolicySurfaceSha256?: string;
   sha256: string;
   sizeBytes: number;
   status: string;
@@ -80,12 +82,16 @@ export function releaseJson(release: {
   aiPolicyStatus?: string;
   aiPolicyReason?: string;
   createdAt: Date;
-}) {
+};
+
+/** Lightweight release projection used by catalogs and mutation responses. */
+export function releaseJson(release: ReleaseJsonInput) {
   return {
     id: release.id,
     packageId: release.packageId,
     version: release.version,
     manifest: release.manifest,
+    package_policy_surface_sha256: release.packagePolicySurfaceSha256 || '0'.repeat(64),
     sha256: release.sha256,
     sizeBytes: release.sizeBytes,
     status: release.status,
@@ -100,6 +106,18 @@ export function releaseJson(release: {
     aiPolicyReason: release.aiPolicyReason || '',
     createdAt: release.createdAt.toISOString(),
   };
+}
+
+/** README content is exposed only by the exact immutable release detail route. */
+export function releaseDetailJson(release: ReleaseJsonInput) {
+  return {
+    ...releaseJson(release),
+    readme_markdown: release.readmeMarkdown || '',
+  };
+}
+
+export function releaseListJson(release: ReleaseJsonInput) {
+  return releaseJson(release);
 }
 
 export function packageJson(pkg: {

@@ -56,6 +56,7 @@ export const PluginReleaseSummary = z.object({
   packageId: z.string().uuid(),
   version: StrictSemVer,
   manifest: PluginManifest,
+  package_policy_surface_sha256: Sha256Hex.default('0'.repeat(64)),
   sha256: Sha256Hex,
   sizeBytes: z.number().int().nonnegative().max(300 * 1024 * 1024),
   status: PluginReleaseStatus,
@@ -70,6 +71,11 @@ export const PluginReleaseSummary = z.object({
   createdAt: z.string().datetime(),
 });
 export type PluginReleaseSummary = z.infer<typeof PluginReleaseSummary>;
+
+export const PluginReleaseDetail = PluginReleaseSummary.extend({
+  readme_markdown: z.string().max(256 * 1024).default(''),
+});
+export type PluginReleaseDetail = z.infer<typeof PluginReleaseDetail>;
 
 export const MarketplaceListingProjection = z.object({
   status: MarketplaceListingStatus,
@@ -277,8 +283,15 @@ export const PluginCatalogItem = z.object({
   package: PluginPackageSummary,
   latestRelease: PluginReleaseSummary,
   priceCents: z.number().int().nonnegative().optional(),
+  listPriceCents: z.number().int().nonnegative().optional(),
+  discountAmountCents: z.number().int().nonnegative().optional(),
+  priceVersion: z.string().regex(/^pv1\.[A-Za-z0-9_-]{43}$/).optional(),
   listingStatus: MarketplaceListingStatus.optional(),
   entitled: z.boolean().optional(),
+  /** v4 discovery projection; optional for clients talking to an older API. */
+  category: z.enum(['AI', 'PRODUCTIVITY', 'DEV', 'DATA', 'MEDIA', 'FILES', 'NETWORK', 'SYSTEM', 'OTHER']).optional(),
+  qualityTier: z.enum(['LISTED', 'QUALITY', 'FEATURED']).optional(),
+  qualityQualifiedAt: z.string().datetime().nullable().optional(),
 });
 export type PluginCatalogItem = z.infer<typeof PluginCatalogItem>;
 

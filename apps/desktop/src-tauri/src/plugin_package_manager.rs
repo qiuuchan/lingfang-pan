@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -92,6 +92,37 @@ pub(crate) struct LocalInstallation {
     pub data_path: String,
     pub installed_at: String,
     pub updated_at: String,
+}
+
+/// Desktop workflow executor 向平台提交的本机安装清单。
+///
+/// 只投影当前 active release 的精确身份与依赖准备状态；本机目录、pending/previous
+/// release、共享 data 路径和安装来源都不跨出 native 边界。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct WorkflowExecutorInventoryItem {
+    pub installation_id: String,
+    pub package_id: String,
+    pub release_id: String,
+    pub sha256: String,
+    pub dependency_status: DependencyStatus,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InstalledActionBinding {
+    pub runtime: String,
+    pub release_path: PathBuf,
+    pub entry: String,
+    pub callable: String,
+    pub timeout_seconds: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct InstalledClientActionHandler {
+    pub source: String,
+    pub export_name: String,
+    pub manifest: Value,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -321,6 +352,7 @@ pub(crate) struct InstalledPluginPayload {
     pub installation: LocalInstallation,
     pub manifest: Value,
     pub entry_content: String,
+    pub readme_markdown: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -503,6 +535,184 @@ impl PluginPackageManager {
 
     pub(crate) fn list_installations(&self) -> Vec<LocalInstallation> {
         self.read_installations().installations
+    }
+
+    pub(crate) fn executor_inventory(
+        &self,
+    ) -> Result<Vec<WorkflowExecutorInventoryItem>, String> {
+        let mut installation_ids = HashSet::new();
+        let mut package_ids = HashSet::new();
+        let mut inventory = Vec::new();
+        for installation in self.read_installations().installations {
+            // Published workflow plans can only target releases known to the v4 registry.
+            // Builtin/local artifacts deliberately stay outside the attested executor inventory;
+            // including their synthetic IDs would make the server reject the whole session.
+            if !matches!(
+                installation.origin,
+                InstallationOrigin::Team | InstallationOrigin::Marketplace
+            ) {
+                continue;
+            }
+            if !installation_ids.insert(installation.installation_id.clone()) {
+                return Err("本机安装账本包含重复 installationId".to_string());
+            }
+            if !package_ids.insert(installation.package_id.clone()) {
+                return Err("本机安装账本包含重复 packageId".to_string());
+            }
+            let active = installation.active_release;
+            if installation.installation_id.trim().is_empty()
+                || installation.package_id.trim().is_empty()
+                || active.release_id.trim().is_empty()
+                || active.sha256.len() != 64
+                || !active
+                    .sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err("本机 active release 清单包含无效精确身份".to_string());
+            }
+            inventory.push(WorkflowExecutorInventoryItem {
+                installation_id: installation.installation_id,
+                package_id: installation.package_id,
+                release_id: active.release_id,
+                sha256: active.sha256,
+                dependency_status: active.dependency_status,
+            });
+        }
+        inventory.sort_by(|left, right| left.installation_id.cmp(&right.installation_id));
+        Ok(inventory)
+    }
+
+    pub(crate) fn resolve_action_binding(
+        &self,
+        package_id: &str,
+        release_id: &str,
+        sha256: &str,
+        action_id: &str,
+        contract_version: &str,
+    ) -> Result<InstalledActionBinding, String> {
+        let installation = self.read_installations().installations.into_iter().find(|item| item.package_id == package_id).ok_or_else(|| "工作流目标插件未安装".to_string())?;
+        let release = installation.active_release;
+        if release.release_id != release_id || release.sha256 != sha256 {
+            return Err("工作流目标与本机 active release 不一致".to_string());
+        }
+        if release.dependency_status != DependencyStatus::Ready {
+            return Err("工作流目标插件依赖尚未就绪".to_string());
+        }
+        let root = PathBuf::from(&release.path);
+        let manifest: Value = read_json(&root.join("manifest.json")).ok_or_else(|| "工作流目标 manifest 无法读取".to_string())?;
+        let runtime = manifest.get("runtime_type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(runtime, "nodejs" | "python") { return Err("当前本地 Action 仅支持 Node.js/Python".to_string()); }
+        let action = manifest.get("actions").and_then(Value::as_array).and_then(|items| items.iter().find(|item| item.get("action_id").and_then(Value::as_str) == Some(action_id))).ok_or_else(|| "本机发行版未声明该 Action".to_string())?;
+        if action.get("action_contract_version").and_then(Value::as_str) != Some(contract_version) { return Err("本机 Action contract version 不匹配".to_string()); }
+        let handler = action.get("handler").and_then(Value::as_object).ok_or_else(|| "本机 Action 缺少 handler".to_string())?;
+        let entry = handler.get("entry").and_then(Value::as_str).ok_or_else(|| "本机 Action handler.entry 无效".to_string())?.to_string();
+        let callable = handler.get(if runtime == "python" { "callable" } else { "export" }).and_then(Value::as_str).ok_or_else(|| "本机 Action handler 导出无效".to_string())?.to_string();
+        let entry_path = root.join(&entry).canonicalize().map_err(|error| format!("本机 Action handler 不可用：{error}"))?;
+        let canonical_root = root.canonicalize().map_err(|error| format!("本机发行版目录不可用：{error}"))?;
+        if !entry_path.starts_with(&canonical_root) || !entry_path.is_file() { return Err("本机 Action handler 越出发行版目录".to_string()); }
+        Ok(InstalledActionBinding { runtime: runtime.to_string(), release_path: canonical_root, entry, callable, timeout_seconds: action.get("timeout_seconds").and_then(Value::as_u64).unwrap_or(900).min(24 * 60 * 60) })
+    }
+
+    pub(crate) fn resolve_client_action_handler(
+        &self,
+        package_id: &str,
+        release_id: &str,
+        sha256: &str,
+        action_id: &str,
+        contract_version: &str,
+    ) -> Result<InstalledClientActionHandler, String> {
+        let installation = self
+            .read_installations()
+            .installations
+            .into_iter()
+            .find(|item| item.package_id == package_id)
+            .ok_or_else(|| "Client Action 目标插件未安装".to_string())?;
+        let release = installation.active_release;
+        if release.release_id != release_id || release.sha256 != sha256 {
+            return Err("Client Action 目标与本机 active release 不一致".to_string());
+        }
+        if release.dependency_status != DependencyStatus::Ready {
+            return Err("Client Action 目标插件依赖尚未就绪".to_string());
+        }
+        let root = PathBuf::from(&release.path);
+        let manifest: Value = read_json(&root.join("manifest.json"))
+            .ok_or_else(|| "Client Action manifest 无法读取".to_string())?;
+        if manifest.get("runtime_type").and_then(Value::as_str) != Some("client") {
+            return Err("目标不是 client runtime".to_string());
+        }
+        let action = manifest
+            .get("actions")
+            .and_then(Value::as_array)
+            .and_then(|items| {
+                items.iter().find(|item| {
+                    item.get("action_id").and_then(Value::as_str) == Some(action_id)
+                })
+            })
+            .ok_or_else(|| "本机发行版未声明该 Client Action".to_string())?;
+        if action
+            .get("action_contract_version")
+            .and_then(Value::as_str)
+            != Some(contract_version)
+        {
+            return Err("本机 Client Action contract version 不匹配".to_string());
+        }
+        let handler = action
+            .get("handler")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "本机 Client Action 缺少 handler".to_string())?;
+        let entry = handler
+            .get("entry")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "本机 Client Action handler.entry 无效".to_string())?;
+        let export_name = handler
+            .get("export")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "本机 Client Action handler.export 无效".to_string())?
+            .to_string();
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|error| format!("本机发行版目录不可用：{error}"))?;
+        let entry_path = root
+            .join(entry)
+            .canonicalize()
+            .map_err(|error| format!("本机 Client Action handler 不可用：{error}"))?;
+        if !entry_path.starts_with(&canonical_root) || !entry_path.is_file() {
+            return Err("本机 Client Action handler 越出发行版目录".to_string());
+        }
+        let bytes = fs::read(&entry_path)
+            .map_err(|error| format!("读取本机 Client Action handler 失败：{error}"))?;
+        if bytes.len() > 256 * 1024 {
+            return Err("Client Action handler 超过 256 KiB".to_string());
+        }
+        let source = String::from_utf8(bytes)
+            .map_err(|_| "Client Action handler 必须是 UTF-8".to_string())?;
+        Ok(InstalledClientActionHandler {
+            source,
+            export_name,
+            manifest,
+        })
+    }
+
+    pub(crate) fn action_caller_descriptor(&self, package_id: &str, release_id: &str, sha256: &str) -> Result<Value, String> {
+        let installation = self.read_installations().installations.into_iter().find(|item| item.package_id == package_id).ok_or_else(|| "Action 调用方插件未安装".to_string())?;
+        if installation.active_release.release_id != release_id || installation.active_release.sha256 != sha256 || installation.active_release.dependency_status != DependencyStatus::Ready { return Err("Action 调用方与本机 active release 不一致".to_string()); }
+        let manifest: Value = read_json(&PathBuf::from(&installation.active_release.path).join("manifest.json")).ok_or_else(|| "Action 调用方 manifest 无法读取".to_string())?;
+        Ok(serde_json::json!({
+            "id": installation.installation_id,
+            "installation_id": installation.installation_id,
+            "package_id": installation.package_id,
+            "release_id": installation.active_release.release_id,
+            "release_sha256": installation.active_release.sha256,
+            "installation_origin": match installation.origin { InstallationOrigin::Builtin => "builtin", InstallationOrigin::Local => "local", InstallationOrigin::Team => "team", InstallationOrigin::Marketplace => "marketplace" },
+            "name": manifest.get("name").and_then(Value::as_str).unwrap_or("Action Plugin"),
+            "description": manifest.get("description").and_then(Value::as_str).unwrap_or(""),
+            "version": manifest.get("version").and_then(Value::as_str).unwrap_or("0.0.0"),
+            "entry": manifest.get("entry").and_then(Value::as_str).unwrap_or(""),
+            "runtime_type": manifest.get("runtime_type").and_then(Value::as_str).unwrap_or("client"),
+            "source": "installed",
+            "manifest": manifest,
+        }))
     }
 
     pub(crate) fn register_builtins(
@@ -1134,10 +1344,12 @@ impl PluginPackageManager {
         }
         let entry_content = fs::read_to_string(&canonical_entry)
             .map_err(|error| format!("已安装插件入口不是 UTF-8 文本：{error}"))?;
+        let readme_markdown = load_legacy_readme(&package.join("README.md"));
         Ok(InstalledPluginPayload {
             installation,
             manifest,
             entry_content,
+            readme_markdown,
         })
     }
 
@@ -1374,7 +1586,7 @@ impl PluginPackageManager {
             .map_err(|_| "草稿版本必须是严格 SemVer".to_string())?;
         if !matches!(
             input.runtime.as_str(),
-            "client" | "cloud" | "nodejs" | "python"
+            "client" | "cloud" | "nodejs" | "python" | "workflow"
         ) {
             return Err("草稿 runtime 不受支持".to_string());
         }
@@ -1694,5 +1906,26 @@ impl PluginPackageManager {
         let result = workspace.clone();
         self.write_workspaces(&ledger)?;
         Ok(result)
+    }
+}
+
+fn load_legacy_readme(path: &Path) -> String {
+    match fs::read(path) {
+        Ok(bytes) if bytes.len() <= 256 * 1024 => match String::from_utf8(bytes) {
+            Ok(markdown) => markdown,
+            Err(_) => {
+                eprintln!("[plugin-readme] 忽略历史安装中的非 UTF-8 README.md：{}", path.display());
+                String::new()
+            }
+        },
+        Ok(_) => {
+            eprintln!("[plugin-readme] 忽略历史安装中超过 256 KiB 的 README.md：{}", path.display());
+            String::new()
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            eprintln!("[plugin-readme] 读取历史安装 README.md 失败，降级为短摘要：{}：{error}", path.display());
+            String::new()
+        }
     }
 }

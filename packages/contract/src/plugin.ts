@@ -5,10 +5,12 @@
 // public 由市场审核赋予），不要改。
 import { z } from 'zod';
 import { StrictSemVer } from './semver.ts';
+import { ACTION_DEPENDENCY_MAX_COUNT, ACTION_MAX_COUNT, PluginAction, PluginActionDependency } from './plugin-action.ts';
+import { SharedNamespaceDeclaration } from './plugin-shared-state.ts';
 
 // 运行时类型四值：client（浏览器侧 HTML/iframe）/ cloud（云端执行）/
 // nodejs / python（脚本型，由桌面壳本地预览执行，见 R3）。
-export const RuntimeType = z.enum(['client', 'cloud', 'nodejs', 'python']);
+export const RuntimeType = z.enum(['client', 'cloud', 'nodejs', 'python', 'workflow']);
 export type RuntimeType = z.infer<typeof RuntimeType>;
 
 export const CapabilityKind = z.enum([
@@ -44,6 +46,35 @@ export const PluginManifest = z.object({
   // manifest 上传入口 visibility 仅允许 private/tenant；public 由审核流程赋予，不在上传字段。
   visibility: z.enum(['private', 'tenant']).default('tenant'),
   capabilities: z.array(PluginCapability).max(64).default([]),
+  // Action exports and dependencies are optional for backwards compatibility.
+  actions: z.array(PluginAction).max(ACTION_MAX_COUNT).default([]),
+  action_dependencies: z.array(PluginActionDependency).max(ACTION_DEPENDENCY_MAX_COUNT).default([]),
+  shared_namespaces: z.array(SharedNamespaceDeclaration).max(16).default([]),
+}).superRefine((manifest, ctx) => {
+  const actionIds = new Set<string>();
+  manifest.actions.forEach((action, index) => {
+    if (actionIds.has(action.action_id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['actions', index, 'action_id'], message: 'action_id must be unique within a manifest' });
+    actionIds.add(action.action_id);
+    if (manifest.runtime_type === 'cloud' || manifest.runtime_type === 'workflow') {
+      if (action.handler) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['actions', index, 'handler'], message: `${manifest.runtime_type} actions must not declare a package handler` });
+    } else if (!action.handler) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['actions', index, 'handler'], message: `${manifest.runtime_type} actions require a handler` });
+    } else if (manifest.runtime_type === 'python' && !('callable' in action.handler)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['actions', index, 'handler'], message: 'python actions require a callable handler' });
+    } else if (manifest.runtime_type !== 'python' && !('export' in action.handler)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['actions', index, 'handler'], message: `${manifest.runtime_type} actions require an export handler` });
+    }
+  });
+  const dependencyIds = new Set<string>();
+  manifest.action_dependencies.forEach((dependency, index) => {
+    if (dependencyIds.has(dependency.dependency_id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['action_dependencies', index, 'dependency_id'], message: 'dependency_id must be unique within a manifest' });
+    dependencyIds.add(dependency.dependency_id);
+  });
+  const namespaceNames = new Set<string>();
+  manifest.shared_namespaces.forEach((namespace, index) => {
+    if (namespaceNames.has(namespace.name)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['shared_namespaces', index, 'name'], message: 'shared namespace name must be unique' });
+    namespaceNames.add(namespace.name);
+  });
 });
 export type PluginManifest = z.infer<typeof PluginManifest>;
 
@@ -96,7 +127,7 @@ export const PluginGrant = z.object({
 }).refine((grant) => Boolean(grant.package_id || grant.plugin_id), { message: 'plugin grant requires package_id or legacy plugin_id' });
 export type PluginGrant = z.infer<typeof PluginGrant>;
 
-/** 授权解析：deny 优先；user 级优先于 role 级；owner/admin 默认可用。 */
+/** 授权解析：deny 优先；user 级优先于 role 级；无 grant 默认可用。管理员无运行时绕过。 */
 export function resolveGrant(
   grants: PluginGrant[],
   userId: string,
@@ -108,5 +139,5 @@ export function resolveGrant(
   const roleGrants = grants.filter((g) => g.subject_kind === 'role' && g.subject_id === role);
   if (roleGrants.some((g) => g.effect === 'deny')) return false;
   if (roleGrants.some((g) => g.effect === 'allow')) return true;
-  return role === 'owner' || role === 'admin';
+  return true;
 }

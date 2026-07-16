@@ -62,7 +62,7 @@ async function prepareEditableDraft(plugin: LoadedPlugin): Promise<LoadedPlugin>
   throw new Error('插件必须先复制为草稿工作区才能编辑。');
 }
 
-function draftFromPlugin(plugin: LoadedPlugin): PluginDraft {
+export function draftFromPlugin(plugin: LoadedPlugin): PluginDraft {
   return {
     id: plugin.id,
     status: plugin.status || 'ready',
@@ -78,6 +78,7 @@ const RUNTIME_LABEL: Record<NonNullable<LoadedPlugin['runtime_type']>, string> =
   nodejs: 'Node.js',
   python: 'Python',
   cloud: '云端',
+  workflow: '工作流',
 };
 
 /**
