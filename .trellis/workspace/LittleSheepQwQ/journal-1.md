@@ -752,3 +752,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: 完善插件页面筛选分页与职责
+
+**Date**: 2026-07-16
+**Task**: 完善插件页面筛选分页与职责
+**Branch**: `betav2`
+
+### Summary
+
+整合插件中心已安装、团队库和市场列表的来源筛选与客户端分页；已安装页保留运行、详情和卸载，上传与编辑归草稿工作台；补充单元测试并同步桌面端插件 UI 规范。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d219309d` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
