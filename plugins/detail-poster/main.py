@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog, font as tkfont
-from PIL import Image, ImageTk, ImageFilter, ImageGrab, ImageDraw, ImageFont
+from PIL import Image, ImageTk, ImageFilter, ImageGrab, ImageDraw, ImageFont, ImageOps
 import os, threading, time, requests, base64, random, queue, mimetypes, json, subprocess, re, io, logging, sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -50,8 +50,35 @@ REVERSE_CONFIG_FILE = os.path.join(_DATA_DIR, "reverse_config.json")
 COLOR_STATE_FILE = os.path.join(_DATA_DIR, "color_tool_state.json")
 GPT55_CHAT_FILE = os.path.join(_DATA_DIR, "gpt55_chat_history.json")
 
-# ---------- 字体（运行时探测系统已装字体 + 用户导入，不内置他人字体文件）----------
+# ---------- 字体（内置 fonts/ 目录 + 运行时探测系统字体 + 用户导入）----------
+# 扫描插件自带 fonts/ 下 .ttf/.otf，建 显示名→路径 字典供颜色图工具加载。
+# 文件名形如 `白无常可可体常规_mianfeiziti.com.ttf`，去 `_mianfeiziti.com` 与 ` (1)` 后缀取显示名。
 BUILTIN_FONTS = {}
+_FONT_FILE_SUFFIX = "_mianfeiziti.com"
+
+
+def _scan_builtin_fonts():
+    fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+    if not os.path.isdir(fonts_dir):
+        return
+    try:
+        for fn in os.listdir(fonts_dir):
+            if not fn.lower().endswith((".ttf", ".otf")):
+                continue
+            path = os.path.join(fonts_dir, fn)
+            if not os.path.isfile(path):
+                continue
+            stem = os.path.splitext(fn)[0]
+            stem = re.sub(r"\s*\(\d+\)\s*$", "", stem)  # 去重复下载的 ` (1)` 后缀
+            if stem.endswith(_FONT_FILE_SUFFIX):
+                stem = stem[: -len(_FONT_FILE_SUFFIX)]
+            if stem and stem not in BUILTIN_FONTS:  # 同名去重，首个命中保留
+                BUILTIN_FONTS[stem] = path
+    except Exception as e:
+        log_error(f"扫描内置字体失败: {e}")
+
+
+_scan_builtin_fonts()
 
 
 def bridge_ready():
@@ -102,6 +129,34 @@ def fetch_image_bytes(src):
     resp.raise_for_status()
     return resp.content
 
+# ---------- 出图比例 → 上游标准 size / 目标精确像素 ----------
+# 上游 image-edit 模型只认标准 size（1024x1024 / 1024x1536 / 1536x1024），任意自定义像素值
+# （如 1254x1254 / 1440x2160）会被忽略（→ 出默认比例横图）或报错（→ 一键主图少出图）。
+# 故请求层统一发标准 size；落盘前再用 Pillow center-crop 到目标精确像素，保证「选什么比例出什么比例」。
+RATIO_STANDARD_SIZE = {
+    "1:1": "1024x1024",
+    "3:4": "1024x1536",
+    "9:16": "1024x1536",
+    "2:3": "1024x1536",
+}
+RATIO_PIXELS = {
+    "1:1": (1024, 1024),
+    "3:4": (1024, 1366),   # W:H = 3:4
+    "9:16": (864, 1536),   # W:H = 9:16
+    "2:3": (1024, 1536),   # W:H = 2:3
+}
+
+
+def _crop_to_ratio(img, ratio):
+    """按目标比例 center-crop 到精确像素（ImageOps.fit）。ratio 不在表里或失败时原样返回。"""
+    target = RATIO_PIXELS.get(ratio)
+    if not target:
+        return img
+    try:
+        return ImageOps.fit(img, target, Image.LANCZOS)
+    except Exception:
+        return img
+
 # ---------- 模块类 ----------
 class PosterModule:
     def __init__(self, idx, is_sku=False):
@@ -125,7 +180,7 @@ class App:
     def __init__(self, root):
         log_info("应用启动")
         self.root = root
-        self.root.title("AI详情页海报生成器 v0.2.3")
+        self.root.title("AI详情页海报生成器 v0.2.4")
         self.root.geometry("1600x900")
         self.root.configure(bg='#f0f2f5')
         try:
@@ -1199,10 +1254,12 @@ class App:
         res.pack(side=tk.LEFT, padx=1)
         ttk.Label(btm, text="尺寸：").pack(side=tk.LEFT, padx=2)
         size = ttk.Combobox(btm, values=["1:1","3:4","9:16","2:3"], width=4)
-        size.set("1:1")
+        size.set(mod.size_ratio or "1:1")
         size.pack(side=tk.LEFT, padx=1)
         mod.widgets['res'] = res
         mod.widgets['size'] = size
+        # 下拉选择实时回写 mod.size_ratio，否则 _call_api 永远用默认 1:1（旧 bug）。
+        size.trace_add('write', lambda *a: setattr(mod, 'size_ratio', size.get()))
 
         btnf = ttk.Frame(btm)
         btnf.pack(side=tk.RIGHT, padx=2)
@@ -1726,7 +1783,7 @@ class App:
 
             old_prompt = mod.prompt
             mod.prompt = prompt
-            img_path = self._call_api(mod, target_size="1254x1254")
+            img_path = self._call_api(mod, target_size=RATIO_STANDARD_SIZE["1:1"], ratio="1:1")
             mod.prompt = old_prompt
 
             if img_path and os.path.exists(img_path):
@@ -1781,18 +1838,13 @@ class App:
         except Exception as e:
             self.safe_ui(self._set_status, mod, "❌ 错误", "#e74c3c")
 
-    def _call_api(self, mod, target_size=None, custom_name=None):
+    def _call_api(self, mod, target_size=None, custom_name=None, ratio=None):
         try:
-            size_map = {
-                "1:1": "1254x1254",
-                "3:4": "1086x1448",
-                "9:16": "941x1672",
-                "2:3": "1024x1536"
-            }
-            if target_size:
-                size_str = target_size
-            else:
-                size_str = size_map.get(mod.size_ratio, "1024x1024")
+            if ratio is None:
+                ratio = mod.size_ratio
+            # target_size（标准 size 字符串）优先；否则按 ratio 查标准 size。
+            # 不再用 1254x1254 这类自定义像素值——上游不认会被忽略/报错。
+            size_str = target_size if target_size else RATIO_STANDARD_SIZE.get(ratio, "1024x1024")
 
             if not mod.images:
                 raise Exception("无图片")
@@ -1821,6 +1873,16 @@ class App:
                     log_error(f"下载结果图失败: {e}")
             if image_data is None:
                 return None
+
+            # 上游返回图按目标比例 center-crop 到精确像素（上游可能不认 size，客户端兜底保证比例）。
+            try:
+                pil = Image.open(io.BytesIO(image_data))
+                pil = _crop_to_ratio(pil, ratio)
+                buf = io.BytesIO()
+                pil.save(buf, format="PNG")
+                image_data = buf.getvalue()
+            except Exception as e:
+                log_error(f"结果图裁剪失败(原样保留): {e}")
 
             if custom_name:
                 base_name = custom_name
@@ -1897,11 +1959,10 @@ class App:
 
                 mod.size_ratio = ratio
                 self.safe_ui(self._set_status, mod, f"⏳ 生成{ratio}", "#2980b9")
-                size_map_api = {"1:1": "1440x1440", "3:4": "1440x1920", "2:3": "1440x2160"}
-                target_size = size_map_api.get(ratio, "1440x1440")
+                target_size = RATIO_STANDARD_SIZE.get(ratio, "1024x1024")
                 old_save_dir = mod.save_dir
                 mod.save_dir = base_dir
-                img_path = self._call_api(mod, target_size=target_size, custom_name=filename.replace(".png", ""))
+                img_path = self._call_api(mod, target_size=target_size, ratio=ratio, custom_name=filename.replace(".png", ""))
                 mod.save_dir = old_save_dir
 
                 if img_path and os.path.exists(img_path):

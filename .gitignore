@@ -19,6 +19,11 @@ plugins/moneyprinter-turbo.lfplugin
 # 所有 .lfplugin 插件包均为本地构建/分发产物（超 Gitee 100MB 单文件限制），
 # 单独传输不入仓。下方 git rm --cached 已把历史遗留的追踪移除。
 plugins/*.lfplugin
+# 插件二进制资源（内置字体/窗口图标）随 .lfplugin 本地分发，不入仓（同 .lfplugin 约定）。
+# detail-poster/fonts/ 约 188MB；图标为小二进制。构建 .lfplugin 时需本地存在。
+plugins/detail-poster/fonts/
+plugins/detail-poster/app.ico
+plugins/outfit-batch/favicon*.ico
 
 # 后端运行时上传目录（admin 发布管理上传的安装包，运行时产物不入仓）。
 # 生产持久化：docker-compose.collab.yml 挂 collab_downloads volume → /app/apps/collab-api/downloads
