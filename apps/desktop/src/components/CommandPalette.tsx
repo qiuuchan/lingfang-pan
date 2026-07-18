@@ -112,7 +112,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           item.package.manifestId,
           item.latestRelease.version,
         ];
-        return searchable.some((value) => value.toLowerCase().includes(lower));
+        return searchable.some((value) => typeof value === 'string' && value.toLowerCase().includes(lower));
       })
       .slice(0, 5)
       .map((item) => ({
