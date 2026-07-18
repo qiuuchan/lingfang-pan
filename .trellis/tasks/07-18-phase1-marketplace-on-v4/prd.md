@@ -1,41 +1,55 @@
-# 阶段1：市场货架与购买改读 v4
+# 阶段1：v4 市场/购买闭环验证（无代码迁移缺口）
 
 > 父任务：[`07-18-unify-plugin-system-v4`](../07-18-unify-plugin-system-v4/prd.md)
-> 依赖：阶段0 完成（v4 审核闭环可用）。
+> 依赖：阶段0 完成（v4 审核入口可用）。
+> 研究依据：[`research/legacy-plugin-dependency-map.md`](./research/legacy-plugin-dependency-map.md)
+
+## 结论先行
+
+**原设想的「把 marketplace/economy 迁到 v4」是伪命题——v4 货架/购买/权益/评分链路早已存在且桌面端在用。** phase1 因此从「迁移实现」降级为「端到端验证 + 圈定 legacy 残留」，**无新增代码缺口**。本 PRD 据实重写。
+
+## v4 闭环现状（已存在，phase0 勘察 + 本研究确认）
+
+| 环节 | v4 实现 | 桌面端入口 |
+|---|---|---|
+| 审批→上架 | `approveRelease` 设 `MarketplaceListing.currentReleaseId`+`status=ACTIVE` | 后台「待审核发行版」直列页（phase0） |
+| 货架列表/详情 | `MarketplaceDiscoveryService`（catalog/home/page + snapshots/prices/quality） | `GET /api/plugin-registry/marketplace`（`plugin-registry.ts:157`） |
+| 购买/计费/权益 | `marketplace-commerce.service:purchaseV2`（packageId→listing.currentRelease→`Purchase(packageId,releaseId)`+`pluginEntitlement`，幂等/折扣/活动/结算V2） | `POST /api/plugin-packages/:id/purchase`（`plugin-registry.ts:507`） |
+| 评分/质量 | `marketplace-quality.service` + `MarketplaceQualitySnapshot`（ratingTeams/ratingSum/averageRatingTenths 喂 discovery） | `POST .../rate`（`marketplace-quality.controller:30`） |
+| 参与度排序 | discovery popular 用快照；`MarketplaceListing.installCount` 等为 legacy 残留计数（v4 用快照为主） | — |
+
+`Purchase`/`PluginGrant` 已双写（`pluginId?`+`packageId?`/`releaseId?`）→ **v4 化无需 schema 变更**。`MarketplaceListing` 已含 `installCount/ratingCount/ratingSum/priceCents/currentReleaseId/qualityTier` 等全字段。
 
 ## Goal
 
-把市场货架与购买计费的读路径从 legacy `Plugin` 迁到 v4（`PluginPackage` + `PluginRelease` + `MarketplaceListing`）。让「v4 审批通过 → 市场可搜到、详情可看、可下单购买、计费正确」成为闭环，消除 phase0 发现的「审通过上不了货架」断链。
+**验证** v4「审批→上架→下单→权益→评分」闭环端到端可用，并圈定 legacy 残留供 phase2 清理。不写新功能（无缺口）。
 
-## 范围（目标级，详细设计待 phase0 完成后补 design.md）
+## Requirements
 
-预期改动面（需在详规阶段全量核查）：
-- `apps/collab-api/src/modules/marketplace.service.ts` — 货架列表、详情、安装计数（现查 `prisma.plugin`）改读 v4 listing/release。
-- `apps/collab-api/src/modules/economy.service.ts` — 购买/计费（现查 `prisma.plugin`）改读 v4，保证灵石扣费等价。
-- `apps/collab-api/src/modules/marketplace-commerce.service.ts` — 退款等 commerce 流（核查 legacy 依赖）。
-- v4 审批落 `MarketplaceListing`：确认 `approveRelease` 已设 `currentReleaseId`（phase0 勘察已见），补充上架所需字段（价格、可见性、安装包来源）。
-- 桌面端市场/购买页：核查是否直接消费 `marketplace.service` 响应，字段适配。
+### 验证性
+- **R1 审批可见**：detail-poster 0.2.4（或任一 v4 release）经 phase0 直列页 approve 后，`marketReviewStatus=APPROVED` 且 `MarketplaceListing.currentReleaseId` 已设。
+- **R2 货架上架**：approve 后 `GET /api/plugin-registry/marketplace` 能搜到该插件，详情字段正确。
+- **R3 购买/权益**：桌面 `POST /api/plugin-packages/:id/purchase` 跑通（免费插件直接获权益；付费扣灵石正确，团队计费对齐 [[billing-relay-over-byok]]），`Purchase.packageId/releaseId`+`pluginEntitlement` 落库。
+- **R4 评分**：`marketplace-quality.rate` 对该 package 写快照，discovery 评分位展示。
 
-## 关键问题（详规时解决）
+### 清理性（圈定，不改）
+- **R5 legacy 残留清单**：确认 `marketplace.service`（`@Controller('marketplace')`）/`economy.service`/`plugin.service` legacy CRUD/`admin` legacy-plugin 端点**无活跃消费**（前端/外部），归入 phase2。仅产出清单，不删。
 
-- Q1 ID 映射：legacy `Plugin.id` ↔ v4 `PluginPackage.id`/`manifestId`。存量已购记录按哪个键对齐到 v4？
-- Q2 安装计数：legacy `Plugin.installCount` 如何并入 v4 `MarketplaceListing`/`PluginPackage`（v4 是否有等价计数字段？需否加字段）。
-- Q3 价格：`MarketplaceListing.priceCents` 已存在；确认购买流读这个而非 legacy `Plugin` 价格。
-- Q4 计费等价性：灵石扣费、团队计费、fast/premium 哨兵（[[billing-relay-over-byok]]）逻辑必须与 legacy 行为一致，需写对账用例。
-- Q5 双写过渡期：是否需要 v4 审批时同步回写一份 legacy `Plugin`（兼容期），还是直接切流？倾向直接切流 + 存量迁移（phase2），避免双写复杂度。
+## Acceptance Criteria
 
-## 验收（目标级）
-
-- [ ] v4 审批通过的插件，在市场货架能搜到、详情正确。
-- [ ] 购买流程端到端跑通，灵石扣费与既有规则一致（对账用例通过）。
-- [ ] legacy `Plugin` 不再被 marketplace/economy 读路径依赖（grep 验证）。
-- [ ] 存量 legacy 已购插件仍可用（过渡兼容）。
+- [ ] approve 一个 v4 release → discovery 搜得到、详情对。
+- [ ] 桌面下单（免费/付费各一）→ Purchase+pluginEntitlement 落库、计费正确。
+- [ ] 评分写入质量快照、discovery 展示。
+- [ ] 产出 legacy 残留清单（文件 + 行 + 确认无消费）供 phase2。
 
 ## Out of Scope
 
-- 删 legacy `Plugin` 表 / 下线旧上传接口（phase2）。
-- 改 v4 AI 政策/制品格式。
+- 删 legacy `Plugin` 表 / 下线废弃服务 / 迁 `PluginInstallation`/`PluginRating` 强 FK（全部 phase2）。
+- 任何新功能开发（v4 已齐）。
+- 双写 legacy（无需，直接用 v4）。
 
 ## Notes
 
-- 本 PRD 为目标级；**design.md / implement.md 待 phase0 完成后、进入本阶段时再写**（届时 marketplace/economy 读路径需全量核查 + 对账用例设计）。
+- 本阶段**阻塞于运行时操作**：需先在 phase0 审核页 approve 一个真实 v4 release（detail-poster 0.2.4 即样本）才能验证 R1-R4。本会话无法独立完成验证。
+- 若验证中发现真实缺口（如某指标未填充），再转实现并补 design.md；目前代码层无缺口。
+- phase0 前端改动需重新构建 collab-admin 部署后后台才生效。
