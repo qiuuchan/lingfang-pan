@@ -63,9 +63,9 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View, intent?: O
     { label: '市场上架', value: data?.activeMarketplaceListings ?? 0, desc: '当前可见条目', icon: CheckCircleIcon, color: 'text-cyan-600' },
   ];
 
-  const pendingTasks = [
-    { label: '待审批申请', count: data?.pendingApplications ?? 0, icon: AlertCircleIcon, color: 'text-amber-500' },
-    { label: '待审核插件发行版', count: data?.pendingPluginReviews ?? 0, icon: ClockIcon, color: 'text-violet-500' },
+  const pendingTasks: Array<{ label: string; count: number; icon: typeof UsersIcon; color: string; view?: View; intent?: Omit<GovernanceIntent, 'nonce'> }> = [
+    { label: '待审批申请', count: data?.pendingApplications ?? 0, icon: AlertCircleIcon, color: 'text-amber-500', view: 'governance', intent: { tab: 'applications', applicationStatus: 'PENDING' } },
+    { label: '待审核插件发行版', count: data?.pendingPluginReviews ?? 0, icon: ClockIcon, color: 'text-violet-500', view: 'governance', intent: { tab: 'pending-releases' } },
     { label: '已下架市场插件', count: data?.delistedMarketplaceListings ?? 0, icon: AlertCircleIcon, color: 'text-destructive' },
   ];
 
@@ -285,18 +285,29 @@ export function Dashboard({ onNavigate }: { onNavigate?: (view: View, intent?: O
               </AsyncResource>
             ) : (
               <div className="px-6 pb-6">
-                {pendingTasks.map((task, i) => (
-                  <div key={task.label}>
-                    {i > 0 && <Separator className="my-2" />}
-                    <div className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm">
-                      <div className="flex items-center gap-3">
-                        <task.icon className={cn('size-4', task.color)} />
-                        <span>{task.label}</span>
+                {pendingTasks.map((task, i) => {
+                  const clickable = Boolean(task.view && onNavigate);
+                  return (
+                    <div key={task.label}>
+                      {i > 0 && <Separator className="my-2" />}
+                      <div
+                        className={cn(
+                          'flex items-center justify-between rounded-lg px-3 py-2.5 text-sm',
+                          clickable && 'cursor-pointer transition-colors hover:bg-accent',
+                        )}
+                        role={clickable ? 'button' : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        onClick={clickable ? () => onNavigate?.(task.view!, task.intent) : undefined}
+                      >
+                        <div className="flex items-center gap-3">
+                          <task.icon className={cn('size-4', task.color)} />
+                          <span>{task.label}</span>
+                        </div>
+                        <Badge variant="outline">{task.count}</Badge>
                       </div>
-                      <Badge variant="outline">{task.count}</Badge>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {pendingTasks.every((task) => task.count === 0) && (
                   <div className="py-6 text-center text-sm text-muted-foreground">
                     <CheckCircleIcon className="mx-auto mb-1 size-6 text-emerald-500" />

@@ -15,7 +15,34 @@ import type {
   TeamAdminApplicationSummary as ContractApplicationSummary,
 } from '@lingfang/contract';
 
-export type GovernanceTab = 'plugins' | 'applications';
+export type GovernanceTab = 'plugins' | 'applications' | 'pending-releases';
+
+/** GET /api/admin/plugin-releases/review-pending 返回的待审核发行版条目。 */
+export type PendingReleaseItem = {
+  package: {
+    id: string;
+    ownerTeamId: string;
+    manifestId: string;
+    name: string;
+    description: string;
+    governanceStatus: string;
+  };
+  release: {
+    id: string;
+    packageId: string;
+    version: string;
+    status: PluginReleaseStatus;
+    marketReviewStatus: PluginReviewStatus;
+    sourceKind: PluginSourceKind;
+    sourceLabel: string;
+    ingestChannel: PluginIngestChannel;
+    aiPolicyVersion: number;
+    aiPolicyStatus: string;
+    aiPolicyReason: string;
+    createdAt: string;
+  };
+  fileManifest: unknown;
+};
 
 export type PluginReviewStatus = AdminPluginReleaseListItem['marketReviewStatus'];
 export type PluginGovernanceStatus = AdminPluginPackageListItem['governanceStatus'];
