@@ -180,7 +180,7 @@ class App:
     def __init__(self, root):
         log_info("应用启动")
         self.root = root
-        self.root.title("AI详情页海报生成器 v0.2.4")
+        self.root.title("AI详情页海报生成器 v0.2.5")
         self.root.geometry("1600x900")
         self.root.configure(bg='#f0f2f5')
         try:
@@ -1253,13 +1253,14 @@ class App:
         res.set("1K")
         res.pack(side=tk.LEFT, padx=1)
         ttk.Label(btm, text="尺寸：").pack(side=tk.LEFT, padx=2)
-        size = ttk.Combobox(btm, values=["1:1","3:4","9:16","2:3"], width=4)
-        size.set(mod.size_ratio or "1:1")
+        size_var = tk.StringVar(value=mod.size_ratio or "1:1")
+        size = ttk.Combobox(btm, textvariable=size_var, values=["1:1","3:4","9:16","2:3"], width=4)
         size.pack(side=tk.LEFT, padx=1)
         mod.widgets['res'] = res
         mod.widgets['size'] = size
         # 下拉选择实时回写 mod.size_ratio，否则 _call_api 永远用默认 1:1（旧 bug）。
-        size.trace_add('write', lambda *a: setattr(mod, 'size_ratio', size.get()))
+        # 注意：trace_add 是 tkinter.Variable 的方法，必须挂在 StringVar 上，不能挂在 Combobox 控件上。
+        size_var.trace_add('write', lambda *a: setattr(mod, 'size_ratio', size_var.get()))
 
         btnf = ttk.Frame(btm)
         btnf.pack(side=tk.RIGHT, padx=2)
