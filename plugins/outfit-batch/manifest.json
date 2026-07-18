@@ -1,7 +1,7 @@
 {
   "id": "com.lingfang.outfit-batch",
   "name": "AI换装批量版",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "批量 AI 换装/换内搭/换头/裂变/创意/口令工具：任务队列（并发/超时/重试）、多人模式、预览区拖拽重命名、PNG→JPEG、高清放大。经平台桥调用图片编辑能力，按团队灵石计费，无需配置任何密钥。",
   "runtime_type": "python",
   "entry": "main.py",
