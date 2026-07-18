@@ -1189,6 +1189,7 @@ export class PluginRegistryService {
       where: { marketReviewStatus: 'PENDING' },
       include: { package: true },
       orderBy: { createdAt: 'asc' },
+      take: 200,
     });
     return { items: releases.map((release) => ({ package: packageJson(release.package), release: releaseJson(release), fileManifest: release.fileManifest })) };
   }

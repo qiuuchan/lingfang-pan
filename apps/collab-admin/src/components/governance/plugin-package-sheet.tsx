@@ -108,11 +108,14 @@ export function PluginPackageSheet({
   open,
   onOpenChange,
   onChanged,
+  initialReleaseId,
 }: {
   summary: PluginPackageSummary | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
+  /** 深链：打开抽屉时预选指定 release（如待审核队列跳入）。 */
+  initialReleaseId?: string | null;
 }) {
   const packageId = summary?.id ?? '';
   const cacheRef = useRef<ResourceCache>(new Map());
@@ -178,13 +181,13 @@ export function PluginPackageSheet({
   useEffect(() => {
     cacheRef.current.clear();
     setReleasePage(1);
-    setSelectedReleaseId(null);
+    setSelectedReleaseId(initialReleaseId ?? null);
     setActiveTab('overview');
     setFilePage(1);
     setReviewPage(1);
     setConfirmAction(null);
     setReason('');
-  }, [packageId]);
+  }, [packageId, initialReleaseId]);
 
   useEffect(() => {
     if (!releases.data) return;
@@ -193,10 +196,15 @@ export function PluginPackageSheet({
       setSelectedReleaseId(null);
       return;
     }
-    setSelectedReleaseId((current) => (
-      current && items.some((release: PluginReleaseSummary) => release.id === current) ? current : items[0].id
-    ));
-  }, [releases.data]);
+    setSelectedReleaseId((current) => {
+      // 优先深链 initialReleaseId，其次保留已选，否则首个。
+      const preferred = initialReleaseId && items.some((release: PluginReleaseSummary) => release.id === initialReleaseId)
+        ? initialReleaseId
+        : null;
+      if (preferred) return preferred;
+      return current && items.some((release: PluginReleaseSummary) => release.id === current) ? current : items[0].id;
+    });
+  }, [releases.data, initialReleaseId]);
 
   useEffect(() => {
     setReason('');

@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type {
   ApplicationStatus,
   Page,
+  PendingReleaseItem,
   PluginFileSummary,
   PluginGovernanceStatus,
   PluginManifestDetail,
@@ -41,6 +42,11 @@ export function loadPluginPackages(
   signal: AbortSignal,
 ) {
   return api<Page<PluginPackageSummary>>(`/api/admin/plugin-packages${queryString(query)}`, { signal });
+}
+
+/** v4 待审核发行版队列：消费 GET /api/admin/plugin-releases/review-pending。 */
+export function loadPendingReleases(signal: AbortSignal): Promise<{ items: PendingReleaseItem[] }> {
+  return api(`/api/admin/plugin-releases/review-pending`, { signal });
 }
 
 export function loadPluginPackage(packageId: string, signal: AbortSignal) {
