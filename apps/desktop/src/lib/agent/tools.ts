@@ -1042,8 +1042,180 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  // —— 本地定时任务工具（local-scheduler）——
+  // 让 Agent 在对话中创建/管理定时任务（CodeBuddy 风格自然语言触发）。
+  // 实现走 tauri invoke → Rust scheduler::commands；任务持久化到本地，仅在桌面端运行时触发。
+  const ScheduleCreate = defineTool({
+    name: 'ScheduleCreate',
+    description:
+      '创建一个本地定时任务，到点自动执行。支持两种触发与三种执行体。\n' +
+      '触发：kind="CRON"（cron 表达式，5 字段：分 时 日 月 周，如每天 9 点用 "0 9 * * *"）' +
+      '或 kind="ONCE"（一次性，run_at 用 RFC 3339 UTC 时间，如 "2030-01-01T01:00:00Z"）。\n' +
+      '执行：type="AGENT_PROMPT"（跑一段 Agent prompt，prompt 上限 10000 字符）；' +
+      'type="PLUGIN_ACTION"（调用已安装插件的 action，需 plugin_id/action/input）；' +
+      'type="NOTIFY"（仅发系统通知，需 title/body）。\n' +
+      '时区：CRON 触发器需 time_zone（IANA 名，如 Asia/Shanghai），默认用户系统时区。\n' +
+      '可选 timeout_ms（1000-3600000，默认 1800000=30 分钟）。\n' +
+      '注意：任务仅在应用运行时触发；关闭窗口或退出应用会暂停所有任务；漏掉的任务不会补跑。',
+    parameters: z.object({
+      name: z.string().min(1).max(100).describe('任务名称'),
+      kind: z.enum(['ONCE', 'CRON']).describe('触发类型'),
+      cron: z.string().optional().describe('cron 表达式（kind=CRON 时必填，5 字段：分 时 日 月 周）'),
+      run_at: z.string().optional().describe('一次性触发时间（kind=ONCE 时必填，RFC 3339 UTC）'),
+      time_zone: z.string().optional().describe('IANA 时区名（kind=CRON 时使用，默认系统时区）'),
+      type: z.enum(['AGENT_PROMPT', 'PLUGIN_ACTION', 'NOTIFY']).describe('执行体类型'),
+      prompt: z.string().max(10000).optional().describe('Agent prompt（type=AGENT_PROMPT 时必填）'),
+      plugin_id: z.string().optional().describe('插件 ID（type=PLUGIN_ACTION 时必填）'),
+      action: z.string().optional().describe('action 名（type=PLUGIN_ACTION 时必填）'),
+      input: z.unknown().optional().describe('action 入参 JSON（type=PLUGIN_ACTION 时使用）'),
+      title: z.string().max(200).optional().describe('通知标题（type=NOTIFY 时必填）'),
+      body: z.string().max(2000).optional().describe('通知正文（type=NOTIFY 时使用）'),
+      timeout_ms: z.number().int().min(1000).max(3600000).optional().describe('单次执行超时（ms），默认 1800000'),
+    }),
+    async execute(args): Promise<string> {
+      const a = args as {
+        name: string;
+        kind: 'ONCE' | 'CRON';
+        cron?: string;
+        run_at?: string;
+        time_zone?: string;
+        type: 'AGENT_PROMPT' | 'PLUGIN_ACTION' | 'NOTIFY';
+        prompt?: string;
+        plugin_id?: string;
+        action?: string;
+        input?: unknown;
+        title?: string;
+        body?: string;
+        timeout_ms?: number;
+      };
+      // 校验必填。
+      if (a.kind === 'CRON' && !a.cron) return '错误：kind=CRON 时必须提供 cron 表达式';
+      if (a.kind === 'ONCE' && !a.run_at) return '错误：kind=ONCE 时必须提供 run_at';
+      if (a.type === 'AGENT_PROMPT' && !a.prompt) return '错误：type=AGENT_PROMPT 时必须提供 prompt';
+      if (a.type === 'PLUGIN_ACTION' && (!a.plugin_id || !a.action))
+        return '错误：type=PLUGIN_ACTION 时必须提供 plugin_id 和 action';
+      if (a.type === 'NOTIFY' && !a.title) return '错误：type=NOTIFY 时必须提供 title';
+
+      const trigger =
+        a.kind === 'ONCE'
+          ? { kind: 'ONCE' as const, run_at: a.run_at! }
+          : {
+              kind: 'CRON' as const,
+              cron: a.cron!,
+              time_zone: a.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            };
+
+      const payload =
+        a.type === 'AGENT_PROMPT'
+          ? { type: 'AGENT_PROMPT' as const, prompt: a.prompt! }
+          : a.type === 'PLUGIN_ACTION'
+            ? {
+                type: 'PLUGIN_ACTION' as const,
+                plugin_id: a.plugin_id!,
+                action: a.action!,
+                input: (a.input ?? null) as import('@lingfang/contract').WorkflowJsonValue,
+              }
+            : { type: 'NOTIFY' as const, title: a.title!, body: a.body ?? '' };
+
+      try {
+        const { schedulerCreate } = await import('@/lib/local-scheduler');
+        const task = await schedulerCreate({
+          name: a.name,
+          trigger,
+          payload,
+          timeout_ms: a.timeout_ms ?? 1_800_000,
+          status: 'ACTIVE',
+        });
+        return `已创建定时任务「${task.name}」（id=${task.id}），下次触发：${task.next_run_at ?? '（无）'}`;
+      } catch (e) {
+        return `错误：创建定时任务失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const ScheduleList = defineTool({
+    name: 'ScheduleList',
+    description:
+      '列出本地定时任务。可选传入 status 过滤（ACTIVE/PAUSED/COMPLETED）；不传则返回所有非删除任务。' +
+      '返回每个任务的 id/name/status/type/trigger/next_run_at。',
+    parameters: z.object({
+      status: z.enum(['ACTIVE', 'PAUSED', 'COMPLETED']).optional().describe('状态过滤'),
+    }),
+    async execute(args): Promise<string> {
+      const status = (args as { status?: 'ACTIVE' | 'PAUSED' | 'COMPLETED' }).status;
+      try {
+        const { schedulerList } = await import('@/lib/local-scheduler');
+        const list = await schedulerList(status ? { status } : undefined);
+        if (!list.length) return '当前没有定时任务。';
+        const lines = list.map(
+          (t) =>
+            `- ${t.name}（id=${t.id}, status=${t.status}, type=${t.payload.type}, ` +
+            `trigger=${t.trigger.kind}${t.trigger.kind === 'CRON' ? ` ${t.trigger.cron}` : ''}, ` +
+            `next_run=${t.next_run_at ?? '—'}）`,
+        );
+        return `共 ${list.length} 个任务：\n${lines.join('\n')}`;
+      } catch (e) {
+        return `错误：列定时任务失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const ScheduleDelete = defineTool({
+    name: 'ScheduleDelete',
+    description: '删除一个本地定时任务（物理删除，不可恢复）。需提供任务 id。',
+    parameters: z.object({
+      id: z.string().min(1).describe('任务 id（ScheduleList 返回的 id）'),
+    }),
+    async execute(args): Promise<string> {
+      const id = (args as { id: string }).id;
+      try {
+        const { schedulerDelete } = await import('@/lib/local-scheduler');
+        await schedulerDelete(id);
+        return `已删除任务 ${id}`;
+      } catch (e) {
+        return `错误：删除失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const SchedulePause = defineTool({
+    name: 'SchedulePause',
+    description: '暂停一个激活中的定时任务（ACTIVE → PAUSED）。暂停后不再触发。',
+    parameters: z.object({
+      id: z.string().min(1).describe('任务 id'),
+    }),
+    async execute(args): Promise<string> {
+      const id = (args as { id: string }).id;
+      try {
+        const { schedulerPause } = await import('@/lib/local-scheduler');
+        await schedulerPause(id);
+        return `已暂停任务 ${id}`;
+      } catch (e) {
+        return `错误：暂停失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  const ScheduleResume = defineTool({
+    name: 'ScheduleResume',
+    description: '恢复一个已暂停的定时任务（PAUSED → ACTIVE）。恢复后按触发规则继续。',
+    parameters: z.object({
+      id: z.string().min(1).describe('任务 id'),
+    }),
+    async execute(args): Promise<string> {
+      const id = (args as { id: string }).id;
+      try {
+        const { schedulerResume } = await import('@/lib/local-scheduler');
+        await schedulerResume(id);
+        return `已恢复任务 ${id}`;
+      } catch (e) {
+        return `错误：恢复失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, UpdatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, Bash, DeleteFile, MoveFile, Grep],
+    tools: [Read, Write, Edit, Glob, CreatePlugin, UpdatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, Bash, DeleteFile, MoveFile, Grep, ScheduleCreate, ScheduleList, ScheduleDelete, SchedulePause, ScheduleResume],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();

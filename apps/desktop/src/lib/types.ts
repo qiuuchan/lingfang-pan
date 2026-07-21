@@ -220,7 +220,7 @@ export type AccountSettingsTab = 'account' | 'team-wallet' | 'settings';
 // 'creator' 保留为 setView 拦截键（拦截后切到 develop-plugins）；
 // 'team-wallet' | 'settings' 同为 setView 拦截转独立悬浮窗。
 export type PluginWorkspaceMode = 'run' | 'develop';
-export type View = 'home' | 'run-plugins' | 'develop-plugins' | 'draft-plugins' | 'creator' | 'team-wallet' | 'team-admin' | 'settings' | 'review';
+export type View = 'home' | 'run-plugins' | 'develop-plugins' | 'draft-plugins' | 'creator' | 'team-wallet' | 'team-admin' | 'settings' | 'review' | 'schedules';
 
 // RBAC：团队角色 + 权限码 + 插件授权（与后端 Role/PermissionEntry/PluginGrant + contract rbac.ts 对齐）。
 export type RoleScope = 'PLATFORM' | 'TEAM';
