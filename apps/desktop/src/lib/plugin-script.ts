@@ -159,7 +159,8 @@ export interface ShellResult {
 
 /** runPluginShell 入参（前端 camelCase，封装层转 Rust snake_case）。 */
 export interface RunPluginShellInput {
-  pluginId: string;
+  /** 插件 id。undefined / 空 = 无插件模式：cwd 落系统临时目录，不注入插件 PATH。 */
+  pluginId?: string;
   command: string;
   /** shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）。 */
   shell?: 'cmd' | 'powershell' | 'pwsh';
@@ -174,14 +175,18 @@ export interface RunPluginShellInput {
 /**
  * 在插件目录执行 shell 命令（Agent Bash 工具底层）。
  *
- * PATH 已注入软件内置 Python/Node/FFmpeg/Chromium + 插件 venv（python）或
- * node_modules/.bin（nodejs）+ 国内镜像源。命令失败时仍返回结果，便于读 stderr 修复。
- * cwd 锁定插件目录（防越权访问其它插件或系统目录）。
+ * 两种模式：
+ * - 插件模式（pluginId 非空）：PATH 注入软件内置运行时 + 插件 venv / node_modules/.bin + 国内镜像源，
+ *   cwd 锁定插件目录（防越权访问其它插件或系统目录）。
+ * - 无插件模式（pluginId 空）：cwd = 系统临时目录，仅注入应用 PATH。等同 Claude Code Bash，
+ *   隔离消失。用于读 docx、跑临时脚本等非插件开发任务。
+ *
+ * 命令失败时仍返回结果，便于读 stderr 修复。
  */
 export function runPluginShell(input: RunPluginShellInput): Promise<ShellResult> {
   return tauriInvoke<ShellResult>('run_plugin_shell', {
     input: {
-      plugin_id: input.pluginId,
+      plugin_id: input.pluginId?.trim() ? input.pluginId : null,
       command: input.command,
       shell: input.shell ?? null,
       cwd: input.cwd ?? null,

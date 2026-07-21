@@ -8,11 +8,13 @@ import { configureApiBase, setAuthToken } from '@/lib/api';
 import { createAgentTools, normalizeToolFileContent, detectCapabilities, isVersionNewer, type AgentToolsOptions, type TodoItem } from './tools';
 
 // RunPlugin 测试需要 mock tauriInvoke（list/read 文件）+ runPluginScript（试跑）。
+// Bash 测试需要 mock runPluginShell（plugin-script.ts）。
 // 用 vi.hoisted 拿到可在工厂内引用的 mock 引用，再 vi.mock 替换两个模块。
 const runPluginMock = vi.hoisted(() => vi.fn());
+const runShellMock = vi.hoisted(() => vi.fn());
 const tauriInvokeMock = vi.hoisted(() => vi.fn());
 const assertPolicyMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock('@/lib/plugin-script', () => ({ runPluginScript: runPluginMock }));
+vi.mock('@/lib/plugin-script', () => ({ runPluginScript: runPluginMock, runPluginShell: runShellMock }));
 vi.mock('@/lib/plugin-ai-policy', () => ({
   assertPluginAiPolicy: assertPolicyMock,
   checkPluginAiPolicy: vi.fn().mockResolvedValue({ policyVersion: 1, ok: true, diagnostics: [], requiredCapabilities: [], truncated: false }),
@@ -467,6 +469,61 @@ describe('RunPlugin 工具', () => {
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'RunPlugin', {});
     expect(out).toContain('运行时缺失');
+  });
+});
+
+describe('Bash 工具', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('已注册到工具集', () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    expect(tools.some((t) => t.name === 'Bash')).toBe(true);
+  });
+
+  it('插件模式：pluginId 非空 → 透传 pluginId 给 runPluginShell', async () => {
+    runShellMock.mockResolvedValueOnce({ stdout: 'ok\n', stderr: '', exit_code: 0, timed_out: false, elapsed_ms: 50 });
+    const { tools } = createAgentTools(makeOpts().opts); // getPluginId → 'test-plugin'
+    const out = await callExecute(tools, 'Bash', { command: 'echo ok' });
+    expect(out).toContain('退出码 0');
+    expect(out).toContain('ok');
+    // 关键：pluginId 透传给底层，不是 null/undefined。
+    expect(runShellMock.mock.calls[0][0].pluginId).toBe('test-plugin');
+  });
+
+  it('无插件模式：pluginId 为空 → 仍执行，pluginId 传 undefined（落临时目录）', async () => {
+    // 这是本次修复的核心断言：以前会 return '错误：当前没有插件...'，现在应正常执行。
+    runShellMock.mockResolvedValueOnce({ stdout: 'done', stderr: '', exit_code: 0, timed_out: false, elapsed_ms: 10 });
+    const { opts } = makeOpts();
+    opts.getPluginId = () => null;
+    const { tools } = createAgentTools(opts);
+    const out = await callExecute(tools, 'Bash', { command: 'python -c "print(1)"' });
+    expect(out).not.toContain('错误');
+    expect(out).toContain('退出码 0');
+    // pluginId 透传给底层 = undefined（opts.getPluginId 返回 null，Bash 工具转 undefined）。
+    // runPluginShell 内部再把 undefined/空串转 null 传给 Rust（plugin_shell.rs 的 None 分支）。
+    expect(runShellMock.mock.calls[0][0].pluginId).toBeUndefined();
+  });
+
+  it('command 为空 → 返回错误前缀（无论有无插件）', async () => {
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'Bash', { command: '   ' });
+    expect(out).toContain('command 不能为空');
+    expect(runShellMock).not.toHaveBeenCalled();
+  });
+
+  it('命令失败（非零退出码）→ 仍返回结果，含 stderr 供模型修复', async () => {
+    runShellMock.mockResolvedValueOnce({ stdout: '', stderr: 'boom', exit_code: 1, timed_out: false, elapsed_ms: 5 });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'Bash', { command: 'false' });
+    expect(out).toContain('退出码 1');
+    expect(out).toContain('boom');
+  });
+
+  it('超时 → 返回 ⏱ + 耗时', async () => {
+    runShellMock.mockResolvedValueOnce({ stdout: '', stderr: '', exit_code: null, timed_out: true, elapsed_ms: 120000 });
+    const { tools } = createAgentTools(makeOpts().opts);
+    const out = await callExecute(tools, 'Bash', { command: 'sleep 999', timeoutMs: 1000 });
+    expect(out).toContain('超时');
   });
 });
 

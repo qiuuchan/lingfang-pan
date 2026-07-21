@@ -859,20 +859,23 @@ export function createAgentTools(opts: AgentToolsOptions) {
   const Bash = defineTool({
     name: 'Bash',
     description:
-      '在当前插件目录执行 shell 命令。默认 cmd（Windows）/ sh（Unix），可选 powershell/pwsh。' +
-      'PATH 已注入软件内置 Python/Node/FFmpeg/Chromium + 当前插件的 venv（python 插件）或 node_modules/.bin（nodejs 插件）' +
-      '+ 国内镜像源（PIP_INDEX_URL/NPM_CONFIG_REGISTRY）。用于 `pip install xxx`、`npm install xxx` 等命令；' +
-      'Chromium 已内置，禁止执行 playwright install。cwd 默认插件目录根，可传相对子路径。' +
+      '执行 shell 命令。默认 cmd（Windows）/ sh（Unix），可选 powershell/pwsh。两种模式：' +
+      '① 有插件时：cwd 锁定插件目录，PATH 注入软件内置 Python/Node/FFmpeg/Chromium + 插件 venv / node_modules/.bin + 国内镜像源，' +
+      '用于 `pip install xxx`、`npm install xxx` 等插件开发命令；' +
+      '② 无插件时：cwd = 系统临时目录，仅注入应用 PATH（Python/Node 仍可用），' +
+      '用于读 docx/跑临时脚本等通用任务（等同 Claude Code Bash）。' +
+      'Chromium 已内置，禁止执行 playwright install。' +
       '返回 stdout/stderr/exitCode；命令失败（exit≠0）时仍返回结果（不抛异常），便于读 stderr 修复后重试。',
     parameters: z.object({
-      command: z.string().describe("shell 命令（如 'pip install requests' / 'npm install axios'）"),
-      cwd: z.string().optional().describe('相对插件目录的子路径（如 src），默认插件目录根；不能是绝对路径或含 ..'),
+      command: z.string().describe("shell 命令（如 'pip install requests' / 'npm install axios' / 'python -c \"...\"'）"),
+      cwd: z.string().optional().describe('相对插件目录的子路径（如 src），仅插件模式有效，默认插件目录根；不能是绝对路径或含 ..'),
       shell: z.enum(['cmd', 'powershell', 'pwsh']).optional().describe('shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）'),
       timeoutMs: z.number().optional().describe('超时毫秒，默认 120000；安装大型依赖时可按需调大'),
     }),
     async execute({ command, cwd, shell, timeoutMs }): Promise<string> {
-      const pluginId = opts.getPluginId();
-      if (!pluginId) return '错误：当前没有插件。请先 CreatePlugin 或打开已有插件。';
+      // pluginId 可为空：无插件时走「临时目录模式」（见 plugin-script.ts / plugin_shell.rs）。
+      // getPluginId 返回 null（无插件）→ 转 undefined 给 RunPluginShellInput.pluginId?。
+      const pluginId = opts.getPluginId() ?? undefined;
       if (!command.trim()) return '错误：command 不能为空。';
       try {
         const r = await runPluginShell({
