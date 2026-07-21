@@ -45,3 +45,16 @@ base64 = "0.22"
 zip = "2"
 semver = "1"
 uuid = { version = "1", features = ["v4"] }
+# 本地定时任务（local-scheduler）：cron 表达式解析 + 下次触发时间计算。
+croner = "2"
+# 本地定时任务：系统通知（NOTIFY payload + 任务运行结果推送）。
+tauri-plugin-notification = "2"
+# 本地定时任务：60s tick + 串行执行（oneshot 等待 + 硬超时）。
+# features= ["time"] 提供 interval / sleep / timeout；与 tauri::async_runtime 共用同一 runtime。
+tokio = { version = "1", features = ["time", "sync", "rt"] }
+
+[dev-dependencies]
+# scheduler 单测临时目录。
+tempfile = "3"
+# scheduler 单测阻塞 oneshot 接收。
+futures = "0.3"

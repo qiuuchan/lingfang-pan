@@ -18,6 +18,7 @@ mod plugin_store;
 mod plugins;
 mod process_util;
 mod runtime_commands;
+mod scheduler;
 mod runtime_resolver;
 mod update;
 mod upload;
@@ -274,6 +275,8 @@ fn quit_app(app: tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // 本地定时任务：系统通知（NOTIFY payload + 运行结果推送）。
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
             // 组B 的 start_plugin/stop_plugin 经此 State 的 ensure_plugin_dir 解析插件目录，
@@ -327,6 +330,17 @@ fn main() {
             // task 06-26：Node/Python 插件通过 localhost 一次性 token 调平台 LLM；
             // 桥持有后端地址与登录态，插件进程不直接接触 JWT/API Key。
             app.manage(plugin_llm_bridge::PluginLlmBridge::new());
+            // 本地定时任务（local-scheduler）：内存状态 + 文件存储 + 60s tick + 串行执行。
+            // 任务配置落 app_data_dir/scheduler/tasks/<id>/；runs.jsonl 保留最近 200 条。
+            // 三种 payload：AGENT_PROMPT（emit 给前端常驻组件）/ PLUGIN_ACTION（二期）/ NOTIFY（直接 emit 通知）。
+            let scheduler_storage = scheduler::SchedulerStorage::new(
+                &app.path().app_data_dir().map_err(|e| e.to_string())?,
+            );
+            let scheduler_state = scheduler::SchedulerState::new(scheduler_storage);
+            app.manage(scheduler_state);
+            app.manage(scheduler::executor::PendingRuns::default());
+            // 启动 tick + executor 两个 tokio 任务。
+            scheduler::executor::spawn(app.handle().clone());
             // 项 11：系统托盘（显示窗口 / 退出菜单 + 左键单击恢复）。
             setup_tray(app)?;
             Ok(())
@@ -415,7 +429,18 @@ fn main() {
             update::download_update,
             upload::upload_plugin,
             plugin_security::verify_plugin_signature_command,
-            plugin_security::check_plugin_recall_command
+            plugin_security::check_plugin_recall_command,
+            scheduler::commands::scheduler_create,
+            scheduler::commands::scheduler_update,
+            scheduler::commands::scheduler_delete,
+            scheduler::commands::scheduler_list,
+            scheduler::commands::scheduler_pause,
+            scheduler::commands::scheduler_resume,
+            scheduler::commands::scheduler_run_now,
+            scheduler::commands::scheduler_list_runs,
+            scheduler::commands::scheduler_record_run,
+            scheduler::commands::scheduler_active_count,
+            scheduler::commands::scheduler_has_running
         ])
         .run(tauri::generate_context!())
         .expect("启动 LingFang 桌面壳失败");
