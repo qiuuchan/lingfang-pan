@@ -1,7 +1,7 @@
 {
   "id": "com.lingfang.detail-poster",
   "name": "AI详情页海报生成器",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "AI 详情页/主图海报生成：提示词模板库 + 多模块批量生图 + 换装换脸 + 反推提示词 + 拼长图 + 高清修复 + 颜色图工具。生图与反推均经平台桥调用，按团队灵石计费，无需配置任何密钥。",
   "runtime_type": "python",
   "entry": "main.py",
