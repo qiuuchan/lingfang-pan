@@ -20,6 +20,7 @@ export type CreatorErrorKind =
   | 'run_timeout' // 预览执行超时（来自 R3）
   | 'run_failed' // 预览执行非零退出（来自 R3）
   | 'run_spawn_failed' // 预览执行进程拉起失败（来自 R3）
+  | 'ai_policy_failed' // 未通过平台 AI 使用政策检查（启动前预检失败，非进程问题）
   | 'manifest_missing' // 持久化运行时 manifest 缺失（temp 目录空，AI 未产出）
   | 'plugin_crashed' // 持久化运行启动后秒退（插件代码异常，附 stderr）
   | 'plugin_exited_clean' // 持久化运行进程正常退出（exit 0，但进程已结束；可能上游主动关闭）
@@ -79,6 +80,7 @@ const TITLE_MAP: Record<CreatorErrorKind, string> = {
   run_timeout: '预览执行超时',
   run_failed: '预览执行未成功',
   run_spawn_failed: '预览执行无法启动',
+  ai_policy_failed: '插件未通过平台 AI 使用政策检查',
   manifest_missing: '插件未生成完成',
   plugin_crashed: '插件启动后立即退出',
   plugin_exited_clean: '插件进程已结束',
@@ -99,6 +101,7 @@ const DETAIL_MAP: Record<CreatorErrorKind, string> = {
   run_timeout: '脚本在限定时间内未结束，可能存在死循环或阻塞输入。',
   run_failed: '脚本以非零状态码退出，请在下方查看完整输出定位错误。',
   run_spawn_failed: '进程无法拉起，可能是解释器路径无效或脚本文件不存在。',
+  ai_policy_failed: '插件源码命中平台禁用规则（硬编码密钥/第三方端点/未声明能力等）。请按下方诊断修正源码或 manifest 后重试，重试进程本身无意义。',
   manifest_missing: '该插件目录缺少 manifest.json（可能是创建时 AI 未完成产出）。请继续对话让 AI 补全，或重新创建插件。',
   plugin_crashed: '插件代码运行时抛出异常导致进程立即退出。请查看下方错误信息定位并修复（或点「让 AI 修复」自动修）。',
   plugin_exited_clean: '插件进程已正常退出（退出码 0）。可能是上游服务主动关闭、配置导致提前结束，或运行完成。可重新启动继续使用。',
@@ -119,6 +122,8 @@ const RETRYABLE_MAP: Record<CreatorErrorKind, boolean> = {
   run_timeout: true,
   run_failed: true,
   run_spawn_failed: true,
+  // 政策检查失败需先改源码/manifest，重试进程无意义。
+  ai_policy_failed: false,
   // manifest 缺失需先让 AI 补全产出，重试运行无效。
   manifest_missing: false,
   // 插件崩溃需先修代码，重试运行无效（用「让 AI 修复」自动修）。
@@ -141,6 +146,16 @@ export function toCreatorError(kind: CreatorErrorKind, error: unknown): CreatorE
     raw: raw || undefined,
     retryable: RETRYABLE_MAP[kind],
   };
+}
+
+/**
+ * 判断是否为 plugin_ai_policy_failed 错误（由 assertPluginAiPolicy/assertInstalledPluginAiPolicy 抛出）。
+ * 用于在启动/预览的 catch 中把它从 run_spawn_failed 兜底里拆出来，避免误导用户去查解释器路径。
+ */
+export function isPluginAiPolicyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return code === 'plugin_ai_policy_failed';
 }
 
 /**

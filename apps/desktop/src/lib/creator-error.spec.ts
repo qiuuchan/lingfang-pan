@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromRunResult, toCreatorError, toUploadError } from '@/lib/creator-error';
+import { fromRunResult, isPluginAiPolicyError, toCreatorError, toUploadError } from '@/lib/creator-error';
 import type { ApiError } from '@/lib/api';
 
 function makeApiError(message: string, code?: string): ApiError {
@@ -29,6 +29,38 @@ describe('toCreatorError', () => {
     const err = toCreatorError('run_timeout', new Error('超时'));
     expect(err.kind).toBe('run_timeout');
     expect(err.retryable).toBe(true);
+  });
+
+  it('ai_policy_failed 映射为不可重试错误且文案明确指向政策检查', () => {
+    const err = toCreatorError('ai_policy_failed', new Error('插件未通过平台 AI 使用政策检查'));
+    expect(err.kind).toBe('ai_policy_failed');
+    expect(err.title).toBe('插件未通过平台 AI 使用政策检查');
+    expect(err.detail).toContain('禁用规则');
+    expect(err.retryable).toBe(false);
+  });
+});
+
+describe('isPluginAiPolicyError', () => {
+  it('识别 code 为 plugin_ai_policy_failed 的错误', () => {
+    const err = new Error('插件未通过平台 AI 使用政策检查') as Error & { code?: string };
+    err.code = 'plugin_ai_policy_failed';
+    expect(isPluginAiPolicyError(err)).toBe(true);
+  });
+
+  it('普通 Error 不被识别', () => {
+    expect(isPluginAiPolicyError(new Error('interpreter_missing: ...'))).toBe(false);
+  });
+
+  it('run_plugin_script 抛出的 spawn_failed 不被识别', () => {
+    const err = new Error('No such file') as Error & { code?: string };
+    err.code = 'spawn_failed';
+    expect(isPluginAiPolicyError(err)).toBe(false);
+  });
+
+  it('非对象入参安全返回 false', () => {
+    expect(isPluginAiPolicyError(null)).toBe(false);
+    expect(isPluginAiPolicyError(undefined)).toBe(false);
+    expect(isPluginAiPolicyError('字符串')).toBe(false);
   });
 });
 

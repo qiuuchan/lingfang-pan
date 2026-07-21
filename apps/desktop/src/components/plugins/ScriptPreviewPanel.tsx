@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
-import { fromRunResult, toCreatorError, type CreatorError } from '@/lib/creator-error';
+import { fromRunResult, isPluginAiPolicyError, toCreatorError, type CreatorError } from '@/lib/creator-error';
 import {
   probeScriptRuntime,
   runPluginScript,
@@ -287,8 +287,12 @@ export function ScriptPreviewPanel({
       toast.success(`${RUNTIME_LABEL[runtime]} 插件已启动，运行在独立进程`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // 解释器缺失：start_plugin 返回 interpreter_missing: 前缀（与 run_plugin_script 同款）。
-      if (message.startsWith('interpreter_missing:')) {
+      // AI 政策检查失败：assertInstalledPluginAiPolicy/assertPluginAiPolicy 抛 plugin_ai_policy_failed，
+      // 与进程拉起无关，单独归类，避免误导用户去查解释器路径（raw 已含完整诊断）。
+      if (isPluginAiPolicyError(error)) {
+        setPersistentRun({ status: 'error', error: toCreatorError('ai_policy_failed', error) });
+      } else if (message.startsWith('interpreter_missing:')) {
+        // 解释器缺失：start_plugin 返回 interpreter_missing: 前缀（与 run_plugin_script 同款）。
         setPersistentRun({
           status: 'error',
           error: fromRunResult({ ok: false, failure: 'interpreter_missing', stderr: message.slice('interpreter_missing:'.length) }),
@@ -363,10 +367,15 @@ export function ScriptPreviewPanel({
         setPreviewRun({ status: 'error', error: fromRunResult(result) });
       }
     } catch (error) {
-      setPreviewRun({
-        status: 'error',
-        error: fromRunResult({ ok: false, failure: 'spawn_failed', stderr: error instanceof Error ? error.message : String(error) }),
-      });
+      // AI 政策检查失败（assertPluginAiPolicy 抛出）：与进程拉起无关，单独归类。
+      if (isPluginAiPolicyError(error)) {
+        setPreviewRun({ status: 'error', error: toCreatorError('ai_policy_failed', error) });
+      } else {
+        setPreviewRun({
+          status: 'error',
+          error: fromRunResult({ ok: false, failure: 'spawn_failed', stderr: error instanceof Error ? error.message : String(error) }),
+        });
+      }
     }
   }, [entryFile, files, manifest.entry, manifest.id, pluginId, runtime]);
 
