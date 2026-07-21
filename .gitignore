@@ -1,8 +1,21 @@
 # 依赖
 node_modules/
+# 例外：桌面端内置 Node 运行时的 node_modules 必须入仓——
+# pnpm/npm 等 shim(.cmd) 指向的真实入口(.cjs/.js)就在这里，缺失会让所有 Node 插件启动报 MODULE_NOT_FOUND。
+# 注意：pnpm 包内部有 dist/ 和 dist/node_modules/ 子目录，必须同时反转 node_modules/、dist/、**/dist/ 三条通用规则，
+# 否则 dist/pnpm.cjs（真正实现）和 dist/node_modules/（pnpm bundle 依赖）会被忽略。
+!apps/desktop/runtimes/nodejs/node_modules/
+!apps/desktop/runtimes/nodejs/node_modules/**
 target/
 dist/
 **/dist/
+# 例外（同上）：内置 Node 运行时 pnpm 包的 dist/ 不受 dist/ 与 **/dist/ 影响。
+!apps/desktop/runtimes/nodejs/node_modules/pnpm/dist/
+!apps/desktop/runtimes/nodejs/node_modules/pnpm/dist/**
+# pnpm 包内 dist/node_modules/ 是 pnpm 自己 bundle 的运行时依赖，不是项目的 node_modules——
+# 必须显式反转 node_modules/ 规则对它的命中，否则 git 会忽略这个子目录本身。
+!apps/desktop/runtimes/nodejs/node_modules/pnpm/dist/node_modules/
+!apps/desktop/runtimes/nodejs/node_modules/pnpm/dist/node_modules/**
 
 # 桌面打包产物
 apps/desktop/src-tauri/target/
