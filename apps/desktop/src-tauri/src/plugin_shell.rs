@@ -36,7 +36,10 @@ use crate::runtime_resolver::RuntimeResolver;
 /// run_plugin_shell 命令入参（前端传 camelCase，封装层转 snake_case）。
 #[derive(Clone, Debug, Deserialize)]
 pub struct RunPluginShellInput {
-    pub plugin_id: String,
+    /// 插件 id。None / 空 = 无插件模式：cwd 落到系统临时目录，跳过插件专属 PATH 注入，
+    /// runtime 强制 nodejs（仅靠应用运行时 PATH）。等同 Claude Code Bash。
+    #[serde(default)]
+    pub plugin_id: Option<String>,
     /// 要执行的 shell 命令（如 `pip install requests` / `npm install axios`）。
     pub command: String,
     /// shell 类型："cmd" | "powershell" | "pwsh"。缺省 "cmd"（非 Windows 走 /bin/sh，本字段忽略）。
@@ -72,7 +75,14 @@ pub(crate) enum ShellRuntime {
 
 /// 命令：在插件目录执行任意 shell 命令（Agent Bash 工具底层）。
 ///
-/// 流程：
+/// 两种模式：
+/// - **插件模式**（plugin_id 非空）：cwd 锁定插件目录，PATH 注入 venv / node_modules/.bin。
+///   插件开发的默认场景，安全不变式 = cwd 软隔离。
+/// - **无插件模式**（plugin_id 为 None / 空）：cwd = 系统临时目录，不注入插件 PATH，
+///   runtime 强制 nodejs。等同 Claude Code Bash——给 Agent 一个通用 shell 通道，
+///   用于读 docx、跑临时脚本等非插件开发任务。**隔离消失**：以用户权限跑任意命令。
+///
+/// 插件模式流程：
 /// 1. ensure_plugin_dir 拿 canonicalize 后的插件目录。
 /// 2. resolve_cwd：子路径段级校验 + canonicalize 前缀断言（防越权）。
 /// 3. RuntimeResolver::resolve 拿应用管理的运行时 + 镜像源 env。
@@ -89,13 +99,31 @@ pub fn run_plugin_shell(
     if requests_playwright_browser_install(&input.command) {
         return Err("Chromium 已由软件内置，禁止下载或安装第二套 Playwright 浏览器".to_string());
     }
-    // 1. 插件目录（canonicalize 防符号链接逃逸）。
-    let plugin_dir = store.ensure_plugin_dir(&input.plugin_id)?;
 
-    // 2. cwd 解析（段级校验 + 前缀断言）。
-    let cwd = resolve_cwd(&plugin_dir, input.cwd.as_deref())?;
+    // 模式判定：trim 后非空 = 插件模式；否则 = 无插件模式。
+    let plugin_id = input
+        .plugin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
-    // 3. 运行时解析（应用管理 + 镜像源 env）。
+    // 1+2. 解析 plugin_dir + cwd（两模式分支）。
+    let (plugin_dir, cwd, has_plugin_dir) = match plugin_id {
+        Some(id) => {
+            let dir = store.ensure_plugin_dir(id)?;
+            let cwd = resolve_cwd(&dir, input.cwd.as_deref())?;
+            (dir, cwd, true)
+        }
+        None => {
+            // 无插件模式：cwd = 系统临时目录。不创建子目录、不做段级校验
+            // （临时目录里 Agent 可能 cd 任意位置——这是用户明确接受的「等同 Claude Code Bash」语义）。
+            // 用户传的 cwd 在此模式下被忽略，避免与「无插件根」语义冲突。
+            let dir = std::env::temp_dir();
+            (dir.clone(), dir, false)
+        }
+    };
+
+    // 3. 运行时解析（应用管理 + 镜像源 env）——两模式都需要，应用 PATH 永远注入。
     let resolver = RuntimeResolver::resolve(&app)?;
 
     // 4. runtime 探测 / 校验。
@@ -110,18 +138,29 @@ pub fn run_plugin_shell(
         Some(other) => {
             return Err(format!("runtime 仅支持 python/nodejs（收到 {other:?}）"));
         }
-        None => detect_runtime(&plugin_dir),
+        None => {
+            // 无插件模式：没有插件目录可探测，默认 nodejs（应用 PATH 永远有 node）。
+            if has_plugin_dir {
+                detect_runtime(&plugin_dir)
+            } else {
+                ShellRuntime::Nodejs
+            }
+        }
     };
 
-    // 5. env 构造：resolver 注入应用 PATH + 镜像源，再 prepend 插件专属路径。
+    // 5. env 构造：resolver 注入应用 PATH + 镜像源；插件模式额外 prepend 插件专属路径。
     let base_env = resolver.env(minimal_env());
-    let env = prepend_plugin_paths(base_env, &plugin_dir, runtime);
+    let env = if has_plugin_dir {
+        prepend_plugin_paths(base_env, &plugin_dir, runtime)
+    } else {
+        base_env
+    };
 
     // 6. shell binary 绝对路径。
     let shell_kind = normalize_shell(input.shell.as_deref());
     let (binary, flag) = resolve_shell_binary(shell_kind)?;
 
-    // 7. 拉起 shell 执行命令（cwd 锁定插件目录 / 子路径）。
+    // 7. 拉起 shell 执行命令。
     let timeout_ms = input.timeout_ms.unwrap_or(120_000);
     let cwd_str = cwd.to_string_lossy().to_string();
     let started = std::time::Instant::now();
@@ -561,5 +600,40 @@ mod tests {
             .unwrap();
         assert_eq!(path_node, OsString::from("/app/node"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 无插件模式：plugin_id 为 None / 空 / 纯空白 → 都视为无插件。
+    /// 这条断言锁定本次修复的核心契约——trim+filter 后的语义判定。
+    #[test]
+    fn plugin_id_blank_treated_as_no_plugin() {
+        fn is_no_plugin(raw: Option<&str>) -> bool {
+            raw.map(str::trim).filter(|s| !s.is_empty()).is_none()
+        }
+        assert!(is_no_plugin(None));
+        assert!(is_no_plugin(Some("")));
+        assert!(is_no_plugin(Some("   ")));
+        assert!(is_no_plugin(Some("\t\n")));
+        assert!(!is_no_plugin(Some("abc")));
+        assert!(!is_no_plugin(Some("  abc  "))); // trim 后非空
+    }
+
+    /// 无插件模式：RunPluginShellInput 反序列化时 plugin_id 缺失/为 null → None。
+    /// 锁定 `#[serde(default)]` 让旧前端（仍传字符串）和新前端（传 null）都兼容。
+    #[test]
+    fn run_plugin_shell_input_plugin_id_optional_deserialize() {
+        // 缺失字段
+        let json = r#"{"command":"echo hi"}"#;
+        let parsed: RunPluginShellInput = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.plugin_id, None);
+
+        // 显式 null
+        let json = r#"{"plugin_id":null,"command":"echo hi"}"#;
+        let parsed: RunPluginShellInput = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.plugin_id, None);
+
+        // 字符串（兼容旧前端）
+        let json = r#"{"plugin_id":"my-plugin","command":"echo hi"}"#;
+        let parsed: RunPluginShellInput = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.plugin_id.as_deref(), Some("my-plugin"));
     }
 }
