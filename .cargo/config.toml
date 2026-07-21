@@ -1,0 +1,8 @@
+# Cargo 链接器/目标配置。
+#
+# target-feature=+crt-static：让 Rust 静态链接 MSVC 运行时（vcruntime140.dll 等），
+# 产物不再依赖系统 VC++ Redistributable。新用户开箱即装，避免「找不到 VCRUNTIME140.dll」类报错。
+# 体积代价小（通常几百 KB），收益是消除一整类 Windows 环境依赖问题。
+# 仅作用于 MSVC toolchain（GNU toolchain 本身就静态链接）。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

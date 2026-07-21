@@ -6,3 +6,13 @@ members = [
   "apps/desktop/src-tauri",
   "apps/desktop/installer",
 ]
+
+# release 优化：减体积 + 提升启动速度。
+# - lto="fat" + codegen-units=1：跨 crate 全程序内联优化（编译变慢，但产物更小更快）。
+# - strip="symbols"：剥除调试符号（与日志行号无关，panic 仍保留位置信息）。
+# - panic="abort"：去掉 unwind 表，进一步减体积（桌面 GUI 不依赖 panic unwind 做清理）。
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
