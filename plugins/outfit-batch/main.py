@@ -1,7 +1,7 @@
-import sys, os, json, time, shutil, requests, base64, random, string, mimetypes, logging, gc, traceback
+import sys, os, json, time, shutil, requests, base64, random, string, mimetypes, logging, gc, traceback, io
 from datetime import datetime, timedelta
 from pathlib import Path
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -75,11 +75,41 @@ RESOLUTION_SUPPORTED_RATIOS = {
     "1K": ["1:1", "3:4", "9:16", "3:2", "4:3", "16:9", "2:3", "2:1", "1:2"],
     "2K": ["1:1", "3:4", "9:16", "3:2", "4:3", "16:9", "2:3", "2:1", "1:2"]
 }
-SIZE_MAP = {
-    "1:1": "1024x1024", "3:4": "768x1024", "4:3": "1024x768",
-    "9:16": "576x1024", "16:9": "1024x576", "2:3": "768x1152",
-    "3:2": "1152x768", "2:1": "1024x512", "1:2": "512x1024"
+# ---------- 出图比例 → 上游标准 size / 目标精确像素 ----------
+# 上游 image-edit 模型只认标准 size（1024x1024 / 1024x1536 / 1536x1024），任意自定义像素值
+# （如 768x1024 / 576x1024）会被忽略（→ 按参考图比例出图，常表现为「选 1:1 出竖图」）或报错。
+# 故请求层统一发标准 size；落盘前再用 Pillow center-crop 到目标精确像素，保证「选什么比例出什么比例」。
+# 与 detail-poster 同款双保险（detail-poster/main.py L132-158 已验证）。
+RATIO_STANDARD_SIZE = {
+    "1:1": "1024x1024",
+    # 竖图统一发 1024x1536
+    "3:4": "1024x1536", "9:16": "1024x1536", "2:3": "1024x1536", "1:2": "1024x1536",
+    # 横图统一发 1536x1024
+    "4:3": "1536x1024", "16:9": "1536x1024", "3:2": "1536x1024", "2:1": "1536x1024",
 }
+# 目标精确像素（W:H 严格等于比例，长边对齐 1536），用于落盘前 center-crop。
+RATIO_PIXELS = {
+    "1:1": (1024, 1024),
+    "3:4": (1152, 1536),   # W:H = 3:4
+    "9:16": (864, 1536),   # W:H = 9:16
+    "2:3": (1024, 1536),   # W:H = 2:3
+    "1:2": (768, 1536),    # W:H = 1:2
+    "4:3": (1536, 1152),   # W:H = 4:3
+    "16:9": (1536, 864),   # W:H = 16:9
+    "3:2": (1536, 1024),   # W:H = 3:2
+    "2:1": (1536, 768),    # W:H = 2:1
+}
+
+
+def _crop_to_ratio(img, ratio):
+    """按目标比例 center-crop 到精确像素（ImageOps.fit）。ratio 不在表里或失败时原样返回。"""
+    target = RATIO_PIXELS.get(ratio)
+    if not target:
+        return img
+    try:
+        return ImageOps.fit(img, target, Image.LANCZOS)
+    except Exception:
+        return img
 
 DEFAULT_PASSPHRASE_PROMPT = "展示人物全身图，专业摄影，像素级的面料纹理，质感清晰，焦点清晰，电影级布光，景深效果。高清画质"
 CHANGE_CLOTHES_PROMPT_TEMPLATE = """把图2全套（上衣+裤子+内搭）换到图1身上，图1保持姿态背景不变。严格保持图1的面部特征、表情、五官、皮肤纹理、肤色完全不变，面部不得出现任何色斑、色块、噪点或模糊。去除图1文字字母banner标签横条幅小海报遮挡物，严格保持人物身材比例的一致性。要求极高精度与细节还原，像素级的面料纹理，逼真的光线，焦点清晰，高清质感"""
@@ -104,11 +134,22 @@ BATCH_CHANGE_CLOTHES_PROMPT = """请将【服装图区】中图1的全套服装�
 
 # ========== 性能参数（优化） ==========
 DEFAULT_MAX_CONCURRENT = 12          # 优化：降低并发至12，避免瞬时熔断
-DEFAULT_TIMEOUT = 300                # 优化：增加超时至300秒，减少假性超时
+DEFAULT_TIMEOUT = 3000               # 单次请求超时3000秒（上游偶发长耗时，避免假性超时）
 DEFAULT_RETRY_COUNT = 5              # 优化：减少重试次数至5，降低无效重试
-DEFAULT_MAX_TOTAL_SECONDS = 1800     # 总超时30分钟
+# 单任务总超时：需 ≥ 单次超时 × 重试次数 + 退避（3000×10 + 退避≈60×10 ≈ 30600s），取 36000s（10h）留余量。
+DEFAULT_MAX_TOTAL_SECONDS = 36000
 MAX_PREVIEW_IMAGES = 200
 MAX_TASK_HISTORY = 200
+
+# ========== 设置迁移 ==========
+# 旧版单次请求超时被钳制在 600s 内，历史保存值（如 200）会覆盖新默认值（3000）；
+# 同步把过小的 max_total 迁移到新基线，否则 3000s 单次会在首次请求中途触发"任务超时"弹窗。
+_old_timeout = app_settings.value("timeout", DEFAULT_TIMEOUT, type=int)
+if 0 < _old_timeout < DEFAULT_TIMEOUT:
+    app_settings.setValue("timeout", DEFAULT_TIMEOUT)
+_old_max_total = app_settings.value("max_total", DEFAULT_MAX_TOTAL_SECONDS, type=int)
+if 0 < _old_max_total < DEFAULT_MAX_TOTAL_SECONDS:
+    app_settings.setValue("max_total", DEFAULT_MAX_TOTAL_SECONDS)
 
 APP_CONFIG = {
     "task_expire_days": 7,
@@ -128,9 +169,9 @@ APP_CONFIG = {
     ]
 }
 def get_max_concurrent(): return app_settings.value("max_concurrent", DEFAULT_MAX_CONCURRENT, type=int)
-def get_timeout(): return app_settings.value("timeout", DEFAULT_TIMEOUT, type=int)
+def get_timeout(): return max(app_settings.value("timeout", DEFAULT_TIMEOUT, type=int), DEFAULT_TIMEOUT)
 def get_retry_count(): return app_settings.value("retry_count", DEFAULT_RETRY_COUNT, type=int)
-def get_max_total_seconds(): return app_settings.value("max_total", DEFAULT_MAX_TOTAL_SECONDS, type=int)
+def get_max_total_seconds(): return max(app_settings.value("max_total", DEFAULT_MAX_TOTAL_SECONDS, type=int), DEFAULT_MAX_TOTAL_SECONDS)
 
 # ==================== 内存监控 ====================
 def check_memory_and_cleanup():
@@ -649,9 +690,9 @@ class ApiKeyDialog(QDialog):
         self.concurrency_spin = QSpinBox()
         self.concurrency_spin.setRange(1,30); self.concurrency_spin.setValue(get_max_concurrent())
         layout.addWidget(self.concurrency_spin)
-        layout.addWidget(QLabel("单次请求超时 (秒，≤600):"))
+        layout.addWidget(QLabel("单次请求超时 (秒，默认3000，≤3600):"))
         self.timeout_spin = QSpinBox()
-        self.timeout_spin.setRange(30,600); self.timeout_spin.setValue(get_timeout())
+        self.timeout_spin.setRange(30,3600); self.timeout_spin.setValue(get_timeout())
         layout.addWidget(self.timeout_spin)
         layout.addWidget(QLabel("最大重试次数:"))
         self.retry_spin = QSpinBox()
@@ -697,14 +738,14 @@ class LocalAPIGenerator:
         tier = app_settings.value("tier", DEFAULT_TIER, type=str)
         return tier if tier in TIER_CHOICES else DEFAULT_TIER
     @staticmethod
-    def get_size_str(size_ratio): return SIZE_MAP.get(size_ratio, "1024x1024")
+    def get_size_str(size_ratio): return RATIO_STANDARD_SIZE.get(size_ratio, "1024x1024")
     @staticmethod
     def generate(task, progress_callback=None, image_ready_callback=None, ask_continue_callback=None):
         try:
             if not bridge_ready():
                 raise Exception("未检测到平台桥环境变量，请在桌面客户端中运行本插件")
             max_retries = app_settings.value("retry_count", APP_CONFIG["retry_count"], type=int)
-            timeout_sec = min(app_settings.value("timeout", APP_CONFIG["timeout_seconds"], type=int), 600)
+            timeout_sec = max(app_settings.value("timeout", APP_CONFIG["timeout_seconds"], type=int), DEFAULT_TIMEOUT)
             tier = LocalAPIGenerator.get_tier()
             last_error = None
             for retry in range(max_retries):
@@ -758,6 +799,15 @@ class LocalAPIGenerator:
                             image_data = fetch_image_bytes(src)
                         except Exception as fe:
                             logging.error(f"下载结果图失败: {fe}"); continue
+                        # 上游返回图按目标比例 center-crop 到精确像素（上游可能不认 size，客户端兜底保证比例）。
+                        try:
+                            pil = Image.open(io.BytesIO(image_data))
+                            pil = _crop_to_ratio(pil, task.size)
+                            buf = io.BytesIO()
+                            pil.save(buf, format="PNG")
+                            image_data = buf.getvalue()
+                        except Exception as ce:
+                            logging.error(f"结果图裁剪失败(原样保留): {ce}")
                         filename = get_png_filename(save_dir)
                         save_path = save_dir / filename
                         with open(save_path, 'wb') as f: f.write(image_data)

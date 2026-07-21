@@ -148,12 +148,32 @@ RATIO_PIXELS = {
 
 
 def _crop_to_ratio(img, ratio):
-    """按目标比例 center-crop 到精确像素（ImageOps.fit）。ratio 不在表里或失败时原样返回。"""
+    """按目标比例裁切到精确像素，保留顶部（人物头肩在上 1/3，居中裁切会把头顶裁掉）。
+
+    原来用 ImageOps.fit 做 center-crop：当源图比目标比例更高时，垂直方向上下各裁一半，
+    直接把头顶切掉（详情图/海报的常见痛点）。改为：
+      - 水平方向（源图更宽）仍 center-crop，左右对称；
+      - 垂直方向（源图更高）改为顶部对齐 + 向下偏移 12%（保留头顶、留一点脚下空间）；
+      - 先缩放到刚好覆盖目标，再按上面的偏移裁切到精确像素。
+    ratio 不在表里或失败时原样返回。
+    """
     target = RATIO_PIXELS.get(ratio)
     if not target:
         return img
     try:
-        return ImageOps.fit(img, target, Image.LANCZOS)
+        tw, th = target
+        iw, ih = img.size
+        # 缩放比：必须让缩放后宽≥目标宽 且 高≥目标高（cover），否则会拉伸变形。
+        scale = max(tw / iw, th / ih)
+        nw, nh = int(round(iw * scale)), int(round(ih * scale))
+        resized = img.resize((nw, nh), Image.LANCZOS)
+        # 水平居中，垂直偏顶（顶部偏移 12%，既不切头顶也不让脚下贴边）。
+        left = (nw - tw) // 2
+        top = int(round((nh - th) * 0.12)) if nh > th else 0
+        # 限定到合法区间，防止极端输入溢出。
+        top = max(0, min(top, nh - th))
+        left = max(0, min(left, nw - tw))
+        return resized.crop((left, top, left + tw, top + th))
     except Exception:
         return img
 
@@ -180,7 +200,7 @@ class App:
     def __init__(self, root):
         log_info("应用启动")
         self.root = root
-        self.root.title("AI详情页海报生成器 v0.2.5")
+        self.root.title("AI详情页海报生成器 v0.2.6")
         self.root.geometry("1600x900")
         self.root.configure(bg='#f0f2f5')
         try:
