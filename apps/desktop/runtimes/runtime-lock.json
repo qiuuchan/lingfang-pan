@@ -71,6 +71,10 @@
   "requiredFiles": [
     "nodejs/npm.cmd",
     "nodejs/pnpm.cmd",
+    "nodejs/node_modules/npm/bin/npm-cli.js",
+    "nodejs/node_modules/npm/bin/npx-cli.js",
+    "nodejs/node_modules/pnpm/bin/pnpm.cjs",
+    "nodejs/node_modules/pnpm/bin/pnpx.cjs",
     "python/Scripts/pip.cmd",
     "python/Lib/ensurepip/_bundled/pip-25.0.1-py3-none-any.whl",
     "chromium/ms-playwright/chromium-1228/INSTALLATION_COMPLETE",
