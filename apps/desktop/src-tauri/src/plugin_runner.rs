@@ -923,13 +923,34 @@ pub(crate) fn ensure_node_dependencies(
         let _ = std::fs::remove_dir(&node_modules_path);
     }
     // 锁文件决定冻结安装器；存在锁文件时不允许退化为普通 install。
+    //
+    // pnpm 两个独立化 flag（实现「插件环境独立」契约）：
+    // - `--ignore-workspace`：插件目录必须当独立项目装，不能被祖先 pnpm-workspace.yaml
+    //   吸收成成员（开发态插件在 monorepo 内时，pnpm 会向上找到根 workspace 把整个
+    //   monorepo 当项目，触发 "modules 目录将被清空重装" 的交互确认 → 非 TTY 子进程
+    //   卡住/exit=1；生产态插件在 app_data 下通常无 workspace.yaml，flag 无副作用）。
+    //   依赖照常全装到插件自己的 node_modules/。
+    // - `--config.store-dir=<plugin>/data/.pnpm-store`：把全局内容寻址 store 落在插件
+    //   data 目录内，彻底隔离于宿主 PNPM_HOME/盘根 `.pnpm-store`（避免开发机或某些
+    //   Windows 环境下盘根 ACL 导致 ERR_PNPM_EPERM）。代价是多个 Node 插件 store 不
+    //   共享、占用略增，但换来卸载即清 + 行为可预测。data/ 已由 ensure_plugin_dir 建好。
+    let pnpm_store_dir = plugin_dir.join("data").join(".pnpm-store");
+    let pnpm_store_flag = format!(
+        "--config.store-dir={}",
+        pnpm_store_dir.to_string_lossy()
+    );
     let (bin, install_args) = if plugin_dir.join("pnpm-lock.yaml").is_file() {
         let pnpm = runtime
             .pnpm()
             .ok_or_else(|| "插件包含 pnpm-lock.yaml，但应用运行时缺少 pnpm".to_string())?;
         (
             pnpm,
-            vec!["install".to_string(), "--frozen-lockfile".to_string()],
+            vec![
+                "install".to_string(),
+                "--frozen-lockfile".to_string(),
+                "--ignore-workspace".to_string(),
+                pnpm_store_flag,
+            ],
         )
     } else if plugin_dir.join("package-lock.json").is_file() {
         let npm = runtime
@@ -937,7 +958,14 @@ pub(crate) fn ensure_node_dependencies(
             .ok_or_else(|| "插件包含 package-lock.json，但应用运行时缺少 npm".to_string())?;
         (npm, vec!["ci".to_string()])
     } else if let Some(pnpm) = runtime.pnpm() {
-        (pnpm, vec!["install".to_string()])
+        (
+            pnpm,
+            vec![
+                "install".to_string(),
+                "--ignore-workspace".to_string(),
+                pnpm_store_flag,
+            ],
+        )
     } else if let Some(npm) = runtime.npm() {
         (npm, vec!["install".to_string()])
     } else {
