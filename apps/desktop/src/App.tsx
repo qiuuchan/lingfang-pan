@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 
 import { PermissionConsentDialog } from '@/components/PermissionConsentDialog';
+import { SchedulerAgentRunner } from '@/components/SchedulerAgentRunner';
+import { SchedulerNotifier } from '@/components/SchedulerNotifier';
 import { isStandalonePluginWindow, standalonePluginId } from '@/lib/plugin-window';
 import { Auth } from '@/pages/Auth';
 import { Onboarding } from '@/pages/Onboarding';
@@ -49,6 +51,7 @@ const TeamWallet = lazy(() => import('@/pages/TeamWallet').then((m) => ({ defaul
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 const CreatorWorkspace = lazy(() => import('@/components/creator/CreatorWorkspace').then((m) => ({ default: m.CreatorWorkspace })));
 const DraftPlugins = lazy(() => import('@/pages/DraftPlugins').then((m) => ({ default: m.DraftPlugins })));
+const Schedules = lazy(() => import('@/pages/Schedules').then((m) => ({ default: m.Schedules })));
 
 interface AppContextValue {
   backendUrl: string | null;
@@ -291,6 +294,8 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
   const [closePromptOpen, setClosePromptOpen] = useState(false);
+  // 本地定时任务（local-scheduler）：关窗对话框展示当前 ACTIVE 任务数。
+  const [closeActiveSchedules, setCloseActiveSchedules] = useState(0);
   // 左下角用户按钮弹出的 AvatarMenu 开关（项 4：替代直接打开 AccountDialog）。
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
@@ -803,7 +808,12 @@ export default function App() {
       } else if (pref === 'quit') {
         void tauriInvoke('quit_app');
       } else {
-        setClosePromptOpen(true);
+        // 拉一次 ACTIVE 定时任务数，传给 CloseBehaviorDialog 展示告警。
+        import('@/lib/local-scheduler')
+          .then(({ schedulerActiveCount }) => schedulerActiveCount())
+          .then((n) => setCloseActiveSchedules(n))
+          .catch(() => setCloseActiveSchedules(0))
+          .finally(() => setClosePromptOpen(true));
       }
     })
       .then((fn) => {
@@ -847,7 +857,7 @@ export default function App() {
           </div>
         </Centered>
         {/* 关窗询问悬浮窗：登录前的居中态也需渲染，否则关闭按钮 prevent_close 后无对话框、应用关不掉。 */}
-        <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} />
+        <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} activeSchedules={closeActiveSchedules} />
         <Toaster position="top-right" richColors closeButton />
       </AppContext.Provider>
     );
@@ -873,6 +883,7 @@ export default function App() {
   else if (view === 'review') body = session.isPlatformAdmin ? <Review /> : <Home />;
   else if (view === 'team-admin') body = <TeamAdmin />;
   else if (view === 'draft-plugins') body = <DraftPlugins />;
+  else if (view === 'schedules') body = <Schedules />;
   else body = null;
   // 开发插件页隐藏外层 Sidebar；创建器会话侧栏维护自己的折叠偏好与切换入口。
   const showAppSidebar = view !== 'develop-plugins';
@@ -982,7 +993,7 @@ export default function App() {
       {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
       <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
       {/* 项 11：关窗询问悬浮窗（偏好 'ask' 时弹；tray/quit/cancel 三选项）。 */}
-      <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} />
+      <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} activeSchedules={closeActiveSchedules} />
       {/* 项 4：左下角用户按钮弹出的 AvatarMenu（v4 形态，适配当前 RBAC/View）。 */}
       <AvatarMenu open={avatarMenuOpen} onClose={() => setAvatarMenuOpen(false)} collapsed={!sidebarOpen} />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
@@ -1010,6 +1021,10 @@ export default function App() {
       </Dialog>
       {/* Task 14 系统级权限运行时确认框（监听 lf:permission-request 事件）。 */}
       <PermissionConsentDialog />
+      {/* 本地定时任务（local-scheduler）：常驻隐藏 Agent 执行器（监听 scheduler:trigger / cancel）。 */}
+      <SchedulerAgentRunner />
+      {/* 本地定时任务通知分发：监听 scheduler:notify → toast + 系统通知（尊重勿扰时段）。 */}
+      <SchedulerNotifier />
       <Toaster position="top-right" richColors closeButton />
     </AppContext.Provider>
   );

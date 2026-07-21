@@ -25,10 +25,12 @@ import {
   HistoryIcon,
   XIcon,
   FileEditIcon,
+  ClockIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { preloadView } from '@/lib/view-preload';
 import { isTeamManager } from '@/lib/permissions';
+import { tauriListen } from '@/lib/api';
 
 // 导航项：切换主区 view。插件工作台在主区展示运行/开发两个模式。
 type NavItem = { kind: 'view'; v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean };
@@ -38,6 +40,8 @@ const NAV: NavItem[] = [
   // 项 3：团队管理入口迁至左下角 AvatarMenu，不再占用侧栏导航位。
   { kind: 'view', v: 'run-plugins', label: '插件', icon: PackageIcon },
   { kind: 'view', v: 'draft-plugins', label: '草稿', icon: FileEditIcon },
+  // 本地定时任务（local-scheduler）：顶级导航 + 失败红点徽章。
+  { kind: 'view', v: 'schedules', label: '定时', icon: ClockIcon },
   { kind: 'view', v: 'review', label: '审核', icon: ShieldCheckIcon, platformAdminOnly: true },
 ];
 
@@ -85,6 +89,28 @@ export function Sidebar({
   const [dragging, setDragging] = useState(false);
   const widthRef = useRef(width);
   widthRef.current = width;
+
+  // 本地定时任务失败红点：监听 scheduler:run_finished；FAILED|TIMEOUT 时亮红点；
+  // 用户进入 schedules 页时清除（视作"已确认"）。
+  const [scheduleFailed, setScheduleFailed] = useState(false);
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      unlisten = await tauriListen<{
+        run: { status: string };
+      }>('scheduler:run_finished', (event) => {
+        const status = event.payload?.run?.status;
+        if (status === 'FAILED' || status === 'TIMEOUT') {
+          setScheduleFailed(true);
+        }
+      });
+    })();
+    return () => unlisten?.();
+  }, []);
+  // 进入 schedules 页清除红点。
+  useEffect(() => {
+    if (view === 'schedules') setScheduleFailed(false);
+  }, [view]);
 
   // 持久化最终宽度（拖拽结束时调用，避免每次 mousemove 写 localStorage）。
   const persist = useCallback((w: number) => {
@@ -166,6 +192,8 @@ export function Sidebar({
           const active = item.v === 'run-plugins'
             ? view === 'run-plugins' || view === 'develop-plugins'
             : activeView(item.v);
+          // 定时任务红点：仅在 schedules 项 + scheduleFailed=true 时显示。
+          const showDot = item.v === 'schedules' && scheduleFailed && !active;
           return (
             <Button
               key={item.v}
@@ -179,7 +207,7 @@ export function Sidebar({
               onMouseEnter={() => { preloadView(item.v); }}
               title={collapsed ? item.label : undefined}
               className={cn(
-                'h-9 shrink-0 gap-2.5 font-medium',
+                'relative h-9 shrink-0 gap-2.5 font-medium',
                 collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
                 active
                   ? 'bg-primary text-primary-foreground hover:bg-primary! hover:text-primary-foreground!'
@@ -188,6 +216,12 @@ export function Sidebar({
             >
               <Icon className="size-4 shrink-0" />
               {!collapsed && item.label}
+              {showDot && (
+                <span
+                  className="absolute right-2 top-2 size-2 rounded-full bg-red-500 ring-2 ring-card"
+                  aria-label="有任务执行失败"
+                />
+              )}
             </Button>
           );
         })}
