@@ -13,7 +13,7 @@
 // 替代的 SDK 代码：run.ts（buildPluginAgent/runAgentStreamed）+ creator-adapter.ts（runPluginCreatorAgent）
 // + model.ts（aisdk 适配层）+ tools.ts 的 tool() 工厂依赖。共减少 ~600 行 SDK 胶水。
 import { apiBase, getAuthToken } from '@/lib/api';
-import { withRetryFetch } from '@/lib/relay-provider';
+import { readRelayErrorDetail, withRetryFetch } from '@/lib/relay-provider';
 import { createThinkTagStreamParser } from './think-tags';
 import type {
   ChatMessage,
@@ -307,14 +307,12 @@ async function streamChatCompletion(opts: StreamOptions): Promise<StreamResult> 
     }
 
     if (!res.ok) {
-      // 读取 relay 错误体（{code,message}）。
-      let detail = `HTTP ${res.status}`;
-      let code = '';
-      try {
-        const err = await res.json();
-        detail = err.message || err.code || detail;
-        code = err.code || '';
-      } catch { /* 忽略 */ }
+      // 读取 relay 错误体。fetch 包了 withRetryFetch：它会先把 relay 原生 {code,message}
+      // 翻译成 OpenAI {error:{message}} 供 @ai-sdk/openai 解析。此前这里读顶层
+      // err.message（OpenAI 格式里不存在）→ detail 回落为 "HTTP 400"，真实根因被吞。
+      // readRelayErrorDetail 兼容翻译后（OpenAI）与原始（relay）两种格式，并透传上游根因。
+      const rawBody = await res.text().catch(() => '');
+      const { detail, code } = readRelayErrorDetail(res.status, rawBody);
 
       // 429 / 503 / 502(upstream_llm_error)：可重试，指数退避。
       const retryable = res.status === 429 || res.status === 503

@@ -57,6 +57,50 @@ export function rewriteRelayErrorBody(status: number, rawBody: string): { body: 
 }
 
 /**
+ * 从 relay 错误响应体提取可读 detail + code，兼容三种实际出现的格式：
+ *
+ * 1. **OpenAI 格式**（`withRetryFetch` 翻译后 / AI SDK 包装）：`{error:{message,type,code}}`
+ * 2. **relay 原生格式**（未经过翻译的直连响应）：`{code,message,details:{upstreamDetail}}`
+ * 3. **非 JSON**（反代 502 的 HTML / 空响应）：截断原文作 detail。
+ *
+ * 背景（修复「调用失败：HTTP 400」根因被吞）：loop.ts / withRetryFetch 两条路径对错误体
+ * 的格式假设不一致——withRetryFetch 把 relay 原生格式翻译成 OpenAI `{error:{message}}`，
+ * 但 loop.ts 此前读顶层 `err.message`（OpenAI 格式里不存在）→ detail 回落为 `"HTTP 400"`，
+ * 真实根因（如 "上游模型调用失败：tokenization failed: unexpected role developer"）丢失。
+ * 本 helper 统一两种格式的读取，调用方不再需要关心响应是否经过翻译。
+ *
+ * 返回 `{ detail, code }`：
+ * - detail 优先级：`error.message` → `message` → `code` → `HTTP {status}`（保证非空）。
+ * - code 优先级：`error.code` → `code` → `error.type`（供重试判定，如 `upstream_llm_error`）。
+ */
+export function readRelayErrorDetail(status: number, rawBody: string): { detail: string; code: string } {
+  const httpFallback = `HTTP ${status}`;
+  let parsed: {
+    code?: string; message?: string;
+    error?: { message?: string; type?: string; code?: string } | string;
+    details?: { upstreamDetail?: string | null };
+  } | null = null;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    // 非 JSON（反代 502 的 HTML / 空响应）→ 截断原文作 detail，不让上游回退到无意义 statusText。
+    const fallbackMsg = rawBody.slice(0, 200).trim() || httpFallback;
+    return { detail: fallbackMsg, code: `http_${status}` };
+  }
+  // relay 原生格式透传上游根因到 details.upstreamDetail（见 relay.service.ts extractUpstreamCause）。
+  // 优先拼接出完整原因（"上游模型调用失败：<根因>"），便于用户/开发者一眼定位。
+  const upstream = parsed?.details?.upstreamDetail;
+  const relayMessage = upstream && parsed?.message
+    ? `${parsed.message}：${upstream}`
+    : (parsed?.message ?? undefined);
+  const errObj = typeof parsed?.error === 'object' ? parsed.error : null;
+  const errStr = typeof parsed?.error === 'string' ? parsed.error : null;
+  const detail = errObj?.message ?? relayMessage ?? errStr ?? parsed?.code ?? httpFallback;
+  const code = errObj?.code ?? parsed?.code ?? errObj?.type ?? `http_${status}`;
+  return { detail, code };
+}
+
+/**
  * 带「连接级退避重试」+ relay 错误格式翻译的 fetch 包装。导出供单测验证重试语义。
  * - 仅在 fetch 抛 TypeError（连接失败/网络不可达）时重试；拿到任何 HTTP 响应（含 4xx/5xx）都不重试，
  *   因为流式响应已开始传输，重试会破坏 SSE 流。
