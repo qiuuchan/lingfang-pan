@@ -1,6 +1,6 @@
 // context-compress.spec.ts —— 验证 buildContextMessages 的压缩与原生 function calling 历史还原。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildContextMessages, emptyCompressState, turnHasPackage } from './context-compress';
+import { buildContextMessages, compressHistoryManually, emptyCompressState, turnHasPackage } from './context-compress';
 import { chatComplete } from '@/lib/relay-chat-stream';
 
 vi.mock('@/lib/relay-chat-stream', () => ({
@@ -200,5 +200,122 @@ describe('buildContextMessages', () => {
     expect(result.breakdown.compressInfo).toHaveProperty('remainingTokens');
     expect(result.breakdown.compressInfo).not.toHaveProperty('currentChars');
     expect(typeof result.breakdown.compressInfo.currentTokens).toBe('number');
+  });
+});
+
+describe('compressHistoryManually（手动压缩）', () => {
+  beforeEach(() => {
+    mockChatComplete.mockReset();
+  });
+
+  it('可压缩的早期轮进摘要，近窗口 + 包轮保留', async () => {
+    mockChatComplete.mockResolvedValue('摘要：做了天气插件');
+    const result = await compressHistoryManually({
+      turns: [
+        { role: 'user', content: '做一个天气插件' },
+        { role: 'assistant', content: '好的开始' },
+        { role: 'user', content: '加设置页' },
+        { role: 'assistant', content: '明白' },
+        { role: 'user', content: '```lingfang-plugin\n{"id":"demo"}\n```' },
+        { role: 'assistant', content: '已生成 demo' },
+        { role: 'user', content: '再优化一下' },
+        { role: 'assistant', content: '好的' },
+      ],
+      state: emptyCompressState(),
+      recentWindowTurns: 1, // 只保留最近 1 轮（2 条）
+      tier: 'fast',
+    });
+
+    expect(mockChatComplete).toHaveBeenCalledTimes(1);
+    expect(result.compressedCount).toBeGreaterThan(0);
+    expect(result.summary).toContain('天气插件');
+    // 包轮（下标 4）必须保留
+    expect(result.keptTurnIndices).toContain(4);
+    // 近窗口（下标 6、7）必须保留
+    expect(result.keptTurnIndices).toContain(6);
+    expect(result.keptTurnIndices).toContain(7);
+    // 早期可压缩轮（0、1）不保留
+    expect(result.keptTurnIndices).not.toContain(0);
+    expect(result.keptTurnIndices).not.toContain(1);
+    // 保留下标按原序
+    const sorted = [...result.keptTurnIndices].sort((a, b) => a - b);
+    expect(result.keptTurnIndices).toEqual(sorted);
+  });
+
+  it('对话很短（无可压缩轮）：不调摘要，全保留', async () => {
+    const result = await compressHistoryManually({
+      turns: [
+        { role: 'user', content: '你好' },
+        { role: 'assistant', content: '嗨' },
+      ],
+      state: emptyCompressState(),
+      recentWindowTurns: 4,
+      tier: 'fast',
+    });
+    expect(mockChatComplete).not.toHaveBeenCalled();
+    expect(result.compressedCount).toBe(0);
+    expect(result.keptTurnIndices).toEqual([0, 1]);
+  });
+
+  it('带工具调用的早期轮：工具结果也进摘要文本', async () => {
+    mockChatComplete.mockImplementation(async (messages) => {
+      // 验证摘要输入里包含了工具结果的渲染文本
+      const allContent = messages.map((m) => m.content).join('\n');
+      expect(allContent).toContain('WebSearch');
+      expect(allContent).toContain('Tauri 2.0');
+      return '摘要：搜索了 tauri';
+    });
+    await compressHistoryManually({
+      turns: [
+        { role: 'user', content: '搜索 tauri' },
+        {
+          role: 'assistant',
+          content: '',
+          parts: [
+            { type: 'tool', toolCallId: 'c1', name: 'WebSearch', args: { query: 'tauri' }, result: 'Tauri 2.0', status: 'ok' },
+          ],
+        },
+        { role: 'user', content: '基于搜索结果做插件' },
+        { role: 'assistant', content: '好的' },
+      ],
+      state: emptyCompressState(),
+      recentWindowTurns: 1,
+      tier: 'fast',
+    });
+    expect(mockChatComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('摘要失败：抛错（不静默丢轮）', async () => {
+    mockChatComplete.mockRejectedValue(new Error('网络错误'));
+    await expect(compressHistoryManually({
+      turns: [
+        { role: 'user', content: '需求1' },
+        { role: 'assistant', content: '回复1' },
+        { role: 'user', content: '需求2' },
+        { role: 'assistant', content: '回复2' },
+      ],
+      state: emptyCompressState(),
+      recentWindowTurns: 1,
+      tier: 'fast',
+    })).rejects.toThrow('网络错误');
+  });
+
+  it('增量合并：已有 summary 与新可压缩轮一起进摘要', async () => {
+    mockChatComplete.mockResolvedValue('合并摘要：含旧摘要 + 新轮');
+    const result = await compressHistoryManually({
+      turns: [
+        { role: 'user', content: '早期需求' },
+        { role: 'assistant', content: '早期回复' },
+        { role: 'user', content: '近期' },
+        { role: 'assistant', content: '近期回复' },
+      ],
+      state: { lastSummarizedIndex: 0, summary: '已有摘要：之前做了计算器' },
+      recentWindowTurns: 1,
+      tier: 'fast',
+    });
+    expect(result.summary).toContain('合并摘要');
+    // 验证摘要输入包含了已有 summary
+    const inputContent = mockChatComplete.mock.calls[0]?.[0]?.map((m: { content: string }) => m.content).join('\n') ?? '';
+    expect(inputContent).toContain('已有摘要：之前做了计算器');
   });
 });

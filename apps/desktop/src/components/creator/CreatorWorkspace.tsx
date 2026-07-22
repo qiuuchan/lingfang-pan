@@ -40,7 +40,7 @@ import { CreatorMessageList } from '@/components/creator/CreatorMessageList';
 import { CreatorSkillsDialog } from '@/components/creator/CreatorSkillsDialog';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
-import { buildContextMessages, emptyCompressState } from '@/lib/plugin-creator/context-compress';
+import { buildContextMessages, compressHistoryManually, emptyCompressState } from '@/lib/plugin-creator/context-compress';
 import {
   cleanTurnParts,
   detectDuplicateOutput,
@@ -681,6 +681,79 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       setContextInspectorOpen(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '上下文预览失败');
+    }
+  }
+
+  /**
+   * 手动压缩上下文：用户在 ContextInspector 面板点「立即压缩」时调用。
+   * 把早期可压缩轮摘要成一条 assistant 轮，真实删除原早期轮（持久化进会话），
+   * 保留最近 N 轮 + 含插件包的轮原文。压缩后立即刷新占用估算，让用户看到数字下降。
+   * busy 时禁用（此时无 generating 轮，无需处理进行中的轮）。
+   */
+  async function handleManualCompress() {
+    if (busy) return;
+    // 构建参与压缩的轮：user + status==='done' 的 assistant（排除 generating/failed/cancelled）。
+    // 保留与原 turns 的下标映射，以便压缩后按 keptTurnIndices 重建。
+    const compressible = turns
+      .map((t, idx) => ({ t, idx }))
+      .filter(({ t }) => t.role === 'user' || (t.role === 'assistant' && t.status === 'done'));
+    if (compressible.length === 0) {
+      toast.info('暂无历史可压缩');
+      return;
+    }
+
+    setCompressing(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const result = await compressHistoryManually({
+        turns: compressible.map(({ t }) => ({
+          role: t.role,
+          content: t.modelContent ?? t.content,
+          parts: t.parts as unknown as HistoryPart[] | undefined,
+        })),
+        state: compressRef.current,
+        tier,
+        signal: controller.signal,
+      });
+
+      if (result.compressedCount === 0) {
+        toast.info('当前历史较短，无需压缩');
+        return;
+      }
+
+      // 重建 turns：把可压缩区里被摘要的轮删掉，在最前面插一条摘要轮。
+      // 保留：keptTurnIndices 指向的轮（近窗口 + 包轮）+ 不参与压缩的轮（generating/failed 等）。
+      const summaryText = `[已压缩 ${result.compressedCount} 轮历史]\n${result.summary}`;
+      const summaryTurn: Turn = {
+        role: 'assistant',
+        content: summaryText,
+        status: 'done',
+        parts: [{ type: 'text', content: summaryText } as TextPart],
+      };
+      const keptOriginalIdx = new Set(result.keptTurnIndices.map((i) => compressible[i]?.idx).filter((x): x is number => x != null));
+      // 被摘要的轮（在 compressible 里但不在 kept 里）的原 idx，这些要删除。
+      const removedOriginalIdx = new Set(
+        compressible.filter(({ idx }) => !keptOriginalIdx.has(idx)).map(({ idx }) => idx),
+      );
+      // 保留原序：摘要轮置顶，其余未删除的轮按原序跟在后面。
+      const nextTurns: Turn[] = [summaryTurn, ...turns.filter((_, idx) => !removedOriginalIdx.has(idx))];
+
+      setTurns(nextTurns);
+      compressRef.current = result.state;
+      setCompressedHint(result.compressedCount);
+      // 刷新 breakdown（反映压缩后的占用）。
+      setContextBreakdown(buildContextPreviewBreakdown({
+        historyTurns: nextTurns.map((t) => ({ role: t.role, content: t.modelContent ?? t.content })),
+        currentInput: input,
+        systemPrompt: buildSystemPrompt(),
+      }));
+      toast.success(`已压缩 ${result.compressedCount} 轮历史，上下文占用已降低`);
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') return;
+      toast.error(`压缩失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setCompressing(false);
     }
   }
 
@@ -1395,7 +1468,16 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     />
 
     {/* 上下文查看面板 */}
-    <ContextInspector breakdown={contextBreakdown} open={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} modelTokens={inspectorTokens} contextWindow={contextWindow} />
+    <ContextInspector
+      breakdown={contextBreakdown}
+      open={contextInspectorOpen}
+      onClose={() => setContextInspectorOpen(false)}
+      modelTokens={inspectorTokens}
+      contextWindow={contextWindow}
+      canCompress={!busy && turns.length > 0}
+      compressing={compressing}
+      onCompress={() => { void handleManualCompress(); }}
+    />
     </>
   );
 }
