@@ -74,17 +74,21 @@ impl PendingRuns {
     }
 }
 
-/// 启动 tick + executor 两个 tokio 任务。应在 setup 阶段调用一次。
+/// 启动 tick + executor 两个异步任务。应在 setup 阶段调用一次。
+///
+/// 关键：必须用 `tauri::async_runtime::spawn` 而非裸 `tokio::spawn`。
+/// Tauri 2 的 setup 闭包是同步的，且自有独立 runtime（async_runtime）；
+/// 裸 tokio::spawn 在 setup 同步上下文里会 panic「there is no reactor running」。
 pub(crate) fn spawn(app: AppHandle) {
     {
         let app_clone = app.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             tick_loop(app_clone).await;
         });
     }
     {
         let app_clone = app.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             executor_loop(app_clone).await;
         });
     }

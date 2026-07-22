@@ -18,6 +18,10 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:webview:allow-create-webview-window",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission"
   ]
 }

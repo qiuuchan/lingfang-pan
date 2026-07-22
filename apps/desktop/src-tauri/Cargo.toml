@@ -1,6 +1,6 @@
 [package]
 name = "lingfang-desktop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [build-dependencies]
@@ -50,8 +50,8 @@ croner = "2"
 # 本地定时任务：系统通知（NOTIFY payload + 任务运行结果推送）。
 tauri-plugin-notification = "2"
 # 本地定时任务：60s tick + 串行执行（oneshot 等待 + 硬超时）。
-# features= ["time"] 提供 interval / sleep / timeout；与 tauri::async_runtime 共用同一 runtime。
-tokio = { version = "1", features = ["time", "sync", "rt"] }
+# 只启用 time/sync 工具；runtime 由 tauri::async_runtime 提供（避免双 runtime）。
+tokio = { version = "1", features = ["time", "sync"] }
 
 [dev-dependencies]
 # scheduler 单测临时目录。
