@@ -288,6 +288,66 @@ describe('RelayService.executeRelay 计费时机（R3：未成功对话不净扣
   });
 });
 
+describe('RelayService 输入预检（超 contextWindow 返回 413 input_too_long，不触达上游/不计费）', () => {
+  beforeEach(() => {
+    forwardOpenAiChat.mockReset();
+  });
+
+  it('输入 token 超 window：返回 413 input_too_long，不预扣灵石/不建日志/不转发', async () => {
+    const { svc, prisma, credits, pricing, router } = build(200);
+    // 候选窗口设为很小（100 token），输入远超。
+    pricing.lookupMinContextWindow.mockResolvedValueOnce(100);
+    const bigContent = 'x'.repeat(10_000); // 约 2500 token
+    await expect(svc.chatCompletions(makeReq(), makeRes(false), {
+      model: 'fast',
+      messages: [{ role: 'user', content: bigContent }],
+      stream: false,
+    })).rejects.toMatchObject({
+      status: 413,
+      code: 'input_too_long',
+      details: { contextWindow: 100 },
+    });
+    // 关键：预检在 executeRelay 之前，不消耗任何计费/日志/渠道资源。
+    expect(prisma.llmCallLog.create).not.toHaveBeenCalled();
+    expect(credits.reserve).not.toHaveBeenCalled();
+    expect(router.selectCandidates).not.toHaveBeenCalled();
+    expect(forwardOpenAiChat).not.toHaveBeenCalled();
+  });
+
+  it('输入未超 window：正常进入转发流程（不拦截）', async () => {
+    const { svc, pricing, router } = build(0);
+    pricing.lookupMinContextWindow.mockResolvedValueOnce(1_000_000); // 大窗口
+    router.selectCandidates.mockResolvedValueOnce([]); // 无渠道，走到正常失败路径
+    await expect(svc.chatCompletions(makeReq(), makeRes(false), { ...chatBody }))
+      .rejects.toMatchObject({ code: 'no_channel_available' });
+    // 走到了选渠道步骤，说明预检放行。
+    expect(router.selectCandidates).toHaveBeenCalled();
+  });
+
+  it('window 未配置（null）：跳过预检，不阻断正常调用', async () => {
+    const { svc, pricing, router } = build(0);
+    pricing.lookupMinContextWindow.mockResolvedValueOnce(null);
+    router.selectCandidates.mockResolvedValueOnce([]);
+    await expect(svc.chatCompletions(makeReq(), makeRes(false), { ...chatBody }))
+      .rejects.toMatchObject({ code: 'no_channel_available' });
+    expect(router.selectCandidates).toHaveBeenCalled();
+  });
+
+  it('Anthropic /messages 协议：system + messages 合计超 window 同样返回 413', async () => {
+    const { svc, credits, pricing, router } = build(200);
+    pricing.lookupMinContextWindow.mockResolvedValueOnce(100);
+    const bigSystem = 's'.repeat(10_000);
+    await expect(svc.messages(makeReq(), makeRes(false), {
+      model: 'fast',
+      system: bigSystem,
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: false,
+    })).rejects.toMatchObject({ status: 413, code: 'input_too_long' });
+    expect(credits.reserve).not.toHaveBeenCalled();
+    expect(router.selectCandidates).not.toHaveBeenCalled();
+  });
+});
+
 describe('injectMultipartModel', () => {
   /** 构造一个最小 multipart（无 model 字段），形状与桥 route_image_edit 输出一致。 */
   function buildBody(boundary: string, fields: Array<[name: string, value: string]>, file?: Buffer) {

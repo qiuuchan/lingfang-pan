@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, setAuthToken } from '@/lib/api';
 import { runAgentLoop } from './loop';
-import type { ToolDefinition, LoopCallbacks } from './types';
+import type { ToolDefinition, LoopCallbacks, ChatMessage } from './types';
 
 // === SSE 流构造辅助 ===
 
@@ -344,5 +344,110 @@ describe('runAgentLoop', () => {
     const truncOutput = cbs.outputs.find((o) => o.name === 'Write' && !o.ok);
     expect(truncOutput).toBeTruthy();
     expect(String(truncOutput?.result)).toMatch(/截断|拆成更小|分块/);
+  });
+
+  it('contextBudget 护栏：超预算时丢弃最早历史并注入压缩提示（不破坏 tool 配对）', async () => {
+    // 构造大量历史消息，使总 token 远超 budget。
+    // 含 assistant(tool_calls) + role:tool 配对，验证压缩后不留下孤立 tool result。
+    const bigText = 'x'.repeat(2000); // 每条约 500 token
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: `早期问题 ${bigText}` },
+      { role: 'assistant', content: `早期回复 ${bigText}` },
+      { role: 'user', content: `早期问题2 ${bigText}` },
+      { role: 'assistant', content: `早期回复2 ${bigText}` },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_recent', type: 'function', function: { name: 'WebSearch', arguments: '{"query":"x"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_recent', content: '近期工具结果' },
+      { role: 'user', content: '近期问题' },
+    ];
+
+    // 捕获发给 fetch 的 body.messages，断言压缩后的形态。
+    let capturedMessages: Array<{ role: string; content?: string | null }> = [];
+    globalThis.fetch = vi.fn().mockImplementation(((_url: string, init: RequestInit) => {
+      try {
+        const body = JSON.parse(String(init.body)) as { messages: Array<{ role: string; content?: string | null }> };
+        capturedMessages = body.messages;
+      } catch { /* 忽略 */ }
+      return Promise.resolve(new Response(
+        new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(sseBody([contentDelta('好的')])));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      ));
+    }) as typeof globalThis.fetch);
+
+    const cbs = makeCallbacks();
+    const result = await runAgentLoop({
+      messages,
+      tools: [],
+      tier: 'fast',
+      contextBudget: 1000, // 远小于实际 token，强制压缩
+      signal: new AbortController().signal,
+      callbacks: cbs,
+    });
+    expect(result.status).toBe('done');
+
+    // 断言 1：发出去的消息数远少于原始（压缩生效）。
+    expect(capturedMessages.length).toBeLessThan(messages.length);
+    // 断言 2：保留了首条 system prompt。
+    expect(capturedMessages[0]).toMatchObject({ role: 'system', content: 'sys' });
+    // 断言 3：注入了压缩提示 system 消息。
+    expect(capturedMessages.some((m) => m.role === 'system' && typeof m.content === 'string' && m.content.includes('运行中历史压缩'))).toBe(true);
+    // 断言 4：保留了近期的 tool_calls + tool result 配对（不是孤立的 tool result）。
+    const toolResultIdx = capturedMessages.findIndex((m) => m.role === 'tool');
+    if (toolResultIdx >= 0) {
+      // tool result 前一条必须是带 tool_calls 的 assistant（OpenAI 配对要求）。
+      const prev = capturedMessages[toolResultIdx - 1];
+      expect(prev).toBeTruthy();
+      expect(prev.role).toBe('assistant');
+    }
+    // 断言 5：近期的 user 消息保留。
+    expect(capturedMessages.some((m) => m.role === 'user' && m.content === '近期问题')).toBe(true);
+  });
+
+  it('contextBudget 未超：不压缩，原文发出', async () => {
+    let capturedMessages: Array<{ role: string; content?: string | null }> = [];
+    globalThis.fetch = vi.fn().mockImplementation(((_url: string, init: RequestInit) => {
+      try {
+        const body = JSON.parse(String(init.body)) as { messages: Array<{ role: string; content?: string | null }> };
+        capturedMessages = body.messages;
+      } catch { /* 忽略 */ }
+      return Promise.resolve(new Response(
+        new ReadableStream({
+          start(controller) {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(sseBody([contentDelta('好的')])));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      ));
+    }) as typeof globalThis.fetch);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: '你好' },
+      { role: 'assistant', content: '嗨' },
+    ];
+    const cbs = makeCallbacks();
+    await runAgentLoop({
+      messages,
+      tools: [],
+      tier: 'fast',
+      contextBudget: 100_000, // 远大于实际，不触发压缩
+      signal: new AbortController().signal,
+      callbacks: cbs,
+    });
+    // 原文发出，无压缩提示。
+    expect(capturedMessages.length).toBe(3);
+    expect(capturedMessages.some((m) => m.role === 'system' && typeof m.content === 'string' && m.content.includes('运行中历史压缩'))).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+// context-compress.spec.ts —— 验证 buildContextMessages 的压缩与原生 function calling 历史还原。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildContextMessages, emptyCompressState, turnHasPackage } from './context-compress';
 import { chatComplete } from '@/lib/relay-chat-stream';
@@ -20,7 +21,29 @@ describe('buildContextMessages', () => {
     mockChatComplete.mockReset();
   });
 
-  it('summarizes older compressible turns and keeps package-bearing turns verbatim', async () => {
+  it('未超阈值：保留完整原文历史（原生 function calling），不调摘要', async () => {
+    const result = await buildContextMessages({
+      turns: [
+        { role: 'user', content: '请做一个天气插件' },
+        { role: 'assistant', content: '先确认城市与温度单位' },
+      ],
+      currentInput: '继续优化',
+      systemPrompt: 'system prompt',
+      state: emptyCompressState(),
+      tier: 'fast',
+    });
+
+    expect(mockChatComplete).not.toHaveBeenCalled();
+    expect(result.compressedCount).toBe(0);
+    // messages = [system, user, assistant, user(当前输入)]
+    expect(result.messages[0]).toEqual({ role: 'system', content: 'system prompt' });
+    expect(result.messages[result.messages.length - 1]).toEqual({ role: 'user', content: '继续优化' });
+    // 早期 user/assistant 原文保留
+    expect(result.messages.some((m) => m.role === 'user' && m.content === '请做一个天气插件')).toBe(true);
+    expect(result.messages.some((m) => m.role === 'assistant' && m.content === '先确认城市与温度单位')).toBe(true);
+  });
+
+  it('超阈值：摘要较早轮 + 保留含插件包的轮原文 + 近期轮原文', async () => {
     mockChatComplete.mockResolvedValue('核心需求：做一个天气插件\n已生成 demo 插件包');
 
     const result = await buildContextMessages({
@@ -35,7 +58,7 @@ describe('buildContextMessages', () => {
       currentInput: '继续优化',
       systemPrompt: 'system prompt',
       state: emptyCompressState(),
-      threshold: 1,
+      threshold: 1, // 极低阈值强制触发压缩
       recentWindowTurns: 1,
       tier: 'fast',
     });
@@ -43,10 +66,58 @@ describe('buildContextMessages', () => {
     expect(mockChatComplete).toHaveBeenCalledTimes(1);
     expect(result.compressedCount).toBeGreaterThan(0);
     expect(result.breakdown.summary).toContain('核心需求');
-    expect(result.breakdown.keptTurns.some((turn) => turn.content.includes('```lingfang-plugin'))).toBe(true);
-    expect(result.breakdown.currentInput).toBe('继续优化');
-    expect(result.messages[0]).toEqual({ role: 'system', content: 'system prompt' });
+    // 含插件包的轮原文保留（不进摘要）
+    expect(result.messages.some((m) => typeof m.content === 'string' && m.content.includes('```lingfang-plugin'))).toBe(true);
+    // 近期轮原文保留
+    expect(result.messages.some((m) => m.content === '再补一个设置页')).toBe(true);
+    // 摘要作为 system 消息注入
+    expect(result.messages.some((m) => m.role === 'system' && m.content.includes('[历史上下文摘要]'))).toBe(true);
+    // 当前输入在末尾
     expect(result.messages[result.messages.length - 1]).toEqual({ role: 'user', content: '继续优化' });
+  });
+
+  it('超阈值且 assistant 带工具调用：近期轮保留原生 tool_calls + role:tool 配对', async () => {
+    // 关键回归：压缩后近期保留区必须保留原生 function calling 结构（tool_calls + role:tool 按 id 配对），
+    // 否则 OpenAI 会因 tool result 找不到对应 tool_calls 而 400。
+    mockChatComplete.mockResolvedValue('摘要：用户要搜索');
+    const result = await buildContextMessages({
+      turns: [
+        { role: 'user', content: '搜索 tauri' },
+        {
+          role: 'assistant',
+          content: '',
+          parts: [
+            { type: 'tool', toolCallId: 'call_1', name: 'WebSearch', args: { query: 'tauri' }, result: 'Tauri 2.0', status: 'ok' },
+            { type: 'text', content: '找到了 Tauri' },
+          ],
+        },
+        { role: 'user', content: '再搜索 rust' },
+        {
+          role: 'assistant',
+          content: '',
+          parts: [
+            { type: 'tool', toolCallId: 'call_2', name: 'WebSearch', args: { query: 'rust' }, result: 'Rust lang', status: 'ok' },
+          ],
+        },
+      ],
+      currentInput: '继续',
+      systemPrompt: 'sys',
+      state: emptyCompressState(),
+      threshold: 1,
+      recentWindowTurns: 2, // 保留全部 2 轮（含工具），只摘要无
+      tier: 'fast',
+    });
+
+    // 应有 assistant 带 tool_calls 的消息
+    const assistantWithTools = result.messages.find(
+      (m) => m.role === 'assistant' && Array.isArray((m as { tool_calls?: unknown[] }).tool_calls),
+    );
+    expect(assistantWithTools).toBeTruthy();
+    // 应有 role:'tool' 消息，且 tool_call_id 与 tool_calls 配对
+    const toolMsgs = result.messages.filter((m) => m.role === 'tool') as Array<{ role: 'tool'; tool_call_id: string; content: string }>;
+    expect(toolMsgs.length).toBeGreaterThan(0);
+    expect(toolMsgs.some((m) => m.tool_call_id === 'call_1')).toBe(true);
+    expect(toolMsgs.some((m) => m.tool_call_id === 'call_2')).toBe(true);
   });
 
   it('摘要失败时不推进 lastSummarizedIndex（保留这些轮下次重试，不静默丢弃）', async () => {
@@ -103,16 +174,31 @@ describe('buildContextMessages', () => {
     expect(r2.state.summary).toContain('计算器');
   });
 
-  it('token 估算用 /1.5（中文偏向，防低估）', async () => {
-    // 600 字符的 systemPrompt → /1.5 = 400 token（旧 /4 = 150，严重低估中文）。
+  it('token 估算用 CJK/拉丁加权（不再用单一 /1.5）', async () => {
+    // systemPrompt 含中文与英文混合，估算应反映加权（而非纯 chars/1.5）。
     const result = await buildContextMessages({
       turns: [{ role: 'user', content: '你好' }],
       currentInput: '继续',
-      systemPrompt: 's'.repeat(600),
+      systemPrompt: 's'.repeat(600), // 纯英文 600 字符 → /4 = 150 token
       state: emptyCompressState(),
       tier: 'fast',
     });
-    expect(result.breakdown.estimatedTokens.system).toBe(400);
+    // 纯英文 600 字符：旧 /1.5 = 400 token，新 /4 = 150 token。
+    expect(result.breakdown.estimatedTokens.system).toBe(150);
+  });
+
+  it('compressInfo 字段为 token 维度（currentTokens/remainingTokens）', async () => {
+    const result = await buildContextMessages({
+      turns: [{ role: 'user', content: '你好世界' }],
+      currentInput: '继续',
+      systemPrompt: 'sys',
+      state: emptyCompressState(),
+      threshold: 100,
+      tier: 'fast',
+    });
+    expect(result.breakdown.compressInfo).toHaveProperty('currentTokens');
+    expect(result.breakdown.compressInfo).toHaveProperty('remainingTokens');
+    expect(result.breakdown.compressInfo).not.toHaveProperty('currentChars');
+    expect(typeof result.breakdown.compressInfo.currentTokens).toBe('number');
   });
 });
-
