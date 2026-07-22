@@ -15,6 +15,7 @@
 import { apiBase, getAuthToken } from '@/lib/api';
 import { readRelayErrorDetail, withRetryFetch } from '@/lib/relay-provider';
 import { createThinkTagStreamParser } from './think-tags';
+import { estimateMessagesTokens } from './token-estimate';
 import type {
   ChatMessage,
   ChatTool,
@@ -40,6 +41,10 @@ export interface AgentLoopOptions {
   signal: AbortSignal;
   /** 流式事件回调（写回 UI）。 */
   callbacks: LoopCallbacks;
+  /** 输入 token 预算（contextWindow - 输出预留）。每轮调模型前检查 working 是否超预算，
+   *  超则就地压缩（丢最早历史，保留首条 system + 末尾含工具配对的近期消息）。
+   *  不传则不做运行时护栏（依赖调用方/后端兜底）。 */
+  contextBudget?: number;
 }
 
 /**
@@ -52,7 +57,7 @@ export interface AgentLoopOptions {
  *  - max_turns：达软上限（给友好提示，非硬错误）
  */
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> {
-  const { messages, tools, tier, signal, callbacks } = opts;
+  const { messages, tools, tier, signal, callbacks, contextBudget } = opts;
 
   // 把 ToolDefinition 转成 OpenAI tools 参数格式。
   const chatTools: ChatTool[] = tools.map((t) => ({
@@ -64,12 +69,75 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
   // 工作 messages 副本：循环中追加 assistant(tool_calls) + tool 结果。
   const working: ChatMessage[] = [...messages];
 
+  /**
+   * 运行时输入护栏：working 超过 contextBudget 时就地压缩。
+   * 策略：保留首条 system + 末尾消息（从尾部往前累加到预算内），中间最早的历史被丢弃，
+   *      插一条「[运行中历史压缩] 已省略 N 条早期消息」system 消息提示模型。
+   * 安全约束（不破坏 function calling 配对）：
+   *  - 保留区的第一条不能是 role:'tool'（否则无对应 tool_calls 配对 → 上游 400）。
+   *    压缩后若开头是孤立的 tool result，继续向前丢弃直到遇到非 tool 消息。
+   *  - 不拆 assistant(tool_calls) + 紧随的 role:tool 组（从尾部累加时天然成组保留）。
+   * 这是软护栏：若单条消息就超预算（极端情况），仍照发（让后端 relay 兜底返回友好错误）。
+   */
+  function enforceContextBudget(): void {
+    if (!contextBudget || contextBudget <= 0) return;
+    const used = estimateMessagesTokens(working);
+    if (used <= contextBudget) return;
+
+    const total = working.length;
+    // 从尾部累加消息，直到累加 token 达到预算（留余量给 system 注入）。
+    const RESERVE_FOR_NOTICE = 50; // 注入提示消息的预留 token
+    const target = contextBudget - RESERVE_FOR_NOTICE;
+    let acc = 0;
+    let keepFrom = total; // 保留区起点（含）
+    for (let i = total - 1; i >= 0; i--) {
+      const t = estimateMessagesTokens([working[i]]);
+      if (acc + t > target && i < total - 1) {
+        keepFrom = i + 1;
+        break;
+      }
+      acc += t;
+      keepFrom = i;
+    }
+    // 保留区起点不能是孤立的 role:'tool'（无前置 assistant(tool_calls)）——向前跳过。
+    while (
+      keepFrom < total &&
+      working[keepFrom].role === 'tool' &&
+      // keepFrom 之前没有 assistant(tool_calls) 与之配对（被压缩掉了）
+      !(keepFrom > 0 && working[keepFrom - 1].role === 'assistant' && 'tool_calls' in working[keepFrom - 1])
+    ) {
+      keepFrom++;
+    }
+
+    const droppedHead = keepFrom; // 0..keepFrom-1 被丢弃
+    if (droppedHead <= 1) return; // 没东西可压（或只剩首条）—— 照发，交后端兜底
+
+    // 保留首条 system（通常是主 system prompt，不能丢）+ 注入提示 + 保留区。
+    const head = working[0];
+    const hasHeadSystem = head && head.role === 'system';
+    const notice: ChatMessage = {
+      role: 'system',
+      content: `[运行中历史压缩] 已省略 ${droppedHead - (hasHeadSystem ? 1 : 0)} 条较早的对话/工具消息以适应上下文上限。近期工作完整保留。`,
+    };
+    const kept = working.slice(keepFrom);
+    working.length = 0;
+    if (hasHeadSystem) working.push(head, notice, ...kept);
+    else working.push(notice, ...kept);
+
+    console.warn(
+      `[agent] context budget guardrail triggered: ${used} → ~${estimateMessagesTokens(working)} tokens (dropped ${droppedHead} early messages)`,
+    );
+  }
+
   // 增量拼接中的 tool_calls（带 _index 用于 OpenAI 分片合并，输出时剥离）。
   type PendingCall = FunctionToolCall & { _index: number };
   let toolCallCount = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (signal.aborted) return { status: 'aborted', toolCallCount };
+
+    // 输入护栏：每轮调模型前检查 working 是否超预算，超则就地压缩（保工具配对完整）。
+    enforceContextBudget();
 
     // 每个 model turn 用独立的 thinkParser（避免上轮 think 状态泄漏到下轮正文）。
     const thinkParser = createThinkTagStreamParser({

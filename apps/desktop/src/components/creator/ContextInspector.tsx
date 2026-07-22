@@ -18,7 +18,7 @@ interface ContextBreakdown {
   keptTurns: Array<{ role: string; content: string }>;
   currentInput: string;
   estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
-  compressInfo: { threshold: number; currentChars: number; remainingChars: number; pct: number };
+  compressInfo: { threshold: number; currentTokens: number; remainingTokens: number; pct: number };
 }
 
 export function ContextInspector({
@@ -111,8 +111,8 @@ export function ContextInspector({
                     compressStatus === 'critical' && 'text-destructive',
                     compressStatus === 'warning' && 'text-amber-700 dark:text-amber-400',
                   )}>
-                    {ci.remainingChars > 0
-                      ? `还需 ${ci.remainingChars.toLocaleString()} 字符`
+                    {ci.remainingTokens > 0
+                      ? `还需 ${ci.remainingTokens.toLocaleString()} tokens 压缩`
                       : '已达阈值，下次将压缩'}
                   </span>
                 </div>

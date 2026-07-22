@@ -28,6 +28,7 @@ import {
   extractClientIp,
   type ForwardResult,
 } from './forwarders';
+import { estimateMessagesTokens } from './token-estimate';
 
 type Tier = 'FAST' | 'PREMIUM';
 type Kind = 'CHAT' | 'IMAGE';
@@ -158,6 +159,25 @@ export class RelayService {
     };
   }
 
+  /**
+   * 输入预检：估算 messages 的 token，超过该 tier 候选模型的最小 contextWindow 则抛 413。
+   * 在 executeRelay（预扣灵石/选渠道/转发）之前调用——超限时不消耗任何额度、不触达上游。
+   * contextWindow 未知（后端未配置）时跳过预检，交前端护栏 + 上游硬限兜底（不阻断正常调用）。
+   */
+  private async assertInputWithinWindow(tier: Tier, messages: { role: string; content: unknown }[]): Promise<void> {
+    const contextWindow = await this.pricing.lookupMinContextWindow({ tier });
+    if (!contextWindow || contextWindow <= 0) return; // 未配置 → 跳过（不阻断）
+    const estimated = estimateMessagesTokens(messages as never);
+    if (estimated > contextWindow) {
+      throw new AppError(
+        413,
+        'input_too_long',
+        `本次对话内容过长，已超过模型上下文上限（约 ${estimated.toLocaleString()} / ${contextWindow.toLocaleString()} token）。请新建对话或精简后重试。`,
+        { estimatedTokens: estimated, contextWindow },
+      );
+    }
+  }
+
   /** POST /api/relay/v1/chat/completions（OpenAI 协议）。 */
   async chatCompletions(req: Request, res: Response, body: Record<string, unknown>) {
     const auth = this.requireAuth(req);
@@ -176,6 +196,10 @@ export class RelayService {
     const injectedMessages = guardRule?.trim()
       ? (guardRule ? this.injectGuard(messages, guardRule) : messages)
       : messages;
+
+    // 输入预检：估算注入后 messages 的 token，超上游窗口上限则直接返回友好的 413，
+    // 不透传给上游（避免无意义的 400 + 难懂报文 + 漏判计费）。
+    await this.assertInputWithinWindow(tier, injectedMessages);
 
     return this.executeRelay(req, res, {
       auth,
@@ -205,6 +229,13 @@ export class RelayService {
     const systemField = guardRule?.trim()
       ? [body.system as string | undefined, guardRule].filter((s) => s && String(s).trim()).join('\n\n')
       : (body.system as string | undefined);
+
+    // 输入预检：把 system + messages 合并估算，超窗口上限返回友好 413（同 chatCompletions）。
+    const anthropicMessages = (body.messages as { role: string; content: string }[]) ?? [];
+    const messagesForCheck = systemField
+      ? [{ role: 'system', content: systemField }, ...anthropicMessages]
+      : anthropicMessages;
+    await this.assertInputWithinWindow(tier, messagesForCheck);
 
     return this.executeRelay(req, res, {
       auth,

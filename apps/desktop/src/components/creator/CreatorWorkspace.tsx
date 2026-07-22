@@ -17,7 +17,8 @@ import { getPluginsRoot, openPluginDir, openPluginsRoot } from '@/lib/plugin-sta
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { runAgentLoop } from '@/lib/agent/loop';
 import { createAgentTools } from '@/lib/agent/tools';
-import { turnsToMessages } from '@/lib/agent/history';
+import type { HistoryPart } from '@/lib/agent/history';
+import { estimateTokens, DEFAULT_OUTPUT_RESERVE } from '@/lib/agent/token-estimate';
 import type { ChatMessage, LoopCallbacks } from '@/lib/agent/types';
 import { usePluginCreatorStore } from '@/lib/agent/session/store';
 import type { AskQuestionArgs, AskQuestionResult, TodoItem } from '@/lib/agent/tools';
@@ -67,7 +68,7 @@ type ContextBreakdown = {
   keptTurns: Array<{ role: string; content: string }>;
   currentInput: string;
   estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
-  compressInfo: { threshold: number; currentChars: number; remainingChars: number; pct: number };
+  compressInfo: { threshold: number; currentTokens: number; remainingTokens: number; pct: number };
 };
 
 interface SpeechRecognitionLike {
@@ -529,18 +530,19 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   }, [tier]);
 
   // Composer 始终使用实时对话估算，避免打开过一次 ContextInspector 后沿用旧 breakdown。
-  const usedTokens = Math.round((
-    buildSystemPrompt().length
-    + turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content).length, 0)
-    + input.length
-    + selectedFiles.reduce((sum, item) => sum + item.file.size, 0)
-  ) / 1.5);
+  // 用 token-estimate 的 CJK/拉丁加权估算（替代旧的 chars/1.5）。
+  // 附件文件用 file.size（字节数）按拉丁系数估——附件多为代码/文本（拉丁为主），
+  // 字节数 ≈ 字符数，按 /4 估偏保守（宁可高估早压缩，不要低估撞上游硬限）。
+  const usedTokens = estimateTokens(buildSystemPrompt())
+    + estimateTokens(turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content), ''))
+    + estimateTokens(input)
+    + selectedFiles.reduce((sum, item) => sum + Math.ceil(item.file.size / 4), 0);
   const inspectorTokens = contextBreakdown?.estimatedTokens.total ?? usedTokens;
   const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
   const compressInfo = contextBreakdown?.compressInfo;
   const compressHint = compressInfo
-    ? (compressInfo.remainingChars > 0
-      ? `还差 ${compressInfo.remainingChars.toLocaleString()} 字压缩`
+    ? (compressInfo.remainingTokens > 0
+      ? `还差 ${compressInfo.remainingTokens.toLocaleString()} tokens 压缩`
       : '下次将压缩')
     : undefined;
 
@@ -549,29 +551,33 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     currentInput: string;
     systemPrompt: string;
   }): ContextBreakdown {
-    // betav2 阶段5：阈值与 buildContextMessages 同源（contextWindow 推算），不再硬编码 5000。
+    // 阈值与 buildContextMessages 同源（contextWindow × 0.7，token 维度）。
     const threshold = contextWindow
-      ? Math.floor(contextWindow * 0.7 * 1.5)
-      : 10_000;
+      ? Math.floor(contextWindow * 0.7)
+      : 8_000;
     const summary = compressRef.current.summary;
-    const historyChars = args.historyTurns.reduce((sum, turn) => sum + turn.content.length, 0);
+    const historyText = args.historyTurns.reduce((sum, turn) => sum + turn.content, '');
+    const systemTok = estimateTokens(args.systemPrompt);
+    const summaryTok = estimateTokens(summary);
+    const historyTok = estimateTokens(historyText);
+    const inputTok = estimateTokens(args.currentInput);
     return {
       systemPrompt: args.systemPrompt,
       summary,
       keptTurns: args.historyTurns,
       currentInput: args.currentInput,
       estimatedTokens: {
-        system: Math.ceil(args.systemPrompt.length / 1.5),
-        summary: Math.ceil(summary.length / 1.5),
-        history: Math.ceil(historyChars / 1.5),
-        input: Math.ceil(args.currentInput.length / 1.5),
-        total: Math.ceil((args.systemPrompt.length + summary.length + historyChars + args.currentInput.length) / 1.5),
+        system: systemTok,
+        summary: summaryTok,
+        history: historyTok,
+        input: inputTok,
+        total: systemTok + summaryTok + historyTok + inputTok,
       },
       compressInfo: {
         threshold,
-        currentChars: historyChars,
-        remainingChars: threshold - historyChars,
-        pct: threshold > 0 ? Math.round((historyChars / threshold) * 100) : 0,
+        currentTokens: historyTok,
+        remainingTokens: threshold - historyTok,
+        pct: threshold > 0 ? Math.round((historyTok / threshold) * 100) : 0,
       },
     };
   }
@@ -826,11 +832,12 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         ? turns.slice(0, assistantIdx)
         : turns;
       const built = await buildContextMessages({
+        // parts 透传给 buildContextMessages：内部用 turnsToMessages 还原原生 function calling 历史
+        // （tool_calls + role:'tool' 配对），并据此判断哪些轮可压缩。
         turns: historyTurns.map((t) => {
           const content = t.modelContent ?? t.content;
           if (t.role === 'assistant' && t.status === 'done') {
-            // parts 透传给 buildContextMessages 做压缩判断；最终历史还原由 turnsToMessages 完成。
-            return { role: t.role, content, parts: t.parts as unknown[] };
+            return { role: t.role, content, parts: t.parts as unknown as HistoryPart[] | undefined };
           }
           return { role: t.role, content };
         }),
@@ -839,7 +846,7 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         systemPrompt,
         state: compressRef.current,
         tier,
-        contextWindow: contextWindow ?? undefined, // betav2 阶段5：真实窗口推算压缩阈值
+        contextWindow: contextWindow ?? undefined, // 真实窗口推算压缩阈值
         signal: controller.signal,
       });
       setCompressing(false);
@@ -879,23 +886,14 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       let streamError: string | null = null; // 捕获流中的错误消息（error 事件或 finish_reason='error'）
 
       // betav2：自建 agent 循环（loop.ts），替代旧 runPluginCreatorAgent（creator-adapter）。
-      // 历史还原用 turnsToMessages（原生 function calling）处理原始 UI turns（含完整工具 parts），
-      // 压缩摘要作为额外 system 消息注入（保留 buildContextMessages 的压缩能力，但不让它丢工具历史）。
-      const loopMessages: ChatMessage[] = [{ role: 'system', content: systemPrompt }];
-      if (built.breakdown.summary.trim()) {
-        loopMessages.push({ role: 'system', content: `[历史上下文摘要]\n${built.breakdown.summary}` });
-      }
-      // 用原始 turns（含完整 parts）还原原生 function calling 历史。
-      loopMessages.push(...turnsToMessages(
-        historyTurns.map((t) => ({
-          role: t.role,
-          content: t.modelContent ?? t.content,
-          parts: t.parts as unknown as import('@/lib/agent/history').HistoryPart[] | undefined,
-          status: t.status,
-        })) as import('@/lib/agent/history').HistoryTurn[],
-        opts.isRetry ? '' : text,
-        opts.isRetry,
-      ));
+      // 关键修复：直接使用 buildContextMessages 的压缩产物。
+      // 此前这里手工拼 loopMessages（system + 摘要 + turnsToMessages(完整历史)），导致压缩完全失效——
+      // 早期轮被摘要后又全量塞回，历史只增不减，最终撞上游 256K token 硬限。
+      // 现在 buildContextMessages 内部已用 turnsToMessages 还原近期区（保留 tool_calls + role:'tool' 配对），
+      // 早期可压缩轮进摘要文本，含插件包的轮原文保留。loopMessages 即压缩后的最终入参。
+      const loopMessages: ChatMessage[] = built.messages;
+      // 输入预算：contextWindow 扣除输出预留，供 agent 循环做运行时护栏（超限则就地压缩/截断）。
+      const contextBudget = contextWindow ? contextWindow - DEFAULT_OUTPUT_RESERVE : undefined;
 
       const { tools, resetReadTracking } = createAgentTools({
         getPluginId: () => currentPluginIdRef.current,
@@ -967,6 +965,7 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         messages: loopMessages,
         tools,
         tier,
+        contextBudget,
         signal: controller.signal,
         callbacks: loopCallbacks,
       });
