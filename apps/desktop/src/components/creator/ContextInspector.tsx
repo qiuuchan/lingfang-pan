@@ -5,7 +5,7 @@
 // 视觉参考：终端风格的 monospace 数字 + 堆叠条形图 + 压缩进度环。
 import { useState } from 'react';
 import {
-  ChevronDownIcon, ChevronUpIcon, EyeIcon, FileTextIcon, ClockIcon, PencilIcon,
+  ArchiveIcon, ChevronDownIcon, ChevronUpIcon, EyeIcon, FileTextIcon, ClockIcon, PencilIcon,
   GaugeIcon, LayersIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -27,6 +27,9 @@ export function ContextInspector({
   onClose,
   modelTokens,
   contextWindow,
+  canCompress,
+  compressing,
+  onCompress,
 }: {
   breakdown: ContextBreakdown | null;
   open: boolean;
@@ -35,6 +38,12 @@ export function ContextInspector({
   modelTokens?: number;
   /** 模型上下文窗口大小（token），null 表示未知。 */
   contextWindow?: number | null;
+  /** 是否允许手动压缩（有历史且非 busy 时）。 */
+  canCompress?: boolean;
+  /** 压缩进行中（按钮显示 loading）。 */
+  compressing?: boolean;
+  /** 点击「立即压缩」回调。 */
+  onCompress?: () => void;
 }) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['overview']));
 
@@ -65,6 +74,18 @@ export function ContextInspector({
               <EyeIcon className="size-4" />
             </span>
             <span>上下文详情</span>
+            {onCompress && (
+              <button
+                type="button"
+                onClick={onCompress}
+                disabled={!canCompress || compressing}
+                title={compressing ? '正在压缩…' : '把早期对话轮摘要成一条，降低上下文占用（保留近期轮与插件包）'}
+                className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45"
+              >
+                <ArchiveIcon className={cn('size-3.5', compressing && 'animate-pulse')} />
+                <span>{compressing ? '压缩中…' : '立即压缩'}</span>
+              </button>
+            )}
           </DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-[calc(85vh-64px)]">

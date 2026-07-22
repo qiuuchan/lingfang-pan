@@ -282,3 +282,99 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
     },
   };
 }
+
+/** 手动压缩结果。调用方据此重建 turns：[摘要轮, ...保留的原文轮]。 */
+export interface ManualCompressResult {
+  /** 合并后的摘要文本（含已有摘要 + 本次新压缩的轮）。 */
+  summary: string;
+  /** 保留原文的轮在原 turns 数组中的下标（按原序）。 */
+  keptTurnIndices: number[];
+  /** 本次新压缩（进摘要）的轮数。 */
+  compressedCount: number;
+  /** 更新后的压缩状态（调用方写回 compressRef）。 */
+  state: CompressState;
+}
+
+/**
+ * 手动压缩历史：用户在 ContextInspector 里点「立即压缩」时调用。
+ *
+ * 与自动压缩（buildContextMessages）的区别：
+ *  - 自动压缩只在超阈值时增量摘要「新增」的早期轮，且产物是 messages（不删原 turns）。
+ *  - 手动压缩无条件触发，把所有可压缩的早期轮（含此前已摘要过的）一次性合并进摘要，
+ *    返回需保留的轮下标——调用方据此**真实删除**早期 turns 并插入摘要轮（持久化进会话）。
+ *
+ * 保留策略（与自动压缩一致，符合主流应用惯例）：
+ *  - 最近 recentWindowTurns 轮（默认 4 轮 = 8 条）原文保留。
+ *  - 含插件包（```lingfang-plugin）的轮强制原文保留（代码不可丢）。
+ *  - 其余早期轮进摘要。
+ *
+ * 摘要失败时抛错（让调用方 toast 提示），不静默丢轮。
+ */
+export async function compressHistoryManually(args: {
+  turns: { role: 'user' | 'assistant'; content: string; parts?: HistoryPart[] }[];
+  state: CompressState;
+  tier?: 'fast' | 'premium';
+  recentWindowTurns?: number;
+  signal?: AbortSignal;
+}): Promise<ManualCompressResult> {
+  const recentWindow = args.recentWindowTurns ?? 4;
+  const tier = args.tier ?? 'fast';
+  const turns = args.turns;
+  const state = args.state;
+
+  const recentStart = Math.max(0, turns.length - recentWindow * 2);
+  const older = turns.slice(0, recentStart);
+
+  // older 里含插件包的轮必须原文保留；其余可压缩。
+  const protectedFromCompressIdx = new Set<number>();
+  older.forEach((t, i) => {
+    if (turnHasPackage(t.content) || (t.parts && t.parts.some((p) => p.type === 'text' && turnHasPackage(p.content)))) {
+      protectedFromCompressIdx.add(i);
+    }
+  });
+
+  // 可压缩轮 = older 区内非包轮（全部，不论是否此前已摘要过——手动压缩是全量重做）。
+  const toCompress: { role: 'user' | 'assistant'; content: string }[] = [];
+  older.forEach((t, olderIdx) => {
+    if (protectedFromCompressIdx.has(olderIdx)) return;
+    toCompress.push({ role: t.role, content: renderTurnText(t.content, t.parts) });
+  });
+
+  // 没有可压缩的轮（比如对话很短，或全在近窗口/全是包轮）→ 无需压缩。
+  if (toCompress.length === 0) {
+    return {
+      summary: state.summary,
+      keptTurnIndices: turns.map((_, i) => i),
+      compressedCount: 0,
+      state,
+    };
+  }
+
+  // 增量摘要：prior summary + 全部可压缩轮。
+  const summarizeInput: SimpleChatMessage[] = [
+    { role: 'system', content: SUMMARIZE_PROMPT },
+    ...(state.summary ? [{ role: 'assistant' as const, content: `已有摘要：\n${state.summary}` }] : []),
+    ...toCompress.map((t): SimpleChatMessage => ({ role: t.role, content: t.content })),
+    { role: 'user', content: '请输出更新后的完整摘要（含上面已有摘要的内容 + 这些新对话）。' },
+  ];
+  const nextSummary = await chatComplete(summarizeInput, tier, args.signal);
+
+  // 保留区 = older 的包轮 + 近窗口（按原全局下标）。
+  const keptTurnIndices: number[] = [];
+  older.forEach((_, olderIdx) => {
+    if (protectedFromCompressIdx.has(olderIdx)) keptTurnIndices.push(olderIdx);
+  });
+  for (let i = recentStart; i < turns.length; i++) keptTurnIndices.push(i);
+  keptTurnIndices.sort((a, b) => a - b);
+
+  return {
+    summary: nextSummary,
+    keptTurnIndices,
+    compressedCount: toCompress.length,
+    // 手动压缩后，lastSummarizedIndex 标记为「older 区已全部摘要」。
+    // 由于调用方会真实删除这些轮，索引在新 turns 里已无对应——但保留语义：
+    // 若用户再次手动压缩，older 区已不含这些轮，toCompress 会只含新早期轮。
+    state: { lastSummarizedIndex: older.length - 1, summary: nextSummary },
+  };
+}
+
