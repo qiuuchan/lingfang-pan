@@ -1,7 +1,7 @@
 {
   "id": "com.lingfang.rbflow-video",
   "name": "动作迁移视频生成",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "RunningHub 动作迁移工作流：上传参考图片+视频→按视频时长（秒）扣灵石→生成视频→实时进度→保存到自定义文件夹。支持任务队列排序、多素材笛卡尔积、自定义输出目录。视频生成经平台桥代理转发到平台运营的 RBFLow 实例，按团队灵石按秒计费，用户无需也无法配置任何 RBFLow / RunningHub 密钥（防绕过）。",
   "runtime_type": "python",
   "entry": "main.py",

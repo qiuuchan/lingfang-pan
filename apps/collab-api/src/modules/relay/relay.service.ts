@@ -358,10 +358,113 @@ export class RelayService {
 
     // 实算：cap=real=totalCredits，reconcile 净效果=实扣 totalCredits。
     const charged = await this.credits.reconcile(auth.teamId, totalCredits, totalCredits, pendingLog.id, auth.userId);
-    await ensureFinalized({ status: 'success', errorCode: null, httpStatus: 200, credits: charged });
 
-    // 返回扣费票据（桥转发 RBFLow 成功后关联此 call_log_id；失败时凭此退款）。
-    return { charged: true, credits: charged, call_log_id: pendingLog.id, seconds, request_id: requestId };
+    // 计费成功 → 转发到 RBFLow 提交任务（平台运营实例，凭证在 PlatformSetting）。
+    // 转发失败则退款（凭 call_log_id，幂等），避免扣费无服务。
+    let task_id = '';
+    try {
+      task_id = await this.forwardToRbflow(body);
+      await ensureFinalized({ status: 'success', errorCode: null, httpStatus: 200, credits: charged });
+    } catch (e) {
+      // 转发失败：退款 + finalize 错误态，把真实错误透传给桥→插件。
+      await this.credits.refundConsumed(auth.teamId, pendingLog.id, auth.userId, '视频生成转发失败退款');
+      await ensureFinalized({ status: 'client_error', errorCode: 'rbflow_forward_failed', httpStatus: 502, credits: 0 });
+      throw e instanceof AppError ? e : new AppError(502, 'rbflow_forward_failed', `RBFLow 服务转发失败：${(e as Error).message}`);
+    }
+
+    // 返回扣费票据 + RBFLow task_id（桥据此建任务卡片 + 监听进度）。
+    return { charged: true, credits: charged, call_log_id: pendingLog.id, task_id, seconds, request_id: requestId };
+  }
+
+  /**
+   * 读 PlatformSetting 的 RBFLow 配置（url + api_key），构建 multipart 转发到 RBFLow
+   * POST /api/v1/tasks（带 X-API-Key），返回 RBFLow task_id。
+   *
+   * body 含 image/video（base64）+ image_filename/video_filename/image_mime_type/video_mime_type + 可选 callback_url。
+   * 转发是计费成功后执行的——relay 持有 RBFLow 凭证转发，插件进程永远拿不到（防绕过）。
+   */
+  private async forwardToRbflow(body: Record<string, unknown>): Promise<string> {
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['rbflowUrl', 'rbflowApiKey'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    const url = (map.get('rbflowUrl') ?? '').trim();
+    const apiKey = map.get('rbflowApiKey') ?? '';
+    if (!url) {
+      throw new AppError(503, 'rbflow_not_configured', 'RBFLow 服务未配置（请在后台管理「设置 → 视频」填写 RBFLow 地址）');
+    }
+
+    // 解码 base64 素材。
+    const imageB64 = String(body.image ?? '');
+    const videoB64 = String(body.video ?? '');
+    const imageFilename = String(body.image_filename ?? 'image');
+    const videoFilename = String(body.video_filename ?? 'video');
+    const imageMime = String(body.image_mime_type ?? 'image/png');
+    const videoMime = String(body.video_mime_type ?? 'video/mp4');
+    const callbackUrl = body.callback_url ? String(body.callback_url) : '';
+    if (!imageB64 || !videoB64) {
+      throw new AppError(400, 'bad_request', 'RBFLow 转发缺少 image/video 素材');
+    }
+    let imageBytes: Buffer, videoBytes: Buffer;
+    try {
+      imageBytes = Buffer.from(imageB64, 'base64');
+      videoBytes = Buffer.from(videoB64, 'base64');
+    } catch {
+      throw new AppError(400, 'bad_request', 'RBFLow 转发 image/video base64 解码失败');
+    }
+
+    // 构建 multipart/form-data（image + video 两个文件 part，字段名固定 image/video）。
+    const boundary = 'lfVideoRelay3k8m2xQ7';
+    const parts: Buffer[] = [];
+    const filePart = (name: string, filename: string, mime: string, data: Buffer) => {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`,
+      ));
+      parts.push(data);
+      parts.push(Buffer.from('\r\n'));
+    };
+    filePart('image', imageFilename, imageMime, imageBytes);
+    filePart('video', videoFilename, videoMime, videoBytes);
+    if (callbackUrl) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="callback_url"\r\n\r\n${callbackUrl}\r\n`,
+      ));
+    }
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+    const multipartBody = Buffer.concat(parts);
+
+    // 转发到 RBFLow POST /api/v1/tasks（X-API-Key 鉴权，10min 超时容长任务上传）。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 600_000);
+    let res: globalThis.Response;
+    try {
+      res = await globalThis.fetch(`${url.replace(/\/+$/, '')}/api/v1/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'X-API-Key': apiKey,
+        },
+        body: multipartBody,
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      throw new AppError(502, 'rbflow_forward_failed', `无法连接 RBFLow 服务：${(e as Error).message}`);
+    }
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      let detail = '';
+      try { detail = JSON.stringify(await res.json()).slice(0, 300); } catch { try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ } }
+      throw new AppError(502, 'rbflow_forward_failed', `RBFLow 提交失败（${res.status}）：${detail}`);
+    }
+    const data = (await res.json()) as { task_id?: string };
+    const taskId = data.task_id ?? '';
+    if (!taskId) {
+      throw new AppError(502, 'rbflow_forward_failed', 'RBFLow 响应缺少 task_id');
+    }
+    return taskId;
   }
 
   /**

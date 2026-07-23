@@ -425,7 +425,7 @@ describe('injectMultipartModel', () => {
 // === 视频生成按秒计费（PER_SECOND，精简编排，不接渠道路由） ===
 
 /** 构造视频专用 RelayService：pricing 返回 PER_SECOND 单价 0.5；credits 模拟 reserve→reconcile 净扣。 */
-function buildVideo(seconds: number, opts: { reserveThrows?: boolean } = {}) {
+function buildVideo(seconds: number, opts: { reserveThrows?: boolean; rbflowStatus?: number; rbflowBody?: unknown } = {}) {
   const pricePerUnit = 0.5;
   const expectedCredits = pricePerUnit * Math.max(1, Math.ceil(seconds)); // 与 computeCredits 语义一致
   const prisma = {
@@ -433,6 +433,13 @@ function buildVideo(seconds: number, opts: { reserveThrows?: boolean } = {}) {
       create: vi.fn(async () => ({ id: 'vlog1' })),
       update: vi.fn(async () => ({})),
       findFirst: vi.fn(async () => ({ id: 'vlog1', status: 'success', credits: expectedCredits })),
+    },
+    // forwardToRbflow 读 RBFLow 配置（rbflowUrl/rbflowApiKey）。空 rbflowUrl=未配置。
+    platformSetting: {
+      findMany: vi.fn(async () => opts.rbflowStatus === undefined && opts.rbflowBody === undefined
+        ? [] // 默认：未配置（用于测试转发失败/未配置分支）
+        : [{ key: 'rbflowUrl', value: 'http://rbflow.test:41792' }, { key: 'rbflowApiKey', value: 'test-key' }],
+      ),
     },
   } as never;
   const credits = makeCredits(expectedCredits, { reserveThrows: opts.reserveThrows });
@@ -448,11 +455,27 @@ function buildVideo(seconds: number, opts: { reserveThrows?: boolean } = {}) {
   return { svc, prisma, credits, pricing, expectedCredits };
 }
 
-describe('RelayService.videoGenerations 按秒计费', () => {
-  it('成功按秒扣费：0.5 灵石/秒 × 30 秒 = 15 灵石，reserve+reconcile 各一次', async () => {
-    const { svc, credits, pricing, expectedCredits } = buildVideo(30);
-    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 30 });
-    expect(out).toMatchObject({ charged: true, credits: expectedCredits, seconds: 30 });
+/** Mock globalThis.fetch 拦截 RBFLow 转发（不发真实网络）。rbflowBody 给 undefined 则模拟 fetch 抛错。 */
+function mockRbflowFetch(status: number, body: unknown) {
+  const fetchMock = vi.fn(async () => {
+    if (status === -1) throw new Error('network down');
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+    } as globalThis.Response;
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+describe('RelayService.videoGenerations 按秒计费 + RBFLow 转发', () => {
+  it('成功按秒扣费 + 转发 RBFLow：返回 task_id，reserve+reconcile 各一次，不退款', async () => {
+    mockRbflowFetch(200, { task_id: 'rh-task-1' });
+    const { svc, credits, pricing, expectedCredits } = buildVideo(30, { rbflowStatus: 200, rbflowBody: { task_id: 'rh-task-1' } });
+    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 30, image: 'aGk=', video: 'Ymo=' });
+    expect(out).toMatchObject({ charged: true, credits: expectedCredits, seconds: 30, task_id: 'rh-task-1' });
     expect(pricing.lookupPrice).toHaveBeenCalledWith(expect.objectContaining({ capability: 'video', model: 'video_generate' }));
     expect(credits.reserve).toHaveBeenCalledTimes(1);
     expect(credits.reconcile).toHaveBeenCalledTimes(1);
@@ -460,28 +483,32 @@ describe('RelayService.videoGenerations 按秒计费', () => {
   });
 
   it('小数秒数向上取整：45.2 秒 → 46 秒，扣 0.5×46=23 灵石', async () => {
-    const { svc, expectedCredits } = buildVideo(45.2);
-    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 45.2 });
+    mockRbflowFetch(200, { task_id: 'rh-2' });
+    const { svc, expectedCredits } = buildVideo(45.2, { rbflowStatus: 200, rbflowBody: { task_id: 'rh-2' } });
+    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 45.2, image: 'aGk=', video: 'Ymo=' });
     expect(out.seconds).toBe(46);
     expect(out.credits).toBe(expectedCredits);
   });
 
   it('0 秒 clamp 到 1 秒（防白嫖）', async () => {
-    const { svc } = buildVideo(0);
-    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 0 });
+    mockRbflowFetch(200, { task_id: 'rh-3' });
+    const { svc } = buildVideo(0, { rbflowStatus: 200, rbflowBody: { task_id: 'rh-3' } });
+    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 0, image: 'aGk=', video: 'Ymo=' });
     expect(out.seconds).toBe(1);
   });
 
-  it('余额不足（reserve 抛 402）：finalize status=insufficient_balance，不调 reconcile', async () => {
+  it('余额不足（reserve 抛 402）：finalize status=insufficient_balance，不调 reconcile/不转发', async () => {
+    const fetchMock = mockRbflowFetch(200, { task_id: 'should-not-reach' });
     const { svc, credits, prisma } = buildVideo(60, { reserveThrows: true });
     await expect(svc.videoGenerations(makeReq(), { model: 'fast', seconds: 60 })).rejects.toMatchObject({ code: 'insufficient_balance' });
     expect(credits.reconcile).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled(); // 余额不足不转发
     const updateData = prisma.llmCallLog.update.mock.calls[0]?.[0]?.data;
     expect(updateData).toMatchObject({ status: 'insufficient_balance', errorCode: 'insufficient_balance' });
   });
 
   it('无定价抛 503 no_pricing 且不建计费日志', async () => {
-    const prisma = { llmCallLog: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() } } as never;
+    const prisma = { llmCallLog: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() }, platformSetting: { findMany: vi.fn() } } as never;
     const credits = makeCredits(10);
     const pricing = { lookupPrice: vi.fn(async () => null), lookupMinContextWindow: vi.fn(async () => null), computeCredits: vi.fn() } as never;
     const router = { selectCandidates: vi.fn(), decryptUpstreamKey: vi.fn() } as never;
@@ -492,11 +519,25 @@ describe('RelayService.videoGenerations 按秒计费', () => {
   });
 
   it('LlmCallLog 记 capability=video + requestSummary 含 seconds（审计）', async () => {
-    const { svc, prisma } = buildVideo(20);
-    await svc.videoGenerations(makeReq(), { model: 'premium', seconds: 20 });
+    mockRbflowFetch(200, { task_id: 'rh-4' });
+    const { svc, prisma } = buildVideo(20, { rbflowStatus: 200, rbflowBody: { task_id: 'rh-4' } });
+    await svc.videoGenerations(makeReq(), { model: 'premium', seconds: 20, image: 'aGk=', video: 'Ymo=' });
     const data = prisma.llmCallLog.create.mock.calls[0]?.[0]?.data;
     expect(data).toMatchObject({ capability: 'video', tier: 'PREMIUM', model: 'video_generate' });
     expect(data.requestSummary).toMatchObject({ seconds: 20, tier: 'PREMIUM' });
+  });
+
+  it('RBFLow 未配置（rbflowUrl 空）→ 退款 + 503 rbflow_not_configured', async () => {
+    const { svc, credits } = buildVideo(10); // 默认 rbflowStatus=undefined → platformSetting 返空（未配置）
+    await expect(svc.videoGenerations(makeReq(), { model: 'fast', seconds: 10, image: 'aGk=', video: 'Ymo=' })).rejects.toMatchObject({ status: 503, code: 'rbflow_not_configured' });
+    expect(credits.refundConsumed).toHaveBeenCalledTimes(1); // 转发失败必退款
+  });
+
+  it('RBFLow 转发失败（网络/非 2xx）→ 退款 + 502 rbflow_forward_failed', async () => {
+    mockRbflowFetch(-1, null); // fetch 抛错
+    const { svc, credits } = buildVideo(10, { rbflowStatus: 200, rbflowBody: { task_id: 'x' } });
+    await expect(svc.videoGenerations(makeReq(), { model: 'fast', seconds: 10, image: 'aGk=', video: 'Ymo=' })).rejects.toMatchObject({ status: 502, code: 'rbflow_forward_failed' });
+    expect(credits.refundConsumed).toHaveBeenCalledTimes(1);
   });
 });
 
