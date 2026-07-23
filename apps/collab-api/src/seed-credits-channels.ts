@@ -30,6 +30,8 @@ const DEFAULT_PRICING = [
   { capability: 'image', model: 'dall-e-2', label: 'DALL·E 2 生图', unit: 'PER_IMAGE' as const, pricePerUnit: 20, tier: null },
   // action：按次（示例：创建插件聊天会话固定扣 Y 灵石）
   { capability: 'action', model: 'create_plugin_session', label: '创建插件会话', unit: 'PER_CALL' as const, pricePerUnit: 10, tier: null },
+  // video：按秒（RunningHub 动作迁移视频生成，按参考视频时长计费）
+  { capability: 'video', model: 'video_generate', label: '视频生成（动作迁移）', unit: 'PER_SECOND' as const, pricePerUnit: 0.5, tier: null },
 ];
 
 /** 默认灵石全局参数（PlatformSetting 键值表）。 */

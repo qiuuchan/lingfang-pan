@@ -104,6 +104,56 @@ describe('plugin AI SDK', () => {
       status: 503,
     });
   });
+
+  it('defaults video.generate to fast and forwards the relay billing ticket', async () => {
+    // 防绕过：插件只发 image/video base64 + seconds，桥侧扣费+注入 RBFLow 凭证转发；
+    // SDK 仅透传桥返回的 { task_id, call_log_id, charged, credits }，不持任何 RBFLow 凭证。
+    const bridge = vi.fn().mockResolvedValue({
+      task_id: 'rbflow-task-1',
+      call_log_id: 'vlog-1',
+      charged: true,
+      credits: 5,
+    });
+    (globalThis as TestGlobal).__lingfangInvoke = bridge;
+
+    await expect(sdk.video.generate({
+      image: 'aGVsbG8=',
+      video: 'd29ybGQ=',
+      seconds: 10,
+    })).resolves.toEqual({ task_id: 'rbflow-task-1', call_log_id: 'vlog-1', charged: true, credits: 5 });
+    expect(bridge).toHaveBeenCalledWith('video.generate', {
+      image: 'aGVsbG8=',
+      video: 'd29ybGQ=',
+      seconds: 10,
+      model: 'fast',
+    });
+  });
+
+  it('routes video.generate through the localhost script bridge with tier injection', async () => {
+    // 脚本回退路径（无 __lingfangInvoke）：经 localhost /video/generate，body 注入 model=platformModel。
+    env().LINGFANG_PLUGIN_BRIDGE_URL = 'http://127.0.0.1:12345';
+    env().LINGFANG_PLUGIN_BRIDGE_TOKEN = 'session-token';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      task_id: 'rbflow-task-2',
+      call_log_id: 'vlog-2',
+      charged: true,
+      credits: 3,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(sdk.video.generate({
+      image: 'aQ==',
+      video: 'Yg==',
+      seconds: 6,
+      model: 'premium',
+    })).resolves.toEqual({ task_id: 'rbflow-task-2', call_log_id: 'vlog-2', charged: true, credits: 3 });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:12345/video/generate', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'X-LingFang-Plugin-Token': 'session-token' }),
+      body: JSON.stringify({ image: 'aQ==', video: 'Yg==', seconds: 6, model: 'premium' }),
+    }));
+  });
 });
 
 describe('plugin shared SDK', () => {

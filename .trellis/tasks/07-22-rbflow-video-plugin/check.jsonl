@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/contract/backend/index.md", "reason": "检查 CapabilityKind 枚举变更符合 contract 层质量门（schema+规则+测试）"}
+{"file": ".trellis/spec/collab-api/backend/index.md", "reason": "检查 relay 视频端点：计费两阶段(reserve/reconcile/refund)、LlmCallLog、余额不足处理、现有 chat/image 回归不破坏"}
+{"file": ".trellis/spec/desktop/backend/index.md", "reason": "检查桥路由 gate、session flag、调用方白名单一致性、Rust 测试覆盖"}
+{"file": ".trellis/spec/plugin-sdk/backend/index.md", "reason": "检查 SCRIPT_BRIDGE_PATH 路由表新增项与桥路由一致"}
+{"file": ".trellis/spec/guides/index.md", "reason": "跨包改动（contract→relay→桥→SDK→插件）的一致性检查指南"}

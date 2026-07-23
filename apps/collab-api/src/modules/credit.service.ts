@@ -228,6 +228,43 @@ export class CreditService {
     });
   }
 
+  /**
+   * 退还已实扣的灵石（视频生成等「先 reconcile 实扣、后转发失败」场景专用）。
+   *
+   * 与 refund 的区别：
+   *  - refund：退 reserve 的预留（在 reconcile 之前调用；针对未实扣的 cap）。
+   *  - refundConsumed：退 reconcile 已实扣的消费（针对已扣到 llm_consume 的额度）。
+   *
+   * 视频计费链路：reserve(cap) → reconcile(cap, real) 实扣 → 桥转发 RBFLow。
+   * 若转发失败，此时钱已从 llm_consume 扣走（refund 因 source=llm_consume 已「终结」而 no-op），
+   * 必须走本方法：找到该 callLogId 的 llm_consume 流水，按其 amount 退回（CREDIT）+ 写 source='video_refund'
+   * 标记，保证幂等（同一 callLogId 只退一次，重复调用 no-op）。
+   *
+   * @returns 实际退还的灵石数（已退过则返回 0）。
+   */
+  async refundConsumed(teamId: string, callLogId: string, actorUserId: string | null, reason = '视频生成转发失败退款'): Promise<number> {
+    return this.prisma.$transaction(async (tx) => {
+      // 幂等：已退过（source='video_refund'）则 no-op。
+      const alreadyRefunded = await tx.creditLedger.findFirst({
+        where: { teamId, callLogId, source: 'video_refund' },
+        select: { id: true },
+      });
+      if (alreadyRefunded) return 0;
+      // 找到本次实扣的 llm_consume 流水（reconcile 写的 DEBIT）。
+      const consumed = await tx.creditLedger.findFirst({
+        where: { teamId, callLogId, source: 'llm_consume', direction: 'DEBIT' },
+        select: { id: true, amount: true },
+      });
+      if (!consumed || roundCredits(consumed.amount) <= 0) return 0;
+      const refundAmount = roundCredits(consumed.amount);
+      await tx.teamCredit.update({ where: { teamId }, data: { balance: { increment: refundAmount } } });
+      await tx.creditLedger.create({
+        data: { teamId, amount: refundAmount, direction: 'CREDIT', source: 'video_refund', reason, actorUserId, callLogId },
+      });
+      return refundAmount;
+    });
+  }
+
   /** admin 调整灵石（加/扣 + 强审计）。amount>0；direction=CREDIT 加款，DEBIT 扣款。 */
   async adjust(args: {
     teamId: string;

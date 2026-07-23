@@ -167,6 +167,45 @@ describe('CreditService reserve/reconcile/refund', () => {
   });
 });
 
+describe('CreditService.refundConsumed（视频转发失败退已实扣灵石）', () => {
+  let svc: CreditService;
+  let prisma: PrismaService;
+  let tx: ReturnType<typeof mockTx>;
+
+  beforeEach(() => {
+    tx = mockTx();
+    prisma = mockPrisma(tx);
+    svc = new CreditService(prisma);
+  });
+
+  it('找到 llm_consume 流水 → 按其 amount 退回（CREDIT）+ 写 source=video_refund', async () => {
+    tx.creditLedger.findFirst
+      .mockResolvedValueOnce(null) // 未退过（source=video_refund 查无）
+      .mockResolvedValueOnce({ id: 'consume-1', amount: 15 }); // llm_consume 流水
+    const refunded = await svc.refundConsumed('t1', 'vlog1', 'u1');
+    expect(refunded).toBe(15);
+    expect(tx.teamCredit.update).toHaveBeenCalledWith(expect.objectContaining({ where: { teamId: 't1' }, data: { balance: { increment: 15 } } }));
+    expect(tx.creditLedger.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ direction: 'CREDIT', source: 'video_refund', amount: 15, callLogId: 'vlog1' }) }));
+  });
+
+  it('已退过（source=video_refund 存在）→ 幂等 no-op，返回 0', async () => {
+    tx.creditLedger.findFirst.mockResolvedValueOnce({ id: 'prev-refund' });
+    const refunded = await svc.refundConsumed('t1', 'vlog1', 'u1');
+    expect(refunded).toBe(0);
+    expect(tx.teamCredit.update).not.toHaveBeenCalled();
+    expect(tx.creditLedger.create).not.toHaveBeenCalled();
+  });
+
+  it('无 llm_consume 流水（没扣过钱）→ 返回 0，不退', async () => {
+    tx.creditLedger.findFirst
+      .mockResolvedValueOnce(null) // 未退过
+      .mockResolvedValueOnce(null); // 无 consume 流水
+    const refunded = await svc.refundConsumed('t1', 'vlog1', 'u1');
+    expect(refunded).toBe(0);
+    expect(tx.teamCredit.update).not.toHaveBeenCalled();
+  });
+});
+
 describe('PricingService.computeCredits（间接验证单价换算语义）', () => {
   // 直接用 CreditService 内不持有 pricing，但 computeCredits 在 PricingService。
   // 这里只校验 CreditService 透传正确即可——pricing 单测单独覆盖。

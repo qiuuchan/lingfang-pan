@@ -49,4 +49,18 @@ export class RelayController {
     // multipart：body 不能用 @Body（已读为原始 buffer），由 service 处理 rawBody。
     return this.relay.imageEditsPassthrough(req, res);
   }
+
+  @Post('videos/generations')
+  @ApiOperation({ summary: '视频生成按秒计费（不接上游转发，纯灵石账本）' })
+  videos(@Req() req: Request, @Body() body: Record<string, unknown>) {
+    // body: { model: 'fast'|'premium', seconds: number }。只计费，转发由桌面桥代理到 RBFLow。
+    return this.relay.videoGenerations(req, body);
+  }
+
+  @Post('videos/refund')
+  @ApiOperation({ summary: '视频生成转发失败退款（凭 call_log_id 退已实扣灵石）' })
+  refundVideo(@Req() req: Request, @Body() body: Record<string, unknown>) {
+    // body: { call_log_id: string }。幂等。
+    return this.relay.refundVideo(req, body);
+  }
 }

@@ -1,0 +1,9 @@
+# RBFLow 动作迁移视频生成插件依赖
+# PySide6（Qt6）—— 与 videodl/facefusion 插件一致；plugin_runner.rs 已为 PySide6 深层 wheel 做短路径缓存
+PySide6>=6.7
+# HTTP（桥调用 + SSE 进度流）
+requests>=2.31
+# 图片缩略图生成
+Pillow>=10.0
+# 视频时长探测（ffprobe wrapper，纯 Python；若系统无 ffmpeg 则回退到容器解析兜底）
+ffmpeg-python>=0.2

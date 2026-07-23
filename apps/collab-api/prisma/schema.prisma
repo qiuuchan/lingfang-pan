@@ -309,12 +309,13 @@ enum ChannelKind {
   IMAGE
 }
 
-// 计费/中转 · 计费单位。PER_TOKEN_INPUT/OUTPUT 按每 1M token 计（灵石/百万 token）；PER_CALL 按次固定；PER_IMAGE 按张固定。
+// 计费/中转 · 计费单位。PER_TOKEN_INPUT/OUTPUT 按每 1M token 计（灵石/百万 token）；PER_CALL 按次固定；PER_IMAGE 按张固定；PER_SECOND 按秒计（视频生成按时长）。
 enum PricingUnit {
   PER_TOKEN_INPUT
   PER_TOKEN_OUTPUT
   PER_CALL
   PER_IMAGE
+  PER_SECOND
 }
 
 // 计费/中转 · 渠道版本标签（FAST 快速 / PREMIUM 高级）。relay 据 model 哨兵匹配渠道 tier，多渠道轮询。

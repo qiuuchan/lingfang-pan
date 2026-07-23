@@ -18,7 +18,7 @@ export class PricingService {
    * 优先查 (capability, model, tier)，回退 (capability, model, null)。
    */
   async lookupPrice(args: {
-    capability: 'chat' | 'image' | 'action';
+    capability: 'chat' | 'image' | 'action' | 'video';
     model: string;
     tier?: 'FAST' | 'PREMIUM' | null;
   }): Promise<{ unit: string; pricePerUnit: number } | null> {
@@ -71,12 +71,13 @@ export class PricingService {
    *  - PER_TOKEN_*：pricePerUnit = 每 1M token 的灵石数。actual = tokens × pricePerUnit / 1_000_000（浮点，保留精度）。
    *  - PER_CALL：固定 pricePerUnit。
    *  - PER_IMAGE：pricePerUnit × 张数。
+   *  - PER_SECOND：pricePerUnit × 秒数（视频生成按时长计费）。秒数向上取整，至少 1 秒（防 0 秒白嫖）。
    * 灵石为 Float（支持小数单价），不再 ceil 强制整数——按真实用量精确计费。
    */
   computeCredits(
     unit: string,
     pricePerUnit: number,
-    usage: { inputTokens?: number; outputTokens?: number; images?: number },
+    usage: { inputTokens?: number; outputTokens?: number; images?: number; seconds?: number },
   ): number {
     switch (unit) {
       case 'PER_TOKEN_INPUT': {
@@ -93,6 +94,9 @@ export class PricingService {
         return pricePerUnit;
       case 'PER_IMAGE':
         return pricePerUnit * Math.max(1, usage.images ?? 1);
+      case 'PER_SECOND':
+        // 秒数向上取整（部分秒按整秒计），至少 1 秒——防 0 秒或负值白嫖。
+        return pricePerUnit * Math.max(1, Math.ceil(usage.seconds ?? 0));
       default:
         return pricePerUnit;
     }
