@@ -41,7 +41,7 @@ export function ThemeOption({ active, onClick, icon: Icon, label, desc }: ThemeO
 }
 
 type RevealSecretButtonProps = {
-  secretKey: 'smtpPass' | 'geetestCaptchaKey';
+  secretKey: 'smtpPass' | 'geetestCaptchaKey' | 'giteeAccessToken' | 'tavilyApiKey' | 'braveApiKey' | 'rbflowApiKey';
   label: string;
   hasConfigured: boolean;
 };

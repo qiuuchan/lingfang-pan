@@ -498,6 +498,20 @@ export class AdminController {
   }
 
   @RequirePermission('platform.setting.manage')
+  @Get('settings/rbflow')
+  @ApiOperation({ summary: '当前 RBFLow 视频生成服务配置（rbflowUrl 明文，rbflowApiKey 脱敏）' })
+  rbflowSettings(@Req() req: Request) {
+    return this.settings.getRbflowSettings(requireUser(req).id);
+  }
+
+  @RequirePermission('platform.setting.manage')
+  @Post('settings/test-rbflow')
+  @ApiOperation({ summary: '测试 RBFLow 服务连通性（探测 /api/v1/health，返成功/失败 + 错误信息）' })
+  testRbflow(@Req() req: Request) {
+    return this.settings.testRbflow(requireUser(req).id);
+  }
+
+  @RequirePermission('platform.setting.manage')
   @Post('settings/test-gitee')
   @ApiOperation({ summary: '测试 Gitee 配置是否可用（探测 releases 端点连通性，返成功/失败 + 错误信息）' })
   testGitee(@Req() req: Request) {

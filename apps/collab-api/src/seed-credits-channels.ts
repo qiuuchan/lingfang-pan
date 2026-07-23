@@ -40,6 +40,9 @@ const DEFAULT_SETTINGS = [
   { key: 'creditReserveCapFast', value: '200', description: '快速版单次调用预扣灵石上限（实算后冲销）' },
   { key: 'creditReserveCapPremium', value: '2000', description: '高级版单次调用预扣灵石上限（实算后冲销）' },
   { key: 'aiUsageGuardRule', value: DEFAULT_AI_USAGE_GUARD_RULE, description: '系统提示词强制规则（AI 能力必须且仅能使用灵坊平台服务）' },
+  // RBFLow 视频生成服务配置（平台运营实例，后台管理配置；空值=未配置）
+  { key: 'rbflowUrl', value: '', description: 'RBFLow 视频生成服务地址（平台运营实例，服务端转发用，用户不可见）' },
+  { key: 'rbflowApiKey', value: '', description: 'RBFLow 静态 API-KEY（服务端转发用，非用户可见；后台 reveal-secret 可查）' },
 ];
 
 async function main() {

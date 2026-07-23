@@ -63,4 +63,10 @@ export class RelayController {
     // body: { call_log_id: string }。幂等。
     return this.relay.refundVideo(req, body);
   }
+
+  @Get('rbflow-config')
+  @ApiOperation({ summary: '读取 RBFLow 服务配置（供桌面桥转发用，已登录用户即可；插件进程不可见）' })
+  rbflowConfig(@Req() req: Request) {
+    return this.relay.getRbflowConfig(req);
+  }
 }

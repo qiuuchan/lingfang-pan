@@ -172,6 +172,21 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('braveApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
     return v;
   },
+  // 组F RBFLow 视频生成服务地址（平台运营实例）。桥转发 RBFLow 任务的 base URL（拼进 fetch path），
+  // 必须 http/https 防 javascript: 等危险协议；长度上限防滥用。允许空（未配置=桥 /video/generate 报 503）。
+  rbflowUrl: (raw) => {
+    const v = raw.trim();
+    if (v && !/^https?:\/\//i.test(v)) throw badRequest('rbflowUrl 必须是 http 或 https 链接');
+    if (v.length > 500) throw badRequest('rbflowUrl 过长（上限 500 字符）');
+    return v;
+  },
+  // 组F RBFLow 静态 API-KEY（服务端转发用，非用户可见）。与 giteeAccessToken 同款 URL-safe 字符校验。
+  // 允许空（未配置=桥报 503 rbflow_not_configured）。
+  rbflowApiKey: (raw) => {
+    const v = raw.trim();
+    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('rbflowApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
+    return v;
+  },
 };
 
 /** Gitee owner/repo 路径段校验：仅 [A-Za-z0-9._-]，首尾须字母数字，禁连续点（防 ..），长度 0 或 1~100。
@@ -193,7 +208,7 @@ function validateRepoSegment(key: string): (raw: string) => string {
 /** 密钥类 PlatformSetting key 集合：审计时对命中 key 脱敏（只记 {configured} 布尔，不记明文 value）。
  *  既有缺陷修复（本次随 giteeAccessToken 一并补）：updateSettings 原对 smtpPass/geetestCaptchaKey 也记明文。
  *  SECRET_KEYS 命中后审计 metadata 改记 {key, configured}，与 testCaptcha 同范式。 */
-const SECRET_KEYS = new Set(['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken', 'tavilyApiKey', 'braveApiKey']);
+const SECRET_KEYS = new Set(['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken', 'tavilyApiKey', 'braveApiKey', 'rbflowApiKey']);
 
 /** 影响 MailService SMTP / 品牌缓存的 PlatformSetting key 集合。
  *  组A：更新这些 key 后调用 mail.invalidateSmtpCache()，保证 admin 保存后下一封邮件即读到新配置（AC1），
@@ -504,6 +519,63 @@ export class SettingsService {
     };
   }
 
+  /** GET /api/admin/settings/rbflow：读 RBFLow 视频生成服务配置（供 admin 表单预填）。
+   *  仅平台 Admin 可调用。凭据安全：rbflowApiKey 永不返回明文（避免 API-KEY 经 HTTP 响应泄漏到浏览器），
+   *  改返 hasApiKey 布尔（true=已配置）。rbflowUrl 明文返回（非密钥）。复刻 getGiteeSettings 范式。 */
+  async getRbflowSettings(userId: string) {
+    await this.auth.ensurePlatformAdmin(userId);
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['rbflowUrl', 'rbflowApiKey'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    const apiKey = map.get('rbflowApiKey') ?? '';
+    return {
+      rbflowUrl: (map.get('rbflowUrl') ?? '').trim(),
+      hasApiKey: apiKey.length > 0,
+    };
+  }
+
+  /** POST /api/admin/settings/test-rbflow：测试 RBFLow 服务连通性（与 test-gitee / test-captcha 同模式）。
+   *  仅平台 Admin 可调用。探测 RBFLow GET {url}/api/v1/health（公开端点，不需鉴权；8s 超时），
+   *  按状态码判定连通性（200 通 / 其他异常）。直接查库不读缓存。审计仅记 ok/configured/status，不记 key。 */
+  async testRbflow(actorId: string) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['rbflowUrl'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    const url = (map.get('rbflowUrl') ?? '').trim();
+
+    if (!url) {
+      const result = { ok: false, configured: false, message: 'rbflowUrl 未配置，请先填写并保存。' };
+      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, { ok: false, configured: false });
+      return result;
+    }
+
+    const healthUrl = `${url.replace(/\/+$/, '')}/api/v1/health`;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8_000);
+      let res: Response;
+      try {
+        res = await fetch(healthUrl, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+      const message = mapRbflowStatus(res.status);
+      const ok = res.ok;
+      const result = { ok, configured: true, message };
+      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, { ok, configured: true, status: res.status });
+      return result;
+    } catch (error) {
+      const result = { ok: false, configured: true, message: `RBFLow 接口请求失败：${(error as Error).message}` };
+      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, { ok: false, configured: true });
+      return result;
+    }
+  }
+
   /** POST /api/admin/settings/test-gitee：测试 Gitee 配置是否可用（与极验 test-captcha / SMTP test-email 同模式）。
    *  仅平台 Admin 可调用。探测实际生产路径 GET /repos/{owner}/{repo}/releases?per_page=1（Bearer，8s 超时），
    *  按状态码判定根因（200 通 / 401 token 失效 / 403 缺 scope / 404 owner-repo 错 / 429 限流）。
@@ -589,4 +661,13 @@ function mapGiteeStatus(status: number): string {
   if (status === 404) return 'owner/repo 不存在或令牌无权访问该仓库。';
   if (status === 429) return 'Gitee 接口限流，请稍后重试。';
   return `Gitee 接口返回异常状态（${status}），请检查 owner/repo/token 是否正确。`;
+}
+
+/** RBFLow 探测响应状态码 → 友好 message 映射（供 testRbflow 使用）。
+ *  /api/v1/health 是公开端点（不需鉴权），主要判连通性 + 服务存活。 */
+function mapRbflowStatus(status: number): string {
+  if (status === 200) return 'RBFLow 服务连通正常，健康检查通过。';
+  if (status === 404) return 'RBFLow 服务未找到 /api/v1/health，请检查 URL 是否指向正确的 RBFLow 实例。';
+  if (status === 502 || status === 503) return 'RBFLow 服务暂时不可用（502/503），可能正在重启或过载。';
+  return `RBFLow 健康检查返回异常状态（${status}），请检查 URL 是否正确。`;
 }
