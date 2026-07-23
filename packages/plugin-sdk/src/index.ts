@@ -29,6 +29,21 @@ type ImageEditInput = {
   n?: number;
 };
 type ImageEditResult = { images: string[] };
+// 视频生成（RBFLow 动作迁移）：image + video base64 + seconds（参考视频时长，按秒计费）+ tier。
+// data 为 base64 无前缀；image_filename/video_filename 可选（给上游 RBFLow 工作流节点用）。
+// 返回 { task_id, call_log_id }：task_id 供 stream/download 代理路由用。
+type VideoGenerateInput = {
+  image: string;
+  video: string;
+  seconds: number;
+  model?: 'fast' | 'premium';
+  image_filename?: string;
+  video_filename?: string;
+  image_mime_type?: string;
+  video_mime_type?: string;
+  callback_url?: string;
+};
+type VideoGenerateResult = { task_id: string; call_log_id: string; charged: boolean; credits: number };
 type PluginFile = { path: string; content: string };
 type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
 type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
@@ -223,6 +238,7 @@ const SCRIPT_BRIDGE_PATH: Record<string, string> = {
   'llm.chat': '/llm/chat',
   'image.generate': '/image/generate',
   'image.edit': '/image/edit',
+  'video.generate': '/video/generate',
   'actions.call': '/actions/call',
   'artifacts.create': '/artifacts/create',
   'artifacts.materialize': '/artifacts/materialize',
@@ -241,7 +257,7 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
   if (!baseValue || !token || typeof g.fetch !== 'function') return null;
   const base = localhostBridgeBase(baseValue);
   const input = record(args);
-  const body = capability === 'llm.chat' || capability === 'image.generate'
+  const body = capability === 'llm.chat' || capability === 'image.generate' || capability === 'image.edit' || capability === 'video.generate'
     ? { ...input, model: platformModel(input.model) }
     : input;
   const res = await g.fetch(`${base}${path}`, {
@@ -266,7 +282,9 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
     return (typeof data.content === 'string' ? data.content : '') as T;
   }
   if (capability.startsWith('actions.') || capability.startsWith('artifacts.')) return data as T;
-  // image.generate：返回 { images: string[] }
+  // video.generate：桥透传 { task_id, call_log_id, charged, credits }，直接回传。
+  if (capability === 'video.generate') return data as T;
+  // image.generate / image.edit：返回 { images: string[] }
   return { images: Array.isArray(data.images) ? (data.images as string[]) : [] } as T;
 }
 
@@ -295,7 +313,7 @@ async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}
   }
 }
 
-async function invokeAi<T>(capability: 'llm.chat' | 'image.generate' | 'image.edit', input: Record<string, unknown>): Promise<T> {
+async function invokeAi<T>(capability: 'llm.chat' | 'image.generate' | 'image.edit' | 'video.generate', input: Record<string, unknown>): Promise<T> {
   const args = { ...input, model: platformModel(input.model) };
   try {
     return await invoke<T>(capability, args, AI_BRIDGE_TIMEOUT_MS);
@@ -439,6 +457,13 @@ export const sdk = {
     // 输入 prompt + images（参考图，data 为 base64 无前缀）；model 默认 fast；返回 { images: string[] }（url 或 data:base64）。
     edit: (input: ImageEditInput) => invokeAi<ImageEditResult>('image.edit', input),
   },
+  // 视频生成（RBFLow 动作迁移）：image + video base64 + seconds → 桥先按秒扣灵石（PER_SECOND）→
+  // 注入平台 RBFLow 凭证转发 → 返回 { task_id, call_log_id }。
+  // 防绕过：插件不持有任何 RBFLow 凭证；stream/download 进度与下载走桥 GET /video/stream、/video/download
+  // （非 capability，插件自行拼路径调桥，不经此 SDK namespace）。
+  video: {
+    generate: (input: VideoGenerateInput) => invokeAi<VideoGenerateResult>('video.generate', input),
+  },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),
     submitMarketplace: (input: PluginSubmitMarketplaceInput) => invoke<unknown>('plugin.submitMarketplace', input),
@@ -460,6 +485,8 @@ export type {
   ImageEditImage,
   ImageEditInput,
   ImageEditResult,
+  VideoGenerateInput,
+  VideoGenerateResult,
   PluginFile,
   PluginUploadInput,
   PluginSubmitMarketplaceInput,

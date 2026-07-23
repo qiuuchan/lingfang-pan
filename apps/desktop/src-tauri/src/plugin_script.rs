@@ -587,6 +587,10 @@ pub fn run_plugin_script(
             .capabilities
             .iter()
             .any(|kind| kind == "image.edit"),
+        input
+            .capabilities
+            .iter()
+            .any(|kind| kind == "video.generate"),
         PluginBridgeClientSource::PluginTest,
         Duration::from_secs(30 * 60),
     )?;

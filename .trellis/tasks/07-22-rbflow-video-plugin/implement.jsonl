@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/contract/backend/index.md", "reason": "交付物 A 改 CapabilityKind 枚举（plugin.ts），需遵循 contract 层契约改动规范与测试约定"}
+{"file": ".trellis/spec/collab-api/backend/index.md", "reason": "新增 relay 视频计费端点（relay.service.ts/controller.ts），需遵循 collab-api 后端编码/测试/计费规范"}
+{"file": ".trellis/spec/desktop/backend/index.md", "reason": "改 Tauri Rust 桥（plugin_llm_bridge.rs）+ 调用方白名单（plugin_runner.rs/plugin_script.rs），需遵循桌面后端 Rust 规范"}
+{"file": ".trellis/spec/plugin-sdk/backend/index.md", "reason": "改 SDK 路由表（index.ts SCRIPT_BRIDGE_PATH），需遵循 plugin-sdk 规范"}
+{"file": ".trellis/spec/lingfang-desktop/backend/index.md", "reason": "桌面端整体后端规范（若 desktop 与 lingfang-desktop 分层，桥改动需对照此层）"}
+{"file": "packages/contract/src/plugin.ts", "reason": "CapabilityKind 枚举定义位置（L16-21），新增 video.generate 的直接修改点"}
+{"file": "packages/contract/src/billing.ts", "reason": "计费契约（Tier/PER_CALL/pricing 单位），relay 视频端点复用 PER_CALL 的契约依据"}

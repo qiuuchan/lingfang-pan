@@ -60,6 +60,11 @@ function makeCredits(cap: number, opts: { reserveThrows?: boolean; cap0Balance?:
     refund: vi.fn(async (_teamId: string, c: number) => {
       if (c > 0 && reserved) { net += c; reserved = false; }
     }),
+    // 视频退款（退已实扣）：模拟「退回上次 reconcile 实扣额」，幂等。
+    refundConsumed: vi.fn(async (_teamId: string, _callLogId: string, _actor: string | null) => {
+      // 简化：返回一个固定退额供断言调用发生（真实幂等语义在 credit.service.spec 测）。
+      return 0;
+    }),
     __net: () => net,
   };
 }
@@ -414,5 +419,113 @@ describe('injectMultipartModel', () => {
     // CRLF 被剥离 → "X-Inject" 不会出现在新行首伪造头，而是合入 model 值单行。
     expect(text).not.toContain('\r\nX-Inject');
     expect(text).toContain('evil');
+  });
+});
+
+// === 视频生成按秒计费（PER_SECOND，精简编排，不接渠道路由） ===
+
+/** 构造视频专用 RelayService：pricing 返回 PER_SECOND 单价 0.5；credits 模拟 reserve→reconcile 净扣。 */
+function buildVideo(seconds: number, opts: { reserveThrows?: boolean } = {}) {
+  const pricePerUnit = 0.5;
+  const expectedCredits = pricePerUnit * Math.max(1, Math.ceil(seconds)); // 与 computeCredits 语义一致
+  const prisma = {
+    llmCallLog: {
+      create: vi.fn(async () => ({ id: 'vlog1' })),
+      update: vi.fn(async () => ({})),
+      findFirst: vi.fn(async () => ({ id: 'vlog1', status: 'success', credits: expectedCredits })),
+    },
+  } as never;
+  const credits = makeCredits(expectedCredits, { reserveThrows: opts.reserveThrows });
+  const pricing = {
+    lookupPrice: vi.fn(async () => ({ unit: 'PER_SECOND', pricePerUnit })),
+    lookupMinContextWindow: vi.fn(async () => null),
+    // 用真实 computeCredits 逻辑（与 production 一致）而非固定 0。
+    computeCredits: vi.fn((_unit: string, ppu: number, usage: { seconds?: number }) => ppu * Math.max(1, Math.ceil(usage.seconds ?? 0))),
+  } as never;
+  const router = { selectCandidates: vi.fn(async () => []), decryptUpstreamKey: vi.fn(async () => ({})) } as never;
+  // @ts-expect-error mock 不实现完整接口。
+  const svc = new RelayService(prisma, pricing, credits, router);
+  return { svc, prisma, credits, pricing, expectedCredits };
+}
+
+describe('RelayService.videoGenerations 按秒计费', () => {
+  it('成功按秒扣费：0.5 灵石/秒 × 30 秒 = 15 灵石，reserve+reconcile 各一次', async () => {
+    const { svc, credits, pricing, expectedCredits } = buildVideo(30);
+    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 30 });
+    expect(out).toMatchObject({ charged: true, credits: expectedCredits, seconds: 30 });
+    expect(pricing.lookupPrice).toHaveBeenCalledWith(expect.objectContaining({ capability: 'video', model: 'video_generate' }));
+    expect(credits.reserve).toHaveBeenCalledTimes(1);
+    expect(credits.reconcile).toHaveBeenCalledTimes(1);
+    expect(credits.refund).not.toHaveBeenCalled();
+  });
+
+  it('小数秒数向上取整：45.2 秒 → 46 秒，扣 0.5×46=23 灵石', async () => {
+    const { svc, expectedCredits } = buildVideo(45.2);
+    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 45.2 });
+    expect(out.seconds).toBe(46);
+    expect(out.credits).toBe(expectedCredits);
+  });
+
+  it('0 秒 clamp 到 1 秒（防白嫖）', async () => {
+    const { svc } = buildVideo(0);
+    const out = await svc.videoGenerations(makeReq(), { model: 'fast', seconds: 0 });
+    expect(out.seconds).toBe(1);
+  });
+
+  it('余额不足（reserve 抛 402）：finalize status=insufficient_balance，不调 reconcile', async () => {
+    const { svc, credits, prisma } = buildVideo(60, { reserveThrows: true });
+    await expect(svc.videoGenerations(makeReq(), { model: 'fast', seconds: 60 })).rejects.toMatchObject({ code: 'insufficient_balance' });
+    expect(credits.reconcile).not.toHaveBeenCalled();
+    const updateData = prisma.llmCallLog.update.mock.calls[0]?.[0]?.data;
+    expect(updateData).toMatchObject({ status: 'insufficient_balance', errorCode: 'insufficient_balance' });
+  });
+
+  it('无定价抛 503 no_pricing 且不建计费日志', async () => {
+    const prisma = { llmCallLog: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() } } as never;
+    const credits = makeCredits(10);
+    const pricing = { lookupPrice: vi.fn(async () => null), lookupMinContextWindow: vi.fn(async () => null), computeCredits: vi.fn() } as never;
+    const router = { selectCandidates: vi.fn(), decryptUpstreamKey: vi.fn() } as never;
+    // @ts-expect-error mock
+    const svc = new RelayService(prisma, pricing, credits, router);
+    await expect(svc.videoGenerations(makeReq(), { model: 'fast', seconds: 10 })).rejects.toMatchObject({ status: 503, code: 'no_pricing' });
+    expect(prisma.llmCallLog.create).not.toHaveBeenCalled();
+  });
+
+  it('LlmCallLog 记 capability=video + requestSummary 含 seconds（审计）', async () => {
+    const { svc, prisma } = buildVideo(20);
+    await svc.videoGenerations(makeReq(), { model: 'premium', seconds: 20 });
+    const data = prisma.llmCallLog.create.mock.calls[0]?.[0]?.data;
+    expect(data).toMatchObject({ capability: 'video', tier: 'PREMIUM', model: 'video_generate' });
+    expect(data.requestSummary).toMatchObject({ seconds: 20, tier: 'PREMIUM' });
+  });
+});
+
+describe('RelayService.refundVideo 视频退款', () => {
+  it('凭 call_log_id 调 refundConsumed 退款，finalize status=refunded', async () => {
+    const { svc, credits, prisma } = buildVideo(10);
+    credits.refundConsumed.mockResolvedValueOnce(5);
+    const out = await svc.refundVideo(makeReq(), { call_log_id: 'vlog1' });
+    expect(out).toMatchObject({ refunded: true, credits: 5, call_log_id: 'vlog1' });
+    expect(credits.refundConsumed).toHaveBeenCalledTimes(1);
+    expect(prisma.llmCallLog.update).toHaveBeenCalled();
+  });
+
+  it('缺 call_log_id → 400 bad_request', async () => {
+    const { svc } = buildVideo(10);
+    await expect(svc.refundVideo(makeReq(), {})).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+  });
+
+  it('call_log 不属于当前团队 → 404 not_found', async () => {
+    const { svc, prisma } = buildVideo(10);
+    prisma.llmCallLog.findFirst.mockResolvedValueOnce(null);
+    await expect(svc.refundVideo(makeReq(), { call_log_id: 'other' })).rejects.toMatchObject({ status: 404, code: 'not_found' });
+  });
+
+  it('已退过（refundConsumed 返回 0）不重复 finalize', async () => {
+    const { svc, credits, prisma } = buildVideo(10);
+    credits.refundConsumed.mockResolvedValueOnce(0);
+    const out = await svc.refundVideo(makeReq(), { call_log_id: 'vlog1' });
+    expect(out.refunded).toBe(false);
+    expect(prisma.llmCallLog.update).not.toHaveBeenCalled();
   });
 });

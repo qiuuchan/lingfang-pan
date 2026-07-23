@@ -294,6 +294,103 @@ export class RelayService {
     });
   }
 
+  /**
+   * POST /api/relay/v1/videos/generations —— 视频生成按秒计费（精简编排，不接渠道路由/上游转发）。
+   *
+   * 与 chat/image 的 executeRelay 区别：视频上游是外部 RBFLow（由桌面桥代理转发，不进 relay），
+   * relay 只负责灵石账本（reserve→reconcile 两阶段）。PER_SECOND 单价 × 秒数。
+   *
+   * seconds 由插件 ffprobe 探测后上报（MVP 信任 + 审计）；relay clamp 到 ≥1 秒防 0 秒白嫖。
+   * 视频无上游 token usage，故 reserve(cap=实扣额) 后直接 reconcile(实扣额)（净效果=实扣）。
+   */
+  async videoGenerations(req: Request, body: Record<string, unknown>) {
+    const auth = this.requireAuth(req);
+    const tier = wireToTier(String(body.model ?? 'fast'));
+    // 秒数：向上取整 + clamp ≥1（防 0/负值白嫖）。
+    const seconds = Math.max(1, Math.ceil(Number(body.seconds) || 0));
+    const startedAt = Date.now();
+    const requestId = (req.header('x-request-id') || undefined) as string | undefined;
+    const clientIp = extractClientIp(req);
+    const clientSource = clientSourceFromRequest(req);
+
+    // 查视频单价（capability='video', model='video_generate'，tier 可空）。
+    const price = await this.pricing.lookupPrice({ capability: 'video', model: 'video_generate', tier });
+    if (!price) {
+      throw new AppError(503, 'no_pricing', '视频生成未配置定价（请联系管理员在价目表配置 video/video_generate）');
+    }
+
+    // 实扣额 = PER_SECOND 单价 × 秒数（computeCredits 内部已 clamp seconds≥1）。
+    const totalCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, { seconds });
+
+    // 建 pending LlmCallLog（capability='video'；seconds 记入 requestSummary 供审计；images=1 表一个视频）。
+    const pendingLog = await this.prisma.llmCallLog.create({
+      data: {
+        teamId: auth.teamId,
+        userId: auth.userId,
+        capability: 'video',
+        tier,
+        model: 'video_generate',
+        status: 'reserve',
+        requestId,
+        requestSummary: { seconds, tier, model: body.model ?? 'fast' } as never,
+        clientIp,
+        clientSource,
+        credits: 0,
+      },
+    });
+
+    // 预扣：cap=实扣额（视频固定价，无事后用量校准，故 cap=real，净效果=实扣）。
+    let finalized = false;
+    const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; credits: number }) => {
+      if (finalized) return;
+      finalized = true;
+      try {
+        await this.finalizeLog(pendingLog.id, { ...args, channelId: null, model: 'video_generate', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 1 }, credits: args.credits });
+      } catch { /* finalize 失败不阻断主流程 */ }
+    };
+
+    try {
+      await this.credits.reserve(auth.teamId, totalCredits, pendingLog.id, auth.userId);
+    } catch (e) {
+      await ensureFinalized({ status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, credits: 0 });
+      throw e; // AppError(402) 透传给桥→插件
+    }
+
+    // 实算：cap=real=totalCredits，reconcile 净效果=实扣 totalCredits。
+    const charged = await this.credits.reconcile(auth.teamId, totalCredits, totalCredits, pendingLog.id, auth.userId);
+    await ensureFinalized({ status: 'success', errorCode: null, httpStatus: 200, credits: charged });
+
+    // 返回扣费票据（桥转发 RBFLow 成功后关联此 call_log_id；失败时凭此退款）。
+    return { charged: true, credits: charged, call_log_id: pendingLog.id, seconds, request_id: requestId };
+  }
+
+  /**
+   * POST /api/relay/v1/videos/refund —— 视频生成转发失败退款（凭 call_log_id 退已实扣灵石）。
+   *
+   * 场景：桥 /video/generate 先经 videoGenerations 扣费成功 → 转发 RBFLow 失败 → 调本端点退回。
+   * 幂等：同一 call_log_id 只退一次（CreditService.refundConsumed 用 source='video_refund' 标记防重）。
+   */
+  async refundVideo(req: Request, body: Record<string, unknown>) {
+    const auth = this.requireAuth(req);
+    const callLogId = String(body.call_log_id ?? '').trim();
+    if (!callLogId) {
+      throw new AppError(400, 'bad_request', '缺少 call_log_id');
+    }
+    // 校验 callLog 归属当前团队（防跨团队退款）。
+    const log = await this.prisma.llmCallLog.findFirst({
+      where: { id: callLogId, teamId: auth.teamId },
+      select: { id: true, status: true, credits: true },
+    });
+    if (!log) {
+      throw new AppError(404, 'not_found', '扣费记录不存在或不属于当前团队');
+    }
+    const refunded = await this.credits.refundConsumed(auth.teamId, callLogId, auth.userId, '视频生成转发失败退款');
+    if (refunded > 0) {
+      await this.finalizeLog(callLogId, { status: 'refunded', errorCode: 'video_forward_failed', httpStatus: null, channelId: null, model: 'video_generate', durationMs: 0, usage: { inputTokens: 0, outputTokens: 0, images: 1 }, credits: 0 });
+    }
+    return { refunded: refunded > 0, credits: refunded, call_log_id: callLogId };
+  }
+
   // === 内部：统一编排 ===
 
   private requireAuth(req: Request): RelayAuth {
