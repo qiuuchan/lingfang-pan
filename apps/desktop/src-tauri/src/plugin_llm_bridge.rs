@@ -799,36 +799,15 @@ fn percent_decode(input: &str) -> String {
 }
 
 // ============================================================================
-// 视频生成（RBFLow 代理转发 + 防绕过计费）
+// 视频生成（平台 relay 代理 RBFLow + 防绕过计费）
 //
-// 安全模型：插件进程**不持有任何 RBFLow 凭证**。RBFLow 的 URL + API-KEY 是平台运营实例的
-// 配置，由桌面进程从环境变量 LINGFANG_RBFLOW_URL / LINGFANG_RBFLOW_API_KEY 读取（桌面进程 env，
-// 绝不注入到插件子进程 env —— plugin_runner.rs 用 env_clear + minimal_env 白名单保证）。
+// 安全模型：插件进程和桌面进程都不持有 RBFLow 凭证。RBFLow 的 URL + API-KEY 由平台后台
+// PlatformSetting 维护，collab-api relay 在计费成功后读取并代理转发。
 //
-// 数据流：插件 POST /video/generate → 桥先经 relay /api/relay/v1/videos/generations 按秒计费 →
-// 计费成功后注入平台 RBFLow 凭证转发 multipart 到 RBFLow POST /api/v1/tasks → 返回 {task_id, call_log_id}。
-// 计费失败(402) 不转发；转发失败则调 relay /api/relay/v1/videos/refund 退款。
+// 数据流：插件 POST /video/generate → 桥做本地 token/capability gate → relay
+// /api/relay/v1/videos/generations 按秒计费 + 注入后台 RBFLow 凭证转发 → 返回 {task_id, call_log_id}。
+// 计费失败(402) 不转发；转发失败由 relay 内部退款。
 // ============================================================================
-
-/// 平台运营 RBFLow 实例的凭证（桌面进程 env，非插件 env）。
-struct RbflowCredential {
-    url: String,
-    api_key: String,
-}
-
-/// 读取平台 RBFLow 凭证。缺失说明平台未配 RBFLow（部署错误）。
-fn read_rbflow_credential() -> Result<RbflowCredential, String> {
-    let url = std::env::var("LINGFANG_RBFLOW_URL")
-        .map(|v| v.trim().trim_end_matches('/').to_string())
-        .map_err(|_| "未配置 LINGFANG_RBFLOW_URL".to_string())?;
-    let api_key = std::env::var("LINGFANG_RBFLOW_API_KEY")
-        .map(|v| v.trim().to_string())
-        .map_err(|_| "未配置 LINGFANG_RBFLOW_API_KEY".to_string())?;
-    if url.is_empty() || api_key.is_empty() {
-        return Err("RBFLow 凭证为空".to_string());
-    }
-    Ok(RbflowCredential { url, api_key })
-}
 
 /// 构建 RBFLow 提交 multipart（POST /api/v1/tasks）：
 /// 两个 file part（image + video，字段名固定 image/video，与 RBFLow 工作流节点字段对齐）
@@ -922,10 +901,9 @@ fn video_mime_for(filename: &str) -> &'static str {
 }
 
 /// POST /video/generate：gate → 平台 session → 解析 image/video/seconds/tier →
-/// **先 relay 按秒计费**（402 透传不转发）→ **计费成功注入平台 RBFLow 凭证转发 multipart** →
-/// 转发失败调 relay 退款 → 返回 {task_id, call_log_id, charged, credits}。
+/// relay 按秒计费 + 后台配置 RBFLow 凭证代理转发 → 返回 {task_id, call_log_id, charged, credits}。
 ///
-/// 防绕过：插件不持有 RBFLow 凭证，无法绕过桥直连 RBFLow；计费与转发原子绑定在桥内。
+/// 防绕过：插件/桌面都不持有 RBFLow 凭证，无法绕过平台 relay 直连 RBFLow；计费与转发在后端原子绑定。
 fn route_video_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
     if !session.allow_video_generate {
         return Err(BridgeError::new(
@@ -990,149 +968,40 @@ fn route_video_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
         .unwrap_or_else(|| video_mime_for(&video_filename).to_string());
     let callback_url = body.get("callback_url").and_then(Value::as_str);
 
-    // 1) 先经 relay 按秒计费。relay_post_json 对非 2xx（含 402 insufficient_balance）转 BridgeError 抛出，
-    //    402 直接透传给插件（插件拦截不提交）。
-    let charge = relay_post_json(
+    // relay 接管：后端读取 PlatformSetting.rbflowUrl/rbflowApiKey，先扣费再代理 RBFLow。
+    // 桥只转发插件素材和本地 session，不读任何 LINGFANG_RBFLOW_* 环境变量。
+    let mut relay_body = json!({
+        "image": image_b64,
+        "video": video_b64,
+        "image_filename": image_filename,
+        "video_filename": video_filename,
+        "image_mime_type": image_mime,
+        "video_mime_type": video_mime,
+        "seconds": seconds,
+        "model": tier,
+    });
+    if let Some(cb) = callback_url.filter(|v| !v.trim().is_empty()) {
+        relay_body["callback_url"] = Value::String(cb.to_string());
+    }
+    let out = relay_post_json_timeout(
         session,
         "/api/relay/v1/videos/generations",
-        &json!({ "model": tier, "seconds": seconds }),
+        &relay_body,
+        Duration::from_secs(600),
     )?;
-    let call_log_id = charge
-        .get("call_log_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let credits = charge.get("credits").cloned().unwrap_or(Value::Null);
-    if call_log_id.is_empty() {
-        return Err(BridgeError::new(
-            502,
-            "relay_response_invalid",
-            "平台计费响应缺少 call_log_id",
-        ));
-    }
-
-    // 2) 计费成功 → 解码素材字节。
-    let image_bytes = decode_required_base64("image", image_b64)?;
-    let video_bytes = decode_required_base64("video", video_b64)?;
-
-    // 3) 读平台 RBFLow 凭证。缺失则**先退款再报错**（凭证缺失是部署错误，不能扣费无服务）。
-    let rbflow = match read_rbflow_credential() {
-        Ok(rbflow) => rbflow,
-        Err(reason) => {
-            refund_video_silent(session, &call_log_id, &format!("rbflow_not_configured: {reason}"));
-            return Err(BridgeError::new(
-                503,
-                "rbflow_not_configured",
-                format!("平台未配置 RBFLow 视频服务：{reason}"),
-            ));
-        }
-    };
-
-    // 4) 转发 multipart 到平台运营 RBFLow POST /api/v1/tasks（注入 X-API-Key）。
-    let (multipart_body, content_type) = build_rbflow_multipart(
-        &image_filename,
-        &image_mime,
-        &image_bytes,
-        &video_filename,
-        &video_mime,
-        &video_bytes,
-        callback_url,
-    );
-    let rbflow_url = format!("{}/api/v1/tasks", rbflow.url);
-    let rbflow_resp = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(600))
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new())
-        .post(&rbflow_url)
-        .header("X-API-Key", &rbflow.api_key)
-        .header("Content-Type", content_type)
-        .header("X-Client", session.client_source.x_client())
-        .body(multipart_body)
-        .send();
-    let rbflow_resp = match rbflow_resp {
-        Ok(resp) => resp,
-        Err(error) => {
-            // 转发失败（RBFLow 宕机/不可达）→ 退款，避免扣费无服务。
-            refund_video_silent(session, &call_log_id, &format!("rbflow_forward_failed: {error}"));
-            return Err(BridgeError::new(
-                502,
-                "rbflow_forward_failed",
-                format!("转发到 RBFLow 失败：{error}"),
-            ));
-        }
-    };
-    let rbflow_status = rbflow_resp.status();
-    let rbflow_text = rbflow_resp.text().unwrap_or_default();
-    if !rbflow_status.is_success() {
-        refund_video_silent(
-            session,
-            &call_log_id,
-            &format!("rbflow_forward_failed: HTTP {}", rbflow_status.as_u16()),
-        );
-        // 附 RBFLow 错误信息供插件展示（不暴露内部敏感细节，仅状态码与可读消息）。
-        let message = serde_json::from_str::<Value>(&rbflow_text)
-            .ok()
-            .and_then(|v| {
-                v.get("detail")
-                    .and_then(Value::as_str)
-                    .or_else(|| v.get("message").and_then(Value::as_str))
-                    .map(String::from)
-            })
-            .unwrap_or_else(|| format!("RBFLow 返回 HTTP {}", rbflow_status.as_u16()));
-        return Err(BridgeError::new(
-            502,
-            "rbflow_forward_failed",
-            format!("RBFLow 任务创建失败：{message}"),
-        ));
-    }
-
-    // 5) 转发成功 → 取 task_id 返回扣费票据。
-    let rbflow_json: Value = serde_json::from_str(&rbflow_text).map_err(|_| {
-        BridgeError::new(
-            502,
-            "rbflow_response_invalid",
-            "RBFLow 响应不是有效 JSON",
-        )
-    })?;
-    let task_id = rbflow_json
+    let task_id = out
         .get("task_id")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
     if task_id.is_empty() {
-        refund_video_silent(session, &call_log_id, "rbflow_response_missing_task_id");
         return Err(BridgeError::new(
             502,
-            "rbflow_response_invalid",
-            "RBFLow 响应缺少 task_id",
+            "relay_response_invalid",
+            "平台视频服务响应缺少 task_id",
         ));
     }
-    Ok(json!({
-        "task_id": task_id,
-        "call_log_id": call_log_id,
-        "charged": true,
-        "credits": credits,
-    }))
-}
-
-/// 静默退款（转发失败时调）：失败仅记 warn，不阻塞主错误返回（凭 call_log_id 幂等）。
-fn refund_video_silent(session: &BridgeSession, call_log_id: &str, reason: &str) {
-    if call_log_id.is_empty() {
-        return;
-    }
-    match relay_post_json(
-        session,
-        "/api/relay/v1/videos/refund",
-        &json!({ "call_log_id": call_log_id }),
-    ) {
-        Ok(_) => eprintln!(
-            "[video-bridge] 退款成功 call_log_id={call_log_id} reason={reason}"
-        ),
-        Err(error) => eprintln!(
-            "[video-bridge] 退款失败 call_log_id={call_log_id} reason={reason} refund_error={}({})",
-            error.code, error.message
-        ),
-    }
+    Ok(out)
 }
 
 /// GET /video/stream?task_id=X：注入平台 RBFLow key 代理 RBFLow `GET /api/v1/tasks/{id}/stream`。
@@ -1152,7 +1021,7 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
     let task_id = sanitize_task_id(query_first(full_path, "task_id").ok_or_else(|| {
         BridgeError::new(400, "bad_request", "video.stream 缺少 task_id")
     })?)?;
-    let rbflow = read_rbflow_credential().map_err(|reason| {
+    let rbflow = read_rbflow_credential(session).map_err(|reason| {
         BridgeError::new(
             503,
             "rbflow_not_configured",
@@ -1243,7 +1112,7 @@ fn route_video_download(session: &BridgeSession, full_path: &str) -> BridgeResul
     let task_id = sanitize_task_id(query_first(full_path, "task_id").ok_or_else(|| {
         BridgeError::new(400, "bad_request", "video.download 缺少 task_id")
     })?)?;
-    let rbflow = read_rbflow_credential().map_err(|reason| {
+    let rbflow = read_rbflow_credential(session).map_err(|reason| {
         BridgeError::new(
             503,
             "rbflow_not_configured",
@@ -1557,6 +1426,68 @@ fn relay_get_json(session: &BridgeSession, path: &str) -> BridgeResult<Value> {
             .with_request_id(request_id.clone())
         })?;
     relay_response_json(response, &request_id)
+}
+
+/// 转发 JSON 到平台 relay，带自定义超时（视频生成等耗时调用用，默认 blocking_client 的 180s 不够）。
+/// 与 relay_post_json 的区别：用独立 Client builder 指定 timeout，而非复用 180s 的 blocking_client。
+fn relay_post_json_timeout(
+    session: &BridgeSession,
+    path: &str,
+    body: &Value,
+    timeout: Duration,
+) -> BridgeResult<Value> {
+    let request_id = Uuid::new_v4().to_string();
+    let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new());
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("X-Client", session.client_source.x_client())
+        .header("X-Request-Id", &request_id)
+        .bearer_auth(&session.auth_token)
+        .json(body)
+        .send()
+        .map_err(|_| {
+            BridgeError::new(
+                502,
+                "relay_request_failed",
+                "无法连接平台视频服务，请稍后重试",
+            )
+            .with_request_id(request_id.clone())
+        })?;
+    relay_response_json(response, &request_id)
+}
+
+/// 从平台 relay /api/relay/v1/rbflow-config 读取 RBFLow 服务配置（url + api_key）。
+///
+/// 桥**不读任何环境变量**——RBFLow 凭证由后台管理 PlatformSetting 维护，relay 端点返回。
+/// bridge 持有此配置用于 stream/download 代理转发（generate 路径由 relay 内部转发，不经此函数）。
+/// 桥是 localhost 服务端进程，持有 api_key 转发是安全的；插件进程永远拿不到（不回传给插件）。
+struct RbflowCredentials {
+    url: String,
+    api_key: String,
+}
+
+fn read_rbflow_credential(session: &BridgeSession) -> Result<RbflowCredentials, String> {
+    let data = relay_get_json(session, "/api/relay/v1/rbflow-config")
+        .map_err(|e| format!("读取 RBFLow 配置失败：{}", e.message))?;
+    let url = data
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let api_key = data
+        .get("api_key")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if url.is_empty() {
+        return Err("RBFLow 服务未配置（请在后台管理「设置」填写 RBFLow 地址）".to_string());
+    }
+    Ok(RbflowCredentials { url, api_key })
 }
 
 /// 解析平台 relay 响应：保留产品错误码、状态、消息和 requestId，不透出供应商响应细节。
@@ -2341,109 +2272,70 @@ mod tests {
     }
 
     #[test]
-    fn route_video_generate_billing_402_does_not_forward_to_rbflow() {
-        // relay 计费返回 402 insufficient_balance → 桥直接透传 402，不读 RBFLow env、不转发。
-        // (计费失败必不转发；插件拦截不提交。)
-        let _guard = RBFLOW_ENV_GUARD.lock().unwrap();
+    fn route_video_generate_forwards_full_body_to_relay_and_returns_task_id() {
+        // 新架构：桥把完整请求（image/video/seconds/model）转发到 relay /api/relay/v1/videos/generations，
+        // relay 内部完成计费 + RBFLow 转发 + 退款。桥只透传 relay 响应，不读任何 RBFLow 凭证。
+        let (endpoint, request_rx) = spawn_relay_response(
+            200,
+            json!({ "task_id": "rh-task-1", "call_log_id": "vlog-1", "charged": true, "credits": 5 }),
+        );
+        let session = video_session(endpoint, true);
+        let body = serde_json::to_vec(&json!({
+            "image": "aGk=", "video": "Ymo=", "seconds": 10, "model": "fast"
+        }))
+        .unwrap();
+        let out = route_video_generate(&session, body).expect("relay 200 应返回成功");
+        assert_eq!(out["task_id"], "rh-task-1");
+        assert_eq!(out["call_log_id"], "vlog-1");
+        assert_eq!(out["charged"], true);
+        // 验证桥转发了完整 body（含 image/video/seconds/model）到 relay。
+        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到转发请求");
+        assert!(request.path.starts_with("/api/relay/v1/videos/generations"));
+        let fwd_body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(fwd_body["model"], "fast");
+        assert_eq!(fwd_body["seconds"].as_f64(), Some(10.0));
+        assert_eq!(fwd_body["image"], "aGk=");
+        assert_eq!(fwd_body["video"], "Ymo=");
+    }
+
+    #[test]
+    fn route_video_generate_billing_402_passthrough_from_relay() {
+        // relay 返回 402 insufficient_balance（计费失败，relay 内部不转发 RBFLow）→ 桥透传 402 给插件。
+        // 桥本身不做任何 RBFLow 操作（不读 env、不退款——这些都在 relay 内部）。
         let (endpoint, request_rx) = spawn_relay_response(
             402,
             json!({ "code": "insufficient_balance", "message": "团队额度不足", "requestId": "req-bill" }),
         );
-        // 临时设置 RBFLow env（验证计费失败路径不触碰它）。
-        std::env::set_var("LINGFANG_RBFLOW_URL", "http://127.0.0.1:1");
-        std::env::set_var("LINGFANG_RBFLOW_API_KEY", "should-not-be-used");
         let session = video_session(endpoint, true);
         let body = serde_json::to_vec(&json!({
             "image": "aGk=", "video": "Ymo=", "seconds": 30, "model": "fast"
         }))
         .unwrap();
         let error = route_video_generate(&session, body).unwrap_err();
-        std::env::remove_var("LINGFANG_RBFLOW_URL");
-        std::env::remove_var("LINGFANG_RBFLOW_API_KEY");
         assert_eq!(error.status, 402);
         assert_eq!(error.code, "insufficient_balance");
         assert_eq!(error.message, "团队额度不足");
-        // 仅收到一次计费请求（/api/relay/v1/videos/generations）。
-        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到计费请求");
+        // 桥只发了一次请求（转发给 relay），relay 内部处理退款（不经桥）。
+        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到转发请求");
         assert!(request.path.starts_with("/api/relay/v1/videos/generations"));
-        let bill_body: Value = serde_json::from_slice(&request.body).unwrap();
-        assert_eq!(bill_body["model"], "fast");
-        // seconds 透传（桥不 clamp，relay 侧 clamp≥1）；按数值比较兼容整数/浮点表示。
-        assert_eq!(bill_body["seconds"].as_f64(), Some(30.0));
-    }
-
-    /// 启动一个多请求测试 relay：按收到的请求顺序返回预设响应，并收集所有请求。
-    fn spawn_relay_sequence(responses: Vec<(u16, Value)>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<HttpRequest>>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("应启动测试 relay");
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
-        let captured_clone = std::sync::Arc::clone(&captured);
-        thread::spawn(move || {
-            for (status, body) in responses {
-                if let Ok((mut stream, _)) = listener.accept() {
-                    if let Ok(request) = read_request(&mut stream) {
-                        captured_clone.lock().unwrap().push(request);
-                    }
-                    let _ = stream.write_all(http_json(status, &body).as_bytes());
-                    let _ = stream.flush();
-                }
-            }
-        });
-        (endpoint, captured)
     }
 
     #[test]
-    fn route_video_generate_refunds_when_rbflow_not_configured() {
-        // 计费成功 → RBFLow 凭证缺失（部署错误）→ 应**先退款再报 503**，避免扣费无服务。
-        let _guard = RBFLOW_ENV_GUARD.lock().unwrap();
-        std::env::remove_var("LINGFANG_RBFLOW_URL");
-        std::env::remove_var("LINGFANG_RBFLOW_API_KEY");
-        let (endpoint, captured) = spawn_relay_sequence(vec![
-            // 1) 计费成功
-            (200, json!({ "charged": true, "credits": 5, "call_log_id": "vlog-refund", "seconds": 10, "request_id": "req-1" })),
-            // 2) 退款成功
-            (200, json!({ "refunded": true, "credits": 5, "call_log_id": "vlog-refund" })),
-        ]);
-        let session = video_session(endpoint, true);
+    fn route_video_generate_relay_forward_error_passthrough() {
+        // relay 转发 RBFLow 失败（relay 内部已退款）→ 返回 502 rbflow_forward_failed → 桥透传给插件。
+        // 退款由 relay 内部完成（relay 侧测试覆盖），桥不参与退款逻辑。
+        let (_endpoint, _request_rx) = spawn_relay_response(
+            502,
+            json!({ "code": "rbflow_forward_failed", "message": "RBFLow 服务转发失败", "requestId": "req-fwd" }),
+        );
+        let session = video_session(_endpoint, true);
         let body = serde_json::to_vec(&json!({
             "image": "aGk=", "video": "Ymo=", "seconds": 10, "model": "fast"
         }))
         .unwrap();
         let error = route_video_generate(&session, body).unwrap_err();
-        assert_eq!(error.status, 503);
-        assert_eq!(error.code, "rbflow_not_configured");
-        let captured = captured.lock().unwrap();
-        assert_eq!(captured.len(), 2, "应收到计费 + 退款两个请求");
-        assert!(captured[0].path.starts_with("/api/relay/v1/videos/generations"));
-        assert!(captured[1].path.starts_with("/api/relay/v1/videos/refund"));
-        let refund_body: Value = serde_json::from_slice(&captured[1].body).unwrap();
-        assert_eq!(refund_body["call_log_id"], "vlog-refund");
-    }
-
-    #[test]
-    fn route_video_generate_refunds_on_rbflow_forward_failure() {
-        // 计费成功 + RBFLow 凭证已配 → 但 RBFLow 实例不可达（连接失败）→ 应退款并报 502。
-        let _guard = RBFLOW_ENV_GUARD.lock().unwrap();
-        // 用一个几乎必然不可达的地址（端口 0 不可连；reqwest blocking 会失败）。
-        std::env::set_var("LINGFANG_RBFLOW_URL", "http://127.0.0.1:9");
-        std::env::set_var("LINGFANG_RBFLOW_API_KEY", "test-key");
-        let (endpoint, captured) = spawn_relay_sequence(vec![
-            (200, json!({ "charged": true, "credits": 5, "call_log_id": "vlog-fwd", "seconds": 10, "request_id": "req-1" })),
-            (200, json!({ "refunded": true, "credits": 5, "call_log_id": "vlog-fwd" })),
-        ]);
-        let session = video_session(endpoint, true);
-        let body = serde_json::to_vec(&json!({
-            "image": "aGk=", "video": "Ymo=", "seconds": 10, "model": "fast"
-        }))
-        .unwrap();
-        let error = route_video_generate(&session, body).unwrap_err();
-        std::env::remove_var("LINGFANG_RBFLOW_URL");
-        std::env::remove_var("LINGFANG_RBFLOW_API_KEY");
         assert_eq!(error.status, 502);
         assert_eq!(error.code, "rbflow_forward_failed");
-        let captured = captured.lock().unwrap();
-        assert_eq!(captured.len(), 2, "应收到计费 + 退款两个请求");
-        assert!(captured[1].path.starts_with("/api/relay/v1/videos/refund"));
     }
 
     #[test]
@@ -2451,6 +2343,8 @@ mod tests {
         // 防绕过审计：minimal_env() 是插件进程 env 白名单，断言不含 LINGFANG_RBFLOW_*，
         // 也不含任何 TOKEN/KEY 类宿主密钥。即使桌面进程设置了这些 env，env_clear 也会清掉。
         // （minimal_env 是 plugin_runner.rs 的白名单；plugin_script.rs 复用同一函数。）
+        // 注意：RBFLow 凭证现已从后台管理 PlatformSetting 读取（relay rbflow-config 端点），
+        // 桌面进程 env 也不再有 LINGFANG_RBFLOW_*，但本测试仍断言白名单不包含它们（双保险）。
         let _guard = RBFLOW_ENV_GUARD.lock().unwrap();
         // 设置一个「宿主」RBFLow env，确认它不进白名单。
         std::env::set_var("LINGFANG_RBFLOW_URL", "http://rbflow.internal");

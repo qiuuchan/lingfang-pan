@@ -11,6 +11,7 @@ import {
   ShieldCheckIcon,
   GitBranchIcon,
   Loader2Icon,
+  FilmIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -93,6 +94,18 @@ const EMPTY_GITEE: GiteeSettings = {
   hasAccessToken: false,
 };
 
+// 组F RBFLow 视频生成服务配置：从 GET /api/admin/settings/rbflow 加载。
+// rbflowUrl 明文（非密钥），rbflowApiKey 脱敏（hasApiKey 布尔）。
+type RbflowSettings = {
+  rbflowUrl: string;
+  hasApiKey: boolean;
+};
+
+const EMPTY_RBFLOW: RbflowSettings = {
+  rbflowUrl: '',
+  hasApiKey: false,
+};
+
 // 组E 搜索源：searxngUrl 明文 + tavily/brave 密钥脱敏（hasXxx 布尔）。
 type SearchSettings = {
   searxngUrl: string;
@@ -116,7 +129,7 @@ const cardVariant = {
 };
 
 export function SettingsView() {
-  const [activeTab, setActiveTab] = useState<'basic' | 'email' | 'security' | 'release' | 'search'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'email' | 'security' | 'release' | 'search' | 'video'>('basic');
   const loadedTabs = useRef(new Set<string>());
   const { mode, setTheme } = useTheme();
   // 平台信息：从云端 GET /api/platform-info（公开扁平端点）加载 platformName/logoUrl。
@@ -155,6 +168,14 @@ export function SettingsView() {
   const [giteeLoading, setGiteeLoading] = useState(true);
   const [giteeSaving, setGiteeSaving] = useState(false);
   const [giteeTesting, setGiteeTesting] = useState(false);
+
+  // 组F RBFLow 视频生成服务：从 GET /api/admin/settings/rbflow 加载（rbflowUrl 明文，rbflowApiKey 脱敏）。
+  const [rbflow, setRbflow] = useState<RbflowSettings>(EMPTY_RBFLOW);
+  const [rbflowDraft, setRbflowDraft] = useState<RbflowSettings>(EMPTY_RBFLOW);
+  const [rbflowApiKeyDraft, setRbflowApiKeyDraft] = useState('');
+  const [rbflowLoading, setRbflowLoading] = useState(true);
+  const [rbflowSaving, setRbflowSaving] = useState(false);
+  const [rbflowTesting, setRbflowTesting] = useState(false);
 
   // 组E 搜索源：searxngUrl 明文 + tavily/brave 密钥脱敏。AI 联网搜索的源配置。
   // 密钥 Draft 仅在输入新值时非空（留空保持不变，与 Gitee token 同款约定）。
@@ -230,6 +251,20 @@ export function SettingsView() {
       })
       .finally(() => {
         if (!cancelled) setGiteeLoading(false);
+      });
+    if (activeTab === 'video') api<RbflowSettings>('/api/admin/settings/rbflow')
+      .then((data) => {
+        if (cancelled) return;
+        const next = { ...EMPTY_RBFLOW, ...data };
+        setRbflow(next);
+        setRbflowDraft(next);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        toast.error(`RBFLow 配置加载失败：${(e as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setRbflowLoading(false);
       });
     if (activeTab === 'search') api<SearchSettings>('/api/admin/settings/search')
       .then((data) => {
@@ -460,11 +495,61 @@ export function SettingsView() {
     }
   }
 
+  // 组F RBFLow：保存配置（rbflowUrl/rbflowApiKey 批量 upsert）。
+  // rbflowUrl 始终提交；rbflowApiKey 仅在 admin 输入新值时提交（留空保持不变，与 Gitee token 同款）。
+  async function saveRbflowSettings() {
+    setRbflowSaving(true);
+    try {
+      const entries: Array<{ key: string; value: string }> = [
+        { key: 'rbflowUrl', value: rbflowDraft.rbflowUrl.trim() },
+      ];
+      if (rbflowApiKeyDraft.length > 0) entries.push({ key: 'rbflowApiKey', value: rbflowApiKeyDraft });
+      await api('/api/admin/settings', { method: 'PATCH', body: { settings: entries } });
+      setRbflow({
+        ...rbflowDraft,
+        hasApiKey: rbflowApiKeyDraft.length > 0 ? true : rbflowDraft.hasApiKey,
+      });
+      setRbflowDraft((prev) => ({
+        ...prev,
+        hasApiKey: rbflowApiKeyDraft.length > 0 ? true : prev.hasApiKey,
+      }));
+      setRbflowApiKeyDraft('');
+      toast.success('RBFLow 配置已保存');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRbflowSaving(false);
+    }
+  }
+
+  // 组F RBFLow：测试连通性（POST /api/admin/settings/test-rbflow，探测 /api/v1/health）。
+  async function testRbflow() {
+    if (
+      rbflowDraft.rbflowUrl.trim() !== rbflow.rbflowUrl ||
+      rbflowApiKeyDraft.length > 0
+    ) {
+      return toast.error('配置已修改，请先保存再测试');
+    }
+    setRbflowTesting(true);
+    try {
+      const result = await api<{ ok: boolean; configured: boolean; message: string }>(
+        '/api/admin/settings/test-rbflow',
+        { method: 'POST' },
+      );
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRbflowTesting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
     <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
       <TabsList className="max-w-full overflow-x-auto">
-        <TabsTrigger value="basic">基础</TabsTrigger><TabsTrigger value="email">邮件</TabsTrigger><TabsTrigger value="security">安全</TabsTrigger><TabsTrigger value="release">发布源</TabsTrigger><TabsTrigger value="search">搜索</TabsTrigger>
+        <TabsTrigger value="basic">基础</TabsTrigger><TabsTrigger value="email">邮件</TabsTrigger><TabsTrigger value="security">安全</TabsTrigger><TabsTrigger value="release">发布源</TabsTrigger><TabsTrigger value="search">搜索</TabsTrigger><TabsTrigger value="video">视频</TabsTrigger>
       </TabsList>
     </Tabs>
     <motion.div
@@ -961,6 +1046,102 @@ export function SettingsView() {
                 : gitee.hasAccessToken
                   ? `Gitee 已配置 · ${gitee.giteeOwner || 'yijianruyuan'}/${gitee.giteeRepo || 'lingfang'}`
                   : 'Gitee 未配置 · 更新日志降级显示「未配置」'}
+            </Badge>
+          </div>
+        </Section>
+      </motion.div>
+
+      {/* 组F RBFLow 视频生成服务（rbflowUrl 明文 + rbflowApiKey 脱敏 + 测试连通性） */}
+      <motion.div variants={cardVariant} className={activeTab === 'video' ? undefined : 'hidden'}>
+        <Section
+          title="RBFLow 视频生成服务"
+          description="动作迁移视频生成插件（RunningHub WanAnimateToVideo）连接的平台运营 RBFLow 实例。配置服务地址与 API-KEY，插件经平台桥代理转发（按秒扣灵石），用户不可见也无法绕过计费直连。"
+        >
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <FilmIcon className="size-3.5" />
+            <span>
+              RBFLow 是封装 RunningHub ComfyUI 工作流的 FastAPI 服务。API-KEY 对应 RBFLow 实例 .env 的
+              <code className="mx-1 rounded bg-muted px-1">API_KEY</code>（服务端转发用，绝不公开）。地址留空则视频插件报「未配置」。
+            </span>
+          </div>
+
+          {/* 编辑表单：rbflowUrl 明文，rbflowApiKey password 脱敏 */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="rbflow-url">RBFLow 服务地址</Label>
+              <Input
+                id="rbflow-url"
+                value={rbflowDraft.rbflowUrl}
+                onChange={(e) => setRbflowDraft({ ...rbflowDraft, rbflowUrl: e.target.value })}
+                placeholder="http://rbflow.internal:41792"
+                disabled={rbflowLoading}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">平台运营的 RBFLow 实例 Base URL（含端口，不带尾部斜杠）。</p>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="rbflow-key">RBFLow API-KEY（静态密钥）</Label>
+              <Input
+                id="rbflow-key"
+                type="password"
+                value={rbflowApiKeyDraft}
+                onChange={(e) => setRbflowApiKeyDraft(e.target.value)}
+                placeholder={rbflowDraft.hasApiKey ? '已配置，留空保持不变' : '（未配置，视频插件将报「未配置」）'}
+                disabled={rbflowLoading}
+                autoComplete="new-password"
+              />
+              <p className="text-xs text-muted-foreground">
+                {rbflowDraft.hasApiKey
+                  ? '当前已配置密钥，留空提交则保持原密钥不变。'
+                  : '对应 RBFLow 实例 .env 的 API_KEY。仅服务端转发用，绝不公开。'}
+              </p>
+              {rbflowDraft.hasApiKey && (
+                <RevealSecretButton secretKey="rbflowApiKey" label="查看 API-KEY 明文" hasConfigured={rbflowDraft.hasApiKey} />
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRbflowDraft(rbflow);
+                setRbflowApiKeyDraft('');
+              }}
+              disabled={rbflowLoading || rbflowSaving}
+            >
+              重置
+            </Button>
+            <Button onClick={saveRbflowSettings} disabled={rbflowLoading || rbflowSaving}>
+              <SaveIcon className="mr-1 size-4" />
+              {rbflowSaving ? '保存中…' : '保存 RBFLow 配置'}
+            </Button>
+          </div>
+
+          {/* 测试连通性：调 /api/admin/settings/test-rbflow → 探测 /api/v1/health */}
+          <div className="mt-4 rounded-xl border bg-muted/20 p-4">
+            <div className="mb-2 text-sm font-medium">测试连通性</div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <p className="flex-1 text-xs text-muted-foreground">
+                点击后后端会读已保存的服务地址向 RBFLow
+                <code className="mx-1 rounded bg-muted px-1">/api/v1/health</code>
+                发探测请求，校验服务存活与地址正确性。
+              </p>
+              <Button onClick={testRbflow} disabled={rbflowTesting || rbflowLoading || rbflowSaving} className="sm:mb-[1px]">
+                <FilmIcon className="mr-1 size-4" />
+                {rbflowTesting ? '测试中…' : '测试 RBFLow'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <Badge variant="outline" className="text-muted-foreground">
+              {rbflowLoading
+                ? '配置加载中…'
+                : rbflow.rbflowUrl
+                  ? `RBFLow 已配置 · ${rbflow.rbflowUrl}${rbflow.hasApiKey ? ' · API-KEY 已设' : ' · 未设 API-KEY'}`
+                  : 'RBFLow 未配置 · 视频插件将报「未配置」'}
             </Badge>
           </div>
         </Section>

@@ -16,11 +16,20 @@
 本插件**不持有任何 RBFLow / RunningHub 凭证**。视频生成经平台桥 `/video/generate` 代理转发到平台运营的 RBFLow 实例：
 
 1. 插件调用桥 `/video/generate`（带 image+video+seconds）
-2. 桥**先按秒扣灵石**（relay `videoGenerations`，reserve→reconcile 两阶段）
-3. 计费成功后，桥注入平台 RBFLow 凭证，转发到 RBFLow `POST /api/v1/tasks`
+2. 桥转发到 relay `videoGenerations`，**先按秒扣灵石**（reserve→reconcile 两阶段）
+3. 计费成功后，relay 读取后台管理的 RBFLow 凭证，转发到 RBFLow `POST /api/v1/tasks`
 4. 转发失败则自动退款（relay `refundVideo`，凭 `call_log_id`，幂等）
 
-插件进程 env 仅有 `LINGFANG_PLUGIN_BRIDGE_URL` / `LINGFANG_PLUGIN_BRIDGE_TOKEN`（桌面注入），**不含** RBFLow 地址或密钥。用户物理上无法绕过灵石计费直连 RBFLow。
+插件进程 env 仅有 `LINGFANG_PLUGIN_BRIDGE_URL` / `LINGFANG_PLUGIN_BRIDGE_TOKEN`（桌面注入），**不含** RBFLow 地址或密钥。RBFLow 凭证由**平台管理员在后台管理「设置 → 视频」配置**（PlatformSetting 表）。用户物理上无法绕过灵石计费直连 RBFLow。
+
+### 后台配置（管理员）
+
+在灵坊后台管理「设置 → 视频」标签页配置：
+- **RBFLow 服务地址**：平台运营的 RBFLow 实例 URL（含端口，如 `http://rbflow.internal:41792`）
+- **RBFLow API-KEY**：对应 RBFLow 实例 `.env` 的 `API_KEY`（密钥脱敏，可用 reveal-secret 查看明文）
+- **测试连通**：探测 RBFLow `/api/v1/health` 校验服务存活
+
+未配置时视频插件报「RBFLow 服务未配置」。
 
 ## 使用
 

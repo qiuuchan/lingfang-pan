@@ -391,6 +391,29 @@ export class RelayService {
     return { refunded: refunded > 0, credits: refunded, call_log_id: callLogId };
   }
 
+  /**
+   * GET /api/relay/v1/rbflow-config —— 读 RBFLow 服务配置（供桌面桥转发 RBFLow 任务用）。
+   *
+   * 已登录用户（RelayTeamGuard）即可调用——桥转发本身已先扣了灵石，读配置不需要 platform admin。
+   * 返回 { url, api_key } 明文（含 api_key）：桥是 localhost 服务端进程，持有它转发 RBFLow 是安全的；
+   * 插件进程永远拿不到（插件只跟桥的 localhost 通信，桥的 /video/* 路由不回传此配置给插件）。
+   * 未配置 url → 503 rbflow_not_configured（桥据此返回给插件明确错误）。
+   */
+  async getRbflowConfig(req: Request) {
+    this.requireAuth(req);
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['rbflowUrl', 'rbflowApiKey'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    const url = (map.get('rbflowUrl') ?? '').trim();
+    const apiKey = map.get('rbflowApiKey') ?? '';
+    if (!url) {
+      throw new AppError(503, 'rbflow_not_configured', 'RBFLow 服务未配置（请在后台管理「设置」填写 RBFLow 地址）');
+    }
+    return { url, api_key: apiKey };
+  }
+
   // === 内部：统一编排 ===
 
   private requireAuth(req: Request): RelayAuth {
