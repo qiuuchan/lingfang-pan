@@ -37,8 +37,9 @@ function defaultEntryForRuntime(runtime: StagedPlugin['runtime_type']): string {
 
 const KNOWN_CAPABILITY_KINDS = new Set([
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch', 'clipboard',
-  'llm.chat', 'image.generate', 'storage.kv', 'system.info',
+  'llm.chat', 'image.generate', 'image.edit', 'storage.kv', 'system.info',
   'system.screenshot', 'system.notify', 'plugin.upload', 'plugin.submitMarketplace',
+  'video.generate',
 ]);
 
 function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {

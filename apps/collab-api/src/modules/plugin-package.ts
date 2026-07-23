@@ -77,9 +77,10 @@ const RUNTIME_TYPE_MAP: Record<string, 'CLIENT' | 'CLOUD' | 'NODEJS' | 'PYTHON'>
 };
 const ALLOWED_CAPABILITIES = new Set([
   'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
+  'clipboard', 'llm.chat', 'image.generate', 'image.edit', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
+  'video.generate',
 ]);
 const ALLOWED_CAPABILITY_RISKS = new Set(['none', 'low', 'medium', 'high']);
 

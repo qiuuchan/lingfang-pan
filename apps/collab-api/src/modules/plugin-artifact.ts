@@ -34,6 +34,7 @@ const CAPABILITY_KINDS = [
   'clipboard', 'llm.chat', 'image.generate', 'image.edit', 'storage.kv',
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
+  'video.generate',
 ] as const;
 const CAPABILITY_RISKS = ['none', 'low', 'medium', 'high'] as const;
 
