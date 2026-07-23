@@ -177,12 +177,45 @@ def bridge_download_video(task_id: str, timeout=(10, 300)) -> dict:
 
 
 # ==================== 视频时长探测（ffprobe，信任插件 + 审计） ====================
+def _ffprobe_path() -> str | None:
+    """定位 ffprobe 可执行文件。
+
+    优先级：
+    1. 环境变量 LINGFANG_FFPROBE_PATH（桌面壳可显式注入内置 ffprobe 路径）
+    2. PATH 中的 ffprobe/ffprobe.exe
+    3. 桌面端内置 runtimes（相对插件目录向上找 apps/desktop/runtimes/ffmpeg）
+    """
+    # 1. 显式注入
+    explicit = os.environ.get("LINGFANG_FFPROBE_PATH")
+    if explicit and os.path.isfile(explicit):
+        return explicit
+    exe = "ffprobe.exe" if sys.platform == "win32" else "ffprobe"
+    # 2. PATH 中查找
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    # 3. 桌面内置 runtimes（开发态：插件在 plugins/rbflow-video，内置在 apps/desktop/runtimes）
+    candidates = [
+        PLUGIN_DIR.parent.parent / "apps" / "desktop" / "runtimes" / "ffmpeg" / exe,
+        PLUGIN_DIR / "runtimes" / "ffmpeg" / exe,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
 def probe_duration_seconds(video_path: str) -> float:
-    """用 ffprobe 探测视频时长（秒）。失败回退到 ffmpeg-python，再失败返回 10（保守默认）。"""
-    # 优先 ffprobe（subprocess，最快）
+    """用 ffprobe 探测视频时长（秒）。找不到 ffprobe 或探测失败抛异常（不静默兜底，避免计费不准）。"""
+    ffprobe = _ffprobe_path()
+    if not ffprobe:
+        raise RuntimeError(
+            "未找到 ffprobe（视频时长探测需要）。请在系统 PATH 安装 ffmpeg，"
+            "或确保灵坊桌面端内置 runtimes 可用。"
+        )
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", video_path],
             capture_output=True, text=True, timeout=15,
         )
@@ -190,22 +223,11 @@ def probe_duration_seconds(video_path: str) -> float:
             dur = float(result.stdout.strip())
             if dur > 0:
                 return dur
-    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
-        pass
-
-    # 回退 ffmpeg-python
-    try:
-        import ffmpeg
-        probe = ffmpeg.probe(video_path)
-        dur = float(probe.get("format", {}).get("duration", 0))
-        if dur > 0:
-            return dur
-    except Exception:
-        pass
-
-    # 最终兜底：保守 10 秒（避免 0 秒白嫖嫌疑 + 让任务能提交）
-    logging.warning(f"无法探测视频时长，使用保守默认 10 秒: {video_path}")
-    return 10.0
+        raise RuntimeError(f"ffprobe 返回异常（exit={result.returncode}）: {result.stderr.strip()[:200]}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("ffprobe 探测超时（15s）")
+    except ValueError:
+        raise RuntimeError(f"ffprobe 返回非数字时长: {result.stdout.strip()[:100]}")
 
 
 # ==================== 任务模型 + 持久化 ====================
@@ -334,14 +356,15 @@ class SubmitWorker(QThread):
             if self._stop:
                 break
             pair_id = f"{int(time.time() * 1000)}_{submitted}_{os.path.basename(img_path)[:8]}"
-            seconds = probe_duration_seconds(vid_path)
             task = Task(
                 pair_id=pair_id, image_path=img_path, video_path=vid_path,
-                seconds=seconds, tier=self.tier, image_category=img_cat,
+                seconds=0, tier=self.tier, image_category=img_cat,
                 created_at=datetime.now().isoformat(timespec="seconds"),
             )
             task.touch()
             try:
+                seconds = probe_duration_seconds(vid_path)
+                task.seconds = seconds
                 self.log.emit(f"提交 {os.path.basename(img_path)} × {os.path.basename(vid_path)}（{seconds:.0f}秒）...")
                 result = bridge_submit_video(img_path, vid_path, seconds, self.tier)
                 task.rbflow_task_id = result.get("task_id", "")
@@ -497,7 +520,7 @@ class TaskCardWidget(QWidget):
         lay.addWidget(self.thumb)
 
         # 信息列
-        info = QVBoxLayout(self)
+        info = QVBoxLayout()
         info.setSpacing(2)
         self.name_label = QLabel(self._name_text(), self)
         self.name_label.setObjectName("TaskFilename")
@@ -514,12 +537,12 @@ class TaskCardWidget(QWidget):
         lay.addLayout(info, 1)
 
         # 状态 + 操作
-        right = QVBoxLayout(self)
+        right = QVBoxLayout()
         right.setSpacing(4)
         self.badge = StatusBadge(task.state, self)
         right.addWidget(self.badge, alignment=Qt.AlignRight)
 
-        ops = QHBoxLayout(self)
+        ops = QHBoxLayout()
         ops.setSpacing(2)
         self.btn_retry = QPushButton("↻", self)
         self.btn_retry.setObjectName("IconBtn")
@@ -1190,13 +1213,17 @@ class MainWindow(QMainWindow):
         imgs = self.image_panel.selected_items()
         vids = self.video_panel.selected_videos()
         n = len(imgs) * len(vids)
-        total_sec = 0.0
-        for _, v in [(img, vid) for img in imgs for vid in vids]:
-            total_sec += probe_duration_seconds(v)
-        cost = total_sec * 0.5
-        self.info_label.setText(
-            f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · 预计 {total_sec:.0f}秒 · 约 {cost:.1f} 灵石"
-        )
+        # 预估时长：探测可能失败（ffprobe 缺失），失败时显示「时长未知」不崩 UI。
+        try:
+            total_sec = sum(probe_duration_seconds(v) for _, v in [(img, vid) for img in imgs for vid in vids])
+            cost = total_sec * 0.5
+            self.info_label.setText(
+                f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · 预计 {total_sec:.0f}秒 · 约 {cost:.1f} 灵石"
+            )
+        except Exception as e:
+            self.info_label.setText(
+                f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · ⚠ 无法预估时长：{e}"
+            )
 
     # ---------- 提交 ----------
     def _on_submit(self):
@@ -1211,12 +1238,14 @@ class MainWindow(QMainWindow):
 
         pairs = [(img_path, vid, img_cat) for (img_path, img_cat) in imgs for vid in vids]
         n = len(pairs)
-        total_sec = sum(probe_duration_seconds(v) for _, v, _ in pairs)
-        cost = total_sec * 0.5
-        if QMessageBox.question(
-            self, "确认提交",
-            f"将生成 {n} 个任务（{total_sec:.0f} 秒），预计消耗约 {cost:.1f} 灵石。\n继续？"
-        ) != QMessageBox.Yes:
+        # 预估总时长/灵石；探测失败时仍允许提交（SubmitWorker 会逐个探测并失败提示）。
+        try:
+            total_sec = sum(probe_duration_seconds(v) for _, v, _ in pairs)
+            cost = total_sec * 0.5
+            preview = f"将生成 {n} 个任务（共 {total_sec:.0f} 秒），预计消耗约 {cost:.1f} 灵石。"
+        except Exception as e:
+            preview = f"将生成 {n} 个任务。⚠ 无法预估时长（{e}），实际计费以各视频实际秒数为准。"
+        if QMessageBox.question(self, "确认提交", preview + "\n继续？") != QMessageBox.Yes:
             return
 
         tier = self.tier_combo.currentText()
@@ -1242,6 +1271,10 @@ class MainWindow(QMainWindow):
             self.store.add(task)
         self.queue_panel.refresh()
         logging.error(f"任务失败 {pair_id}: {err}")
+        # 首个失败弹窗提示（避免每个失败都弹，批量时太吵）；后续失败汇总到状态栏。
+        if not getattr(self, "_first_fail_shown", False):
+            self._first_fail_shown = True
+            QMessageBox.warning(self, "任务失败", f"生成失败：{err}\n\n详情见任务卡片，完整错误已写入 data/app.log")
 
     def _on_billing_blocked(self, msg: str):
         QMessageBox.warning(self, "余额不足", msg)
@@ -1249,7 +1282,14 @@ class MainWindow(QMainWindow):
     def _on_submit_finished(self, submitted: int, failed: int):
         self.btn_submit.setEnabled(True)
         self.btn_submit.setText("🚀 提交生成")
-        self.status_bar.showMessage(f"提交完成：成功 {submitted}，失败 {failed}", 5000)
+        self._first_fail_shown = False  # 重置，下次提交再允许首失败弹窗
+        if failed > 0:
+            # 有失败：状态栏持久红色提示（不自动消失）
+            self.status_bar.setStyleSheet("color: #f38ba8;")
+            self.status_bar.showMessage(f"⚠ 提交完成：成功 {submitted}，失败 {failed}（见任务卡片 / data/app.log）", 0)
+        else:
+            self.status_bar.setStyleSheet("")
+            self.status_bar.showMessage(f"✓ 提交完成：{submitted} 个任务已加入队列", 5000)
 
     # ---------- 进度 ----------
     def _start_progress(self, task: Task):
@@ -1300,6 +1340,8 @@ class MainWindow(QMainWindow):
         task.finished_at = datetime.now().isoformat(timespec="seconds")
         self.store.update(task)
         self.queue_panel.update_task_card(task)
+        # 进度阶段失败（任务跑了一半挂了）弹窗提示用户
+        QMessageBox.warning(self, "生成失败", f"{os.path.basename(task.image_path)} × {os.path.basename(task.video_path)}\n失败原因：{reason}")
         if self.queue_panel.auto_retry():
             self._on_retry_task(pair_id)
 
@@ -1327,12 +1369,14 @@ class MainWindow(QMainWindow):
             task.state = STATE_SUCCESS
             self.store.update(task)
             self.queue_panel.update_task_card(task)
-            self.status_bar.showMessage(f"已保存：{dest}", 5000)
+            self.status_bar.setStyleSheet("")
+            self.status_bar.showMessage(f"✓ 已保存：{dest}", 5000)
         except Exception as e:
             logging.error(f"下载落盘失败 {task.pair_id}: {e}")
             task.error_msg = f"下载失败: {e}"
             self.store.update(task)
             self.queue_panel.update_task_card(task)
+            QMessageBox.warning(self, "下载失败", f"视频已生成但保存失败：{e}\n\n可在任务卡片点「💾 另存为」重试。")
 
     # ---------- 卡片操作 ----------
     def _on_retry_task(self, pair_id: str):

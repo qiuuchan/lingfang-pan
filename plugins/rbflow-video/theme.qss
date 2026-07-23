@@ -36,6 +36,21 @@ QFrame#Panel {
     border-radius: 10px;
 }
 
+/* ---- 三栏分割器（QSplitter）---- */
+QSplitter {
+    background-color: transparent;
+}
+QSplitter::handle:horizontal {
+    background-color: #181825;
+    width: 3px;
+    margin: 8px 1px;
+    border-radius: 1px;
+}
+QSplitter::handle:horizontal:hover {
+    background-color: #89b4fa;
+    width: 4px;
+}
+
 QLabel#PanelTitle {
     font-size: 14px;
     font-weight: 600;
