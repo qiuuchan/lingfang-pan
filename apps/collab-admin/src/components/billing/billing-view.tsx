@@ -44,7 +44,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label>能力</Label>
-          <Select value={form.capability} onValueChange={(v) => patch({ capability: v, model: '' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : '固定动作'}</SelectItem>)}</SelectContent></Select>
+          <Select value={form.capability} onValueChange={(v) => patch({ capability: v, model: '' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : c === 'video' ? '视频' : '固定动作'}</SelectItem>)}</SelectContent></Select>
         </div>
         <div className="space-y-2"><Label>版本（可选）</Label>
           <Select value={form.tier ?? '__none__'} onValueChange={(v) => patch({ tier: v === '__none__' ? null : (v as ModelTier) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不限版本</SelectItem><SelectItem value="FAST">快速版</SelectItem><SelectItem value="PREMIUM">高级版</SelectItem></SelectContent></Select>
@@ -58,7 +58,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
               <SelectContent>{modelOptions.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}</SelectContent>
             </Select>
           ) : (
-            <Input placeholder="动作 key，如 create_plugin_session" value={form.model} onChange={(e) => patch({ model: e.target.value })} />
+            <Input placeholder={form.capability === 'video' ? '视频 key，如 video_generate' : '动作 key，如 create_plugin_session'} value={form.model} onChange={(e) => patch({ model: e.target.value })} />
           )}
         </div>
         <div className="space-y-2"><Label>展示名</Label><Input value={form.label} onChange={(e) => patch({ label: e.target.value })} /></div>
@@ -79,7 +79,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
 
 export function BillingView() {
   const [pricing, setPricing] = useState<ModelPricing[]>([]);
-  const load = () => api<{ pricing: ModelPricing[] }>('/api/admin/billing/pricing').then((r) => setPricing(r.pricing));
+  const load = () => api<{ items: ModelPricing[]; pricing?: ModelPricing[] }>('/api/admin/billing/pricing').then((r) => setPricing(r.items ?? r.pricing ?? []));
   useLoad(load);
 
   async function remove(p: ModelPricing) {
