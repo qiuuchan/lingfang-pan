@@ -15,10 +15,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { ModelPricing, PricingUnit, ModelTier } from '@/lib/types';
 
 const UNIT_LABEL: Record<PricingUnit, string> = {
-  PER_TOKEN_INPUT: '每1M输入token', PER_TOKEN_OUTPUT: '每1M输出token', PER_CALL: '每次', PER_IMAGE: '每张',
+  PER_TOKEN_INPUT: '每1M输入token', PER_TOKEN_OUTPUT: '每1M输出token', PER_CALL: '每次', PER_IMAGE: '每张', PER_SECOND: '每秒',
 };
-const CAPABILITIES = ['chat', 'image', 'action'] as const;
-const UNITS: PricingUnit[] = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE'];
+const CAPABILITIES = ['chat', 'image', 'action', 'video'] as const;
+const UNITS: PricingUnit[] = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE', 'PER_SECOND'];
 
 function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => void }) {
   const patch = (n: Partial<any>) => setForm({ ...form, ...n });
@@ -26,7 +26,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
   // 渠道是配置源——定价的下拉选项 = 渠道已配的 models（去重）。allowCustom 兜底手输不在列表的值。
   const [channelModels, setChannelModels] = useState<string[]>([]);
   useEffect(() => {
-    if (form.capability === 'action') { setChannelModels([]); return; }
+    if (form.capability === 'action' || form.capability === 'video') { setChannelModels([]); return; }
     const kind = form.capability === 'chat' ? 'CHAT' : 'IMAGE';
     let mounted = true;
     api<{ channels: { models: string[] }[] }>(`/api/admin/billing/channels?kind=${kind}`)
@@ -34,7 +34,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
       .catch(() => { if (mounted) setChannelModels([]); });
     return () => { mounted = false; };
   }, [form.capability]);
-  // 模型字段：chat/image 用下拉（渠道模型集合）；action 用 Input（动作 key 自由填）。
+  // 模型字段：chat/image 用下拉（渠道模型集合）；action/video 用 Input（动作/视频 key 自由填）。
   const isModelSelect = form.capability === 'chat' || form.capability === 'image';
   // 当前值若不在列表（如编辑存量定价、或渠道未配该模型），加进去避免 Select 显示空。
   const modelOptions = isModelSelect && form.model && !channelModels.includes(form.model)

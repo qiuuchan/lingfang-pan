@@ -90,7 +90,7 @@ export type PluginGrantSubject = 'USER' | 'ROLE';
 export type ChannelProtocol = 'OPENAI' | 'ANTHROPIC';
 export type ChannelKind = 'CHAT' | 'IMAGE';
 export type ChannelStatus = 'ENABLED' | 'DISABLED';
-export type PricingUnit = 'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE';
+export type PricingUnit = 'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE' | 'PER_SECOND';
 export type ModelTier = 'FAST' | 'PREMIUM';
 export type PoolScope = 'SHARED' | 'DEDICATED';
 
@@ -130,7 +130,7 @@ export type Channel = {
 
 export type ModelPricing = {
   id: string;
-  capability: 'chat' | 'image' | 'action';
+  capability: 'chat' | 'image' | 'action' | 'video';
   model: string;
   label: string;
   unit: PricingUnit;
