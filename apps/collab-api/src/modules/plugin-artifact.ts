@@ -11,7 +11,7 @@ import {
 } from './plugin-ai-policy';
 import { parseStrictSemVer } from './plugin-semver';
 
-export const PLUGIN_ARTIFACT_MAX_BYTES = 300 * 1024 * 1024;
+export const PLUGIN_ARTIFACT_MAX_BYTES = 1024 * 1024 * 1024;
 export const PLUGIN_ARTIFACT_MAX_FILES = 1500;
 export const PLUGIN_ARTIFACT_MAX_FILE_BYTES = 60 * 1024 * 1024;
 export const PLUGIN_ARTIFACT_MAX_METADATA_BYTES = 256 * 1024;

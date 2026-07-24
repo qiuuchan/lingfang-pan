@@ -50,10 +50,10 @@ export type NormalizedPluginPackage = {
 
 // 上传限制（v3 起支持 vendored 大包 + 二进制）：
 // 文件数 1500（完整 vendored 上游源码树 + 模板/预览图可达上千文件，如 Pixelle-Video）、
-// 单文件 60MiB（字体/音频可达 ~55M）、总 300MiB（MPT 完整 ~200M）。
+// 单文件 60MiB（字体/音频可达 ~55M）、总 1GiB。
 const MAX_PLUGIN_FILES = 1500;
 const MAX_PLUGIN_FILE_BYTES = 60 * 1024 * 1024;
-const MAX_PLUGIN_TOTAL_BYTES = 300 * 1024 * 1024;
+const MAX_PLUGIN_TOTAL_BYTES = 1024 * 1024 * 1024;
 const MAX_MANIFEST_ID_LENGTH = 128;
 const MAX_MANIFEST_NAME_LENGTH = 128;
 const MAX_MANIFEST_DESCRIPTION_LENGTH = 4096;
