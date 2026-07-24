@@ -1004,11 +1004,11 @@ fn route_video_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
     Ok(out)
 }
 
-/// GET /video/stream?task_id=X：注入平台 RBFLow key 代理 RBFLow `GET /api/v1/tasks/{id}/stream`。
+/// GET /video/stream?task_id=X：查询 RBFLow 任务当前状态/进度（短轮询，非 SSE 流）。
 ///
-/// 返回类型约束：桥的 HTTP handler（handle_connection）仅支持 JSON Value 响应，无法做真 SSE 透传。
-/// 故 MVP 采用「聚合」方案：桥用 blocking reqwest 拉取 RBFLow 完整 SSE 文本，逐行解析成 JSON 事件数组，
-/// 返回 `{events: [...]}`。插件侧解析数组（非流），等价于 RBFLow 任务跑完后一次性回放所有事件。
+/// 原 MVP 用 SSE 流聚合，但桥的 reqwest 会阻塞到任务跑完（600s）→ 前台一直显示「等待」。
+/// 现改为短轮询：查 RBFLow `GET /api/v1/tasks/{id}`（立即返回当前 state/progress），
+/// 转成单个事件返回。插件 ProgressWorker 每 3 秒调一次，实现实时进度更新。
 fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<Value> {
     if !session.allow_video_generate {
         return Err(BridgeError::new(
@@ -1028,14 +1028,14 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
             format!("平台未配置 RBFLow 视频服务：{reason}"),
         )
     })?;
-    let url = format!("{}/api/v1/tasks/{}/stream", rbflow.url, task_id);
+    // 短超时查询任务当前状态（GET /api/v1/tasks/{id}，立即返回，不阻塞）。
+    let url = format!("{}/api/v1/tasks/{}", rbflow.url, task_id);
     let resp = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(600))
+        .timeout(Duration::from_secs(15))
         .build()
         .unwrap_or_else(|_| reqwest::blocking::Client::new())
         .get(&url)
         .header("X-API-Key", &rbflow.api_key)
-        .header("Accept", "text/event-stream")
         .header("X-Client", session.client_source.x_client())
         .send()
         .map_err(|error| {
@@ -1046,7 +1046,7 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
             )
         })?;
     let status = resp.status();
-    let text = resp.text().unwrap_or_default();
+    let body: Value = resp.json().unwrap_or(Value::Null);
     if !status.is_success() {
         return Err(BridgeError::new(
             502,
@@ -1054,8 +1054,34 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
             format!("RBFLow 进度服务返回 HTTP {}", status.as_u16()),
         ));
     }
-    // 解析 SSE 文本为事件数组。SSE 格式：事件以空行分隔，每事件多行 `field: value`。
-    let events = parse_sse_events(&text);
+    // RBFLow 任务查询返回 {task_id, state, progress, failed_reason, output_filename, ...}
+    // 转成插件期望的单事件数组（与 ProgressWorker 解析逻辑对齐）。
+    let t_state = body.get("state").and_then(Value::as_str).unwrap_or("RUNNING");
+    let t_progress = body.get("progress").and_then(Value::as_f64).unwrap_or(0.0);
+    let failed_reason = body.get("failed_reason").and_then(Value::as_str);
+    let output_filename = body.get("output_filename").and_then(Value::as_str);
+    let mut events = Vec::new();
+    if t_state == "SUCCESS" {
+        events.push(json!({
+            "type": "done",
+            "progress": 100.0,
+            "state": "SUCCESS",
+            "filename": output_filename.unwrap_or(""),
+        }));
+    } else if t_state == "FAILED" || t_state == "COMPLETED_DOWNLOAD_PENDING" {
+        events.push(json!({
+            "type": "error",
+            "state": t_state,
+            "reason": failed_reason.unwrap_or("生成失败"),
+        }));
+    } else {
+        // PENDING / QUEUED / RUNNING / UPLOADING / DOWNLOADING → progress 事件
+        events.push(json!({
+            "type": "progress",
+            "progress": t_progress,
+            "state": t_state,
+        }));
+    }
     Ok(json!({ "task_id": task_id, "events": events }))
 }
 

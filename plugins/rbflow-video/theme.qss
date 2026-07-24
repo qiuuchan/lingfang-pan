@@ -1,3 +1,14 @@
+/* ===================================================================
+ * 注意：本文件已不再在运行时加载。
+ *
+ * 从 v0.3.0 起，主题由 plugins/rbflow-video/main.py 的 build_qss()
+ * 动态生成（深色 DARK_COLORS / 亮色 LIGHT_COLORS 两套调色板 + f-string 模板），
+ * 以支持顶栏「☀/☾」深色/亮色主题切换。详见 main.py 中 build_qss()。
+ *
+ * 下方保留原始暗色（Catppuccin Mocha）样式作为深色主题的可读参考；
+ * 若要调整运行时样式，请改 main.py 的 build_qss()，而不是改本文件。
+ * =================================================================== */
+
 /* === RBFLow 视频生成插件 · 现代暗色主题（Catppuccin Mocha 系） === */
 
 * {
@@ -180,6 +191,16 @@ QListWidget#ImageList::item, QListWidget#VideoList::item {
     margin: 3px;
 }
 
+/* 任务列表 item：给选中态留 padding，避免选中背景覆盖卡片底部按钮 */
+QListWidget#TaskList::item {
+    padding: 3px;
+    margin: 1px 0px;
+    border-radius: 8px;
+}
+QListWidget#TaskList::item:selected {
+    background-color: #313244;
+}
+
 /* ---- 进度条 ---- */
 QProgressBar {
     background-color: #11111b;
@@ -270,6 +291,8 @@ QCheckBox {
     spacing: 6px;
     color: #cdd6f4;
 }
+/* 注意：运行时勾选标记由 build_qss() 注入白色对勾 SVG，这里 image:none 会导致某些平台
+   不显示勾——运行时样式已修复，本参考文件保留旧行为仅作历史对照。 */
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
@@ -280,7 +303,6 @@ QCheckBox::indicator {
 QCheckBox::indicator:checked {
     background-color: #89b4fa;
     border-color: #89b4fa;
-    image: none;
 }
 
 /* ---- 分组框 ---- */
