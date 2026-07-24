@@ -1460,18 +1460,17 @@ class VideoPanel(QFrame):
         btn_row.addWidget(btn_dir)
         lay.addLayout(btn_row)
 
-        self.list_widget = QListWidget(self)
+        self.list_widget = DropListWidget({".mp4", ".avi", ".mov", ".mkv", ".webm"}, self)
         self.list_widget.setObjectName("VideoList")
-        self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.list_widget.setSpacing(2)
+        # 和图片一样的大缩略图 IconMode
+        self.list_widget.setViewMode(QListWidget.IconMode)
+        self.list_widget.setIconSize(QSize(120, 80))
+        self.list_widget.setResizeMode(QListWidget.Adjust)
+        self.list_widget.setMovement(QListWidget.Static)
+        self.list_widget.setSpacing(4)
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
-        # 拖拽添加视频
-        self.list_widget.setAcceptDrops(True)
-        self.list_widget.setDragDropMode(QAbstractItemView.DropOnly)
-        self.list_widget.dragEnterEvent = self._drag_enter_event
-        self.list_widget.dragMoveEvent = self._drag_move_event
-        self.list_widget.dropEvent = self._drop_event
+        self.list_widget.files_dropped.connect(self._add_paths)
         # 双击预览视频（系统默认播放器）
         self.list_widget.itemDoubleClicked.connect(self._preview_video)
         # checkbox 勾选变化时更新计数 + 底部信息栏
@@ -1574,8 +1573,38 @@ class VideoPanel(QFrame):
             item.setToolTip(it["path"])
             item.setData(Qt.UserRole, it["path"])
             item.setCheckState(Qt.Checked if it["path"] in checked_paths else Qt.Unchecked)
+            # 生成视频缩略图（ffmpeg 提取第一帧）
+            pix = self._make_video_thumb(it["path"])
+            if pix:
+                item.setIcon(QIcon(pix))
             self.list_widget.addItem(item)
         self._update_count()
+
+    def _make_video_thumb(self, path: str) -> Optional[QPixmap]:
+        """用 ffmpeg 提取视频第一帧作为缩略图。"""
+        thumb_path = str(DATA_DIR / f"vthumb_{hash(path) & 0xFFFFFFFF}.jpg")
+        if not os.path.exists(thumb_path):
+            ffprobe = _ffprobe_path()
+            ffmpeg = ffprobe.replace("ffprobe", "ffmpeg") if ffprobe else shutil.which("ffmpeg")
+            if not ffmpeg:
+                return None
+            try:
+                subprocess.run(
+                    [ffmpeg, "-y", "-i", path, "-ss", "00:00:01", "-vframes", "1",
+                     "-vf", "scale=120:80:force_original_aspect_ratio=decrease",
+                     "-loglevel", "error", thumb_path],
+                    timeout=15, capture_output=True,
+                )
+            except Exception:
+                return None
+        try:
+            if os.path.exists(thumb_path):
+                pix = QPixmap(thumb_path)
+                if not pix.isNull():
+                    return pix
+        except Exception:
+            pass
+        return None
 
     def _checked_paths(self) -> list:
         return [self.list_widget.item(i).data(Qt.UserRole)
@@ -1667,6 +1696,7 @@ class QueuePanel(QFrame):
     retry_task = Signal(str)               # pair_id
     delete_task = Signal(str)              # pair_id
     saveas_task = Signal(str)              # pair_id
+    open_task = Signal(str)                # pair_id（双击打开已保存视频）
     reorder_requested = Signal(list)       # pair_ids in new order
     manual_refresh = Signal()              # 立即轮询所有非终态任务
 
@@ -1726,6 +1756,8 @@ class QueuePanel(QFrame):
         self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
         self.list_widget.setDefaultDropAction(Qt.MoveAction)
         self.list_widget.model().rowsMoved.connect(self._on_rows_moved)
+        # 双击任务卡片打开已保存的视频
+        self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         lay.addWidget(self.list_widget, 1)
 
         # 底部批量操作
@@ -1816,6 +1848,12 @@ class QueuePanel(QFrame):
     def _on_rows_moved(self):
         pair_ids = [self.list_widget.item(i).data(Qt.UserRole) for i in range(self.list_widget.count())]
         self.reorder_requested.emit(pair_ids)
+
+    def _on_item_double_clicked(self, item):
+        """双击任务卡片 → 打开已保存的视频。"""
+        pair_id = item.data(Qt.UserRole)
+        if pair_id:
+            self.open_task.emit(pair_id)
 
     def _clear_done(self):
         done = [t.pair_id for t in self.store.all_ordered() if t.state == STATE_SUCCESS]
@@ -2000,6 +2038,7 @@ class MainWindow(QMainWindow):
         self.queue_panel.retry_task.connect(self._on_retry_task)
         self.queue_panel.delete_task.connect(self._on_delete_task)
         self.queue_panel.saveas_task.connect(self._on_saveas_task)
+        self.queue_panel.open_task.connect(self._on_open_task)
         self.queue_panel.reorder_requested.connect(self.store.reorder)
         self.queue_panel.manual_refresh.connect(self._do_manual_refresh)
         # 「自动刷新」勾选变化时启停定时器
@@ -2315,6 +2354,19 @@ class MainWindow(QMainWindow):
         if dest:
             shutil.copy2(src, dest)
             self.status_bar.showMessage(f"已另存为：{dest}", 5000)
+
+    def _on_open_task(self, pair_id: str):
+        """双击任务卡片 → 用系统默认播放器打开已保存的视频。"""
+        task = self.store.tasks.get(pair_id)
+        if not task:
+            return
+        # 优先用已保存的文件；否则先下载
+        if not task.saved_path or not os.path.exists(task.saved_path):
+            self._download_and_save(task)
+        if task.saved_path and os.path.exists(task.saved_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(task.saved_path))
+        else:
+            QMessageBox.information(self, "暂无视频", "该任务还未生成视频，请等待完成。")
 
 
 # ==================== 入口 ====================

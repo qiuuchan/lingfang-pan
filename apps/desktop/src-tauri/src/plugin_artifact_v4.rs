@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
-pub(crate) const MAX_ARCHIVE_BYTES: u64 = 300 * 1024 * 1024;
-pub(crate) const MAX_UNCOMPRESSED_BYTES: u64 = 300 * 1024 * 1024;
+pub(crate) const MAX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+pub(crate) const MAX_UNCOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 60 * 1024 * 1024;
 pub(crate) const MAX_FILES: usize = 1500;
 const MAX_README_BYTES: u64 = 256 * 1024;
@@ -144,7 +144,7 @@ pub(crate) fn collect_workspace_source_files(
             .map_err(|error| format!("读取插件文件信息失败：{error}"))?
             .len();
         if size > MAX_UNCOMPRESSED_BYTES.saturating_sub(total) {
-            return Err("插件文件总量超过 300MiB".to_string());
+            return Err("插件文件总量超过 1GiB".to_string());
         }
         total += size;
         files.push((normalized, path));
@@ -226,7 +226,7 @@ pub(crate) fn package_workspace(
         .len();
     if size > MAX_ARCHIVE_BYTES {
         let _ = fs::remove_file(output);
-        return Err("插件压缩包超过 300MiB".to_string());
+        return Err("插件压缩包超过 1GiB".to_string());
     }
     inspect_artifact(output)
 }
@@ -314,7 +314,7 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
         }
         let declared_size = entry.size();
         if declared_size > MAX_UNCOMPRESSED_BYTES.saturating_sub(total) {
-            return Err("插件解压总量超过 300MiB".to_string());
+            return Err("插件解压总量超过 1GiB".to_string());
         }
         let read_limit = declared_size.saturating_add(1).min(MAX_FILE_BYTES + 1);
         if name == "README.md" && declared_size > MAX_README_BYTES {
@@ -342,7 +342,7 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
         }
         total = total.saturating_add(actual_size);
         if total > MAX_UNCOMPRESSED_BYTES {
-            return Err("插件解压总量超过 300MiB".to_string());
+            return Err("插件解压总量超过 1GiB".to_string());
         }
         if name == "README.md" {
             let buffer = metadata_buffer.expect("README entry was buffered above");
@@ -407,7 +407,7 @@ pub(crate) fn extract_artifact(
             let name = entry.name().to_string();
             let declared_size = entry.size();
             if declared_size > MAX_UNCOMPRESSED_BYTES.saturating_sub(total) {
-                return Err("插件解压总量超过 300MiB".to_string());
+                return Err("插件解压总量超过 1GiB".to_string());
             }
             let target = destination.join(relative);
             if let Some(parent) = target.parent() {
@@ -429,7 +429,7 @@ pub(crate) fn extract_artifact(
             }
             total = total.saturating_add(actual_size);
             if total > MAX_UNCOMPRESSED_BYTES {
-                return Err("插件解压总量超过 300MiB".to_string());
+                return Err("插件解压总量超过 1GiB".to_string());
             }
             output
                 .flush()

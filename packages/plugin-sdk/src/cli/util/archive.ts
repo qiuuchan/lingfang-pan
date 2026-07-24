@@ -17,8 +17,8 @@ import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 
 // 大小限制（与 plugin_artifact_v4.rs 第 12-15 行对齐）
-const MAX_ARCHIVE_BYTES = 300 * 1024 * 1024;
-const MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
 const MAX_FILE_BYTES = 60 * 1024 * 1024;
 const MAX_FILES = 1500;
 
