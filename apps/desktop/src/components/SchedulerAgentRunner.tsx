@@ -19,6 +19,9 @@ import { createAgentTools } from '@/lib/agent/tools';
 import type { ChatMessage, LoopCallbacks } from '@/lib/agent/types';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
 import { schedulerRecordRun } from '@/lib/local-scheduler';
+import { api } from '@/lib/api';
+import { loadInstalledPlugin } from '@/lib/plugin-registry';
+import { invokeInstalledPluginAction } from '@/lib/plugin-action-runtime';
 
 /** trigger 事件 payload。 */
 interface SchedulerTriggerPayload {
@@ -30,6 +33,15 @@ interface SchedulerTriggerPayload {
 /** cancel 事件 payload。 */
 interface SchedulerCancelPayload {
   run_id: string;
+}
+
+interface SchedulerPluginActionPayload {
+  task_id: string;
+  run_id: string;
+  started_at: string;
+  plugin_id: string;
+  action: string;
+  input: { input?: unknown };
 }
 
 /**
@@ -46,6 +58,7 @@ export function SchedulerAgentRunner() {
     // trigger 监听：启动 agent session。
     let unlistenTrigger: (() => void) | null = null;
     let unlistenCancel: (() => void) | null = null;
+    let unlistenPluginAction: (() => void) | null = null;
 
     (async () => {
       unlistenTrigger = await tauriListen<SchedulerTriggerPayload>(
@@ -66,11 +79,15 @@ export function SchedulerAgentRunner() {
           }
         },
       );
+      unlistenPluginAction = await tauriListen<SchedulerPluginActionPayload>('scheduler:plugin-action', (event) => {
+        void runPluginAction(event.payload);
+      });
     })();
 
     return () => {
       unlistenTrigger?.();
       unlistenCancel?.();
+      unlistenPluginAction?.();
       // 卸载时中止所有在跑的 session（应用关闭）。
       for (const controller of activeRef.current.values()) {
         controller.abort();
@@ -79,6 +96,29 @@ export function SchedulerAgentRunner() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function runPluginAction(payload: SchedulerPluginActionPayload) {
+    const { run_id: runId, task_id: taskId, started_at: startedAt } = payload;
+    try {
+      const plugin = await loadInstalledPlugin(payload.plugin_id);
+      if (!plugin.releaseId || !plugin.packageId) throw new Error('插件发行版身份不完整，无法调用 Action');
+      const manifest = plugin.manifest && typeof plugin.manifest === 'object' ? plugin.manifest as Record<string, unknown> : {};
+      const actions = await api<{ actions?: Array<Record<string, unknown>> }>(`/api/plugin-releases/${encodeURIComponent(plugin.releaseId)}/actions`);
+      const action = actions.actions?.find((item) => item.action_id === payload.action);
+      if (!action || typeof action.action_contract_version !== 'string') throw new Error(`插件未导出 Action：${payload.action}`);
+      const caller = {
+        ...plugin,
+        manifest: {
+          ...manifest,
+          action_dependencies: [{ dependency_id: `scheduler.${payload.action}`, package_id: plugin.packageId, release_version_range: `=${plugin.version}`, action_id: payload.action, action_contract_version_range: `=${action.action_contract_version}` }],
+        },
+      };
+      const output = await invokeInstalledPluginAction(caller, { dependency_id: `scheduler.${payload.action}`, input: payload.input?.input ?? {} });
+      await schedulerRecordRun({ id: runId, task_id: taskId, started_at: startedAt, finished_at: new Date().toISOString(), status: 'SUCCESS', error: null, output_summary: truncate(JSON.stringify(output), 2000) });
+    } catch (error) {
+      await schedulerRecordRun({ id: runId, task_id: taskId, started_at: startedAt, finished_at: new Date().toISOString(), status: 'FAILED', error: errorMessage(error), output_summary: null }).catch(() => undefined);
+    }
+  }
 
   /**
    * 跑一个无头 agent session。

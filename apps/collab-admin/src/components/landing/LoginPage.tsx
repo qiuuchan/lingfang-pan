@@ -39,6 +39,11 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   // 组C 极验 + 组D 云同步平台信息：platform-info 取 geetestCaptchaId（公开端点，后端配置了才显验证码）+
   // platformName（云同步展示平台名，登录页顶栏与标题用平台名而非硬编码）+ geetestScenes（场景开关）。
@@ -63,6 +68,20 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
       .catch(() => {
         /* 拉取失败不阻断登录 */
       });
+  }, []);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('reset_token');
+      if (!token) return;
+      setResetToken(token);
+      setResetOpen(true);
+      // Remove the secret from browser history while keeping the reset dialog open.
+      window.history.replaceState({}, '', window.location.pathname);
+    } catch {
+      /* Non-browser webviews may not expose location APIs. */
+    }
   }, []);
 
   /** 当前管理端场景是否启用验证码。 */
@@ -107,6 +126,30 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
       toast.error((e as Error).message);
     } finally {
       setForgotLoading(false);
+    }
+  }
+
+  async function onResetPassword() {
+    if (!resetToken) return toast.error('重置链接无效');
+    if (newPassword.length < 8) return toast.error('新密码至少 8 位');
+    if (newPassword !== confirmPassword) return toast.error('两次输入的密码不一致');
+    setResetLoading(true);
+    try {
+      await api('/api/auth/reset-password', {
+        auth: false,
+        method: 'POST',
+        body: { token: resetToken, newPassword },
+      });
+      toast.success('密码已重置，请使用新密码登录');
+      setResetOpen(false);
+      setResetToken('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPassword('');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setResetLoading(false);
     }
   }
 
@@ -274,6 +317,52 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
             <Button variant="outline" onClick={() => setForgotOpen(false)}>取消</Button>
             <Button onClick={onForgotPassword} disabled={forgotLoading}>
               {forgotLoading ? '发送中…' : '发送重置链接'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={resetOpen}
+        onOpenChange={(open) => {
+          if (!open && resetLoading) return;
+          setResetOpen(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重置管理员密码</DialogTitle>
+            <DialogDescription>设置一个至少 8 位的新密码，完成后返回登录。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <input
+              id="admin-reset-password"
+              name="new-password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="新密码（至少 8 位）"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
+              style={{ backgroundColor: 'var(--lf-bg-elevated)', borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg)' }}
+            />
+            <input
+              id="admin-reset-password-confirm"
+              name="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="确认新密码"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void onResetPassword()}
+              className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
+              style={{ backgroundColor: 'var(--lf-bg-elevated)', borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg)' }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetOpen(false)} disabled={resetLoading}>取消</Button>
+            <Button onClick={() => void onResetPassword()} disabled={resetLoading || !resetToken}>
+              {resetLoading ? '保存中…' : '重置密码'}
             </Button>
           </DialogFooter>
         </DialogContent>

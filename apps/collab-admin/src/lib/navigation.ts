@@ -15,6 +15,7 @@ import {
   UsersIcon,
   ZapIcon,
   TagIcon,
+  MapIcon,
 } from 'lucide-react';
 import type { View } from '@/lib/types';
 
@@ -68,6 +69,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: 'audit', label: '审计日志', icon: ActivityIcon },
       { view: 'releases', label: '版本发布', icon: RocketIcon },
       { view: 'settings', label: '平台设置', icon: SettingsIcon },
+      { view: 'roadmap', label: '未来规划', icon: MapIcon },
     ],
   },
 ];

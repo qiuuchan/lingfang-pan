@@ -67,6 +67,8 @@ interface AppContextValue {
   setCurrentDraft: (d: PluginDraft | null) => void;
   runningPlugin: LoadedPlugin | null;
   setRunningPlugin: (p: LoadedPlugin | null) => void;
+  clearRunningPlugin: (pluginId: string) => void;
+  runningPlugins: Record<string, LoadedPlugin>;
   pinnedPlugins: LoadedPlugin[];
   // 项 9：最近使用的插件（侧栏分区展示，按租户持久化 lf:recent:<tenantId>）。
   recentPlugins: LoadedPlugin[];
@@ -300,21 +302,25 @@ export default function App() {
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<PluginDraft | null>(null);
   const [runningPlugin, setRunningPluginState] = useState<LoadedPlugin | null>(null);
-  const runningPluginRequestRef = useRef(0);
+  const [runningPlugins, setRunningPlugins] = useState<Record<string, LoadedPlugin>>({});
+  const runningPluginRequestRef = useRef<Record<string, number>>({});
   const [pinnedPlugins, setPinnedPlugins] = useState<LoadedPlugin[]>([]);
   // 项 9：最近使用插件（与 pinnedPlugins 同构，按 tenantId 持久化隔离）。
   const [recentPlugins, setRecentPlugins] = useState<LoadedPlugin[]>([]);
   // 项 9：包装 setRunningPlugin —— 运行插件时记入「最近使用」（置顶、去重、限量 RECENT_MAX、按租户持久化）。
   // 保留 ctx 上 setRunningPlugin 原签名，所有现有调用方（Sidebar/Home/Plugins 等）自动走包装逻辑。
   const setRunningPlugin = useCallback((plugin: LoadedPlugin | null) => {
-    const requestId = ++runningPluginRequestRef.current;
     if (!plugin) {
       setRunningPluginState(null);
       return;
     }
+    const requestKey = plugin.installationId || plugin.id;
+    const requestId = (runningPluginRequestRef.current[requestKey] ?? 0) + 1;
+    runningPluginRequestRef.current[requestKey] = requestId;
     const commit = (prepared: LoadedPlugin) => {
-      if (runningPluginRequestRef.current !== requestId) return;
+      if (runningPluginRequestRef.current[requestKey] !== requestId) return;
       setRunningPluginState(prepared);
+      setRunningPlugins((prev) => ({ ...prev, [prepared.id]: prepared }));
       if (!prepared.installationId) return;
       setRecentPlugins((prev) => {
         const next = [prepared, ...prev.filter((item) => item.id !== prepared.id)].slice(0, RECENT_MAX);
@@ -327,7 +333,7 @@ export default function App() {
       return;
     }
 
-    const isCurrent = () => runningPluginRequestRef.current === requestId;
+    const isCurrent = () => runningPluginRequestRef.current[requestKey] === requestId;
     void (async () => {
       try {
         const installations = await listInstallations();
@@ -367,6 +373,15 @@ export default function App() {
       }
     })();
   }, [session.tenantId]);
+  const clearRunningPlugin = useCallback((pluginId: string) => {
+    setRunningPlugins((prev) => {
+      if (!prev[pluginId]) return prev;
+      const next = { ...prev };
+      delete next[pluginId];
+      return next;
+    });
+    setRunningPluginState((current) => current?.id === pluginId ? null : current);
+  }, []);
   // 项 9：从「最近使用」中移除指定插件（侧栏历史区删除按钮用）。
   const removeFromRecent = useCallback((pluginId: string) => {
     setRecentPlugins((prev) => {
@@ -834,7 +849,7 @@ export default function App() {
     session, applySession, applyCollabSession, refreshSession, resetSession,
     view, setView,
     currentDraft, setCurrentDraft,
-    runningPlugin, setRunningPlugin,
+    runningPlugin, setRunningPlugin, clearRunningPlugin, runningPlugins,
     pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned, removeFromRecent,
     settingsTab, setSettingsTab,
     openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,

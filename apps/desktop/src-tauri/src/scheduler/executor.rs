@@ -6,11 +6,12 @@
 //! 2. `spawn_executor_loop`：循环 try_claim_next。拿到任务则按 payload 分发：
 //!    - AGENT_PROMPT → emit `scheduler:trigger`，前端跑完调 record_run 命令回写。
 //!      executor 在 oneshot channel 上等待，30 分钟硬超时。
-//!    - PLUGIN_ACTION → MVP 占位：记 SUCCESS（二期接 plugin action invoke）。
+//!    - PLUGIN_ACTION → emit `scheduler:plugin-action`，由桌面 Action runtime 执行并回写。
 //!    - NOTIFY       → emit `scheduler:notify` 给前端（前端走 NotificationCenter + 系统通知）。
 //!
 //! 事件（emit）：
 //! - `scheduler:trigger` { task_id, run_id, started_at } → 前端启动隐藏 Agent session。
+//! - `scheduler:plugin-action` { task_id, run_id, started_at, plugin_id, action, input } → 前端调用插件 Action。
 //! - `scheduler:cancel`  { run_id }                      → 前端取消正在跑的 session（超时时）。
 //! - `scheduler:run_finished` { task, run }              → 前端更新 UI / 红点徽章。
 //! - `scheduler:notify` { title, body }                  → 前端走应用内通知中心 + 系统通知（尊重勿扰时段）。
@@ -223,28 +224,46 @@ async fn run_one_task(app: &AppHandle, task: LocalSchedule) -> Result<(), String
         return Ok(());
     }
 
-    // PLUGIN_ACTION：MVP 占位。二期接 plugin_runner 的 action invoke 通道。
+    // PLUGIN_ACTION：交给桌面 Action runtime 执行，复用安装校验、权限和 invocation 语义。
     if let LocalTaskPayload::PluginAction {
         plugin_id,
         action,
         ..
     } = &task.payload
     {
+        let (tx, rx) = oneshot::channel::<LocalScheduleRunRecordInput>();
+        app.state::<PendingRuns>().insert(&run_id, tx);
+        let _ = app.emit(
+            "scheduler:plugin-action",
+            serde_json::json!({
+                "task_id": task.id,
+                "run_id": run_id,
+                "started_at": started_at,
+                "plugin_id": plugin_id,
+                "action": action,
+                "input": task.payload,
+            }),
+        );
+        let result = timeout(Duration::from_secs(timeout_secs), rx).await;
+        let pending = app.state::<PendingRuns>();
         let finished_at = Utc::now().to_rfc3339();
         let duration_ms = parse_iso_delta(&finished_at, &started_at).unwrap_or(0);
-        let run = LocalScheduleRun {
-            id: run_id.clone(),
-            task_id: task.id.clone(),
-            started_at,
-            finished_at: Some(finished_at),
-            status: LocalScheduleRunStatus::Success,
-            skip_reason: None,
-            error: None,
-            output_summary: Some(format!(
-                "PLUGIN_ACTION 通道二期接入（plugin={} action={}）",
-                plugin_id, action
-            )),
-            duration_ms: Some(duration_ms),
+        let run = match result {
+            Ok(Ok(record)) => LocalScheduleRun {
+                id: run_id.clone(), task_id: task.id.clone(), started_at,
+                finished_at: Some(finished_at),
+                status: match record.status { LocalScheduleRunRecordStatus::Success => LocalScheduleRunStatus::Success, LocalScheduleRunRecordStatus::Failed => LocalScheduleRunStatus::Failed },
+                skip_reason: None, error: record.error, output_summary: record.output_summary, duration_ms: Some(duration_ms),
+            },
+            Ok(Err(_)) => {
+                pending.cancel(&run_id);
+                LocalScheduleRun { id: run_id.clone(), task_id: task.id.clone(), started_at, finished_at: Some(finished_at), status: LocalScheduleRunStatus::Failed, skip_reason: None, error: Some("执行通道关闭".to_string()), output_summary: None, duration_ms: Some(duration_ms) }
+            }
+            Err(_) => {
+                pending.cancel(&run_id);
+                let _ = app.emit("scheduler:cancel", serde_json::json!({ "run_id": run_id }));
+                LocalScheduleRun { id: run_id.clone(), task_id: task.id.clone(), started_at, finished_at: Some(finished_at), status: LocalScheduleRunStatus::Timeout, skip_reason: None, error: Some(format!("执行超时（{} 秒）", timeout_secs)), output_summary: None, duration_ms: Some(duration_ms) }
+            }
         };
         finalize_run(app, &task, run);
         return Ok(());

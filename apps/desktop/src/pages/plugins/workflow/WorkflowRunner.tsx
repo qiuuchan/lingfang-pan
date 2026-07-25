@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkflowExecutionTarget, WorkflowPreflightResponse, WorkflowRunDetail, WorkflowUpgradeSuggestion } from '@lingfang/contract';
 import {
   AlertTriangleIcon,
-  CloudIcon,
   GitBranchIcon,
   MonitorIcon,
   PlayIcon,
@@ -128,7 +127,7 @@ export function WorkflowRunner({ plugin, onReady, onAdoptedDraft }: { plugin: Lo
 function RunnableWorkflow({ plugin, decoded, onAdoptedDraft }: { plugin: LoadedPlugin; decoded: Extract<ReturnType<typeof decodeWorkflowDefinition>, { ok: true }>; onAdoptedDraft: (draft: LoadedPlugin) => void }) {
   const support = useMemo(() => assessWorkflowExecutionSupport(plugin, { desktopShell: hasDesktopWorkflowBridge() }), [plugin]);
   const exactIdentity = Boolean(plugin.releaseId && plugin.releaseSha256);
-  const [executionTarget, setExecutionTarget] = useState<WorkflowExecutionTarget>(() => support.desktop.available ? 'DESKTOP' : 'CLOUD');
+  const [executionTarget, setExecutionTarget] = useState<WorkflowExecutionTarget>('DESKTOP');
   const [input, setInput] = useState(() => initialWorkflowInput(decoded.definition.input_schema));
   const [issues, setIssues] = useState<WorkflowInputIssue[]>([]);
   const [preflight, setPreflight] = useState<WorkflowPreflightResponse | null>(null);
@@ -241,11 +240,6 @@ function RunnableWorkflow({ plugin, decoded, onAdoptedDraft }: { plugin: LoadedP
   const currentPreflight = preflight?.execution_target === executionTarget ? preflight : null;
   const blockingDiagnostics = (currentPreflight?.diagnostics ?? []).filter((item) => item.severity === 'ERROR' && !SESSION_DIAGNOSTICS.has(item.code));
   const policyAvailable = currentPreflight?.eligible === true;
-  const cloudDiagnostic = currentPreflight?.execution_target === 'CLOUD'
-    ? currentPreflight.diagnostics.find((item) => item.code === 'workflow_cloud_ineligible' || item.code.startsWith('cloud_'))
-    : undefined;
-  const cloudAvailable = support.cloud.available && !cloudDiagnostic;
-  const cloudReason = cloudDiagnostic?.message || (currentPreflight?.execution_target === 'CLOUD' && currentPreflight.eligible ? 'Cloud 预检已通过，运行将进入平台队列并由 Cloud worker 执行' : support.cloud.reason);
   const canStart = selectedSupport.available && exactIdentity && policyAvailable && !starting && !run && blockingDiagnostics.length === 0 && (executionTarget === 'CLOUD' || desktopSessionReady);
 
   const selectExecutionTarget = (target: WorkflowExecutionTarget) => {
@@ -324,7 +318,6 @@ function RunnableWorkflow({ plugin, decoded, onAdoptedDraft }: { plugin: LoadedP
 
         <section className="grid gap-3 md:grid-cols-3">
           <CompatibilityCard icon={<MonitorIcon className="size-4" />} title="本地手动" available={support.desktop.available} reason={support.desktop.reason} selected={executionTarget === 'DESKTOP'} disabled={Boolean(run)} onSelect={() => selectExecutionTarget('DESKTOP')} />
-          <CompatibilityCard icon={<CloudIcon className="size-4" />} title="Cloud" available={cloudAvailable} reason={cloudReason} selected={executionTarget === 'CLOUD'} disabled={Boolean(run)} onSelect={() => selectExecutionTarget('CLOUD')} />
           <CompatibilityCard icon={<ShieldCheckIcon className="size-4" />} title={`${executionTarget === 'CLOUD' ? 'Cloud' : '本地'}运行策略`} available={policyAvailable} reason={preflightLoading ? '正在检查精确发行版、执行位置与策略…' : preflightError || blockingDiagnostics[0]?.message || (currentPreflight?.eligible ? '当前预检允许运行；启动时仍会实时复验' : currentPreflight ? '当前执行位置未通过预检' : '等待平台预检')} />
         </section>
 

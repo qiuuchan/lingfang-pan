@@ -72,6 +72,10 @@ Source pattern:
 
 新增需要 prevent_close / 后台常驻的行为时，沿用「Rust emit 事件 + 前端按 localStorage 偏好决策」模式，不要在 Rust 里直接读前端偏好。
 
+## Concurrent Plugin State
+
+`App.tsx` keeps `runningPlugin` as the currently visible plugin for compatibility, while `runningPlugins` is the authoritative map for concurrently loaded plugins. Async preparation request IDs must be keyed by `installationId` (falling back to plugin ID), and clearing one plugin must remove only that map entry and clear the visible plugin only when its ID matches. Do not use one global request counter for all plugin starts because opening a second plugin can otherwise invalidate the first plugin's pending preparation.
+
 ## Page State Pattern
 
 页面用 React 本地 state 和 `useEffect` 拉取数据；项目目前没有全局 server-state 库。新增页面时优先保持这种直接模式：

@@ -65,6 +65,12 @@ export class AutomationReconcilerService implements OnModuleInit, OnModuleDestro
         const fire = schedule.kind === 'ONCE'
           ? await this.fire.process({ kind: 'ONCE', schedule_id: schedule.id, generation: schedule.generation, scheduler_key: schedule.schedulerKey, scheduled_for: schedule.nextRunAt.toISOString(), occurrence_key: occurrenceKey })
           : await this.fire.process({ kind: 'RECOVERY', schedule_id: schedule.id, generation: schedule.generation, scheduler_key: schedule.schedulerKey, scheduled_for: schedule.nextRunAt.toISOString(), occurrence_key: occurrenceKey });
+        if (fire.outcome === 'DEPRECATED') {
+          // Historical Cloud rows remain readable, but must not be re-enqueued by a
+          // worker that happens to start with legacy automation flags enabled.
+          await this.scheduler.remove(schedule.id, schedule.generation).catch(() => undefined);
+          continue;
+        }
         if (fire.outcome === 'CREATED' || fire.outcome === 'DUPLICATE') result.recovered += 1;
       }
       const current = await this.prisma.automationSchedule.findUnique({ where: { id: schedule.id }, select: { generation: true, status: true } });

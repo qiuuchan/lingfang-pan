@@ -34,7 +34,7 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 }
 
 export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
-  const { setCurrentDraft, setView, setRunningPlugin, setPendingAutoFix, setPendingDraftEdit } = useApp();
+  const { setCurrentDraft, setView, setRunningPlugin, clearRunningPlugin, setPendingAutoFix, setPendingDraftEdit } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const runtime = resolvePluginRuntime(plugin);
   const document = usePluginDocument(plugin, runtime);
@@ -65,7 +65,7 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         editing={actions.editing}
         canEdit={canEdit}
         canPopOut={!plugin.pendingActivation && runtime !== 'workflow'}
-        onBack={onBack}
+        onBack={() => { clearRunningPlugin(plugin.id); onBack(); }}
         onEdit={actions.editInGenerator}
         onShowManifest={() => setManifestOpen(true)}
         onPopOut={() => { void openPluginInWindow(plugin).catch((e) => toast.error(e instanceof Error ? e.message : String(e))); }}
