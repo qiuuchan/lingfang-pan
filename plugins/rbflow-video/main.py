@@ -26,6 +26,7 @@ import traceback
 import mimetypes
 import subprocess
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
@@ -140,9 +141,13 @@ class DropListWidget(QListWidget):
             p = url.toLocalFile()
             if p and Path(p).suffix.lower() in self._valid_exts:
                 paths.append(p)
-        if paths:
-            self.files_dropped.emit(paths)
+        # 必须先 accept，让拖放手势在视觉上立即结束；再延迟到事件循环空闲时
+        # 处理 paths —— 否则 files_dropped 同步触发 _add_paths → refresh（含 ffmpeg
+        # 缩略图生成），会在 dropEvent 内部重建本 widget，导致 Windows OLE 拖放
+        # 看似无反应/卡死。
         event.acceptProposedAction()
+        if paths:
+            QTimer.singleShot(0, lambda p=paths: self.files_dropped.emit(p))
 
 # ==================== 主题调色板 + QSS 模板 ====================
 # QSS 不支持变量，这里用 Python dict + f-string 模板动态生成深色/亮色样式表。
@@ -637,8 +642,25 @@ def _ffprobe_path() -> str | None:
     return None
 
 
+_DURATION_CACHE: dict[str, float] = {}
+"""path -> 视频时长（秒）。由后台线程探测填充，避免在 UI 勾选时同步 spawn
+ffprobe 导致卡顿。SubmitWorker / _update_info 均优先读缓存。"""
+
+
+def cached_duration(video_path: str) -> Optional[float]:
+    """仅读缓存，绝不 spawn ffprobe。供 UI（_update_info）使用，保证勾选瞬时响应。"""
+    return _DURATION_CACHE.get(video_path)
+
+
 def probe_duration_seconds(video_path: str) -> float:
-    """用 ffprobe 探测视频时长（秒）。找不到 ffprobe 或探测失败抛异常（不静默兜底，避免计费不准）。"""
+    """用 ffprobe 探测视频时长（秒）。找不到 ffprobe 或探测失败抛异常（不静默兜底，避免计费不准）。
+
+    成功后写入 _DURATION_CACHE，后续 UI 可直接读缓存。应在后台线程调用
+    （SubmitWorker / _DurationAssetsGenWorker），不要在 UI 事件处理中同步调用。
+    """
+    cached = _DURATION_CACHE.get(video_path)
+    if cached is not None:
+        return cached
     ffprobe = _ffprobe_path()
     if not ffprobe:
         raise RuntimeError(
@@ -654,6 +676,7 @@ def probe_duration_seconds(video_path: str) -> float:
         if result.returncode == 0:
             dur = float(result.stdout.strip())
             if dur > 0:
+                _DURATION_CACHE[video_path] = dur
                 return dur
         raise RuntimeError(f"ffprobe 返回异常（exit={result.returncode}）: {result.stderr.strip()[:200]}")
     except subprocess.TimeoutExpired:
@@ -1266,6 +1289,9 @@ class ImagePanel(QFrame):
                 p = it.data(Qt.UserRole)
                 if p:
                     checked_paths.add(p)
+        # 重建期间阻塞信号：每个 setCheckState 都会触发 itemChanged → _update_count
+        # （O(N)），N 个项重建即 O(N²)；block 后只在末尾 _update_count 一次。
+        self.list_widget.blockSignals(True)
         self.list_widget.clear()
         cat_items = [it for it in self._items if it["category"] == self._cur_category]
         for it in cat_items:
@@ -1277,6 +1303,7 @@ class ImagePanel(QFrame):
             if pix:
                 item.setIcon(QIcon(pix))
             self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
         self._update_count()
 
     # ---------- 右键菜单 ----------
@@ -1390,6 +1417,9 @@ class VideoPanel(QFrame):
     工具行：全选/反选/未选/删除/移动（与 ImagePanel 一致）。
     """
     videos_changed = Signal()
+    durations_ready = Signal()
+    """后台线程完成时长探测 + 缩略图生成后发出（跨线程 queued 到主线程），
+    MainWindow 据此刷新视频列表图标 + 预估信息。"""
 
     STORE_PATH = DATA_DIR / "videos.json"
 
@@ -1403,6 +1433,8 @@ class VideoPanel(QFrame):
         self._load_store()
         self._build_ui()
         self.refresh()
+        # 启动时若历史视频有时长/缩略图未生成，后台补齐
+        self._kick_off_assets([it["path"] for it in self._items])
 
     # ---------- 持久化 ----------
     def _load_store(self):
@@ -1473,18 +1505,19 @@ class VideoPanel(QFrame):
         self.list_widget.files_dropped.connect(self._add_paths)
         # 双击预览视频（系统默认播放器）
         self.list_widget.itemDoubleClicked.connect(self._preview_video)
-        # checkbox 勾选变化时更新计数 + 底部信息栏
-        self.list_widget.itemChanged.connect(lambda: self._update_count() if hasattr(self, '_update_count') else None)
+        # 参考视频唯一：勾选任一项即取消其他（radio 行为）+ 更新计数
+        self.list_widget.itemChanged.connect(self._on_item_changed)
         lay.addWidget(self.list_widget, 1)
 
-        # 工具行：全选/反选/未选/删除/移动
+        # 工具行：参考视频为单选，去掉「全选/反选」（语义不适用），保留 未选/删除/移动
         tools = QHBoxLayout()
-        for label, slot in [("全选", self._select_all), ("反选", self._invert),
-                            ("未选", self._select_none), ("删除", self._delete_selected),
+        for label, slot in [("未选", self._select_none),
+                            ("删除", self._delete_selected),
                             ("移动", self._move_selected)]:
             b = QPushButton(label, self)
             b.clicked.connect(slot)
             tools.addWidget(b)
+        tools.addStretch()
         lay.addLayout(tools)
 
         self._count_label = QLabel("0 个", self)
@@ -1520,37 +1553,61 @@ class VideoPanel(QFrame):
                 self._add_paths(paths)
 
     def _add_paths(self, paths: list):
+        new_paths = []
         for p in paths:
             if not any(it["path"] == p for it in self._items):
                 self._items.append({"path": p, "category": self._cur_category})
+                new_paths.append(p)
         self._save_store()
         self.refresh()
         self.videos_changed.emit()
+        # 后台生成缩略图 + 探测时长（填充缓存），完成后刷新列表图标 + 预估信息
+        if new_paths:
+            self._kick_off_assets(new_paths)
 
-    # ---------- 拖拽添加 ----------
-    _VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+    # ---------- 后台资源生成（缩略图 + 时长） ----------
+    def _kick_off_assets(self, paths: list):
+        """启动后台线程：为给定视频生成缩略图文件 + 探测时长入缓存。
 
-    def _drag_enter_event(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
+        线程内只做文件 I/O 与 subprocess（无 Qt 对象操作），完成后跨线程 emit
+        durations_ready（自动 queued 到主线程）。threading 模块在运行期间会
+        持有线程引用，无需手动保活。
+        """
+        todo = [p for p in paths
+                if (p not in _DURATION_CACHE)
+                or not os.path.exists(str(DATA_DIR / f"vthumb_{hash(p) & 0xFFFFFFFF}.jpg"))]
+        if not todo:
+            return
 
-    def _drag_move_event(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
+        def _worker():
+            ffmpeg = None
+            for p in todo:
+                # 时长
+                if p not in _DURATION_CACHE:
+                    try:
+                        probe_duration_seconds(p)
+                    except Exception as e:
+                        logging.error(f"探测时长失败 {p}: {e}")
+                # 缩略图（仅当文件不存在才生成，避免重复跑 ffmpeg）
+                thumb_path = str(DATA_DIR / f"vthumb_{hash(p) & 0xFFFFFFFF}.jpg")
+                if not os.path.exists(thumb_path):
+                    if ffmpeg is None:
+                        ffprobe = _ffprobe_path()
+                        ffmpeg = ffprobe.replace("ffprobe", "ffmpeg") if ffprobe else shutil.which("ffmpeg")
+                    if ffmpeg:
+                        try:
+                            subprocess.run(
+                                [ffmpeg, "-y", "-i", p, "-ss", "00:00:01", "-vframes", "1",
+                                 "-vf", "scale=120:80:force_original_aspect_ratio=decrease",
+                                 "-loglevel", "error", thumb_path],
+                                timeout=20, capture_output=True,
+                            )
+                        except Exception as e:
+                            logging.error(f"生成缩略图失败 {p}: {e}")
+            self.durations_ready.emit()
 
-    def _drop_event(self, event):
-        paths = []
-        for url in event.mimeData().urls():
-            p = url.toLocalFile()
-            if p and Path(p).suffix.lower() in self._VIDEO_EXTS:
-                paths.append(p)
-        if paths:
-            self._add_paths(paths)
-        event.acceptProposedAction()
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
 
     def _preview_video(self, item):
         """双击用系统默认播放器打开视频。"""
@@ -1566,6 +1623,9 @@ class VideoPanel(QFrame):
                 p = it.data(Qt.UserRole)
                 if p:
                     checked_paths.add(p)
+        # 重建期间阻塞信号：setCheckState 会触发 itemChanged → _on_item_changed，
+        # 后者会取消其他勾选（radio 行为），在重建循环中引发级联与错误取消。
+        self.list_widget.blockSignals(True)
         self.list_widget.clear()
         cat_items = [it for it in self._items if it["category"] == self._cur_category]
         for it in cat_items:
@@ -1573,35 +1633,24 @@ class VideoPanel(QFrame):
             item.setToolTip(it["path"])
             item.setData(Qt.UserRole, it["path"])
             item.setCheckState(Qt.Checked if it["path"] in checked_paths else Qt.Unchecked)
-            # 生成视频缩略图（ffmpeg 提取第一帧）
-            pix = self._make_video_thumb(it["path"])
+            # 仅加载已生成的缩略图文件（不在此 spawn ffmpeg）；首次添加后由后台
+            # 线程生成文件，durations_ready → refresh 时此处即可读到。
+            pix = self._load_video_thumb(it["path"])
             if pix:
                 item.setIcon(QIcon(pix))
             self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
         self._update_count()
 
-    def _make_video_thumb(self, path: str) -> Optional[QPixmap]:
-        """用 ffmpeg 提取视频第一帧作为缩略图。"""
+    def _load_video_thumb(self, path: str) -> Optional[QPixmap]:
+        """加载已生成的缩略图文件（不生成、不 spawn ffmpeg）。文件不存在返回 None。"""
         thumb_path = str(DATA_DIR / f"vthumb_{hash(path) & 0xFFFFFFFF}.jpg")
         if not os.path.exists(thumb_path):
-            ffprobe = _ffprobe_path()
-            ffmpeg = ffprobe.replace("ffprobe", "ffmpeg") if ffprobe else shutil.which("ffmpeg")
-            if not ffmpeg:
-                return None
-            try:
-                subprocess.run(
-                    [ffmpeg, "-y", "-i", path, "-ss", "00:00:01", "-vframes", "1",
-                     "-vf", "scale=120:80:force_original_aspect_ratio=decrease",
-                     "-loglevel", "error", thumb_path],
-                    timeout=15, capture_output=True,
-                )
-            except Exception:
-                return None
+            return None
         try:
-            if os.path.exists(thumb_path):
-                pix = QPixmap(thumb_path)
-                if not pix.isNull():
-                    return pix
+            pix = QPixmap(thumb_path)
+            if not pix.isNull():
+                return pix
         except Exception:
             pass
         return None
@@ -1611,21 +1660,29 @@ class VideoPanel(QFrame):
                 for i in range(self.list_widget.count())
                 if self.list_widget.item(i).checkState() == Qt.Checked]
 
-    def _select_all(self):
-        for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(Qt.Checked)
+    def _on_item_changed(self, item: QListWidgetItem):
+        """参考视频唯一选择（radio 行为）。
+
+        勾选任一项 → 取消其余项（blockSignals 防止取消时再次触发本槽形成级联）。
+        取消勾选不强制保留某个——允许「全不选」状态（用户可先清空再选）。
+        """
+        if item.checkState() == Qt.Checked:
+            self.list_widget.blockSignals(True)
+            for i in range(self.list_widget.count()):
+                other = self.list_widget.item(i)
+                if other is not item and other.checkState() == Qt.Checked:
+                    other.setCheckState(Qt.Unchecked)
+            self.list_widget.blockSignals(False)
         self._update_count()
+        self.videos_changed.emit()
 
     def _select_none(self):
+        self.list_widget.blockSignals(True)
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(Qt.Unchecked)
+        self.list_widget.blockSignals(False)
         self._update_count()
-
-    def _invert(self):
-        for i in range(self.list_widget.count()):
-            it = self.list_widget.item(i)
-            it.setCheckState(Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked)
-        self._update_count()
+        self.videos_changed.emit()
 
     def _delete_selected(self):
         paths = set(self._checked_paths())
@@ -2035,6 +2092,8 @@ class MainWindow(QMainWindow):
         # checkbox 勾选变化时更新底部信息——否则勾了图/视频后数字不更新
         self.image_panel.list_widget.itemChanged.connect(self._update_info)
         self.video_panel.list_widget.itemChanged.connect(self._update_info)
+        # 后台线程完成时长探测 + 缩略图生成后：刷新视频列表图标 + 预估信息
+        self.video_panel.durations_ready.connect(self._on_video_assets_ready)
         self.queue_panel.retry_task.connect(self._on_retry_task)
         self.queue_panel.delete_task.connect(self._on_delete_task)
         self.queue_panel.saveas_task.connect(self._on_saveas_task)
@@ -2123,20 +2182,35 @@ class MainWindow(QMainWindow):
             self.status_label.setText("● 未连接平台桥（请在灵坊桌面端内运行）")
             self.status_label.setStyleSheet("color: #f38ba8; font-size: 12px;")
 
+    def _on_video_assets_ready(self):
+        """后台线程完成时长探测 + 缩略图生成：刷新视频列表（加载已生成缩略图）
+        + 用缓存时长更新预估。"""
+        self.video_panel.refresh()
+        self._update_info()
+
     def _update_info(self):
+        """更新底部信息栏。
+
+        关键：只读 _DURATION_CACHE（cached_duration），绝不在此同步 spawn ffprobe
+        —— 该槽由 itemChanged 触发（每次勾选都跑），若 spawn 子进程会让勾选卡
+        数秒。时长由后台线程在「添加视频」时探测入缓存；未就绪时显示「时长计算中」。
+        """
         imgs = self.image_panel.selected_items()
         vids = self.video_panel.selected_videos()
         n = len(imgs) * len(vids)
-        # 预估时长：探测可能失败（ffprobe 缺失），失败时显示「时长未知」不崩 UI。
-        try:
-            total_sec = sum(probe_duration_seconds(v) for _, v in [(img, vid) for img in imgs for vid in vids])
+        durations = [cached_duration(v) for v in vids]
+        if n == 0:
+            self.info_label.setText(f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务")
+        elif vids and all(d is not None for d in durations):
+            # 每个视频配全部图片：总时长 = 图片数 × 各视频时长之和
+            total_sec = len(imgs) * sum(durations)
             cost = total_sec * 0.5
             self.info_label.setText(
                 f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · 预计 {total_sec:.0f}秒 · 约 {cost:.1f} 灵石"
             )
-        except Exception as e:
+        else:
             self.info_label.setText(
-                f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · ⚠ 无法预估时长：{e}"
+                f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · 时长计算中…"
             )
 
     # ---------- 提交 ----------
