@@ -4,7 +4,7 @@
 // 以及 todo 跨轮延续（getTodos 回灌 → onTodoUpdate 同步）。
 // betav2：工具走自建 defineTool（ToolDefinition），execute(args, ctx) 直接收对象返回 ToolResult。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { configureApiBase, setAuthToken } from '@/lib/api';
+import { configureApiBase, FIXED_BACKEND_URL, setAuthToken } from '@/lib/api';
 import { createAgentTools, normalizeToolFileContent, detectCapabilities, isVersionNewer, type AgentToolsOptions, type TodoItem } from './tools';
 
 // RunPlugin 测试需要 mock tauriInvoke（list/read 文件）+ runPluginScript（试跑）。
@@ -332,7 +332,7 @@ describe('ListTeamPlugins registry catalog', () => {
     const out = await callExecute(createAgentTools(makeOpts().opts).tools, 'ListTeamPlugins', {});
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://test.local/api/plugin-registry/team',
+      `${FIXED_BACKEND_URL}/api/plugin-registry/team`,
       expect.objectContaining({ method: 'GET' }),
     );
     expect(out).toContain('团队 Demo (team.demo) v1.2.3 [nodejs] 说明');

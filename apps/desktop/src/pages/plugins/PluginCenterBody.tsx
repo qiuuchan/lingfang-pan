@@ -201,7 +201,7 @@ export function PluginCenterBody({
           if (nextTab === 'market') setMarketPage(1);
           onTabChange(nextTab);
         }}>
-          <TabsList className="grid w-full max-w-xl grid-cols-3">
+          <TabsList className="flex w-full max-w-xl">
             <TabsTrigger value="installed"><PackageCheckIcon />已安装</TabsTrigger>
             <TabsTrigger value="team"><UsersIcon />团队库</TabsTrigger>
             <TabsTrigger value="market"><StoreIcon />插件市场</TabsTrigger>
