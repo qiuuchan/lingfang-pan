@@ -11,12 +11,16 @@ export type ScheduleFireJob =
   | { kind: 'ONCE'; schedule_id: string; generation: number; scheduler_key: string; scheduled_for: string; occurrence_key: string }
   | { kind: 'RECOVERY'; schedule_id: string; generation: number; scheduler_key: string; scheduled_for: string; occurrence_key: string };
 
+export type ScheduleFireResult =
+  | { outcome: 'DISABLED' | 'STALE' | 'DEPRECATED'; run_id: null }
+  | { outcome: 'DUPLICATE' | 'CREATED'; run_id: string };
+
 @Injectable()
 export class AutomationScheduleFireProcessor {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(WorkflowRunService) private readonly runs: WorkflowRunService, @Optional() @Inject(AUTOMATION_CONFIG) private readonly config?: AutomationConfig) {}
 
-  async process(job: ScheduleFireJob) {
-    if (this.config && (!this.config.enabled || !this.config.schedulesEnabled)) return { outcome: 'DISABLED' as const, run_id: null };
+  async process(job: ScheduleFireJob): Promise<ScheduleFireResult> {
+    if (this.config) return { outcome: 'DEPRECATED', run_id: null };
     const schedule = await this.prisma.automationSchedule.findFirst({ where: { id: job.schedule_id, generation: job.generation, status: 'ACTIVE' } });
     if (!schedule) return { outcome: 'STALE' as const, run_id: null };
     if (schedule.schedulerKey !== job.scheduler_key) return { outcome: 'STALE' as const, run_id: null };

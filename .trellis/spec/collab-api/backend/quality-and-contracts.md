@@ -1,5 +1,11 @@
 # collab-api 质量与契约规范
 
+## Cloud Schedule Deprecation Contract
+
+Cloud automation schedule rows remain readable for migration and audit, but they are no longer an execution target. `AutomationScheduleService.create/update/resume` must return `AppError(410, 'cloud_disabled', ...)`. `AutomationScheduleFireProcessor.process()` must return `{ outcome: 'DEPRECATED', run_id: null }` before reading or creating a workflow run whenever an automation config is injected; the reconciler removes the stale queue projection. Historical data must not be deleted and a deprecated fire must never call `WorkflowRunService.startScheduled()`.
+
+Required coverage: service mutation rejection, processor short-circuit without Prisma lookup, and reconciler removal of the queue projection.
+
 ## Current Backend Boundary
 
 `apps/collab-api` 是当前平台后端。新增后端能力时，不要往已删除的 `apps/server` 路径或旧 Rust server spec 增加实现规则。

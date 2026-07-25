@@ -17,6 +17,18 @@ import { api, apiBase, errorMessage, getAuthToken, tauriInvoke, type ApiError } 
 import { listInstallations } from '@/lib/plugin-registry';
 import type { LoadedPlugin } from '@/lib/types';
 import { executeClientActionAdapter } from '@/lib/plugin-action-client-adapter';
+import {
+  cancelWorkflowRun,
+  createDesktopWorkflowSession,
+  driveDesktopWorkflowRun,
+  getWorkflowRun,
+  preflightWorkflowRun,
+  revokeDesktopWorkflowSession,
+  startWorkflowRun,
+  workflowDeadline,
+  workflowIdempotencyKey,
+} from '@/lib/workflow-client';
+import type { WorkflowJsonValue } from '@lingfang/contract';
 
 const TERMINAL_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'CANCELED', 'TIMED_OUT']);
 const ACTION_POLL_INTERVAL_MS = 200;
@@ -277,6 +289,43 @@ async function invokeArtifactCapability(invocationId: string, kind: string, args
   return result;
 }
 
+async function executeWorkflowAction(
+  target: ActionTargetType,
+  input: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  if (!isTauri()) throw actionError('action_runtime_unavailable', '工作流实例只能在桌面应用中运行');
+  const deadline = Date.now() + timeoutMs;
+  await createDesktopWorkflowSession();
+  try {
+    const request = {
+      workflow_release_id: target.release_id,
+      sha256: target.sha256,
+      execution_target: 'DESKTOP' as const,
+      execution_scope: 'PRODUCTION' as const,
+      input: input as Record<string, WorkflowJsonValue>,
+      deadline_at: new Date(deadline).toISOString(),
+    };
+    const preflight = await preflightWorkflowRun(request);
+    if (!preflight.eligible) throw actionError('action_runtime_unavailable', preflight.diagnostics.find((item) => item.severity === 'ERROR')?.message || '工作流实例预检失败');
+    let run = await startWorkflowRun({ ...request, idempotency_key: workflowIdempotencyKey() });
+    while (!TERMINAL_STATUSES.has(run.status)) {
+      if (Date.now() >= deadline) {
+        await cancelWorkflowRun(run.id).catch(() => undefined);
+        throw actionError('action_timeout', '工作流实例执行超时');
+      }
+      await driveDesktopWorkflowRun(run.id, run.plan.max_parallelism);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      run = await getWorkflowRun(run.id);
+    }
+    if (run.status !== 'SUCCEEDED') throw actionError('action_execution_failed', run.error?.message || '工作流实例执行失败');
+    if (!run.output || typeof run.output !== 'object' || Array.isArray(run.output)) throw actionError('action_output_invalid', '工作流实例输出必须是 JSON 对象');
+    return run.output as Record<string, unknown>;
+  } finally {
+    await revokeDesktopWorkflowSession().catch(() => undefined);
+  }
+}
+
 export async function invokeInstalledPluginAction(
   plugin: LoadedPlugin,
   args: ActionCallArgs | undefined,
@@ -365,7 +414,9 @@ export async function invokeInstalledPluginAction(
               authToken: getAuthToken() ?? '',
             });
           })()
-        : await Promise.reject(actionError('action_runtime_unavailable', `桌面本地 Action 尚不支持 ${resolved.action.execution.runtime_type} runtime`));
+        : resolved.action.execution.runtime_type === 'workflow'
+          ? await executeWorkflowAction(resolved.target, input as Record<string, unknown>, Math.max(1, deadlineAt - deps.now()))
+          : await Promise.reject(actionError('action_runtime_unavailable', `桌面本地 Action 尚不支持 ${resolved.action.execution.runtime_type} runtime`));
     await deps.api(`/api/plugin-actions/invocations/${encodeURIComponent(invocation.id)}/complete`, {
       method: 'POST',
       body: { output },

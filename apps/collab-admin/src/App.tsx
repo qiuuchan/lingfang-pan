@@ -64,6 +64,7 @@ const ChannelsView = lazy(() => import('@/components/billing/channels-view').the
 const BillingView = lazy(() => import('@/components/billing/billing-view').then((m) => ({ default: m.BillingView })));
 const CreditsView = lazy(() => import('@/components/billing/credits-view').then((m) => ({ default: m.CreditsView })));
 const CallLogsView = lazy(() => import('@/components/billing/call-logs-view').then((m) => ({ default: m.CallLogsView })));
+const RoadmapView = lazy(() => import('@/components/roadmap-view').then((m) => ({ default: m.RoadmapView })));
 
 // 主题初始化：在模块加载时同步应用，避免首屏亮暗闪烁（FOUC）。
 // 放在模块顶层执行一次，早于 React 渲染，读取 localStorage 的主题偏好并应用到 <html>。
@@ -386,6 +387,7 @@ export default function App() {
                   {view === 'credits' && <CreditsView />}
                   {view === 'callLogs' && <CallLogsView />}
                   {view === 'settings' && <SettingsView />}
+                  {view === 'roadmap' && <RoadmapView />}
                 </Suspense>
               </PageTransition>
             </div>

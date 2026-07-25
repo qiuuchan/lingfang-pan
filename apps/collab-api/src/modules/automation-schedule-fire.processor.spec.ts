@@ -7,6 +7,15 @@ const schedule = {
 };
 
 describe('AutomationScheduleFireProcessor', () => {
+  it('does not execute historical Cloud schedules when configured', async () => {
+    const findFirst = vi.fn();
+    const startScheduled = vi.fn();
+    const processor = new AutomationScheduleFireProcessor({ automationSchedule: { findFirst } } as never, { startScheduled } as never, { enabled: true, schedulesEnabled: true } as never);
+    await expect(processor.process({ kind: 'ONCE', schedule_id: 'schedule-1', generation: 2, scheduler_key: 'key', scheduled_for: new Date().toISOString(), occurrence_key: 'occurrence' })).resolves.toEqual({ outcome: 'DEPRECATED', run_id: null });
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(startScheduled).not.toHaveBeenCalled();
+  });
+
   it('ignores a stale generation or scheduler key without creating a run', async () => {
     const startScheduled = vi.fn();
     const processor = new AutomationScheduleFireProcessor({ automationSchedule: { findFirst: vi.fn(async () => null) } } as never, { startScheduled } as never);

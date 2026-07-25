@@ -17,20 +17,16 @@ function harness() {
 }
 
 describe('AutomationScheduleService', () => {
-  it('creates a structured DAILY schedule and its generation-scoped outbox projection', async () => {
+  it('rejects new Cloud schedules with an explicit deprecation error', async () => {
     const h = harness();
-    const result = await h.service.create('u1', { workflow_release_id: 'wr1', workflow_release_sha256: 'a'.repeat(64), kind: 'DAILY', time_zone: 'Asia/Shanghai', local_time: '09:30', input: {} });
-    expect(result.schedule).toMatchObject({ status: 'ACTIVE', generation: 1, sync_state: 'PENDING', trigger: { kind: 'DAILY', time_zone: 'Asia/Shanghai', local_time: '09:30' } });
-    expect(h.governance.authorizeRelease).toHaveBeenCalledTimes(1);
-    expect(h.governance.authorizeRelease).toHaveBeenCalledWith('u1', expect.anything(), ['manage_schedule'], expect.anything());
-    expect(h.outboxCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: 'UPSERT_SCHEDULE', generation: 1, payload: expect.objectContaining({ generation: 1 }) }) });
+    await expect(h.service.create('u1', { workflow_release_id: 'wr1', workflow_release_sha256: 'a'.repeat(64), kind: 'DAILY', time_zone: 'Asia/Shanghai', local_time: '09:30', input: {} }))
+      .rejects.toMatchObject({ status: 410, code: 'cloud_disabled' });
+    expect(h.outboxCreate).not.toHaveBeenCalled();
   });
 
-  it('pause increments generation and writes REMOVE_SCHEDULE without changing lifecycle to a sync status', async () => {
+  it('rejects updates that would execute a Cloud schedule', async () => {
     const h = harness();
-    const created = await h.service.create('u1', { workflow_release_id: 'wr1', workflow_release_sha256: 'a'.repeat(64), kind: 'ONCE', run_at: '2099-01-01T00:00:00.000Z', input: {} });
-    const result = await h.service.pause('u1', created.schedule.id, 1);
-    expect(result.schedule).toMatchObject({ status: 'PAUSED', generation: 2, sync_state: 'PENDING' });
-    expect(h.outboxCreate).toHaveBeenLastCalledWith({ data: expect.objectContaining({ kind: 'REMOVE_SCHEDULE', generation: 2 }) });
+    await expect(h.service.update('u1', 'schedule-1', { workflow_release_id: 'wr1', workflow_release_sha256: 'a'.repeat(64), kind: 'DAILY', time_zone: 'Asia/Shanghai', local_time: '09:30', input: {}, expected_generation: 1 }))
+      .rejects.toMatchObject({ status: 410, code: 'cloud_disabled' });
   });
 });
