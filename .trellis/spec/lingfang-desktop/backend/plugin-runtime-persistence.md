@@ -423,111 +423,31 @@ Reference files:
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`pluginIncomplete` + `manifest_missing:` catch）
 - `apps/desktop/src/lib/creator-error.ts`（`manifest_missing` kind）
 
-## 插件删除（本地 + 云端分层，2026-06-17）
+## 本地插件删除（2026-07-25）
 
-删除插件分本地与云端两层，分层治理（保护已购买/安装用户）：
+本地删除由 `plugin_runner.rs` 的 `delete_plugin` 命令处理：先通过
+`sanitize_plugin_id` 拒绝路径穿越；若插件仍在运行，则从进程表取出并终止整棵进程树；
+最后只删除 `plugins_root/<id>/`。目录不存在时保持幂等成功。
 
-- **本地删除**（`plugin_runner.rs` `delete_plugin` 命令，纯逻辑 `delete_plugin_dir` 便于单测）：`sanitize_plugin_id` 防穿越 → 若进程表在运行先 take+kill_child_tree+wait（防文件占用）→ `remove_dir_all(plugin_dir)`。仅删 `plugins_root/<id>/`，不删 builtin（builtin-plugins 不在 plugins_root）、不删云端记录。目录不存在幂等 Ok。
-- **作者删云端**（`DELETE /api/plugins/:id`，`plugin.service.deleteByAuthor`）：`ensurePluginManager` 作者校验 + **仅 marketplace=false 可删**（已上架抛 conflict「先联系管理员下架」）。级联删 PluginInstallation（onDelete: Cascade 自动）。
-- **admin 删云端**（`DELETE /api/admin/plugins/:id`，`admin.service.adminDeletePlugin`）：ensurePlatformAdmin + 删任意（含已上架）+ 级联删 Installation + Purchase + Review（Cascade）+ 审计 `admin.plugin.deleted`。
-
-**治理边界**：作者只能删未上架的（草稿/驳回/团队内），已上架的走 admin 下架（delist，软退市）后 admin 删。admin 可物理删任意（兜底，二次确认 + 审计，级联清购买记录——已确认接受）。
-
-**前端入口**：
-- 桌面 Plugins.tsx 本地插件项「删除」按钮 → deletePlugin（本地）。
-- 桌面 PluginList.tsx 作者插件（source==='team'）「删除」按钮 → DELETE /api/plugins/:id → 成功后 deletePlugin 清本地。
-- admin plugins-view「删除插件」按钮 → DELETE /api/admin/plugins/:id。
+云端 package/release 不使用 legacy `DELETE /api/plugins/:id` 或
+`DELETE /api/admin/plugins/:id`。v4 采用 package archive、release yank 和 listing
+delist/relist 状态机；已发布 release 与购买历史不得物理覆盖或级联删除。
 
 Reference files:
-- `apps/desktop/src-tauri/src/plugin_runner.rs`（`delete_plugin` / `delete_plugin_dir`）
-- `apps/desktop/src/lib/plugin-status.ts`（`deletePlugin` 封装）
-- `apps/collab-api/src/modules/plugin.service.ts`（`deleteByAuthor`）
-- `apps/collab-api/src/modules/admin.service.ts`（`adminDeletePlugin`）
-- `apps/collab-api/src/modules/plugins.controller.ts` + `admin.controller.ts`（DELETE 端点）
+- `apps/desktop/src-tauri/src/plugin_runner.rs`
+- `apps/desktop/src/lib/plugin-status.ts`
+- `.trellis/spec/collab-api/backend/plugin-package-registry.md`
+## 聊天引用插件（2026-06-17）
 
-## 修改已有插件 + 聊天引用插件（2026-06-17）
-
-### A 修改已有插件：落盘云端 files 后进创建器
-
-`editInGenerator`（Plugins.tsx）「继续修改」时，先把云端 `plugin.files` 落盘到 `plugins_root/<plugin.id>/`（`write_plugin_files` 命令），再 `setCurrentDraft` + `setView('home')` 跳创建器。AI 进 `start_session` 时 workspace=该目录（已落盘 files），用 Read 工具看到现有代码并改（而非重新生成）。改完走已有 `edit-draft` 端点覆盖。
-
-`write_plugin_files`（`plugin_store.rs`，与 `read_local_plugin_file` 对称的写操作）：
-- `write_files` 方法：`ensure_plugin_dir` → 逐文件 path 白名单（拒 `..`/绝对路径/盘符 `:`）→ `fs::write` + 建子目录。
-- 幂等覆盖同名文件。`PluginFileInput { path, content }` 入参。
-- 安全：path 段级白名单防穿越（写时文件不存在，不能用 read 的 canonicalize+starts_with，改校验段不含 `..` + 非绝对 + join 后父目录 canonicalize 校验）。
-
-### B 聊天引用插件：@触发 + manifest 摘要拼 prompt
-
-创建器 Composer Textarea 输入 `@` 触发下拉（mentionablePlugins：team + 本地插件合并），选中后：
-- input 插入 `@<name>` 标记 + `attachedPlugins` 加该插件（id/name/summary）。
-- Textarea 上方 chip 展示已引用（可移除）。
-- send 时 attachedPlugins 非空 → prompt 前拼 `[引用插件参考] - name（manifest 摘要） [/引用插件参考]`，让 AI 参考被引用插件。限 5 个，每轮独立（send 后清空）。
-
-manifest 摘要（`pluginManifestSummary`）：从 plugin.files 找 manifest.json 解析 `runtime_type/entry/capabilities`。team 从 files 解析，本地从 scan 的 manifest 字段。
+创建器 Composer 输入 `@` 时，从团队与本地插件合并列表中选择引用；选中项以 chip
+展示，每轮最多 5 个。发送时只把插件名与 manifest 摘要拼入提示词，发送后清空本轮引用。
+需要继续修改已发布插件时，先从已安装的精确 v4 release 创建新的本地工作副本；不得把
+immutable release 原地覆盖。
 
 Reference files:
-- `apps/desktop/src-tauri/src/plugin_store.rs`（`write_files` / `write_plugin_files` / `PluginFileInput`）
-- `apps/desktop/src/lib/plugin-status.ts`（`writePluginFiles` 封装）
-- `apps/desktop/src/pages/Plugins.tsx`（`editInGenerator` 落盘）
-- `apps/desktop/src/components/creator/Composer.tsx`（@触发 + chip + `MentionPlugin` 类型）
-- `apps/desktop/src/pages/PluginCreatorHome.tsx`（`attachedPlugins`/`mentionablePlugins` state + `pluginManifestSummary` + send 拼接）
-
-## 已安装云端插件包必须本地物化（2026-06-19）
-
-### 1. Scope / Trigger
-- Trigger: changing marketplace install flow, `/api/plugins/available` package projection, cloud plugin run/edit entrypoints, or `write_plugin_files` local materialization.
-
-### 2. Signatures
-- Frontend install: `installMarketplacePluginPackage(pluginId: string) -> Promise<LoadedPlugin>`
-- Frontend persistence: `ensurePluginPackagePersisted(plugin: LoadedPlugin) -> Promise<void>`
-- Frontend package builder: `pluginPackageFiles(plugin: LoadedPlugin) -> DraftFile[]`
-- Tauri write command: `write_plugin_files(plugin_id, files: PluginFileInput[])`
-- Tauri open command: `open_plugins_root() -> Result<(), String>`
-- Backend availability: `GET /api/plugins/available -> { plugins: LoadedPlugin[] }`
-
-### 3. Contracts
-- Marketplace install only creates/enables the backend `PluginInstallation`; it does not make the plugin runnable on the desktop by itself.
-- After `/api/marketplace/install`, desktop must call `/api/plugins/available`, find the installed plugin, and write the package to `plugins_root/<pluginId>/` before reporting install success.
-- Running a cloud/team plugin whose `runtime_type` is not `cloud` must first call `ensurePluginPackagePersisted(plugin)`, so `start_plugin(plugin.id)` reads real local files instead of an empty directory.
-- Local package materialization writes both `plugin.manifest` and `plugin.files[]`; if `plugin.manifest` is present it generates or overwrites `manifest.json` ahead of file entries.
-- A plugin package without non-manifest files or without any `manifest.json` source is invalid for local runtime and must fail explicitly.
-- `open_plugins_root` must create the root directory if missing and open it with the OS file manager; failures surface as returned errors.
-
-### 4. Validation & Error Matrix
-- `/api/plugins/available` does not contain installed `pluginId` -> error `安装已记录，但 /api/plugins/available 未返回该插件。`
-- available plugin has no `files` or empty `files` -> error `后端未返回插件文件，无法写入本地插件目录。`
-- available plugin has only `manifest.json` and no entry/source files -> error `后端未返回插件入口文件，无法写入本地插件目录。`
-- `files[]` lacks `manifest.json` and `plugin.manifest` is missing -> error `后端未返回 manifest.json，无法写入本地插件目录。`
-- `write_plugin_files` rejects absolute path / `..` / hidden segments -> propagate the Rust error; do not show install success.
-- OS file manager spawn fails in `open_plugins_root` -> return `打开插件目录失败：...`.
-
-### 5. Good/Base/Bad Cases
-- Good: install market plugin -> backend install succeeds -> available returns `manifest + files[]` -> desktop writes `manifest.json`, entry file, requirements/package files -> Plugins page can run it.
-- Base: available `files[]` already contains `manifest.json`; desktop writes it unchanged unless `plugin.manifest` is present.
-- Bad: POST `/api/marketplace/install` returns `installed` and UI toasts success without writing package files; later local scan reports incomplete or `pip install` fails in an empty directory.
-
-### 6. Tests Required
-- Frontend unit: `plugin-installation.spec.ts` asserts install fetches available package and writes local files.
-- Frontend unit: same spec asserts missing files, missing entry files, and missing manifest source fail explicitly.
-- Backend unit: `plugin-available.spec.ts` asserts marketplace package files are hidden before install and returned after install.
-- Rust/desktop checks: `cargo test -p lingfang-desktop`, `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, and desktop build when packaging.
-
-### 7. Wrong vs Correct
-Wrong:
-```typescript
-await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: pluginId } });
-toast.success('已安装');
-```
-
-Correct:
-```typescript
-await api('/api/marketplace/install', { method: 'POST', body: { plugin_id: pluginId } });
-const { plugins } = await api<{ plugins: LoadedPlugin[] }>('/api/plugins/available');
-const plugin = plugins.find((item) => item.id === pluginId);
-if (!plugin) throw new Error('安装已记录，但 /api/plugins/available 未返回该插件。');
-await ensurePluginPackagePersisted(plugin);
-```
-
+- `apps/desktop/src/components/creator/Composer.tsx`
+- `apps/desktop/src/pages/PluginCreatorHome.tsx`
+- `apps/desktop/src/lib/plugin-registry.ts`
 ## 插件崩溃展示 stderr + 一键 AI 修复（2026-06-17）
 
 插件运行（start_plugin）崩溃时，原 `Stdio::null` 丢弃 stderr，用户只看到「无法启动」看不到 Python/Node 异常。改进：
@@ -728,207 +648,81 @@ Reference files:
 - `apps/desktop/src/pages/plugins/DraftPluginsSection.tsx`（草稿导入/导出走 ZIP）
 - `apps/desktop/src/lib/draft-plugin.ts`（旧 JSON 函数已删，注释指向 zip 模块）
 
-## 本地插件上传到团队空间（2026-07-07）
+## 本地插件发布到 v4 Registry（2026-07-25）
 
 ### 1. Scope / Trigger
-- Trigger: 在「本地插件」行点「发布」按钮（RocketIcon），或修改 `loadLocalPluginAsStaged` / `LocalPluginRow` 发布流程。
+
+- 修改本地插件发布、版本升级、市场提审或安装 materialization 时适用。
+- legacy `/api/plugins/upload`、`/api/plugins/available`、DRAFT 直接审核和
+  `Plugin` 行原地覆盖均已退役。
 
 ### 2. Signatures
-- 前端组装: `loadLocalPluginAsStaged(pluginId: string) -> Promise<StagedPlugin>`
-- 前端上传（已有）: `submitStagedPlugin(StagedPlugin) -> Promise<{ ok: true; name } | { ok: false; message }>`
-- 复用 Tauri 读命令: `read_local_plugin_file(plugin_id, file) -> Result<String, String>` / `list_plugin_files(plugin_id) -> Result<Vec<String>, String>`
-- 前端封装: `readLocalPluginFile` / `listPluginFiles`（`@/lib/plugin-status`）
+
+```text
+publishLocalArtifact(artifactPath, options?, onProgress?) -> RegistryPublishResult
+Tauri: publish_local_artifact
+POST /api/plugin-registry/releases
+POST /api/plugin-releases/:id/submit-marketplace
+```
 
 ### 3. Contracts
-- 「发布到团队」= 读磁盘 manifest.json（取 capabilities/visibility 等列表层 LocalPluginStatus 没有的字段）+ `list_plugin_files` 枚举源文件 + 逐个 `read_local_plugin_file` 读内容 → 组装 `StagedPlugin` → `submitStagedPlugin` → `POST /api/plugins/upload`。
-- manifest.json **不**进 `files[]`（由 `submitStagedPlugin` 内的 `buildStagedManifest` 重新生成），避免旧 manifest 脏字段污染上传包。
-- 二进制占位文件（`read_local_plugin_file` 对非 UTF-8 返回 `[binary file, ...]` 占位）用 `isBinaryPlaceholder` 判定后**跳过**，不作为文本上传。
-- 组装字段优先级：`id` ← manifest.id > plugin_id；`name` ← manifest.title > manifest.name > plugin_id（与 `scan_one_plugin` 展示一致）；`runtime_type`/`entry`/`visibility`/`capabilities` ← manifest，缺失走默认（runtime=client、entry 按 runtime 默认、visibility=tenant、capabilities=[ui.view]）。
-- **两种发布目标（RocketIcon 下拉菜单）**：
-  - 「发布到团队」：`/api/plugins/upload` → 团队插件（reviewStatus=DRAFT），后续可在团队行点 RocketIcon 提交市场审核。
-  - 「发布到市场」：先 `/api/plugins/upload`（拿返回 `plugin.id`）→ 再 `POST /api/plugins/:id/submit-marketplace`（带 priceCents）一步进入审核队列（PENDING）。`submitStagedPlugin` 返回类型含 `id` 供此第二步使用。
-- 本地行「发布」按钮仅对**非草稿**（`!item.draft`）插件显示——草稿在「我的草稿」tab 有自己的 `handlePublish`（DraftPluginsSection）。
-- **发布成功后刷新本地 + 团队列表**：`PluginCenterBody` 传 `onPublished={() => { local.reload(); team.refresh(); }}`（此前只刷新本地，导致切到「团队插件」看不到刚发布的插件——团队列表缓存陈旧）。
+
+- 桌面从本地目录生成完整 `.lfplugin`，经 `publish_local_artifact` 发布到
+  `POST /api/plugin-registry/releases`；请求携带 manifest、制品摘要与 provenance。
+- `PluginPackage` 表示稳定逻辑身份；每个版本创建 immutable `PluginRelease`。
+  升级必须提高 SemVer 并创建新 release，不能覆盖旧 release 的 manifest、artifactKey
+  或 sha256。
+- 市场审核只接受显式提交的 v4 release。管理员审核 `PluginReleaseReview`，通过后由
+  `MarketplaceListing.currentReleaseId` 指向可售版本。
+- 安装由 entitlement 与 installation ledger 驱动，桌面下载并校验精确
+  `releaseId + sha256` 后 materialize；不得再从 `/api/plugins/available` 获取
+  `manifest + files[]`。
+- package archive、release yank 与 listing delist/relist 保留历史；不物理删除已发布
+  release，不把 DRAFT legacy Plugin 直接变成市场版本。
 
 ### 4. Validation & Error Matrix
-- manifest.json 读取失败（os error / JSON 非法）→ 抛 `读取 manifest.json 失败：...`，toast 展示，不发起上传。
-- 插件目录无源文件（全是二进制占位）→ 抛 `插件没有可上传的源文件（可能全是二进制）`。
-- `submitStagedPlugin` 内 `validateStagedCompleteness` 校验失败（python 缺 requirements.txt / nodejs 缺 package.json / client 入口非 .html）→ 返回 `{ ok:false, message }`，toast 展示其 message，不发起上传。
-- 后端 `/api/plugins/upload` 失败（权限/超限）→ `submitStagedPlugin` catch ApiError 返回 message，toast 展示。
+
+| Condition | Result |
+| --- | --- |
+| `.lfplugin` 非法、缺 manifest/entry 或摘要不匹配 | 发布失败，不创建 release |
+| 同 package + version 已存在但制品不同 | 409 conflict |
+| 新版本 SemVer 不高于现有版本 | 409 conflict |
+| 未显式 submit 的 release | 不进入审核队列 |
+| 下载的 releaseId/SHA 与账本不一致 | 拒绝 materialize/运行 |
+| legacy 上传、available、审核或市场写路由 | 410 `legacy_plugin_api_retired` |
 
 ### 5. Good/Base/Bad Cases
-- Good: 本地 videodl 插件行 RocketIcon → 选「发布到市场」→ 填定价（或留空=免费）→ 一步上传 + 提交审核 → toast「已发布并提交市场审核」，团队列表刷新出现该插件（reviewStatus=PENDING）。
-- Good: 本地 videodl 行选「发布到团队」→ 上传成功 → 团队 tab 出现（reviewStatus=DRAFT）→ 团队行点 RocketIcon 提交市场审核（两步路径仍保留）。
-- Base: 本地插件无 capabilities 字段 → loadLocalPluginAsStaged 兜底 `[ui.view]` → 上传成功。
-- Bad: 发布成功后只刷新本地列表，不刷新团队列表 → 用户切到「团队插件」看不到刚发布的插件；正确做法是 `onPublished` 同时调 `local.reload()` + `team.refresh()`。
-- Bad: 把 manifest.json 原样塞进 files[] → 上传后后端 manifest 与 files 里的 manifest.json 冲突/重复；正确做法是 manifest 由 buildStagedManifest 重新生成。
+
+- Good：本地 `1.10.0` 打包后创建新 release，审核通过后 listing current 从
+  `1.9.0` 原子切到 `1.10.0`，旧制品仍可审计。
+- Base：仅发布到团队时 package/release 可见，但未 submit 前不进入市场审核。
+- Bad：调用 `POST /api/plugins/upload`，或更新同一 `Plugin` 行覆盖 `1.9.0`
+  内容；这会破坏精确制品身份和购买追溯。
 
 ### 6. Tests Required
-- 前端单测: `local-upload.spec.ts` 覆盖 python 插件组装完整 StagedPlugin（title 优先、保留 capabilities/visibility、跳过 manifest.json）、二进制占位跳过、缺 capabilities/visibility 走默认、manifest 读取失败抛错、无可上传源文件抛错。
-- 前端单测（已有）: `creator-tools.spec.ts` 覆盖 `submitStagedPlugin` / `validateStagedCompleteness`。
-- Full checks: `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `pnpm -C apps/desktop vite:build`。
+
+- 桌面：`plugin-registry.spec.ts` 与发布 E2E 断言调用
+  `publish_local_artifact`、来源字段和失败状态。
+- 后端：`plugin-registry.service.spec.ts` 断言 immutable version、SemVer、
+  submit/review/listing 状态机和摘要校验。
+- Rust：打包、上传、下载、账本 materialization 与路径/摘要失败分支。
+- 跨层门禁：desktop/collab-api/contract typecheck、测试、build 及
+  `cargo test -p lingfang-desktop`。
 
 ### 7. Wrong vs Correct
 
 Wrong:
-```typescript
-// 列表层 LocalPluginStatus 没有 capabilities，直接拼会丢字段
-await submitStagedPlugin({ id: item.id, name: item.name, /* capabilities 缺失 */ ... });
+
+```ts
+await api('/api/plugins/upload', { method: 'POST', body: legacyPackage });
 ```
 
 Correct:
-```typescript
-const staged = await loadLocalPluginAsStaged(item.id); // 从磁盘 manifest 读 capabilities/visibility
-const result = await submitStagedPlugin(staged);        // 返回 { ok, name, id, upgraded }
-if (!result.ok) toast.error(result.message);
-// 「发布到市场」：拿到 result.id 后调 submit-marketplace
-await api(`/api/plugins/${result.id}/submit-marketplace`, { method: 'POST', body: { priceCents } });
+
+```ts
+const release = await publishLocalArtifact(artifactPath, provenance);
+await api(`/api/plugin-releases/${release.id}/submit-marketplace`, {
+  method: 'POST',
+  body: { priceCents },
+});
 ```
-
-Reference files:
-- `apps/desktop/src/lib/plugin-creator/local-upload.ts`（`loadLocalPluginAsStaged`）
-- `apps/desktop/src/pages/plugins/LocalPluginRow.tsx`（`useLocalPublishState`：RocketIcon Popover 菜单「发布到团队」/「发布到市场」+ `PublishToMarketDialog` 定价弹窗）
-- `apps/desktop/src/pages/plugins/LocalPluginsSection.tsx`（透传 `onPublished` 回调）
-- `apps/desktop/src/pages/plugins/PluginCenterBody.tsx`（`onPublished` 同时刷新本地 + 团队列表）
-- `apps/desktop/src/lib/plugin-status.ts`（`listPluginFiles` / `readLocalPluginFile` 封装）
-- `apps/desktop/src/lib/plugin-creator/creator-tools.ts`（`submitStagedPlugin` 透传 `id`/`upgraded` / `validateStagedCompleteness`）
-
-## 后台直接审核草稿插件（DRAFT → APPROVED，2026-07-07）
-
-管理员可在后台插件详情直接把草稿(DRAFT)插件审核通过/驳回，无需作者先提交市场审核。
-
-### 1. Scope / Trigger
-- Trigger: 在 `apps/collab-admin` 插件详情面板对一个 DRAFT 插件点「通过审核」/「驳回」，或修改 `adminApprovePlugin` / `adminRejectPlugin` 守卫、`plugins-view.tsx` 审核按钮渲染条件。
-
-### 2. Signatures
-- 后端：`AdminService.adminApprovePlugin(actorId, id) -> { plugin }`（守卫放宽：DRAFT/PENDING 均可）
-- 后端：`AdminService.adminRejectPlugin(actorId, id, reason?) -> { plugin }`（守卫同上）
-
-### 3. Contracts
-- `adminApprovePlugin` / `adminRejectPlugin` 守卫从 `!== 'PENDING'` 放宽为 `!== 'PENDING' && !== 'DRAFT'`：DRAFT 插件可直接审核，跳过作者主动提交步骤。
-- 对 DRAFT 审核通过/驳回的副作用与 PENDING 完全一致：写 `PluginReview`（status APPROVED/REJECTED）、审计日志、通知作者、（审核通过）marketplace=true/visibility=PUBLIC/新版本通知已安装用户。
-- APPROVED/REJECTED 等终态仍抛 conflict「插件不在审核中且非草稿，无法直接审核」。
-- 后台 UI（`plugins-view.tsx`）审核按钮渲染条件：`reviewStatus === 'PENDING' || reviewStatus === 'DRAFT'`。
-- 桌面端 `Review.tsx` 审核**队列**（`GET /api/admin/plugins/review-pending`）仍只列 PENDING（队列=作者主动提交的待办）；后台插件详情面板才是对任意状态审核的入口。
-
-### 4. Validation & Error Matrix
-- DRAFT → approve → APPROVED + marketplace + PUBLIC（成功）。
-- DRAFT → reject → REJECTED + 通知作者附原因（成功）。
-- APPROVED → approve → 409 conflict（不能重复审核）。
-- REJECTED → reject → 409 conflict（不能重复驳回）。
-- PENDING → approve/reject → 与原逻辑一致（回归用例覆盖）。
-
-### 5. Good/Base/Bad Cases
-- Good: 作者上传插件后未提交审核（DRAFT），管理员在后台插件列表筛选看到 → 详情面板点「通过审核」→ 直接上架市场。
-- Base: DRAFT 插件无 authorUserId → 审核通过但不触发作者通知（与 PENDING 路径一致）。
-- Bad: 对已 APPROVED 插件再点通过 → 后端 409，前端按 toast 展示；不重复写 PluginReview。
-
-### 6. Tests Required
-- 后端单测: `admin.service.spec.ts` 覆盖 DRAFT → approve（APPROVED + marketplace + 通知）、DRAFT → reject（REJECTED + 通知附原因）、APPROVED/REJECTED 终态抛 conflict。
-- Full checks: `pnpm -C apps/collab-api test`, `pnpm -C apps/collab-admin build`。
-
-### 7. Wrong vs Correct
-
-Wrong:
-```typescript
-// 守卫只允许 PENDING，DRAFT 被挡在 409
-if (plugin.reviewStatus !== 'PENDING') throw conflict('插件不在审核中');
-// 后台 UI 只对 PENDING 显示审核按钮，DRAFT 连按钮都看不到
-{plugin.reviewStatus === 'PENDING' ? <Button>通过审核</Button> : null}
-```
-
-Correct:
-```typescript
-// 守卫允许 DRAFT/PENDING；终态（APPROVED/REJECTED）抛 conflict
-if (plugin.reviewStatus !== 'PENDING' && plugin.reviewStatus !== 'DRAFT')
-  throw conflict('插件不在审核中且非草稿，无法直接审核');
-// 后台 UI 对 PENDING/DRAFT 都显示审核按钮
-{plugin.reviewStatus === 'PENDING' || plugin.reviewStatus === 'DRAFT' ? <Button>通过审核</Button> : null}
-```
-
-Reference files:
-- `apps/collab-api/src/modules/admin.service.ts`（`adminApprovePlugin` / `adminRejectPlugin` 守卫放宽）
-- `apps/collab-api/src/modules/admin.service.spec.ts`（DRAFT 审核 + 终态 conflict 用例）
-- `apps/collab-admin/src/components/plugins-view.tsx`（审核按钮对 DRAFT 渲染）
-
-## 插件版本升级覆盖（manifest.id 同一性，2026-07-07）
-
-支持「同一插件的不同版本」：上传/导入时按 `manifest.id` 识别同插件，新版本覆盖旧版本（in-place 升级），而非创建无关联的新记录/目录。覆盖团队上传、本地上传、本地包导入三条路径。
-
-### 1. Scope / Trigger
-- Trigger: changing `uploadPlugin`（后端）、`editPluginDraft`（后端）、`publicAvailablePlugin`（后端）、`submitStagedPlugin`（前端）、`materializeZipPlugin`（前端）、`TeamPluginRow` 更新按钮、或插件版本升级流程。
-
-### 2. Signatures
-- 后端：`PluginService.uploadPlugin(userId, input) -> { plugin, deduplicated?, upgraded? }`
-- 后端：`PluginService.editPluginDraft(userId, id, input) -> { plugin }`（已上架强制 semver 严格递增 + 通知已安装用户）
-- 后端：`publicAvailablePlugin(plugin, currentTeamId)` 现在对本团队插件也注入 `installedVersion`
-- 前端：`submitStagedPlugin(draft) -> { ok, name, upgraded? } | { ok:false, message }`
-- 前端：`materializeZipPlugin(result, existingIds, existingVersions?) -> { id, source, upgraded }`
-- 前端：`isVersionNewer(newVer, oldVer) -> boolean`（共享工具 `@/lib/version`）
-
-### 3. Contracts — 同一性识别
-- **团队/云端**：`manifest.id`（+ 团队）唯一标识一个插件。`uploadPlugin` 先 contentHash 去重；再按 `manifest.id` 查同团队已有插件（`findFirst` where `manifest.path['id']`）；命中 → 委托 `editPluginDraft(id, input)` in-place 升级，返回 `{ upgraded: true }`；否则新建。
-- **本地**：插件目录名 = 身份（不变）。`.lfplugin` 包导入时，若现有同 id 插件且包版本更高（`isVersionNewer`）→ 用原 id 覆盖（不 dedupe 改名）；否则走 dedupe 改名逻辑。
-
-### 3a. Contracts — 后端 uploadPlugin 升级委托
-- `editPluginDraft` 复用：含权限校验（`ensurePluginManager`）、PENDING 检查、已上架 semver 严格递增、未上架 in-place 更新（打回 DRAFT）、`notifyNewVersion` 推送。
-- 未上架插件（DRAFT/REJECTED）升级：in-place 更新不校验版本（允许 0.0.1→0.0.2），打回 DRAFT 重审。
-- 已上架插件（APPROVED+marketplace）升级：强制 `isVersionNewer(newVersion, oldVersion)`，否则抛「版本号必须大于当前」。
-- 返回 `{ plugin, upgraded: true }`；contentHash 相同 → `{ deduplicated: true }`；全新 → `{ deduplicated: false }`。
-
-### 3b. Contracts — 前端本地包导入版本感知
-- `materializeZipPlugin(result, existingIds, existingVersions)`：`existingVersions` 是 id→version 映射（调用方从 `scanPluginStatus` 的 items 构造）。
-- `isUpgrade = existingVersions[baseId] && isVersionNewer(incomingVersion, existingVersion)`。
-- 升级 → `finalId = baseId`（覆盖，不 dedupe），`upgraded: true`；非升级 → `finalId = dedupeImportId(baseId, existingIds)`，`upgraded: false`。
-
-### 3c. Contracts — 本团队插件「更新」可见
-- `publicAvailablePlugin` 原先对本团队插件（`isOwnTeam`）早返回不注入 `installedVersion` → 本团队插件看不到「更新」按钮。现改为本团队已安装插件也注入 `installedVersion`（从 `installations[0].version`）。
-- `TeamPluginRow.hasUpdate = installedVersion && isVersionNewer(version, installedVersion)` 现对本团队作者/成员安装的旧版也成立。
-
-### 4. Validation & Error Matrix
-- 上传同 manifest.id 不同版本（未上架）→ in-place 升级，返回 `upgraded:true`，不新建。
-- 上传同 manifest.id 已上架插件低版本 → 抛「版本号必须大于当前 X」。
-- 上传同 contentHash → 返回 `deduplicated:true`，不新建不升级。
-- 上传无同 manifest.id → 新建，返回 `deduplicated:false`。
-- 本地导入包版本更高 → 覆盖原 id，`upgraded:true`；同版本/低版本 → dedupe 改名 `-2`，`upgraded:false`。
-- `editPluginDraft` 命中 PENDING 插件 → 抛「审核中不能编辑」。
-
-### 5. Good/Base/Bad Cases
-- Good: 本地 videodl v0.1.0「发布到团队」→ 团队出现 v0.1.0；本地改代码升 version 到 v0.2.0 再「发布」→ 同一团队插件行 version 变 v0.2.0（不新增行），toast「已升级到 v0.2.0」。
-- Good: 本地导入 videodl v0.2.0 包（现有 v0.1.0）→ 覆盖 `plugins_root/videodl/`，toast「已升级覆盖旧版本」，不改名。
-- Base: 团队成员安装了作者的 v0.1.0，作者升 v0.2.0 → 团队列表该插件显示「更新 v0.2.0」按钮（`installedVersion=0.1.0 < version=0.2.0`）。
-- Bad: 上传同 manifest.id 不同内容创建新 UUID 行（旧行为）→ 团队出现两条同名插件，无关联；正确做法是 uploadPlugin 委托 editPluginDraft。
-- Bad: 本地导入高版本包走 dedupe 改名 → 出现 `videodl-2` 旧版残留；正确做法是版本感知覆盖原 id。
-
-### 6. Tests Required
-- 后端单测: `plugin.service.spec.ts` 覆盖同 manifest.id 升级（upgraded:true，走 update 不 create）、无同 id 新建、contentHash 去重。
-- 前端单测: `plugin-package-zip.spec.ts` 覆盖高版本覆盖升级（upgraded:true，不 dedupe）、同版本/低版本 dedupe、`version.spec.ts` 覆盖 isVersionNewer。
-- Full checks: `pnpm -C apps/collab-api test`, `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `pnpm -C apps/desktop vite:build`。
-
-### 7. Wrong vs Correct
-
-Wrong:
-```typescript
-// 后端：上传同 id 不同版本创建新行
-const plugin = await prisma.plugin.create({ ... }); // 新 UUID，与旧版无关联
-```
-
-Correct:
-```typescript
-// 后端：同 manifest.id 委托 editPluginDraft in-place 升级
-const sameLogical = await prisma.plugin.findFirst({ where: { teamId, manifest: { path: ['id'], equals: manifestId } } });
-if (sameLogical) {
-  const { plugin } = await this.editPluginDraft(userId, sameLogical.id, input);
-  return { plugin, upgraded: true };
-}
-```
-
-Reference files:
-- `apps/collab-api/src/modules/plugin.service.ts`（`uploadPlugin` manifest.id 匹配 + 委托 `editPluginDraft`）
-- `apps/collab-api/src/modules/plugin-package.ts`（`publicAvailablePlugin` 本团队注入 `installedVersion`）
-- `apps/desktop/src/lib/version.ts`（`isVersionNewer` / `parseVersion` 共享工具）
-- `apps/desktop/src/lib/plugin-creator/creator-tools.ts`（`submitStagedPlugin` 透传 `upgraded`）
-- `apps/desktop/src/lib/plugin-package-zip.ts`（`materializeZipPlugin` 版本感知覆盖）
-- `apps/desktop/src/pages/plugins/use-local-import.ts`（`existingVersions` + 升级 toast）
-- `apps/desktop/src/pages/plugins/LocalPluginsSection.tsx`（构造 `existingVersions` 传入）
-- `apps/desktop/src/pages/plugins/TeamPluginRow.tsx`（`hasUpdate` 用共享 `isVersionNewer`）

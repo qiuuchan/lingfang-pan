@@ -27,6 +27,8 @@ describe('AutomationScheduleFireProcessor', () => {
   });
 
   it('creates one scheduled run and advances recurring nextRunAt', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T10:00:30.000Z'));
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const prisma = {
       automationSchedule: { findFirst: vi.fn(async () => schedule), updateMany },
@@ -40,5 +42,6 @@ describe('AutomationScheduleFireProcessor', () => {
     })).resolves.toEqual({ outcome: 'CREATED', run_id: 'run-new' });
     expect(startScheduled).toHaveBeenCalledWith('user-1', schedule, new Date('2026-07-20T10:00:00.000Z'), 'schedule-1:g2:2026-07-20T10:00:00.000Z');
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { nextRunAt: new Date('2026-07-21T10:00:00.000Z') } }));
+    vi.useRealTimers();
   });
 });

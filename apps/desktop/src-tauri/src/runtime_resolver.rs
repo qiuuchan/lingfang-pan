@@ -595,7 +595,11 @@ mod tests {
         let env = r.env(vec![]);
         assert!(env.iter().any(|(key, value)| {
             key == "PLAYWRIGHT_BROWSERS_PATH"
-                && value == &root.join("chromium/ms-playwright").into_os_string()
+                && value
+                    == &root
+                        .join("chromium")
+                        .join("ms-playwright")
+                        .into_os_string()
         }));
         assert!(env
             .iter()

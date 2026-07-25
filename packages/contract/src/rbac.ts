@@ -116,7 +116,7 @@ export type TeamMember = z.infer<typeof TeamMember>;
 export const PluginGrantRow = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
-  pluginId: z.string().min(1),
+  packageId: z.string().min(1),
   subjectKind: PluginGrantSubject,
   subjectId: z.string().min(1),
   effect: PluginGrantEffect,

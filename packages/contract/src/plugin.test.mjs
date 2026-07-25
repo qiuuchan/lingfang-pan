@@ -23,7 +23,7 @@ test('all roles default to allowed when no grant matches while governance owns h
 
 test('deny grant still overrides owner default allow', () => {
   const grants = [
-    { tenant_id: 't1', plugin_id: 'p1', subject_kind: 'role', subject_id: 'owner', effect: 'deny' },
+    { tenant_id: 't1', package_id: 'pkg1', subject_kind: 'role', subject_id: 'owner', effect: 'deny' },
   ];
 
   assert.equal(resolveGrant(grants, 'u1', 'owner'), false);

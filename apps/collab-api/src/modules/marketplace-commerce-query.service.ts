@@ -50,7 +50,6 @@ const ORDER_ITEM_SELECT = {
   refundedAt: true,
   createdAt: true,
   package: { select: { name: true } },
-  plugin: { select: { name: true } },
   release: { select: { version: true } },
   refundRequest: {
     select: {
@@ -345,7 +344,7 @@ function publicOrder(row: OrderItemRow) {
   return {
     id: row.id,
     package_id: row.packageId,
-    package_name: row.package?.name ?? row.plugin?.name ?? '未知插件',
+    package_name: row.package?.name ?? '未知插件',
     release_id: row.releaseId,
     release_version: row.release?.version ?? null,
     currency_code: row.currencyCode,

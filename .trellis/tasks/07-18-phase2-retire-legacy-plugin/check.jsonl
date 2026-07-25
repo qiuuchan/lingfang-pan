@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/collab-api/backend/plugin-package-registry.md", "reason": "校验 v4 registry、legacy cutover、幂等迁移与 provider-specific destructive guards"}
+{"file": ".trellis/spec/collab-api/backend/quality-and-contracts.md", "reason": "校验 410 错误契约、v4 admin/me 投影与 package grant 边界"}
+{"file": ".trellis/spec/contract/backend/cross-runtime-alignment.md", "reason": "校验 capability、DTO 与跨运行时契约一致性"}
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-runtime-persistence.md", "reason": "校验桌面发布只走 immutable v4 release 且 legacy upload command 已退役"}

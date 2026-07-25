@@ -18,6 +18,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma.service';
 import { notFound, publicUser } from '../common';
+import { highestSemVer } from './plugin-registry-model';
 
 @Injectable()
 export class MeService {
@@ -28,9 +29,16 @@ export class MeService {
    * Promise.all 并行查询五类数据，出参按白名单脱敏，绝不返回 passwordHash/tokenVersion。
    */
   async exportMyData(userId: string) {
-    const [user, plugins, purchases, walletTxs, memberships] = await Promise.all([
+    const [user, pluginPackages, purchases, walletTxs, memberships] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId } }),
-      this.prisma.plugin.findMany({ where: { authorUserId: userId }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.pluginPackage.findMany({
+        where: { authorUserId: userId },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          listing: true,
+          releases: { select: { version: true, marketReviewStatus: true } },
+        },
+      }),
       this.prisma.purchase.findMany({ where: { buyerUserId: userId }, orderBy: { createdAt: 'desc' } }),
       this.prisma.walletTransaction.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 200 }),
       this.prisma.teamMembership.findMany({ where: { userId }, include: { team: true }, orderBy: { joinedAt: 'desc' } }),
@@ -40,21 +48,25 @@ export class MeService {
       // 个人信息：publicUser 白名单（id/email/displayName/status/platformRole），不含 passwordHash/tokenVersion。
       // 补 createdAt 供用户导出注册时间；tokenVersion 等敏感字段严格排除。
       user: { ...publicUser(user), createdAt: user.createdAt },
-      plugins: plugins.map((p) => ({
-        id: p.id,
-        name: p.name,
-        version: p.version,
-        description: p.description,
-        visibility: p.visibility,
-        reviewStatus: p.reviewStatus,
-        marketplace: p.marketplace,
-        priceCents: p.priceCents,
-        createdAt: p.createdAt,
-      })),
+      plugins: pluginPackages.map((p) => {
+        const latestRelease = highestSemVer(p.releases);
+        return {
+          id: p.id,
+          name: p.name,
+          version: latestRelease?.version ?? null,
+          description: p.description,
+          visibility: p.listing?.status === 'ACTIVE' ? 'PUBLIC' : 'TEAM',
+          reviewStatus: latestRelease?.marketReviewStatus ?? 'DRAFT',
+          marketplace: p.listing?.status === 'ACTIVE',
+          priceCents: p.listing?.priceCents ?? 0,
+          createdAt: p.createdAt,
+        };
+      }),
       purchases: purchases.map((p) => ({
         id: p.id,
-        pluginId: p.pluginId,
+        pluginId: null,
         packageId: p.packageId,
+        releaseId: p.releaseId,
         sellerUserId: p.sellerUserId,
         priceCents: p.priceCents,
         createdAt: p.createdAt,

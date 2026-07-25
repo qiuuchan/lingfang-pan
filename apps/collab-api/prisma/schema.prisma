@@ -48,24 +48,6 @@ enum LedgerDirection {
   DEBIT
 }
 
-enum PluginStatus {
-  ENABLED
-  DISABLED
-}
-
-enum PluginRuntimeType {
-  CLIENT
-  CLOUD
-  NODEJS
-  PYTHON
-}
-
-enum PluginVisibility {
-  PRIVATE
-  TEAM
-  PUBLIC
-}
-
 enum PluginReviewStatus {
   DRAFT
   PENDING
@@ -521,9 +503,6 @@ model User {
   reviewedApplications   TeamAdminApplication[] @relation("ApplicationReviewer")
   invitations            InvitationCode[]       @relation("InvitationCreator")
   balanceLedgers         BalanceLedger[]        @relation("LedgerActor")
-  authoredPlugins        Plugin[]               @relation("PluginAuthor")
-  reviewedPlugins        Plugin[]               @relation("PluginReviewer")
-  pluginReviews          PluginReview[]         @relation("PluginReviewReviewer")
   authoredPluginPackages PluginPackage[]        @relation("PluginPackageAuthor")
   createdPluginReleases  PluginRelease[]        @relation("PluginReleaseCreator")
   pluginReleaseReviews   PluginReleaseReview[]  @relation("PluginReleaseReviewer")
@@ -538,7 +517,6 @@ model User {
   marketplaceDiscountsCanceled MarketplaceDiscount[] @relation("MarketplaceDiscountCanceler")
   marketplaceCampaignsCreated MarketplaceCampaign[] @relation("MarketplaceCampaignCreator")
   marketplaceCampaignsPublished MarketplaceCampaign[] @relation("MarketplaceCampaignPublisher")
-  pluginRatings          PluginRating[]         @relation("PluginRater")
   auditLogs              AuditLog[]             @relation("AuditActor")
   platformSettingUpdates PlatformSetting[]      @relation("SettingUpdater")
   pluginGrantsCreated    PluginGrant[]          @relation("PluginGrantCreator")
@@ -576,8 +554,6 @@ model Team {
   memberships        TeamMembership[]
   invitations        InvitationCode[]
   ledger             BalanceLedger[]
-  plugins            Plugin[]
-  installations      PluginInstallation[]
   pluginPackages     PluginPackage[]
   pluginEntitlements PluginEntitlement[]
   marketplacePurchasesBuyer Purchase[] @relation("PurchaseBuyerTeam")
@@ -689,81 +665,6 @@ model BalanceLedger {
   @@unique([purchaseId, marketplaceEntryKind])
 }
 
-model Plugin {
-  id              String               @id @default(uuid())
-  name            String
-  description     String               @default("")
-  version         String               @default("0.1.0")
-  entry           String               @default("ui/index.html")
-  runtimeType     PluginRuntimeType    @default(CLIENT)
-  status          PluginStatus         @default(ENABLED)
-  visibility      PluginVisibility     @default(TEAM)
-  teamId          String?
-  authorUserId    String?
-  files           Json                 @default("[]")
-  manifest        Json                 @default("{}")
-  capabilities    Json                 @default("[]")
-  contentHash     String               @default("")
-  reviewStatus    PluginReviewStatus   @default(DRAFT)
-  reviewReason    String               @default("")
-  reviewedById    String?
-  reviewedAt      DateTime?
-  marketplace     Boolean              @default(false)
-  priceCents      Int                  @default(0)
-  installCount    Int                  @default(0)
-  ratingCount     Int                  @default(0)
-  ratingSum       Int                  @default(0)
-  aiPolicyVersion Int                  @default(0)
-  aiPolicyStatus  String               @default("UNCHECKED")
-  aiPolicyReason  String               @default("")
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  team            Team?                @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  author          User?                @relation("PluginAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
-  reviewedBy      User?                @relation("PluginReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  installations   PluginInstallation[]
-  reviews         PluginReview[]
-  purchases       Purchase[]
-  ratings         PluginRating[]
-  pluginGrants    PluginGrant[]
-
-  @@unique([teamId, contentHash])
-  @@index([teamId, status, visibility])
-  @@index([authorUserId, createdAt])
-  @@index([marketplace, reviewStatus, status])
-  @@index([reviewStatus, createdAt])
-}
-
-model PluginInstallation {
-  id            String       @id @default(uuid())
-  pluginId      String
-  teamId        String
-  installedById String?
-  version       String
-  status        PluginStatus @default(ENABLED)
-  installedAt   DateTime     @default(now())
-  plugin        Plugin       @relation(fields: [pluginId], references: [id], onDelete: Cascade)
-  team          Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
-
-  @@unique([pluginId, teamId])
-  @@index([teamId, status])
-}
-
-model PluginReview {
-  id         String             @id @default(uuid())
-  pluginId   String
-  reviewerId String?
-  status     PluginReviewStatus
-  reason     String             @default("")
-  createdAt  DateTime           @default(now())
-  plugin     Plugin             @relation(fields: [pluginId], references: [id], onDelete: Cascade)
-  reviewer   User?              @relation("PluginReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
-
-  @@index([pluginId, createdAt])
-  @@index([status, createdAt])
-}
-
-// v4 registry: package identity is stable while every release points at one immutable ZIP artifact.
 model PluginPackage {
   id               String              @id @default(uuid())
   ownerTeamId      String
@@ -1151,7 +1052,6 @@ model WalletTransaction {
 
 model Purchase {
   id           String             @id @default(uuid())
-  pluginId     String?
   packageId    String?
   releaseId    String?
   buyerUserId  String
@@ -1182,7 +1082,6 @@ model Purchase {
   refundReason String @default("")
   idempotencyKey String?
   createdAt    DateTime           @default(now())
-  plugin       Plugin?            @relation(fields: [pluginId], references: [id], onDelete: Cascade)
   package      PluginPackage?     @relation(fields: [packageId], references: [id], onDelete: Restrict)
   release      PluginRelease?     @relation(fields: [releaseId], references: [id], onDelete: Restrict)
   buyer        User               @relation("PurchaseBuyer", fields: [buyerUserId], references: [id])
@@ -1199,7 +1098,6 @@ model Purchase {
   ledgerEntries BalanceLedger[]
   idempotencyRecords MarketplacePurchaseIdempotency[]
 
-  @@unique([pluginId, buyerUserId])
   @@index([packageId, buyerTeamId])
   @@index([buyerUserId])
   @@index([packageId])
@@ -1338,21 +1236,6 @@ model MarketplaceCampaignItem {
   @@unique([campaignId, packageId])
   @@unique([campaignId, rank])
   @@index([packageId])
-}
-
-model PluginRating {
-  id        String   @id @default(uuid())
-  pluginId  String
-  userId    String
-  teamId    String
-  score     Int
-  comment   String   @default("")
-  createdAt DateTime @default(now())
-  plugin    Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
-  user      User     @relation("PluginRater", fields: [userId], references: [id])
-
-  @@unique([pluginId, userId])
-  @@index([pluginId])
 }
 
 // LLM provider 目录（平台级，平台 Admin 维护，应用发布时 seed 默认值）。
@@ -1562,21 +1445,17 @@ model Role {
 model PluginGrant {
   id          String             @id @default(uuid())
   teamId      String
-  pluginId    String?
-  packageId   String?
+  packageId   String
   subjectKind PluginGrantSubject
   subjectId   String
   effect      PluginGrantEffect
   createdBy   String?
   createdAt   DateTime           @default(now())
   team        Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  plugin      Plugin?            @relation(fields: [pluginId], references: [id], onDelete: Cascade)
-  package     PluginPackage?     @relation("PluginPackageGrants", fields: [packageId], references: [id], onDelete: Cascade)
+  package     PluginPackage      @relation("PluginPackageGrants", fields: [packageId], references: [id], onDelete: Cascade)
   creator     User?              @relation("PluginGrantCreator", fields: [createdBy], references: [id], onDelete: SetNull)
 
-  @@unique([teamId, pluginId, subjectKind, subjectId])
   @@unique([teamId, packageId, subjectKind, subjectId])
-  @@index([teamId, pluginId])
   @@index([teamId, packageId])
 }
 

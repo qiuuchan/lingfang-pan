@@ -7,7 +7,7 @@ import { badRequest, conflict, forbidden, insufficientBalance, notFound, publicU
 import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 import { NotificationService } from './notification.service';
-import { publicPlugin } from './plugin-package';
+import { highestSemVer } from './plugin-registry-model';
 import {
   SYSTEM_PLATFORM_ADMIN_ROLE_ID,
   SYSTEM_TEAM_ADMIN_ROLE_CODE,
@@ -133,11 +133,11 @@ export class AdminService {
   }
 
   // 平台级财务概览看板（调研报告 Top10 / C7）。
-  // 全量基于现有 Purchase/Plugin 表聚合，不新建 PaymentOrder/PlatformFeePolicy 表：
+  // 全量基于现有 Purchase/MarketplaceListing 表聚合，不新建 PaymentOrder/PlatformFeePolicy 表：
   //   - GMV（月/累计）：sum(Purchase.priceCents)。平台抽成暂为 0（ADR-0002 明确放弃），platformRevenueCents 恒为 0。
   //   - 付费用户数：distinct Purchase.buyerUserId。
   //   - 付费转化率：付费用户 / 总用户（需 count User）。
-  //   - Top5 热销插件：按 installCount 降序取前 5（市场插件，installCount 是 installMarketplacePlugin 维护的真实安装数）。
+  //   - Top5 热销插件：按 v4 MarketplaceListing.installCount 降序取前 5。
   async adminFinanceStats(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
     const now = new Date();
@@ -148,11 +148,11 @@ export class AdminService {
       this.prisma.purchase.aggregate({ _sum: { priceCents: true } }),
       this.prisma.purchase.findMany({ select: { buyerUserId: true }, distinct: ['buyerUserId'] }),
       this.prisma.user.count(),
-      this.prisma.plugin.findMany({
-        where: { marketplace: true },
+      this.prisma.marketplaceListing.findMany({
+        where: { status: 'ACTIVE' },
         orderBy: [{ installCount: 'desc' }, { ratingCount: 'desc' }],
         take: 5,
-        select: { id: true, name: true, installCount: true, ratingCount: true, ratingSum: true, priceCents: true },
+        select: { packageId: true, installCount: true, ratingCount: true, ratingSum: true, priceCents: true, package: { select: { name: true } } },
       }),
     ]);
     const monthGmv = monthGmvAgg._sum.priceCents ?? 0;
@@ -160,8 +160,8 @@ export class AdminService {
     const paidUserCount = paidBuyers.length;
     const conversionRate = totalUsers > 0 ? Math.round((paidUserCount / totalUsers) * 1000) / 10 : 0;
     const topPlugins = topPluginsRaw.map((p) => ({
-      id: p.id,
-      name: p.name,
+      id: p.packageId,
+      name: p.package.name,
       installCount: p.installCount,
       ratingCount: p.ratingCount,
       // 平均分：ratingCount>0 才计算，否则 0，避免除零 NaN。
@@ -847,7 +847,7 @@ export class AdminService {
     const [memberCount, roleCount, pluginCount, purchaseCount, ledgerAgg] = await Promise.all([
       this.prisma.teamMembership.count({ where: { teamId, status: 'ACTIVE' } }),
       this.prisma.role.count({ where: { scope: 'TEAM', teamId } }),
-      this.prisma.plugin.count({ where: { teamId } }),
+      this.prisma.pluginPackage.count({ where: { ownerTeamId: teamId } }),
       this.prisma.purchase.count({ where: { buyerTeamId: teamId } }),
       this.prisma.balanceLedger.groupBy({
         by: ['direction'],
@@ -882,29 +882,33 @@ export class AdminService {
     await this.auth.ensurePlatformAdmin(userId);
     await this.ensureAdminTeamExists(teamId);
     const { page, pageSize, skip } = normalizeAdminPage(query);
-    const where: Prisma.PluginWhereInput = { teamId };
+    const where: Prisma.PluginPackageWhereInput = { ownerTeamId: teamId };
     const [rows, total] = await Promise.all([
-      this.prisma.plugin.findMany({
+      this.prisma.pluginPackage.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take: pageSize,
         select: ADMIN_TEAM_PLUGIN_SELECT,
       }),
-      this.prisma.plugin.count({ where }),
+      this.prisma.pluginPackage.count({ where }),
     ]);
-    const items = rows.map((plugin) => ({
-      id: plugin.id,
-      name: plugin.name,
-      status: plugin.status,
-      visibility: plugin.visibility,
-      reviewStatus: plugin.reviewStatus,
-      marketplace: plugin.marketplace,
-      priceCents: plugin.priceCents,
-      installCount: plugin.installCount,
-      createdAt: plugin.createdAt,
-      updatedAt: plugin.updatedAt,
-    }));
+    const items = rows.map((pluginPackage) => {
+      const latestRelease = highestSemVer(pluginPackage.releases);
+      return {
+        id: pluginPackage.id,
+        name: pluginPackage.name,
+        version: latestRelease?.version ?? null,
+        status: pluginPackage.governanceStatus === 'ACTIVE' ? 'ENABLED' : 'DISABLED',
+        visibility: pluginPackage.listing?.status === 'ACTIVE' ? 'PUBLIC' : 'TEAM',
+        reviewStatus: latestRelease?.marketReviewStatus ?? 'DRAFT',
+        marketplace: pluginPackage.listing?.status === 'ACTIVE',
+        priceCents: pluginPackage.listing?.priceCents ?? 0,
+        installCount: pluginPackage.listing?.installCount ?? 0,
+        createdAt: pluginPackage.createdAt,
+        updatedAt: pluginPackage.updatedAt,
+      };
+    });
     return { items, total, page, pageSize };
   }
 
@@ -925,9 +929,10 @@ export class AdminService {
     ]);
     const items = rows.map((purchase) => ({
       id: purchase.id,
-      pluginId: purchase.pluginId,
+      pluginId: null,
       packageId: purchase.packageId,
-      pluginName: purchase.package?.name ?? purchase.plugin?.name ?? '未知插件',
+      releaseId: purchase.releaseId,
+      pluginName: purchase.package?.name ?? '未知插件',
       priceCents: purchase.priceCents,
       buyerUserId: purchase.buyerUserId,
       sellerUserId: purchase.sellerUserId,
@@ -982,235 +987,6 @@ export class AdminService {
         totalDebitCents,
         netCents: totalCreditCents - totalDebitCents,
       },
-    };
-  }
-
-  async adminPlugins(userId: string) {
-    await this.auth.ensurePlatformAdmin(userId);
-    // 组E 性能：take:200 上限防全表扫描（与 adminUsers/adminTeams 一致，前端已分页）。
-    // 不再 include team/author：publicPlugin 仅读 Plugin 标量字段（authorUserId/teamId 已是 Plugin 列），
-    // 此前 include author 会过度拉取整行 User（含 passwordHash/tokenVersion），既浪费 IO 又扩大凭据哈希暴露面。
-    const plugins = await this.prisma.plugin.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
-    return { plugins: plugins.map((plugin) => publicPlugin(plugin, plugin.teamId || undefined)) };
-  }
-
-  async adminPluginReviewPending(userId: string) {
-    await this.auth.ensurePlatformAdmin(userId);
-    // 组E 性能：take:200 上限；移除无用的 team/author include（同 adminPlugins 理由）。
-    // reviewStatus PENDING 已有 @@index([reviewStatus, createdAt]) 支撑高效过滤。
-    const plugins = await this.prisma.plugin.findMany({
-      where: { reviewStatus: 'PENDING' },
-      orderBy: { updatedAt: 'asc' },
-      take: 200,
-    });
-    return { plugins: plugins.map((plugin) => publicPlugin(plugin, plugin.teamId || undefined)) };
-  }
-
-  async adminApprovePlugin(actorId: string, id: string) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    const plugin = await this.prisma.plugin.findUnique({ where: { id } });
-    if (!plugin) throw notFound('插件不存在');
-    // 允许管理员对草稿(DRAFT)或待审(PENDING)插件直接通过审核。
-    // DRAFT 场景：作者未主动提交市场审核时，管理员可在后台插件详情直接上架（跳过作者提交步骤）。
-    if (plugin.reviewStatus !== 'PENDING' && plugin.reviewStatus !== 'DRAFT') throw conflict('插件不在审核中且非草稿，无法直接审核');
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.plugin.update({
-        where: { id },
-        data: { reviewStatus: 'APPROVED', reviewReason: '', reviewedById: actorId, reviewedAt: new Date(), marketplace: true, visibility: 'PUBLIC' },
-      });
-      await tx.pluginReview.create({ data: { pluginId: id, reviewerId: actorId, status: 'APPROVED', reason: '' } });
-      await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin.approved', targetType: 'Plugin', targetId: id, metadata: { teamId: plugin.teamId } } });
-      return next;
-    });
-    // 通知作者：插件审核通过（触发失败不阻塞主操作，仅吞错记日志）。
-    if (plugin.authorUserId) {
-      try {
-        await this.notifications.create(
-          plugin.authorUserId,
-          'plugin_approved',
-          '插件审核通过',
-          `你的插件「${plugin.name}」已通过平台审核并上架市场。`,
-          { relatedType: 'Plugin', relatedId: id },
-        );
-      } catch {
-        // 通知触发失败不阻塞审核主流程。
-      }
-    }
-    // Task 7「新版本推送」：重新审核通过（通常是作者改版后重提）且已有用户安装旧版本时，
-    // 向每位安装了旧版本的用户推 new_version 通知。首次上架无安装记录 → 不触发。
-    // 触发失败不阻塞审核主流程（与上方作者通知同语义）。
-    try {
-      const installations = await this.prisma.pluginInstallation.findMany({
-        where: { pluginId: id, status: 'ENABLED' },
-        select: { installedById: true, version: true },
-      });
-      const newVersion = updated.version;
-      for (const inst of installations) {
-        if (!inst.installedById || inst.version === newVersion) continue;
-        try {
-          await this.notifications.create(
-            inst.installedById,
-            'new_version',
-            '插件有新版本',
-            `你安装的「${plugin.name}」发布了新版本 v${newVersion}（当前 v${inst.version}），可在插件页更新。`,
-            { relatedType: 'Plugin', relatedId: id },
-          );
-        } catch {
-          /* 单条通知失败不影响其它用户 */
-        }
-      }
-    } catch {
-      /* 查询安装记录失败不阻塞审核 */
-    }
-    return { plugin: publicPlugin(updated, updated.teamId || undefined) };
-  }
-
-  async adminRejectPlugin(actorId: string, id: string, reason?: string) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    const plugin = await this.prisma.plugin.findUnique({ where: { id } });
-    if (!plugin) throw notFound('插件不存在');
-    // 同 adminApprovePlugin：允许驳回 DRAFT/PENDING（管理员可对未提交审核的草稿打回并附原因）。
-    if (plugin.reviewStatus !== 'PENDING' && plugin.reviewStatus !== 'DRAFT') throw conflict('插件不在审核中且非草稿，无法驳回');
-    const reviewReason = reason?.trim() || '未通过平台审核';
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.plugin.update({
-        where: { id },
-        data: { reviewStatus: 'REJECTED', reviewReason, reviewedById: actorId, reviewedAt: new Date(), marketplace: false, visibility: plugin.teamId ? 'TEAM' : plugin.visibility },
-      });
-      await tx.pluginReview.create({ data: { pluginId: id, reviewerId: actorId, status: 'REJECTED', reason: reviewReason } });
-      await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.plugin.rejected', targetType: 'Plugin', targetId: id, metadata: { teamId: plugin.teamId, reason: reviewReason } } });
-      return next;
-    });
-    // 通知作者：插件审核未通过，附驳回原因（触发失败不阻塞主操作）。
-    if (plugin.authorUserId) {
-      try {
-        await this.notifications.create(
-          plugin.authorUserId,
-          'plugin_rejected',
-          '插件审核未通过',
-          `你的插件「${plugin.name}」未通过平台审核：${reviewReason}`,
-          { relatedType: 'Plugin', relatedId: id },
-        );
-      } catch {
-        // 通知触发失败不阻塞审核主流程。
-      }
-    }
-    return { plugin: publicPlugin(updated, updated.teamId || undefined) };
-  }
-
-  async adminCreatePlugin(actorId: string) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    throw forbidden('插件创建只允许通过本地客户端 Agent 发布流程，不支持管理端新增插件');
-  }
-
-  // 扩展插件治理：支持改 name/description/version/priceCents/visibility（现仅 status/marketplace）。
-  // 与 adminUpdateTeam 同模式：显式字段白名单 + 仅记录被实际修改的字段到审计 metadata，
-  // 杜绝透传 input DTO 引用导致审计 shape 漂移（H5 同类修复）。
-  async adminUpdatePlugin(
-    actorId: string,
-    id: string,
-    input: { name?: string; description?: string; version?: string; status?: 'ENABLED' | 'DISABLED'; priceCents?: number; visibility?: 'PRIVATE' | 'TEAM' | 'PUBLIC' },
-  ) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    // 修复 PLUGIN-09：前置存在性校验，此前 plugin.update 在 id 不存在时抛 P2025 被吞成 500。
-    const existing = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw notFound('插件不存在');
-    // 显式字段白名单：仅取声明字段，丢弃客户端误传的非法键（marketplace/reviewStatus 等只能走专用端点）。
-    const data: {
-      name?: string;
-      description?: string;
-      version?: string;
-      status?: 'ENABLED' | 'DISABLED';
-      priceCents?: number;
-      visibility?: 'PRIVATE' | 'TEAM' | 'PUBLIC';
-    } = {};
-    if (input.name !== undefined) data.name = input.name;
-    if (input.description !== undefined) data.description = input.description;
-    if (input.version !== undefined) data.version = input.version;
-    if (input.status !== undefined) data.status = input.status;
-    if (input.priceCents !== undefined) data.priceCents = Math.max(0, Math.floor(Number(input.priceCents)));
-    if (input.visibility !== undefined) data.visibility = input.visibility;
-    const plugin = await this.prisma.plugin.update({ where: { id }, data });
-    // 审计 metadata 仅记录实际变更字段，便于审计日志回溯精确 diff（避免裸透传 input）。
-    await this.audit(actorId, 'admin.plugin.updated', 'Plugin', id, data);
-    return { plugin: publicPlugin(plugin, plugin.teamId || undefined) };
-  }
-
-  // 下架市场插件：marketplace=false + reviewStatus=DRAFT，与作者编辑草稿（plugin.service.editPluginDraft）
-  // 下架后的状态保持一致——下架后回到草稿态，作者可重新编辑并再次提交审核。事务内写审计。
-  // 通知作者：插件已被平台下架（触发失败不阻塞主操作）。
-  async adminDelistPlugin(actorId: string, id: string, reason?: string) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    const plugin = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true, name: true, teamId: true, authorUserId: true, marketplace: true } });
-    if (!plugin) throw notFound('插件不存在');
-    // 仅对上架市场的插件有下架语义；未上架直接幂等成功返回（避免重复下架产生歧义审计）。
-    if (!plugin.marketplace) throw conflict('插件未上架市场，无需下架');
-    const reviewReason = reason?.trim() || '平台下架';
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.plugin.update({
-        where: { id },
-        data: { marketplace: false, reviewStatus: 'DRAFT', reviewReason: '', reviewedById: null, reviewedAt: null },
-      });
-      await tx.auditLog.create({
-        data: {
-          actorUserId: actorId,
-          action: 'admin.plugin.delisted',
-          targetType: 'Plugin',
-          targetId: id,
-          metadata: { teamId: plugin.teamId, reason: reviewReason },
-        },
-      });
-      return next;
-    });
-    // 通知作者：插件已被平台下架（触发失败不阻塞主操作，仅吞错记日志）。
-    if (plugin.authorUserId) {
-      try {
-        await this.notifications.create(
-          plugin.authorUserId,
-          'plugin_delisted',
-          '插件已被平台下架',
-          `你的插件「${plugin.name}」已被平台下架${reviewReason ? `：${reviewReason}` : ''}。`,
-          { relatedType: 'Plugin', relatedId: id },
-        );
-      } catch {
-        // 通知触发失败不阻塞下架主流程。
-      }
-    }
-    return { plugin: publicPlugin(updated, updated.teamId || undefined) };
-  }
-
-  /** 平台管理员物理删除插件（任意，含已上架）。
-   *  级联删 PluginInstallation + Purchase + PluginReview（schema onDelete: Cascade 自动）。
-   *  兜底能力：作者不能删的已上架/有购买插件，admin 可删（二次确认 + 审计）。 */
-  async adminDeletePlugin(actorId: string, id: string) {
-    await this.auth.ensurePlatformAdmin(actorId);
-    const plugin = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true, name: true, marketplace: true, teamId: true } });
-    if (!plugin) throw notFound('插件不存在');
-    // 级联删 Installation + Purchase + Review（onDelete: Cascade）+ 物理删 Plugin。
-    await this.prisma.plugin.delete({ where: { id } });
-    await this.audit(actorId, 'admin.plugin.deleted', 'Plugin', id, { name: plugin.name, wasMarketplace: plugin.marketplace, teamId: plugin.teamId });
-    return { id };
-  }
-
-  // 插件审核历史：PluginReview 列表（按时间倒序），供详情抽屉渲染审核时间线。
-  // include reviewer 用 publicUser 白名单脱敏（与 adminApplications 同类凭据泄漏防护）。
-  async adminPluginAuditHistory(userId: string, id: string) {
-    await this.auth.ensurePlatformAdmin(userId);
-    const existing = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw notFound('插件不存在');
-    const reviews = await this.prisma.pluginReview.findMany({
-      where: { pluginId: id },
-      orderBy: { createdAt: 'desc' },
-      include: { reviewer: { select: { id: true, email: true, displayName: true, platformRole: true, status: true } } },
-    });
-    return {
-      reviews: reviews.map((r) => ({
-        id: r.id,
-        status: r.status,
-        reason: r.reason,
-        reviewer: r.reviewer ? publicUser(r.reviewer) : null,
-        createdAt: r.createdAt.toISOString(),
-      })),
     };
   }
 

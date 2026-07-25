@@ -9,10 +9,27 @@ import type { Prisma } from '@prisma/client';
 import { createArtifactStore, type ArtifactDownload } from './modules/artifact-store';
 import { assertPluginAiPolicy } from './modules/plugin-ai-policy-enforcement';
 import { inspectPluginArtifact } from './modules/plugin-artifact';
+import {
+  loadLegacyPlugins,
+  type LegacyPlugin,
+  type LegacyPurchase,
+  type LegacyRating,
+} from './migrate-plugin-registry-v4-legacy';
 import { PrismaService } from './prisma.service';
 
 type LegacyFile = { path: string; content: string; binary?: boolean };
 type ZipCentralEntry = { name: Buffer; crc32: number; size: number; offset: number };
+
+type Verification = {
+  pluginsWithoutMapping: number;
+  purchasesWithoutV4Identity: number;
+  purchasesWithoutMetric: number;
+  enabledInstallationsWithoutEntitlement: number;
+  installationsWithoutMetric: number;
+  ratingsWithoutV4Fact: number;
+  reviewsWithoutV4History: number;
+  grantsWithoutPackage: number;
+};
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, value) => {
   let current = value;
@@ -143,27 +160,163 @@ function legacyManifest(plugin: {
   };
 }
 
+function latestRatingsByTeam(ratings: LegacyRating[]): LegacyRating[] {
+  const latest = new Map<string, LegacyRating>();
+  for (const rating of [...ratings].sort((left, right) => {
+    const byTime = left.createdAt.getTime() - right.createdAt.getTime();
+    return byTime || left.id.localeCompare(right.id);
+  })) latest.set(rating.teamId, rating);
+  return [...latest.values()];
+}
+
+function auditMapping(metadata: unknown): { packageId: string; releaseId: string } | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const value = metadata as Record<string, unknown>;
+  return typeof value.packageId === 'string' && typeof value.releaseId === 'string'
+    ? { packageId: value.packageId, releaseId: value.releaseId }
+    : null;
+}
+
+async function verifyLegacyCutover(prisma: PrismaService, plugins: LegacyPlugin[]): Promise<Verification> {
+  const verification: Verification = {
+    pluginsWithoutMapping: 0,
+    purchasesWithoutV4Identity: 0,
+    purchasesWithoutMetric: 0,
+    enabledInstallationsWithoutEntitlement: 0,
+    installationsWithoutMetric: 0,
+    ratingsWithoutV4Fact: 0,
+    reviewsWithoutV4History: 0,
+    grantsWithoutPackage: 0,
+  };
+  for (const plugin of plugins) {
+    const audit = await prisma.auditLog.findFirst({
+      where: { action: 'plugin.registry.legacy_migrated', targetType: 'Plugin', targetId: plugin.id },
+      orderBy: { createdAt: 'desc' },
+      select: { metadata: true },
+    });
+    const mapping = auditMapping(audit?.metadata);
+    const mappedRelease = mapping
+      ? await prisma.pluginRelease.findUnique({
+          where: { id: mapping.releaseId },
+          select: { packageId: true, version: true, package: { select: { ownerTeamId: true } } },
+        })
+      : null;
+    const validMapping = Boolean(
+      mapping
+      && plugin.teamId
+      && mappedRelease
+      && mappedRelease.packageId === mapping.packageId
+      && mappedRelease.package.ownerTeamId === plugin.teamId
+      && mappedRelease.version === plugin.version,
+    );
+    if (!mapping || !validMapping) {
+      verification.pluginsWithoutMapping += 1;
+      verification.purchasesWithoutV4Identity += plugin.purchases.filter((purchase) => !purchase.packageId || !purchase.releaseId).length;
+      verification.purchasesWithoutMetric += plugin.purchases.length;
+      verification.enabledInstallationsWithoutEntitlement += plugin.installations.filter((installation) => installation.status === 'ENABLED').length;
+      verification.installationsWithoutMetric += plugin.installations.length;
+      verification.ratingsWithoutV4Fact += latestRatingsByTeam(plugin.ratings).length;
+      verification.reviewsWithoutV4History += plugin.reviews.length;
+      verification.grantsWithoutPackage += plugin.pluginGrants.filter((grant) => !grant.packageId).length;
+      continue;
+    }
+    verification.purchasesWithoutV4Identity += plugin.purchases.filter((purchase) => purchase.packageId !== mapping.packageId || purchase.releaseId !== mapping.releaseId).length;
+    for (const purchase of plugin.purchases) {
+      const metric = await prisma.marketplaceMetricEvent.findUnique({
+        where: { idempotencyKey: `legacy-purchase:${purchase.id}` },
+        select: { packageId: true, releaseId: true, teamId: true, kind: true, sourceRecordId: true },
+      });
+      if (!metric
+        || metric.packageId !== mapping.packageId
+        || metric.releaseId !== mapping.releaseId
+        || metric.teamId !== purchase.buyerTeamId
+        || metric.kind !== 'PURCHASED'
+        || metric.sourceRecordId !== purchase.id) verification.purchasesWithoutMetric += 1;
+    }
+    for (const installation of plugin.installations.filter((item) => item.status === 'ENABLED')) {
+      const entitlement = await prisma.pluginEntitlement.findFirst({
+        where: { teamId: installation.teamId, packageId: mapping.packageId, status: 'ACTIVE' },
+        select: { id: true },
+      });
+      if (!entitlement) verification.enabledInstallationsWithoutEntitlement += 1;
+    }
+    for (const installation of plugin.installations) {
+      const metric = await prisma.marketplaceMetricEvent.findUnique({
+        where: { idempotencyKey: `legacy-installation:${installation.id}` },
+        select: { packageId: true, releaseId: true, teamId: true, kind: true, sourceRecordId: true },
+      });
+      if (!metric
+        || metric.packageId !== mapping.packageId
+        || metric.releaseId !== mapping.releaseId
+        || metric.teamId !== installation.teamId
+        || metric.kind !== 'INSTALL_SUCCEEDED'
+        || metric.sourceRecordId !== installation.id) verification.installationsWithoutMetric += 1;
+    }
+    for (const rating of latestRatingsByTeam(plugin.ratings)) {
+      const revision = await prisma.marketplaceRatingRevision.findFirst({
+        where: { packageId: mapping.packageId, teamId: rating.teamId, sourceKind: 'LEGACY_PLUGIN_RATING', sourceId: rating.id },
+        select: { id: true },
+      });
+      const current = await prisma.marketplaceRating.findUnique({
+        where: { packageId_teamId: { packageId: mapping.packageId, teamId: rating.teamId } },
+        select: { id: true },
+      });
+      const metric = await prisma.marketplaceMetricEvent.findUnique({
+        where: { idempotencyKey: `legacy-rating:${rating.id}` },
+        select: { packageId: true, releaseId: true, teamId: true, kind: true, sourceRecordId: true },
+      });
+      const metricMatches = metric
+        && metric.packageId === mapping.packageId
+        && metric.releaseId === mapping.releaseId
+        && metric.teamId === rating.teamId
+        && metric.kind === 'RATING_CHANGED'
+        && metric.sourceRecordId === rating.id;
+      if ((!revision && !current) || !metricMatches) verification.ratingsWithoutV4Fact += 1;
+    }
+    for (const review of plugin.reviews) {
+      const migrated = await prisma.pluginReleaseReview.findFirst({
+        where: { releaseId: mapping.releaseId, reviewerId: review.reviewerId, status: review.status, reason: review.reason, createdAt: review.createdAt },
+        select: { id: true },
+      });
+      if (!migrated) verification.reviewsWithoutV4History += 1;
+    }
+    verification.grantsWithoutPackage += plugin.pluginGrants.filter((grant) => grant.packageId !== mapping.packageId).length;
+  }
+  return verification;
+}
+
+function verificationFailed(value: Verification): boolean {
+  return Object.values(value).some((count) => count > 0);
+}
+
 async function main() {
   const apply = process.argv.includes('--apply');
+  const verify = process.argv.includes('--verify');
   const prisma = new PrismaService();
   const artifacts = createArtifactStore(process.env);
   const stagingRoot = process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts');
   await prisma.$connect();
-  const summary = { mode: apply ? 'apply' : 'dry-run', total: 0, migrated: 0, skipped: 0, failed: 0, failures: [] as Array<{ pluginId: string; error: string }> };
+  const summary = {
+    mode: verify ? 'verify' : apply ? 'apply' : 'dry-run',
+    total: 0,
+    migrated: 0,
+    skipped: 0,
+    failed: 0,
+    failures: [] as Array<{ pluginId: string; error: string }>,
+    verification: null as Verification | null,
+  };
   try {
-    const plugins = await prisma.plugin.findMany({
-      include: { purchases: true, pluginGrants: true, reviews: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    const plugins = await loadLegacyPlugins(prisma);
     summary.total = plugins.length;
-    for (const plugin of plugins) {
+    if (verify) {
+      summary.verification = await verifyLegacyCutover(prisma, plugins);
+      if (verificationFailed(summary.verification)) summary.failed = Object.values(summary.verification).reduce((sum, count) => sum + count, 0);
+    } else {
+      for (const plugin of plugins) {
       let directory = '';
       let artifactKey = '';
       try {
-        if (!plugin.teamId) {
-          summary.skipped += 1;
-          continue;
-        }
+        if (!plugin.teamId) throw new Error('legacy plugin has no teamId and cannot be mapped to PluginPackage.ownerTeamId');
         const manifest = legacyManifest(plugin);
         const files = Array.isArray(plugin.files) ? plugin.files as unknown as LegacyFile[] : [];
         await mkdir(stagingRoot, { recursive: true });
@@ -241,25 +394,45 @@ async function main() {
               },
             });
           }
+          const existingListing = await tx.marketplaceListing.findUnique({ where: { packageId: pkg.id }, select: { installCount: true } });
           if (plugin.marketplace && plugin.reviewStatus === 'APPROVED') {
             await tx.marketplaceListing.upsert({
               where: { packageId: pkg.id },
-              update: { currentReleaseId: release.id, priceCents: plugin.priceCents, status: 'ACTIVE' },
-              create: { packageId: pkg.id, currentReleaseId: release.id, priceCents: plugin.priceCents, status: 'ACTIVE', installCount: plugin.installCount, ratingCount: plugin.ratingCount, ratingSum: plugin.ratingSum },
+              update: { currentReleaseId: release.id, priceCents: plugin.priceCents, status: 'ACTIVE', installCount: Math.max(existingListing?.installCount ?? 0, plugin.installCount) },
+              create: { packageId: pkg.id, currentReleaseId: release.id, priceCents: plugin.priceCents, status: 'ACTIVE', installCount: plugin.installCount, ratingCount: 0, ratingSum: 0 },
             });
           }
-          const purchasesByTeam = new Map<string, (typeof plugin.purchases)[number]>();
-          for (const purchase of [...plugin.purchases].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())) {
-            if (!purchasesByTeam.has(purchase.buyerTeamId)) purchasesByTeam.set(purchase.buyerTeamId, purchase);
+          const purchasesByTeam = new Map<string, LegacyPurchase>();
+          for (const purchase of [...plugin.purchases].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))) {
+            await tx.purchase.update({
+              where: { id: purchase.id },
+              data: { packageId: pkg.id, releaseId: release.id, sellerTeamId: purchase.sellerTeamId ?? plugin.teamId },
+            });
+            if (purchase.status !== 'REFUNDED' && !purchasesByTeam.has(purchase.buyerTeamId)) purchasesByTeam.set(purchase.buyerTeamId, purchase);
+            await tx.marketplaceMetricEvent.upsert({
+              where: { idempotencyKey: `legacy-purchase:${purchase.id}` },
+              update: {
+                packageId: pkg.id, releaseId: release.id, teamId: purchase.buyerTeamId,
+                kind: 'PURCHASED', source: 'REGISTRY', sourceRecordId: purchase.id,
+                value: purchase.status === 'REFUNDED' ? 0 : purchase.priceCents,
+                metadata: { legacyPluginId: plugin.id }, occurredAt: purchase.createdAt,
+              },
+              create: {
+                idempotencyKey: `legacy-purchase:${purchase.id}`, packageId: pkg.id, releaseId: release.id,
+                teamId: purchase.buyerTeamId, kind: 'PURCHASED', source: 'REGISTRY', sourceRecordId: purchase.id,
+                value: purchase.status === 'REFUNDED' ? 0 : purchase.priceCents, metadata: { legacyPluginId: plugin.id }, occurredAt: purchase.createdAt,
+              },
+            });
           }
           for (const [teamId, purchase] of purchasesByTeam) {
-            await tx.pluginEntitlement.upsert({
-              where: { teamId_packageId: { teamId, packageId: pkg.id } },
-              update: { purchaseId: purchase.id },
-              create: { teamId, packageId: pkg.id, purchaseId: purchase.id },
-            });
+            const existingEntitlement = await tx.pluginEntitlement.findUnique({ where: { teamId_packageId: { teamId, packageId: pkg.id } } });
+            if (!existingEntitlement) {
+              await tx.pluginEntitlement.create({ data: { teamId, packageId: pkg.id, purchaseId: purchase.id, activatedAt: purchase.createdAt } });
+            } else if (!existingEntitlement.purchaseId && existingEntitlement.status === 'ACTIVE') {
+              await tx.pluginEntitlement.update({ where: { id: existingEntitlement.id }, data: { purchaseId: purchase.id } });
+            }
           }
-          await tx.pluginGrant.updateMany({ where: { pluginId: plugin.id }, data: { packageId: pkg.id } });
+          await (tx as any).pluginGrant.updateMany({ where: { pluginId: plugin.id }, data: { packageId: pkg.id } });
           for (const review of plugin.reviews) {
             const migratedReview = await tx.pluginReleaseReview.findFirst({
               where: { releaseId: release.id, reviewerId: review.reviewerId, status: review.status, reason: review.reason, createdAt: review.createdAt },
@@ -269,11 +442,69 @@ async function main() {
               await tx.pluginReleaseReview.create({ data: { releaseId: release.id, reviewerId: review.reviewerId, status: review.status, reason: review.reason, createdAt: review.createdAt } });
             }
           }
+          for (const installation of plugin.installations) {
+            const entitlement = await tx.pluginEntitlement.findUnique({ where: { teamId_packageId: { teamId: installation.teamId, packageId: pkg.id } } });
+            if (installation.status === 'ENABLED' && !entitlement) {
+              const purchase = purchasesByTeam.get(installation.teamId);
+              await tx.pluginEntitlement.create({ data: { teamId: installation.teamId, packageId: pkg.id, purchaseId: purchase?.id ?? null, activatedAt: installation.installedAt } });
+            }
+            await tx.marketplaceMetricEvent.upsert({
+              where: { idempotencyKey: `legacy-installation:${installation.id}` },
+              update: {
+                packageId: pkg.id, releaseId: release.id, teamId: installation.teamId,
+                kind: 'INSTALL_SUCCEEDED', source: 'REGISTRY', sourceRecordId: installation.id,
+                value: installation.status === 'ENABLED' ? 1 : 0,
+                metadata: { legacyPluginId: plugin.id, status: installation.status, version: installation.version, installedById: installation.installedById },
+                occurredAt: installation.installedAt,
+              },
+              create: {
+                idempotencyKey: `legacy-installation:${installation.id}`, packageId: pkg.id, releaseId: release.id,
+                teamId: installation.teamId, kind: 'INSTALL_SUCCEEDED', source: 'REGISTRY', sourceRecordId: installation.id,
+                value: installation.status === 'ENABLED' ? 1 : 0,
+                metadata: { legacyPluginId: plugin.id, status: installation.status, version: installation.version, installedById: installation.installedById },
+                occurredAt: installation.installedAt,
+              },
+            });
+          }
+          for (const rating of latestRatingsByTeam(plugin.ratings)) {
+            const sourceKind = 'LEGACY_PLUGIN_RATING';
+            const sourceId = rating.id;
+            await tx.marketplaceMetricEvent.upsert({
+              where: { idempotencyKey: `legacy-rating:${rating.id}` },
+              update: {
+                packageId: pkg.id, releaseId: release.id, teamId: rating.teamId,
+                kind: 'RATING_CHANGED', source: 'REGISTRY', sourceRecordId: rating.id,
+                value: rating.score, metadata: { legacyPluginId: plugin.id }, occurredAt: rating.createdAt,
+              },
+              create: {
+                idempotencyKey: `legacy-rating:${rating.id}`, packageId: pkg.id, releaseId: release.id,
+                teamId: rating.teamId, kind: 'RATING_CHANGED', source: 'REGISTRY', sourceRecordId: rating.id,
+                value: rating.score, metadata: { legacyPluginId: plugin.id }, occurredAt: rating.createdAt,
+              },
+            });
+            const existingFact = await tx.marketplaceRatingRevision.findFirst({ where: { packageId: pkg.id, teamId: rating.teamId, sourceKind, sourceId }, select: { id: true } });
+            if (existingFact) continue;
+            const current = await tx.marketplaceRating.findUnique({ where: { packageId_teamId: { packageId: pkg.id, teamId: rating.teamId } } });
+            if (current) continue; // Never overwrite a newer v4 team rating.
+            const row = await tx.marketplaceRating.create({
+              data: { packageId: pkg.id, teamId: rating.teamId, score: rating.score, comment: rating.comment, revision: 1, createdById: rating.userId, updatedById: rating.userId, createdAt: rating.createdAt, updatedAt: rating.createdAt },
+            });
+            await tx.marketplaceRatingRevision.create({
+              data: { ratingId: row.id, packageId: pkg.id, teamId: rating.teamId, revision: 1, score: rating.score, recordedAt: rating.createdAt, sourceKind, sourceId, actorUserId: rating.userId },
+            });
+          }
+          const listingRatings = await tx.marketplaceRating.findMany({ where: { packageId: pkg.id }, select: { score: true } });
+          await tx.marketplaceListing.updateMany({ where: { packageId: pkg.id }, data: { ratingCount: listingRatings.length, ratingSum: listingRatings.reduce((sum, row) => sum + row.score, 0) } });
           const migratedAudit = await tx.auditLog.findFirst({
             where: { action: 'plugin.registry.legacy_migrated', targetType: 'Plugin', targetId: plugin.id },
             select: { id: true },
           });
-          if (!migratedAudit) {
+          if (migratedAudit) {
+            await tx.auditLog.updateMany({
+              where: { action: 'plugin.registry.legacy_migrated', targetType: 'Plugin', targetId: plugin.id },
+              data: { metadata: { packageId: pkg.id, releaseId: release.id, sha256 } },
+            });
+          } else {
             await tx.auditLog.create({ data: { action: 'plugin.registry.legacy_migrated', targetType: 'Plugin', targetId: plugin.id, metadata: { packageId: pkg.id, releaseId: release.id, sha256 } } });
           }
         });
@@ -299,6 +530,7 @@ async function main() {
         }
       } finally {
         if (directory) await rm(directory, { recursive: true, force: true });
+      }
       }
     }
   } finally {

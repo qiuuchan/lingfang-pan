@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/collab-api/backend/plugin-package-registry.md", "reason": "实现 v4 registry cutover、数据映射与 migration safety contracts"}
+{"file": ".trellis/spec/collab-api/backend/quality-and-contracts.md", "reason": "实现统一错误响应、v4 projections 与 package grant 契约"}
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-runtime-persistence.md", "reason": "移除 legacy Rust upload command 并保持 v4 publish/runtime 边界"}

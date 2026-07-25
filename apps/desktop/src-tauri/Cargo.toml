@@ -26,7 +26,7 @@ sha2 = "0.10"
 # features=json 解析 OpenAI 兼容响应体；features=rustls-tls 复用 rustls 避免原生 OpenSSL/WinHTTP 依赖；
 # default-features=false 裁掉默认的 native-tls / charset / blocking 等不需要的 feature，减小产物体积。
 reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls", "stream"], default-features = false }
-# upload_plugin 流式 body：wrap_stream 需要 futures_util::stream + bytes::Bytes。
+# v4 制品上传/下载流式 body：network.rs 使用 futures stream + bytes::Bytes。
 futures-util = "0.3"
 bytes = "1"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }

@@ -332,3 +332,92 @@ const claimed = await tx.marketplaceListing.updateMany({
 });
 if (claimed.count !== 1) throw conflict('只有市场当前发行版可以触发下架');
 ```
+
+## Scenario: Legacy Registry Retirement Cutover
+
+### 1. Scope / Trigger
+
+- 修改 legacy `Plugin` 数据回填、`PluginGrant` package 归属、退役 migration 或
+  PostgreSQL/MySQL 部署流程时适用。
+- v4 schema 已删除 legacy Prisma models，因此回填工具不能依赖生成客户端中的
+  `prisma.plugin`、`pluginInstallation`、`pluginRating` 或 `pluginReview` delegate。
+
+### 2. Signatures
+
+```text
+pnpm -C apps/collab-api plugin-registry:migrate
+pnpm -C apps/collab-api plugin-registry:migrate -- --apply
+pnpm -C apps/collab-api plugin-registry:migrate -- --verify
+
+loadLegacyPlugins(prisma, provider?) -> LegacyPlugin[]
+Migration: 20260725090000_retire_legacy_plugin
+DB: PluginGrant(teamId, packageId, subjectKind, subjectId, effect)
+```
+
+### 3. Contracts
+
+- `loadLegacyPlugins` 使用 provider-aware 原生只读 SQL：PostgreSQL 标识符用双引号，
+  MySQL 用反引号；表名来自固定 allowlist，不能拼接用户输入。
+- orphan purchase/installation/review/rating/grant 必须 fail closed；不能静默丢弃无法
+  对应 `Plugin` 的行。
+- `--apply` 幂等创建 package/release/audit mapping，回填 Purchase 精确
+  `packageId/releaseId/sellerTeamId`，为 purchase/install/rating 写稳定
+  `idempotencyKey` metric，并迁移 entitlement、rating/revision、review 和 grant。
+- rating 按 `packageId + teamId` 收敛，legacy 同组取最新；已有 v4 当前评分不得被覆盖，
+  但 legacy metric fact 仍必须保留。
+- `--verify` 对每个 legacy 行校验精确 package/release/owner/version 映射及所有下游事实，
+  任一计数非零即以非零状态退出。
+- PostgreSQL migration 在 drop 前重复执行 SQL 级断言；MySQL 只允许在 `--verify`
+  全零后，以 `PRISMA_MYSQL_ACCEPT_DATA_LOSS_ONCE=1` 执行一次 destructive deploy。
+- 删除表后的回滚只允许恢复数据库与 artifact snapshot 并部署上一应用版本；不得创建
+  空 legacy 表冒充恢复。
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| legacy 表无法读取 | migration 非零退出，提示先完成回填 |
+| orphan legacy 外键 | fail closed，不生成部分映射 |
+| package owner/release version 与 audit mapping 不一致 | `--verify` 失败；PostgreSQL drop 断言失败 |
+| Purchase identity 或 purchase metric 不精确 | `--verify` 失败 |
+| enabled Installation 无 active entitlement，或任一 Installation 无 metric | `--verify` 失败 |
+| 最新 Rating 无 current/revision/metric，或 Review/Grant 未迁 | `--verify` 失败 |
+| MySQL 未设置一次性 data-loss 开关 | destructive deploy 拒绝执行 |
+
+### 5. Good/Base/Bad Cases
+
+- Good：维护窗口先备份，运行 `--apply` 与 `--verify` 全零，停止旧实例，再部署
+  schema/app 并完成 v4 smoke test。
+- Base：重复运行 `--apply` 只更新一致映射，不重复创建 release、metric、revision、
+  entitlement 或 review。
+- Bad：先生成已删 legacy delegate 的 Prisma Client，再调用 `prisma.plugin.findMany()`；
+  新部署会在回填开始前崩溃。
+
+### 6. Tests Required
+
+- `migrate-plugin-registry-v4-legacy.spec.ts`：PostgreSQL/MySQL quoting、关联组装、orphan
+  fail closed，且不依赖 legacy Prisma delegate。
+- 迁移 helper 单测：幂等 apply、精确 verify、existing v4 rating 不覆盖、legacy metric
+  保留、review/grant/purchase/install identity。
+- `prisma:validate`、`prisma:generate`、collab-api typecheck/test/build。
+- 生产维护窗口记录实际 `--apply`、`--verify`、备份、smoke 与恢复演练结果；没有生产
+  数据库的开发环境不能把静态测试标记成生产迁移已执行。
+
+### 7. Wrong vs Correct
+
+Wrong：
+
+```ts
+const plugins = await prisma.plugin.findMany({ include: { purchases: true } });
+await prisma.$executeRawUnsafe(`DROP TABLE ${tableName}`);
+```
+
+Correct：
+
+```ts
+const plugins = await loadLegacyPlugins(prisma, resolveDatabaseProvider());
+const verification = await verifyLegacyCutover(prisma, plugins);
+if (verificationFailed(verification)) process.exitCode = 1;
+```
+
+只有验证全零后，才由受保护的 provider-specific deploy 流程执行固定 migration。

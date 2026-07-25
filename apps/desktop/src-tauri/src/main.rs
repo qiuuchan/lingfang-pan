@@ -21,7 +21,6 @@ mod runtime_commands;
 mod scheduler;
 mod runtime_resolver;
 mod update;
-mod upload;
 mod workflow_executor;
 
 use std::sync::Arc;
@@ -427,7 +426,6 @@ fn main() {
             draft_plugin::migrate_drafts_to_root,
             update::check_update,
             update::download_update,
-            upload::upload_plugin,
             plugin_security::verify_plugin_signature_command,
             plugin_security::check_plugin_recall_command,
             scheduler::commands::scheduler_create,

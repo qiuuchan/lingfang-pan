@@ -32,50 +32,6 @@
 
 不要为缺失数据库 URL 生成默认连接串；部署错误必须显式暴露。
 
-## Scenario: Installed Marketplace Plugin Package Visibility
-
-### 1. Scope / Trigger
-- Trigger: changing `GET /api/plugins/available`, marketplace install, plugin package serialization, or desktop plugin loading.
-
-### 2. Signatures
-- `PluginService.availablePlugins(userId) -> { plugins }`
-- `publicAvailablePlugin(plugin, currentTeamId) -> public plugin payload`
-- `PluginInstallation(pluginId, teamId, status)` controls whether another team may receive package files.
-
-### 3. Contracts
-- Uploaded plugins are stored as JSON package data: `manifest + files[]`, not multipart uploads or zip archives.
-- Own-team plugins return `files` and `manifest`.
-- Public marketplace plugins from another team return no `files`/`manifest` until the current team has an ENABLED `PluginInstallation`.
-- Installed marketplace plugins return `files`/`manifest` so desktop can run them; review internals such as `reviewReason` and `reviewedById` stay hidden.
-
-### 4. Validation & Error Matrix
-- Missing or disabled installation -> `files` and `manifest` are `undefined` in `available`.
-- ENABLED installation for current team -> package fields are returned.
-- Paid plugin without purchase -> install endpoint returns `payment_required`; `available` must not expose package files before installation.
-
-### 5. Good/Base/Bad Cases
-- Good: team B installs an approved public plugin from team A, then `/api/plugins/available` returns its `files` for team B.
-- Base: team B sees the same public plugin in marketplace listings before install, but no package files through `available`.
-- Bad: hiding `files` for already installed marketplace plugins; desktop will show a placeholder instead of running the plugin.
-
-### 6. Tests Required
-- `plugin-available.spec.ts`: uninstalled marketplace plugin hides package fields.
-- `plugin-available.spec.ts`: installed marketplace plugin returns package fields but hides review internals.
-- `plugin.service.spec.ts`: upload/edit paths still normalize package files and capabilities.
-
-### 7. Wrong vs Correct
-Wrong:
-
-```ts
-if (plugin.teamId !== currentTeamId) return { ...public_, files: undefined };
-```
-
-Correct:
-
-```ts
-return publicAvailablePlugin(plugin, currentTeamId);
-```
-
 ## Scenario: Team Invitation Code Contract
 
 ### 1. Scope / Trigger
@@ -149,16 +105,16 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 ## Scenario: RBAC Permission Resolution (角色 + 权限码 + 插件授权)
 
 ### 1. Scope / Trigger
-- Trigger: 改 `@RequirePermission` 装饰器、`PermissionsGuard`、`AuthService.ensurePermission`、`RoleService`、`PluginGrantService`、`PermissionGroupService`、`PluginService.availablePlugins`、角色/插件授权相关 Prisma 模型（Role/PermissionEntry/PermissionGroup/PluginGrant）或权限码注册表 `permission-codes.ts`。
+- Trigger: 改 `@RequirePermission` 装饰器、`PermissionsGuard`、`AuthService.ensurePermission`、`RoleService`、`PluginGrantService`、`PermissionGroupService`、v4 package 可见性、角色/插件授权相关 Prisma 模型（Role/PermissionEntry/PermissionGroup/PluginGrant）或权限码注册表 `permission-codes.ts`。
 
 ### 2. Signatures
 - `@RequirePermission(...codes: string[])` 装饰器 → `PermissionsGuard.canActivate` 校验（OR 语义，任一命中放行）
 - `AuthService.ensurePermission(userId, ...codes)` 命令式 helper（service 内部条件分支用）
-- `PluginGrantService.resolvePluginAccess(teamId, pluginId, userId, teamRoleId)` → boolean（插件授权解析）
+- `PluginGrantService.resolvePluginAccess(teamId, packageId, userId, teamRoleId)` → boolean（v4 package 授权解析）
 - `RoleService.{list,create,update,delete}{Platform,Team}Role` / `assign{Platform,Member}Role`（入参含可选 `code`）
 - `PermissionGroupService.{list,upsert,delete}Group(userId, scope, input)`（分组显示名管理）
 - `RoleService.listPermissions(scope)` → `{ modules: PermissionModuleDef[], permissions: PermissionEntry[] }`（两级结构 + 扁平兼容）
-- DB: `User.platformRoleId`（平台角色）、`TeamMembership.teamRoleId`（团队角色）、`Role.code String?`（角色编码，同 scope+teamId 唯一）、`Role.permissions String[]`（权限码数组）、`PermissionEntry.{moduleKey,moduleLabel,moduleOrder}`（两级模块结构）、`PermissionGroup(scope,groupKey,displayName,sortOrder,isSystem)`（可编辑分组显示名）、`PluginGrant(teamId, pluginId, subjectKind, subjectId, effect)`
+- DB: `User.platformRoleId`（平台角色）、`TeamMembership.teamRoleId`（团队角色）、`Role.code String?`（角色编码，同 scope+teamId 唯一）、`Role.permissions String[]`（权限码数组）、`PermissionEntry.{moduleKey,moduleLabel,moduleOrder}`（两级模块结构）、`PermissionGroup(scope,groupKey,displayName,sortOrder,isSystem)`（可编辑分组显示名）、`PluginGrant(teamId, packageId, subjectKind, subjectId, effect)`
 
 ### 3. Contracts
 - 权限码为预定义字符串（`permission-codes.ts` 注册表，dot.notation 如 `team.member.invite`），不可由用户自由新增。
@@ -192,7 +148,7 @@ rows={invitations.map((i) => [i.displayCodePrefix, i.status])}
 
 ### 5. Good/Base/Bad Cases
 - Good: 团队管理员创建「开发者」自定义角色勾选 `team.plugin.upload` + `team.plugin.edit`，分配给成员后该成员可上传/编辑团队插件。
-- Base: 团队管理员为某插件对「成员」角色设 DENY，所有成员不再看到该插件（availablePlugins 过滤）；团队管理员自身不受限（默认放行）。
+- Base: 团队管理员为某 v4 package 对「成员」角色设 DENY，所有成员不能访问该 package；团队管理员自身不受限（默认放行）。
 - Bad: 对单个用户设 ALLOW 但对其角色设 DENY —— 正确行为是 ALLOW（user 级优先）；错误实现会拒绝（role DENY 覆盖 user ALLOW）。
 
 ### 6. Tests Required
@@ -327,7 +283,7 @@ Wrong:
 
 ```ts
 try {
-  return await prisma.plugin.create(data);
+  return await prisma.pluginPackage.create(data);
 } catch {
   return { ok: true };
 }

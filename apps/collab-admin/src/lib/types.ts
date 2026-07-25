@@ -223,7 +223,7 @@ export type Role = {
 export type PluginGrantRow = {
   id: string;
   teamId: string;
-  pluginId: string;
+  packageId: string;
   subjectKind: PluginGrantSubject;
   subjectId: string;
   effect: PluginGrantEffect;

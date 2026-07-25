@@ -275,8 +275,7 @@ export interface Role {
 export interface PluginGrantRow {
   id: string;
   teamId: string;
-  pluginId?: string | null;
-  packageId?: string | null;
+  packageId: string;
   subjectKind: PluginGrantSubject;
   subjectId: string;
   effect: PluginGrantEffect;

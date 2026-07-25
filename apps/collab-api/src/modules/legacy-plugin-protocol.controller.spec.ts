@@ -24,7 +24,7 @@ function expectClientUpgrade(controller: Controller, methodNames: string[]): voi
   for (const methodName of methodNames) {
     const method = controller[methodName] as (...args: unknown[]) => unknown;
     expect(() => method.call(controller, {}, 'resource-id', {}), methodName).toThrowError(
-      expect.objectContaining({ status: 426, code: 'client_upgrade_required' }),
+      expect.objectContaining({ status: 410, code: 'legacy_plugin_api_retired' }),
     );
   }
 }
