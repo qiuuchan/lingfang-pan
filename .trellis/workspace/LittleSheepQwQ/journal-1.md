@@ -818,3 +818,37 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: 完成全部 Trellis 任务并归档
+
+**Date**: 2026-07-25
+**Task**: 完成全部 Trellis 任务并归档
+**Branch**: `main`
+
+### Summary
+
+完成平台文档与插件 SDK 重构，退役 legacy 插件系统并迁移至 v4；全量质量检查通过，13 个活动任务均已按子任务优先顺序归档。生产迁移、外部服务与桌面 GUI 验证因当前环境缺少对应依赖而未执行。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b849716b` | (see git log) |
+| `a892e6ea` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
