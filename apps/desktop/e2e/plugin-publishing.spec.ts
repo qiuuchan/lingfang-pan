@@ -74,6 +74,16 @@ async function setupPluginWorkbench(page: Page) {
     contentType: 'application/json',
     body: JSON.stringify({ items: [managementItem] }),
   }));
+  await page.route('**/api/plugin-registry/team', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ items: [] }),
+  }));
+  await page.route('**/api/plugin-registry/marketplace', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ items: [] }),
+  }));
   await page.route(`**/api/plugin-packages/${PACKAGE_ID}`, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -153,6 +163,13 @@ test('移动视口可查看来源与四轴状态且无横向溢出', async ({ pa
   await expect(page.getByText('外部工具示例插件', { exact: true })).toBeVisible();
   await expect(page.getByText('VS Code 工程')).toBeVisible();
   await expect(page.getByText('桌面端')).toBeVisible();
+  const publishedRow = page.getByText('外部工具示例插件', { exact: true }).locator('xpath=ancestor::button/..');
+  const rowChildren = publishedRow.locator(':scope > *');
+  await expect(rowChildren).toHaveCount(3);
+  const rowBoxes = await Promise.all([0, 1, 2].map((index) => rowChildren.nth(index).boundingBox()));
+  expect(rowBoxes.every(Boolean)).toBe(true);
+  const rowCenters = rowBoxes.map((box) => box!.y + box!.height / 2);
+  expect(Math.max(...rowCenters) - Math.min(...rowCenters)).toBeLessThan(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   await page.getByText('外部工具示例插件', { exact: true }).click();
@@ -161,4 +178,24 @@ test('移动视口可查看来源与四轴状态且无横向溢出', async ({ pa
   await expect(page.getByText('未提审')).toBeVisible();
   await expect(page.getByRole('button', { name: '提交市场' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('插件中心顶部 Tab 保持横向等分排列', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 720 });
+  await setupPluginWorkbench(page);
+
+  await page.getByRole('button', { name: '插件', exact: true }).click();
+  const tabs = [
+    page.getByRole('tab', { name: '已安装' }),
+    page.getByRole('tab', { name: '团队库' }),
+    page.getByRole('tab', { name: '插件市场' }),
+  ];
+  await Promise.all(tabs.map((tab) => expect(tab).toBeVisible()));
+  const tabBoxes = await Promise.all(tabs.map((tab) => tab.boundingBox()));
+  expect(tabBoxes.every(Boolean)).toBe(true);
+  const tabCenters = tabBoxes.map((box) => box!.y + box!.height / 2);
+  expect(Math.max(...tabCenters) - Math.min(...tabCenters)).toBeLessThan(2);
+  expect(tabBoxes[0]!.x).toBeLessThan(tabBoxes[1]!.x);
+  expect(tabBoxes[1]!.x).toBeLessThan(tabBoxes[2]!.x);
+  expect(Math.max(...tabBoxes.map((box) => box!.width)) - Math.min(...tabBoxes.map((box) => box!.width))).toBeLessThan(2);
 });

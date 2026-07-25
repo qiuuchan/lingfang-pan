@@ -107,9 +107,9 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">管理团队版本、市场审核和上架状态。已归档或已撤回项目仍会保留在这里。</p>
-        <Button variant="outline" size="icon-sm" title="刷新已发布插件" onClick={() => void reload()} disabled={loading}><RefreshCwIcon /></Button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0 flex-1 text-sm text-muted-foreground">管理团队版本、市场审核和上架状态。已归档或已撤回项目仍会保留在这里。</p>
+        <Button className="shrink-0" variant="outline" size="icon-sm" title="刷新已发布插件" onClick={() => void reload()} disabled={loading}><RefreshCwIcon /></Button>
       </div>
       {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
       {!items.length ? (
@@ -121,7 +121,7 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
             const packageBusy = busyKey === `package:${item.package.id}`;
             const archiveBlocked = !archived && item.pendingReviewCount > 0;
             return (
-              <div key={item.package.id} className="grid min-h-24 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 px-4 py-3 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:gap-x-4">
+              <div key={item.package.id} className="flex min-h-24 min-w-0 items-center gap-4 px-4 py-3">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted"><PackageIcon className="size-4" /></div>
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setSelected(item)}>
                   <div className="flex flex-wrap items-center gap-2">
@@ -137,7 +137,7 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
                     {item.latestRelease && <PluginSourceBadge sourceKind={item.latestRelease.sourceKind} sourceLabel={item.latestRelease.sourceLabel} ingestChannel={item.latestRelease.ingestChannel} />}
                   </div>
                 </button>
-                <div className="col-span-2 flex min-w-0 flex-wrap items-center justify-end gap-1 sm:col-span-1">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                   {canEditPackage && (
                     <LoadingButton
                       variant="outline"
