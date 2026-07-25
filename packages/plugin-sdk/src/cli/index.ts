@@ -35,7 +35,7 @@ lingfang-plugin — 灵方插件开发工具
     --id <ID>         插件唯一标识
     --author <作者>   插件作者
     --description <描述>
-    --visibility <V>  可见度（public | private | tenant，默认 tenant）
+    --visibility <V>  可见度（private | tenant，默认 tenant；public 由审核赋予）
     --capabilities <C> 逗号分隔的能力列表
     --force           覆盖已有目录
 

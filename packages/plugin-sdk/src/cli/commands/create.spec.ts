@@ -109,6 +109,20 @@ describe('create 命令 — manifest 校验', () => {
     expect(result.success).toBe(true);
   });
 
+  it('上传 manifest 拒绝 public visibility', () => {
+    const result = validateManifest({
+      id: 'com.example.public-upload',
+      name: 'Public Upload',
+      version: '0.1.0',
+      description: '',
+      runtime_type: 'client',
+      entry: 'ui/index.html',
+      visibility: 'public',
+      capabilities: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('无效 id 被拒绝', () => {
     const manifest = {
       id: '123-invalid',

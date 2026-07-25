@@ -1,44 +1,33 @@
-# 本地客户端接入说明
+# 桌面客户端
 
-本地客户端 `apps/desktop` 是协作平台前台，服务普通用户和团队管理员。
+`apps/desktop` 由 React 工作台和 `src-tauri` Rust 壳组成。
 
-## 后端地址
+## 前端职责
 
-首次启动需要填写统一 API 地址，例如：
+- 登录、团队选择、插件中心、市场、钱包和设置。
+- 对话式插件创建器、草稿工作区与发布流程。
+- 已安装插件的 iframe/脚本运行界面。
+- 本地定时任务页面、常驻执行器和通知协调。
 
-```text
-http://127.0.0.1:3000
+## Rust 壳职责
+
+- 内置运行时解析：Python、Node.js、FFmpeg、Chromium。
+- `.lfplugin` v4 检查、安装、更新、激活、回滚和卸载。
+- 文件、网络、系统、AI、图片和视频能力桥。
+- 插件进程、最小环境、数据目录和日志管理。
+- 本地 scheduler 的 cron/once 计算、原子存储、串行执行与历史轮转。
+
+## 插件安装布局
+
+安装账本指向 `installed/<installationId>/releases/<releaseId>/package`。release 目录不可变，共享 `data` 独立存在；更新先进入 pending，启动成功才切换 active。
+
+## 开发验证
+
+```powershell
+pnpm -C apps/desktop typecheck
+pnpm -C apps/desktop test
+pnpm -C apps/desktop vite:build
+cargo test -p lingfang-desktop
 ```
 
-客户端会访问 `/api/health` 做健康检查。
-
-## 页面状态
-
-后端 `/api/auth/me` 和 `/api/me/onboarding` 返回 onboarding 状态：
-
-- `NEEDS_INVITATION`：显示邀请码输入页。
-- `PENDING_APPROVAL`：显示团队管理员申请待审批页。
-- `APPLICATION_REJECTED`：显示驳回原因。
-- `TEAM_SPACE`：进入团队空间首页。
-- `TEAM_ADMIN_SPACE`：进入团队管理。
-- `PLATFORM_ADMIN_WEB_ONLY`：提示平台管理员使用网页管理端。
-
-## 团队管理员能力
-
-团队管理员只能在本团队内：
-
-- 查看成员。
-- 移除普通成员。
-- 生成/禁用邀请码。
-- 查看团队余额和流水。
-
-不能：
-
-- 修改团队余额。
-- 管理其他团队。
-- 启用/禁用平台插件。
-- 处理审批。
-
-## 插件入口
-
-客户端通过 `/api/plugins/available` 获取可用插件。平台管理员禁用的插件不会返回。
+前端 API、SSE 和 Tauri command 的 payload 必须通过共享类型或边界解码器，不在页面中重复猜测字段。
