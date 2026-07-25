@@ -38,6 +38,10 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // 调试用：开启 sourcemap，以便把运行时 TDZ「Cannot access 'k' before initialization」
+    // 里的压缩名 k 映射回源码位置（dev 模式 Vite 直供源码不压缩，不会触发此问题，
+    // 仅生产构建产物 .exe 会复现）。定位完成后可改回 false 再发布。
+    sourcemap: true,
     rollupOptions: {
       output: { manualChunks },
     },
