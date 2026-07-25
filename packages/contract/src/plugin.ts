@@ -117,15 +117,14 @@ export const PluginInstallation = z.object({
 });
 export type PluginInstallation = z.infer<typeof PluginInstallation>;
 
-// PluginGrant 字段为 snake_case，授权解析 helper 自洽，保持不变。
+// PluginGrant 字段为 snake_case。legacy plugin_id 已退役，package_id 是唯一插件身份。
 export const PluginGrant = z.object({
   tenant_id: z.string().min(1),
-  plugin_id: z.string().min(1).optional(),
-  package_id: z.string().min(1).optional(),
+  package_id: z.string().min(1),
   subject_kind: z.enum(['user', 'role']),
   subject_id: z.string().min(1),
   effect: z.enum(['allow', 'deny']),
-}).refine((grant) => Boolean(grant.package_id || grant.plugin_id), { message: 'plugin grant requires package_id or legacy plugin_id' });
+});
 export type PluginGrant = z.infer<typeof PluginGrant>;
 
 /** 授权解析：deny 优先；user 级优先于 role 级；无 grant 默认可用。管理员无运行时绕过。 */

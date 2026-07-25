@@ -48,7 +48,7 @@ When frontend behavior branches on a new error code, add it to the shared contra
 
 ### 2. Signatures
 - Contract enum: `packages/contract/src/plugin.ts` `CapabilityKind`.
-- Backend whitelist: `apps/collab-api/src/modules/plugin-package.ts` `CAPABILITY_KINDS`.
+- Backend whitelist: `apps/collab-api/src/modules/plugin-artifact.ts` `CAPABILITY_KINDS`.
 - Desktop draft normalization: `apps/desktop/src/lib/plugin-draft/manifest.ts` `FRONTEND_CAPABILITY_KINDS` and `FALLBACK_CAPABILITY`.
 
 ### 3. Contracts
@@ -64,12 +64,12 @@ When frontend behavior branches on a new error code, add it to the shared contra
 ### 5. Good/Base/Bad Cases
 - Good: `code-assistant.run` and `code-assistant.session` exist in both `CapabilityKind` and backend `CAPABILITY_KINDS`; desktop fallback uses `code-assistant.run`.
 - Base: adding `plugin.export` updates all three locations in the same change and includes a regression test.
-- Bad: adding `plugin.export` only to `apps/collab-api/src/modules/plugin-package.ts`.
+- Bad: adding `plugin.export` only to `apps/collab-api/src/modules/plugin-artifact.ts`.
 
 ### 6. Tests Required
 - `pnpm -C packages/contract typecheck` verifies exported enum consumers compile.
 - `pnpm -C apps/desktop test` covers draft manifest normalization and fallback capability acceptance.
-- Backend plugin-package tests should assert unknown capability kinds are rejected and newly allowed kinds are accepted.
+- Backend plugin-artifact tests should assert unknown capability kinds are rejected and newly allowed kinds are accepted.
 
 ### 7. Wrong vs Correct
 
@@ -86,7 +86,7 @@ Correct:
 // packages/contract/src/plugin.ts
 export const CapabilityKind = z.enum(['code-assistant.run', 'code-assistant.session', 'plugin.export']);
 
-// apps/collab-api/src/modules/plugin-package.ts
+// apps/collab-api/src/modules/plugin-artifact.ts
 const CAPABILITY_KINDS = new Set(['code-assistant.run', 'code-assistant.session', 'plugin.export']);
 
 // apps/desktop/src/lib/plugin-draft/manifest.ts

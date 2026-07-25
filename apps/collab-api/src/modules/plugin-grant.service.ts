@@ -7,8 +7,7 @@ import { AuthService } from './auth.service';
 function publicGrant(grant: {
   id: string;
   teamId: string;
-  pluginId?: string | null;
-  packageId?: string | null;
+  packageId: string;
   subjectKind: 'USER' | 'ROLE';
   subjectId: string;
   effect: 'ALLOW' | 'DENY';
@@ -18,8 +17,7 @@ function publicGrant(grant: {
   return {
     id: grant.id,
     teamId: grant.teamId,
-    pluginId: grant.pluginId ?? null,
-    packageId: grant.packageId ?? null,
+    packageId: grant.packageId,
     subjectKind: grant.subjectKind,
     subjectId: grant.subjectId,
     effect: grant.effect,
@@ -48,7 +46,7 @@ export class PluginGrantService {
     return { grants: grants.map(publicGrant) };
   }
 
-  /** 设置/更新插件授权（upsert 语义：同 teamId+pluginId+subjectKind+subjectId 存在则更新 effect）。 */
+  /** 设置/更新插件授权（upsert 语义：同 teamId+packageId+subjectKind+subjectId 存在则更新 effect）。 */
   async setGrant(userId: string, packageId: string, input: { subjectKind: 'USER' | 'ROLE'; subjectId: string; effect: 'ALLOW' | 'DENY' }) {
     await this.auth.ensurePermission(userId, 'team.plugin.grant.manage');
     const m = await this.resolveCurrentTeam(userId);
@@ -115,15 +113,15 @@ export class PluginGrantService {
    * 语义：user 级优先于 role 级，同级 DENY 优先，无 grant 默认放行。
    * 管理员没有运行时隐式绕过；管理能力仅由 RBAC 权限控制。
    *
-   * 供 PluginService.availablePlugins 过滤 + 桌面端运行时二次校验。
+   * 供 v4 package governance 与桌面端运行时二次校验。
    */
-  async resolvePluginAccess(teamId: string, pluginId: string, userId: string, teamRoleId: string | null): Promise<boolean> {
+  async resolvePluginAccess(teamId: string, packageId: string, userId: string, teamRoleId: string | null): Promise<boolean> {
     const orConditions: Array<{ subjectKind: 'USER' | 'ROLE'; subjectId: string }> = [
       { subjectKind: 'USER', subjectId: userId },
     ];
     if (teamRoleId) orConditions.push({ subjectKind: 'ROLE', subjectId: teamRoleId });
     const grants = await this.prisma.pluginGrant.findMany({
-      where: { teamId, pluginId, OR: orConditions },
+      where: { teamId, packageId, OR: orConditions },
       select: { subjectKind: true, effect: true },
     });
 

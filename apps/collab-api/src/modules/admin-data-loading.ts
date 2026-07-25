@@ -136,25 +136,33 @@ export const ADMIN_TEAM_MEMBER_SELECT = {
 export const ADMIN_TEAM_PLUGIN_SELECT = {
   id: true,
   name: true,
-  status: true,
-  visibility: true,
-  reviewStatus: true,
-  marketplace: true,
-  priceCents: true,
-  installCount: true,
+  governanceStatus: true,
   createdAt: true,
   updatedAt: true,
-} as const satisfies Prisma.PluginSelect;
+  listing: {
+    select: {
+      status: true,
+      priceCents: true,
+      installCount: true,
+    },
+  },
+  releases: {
+    select: {
+      version: true,
+      status: true,
+      marketReviewStatus: true,
+    },
+  },
+} as const satisfies Prisma.PluginPackageSelect;
 
 export const ADMIN_TEAM_PURCHASE_SELECT = {
   id: true,
-  pluginId: true,
   packageId: true,
+  releaseId: true,
   buyerUserId: true,
   sellerUserId: true,
   priceCents: true,
   createdAt: true,
-  plugin: { select: { id: true, name: true } },
   package: { select: { id: true, name: true } },
 } as const satisfies Prisma.PurchaseSelect;
 

@@ -11,7 +11,7 @@ function order(overrides: Record<string, unknown> = {}) {
     priceVersion: `pv1.${'a'.repeat(43)}`, campaignId: null, attributionKind: 'ORGANIC',
     status: 'PENDING_SETTLEMENT', createdAt: now, settleAt: new Date('2026-07-23T00:00:00.000Z'),
     refundableUntil: new Date('2026-07-23T00:00:00.000Z'), settledAt: null, refundedAt: null,
-    package: { name: '图片插件' }, plugin: null, release: { version: '1.0.0' }, refundRequest: null,
+    package: { name: '图片插件' }, release: { version: '1.0.0' }, refundRequest: null,
     ...overrides,
   };
 }

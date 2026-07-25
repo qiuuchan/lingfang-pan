@@ -21,10 +21,9 @@ function mockPrisma() {
     aggregate: vi.fn(async () => ({ _sum: { priceCents: null } })),
     findMany: vi.fn(async () => []),
   };
-  const plugin = { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) };
   const pluginRelease = { count: vi.fn(async () => 0) };
   const pluginPackage = { count: vi.fn(async () => 0) };
-  const marketplaceListing = { count: vi.fn(async () => 0) };
+  const marketplaceListing = { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) };
   const user = { count: vi.fn(async () => 0) };
   const team = { count: vi.fn(async () => 0) };
   const teamAdminApplication = { count: vi.fn(async () => 0) };
@@ -32,7 +31,6 @@ function mockPrisma() {
     auditLog,
     llmCallLog,
     purchase,
-    plugin,
     pluginRelease,
     pluginPackage,
     marketplaceListing,
@@ -97,7 +95,6 @@ describe('AdminService stats', () => {
       });
       expect(prisma.marketplaceListing.count).toHaveBeenNthCalledWith(1, { where: { status: 'ACTIVE' } });
       expect(prisma.marketplaceListing.count).toHaveBeenNthCalledWith(2, { where: { status: 'DELISTED' } });
-      expect(prisma.plugin.count).not.toHaveBeenCalled();
     });
   });
 
@@ -158,7 +155,7 @@ describe('AdminService stats', () => {
       // 付费买家去重列表（2 个）。
       prisma.purchase.findMany.mockResolvedValue([{ buyerUserId: 'u1' }, { buyerUserId: 'u2' }]);
       prisma.user.count.mockResolvedValue(10);
-      prisma.plugin.findMany.mockResolvedValue([]);
+      prisma.marketplaceListing.findMany.mockResolvedValue([]);
 
       const result = await service.adminFinanceStats('user-admin');
 
@@ -177,9 +174,9 @@ describe('AdminService stats', () => {
       prisma.purchase.aggregate.mockResolvedValue({ _sum: { priceCents: 1000 } });
       prisma.purchase.findMany.mockResolvedValue([{ buyerUserId: 'u1' }]);
       prisma.user.count.mockResolvedValue(5);
-      prisma.plugin.findMany.mockResolvedValue([
-        { id: 'p1', name: '插件A', installCount: 42, ratingCount: 10, ratingSum: 45, priceCents: 0 },
-        { id: 'p2', name: '插件B', installCount: 7, ratingCount: 0, ratingSum: 0, priceCents: 1000 },
+      prisma.marketplaceListing.findMany.mockResolvedValue([
+        { packageId: 'p1', package: { name: '插件A' }, installCount: 42, ratingCount: 10, ratingSum: 45, priceCents: 0 },
+        { packageId: 'p2', package: { name: '插件B' }, installCount: 7, ratingCount: 0, ratingSum: 0, priceCents: 1000 },
       ]);
 
       const result = await service.adminFinanceStats('user-admin');
@@ -196,7 +193,7 @@ describe('AdminService stats', () => {
       prisma.purchase.aggregate.mockResolvedValue({ _sum: { priceCents: null } });
       prisma.purchase.findMany.mockResolvedValue([]);
       prisma.user.count.mockResolvedValue(0);
-      prisma.plugin.findMany.mockResolvedValue([]);
+      prisma.marketplaceListing.findMany.mockResolvedValue([]);
 
       const result = await service.adminFinanceStats('user-admin');
 
@@ -224,52 +221,6 @@ describe('v4 plugin registry audit labels', () => {
   });
 });
 
-// === 通知埋点契约：插件审核结果触发 NotificationService.create（触发失败不阻塞主操作）===
-// 申请治理的事务与通知时机由 admin-applications.service.spec.ts 聚焦覆盖。
-const NOW = new Date('2026-06-15T00:00:00.000Z');
-
-// plugin 完整字段：publicPlugin(plugin-package.ts) 会读 createdAt/updatedAt/ratingSum/installCount 等，
-// mock 必须补齐这些字段，否则 toISOString 报 undefined。
-function makeReviewPlugin(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    id: 'p1',
-    name: '插件A',
-    description: '',
-    version: '0.1.0',
-    entry: 'ui/index.html',
-    runtimeType: 'CLIENT',
-    status: 'ENABLED',
-    visibility: 'TEAM',
-    teamId: 't1',
-    authorUserId: 'author-1',
-    files: [],
-    manifest: {},
-    capabilities: [],
-    contentHash: '',
-    reviewStatus: 'PENDING',
-    reviewReason: '',
-    reviewedById: null,
-    reviewedAt: null,
-    marketplace: false,
-    priceCents: 0,
-    installCount: 0,
-    ratingCount: 0,
-    ratingSum: 0,
-    createdAt: NOW,
-    updatedAt: NOW,
-    ...overrides,
-  };
-}
-
-function mockPrismaForReview() {
-  const plugin = { findUnique: vi.fn(async () => null), update: vi.fn() };
-  const pluginReview = { create: vi.fn() };
-  const auditLog = { create: vi.fn() };
-  const tx = { plugin, pluginReview, auditLog };
-  const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
-  return { plugin, pluginReview, auditLog, $transaction };
-}
-
 function mockAuthForReview() {
   return {
     ensurePlatformAdmin: vi.fn(),
@@ -277,118 +228,6 @@ function mockAuthForReview() {
     ensureTeamAdmin: vi.fn(),
   };
 }
-
-describe('AdminService 通知埋点', () => {
-  let prisma: ReturnType<typeof mockPrismaForReview>;
-  let auth: ReturnType<typeof mockAuthForReview>;
-  let notifications: ReturnType<typeof mockNotifications>;
-  let service: AdminService;
-
-  beforeEach(() => {
-    prisma = mockPrismaForReview();
-    auth = mockAuthForReview();
-    notifications = mockNotifications();
-    // @ts-expect-error mock 不实现完整 PrismaService 接口。
-    service = new AdminService(prisma, auth, notifications);
-  });
-
-  it('adminApprovePlugin 触发通知 authorUserId（type=plugin_approved）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin());
-    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }));
-    await service.adminApprovePlugin('user-admin', 'p1');
-    expect(notifications.create).toHaveBeenCalledWith(
-      'author-1', 'plugin_approved', expect.any(String), expect.any(String),
-      { relatedType: 'Plugin', relatedId: 'p1' },
-    );
-  });
-
-  it('adminRejectPlugin 触发通知 authorUserId（type=plugin_rejected，body 含原因）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin());
-    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'REJECTED' }));
-    await service.adminRejectPlugin('user-admin', 'p1', '描述不符规范');
-    expect(notifications.create).toHaveBeenCalledWith(
-      'author-1', 'plugin_rejected', expect.any(String), expect.stringContaining('描述不符规范'),
-      { relatedType: 'Plugin', relatedId: 'p1' },
-    );
-  });
-
-  it('adminApprovePlugin 无 authorUserId 时不触发通知（不报错）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ authorUserId: null }));
-    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ authorUserId: null, reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }));
-    await service.adminApprovePlugin('user-admin', 'p1');
-    expect(notifications.create).not.toHaveBeenCalled();
-  });
-
-  it('审核通过后通知 create 抛错时主流程不阻塞（仍正常返回）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin());
-    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }));
-    notifications.create.mockRejectedValueOnce(new Error('db down'));
-    const result = await service.adminApprovePlugin('user-admin', 'p1');
-    expect(result.plugin.reviewStatus).toBe('APPROVED');
-  });
-
-});
-
-// === 审核 DRAFT 插件：管理员可直接审核草稿（不再要求作者先提交审核）===
-// 守卫已放宽：DRAFT/PENDING → APPROVED/REJECTED 均允许；APPROVED/REJECTED 等终态抛 conflict。
-// 这覆盖问题「后台无法把插件状态从草稿改为已审核」：此前 DRAFT 被守卫挡在 409。
-describe('AdminService 审核 DRAFT 插件', () => {
-  let prisma: ReturnType<typeof mockPrismaForReview>;
-  let auth: ReturnType<typeof mockAuthForReview>;
-  let notifications: ReturnType<typeof mockNotifications>;
-  let service: AdminService;
-
-  beforeEach(() => {
-    prisma = mockPrismaForReview();
-    auth = mockAuthForReview();
-    notifications = mockNotifications();
-    // @ts-expect-error mock 不实现完整 PrismaService 接口。
-    service = new AdminService(prisma, auth, notifications);
-  });
-
-  it('adminApprovePlugin 对 DRAFT 草稿直接审核通过（→ APPROVED + marketplace + PUBLIC）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'DRAFT' }));
-    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }));
-    const result = await service.adminApprovePlugin('user-admin', 'p1');
-    expect(result.plugin.reviewStatus).toBe('APPROVED');
-    expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'p1' },
-      data: expect.objectContaining({ reviewStatus: 'APPROVED', marketplace: true, visibility: 'PUBLIC' }),
-    }));
-    // 仍写 PluginReview 记录 + 通知作者（与 PENDING 路径一致）。
-    expect(prisma.pluginReview.create).toHaveBeenCalledTimes(1);
-    expect(notifications.create).toHaveBeenCalledWith(
-      'author-1', 'plugin_approved', expect.any(String), expect.any(String),
-      { relatedType: 'Plugin', relatedId: 'p1' },
-    );
-  });
-
-  it('adminRejectPlugin 对 DRAFT 草稿可直接驳回（→ REJECTED，附原因通知作者）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'DRAFT' }));
-    prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'REJECTED' }));
-    await service.adminRejectPlugin('user-admin', 'p1', '描述不符');
-    expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'p1' },
-      data: expect.objectContaining({ reviewStatus: 'REJECTED' }),
-    }));
-    expect(notifications.create).toHaveBeenCalledWith(
-      'author-1', 'plugin_rejected', expect.any(String), expect.stringContaining('描述不符'),
-      { relatedType: 'Plugin', relatedId: 'p1' },
-    );
-  });
-
-  it('adminApprovePlugin 对 APPROVED 终态抛 conflict（不能重复审核）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'APPROVED', marketplace: true }));
-    await expect(service.adminApprovePlugin('user-admin', 'p1')).rejects.toMatchObject({ status: 409 });
-    expect(prisma.plugin.update).not.toHaveBeenCalled();
-  });
-
-  it('adminRejectPlugin 对 REJECTED 终态抛 conflict（不能重复驳回）', async () => {
-    prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ reviewStatus: 'REJECTED' }));
-    await expect(service.adminRejectPlugin('user-admin', 'p1')).rejects.toMatchObject({ status: 409 });
-    expect(prisma.plugin.update).not.toHaveBeenCalled();
-  });
-});
 
 // === 组B 团队管理完善：成员列表 / 角色切换 / 状态启停 / 详情聚合 ===
 // 覆盖 4 个新方法，关键断言：
@@ -401,11 +240,11 @@ function mockPrismaForTeam() {
   const user = { findUnique: vi.fn(), update: vi.fn() };
   const teamMembership = { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(async () => 0), update: vi.fn(), upsert: vi.fn() };
   const role = { findUnique: vi.fn(), count: vi.fn(async () => 0), upsert: vi.fn(async ({ create }) => create) };
-  const plugin = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
+  const pluginPackage = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
   const purchase = { findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
   const balanceLedger = { groupBy: vi.fn(async () => []), findMany: vi.fn(async () => []), count: vi.fn(async () => 0) };
   const auditLog = { create: vi.fn() };
-  const tx = { team, user, teamMembership, role, plugin, purchase, balanceLedger, auditLog };
+  const tx = { team, user, teamMembership, role, pluginPackage, purchase, balanceLedger, auditLog };
   const $transaction = vi.fn(async (cb: (client: typeof tx) => Promise<unknown>) => cb(tx));
   return { ...tx, $transaction };
 }
@@ -637,7 +476,7 @@ describe('AdminService 团队管理完善（组B）', () => {
       });
       prisma.teamMembership.count.mockResolvedValueOnce(5);
       prisma.role.count.mockResolvedValueOnce(3);
-      prisma.plugin.count.mockResolvedValueOnce(2);
+      prisma.pluginPackage.count.mockResolvedValueOnce(2);
       prisma.purchase.count.mockResolvedValueOnce(7);
       prisma.balanceLedger.groupBy.mockResolvedValueOnce([
         { direction: 'CREDIT', _sum: { amountCents: 5000 } },
@@ -667,171 +506,28 @@ describe('AdminService 团队管理完善（组B）', () => {
       expect(result.ledgerSummary).toEqual({ totalCreditCents: 0, totalDebitCents: 0, netCents: 0 });
     });
   });
-});
 
-// === 组A 插件管理完善：扩展 adminUpdatePlugin（version/visibility/字段白名单）+ adminDelistPlugin + adminPluginAuditHistory ===
-// 覆盖关键契约：
-//  - adminUpdatePlugin：非管理员拒绝；字段白名单（仅声明字段落库 + 审计 metadata）；priceCents 强制取整非负。
-//  - adminDelistPlugin：非管理员拒绝；未上架 conflict；下架写 admin.plugin.delisted 审计 + marketplace=false/reviewStatus=DRAFT；通知作者（触发失败不阻塞）。
-//  - adminPluginAuditHistory：非管理员拒绝；插件不存在 not_found；返回 PluginReview 列表（reviewer 脱敏）。
-function mockPrismaForPlugin() {
-  const plugin = { findUnique: vi.fn(), update: vi.fn() };
-  const pluginReview = { findMany: vi.fn(async () => []) };
-  const auditLog = { create: vi.fn() };
-  const tx = { plugin, pluginReview, auditLog };
-  const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
-  return { plugin, pluginReview, auditLog, $transaction };
-}
+  describe('adminTeamPlugins', () => {
+    it('从 v4 package/listing 投影，并按严格 SemVer 选择最新发行版', async () => {
+      prisma.team.findUnique.mockResolvedValueOnce({ id: 't1' });
+      prisma.pluginPackage.findMany.mockResolvedValueOnce([{
+        id: 'pkg-1', name: '图片插件', governanceStatus: 'ACTIVE',
+        listing: { status: 'ACTIVE', priceCents: 500, installCount: 12 },
+        releases: [
+          { version: '1.9.0', status: 'PUBLISHED', marketReviewStatus: 'APPROVED' },
+          { version: '1.10.0', status: 'PUBLISHED', marketReviewStatus: 'PENDING' },
+        ],
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-02T00:00:00.000Z'),
+      }]);
+      prisma.pluginPackage.count.mockResolvedValueOnce(1);
 
-describe('AdminService 插件管理完善（组A）', () => {
-  let prisma: ReturnType<typeof mockPrismaForPlugin>;
-  let auth: ReturnType<typeof mockAuthForReview>;
-  let notifications: ReturnType<typeof mockNotifications>;
-  let service: AdminService;
+      const result = await service.adminTeamPlugins('user-admin', 't1');
 
-  beforeEach(() => {
-    prisma = mockPrismaForPlugin();
-    auth = mockAuthForReview();
-    notifications = mockNotifications();
-    // @ts-expect-error mock 不实现完整 PrismaService 接口。
-    service = new AdminService(prisma, auth, notifications);
-  });
-
-  describe('adminUpdatePlugin', () => {
-    it('非平台管理员被拒绝（403）', async () => {
-      auth.ensurePlatformAdmin.mockImplementation(() => {
-        throw forbidden('仅平台管理员可操作');
+      expect(result.items[0]).toMatchObject({
+        id: 'pkg-1', version: '1.10.0', status: 'ENABLED', visibility: 'PUBLIC',
+        reviewStatus: 'PENDING', marketplace: true, priceCents: 500, installCount: 12,
       });
-      await expect(service.adminUpdatePlugin('user-member', 'p1', { name: '新名' })).rejects.toMatchObject({ status: 403, code: 'forbidden' });
-      expect(prisma.plugin.update).not.toHaveBeenCalled();
-    });
-
-    it('插件不存在时抛 not_found', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(null);
-      await expect(service.adminUpdatePlugin('user-admin', 'missing', { name: '新名' })).rejects.toMatchObject({ status: 404, code: 'not_found' });
-    });
-
-    it('字段白名单：仅声明字段落库 + 审计 metadata 只含变更字段', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce({ id: 'p1' });
-      prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ name: '新名', version: '1.2.0', visibility: 'PUBLIC', priceCents: 500 }));
-      const result = await service.adminUpdatePlugin('user-admin', 'p1', {
-        name: '新名', version: '1.2.0', visibility: 'PUBLIC', priceCents: 500,
-      });
-      // update.data 仅含四个声明字段（不含未声明的 marketplace/reviewStatus 等）。
-      expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 'p1' },
-        data: { name: '新名', version: '1.2.0', visibility: 'PUBLIC', priceCents: 500 },
-      }));
-      // 审计 metadata 精确记录变更字段（H5 同类修复：不裸透传 input DTO）。
-      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ action: 'admin.plugin.updated', targetType: 'Plugin', targetId: 'p1', metadata: { name: '新名', version: '1.2.0', visibility: 'PUBLIC', priceCents: 500 } }),
-      }));
-      expect(result.plugin.name).toBe('新名');
-    });
-
-    it('priceCents 强制取整非负（负数或浮点兜底）', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce({ id: 'p1' });
-      prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ priceCents: 0 }));
-      await service.adminUpdatePlugin('user-admin', 'p1', { priceCents: -12.7 });
-      expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
-        data: { priceCents: 0 }, // Math.max(0, Math.floor(-12.7)) = 0
-      }));
-    });
-
-    it('部分字段更新：仅传 status 时 data 只含 status', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce({ id: 'p1' });
-      prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ status: 'DISABLED' }));
-      await service.adminUpdatePlugin('user-admin', 'p1', { status: 'DISABLED' });
-      expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
-        data: { status: 'DISABLED' },
-      }));
-    });
-  });
-
-  describe('adminDelistPlugin', () => {
-    it('非平台管理员被拒绝（403）', async () => {
-      auth.ensurePlatformAdmin.mockImplementation(() => {
-        throw forbidden('仅平台管理员可操作');
-      });
-      await expect(service.adminDelistPlugin('user-member', 'p1')).rejects.toMatchObject({ status: 403, code: 'forbidden' });
-      expect(prisma.plugin.findUnique).not.toHaveBeenCalled();
-    });
-
-    it('插件不存在时抛 not_found', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(null);
-      await expect(service.adminDelistPlugin('user-admin', 'missing')).rejects.toMatchObject({ status: 404, code: 'not_found' });
-    });
-
-    it('未上架市场时抛 conflict（无需下架）', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ marketplace: false }));
-      await expect(service.adminDelistPlugin('user-admin', 'p1')).rejects.toMatchObject({ status: 409, code: 'conflict' });
-      expect(prisma.plugin.update).not.toHaveBeenCalled();
-    });
-
-    it('下架写 marketplace=false + reviewStatus=DRAFT + admin.plugin.delisted 审计 + 通知作者', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ marketplace: true }));
-      prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ marketplace: false, reviewStatus: 'DRAFT' }));
-      const result = await service.adminDelistPlugin('user-admin', 'p1', '违规内容');
-      expect(prisma.plugin.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 'p1' },
-        data: expect.objectContaining({ marketplace: false, reviewStatus: 'DRAFT', reviewReason: '', reviewedById: null, reviewedAt: null }),
-      }));
-      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ action: 'admin.plugin.delisted', targetType: 'Plugin', targetId: 'p1', metadata: { teamId: 't1', reason: '违规内容' } }),
-      }));
-      expect(result.plugin.marketplace).toBe(false);
-      // 通知作者 type=plugin_delisted，body 含原因。
-      expect(notifications.create).toHaveBeenCalledWith(
-        'author-1', 'plugin_delisted', expect.any(String), expect.stringContaining('违规内容'),
-        { relatedType: 'Plugin', relatedId: 'p1' },
-      );
-    });
-
-    it('无 authorUserId 时不触发通知（不报错）', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ authorUserId: null, marketplace: true }));
-      prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ authorUserId: null, marketplace: false, reviewStatus: 'DRAFT' }));
-      await service.adminDelistPlugin('user-admin', 'p1');
-      expect(notifications.create).not.toHaveBeenCalled();
-    });
-
-    it('通知 create 抛错时主流程不阻塞（仍正常返回）', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(makeReviewPlugin({ marketplace: true }));
-      prisma.plugin.update.mockResolvedValueOnce(makeReviewPlugin({ marketplace: false, reviewStatus: 'DRAFT' }));
-      notifications.create.mockRejectedValueOnce(new Error('db down'));
-      const result = await service.adminDelistPlugin('user-admin', 'p1');
-      expect(result.plugin.marketplace).toBe(false);
-    });
-  });
-
-  describe('adminPluginAuditHistory', () => {
-    it('非平台管理员被拒绝（403）', async () => {
-      auth.ensurePlatformAdmin.mockImplementation(() => {
-        throw forbidden('仅平台管理员可操作');
-      });
-      await expect(service.adminPluginAuditHistory('user-member', 'p1')).rejects.toMatchObject({ status: 403, code: 'forbidden' });
-      expect(prisma.pluginReview.findMany).not.toHaveBeenCalled();
-    });
-
-    it('插件不存在时抛 not_found', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce(null);
-      await expect(service.adminPluginAuditHistory('user-admin', 'missing')).rejects.toMatchObject({ status: 404, code: 'not_found' });
-    });
-
-    it('返回 PluginReview 列表（reviewer 脱敏 + createdAt 转 ISO）', async () => {
-      prisma.plugin.findUnique.mockResolvedValueOnce({ id: 'p1' });
-      const now = new Date('2026-06-15T00:00:00.000Z');
-      prisma.pluginReview.findMany.mockResolvedValueOnce([
-        { id: 'rv1', status: 'APPROVED', reason: '', createdAt: now, reviewer: { id: 'u1', email: 'a@x.com', displayName: 'A', platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' } },
-        { id: 'rv2', status: 'REJECTED', reason: '描述不符', createdAt: now, reviewer: null },
-      ]);
-      const result = await service.adminPluginAuditHistory('user-admin', 'p1');
-      expect(result.reviews).toHaveLength(2);
-      // reviewer 经 publicUser 脱敏：不携带 passwordHash/tokenVersion。
-      expect(result.reviews[0].reviewer).toEqual({ id: 'u1', email: 'a@x.com', displayName: 'A', platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' });
-      expect(result.reviews[0].reviewer).not.toHaveProperty('passwordHash');
-      expect(result.reviews[1].reviewer).toBeNull();
-      // createdAt 转 ISO 字符串。
-      expect(result.reviews[0].createdAt).toBe('2026-06-15T00:00:00.000Z');
     });
   });
 });

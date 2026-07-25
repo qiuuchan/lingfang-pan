@@ -16,9 +16,8 @@ import { PrismaService } from './prisma.service';
 
 type Summary = {
   mode: 'dry-run' | 'apply';
-  legacy: { total: number; passed: number; quarantined: number; failed: number };
   releases: { total: number; passed: number; quarantined: number; failed: number };
-  failures: Array<{ type: 'Plugin' | 'PluginRelease'; id: string; reason: string }>;
+  failures: Array<{ type: 'PluginRelease'; id: string; reason: string }>;
 };
 
 function unscannableResult(path: string): PluginAiPolicyResult {
@@ -48,53 +47,11 @@ async function main() {
   const stagingRoot = process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts');
   const summary: Summary = {
     mode: apply ? 'apply' : 'dry-run',
-    legacy: { total: 0, passed: 0, quarantined: 0, failed: 0 },
     releases: { total: 0, passed: 0, quarantined: 0, failed: 0 },
     failures: [],
   };
   await prisma.$connect();
   try {
-    const plugins = await prisma.plugin.findMany({ orderBy: { createdAt: 'asc' } });
-    summary.legacy.total = plugins.length;
-    for (const plugin of plugins) {
-      let result: PluginAiPolicyResult;
-      try {
-        result = checkPluginAiPolicy({
-          manifest: plugin.manifest,
-          files: Array.isArray(plugin.files) ? plugin.files as Array<{ path: string; content?: string; binary?: boolean }> : [],
-        });
-      } catch {
-        result = unscannableResult('legacy-plugin');
-        summary.legacy.failed += 1;
-      }
-      if (result.ok) summary.legacy.passed += 1;
-      else {
-        summary.legacy.quarantined += 1;
-        summary.failures.push({ type: 'Plugin', id: plugin.id, reason: pluginAiPolicyReason(result) });
-      }
-      if (apply) {
-        await prisma.plugin.update({
-          where: { id: plugin.id },
-          data: {
-            aiPolicyVersion: result.policyVersion,
-            aiPolicyStatus: result.ok ? 'PASSED' : 'FAILED',
-            aiPolicyReason: pluginAiPolicyReason(result),
-            ...(result.ok ? {} : { status: 'DISABLED' }),
-          },
-        });
-        if (!result.ok) {
-          await prisma.auditLog.create({
-            data: {
-              action: 'plugin.ai_policy.quarantined',
-              targetType: 'Plugin',
-              targetId: plugin.id,
-              metadata: { policyVersion: result.policyVersion, diagnostics: result.diagnostics.map((item) => item.code) },
-            },
-          });
-        }
-      }
-    }
-
     const releases = await prisma.pluginRelease.findMany({ orderBy: { createdAt: 'asc' } });
     summary.releases.total = releases.length;
     await mkdir(stagingRoot, { recursive: true });

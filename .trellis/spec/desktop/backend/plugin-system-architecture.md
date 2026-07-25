@@ -8,7 +8,7 @@
               ├─ 创建器（对话式 AI 生成插件）
               │     ├─ ClaudeCode / Codex SDK Runtime（Rust reqwest 内置请求）
               │     ├─ AI 产出写入 plugins_root/<session_id>/（临时持久化目录）
-              │     └─ 预览满意 → 上传时弹命名 Dialog → rename 目录为正式名
+              │     └─ 预览满意 → 命名并打包 `.lfplugin` → 发布 immutable v4 release
               │
               ├─ 插件运行（三类独立）
               │     ├─ HTML（CLIENT）→ iframe 内嵌显示
@@ -21,7 +21,7 @@
               │     └─ 设置（插件存放路径可配置）
               │
               └─ 后端（collab-api NestJS）
-                    ├─ 插件上传/市场/安装/购买
+                    ├─ v4 package/release/listing/entitlement
                     ├─ 模型网关（provider 云分发 + apiKey 加密存储）
                     ├─ 检查更新（Tauri updater）
                     └─ 通知/审计/导出/注销
@@ -47,13 +47,13 @@
   │     ├─ Python → sandbox 一次性预览（终端输出）
   │     └─ Node.js → sandbox 一次性预览
   │
-  ├─ 4. 命名上传：
-  │     ├─ 用户点「上传到团队共享」→ 弹命名 Dialog
+  ├─ 4. 命名发布：
+  │     ├─ 用户点「发布」→ 弹命名 Dialog
   │     ├─ 用户填名（如"我的番茄钟"）→ safePluginId → uXXXX 编码
   │     ├─ Rust rename_plugin_dir：temp-xxx/ → 正式名/
-  │     └─ POST /api/plugins/upload（manifest.name = 用户命名）
+  │     └─ publish_local_artifact → POST /api/plugin-registry/releases（`.lfplugin`）
   │
-  └─ 5. 发布市场（可选）：submit-marketplace → admin 审核 → 上架
+  └─ 5. 发布市场（可选）：v4 release submit → admin 审核 → listing 上架
 ```
 
 ## 运行流程（三类插件各自的运行方式）
@@ -204,15 +204,15 @@ code_assistant::start_session(app, state, input, session_id, credentials)
 │    ├─ Python → venv python main.py（外部窗口）             │
 │    └─ Node → pnpm start（外部终端）                        │
 │                                                          │
-│  上传 ──→ POST /api/plugins/upload                        │
-│    └─ 命名 Dialog → rename_plugin_dir → 正式目录名          │
+│  发布 ──→ publish_local_artifact                           │
+│    └─ `.lfplugin` → POST /api/plugin-registry/releases    │
 └──────────────────────────────────────────────────────────┘
          │                              │
          ▼                              ▼
    PostgreSQL                    插件文件系统
-   ├─ plugins（市场）             ├─ plugins/
-   ├─ installations              │   ├─ temp-xxx/（创建期临时）
-   ├─ purchases                  │   └─ 正式名/（上传后命名）
+   ├─ plugin packages/releases   ├─ plugins/
+   ├─ listings/entitlements      │   ├─ temp-xxx/（创建期临时）
+   ├─ purchases                  │   └─ 正式名/（发布后命名）
    └─ audit_logs                 └─ .lingfang/config.json
 ```
 

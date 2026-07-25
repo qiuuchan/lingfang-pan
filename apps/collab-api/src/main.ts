@@ -49,11 +49,11 @@ async function bootstrap() {
     console.warn('[邮件警告] SMTP_URL 未配置：找回密码 / 邮箱验证邮件将降级输出到 console.log（不实际发送）。生产环境请配置 SMTP_URL="smtps://user:pass@host:465" 后重启。');
   }
 
-  // 修复 PPK-04：默认 body parser limit 仅 100KB，使 plugin-package 上传约束不可达
-  // （上传超 100KB 直接 413，到不了 normalizePluginPackage 的字节校验）。
+  // JSON body 仍需覆盖管理配置、工作流和兼容请求；v4 插件制品上传使用 raw stream，
+  // 不经过此 JSON parser。
   // 提到 50MB：插件源码（含 vendor/ 内嵌上游）经 JSON 明文传输，3-5MB 常见，
   // huobao-drama 等含前端构建产物的插件可达 4MB+。50MB 覆盖绝大多数插件，
-  // 真正的字节/文件数上限由 normalizePluginPackage（300 文件 / 300MB）兜底。
+  // 插件制品字节/文件数上限由 plugin-artifact 检查器兜底。
   // bufferLogs: true 让 NestJS 在 useLogger 注入 pino 前缓冲启动日志，
   // 避免 bootstrap 早期消息走默认 ConsoleLogger 与 pino 输出双轨不一致。
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
