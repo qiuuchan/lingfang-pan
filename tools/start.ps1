@@ -1,10 +1,10 @@
 # LingFang 一键启动脚本（Windows / PowerShell）。
 #
 # 流程：检查依赖 → 校验 collab-api 配置 → 确保数据库可连 → 迁移/同步+建管理员 →
-#       启动 collab-api（NestJS，:3000）→ 等待健康 → 启动桌面壳（Tauri）。
+#       启动 collab-api（NestJS，端口取 .env 的 PORT）→ 等待健康 → 启动桌面壳（Tauri）。
 #
 # 后端为 apps/collab-api（NestJS，/api/* 前缀，支持 PostgreSQL 16+ 或 MySQL 8+/MariaDB）。
-# 旧 Rust apps/server（:8787）已下线，不再启动——见 docs/collab-platform.md「双后端收敛」。
+# 历史服务实现已退役；当前只启动 apps/collab-api。
 #
 # 用法：  pnpm start        （见根 package.json）
 #   或    pwsh tools/start.ps1

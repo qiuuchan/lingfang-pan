@@ -113,8 +113,8 @@ export async function createCommand(
   const capabilitiesRaw = String(flags['capabilities'] ?? '').trim();
   const force = Boolean(flags['force']);
 
-  // 确保 visibility 合法
-  if (!['public', 'private', 'tenant'].includes(visibility)) {
+  // 上传 manifest 只允许 private / tenant；public 由市场审核后赋予。
+  if (!['private', 'tenant'].includes(visibility)) {
     visibility = 'tenant';
   }
 
@@ -166,8 +166,8 @@ export async function createCommand(
 
   // visibility
   if (interactive) {
-    const visIdx = await askSelect('可见度', ['公共 (public)', '私有 (private)', '租户 (tenant)'], 2);
-    visibility = ['public', 'private', 'tenant'][visIdx];
+    const visIdx = await askSelect('可见度', ['私有 (private)', '租户 (tenant)'], 1);
+    visibility = ['private', 'tenant'][visIdx];
   }
 
   // capabilities

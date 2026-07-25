@@ -1,0 +1,27 @@
+# AdminPluginRegistryController
+
+源码：`apps/collab-api/src/modules/plugin-registry.controller.ts`
+
+控制器基路径：`/api/admin/plugin-releases`
+
+除登录、安装向导、公开目录等明确公开接口外，请携带 `Authorization: Bearer <token>`。平台或团队权限以控制器上的守卫和 `@RequirePermission` 为准。
+
+## 端点
+
+| 方法 | 路径 | 处理器 |
+|---|---|---|
+| `GET` | `/api/admin/plugin-releases` | `list()` |
+| `GET` | `/api/admin/plugin-releases/review-pending` | `pending()` |
+| `GET` | `/api/admin/plugin-releases/:id/artifact` | `artifact()` |
+| `GET` | `/api/admin/plugin-releases/:id` | `detail()` |
+| `GET` | `/api/admin/plugin-releases/:id/manifest` | `manifest()` |
+| `GET` | `/api/admin/plugin-releases/:id/files` | `files()` |
+| `GET` | `/api/admin/plugin-releases/:id/reviews` | `reviews()` |
+| `POST` | `/api/admin/plugin-releases/:id/approve` | `approve()` |
+| `POST` | `/api/admin/plugin-releases/:id/reject` | `reject()` |
+| `POST` | `/api/admin/plugin-releases/:id/delist` | `delist()` |
+
+## 请求与响应
+
+请求体、查询参数和响应字段以同目录 DTO、服务方法及开发环境 Swagger 为准。失败响应统一包含稳定 `code`、可读 `message` 和 `requestId`；不要根据中文消息分支业务逻辑。
+

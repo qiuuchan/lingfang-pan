@@ -1,75 +1,31 @@
-# 领域模型与插件生命周期
+# 领域模型与插件
 
-> 本文描述当前领域模型。迁移前的草稿、LLM 绑定和旧后端模型仅保留在历史文档中。
+## 身份与团队
 
-## 领域边界
+- `User`：登录身份、状态和 token 版本。
+- `Team`：租户边界，拥有成员、余额、角色和插件包。
+- `Role` / `PermissionEntry`：平台与团队两级 RBAC。
+- `Membership`：用户与团队关系；当前团队决定大多数业务作用域。
 
-### 身份与团队
+## v4 插件注册中心
 
-- `User` 表示账号。
-- `Team` 是协作、余额、插件所有权和权限的主要租户边界。
-- `Role`、`PermissionEntry` 和成员关系实现平台级与团队级 RBAC。
-- 团队管理员申请有独立状态机和审计记录，不与插件审核共用数据库实体。
+- `PluginPackage`：稳定包身份，以 `ownerTeamId + manifestId` 唯一。
+- `PluginRelease`：不可变版本，保存 manifest、文件清单、制品 SHA、来源和审核状态。
+- `MarketplaceListing`：市场货架，指向当前上架 release，并保存价格、分类、统计和质量快照。
+- `PluginEntitlement`：团队对 package 的使用权。
+- `Purchase`：购买、结算和退款记录。
+- `PluginReleaseReview`：发行版审核历史。
 
-### 插件工作区
+旧插件记录只用于迁移兼容，不应成为新功能的数据源。新发布、审核、发现、购买和授权全部围绕 package/release/listing/entitlement 建模。
 
-桌面工作区是正在创建或编辑的本地源文件集合，包含 manifest、入口文件和资源。创建器通过 Agent 工具读取、写入和验证工作区。工作区不是云端已发布发行版，也不能直接作为市场安装来源。
+## Manifest
 
-### 插件包与发行版
+Manifest 字段和能力枚举以 `packages/contract/src/plugin.ts` 为准。运行时包括 `client`、`nodejs`、`python`、`cloud` 和 `workflow`；上传可见性只允许 `private` 或 `tenant`。
 
-- `PluginPackage` 表示稳定插件身份和所有权。
-- `PluginRelease` 表示不可变版本，关联 SemVer、manifest、文件清单、制品摘要、来源和审核状态。
-- `MarketplaceListing` 表示市场上架状态，并通过 `currentReleaseId` 精确指向当前版本。
-- `PluginReview` 和审计记录保存发行版治理过程。
+插件通过能力声明访问文件、网络、剪贴板、系统通知、AI、图片、视频、发布和共享状态。宿主会同时校验 manifest、团队权限和运行时 session。
 
-同一包可有多个发行版，但市场当前版只能是 listing 指针指向的已批准发行版。下架保留发行版、制品、历史和既有权益。
+## 制品与安装
 
-## 运行时类型
+`.lfplugin` v4 是确定性 ZIP，根目录必须有 `_meta.json` 与 `manifest.json`。桌面安装器先检查格式和 SHA，再安全解压到 staging，最后原子更新安装账本。更新先进入 pending release，成功启动后才激活，并保留一个 previous release 供回滚。
 
-| 类型 | 执行位置 | 说明 |
-|---|---|---|
-| `client` | 桌面 WebView/iframe | 纯前端插件，通过受控桥调用能力 |
-| `python` | 桌面子进程 | 使用 Resolver 选定的 Python 与独立 venv |
-| `nodejs` | 桌面子进程 | 使用 Resolver 选定的 Node 与隔离依赖目录 |
-| `cloud` | 平台服务 | 由平台能力和契约约束，不在本地脚本进程执行 |
-
-插件运行、创建、预览、依赖安装和 Agent shell 的执行来源必须是软件内置运行时，不探测或使用系统 Python/Node/FFmpeg/Chromium。
-
-## 创建与发布
-
-```text
-自然语言需求
-  -> Agent 会话
-  -> 本地工作区文件
-  -> manifest / 完整性 / 安全校验
-  -> 本地预览
-  -> 确定性 .lfplugin 制品
-  -> package release
-  -> 平台审核
-  -> marketplace listing
-  -> 桌面安装与原子激活
-```
-
-发布边界会重新验证插件 ID、版本、入口、能力、文件路径、数量、大小和摘要。服务端不信任桌面端已经执行过的校验。
-
-## 安装与本地状态
-
-桌面端把远端发行版安装到不可变 release 目录，并用安装账本记录活动版、待激活版和来源。下载、摘要校验或依赖准备失败时不得覆盖当前活动版本。用户从已安装插件复制到工作区后，副本重新成为可编辑本地源。
-
-## 模型与计费
-
-插件和创建器通过平台 relay 使用 `fast` / `premium` 等产品层级，不直接获取上游渠道密钥。后端负责渠道选择、调用记录、灵石预留/结算和错误映射。团队余额、账本和平台上游渠道凭证属于平台领域，不属于插件 manifest。
-
-## 治理规则
-
-- 审核状态转换使用条件更新，两个并发处理请求只能有一个成功。
-- 驳回和下架必须记录原因。
-- 列表只返回摘要；manifest、文件元数据和审核历史在详情 Tab 中按需加载。
-- 管理端不返回插件文件正文、上游密钥密文或其他敏感字段。
-
-## 契约来源
-
-- 插件和 manifest：`packages/contract/src/plugin.ts`
-- 插件治理：`packages/contract/src/plugin-registry.ts`
-- 后端模型：`apps/collab-api/prisma/schema.prisma`
-- 桌面安装状态：`apps/desktop/src-tauri/src/plugin_package_manager.rs`
+开发与打包见 [插件开发指南](./plugin-development/README.md)。

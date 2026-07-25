@@ -1,260 +1,64 @@
-# Collab 部署文档
+# 部署指南
 
-协作平台优先支持本地部署；Docker Compose 保留为可选部署方式。
+## 本地开发
 
-## 本地部署主路径
-
-### 1. 前置环境
-
-- Node.js 20+
-- pnpm 9+
-- PostgreSQL 16+（默认）或 MySQL 8+/MariaDB 10.11+
-- Redis 6+（可选，用于多实例共享缓存和热点接口加速）
-
-默认本地端口：
-
-- API：`http://localhost:3000`
-- Swagger：`http://localhost:3000/api/docs`
-- OpenAPI JSON：`http://localhost:3000/api/docs-json`
-- 管理端：`http://localhost:4174`
-- PostgreSQL：`localhost:5432`
-- MySQL：按实际部署地址配置 `DATABASE_URL`
-
-### 2. 创建本地数据库
-
-默认 PostgreSQL 连接：
-
-```text
-postgresql://lingfang:lingfang@localhost:5432/lingfang_collab?schema=public
-```
-
-可用任意 PostgreSQL 管理方式创建同名用户和数据库。示例 SQL：
-
-```sql
-CREATE USER lingfang WITH PASSWORD 'lingfang';
-CREATE DATABASE lingfang_collab OWNER lingfang;
-```
-
-MySQL / MariaDB 切换示例：
-
-```env
-DATABASE_PROVIDER="mysql"
-DATABASE_URL="mysql://lingfang:lingfang@localhost:3306/lingfang_collab"
-```
-
-对应数据库需提前创建并授权：
-
-```sql
-CREATE DATABASE lingfang_collab CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'lingfang'@'%' IDENTIFIED BY 'lingfang';
-GRANT ALL PRIVILEGES ON lingfang_collab.* TO 'lingfang'@'%';
-```
-
-### 3. 安装依赖
-
-在仓库根目录执行：
-
-```bash
+```powershell
 pnpm install
+Copy-Item apps/collab-api/.env.example apps/collab-api/.env
+pnpm start
 ```
 
-### 4. 配置后端环境变量
+`tools/start.ps1` 读取 `.env`：检查数据库、生成 Prisma Client、应用 migration、执行管理员 seed、启动 API、等待 `/api/health`，最后启动 Tauri。仓库示例 `.env` 的 `PORT` 是 `19006`；代码在未设置时回退 `3000`。
 
-```bash
-cp apps/collab-api/.env.example apps/collab-api/.env
+管理端单独启动在 `http://localhost:19005`，桌面 Vite dev server 使用 `http://localhost:1420`。
+
+## 必要配置
+
+- `DATABASE_PROVIDER`：`postgresql` 或 `mysql`。
+- `DATABASE_URL`：与 provider 协议一致。
+- `JWT_SECRET`：生产至少 16 字符。
+- `LLM_KEY_ENCRYPTION_KEY`：64 位 hex。
+- `CORS_ALLOWED_ORIGINS`：管理端、Tauri dev/release origin。
+- `PORT`：API 监听端口。
+
+可选配置包括 Redis、SMTP、密码/邮箱验证链接和 CDN 前缀。平台 RBFLow 凭证通过管理后台设置，不下发插件进程。
+
+## Docker Compose
+
+```powershell
+docker compose -f docker-compose.collab.yml up -d
 ```
 
-最小配置：
+编排包含数据库、API 和静态管理端。生产环境必须替换示例密码、JWT、加密密钥与公开域名，并为插件制品目录配置持久卷。
 
-```env
-PORT=3000
-DATABASE_PROVIDER="postgresql"
-DATABASE_URL="postgresql://lingfang:lingfang@localhost:5432/lingfang_collab?schema=public"
-CACHE_DRIVER="memory"
-REDIS_URL=""
-JWT_SECRET="change-me-in-production"
-JWT_EXPIRES_IN="7d"
-CORS_ALLOWED_ORIGINS="http://localhost:4174,http://localhost:1420,tauri://localhost"
-PLATFORM_ADMIN_BOOTSTRAP_ENABLED=true
-PLATFORM_ADMIN_EMAIL="admin@example.com"
-PLATFORM_ADMIN_PASSWORD="ChangeMe123!"
-PLATFORM_ADMIN_NAME="平台管理员"
-```
+## 发布检查
 
-生产环境必须替换 `JWT_SECRET` 和初始管理员密码。
-
-缓存配置：
-
-```env
-# 单实例默认值：进程内缓存
-CACHE_DRIVER="memory"
-
-# 多实例或高频公开端点：显式启用 Redis。REDIS_URL 缺失或协议错误会启动失败，不会静默降级。
-CACHE_DRIVER="redis"
-REDIS_URL="redis://127.0.0.1:6379/0"
-```
-
-### 5. 生成 Prisma Client、迁移数据库、创建初始平台管理员
-
-```bash
+```powershell
 pnpm -C apps/collab-api prisma:generate
-pnpm -C apps/collab-api prisma:deploy
-pnpm -C apps/collab-api seed:admin
-```
-
-`prisma:deploy` 会按数据库类型选择执行路径：
-
-- PostgreSQL：执行 `prisma migrate deploy`，使用仓库内 `prisma/migrations/`。
-- MySQL：先生成 `prisma/.generated/mysql/schema.prisma`，再执行 `prisma db push` 同步结构。
-
-也可以使用聚合命令：
-
-```bash
-pnpm -C apps/collab-api db:setup
-```
-
-seed 规则：
-
-- 若数据库中不存在任何 `PLATFORM_ADMIN`，并且 `PLATFORM_ADMIN_BOOTSTRAP_ENABLED=true`，创建初始平台管理员。
-- 若该邮箱已存在且尚无平台管理员，则提升该用户为平台管理员。
-- 若已经存在平台管理员，不重复创建，也不覆盖密码。
-
-初始化完成后，生产环境建议关闭：
-
-```env
-PLATFORM_ADMIN_BOOTSTRAP_ENABLED=false
-```
-
-### 6. 启动 API
-
-开发模式：
-
-```bash
-pnpm -C apps/collab-api dev
-```
-
-生产构建后启动：
-
-```bash
 pnpm -C apps/collab-api build
-pnpm -C apps/collab-api start
-```
-
-### 7. 启动管理端
-
-管理端默认读取 `VITE_API_BASE_URL`，并兼容旧变量名 `VITE_COLLAB_API_BASE`。静态资源可通过 `VITE_CDN_BASE_URL` 指向国内 CDN；为空时使用同源资源。
-
-```bash
-VITE_API_BASE_URL=http://localhost:3000 pnpm -C apps/collab-admin dev
-```
-
-访问：
-
-```text
-http://localhost:4174
-```
-
-生产构建：
-
-```bash
-VITE_API_BASE_URL=http://localhost:3000 pnpm -C apps/collab-admin build
-pnpm -C apps/collab-admin preview
-```
-
-国内 CDN 构建示例：
-
-```bash
-VITE_API_BASE_URL=https://api.example.cn VITE_CDN_BASE_URL=https://cdn.example.cn/lingfang-admin/ pnpm -C apps/collab-admin build
-```
-
-CDN 只承载 `dist` 中的静态资源，API 仍走 `VITE_API_BASE_URL` 或同源 `/api` 反代。桌面端构建保持本地资源，不依赖 CDN，以保证离线启动。
-
-### 8. 配置本地客户端
-
-本地客户端首次启动时填写统一 API 地址：
-
-```text
-http://127.0.0.1:3000
-```
-
-也可以在 `apps/desktop/public/app.config.json` 预置：
-
-```json
-{ "api_base": "http://127.0.0.1:3000" }
-```
-
-客户端会访问 `/api/health` 做健康检查。
-
-## 根目录快捷脚本
-
-根目录提供协作平台常用脚本：
-
-```bash
-pnpm collab:api:generate
-pnpm collab:api:migrate
-pnpm collab:api:seed
-pnpm collab:api:dev
-pnpm collab:api:build
-pnpm collab:admin:dev
-pnpm collab:admin:build
-```
-
-## Docker Compose 可选路径
-
-Docker Compose 会启动 PostgreSQL、API 和管理端。该路径适合快速联调或容器化部署，不是唯一部署方式；MySQL 支持通过手动部署或外部数据库环境变量使用，当前 Compose 文件不内置 MySQL 服务。
-
-### 1. 准备环境文件
-
-```bash
-cp .env.collab.example .env.collab
-```
-
-按需修改 `.env.collab` 中的管理员账号、JWT 密钥和管理端 API 地址。
-
-Compose 中 API 容器会使用内部数据库地址：
-
-```text
-postgresql://lingfang:lingfang@postgres:5432/lingfang_collab?schema=public
-```
-
-宿主机访问 PostgreSQL 使用：
-
-```text
-localhost:5434
-```
-
-### 2. 启动
-
-```bash
-docker compose -f docker-compose.collab.yml up --build
-```
-
-启动流程包含：
-
-1. PostgreSQL 健康检查。
-2. `prisma:generate`。
-3. `prisma:deploy`（Compose 默认 PostgreSQL，因此执行迁移）。
-4. `seed:admin`。
-5. 启动 API 和管理端。
-
-默认端口：
-
-- API：`http://localhost:3000`
-- Swagger：`http://localhost:3000/api/docs`
-- 管理端：`http://localhost:4174`
-- PostgreSQL：宿主机 `localhost:5434`
-
-## 验证命令
-
-```bash
-pnpm -C apps/collab-api prisma:validate
-pnpm -C apps/collab-api typecheck
-pnpm -C apps/collab-api build
-pnpm -C apps/collab-admin typecheck
 pnpm -C apps/collab-admin build
-pnpm -C apps/desktop typecheck
-pnpm -C apps/desktop vite:build
-docker compose -f docker-compose.collab.yml config
+pnpm -C apps/desktop build
 ```
 
-如果 Docker 镜像拉取网络不可用，`docker compose build` 可能卡在基础镜像元数据下载；这不影响本地 Node/PostgreSQL 部署路径。
+数据库升级使用 `prisma:deploy`，不要在生产使用破坏性重置命令。
+
+## Legacy 插件表退役维护窗口
+
+删除 legacy `Plugin` 表前，先停止旧客户端写入并保存数据库与插件制品存储快照。回填命令直接读取 legacy 表，不依赖已删除的 Prisma delegate，可在包含退役 schema 的发布版本中执行：
+
+```powershell
+pnpm -C apps/collab-api plugin-registry:migrate -- --apply
+pnpm -C apps/collab-api plugin-registry:migrate -- --verify
+```
+
+`--verify` 输出任一非零缺口时不得继续。PostgreSQL 的 `20260725090000_retire_legacy_plugin` migration 会再次校验 package/release 映射、购买、授权、安装、评分和审核事实，失败时中止删表。
+
+MySQL 使用 `prisma db push`，没有 PostgreSQL migration 内的 SQL 断言。仅在 `--verify` 成功并归档 JSON 输出后，为本次命令临时设置一次性开关：
+
+```powershell
+$env:PRISMA_MYSQL_ACCEPT_DATA_LOSS_ONCE='1'
+pnpm -C apps/collab-api prisma:deploy
+Remove-Item Env:PRISMA_MYSQL_ACCEPT_DATA_LOSS_ONCE
+```
+
+部署顺序固定为：备份、`--apply`、`--verify`、停止旧实例、部署 schema 和应用、执行 v4 市场/购买/下载/审核/授权/导出 smoke test。删表后的回滚必须恢复数据库与制品快照并部署上一应用版本，不能用空 legacy 表代替恢复。
