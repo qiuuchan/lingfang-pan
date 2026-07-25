@@ -852,3 +852,36 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: 完成管理后台、工作流与本地自动化闭环
+
+**Date**: 2026-07-25
+**Task**: 完成管理后台、工作流与本地自动化闭环
+**Branch**: `main`
+
+### Summary
+
+完成管理员重置密码、多插件并行状态、插件 Action 定时任务、工作流实例调用、Cloud 定时任务弃用隔离、管理端路线图与规范同步；通过契约、桌面、管理端、API、Rust 全量检查。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ceae6de` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
