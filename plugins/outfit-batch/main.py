@@ -41,6 +41,27 @@ def _bridge_headers():
     return {"X-LingFang-Plugin-Token": _BRIDGE_TOKEN}
 
 
+class BridgeError(Exception):
+    """桥调用失败。携带 status/code 供重试判定（401/403/402 等鉴权/余额错误不重试）。"""
+    def __init__(self, message, status=0, code=""):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+def bridge_error_is_retryable(err):
+    """是否值得重试。
+
+    重试只对瞬态错误有意义：网络错误(status=0)/429/5xx。
+    鉴权(401/403)/余额(402)/其它客户端 4xx 不会自愈——重试只空等（旧版 401 会
+    空耗 重试次数×退避 ≈ 10 分钟才报错）。status==0 视为网络/未知，按瞬态重试。
+    """
+    status = getattr(err, "status", 0) or 0
+    if status == 0:
+        return True
+    return status == 429 or status >= 500
+
+
 def bridge_image_edit(prompt, image_paths, tier="fast", n=1, size="1024x1024", timeout=(30, 600)):
     """经平台桥 /image/edit：参考图 + prompt → 返回 list[str]（data:URI 或 http URL）。"""
     images = []
@@ -52,14 +73,17 @@ def bridge_image_edit(prompt, image_paths, tier="fast", n=1, size="1024x1024", t
     body = {"prompt": prompt, "images": images, "model": tier, "n": int(n), "size": size}
     resp = requests.post(_BRIDGE_URL + "/image/edit", json=body, headers=_bridge_headers(), timeout=timeout)
     if resp.status_code != 200:
-        # 桥错误 body 含 code/message/requestId，拼进异常便于诊断（不丢上下文）
+        # 桥错误 body 含 code/message/requestId，拼进异常便于诊断（不丢上下文）。
+        # 抛 BridgeError 携带 status/code，供重试循环按错误类型决定是否重试。
         try:
             ej = resp.json()
-            raise Exception("桥 image.edit %s %s: %s%s" % (
+            raise BridgeError("桥 image.edit %s %s: %s%s" % (
                 resp.status_code, ej.get("code", ""), ej.get("message", resp.text[:200]),
-                (" (requestId=" + ej["requestId"] + ")") if ej.get("requestId") else ""))
+                (" (requestId=" + ej["requestId"] + ")") if ej.get("requestId") else ""),
+                status=resp.status_code, code=str(ej.get("code", "")))
         except ValueError:
-            raise Exception("桥 image.edit %s: %s" % (resp.status_code, resp.text[:200]))
+            raise BridgeError("桥 image.edit %s: %s" % (resp.status_code, resp.text[:200]),
+                              status=resp.status_code)
     return resp.json().get("images", [])
 
 
@@ -829,6 +853,15 @@ class LocalAPIGenerator:
                         print(f"等待 {wait_time}s 后重试")
                         time.sleep(wait_time); continue
                     else: raise Exception(f"请求超时，已重试{max_retries}次仍失败")
+                except BridgeError as e:
+                    # 按错误类型决定重试：401/403/402 等不会自愈，立即失败，避免空等。
+                    last_error = e
+                    if bridge_error_is_retryable(e) and retry < max_retries-1:
+                        wait_time = min(60, LocalAPIGenerator.RETRY_DELAY_BASE * (2 ** retry))
+                        print(f"[API异常] #{task.local_id}: {e}，等待 {wait_time}s 后重试")
+                        time.sleep(wait_time); continue
+                    print(f"[API异常] #{task.local_id}: {e}（status={e.status}，不重试）")
+                    raise
                 except Exception as e:
                     last_error = e
                     if retry < max_retries-1:
