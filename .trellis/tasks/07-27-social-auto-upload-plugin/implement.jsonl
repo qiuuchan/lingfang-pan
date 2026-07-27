@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-runtime-persistence.md", "reason": "Python 插件运行时：venv 创建、requirements 安装、data/ 持久化目录、进程管理约定——本插件 runtime_type=python 必须遵守"}
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-loading.md", "reason": "manifest 解析与插件加载规则，编写 manifest.json 与目录结构时对照"}
+{"file": ".trellis/spec/desktop/backend/plugin-system-architecture.md", "reason": "插件系统跨层架构总览，理解 GUI 插件/桥/运行时关系"}
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-package-manager.md", "reason": ".lfplugin v4 制品/安装/排除规则，打包阶段对照（排除 .venv/data/__pycache__）"}
+{"file": ".trellis/tasks/07-27-social-auto-upload-plugin/research/chromium-bundling.md", "reason": "内置 chromium 机制 + patchright 1.61.x==r1228 映射 + PLAYWRIGHT_BROWSERS_PATH 注入——浏览器方案的核心依据"}
+{"file": ".trellis/tasks/07-27-social-auto-upload-plugin/research/social-auto-upload-integration.md", "reason": "上游项目结构/浏览器启动/channel=chrome 冲突/cookie 存储/QR 回调/各平台 API——适配层与 GUI 的实现依据"}
