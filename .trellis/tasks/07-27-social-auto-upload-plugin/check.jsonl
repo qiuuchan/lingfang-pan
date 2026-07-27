@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-loading.md", "reason": "校验 manifest 字段/能力声明是否合规、entry 与 runtime 匹配"}
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-package-manager.md", "reason": "校验 .lfplugin 制品排除规则、_meta.json、路径/大小安全"}
+{"file": ".trellis/spec/lingfang-desktop/backend/plugin-runtime-persistence.md", "reason": "校验持久状态写 data/、venv 与 requirements 契约、不污染 release 目录"}
+{"file": ".trellis/tasks/07-27-social-auto-upload-plugin/research/chromium-bundling.md", "reason": "核对 patchright 版本确实命中内置 chromium r1228、无浏览器下载、requirements 无 AI SDK"}
+{"file": ".trellis/tasks/07-27-social-auto-upload-plugin/research/social-auto-upload-integration.md", "reason": "核对上游源码未被改业务逻辑、cookie 落 data/、channel=chrome 已 hook"}

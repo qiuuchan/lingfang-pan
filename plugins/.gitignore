@@ -1,9 +1,10 @@
-# 这四个插件封装第三方开源项目，含 vendored 上游源码（体积大 + 上游许可证），
+# 这些插件封装第三方开源项目，含 vendored 上游源码（体积大 + 上游许可证），
 # 按要求不入 git。部署时由用户从发布产物（.lfplugin / release zip）获取。
 /facefusion/
 /moneyprinter-turbo/
 /pixelle-video/
 /huobao-drama/
+/social-auto-upload/
 
 # Python 缓存
 __pycache__/
