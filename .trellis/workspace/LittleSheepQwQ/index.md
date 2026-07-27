@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
-- **Last Active**: 2026-07-25
+- **Total Sessions**: 27
+- **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~887 | Active |
+| `journal-1.md` | ~921 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-07-27 | social-auto-upload 社交媒体自动上传插件（8平台+内置Chromium） | `25459cf8`, `6ae65321` | `main` |
 | 26 | 2026-07-25 | 完成管理后台、工作流与本地自动化闭环 | `0ceae6de` | `main` |
 | 25 | 2026-07-25 | 完成全部 Trellis 任务并归档 | `b849716b`, `a892e6ea` | `main` |
 | 24 | 2026-07-16 | 美化账户与团队管理页面 | `7690cb1f` | `betav2` |
