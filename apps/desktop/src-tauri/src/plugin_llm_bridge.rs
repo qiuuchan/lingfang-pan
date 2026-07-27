@@ -2206,6 +2206,53 @@ mod tests {
     }
 
     #[test]
+    fn route_image_edit_surfaces_upstream_401_as_plugin_safe_message() {
+        // 复刻线上场景：relay 因上游渠道 key 失效回 401 + upstream_llm_error。
+        // 桥必须：保留 401 / code / requestId（供后台调用日志对账），但把 message 抹成
+        // "平台模型服务暂时不可用"——不向插件透出上游根因（如供应商 401 body）。
+        // 该断言锁定：插件看到这条文案 ⇒ 根因在 relay / 上游渠道，而非桌面桥代码。
+        let (endpoint, _request_rx) = spawn_relay_response(
+            401,
+            json!({
+                "code": "upstream_llm_error",
+                "message": "上游模型调用失败",
+                "requestId": "2eb03a0b-7eca-484f-8e71-4a5f9c2327e5",
+            }),
+        );
+        let session = BridgeSession {
+            plugin_id: "test-plugin".to_string(),
+            api_base: endpoint,
+            auth_token: "jwt".to_string(),
+            allow_llm_chat: false,
+            allow_image_generate: false,
+            allow_image_edit: true,
+            allow_video_generate: false,
+            action_invocation_id: None,
+            action_context: None,
+            client_source: PluginBridgeClientSource::PluginRuntime,
+            expires_at: Instant::now() + Duration::from_secs(60),
+        };
+        let body = serde_json::to_vec(&json!({
+            "prompt": "换装",
+            "images": [{ "filename": "model.jpg", "mimeType": "image/jpeg", "data": "UE5HREFUQQ==" }],
+            "model": "fast",
+            "n": 1,
+            "size": "1024x1024",
+        }))
+        .expect("请求体应可序列化");
+        let error = route_image_edit(&session, body)
+            .expect_err("上游 401 应透出为桥错误");
+        assert_eq!(error.status, 401);
+        assert_eq!(error.code, "upstream_llm_error");
+        assert_eq!(error.message, "平台模型服务暂时不可用");
+        assert_ne!(error.message, "上游模型调用失败", "原始上游 detail 不得泄漏给插件");
+        assert_eq!(
+            error.request_id.as_deref(),
+            Some("2eb03a0b-7eca-484f-8e71-4a5f9c2327e5")
+        );
+    }
+
+    #[test]
     fn route_image_edit_rejects_invalid_input() {
         let (endpoint, _request_rx) = spawn_relay_response(200, json!({ "data": [] }));
         let session = BridgeSession {
