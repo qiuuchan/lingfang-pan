@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalPluginInstallation, PluginCatalogItem } from '@lingfang/contract';
-import { catalogSourceKinds, filterCatalogItems, filterInstallations, paginateItems } from './plugin-center-list';
+import { catalogSourceKinds, filterCatalogItems, filterInstallations, paginateItems, PLUGIN_CENTER_PAGE_SIZE } from './plugin-center-list';
 
 const installation = (origin: LocalPluginInstallation['origin']) => ({ origin }) as LocalPluginInstallation;
 const catalogItem = (sourceKind: PluginCatalogItem['latestRelease']['sourceKind']) => ({
@@ -25,5 +25,11 @@ describe('plugin center list helpers', () => {
     expect(paginateItems(items, 2, 10)).toMatchObject({ currentPage: 2, totalPages: 2, items: [10] });
     expect(paginateItems(items.slice(0, 1), 2, 10)).toMatchObject({ currentPage: 1, totalPages: 1, items: [0] });
     expect(paginateItems([], 3, 10)).toMatchObject({ currentPage: 1, totalPages: 1, items: [] });
+  });
+
+  it('defaults plugin center lists to 5 items per page', () => {
+    expect(PLUGIN_CENTER_PAGE_SIZE).toBe(5);
+    const items = Array.from({ length: 12 }, (_, index) => index);
+    expect(paginateItems(items, 1)).toMatchObject({ currentPage: 1, totalPages: 3, total: 12, items: [0, 1, 2, 3, 4] });
   });
 });
