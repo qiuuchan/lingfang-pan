@@ -11,7 +11,8 @@
 
 ### 打包信息
 
-- Windows 安装包：`release/LingFang-Setup-0.1.8.exe`。
+- Windows 安装包：`release/LingFang-Setup-0.1.8.exe`（约 578.5 MB，606,589,056 bytes）。
+- SHA-256：`a7cc504e2ca9a817baf97fee0880733d9d9f7933a450eb1227c27753a316c7ca`。
 - 安装包继续内置 Python、Node.js、FFmpeg、Chromium 等插件运行时，安装后可直接运行内置插件。
 
 ## v0.1.5 · 2026-07-25
