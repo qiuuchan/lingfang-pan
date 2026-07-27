@@ -21,13 +21,14 @@
 - `ensure_plugin_dir` 建插件目录时**一并创建 `data/` 子目录**（不依赖插件作者自觉 mkdir），子进程 cwd = 插件目录，插件可经相对路径 `data/xxx` 读写。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_store.rs`（`plugin_dir` / `ensure_plugin_dir` / `sanitize_plugin_id` / `plugins_root` / `set_plugins_root`）
 - `apps/desktop/src/pages/settings/PluginsTab.tsx`（设置页路径配置 UI）
 
 ## 三种运行时分流
 
 | runtime_type | 入口 | 运行方式 | UI |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `client`（HTML） | `ui/index.html` | 软件内 iframe（opaque origin 沙盒） | 「打开」按钮 |
 | `python` | `main.py` | 软件内置 Python 创建的独立 venv 进程（GUI 自弹窗口） | 「运行」/「停止」+ 状态 |
 | `nodejs` | `package.json` scripts.start | 软件内置 pnpm/npm start 独立进程 | 「运行」/「停止」+ 状态 |
@@ -35,20 +36,23 @@ Reference files:
 - 前端运行分流必须通过共享解析器读取运行时，优先级为 `plugin.manifest.runtime_type/runtimeType` → `plugin.files[].manifest.json` → `plugin.runtime_type` → `client`。不要让列表层的旧默认值 `client` 覆盖 manifest 里的 `python`/`nodejs`。
 - **Python**：`ensure_python_venv` 检测 `python_venv_dir(plugin_dir)` → 不存在则用软件内置 `runtimes/python` 创建 venv（300s）→ 有 `uv.lock` 则 `uv sync --frozen`（需内置 uv，缺失即报错），有 `requirements.txt` 则装依赖（优先 `uv pip install --python`，应用未随 uv 时回退 `venv/.../python -m pip install --no-input`，600s，幂等，清华 PyPI 镜像）→ `venv` 内 Python `-u main.py`。Windows 的 venv 不放插件目录，改放 `%LOCALAPPDATA%/LingFang/python-venvs/venv-<stable_path_hash>`，避免 PySide6 等深层 wheel 在默认 Roaming 插件目录下触发 260 字符路径限制。
 - **Node**：`ensure_node_dependencies` 有 `package.json` + 非空依赖 + `node_modules` 缺失 → 软件内置 `runtimes/nodejs` 下的 `pnpm install`，缺 pnpm 时回退内置 `npm install`（600s，npmmirror）→ 内置 `pnpm start` / `npm start`，无 package 脚本时内置 `node entry`。
-- **HTML**：`read_local_plugin_file` 读取 entry HTML → iframe srcDoc 渲染。iframe 去 `allow-same-origin` 形成 opaque origin，防越权访问 parent.__TAURI__/localStorage。
+- **HTML**：`read_local_plugin_file` 读取 entry HTML → iframe srcDoc 渲染。iframe 去 `allow-same-origin` 形成 opaque origin，防越权访问 parent.**TAURI**/localStorage。
 
 ### Scenario: Builtin Script Plugins Use Manifest Runtime And Dedicated Start Command
 
 #### 1. Scope / Trigger
+
 - Trigger: changing builtin plugin manifest parsing, `LoadedPlugin` serialization, team plugin runtime dispatch, `ScriptPreviewPanel`, or Tauri `start_plugin` command wrappers.
 
 #### 2. Signatures
+
 - Rust loaded plugin field: `plugins::LoadedPlugin.runtime_type: String`
 - Tauri command: `start_builtin_plugin(plugin_id, api_base?, auth_token?) -> StartPluginResult`
 - Shared frontend resolver: `resolvePluginRuntime(plugin) -> 'client' | 'nodejs' | 'python' | 'cloud'`
 - Local plugin command remains: `start_plugin(plugin_id, api_base?, auth_token?) -> StartPluginResult`
 
 #### 3. Contracts
+
 - `plugins::parse_manifest` must export `manifest.runtime_type` for builtin plugins; missing runtime defaults to `client`.
 - Frontend runtime dispatch must call `resolvePluginRuntime(plugin)` rather than reading `plugin.runtime_type || 'client'` inline.
 - `resolvePluginRuntime` priority is manifest object, then `files` manifest.json, then top-level `runtime_type`, then `client`.
@@ -57,18 +61,21 @@ Reference files:
 - Builtin ids may contain dots, such as `builtin.ai-python-example`; they must not be routed through `PluginStore::plugin_dir` or `sanitize_plugin_id`.
 
 #### 4. Validation & Error Matrix
+
 - builtin plugin id not found in `AppState.plugins` -> `内置插件不存在: <id>`.
 - builtin plugin dir cannot canonicalize -> `内置插件目录不可用：...`.
 - builtin manifest has `runtime_type=client` but caller invokes script start -> `manifest runtime_type 不支持独立进程运行`.
 - database/team script plugin has no package files and is not builtin -> frontend shows install/run guidance instead of rendering source text.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: builtin manifest `{ runtime_type: "python", entry: "main.py" }` shows the script launch panel and starts via `start_builtin_plugin`.
 - Base: builtin manifest without `runtime_type` is treated as `client` and opens iframe.
 - Bad: top-level `runtime_type: "client"` from a stale list payload overrides `files/manifest.json` with `runtime_type: "python"`; this renders `main.py` source in an iframe.
 - Bad: builtin script id `builtin.foo` is passed to `start_plugin`, fails local id validation, or points at `plugins_root/builtin.foo` instead of `builtin-plugins/foo`.
 
 #### 6. Tests Required
+
 - Rust unit: `plugins::tests::parse_manifest_exports_runtime_type`.
 - Frontend unit: `resolvePluginRuntime` keeps manifest object/files ahead of stale top-level `runtime_type`.
 - Full checks when this path changes: `cargo test -p lingfang-desktop`, `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `pnpm -C apps/desktop vite:build`.
@@ -76,12 +83,14 @@ Reference files:
 #### 7. Wrong vs Correct
 
 Wrong:
+
 ```typescript
 const runtime = plugin.runtime_type || 'client';
 await startPlugin(plugin.id);
 ```
 
 Correct:
+
 ```typescript
 const runtime = resolvePluginRuntime(plugin);
 const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
@@ -90,9 +99,11 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 ### Scenario: Bundled-Only Windows Runtime Boundary
 
 #### 1. Scope / Trigger
+
 - Trigger: changing `runtime_resolver`, runtime status, plugin preview/start/shell, dependency installation, Playwright support, runtime assets, or Tauri bundle resources.
 
 #### 2. Signatures
+
 - `RuntimeResolver::resolve(app) -> Result<RuntimeResolver, String>`
 - `probe_script_runtime(app, runtime: ScriptRuntime) -> Result<ProbeResult, String>`
 - `run_plugin_script(app, input) -> Result<RunResult, String>`
@@ -101,6 +112,7 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - `get_runtime_status(app) -> Result<{python,node,ffmpeg,chromium}, String>`
 
 #### 3. Contracts
+
 - Windows x64 runtime assets are ordinary Git files under `apps/desktop/runtimes/`; do not use Git LFS or build-time downloads. Files above Gitee's 100 MB object limit are committed as fixed parts under `apps/desktop/runtime-parts/` and materialized atomically before development or packaging; installers must not copy the parts directory.
 - Tauri resources and the custom SFX both map that exact directory to installed `runtimes/`.
 - Layout: `python/python.exe`, `python/Scripts/pip.cmd`, `nodejs/node.exe`, `nodejs/npm.cmd`, `nodejs/pnpm.cmd`, `ffmpeg/{ffmpeg,ffprobe}.exe`, and `chromium/ms-playwright/{chromium,chromium_headless_shell}-1228/...`.
@@ -116,6 +128,7 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - `ensure_playwright_browsers` validates both full Chromium and headless shell at revision 1228; it never invokes Playwright install. Agent shell rejects commands containing `playwright install`.
 
 #### 4. Validation & Error Matrix
+
 - missing/modified key file -> runtime verifier fails the build with the relative path.
 - missing Python/Node -> status is unavailable and preview/start says the installation is incomplete; host installations remain ignored.
 - missing full Chromium or headless shell revision -> Playwright plugin start fails with a reinstall/incompatible revision error; never download a replacement.
@@ -129,6 +142,7 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - plugin has `requirements.txt` but bundled runtime has no uv -> must fall back to `<venv-python> -m pip install --no-input`; only `uv.lock` may hard-require uv (no equivalent fallback). Never fail requirements install with a "缺少 uv" error.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: a clean Windows machine runs Python, Node, FFmpeg, and Playwright Chromium from installed `runtimes/` while offline.
 - Base: a Node plugin without package dependencies runs embedded `node entry`.
 - Bad: settings offers download/system probe/custom path controls, creating a second runtime truth source.
@@ -136,6 +150,7 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 - Bad: venv creation retries with host `python -m ensurepip` or downloads pip from PyPI; this breaks the embedded runtime boundary and China mirror contract.
 
 #### 6. Tests Required
+
 - `runtime_resolver::tests::runtime_commands_are_detected_by_name`
 - `runtime_resolver::tests::env_replaces_path_and_adds_default_mirrors`
 - `runtime_resolver::tests::chromium_command_and_playwright_env_use_bundled_root`
@@ -152,12 +167,14 @@ const start = plugin.builtin ? startBuiltinPlugin : startPlugin;
 #### 7. Wrong vs Correct
 
 Wrong:
+
 ```rust
 Command::new("python").args(args).spawn()?;
 Command::new("playwright").args(["install", "chromium"]).spawn()?;
 ```
 
 Correct:
+
 ```rust
 let runtime = RuntimeResolver::resolve(&app)?;
 let binary = runtime.require_runtime_command("python")?;
@@ -165,12 +182,14 @@ run_capture_with_env(&binary, args, None, 5_000, runtime.env(minimal_env()))?;
 ```
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`start_plugin` / `stop_plugin` / `ensure_python_venv` / `ensure_node_dependencies`）
 - `apps/desktop/src/pages/Plugins.tsx`（runtime 分流 + RunnerBody iframe）
 
 ## 独立进程管理
 
 `start_plugin` detached spawn（`Stdio::null` 不捕获 stdout 进 UI；GUI 插件自弹窗口）：
+
 - Unix：`pre_exec` 调 `setsid()` 建独立进程组。
 - Windows：`CREATE_NEW_PROCESS_GROUP`。
 - `env_clear()` + 白名单 env（防泄漏宿主 token/密钥到插件进程）。
@@ -181,29 +200,35 @@ Reference files:
 ### Scenario: Windows Process Tree Stop Uses Win32 APIs
 
 #### 1. Scope / Trigger
+
 - Trigger: changing `kill_child_tree`, `stop_plugin`, preview execution timeout cleanup, or tests that assert plugin process cleanup speed.
 
 #### 2. Signatures
+
 - `kill_child_tree(child: &std::process::Child)`
 - `stop_plugin(process_table, plugin_id) -> Result<(), String>`
 - `run_captured_inner(..., timeout_ms, ...) -> Result<CapturedOutput, String>`
 
 #### 3. Contracts
+
 - Windows process cleanup must not shell out to `taskkill`; it must enumerate child processes with ToolHelp and terminate via Win32 `TerminateProcess`.
 - Child processes must be terminated before the root process so inherited stdout/stderr pipe handles close promptly.
 - Unix keeps process-group semantics via `setsid` + `kill -TERM/-KILL -<pgid>`.
 
 #### 4. Validation & Error Matrix
+
 - direct child still alive after stop -> `process_table_stop_plugin_kills_running_process` must fail under the time assertion.
 - grandchild keeps stdout/stderr pipe open after preview timeout -> `timeout_kills_grandchild_process_tree` must fail or exceed 5 seconds.
 - missing process handle / already exited process -> best-effort terminate returns; caller `wait` remains the observable cleanup point.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: Windows Node plugin `node -e "setInterval(...)"` stops in under 3 seconds.
 - Base: Unix long-running `sleep` process stops through the process group and `wait` returns.
 - Bad: `taskkill /F /PID <pid> /T` can block for roughly 60 seconds on Windows console-process chains, making tests and plugin stop sluggish.
 
 #### 6. Tests Required
+
 - `plugin_runner::tests::process_table_stop_plugin_kills_running_process` asserts stop latency under 3 seconds.
 - `plugin_script::tests::timeout_kills_infinite_loop` asserts preview timeout returns promptly.
 - `plugin_script::tests::timeout_kills_grandchild_process_tree` asserts grandchildren holding inherited pipes are terminated.
@@ -211,11 +236,13 @@ Reference files:
 #### 7. Wrong vs Correct
 
 Wrong:
+
 ```rust
 Command::new("taskkill").args(["/F", "/PID", &pid.to_string(), "/T"]).status();
 ```
 
 Correct:
+
 ```rust
 let child_pids = windows_child_pids(pid);
 for child_pid in child_pids {
@@ -229,6 +256,7 @@ terminate_windows_process(pid);
 **线程模型约束（必遵）**：`start_plugin` / `start_installed_plugin` / `start_builtin_plugin` 三个 Tauri 命令必须声明为 `async fn`，并把 `start_plugin_from_dir`（含 `ensure_python_venv` / `ensure_node_dependencies` 的 venv 创建 + pip/pnpm install，可能几十秒到数分钟）经 `tauri::async_runtime::spawn_blocking` 丢到阻塞线程池——**不能**在命令体里同步直接调用。Tauri 2 同步命令跑在主线程（webview 事件循环）上，长阻塞会让窗口"未响应"，且上方的 `plugin:start-progress` / `plugin:output` emit 事件需主线程投递，阻塞期间排队发不出去（前端日志面板收不到实时输出，转圈动画因走合成器线程仍转）。`spawn_blocking` 闭包需 `Send + 'static`，`tauri::State` 借用不能 move 进去：`PluginProcessTable` / `PluginLlmBridge` / `AppHandle` 先 `.inner().clone()` / `.clone()` 拿 owned 值再 move（`PluginProcessTable` 内部是 `Arc<Mutex<…>>`，clone 共享同一张表）。命令前后的快速步骤（`selected_release` / `mark_dependency_status` / `activate_pending` 等毫秒级 JSON 读写）留在 async 体内直接执行，无需 offload。任何新增的、会做子进程 wait / 大文件 IO / 网络请求的 Tauri 命令同样必须 async + `spawn_blocking`，参考既有 `download_plugin_release`、`plugin_net_fetch`。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_runner.rs`
 - `apps/desktop/src/lib/plugin-status.ts`（`startPlugin` 的 `onProgress` 回调订阅事件）
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`StartProgressView` 分阶段动画）
@@ -238,7 +266,7 @@ Reference files:
 `scan_plugin_status` 命令扫文件系统 + 合并进程表：
 
 | 状态 | 判定 |
-|---|---|
+| --- | --- |
 | `ready` | manifest 合法 + 入口文件存在 |
 | `incomplete` | 缺 manifest 或入口文件 |
 | `error` | manifest JSON 非法 / 缺 id/name |
@@ -248,45 +276,54 @@ Reference files:
 `scan_one_plugin` 是纯文件系统逻辑（便于单测），`scan_plugin_status` 命令层合并 `process_table.is_running` 叠加 running 态。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_store.rs`（`scan_one_plugin` / `list_plugins` / `scan_plugin_status`）
 
 ### Scenario: Local Plugin Identity Uses Directory Name
 
 #### 1. Scope / Trigger
+
 - Trigger: changing `scan_one_plugin`, local plugin deletion/start/read commands, or upload rename behavior.
 
 #### 2. Signatures
+
 - `scan_one_plugin(dir: &Path, plugin_id: &str) -> PluginMeta`
 - `PluginMeta.id: String`
 - Local file-system commands take `plugin_id` and resolve `plugins_root/<plugin_id>/`.
 
 #### 3. Contracts
+
 - `PluginMeta.id` must be the directory name passed as `plugin_id`, not `manifest.json.id`.
 - `manifest.json.id` remains required for manifest validity, but it is a declaration field only.
 - User upload rename can make directory `plugin_id` differ from manifest `id`; this is valid.
 
 #### 4. Validation & Error Matrix
+
 - manifest missing `id` or `name` -> `PluginStatus::Error`, but returned `PluginMeta.id` still equals directory `plugin_id`.
 - manifest `id` differs from directory name -> `PluginStatus::Ready` if entry exists, returned `PluginMeta.id` equals directory name.
 - invalid directory name -> skipped before `scan_one_plugin` via `sanitize_plugin_id`.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: directory `ai-image`, manifest `id=ai-image-studio` -> UI actions use `ai-image`.
 - Base: directory and manifest id both `my-clock` -> UI actions use `my-clock`.
 - Bad: returning manifest `id` makes local delete/read/start target the wrong directory and can look successful while leaving files behind.
 
 #### 6. Tests Required
+
 - `plugin_store::tests::scan_id_uses_dir_name_not_manifest_id`
 - `plugin_store::tests::rename_and_title_writes_title_and_renames_dir`
 
 #### 7. Wrong vs Correct
 
 Wrong:
+
 ```rust
 PluginMeta { id: manifest_id.to_string(), ... }
 ```
 
 Correct:
+
 ```rust
 PluginMeta { id: plugin_id.to_string(), ... }
 ```
@@ -306,6 +343,7 @@ PluginMeta { id: plugin_id.to_string(), ... }
 `rename_and_title`（`plugin_store.rs`）是 `rename_plugin_dir` 命令的底层方法（抽出为方法便于单测）：rename 目录 + 解析 manifest JSON 写入 title 字段（保留其他字段）。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_store.rs`（`rename_and_title`）
 - `apps/desktop/src-tauri/src/code_assistant/store.rs`（`update_session_workspace_dir`）
 - `apps/desktop/src/pages/PluginCreatorHome.tsx`（`doUpload` / `startNewSession`）
@@ -315,44 +353,53 @@ Reference files:
 ### Scenario: Upload Rename Must Update Draft And Workspace
 
 #### 1. Scope / Trigger
+
 - Trigger: changing upload naming, `rename_plugin_dir`, creator draft persistence, `code_assistant_send_input`, or session workspace storage.
 
 #### 2. Signatures
+
 - Tauri command: `rename_plugin_dir(old_id, new_id, title?) -> renamedId`
 - Tauri command: `code_assistant_update_workspace({ sessionId, workspaceDir }) -> Result<(), String>`
 - Store method: `AssistantStore::update_session_workspace_dir(session_id, workspace_dir)`
 - Frontend helpers: `draftWithPluginId(draft, pluginId)`, `pluginWorkspaceDir(pluginsRoot, pluginId)`
 
 #### 3. Contracts
+
 - Directory rename changes the canonical local plugin identity. All future local actions must use the renamed directory id.
 - After rename succeeds, frontend must update current draft `plugin_id` and save it before considering upload synchronized.
 - After rename succeeds, frontend must update the Rust session `workspaceDir`; `send_input` uses `SessionRecord.workspace_dir` for the next SDK turn's tool workspace.
 - If active session or current draft is missing after a successful rename, fail the upload path explicitly instead of continuing with stale references.
 
 #### 4. Validation & Error Matrix
+
 - `rename_plugin_dir` succeeds but `code_assistant_save_draft` fails -> upload fails; stale draft is not accepted.
 - `rename_plugin_dir` succeeds but `code_assistant_update_workspace` fails -> upload fails; follow-up AI writes must not continue to the old temp directory.
 - missing active session id after rename -> error `当前会话不存在`.
 - missing current draft after rename -> error `当前草稿不存在`.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: temp directory `temp-1` renamed to `timer`; draft `plugin_id` becomes `timer`; session `workspaceDir` becomes `plugins_root/timer`; follow-up AI edits `timer`.
 - Base: safe plugin id equals old id; no rename occurs, so no reference rewrite is required.
 - Bad: only `pluginIdRef.current` is changed in memory; saved draft still has `temp-1`, and `send_input` still writes to the old workspace path.
 
 #### 6. Tests Required
+
 - Frontend unit: `upload-sync.spec.ts` asserts renamed draft id and workspace path construction.
 - Rust unit: `update_session_workspace_dir_persists_new_path` asserts `sessions.json` workspace path updates.
 - Full checks: `pnpm -C apps/desktop test`, `pnpm -C apps/desktop typecheck`, `cargo test -p lingfang-desktop`.
 
 #### 7. Wrong vs Correct
+
 Wrong:
+
 ```typescript
 const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId, title });
 pluginIdRef.current = renamed;
 ```
 
 Correct:
+
 ```typescript
 const renamed = await tauriInvoke<string>('rename_plugin_dir', { oldId, newId, title });
 const draft = requireRenamedDraft(currentDraft, renamed);
@@ -371,11 +418,13 @@ manifest 的 `entry` 字段缺失时，按 `runtime_type` 回退（**不写死 `
 `defaultEntryForRuntime` + `buildFallbackEntryFile`（生成对应骨架：python main.py / nodejs index.js / client HTML）。5 处 entry 回退（`buildLocalDraft` / `finalizeFromSandbox` / `mergeFollowup` / `mergeFollowupFromSandbox` / `parseManifest`）统一走此分流。
 
 Reference file:
+
 - `apps/desktop/src/lib/plugin-draft.ts`
 
 ## AI 生成写入持久化目录（AC10）
 
 `code_assistant_start_session`（`main.rs`）把 workspace 强制落到插件持久化目录：
+
 - 有 `plugin_id` → `plugin_store.ensure_plugin_dir` → 注入 `input.workspace_dir`。
 - 无 `plugin_id` → 用 `temp-<timestamp>-<nanos>` 作临时 plugin_id → `ensure_plugin_dir` → 持久化目录（不再是 `claude-sandbox` 临时目录）。
 
@@ -386,6 +435,7 @@ AI（ClaudeCode/Codex SDK Runtime）只能通过本地工具写文件。`write_f
 `start_session` / `send_input` 仍接收 `system_prompt`，但不再拼命令行参数。ClaudeCodeEngine 把它放进 Anthropic Messages API 的 `system` 字段；CodexEngine 把它作为 OpenAI-compatible Chat Completions 的首条 `system` message。追问不再依赖 CLI resume id，统一从 transcript/history 重建上下文。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/code_assistant/engine/runtime.rs`（`claude_messages` / `openai_messages`）
 - `apps/desktop/src-tauri/src/code_assistant/engine/anthropic.rs` / `openai.rs`（SDK request body）
 - `apps/desktop/src/lib/plugin-creator-protocol.ts`（`DEFAULT_CONVERSATION_SYSTEM_PROMPT` 三种 runtime 开发规范）
@@ -393,16 +443,19 @@ Reference files:
 ## 预览执行 vs 持久化运行
 
 两条运行通道：
+
 - **`run_plugin_script`（预览执行）**：创建期一次性 sandbox 执行，软件内置 `node <entry>` / `python <entry>`，捕获 stdout 进 UI，15s 超时。适合验证简单脚本。**对需专属运行时的插件（如 Electron，`scripts.start=electron .`）不适用**——`needs_runtime_start` 预检拦截并提示用持久化运行。
 - **`start_plugin`（持久化运行）**：detached 独立进程，内置 `pnpm/npm install` + `pnpm/npm start`，不捕获 stdout。创建器的 `ScriptPreviewPanel` 透传 `pluginId` 后走此通道（`usePersistent = Boolean(pluginId)`），让 Electron 等框架插件在创建期也能拉起。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_script.rs`（`run_plugin_script` / `needs_runtime_start`）
 - `apps/desktop/src/components/creator/PreviewDrawer.tsx` / `PreviewPanel.tsx`（透传 pluginId）
 
 ## 安全边界
 
 持久化运行通道是**不受控执行通道**，绕过 capability 网关（`capability.rs` 的声明式白名单面向「插件运行态受控能力调用」，与「开发者主动运行自己刚生成的脚本」语义不同）：
+
 - 软隔离：`sanitize_plugin_id` 段级白名单、路径不穿越 plugins_root、env 白名单、超时 kill（仅预览）、stdin=null。
 - 可逃逸：用户权限运行的脚本可执行 `fs.writeFile` / `child_process` / 网络请求（与本地直接 `node main.js` 等价风险）。
 - 后续独立大任务（TODO）：OS 级硬隔离（Windows AppContainer / Linux bubblewrap / macOS sandbox-exec）+ 新增 `script.node` / `script.python` capability kind，让本通道也走声明式授权。
@@ -418,6 +471,7 @@ Reference files:
 前缀约定：Rust 错误字符串用 `<code>:<人类可读>` 前缀（`interpreter_missing:` / `manifest_missing:`），前端 `startsWith` 识别后映射到 CreatorErrorKind，与 `creator-error.ts` 的 kind 表对齐。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_store.rs`（`cleanup_empty_temp_dirs`）
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`parse_manifest` 的 `manifest_missing:` 分支）
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`pluginIncomplete` + `manifest_missing:` catch）
@@ -434,9 +488,11 @@ Reference files:
 delist/relist 状态机；已发布 release 与购买历史不得物理覆盖或级联删除。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_runner.rs`
 - `apps/desktop/src/lib/plugin-status.ts`
 - `.trellis/spec/collab-api/backend/plugin-package-registry.md`
+
 ## 聊天引用插件（2026-06-17）
 
 创建器 Composer 输入 `@` 时，从团队与本地插件合并列表中选择引用；选中项以 chip
@@ -445,20 +501,24 @@ Reference files:
 immutable release 原地覆盖。
 
 Reference files:
+
 - `apps/desktop/src/components/creator/Composer.tsx`
 - `apps/desktop/src/pages/PluginCreatorHome.tsx`
 - `apps/desktop/src/lib/plugin-registry.ts`
+
 ## 插件崩溃展示 stderr + 一键 AI 修复（2026-06-17）
 
 插件运行（start_plugin）崩溃时，原 `Stdio::null` 丢弃 stderr，用户只看到「无法启动」看不到 Python/Node 异常。改进：
 
 ### stderr 捕获 + 秒退判定（Rust）
+
 - `start_plugin` 的 stderr 改 `Stdio::piped`（stdout 保持 null，PRD 需求 9 不嵌终端）。
 - spawn 后 `wait_for_crash(child, 800ms)`（纯函数便于单测）轮询 `try_wait`：
   - 退出 = 崩溃：读 stderr 全部内容，返回 `plugin_crashed:<status>\n<stderr 摘要>` 前缀错误（与 `manifest_missing:`/`interpreter_missing:` 同款前缀约定）。stderr 超 2000 字符截断（`truncate_stderr`）。
   - 存活 = 正常：stderr pipe 交后台线程排空（防 pipe 满阻塞），读后丢弃不进 UI，register 进程表返回 pid。
 
 ### 前端展示 + 一键修复
+
 - `ScriptPreviewPanel.handleStart` catch `plugin_crashed:` 前缀 → `toCreatorError('plugin_crashed')` 展示「插件启动后立即退出」+ stderr 原文。
 - 错误卡片加「让 AI 修复」按钮（仅 plugin_crashed + 有 onRequestFix 时）：调 `onRequestFix(stderr)`。
 - `Plugins.tsx handleAutoFix`：落盘 files + 跳创建器 + 设 `pendingAutoFixPrompt`（AppContext 跨页传递）。
@@ -467,6 +527,7 @@ Reference files:
 前缀约定：Rust 错误字符串用 `<code>:<人类可读>` 前缀（`interpreter_missing:` / `manifest_missing:` / `plugin_crashed:`），前端 `startsWith` 识别后映射到 CreatorErrorKind。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`wait_for_crash` / `truncate_stderr` + start_plugin stderr piped）
 - `apps/desktop/src/lib/creator-error.ts`（`plugin_crashed` kind）
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（`plugin_crashed:` catch + 「让 AI 修复」按钮）
@@ -478,7 +539,9 @@ Reference files:
 **当前实现**（跨平台统一）：`start_plugin_from_dir` 直接 spawn 入口进程（python/node），`stdin=null`、`stdout=Stdio::piped()`、`stderr=Stdio::piped()`（**两者都 piped 逐行流**），800ms 秒退判定 try_wait 判退出 + 从 stderr 缓冲读全文做崩溃诊断。Unix 用 `setsid` 进程组分离，Windows 用 `CREATE_NEW_PROCESS_GROUP`（不加 `CREATE_NEW_CONSOLE`，不弹 cmd 窗口）。
 
 ### 全阶段输出实时流 `plugin:output`（2026-07-09 新增）
+
 **推翻 PRD 需求 5/9「不在 UI 内嵌终端」**：现在全阶段（venv 创建 / pip install / python 运行）的 stdout+stderr 逐行实时流到 app 内日志面板。
+
 - `plugin:output` 事件 payload：`{ plugin_id, stream: "stdout"|"stderr", line }`，逐行 emit。
 - **命名陷阱（2026-07-09 实测修复）**：`PluginOutput` / `PluginStartProgress` struct **必须** `#[serde(rename_all = "camelCase")]`。Tauri `emit` 的事件 payload 不像命令返回值那样自动转驼峰，seria 默认是 snake_case（`plugin_id`）；而前端按 `event.payload.pluginId === pluginId` 过滤。漏加会导致前端 onOutput/onProgress 回调因字段恒 undefined 而全部静默失效——面板永远显示「（等待输出…）」。
 - **流式运行函数** `run_streamed_with_env(binary, args, cwd, timeout, env, on_line)`（`process_util/capture.rs`）：spawn stdout+stderr piped，开两个后台线程逐行读，每行调 `on_line(line, is_stderr)` 回调（调用方据此 emit plugin:output）；主线程 try_wait 轮询 + 超时 kill；返回 CapturedOutput 供错误诊断。
@@ -489,6 +552,7 @@ Reference files:
 - **PYTHONIOENCODING=utf-8**：spawn env 注入（Windows 中文系统默认 GBK，不设逐行读会乱码）。
 
 ### 前端日志面板
+
 - `PluginLogPanel`（`components/plugins/PluginLogPanel.tsx`）：深色终端风格（`bg-[#0d1117] text-[#e6edf3] font-mono`），行缓冲 + 自动滚到底 + stderr 红色 + 复制按钮。
 - `useLogBuffer` hook：累积 `PluginOutputEvent[]` → `LogLine[]`。
 - `ScriptPreviewPanel` 在 starting/running/error 三阶段都渲染 `<PluginLogPanel>`（starting 看 pip install 进度，running 看应用日志，error 保留 traceback）。`handleStart` 传 `onOutput` 回调 + 存 `unlistenOutput`（停止/卸载时解绑）。
@@ -499,21 +563,26 @@ Reference files:
 **前端兼容**：`plugin:exited` 事件不再触发（监听器无害保留）；2.5s 轮询 `getPluginStatus`（`is_running` try_wait）兜底，进程退出后 UI 自动回 idle + toast。800ms 内秒退仍由同步 `plugin_crashed:` 前缀路径完整覆盖（含 stderr + ErrorBubble + AI 修复）。唯一回归：800ms 后才退出的插件看不到 stderr 错误卡片（只有通用 toast）。
 
 ### 启动流水线日志 `data/.launch.log`（保留）
+
 - `append_launch_log(plugin_dir, msg)` 追加带时间戳的一行到 `<plugin_dir>/data/.launch.log`（best-effort）。
 - `start_plugin_from_dir` 各节点记录：启动开始、manifest/runtime 解析、venv/依赖就绪、spawn 命令、秒退诊断、启动成功 pid。
 
 ### 崩溃转储 `data/.crash.log`（保留）
+
 800ms 秒退时写完整崩溃转储到 `<plugin_dir>/data/.crash.log`（覆盖式）：
+
 - `write_crash_dump(plugin_dir, cmdline, cwd, env_dump, crash_err, output)` 写入：时间戳、完整复现命令、cwd、环境变量（脱敏）、平台诊断串、piped stderr 全文。
 - env_dump 在 env move 进 spawn 之前捕获，`start_plugin_from_dir` 在 spawn 前构造 `cmdline_str` / `cwd_str` / `env_dump` 快照。
 - `wait_for_crash_with_diagnostics_capturing`（跨平台）秒退时把 piped stderr 回传 out_capture -> 写转储。
 - 崩溃错误信息追加手动复现段（完整命令 + cwd + `.crash.log` 路径）。
 
 ### Tests Required
+
 - Rust: `strip_verbatim_prefix`（去前缀/无前缀不变）、`append_launch_log`（追加 + 时间戳）、`write_crash_dump`（含命令/env/输出）、venv 自愈冒烟（9 个）、`wait_for_crash`（秒退/存活）。
 - Full check: `cargo test --bin lingfang-desktop`。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`start_plugin_from_dir` / `wait_for_crash_with_diagnostics_capturing` / `write_crash_dump` / `append_launch_log` / `strip_verbatim_prefix`）
 
 ## Python venv 依赖损坏自愈（2026-07-09）
@@ -521,6 +590,7 @@ Reference files:
 **问题**：pip 装出的包可能被杀软（Windows Defender 在解压 wheel 时锁文件）/磁盘残缺写坏——典型表现：streamlit 的某个 `.py` 混入 NUL 字节 → `python -m streamlit run` 在 runpy 解析阶段抛 `SyntaxError: source code string cannot contain null bytes`，退出码 1。但平台的 venv 逻辑（`ensure_python_venv`）只看 `python.exe` 是否存在 + `pip install -r` 是否幂等成功（exit 0），**永远检测不到这种落盘后损坏**，且 pip install 幂等（已装跳过）不会重装坏包 → 死锁：用户只能手动删 `%LOCALAPPDATA%\LingFang\python-venvs\venv-<hash>` 目录。
 
 ### 自愈流程（`ensure_python_venv`，Rust）
+
 1. 原有：venv 不存在/home 不匹配 → `create_python_venv`。
 2. **新增快路径**：读 `requirements.txt` 内容算指纹（哈希 + salt），与 venv 目录下 `.lfdeps-verified` 标记比对——命中且 venv python 存在 → 直接返回（冷启动秒过，不跑 pip 也不跑冒烟）。
 3. 标记未命中 → `install_and_smoke`（单次尝试）：
@@ -531,16 +601,19 @@ Reference files:
 4. `install_and_smoke` 返回损坏错误 → **删整个 venv**（`remove_dir_all_with_retry`，带 AV 锁重试 + Windows rmdir 降级）→ `create_python_venv` 重建 → `install_and_smoke` 再试一次。仍失败 → 返回友好错误（前端展示「pip install 失败」类，不崩）。
 
 ### 包名 → import 名映射
+
 - requirements.txt 里是 PyPI distribution 名，冒烟需要真正的 import 名。
 - `dist_to_import_name`：已知不一致的硬编码表（`pillow→PIL`、`opencv-python→cv2`、`pyyaml→yaml`、`beautifulsoup4→bs4`、`python-magic→magic`、`scikit-learn→sklearn` 等）。
 - 未列出的用 `normalize_import_name` 兜底：去版本约束（`>=`/`==`/`<`）、去 extras（`[x]`）、去 environment marker（`;`）、`-`/`.` → `_`。
 - `parse_requirements_dist_names`：跳过注释/空行/`-r`/`-e`/`--option`/URL（含 `://`）/路径行。
 
 ### Tests Required
+
 - Rust: `parse_requirements_dist_names`（基础/跳 option+URL/空）、`dist_to_import_name`（已知映射/未知 None）、`normalize_import_name`（去版本+分隔符替换）、`smoke_import_names`（映射优先+标准化兜底/dedup+sorted）、`deps_fingerprint`（确定性+内容敏感）、`deps_verified_marker` round-trip、`build_smoke_script`（含 import 名 + exit 码 0/2）。
 - Full check: `cargo test --bin lingfang-desktop`。
 
 Reference files:
+
 - `apps/desktop/src-tauri/src/plugin_runner.rs`（`ensure_python_venv` / `install_and_smoke` / `smoke_test_venv` / `build_smoke_script` / `parse_requirements_dist_names` / `dist_to_import_name` / `normalize_import_name` / `smoke_import_names` / `deps_fingerprint` / `deps_verified_matches` / `write_deps_verified` / `deps_verified_marker` / `DEPS_VERIFIED_SALT`）
 
 ## Legacy: 本地/草稿插件 ZIP 导入导出（`.lfplugin` v3，2026-07-08）
@@ -550,9 +623,11 @@ Reference files:
 旧 `.lfplugin` v3 是 ZIP 压缩包（v3 支持二进制；v2 纯文本向后兼容）。以下内容不是当前实现契约。
 
 ### 1. Scope / Trigger
+
 - Trigger: changing `plugin-package-zip.ts`（`exportPluginToZip`/`parsePluginZip`/`materializeZipPlugin`）、`LocalPluginsSection` 的「导入」按钮、`LocalPluginRow` 的「导出」按钮、`DraftPluginsSection` 的导入/导出，或 `.lfplugin` 包格式。
 
 ### 2. Signatures
+
 - 导出: `exportPluginToZip(pluginId: string, source: 'local'|'draft') -> Promise<{ name, fileCount, skipped }>`
 - 解析（不落盘）: `parsePluginZip(file: File) -> Promise<ZipImportResult>`
 - 物化（落盘）: `materializeZipPlugin(result: ZipImportResult, existingIds: string[]) -> Promise<{ id, source }>`
@@ -561,6 +636,7 @@ Reference files:
 - 复用: `saveDraftPlugin`（draft 落点）/ `dedupeImportId`（id 去重）/ `safePluginId`（合法化）。
 
 ### 3. Contracts — `.lfplugin` ZIP 包结构（v3）
+
 ```
 <id>.lfplugin  (ZIP, DEFLATE)
 ├── _meta.json       { "format": "lingfang-plugin", "version": 3, "source": "local"|"draft", "exportedAt": ISO, "name": 展示名, "binaryFiles": ["icon.png", "vendor/x/font.ttf"] }
@@ -568,11 +644,13 @@ Reference files:
 ├── <文本源文件>      main.py / index.js / ui/index.html / requirements.txt / ...（UTF-8 直存）
 └── <二进制源文件>    字体/图片/音频（base64 编码存，路径列入 _meta.binaryFiles）
 ```
+
 - `version`: 3（当前写入）。读取接受 v2（纯文本，无 binaryFiles 字段，按文本处理）与 v3；v1（旧 JSON 单文件 `lingfang-plugin-bundle`）报「旧版 JSON 格式，请重新导出」。
 - `binaryFiles`（v3 新增）：列出 ZIP 内以 base64 存的二进制文件路径。导入时这些 entry 用 `async('base64')` 读 + `write_plugin_file_bytes` 写真实字节；文本 entry 仍用 `async('string')` + `write_plugin_files`。
 - `source`：导出时按来源记（本地→`local`，草稿→`draft`），导入时据此决定落点（见下）。
 
 ### 3a. Contracts — 导出（v3）
+
 - `exportPluginToZip`：`list_plugin_files(pluginId)` 取源文件 → 逐个 `read_local_plugin_file` → `isBinaryPlaceholder` 判定：
   - **文本**：直存 `zip.file(path, content)`。
   - **二进制**（v3）：改读 `read_local_plugin_file_bytes`（base64）→ `zip.file(path, base64, {base64:true})`，路径记入 `binaryFiles`（**不再跳过**）。
@@ -580,6 +658,7 @@ Reference files:
 - 二进制读路径：`read_local_plugin_file` 对非 UTF-8 返回占位字符串（向后兼容旧消费者）；`read_local_plugin_file_bytes` 返回真实字节的 base64（v3 导出专用）。
 
 ### 3b. Contracts — 导入落点（按来源保持 + 二进制分流）
+
 - `parsePluginZip`：`file.arrayBuffer()` → `JSZip.loadAsync` → 校验 `_meta.json`（format/version∈{2,3}/source）→ 读 `binaryFiles`（v3；v2 为空集）→ 读 `manifest.json` 取 id/name → 收集其余源文件：`binaryFiles` 名单内用 `async('base64')` + 标 `binary:true`，其余 `async('string')`（跳过 `_meta.json`/`manifest.json`/`__MACOSX/`/`.DS_Store`）。
 - **非 ZIP** → `rejectLegacyJsonOrInvalid`：尝试按 JSON 解析，命中旧 v1 给重新导出引导，否则报「不是有效的 ZIP 包」。
 - `materializeZipPlugin`：拆分文本/二进制 → 文本走批量写，二进制逐个 `writePluginFileBytes`（base64 解码写字节）。`finalId = dedupeImportId(safePluginId(result.id), existingIds)`（冲突追加 -2/-3，**绝不覆盖**；版本升级见下）。
@@ -589,11 +668,13 @@ Reference files:
 - 导入前弹确认对话框（`ImportConfirmDialog`）：展示 runtime/entry/文件数 + 草稿来源提示（source=draft 时黄色提示「将出现在我的草稿」），允许改名 → 改名影响最终 plugin_id 与 manifest.title。
 
 ### 3c. Contracts — 版本感知覆盖（manifest.id 同一性）
+
 - `materializeZipPlugin(result, existingIds, existingVersions?)`：`existingVersions` 是 id→version 映射。
 - `isUpgrade = existingVersions[baseId] && isVersionNewer(incomingVersion, existingVersion)`。
 - 升级 → `finalId = baseId`（覆盖，不 dedupe），`upgraded: true`；非升级 → `finalId = dedupeImportId(baseId, existingIds)`，`upgraded: false`。
 
 ### 4. Validation & Error Matrix
+
 - 文件非 ZIP 且非旧 JSON → `parsePluginZip` 抛「文件不是有效的 ZIP 包」。
 - 旧 JSON v1 → 抛「这是旧版 JSON 格式的 .lfplugin（v1），请用当前版本重新导出后再导入」。
 - `_meta.json` format 不符 → 抛「文件不是灵坊插件包（_meta.json format 不符）」。
@@ -606,6 +687,7 @@ Reference files:
 - `write_plugin_files`/`write_plugin_file_bytes`/`saveDraftPlugin` 失败（非法路径/IO）→ toast 透传错误，不显示导入成功。
 
 ### 5. Good/Base/Bad Cases
+
 - Good: 本地插件 videodl 点「导出」→ 下载 `videodl.lfplugin`（v3 ZIP，含 _meta(version:3,binaryFiles)/manifest/main.py/requirements.txt，二进制以 base64 进包）→ 本地 tab「导入」选该包 → 确认 → 本地列表出现 videodl 可运行，二进制字节一致。
 - Good: 含 vendored 源码（字体/音频二进制）的插件（如 moneyprinter-turbo）导出 → 导入 → 字体/音频文件字节完整还原（经 write_plugin_file_bytes）。
 - Good: 草稿点「导出」（source=draft）→ 草稿 tab「导入」→ 落「我的草稿」（draft:true）。
@@ -617,6 +699,7 @@ Reference files:
 - Bad: source=draft 走 writePluginFiles → manifest 无 draft 标记，出现在本地而非草稿；正确做法 source=draft 走 saveDraftPlugin。
 
 ### 6. Tests Required
+
 - 前端单测: `plugin-package-zip.spec.ts` 覆盖：导出→解析往返（v3，含二进制 base64 + binaryFiles + binary:true 标记）、物化分流（文本 writePluginFiles + 二进制 writePluginFileBytes）、source=draft 走 saveDraftPlugin / source=local 走 writePluginFiles、id 冲突 dedupe、版本升级覆盖、v2 包向后兼容、旧 JSON v1 报错、非 ZIP 报错、缺 _meta/缺 manifest/version 不符报错。
 - 前端单测: `use-local-import.spec.ts::dedupeImportId`（纯函数，保留）。
 - 后端单测: `plugin-package.spec.ts` 覆盖 binary base64 大小计量、单文件超限、点开头文件名放行、.. 仍拒。
@@ -626,6 +709,7 @@ Reference files:
 ### 7. Wrong vs Correct
 
 Wrong:
+
 ```typescript
 // v1 单文件 JSON（已废弃）：
 exportDraftPlugin(id); parseDraftBundle(file); importDraftBundle(bundle);
@@ -634,6 +718,7 @@ await writePluginFiles(result.id, result.files);
 ```
 
 Correct:
+
 ```typescript
 const result = await parsePluginZip(file);            // ZIP v2
 const { id, source } = await materializeZipPlugin(result, existingIds); // source 决定落点 + dedupe
@@ -641,6 +726,7 @@ const { id, source } = await materializeZipPlugin(result, existingIds); // sourc
 ```
 
 Reference files:
+
 - `apps/desktop/src/lib/plugin-package-zip.ts`（`exportPluginToZip` / `parsePluginZip` / `materializeZipPlugin` / `rejectLegacyJsonOrInvalid`）
 - `apps/desktop/src/pages/plugins/use-local-import.ts`（`useLocalImport` / `dedupeImportId`）
 - `apps/desktop/src/pages/plugins/LocalPluginsSection.tsx`（「导入」按钮 + 隐藏 `<input accept=".lfplugin">` + `ImportConfirmDialog`）
@@ -726,3 +812,26 @@ await api(`/api/plugin-releases/${release.id}/submit-marketplace`, {
   body: { priceCents },
 });
 ```
+
+## 浏览器自动化插件作者契约（playwright/patchright，2026-07-27）
+
+Python 插件要用浏览器（playwright 或其 fork patchright）时，**必须用软件内置 Chromium，不得下载浏览器、不得依赖系统 Chrome**。作者侧契约（运行时侧见上文 Bundled-Only Windows Runtime Boundary）：
+
+1. **版本 pin 必须匹配内置 revision**。内置 chromium revision 由 `runtime_resolver.rs::PLAYWRIGHT_CHROMIUM_REVISION`（当前 **1228** / 149.0.7827.55）决定。浏览器库只在其期望 revision == 内置时才能经 `PLAYWRIGHT_BROWSERS_PATH` 命中。选版方法：装候选版本后读其 `site-packages/<lib>/driver/package/browsers.json` 的 chromium revision，取 == 1228 者。实测：**patchright==1.61.1** 与 **playwright==1.61.0** 均为 1228（注意 PyPI 上 playwright 只到 1.61.0，patchright 有 1.61.1；勿写 playwright==1.61.1）。内置 revision 升级后此 pin 需同步重算。
+2. **默认 launch 即命中内置**。桌面壳无条件注入 `PLAYWRIGHT_BROWSERS_PATH` + `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`；`chromium.launch()`（无 channel 或 `channel="chromium"`）直接命中 `chromium-1228`，**绝不调 `playwright/patchright install`**（Agent shell 也会拒绝该命令）。
+3. **`channel="chrome"` 会绕过内置**去找系统 Google Chrome，必须重定向。上游项目（如 social-auto-upload 的抖音 cookie 校验、视频号全部 launch）常硬编码 `channel="chrome"`。作者需在入口（import 上游之前）monkey-patch 浏览器库 `BrowserType.launch`（patchright/playwright 的 sync+async 四个类各一次）：仅当 `self.name=="chromium"` 且 `kwargs["channel"]=="chrome"` 时，`pop("channel")` + `setdefault("executable_path", <内置 chrome.exe>)`。内置 exe = `PLAYWRIGHT_BROWSERS_PATH/chromium-1228/chrome-win64/chrome.exe`。不要改上游源码。
+4. **可设 `conf.LOCAL_CHROME_PATH=<内置 exe>`**（在 uploader import 前，因上游 `from conf import LOCAL_CHROME_PATH`）：让走 `executable_path` 的上游路径（如 tencent `_build_launch_kwargs`、tk `main_chrome`、`browser_hook.get_browser_options`）直接命中内置，与第 3 点 hook 互为双保险。
+5. **`declares_playwright()` 只认 `playwright` 不认 `patchright`**（plugin_runner.rs）：纯 patchright 插件不会触发 `ensure_playwright_browsers` 预校验（无害——env 仍注入、运行期仍命中）；requirements.txt 同时含 `playwright` 则会触发预校验（可提前报缺浏览器友好错误）。
+6. **vendored 上游的运行时写入必须改道 data/**。上游常相对自己的 `BASE_DIR` 写 `logs/*.log`、`cookies/`（如 social-auto-upload `utils/log.py` 模块级 `logger.remove()` + 建 `BASE_DIR/logs/*.log`）。这会（a）污染不可变 release 目录（违反「持久状态写 data/」），（b）其 `logger.remove()` 会清掉插件后加的 loguru GUI sink。解法：插件入口 import 上游 logging 模块前，**临时**把 `conf.BASE_DIR` 指向 `data/` 再 import（其文件 logger 落 `data/logs/`），import 后还原 `conf.BASE_DIR`（stealth.min.js 等资源仍从 vendored 根读）；GUI loguru sink 在还原后添加即可幸存。
+7. **vendored 第三方插件不入 git，经 .lfplugin 分发**。封装开源项目的插件（facefusion/moneyprinter-turbo/pixelle-video/huobao-drama/social-auto-upload）整个目录在 `plugins/.gitignore` 里（体积 + 上游许可证），部署由 `.lfplugin`/release zip 提供。README 需注明上游仓库 + commit + 许可证（如 MIT）+ 与上游的差异（版本 pin、hook、改道）。
+8. **打包自查**：`.lfplugin` 不得含 vendored 目录下的运行时产物（`logs/`、`cookies/`、`__pycache__`）——build 器只默认排除插件根 `data/`，**不**排除 vendored 子目录里的 `logs/`，故第 6 点的改道是打包干净的必要前提。
+9. **vendored 文本文件必须是合法 UTF-8（无 NUL）**，否则发布被拒。服务端发布前跑 AI 政策扫描（`apps/collab-api/src/modules/plugin-ai-policy.ts` `checkPluginAiPolicy`），对所有可扫描文本（含 vendored 子目录的 `.py/.txt/.toml/.json` 等）要求合法 UTF-8；含 NUL/非 UTF-8 的文件判 `ai.policy.unscannable` → `assertPluginAiPolicy` 抛 HTTP 400 `plugin_ai_policy_failed`（「插件不符合平台 AI 使用政策」）。实测坑：social-auto-upload 上游 `requirements.txt` 是 Windows PowerShell 重定向生成的 **UTF-16-LE（含 NUL）**，直接触发该拒绝；解法是重编码为 UTF-8（内容不变）。vendored 前务必检查上游是否有 UTF-16/二进制伪装文本文件（`file <f>` / 查 BOM `ff fe`）。同扫描还会拒：第三方模型 SDK 依赖、硬编码 `sk-/rk-/pk-` 密钥、直连 AI 端点、`model = "非 fast/premium"`、bridge 环境变量带自定义 fallback。本地预检：`pnpm -C apps/collab-api exec tsx` 调 `inspectPluginArtifact` + `checkPluginAiPolicy` 跑 .lfplugin。
+
+Reference files:
+
+- `plugins/social-auto-upload/sau_bridge.py`（launch-hook `_redirect` + `_setup_upstream_logging` 日志改道 + `_configure_browser_path`）
+- `plugins/social-auto-upload/requirements.txt`（patchright==1.61.1 / playwright==1.61.0 pin 依据）
+- `apps/desktop/src-tauri/src/runtime_resolver.rs`（`PLAYWRIGHT_CHROMIUM_REVISION` / env 注入）
+- `apps/desktop/src-tauri/src/plugin_runner.rs`（`declares_playwright` / `ensure_playwright_browsers`）
+- `apps/collab-api/src/modules/plugin-ai-policy.ts`（发布前 AI 政策扫描：UTF-8 可扫描性 / 禁 SDK / 禁端点 / model 档位）
+- 任务 `.trellis/tasks/07-27-social-auto-upload-plugin/`（research/ 有完整实测记录）
