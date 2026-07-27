@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -15,11 +15,13 @@ import {
 import { toast } from 'sonner';
 import { useApp } from '@/App';
 import { LoadingButton } from '@/components/loading-button';
+import { Pagination } from '@/components/pagination';
 import { PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { errorMessage } from '@/lib/api';
+import { DEFAULT_PAGE_SIZE, paginateItems } from '@/lib/pagination';
 import { hasPermission } from '@/lib/permissions';
 import {
   getPluginPackageDetail,
@@ -47,6 +49,9 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
   const [selected, setSelected] = useState<RegistryManagementItem | null>(null);
   const [detail, setDetail] = useState<RegistryPackageDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const paged = useMemo(() => paginateItems(items, page, pageSize), [items, page, pageSize]);
   const currentListingRelease = detail?.releases.find((release) => release.id === detail.listing?.currentReleaseId);
   const ownerListingCanRelist = detail?.package.governanceStatus === 'ACTIVE'
     && currentListingRelease?.status === 'PUBLISHED'
@@ -116,7 +121,7 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
         <div className="flex h-44 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground"><PackageIcon className="size-5" />团队还没有已发布插件</div>
       ) : (
         <div className="divide-y rounded-lg border">
-          {items.map((item) => {
+          {paged.items.map((item) => {
             const archived = item.package.governanceStatus === 'ARCHIVED';
             const packageBusy = busyKey === `package:${item.package.id}`;
             const archiveBlocked = !archived && item.pendingReviewCount > 0;
@@ -157,6 +162,14 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
           })}
         </div>
       )}
+      <Pagination
+        page={paged.currentPage}
+        totalPages={paged.totalPages}
+        total={paged.total}
+        pageSize={pageSize}
+        onChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">

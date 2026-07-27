@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/api';
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import type { LoadedPlugin } from '@/lib/types';
 import {
   buyMarketplacePackage,
@@ -90,6 +91,9 @@ export function PluginCenterBody({
   const [installedPage, setInstalledPage] = useState(1);
   const [teamPage, setTeamPage] = useState(1);
   const [marketPage, setMarketPage] = useState(1);
+  const [installedPageSize, setInstalledPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [teamPageSize, setTeamPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [marketPageSize, setMarketPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const reload = useCallback(async () => {
     setLocalLoading(true);
@@ -129,9 +133,9 @@ export function PluginCenterBody({
   const byPackage = useMemo(() => new Map(installations.map((item) => [item.packageId, item])), [installations]);
   const teamSources = useMemo(() => catalogSourceKinds(team), [team]);
   const marketSources = useMemo(() => catalogSourceKinds(market), [market]);
-  const installedResult = useMemo(() => paginateItems(filterInstallations(installations, installedOrigin), installedPage), [installations, installedOrigin, installedPage]);
-  const teamResult = useMemo(() => paginateItems(filterCatalogItems(team, teamSource), teamPage), [team, teamSource, teamPage]);
-  const marketResult = useMemo(() => paginateItems(filterCatalogItems(market, marketSource), marketPage), [market, marketSource, marketPage]);
+  const installedResult = useMemo(() => paginateItems(filterInstallations(installations, installedOrigin), installedPage, installedPageSize), [installations, installedOrigin, installedPage, installedPageSize]);
+  const teamResult = useMemo(() => paginateItems(filterCatalogItems(team, teamSource), teamPage, teamPageSize), [team, teamSource, teamPage, teamPageSize]);
+  const marketResult = useMemo(() => paginateItems(filterCatalogItems(market, marketSource), marketPage, marketPageSize), [market, marketSource, marketPage, marketPageSize]);
 
   useEffect(() => {
     if (teamSource !== 'all' && !teamSources.includes(teamSource)) {
@@ -227,7 +231,14 @@ export function PluginCenterBody({
               onUninstall={setUninstallTarget}
               busyKey={busyKey}
             />
-            <Pagination page={installedResult.currentPage} totalPages={installedResult.totalPages} onChange={setInstalledPage} />
+            <Pagination
+              page={installedResult.currentPage}
+              totalPages={installedResult.totalPages}
+              total={installedResult.total}
+              pageSize={installedPageSize}
+              onChange={setInstalledPage}
+              onPageSizeChange={(size) => { setInstalledPageSize(size); setInstalledPage(1); }}
+            />
           </TabsContent>
 
           <TabsContent value="team" className="mt-4">
@@ -245,7 +256,14 @@ export function PluginCenterBody({
               onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: false })}
               onHistory={(item) => setHistoryPackage(item.package)}
             />
-            <Pagination page={teamResult.currentPage} totalPages={teamResult.totalPages} onChange={setTeamPage} />
+            <Pagination
+              page={teamResult.currentPage}
+              totalPages={teamResult.totalPages}
+              total={teamResult.total}
+              pageSize={teamPageSize}
+              onChange={setTeamPage}
+              onPageSizeChange={(size) => { setTeamPageSize(size); setTeamPage(1); }}
+            />
           </TabsContent>
 
           <TabsContent value="market" className="mt-4">
@@ -264,7 +282,14 @@ export function PluginCenterBody({
               onDetail={(item) => setDetailTarget({ kind: 'catalog', item, marketplace: true })}
               onHistory={(item) => setHistoryPackage(item.package)}
             />
-            <Pagination page={marketResult.currentPage} totalPages={marketResult.totalPages} onChange={setMarketPage} />
+            <Pagination
+              page={marketResult.currentPage}
+              totalPages={marketResult.totalPages}
+              total={marketResult.total}
+              pageSize={marketPageSize}
+              onChange={setMarketPage}
+              onPageSizeChange={(size) => { setMarketPageSize(size); setMarketPage(1); }}
+            />
           </TabsContent>
         </Tabs>
       </div>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
+import { Pagination } from '@/components/pagination';
 import { PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
 import { PublishPluginDialog } from '@/components/plugins/PublishPluginDialog';
 import { PublishedPluginList } from '@/components/plugins/PublishedPluginList';
@@ -26,6 +27,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { errorMessage } from '@/lib/api';
+import { DEFAULT_PAGE_SIZE, paginateItems } from '@/lib/pagination';
 import {
   createDraftWorkspace,
   deleteLocalCreatorConversation,
@@ -47,6 +49,8 @@ export function DraftPlugins() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | Workspace['diagnosticStatus']>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [artifactPublishOpen, setArtifactPublishOpen] = useState(false);
@@ -71,6 +75,8 @@ export function DraftPlugins() {
       return matchesQuery && (status === 'all' || workspace.diagnosticStatus === status);
     });
   }, [query, status, workspaces]);
+
+  const paged = useMemo(() => paginateItems(filtered, page, pageSize), [filtered, page, pageSize]);
 
   const loadPlugin = async (workspace: Workspace) => {
     setBusy(workspace.workspaceId);
@@ -111,8 +117,8 @@ export function DraftPlugins() {
 
         <TabsContent value="local" className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-64 flex-1"><SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或 manifest ID" className="pl-9" /></div>
-            <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}>
+            <div className="relative min-w-64 flex-1"><SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索名称或 manifest ID" className="pl-9" /></div>
+            <Select value={status} onValueChange={(value) => { setStatus(value as typeof status); setPage(1); }}>
               <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部状态</SelectItem><SelectItem value="idle">未诊断</SelectItem><SelectItem value="ready">可发布</SelectItem><SelectItem value="warning">有警告</SelectItem><SelectItem value="error">有错误</SelectItem>
@@ -127,7 +133,7 @@ export function DraftPlugins() {
             <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground"><FileEditIcon className="size-5" />暂无符合条件的草稿</div>
           ) : (
             <div className="divide-y rounded-lg border">
-              {filtered.map((workspace) => (
+              {paged.items.map((workspace) => (
                 <div key={workspace.workspaceId} className="flex min-h-24 items-center gap-4 px-4 py-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted"><FileArchiveIcon className="size-4" /></div>
                   <div className="min-w-0 flex-1">
@@ -148,6 +154,16 @@ export function DraftPlugins() {
                 </div>
               ))}
             </div>
+          )}
+          {!loading && (
+            <Pagination
+              page={paged.currentPage}
+              totalPages={paged.totalPages}
+              total={paged.total}
+              pageSize={pageSize}
+              onChange={setPage}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+            />
           )}
         </TabsContent>
 

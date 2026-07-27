@@ -1,6 +1,13 @@
 import type { LocalPluginInstallation, PluginCatalogItem, PluginReleaseSourceKind } from '@lingfang/contract';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, paginateItems } from '../../lib/pagination';
 
-export const PLUGIN_CENTER_PAGE_SIZE = 10;
+export { paginateItems };
+
+/** 插件中心默认每页条数（与全站列表一致：默认 5）。 */
+export const PLUGIN_CENTER_PAGE_SIZE = DEFAULT_PAGE_SIZE;
+
+/** 插件中心每页条数可选项。 */
+export const PLUGIN_CENTER_PAGE_SIZE_OPTIONS = PAGE_SIZE_OPTIONS;
 
 export type InstallationOriginFilter = 'all' | LocalPluginInstallation['origin'];
 export type CatalogSourceFilter = 'all' | PluginReleaseSourceKind;
@@ -25,13 +32,3 @@ export function filterCatalogItems(
   return items.filter((item) => item.latestRelease.sourceKind === source);
 }
 
-export function paginateItems<T>(items: T[], page: number, pageSize = PLUGIN_CENTER_PAGE_SIZE) {
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  const currentPage = Math.min(Math.max(1, page), totalPages);
-  const start = (currentPage - 1) * pageSize;
-  return {
-    currentPage,
-    totalPages,
-    items: items.slice(start, start + pageSize),
-  };
-}
