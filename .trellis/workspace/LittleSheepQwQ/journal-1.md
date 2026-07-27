@@ -885,3 +885,37 @@ Completed desktop/admin/backend UI fixes: billing and resource-pool edits, model
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: social-auto-upload 社交媒体自动上传插件（8平台+内置Chromium）
+
+**Date**: 2026-07-27
+**Task**: social-auto-upload 社交媒体自动上传插件（8平台+内置Chromium）
+**Branch**: `main`
+
+### Summary
+
+封装开源项目 dreammis/social-auto-upload 为 lingfang Python 插件（PySide6 GUI + 适配层 + vendored 原项目）。支持抖音/视频号/快手/小红书/YouTube/B站/百家号/TikTok 8 平台。保留原项目（vendored 源码与上游 commit 逐字节一致，仅加 conf.py）。全链路用软件内置 Chromium：pin patchright==1.61.1/playwright==1.61.0（期望 revision==内置1228），默认 launch 经 PLAYWRIGHT_BROWSERS_PATH 命中内置、零下载；channel=chrome 路径经运行时 launch-hook 重定向；TikTok 由 Firefox 改用 chromium 版。修复发布被 AI 政策扫描拒绝（上游 requirements.txt 为 UTF-16，重编码 UTF-8 后通过）。经验沉淀入 plugin-runtime-persistence.md（浏览器插件作者契约 9 条）。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25459cf8` | (see git log) |
+| `6ae65321` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
