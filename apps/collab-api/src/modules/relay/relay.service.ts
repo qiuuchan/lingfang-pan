@@ -15,7 +15,7 @@ import type { Request, Response } from 'express';
 import { PrismaService } from '../../prisma.service';
 import { AppError } from '../../common';
 import { PricingService } from '../pricing.service';
-import { CreditService, type ReserveTicket } from '../credit.service';
+import { CreditService } from '../credit.service';
 import { ChannelRouterService } from '../channel.service';
 import type { RelayAuth } from '../../relay-team.guard';
 import {
@@ -573,7 +573,6 @@ export class RelayService {
         credits: 0,
       },
     });
-    const ticket: ReserveTicket = { teamId: auth.teamId, cap, callLogId: pendingLog.id, actorUserId: auth.userId };
     // finalizedRef：确保 pendingLog 至少被 finalize 一次（防 catch 链中途抛错导致日志永久卡 pending）。
     let finalized = false;
     const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; channelId: string | null; model: string }) => {
@@ -659,7 +658,11 @@ export class RelayService {
         await ensureFinalized({ status: 'no_pricing', errorCode: 'pricing_not_configured', httpStatus: 503, channelId: null, model: modelNames || '(none)' });
         throw new AppError(503, 'pricing_not_configured', '当前模型版本暂不可用，请联系平台管理员配置定价');
       }
-      const httpStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
+      const rawStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
+      // 上游 401/403 是渠道 key 被上游拒绝（非客户端鉴权问题——客户端 JWT 在 RelayTeamGuard 已验证）。
+      // 对客户端映射为 502（Bad Gateway），使桥/插件的重试逻辑正确归类为瞬态错误（5xx 可重试），
+      // 而非误判为「鉴权失败不重试」。原始状态码保留在 details.upstreamStatus 供诊断。
+      const httpStatus = (rawStatus === 401 || rawStatus === 403) ? 502 : rawStatus;
       const { upstreamStatus, upstreamDetail } = extractUpstreamCause(lastError);
       // errorCode 带上游根因摘要，后台「调用日志」可一眼看到 Kimi/Moonshot 真实拒绝原因。
       const errorCode = lastError instanceof UpstreamError ? upstreamErrorCode(lastError) : 'upstream_llm_error';
@@ -669,7 +672,7 @@ export class RelayService {
     } catch (e) {
       // 任何未预期错误：退款兜底（防灵石泄漏）+ 确保日志终态，再原样抛给客户端。
       if (!finalized) {
-        try { await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId); } catch { /* 忽略 */ }
+        try { await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId); } catch (refundErr) { console.warn(`[relay] refund failed in error path (callLogId=${pendingLog.id}): ${refundErr instanceof Error ? refundErr.message : refundErr}`); }
         // 把原生错误信息记入 errorCode（前 120 字），便于后台调用日志直接看到根因（如 Prisma 列类型错）。
         const errMsg = e instanceof Error ? e.message : String(e);
         const errCode = e instanceof AppError ? e.code : `internal:${errMsg.slice(0, 120)}`;
