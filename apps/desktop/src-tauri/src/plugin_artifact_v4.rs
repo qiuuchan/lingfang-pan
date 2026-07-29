@@ -278,7 +278,7 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
     }
     let file = File::open(path).map_err(|error| format!("读取制品失败：{error}"))?;
     let mut zip = ZipArchive::new(file).map_err(|error| format!("无效的 ZIP 制品：{error}"))?;
-    if zip.len() == 0 || zip.len() > MAX_FILES {
+    if zip.is_empty() || zip.len() > MAX_FILES {
         return Err("插件文件数量超限".to_string());
     }
     let mut seen = HashSet::new();

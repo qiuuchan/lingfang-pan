@@ -429,7 +429,7 @@ fn dist_to_import_name(dist: &str) -> Option<&'static str> {
 fn normalize_import_name(raw: &str) -> String {
     // 去掉版本约束（pip requirement 语法）：`pkg>=1.0,<2` → `pkg`；`pkg[extra]` → `pkg`。
     let no_version = raw
-        .split(|c: char| matches!(c, '>' | '<' | '=' | '!' | '~' | ';' | '['))
+        .split(['>', '<', '=', '!', '~', ';', '['])
         .next()
         .unwrap_or("")
         .trim();
@@ -457,7 +457,7 @@ fn parse_requirements_dist_names(content: &str) -> Vec<String> {
         let name_part = line.split([';', '[']).next().unwrap_or("").trim();
         // 去掉版本约束。
         let name = name_part
-            .split(|c: char| matches!(c, '>' | '<' | '=' | '!' | '~'))
+            .split(['>', '<', '=', '!', '~'])
             .next()
             .unwrap_or("")
             .trim();
@@ -581,7 +581,7 @@ fn smoke_test_venv(
     let script = build_smoke_script(&import_names);
     // 写入 venv 内临时文件（venv 目录可写），运行后删除。
     let script_path = venv_dir.join(".lf-smoke.py");
-    if let Err(e) = std::fs::write(&script_path, &script) {
+    if let Err(_e) = std::fs::write(&script_path, &script) {
         // 写脚本失败（venv 只读？）不当坏包，放过。
         return Ok(true);
     }
@@ -1942,7 +1942,7 @@ pub(crate) fn stop_plugin_by_id(
     bridge: &PluginLlmBridge,
     plugin_id: &str,
 ) -> Result<(), String> {
-    if let Some((mut child, _started_at)) = process_table.take(&plugin_id) {
+    if let Some((mut child, _started_at)) = process_table.take(plugin_id) {
         // kill_child_tree 发进程组/树 kill 信号（不 wait），这里补 wait 回收 Child 句柄。
         kill_child_tree(&child);
         let _ = child.kill();

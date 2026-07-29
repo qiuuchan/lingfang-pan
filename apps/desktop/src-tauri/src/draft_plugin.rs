@@ -186,7 +186,7 @@ pub async fn save_draft_plugin(
 
     let manifest_written = manifest_path.is_file();
     let meta_written = meta_path.is_file();
-    if !manifest_written || !meta_written || saved_files.len() == 0 {
+    if !manifest_written || !meta_written || saved_files.is_empty() {
         return Err("草稿保存核验失败：manifest/meta 或源文件未完整写入".to_string());
     }
 
@@ -674,7 +674,7 @@ pub fn migrate_drafts_impl(
             }
         }
         // 复制源文件（跳过隐藏文件/目录与 manifest，复用 copy_plugin_files）。
-        if let Err(_) = copy_plugin_files(&src, &target) {
+        if copy_plugin_files(&src, &target).is_err() {
             skipped += 1;
             continue;
         }

@@ -666,6 +666,8 @@ export class RelayService {
       const { upstreamStatus, upstreamDetail } = extractUpstreamCause(lastError);
       // errorCode 带上游根因摘要，后台「调用日志」可一眼看到 Kimi/Moonshot 真实拒绝原因。
       const errorCode = lastError instanceof UpstreamError ? upstreamErrorCode(lastError) : 'upstream_llm_error';
+      // 服务端日志：上游错误全量输出（含 body 摘要），便于 SSH 看日志即时定位渠道/模型问题。
+      console.warn(`[relay] upstream_error: capability=${capability} tier=${tier} model=${lastCand?.model ?? '?'} channel=${lastCand?.id ?? '?'} upstreamStatus=${upstreamStatus} httpStatus=${httpStatus} detail=${upstreamDetail ?? '(none)'}`);
       await ensureFinalized({ status: 'upstream_error', errorCode, httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
       // details 透传上游真实原因（status + body 摘要），客户端据此显示可读错误而非无意义 statusText。
       throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败', { upstreamStatus, upstreamDetail });

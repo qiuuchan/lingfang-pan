@@ -26,6 +26,5 @@ pub(crate) mod state;
 pub(crate) mod storage;
 pub(crate) mod types;
 
-pub(crate) use executor::PendingRuns;
 pub(crate) use state::SchedulerState;
 pub(crate) use storage::SchedulerStorage;
