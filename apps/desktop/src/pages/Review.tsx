@@ -83,7 +83,7 @@ export function Review() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium">{item.package.name} <span className="text-sm font-normal text-muted-foreground">v{item.release.version}</span></div>
-                      <div className="mt-0.5 text-sm text-muted-foreground">{item.package.description || '作者未填写描述'}</div>
+                      <div className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{item.package.description || '作者未填写描述'}</div>
                       <div className="mt-1 font-mono text-xs text-muted-foreground">{item.package.manifestId} · {item.release.sha256.slice(0, 16)}...</div>
                     </div>
                     <Badge variant="secondary">{formatBytes(item.release.sizeBytes)} · {item.fileManifest.length} 个文件</Badge>

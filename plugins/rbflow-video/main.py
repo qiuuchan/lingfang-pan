@@ -33,33 +33,80 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QPushButton, QLineEdit, QComboBox, QListWidget, QListWidgetItem, QFileDialog,
-    QProgressBar, QTabWidget, QCheckBox, QMessageBox,
-    QSizePolicy, QFrame, QMenu, QAbstractItemView, QSplitter, QStatusBar,
-    QDialog, QDialogButtonBox,
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QLabel,
+    QPushButton,
+    QLineEdit,
+    QComboBox,
+    QListWidget,
+    QListWidgetItem,
+    QFileDialog,
+    QProgressBar,
+    QTabWidget,
+    QCheckBox,
+    QMessageBox,
+    QSizePolicy,
+    QFrame,
+    QMenu,
+    QAbstractItemView,
+    QSplitter,
+    QStatusBar,
+    QDialog,
+    QDialogButtonBox,
     QSystemTrayIcon,
+    QStyledItemDelegate,
+    QStyle,
+    QStyleOption,
+    QStyleOptionViewItem,
 )
 from PySide6.QtCore import (
-    Qt, QThread, Signal, QSize, QTimer, QSettings, QMimeData, QPoint, QUrl,
+    Qt,
+    QThread,
+    Signal,
+    QSize,
+    QTimer,
+    QSettings,
+    QMimeData,
+    QPoint,
+    QUrl,
+    QObject,
+    QEvent,
+    QRect,
 )
 from PySide6.QtGui import (
-    QPixmap, QImage, QAction, QIcon, QColor, QFont, QPainter,
-    QDragEnterEvent, QDropEvent, QDesktopServices,
+    QPixmap,
+    QImage,
+    QAction,
+    QIcon,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPalette,
+    QDragEnterEvent,
+    QDropEvent,
+    QDesktopServices,
 )
 
 import requests
 
 try:
     from PIL import Image as PILImage
+
     HAS_PIL = True
 except Exception:
     HAS_PIL = False
+
 
 # ==================== 全局异常捕获 ====================
 def global_exception_handler(exc_type, exc_value, exc_tb):
     logging.error(f"未捕获异常: {exc_type.__name__}: {exc_value}")
     logging.error("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+
 
 sys.excepthook = global_exception_handler
 
@@ -106,31 +153,60 @@ VIDEO_NODE_ID = "77"
 VIDEO_FIELD_NAME = "video"
 
 
-# ==================== 支持拖拽的 QListWidget 子类 ====================
+# ==================== 文件拖拽：QListWidget 子类 + 面板级事件过滤器 ====================
 # PySide6 的 Qt 事件分发走 C++ 虚函数表——直接赋值实例属性（self.list.dropEvent = ...）
 # 不会被 Qt 调用。必须子类化并在类层级重写虚函数，Qt 才会正确分发。
+#
+# 两道保险，覆盖拖到列表内 / 拖到面板空白两种位置：
+# 1) DropListWidget 子类重写 dragEnterEvent/dragMoveEvent/dropEvent——拖到列表视口
+#    区域时由本类处理（标准做法）。
+# 2) FileDropZone 事件过滤器装到面板（QFrame）上——拖到标题/按钮/空白区域也接受。
+# 一次拖放只命中一个目标，_add_paths 自带去重，二者不会重复添加。
+#
+# 关键：dropEvent 用 QTimer.singleShot(0, ...) 延迟发出 files_dropped——否则同步
+# 触发 _add_paths → refresh（含 ffmpeg 缩略图生成），会在 dropEvent 内部重建本
+# widget，导致 Windows OLE 拖放看似无反应/卡死。
+
 
 class DropListWidget(QListWidget):
     """支持从文件管理器拖拽文件添加的 QListWidget。
     子类化重写 dragEnterEvent/dragMoveEvent/dropEvent（PySide6 要求类层级重写，
-    实例属性赋值无效）。回调 on_drop(paths) 由面板实现。
+    实例属性赋值无效）。回调 files_dropped(paths) 由面板实现。
     """
+
     files_dropped = Signal(list)  # list[str] of file paths
 
     def __init__(self, valid_exts: set, parent=None):
         super().__init__(parent)
-        self._valid_exts = valid_exts
+        self._valid_exts = {e.lower() for e in valid_exts}
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DropOnly)
+        self.setDefaultDropAction(Qt.CopyAction)
+        # 视口也必须接受拖放——Windows OLE 拖放目标注册在视口上，
+        # 某些 Qt6 构建仅 setAcceptDrops(self) 不够，拖入时视口仍不响应。
+        self.viewport().setAcceptDrops(True)
+
+    @staticmethod
+    def _has_files(mime) -> bool:
+        # 宽松判定：个别 Windows / PySide6 版本 hasUrls() 偶发返回 False 但 urls()
+        # 非空（Explorer 拖入的 uri-list），故三者取或，确保都能被识别为文件拖放。
+        try:
+            return bool(
+                mime.hasUrls() or mime.hasFormat("text/uri-list") or mime.urls()
+            )
+        except Exception:
+            return bool(mime.urls())
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
+        if self._has_files(event.mimeData()):
+            event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
+        if self._has_files(event.mimeData()):
+            event.setDropAction(Qt.CopyAction)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -149,22 +225,192 @@ class DropListWidget(QListWidget):
         if paths:
             QTimer.singleShot(0, lambda p=paths: self.files_dropped.emit(p))
 
+
+class FileDropZone(QObject):
+    """事件过滤器：装到任意 QWidget（通常是面板 QFrame）上即可接受文件管理器拖拽。
+    用于补 DropListWidget 之不足——拖到面板标题/按钮/空白区域也能添加文件。
+    QListWidget 自身保留 DropOnly 处理其视口区域；二者只会命中其一。
+    """
+
+    files_dropped = Signal(list)  # list[str] of file paths
+
+    def __init__(self, host, valid_exts: set):
+        super().__init__(host)
+        self._valid_exts = {e.lower() for e in valid_exts}
+        self._host = host
+        host.setAcceptDrops(True)
+        host.installEventFilter(self)
+
+    @staticmethod
+    def _has_files(mime) -> bool:
+        try:
+            return bool(
+                mime.hasUrls() or mime.hasFormat("text/uri-list") or mime.urls()
+            )
+        except Exception:
+            return bool(mime.urls())
+
+    def _collect(self, mime) -> list:
+        paths = []
+        for url in mime.urls():
+            p = url.toLocalFile()
+            if p and Path(p).suffix.lower() in self._valid_exts:
+                paths.append(p)
+        return paths
+
+    def eventFilter(self, watched, event):
+        t = event.type()
+        if t == QEvent.DragEnter:
+            if self._has_files(event.mimeData()):
+                event.setDropAction(Qt.CopyAction)
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+            return True
+        if t == QEvent.DragMove:
+            if self._has_files(event.mimeData()):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+            return True
+        if t == QEvent.Drop:
+            paths = self._collect(event.mimeData())
+            event.acceptProposedAction()
+            if paths:
+                QTimer.singleShot(0, lambda p=paths: self.files_dropped.emit(p))
+            return True
+        return False
+
+
+# ==================== 素材行代理：一行一个 [复选框][缩略图] 名字 / 上传时间 ====================
+# index 数据角色：
+#   PATH_ROLE = 文件路径（= Qt.UserRole，_checked_paths/_preview 直接复用）
+#   TIME_ROLE = 上传时间字符串 "YYYY-MM-DD HH:MM"
+#   PIX_ROLE  = QPixmap 缩略图（可能为 None → 绘制占位）
+# 复选框/选中/hover/双击/右键菜单 全部由 QListView 原生事件处理，代理只画——
+# 不用 setItemWidget（会与复选框重叠、吞鼠标事件），也不用多行文本（默认代理
+# 走 TextSingleLine，"\n" 不换行）。
+
+PATH_ROLE = Qt.UserRole  # 文件路径
+TIME_ROLE = Qt.UserRole + 1  # 上传时间字符串
+PIX_ROLE = Qt.UserRole + 2  # QPixmap 缩略图
+
+
+def _format_added_time(it: dict, path: str) -> str:
+    """显示「上传时间」：优先 item.added_at，其次文件 mtime，再退化为 '—'。
+    旧素材库无 added_at 字段，用文件修改时间近似。"""
+    ts = it.get("added_at")
+    if not ts:
+        try:
+            ts = datetime.fromtimestamp(os.path.getmtime(path)).isoformat(
+                timespec="minutes"
+            )
+        except Exception:
+            return "—"
+    try:
+        return datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return "—"
+
+
+class AssetRowDelegate(QStyledItemDelegate):
+    """素材行绘制代理。
+
+    一行一项布局：[复选框] [缩略图]  右侧：名字（粗体）/ 上传时间（淡色小字）。
+    复选框与背景由 QStyle::drawControl(CE_ItemViewItem) 绘制——与 QListView
+    点击命中复选框的判定一致，勾选/双击/右键/选择均由视图原生处理，本类只画。
+    """
+
+    def __init__(self, thumb_w: int = 72, thumb_h: int = 72, parent=None):
+        super().__init__(parent)
+        self._tw = thumb_w
+        self._th = thumb_h
+
+    def sizeHint(self, option, index):
+        return QSize(120, self._th + 10)
+
+    def paint(self, painter: QPainter, option, index):
+        painter.save()
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        # 清空文字/图标，让 drawControl 只画背景 + 复选框
+        opt.text = ""
+        opt.icon = QIcon()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+
+        rect = option.rect
+        cb_w = style.pixelMetric(QStyle.PM_IndicatorWidth, opt, opt.widget)
+        x0 = rect.left() + cb_w + 12  # 跳过复选框
+
+        th, tw = self._th, self._tw
+        pix_rect = QRect(x0, rect.top() + (rect.height() - th) // 2, tw, th)
+        pix = index.data(PIX_ROLE)
+        if isinstance(pix, QPixmap) and not pix.isNull():
+            scaled = pix.scaled(tw, th, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(
+                QRect(
+                    pix_rect.left() + (tw - scaled.width()) // 2,
+                    pix_rect.top() + (th - scaled.height()) // 2,
+                    scaled.width(),
+                    scaled.height(),
+                ),
+                scaled,
+            )
+        else:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(opt.palette.color(QPalette.AlternateBase))
+            painter.drawRoundedRect(pix_rect, 4, 4)
+            painter.setPen(opt.palette.color(QPalette.PlaceholderText))
+            painter.drawText(pix_rect, Qt.AlignCenter, "📁")
+
+        tx = pix_rect.right() + 8
+        twa = max(20, rect.right() - tx - 6)
+        name = os.path.basename(str(index.data(PATH_ROLE) or ""))
+        ts = str(index.data(TIME_ROLE) or "")
+
+        block_h = 20 + 1 + 16
+        ty = rect.top() + max(0, (rect.height() - block_h) // 2)
+
+        f = QFont(painter.font())
+        f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(opt.palette.color(QPalette.Active, QPalette.Text))
+        painter.drawText(
+            QRect(tx, ty, twa, 20),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            QFontMetrics(f).elidedText(name, Qt.ElideRight, twa),
+        )
+        ps = f.pointSize()
+        f2 = QFont(f)
+        f2.setBold(False)
+        f2.setPointSize(max(8, (ps - 1) if ps > 0 else 9))
+        painter.setFont(f2)
+        painter.setPen(opt.palette.color(QPalette.Disabled, QPalette.Text))
+        painter.drawText(
+            QRect(tx, ty + 21, twa, 16),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            QFontMetrics(f2).elidedText(ts, Qt.ElideRight, twa),
+        )
+        painter.restore()
+
+
 # ==================== 主题调色板 + QSS 模板 ====================
 # QSS 不支持变量，这里用 Python dict + f-string 模板动态生成深色/亮色样式表。
 
 DARK_COLORS = {
-    "base": "#1e1e2e",       # 主背景
-    "mantle": "#181825",     # 面板/顶栏
-    "crust": "#11111b",      # 输入框/列表底
-    "surface0": "#313244",   # 按钮底
-    "surface1": "#45475a",   # hover
+    "base": "#1e1e2e",  # 主背景
+    "mantle": "#181825",  # 面板/顶栏
+    "crust": "#11111b",  # 输入框/列表底
+    "surface0": "#313244",  # 按钮底
+    "surface1": "#45475a",  # hover
     "surface2": "#585b70",
-    "overlay0": "#6c7086",   # 次要文字
+    "overlay0": "#6c7086",  # 次要文字
     "overlay1": "#7f849c",
     "overlay2": "#9399b2",
     "subtext0": "#a6adc8",
-    "text": "#cdd6f4",       # 主文字
-    "blue": "#89b4fa",       # 强调色
+    "text": "#cdd6f4",  # 主文字
+    "blue": "#89b4fa",  # 强调色
     "blue_hover": "#b4befe",
     "blue_press": "#74c7ec",
     "lavender": "#b4befe",
@@ -197,6 +443,7 @@ LIGHT_COLORS = {
 THEME_DARK = "dark"
 THEME_LIGHT = "light"
 
+
 # 复选框勾选标记：内联 SVG 数据 URL（深蓝/蓝色对号），在深色与亮色主题下都用强调色绘制
 def _check_svg(color: str) -> str:
     # url-encoded SVG for QSS image: url("data:image/svg+xml,...")
@@ -207,13 +454,14 @@ def _check_svg(color: str) -> str:
     )
     # 把 SVG 做成 data url（用 url() 包裹前转义必要字符）
     import urllib.parse
-    return "url(\"data:image/svg+xml," + urllib.parse.quote(svg) + "\")"
+
+    return 'url("data:image/svg+xml,' + urllib.parse.quote(svg) + '")'
 
 
 def build_qss(c: dict) -> str:
     """根据配色 dict 生成完整 QSS 字符串。"""
     return f"""\
-/* === RBFLow 视频生成插件 · 动态主题（{'暗色' if c is DARK_COLORS else '亮色'}） === */
+/* === RBFLow 视频生成插件 · 动态主题（{"暗色" if c is DARK_COLORS else "亮色"}） === */
 
 * {{
     font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
@@ -535,6 +783,7 @@ QLabel#CreditLabel {{ color: {c["yellow"]}; font-weight: 600; }}
 
 class BridgeError(Exception):
     """桥调用失败。code 用于区分 insufficient_balance 等。"""
+
     def __init__(self, message: str, code: str = "", status: int = 0):
         super().__init__(message)
         self.code = code
@@ -551,11 +800,18 @@ def _parse_bridge_error(resp: requests.Response) -> BridgeError:
             status=resp.status_code,
         )
     except Exception:
-        return BridgeError(f"桥错误 {resp.status_code}: {resp.text[:200]}", status=resp.status_code)
+        return BridgeError(
+            f"桥错误 {resp.status_code}: {resp.text[:200]}", status=resp.status_code
+        )
 
 
-def bridge_submit_video(image_path: str, video_path: str, seconds: float, tier: str = DEFAULT_TIER,
-                        timeout=(30, 120)) -> dict:
+def bridge_submit_video(
+    image_path: str,
+    video_path: str,
+    seconds: float,
+    tier: str = DEFAULT_TIER,
+    timeout=(30, 120),
+) -> dict:
     """提交一个图片+视频任务。返回 {task_id, call_log_id, charged, credits}。
 
     桥先按秒扣灵石，再代理转发到 RBFLow。余额不足(402)抛 BridgeError(code=insufficient_balance)。
@@ -575,7 +831,9 @@ def bridge_submit_video(image_path: str, video_path: str, seconds: float, tier: 
     }
     resp = requests.post(
         _BRIDGE_URL + "/video/generate",
-        json=body, headers=_bridge_headers(), timeout=timeout,
+        json=body,
+        headers=_bridge_headers(),
+        timeout=timeout,
     )
     if resp.status_code != 200:
         raise _parse_bridge_error(resp)
@@ -593,7 +851,8 @@ def bridge_stream_video(task_id: str, timeout=(10, 600)) -> list:
     resp = requests.get(
         _BRIDGE_URL + "/video/stream",
         params={"task_id": task_id},
-        headers=_bridge_headers(), timeout=timeout,
+        headers=_bridge_headers(),
+        timeout=timeout,
     )
     if resp.status_code != 200:
         raise _parse_bridge_error(resp)
@@ -606,7 +865,8 @@ def bridge_download_video(task_id: str, timeout=(10, 300)) -> dict:
     resp = requests.get(
         _BRIDGE_URL + "/video/download",
         params={"task_id": task_id},
-        headers=_bridge_headers(), timeout=timeout,
+        headers=_bridge_headers(),
+        timeout=timeout,
     )
     if resp.status_code != 200:
         raise _parse_bridge_error(resp)
@@ -669,30 +929,56 @@ def probe_duration_seconds(video_path: str) -> float:
         )
     try:
         result = subprocess.run(
-            [ffprobe, "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", video_path],
-            capture_output=True, text=True, timeout=15,
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if result.returncode == 0:
             dur = float(result.stdout.strip())
             if dur > 0:
                 _DURATION_CACHE[video_path] = dur
                 return dur
-        raise RuntimeError(f"ffprobe 返回异常（exit={result.returncode}）: {result.stderr.strip()[:200]}")
+        raise RuntimeError(
+            f"ffprobe 返回异常（exit={result.returncode}）: {result.stderr.strip()[:200]}"
+        )
     except subprocess.TimeoutExpired:
         raise RuntimeError("ffprobe 探测超时（15s）")
     except ValueError:
         raise RuntimeError(f"ffprobe 返回非数字时长: {result.stdout.strip()[:100]}")
 
 
+def _unique_dest_path(dest_dir: Path, stem: str, ext: str = ".mp4") -> Path:
+    """返回 dest_dir 下不会覆盖已有文件的目标路径。
+
+    若 {stem}{ext} 已存在，则依次尝试 {stem}_1{ext}、{stem}_2{ext}……
+    直到找到一个尚未存在的文件名，避免覆盖之前输出的同名视频。
+    """
+    candidate = dest_dir / f"{stem}{ext}"
+    n = 1
+    while candidate.exists():
+        candidate = dest_dir / f"{stem}_{n}{ext}"
+        n += 1
+    return candidate
+
+
 # ==================== 任务模型 + 持久化 ====================
 # 状态枚举（与 RBFLow v0.4 对齐 + 本地态）
-STATE_PENDING = "PENDING"          # 已提交，等待 RBFLow worker
-STATE_RUNNING = "RUNNING"          # 执行中
-STATE_SUCCESS = "SUCCESS"          # 完成
-STATE_FAILED = "FAILED"            # 失败
+STATE_PENDING = "PENDING"  # 已提交，等待 RBFLow worker
+STATE_RUNNING = "RUNNING"  # 执行中
+STATE_SUCCESS = "SUCCESS"  # 完成
+STATE_FAILED = "FAILED"  # 失败
 STATE_DOWNLOADING = "DOWNLOADING"  # 下载中
-STATE_QUEUED = "QUEUED"            # RBFLow 已收单排队
+STATE_QUEUED = "QUEUED"  # RBFLow 已收单排队
 
 # 用于状态筛选 tab 分组
 FILTER_ALL = "全部"
@@ -707,25 +993,26 @@ WAITING_STATES = {STATE_PENDING, STATE_QUEUED}
 @dataclass
 class Task:
     """单个视频生成任务（一对 image+video）。"""
-    pair_id: str                       # 本地唯一 id
+
+    pair_id: str  # 本地唯一 id
     image_path: str
     video_path: str
-    seconds: float = 0.0               # 视频时长（计费用）
+    seconds: float = 0.0  # 视频时长（计费用）
     tier: str = DEFAULT_TIER
     # 运行态
-    rbflow_task_id: str = ""           # 桥返回的 RBFLow task_id
-    call_log_id: str = ""             # 扣费票据
+    rbflow_task_id: str = ""  # 桥返回的 RBFLow task_id
+    call_log_id: str = ""  # 扣费票据
     charged_credits: float = 0.0
     state: str = STATE_PENDING
     progress: float = 0.0
     error_msg: str = ""
-    saved_path: str = ""               # 落盘路径
-    image_category: str = "默认"       # 图片分类（用于命名子目录）
+    saved_path: str = ""  # 落盘路径
+    image_category: str = "默认"  # 图片分类（用于命名子目录）
     # 时间戳
     created_at: str = ""
     updated_at: str = ""
     finished_at: str = ""
-    order: int = 0                    # 队列顺序
+    order: int = 0  # 队列顺序
 
     def touch(self):
         self.updated_at = datetime.now().isoformat(timespec="seconds")
@@ -754,7 +1041,9 @@ class TaskStore:
         ordered = sorted(self.tasks.values(), key=lambda t: t.order)
         data = {"tasks": [asdict(t) for t in ordered]}
         try:
-            self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as e:
             logging.error(f"保存任务列表失败: {e}")
 
@@ -786,12 +1075,14 @@ class TaskStore:
 
 # ==================== 工作线程 ====================
 
+
 class SubmitWorker(QThread):
     """笛卡尔积提交：逐对探测时长 → 扣灵石 → 提交 RBFLow。"""
-    pair_submitted = Signal(object)   # Task
+
+    pair_submitted = Signal(object)  # Task
     pair_failed = Signal(str, str, object)  # pair_id, error_msg, partial Task (or None)
-    billing_blocked = Signal(str)     # 余额不足消息
-    finished_all = Signal(int, int)   # submitted_count, failed_count
+    billing_blocked = Signal(str)  # 余额不足消息
+    finished_all = Signal(int, int)  # submitted_count, failed_count
     log = Signal(str)
 
     def __init__(self, pairs: list, tier: str, parent=None):
@@ -812,15 +1103,21 @@ class SubmitWorker(QThread):
                 break
             pair_id = f"{int(time.time() * 1000)}_{submitted}_{os.path.basename(img_path)[:8]}"
             task = Task(
-                pair_id=pair_id, image_path=img_path, video_path=vid_path,
-                seconds=0, tier=self.tier, image_category=img_cat,
+                pair_id=pair_id,
+                image_path=img_path,
+                video_path=vid_path,
+                seconds=0,
+                tier=self.tier,
+                image_category=img_cat,
                 created_at=datetime.now().isoformat(timespec="seconds"),
             )
             task.touch()
             try:
                 seconds = probe_duration_seconds(vid_path)
                 task.seconds = seconds
-                self.log.emit(f"提交 {os.path.basename(img_path)} × {os.path.basename(vid_path)}（{seconds:.0f}秒）...")
+                self.log.emit(
+                    f"提交 {os.path.basename(img_path)} × {os.path.basename(vid_path)}（{seconds:.0f}秒）..."
+                )
                 result = bridge_submit_video(img_path, vid_path, seconds, self.tier)
                 task.rbflow_task_id = result.get("task_id", "")
                 task.call_log_id = result.get("call_log_id", "")
@@ -831,7 +1128,9 @@ class SubmitWorker(QThread):
             except BridgeError as e:
                 failed += 1
                 if e.code == "insufficient_balance":
-                    self.billing_blocked.emit(f"灵石余额不足，已停止提交（已完成 {submitted} 个）。请充值后重试。")
+                    self.billing_blocked.emit(
+                        f"灵石余额不足，已停止提交（已完成 {submitted} 个）。请充值后重试。"
+                    )
                     task.state = STATE_FAILED
                     task.error_msg = "灵石余额不足"
                     self.pair_failed.emit(pair_id, str(e), task)
@@ -855,9 +1154,10 @@ class ProgressWorker(QThread):
     旧实现直接调 bridge_stream_video（默认 600s 读超时）→ 一直阻塞到终态才返回，前台一直显示「等待」。
     现改为短超时轮询：循环拉 events → 取最后一个 progress 更新 → 命中 done/error 即终止 → 否则 sleep 3s 再拉。
     """
-    progress_update = Signal(str, float, str)   # pair_id, progress, state
-    done = Signal(str, str)                      # pair_id, saved_info(json str)
-    error = Signal(str, str)                     # pair_id, reason
+
+    progress_update = Signal(str, float, str)  # pair_id, progress, state
+    done = Signal(str, str)  # pair_id, saved_info(json str)
+    error = Signal(str, str)  # pair_id, reason
 
     def __init__(self, pair_id: str, rbflow_task_id: str, parent=None):
         super().__init__(parent)
@@ -893,7 +1193,9 @@ class ProgressWorker(QThread):
                         terminal = True
                         break
                     elif etype == "error":
-                        reason = ev.get("reason") or ev.get("error_advice") or "生成失败"
+                        reason = (
+                            ev.get("reason") or ev.get("error_advice") or "生成失败"
+                        )
                         self.error.emit(self.pair_id, reason)
                         terminal = True
                         break
@@ -901,7 +1203,9 @@ class ProgressWorker(QThread):
                     return
                 # 只在有 progress 事件时发一次最新进度（取最后一条）
                 if last_prog >= 0:
-                    self.progress_update.emit(self.pair_id, last_prog, last_state or STATE_RUNNING)
+                    self.progress_update.emit(
+                        self.pair_id, last_prog, last_state or STATE_RUNNING
+                    )
                 retries = 0
                 self.msleep(3000)
             except Exception as e:
@@ -919,9 +1223,10 @@ class _PollWorker(QThread):
     由 MainWindow 的自动刷新定时器（5s）和手动刷新按钮触发。与 ProgressWorker
     （长驻轮询）互补：ProgressWorker 单任务常驻；_PollWorker 批量兜底。
     """
-    progress_update = Signal(str, float, str)   # pair_id, progress, state
-    done = Signal(str, str)                      # pair_id, saved_info(json str)
-    error = Signal(str, str)                     # pair_id, reason
+
+    progress_update = Signal(str, float, str)  # pair_id, progress, state
+    done = Signal(str, str)  # pair_id, saved_info(json str)
+    error = Signal(str, str)  # pair_id, reason
 
     def __init__(self, tasks: list, parent=None):
         super().__init__(parent)
@@ -944,21 +1249,27 @@ class _PollWorker(QThread):
                         self.done.emit(pair_id, json.dumps(ev, ensure_ascii=False))
                         break
                     elif etype == "error":
-                        reason = ev.get("reason") or ev.get("error_advice") or "生成失败"
+                        reason = (
+                            ev.get("reason") or ev.get("error_advice") or "生成失败"
+                        )
                         self.error.emit(pair_id, reason)
                         break
                 else:
                     # 无终态事件：发最新进度（若有）
                     if last_prog >= 0:
-                        self.progress_update.emit(pair_id, last_prog, last_state or STATE_RUNNING)
+                        self.progress_update.emit(
+                            pair_id, last_prog, last_state or STATE_RUNNING
+                        )
             except Exception as e:
                 logging.warning(f"_PollWorker {pair_id} 异常: {e}")
 
 
 # ==================== 自定义控件 ====================
 
+
 class StatusBadge(QLabel):
     """状态色标圆点 + 文字。"""
+
     COLORS = {
         STATE_PENDING: "#f9e2af",
         STATE_QUEUED: "#f9e2af",
@@ -968,8 +1279,12 @@ class StatusBadge(QLabel):
         STATE_FAILED: "#f38ba8",
     }
     LABELS = {
-        STATE_PENDING: "等待", STATE_QUEUED: "排队", STATE_RUNNING: "执行中",
-        STATE_DOWNLOADING: "下载中", STATE_SUCCESS: "完成", STATE_FAILED: "失败",
+        STATE_PENDING: "等待",
+        STATE_QUEUED: "排队",
+        STATE_RUNNING: "执行中",
+        STATE_DOWNLOADING: "下载中",
+        STATE_SUCCESS: "完成",
+        STATE_FAILED: "失败",
     }
 
     def __init__(self, state: str = STATE_PENDING, parent=None):
@@ -986,6 +1301,7 @@ class StatusBadge(QLabel):
 
 class StatCard(QFrame):
     """统计卡片（数字 + 标签）。"""
+
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setObjectName("Panel")
@@ -1004,6 +1320,7 @@ class StatCard(QFrame):
 
 class TaskCardWidget(QWidget):
     """单个任务卡片控件（缩略图行 + 进度 + 状态 + 操作）。"""
+
     retry_clicked = Signal(str)
     delete_clicked = Signal(str)
     saveas_clicked = Signal(str)
@@ -1021,7 +1338,9 @@ class TaskCardWidget(QWidget):
         # 缩略图（图片）
         self.thumb = QLabel(self)
         self.thumb.setFixedSize(72, 72)
-        self.thumb.setStyleSheet("background-color: #11111b; border-radius: 6px; border: 1px solid #313244;")
+        self.thumb.setStyleSheet(
+            "background-color: #11111b; border-radius: 6px; border: 1px solid #313244;"
+        )
         self.thumb.setAlignment(Qt.AlignCenter)
         self._load_thumb()
         lay.addWidget(self.thumb)
@@ -1055,17 +1374,23 @@ class TaskCardWidget(QWidget):
         self.btn_retry.setObjectName("CardBtnRetry")
         self.btn_retry.setFixedSize(30, 26)
         self.btn_retry.setToolTip("重新执行")
-        self.btn_retry.clicked.connect(lambda: self.retry_clicked.emit(self.task.pair_id))
+        self.btn_retry.clicked.connect(
+            lambda: self.retry_clicked.emit(self.task.pair_id)
+        )
         self.btn_saveas = QPushButton("💾", self)
         self.btn_saveas.setObjectName("CardBtnSave")
         self.btn_saveas.setFixedSize(30, 26)
         self.btn_saveas.setToolTip("另存为")
-        self.btn_saveas.clicked.connect(lambda: self.saveas_clicked.emit(self.task.pair_id))
+        self.btn_saveas.clicked.connect(
+            lambda: self.saveas_clicked.emit(self.task.pair_id)
+        )
         self.btn_del = QPushButton("✕", self)
         self.btn_del.setObjectName("CardBtnDelete")
         self.btn_del.setFixedSize(30, 26)
         self.btn_del.setToolTip("删除")
-        self.btn_del.clicked.connect(lambda: self.delete_clicked.emit(self.task.pair_id))
+        self.btn_del.clicked.connect(
+            lambda: self.delete_clicked.emit(self.task.pair_id)
+        )
         ops.addWidget(self.btn_retry)
         ops.addWidget(self.btn_saveas)
         ops.addWidget(self.btn_del)
@@ -1103,7 +1428,10 @@ class TaskCardWidget(QWidget):
             # 保持引用避免被 GC
             self._qimg = qimg
             pix = QPixmap.fromImage(qimg).scaled(
-                72, 72, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation,
+                72,
+                72,
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation,
             )
             self.thumb.setPixmap(pix)
         except Exception:
@@ -1118,7 +1446,9 @@ class TaskCardWidget(QWidget):
         self.meta_label.setText(self._meta_text())
         # 操作按钮显隐
         self.btn_retry.setEnabled(self.task.state in (STATE_FAILED,))
-        self.btn_saveas.setEnabled(bool(self.task.saved_path) or self.task.state == STATE_SUCCESS)
+        self.btn_saveas.setEnabled(
+            bool(self.task.saved_path) or self.task.state == STATE_SUCCESS
+        )
 
     def update_task(self, task: Task):
         self.task = task
@@ -1127,11 +1457,13 @@ class TaskCardWidget(QWidget):
 
 # ==================== 左栏：图片输入面板 ====================
 
+
 class ImagePanel(QFrame):
     """图片素材库：选图/选文件夹、分类、多选缩略图列表、全选/反选/删除/移动。
 
     素材列表持久化到 data/images.json（重启保留）。右键菜单：删除/置顶/移动分类。
     """
+
     images_changed = Signal()
 
     STORE_PATH = DATA_DIR / "images.json"
@@ -1167,7 +1499,9 @@ class ImagePanel(QFrame):
         """保存素材列表 + 分类。"""
         try:
             data = {"items": self._items, "categories": self._categories}
-            self.STORE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.STORE_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as e:
             logging.error(f"保存图片素材库失败: {e}")
 
@@ -1207,28 +1541,37 @@ class ImagePanel(QFrame):
         btn_row.addWidget(btn_dir)
         lay.addLayout(btn_row)
 
-        # 缩略图列表（图标模式 + 拖拽 + 多选 + 双击预览）
-        self.list_widget = DropListWidget({".jpg", ".jpeg", ".png", ".webp", ".bmp"}, self)
+        # 素材列表：一行一个 [复选框][缩略图] 名字/上传时间（AssetRowDelegate 绘制）
+        self.list_widget = DropListWidget(
+            {".jpg", ".jpeg", ".png", ".webp", ".bmp"}, self
+        )
         self.list_widget.setObjectName("ImageList")
-        self.list_widget.setViewMode(QListWidget.IconMode)
-        self.list_widget.setIconSize(QSize(90, 90))
-        self.list_widget.setResizeMode(QListWidget.Adjust)
-        self.list_widget.setMovement(QListWidget.Static)
+        self.list_widget.setViewMode(QListWidget.ListMode)
+        self.list_widget.setUniformItemSizes(True)
         self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.list_widget.setSpacing(4)
+        self.list_widget.setItemDelegate(AssetRowDelegate(72, 72, self.list_widget))
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.files_dropped.connect(self._add_paths)
+        # 面板级拖拽兜底：拖到标题/按钮/空白区域也接受（列表自身处理视口区域）
+        self._drop_zone = FileDropZone(self, {".jpg", ".jpeg", ".png", ".webp", ".bmp"})
+        self._drop_zone.files_dropped.connect(self._add_paths)
         self.list_widget.itemDoubleClicked.connect(self._preview_image)
         # checkbox 勾选变化时更新计数 + 底部信息栏
-        self.list_widget.itemChanged.connect(lambda: (self._update_count() if hasattr(self, '_update_count') else None))
+        self.list_widget.itemChanged.connect(
+            lambda: self._update_count() if hasattr(self, "_update_count") else None
+        )
         lay.addWidget(self.list_widget, 1)
 
         # 工具行
         tools = QHBoxLayout()
-        for label, slot in [("全选", self._select_all), ("反选", self._invert),
-                            ("未选", self._select_none), ("删除", self._delete_selected),
-                            ("移动", self._move_selected)]:
+        for label, slot in [
+            ("全选", self._select_all),
+            ("反选", self._invert),
+            ("未选", self._select_none),
+            ("删除", self._delete_selected),
+            ("移动", self._move_selected),
+        ]:
             b = QPushButton(label, self)
             b.clicked.connect(slot)
             tools.addWidget(b)
@@ -1244,6 +1587,7 @@ class ImagePanel(QFrame):
 
     def _new_category(self):
         from PySide6.QtWidgets import QInputDialog
+
         name, ok = QInputDialog.getText(self, "新建分类", "分类名称:")
         if ok and name.strip() and name.strip() not in self._categories:
             self._categories.append(name.strip())
@@ -1267,9 +1611,12 @@ class ImagePanel(QFrame):
                 self._add_paths(paths)
 
     def _add_paths(self, paths: list):
+        now = datetime.now().isoformat(timespec="minutes")
         for p in paths:
             if not any(it["path"] == p for it in self._items):
-                self._items.append({"path": p, "category": self._cur_category})
+                self._items.append(
+                    {"path": p, "category": self._cur_category, "added_at": now}
+                )
         self._save_store()
         self.refresh()
         self.images_changed.emit()
@@ -1286,7 +1633,7 @@ class ImagePanel(QFrame):
         for i in range(self.list_widget.count()):
             it = self.list_widget.item(i)
             if it.checkState() == Qt.Checked:
-                p = it.data(Qt.UserRole)
+                p = it.data(PATH_ROLE)
                 if p:
                     checked_paths.add(p)
         # 重建期间阻塞信号：每个 setCheckState 都会触发 itemChanged → _update_count
@@ -1295,13 +1642,14 @@ class ImagePanel(QFrame):
         self.list_widget.clear()
         cat_items = [it for it in self._items if it["category"] == self._cur_category]
         for it in cat_items:
-            item = QListWidgetItem(os.path.basename(it["path"]))
+            item = QListWidgetItem()
             item.setToolTip(it["path"])
-            item.setData(Qt.UserRole, it["path"])
-            item.setCheckState(Qt.Checked if it["path"] in checked_paths else Qt.Unchecked)
-            pix = self._make_thumb(it["path"])
-            if pix:
-                item.setIcon(QIcon(pix))
+            item.setData(PATH_ROLE, it["path"])
+            item.setData(TIME_ROLE, _format_added_time(it, it["path"]))
+            item.setData(PIX_ROLE, self._make_thumb(it["path"]))
+            item.setCheckState(
+                Qt.Checked if it["path"] in checked_paths else Qt.Unchecked
+            )
             self.list_widget.addItem(item)
         self.list_widget.blockSignals(False)
         self._update_count()
@@ -1350,9 +1698,11 @@ class ImagePanel(QFrame):
 
     def _checked_paths(self) -> list:
         """返回勾选的图片路径（checkbox 模式）。"""
-        return [self.list_widget.item(i).data(Qt.UserRole)
-                for i in range(self.list_widget.count())
-                if self.list_widget.item(i).checkState() == Qt.Checked]
+        return [
+            self.list_widget.item(i).data(Qt.UserRole)
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.Checked
+        ]
 
     def _select_all(self):
         for i in range(self.list_widget.count()):
@@ -1367,7 +1717,9 @@ class ImagePanel(QFrame):
     def _invert(self):
         for i in range(self.list_widget.count()):
             it = self.list_widget.item(i)
-            it.setCheckState(Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked)
+            it.setCheckState(
+                Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked
+            )
         self._update_count()
 
     def _delete_selected(self):
@@ -1382,11 +1734,14 @@ class ImagePanel(QFrame):
         if not paths:
             return
         from PySide6.QtWidgets import QInputDialog
+
         items = [c for c in self._categories if c != self._cur_category]
         if not items:
             QMessageBox.information(self, "移动分类", "请先新建其他分类")
             return
-        target, ok = QInputDialog.getItem(self, "移动到分类", "目标分类:", items, 0, False)
+        target, ok = QInputDialog.getItem(
+            self, "移动到分类", "目标分类:", items, 0, False
+        )
         if ok and target:
             for it in self._items:
                 if it["path"] in paths:
@@ -1396,7 +1751,13 @@ class ImagePanel(QFrame):
 
     def _update_count(self):
         """更新计数 label（含已选数）。"""
-        n = len([i for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked])
+        n = len(
+            [
+                i
+                for i in range(self.list_widget.count())
+                if self.list_widget.item(i).checkState() == Qt.Checked
+            ]
+        )
         total = self.list_widget.count()
         self._count_label.setText(f"已选 {n} / 共 {total} 张")
 
@@ -1408,6 +1769,7 @@ class ImagePanel(QFrame):
 
 # ==================== 中栏：参考视频面板 ====================
 
+
 class VideoPanel(QFrame):
     """参考视频库。
 
@@ -1416,6 +1778,7 @@ class VideoPanel(QFrame):
     素材列表持久化到 data/videos.json（重启保留）。右键菜单：删除/置顶/移动分类。
     工具行：全选/反选/未选/删除/移动（与 ImagePanel 一致）。
     """
+
     videos_changed = Signal()
     durations_ready = Signal()
     """后台线程完成时长探测 + 缩略图生成后发出（跨线程 queued 到主线程），
@@ -1453,7 +1816,9 @@ class VideoPanel(QFrame):
     def _save_store(self):
         try:
             data = {"items": self._items, "categories": self._categories}
-            self.STORE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.STORE_PATH.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as e:
             logging.error(f"保存视频素材库失败: {e}")
 
@@ -1492,17 +1857,20 @@ class VideoPanel(QFrame):
         btn_row.addWidget(btn_dir)
         lay.addLayout(btn_row)
 
-        self.list_widget = DropListWidget({".mp4", ".avi", ".mov", ".mkv", ".webm"}, self)
+        self.list_widget = DropListWidget(
+            {".mp4", ".avi", ".mov", ".mkv", ".webm"}, self
+        )
         self.list_widget.setObjectName("VideoList")
-        # 和图片一样的大缩略图 IconMode
-        self.list_widget.setViewMode(QListWidget.IconMode)
-        self.list_widget.setIconSize(QSize(120, 80))
-        self.list_widget.setResizeMode(QListWidget.Adjust)
-        self.list_widget.setMovement(QListWidget.Static)
-        self.list_widget.setSpacing(4)
+        # 素材列表：一行一个 [复选框][缩略图] 名字/上传时间（AssetRowDelegate 绘制）
+        self.list_widget.setViewMode(QListWidget.ListMode)
+        self.list_widget.setUniformItemSizes(True)
+        self.list_widget.setItemDelegate(AssetRowDelegate(96, 54, self.list_widget))
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.files_dropped.connect(self._add_paths)
+        # 面板级拖拽兜底：拖到标题/按钮/空白区域也接受（列表自身处理视口区域）
+        self._drop_zone = FileDropZone(self, {".mp4", ".avi", ".mov", ".mkv", ".webm"})
+        self._drop_zone.files_dropped.connect(self._add_paths)
         # 双击预览视频（系统默认播放器）
         self.list_widget.itemDoubleClicked.connect(self._preview_video)
         # 参考视频唯一：勾选任一项即取消其他（radio 行为）+ 更新计数
@@ -1511,9 +1879,11 @@ class VideoPanel(QFrame):
 
         # 工具行：参考视频为单选，去掉「全选/反选」（语义不适用），保留 未选/删除/移动
         tools = QHBoxLayout()
-        for label, slot in [("未选", self._select_none),
-                            ("删除", self._delete_selected),
-                            ("移动", self._move_selected)]:
+        for label, slot in [
+            ("未选", self._select_none),
+            ("删除", self._delete_selected),
+            ("移动", self._move_selected),
+        ]:
             b = QPushButton(label, self)
             b.clicked.connect(slot)
             tools.addWidget(b)
@@ -1530,6 +1900,7 @@ class VideoPanel(QFrame):
 
     def _new_category(self):
         from PySide6.QtWidgets import QInputDialog
+
         name, ok = QInputDialog.getText(self, "新建分类", "分类名称:")
         if ok and name.strip() and name.strip() not in self._categories:
             self._categories.append(name.strip())
@@ -1554,9 +1925,12 @@ class VideoPanel(QFrame):
 
     def _add_paths(self, paths: list):
         new_paths = []
+        now = datetime.now().isoformat(timespec="minutes")
         for p in paths:
             if not any(it["path"] == p for it in self._items):
-                self._items.append({"path": p, "category": self._cur_category})
+                self._items.append(
+                    {"path": p, "category": self._cur_category, "added_at": now}
+                )
                 new_paths.append(p)
         self._save_store()
         self.refresh()
@@ -1573,9 +1947,12 @@ class VideoPanel(QFrame):
         durations_ready（自动 queued 到主线程）。threading 模块在运行期间会
         持有线程引用，无需手动保活。
         """
-        todo = [p for p in paths
-                if (p not in _DURATION_CACHE)
-                or not os.path.exists(str(DATA_DIR / f"vthumb_{hash(p) & 0xFFFFFFFF}.jpg"))]
+        todo = [
+            p
+            for p in paths
+            if (p not in _DURATION_CACHE)
+            or not os.path.exists(str(DATA_DIR / f"vthumb_{hash(p) & 0xFFFFFFFF}.jpg"))
+        ]
         if not todo:
             return
 
@@ -1593,14 +1970,31 @@ class VideoPanel(QFrame):
                 if not os.path.exists(thumb_path):
                     if ffmpeg is None:
                         ffprobe = _ffprobe_path()
-                        ffmpeg = ffprobe.replace("ffprobe", "ffmpeg") if ffprobe else shutil.which("ffmpeg")
+                        ffmpeg = (
+                            ffprobe.replace("ffprobe", "ffmpeg")
+                            if ffprobe
+                            else shutil.which("ffmpeg")
+                        )
                     if ffmpeg:
                         try:
                             subprocess.run(
-                                [ffmpeg, "-y", "-i", p, "-ss", "00:00:01", "-vframes", "1",
-                                 "-vf", "scale=120:80:force_original_aspect_ratio=decrease",
-                                 "-loglevel", "error", thumb_path],
-                                timeout=20, capture_output=True,
+                                [
+                                    ffmpeg,
+                                    "-y",
+                                    "-i",
+                                    p,
+                                    "-ss",
+                                    "00:00:01",
+                                    "-vframes",
+                                    "1",
+                                    "-vf",
+                                    "scale=120:80:force_original_aspect_ratio=decrease",
+                                    "-loglevel",
+                                    "error",
+                                    thumb_path,
+                                ],
+                                timeout=20,
+                                capture_output=True,
                             )
                         except Exception as e:
                             logging.error(f"生成缩略图失败 {p}: {e}")
@@ -1620,7 +2014,7 @@ class VideoPanel(QFrame):
         for i in range(self.list_widget.count()):
             it = self.list_widget.item(i)
             if it.checkState() == Qt.Checked:
-                p = it.data(Qt.UserRole)
+                p = it.data(PATH_ROLE)
                 if p:
                     checked_paths.add(p)
         # 重建期间阻塞信号：setCheckState 会触发 itemChanged → _on_item_changed，
@@ -1629,15 +2023,14 @@ class VideoPanel(QFrame):
         self.list_widget.clear()
         cat_items = [it for it in self._items if it["category"] == self._cur_category]
         for it in cat_items:
-            item = QListWidgetItem(f"📹 {os.path.basename(it['path'])}")
+            item = QListWidgetItem()
             item.setToolTip(it["path"])
-            item.setData(Qt.UserRole, it["path"])
-            item.setCheckState(Qt.Checked if it["path"] in checked_paths else Qt.Unchecked)
-            # 仅加载已生成的缩略图文件（不在此 spawn ffmpeg）；首次添加后由后台
-            # 线程生成文件，durations_ready → refresh 时此处即可读到。
-            pix = self._load_video_thumb(it["path"])
-            if pix:
-                item.setIcon(QIcon(pix))
+            item.setData(PATH_ROLE, it["path"])
+            item.setData(TIME_ROLE, _format_added_time(it, it["path"]))
+            item.setData(PIX_ROLE, self._load_video_thumb(it["path"]))
+            item.setCheckState(
+                Qt.Checked if it["path"] in checked_paths else Qt.Unchecked
+            )
             self.list_widget.addItem(item)
         self.list_widget.blockSignals(False)
         self._update_count()
@@ -1656,9 +2049,11 @@ class VideoPanel(QFrame):
         return None
 
     def _checked_paths(self) -> list:
-        return [self.list_widget.item(i).data(Qt.UserRole)
-                for i in range(self.list_widget.count())
-                if self.list_widget.item(i).checkState() == Qt.Checked]
+        return [
+            self.list_widget.item(i).data(Qt.UserRole)
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.Checked
+        ]
 
     def _on_item_changed(self, item: QListWidgetItem):
         """参考视频唯一选择（radio 行为）。
@@ -1696,11 +2091,14 @@ class VideoPanel(QFrame):
         if not paths:
             return
         from PySide6.QtWidgets import QInputDialog
+
         items = [c for c in self._categories if c != self._cur_category]
         if not items:
             QMessageBox.information(self, "移动分类", "请先新建其他分类")
             return
-        target, ok = QInputDialog.getItem(self, "移动到分类", "目标分类:", items, 0, False)
+        target, ok = QInputDialog.getItem(
+            self, "移动到分类", "目标分类:", items, 0, False
+        )
         if ok and target:
             for it in self._items:
                 if it["path"] in paths:
@@ -1709,7 +2107,13 @@ class VideoPanel(QFrame):
             self.refresh()
 
     def _update_count(self):
-        n = len([i for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked])
+        n = len(
+            [
+                i
+                for i in range(self.list_widget.count())
+                if self.list_widget.item(i).checkState() == Qt.Checked
+            ]
+        )
         total = self.list_widget.count()
         self._count_label.setText(f"已选 {n} / 共 {total} 个")
 
@@ -1747,15 +2151,17 @@ class VideoPanel(QFrame):
 
 # ==================== 右栏：任务队列面板 ====================
 
+
 class QueuePanel(QFrame):
     """任务队列：统计、状态筛选 tab、自定义输出目录、任务卡片、批量操作。"""
-    submit_requested = Signal(list, str)   # pairs, tier
-    retry_task = Signal(str)               # pair_id
-    delete_task = Signal(str)              # pair_id
-    saveas_task = Signal(str)              # pair_id
-    open_task = Signal(str)                # pair_id（双击打开已保存视频）
-    reorder_requested = Signal(list)       # pair_ids in new order
-    manual_refresh = Signal()              # 立即轮询所有非终态任务
+
+    submit_requested = Signal(list, str)  # pairs, tier
+    retry_task = Signal(str)  # pair_id
+    delete_task = Signal(str)  # pair_id
+    saveas_task = Signal(str)  # pair_id
+    open_task = Signal(str)  # pair_id（双击打开已保存视频）
+    reorder_requested = Signal(list)  # pair_ids in new order
+    manual_refresh = Signal()  # 立即轮询所有非终态任务
 
     def __init__(self, store: TaskStore, settings: QSettings, parent=None):
         super().__init__(parent)
@@ -1784,13 +2190,25 @@ class QueuePanel(QFrame):
         self.stat_running = StatCard("执行中")
         self.stat_done = StatCard("完成")
         self.stat_failed = StatCard("失败")
-        for s in (self.stat_total, self.stat_waiting, self.stat_running, self.stat_done, self.stat_failed):
+        for s in (
+            self.stat_total,
+            self.stat_waiting,
+            self.stat_running,
+            self.stat_done,
+            self.stat_failed,
+        ):
             stats.addWidget(s, 1)
         lay.addLayout(stats)
 
         # 状态筛选 tab
         self.tabs = QTabWidget(self)
-        for name in (FILTER_ALL, FILTER_WAITING, FILTER_RUNNING, FILTER_DONE, FILTER_FAILED):
+        for name in (
+            FILTER_ALL,
+            FILTER_WAITING,
+            FILTER_RUNNING,
+            FILTER_DONE,
+            FILTER_FAILED,
+        ):
             tab = QWidget()
             self.tabs.addTab(tab, name)
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1799,7 +2217,9 @@ class QueuePanel(QFrame):
         # 输出目录
         out_row = QHBoxLayout()
         out_row.addWidget(QLabel("输出:", self))
-        self.out_edit = QLineEdit(self.settings.value("output_dir", str(PLUGIN_DIR / "outputs")), self)
+        self.out_edit = QLineEdit(
+            self.settings.value("output_dir", str(PLUGIN_DIR / "outputs")), self
+        )
         out_row.addWidget(self.out_edit, 1)
         btn_browse = QPushButton("浏览", self)
         btn_browse.clicked.connect(self._browse_output)
@@ -1828,11 +2248,19 @@ class QueuePanel(QFrame):
         self.btn_del_all.setObjectName("DangerBtn")
         self.btn_del_all.clicked.connect(self._delete_all)
         self.chk_auto_retry = QCheckBox("自动重试", self)
-        self.chk_auto_retry.setChecked(bool(self.settings.value("auto_retry", False, type=bool)))
-        self.chk_auto_retry.toggled.connect(lambda v: self.settings.setValue("auto_retry", v))
+        self.chk_auto_retry.setChecked(
+            bool(self.settings.value("auto_retry", False, type=bool))
+        )
+        self.chk_auto_retry.toggled.connect(
+            lambda v: self.settings.setValue("auto_retry", v)
+        )
         self.chk_auto_refresh = QCheckBox("自动刷新", self)
-        self.chk_auto_refresh.setChecked(bool(self.settings.value("auto_refresh", True, type=bool)))
-        self.chk_auto_refresh.toggled.connect(lambda v: self.settings.setValue("auto_refresh", v))
+        self.chk_auto_refresh.setChecked(
+            bool(self.settings.value("auto_refresh", True, type=bool))
+        )
+        self.chk_auto_refresh.toggled.connect(
+            lambda v: self.settings.setValue("auto_refresh", v)
+        )
         batch.addWidget(self.chk_auto_retry)
         batch.addWidget(self.chk_auto_refresh)
         batch.addWidget(self.btn_manual_refresh)
@@ -1846,7 +2274,9 @@ class QueuePanel(QFrame):
         self.refresh()
 
     def _browse_output(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择输出文件夹", self.out_edit.text())
+        folder = QFileDialog.getExistingDirectory(
+            self, "选择输出文件夹", self.out_edit.text()
+        )
         if folder:
             self.out_edit.setText(folder)
             self.settings.setValue("output_dir", folder)
@@ -1877,8 +2307,12 @@ class QueuePanel(QFrame):
         # 统计
         all_tasks = self.store.all_ordered()
         self.stat_total.set_num(len(all_tasks))
-        self.stat_waiting.set_num(sum(1 for t in all_tasks if t.state in WAITING_STATES))
-        self.stat_running.set_num(sum(1 for t in all_tasks if t.state in (STATE_RUNNING, STATE_DOWNLOADING)))
+        self.stat_waiting.set_num(
+            sum(1 for t in all_tasks if t.state in WAITING_STATES)
+        )
+        self.stat_running.set_num(
+            sum(1 for t in all_tasks if t.state in (STATE_RUNNING, STATE_DOWNLOADING))
+        )
         self.stat_done.set_num(sum(1 for t in all_tasks if t.state == STATE_SUCCESS))
         self.stat_failed.set_num(sum(1 for t in all_tasks if t.state == STATE_FAILED))
 
@@ -1903,7 +2337,10 @@ class QueuePanel(QFrame):
         self.refresh()  # MVP：简单全刷；统计 + 过滤都要更新
 
     def _on_rows_moved(self):
-        pair_ids = [self.list_widget.item(i).data(Qt.UserRole) for i in range(self.list_widget.count())]
+        pair_ids = [
+            self.list_widget.item(i).data(Qt.UserRole)
+            for i in range(self.list_widget.count())
+        ]
         self.reorder_requested.emit(pair_ids)
 
     def _on_item_double_clicked(self, item):
@@ -1921,7 +2358,12 @@ class QueuePanel(QFrame):
     def _delete_all(self):
         if not self.store.tasks:
             return
-        if QMessageBox.question(self, "清空全部", f"确定删除全部 {len(self.store.tasks)} 个任务？") == QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self, "清空全部", f"确定删除全部 {len(self.store.tasks)} 个任务？"
+            )
+            == QMessageBox.Yes
+        ):
             for pid in list(self.store.tasks.keys()):
                 self.store.remove(pid)
             self.refresh()
@@ -1929,15 +2371,22 @@ class QueuePanel(QFrame):
 
 # ==================== 提交进度悬浮窗 ====================
 
+
 class SubmitProgressOverlay(QDialog):
     """提交时的非模态悬浮进度窗：显示提交进度（已提交/总数 + 当前操作 + 进度条）。
 
     提交完成后自动关闭（on_submit_finished 调 close()）。用户可手动关闭（不阻断提交线程）。
     """
+
     def __init__(self, total: int, parent=None):
         super().__init__(parent)
         self.setWindowTitle("提交中")
-        self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint)
+        self.setWindowFlags(
+            Qt.Window
+            | Qt.WindowTitleHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.CustomizeWindowHint
+        )
         self.setModal(False)
         self._total = total
         self._done = 0
@@ -1969,14 +2418,18 @@ class SubmitProgressOverlay(QDialog):
 
     def finish(self, submitted: int, failed: int):
         self.title_label.setText(f"提交完成：成功 {submitted}，失败 {failed}")
-        self.detail_label.setText("窗口将在 2 秒后自动关闭" if failed == 0 else "部分失败，详情见任务卡片")
+        self.detail_label.setText(
+            "窗口将在 2 秒后自动关闭" if failed == 0 else "部分失败，详情见任务卡片"
+        )
         # 2 秒后自动关闭（成功时）；失败时保持让用户看到结果
         if failed == 0:
             from PySide6.QtCore import QTimer
+
             QTimer.singleShot(2000, self.close)
 
 
 # ==================== 主窗口 ====================
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -2055,7 +2508,9 @@ class MainWindow(QMainWindow):
         self.tier_combo = QComboBox(topbar)
         self.tier_combo.addItems(TIER_CHOICES)
         self.tier_combo.setCurrentText(self.settings.value("tier", DEFAULT_TIER))
-        self.tier_combo.currentTextChanged.connect(lambda v: self.settings.setValue("tier", v))
+        self.tier_combo.currentTextChanged.connect(
+            lambda v: self.settings.setValue("tier", v)
+        )
         tlay.addWidget(QLabel("档位:", topbar))
         tlay.addWidget(self.tier_combo)
         root.addWidget(topbar)
@@ -2145,7 +2600,8 @@ class MainWindow(QMainWindow):
         在独立线程执行，避免短超时阻塞 UI。
         """
         non_terminal = [
-            t for t in self.store.all_ordered()
+            t
+            for t in self.store.all_ordered()
             if t.rbflow_task_id and t.state not in (STATE_SUCCESS, STATE_FAILED)
         ]
         if not non_terminal:
@@ -2221,10 +2677,14 @@ class MainWindow(QMainWindow):
         imgs = self.image_panel.selected_items()
         vids = self.video_panel.selected_videos()
         if not imgs or not vids:
-            QMessageBox.information(self, "未选择素材", "请至少选择 1 张图片和 1 个参考视频。")
+            QMessageBox.information(
+                self, "未选择素材", "请至少选择 1 张图片和 1 个参考视频。"
+            )
             return
 
-        pairs = [(img_path, vid, img_cat) for (img_path, img_cat) in imgs for vid in vids]
+        pairs = [
+            (img_path, vid, img_cat) for (img_path, img_cat) in imgs for vid in vids
+        ]
         n = len(pairs)
         # 预估总时长/灵石；探测失败时仍允许提交（SubmitWorker 会逐个探测并失败提示）。
         try:
@@ -2233,7 +2693,10 @@ class MainWindow(QMainWindow):
             preview = f"将生成 {n} 个任务（共 {total_sec:.0f} 秒），预计消耗约 {cost:.1f} 灵石。"
         except Exception as e:
             preview = f"将生成 {n} 个任务。⚠ 无法预估时长（{e}），实际计费以各视频实际秒数为准。"
-        if QMessageBox.question(self, "确认提交", preview + "\n继续？") != QMessageBox.Yes:
+        if (
+            QMessageBox.question(self, "确认提交", preview + "\n继续？")
+            != QMessageBox.Yes
+        ):
             return
 
         tier = self.tier_combo.currentText()
@@ -2269,7 +2732,11 @@ class MainWindow(QMainWindow):
         # 首个失败弹窗提示（避免每个失败都弹，批量时太吵）；后续失败汇总到状态栏。
         if not getattr(self, "_first_fail_shown", False):
             self._first_fail_shown = True
-            QMessageBox.warning(self, "任务失败", f"生成失败：{err}\n\n详情见任务卡片，完整错误已写入 data/app.log")
+            QMessageBox.warning(
+                self,
+                "任务失败",
+                f"生成失败：{err}\n\n详情见任务卡片，完整错误已写入 data/app.log",
+            )
 
     def _on_billing_blocked(self, msg: str):
         QMessageBox.warning(self, "余额不足", msg)
@@ -2284,10 +2751,15 @@ class MainWindow(QMainWindow):
         if failed > 0:
             # 有失败：状态栏持久红色提示（不自动消失）
             self.status_bar.setStyleSheet("color: #f38ba8;")
-            self.status_bar.showMessage(f"⚠ 提交完成：成功 {submitted}，失败 {failed}（见任务卡片 / data/app.log）", 0)
+            self.status_bar.showMessage(
+                f"⚠ 提交完成：成功 {submitted}，失败 {failed}（见任务卡片 / data/app.log）",
+                0,
+            )
         else:
             self.status_bar.setStyleSheet("")
-            self.status_bar.showMessage(f"✓ 提交完成：{submitted} 个任务已加入队列", 5000)
+            self.status_bar.showMessage(
+                f"✓ 提交完成：{submitted} 个任务已加入队列", 5000
+            )
 
     # ---------- 进度 ----------
     def _start_progress(self, task: Task):
@@ -2354,7 +2826,11 @@ class MainWindow(QMainWindow):
         self.store.update(task)
         self.queue_panel.update_task_card(task)
         # 进度阶段失败（任务跑了一半挂了）弹窗提示用户
-        QMessageBox.warning(self, "生成失败", f"{os.path.basename(task.image_path)} × {os.path.basename(task.video_path)}\n失败原因：{reason}")
+        QMessageBox.warning(
+            self,
+            "生成失败",
+            f"{os.path.basename(task.image_path)} × {os.path.basename(task.video_path)}\n失败原因：{reason}",
+        )
         if self.queue_panel.auto_retry():
             self._on_retry_task(pair_id)
 
@@ -2365,17 +2841,25 @@ class MainWindow(QMainWindow):
         try:
             result = bridge_download_video(task.rbflow_task_id)
             data_b64 = result.get("data", "")
-            filename = result.get("filename") or f"{os.path.basename(task.image_path)}_{os.path.basename(task.video_path)}.mp4"
+            filename = (
+                result.get("filename")
+                or f"{os.path.basename(task.image_path)}_{os.path.basename(task.video_path)}.mp4"
+            )
             video_bytes = base64.b64decode(data_b64)
 
             # 命名模板：{输出目录}\{日期}\{图片分类}\{图片名}_{视频名}.mp4
             out_root = Path(self.queue_panel.output_dir())
-            date_str = datetime.now().strftime("%Y-%-m-%-d") if sys.platform != "win32" else datetime.now().strftime("%Y-%#m-%#d")
+            date_str = (
+                datetime.now().strftime("%Y-%-m-%-d")
+                if sys.platform != "win32"
+                else datetime.now().strftime("%Y-%#m-%#d")
+            )
             dest_dir = out_root / date_str / task.image_category
             dest_dir.mkdir(parents=True, exist_ok=True)
             base_img = Path(task.image_path).stem
             base_vid = Path(task.video_path).stem
-            dest = dest_dir / f"{base_img}_{base_vid}.mp4"
+            # 同名文件不覆盖：已存在则自动追加 _1/_2/... 后缀
+            dest = _unique_dest_path(dest_dir, f"{base_img}_{base_vid}")
             dest.write_bytes(video_bytes)
 
             task.saved_path = str(dest)
@@ -2389,7 +2873,11 @@ class MainWindow(QMainWindow):
             task.error_msg = f"下载失败: {e}"
             self.store.update(task)
             self.queue_panel.update_task_card(task)
-            QMessageBox.warning(self, "下载失败", f"视频已生成但保存失败：{e}\n\n可在任务卡片点「💾 另存为」重试。")
+            QMessageBox.warning(
+                self,
+                "下载失败",
+                f"视频已生成但保存失败：{e}\n\n可在任务卡片点「💾 另存为」重试。",
+            )
 
     # ---------- 卡片操作 ----------
     def _on_retry_task(self, pair_id: str):
@@ -2400,8 +2888,16 @@ class MainWindow(QMainWindow):
         pairs = [(task.image_path, task.video_path, task.image_category)]
         tier = task.tier
         worker = SubmitWorker(pairs, tier, self)
-        worker.pair_submitted.connect(lambda new_task: (self.store.add(new_task), self._start_progress(new_task), self.queue_panel.refresh()))
-        worker.pair_failed.connect(lambda pid, err, t: (self._on_pair_failed(pid, err, t)))
+        worker.pair_submitted.connect(
+            lambda new_task: (
+                self.store.add(new_task),
+                self._start_progress(new_task),
+                self.queue_panel.refresh(),
+            )
+        )
+        worker.pair_failed.connect(
+            lambda pid, err, t: self._on_pair_failed(pid, err, t)
+        )
         worker.start()
 
     def _on_delete_task(self, pair_id: str):
@@ -2424,7 +2920,9 @@ class MainWindow(QMainWindow):
         if not src or not os.path.exists(src):
             QMessageBox.warning(self, "无文件", "该任务暂无可保存的视频。")
             return
-        dest, _ = QFileDialog.getSaveFileName(self, "另存为", os.path.basename(src), "视频 (*.mp4)")
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "另存为", os.path.basename(src), "视频 (*.mp4)"
+        )
         if dest:
             shutil.copy2(src, dest)
             self.status_bar.showMessage(f"已另存为：{dest}", 5000)
@@ -2440,10 +2938,13 @@ class MainWindow(QMainWindow):
         if task.saved_path and os.path.exists(task.saved_path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(task.saved_path))
         else:
-            QMessageBox.information(self, "暂无视频", "该任务还未生成视频，请等待完成。")
+            QMessageBox.information(
+                self, "暂无视频", "该任务还未生成视频，请等待完成。"
+            )
 
 
 # ==================== 入口 ====================
+
 
 def main():
     app = QApplication(sys.argv)

@@ -6,6 +6,17 @@ export type CreatorMode = 'plan' | 'agent';
 const MAX_ATTACHMENT_CHARS_PER_FILE = 12_000;
 const MAX_ATTACHMENT_TOTAL_CHARS = 40_000;
 
+/**
+ * 单次 Write 工具调用的安全长度上限（字符）。
+ * 上游 completion max_tokens=16384，扣除思考 + JSON 包裹 + path 后，
+ * content 超过此值会让 tool_call 的 arguments JSON 被截断（finish_reason='length'），
+ * 触发 loop.ts 的截断回灌——模型对大附件常未正确分块，会反复整段重写撞 40 轮上限。
+ * 此处与 prompts.ts 的「单次 Write ≤ 6000 字符」指引对齐，留 500 余量。
+ * 超过该值的附件在注入用户消息前先预分块，让模型按块 Write + Edit 追加。
+ */
+const WRITE_SAFE_CHARS = 5500;
+const CHUNK_SIZE = 5000;
+
 export const PROMPT_OPTIMIZER_SYSTEM = `# Role: 用户提示词基础优化助手
 
 ## Profile
@@ -99,10 +110,31 @@ export function formatAttachmentContext(files: DraftFile[], skipped: string[] = 
   for (const file of files) {
     if (remaining <= 0) break;
     const raw = file.content ?? '';
-    const limit = Math.min(MAX_ATTACHMENT_CHARS_PER_FILE, remaining);
-    const content = raw.length > limit ? `${raw.slice(0, limit)}\n...(已截断，原文件 ${raw.length} 字符)` : raw;
-    remaining -= content.length;
-    chunks.push('', `--- ${file.path} ---`, content);
+    // 单文件总上限：仍受 MAX_ATTACHMENT_CHARS_PER_FILE + 剩余总量约束。
+    const fileCap = Math.min(MAX_ATTACHMENT_CHARS_PER_FILE, remaining);
+    const truncated = raw.length > fileCap ? raw.slice(0, fileCap) : raw;
+    const wasTruncated = raw.length > fileCap;
+    remaining -= truncated.length;
+
+    // 超过 Write 安全长度的文件预分块：让模型看到块边界，按块 Write + Edit 追加，
+    // 避免整段 Write 被上游 max_tokens 截断、回灌、再整段重写撞 40 轮上限。
+    if (truncated.length > WRITE_SAFE_CHARS) {
+      const pieceCount = Math.ceil(truncated.length / CHUNK_SIZE);
+      const pieces: string[] = [];
+      for (let i = 0; i < pieceCount; i++) {
+        pieces.push(`# ===== 块 ${i + 1}/${pieceCount} =====`);
+        pieces.push(truncated.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE));
+      }
+      chunks.push(
+        '',
+        `--- ${file.path}（共 ${raw.length} 字符${wasTruncated ? '，已按上限截断' : ''}，已分 ${pieceCount} 块以适配 Write 工具）---`,
+        ...pieces,
+        `[说明] 此文件已预分块。请用 Write 写「块 1」到 ${file.path}，再用 Edit 逐步把后续块追加到文件末尾（每次 Edit 的 new_string ≤ ${WRITE_SAFE_CHARS} 字符），不要一次性写整文件，否则参数会被截断。`,
+      );
+    } else {
+      const content = wasTruncated ? `${truncated}\n...(已截断，原文件 ${raw.length} 字符)` : truncated;
+      chunks.push('', `--- ${file.path} ---`, content);
+    }
   }
 
   if (skipped.length > 0) {

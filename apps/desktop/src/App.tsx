@@ -844,6 +844,29 @@ export default function App() {
     };
   }, []);
 
+  // R3 多插件同时运行：全局监听 Tauri `plugin:exited` 事件，脚本类插件进程真正退出时
+  // （用户点停止 / 脚本跑完 / 崩溃）从 runningPlugins 映射移除，使侧栏运行指示器自动消失。
+  // 此前只有 ScriptPreviewPanel 组件内监听该事件，用户切到别的页面时进程退出会留下过期映射项。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    tauriListen<{ pluginId: string; exitCode?: number | null; stderrTail?: string }>('plugin:exited', (event) => {
+      const pluginId = event.payload?.pluginId;
+      if (pluginId) clearRunningPlugin(pluginId);
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* 无 Tauri 壳（浏览器预览）静默忽略 */
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [clearRunningPlugin]);
+
   const ctx: AppContextValue = {
     backendUrl, saveBackendUrl,
     session, applySession, applyCollabSession, refreshSession, resetSession,

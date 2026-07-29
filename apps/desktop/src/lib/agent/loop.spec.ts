@@ -346,6 +346,52 @@ describe('runAgentLoop', () => {
     expect(String(truncOutput?.result)).toMatch(/截断|拆成更小|分块/);
   });
 
+  it('连续截断早终止：连续 3 次 finish_reason=length 直接 failed，不空转到 max_turns', async () => {
+    // 模拟模型对大附件整段重写：连续 3 轮都被上游 max_tokens 截断，参数不完整。
+    const truncatedResp = sseBody([
+      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: '{"path":"big.py","content":"xxx' }),
+      finishChunk('length'),
+    ]);
+    // 前 3 次 fetch 都返回截断；第 4 次不应被调用（第 3 次截断后即 failed 返回）。
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount > 3) throw new Error('不应发起第 4 次模型调用：连续截断应早终止');
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) { controller.enqueue(encoder.encode(truncatedResp)); controller.close(); },
+      });
+      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    });
+
+    let executeCalled = false;
+    const writeTool: ToolDefinition = {
+      name: 'Write',
+      description: '写文件',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      execute: async () => {
+        executeCalled = true; // 截断时不应执行
+        return { ok: true, data: '不应到达' };
+      },
+    };
+    const cbs = makeCallbacks();
+    const result = await runAgentLoop({
+      messages: [{ role: 'user', content: '写大附件文件' }],
+      tools: [writeTool],
+      tier: 'fast',
+      signal: new AbortController().signal,
+      callbacks: cbs,
+    });
+    // 关键断言：连续截断达阈值后直接 failed，不再空转到 max_turns。
+    expect(result.status).toBe('failed');
+    expect(result.error).toMatch(/连续.*截断/);
+    expect(result.error).toMatch(/重试/);
+    // 仅发起 3 次模型调用（第 3 次截断后即返回，无第 4 次）。
+    expect(callCount).toBe(3);
+    // 截断时工具 execute 不应被调用。
+    expect(executeCalled).toBe(false);
+  });
+
   it('contextBudget 护栏：超预算时丢弃最早历史并注入压缩提示（不破坏 tool 配对）', async () => {
     // 构造大量历史消息，使总 token 远超 budget。
     // 含 assistant(tool_calls) + role:tool 配对，验证压缩后不留下孤立 tool result。

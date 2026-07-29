@@ -65,7 +65,13 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         editing={actions.editing}
         canEdit={canEdit}
         canPopOut={!plugin.pendingActivation && runtime !== 'workflow'}
-        onBack={() => { clearRunningPlugin(plugin.id); onBack(); }}
+        // R3 多插件同时运行：脚本类（nodejs/python）Tauri 进程在导航离开后仍存活，
+        // 保留 runningPlugins 映射项让侧栏继续显示运行指示器，由全局 plugin:exited 监听清理。
+        // 其他运行时（client/cloud/workflow）无持久客户端进程，返回即停止，从映射移除。
+        onBack={() => {
+          if (!isScriptRuntime(runtime)) clearRunningPlugin(plugin.id);
+          onBack();
+        }}
         onEdit={actions.editInGenerator}
         onShowManifest={() => setManifestOpen(true)}
         onPopOut={() => { void openPluginInWindow(plugin).catch((e) => toast.error(e instanceof Error ? e.message : String(e))); }}

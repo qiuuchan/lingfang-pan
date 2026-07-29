@@ -29,6 +29,34 @@ describe('creator input helpers', () => {
     expect(context).toContain('已跳过 1 个文件');
   });
 
+  it('chunks oversized attachments to fit Write tool safe length', () => {
+    // 12000 字符文件：超过 WRITE_SAFE_CHARS(5500)，应分 3 块（每块 5000）。
+    const big = 'x'.repeat(12_000);
+    const context = formatAttachmentContext([{ path: 'big.py', content: big }]);
+
+    // 头部声明：分块说明 + 原文字符数。
+    expect(context).toContain('--- big.py（共 12000 字符，已分 3 块以适配 Write 工具）---');
+    // 三块标记齐全。
+    expect(context).toContain('# ===== 块 1/3 =====');
+    expect(context).toContain('# ===== 块 2/3 =====');
+    expect(context).toContain('# ===== 块 3/3 =====');
+    // 分块指引：Write 块 1 + Edit 追加后续块 + 安全长度提示。
+    expect(context).toContain('用 Write 写「块 1」到 big.py');
+    expect(context).toContain('Edit');
+    expect(context).toMatch(/new_string ≤ 5500 字符/);
+    // 不应回退到老的「已截断」占位（那是短文件分支的兜底）。
+    expect(context).not.toContain('...(已截断');
+  });
+
+  it('leaves short attachments unchunked (no behavior change below safe length)', () => {
+    const short = 'x'.repeat(5_000); // ≤ WRITE_SAFE_CHARS(5500)，走原逻辑
+    const context = formatAttachmentContext([{ path: 'short.py', content: short }]);
+
+    expect(context).toContain('--- short.py ---');
+    expect(context).not.toContain('已分 ');
+    expect(context).not.toContain('块 1/');
+  });
+
   it('composes user input with attachments only when present', () => {
     expect(composeModelInput('做一个插件', '')).toBe('做一个插件');
     expect(composeModelInput('做一个插件', '# 附件')).toContain('做一个插件\n\n# 附件');

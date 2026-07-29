@@ -78,7 +78,7 @@ export function Sidebar({
   /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
   onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, removeFromRecent, openPluginCenter } = useApp();
+  const { session, view, setView, setRunningPlugin, runningPlugin, runningPlugins, pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, removeFromRecent, openPluginCenter } = useApp();
   const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
   // 历史使用中已固定的项不重复展示，避免与「固定常用」区冗余。
   const recentUnpinned = recentPlugins.filter((p) => !isPinned(p.id));
@@ -239,6 +239,8 @@ export function Sidebar({
                 key={p.id}
                 plugin={p}
                 collapsed={collapsed}
+                isRunning={Boolean(runningPlugins[p.id])}
+                isActive={runningPlugin?.id === p.id}
                 actionIcon={<PinOffIcon className="size-3.5" />}
                 actionTitle="取消固定"
                 onAction={() => unpinPlugin(p.id)}
@@ -261,6 +263,8 @@ export function Sidebar({
                 key={p.id}
                 plugin={p}
                 collapsed={collapsed}
+                isRunning={Boolean(runningPlugins[p.id])}
+                isActive={runningPlugin?.id === p.id}
                 onPin={() => pinPlugin(p)}
                 onRemove={() => removeFromRecent(p.id)}
                 onClick={() => { setRunningPlugin(p); }}
@@ -310,6 +314,8 @@ export function Sidebar({
 function SidebarPluginItem({
   plugin,
   collapsed,
+  isRunning,
+  isActive,
   actionIcon,
   actionTitle,
   onAction,
@@ -317,6 +323,10 @@ function SidebarPluginItem({
 }: {
   plugin: LoadedPlugin;
   collapsed: boolean;
+  /** 是否在 runningPlugins 映射中（含当前查看项）—— 显示翠绿运行指示器。 */
+  isRunning: boolean;
+  /** 是否为当前正在查看的运行插件（runningPlugin.id === p.id）—— 名字/行高亮。 */
+  isActive: boolean;
   actionIcon: ReactNode;
   actionTitle: string;
   onAction: () => void;
@@ -330,17 +340,31 @@ function SidebarPluginItem({
         title={collapsed ? plugin.name : undefined}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'sm' }),
-          'h-9 flex-1 gap-2.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+          'h-9 flex-1 gap-2.5 font-medium',
           collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
+          isActive
+            ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >
         {/* 去图标后用插件名首字符占位（折叠态仅显示首字符,展开态显示全名+草稿徽章）。 */}
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
+        <span className="relative flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
           {plugin.name.trim().charAt(0) || '?'}
+          {isRunning && (
+            <span
+              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-card"
+              aria-label="插件运行中"
+            />
+          )}
         </span>
         {!collapsed && (
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-sm">{plugin.name}</span>
+            {isRunning && (
+              <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+                运行中
+              </span>
+            )}
             {plugin.draft && (
               <span className="shrink-0 rounded border border-amber-500/30 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
                 草稿
@@ -368,12 +392,18 @@ function SidebarPluginItem({
 function SidebarRecentItem({
   plugin,
   collapsed,
+  isRunning,
+  isActive,
   onPin,
   onRemove,
   onClick,
 }: {
   plugin: LoadedPlugin;
   collapsed: boolean;
+  /** 是否在 runningPlugins 映射中（含当前查看项）—— 显示翠绿运行指示器。 */
+  isRunning: boolean;
+  /** 是否为当前正在查看的运行插件（runningPlugin.id === p.id）—— 名字/行高亮。 */
+  isActive: boolean;
   onPin: () => void;
   onRemove: () => void;
   onClick: () => void;
@@ -386,16 +416,30 @@ function SidebarRecentItem({
         title={collapsed ? plugin.name : undefined}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'sm' }),
-          'h-9 flex-1 gap-2.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+          'h-9 flex-1 gap-2.5 font-medium',
           collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
+          isActive
+            ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
+        <span className="relative flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
           {plugin.name.trim().charAt(0) || '?'}
+          {isRunning && (
+            <span
+              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-card"
+              aria-label="插件运行中"
+            />
+          )}
         </span>
         {!collapsed && (
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-sm">{plugin.name}</span>
+            {isRunning && (
+              <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 group-hover/item:opacity-0 dark:bg-emerald-950/30 dark:text-emerald-400">
+                运行中
+              </span>
+            )}
             {plugin.draft && (
               <span className="shrink-0 rounded border border-amber-500/30 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 group-hover/item:opacity-0 dark:bg-amber-950/30 dark:text-amber-400">
                 草稿
