@@ -1,5 +1,6 @@
 {
   "name": "lingfang-platform",
+  "version": "0.1.9",
   "private": true,
   "packageManager": "pnpm@9.0.0",
   "engines": {
@@ -24,7 +25,12 @@
     "plugin:create": "pnpm -C packages/plugin-sdk exec lingfang-plugin create",
     "plugin:validate": "pnpm -C packages/plugin-sdk exec lingfang-plugin validate",
     "plugin:build": "pnpm -C packages/plugin-sdk exec lingfang-plugin build",
-    "plugin:publish": "pnpm -C packages/plugin-sdk exec lingfang-plugin publish"
+    "plugin:publish": "pnpm -C packages/plugin-sdk exec lingfang-plugin publish",
+    "version:sync": "node scripts/sync-version.mjs",
+    "version:bump": "node scripts/sync-version.mjs",
+    "prebuild": "node scripts/sync-version.mjs",
+    "build:desktop": "node scripts/sync-version.mjs && pnpm -C apps/desktop build",
+    "build:api": "node scripts/sync-version.mjs && pnpm -C apps/collab-api build"
   },
   "dependencies": {
     "zod": "^4.4.3"
