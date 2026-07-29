@@ -5,10 +5,9 @@ import { Public } from './common';
 import { PrismaService } from './prisma.service';
 import { AutomationReadinessService } from './automation/automation-readiness.service';
 
-// 运行时读取 package.json 的 version（源文件位于 src/、产物位于 dist/，二者各上一级即项目根的 package.json）。
-// 不用 import 的原因：tsconfig 未启用 resolveJsonModule，且 rootDir=src 会拒绝引入 src 外的 .json。
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { version } = require('../package.json') as { version: string };
+// 构建元信息（版本 + git hash + 构建时间），由 scripts/sync-version.mjs 自动生成。
+import { BUILD_INFO } from './build-info';
+const { version } = BUILD_INFO;
 
 /**
  * 深度就绪检查：执行原生 SELECT 1 验证数据库连通性。
@@ -48,8 +47,8 @@ export class HealthController {
   @Get('health')
   @ApiOperation({ summary: '服务存活检查（liveness，不查依赖）' })
   health() {
-    // 返回 version 供 collab-admin 做版本比对，避免管理端因缺字段永远误判为「有新版本」。
-    return { status: 'ok', service: 'collab-api', version };
+    // 返回 version + 构建元信息供 collab-admin 做版本比对 + 运维定位部署时间。
+    return { status: 'ok', service: 'collab-api', version, gitHash: BUILD_INFO.gitHash, buildTime: BUILD_INFO.buildTime };
   }
 
   /**
