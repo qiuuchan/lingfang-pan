@@ -32,6 +32,14 @@ const MAX_TURNS = 40;
 /** 429/503 重试次数（指数退避 1s/2s，不含首次）。 */
 const HTTP_RETRY = 2;
 
+/**
+ * 连续截断早终止阈值：模型 tool_call 的 arguments 因上游 max_tokens 被截断
+ * （finish_reason='length'）时，loop.ts 会回灌分块提示让模型改用 Write + Edit 追加。
+ * 但模型对大附件常未正确分块，整段重写再次截断，循环到 MAX_TURNS 才报 max_turns。
+ * 连续达此阈值即直接 failed 返回，给用户可重试的清晰错误，而非空转到 40 轮。
+ */
+const MAX_CONSECUTIVE_TRUNCATIONS = 3;
+
 export interface AgentLoopOptions {
   /** 完整 messages（含 system + 历史还原 + 当前 user 输入）。 */
   messages: ChatMessage[];
@@ -132,6 +140,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
   // 增量拼接中的 tool_calls（带 _index 用于 OpenAI 分片合并，输出时剥离）。
   type PendingCall = FunctionToolCall & { _index: number };
   let toolCallCount = 0;
+  // 连续截断计数：finish_reason='length' +1，非截断轮清零；达阈值直接 failed 返回。
+  let consecutiveTruncations = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (signal.aborted) return { status: 'aborted', toolCallCount };
@@ -199,6 +209,16 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
     // 此时 tool_calls 的 arguments 必然不完整（JSON 被切断），不能执行。
     // 回灌明确错误让模型分块重试（如先 Write 部分内容，再 Edit 追加）。
     if (streamed && streamed.finishReason === 'length' && pendingToolCalls.length > 0) {
+      consecutiveTruncations++;
+      // 连续截断早终止：模型对大附件常未正确分块，整段重写再次截断，会循环到 MAX_TURNS。
+      // 达阈值直接 failed 返回，给用户可重试的清晰错误，而非空转到 40 轮。
+      if (consecutiveTruncations >= MAX_CONSECUTIVE_TRUNCATIONS) {
+        return {
+          status: 'failed',
+          error: `工具调用连续 ${consecutiveTruncations} 次因长度限制被截断，已停止以避免空转。可点「重试」从上次进度继续，或把附件内容拆小后重试。`,
+          toolCallCount,
+        };
+      }
       const truncatedCall = pendingToolCalls[0];
       callbacks.onToolCall({
         toolCallId: truncatedCall.id,
@@ -226,6 +246,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
       pendingToolCalls.length = 0;
       continue;
     }
+
+    // 非截断轮：重置连续截断计数（模型本轮按分块指引正常输出了）。
+    consecutiveTruncations = 0;
 
     // 无工具调用：模型给了最终答案，循环结束。
     // 剥离内部用的 _index 字段，输出标准 FunctionToolCall。
