@@ -117,7 +117,7 @@ async fn plugin_net_fetch(
     // 1) manifest 声明校验：仅声明了 net.fetch 的插件可用。
     let declared = state.registry.find(&plugin_id, "net.fetch");
     if declared.is_none() {
-        return Err(format!("插件未声明能力: net.fetch"));
+        return Err("插件未声明能力: net.fetch".to_string());
     }
     let url = args
         .get("url")

@@ -12,7 +12,7 @@
 //! - `scheduler_has_active()` → 是否有 ACTIVE 任务（close 确认对话框用）。
 
 use chrono::Utc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::State;
 use uuid::Uuid;
 
 use super::cron::next_run_after;
@@ -20,7 +20,7 @@ use super::executor::PendingRuns;
 use super::state::SchedulerState;
 use super::types::{
     LocalSchedule, LocalScheduleCreateInput, LocalScheduleListFilter, LocalScheduleRun,
-    LocalScheduleRunRecordInput, LocalScheduleRunRecordStatus, LocalScheduleRunStatus,
+    LocalScheduleRunRecordInput,
     LocalScheduleStatus, LocalScheduleTrigger, LocalScheduleUpdateInput,
 };
 

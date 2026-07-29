@@ -64,7 +64,7 @@ pub(crate) fn build_spawn_command(binary: &Path, args: &[String]) -> Command {
         }
         let mut cmd = Command::new(binary);
         cmd.creation_flags(CREATE_NO_WINDOW).args(args);
-        return cmd;
+        cmd
     }
     #[cfg(not(windows))]
     {
@@ -93,7 +93,7 @@ pub(crate) fn resolve_npm_shim(cmd_path: &Path) -> Option<ResolvedShim> {
                     || cap.ends_with(".mjs")
                     || cap.ends_with(".cjs"))
         })
-        .last()?;
+        .next_back()?;
     let path = expand_npm_shim_path(&raw, dp0);
     if !path.is_file() {
         return None;

@@ -96,7 +96,7 @@ pub(crate) fn run_streamed_with_env<F>(
     workspace_dir: Option<&str>,
     timeout_ms: u64,
     env: Vec<(OsString, OsString)>,
-    mut on_line: F,
+    on_line: F,
 ) -> Result<CapturedOutput, String>
 where
     F: FnMut(&str, bool) + Send + 'static,

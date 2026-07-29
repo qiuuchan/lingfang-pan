@@ -214,18 +214,44 @@ impl PluginLlmBridge {
         sha256: String,
         ttl: Duration,
     ) -> Result<PluginBridgeEnv, String> {
-        if api_base.trim().is_empty() || auth_token.trim().is_empty() || invocation_id.trim().is_empty() {
+        if api_base.trim().is_empty()
+            || auth_token.trim().is_empty()
+            || invocation_id.trim().is_empty()
+        {
             return Err("Action bridge 缺少平台 session 或 invocation".to_string());
         }
         let endpoint = self.ensure_server()?;
         let token = issue_token();
-        self.inner.sessions.lock().unwrap_or_else(|poison| poison.into_inner()).insert(token.clone(), BridgeSession {
-            plugin_id: plugin_id.to_string(), api_base: api_base.trim().trim_end_matches('/').to_string(), auth_token: auth_token.trim().to_string(),
-            allow_llm_chat: false, allow_image_generate: false, allow_image_edit: false, allow_video_generate: false, action_invocation_id: Some(invocation_id),
-            action_context: Some(Arc::new(ActionRuntimeContext { app, manager, package_id, release_id, sha256 })),
-            client_source: PluginBridgeClientSource::PluginRuntime, expires_at: Instant::now() + ttl,
-        });
-        Ok(PluginBridgeEnv { url: endpoint, token })
+        self.inner
+            .sessions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .insert(
+                token.clone(),
+                BridgeSession {
+                    plugin_id: plugin_id.to_string(),
+                    api_base: api_base.trim().trim_end_matches('/').to_string(),
+                    auth_token: auth_token.trim().to_string(),
+                    allow_llm_chat: false,
+                    allow_image_generate: false,
+                    allow_image_edit: false,
+                    allow_video_generate: false,
+                    action_invocation_id: Some(invocation_id),
+                    action_context: Some(Arc::new(ActionRuntimeContext {
+                        app,
+                        manager,
+                        package_id,
+                        release_id,
+                        sha256,
+                    })),
+                    client_source: PluginBridgeClientSource::PluginRuntime,
+                    expires_at: Instant::now() + ttl,
+                },
+            );
+        Ok(PluginBridgeEnv {
+            url: endpoint,
+            token,
+        })
     }
 
     pub fn revoke_token(&self, token: &str) {
@@ -325,8 +351,19 @@ pub fn respond_plugin_action_bridge(
     result: Option<Value>,
     error: Option<Value>,
 ) -> Result<(), String> {
-    let sender = bridge.inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&request_id).ok_or_else(|| "Action bridge request 已失效".to_string())?;
-    sender.send(match error { Some(error) => Err(error), None => Ok(result.unwrap_or_else(|| json!({}))) }).map_err(|_| "Action bridge 响应接收端已关闭".to_string())
+    let sender = bridge
+        .inner
+        .action_requests
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .remove(&request_id)
+        .ok_or_else(|| "Action bridge request 已失效".to_string())?;
+    sender
+        .send(match error {
+            Some(error) => Err(error),
+            None => Ok(result.unwrap_or_else(|| json!({}))),
+        })
+        .map_err(|_| "Action bridge 响应接收端已关闭".to_string())
 }
 
 fn handle_connection(inner: Arc<BridgeState>, mut stream: TcpStream) {
@@ -427,7 +464,9 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
     let path = request.path.as_str();
     let path_only = path.split('?').next().unwrap_or(path);
     let is_get_allowed = request.method == "GET"
-        && (path_only == "/v1/models" || path_only == "/video/stream" || path_only == "/video/download");
+        && (path_only == "/v1/models"
+            || path_only == "/video/stream"
+            || path_only == "/video/download");
     if !is_get_allowed && request.method != "POST" {
         return Err(BridgeError::new(
             404,
@@ -478,32 +517,112 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
     }
 }
 
-fn route_action_call(inner: &Arc<BridgeState>, session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+fn route_action_call(
+    inner: &Arc<BridgeState>,
+    session: &BridgeSession,
+    body_bytes: Vec<u8>,
+) -> BridgeResult<Value> {
     ensure_platform_session(session, "Nested Action")?;
-    let parent_id = session.action_invocation_id.as_deref().ok_or_else(|| BridgeError::new(403, "action_dependency_denied", "当前脚本不在 Action invocation 中"))?;
-    let context = session.action_context.as_ref().ok_or_else(|| BridgeError::new(503, "action_runtime_unavailable", "Action runtime context 不可用"))?;
-    let body: Value = serde_json::from_slice(&body_bytes).map_err(|_| BridgeError::new(400, "action_input_invalid", "actions.call 请求体不是有效 JSON"))?;
-    let _dependency_id = body.get("dependency_id").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).ok_or_else(|| BridgeError::new(400, "action_dependency_denied", "actions.call 缺少 dependency_id"))?;
-    body.get("input").filter(|value| value.is_object()).ok_or_else(|| BridgeError::new(400, "action_input_invalid", "Action input 必须是 JSON 对象"))?;
-    let caller = context.manager.action_caller_descriptor(&context.package_id, &context.release_id, &context.sha256).map_err(|error| BridgeError::new(403, "action_dependency_denied", error))?;
+    let parent_id = session.action_invocation_id.as_deref().ok_or_else(|| {
+        BridgeError::new(
+            403,
+            "action_dependency_denied",
+            "当前脚本不在 Action invocation 中",
+        )
+    })?;
+    let context = session.action_context.as_ref().ok_or_else(|| {
+        BridgeError::new(
+            503,
+            "action_runtime_unavailable",
+            "Action runtime context 不可用",
+        )
+    })?;
+    let body: Value = serde_json::from_slice(&body_bytes).map_err(|_| {
+        BridgeError::new(
+            400,
+            "action_input_invalid",
+            "actions.call 请求体不是有效 JSON",
+        )
+    })?;
+    let _dependency_id = body
+        .get("dependency_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            BridgeError::new(
+                400,
+                "action_dependency_denied",
+                "actions.call 缺少 dependency_id",
+            )
+        })?;
+    body.get("input")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| {
+            BridgeError::new(400, "action_input_invalid", "Action input 必须是 JSON 对象")
+        })?;
+    let caller = context
+        .manager
+        .action_caller_descriptor(&context.package_id, &context.release_id, &context.sha256)
+        .map_err(|error| BridgeError::new(403, "action_dependency_denied", error))?;
     let request_id = Uuid::new_v4().to_string();
     let (sender, receiver) = mpsc::channel();
-    inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).insert(request_id.clone(), sender);
+    inner
+        .action_requests
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(request_id.clone(), sender);
     if let Err(error) = context.app.emit("plugin-action-bridge-call", json!({ "request_id": request_id, "parent_invocation_id": parent_id, "caller": caller, "args": body })) {
         inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&request_id);
         return Err(BridgeError::new(503, "action_runtime_unavailable", format!("发送 Action bridge 请求失败：{error}")));
     }
     match receiver.recv_timeout(Duration::from_secs(24 * 60 * 60 + 30)) {
         Ok(Ok(result)) => Ok(result),
-        Ok(Err(error)) => Err(BridgeError::new(error.get("status").and_then(Value::as_u64).unwrap_or(500) as u16, error.get("code").and_then(Value::as_str).unwrap_or("action_execution_failed"), error.get("message").and_then(Value::as_str).unwrap_or("Nested Action 执行失败"))),
-        Err(_) => { inner.action_requests.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&request_id); Err(BridgeError::new(504, "action_timeout", "等待桌面 Action host 响应超时")) }
+        Ok(Err(error)) => Err(BridgeError::new(
+            error.get("status").and_then(Value::as_u64).unwrap_or(500) as u16,
+            error
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("action_execution_failed"),
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Nested Action 执行失败"),
+        )),
+        Err(_) => {
+            inner
+                .action_requests
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .remove(&request_id);
+            Err(BridgeError::new(
+                504,
+                "action_timeout",
+                "等待桌面 Action host 响应超时",
+            ))
+        }
     }
 }
 
-fn route_action_artifact(session: &BridgeSession, suffix: &str, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+fn route_action_artifact(
+    session: &BridgeSession,
+    suffix: &str,
+    body_bytes: Vec<u8>,
+) -> BridgeResult<Value> {
     ensure_platform_session(session, "Action artifact")?;
-    let invocation_id = session.action_invocation_id.as_deref().ok_or_else(|| BridgeError::new(403, "action_artifact_invalid", "当前脚本不在 Action invocation 中"))?;
-    let body: Value = serde_json::from_slice(&body_bytes).map_err(|_| BridgeError::new(400, "action_artifact_invalid", "Artifact 请求体不是有效 JSON"))?;
+    let invocation_id = session.action_invocation_id.as_deref().ok_or_else(|| {
+        BridgeError::new(
+            403,
+            "action_artifact_invalid",
+            "当前脚本不在 Action invocation 中",
+        )
+    })?;
+    let body: Value = serde_json::from_slice(&body_bytes).map_err(|_| {
+        BridgeError::new(
+            400,
+            "action_artifact_invalid",
+            "Artifact 请求体不是有效 JSON",
+        )
+    })?;
     let path = format!("/api/plugin-actions/invocations/{invocation_id}/artifacts{suffix}");
     let value = relay_post_json(session, &path, &body)?;
     if suffix == "/materialize" {
@@ -620,7 +739,11 @@ fn route_image_edit(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResul
         .and_then(|value| value.as_array())
         .filter(|items| !items.is_empty())
         .ok_or_else(|| {
-            BridgeError::new(400, "bad_request", "image.edit 缺少 images（至少 1 张参考图）")
+            BridgeError::new(
+                400,
+                "bad_request",
+                "image.edit 缺少 images（至少 1 张参考图）",
+            )
         })?;
     let tier = parse_model_tier(&body)?;
     let n = body
@@ -638,7 +761,9 @@ fn route_image_edit(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResul
     let mut decoded: Vec<(String, String, Vec<u8>)> = Vec::with_capacity(images.len());
     for (index, item) in images.iter().enumerate() {
         let filename = sanitize_filename(
-            item.get("filename").and_then(|value| value.as_str()).unwrap_or("image"),
+            item.get("filename")
+                .and_then(|value| value.as_str())
+                .unwrap_or("image"),
         );
         let mime = item
             .get("mimeType")
@@ -656,15 +781,13 @@ fn route_image_edit(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResul
                     format!("image.edit 第 {index} 张图片缺少 data(base64)"),
                 )
             })?;
-        let bytes = BASE64_STANDARD
-            .decode(data_b64.trim())
-            .map_err(|_| {
-                BridgeError::new(
-                    400,
-                    "bad_request",
-                    format!("image.edit 第 {index} 张图片 data 不是合法 base64"),
-                )
-            })?;
+        let bytes = BASE64_STANDARD.decode(data_b64.trim()).map_err(|_| {
+            BridgeError::new(
+                400,
+                "bad_request",
+                format!("image.edit 第 {index} 张图片 data 不是合法 base64"),
+            )
+        })?;
         if bytes.is_empty() {
             return Err(BridgeError::new(
                 400,
@@ -705,7 +828,9 @@ fn build_image_edit_multipart(
     }
     push_text_part(&mut body, boundary, "n", &n.to_string());
     push_text_part(&mut body, boundary, "size", size);
-    push_text_part(&mut body, boundary, "response_format", "b64_json");
+    // 不再发送 response_format：gpt-image-1 及以后模型固定返回 b64_json，
+    // 传此参数会导致上游 400（"Invalid request: response_format is not supported"）。
+    // dall-e-2 默认也返回 b64_json（relay 侧按 data[] 解析，不依赖此字段）。
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     (body, format!("multipart/form-data; boundary={boundary}"))
 }
@@ -737,7 +862,7 @@ fn push_file_part(body: &mut Vec<u8>, boundary: &str, filename: &str, mime: &str
 
 /// 过滤文件名中的路径分隔符与特殊字符，防止 multipart 头注入。
 fn sanitize_filename(raw: &str) -> String {
-    let base = raw.split(['/', '\\']).last().unwrap_or(raw);
+    let base = raw.split(['/', '\\']).next_back().unwrap_or(raw);
     let cleaned: String = base
         .chars()
         .map(|c| {
@@ -779,10 +904,9 @@ fn percent_decode(input: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 out.push(byte);
                 i += 3;
                 continue;
@@ -823,8 +947,22 @@ fn build_rbflow_multipart(
 ) -> (Vec<u8>, String) {
     let boundary = "lfVideoGenerate8k2m7xQ1";
     let mut body = Vec::new();
-    push_file_part_named(&mut body, boundary, "image", image_filename, image_mime, image_bytes);
-    push_file_part_named(&mut body, boundary, "video", video_filename, video_mime, video_bytes);
+    push_file_part_named(
+        &mut body,
+        boundary,
+        "image",
+        image_filename,
+        image_mime,
+        image_bytes,
+    );
+    push_file_part_named(
+        &mut body,
+        boundary,
+        "video",
+        video_filename,
+        video_mime,
+        video_bytes,
+    );
     if let Some(cb) = callback_url.filter(|s| !s.is_empty()) {
         push_text_part(&mut body, boundary, "callback_url", cb);
     }
@@ -853,15 +991,9 @@ fn push_file_part_named(
 
 /// 解析 base64 数据为原始字节（视频桥共用 image.edit 的解码模式）。
 fn decode_required_base64(label: &str, data_b64: &str) -> BridgeResult<Vec<u8>> {
-    let bytes = BASE64_STANDARD
-        .decode(data_b64.trim())
-        .map_err(|_| {
-            BridgeError::new(
-                400,
-                "bad_request",
-                format!("{label} data 不是合法 base64"),
-            )
-        })?;
+    let bytes = BASE64_STANDARD.decode(data_b64.trim()).map_err(|_| {
+        BridgeError::new(400, "bad_request", format!("{label} data 不是合法 base64"))
+    })?;
     if bytes.is_empty() {
         return Err(BridgeError::new(
             400,
@@ -920,11 +1052,7 @@ fn route_video_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
     // seconds：必填，支持整数或浮点；向上取整为秒。
     let seconds = body
         .get("seconds")
-        .and_then(|v| {
-            v.as_u64()
-                .map(|n| n as f64)
-                .or_else(|| v.as_f64())
-        })
+        .and_then(|v| v.as_u64().map(|n| n as f64).or_else(|| v.as_f64()))
         .filter(|v| *v > 0.0)
         .ok_or_else(|| {
             BridgeError::new(400, "bad_request", "video.generate 缺少 seconds（正数）")
@@ -934,16 +1062,12 @@ fn route_video_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
         .get("image")
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            BridgeError::new(400, "bad_request", "video.generate 缺少 image(base64)")
-        })?;
+        .ok_or_else(|| BridgeError::new(400, "bad_request", "video.generate 缺少 image(base64)"))?;
     let video_b64 = body
         .get("video")
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            BridgeError::new(400, "bad_request", "video.generate 缺少 video(base64)")
-        })?;
+        .ok_or_else(|| BridgeError::new(400, "bad_request", "video.generate 缺少 video(base64)"))?;
     let image_filename = sanitize_filename(
         body.get("image_filename")
             .and_then(Value::as_str)
@@ -1018,9 +1142,10 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
         ));
     }
     ensure_platform_session(session, "视频进度")?;
-    let task_id = sanitize_task_id(query_first(full_path, "task_id").ok_or_else(|| {
-        BridgeError::new(400, "bad_request", "video.stream 缺少 task_id")
-    })?)?;
+    let task_id = sanitize_task_id(
+        query_first(full_path, "task_id")
+            .ok_or_else(|| BridgeError::new(400, "bad_request", "video.stream 缺少 task_id"))?,
+    )?;
     let rbflow = read_rbflow_credential(session).map_err(|reason| {
         BridgeError::new(
             503,
@@ -1056,7 +1181,10 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
     }
     // RBFLow 任务查询返回 {task_id, state, progress, failed_reason, output_filename, ...}
     // 转成插件期望的单事件数组（与 ProgressWorker 解析逻辑对齐）。
-    let t_state = body.get("state").and_then(Value::as_str).unwrap_or("RUNNING");
+    let t_state = body
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("RUNNING");
     let t_progress = body.get("progress").and_then(Value::as_f64).unwrap_or(0.0);
     let failed_reason = body.get("failed_reason").and_then(Value::as_str);
     let output_filename = body.get("output_filename").and_then(Value::as_str);
@@ -1135,9 +1263,10 @@ fn route_video_download(session: &BridgeSession, full_path: &str) -> BridgeResul
         ));
     }
     ensure_platform_session(session, "视频下载")?;
-    let task_id = sanitize_task_id(query_first(full_path, "task_id").ok_or_else(|| {
-        BridgeError::new(400, "bad_request", "video.download 缺少 task_id")
-    })?)?;
+    let task_id = sanitize_task_id(
+        query_first(full_path, "task_id")
+            .ok_or_else(|| BridgeError::new(400, "bad_request", "video.download 缺少 task_id"))?,
+    )?;
     let rbflow = read_rbflow_credential(session).map_err(|reason| {
         BridgeError::new(
             503,
@@ -1212,17 +1341,8 @@ fn extract_filename_from_disposition(header: &str) -> Option<String> {
         let part = part.trim();
         if let Some(rest) = part.strip_prefix("filename*=") {
             // RFC 5987: utf-8''name.mp4 → 去掉前缀与引号
-            let decoded = rest
-                .split('\'')
-                .nth(2)
-                .unwrap_or(rest)
-                .trim_matches('"');
-            return Some(
-                percent_decode(decoded)
-                    .trim()
-                    .trim_matches('"')
-                    .to_string(),
-            );
+            let decoded = rest.split('\'').nth(2).unwrap_or(rest).trim_matches('"');
+            return Some(percent_decode(decoded).trim().trim_matches('"').to_string());
         }
         if let Some(rest) = part.strip_prefix("filename=") {
             let name = rest.trim().trim_matches('"');
@@ -1241,11 +1361,7 @@ fn sanitize_task_id(raw: String) -> BridgeResult<String> {
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
         .collect();
     if cleaned.is_empty() || cleaned != raw {
-        return Err(BridgeError::new(
-            400,
-            "bad_request",
-            "task_id 含非法字符",
-        ));
+        return Err(BridgeError::new(400, "bad_request", "task_id 含非法字符"));
     }
     Ok(cleaned)
 }
@@ -1272,8 +1388,12 @@ fn relay_post_raw(
         .body(body.to_vec())
         .send()
         .map_err(|_| {
-            BridgeError::new(502, "relay_request_failed", "无法连接平台模型服务，请稍后重试")
-                .with_request_id(request_id.clone())
+            BridgeError::new(
+                502,
+                "relay_request_failed",
+                "无法连接平台模型服务，请稍后重试",
+            )
+            .with_request_id(request_id.clone())
         })?;
     relay_response_json(response, &request_id)
 }
@@ -1546,10 +1666,20 @@ fn relay_response_json(
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(fallback_request_id);
-        return Err(
-            BridgeError::new(status.as_u16(), code, plugin_safe_message(code, message))
-                .with_request_id(request_id),
-        );
+        // 提取 relay 透传的上游真实错误（details.upstreamDetail），附到消息末尾供插件日志诊断。
+        // 不暴露给最终用户 UI（插件 SDK 的 PluginAiError.message 仅用于开发者 console）。
+        let upstream_detail = product_error
+            .as_ref()
+            .and_then(|value| value.get("details"))
+            .and_then(|details| details.get("upstreamDetail"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let safe_msg = plugin_safe_message(code, message);
+        let final_msg = match upstream_detail {
+            Some(detail) => format!("{safe_msg} [upstream: {detail}]"),
+            None => safe_msg,
+        };
+        return Err(BridgeError::new(status.as_u16(), code, final_msg).with_request_id(request_id));
     }
     serde_json::from_str(&text).map_err(|_| {
         BridgeError::new(502, "relay_response_invalid", "平台模型响应格式无效")
@@ -1632,7 +1762,7 @@ fn http_json(status: u16, body: &Value) -> String {
     };
     format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
-        payload.as_bytes().len()
+        payload.len()
     )
 }
 
@@ -1739,7 +1869,11 @@ mod tests {
         let env = env.expect("video.generate 应注册 session");
         assert!(!env.url.is_empty());
         assert!(!env.token.is_empty());
-        let sessions = bridge.inner.sessions.lock().unwrap_or_else(|poison| poison.into_inner());
+        let sessions = bridge
+            .inner
+            .sessions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let session = sessions.get(&env.token).expect("session 应已注册");
         assert!(session.allow_video_generate);
         assert!(!session.allow_llm_chat);
@@ -1906,22 +2040,46 @@ mod tests {
 
     #[test]
     fn action_artifact_route_binds_the_host_invocation_without_leaking_jwt_in_body() {
-        let (endpoint, request_rx) = spawn_relay_response(200, json!({ "type": "artifact_ref", "artifact_id": "artifact-1" }));
+        let (endpoint, request_rx) = spawn_relay_response(
+            200,
+            json!({ "type": "artifact_ref", "artifact_id": "artifact-1" }),
+        );
         let session = BridgeSession {
-            plugin_id: "test-plugin".to_string(), api_base: endpoint, auth_token: "secret-jwt".to_string(),
-            allow_llm_chat: false, allow_image_generate: false, allow_image_edit: false, allow_video_generate: false,
-            action_invocation_id: Some("invocation-1".to_string()), action_context: None,
-            client_source: PluginBridgeClientSource::PluginRuntime, expires_at: Instant::now() + Duration::from_secs(60),
+            plugin_id: "test-plugin".to_string(),
+            api_base: endpoint,
+            auth_token: "secret-jwt".to_string(),
+            allow_llm_chat: false,
+            allow_image_generate: false,
+            allow_image_edit: false,
+            allow_video_generate: false,
+            action_invocation_id: Some("invocation-1".to_string()),
+            action_context: None,
+            client_source: PluginBridgeClientSource::PluginRuntime,
+            expires_at: Instant::now() + Duration::from_secs(60),
         };
-        let result = route_action_artifact(&session, "", serde_json::to_vec(&json!({ "data_base64": "UE5H", "media_type": "image/png" })).unwrap()).expect("artifact create 应代理成功");
+        let result = route_action_artifact(
+            &session,
+            "",
+            serde_json::to_vec(&json!({ "data_base64": "UE5H", "media_type": "image/png" }))
+                .unwrap(),
+        )
+        .expect("artifact create 应代理成功");
         assert_eq!(result["artifact_id"], "artifact-1");
-        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到 artifact 请求");
-        assert_eq!(request.path, "/api/plugin-actions/invocations/invocation-1/artifacts");
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("应收到 artifact 请求");
+        assert_eq!(
+            request.path,
+            "/api/plugin-actions/invocations/invocation-1/artifacts"
+        );
         let body: Value = serde_json::from_slice(&request.body).unwrap();
         assert_eq!(body["data_base64"], "UE5H");
         assert!(body.get("auth_token").is_none());
         assert!(body.get("invocation_id").is_none());
-        assert_eq!(request.headers.get("authorization").map(String::as_str), Some("Bearer secret-jwt"));
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer secret-jwt")
+        );
     }
 
     fn spawn_relay_response(status: u16, body: Value) -> (String, mpsc::Receiver<HttpRequest>) {
@@ -2156,10 +2314,8 @@ mod tests {
     #[test]
     fn route_image_edit_builds_multipart_and_extracts_images() {
         // mock relay 返回一张 b64 图片，并捕获桥转发的 multipart 请求。
-        let (endpoint, request_rx) = spawn_relay_response(
-            200,
-            json!({ "data": [{ "b64_json": "AAAA" }] }),
-        );
+        let (endpoint, request_rx) =
+            spawn_relay_response(200, json!({ "data": [{ "b64_json": "AAAA" }] }));
         let session = BridgeSession {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
@@ -2240,12 +2396,14 @@ mod tests {
             "size": "1024x1024",
         }))
         .expect("请求体应可序列化");
-        let error = route_image_edit(&session, body)
-            .expect_err("上游 401 应透出为桥错误");
+        let error = route_image_edit(&session, body).expect_err("上游 401 应透出为桥错误");
         assert_eq!(error.status, 401);
         assert_eq!(error.code, "upstream_llm_error");
         assert_eq!(error.message, "平台模型服务暂时不可用");
-        assert_ne!(error.message, "上游模型调用失败", "原始上游 detail 不得泄漏给插件");
+        assert_ne!(
+            error.message, "上游模型调用失败",
+            "原始上游 detail 不得泄漏给插件"
+        );
         assert_eq!(
             error.request_id.as_deref(),
             Some("2eb03a0b-7eca-484f-8e71-4a5f9c2327e5")
@@ -2270,7 +2428,12 @@ mod tests {
         };
         let case = |body: Value| route_image_edit(&session, serde_json::to_vec(&body).unwrap());
         // 缺 prompt
-        assert_eq!(case(json!({ "images": [{ "filename": "a.jpg", "data": "UE5HREFUQQ==" }] })).unwrap_err().status, 400);
+        assert_eq!(
+            case(json!({ "images": [{ "filename": "a.jpg", "data": "UE5HREFUQQ==" }] }))
+                .unwrap_err()
+                .status,
+            400
+        );
         // 缺 images
         assert_eq!(case(json!({ "prompt": "x" })).unwrap_err().status, 400);
         // 非法 base64
@@ -2333,15 +2496,40 @@ mod tests {
         let session = video_session("http://127.0.0.1:0".to_string(), true);
         let case = |body: Value| route_video_generate(&session, serde_json::to_vec(&body).unwrap());
         // 缺 seconds
-        assert_eq!(case(json!({ "image": "aGk=", "video": "Ymo=" })).unwrap_err().status, 400);
+        assert_eq!(
+            case(json!({ "image": "aGk=", "video": "Ymo=" }))
+                .unwrap_err()
+                .status,
+            400
+        );
         // seconds 非正
-        assert_eq!(case(json!({ "image": "aGk=", "video": "Ymo=", "seconds": 0 })).unwrap_err().status, 400);
+        assert_eq!(
+            case(json!({ "image": "aGk=", "video": "Ymo=", "seconds": 0 }))
+                .unwrap_err()
+                .status,
+            400
+        );
         // 缺 image
-        assert_eq!(case(json!({ "video": "Ymo=", "seconds": 5 })).unwrap_err().status, 400);
+        assert_eq!(
+            case(json!({ "video": "Ymo=", "seconds": 5 }))
+                .unwrap_err()
+                .status,
+            400
+        );
         // 缺 video
-        assert_eq!(case(json!({ "image": "aGk=", "seconds": 5 })).unwrap_err().status, 400);
+        assert_eq!(
+            case(json!({ "image": "aGk=", "seconds": 5 }))
+                .unwrap_err()
+                .status,
+            400
+        );
         // 非法 tier
-        assert_eq!(case(json!({ "image": "aGk=", "video": "Ymo=", "seconds": 5, "model": "gpt-4o" })).unwrap_err().status, 400);
+        assert_eq!(
+            case(json!({ "image": "aGk=", "video": "Ymo=", "seconds": 5, "model": "gpt-4o" }))
+                .unwrap_err()
+                .status,
+            400
+        );
     }
 
     #[test]
@@ -2362,7 +2550,9 @@ mod tests {
         assert_eq!(out["call_log_id"], "vlog-1");
         assert_eq!(out["charged"], true);
         // 验证桥转发了完整 body（含 image/video/seconds/model）到 relay。
-        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到转发请求");
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("应收到转发请求");
         assert!(request.path.starts_with("/api/relay/v1/videos/generations"));
         let fwd_body: Value = serde_json::from_slice(&request.body).unwrap();
         assert_eq!(fwd_body["model"], "fast");
@@ -2389,7 +2579,9 @@ mod tests {
         assert_eq!(error.code, "insufficient_balance");
         assert_eq!(error.message, "团队额度不足");
         // 桥只发了一次请求（转发给 relay），relay 内部处理退款（不经桥）。
-        let request = request_rx.recv_timeout(Duration::from_secs(2)).expect("应收到转发请求");
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("应收到转发请求");
         assert!(request.path.starts_with("/api/relay/v1/videos/generations"));
     }
 
@@ -2437,7 +2629,10 @@ mod tests {
             );
         }
         // 白名单只含 OS 路径/locale 类变量。
-        let keys: Vec<String> = env.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        let keys: Vec<String> = env
+            .iter()
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
         assert!(keys.iter().any(|k| k == "PATH"));
     }
 
