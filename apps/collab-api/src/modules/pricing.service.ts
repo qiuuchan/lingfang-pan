@@ -18,7 +18,7 @@ export class PricingService {
    * 优先查 (capability, model, tier)，回退 (capability, model, null)。
    */
   async lookupPrice(args: {
-    capability: 'chat' | 'image' | 'action' | 'video';
+    capability: 'chat' | 'image' | 'action' | 'video' | 'audio';
     model: string;
     tier?: 'FAST' | 'PREMIUM' | null;
   }): Promise<{ unit: string; pricePerUnit: number } | null> {

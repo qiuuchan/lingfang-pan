@@ -1562,6 +1562,10 @@ pub(crate) fn start_plugin_from_dir(
             .capabilities
             .iter()
             .any(|kind| kind == "video.generate"),
+        manifest
+            .capabilities
+            .iter()
+            .any(|kind| kind == "audio.generate"),
         PluginBridgeClientSource::PluginRuntime,
         Duration::from_secs(12 * 60 * 60),
     )?;

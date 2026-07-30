@@ -45,6 +45,7 @@ struct BridgeSession {
     allow_image_generate: bool,
     allow_image_edit: bool,
     allow_video_generate: bool,
+    allow_audio_generate: bool,
     action_invocation_id: Option<String>,
     action_context: Option<Arc<ActionRuntimeContext>>,
     client_source: PluginBridgeClientSource,
@@ -162,6 +163,7 @@ impl PluginLlmBridge {
         allow_image_generate: bool,
         allow_image_edit: bool,
         allow_video_generate: bool,
+        allow_audio_generate: bool,
         client_source: PluginBridgeClientSource,
         ttl: Duration,
     ) -> Result<Option<PluginBridgeEnv>, String> {
@@ -171,7 +173,7 @@ impl PluginLlmBridge {
             .trim_end_matches('/')
             .to_string();
         let auth_token = auth_token.unwrap_or_default().trim().to_string();
-        if !allow_llm_chat && !allow_image_generate && !allow_image_edit && !allow_video_generate {
+        if !allow_llm_chat && !allow_image_generate && !allow_image_edit && !allow_video_generate && !allow_audio_generate {
             return Ok(None);
         }
         let endpoint = self.ensure_server()?;
@@ -184,6 +186,7 @@ impl PluginLlmBridge {
             allow_image_generate,
             allow_image_edit,
             allow_video_generate,
+            allow_audio_generate,
             action_invocation_id: None,
             action_context: None,
             client_source,
@@ -236,6 +239,7 @@ impl PluginLlmBridge {
                     allow_image_generate: false,
                     allow_image_edit: false,
                     allow_video_generate: false,
+                    allow_audio_generate: false,
                     action_invocation_id: Some(invocation_id),
                     action_context: Some(Arc::new(ActionRuntimeContext {
                         app,
@@ -466,12 +470,14 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
     let is_get_allowed = request.method == "GET"
         && (path_only == "/v1/models"
             || path_only == "/video/stream"
-            || path_only == "/video/download");
+            || path_only == "/video/download"
+            || path_only == "/audio/stream"
+            || path_only == "/audio/download");
     if !is_get_allowed && request.method != "POST" {
         return Err(BridgeError::new(
             404,
             "not_found",
-            "插件本地桥仅支持 POST 请求（GET 仅 /v1/models、/video/stream、/video/download）",
+            "插件本地桥仅支持 POST 请求（GET 仅 /v1/models、/video/stream、/video/download、/audio/stream、/audio/download）",
         ));
     }
     let token = extract_token(&request.headers)
@@ -492,10 +498,15 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
         "/image/generate" => route_image_generate(&session, request.body),
         "/image/edit" => route_image_edit(&session, request.body),
         "/video/generate" => route_video_generate(&session, request.body),
+        "/audio/generate" => route_audio_generate(&session, request.body),
         // GET 路由带 query（task_id），完整 path 透传给 route 函数解析。
         "/video/stream" if request.method == "GET" => route_video_stream(&session, &request.path),
         "/video/download" if request.method == "GET" => {
             route_video_download(&session, &request.path)
+        }
+        "/audio/stream" if request.method == "GET" => route_audio_stream(&session, &request.path),
+        "/audio/download" if request.method == "GET" => {
+            route_audio_download(&session, &request.path)
         }
         "/actions/call" => route_action_call(inner, &session, request.body),
         "/artifacts/create" => route_action_artifact(&session, "", request.body),
@@ -1032,6 +1043,26 @@ fn video_mime_for(filename: &str) -> &'static str {
     }
 }
 
+/// 推断常见音频扩展名对应的 MIME（默认 audio/mpeg）。与 RBFLow /tasks/voice 允许的扩展名对齐。
+fn audio_mime_for(filename: &str) -> &'static str {
+    let lower = filename.to_ascii_lowercase();
+    if lower.ends_with(".wav") {
+        "audio/wav"
+    } else if lower.ends_with(".flac") {
+        "audio/flac"
+    } else if lower.ends_with(".m4a") {
+        "audio/mp4"
+    } else if lower.ends_with(".aac") {
+        "audio/aac"
+    } else if lower.ends_with(".ogg") {
+        "audio/ogg"
+    } else if lower.ends_with(".opus") {
+        "audio/opus"
+    } else {
+        "audio/mpeg"
+    }
+}
+
 /// POST /video/generate：gate → 平台 session → 解析 image/video/seconds/tier →
 /// relay 按秒计费 + 后台配置 RBFLow 凭证代理转发 → 返回 {task_id, call_log_id, charged, credits}。
 ///
@@ -1128,6 +1159,81 @@ fn route_video_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeR
     Ok(out)
 }
 
+/// POST /audio/generate：gate → 平台 session → 解析 audio/prompt_text/tier →
+/// relay 按输出秒数计费 + 后台配置 RBFLow 凭证代理转发 /tasks/voice → 返回 {task_id, call_log_id, charged, credits}。
+///
+/// 与 route_video_generate 同构；区别：素材为单个参考音频 + 目标文本，计费秒数由 relay 从
+/// prompt_text 估算（桥不传 seconds，防插件篡改计费）。
+fn route_audio_generate(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+    if !session.allow_audio_generate {
+        return Err(BridgeError::new(
+            403,
+            "capability_denied",
+            "插件未声明 audio.generate 能力",
+        ));
+    }
+    ensure_platform_session(session, "声音克隆")?;
+
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|_| BridgeError::new(400, "bad_request", "请求体不是有效 JSON"))?;
+
+    let tier = parse_model_tier(&body)?;
+    let audio_b64 = body
+        .get("audio")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| BridgeError::new(400, "bad_request", "audio.generate 缺少 audio(base64)"))?;
+    let prompt_text = body
+        .get("prompt_text")
+        .and_then(Value::as_str)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| BridgeError::new(400, "bad_request", "audio.generate 缺少 prompt_text（目标文本）"))?;
+    let audio_filename = sanitize_filename(
+        body.get("audio_filename")
+            .and_then(Value::as_str)
+            .unwrap_or("audio"),
+    );
+    let audio_mime = body
+        .get("audio_mime_type")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| audio_mime_for(&audio_filename).to_string());
+    let callback_url = body.get("callback_url").and_then(Value::as_str);
+
+    // relay 接管：后端读取 PlatformSetting.rbflowUrl/rbflowApiKey，先按估算秒数扣费再代理 RBFLow /tasks/voice。
+    let mut relay_body = json!({
+        "audio": audio_b64,
+        "audio_filename": audio_filename,
+        "audio_mime_type": audio_mime,
+        "prompt_text": prompt_text,
+        "model": tier,
+    });
+    if let Some(cb) = callback_url.filter(|v| !v.trim().is_empty()) {
+        relay_body["callback_url"] = Value::String(cb.to_string());
+    }
+    let out = relay_post_json_timeout(
+        session,
+        "/api/relay/v1/audio/generations",
+        &relay_body,
+        Duration::from_secs(600),
+    )?;
+    let task_id = out
+        .get("task_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if task_id.is_empty() {
+        return Err(BridgeError::new(
+            502,
+            "relay_response_invalid",
+            "平台音频服务响应缺少 task_id",
+        ));
+    }
+    Ok(out)
+}
+
 /// GET /video/stream?task_id=X：查询 RBFLow 任务当前状态/进度（短轮询，非 SSE 流）。
 ///
 /// 原 MVP 用 SSE 流聚合，但桥的 reqwest 会阻塞到任务跑完（600s）→ 前台一直显示「等待」。
@@ -1141,16 +1247,43 @@ fn route_video_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<
             "插件未声明 video.generate 能力",
         ));
     }
-    ensure_platform_session(session, "视频进度")?;
+    rbflow_task_stream(session, full_path, "video.stream", "视频进度")
+}
+
+/// GET /audio/stream?task_id=X：与 video/stream 同构（RBFLow 任务查询不区分工作流类型）。
+///
+/// 声音克隆任务与视频任务共用 RBFLow `GET /api/v1/tasks/{id}` 状态机，仅能力门控不同。
+fn route_audio_stream(session: &BridgeSession, full_path: &str) -> BridgeResult<Value> {
+    if !session.allow_audio_generate {
+        return Err(BridgeError::new(
+            403,
+            "capability_denied",
+            "插件未声明 audio.generate 能力",
+        ));
+    }
+    rbflow_task_stream(session, full_path, "audio.stream", "音频进度")
+}
+
+/// RBFLow 任务状态查询共享实现（video/audio stream 复用）。
+///
+/// `route_label` 用于错误文案（如 "video.stream"/"audio.stream"），`capability_name` 用于
+/// ensure_platform_session 的未登录提示（如 "视频进度"/"音频进度"）。
+fn rbflow_task_stream(
+    session: &BridgeSession,
+    full_path: &str,
+    route_label: &str,
+    capability_name: &str,
+) -> BridgeResult<Value> {
+    ensure_platform_session(session, capability_name)?;
     let task_id = sanitize_task_id(
         query_first(full_path, "task_id")
-            .ok_or_else(|| BridgeError::new(400, "bad_request", "video.stream 缺少 task_id"))?,
+            .ok_or_else(|| BridgeError::new(400, "bad_request", format!("{route_label} 缺少 task_id")))?,
     )?;
     let rbflow = read_rbflow_credential(session).map_err(|reason| {
         BridgeError::new(
             503,
             "rbflow_not_configured",
-            format!("平台未配置 RBFLow 视频服务：{reason}"),
+            format!("平台未配置 RBFLow 服务：{reason}"),
         )
     })?;
     // 短超时查询任务当前状态（GET /api/v1/tasks/{id}，立即返回，不阻塞）。
@@ -1262,16 +1395,46 @@ fn route_video_download(session: &BridgeSession, full_path: &str) -> BridgeResul
             "插件未声明 video.generate 能力",
         ));
     }
-    ensure_platform_session(session, "视频下载")?;
+    rbflow_task_download(session, full_path, "video.download", "视频下载", "video/mp4", "mp4")
+}
+
+/// GET /audio/download?task_id=X：与 video/download 同构（RBFLow 下载端点按输出文件扩展名返回正确 MIME）。
+///
+/// 声音克隆输出为音频（FLAC/WAV 等），RBFLow `GET /api/v1/tasks/{id}/download` 据扩展名设
+/// Content-Type，桥透传该 MIME + base64 字节。fallback MIME 用 audio/flac（未知扩展名时）。
+fn route_audio_download(session: &BridgeSession, full_path: &str) -> BridgeResult<Value> {
+    if !session.allow_audio_generate {
+        return Err(BridgeError::new(
+            403,
+            "capability_denied",
+            "插件未声明 audio.generate 能力",
+        ));
+    }
+    rbflow_task_download(session, full_path, "audio.download", "音频下载", "audio/flac", "flac")
+}
+
+/// RBFLow 任务结果下载共享实现（video/audio download 复用）。
+///
+/// `fallback_mime`/`fallback_ext`：RBFLow 未返回 Content-Type/Content-Disposition 时的兑底
+///（视频 mp4，音频 flac）。
+fn rbflow_task_download(
+    session: &BridgeSession,
+    full_path: &str,
+    route_label: &str,
+    capability_name: &str,
+    fallback_mime: &str,
+    fallback_ext: &str,
+) -> BridgeResult<Value> {
+    ensure_platform_session(session, capability_name)?;
     let task_id = sanitize_task_id(
         query_first(full_path, "task_id")
-            .ok_or_else(|| BridgeError::new(400, "bad_request", "video.download 缺少 task_id"))?,
+            .ok_or_else(|| BridgeError::new(400, "bad_request", format!("{route_label} 缺少 task_id")))?,
     )?;
     let rbflow = read_rbflow_credential(session).map_err(|reason| {
         BridgeError::new(
             503,
             "rbflow_not_configured",
-            format!("平台未配置 RBFLow 视频服务：{reason}"),
+            format!("平台未配置 RBFLow 服务：{reason}"),
         )
     })?;
     let url = format!("{}/api/v1/tasks/{}/download", rbflow.url, task_id);
@@ -1302,7 +1465,7 @@ fn route_video_download(session: &BridgeSession, full_path: &str) -> BridgeResul
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("video/mp4")
+        .unwrap_or(fallback_mime)
         .to_string();
     // 从 Content-Disposition 解析文件名（如 `attachment; filename="xxx.mp4"`）。
     let filename = resp
@@ -1310,7 +1473,7 @@ fn route_video_download(session: &BridgeSession, full_path: &str) -> BridgeResul
         .get(reqwest::header::CONTENT_DISPOSITION)
         .and_then(|v| v.to_str().ok())
         .and_then(extract_filename_from_disposition)
-        .unwrap_or_else(|| format!("{}.mp4", task_id));
+        .unwrap_or_else(|| format!("{task_id}.{fallback_ext}"));
     let bytes = resp.bytes().map_err(|error| {
         BridgeError::new(
             502,
@@ -1836,6 +1999,7 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
                 PluginBridgeClientSource::PluginRuntime,
                 Duration::from_secs(60),
             )
@@ -1862,6 +2026,7 @@ mod tests {
                 false,
                 false,
                 true,
+                false,
                 PluginBridgeClientSource::PluginRuntime,
                 Duration::from_secs(60),
             )
@@ -2016,6 +2181,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: false,
             allow_video_generate: false,
+            allow_audio_generate: false,
             action_invocation_id: None,
             action_context: None,
             client_source: PluginBridgeClientSource::PluginTest,
@@ -2052,6 +2218,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: false,
             allow_video_generate: false,
+            allow_audio_generate: false,
             action_invocation_id: Some("invocation-1".to_string()),
             action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
@@ -2119,6 +2286,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: false,
             allow_video_generate: false,
+            allow_audio_generate: false,
             action_invocation_id: None,
             action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
@@ -2190,6 +2358,7 @@ mod tests {
                     allow_image_generate: allow_image,
                     allow_image_edit: false,
                     allow_video_generate: allow_video,
+                    allow_audio_generate: false,
                     action_invocation_id: None,
                     action_context: None,
                     client_source: PluginBridgeClientSource::PluginRuntime,
@@ -2324,6 +2493,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: true,
             allow_video_generate: false,
+            allow_audio_generate: false,
             action_invocation_id: None,
             action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
@@ -2383,6 +2553,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: true,
             allow_video_generate: false,
+            allow_audio_generate: false,
             action_invocation_id: None,
             action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
@@ -2421,6 +2592,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: true,
             allow_video_generate: false,
+            allow_audio_generate: false,
             action_invocation_id: None,
             action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,
@@ -2452,6 +2624,7 @@ mod tests {
             allow_image_generate: false,
             allow_image_edit: false,
             allow_video_generate: allow_video,
+            allow_audio_generate: false,
             action_invocation_id: None,
             action_context: None,
             client_source: PluginBridgeClientSource::PluginRuntime,

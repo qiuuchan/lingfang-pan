@@ -97,6 +97,22 @@ function normalizeDeveloperRole(messages: { role: string; content: string }[]): 
   return messages.map((m) => (m.role === 'developer' ? { ...m, role: 'system' } : m));
 }
 
+/**
+ * 声音克隆计费：按「输出音频秒数」PER_SECOND 计费。输出时长在提交时未知，
+ * 故用目标文本长度估算（中文语速启发式）。插件侧用同一公式做提交前预估，
+ * relay 用同一公式做权威计费，二者一致 → 用户看到的预估即实际扣费。
+ * 与视频「信任插件上报 seconds + 审计」不同：音频秒数由 relay 从 prompt_text 推导，
+ * 插件无法篡改计费秒数（防绕过）。
+ */
+/** 中文语音合成语速（字/秒）。含标点停顿的保守估计；可调，但须与插件 estimate_voice_seconds 同步。 */
+const VOICE_CHARS_PER_SECOND = 4;
+/** 目标文本上限（字符），与 RBFLow /tasks/voice 的 _MAX_PROMPT_TEXT 对齐。 */
+const VOICE_MAX_PROMPT_CHARS = 5000;
+
+/** 由目标文本长度估算输出音频秒数（向上取整，≥1 秒防 0 秒白嫖）。 */
+function estimateVoiceSeconds(promptText: string): number {
+  return Math.max(1, Math.ceil(promptText.trim().length / VOICE_CHARS_PER_SECOND));
+}
 @Injectable()
 export class RelayService {
   constructor(
@@ -374,6 +390,210 @@ export class RelayService {
 
     // 返回扣费票据 + RBFLow task_id（桥据此建任务卡片 + 监听进度）。
     return { charged: true, credits: charged, call_log_id: pendingLog.id, task_id, seconds, request_id: requestId };
+  }
+
+  /**
+   * POST /api/relay/v1/audio/generations —— 声音克隆按「输出音频秒数」计费（精简编排，不接渠道路由）。
+   *
+   * 与 videoGenerations 同构：relay 只负责灵石账本（reserve→reconcile 两阶段），上游是外部 RBFLow
+   * 声音克隆工作流（由桌面桥代理转发，不进 relay）。PER_SECOND 单价 × 估算秒数。
+   *
+   * 秒数由 relay 从 prompt_text 估算（estimateVoiceSeconds，中文语速启发式）——不信任插件上报，
+   * 防篡改计费。插件侧用同一公式做提交前预估，二者一致。
+   */
+  async audioGenerations(req: Request, body: Record<string, unknown>) {
+    const auth = this.requireAuth(req);
+    const tier = wireToTier(String(body.model ?? 'fast'));
+    const promptText = String(body.prompt_text ?? '').trim();
+    if (!promptText) {
+      throw new AppError(400, 'bad_request', 'audio.generate 缺少 prompt_text（目标文本）');
+    }
+    if (promptText.length > VOICE_MAX_PROMPT_CHARS) {
+      throw new AppError(400, 'bad_request', `prompt_text 过长（最多 ${VOICE_MAX_PROMPT_CHARS} 字符）`);
+    }
+    // 输出音频秒数：由目标文本长度估算（向上取整 + clamp ≥1）。
+    const seconds = estimateVoiceSeconds(promptText);
+    const startedAt = Date.now();
+    const requestId = (req.header('x-request-id') || undefined) as string | undefined;
+    const clientIp = extractClientIp(req);
+    const clientSource = clientSourceFromRequest(req);
+
+    // 查音频单价（capability='audio', model='voice_clone'，tier 可空）。
+    const price = await this.pricing.lookupPrice({ capability: 'audio', model: 'voice_clone', tier });
+    if (!price) {
+      throw new AppError(503, 'no_pricing', '声音克隆未配置定价（请联系管理员在价目表配置 audio/voice_clone）');
+    }
+
+    // 实扣额 = PER_SECOND 单价 × 估算秒数（computeCredits 内部已 clamp seconds≥1）。
+    const totalCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, { seconds });
+
+    // 建 pending LlmCallLog（capability='audio'；seconds/chars 记入 requestSummary 供审计）。
+    const pendingLog = await this.prisma.llmCallLog.create({
+      data: {
+        teamId: auth.teamId,
+        userId: auth.userId,
+        capability: 'audio',
+        tier,
+        model: 'voice_clone',
+        status: 'reserve',
+        requestId,
+        requestSummary: { seconds, chars: promptText.length, tier, model: body.model ?? 'fast' } as never,
+        clientIp,
+        clientSource,
+        credits: 0,
+      },
+    });
+
+    // 预扣：cap=实扣额（音频估算固定价，无事后用量校准，故 cap=real，净效果=实扣）。
+    let finalized = false;
+    const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; credits: number }) => {
+      if (finalized) return;
+      finalized = true;
+      try {
+        await this.finalizeLog(pendingLog.id, { ...args, channelId: null, model: 'voice_clone', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: args.credits });
+      } catch { /* finalize 失败不阻断主流程 */ }
+    };
+
+    try {
+      await this.credits.reserve(auth.teamId, totalCredits, pendingLog.id, auth.userId);
+    } catch (e) {
+      await ensureFinalized({ status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, credits: 0 });
+      throw e; // AppError(402) 透传给桥→插件
+    }
+
+    // 实算：cap=real=totalCredits，reconcile 净效果=实扣 totalCredits。
+    const charged = await this.credits.reconcile(auth.teamId, totalCredits, totalCredits, pendingLog.id, auth.userId);
+
+    // 计费成功 → 转发到 RBFLow 声音克隆工作流（平台运营实例，凭证在 PlatformSetting）。
+    // 转发失败则退款（凭 call_log_id，幂等），避免扣费无服务。
+    let task_id = '';
+    try {
+      task_id = await this.forwardToRbflowVoice(body, promptText);
+      await ensureFinalized({ status: 'success', errorCode: null, httpStatus: 200, credits: charged });
+    } catch (e) {
+      await this.credits.refundConsumed(auth.teamId, pendingLog.id, auth.userId, '声音克隆转发失败退款');
+      await ensureFinalized({ status: 'client_error', errorCode: 'rbflow_forward_failed', httpStatus: 502, credits: 0 });
+      throw e instanceof AppError ? e : new AppError(502, 'rbflow_forward_failed', `RBFLow 服务转发失败：${(e as Error).message}`);
+    }
+
+    // 返回扣费票据 + RBFLow task_id（桥据此建任务卡片 + 监听进度）。
+    return { charged: true, credits: charged, call_log_id: pendingLog.id, task_id, seconds, request_id: requestId };
+  }
+
+  /**
+   * 读 PlatformSetting 的 RBFLow 配置（url + api_key），构建 multipart 转发到 RBFLow
+   * POST /api/v1/tasks/voice（带 X-API-Key），返回 RBFLow task_id。
+   *
+   * body 含 audio（base64）+ audio_filename/audio_mime_type；prompt_text 为克隆语音要说的目标文本。
+   * 转发是计费成功后执行的——relay 持有 RBFLow 凭证转发，插件进程永远拿不到（防绕过）。
+   */
+  private async forwardToRbflowVoice(body: Record<string, unknown>, promptText: string): Promise<string> {
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: { in: ['rbflowUrl', 'rbflowApiKey'] } },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value] as const));
+    const url = (map.get('rbflowUrl') ?? '').trim();
+    const apiKey = map.get('rbflowApiKey') ?? '';
+    if (!url) {
+      throw new AppError(503, 'rbflow_not_configured', 'RBFLow 服务未配置（请在后台管理「设置 → 视频」填写 RBFLow 地址）');
+    }
+
+    // 解码 base64 音频素材。
+    const audioB64 = String(body.audio ?? '');
+    const audioFilename = String(body.audio_filename ?? 'audio');
+    const audioMime = String(body.audio_mime_type ?? 'audio/mpeg');
+    const callbackUrl = body.callback_url ? String(body.callback_url) : '';
+    if (!audioB64) {
+      throw new AppError(400, 'bad_request', 'RBFLow 转发缺少 audio 素材');
+    }
+    let audioBytes: Buffer;
+    try {
+      audioBytes = Buffer.from(audioB64, 'base64');
+    } catch {
+      throw new AppError(400, 'bad_request', 'RBFLow 转发 audio base64 解码失败');
+    }
+
+    // 构建 multipart/form-data（audio 文件 part + prompt_text 文本 part，字段名与 RBFLow /tasks/voice 对齐）。
+    const boundary = 'lfAudioRelay7n4q9wR2';
+    const parts: Buffer[] = [];
+    const filePart = (name: string, filename: string, mime: string, data: Buffer) => {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`,
+      ));
+      parts.push(data);
+      parts.push(Buffer.from('\r\n'));
+    };
+    filePart('audio', audioFilename, audioMime, audioBytes);
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="prompt_text"\r\n\r\n${promptText}\r\n`,
+    ));
+    if (callbackUrl) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="callback_url"\r\n\r\n${callbackUrl}\r\n`,
+      ));
+    }
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+    const multipartBody = Buffer.concat(parts);
+
+    // 转发到 RBFLow POST /api/v1/tasks/voice（X-API-Key 鉴权，10min 超时容长任务上传）。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 600_000);
+    let res: globalThis.Response;
+    try {
+      res = await globalThis.fetch(`${url.replace(/\/+$/, '')}/api/v1/tasks/voice`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'X-API-Key': apiKey,
+        },
+        body: multipartBody,
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      throw new AppError(502, 'rbflow_forward_failed', `无法连接 RBFLow 服务：${(e as Error).message}`);
+    }
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      let detail = '';
+      try { detail = JSON.stringify(await res.json()).slice(0, 300); } catch { try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ } }
+      throw new AppError(502, 'rbflow_forward_failed', `RBFLow 声音克隆提交失败（${res.status}）：${detail}`);
+    }
+    const data = (await res.json()) as { task_id?: string };
+    const taskId = data.task_id ?? '';
+    if (!taskId) {
+      throw new AppError(502, 'rbflow_forward_failed', 'RBFLow 响应缺少 task_id');
+    }
+    return taskId;
+  }
+
+  /**
+   * POST /api/relay/v1/audio/refund —— 声音克隆转发失败退款（凭 call_log_id 退已实扣灵石）。
+   *
+   * 场景：桥 /audio/generate 先经 audioGenerations 扣费成功 → 转发 RBFLow 失败 → 调本端点退回。
+   * 幂等：同一 call_log_id 只退一次（CreditService.refundConsumed 用 source 标记防重）。
+   */
+  async refundAudio(req: Request, body: Record<string, unknown>) {
+    const auth = this.requireAuth(req);
+    const callLogId = String(body.call_log_id ?? '').trim();
+    if (!callLogId) {
+      throw new AppError(400, 'bad_request', '缺少 call_log_id');
+    }
+    // 校验 callLog 归属当前团队（防跨团队退款）。
+    const log = await this.prisma.llmCallLog.findFirst({
+      where: { id: callLogId, teamId: auth.teamId },
+      select: { id: true, status: true, credits: true },
+    });
+    if (!log) {
+      throw new AppError(404, 'not_found', '扣费记录不存在或不属于当前团队');
+    }
+    const refunded = await this.credits.refundConsumed(auth.teamId, callLogId, auth.userId, '声音克隆转发失败退款');
+    if (refunded > 0) {
+      await this.finalizeLog(callLogId, { status: 'refunded', errorCode: 'audio_forward_failed', httpStatus: null, channelId: null, model: 'voice_clone', durationMs: 0, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
+    }
+    return { refunded: refunded > 0, credits: refunded, call_log_id: callLogId };
   }
 
   /**

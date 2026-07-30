@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-RBFLow 动作迁移视频生成插件（PySide6 / Qt6）。
+RBFLow 创意工坊插件（PySide6 / Qt6）——视频动作迁移 + 音频声音克隆，顶部 Tab 切换。
 
 功能：
-  - 上传参考图片 + 参考视频 → 笛卡尔积生成任务
-  - 经平台桥 /video/generate 按视频时长（秒）扣灵石（PER_SECOND）
-  - 桥代理转发到平台运营的 RBFLow 实例生成视频（用户无凭证，防绕过）
-  - SSE 实时进度（经桥 /video/stream 代理）
-  - 完成后下载成品 mp4 落盘到自定义文件夹（支持日期/分类子目录）
-  - 任务队列排序、状态筛选、批量操作、自动重试
+  - 🎬 视频：上传参考图片 + 参考视频 → 笛卡尔积生成任务
+      经平台桥 /video/generate 按视频时长（秒）扣灵石（PER_SECOND）
+  - 🎙 音频：上传参考音频 + 目标文本 → 声音克隆任务
+      经平台桥 /audio/generate 按输出音频估算秒数扣灵石（relay 从文本估算，防篡改）
+  - 桥代理转发到平台运营的 RBFLow 实例（用户无凭证，防绕过）
+  - 实时进度（经桥 /video/stream、/audio/stream 短轮询代理）
+  - 完成后下载成品落盘到自定义文件夹（视频 mp4 / 音频 flac，支持日期/分类子目录）
+  - 任务队列排序、状态筛选、批量操作、自动重试（视频/音频共享队列）
 
 安全边界：
   - 插件进程 env 只有 LINGFANG_PLUGIN_BRIDGE_URL / TOKEN（桌面注入）。
@@ -29,7 +31,7 @@ import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, fields, asdict
 from typing import Optional
 
 from PySide6.QtWidgets import (
@@ -630,7 +632,7 @@ QPushButton#ThemeToggle:hover {{
 }}
 
 /* ---- 输入控件 ---- */
-QLineEdit, QComboBox, QSpinBox {{
+QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {{
     background-color: {c["crust"]};
     border: 1px solid {c["surface0"]};
     border-radius: 6px;
@@ -639,7 +641,7 @@ QLineEdit, QComboBox, QSpinBox {{
     selection-background-color: {c["blue"]};
     selection-color: {c["base"]};
 }}
-QLineEdit:focus, QComboBox:focus {{ border-color: {c["blue"]}; }}
+QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{ border-color: {c["blue"]}; }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox QAbstractItemView {{
     background-color: {c["mantle"]};
@@ -840,16 +842,18 @@ def bridge_submit_video(
     return resp.json()
 
 
-def bridge_stream_video(task_id: str, timeout=(10, 600)) -> list:
-    """拉取任务 SSE 事件（桥聚合返回 events 数组）。每个 event 是 dict。
+def bridge_stream_video(task_id: str, timeout=(10, 600), kind: str = "video") -> list:
+    """拉取任务进度事件（桥聚合返回 events 数组）。每个 event 是 dict。
 
+    kind: "video" → /video/stream；"audio" → /audio/stream（RBFLow 任务状态机两者同构）。
     事件类型（RBFLow v0.4）：
       progress: {type, progress, node, node_progress, state}
       done:     {type, progress, state, file_url, local_path, filename}
       error:    {type, state, reason, error_code, error_advice}
     """
+    endpoint = "/audio/stream" if kind == "audio" else "/video/stream"
     resp = requests.get(
-        _BRIDGE_URL + "/video/stream",
+        _BRIDGE_URL + endpoint,
         params={"task_id": task_id},
         headers=_bridge_headers(),
         timeout=timeout,
@@ -860,10 +864,14 @@ def bridge_stream_video(task_id: str, timeout=(10, 600)) -> list:
     return data.get("events", [])
 
 
-def bridge_download_video(task_id: str, timeout=(10, 300)) -> dict:
-    """下载成品视频字节（桥 base64 返回）。返回 {data(b64), filename, mime_type, size}。"""
+def bridge_download_video(task_id: str, timeout=(10, 300), kind: str = "video") -> dict:
+    """下载成品字节（桥 base64 返回）。返回 {data(b64), filename, mime_type, size}。
+
+    kind: "video" → /video/download；"audio" → /audio/download。
+    """
+    endpoint = "/audio/download" if kind == "audio" else "/video/download"
     resp = requests.get(
-        _BRIDGE_URL + "/video/download",
+        _BRIDGE_URL + endpoint,
         params={"task_id": task_id},
         headers=_bridge_headers(),
         timeout=timeout,
@@ -872,6 +880,51 @@ def bridge_download_video(task_id: str, timeout=(10, 300)) -> dict:
         raise _parse_bridge_error(resp)
     return resp.json()
 
+
+def bridge_submit_audio(
+    audio_path: str,
+    prompt_text: str,
+    tier: str = DEFAULT_TIER,
+    timeout=(30, 120),
+) -> dict:
+    """提交一个声音克隆任务（参考音频 + 目标文本）。返回 {task_id, call_log_id, charged, credits, seconds}。
+
+    桥先按「输出音频估算秒数」扣灵石（relay 从 prompt_text 估算，插件不传 seconds），
+    再代理转发到 RBFLow /tasks/voice。余额不足(402)抛 BridgeError(code=insufficient_balance)。
+    """
+    with open(audio_path, "rb") as f:
+        audio_b64 = base64.b64encode(f.read()).decode()
+
+    body = {
+        "audio": audio_b64,
+        "audio_filename": os.path.basename(audio_path),
+        "prompt_text": prompt_text,
+        "model": tier,
+    }
+    resp = requests.post(
+        _BRIDGE_URL + "/audio/generate",
+        json=body,
+        headers=_bridge_headers(),
+        timeout=timeout,
+    )
+    if resp.status_code != 200:
+        raise _parse_bridge_error(resp)
+    return resp.json()
+
+
+# ==================== 声音克隆：输出音频秒数估算（中文语速启发式） ====================
+# 与 relay estimateVoiceSeconds 同一公式：插件做提交前预估，relay 做权威计费，二者一致。
+# 改这里必须同步改 relay.service.ts 的 VOICE_CHARS_PER_SECOND，否则预估≠实扣。
+VOICE_CHARS_PER_SECOND = 4
+# 目标文本上限（字符），与 relay VOICE_MAX_PROMPT_CHARS / RBFLow _MAX_PROMPT_TEXT 对齐。
+VOICE_MAX_PROMPT_CHARS = 5000
+
+
+def estimate_voice_seconds(prompt_text: str) -> int:
+    """由目标文本长度估算输出音频秒数（向上取整，≥1 秒）。与 relay 计费公式一致。"""
+    import math
+
+    return max(1, math.ceil(len(prompt_text.strip()) / VOICE_CHARS_PER_SECOND))
 
 # ==================== 视频时长探测（ffprobe，信任插件 + 审计） ====================
 def _ffprobe_path() -> str | None:
@@ -992,13 +1045,21 @@ WAITING_STATES = {STATE_PENDING, STATE_QUEUED}
 
 @dataclass
 class Task:
-    """单个视频生成任务（一对 image+video）。"""
+    """单个工作流任务。
+
+    kind="video"：动作迁移（image_path + video_path 笛卡尔积一对）。
+    kind="audio"：声音克隆（audio_path 参考音频 + prompt_text 目标文本）。
+    """
 
     pair_id: str  # 本地唯一 id
-    image_path: str
-    video_path: str
-    seconds: float = 0.0  # 视频时长（计费用）
+    image_path: str = ""  # 视频工作流：参考图片
+    video_path: str = ""  # 视频工作流：参考视频
+    seconds: float = 0.0  # 计费用秒数（视频=探测时长；音频=文本估算）
     tier: str = DEFAULT_TIER
+    kind: str = "video"  # "video" | "audio"
+    # 音频工作流专用
+    audio_path: str = ""  # 参考音频
+    prompt_text: str = ""  # 目标文本（克隆语音要说的内容）
     # 运行态
     rbflow_task_id: str = ""  # 桥返回的 RBFLow task_id
     call_log_id: str = ""  # 扣费票据
@@ -1029,10 +1090,13 @@ class TaskStore:
     def _load(self):
         if not self.path.exists():
             return
+        # 只取 Task 已知字段：老数据无新字段（kind/audio_path/prompt_text）走默认值，
+        # 未来新增字段也不会因老版本读到多余 key 而崩溃。
+        known = {f.name for f in fields(Task)}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             for item in data.get("tasks", []):
-                t = Task(**item)
+                t = Task(**{k: v for k, v in item.items() if k in known})
                 self.tasks[t.pair_id] = t
         except Exception as e:
             logging.error(f"加载任务列表失败: {e}")
@@ -1147,6 +1211,79 @@ class SubmitWorker(QThread):
         self.finished_all.emit(submitted, failed)
 
 
+class VoiceSubmitWorker(QThread):
+    """声音克隆提交：探测参考音频时长（仅展示）→ 扣灵石（relay 按文本估算秒数）→ 提交 RBFLow /tasks/voice。
+
+    与 SubmitWorker 区别：单个参考音频 + 目标文本（非笛卡尔积）；计费秒数由 relay 从
+    prompt_text 估算，插件仅用 estimate_voice_seconds 做提交前预估展示。
+    """
+
+    pair_submitted = Signal(object)  # Task
+    pair_failed = Signal(str, str, object)  # pair_id, error_msg, partial Task (or None)
+    billing_blocked = Signal(str)  # 余额不足消息
+    finished_all = Signal(int, int)  # submitted_count, failed_count
+    log = Signal(str)
+
+    def __init__(self, audio_path: str, prompt_text: str, tier: str, parent=None):
+        super().__init__(parent)
+        self.audio_path = audio_path
+        self.prompt_text = prompt_text
+        self.tier = tier
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        submitted = 0
+        failed = 0
+        if self._stop:
+            self.finished_all.emit(0, 0)
+            return
+        pair_id = f"{int(time.time() * 1000)}_voice_{os.path.basename(self.audio_path)[:8]}"
+        est_seconds = estimate_voice_seconds(self.prompt_text)
+        task = Task(
+            pair_id=pair_id,
+            kind="audio",
+            audio_path=self.audio_path,
+            prompt_text=self.prompt_text,
+            seconds=est_seconds,
+            tier=self.tier,
+            created_at=datetime.now().isoformat(timespec="seconds"),
+        )
+        task.touch()
+        try:
+            self.log.emit(
+                f"提交声音克隆 {os.path.basename(self.audio_path)}（约{est_seconds}秒）..."
+            )
+            result = bridge_submit_audio(self.audio_path, self.prompt_text, self.tier)
+            task.rbflow_task_id = result.get("task_id", "")
+            task.call_log_id = result.get("call_log_id", "")
+            task.charged_credits = float(result.get("credits", 0))
+            # relay 返回权威估算秒数（与插件公式一致），回填任务供展示。
+            task.seconds = float(result.get("seconds", est_seconds))
+            task.state = STATE_PENDING
+            submitted += 1
+            self.pair_submitted.emit(task)
+        except BridgeError as e:
+            failed += 1
+            if e.code == "insufficient_balance":
+                self.billing_blocked.emit("灵石余额不足，提交已取消。请充值后重试。")
+                task.state = STATE_FAILED
+                task.error_msg = "灵石余额不足"
+                self.pair_failed.emit(pair_id, str(e), task)
+            else:
+                task.state = STATE_FAILED
+                task.error_msg = str(e)
+                self.pair_failed.emit(pair_id, str(e), task)
+        except Exception as e:
+            failed += 1
+            task.state = STATE_FAILED
+            task.error_msg = str(e)
+            self.pair_failed.emit(pair_id, str(e), task)
+        self.finished_all.emit(submitted, failed)
+
+
 class ProgressWorker(QThread):
     """单个任务的进度监听（轮询模式）。
 
@@ -1159,10 +1296,11 @@ class ProgressWorker(QThread):
     done = Signal(str, str)  # pair_id, saved_info(json str)
     error = Signal(str, str)  # pair_id, reason
 
-    def __init__(self, pair_id: str, rbflow_task_id: str, parent=None):
+    def __init__(self, pair_id: str, rbflow_task_id: str, kind: str = "video", parent=None):
         super().__init__(parent)
         self.pair_id = pair_id
         self.rbflow_task_id = rbflow_task_id
+        self.kind = kind  # "video" | "audio"：决定走 /video/stream 还是 /audio/stream
         self._stop = False
 
     def stop(self):
@@ -1174,7 +1312,7 @@ class ProgressWorker(QThread):
         while not self._stop:
             try:
                 # 短超时（连接 5s / 读 3s），让循环快速返回当前 events 而不阻塞到任务跑完
-                events = bridge_stream_video(self.rbflow_task_id, timeout=(5, 3))
+                events = bridge_stream_video(self.rbflow_task_id, timeout=(5, 3), kind=self.kind)
                 last_prog = -1.0
                 last_state = None
                 terminal = False
@@ -1230,13 +1368,13 @@ class _PollWorker(QThread):
 
     def __init__(self, tasks: list, parent=None):
         super().__init__(parent)
-        # 只需 pair_id + rbflow_task_id
-        self._tasks = [(t.pair_id, t.rbflow_task_id) for t in tasks]
+        # 只需 pair_id + rbflow_task_id + kind（视频/音频走不同 stream 端点）
+        self._tasks = [(t.pair_id, t.rbflow_task_id, t.kind) for t in tasks]
 
     def run(self):
-        for pair_id, rbflow_task_id in self._tasks:
+        for pair_id, rbflow_task_id, kind in self._tasks:
             try:
-                events = bridge_stream_video(rbflow_task_id, timeout=(5, 3))
+                events = bridge_stream_video(rbflow_task_id, timeout=(5, 3), kind=kind)
                 last_prog = -1.0
                 last_state = None
                 for ev in events:
@@ -1404,10 +1542,16 @@ class TaskCardWidget(QWidget):
         self._refresh_state()
 
     def _name_text(self):
+        if self.task.kind == "audio":
+            return f"🎙 {os.path.basename(self.task.audio_path or '音频')} · 声音克隆"
         return f"{os.path.basename(self.task.image_path)} × {os.path.basename(self.task.video_path)}"
 
     def _meta_text(self):
-        s = f"{self.task.seconds:.0f}秒 · {self.task.charged_credits:.1f}灵石"
+        if self.task.kind == "audio":
+            snippet = self.task.prompt_text.strip().replace("\n", " ")[:18]
+            s = f"约{self.task.seconds:.0f}秒 · {self.task.charged_credits:.1f}灵石 · {snippet}"
+        else:
+            s = f"{self.task.seconds:.0f}秒 · {self.task.charged_credits:.1f}灵石"
         if self.task.saved_path:
             s += " · 已保存"
         elif self.task.error_msg:
@@ -1415,6 +1559,10 @@ class TaskCardWidget(QWidget):
         return s
 
     def _load_thumb(self):
+        # 音频任务无图片缩略图，显示麦克风图标。
+        if self.task.kind == "audio":
+            self.thumb.setText("🎙")
+            return
         if not HAS_PIL:
             self.thumb.setText("🖼")
             return
@@ -2369,6 +2517,213 @@ class QueuePanel(QFrame):
             self.refresh()
 
 
+# ==================== 音频工作流：参考音频面板 + 目标文本面板 ====================
+
+
+class AudioRefPanel(QFrame):
+    """参考音频库（声音克隆）：上传/拖放单个参考音频，单选。
+
+    与 VideoPanel 类似但更轻：声音克隆一次只用一个参考音频 + 一段目标文本。
+    素材列表持久化到 data/audios.json（重启保留）。勾选任一项即取消其余（radio）。
+    """
+
+    audio_changed = Signal()
+
+    STORE_PATH = DATA_DIR / "audios.json"
+    AUDIO_EXTS = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        self._items: list[str] = []  # 音频路径列表
+        self._load_store()
+        self._build_ui()
+        self.refresh()
+
+    # ---------- 持久化 ----------
+    def _load_store(self):
+        try:
+            if self.STORE_PATH.exists():
+                data = json.loads(self.STORE_PATH.read_text(encoding="utf-8"))
+                self._items = data.get("items", []) or []
+        except Exception as e:
+            logging.error(f"加载音频素材库失败: {e}")
+
+    def _save_store(self):
+        try:
+            self.STORE_PATH.write_text(
+                json.dumps({"items": self._items}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logging.error(f"保存音频素材库失败: {e}")
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        title = QLabel("🎙 参考音频", self)
+        title.setObjectName("PanelTitle")
+        lay.addWidget(title)
+
+        hint = QLabel("上传一段清晰的人声作参考（决定克隆音色）", self)
+        hint.setObjectName("HintLabel")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        btn_row = QHBoxLayout()
+        btn_pick = QPushButton("上传音频", self)
+        btn_pick.clicked.connect(self._pick_audio)
+        btn_row.addWidget(btn_pick)
+        btn_del = QPushButton("删除选中", self)
+        btn_del.clicked.connect(self._delete_selected)
+        btn_row.addWidget(btn_del)
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
+
+        self.list_widget = DropListWidget(self.AUDIO_EXTS, self)
+        self.list_widget.setObjectName("AudioList")
+        self.list_widget.files_dropped.connect(self._add_paths)
+        self._drop_zone = FileDropZone(self, self.AUDIO_EXTS)
+        self._drop_zone.files_dropped.connect(self._add_paths)
+        self.list_widget.itemChanged.connect(self._on_item_changed)
+        # 双击预览（系统默认播放器）
+        self.list_widget.itemDoubleClicked.connect(self._preview_audio)
+        lay.addWidget(self.list_widget, 1)
+
+        self._count_label = QLabel("0 个", self)
+        self._count_label.setObjectName("HintLabel")
+        lay.addWidget(self._count_label)
+
+    def _pick_audio(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择音频", "",
+            "音频文件 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.opus)",
+        )
+        if paths:
+            self._add_paths(paths)
+
+    def _add_paths(self, paths: list):
+        for p in paths:
+            if p not in self._items:
+                self._items.append(p)
+        self._save_store()
+        self.refresh()
+        self.audio_changed.emit()
+
+    def _preview_audio(self, item):
+        path = item.data(Qt.UserRole)
+        if path and os.path.isfile(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def refresh(self):
+        checked = self._checked_paths()
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        for p in self._items:
+            item = QListWidgetItem(os.path.basename(p))
+            item.setToolTip(p)
+            item.setData(Qt.UserRole, p)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if p in checked else Qt.Unchecked)
+            self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
+        self._update_count()
+
+    def _checked_paths(self) -> list:
+        return [
+            self.list_widget.item(i).data(Qt.UserRole)
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.Checked
+        ]
+
+    def _on_item_changed(self, item: QListWidgetItem):
+        """参考音频唯一选择（radio 行为）。"""
+        if item.checkState() == Qt.Checked:
+            self.list_widget.blockSignals(True)
+            for i in range(self.list_widget.count()):
+                other = self.list_widget.item(i)
+                if other is not item and other.checkState() == Qt.Checked:
+                    other.setCheckState(Qt.Unchecked)
+            self.list_widget.blockSignals(False)
+        self._update_count()
+        self.audio_changed.emit()
+
+    def _delete_selected(self):
+        paths = set(self._checked_paths())
+        self._items = [p for p in self._items if p not in paths]
+        self._save_store()
+        self.refresh()
+        self.audio_changed.emit()
+
+    def _update_count(self):
+        n = len(self._checked_paths())
+        self._count_label.setText(f"已选 {n} / 共 {self.list_widget.count()} 个")
+
+    def selected_audio(self) -> Optional[str]:
+        sel = self._checked_paths()
+        return sel[0] if sel else None
+
+
+class VoiceTextPanel(QFrame):
+    """目标文本面板（声音克隆）：输入要让克隆语音说的文本，实时显示字数/预估秒数/预估灵石。"""
+
+    text_changed = Signal()
+
+    def __init__(self, settings: QSettings, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        self.settings = settings
+        self._build_ui()
+
+    def _build_ui(self):
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        title = QLabel("📝 目标文本", self)
+        title.setObjectName("PanelTitle")
+        lay.addWidget(title)
+
+        hint = QLabel("克隆语音会说出以下文本（计费按输出音频估算秒数）：", self)
+        hint.setObjectName("HintLabel")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        self.text_edit = QPlainTextEdit(self)
+        self.text_edit.setObjectName("VoiceText")
+        self.text_edit.setPlaceholderText("在此输入要让克隆语音说的内容…")
+        self.text_edit.setPlainText(self.settings.value("voice_text", "", type=str))
+        self.text_edit.textChanged.connect(self._on_text_changed)
+        lay.addWidget(self.text_edit, 1)
+
+        self.info_label = QLabel("0 字", self)
+        self.info_label.setObjectName("HintLabel")
+        lay.addWidget(self.info_label)
+        self._refresh_info()
+
+    def _on_text_changed(self):
+        self.settings.setValue("voice_text", self.text_edit.toPlainText())
+        self._refresh_info()
+        self.text_changed.emit()
+
+    def _refresh_info(self):
+        text = self.text_edit.toPlainText().strip()
+        n = len(text)
+        if n == 0:
+            self.info_label.setText("0 字")
+            return
+        secs = estimate_voice_seconds(text)
+        cost = secs * 0.5
+        self.info_label.setText(f"{n} 字 · 约 {secs} 秒 · 预估 {cost:.1f} 灵石")
+
+    def prompt_text(self) -> str:
+        return self.text_edit.toPlainText().strip()
+
+
 # ==================== 提交进度悬浮窗 ====================
 
 
@@ -2434,13 +2789,15 @@ class SubmitProgressOverlay(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("动作迁移视频生成")
+        self.setWindowTitle("RBFLow 创意工坊")
         self.resize(1500, 850)
         self.setMinimumSize(1200, 700)
 
         self.settings = QSettings("LingFang", "RbflowVideo")
         self.store = TaskStore(DATA_DIR / "tasks.json")
         self._submit_worker: Optional[SubmitWorker] = None
+        self._voice_worker: Optional[VoiceSubmitWorker] = None
+        self._submit_overlay = None  # 视频批量提交悬浮窗（音频单任务不用）
         self._progress_workers: dict[str, ProgressWorker] = {}
 
         # 主题状态（深色/亮色），记忆到 QSettings
@@ -2454,7 +2811,7 @@ class MainWindow(QMainWindow):
         _tray_pix = QPixmap(16, 16)
         _tray_pix.fill(QColor("#89b4fa"))
         self.tray.setIcon(QIcon(_tray_pix))
-        self.tray.setToolTip("动作迁移视频生成")
+        self.tray.setToolTip("RBFLow 创意工坊")
         self.tray.show()
 
         self._build_ui()
@@ -2487,7 +2844,7 @@ class MainWindow(QMainWindow):
         topbar.setFixedHeight(48)
         tlay = QHBoxLayout(topbar)
         tlay.setContentsMargins(12, 6, 12, 6)
-        title = QLabel("🎬 动作迁移视频生成", topbar)
+        title = QLabel("🎨 RBFLow 创意工坊", topbar)
         title.setObjectName("AppTitle")
         tlay.addWidget(title)
         tlay.addStretch()
@@ -2515,20 +2872,47 @@ class MainWindow(QMainWindow):
         tlay.addWidget(self.tier_combo)
         root.addWidget(topbar)
 
-        # 三栏（用 QSplitter 支持拖拽调宽）
-        splitter = QSplitter(Qt.Horizontal)
+        # 顶部工作流切换 Tab：视频（动作迁移） / 音频（声音克隆）
+        self.workspace_tabs = QTabWidget()
+        self.workspace_tabs.setObjectName("WorkspaceTabs")
+
+        # --- 视频工作流（原有三栏） ---
+        self.video_workspace = QWidget()
+        vlay = QVBoxLayout(self.video_workspace)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+        self.video_splitter = QSplitter(Qt.Horizontal)
         self.image_panel = ImagePanel()
         self.video_panel = VideoPanel(self.settings)
-        self.queue_panel = QueuePanel(self.store, self.settings)
-        splitter.addWidget(self.image_panel)
-        splitter.addWidget(self.video_panel)
-        splitter.addWidget(self.queue_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 4)
-        splitter.setStretchFactor(2, 4)
-        root.addWidget(splitter, 1)
+        self.video_splitter.addWidget(self.image_panel)
+        self.video_splitter.addWidget(self.video_panel)
+        self.video_splitter.setStretchFactor(0, 3)
+        self.video_splitter.setStretchFactor(1, 4)
+        vlay.addWidget(self.video_splitter)
+        self.workspace_tabs.addTab(self.video_workspace, "🎬 视频 · 动作迁移")
 
-        # 提交栏
+        # --- 音频工作流（参考音频 + 目标文本） ---
+        self.audio_workspace = QWidget()
+        alay = QVBoxLayout(self.audio_workspace)
+        alay.setContentsMargins(0, 0, 0, 0)
+        alay.setSpacing(0)
+        self.audio_splitter = QSplitter(Qt.Horizontal)
+        self.audio_panel = AudioRefPanel()
+        self.voice_panel = VoiceTextPanel(self.settings)
+        self.audio_splitter.addWidget(self.audio_panel)
+        self.audio_splitter.addWidget(self.voice_panel)
+        self.audio_splitter.setStretchFactor(0, 3)
+        self.audio_splitter.setStretchFactor(1, 4)
+        alay.addWidget(self.audio_splitter)
+        self.workspace_tabs.addTab(self.audio_workspace, "🎙 音频 · 声音克隆")
+
+        # 任务队列面板：两个工作流共享同一实例，随 Tab 切换挂载到当前工作流右栏
+        self.queue_panel = QueuePanel(self.store, self.settings)
+
+        self.workspace_tabs.currentChanged.connect(self._on_workspace_changed)
+        root.addWidget(self.workspace_tabs, 1)
+
+        # 提交栏（随工作流切换语义：视频=笛卡尔积生成；音频=声音克隆）
         submit_bar = QHBoxLayout()
         self.info_label = QLabel("选 0 图 × 0 视频 = 0 任务", central)
         self.info_label.setObjectName("HintLabel")
@@ -2549,6 +2933,9 @@ class MainWindow(QMainWindow):
         self.video_panel.list_widget.itemChanged.connect(self._update_info)
         # 后台线程完成时长探测 + 缩略图生成后：刷新视频列表图标 + 预估信息
         self.video_panel.durations_ready.connect(self._on_video_assets_ready)
+        # 音频工作流：参考音频/目标文本变化时更新预估
+        self.audio_panel.audio_changed.connect(self._update_info)
+        self.voice_panel.text_changed.connect(self._update_info)
         self.queue_panel.retry_task.connect(self._on_retry_task)
         self.queue_panel.delete_task.connect(self._on_delete_task)
         self.queue_panel.saveas_task.connect(self._on_saveas_task)
@@ -2558,9 +2945,42 @@ class MainWindow(QMainWindow):
         # 「自动刷新」勾选变化时启停定时器
         self.queue_panel.chk_auto_refresh.toggled.connect(self._on_auto_refresh_toggled)
 
+        # 初始把队列面板挂到当前 Tab（默认视频）并同步提交按钮/预估
+        self._attach_queue_to_workspace()
         self._update_info()
+        self._update_submit_button()
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+
+    # ---------- 工作流切换 ----------
+    def _current_kind(self) -> str:
+        """当前工作流类型：0=视频，1=音频。"""
+        return "audio" if self.workspace_tabs.currentIndex() == 1 else "video"
+
+    def _attach_queue_to_workspace(self):
+        """把共享的任务队列面板挂载到当前工作流的右栏。
+
+        QSplitter 没有 removeWidget；用 setParent(None) 先脱离旧分割器（不删除控件），
+        再 addWidget 到新分割器。addWidget 会自动把控件 reparent 到目标分割器。
+        """
+        self.queue_panel.setParent(None)
+        if self._current_kind() == "audio":
+            self.audio_splitter.addWidget(self.queue_panel)
+            self.audio_splitter.setStretchFactor(2, 4)
+        else:
+            self.video_splitter.addWidget(self.queue_panel)
+            self.video_splitter.setStretchFactor(2, 4)
+
+    def _on_workspace_changed(self, _idx: int):
+        self._attach_queue_to_workspace()
+        self._update_submit_button()
+        self._update_info()
+
+    def _update_submit_button(self):
+        if self._current_kind() == "audio":
+            self.btn_submit.setText("🚀 生成克隆语音")
+        else:
+            self.btn_submit.setText("🚀 提交生成")
 
     def _apply_theme(self):
         """根据 self._theme 生成 QSS 并应用。"""
@@ -2622,10 +3042,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
-        # 停止所有 worker
+        # 停止所有 worker（视频提交 / 音频提交 / 进度监听）
         if self._submit_worker:
             self._submit_worker.stop()
             self._submit_worker.wait(3000)
+        voice_worker = getattr(self, "_voice_worker", None)
+        if voice_worker:
+            voice_worker.stop()
+            voice_worker.wait(3000)
         for w in self._progress_workers.values():
             w.stop()
             w.wait(3000)
@@ -2645,7 +3069,14 @@ class MainWindow(QMainWindow):
         self._update_info()
 
     def _update_info(self):
-        """更新底部信息栏。
+        """更新底部信息栏（随当前工作流切换语义）。"""
+        if self._current_kind() == "audio":
+            self._update_audio_info()
+        else:
+            self._update_video_info()
+
+    def _update_video_info(self):
+        """视频工作流预估。
 
         关键：只读 _DURATION_CACHE（cached_duration），绝不在此同步 spawn ffprobe
         —— 该槽由 itemChanged 触发（每次勾选都跑），若 spawn 子进程会让勾选卡
@@ -2669,8 +3100,27 @@ class MainWindow(QMainWindow):
                 f"选 {len(imgs)} 图 × {len(vids)} 视频 = {n} 任务 · 时长计算中…"
             )
 
+    def _update_audio_info(self):
+        """音频工作流预估：由目标文本长度估算输出秒数（与 relay 计费公式一致）。"""
+        audio = self.audio_panel.selected_audio()
+        text = self.voice_panel.prompt_text()
+        if not audio or not text:
+            self.info_label.setText("选 1 个参考音频 + 输入目标文本 = 1 任务")
+            return
+        secs = estimate_voice_seconds(text)
+        cost = secs * 0.5
+        self.info_label.setText(
+            f"1 个声音克隆任务 · 约 {secs} 秒 · 预估 {cost:.1f} 灵石"
+        )
+
     # ---------- 提交 ----------
     def _on_submit(self):
+        if self._current_kind() == "audio":
+            self._on_submit_audio()
+        else:
+            self._on_submit_video()
+
+    def _on_submit_video(self):
         if not bridge_ready():
             QMessageBox.warning(self, "未连接", "请在灵坊桌面端内运行本插件。")
             return
@@ -2713,6 +3163,45 @@ class MainWindow(QMainWindow):
         self._submit_worker.log.connect(self._submit_overlay.update_step)
         self._submit_worker.start()
 
+    def _on_submit_audio(self):
+        if not bridge_ready():
+            QMessageBox.warning(self, "未连接", "请在灵坊桌面端内运行本插件。")
+            return
+        audio = self.audio_panel.selected_audio()
+        text = self.voice_panel.prompt_text()
+        if not audio:
+            QMessageBox.information(self, "未选择音频", "请选择 1 个参考音频。")
+            return
+        if not text:
+            QMessageBox.information(self, "未输入文本", "请输入要让克隆语音说的目标文本。")
+            return
+        if len(text) > VOICE_MAX_PROMPT_CHARS:
+            QMessageBox.warning(
+                self, "文本过长",
+                f"目标文本最多 {VOICE_MAX_PROMPT_CHARS} 字符（当前 {len(text)}），请精简后重试。",
+            )
+            return
+
+        secs = estimate_voice_seconds(text)
+        cost = secs * 0.5
+        preview = (
+            f"将生成 1 个声音克隆任务（约 {secs} 秒），预估消耗约 {cost:.1f} 灵石。\n"
+            f"实际计费以平台按输出音频估算秒数为准。"
+        )
+        if QMessageBox.question(self, "确认提交", preview + "\n继续？") != QMessageBox.Yes:
+            return
+
+        tier = self.tier_combo.currentText()
+        self.btn_submit.setEnabled(False)
+        self.btn_submit.setText("提交中...")
+        # 声音克隆为单任务，不走批量提交悬浮窗
+        self._voice_worker = VoiceSubmitWorker(audio, text, tier, self)
+        self._voice_worker.pair_submitted.connect(self._on_pair_submitted)
+        self._voice_worker.pair_failed.connect(self._on_pair_failed)
+        self._voice_worker.billing_blocked.connect(self._on_billing_blocked)
+        self._voice_worker.finished_all.connect(self._on_submit_finished)
+        self._voice_worker.start()
+
     def _on_pair_submitted(self, task: Task):
         self.store.add(task)
         self.queue_panel.refresh()
@@ -2743,11 +3232,12 @@ class MainWindow(QMainWindow):
 
     def _on_submit_finished(self, submitted: int, failed: int):
         self.btn_submit.setEnabled(True)
-        self.btn_submit.setText("🚀 提交生成")
+        self._update_submit_button()  # 恢复当前工作流的按钮文案
         self._first_fail_shown = False  # 重置，下次提交再允许首失败弹窗
-        # 关闭/完成提交悬浮窗
-        if hasattr(self, "_submit_overlay") and self._submit_overlay.isVisible():
-            self._submit_overlay.finish(submitted, failed)
+        # 关闭/完成提交悬浮窗（仅视频批量提交有；音频单任务无悬浮窗）
+        overlay = getattr(self, "_submit_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.finish(submitted, failed)
         if failed > 0:
             # 有失败：状态栏持久红色提示（不自动消失）
             self.status_bar.setStyleSheet("color: #f38ba8;")
@@ -2767,7 +3257,7 @@ class MainWindow(QMainWindow):
             return
         if task.pair_id in self._progress_workers:
             return
-        w = ProgressWorker(task.pair_id, task.rbflow_task_id, self)
+        w = ProgressWorker(task.pair_id, task.rbflow_task_id, task.kind, self)
         w.progress_update.connect(self._on_progress_update)
         w.done.connect(self._on_progress_done)
         w.error.connect(self._on_progress_error)
@@ -2806,10 +3296,15 @@ class MainWindow(QMainWindow):
     def _notify_done(self, task: Task):
         """任务成功完成时弹 Windows 系统通知（QSystemTrayIcon）。"""
         try:
-            name = f"{Path(task.image_path).stem}_{Path(task.video_path).stem}"
+            if task.kind == "audio":
+                name = Path(task.audio_path).stem
+                title, body = "声音克隆完成", f"{name} 已生成，正在保存到本地"
+            else:
+                name = f"{Path(task.image_path).stem}_{Path(task.video_path).stem}"
+                title, body = "视频生成完成", f"{name} 已生成，正在保存到本地"
             self.tray.showMessage(
-                "视频生成完成",
-                f"{name} 已生成，正在保存到本地",
+                title,
+                body,
                 QSystemTrayIcon.Information,
                 5000,
             )
@@ -2826,41 +3321,47 @@ class MainWindow(QMainWindow):
         self.store.update(task)
         self.queue_panel.update_task_card(task)
         # 进度阶段失败（任务跑了一半挂了）弹窗提示用户
+        if task.kind == "audio":
+            task_name = os.path.basename(task.audio_path or "音频")
+        else:
+            task_name = f"{os.path.basename(task.image_path)} × {os.path.basename(task.video_path)}"
         QMessageBox.warning(
             self,
             "生成失败",
-            f"{os.path.basename(task.image_path)} × {os.path.basename(task.video_path)}\n失败原因：{reason}",
+            f"{task_name}\n失败原因：{reason}",
         )
         if self.queue_panel.auto_retry():
             self._on_retry_task(pair_id)
 
     def _download_and_save(self, task: Task):
-        """从桥下载成品视频并落盘到自定义文件夹。"""
+        """从桥下载成品（视频/音频）并落盘到自定义文件夹。"""
         if not task.rbflow_task_id:
             return
+        is_audio = task.kind == "audio"
         try:
-            result = bridge_download_video(task.rbflow_task_id)
+            result = bridge_download_video(task.rbflow_task_id, kind=task.kind)
             data_b64 = result.get("data", "")
-            filename = (
-                result.get("filename")
-                or f"{os.path.basename(task.image_path)}_{os.path.basename(task.video_path)}.mp4"
-            )
-            video_bytes = base64.b64decode(data_b64)
+            filename = result.get("filename") or f"{self._output_stem(task)}.{'flac' if is_audio else 'mp4'}"
+            file_bytes = base64.b64decode(data_b64)
 
-            # 命名模板：{输出目录}\{日期}\{图片分类}\{图片名}_{视频名}.mp4
+            # 命名模板：
+            #   视频：{输出目录}\{日期}\{图片分类}\{图片名}_{视频名}.mp4
+            #   音频：{输出目录}\{日期}\voice\{音频名}.flac
             out_root = Path(self.queue_panel.output_dir())
             date_str = (
                 datetime.now().strftime("%Y-%-m-%-d")
                 if sys.platform != "win32"
                 else datetime.now().strftime("%Y-%#m-%#d")
             )
-            dest_dir = out_root / date_str / task.image_category
+            sub = "voice" if is_audio else task.image_category
+            dest_dir = out_root / date_str / sub
             dest_dir.mkdir(parents=True, exist_ok=True)
-            base_img = Path(task.image_path).stem
-            base_vid = Path(task.video_path).stem
+            stem = self._output_stem(task)
+            # 从下载文件名推断扩展名（音频多为 .flac，视频 .mp4）
+            ext = Path(filename).suffix or (".flac" if is_audio else ".mp4")
             # 同名文件不覆盖：已存在则自动追加 _1/_2/... 后缀
-            dest = _unique_dest_path(dest_dir, f"{base_img}_{base_vid}")
-            dest.write_bytes(video_bytes)
+            dest = _unique_dest_path(dest_dir, stem, ext)
+            dest.write_bytes(file_bytes)
 
             task.saved_path = str(dest)
             task.state = STATE_SUCCESS
@@ -2873,21 +3374,31 @@ class MainWindow(QMainWindow):
             task.error_msg = f"下载失败: {e}"
             self.store.update(task)
             self.queue_panel.update_task_card(task)
+            media = "音频" if is_audio else "视频"
             QMessageBox.warning(
                 self,
                 "下载失败",
-                f"视频已生成但保存失败：{e}\n\n可在任务卡片点「💾 另存为」重试。",
+                f"{media}已生成但保存失败：{e}\n\n可在任务卡片点「💾 另存为」重试。",
             )
+
+    def _output_stem(self, task: Task) -> str:
+        """输出文件名主干（不含扩展名）。音频用音频名；视频用 图片名_视频名。"""
+        if task.kind == "audio":
+            return Path(task.audio_path).stem or "voice"
+        return f"{Path(task.image_path).stem}_{Path(task.video_path).stem}"
 
     # ---------- 卡片操作 ----------
     def _on_retry_task(self, pair_id: str):
         task = self.store.tasks.get(pair_id)
         if not task:
             return
-        # 重新提交（重新扣费 + 转发）
-        pairs = [(task.image_path, task.video_path, task.image_category)]
         tier = task.tier
-        worker = SubmitWorker(pairs, tier, self)
+        # 重新提交（重新扣费 + 转发）：按工作流类型选 worker
+        if task.kind == "audio":
+            worker = VoiceSubmitWorker(task.audio_path, task.prompt_text, tier, self)
+        else:
+            pairs = [(task.image_path, task.video_path, task.image_category)]
+            worker = SubmitWorker(pairs, tier, self)
         worker.pair_submitted.connect(
             lambda new_task: (
                 self.store.add(new_task),
@@ -2918,10 +3429,15 @@ class MainWindow(QMainWindow):
             self._download_and_save(task)
             src = task.saved_path
         if not src or not os.path.exists(src):
-            QMessageBox.warning(self, "无文件", "该任务暂无可保存的视频。")
+            QMessageBox.warning(self, "无文件", "该任务暂无可保存的文件。")
             return
+        file_filter = (
+            "音频 (*.flac *.mp3 *.wav *.m4a *.aac *.ogg *.opus)"
+            if task.kind == "audio"
+            else "视频 (*.mp4)"
+        )
         dest, _ = QFileDialog.getSaveFileName(
-            self, "另存为", os.path.basename(src), "视频 (*.mp4)"
+            self, "另存为", os.path.basename(src), file_filter
         )
         if dest:
             shutil.copy2(src, dest)
@@ -2939,7 +3455,7 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(task.saved_path))
         else:
             QMessageBox.information(
-                self, "暂无视频", "该任务还未生成视频，请等待完成。"
+                self, "暂无文件", "该任务还未生成完成，请等待。"
             )
 
 
@@ -2948,7 +3464,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("RBFLow 视频生成")
+    app.setApplicationName("RBFLow 创意工坊")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

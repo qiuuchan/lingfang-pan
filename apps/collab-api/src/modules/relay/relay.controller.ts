@@ -64,6 +64,20 @@ export class RelayController {
     return this.relay.refundVideo(req, body);
   }
 
+  @Post('audio/generations')
+  @ApiOperation({ summary: '声音克隆按输出秒数计费（转发 RBFLow /tasks/voice）' })
+  audio(@Req() req: Request, @Body() body: Record<string, unknown>) {
+    // body: { model: 'fast'|'premium', audio: base64, audio_filename, audio_mime_type, prompt_text }。
+    return this.relay.audioGenerations(req, body);
+  }
+
+  @Post('audio/refund')
+  @ApiOperation({ summary: '声音克隆转发失败退款（凭 call_log_id 退已实扣灵石）' })
+  refundAudio(@Req() req: Request, @Body() body: Record<string, unknown>) {
+    // body: { call_log_id: string }。幂等。
+    return this.relay.refundAudio(req, body);
+  }
+
   @Get('rbflow-config')
   @ApiOperation({ summary: '读取 RBFLow 服务配置（供桌面桥转发用，已登录用户即可；插件进程不可见）' })
   rbflowConfig(@Req() req: Request) {

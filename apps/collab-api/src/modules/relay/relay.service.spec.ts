@@ -570,3 +570,144 @@ describe('RelayService.refundVideo 视频退款', () => {
     expect(prisma.llmCallLog.update).not.toHaveBeenCalled();
   });
 });
+
+// === 声音克隆按输出秒数计费（PER_SECOND，秒数由 relay 从 prompt_text 估算） ===
+
+/** 与 relay.service estimateVoiceSeconds 同一公式（4 字/秒，向上取整，≥1）。 */
+function estSeconds(text: string): number {
+  return Math.max(1, Math.ceil(text.trim().length / 4));
+}
+
+/** 构造音频专用 RelayService：pricing 返回 PER_SECOND 单价 0.5；秒数由 prompt_text 估算。 */
+function buildAudio(promptText: string, opts: { reserveThrows?: boolean; rbflowStatus?: number; rbflowBody?: unknown } = {}) {
+  const pricePerUnit = 0.5;
+  const seconds = estSeconds(promptText);
+  const expectedCredits = pricePerUnit * Math.max(1, Math.ceil(seconds));
+  const prisma = {
+    llmCallLog: {
+      create: vi.fn(async () => ({ id: 'alog1' })),
+      update: vi.fn(async () => ({})),
+      findFirst: vi.fn(async () => ({ id: 'alog1', status: 'success', credits: expectedCredits })),
+    },
+    platformSetting: {
+      findMany: vi.fn(async () => opts.rbflowStatus === undefined && opts.rbflowBody === undefined
+        ? [] // 默认：未配置
+        : [{ key: 'rbflowUrl', value: 'http://rbflow.test:41792' }, { key: 'rbflowApiKey', value: 'test-key' }],
+      ),
+    },
+  } as never;
+  const credits = makeCredits(expectedCredits, { reserveThrows: opts.reserveThrows });
+  const pricing = {
+    lookupPrice: vi.fn(async () => ({ unit: 'PER_SECOND', pricePerUnit })),
+    lookupMinContextWindow: vi.fn(async () => null),
+    computeCredits: vi.fn((_unit: string, ppu: number, usage: { seconds?: number }) => ppu * Math.max(1, Math.ceil(usage.seconds ?? 0))),
+  } as never;
+  const router = { selectCandidates: vi.fn(async () => []), decryptUpstreamKey: vi.fn(async () => ({})) } as never;
+  // @ts-expect-error mock 不实现完整接口。
+  const svc = new RelayService(prisma, pricing, credits, router);
+  return { svc, prisma, credits, pricing, expectedCredits, seconds };
+}
+
+describe('RelayService.audioGenerations 按输出秒数计费 + RBFLow /tasks/voice 转发', () => {
+  it('成功按估算秒数扣费 + 转发：返回 task_id，reserve+reconcile 各一次，不退款', async () => {
+    mockRbflowFetch(200, { task_id: 'voice-task-1' });
+    const text = '你好世界'.repeat(10); // 40 字 → 10 秒
+    const { svc, credits, pricing, expectedCredits, seconds } = buildAudio(text, { rbflowStatus: 200, rbflowBody: { task_id: 'voice-task-1' } });
+    const out = await svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: text });
+    expect(out).toMatchObject({ charged: true, credits: expectedCredits, seconds, task_id: 'voice-task-1' });
+    expect(pricing.lookupPrice).toHaveBeenCalledWith(expect.objectContaining({ capability: 'audio', model: 'voice_clone' }));
+    expect(credits.reserve).toHaveBeenCalledTimes(1);
+    expect(credits.reconcile).toHaveBeenCalledTimes(1);
+    expect(credits.refund).not.toHaveBeenCalled();
+  });
+
+  it('秒数由文本长度估算：40 字 → 10 秒，扣 0.5×10=5 灵石', async () => {
+    mockRbflowFetch(200, { task_id: 'v2' });
+    const text = '字'.repeat(40);
+    const { svc, expectedCredits } = buildAudio(text, { rbflowStatus: 200, rbflowBody: { task_id: 'v2' } });
+    const out = await svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: text });
+    expect(out.seconds).toBe(10);
+    expect(out.credits).toBe(expectedCredits);
+  });
+
+  it('短文本 clamp 到 1 秒（防白嫖）：3 字 → 1 秒', async () => {
+    mockRbflowFetch(200, { task_id: 'v3' });
+    const { svc } = buildAudio('你好吗', { rbflowStatus: 200, rbflowBody: { task_id: 'v3' } });
+    const out = await svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: '你好吗' });
+    expect(out.seconds).toBe(1);
+  });
+
+  it('空 prompt_text → 400 bad_request，不建计费日志', async () => {
+    const { svc, prisma } = buildAudio('   ');
+    await expect(svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: '   ' })).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    expect(prisma.llmCallLog.create).not.toHaveBeenCalled();
+  });
+
+  it('余额不足（reserve 抛 402）：finalize insufficient_balance，不调 reconcile/不转发', async () => {
+    const fetchMock = mockRbflowFetch(200, { task_id: 'should-not-reach' });
+    const text = '字'.repeat(20);
+    const { svc, credits, prisma } = buildAudio(text, { reserveThrows: true });
+    await expect(svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: text })).rejects.toMatchObject({ code: 'insufficient_balance' });
+    expect(credits.reconcile).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const updateData = prisma.llmCallLog.update.mock.calls[0]?.[0]?.data;
+    expect(updateData).toMatchObject({ status: 'insufficient_balance', errorCode: 'insufficient_balance' });
+  });
+
+  it('无定价抛 503 no_pricing 且不建计费日志', async () => {
+    const prisma = { llmCallLog: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() }, platformSetting: { findMany: vi.fn() } } as never;
+    const credits = makeCredits(10);
+    const pricing = { lookupPrice: vi.fn(async () => null), lookupMinContextWindow: vi.fn(async () => null), computeCredits: vi.fn() } as never;
+    const router = { selectCandidates: vi.fn(), decryptUpstreamKey: vi.fn() } as never;
+    // @ts-expect-error mock
+    const svc = new RelayService(prisma, pricing, credits, router);
+    await expect(svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: '你好' })).rejects.toMatchObject({ status: 503, code: 'no_pricing' });
+    expect(prisma.llmCallLog.create).not.toHaveBeenCalled();
+  });
+
+  it('LlmCallLog 记 capability=audio + requestSummary 含 seconds/chars（审计）', async () => {
+    mockRbflowFetch(200, { task_id: 'v4' });
+    const text = '字'.repeat(20);
+    const { svc, prisma } = buildAudio(text, { rbflowStatus: 200, rbflowBody: { task_id: 'v4' } });
+    await svc.audioGenerations(makeReq(), { model: 'premium', audio: 'aGk=', prompt_text: text });
+    const data = prisma.llmCallLog.create.mock.calls[0]?.[0]?.data;
+    expect(data).toMatchObject({ capability: 'audio', tier: 'PREMIUM', model: 'voice_clone' });
+    expect(data.requestSummary).toMatchObject({ seconds: 5, chars: 20, tier: 'PREMIUM' });
+  });
+
+  it('RBFLow 未配置（rbflowUrl 空）→ 退款 + 503 rbflow_not_configured', async () => {
+    const { svc, credits } = buildAudio('字'.repeat(10)); // 默认未配置
+    await expect(svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: '字'.repeat(10) })).rejects.toMatchObject({ status: 503, code: 'rbflow_not_configured' });
+    expect(credits.refundConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it('RBFLow 转发失败（网络/非 2xx）→ 退款 + 502 rbflow_forward_failed', async () => {
+    mockRbflowFetch(-1, null); // fetch 抛错
+    const text = '字'.repeat(10);
+    const { svc, credits } = buildAudio(text, { rbflowStatus: 200, rbflowBody: { task_id: 'x' } });
+    await expect(svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: text })).rejects.toMatchObject({ status: 502, code: 'rbflow_forward_failed' });
+    expect(credits.refundConsumed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RelayService.refundAudio 音频退款', () => {
+  it('凭 call_log_id 调 refundConsumed 退款，finalize status=refunded', async () => {
+    const { svc, credits, prisma } = buildAudio('字'.repeat(10));
+    credits.refundConsumed.mockResolvedValueOnce(5);
+    const out = await svc.refundAudio(makeReq(), { call_log_id: 'alog1' });
+    expect(out).toMatchObject({ refunded: true, credits: 5, call_log_id: 'alog1' });
+    expect(credits.refundConsumed).toHaveBeenCalledTimes(1);
+    expect(prisma.llmCallLog.update).toHaveBeenCalled();
+  });
+
+  it('缺 call_log_id → 400 bad_request', async () => {
+    const { svc } = buildAudio('字'.repeat(10));
+    await expect(svc.refundAudio(makeReq(), {})).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+  });
+
+  it('call_log 不属于当前团队 → 404 not_found', async () => {
+    const { svc, prisma } = buildAudio('字'.repeat(10));
+    prisma.llmCallLog.findFirst.mockResolvedValueOnce(null);
+    await expect(svc.refundAudio(makeReq(), { call_log_id: 'other' })).rejects.toMatchObject({ status: 404, code: 'not_found' });
+  });
+});
