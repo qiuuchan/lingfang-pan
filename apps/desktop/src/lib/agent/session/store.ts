@@ -40,6 +40,7 @@ const KNOWN_CAPABILITY_KINDS = new Set([
   'llm.chat', 'image.generate', 'image.edit', 'storage.kv', 'system.info',
   'system.screenshot', 'system.notify', 'plugin.upload', 'plugin.submitMarketplace',
   'video.generate',
+  'audio.generate',
 ]);
 
 function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {

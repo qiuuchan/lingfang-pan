@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLineEdit,
     QComboBox,
+    QSpinBox,
     QListWidget,
     QListWidgetItem,
     QFileDialog,
@@ -1074,6 +1075,9 @@ class Task:
     updated_at: str = ""
     finished_at: str = ""
     order: int = 0  # 队列顺序
+    # 自动重试
+    retry_count: int = 0  # 已自动重试次数
+    next_retry_at: str = ""  # 下次自动重试时间（ISO）；空=无待重试
 
     def touch(self):
         self.updated_at = datetime.now().isoformat(timespec="seconds")
@@ -1144,16 +1148,18 @@ class SubmitWorker(QThread):
     """笛卡尔积提交：逐对探测时长 → 扣灵石 → 提交 RBFLow。"""
 
     pair_submitted = Signal(object)  # Task
-    pair_failed = Signal(str, str, object)  # pair_id, error_msg, partial Task (or None)
+    pair_failed = Signal(str, str, object, bool)  # pair_id, error_msg, partial Task, retryable
     billing_blocked = Signal(str)  # 余额不足消息
     finished_all = Signal(int, int)  # submitted_count, failed_count
     log = Signal(str)
 
-    def __init__(self, pairs: list, tier: str, parent=None):
+    def __init__(self, pairs: list, tier: str, pair_id: str = "", parent=None):
         # pairs: list of (image_path, video_path, image_category)
+        # pair_id：非空时复用该 id（原任务就地重试用），否则生成新 id
         super().__init__(parent)
         self.pairs = pairs
         self.tier = tier
+        self._pair_id = pair_id
         self._stop = False
 
     def stop(self):
@@ -1165,7 +1171,7 @@ class SubmitWorker(QThread):
         for img_path, vid_path, img_cat in self.pairs:
             if self._stop:
                 break
-            pair_id = f"{int(time.time() * 1000)}_{submitted}_{os.path.basename(img_path)[:8]}"
+            pair_id = self._pair_id or f"{int(time.time() * 1000)}_{submitted}_{os.path.basename(img_path)[:8]}"
             task = Task(
                 pair_id=pair_id,
                 image_path=img_path,
@@ -1197,17 +1203,17 @@ class SubmitWorker(QThread):
                     )
                     task.state = STATE_FAILED
                     task.error_msg = "灵石余额不足"
-                    self.pair_failed.emit(pair_id, str(e), task)
+                    self.pair_failed.emit(pair_id, str(e), task, False)  # 余额不足不可重试
                     break  # 余额不足，停止后续
                 else:
                     task.state = STATE_FAILED
                     task.error_msg = str(e)
-                    self.pair_failed.emit(pair_id, str(e), task)
+                    self.pair_failed.emit(pair_id, str(e), task, True)
             except Exception as e:
                 failed += 1
                 task.state = STATE_FAILED
                 task.error_msg = str(e)
-                self.pair_failed.emit(pair_id, str(e), task)
+                self.pair_failed.emit(pair_id, str(e), task, True)
         self.finished_all.emit(submitted, failed)
 
 
@@ -1219,16 +1225,17 @@ class VoiceSubmitWorker(QThread):
     """
 
     pair_submitted = Signal(object)  # Task
-    pair_failed = Signal(str, str, object)  # pair_id, error_msg, partial Task (or None)
+    pair_failed = Signal(str, str, object, bool)  # pair_id, error_msg, partial Task, retryable
     billing_blocked = Signal(str)  # 余额不足消息
     finished_all = Signal(int, int)  # submitted_count, failed_count
     log = Signal(str)
 
-    def __init__(self, audio_path: str, prompt_text: str, tier: str, parent=None):
+    def __init__(self, audio_path: str, prompt_text: str, tier: str, pair_id: str = "", parent=None):
         super().__init__(parent)
         self.audio_path = audio_path
         self.prompt_text = prompt_text
         self.tier = tier
+        self._pair_id = pair_id  # 非空时复用（原任务就地重试）
         self._stop = False
 
     def stop(self):
@@ -1240,7 +1247,7 @@ class VoiceSubmitWorker(QThread):
         if self._stop:
             self.finished_all.emit(0, 0)
             return
-        pair_id = f"{int(time.time() * 1000)}_voice_{os.path.basename(self.audio_path)[:8]}"
+        pair_id = self._pair_id or f"{int(time.time() * 1000)}_voice_{os.path.basename(self.audio_path)[:8]}"
         est_seconds = estimate_voice_seconds(self.prompt_text)
         task = Task(
             pair_id=pair_id,
@@ -1271,16 +1278,16 @@ class VoiceSubmitWorker(QThread):
                 self.billing_blocked.emit("灵石余额不足，提交已取消。请充值后重试。")
                 task.state = STATE_FAILED
                 task.error_msg = "灵石余额不足"
-                self.pair_failed.emit(pair_id, str(e), task)
+                self.pair_failed.emit(pair_id, str(e), task, False)  # 余额不足不可重试
             else:
                 task.state = STATE_FAILED
                 task.error_msg = str(e)
-                self.pair_failed.emit(pair_id, str(e), task)
+                self.pair_failed.emit(pair_id, str(e), task, True)
         except Exception as e:
             failed += 1
             task.state = STATE_FAILED
             task.error_msg = str(e)
-            self.pair_failed.emit(pair_id, str(e), task)
+            self.pair_failed.emit(pair_id, str(e), task, True)
         self.finished_all.emit(submitted, failed)
 
 
@@ -1552,7 +1559,12 @@ class TaskCardWidget(QWidget):
             s = f"约{self.task.seconds:.0f}秒 · {self.task.charged_credits:.1f}灵石 · {snippet}"
         else:
             s = f"{self.task.seconds:.0f}秒 · {self.task.charged_credits:.1f}灵石"
-        if self.task.saved_path:
+        if self.task.retry_count:
+            s += f" · 重试{self.task.retry_count}次"
+        if self.task.state == STATE_FAILED and self.task.next_retry_at:
+            # 已安排自动重试：显示下次重试时间（等待中）
+            s += f" · 待重试({self.task.next_retry_at[11:19]})"
+        elif self.task.saved_path:
             s += " · 已保存"
         elif self.task.error_msg:
             s += f" · {self.task.error_msg[:20]}"
@@ -2402,6 +2414,23 @@ class QueuePanel(QFrame):
         self.chk_auto_retry.toggled.connect(
             lambda v: self.settings.setValue("auto_retry", v)
         )
+        # 自动重试上限（次）：同一任务最多重试 N 次，超过则取消（保持失败）
+        self.spin_max_retry = QSpinBox(self)
+        self.spin_max_retry.setRange(0, 20)
+        self.spin_max_retry.setValue(int(self.settings.value("max_retry", 3)))
+        self.spin_max_retry.setToolTip("同一任务最多自动重试次数，超过则取消（0=不重试）")
+        self.spin_max_retry.valueChanged.connect(
+            lambda v: self.settings.setValue("max_retry", v)
+        )
+        # 自动重试间隔（秒）：失败后等待多久再重试
+        self.spin_retry_interval = QSpinBox(self)
+        self.spin_retry_interval.setRange(5, 3600)
+        self.spin_retry_interval.setSingleStep(5)
+        self.spin_retry_interval.setValue(int(self.settings.value("retry_interval", 30)))
+        self.spin_retry_interval.setToolTip("失败后等待多少秒再自动重试")
+        self.spin_retry_interval.valueChanged.connect(
+            lambda v: self.settings.setValue("retry_interval", v)
+        )
         self.chk_auto_refresh = QCheckBox("自动刷新", self)
         self.chk_auto_refresh.setChecked(
             bool(self.settings.value("auto_refresh", True, type=bool))
@@ -2410,6 +2439,10 @@ class QueuePanel(QFrame):
             lambda v: self.settings.setValue("auto_refresh", v)
         )
         batch.addWidget(self.chk_auto_retry)
+        batch.addWidget(QLabel("上限", self))
+        batch.addWidget(self.spin_max_retry)
+        batch.addWidget(QLabel("间隔秒", self))
+        batch.addWidget(self.spin_retry_interval)
         batch.addWidget(self.chk_auto_refresh)
         batch.addWidget(self.btn_manual_refresh)
         batch.addStretch()
@@ -2434,6 +2467,12 @@ class QueuePanel(QFrame):
 
     def auto_retry(self) -> bool:
         return self.chk_auto_retry.isChecked()
+
+    def max_retry(self) -> int:
+        return self.spin_max_retry.value()
+
+    def retry_interval(self) -> int:
+        return self.spin_retry_interval.value()
 
     def auto_refresh(self) -> bool:
         return self.chk_auto_refresh.isChecked()
@@ -2822,12 +2861,12 @@ class MainWindow(QMainWindow):
         # 恢复运行中任务的进度监听
         self._resume_progress()
 
-        # 自动刷新定时器：每 5 秒轮询所有非终态任务（「自动刷新」勾选控制启停）
+        # 定时刷新：每 5 秒 ① 触发到期的自动重试 ② 轮询非终态任务。
+        # 「自动重试」或「自动刷新」任一勾选即启动（重试不依赖自动刷新）。
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._auto_refresh_tick)
         self._refresh_timer.setInterval(5000)
-        if self.queue_panel.auto_refresh():
-            self._refresh_timer.start()
+        self._sync_refresh_timer()
 
     def _build_ui(self):
         central = QWidget()
@@ -2942,8 +2981,9 @@ class MainWindow(QMainWindow):
         self.queue_panel.open_task.connect(self._on_open_task)
         self.queue_panel.reorder_requested.connect(self.store.reorder)
         self.queue_panel.manual_refresh.connect(self._do_manual_refresh)
-        # 「自动刷新」勾选变化时启停定时器
+        # 「自动刷新」/「自动重试」勾选变化时启停定时器
         self.queue_panel.chk_auto_refresh.toggled.connect(self._on_auto_refresh_toggled)
+        self.queue_panel.chk_auto_retry.toggled.connect(self._on_auto_refresh_toggled)
 
         # 初始把队列面板挂到当前 Tab（默认视频）并同步提交按钮/预估
         self._attach_queue_to_workspace()
@@ -2996,9 +3036,14 @@ class MainWindow(QMainWindow):
         self.btn_theme.setText("☀" if self._theme == THEME_DARK else "☾")
         self._apply_theme()
 
-    def _on_auto_refresh_toggled(self, enabled: bool):
-        if enabled:
-            self._refresh_timer.start()
+    def _on_auto_refresh_toggled(self, _enabled: bool):
+        self._sync_refresh_timer()
+
+    def _sync_refresh_timer(self):
+        """「自动重试」或「自动刷新」任一勾选即启动定时器（两者共用 5s tick）。"""
+        if self.queue_panel.auto_refresh() or self.queue_panel.auto_retry():
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
         else:
             self._refresh_timer.stop()
 
@@ -3007,10 +3052,14 @@ class MainWindow(QMainWindow):
         self._poll_non_terminal_tasks()
 
     def _auto_refresh_tick(self):
-        """定时器每 5 秒触发：轮询所有非终态任务。"""
-        if not self.queue_panel.auto_refresh():
-            return
-        self._poll_non_terminal_tasks()
+        """定时器每 5 秒触发：① 触发到期的自动重试；② 轮询所有非终态任务。
+
+        自动重试由「自动重试」勾选独立控制（不依赖「自动刷新」）；
+        进度轮询由「自动刷新」控制。
+        """
+        self._process_due_retries()
+        if self.queue_panel.auto_refresh():
+            self._poll_non_terminal_tasks()
 
     def _poll_non_terminal_tasks(self):
         """对 PENDING/QUEUED/RUNNING/DOWNLOADING 任务调桥拉取最新进度。
@@ -3203,22 +3252,58 @@ class MainWindow(QMainWindow):
         self._voice_worker.start()
 
     def _on_pair_submitted(self, task: Task):
-        self.store.add(task)
-        self.queue_panel.refresh()
-        # 启动该任务的进度监听
-        self._start_progress(task)
-        # 更新提交悬浮窗进度
-        if hasattr(self, "_submit_overlay") and self._submit_overlay.isVisible():
-            self._submit_overlay.step_done()
+        self._apply_submit_result(task)
+        # 更新提交悬浮窗进度（仅视频批量提交有）
+        overlay = getattr(self, "_submit_overlay", None)
+        if overlay is not None and overlay.isVisible():
+            overlay.step_done()
 
-    def _on_pair_failed(self, pair_id: str, err: str, task):
+    def _apply_submit_result(self, result: Task):
+        """把 worker 的提交结果写回任务。
+
+        原任务就地重试（store 已有该 pair_id）：更新字段并把状态改回 PENDING，
+        不新建任务（保留队列位置与 retry_count）。新任务则 add。
+        """
+        existing = self.store.tasks.get(result.pair_id)
+        if existing is not None:
+            existing.rbflow_task_id = result.rbflow_task_id
+            existing.call_log_id = result.call_log_id
+            existing.charged_credits = result.charged_credits
+            if result.seconds:
+                existing.seconds = result.seconds
+            existing.state = STATE_PENDING
+            existing.progress = 0.0
+            existing.error_msg = ""
+            existing.next_retry_at = ""
+            existing.finished_at = ""
+            self.store.update(existing)
+            self.queue_panel.refresh()
+            self._start_progress(existing)
+        else:
+            self.store.add(result)
+            self.queue_panel.refresh()
+            self._start_progress(result)
+
+    def _on_pair_failed(self, pair_id: str, err: str, task, retryable: bool = True):
+        will_retry = False
         if task:
             task.state = STATE_FAILED
             task.error_msg = err
-            self.store.add(task)
+            existing = self.store.tasks.get(task.pair_id)
+            if existing is not None:
+                # 就地重试的提交阶段失败：更新原任务（保留 retry_count）
+                existing.state = STATE_FAILED
+                existing.error_msg = err
+                self.store.update(existing)
+                will_retry = self._schedule_retry(existing, retryable)
+            else:
+                self.store.add(task)
+                will_retry = self._schedule_retry(task, retryable)
         self.queue_panel.refresh()
         logging.error(f"任务失败 {pair_id}: {err}")
-        # 首个失败弹窗提示（避免每个失败都弹，批量时太吵）；后续失败汇总到状态栏。
+        # 首个失败弹窗提示（避免每个失败都弹，批量时太吵）；若会自动重试则不弹（仅最终失败提示）。
+        if will_retry:
+            return
         if not getattr(self, "_first_fail_shown", False):
             self._first_fail_shown = True
             QMessageBox.warning(
@@ -3318,20 +3403,22 @@ class MainWindow(QMainWindow):
         task.state = STATE_FAILED
         task.error_msg = reason
         task.finished_at = datetime.now().isoformat(timespec="seconds")
-        self.store.update(task)
+        # 安排自动重试（达上限则保持失败=取消）；返回是否还会重试
+        will_retry = self._schedule_retry(task, retryable=True)
         self.queue_panel.update_task_card(task)
-        # 进度阶段失败（任务跑了一半挂了）弹窗提示用户
+        # 进度阶段失败弹窗：若会自动重试则不弹（避免每次重试都弹），仅最终失败提示
+        if will_retry:
+            return
         if task.kind == "audio":
             task_name = os.path.basename(task.audio_path or "音频")
         else:
             task_name = f"{os.path.basename(task.image_path)} × {os.path.basename(task.video_path)}"
+        tried = f"（已自动重试 {task.retry_count} 次）" if task.retry_count else ""
         QMessageBox.warning(
             self,
             "生成失败",
-            f"{task_name}\n失败原因：{reason}",
+            f"{task_name}{tried}\n失败原因：{reason}",
         )
-        if self.queue_panel.auto_retry():
-            self._on_retry_task(pair_id)
 
     def _download_and_save(self, task: Task):
         """从桥下载成品（视频/音频）并落盘到自定义文件夹。"""
@@ -3389,27 +3476,80 @@ class MainWindow(QMainWindow):
 
     # ---------- 卡片操作 ----------
     def _on_retry_task(self, pair_id: str):
+        """手动重试（卡片 ↻ 按钮）：重置重试计数，立即就地重新提交。"""
         task = self.store.tasks.get(pair_id)
         if not task:
             return
+        task.retry_count = 0
+        task.next_retry_at = ""
+        task.error_msg = ""
+        self.store.update(task)
+        self._resubmit_task(task)
+
+    def _resubmit_task(self, task: Task):
+        """就地重新提交一个任务（复用 pair_id，提交结果经 _apply_submit_result 写回原任务）。"""
         tier = task.tier
-        # 重新提交（重新扣费 + 转发）：按工作流类型选 worker
         if task.kind == "audio":
-            worker = VoiceSubmitWorker(task.audio_path, task.prompt_text, tier, self)
+            worker = VoiceSubmitWorker(task.audio_path, task.prompt_text, tier, task.pair_id, self)
         else:
             pairs = [(task.image_path, task.video_path, task.image_category)]
-            worker = SubmitWorker(pairs, tier, self)
-        worker.pair_submitted.connect(
-            lambda new_task: (
-                self.store.add(new_task),
-                self._start_progress(new_task),
-                self.queue_panel.refresh(),
-            )
-        )
-        worker.pair_failed.connect(
-            lambda pid, err, t: self._on_pair_failed(pid, err, t)
-        )
+            worker = SubmitWorker(pairs, tier, task.pair_id, self)
+        worker.pair_submitted.connect(self._apply_submit_result)
+        worker.pair_failed.connect(self._on_pair_failed)
+        # 持有引用避免 GC（与 _submit_worker/_voice_worker 同机制）
+        self._retry_workers = getattr(self, "_retry_workers", [])
+        self._retry_workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._retry_workers.remove(w) if w in self._retry_workers else None)
         worker.start()
+
+    def _schedule_retry(self, task: Task, retryable: bool) -> bool:
+        """失败后按「自动重试」配置安排下次重试。返回是否还会重试（False=已取消/最终失败）。
+
+        规则：勾选自动重试 + retryable + retry_count < 上限 → 记录 next_retry_at，
+        由 _process_due_retries 定时触发；否则保持 FAILED（取消）。
+        余额不足等不可重试错误（retryable=False）永不自动重试。
+        """
+        if not (retryable and self.queue_panel.auto_retry()):
+            return False
+        max_retry = self.queue_panel.max_retry()
+        if task.retry_count >= max_retry:
+            task.next_retry_at = ""
+            self.store.update(task)
+            return False
+        task.retry_count += 1
+        interval = max(5, self.queue_panel.retry_interval())
+        task.next_retry_at = datetime.fromtimestamp(
+            time.time() + interval
+        ).isoformat(timespec="seconds")
+        task.error_msg = f"{task.error_msg}（第 {task.retry_count}/{max_retry} 次重试待触发）"
+        self.store.update(task)
+        return True
+
+    def _process_due_retries(self):
+        """定时器驱动：把到达 next_retry_at 的失败任务就地重新提交。"""
+        if not self.queue_panel.auto_retry():
+            return
+        now = datetime.now()
+        due = []
+        for t in self.store.all_ordered():
+            if t.state != STATE_FAILED or not t.next_retry_at:
+                continue
+            try:
+                when = datetime.fromisoformat(t.next_retry_at)
+            except ValueError:
+                t.next_retry_at = ""
+                self.store.update(t)
+                continue
+            if now >= when:
+                due.append(t)
+        for t in due:
+            t.next_retry_at = ""  # 先清除，防重复触发
+            t.state = STATE_PENDING
+            t.error_msg = f"自动重试中（第 {t.retry_count} 次）"
+            self.store.update(t)
+            self._resubmit_task(t)
+        if due:
+            self.queue_panel.refresh()
 
     def _on_delete_task(self, pair_id: str):
         if pair_id in self._progress_workers:
