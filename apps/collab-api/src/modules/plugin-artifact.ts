@@ -35,6 +35,7 @@ const CAPABILITY_KINDS = [
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
   'video.generate',
+  'audio.generate',
 ] as const;
 const CAPABILITY_RISKS = ['none', 'low', 'medium', 'high'] as const;
 

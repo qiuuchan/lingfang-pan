@@ -19,6 +19,7 @@ export const CapabilityKind = z.enum([
   'system.info', 'system.screenshot', 'system.notify',
   'plugin.upload', 'plugin.submitMarketplace',
   'video.generate',
+  'audio.generate',
 ]);
 export type CapabilityKind = z.infer<typeof CapabilityKind>;
 
