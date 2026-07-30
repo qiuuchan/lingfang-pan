@@ -44,8 +44,12 @@ function ChannelList({ kind }: { kind: ChannelKind }) {
   const [totalItems, setTotalItems] = useState(0);
   const [testing, setTesting] = useState<Channel | null>(null);
   const load = async () => {
-    const result = await api<{ items: Array<Channel & { modelCount?: number }>; total: number }>(`/api/admin/billing/channels?kind=${kind}&page=${page}&pageSize=${pageSize}`);
-    setList(result.items); setTotalItems(result.total);
+    const result = await api<{ items?: Array<Channel & { modelCount?: number }>; total?: number }>(`/api/admin/billing/channels?kind=${kind}&page=${page}&pageSize=${pageSize}`);
+    // 后端正常返回 { items, total }；但 api() 会把非 JSON 的 200 响应体兜底成 {}（见 api.ts），
+    // 此时 result.items 为 undefined，若直接 setList(undefined) 会让下面的 list.length 抛
+    // "Cannot read properties of undefined (reading 'length')" 导致整个渠道页白屏。
+    // 用 ?? 兜底为空列表/0，让异常响应降级为「暂无渠道」而非崩溃。
+    setList(result?.items ?? []); setTotalItems(result?.total ?? 0);
   };
   useEffect(() => { void load(); }, [kind, page, pageSize]);
 
