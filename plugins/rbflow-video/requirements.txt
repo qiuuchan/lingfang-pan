@@ -1,4 +1,4 @@
-# RBFLow 动作迁移视频生成插件依赖
+# RBFLow 创意工坊插件依赖（视频动作迁移 + 音频声音克隆）
 # PySide6（Qt6）—— 与 videodl/facefusion 插件一致；plugin_runner.rs 已为 PySide6 深层 wheel 做短路径缓存
 PySide6>=6.7
 # HTTP（桥调用 + SSE 进度流）

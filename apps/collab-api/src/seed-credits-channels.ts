@@ -32,6 +32,8 @@ const DEFAULT_PRICING = [
   { capability: 'action', model: 'create_plugin_session', label: '创建插件会话', unit: 'PER_CALL' as const, pricePerUnit: 10, tier: null },
   // video：按秒（RunningHub 动作迁移视频生成，按参考视频时长计费）
   { capability: 'video', model: 'video_generate', label: '视频生成（动作迁移）', unit: 'PER_SECOND' as const, pricePerUnit: 0.5, tier: null },
+  // audio：按秒（RunningHub 声音克隆，按目标文本估算的输出音频时长计费）
+  { capability: 'audio', model: 'voice_clone', label: '声音克隆（文本转语音）', unit: 'PER_SECOND' as const, pricePerUnit: 0.5, tier: null },
 ];
 
 /** 默认灵石全局参数（PlatformSetting 键值表）。 */

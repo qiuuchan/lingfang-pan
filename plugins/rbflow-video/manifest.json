@@ -1,8 +1,8 @@
 {
   "id": "com.lingfang.rbflow-video",
-  "name": "动作迁移视频生成",
-  "version": "0.3.10",
-  "description": "RunningHub 动作迁移工作流：上传参考图片+视频→按视频时长（秒）扣灵石→生成视频→实时进度→保存到自定义文件夹。支持任务队列排序、多素材笛卡尔积、自定义输出目录。视频生成经平台桥代理转发到平台运营的 RBFLow 实例，按团队灵石按秒计费，用户无需也无法配置任何 RBFLow / RunningHub 密钥（防绕过）。",
+  "name": "RBFLow 创意工坊",
+  "version": "0.4.0",
+  "description": "RBFLow 创意工坊：一个插件，两类工作流，顶部 Tab 切换。① 动作迁移视频——上传参考图片+视频→按视频时长（秒）扣灵石→生成视频；② 声音克隆——上传参考音频+目标文本→按输出音频估算秒数扣灵石→生成克隆语音。实时进度、任务队列排序、多素材笛卡尔积（视频）、自定义输出目录。所有生成经平台桥代理转发到平台运营的 RBFLow 实例，按团队灵石计费，用户无需也无法配置任何 RBFLow / RunningHub 密钥（防绕过）。",
   "runtime_type": "python",
   "entry": "main.py",
   "visibility": "tenant",
@@ -10,6 +10,12 @@
     {
       "kind": "video.generate",
       "reason": "经平台视频能力按秒扣灵石生成动作迁移视频",
+      "risk": "medium",
+      "requires_admin": false
+    },
+    {
+      "kind": "audio.generate",
+      "reason": "经平台音频能力按输出秒数扣灵石生成声音克隆音频",
       "risk": "medium",
       "requires_admin": false
     }
