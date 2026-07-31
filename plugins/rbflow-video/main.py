@@ -785,22 +785,49 @@ QLabel#CreditLabel {{ color: {c["yellow"]}; font-weight: 600; }}
 
 
 class BridgeError(Exception):
-    """桥调用失败。code 用于区分 insufficient_balance 等。"""
+    """桥调用失败。
 
-    def __init__(self, message: str, code: str = "", status: int = 0):
+    字段：
+      message    人类可读错误消息（relay/桥已脱敏，可直接展示给用户）。
+      code       产品错误码（如 insufficient_balance / no_pricing / capability_denied），供程序判断。
+      status     HTTP 状态码（桥透传 relay 状态）。
+      request_id 请求追踪 ID（排查时提供给管理员 / 写入日志）。
+    """
+
+    def __init__(self, message: str, code: str = "", status: int = 0, request_id: str = ""):
         super().__init__(message)
+        self.message = message
         self.code = code
         self.status = status
+        self.request_id = request_id
+
+    @property
+    def detail(self) -> str:
+        """诊断标签，缺省项自动省略。例：错误码 no_pricing · HTTP 503 · 请求ID abc。"""
+        parts = []
+        if self.code:
+            parts.append(f"错误码 {self.code}")
+        if self.status:
+            parts.append(f"HTTP {self.status}")
+        if self.request_id:
+            parts.append(f"请求ID {self.request_id}")
+        return " · ".join(parts)
+
+    def __str__(self) -> str:
+        d = self.detail
+        return f"{self.message}\n[{d}]" if d else self.message
 
 
 def _parse_bridge_error(resp: requests.Response) -> BridgeError:
-    """桥错误 body: {code, message, requestId}。"""
+    """桥错误 body: {code, message, status, requestId}（见 Rust BridgeError::response_body）。"""
     try:
         ej = resp.json()
+        status = ej.get("status", resp.status_code)
         return BridgeError(
-            str(ej.get("message", resp.text[:200])),
-            code=str(ej.get("code", "")),
-            status=resp.status_code,
+            str(ej.get("message") or resp.text[:200] or f"桥错误 {resp.status_code}"),
+            code=str(ej.get("code") or ""),
+            status=int(status) if status else resp.status_code,
+            request_id=str(ej.get("requestId") or ""),
         )
     except Exception:
         return BridgeError(
@@ -1341,6 +1368,9 @@ class ProgressWorker(QThread):
                         reason = (
                             ev.get("reason") or ev.get("error_advice") or "生成失败"
                         )
+                        err_code = ev.get("error_code") or ev.get("code") or ""
+                        if err_code:
+                            reason = f"{reason}（错误码 {err_code}）"
                         self.error.emit(self.pair_id, reason)
                         terminal = True
                         break
@@ -1397,6 +1427,9 @@ class _PollWorker(QThread):
                         reason = (
                             ev.get("reason") or ev.get("error_advice") or "生成失败"
                         )
+                        err_code = ev.get("error_code") or ev.get("code") or ""
+                        if err_code:
+                            reason = f"{reason}（错误码 {err_code}）"
                         self.error.emit(pair_id, reason)
                         break
                 else:
@@ -1567,7 +1600,7 @@ class TaskCardWidget(QWidget):
         elif self.task.saved_path:
             s += " · 已保存"
         elif self.task.error_msg:
-            s += f" · {self.task.error_msg[:20]}"
+            s += f" · {self.task.error_msg.split(chr(10), 1)[0][:20]}"
         return s
 
     def _load_thumb(self):
@@ -3204,7 +3237,7 @@ class MainWindow(QMainWindow):
         # 提交进度悬浮窗
         self._submit_overlay = SubmitProgressOverlay(n, self)
         self._submit_overlay.show()
-        self._submit_worker = SubmitWorker(pairs, tier, self)
+        self._submit_worker = SubmitWorker(pairs, tier, parent=self)
         self._submit_worker.pair_submitted.connect(self._on_pair_submitted)
         self._submit_worker.pair_failed.connect(self._on_pair_failed)
         self._submit_worker.billing_blocked.connect(self._on_billing_blocked)
@@ -3244,7 +3277,7 @@ class MainWindow(QMainWindow):
         self.btn_submit.setEnabled(False)
         self.btn_submit.setText("提交中...")
         # 声音克隆为单任务，不走批量提交悬浮窗
-        self._voice_worker = VoiceSubmitWorker(audio, text, tier, self)
+        self._voice_worker = VoiceSubmitWorker(audio, text, tier, parent=self)
         self._voice_worker.pair_submitted.connect(self._on_pair_submitted)
         self._voice_worker.pair_failed.connect(self._on_pair_failed)
         self._voice_worker.billing_blocked.connect(self._on_billing_blocked)

@@ -17,7 +17,7 @@ import type { ModelPricing, PricingUnit, ModelTier } from '@/lib/types';
 const UNIT_LABEL: Record<PricingUnit, string> = {
   PER_TOKEN_INPUT: '每1M输入token', PER_TOKEN_OUTPUT: '每1M输出token', PER_CALL: '每次', PER_IMAGE: '每张', PER_SECOND: '每秒',
 };
-const CAPABILITIES = ['chat', 'image', 'action', 'video'] as const;
+const CAPABILITIES = ['chat', 'image', 'action', 'video', 'audio'] as const;
 const UNITS: PricingUnit[] = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE', 'PER_SECOND'];
 
 function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => void }) {
@@ -26,7 +26,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
   // 渠道是配置源——定价的下拉选项 = 渠道已配的 models（去重）。allowCustom 兜底手输不在列表的值。
   const [channelModels, setChannelModels] = useState<string[]>([]);
   useEffect(() => {
-    if (form.capability === 'action' || form.capability === 'video') { setChannelModels([]); return; }
+    if (form.capability === 'action' || form.capability === 'video' || form.capability === 'audio') { setChannelModels([]); return; }
     const kind = form.capability === 'chat' ? 'CHAT' : 'IMAGE';
     let mounted = true;
     api<{ channels: { models: string[] }[] }>(`/api/admin/billing/channels?kind=${kind}`)
@@ -44,7 +44,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label>能力</Label>
-          <Select value={form.capability} onValueChange={(v) => patch({ capability: v, model: '' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : c === 'video' ? '视频' : '固定动作'}</SelectItem>)}</SelectContent></Select>
+          <Select value={form.capability} onValueChange={(v) => patch({ capability: v, model: '' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CAPABILITIES.map((c) => <SelectItem key={c} value={c}>{c === 'chat' ? '对话' : c === 'image' ? '生图' : c === 'video' ? '视频' : c === 'audio' ? '音频' : '固定动作'}</SelectItem>)}</SelectContent></Select>
         </div>
         <div className="space-y-2"><Label>版本（可选）</Label>
           <Select value={form.tier ?? '__none__'} onValueChange={(v) => patch({ tier: v === '__none__' ? null : (v as ModelTier) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不限版本</SelectItem><SelectItem value="FAST">快速版</SelectItem><SelectItem value="PREMIUM">高级版</SelectItem></SelectContent></Select>
@@ -58,7 +58,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
               <SelectContent>{modelOptions.map((m) => <SelectItem key={m} value={m} className="font-mono text-xs">{m}</SelectItem>)}</SelectContent>
             </Select>
           ) : (
-            <Input placeholder={form.capability === 'video' ? '视频 key，如 video_generate' : '动作 key，如 create_plugin_session'} value={form.model} onChange={(e) => patch({ model: e.target.value })} />
+            <Input placeholder={form.capability === 'video' ? '视频 key，如 video_generate' : form.capability === 'audio' ? '音频 key，如 voice_clone' : '动作 key，如 create_plugin_session'} value={form.model} onChange={(e) => patch({ model: e.target.value })} />
           )}
         </div>
         <div className="space-y-2"><Label>展示名</Label><Input value={form.label} onChange={(e) => patch({ label: e.target.value })} /></div>

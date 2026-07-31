@@ -130,7 +130,7 @@ export type Channel = {
 
 export type ModelPricing = {
   id: string;
-  capability: 'chat' | 'image' | 'action' | 'video';
+  capability: 'chat' | 'image' | 'action' | 'video' | 'audio';
   model: string;
   label: string;
   unit: PricingUnit;
