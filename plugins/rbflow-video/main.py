@@ -840,7 +840,7 @@ def bridge_submit_video(
     video_path: str,
     seconds: float,
     tier: str = DEFAULT_TIER,
-    timeout=(30, 120),
+    timeout=(30, 600),
 ) -> dict:
     """提交一个图片+视频任务。返回 {task_id, call_log_id, charged, credits}。
 
@@ -913,7 +913,7 @@ def bridge_submit_audio(
     audio_path: str,
     prompt_text: str,
     tier: str = DEFAULT_TIER,
-    timeout=(30, 120),
+    timeout=(30, 600),
 ) -> dict:
     """提交一个声音克隆任务（参考音频 + 目标文本）。返回 {task_id, call_log_id, charged, credits, seconds}。
 
@@ -1090,6 +1090,7 @@ class Task:
     prompt_text: str = ""  # 目标文本（克隆语音要说的内容）
     # 运行态
     rbflow_task_id: str = ""  # 桥返回的 RBFLow task_id
+    rh_account_id: str = ""  # 后端分配的 RB 账号 id（空=本地排队，尚未提交 RB）
     call_log_id: str = ""  # 扣费票据
     charged_credits: float = 0.0
     state: str = STATE_PENDING
@@ -1176,6 +1177,7 @@ class SubmitWorker(QThread):
 
     pair_submitted = Signal(object)  # Task
     pair_failed = Signal(str, str, object, bool)  # pair_id, error_msg, partial Task, retryable
+    submit_unconfirmed = Signal(str, str)  # pair_id, msg —— 提交请求超时/断网，任务可能在后台运行
     billing_blocked = Signal(str)  # 余额不足消息
     finished_all = Signal(int, int)  # submitted_count, failed_count
     log = Signal(str)
@@ -1222,6 +1224,14 @@ class SubmitWorker(QThread):
                 task.state = STATE_PENDING
                 submitted += 1
                 self.pair_submitted.emit(task)
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                # 提交请求层超时/断网：relay→RBFLow 上传大文件可能超过插件读超时，
+                # 后端可能仍在处理。不标失败——任务可能已在后台运行，由用户刷新查看。
+                self.log.emit(f"提交 {os.path.basename(img_path)} 请求未确认：{e}")
+                self.submit_unconfirmed.emit(
+                    pair_id,
+                    f"提交请求超时/网络异常，任务可能已在后台运行，请稍后刷新：{e}",
+                )
             except BridgeError as e:
                 failed += 1
                 if e.code == "insufficient_balance":
@@ -1253,6 +1263,7 @@ class VoiceSubmitWorker(QThread):
 
     pair_submitted = Signal(object)  # Task
     pair_failed = Signal(str, str, object, bool)  # pair_id, error_msg, partial Task, retryable
+    submit_unconfirmed = Signal(str, str)  # pair_id, msg —— 提交请求超时/断网，任务可能在后台运行
     billing_blocked = Signal(str)  # 余额不足消息
     finished_all = Signal(int, int)  # submitted_count, failed_count
     log = Signal(str)
@@ -1299,6 +1310,13 @@ class VoiceSubmitWorker(QThread):
             task.state = STATE_PENDING
             submitted += 1
             self.pair_submitted.emit(task)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            # 提交请求层超时/断网：后端可能仍在处理。不标失败，提示用户刷新。
+            self.log.emit(f"提交声音克隆请求未确认：{e}")
+            self.submit_unconfirmed.emit(
+                pair_id,
+                f"提交请求超时/网络异常，任务可能已在后台运行，请稍后刷新：{e}",
+            )
         except BridgeError as e:
             failed += 1
             if e.code == "insufficient_balance":
@@ -1318,88 +1336,19 @@ class VoiceSubmitWorker(QThread):
         self.finished_all.emit(submitted, failed)
 
 
-class ProgressWorker(QThread):
-    """单个任务的进度监听（轮询模式）。
-
-    桥 /video/stream 一次性聚合返回 events 数组（非真正 SSE 流），且调用会阻塞到任务跑完。
-    旧实现直接调 bridge_stream_video（默认 600s 读超时）→ 一直阻塞到终态才返回，前台一直显示「等待」。
-    现改为短超时轮询：循环拉 events → 取最后一个 progress 更新 → 命中 done/error 即终止 → 否则 sleep 3s 再拉。
-    """
-
-    progress_update = Signal(str, float, str)  # pair_id, progress, state
-    done = Signal(str, str)  # pair_id, saved_info(json str)
-    error = Signal(str, str)  # pair_id, reason
-
-    def __init__(self, pair_id: str, rbflow_task_id: str, kind: str = "video", parent=None):
-        super().__init__(parent)
-        self.pair_id = pair_id
-        self.rbflow_task_id = rbflow_task_id
-        self.kind = kind  # "video" | "audio"：决定走 /video/stream 还是 /audio/stream
-        self._stop = False
-
-    def stop(self):
-        self._stop = True
-
-    def run(self):
-        retries = 0
-        max_retries = 5
-        while not self._stop:
-            try:
-                # 短超时（连接 5s / 读 3s），让循环快速返回当前 events 而不阻塞到任务跑完
-                events = bridge_stream_video(self.rbflow_task_id, timeout=(5, 3), kind=self.kind)
-                last_prog = -1.0
-                last_state = None
-                terminal = False
-                for ev in events:
-                    if self._stop:
-                        break
-                    etype = ev.get("type", "")
-                    if etype == "progress":
-                        prog = float(ev.get("progress", 0))
-                        state = ev.get("state", STATE_RUNNING)
-                        last_prog = prog
-                        last_state = state
-                    elif etype == "done":
-                        self.progress_update.emit(self.pair_id, 100.0, STATE_SUCCESS)
-                        self.done.emit(self.pair_id, json.dumps(ev, ensure_ascii=False))
-                        terminal = True
-                        break
-                    elif etype == "error":
-                        reason = (
-                            ev.get("reason") or ev.get("error_advice") or "生成失败"
-                        )
-                        err_code = ev.get("error_code") or ev.get("code") or ""
-                        if err_code:
-                            reason = f"{reason}（错误码 {err_code}）"
-                        self.error.emit(self.pair_id, reason)
-                        terminal = True
-                        break
-                if terminal or self._stop:
-                    return
-                # 只在有 progress 事件时发一次最新进度（取最后一条）
-                if last_prog >= 0:
-                    self.progress_update.emit(
-                        self.pair_id, last_prog, last_state or STATE_RUNNING
-                    )
-                retries = 0
-                self.msleep(3000)
-            except Exception as e:
-                logging.warning(f"ProgressWorker {self.pair_id} 异常: {e}")
-                retries += 1
-                if retries > max_retries:
-                    self.msleep(8000)
-                else:
-                    self.msleep(2000 * retries)
+# ProgressWorker（单任务长驻 3s 轮询）已移除——统一由 _PollWorker 按配置间隔
+# （默认 5 分钟）批量轮询，降低 RBFLow 请求量；进度条由客户端假进度插值平滑推进。
 
 
 class _PollWorker(QThread):
     """一次性轮询线程：对一批非终态任务短超时拉一次 events，发回进度/终态信号。
 
-    由 MainWindow 的自动刷新定时器（5s）和手动刷新按钮触发。与 ProgressWorker
-    （长驻轮询）互补：ProgressWorker 单任务常驻；_PollWorker 批量兜底。
+    由 MainWindow 的定时器按配置间隔（默认 5 分钟）和手动刷新按钮触发。
+    每条 progress 事件携带后端 rh_account_id：空=本地排队未提交 RB；非空=已提交。
     """
 
     progress_update = Signal(str, float, str)  # pair_id, progress, state
+    account_update = Signal(str, str)  # pair_id, rh_account_id（""=本地排队）
     done = Signal(str, str)  # pair_id, saved_info(json str)
     error = Signal(str, str)  # pair_id, reason
 
@@ -1414,11 +1363,13 @@ class _PollWorker(QThread):
                 events = bridge_stream_video(rbflow_task_id, timeout=(5, 3), kind=kind)
                 last_prog = -1.0
                 last_state = None
+                last_acc = None
                 for ev in events:
                     etype = ev.get("type", "")
                     if etype == "progress":
                         last_prog = float(ev.get("progress", 0))
                         last_state = ev.get("state", STATE_RUNNING)
+                        last_acc = str(ev.get("rh_account_id", "") or "")
                     elif etype == "done":
                         self.progress_update.emit(pair_id, 100.0, STATE_SUCCESS)
                         self.done.emit(pair_id, json.dumps(ev, ensure_ascii=False))
@@ -1433,7 +1384,9 @@ class _PollWorker(QThread):
                         self.error.emit(pair_id, reason)
                         break
                 else:
-                    # 无终态事件：发最新进度（若有）
+                    # 无终态事件：发最新进度 + 账号归属（若有）
+                    if last_acc is not None:
+                        self.account_update.emit(pair_id, last_acc)
                     if last_prog >= 0:
                         self.progress_update.emit(
                             pair_id, last_prog, last_state or STATE_RUNNING
@@ -1601,6 +1554,16 @@ class TaskCardWidget(QWidget):
             s += " · 已保存"
         elif self.task.error_msg:
             s += f" · {self.task.error_msg.split(chr(10), 1)[0][:20]}"
+        # 任务 id（短显 8 位）+ 本地排队/已提交 区分（tooltip 给完整 id）
+        if self.task.rbflow_task_id:
+            tag = (
+                "平台排队"
+                if (not self.task.rh_account_id and self.task.state in WAITING_STATES)
+                else "已提交"
+            )
+            s += f" · #{self.task.rbflow_task_id[:8]}({tag})"
+        else:
+            s += " · 本地排队"
         return s
 
     def _load_thumb(self):
@@ -2428,6 +2391,9 @@ class QueuePanel(QFrame):
         self.list_widget.model().rowsMoved.connect(self._on_rows_moved)
         # 双击任务卡片打开已保存的视频
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # 右键菜单：复制任务 ID（有 rbflow_task_id 才显示）
+        self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self._show_task_context_menu)
         lay.addWidget(self.list_widget, 1)
 
         # 底部批量操作
@@ -2471,12 +2437,25 @@ class QueuePanel(QFrame):
         self.chk_auto_refresh.toggled.connect(
             lambda v: self.settings.setValue("auto_refresh", v)
         )
+        # 状态轮询间隔（秒）：向平台拉取任务进度的节奏，默认 5 分钟（降低 RBFLow 请求量）
+        self.spin_refresh_interval = QSpinBox(self)
+        self.spin_refresh_interval.setRange(30, 3600)
+        self.spin_refresh_interval.setSingleStep(30)
+        self.spin_refresh_interval.setValue(
+            int(self.settings.value("refresh_interval_sec", 300))
+        )
+        self.spin_refresh_interval.setToolTip("向平台拉取状态的间隔秒数（默认 300=5 分钟）")
+        self.spin_refresh_interval.valueChanged.connect(
+            lambda v: self.settings.setValue("refresh_interval_sec", v)
+        )
         batch.addWidget(self.chk_auto_retry)
         batch.addWidget(QLabel("上限", self))
         batch.addWidget(self.spin_max_retry)
         batch.addWidget(QLabel("间隔秒", self))
         batch.addWidget(self.spin_retry_interval)
         batch.addWidget(self.chk_auto_refresh)
+        batch.addWidget(QLabel("轮询秒", self))
+        batch.addWidget(self.spin_refresh_interval)
         batch.addWidget(self.btn_manual_refresh)
         batch.addStretch()
         batch.addWidget(self.btn_clear_done)
@@ -2509,6 +2488,10 @@ class QueuePanel(QFrame):
 
     def auto_refresh(self) -> bool:
         return self.chk_auto_refresh.isChecked()
+
+    def refresh_interval(self) -> int:
+        """状态轮询间隔（秒），默认 300=5 分钟。"""
+        return self.spin_refresh_interval.value()
 
     def _matches_filter(self, task: Task) -> bool:
         if self._filter == FILTER_ALL:
@@ -2551,10 +2534,21 @@ class QueuePanel(QFrame):
             item.setData(Qt.UserRole, task.pair_id)
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, card)
+            self._card_widgets[task.pair_id] = card
 
     def update_task_card(self, task: Task):
         """单任务更新（不重建整个列表，避免拖拽顺序丢失）。"""
         self.refresh()  # MVP：简单全刷；统计 + 过滤都要更新
+
+    def nudge_running_progress(self):
+        """轻量更新运行中卡片的进度条（不重建列表），供 UI 假进度 tick 调用。
+
+        假进度 2s tick 调用——refresh() 全重建太重且会丢拖拽/选中，这里只刷卡片显示。
+        """
+        for pair_id, card in list(self._card_widgets.items()):
+            task = self.store.tasks.get(pair_id)
+            if task and task.state in (STATE_RUNNING, STATE_DOWNLOADING):
+                card.update_task(task)
 
     def _on_rows_moved(self):
         pair_ids = [
@@ -2568,6 +2562,21 @@ class QueuePanel(QFrame):
         pair_id = item.data(Qt.UserRole)
         if pair_id:
             self.open_task.emit(pair_id)
+
+    def _show_task_context_menu(self, pos: QPoint):
+        """右键任务卡片 → 复制任务 ID（仅当已提交 RB，有 rbflow_task_id）。"""
+        item = self.list_widget.itemAt(pos)
+        if not item:
+            return
+        pair_id = item.data(Qt.UserRole)
+        task = self.store.tasks.get(pair_id) if pair_id else None
+        if not task or not task.rbflow_task_id:
+            return
+        menu = QMenu(self)
+        act_copy = menu.addAction(f"复制任务 ID ({task.rbflow_task_id[:8]}…)")
+        chosen = menu.exec(self.list_widget.viewport().mapToGlobal(pos))
+        if chosen is act_copy:
+            QApplication.clipboard().setText(task.rbflow_task_id)
 
     def _clear_done(self):
         done = [t.pair_id for t in self.store.all_ordered() if t.state == STATE_SUCCESS]
@@ -2870,7 +2879,9 @@ class MainWindow(QMainWindow):
         self._submit_worker: Optional[SubmitWorker] = None
         self._voice_worker: Optional[VoiceSubmitWorker] = None
         self._submit_overlay = None  # 视频批量提交悬浮窗（音频单任务不用）
-        self._progress_workers: dict[str, ProgressWorker] = {}
+        self._poll_worker = None  # _PollWorker 引用防 GC
+        self._last_poll_ts = 0.0  # 状态拉取节流时间戳
+        self._ui_save_counter = 0  # 假进度 tick 存盘计数
 
         # 主题状态（深色/亮色），记忆到 QSettings
         self._theme = self.settings.value("theme", THEME_DARK, type=str)
@@ -2891,15 +2902,18 @@ class MainWindow(QMainWindow):
         self._restore_geometry()
         self._refresh_status()
 
-        # 恢复运行中任务的进度监听
-        self._resume_progress()
-
-        # 定时刷新：每 5 秒 ① 触发到期的自动重试 ② 轮询非终态任务。
+        # 定时刷新：每 5 秒 ① 触发到期的自动重试 ② 按配置间隔轮询非终态任务。
         # 「自动重试」或「自动刷新」任一勾选即启动（重试不依赖自动刷新）。
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._auto_refresh_tick)
         self._refresh_timer.setInterval(5000)
         self._sync_refresh_timer()
+
+        # 假进度 UI tick：2s 推进运行中任务的进度条（两次拉取间平滑前进，不每 tick 写盘）
+        self._ui_timer = QTimer(self)
+        self._ui_timer.timeout.connect(self._fake_progress_tick)
+        self._ui_timer.setInterval(2000)
+        self._ui_timer.start()
 
     def _build_ui(self):
         central = QWidget()
@@ -3081,25 +3095,29 @@ class MainWindow(QMainWindow):
             self._refresh_timer.stop()
 
     def _do_manual_refresh(self):
-        """手动刷新按钮：立即轮询所有非终态任务（同步，但每任务短超时）。"""
+        """手动刷新按钮：立即轮询所有非终态任务，绕过节流。"""
+        self._last_poll_ts = time.time()
         self._poll_non_terminal_tasks()
 
     def _auto_refresh_tick(self):
-        """定时器每 5 秒触发：① 触发到期的自动重试；② 轮询所有非终态任务。
+        """定时器每 5 秒触发：① 触发到期的自动重试；② 按配置间隔轮询非终态任务。
 
         自动重试由「自动重试」勾选独立控制（不依赖「自动刷新」）；
-        进度轮询由「自动刷新」控制。
+        状态轮询由「自动刷新」控制，并按 refresh_interval（默认 5 分钟）节流。
         """
         self._process_due_retries()
-        if self.queue_panel.auto_refresh():
+        if not self.queue_panel.auto_refresh():
+            return
+        now = time.time()
+        if now - self._last_poll_ts >= self.queue_panel.refresh_interval():
+            self._last_poll_ts = now
             self._poll_non_terminal_tasks()
 
     def _poll_non_terminal_tasks(self):
-        """对 PENDING/QUEUED/RUNNING/DOWNLOADING 任务调桥拉取最新进度。
+        """对 PENDING/QUEUED/RUNNING/DOWNLOADING 任务调桥拉取最新进度（独立线程）。
 
-        ProgressWorker 已是轮询模式；这里作为第二层兜底：覆盖刚启动尚未轮询到、
-        或 worker 异常退出的任务。从 store 取最新状态避免与 worker 重复写终态。
-        在独立线程执行，避免短超时阻塞 UI。
+        _PollWorker 是唯一的进度来源（ProgressWorker 已移除）。每条 progress 事件
+        携带后端 rh_account_id，经 account_update 信号回传，用于区分本地排队/已提交。
         """
         non_terminal = [
             t
@@ -3110,6 +3128,7 @@ class MainWindow(QMainWindow):
             return
         worker = _PollWorker(non_terminal, self)
         worker.progress_update.connect(self._on_progress_update)
+        worker.account_update.connect(self._on_account_update)
         worker.done.connect(self._on_progress_done)
         worker.error.connect(self._on_progress_error)
         # 持有引用避免 GC（worker.run 完会发 finished）
@@ -3124,7 +3143,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
-        # 停止所有 worker（视频提交 / 音频提交 / 进度监听）
+        # 停止 worker（视频提交 / 音频提交）+ 假进度 UI 定时器
         if self._submit_worker:
             self._submit_worker.stop()
             self._submit_worker.wait(3000)
@@ -3132,9 +3151,7 @@ class MainWindow(QMainWindow):
         if voice_worker:
             voice_worker.stop()
             voice_worker.wait(3000)
-        for w in self._progress_workers.values():
-            w.stop()
-            w.wait(3000)
+        self._ui_timer.stop()
         super().closeEvent(event)
 
     def _refresh_status(self):
@@ -3240,6 +3257,7 @@ class MainWindow(QMainWindow):
         self._submit_worker = SubmitWorker(pairs, tier, parent=self)
         self._submit_worker.pair_submitted.connect(self._on_pair_submitted)
         self._submit_worker.pair_failed.connect(self._on_pair_failed)
+        self._submit_worker.submit_unconfirmed.connect(self._on_submit_unconfirmed)
         self._submit_worker.billing_blocked.connect(self._on_billing_blocked)
         self._submit_worker.finished_all.connect(self._on_submit_finished)
         self._submit_worker.log.connect(self._submit_overlay.update_step)
@@ -3280,6 +3298,7 @@ class MainWindow(QMainWindow):
         self._voice_worker = VoiceSubmitWorker(audio, text, tier, parent=self)
         self._voice_worker.pair_submitted.connect(self._on_pair_submitted)
         self._voice_worker.pair_failed.connect(self._on_pair_failed)
+        self._voice_worker.submit_unconfirmed.connect(self._on_submit_unconfirmed)
         self._voice_worker.billing_blocked.connect(self._on_billing_blocked)
         self._voice_worker.finished_all.connect(self._on_submit_finished)
         self._voice_worker.start()
@@ -3300,6 +3319,7 @@ class MainWindow(QMainWindow):
         existing = self.store.tasks.get(result.pair_id)
         if existing is not None:
             existing.rbflow_task_id = result.rbflow_task_id
+            existing.rh_account_id = ""  # 重置：等首次轮询回填后端归属
             existing.call_log_id = result.call_log_id
             existing.charged_credits = result.charged_credits
             if result.seconds:
@@ -3311,11 +3331,11 @@ class MainWindow(QMainWindow):
             existing.finished_at = ""
             self.store.update(existing)
             self.queue_panel.refresh()
-            self._start_progress(existing)
         else:
             self.store.add(result)
             self.queue_panel.refresh()
-            self._start_progress(result)
+        # 提交刚完成：下一 tick 立即拉一次状态（跳过节流，默认 5 分钟太久）
+        self._last_poll_ts = 0.0
 
     def _on_pair_failed(self, pair_id: str, err: str, task, retryable: bool = True):
         will_retry = False
@@ -3370,32 +3390,58 @@ class MainWindow(QMainWindow):
             )
 
     # ---------- 进度 ----------
-    def _start_progress(self, task: Task):
-        if not task.rbflow_task_id:
-            return
-        if task.pair_id in self._progress_workers:
-            return
-        w = ProgressWorker(task.pair_id, task.rbflow_task_id, task.kind, self)
-        w.progress_update.connect(self._on_progress_update)
-        w.done.connect(self._on_progress_done)
-        w.error.connect(self._on_progress_error)
-        self._progress_workers[task.pair_id] = w
-        w.start()
-
-    def _resume_progress(self):
-        """重启后恢复未完成任务的进度监听。"""
-        for task in self.store.all_ordered():
-            if task.rbflow_task_id and task.state not in (STATE_SUCCESS, STATE_FAILED):
-                self._start_progress(task)
-
     def _on_progress_update(self, pair_id: str, progress: float, state: str):
         task = self.store.tasks.get(pair_id)
         if not task:
             return
-        task.progress = progress
+        # 单调：假进度可能已超前，取 max 避免回退（后端真实值也是单调的）
+        task.progress = max(task.progress, progress)
         task.state = state
         self.store.update(task)
         self.queue_panel.update_task_card(task)
+
+    def _on_account_update(self, pair_id: str, rh_account_id: str):
+        """后端归属账号回填：非空=已提交 RB；空=仍在平台本地队列。"""
+        task = self.store.tasks.get(pair_id)
+        if not task:
+            return
+        if task.rh_account_id != rh_account_id:
+            task.rh_account_id = rh_account_id
+            self.store.update(task)
+            self.queue_panel.update_task_card(task)
+
+    def _fake_progress_tick(self):
+        """2s tick：运行中任务的进度条按客户端斜率平滑推进（假进度）。
+
+        两次状态拉取（默认 5 分钟）间，进度条缓慢向 99% 推进，避免长时间不动。
+        后端真实 progress（_on_progress_update）是权威锚，本 tick 仅在其上插值，
+        不超过 99（SUCCESS 才到 100）。每 ~10 tick（20s）存一次盘，避免 JSON 频繁写。
+        """
+        dirty = False
+        for task in self.store.all_ordered():
+            if task.state not in (STATE_RUNNING, STATE_DOWNLOADING):
+                continue
+            if task.progress >= 99:
+                continue
+            # 每 2s 推进 0.3%，铺满 ~20 分钟到 99（与后端 eta_baseline_sec 对齐）
+            task.progress = min(99.0, task.progress + 0.3)
+            dirty = True
+        if not dirty:
+            return
+        self._ui_save_counter += 1
+        if self._ui_save_counter >= 10:
+            self._ui_save_counter = 0
+            for task in self.store.all_ordered():
+                if task.state in (STATE_RUNNING, STATE_DOWNLOADING):
+                    self.store.update(task)
+        # 轻量刷新卡片进度条（不重建列表，避免拖拽/选中丢失）
+        self.queue_panel.nudge_running_progress()
+
+    def _on_submit_unconfirmed(self, pair_id: str, msg: str):
+        """提交请求超时/断网——任务可能在后台运行。不标失败，状态栏黄色提示。"""
+        logging.warning(f"提交未确认 {pair_id}: {msg}")
+        self.status_bar.setStyleSheet("color: #f9e2af;")
+        self.status_bar.showMessage(msg, 10000)
 
     def _on_progress_done(self, pair_id: str, info_json: str):
         task = self.store.tasks.get(pair_id)
@@ -3529,6 +3575,7 @@ class MainWindow(QMainWindow):
             worker = SubmitWorker(pairs, tier, task.pair_id, self)
         worker.pair_submitted.connect(self._apply_submit_result)
         worker.pair_failed.connect(self._on_pair_failed)
+        worker.submit_unconfirmed.connect(self._on_submit_unconfirmed)
         # 持有引用避免 GC（与 _submit_worker/_voice_worker 同机制）
         self._retry_workers = getattr(self, "_retry_workers", [])
         self._retry_workers.append(worker)
@@ -3585,9 +3632,6 @@ class MainWindow(QMainWindow):
             self.queue_panel.refresh()
 
     def _on_delete_task(self, pair_id: str):
-        if pair_id in self._progress_workers:
-            self._progress_workers[pair_id].stop()
-            del self._progress_workers[pair_id]
         self.store.remove(pair_id)
         self.queue_panel.refresh()
 
