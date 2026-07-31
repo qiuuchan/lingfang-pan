@@ -2,6 +2,21 @@
 
 本文件记录灵方桌面端面向用户的版本变更。
 
+## v0.1.11 · 2026-07-31
+
+本版本随 RBFLow 可靠性与多账号改造，升级平台桥（plugin_llm_bridge）对 RBFLow 任务状态的透传，配合后端多账号池/插件新行为。
+
+### 改进
+
+- **RBFLow 任务状态透传**：平台桥 `/video/stream`、`/audio/stream` 的进度事件新增 `rh_account_id` 字段——非空表示已分配 RunningHub 账号并提交，空表示仍在平台本地队列等账号槽，供插件区分「本地排队」vs「已提交」。
+- 配合 RBFLow 后端 v0.6 多账号池（每账号并发上限默认 3）、5 分钟轮询 + 假进度、去硬超时等改动（RBFLow 后端独立部署，详见其 changelog）。
+
+### 打包信息
+
+- Windows 安装包：`release/LingFang-Setup-0.1.11.exe`。
+- 安装包继续内置 Python、Node.js、FFmpeg、Chromium 等插件运行时。
+- 注：`rbflow-video` 插件为独立分发插件（不内置于此安装包），其 v0.4.x 更新（假进度 / 5 分钟轮询 / 任务 ID 展示 / 提交超时不再误判失败 / 移除实时进度 WS）经插件市场另行走 `scripts/export-plugins.mjs` 发布。
+
 ## v0.1.10 · 2026-07-31
 
 本版本重点完善桌面端更新系统（下载体验、更新提示、健壮性），并修复一个会阻断安装包构建的配置问题。
