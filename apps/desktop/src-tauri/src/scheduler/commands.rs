@@ -241,6 +241,7 @@ pub(crate) async fn scheduler_has_running(state: State<'_, SchedulerState>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::types::{LocalScheduleRunRecordStatus, LocalScheduleRunStatus};
 
     #[test]
     fn list_filter_status_discriminant() {

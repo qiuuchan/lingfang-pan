@@ -86,7 +86,9 @@ syncJson("apps/collab-admin/package.json", (d) => {
 });
 syncJson("apps/desktop/src-tauri/tauri.conf.json", (d) => {
 	d.version = version;
-	d.buildInfo = { version, gitHash, buildTime };
+	// tauri-build 严格校验 tauri.conf.json 顶层字段，注入未知字段 buildInfo 会导致 `tauri build` 失败；
+	// 桌面端也未消费该字段（版本走 app.package_info().version）。此处主动删除历史残留，保证构建可用。
+	delete d.buildInfo;
 });
 
 // --- 同步 Cargo.toml（只改顶层 [package] 的 version） ---

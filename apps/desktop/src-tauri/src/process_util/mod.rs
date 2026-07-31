@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 pub(crate) use binary::command_preview;
 #[cfg(test)]
+pub(crate) use binary::find_binary;
+#[cfg(test)]
 pub(crate) use binary::find_binaries_in_path;
 #[cfg(all(windows, test))]
 pub(crate) use binary::resolve_npm_shim;

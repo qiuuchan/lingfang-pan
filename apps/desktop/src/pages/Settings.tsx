@@ -4,13 +4,13 @@
 // - gateway：模型与计费信息。
 // - updates：检查更新与更新日志。
 //
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/App';
 import { errorMessage } from '@/lib/api';
-import { checkUpdate, downloadUpdate, loadUpdateChannel, saveUpdateChannel, type UpdateChannel, type UpdateMetadata } from '@/lib/updater';
+import { checkUpdate, clearCachedUpdate, downloadUpdate, loadCachedUpdate, loadUpdateChannel, saveCachedUpdate, saveUpdateChannel, type CachedUpdate, type UpdateChannel, type UpdateMetadata } from '@/lib/updater';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -48,6 +48,17 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+// 秒数转人类可读时长（下载 ETA：≥60s 显示「N 分 N 秒」，否则「N 秒」；过长给「超过 1 小时」兜底）。
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '即将完成';
+  const s = Math.round(seconds);
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return rem > 0 ? `${m} 分 ${rem} 秒` : `${m} 分`;
+  return '超过 1 小时';
+}
+
 export function Settings({
   // 受控 Tab：默认 'cli'，支持父组件（如新手任务清单「去设置 → 模型与计费」）定向跳转。
   value,
@@ -72,6 +83,12 @@ export function Settings({
   // 更新日志悬浮窗（ChangelogDialog）：检查更新卡片下方「查看更新日志」按钮触发。
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [updateChannel, setUpdateChannel] = useState<UpdateChannel>(() => loadUpdateChannel());
+  // 缓存的可用更新（启动/手动检查写入 localStorage）：设置页挂载即读，无需重新请求后端即可一键更新。
+  const [cachedUpdate, setCachedUpdate] = useState<CachedUpdate | null>(() => loadCachedUpdate());
+  // 下载失败标记：置 true 后 Dialog 主按钮文案变「重试下载」（updateMeta 仍在，无需重新检查）。
+  const [downloadFailed, setDownloadFailed] = useState(false);
+  // 下载起始时间戳（算速度/ETA 用），Started 事件时记录。
+  const downloadStartedAtRef = useRef<number | null>(null);
 
   // === 检查更新逻辑（design §3.2） ===
   // checkUpdate：backendUrl 空 → 友好提示；返 null → 已是最新；非 null → 弹 Dialog。
@@ -86,9 +103,16 @@ export function Settings({
     try {
       const meta = await checkUpdate(base, updateChannel);
       if (!meta) {
+        // 已是最新：清除历史缓存（避免设置页继续提示旧版本）。
+        clearCachedUpdate();
+        setCachedUpdate(null);
         toast.success(updateChannel === 'BETA' ? '当前已是最新 beta 版本' : '当前已是最新正式版本');
         return;
       }
+      // 发现新版本：写缓存（下次进设置页无需重新检查即可直接更新）。
+      saveCachedUpdate(meta, updateChannel);
+      setCachedUpdate({ meta, channel: updateChannel, checkedAt: new Date().toISOString() });
+      setDownloadFailed(false);
       setProgress({ downloaded: 0, total: null });
       setUpdateMeta(meta);
     } catch (err) {
@@ -113,10 +137,16 @@ export function Settings({
   async function installUpdate() {
     if (!updateMeta) return;
     setUpdateInstalling(true);
+    setDownloadFailed(false);
+    downloadStartedAtRef.current = null;
+    // 进入安装流程：清除「发现新版本」缓存提示（更新进行中）。
+    clearCachedUpdate();
+    setCachedUpdate(null);
     let finished = false;
     try {
       await downloadUpdate(updateMeta, (event) => {
         if (event.event === 'Started') {
+          downloadStartedAtRef.current = Date.now();
           setProgress({ downloaded: 0, total: event.data.contentLength });
         } else if (event.event === 'Progress') {
           setProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
@@ -135,6 +165,7 @@ export function Settings({
       }
     } catch (err) {
       toast.error(errorMessage(err, '下载更新失败，请重试'));
+      setDownloadFailed(true);
       setUpdateInstalling(false);
     }
   }
@@ -147,6 +178,13 @@ export function Settings({
 
   const progressPercent = progress.total && progress.total > 0
     ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+    : null;
+
+  // 下载速度 / 预计剩余时间：自 Started 起的平均速度（chunk 频繁触发渲染，显示持续刷新）。
+  const elapsedMs = downloadStartedAtRef.current !== null ? Date.now() - downloadStartedAtRef.current : 0;
+  const speedBps = updateInstalling && elapsedMs > 500 ? progress.downloaded / (elapsedMs / 1000) : null;
+  const etaSeconds = speedBps && speedBps > 0 && progress.total
+    ? (progress.total - progress.downloaded) / speedBps
     : null;
 
   return (
@@ -223,6 +261,28 @@ export function Settings({
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {/* 缓存的可用更新提示：启动/上次检查发现的新版本，无需重新请求后端即可直接更新。 */}
+                    {cachedUpdate && (
+                      <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-sm font-medium">
+                            <span className="relative flex size-2">
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                              <span className="relative inline-flex size-2 rounded-full bg-primary" />
+                            </span>
+                            发现新版本 v{cachedUpdate.meta.version}
+                            {cachedUpdate.channel === 'BETA' && <Badge variant="default">Beta</Badge>}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            检查于 {new Date(cachedUpdate.checkedAt).toLocaleString()}，可直接更新，无需重新检查。
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <Button variant="outline" size="sm" onClick={() => { void checkForUpdate(); }}>重新检查</Button>
+                          <Button size="sm" onClick={() => { setDownloadFailed(false); setProgress({ downloaded: 0, total: null }); setUpdateMeta(cachedUpdate.meta); }}>立即更新</Button>
+                        </div>
+                      </div>
+                    )}
                     <div className="rounded-lg border bg-background/40 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
@@ -286,27 +346,38 @@ export function Settings({
           {updateInstalling ? (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{progress.total !== null ? '下载中' : '下载中（未知总大小）'}</span>
+                <span>
+                  {progress.total !== null ? '下载中' : '下载中（未知总大小）'}
+                  {speedBps ? ` · ${formatBytes(speedBps)}/s` : ''}
+                </span>
                 <span>
                   {progressPercent !== null
                     ? `${progressPercent}%`
-                    : `${formatBytes(progress.downloaded)}`}
+                    : formatBytes(progress.downloaded)}
                 </span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-300"
-                  style={{ width: progressPercent !== null ? `${progressPercent}%` : '36%' }}
-                />
+                {progressPercent !== null ? (
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width] duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                ) : (
+                  // 未知总大小：不定进度动画（左右滑动），替代旧固定 36% 的误导进度。
+                  <div className="h-full w-1/3 animate-indeterminate rounded-full bg-primary" />
+                )}
               </div>
-              <p className="text-xs text-muted-foreground">下载完成后自动安装并重启，请勿关闭窗口。</p>
+              <p className="text-xs text-muted-foreground">
+                {etaSeconds !== null ? `预计剩余 ${formatDuration(etaSeconds)}，` : ''}
+                下载完成后自动安装并重启，请勿关闭窗口。
+              </p>
             </div>
           ) : null}
 
           <DialogFooter>
             <LoadingButton variant="outline" loading={false} disabled={updateInstalling} onClick={() => closeUpdateDialog(false)}>稍后</LoadingButton>
             <LoadingButton loading={updateInstalling} disabled={updateInstalling} onClick={() => { void installUpdate(); }}>
-              立即更新
+              {downloadFailed ? '重试下载' : '立即更新'}
             </LoadingButton>
           </DialogFooter>
         </DialogContent>
