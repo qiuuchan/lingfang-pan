@@ -11,7 +11,7 @@ const CHANNEL_TIER = ['FAST', 'PREMIUM'] as const;
 const CHANNEL_STATUS = ['ENABLED', 'DISABLED'] as const;
 const POOL_SCOPE = ['SHARED', 'DEDICATED'] as const;
 const PRICING_UNIT = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE', 'PER_SECOND'] as const;
-const PRICING_CAPABILITY = ['chat', 'image', 'action', 'video'] as const;
+const PRICING_CAPABILITY = ['chat', 'image', 'action', 'video', 'audio'] as const;
 const TIER = ['FAST', 'PREMIUM'] as const;
 const LEDGER_DIR = ['CREDIT', 'DEBIT'] as const;
 
@@ -51,7 +51,7 @@ export class ChannelUpsertDto {
 // === 定价（单位：PER_TOKEN_* = 每 1M token；PER_CALL 每次；PER_IMAGE 每张）===
 
 export class PricingUpsertDto {
-  @ApiProperty({ enum: PRICING_CAPABILITY }) @IsEnum(PRICING_CAPABILITY) capability!: 'chat' | 'image' | 'action' | 'video';
+  @ApiProperty({ enum: PRICING_CAPABILITY }) @IsEnum(PRICING_CAPABILITY) capability!: 'chat' | 'image' | 'action' | 'video' | 'audio';
   @ApiProperty() @IsString() @IsNotEmpty() model!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() label?: string;
   @ApiProperty({ enum: PRICING_UNIT }) @IsEnum(PRICING_UNIT) unit!: string;
