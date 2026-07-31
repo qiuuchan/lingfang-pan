@@ -1321,6 +1321,12 @@ fn rbflow_task_stream(
     let t_progress = body.get("progress").and_then(Value::as_f64).unwrap_or(0.0);
     let failed_reason = body.get("failed_reason").and_then(Value::as_str);
     let output_filename = body.get("output_filename").and_then(Value::as_str);
+    // rh_account_id: 非空 = 已分配 RB 账号并提交；空/null = 仍在平台本地队列等账号槽。
+    // 透传给插件用于区分「本地排队」vs「已提交 RB」（多账号池语义）。
+    let rh_account_id = body
+        .get("rh_account_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let mut events = Vec::new();
     if t_state == "SUCCESS" {
         events.push(json!({
@@ -1341,6 +1347,7 @@ fn rbflow_task_stream(
             "type": "progress",
             "progress": t_progress,
             "state": t_state,
+            "rh_account_id": rh_account_id,
         }));
     }
     Ok(json!({ "task_id": task_id, "events": events }))
