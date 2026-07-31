@@ -1,0 +1,32 @@
+{
+  "id": "rbflow-reliability-multiaccount",
+  "name": "rbflow-reliability-multiaccount",
+  "title": "RBFLow 可靠性与多账号改造",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "LittleSheepQwQ",
+  "assignee": "LittleSheepQwQ",
+  "createdAt": "2026-07-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-31-rbflow-backend-progress-rewrite",
+    "07-31-rbflow-multi-account-pool",
+    "07-31-rbflow-submit-status-reliability",
+    "07-31-rbflow-admin-config-dashboard",
+    "07-31-rbflow-plugin-rework"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
