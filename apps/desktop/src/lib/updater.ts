@@ -57,6 +57,44 @@ export function isBetaUpdateEnabled(): boolean {
   return loadUpdateChannel() === 'BETA';
 }
 
+// === 检查结果缓存（更新可用提示增强）===
+// 启动静默检查 / 手动检查发现新版本时写入 localStorage，设置页挂载即读，无需重新请求后端
+// 就能直接展示「发现新版本」并一键更新；检查无更新或开始安装时清除。
+const CACHED_UPDATE_KEY = 'lf:cached-update';
+
+export interface CachedUpdate {
+  meta: UpdateMetadata;
+  channel: UpdateChannel;
+  /** 检查时间 ISO 字符串（展示「检查于 …」用）。 */
+  checkedAt: string;
+}
+
+export function loadCachedUpdate(): CachedUpdate | null {
+  try {
+    const raw = localStorage.getItem(CACHED_UPDATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedUpdate;
+    // 结构兜底：缺关键字段视为无效缓存。checkedAt 非法（localStorage 被篡改/损坏）也判无效，
+    // 避免设置页横幅显示 "Invalid Date"。
+    if (!parsed?.meta?.version || !parsed?.meta?.downloadUrl) return null;
+    if (!parsed.checkedAt || Number.isNaN(new Date(parsed.checkedAt).getTime())) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedUpdate(meta: UpdateMetadata, channel: UpdateChannel): void {
+  try {
+    const payload: CachedUpdate = { meta, channel, checkedAt: new Date().toISOString() };
+    localStorage.setItem(CACHED_UPDATE_KEY, JSON.stringify(payload));
+  } catch { /* localStorage 不可用则忽略 */ }
+}
+
+export function clearCachedUpdate(): void {
+  try { localStorage.removeItem(CACHED_UPDATE_KEY); } catch { /* ignore */ }
+}
+
 /** 进度回调类型（供 Settings 页订阅 Started/Progress/Finished）。 */
 export type DownloadEventHandler = (event: DownloadEvent) => void;
 

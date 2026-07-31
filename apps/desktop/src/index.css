@@ -168,6 +168,14 @@
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* 不定进度条：下载总大小未知时进度块左右滑动表示「进行中」（替代旧固定 36% 的误导进度）。 */
+  .animate-indeterminate {
+    animation: lf-indeterminate 1.3s ease-in-out infinite alternate;
+  }
+}
+@keyframes lf-indeterminate {
+  0% { margin-left: 0%; }
+  100% { margin-left: 67%; }
 }
 
 /* === 更新日志 markdown 排版美化（ChangelogDialog 的 .changelog-md 容器） ===

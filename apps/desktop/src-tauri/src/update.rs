@@ -199,49 +199,37 @@ pub async fn download_update(
         );
     }
 
-    // 1) 下载到临时目录。
+    // 1) 下载到临时目录。先清扫历史残留安装包（历次失败/中断会留下 LingFang-Setup-*.exe，累积占盘）。
     let temp_dir = std::env::temp_dir();
+    clean_stale_setups(&temp_dir);
     let setup_path = temp_dir.join(format!("LingFang-Setup-{}.exe", sanitize(&meta.version)));
 
+    // connect_timeout 限建连、read_timeout 限单次读（每 chunk）：500MB+ 安装包「慢但持续」的下载
+    // 不会被误杀。旧实现用 600s 全局 timeout（整段响应体），慢网下大文件可能超时失败。
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| e.to_string())?;
-    let mut resp = client
-        .get(&meta.download_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("下载失败，HTTP {}", resp.status()));
-    }
 
-    let content_length = resp.content_length();
-    let started = AtomicBool::new(false);
-    {
-        use std::io::Write;
-        let mut file = std::fs::File::create(&setup_path).map_err(|e| e.to_string())?;
-        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
-            if started
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                let _ = on_event.send(DownloadEvent::Started { content_length });
-            }
-            let _ = on_event.send(DownloadEvent::Progress {
-                chunk_length: chunk.len(),
-            });
-            file.write_all(&chunk).map_err(|e| e.to_string())?;
-        }
-        file.flush().map_err(|e| e.to_string())?;
+    // 下载失败（建连/HTTP/读chunk/写盘）统一清理半截文件，再把错误暴露给前端（前端可重试）。
+    if let Err(e) = download_to_file(&client, &meta.download_url, &setup_path, &on_event).await {
+        let _ = std::fs::remove_file(&setup_path);
+        return Err(e);
     }
 
     // 2) 流式校验 SHA-256。
-    let actual = sha256_hex(&setup_path).map_err(|e| e.to_string())?;
+    let actual = match sha256_hex(&setup_path) {
+        Ok(h) => h,
+        Err(e) => {
+            let _ = std::fs::remove_file(&setup_path);
+            return Err(format!("无法读取安装包进行完整性校验：{e}"));
+        }
+    };
     if !actual.eq_ignore_ascii_case(meta.sha256.trim()) {
         let _ = std::fs::remove_file(&setup_path);
         return Err(format!(
-            "安装包校验失败：SHA-256 不匹配（期望 {}，实际 {}），已中止更新",
+            "安装包校验失败：SHA-256 不匹配（期望 {}，实际 {}），已中止更新。请重试，或联系管理员确认安装包是否损坏",
             meta.sha256, actual
         ));
     }
@@ -280,6 +268,56 @@ pub async fn download_update(
     // 5) 退出主程序，交给 updater。
     app.exit(0);
     Ok(())
+}
+
+/// 流式下载安装包到 `path`，经 Channel 推送 Started/Progress 事件；返回服务端 Content-Length（未知则 None）。
+///
+/// 任何网络 / I/O 错误返回 Err，由调用方统一清理残留文件（本函数不删，避免双重清理竞态）。
+async fn download_to_file(
+    client: &reqwest::Client,
+    url: &str,
+    path: &std::path::Path,
+    on_event: &Channel<DownloadEvent>,
+) -> Result<Option<u64>, String> {
+    use std::io::Write;
+    let mut resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("下载失败，HTTP {}", resp.status()));
+    }
+    let content_length = resp.content_length();
+    let started = AtomicBool::new(false);
+    let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let _ = on_event.send(DownloadEvent::Started { content_length });
+        }
+        let _ = on_event.send(DownloadEvent::Progress {
+            chunk_length: chunk.len(),
+        });
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    Ok(content_length)
+}
+
+/// 清理临时目录里残留的旧安装包（best-effort，失败静默）。
+///
+/// 历次下载失败 / 中断会留下 `LingFang-Setup-*.exe`，长期累积占用磁盘；更新开始前统一清扫。
+fn clean_stale_setups(temp_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if name.starts_with("LingFang-Setup-") && name.ends_with(".exe") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// download_update 的入参（前端传完整 meta；与 UpdateMetadata 同构，单独定义 Deserialize 入参）。
