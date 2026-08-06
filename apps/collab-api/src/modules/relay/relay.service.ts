@@ -29,6 +29,8 @@ import {
   type ForwardResult,
 } from './forwarders';
 import { estimateMessagesTokens } from './token-estimate';
+import { relayOutcome } from './relay-finalizer';
+import { summarizeUpstreamError, upstreamErrorCode } from './upstream-status-policy';
 
 type Tier = 'FAST' | 'PREMIUM';
 type Kind = 'CHAT' | 'IMAGE';
@@ -47,41 +49,6 @@ export function clientSourceFromRequest(req: Request): ClientSource {
   if (source === 'desktop-plugin') return 'plugin_runtime';
   if (source === 'desktop-plugin-test') return 'plugin_test';
   return 'platform';
-}
-
-/**
- * 从最后一次上游错误中提取「根因摘要」，供调用日志 errorCode + 客户端响应 details 使用。
- *
- * 解决历史诊断盲区：上游（如 Kimi/Moonshot）返回 4xx 时，其 response body 含真实拒绝原因
- * （schema 非法、内容违规、限流、key 失效等），forwarders.ts 已把它存进 UpstreamError.body。
- * 但此前 relay 只抛写死的「上游模型调用失败」并把 body 丢弃，导致后台日志与前端都看不到根因，
- * 用户只能看到无意义的「Bad Request」。本 helper 把 body 解析成可读摘要透传出来。
- *
- * 返回 { upstreamStatus, upstreamDetail }：
- *  - upstreamStatus：上游 HTTP 状态码（无上游错误时为 null）。
- *  - upstreamDetail：根因摘要（≤300 字符）。优先从 body 里抽 message/error 字段；无法解析则返回 body 原文截断。
- */
-function extractUpstreamCause(error: unknown): { upstreamStatus: number | null; upstreamDetail: string | null } {
-  if (!(error instanceof UpstreamError)) return { upstreamStatus: null, upstreamDetail: null };
-  const body = (error.body ?? '').slice(0, 300);
-  // 尝试从 JSON body 抽取 message/error.message（OpenAI/Moonshot 错误体常见字段）。
-  try {
-    const parsed = JSON.parse(error.body ?? '') as { message?: string; error?: { message?: string } | string; msg?: string };
-    const msg = parsed.message ?? parsed.msg ?? (typeof parsed.error === 'object' ? parsed.error?.message : undefined);
-    if (msg && typeof msg === 'string') {
-      return { upstreamStatus: error.httpStatus, upstreamDetail: msg.slice(0, 300) };
-    }
-  } catch { /* body 非 JSON，回落到原文截断 */ }
-  return { upstreamStatus: error.httpStatus, upstreamDetail: body || null };
-}
-
-/** 拼接 errorCode：upstream_llm_error + 根因摘要，便于后台调用日志一眼定位。 */
-function upstreamErrorCode(error: unknown): string {
-  const { upstreamStatus, upstreamDetail } = extractUpstreamCause(error);
-  const tag = `upstream_${upstreamStatus ?? 'unknown'}`;
-  if (!upstreamDetail) return tag;
-  // 截断 100 字符，避免 errorCode 过长（数据库列 + 日志可读性）。
-  return `${tag}:${upstreamDetail.slice(0, 100)}`;
 }
 
 /**
@@ -368,7 +335,7 @@ export class RelayService {
     try {
       await this.credits.reserve(auth.teamId, totalCredits, pendingLog.id, auth.userId);
     } catch (e) {
-      await ensureFinalized({ status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, credits: 0 });
+      await ensureFinalized({ status: 'insufficient_balance', ...relayOutcome('insufficient_balance'), credits: 0 });
       throw e; // AppError(402) 透传给桥→插件
     }
 
@@ -380,7 +347,7 @@ export class RelayService {
     let task_id = '';
     try {
       task_id = await this.forwardToRbflow(body);
-      await ensureFinalized({ status: 'success', errorCode: null, httpStatus: 200, credits: charged });
+      await ensureFinalized({ status: 'success', ...relayOutcome('success'), credits: charged });
     } catch (e) {
       // 转发失败：退款 + finalize 错误态，把真实错误透传给桥→插件。
       await this.credits.refundConsumed(auth.teamId, pendingLog.id, auth.userId, '视频生成转发失败退款');
@@ -457,7 +424,7 @@ export class RelayService {
     try {
       await this.credits.reserve(auth.teamId, totalCredits, pendingLog.id, auth.userId);
     } catch (e) {
-      await ensureFinalized({ status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, credits: 0 });
+      await ensureFinalized({ status: 'insufficient_balance', ...relayOutcome('insufficient_balance'), credits: 0 });
       throw e; // AppError(402) 透传给桥→插件
     }
 
@@ -469,7 +436,7 @@ export class RelayService {
     let task_id = '';
     try {
       task_id = await this.forwardToRbflowVoice(body, promptText);
-      await ensureFinalized({ status: 'success', errorCode: null, httpStatus: 200, credits: charged });
+      await ensureFinalized({ status: 'success', ...relayOutcome('success'), credits: charged });
     } catch (e) {
       await this.credits.refundConsumed(auth.teamId, pendingLog.id, auth.userId, '声音克隆转发失败退款');
       await ensureFinalized({ status: 'client_error', errorCode: 'rbflow_forward_failed', httpStatus: 502, credits: 0 });
@@ -807,14 +774,14 @@ export class RelayService {
       try {
         await this.credits.reserve(auth.teamId, cap, pendingLog.id, auth.userId);
       } catch (e) {
-        await ensureFinalized({ status: 'insufficient_balance', errorCode: 'insufficient_balance', httpStatus: 402, channelId: null, model: '(reserve-failed)' });
+        await ensureFinalized({ status: 'insufficient_balance', ...relayOutcome('insufficient_balance'), channelId: null, model: '(reserve-failed)' });
         throw e;
       }
 
       const candidates = await this.router.selectCandidates({ teamId: auth.teamId, kind, tier });
       if (candidates.length === 0) {
         await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-        await ensureFinalized({ status: 'no_channel', errorCode: 'no_channel_available', httpStatus: 503, channelId: null, model: '(no-channel)' });
+        await ensureFinalized({ status: 'no_channel', ...relayOutcome('no_channel'), channelId: null, model: '(no-channel)' });
         throw new AppError(503, 'no_channel_available', `无可用${kind === 'CHAT' ? '聊天' : '生图'}渠道（${tier === 'FAST' ? '快速' : '高级'}版）`);
       }
 
@@ -875,17 +842,12 @@ export class RelayService {
       if (lastError === undefined && skippedForNoPricing === candidates.length) {
         // 所有候选都因无定价被跳过：明确提示配价，而非笼统 upstream_error。
         const modelNames = Array.from(new Set(candidates.map((c) => c.model))).join('、');
-        await ensureFinalized({ status: 'no_pricing', errorCode: 'pricing_not_configured', httpStatus: 503, channelId: null, model: modelNames || '(none)' });
+        await ensureFinalized({ status: 'no_pricing', ...relayOutcome('no_pricing'), channelId: null, model: modelNames || '(none)' });
         throw new AppError(503, 'pricing_not_configured', '当前模型版本暂不可用，请联系平台管理员配置定价');
       }
-      const rawStatus = lastError instanceof UpstreamError ? lastError.httpStatus : 502;
-      // 上游 401/403 是渠道 key 被上游拒绝（非客户端鉴权问题——客户端 JWT 在 RelayTeamGuard 已验证）。
-      // 对客户端映射为 502（Bad Gateway），使桥/插件的重试逻辑正确归类为瞬态错误（5xx 可重试），
-      // 而非误判为「鉴权失败不重试」。原始状态码保留在 details.upstreamStatus 供诊断。
-      const httpStatus = (rawStatus === 401 || rawStatus === 403) ? 502 : rawStatus;
-      const { upstreamStatus, upstreamDetail } = extractUpstreamCause(lastError);
-      // errorCode 带上游根因摘要，后台「调用日志」可一眼看到 Kimi/Moonshot 真实拒绝原因。
-      const errorCode = lastError instanceof UpstreamError ? upstreamErrorCode(lastError) : 'upstream_llm_error';
+      // 上游错误 → 平台表示（状态重映射 + 根因摘要 + errorCode 全在 upstream-status-policy 单点定义）。
+      const summary = summarizeUpstreamError(lastError);
+      const { upstreamStatus, upstreamDetail, httpStatus, errorCode } = summary;
       // 服务端日志：上游错误全量输出（含 body 摘要），便于 SSH 看日志即时定位渠道/模型问题。
       console.warn(`[relay] upstream_error: capability=${capability} tier=${tier} model=${lastCand?.model ?? '?'} channel=${lastCand?.id ?? '?'} upstreamStatus=${upstreamStatus} httpStatus=${httpStatus} detail=${upstreamDetail ?? '(none)'}`);
       await ensureFinalized({ status: 'upstream_error', errorCode, httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
