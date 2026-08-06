@@ -1,0 +1,78 @@
+# =============================================================================
+# 灵坊桌面端 · 更新包 minisign 签名模板（TEMPLATE）
+# -----------------------------------------------------------------------------
+# 用途：在发布流水线产出安装包后，用团队私钥对其做 minisign 签名，并把 .sig 全文
+#       上报给后端，由后端写入 LatestAsset.signature，供桌面壳（update.rs 的
+#       verify_update_signature）在配置 LINGFANG_UPDATER_PUBKEY 后强制验签。
+#
+# 本文件默认以 workflow_dispatch 手动触发，不会自动运行，可安全提交。
+# 接入前需补齐：
+#   1) Secrets：MINISIGN_KEY（minisign.key 全文）、MINISIGN_PASSWORD（私钥口令）、
+#      MINISIGN_PUBKEY（base64 公钥行，仅用于本地核对）、
+#      BACKEND_API（后端地址）、BACKEND_TOKEN（上报用令牌）。
+#   2) 本模板假设安装包已由其他流水线产出并上传为 artifact/可访问路径；
+#      若需在本流程内构建，请改用 tauri-apps/tauri-action（各平台 runner + webview 依赖）。
+# =============================================================================
+name: Desktop Updater Signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, e.g. 1.2.3'
+        required: true
+      platform:
+        description: 'Target platform, e.g. windows / darwin / linux'
+        required: true
+      arch:
+        description: 'Target arch, e.g. x86_64 / aarch64'
+        required: true
+      artifact-path:
+        description: 'Path to the built installer (relative to workspace root)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    name: Sign installer with minisign
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install minisign (static binary, no Rust toolchain needed)
+        run: |
+          curl -fsSL https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz -o minisign.tar.gz
+          tar xzf minisign.tar.gz
+          sudo mv minisign-0.11-linux/minisign /usr/local/bin/minisign
+          minisign --version
+
+      - name: Restore signing key from secret
+        run: |
+          printf '%s\n' "${{ secrets.MINISIGN_KEY }}" > minisign.key
+          chmod 600 minisign.key
+
+      - name: Sign installer
+        env:
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          minisign -S \
+            -s minisign.key \
+            -p "$MINISIGN_PASSWORD" \
+            -m "${{ github.workspace }}/${{ inputs.artifact-path }}" \
+            -x "${{ github.workspace }}/${{ inputs.artifact-path }}.sig" \
+            -t "lingfang-updater ${{ inputs.version }} (${{ inputs.platform }}-${{ inputs.arch }})"
+          echo "--- .sig 全文（需整体存入后端 signature 字段，含 untrusted comment 行）---"
+          cat "${{ inputs.artifact-path }}.sig"
+
+      - name: Report signature to backend
+        run: |
+          # 后端需新增接口：接收 { version, platform, arch, signature(.sig 全文) }
+          # 并将其写入对应 LatestAsset.signature，供桌面壳验签。
+          SIG_JSON=$(jq -Rs . < "${{ inputs.artifact-path }}.sig")
+          curl -fsSL -X POST "${{ secrets.BACKEND_API }}/api/admin/release-signature" \
+            -H "Authorization: Bearer ${{ secrets.BACKEND_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"version\":\"${{ inputs.version }}\",\"platform\":\"${{ inputs.platform }}\",\"arch\":\"${{ inputs.arch }}\",\"signature\":${SIG_JSON}}"
