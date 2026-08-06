@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # LingFang CI 核心脚本 —— 本地与任意 CI 平台通用。
 #
-# 执行链路：安装依赖 → 生成 Prisma 客户端 → 类型检查 → 单元/集成测试 → 生产构建。
+# 执行链路：安装依赖 → 生成 Prisma 客户端 → 类型检查 → 单元测试(后端 + 前端) → 生产构建。
 #
 # 设计要点（为何无需 Redis / 外部 Postgres）：
 #   - 后端单元测试全部 Mock 了 PrismaService + $transaction，不连真实数据库；
@@ -50,17 +50,29 @@ $PNPM install --frozen-lockfile
 echo "==> [2/6] prisma generate (apps/collab-api)"
 $PNPM -C apps/collab-api prisma:generate
 
-echo "==> [3/6] typecheck (collab-api, collab-admin)"
+echo "==> scan: forbidden patterns in request paths"
+# 仅离线迁移脚本（migrate-plugin-registry-v4-legacy.ts）允许 $queryRawUnsafe；
+# 请求处理路径严禁，防止 SQL 注入反模式被误复制进 HTTP 处理链路。
+if grep -rn --include='*.ts' '$queryRawUnsafe' apps/collab-api/src \
+   | grep -v 'migrate-plugin-registry-v4-legacy\.ts' \
+   | grep -v '\.spec\.ts'; then
+  echo '错误：发现 $queryRawUnsafe 出现在非迁移脚本（仅离线迁移 migrate-plugin-registry-v4-legacy.ts 与测试 *.spec.ts 允许）'; exit 1
+fi
+
+echo "==> [3/7] typecheck (collab-api, collab-admin)"
 $PNPM -C apps/collab-api typecheck
 $PNPM -C apps/collab-admin typecheck
 
-echo "==> [4/6] unit + integration tests (collab-api; integration auto-skips)"
+echo "==> [4/7] unit tests (collab-api; integration auto-skips)"
 $PNPM -C apps/collab-api test
 
-echo "==> [5/6] build collab-api"
+echo "==> [5/7] unit tests (collab-admin; jsdom 纯函数单测)"
+$PNPM -C apps/collab-admin test
+
+echo "==> [6/7] build collab-api"
 $PNPM -C apps/collab-api build
 
-echo "==> [6/6] build collab-admin"
+echo "==> [7/7] build collab-admin"
 $PNPM -C apps/collab-admin build
 
 echo "==> CI core checks passed ✅"

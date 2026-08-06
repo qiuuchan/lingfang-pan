@@ -5,7 +5,7 @@
 //    1) 读 PlatformSetting 的 geetestCaptchaId/geetestCaptchaKey（缓存，避免每次登录查库）。
 //    2) 未配置 geetestCaptchaId（空）→ 直接返回 true（开发态跳过，前端不显验证码）。
 //    3) 已配置 → sign_token = HMAC-SHA256(captchaKey, lot_number) hex，
-//       POST http://gcaptcha4.geetest.com/validate?captcha_id=<id>（表单 5 参数）。
+//       POST https://gcaptcha4.geetest.com/validate?captcha_id=<id>（表单 5 参数）。
 //    4) 极验返回 result==='success' → true；result!=='success' → false。
 //    5) 极验 API 超时/异常/响应非 JSON → 返回 false + console.error 日志，
 //       不伪造验证码成功；调用方按验证码失败处理。
@@ -17,9 +17,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 import { PrismaService } from '../prisma.service';
 
-/** 极验二次校验接口地址（官方固定，http/https 均支持）。
+/** 极验二次校验接口地址（官方固定，强制 HTTPS 以防中间人篡改 result 绕过人机校验）。
  *  captcha_id 作为 query 参数附在 URL 后，便于在网关/日志层按 id 识别异常请求。 */
-const GEETEST_VALIDATE_URL = 'http://gcaptcha4.geetest.com/validate';
+const GEETEST_VALIDATE_URL = 'https://gcaptcha4.geetest.com/validate';
 
 /** 二次校验请求超时（毫秒）。极验 API 正常响应 <1s，5s 兜底防网络黑洞挂起登录流程。 */
 const GEETEST_TIMEOUT_MS = 5_000;

@@ -22,6 +22,9 @@ import type { UserSummary } from '@/components/admin-core/types';
 
 type AccountKind = 'user' | 'admin';
 
+// 邮箱格式校验（前端 UX 层；真正的强制校验仍由后端负责）。
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function CreateAccountDialog({
   children,
   kind,
@@ -34,10 +37,11 @@ export function CreateAccountDialog({
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [password, setPassword] = useState('ChangeMe123!');
+  const [password, setPassword] = useState('');
 
   async function create() {
-    if (!email.trim()) return toast.error('请输入邮箱');
+    if (!EMAIL_RE.test(email.trim())) return toast.error('请输入有效的邮箱地址');
+    if (password.length < 8) return toast.error('初始密码至少 8 位');
     const platformRole: PlatformRole = kind === 'admin' ? 'PLATFORM_ADMIN' : 'NONE';
     const ok = await run(
       () => api('/api/admin/users', {
@@ -55,7 +59,7 @@ export function CreateAccountDialog({
     setOpen(false);
     setEmail('');
     setDisplayName('');
-    setPassword('ChangeMe123!');
+    setPassword('');
     onChanged();
   }
 

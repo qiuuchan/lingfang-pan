@@ -5,6 +5,18 @@
 //          > 引用、--- 分隔线、```代码块```、| 表格 |、**bold**、`code`、![img](url)、[link](url)。
 import type { ReactNode } from 'react';
 
+/** 仅允许白名单协议的 URL，阻断 javascript:/data:/vbscript: 等危险协议（防 DOM XSS）。
+ *  release notes 来自外部 Gitee 配置，必须过滤；相对协议(//)与此场景下的相对路径均拒绝。 */
+function isSafeUrl(url: string, allowed: string[]): boolean {
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith('//')) return false;
+  try {
+    return allowed.includes(new URL(trimmed).protocol);
+  } catch {
+    return false;
+  }
+}
+
 /** 行内元素解析：**bold**、`code`、![alt](url) 图片、[text](url) 链接、~~删除线~~。
  *  图片必须在链接前匹配（!\[ 前缀优先于 \[），否则图片会被当链接解析错。 */
 export function renderInline(text: string): ReactNode[] {
@@ -17,31 +29,41 @@ export function renderInline(text: string): ReactNode[] {
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
     if (match[0].startsWith('![')) {
-      // 图片
-      parts.push(
-        <img
-          key={key++}
-          src={match[2]}
-          alt={match[1]}
-          className="my-2 max-w-full rounded-md border"
-          style={{ borderColor: 'var(--lf-border)' }}
-          loading="lazy"
-        />,
-      );
+      // 图片：校验协议，危险协议仅渲染 alt 文本（不生成 <img>）。
+      const imgSrc = isSafeUrl(match[2], ['http:', 'https:', 'data:']) ? match[2] : null;
+      if (imgSrc) {
+        parts.push(
+          <img
+            key={key++}
+            src={imgSrc}
+            alt={match[1]}
+            className="my-2 max-w-full rounded-md border"
+            style={{ borderColor: 'var(--lf-border)' }}
+            loading="lazy"
+          />,
+        );
+      } else if (match[1]) {
+        parts.push(match[1]);
+      }
     } else if (match[0].startsWith('[')) {
-      // 链接
-      parts.push(
-        <a
-          key={key++}
-          href={match[4]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline transition-colors hover:opacity-80"
-          style={{ color: 'var(--lf-accent)' }}
-        >
-          {match[3]}
-        </a>,
-      );
+      // 链接：校验协议，危险协议（javascript: 等）仅渲染文本，不生成可点击链接。
+      const href = isSafeUrl(match[4], ['http:', 'https:', 'mailto:']) ? match[4] : null;
+      if (href) {
+        parts.push(
+          <a
+            key={key++}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline transition-colors hover:opacity-80"
+            style={{ color: 'var(--lf-accent)' }}
+          >
+            {match[3]}
+          </a>,
+        );
+      } else {
+        parts.push(match[3]);
+      }
     } else if (match[0].startsWith('**')) {
       // 粗体
       parts.push(

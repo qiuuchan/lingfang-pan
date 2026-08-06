@@ -50,6 +50,8 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 650,
+    // 生产构建不产出 sourcemap，避免源码经 .map 公开暴露（审计 L4）。
+    sourcemap: false,
     rollupOptions: {
       output: { manualChunks },
     },
