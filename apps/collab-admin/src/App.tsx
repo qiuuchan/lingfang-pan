@@ -40,7 +40,7 @@ import { SetupWizard } from '@/components/setup-wizard';
 import { OnboardingWizard, ONBOARDING_DONE_KEY } from '@/components/onboarding-wizard';
 import type { GovernanceIntent } from '@/components/governance/types';
 import { NAV_GROUPS, VIEW_LABEL, VIEW_GROUP } from '@/lib/navigation';
-import { api, getToken, isPlatformAdminSession, setToken, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
+import { api, isPlatformAdminSession, UNAUTHORIZED_EVENT, type AdminSession } from '@/lib/api';
 import { initTheme } from '@/lib/theme';
 import type { View } from '@/lib/types';
 import { PageTransition, ListSkeleton } from '@/lib/motion';
@@ -76,7 +76,8 @@ const navGroups: SidebarNavGroup[] = NAV_GROUPS;
 
 export default function App() {
   const [session, setSession] = useState<AdminSession | null>(null);
-  const [checking, setChecking] = useState(!!getToken());
+  // 加载即尝试基于 Cookie 恢复会话（HttpOnly Cookie 由浏览器自动携带），无需读取本地令牌。
+  const [checking, setChecking] = useState(true);
   const [view, setView] = useState<View>('dashboard');
   const [governanceIntent, setGovernanceIntent] = useState<GovernanceIntent>({ tab: 'plugins', nonce: 0 });
   // 未登录态的落地页视图：首页 / 登录页 / 下载页 / 更新日志页（各自独立全屏页，状态机 AJAX 切换，无路由库）。
@@ -121,7 +122,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!getToken()) return;
+    // 加载即尝试恢复会话（Cookie 认证）；未登录（401）属正常空态，不提示。
     api<AdminSession>('/api/auth/me')
       .then((next) => {
         if (!isPlatformAdminSession(next)) throw new Error('当前账号不是平台管理员');
@@ -131,7 +132,6 @@ export default function App() {
         if (!localStorage.getItem(ONBOARDING_DONE_KEY)) setOnboardingOpen(true);
       })
       .catch((e) => {
-        setToken(null);
         // ADMIN-01：401 已由 api() 的 UNAUTHORIZED 事件路径处理（refresh 失败后派发事件 + handler 已 toast），
         // 此处仅对非 401 错误（如网络异常、非管理员）toast，避免重复弹两条相同提示。
         const status = (e as { status?: number }).status;
@@ -165,7 +165,6 @@ export default function App() {
   // 现由 api() 在 refresh 失败/已过期时派发 UNAUTHORIZED_EVENT，App.tsx 监听并 resetSession。
   useEffect(() => {
     const handler = () => {
-      setToken(null);
       setSession(null);
       toast.error('登录已过期，重新登录');
     };
@@ -174,7 +173,6 @@ export default function App() {
   }, []);
 
   function handleLogout() {
-    setToken(null);
     setSession(null);
   }
 

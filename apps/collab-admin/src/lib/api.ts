@@ -1,10 +1,13 @@
-const STORAGE_KEY = 'lf:collab-admin:token';
+// 管理端鉴权改为 HttpOnly Cookie（lingfang_admin_session）+ CSRF 双提交：
+// 不再把令牌存入 localStorage / 内存，从源头消除 XSS 窃取可复用凭据的攻击面。
+// 浏览器在同源（生产经 nginx 代理）或同站（开发 localhost 跨端口）请求时自动携带 Cookie；
+// 写操作需附带 x-csrf-token（取自可读的 lingfang_admin_csrf Cookie）以防御跨站请求伪造。
+const ADMIN_CSRF_COOKIE = 'lingfang_admin_csrf';
 
 // ADMIN-01 修复：401 全局拦截事件名。
-// api() 检测到 token 失效（HTTP 401 / code='unauthorized'）时派发此事件，
+// api() 检测到会话失效（HTTP 401 / code='unauthorized'）时派发此事件，
 // App.tsx 注册监听器清空 session 回登录页，避免已挂载视图陷入「每次操作都弹『登录已过期』但不回登录页」的死循环。
-// 后端 /api/auth/refresh 要求当前 token 仍有效（guard 先验签再 read req.user），
-// 属「过期前滑动续签」而非「过期后补救」，因此 401 兜底清 session 仍是必需的。
+// 后端 /api/auth/refresh 基于 Cookie 续签（滑动续签，非过期补救），故 401 兜底清 session 仍是必需的。
 export const UNAUTHORIZED_EVENT = 'lf:collab-admin:unauthorized';
 
 export interface ApiError extends Error {
@@ -15,16 +18,10 @@ export interface ApiError extends Error {
   status?: number;
 }
 
-let token = localStorage.getItem(STORAGE_KEY);
-
-export function getToken() {
-  return token;
-}
-
-export function setToken(next: string | null) {
-  token = next;
-  if (next) localStorage.setItem(STORAGE_KEY, next);
-  else localStorage.removeItem(STORAGE_KEY);
+// 从可读 CSRF Cookie 中读取令牌，供写操作放入 x-csrf-token 头（防御跨站请求伪造）。
+function readCsrfToken(): string {
+  const m = document.cookie.match(/(?:^|;\s*)lingfang_admin_csrf=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : '';
 }
 
 export function apiBase() {
@@ -54,35 +51,27 @@ export interface ApiOptions {
   _retried?: boolean;
 }
 
-// 续签尝试按 token 去重：同一会话的多个 in-flight 请求同时 401 时只触发一次 refresh，
-// 新登录会话则不等待旧 token 的 refresh，避免旧请求覆盖或清理新 token。
+// 续签按单飞行去重：并发 401 只触发一次 refresh（基于 Cookie，无需 token 比较）。
 // ADMIN-01 修复：管理端全链路此前从不调用 /api/auth/refresh，token 过期后无续签机制。
-// 此处在首个 401 时尝试一次 refresh（仅当当前 token 仍有效），refresh 成功则重放原请求；
-// refresh 失败或已过期则派发 UNAUTHORIZED 事件，由 App.tsx 清 session 回登录页。
-const refreshInFlight = new Map<string, Promise<string | null>>();
+// 此处在首个 401 时尝试一次 refresh（后端基于现有会话 Cookie 重新下发 Cookie），
+// refresh 成功则重放原请求；refresh 失败或已过期则派发 UNAUTHORIZED 事件，由 App.tsx 清 session 回登录页。
+let refreshPromise: Promise<boolean> | null = null;
 
-async function tryRefresh(requestToken: string): Promise<string | null> {
-  if (token !== requestToken) return null;
-  const existing = refreshInFlight.get(requestToken);
-  if (existing) return existing;
-  const pending = (async () => {
+async function tryRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
     try {
-      const next = await api<{ token?: string }>('/api/auth/refresh', { method: 'POST', auth: true, _isRefresh: true });
-      // refresh 返回时用户可能已重新登录；旧会话的结果不得覆盖新 token。
-      if (next?.token && token === requestToken) {
-        setToken(next.token);
-        return next.token;
-      }
-      return null;
+      await api<unknown>('/api/auth/refresh', { method: 'POST', auth: true, _isRefresh: true });
+      return true;
     } catch {
-      return null;
+      return false;
     }
   })();
-  refreshInFlight.set(requestToken, pending);
-  void pending.finally(() => {
-    if (refreshInFlight.get(requestToken) === pending) refreshInFlight.delete(requestToken);
-  });
-  return pending;
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
@@ -90,9 +79,13 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   // 否则默认 JSON：Content-Type: application/json + JSON.stringify(body)。
   const isFormData = options.formData instanceof FormData;
   const headers: Record<string, string> = isFormData ? {} : { 'Content-Type': 'application/json' };
-  // 冻结本次请求实际携带的 token，401 返回时据此判断响应是否已属于旧会话。
-  const requestToken = options.auth !== false ? token : null;
-  if (requestToken) headers.Authorization = `Bearer ${requestToken}`;
+  // 鉴权完全由 HttpOnly Cookie 承载（浏览器自动附带），不再发送 Bearer。
+  // 写操作（auth 且非安全方法）附带 CSRF 令牌，防御跨站请求伪造。
+  const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase());
+  if (options.auth !== false && isMutation) {
+    const csrf = readCsrfToken();
+    if (csrf) headers['x-csrf-token'] = csrf;
+  }
   let response: Response;
   let data: unknown;
   // ADMIN-06：用 AbortController 兜底挂起的 fetch，并把调用方取消转发给同一请求。
@@ -117,6 +110,8 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     response = await fetch(`${apiBase()}${path}`, {
       method: options.method || 'GET',
       headers,
+      // 跨域（开发直连 :19006）或同源（生产经 nginx）均携带 Cookie，使 HttpOnly 会话生效。
+      credentials: 'include',
       body: isFormData ? options.formData : (options.body ? JSON.stringify(options.body) : undefined),
       signal: controller.signal,
     });
@@ -163,32 +158,14 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     error.status = response.status;
     // refresh 请求自身失败时只把错误交给 tryRefresh；不能递归刷新或直接清 session。
     if (response.status === 401 && options.auth !== false && !options._isRefresh) {
-      const replayWithCurrentToken = () => {
+      // 基于 Cookie 续签：后端重新下发会话 Cookie，成功后重放原请求（Cookie 由浏览器自动附带）。
+      const ok = await tryRefresh();
+      if (ok) {
         const { _isRefresh: _, _retried: __, ...rest } = options;
         return api<T>(path, { ...rest, _retried: true });
-      };
-
-      // 401 晚到时若会话已变化，响应只代表旧 token。使用最新 token 重放，禁止旧请求触发 refresh/clear。
-      if (token !== requestToken) {
-        if (token) return replayWithCurrentToken();
-        throw error;
       }
-
-      // 同一 token 只尝试一次 refresh；并发 401 共享该 token 对应的刷新请求。
-      if (requestToken && !options._retried) {
-        await tryRefresh(requestToken);
-        // refresh 成功或等待期间发生了重新登录时，均用当前 token 重放原请求。
-        if (token !== requestToken) {
-          if (token) return replayWithCurrentToken();
-          throw error;
-        }
-      }
-
-      // 只有发出请求的 token 仍是当前会话时，才允许清理登录态。
-      if (token === requestToken) {
-        setToken(null);
-        try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* 浏览器环境兜底 */ }
-      }
+      // 续签失败：会话已失效，清空前端 session 并提示重新登录。
+      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* 浏览器环境兜底 */ }
     }
     throw error;
   }

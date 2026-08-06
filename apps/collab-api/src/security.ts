@@ -9,6 +9,11 @@ import { AppError, IS_PUBLIC_KEY, unauthorized, type AuthUser } from './common';
 export const WEB_SESSION_COOKIE = 'lingfang_web_session';
 export const WEB_CSRF_COOKIE = 'lingfang_web_csrf';
 
+// 管理端（平台管理员）会话 Cookie：与 web 会话隔离，路径作用域覆盖 /api/admin/* 与
+// /api/auth/{refresh,logout}。HttpOnly 使 JS 无法读取，从源头消除 XSS 窃取可复用凭据。
+export const ADMIN_SESSION_COOKIE = 'lingfang_admin_session';
+export const ADMIN_CSRF_COOKIE = 'lingfang_admin_csrf';
+
 function cookieValue(request: Request, name: string): string {
   const header = request.header('cookie') || '';
   for (const part of header.split(';')) {
@@ -24,14 +29,35 @@ export function webSessionToken(request: Request): string {
   return path.startsWith('/web/') || path.startsWith('/api/web/') ? cookieValue(request, WEB_SESSION_COOKIE) : '';
 }
 
-export function requireWebCsrf(request: Request): void {
-  const expected = cookieValue(request, WEB_CSRF_COOKIE);
+function requireCsrf(request: Request, cookieName: string): void {
+  const expected = cookieValue(request, cookieName);
   const supplied = request.header('x-csrf-token') || '';
   const valid = expected && supplied && expected.length === supplied.length
     && timingSafeEqual(Buffer.from(expected), Buffer.from(supplied));
   if (!valid) {
     throw new AppError(403, 'csrf_invalid', 'CSRF 校验失败，请刷新页面后重试');
   }
+}
+
+export function requireWebCsrf(request: Request): void {
+  requireCsrf(request, WEB_CSRF_COOKIE);
+}
+
+export function requireAdminCsrf(request: Request): void {
+  requireCsrf(request, ADMIN_CSRF_COOKIE);
+}
+
+/**
+ * 管理端会话令牌（仅 HttpOnly Cookie）：路径作用域覆盖
+ * - /api/admin/*   平台管理员操作端点（守卫据此读取管理员身份）
+ * - /api/auth/refresh、/api/auth/logout   基于 Cookie 的续签与登出
+ * 其余路径（如 /api/auth/admin/login 为 @Public 不进守卫；/api/auth/register 等公开端点）不读取，避免越权。
+ */
+export function adminSessionToken(request: Request): string {
+  const path = request.path || request.originalUrl || '';
+  if (path.startsWith('/api/admin/')) return cookieValue(request, ADMIN_SESSION_COOKIE);
+  if (path === '/api/auth/refresh' || path === '/api/auth/logout') return cookieValue(request, ADMIN_SESSION_COOKIE);
+  return '';
 }
 
 /**
@@ -62,11 +88,28 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request & { user?: AuthUser }>();
     const header = request.header('authorization') || '';
     const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
-    const cookieToken = bearer ? '' : webSessionToken(request);
+    // 优先 Bearer（非浏览器 / API 客户端，如 curl、桌面端、AI 插件）；否则按路径尝试 web / admin 会话 Cookie。
+    let cookieToken = '';
+    let csrfCookieName = '';
+    if (!bearer) {
+      const admin = adminSessionToken(request);
+      if (admin) { cookieToken = admin; csrfCookieName = ADMIN_CSRF_COOKIE; }
+      else {
+        const web = webSessionToken(request);
+        if (web) { cookieToken = web; csrfCookieName = WEB_CSRF_COOKIE; }
+      }
+    }
     const token = bearer || cookieToken;
     if (!token) throw unauthorized();
 
-    if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase())) requireWebCsrf(request);
+    // Cookie 认证的写操作需校验 CSRF 双提交；refresh/logout 为同源自恢复 / 自清理，豁免以避免鸡生蛋问题。
+    if (cookieToken) {
+      const method = (request.method || 'GET').toUpperCase();
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const p = request.path || request.originalUrl || '';
+        if (p !== '/api/auth/refresh' && p !== '/api/auth/logout') requireCsrf(request, csrfCookieName);
+      }
+    }
 
     let payload: jwt.JwtPayload;
     try {
