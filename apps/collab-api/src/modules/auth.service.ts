@@ -17,6 +17,10 @@ export type OnboardingState =
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  /** 极验未配置时按场景去重告警（进程内每场景仅告警一次，避免每个登录请求刷屏）。
+   *  用于 fail-open 兜底：未配置极验时管理端登录/找回密码跳过人机校验，但必须可见地暴露这是安全风险。 */
+  private readonly warnedCaptchaScenes = new Set<GeetestScene>();
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MailService) private readonly mail: MailService,
@@ -29,9 +33,20 @@ export class AuthService {
    */
   private async requireAdminCaptcha(scene: GeetestScene, captcha: Partial<GeetestCaptchaParams> | undefined): Promise<void> {
     const enabled = await this.geetest.isSceneEnabled(scene);
-    if (!enabled) return;
-    const ok = await this.geetest.validate(captcha);
-    if (!ok) throw badRequest('请先完成验证码');
+    if (enabled) {
+      const ok = await this.geetest.validate(captcha);
+      if (!ok) throw badRequest('请先完成验证码');
+      return;
+    }
+    // 极验未启用（captchaId 未配置 或 该场景未开启）→ fail-open 跳过校验，但显式告警（不静默）。
+    // 保持 fail-open 是为了不锁死「未配极验」的默认部署；告警则让运维/安全人员能感知这一风险面。
+    if (!this.warnedCaptchaScenes.has(scene)) {
+      this.warnedCaptchaScenes.add(scene);
+      this.logger.warn(
+        `[安全] 极验未启用，管理端「${scene}」人机校验已跳过(fail-open)。` +
+          `若已上线生产，请配置 geetestCaptchaId+geetestCaptchaKey 并在场景中启用「${scene}」，否则平台管理员账号面临暴力破解风险。`,
+      );
+    }
   }
 
   async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {

@@ -149,7 +149,14 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   }
   if (!response.ok) {
     const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
-    const error = new Error(typeof payload.message === 'string' ? payload.message : response.statusText) as ApiError;
+    const rawMessage = typeof payload.message === 'string' ? payload.message : response.statusText;
+    // 5xx 服务端错误不向管理员界面泄露原始消息（可能含堆栈/内部路径），改用通用文案 + 追踪号；
+    // 4xx 由后端 AppExceptionFilter 已语义化，保留原始 message 便于前端提示。
+    const safeMessage =
+      response.status >= 500
+        ? `服务暂时不可用，请稍后重试${typeof payload.requestId === 'string' ? `（追踪号 ${payload.requestId}）` : ''}`
+        : rawMessage;
+    const error = new Error(safeMessage) as ApiError;
     error.code = typeof payload.code === 'string' ? payload.code : undefined;
     error.requestId = typeof payload.requestId === 'string' ? payload.requestId : undefined;
     error.kind = 'http';

@@ -60,8 +60,10 @@ async function bootstrap() {
   // 用 pino Logger 替代 NestJS 默认 ConsoleLogger：框架级日志（路由解析、启动横幅等）
   // 与业务日志（services 内 this.logger.*）统一走 pino，格式/请求上下文/redact 一致。
   app.useLogger(app.get(Logger));
-  app.use(json({ limit: '300mb' }));
-  app.use(urlencoded({ limit: '300mb', extended: true }));
+  // 收紧请求体上限（审计 M1/DoS）：插件制品走 raw stream 不经 JSON parser，50MB 已覆盖绝大多数
+  // 管理配置/工作流/兼容请求；超大请求在入口即被拒，避免内存耗尽。
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ limit: '50mb', extended: true }));
 
   // 静态托管 downloads/ 目录（admin 上传的安装包）：
   // /downloads/LingFang_1.0.0_x64-setup.exe → downloads/LingFang_1.0.0_x64-setup.exe。
