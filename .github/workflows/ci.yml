@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# 取消同一分支上互相竞争的旧运行，节省 runner 时长。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck / Test / Build
+    runs-on: ubuntu-latest
+    # 单元门禁不需要外部服务：
+    #   - 后端单测全部 Mock PrismaService，不连真实库；
+    #   - integration spec 按 env 门控自动 skip（见 scripts/ci.sh 注释）。
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Run CI core (install → prisma generate → typecheck → test → build)
+        run: bash scripts/ci.sh

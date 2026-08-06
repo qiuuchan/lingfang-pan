@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../prisma.service';
@@ -15,6 +15,8 @@ export type OnboardingState =
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MailService) private readonly mail: MailService,
@@ -81,7 +83,14 @@ export class AuthService {
     const token = this.issueVerifyToken(userId, email, user.tokenVersion);
     const baseUrl = (process.env.EMAIL_VERIFY_BASE_URL || '').replace(/\/+$/, '');
     const link = baseUrl ? `${baseUrl}/?verify_token=${encodeURIComponent(token)}` : `/?verify_token=${encodeURIComponent(token)}`;
-    await this.mail.sendEmailVerification(email, link);
+    // 修复 AUTH-EMAIL-01：邮件是可降级能力，SMTP 未配置或发送失败不应阻断注册/重发验证邮件。
+    // 此前 sendEmailVerification 在 SMTP 未配置时抛错并向上传播，导致整个 register 返回 500
+    // （即使用户行已在事务中提交）。此处捕获并记告警，保证注册成功且运维可感知邮件未发出。
+    try {
+      await this.mail.sendEmailVerification(email, link);
+    } catch (err) {
+      this.logger.warn(`发送验证邮件失败（用户 ${userId} / ${email}）：${(err as Error)?.message ?? err}`);
+    }
   }
 
   async login(input: { email: string; password: string }, options: { allowPlatformAdmin?: boolean } = {}) {

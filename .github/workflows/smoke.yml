@@ -1,0 +1,50 @@
+name: Smoke (integration)
+
+# 集成冒烟：在全新 PostgreSQL 上启动真实 API，跑通 verify-all.mjs 三大链路
+# （健康检查 / 插件发布价值链 / 灵石计费购买）。
+# 默认手动触发（workflow_dispatch）；如需每次推送都跑，取消下面 push 段的注释。
+# 注意：本作业会构建并启动 API（较重），故不作为每提交必跑的单元门禁（见 ci.yml）。
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ main ]
+
+jobs:
+  smoke:
+    name: Boot API + verify-all
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lingfang
+          POSTGRES_PASSWORD: lingfang
+          POSTGRES_DB: lingfang_collab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lingfang"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://lingfang:lingfang@localhost:5432/lingfang_collab?schema=public
+      DATABASE_PROVIDER: postgresql
+      API_BASE: http://localhost:19006
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Run integration smoke (boot API + verify-all)
+        run: bash scripts/smoke-ci.sh
