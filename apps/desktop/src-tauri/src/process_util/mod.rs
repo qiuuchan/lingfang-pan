@@ -7,6 +7,7 @@
 // AI 能力统一走平台 relay（见 docs/billing-and-relay-design.md）。本模块仅保留通用子进程工具。
 mod binary;
 mod capture;
+mod sandbox;
 mod tree;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ pub(crate) use binary::resolve_npm_shim;
 pub(crate) use capture::{
     run_capture_with_env, run_capture_with_env_and_cancel, run_streamed_with_env, CapturedOutput,
 };
+pub(crate) use sandbox::SandboxHandle;
 pub(crate) use tree::kill_child_tree;
 
 /// 解析 workspace 目录：优先用传入值，缺失则用 default_root/claude-sandbox，再缺失用 cwd。

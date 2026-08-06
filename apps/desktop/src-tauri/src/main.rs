@@ -23,8 +23,6 @@ mod runtime_resolver;
 mod update;
 mod workflow_executor;
 
-use std::sync::Arc;
-
 use serde_json::{json, Value};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -34,9 +32,53 @@ use tauri::{Emitter, Manager};
 use capability::CapabilityRegistry;
 use plugins::LoadedPlugin;
 
+/// 从完整 URL 中提取主机名（含 IPv6 的 `[..]` 包裹形式）。
+/// 用于 net.fetch 的 SSRF 防护：解析目标主机判断是否指向内网/保留地址。
+fn extract_host(raw_url: &str) -> Option<String> {
+    let authority = raw_url
+        .split("://")
+        .nth(1)?
+        .split(['/', '?', '#'])
+        .next()?;
+    if authority.starts_with('[') {
+        // IPv6 形式：[addr]:port
+        let end = authority.find(']')?;
+        Some(authority[..=end].to_string())
+    } else {
+        Some(authority.split(':').next()?.to_string())
+    }
+}
+
+/// net.fetch SSRF 防护：拒绝环回/私网/链路本地/未指定/组播地址（含云元数据 169.254.169.254）。
+/// 域名会做 DNS 解析后逐一检查；解析失败按拦截处理（fail-closed）。
+fn is_blocked_host(host: &str) -> bool {
+    let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
+    if host == "localhost" {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback()
+            || ip.is_private()
+            || ip.is_link_local()
+            || ip.is_unspecified()
+            || ip.is_multicast();
+    }
+    // 域名：解析后逐地址检查（fail-closed：解析失败即拦截）。
+    let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:0")) else {
+        return true;
+    };
+    addrs.any(|addr| {
+        let ip = addr.ip();
+        ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified() || ip.is_multicast()
+    })
+}
+
 /// 壳全局状态：能力注册表 + 已加载插件。
+///
+/// 注：AppState 本身由 Tauri 以 `Arc` 方式托管（`app.manage`），
+/// 故 registry 不再额外包 `Arc`（此前为双写 Arc，无收益且易误导）。
 struct AppState {
-    registry: Arc<CapabilityRegistry>,
+    registry: CapabilityRegistry,
     plugins: Vec<LoadedPlugin>,
 }
 
@@ -127,6 +169,12 @@ async fn plugin_net_fetch(
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("net.fetch 仅支持 http/https".to_string());
     }
+    // SSRF 防护：拒绝指向环回/私网/链路本地/云元数据等保留地址的主机。
+    let host = extract_host(url)
+        .ok_or_else(|| "net.fetch 无法解析目标主机".to_string())?;
+    if is_blocked_host(&host) {
+        return Err("net.fetch 禁止访问内网/保留地址（SSRF 防护）".to_string());
+    }
     let method = args
         .get("method")
         .and_then(|v| v.as_str())
@@ -136,6 +184,15 @@ async fn plugin_net_fetch(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .user_agent("LingFang-Desktop-Plugin")
+        // SSRF 兜底：跟随重定向时再次校验目标主机，阻断「公网跳转内网」绕过。
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let host = extract_host(attempt.url().as_str()).unwrap_or_default();
+            if is_blocked_host(&host) {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        }))
         .build()
         .map_err(|e| format!("网络请求初始化失败：{e}"))?;
     let mut req = match method.as_str() {
@@ -305,7 +362,7 @@ fn main() {
                 Ok(count) => eprintln!("[plugin-v4-builtins] registered={count}"),
                 Err(error) => eprintln!("[plugin-v4-builtins] 注册失败：{error}"),
             }
-            let registry = Arc::new(CapabilityRegistry::default());
+            let registry = CapabilityRegistry::default();
             let builtin_release_dirs = plugin_package_manager
                 .list_installations()
                 .into_iter()

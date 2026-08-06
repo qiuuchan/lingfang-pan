@@ -3,7 +3,7 @@
 // 展示 plugin:output 事件逐行流（venv 创建 / pip install / python 运行 stdout+stderr）。
 // 深色终端风格，自动滚到底（用户上滚则暂停跟随），stderr 行红色着色。
 // 与 ScriptPreviewPanel 的 persistentRun 状态机集成：starting/running/error 阶段都显示。
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { PluginOutputEvent } from '../../lib/plugin-status';
 import { CopyIcon, CheckIcon } from 'lucide-react';
 
@@ -17,6 +17,21 @@ interface PluginLogPanelProps {
   /** 是否自动滚到底（用户上滚后传 false 暂停跟随）。 */
   autoScroll?: boolean;
 }
+
+// 单行日志：memo 后每行只在其内容变化时重建，长输出避免每 append 一次就全量重渲染 O(n²)。
+const LogRow = memo(function LogRow({ line }: { line: LogLine }) {
+  return (
+    <div
+      className={
+        line.stream === 'stderr'
+          ? 'whitespace-pre-wrap break-words text-[#ff7b72]'
+          : 'whitespace-pre-wrap break-words text-[#e6edf3]'
+      }
+    >
+      {line.text || '\u00A0'}
+    </div>
+  );
+});
 
 export function PluginLogPanel({ lines, autoScroll = true }: PluginLogPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,16 +79,7 @@ export function PluginLogPanel({ lines, autoScroll = true }: PluginLogPanelProps
           <span className="text-[#8b949e]">（等待输出…）</span>
         ) : (
           lines.map((line, i) => (
-            <div
-              key={i}
-              className={
-                line.stream === 'stderr'
-                  ? 'whitespace-pre-wrap break-words text-[#ff7b72]'
-                  : 'whitespace-pre-wrap break-words text-[#e6edf3]'
-              }
-            >
-              {line.text || '\u00A0'}
-            </div>
+            <LogRow key={i} line={line} />
           ))
         )}
       </div>
@@ -82,10 +88,13 @@ export function PluginLogPanel({ lines, autoScroll = true }: PluginLogPanelProps
 }
 
 /** 把 PluginOutputEvent 累积成 LogLine[] 的 hook（自动滚动跟随由 PluginLogPanel 处理）。 */
-export function useLogBuffer() {
+export function useLogBuffer(maxLines = 2000) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const append = (e: PluginOutputEvent) => {
-    setLines((prev) => [...prev, { stream: e.stream, text: e.line }]);
+    setLines((prev) => {
+      const next = [...prev, { stream: e.stream, text: e.line }];
+      return next.length > maxLines ? next.slice(next.length - maxLines) : next;
+    });
   };
   const clear = () => setLines([]);
   return { lines, append, clear };

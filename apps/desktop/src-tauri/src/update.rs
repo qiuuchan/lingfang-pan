@@ -18,6 +18,100 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::AppHandle;
 
+// 更新发布者签名验签复用 minisign-verify（与 plugin_security 同款依赖，零新依赖）。
+use minisign_verify::{PublicKey, Signature};
+
+// === 下载地址安全校验（M1：更新通道=RCE 最高危面）===
+//
+// 自研 updater 仅比对后端下发的 SHA-256，而该值也来自同一后端——后端被入侵或
+// 响应被中间人篡改时，攻击者可把下载地址换成恶意安装包接管整机。为此在真正
+// 下载前加两道独立校验（fail-closed）：
+//   1) 协议必须为 https（防明文 MITM 替换安装包）；
+//   2) 目标主机不得为环回/私网/链路本地/云元数据等保留地址（防 SSRF / file:// 转向）。
+// 以下两个函数与 main.rs::plugin_net_fetch 的 SSRF 防护同款（纯 std，零新依赖）。
+
+/// 从完整 URL 中提取主机名（含 IPv6 的 `[..]` 包裹形式）。
+fn extract_host(raw_url: &str) -> Option<String> {
+    let authority = raw_url
+        .split("://")
+        .nth(1)?
+        .split(['/', '?', '#'])
+        .next()?;
+    if authority.starts_with('[') {
+        let end = authority.find(']')?;
+        Some(authority[..=end].to_string())
+    } else {
+        Some(authority.split(':').next()?.to_string())
+    }
+}
+
+/// 拒绝环回/私网/链路本地/未指定/组播地址（含云元数据 169.254.169.254）。
+/// 域名会做 DNS 解析后逐一检查；解析失败按拦截处理（fail-closed）。
+fn is_blocked_host(host: &str) -> bool {
+    let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
+    if host == "localhost" {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback()
+            || ip.is_private()
+            || ip.is_link_local()
+            || ip.is_unspecified()
+            || ip.is_multicast();
+    }
+    let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:0")) else {
+        return true;
+    };
+    addrs.any(|addr| {
+        let ip = addr.ip();
+        ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified() || ip.is_multicast()
+    })
+}
+
+/// 校验更新下载地址安全：仅允许 https + 非保留/内网主机。失败时返回可读错误。
+fn is_safe_download_url(url: &str) -> Result<(), String> {
+    let Some(host) = extract_host(url) else {
+        return Err("更新下载地址无法解析主机名，已拒绝".to_string());
+    };
+    // 协议检查：仅放行 https（file:/http:/data: 等一律拒绝）。
+    let scheme = url.split("://").next().unwrap_or("");
+    if !scheme.eq_ignore_ascii_case("https") {
+        return Err(format!(
+            "更新下载地址必须为 https（收到 {scheme}://...），已拒绝以防中间人篡改安装包"
+        ));
+    }
+    if is_blocked_host(&host) {
+        return Err("更新下载地址指向内网/保留地址，已拒绝（可能遭响应劫持）".to_string());
+    }
+    Ok(())
+}
+
+// === 更新发布者签名验签（M1+：真实性 = 防伪造安装包的最后一道关）===
+//
+// `sha256` 只能验证「下载内容 == 后端声称的内容」，而该值来自同一后端——后端被入侵或
+// 响应被中间人篡改时，攻击者可把下载地址换成恶意安装包并同时改写 sha256。真正的真实性
+// 必须由发布者私钥签名、桌面壳用配置的公钥验签来保证（与 plugin_security 同机制）。
+//
+// 公钥来源：env `LINGFANG_UPDATER_PUBKEY`（minisign base64 公钥）。未配置时保持现有
+// SHA-256 行为，但更新时明确告警（非静默降级）；配置后则强制要求并验签（fail-closed）。
+
+/// 读取更新发布者公钥（minisign base64）。未配置返回 None。
+fn read_updater_pubkey() -> Option<String> {
+    std::env::var("LINGFANG_UPDATER_PUBKEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 用发布者公钥验签安装包字节。任何失败（公钥非法/签名非法/不匹配）一律返回 Err（fail-closed）。
+fn verify_update_signature(pubkey_b64: &str, message: &[u8], signature_text: &str) -> Result<(), String> {
+    let pubkey = PublicKey::from_base64(pubkey_b64).map_err(|e| format!("更新验签公钥格式非法：{e}"))?;
+    let signature = Signature::decode(signature_text).map_err(|e| format!("更新签名格式非法：{e}"))?;
+    pubkey
+        .verify(message, &signature, false)
+        .map_err(|e| format!("更新签名验证失败（安装包可能遭伪造）：{e}"))
+}
+
 /// 检查更新返回给前端的元数据（camelCase）。
 ///
 /// 在旧 UpdateMetadata 基础上新增 `download_url` / `sha256` / `size_bytes`，
@@ -31,6 +125,9 @@ pub struct UpdateMetadata {
     notes: Option<String>,
     download_url: String,
     sha256: String,
+    /// 发布者 minisign 签名文本（.minisig 内容）；后端未签名时为空。
+    #[serde(default)]
+    signature: String,
     size_bytes: Option<u64>,
 }
 
@@ -70,6 +167,9 @@ struct LatestAsset {
     url: String,
     #[serde(default)]
     sha256: String,
+    /// 发布者 minisign 签名文本（.minisig 内容）；后端未签名时缺省为空。
+    #[serde(default)]
+    signature: String,
     #[serde(default)]
     size_bytes: Option<u64>,
 }
@@ -179,6 +279,7 @@ pub async fn check_update(
         notes: release.notes,
         download_url: absolute_url(&backend_url, &asset.url),
         sha256: asset.sha256,
+        signature: asset.signature,
         size_bytes: asset.size_bytes,
     }))
 }
@@ -198,6 +299,11 @@ pub async fn download_update(
             "该版本缺少 SHA-256 校验值，已拒绝更新（请联系管理员重新上传安装包）".to_string(),
         );
     }
+
+    // M1：下载前最后一道关——强制 https + 拒绝内网/本地地址（fail-closed）。
+    is_safe_download_url(&meta.download_url).map_err(|e| {
+        format!("{e}（如需内网分发，请改用受信任的 https 镜像源）")
+    })?;
 
     // 1) 下载到临时目录。先清扫历史残留安装包（历次失败/中断会留下 LingFang-Setup-*.exe，累积占盘）。
     let temp_dir = std::env::temp_dir();
@@ -232,6 +338,31 @@ pub async fn download_update(
             "安装包校验失败：SHA-256 不匹配（期望 {}，实际 {}），已中止更新。请重试，或联系管理员确认安装包是否损坏",
             meta.sha256, actual
         ));
+    }
+
+    // M1+：发布者签名验签（真实性）。配置公钥后强制要求并验证（fail-closed）；
+    // 未配置则明确告警——保持现有 SHA-256 行为，但绝不静默假称已验签。
+    match read_updater_pubkey() {
+        Some(pubkey) => {
+            if meta.signature.trim().is_empty() {
+                let _ = std::fs::remove_file(&setup_path);
+                return Err(
+                    "已配置更新签名公钥，但本次更新缺少签名（signature），已拒绝以防伪造安装包（请让后端下发 minisign 签名）"
+                        .to_string(),
+                );
+            }
+            let bytes =
+                std::fs::read(&setup_path).map_err(|e| format!("读取安装包以验签失败：{e}"))?;
+            if let Err(e) = verify_update_signature(&pubkey, &bytes, &meta.signature) {
+                let _ = std::fs::remove_file(&setup_path);
+                return Err(e);
+            }
+        }
+        None => {
+            eprintln!(
+                "[updater] 警告：未配置 LINGFANG_UPDATER_PUBKEY，更新仅做 SHA-256 校验（该值来自同一后端，被入侵即失效）。生产环境请配置发布者公钥并让后端对安装包下发 minisign 签名。"
+            );
+        }
     }
 
     let _ = on_event.send(DownloadEvent::Finished);
@@ -328,6 +459,9 @@ pub struct UpdateMetadataInput {
     version: String,
     download_url: String,
     sha256: String,
+    /// 发布者 minisign 签名文本（.minisig 内容）；后端未签名时缺省为空。
+    #[serde(default)]
+    signature: String,
 }
 
 /// 流式计算文件 SHA-256（小写十六进制）。
