@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { toast } from 'sonner';
 import {
   CheckCircleIcon,
@@ -178,7 +178,8 @@ export default function App() {
     setSession(null);
   }
 
-  function navigate(nextView: View, intent?: Omit<GovernanceIntent, 'nonce'>) {
+  // 仅用稳定 setter，无闭包读值 → useCallback 空依赖，供 memo 化的 Sidebar 保持引用稳定。
+  const navigate = useCallback((nextView: View, intent?: Omit<GovernanceIntent, 'nonce'>) => {
     if (nextView === 'governance') {
       setGovernanceIntent((current) => ({
         tab: intent?.tab ?? 'plugins',
@@ -188,7 +189,7 @@ export default function App() {
       }));
     }
     setView(nextView);
-  }
+  }, []);
 
   async function checkUpdate() {
     setCheckingUpdate(true);
@@ -253,7 +254,9 @@ export default function App() {
   const currentLabel = VIEW_LABEL[view];
   const currentGroup = VIEW_GROUP[view];
 
-  const sidebarHeader = ({ compact }: SidebarSlotContext) => (
+  // header/footer 是函数槽 props，memo 化 Sidebar 需要它们引用稳定；
+  // 用 useMemo 包裹后，App 外壳其它状态（对话框开合等）变化时侧栏不再重建。
+  const sidebarHeader = useMemo(() => ({ compact }: SidebarSlotContext) => (
     <div className={compact ? 'flex justify-center py-1' : 'flex items-center gap-3 px-2 py-1'}>
       <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary text-primary-foreground">
           {/* logoUrl 有值显示图片，无值 fallback ShieldCheckIcon 默认图标。 */}
@@ -276,9 +279,9 @@ export default function App() {
         </div>
       )}
     </div>
-  );
+  ), [platformLogoUrl, platformName]);
 
-  const sidebarFooter = ({ compact }: SidebarSlotContext) => (
+  const sidebarFooter = useMemo(() => ({ compact }: SidebarSlotContext) => (
     <div className="space-y-1 border-t pt-2">
       {!compact && (
         <div className="truncate px-3 py-1 text-xs text-muted-foreground" title={session.user.email}>
@@ -306,7 +309,7 @@ export default function App() {
         {!compact && '关于'}
       </button>
     </div>
-  );
+  ), [session.user.email]);
 
   return (
     <TooltipProvider>
@@ -314,7 +317,7 @@ export default function App() {
         <Sidebar
           groups={navGroups}
           activeView={view}
-          onSelect={(v) => navigate(v as View)}
+          onSelect={navigate}
           header={sidebarHeader}
           footer={sidebarFooter}
           mobileOpen={mobileNavOpen}
@@ -490,7 +493,7 @@ export default function App() {
       <CommandPalette
         open={commandPalette.open}
         onOpenChange={commandPalette.setOpen}
-        onSelect={(v) => navigate(v)}
+        onSelect={navigate}
       />
     </TooltipProvider>
   );

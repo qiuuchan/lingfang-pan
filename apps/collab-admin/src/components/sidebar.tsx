@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useEffect, useState, type ReactNode, type RefObject } from 'react';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -51,7 +51,9 @@ type SidebarProps = {
   showMobileTrigger?: boolean;
 };
 
-export function Sidebar({
+// memo：侧栏 props 稳定（groups/onSelect/header/footer 均引用稳定），
+// 仅在 activeView/mobileOpen 变化时重渲染，避免 App 外壳开关弹窗等状态变化时整栏重建。
+export const Sidebar = memo(function Sidebar({
   groups,
   items,
   activeView,
@@ -221,4 +223,4 @@ export function Sidebar({
       </div>
     </TooltipProvider>
   );
-}
+});

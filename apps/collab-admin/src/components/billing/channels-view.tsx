@@ -227,28 +227,31 @@ function ChannelDialog({ channel, kind, pools, children, onRefresh }: { channel?
             <div className="space-y-2"><Label>上游 API Key</Label><Input type="password" value={form.upstreamKey} onChange={(e) => patch({ upstreamKey: e.target.value })} placeholder={channel ? '（不改则保留原 key）' : 'sk-...'} /></div>
             <div className="space-y-2">
               <Label>可调用模型（轮询；从预设勾选或手输，一行一个）</Label>
-              {getPresetModels(form.provider, kind).length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {getPresetModels(form.provider, kind).map((m) => {
-                    const current = parseModels(form.modelsText);
-                    const checked = current.includes(m.id);
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => {
-                          const next = checked ? current.filter((x) => x !== m.id) : [...current, m.id];
-                          patch({ modelsText: next.join('\n'), pricingModel: next[0] ?? '' });
-                        }}
-                        className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${checked ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
-                        title={`${m.label} · ${m.contextWindow ? (m.contextWindow / 1000) + 'K' : '生图'}${m.supportsReasoning ? ' · 支持思考' : ''}`}
-                      >
-                        {m.id}{m.supportsReasoning && ' 思考'}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              {(() => {
+                const presets = getPresetModels(form.provider, kind);
+                const current = parseModels(form.modelsText);
+                return presets.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {presets.map((m) => {
+                      const checked = current.includes(m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            const next = checked ? current.filter((x) => x !== m.id) : [...current, m.id];
+                            patch({ modelsText: next.join('\n'), pricingModel: next[0] ?? '' });
+                          }}
+                          className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${checked ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                          title={`${m.label} · ${m.contextWindow ? (m.contextWindow / 1000) + 'K' : '生图'}${m.supportsReasoning ? ' · 支持思考' : ''}`}
+                        >
+                          {m.id}{m.supportsReasoning && ' 思考'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               <Textarea value={form.modelsText} onChange={(e) => patch({ modelsText: e.target.value })} placeholder={'gpt-4o\ngpt-4o-mini'} />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">

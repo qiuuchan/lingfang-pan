@@ -187,10 +187,14 @@ export function SettingsView() {
   const [searchSaving, setSearchSaving] = useState(false);
 
   // 每个配置域首次打开时加载；草稿 state 留在本组件，切换 Tab 不丢失也不重复请求。
+  // 注意：不能在 effect 开头就把 tab 标记为已加载——StrictMode 双执行 effect 时，
+  // 首次运行的请求会被 cleanup 取消（cancelled=true），第二次运行因「已加载」提前 return，
+  // 请求不再重发，loading 永远不置 false（整个设置页表单永久 disabled）。
+  // 因此把标记推迟到各请求 .finally 且未取消时执行：二次运行（cancelled=false）会重新发请求，正常完成后再标记。
   useEffect(() => {
     if (loadedTabs.current.has(activeTab)) return;
-    loadedTabs.current.add(activeTab);
     let cancelled = false;
+    const markLoaded = () => { if (!cancelled) loadedTabs.current.add(activeTab); };
     if (activeTab === 'basic') api<PlatformInfo>('/api/platform-info', { auth: false })
       .then((data) => {
         if (cancelled) return;
@@ -206,7 +210,7 @@ export function SettingsView() {
         toast.error(`平台信息加载失败：${(e as Error).message}`);
       })
       .finally(() => {
-        if (!cancelled) setPlatformInfoLoading(false);
+        if (!cancelled) { setPlatformInfoLoading(false); markLoaded(); }
       });
     if (activeTab === 'email') api<SmtpSettings>('/api/admin/settings/smtp')
       .then((data) => {
@@ -220,7 +224,7 @@ export function SettingsView() {
         toast.error(`SMTP 配置加载失败：${(e as Error).message}`);
       })
       .finally(() => {
-        if (!cancelled) setSmtpLoading(false);
+        if (!cancelled) { setSmtpLoading(false); markLoaded(); }
       });
     if (activeTab === 'security') api<GeetestSettings>('/api/admin/settings/geetest')
       .then((data) => {
@@ -236,7 +240,7 @@ export function SettingsView() {
         toast.error(`极验配置加载失败：${(e as Error).message}`);
       })
       .finally(() => {
-        if (!cancelled) setGeetestLoading(false);
+        if (!cancelled) { setGeetestLoading(false); markLoaded(); }
       });
     if (activeTab === 'release') api<GiteeSettings>('/api/admin/settings/gitee')
       .then((data) => {
@@ -250,7 +254,7 @@ export function SettingsView() {
         toast.error(`Gitee 配置加载失败：${(e as Error).message}`);
       })
       .finally(() => {
-        if (!cancelled) setGiteeLoading(false);
+        if (!cancelled) { setGiteeLoading(false); markLoaded(); }
       });
     if (activeTab === 'video') api<RbflowSettings>('/api/admin/settings/rbflow')
       .then((data) => {
@@ -264,7 +268,7 @@ export function SettingsView() {
         toast.error(`RBFLow 配置加载失败：${(e as Error).message}`);
       })
       .finally(() => {
-        if (!cancelled) setRbflowLoading(false);
+        if (!cancelled) { setRbflowLoading(false); markLoaded(); }
       });
     if (activeTab === 'search') api<SearchSettings>('/api/admin/settings/search')
       .then((data) => {
@@ -278,7 +282,7 @@ export function SettingsView() {
         toast.error(`搜索源配置加载失败：${(e as Error).message}`);
       })
       .finally(() => {
-        if (!cancelled) setSearchLoading(false);
+        if (!cancelled) { setSearchLoading(false); markLoaded(); }
       });
     return () => {
       cancelled = true;
