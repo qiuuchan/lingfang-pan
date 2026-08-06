@@ -45,7 +45,14 @@ function Campaigns() {
   const [busy, setBusy] = useState(false);
 
   const normalizedPackageIds = items.map((item) => item.packageId.trim());
-  const duplicatePackageIds = new Set(normalizedPackageIds.filter((packageId, index) => packageId && normalizedPackageIds.indexOf(packageId) !== index));
+  // 去重判断用 Set 保持 O(n)（indexOf-in-filter 是 O(n²)），上限虽 100 项但顺手消除重复扫描。
+  const seenPackageIds = new Set<string>();
+  const duplicatePackageIds = new Set(normalizedPackageIds.filter((packageId) => {
+    if (!packageId) return false;
+    if (seenPackageIds.has(packageId)) return true;
+    seenPackageIds.add(packageId);
+    return false;
+  }));
   const hasBlankPackage = normalizedPackageIds.some((packageId) => !packageId);
   const hasInvalidRank = items.some((item) => !Number.isInteger(item.rank) || item.rank < 0 || item.rank > 99);
   const hasInvalidItems = hasBlankPackage || duplicatePackageIds.size > 0 || hasInvalidRank;
