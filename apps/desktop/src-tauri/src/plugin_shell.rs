@@ -92,10 +92,14 @@ pub(crate) enum ShellRuntime {
 /// 7. run_capture_with_env 捕获 stdout/stderr/exit_code。
 #[tauri::command]
 pub fn run_plugin_shell(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     store: tauri::State<'_, PluginStore>,
     input: RunPluginShellInput,
 ) -> Result<ShellResult, String> {
+    // M3：来源窗口校验——防止插件窗口以另一插件/无插件身份越权执行命令。
+    enforce_shell_caller(&window, input.plugin_id.as_deref())?;
+
     if requests_playwright_browser_install(&input.command) {
         return Err("Chromium 已由软件内置，禁止下载或安装第二套 Playwright 浏览器".to_string());
     }
@@ -180,6 +184,42 @@ pub fn run_plugin_shell(
         timed_out: captured.timed_out,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// 校验 run_plugin_shell 的调用来源窗口是否有权以给定 plugin_id 执行命令。
+///
+/// 设计意图（见模块头注释）：本通道是「不受控执行通道」，等同 Claude Code Bash，
+/// 以**用户权限**运行任意命令。因此授权边界不在「能否执行命令」，而在「**哪个窗口
+/// 能以哪个身份**发起」——防止一个插件窗口冒用另一插件或用户级 shell 身份越权。
+///
+/// - 无插件模式（plugin_id 为空）：仅允许 `main` 窗口调用。
+///   拒绝任何 `plugin-*` 窗口，否则插件可借通用 bash 通道拿到用户级 shell。
+/// - 插件模式（plugin_id = ID）：允许 `main` 或 `plugin-<ID>` 窗口；
+///   拒绝 `plugin-<OTHER>`（跨插件越权）。
+fn enforce_shell_caller(
+    window: &tauri::WebviewWindow,
+    plugin_id: Option<&str>,
+) -> Result<(), String> {
+    let label = window.label();
+    let plugin_id = plugin_id.map(str::trim).filter(|s| !s.is_empty());
+    match plugin_id {
+        None => {
+            if label == "main" {
+                Ok(())
+            } else {
+                Err("run_plugin_shell 无插件模式仅允许主窗口调用（插件窗口禁止通用 shell）".to_string())
+            }
+        }
+        Some(id) => {
+            if label == "main" || label == format!("plugin-{id}") {
+                Ok(())
+            } else {
+                Err(format!(
+                    "run_plugin_shell 调用来源窗口 {label} 无权以插件 {id} 身份执行命令"
+                ))
+            }
+        }
+    }
 }
 
 fn requests_playwright_browser_install(command: &str) -> bool {

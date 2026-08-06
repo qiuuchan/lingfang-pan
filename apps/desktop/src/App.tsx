@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { Loader2Icon, SparklesIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
@@ -874,22 +874,42 @@ export default function App() {
     };
   }, [clearRunningPlugin]);
 
-  const ctx: AppContextValue = {
-    backendUrl, saveBackendUrl,
-    session, applySession, applyCollabSession, refreshSession, resetSession,
-    view, setView,
-    currentDraft, setCurrentDraft,
-    runningPlugin, setRunningPlugin, clearRunningPlugin, runningPlugins,
-    pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned, removeFromRecent,
-    settingsTab, setSettingsTab,
-    openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
-    modelConfigVersion, bumpModelConfig,
-    pendingAutoFix, setPendingAutoFix,
-    pendingDraftEdit, setPendingDraftEdit,
-    platformName, platformLogoUrl,
-    openSearch,
-    openAvatarMenu: () => setAvatarMenuOpen(true),
-  };
+  const openAvatarMenu = useCallback(() => setAvatarMenuOpen(true), []);
+
+  // ctx 每次渲染都新建会导致 App 任一状态变化（如 runningPlugins 更新）时，
+  // 所有 useApp() 消费者（Sidebar/Home/各页面）整体重渲染。useMemo 后引用稳定，
+  // 仅在依赖状态真正变化时才重建，消费者得以跳过无关更新。
+  const ctx: AppContextValue = useMemo(
+    () => ({
+      backendUrl, saveBackendUrl,
+      session, applySession, applyCollabSession, refreshSession, resetSession,
+      view, setView,
+      currentDraft, setCurrentDraft,
+      runningPlugin, setRunningPlugin, clearRunningPlugin, runningPlugins,
+      pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned, removeFromRecent,
+      settingsTab, setSettingsTab,
+      openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
+      modelConfigVersion, bumpModelConfig,
+      pendingAutoFix, setPendingAutoFix,
+      pendingDraftEdit, setPendingDraftEdit,
+      platformName, platformLogoUrl,
+      openSearch,
+      openAvatarMenu,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      backendUrl, session, view, currentDraft,
+      runningPlugin, runningPlugins,
+      pinnedPlugins, recentPlugins, isPinned,
+      settingsTab,
+      modelConfigVersion, pendingAutoFix, pendingDraftEdit,
+      platformName, platformLogoUrl,
+      saveBackendUrl, applySession, applyCollabSession, refreshSession, resetSession,
+      clearRunningPlugin, pinPlugin, unpinPlugin, removeFromRecent,
+      openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
+      bumpModelConfig, openSearch, openAvatarMenu,
+    ],
+  );
 
   if (restoring) {
     return (

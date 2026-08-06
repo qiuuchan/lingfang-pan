@@ -20,7 +20,9 @@ import { tauriInvoke } from '@/lib/api';
 
 /** 更新检查结果（对应 Rust UpdateMetadata，camelCase 字段名）。
  *  available 始终为 true（Rust 仅在有更新时构造此结构；无更新返回 null）。
- *  downloadUrl/sha256/sizeBytes 供 downloadUpdate 下载 + 完整性校验（替代旧 minisign 签名）。 */
+ *  downloadUrl/sha256/sizeBytes 供 downloadUpdate 下载 + 完整性校验。
+ *  signature 为安装包发布者 minisign 签名（.sig 全文）；桌面壳配置 LINGFANG_UPDATER_PUBKEY
+ *  后会强制验签（fail-closed）。未配置公钥时此字段可空，降级为仅 SHA-256。 */
 export interface UpdateMetadata {
   version: string;
   currentVersion: string;
@@ -29,6 +31,8 @@ export interface UpdateMetadata {
   downloadUrl: string;
   sha256: string;
   sizeBytes: number | null;
+  /** 安装包发布者签名（minisign .sig 全文）；配置公钥后用于真实性验签。 */
+  signature?: string | null;
 }
 
 /** 下载安装进度事件（对应 Rust DownloadEvent，discriminated union）。

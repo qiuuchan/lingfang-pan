@@ -370,12 +370,23 @@ pub fn respond_plugin_action_bridge(
         .map_err(|_| "Action bridge 响应接收端已关闭".to_string())
 }
 
+/// 桥响应类型：JSON（默认）或 SSE（流式 chat completions）。
+///
+/// SSE 用于 `stream: true` 的 /v1/chat/completions 请求：桥从 relay 拿完整响应后，
+/// 包装成单个 `data:` 事件 + `data: [DONE]` 返回，兼容 OpenAI SDK 的流式消费。
+/// 非真正流式（relay 固定非流式），但解除了插件 SDK `stream: true` 的 400 报错。
+enum BridgeResponse {
+    Json(Value),
+    Sse(String),
+}
+
 fn handle_connection(inner: Arc<BridgeState>, mut stream: TcpStream) {
     let response = match read_request(&mut stream) {
         Ok(request) => {
             let openai_compatible = request.path.starts_with("/v1/");
             match route_request(&inner, request) {
-                Ok(body) => http_json(200, &body),
+                Ok(BridgeResponse::Json(body)) => http_json(200, &body),
+                Ok(BridgeResponse::Sse(body)) => http_sse(&body),
                 Err(error) => {
                     let error = error.ensure_request_id();
                     http_json(error.status, &error.response_body(openai_compatible))
@@ -461,7 +472,7 @@ fn find_header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult<Value> {
+fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult<BridgeResponse> {
     // 按路由分发 HTTP method：GET /v1/models 与 GET /video/stream、/video/download 允许
     //（供第三方 SDK 连通性探测 + RBFLow 进度/下载代理），其余路由保持仅 POST。
     // 先校验 method 再校验 token，避免对错误 method 暴露鉴权细节。
@@ -494,32 +505,45 @@ fn route_request(inner: &Arc<BridgeState>, request: HttpRequest) -> BridgeResult
 
     match path_only {
         // 灵坊自有形状（SDK 内部用）：返回 {content} / {images} 包装。
-        "/llm/chat" => route_llm_chat(&session, request.body),
-        "/image/generate" => route_image_generate(&session, request.body),
-        "/image/edit" => route_image_edit(&session, request.body),
-        "/video/generate" => route_video_generate(&session, request.body),
-        "/audio/generate" => route_audio_generate(&session, request.body),
+        "/llm/chat" => route_llm_chat(&session, request.body).map(BridgeResponse::Json),
+        "/image/generate" => route_image_generate(&session, request.body).map(BridgeResponse::Json),
+        "/image/edit" => route_image_edit(&session, request.body).map(BridgeResponse::Json),
+        "/video/generate" => route_video_generate(&session, request.body).map(BridgeResponse::Json),
+        "/audio/generate" => route_audio_generate(&session, request.body).map(BridgeResponse::Json),
         // GET 路由带 query（task_id），完整 path 透传给 route 函数解析。
-        "/video/stream" if request.method == "GET" => route_video_stream(&session, &request.path),
+        "/video/stream" if request.method == "GET" => {
+            route_video_stream(&session, &request.path).map(BridgeResponse::Json)
+        }
         "/video/download" if request.method == "GET" => {
-            route_video_download(&session, &request.path)
+            route_video_download(&session, &request.path).map(BridgeResponse::Json)
         }
-        "/audio/stream" if request.method == "GET" => route_audio_stream(&session, &request.path),
+        "/audio/stream" if request.method == "GET" => {
+            route_audio_stream(&session, &request.path).map(BridgeResponse::Json)
+        }
         "/audio/download" if request.method == "GET" => {
-            route_audio_download(&session, &request.path)
+            route_audio_download(&session, &request.path).map(BridgeResponse::Json)
         }
-        "/actions/call" => route_action_call(inner, &session, request.body),
-        "/artifacts/create" => route_action_artifact(&session, "", request.body),
-        "/artifacts/materialize" => route_action_artifact(&session, "/materialize", request.body),
-        "/artifacts/import" => route_action_artifact(&session, "/import", request.body),
+        "/actions/call" => route_action_call(inner, &session, request.body).map(BridgeResponse::Json),
+        "/artifacts/create" => {
+            route_action_artifact(&session, "", request.body).map(BridgeResponse::Json)
+        }
+        "/artifacts/materialize" => {
+            route_action_artifact(&session, "/materialize", request.body).map(BridgeResponse::Json)
+        }
+        "/artifacts/import" => {
+            route_action_artifact(&session, "/import", request.body).map(BridgeResponse::Json)
+        }
         // OpenAI 兼容形状（第三方 SDK 直连用）：透传 relay 完整响应，不包装。
+        // /v1/chat/completions 可能返回 JSON 或 SSE（stream: true 时）。
         "/v1/chat/completions" if request.method == "POST" => {
             route_v1_chat_completions(&session, request.body)
         }
         "/v1/images/generations" if request.method == "POST" => {
-            route_v1_images_generations(&session, request.body)
+            route_v1_images_generations(&session, request.body).map(BridgeResponse::Json)
         }
-        "/v1/models" if request.method == "GET" => route_v1_models(&session),
+        "/v1/models" if request.method == "GET" => {
+            route_v1_models(&session).map(BridgeResponse::Json)
+        }
         other => Err(BridgeError::new(
             404,
             "not_found",
@@ -1578,7 +1602,10 @@ fn route_v1_models(session: &BridgeSession) -> BridgeResult<Value> {
 /// 与 route_llm_chat 的区别：**直接返回 relay 的完整 OpenAI 响应**（choices[].message），
 /// 不再抽取成 {content}，以便第三方 openai SDK / @ai-sdk/openai 等直连消费。
 /// gate 复用 allow_llm_chat（语义上仍是 llm.chat 能力）。
-fn route_v1_chat_completions(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResult<Value> {
+fn route_v1_chat_completions(
+    session: &BridgeSession,
+    body_bytes: Vec<u8>,
+) -> BridgeResult<BridgeResponse> {
     if !session.allow_llm_chat {
         return Err(BridgeError::new(
             403,
@@ -1598,17 +1625,30 @@ fn route_v1_chat_completions(session: &BridgeSession, body_bytes: Vec<u8>) -> Br
         .ok_or_else(|| {
             BridgeError::new(400, "bad_request", "/v1/chat/completions 缺少 messages")
         })?;
-    reject_streaming(&body)?;
     let model = parse_model_tier(&body)?;
+    let want_stream = body
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    // 仅转发桥关心的字段；relay 固定非流式。
+    // relay 固定非流式：无论插件是否请求 stream，都发 stream:false 到 relay。
+    // 插件请求 stream:true 时，桥把完整响应包装成单个 SSE 事件返回，兼容 OpenAI SDK 流式消费。
     let relay_body = json!({
         "model": model,
         "messages": messages,
         "stream": false,
     });
-    // 透传 relay 完整响应（不抽取 content）。
-    relay_post_json(session, "/api/relay/v1/chat/completions", &relay_body)
+    let data = relay_post_json(session, "/api/relay/v1/chat/completions", &relay_body)?;
+
+    if want_stream {
+        // 包装为 SSE：data: <完整响应>\n\ndata: [DONE]\n\n
+        let json_str = serde_json::to_string(&data)
+            .unwrap_or_else(|_| "{}".to_string());
+        let sse_body = format!("data: {json_str}\n\ndata: [DONE]\n\n");
+        Ok(BridgeResponse::Sse(sse_body))
+    } else {
+        Ok(BridgeResponse::Json(data))
+    }
 }
 
 /// POST /v1/images/generations：OpenAI 兼容透传。
@@ -1702,46 +1742,83 @@ fn reject_streaming(body: &Value) -> BridgeResult<()> {
     }
 }
 
+/// 502/503 指数退避自动重试：最多 3 次（初始 1s → 2s → 4s）。
+///
+/// 仅对 502（Bad Gateway）和 503（Service Unavailable）重试——这两类通常是平台瞬时不可用。
+/// 504（Gateway Timeout）不重试（请求可能已在平台执行，重试会重复计费）。
+/// 4xx 错误不重试（客户端错误，重试无意义）。
+fn relay_with_retry<F>(mut attempt: F) -> BridgeResult<Value>
+where
+    F: FnMut() -> BridgeResult<Value>,
+{
+    const MAX_RETRIES: u32 = 3;
+    const INITIAL_BACKOFF_MS: u64 = 1_000;
+    let mut last_error: Option<BridgeError> = None;
+    for attempt_num in 0..=MAX_RETRIES {
+        if attempt_num > 0 {
+            let backoff_ms = INITIAL_BACKOFF_MS * (1 << (attempt_num - 1));
+            std::thread::sleep(Duration::from_millis(backoff_ms));
+        }
+        match attempt() {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let should_retry = error.status == 502 || error.status == 503;
+                if !should_retry || attempt_num == MAX_RETRIES {
+                    return Err(error);
+                }
+                last_error = Some(error);
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        BridgeError::new(502, "relay_request_failed", "重试后仍失败")
+    }))
+}
+
 fn relay_post_json(session: &BridgeSession, path: &str, body: &Value) -> BridgeResult<Value> {
-    let request_id = Uuid::new_v4().to_string();
-    let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
-    let response = blocking_client()
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("X-Client", session.client_source.x_client())
-        .header("X-Request-Id", &request_id)
-        .bearer_auth(&session.auth_token)
-        .json(body)
-        .send()
-        .map_err(|_| {
-            BridgeError::new(
-                502,
-                "relay_request_failed",
-                "无法连接平台模型服务，请稍后重试",
-            )
-            .with_request_id(request_id.clone())
-        })?;
-    relay_response_json(response, &request_id)
+    relay_with_retry(|| {
+        let request_id = Uuid::new_v4().to_string();
+        let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
+        let response = blocking_client()
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("X-Client", session.client_source.x_client())
+            .header("X-Request-Id", &request_id)
+            .bearer_auth(&session.auth_token)
+            .json(body)
+            .send()
+            .map_err(|_| {
+                BridgeError::new(
+                    502,
+                    "relay_request_failed",
+                    "无法连接平台模型服务，请稍后重试",
+                )
+                .with_request_id(request_id.clone())
+            })?;
+        relay_response_json(response, &request_id)
+    })
 }
 
 fn relay_get_json(session: &BridgeSession, path: &str) -> BridgeResult<Value> {
-    let request_id = Uuid::new_v4().to_string();
-    let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
-    let response = blocking_client()
-        .get(url)
-        .header("X-Client", session.client_source.x_client())
-        .header("X-Request-Id", &request_id)
-        .bearer_auth(&session.auth_token)
-        .send()
-        .map_err(|_| {
-            BridgeError::new(
-                502,
-                "relay_request_failed",
-                "无法连接平台模型服务，请稍后重试",
-            )
-            .with_request_id(request_id.clone())
-        })?;
-    relay_response_json(response, &request_id)
+    relay_with_retry(|| {
+        let request_id = Uuid::new_v4().to_string();
+        let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
+        let response = blocking_client()
+            .get(url)
+            .header("X-Client", session.client_source.x_client())
+            .header("X-Request-Id", &request_id)
+            .bearer_auth(&session.auth_token)
+            .send()
+            .map_err(|_| {
+                BridgeError::new(
+                    502,
+                    "relay_request_failed",
+                    "无法连接平台模型服务，请稍后重试",
+                )
+                .with_request_id(request_id.clone())
+            })?;
+        relay_response_json(response, &request_id)
+    })
 }
 
 /// 转发 JSON 到平台 relay，带自定义超时（视频生成等耗时调用用，默认 blocking_client 的 180s 不够）。
@@ -1752,29 +1829,31 @@ fn relay_post_json_timeout(
     body: &Value,
     timeout: Duration,
 ) -> BridgeResult<Value> {
-    let request_id = Uuid::new_v4().to_string();
-    let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(timeout)
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new());
-    let response = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("X-Client", session.client_source.x_client())
-        .header("X-Request-Id", &request_id)
-        .bearer_auth(&session.auth_token)
-        .json(body)
-        .send()
-        .map_err(|_| {
-            BridgeError::new(
-                502,
-                "relay_request_failed",
-                "无法连接平台视频服务，请稍后重试",
-            )
-            .with_request_id(request_id.clone())
-        })?;
-    relay_response_json(response, &request_id)
+    relay_with_retry(|| {
+        let request_id = Uuid::new_v4().to_string();
+        let url = format!("{}{}", session.api_base.trim_end_matches('/'), path);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(timeout)
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("X-Client", session.client_source.x_client())
+            .header("X-Request-Id", &request_id)
+            .bearer_auth(&session.auth_token)
+            .json(body)
+            .send()
+            .map_err(|_| {
+                BridgeError::new(
+                    502,
+                    "relay_request_failed",
+                    "无法连接平台视频服务，请稍后重试",
+                )
+                .with_request_id(request_id.clone())
+            })?;
+        relay_response_json(response, &request_id)
+    })
 }
 
 /// 从平台 relay /api/relay/v1/rbflow-config 读取 RBFLow 服务配置（url + api_key）。
@@ -1933,6 +2012,15 @@ fn http_json(status: u16, body: &Value) -> String {
     format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
         payload.len()
+    )
+}
+
+/// SSE 响应（text/event-stream）：用于 stream:true 的 chat completions。
+/// body 已是完整的 SSE 格式文本（含 `data: ...\n\n` 行），直接写入 Content-Length。
+fn http_sse(body: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
     )
 }
 
@@ -2329,7 +2417,7 @@ mod tests {
         allow_llm: bool,
         allow_image: bool,
         allow_video: bool,
-    ) -> BridgeResult<Value> {
+    ) -> BridgeResult<BridgeResponse> {
         let bridge = PluginLlmBridge::new();
         let token = insert_test_session(&bridge, allow_llm, allow_image, allow_video);
         let mut headers = HashMap::new();
@@ -2341,6 +2429,14 @@ mod tests {
             body: Vec::new(),
         };
         route_request(&bridge.inner, request)
+    }
+
+    /// 从 BridgeResponse 提取 JSON Value（测试辅助）。
+    fn unwrap_json(response: BridgeResponse) -> Value {
+        match response {
+            BridgeResponse::Json(v) => v,
+            BridgeResponse::Sse(s) => json!({ "_sse": s }),
+        }
     }
 
     fn insert_test_session(
@@ -2411,7 +2507,7 @@ mod tests {
                 body: Vec::new(),
             },
         );
-        let data = result.expect("GET /v1/models 应成功");
+        let data = unwrap_json(result.expect("GET /v1/models 应成功"));
         let ids: Vec<&str> = data
             .get("data")
             .and_then(|value| value.as_array())

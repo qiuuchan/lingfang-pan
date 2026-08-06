@@ -258,7 +258,7 @@ fn process_table_register_and_is_running() {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let child = cmd.spawn().expect("测试进程应能 spawn");
-    let (pid, _arc) = table.register_with_handle("test-plugin", child, "1000Z".to_string());
+    let (pid, _arc) = table.register_with_handle("test-plugin", child, SandboxHandle::default(), "1000Z".to_string());
     assert!(pid > 0, "注册应返回有效 pid");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while table.is_running("test-plugin").is_some() && std::time::Instant::now() < deadline {
@@ -308,9 +308,9 @@ fn process_table_stop_plugin_kills_running_process() {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let child = cmd.spawn().expect("测试长进程应能 spawn");
-    let (_pid, _arc) = table.register_with_handle("long-plugin", child, "2000Z".to_string());
+    let (_pid, _arc) = table.register_with_handle("long-plugin", child, SandboxHandle::default(), "2000Z".to_string());
     // 取出并杀。
-    let (mut killed_child, _) = table.take("long-plugin").expect("应能取出注册的进程");
+    let (mut killed_child, _sandbox) = table.take("long-plugin").expect("应能取出注册的进程");
     let started = std::time::Instant::now();
     kill_child_tree(&killed_child);
     let _ = killed_child.kill();

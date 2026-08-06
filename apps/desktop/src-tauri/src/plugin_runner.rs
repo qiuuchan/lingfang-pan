@@ -23,8 +23,9 @@
 //! 安全边界（与 plugin_script.rs 同源留痕）：
 //! - 本通道是【不受控执行通道】，绕过 capability 网关（design §6.1）。
 //! - 软隔离：plugin_id 段级白名单（plugin_store::sanitize_plugin_id）、路径不穿越 plugins_root。
+//! - OS 级硬隔离：Windows Job Object（KILL_ON_JOB_CLOSE）确保进程树围栏，关闭即杀整棵树（sandbox.rs）。
 //! - 可逃逸：用户权限运行的脚本可执行 fs.writeFile / child_process / 网络请求（与本地直接 `node main.js` 等价）。
-//! - 后续独立大任务：OS 级硬隔离 + script.node/script.python capability kind 让本通道也走声明式授权。
+//! - 后续：script.node/script.python capability kind 让本通道也走声明式授权。
 
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::ffi::OsString;
@@ -41,7 +42,7 @@ use serde::{Deserialize, Serialize};
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
 use crate::process_util::{
-    kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput,
+    kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput, SandboxHandle,
 };
 use crate::runtime_resolver::RuntimeResolver;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
@@ -155,6 +156,32 @@ pub(crate) fn python_venv_dir(plugin_dir: &std::path::Path) -> PathBuf {
     }
 }
 
+/// 全局依赖缓存目录（P1-4：跨插件依赖缓存共享）。
+///
+/// Python pip 和 Node pnpm 共用此目录下的子目录：
+/// - `pip-cache/`：pip 下载的 wheel 缓存（PIP_CACHE_DIR），多个插件装同一包时复用。
+/// - `pnpm-store/`：pnpm 内容寻址 store（--config.store-dir），多插件共享同一物理包。
+///
+/// 路径选择与 `python_venv_dir` 对齐（Windows: LOCALAPPDATA/LingFang，Unix: ~/.cache/lingfang），
+/// 确保卸载即清（删 LingFang 目录即回收全部缓存）。
+pub(crate) fn global_cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        base.join("LingFang").join("cache")
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join(".cache")
+            .join("lingfang")
+    }
+}
+
 fn stable_path_hash(path: &std::path::Path) -> u64 {
     let mut hasher = DefaultHasher::new();
     let normalized = path
@@ -234,6 +261,13 @@ pub(crate) fn ensure_python_venv(
             env.push((
                 std::ffi::OsString::from("UV_PROJECT_ENVIRONMENT"),
                 venv_dir.as_os_str().to_os_string(),
+            ));
+            // P1-4：uv 也共享全局 pip 缓存目录（uv 内部用 pip 兼容的缓存机制）。
+            let pip_cache_dir = global_cache_dir().join("pip-cache");
+            let _ = std::fs::create_dir_all(&pip_cache_dir);
+            env.push((
+                std::ffi::OsString::from("UV_CACHE_DIR"),
+                pip_cache_dir.as_os_str().to_os_string(),
             ));
             let captured = run_with_optional_stream(
                 &uv,
@@ -345,12 +379,21 @@ fn install_and_smoke(
     let requirements_path = plugin_dir.join("requirements.txt");
     let (install_program, install_args) =
         resolve_requirements_install_command(runtime, py, &requirements_path);
+    // P1-4：全局 pip 缓存共享。设置 PIP_CACHE_DIR 指向全局缓存目录，
+    // 多个插件装同一包时 pip 直接复用已缓存的 wheel，不重复下载。
+    let mut env = runtime.env(minimal_env());
+    let pip_cache_dir = global_cache_dir().join("pip-cache");
+    let _ = std::fs::create_dir_all(&pip_cache_dir);
+    env.push((
+        std::ffi::OsString::from("PIP_CACHE_DIR"),
+        pip_cache_dir.as_os_str().to_os_string(),
+    ));
     let captured = run_with_optional_stream(
         &install_program,
         install_args,
         Some(&plugin_dir.to_string_lossy()),
         600_000,
-        runtime.env(minimal_env()),
+        env,
         stream,
     )
     .map_err(|e| format!("pip install 失败：{e}"))?;
@@ -930,11 +973,12 @@ pub(crate) fn ensure_node_dependencies(
     //   monorepo 当项目，触发 "modules 目录将被清空重装" 的交互确认 → 非 TTY 子进程
     //   卡住/exit=1；生产态插件在 app_data 下通常无 workspace.yaml，flag 无副作用）。
     //   依赖照常全装到插件自己的 node_modules/。
-    // - `--config.store-dir=<plugin>/data/.pnpm-store`：把全局内容寻址 store 落在插件
-    //   data 目录内，彻底隔离于宿主 PNPM_HOME/盘根 `.pnpm-store`（避免开发机或某些
-    //   Windows 环境下盘根 ACL 导致 ERR_PNPM_EPERM）。代价是多个 Node 插件 store 不
-    //   共享、占用略增，但换来卸载即清 + 行为可预测。data/ 已由 ensure_plugin_dir 建好。
-    let pnpm_store_dir = plugin_dir.join("data").join(".pnpm-store");
+    // - `--config.store-dir=<global>/pnpm-store`（P1-4 改为全局共享）：
+    //   原为每插件独立 store（<plugin>/data/.pnpm-store），现改为全局 content-addressable
+    //   store，多个插件装同一包时 pnpm 自动硬链接复用，不重复下载/存储。
+    //   全局 store 路径与 pip 缓存共用 global_cache_dir()，卸载即清。
+    let pnpm_store_dir = global_cache_dir().join("pnpm-store");
+    let _ = std::fs::create_dir_all(&pnpm_store_dir);
     let pnpm_store_flag = format!(
         "--config.store-dir={}",
         pnpm_store_dir.to_string_lossy()
@@ -1094,8 +1138,9 @@ fn node_has_start_script(plugin_dir: &std::path::Path) -> Result<bool, String> {
 /// 供 `start_*` async 命令把 owned clone move 进 `spawn_blocking` 闭包（State 借用不满足 'static）。
 #[derive(Clone, Default)]
 pub struct PluginProcessTable {
-    /// plugin_id → (Child 句柄, started_at ISO 字符串)。
-    inner: Arc<Mutex<HashMap<String, (Arc<Mutex<Option<Child>>>, String)>>>,
+    /// plugin_id → (Child 共享句柄, SandboxHandle, started_at ISO 字符串)。
+    /// SandboxHandle 存活到 take/替换时 drop → Job 句柄关闭 → 整棵进程树被杀（安全网）。
+    inner: Arc<Mutex<HashMap<String, (Arc<Mutex<Option<Child>>>, SandboxHandle, String)>>>,
 }
 
 impl PluginProcessTable {
@@ -1107,10 +1152,12 @@ impl PluginProcessTable {
 
     /// 注册新启动的插件进程（若同 plugin_id 已有旧进程，先杀旧再覆盖，避免泄漏）。
     /// 返回 Child 共享句柄的 Arc（供退出监视线程轮询 try_wait，不 take）。
+    /// sandbox 的生命周期与进程条目绑定：take/替换时 drop → Job 句柄关闭 → 杀整棵进程树。
     pub(crate) fn register_with_handle(
         &self,
         plugin_id: &str,
         child: Child,
+        sandbox: SandboxHandle,
         started_at: String,
     ) -> (u32, Arc<Mutex<Option<Child>>>) {
         let arc = Arc::new(Mutex::new(Some(child)));
@@ -1119,22 +1166,28 @@ impl PluginProcessTable {
             guard.as_ref().map(|c| c.id()).unwrap_or(0)
         };
         let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((old, _)) = map.insert(plugin_id.to_string(), (arc.clone(), started_at)) {
+        if let Some((old, old_sandbox, _)) =
+            map.insert(plugin_id.to_string(), (arc.clone(), sandbox, started_at))
+        {
             // 旧进程残留：take + kill_child_tree 回收（防泄漏）。
             if let Some(mut old_child) = old.lock().unwrap_or_else(|p| p.into_inner()).take() {
                 kill_child_tree(&old_child);
                 let _ = old_child.wait();
             }
+            // old_sandbox drop → Job 句柄关闭 → 漏杀的孙进程也被清理。
+            drop(old_sandbox);
         }
         (pid, arc)
     }
 
-    /// take 出插件进程（停止时用），返回 (Child, started_at) 或 None。
-    fn take(&self, plugin_id: &str) -> Option<(Child, String)> {
-        let map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let (arc, started_at) = map.get(plugin_id).cloned()?;
+    /// take 出插件进程（停止时用），返回 (Child, SandboxHandle, started_at) 或 None。
+    /// SandboxHandle 由调用方持有，kill_child_tree 后 drop → 双保险杀整棵进程树。
+    /// 用 remove 而非 get+cloned：SandboxHandle 非 Clone，remove 拿走所有权。
+    fn take(&self, plugin_id: &str) -> Option<(Child, SandboxHandle, String)> {
+        let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let (arc, sandbox, started_at) = map.remove(plugin_id)?;
         let mut guard = arc.lock().unwrap_or_else(|p| p.into_inner());
-        guard.take().map(|c| (c, started_at))
+        guard.take().map(|c| (c, sandbox, started_at))
     }
 
     /// 查询插件进程是否仍在运行（不 take，仅 try_wait）。
@@ -1145,7 +1198,9 @@ impl PluginProcessTable {
     pub fn is_running(&self, plugin_id: &str) -> Option<(u32, String)> {
         let arc_started = {
             let map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-            map.get(plugin_id).cloned()
+            // 只 clone Arc（bump 引用计数）和 String，不 clone SandboxHandle（非 Clone）。
+            map.get(plugin_id)
+                .map(|(arc, _, started)| (arc.clone(), started.clone()))
         };
         let (arc, started_at) = arc_started?;
         let mut guard = arc.lock().unwrap_or_else(|p| p.into_inner());
@@ -1165,7 +1220,7 @@ impl PluginProcessTable {
         let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         if map
             .get(plugin_id)
-            .is_some_and(|(current, _)| Arc::ptr_eq(current, &arc))
+            .is_some_and(|(current, _, _)| Arc::ptr_eq(current, &arc))
         {
             map.remove(plugin_id);
         }
@@ -1652,6 +1707,18 @@ pub(crate) fn start_plugin_from_dir(
         format!("启动插件进程失败：{e}")
     })?;
 
+    // OS 级沙箱（Windows Job Object）：进程树围栏 + 关闭即杀。
+    // 沙箱是安全网：即使 kill_child_tree 漏杀孙进程，Job 句柄关闭也会清理整棵进程树。
+    // 创建/分配失败不阻断启动（降级到仅 kill_child_tree + CREATE_NEW_PROCESS_GROUP 隔离）。
+    let sandbox = SandboxHandle::create().unwrap_or_else(|e| {
+        log_launch(format!("沙箱创建失败（降级为无沙箱）：{e}"));
+        SandboxHandle::default()
+    });
+    if let Err(e) = sandbox.assign_process(&child) {
+        log_launch(format!("沙箱分配进程失败（降级为无沙箱）：{e}"));
+    }
+    log_launch("OS 级沙箱已就绪".to_string());
+
     // 取出 stdout/stderr pipe，开两个 reader 线程逐行 emit plugin:output（实时流到前端日志面板）。
     // 同时累积 stderr 到共享缓冲，供 800ms 秒退时的崩溃诊断读全文。
     let on_line = stream_ctx.make_line_callback();
@@ -1758,7 +1825,7 @@ pub(crate) fn start_plugin_from_dir(
     // 替换同 id 进程时仅保留本次会话；旧 watcher 使用精确 token 撤销，不会误伤新会话。
     bridge.revoke_plugin_except(&plugin_id, bridge_token.as_deref());
     let (pid, child_arc) =
-        process_table.register_with_handle(&plugin_id, child, started_at.clone());
+        process_table.register_with_handle(&plugin_id, child, sandbox, started_at.clone());
     log_launch(format!("启动成功：pid={pid}"));
     // 运行态仅存内存进程表（组A scan_plugin_status 经 process_table.is_running 合并判定 running，
     // 不落 DB——PRD 需求 2「状态不存 DB」，重启后所有插件从文件系统重判 ready）。
@@ -1775,7 +1842,10 @@ pub(crate) fn start_plugin_from_dir(
     Ok(StartPluginResult { pid, started_at })
 }
 
-/// 退出监视线程：轮询 try_wait 判定进程退出，退出时 emit `plugin:exited` 事件。
+/// 退出监视线程：tokio async 任务轮询 try_wait 判定进程退出，退出时 emit `plugin:exited` 事件。
+///
+/// 改为 tokio async（P1-3 优化）：原 std::thread + sleep(500ms) 持有专用线程最长 24h，
+/// 现用 tauri::async_runtime::spawn + tokio::time::sleep，不占用阻塞线程，timer 由 tokio reactor 驱动。
 ///
 /// 不 take Child（避免与 stop_plugin 的 take 竞争——stop 仍能拿到 Child 调 kill）。
 /// 每 500ms try_wait 一次：返回 Some(status) = 退出；返回 None = 继续轮询；Arc 内 None = 已被
@@ -1792,22 +1862,20 @@ fn spawn_exit_watcher(
 ) {
     use tauri::Emitter;
     let pid_str = plugin_id.to_string();
-    std::thread::spawn(move || {
-        // 轮询 try_wait（不 take，stop_plugin 仍能 take+kill）。
-        // 上限 24h 防泄漏（极端：进程永不退出 + 用户不关 app）。
-        let max_iters = 24 * 3600 * 2; // 500ms × 2 × 3600 × 24
+    // tokio async 任务：不占用阻塞线程池，sleep 由 tokio timer 驱动（epoll/io_uring/kqueue）。
+    tauri::async_runtime::spawn(async move {
+        let max_iters = 24 * 3600 * 2; // 500ms × 2 × 3600 × 24 = 24h 上限防泄漏
         let mut exit_code: Option<i32> = None;
         let mut exited = false;
         for _ in 0..max_iters {
-            std::thread::sleep(Duration::from_millis(500));
+            // tokio::time::sleep 不阻塞当前线程（yield 回 reactor），对比 std::thread::sleep 全程占用线程。
+            tokio::time::sleep(Duration::from_millis(500)).await;
             let mut guard = child_arc.lock().unwrap_or_else(|p| p.into_inner());
             match guard.as_mut() {
                 Some(child) => match child.try_wait() {
                     Ok(Some(status)) => {
                         exit_code = status.code();
                         exited = true;
-                        // 不 take（让 process_table.is_running 的下次调用清表回收，
-                        // 或 stop_plugin 的 take 拿到已退出的 Child 做 wait 回收）。
                         break;
                     }
                     Ok(None) => { /* 仍在运行，继续轮询 */ }
@@ -1818,18 +1886,16 @@ fn spawn_exit_watcher(
                 },
                 None => {
                     // Arc 内 None = 已被 stop_plugin take 走（用户主动停止）。
-                    // stop/replace 已同步撤销对应桥会话，直接退出。
                     return;
                 }
             }
         }
         if !exited {
-            return; // 24h 超时，防泄漏兜底退出。
+            return;
         }
         if let Some(token) = bridge_token {
             bridge.revoke_token(&token);
         }
-        // 读 stderr 尾部（≤4000 字符），供前端展示。
         let stderr_tail = stderr_buf
             .lock()
             .map(|b| {
@@ -1946,8 +2012,9 @@ pub(crate) fn stop_plugin_by_id(
     bridge: &PluginLlmBridge,
     plugin_id: &str,
 ) -> Result<(), String> {
-    if let Some((mut child, _started_at)) = process_table.take(plugin_id) {
+    if let Some((mut child, _sandbox, _started_at)) = process_table.take(plugin_id) {
         // kill_child_tree 发进程组/树 kill 信号（不 wait），这里补 wait 回收 Child 句柄。
+        // _sandbox 在块结束时 drop → Job 句柄关闭 → 漏杀的孙进程也被清理（安全网）。
         kill_child_tree(&child);
         let _ = child.kill();
         let _ = child.wait();
@@ -1985,7 +2052,7 @@ pub(crate) fn delete_plugin_dir(
 ) -> Result<(), String> {
     let id = sanitize_plugin_id(plugin_id)?;
     // 先停进程（防 venv / node_modules 文件占用删不掉）。
-    if let Some((mut child, _)) = process_table.take(&id) {
+    if let Some((mut child, _sandbox, _)) = process_table.take(&id) {
         kill_child_tree(&child);
         let _ = child.kill();
         let _ = child.wait();

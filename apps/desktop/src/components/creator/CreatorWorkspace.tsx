@@ -6,7 +6,7 @@
 //    草稿在右侧分栏实时预览，用户可改名字/信息、继续对话打磨，点「提交」才真正发布。
 //  - pluginId 单一真相源：经 PluginCreatorSession store（session/store.ts），消除旧 5 副本竞态。
 //  - 上下文自动压缩 + Skill 动态拼装系统提示词保留。
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
@@ -285,6 +285,17 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     currentPluginIdRef.current = workspacePluginId ?? draft?.id ?? null;
   }, [draft, workspacePluginId]);
 
+  // 稳定回调所需 refs：TurnBubble 已 memo，流式期间回调必须保持引用稳定，
+  // 否则父级每次重渲染都会重建闭包导致 memo 失效、所有气泡重新解析 Markdown。
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+  const activeConversationIdRef = useRef(activeConversationId);
+  activeConversationIdRef.current = activeConversationId;
+  const runAgentTurnRef = useRef(runAgentTurn);
+  runAgentTurnRef.current = runAgentTurn;
+
   // Write/Edit 工具直接改 plugins_root，需要从真实目录重载文件刷新右侧预览。
   async function refreshDraftFromRoot(pluginId = currentPluginIdRef.current): Promise<boolean> {
     if (!pluginId) return false;
@@ -413,14 +424,24 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     // turns 为空但有草稿（如刚导入未对话）也应持久化，故放宽空判定为「两者皆空才跳过」。
     if (!activeConversationId || (turns.length === 0 && !stagedDraft && !workspacePluginId)) return;
-    setConversations((prev) => {
-      const now = new Date().toISOString();
-      const next = prev.map((conversation) => conversation.id === activeConversationId
-        ? { ...conversation, turns, stagedDraft, workspacePluginId, userEdits, todos: todos.length ? todos : undefined, updatedAt: now }
-        : conversation);
-      saveConversations(session.userId, session.tenantId, next);
-      return next;
-    });
+    // 流式期间每 token 都触发一次 effect：对 turn 快照做尾沿防抖（500ms），
+    // 流式 chunk 密集到达时只在停顿/结束时落盘一次，避免每次 delta 都全量 JSON.stringify + 写 localStorage。
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      if (cancelled) return;
+      setConversations((prev) => {
+        const now = new Date().toISOString();
+        const next = prev.map((conversation) => conversation.id === activeConversationId
+          ? { ...conversation, turns, stagedDraft, workspacePluginId, userEdits, todos: todos.length ? todos : undefined, updatedAt: now }
+          : conversation);
+        saveConversations(session.userId, session.tenantId, next);
+        return next;
+      });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
   }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, workspacePluginId, userEdits, todos]);
 
   function ensureConversation(firstUserText: string) {
@@ -533,10 +554,16 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   // 用 token-estimate 的 CJK/拉丁加权估算（替代旧的 chars/1.5）。
   // 附件文件用 file.size（字节数）按拉丁系数估——附件多为代码/文本（拉丁为主），
   // 字节数 ≈ 字符数，按 /4 估偏保守（宁可高估早压缩，不要低估撞上游硬限）。
-  const usedTokens = estimateTokens(buildSystemPrompt())
-    + estimateTokens(turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content), ''))
-    + estimateTokens(input)
-    + selectedFiles.reduce((sum, item) => sum + Math.ceil(item.file.size / 4), 0);
+  // useMemo：流式每 token 都在重渲染，整段会话估算放这里避免每次全量 O(n) 扫描。
+  const usedTokens = useMemo(
+    () =>
+      estimateTokens(buildSystemPrompt())
+      + estimateTokens(turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content), ''))
+      + estimateTokens(input)
+      + selectedFiles.reduce((sum, item) => sum + Math.ceil(item.file.size / 4), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [turns, input, selectedFiles, activeSkillIds, creatorMode, referencedPlugin, draft],
+  );
   const inspectorTokens = contextBreakdown?.estimatedTokens.total ?? usedTokens;
   const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
   const compressInfo = contextBreakdown?.compressInfo;
@@ -850,19 +877,20 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
    * 重试最后一条失败的/已取消的 assistant 轮：复用其上一条 user 轮的输入，
    * 清空失败轮的 parts 后重新发起 agent run。不新增 user 气泡，保持对话结构不变。
    */
-  async function retry() {
-    if (busy) return;
+  const retry = useCallback(async () => {
+    if (busyRef.current) return;
     // 找到最后一条 assistant 轮（失败/取消态），其上一条应为对应 user 轮。
     // 用倒序 for 循环（避免 findLastIndex 在低 lib target 下不可用）。
+    const curTurns = turnsRef.current;
     let lastAssistantIdx = -1;
-    for (let i = turns.length - 1; i >= 0; i--) {
-      if (turns[i].role === 'assistant') { lastAssistantIdx = i; break; }
+    for (let i = curTurns.length - 1; i >= 0; i--) {
+      if (curTurns[i].role === 'assistant') { lastAssistantIdx = i; break; }
     }
     if (lastAssistantIdx < 0) return;
-    const cur = turns[lastAssistantIdx];
+    const cur = curTurns[lastAssistantIdx];
     if (cur.status !== 'failed' && cur.status !== 'cancelled') return;
     // 取上一条 user 轮的输入作为重跑文本；找不到则放弃。
-    const userTurn = [...turns].slice(0, lastAssistantIdx).reverse().find((t) => t.role === 'user');
+    const userTurn = curTurns.slice(0, lastAssistantIdx).reverse().find((t) => t.role === 'user');
     const userText = userTurn?.modelContent ?? userTurn?.content ?? '';
     if (!userText.trim()) return;
     // 重置该轮：清空旧 parts 与 content，回到生成中态。
@@ -873,8 +901,8 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     });
     // 重试模式：turns 里已含上一条 user 轮（紧邻被重置的 assistant 轮之前），
     // 所以不应再追加 currentInput（否则用户消息重复）。传 isRetry=true 让 runAgentTurn 跳过追加。
-    await runAgentTurn(lastAssistantIdx, userText, { isRetry: true, conversationId: activeConversationId });
-  }
+    await runAgentTurnRef.current(lastAssistantIdx, userText, { isRetry: true, conversationId: activeConversationIdRef.current });
+  }, []);
 
   /**
    * 执行一次 agent run，把流式输出写回指定 assistant turn（runPluginCreatorAgent 的 UI 编排）。
@@ -1350,7 +1378,7 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     });
   }
 
-  function answerQuestion(turnIdx: number, toolCallId: string, answer: string) {
+  const answerQuestion = useCallback((turnIdx: number, toolCallId: string, answer: string) => {
     const trimmed = answer.trim();
     if (!trimmed) return;
     setTurns((prev) => {
@@ -1373,7 +1401,18 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     }
     setAnswerDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
     setMultiSelectDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
-  }
+  }, []);
+
+  const handleAnswerDraftChange = useCallback((toolCallId: string, text: string) => {
+    setAnswerDrafts((prev) => ({ ...prev, [toolCallId]: text }));
+  }, []);
+
+  const handleToggleMultiSelect = useCallback((toolCallId: string, value: string) => {
+    setMultiSelectDrafts((prev) => {
+      const cur = prev[toolCallId] ?? [];
+      return { ...prev, [toolCallId]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
+    });
+  }, []);
 
 
   return (
@@ -1436,12 +1475,9 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
             searchingQuery={searchingQuery}
             uploadingViaTool={uploadingViaTool}
             onAnswer={answerQuestion}
-            onAnswerDraftChange={(toolCallId, text) => setAnswerDrafts((prev) => ({ ...prev, [toolCallId]: text }))}
-            onToggleMultiSelect={(toolCallId, value) => setMultiSelectDrafts((prev) => {
-              const cur = prev[toolCallId] ?? [];
-              return { ...prev, [toolCallId]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
-            })}
-            onRetry={() => { void retry(); }}
+            onAnswerDraftChange={handleAnswerDraftChange}
+            onToggleMultiSelect={handleToggleMultiSelect}
+            onRetry={retry}
           />
         )}
         {renderComposer()}
