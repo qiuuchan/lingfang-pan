@@ -1,6 +1,6 @@
 // 帮助与反馈工单：后台 admin API 客户端 + 类型。
 // 提交回复走 multipart（FormData，与 release uploadAsset 同款）；附件下载需 Bearer，故 fetch+blob 触发。
-import { api, apiBase, getToken } from '@/lib/api';
+import { api, apiBase } from '@/lib/api';
 
 export type TicketCategory = 'BUG' | 'FEATURE' | 'ACCOUNT' | 'OTHER';
 export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
@@ -130,11 +130,11 @@ export async function updateAdminTicket(id: string, body: { status?: TicketStatu
   return api<{ ticket: TicketDetail }>(`/api/admin/tickets/${id}`, { method: 'PATCH', body });
 }
 
-/** 下载附件：需 Bearer，fetch 取 blob 后用临时 <a> 触发。 */
+/** 下载附件：鉴权由 HttpOnly Cookie 承载（浏览器自动附带），fetch 取 blob 后用临时 <a> 触发。 */
 export async function downloadAttachment(ticketId: string, attachment: TicketAttachment): Promise<void> {
-  const token = getToken();
   const res = await fetch(`${apiBase()}/api/admin/tickets/${ticketId}/attachments/${attachment.id}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    method: 'GET',
+    credentials: 'include',
   });
   if (!res.ok) throw new Error('附件下载失败');
   const blob = await res.blob();

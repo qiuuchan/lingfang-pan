@@ -5,7 +5,7 @@
 // 组C 极验：后端配置了 geetestCaptchaId 时，管理端登录/找回密码表单集成「点击验证」极验组件。
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { api, isPlatformAdminSession, setToken, type AdminSession } from '@/lib/api';
+import { api, isPlatformAdminSession, type AdminSession } from '@/lib/api';
 import { useGeetest } from '@/lib/geetest';
 import {
   Dialog,
@@ -98,7 +98,7 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
       });
       if (!result.token) throw new Error('登录失败，请稍后重试');
       if (!isPlatformAdminSession(result)) throw new Error('该账号不是平台管理员');
-      setToken(result.token);
+      // 会话由后端写入 HttpOnly Cookie，前端无需持有令牌；仅触发登录成功回调。
       loginCaptcha.reset();
       onAuthed(result);
     } catch (e) {
