@@ -1270,7 +1270,8 @@ model Release {
 // 版本产物（一个版本下多个平台/架构的安装包登记）。
 // url 为下载地址（外链，如 GitHub Release 直链或 CDN）。
 // sha256 为安装包内容的 SHA-256 十六进制摘要（上传时后端自动计算），自制更新器下载后比对校验完整性。
-// signature 为旧 Tauri updater minisign 签名（base64）——已废弃，列保留避免 migration 风险，不再写入/使用。
+// signature 为发布者 minisign 签名（.minisig 文本，含 untrusted comment / 签名 / trusted comment / 全局签名 4 行）。
+//   上传安装包时若配置 LINGFANG_RELEASE_SIGNING_KEY 则对字节签名写入；桌面配置 LINGFANG_UPDATER_PUBKEY 后强制验签（fail-closed）。未配置签名密钥时恒空。
 // sizeBytes 用 Int（安装包 < 2GB，Int 上限 ~2.1GB 足够；避免 BigInt 的 JSON 序列化坑）。
 // filename 为展示用文件名（如 LingFang_1.0.0_x64-setup.exe）。
 // (releaseId, platform, arch) 唯一：同版本同平台同架构仅一个产物。
@@ -1282,7 +1283,7 @@ model ReleaseAsset {
   url       String // 下载直链（外链）
   filename  String        @default("") // 展示用文件名
   sha256    String        @default("") // 安装包 SHA-256 十六进制摘要（上传时自动计算，更新器校验完整性）
-  signature String        @default("") // 【废弃】旧 Tauri updater minisign 签名，列保留不再使用
+  signature String        @default("") // 发布者 minisign 签名（.minisig 文本）：上传时若配置 LINGFANG_RELEASE_SIGNING_KEY 则对安装包字节签名写入；桌面配置 LINGFANG_UPDATER_PUBKEY 后强制验签（fail-closed）。未配置签名密钥时恒空。
   sizeBytes Int? // 安装包字节大小（展示用，< 2GB）
   createdAt DateTime      @default(now())
   release   Release       @relation(fields: [releaseId], references: [id], onDelete: Cascade)

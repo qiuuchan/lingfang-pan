@@ -16,11 +16,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import type { Prisma, Release, ReleaseAsset } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { AppError, badRequest, notFound } from '../common';
 import { AuthService } from './auth.service';
+import { isReleaseSigningEnabled, signReleaseArtifact } from './release-signing';
 import type {
   ReleaseAssetCreateDto,
   AdminReleaseListQueryDto,
@@ -34,7 +35,7 @@ import type {
 export class ReleaseService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   // === 公开查询方法（controller 标 @Public）===
@@ -51,14 +52,21 @@ export class ReleaseService {
     if (!release) throw new AppError(404, 'release_not_found', `当前没有已发布的 ${channel} 版本`);
 
     // platform/arch 过滤（仅缩小展示范围，不影响 latest 判定）。
-    const assets = query.platform || query.arch
-      ? release.assets.filter((a) => (!query.platform || a.platform === query.platform) && (!query.arch || a.arch === query.arch))
-      : release.assets;
+    const assets =
+      query.platform || query.arch
+        ? release.assets.filter(
+            (a) =>
+              (!query.platform || a.platform === query.platform) &&
+              (!query.arch || a.arch === query.arch)
+          )
+        : release.assets;
 
     const public_ = this.publicRelease(release, assets);
     return {
       ...public_,
-      updateAvailable: query.currentVersion ? this.isNewer(release.version, query.currentVersion) : undefined,
+      updateAvailable: query.currentVersion
+        ? this.isNewer(release.version, query.currentVersion)
+        : undefined,
     };
   }
 
@@ -85,12 +93,10 @@ export class ReleaseService {
   }
 
   /** GET /api/admin/releases：Admin 版本摘要分页，不返回 notes/assets。 */
-  async listAdmin(
-    actorId: string,
-    query: AdminReleaseListQueryDto | 'STABLE' | 'BETA' = {},
-  ) {
+  async listAdmin(actorId: string, query: AdminReleaseListQueryDto | 'STABLE' | 'BETA' = {}) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const filters: AdminReleaseListQueryDto = typeof query === 'string' ? { channel: query } : query;
+    const filters: AdminReleaseListQueryDto =
+      typeof query === 'string' ? { channel: query } : query;
     const page = Math.max(1, Math.floor(filters.page ?? 1));
     const pageSize = Math.min(100, Math.max(1, Math.floor(filters.pageSize ?? 20)));
     const where: Prisma.ReleaseWhereInput = {};
@@ -150,7 +156,9 @@ export class ReleaseService {
   async create(actorId: string, dto: ReleaseCreateDto) {
     await this.auth.ensurePlatformAdmin(actorId);
     const channel = dto.channel ?? 'STABLE';
-    const existing = await this.prisma.release.findUnique({ where: { channel_version: { channel, version: dto.version } } });
+    const existing = await this.prisma.release.findUnique({
+      where: { channel_version: { channel, version: dto.version } },
+    });
     if (existing) throw badRequest(`版本 ${dto.version} 在 ${channel} 通道已存在`);
 
     const release = await this.prisma.release.create({
@@ -163,7 +171,10 @@ export class ReleaseService {
         isLatest: false,
       },
     });
-    await this.audit(actorId, 'admin.release.created', 'Release', release.id, { version: release.version, channel: release.channel });
+    await this.audit(actorId, 'admin.release.created', 'Release', release.id, {
+      version: release.version,
+      channel: release.channel,
+    });
     return { release: this.adminRelease(release) };
   }
 
@@ -174,7 +185,13 @@ export class ReleaseService {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.release.findUnique({ where: { id } });
     if (!existing) throw notFound('版本不存在');
-    const data: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: Date | null; isLatest?: boolean } = {};
+    const data: {
+      title?: string;
+      notes?: string;
+      channel?: 'STABLE' | 'BETA';
+      publishedAt?: Date | null;
+      isLatest?: boolean;
+    } = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.channel !== undefined && dto.channel !== existing.channel) {
@@ -191,34 +208,45 @@ export class ReleaseService {
     }
 
     const targetChannel = data.channel ?? existing.channel;
-    const movedLatestRelease = targetChannel !== existing.channel && existing.status === 'PUBLISHED' && existing.isLatest;
-    if (targetChannel !== existing.channel && existing.status !== 'PUBLISHED' && existing.isLatest) {
+    const movedLatestRelease =
+      targetChannel !== existing.channel && existing.status === 'PUBLISHED' && existing.isLatest;
+    if (
+      targetChannel !== existing.channel &&
+      existing.status !== 'PUBLISHED' &&
+      existing.isLatest
+    ) {
       data.isLatest = false;
     }
 
     const release = movedLatestRelease
       ? await this.prisma.$transaction(async (tx) => {
-        await tx.release.updateMany({
-          where: { channel: targetChannel, isLatest: true, id: { not: id } },
-          data: { isLatest: false },
-        });
-        const updated = await tx.release.update({ where: { id }, data: { ...data, isLatest: true } });
-        await tx.release.updateMany({
-          where: { channel: existing.channel, isLatest: true, id: { not: id } },
-          data: { isLatest: false },
-        });
-        const sourceLatest = await tx.release.findFirst({
-          where: { channel: existing.channel, status: 'PUBLISHED', id: { not: id } },
-          orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-        });
-        if (sourceLatest) {
-          await tx.release.update({ where: { id: sourceLatest.id }, data: { isLatest: true } });
-        }
-        return updated;
-      })
+          await tx.release.updateMany({
+            where: { channel: targetChannel, isLatest: true, id: { not: id } },
+            data: { isLatest: false },
+          });
+          const updated = await tx.release.update({
+            where: { id },
+            data: { ...data, isLatest: true },
+          });
+          await tx.release.updateMany({
+            where: { channel: existing.channel, isLatest: true, id: { not: id } },
+            data: { isLatest: false },
+          });
+          const sourceLatest = await tx.release.findFirst({
+            where: { channel: existing.channel, status: 'PUBLISHED', id: { not: id } },
+            orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+          });
+          if (sourceLatest) {
+            await tx.release.update({ where: { id: sourceLatest.id }, data: { isLatest: true } });
+          }
+          return updated;
+        })
       : await this.prisma.release.update({ where: { id }, data });
 
-    await this.audit(actorId, 'admin.release.updated', 'Release', release.id, { version: release.version, channel: release.channel });
+    await this.audit(actorId, 'admin.release.updated', 'Release', release.id, {
+      version: release.version,
+      channel: release.channel,
+    });
     return { release: this.adminRelease(release) };
   }
 
@@ -239,10 +267,17 @@ export class ReleaseService {
       // publishedAt 仅首次发布时落库，重发保持原值（归档后再发布场景）。
       return tx.release.update({
         where: { id },
-        data: { status: 'PUBLISHED', isLatest: true, publishedAt: existing.publishedAt ?? new Date() },
+        data: {
+          status: 'PUBLISHED',
+          isLatest: true,
+          publishedAt: existing.publishedAt ?? new Date(),
+        },
       });
     });
-    await this.audit(actorId, 'admin.release.published', 'Release', release.id, { version: release.version, channel: release.channel });
+    await this.audit(actorId, 'admin.release.published', 'Release', release.id, {
+      version: release.version,
+      channel: release.channel,
+    });
     return { release: this.adminRelease(release) };
   }
 
@@ -251,8 +286,14 @@ export class ReleaseService {
     await this.auth.ensurePlatformAdmin(actorId);
     const existing = await this.prisma.release.findUnique({ where: { id } });
     if (!existing) throw notFound('版本不存在');
-    const release = await this.prisma.release.update({ where: { id }, data: { status: 'ARCHIVED', isLatest: false } });
-    await this.audit(actorId, 'admin.release.archived', 'Release', release.id, { version: release.version, channel: release.channel });
+    const release = await this.prisma.release.update({
+      where: { id },
+      data: { status: 'ARCHIVED', isLatest: false },
+    });
+    await this.audit(actorId, 'admin.release.archived', 'Release', release.id, {
+      version: release.version,
+      channel: release.channel,
+    });
     return { release: this.adminRelease(release) };
   }
 
@@ -260,18 +301,27 @@ export class ReleaseService {
    *  已发布的版本删除后官网/更新检查立即不再展示。downloads/ 里的安装包文件不自动清理（无关联记录）。 */
   async deleteRelease(actorId: string, id: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const existing = await this.prisma.release.findUnique({ where: { id }, select: { id: true, version: true, channel: true } });
+    const existing = await this.prisma.release.findUnique({
+      where: { id },
+      select: { id: true, version: true, channel: true },
+    });
     if (!existing) throw notFound('版本不存在');
     // ReleaseAsset 关联 onDelete: Cascade，prisma.release.delete 自动级联删 assets。
     await this.prisma.release.delete({ where: { id } });
-    await this.audit(actorId, 'admin.release.deleted', 'Release', id, { version: existing.version, channel: existing.channel });
+    await this.audit(actorId, 'admin.release.deleted', 'Release', id, {
+      version: existing.version,
+      channel: existing.channel,
+    });
     return { id };
   }
 
   /** POST /api/admin/releases/:id/assets：登记一个平台产物（releaseId+platform+arch 唯一）。 */
   async addAsset(actorId: string, id: string, dto: ReleaseAssetCreateDto) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const existing = await this.prisma.release.findUnique({ where: { id }, select: { id: true, version: true, channel: true } });
+    const existing = await this.prisma.release.findUnique({
+      where: { id },
+      select: { id: true, version: true, channel: true },
+    });
     if (!existing) throw notFound('版本不存在');
 
     const asset = await this.prisma.releaseAsset.create({
@@ -301,11 +351,14 @@ export class ReleaseService {
     id: string,
     file: { originalname: string; buffer?: Buffer; path?: string; size?: number } | undefined,
     platform?: string,
-    arch?: string,
+    arch?: string
   ) {
     await this.auth.ensurePlatformAdmin(actorId);
     if (!file) throw badRequest('未收到文件（field name 必须是 file）');
-    const existing = await this.prisma.release.findUnique({ where: { id }, select: { id: true, version: true, channel: true } });
+    const existing = await this.prisma.release.findUnique({
+      where: { id },
+      select: { id: true, version: true, channel: true },
+    });
     if (!existing) throw notFound('版本不存在');
 
     // 文件名加随机前缀防冲突（不同版本同名 setup.exe 不覆盖）。
@@ -324,18 +377,30 @@ export class ReleaseService {
       copyFileSync(file.path, filePath);
     }
 
-    // 计算安装包 SHA-256（自制更新器下载后比对校验完整性，替代旧的 minisign 签名）。
-    // buffer 模式直接 hash 内存；diskStorage 模式从落盘文件流式读取（大安装包不撑爆内存）。
+    // 计算安装包 SHA-256（自制更新器下载后比对校验完整性）。buffer 模式直接 hash 内存；
+    // diskStorage 模式从落盘文件读取（大安装包一次读入，便于随后一并 minisign 签名）。
+    // 同时取出字节用于发布者签名（与 sha256 同一份 bytes，保证签名对象 == 下载对象）。
     let sha256 = '';
+    let bytes: Buffer | undefined;
     try {
-      if (file.buffer) {
-        sha256 = createHash('sha256').update(file.buffer).digest('hex');
-      } else {
-        const { readFileSync } = require('node:fs');
-        sha256 = createHash('sha256').update(readFileSync(filePath)).digest('hex');
-      }
+      bytes = file.buffer ?? readFileSync(filePath);
+      sha256 = createHash('sha256').update(bytes).digest('hex');
     } catch {
       // hash 失败不阻断上传（sha256 留空，更新器会因校验缺失拒绝该 asset，但下载链接仍可用）。
+    }
+
+    // 发布者 minisign 签名（真实性，防伪造安装包）。仅在配置了 LINGFANG_RELEASE_SIGNING_KEY
+    // 时签名；密钥已配置却签名失败则显式抛错（fail-closed），绝不静默下发未签名安装包。
+    let signature = '';
+    if (isReleaseSigningEnabled()) {
+      if (!bytes) {
+        throw new AppError(500, 'release_sign_failed', '安装包签名失败：无法读取安装包字节');
+      }
+      try {
+        signature = signReleaseArtifact(bytes);
+      } catch (e) {
+        throw new AppError(500, 'release_sign_failed', `安装包签名失败：${(e as Error).message}`);
+      }
     }
 
     // 构建公开下载 URL（相对路径，由当前后端地址拼接）。
@@ -349,6 +414,7 @@ export class ReleaseService {
         url,
         filename: file.originalname,
         sha256,
+        signature,
         sizeBytes: file.size ?? null,
       },
     });
@@ -359,6 +425,7 @@ export class ReleaseService {
       arch: asset.arch,
       sizeBytes: file.size,
       sha256,
+      signed: signature.length > 0,
     });
     return { asset: this.publicAsset(asset) };
   }
@@ -366,10 +433,15 @@ export class ReleaseService {
   /** DELETE /api/admin/releases/:id/assets/:assetId：删除一个产物（物理删除，仅链接登记）。 */
   async deleteAsset(actorId: string, id: string, assetId: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const asset = await this.prisma.releaseAsset.findUnique({ where: { id: assetId }, select: { id: true, releaseId: true } });
+    const asset = await this.prisma.releaseAsset.findUnique({
+      where: { id: assetId },
+      select: { id: true, releaseId: true },
+    });
     if (!asset || asset.releaseId !== id) throw notFound('产物不存在');
     await this.prisma.releaseAsset.delete({ where: { id: assetId } });
-    await this.audit(actorId, 'admin.release.asset_deleted', 'ReleaseAsset', assetId, { releaseId: id });
+    await this.audit(actorId, 'admin.release.asset_deleted', 'ReleaseAsset', assetId, {
+      releaseId: id,
+    });
     return { ok: true };
   }
 
@@ -439,7 +511,8 @@ export class ReleaseService {
     };
   }
 
-  /** 产物出参：sha256 供自制更新器校验完整性；signature 已废弃但保留出参（恒空，前端不再展示）。 */
+  /** 产物出参：sha256 供自制更新器校验完整性；signature 为发布者 minisign 签名（.minisig 文本），
+   *  桌面在配置 LINGFANG_UPDATER_PUBKEY 后强制验签。未配置签名密钥时恒空。 */
   private publicAsset(asset: ReleaseAsset) {
     return {
       id: asset.id,
@@ -479,7 +552,15 @@ export class ReleaseService {
     };
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId?: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 }

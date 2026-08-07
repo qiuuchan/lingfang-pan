@@ -6,7 +6,7 @@
 //  - latest_returns_only_published（非 PUBLISHED 不暴露）。
 //  - latest_with_current_version_update_available（semver 比较：1.0.0 > 0.9.0）。
 // 参考 llm.service.spec.ts：Mock PrismaService + AuthService，不连真实 DB。
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ReleaseService } from './release.service';
 import { forbidden } from '../common';
 
@@ -83,23 +83,28 @@ describe('ReleaseService', () => {
     auth.ensurePlatformAdmin.mockImplementation(() => {
       throw forbidden('仅平台管理员可操作');
     });
-    await expect(
-      service.create('user-member', { version: '1.0.0' }),
-    ).rejects.toMatchObject({ status: 403, code: 'forbidden' });
+    await expect(service.create('user-member', { version: '1.0.0' })).rejects.toMatchObject({
+      status: 403,
+      code: 'forbidden',
+    });
     expect(prisma.release.create).not.toHaveBeenCalled();
   });
 
   it('同 channel+version 已存在时 create 抛 bad_request', async () => {
     prisma.release.findUnique.mockResolvedValue(makeRelease());
     await expect(
-      service.create('user-admin', { version: '1.0.0', channel: 'STABLE' }),
+      service.create('user-admin', { version: '1.0.0', channel: 'STABLE' })
     ).rejects.toMatchObject({ status: 400, code: 'bad_request' });
     expect(prisma.release.create).not.toHaveBeenCalled();
   });
 
   it('publish 把当前置 isLatest=true 且同 channel 其他置 false（事务）', async () => {
-    prisma.release.findUnique.mockResolvedValue(makeRelease({ status: 'DRAFT', isLatest: false, publishedAt: null }));
-    prisma.__tx.release.update.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true }));
+    prisma.release.findUnique.mockResolvedValue(
+      makeRelease({ status: 'DRAFT', isLatest: false, publishedAt: null })
+    );
+    prisma.__tx.release.update.mockResolvedValue(
+      makeRelease({ status: 'PUBLISHED', isLatest: true })
+    );
 
     await service.publish('user-admin', 'release-1');
 
@@ -118,8 +123,12 @@ describe('ReleaseService', () => {
   });
 
   it('publish 允许归档版本重新发布（取消归档，恢复下载）', async () => {
-    prisma.release.findUnique.mockResolvedValue(makeRelease({ status: 'ARCHIVED', publishedAt: now }));
-    prisma.__tx.release.update.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true, publishedAt: now }));
+    prisma.release.findUnique.mockResolvedValue(
+      makeRelease({ status: 'ARCHIVED', publishedAt: now })
+    );
+    prisma.__tx.release.update.mockResolvedValue(
+      makeRelease({ status: 'PUBLISHED', isLatest: true, publishedAt: now })
+    );
     const result = await service.publish('user-admin', 'release-1');
     expect(result.release.status).toBe('PUBLISHED');
     expect(result.release.isLatest).toBe(true);
@@ -128,14 +137,36 @@ describe('ReleaseService', () => {
 
   it('update 移动已发布 latest 到另一 channel 时重建两边 latest', async () => {
     prisma.release.findUnique
-      .mockResolvedValueOnce(makeRelease({ id: 'release-1', channel: 'STABLE', version: '1.0.0', status: 'PUBLISHED', isLatest: true }))
+      .mockResolvedValueOnce(
+        makeRelease({
+          id: 'release-1',
+          channel: 'STABLE',
+          version: '1.0.0',
+          status: 'PUBLISHED',
+          isLatest: true,
+        })
+      )
       .mockResolvedValueOnce(null);
     prisma.__tx.release.update
-      .mockResolvedValueOnce(makeRelease({ id: 'release-1', channel: 'BETA', version: '1.0.0', isLatest: true }))
-      .mockResolvedValueOnce(makeRelease({ id: 'release-stable-prev', channel: 'STABLE', version: '0.9.0', isLatest: true }));
-    prisma.__tx.release.findFirst.mockResolvedValue(makeRelease({
-      id: 'release-stable-prev', channel: 'STABLE', version: '0.9.0', isLatest: false,
-    }));
+      .mockResolvedValueOnce(
+        makeRelease({ id: 'release-1', channel: 'BETA', version: '1.0.0', isLatest: true })
+      )
+      .mockResolvedValueOnce(
+        makeRelease({
+          id: 'release-stable-prev',
+          channel: 'STABLE',
+          version: '0.9.0',
+          isLatest: true,
+        })
+      );
+    prisma.__tx.release.findFirst.mockResolvedValue(
+      makeRelease({
+        id: 'release-stable-prev',
+        channel: 'STABLE',
+        version: '0.9.0',
+        isLatest: false,
+      })
+    );
 
     const result = await service.update('user-admin', 'release-1', { channel: 'BETA' });
 
@@ -159,7 +190,9 @@ describe('ReleaseService', () => {
   });
 
   it('latest 仅返回 PUBLISHED+isLatest 版本', async () => {
-    prisma.release.findFirst.mockResolvedValue(makeRelease({ status: 'PUBLISHED', isLatest: true }));
+    prisma.release.findFirst.mockResolvedValue(
+      makeRelease({ status: 'PUBLISHED', isLatest: true })
+    );
     const result = await service.latest({ channel: 'STABLE' });
     expect(result.version).toBe('1.0.0');
     expect(result.updateAvailable).toBeUndefined(); // 未传 currentVersion
@@ -172,7 +205,9 @@ describe('ReleaseService', () => {
   });
 
   it('latest 按 channel 独立查询，beta 不影响 stable latest', async () => {
-    prisma.release.findFirst.mockResolvedValue(makeRelease({ channel: 'BETA', version: '1.1.0-beta.1' }));
+    prisma.release.findFirst.mockResolvedValue(
+      makeRelease({ channel: 'BETA', version: '1.1.0-beta.1' })
+    );
     const result = await service.latest({ channel: 'BETA', currentVersion: '1.0.0' });
     expect(prisma.release.findFirst).toHaveBeenCalledWith({
       where: { channel: 'BETA', status: 'PUBLISHED', isLatest: true },
@@ -185,12 +220,35 @@ describe('ReleaseService', () => {
 
   it('latest 无版本时抛 release_not_found', async () => {
     prisma.release.findFirst.mockResolvedValue(null);
-    await expect(service.latest({ channel: 'BETA' })).rejects.toMatchObject({ status: 404, code: 'release_not_found' });
+    await expect(service.latest({ channel: 'BETA' })).rejects.toMatchObject({
+      status: 404,
+      code: 'release_not_found',
+    });
   });
 
   it('latest 的 platform/arch 过滤缩小 asset 范围', async () => {
-    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: null, createdAt: now };
-    const macAsset = { id: 'a2', platform: 'DARWIN', arch: 'AARCH64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: null, createdAt: now };
+    const winAsset = {
+      id: 'a1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      url: 'u',
+      filename: 'f',
+      sha256: '',
+      signature: '',
+      sizeBytes: null,
+      createdAt: now,
+    };
+    const macAsset = {
+      id: 'a2',
+      platform: 'DARWIN',
+      arch: 'AARCH64',
+      url: 'u',
+      filename: 'f',
+      sha256: '',
+      signature: '',
+      sizeBytes: null,
+      createdAt: now,
+    };
     prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset, macAsset] }));
     const result = await service.latest({ platform: 'WINDOWS' });
     expect(result.assets).toHaveLength(1);
@@ -198,7 +256,17 @@ describe('ReleaseService', () => {
   });
 
   it('latest 的 asset 出参包含 sha256（自制更新器校验用）', async () => {
-    const winAsset = { id: 'a1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'f', sha256: 'abc123', signature: '', sizeBytes: 100, createdAt: now };
+    const winAsset = {
+      id: 'a1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      url: '/downloads/x.exe',
+      filename: 'f',
+      sha256: 'abc123',
+      signature: '',
+      sizeBytes: 100,
+      createdAt: now,
+    };
     prisma.release.findFirst.mockResolvedValue(makeRelease({ assets: [winAsset] }));
     const result = await service.latest({ platform: 'WINDOWS', arch: 'X86_64' });
     expect(result.assets[0].sha256).toBe('abc123');
@@ -210,16 +278,36 @@ describe('ReleaseService', () => {
   });
 
   it('addAsset 校验 release 存在且 platform/arch 写库', async () => {
-    prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '1.0.0', channel: 'STABLE' });
+    prisma.release.findUnique.mockResolvedValue({
+      id: 'release-1',
+      version: '1.0.0',
+      channel: 'STABLE',
+    });
     prisma.releaseAsset.create.mockResolvedValue({
-      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: 1024, createdAt: now,
+      id: 'asset-1',
+      releaseId: 'release-1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      url: 'u',
+      filename: 'f',
+      sha256: '',
+      signature: '',
+      sizeBytes: 1024,
+      createdAt: now,
     });
     const result = await service.addAsset('user-admin', 'release-1', {
-      platform: 'WINDOWS', arch: 'X86_64', url: 'u',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      url: 'u',
     });
     expect(result.asset.platform).toBe('WINDOWS');
     expect(prisma.releaseAsset.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: 'u' }),
+      data: expect.objectContaining({
+        releaseId: 'release-1',
+        platform: 'WINDOWS',
+        arch: 'X86_64',
+        url: 'u',
+      }),
     });
   });
 
@@ -231,7 +319,9 @@ describe('ReleaseService', () => {
 
   it('deleteAsset asset 不属于该 release 时抛 not_found', async () => {
     prisma.releaseAsset.findUnique.mockResolvedValue({ id: 'asset-1', releaseId: 'release-other' });
-    await expect(service.deleteAsset('user-admin', 'release-1', 'asset-1')).rejects.toMatchObject({ status: 404 });
+    await expect(service.deleteAsset('user-admin', 'release-1', 'asset-1')).rejects.toMatchObject({
+      status: 404,
+    });
     expect(prisma.releaseAsset.delete).not.toHaveBeenCalled();
   });
 
@@ -242,14 +332,16 @@ describe('ReleaseService', () => {
     ]);
     prisma.release.count.mockResolvedValue(2);
     const result = await service.listAdmin('user-admin', { page: 1, pageSize: 20 });
-    expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      skip: 0,
-      take: 20,
-      select: expect.objectContaining({
-        _count: { select: { assets: true } },
-      }),
-    }));
+    expect(prisma.release.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip: 0,
+        take: 20,
+        select: expect.objectContaining({
+          _count: { select: { assets: true } },
+        }),
+      })
+    );
     expect(result).toMatchObject({ total: 2, page: 1, pageSize: 20 });
     expect(result.items).toHaveLength(2);
     expect(result.items[0]).not.toHaveProperty('notes');
@@ -269,9 +361,11 @@ describe('ReleaseService', () => {
         { title: { contains: 'preview', mode: 'insensitive' } },
       ],
     };
-    expect(prisma.release.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where,
-    }));
+    expect(prisma.release.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where,
+      })
+    );
     expect(prisma.release.count).toHaveBeenCalledWith({ where });
   });
 
@@ -282,9 +376,23 @@ describe('ReleaseService', () => {
   });
 
   it('getAdmin 仅在打开详情后返回 notes 与 assets', async () => {
-    prisma.release.findUnique.mockResolvedValue(makeRelease({
-      assets: [{ id: 'a', platform: 'WINDOWS', arch: 'X86_64', url: 'u', filename: 'f', sha256: '', signature: '', sizeBytes: 1, createdAt: now }],
-    }));
+    prisma.release.findUnique.mockResolvedValue(
+      makeRelease({
+        assets: [
+          {
+            id: 'a',
+            platform: 'WINDOWS',
+            arch: 'X86_64',
+            url: 'u',
+            filename: 'f',
+            sha256: '',
+            signature: '',
+            sizeBytes: 1,
+            createdAt: now,
+          },
+        ],
+      })
+    );
     const result = await service.getAdmin('user-admin', 'release-1');
     expect(prisma.release.findUnique).toHaveBeenCalledWith({
       where: { id: 'release-1' },
@@ -295,26 +403,154 @@ describe('ReleaseService', () => {
   });
 
   it('uploadAsset 写文件 + 自动计算 SHA-256 + 建 asset', async () => {
-    prisma.release.findUnique.mockResolvedValue({ id: 'release-1', version: '0.0.2', channel: 'STABLE' });
+    prisma.release.findUnique.mockResolvedValue({
+      id: 'release-1',
+      version: '0.0.2',
+      channel: 'STABLE',
+    });
     // buffer 'exe-content' 的 SHA-256（与 service 内 createHash 计算一致）。
     const expectedSha = 'c4f69a3c35671f2fe0ef9e54b4e535541d89f7e45774ddb7d31cef7223320117';
     prisma.releaseAsset.create.mockResolvedValue({
-      id: 'asset-1', releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64', url: '/downloads/x.exe', filename: 'setup.exe', sha256: expectedSha, signature: '', sizeBytes: 100, createdAt: now,
+      id: 'asset-1',
+      releaseId: 'release-1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      url: '/downloads/x.exe',
+      filename: 'setup.exe',
+      sha256: expectedSha,
+      signature: '',
+      sizeBytes: 100,
+      createdAt: now,
     });
     const file = { originalname: 'setup.exe', buffer: Buffer.from('exe-content'), size: 100 };
     const result = await service.uploadAsset('user-admin', 'release-1', file, 'WINDOWS', 'X86_64');
     expect(result.asset.sha256).toBe(expectedSha);
     expect(prisma.releaseAsset.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        releaseId: 'release-1', platform: 'WINDOWS', arch: 'X86_64',
+        releaseId: 'release-1',
+        platform: 'WINDOWS',
+        arch: 'X86_64',
         url: expect.stringContaining('/downloads/'),
-        filename: 'setup.exe', sha256: expectedSha, sizeBytes: 100,
+        filename: 'setup.exe',
+        sha256: expectedSha,
+        sizeBytes: 100,
       }),
     });
   });
 
   it('uploadAsset 未传 file 抛 bad_request', async () => {
-    await expect(service.uploadAsset('user-admin', 'release-1', undefined)).rejects.toMatchObject({ status: 400 });
+    await expect(service.uploadAsset('user-admin', 'release-1', undefined)).rejects.toMatchObject({
+      status: 400,
+    });
     expect(prisma.releaseAsset.create).not.toHaveBeenCalled();
+  });
+
+  // === 发布者 minisign 签名开关（commercial-readiness P1：更新验签闭环）===
+  // env LINGFANG_RELEASE_SIGNING_KEY 门控：未配置→signature 恒空（向后兼容）；
+  // 已配置→上传时对安装包字节签名写入；密钥非法→500 fail-closed（绝不静默下发未签名包）。
+  describe('uploadAsset 发布者签名（env-gated）', () => {
+    const SIGNING_KEY_ENV = 'LINGFANG_RELEASE_SIGNING_KEY';
+    let savedKey: string | undefined;
+
+    beforeEach(() => {
+      savedKey = process.env[SIGNING_KEY_ENV];
+      delete process.env[SIGNING_KEY_ENV];
+    });
+
+    afterEach(() => {
+      if (savedKey === undefined) delete process.env[SIGNING_KEY_ENV];
+      else process.env[SIGNING_KEY_ENV] = savedKey;
+    });
+
+    /** 用真 Ed25519 密钥对拼出合法 minisign 私钥文本（与 release-signing.spec.ts 同款构造）。 */
+    function makeMinisignSecretKey(): string {
+      const { generateKeyPairSync, randomBytes } = require('node:crypto');
+      const { privateKey } = generateKeyPairSync('ed25519');
+      const jwk = privateKey.export({ format: 'jwk' });
+      const seed = Buffer.from(jwk.d, 'base64url');
+      const pk = Buffer.from(jwk.x, 'base64url');
+      const secBin = Buffer.concat([randomBytes(8), seed, pk]); // keynum(8)+seed(32)+pk(32)=72B
+      return `untrusted comment: test key\n${secBin.toString('base64')}\n`;
+    }
+
+    it('未配置签名密钥时 signature 恒空（向后兼容，不破坏现有上传）', async () => {
+      prisma.release.findUnique.mockResolvedValue({
+        id: 'release-1',
+        version: '0.0.3',
+        channel: 'STABLE',
+      });
+      prisma.releaseAsset.create.mockResolvedValue({
+        id: 'asset-1',
+        releaseId: 'release-1',
+        platform: 'WINDOWS',
+        arch: 'X86_64',
+        url: '/downloads/x.exe',
+        filename: 'setup.exe',
+        sha256: 'x',
+        signature: '',
+        sizeBytes: 11,
+        createdAt: now,
+      });
+      const file = { originalname: 'setup.exe', buffer: Buffer.from('exe-content'), size: 11 };
+      await service.uploadAsset('user-admin', 'release-1', file, 'WINDOWS', 'X86_64');
+      const createArg = prisma.releaseAsset.create.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(createArg.data.signature).toBe('');
+    });
+
+    it('配置签名密钥时上传自动 minisign 签名写入 + 审计 signed=true', async () => {
+      process.env[SIGNING_KEY_ENV] = makeMinisignSecretKey();
+      prisma.release.findUnique.mockResolvedValue({
+        id: 'release-1',
+        version: '0.0.4',
+        channel: 'STABLE',
+      });
+      prisma.releaseAsset.create.mockResolvedValue({
+        id: 'asset-1',
+        releaseId: 'release-1',
+        platform: 'WINDOWS',
+        arch: 'X86_64',
+        url: '/downloads/x.exe',
+        filename: 'setup.exe',
+        sha256: 'x',
+        signature: 'sig',
+        sizeBytes: 11,
+        createdAt: now,
+      });
+      const file = { originalname: 'setup.exe', buffer: Buffer.from('exe-content'), size: 11 };
+      await service.uploadAsset('user-admin', 'release-1', file, 'WINDOWS', 'X86_64');
+
+      // signature 为标准 4 行 .minisig 文本（预哈希 "ED" 算法，与桌面 minisign-verify 兼容）。
+      const createArg = prisma.releaseAsset.create.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      const signature = createArg.data.signature as string;
+      const lines = signature.split(/\r?\n/).filter((l) => l.length > 0);
+      expect(lines.length).toBe(4);
+      expect(lines[0]).toContain('untrusted comment:');
+      expect(lines[2]).toContain('trusted comment:');
+      expect(Buffer.from(lines[1], 'base64').length).toBe(74);
+      expect(Buffer.from(lines[3], 'base64').length).toBe(64);
+      // 审计标记 signed=true（运维可追溯该产物已签名）。
+      const auditArg = prisma.auditLog.create.mock.calls[0][0] as {
+        data: { metadata: Record<string, unknown> };
+      };
+      expect(auditArg.data.metadata.signed).toBe(true);
+    });
+
+    it('签名密钥非法时 fail-closed：500 release_sign_failed，绝不落库未签名 asset', async () => {
+      process.env[SIGNING_KEY_ENV] = 'not-a-valid-minisign-key';
+      prisma.release.findUnique.mockResolvedValue({
+        id: 'release-1',
+        version: '0.0.5',
+        channel: 'STABLE',
+      });
+      const file = { originalname: 'setup.exe', buffer: Buffer.from('exe-content'), size: 11 };
+      await expect(
+        service.uploadAsset('user-admin', 'release-1', file, 'WINDOWS', 'X86_64')
+      ).rejects.toMatchObject({ status: 500, code: 'release_sign_failed' });
+      expect(prisma.releaseAsset.create).not.toHaveBeenCalled();
+    });
   });
 });
