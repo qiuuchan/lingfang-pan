@@ -6,7 +6,7 @@ import { AuthService } from '../auth.service';
 export class WebSessionService {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
-    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService
   ) {}
 
   async login(email: string, password: string) {
@@ -23,10 +23,20 @@ export class WebSessionService {
   async teams(userId: string) {
     const memberships = await this.prisma.teamMembership.findMany({
       where: { userId, status: 'ACTIVE', team: { status: 'ACTIVE' } },
-      select: { role: true, teamRoleId: true, team: { select: { id: true, name: true, slug: true } } },
+      select: {
+        role: true,
+        teamRoleId: true,
+        team: { select: { id: true, name: true, slug: true } },
+      },
       orderBy: { joinedAt: 'desc' },
     });
-    return { teams: memberships.map((membership) => ({ ...membership.team, role: membership.role, teamRoleId: membership.teamRoleId })) };
+    return {
+      teams: memberships.map((membership) => ({
+        ...membership.team,
+        role: membership.role,
+        teamRoleId: membership.teamRoleId,
+      })),
+    };
   }
 
   async switchTeam(userId: string, teamId: string) {

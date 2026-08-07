@@ -40,8 +40,9 @@ export function buildStagedManifest(draft: StagedPluginManifestSource) {
     runtime_type: draft.runtime_type,
     entry: draft.entry,
     visibility: draft.visibility,
-    capabilities: (draft.capabilities.length ? draft.capabilities : [DEFAULT_CAPABILITY])
-      .map(normalizeAiCapabilityAdmin),
+    capabilities: (draft.capabilities.length ? draft.capabilities : [DEFAULT_CAPABILITY]).map(
+      normalizeAiCapabilityAdmin
+    ),
   };
 }
 
@@ -63,7 +64,9 @@ export function withSyncedStagedManifest(draft: StagedPlugin): StagedPlugin {
 // 文件路径安全校验（禁绝对路径/空段/../反斜杠/隐藏段），与后端 cleanPath 行为对齐。
 export function isSafePath(p: string): boolean {
   if (!p || p.includes('\\') || /^[\\/]/.test(p)) return false;
-  return !p.split('/').some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.'));
+  return !p
+    .split('/')
+    .some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.'));
 }
 
 /** 校验暂存草稿结构（路径合法 + 入口存在），返回错误信息或 null。 */
@@ -80,7 +83,7 @@ export function validateStagedFiles(entry: string, files: DraftFile[]): string |
 export function validateStagedCompleteness(
   runtime_type: StagedPlugin['runtime_type'],
   entry: string,
-  files: DraftFile[],
+  files: DraftFile[]
 ): string | null {
   const base = validateStagedFiles(entry, files);
   if (base) return base;

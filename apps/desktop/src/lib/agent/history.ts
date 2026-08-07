@@ -53,7 +53,7 @@ export interface HistoryTurn {
 export function turnsToMessages(
   turns: HistoryTurn[],
   currentInput: string,
-  skipAppendCurrent = false,
+  skipAppendCurrent = false
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
@@ -67,12 +67,15 @@ export function turnsToMessages(
     if (turn.status && turn.status !== 'done') continue;
 
     const parts = turn.parts ?? [];
-    const toolParts = parts.filter((p): p is TurnToolPart =>
-      p.type === 'tool' && p.status !== 'running',
+    const toolParts = parts.filter(
+      (p): p is TurnToolPart => p.type === 'tool' && p.status !== 'running'
     );
     const textParts = parts.filter((p): p is TurnTextPart => p.type === 'text');
     // 文本优先取 parts（结构化），兜底取 turn.content（旧数据或无 parts 时）。
-    const partsText = textParts.map((p) => p.content).join('').trim();
+    const partsText = textParts
+      .map((p) => p.content)
+      .join('')
+      .trim();
     const assistantText = partsText || turn.content.trim();
 
     if (toolParts.length === 0) {
@@ -102,9 +105,8 @@ export function turnsToMessages(
 
     // 每个 tool result 作为独立的 role:'tool' 消息（按 tool_call_id 配对）。
     for (const p of toolParts) {
-      const resultContent = typeof p.result === 'string'
-        ? p.result
-        : JSON.stringify(p.result ?? '');
+      const resultContent =
+        typeof p.result === 'string' ? p.result : JSON.stringify(p.result ?? '');
       messages.push({
         role: 'tool',
         tool_call_id: p.toolCallId,

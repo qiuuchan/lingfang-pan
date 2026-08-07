@@ -11,7 +11,14 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { dragRegionProps } from '@/lib/window-drag';
 
 export function Auth() {
@@ -92,7 +99,11 @@ export function Auth() {
     if (!resetToken) return toast.error('重置链接无效');
     setResetLoading(true);
     try {
-      await api('/api/auth/reset-password', { auth: false, method: 'POST', body: { token: resetToken, newPassword } });
+      await api('/api/auth/reset-password', {
+        auth: false,
+        method: 'POST',
+        body: { token: resetToken, newPassword },
+      });
       toast.success('密码已重置，请使用新密码登录');
       setResetOpen(false);
       setResetToken('');
@@ -111,7 +122,9 @@ export function Auth() {
 
   async function loginCore(em: string, pw: string) {
     const r = await api<CollabSessionResponse>('/api/auth/login', {
-      auth: false, method: 'POST', body: { email: em, password: pw },
+      auth: false,
+      method: 'POST',
+      body: { email: em, password: pw },
     });
     if (!r.token) throw new Error('登录响应缺少 token');
     applyCollabSession(r);
@@ -151,7 +164,9 @@ export function Auth() {
           reason: reason.trim(),
         },
       });
-      toast.success(wantsTeamAdmin ? '申请已提交，等待平台管理员审批' : '注册成功，请输入团队邀请码');
+      toast.success(
+        wantsTeamAdmin ? '申请已提交，等待平台管理员审批' : '注册成功，请输入团队邀请码'
+      );
       applyCollabSession(r);
     } catch (e) {
       const err = e as ApiError;
@@ -185,48 +200,100 @@ export function Auth() {
         <CardContent className="flex flex-col gap-3">
           <FieldGroup className="gap-3">
             <Field>
-              <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" spellCheck={false} />
+              <Input
+                placeholder="邮箱"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+                autoComplete="off"
+                spellCheck={false}
+              />
             </Field>
             <Field>
-              <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" />
+              <Input
+                type="password"
+                placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+                autoComplete="off"
+              />
             </Field>
           </FieldGroup>
-          <div className={cn('grid transition-all duration-300 ease-out', mode === 'register' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
+          <div
+            className={cn(
+              'grid transition-all duration-300 ease-out',
+              mode === 'register' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            )}
+          >
             <FieldGroup className="gap-3 overflow-hidden">
               <Field>
-                <Input placeholder="昵称（可选）" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input
+                  placeholder="昵称（可选）"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </Field>
               <FieldLabel
                 htmlFor="auth-wants-team-admin"
                 className="w-full cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-normal"
               >
-                <Checkbox id="auth-wants-team-admin" checked={wantsTeamAdmin} onCheckedChange={(v) => setWantsTeamAdmin(v === true)} />
+                <Checkbox
+                  id="auth-wants-team-admin"
+                  checked={wantsTeamAdmin}
+                  onCheckedChange={(v) => setWantsTeamAdmin(v === true)}
+                />
                 我是团队管理员，需要提交审批申请
               </FieldLabel>
               {wantsTeamAdmin && (
                 <>
                   <Field>
-                    <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+                    <Input
+                      placeholder="团队名称"
+                      value={teamName}
+                      onChange={(e) => setTeamName(e.target.value)}
+                    />
                   </Field>
                   <Field>
-                    <Textarea placeholder="申请说明（可选）" value={reason} onChange={(e) => setReason(e.target.value)} />
+                    <Textarea
+                      placeholder="申请说明（可选）"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
                   </Field>
                 </>
               )}
             </FieldGroup>
           </div>
-          <LoadingButton className="w-full" loading={loading} onClick={submit}>{mode === 'login' ? '登录' : '注册'}</LoadingButton>
+          <LoadingButton className="w-full" loading={loading} onClick={submit}>
+            {mode === 'login' ? '登录' : '注册'}
+          </LoadingButton>
           <div className="flex items-center justify-between">
             {mode === 'login' ? (
               <>
-                <Button variant="link" className="h-auto p-0 text-sm" onClick={() => { setForgotEmail(email); setForgotOpen(true); }}>忘记密码？</Button>
+                <Button
+                  variant="link"
+                  className="h-auto p-0 text-sm"
+                  onClick={() => {
+                    setForgotEmail(email);
+                    setForgotOpen(true);
+                  }}
+                >
+                  忘记密码？
+                </Button>
                 <p className="text-center text-sm text-muted-foreground">
-                  <span>还没有账号？</span><Button variant="link" className="h-auto p-0" onClick={() => setMode('register')}>注册新账号</Button>
+                  <span>还没有账号？</span>
+                  <Button variant="link" className="h-auto p-0" onClick={() => setMode('register')}>
+                    注册新账号
+                  </Button>
                 </p>
               </>
             ) : (
               <p className="w-full text-center text-sm text-muted-foreground">
-                <span>已有账号？</span><Button variant="link" className="h-auto p-0" onClick={() => setMode('login')}>去登录</Button>
+                <span>已有账号？</span>
+                <Button variant="link" className="h-auto p-0" onClick={() => setMode('login')}>
+                  去登录
+                </Button>
               </p>
             )}
           </div>
@@ -249,8 +316,12 @@ export function Auth() {
             />
           </Field>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setForgotOpen(false)}>取消</Button>
-            <LoadingButton loading={forgotLoading} onClick={onForgotPassword}>发送重置链接</LoadingButton>
+            <Button variant="outline" onClick={() => setForgotOpen(false)}>
+              取消
+            </Button>
+            <LoadingButton loading={forgotLoading} onClick={onForgotPassword}>
+              发送重置链接
+            </LoadingButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -260,7 +331,9 @@ export function Auth() {
         <DialogContent>
           <DialogHeader {...dragRegionProps}>
             <DialogTitle data-tauri-drag-region>设置新密码</DialogTitle>
-            <DialogDescription>请输入你的新密码（至少 8 位）。重置后需使用新密码重新登录。</DialogDescription>
+            <DialogDescription>
+              请输入你的新密码（至少 8 位）。重置后需使用新密码重新登录。
+            </DialogDescription>
           </DialogHeader>
           <Field>
             <Input
@@ -272,12 +345,15 @@ export function Auth() {
             />
           </Field>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setResetOpen(false)}>取消</Button>
-            <LoadingButton loading={resetLoading} onClick={onResetPassword}>重置密码</LoadingButton>
+            <Button variant="outline" onClick={() => setResetOpen(false)}>
+              取消
+            </Button>
+            <LoadingButton loading={resetLoading} onClick={onResetPassword}>
+              重置密码
+            </LoadingButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   );
 }
-

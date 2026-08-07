@@ -78,7 +78,11 @@ function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
     case 'text':
       return { type: 'text', content: typeof raw.content === 'string' ? raw.content : '' };
     case 'reasoning':
-      return { type: 'reasoning', content: typeof raw.content === 'string' ? raw.content : '', done: raw.done === true };
+      return {
+        type: 'reasoning',
+        content: typeof raw.content === 'string' ? raw.content : '',
+        done: raw.done === true,
+      };
     case 'tool':
       return {
         type: 'tool',
@@ -91,16 +95,17 @@ function normalizeTurnPart(part: unknown, index: number): TurnPart | null {
     case 'question':
       return {
         type: 'question',
-        toolCallId: typeof raw.toolCallId === 'string' ? raw.toolCallId : `legacy-question-${index}`,
+        toolCallId:
+          typeof raw.toolCallId === 'string' ? raw.toolCallId : `legacy-question-${index}`,
         question: typeof raw.question === 'string' ? raw.question : '请补充信息',
         options: Array.isArray(raw.options)
           ? raw.options.flatMap((option) => {
-            if (!option || typeof option !== 'object') return [];
-            const item = option as Record<string, unknown>;
-            const label = typeof item.label === 'string' ? item.label : '';
-            const value = typeof item.value === 'string' ? item.value : label;
-            return label ? [{ label, value }] : [];
-          })
+              if (!option || typeof option !== 'object') return [];
+              const item = option as Record<string, unknown>;
+              const label = typeof item.label === 'string' ? item.label : '';
+              const value = typeof item.value === 'string' ? item.value : label;
+              return label ? [{ label, value }] : [];
+            })
           : undefined,
         allowFreeText: raw.allowFreeText !== false,
         multiSelect: raw.multiSelect === true,
@@ -163,7 +168,12 @@ function cleanTurn(turn: unknown): Turn | null {
     role: raw.role,
     content: typeof raw.content === 'string' ? raw.content : '',
   };
-  if (raw.status === 'generating' || raw.status === 'done' || raw.status === 'failed' || raw.status === 'cancelled') {
+  if (
+    raw.status === 'generating' ||
+    raw.status === 'done' ||
+    raw.status === 'failed' ||
+    raw.status === 'cancelled'
+  ) {
     next.status = raw.status;
   }
   if (raw.streaming === true) next.streaming = true;
@@ -187,8 +197,10 @@ function sanitizeConversationForStorage(conversation: CreatorConversation): Crea
   };
 }
 
-export const conversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-conversations:${tenantId || userId || 'none'}`;
-export const selectedConversationKey = (userId: string | null, tenantId: string | null) => `lf:creator-selected:${tenantId || userId || 'none'}`;
+export const conversationKey = (userId: string | null, tenantId: string | null) =>
+  `lf:creator-conversations:${tenantId || userId || 'none'}`;
+export const selectedConversationKey = (userId: string | null, tenantId: string | null) =>
+  `lf:creator-selected:${tenantId || userId || 'none'}`;
 
 /** 归一化持久化的 todo 清单（容忍旧数据/非法值，status/priority 枚举校验）。 */
 function normalizeTodos(raw: unknown): TodoItem[] | undefined {
@@ -201,43 +213,64 @@ function normalizeTodos(raw: unknown): TodoItem[] | undefined {
     const record = item as Record<string, unknown>;
     const content = typeof record.content === 'string' ? record.content : '';
     if (!content.trim()) continue;
-    const status = validStatus.has(record.status as string) ? (record.status as TodoItem['status']) : 'pending';
-    const priority = validPriority.has(record.priority as string) ? (record.priority as TodoItem['priority']) : 'medium';
+    const status = validStatus.has(record.status as string)
+      ? (record.status as TodoItem['status'])
+      : 'pending';
+    const priority = validPriority.has(record.priority as string)
+      ? (record.priority as TodoItem['priority'])
+      : 'medium';
     out.push({ content, status, priority });
   }
   return out;
 }
 
-export function loadConversations(userId: string | null, tenantId: string | null): CreatorConversation[] {
+export function loadConversations(
+  userId: string | null,
+  tenantId: string | null
+): CreatorConversation[] {
   try {
     const raw = localStorage.getItem(conversationKey(userId, tenantId));
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.flatMap((item): CreatorConversation[] => {
-      if (!item || typeof item !== 'object') return [];
-      const record = item as Record<string, unknown>;
-      if (typeof record.id !== 'string' || !Array.isArray(record.turns)) return [];
-      return [{
-        id: record.id,
-        title: typeof record.title === 'string' ? record.title : '历史对话',
-        turns: record.turns.flatMap((turn) => cleanTurn(turn) ?? []),
-        createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
-        updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
-        stagedDraft: (record.stagedDraft ?? null) as StagedPlugin | null,
-        workspacePluginId: typeof record.workspacePluginId === 'string' ? record.workspacePluginId : null,
-        userEdits: record.userEdits && typeof record.userEdits === 'object' ? record.userEdits as Partial<StagedPlugin> : undefined,
-        todos: normalizeTodos(record.todos),
-      }];
-    }) : [];
+    return Array.isArray(arr)
+      ? arr.flatMap((item): CreatorConversation[] => {
+          if (!item || typeof item !== 'object') return [];
+          const record = item as Record<string, unknown>;
+          if (typeof record.id !== 'string' || !Array.isArray(record.turns)) return [];
+          return [
+            {
+              id: record.id,
+              title: typeof record.title === 'string' ? record.title : '历史对话',
+              turns: record.turns.flatMap((turn) => cleanTurn(turn) ?? []),
+              createdAt:
+                typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
+              updatedAt:
+                typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString(),
+              stagedDraft: (record.stagedDraft ?? null) as StagedPlugin | null,
+              workspacePluginId:
+                typeof record.workspacePluginId === 'string' ? record.workspacePluginId : null,
+              userEdits:
+                record.userEdits && typeof record.userEdits === 'object'
+                  ? (record.userEdits as Partial<StagedPlugin>)
+                  : undefined,
+              todos: normalizeTodos(record.todos),
+            },
+          ];
+        })
+      : [];
   } catch {
     return [];
   }
 }
 
-export function saveConversations(userId: string | null, tenantId: string | null, conversations: CreatorConversation[]) {
+export function saveConversations(
+  userId: string | null,
+  tenantId: string | null,
+  conversations: CreatorConversation[]
+) {
   try {
     localStorage.setItem(
       conversationKey(userId, tenantId),
-      JSON.stringify(conversations.slice(0, 30).map(sanitizeConversationForStorage)),
+      JSON.stringify(conversations.slice(0, 30).map(sanitizeConversationForStorage))
     );
   } catch {
     /* localStorage 配额不足时放弃历史保存，当前对话仍可继续 */

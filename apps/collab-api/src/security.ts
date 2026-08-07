@@ -19,21 +19,30 @@ function cookieValue(request: Request, name: string): string {
   for (const part of header.split(';')) {
     const separator = part.indexOf('=');
     if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
-    try { return decodeURIComponent(part.slice(separator + 1).trim()); } catch { return ''; }
+    try {
+      return decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      return '';
+    }
   }
   return '';
 }
 
 export function webSessionToken(request: Request): string {
   const path = request.path || request.originalUrl || '';
-  return path.startsWith('/web/') || path.startsWith('/api/web/') ? cookieValue(request, WEB_SESSION_COOKIE) : '';
+  return path.startsWith('/web/') || path.startsWith('/api/web/')
+    ? cookieValue(request, WEB_SESSION_COOKIE)
+    : '';
 }
 
 function requireCsrf(request: Request, cookieName: string): void {
   const expected = cookieValue(request, cookieName);
   const supplied = request.header('x-csrf-token') || '';
-  const valid = expected && supplied && expected.length === supplied.length
-    && timingSafeEqual(Buffer.from(expected), Buffer.from(supplied));
+  const valid =
+    expected &&
+    supplied &&
+    expected.length === supplied.length &&
+    timingSafeEqual(Buffer.from(expected), Buffer.from(supplied));
   if (!valid) {
     throw new AppError(403, 'csrf_invalid', 'CSRF 校验失败，请刷新页面后重试');
   }
@@ -56,7 +65,8 @@ export function requireAdminCsrf(request: Request): void {
 export function adminSessionToken(request: Request): string {
   const path = request.path || request.originalUrl || '';
   if (path.startsWith('/api/admin/')) return cookieValue(request, ADMIN_SESSION_COOKIE);
-  if (path === '/api/auth/refresh' || path === '/api/auth/logout') return cookieValue(request, ADMIN_SESSION_COOKIE);
+  if (path === '/api/auth/refresh' || path === '/api/auth/logout')
+    return cookieValue(request, ADMIN_SESSION_COOKIE);
   return '';
 }
 
@@ -75,7 +85,7 @@ export function adminSessionToken(request: Request): string {
 export class JwtAuthGuard implements CanActivate {
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
-    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -93,10 +103,15 @@ export class JwtAuthGuard implements CanActivate {
     let csrfCookieName = '';
     if (!bearer) {
       const admin = adminSessionToken(request);
-      if (admin) { cookieToken = admin; csrfCookieName = ADMIN_CSRF_COOKIE; }
-      else {
+      if (admin) {
+        cookieToken = admin;
+        csrfCookieName = ADMIN_CSRF_COOKIE;
+      } else {
         const web = webSessionToken(request);
-        if (web) { cookieToken = web; csrfCookieName = WEB_CSRF_COOKIE; }
+        if (web) {
+          cookieToken = web;
+          csrfCookieName = WEB_CSRF_COOKIE;
+        }
       }
     }
     const token = bearer || cookieToken;
@@ -107,7 +122,8 @@ export class JwtAuthGuard implements CanActivate {
       const method = (request.method || 'GET').toUpperCase();
       if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
         const p = request.path || request.originalUrl || '';
-        if (p !== '/api/auth/refresh' && p !== '/api/auth/logout') requireCsrf(request, csrfCookieName);
+        if (p !== '/api/auth/refresh' && p !== '/api/auth/logout')
+          requireCsrf(request, csrfCookieName);
       }
     }
 
@@ -129,7 +145,13 @@ export class JwtAuthGuard implements CanActivate {
     // RBAC：顺带 select platformRoleId 供 PermissionsGuard 解析平台角色权限（避免二次查库）。
     const user = await this.prisma.user.findUnique({
       where: { id: String(payload.sub) },
-      select: { status: true, tokenVersion: true, teamContextVersion: true, platformRole: true, platformRoleId: true },
+      select: {
+        status: true,
+        tokenVersion: true,
+        teamContextVersion: true,
+        platformRole: true,
+        platformRoleId: true,
+      },
     });
     if (!user || user.status !== 'ACTIVE') throw unauthorized('账号已被禁用，请联系管理员');
     if (payload.tokenVersion !== undefined && Number(payload.tokenVersion) !== user.tokenVersion) {

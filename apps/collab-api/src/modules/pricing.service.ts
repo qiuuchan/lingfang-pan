@@ -46,9 +46,7 @@ export class PricingService {
    *
    * @returns 最小 contextWindow（token）；无任何带 contextWindow 的定价行 → null（前端走保守默认）。
    */
-  async lookupMinContextWindow(args: {
-    tier: 'FAST' | 'PREMIUM';
-  }): Promise<number | null> {
+  async lookupMinContextWindow(args: { tier: 'FAST' | 'PREMIUM' }): Promise<number | null> {
     // tier 候选：精确匹配 tier 或不限版本（null）。nullable enum 用 OR 处理。
     const rows = await this.prisma.modelPricing.findMany({
       where: {
@@ -77,7 +75,7 @@ export class PricingService {
   computeCredits(
     unit: string,
     pricePerUnit: number,
-    usage: { inputTokens?: number; outputTokens?: number; images?: number; seconds?: number },
+    usage: { inputTokens?: number; outputTokens?: number; images?: number; seconds?: number }
   ): number {
     switch (unit) {
       case 'PER_TOKEN_INPUT': {

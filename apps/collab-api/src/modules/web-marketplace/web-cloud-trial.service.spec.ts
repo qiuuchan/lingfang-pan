@@ -78,41 +78,76 @@ function request(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(options: { existing?: ReturnType<typeof row> | null; loaded?: ReturnType<typeof row>[] } = {}) {
+function setup(
+  options: { existing?: ReturnType<typeof row> | null; loaded?: ReturnType<typeof row>[] } = {}
+) {
   const loaded = [...(options.loaded ?? [row()])];
   const findFirst = vi.fn().mockImplementation(({ where }: { where: Record<string, unknown> }) => {
     if (where.id) return Promise.resolve(loaded.shift() ?? null);
     return Promise.resolve(options.existing ?? null);
   });
-  const count = vi.fn()
-    .mockResolvedValueOnce(0).mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+  const count = vi
+    .fn()
+    .mockResolvedValueOnce(0)
+    .mockResolvedValueOnce(0)
+    .mockResolvedValueOnce(1)
+    .mockResolvedValueOnce(1);
   const prisma = {
-    marketplaceListing: { findFirst: vi.fn().mockResolvedValue({ currentRelease: { id: IDS.release, sha256: target.sha256, actionSurfaceManifest: [action] } }) },
+    marketplaceListing: {
+      findFirst: vi.fn().mockResolvedValue({
+        currentRelease: {
+          id: IDS.release,
+          sha256: target.sha256,
+          actionSurfaceManifest: [action],
+        },
+      }),
+    },
     actionInvocation: { findFirst, count },
     automationOutbox: { upsert: vi.fn().mockResolvedValue({}) },
   };
   const auth = { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId: IDS.team }) };
   const actions = { resolve: vi.fn().mockResolvedValue({ target, action }) };
-  const routing = { freeze: vi.fn().mockResolvedValue({ deployment_id: IDS.deployment, routing_generation: 7 }) };
+  const routing = {
+    freeze: vi.fn().mockResolvedValue({ deployment_id: IDS.deployment, routing_generation: 7 }),
+  };
   const invocations = {
     create: vi.fn().mockResolvedValue({ id: IDS.invocation, status: 'AUTHORIZED' }),
     cancel: vi.fn().mockResolvedValue({}),
   };
-  return { prisma, auth, actions, routing, invocations, service: new WebCloudTrialService(prisma as never, auth as never, actions as never, routing as never, invocations as never) };
+  return {
+    prisma,
+    auth,
+    actions,
+    routing,
+    invocations,
+    service: new WebCloudTrialService(
+      prisma as never,
+      auth as never,
+      actions as never,
+      routing as never,
+      invocations as never
+    ),
+  };
 }
 
 describe('WebCloudTrialService', () => {
   it('creates a PREVIEW invocation and returns the complete shared projection', async () => {
     const h = setup();
     const result = await h.service.start(IDS.user, IDS.package, target.action_id, request());
-    expect(h.invocations.create).toHaveBeenCalledWith(IDS.user, expect.objectContaining({
-      preview: true,
-      input: { prompt: '海边日落' },
-      request_idempotency_key: 'request-1',
-      caller: { kind: 'WEB', id: IDS.user },
-      cloud_binding: { deployment_id: IDS.deployment, routing_generation: 7, environment: 'PREVIEW' },
-    }));
+    expect(h.invocations.create).toHaveBeenCalledWith(
+      IDS.user,
+      expect.objectContaining({
+        preview: true,
+        input: { prompt: '海边日落' },
+        request_idempotency_key: 'request-1',
+        caller: { kind: 'WEB', id: IDS.user },
+        cloud_binding: {
+          deployment_id: IDS.deployment,
+          routing_generation: 7,
+          environment: 'PREVIEW',
+        },
+      })
+    );
     expect(result).toMatchObject({
       invocation_id: IDS.invocation,
       status: 'AUTHORIZED',
@@ -139,38 +174,64 @@ describe('WebCloudTrialService', () => {
 
   it('fails closed on stale release/action identities from an opened page', async () => {
     const h = setup();
-    await expect(h.service.start(IDS.user, IDS.package, target.action_id, request({ release_sha256: 'c'.repeat(64) })))
-      .rejects.toMatchObject<AppError>({ status: 409, code: 'web_preview_release_changed' });
+    await expect(
+      h.service.start(
+        IDS.user,
+        IDS.package,
+        target.action_id,
+        request({ release_sha256: 'c'.repeat(64) })
+      )
+    ).rejects.toMatchObject<AppError>({ status: 409, code: 'web_preview_release_changed' });
     expect(h.actions.resolve).not.toHaveBeenCalled();
   });
 
   it('isolates reads and cancellation to the invoking principal and Web PREVIEW kind', async () => {
     const missing = setup({ loaded: [] });
-    await expect(missing.service.get(IDS.user, IDS.invocation)).rejects.toMatchObject<AppError>({ status: 404 });
-    await expect(missing.service.cancel(IDS.user, IDS.invocation)).rejects.toMatchObject<AppError>({ status: 404 });
+    await expect(missing.service.get(IDS.user, IDS.invocation)).rejects.toMatchObject<AppError>({
+      status: 404,
+    });
+    await expect(missing.service.cancel(IDS.user, IDS.invocation)).rejects.toMatchObject<AppError>({
+      status: 404,
+    });
     expect(missing.invocations.cancel).not.toHaveBeenCalled();
-    expect(missing.prisma.actionInvocation.findFirst).toHaveBeenCalledWith({ where: {
-      id: IDS.invocation,
-      teamId: IDS.team,
-      principalUserId: IDS.user,
-      kind: 'PREVIEW',
-      callerKind: 'WEB',
-    } });
+    expect(missing.prisma.actionInvocation.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: IDS.invocation,
+        teamId: IDS.team,
+        principalUserId: IDS.user,
+        kind: 'PREVIEW',
+        callerKind: 'WEB',
+      },
+    });
   });
 
   it('uses the invocation terminal CAS for cancel and returns the persisted terminal row', async () => {
-    const canceled = row({ status: 'CANCELED', completedAt: new Date('2026-07-16T00:00:10.000Z'), errorCode: 'action_cancelled', errorMessage: 'Action invocation 已取消' });
+    const canceled = row({
+      status: 'CANCELED',
+      completedAt: new Date('2026-07-16T00:00:10.000Z'),
+      errorCode: 'action_cancelled',
+      errorMessage: 'Action invocation 已取消',
+    });
     const h = setup({ loaded: [row(), canceled] });
     h.prisma.actionInvocation.count = vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     const result = await h.service.cancel(IDS.user, IDS.invocation);
     expect(h.invocations.cancel).toHaveBeenCalledWith(IDS.user, IDS.invocation);
-    expect(result).toMatchObject({ status: 'CANCELED', concurrent_active: 0, error: { code: 'action_cancelled', message: 'Action invocation 已取消' } });
+    expect(result).toMatchObject({
+      status: 'CANCELED',
+      concurrent_active: 0,
+      error: { code: 'action_cancelled', message: 'Action invocation 已取消' },
+    });
   });
 
   it('propagates a lost terminal CAS without fabricating a canceled projection', async () => {
     const h = setup({ loaded: [row()] });
-    h.invocations.cancel.mockRejectedValue(new AppError(409, 'conflict', 'Action invocation 已终止'));
-    await expect(h.service.cancel(IDS.user, IDS.invocation)).rejects.toMatchObject({ status: 409, code: 'conflict' });
+    h.invocations.cancel.mockRejectedValue(
+      new AppError(409, 'conflict', 'Action invocation 已终止')
+    );
+    await expect(h.service.cancel(IDS.user, IDS.invocation)).rejects.toMatchObject({
+      status: 409,
+      code: 'conflict',
+    });
     expect(h.prisma.actionInvocation.findFirst).toHaveBeenCalledTimes(1);
   });
 });

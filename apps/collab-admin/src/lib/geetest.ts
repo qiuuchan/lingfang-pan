@@ -41,7 +41,7 @@ export interface GeetestValidateResult {
 /** 全局 initGeetest4 函数签名（gt4.js 暴露在 window 上）。 */
 type InitGeetest4 = (
   options: { captchaId: string; product: 'float' },
-  callback: (captchaObj: GeetestCaptchaObj) => void,
+  callback: (captchaObj: GeetestCaptchaObj) => void
 ) => void;
 
 /**

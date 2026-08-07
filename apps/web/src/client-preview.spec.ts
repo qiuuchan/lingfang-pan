@@ -1,6 +1,10 @@
 import type { WebPreviewSession } from '@lingfang/contract';
 import { describe, expect, it } from 'vitest';
-import { buildPreviewIframeUrl, PREVIEW_IFRAME_SANDBOX, previewOrigin } from './ClientSandboxPreview';
+import {
+  buildPreviewIframeUrl,
+  PREVIEW_IFRAME_SANDBOX,
+  previewOrigin,
+} from './ClientSandboxPreview';
 
 const session: WebPreviewSession = {
   session_id: '11111111-1111-4111-8111-111111111111',
@@ -13,7 +17,9 @@ const session: WebPreviewSession = {
 
 describe('Client sandbox iframe boundary', () => {
   it('uses an independent preview origin and keeps the nonce in the URL fragment', () => {
-    const result = new URL(buildPreviewIframeUrl('https://preview.example.test', session, 'https://web.example.test'));
+    const result = new URL(
+      buildPreviewIframeUrl('https://preview.example.test', session, 'https://web.example.test')
+    );
     expect(result.origin).toBe('https://preview.example.test');
     expect(result.pathname).toBe(`/sessions/${session.session_id}/index.html`);
     expect(result.search).toBe('');
@@ -21,7 +27,9 @@ describe('Client sandbox iframe boundary', () => {
   });
 
   it('refuses same-origin, insecure remote, and credential-bearing preview origins', () => {
-    expect(() => buildPreviewIframeUrl('https://web.example.test', session, 'https://web.example.test')).toThrow(/分离/);
+    expect(() =>
+      buildPreviewIframeUrl('https://web.example.test', session, 'https://web.example.test')
+    ).toThrow(/分离/);
     expect(() => previewOrigin('http://preview.example.test')).toThrow(/HTTPS/);
     expect(() => previewOrigin('https://user:pass@preview.example.test')).toThrow(/HTTPS/);
   });

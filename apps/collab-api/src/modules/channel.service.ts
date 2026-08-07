@@ -35,14 +35,14 @@ export class PoolService {
     const where = q ? { name: { contains: q, mode: 'insensitive' as const } } : {};
     const [pools, total] = await this.prisma.$transaction([
       this.prisma.pool.findMany({
-      where,
-      orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
-      skip,
-      take: pageSize,
-      include: {
-        team: { select: { id: true, name: true, slug: true } },
-        _count: { select: { channels: true } },
-      },
+        where,
+        orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
+        skip,
+        take: pageSize,
+        include: {
+          team: { select: { id: true, name: true, slug: true } },
+          _count: { select: { channels: true } },
+        },
       }),
       this.prisma.pool.count({ where }),
     ]);
@@ -56,15 +56,24 @@ export class PoolService {
         description: p.description,
         channelCount: p._count.channels,
         createdAt: p.createdAt.toISOString(),
-      })), total, page, pageSize,
+      })),
+      total,
+      page,
+      pageSize,
     };
   }
 
-  async adminCreate(actorId: string, input: { name: string; scope: 'SHARED' | 'DEDICATED'; teamId?: string; description?: string }) {
+  async adminCreate(
+    actorId: string,
+    input: { name: string; scope: 'SHARED' | 'DEDICATED'; teamId?: string; description?: string }
+  ) {
     if (!input.name.trim()) throw badRequest('池名称不能为空');
     if (input.scope === 'DEDICATED') {
       if (!input.teamId?.trim()) throw badRequest('DEDICATED 池必须指定团队');
-      const team = await this.prisma.team.findUnique({ where: { id: input.teamId }, select: { id: true, name: true } });
+      const team = await this.prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { id: true, name: true },
+      });
       if (!team) throw badRequest('指定团队不存在');
     }
     const data = {
@@ -111,7 +120,10 @@ export class PoolService {
   }
 
   async adminDelete(actorId: string, id: string) {
-    const existing = await this.prisma.pool.findUnique({ where: { id }, select: { id: true, name: true } });
+    const existing = await this.prisma.pool.findUnique({
+      where: { id },
+      select: { id: true, name: true },
+    });
     if (!existing) throw new AppError(404, 'pool_not_found', '资源池不存在');
     await this.prisma.pool.delete({ where: { id } });
     await this.audit(actorId, 'admin.pool.deleted', id, { name: existing.name });
@@ -119,7 +131,9 @@ export class PoolService {
   }
 
   private async audit(actorUserId: string, action: string, targetId: string, metadata: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType: 'Pool', targetId, metadata: metadata as object } });
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType: 'Pool', targetId, metadata: metadata as object },
+    });
   }
 }
 
@@ -143,14 +157,27 @@ export class ChannelService {
 
   async adminList(kind?: 'CHAT' | 'IMAGE', query: BillingPageQuery = {}) {
     const { page, pageSize, skip, q } = normalizeBillingPage(query);
-    const where = { ...(kind ? { kind } : {}), ...(q ? { name: { contains: q, mode: 'insensitive' as const } } : {}) };
+    const where = {
+      ...(kind ? { kind } : {}),
+      ...(q ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
+    };
     const [channels, total] = await this.prisma.$transaction([
       this.prisma.channel.findMany({
-      where,
-      orderBy: [{ kind: 'asc' }, { tier: 'asc' }, { createdAt: 'asc' }],
-      skip,
-      take: pageSize,
-      include: { pool: { select: { id: true, name: true, scope: true, teamId: true, team: { select: { id: true, name: true, slug: true } } } } },
+        where,
+        orderBy: [{ kind: 'asc' }, { tier: 'asc' }, { createdAt: 'asc' }],
+        skip,
+        take: pageSize,
+        include: {
+          pool: {
+            select: {
+              id: true,
+              name: true,
+              scope: true,
+              teamId: true,
+              team: { select: { id: true, name: true, slug: true } },
+            },
+          },
+        },
       }),
       this.prisma.channel.count({ where }),
     ]);
@@ -160,7 +187,17 @@ export class ChannelService {
   async adminDetail(id: string) {
     const channel = await this.prisma.channel.findUnique({
       where: { id },
-      include: { pool: { select: { id: true, name: true, scope: true, teamId: true, team: { select: { id: true, name: true, slug: true } } } } },
+      include: {
+        pool: {
+          select: {
+            id: true,
+            name: true,
+            scope: true,
+            teamId: true,
+            team: { select: { id: true, name: true, slug: true } },
+          },
+        },
+      },
     });
     if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
     return { channel: this.adminView(channel) };
@@ -191,7 +228,11 @@ export class ChannelService {
         description: input.description ?? '',
       },
     });
-    await this.audit(actorId, 'admin.channel.created', channel.id, { name: channel.name, kind: channel.kind, tier: channel.tier });
+    await this.audit(actorId, 'admin.channel.created', channel.id, {
+      name: channel.name,
+      kind: channel.kind,
+      tier: channel.tier,
+    });
     return { channel: this.adminView(channel) };
   }
 
@@ -222,7 +263,10 @@ export class ChannelService {
   }
 
   async adminDelete(actorId: string, id: string) {
-    const existing = await this.prisma.channel.findUnique({ where: { id }, select: { id: true, name: true } });
+    const existing = await this.prisma.channel.findUnique({
+      where: { id },
+      select: { id: true, name: true },
+    });
     if (!existing) throw new AppError(404, 'channel_not_found', '渠道不存在');
     await this.prisma.channel.delete({ where: { id } });
     await this.audit(actorId, 'admin.channel.deleted', id, { name: existing.name });
@@ -234,12 +278,14 @@ export class ChannelService {
     const channel = await this.prisma.channel.findUnique({ where: { id } });
     if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
     const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, getLlmKey());
-    const url = channel.protocol === 'ANTHROPIC'
-      ? `${this.normalizeUrl(channel.baseUrl)}/v1/models`
-      : `${this.normalizeUrl(channel.baseUrl)}/models`;
-    const headers: Record<string, string> = channel.protocol === 'ANTHROPIC'
-      ? { 'x-api-key': upstreamKey, 'anthropic-version': '2023-06-01' }
-      : { Authorization: `Bearer ${upstreamKey}` };
+    const url =
+      channel.protocol === 'ANTHROPIC'
+        ? `${this.normalizeUrl(channel.baseUrl)}/v1/models`
+        : `${this.normalizeUrl(channel.baseUrl)}/models`;
+    const headers: Record<string, string> =
+      channel.protocol === 'ANTHROPIC'
+        ? { 'x-api-key': upstreamKey, 'anthropic-version': '2023-06-01' }
+        : { Authorization: `Bearer ${upstreamKey}` };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8_000);
     let ok = false;
@@ -260,7 +306,10 @@ export class ChannelService {
     } finally {
       clearTimeout(timer);
     }
-    await this.prisma.channel.update({ where: { id }, data: { lastHealthAt: new Date(), lastHealthOk: ok } });
+    await this.prisma.channel.update({
+      where: { id },
+      data: { lastHealthAt: new Date(), lastHealthOk: ok },
+    });
     await this.audit(actorId, 'admin.channel.tested', id, { ok, name: channel.name });
     return { ok, message, models, lastHealthOk: ok };
   }
@@ -269,7 +318,8 @@ export class ChannelService {
   async adminTestChat(actorId: string, id: string, model: string) {
     const channel = await this.prisma.channel.findUnique({ where: { id } });
     if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
-    if (channel.kind !== 'CHAT') return { ok: false, message: '仅聊天渠道支持对话测试', reply: '', latencyMs: 0 };
+    if (channel.kind !== 'CHAT')
+      return { ok: false, message: '仅聊天渠道支持对话测试', reply: '', latencyMs: 0 };
     if (!model.trim()) throw badRequest('请选择测试用模型');
     const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, getLlmKey());
     const base = this.normalizeUrl(channel.baseUrl);
@@ -283,23 +333,47 @@ export class ChannelService {
       if (channel.protocol === 'ANTHROPIC') {
         const res = await fetch(`${base}/v1/messages`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': upstreamKey, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] }),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': upstreamKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 16,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
           signal: controller.signal,
         });
         ok = res.ok;
-        if (ok) { const data = (await res.json()) as { content?: { text?: string }[] }; reply = data.content?.map((c) => c.text).filter(Boolean).join('') ?? ''; message = '测试对话成功'; }
-        else message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+        if (ok) {
+          const data = (await res.json()) as { content?: { text?: string }[] };
+          reply =
+            data.content
+              ?.map((c) => c.text)
+              .filter(Boolean)
+              .join('') ?? '';
+          message = '测试对话成功';
+        } else
+          message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
       } else {
         const res = await fetch(`${base}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${upstreamKey}` },
-          body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] }),
+          body: JSON.stringify({
+            model,
+            max_tokens: 16,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
           signal: controller.signal,
         });
         ok = res.ok;
-        if (ok) { const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }; reply = data.choices?.[0]?.message?.content ?? ''; message = '测试对话成功'; }
-        else message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+        if (ok) {
+          const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+          reply = data.choices?.[0]?.message?.content ?? '';
+          message = '测试对话成功';
+        } else
+          message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
       }
       // HTTP 200 不等于通过：必须有实际回复内容（对齐 adminTestImage 的 ok=Boolean(result) 校准）。
       if (ok && reply.trim().length === 0) {
@@ -319,8 +393,10 @@ export class ChannelService {
   async adminTestImage(actorId: string, id: string, model: string, prompt?: string) {
     const channel = await this.prisma.channel.findUnique({ where: { id } });
     if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
-    if (channel.kind !== 'IMAGE') return { ok: false, message: '仅生图渠道支持生图测试', imageUrl: null, latencyMs: 0 };
-    if (channel.protocol === 'ANTHROPIC') return { ok: false, message: 'Anthropic 协议不支持生图', imageUrl: null, latencyMs: 0 };
+    if (channel.kind !== 'IMAGE')
+      return { ok: false, message: '仅生图渠道支持生图测试', imageUrl: null, latencyMs: 0 };
+    if (channel.protocol === 'ANTHROPIC')
+      return { ok: false, message: 'Anthropic 协议不支持生图', imageUrl: null, latencyMs: 0 };
     if (!model.trim()) throw badRequest('请选择生图模型');
     const upstreamKey = decryptApiKey(channel.encryptedUpstreamKey, getLlmKey());
     const base = this.normalizeUrl(channel.baseUrl);
@@ -334,7 +410,11 @@ export class ChannelService {
       const res = await fetch(`${base}/images/generations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${upstreamKey}` },
-        body: JSON.stringify({ model, prompt: prompt?.trim() || 'a red circle on white background', n: 1 }),
+        body: JSON.stringify({
+          model,
+          prompt: prompt?.trim() || 'a red circle on white background',
+          n: 1,
+        }),
         signal: controller.signal,
       });
       ok = res.ok;
@@ -345,7 +425,8 @@ export class ChannelService {
         else if (first?.b64_json) imageUrl = `data:image/png;base64,${first.b64_json}`;
         message = imageUrl ? '生图成功' : '上游返回成功但无图片数据';
         ok = Boolean(imageUrl);
-      } else message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
+      } else
+        message = `上游返回 ${res.status}：${(await res.text().catch(() => '')).slice(0, 200)}`;
     } catch (e) {
       message = `生图失败：${(e as Error).name === 'AbortError' ? '超时（60s）' : (e as Error).message}`;
     } finally {
@@ -372,10 +453,30 @@ export class ChannelService {
   }
 
   private adminView(c: {
-    id: string; name: string; kind: string; tier: string; protocol: string; provider: string;
-    poolId: string; baseUrl: string; upstreamKeyHint: string; encryptedUpstreamKey: string;
-    models: unknown; status: string; description: string; lastHealthAt: Date | null; lastHealthOk: boolean | null;
-    createdAt: Date; updatedAt: Date; pool?: { id: string; name: string; scope: string; teamId: string | null; team?: { id: string; name: string; slug: string } | null };
+    id: string;
+    name: string;
+    kind: string;
+    tier: string;
+    protocol: string;
+    provider: string;
+    poolId: string;
+    baseUrl: string;
+    upstreamKeyHint: string;
+    encryptedUpstreamKey: string;
+    models: unknown;
+    status: string;
+    description: string;
+    lastHealthAt: Date | null;
+    lastHealthOk: boolean | null;
+    createdAt: Date;
+    updatedAt: Date;
+    pool?: {
+      id: string;
+      name: string;
+      scope: string;
+      teamId: string | null;
+      team?: { id: string; name: string; slug: string } | null;
+    };
   }) {
     return {
       id: c.id,
@@ -385,7 +486,15 @@ export class ChannelService {
       protocol: c.protocol as 'OPENAI' | 'ANTHROPIC',
       provider: c.provider,
       poolId: c.poolId,
-      pool: c.pool ? { id: c.pool.id, name: c.pool.name, scope: c.pool.scope, teamId: c.pool.teamId, team: c.pool.team ?? null } : null,
+      pool: c.pool
+        ? {
+            id: c.pool.id,
+            name: c.pool.name,
+            scope: c.pool.scope,
+            teamId: c.pool.teamId,
+            team: c.pool.team ?? null,
+          }
+        : null,
       baseUrl: c.baseUrl,
       upstreamKeyHint: c.upstreamKeyHint,
       hasUpstreamKey: c.encryptedUpstreamKey.length > 0,
@@ -400,7 +509,9 @@ export class ChannelService {
   }
 
   private async audit(actorUserId: string, action: string, targetId: string, metadata: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType: 'Channel', targetId, metadata: metadata as object } });
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType: 'Channel', targetId, metadata: metadata as object },
+    });
   }
 }
 
@@ -420,7 +531,17 @@ export class ChannelRouterService {
     teamId: string;
     kind: 'CHAT' | 'IMAGE';
     tier: 'FAST' | 'PREMIUM';
-  }): Promise<{ id: string; name: string; kind: 'CHAT' | 'IMAGE'; tier: 'FAST' | 'PREMIUM'; protocol: 'OPENAI' | 'ANTHROPIC'; baseUrl: string; model: string }[]> {
+  }): Promise<
+    {
+      id: string;
+      name: string;
+      kind: 'CHAT' | 'IMAGE';
+      tier: 'FAST' | 'PREMIUM';
+      protocol: 'OPENAI' | 'ANTHROPIC';
+      baseUrl: string;
+      model: string;
+    }[]
+  > {
     // 1. 可用池 id。
     const pools = await this.prisma.pool.findMany({
       where: { OR: [{ scope: 'SHARED' }, { scope: 'DEDICATED', teamId: args.teamId }] },
@@ -432,16 +553,40 @@ export class ChannelRouterService {
     // 2. 匹配渠道。
     const channels = await this.prisma.channel.findMany({
       where: { poolId: { in: poolIds }, kind: args.kind, tier: args.tier, status: 'ENABLED' },
-      select: { id: true, name: true, kind: true, tier: true, protocol: true, baseUrl: true, models: true },
+      select: {
+        id: true,
+        name: true,
+        kind: true,
+        tier: true,
+        protocol: true,
+        baseUrl: true,
+        models: true,
+      },
     });
     if (channels.length === 0) return [];
 
     // 3. 渠道 × models 笛卡尔积。
-    const candidates: { id: string; name: string; kind: 'CHAT' | 'IMAGE'; tier: 'FAST' | 'PREMIUM'; protocol: 'OPENAI' | 'ANTHROPIC'; baseUrl: string; model: string }[] = [];
+    const candidates: {
+      id: string;
+      name: string;
+      kind: 'CHAT' | 'IMAGE';
+      tier: 'FAST' | 'PREMIUM';
+      protocol: 'OPENAI' | 'ANTHROPIC';
+      baseUrl: string;
+      model: string;
+    }[] = [];
     for (const c of channels) {
       const models = (c.models as string[]) ?? [];
       for (const model of models.length ? models : ['']) {
-        candidates.push({ id: c.id, name: c.name, kind: c.kind as 'CHAT' | 'IMAGE', tier: c.tier as 'FAST' | 'PREMIUM', protocol: c.protocol as 'OPENAI' | 'ANTHROPIC', baseUrl: c.baseUrl, model });
+        candidates.push({
+          id: c.id,
+          name: c.name,
+          kind: c.kind as 'CHAT' | 'IMAGE',
+          tier: c.tier as 'FAST' | 'PREMIUM',
+          protocol: c.protocol as 'OPENAI' | 'ANTHROPIC',
+          baseUrl: c.baseUrl,
+          model,
+        });
       }
     }
 
@@ -452,7 +597,15 @@ export class ChannelRouterService {
   }
 
   /** 解密某渠道上游 key（relay 转发前调用）。 */
-  async decryptUpstreamKey(channelId: string): Promise<{ id: string; name: string; kind: 'CHAT' | 'IMAGE'; tier: 'FAST' | 'PREMIUM'; protocol: 'OPENAI' | 'ANTHROPIC'; baseUrl: string; upstreamKey: string }> {
+  async decryptUpstreamKey(channelId: string): Promise<{
+    id: string;
+    name: string;
+    kind: 'CHAT' | 'IMAGE';
+    tier: 'FAST' | 'PREMIUM';
+    protocol: 'OPENAI' | 'ANTHROPIC';
+    baseUrl: string;
+    upstreamKey: string;
+  }> {
     const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
     if (!channel) throw new AppError(404, 'channel_not_found', '渠道不存在');
     const key = getLlmKey();

@@ -104,11 +104,11 @@ test('PluginManifest manifest-boundary fields stay snake_case', () => {
   });
   expect(manifest.success, JSON.stringify(manifest.error?.issues)).toBe(true);
   expect({
-      id: manifest.data.id,
-      name: manifest.data.name,
-      version: manifest.data.version,
-      entry: manifest.data.entry,
-    }).toEqual({ id: 'p1', name: 'demo', version: '0.1.0', entry: 'ui/index.html' });
+    id: manifest.data.id,
+    name: manifest.data.name,
+    version: manifest.data.version,
+    entry: manifest.data.entry,
+  }).toEqual({ id: 'p1', name: 'demo', version: '0.1.0', entry: 'ui/index.html' });
 });
 
 test('PluginManifest rejects blank required fields and invalid SemVer versions', () => {
@@ -142,14 +142,18 @@ test('PluginManifest rejects oversized metadata and capability collections', () 
   expect(PluginManifest.safeParse({ ...base, name: 'x'.repeat(129) }).success).toBe(false);
   expect(PluginManifest.safeParse({ ...base, description: 'x'.repeat(4097) }).success).toBe(false);
   expect(PluginManifest.safeParse({ ...base, entry: 'x'.repeat(513) }).success).toBe(false);
-  expect(PluginManifest.safeParse({
+  expect(
+    PluginManifest.safeParse({
       ...base,
       capabilities: Array.from({ length: 65 }, () => ({ kind: 'ui.view' })),
-    }).success).toBe(false);
-  expect(PluginManifest.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    PluginManifest.safeParse({
       ...base,
       capabilities: [{ kind: 'ui.view', reason: 'x'.repeat(501) }],
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
 });
 
 test('StrictSemVer accepts prereleases and rejects loose or leading-zero versions', () => {
@@ -250,8 +254,12 @@ test('release provenance rejects unknown enums and source labels over 80 charact
   };
   expect(PluginReleaseSummary.safeParse({ ...base, sourceKind: 'CURSOR' }).success).toBe(false);
   expect(PluginReleaseSummary.safeParse({ ...base, ingestChannel: 'CLI' }).success).toBe(false);
-  expect(PluginReleaseSummary.safeParse({ ...base, sourceLabel: 'x'.repeat(81) }).success).toBe(false);
-  expect(PluginReleaseSummary.safeParse({ ...base, sourceLabel: 'VS\u0000Code' }).success).toBe(false);
+  expect(PluginReleaseSummary.safeParse({ ...base, sourceLabel: 'x'.repeat(81) }).success).toBe(
+    false
+  );
+  expect(PluginReleaseSummary.safeParse({ ...base, sourceLabel: 'VS\u0000Code' }).success).toBe(
+    false
+  );
 });
 
 test('exact release detail carries bounded immutable README markdown', () => {
@@ -277,7 +285,9 @@ test('exact release detail carries bounded immutable README markdown', () => {
     createdAt: '2026-07-11T00:00:00.000Z',
   };
   expect(PluginReleaseDetail.safeParse({ ...base, readme_markdown: '# Demo' }).success).toBe(true);
-  expect(PluginReleaseDetail.safeParse({ ...base, readme_markdown: 'x'.repeat(256 * 1024 + 1) }).success).toBe(false);
+  expect(
+    PluginReleaseDetail.safeParse({ ...base, readme_markdown: 'x'.repeat(256 * 1024 + 1) }).success
+  ).toBe(false);
 });
 
 test('management and package detail contracts project listing lifecycle metadata', () => {
@@ -317,6 +327,8 @@ test('management and package detail contracts project listing lifecycle metadata
   });
   expect(detail.package.governanceStatus).toBe('ARCHIVED');
   expect(UpdateMarketplaceListingStatusRequest.safeParse({ status: 'DRAFT' }).success).toBe(false);
-  expect(UpdateMarketplaceListingStatusRequest.safeParse({ status: 'DELISTED', reason: 'x'.repeat(501) })
-      .success).toBe(false);
+  expect(
+    UpdateMarketplaceListingStatusRequest.safeParse({ status: 'DELISTED', reason: 'x'.repeat(501) })
+      .success
+  ).toBe(false);
 });

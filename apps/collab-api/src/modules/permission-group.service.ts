@@ -2,10 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { badRequest, forbidden, notFound } from '../common';
 import { AuthService } from './auth.service';
-import {
-  BUILTIN_PERMISSION_GROUPS,
-  type PermissionScope,
-} from './permissions/permission-codes';
+import { BUILTIN_PERMISSION_GROUPS, type PermissionScope } from './permissions/permission-codes';
 
 /**
  * 权限分组显示名管理。
@@ -25,7 +22,7 @@ import {
 export class PermissionGroupService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   /** 列出某 scope 的全部权限分组（内置基线 + DB 覆盖合并，标注 customized）。 */
@@ -55,7 +52,11 @@ export class PermissionGroupService {
   }
 
   /** upsert 权限分组显示名（管理员改名）。groupKey 必须是已注册的 moduleKey。 */
-  async upsertGroup(userId: string, scope: PermissionScope, input: { groupKey: string; displayName: string }) {
+  async upsertGroup(
+    userId: string,
+    scope: PermissionScope,
+    input: { groupKey: string; displayName: string }
+  ) {
     await this.ensureManagePermission(scope, userId);
     if (scope === 'TEAM') await this.resolveCurrentTeam(userId);
     const builtin = this.assertGroupKeyRegistered(scope, input.groupKey);
@@ -71,11 +72,17 @@ export class PermissionGroupService {
         sortOrder: builtin.sortOrder,
       },
     });
-    await this.audit(userId, 'permission_group.upserted', 'PermissionGroup', `${scope}:${input.groupKey}`, {
-      scope,
-      groupKey: input.groupKey,
-      displayName: input.displayName,
-    });
+    await this.audit(
+      userId,
+      'permission_group.upserted',
+      'PermissionGroup',
+      `${scope}:${input.groupKey}`,
+      {
+        scope,
+        groupKey: input.groupKey,
+        displayName: input.displayName,
+      }
+    );
     return {
       group: {
         scope: row.scope,
@@ -113,7 +120,9 @@ export class PermissionGroupService {
 
   /** 校验 groupKey 是已注册的内置 moduleKey（不允许凭空新增模块），返回内置定义。 */
   private assertGroupKeyRegistered(scope: PermissionScope, groupKey: string) {
-    const builtin = BUILTIN_PERMISSION_GROUPS.find((g) => g.scope === scope && g.groupKey === groupKey);
+    const builtin = BUILTIN_PERMISSION_GROUPS.find(
+      (g) => g.scope === scope && g.groupKey === groupKey
+    );
     if (!builtin) throw badRequest(`未知的权限分组键：${groupKey}（不允许新增模块）`);
     return builtin;
   }
@@ -136,7 +145,15 @@ export class PermissionGroupService {
     return membership;
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 }

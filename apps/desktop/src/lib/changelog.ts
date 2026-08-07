@@ -45,7 +45,12 @@ export async function listChangelog(): Promise<ChangelogResponse> {
     return await api<ChangelogResponse>('/api/changelog', { auth: false });
   } catch {
     // 网络层兜底（api() 抛连接错误时降级为空列表 + 友好提示，不阻断 UI）。
-    return { source: 'unconfigured', releases: [], degraded: true, message: '无法连接服务器，请检查网络或后端地址' };
+    return {
+      source: 'unconfigured',
+      releases: [],
+      degraded: true,
+      message: '无法连接服务器，请检查网络或后端地址',
+    };
   }
 }
 

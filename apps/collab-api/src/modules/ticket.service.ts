@@ -51,7 +51,9 @@ const ADMIN_TICKET_SUMMARY_SELECT = {
   _count: { select: { messages: true, attachments: true } },
 } as const satisfies Prisma.TicketSelect;
 
-type AdminTicketSummaryRow = Prisma.TicketGetPayload<{ select: typeof ADMIN_TICKET_SUMMARY_SELECT }>;
+type AdminTicketSummaryRow = Prisma.TicketGetPayload<{
+  select: typeof ADMIN_TICKET_SUMMARY_SELECT;
+}>;
 
 export interface TicketViewer {
   userId: string;
@@ -65,7 +67,7 @@ export class TicketService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
-    @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(NotificationService) private readonly notifications: NotificationService
   ) {}
 
   // === 前台方法（按 userId 隔离）===
@@ -74,7 +76,7 @@ export class TicketService {
   async create(
     userId: string,
     input: { title: string; body: string; category?: string },
-    files: UploadedFileLike[],
+    files: UploadedFileLike[]
   ) {
     const title = cleanTitle(input.title);
     const body = cleanBody(input.body);
@@ -136,7 +138,12 @@ export class TicketService {
   }
 
   /** POST /api/tickets/:id/messages：用户追加回复（+附件）。CLOSED 不可追加；RESOLVED→IN_PROGRESS。 */
-  async addUserMessage(userId: string, id: string, input: { body?: string }, files: UploadedFileLike[]) {
+  async addUserMessage(
+    userId: string,
+    id: string,
+    input: { body?: string },
+    files: UploadedFileLike[]
+  ) {
     const body = cleanBody(input.body, files.length > 0);
     if (!body && files.length === 0) throw badRequest('请填写内容或上传附件');
     validateAttachments(files);
@@ -144,7 +151,8 @@ export class TicketService {
     const message = await this.prisma.$transaction(async (tx) => {
       const ticket = await tx.ticket.findUnique({ where: { id } });
       if (!ticket || ticket.userId !== userId) throw notFound('工单不存在');
-      if (ticket.status === 'CLOSED') throw badRequest('工单已关闭，无法追加回复（如需继续请新建工单）');
+      if (ticket.status === 'CLOSED')
+        throw badRequest('工单已关闭，无法追加回复（如需继续请新建工单）');
 
       const nextStatus = nextStatusOnUserReply(ticket.status as TicketStatusValue);
       const claimed = await tx.ticket.updateMany({
@@ -164,7 +172,14 @@ export class TicketService {
   // === 后台方法（@RequirePermission 把关）===
 
   /** GET /api/admin/tickets：全部工单列表（筛选 + 分页）。 */
-  async listAdmin(opts: { status?: string; category?: string; teamId?: string; q?: string; page?: number; pageSize?: number }) {
+  async listAdmin(opts: {
+    status?: string;
+    category?: string;
+    teamId?: string;
+    q?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
     const page = Math.max(1, Math.floor(opts.page ?? 1));
     const pageSize = Math.min(100, Math.max(1, Math.floor(opts.pageSize ?? 20)));
     const where: Prisma.TicketWhereInput = {};
@@ -184,14 +199,21 @@ export class TicketService {
       this.prisma.ticket.count({ where }),
     ]);
 
-    const handlerIds = [...new Set(items.map((t) => t.handlerUserId).filter((v): v is string => !!v))];
+    const handlerIds = [
+      ...new Set(items.map((t) => t.handlerUserId).filter((v): v is string => !!v)),
+    ];
     const handlers = handlerIds.length
-      ? await this.prisma.user.findMany({ where: { id: { in: handlerIds } }, select: { id: true, displayName: true } })
+      ? await this.prisma.user.findMany({
+          where: { id: { in: handlerIds } },
+          select: { id: true, displayName: true },
+        })
       : [];
     const handlerMap = new Map(handlers.map((h) => [h.id, h.displayName]));
 
     return {
-      items: items.map((t) => this.adminTicketSummary(t, handlerMap.get(t.handlerUserId ?? '') ?? null)),
+      items: items.map((t) =>
+        this.adminTicketSummary(t, handlerMap.get(t.handlerUserId ?? '') ?? null)
+      ),
       total,
       page,
       pageSize,
@@ -206,7 +228,12 @@ export class TicketService {
   }
 
   /** POST /api/admin/tickets/:id/messages：管理员回复（+附件）。OPEN→IN_PROGRESS，记 handler + 审计 + 通知。 */
-  async addAdminMessage(actorId: string, id: string, input: { body?: string }, files: UploadedFileLike[]) {
+  async addAdminMessage(
+    actorId: string,
+    id: string,
+    input: { body?: string },
+    files: UploadedFileLike[]
+  ) {
     const body = cleanBody(input.body, files.length > 0);
     if (!body && files.length === 0) throw badRequest('请填写内容或上传附件');
     validateAttachments(files);
@@ -231,7 +258,12 @@ export class TicketService {
     if (files.length > 0) await this.persistAttachments(id, result.message.id, files);
 
     await this.audit(actorId, 'admin.ticket.replied', id, { status: result.nextStatus });
-    this.notify(result.ticket.userId, '工单收到新回复', `您的工单「${result.ticket.title}」收到管理员回复`, id);
+    this.notify(
+      result.ticket.userId,
+      '工单收到新回复',
+      `您的工单「${result.ticket.title}」收到管理员回复`,
+      id
+    );
     return this.getAdmin(id);
   }
 
@@ -245,7 +277,10 @@ export class TicketService {
 
     const data: Prisma.TicketUpdateInput = {};
     if (input.status !== undefined) {
-      assertAdminStatusTransition(ticket.status as TicketStatusValue, input.status as TicketStatusValue);
+      assertAdminStatusTransition(
+        ticket.status as TicketStatusValue,
+        input.status as TicketStatusValue
+      );
       data.status = input.status as Ticket['status'];
       data.handlerUserId = actorId;
     }
@@ -267,7 +302,12 @@ export class TicketService {
       priority: nextPriority,
     });
     if (input.status !== undefined && input.status !== ticket.status) {
-      this.notify(ticket.userId, '工单状态更新', `您的工单「${ticket.title}」状态变更为 ${this.statusLabel(nextStatus)}`, id);
+      this.notify(
+        ticket.userId,
+        '工单状态更新',
+        `您的工单「${ticket.title}」状态变更为 ${this.statusLabel(nextStatus)}`,
+        id
+      );
     }
     return this.getAdmin(id);
   }
@@ -301,7 +341,11 @@ export class TicketService {
   // === 私有辅助 ===
 
   /** 落盘一批附件并写 DB 记录。目录 uploads/tickets/<ticketId>/，文件名随机前缀防冲突。 */
-  private async persistAttachments(ticketId: string, messageId: string | null, files: UploadedFileLike[]) {
+  private async persistAttachments(
+    ticketId: string,
+    messageId: string | null,
+    files: UploadedFileLike[]
+  ) {
     const dir = this.ticketDir(ticketId);
     await mkdir(dir, { recursive: true });
     for (const file of files) {
@@ -366,7 +410,10 @@ export class TicketService {
   }
 
   private statusLabel(status: string): string {
-    return { OPEN: '待处理', IN_PROGRESS: '处理中', RESOLVED: '已解决', CLOSED: '已关闭' }[status] ?? status;
+    return (
+      { OPEN: '待处理', IN_PROGRESS: '处理中', RESOLVED: '已解决', CLOSED: '已关闭' }[status] ??
+      status
+    );
   }
 
   // === 出参构造 ===
@@ -386,13 +433,12 @@ export class TicketService {
     };
   }
 
-  private adminTicketSummary(
-    t: AdminTicketSummaryRow,
-    handlerName: string | null,
-  ) {
+  private adminTicketSummary(t: AdminTicketSummaryRow, handlerName: string | null) {
     return {
       ...this.publicTicketSummary(t),
-      submitter: t.user ? { id: t.user.id, displayName: t.user.displayName, email: t.user.email } : null,
+      submitter: t.user
+        ? { id: t.user.id, displayName: t.user.displayName, email: t.user.email }
+        : null,
       team: t.team ? { id: t.team.id, name: t.team.name } : null,
       handler: t.handlerUserId ? { id: t.handlerUserId, displayName: handlerName } : null,
     };
@@ -400,7 +446,7 @@ export class TicketService {
 
   private async publicTicketDetail(
     t: Ticket & { messages: TicketMessage[]; attachments: TicketAttachment[] },
-    includeMeta = false,
+    includeMeta = false
   ) {
     // 附件按 messageId 分组（messageId=null 挂工单首贴）。
     const byMessage = new Map<string | null, TicketAttachment[]>();
@@ -437,12 +483,24 @@ export class TicketService {
 
   private async detailMeta(t: Ticket) {
     const [submitter, team, handler] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: t.userId }, select: { id: true, displayName: true, email: true } }),
-      t.teamId ? this.prisma.team.findUnique({ where: { id: t.teamId }, select: { id: true, name: true } }) : Promise.resolve(null),
-      t.handlerUserId ? this.prisma.user.findUnique({ where: { id: t.handlerUserId }, select: { id: true, displayName: true } }) : Promise.resolve(null),
+      this.prisma.user.findUnique({
+        where: { id: t.userId },
+        select: { id: true, displayName: true, email: true },
+      }),
+      t.teamId
+        ? this.prisma.team.findUnique({ where: { id: t.teamId }, select: { id: true, name: true } })
+        : Promise.resolve(null),
+      t.handlerUserId
+        ? this.prisma.user.findUnique({
+            where: { id: t.handlerUserId },
+            select: { id: true, displayName: true },
+          })
+        : Promise.resolve(null),
     ]);
     return {
-      submitter: submitter ? { id: submitter.id, displayName: submitter.displayName, email: submitter.email } : null,
+      submitter: submitter
+        ? { id: submitter.id, displayName: submitter.displayName, email: submitter.email }
+        : null,
       team: team ? { id: team.id, name: team.name } : null,
       handler: handler ? { id: handler.id, displayName: handler.displayName } : null,
     };

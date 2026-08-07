@@ -12,9 +12,24 @@ function mockPrisma(queryRawImpl: () => Promise<unknown>) {
 describe('ReadinessService health/ready', () => {
   it('$queryRaw 成功时返 {status:ok, db:up}', async () => {
     const prisma = mockPrisma(async () => [{ '?column?': 1 }]);
-    const service = new ReadinessService(prisma as never, { check: vi.fn().mockResolvedValue({ status: 'api_only', redis: 'not_required', persistence: 'not_required', evictionPolicy: 'not_required', processRole: 'api' }) } as never);
+    const service = new ReadinessService(
+      prisma as never,
+      {
+        check: vi.fn().mockResolvedValue({
+          status: 'api_only',
+          redis: 'not_required',
+          persistence: 'not_required',
+          evictionPolicy: 'not_required',
+          processRole: 'api',
+        }),
+      } as never
+    );
     const result = await service.check();
-    expect(result).toEqual({ status: 'ok', db: 'up', automation: expect.objectContaining({ status: 'api_only' }) });
+    expect(result).toEqual({
+      status: 'ok',
+      db: 'up',
+      automation: expect.objectContaining({ status: 'api_only' }),
+    });
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 

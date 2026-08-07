@@ -13,15 +13,7 @@ export interface MarketPlugin {
 }
 
 export type CategoryKey =
-  | 'ai'
-  | 'productivity'
-  | 'dev'
-  | 'files'
-  | 'data'
-  | 'media'
-  | 'network'
-  | 'system'
-  | 'other';
+  'ai' | 'productivity' | 'dev' | 'files' | 'data' | 'media' | 'network' | 'system' | 'other';
 
 export interface PluginCategory {
   key: CategoryKey;
@@ -36,49 +28,158 @@ export const CATEGORIES: PluginCategory[] = [
     key: 'ai',
     label: 'AI 与助手',
     // 关键词从严：避免「生成/智能」等泛词误吞 productivity（如「会议纪要生成器」）。
-    keywords: ['ai', 'gpt', 'llm', '助手', '对话', 'chat', '总结', '翻译', '摘要', 'assistant', '写作', '大模型'],
+    keywords: [
+      'ai',
+      'gpt',
+      'llm',
+      '助手',
+      '对话',
+      'chat',
+      '总结',
+      '翻译',
+      '摘要',
+      'assistant',
+      '写作',
+      '大模型',
+    ],
   },
   {
     key: 'productivity',
     label: '效率与办公',
-    keywords: ['笔记', 'note', 'todo', '任务', '待办', '日历', '会议', '纪要', '效率', '清单', '备忘', '事项', '看板', 'kanban'],
+    keywords: [
+      '笔记',
+      'note',
+      'todo',
+      '任务',
+      '待办',
+      '日历',
+      '会议',
+      '纪要',
+      '效率',
+      '清单',
+      '备忘',
+      '事项',
+      '看板',
+      'kanban',
+    ],
   },
   {
     key: 'dev',
     label: '开发工具',
-    keywords: ['代码', '开发', 'code', 'dev', 'git', '构建', '编译', '调试', 'debug', '工具链', 'sdk', '命令行', 'cli', '终端'],
+    keywords: [
+      '代码',
+      '开发',
+      'code',
+      'dev',
+      'git',
+      '构建',
+      '编译',
+      '调试',
+      'debug',
+      '工具链',
+      'sdk',
+      '命令行',
+      'cli',
+      '终端',
+    ],
   },
   {
     key: 'data',
     label: '数据与可视化',
     // 关键词具体化：去掉泛词「数据/分析」（「抓取接口数据」「静态分析与调试」会误命中），
     // 改用「数据可视化/数据分析」等组合词 + 可视化/图表/统计等明确信号。
-    keywords: ['可视化', '数据可视化', '数据分析', 'chart', '图表', '统计', '报表', 'excel', '表格', 'csv', 'bi', 'dashboard'],
+    keywords: [
+      '可视化',
+      '数据可视化',
+      '数据分析',
+      'chart',
+      '图表',
+      '统计',
+      '报表',
+      'excel',
+      '表格',
+      'csv',
+      'bi',
+      'dashboard',
+    ],
   },
   {
     key: 'media',
     label: '图像与多媒体',
-    keywords: ['图片', '图像', '视频', '音频', '音乐', 'image', 'video', 'audio', '音乐', '换衣', '美颜', '剪辑', '压缩', '转码', '水印'],
+    keywords: [
+      '图片',
+      '图像',
+      '视频',
+      '音频',
+      '音乐',
+      'image',
+      'video',
+      'audio',
+      '音乐',
+      '换衣',
+      '美颜',
+      '剪辑',
+      '压缩',
+      '转码',
+      '水印',
+    ],
   },
   {
     key: 'files',
     label: '文件与存储',
-    keywords: ['文件', 'file', '资源管理', '目录', '搜索文件', '同步', '云盘', '备份', 'archive', 'zip', '解压'],
+    keywords: [
+      '文件',
+      'file',
+      '资源管理',
+      '目录',
+      '搜索文件',
+      '同步',
+      '云盘',
+      '备份',
+      'archive',
+      'zip',
+      '解压',
+    ],
   },
   {
     key: 'network',
     label: '网络与接口',
-    keywords: ['网络', '请求', 'http', 'api', '爬虫', '抓取', '代理', 'proxy', '测速', 'dns', '下载器'],
+    keywords: [
+      '网络',
+      '请求',
+      'http',
+      'api',
+      '爬虫',
+      '抓取',
+      '代理',
+      'proxy',
+      '测速',
+      'dns',
+      '下载器',
+    ],
   },
   {
     key: 'system',
     label: '系统与监控',
-    keywords: ['系统', '监控', '性能', 'system', 'info', '进程', '硬件', 'cpu', '内存', '磁盘', '网络监控', '通知'],
+    keywords: [
+      '系统',
+      '监控',
+      '性能',
+      'system',
+      'info',
+      '进程',
+      '硬件',
+      'cpu',
+      '内存',
+      '磁盘',
+      '网络监控',
+      '通知',
+    ],
   },
 ];
 
 const CATEGORY_BY_KEY: Record<CategoryKey, PluginCategory> = Object.fromEntries(
-  CATEGORIES.map((c) => [c.key, c]),
+  CATEGORIES.map((c) => [c.key, c])
 ) as Record<CategoryKey, PluginCategory>;
 
 const OTHER: PluginCategory = { key: 'other', label: '其他', keywords: [] };
@@ -125,7 +226,10 @@ export function categoryLabel(key: CategoryKey): string {
 }
 
 /** 用于「全部」入口的聚合分类（顺序 = 展示顺序，含「全部」）。 */
-export interface CategoryTab { key: CategoryKey | 'all'; label: string }
+export interface CategoryTab {
+  key: CategoryKey | 'all';
+  label: string;
+}
 
 export const CATEGORY_TABS: CategoryTab[] = [
   { key: 'all', label: '全部' },
@@ -136,7 +240,11 @@ export const CATEGORY_TABS: CategoryTab[] = [
  * 按分类过滤插件列表。key='all' 返回全部；否则返回该分类下的插件。
  * 同时可叠加关键字 q（子串匹配 name/description，与现有搜索语义一致）。
  */
-export function filterByCategory(plugins: MarketPlugin[], key: CategoryKey | 'all', q: string): MarketPlugin[] {
+export function filterByCategory(
+  plugins: MarketPlugin[],
+  key: CategoryKey | 'all',
+  q: string
+): MarketPlugin[] {
   const query = q.trim().toLowerCase();
   return plugins.filter((p) => {
     if (key !== 'all' && categorizePlugin(p) !== key) return false;

@@ -30,16 +30,25 @@ function readStoredBackendUrl(): string | null {
 
 export function configureApiBase(url: string | null | undefined, opts: { persist?: boolean } = {}) {
   // 写死后端地址：忽略入参，始终用 FIXED_BACKEND_URL；顺带清掉旧缓存避免残留。
-  void url; void opts;
+  void url;
+  void opts;
   apiBaseUrl = FIXED_BACKEND_URL;
-  try { localStorage.removeItem(BACKEND_URL_STORAGE_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
   return true;
 }
 
 export function clearApiBase() {
   // 写死：即使「清空」也保持 FIXED_BACKEND_URL（登出等场景不会让后端地址变空）。
   apiBaseUrl = FIXED_BACKEND_URL;
-  try { localStorage.removeItem(BACKEND_URL_STORAGE_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -55,7 +64,9 @@ export function initApiBase(defaultUrl?: string | null) {
     if (stored && stored !== FIXED_BACKEND_URL) {
       localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return FIXED_BACKEND_URL;
 }
 
@@ -65,7 +76,6 @@ export function setApiBase(url: string | null | undefined) {
 export function apiBase() {
   return apiBaseUrl;
 }
-
 
 export async function testBackendUrl(url: string): Promise<void> {
   const normalized = normalizeBackendUrl(url);
@@ -105,14 +115,22 @@ export function initAuthToken(): string | null {
 }
 
 // Tauri 命令调用（桌面环境注入 __TAURI__，需 tauri.conf.json 开 withGlobalTauri）。
-export async function tauriInvoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: Function } } }).__TAURI__?.core?.invoke;
+export async function tauriInvoke<T = unknown>(
+  cmd: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: Function } } }).__TAURI__
+    ?.core?.invoke;
   if (!inv) throw new Error('需在 灵坊 桌面环境中运行');
   return inv(cmd, args) as Promise<T>;
 }
 
-export async function tauriListen<T = unknown>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> {
-  const listen = (window as unknown as { __TAURI__?: { event?: { listen?: Function } } }).__TAURI__?.event?.listen;
+export async function tauriListen<T = unknown>(
+  event: string,
+  handler: (event: { payload: T }) => void
+): Promise<() => void> {
+  const listen = (window as unknown as { __TAURI__?: { event?: { listen?: Function } } }).__TAURI__
+    ?.event?.listen;
   if (!listen) throw new Error('需在 灵坊 桌面环境中运行');
   return listen(event, handler) as Promise<() => void>;
 }
@@ -139,10 +157,18 @@ export function isConnectionError(err: unknown): boolean {
 
 // 便捷派发：连接失败派 unreachable，成功派 reachable（业务侧请求成功后可调用以退出不可达态）。
 export function dispatchBackendUnreachable() {
-  try { window.dispatchEvent(new CustomEvent(BACKEND_UNREACHABLE_EVENT)); } catch { /* webview 可能无 CustomEvent，静默兜底 */ }
+  try {
+    window.dispatchEvent(new CustomEvent(BACKEND_UNREACHABLE_EVENT));
+  } catch {
+    /* webview 可能无 CustomEvent，静默兜底 */
+  }
 }
 export function dispatchBackendReachable() {
-  try { window.dispatchEvent(new CustomEvent(BACKEND_REACHABLE_EVENT)); } catch { /* webview 可能无 CustomEvent，静默兜底 */ }
+  try {
+    window.dispatchEvent(new CustomEvent(BACKEND_REACHABLE_EVENT));
+  } catch {
+    /* webview 可能无 CustomEvent，静默兜底 */
+  }
 }
 
 export interface ApiError extends Error {
@@ -194,7 +220,18 @@ interface ApiOptions {
 // 默认请求超时（30s）。覆盖 fetch 原生「无超时」行为，与浏览器默认 connection timeout 解耦。
 const DEFAULT_API_TIMEOUT_MS = 30_000;
 
-export async function api<T = any>(path: string, { method = 'GET', body, auth = true, headers: extraHeaders, formData, timeoutMs = DEFAULT_API_TIMEOUT_MS, clientSource = 'desktop' }: ApiOptions = {}): Promise<T> {
+export async function api<T = any>(
+  path: string,
+  {
+    method = 'GET',
+    body,
+    auth = true,
+    headers: extraHeaders,
+    formData,
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
+    clientSource = 'desktop',
+  }: ApiOptions = {}
+): Promise<T> {
   // 客户端标识：用于后端日志/来源区分，不作为验证码或权限信任边界。
   // multipart 上传时不设 Content-Type，交给浏览器自动加 boundary（设了反而会破坏 multipart 解析）。
   const isFormData = formData instanceof FormData;
@@ -209,7 +246,12 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
   const controller = timeoutMs > 0 ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    res = await fetch(base + path, { method, headers, body: isFormData ? formData : (body ? JSON.stringify(body) : undefined), signal: controller?.signal });
+    res = await fetch(base + path, {
+      method,
+      headers,
+      body: isFormData ? formData : body ? JSON.stringify(body) : undefined,
+      signal: controller?.signal,
+    });
   } catch (err) {
     // AbortError → 友好的超时提示；其余网络错误 → 连接失败提示。
     // R6：两类都属「后端不可达」，派发 BACKEND_UNREACHABLE_EVENT 让 App 渲染友好页（替代反复 toast）。
@@ -228,15 +270,22 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
   if (!res.ok) {
     const nested = data.error && typeof data.error === 'object' ? data.error : {};
     const errorText = typeof data.error === 'string' ? data.error : undefined;
-    const err = new Error(data.message || nested.message || errorText || res.statusText) as ApiError;
+    const err = new Error(
+      data.message || nested.message || errorText || res.statusText
+    ) as ApiError;
     err.code = data.code || nested.code || (data.message ? errorText : undefined);
     err.status = res.status;
-    err.requestId = data.requestId || nested.requestId || res.headers.get('x-request-id') || undefined;
+    err.requestId =
+      data.requestId || nested.requestId || res.headers.get('x-request-id') || undefined;
     // 401 全局拦截（DESK-TOKEN-01 / DESK-03）：仅在 auth 请求且 HTTP 401 时派发，
     // 由 App.tsx 监听器调用 resetSession（避免业务页陷入反复报错却不回登录页）。
     // 业务页的 toast 仍会照常抛出（瞬时反馈），此处不阻断 throw 流程。
     if (auth && res.status === 401) {
-      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* webview 可能无 CustomEvent，静默兜底 */ }
+      try {
+        window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      } catch {
+        /* webview 可能无 CustomEvent，静默兜底 */
+      }
     }
     throw err;
   }
@@ -248,7 +297,13 @@ export async function api<T = any>(path: string, { method = 'GET', body, auth = 
  * boundary.  This is deliberately tiny (currently used by team-admin JSONL
  * exports) so pages never hand-roll Bearer headers or expose the session token.
  */
-export async function apiDownload(path: string, { timeoutMs = DEFAULT_API_TIMEOUT_MS, clientSource = 'desktop' }: { timeoutMs?: number; clientSource?: ApiOptions['clientSource'] } = {}): Promise<Blob> {
+export async function apiDownload(
+  path: string,
+  {
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
+    clientSource = 'desktop',
+  }: { timeoutMs?: number; clientSource?: ApiOptions['clientSource'] } = {}
+): Promise<Blob> {
   const base = apiBase();
   if (!base) throw new Error('尚未配置后端服务地址，请先填写后端 URL。');
   const headers: Record<string, string> = { 'X-Client': clientSource };
@@ -275,9 +330,14 @@ export async function apiDownload(path: string, { timeoutMs = DEFAULT_API_TIMEOU
     const error = new Error(data.message || nested.message || response.statusText) as ApiError;
     error.code = data.code || nested.code;
     error.status = response.status;
-    error.requestId = data.requestId || nested.requestId || response.headers.get('x-request-id') || undefined;
+    error.requestId =
+      data.requestId || nested.requestId || response.headers.get('x-request-id') || undefined;
     if (response.status === 401) {
-      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* webview 可能无 CustomEvent */ }
+      try {
+        window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      } catch {
+        /* webview 可能无 CustomEvent */
+      }
     }
     throw error;
   }

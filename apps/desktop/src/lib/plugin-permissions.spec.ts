@@ -13,11 +13,17 @@ function installStubs() {
   Object.defineProperty(globalThis, 'localStorage', {
     value: {
       getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => { store.set(k, String(v)); },
-      removeItem: (k: string) => { store.delete(k); },
+      setItem: (k: string, v: string) => {
+        store.set(k, String(v));
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
       key: (i: number) => Array.from(store.keys())[i] ?? null,
       clear: () => store.clear(),
-      get length() { return store.size; },
+      get length() {
+        return store.size;
+      },
     },
     configurable: true,
     writable: true,
@@ -57,7 +63,12 @@ describe('plugin system permission gate (Task 14)', () => {
 
   it('记忆 denied 决策后，后续请求返回 granted=false', async () => {
     rememberDecision('p1', 'system.elevated-fs', 'denied');
-    const res = await requestSystemPermission('p1', '插件A', 'system.elevated-fs', '需要写系统目录');
+    const res = await requestSystemPermission(
+      'p1',
+      '插件A',
+      'system.elevated-fs',
+      '需要写系统目录'
+    );
     expect(res.granted).toBe(false);
     expect(res.remembered).toBe(true);
   });

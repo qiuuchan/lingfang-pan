@@ -154,7 +154,9 @@ export class MailService {
     };
     if (authUser) options.auth = { user: authUser, pass: authPass };
     try {
-      return nodemailer.createTransport(options as Parameters<typeof nodemailer.createTransport>[0]);
+      return nodemailer.createTransport(
+        options as Parameters<typeof nodemailer.createTransport>[0]
+      );
     } catch (error) {
       console.error('[mail.transport_create_failed]', { error: (error as Error).message });
       return null;
@@ -173,7 +175,7 @@ export class MailService {
       ? `<img src="${logoUrl}" alt="${platformName}" style="height:32px;margin-bottom:16px;" />`
       : `<div style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;background:#2563eb;color:#fff;border-radius:8px;font-weight:bold;font-size:18px;margin-bottom:16px;">${platformName.slice(0, 1).toUpperCase()}</div>`;
     return [
-      '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'PingFang SC\',\'Microsoft YaHei\',sans-serif;max-width:520px;margin:auto;padding:24px;background:#ffffff;border-radius:12px;">',
+      "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;max-width:520px;margin:auto;padding:24px;background:#ffffff;border-radius:12px;\">",
       logoHtml,
       `<h2 style="margin:0 0 12px;color:#111827;">${title}</h2>`,
       '<div style="color:#374151;font-size:14px;line-height:1.6;">',
@@ -262,7 +264,8 @@ export class MailService {
         message: 'SMTP 未配置（smtpUrl 为空），未实际发送。',
       };
     }
-    const bodyHtml = '<p>这是一封来自平台的测试邮件，用于验证 SMTP 发信配置是否正常。</p><p>如果你收到了这封邮件，说明 SMTP 配置成功。</p>';
+    const bodyHtml =
+      '<p>这是一封来自平台的测试邮件，用于验证 SMTP 发信配置是否正常。</p><p>如果你收到了这封邮件，说明 SMTP 配置成功。</p>';
     const html = await this.renderTemplate(cfg, 'SMTP 测试邮件', bodyHtml);
     try {
       await transporter.sendMail({
@@ -303,7 +306,14 @@ interface SmtpConfigCache {
 }
 
 /** SMTP + 品牌配置查询的 PlatformSetting key 白名单（一次 findMany 全取，避免发一封信查两次库）。 */
-const CONFIG_KEYS = ['smtpUrl', 'smtpFrom', 'smtpUser', 'smtpPass', 'platformName', 'logoUrl'] as const;
+const CONFIG_KEYS = [
+  'smtpUrl',
+  'smtpFrom',
+  'smtpUser',
+  'smtpPass',
+  'platformName',
+  'logoUrl',
+] as const;
 
 /**
  * 归一化 SMTP URL：裸地址自动补协议头，确保 new URL 能正确解析。

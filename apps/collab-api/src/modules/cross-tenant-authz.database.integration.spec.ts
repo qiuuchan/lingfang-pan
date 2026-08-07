@@ -49,8 +49,12 @@ databaseDescribe(
       await prisma.$connect();
 
       // 两个相互隔离的团队。
-      await prisma.team.create({ data: { id: teamAId, name: `CT Team A ${suffix}`, slug: `ct-a-${suffix}` } });
-      await prisma.team.create({ data: { id: teamBId, name: `CT Team B ${suffix}`, slug: `ct-b-${suffix}` } });
+      await prisma.team.create({
+        data: { id: teamAId, name: `CT Team A ${suffix}`, slug: `ct-a-${suffix}` },
+      });
+      await prisma.team.create({
+        data: { id: teamBId, name: `CT Team B ${suffix}`, slug: `ct-b-${suffix}` },
+      });
 
       // 用户：A 管理员 / A 成员 / B 管理员。
       for (const [id, name] of [
@@ -59,7 +63,12 @@ databaseDescribe(
         [adminBId, 'ct-admin-b'],
       ] as const) {
         await prisma.user.create({
-          data: { id, email: `${name}-${suffix}@example.test`, displayName: name, passwordHash: 'not-used' },
+          data: {
+            id,
+            email: `${name}-${suffix}@example.test`,
+            displayName: name,
+            passwordHash: 'not-used',
+          },
         });
       }
 
@@ -75,13 +84,31 @@ databaseDescribe(
 
       // 成员关系：adminA/memberA ∈ A；adminB ∈ B（互不交叉）。
       await prisma.teamMembership.create({
-        data: { teamId: teamAId, userId: adminAId, role: 'TEAM_ADMIN', teamRoleId: roleAId, status: 'ACTIVE' },
+        data: {
+          teamId: teamAId,
+          userId: adminAId,
+          role: 'TEAM_ADMIN',
+          teamRoleId: roleAId,
+          status: 'ACTIVE',
+        },
       });
       await prisma.teamMembership.create({
-        data: { teamId: teamAId, userId: memberAId, role: 'MEMBER', teamRoleId: roleAId, status: 'ACTIVE' },
+        data: {
+          teamId: teamAId,
+          userId: memberAId,
+          role: 'MEMBER',
+          teamRoleId: roleAId,
+          status: 'ACTIVE',
+        },
       });
       await prisma.teamMembership.create({
-        data: { teamId: teamBId, userId: adminBId, role: 'TEAM_ADMIN', teamRoleId: roleBId, status: 'ACTIVE' },
+        data: {
+          teamId: teamBId,
+          userId: adminBId,
+          role: 'TEAM_ADMIN',
+          teamRoleId: roleBId,
+          status: 'ACTIVE',
+        },
       });
 
       // B 团邀请码（用于 A 团管理员越权禁用测试）。
@@ -175,7 +202,9 @@ databaseDescribe(
     afterAll(async () => {
       if (!prisma) return;
       // 按 FK 依赖逆序清理（auditLog.actor→user 为 Restrict，须先删）。
-      await prisma.auditLog.deleteMany({ where: { actorUserId: { in: [adminAId, memberAId, adminBId] } } });
+      await prisma.auditLog.deleteMany({
+        where: { actorUserId: { in: [adminAId, memberAId, adminBId] } },
+      });
       await prisma.automationOutbox.deleteMany({ where: { aggregateId: scheduleAId } });
       await prisma.automationSchedule.deleteMany({ where: { id: scheduleAId } });
       await prisma.workflowRelease.deleteMany({ where: { pluginReleaseId: releaseAId } });
@@ -238,7 +267,9 @@ databaseDescribe(
       });
 
       it('正向对照：A 团管理员移除本团成员成功', async () => {
-        await expect(teamService.removeMember(adminAId, memberAId)).resolves.toMatchObject({ ok: true });
+        await expect(teamService.removeMember(adminAId, memberAId)).resolves.toMatchObject({
+          ok: true,
+        });
         const removed = await prisma.teamMembership.findUnique({
           where: { teamId_userId: { teamId: teamAId, userId: memberAId } },
         });
@@ -257,7 +288,9 @@ databaseDescribe(
       });
 
       it('正向对照：本人标记已读成功', async () => {
-        await expect(notificationService.markRead(notifBId, adminBId)).resolves.toMatchObject({ ok: true });
+        await expect(notificationService.markRead(notifBId, adminBId)).resolves.toMatchObject({
+          ok: true,
+        });
       });
     });
 

@@ -37,10 +37,9 @@ import {
 import type { UploadedFileLike } from './ticket-package';
 
 /** multipart 上传配置：field name=files，最多 5 个，单文件 10MB（与 ticket-package 上限一致，拦截器层先兜底）。 */
-const TICKET_UPLOAD = FileFieldsInterceptor(
-  [{ name: 'files', maxCount: 5 }],
-  { limits: { fileSize: 10 * 1024 * 1024, files: 5 } },
-);
+const TICKET_UPLOAD = FileFieldsInterceptor([{ name: 'files', maxCount: 5 }], {
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+});
 
 type MulterFiles = { files?: UploadedFileLike[] };
 
@@ -54,9 +53,13 @@ async function sendAttachment(
   res: Response,
   ticketId: string,
   attachmentId: string,
-  viewer: TicketViewer,
+  viewer: TicketViewer
 ) {
-  const { stream, filename, mimeType, sizeBytes } = await service.streamAttachment(ticketId, attachmentId, viewer);
+  const { stream, filename, mimeType, sizeBytes } = await service.streamAttachment(
+    ticketId,
+    attachmentId,
+    viewer
+  );
   const encoded = encodeURIComponent(filename);
   res.setHeader('Content-Type', mimeType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encoded}`);
@@ -81,7 +84,10 @@ export class TicketController {
   @Get()
   @ApiOperation({ summary: '本人工单列表（按最近回复倒序）' })
   list(@Req() req: Request, @Query() query: TicketListQueryDto) {
-    return this.tickets.listForUser(requireUser(req).id, { status: query.status, limit: query.limit });
+    return this.tickets.listForUser(requireUser(req).id, {
+      status: query.status,
+      limit: query.limit,
+    });
   }
 
   @Get(':id')
@@ -93,14 +99,27 @@ export class TicketController {
   @Post(':id/messages')
   @ApiOperation({ summary: '用户追加回复（multipart：body + files[]）' })
   @UseInterceptors(TICKET_UPLOAD)
-  reply(@Req() req: Request, @Param('id') id: string, @Body() body: TicketMessageCreateDto, @UploadedFiles() files: MulterFiles) {
+  reply(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: TicketMessageCreateDto,
+    @UploadedFiles() files: MulterFiles
+  ) {
     return this.tickets.addUserMessage(requireUser(req).id, id, body, pickFiles(files));
   }
 
   @Get(':id/attachments/:attachmentId')
   @ApiOperation({ summary: '下载本人工单附件（鉴权流式）' })
-  async download(@Req() req: Request, @Res() res: Response, @Param('id') id: string, @Param('attachmentId') attachmentId: string) {
-    await sendAttachment(this.tickets, res, id, attachmentId, { userId: requireUser(req).id, isAdmin: false });
+  async download(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string
+  ) {
+    await sendAttachment(this.tickets, res, id, attachmentId, {
+      userId: requireUser(req).id,
+      isAdmin: false,
+    });
   }
 }
 
@@ -129,7 +148,12 @@ export class AdminTicketController {
   @Post(':id/messages')
   @ApiOperation({ summary: '管理员回复工单（multipart：body + files[]）' })
   @UseInterceptors(TICKET_UPLOAD)
-  reply(@Req() req: Request, @Param('id') id: string, @Body() body: TicketMessageCreateDto, @UploadedFiles() files: MulterFiles) {
+  reply(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: TicketMessageCreateDto,
+    @UploadedFiles() files: MulterFiles
+  ) {
     return this.tickets.addAdminMessage(requireUser(req).id, id, body, pickFiles(files));
   }
 
@@ -143,7 +167,15 @@ export class AdminTicketController {
   @RequirePermission('platform.ticket.view')
   @Get(':id/attachments/:attachmentId')
   @ApiOperation({ summary: '下载工单附件（鉴权流式）' })
-  async download(@Req() req: Request, @Res() res: Response, @Param('id') id: string, @Param('attachmentId') attachmentId: string) {
-    await sendAttachment(this.tickets, res, id, attachmentId, { userId: requireUser(req).id, isAdmin: true });
+  async download(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string
+  ) {
+    await sendAttachment(this.tickets, res, id, attachmentId, {
+      userId: requireUser(req).id,
+      isAdmin: true,
+    });
   }
 }

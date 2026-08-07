@@ -13,9 +13,21 @@ export function pluginSourceText(sourceKind: PluginReleaseSourceKind, sourceLabe
   return label || DEFAULT_SOURCE_LABELS[sourceKind] || DEFAULT_SOURCE_LABELS.UNKNOWN;
 }
 
-export function PluginSourceBadge({ sourceKind, sourceLabel, ingestChannel }: { sourceKind: PluginReleaseSourceKind; sourceLabel?: string | null; ingestChannel?: PluginIngestChannel }) {
+export function PluginSourceBadge({
+  sourceKind,
+  sourceLabel,
+  ingestChannel,
+}: {
+  sourceKind: PluginReleaseSourceKind;
+  sourceLabel?: string | null;
+  ingestChannel?: PluginIngestChannel;
+}) {
   const source = pluginSourceText(sourceKind, sourceLabel);
   const channel = ingestChannel ? CHANNEL_NAMES[ingestChannel] : null;
   const text = `发布来源：${source}${channel ? ` · ${channel}` : ''}`;
-  return <Badge variant="outline" className="min-w-0 max-w-full sm:max-w-64" title={text}><span className="truncate">{text}</span></Badge>;
+  return (
+    <Badge variant="outline" className="min-w-0 max-w-full sm:max-w-64" title={text}>
+      <span className="truncate">{text}</span>
+    </Badge>
+  );
 }

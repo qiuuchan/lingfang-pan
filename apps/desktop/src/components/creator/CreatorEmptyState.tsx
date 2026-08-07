@@ -8,7 +8,11 @@ const EXAMPLES = [
   { icon: PenLineIcon, title: '日常自动化', prompt: '做一个能整理待办、提醒进度并生成日报的插件' },
 ] as const;
 
-export function CreatorEmptyState({ onSelectPreset }: { onSelectPreset: (prompt: string) => void }) {
+export function CreatorEmptyState({
+  onSelectPreset,
+}: {
+  onSelectPreset: (prompt: string) => void;
+}) {
   return (
     <div className="flex min-h-0 flex-1 items-center overflow-y-auto px-5 py-10 sm:px-8">
       <div className={`${CREATOR_COLUMN_CLASS} flex flex-col items-center text-center`}>
@@ -35,7 +39,9 @@ export function CreatorEmptyState({ onSelectPreset }: { onSelectPreset: (prompt:
                 </span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-foreground">{example.title}</span>
-                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">{example.prompt}</span>
+                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                    {example.prompt}
+                  </span>
                 </span>
               </button>
             );

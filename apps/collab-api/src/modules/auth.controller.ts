@@ -6,14 +6,34 @@ import { Throttle } from '@nestjs/throttler';
 import { Public, requireUser } from '../common';
 import { ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE } from '../security';
 import { AuthService } from './auth.service';
-import { ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto, AdminForgotPasswordDto, AdminLoginDto } from './dto/auth.dto';
+import {
+  ForgotPasswordDto,
+  LoginDto,
+  RegisterDto,
+  ResetPasswordDto,
+  VerifyEmailDto,
+  AdminForgotPasswordDto,
+  AdminLoginDto,
+} from './dto/auth.dto';
 
 // 管理端会话 Cookie（镜像 web-session.controller 的 web 会话方案）。
 // session：HttpOnly + 同源 path=/api，7 天；csrf：可读（非 HttpOnly）供前端读取放入 x-csrf-token，1 天。
 // secure 仅生产（HTTPS）置位；开发（HTTP localhost）不置位以便浏览器存储。
 const secure = () => process.env.NODE_ENV === 'production';
-const adminSessionCookie = { httpOnly: true, secure: secure(), sameSite: 'lax' as const, path: '/api', maxAge: 7 * 24 * 60 * 60 * 1000 };
-const adminCsrfCookie = { httpOnly: false, secure: secure(), sameSite: 'lax' as const, path: '/api', maxAge: 24 * 60 * 60 * 1000 };
+const adminSessionCookie = {
+  httpOnly: true,
+  secure: secure(),
+  sameSite: 'lax' as const,
+  path: '/api',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
+const adminCsrfCookie = {
+  httpOnly: false,
+  secure: secure(),
+  sameSite: 'lax' as const,
+  path: '/api',
+  maxAge: 24 * 60 * 60 * 1000,
+};
 
 // 敏感鉴权端点统一限流：10 次/分钟/IP（Top9）。
 // 防暴力破解密码、注册轰炸、找回密码邮件轰炸。全局默认 60 次/分钟，此处收紧到 10。
@@ -52,7 +72,11 @@ export class AuthController {
   @AUTH_THROTTLE
   @ApiOperation({ summary: '管理端登录（按平台配置校验验证码）' })
   async adminLogin(@Res({ passthrough: true }) res: Response, @Body() body: AdminLoginDto) {
-    const session = await this.auth.adminLogin({ email: body.email, password: body.password, captcha: body.captcha });
+    const session = await this.auth.adminLogin({
+      email: body.email,
+      password: body.password,
+      captcha: body.captcha,
+    });
     // 下发 HttpOnly 会话 Cookie + 可读 CSRF Cookie；Body 仍返回 token 以兼容非浏览器客户端。
     res.cookie(ADMIN_SESSION_COOKIE, session.token, adminSessionCookie);
     res.cookie(ADMIN_CSRF_COOKIE, randomBytes(32).toString('base64url'), adminCsrfCookie);
@@ -108,7 +132,9 @@ export class AuthController {
 
   @Public()
   @Get('admin/csrf')
-  @ApiOperation({ summary: '获取管理端 CSRF 令牌（写入可读 Cookie，前端读取后放于 x-csrf-token 头）' })
+  @ApiOperation({
+    summary: '获取管理端 CSRF 令牌（写入可读 Cookie，前端读取后放于 x-csrf-token 头）',
+  })
   adminCsrf(@Res({ passthrough: true }) res: Response) {
     const csrfToken = randomBytes(32).toString('base64url');
     res.cookie(ADMIN_CSRF_COOKIE, csrfToken, adminCsrfCookie);

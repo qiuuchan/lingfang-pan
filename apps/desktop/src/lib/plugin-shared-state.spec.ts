@@ -22,7 +22,9 @@ describe('desktop shared-state admin client', () => {
     api.mockResolvedValue({ namespaces: [] });
     await listSharedNamespaces();
     expect(api).toHaveBeenCalledWith('/api/teams/current/plugin-shared/namespaces');
-    expect(api.mock.calls[0]).not.toContainEqual(expect.objectContaining({ token: expect.anything(), invocation_id: expect.anything() }));
+    expect(api.mock.calls[0]).not.toContainEqual(
+      expect.objectContaining({ token: expect.anything(), invocation_id: expect.anything() })
+    );
   });
 
   it('routes lifecycle, export and CAS migration through exact namespace ids', async () => {
@@ -39,14 +41,30 @@ describe('desktop shared-state admin client', () => {
       expected_revision: '42',
     });
 
-    expect(apiDownload).toHaveBeenCalledWith('/api/teams/current/plugin-shared/namespaces/ns%2Fone/export');
-    expect(api).toHaveBeenCalledWith('/api/teams/current/plugin-shared/namespaces/ns%2Fone', { method: 'DELETE' });
-    expect(api).toHaveBeenCalledWith('/api/teams/current/plugin-shared/namespaces/ns%2Fone/reactivate', {
-      method: 'PUT', body: { active_schema_version: 3 },
+    expect(apiDownload).toHaveBeenCalledWith(
+      '/api/teams/current/plugin-shared/namespaces/ns%2Fone/export'
+    );
+    expect(api).toHaveBeenCalledWith('/api/teams/current/plugin-shared/namespaces/ns%2Fone', {
+      method: 'DELETE',
     });
-    expect(api).toHaveBeenCalledWith('/api/teams/current/plugin-shared/namespaces/ns%2Fone/values/project%20key/migrate', {
-      method: 'PUT',
-      body: { value: { version: 3 }, source_schema_version: 2, target_schema_version: 3, expected_revision: '42' },
-    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/teams/current/plugin-shared/namespaces/ns%2Fone/reactivate',
+      {
+        method: 'PUT',
+        body: { active_schema_version: 3 },
+      }
+    );
+    expect(api).toHaveBeenCalledWith(
+      '/api/teams/current/plugin-shared/namespaces/ns%2Fone/values/project%20key/migrate',
+      {
+        method: 'PUT',
+        body: {
+          value: { version: 3 },
+          source_schema_version: 2,
+          target_schema_version: 3,
+          expected_revision: '42',
+        },
+      }
+    );
   });
 });

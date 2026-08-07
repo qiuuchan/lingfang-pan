@@ -6,7 +6,7 @@ export const AUTOMATION_OUTBOX_LEASE_MS = 30_000;
 
 export function automationOutboxBackoffMs(attempt: number): number {
   const exponent = Math.max(0, Math.min(attempt - 1, 10));
-  return Math.min(60 * 60 * 1000, 1_000 * (2 ** exponent));
+  return Math.min(60 * 60 * 1000, 1_000 * 2 ** exponent);
 }
 
 export type ClaimedAutomationOutbox = {
@@ -30,10 +30,7 @@ export class AutomationOutboxService {
       const candidates = await tx.automationOutbox.findMany({
         where: {
           availableAt: { lte: now },
-          OR: [
-            { status: 'PENDING' },
-            { status: 'PROCESSING', lockedUntil: { lt: now } },
-          ],
+          OR: [{ status: 'PENDING' }, { status: 'PROCESSING', lockedUntil: { lt: now } }],
         },
         orderBy: [{ availableAt: 'asc' }, { createdAt: 'asc' }],
         take: boundedLimit,
@@ -45,10 +42,7 @@ export class AutomationOutboxService {
           where: {
             id: candidate.id,
             availableAt: { lte: now },
-            OR: [
-              { status: 'PENDING' },
-              { status: 'PROCESSING', lockedUntil: { lt: now } },
-            ],
+            OR: [{ status: 'PENDING' }, { status: 'PROCESSING', lockedUntil: { lt: now } }],
           },
           data: {
             status: 'PROCESSING',
@@ -81,7 +75,12 @@ export class AutomationOutboxService {
     return result.count === 1;
   }
 
-  async fail(id: string, workerId: string, errorCode: string, now = new Date()): Promise<'RETRY' | 'DEAD' | 'STALE'> {
+  async fail(
+    id: string,
+    workerId: string,
+    errorCode: string,
+    now = new Date()
+  ): Promise<'RETRY' | 'DEAD' | 'STALE'> {
     const current = await this.prisma.automationOutbox.findFirst({
       where: { id, status: 'PROCESSING', lockedBy: workerId },
       select: { attempts: true },
@@ -90,18 +89,20 @@ export class AutomationOutboxService {
     const dead = current.attempts >= AUTOMATION_OUTBOX_MAX_ATTEMPTS;
     const result = await this.prisma.automationOutbox.updateMany({
       where: { id, status: 'PROCESSING', lockedBy: workerId, attempts: current.attempts },
-      data: dead ? {
-        status: 'FAILED',
-        lockedBy: null,
-        lockedUntil: null,
-        lastErrorCode: errorCode.slice(0, 120),
-      } : {
-        status: 'PENDING',
-        availableAt: new Date(now.getTime() + automationOutboxBackoffMs(current.attempts)),
-        lockedBy: null,
-        lockedUntil: null,
-        lastErrorCode: errorCode.slice(0, 120),
-      },
+      data: dead
+        ? {
+            status: 'FAILED',
+            lockedBy: null,
+            lockedUntil: null,
+            lastErrorCode: errorCode.slice(0, 120),
+          }
+        : {
+            status: 'PENDING',
+            availableAt: new Date(now.getTime() + automationOutboxBackoffMs(current.attempts)),
+            lockedBy: null,
+            lockedUntil: null,
+            lastErrorCode: errorCode.slice(0, 120),
+          },
     });
     if (result.count !== 1) return 'STALE';
     return dead ? 'DEAD' : 'RETRY';

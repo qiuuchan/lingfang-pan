@@ -64,22 +64,54 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
         </p>
         <FieldGroup className="gap-3">
           <Field>
-            <Input placeholder="管理员邮箱" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <Input
+              placeholder="管理员邮箱"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
           </Field>
           <Field>
-            <Input type="password" placeholder="密码（≥8 位）" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <Input
+              type="password"
+              placeholder="密码（≥8 位）"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
           </Field>
           <Field>
-            <Input type="password" placeholder="确认密码" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <Input
+              type="password"
+              placeholder="确认密码"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
           </Field>
           <Field>
-            <Input placeholder="显示名称（可选）" value={displayName} onChange={(e) => setDisplayName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <Input
+              placeholder="显示名称（可选）"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
           </Field>
           <Field>
-            <Input placeholder="平台名称（可选）" value={platformName} onChange={(e) => setPlatformName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <Input
+              placeholder="平台名称（可选）"
+              value={platformName}
+              onChange={(e) => setPlatformName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
           </Field>
         </FieldGroup>
-        <LoadingButton className="w-full" loading={loading} onClick={submit}>完成初始化</LoadingButton>
+        <LoadingButton className="w-full" loading={loading} onClick={submit}>
+          完成初始化
+        </LoadingButton>
       </CardContent>
     </Card>
   );

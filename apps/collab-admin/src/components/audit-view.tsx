@@ -5,7 +5,13 @@ import { Button } from '@/components/ui/button';
 import { DetailSheet } from '@/components/ui/detail-sheet';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -85,7 +91,7 @@ export function AuditView() {
   const logs = useAsyncResource(
     (signal) => api<AuditLogPage>(auditListPath({ page, pageSize, category, query }), { signal }),
     [page, pageSize, category, query],
-    { isEmpty: (result) => result.items.length === 0 },
+    { isEmpty: (result) => result.items.length === 0 }
   );
 
   useEffect(() => {
@@ -104,15 +110,24 @@ export function AuditView() {
     <Section
       title="审计日志"
       description="平台级操作记录。列表保持轻量，完整元数据仅在打开单条记录后加载。"
-      actions={(
-        <Button type="button" variant="outline" size="sm" onClick={logs.reload} disabled={logs.status === 'loading'}>
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={logs.reload}
+          disabled={logs.status === 'loading'}
+        >
           <RefreshCwIcon className={logs.status === 'loading' ? 'animate-spin' : ''} />
           刷新
         </Button>
-      )}
+      }
     >
       <div className="space-y-4">
-        <form className="grid gap-2 sm:grid-cols-[minmax(16rem,1fr)_11rem_auto]" onSubmit={submitSearch}>
+        <form
+          className="grid gap-2 sm:grid-cols-[minmax(16rem,1fr)_11rem_auto]"
+          onSubmit={submitSearch}
+        >
           <div className="relative min-w-0">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -129,27 +144,34 @@ export function AuditView() {
               setPage(1);
             }}
           >
-            <SelectTrigger aria-label="审计分类"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="审计分类">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部分类</SelectItem>
               {AUDIT_CATEGORIES.map((item) => (
-                <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>
+                <SelectItem key={item.key} value={item.key}>
+                  {item.label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button type="submit"><SearchIcon />查询</Button>
+          <Button type="submit">
+            <SearchIcon />
+            查询
+          </Button>
         </form>
 
         <AsyncResource
           status={logs.status}
           error={logs.error}
           retry={logs.reload}
-          emptyFallback={(
+          emptyFallback={
             <div className="flex min-h-40 flex-col items-center justify-center gap-2 border-y py-8 text-sm text-muted-foreground">
               <FileClockIcon className="size-6 opacity-60" />
               没有符合条件的审计记录
             </div>
-          )}
+          }
         >
           {logs.data && (
             <>
@@ -174,16 +196,22 @@ export function AuditView() {
                         >
                           {actionLabel(log.action)}
                         </TableCellAction>
-                        <div className="mt-0.5 max-w-72 truncate font-mono text-xs text-muted-foreground">{log.action}</div>
+                        <div className="mt-0.5 max-w-72 truncate font-mono text-xs text-muted-foreground">
+                          {log.action}
+                        </div>
                       </TableCell>
                       <TableCell className="hidden text-muted-foreground sm:table-cell">
                         {categoryLabel(auditCategory(log.action))}
                       </TableCell>
                       <TableCell>
                         <div>{targetLabel(log.targetType)}</div>
-                        <div className="max-w-48 truncate font-mono text-xs text-muted-foreground">{log.targetId || '—'}</div>
+                        <div className="max-w-48 truncate font-mono text-xs text-muted-foreground">
+                          {log.targetId || '—'}
+                        </div>
                       </TableCell>
-                      <TableCell className="hidden md:table-cell">{log.actor?.email || '系统'}</TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {log.actor?.email || '系统'}
+                      </TableCell>
                       <TableCell className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">
                         {formatTime(log.createdAt)}
                       </TableCell>
@@ -228,9 +256,12 @@ function AuditDetailSheet({
 }) {
   const logId = summary?.id ?? '';
   const detail = useAsyncResource(
-    (signal) => api<{ log: AuditLogDetail }>(`/api/admin/audit-logs/${encodeURIComponent(logId)}`, { signal }),
+    (signal) =>
+      api<{ log: AuditLogDetail }>(`/api/admin/audit-logs/${encodeURIComponent(logId)}`, {
+        signal,
+      }),
     [logId],
-    { enabled: open && Boolean(logId) },
+    { enabled: open && Boolean(logId) }
   );
   const log = detail.data?.log;
 
@@ -247,13 +278,15 @@ function AuditDetailSheet({
           <div className="space-y-5">
             <section className="space-y-2">
               <h3 className="text-sm font-semibold">记录概览</h3>
-              <InfoGrid items={[
-                ['分类', categoryLabel(auditCategory(log.action))],
-                ['对象', targetLabel(log.targetType)],
-                ['对象 ID', <span className="font-mono text-xs">{log.targetId || '—'}</span>],
-                ['操作者', log.actor ? `${log.actor.displayName} (${log.actor.email})` : '系统'],
-                ['时间', formatTime(log.createdAt)],
-              ]} />
+              <InfoGrid
+                items={[
+                  ['分类', categoryLabel(auditCategory(log.action))],
+                  ['对象', targetLabel(log.targetType)],
+                  ['对象 ID', <span className="font-mono text-xs">{log.targetId || '—'}</span>],
+                  ['操作者', log.actor ? `${log.actor.displayName} (${log.actor.email})` : '系统'],
+                  ['时间', formatTime(log.createdAt)],
+                ]}
+              />
             </section>
             <section className="space-y-2 border-t pt-5">
               <h3 className="text-sm font-semibold">元数据</h3>

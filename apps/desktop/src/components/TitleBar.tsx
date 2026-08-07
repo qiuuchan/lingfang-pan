@@ -1,4 +1,12 @@
-import { PanelLeftCloseIcon, PanelLeftOpenIcon, MinusIcon, SquareIcon, XIcon, CopyIcon, SparklesIcon } from 'lucide-react';
+import {
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  MinusIcon,
+  SquareIcon,
+  XIcon,
+  CopyIcon,
+  SparklesIcon,
+} from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { cn } from '@/lib/utils';
@@ -15,18 +23,33 @@ interface TitleBarProps {
 }
 
 export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作台' }: TitleBarProps) {
-  const hasTauri = typeof window !== 'undefined' && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+  const hasTauri =
+    typeof window !== 'undefined' &&
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
   const appWindow = hasTauri ? getCurrentWindow() : null;
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
     if (!appWindow) return;
     let unlisten: (() => void) | undefined;
-    appWindow.isMaximized().then(setMaximized).catch(() => {});
-    appWindow.onResized(() => { appWindow.isMaximized().then(setMaximized).catch(() => {}); })
-      .then((fn) => { unlisten = fn as unknown as () => void; })
+    appWindow
+      .isMaximized()
+      .then(setMaximized)
       .catch(() => {});
-    return () => { unlisten?.(); };
+    appWindow
+      .onResized(() => {
+        appWindow
+          .isMaximized()
+          .then(setMaximized)
+          .catch(() => {});
+      })
+      .then((fn) => {
+        unlisten = fn as unknown as () => void;
+      })
+      .catch(() => {});
+    return () => {
+      unlisten?.();
+    };
   }, [appWindow]);
 
   const hasSidebar = typeof onToggleSidebar === 'function';
@@ -39,19 +62,28 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
         {hasSidebar && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleSidebar!(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSidebar!();
+            }}
             className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             aria-label={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
             title={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
           >
-            {sidebarOpen ? <PanelLeftCloseIcon className="size-[18px]" /> : <PanelLeftOpenIcon className="size-[18px]" />}
+            {sidebarOpen ? (
+              <PanelLeftCloseIcon className="size-[18px]" />
+            ) : (
+              <PanelLeftOpenIcon className="size-[18px]" />
+            )}
           </button>
         )}
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
             <SparklesIcon className="size-3.5" />
           </span>
-          <span className="truncate text-sm font-semibold text-foreground" data-tauri-drag-region>{label}</span>
+          <span className="truncate text-sm font-semibold text-foreground" data-tauri-drag-region>
+            {label}
+          </span>
         </div>
       </div>
 
@@ -61,7 +93,11 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
             <MinusIcon className="size-4" />
           </WinBtn>
           <WinBtn title={maximized ? '还原' : '最大化'} onClick={() => appWindow.toggleMaximize()}>
-            {maximized ? <CopyIcon className="size-3.5 rotate-180" /> : <SquareIcon className="size-3.5" />}
+            {maximized ? (
+              <CopyIcon className="size-3.5 rotate-180" />
+            ) : (
+              <SquareIcon className="size-3.5" />
+            )}
           </WinBtn>
           <WinBtn title="关闭" danger onClick={() => appWindow.close()}>
             <XIcon className="size-4" />
@@ -72,15 +108,30 @@ export function TitleBar({ sidebarOpen, onToggleSidebar, label = '灵坊工作�
   );
 }
 
-function WinBtn({ children, title, onClick, danger }: { children: ReactNode; title: string; onClick: () => void; danger?: boolean }) {
+function WinBtn({
+  children,
+  title,
+  onClick,
+  danger,
+}: {
+  children: ReactNode;
+  title: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
   return (
     <button
       type="button"
       title={title}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       className={cn(
         'inline-flex h-7 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors',
-        danger ? 'hover:bg-destructive/15 hover:text-destructive' : 'hover:bg-accent hover:text-foreground',
+        danger
+          ? 'hover:bg-destructive/15 hover:text-destructive'
+          : 'hover:bg-accent hover:text-foreground'
       )}
     >
       {children}

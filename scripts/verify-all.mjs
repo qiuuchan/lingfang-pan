@@ -15,8 +15,13 @@ let fail = 0;
 for (const j of jobs) {
   console.log(`\n──────── ${j.name} (${j.file}) ────────`);
   const r = spawnSync(process.execPath, [j.file], { cwd: root, stdio: 'inherit' });
-  if (r.status === 0) { pass += 1; console.log(`✓ ${j.name} 通过`); }
-  else { fail += 1; console.log(`✗ ${j.name} 失败 (exit ${r.status})`); }
+  if (r.status === 0) {
+    pass += 1;
+    console.log(`✓ ${j.name} 通过`);
+  } else {
+    fail += 1;
+    console.log(`✗ ${j.name} 失败 (exit ${r.status})`);
+  }
 }
 console.log(`\n════ 全量验证汇总：通过 ${pass} / 失败 ${fail} ════`);
 process.exit(fail === 0 ? 0 : 1);

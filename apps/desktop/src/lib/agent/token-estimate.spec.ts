@@ -53,7 +53,10 @@ describe('estimateMessageTokens', () => {
         {
           id: 'call_1',
           type: 'function',
-          function: { name: 'WebSearch', arguments: JSON.stringify({ query: 'tauri 2.0 release' }) },
+          function: {
+            name: 'WebSearch',
+            arguments: JSON.stringify({ query: 'tauri 2.0 release' }),
+          },
         },
       ],
     };

@@ -31,7 +31,9 @@ export function Home() {
       >
         <SearchIcon className="size-4 shrink-0 transition-colors group-hover:text-primary" />
         <span className="flex-1">搜插件、搜功能，或描述你想创建的工具…</span>
-        <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">Ctrl K</kbd>
+        <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          Ctrl K
+        </kbd>
       </button>
 
       {/* 最近使用插件 */}
@@ -42,7 +44,9 @@ export function Home() {
             {recent.map((p: LoadedPlugin) => (
               <button
                 key={p.id}
-                onClick={() => { setRunningPlugin(p); }}
+                onClick={() => {
+                  setRunningPlugin(p);
+                }}
                 className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/40 hover:text-primary"
                 title={p.name}
               >

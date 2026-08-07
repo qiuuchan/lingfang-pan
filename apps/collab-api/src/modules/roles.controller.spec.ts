@@ -7,7 +7,7 @@ describe('AdminRolesController permissions registry guard', () => {
   it('requires platform.role.manage before exposing platform permission codes', () => {
     const permissions = Reflect.getMetadata(
       PERMISSIONS_KEY,
-      AdminRolesController.prototype.listPermissions,
+      AdminRolesController.prototype.listPermissions
     );
     expect(permissions).toEqual(['platform.role.manage']);
   });

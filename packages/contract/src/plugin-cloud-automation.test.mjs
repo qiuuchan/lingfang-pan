@@ -18,24 +18,29 @@ const target = {
 };
 
 test('schedule triggers accept only structured once/daily/weekly shapes', () => {
-  expect(AutomationScheduleTrigger.parse({
+  expect(
+    AutomationScheduleTrigger.parse({
       kind: 'DAILY',
       time_zone: 'Asia/Shanghai',
       local_time: '09:30',
-    }).kind).toBe('DAILY');
-  expect(AutomationScheduleTrigger.parse({
+    }).kind
+  ).toBe('DAILY');
+  expect(
+    AutomationScheduleTrigger.parse({
       kind: 'WEEKLY',
       time_zone: 'America/New_York',
       day_of_week: 7,
       local_time: '22:10',
-    }).kind).toBe('WEEKLY');
+    }).kind
+  ).toBe('WEEKLY');
   expect(() =>
     AutomationScheduleTrigger.parse({
       kind: 'DAILY',
       cron: '0 9 * * *',
       time_zone: 'UTC',
       local_time: '09:00',
-    })).toThrow();
+    })
+  ).toThrow();
   expect(() =>
     CreateAutomationScheduleRequest.parse({
       workflow_release_id: 'wf',
@@ -43,16 +48,19 @@ test('schedule triggers accept only structured once/daily/weekly shapes', () => 
       trigger: { kind: 'ONCE', run_at: '2099-01-01T00:00:00.000Z' },
       input: {},
       webhook_url: 'https://example.com',
-    })).toThrow();
+    })
+  ).toThrow();
 });
 
 test('repeat fire payload cannot smuggle an occurrence or schedule input', () => {
-  expect(AutomationScheduleFirePayload.parse({
+  expect(
+    AutomationScheduleFirePayload.parse({
       kind: 'REPEAT',
       schedule_id: 's1',
       generation: 2,
       scheduler_key: 'schedule-s1-g2',
-    })).toEqual({ kind: 'REPEAT', schedule_id: 's1', generation: 2, scheduler_key: 'schedule-s1-g2' });
+    })
+  ).toEqual({ kind: 'REPEAT', schedule_id: 's1', generation: 2, scheduler_key: 'schedule-s1-g2' });
   expect(() =>
     AutomationScheduleFirePayload.parse({
       kind: 'REPEAT',
@@ -60,7 +68,8 @@ test('repeat fire payload cannot smuggle an occurrence or schedule input', () =>
       generation: 2,
       scheduler_key: 'schedule-s1-g2',
       scheduled_for: '2099-01-01T00:00:00.000Z',
-    })).toThrow();
+    })
+  ).toThrow();
 });
 
 test('deployment projection excludes endpoint URL and secret material', () => {
@@ -85,7 +94,8 @@ test('deployment projection excludes endpoint URL and secret material', () => {
   expect(CloudActionDeployment.parse(deployment).status).toBe('DRAFT');
   expect(() => CloudActionDeployment.parse({ ...deployment, secret: 'plaintext' })).toThrow();
   expect(() =>
-    CloudActionDeployment.parse({ ...deployment, endpoint_url: 'https://api.example.com/action' })).toThrow();
+    CloudActionDeployment.parse({ ...deployment, endpoint_url: 'https://api.example.com/action' })
+  ).toThrow();
 });
 
 test('usage source is explicit and exact target includes action surface digest', () => {
@@ -109,5 +119,6 @@ test('usage source is explicit and exact target includes action surface digest',
   };
   expect(CloudUsageEvent.parse(usage).target.action_surface_sha256).toBe(digest('b'));
   expect(() =>
-    CloudUsageEvent.parse({ ...usage, target: { ...target, action_surface_sha256: undefined } })).toThrow();
+    CloudUsageEvent.parse({ ...usage, target: { ...target, action_surface_sha256: undefined } })
+  ).toThrow();
 });

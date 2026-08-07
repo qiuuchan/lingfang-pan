@@ -48,11 +48,16 @@ export function LandingFeatures() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="max-w-2xl">
           <span className="lf-section-label">capabilities</span>
-          <h2 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
+          <h2
+            className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight"
+            style={{ color: 'var(--lf-fg)' }}
+          >
             从想法到能力，只需一套平台
           </h2>
           <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
-            LingFang 把插件的生成、分发、协作与治理串成完整闭环，让团队里的每个人都能参与构建企业专属 AI 能力。
+            LingFang
+            把插件的生成、分发、协作与治理串成完整闭环，让团队里的每个人都能参与构建企业专属 AI
+            能力。
           </p>
         </div>
 
@@ -75,20 +80,38 @@ export function LandingFeatures() {
                 </span>
               </div>
 
-              <h3 className="lf-display mt-5 text-xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
+              <h3
+                className="lf-display mt-5 text-xl font-semibold tracking-tight"
+                style={{ color: 'var(--lf-fg)' }}
+              >
                 {feature.title}
               </h3>
-              <p className="mt-2 text-sm leading-relaxed flex-1" style={{ color: 'var(--lf-fg-muted)' }}>
+              <p
+                className="mt-2 text-sm leading-relaxed flex-1"
+                style={{ color: 'var(--lf-fg-muted)' }}
+              >
                 {feature.description}
               </p>
 
-              <ul className="mt-5 space-y-2 border-t pt-5" style={{ borderColor: 'var(--lf-border)' }}>
+              <ul
+                className="mt-5 space-y-2 border-t pt-5"
+                style={{ borderColor: 'var(--lf-border)' }}
+              >
                 {feature.points.map((point) => (
-                  <li key={point} className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+                  <li
+                    key={point}
+                    className="flex items-start gap-2.5 text-sm"
+                    style={{ color: 'var(--lf-fg-muted)' }}
+                  >
                     <svg
                       className="mt-0.5 shrink-0"
                       style={{ color: 'var(--lf-accent)' }}
-                      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
                     >
                       <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>

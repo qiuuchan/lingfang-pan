@@ -51,20 +51,37 @@ export function exportSharedNamespace(namespaceId: string): Promise<Blob> {
   return apiDownload(`${root}/${encodeURIComponent(namespaceId)}/export`);
 }
 
-export function deleteSharedNamespace(namespaceId: string): Promise<SharedNamespaceLifecycleResult> {
-  return api<SharedNamespaceLifecycleResult>(`${root}/${encodeURIComponent(namespaceId)}`, { method: 'DELETE' });
-}
-
-export function reactivateSharedNamespace(namespaceId: string, activeSchemaVersion: number): Promise<SharedNamespaceLifecycleResult> {
-  return api<SharedNamespaceLifecycleResult>(`${root}/${encodeURIComponent(namespaceId)}/reactivate`, {
-    method: 'PUT',
-    body: { active_schema_version: activeSchemaVersion },
+export function deleteSharedNamespace(
+  namespaceId: string
+): Promise<SharedNamespaceLifecycleResult> {
+  return api<SharedNamespaceLifecycleResult>(`${root}/${encodeURIComponent(namespaceId)}`, {
+    method: 'DELETE',
   });
 }
 
-export function migrateSharedNamespaceValue(namespaceId: string, key: string, input: SharedNamespaceMigrationInput): Promise<unknown> {
-  return api(`${root}/${encodeURIComponent(namespaceId)}/values/${encodeURIComponent(key)}/migrate`, {
-    method: 'PUT',
-    body: input,
-  });
+export function reactivateSharedNamespace(
+  namespaceId: string,
+  activeSchemaVersion: number
+): Promise<SharedNamespaceLifecycleResult> {
+  return api<SharedNamespaceLifecycleResult>(
+    `${root}/${encodeURIComponent(namespaceId)}/reactivate`,
+    {
+      method: 'PUT',
+      body: { active_schema_version: activeSchemaVersion },
+    }
+  );
+}
+
+export function migrateSharedNamespaceValue(
+  namespaceId: string,
+  key: string,
+  input: SharedNamespaceMigrationInput
+): Promise<unknown> {
+  return api(
+    `${root}/${encodeURIComponent(namespaceId)}/values/${encodeURIComponent(key)}/migrate`,
+    {
+      method: 'PUT',
+      body: input,
+    }
+  );
 }

@@ -36,7 +36,10 @@ export function UserDetailSheet({
 }) {
   const userId = user?.id ?? '';
   const [tab, setTab] = useState<UserDetailTab>('overview');
-  const [visitedState, setVisitedState] = useState<VisitedUserTabs>({ userId, tabs: new Set(['overview']) });
+  const [visitedState, setVisitedState] = useState<VisitedUserTabs>({
+    userId,
+    tabs: new Set(['overview']),
+  });
   const [teamsPage, setTeamsPage] = useState(1);
   const [walletPage, setWalletPage] = useState(1);
   const [loginsPage, setLoginsPage] = useState(1);
@@ -55,42 +58,56 @@ export function UserDetailSheet({
     setEmailNotice(null);
   }, [userId, mode]);
 
-  const overview = useAsyncResource(
-    (signal) => adminCoreApi.userDetail(userId, signal),
-    [userId],
-    { enabled: !!userId },
-  );
+  const overview = useAsyncResource((signal) => adminCoreApi.userDetail(userId, signal), [userId], {
+    enabled: !!userId,
+  });
   const teams = useAsyncResource(
     (signal) => adminCoreApi.userTeams(userId, teamsPage, PAGE_SIZE, signal),
     [userId, teamsPage],
     {
-      enabled: !!userId && mode === 'user' && visitedState.userId === userId && visitedState.tabs.has('teams'),
+      enabled:
+        !!userId &&
+        mode === 'user' &&
+        visitedState.userId === userId &&
+        visitedState.tabs.has('teams'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
   const wallet = useAsyncResource(
     (signal) => adminCoreApi.userWallet(userId, walletPage, PAGE_SIZE, signal),
     [userId, walletPage],
     {
-      enabled: !!userId && mode === 'user' && visitedState.userId === userId && visitedState.tabs.has('wallet'),
+      enabled:
+        !!userId &&
+        mode === 'user' &&
+        visitedState.userId === userId &&
+        visitedState.tabs.has('wallet'),
       isEmpty: () => false,
-    },
+    }
   );
   const logins = useAsyncResource(
     (signal) => adminCoreApi.userLogins(userId, loginsPage, PAGE_SIZE, signal),
     [userId, loginsPage],
     {
-      enabled: !!userId && mode === 'user' && visitedState.userId === userId && visitedState.tabs.has('logins'),
+      enabled:
+        !!userId &&
+        mode === 'user' &&
+        visitedState.userId === userId &&
+        visitedState.tabs.has('logins'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
   const activity = useAsyncResource(
     (signal) => adminCoreApi.adminActivity(userId, activityPage, PAGE_SIZE, signal),
     [userId, activityPage],
     {
-      enabled: !!userId && mode === 'admin' && visitedState.userId === userId && visitedState.tabs.has('activity'),
+      enabled:
+        !!userId &&
+        mode === 'admin' &&
+        visitedState.userId === userId &&
+        visitedState.tabs.has('activity'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
 
   usePageCorrection(teams.data, teamsPage, PAGE_SIZE, setTeamsPage);
@@ -104,7 +121,8 @@ export function UserDetailSheet({
     const nextTab = value as UserDetailTab;
     setTab(nextTab);
     setVisitedState((current) => {
-      const currentTabs = current.userId === userId ? current.tabs : new Set<UserDetailTab>(['overview']);
+      const currentTabs =
+        current.userId === userId ? current.tabs : new Set<UserDetailTab>(['overview']);
       if (current.userId === userId && currentTabs.has(nextTab)) return current;
       const next = new Set(currentTabs);
       next.add(nextTab);
@@ -133,11 +151,12 @@ export function UserDetailSheet({
     const nextStatus = actionableUser.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
     if (nextStatus === 'DISABLED' && !window.confirm(`确认禁用 ${actionableUser.email}？`)) return;
     const ok = await run(
-      () => api(`/api/admin/users/${actionableUser.id}`, {
-        method: 'PATCH',
-        body: { status: nextStatus },
-      }),
-      nextStatus === 'DISABLED' ? '账号已禁用' : '账号已启用',
+      () =>
+        api(`/api/admin/users/${actionableUser.id}`, {
+          method: 'PATCH',
+          body: { status: nextStatus },
+        }),
+      nextStatus === 'DISABLED' ? '账号已禁用' : '账号已启用'
     );
     if (!ok) return;
     onChanged();
@@ -151,23 +170,30 @@ export function UserDetailSheet({
       title={user?.displayName || user?.email || ''}
       description={user?.email}
       size="lg"
-      footer={actionableUser ? (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button type="button" variant="outline" className="flex-1" onClick={() => void resetPassword()}>
-            <KeyRoundIcon className="size-4" />
-            重置密码
-          </Button>
-          <Button
-            type="button"
-            variant={actionableUser.status === 'ACTIVE' ? 'destructive' : 'default'}
-            className="flex-1"
-            onClick={() => void toggleStatus()}
-          >
-            <BanIcon className="size-4" />
-            {actionableUser.status === 'ACTIVE' ? '禁用账号' : '启用账号'}
-          </Button>
-        </div>
-      ) : null}
+      footer={
+        actionableUser ? (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => void resetPassword()}
+            >
+              <KeyRoundIcon className="size-4" />
+              重置密码
+            </Button>
+            <Button
+              type="button"
+              variant={actionableUser.status === 'ACTIVE' ? 'destructive' : 'default'}
+              className="flex-1"
+              onClick={() => void toggleStatus()}
+            >
+              <BanIcon className="size-4" />
+              {actionableUser.status === 'ACTIVE' ? '禁用账号' : '启用账号'}
+            </Button>
+          </div>
+        ) : null
+      }
     >
       {user ? (
         <Tabs value={tab} onValueChange={selectTab}>
@@ -187,22 +213,28 @@ export function UserDetailSheet({
           <TabsContent value="overview" className="space-y-4 pt-3">
             <AsyncResource status={overview.status} error={overview.error} retry={overview.reload}>
               {overview.data ? (
-                <InfoGrid items={[
-                  ['用户 ID', overview.data.id],
-                  ['邮箱', overview.data.email],
-                  ['显示名', overview.data.displayName || '—'],
-                  ['状态', <StatusBadge key="status" value={overview.data.status} />],
-                  ['平台角色', <StatusBadge key="role" value={overview.data.platformRole} />],
-                  ['注册时间', formatTime(overview.data.createdAt)],
-                  ['邮箱验证', overview.data.emailVerified ? '已验证' : '未验证'],
-                ]} />
+                <InfoGrid
+                  items={[
+                    ['用户 ID', overview.data.id],
+                    ['邮箱', overview.data.email],
+                    ['显示名', overview.data.displayName || '—'],
+                    ['状态', <StatusBadge key="status" value={overview.data.status} />],
+                    ['平台角色', <StatusBadge key="role" value={overview.data.platformRole} />],
+                    ['注册时间', formatTime(overview.data.createdAt)],
+                    ['邮箱验证', overview.data.emailVerified ? '已验证' : '未验证'],
+                  ]}
+                />
               ) : null}
             </AsyncResource>
             {tempPassword ? (
               <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950">
                 <div className="font-medium text-amber-800 dark:text-amber-200">临时密码</div>
-                <div className="mt-2 break-all rounded-md bg-background px-3 py-2 font-mono text-base">{tempPassword}</div>
-                {emailNotice ? <p className="mt-2 text-xs text-muted-foreground">{emailNotice}</p> : null}
+                <div className="mt-2 break-all rounded-md bg-background px-3 py-2 font-mono text-base">
+                  {tempPassword}
+                </div>
+                {emailNotice ? (
+                  <p className="mt-2 text-xs text-muted-foreground">{emailNotice}</p>
+                ) : null}
               </div>
             ) : null}
           </TabsContent>
@@ -219,14 +251,21 @@ export function UserDetailSheet({
                       emptyLabel="该用户未加入团队"
                     >
                       {teams.data.items.map((membership) => (
-                        <div key={membership.teamId} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                        <div
+                          key={membership.teamId}
+                          className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                        >
                           <div className="min-w-0">
                             <div className="truncate font-medium">{membership.team.name}</div>
-                            <div className="truncate text-xs text-muted-foreground">{membership.team.slug} · {formatTime(membership.joinedAt)}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {membership.team.slug} · {formatTime(membership.joinedAt)}
+                            </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             <Badge variant="secondary">{labelOf(membership.role)}</Badge>
-                            <span className="font-medium">{money(membership.team.balanceCents)}</span>
+                            <span className="font-medium">
+                              {money(membership.team.balanceCents)}
+                            </span>
                           </div>
                         </div>
                       ))}
@@ -242,7 +281,9 @@ export function UserDetailSheet({
                       <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-3 text-sm">
                         <WalletIcon className="size-4 text-muted-foreground" />
                         <span className="text-muted-foreground">钱包余额</span>
-                        <span className="ml-auto font-semibold">{money(wallet.data.balanceCents)}</span>
+                        <span className="ml-auto font-semibold">
+                          {money(wallet.data.balanceCents)}
+                        </span>
                       </div>
                       <PagedStack
                         total={wallet.data.total}
@@ -251,12 +292,19 @@ export function UserDetailSheet({
                         emptyLabel="暂无钱包流水"
                       >
                         {wallet.data.items.map((entry) => (
-                          <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                          <div
+                            key={entry.id}
+                            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                          >
                             <div className="min-w-0">
                               <div className="truncate font-medium">{entry.reason}</div>
-                              <div className="text-xs text-muted-foreground">{formatTime(entry.createdAt)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {formatTime(entry.createdAt)}
+                              </div>
                             </div>
-                            <Badge variant={entry.direction === 'CREDIT' ? 'success' : 'destructive'}>
+                            <Badge
+                              variant={entry.direction === 'CREDIT' ? 'success' : 'destructive'}
+                            >
                               {labelOf(entry.direction)} {money(entry.amountCents)}
                             </Badge>
                           </div>
@@ -277,9 +325,14 @@ export function UserDetailSheet({
                       emptyLabel="暂无登录记录"
                     >
                       {logins.data.items.map((entry) => (
-                        <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                        <div
+                          key={entry.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                        >
                           <span className="font-medium">{actionLabel(entry.action)}</span>
-                          <span className="shrink-0 text-xs text-muted-foreground">{formatTime(entry.createdAt)}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {formatTime(entry.createdAt)}
+                          </span>
                         </div>
                       ))}
                     </PagedStack>
@@ -289,7 +342,11 @@ export function UserDetailSheet({
             </>
           ) : (
             <TabsContent value="activity" className="pt-3">
-              <AsyncResource status={activity.status} error={activity.error} retry={activity.reload}>
+              <AsyncResource
+                status={activity.status}
+                error={activity.error}
+                retry={activity.reload}
+              >
                 {activity.data ? (
                   <PagedStack
                     total={activity.data.total}
@@ -304,11 +361,14 @@ export function UserDetailSheet({
                             <ActivityIcon className="size-3.5 shrink-0 text-muted-foreground" />
                             <span className="truncate">{actionLabel(entry.action)}</span>
                           </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">{formatTime(entry.createdAt)}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {formatTime(entry.createdAt)}
+                          </span>
                         </div>
                         {entry.targetType ? (
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {targetLabel(entry.targetType)}{entry.targetId ? ` · ${entry.targetId.slice(0, 8)}` : ''}
+                            {targetLabel(entry.targetType)}
+                            {entry.targetId ? ` · ${entry.targetId.slice(0, 8)}` : ''}
                           </div>
                         ) : null}
                       </div>
@@ -339,7 +399,11 @@ function PagedStack({
 }) {
   return (
     <div className="space-y-2">
-      {total > 0 ? children : <p className="py-8 text-center text-sm text-muted-foreground">{emptyLabel}</p>}
+      {total > 0 ? (
+        children
+      ) : (
+        <p className="py-8 text-center text-sm text-muted-foreground">{emptyLabel}</p>
+      )}
       {total > PAGE_SIZE ? (
         <Pagination
           totalItems={total}

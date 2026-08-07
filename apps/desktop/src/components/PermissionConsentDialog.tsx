@@ -4,7 +4,14 @@
 // 让用户授权/拒绝。勾选「记住选择」时记忆到 localStorage，下次同插件同权限不再弹。
 import { useEffect, useState } from 'react';
 import { ShieldAlertIcon } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { rememberDecision, type PermissionRequest } from '@/lib/plugin-permissions';
@@ -42,15 +49,16 @@ export function PermissionConsentDialog() {
       <DialogContent className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShieldAlertIcon className="size-5 text-amber-500" />
+            <ShieldAlertIcon className="size-5 text-warning" />
             权限请求
           </DialogTitle>
           <DialogDescription>
-            插件「<span className="font-medium text-foreground">{req?.pluginName}</span>」请求系统级权限，请确认是否允许。
+            插件「<span className="font-medium text-foreground">{req?.pluginName}</span>
+            」请求系统级权限，请确认是否允许。
           </DialogDescription>
         </DialogHeader>
         {req && (
-          <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+          <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="text-muted-foreground">权限</span>
               <code className="font-mono text-xs text-foreground">{req.code}</code>

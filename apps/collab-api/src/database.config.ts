@@ -34,7 +34,9 @@ function requireDatabaseUrl(raw: string | undefined): string {
 
 function assertUrlMatchesProvider(provider: DatabaseProvider, url: string): void {
   if (provider === 'postgresql' && !/^postgres(ql)?:\/\//i.test(url)) {
-    throw new Error('DATABASE_PROVIDER=postgresql requires DATABASE_URL to start with postgresql:// or postgres://');
+    throw new Error(
+      'DATABASE_PROVIDER=postgresql requires DATABASE_URL to start with postgresql:// or postgres://'
+    );
   }
   if (provider === 'mysql' && !/^mysql:\/\//i.test(url)) {
     throw new Error('DATABASE_PROVIDER=mysql requires DATABASE_URL to start with mysql://');

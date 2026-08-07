@@ -41,9 +41,7 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
   const parsed = parseArgs(argv);
 
   // 1. 解析插件路径
-  const pluginPath = path.resolve(
-    parsed.positional[0] ?? opts?.path ?? process.cwd(),
-  );
+  const pluginPath = path.resolve(parsed.positional[0] ?? opts?.path ?? process.cwd());
 
   // 2. 读取 manifest.json
   const manifestPath = path.join(pluginPath, 'manifest.json');
@@ -51,7 +49,7 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
     return printError(
       'manifest_not_found',
       `manifest.json 不存在，期望路径: ${manifestPath}`,
-      opts?.json ?? false,
+      opts?.json ?? false
     );
   }
 
@@ -62,7 +60,7 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
     return printError(
       'manifest_read_error',
       `无法读取 manifest.json: ${(e as Error).message}`,
-      opts?.json ?? false,
+      opts?.json ?? false
     );
   }
 
@@ -73,20 +71,18 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
     return printError(
       'manifest_invalid_json',
       `manifest.json 不是合法的 JSON: ${(e as SyntaxError).message}`,
-      opts?.json ?? false,
+      opts?.json ?? false
     );
   }
 
   // 3. 校验 manifest
   const manifestResult: ManifestResult = validateManifest(parsedManifest);
   if (!manifestResult.success) {
-    const lines = manifestResult.errors.map(
-      (e) => `  [${e.code}] ${e.path}: ${e.message}`,
-    );
+    const lines = manifestResult.errors.map((e) => `  [${e.code}] ${e.path}: ${e.message}`);
     return printError(
       'manifest_validation_failed',
       `manifest 校验失败:\n${lines.join('\n')}`,
-      opts?.json ?? false,
+      opts?.json ?? false
     );
   }
 
@@ -98,7 +94,7 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
     return printError(
       'entry_not_found',
       `入口文件不存在: ${manifest.entry}（完整路径: ${entryPath}）`,
-      opts?.json ?? false,
+      opts?.json ?? false
     );
   }
 
@@ -110,22 +106,14 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
   try {
     packResult = await packWorkspace({ workspaceDir: pluginPath, manifest });
   } catch (e) {
-    return printError(
-      'pack_failed',
-      `打包失败: ${(e as Error).message}`,
-      opts?.json ?? false,
-    );
+    return printError('pack_failed', `打包失败: ${(e as Error).message}`, opts?.json ?? false);
   }
 
   // 6. 确定输出路径
-  const resolvedOut = opts?.out ?? (
-    parsed.flags.out && typeof parsed.flags.out === 'string'
-      ? parsed.flags.out
-      : undefined
-  );
-  const outputPath = path.resolve(
-    resolvedOut ?? packResult.suggestedFilename,
-  );
+  const resolvedOut =
+    opts?.out ??
+    (parsed.flags.out && typeof parsed.flags.out === 'string' ? parsed.flags.out : undefined);
+  const outputPath = path.resolve(resolvedOut ?? packResult.suggestedFilename);
 
   // 7. 写入文件
   try {
@@ -134,12 +122,12 @@ export async function buildCommand(argv: string[], opts?: BuildOptions): Promise
     return printError(
       'write_failed',
       `写入输出文件失败: ${(e as Error).message}`,
-      opts?.json ?? false,
+      opts?.json ?? false
     );
   }
 
   // 8. 输出结果
-  const json = opts?.json ?? (parsed.flags.json === true);
+  const json = opts?.json ?? parsed.flags.json === true;
   if (json) {
     const result: BuildResult = {
       ok: true,

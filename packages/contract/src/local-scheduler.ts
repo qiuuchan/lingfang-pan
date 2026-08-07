@@ -27,7 +27,10 @@ const CronExpression = z
   .trim()
   .min(9, 'cron 表达式过短')
   .max(128, 'cron 表达式过长')
-  .regex(/^[\d*/,-]+(\s+[\d*/,-]+){4,5}$/, 'cron 表达式格式无效（需 5 或 6 字段：分 时 日 月 周 [秒]）');
+  .regex(
+    /^[\d*/,-]+(\s+[\d*/,-]+){4,5}$/,
+    'cron 表达式格式无效（需 5 或 6 字段：分 时 日 月 周 [秒]）'
+  );
 const TimeZone = z
   .string()
   .trim()
@@ -47,7 +50,14 @@ const TimeZone = z
 // 本地复用一份避免循环依赖。
 type JsonValue = null | string | number | boolean | JsonValue[] | { [key: string]: JsonValue };
 const WorkflowJsonValue: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([z.null(), z.string(), z.number().finite(), z.boolean(), z.array(WorkflowJsonValue), z.record(WorkflowJsonValue)]),
+  z.union([
+    z.null(),
+    z.string(),
+    z.number().finite(),
+    z.boolean(),
+    z.array(WorkflowJsonValue),
+    z.record(WorkflowJsonValue),
+  ])
 );
 
 // —— 触发器 ——
@@ -162,14 +172,25 @@ export const LocalScheduleUpdateInput = z
     name: z.string().trim().min(1).max(100).optional(),
     trigger: LocalScheduleTrigger.optional(),
     payload: LocalTaskPayload.optional(),
-    timeout_ms: z.number().int().min(LOCAL_SCHEDULE_TIMEOUT_MS_MIN).max(LOCAL_SCHEDULE_TIMEOUT_MS_MAX).optional(),
+    timeout_ms: z
+      .number()
+      .int()
+      .min(LOCAL_SCHEDULE_TIMEOUT_MS_MIN)
+      .max(LOCAL_SCHEDULE_TIMEOUT_MS_MAX)
+      .optional(),
     status: LocalScheduleStatus.optional(),
   })
   .strict();
 export type LocalScheduleUpdateInput = z.infer<typeof LocalScheduleUpdateInput>;
 
 // —— 运行记录 ——
-export const LocalScheduleRunStatus = z.enum(['RUNNING', 'SUCCESS', 'FAILED', 'TIMEOUT', 'SKIPPED']);
+export const LocalScheduleRunStatus = z.enum([
+  'RUNNING',
+  'SUCCESS',
+  'FAILED',
+  'TIMEOUT',
+  'SKIPPED',
+]);
 export type LocalScheduleRunStatus = z.infer<typeof LocalScheduleRunStatus>;
 
 export const LocalScheduleRun = z

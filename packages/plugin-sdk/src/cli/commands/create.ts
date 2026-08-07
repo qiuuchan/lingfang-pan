@@ -101,7 +101,7 @@ async function collectFiles(srcDir: string, baseDir: string = srcDir): Promise<s
 
 export async function createCommand(
   positional: string[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean>
 ): Promise<number> {
   // —— 参数解析 ——
   let name = positional[0] ?? String(flags['name'] ?? '').trim();
@@ -128,10 +128,11 @@ export async function createCommand(
       name = await askText('插件显示名', 'my-plugin');
     }
     if (!runtime) {
-      const idx = await askSelect(
-        '选择运行时类型',
-        ['client — 前端 UI 插件（iframe + HTML）', 'nodejs — Node.js 脚本插件', 'python — Python 脚本插件'],
-      );
+      const idx = await askSelect('选择运行时类型', [
+        'client — 前端 UI 插件（iframe + HTML）',
+        'nodejs — Node.js 脚本插件',
+        'python — Python 脚本插件',
+      ]);
       runtime = VALID_RUNTIMES[idx];
     }
   }
@@ -174,7 +175,10 @@ export async function createCommand(
   let capabilities: Array<{ kind: string; reason: string; risk: string }> = [];
   if (capabilitiesRaw) {
     // 从命令行解析
-    const kinds = capabilitiesRaw.split(',').map((k) => k.trim()).filter(Boolean);
+    const kinds = capabilitiesRaw
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
     capabilities = kinds.map((kind) => ({
       kind,
       reason: `命令行声明`,
@@ -196,7 +200,9 @@ export async function createCommand(
   }
 
   if (!ID_PATTERN.test(id)) {
-    log.error(`id "${id}" 不合法：必须以英文字母开头，只能包含字母、数字、连字符(-)、下划线(_)、点号(.)`);
+    log.error(
+      `id "${id}" 不合法：必须以英文字母开头，只能包含字母、数字、连字符(-)、下划线(_)、点号(.)`
+    );
     return 1;
   }
 
@@ -229,7 +235,7 @@ export async function createCommand(
   if (capabilities.length > 0) {
     const entries = capabilities.map(
       (c, i) =>
-        `${i > 0 ? ',\n    ' : ''}{ "kind": "${c.kind}", "reason": "${c.reason}", "risk": "${c.risk}", "requires_admin": false }`,
+        `${i > 0 ? ',\n    ' : ''}{ "kind": "${c.kind}", "reason": "${c.reason}", "risk": "${c.risk}", "requires_admin": false }`
     );
     capabilitiesJson = entries.join('');
   }
@@ -237,9 +243,12 @@ export async function createCommand(
   // 构建 README 中人类可读的能力列表（Markdown 项目符号）
   // 占位符 __CAPABILITIES_LIST__ 与 manifest JSON 占位 __CAPABILITIES__ 必须分开替换，
   // 否则子串匹配会让 __CAPABILITIES_LIST__ 被替换成 "<json>_LIST__"。
-  const capabilitiesList = capabilities.length > 0
-    ? capabilities.map((c) => `- \`${c.kind}\` — ${c.reason || '插件核心功能'}（风险：${c.risk}）`).join('\n')
-    : '- （暂未声明能力）';
+  const capabilitiesList =
+    capabilities.length > 0
+      ? capabilities
+          .map((c) => `- \`${c.kind}\` — ${c.reason || '插件核心功能'}（风险：${c.risk}）`)
+          .join('\n')
+      : '- （暂未声明能力）';
 
   const vars: Record<string, string> = {
     id,

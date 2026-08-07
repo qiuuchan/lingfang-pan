@@ -131,7 +131,7 @@ function containsExcludedSegment(zipPath: string): boolean {
  */
 export async function collectWorkspaceFiles(
   workspaceDir: string,
-  _opts: CollectOptions = {},
+  _opts: CollectOptions = {}
 ): Promise<CollectedFile[]> {
   const collected: CollectedFile[] = [];
 
@@ -184,9 +184,7 @@ export async function collectWorkspaceFiles(
       }
       if (!st.isFile()) continue;
       if (st.size > MAX_FILE_BYTES) {
-        throw new Error(
-          `文件过大（${st.size} > ${MAX_FILE_BYTES}）：${zipPath}`,
-        );
+        throw new Error(`文件过大（${st.size} > ${MAX_FILE_BYTES}）：${zipPath}`);
       }
       collected.push({ zipPath, absPath, size: st.size });
     }
@@ -198,9 +196,7 @@ export async function collectWorkspaceFiles(
     throw new Error('工作区无任何可打包文件（仅 manifest.json + _meta.json 之外应有入口文件）');
   }
   if (collected.length > MAX_FILES) {
-    throw new Error(
-      `文件数超限（${collected.length} > ${MAX_FILES}）`,
-    );
+    throw new Error(`文件数超限（${collected.length} > ${MAX_FILES}）`);
   }
 
   // 按字典序排序（与 Rust 第 151 行 files.sort_by 对齐）
@@ -209,9 +205,7 @@ export async function collectWorkspaceFiles(
   // 总解压大小限制
   const totalUncompressed = collected.reduce((sum, f) => sum + f.size, 0);
   if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
-    throw new Error(
-      `总大小超限（${totalUncompressed} > ${MAX_UNCOMPRESSED_BYTES}）`,
-    );
+    throw new Error(`总大小超限（${totalUncompressed} > ${MAX_UNCOMPRESSED_BYTES}）`);
   }
 
   return collected;
@@ -243,7 +237,7 @@ export async function packWorkspace(opts: PackOptions): Promise<PackResult> {
   const entryExists = files.some((f) => f.zipPath === entryZipPath);
   if (!entryExists) {
     throw new Error(
-      `manifest.entry "${entryZipPath}" 不在打包文件列表中（可能被排除段过滤或文件不存在）`,
+      `manifest.entry "${entryZipPath}" 不在打包文件列表中（可能被排除段过滤或文件不存在）`
     );
   }
 
@@ -290,9 +284,7 @@ export async function packWorkspace(opts: PackOptions): Promise<PackResult> {
   });
 
   if (buffer.length > MAX_ARCHIVE_BYTES) {
-    throw new Error(
-      `ZIP 大小超限（${buffer.length} > ${MAX_ARCHIVE_BYTES}）`,
-    );
+    throw new Error(`ZIP 大小超限（${buffer.length} > ${MAX_ARCHIVE_BYTES}）`);
   }
 
   // SHA256 前缀（与桌面壳 release_id "local-<sha256[..16]>" 一致）

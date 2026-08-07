@@ -66,6 +66,8 @@ describe('MailService sendMail', () => {
     // @ts-expect-error mock 不实现完整 PrismaService 接口，仅测用到的方法。
     const service = new MailService(prisma);
 
-    await expect(service.sendMail('a@b.com', '主题', '<p>hello</p>')).rejects.toThrow('SMTP 未配置');
+    await expect(service.sendMail('a@b.com', '主题', '<p>hello</p>')).rejects.toThrow(
+      'SMTP 未配置'
+    );
   });
 });

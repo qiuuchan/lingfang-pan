@@ -9,7 +9,7 @@
 // - 与创建器 env-readiness 横幅互补：横幅处理「地址未配置」，本组件处理「地址已配但 fetch 失败」。
 
 import { useState } from 'react';
-import { CloudOffIcon, RefreshCwIcon } from "lucide-react";
+import { CloudOffIcon, RefreshCwIcon } from 'lucide-react';
 import { apiBase, testBackendUrl, dispatchBackendReachable } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
@@ -45,7 +45,7 @@ export function BackendUnreachable() {
           <CloudOffIcon className="size-8 text-indigo-500 dark:text-indigo-400" />
         </div>
 
-        <div className="space-y-1.5">
+        <div className="flex flex-col gap-1.5">
           <h2 className="text-lg font-semibold">无法访问此页面</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
             灵坊工作台无法连接到协作服务。请确认服务已启动，或检查网络后重试。
@@ -58,9 +58,7 @@ export function BackendUnreachable() {
           <span className="break-all font-mono text-foreground">{address}</span>
         </div>
 
-        {lastError && (
-          <p className="text-xs text-destructive">{lastError}</p>
-        )}
+        {lastError && <p className="text-xs text-destructive">{lastError}</p>}
 
         <div className="flex w-full">
           <Button className="w-full" onClick={handleRetry} disabled={retrying}>
@@ -72,4 +70,3 @@ export function BackendUnreachable() {
     </div>
   );
 }
-

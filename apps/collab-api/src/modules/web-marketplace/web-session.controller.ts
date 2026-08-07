@@ -16,8 +16,20 @@ class WebSwitchTeamDto {
 }
 
 const secure = () => process.env.NODE_ENV === 'production';
-const sessionCookie = { httpOnly: true, secure: secure(), sameSite: 'lax' as const, path: '/api', maxAge: 7 * 24 * 60 * 60 * 1000 };
-const csrfCookie = { httpOnly: false, secure: secure(), sameSite: 'lax' as const, path: '/api', maxAge: 24 * 60 * 60 * 1000 };
+const sessionCookie = {
+  httpOnly: true,
+  secure: secure(),
+  sameSite: 'lax' as const,
+  path: '/api',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
+const csrfCookie = {
+  httpOnly: false,
+  secure: secure(),
+  sameSite: 'lax' as const,
+  path: '/api',
+  maxAge: 24 * 60 * 60 * 1000,
+};
 
 @Controller('web/session')
 export class WebSessionController {
@@ -33,7 +45,11 @@ export class WebSessionController {
 
   @Public()
   @Post('login')
-  async login(@Req() request: Request, @Res({ passthrough: true }) response: Response, @Body() body: WebLoginDto) {
+  async login(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+    @Body() body: WebLoginDto
+  ) {
     requireWebCsrf(request);
     const result = await this.sessions.login(body.email, body.password);
     response.cookie(WEB_SESSION_COOKIE, result.token, sessionCookie);
@@ -52,7 +68,11 @@ export class WebSessionController {
   }
 
   @Post('team')
-  async switchTeam(@Req() request: Request, @Res({ passthrough: true }) response: Response, @Body() body: WebSwitchTeamDto) {
+  async switchTeam(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+    @Body() body: WebSwitchTeamDto
+  ) {
     const result = await this.sessions.switchTeam(requireUser(request).id, body.teamId);
     response.cookie(WEB_SESSION_COOKIE, result.token, sessionCookie);
     return result.session;

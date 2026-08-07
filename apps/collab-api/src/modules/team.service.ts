@@ -19,7 +19,8 @@ const INVITE_CODE_LENGTH = INVITE_CODE_PREFIX.length + INVITE_CODE_RANDOM_CHARS;
 const INVITE_DISPLAY_PREFIX_LENGTH = 7;
 
 const normalizeInviteCode = (code: string) => code.trim().toUpperCase();
-const hashInvite = (code: string) => createHash('sha256').update(normalizeInviteCode(code)).digest('hex');
+const hashInvite = (code: string) =>
+  createHash('sha256').update(normalizeInviteCode(code)).digest('hex');
 
 function requireCompleteInviteCode(code: string) {
   const normalized = normalizeInviteCode(code);
@@ -33,7 +34,7 @@ function requireCompleteInviteCode(code: string) {
 export class TeamService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   onboarding(userId: string) {
@@ -41,34 +42,57 @@ export class TeamService {
   }
 
   async submitApplication(userId: string, input: { teamName: string; reason?: string }) {
-    const pending = await this.prisma.teamAdminApplication.findFirst({ where: { userId, status: 'PENDING' } });
+    const pending = await this.prisma.teamAdminApplication.findFirst({
+      where: { userId, status: 'PENDING' },
+    });
     if (pending) return { application: pending };
     // 修复 H7：此前 .catch 无差别吞掉所有 DB 错误（连接断/字段超长/外键失败）并伪装成
     // 「返回已有 PENDING」，DB 故障被掩盖成 404，且极端时序下可能创建重复 PENDING。
     // schema 无 unique 约束，并发 create 不会触发 P2002，故仅显式兜底 P2002，其余错误正常抛出。
-    const application = await this.prisma.teamAdminApplication.create({
-      data: { userId, teamName: input.teamName?.trim() || '新团队', reason: input.reason?.trim() || '' },
-    }).catch((error) => {
-      if (error?.code === 'P2002') {
-        // 并发命中唯一约束（理论 schema 无 unique，保险）：退化为返回已有 PENDING。
-        return this.prisma.teamAdminApplication.findFirstOrThrow({ where: { userId, status: 'PENDING' } });
-      }
-      throw error;
-    });
-    await this.audit(userId, 'team_admin_application.created', 'TeamAdminApplication', application.id, { teamName: application.teamName });
+    const application = await this.prisma.teamAdminApplication
+      .create({
+        data: {
+          userId,
+          teamName: input.teamName?.trim() || '新团队',
+          reason: input.reason?.trim() || '',
+        },
+      })
+      .catch((error) => {
+        if (error?.code === 'P2002') {
+          // 并发命中唯一约束（理论 schema 无 unique，保险）：退化为返回已有 PENDING。
+          return this.prisma.teamAdminApplication.findFirstOrThrow({
+            where: { userId, status: 'PENDING' },
+          });
+        }
+        throw error;
+      });
+    await this.audit(
+      userId,
+      'team_admin_application.created',
+      'TeamAdminApplication',
+      application.id,
+      { teamName: application.teamName }
+    );
     return { application };
   }
 
   async myApplication(userId: string) {
-    const application = await this.prisma.teamAdminApplication.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    const application = await this.prisma.teamAdminApplication.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
     return { application };
   }
 
   async redeemInvitation(userId: string, code: string) {
     const normalizedCode = requireCompleteInviteCode(code);
-    const invite = await this.prisma.invitationCode.findUnique({ where: { codeHash: hashInvite(normalizedCode) }, include: { team: true } });
+    const invite = await this.prisma.invitationCode.findUnique({
+      where: { codeHash: hashInvite(normalizedCode) },
+      include: { team: true },
+    });
     if (!invite || invite.status !== 'ACTIVE') throw badRequest('邀请码无效');
-    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) throw badRequest('邀请码已过期');
+    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now())
+      throw badRequest('邀请码已过期');
     if (invite.team.status !== 'ACTIVE') throw forbidden('团队当前不可加入');
     // 修复 TEAM-01 / XCONC-01（并发超发）：此前 usedCount 检查在事务外、事务内无条件 increment，
     // READ COMMITTED 下并发兑换可越过 maxUses。改用条件 updateMany + count!==1 原子扣减，
@@ -81,17 +105,35 @@ export class TeamService {
       if (consumed.count !== 1) throw badRequest('邀请码已达到使用次数上限');
       await tx.teamMembership.upsert({
         where: { teamId_userId: { teamId: invite.teamId, userId } },
-        create: { teamId: invite.teamId, userId, role: 'MEMBER', teamRoleId: teamMemberRoleId(invite.teamId) },
+        create: {
+          teamId: invite.teamId,
+          userId,
+          role: 'MEMBER',
+          teamRoleId: teamMemberRoleId(invite.teamId),
+        },
         // 修复 TEAM-06：重新激活已 REMOVED 成员时刷新 joinedAt，否则 ensureCurrentTeam/sessionFor
         // 按 joinedAt desc 选当前团队会错指（重新加入的旧团队 joinedAt 仍是历史值）。
         // RBAC：重新激活时回填系统成员角色（REMOVED 前可能已清空 teamRoleId）。
-        update: { status: 'ACTIVE', role: 'MEMBER', teamRoleId: teamMemberRoleId(invite.teamId), joinedAt: new Date() },
+        update: {
+          status: 'ACTIVE',
+          role: 'MEMBER',
+          teamRoleId: teamMemberRoleId(invite.teamId),
+          joinedAt: new Date(),
+        },
       });
       await tx.user.update({
         where: { id: userId },
         data: { teamContextVersion: { increment: 1 } },
       });
-      await tx.auditLog.create({ data: { actorUserId: userId, action: 'invitation.redeemed', targetType: 'InvitationCode', targetId: invite.id, metadata: { teamId: invite.teamId } } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'invitation.redeemed',
+          targetType: 'InvitationCode',
+          targetId: invite.id,
+          metadata: { teamId: invite.teamId },
+        },
+      });
     });
     return this.auth.sessionAfterTeamContextChange(userId);
   }
@@ -151,14 +193,25 @@ export class TeamService {
         // 重新激活已 REMOVED 成员时刷新 joinedAt（与 redeemInvitation 的 TEAM-06 修复对齐），
         // 否则 ensureCurrentTeam 按 joinedAt desc 选当前团队会错指。
         // RBAC：重新激活时回填系统成员角色。
-        update: { status: 'ACTIVE', role: 'MEMBER', teamRoleId: teamMemberRoleId(teamId), joinedAt: new Date() },
+        update: {
+          status: 'ACTIVE',
+          role: 'MEMBER',
+          teamRoleId: teamMemberRoleId(teamId),
+          joinedAt: new Date(),
+        },
       });
       await tx.user.update({
         where: { id: userId },
         data: { teamContextVersion: { increment: 1 } },
       });
       await tx.auditLog.create({
-        data: { actorUserId: userId, action: 'team.public_joined', targetType: 'Team', targetId: teamId, metadata: { teamId } },
+        data: {
+          actorUserId: userId,
+          action: 'team.public_joined',
+          targetType: 'Team',
+          targetId: teamId,
+          metadata: { teamId },
+        },
       });
     });
     return this.auth.sessionAfterTeamContextChange(userId);
@@ -190,7 +243,9 @@ export class TeamService {
   async removeMember(actorId: string, userId: string) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
     if (actorId === userId) throw badRequest('不能移除自己');
-    const target = await this.prisma.teamMembership.findUnique({ where: { teamId_userId: { teamId: membership.teamId, userId } } });
+    const target = await this.prisma.teamMembership.findUnique({
+      where: { teamId_userId: { teamId: membership.teamId, userId } },
+    });
     if (!target) throw notFound('成员不存在');
     if (target.role === 'TEAM_ADMIN') throw forbidden('不能移除团队管理员');
     await this.prisma.$transaction(async (tx) => {
@@ -203,7 +258,13 @@ export class TeamService {
         data: { teamContextVersion: { increment: 1 } },
       });
       await tx.auditLog.create({
-        data: { actorUserId: actorId, action: 'team.member.removed', targetType: 'User', targetId: userId, metadata: { teamId: membership.teamId } },
+        data: {
+          actorUserId: actorId,
+          action: 'team.member.removed',
+          targetType: 'User',
+          targetId: userId,
+          metadata: { teamId: membership.teamId },
+        },
       });
     });
     return { ok: true };
@@ -230,22 +291,31 @@ export class TeamService {
         expiresAt,
       },
     });
-    await this.audit(actorId, 'invitation.created', 'InvitationCode', invite.id, { teamId: membership.teamId });
+    await this.audit(actorId, 'invitation.created', 'InvitationCode', invite.id, {
+      teamId: membership.teamId,
+    });
     return { invitation: { ...invite, code } };
   }
 
   async listInvitations(actorId: string) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
-    const invitations = await this.prisma.invitationCode.findMany({ where: { teamId: membership.teamId }, orderBy: { createdAt: 'desc' } });
+    const invitations = await this.prisma.invitationCode.findMany({
+      where: { teamId: membership.teamId },
+      orderBy: { createdAt: 'desc' },
+    });
     return { invitations };
   }
 
   async disableInvitation(actorId: string, id: string) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
-    const invite = await this.prisma.invitationCode.findFirst({ where: { id, teamId: membership.teamId } });
+    const invite = await this.prisma.invitationCode.findFirst({
+      where: { id, teamId: membership.teamId },
+    });
     if (!invite) throw notFound('邀请码不存在');
     await this.prisma.invitationCode.update({ where: { id }, data: { status: 'DISABLED' } });
-    await this.audit(actorId, 'invitation.disabled', 'InvitationCode', id, { teamId: membership.teamId });
+    await this.audit(actorId, 'invitation.disabled', 'InvitationCode', id, {
+      teamId: membership.teamId,
+    });
     return { ok: true };
   }
 
@@ -254,7 +324,10 @@ export class TeamService {
    * allowPublicJoin 切换是否出现在「发现公开团队」列表；description 为发现页展示的简介。
    * 仅 TEAM_ADMIN 可操作，限当前团队（防越权改他团）。
    */
-  async updateTeamProfile(actorId: string, input: { allowPublicJoin?: boolean; description?: string }) {
+  async updateTeamProfile(
+    actorId: string,
+    input: { allowPublicJoin?: boolean; description?: string }
+  ) {
     const membership = await this.auth.ensureTeamAdmin(actorId);
     const data: { allowPublicJoin?: boolean; description?: string } = {};
     if (typeof input.allowPublicJoin === 'boolean') data.allowPublicJoin = input.allowPublicJoin;
@@ -288,7 +361,11 @@ export class TeamService {
 
   async ledger(userId: string) {
     const membership = await this.auth.ensureCurrentTeam(userId);
-    const ledger = await this.prisma.balanceLedger.findMany({ where: { teamId: membership.teamId }, orderBy: { createdAt: 'desc' }, take: 50 });
+    const ledger = await this.prisma.balanceLedger.findMany({
+      where: { teamId: membership.teamId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
     return { ledger };
   }
 
@@ -299,12 +376,31 @@ export class TeamService {
     // 的冗余校验移除；DTO transform 后此处 input.amountCents 必为正整数。
     const amount = input.amountCents;
     await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.team.updateMany({ where: { id: membership.teamId, balanceCents: { gte: amount } }, data: { balanceCents: { decrement: amount } } });
+      const updated = await tx.team.updateMany({
+        where: { id: membership.teamId, balanceCents: { gte: amount } },
+        data: { balanceCents: { decrement: amount } },
+      });
       if (updated.count !== 1) throw insufficientBalance();
-      await tx.balanceLedger.create({ data: { teamId: membership.teamId, amountCents: amount, direction: 'DEBIT', reason: input.reason || 'usage', actorUserId: userId } });
+      await tx.balanceLedger.create({
+        data: {
+          teamId: membership.teamId,
+          amountCents: amount,
+          direction: 'DEBIT',
+          reason: input.reason || 'usage',
+          actorUserId: userId,
+        },
+      });
       // 修复 H4：auditLog 写入移入事务，保证「余额变更必有审计」原子性。
       // 此前事务外 audit() 在 DB 抖动时丢失，与 balanceLedger 不一致，破坏安全追溯链。
-      await tx.auditLog.create({ data: { actorUserId: userId, action: 'team.balance.consumed', targetType: 'Team', targetId: membership.teamId, metadata: { amountCents: amount, reason: input.reason || 'usage' } } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'team.balance.consumed',
+          targetType: 'Team',
+          targetId: membership.teamId,
+          metadata: { amountCents: amount, reason: input.reason || 'usage' },
+        },
+      });
     });
     return this.balance(userId);
   }
@@ -315,11 +411,15 @@ export class TeamService {
    */
   async updateDefaultPool(userId: string, poolId: string | null | undefined) {
     const membership = await this.auth.ensureCurrentTeam(userId);
-    const normalizedPoolId = poolId === null || poolId === undefined || poolId === '' ? null : poolId;
+    const normalizedPoolId =
+      poolId === null || poolId === undefined || poolId === '' ? null : poolId;
 
     // 验证池子存在且团队有权使用（SHARED 或本团队的 DEDICATED）
     if (normalizedPoolId) {
-      const pool = await this.prisma.pool.findUnique({ where: { id: normalizedPoolId }, select: { id: true, scope: true, teamId: true } });
+      const pool = await this.prisma.pool.findUnique({
+        where: { id: normalizedPoolId },
+        select: { id: true, scope: true, teamId: true },
+      });
       if (!pool) throw notFound('资源池不存在');
       if (pool.scope === 'DEDICATED' && pool.teamId !== membership.teamId) {
         throw forbidden('该专用池不属于当前团队');
@@ -331,11 +431,21 @@ export class TeamService {
       data: { defaultPoolId: normalizedPoolId },
     });
 
-    await this.audit(userId, 'team.default_pool.updated', 'Team', membership.teamId, { defaultPoolId: normalizedPoolId });
+    await this.audit(userId, 'team.default_pool.updated', 'Team', membership.teamId, {
+      defaultPoolId: normalizedPoolId,
+    });
     return { ok: true, defaultPoolId: normalizedPoolId };
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId?: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 }

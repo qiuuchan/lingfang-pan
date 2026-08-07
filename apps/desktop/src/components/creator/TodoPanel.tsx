@@ -6,15 +6,19 @@
 // 纯展示组件（不可编辑——状态由模型驱动，用户只看进度），与 ToolCallCard 风格一致。
 import { useState } from 'react';
 import {
-  ChevronUpIcon, Loader2Icon, CheckCircle2Icon, CircleIcon, ListChecksIcon,
+  ChevronUpIcon,
+  Loader2Icon,
+  CheckCircle2Icon,
+  CircleIcon,
+  ListChecksIcon,
 } from 'lucide-react';
 import type { TodoItem } from '@/lib/agent/tools';
 import { cn } from '@/lib/utils';
 import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 
 const PRIORITY_STYLE: Record<TodoItem['priority'], string> = {
-  high: 'border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400',
-  medium: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  high: 'border-destructive/40 bg-destructive/10 text-destructive',
+  medium: 'border-warning/40 bg-warning/10 text-warning',
   low: 'border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400',
 };
 const PRIORITY_LABEL: Record<TodoItem['priority'], string> = {
@@ -67,21 +71,34 @@ export function TodoPanel({ todos, streaming }: { todos: TodoItem[]; streaming?:
               <div
                 className={cn(
                   'h-full rounded-full transition-all duration-500',
-                  allDone ? 'bg-emerald-500' : 'bg-primary',
+                  allDone ? 'bg-success' : 'bg-primary'
                 )}
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <span className={cn(
-              'flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums',
-              allDone
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                : 'border-border bg-muted text-foreground',
-            )}>
-              {hasActive ? <Loader2Icon className="size-3.5 animate-spin" /> : allDone ? <CheckCircle2Icon className="size-3.5" /> : <CircleIcon className="size-3.5" />}
+            <span
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums',
+                allDone
+                  ? 'border-success/30 bg-success/10 text-success'
+                  : 'border-border bg-muted text-foreground'
+              )}
+            >
+              {hasActive ? (
+                <Loader2Icon className="size-3.5 animate-spin" />
+              ) : allDone ? (
+                <CheckCircle2Icon className="size-3.5" />
+              ) : (
+                <CircleIcon className="size-3.5" />
+              )}
               {pct}%
             </span>
-            <ChevronUpIcon className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-200', !open && 'rotate-180')} />
+            <ChevronUpIcon
+              className={cn(
+                'size-4 shrink-0 text-muted-foreground transition-transform duration-200',
+                !open && 'rotate-180'
+              )}
+            />
           </button>
 
           {/* 展开明细（向上展开） */}
@@ -93,12 +110,14 @@ export function TodoPanel({ todos, streaming }: { todos: TodoItem[]; streaming?:
                   <div
                     className={cn(
                       'h-full rounded-full transition-all duration-500',
-                      allDone ? 'bg-emerald-500' : 'bg-primary',
+                      allDone ? 'bg-success' : 'bg-primary'
                     )}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{pct}%</span>
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
+                  {pct}%
+                </span>
               </div>
               <ul className="max-h-60 space-y-1 overflow-y-auto pr-3">
                 {todos.map((t, i) => {
@@ -108,12 +127,12 @@ export function TodoPanel({ todos, streaming }: { todos: TodoItem[]; streaming?:
                       key={i}
                       className={cn(
                         'flex items-start gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
-                        isCurrent ? 'bg-accent' : 'hover:bg-accent/60',
+                        isCurrent ? 'bg-accent' : 'hover:bg-accent/60'
                       )}
                     >
                       <span className="mt-0.5 shrink-0">
                         {t.status === 'completed' ? (
-                          <CheckCircle2Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                          <CheckCircle2Icon className="size-4 text-success" />
                         ) : isCurrent ? (
                           <Loader2Icon className="size-4 animate-spin text-primary" />
                         ) : (
@@ -127,12 +146,17 @@ export function TodoPanel({ todos, streaming }: { todos: TodoItem[]; streaming?:
                             ? 'text-muted-foreground line-through'
                             : isCurrent
                               ? 'font-medium text-foreground'
-                              : 'text-foreground/80',
+                              : 'text-foreground/80'
                         )}
                       >
                         {t.content}
                       </span>
-                      <span className={cn('mt-0.5 shrink-0 rounded border px-1 py-0.5 text-[9px] font-medium leading-none', PRIORITY_STYLE[t.priority])}>
+                      <span
+                        className={cn(
+                          'mt-0.5 shrink-0 rounded border px-1 py-0.5 text-[9px] font-medium leading-none',
+                          PRIORITY_STYLE[t.priority]
+                        )}
+                      >
                         {PRIORITY_LABEL[t.priority]}
                       </span>
                     </li>

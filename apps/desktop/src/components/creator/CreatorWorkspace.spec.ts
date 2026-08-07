@@ -33,18 +33,21 @@ describe('CreatorWorkspace draft projections', () => {
       { path: 'ui/index.html', content: '<main>demo</main>' },
     ];
 
-    const staged = stagedPluginFromLoadedPlugin(plugin({
-      name: 'Cloud plugin',
-      runtime_type: 'cloud',
-      files,
-      _meta: {
-        createdAt: '2026-07-12T00:00:00.000Z',
-        updatedAt: '2026-07-12T00:00:00.000Z',
-        source: 'workspace',
-        sourceKind: 'EXTERNAL_TOOL',
-        sourceLabel: 'External IDE',
-      },
-    }), files);
+    const staged = stagedPluginFromLoadedPlugin(
+      plugin({
+        name: 'Cloud plugin',
+        runtime_type: 'cloud',
+        files,
+        _meta: {
+          createdAt: '2026-07-12T00:00:00.000Z',
+          updatedAt: '2026-07-12T00:00:00.000Z',
+          source: 'workspace',
+          sourceKind: 'EXTERNAL_TOOL',
+          sourceLabel: 'External IDE',
+        },
+      }),
+      files
+    );
 
     expect(staged.name).toBe('Cloud plugin');
     expect(staged.runtime_type).toBe('cloud');
@@ -58,12 +61,14 @@ describe('CreatorWorkspace draft projections', () => {
   });
 
   it('includes only text files in referenced plugin model context', () => {
-    const prompt = referencedPluginPrompt(plugin({
-      files: [
-        { path: 'ui/index.html', content: '<main>demo</main>' },
-        { path: 'assets/logo.png', content: 'SENSITIVE_BASE64', binary: true },
-      ],
-    }));
+    const prompt = referencedPluginPrompt(
+      plugin({
+        files: [
+          { path: 'ui/index.html', content: '<main>demo</main>' },
+          { path: 'assets/logo.png', content: 'SENSITIVE_BASE64', binary: true },
+        ],
+      })
+    );
 
     expect(prompt).toContain('--- ui/index.html ---');
     expect(prompt).toContain('<main>demo</main>');

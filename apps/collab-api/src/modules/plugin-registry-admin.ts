@@ -111,11 +111,21 @@ export const ADMIN_RELEASE_REVIEW_SELECT = {
   reviewer: { select: { id: true, displayName: true, email: true } },
 } as const satisfies Prisma.PluginReleaseReviewSelect;
 
-export type AdminPackageListRow = Prisma.PluginPackageGetPayload<{ select: typeof ADMIN_PACKAGE_LIST_SELECT }>;
-export type AdminPackageDetailRow = Prisma.PluginPackageGetPayload<{ select: typeof ADMIN_PACKAGE_DETAIL_SELECT }>;
-export type AdminReleaseSummaryRow = Prisma.PluginReleaseGetPayload<{ select: typeof ADMIN_RELEASE_SUMMARY_SELECT }>;
-export type AdminReleaseCoreRow = Prisma.PluginReleaseGetPayload<{ select: typeof ADMIN_RELEASE_CORE_SELECT }>;
-export type AdminReleaseReviewRow = Prisma.PluginReleaseReviewGetPayload<{ select: typeof ADMIN_RELEASE_REVIEW_SELECT }>;
+export type AdminPackageListRow = Prisma.PluginPackageGetPayload<{
+  select: typeof ADMIN_PACKAGE_LIST_SELECT;
+}>;
+export type AdminPackageDetailRow = Prisma.PluginPackageGetPayload<{
+  select: typeof ADMIN_PACKAGE_DETAIL_SELECT;
+}>;
+export type AdminReleaseSummaryRow = Prisma.PluginReleaseGetPayload<{
+  select: typeof ADMIN_RELEASE_SUMMARY_SELECT;
+}>;
+export type AdminReleaseCoreRow = Prisma.PluginReleaseGetPayload<{
+  select: typeof ADMIN_RELEASE_CORE_SELECT;
+}>;
+export type AdminReleaseReviewRow = Prisma.PluginReleaseReviewGetPayload<{
+  select: typeof ADMIN_RELEASE_REVIEW_SELECT;
+}>;
 
 export function normalizeAdminPage(query: AdminPageQuery) {
   const page = Math.max(1, Math.floor(query.page ?? 1));
@@ -158,18 +168,26 @@ function iso(value: Date | string | null | undefined): string | null {
   return value?.toISOString() ?? null;
 }
 
-export function adminListingProjection(listing: {
-  status: string;
-  priceCents: number;
-  currentReleaseId: string | null;
-  delistedBy?: string | null;
-  delistReason?: string;
-  delistedAt?: Date | string | null;
-  delistedByUserId?: string | null;
-} | null | undefined) {
+export function adminListingProjection(
+  listing:
+    | {
+        status: string;
+        priceCents: number;
+        currentReleaseId: string | null;
+        delistedBy?: string | null;
+        delistReason?: string;
+        delistedAt?: Date | string | null;
+        delistedByUserId?: string | null;
+      }
+    | null
+    | undefined
+) {
   if (!listing) return null;
   const delistMetadata = {
-    delistedBy: listing.delistedBy === 'OWNER' || listing.delistedBy === 'PLATFORM' ? listing.delistedBy : null,
+    delistedBy:
+      listing.delistedBy === 'OWNER' || listing.delistedBy === 'PLATFORM'
+        ? listing.delistedBy
+        : null,
     delistReason: listing.delistReason || '',
     delistedAt: iso(listing.delistedAt ?? null),
     delistedByUserId: listing.delistedByUserId ?? null,
@@ -183,7 +201,7 @@ export function adminListingProjection(listing: {
     };
   }
   return {
-    status: listing.status === 'DELISTED' ? 'DELISTED' as const : 'DRAFT' as const,
+    status: listing.status === 'DELISTED' ? ('DELISTED' as const) : ('DRAFT' as const),
     priceCents: listing.priceCents,
     currentReleaseId: listing.status === 'DELISTED' ? listing.currentReleaseId : null,
     ...delistMetadata,
@@ -217,9 +235,11 @@ export function adminPackageListItem(pkg: AdminPackageListRow, releases: AdminRe
     ownerTeam: pkg.ownerTeam,
     listing: adminListingProjection(pkg.listing),
     latestRelease: latestReleaseSummary(highestSemVer(releases)),
-    marketplaceCurrentVersion: releases.find((release) => release.id === pkg.listing?.currentReleaseId)?.version ?? null,
+    marketplaceCurrentVersion:
+      releases.find((release) => release.id === pkg.listing?.currentReleaseId)?.version ?? null,
     releaseCount: releases.length,
-    pendingReviewCount: releases.filter((release) => release.marketReviewStatus === 'PENDING').length,
+    pendingReviewCount: releases.filter((release) => release.marketReviewStatus === 'PENDING')
+      .length,
     createdAt: pkg.createdAt.toISOString(),
     updatedAt: pkg.updatedAt.toISOString(),
   };
@@ -235,7 +255,11 @@ export function groupAdminReleases(releases: AdminReleaseSummaryRow[]) {
   return grouped;
 }
 
-export function adminPackageDetail(pkg: AdminPackageDetailRow, releaseCount: number, pendingReviewCount: number) {
+export function adminPackageDetail(
+  pkg: AdminPackageDetailRow,
+  releaseCount: number,
+  pendingReviewCount: number
+) {
   return {
     package: {
       id: pkg.id,
@@ -257,7 +281,7 @@ export function adminPackageDetail(pkg: AdminPackageDetailRow, releaseCount: num
 
 export function adminReleaseSummary(
   release: AdminReleaseSummaryRow,
-  listing: { status: string; currentReleaseId: string | null } | null,
+  listing: { status: string; currentReleaseId: string | null } | null
 ) {
   return {
     id: release.id,
@@ -309,13 +333,16 @@ export type AdminPluginFile = { path: string; sizeBytes: number };
 
 export function normalizeFileManifest(value: unknown): AdminPluginFile[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== 'object') return [];
-    const path = Reflect.get(item, 'path');
-    const sizeBytes = Reflect.get(item, 'sizeBytes');
-    if (typeof path !== 'string' || !Number.isSafeInteger(sizeBytes) || Number(sizeBytes) < 0) return [];
-    return [{ path, sizeBytes: Number(sizeBytes) }];
-  }).sort((left, right) => left.path.localeCompare(right.path));
+  return value
+    .flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const path = Reflect.get(item, 'path');
+      const sizeBytes = Reflect.get(item, 'sizeBytes');
+      if (typeof path !== 'string' || !Number.isSafeInteger(sizeBytes) || Number(sizeBytes) < 0)
+        return [];
+      return [{ path, sizeBytes: Number(sizeBytes) }];
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 export function adminReleaseReview(review: AdminReleaseReviewRow) {

@@ -7,11 +7,11 @@ services:
       POSTGRES_DB: lingfang_collab
     # 仅绑定宿主机本地回环，不直接暴露公网
     ports:
-      - "127.0.0.1:5434:5432"
+      - '127.0.0.1:5434:5432'
     volumes:
       - collab_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lingfang -d lingfang_collab"]
+      test: ['CMD-SHELL', 'pg_isready -U lingfang -d lingfang_collab']
       interval: 3s
       timeout: 3s
       retries: 20
@@ -29,7 +29,7 @@ services:
       NODE_ENV: production
       PLUGIN_ARTIFACT_DIR: /app/apps/collab-api/artifacts/plugins
     ports:
-      - "0.0.0.0:19006:19006"
+      - '0.0.0.0:19006:19006'
     volumes:
       - collab_downloads:/app/apps/collab-api/downloads
       - collab_uploads:/app/apps/collab-api/uploads
@@ -51,7 +51,7 @@ services:
         VITE_CDN_BASE_URL: ${VITE_CDN_BASE_URL:-}
     # 容器内 Nginx 同时提供管理端静态资源，并将 /api/ 反代到 collab-api。
     ports:
-      - "0.0.0.0:19005:19005"
+      - '0.0.0.0:19005:19005'
     depends_on:
       - collab-api
     restart: unless-stopped

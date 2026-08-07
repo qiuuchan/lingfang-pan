@@ -12,21 +12,17 @@ describe('resolvePrismaInvocation', () => {
   });
 
   it('uses db push for MySQL deploy because PostgreSQL SQL migrations are not portable', () => {
-    expect(resolvePrismaInvocation('deploy', 'mysql', 'prisma/.generated/mysql/schema.prisma').args).toEqual([
-      'db',
-      'push',
-      '--schema',
-      'prisma/.generated/mysql/schema.prisma',
-    ]);
+    expect(
+      resolvePrismaInvocation('deploy', 'mysql', 'prisma/.generated/mysql/schema.prisma').args
+    ).toEqual(['db', 'push', '--schema', 'prisma/.generated/mysql/schema.prisma']);
   });
 
   it('only adds MySQL accept-data-loss after explicit one-shot opt-in', () => {
-    expect(resolvePrismaInvocation(
-      'deploy',
-      'mysql',
-      'prisma/.generated/mysql/schema.prisma',
-      { acceptDataLoss: true },
-    ).args).toEqual([
+    expect(
+      resolvePrismaInvocation('deploy', 'mysql', 'prisma/.generated/mysql/schema.prisma', {
+        acceptDataLoss: true,
+      }).args
+    ).toEqual([
       'db',
       'push',
       '--schema',

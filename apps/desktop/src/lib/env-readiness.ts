@@ -46,37 +46,38 @@ interface RelayModelsResponse {
  */
 export function useEnvReadiness(
   session: Session,
-  activeView: View = 'creator',
+  activeView: View = 'creator'
 ): EnvReadinessResult & { refresh: RefreshEnvReadiness } {
   const [ready, setReady] = useState(false);
   const [missing, setMissing] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 检测单次执行：三项查，失败按未就绪处理，绝不抛出（横幅兜底提示用户去设置）。
-  const probe = useCallback(async (signal?: { cancelled: boolean }): Promise<void> => {
-    // 后端地址（最廉价，先查；无后端地址后续 api() 会直接抛）。
-    const backendConfigured = Boolean(apiBase());
+  const probe = useCallback(
+    async (signal?: { cancelled: boolean }): Promise<void> => {
+      // 后端地址（最廉价，先查；无后端地址后续 api() 会直接抛）。
+      const backendConfigured = Boolean(apiBase());
 
-    // 中转是否配好版本：relay /v1/models 返回 fast/premium 版本列表（空 = 后台未配 ModelTierConfig/渠道）。
-    const modelConfigured = await (
-      api<RelayModelsResponse>('/api/relay/v1/models')
+      // 中转是否配好版本：relay /v1/models 返回 fast/premium 版本列表（空 = 后台未配 ModelTierConfig/渠道）。
+      const modelConfigured = await api<RelayModelsResponse>('/api/relay/v1/models')
         .then((res) => Boolean(res?.data?.length))
-        .catch(() => false)
-    );
+        .catch(() => false);
 
-    // 组件已卸载 / tenantName 已变（依赖变化触发重探）：丢弃本次结果，避免 stale setState。
-    if (signal?.cancelled) return;
+      // 组件已卸载 / tenantName 已变（依赖变化触发重探）：丢弃本次结果，避免 stale setState。
+      if (signal?.cancelled) return;
 
-    const miss: string[] = [];
-    if (!backendConfigured) miss.push('未配置公司平台地址');
-    if (!modelConfigured) miss.push('平台未配置模型版本（联系管理员配置渠道与快速/高级版）');
-    // 是否加入团队：session.tenantName 非空（PENDING_APPROVAL 等中间态也没有 team）。
-    if (!session.tenantName) miss.push('未加入团队');
+      const miss: string[] = [];
+      if (!backendConfigured) miss.push('未配置公司平台地址');
+      if (!modelConfigured) miss.push('平台未配置模型版本（联系管理员配置渠道与快速/高级版）');
+      // 是否加入团队：session.tenantName 非空（PENDING_APPROVAL 等中间态也没有 team）。
+      if (!session.tenantName) miss.push('未加入团队');
 
-    setMissing(miss);
-    setReady(miss.length === 0);
-    setLoading(false);
-  }, [session.tenantName]);
+      setMissing(miss);
+      setReady(miss.length === 0);
+      setLoading(false);
+    },
+    [session.tenantName]
+  );
 
   // 单一 effect 同时响应 tenantName 变化 + 切回创建器，两者都触发一次完整重检。
   // 切回 creator 时 loading 会短暂为 true（横幅在探测期间不渲染），探测完按最新结果重渲染——
@@ -87,7 +88,9 @@ export function useEnvReadiness(
     const signal = { cancelled: false };
     setLoading(true);
     void probe(signal);
-    return () => { signal.cancelled = true; };
+    return () => {
+      signal.cancelled = true;
+    };
   }, [probe, activeView]);
 
   return {
@@ -95,6 +98,8 @@ export function useEnvReadiness(
     missing,
     loading,
     // 手动重检（用户从设置返回后调用刷新）；不重置 loading 态（refresh 通常已是二次调用，无需 loading 闪烁）。
-    refresh: () => { void probe({ cancelled: false }); },
+    refresh: () => {
+      void probe({ cancelled: false });
+    },
   };
 }

@@ -36,9 +36,13 @@ async function bootstrap() {
   // 密钥格式错（非 64 位 hex）：同样 fail-fast，避免静默用错误密钥加密后无法解密。
   if (!requireKeyEncryptionKey()) {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('启动失败：必须设置 LLM_KEY_ENCRYPTION_KEY（64 位 hex，openssl rand -hex 32 生成）');
+      throw new Error(
+        '启动失败：必须设置 LLM_KEY_ENCRYPTION_KEY（64 位 hex，openssl rand -hex 32 生成）'
+      );
     }
-    console.warn('[安全警告] LLM_KEY_ENCRYPTION_KEY 未设置或格式非法，开发环境继续，生产将拒绝启动。');
+    console.warn(
+      '[安全警告] LLM_KEY_ENCRYPTION_KEY 未设置或格式非法，开发环境继续，生产将拒绝启动。'
+    );
   }
   // 本阶段只做启动断言。阶段 2 LlmService 通过 Nest provider token 注入（useFactory: () => getLlmKey()）。
 
@@ -46,7 +50,9 @@ async function bootstrap() {
   // 与 JWT_SECRET / LLM_KEY 的 fail-fast 不同：邮件是可降级能力（占位兜底），不阻塞启动；
   // 但需醒目告警提醒运维配置，否则生产环境邮件全静默（用户收不到重置 / 验证链接）。
   if (!process.env.SMTP_URL) {
-    console.warn('[邮件警告] SMTP_URL 未配置：找回密码 / 邮箱验证邮件将降级输出到 console.log（不实际发送）。生产环境请配置 SMTP_URL="smtps://user:pass@host:465" 后重启。');
+    console.warn(
+      '[邮件警告] SMTP_URL 未配置：找回密码 / 邮箱验证邮件将降级输出到 console.log（不实际发送）。生产环境请配置 SMTP_URL="smtps://user:pass@host:465" 后重启。'
+    );
   }
 
   // JSON body 仍需覆盖管理配置、工作流和兼容请求；v4 插件制品上传使用 raw stream，
@@ -70,9 +76,15 @@ async function bootstrap() {
   const downloadsDir = resolve(process.cwd(), 'downloads');
   const httpAdapter = app.getHttpAdapter();
   const expressInstance = httpAdapter.getInstance();
-  if (typeof (expressInstance as { use?: (path: string, handler: unknown) => void }).use === 'function') {
+  if (
+    typeof (expressInstance as { use?: (path: string, handler: unknown) => void }).use ===
+    'function'
+  ) {
     const express = await import('express');
-    (expressInstance as { use: (path: string, handler: unknown) => void }).use('/downloads', express.static(downloadsDir));
+    (expressInstance as { use: (path: string, handler: unknown) => void }).use(
+      '/downloads',
+      express.static(downloadsDir)
+    );
   }
   app.use(helmet());
   app.setGlobalPrefix('api');
@@ -99,7 +111,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true, // 出现未声明字段直接 400（而非静默剥离）
       transform: true, // 字符串参数自动转型（query/param 的 number 等）
       transformOptions: { enableImplicitConversion: true },
-    }),
+    })
   );
   app.useGlobalFilters(new AppExceptionFilter());
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
@@ -137,7 +149,9 @@ async function bootstrap() {
   // 408 Request Timeout（非 JSON body，桌面端报「解析发布响应失败：error decoding response body」），
   // 导致插件发布失败。放宽到可配置值（默认 30min，覆盖 300MB 慢上传）；collab-api 部署在反代后、
   // 真实超时由反代统一管控，body 上限 300MB（json limit）仍兜底最大体积。
-  app.getHttpServer().requestTimeout = Number(process.env.HTTP_REQUEST_TIMEOUT_MS ?? 30 * 60 * 1000);
+  app.getHttpServer().requestTimeout = Number(
+    process.env.HTTP_REQUEST_TIMEOUT_MS ?? 30 * 60 * 1000
+  );
 
   await app.listen(port, '0.0.0.0');
 }

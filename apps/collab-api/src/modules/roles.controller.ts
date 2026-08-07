@@ -1,11 +1,27 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { RoleService } from './role.service';
-import { AssignMemberRoleDto, CreateRoleDto, RoleListQueryDto, UpdateRoleDto } from './dto/role.dto';
+import {
+  AssignMemberRoleDto,
+  CreateRoleDto,
+  RoleListQueryDto,
+  UpdateRoleDto,
+} from './dto/role.dto';
 
 /**
  * 平台角色管理控制器（web 端 collab-admin 使用）。
@@ -63,7 +79,11 @@ export class AdminRolesController {
   @RequirePermission('platform.user.role.assign')
   @Post('assign')
   @ApiOperation({ summary: '为用户分配/撤销平台角色（roleId 传 null 撤销）' })
-  assign(@Req() req: Request, @Body('userId') userId: string, @Body('roleId') roleId: string | null) {
+  assign(
+    @Req() req: Request,
+    @Body('userId') userId: string,
+    @Body('roleId') roleId: string | null
+  ) {
     return this.role.assignPlatformRole(requireUser(req).id, userId, roleId);
   }
 }
@@ -87,7 +107,12 @@ export class RolesController {
     return this.role.listPermissions('TEAM');
   }
 
-  @RequirePermission('team.role.create', 'team.role.update', 'team.role.delete', 'team.member.role.assign')
+  @RequirePermission(
+    'team.role.create',
+    'team.role.update',
+    'team.role.delete',
+    'team.member.role.assign'
+  )
   @Get()
   @ApiOperation({ summary: '列出当前团队的全部角色（含成员数）' })
   list(@Req() req: Request) {

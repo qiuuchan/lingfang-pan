@@ -2,11 +2,22 @@
 // 字段白名单由全局 ValidationPipe（whitelist + forbidNonWhitelisted）强制，杜绝越权字段透传。
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEmail, IsIn, IsString, MinLength, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsEmail,
+  IsIn,
+  IsString,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 
 /** 单项设置：key 受 service 层 KEY_VALIDATORS 白名单约束（platformName/logoUrl 等），value 为字符串。 */
 export class SettingItemDto {
-  @ApiProperty({ description: '设置 key（白名单：platformName / logoUrl 等）', example: 'platformName' })
+  @ApiProperty({
+    description: '设置 key（白名单：platformName / logoUrl 等）',
+    example: 'platformName',
+  })
   @IsString()
   @MinLength(1, { message: 'key 不能为空' })
   key!: string;
@@ -41,20 +52,37 @@ export class TestEmailDto {
 /** 可被 reveal-secret 解密的敏感配置 key 白名单。
  *  这些 key 都按密钥类配置保存，审计时只记录 configured，不记录明文。
  *  在 DTO 层用 @IsIn 强制，配合 service 层兜底，杜绝通过 reveal-secret 读取任意 key。 */
-export const REVEALABLE_SECRET_KEYS = ['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken', 'tavilyApiKey', 'braveApiKey', 'rbflowApiKey'] as const;
+export const REVEALABLE_SECRET_KEYS = [
+  'smtpPass',
+  'geetestCaptchaKey',
+  'giteeAccessToken',
+  'tavilyApiKey',
+  'braveApiKey',
+  'rbflowApiKey',
+] as const;
 export type RevealableSecretKey = (typeof REVEALABLE_SECRET_KEYS)[number];
 
 /** POST /api/admin/settings/reveal-secret 入参：admin 当前密码 + 要查看的敏感 key。
  *  密码校验由 service 层做（bcrypt.compare 与当前用户 passwordHash），DTO 仅校验非空 + key 白名单。
  *  密码不设最小长度（避免与「密码 ≥8 位」注册约束耦合，校验语义是「匹配当前哈希」而非「符合策略」）。 */
 export class RevealSecretDto {
-  @ApiProperty({ description: '当前管理员密码（用于二次确认，明文传输经 HTTPS）', example: 'ChangeMe123!' })
+  @ApiProperty({
+    description: '当前管理员密码（用于二次确认，明文传输经 HTTPS）',
+    example: 'ChangeMe123!',
+  })
   @IsString()
   @MinLength(1, { message: 'password 不能为空' })
   password!: string;
 
-  @ApiProperty({ description: '要查看明文的敏感 key（仅 smtpPass / geetestCaptchaKey / giteeAccessToken / tavilyApiKey / braveApiKey / rbflowApiKey）', example: 'smtpPass' })
+  @ApiProperty({
+    description:
+      '要查看明文的敏感 key（仅 smtpPass / geetestCaptchaKey / giteeAccessToken / tavilyApiKey / braveApiKey / rbflowApiKey）',
+    example: 'smtpPass',
+  })
   @IsString()
-  @IsIn(REVEALABLE_SECRET_KEYS, { message: '仅支持查看 smtpPass、geetestCaptchaKey、giteeAccessToken、tavilyApiKey、braveApiKey 或 rbflowApiKey' })
+  @IsIn(REVEALABLE_SECRET_KEYS, {
+    message:
+      '仅支持查看 smtpPass、geetestCaptchaKey、giteeAccessToken、tavilyApiKey、braveApiKey 或 rbflowApiKey',
+  })
   key!: RevealableSecretKey;
 }

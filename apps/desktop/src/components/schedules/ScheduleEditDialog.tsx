@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { BotIcon, PackageIcon, BellIcon, ClockIcon, CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
@@ -161,7 +161,7 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
 
     const timeoutMs = Math.max(
       LOCAL_SCHEDULE_TIMEOUT_MS_MIN,
-      Math.min(LOCAL_SCHEDULE_TIMEOUT_MS_MAX, Math.round(timeoutMin * 60_000)),
+      Math.min(LOCAL_SCHEDULE_TIMEOUT_MS_MAX, Math.round(timeoutMin * 60_000))
     );
 
     setSaving(true);
@@ -197,166 +197,230 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
       <DialogContent className="flex max-h-[90vh] w-[92vw] max-w-2xl flex-col gap-4 overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? '编辑定时任务' : '新建定时任务'}</DialogTitle>
-          <DialogDescription>
-            配置触发规则与执行内容；任务仅在应用运行时触发
-          </DialogDescription>
+          <DialogDescription>配置触发规则与执行内容；任务仅在应用运行时触发</DialogDescription>
         </DialogHeader>
 
-        {/* 名称 */}
-        <Field label="任务名称">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="如：每日早报生成"
-            maxLength={100}
-          />
-        </Field>
-
-        {/* 类型 */}
-        <Field label="执行类型">
-          <Select value={taskType} onValueChange={(v) => setTaskType(v as LocalTaskType)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="AGENT_PROMPT">
-                <span className="flex items-center gap-2">
-                  <BotIcon className="size-4" />Agent Prompt（跑一段 Agent 对话）
-                </span>
-              </SelectItem>
-              <SelectItem value="PLUGIN_ACTION">
-                <span className="flex items-center gap-2">
-                  <PackageIcon className="size-4" />插件 Action（调用插件能力）
-                </span>
-              </SelectItem>
-              <SelectItem value="NOTIFY">
-                <span className="flex items-center gap-2">
-                  <BellIcon className="size-4" />系统通知（仅发提醒）
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-
-        {/* 触发器 */}
-        <Field label="触发规则">
-          <Select value={triggerKind} onValueChange={(v) => setTriggerKind(v as 'ONCE' | 'CRON')}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CRON">
-                <span className="flex items-center gap-2">
-                  <ClockIcon className="size-4" />周期触发（cron 表达式）
-                </span>
-              </SelectItem>
-              <SelectItem value="ONCE">
-                <span className="flex items-center gap-2">
-                  <CalendarIcon className="size-4" />一次性触发
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-
-        {triggerKind === 'ONCE' ? (
-          <Field label="触发时间">
+        <FieldGroup className="gap-4">
+          {/* 名称 */}
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="schedule-name" className="text-xs font-medium">
+              任务名称
+            </FieldLabel>
             <Input
-              type="datetime-local"
-              value={runAtLocal}
-              onChange={(e) => setRunAtLocal(e.target.value)}
+              id="schedule-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="如：每日早报生成"
+              maxLength={100}
             />
           </Field>
-        ) : (
-          <>
-            <Field label="cron 表达式" hint="5 字段：分 时 日 月 周（如每天 9 点：0 9 * * *）">
-              <Input
-                value={cron}
-                onChange={(e) => setCron(e.target.value)}
-                placeholder="0 9 * * *"
-                className="font-mono"
-              />
-            </Field>
-            <Field label="时区" hint="IANA 时区名，默认系统时区">
-              <Input value={timeZone} onChange={(e) => setTimeZone(e.target.value)} />
-            </Field>
-          </>
-        )}
 
-        {/* payload 按类型切换 */}
-        {taskType === 'AGENT_PROMPT' && (
-          <Field
-            label="Prompt"
-            hint={`Agent 任务指令，最多 10000 字符（当前 ${prompt.length}）`}
-          >
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="如：生成本周工作日报，输出 Markdown 格式摘要"
-              rows={6}
-              maxLength={10000}
-              className="resize-y"
-            />
+          {/* 类型 */}
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="schedule-task-type" className="text-xs font-medium">
+              执行类型
+            </FieldLabel>
+            <Select value={taskType} onValueChange={(v) => setTaskType(v as LocalTaskType)}>
+              <SelectTrigger id="schedule-task-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="AGENT_PROMPT">
+                  <span className="flex items-center gap-2">
+                    <BotIcon className="size-4" />
+                    Agent Prompt（跑一段 Agent 对话）
+                  </span>
+                </SelectItem>
+                <SelectItem value="PLUGIN_ACTION">
+                  <span className="flex items-center gap-2">
+                    <PackageIcon className="size-4" />
+                    插件 Action（调用插件能力）
+                  </span>
+                </SelectItem>
+                <SelectItem value="NOTIFY">
+                  <span className="flex items-center gap-2">
+                    <BellIcon className="size-4" />
+                    系统通知（仅发提醒）
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
-        )}
-        {taskType === 'PLUGIN_ACTION' && (
-          <>
-            <Field label="插件 ID">
+
+          {/* 触发器 */}
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="schedule-trigger-kind" className="text-xs font-medium">
+              触发规则
+            </FieldLabel>
+            <Select value={triggerKind} onValueChange={(v) => setTriggerKind(v as 'ONCE' | 'CRON')}>
+              <SelectTrigger id="schedule-trigger-kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CRON">
+                  <span className="flex items-center gap-2">
+                    <ClockIcon className="size-4" />
+                    周期触发（cron 表达式）
+                  </span>
+                </SelectItem>
+                <SelectItem value="ONCE">
+                  <span className="flex items-center gap-2">
+                    <CalendarIcon className="size-4" />
+                    一次性触发
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          {triggerKind === 'ONCE' ? (
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor="schedule-run-at" className="text-xs font-medium">
+                触发时间
+              </FieldLabel>
               <Input
-                value={pluginId}
-                onChange={(e) => setPluginId(e.target.value)}
-                placeholder="plugin id"
+                id="schedule-run-at"
+                type="datetime-local"
+                value={runAtLocal}
+                onChange={(e) => setRunAtLocal(e.target.value)}
               />
             </Field>
-            <Field label="Action 名">
-              <Input
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                placeholder="action name"
-              />
-            </Field>
-            <Field label="入参（JSON）">
+          ) : (
+            <>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-cron" className="text-xs font-medium">
+                  cron 表达式
+                </FieldLabel>
+                <Input
+                  id="schedule-cron"
+                  value={cron}
+                  onChange={(e) => setCron(e.target.value)}
+                  placeholder="0 9 * * *"
+                  className="font-mono"
+                />
+                <FieldDescription className="text-xs">
+                  5 字段：分 时 日 月 周（如每天 9 点：0 9 * * *）
+                </FieldDescription>
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-time-zone" className="text-xs font-medium">
+                  时区
+                </FieldLabel>
+                <Input
+                  id="schedule-time-zone"
+                  value={timeZone}
+                  onChange={(e) => setTimeZone(e.target.value)}
+                />
+                <FieldDescription className="text-xs">IANA 时区名，默认系统时区</FieldDescription>
+              </Field>
+            </>
+          )}
+
+          {/* payload 按类型切换 */}
+          {taskType === 'AGENT_PROMPT' && (
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor="schedule-prompt" className="text-xs font-medium">
+                Prompt
+              </FieldLabel>
               <Textarea
-                value={inputJson}
-                onChange={(e) => setInputJson(e.target.value)}
-                rows={4}
-                className="resize-y font-mono"
-              />
-            </Field>
-          </>
-        )}
-        {taskType === 'NOTIFY' && (
-          <>
-            <Field label="通知标题">
-              <Input
-                value={notifyTitle}
-                onChange={(e) => setNotifyTitle(e.target.value)}
-                maxLength={200}
-              />
-            </Field>
-            <Field label="通知正文">
-              <Textarea
-                value={notifyBody}
-                onChange={(e) => setNotifyBody(e.target.value)}
-                rows={3}
-                maxLength={2000}
+                id="schedule-prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="如：生成本周工作日报，输出 Markdown 格式摘要"
+                rows={6}
+                maxLength={10000}
                 className="resize-y"
               />
+              <FieldDescription className="text-xs">
+                {`Agent 任务指令，最多 10000 字符（当前 ${prompt.length}）`}
+              </FieldDescription>
             </Field>
-          </>
-        )}
+          )}
+          {taskType === 'PLUGIN_ACTION' && (
+            <>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-plugin-id" className="text-xs font-medium">
+                  插件 ID
+                </FieldLabel>
+                <Input
+                  id="schedule-plugin-id"
+                  value={pluginId}
+                  onChange={(e) => setPluginId(e.target.value)}
+                  placeholder="plugin id"
+                />
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-action" className="text-xs font-medium">
+                  Action 名
+                </FieldLabel>
+                <Input
+                  id="schedule-action"
+                  value={action}
+                  onChange={(e) => setAction(e.target.value)}
+                  placeholder="action name"
+                />
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-input-json" className="text-xs font-medium">
+                  入参（JSON）
+                </FieldLabel>
+                <Textarea
+                  id="schedule-input-json"
+                  value={inputJson}
+                  onChange={(e) => setInputJson(e.target.value)}
+                  rows={4}
+                  className="resize-y font-mono"
+                />
+              </Field>
+            </>
+          )}
+          {taskType === 'NOTIFY' && (
+            <>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-notify-title" className="text-xs font-medium">
+                  通知标题
+                </FieldLabel>
+                <Input
+                  id="schedule-notify-title"
+                  value={notifyTitle}
+                  onChange={(e) => setNotifyTitle(e.target.value)}
+                  maxLength={200}
+                />
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="schedule-notify-body" className="text-xs font-medium">
+                  通知正文
+                </FieldLabel>
+                <Textarea
+                  id="schedule-notify-body"
+                  value={notifyBody}
+                  onChange={(e) => setNotifyBody(e.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  className="resize-y"
+                />
+              </Field>
+            </>
+          )}
 
-        {/* timeout */}
-        <Field label="单次执行超时（分钟）" hint="范围 1-60 分钟，默认 30">
-          <Input
-            type="number"
-            min={1}
-            max={60}
-            value={timeoutMin}
-            onChange={(e) => setTimeoutMin(Number(e.target.value) || 30)}
-            className="w-32"
-          />
-        </Field>
+          {/* timeout */}
+          {/* *:data-[slot=input]:w-32 保住原来的窄输入框宽度（Field 默认给子元素 w-full）。 */}
+          <Field className="gap-1.5 *:data-[slot=input]:w-32">
+            <FieldLabel htmlFor="schedule-timeout" className="text-xs font-medium">
+              单次执行超时（分钟）
+            </FieldLabel>
+            <Input
+              id="schedule-timeout"
+              type="number"
+              min={1}
+              max={60}
+              value={timeoutMin}
+              onChange={(e) => setTimeoutMin(Number(e.target.value) || 30)}
+              className="w-32"
+            />
+            <FieldDescription className="text-xs">范围 1-60 分钟，默认 30</FieldDescription>
+          </Field>
+        </FieldGroup>
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
@@ -368,24 +432,6 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label className="text-xs font-medium">{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
   );
 }
 

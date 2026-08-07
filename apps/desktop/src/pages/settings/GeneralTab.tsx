@@ -29,7 +29,7 @@ export function GeneralTab() {
       <CardHeader>
         <CardTitle>通用</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="flex flex-col gap-2">
         <Field className="w-72">
           <FieldLabel htmlFor="close-action">关闭窗口时</FieldLabel>
           <Select

@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public, requireUser } from '../common';
@@ -17,12 +28,16 @@ import { MarketplaceQualityService } from './marketplace-quality.service';
 @ApiBearerAuth()
 @Controller()
 export class MarketplaceQualityController {
-  constructor(@Inject(MarketplaceQualityService) private readonly quality: MarketplaceQualityService) {}
+  constructor(
+    @Inject(MarketplaceQualityService) private readonly quality: MarketplaceQualityService
+  ) {}
 
   @Public()
   @Get('marketplace/quality-policy')
   @ApiOperation({ summary: '公开市场质量规则 v1' })
-  policy() { return this.quality.policy(); }
+  policy() {
+    return this.quality.policy();
+  }
 
   @Put('plugin-packages/:id/marketplace-rating')
   @ApiOperation({ summary: '创建或更新当前团队评分' })
@@ -52,7 +67,11 @@ export class MarketplaceQualityController {
   @RequirePermission('platform.plugin.list_all', 'platform.plugin.review')
   @Post('admin/plugin-packages/:id/quality/recompute')
   @ApiOperation({ summary: '平台管理员对单个插件重新计算质量快照' })
-  recompute(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplaceQualityRecomputeDto) {
+  recompute(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplaceQualityRecomputeDto
+  ) {
     return this.quality.recompute(requireUser(req).id, id, body.requestId);
   }
 
@@ -66,7 +85,11 @@ export class MarketplaceQualityController {
   @RequirePermission('platform.plugin.edit')
   @Delete('admin/plugin-packages/:id/feature')
   @ApiOperation({ summary: '平台管理员取消人工精选' })
-  unfeature(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplaceQualityReasonDto) {
+  unfeature(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplaceQualityReasonDto
+  ) {
     return this.quality.unfeature(requireUser(req).id, id, body.reason);
   }
 

@@ -38,7 +38,9 @@ const SAMPLE_ASSET = {
 
 async function main() {
   const existing = await prisma.release.findUnique({
-    where: { channel_version: { channel: SAMPLE_RELEASE.channel, version: SAMPLE_RELEASE.version } },
+    where: {
+      channel_version: { channel: SAMPLE_RELEASE.channel, version: SAMPLE_RELEASE.version },
+    },
   });
   if (existing) {
     console.log(`Release seed 跳过：${SAMPLE_RELEASE.channel}/${SAMPLE_RELEASE.version} 已存在。`);
@@ -60,7 +62,9 @@ async function main() {
     },
     include: { assets: true },
   });
-  console.log(`Release seed 完成：${release.channel}/${release.version}（${release.assets.length} 个产物）。`);
+  console.log(
+    `Release seed 完成：${release.channel}/${release.version}（${release.assets.length} 个产物）。`
+  );
 }
 
 main().finally(async () => prisma.$disconnect());

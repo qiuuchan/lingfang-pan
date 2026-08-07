@@ -17,11 +17,21 @@ export function loadCatalog(fetchImplementation?: FetchImplementation) {
 }
 
 export function loadDiscoveryHome(fetchImplementation?: FetchImplementation) {
-  return requestJson('/api/web/plugins/discovery/home', MarketplaceDiscoveryHome, {}, fetchImplementation);
+  return requestJson(
+    '/api/web/plugins/discovery/home',
+    MarketplaceDiscoveryHome,
+    {},
+    fetchImplementation
+  );
 }
 
 export function loadPluginDetail(packageId: string, fetchImplementation?: FetchImplementation) {
-  return requestJson(`/api/web/plugins/${encodeURIComponent(packageId)}`, PublicPluginDetail, {}, fetchImplementation);
+  return requestJson(
+    `/api/web/plugins/${encodeURIComponent(packageId)}`,
+    PublicPluginDetail,
+    {},
+    fetchImplementation
+  );
 }
 
 export function startCloudTrial(
@@ -29,7 +39,7 @@ export function startCloudTrial(
   action: WebCloudPreviewAction,
   input: Record<string, unknown>,
   requestIdempotencyKey: string,
-  fetchImplementation?: FetchImplementation,
+  fetchImplementation?: FetchImplementation
 ) {
   return requestJson(
     `/api/web/plugin-actions/${encodeURIComponent(detail.package_id)}/${encodeURIComponent(action.action_id)}/preview`,
@@ -45,7 +55,7 @@ export function startCloudTrial(
         request_idempotency_key: requestIdempotencyKey,
       }),
     },
-    fetchImplementation,
+    fetchImplementation
   );
 }
 
@@ -54,7 +64,7 @@ export function getCloudTrial(invocationId: string, fetchImplementation?: FetchI
     `/api/web/plugin-actions/preview/${encodeURIComponent(invocationId)}`,
     WebCloudTrialProjection,
     {},
-    fetchImplementation,
+    fetchImplementation
   );
 }
 
@@ -63,7 +73,7 @@ export function cancelCloudTrial(invocationId: string, fetchImplementation?: Fet
     `/api/web/plugin-actions/preview/${encodeURIComponent(invocationId)}/cancel`,
     WebCloudTrialProjection,
     { method: 'POST' },
-    fetchImplementation,
+    fetchImplementation
   );
 }
 
@@ -78,13 +88,16 @@ export function parseTrialInput(source: string): Record<string, unknown> {
   } catch {
     throw new Error('输入必须是合法 JSON');
   }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Action 输入必须是 JSON 对象');
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Action 输入必须是 JSON 对象');
   return value as Record<string, unknown>;
 }
 
 export function defaultTrialInput(schema: PortableJsonSchemaNode): Record<string, unknown> {
   const value = defaultSchemaValue(schema);
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function defaultSchemaValue(schema: PortableJsonSchemaNode): unknown {
@@ -94,9 +107,11 @@ function defaultSchemaValue(schema: PortableJsonSchemaNode): unknown {
   const type = types.find((candidate) => candidate !== 'null');
   if (type === 'object') {
     const required = new Set(schema.required ?? []);
-    return Object.fromEntries(Object.entries(schema.properties ?? {})
-      .filter(([name]) => required.has(name))
-      .map(([name, child]) => [name, defaultSchemaValue(child)]));
+    return Object.fromEntries(
+      Object.entries(schema.properties ?? {})
+        .filter(([name]) => required.has(name))
+        .map(([name, child]) => [name, defaultSchemaValue(child)])
+    );
   }
   if (type === 'array') return [];
   if (type === 'string') return 'x'.repeat(Math.min(schema.minLength ?? 0, 64));

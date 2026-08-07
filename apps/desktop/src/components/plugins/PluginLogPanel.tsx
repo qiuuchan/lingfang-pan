@@ -66,7 +66,11 @@ export function PluginLogPanel({ lines, autoScroll = true }: PluginLogPanelProps
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title="复制全部"
           >
-            {copied ? <CheckIcon className="size-3 text-emerald-500" /> : <CopyIcon className="size-3" />}
+            {copied ? (
+              <CheckIcon className="size-3 text-emerald-500" />
+            ) : (
+              <CopyIcon className="size-3" />
+            )}
             {copied ? '已复制' : '复制'}
           </button>
         </div>
@@ -78,9 +82,7 @@ export function PluginLogPanel({ lines, autoScroll = true }: PluginLogPanelProps
         {lines.length === 0 ? (
           <span className="text-[#8b949e]">（等待输出…）</span>
         ) : (
-          lines.map((line, i) => (
-            <LogRow key={i} line={line} />
-          ))
+          lines.map((line, i) => <LogRow key={i} line={line} />)
         )}
       </div>
     </div>

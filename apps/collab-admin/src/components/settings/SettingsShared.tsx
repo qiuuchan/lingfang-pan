@@ -28,7 +28,9 @@ export function ThemeOption({ active, onClick, icon: Icon, label, desc }: ThemeO
       type="button"
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors ${
-        active ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'border-border hover:bg-muted/50'
+        active
+          ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+          : 'border-border hover:bg-muted/50'
       }`}
     >
       <Icon className={`size-5 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
@@ -41,7 +43,13 @@ export function ThemeOption({ active, onClick, icon: Icon, label, desc }: ThemeO
 }
 
 type RevealSecretButtonProps = {
-  secretKey: 'smtpPass' | 'geetestCaptchaKey' | 'giteeAccessToken' | 'tavilyApiKey' | 'braveApiKey' | 'rbflowApiKey';
+  secretKey:
+    | 'smtpPass'
+    | 'geetestCaptchaKey'
+    | 'giteeAccessToken'
+    | 'tavilyApiKey'
+    | 'braveApiKey'
+    | 'rbflowApiKey';
   label: string;
   hasConfigured: boolean;
 };
@@ -97,9 +105,18 @@ export function RevealSecretButton({ secretKey, label, hasConfigured }: RevealSe
           {revealed ? (
             <RevealedSecretContent revealed={revealed} />
           ) : (
-            <SecretPasswordForm password={password} onPasswordChange={setPassword} onReveal={reveal} />
+            <SecretPasswordForm
+              password={password}
+              onPasswordChange={setPassword}
+              onReveal={reveal}
+            />
           )}
-          <RevealSecretFooter revealed={revealed} loading={loading} onClose={() => setOpen(false)} onReveal={reveal} />
+          <RevealSecretFooter
+            revealed={revealed}
+            loading={loading}
+            onClose={() => setOpen(false)}
+            onReveal={reveal}
+          />
         </DialogContent>
       </Dialog>
     </>
@@ -117,7 +134,7 @@ function RevealedSecretContent({ revealed }: { revealed: string }) {
         onClick={() => {
           void navigator.clipboard?.writeText(revealed).then(
             () => toast.success('已复制到剪贴板'),
-            () => toast.error('复制失败，请手动选取'),
+            () => toast.error('复制失败，请手动选取')
           );
         }}
       >

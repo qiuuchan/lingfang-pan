@@ -42,7 +42,10 @@ function canonicalPriceFacts(value: {
   });
 }
 
-export function marketplaceDiscountPhase(discount: MarketplaceDiscountFact | null, now: Date): MarketplacePriceWindowPhase {
+export function marketplaceDiscountPhase(
+  discount: MarketplaceDiscountFact | null,
+  now: Date
+): MarketplacePriceWindowPhase {
   if (!discount) return 'BASE';
   if (discount.canceledAt) return 'CANCELED';
   if (now < discount.startsAt) return 'BEFORE';
@@ -50,15 +53,25 @@ export function marketplaceDiscountPhase(discount: MarketplaceDiscountFact | nul
   return 'ACTIVE';
 }
 
-export function validateMarketplaceDiscount(listPriceCents: number, discount: MarketplaceDiscountFact): void {
+export function validateMarketplaceDiscount(
+  listPriceCents: number,
+  discount: MarketplaceDiscountFact
+): void {
   const listPrice = CnyCents.parse(listPriceCents);
   const discountPrice = CnyCents.parse(discount.priceCents);
-  if (discountPrice < 1 || discountPrice >= listPrice) throw new Error('marketplace_discount_invalid_price');
-  if (!Number.isInteger(discount.revision) || discount.revision < 1) throw new Error('marketplace_discount_invalid_revision');
-  if (Number.isNaN(discount.startsAt.getTime()) || Number.isNaN(discount.endsAt.getTime()) || discount.startsAt >= discount.endsAt) {
+  if (discountPrice < 1 || discountPrice >= listPrice)
+    throw new Error('marketplace_discount_invalid_price');
+  if (!Number.isInteger(discount.revision) || discount.revision < 1)
+    throw new Error('marketplace_discount_invalid_revision');
+  if (
+    Number.isNaN(discount.startsAt.getTime()) ||
+    Number.isNaN(discount.endsAt.getTime()) ||
+    discount.startsAt >= discount.endsAt
+  ) {
     throw new Error('marketplace_discount_invalid_window');
   }
-  if (discount.endsAt.getTime() - discount.startsAt.getTime() > 90 * 24 * 60 * 60 * 1000) throw new Error('marketplace_discount_window_too_long');
+  if (discount.endsAt.getTime() - discount.startsAt.getTime() > 90 * 24 * 60 * 60 * 1000)
+    throw new Error('marketplace_discount_window_too_long');
 }
 
 export function resolveMarketplacePrice(input: {
@@ -66,20 +79,28 @@ export function resolveMarketplacePrice(input: {
   priceRevision: number;
   discount: MarketplaceDiscountFact | null;
   now: Date;
-}): MarketplacePriceProjection & { window_phase: MarketplacePriceWindowPhase; internal_price_revision: number } {
+}): MarketplacePriceProjection & {
+  window_phase: MarketplacePriceWindowPhase;
+  internal_price_revision: number;
+} {
   const listPrice = CnyCents.parse(input.listPriceCents);
-  if (!Number.isInteger(input.priceRevision) || input.priceRevision < 1) throw new Error('marketplace_price_invalid_revision');
+  if (!Number.isInteger(input.priceRevision) || input.priceRevision < 1)
+    throw new Error('marketplace_price_invalid_revision');
   if (Number.isNaN(input.now.getTime())) throw new Error('marketplace_price_invalid_clock');
   if (input.discount) validateMarketplaceDiscount(listPrice, input.discount);
   const phase = marketplaceDiscountPhase(input.discount, input.now);
   const active = phase === 'ACTIVE' ? input.discount : null;
   const effectivePrice = active?.priceCents ?? listPrice;
-  const digest = createHash('sha256').update(canonicalPriceFacts({
-    priceRevision: input.priceRevision,
-    discountId: input.discount?.id ?? null,
-    discountRevision: input.discount?.revision ?? null,
-    windowPhase: phase,
-  })).digest('base64url');
+  const digest = createHash('sha256')
+    .update(
+      canonicalPriceFacts({
+        priceRevision: input.priceRevision,
+        discountId: input.discount?.id ?? null,
+        discountRevision: input.discount?.revision ?? null,
+        windowPhase: phase,
+      })
+    )
+    .digest('base64url');
   const priceVersion = MarketplacePriceVersion.parse(`pv1.${digest}`);
   return {
     currency_code: 'CNY',
@@ -88,13 +109,15 @@ export function resolveMarketplacePrice(input: {
     effective_price_cents: effectivePrice,
     price_cents: effectivePrice,
     price_version: priceVersion,
-    discount: active ? {
-      id: active.id,
-      revision: active.revision,
-      price_cents: active.priceCents,
-      starts_at: active.startsAt.toISOString(),
-      ends_at: active.endsAt.toISOString(),
-    } : null,
+    discount: active
+      ? {
+          id: active.id,
+          revision: active.revision,
+          price_cents: active.priceCents,
+          starts_at: active.startsAt.toISOString(),
+          ends_at: active.endsAt.toISOString(),
+        }
+      : null,
     window_phase: phase,
     internal_price_revision: input.priceRevision,
   };
@@ -121,12 +144,27 @@ export function refundJournal(grossCents: number): MarketplaceJournalEntry[] {
   ]);
 }
 
-export function settlementJournal(grossCents: number, platformFeeBps: number): MarketplaceJournalEntry[] {
+export function settlementJournal(
+  grossCents: number,
+  platformFeeBps: number
+): MarketplaceJournalEntry[] {
   const split = splitMarketplacePrice(grossCents, platformFeeBps);
   return balanced([
-    { entry_kind: 'PLATFORM_SETTLEMENT_CLEARING_DEBIT', direction: 'DEBIT', amount_cents: split.gross_cents },
-    { entry_kind: 'SELLER_SETTLEMENT_CREDIT', direction: 'CREDIT', amount_cents: split.seller_amount_cents },
-    { entry_kind: 'PLATFORM_SETTLEMENT_CREDIT', direction: 'CREDIT', amount_cents: split.platform_amount_cents },
+    {
+      entry_kind: 'PLATFORM_SETTLEMENT_CLEARING_DEBIT',
+      direction: 'DEBIT',
+      amount_cents: split.gross_cents,
+    },
+    {
+      entry_kind: 'SELLER_SETTLEMENT_CREDIT',
+      direction: 'CREDIT',
+      amount_cents: split.seller_amount_cents,
+    },
+    {
+      entry_kind: 'PLATFORM_SETTLEMENT_CREDIT',
+      direction: 'CREDIT',
+      amount_cents: split.platform_amount_cents,
+    },
   ]);
 }
 
@@ -142,7 +180,8 @@ export function projectMarketplaceOrderFunds(input: {
   const platform = CnyCents.parse(input.platformAmountCents);
   const seller = CnyCents.parse(input.sellerAmountCents);
   if (platform + seller !== gross) throw new Error('marketplace_order_split_invalid');
-  const awaitingTerminal = input.status === 'PENDING_SETTLEMENT' || input.status === 'REFUND_REQUESTED';
+  const awaitingTerminal =
+    input.status === 'PENDING_SETTLEMENT' || input.status === 'REFUND_REQUESTED';
   return {
     clearingReserveCents: awaitingTerminal ? gross : 0,
     sellerReceivableCents: awaitingTerminal ? seller : 0,

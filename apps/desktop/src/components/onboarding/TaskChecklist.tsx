@@ -67,18 +67,25 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
   // 四项内置运行时全部可用时自动完成环境确认步骤。
   useEffect(() => {
     let cancelled = false;
-    void getRuntimeStatus().then((status) => {
-      if (cancelled || Object.values(status).some((runtime) => !runtime.available)) return;
-      setDone((prev) => {
-        if (prev[0]) return prev;
-        const next = [...prev];
-        next[0] = true;
-        saveProgress(session.userId, next);
-        if (isAllDone(next)) { saveDone(session.userId); setCompleted(true); }
-        return next;
-      });
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
+    void getRuntimeStatus()
+      .then((status) => {
+        if (cancelled || Object.values(status).some((runtime) => !runtime.available)) return;
+        setDone((prev) => {
+          if (prev[0]) return prev;
+          const next = [...prev];
+          next[0] = true;
+          saveProgress(session.userId, next);
+          if (isAllDone(next)) {
+            saveDone(session.userId);
+            setCompleted(true);
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [session.userId]);
 
   const finishedCount = useMemo(() => done.filter(Boolean).length, [done]);
@@ -114,12 +121,19 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
   if (completed || dismissed) return null;
 
   return (
-    <Dialog open onOpenChange={() => { /* 不允许外点/Esc 关闭，强制走任务流程（仅「稍后再说」可关） */ }}>
+    <Dialog
+      open
+      onOpenChange={() => {
+        /* 不允许外点/Esc 关闭，强制走任务流程（仅「稍后再说」可关） */
+      }}
+    >
       <DialogContent showCloseButton={false} className="sm:max-w-lg">
         <DialogHeader {...dragRegionProps}>
           <DialogTitle className="flex items-center gap-2 text-base" data-tauri-drag-region>
             <span>新手任务清单</span>
-            <span className="text-xs font-normal text-muted-foreground">{finishedCount}/{TASK_STEPS.length}</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {finishedCount}/{TASK_STEPS.length}
+            </span>
           </DialogTitle>
           <DialogDescription>
             按顺序完成以下 5 步，即可上手用 AI 创建并分享插件。每完成一步回来打勾。
@@ -144,26 +158,34 @@ export function TaskChecklist({ session, setView, setSettingsTab }: TaskChecklis
                 key={index}
                 className={cn(
                   'flex items-start gap-3 rounded-lg border p-3 transition-colors',
-                  isStepDone ? 'border-primary/30 bg-primary/5' : 'border-border bg-background',
+                  isStepDone ? 'border-primary/30 bg-primary/5' : 'border-border bg-background'
                 )}
               >
-                <div className={cn(
-                  'flex size-8 shrink-0 items-center justify-center rounded-full',
-                  isStepDone ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-                )}>
-                  {isStepDone ? <CircleCheckIcon className="size-4" /> : <Icon className="size-4" />}
+                <div
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full',
+                    isStepDone
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {isStepDone ? (
+                    <CircleCheckIcon className="size-4" />
+                  ) : (
+                    <Icon className="size-4" />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{index + 1}. {step.title}</span>
+                    <span className="text-sm font-medium">
+                      {index + 1}. {step.title}
+                    </span>
                   </div>
-                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{step.description}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    {step.description}
+                  </p>
                   <div className="mt-2 flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => gotoStep(index)}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => gotoStep(index)}>
                       去完成
                     </Button>
                     <Button

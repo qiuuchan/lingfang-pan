@@ -25,7 +25,33 @@ import { WebPreviewAssetService } from './web-preview-asset.service';
 import { ARTIFACT_STORE, createArtifactStore } from '../artifact-store';
 
 @Module({
-  controllers: [WebMarketplaceController, WebPreviewSessionController, WebPreviewAssetController, WebCloudTrialController, WebSessionController],
-  providers: [PrismaService, AuthService, MailService, GeetestService, MarketplaceDiscoveryService, MarketplaceCommerceService, MarketplaceCommerceQueryService, WebMarketplaceService, WebPreviewSessionService, WebPreviewAssetService, WebCloudTrialService, WebSessionService, PluginActionRegistryService, CloudActionRoutingService, ActionInvocationService, GovernanceActionAdapter, PluginGovernanceService, PluginGovernancePolicyService, { provide: ARTIFACT_STORE, useFactory: () => createArtifactStore() }],
+  controllers: [
+    WebMarketplaceController,
+    WebPreviewSessionController,
+    WebPreviewAssetController,
+    WebCloudTrialController,
+    WebSessionController,
+  ],
+  providers: [
+    PrismaService,
+    AuthService,
+    MailService,
+    GeetestService,
+    MarketplaceDiscoveryService,
+    MarketplaceCommerceService,
+    MarketplaceCommerceQueryService,
+    WebMarketplaceService,
+    WebPreviewSessionService,
+    WebPreviewAssetService,
+    WebCloudTrialService,
+    WebSessionService,
+    PluginActionRegistryService,
+    CloudActionRoutingService,
+    ActionInvocationService,
+    GovernanceActionAdapter,
+    PluginGovernanceService,
+    PluginGovernancePolicyService,
+    { provide: ARTIFACT_STORE, useFactory: () => createArtifactStore() },
+  ],
 })
 export class WebMarketplaceModule {}

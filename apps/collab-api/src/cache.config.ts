@@ -9,7 +9,8 @@ export function resolveCacheConfig(env: NodeJS.ProcessEnv = process.env): CacheC
   if (driver === 'memory') return { driver, redisUrl: null };
   const redisUrl = env.REDIS_URL?.trim();
   if (!redisUrl) throw new Error('CACHE_DRIVER=redis requires REDIS_URL');
-  if (!/^rediss?:\/\//i.test(redisUrl)) throw new Error('REDIS_URL must start with redis:// or rediss://');
+  if (!/^rediss?:\/\//i.test(redisUrl))
+    throw new Error('REDIS_URL must start with redis:// or rediss://');
   return { driver, redisUrl };
 }
 

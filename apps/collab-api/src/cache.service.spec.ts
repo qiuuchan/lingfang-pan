@@ -9,22 +9,29 @@ describe('AppCacheService', () => {
     const cache = new AppCacheService(createMemoryCacheStore({ now }));
     const loader = vi.fn(async () => ({ value: 'fresh' }));
 
-    await expect(cache.remember('platform-info', 30_000, loader)).resolves.toEqual({ value: 'fresh' });
-    await expect(cache.remember('platform-info', 30_000, loader)).resolves.toEqual({ value: 'fresh' });
+    await expect(cache.remember('platform-info', 30_000, loader)).resolves.toEqual({
+      value: 'fresh',
+    });
+    await expect(cache.remember('platform-info', 30_000, loader)).resolves.toEqual({
+      value: 'fresh',
+    });
 
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
   it('reloads values after explicit delete', async () => {
     const cache = new AppCacheService(createMemoryCacheStore());
-    const loader = vi.fn()
+    const loader = vi
+      .fn()
       .mockResolvedValueOnce({ value: 'first' })
       .mockResolvedValueOnce({ value: 'second' });
 
     await cache.remember('active-provider', 30_000, loader);
     await cache.delete('active-provider');
 
-    await expect(cache.remember('active-provider', 30_000, loader)).resolves.toEqual({ value: 'second' });
+    await expect(cache.remember('active-provider', 30_000, loader)).resolves.toEqual({
+      value: 'second',
+    });
     expect(loader).toHaveBeenCalledTimes(2);
   });
 });
@@ -35,14 +42,18 @@ describe('resolveCacheConfig', () => {
   });
 
   it('requires REDIS_URL when redis is selected', () => {
-    expect(() => resolveCacheConfig({ CACHE_DRIVER: 'redis' })).toThrow('CACHE_DRIVER=redis requires REDIS_URL');
+    expect(() => resolveCacheConfig({ CACHE_DRIVER: 'redis' })).toThrow(
+      'CACHE_DRIVER=redis requires REDIS_URL'
+    );
   });
 
   it('accepts explicit redis configuration', () => {
-    expect(resolveCacheConfig({
-      CACHE_DRIVER: 'redis',
-      REDIS_URL: 'redis://localhost:6379/0',
-    })).toEqual({
+    expect(
+      resolveCacheConfig({
+        CACHE_DRIVER: 'redis',
+        REDIS_URL: 'redis://localhost:6379/0',
+      })
+    ).toEqual({
       driver: 'redis',
       redisUrl: 'redis://localhost:6379/0',
     });
@@ -68,10 +79,7 @@ describe('createRedisCacheStore', () => {
 
     const cache = createRedisCacheStore(`redis://127.0.0.1:${address.port}/0`);
     try {
-      const [alpha, beta] = await Promise.all([
-        cache.get('alpha'),
-        cache.get('beta'),
-      ]);
+      const [alpha, beta] = await Promise.all([cache.get('alpha'), cache.get('beta')]);
 
       expect(alpha).toBe('A');
       expect(beta).toBe('B');
@@ -122,7 +130,10 @@ function parseRedisCommands(buffer: Buffer): { commands: string[][]; rest: Buffe
   return { commands, rest: buffer.subarray(offset) };
 }
 
-function parseRedisCommand(buffer: Buffer, start: number): { command: string[]; offset: number } | null {
+function parseRedisCommand(
+  buffer: Buffer,
+  start: number
+): { command: string[]; offset: number } | null {
   if (buffer[start] !== 42) return null;
   const countLine = readLine(buffer, start + 1);
   if (!countLine) return null;

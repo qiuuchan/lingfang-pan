@@ -18,7 +18,10 @@ export function pluginModelTier(value: unknown): ModelTier {
 
 export function normalizeModelTier(value: unknown): ModelTier | null {
   if (typeof value !== 'string') return null;
-  const normalized = value.trim().toLowerCase().replace(/^tier:/, '');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/^tier:/, '');
   if (normalized === 'fast') return 'fast';
   if (normalized === 'premium') return 'premium';
   return null;

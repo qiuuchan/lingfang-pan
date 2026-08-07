@@ -186,7 +186,9 @@ function printResult(manifestPath: string, errors: ValidateError[], json: boolea
 
   // 人类可读模式：中文输出，✓/✗ 逐项显示
   const lines: string[] = [];
-  const hasManifestCheck = errors.some((e) => e.code === 'manifest_not_found' || e.code === 'manifest_read_error');
+  const hasManifestCheck = errors.some(
+    (e) => e.code === 'manifest_not_found' || e.code === 'manifest_read_error'
+  );
   const hasJsonError = errors.some((e) => e.code === 'manifest_invalid_json');
   const hasManifestErrors = errors.some(
     (e) =>
@@ -197,12 +199,14 @@ function printResult(manifestPath: string, errors: ValidateError[], json: boolea
       e.code !== 'entry_not_file' &&
       e.code !== 'package_json_invalid' &&
       e.code !== 'requirements_invalid_format' &&
-      e.code !== 'requirements_read_error',
+      e.code !== 'requirements_read_error'
   );
   const hasEntryNotFound = errors.some((e) => e.code === 'entry_not_found');
   const hasEntryNotFile = errors.some((e) => e.code === 'entry_not_file');
   const hasPkgJsonError = errors.some((e) => e.code === 'package_json_invalid');
-  const hasReqError = errors.some((e) => e.code === 'requirements_invalid_format' || e.code === 'requirements_read_error');
+  const hasReqError = errors.some(
+    (e) => e.code === 'requirements_invalid_format' || e.code === 'requirements_read_error'
+  );
 
   lines.push(`\n验证插件: ${manifestPath}\n`);
 

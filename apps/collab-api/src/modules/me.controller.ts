@@ -12,7 +12,7 @@ import { TeamService } from './team.service';
 export class MeController {
   constructor(
     @Inject(TeamService) private readonly team: TeamService,
-    @Inject(MeService) private readonly me: MeService,
+    @Inject(MeService) private readonly me: MeService
   ) {}
 
   @Get('onboarding')

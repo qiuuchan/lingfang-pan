@@ -69,7 +69,10 @@ export interface LocalPluginStatus {
 // === 状态展示文案（PRD AC2：状态 Badge 中文展示） ===
 
 // 状态 → Badge variant（与插件列表行的审核角标风格一致）。
-export const STATUS_VARIANT: Record<PluginStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+export const STATUS_VARIANT: Record<
+  PluginStatus,
+  'default' | 'secondary' | 'destructive' | 'outline'
+> = {
   ready: 'secondary',
   incomplete: 'outline',
   error: 'destructive',
@@ -149,8 +152,13 @@ export async function startPlugin(
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
   onExited?: (info: PluginExitedInfo) => void,
-  onOutput?: (e: PluginOutputEvent) => void,
-): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  onOutput?: (e: PluginOutputEvent) => void
+): Promise<{
+  pid: number;
+  started_at: string;
+  unlistenExited?: () => void;
+  unlistenOutput?: () => void;
+}> {
   return startPluginCommand('start_plugin', pluginId, onProgress, onExited, onOutput);
 }
 
@@ -164,8 +172,13 @@ export async function startBuiltinPlugin(
   pluginId: string,
   onProgress?: (progress: PluginStartProgress) => void,
   onExited?: (info: PluginExitedInfo) => void,
-  onOutput?: (e: PluginOutputEvent) => void,
-): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  onOutput?: (e: PluginOutputEvent) => void
+): Promise<{
+  pid: number;
+  started_at: string;
+  unlistenExited?: () => void;
+  unlistenOutput?: () => void;
+}> {
   return startPluginCommand('start_builtin_plugin', pluginId, onProgress, onExited, onOutput);
 }
 
@@ -176,14 +189,26 @@ export async function startInstalledPlugin(
   release: RuntimeAccessRelease,
   onProgress?: (progress: PluginStartProgress) => void,
   onExited?: (info: PluginExitedInfo) => void,
-  onOutput?: (e: PluginOutputEvent) => void,
-): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  onOutput?: (e: PluginOutputEvent) => void
+): Promise<{
+  pid: number;
+  started_at: string;
+  unlistenExited?: () => void;
+  unlistenOutput?: () => void;
+}> {
   let registryAccessGranted = false;
   if (requiresRegistryRuntimeAccess(origin)) {
     await checkRuntimeAccess(packageId, release);
     registryAccessGranted = true;
   }
-  return startPluginCommand('start_installed_plugin', installationId, onProgress, onExited, onOutput, { registryAccessGranted });
+  return startPluginCommand(
+    'start_installed_plugin',
+    installationId,
+    onProgress,
+    onExited,
+    onOutput,
+    { registryAccessGranted }
+  );
 }
 
 /** 插件进程退出事件 payload（与 Rust PluginExited 对齐）。 */
@@ -210,8 +235,13 @@ async function startPluginCommand(
   onProgress?: (progress: PluginStartProgress) => void,
   onExited?: (info: PluginExitedInfo) => void,
   onOutput?: (e: PluginOutputEvent) => void,
-  extraArgs?: Record<string, unknown>,
-): Promise<{ pid: number; started_at: string; unlistenExited?: () => void; unlistenOutput?: () => void }> {
+  extraArgs?: Record<string, unknown>
+): Promise<{
+  pid: number;
+  started_at: string;
+  unlistenExited?: () => void;
+  unlistenOutput?: () => void;
+}> {
   // 订阅阶段事件（仅本次启动期间），完成后解绑避免泄漏。
   const unlistenProgress = onProgress
     ? await tauriListen<PluginStartProgress>('plugin:start-progress', (event) => {
@@ -318,8 +348,14 @@ export function verifyPluginSignature(pluginId: string): Promise<PluginSignature
 }
 
 /** 查询已安装插件版本是否被平台召回（.recalled.json）。 */
-export function checkPluginRecall(pluginId: string, installedVersion: string): Promise<PluginRecallInfo> {
-  return tauriInvoke<PluginRecallInfo>('check_plugin_recall_command', { pluginId, installedVersion });
+export function checkPluginRecall(
+  pluginId: string,
+  installedVersion: string
+): Promise<PluginRecallInfo> {
+  return tauriInvoke<PluginRecallInfo>('check_plugin_recall_command', {
+    pluginId,
+    installedVersion,
+  });
 }
 
 /**
@@ -330,7 +366,10 @@ export function checkPluginRecall(pluginId: string, installedVersion: string): P
  * - 幂等覆盖同名文件，自动创建子目录（如 ui/）。
  * - 让 AI 进创建器时能 Read 到现有代码并改（而非重新生成）。
  */
-export function writePluginFiles(pluginId: string, files: { path: string; content: string }[]): Promise<void> {
+export function writePluginFiles(
+  pluginId: string,
+  files: { path: string; content: string }[]
+): Promise<void> {
   return tauriInvoke<void>('write_plugin_files', { pluginId, files });
 }
 
@@ -339,7 +378,11 @@ export function writePluginFiles(pluginId: string, files: { path: string; conten
  * contentBase64 为标准 base64 编码的字节，Rust 侧 write_plugin_file_bytes 解码后写盘。
  * path 白名单防穿越与 writePluginFiles 一致。幂等覆盖，自动建子目录。
  */
-export function writePluginFileBytes(pluginId: string, path: string, contentBase64: string): Promise<void> {
+export function writePluginFileBytes(
+  pluginId: string,
+  path: string,
+  contentBase64: string
+): Promise<void> {
   return tauriInvoke<void>('write_plugin_file_bytes', { pluginId, path, contentBase64 });
 }
 
@@ -366,9 +409,11 @@ export function readWorkspaceFiles(workspaceId: string): Promise<LocalPluginFile
  */
 export async function writeWorkspaceFiles(
   workspaceId: string,
-  files: Array<{ path: string; content: string; binary?: boolean }>,
+  files: Array<{ path: string; content: string; binary?: boolean }>
 ): Promise<void> {
-  const textFiles = files.filter((file) => !file.binary).map(({ path, content }) => ({ path, content }));
+  const textFiles = files
+    .filter((file) => !file.binary)
+    .map(({ path, content }) => ({ path, content }));
   if (textFiles.length) await writePluginFiles(workspaceId, textFiles);
   for (const file of files) {
     if (file.binary) await writePluginFileBytes(workspaceId, file.path, file.content);

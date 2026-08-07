@@ -66,22 +66,22 @@ export function SchedulerAgentRunner() {
         async (event) => {
           const { task_id, run_id, started_at } = event.payload;
           await runHeadlessAgent(task_id, run_id, started_at);
-        },
+        }
       );
-      unlistenCancel = await tauriListen<SchedulerCancelPayload>(
-        'scheduler:cancel',
-        (event) => {
-          const { run_id } = event.payload;
-          const controller = activeRef.current.get(run_id);
-          if (controller) {
-            controller.abort();
-            activeRef.current.delete(run_id);
-          }
-        },
-      );
-      unlistenPluginAction = await tauriListen<SchedulerPluginActionPayload>('scheduler:plugin-action', (event) => {
-        void runPluginAction(event.payload);
+      unlistenCancel = await tauriListen<SchedulerCancelPayload>('scheduler:cancel', (event) => {
+        const { run_id } = event.payload;
+        const controller = activeRef.current.get(run_id);
+        if (controller) {
+          controller.abort();
+          activeRef.current.delete(run_id);
+        }
       });
+      unlistenPluginAction = await tauriListen<SchedulerPluginActionPayload>(
+        'scheduler:plugin-action',
+        (event) => {
+          void runPluginAction(event.payload);
+        }
+      );
     })();
 
     return () => {
@@ -101,22 +101,56 @@ export function SchedulerAgentRunner() {
     const { run_id: runId, task_id: taskId, started_at: startedAt } = payload;
     try {
       const plugin = await loadInstalledPlugin(payload.plugin_id);
-      if (!plugin.releaseId || !plugin.packageId) throw new Error('插件发行版身份不完整，无法调用 Action');
-      const manifest = plugin.manifest && typeof plugin.manifest === 'object' ? plugin.manifest as Record<string, unknown> : {};
-      const actions = await api<{ actions?: Array<Record<string, unknown>> }>(`/api/plugin-releases/${encodeURIComponent(plugin.releaseId)}/actions`);
+      if (!plugin.releaseId || !plugin.packageId)
+        throw new Error('插件发行版身份不完整，无法调用 Action');
+      const manifest =
+        plugin.manifest && typeof plugin.manifest === 'object'
+          ? (plugin.manifest as Record<string, unknown>)
+          : {};
+      const actions = await api<{ actions?: Array<Record<string, unknown>> }>(
+        `/api/plugin-releases/${encodeURIComponent(plugin.releaseId)}/actions`
+      );
       const action = actions.actions?.find((item) => item.action_id === payload.action);
-      if (!action || typeof action.action_contract_version !== 'string') throw new Error(`插件未导出 Action：${payload.action}`);
+      if (!action || typeof action.action_contract_version !== 'string')
+        throw new Error(`插件未导出 Action：${payload.action}`);
       const caller = {
         ...plugin,
         manifest: {
           ...manifest,
-          action_dependencies: [{ dependency_id: `scheduler.${payload.action}`, package_id: plugin.packageId, release_version_range: `=${plugin.version}`, action_id: payload.action, action_contract_version_range: `=${action.action_contract_version}` }],
+          action_dependencies: [
+            {
+              dependency_id: `scheduler.${payload.action}`,
+              package_id: plugin.packageId,
+              release_version_range: `=${plugin.version}`,
+              action_id: payload.action,
+              action_contract_version_range: `=${action.action_contract_version}`,
+            },
+          ],
         },
       };
-      const output = await invokeInstalledPluginAction(caller, { dependency_id: `scheduler.${payload.action}`, input: payload.input?.input ?? {} });
-      await schedulerRecordRun({ id: runId, task_id: taskId, started_at: startedAt, finished_at: new Date().toISOString(), status: 'SUCCESS', error: null, output_summary: truncate(JSON.stringify(output), 2000) });
+      const output = await invokeInstalledPluginAction(caller, {
+        dependency_id: `scheduler.${payload.action}`,
+        input: payload.input?.input ?? {},
+      });
+      await schedulerRecordRun({
+        id: runId,
+        task_id: taskId,
+        started_at: startedAt,
+        finished_at: new Date().toISOString(),
+        status: 'SUCCESS',
+        error: null,
+        output_summary: truncate(JSON.stringify(output), 2000),
+      });
     } catch (error) {
-      await schedulerRecordRun({ id: runId, task_id: taskId, started_at: startedAt, finished_at: new Date().toISOString(), status: 'FAILED', error: errorMessage(error), output_summary: null }).catch(() => undefined);
+      await schedulerRecordRun({
+        id: runId,
+        task_id: taskId,
+        started_at: startedAt,
+        finished_at: new Date().toISOString(),
+        status: 'FAILED',
+        error: errorMessage(error),
+        output_summary: null,
+      }).catch(() => undefined);
     }
   }
 

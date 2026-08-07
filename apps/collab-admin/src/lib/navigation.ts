@@ -79,10 +79,10 @@ export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 
 // VIEW -> 中文文案映射，由 NAV_ITEMS 派生，避免硬编码两份。
 export const VIEW_LABEL: Record<View, string> = Object.fromEntries(
-  NAV_ITEMS.map(({ view, label }) => [view, label]),
+  NAV_ITEMS.map(({ view, label }) => [view, label])
 ) as Record<View, string>;
 
 // VIEW -> 所属分组标题，供面包屑渲染「分组 / 视图」层级。
 export const VIEW_GROUP: Record<View, string> = Object.fromEntries(
-  NAV_GROUPS.flatMap((group) => group.items.map((item) => [item.view, group.title])),
+  NAV_GROUPS.flatMap((group) => group.items.map((item) => [item.view, group.title]))
 ) as Record<View, string>;

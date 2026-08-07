@@ -45,18 +45,22 @@ export const AuthSession = z.object({
     platformRole: z.enum(['NONE', 'PLATFORM_ADMIN']),
     status: z.enum(['ACTIVE', 'DISABLED']),
   }),
-  team: z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    slug: z.string().min(1),
-    role: z.string().min(1),
-  }).nullable(),
-  application: z.object({
-    id: z.string().min(1),
-    status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
-    teamName: z.string().min(1),
-    reviewReason: z.string().optional(),
-  }).nullable(),
+  team: z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      slug: z.string().min(1),
+      role: z.string().min(1),
+    })
+    .nullable(),
+  application: z
+    .object({
+      id: z.string().min(1),
+      status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
+      teamName: z.string().min(1),
+      reviewReason: z.string().optional(),
+    })
+    .nullable(),
   onboarding: z.enum([
     'NEEDS_INVITATION',
     'PENDING_APPROVAL',

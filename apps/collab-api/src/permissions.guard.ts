@@ -31,7 +31,7 @@ const RESOLVED_PERMS_KEY = '__resolvedPermissions';
 export class PermissionsGuard implements CanActivate {
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
-    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -57,7 +57,12 @@ export class PermissionsGuard implements CanActivate {
     const platformRequired = [...requiredSet].filter(isPlatformPermission);
     const teamRequired = [...requiredSet].filter((c) => !isPlatformPermission(c));
 
-    const resolved = await this.resolvePermissions(request, user, platformRequired.length > 0, teamRequired.length > 0);
+    const resolved = await this.resolvePermissions(
+      request,
+      user,
+      platformRequired.length > 0,
+      teamRequired.length > 0
+    );
 
     // OR 语义：任一所求权限码命中即放行
     const hit = required.some((code) => resolved.has(code));
@@ -74,7 +79,7 @@ export class PermissionsGuard implements CanActivate {
     request: any,
     user: AuthUser,
     needPlatform: boolean,
-    needTeam: boolean,
+    needTeam: boolean
   ): Promise<Set<string>> {
     const cached = request[RESOLVED_PERMS_KEY] as { perms: Set<string> } | undefined;
     if (cached) return cached.perms;
@@ -92,7 +97,11 @@ export class PermissionsGuard implements CanActivate {
     if (needTeam) {
       const membership = await this.resolveCurrentTeamMembership(user.id, user.teamId);
       // SUSPENDED 团队不解析团队权限（与 AuthService.ensureCurrentTeam 同款拦截语义：TEAM-03 修复）。
-      if (membership?.status === 'ACTIVE' && membership.teamRoleId && membership.team.status === 'ACTIVE') {
+      if (
+        membership?.status === 'ACTIVE' &&
+        membership.teamRoleId &&
+        membership.team.status === 'ACTIVE'
+      ) {
         const role = await this.prisma.role.findUnique({
           where: { id: membership.teamRoleId },
           select: { permissions: true },

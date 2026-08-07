@@ -8,7 +8,10 @@ export const INVITATION_CODE_PLACEHOLDER = `团队邀请码，例如 ${INVITATIO
 export function validateInvitationCodeInput(value: string): string | null {
   const normalized = value.trim().toUpperCase();
   if (!normalized) return '输入团队邀请码';
-  if (!normalized.startsWith(INVITATION_CODE_PREFIX) || normalized.length < INVITATION_CODE_LENGTH) {
+  if (
+    !normalized.startsWith(INVITATION_CODE_PREFIX) ||
+    normalized.length < INVITATION_CODE_LENGTH
+  ) {
     return '请输入完整邀请码';
   }
   return null;

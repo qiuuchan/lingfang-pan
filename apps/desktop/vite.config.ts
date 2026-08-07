@@ -13,9 +13,16 @@ function manualChunks(id: string): string | undefined {
   // 仅对 node_modules 内的依赖分包，业务代码（src/**）走默认分块（含 lazy 边界）。
   if (!id.includes('node_modules')) return undefined;
   // 动画引擎：framer-motion 独立分包（体积大、动画依赖）。
-  if (id.includes('framer-motion') || id.includes('/motion-dom') || id.includes('/motion-utils')) return 'motion-vendor';
+  if (id.includes('framer-motion') || id.includes('/motion-dom') || id.includes('/motion-utils'))
+    return 'motion-vendor';
   // markdown 渲染 + 代码高亮：体积可观，仅在渲染 markdown 时需要。
-  if (id.includes('react-markdown') || id.includes('rehype-highlight') || id.includes('remark-gfm') || id.includes('highlight.js')) return 'markdown-vendor';
+  if (
+    id.includes('react-markdown') ||
+    id.includes('rehype-highlight') ||
+    id.includes('remark-gfm') ||
+    id.includes('highlight.js')
+  )
+    return 'markdown-vendor';
   // toast 反馈：sonner，跨页通用。
   if (id.includes('sonner')) return 'toast-vendor';
   // 图标库：lucide-react。
@@ -23,7 +30,8 @@ function manualChunks(id: string): string | undefined {
   // AI 创建器：Vercel AI SDK / OpenAI provider 只在打开创建器时需要，避免进入首屏 chunk。
   if (id.includes('/ai/') || id.includes('/@ai-sdk/')) return 'ai-vendor';
   // React 运行时：react / react-dom / scheduler（react-dom 依赖）单独成块（长期缓存）。
-  if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'react-vendor';
+  if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/'))
+    return 'react-vendor';
   return undefined;
 }
 

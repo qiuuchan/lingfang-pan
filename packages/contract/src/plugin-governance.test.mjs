@@ -40,7 +40,9 @@ test('package policy surface canonicalization is stable across input ordering', 
     actions: [...base.actions].reverse(),
     shared_namespaces: [...base.shared_namespaces].reverse(),
   };
-  expect(canonicalPackagePolicySurfaceJson(base)).toBe(canonicalPackagePolicySurfaceJson(reordered));
+  expect(canonicalPackagePolicySurfaceJson(base)).toBe(
+    canonicalPackagePolicySurfaceJson(reordered)
+  );
 });
 
 test('high-risk team allow and unbound package allow are rejected', () => {
@@ -50,13 +52,16 @@ test('high-risk team allow and unbound package allow are rejected', () => {
     allowed_source_kinds: [],
     denied_capability_kinds: [],
   };
-  expect(TeamPluginPolicyDocumentV1.safeParse({
+  expect(
+    TeamPluginPolicyDocumentV1.safeParse({
       ...common,
       rules: [
         { rule_id: 'r1', effect: 'ALLOW', operations: ['invoke_action'], target: { kind: 'TEAM' } },
       ],
-    }).success).toBe(false);
-  expect(TeamPluginPolicyDocumentV1.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    TeamPluginPolicyDocumentV1.safeParse({
       ...common,
       rules: [
         {
@@ -66,7 +71,8 @@ test('high-risk team allow and unbound package allow are rejected', () => {
           target: { kind: 'PACKAGE', package_id: 'p1' },
         },
       ],
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
 });
 
 test('required operations are nonempty, unique and sorted', () => {
@@ -84,5 +90,7 @@ test('required operations are nonempty, unique and sorted', () => {
     },
   });
   expect(parsed.required_operations).toEqual(['invoke_action', 'web_preview']);
-  expect(EvaluatePluginPolicyRequest.safeParse({ required_operations: [], resource: {} }).success).toBe(false);
+  expect(
+    EvaluatePluginPolicyRequest.safeParse({ required_operations: [], resource: {} }).success
+  ).toBe(false);
 });

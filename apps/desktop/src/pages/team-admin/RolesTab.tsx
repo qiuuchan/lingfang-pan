@@ -10,12 +10,24 @@ import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '@/components/ui/dialog';
 import { PlusIcon, PencilIcon, Trash2Icon, LockIcon } from 'lucide-react';
 import type { PermissionEntry, PermissionModule, PermissionGroup, Role } from '@/lib/types';
@@ -28,7 +40,7 @@ const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  */
 function buildModules(
   permissions: PermissionEntry[],
-  groupLabelOverride: Map<string, string>,
+  groupLabelOverride: Map<string, string>
 ): PermissionModule[] {
   const map = new Map<string, PermissionModule>();
   for (const p of permissions) {
@@ -45,24 +57,26 @@ function buildModules(
     }
     m.operations.push(p);
   }
-  return [...map.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.moduleKey.localeCompare(b.moduleKey));
+  return [...map.values()].sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.moduleKey.localeCompare(b.moduleKey)
+  );
 }
 
 export function RolesTab() {
   const [rolesState, reloadRoles, loadingRoles] = useTeamResource<{ roles: Role[] }>(
     '/api/teams/current/roles',
     (r) => r as { roles: Role[] },
-    { roles: [] },
+    { roles: [] }
   );
   const [permsState, reloadPerms] = useTeamResource<{ permissions: PermissionEntry[] }>(
     '/api/teams/current/roles/permissions',
     (r) => r as { permissions: PermissionEntry[] },
-    { permissions: [] },
+    { permissions: [] }
   );
   const [groupsState] = useTeamResource<{ groups: PermissionGroup[] }>(
     '/api/teams/current/permission-groups',
     (r) => r as { groups: PermissionGroup[] },
-    { groups: [] },
+    { groups: [] }
   );
   const [editing, setEditing] = useState<Role | null>(null);
   const [creating, setCreating] = useState(false);
@@ -82,15 +96,20 @@ export function RolesTab() {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex-row items-center justify-between">
         <div>
           <CardTitle>角色与权限</CardTitle>
-          <p className="text-sm text-muted-foreground">为本团队创建自定义角色并分配权限。内置角色权限锁定。</p>
+          <p className="text-sm text-muted-foreground">
+            为本团队创建自定义角色并分配权限。内置角色权限锁定。
+          </p>
         </div>
         <div className="flex gap-2">
-          <LoadingButton variant="outline" loading={loadingRoles} onClick={reload}>刷新</LoadingButton>
+          <LoadingButton variant="outline" loading={loadingRoles} onClick={reload}>
+            刷新
+          </LoadingButton>
           <Button onClick={() => setCreating(true)}>
-            <PlusIcon className="mr-1.5 size-4" />创建角色
+            <PlusIcon className="mr-1.5 size-4" />
+            创建角色
           </Button>
         </div>
       </CardHeader>
@@ -123,23 +142,34 @@ export function RolesTab() {
                   )}
                 </TableCell>
                 <TableCell>
-                  {role.isSystem ? <Badge variant="default">内置</Badge> : <Badge variant="secondary">自定义</Badge>}
+                  {role.isSystem ? (
+                    <Badge variant="default">内置</Badge>
+                  ) : (
+                    <Badge variant="secondary">自定义</Badge>
+                  )}
                 </TableCell>
                 <TableCell>{role.permissions.length}</TableCell>
                 <TableCell>{role.memberCount}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => setEditing(role)} title="编辑">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setEditing(role)}
+                      title="编辑"
+                    >
                       <PencilIcon className="size-4" />
                     </Button>
                     {!role.isSystem && (
                       <Button
-                        variant="ghost" size="icon" title="删除"
+                        variant="ghost"
+                        size="icon"
+                        title="删除"
                         onClick={async () => {
                           if (!confirm(`确定删除角色「${role.name}」？`)) return;
                           const ok = await runAction(
                             () => api(`/api/teams/current/roles/${role.id}`, { method: 'DELETE' }),
-                            '角色已删除',
+                            '角色已删除'
                           );
                           if (ok) await reload();
                         }}
@@ -160,7 +190,10 @@ export function RolesTab() {
           permissions={permsState.permissions}
           groupLabelOverride={groupLabelOverride}
           onClose={() => setCreating(false)}
-          onSaved={async () => { setCreating(false); await reload(); }}
+          onSaved={async () => {
+            setCreating(false);
+            await reload();
+          }}
         />
       )}
       {editing && (
@@ -169,7 +202,10 @@ export function RolesTab() {
           permissions={permsState.permissions}
           groupLabelOverride={groupLabelOverride}
           onClose={() => setEditing(null)}
-          onSaved={async () => { setEditing(null); await reload(); }}
+          onSaved={async () => {
+            setEditing(null);
+            await reload();
+          }}
         />
       )}
     </Card>
@@ -178,7 +214,11 @@ export function RolesTab() {
 
 /** 角色编辑/创建对话框：含名称、编码、描述、权限码两级勾选面板（模块父级 → 操作子项）。 */
 function RoleEditDialog({
-  role, permissions, groupLabelOverride, onClose, onSaved,
+  role,
+  permissions,
+  groupLabelOverride,
+  onClose,
+  onSaved,
 }: {
   role?: Role | null;
   permissions: PermissionEntry[];
@@ -194,12 +234,16 @@ function RoleEditDialog({
   const [saving, setSaving] = useState(false);
 
   // 权限按模块折叠（两级勾选树）
-  const modules = useMemo(() => buildModules(permissions, groupLabelOverride), [permissions, groupLabelOverride]);
+  const modules = useMemo(
+    () => buildModules(permissions, groupLabelOverride),
+    [permissions, groupLabelOverride]
+  );
 
   function toggle(code: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(code)) next.delete(code); else next.add(code);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
       return next;
     });
   }
@@ -226,53 +270,91 @@ function RoleEditDialog({
       ...(isSystem ? {} : { code: trimmedCode || undefined, permissions: [...selected] }),
     };
     const ok = role
-      ? await runAction(() => api(`/api/teams/current/roles/${role.id}`, { method: 'PATCH', body }), '角色已更新')
-      : await runAction(() => api('/api/teams/current/roles', { method: 'POST', body }), '角色已创建');
+      ? await runAction(
+          () => api(`/api/teams/current/roles/${role.id}`, { method: 'PATCH', body }),
+          '角色已更新'
+        )
+      : await runAction(
+          () => api('/api/teams/current/roles', { method: 'POST', body }),
+          '角色已创建'
+        );
     setSaving(false);
     if (ok) await onSaved();
   }
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-1.5">
             {role ? `编辑角色：${role.name}` : '创建团队角色'}
           </DialogTitle>
           <DialogDescription>
-            {isSystem ? '内置角色权限/编码锁定不可修改，仅可调整名称与说明。' : '勾选该角色拥有的团队权限。'}
+            {isSystem
+              ? '内置角色权限/编码锁定不可修改，仅可调整名称与说明。'
+              : '勾选该角色拥有的团队权限。'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>角色名</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder="如：开发者" />
-            </div>
-            <div className="space-y-2">
-              <Label>编码{isSystem && <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>}</Label>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                maxLength={64}
-                placeholder="如：developer"
-                disabled={isSystem}
-              />
-              <p className="text-xs text-muted-foreground">小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。</p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>说明</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={255} rows={2} />
-          </div>
-          <div className="space-y-2">
+        <FieldGroup className="grid grid-cols-2 gap-4 py-2">
+          <Field>
+            <FieldLabel htmlFor="role-name">角色名</FieldLabel>
+            <Input
+              id="role-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={64}
+              placeholder="如：开发者"
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="role-code">
+              编码
+              {isSystem && <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>}
+            </FieldLabel>
+            <Input
+              id="role-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              maxLength={64}
+              placeholder="如：developer"
+              disabled={isSystem}
+            />
+            <FieldDescription className="text-xs">
+              小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。
+            </FieldDescription>
+          </Field>
+          <Field className="col-span-2">
+            <FieldLabel htmlFor="role-description">说明</FieldLabel>
+            <Textarea
+              id="role-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={255}
+              rows={2}
+            />
+          </Field>
+          <Field className="col-span-2">
             <div className="flex items-center justify-between">
-              <Label>权限分配{isSystem && <span className="ml-2 text-xs text-muted-foreground">（内置锁定）</span>}</Label>
-              <span className="text-xs text-muted-foreground">已选 {selected.size} / {permissions.length}</span>
+              <FieldLabel>
+                权限分配
+                {isSystem && (
+                  <span className="ml-2 text-xs text-muted-foreground">（内置锁定）</span>
+                )}
+              </FieldLabel>
+              <span className="text-xs text-muted-foreground">
+                已选 {selected.size} / {permissions.length}
+              </span>
             </div>
-            <div className={`rounded-md border p-3 ${isSystem ? 'pointer-events-none opacity-60' : ''}`}>
-              <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+            <div
+              className={`rounded-md border p-3 ${isSystem ? 'pointer-events-none opacity-60' : ''}`}
+            >
+              <div className="flex max-h-72 flex-col gap-3 overflow-y-auto pr-1">
                 {modules.map((m) => {
                   const codes = m.operations.map((op) => op.code);
                   const allOn = codes.every((c) => selected.has(c));
@@ -283,13 +365,22 @@ function RoleEditDialog({
                         <span className="text-sm font-medium">{m.moduleLabel}</span>
                         <span className="text-xs text-muted-foreground">{m.moduleKey}</span>
                       </div>
-                      <div className="ml-6 space-y-1.5">
+                      <div className="ml-6 flex flex-col gap-1.5">
                         {m.operations.map((p) => (
-                          <label key={p.code} className="flex cursor-pointer items-start gap-2 text-sm">
-                            <Checkbox checked={selected.has(p.code)} onCheckedChange={() => toggle(p.code)} className="mt-0.5" />
+                          <label
+                            key={p.code}
+                            className="flex cursor-pointer items-start gap-2 text-sm"
+                          >
+                            <Checkbox
+                              checked={selected.has(p.code)}
+                              onCheckedChange={() => toggle(p.code)}
+                              className="mt-0.5"
+                            />
                             <span>
                               <span className="font-medium">{p.label}</span>
-                              <span className="ml-2 text-xs text-muted-foreground">{p.description}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {p.description}
+                              </span>
                             </span>
                           </label>
                         ))}
@@ -299,12 +390,16 @@ function RoleEditDialog({
                 })}
               </div>
             </div>
-          </div>
-        </div>
+          </Field>
+        </FieldGroup>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
-          <LoadingButton loading={saving} onClick={handleSave}>{role ? '保存' : '创建'}</LoadingButton>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <LoadingButton loading={saving} onClick={handleSave}>
+            {role ? '保存' : '创建'}
+          </LoadingButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

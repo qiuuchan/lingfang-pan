@@ -37,7 +37,11 @@ export function getRememberedDecision(pluginId: string, code: string): Permissio
 }
 
 /** 记忆决策（用户勾选「不再询问」或默认记忆最近一次）。 */
-export function rememberDecision(pluginId: string, code: string, decision: PermissionDecision): void {
+export function rememberDecision(
+  pluginId: string,
+  code: string,
+  decision: PermissionDecision
+): void {
   try {
     localStorage.setItem(decisionKey(pluginId, code), decision);
   } catch {
@@ -71,7 +75,7 @@ export function requestSystemPermission(
   pluginId: string,
   pluginName: string,
   code: string,
-  reason: string,
+  reason: string
 ): Promise<{ granted: boolean; remembered: boolean }> {
   const remembered = getRememberedDecision(pluginId, code);
   if (remembered) {

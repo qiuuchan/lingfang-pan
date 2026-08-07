@@ -22,23 +22,29 @@ interface StreamArgs {
  * 流式聊天：返回助手完整回复（拼接所有 delta）。失败抛错。
  * 调用方可通过 onDelta 实时渲染增量，通过 signal 中断。
  */
-export async function streamChat({ messages, tier = 'fast', signal, onDelta }: StreamArgs): Promise<string> {
+export async function streamChat({
+  messages,
+  tier = 'fast',
+  signal,
+  onDelta,
+}: StreamArgs): Promise<string> {
   const base = apiBase();
   if (!base) throw new Error('未配置平台地址');
   const token = getAuthToken();
   if (!token) throw new Error('请先登录');
 
-  const postChat = (stream: boolean) => fetch(`${base}/api/relay/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Client': 'desktop',
-      Authorization: `Bearer ${token}`,
-      ...(stream ? { Accept: 'text/event-stream' } : {}),
-    },
-    body: JSON.stringify({ model: tier, messages, stream, temperature: 0.4 }),
-    signal,
-  });
+  const postChat = (stream: boolean) =>
+    fetch(`${base}/api/relay/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client': 'desktop',
+        Authorization: `Bearer ${token}`,
+        ...(stream ? { Accept: 'text/event-stream' } : {}),
+      },
+      body: JSON.stringify({ model: tier, messages, stream, temperature: 0.4 }),
+      signal,
+    });
   let res = await postChat(true);
 
   if (!res.ok) {
@@ -47,7 +53,9 @@ export async function streamChat({ messages, tier = 'fast', signal, onDelta }: S
     try {
       const err = await res.json();
       detail = err.message || err.code || detail;
-    } catch { /* 忽略 */ }
+    } catch {
+      /* 忽略 */
+    }
     if ((res.status === 400 || res.status === 422) && /stream|流式/i.test(detail)) {
       res = await postChat(false);
     }
@@ -55,7 +63,9 @@ export async function streamChat({ messages, tier = 'fast', signal, onDelta }: S
       try {
         const err = await res.json();
         detail = err.message || err.code || detail;
-      } catch { /* 忽略 */ }
+      } catch {
+        /* 忽略 */
+      }
       throw new Error(detail);
     }
   }
@@ -85,7 +95,11 @@ export async function streamChat({ messages, tier = 'fast', signal, onDelta }: S
       if (!t.startsWith('data:')) continue;
       const jsonStr = t.slice(5).trim();
       if (jsonStr === '[DONE]') continue;
-      let obj: { choices?: { delta?: { content?: string } }[]; error?: { message?: string }; message?: string };
+      let obj: {
+        choices?: { delta?: { content?: string } }[];
+        error?: { message?: string };
+        message?: string;
+      };
       try {
         obj = JSON.parse(jsonStr) as typeof obj;
       } catch {
@@ -124,15 +138,29 @@ export async function streamChat({ messages, tier = 'fast', signal, onDelta }: S
 
 function extractChatContent(data: unknown): string {
   const obj = data as {
-    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> }; delta?: { content?: string }; text?: string }>;
+    choices?: Array<{
+      message?: { content?: string | Array<{ text?: string }> };
+      delta?: { content?: string };
+      text?: string;
+    }>;
     content?: string | Array<{ text?: string }>;
     message?: string;
     output_text?: string;
   };
   const choice = obj.choices?.[0];
-  const content = choice?.message?.content ?? choice?.delta?.content ?? choice?.text ?? obj.content ?? obj.output_text ?? obj.message;
+  const content =
+    choice?.message?.content ??
+    choice?.delta?.content ??
+    choice?.text ??
+    obj.content ??
+    obj.output_text ??
+    obj.message;
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map((part) => part.text).filter(Boolean).join('');
+  if (Array.isArray(content))
+    return content
+      .map((part) => part.text)
+      .filter(Boolean)
+      .join('');
   return '';
 }
 
@@ -140,20 +168,33 @@ function extractChatContent(data: unknown): string {
  * 非流式聊天（一次性返回完整回复）。用于上下文压缩摘要等不需要流式的场景。
  * 鉴权同 streamChat（JWT）。
  */
-export async function chatComplete(messages: ChatMessage[], tier: 'fast' | 'premium' = 'fast', signal?: AbortSignal): Promise<string> {
+export async function chatComplete(
+  messages: ChatMessage[],
+  tier: 'fast' | 'premium' = 'fast',
+  signal?: AbortSignal
+): Promise<string> {
   const base = apiBase();
   if (!base) throw new Error('未配置平台地址');
   const token = getAuthToken();
   if (!token) throw new Error('请先登录');
   const res = await fetch(`${base}/api/relay/v1/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Client': 'desktop', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Client': 'desktop',
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({ model: tier, messages, stream: false, temperature: 0.2 }),
     signal,
   });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
-    try { const err = await res.json(); detail = err.message || err.code || detail; } catch { /* 忽略 */ }
+    try {
+      const err = await res.json();
+      detail = err.message || err.code || detail;
+    } catch {
+      /* 忽略 */
+    }
     throw new Error(detail);
   }
   const data = await res.json();

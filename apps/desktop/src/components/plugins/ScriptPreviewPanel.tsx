@@ -18,12 +18,26 @@
 // 缺失解释器降级：两种模式都保留 probe 探测 + 安装指引（start/run 均依赖解释器存在）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PlayIcon, RefreshCwIcon, SquareIcon, TerminalIcon, Code2Icon, Loader2Icon, CheckIcon, WandSparklesIcon } from 'lucide-react';
+import {
+  PlayIcon,
+  RefreshCwIcon,
+  SquareIcon,
+  TerminalIcon,
+  Code2Icon,
+  Loader2Icon,
+  CheckIcon,
+  WandSparklesIcon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
 import { ErrorBubble } from '@/components/chat/ErrorBubble';
-import { fromRunResult, isPluginAiPolicyError, toCreatorError, type CreatorError } from '@/lib/creator-error';
+import {
+  fromRunResult,
+  isPluginAiPolicyError,
+  toCreatorError,
+  type CreatorError,
+} from '@/lib/creator-error';
 import {
   probeScriptRuntime,
   runPluginScript,
@@ -120,7 +134,7 @@ export function ScriptPreviewPanel({
   const manifest = useMemo(() => parseManifest(files), [files]);
   const entryFile = useMemo(
     () => files.find((file) => file.path === manifest.entry),
-    [files, manifest.entry],
+    [files, manifest.entry]
   );
   // 模式判定：有 pluginId 走持久化独立进程，无则走创建期 sandbox 预览。
   const usePersistent = Boolean(pluginId);
@@ -132,10 +146,13 @@ export function ScriptPreviewPanel({
   // 实时输出日志缓冲（全阶段：venv/pip/python 输出逐行累积）。
   const logBuffer = useLogBuffer();
   // 卸载时解绑退出 + 输出监听，避免泄漏 + 旧插件输出后误更新已卸载组件状态。
-  useEffect(() => () => {
-    unlistenExitedRef.current?.();
-    unlistenOutputRef.current?.();
-  }, []);
+  useEffect(
+    () => () => {
+      unlistenExitedRef.current?.();
+      unlistenOutputRef.current?.();
+    },
+    []
+  );
 
   // 探测解释器（design §3.5：首次进入先 probe）。start/run 均依赖解释器存在，缺失时前置拦截。
   const doProbe = useCallback(async () => {
@@ -155,7 +172,12 @@ export function ScriptPreviewPanel({
       // probe 自身异常（极端：Tauri 通道错误）归为 missing，展示通用指引 + 可重试。
       setProbe({
         status: 'missing',
-        result: { available: false, binary_path: null, version: null, hint: error instanceof Error ? error.message : String(error) },
+        result: {
+          available: false,
+          binary_path: null,
+          version: null,
+          hint: error instanceof Error ? error.message : String(error),
+        },
       });
     }
   }, [runtime]);
@@ -169,7 +191,11 @@ export function ScriptPreviewPanel({
       const items = await scanPluginStatus();
       const current = items.find((item) => item.id === pluginId);
       if (current && current.status === 'running' && current.pid != null) {
-        setPersistentRun({ status: 'running', pid: current.pid, startedAt: current.started_at || new Date().toISOString() });
+        setPersistentRun({
+          status: 'running',
+          pid: current.pid,
+          startedAt: current.started_at || new Date().toISOString(),
+        });
       }
       // incomplete（缺 manifest/入口）或 error（manifest 非法）→ 目录无效，禁用运行引导补全。
       // running/ready/stopped 不拦（正常可运行）。
@@ -205,9 +231,17 @@ export function ScriptPreviewPanel({
         if (!status.running) {
           // 进程已退出：切到 exited（保留 pid/startedAt + 日志面板），不回 idle。
           // exitCode 信息 Rust 此处不返回（轮询只给 running bool），用 null 表示「已退出但退出码未知」。
-          setPersistentRun((prev) => prev.status === 'running'
-            ? { status: 'exited', pid: prev.pid, startedAt: prev.startedAt, exitCode: null, clean: true }
-            : prev);
+          setPersistentRun((prev) =>
+            prev.status === 'running'
+              ? {
+                  status: 'exited',
+                  pid: prev.pid,
+                  startedAt: prev.startedAt,
+                  exitCode: null,
+                  clean: true,
+                }
+              : prev
+          );
           toast.info('插件进程已结束');
         }
       } catch {
@@ -225,7 +259,11 @@ export function ScriptPreviewPanel({
   const handleStart = useCallback(async () => {
     if (!pluginId) return;
     // 初始 checking 阶段（Rust 进 start_plugin 会先 emit checking，但立即设置避免 UI 空窗）。
-    setPersistentRun({ status: 'starting', stage: 'checking', stageMessage: '正在检查插件运行环境…' });
+    setPersistentRun({
+      status: 'starting',
+      stage: 'checking',
+      stageMessage: '正在检查插件运行环境…',
+    });
     // 清理上一次启动遗留的退出/输出监听 + 清空日志（重复启动场景）。
     unlistenExitedRef.current?.();
     unlistenExitedRef.current = null;
@@ -239,21 +277,31 @@ export function ScriptPreviewPanel({
         await assertPluginAiPolicy(manifest as unknown as Record<string, unknown>, files);
       }
       // onProgress 接收 Rust emit 的 plugin:start-progress 事件，实时推进阶段文案。
-      if (installedOrigin && requiresRegistryRuntimeAccess(installedOrigin) && (!releaseId || !releaseSha256)) {
+      if (
+        installedOrigin &&
+        requiresRegistryRuntimeAccess(installedOrigin) &&
+        (!releaseId || !releaseSha256)
+      ) {
         throw new Error('已安装插件缺少发行版标识，无法校验运行权限');
       }
       const start = builtin
         ? startBuiltinPlugin
         : installedOrigin && packageId
-          ? (id: string, onProgress?: (progress: PluginStartProgress) => void, onExited?: (info: PluginExitedInfo) => void, onOutput?: Parameters<typeof startPlugin>[3]) => startInstalledPlugin(
-              id,
-              packageId,
-              installedOrigin,
-              { releaseId: releaseId ?? '', sha256: releaseSha256 ?? '' },
-              onProgress,
-              onExited,
-              onOutput,
-            )
+          ? (
+              id: string,
+              onProgress?: (progress: PluginStartProgress) => void,
+              onExited?: (info: PluginExitedInfo) => void,
+              onOutput?: Parameters<typeof startPlugin>[3]
+            ) =>
+              startInstalledPlugin(
+                id,
+                packageId,
+                installedOrigin,
+                { releaseId: releaseId ?? '', sha256: releaseSha256 ?? '' },
+                onProgress,
+                onExited,
+                onOutput
+              )
           : startPlugin;
       // onExited 接收 plugin:exited 事件（进程退出时触发）：
       // 切到 exited 态保留日志面板（exitCode 区分干净退出 vs 异常退出，但都保留输出供排查）。
@@ -261,7 +309,11 @@ export function ScriptPreviewPanel({
       const result = await start(
         pluginId,
         (progress: PluginStartProgress) => {
-          setPersistentRun({ status: 'starting', stage: progress.stage, stageMessage: progress.message });
+          setPersistentRun({
+            status: 'starting',
+            stage: progress.stage,
+            stageMessage: progress.message,
+          });
         },
         (info: PluginExitedInfo) => {
           // 保留当前 pid/startedAt（从 persistentRun 读，但回调闭包可能拿不到最新态，故用 result 兜底）。
@@ -278,7 +330,7 @@ export function ScriptPreviewPanel({
             toast.error(`插件进程异常退出（码 ${info.exitCode ?? '?'}）`);
           }
         },
-        (e) => logBuffer.append(e),
+        (e) => logBuffer.append(e)
       );
       // 保存退出/输出监听解绑句柄（停止/卸载时调用）。
       if (result.unlistenExited) unlistenExitedRef.current = result.unlistenExited;
@@ -295,13 +347,20 @@ export function ScriptPreviewPanel({
         // 解释器缺失：start_plugin 返回 interpreter_missing: 前缀（与 run_plugin_script 同款）。
         setPersistentRun({
           status: 'error',
-          error: fromRunResult({ ok: false, failure: 'interpreter_missing', stderr: message.slice('interpreter_missing:'.length) }),
+          error: fromRunResult({
+            ok: false,
+            failure: 'interpreter_missing',
+            stderr: message.slice('interpreter_missing:'.length),
+          }),
         });
       } else if (message.startsWith('manifest_missing:')) {
         // temp 目录空（AI 未产出 manifest）：引导继续对话补全，而非裸「预览执行无法启动」。
         setPersistentRun({
           status: 'error',
-          error: toCreatorError('manifest_missing', new Error(message.slice('manifest_missing:'.length))),
+          error: toCreatorError(
+            'manifest_missing',
+            new Error(message.slice('manifest_missing:'.length))
+          ),
         });
       } else if (message.startsWith('plugin_crashed:')) {
         // 启动后秒退（插件代码异常）：展示 stderr + 一键修复按钮（onRequestFix 由父组件传入）。
@@ -314,7 +373,20 @@ export function ScriptPreviewPanel({
         setPersistentRun({ status: 'error', error: toCreatorError('run_spawn_failed', error) });
       }
     }
-  }, [builtin, files, installedOrigin, manifest, packageId, pendingActivation, pluginId, policyPreflight, releaseId, releaseSha256, runtime, logBuffer]);
+  }, [
+    builtin,
+    files,
+    installedOrigin,
+    manifest,
+    packageId,
+    pendingActivation,
+    pluginId,
+    policyPreflight,
+    releaseId,
+    releaseSha256,
+    runtime,
+    logBuffer,
+  ]);
 
   const handleStop = useCallback(async () => {
     if (!pluginId) return;
@@ -323,7 +395,11 @@ export function ScriptPreviewPanel({
     unlistenExitedRef.current = null;
     unlistenOutputRef.current?.();
     unlistenOutputRef.current = null;
-    setPersistentRun((prev) => (prev.status === 'running' ? { status: 'stopping', pid: prev.pid, startedAt: prev.startedAt } : prev));
+    setPersistentRun((prev) =>
+      prev.status === 'running'
+        ? { status: 'stopping', pid: prev.pid, startedAt: prev.startedAt }
+        : prev
+    );
     try {
       if (installedOrigin) await stopInstalledPlugin(pluginId);
       else await stopPlugin(pluginId);
@@ -333,7 +409,8 @@ export function ScriptPreviewPanel({
       toast.error(`停止失败：${errorMessage(error)}`);
       // 停止失败回退到 running 态（进程可能仍在跑）。
       setPersistentRun((prev) => {
-        if (prev.status === 'stopping') return { status: 'running', pid: prev.pid, startedAt: prev.startedAt };
+        if (prev.status === 'stopping')
+          return { status: 'running', pid: prev.pid, startedAt: prev.startedAt };
         return prev;
       });
     }
@@ -373,7 +450,11 @@ export function ScriptPreviewPanel({
       } else {
         setPreviewRun({
           status: 'error',
-          error: fromRunResult({ ok: false, failure: 'spawn_failed', stderr: error instanceof Error ? error.message : String(error) }),
+          error: fromRunResult({
+            ok: false,
+            failure: 'spawn_failed',
+            stderr: error instanceof Error ? error.message : String(error),
+          }),
         });
       }
     }
@@ -383,31 +464,44 @@ export function ScriptPreviewPanel({
   if (probe.status === 'missing') {
     return (
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
-            <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 运行
+            <TerminalIcon className="size-4" />
+            {RUNTIME_LABEL[runtime]} 运行
           </CardTitle>
-          <Button variant="ghost" size="icon-sm" onClick={onRefresh}><RefreshCwIcon className="size-4" /></Button>
+          <Button variant="ghost" size="icon-sm" onClick={onRefresh}>
+            <RefreshCwIcon className="size-4" />
+          </Button>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="flex flex-col gap-3">
           <ErrorBubble
-            error={fromRunResult({ ok: false, failure: 'interpreter_missing', interpreter: undefined })}
+            error={fromRunResult({
+              ok: false,
+              failure: 'interpreter_missing',
+              interpreter: undefined,
+            })}
             onRetry={probe.status === 'missing' ? doProbe : undefined}
           />
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={doProbe}>
-              <RefreshCwIcon className="size-3.5" />重试检测
+              <RefreshCwIcon className="size-3.5" />
+              重试检测
             </Button>
             {entryFile && (
               <Button variant="ghost" size="sm" onClick={() => setSourceView(true)}>
-                <Code2Icon className="size-3.5" />仍要预览源码
+                <Code2Icon className="size-3.5" />
+                仍要预览源码
               </Button>
             )}
           </div>
           {sourceView && entryFile && (
-            <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground">入口文件 {manifest.entry}（只读，未运行）</div>
-              <pre className="scrollbar-thin max-h-72 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">{entryFile.content}</pre>
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted-foreground">
+                入口文件 {manifest.entry}（只读，未运行）
+              </div>
+              <pre className="scrollbar-thin max-h-72 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">
+                {entryFile.content}
+              </pre>
             </div>
           )}
         </CardContent>
@@ -417,18 +511,22 @@ export function ScriptPreviewPanel({
 
   // === 持久化运行视图（组C：独立进程，不再嵌入式终端） ===
   if (usePersistent) {
-    const isRunning = persistentRun.status === 'running' || persistentRun.status === 'starting' || persistentRun.status === 'stopping';
+    const isRunning =
+      persistentRun.status === 'running' ||
+      persistentRun.status === 'starting' ||
+      persistentRun.status === 'stopping';
     return (
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
-            <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 运行
+            <TerminalIcon className="size-4" />
+            {RUNTIME_LABEL[runtime]} 运行
           </CardTitle>
           <Button variant="ghost" size="icon-sm" onClick={onRefresh} disabled={isRunning}>
             <RefreshCwIcon className="size-4" />
           </Button>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="flex flex-col gap-3">
           {/* 解释器状态条：探测中 / 就绪（binary + version） */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {probe.status === 'probing' && <span>正在检测 {RUNTIME_LABEL[runtime]} 运行环境…</span>}
@@ -444,29 +542,41 @@ export function ScriptPreviewPanel({
           {/* 运行状态展示（PRD 需求 5：软件内显示「插件运行中」+ 进程信息 + 「强制关闭」按钮 + 实时输出） */}
           {persistentRun.status === 'idle' && (
             <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center text-sm text-muted-foreground">
-              <p>插件将以独立进程运行（{runtime === 'python' ? '使用 .venv 隔离环境' : '使用 pnpm install + start'}）。</p>
+              <p>
+                插件将以独立进程运行（
+                {runtime === 'python' ? '使用 .venv 隔离环境' : '使用 pnpm install + start'}）。
+              </p>
               <p className="text-xs">点击「运行」启动；启动和运行的所有输出会实时显示在下方。</p>
             </div>
           )}
           {persistentRun.status === 'starting' && (
-            <div className="space-y-3">
-              <StartProgressView stage={persistentRun.stage} message={persistentRun.stageMessage} runtime={runtime} />
+            <div className="flex flex-col gap-3">
+              <StartProgressView
+                stage={persistentRun.stage}
+                message={persistentRun.stageMessage}
+                runtime={runtime}
+              />
               <PluginLogPanel lines={logBuffer.lines} />
             </div>
           )}
           {persistentRun.status === 'running' && (
-            <div className="space-y-3">
-              <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">插件运行中</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                    插件运行中
+                  </span>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   进程 PID：<span className="font-mono text-foreground">{persistentRun.pid}</span>
                 </div>
                 {persistentRun.startedAt && (
                   <div className="text-xs text-muted-foreground">
-                    启动时间：<span className="font-mono text-foreground">{formatTimestamp(persistentRun.startedAt)}</span>
+                    启动时间：
+                    <span className="font-mono text-foreground">
+                      {formatTimestamp(persistentRun.startedAt)}
+                    </span>
                   </div>
                 )}
               </div>
@@ -479,34 +589,47 @@ export function ScriptPreviewPanel({
             </div>
           )}
           {persistentRun.status === 'exited' && (
-            <div className="space-y-3">
-              <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'}`} />
-                  <span className={`font-medium ${persistentRun.clean ? 'text-amber-600 dark:text-amber-400' : 'text-destructive'}`}>
+                  <span
+                    className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'}`}
+                  />
+                  <span
+                    className={`font-medium ${persistentRun.clean ? 'text-amber-600 dark:text-amber-400' : 'text-destructive'}`}
+                  >
                     {persistentRun.clean ? '插件进程已结束' : '插件进程异常退出'}
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   进程 PID：<span className="font-mono text-foreground">{persistentRun.pid}</span>
                   {persistentRun.exitCode != null && (
-                    <span className="ml-3">退出码：<span className={`font-mono ${persistentRun.clean ? 'text-foreground' : 'text-destructive'}`}>{persistentRun.exitCode}</span></span>
+                    <span className="ml-3">
+                      退出码：
+                      <span
+                        className={`font-mono ${persistentRun.clean ? 'text-foreground' : 'text-destructive'}`}
+                      >
+                        {persistentRun.exitCode}
+                      </span>
+                    </span>
                   )}
                 </div>
                 {persistentRun.startedAt && (
                   <div className="text-xs text-muted-foreground">
-                    启动时间：<span className="font-mono text-foreground">{formatTimestamp(persistentRun.startedAt)}</span>
+                    启动时间：
+                    <span className="font-mono text-foreground">
+                      {formatTimestamp(persistentRun.startedAt)}
+                    </span>
                   </div>
                 )}
                 {!persistentRun.clean && onRequestFix && logBuffer.lines.length > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="mt-1"
+                    className="mt-1 self-start"
                     onClick={() => onRequestFix(logBuffer.lines.map((l) => l.text).join('\n'))}
                   >
-                    <WandSparklesIcon className="mr-1 size-3.5" />
-                    让 AI 修复
+                    <WandSparklesIcon className="mr-1 size-3.5" />让 AI 修复
                   </Button>
                 )}
               </div>
@@ -515,16 +638,19 @@ export function ScriptPreviewPanel({
           )}
           {persistentRun.status === 'error' && (
             <>
-              <ErrorBubble error={persistentRun.error} onRetry={persistentRun.error.retryable ? handleStart : undefined} />
+              <ErrorBubble
+                error={persistentRun.error}
+                onRetry={persistentRun.error.retryable ? handleStart : undefined}
+              />
               {/* 一键修复：plugin_crashed 时把 stderr 传回创建器调 send 让 AI 修。仅持久化运行 + 有 onRequestFix 时显示。 */}
               {persistentRun.error.kind === 'plugin_crashed' && onRequestFix && (
                 <Button
                   variant="outline"
                   size="sm"
+                  className="self-start"
                   onClick={() => onRequestFix(persistentRun.error.raw || '')}
                 >
-                  <WandSparklesIcon className="mr-1 size-3.5" />
-                  让 AI 修复
+                  <WandSparklesIcon className="mr-1 size-3.5" />让 AI 修复
                 </Button>
               )}
               {/* 崩溃时保留日志面板（含 traceback），方便定位。 */}
@@ -534,30 +660,51 @@ export function ScriptPreviewPanel({
 
           {/* pluginId 目录缺 manifest（创建期 AI 未产出 / temp 残留）：禁用运行 + 引导补全。 */}
           {pluginIncomplete && (
-            <ErrorBubble error={toCreatorError('manifest_missing', new Error('插件目录缺少 manifest.json，无法运行'))} />
+            <ErrorBubble
+              error={toCreatorError(
+                'manifest_missing',
+                new Error('插件目录缺少 manifest.json，无法运行')
+              )}
+            />
           )}
 
           {/* 运行/停止按钮分派（PRD AC5：可强制关闭） */}
           <div className="flex flex-wrap gap-2">
             {persistentRun.status === 'running' || persistentRun.status === 'stopping' ? (
-              <LoadingButton variant="destructive" loading={persistentRun.status === 'stopping'} disabled={persistentRun.status === 'stopping'} onClick={handleStop}>
-                <SquareIcon className="size-3.5" />强制关闭
+              <LoadingButton
+                variant="destructive"
+                loading={persistentRun.status === 'stopping'}
+                disabled={persistentRun.status === 'stopping'}
+                onClick={handleStop}
+              >
+                <SquareIcon className="size-3.5" />
+                强制关闭
               </LoadingButton>
             ) : (
-              <LoadingButton loading={persistentRun.status === 'starting'} disabled={probe.status !== 'ready' || pluginIncomplete} onClick={handleStart}>
-                <PlayIcon className="size-3.5" />运行
+              <LoadingButton
+                loading={persistentRun.status === 'starting'}
+                disabled={probe.status !== 'ready' || pluginIncomplete}
+                onClick={handleStart}
+              >
+                <PlayIcon className="size-3.5" />
+                运行
               </LoadingButton>
             )}
             {entryFile && !isRunning && (
               <Button variant="ghost" size="sm" onClick={() => setSourceView((v) => !v)}>
-                <Code2Icon className="size-3.5" />{sourceView ? '隐藏源码' : '查看源码'}
+                <Code2Icon className="size-3.5" />
+                {sourceView ? '隐藏源码' : '查看源码'}
               </Button>
             )}
           </div>
           {sourceView && entryFile && !isRunning && (
-            <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground">入口文件 {manifest.entry}（只读，未运行）</div>
-              <pre className="scrollbar-thin max-h-72 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">{entryFile.content}</pre>
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted-foreground">
+                入口文件 {manifest.entry}（只读，未运行）
+              </div>
+              <pre className="scrollbar-thin max-h-72 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-words">
+                {entryFile.content}
+              </pre>
             </div>
           )}
         </CardContent>
@@ -568,9 +715,10 @@ export function ScriptPreviewPanel({
   // === 创建期预览视图（R3 保留：一次性 sandbox 执行 + 终端回显） ===
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
-          <TerminalIcon className="size-4" />{RUNTIME_LABEL[runtime]} 运行
+          <TerminalIcon className="size-4" />
+          {RUNTIME_LABEL[runtime]} 运行
         </CardTitle>
         <div className="flex items-center gap-1">
           <Button
@@ -579,14 +727,20 @@ export function ScriptPreviewPanel({
             disabled={probe.status === 'probing' || previewRun.status === 'running' || !entryFile}
             onClick={handlePreviewRun}
           >
-            <PlayIcon className="size-3.5" />运行
+            <PlayIcon className="size-3.5" />
+            运行
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onRefresh} disabled={previewRun.status === 'running'}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onRefresh}
+            disabled={previewRun.status === 'running'}
+          >
             <RefreshCwIcon className="size-4" />
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex flex-col gap-3">
         {/* 解释器状态条：探测中 / 就绪（binary + version） */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {probe.status === 'probing' && <span>正在检测 {RUNTIME_LABEL[runtime]} 运行环境…</span>}
@@ -611,11 +765,24 @@ export function ScriptPreviewPanel({
           </div>
         )}
         {previewRun.status === 'done' && (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
-              <span>运行结果：<span className={previewRun.exitCode === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>{previewRun.exitCode ?? '未知'}</span></span>
+              <span>
+                运行结果：
+                <span
+                  className={
+                    previewRun.exitCode === 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-destructive'
+                  }
+                >
+                  {previewRun.exitCode ?? '未知'}
+                </span>
+              </span>
               {previewRun.elapsedMs > 0 && (
-                <span className="text-muted-foreground">耗时 {(previewRun.elapsedMs / 1000).toFixed(2)}s</span>
+                <span className="text-muted-foreground">
+                  耗时 {(previewRun.elapsedMs / 1000).toFixed(2)}s
+                </span>
               )}
             </div>
             <pre className="scrollbar-thin max-h-64 overflow-auto rounded-lg bg-[#0d1117] p-3 font-mono text-xs leading-relaxed text-[#e6edf3] whitespace-pre-wrap break-words">
@@ -625,7 +792,10 @@ export function ScriptPreviewPanel({
           </div>
         )}
         {previewRun.status === 'error' && (
-          <ErrorBubble error={previewRun.error} onRetry={previewRun.error.retryable ? handlePreviewRun : undefined} />
+          <ErrorBubble
+            error={previewRun.error}
+            onRetry={previewRun.error.retryable ? handlePreviewRun : undefined}
+          />
         )}
       </CardContent>
     </Card>
@@ -658,7 +828,7 @@ function StartProgressView({
   // Node 首次启动可能无 deps_installing（无依赖声明）→ Python 总有 checking。
   // 统一展示三阶段，但 deps_installing 是否「跳过」由后端是否 emit 该 stage 决定（未到则灰色）。
   return (
-    <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
+    <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-4">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Loader2Icon className="size-4 animate-spin text-primary" />
         <span>正在启动 {RUNTIME_LABEL[runtime]} 插件…</span>
@@ -680,7 +850,15 @@ function StartProgressView({
                   <span className="size-2 rounded-full bg-muted-foreground/30" />
                 )}
               </span>
-              <span className={done ? 'text-muted-foreground line-through' : active ? 'text-foreground font-medium' : 'text-muted-foreground/60'}>
+              <span
+                className={
+                  done
+                    ? 'text-muted-foreground line-through'
+                    : active
+                      ? 'text-foreground font-medium'
+                      : 'text-muted-foreground/60'
+                }
+              >
                 {STAGE_LABEL[s]}
               </span>
               {active && message && (

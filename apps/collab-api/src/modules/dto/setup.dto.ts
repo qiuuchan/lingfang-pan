@@ -26,7 +26,9 @@ export class SetupDto {
   @MaxLength(100, { message: '显示名称过长（上限 100 字符）' })
   displayName?: string;
 
-  @ApiPropertyOptional({ description: '平台名称（写入 PlatformSetting.platformName，默认 LingFang）' })
+  @ApiPropertyOptional({
+    description: '平台名称（写入 PlatformSetting.platformName，默认 LingFang）',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100, { message: '平台名称过长（上限 100 字符）' })

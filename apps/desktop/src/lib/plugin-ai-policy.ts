@@ -43,7 +43,10 @@ function normalizedFiles(files: DraftFile[]): PolicyFile[] {
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-async function contentHash(manifest: Record<string, unknown>, files: PolicyFile[]): Promise<string | null> {
+async function contentHash(
+  manifest: Record<string, unknown>,
+  files: PolicyFile[]
+): Promise<string | null> {
   if (!globalThis.crypto?.subtle) return null;
   const bytes = new TextEncoder().encode(JSON.stringify({ manifest, files }));
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
@@ -62,12 +65,14 @@ export function policyManifest(files: DraftFile[]): Record<string, unknown> {
 
 export async function checkPluginAiPolicy(
   manifest: Record<string, unknown>,
-  files: DraftFile[],
+  files: DraftFile[]
 ): Promise<PluginAiPolicyResult> {
   const payloadFiles = normalizedFiles(files);
   const hash = await contentHash(manifest, payloadFiles);
   if (hash) {
-    const cached = Array.from(passedChecks.entries()).find(([key]) => key.endsWith(`:${hash}`))?.[1];
+    const cached = Array.from(passedChecks.entries()).find(([key]) =>
+      key.endsWith(`:${hash}`)
+    )?.[1];
     if (cached) return cached;
   }
   const result = await api<PluginAiPolicyResult>('/api/plugins/policy/check', {
@@ -87,17 +92,22 @@ export function policyDiagnosticMessage(result: PluginAiPolicyResult): string {
   return `${lines.join('\n')}${suffix}`.trim();
 }
 
-export async function assertPluginAiPolicy(manifest: Record<string, unknown>, files: DraftFile[]): Promise<void> {
+export async function assertPluginAiPolicy(
+  manifest: Record<string, unknown>,
+  files: DraftFile[]
+): Promise<void> {
   const result = await checkPluginAiPolicy(manifest, files);
   if (result.ok) return;
-  const error = new Error(`插件未通过平台 AI 使用政策检查：\n${policyDiagnosticMessage(result)}`) as Error & { code?: string };
+  const error = new Error(
+    `插件未通过平台 AI 使用政策检查：\n${policyDiagnosticMessage(result)}`
+  ) as Error & { code?: string };
   error.code = 'plugin_ai_policy_failed';
   throw error;
 }
 
 export async function assertInstalledPluginAiPolicy(
   installationId: string,
-  pending: boolean,
+  pending: boolean
 ): Promise<void> {
   const source = await tauriInvoke<{
     manifest: Record<string, unknown>;

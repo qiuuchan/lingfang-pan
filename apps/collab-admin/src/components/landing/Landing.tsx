@@ -34,10 +34,7 @@ export function Landing({ onLogin, onNavigateDownload, onNavigateChangelog }: La
           />
           <LandingFeatures />
           <LandingWorkflow />
-          <LandingCTA
-            onLogin={onLogin}
-            onNavigateDownload={onNavigateDownload}
-          />
+          <LandingCTA onLogin={onLogin} onNavigateDownload={onNavigateDownload} />
           <LandingFooter
             onNavigateDownload={onNavigateDownload}
             onNavigateChangelog={onNavigateChangelog}

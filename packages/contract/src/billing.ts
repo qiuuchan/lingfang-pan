@@ -30,7 +30,7 @@ export const AI_USAGE_GUARD_RULE_KEY = 'aiUsageGuardRule';
 /** 把规则注入 messages：已有 system 则追加一段，否则前插一条 system。纯函数，前后端共享。 */
 export function injectSystemGuardRule(
   messages: RelayMessage[],
-  rule: string = DEFAULT_AI_USAGE_GUARD_RULE,
+  rule: string = DEFAULT_AI_USAGE_GUARD_RULE
 ): RelayMessage[] {
   if (!rule.trim()) return messages;
   const hasSystem = messages.some((m) => m.role === 'system');
@@ -43,7 +43,6 @@ export function injectSystemGuardRule(
 /** 前台固定模型版本（wire 层小写，对应 schema 枚举 FAST/PREMIUM）。 */
 export const TierSchema = z.enum(['fast', 'premium']);
 export type Tier = z.infer<typeof TierSchema>;
-
 
 // model 字段限定 'fast'/'premium' 哨兵；relay 据此映射真实上游模型（协议层强制两版本）。
 

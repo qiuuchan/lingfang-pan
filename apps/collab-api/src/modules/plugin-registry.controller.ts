@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Headers, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { ensureRequestId, requireUser } from '../common';
@@ -9,7 +21,6 @@ import {
   AdminPluginReasonDto,
   PluginLifecycleReasonDto,
   PluginRuntimeAccessDto,
-
   UpdateMarketplaceListingStatusDto,
   UpdatePluginPackageStatusDto,
   UpdatePluginReleaseStatusDto,
@@ -27,7 +38,7 @@ export class PluginRegistryController {
   constructor(
     @Inject(PluginRegistryService) private readonly registry: PluginRegistryService,
     @Inject(MarketplaceCommerceService) private readonly commerce: MarketplaceCommerceService,
-    @Inject(MarketplaceDiscoveryService) private readonly discovery: MarketplaceDiscoveryService,
+    @Inject(MarketplaceDiscoveryService) private readonly discovery: MarketplaceDiscoveryService
   ) {}
 
   @RequirePermission('team.plugin.upload', 'team.plugin.edit_draft')
@@ -39,14 +50,18 @@ export class PluginRegistryController {
     @Headers('content-length') contentLength?: string,
     @Headers('x-plugin-source-kind') sourceKind?: string,
     @Headers('x-plugin-source-label-b64') sourceLabelBase64?: string,
-    @Headers('x-client') client?: string,
+    @Headers('x-client') client?: string
   ) {
     return this.registry.publishTeamRelease(
       requireUser(req).id,
       req,
       packageId,
       contentLength ? Number(contentLength) : undefined,
-      { sourceKind, sourceLabelBase64, ingestChannel: client?.trim().toLowerCase() === 'desktop' ? 'DESKTOP' : 'API' },
+      {
+        sourceKind,
+        sourceLabelBase64,
+        ingestChannel: client?.trim().toLowerCase() === 'desktop' ? 'DESKTOP' : 'API',
+      }
     );
   }
 
@@ -84,12 +99,19 @@ export class PluginRegistryController {
 
   @Get('plugin-releases/:id/artifact')
   async artifact(@Req() req: Request, @Res() res: Response, @Param('id') id: string) {
-    const result = await this.registry.artifactDownload(requireUser(req).id, id, ensureRequestId(req));
+    const result = await this.registry.artifactDownload(
+      requireUser(req).id,
+      id,
+      ensureRequestId(req)
+    );
     if (result.download.kind === 'redirect') return res.redirect(302, result.download.url);
     res.setHeader('content-type', 'application/vnd.lingfang.plugin+zip');
     res.setHeader('content-length', String(result.download.sizeBytes));
     res.setHeader('x-plugin-sha256', result.release.sha256);
-    res.setHeader('content-disposition', `attachment; filename="${result.release.packageId}-${result.release.version}.lfplugin"`);
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename="${result.release.packageId}-${result.release.version}.lfplugin"`
+    );
     result.download.stream.pipe(res);
   }
 
@@ -107,37 +129,68 @@ export class PluginRegistryController {
 
   @RequirePermission('team.plugin.edit_metadata')
   @Patch('plugin-packages/:id/status')
-  packageStatus(@Req() req: Request, @Param('id') id: string, @Body() body: UpdatePluginPackageStatusDto) {
+  packageStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: UpdatePluginPackageStatusDto
+  ) {
     return this.registry.updatePackageStatus(requireUser(req).id, id, body.status);
   }
 
   @RequirePermission('team.plugin.edit_draft')
   @Patch('plugin-releases/:id/status')
-  releaseStatus(@Req() req: Request, @Param('id') id: string, @Body() body: UpdatePluginReleaseStatusDto) {
+  releaseStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: UpdatePluginReleaseStatusDto
+  ) {
     return this.registry.updateReleaseStatus(requireUser(req).id, id, body.status);
   }
 
   @RequirePermission('team.plugin.submit_marketplace')
   @Patch('plugin-packages/:id/marketplace-status')
-  marketplaceStatus(@Req() req: Request, @Param('id') id: string, @Body() body: UpdateMarketplaceListingStatusDto) {
-    return this.registry.updateOwnerMarketplaceStatus(requireUser(req).id, id, body.status, body.reason || '');
+  marketplaceStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: UpdateMarketplaceListingStatusDto
+  ) {
+    return this.registry.updateOwnerMarketplaceStatus(
+      requireUser(req).id,
+      id,
+      body.status,
+      body.reason || ''
+    );
   }
 
   @Post('plugin-packages/:id/runtime-access')
-  runtimeAccess(@Req() req: Request, @Param('id') id: string, @Body() body: PluginRuntimeAccessDto) {
+  runtimeAccess(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: PluginRuntimeAccessDto
+  ) {
     return this.registry.runtimeAccess(requireUser(req).id, id, body.releaseId, body.sha256);
   }
 
   @Post('plugin-releases/:id/report-integrity-failure')
-  integrityFailure(@Req() req: Request, @Param('id') id: string, @Body() body: { detail?: string }) {
+  integrityFailure(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: { detail?: string }
+  ) {
     return this.registry.reportIntegrityFailure(requireUser(req).id, id, body?.detail || '');
   }
 
   @RequirePermission('team.plugin.install')
   @Post('plugin-packages/:id/purchase')
-  async purchase(@Req() req: Request, @Param('id') id: string, @Headers('idempotency-key') idempotencyKey: string | undefined, @Body() body: MarketplacePurchaseDto) {
+  async purchase(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() body: MarketplacePurchaseDto
+  ) {
     const disposition = await this.commerce.purchaseDisposition();
-    if (disposition === 'LEGACY') return this.registry.purchase(requireUser(req).id, id, body.expectedPriceVersion);
+    if (disposition === 'LEGACY')
+      return this.registry.purchase(requireUser(req).id, id, body.expectedPriceVersion);
     const result = await this.commerce.purchaseV2(requireUser(req).id, {
       packageId: id,
       expectedPriceVersion: body.expectedPriceVersion,
@@ -169,12 +222,19 @@ export class AdminPluginRegistryController {
   @RequirePermission('platform.plugin.review')
   @Get(':id/artifact')
   async artifact(@Req() req: Request, @Res() res: Response, @Param('id') id: string) {
-    const result = await this.registry.adminArtifactDownload(requireUser(req).id, id, ensureRequestId(req));
+    const result = await this.registry.adminArtifactDownload(
+      requireUser(req).id,
+      id,
+      ensureRequestId(req)
+    );
     if (result.download.kind === 'redirect') return res.redirect(302, result.download.url);
     res.setHeader('content-type', 'application/vnd.lingfang.plugin+zip');
     res.setHeader('content-length', String(result.download.sizeBytes));
     res.setHeader('x-plugin-sha256', result.release.sha256);
-    res.setHeader('content-disposition', `attachment; filename="${result.release.packageId}-${result.release.version}.lfplugin"`);
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename="${result.release.packageId}-${result.release.version}.lfplugin"`
+    );
     result.download.stream.pipe(res);
   }
 
@@ -254,6 +314,11 @@ export class AdminPluginPackageController {
   @RequirePermission('platform.plugin.review')
   @Post(':id/relist')
   relist(@Req() req: Request, @Param('id') id: string, @Body() body: PluginLifecycleReasonDto) {
-    return this.registry.updatePlatformMarketplaceStatus(requireUser(req).id, id, 'ACTIVE', body?.reason || '');
+    return this.registry.updatePlatformMarketplaceStatus(
+      requireUser(req).id,
+      id,
+      'ACTIVE',
+      body?.reason || ''
+    );
   }
 }

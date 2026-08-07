@@ -9,13 +9,20 @@ describe('WebMarketplaceController', () => {
   it('keeps controller paths relative to the global /api prefix', () => {
     expect(Reflect.getMetadata(PATH_METADATA, WebMarketplaceController)).toBe('web/plugins');
     expect(Reflect.getMetadata(PATH_METADATA, WebCloudTrialController)).toBe('web/plugin-actions');
-    expect(Reflect.getMetadata(PATH_METADATA, WebPreviewSessionController)).toBe('web/plugin-preview');
+    expect(Reflect.getMetadata(PATH_METADATA, WebPreviewSessionController)).toBe(
+      'web/plugin-preview'
+    );
   });
   it('decodes query strings before calling the catalog service', async () => {
-    const marketplace = { catalog: vi.fn().mockResolvedValue({ items: [], total: 0, page: 2, page_size: 12 }), detail: vi.fn() };
+    const marketplace = {
+      catalog: vi.fn().mockResolvedValue({ items: [], total: 0, page: 2, page_size: 12 }),
+      detail: vi.fn(),
+    };
     const controller = new WebMarketplaceController(marketplace as never);
     await controller.catalog({ q: '图片', page: '2', page_size: '12', price: 'FREE' });
-    expect(marketplace.catalog).toHaveBeenCalledWith(expect.objectContaining({ q: '图片', page: 2, page_size: 12, price: 'FREE' }));
+    expect(marketplace.catalog).toHaveBeenCalledWith(
+      expect.objectContaining({ q: '图片', page: 2, page_size: 12, price: 'FREE' })
+    );
   });
 
   it('rejects unknown filters and malformed package ids at the public boundary', () => {
@@ -31,7 +38,9 @@ describe('WebMarketplaceController', () => {
     const trials = { start: vi.fn(), get: vi.fn(), cancel: vi.fn() };
     const controller = new WebCloudTrialController(trials as never);
     const request = { user: { id: 'user-1' } } as never;
-    expect(() => controller.start(request, '../private', 'image.generate', {})).toThrowError(AppError);
+    expect(() => controller.start(request, '../private', 'image.generate', {})).toThrowError(
+      AppError
+    );
     expect(() => controller.get(request, 'not-an-id')).toThrowError(AppError);
     expect(() => controller.cancel(request, 'not-an-id')).toThrowError(AppError);
     expect(trials.start).not.toHaveBeenCalled();

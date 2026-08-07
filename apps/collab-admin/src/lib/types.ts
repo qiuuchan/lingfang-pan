@@ -1,4 +1,21 @@
-  export type View = 'dashboard' | 'users' | 'platformAdmins' | 'teams' | 'governance' | 'marketplaceCommerce' | 'audit' | 'settings' | 'releases' | 'roles' | 'pools' | 'channels' | 'billing' | 'credits' | 'callLogs' | 'tickets' | 'roadmap';
+export type View =
+  | 'dashboard'
+  | 'users'
+  | 'platformAdmins'
+  | 'teams'
+  | 'governance'
+  | 'marketplaceCommerce'
+  | 'audit'
+  | 'settings'
+  | 'releases'
+  | 'roles'
+  | 'pools'
+  | 'channels'
+  | 'billing'
+  | 'credits'
+  | 'callLogs'
+  | 'tickets'
+  | 'roadmap';
 export type UserStatus = 'ACTIVE' | 'DISABLED';
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamStatus = 'ACTIVE' | 'SUSPENDED';
@@ -52,7 +69,10 @@ export type Team = {
 // 插件完整字段：后端 publicPlugin（apps/collab-api/src/modules/plugin-package.ts）实际返回上述全部字段，
 // 此前前端只声明了 4 个，导致详情 Sheet 无法展示 capabilities / 文件列表 / 审核状态等治理信息。
 // files / manifest / capabilities 后端存为 Json，前端按 unknown 持有，渲染时再做结构化降级。
-export type PluginFileEntry = { path?: string; size?: number; hash?: string } & Record<string, unknown>;
+export type PluginFileEntry = { path?: string; size?: number; hash?: string } & Record<
+  string,
+  unknown
+>;
 export type Plugin = {
   id: string;
   name: string;
@@ -90,7 +110,8 @@ export type PluginGrantSubject = 'USER' | 'ROLE';
 export type ChannelProtocol = 'OPENAI' | 'ANTHROPIC';
 export type ChannelKind = 'CHAT' | 'IMAGE';
 export type ChannelStatus = 'ENABLED' | 'DISABLED';
-export type PricingUnit = 'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE' | 'PER_SECOND';
+export type PricingUnit =
+  'PER_TOKEN_INPUT' | 'PER_TOKEN_OUTPUT' | 'PER_CALL' | 'PER_IMAGE' | 'PER_SECOND';
 export type ModelTier = 'FAST' | 'PREMIUM';
 export type PoolScope = 'SHARED' | 'DEDICATED';
 
@@ -105,7 +126,13 @@ export type Pool = {
   createdAt: string;
 };
 
-export type ChannelPoolRef = { id: string; name: string; scope: PoolScope; teamId: string | null; team?: { id: string; name: string; slug: string } | null };
+export type ChannelPoolRef = {
+  id: string;
+  name: string;
+  scope: PoolScope;
+  teamId: string | null;
+  team?: { id: string; name: string; slug: string } | null;
+};
 
 export type Channel = {
   id: string;
@@ -256,7 +283,7 @@ export type AuditLog = {
 // 组D 审计完善：分类元数据 + action 推断分类辅助。
 // 与后端 apps/collab-api/src/modules/audit-actions.ts 对齐（key 一一对应），audit-view 据此渲染分类筛选下拉。
 export type AuditCategoryKey =
-  | 'auth' | 'team' | 'plugin' | 'marketplace' | 'wallet' | 'llm' | 'admin' | 'system';
+  'auth' | 'team' | 'plugin' | 'marketplace' | 'wallet' | 'llm' | 'admin' | 'system';
 
 export type AuditCategoryMeta = {
   key: AuditCategoryKey;
@@ -271,7 +298,11 @@ export const AUDIT_CATEGORIES: AuditCategoryMeta[] = [
   { key: 'marketplace', label: '市场', description: '市场上架/购买/评分' },
   { key: 'wallet', label: '钱包', description: '钱包余额变动/赠送/购买扣款' },
   { key: 'llm', label: 'LLM 绑定', description: '租户 API Key 绑定/解绑/解密' },
-  { key: 'admin', label: '平台管理', description: '平台管理员对用户/团队/插件/provider/release 的治理操作' },
+  {
+    key: 'admin',
+    label: '平台管理',
+    description: '平台管理员对用户/团队/插件/provider/release 的治理操作',
+  },
   { key: 'system', label: '系统配置', description: '平台设置/SMTP 测试/启动引导' },
 ];
 
@@ -571,12 +602,16 @@ export function localizeMetadata(metadata: unknown): unknown {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
   return Object.fromEntries(
     Object.entries(metadata as Record<string, unknown>).map(([key, value]) => {
-      if (METADATA_LOCALIZE_KEYS.has(key) && typeof value === 'string') return [key, labelOf(value)];
-      if (key === 'amountCents' && (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))) {
+      if (METADATA_LOCALIZE_KEYS.has(key) && typeof value === 'string')
+        return [key, labelOf(value)];
+      if (
+        key === 'amountCents' &&
+        (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))
+      ) {
         // 分→元格式化，裸露的 cents 不便阅读。
         return [key, `${(Number(value) / 100).toFixed(2)} 元`];
       }
       return [key, value];
-    }),
+    })
   );
 }

@@ -10,7 +10,11 @@ import { CollabModule } from '../modules/collab.module';
 import { AutomationWorkerConsumers } from './automation-worker-consumers';
 import { AutomationControlProcessor } from './automation-control.processor';
 import { AutomationReconcilerService } from './automation-reconciler.service';
-import { AUTOMATION_SCHEDULER_PORT, AutomationSchedulerService, createAutomationSchedulerPort } from './automation-scheduler.service';
+import {
+  AUTOMATION_SCHEDULER_PORT,
+  AutomationSchedulerService,
+  createAutomationSchedulerPort,
+} from './automation-scheduler.service';
 import { CloudAbortBus } from './cloud-abort-bus';
 
 @Module({})
@@ -24,7 +28,10 @@ export class AutomationModule {
         PrismaService,
         { provide: AUTOMATION_CONFIG, useValue: config },
         { provide: AUTOMATION_QUEUE, useFactory: () => createAutomationQueueAdapter(config) },
-        { provide: AUTOMATION_SCHEDULER_PORT, useFactory: () => createAutomationSchedulerPort(config) },
+        {
+          provide: AUTOMATION_SCHEDULER_PORT,
+          useFactory: () => createAutomationSchedulerPort(config),
+        },
         AutomationOutboxService,
         AutomationOutboxDispatcher,
         AutomationReadinessService,
@@ -34,7 +41,13 @@ export class AutomationModule {
         AutomationWorkerConsumers,
         { provide: CloudAbortBus, useFactory: () => new CloudAbortBus(config) },
       ],
-      exports: [AUTOMATION_CONFIG, AUTOMATION_QUEUE, AutomationOutboxService, AutomationReadinessService, CloudAbortBus],
+      exports: [
+        AUTOMATION_CONFIG,
+        AUTOMATION_QUEUE,
+        AutomationOutboxService,
+        AutomationReadinessService,
+        CloudAbortBus,
+      ],
     };
   }
 }

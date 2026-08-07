@@ -9,8 +9,9 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { LoadedPlugin } from '@/lib/types';
 
-const hasTauri = typeof window !== 'undefined'
-  && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+const hasTauri =
+  typeof window !== 'undefined' &&
+  Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
 function pluginWindowLabel(pluginId: string): string {
   // WebviewWindow label 仅允许 [a-zA-Z0-9-:/]，id 已是 kebab-case 安全。
@@ -57,8 +58,12 @@ export async function openPluginInWindow(plugin: LoadedPlugin): Promise<void> {
     // once 创建后即解绑，不长期占用。
     try {
       webview.once('tauri://error', (event) => {
-        const msg = (event?.payload as { message?: string } | undefined)?.message || String(event?.payload ?? '未知错误');
-        import('sonner').then(({ toast }) => toast.error(`独立窗口创建失败：${msg}`)).catch(() => void 0);
+        const msg =
+          (event?.payload as { message?: string } | undefined)?.message ||
+          String(event?.payload ?? '未知错误');
+        import('sonner')
+          .then(({ toast }) => toast.error(`独立窗口创建失败：${msg}`))
+          .catch(() => void 0);
       });
     } catch {
       /* once 注册失败忽略 */

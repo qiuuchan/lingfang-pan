@@ -27,7 +27,11 @@ export interface ArtifactStore {
 
 function assertArtifactKey(key: string): string {
   const normalized = key.replace(/\\/g, '/');
-  if (!normalized || normalized.startsWith('/') || normalized.split('/').some((part) => !part || part === '.' || part === '..')) {
+  if (
+    !normalized ||
+    normalized.startsWith('/') ||
+    normalized.split('/').some((part) => !part || part === '.' || part === '..')
+  ) {
     throw new Error('Invalid artifact key');
   }
   return normalized;
@@ -42,7 +46,8 @@ export class FilesystemArtifactStore implements ArtifactStore {
 
   private pathFor(key: string) {
     const path = resolve(this.root, assertArtifactKey(key));
-    if (path !== this.root && !path.startsWith(`${this.root}${sep}`)) throw new Error('Artifact path escapes root');
+    if (path !== this.root && !path.startsWith(`${this.root}${sep}`))
+      throw new Error('Artifact path escapes root');
     return path;
   }
 
@@ -52,7 +57,8 @@ export class FilesystemArtifactStore implements ArtifactStore {
     try {
       await rename(tempPath, target);
     } catch (error) {
-      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EXDEV') throw error;
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EXDEV')
+        throw error;
       const copyTarget = `${target}.staging-${randomUUID()}`;
       try {
         await copyFile(tempPath, copyTarget, constants.COPYFILE_EXCL);
@@ -71,7 +77,12 @@ export class FilesystemArtifactStore implements ArtifactStore {
     try {
       info = await stat(path);
     } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'ENOENT') {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        (error as { code?: string }).code === 'ENOENT'
+      ) {
         throw new ArtifactUnavailableError(`artifact not found: ${artifactKey}`);
       }
       throw new Error(`读取制品失败：${artifactKey}`, { cause: error });
@@ -94,7 +105,10 @@ export class FilesystemArtifactStore implements ArtifactStore {
           continue;
         }
         if (!entry.isFile() || !entry.name.endsWith('.lfplugin')) continue;
-        const key = path.slice(this.root.length + 1).split(sep).join('/');
+        const key = path
+          .slice(this.root.length + 1)
+          .split(sep)
+          .join('/');
         const info = await stat(path).catch(() => null);
         if (info && !referencedKeys.has(key) && Date.now() - info.mtimeMs >= olderThanMs) {
           await rm(path, { force: true });
@@ -121,7 +135,10 @@ function hmac(key: Buffer | string, value: string): Buffer {
 }
 
 function awsEncode(value: string): string {
-  return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
 }
 
 export class S3ArtifactStore implements ArtifactStore {
@@ -130,7 +147,8 @@ export class S3ArtifactStore implements ArtifactStore {
   private objectUrl(key: string): URL {
     const endpoint = new URL(this.config.endpoint);
     const encodedKey = assertArtifactKey(key).split('/').map(awsEncode).join('/');
-    if (this.config.pathStyle) endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/${awsEncode(this.config.bucket)}/${encodedKey}`;
+    if (this.config.pathStyle)
+      endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/${awsEncode(this.config.bucket)}/${encodedKey}`;
     else {
       endpoint.hostname = `${this.config.bucket}.${endpoint.hostname}`;
       endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/${encodedKey}`;
@@ -150,10 +168,14 @@ export class S3ArtifactStore implements ArtifactStore {
     const shortDate = amzDate.slice(0, 8);
     const canonicalHeaders = `host:${url.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
     const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
-    const canonical = [method, url.pathname, '', canonicalHeaders, signedHeaders, payloadHash].join('\n');
+    const canonical = [method, url.pathname, '', canonicalHeaders, signedHeaders, payloadHash].join(
+      '\n'
+    );
     const scope = `${shortDate}/${this.config.region}/s3/aws4_request`;
     const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash('sha256').update(canonical).digest('hex')}`;
-    const signature = createHmac('sha256', this.signingKey(shortDate)).update(stringToSign).digest('hex');
+    const signature = createHmac('sha256', this.signingKey(shortDate))
+      .update(stringToSign)
+      .digest('hex');
     return {
       authorization: `AWS4-HMAC-SHA256 Credential=${this.config.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
       amzDate,
@@ -173,10 +195,23 @@ export class S3ArtifactStore implements ArtifactStore {
       'X-Amz-Expires': String(expiresSeconds),
       'X-Amz-SignedHeaders': 'host',
     });
-    const canonicalQuery = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${awsEncode(k)}=${awsEncode(v)}`).join('&');
-    const canonical = ['GET', url.pathname, canonicalQuery, `host:${url.host}\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\n');
+    const canonicalQuery = [...params.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${awsEncode(k)}=${awsEncode(v)}`)
+      .join('&');
+    const canonical = [
+      'GET',
+      url.pathname,
+      canonicalQuery,
+      `host:${url.host}\n`,
+      'host',
+      'UNSIGNED-PAYLOAD',
+    ].join('\n');
     const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash('sha256').update(canonical).digest('hex')}`;
-    params.set('X-Amz-Signature', createHmac('sha256', this.signingKey(shortDate)).update(stringToSign).digest('hex'));
+    params.set(
+      'X-Amz-Signature',
+      createHmac('sha256', this.signingKey(shortDate)).update(stringToSign).digest('hex')
+    );
     url.search = params.toString();
     return url.toString();
   }
@@ -186,7 +221,12 @@ export class S3ArtifactStore implements ArtifactStore {
     const { authorization, amzDate } = this.authorization('PUT', url, sha256, new Date());
     const response = await fetch(url, {
       method: 'PUT',
-      headers: { authorization, 'x-amz-date': amzDate, 'x-amz-content-sha256': sha256, 'content-type': 'application/vnd.lingfang.plugin+zip' },
+      headers: {
+        authorization,
+        'x-amz-date': amzDate,
+        'x-amz-content-sha256': sha256,
+        'content-type': 'application/vnd.lingfang.plugin+zip',
+      },
       body: Readable.toWeb(createReadStream(tempPath)) as BodyInit,
       duplex: 'half',
     } as RequestInit & { duplex: 'half' });
@@ -206,8 +246,12 @@ export class S3ArtifactStore implements ArtifactStore {
     const url = this.objectUrl(artifactKey);
     const emptyHash = createHash('sha256').update('').digest('hex');
     const { authorization, amzDate } = this.authorization('DELETE', url, emptyHash, new Date());
-    const response = await fetch(url, { method: 'DELETE', headers: { authorization, 'x-amz-date': amzDate, 'x-amz-content-sha256': emptyHash } });
-    if (!response.ok && response.status !== 404) throw new Error(`S3 delete failed: ${response.status}`);
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { authorization, 'x-amz-date': amzDate, 'x-amz-content-sha256': emptyHash },
+    });
+    if (!response.ok && response.status !== 404)
+      throw new Error(`S3 delete failed: ${response.status}`);
   }
 
   async cleanupOrphans(): Promise<number> {
@@ -219,8 +263,14 @@ export class S3ArtifactStore implements ArtifactStore {
 
 export function createArtifactStore(env: NodeJS.ProcessEnv = process.env): ArtifactStore {
   if ((env.PLUGIN_ARTIFACT_DRIVER || 'filesystem').toLowerCase() === 's3') {
-    const required = ['PLUGIN_S3_ENDPOINT', 'PLUGIN_S3_BUCKET', 'PLUGIN_S3_ACCESS_KEY_ID', 'PLUGIN_S3_SECRET_ACCESS_KEY'] as const;
-    for (const key of required) if (!env[key]) throw new Error(`${key} is required for S3 artifact storage`);
+    const required = [
+      'PLUGIN_S3_ENDPOINT',
+      'PLUGIN_S3_BUCKET',
+      'PLUGIN_S3_ACCESS_KEY_ID',
+      'PLUGIN_S3_SECRET_ACCESS_KEY',
+    ] as const;
+    for (const key of required)
+      if (!env[key]) throw new Error(`${key} is required for S3 artifact storage`);
     return new S3ArtifactStore({
       endpoint: env.PLUGIN_S3_ENDPOINT!,
       region: env.PLUGIN_S3_REGION || 'us-east-1',
@@ -230,5 +280,7 @@ export function createArtifactStore(env: NodeJS.ProcessEnv = process.env): Artif
       pathStyle: env.PLUGIN_S3_PATH_STYLE !== 'false',
     });
   }
-  return new FilesystemArtifactStore(env.PLUGIN_ARTIFACT_DIR || join(process.cwd(), 'artifacts', 'plugins'));
+  return new FilesystemArtifactStore(
+    env.PLUGIN_ARTIFACT_DIR || join(process.cwd(), 'artifacts', 'plugins')
+  );
 }

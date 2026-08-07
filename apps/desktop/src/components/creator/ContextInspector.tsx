@@ -5,8 +5,15 @@
 // 视觉参考：终端风格的 monospace 数字 + 堆叠条形图 + 压缩进度环。
 import { useState } from 'react';
 import {
-  ArchiveIcon, ChevronDownIcon, ChevronUpIcon, EyeIcon, FileTextIcon, ClockIcon, PencilIcon,
-  GaugeIcon, LayersIcon,
+  ArchiveIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  EyeIcon,
+  FileTextIcon,
+  ClockIcon,
+  PencilIcon,
+  GaugeIcon,
+  LayersIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -17,7 +24,13 @@ interface ContextBreakdown {
   summary: string;
   keptTurns: Array<{ role: string; content: string }>;
   currentInput: string;
-  estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+  estimatedTokens: {
+    system: number;
+    summary: number;
+    history: number;
+    input: number;
+    total: number;
+  };
   compressInfo: { threshold: number; currentTokens: number; remainingTokens: number; pct: number };
 }
 
@@ -61,7 +74,10 @@ export function ContextInspector({
   const ci = breakdown.compressInfo;
 
   // 模型窗口占比（若 contextWindow 已知）。
-  const winPct = contextWindow && contextWindow > 0 ? Math.min(100, Math.round(((modelTokens ?? tok.total) / contextWindow) * 100)) : null;
+  const winPct =
+    contextWindow && contextWindow > 0
+      ? Math.min(100, Math.round(((modelTokens ?? tok.total) / contextWindow) * 100))
+      : null;
   // 压缩进度状态：pct≥100 表示已达阈值下次将压缩；≥80 即将压缩。
   const compressStatus = ci.pct >= 100 ? 'critical' : ci.pct >= 80 ? 'warning' : 'ok';
 
@@ -79,7 +95,11 @@ export function ContextInspector({
                 type="button"
                 onClick={onCompress}
                 disabled={!canCompress || compressing}
-                title={compressing ? '正在压缩…' : '把早期对话轮摘要成一条，降低上下文占用（保留近期轮与插件包）'}
+                title={
+                  compressing
+                    ? '正在压缩…'
+                    : '把早期对话轮摘要成一条，降低上下文占用（保留近期轮与插件包）'
+                }
                 className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45"
               >
                 <ArchiveIcon className={cn('size-3.5', compressing && 'animate-pulse')} />
@@ -89,7 +109,7 @@ export function ContextInspector({
           </DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-[calc(85vh-64px)]">
-          <div className="space-y-4 p-5 pr-6">
+          <div className="flex flex-col gap-4 p-5 pr-6">
             {/* === 总览仪表盘（Claude Code 风格：两个并排指标） === */}
             <div className="grid grid-cols-1 overflow-hidden rounded-lg border bg-card/40 sm:grid-cols-2 sm:divide-x">
               {/* 模型窗口占用 */}
@@ -101,21 +121,36 @@ export function ContextInspector({
                 {winPct !== null ? (
                   <>
                     <div className="mb-1 flex items-baseline justify-between">
-                      <span className="font-mono text-lg font-semibold tabular-nums text-foreground">{winPct}%</span>
-                      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{(modelTokens ?? tok.total).toLocaleString()} / {contextWindow!.toLocaleString()}</span>
+                      <span className="font-mono text-lg font-semibold tabular-nums text-foreground">
+                        {winPct}%
+                      </span>
+                      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                        {(modelTokens ?? tok.total).toLocaleString()} /{' '}
+                        {contextWindow!.toLocaleString()}
+                      </span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-muted">
                       <div
                         className={cn(
                           'h-full rounded-full transition-all',
-                          winPct > 90 ? 'bg-destructive' : winPct > 70 ? 'bg-amber-500' : 'bg-primary',
+                          winPct > 90
+                            ? 'bg-destructive'
+                            : winPct > 70
+                              ? 'bg-amber-500'
+                              : 'bg-primary'
                         )}
                         style={{ width: `${winPct}%` }}
                       />
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm text-muted-foreground">未知窗口大小<br /><span className="font-mono text-xs">~{(modelTokens ?? tok.total).toLocaleString()} tokens</span></div>
+                  <div className="text-sm text-muted-foreground">
+                    未知窗口大小
+                    <br />
+                    <span className="font-mono text-xs">
+                      ~{(modelTokens ?? tok.total).toLocaleString()} tokens
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -126,12 +161,16 @@ export function ContextInspector({
                   压缩进度
                 </div>
                 <div className="mb-1 flex items-baseline justify-between">
-                  <span className="font-mono text-lg font-semibold tabular-nums text-foreground">{Math.min(100, ci.pct)}%</span>
-                  <span className={cn(
-                    'font-mono text-[11px] tabular-nums text-muted-foreground',
-                    compressStatus === 'critical' && 'text-destructive',
-                    compressStatus === 'warning' && 'text-amber-700 dark:text-amber-400',
-                  )}>
+                  <span className="font-mono text-lg font-semibold tabular-nums text-foreground">
+                    {Math.min(100, ci.pct)}%
+                  </span>
+                  <span
+                    className={cn(
+                      'font-mono text-[11px] tabular-nums text-muted-foreground',
+                      compressStatus === 'critical' && 'text-destructive',
+                      compressStatus === 'warning' && 'text-warning'
+                    )}
+                  >
                     {ci.remainingTokens > 0
                       ? `还需 ${ci.remainingTokens.toLocaleString()} tokens 压缩`
                       : '已达阈值，下次将压缩'}
@@ -141,9 +180,11 @@ export function ContextInspector({
                   <div
                     className={cn(
                       'h-full rounded-full transition-all',
-                      compressStatus === 'critical' ? 'bg-destructive'
-                        : compressStatus === 'warning' ? 'bg-amber-500'
-                          : 'bg-primary',
+                      compressStatus === 'critical'
+                        ? 'bg-destructive'
+                        : compressStatus === 'warning'
+                          ? 'bg-amber-500'
+                          : 'bg-primary'
                     )}
                     style={{ width: `${Math.min(100, ci.pct)}%` }}
                   />
@@ -164,17 +205,41 @@ export function ContextInspector({
                 {tok.total > 0 && (
                   <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full bg-muted">
                     <SegPct value={tok.system} total={tok.total} className="bg-blue-500" />
-                    {tok.summary > 0 && <SegPct value={tok.summary} total={tok.total} className="bg-purple-500" />}
+                    {tok.summary > 0 && (
+                      <SegPct value={tok.summary} total={tok.total} className="bg-purple-500" />
+                    )}
                     <SegPct value={tok.history} total={tok.total} className="bg-emerald-500" />
                     <SegPct value={tok.input} total={tok.total} className="bg-orange-500" />
                   </div>
                 )}
                 {/* 分项明细 */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                  <TokenLegend label="系统提示" value={tok.system} total={tok.total} color="bg-blue-500" />
-                  {tok.summary > 0 && <TokenLegend label="历史摘要" value={tok.summary} total={tok.total} color="bg-purple-500" />}
-                  <TokenLegend label="保留历史" value={tok.history} total={tok.total} color="bg-emerald-500" />
-                  <TokenLegend label="当前输入" value={tok.input} total={tok.total} color="bg-orange-500" />
+                  <TokenLegend
+                    label="系统提示"
+                    value={tok.system}
+                    total={tok.total}
+                    color="bg-blue-500"
+                  />
+                  {tok.summary > 0 && (
+                    <TokenLegend
+                      label="历史摘要"
+                      value={tok.summary}
+                      total={tok.total}
+                      color="bg-purple-500"
+                    />
+                  )}
+                  <TokenLegend
+                    label="保留历史"
+                    value={tok.history}
+                    total={tok.total}
+                    color="bg-emerald-500"
+                  />
+                  <TokenLegend
+                    label="当前输入"
+                    value={tok.input}
+                    total={tok.total}
+                    color="bg-orange-500"
+                  />
                 </div>
               </Section>
 
@@ -186,7 +251,9 @@ export function ContextInspector({
                 expanded={expandedSections.has('system')}
                 onToggle={() => toggle('system')}
               >
-                <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">{breakdown.systemPrompt}</pre>
+                <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">
+                  {breakdown.systemPrompt}
+                </pre>
               </Section>
 
               {/* 历史摘要 */}
@@ -198,7 +265,9 @@ export function ContextInspector({
                   expanded={expandedSections.has('summary')}
                   onToggle={() => toggle('summary')}
                 >
-                  <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">{breakdown.summary}</pre>
+                  <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">
+                    {breakdown.summary}
+                  </pre>
                 </Section>
               )}
 
@@ -214,13 +283,24 @@ export function ContextInspector({
                   {breakdown.keptTurns.map((t, i) => (
                     <div key={i} className="p-2.5">
                       <div className="mb-1 flex items-center gap-1.5">
-                        <span className={cn(
-                          'inline-flex h-4 items-center rounded-sm px-1.5 text-[10px] font-medium',
-                          t.role === 'user' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
-                        )}>{t.role === 'user' ? '用户' : 'AI'}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground tabular-nums">{t.content.length.toLocaleString()} 字符</span>
+                        <span
+                          className={cn(
+                            'inline-flex h-4 items-center rounded-sm px-1.5 text-[10px] font-medium',
+                            t.role === 'user'
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {t.role === 'user' ? '用户' : 'AI'}
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                          {t.content.length.toLocaleString()} 字符
+                        </span>
                       </div>
-                      <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">{t.content.slice(0, 500)}{t.content.length > 500 ? '…' : ''}</pre>
+                      <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
+                        {t.content.slice(0, 500)}
+                        {t.content.length > 500 ? '…' : ''}
+                      </pre>
                     </div>
                   ))}
                 </div>
@@ -234,7 +314,9 @@ export function ContextInspector({
                 expanded={expandedSections.has('input')}
                 onToggle={() => toggle('input')}
               >
-                <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">{breakdown.currentInput}</pre>
+                <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">
+                  {breakdown.currentInput}
+                </pre>
               </Section>
             </div>
           </div>
@@ -248,11 +330,27 @@ export function ContextInspector({
 function SegPct({ value, total, className }: { value: number; total: number; className: string }) {
   const pct = total > 0 ? (value / total) * 100 : 0;
   if (pct <= 0) return null;
-  return <div className={cn('h-full', className)} style={{ width: `${pct}%` }} title={`${value.toLocaleString()} tokens (${pct.toFixed(1)}%)`} />;
+  return (
+    <div
+      className={cn('h-full', className)}
+      style={{ width: `${pct}%` }}
+      title={`${value.toLocaleString()} tokens (${pct.toFixed(1)}%)`}
+    />
+  );
 }
 
 /** Token 分项图例（色块 + 标签 + 数值）。 */
-function TokenLegend({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
+function TokenLegend({
+  label,
+  value,
+  total,
+  color,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  color: string;
+}) {
   const pct = total > 0 ? (value / total) * 100 : 0;
   return (
     <div className="flex items-center gap-1.5">
@@ -291,7 +389,11 @@ function Section({
           <div className="text-sm font-medium text-foreground">{title}</div>
           <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{subtitle}</div>
         </div>
-        {expanded ? <ChevronUpIcon className="size-4 shrink-0 text-muted-foreground" /> : <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />}
+        {expanded ? (
+          <ChevronUpIcon className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
       </button>
       {expanded && <div className="border-t bg-muted/20 px-3.5 py-3">{children}</div>}
     </div>

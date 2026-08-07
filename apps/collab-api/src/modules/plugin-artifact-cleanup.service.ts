@@ -14,7 +14,7 @@ export class PluginArtifactCleanupService implements OnModuleInit, OnModuleDestr
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(ARTIFACT_STORE) private readonly artifacts: ArtifactStore,
+    @Inject(ARTIFACT_STORE) private readonly artifacts: ArtifactStore
   ) {}
 
   onModuleInit() {
@@ -29,8 +29,13 @@ export class PluginArtifactCleanupService implements OnModuleInit, OnModuleDestr
 
   async cleanup() {
     const releases = await this.prisma.pluginRelease.findMany({ select: { artifactKey: true } });
-    const removedArtifacts = await this.artifacts.cleanupOrphans(new Set(releases.map((release) => release.artifactKey)), ORPHAN_AGE_MS);
-    const removedStaging = await cleanupStaging(process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts'));
+    const removedArtifacts = await this.artifacts.cleanupOrphans(
+      new Set(releases.map((release) => release.artifactKey)),
+      ORPHAN_AGE_MS
+    );
+    const removedStaging = await cleanupStaging(
+      process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts')
+    );
     return { removedArtifacts, removedStaging };
   }
 }
@@ -39,7 +44,11 @@ export async function cleanupStaging(root: string, olderThanMs = ORPHAN_AGE_MS) 
   let removed = 0;
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (!entry.isDirectory() || (!entry.name.startsWith('upload-') && !entry.name.startsWith('legacy-plugin-v4-'))) continue;
+    if (
+      !entry.isDirectory() ||
+      (!entry.name.startsWith('upload-') && !entry.name.startsWith('legacy-plugin-v4-'))
+    )
+      continue;
     const path = join(root, entry.name);
     const info = await stat(path).catch(() => null);
     if (info && Date.now() - info.mtimeMs >= olderThanMs) {

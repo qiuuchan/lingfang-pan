@@ -17,9 +17,7 @@ const persistedManifest = {
   runtime_type: 'client',
   entry: 'ui/index.html',
   visibility: 'tenant',
-  capabilities: [
-    { kind: 'ui.view', reason: '展示计算器界面', risk: 'low', requires_admin: false },
-  ],
+  capabilities: [{ kind: 'ui.view', reason: '展示计算器界面', risk: 'low', requires_admin: false }],
 };
 
 const persistedCreatorFixture: CreatorWorkspaceFixture = {
@@ -37,9 +35,7 @@ const persistedCreatorFixture: CreatorWorkspaceFixture = {
           role: 'assistant',
           content: '插件草稿已经准备好，可以在右侧继续检查。',
           status: 'done',
-          parts: [
-            { type: 'text', content: '插件草稿已经准备好，可以在右侧继续检查。' },
-          ],
+          parts: [{ type: 'text', content: '插件草稿已经准备好，可以在右侧继续检查。' }],
         },
       ],
       stagedDraft: {
@@ -59,7 +55,9 @@ test.describe('CreatorWorkspace', () => {
 
     const creatorDialog = page.getByRole('dialog', { name: 'AI 创建插件' });
     await expect(creatorDialog).toBeVisible();
-    expect(await creatorDialog.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(900);
+    expect(
+      await creatorDialog.evaluate((element) => element.getBoundingClientRect().width)
+    ).toBeGreaterThan(900);
     const creatorSidebar = creatorDialog.locator('aside').first();
     await expect(page.getByRole('button', { name: '展开创建器侧边栏' })).toBeVisible();
     await expect(creatorSidebar).toHaveCSS('width', '60px');
@@ -78,7 +76,9 @@ test.describe('CreatorWorkspace', () => {
     await expect(creatorDialog).toBeHidden();
     await enterCreatorWorkspace(page);
     await expect(page.getByRole('button', { name: '收起创建器侧边栏' })).toBeVisible();
-    await expect(page.getByRole('dialog', { name: 'AI 创建插件' }).locator('aside').first()).toHaveCSS('width', '240px');
+    await expect(
+      page.getByRole('dialog', { name: 'AI 创建插件' }).locator('aside').first()
+    ).toHaveCSS('width', '240px');
   });
 
   test('精简 composer 的加号菜单承载高级操作', async ({ page }) => {
@@ -122,9 +122,15 @@ test.describe('CreatorWorkspace', () => {
 
     await page.getByRole('button', { name: '展开创建器侧边栏' }).click();
     await expect(page.getByText('持久化计算器会话', { exact: true })).toBeVisible();
-    await expect(page.getByText('做一个可以连续计算的网页计算器插件', { exact: true })).toBeVisible();
-    await expect(page.getByText('插件草稿已经准备好，可以在右侧继续检查。', { exact: true })).toBeVisible();
-    const inspector = page.getByRole('heading', { name: '插件草稿' }).locator('xpath=ancestor::aside');
+    await expect(
+      page.getByText('做一个可以连续计算的网页计算器插件', { exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByText('插件草稿已经准备好，可以在右侧继续检查。', { exact: true })
+    ).toBeVisible();
+    const inspector = page
+      .getByRole('heading', { name: '插件草稿' })
+      .locator('xpath=ancestor::aside');
     await expect(inspector).toBeVisible();
     await expect(inspector.locator('input').first()).toHaveValue('持久化计算器');
     await expect(page.locator('button[title^="查看上下文详情"]')).toHaveCount(1);
@@ -138,7 +144,9 @@ test.describe('CreatorWorkspace', () => {
     await page.waitForLoadState('networkidle');
     await enterCreatorWorkspace(page);
     await expect(page.getByText('持久化计算器会话', { exact: true })).toBeVisible();
-    const restoredInspector = page.getByRole('heading', { name: '插件草稿' }).locator('xpath=ancestor::aside');
+    const restoredInspector = page
+      .getByRole('heading', { name: '插件草稿' })
+      .locator('xpath=ancestor::aside');
     await expect(restoredInspector).toBeVisible();
     await expect(restoredInspector.locator('input').first()).toHaveValue('持久化计算器');
   });

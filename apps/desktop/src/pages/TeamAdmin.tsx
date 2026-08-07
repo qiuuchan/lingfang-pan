@@ -112,7 +112,7 @@ export function TeamAdmin() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-        <Tabs value={tab} onValueChange={setTab} className="mx-auto max-w-6xl space-y-4">
+        <Tabs value={tab} onValueChange={setTab} className="mx-auto max-w-6xl gap-4">
           <div className="overflow-x-auto pb-1">
             <TabsList className="h-10 min-w-max justify-start rounded-xl border bg-background p-1 shadow-sm">
               <TabsTrigger className="h-8 flex-none px-3" value="overview">
@@ -224,7 +224,7 @@ function OverviewCard({
       </div>
     );
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-3">
         <OverviewMetric
           icon={<Globe2Icon />}
@@ -327,7 +327,7 @@ function TeamProfileCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4 pt-4">
+      <CardContent className="flex flex-col gap-4 pt-4">
         <FieldGroup>
           <Field orientation="horizontal" className="items-start rounded-lg border bg-muted/20 p-3">
             <FieldContent>

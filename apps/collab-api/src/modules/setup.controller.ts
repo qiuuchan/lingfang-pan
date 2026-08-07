@@ -10,7 +10,10 @@
 import { Body, Controller, Get, Inject, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import bcrypt from 'bcryptjs';
-import { SYSTEM_PLATFORM_ADMIN_ROLE_ID, SYSTEM_PLATFORM_ADMIN_ROLE_CODE } from './permissions/permission-codes';
+import {
+  SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+  SYSTEM_PLATFORM_ADMIN_ROLE_CODE,
+} from './permissions/permission-codes';
 import { PrismaService } from '../prisma.service';
 import { AppError, Public } from '../common';
 import { SetupDto } from './dto/setup.dto';
@@ -40,19 +43,26 @@ export class SetupController {
   async setup(@Body() body: SetupDto) {
     // 进入即复检 needsSetup：防「status 查询返回 true 后、本请求到达前，seed-admin 已建管理员」的竞态。
     const adminCount = await this.prisma.user.count({ where: { platformRole: 'PLATFORM_ADMIN' } });
-    if (adminCount > 0) throw new AppError(403, 'forbidden', '平台已完成初始化，安装向导已关闭', { reason: 'setup_already_done' });
+    if (adminCount > 0)
+      throw new AppError(403, 'forbidden', '平台已完成初始化，安装向导已关闭', {
+        reason: 'setup_already_done',
+      });
 
     // 邮箱归一化（与 register/login 一致：trim + lowercase）。
     const email = body.email.trim().toLowerCase();
     // 已存在同邮箱的非管理员账号：不覆盖（避免把已注册用户提升为平台管理员，越权风险）。
     // 这种情况极罕见（首次部署一般无用户），但必须显式拒绝而非静默 upsert 提权。
     const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) throw new AppError(403, 'forbidden', '该邮箱已被占用，无法作为管理员创建', { reason: 'email_taken' });
+    if (existing)
+      throw new AppError(403, 'forbidden', '该邮箱已被占用，无法作为管理员创建', {
+        reason: 'email_taken',
+      });
 
     // platformName 归一化：与 SettingsService.KEY_VALIDATORS.platformName 同款（trim + 100 上限），
     // 保持单一来源语义；空则不写（保留 SettingsService.getPublicInfo 的 'LingFang' 默认兜底）。
     const platformName = (body.platformName ?? '').trim();
-    if (platformName.length > 100) throw new AppError(400, 'bad_request', '平台名称过长（上限 100 字符）');
+    if (platformName.length > 100)
+      throw new AppError(400, 'bad_request', '平台名称过长（上限 100 字符）');
 
     const passwordHash = await bcrypt.hash(body.password, 12);
     const displayName = (body.displayName ?? '').trim() || email;
@@ -85,7 +95,13 @@ export class SetupController {
         });
         // RBAC 双写：platformRole 枚举 + platformRoleId 同步，否则新权限守卫解析不到平台角色权限。
         const user = await tx.user.create({
-          data: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN', platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
+          data: {
+            email,
+            displayName,
+            passwordHash,
+            platformRole: 'PLATFORM_ADMIN',
+            platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+          },
         });
         // platformName 非空才写 PlatformSetting（空则保留 getPublicInfo 的默认 'LingFang' 兜底）。
         if (platformName) {
@@ -106,8 +122,15 @@ export class SetupController {
         });
       });
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
-        throw new AppError(403, 'forbidden', '平台已完成初始化，安装向导已关闭', { reason: 'setup_already_done' });
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2002'
+      ) {
+        throw new AppError(403, 'forbidden', '平台已完成初始化，安装向导已关闭', {
+          reason: 'setup_already_done',
+        });
       }
       throw error;
     }

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AUTOMATION_OUTBOX_MAX_ATTEMPTS, AutomationOutboxService, automationOutboxBackoffMs } from './automation-outbox.service';
+import {
+  AUTOMATION_OUTBOX_MAX_ATTEMPTS,
+  AutomationOutboxService,
+  automationOutboxBackoffMs,
+} from './automation-outbox.service';
 
 describe('AutomationOutboxService', () => {
   it('uses bounded exponential retry delays', () => {
@@ -12,9 +16,11 @@ describe('AutomationOutboxService', () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const service = new AutomationOutboxService({ automationOutbox: { updateMany } } as never);
     await expect(service.complete('outbox-1', 'worker-a')).resolves.toBe(true);
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'outbox-1', status: 'PROCESSING', lockedBy: 'worker-a' },
-    }));
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'outbox-1', status: 'PROCESSING', lockedBy: 'worker-a' },
+      })
+    );
   });
 
   it('returns stale when another worker already closed the row', async () => {
@@ -33,8 +39,10 @@ describe('AutomationOutboxService', () => {
       },
     } as never);
     await expect(service.fail('outbox-1', 'worker-a', 'redis_down')).resolves.toBe('DEAD');
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: 'FAILED', lockedBy: null, lockedUntil: null }),
-    }));
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'FAILED', lockedBy: null, lockedUntil: null }),
+      })
+    );
   });
 });

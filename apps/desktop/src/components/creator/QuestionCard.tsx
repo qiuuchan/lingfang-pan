@@ -29,12 +29,22 @@ export interface QuestionCardProps {
 }
 
 export function QuestionCard(props: QuestionCardProps) {
-  const { question, options, allowFreeText, multiSelect, answer, answered, draftText, selected, onAnswer, onDraftChange, onToggleOption } = props;
+  const {
+    question,
+    options,
+    allowFreeText,
+    multiSelect,
+    answer,
+    answered,
+    draftText,
+    selected,
+    onAnswer,
+    onDraftChange,
+    onToggleOption,
+  } = props;
   const submitMulti = () => {
     if (!selected.length) return;
-    const labels = selected
-      .map((v) => options?.find((o) => o.value === v)?.label ?? v)
-      .join('、');
+    const labels = selected.map((v) => options?.find((o) => o.value === v)?.label ?? v).join('、');
     onAnswer(labels);
   };
   return (
@@ -47,11 +57,11 @@ export function QuestionCard(props: QuestionCardProps) {
       </div>
       {answered ? (
         <div className="mt-3 flex items-start gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2">
-          <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-success" />
           <span className="text-xs text-muted-foreground">已回答：{answer}</span>
         </div>
       ) : (
-        <div className="mt-3 space-y-2.5">
+        <div className="mt-3 flex flex-col gap-2.5">
           {options && options.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {options.map((o) => {
@@ -69,7 +79,9 @@ export function QuestionCard(props: QuestionCardProps) {
                     }}
                     className={cn(
                       'rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
-                      on ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
+                      on
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
                     )}
                   >
                     {o.label}
@@ -79,7 +91,12 @@ export function QuestionCard(props: QuestionCardProps) {
             </div>
           )}
           {multiSelect && options && options.length > 0 && (
-            <Button size="sm" className="h-8 gap-1.5 rounded-md px-3.5 text-xs" disabled={!selected.length} onClick={submitMulti}>
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 self-start rounded-md px-3.5 text-xs"
+              disabled={!selected.length}
+              onClick={submitMulti}
+            >
               <CheckCircle2Icon className="size-3.5" />
               确认选择
             </Button>
@@ -91,11 +108,21 @@ export function QuestionCard(props: QuestionCardProps) {
                 placeholder="或在此输入你的回答…"
                 value={draftText}
                 onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onAnswer(draftText); } }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    onAnswer(draftText);
+                  }
+                }}
                 rows={1}
                 className="min-h-9 max-h-24 resize-none rounded-md border-input bg-background font-mono text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
               />
-              <Button size="sm" className="h-9 gap-1.5 rounded-md px-3.5 text-xs" disabled={!draftText.trim()} onClick={() => onAnswer(draftText)}>
+              <Button
+                size="sm"
+                className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
+                disabled={!draftText.trim()}
+                onClick={() => onAnswer(draftText)}
+              >
                 <SendIcon className="size-3.5" />
                 提交
               </Button>

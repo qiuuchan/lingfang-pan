@@ -71,17 +71,21 @@ function makeZip(entries) {
 
 function buildArtifact() {
   const meta = Buffer.from(JSON.stringify({ format: 'lingfang-plugin', formatVersion: 4 }));
-  const manifest = Buffer.from(JSON.stringify({
-    id: PLUGIN_ID,
-    name: PLUGIN_NAME,
-    version: '1.0.0',
-    description: '插件价值链冒烟验证用的示例插件',
-    runtime_type: 'client',
-    entry: 'ui/index.html',
-    visibility: 'tenant',
-    capabilities: [],
-  }));
-  const html = Buffer.from('<!doctype html><html><body><h1>Demo Calc</h1><p>lingfang plugin smoke</p></body></html>');
+  const manifest = Buffer.from(
+    JSON.stringify({
+      id: PLUGIN_ID,
+      name: PLUGIN_NAME,
+      version: '1.0.0',
+      description: '插件价值链冒烟验证用的示例插件',
+      runtime_type: 'client',
+      entry: 'ui/index.html',
+      visibility: 'tenant',
+      capabilities: [],
+    })
+  );
+  const html = Buffer.from(
+    '<!doctype html><html><body><h1>Demo Calc</h1><p>lingfang plugin smoke</p></body></html>'
+  );
   return makeZip([
     { name: '_meta.json', content: meta },
     { name: 'manifest.json', content: manifest },
@@ -103,54 +107,86 @@ async function main() {
   console.log(`   demo token 长度 ${team.token.length}, teamId=${team.teamId}`);
 
   console.log('== 2) 流式上传发布 v4 版本 ==');
-  const up = await jreq(await fetch(`${API}/api/plugin-registry/releases`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/vnd.lingfang.plugin+zip',
-      'content-length': String(zip.length),
-      'x-plugin-source-kind': 'API',
-      ...auth(team.token),
-    },
-    body: zip,
-  }));
-  if (up.status < 200 || up.status >= 300) throw new Error(`upload failed ${up.status}: ${JSON.stringify(up.json || up.text).slice(0, 300)}`);
+  const up = await jreq(
+    await fetch(`${API}/api/plugin-registry/releases`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/vnd.lingfang.plugin+zip',
+        'content-length': String(zip.length),
+        'x-plugin-source-kind': 'API',
+        ...auth(team.token),
+      },
+      body: zip,
+    })
+  );
+  if (up.status < 200 || up.status >= 300)
+    throw new Error(
+      `upload failed ${up.status}: ${JSON.stringify(up.json || up.text).slice(0, 300)}`
+    );
   const pkgId = up.json.package?.id ?? up.json.packageId;
   const relId = up.json.release?.id ?? up.json.releaseId;
   console.log(`   OK status=${up.status}, packageId=${pkgId}, releaseId=${relId}`);
 
   console.log('== 3) 提交市场（免费, priceCents=0）==');
-  const sub = await jreq(await fetch(`${API}/api/plugin-releases/${relId}/submit-marketplace`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...auth(team.token) },
-    body: JSON.stringify({ priceCents: 0 }),
-  }));
-  if (sub.status < 200 || sub.status >= 300) throw new Error(`submit failed ${sub.status}: ${JSON.stringify(sub.json || sub.text).slice(0, 300)}`);
-  console.log(`   OK status=${sub.status}, marketReviewStatus=${sub.json?.marketReviewStatus ?? '(set)'}`);
+  const sub = await jreq(
+    await fetch(`${API}/api/plugin-releases/${relId}/submit-marketplace`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...auth(team.token) },
+      body: JSON.stringify({ priceCents: 0 }),
+    })
+  );
+  if (sub.status < 200 || sub.status >= 300)
+    throw new Error(
+      `submit failed ${sub.status}: ${JSON.stringify(sub.json || sub.text).slice(0, 300)}`
+    );
+  console.log(
+    `   OK status=${sub.status}, marketReviewStatus=${sub.json?.marketReviewStatus ?? '(set)'}`
+  );
 
   console.log('== 4) 平台管理员审核 approve ==');
-  const appr = await jreq(await fetch(`${API}/api/admin/plugin-releases/${relId}/approve`, {
-    method: 'POST',
-    headers: auth(plat),
-  }));
-  if (appr.status < 200 || appr.status >= 300) throw new Error(`approve failed ${appr.status}: ${JSON.stringify(appr.json || appr.text).slice(0, 300)}`);
-  console.log(`   OK status=${appr.status}, status=${appr.json?.status}, marketReviewStatus=${appr.json?.marketReviewStatus}`);
+  const appr = await jreq(
+    await fetch(`${API}/api/admin/plugin-releases/${relId}/approve`, {
+      method: 'POST',
+      headers: auth(plat),
+    })
+  );
+  if (appr.status < 200 || appr.status >= 300)
+    throw new Error(
+      `approve failed ${appr.status}: ${JSON.stringify(appr.json || appr.text).slice(0, 300)}`
+    );
+  console.log(
+    `   OK status=${appr.status}, status=${appr.json?.status}, marketReviewStatus=${appr.json?.marketReviewStatus}`
+  );
 
   console.log('== 5) 验证上架（package 详情 + 市场可见）==');
-  const detail = await jreq(await fetch(`${API}/api/plugin-packages/${pkgId}`, { headers: auth(team.token) }));
+  const detail = await jreq(
+    await fetch(`${API}/api/plugin-packages/${pkgId}`, { headers: auth(team.token) })
+  );
   const listingStatus = detail.json?.listing?.status ?? detail.json?.marketplaceStatus;
   console.log(`   packageDetail status=${detail.status}, listingStatus=${listingStatus}`);
-  const rel = await jreq(await fetch(`${API}/api/plugin-releases/${relId}`, { headers: auth(team.token) }));
-  console.log(`   releaseDetail status=${rel.json?.status}, marketReviewStatus=${rel.json?.marketReviewStatus}`);
-  const mkt = await jreq(await fetch(`${API}/api/plugin-registry/marketplace`, { headers: auth(team.token) }));
+  const rel = await jreq(
+    await fetch(`${API}/api/plugin-releases/${relId}`, { headers: auth(team.token) })
+  );
+  console.log(
+    `   releaseDetail status=${rel.json?.status}, marketReviewStatus=${rel.json?.marketReviewStatus}`
+  );
+  const mkt = await jreq(
+    await fetch(`${API}/api/plugin-registry/marketplace`, { headers: auth(team.token) })
+  );
   const items = mkt.json?.items ?? (Array.isArray(mkt.json) ? mkt.json : []);
   const found = items.find((p) => p.packageId === pkgId);
-  console.log(`   市场目录 status=${mkt.status}, 目录条目数=${items.length}, 是否含本插件=${!!found}`);
+  console.log(
+    `   市场目录 status=${mkt.status}, 目录条目数=${items.length}, 是否含本插件=${!!found}`
+  );
 
   console.log('\n== 结果 ==');
   const listingActive = listingStatus === 'ACTIVE';
   if (listingActive) {
     console.log('PASS ✅ 插件价值链完整跑通：发布 v4 → 提交市场 → 平台审核 → 上架(listing ACTIVE)');
-    if (!found) console.log('   (注：本插件未出现在「当前团队」市场目录中，可能因可见性/归属过滤，不影响上架结论)');
+    if (!found)
+      console.log(
+        '   (注：本插件未出现在「当前团队」市场目录中，可能因可见性/归属过滤，不影响上架结论)'
+      );
     process.exit(0);
   } else {
     console.log('WARN ⚠️ 链路执行完毕但上架态未确认，请检查上面输出');
@@ -158,4 +194,7 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error('FAIL ❌', e.message); process.exit(1); });
+main().catch((e) => {
+  console.error('FAIL ❌', e.message);
+  process.exit(1);
+});

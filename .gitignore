@@ -24,6 +24,10 @@ release/
 # 超过 Gitee 100MB 单文件限制的本地生成文件。
 # Chromium chrome.dll 由仓库内 64 MiB 分片自动还原，完整文件不重复入仓。
 apps/desktop/runtimes/chromium/ms-playwright/chromium-1228/chrome-win64/chrome.dll
+# ffmpeg / ffprobe / chrome-headless-shell 由仓库内分片自动还原，完整文件不重复入仓。
+apps/desktop/runtimes/ffmpeg/ffmpeg.exe
+apps/desktop/runtimes/ffmpeg/ffprobe.exe
+apps/desktop/runtimes/chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe
 # 下列文件是本地构建/分发产物，需单独传输：
 #   - opencode.exe：本地代码助手二进制
 #   - 大型第三方插件包：单独分发，不纳入版本控制
@@ -101,12 +105,17 @@ apps/desktop/playwright/.cache/
 .kimi-code/ 
 pnpm-lock.yaml
 
+# 工具/测试运行态缓存（不入仓）
+.playwright-cli/
+.trellis/tasks/
+apps/web/test-results/
+
 # R4 换装逻辑来源（独立工具脚本，仅作复刻参考，不入仓）
 ai换装版本批量版.py
 .workbuddy/
 .codebuddy/settings.local.json
 plugins/ai-video-mixer
-plugins/
+/plugins/
 # 插件制品（.lfplugin）是构建产物，经管理后台「版本发布」分发，不入 git
 *.lfplugin
 .pi-subagents/

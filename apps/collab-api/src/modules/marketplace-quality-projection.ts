@@ -35,7 +35,10 @@ export function marketplaceQualityGateDigest(facts: MarketplaceQualityGateFacts)
   return createHash('sha256').update(canonical).digest('hex');
 }
 
-export function isNewerQualitySnapshot(candidate: QualitySnapshotOrder, current: QualitySnapshotOrder | null): boolean {
+export function isNewerQualitySnapshot(
+  candidate: QualitySnapshotOrder,
+  current: QualitySnapshotOrder | null
+): boolean {
   if (!current) return true;
   const time = candidate.factWatermark.getTime() - current.factWatermark.getTime();
   if (time !== 0) return time > 0;
@@ -54,11 +57,13 @@ export function canProjectQualitySnapshot(input: {
   candidate: QualitySnapshotOrder;
   current: QualitySnapshotOrder | null;
 }): boolean {
-  return input.currentReleaseId === input.expectedReleaseId
-    && input.currentPointerRevision === input.expectedPointerRevision
-    && input.currentEligibilityRevision === input.expectedEligibilityRevision
-    && input.currentGateDigest === input.expectedGateDigest
-    && isNewerQualitySnapshot(input.candidate, input.current);
+  return (
+    input.currentReleaseId === input.expectedReleaseId &&
+    input.currentPointerRevision === input.expectedPointerRevision &&
+    input.currentEligibilityRevision === input.expectedEligibilityRevision &&
+    input.currentGateDigest === input.expectedGateDigest &&
+    isNewerQualitySnapshot(input.candidate, input.current)
+  );
 }
 
 export async function projectMarketplaceQualityGateTx(
@@ -66,7 +71,7 @@ export async function projectMarketplaceQualityGateTx(
   packageId: string,
   reason: string,
   now = new Date(),
-  options: { securityBlocked?: boolean } = {},
+  options: { securityBlocked?: boolean } = {}
 ) {
   const db = tx as Prisma.TransactionClient & {
     marketplaceListingReleaseActivation?: Prisma.TransactionClient['marketplaceListingReleaseActivation'];
@@ -74,7 +79,8 @@ export async function projectMarketplaceQualityGateTx(
   };
   // Partial unit-test transaction doubles created before the quality rollout
   // intentionally omit the new append-only history repositories.
-  if (!db.marketplaceListingReleaseActivation || !db.marketplaceListingEligibilityEpoch) return null;
+  if (!db.marketplaceListingReleaseActivation || !db.marketplaceListingEligibilityEpoch)
+    return null;
   const listing = await tx.marketplaceListing.findUnique({
     where: { packageId },
     include: { package: true, currentRelease: true },
@@ -84,16 +90,19 @@ export async function projectMarketplaceQualityGateTx(
     where: { listingId: listing.id },
     orderBy: { pointerRevision: 'desc' },
   });
-  const pointerChanged = Boolean(listing.currentReleaseId && latestActivation?.releaseId !== listing.currentReleaseId);
-  const securityBlocked = options.securityBlocked ?? await currentSecurityBlocked(tx, packageId);
-  const hardGateEligible = listing.status === 'ACTIVE'
-    && listing.package.governanceStatus === 'ACTIVE'
-    && listing.currentReleaseId === listing.currentRelease?.id
-    && listing.currentRelease?.status === 'PUBLISHED'
-    && listing.currentRelease?.marketReviewStatus === 'APPROVED'
-    && listing.currentRelease?.aiPolicyVersion === PLUGIN_AI_POLICY_VERSION
-    && listing.currentRelease?.aiPolicyStatus === 'PASSED'
-    && !securityBlocked;
+  const pointerChanged = Boolean(
+    listing.currentReleaseId && latestActivation?.releaseId !== listing.currentReleaseId
+  );
+  const securityBlocked = options.securityBlocked ?? (await currentSecurityBlocked(tx, packageId));
+  const hardGateEligible =
+    listing.status === 'ACTIVE' &&
+    listing.package.governanceStatus === 'ACTIVE' &&
+    listing.currentReleaseId === listing.currentRelease?.id &&
+    listing.currentRelease?.status === 'PUBLISHED' &&
+    listing.currentRelease?.marketReviewStatus === 'APPROVED' &&
+    listing.currentRelease?.aiPolicyVersion === PLUGIN_AI_POLICY_VERSION &&
+    listing.currentRelease?.aiPolicyStatus === 'PASSED' &&
+    !securityBlocked;
   const currentlyEligible = Boolean(listing.listingEligibleSince && listing.releaseEligibleSince);
 
   let pointerRevision = listing.pointerRevision;
@@ -167,46 +176,58 @@ export async function projectMarketplaceQualityGateTx(
       releaseEligibleSince,
       eligibilityRevision,
       eligibilityGateDigest: digest,
-      ...(resetProjection ? { qualityTier: 'LISTED' as const, qualitySnapshotId: null, qualityQualifiedAt: null } : {}),
+      ...(resetProjection
+        ? { qualityTier: 'LISTED' as const, qualitySnapshotId: null, qualityQualifiedAt: null }
+        : {}),
     },
   });
   if (changed.count !== 1) throw conflict('市场质量门禁状态发生并发冲突，请重试');
 
   if (pointerChanged && listing.currentReleaseId && activatedAt) {
-    await db.marketplaceListingReleaseActivation.create({ data: {
-      listingId: listing.id,
-      releaseId: listing.currentReleaseId,
-      activatedAt,
-      source: reason,
-      pointerRevision,
-    } });
+    await db.marketplaceListingReleaseActivation.create({
+      data: {
+        listingId: listing.id,
+        releaseId: listing.currentReleaseId,
+        activatedAt,
+        source: reason,
+        pointerRevision,
+      },
+    });
   }
-  if (closeListingEpoch) await db.marketplaceListingEligibilityEpoch.updateMany({
-    where: { listingId: listing.id, kind: 'LISTING', endedAt: null },
-    data: { endedAt: now, endReason: reason },
-  });
-  if (closeReleaseEpoch) await db.marketplaceListingEligibilityEpoch.updateMany({
-    where: { listingId: listing.id, kind: 'RELEASE', endedAt: null },
-    data: { endedAt: now, endReason: reason },
-  });
-  if (openListingEpoch && listingEligibleSince) await db.marketplaceListingEligibilityEpoch.create({ data: {
-    listingId: listing.id,
-    releaseId: listing.currentReleaseId,
-    kind: 'LISTING',
-    generation: eligibilityRevision,
-    startedAt: listingEligibleSince,
-    startReason: reason,
-    gateSnapshotDigest: digest,
-  } });
-  if (openReleaseEpoch && releaseEligibleSince) await db.marketplaceListingEligibilityEpoch.create({ data: {
-    listingId: listing.id,
-    releaseId: listing.currentReleaseId,
-    kind: 'RELEASE',
-    generation: eligibilityRevision,
-    startedAt: releaseEligibleSince,
-    startReason: reason,
-    gateSnapshotDigest: digest,
-  } });
+  if (closeListingEpoch)
+    await db.marketplaceListingEligibilityEpoch.updateMany({
+      where: { listingId: listing.id, kind: 'LISTING', endedAt: null },
+      data: { endedAt: now, endReason: reason },
+    });
+  if (closeReleaseEpoch)
+    await db.marketplaceListingEligibilityEpoch.updateMany({
+      where: { listingId: listing.id, kind: 'RELEASE', endedAt: null },
+      data: { endedAt: now, endReason: reason },
+    });
+  if (openListingEpoch && listingEligibleSince)
+    await db.marketplaceListingEligibilityEpoch.create({
+      data: {
+        listingId: listing.id,
+        releaseId: listing.currentReleaseId,
+        kind: 'LISTING',
+        generation: eligibilityRevision,
+        startedAt: listingEligibleSince,
+        startReason: reason,
+        gateSnapshotDigest: digest,
+      },
+    });
+  if (openReleaseEpoch && releaseEligibleSince)
+    await db.marketplaceListingEligibilityEpoch.create({
+      data: {
+        listingId: listing.id,
+        releaseId: listing.currentReleaseId,
+        kind: 'RELEASE',
+        generation: eligibilityRevision,
+        startedAt: releaseEligibleSince,
+        startReason: reason,
+        gateSnapshotDigest: digest,
+      },
+    });
   return {
     hardGateEligible,
     pointerChanged,
@@ -220,8 +241,15 @@ export async function projectMarketplaceQualityGateTx(
   };
 }
 
-async function currentSecurityBlocked(tx: Prisma.TransactionClient, packageId: string): Promise<boolean> {
-  const repository = (tx as Prisma.TransactionClient & { marketplaceMetricEvent?: Prisma.TransactionClient['marketplaceMetricEvent'] }).marketplaceMetricEvent;
+async function currentSecurityBlocked(
+  tx: Prisma.TransactionClient,
+  packageId: string
+): Promise<boolean> {
+  const repository = (
+    tx as Prisma.TransactionClient & {
+      marketplaceMetricEvent?: Prisma.TransactionClient['marketplaceMetricEvent'];
+    }
+  ).marketplaceMetricEvent;
   if (!repository?.findMany) return false;
   const events = await repository.findMany({
     where: { packageId, kind: { in: ['SECURITY_BLOCKED', 'SECURITY_CLEARED'] } },

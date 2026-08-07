@@ -22,7 +22,8 @@ function isSafeUrl(url: string, allowed: string[]): boolean {
 export function renderInline(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
   // 顺序：图片 → 链接 → bold → 删除线 → code。
-  const regex = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|~~([^~]+)~~|`([^`]+)`/g;
+  const regex =
+    /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|~~([^~]+)~~|`([^`]+)`/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
@@ -40,7 +41,7 @@ export function renderInline(text: string): ReactNode[] {
             className="my-2 max-w-full rounded-md border"
             style={{ borderColor: 'var(--lf-border)' }}
             loading="lazy"
-          />,
+          />
         );
       } else if (match[1]) {
         parts.push(match[1]);
@@ -59,7 +60,7 @@ export function renderInline(text: string): ReactNode[] {
             style={{ color: 'var(--lf-accent)' }}
           >
             {match[3]}
-          </a>,
+          </a>
         );
       } else {
         parts.push(match[3]);
@@ -69,14 +70,14 @@ export function renderInline(text: string): ReactNode[] {
       parts.push(
         <strong key={key++} className="font-semibold" style={{ color: 'var(--lf-fg)' }}>
           {match[0].slice(2, -2)}
-        </strong>,
+        </strong>
       );
     } else if (match[0].startsWith('~~')) {
       // 删除线
       parts.push(
         <del key={key++} className="opacity-60">
           {match[0].slice(2, -2)}
-        </del>,
+        </del>
       );
     } else {
       // 行内 code
@@ -87,7 +88,7 @@ export function renderInline(text: string): ReactNode[] {
           style={{ backgroundColor: 'var(--lf-bg-elevated)', color: 'var(--lf-accent)' }}
         >
           {match[0].slice(1, -1)}
-        </code>,
+        </code>
       );
     }
     lastIndex = regex.lastIndex;
@@ -152,7 +153,7 @@ export function renderMarkdown(md: string): ReactNode[] {
           }}
         >
           {codeLines.join('\n')}
-        </pre>,
+        </pre>
       );
       continue;
     }
@@ -169,11 +170,11 @@ export function renderMarkdown(md: string): ReactNode[] {
             : level === 3
               ? 'text-base font-semibold mt-3 mb-1'
               : 'text-sm font-semibold mt-2 mb-1';
-      const HeadingTag = (`h${Math.min(level + 2, 6)}` as 'h3' | 'h4' | 'h5' | 'h6');
+      const HeadingTag = `h${Math.min(level + 2, 6)}` as 'h3' | 'h4' | 'h5' | 'h6';
       nodes.push(
         <HeadingTag key={key++} className={sizeCls} style={{ color: 'var(--lf-fg)' }}>
           {renderInline(heading[2])}
-        </HeadingTag>,
+        </HeadingTag>
       );
       i++;
       continue;
@@ -181,7 +182,9 @@ export function renderMarkdown(md: string): ReactNode[] {
 
     // 分隔线
     if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
-      nodes.push(<hr key={key++} className="my-4 border-t" style={{ borderColor: 'var(--lf-border)' }} />);
+      nodes.push(
+        <hr key={key++} className="my-4 border-t" style={{ borderColor: 'var(--lf-border)' }} />
+      );
       i++;
       continue;
     }
@@ -227,7 +230,7 @@ export function renderMarkdown(md: string): ReactNode[] {
               ))}
             </tbody>
           </table>
-        </div>,
+        </div>
       );
       continue;
     }
@@ -257,13 +260,16 @@ export function renderMarkdown(md: string): ReactNode[] {
               className="flex gap-2.5"
               style={{ paddingLeft: `${item.indent * 0.5}rem` }}
             >
-              <span className="lf-mono shrink-0 font-semibold" style={{ color: 'var(--lf-accent)' }}>
+              <span
+                className="lf-mono shrink-0 font-semibold"
+                style={{ color: 'var(--lf-accent)' }}
+              >
                 {item.num}.
               </span>
               <span>{renderInline(item.content)}</span>
             </li>
           ))}
-        </ol>,
+        </ol>
       );
       continue;
     }
@@ -298,7 +304,7 @@ export function renderMarkdown(md: string): ReactNode[] {
               <span>{renderInline(item.content)}</span>
             </li>
           ))}
-        </ul>,
+        </ul>
       );
       continue;
     }
@@ -321,16 +327,20 @@ export function renderMarkdown(md: string): ReactNode[] {
               {renderInline(q)}
             </p>
           ))}
-        </blockquote>,
+        </blockquote>
       );
       continue;
     }
 
     // 普通段落
     nodes.push(
-      <p key={key++} className="my-1.5 text-sm leading-relaxed" style={{ color: 'var(--lf-fg-muted)' }}>
+      <p
+        key={key++}
+        className="my-1.5 text-sm leading-relaxed"
+        style={{ color: 'var(--lf-fg-muted)' }}
+      >
         {renderInline(trimmed)}
-      </p>,
+      </p>
     );
     i++;
   }

@@ -48,7 +48,7 @@ function defineModule(
   moduleKey: string,
   moduleLabel: string,
   sortOrder: number,
-  ops: Array<{ code: string; label: string; description: string }>,
+  ops: Array<{ code: string; label: string; description: string }>
 ): PermissionModuleDef {
   const operations: PermissionCodeDef[] = ops.map((op) => ({
     code: op.code,
@@ -67,15 +67,31 @@ function defineModule(
 // 管平台全局资源：用户、团队、插件市场审核、申请、LLM 网关、版本发布、平台管理员、审计、设置。
 export const PLATFORM_MODULES: PermissionModuleDef[] = [
   defineModule('PLATFORM', 'platform.dashboard', '仪表盘', 10, [
-    { code: 'platform.dashboard.view', label: '查看仪表盘', description: '查看平台运营仪表盘与统计概览' },
+    {
+      code: 'platform.dashboard.view',
+      label: '查看仪表盘',
+      description: '查看平台运营仪表盘与统计概览',
+    },
   ]),
   defineModule('PLATFORM', 'platform.user', '用户管理', 20, [
     { code: 'platform.user.list', label: '查看用户', description: '查看平台用户列表与详情' },
     { code: 'platform.user.create', label: '创建用户', description: '由平台管理员创建新用户账号' },
-    { code: 'platform.user.update_profile', label: '编辑用户资料', description: '编辑用户资料（不含密码）' },
-    { code: 'platform.user.reset_password', label: '重置用户密码', description: '管理员强制重置用户密码' },
+    {
+      code: 'platform.user.update_profile',
+      label: '编辑用户资料',
+      description: '编辑用户资料（不含密码）',
+    },
+    {
+      code: 'platform.user.reset_password',
+      label: '重置用户密码',
+      description: '管理员强制重置用户密码',
+    },
     { code: 'platform.user.disable', label: '禁用用户', description: '禁用/删除用户账号' },
-    { code: 'platform.user.role.assign', label: '分配平台角色', description: '为用户分配/撤销平台级角色' },
+    {
+      code: 'platform.user.role.assign',
+      label: '分配平台角色',
+      description: '为用户分配/撤销平台级角色',
+    },
   ]),
   defineModule('PLATFORM', 'platform.team', '团队管理', 30, [
     { code: 'platform.team.list', label: '查看团队', description: '查看平台所有团队列表与详情' },
@@ -83,49 +99,125 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
     { code: 'platform.team.update', label: '编辑团队', description: '编辑团队资料' },
     { code: 'platform.team.suspend', label: '停用团队', description: '挂起/删除团队' },
     { code: 'platform.team.adjust_balance', label: '调整团队余额', description: '为团队加款/扣款' },
-    { code: 'platform.team.set_admin', label: '指定团队管理员', description: '为团队任命/撤销团队管理员' },
-    { code: 'platform.team.member.role', label: '管理团队成员角色', description: '平台管理员调整任意团队成员角色' },
-    { code: 'platform.team.role.manage', label: '管理团队角色', description: '平台管理员管理任意团队的自定义角色与权限' },
+    {
+      code: 'platform.team.set_admin',
+      label: '指定团队管理员',
+      description: '为团队任命/撤销团队管理员',
+    },
+    {
+      code: 'platform.team.member.role',
+      label: '管理团队成员角色',
+      description: '平台管理员调整任意团队成员角色',
+    },
+    {
+      code: 'platform.team.role.manage',
+      label: '管理团队角色',
+      description: '平台管理员管理任意团队的自定义角色与权限',
+    },
   ]),
   defineModule('PLATFORM', 'platform.plugin', '插件市场', 40, [
-    { code: 'platform.plugin.list_all', label: '查看全部插件', description: '查看平台所有插件（含各团队私有）' },
-    { code: 'platform.plugin.review', label: '审核市场插件', description: '审核市场上架申请、批准/拒绝/下架' },
-    { code: 'platform.plugin.edit', label: '编辑插件', description: '平台级编辑任意插件元数据/版本/定价/可见性' },
-    { code: 'platform.plugin.delete', label: '删除插件', description: '平台级物理删除任意插件（含已上架）' },
+    {
+      code: 'platform.plugin.list_all',
+      label: '查看全部插件',
+      description: '查看平台所有插件（含各团队私有）',
+    },
+    {
+      code: 'platform.plugin.review',
+      label: '审核市场插件',
+      description: '审核市场上架申请、批准/拒绝/下架',
+    },
+    {
+      code: 'platform.plugin.edit',
+      label: '编辑插件',
+      description: '平台级编辑任意插件元数据/版本/定价/可见性',
+    },
+    {
+      code: 'platform.plugin.delete',
+      label: '删除插件',
+      description: '平台级物理删除任意插件（含已上架）',
+    },
   ]),
   defineModule('PLATFORM', 'platform.application', '申请审批', 50, [
-    { code: 'platform.application.review', label: '审批团队管理员申请', description: '审批用户提交的开团申请' },
+    {
+      code: 'platform.application.review',
+      label: '审批团队管理员申请',
+      description: '审批用户提交的开团申请',
+    },
   ]),
   defineModule('PLATFORM', 'platform.llm', '模型服务', 60, [
-    { code: 'platform.llm.provider.manage', label: '管理模型服务', description: '管理 LLM 网关目录、激活 provider（旧 BYOK，过渡期保留）' },
+    {
+      code: 'platform.llm.provider.manage',
+      label: '管理模型服务',
+      description: '管理 LLM 网关目录、激活 provider（旧 BYOK，过渡期保留）',
+    },
   ]),
   // 计费与模型中转（Relay + 灵石）：渠道管理 / 模型定价 / 版本配置 / 灵石账户 / 调用日志。
   // 这些是平台级运营资源，仅平台管理员可操作（团队级灵石查看走 team.credits.view，见下）。
   defineModule('PLATFORM', 'platform.billing', '计费与中转', 62, [
-    { code: 'platform.billing.channel.manage', label: '管理渠道', description: '管理上游渠道、范围绑定、优先级/权重、健康测试' },
-    { code: 'platform.billing.pricing.manage', label: '管理模型定价', description: '配置每个模型/能力的灵石单价与计费单位' },
-    { code: 'platform.billing.tier.manage', label: '管理模型版本', description: '配置快速版/高级版的底层模型与参数' },
-    { code: 'platform.billing.credit.adjust', label: '调整团队灵石', description: '为团队灵石账户加款/扣款' },
-    { code: 'platform.billing.call_log.view', label: '查看调用日志', description: '查看全平台 AI 调用日志（多维度查询）' },
+    {
+      code: 'platform.billing.channel.manage',
+      label: '管理渠道',
+      description: '管理上游渠道、范围绑定、优先级/权重、健康测试',
+    },
+    {
+      code: 'platform.billing.pricing.manage',
+      label: '管理模型定价',
+      description: '配置每个模型/能力的灵石单价与计费单位',
+    },
+    {
+      code: 'platform.billing.tier.manage',
+      label: '管理模型版本',
+      description: '配置快速版/高级版的底层模型与参数',
+    },
+    {
+      code: 'platform.billing.credit.adjust',
+      label: '调整团队灵石',
+      description: '为团队灵石账户加款/扣款',
+    },
+    {
+      code: 'platform.billing.call_log.view',
+      label: '查看调用日志',
+      description: '查看全平台 AI 调用日志（多维度查询）',
+    },
   ]),
   defineModule('PLATFORM', 'platform.release', '版本发布', 70, [
-    { code: 'platform.release.manage', label: '管理版本发布', description: '发布/归档应用版本、上传产物' },
+    {
+      code: 'platform.release.manage',
+      label: '管理版本发布',
+      description: '发布/归档应用版本、上传产物',
+    },
   ]),
   defineModule('PLATFORM', 'platform.ticket', '工单反馈', 75, [
-    { code: 'platform.ticket.view', label: '查看工单', description: '查看用户提交的帮助与反馈工单及附件' },
-    { code: 'platform.ticket.manage', label: '处理工单', description: '回复工单、变更状态与优先级' },
+    {
+      code: 'platform.ticket.view',
+      label: '查看工单',
+      description: '查看用户提交的帮助与反馈工单及附件',
+    },
+    {
+      code: 'platform.ticket.manage',
+      label: '处理工单',
+      description: '回复工单、变更状态与优先级',
+    },
   ]),
   defineModule('PLATFORM', 'platform.admin', '平台管理员', 80, [
     { code: 'platform.admin.manage', label: '管理平台管理员', description: '任命/撤销平台管理员' },
   ]),
   defineModule('PLATFORM', 'platform.role', '平台角色', 90, [
-    { code: 'platform.role.manage', label: '管理平台角色', description: '创建/编辑平台级自定义角色与权限分配' },
+    {
+      code: 'platform.role.manage',
+      label: '管理平台角色',
+      description: '创建/编辑平台级自定义角色与权限分配',
+    },
   ]),
   defineModule('PLATFORM', 'platform.audit', '审计日志', 100, [
     { code: 'platform.audit.view', label: '查看审计日志', description: '查看平台审计日志' },
   ]),
   defineModule('PLATFORM', 'platform.setting', '平台设置', 110, [
-    { code: 'platform.setting.manage', label: '管理平台设置', description: '编辑平台设置（SMTP/极验/Gitee/平台信息）' },
+    {
+      code: 'platform.setting.manage',
+      label: '管理平台设置',
+      description: '编辑平台设置（SMTP/极验/Gitee/平台信息）',
+    },
   ]),
 ];
 
@@ -133,13 +225,21 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
 // 管团队内资源：成员、角色、插件（含授权）、余额、邀请码、资料。
 export const TEAM_MODULES: PermissionModuleDef[] = [
   defineModule('TEAM', 'team.dashboard', '团队概览', 10, [
-    { code: 'team.dashboard.view', label: '查看团队概览', description: '查看本团队信息、余额、成员数概览' },
+    {
+      code: 'team.dashboard.view',
+      label: '查看团队概览',
+      description: '查看本团队信息、余额、成员数概览',
+    },
   ]),
   defineModule('TEAM', 'team.member', '成员管理', 20, [
     { code: 'team.member.list', label: '查看团队成员', description: '查看本团队成员列表' },
     { code: 'team.member.invite', label: '邀请成员', description: '生成/管理团队邀请码' },
     { code: 'team.member.remove', label: '移除成员', description: '将成员移出团队' },
-    { code: 'team.member.role.assign', label: '分配成员角色', description: '为本团队成员分配/更换团队角色' },
+    {
+      code: 'team.member.role.assign',
+      label: '分配成员角色',
+      description: '为本团队成员分配/更换团队角色',
+    },
   ]),
   defineModule('TEAM', 'team.role', '团队角色', 30, [
     { code: 'team.role.create', label: '创建团队角色', description: '为本团队创建自定义角色' },
@@ -149,27 +249,63 @@ export const TEAM_MODULES: PermissionModuleDef[] = [
   defineModule('TEAM', 'team.plugin', '插件管理', 40, [
     { code: 'team.plugin.list', label: '查看团队插件', description: '查看本团队可用插件列表' },
     { code: 'team.plugin.upload', label: '上传插件', description: '为本团队上传新插件' },
-    { code: 'team.plugin.edit_metadata', label: '编辑插件元数据', description: '编辑插件名称/描述/图标，不重置审核态、不改源码' },
-    { code: 'team.plugin.edit_draft', label: '编辑插件草稿', description: '重新上传/编辑已上传插件的草稿包' },
-    { code: 'team.plugin.edit_price', label: '设置插件定价', description: '设置插件定价，不改源码、不触发审核流程' },
+    {
+      code: 'team.plugin.edit_metadata',
+      label: '编辑插件元数据',
+      description: '编辑插件名称/描述/图标，不重置审核态、不改源码',
+    },
+    {
+      code: 'team.plugin.edit_draft',
+      label: '编辑插件草稿',
+      description: '重新上传/编辑已上传插件的草稿包',
+    },
+    {
+      code: 'team.plugin.edit_price',
+      label: '设置插件定价',
+      description: '设置插件定价，不改源码、不触发审核流程',
+    },
     { code: 'team.plugin.delete', label: '删除插件', description: '删除本团队插件' },
     { code: 'team.plugin.install', label: '安装市场插件', description: '将市场插件安装到本团队' },
-    { code: 'team.plugin.enable', label: '启用/禁用插件', description: '启用/禁用本团队已安装插件' },
-    { code: 'team.plugin.submit_marketplace', label: '提交市场上架', description: '将本团队插件提交到市场审核' },
+    {
+      code: 'team.plugin.enable',
+      label: '启用/禁用插件',
+      description: '启用/禁用本团队已安装插件',
+    },
+    {
+      code: 'team.plugin.submit_marketplace',
+      label: '提交市场上架',
+      description: '将本团队插件提交到市场审核',
+    },
   ]),
   defineModule('TEAM', 'team.plugin.grant', '插件授权', 50, [
-    { code: 'team.plugin.grant.manage', label: '管理插件授权', description: '为本团队插件按用户/角色设置 allow/deny' },
+    {
+      code: 'team.plugin.grant.manage',
+      label: '管理插件授权',
+      description: '为本团队插件按用户/角色设置 allow/deny',
+    },
   ]),
   defineModule('TEAM', 'team.balance', '团队余额', 60, [
-    { code: 'team.balance.view', label: '查看团队余额', description: '查看本团队余额与流水（人民币·市场）' },
+    {
+      code: 'team.balance.view',
+      label: '查看团队余额',
+      description: '查看本团队余额与流水（人民币·市场）',
+    },
     { code: 'team.balance.consume', label: '消耗团队余额', description: '调用消耗团队余额的接口' },
   ]),
   // 计费/中转 · 团队灵石（AI 用量计费货币，独立于人民币余额）。普通成员可查；调整仅平台 Admin。
   defineModule('TEAM', 'team.credits', '团队灵石', 62, [
-    { code: 'team.credits.view', label: '查看团队灵石', description: '查看本团队灵石余额与流水（AI 用量计费）' },
+    {
+      code: 'team.credits.view',
+      label: '查看团队灵石',
+      description: '查看本团队灵石余额与流水（AI 用量计费）',
+    },
   ]),
   defineModule('TEAM', 'team.profile', '团队资料', 70, [
-    { code: 'team.profile.update', label: '编辑团队资料', description: '编辑本团队名称、简介、公开加入开关' },
+    {
+      code: 'team.profile.update',
+      label: '编辑团队资料',
+      description: '编辑本团队名称、简介、公开加入开关',
+    },
   ]),
 ];
 
@@ -182,7 +318,9 @@ export const ALL_MODULES: PermissionModuleDef[] = [...PLATFORM_MODULES, ...TEAM_
 export const ALL_PERMISSIONS: PermissionCodeDef[] = ALL_MODULES.flatMap((m) => m.operations);
 
 /** 平台级权限码（扁平）。 */
-export const PLATFORM_PERMISSIONS: PermissionCodeDef[] = PLATFORM_MODULES.flatMap((m) => m.operations);
+export const PLATFORM_PERMISSIONS: PermissionCodeDef[] = PLATFORM_MODULES.flatMap(
+  (m) => m.operations
+);
 
 /** 团队级权限码（扁平）。 */
 export const TEAM_PERMISSIONS: PermissionCodeDef[] = TEAM_MODULES.flatMap((m) => m.operations);
@@ -235,14 +373,20 @@ export function isTeamPermission(code: string): boolean {
  * 注意：只扩张、不收缩。映射是单向的（旧→新），不定义反向（新→旧合并会有损）。
  */
 export const LEGACY_PERMISSION_EXPANSION: Record<string, string[]> = {
-  'team.plugin.edit': ['team.plugin.edit_metadata', 'team.plugin.edit_draft', 'team.plugin.edit_price'],
+  'team.plugin.edit': [
+    'team.plugin.edit_metadata',
+    'team.plugin.edit_draft',
+    'team.plugin.edit_price',
+  ],
   'platform.user.update': ['platform.user.update_profile', 'platform.user.reset_password'],
   'team.role.manage': ['team.role.create', 'team.role.update', 'team.role.delete'],
   'platform.plugin.manage': ['platform.plugin.edit', 'platform.plugin.delete'],
 };
 
 /** 旧权限码集合（快速判断某码是否已废弃，需扩张）。 */
-export const LEGACY_PERMISSION_CODES: Set<string> = new Set(Object.keys(LEGACY_PERMISSION_EXPANSION));
+export const LEGACY_PERMISSION_CODES: Set<string> = new Set(
+  Object.keys(LEGACY_PERMISSION_EXPANSION)
+);
 
 /** Permissions retired with external relay-key access. They must never survive in custom roles. */
 export const RETIRED_PERMISSION_CODES = new Set([
@@ -251,7 +395,10 @@ export const RETIRED_PERMISSION_CODES = new Set([
   'platform.billing.relay_docs.view',
 ]);
 
-export function stripRetiredPermissions(current: readonly string[]): { permissions: string[]; changed: boolean } {
+export function stripRetiredPermissions(current: readonly string[]): {
+  permissions: string[];
+  changed: boolean;
+} {
   const permissions = current.filter((code) => !RETIRED_PERMISSION_CODES.has(code));
   return { permissions, changed: permissions.length !== current.length };
 }
@@ -265,7 +412,10 @@ export function stripRetiredPermissions(current: readonly string[]): { permissio
  *
  * 抽离为纯函数供单测构造 fixture 直接断言扩张正确性 + 二次跑 no-op，无需 mock Prisma。
  */
-export function expandLegacyPermissions(current: string[]): { permissions: string[]; changed: boolean } {
+export function expandLegacyPermissions(current: string[]): {
+  permissions: string[];
+  changed: boolean;
+} {
   let changed = false;
   const expanded = new Set<string>();
   for (const code of current) {

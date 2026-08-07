@@ -26,7 +26,7 @@ export interface AutomationRedisConnection {
 }
 
 export type AutomationRedisConnectionFactory<T extends AutomationRedisConnection> = (
-  redisUrl: string,
+  redisUrl: string
 ) => T;
 
 const DISABLED_CONFIG: AutomationConfig = Object.freeze({
@@ -71,28 +71,63 @@ export function resolveAutomationConfig(env: NodeJS.ProcessEnv = process.env): A
     runsOutboxDispatcher: processRole === 'dispatcher' || processRole === 'all',
     runsWorker: processRole === 'worker' || processRole === 'all',
     runsScheduler: processRole === 'scheduler' || processRole === 'all',
-    onceMisfireWindowMs: parsePositiveInteger(env.AUTOMATION_ONCE_MISFIRE_WINDOW_MS, 'AUTOMATION_ONCE_MISFIRE_WINDOW_MS', 15 * 60 * 1000),
-    consecutiveFailureNotifyThreshold: parsePositiveInteger(env.AUTOMATION_CONSECUTIVE_FAILURE_NOTIFY_THRESHOLD, 'AUTOMATION_CONSECUTIVE_FAILURE_NOTIFY_THRESHOLD', 3),
-    teamMaxActiveRuns: parsePositiveInteger(env.AUTOMATION_TEAM_MAX_ACTIVE_RUNS, 'AUTOMATION_TEAM_MAX_ACTIVE_RUNS', 10),
-    workflowMaxActiveRuns: parsePositiveInteger(env.AUTOMATION_WORKFLOW_MAX_ACTIVE_RUNS, 'AUTOMATION_WORKFLOW_MAX_ACTIVE_RUNS', 5),
-    teamMaxActiveInvocations: parsePositiveInteger(env.AUTOMATION_TEAM_MAX_ACTIVE_INVOCATIONS, 'AUTOMATION_TEAM_MAX_ACTIVE_INVOCATIONS', 50),
-    actionMaxActiveInvocations: parsePositiveInteger(env.AUTOMATION_ACTION_MAX_ACTIVE_INVOCATIONS, 'AUTOMATION_ACTION_MAX_ACTIVE_INVOCATIONS', 20),
-    teamMaxUsagePerMinute: parsePositiveInteger(env.AUTOMATION_TEAM_MAX_USAGE_PER_MINUTE, 'AUTOMATION_TEAM_MAX_USAGE_PER_MINUTE', 600),
-    actionMaxUsagePerMinute: parsePositiveInteger(env.AUTOMATION_ACTION_MAX_USAGE_PER_MINUTE, 'AUTOMATION_ACTION_MAX_USAGE_PER_MINUTE', 120),
+    onceMisfireWindowMs: parsePositiveInteger(
+      env.AUTOMATION_ONCE_MISFIRE_WINDOW_MS,
+      'AUTOMATION_ONCE_MISFIRE_WINDOW_MS',
+      15 * 60 * 1000
+    ),
+    consecutiveFailureNotifyThreshold: parsePositiveInteger(
+      env.AUTOMATION_CONSECUTIVE_FAILURE_NOTIFY_THRESHOLD,
+      'AUTOMATION_CONSECUTIVE_FAILURE_NOTIFY_THRESHOLD',
+      3
+    ),
+    teamMaxActiveRuns: parsePositiveInteger(
+      env.AUTOMATION_TEAM_MAX_ACTIVE_RUNS,
+      'AUTOMATION_TEAM_MAX_ACTIVE_RUNS',
+      10
+    ),
+    workflowMaxActiveRuns: parsePositiveInteger(
+      env.AUTOMATION_WORKFLOW_MAX_ACTIVE_RUNS,
+      'AUTOMATION_WORKFLOW_MAX_ACTIVE_RUNS',
+      5
+    ),
+    teamMaxActiveInvocations: parsePositiveInteger(
+      env.AUTOMATION_TEAM_MAX_ACTIVE_INVOCATIONS,
+      'AUTOMATION_TEAM_MAX_ACTIVE_INVOCATIONS',
+      50
+    ),
+    actionMaxActiveInvocations: parsePositiveInteger(
+      env.AUTOMATION_ACTION_MAX_ACTIVE_INVOCATIONS,
+      'AUTOMATION_ACTION_MAX_ACTIVE_INVOCATIONS',
+      20
+    ),
+    teamMaxUsagePerMinute: parsePositiveInteger(
+      env.AUTOMATION_TEAM_MAX_USAGE_PER_MINUTE,
+      'AUTOMATION_TEAM_MAX_USAGE_PER_MINUTE',
+      600
+    ),
+    actionMaxUsagePerMinute: parsePositiveInteger(
+      env.AUTOMATION_ACTION_MAX_USAGE_PER_MINUTE,
+      'AUTOMATION_ACTION_MAX_USAGE_PER_MINUTE',
+      120
+    ),
   };
 }
 
 function parsePositiveInteger(raw: string | undefined, name: string, fallback: number): number {
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  if (!Number.isSafeInteger(value) || value <= 0)
+    throw new Error(`${name} must be a positive integer`);
   return value;
 }
 
 function parseAutomationRedisPrefix(raw: string | undefined): string {
   const value = raw?.trim() || 'lf:automation';
   if (value.length > 96 || !/^[A-Za-z0-9:_-]+$/.test(value)) {
-    throw new Error('AUTOMATION_REDIS_PREFIX must contain only letters, numbers, colon, underscore or hyphen and be at most 96 characters');
+    throw new Error(
+      'AUTOMATION_REDIS_PREFIX must contain only letters, numbers, colon, underscore or hyphen and be at most 96 characters'
+    );
   }
   return value;
 }
@@ -103,7 +138,7 @@ function parseAutomationRedisPrefix(raw: string | undefined): string {
  */
 export function createAutomationRedisConnection<T extends AutomationRedisConnection>(
   config: AutomationConfig,
-  factory: AutomationRedisConnectionFactory<T>,
+  factory: AutomationRedisConnectionFactory<T>
 ): T | null {
   if (!config.connectsToRedis || !config.redisUrl) return null;
   return factory(config.redisUrl);
@@ -120,7 +155,13 @@ function parseBooleanSwitch(raw: string | undefined, name: string): boolean {
 function parseProcessRole(raw: string | undefined): AutomationProcessRole {
   if (raw === undefined || raw.trim() === '') return 'api';
   const role = raw.trim().toLowerCase();
-  if (role === 'api' || role === 'dispatcher' || role === 'worker' || role === 'scheduler' || role === 'all') {
+  if (
+    role === 'api' ||
+    role === 'dispatcher' ||
+    role === 'worker' ||
+    role === 'scheduler' ||
+    role === 'all'
+  ) {
     return role;
   }
   throw new Error('AUTOMATION_PROCESS_ROLE must be api, dispatcher, worker, scheduler or all');

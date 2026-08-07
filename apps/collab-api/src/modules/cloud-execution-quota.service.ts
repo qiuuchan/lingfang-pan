@@ -10,7 +10,12 @@ export const CLOUD_QUOTA_REDIS = Symbol('CLOUD_QUOTA_REDIS');
 
 type QuotaRedis = Pick<IORedis, 'eval' | 'quit' | 'disconnect'>;
 type InvocationQuotaTarget = { id: string; teamId: string; releaseId: string; actionId: string };
-type DeploymentQuota = { id: string; maxConcurrency: number; rateLimitPerMinute: number; timeoutMs: number };
+type DeploymentQuota = {
+  id: string;
+  maxConcurrency: number;
+  rateLimitPerMinute: number;
+  timeoutMs: number;
+};
 
 const ACQUIRE_LUA = `
 local lease_key = KEYS[1]
@@ -39,33 +44,84 @@ export class CloudExecutionQuotaService implements OnModuleDestroy {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AUTOMATION_CONFIG) private readonly config: AutomationConfig,
-    @Optional() @Inject(CLOUD_QUOTA_REDIS) redis?: QuotaRedis,
-  ) { this.redis = redis ?? null; }
+    @Optional() @Inject(CLOUD_QUOTA_REDIS) redis?: QuotaRedis
+  ) {
+    this.redis = redis ?? null;
+  }
 
   async assertInvocationQuota(invocation: InvocationQuotaTarget): Promise<void> {
     const minuteStart = new Date(Math.floor(Date.now() / 60_000) * 60_000);
     const [teamActive, actionActive, teamUsage, actionUsage] = await Promise.all([
-      this.prisma.actionInvocation.count({ where: { teamId: invocation.teamId, cloudDeploymentId: { not: null }, status: { in: ['AUTHORIZED', 'RUNNING'] } } }),
-      this.prisma.actionInvocation.count({ where: { teamId: invocation.teamId, releaseId: invocation.releaseId, actionId: invocation.actionId, cloudDeploymentId: { not: null }, status: { in: ['AUTHORIZED', 'RUNNING'] } } }),
-      this.prisma.cloudUsageEvent.count({ where: { teamId: invocation.teamId, occurredAt: { gte: minuteStart } } }),
-      this.prisma.cloudUsageEvent.count({ where: { teamId: invocation.teamId, releaseId: invocation.releaseId, actionId: invocation.actionId, occurredAt: { gte: minuteStart } } }),
+      this.prisma.actionInvocation.count({
+        where: {
+          teamId: invocation.teamId,
+          cloudDeploymentId: { not: null },
+          status: { in: ['AUTHORIZED', 'RUNNING'] },
+        },
+      }),
+      this.prisma.actionInvocation.count({
+        where: {
+          teamId: invocation.teamId,
+          releaseId: invocation.releaseId,
+          actionId: invocation.actionId,
+          cloudDeploymentId: { not: null },
+          status: { in: ['AUTHORIZED', 'RUNNING'] },
+        },
+      }),
+      this.prisma.cloudUsageEvent.count({
+        where: { teamId: invocation.teamId, occurredAt: { gte: minuteStart } },
+      }),
+      this.prisma.cloudUsageEvent.count({
+        where: {
+          teamId: invocation.teamId,
+          releaseId: invocation.releaseId,
+          actionId: invocation.actionId,
+          occurredAt: { gte: minuteStart },
+        },
+      }),
     ]);
-    if (teamActive > this.config.teamMaxActiveInvocations
-      || actionActive > this.config.actionMaxActiveInvocations
-      || teamUsage >= this.config.teamMaxUsagePerMinute
-      || actionUsage >= this.config.actionMaxUsagePerMinute) {
+    if (
+      teamActive > this.config.teamMaxActiveInvocations ||
+      actionActive > this.config.actionMaxActiveInvocations ||
+      teamUsage >= this.config.teamMaxUsagePerMinute ||
+      actionUsage >= this.config.actionMaxUsagePerMinute
+    ) {
       throw new AppError(429, 'cloud_quota_exceeded', 'Cloud 团队或 action 配额已用尽');
     }
   }
 
-  async acquireEndpoint(deployment: DeploymentQuota, invocationId: string): Promise<() => Promise<void>> {
+  async acquireEndpoint(
+    deployment: DeploymentQuota,
+    invocationId: string
+  ): Promise<() => Promise<void>> {
     const redis = this.redisClient();
     const now = Date.now();
     const leaseKey = `${this.config.redisPrefix}:quota:endpoint:${deployment.id}:leases`;
     const rateKey = `${this.config.redisPrefix}:quota:endpoint:${deployment.id}:minute:${Math.floor(now / 60_000)}`;
-    const result = Number(await redis.eval(ACQUIRE_LUA, 2, leaseKey, rateKey, now, now + deployment.timeoutMs + 10_000, deployment.maxConcurrency, deployment.rateLimitPerMinute, invocationId));
-    if (result !== 1) throw new AppError(429, 'cloud_quota_exceeded', result === 0 ? 'Cloud endpoint 并发已满' : 'Cloud endpoint 速率配额已用尽');
-    return async () => { await redis.eval("return redis.call('ZREM', KEYS[1], ARGV[1])", 1, leaseKey, invocationId).catch(() => undefined); };
+    const result = Number(
+      await redis.eval(
+        ACQUIRE_LUA,
+        2,
+        leaseKey,
+        rateKey,
+        now,
+        now + deployment.timeoutMs + 10_000,
+        deployment.maxConcurrency,
+        deployment.rateLimitPerMinute,
+        invocationId
+      )
+    );
+    if (result !== 1)
+      throw new AppError(
+        429,
+        'cloud_quota_exceeded',
+        result === 0 ? 'Cloud endpoint 并发已满' : 'Cloud endpoint 速率配额已用尽'
+      );
+    return async () => {
+      await redis
+        .eval("return redis.call('ZREM', KEYS[1], ARGV[1])", 1, leaseKey, invocationId)
+        .catch(() => undefined);
+    };
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -75,7 +131,8 @@ export class CloudExecutionQuotaService implements OnModuleDestroy {
 
   private redisClient(): QuotaRedis {
     if (this.redis) return this.redis;
-    if (!this.config.enabled || !this.config.redisUrl) throw new AppError(503, 'automation_redis_unavailable', 'Cloud 配额 Redis 不可用');
+    if (!this.config.enabled || !this.config.redisUrl)
+      throw new AppError(503, 'automation_redis_unavailable', 'Cloud 配额 Redis 不可用');
     const client = new IORedis(this.config.redisUrl, {
       lazyConnect: true,
       maxRetriesPerRequest: null,

@@ -40,7 +40,7 @@ async function setupWorkspace(): Promise<{ tmpDir: string }> {
       entry: 'index.js',
       visibility: 'tenant',
       capabilities: [],
-    }),
+    })
   );
   await writeFile(path.join(tmpDir, 'index.js'), "console.log('hi');\n");
   return { tmpDir };
@@ -89,7 +89,7 @@ describe('publishCommand', () => {
     expect(init.method).toBe('POST');
     // 关键断言：Content-Type 必须是 application/octet-stream（非 multipart/form-data）
     expect(init.headers).toMatchObject({
-      'Authorization': 'Bearer test-jwt-token',
+      Authorization: 'Bearer test-jwt-token',
       'Content-Type': 'application/octet-stream',
     });
     // 关键断言：body 必须是 raw Buffer（非 FormData）
@@ -159,11 +159,14 @@ describe('publishCommand', () => {
   it('should exit with 1 on authentication failure (401)', async () => {
     const { tmpDir, lfpluginPath } = await setupLfplugin();
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      status: 401,
-      ok: false,
-      json: vi.fn().mockResolvedValue({ message: '未认证或 token 已过期' }),
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        status: 401,
+        ok: false,
+        json: vi.fn().mockResolvedValue({ message: '未认证或 token 已过期' }),
+      })
+    );
 
     const code = await publishCommand([lfpluginPath], {
       base: 'http://localhost:3000',
@@ -177,11 +180,14 @@ describe('publishCommand', () => {
   it('should exit with 1 on permission denied (403)', async () => {
     const { tmpDir, lfpluginPath } = await setupLfplugin();
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      status: 403,
-      ok: false,
-      json: vi.fn().mockResolvedValue({ message: '没有上传权限' }),
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        status: 403,
+        ok: false,
+        json: vi.fn().mockResolvedValue({ message: '没有上传权限' }),
+      })
+    );
 
     const code = await publishCommand([lfpluginPath], {
       base: 'http://localhost:3000',
@@ -195,9 +201,10 @@ describe('publishCommand', () => {
   it('should exit with 1 on network error (connection refused)', async () => {
     const { tmpDir, lfpluginPath } = await setupLfplugin();
 
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(
-      new Error('fetch failed — connect ECONNREFUSED 127.0.0.1:9999'),
-    ));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('fetch failed — connect ECONNREFUSED 127.0.0.1:9999'))
+    );
 
     const code = await publishCommand([lfpluginPath], {
       base: 'http://localhost:9999',
@@ -254,7 +261,7 @@ describe('publishCommand', () => {
         entry: 'index.js',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
 
     const mockFetch = vi.fn();

@@ -45,14 +45,14 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
 
 // LLM 网关/绑定专属错误码（与 collab-api common.ts AppError.code 对齐，前端按 code 分支处理）。
 export const LlmErrorCode = z.enum([
-  'no_active_provider',       // 平台未配置当前启用 provider（无 isActive=true），应用提示「平台尚未配置模型服务」
-  'provider_not_found',       // Admin 操作目标 provider 不存在
+  'no_active_provider', // 平台未配置当前启用 provider（无 isActive=true），应用提示「平台尚未配置模型服务」
+  'provider_not_found', // Admin 操作目标 provider 不存在
   'provider_active_not_deletable', // 试图删除当前启用的 provider（需先切换到其他 provider）
-  'binding_not_found',        // 当前用户尚未绑定（config-only PUT 无原密可改 / decrypt 无绑定）
-  'llm_key_decrypt_failed',   // 密文被篡改/密钥不匹配，AES-GCM tag 校验失败
-  'llm_key_not_configured',   // 服务端 LLM_KEY_ENCRYPTION_KEY 未配置，无法加解密
-  'install_unsupported',      // 保留兼容旧客户端；桌面端不再自动安装运行时
-  'install_failed',           // 保留兼容旧客户端；运行时应随应用内置打包
+  'binding_not_found', // 当前用户尚未绑定（config-only PUT 无原密可改 / decrypt 无绑定）
+  'llm_key_decrypt_failed', // 密文被篡改/密钥不匹配，AES-GCM tag 校验失败
+  'llm_key_not_configured', // 服务端 LLM_KEY_ENCRYPTION_KEY 未配置，无法加解密
+  'install_unsupported', // 保留兼容旧客户端；桌面端不再自动安装运行时
+  'install_failed', // 保留兼容旧客户端；运行时应随应用内置打包
 ]);
 export type LlmErrorCode = z.infer<typeof LlmErrorCode>;
 
@@ -79,9 +79,9 @@ export type LlmProviderAdmin = z.infer<typeof LlmProviderAdminSchema>;
 /** GET /api/llm/active-provider 出参（当前启用 provider 的 provider/apiUrl + defaultModels，不暴露「有多个」）。
  *  无启用 provider → 404 `no_active_provider`。 */
 export const ActiveProviderSchema = z.object({
-  name: z.string().optional(),                 // 展示名（可选，应用通常不展示）
-  provider: z.string(),                        // provider 类型（用于客户端选择兼容 CLI/protocol，不在用户界面展示）
-  apiUrl: z.string(),                          // 拉取模型用的 API 基址
+  name: z.string().optional(), // 展示名（可选，应用通常不展示）
+  provider: z.string(), // provider 类型（用于客户端选择兼容 CLI/protocol，不在用户界面展示）
+  apiUrl: z.string(), // 拉取模型用的 API 基址
   defaultModels: z.array(z.string()).default([]), // provider 声明的默认模型清单（占位/兜底）
 });
 export type ActiveProvider = z.infer<typeof ActiveProviderSchema>;
@@ -93,10 +93,10 @@ export type ActiveProvider = z.infer<typeof ActiveProviderSchema>;
  *  modelOverride 为用户从拉取结果选的模型列表（string[]|null）。 */
 export const TenantBindingPublicSchema = z.object({
   id: z.string(),
-  apiKeyHint: z.string(),                          // 脱敏串（如 sk-1***wxyz），非密文非明文
-  keyFingerprint: z.string(),                      // sha256(明文).slice(0,16)，稳定标识「这是哪个 key」
+  apiKeyHint: z.string(), // 脱敏串（如 sk-1***wxyz），非密文非明文
+  keyFingerprint: z.string(), // sha256(明文).slice(0,16)，稳定标识「这是哪个 key」
   enabled: z.boolean(),
-  modelOverride: z.array(z.string()).nullable(),   // 用户从拉取结果选的模型列表；null=未选
+  modelOverride: z.array(z.string()).nullable(), // 用户从拉取结果选的模型列表；null=未选
   updatedBy: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   updatedAt: z.string(),
 });

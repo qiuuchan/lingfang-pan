@@ -14,10 +14,11 @@ import {
 } from '../e2e/plugin-publishing-fixture';
 import '@/index.css';
 
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
-  status,
-  headers: { 'Content-Type': 'application/json' },
-});
+const json = (value: unknown, status = 200) =>
+  new Response(JSON.stringify(value), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 
 const sessionPayload = {
   token: 'test-token',
@@ -102,5 +103,5 @@ initAuthToken();
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
     <App />
-  </ThemeProvider>,
+  </ThemeProvider>
 );

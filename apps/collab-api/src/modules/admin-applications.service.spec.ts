@@ -128,12 +128,14 @@ describe('AdminService team admin application governance', () => {
   });
 
   it('详情按 id 单独读取完整理由、处理信息和用户白名单', async () => {
-    harness.prisma.teamAdminApplication.findUnique.mockResolvedValueOnce(application({
-      status: 'REJECTED',
-      reviewReason: '资料不完整',
-      reviewedAt: REVIEWED_AT,
-      reviewedBy: { id: 'admin-1', email: 'admin@example.com', displayName: 'Admin' },
-    }));
+    harness.prisma.teamAdminApplication.findUnique.mockResolvedValueOnce(
+      application({
+        status: 'REJECTED',
+        reviewReason: '资料不完整',
+        reviewedAt: REVIEWED_AT,
+        reviewedBy: { id: 'admin-1', email: 'admin@example.com', displayName: 'Admin' },
+      })
+    );
 
     const result = await harness.service.adminApplication('admin-1', 'application-1');
 
@@ -150,10 +152,16 @@ describe('AdminService team admin application governance', () => {
         reviewedBy: { id: 'admin-1', email: 'admin@example.com', displayName: 'Admin' },
       },
     });
-    expect(harness.prisma.teamAdminApplication.findUnique).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'application-1' },
-      select: expect.objectContaining({ reason: true, reviewReason: true, reviewedBy: expect.any(Object) }),
-    }));
+    expect(harness.prisma.teamAdminApplication.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'application-1' },
+        select: expect.objectContaining({
+          reason: true,
+          reviewReason: true,
+          reviewedBy: expect.any(Object),
+        }),
+      })
+    );
   });
 
   it('approve 在一个事务内抢占、建团、创建系统角色和 membership，提交后才通知', async () => {
@@ -162,15 +170,25 @@ describe('AdminService team admin application governance', () => {
     const result = await harness.service.approveApplication('admin-1', 'application-1');
 
     expect(result.team.id).toBe('team-1');
-    expect(harness.prisma.teamAdminApplication.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'application-1', status: 'PENDING' },
-      data: expect.objectContaining({ status: 'APPROVED', reviewedById: 'admin-1' }),
-    }));
+    expect(harness.prisma.teamAdminApplication.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'application-1', status: 'PENDING' },
+        data: expect.objectContaining({ status: 'APPROVED', reviewedById: 'admin-1' }),
+      })
+    );
     expect(harness.prisma.role.create).toHaveBeenNthCalledWith(1, {
-      data: expect.objectContaining({ id: 'team-admin-team-1', code: 'team_admin', isSystem: true }),
+      data: expect.objectContaining({
+        id: 'team-admin-team-1',
+        code: 'team_admin',
+        isSystem: true,
+      }),
     });
     expect(harness.prisma.role.create).toHaveBeenNthCalledWith(2, {
-      data: expect.objectContaining({ id: 'team-member-team-1', code: 'team_member', isSystem: true }),
+      data: expect.objectContaining({
+        id: 'team-member-team-1',
+        code: 'team_member',
+        isSystem: true,
+      }),
     });
     expect(harness.prisma.teamMembership.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -185,21 +203,27 @@ describe('AdminService team admin application governance', () => {
       data: { teamContextVersion: { increment: 1 } },
     });
     expect(harness.prisma.auditLog.create).toHaveBeenCalledTimes(1);
-    expect(harness.events.indexOf('transaction:commit')).toBeLessThan(harness.events.indexOf('notification'));
+    expect(harness.events.indexOf('transaction:commit')).toBeLessThan(
+      harness.events.indexOf('notification')
+    );
     expect(harness.notifications.create).toHaveBeenCalledWith(
       'applicant-1',
       'application_approved',
       expect.any(String),
       expect.any(String),
-      { relatedType: 'Team', relatedId: 'team-1' },
+      { relatedType: 'Team', relatedId: 'team-1' }
     );
   });
 
   it('approve 抢占失败返回 409，事务内外均无副作用', async () => {
-    harness.prisma.teamAdminApplication.findUnique.mockResolvedValueOnce(application({ status: 'REJECTED' }));
+    harness.prisma.teamAdminApplication.findUnique.mockResolvedValueOnce(
+      application({ status: 'REJECTED' })
+    );
     harness.prisma.teamAdminApplication.updateMany.mockResolvedValueOnce({ count: 0 });
 
-    await expect(harness.service.approveApplication('admin-1', 'application-1')).rejects.toMatchObject({
+    await expect(
+      harness.service.approveApplication('admin-1', 'application-1')
+    ).rejects.toMatchObject({
       status: 409,
       code: 'conflict',
     });
@@ -214,19 +238,31 @@ describe('AdminService team admin application governance', () => {
   it('reject 在事务内抢占并写 audit，提交后通知并返回详情', async () => {
     harness.prisma.teamAdminApplication.findUnique
       .mockResolvedValueOnce(application())
-      .mockResolvedValueOnce(application({
-        status: 'REJECTED',
-        reviewReason: '资料不完整',
-        reviewedAt: REVIEWED_AT,
-        reviewedBy: { id: 'admin-1', email: 'admin@example.com', displayName: 'Admin' },
-      }));
+      .mockResolvedValueOnce(
+        application({
+          status: 'REJECTED',
+          reviewReason: '资料不完整',
+          reviewedAt: REVIEWED_AT,
+          reviewedBy: { id: 'admin-1', email: 'admin@example.com', displayName: 'Admin' },
+        })
+      );
 
-    const result = await harness.service.rejectApplication('admin-1', 'application-1', '  资料不完整  ');
+    const result = await harness.service.rejectApplication(
+      'admin-1',
+      'application-1',
+      '  资料不完整  '
+    );
 
-    expect(harness.prisma.teamAdminApplication.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'application-1', status: 'PENDING' },
-      data: expect.objectContaining({ status: 'REJECTED', reviewReason: '资料不完整', reviewedById: 'admin-1' }),
-    }));
+    expect(harness.prisma.teamAdminApplication.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'application-1', status: 'PENDING' },
+        data: expect.objectContaining({
+          status: 'REJECTED',
+          reviewReason: '资料不完整',
+          reviewedById: 'admin-1',
+        }),
+      })
+    );
     expect(harness.prisma.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         action: 'team_admin_application.rejected',
@@ -234,15 +270,21 @@ describe('AdminService team admin application governance', () => {
       }),
     });
     expect(result.application.reviewReason).toBe('资料不完整');
-    expect(harness.events.indexOf('transaction:commit')).toBeLessThan(harness.events.indexOf('notification'));
+    expect(harness.events.indexOf('transaction:commit')).toBeLessThan(
+      harness.events.indexOf('notification')
+    );
     expect(harness.notifications.create).toHaveBeenCalledTimes(1);
   });
 
   it('reject 抢占失败返回 409，不写 audit 或通知', async () => {
-    harness.prisma.teamAdminApplication.findUnique.mockResolvedValueOnce(application({ status: 'APPROVED' }));
+    harness.prisma.teamAdminApplication.findUnique.mockResolvedValueOnce(
+      application({ status: 'APPROVED' })
+    );
     harness.prisma.teamAdminApplication.updateMany.mockResolvedValueOnce({ count: 0 });
 
-    await expect(harness.service.rejectApplication('admin-1', 'application-1', '资料不完整')).rejects.toMatchObject({
+    await expect(
+      harness.service.rejectApplication('admin-1', 'application-1', '资料不完整')
+    ).rejects.toMatchObject({
       status: 409,
       code: 'conflict',
     });
@@ -251,13 +293,18 @@ describe('AdminService team admin application governance', () => {
     expect(harness.notifications.create).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, '   ', 'x'.repeat(501)])('reject 拒绝缺失、空白或超过 500 字的原因', async (reason) => {
-    await expect(harness.service.rejectApplication('admin-1', 'application-1', reason)).rejects.toMatchObject({
-      status: 400,
-      code: 'bad_request',
-    });
-    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
-  });
+  it.each([undefined, '   ', 'x'.repeat(501)])(
+    'reject 拒绝缺失、空白或超过 500 字的原因',
+    async (reason) => {
+      await expect(
+        harness.service.rejectApplication('admin-1', 'application-1', reason)
+      ).rejects.toMatchObject({
+        status: 400,
+        code: 'bad_request',
+      });
+      expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+    }
+  );
 
   it('approve/reject 并发只允许一个终态、一个 audit 和一次通知', async () => {
     let terminalStatus: 'APPROVED' | 'REJECTED' | null = null;

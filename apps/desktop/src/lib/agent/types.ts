@@ -75,7 +75,12 @@ export interface LoopCallbacks {
   /** 工具调用开始（模型决定调某工具，UI 显示 running 卡片）。 */
   onToolCall: (call: { toolCallId: string; name: string; args: unknown }) => void;
   /** 工具执行完成（UI 卡片更新为 ok/error）。 */
-  onToolOutput: (output: { toolCallId: string; name: string; result: unknown; ok: boolean }) => void;
+  onToolOutput: (output: {
+    toolCallId: string;
+    name: string;
+    result: unknown;
+    ok: boolean;
+  }) => void;
 }
 
 /** Agent 循环运行结果。 */

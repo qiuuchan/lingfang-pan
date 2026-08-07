@@ -22,11 +22,15 @@ describe('cleanupRetiredPermissions', () => {
       data: { permissions: ['team.dashboard.view'] },
     });
     expect(prisma.permissionEntry.deleteMany).toHaveBeenCalledWith({
-      where: { code: { in: expect.arrayContaining([
-        'team.api_key.manage',
-        'platform.billing.api_key.manage',
-        'platform.billing.relay_docs.view',
-      ]) } },
+      where: {
+        code: {
+          in: expect.arrayContaining([
+            'team.api_key.manage',
+            'platform.billing.api_key.manage',
+            'platform.billing.relay_docs.view',
+          ]),
+        },
+      },
     });
     expect(prisma.permissionGroup.deleteMany).toHaveBeenCalledWith({
       where: { scope: 'TEAM', groupKey: 'team.api_key' },

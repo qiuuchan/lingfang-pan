@@ -30,7 +30,12 @@ function value(key: string, revision: string, content: unknown): SharedValue {
   };
 }
 
-function change(cursor: string, key: string, revision: string, event_kind: 'UPSERT' | 'DELETE'): SharedChangeEvent {
+function change(
+  cursor: string,
+  key: string,
+  revision: string,
+  event_kind: 'UPSERT' | 'DELETE'
+): SharedChangeEvent {
   return {
     namespace_id: namespaceId,
     namespace_generation: 2,
@@ -48,7 +53,13 @@ function replica(cursor = '10', values: Record<string, SharedValue> = {}): Share
 }
 
 function page(input: Partial<SharedPage> = {}): SharedPage {
-  return { values: [], next_page_cursor: null, snapshot_cursor: '10', relist_token: 'token-1', ...input };
+  return {
+    values: [],
+    next_page_cursor: null,
+    snapshot_cursor: '10',
+    relist_token: 'token-1',
+    ...input,
+  };
 }
 
 describe('shared recovery reducer', () => {
@@ -56,8 +67,12 @@ describe('shared recovery reducer', () => {
     expect(inspectSharedCursor('10', '010')).toBe('DUPLICATE');
     expect(inspectSharedCursor('10', '11')).toBe('NEXT');
     expect(inspectSharedCursor('10', '12')).toBe('GAP');
-    expect(applySharedChange(replica('10'), change('10', 'a', '1', 'DELETE'))).toEqual(replica('10'));
-    expect(() => applySharedChange(replica('10'), change('12', 'a', '1', 'DELETE'))).toThrowError(SharedRecoveryError);
+    expect(applySharedChange(replica('10'), change('10', 'a', '1', 'DELETE'))).toEqual(
+      replica('10')
+    );
+    expect(() => applySharedChange(replica('10'), change('12', 'a', '1', 'DELETE'))).toThrowError(
+      SharedRecoveryError
+    );
   });
 
   it('never lets an older value revision roll back a newer replica', () => {
@@ -78,7 +93,8 @@ describe('shared recovery reducer', () => {
     const calls: string[] = [];
     const list = vi.fn(async (request: { page_cursor?: string; relist_token?: string }) => {
       calls.push(`list:${request.page_cursor ?? 'first'}`);
-      if (!request.page_cursor) return page({ values: [value('a', '5', { version: 5 })], next_page_cursor: 'page-2' });
+      if (!request.page_cursor)
+        return page({ values: [value('a', '5', { version: 5 })], next_page_cursor: 'page-2' });
       expect(request.relist_token).toBe('token-1');
       return page({ values: [value('a', '4', { version: 4 }), value('b', '7', { version: 7 })] });
     });
@@ -107,15 +123,18 @@ describe('shared recovery reducer', () => {
   });
 
   it('rejects a relist page that changes snapshot cursor or token', async () => {
-    const list = vi.fn()
+    const list = vi
+      .fn()
       .mockResolvedValueOnce(page({ next_page_cursor: 'page-2' }))
       .mockResolvedValueOnce(page({ snapshot_cursor: '11', relist_token: 'token-2' }));
-    await expect(recoverSharedReplicaAfterCursorExpiry({
-      namespace_id: namespaceId,
-      namespace_generation: 2,
-      list,
-      changes: vi.fn(),
-      get: vi.fn(),
-    })).rejects.toMatchObject({ code: 'shared_relist_token_mismatch' });
+    await expect(
+      recoverSharedReplicaAfterCursorExpiry({
+        namespace_id: namespaceId,
+        namespace_generation: 2,
+        list,
+        changes: vi.fn(),
+        get: vi.fn(),
+      })
+    ).rejects.toMatchObject({ code: 'shared_relist_token_mismatch' });
   });
 });

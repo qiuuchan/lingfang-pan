@@ -18,7 +18,17 @@ import {
 import { api, apiBase, getAuthToken, tauriInvoke } from '@/lib/api';
 import { ensureNativeActionBridgeListener } from '@/lib/plugin-action-runtime';
 
-function decode<T>(schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } } }, value: unknown, label: string): T {
+function decode<T>(
+  schema: {
+    safeParse: (
+      value: unknown
+    ) =>
+      | { success: true; data: T }
+      | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } };
+  },
+  value: unknown,
+  label: string
+): T {
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
   const first = parsed.error.issues[0];
@@ -53,32 +63,47 @@ export async function revokeDesktopWorkflowSession(): Promise<void> {
   await tauriInvoke('workflow_executor_revoke');
 }
 
-export async function preflightWorkflowRun(request: WorkflowPreflightRequestType): Promise<WorkflowPreflightResponseType> {
+export async function preflightWorkflowRun(
+  request: WorkflowPreflightRequestType
+): Promise<WorkflowPreflightResponseType> {
   const body = WorkflowPreflightRequest.parse(request);
-  const raw = request.execution_target === 'DESKTOP' && isTauri()
-    ? await tauriInvoke('workflow_executor_preflight', { request: body })
-    : await api('/api/workflows/runs/preflight', { method: 'POST', body });
+  const raw =
+    request.execution_target === 'DESKTOP' && isTauri()
+      ? await tauriInvoke('workflow_executor_preflight', { request: body })
+      : await api('/api/workflows/runs/preflight', { method: 'POST', body });
   return decode(WorkflowPreflightResponse, raw, '工作流预检');
 }
 
-export async function startWorkflowRun(request: WorkflowRunCreateRequestType): Promise<WorkflowRunDetail> {
+export async function startWorkflowRun(
+  request: WorkflowRunCreateRequestType
+): Promise<WorkflowRunDetail> {
   const body = WorkflowRunCreateRequest.parse(request);
-  const raw = body.execution_target === 'DESKTOP'
-    ? await tauriInvoke('workflow_executor_start_run', { request: body })
-    : await api('/api/workflows/runs', { method: 'POST', body });
+  const raw =
+    body.execution_target === 'DESKTOP'
+      ? await tauriInvoke('workflow_executor_start_run', { request: body })
+      : await api('/api/workflows/runs', { method: 'POST', body });
   return decode(WorkflowRunDetailResponse, raw, '创建工作流运行').run;
 }
 
 type NativeClaim = { attempt: { id: string; node_id: string; lease_expires_at: string } | null };
 
 function decodeNativeClaim(value: unknown): NativeClaim {
-  if (!value || typeof value !== 'object' || !('attempt' in value)) throw new Error('领取工作流步骤响应格式不兼容');
+  if (!value || typeof value !== 'object' || !('attempt' in value))
+    throw new Error('领取工作流步骤响应格式不兼容');
   const attempt = (value as { attempt?: unknown }).attempt;
   if (attempt === null) return { attempt: null };
-  if (!attempt || typeof attempt !== 'object') throw new Error('领取工作流步骤响应格式不兼容（attempt）');
+  if (!attempt || typeof attempt !== 'object')
+    throw new Error('领取工作流步骤响应格式不兼容（attempt）');
   const record = attempt as Record<string, unknown>;
-  if (typeof record.id !== 'string' || typeof record.node_id !== 'string' || typeof record.lease_expires_at !== 'string') throw new Error('领取工作流步骤响应缺少公开 lease 信息');
-  return { attempt: { id: record.id, node_id: record.node_id, lease_expires_at: record.lease_expires_at } };
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.node_id !== 'string' ||
+    typeof record.lease_expires_at !== 'string'
+  )
+    throw new Error('领取工作流步骤响应缺少公开 lease 信息');
+  return {
+    attempt: { id: record.id, node_id: record.node_id, lease_expires_at: record.lease_expires_at },
+  };
 }
 
 export async function claimDesktopWorkflowAttempt(runId: string): Promise<NativeClaim['attempt']> {
@@ -92,17 +117,26 @@ export async function executeDesktopWorkflowAttempt(attemptId: string): Promise<
   return decode(WorkflowRunDetailResponse, raw, '执行工作流步骤').run;
 }
 
-export async function driveDesktopWorkflowRun(runId: string, maxParallelism: number): Promise<{ claimed: number; failures: string[] }> {
+export async function driveDesktopWorkflowRun(
+  runId: string,
+  maxParallelism: number
+): Promise<{ claimed: number; failures: string[] }> {
   const claims: NonNullable<NativeClaim['attempt']>[] = [];
   for (let index = 0; index < Math.max(1, Math.min(maxParallelism, 8)); index += 1) {
     const attempt = await claimDesktopWorkflowAttempt(runId);
     if (!attempt) break;
     claims.push(attempt);
   }
-  const settled = await Promise.allSettled(claims.map((attempt) => executeDesktopWorkflowAttempt(attempt.id)));
+  const settled = await Promise.allSettled(
+    claims.map((attempt) => executeDesktopWorkflowAttempt(attempt.id))
+  );
   return {
     claimed: claims.length,
-    failures: settled.flatMap((result) => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : []),
+    failures: settled.flatMap((result) =>
+      result.status === 'rejected'
+        ? [result.reason instanceof Error ? result.reason.message : String(result.reason)]
+        : []
+    ),
   };
 }
 
@@ -112,11 +146,15 @@ export async function getWorkflowRun(runId: string): Promise<WorkflowRunDetail> 
 }
 
 export async function cancelWorkflowRun(runId: string): Promise<WorkflowRunDetail> {
-  const raw = await api(`/api/workflows/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+  const raw = await api(`/api/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+  });
   return decode(WorkflowRunCancelResponse, raw, '取消工作流运行').run;
 }
 
-export async function listWorkflowRuns(params: { cursor?: string; limit?: number } = {}): Promise<WorkflowRunListResponseType> {
+export async function listWorkflowRuns(
+  params: { cursor?: string; limit?: number } = {}
+): Promise<WorkflowRunListResponseType> {
   const search = new URLSearchParams();
   if (params.cursor) search.set('cursor', params.cursor);
   if (params.limit) search.set('limit', String(params.limit));
@@ -124,7 +162,9 @@ export async function listWorkflowRuns(params: { cursor?: string; limit?: number
   return decode(WorkflowRunListResponse, raw, '工作流运行列表');
 }
 
-export async function getWorkflowUpgradeSuggestions(releaseId: string): Promise<WorkflowUpgradeSuggestionResponseType> {
+export async function getWorkflowUpgradeSuggestions(
+  releaseId: string
+): Promise<WorkflowUpgradeSuggestionResponseType> {
   const raw = await api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/workflow-upgrades`);
   return decode(WorkflowUpgradeSuggestionResponse, raw, '工作流升级建议');
 }
@@ -134,6 +174,7 @@ export function workflowDeadline(hours = 1): string {
 }
 
 export function workflowIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    return crypto.randomUUID();
   return `desktop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

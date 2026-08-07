@@ -7,7 +7,7 @@ import { AuthService } from './auth.service';
 export class TeamPoolService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   /**
@@ -18,10 +18,7 @@ export class TeamPoolService {
     const membership = await this.auth.ensureCurrentTeam(userId);
     const pools = await this.prisma.pool.findMany({
       where: {
-        OR: [
-          { scope: 'SHARED' },
-          { scope: 'DEDICATED', teamId: membership.teamId },
-        ],
+        OR: [{ scope: 'SHARED' }, { scope: 'DEDICATED', teamId: membership.teamId }],
       },
       select: {
         id: true,

@@ -34,7 +34,7 @@ describe('plugin provenance', () => {
 
   it('does not mistake an HTTPS URL for a local path', () => {
     expect(sanitizePluginSourceLabel('Docs https://example.com/plugins/demo')).toBe(
-      'Docs https://example.com/plugins/demo',
+      'Docs https://example.com/plugins/demo'
     );
   });
 });

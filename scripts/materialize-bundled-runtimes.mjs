@@ -33,7 +33,8 @@ async function materialize(entry) {
 
   for (const part of entry.parts ?? []) {
     const partPath = join(partsRoot, part);
-    if (!existsSync(partPath) || !statSync(partPath).isFile()) fail(`missing runtime part: ${part}`);
+    if (!existsSync(partPath) || !statSync(partPath).isFile())
+      fail(`missing runtime part: ${part}`);
   }
   if (!entry.parts?.length) fail(`no runtime parts configured: ${entry.path}`);
 
@@ -45,7 +46,8 @@ async function materialize(entry) {
       const output = createWriteStream(temporary, { flags: index === 0 ? 'wx' : 'a' });
       await pipeline(createReadStream(join(partsRoot, part)), output);
     }
-    if (!(await matches(temporary, entry))) fail(`materialized file checksum mismatch: ${entry.path}`);
+    if (!(await matches(temporary, entry)))
+      fail(`materialized file checksum mismatch: ${entry.path}`);
     renameSync(temporary, target);
     process.stdout.write(`[runtimes] materialized ${entry.path}\n`);
   } catch (error) {

@@ -19,7 +19,13 @@ export const PluginDraftTurn = z.object({
 export type PluginDraftTurn = z.infer<typeof PluginDraftTurn>;
 
 // 桌面端实际产出阶段：schema/security/preview（契约校验）+ diagnostics（汇总诊断）+ local-cli（CLI 工具判定）。
-export const PluginDraftDiagnosticStage = z.enum(['schema', 'security', 'preview', 'diagnostics', 'local-cli']);
+export const PluginDraftDiagnosticStage = z.enum([
+  'schema',
+  'security',
+  'preview',
+  'diagnostics',
+  'local-cli',
+]);
 export const PluginDraftDiagnosticStatus = z.enum(['pass', 'fail', 'warn']);
 export const PluginDraftDiagnostic = z.object({
   stage: PluginDraftDiagnosticStage,
@@ -29,7 +35,14 @@ export const PluginDraftDiagnostic = z.object({
 export type PluginDraftDiagnostic = z.infer<typeof PluginDraftDiagnostic>;
 
 // 草稿状态：generating/ready/invalid/published（最终态）+ partial（部分产出但未完成）+ chat（对话态，未触发结构化产出）。
-export const PluginDraftStatus = z.enum(['generating', 'ready', 'invalid', 'published', 'partial', 'chat']);
+export const PluginDraftStatus = z.enum([
+  'generating',
+  'ready',
+  'invalid',
+  'published',
+  'partial',
+  'chat',
+]);
 export type PluginDraftStatus = z.infer<typeof PluginDraftStatus>;
 
 export const PluginDraft = z.object({

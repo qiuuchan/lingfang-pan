@@ -30,7 +30,9 @@ export const LOCAL_ARTIFACT_PROVENANCE = {
   sourceLabel: DEFAULT_SOURCE_LABELS.LOCAL_ARTIFACT,
 } as const satisfies PluginProvenance;
 
-const SOURCE_KINDS = new Set<PluginReleaseSourceKind>(Object.keys(DEFAULT_SOURCE_LABELS) as PluginReleaseSourceKind[]);
+const SOURCE_KINDS = new Set<PluginReleaseSourceKind>(
+  Object.keys(DEFAULT_SOURCE_LABELS) as PluginReleaseSourceKind[]
+);
 
 export function isPluginSourceKind(value: unknown): value is PluginReleaseSourceKind {
   return typeof value === 'string' && SOURCE_KINDS.has(value as PluginReleaseSourceKind);
@@ -48,14 +50,16 @@ function containsAbsoluteLocalPath(value: string): boolean {
 }
 
 export function sanitizePluginSourceLabel(value: unknown): string {
-  const raw = String(value ?? '').trim().replace(/[\u0000-\u001f\u007f]/g, '');
+  const raw = String(value ?? '')
+    .trim()
+    .replace(/[\u0000-\u001f\u007f]/g, '');
   if (containsAbsoluteLocalPath(raw)) return '';
   return [...raw].slice(0, 80).join('');
 }
 
 export function normalizePluginProvenance(
   input?: Partial<PluginProvenance> | null,
-  fallbackKind: PluginReleaseSourceKind = 'UNKNOWN',
+  fallbackKind: PluginReleaseSourceKind = 'UNKNOWN'
 ): PluginProvenance {
   const sourceKind = isPluginSourceKind(input?.sourceKind) ? input.sourceKind : fallbackKind;
   const sourceLabel = sanitizePluginSourceLabel(input?.sourceLabel);

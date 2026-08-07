@@ -54,7 +54,11 @@ export function loadUpdateChannel(): UpdateChannel {
 }
 
 export function saveUpdateChannel(channel: UpdateChannel): void {
-  try { localStorage.setItem(UPDATE_CHANNEL_STORAGE_KEY, channel); } catch { /* localStorage 不可用则忽略 */ }
+  try {
+    localStorage.setItem(UPDATE_CHANNEL_STORAGE_KEY, channel);
+  } catch {
+    /* localStorage 不可用则忽略 */
+  }
 }
 
 export function isBetaUpdateEnabled(): boolean {
@@ -92,11 +96,17 @@ export function saveCachedUpdate(meta: UpdateMetadata, channel: UpdateChannel): 
   try {
     const payload: CachedUpdate = { meta, channel, checkedAt: new Date().toISOString() };
     localStorage.setItem(CACHED_UPDATE_KEY, JSON.stringify(payload));
-  } catch { /* localStorage 不可用则忽略 */ }
+  } catch {
+    /* localStorage 不可用则忽略 */
+  }
 }
 
 export function clearCachedUpdate(): void {
-  try { localStorage.removeItem(CACHED_UPDATE_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(CACHED_UPDATE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** 进度回调类型（供 Settings 页订阅 Started/Progress/Finished）。 */
@@ -111,7 +121,10 @@ export type DownloadEventHandler = (event: DownloadEvent) => void;
  *
  * 错误：backendUrl 无效 / 网络失败 → throw String（ApiError.message）。
  */
-export function checkUpdate(backendUrl: string, channel: UpdateChannel = loadUpdateChannel()): Promise<UpdateMetadata | null> {
+export function checkUpdate(
+  backendUrl: string,
+  channel: UpdateChannel = loadUpdateChannel()
+): Promise<UpdateMetadata | null> {
   return tauriInvoke<UpdateMetadata | null>('check_update', {
     channel,
     backendUrl,

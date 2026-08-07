@@ -29,8 +29,15 @@ export type NormalizedReleaseSource = {
   ingestChannel: PluginIngestChannel;
 };
 
-function enumValue<T extends readonly string[]>(raw: string | undefined, values: T, fallback: T[number], field: string): T[number] {
-  const value = String(raw || fallback).trim().toUpperCase();
+function enumValue<T extends readonly string[]>(
+  raw: string | undefined,
+  values: T,
+  fallback: T[number],
+  field: string
+): T[number] {
+  const value = String(raw || fallback)
+    .trim()
+    .toUpperCase();
   if (!(values as readonly string[]).includes(value)) throw badRequest(`${field} 无效`);
   return value as T[number];
 }
@@ -54,7 +61,9 @@ function decodeSourceLabel(raw: string | undefined): string {
   return label;
 }
 
-export function normalizeReleaseSource(headers: ReleaseSourceHeaders = {}): NormalizedReleaseSource {
+export function normalizeReleaseSource(
+  headers: ReleaseSourceHeaders = {}
+): NormalizedReleaseSource {
   return {
     sourceKind: enumValue(headers.sourceKind, RELEASE_SOURCE_KINDS, 'UNKNOWN', '插件来源类型'),
     sourceLabel: decodeSourceLabel(headers.sourceLabelBase64),
@@ -144,15 +153,20 @@ export function packageJson(pkg: {
   };
 }
 
-export function listingJson(listing: {
-  priceCents: number;
-  status: string;
-  currentReleaseId: string | null;
-  delistedBy?: string | null;
-  delistReason?: string;
-  delistedAt?: Date | null;
-  delistedByUserId?: string | null;
-} | null | undefined) {
+export function listingJson(
+  listing:
+    | {
+        priceCents: number;
+        status: string;
+        currentReleaseId: string | null;
+        delistedBy?: string | null;
+        delistReason?: string;
+        delistedAt?: Date | null;
+        delistedByUserId?: string | null;
+      }
+    | null
+    | undefined
+) {
   if (!listing) return null;
   return {
     priceCents: listing.priceCents,
@@ -167,7 +181,8 @@ export function listingJson(listing: {
 
 export function highestSemVer<T extends { version: string }>(releases: T[]): T | null {
   return releases.reduce<T | null>(
-    (current, release) => !current || compareStrictSemVer(release.version, current.version) > 0 ? release : current,
-    null,
+    (current, release) =>
+      !current || compareStrictSemVer(release.version, current.version) > 0 ? release : current,
+    null
   );
 }

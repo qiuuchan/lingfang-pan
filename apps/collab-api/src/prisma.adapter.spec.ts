@@ -27,7 +27,7 @@ describe('createPrismaAdapter', () => {
         DATABASE_PROVIDER: 'mysql',
         DATABASE_URL: 'mysql://lingfang:secret@localhost:3306/lingfang_collab',
       },
-      { loadMariaDbAdapter: () => FakeMariaDbAdapter },
+      { loadMariaDbAdapter: () => FakeMariaDbAdapter }
     );
 
     expect(adapter).toBeInstanceOf(FakeMariaDbAdapter);

@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { FolderIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
 import { getPluginsRoot, openPluginsRoot, setPluginsRoot } from '@/lib/plugin-status';
 
@@ -109,8 +109,8 @@ export function PluginsTab() {
             {currentRoot === null ? '读取中…' : currentRoot || '未配置'}
           </span>
         </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="pluginsRootPath">插件根目录</Label>
+        <Field>
+          <FieldLabel htmlFor="pluginsRootPath">插件根目录</FieldLabel>
           <Input
             id="pluginsRootPath"
             placeholder="例如 D:\\MyPlugins 或留空使用默认路径"
@@ -118,13 +118,32 @@ export function PluginsTab() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && savePath()}
           />
-        </div>
+        </Field>
         <div className="flex items-center gap-2">
-          <LoadingButton loading={saving} onClick={() => { void savePath(); }}>保存路径</LoadingButton>
-          <LoadingButton variant="outline" loading={saving} onClick={() => { void resetDefault(); }}>
+          <LoadingButton
+            loading={saving}
+            onClick={() => {
+              void savePath();
+            }}
+          >
+            保存路径
+          </LoadingButton>
+          <LoadingButton
+            variant="outline"
+            loading={saving}
+            onClick={() => {
+              void resetDefault();
+            }}
+          >
             恢复默认
           </LoadingButton>
-          <LoadingButton variant="outline" loading={false} onClick={() => { void openRoot(); }}>
+          <LoadingButton
+            variant="outline"
+            loading={false}
+            onClick={() => {
+              void openRoot();
+            }}
+          >
             打开目录
           </LoadingButton>
         </div>

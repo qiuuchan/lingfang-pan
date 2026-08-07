@@ -17,13 +17,15 @@ describe('plugin README markdown', () => {
   });
 
   it('keeps GFM content while allowing only external HTTP(S) links', () => {
-    const html = renderPluginReadme([
-      '| 功能 | 状态 |',
-      '| --- | --- |',
-      '| 预览 | ✅ |',
-      '',
-      '[官网](https://example.com) [危险链接](javascript:alert(1))',
-    ].join('\n'));
+    const html = renderPluginReadme(
+      [
+        '| 功能 | 状态 |',
+        '| --- | --- |',
+        '| 预览 | ✅ |',
+        '',
+        '[官网](https://example.com) [危险链接](javascript:alert(1))',
+      ].join('\n')
+    );
 
     expect(html).toContain('<table');
     expect(html).toContain('href="https://example.com/"');
@@ -33,11 +35,13 @@ describe('plugin README markdown', () => {
   });
 
   it('drops raw HTML and replaces images with a non-loading placeholder', () => {
-    const html = renderPluginReadme([
-      '<script>globalThis.compromised = true</script>',
-      '<div>raw html</div>',
-      '![远程图](https://example.com/tracker.png)',
-    ].join('\n\n'));
+    const html = renderPluginReadme(
+      [
+        '<script>globalThis.compromised = true</script>',
+        '<div>raw html</div>',
+        '![远程图](https://example.com/tracker.png)',
+      ].join('\n\n')
+    );
 
     expect(html).not.toContain('<script');
     expect(html).not.toContain('<div>raw html</div>');

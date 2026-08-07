@@ -23,7 +23,11 @@ export function onWindowDragStart(e: MouseEvent): void {
   const target = e.target as HTMLElement;
   if (target.closest(INTERACTIVE_SELECTOR)) return;
   // 无 Tauri 壳（浏览器直连 dev server）时 getCurrentWindow 不完整，跳过拖动（避免抛错）。
-  if (typeof window === 'undefined' || !(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return;
+  if (
+    typeof window === 'undefined' ||
+    !(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+  )
+    return;
   void getCurrentWindow().startDragging();
 }
 

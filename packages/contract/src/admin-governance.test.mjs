@@ -57,56 +57,76 @@ const packageItem = {
 
 test('admin page metadata enforces bounded server-side pagination', () => {
   expect(AdminPaginationMetadata.safeParse({ total: 0, page: 1, pageSize: 20 }).success).toBe(true);
-  expect(AdminPaginationMetadata.safeParse({ total: -1, page: 1, pageSize: 20 }).success).toBe(false);
-  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 0, pageSize: 20 }).success).toBe(false);
+  expect(AdminPaginationMetadata.safeParse({ total: -1, page: 1, pageSize: 20 }).success).toBe(
+    false
+  );
+  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 0, pageSize: 20 }).success).toBe(
+    false
+  );
   expect(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 0 }).success).toBe(false);
-  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 101 }).success).toBe(false);
+  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 101 }).success).toBe(
+    false
+  );
 });
 
 test('admin user summary exposes only identity display fields', () => {
   expect(AdminUserSummary.safeParse(user).success).toBe(true);
   expect(AdminUserSummary.safeParse({ ...user, status: 'ACTIVE' }).success).toBe(false);
-  expect(AdminUserSummary.safeParse({ ...user, platformRole: 'PLATFORM_ADMIN' }).success).toBe(false);
+  expect(AdminUserSummary.safeParse({ ...user, platformRole: 'PLATFORM_ADMIN' }).success).toBe(
+    false
+  );
 });
 
 test('admin plugin package page rejects heavyweight list fields', () => {
-  expect(AdminPluginPackagePage.safeParse({
+  expect(
+    AdminPluginPackagePage.safeParse({
       items: [packageItem],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(true);
-  expect(AdminPluginPackagePage.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    AdminPluginPackagePage.safeParse({
       items: [{ ...packageItem, manifest: {}, fileManifest: [], reviews: [] }],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(false);
-  expect(AdminPluginPackagePage.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    AdminPluginPackagePage.safeParse({
       items: [{ ...packageItem, latestRelease: { ...releaseSummary, manifest: {} } }],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(false);
-  expect(AdminPluginPackagePage.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    AdminPluginPackagePage.safeParse({
       items: [{ ...packageItem, marketplaceCurrentVersion: 'v1.2.3' }],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(false);
-  expect(AdminPluginPackagePage.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    AdminPluginPackagePage.safeParse({
       items: [{ ...packageItem, latestRelease: { ...releaseSummary, sourceKind: 'CURSOR' } }],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
   const { marketplaceCurrentVersion: _omitted, ...withoutCurrentVersion } = packageItem;
-  expect(AdminPluginPackagePage.safeParse({
+  expect(
+    AdminPluginPackagePage.safeParse({
       items: [withoutCurrentVersion],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
 });
 
 test('admin release list and core detail reject deferred payload fields', () => {
@@ -116,19 +136,24 @@ test('admin release list and core detail reject deferred payload fields', () => 
     sizeBytes: 1024,
     isMarketplaceCurrent: false,
   };
-  expect(AdminPluginReleasePage.safeParse({
+  expect(
+    AdminPluginReleasePage.safeParse({
       items: [listItem],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(true);
+    }).success
+  ).toBe(true);
   for (const field of ['manifest', 'fileManifest', 'artifactKey', 'reviews']) {
-    expect(AdminPluginReleasePage.safeParse({
+    expect(
+      AdminPluginReleasePage.safeParse({
         items: [{ ...listItem, [field]: field === 'artifactKey' ? 'private/key' : [] }],
         total: 1,
         page: 1,
         pageSize: 20,
-      }).success, field).toBe(false);
+      }).success,
+      field
+    ).toBe(false);
   }
 
   const release = {
@@ -148,17 +173,22 @@ test('admin release list and core detail reject deferred payload fields', () => 
     ingestChannel: 'API',
     createdAt: CREATED_AT,
   };
-  expect(AdminPluginReleaseCoreDetail.safeParse({
+  expect(
+    AdminPluginReleaseCoreDetail.safeParse({
       release,
       listing: null,
       isMarketplaceCurrent: false,
-    }).success).toBe(true);
-  expect(AdminPluginReleaseCoreDetail.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    AdminPluginReleaseCoreDetail.safeParse({
       release: { ...release, manifest: {} },
       listing: null,
       isMarketplaceCurrent: false,
-    }).success).toBe(false);
-  expect(AdminPluginReleaseManifest.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    AdminPluginReleaseManifest.safeParse({
       releaseId: RELEASE_ID,
       manifest: {
         id: 'demo.plugin',
@@ -167,11 +197,13 @@ test('admin release list and core detail reject deferred payload fields', () => 
         entry: 'main.py',
         runtime_type: 'python',
       },
-    }).success).toBe(true);
+    }).success
+  ).toBe(true);
 });
 
 test('delisted listings retain their release pointer without becoming marketplace-current', () => {
-  expect(AdminPluginListingProjection.safeParse({
+  expect(
+    AdminPluginListingProjection.safeParse({
       status: 'ACTIVE',
       priceCents: 0,
       currentReleaseId: RELEASE_ID,
@@ -179,8 +211,10 @@ test('delisted listings retain their release pointer without becoming marketplac
       delistReason: '',
       delistedAt: null,
       delistedByUserId: null,
-    }).success).toBe(true);
-  expect(AdminPluginListingProjection.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    AdminPluginListingProjection.safeParse({
       status: 'DELISTED',
       priceCents: 0,
       currentReleaseId: null,
@@ -188,8 +222,10 @@ test('delisted listings retain their release pointer without becoming marketplac
       delistReason: 'policy',
       delistedAt: CREATED_AT,
       delistedByUserId: USER_ID,
-    }).success).toBe(true);
-  expect(AdminPluginListingProjection.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    AdminPluginListingProjection.safeParse({
       status: 'DELISTED',
       priceCents: 0,
       currentReleaseId: RELEASE_ID,
@@ -197,7 +233,8 @@ test('delisted listings retain their release pointer without becoming marketplac
       delistReason: 'policy',
       delistedAt: CREATED_AT,
       delistedByUserId: USER_ID,
-    }).success).toBe(true);
+    }).success
+  ).toBe(true);
 });
 
 test('team admin application list excludes reasons while detail carries them', () => {
@@ -208,19 +245,24 @@ test('team admin application list excludes reasons while detail carries them', (
     createdAt: CREATED_AT,
     user,
   };
-  expect(TeamAdminApplicationPage.safeParse({
+  expect(
+    TeamAdminApplicationPage.safeParse({
       items: [summary],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(true);
-  expect(TeamAdminApplicationPage.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    TeamAdminApplicationPage.safeParse({
       items: [{ ...summary, reason: 'full application reason', reviewReason: '' }],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success).toBe(false);
-  expect(TeamAdminApplicationDetailResponse.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    TeamAdminApplicationDetailResponse.safeParse({
       application: {
         ...summary,
         reason: 'full application reason',
@@ -228,7 +270,8 @@ test('team admin application list excludes reasons while detail carries them', (
         reviewedAt: null,
         reviewedBy: null,
       },
-    }).success).toBe(true);
+    }).success
+  ).toBe(true);
 });
 
 test('reject and delist reasons trim input and enforce 1..500 characters', () => {

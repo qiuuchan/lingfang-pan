@@ -13,25 +13,59 @@ export type MarketplaceRecommendationCandidate = {
   qualityQualifiedAt: Date | null;
 };
 
-const packageOrder = (a: MarketplaceRecommendationCandidate, b: MarketplaceRecommendationCandidate) => a.packageId.localeCompare(b.packageId);
+const packageOrder = (
+  a: MarketplaceRecommendationCandidate,
+  b: MarketplaceRecommendationCandidate
+) => a.packageId.localeCompare(b.packageId);
 
-export function featuredRecommendations(candidates: readonly MarketplaceRecommendationCandidate[], now: Date): MarketplaceRecommendationCandidate[] {
-  return candidates.filter((item) => item.tier === 'FEATURED' && item.featuredAt && (!item.featuredUntil || item.featuredUntil > now))
-    .sort((a, b) => (a.featuredRank ?? Number.MAX_SAFE_INTEGER) - (b.featuredRank ?? Number.MAX_SAFE_INTEGER)
-      || (b.featuredAt?.getTime() ?? 0) - (a.featuredAt?.getTime() ?? 0)
-      || packageOrder(a, b));
+export function featuredRecommendations(
+  candidates: readonly MarketplaceRecommendationCandidate[],
+  now: Date
+): MarketplaceRecommendationCandidate[] {
+  return candidates
+    .filter(
+      (item) =>
+        item.tier === 'FEATURED' &&
+        item.featuredAt &&
+        (!item.featuredUntil || item.featuredUntil > now)
+    )
+    .sort(
+      (a, b) =>
+        (a.featuredRank ?? Number.MAX_SAFE_INTEGER) - (b.featuredRank ?? Number.MAX_SAFE_INTEGER) ||
+        (b.featuredAt?.getTime() ?? 0) - (a.featuredAt?.getTime() ?? 0) ||
+        packageOrder(a, b)
+    );
 }
 
-export function categoryPopularRecommendations(candidates: readonly MarketplaceRecommendationCandidate[], category: MarketplaceCategory): MarketplaceRecommendationCandidate[] {
-  return candidates.filter((item) => item.category === category)
-    .sort((a, b) => b.activeTeams30d - a.activeTeams30d
-      || b.installTeams30d - a.installTeams30d
-      || b.ratingAverageTenths - a.ratingAverageTenths
-      || packageOrder(a, b));
+export function categoryPopularRecommendations(
+  candidates: readonly MarketplaceRecommendationCandidate[],
+  category: MarketplaceCategory
+): MarketplaceRecommendationCandidate[] {
+  return candidates
+    .filter((item) => item.category === category)
+    .sort(
+      (a, b) =>
+        b.activeTeams30d - a.activeTeams30d ||
+        b.installTeams30d - a.installTeams30d ||
+        b.ratingAverageTenths - a.ratingAverageTenths ||
+        packageOrder(a, b)
+    );
 }
 
-export function recentQualityRecommendations(candidates: readonly MarketplaceRecommendationCandidate[], now: Date): MarketplaceRecommendationCandidate[] {
+export function recentQualityRecommendations(
+  candidates: readonly MarketplaceRecommendationCandidate[],
+  now: Date
+): MarketplaceRecommendationCandidate[] {
   const cutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
-  return candidates.filter((item) => (item.tier === 'QUALITY' || item.tier === 'FEATURED') && (item.qualityQualifiedAt?.getTime() ?? 0) >= cutoff)
-    .sort((a, b) => (b.qualityQualifiedAt?.getTime() ?? 0) - (a.qualityQualifiedAt?.getTime() ?? 0) || packageOrder(a, b));
+  return candidates
+    .filter(
+      (item) =>
+        (item.tier === 'QUALITY' || item.tier === 'FEATURED') &&
+        (item.qualityQualifiedAt?.getTime() ?? 0) >= cutoff
+    )
+    .sort(
+      (a, b) =>
+        (b.qualityQualifiedAt?.getTime() ?? 0) - (a.qualityQualifiedAt?.getTime() ?? 0) ||
+        packageOrder(a, b)
+    );
 }

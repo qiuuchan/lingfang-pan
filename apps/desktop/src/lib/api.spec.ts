@@ -8,16 +8,24 @@ afterEach(() => {
 describe('api structured errors', () => {
   it('preserves nested product code, status and requestId', async () => {
     configureApiBase('https://platform.example');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      error: {
-        message: '团队额度不足',
-        code: 'insufficient_balance',
-        requestId: 'req-body',
-      },
-    }), {
-      status: 402,
-      headers: { 'Content-Type': 'application/json', 'x-request-id': 'req-header' },
-    })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: '团队额度不足',
+              code: 'insufficient_balance',
+              requestId: 'req-body',
+            },
+          }),
+          {
+            status: 402,
+            headers: { 'Content-Type': 'application/json', 'x-request-id': 'req-header' },
+          }
+        )
+      )
+    );
 
     const error = await api('/api/relay/v1/chat/completions').catch((caught) => caught as ApiError);
     expect(error).toMatchObject({
@@ -30,22 +38,34 @@ describe('api structured errors', () => {
 
   it('sets the host-selected plugin telemetry header', async () => {
     configureApiBase('https://platform.example');
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await api('/api/relay/v1/images/generations', { clientSource: 'desktop-plugin-test' });
 
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ 'X-Client': 'desktop-plugin-test' });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'X-Client': 'desktop-plugin-test',
+    });
   });
 
   it('forwards host-owned idempotency headers without losing standard headers', async () => {
     configureApiBase('https://platform.example');
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
     vi.stubGlobal('fetch', fetchMock);
-    await api('/api/plugin-packages/package-1/purchase', { method: 'POST', headers: { 'Idempotency-Key': 'purchase-1' }, body: { expectedPriceVersion: 'pv1.token' } });
+    await api('/api/plugin-packages/package-1/purchase', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'purchase-1' },
+      body: { expectedPriceVersion: 'pv1.token' },
+    });
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       'Content-Type': 'application/json',
       'Idempotency-Key': 'purchase-1',

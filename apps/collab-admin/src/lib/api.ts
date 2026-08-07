@@ -25,9 +25,11 @@ function readCsrfToken(): string {
 }
 
 export function apiBase() {
-  return import.meta.env.VITE_API_BASE_URL
-    || import.meta.env.VITE_COLLAB_API_BASE
-    || (import.meta.env.DEV ? 'http://localhost:19006' : '');
+  return (
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_COLLAB_API_BASE ||
+    (import.meta.env.DEV ? 'http://localhost:19006' : '')
+  );
 }
 
 // ADMIN-06 修复：通用请求超时（30s）。
@@ -99,24 +101,25 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   };
   if (options.signal?.aborted) abortFromCaller();
   else options.signal?.addEventListener('abort', abortFromCaller, { once: true });
-  const timer = timeoutMs > 0
-    ? setTimeout(() => {
-        if (controller.signal.aborted) return;
-        abortSource = 'timeout';
-        controller.abort();
-      }, timeoutMs)
-    : null;
+  const timer =
+    timeoutMs > 0
+      ? setTimeout(() => {
+          if (controller.signal.aborted) return;
+          abortSource = 'timeout';
+          controller.abort();
+        }, timeoutMs)
+      : null;
   try {
     response = await fetch(`${apiBase()}${path}`, {
       method: options.method || 'GET',
       headers,
       // 跨域（开发直连 :19006）或同源（生产经 nginx）均携带 Cookie，使 HttpOnly 会话生效。
       credentials: 'include',
-      body: isFormData ? options.formData : (options.body ? JSON.stringify(options.body) : undefined),
+      body: isFormData ? options.formData : options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
     try {
-      data = await response.json() as unknown;
+      data = (await response.json()) as unknown;
     } catch (err) {
       // 主动取消或超时也会中断 body 读取，必须交给外层按来源分类；普通非 JSON 响应沿用空对象兜底。
       if (controller.signal.aborted) throw err;
@@ -143,7 +146,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     options.signal?.removeEventListener('abort', abortFromCaller);
   }
   if (!response.ok) {
-    const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+    const payload = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
     const rawMessage = typeof payload.message === 'string' ? payload.message : response.statusText;
     // 5xx 服务端错误不向管理员界面泄露原始消息（可能含堆栈/内部路径），改用通用文案 + 追踪号；
     // 4xx 由后端 AppExceptionFilter 已语义化，保留原始 message 便于前端提示。
@@ -165,18 +168,29 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
         return api<T>(path, { ...rest, _retried: true });
       }
       // 续签失败：会话已失效，清空前端 session 并提示重新登录。
-      try { window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); } catch { /* 浏览器环境兜底 */ }
+      try {
+        window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      } catch {
+        /* 浏览器环境兜底 */
+      }
     }
     throw error;
   }
   return data as T;
 }
 
-export const isPlatformAdminSession = (session: AdminSession | null) => session?.user.platformRole === 'PLATFORM_ADMIN';
+export const isPlatformAdminSession = (session: AdminSession | null) =>
+  session?.user.platformRole === 'PLATFORM_ADMIN';
 
 export interface AdminSession {
   token?: string;
-  user: { id: string; email: string; displayName: string; platformRole: 'NONE' | 'PLATFORM_ADMIN'; status: string };
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    platformRole: 'NONE' | 'PLATFORM_ADMIN';
+    status: string;
+  };
   onboarding: string;
 }
 

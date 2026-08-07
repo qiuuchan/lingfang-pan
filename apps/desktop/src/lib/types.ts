@@ -3,7 +3,13 @@ import { formatTimestamp } from './time';
 
 export type PlatformRole = 'NONE' | 'PLATFORM_ADMIN';
 export type TeamRole = string;
-export type OnboardingState = 'NEEDS_INVITATION' | 'PENDING_APPROVAL' | 'APPLICATION_REJECTED' | 'TEAM_SPACE' | 'TEAM_ADMIN_SPACE' | 'PLATFORM_ADMIN_WEB_ONLY';
+export type OnboardingState =
+  | 'NEEDS_INVITATION'
+  | 'PENDING_APPROVAL'
+  | 'APPLICATION_REJECTED'
+  | 'TEAM_SPACE'
+  | 'TEAM_ADMIN_SPACE'
+  | 'PLATFORM_ADMIN_WEB_ONLY';
 
 export interface Session {
   token: string | null;
@@ -22,8 +28,20 @@ export interface Session {
 
 export interface CollabSessionResponse {
   token?: string;
-  user: { id: string; email: string; displayName: string; platformRole: PlatformRole; status: string };
-  team: { id: string; name: string; slug: string; role: TeamRole; teamRoleId?: string | null } | null;
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    platformRole: PlatformRole;
+    status: string;
+  };
+  team: {
+    id: string;
+    name: string;
+    slug: string;
+    role: TeamRole;
+    teamRoleId?: string | null;
+  } | null;
   /** RBAC：当前用户权限码列表（后端 sessionFor 注入）。 */
   permissions?: string[];
   application: TeamAdminApplication | null;
@@ -220,7 +238,17 @@ export type AccountSettingsTab = 'account' | 'team-wallet' | 'settings';
 // 'creator' 保留为 setView 拦截键（拦截后切到 develop-plugins）；
 // 'team-wallet' | 'settings' 同为 setView 拦截转独立悬浮窗。
 export type PluginWorkspaceMode = 'run' | 'develop';
-export type View = 'home' | 'run-plugins' | 'develop-plugins' | 'draft-plugins' | 'creator' | 'team-wallet' | 'team-admin' | 'settings' | 'review' | 'schedules';
+export type View =
+  | 'home'
+  | 'run-plugins'
+  | 'develop-plugins'
+  | 'draft-plugins'
+  | 'creator'
+  | 'team-wallet'
+  | 'team-admin'
+  | 'settings'
+  | 'review'
+  | 'schedules';
 
 // RBAC：团队角色 + 权限码 + 插件授权（与后端 Role/PermissionEntry/PluginGrant + contract rbac.ts 对齐）。
 export type RoleScope = 'PLATFORM' | 'TEAM';

@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../plugin-artifact', async () => {
   const original = await vi.importActual<typeof import('../plugin-artifact')>('../plugin-artifact');
-  return { ...original, readPluginArtifactEntry: vi.fn(async (_path: string, entry: string) => Buffer.from(`asset:${entry}`)) };
+  return {
+    ...original,
+    readPluginArtifactEntry: vi.fn(async (_path: string, entry: string) =>
+      Buffer.from(`asset:${entry}`)
+    ),
+  };
 });
 
 import { PLUGIN_AI_POLICY_VERSION } from '../plugin-ai-policy';
@@ -24,7 +29,10 @@ function row(overrides: Record<string, unknown> = {}) {
       sha256: artifactSha256,
       artifactKey: 'pkg/1.0.0/hash.lfplugin',
       manifest: { runtime_type: 'client', entry: 'ui/index.html' },
-      fileManifest: [{ path: 'ui/index.html', sizeBytes: 'asset:ui/index.html'.length }, { path: 'ui/app.js', sizeBytes: 'asset:ui/app.js'.length }],
+      fileManifest: [
+        { path: 'ui/index.html', sizeBytes: 'asset:ui/index.html'.length },
+        { path: 'ui/app.js', sizeBytes: 'asset:ui/app.js'.length },
+      ],
       status: 'PUBLISHED',
       marketReviewStatus: 'APPROVED',
       aiPolicyVersion: PLUGIN_AI_POLICY_VERSION,
@@ -39,13 +47,19 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe('WebPreviewAssetService', () => {
-  beforeEach(() => { delete process.env.CLIENT_PLUGIN_PREVIEW_ENABLED; });
+  beforeEach(() => {
+    delete process.env.CLIENT_PLUGIN_PREVIEW_ENABLED;
+  });
 
   it('reads only a session-bound file from the exact current approved client release', async () => {
-    const download = vi.fn(async () => ({ kind: 'stream' as const, stream: Readable.from('zip'), sizeBytes: 3 }));
+    const download = vi.fn(async () => ({
+      kind: 'stream' as const,
+      stream: Readable.from('zip'),
+      sizeBytes: 3,
+    }));
     const service = new WebPreviewAssetService(
       { webPreviewSession: { findFirst: vi.fn(async () => row()) } } as never,
-      { download } as never,
+      { download } as never
     );
     await expect(service.read(row().id, 'ui/app.js')).resolves.toMatchObject({
       body: Buffer.from('asset:ui/app.js'),
@@ -60,7 +74,7 @@ describe('WebPreviewAssetService', () => {
     const download = vi.fn();
     const service = new WebPreviewAssetService(
       { webPreviewSession: { findFirst: vi.fn(async () => row()) } } as never,
-      { download } as never,
+      { download } as never
     );
     await expect(service.read(row().id, '../secret')).rejects.toMatchObject({ status: 404 });
     expect(download).not.toHaveBeenCalled();
@@ -71,9 +85,12 @@ describe('WebPreviewAssetService', () => {
     stale.release.package.listing.currentReleaseId = '44444444-4444-4444-8444-444444444444';
     const service = new WebPreviewAssetService(
       { webPreviewSession: { findFirst: vi.fn(async () => stale) } } as never,
-      { download: vi.fn() } as never,
+      { download: vi.fn() } as never
     );
-    await expect(service.read(stale.id, undefined)).rejects.toMatchObject({ status: 410, code: 'web_preview_release_unavailable' });
+    await expect(service.read(stale.id, undefined)).rejects.toMatchObject({
+      status: 410,
+      code: 'web_preview_release_unavailable',
+    });
   });
 
   it('fails closed when stored artifact bytes no longer match the reviewed release sha256', async () => {
@@ -82,8 +99,17 @@ describe('WebPreviewAssetService', () => {
     corrupted.release.sha256 = 'f'.repeat(64);
     const service = new WebPreviewAssetService(
       { webPreviewSession: { findFirst: vi.fn(async () => corrupted) } } as never,
-      { download: vi.fn(async () => ({ kind: 'stream' as const, stream: Readable.from('zip'), sizeBytes: 3 })) } as never,
+      {
+        download: vi.fn(async () => ({
+          kind: 'stream' as const,
+          stream: Readable.from('zip'),
+          sizeBytes: 3,
+        })),
+      } as never
     );
-    await expect(service.read(corrupted.id, undefined)).rejects.toMatchObject({ status: 410, code: 'web_preview_artifact_mismatch' });
+    await expect(service.read(corrupted.id, undefined)).rejects.toMatchObject({
+      status: 410,
+      code: 'web_preview_artifact_mismatch',
+    });
   });
 });

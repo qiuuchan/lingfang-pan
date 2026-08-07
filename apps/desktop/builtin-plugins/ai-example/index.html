@@ -1,395 +1,400 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>AI 能力实例</title>
-  <style>
-    :root {
-      color-scheme: light;
-      font-family: var(--lf-font-sans, Inter, "Microsoft YaHei", system-ui, sans-serif);
-      background: var(--lf-color-bg, #f8fafc);
-      color: var(--lf-color-text, #172033);
-    }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AI 能力实例</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: var(--lf-font-sans, Inter, 'Microsoft YaHei', system-ui, sans-serif);
+        background: var(--lf-color-bg, #f8fafc);
+        color: var(--lf-color-text, #172033);
+      }
 
-    * {
-      box-sizing: border-box;
-    }
+      * {
+        box-sizing: border-box;
+      }
 
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: var(--lf-color-bg, #f8fafc);
-    }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--lf-color-bg, #f8fafc);
+      }
 
-    main {
-      width: min(920px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 28px 0;
-    }
-
-    header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.2;
-      font-weight: 650;
-      letter-spacing: 0;
-    }
-
-    .subtitle {
-      margin: 6px 0 0;
-      color: var(--lf-color-muted-text, #64748b);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    .model-switch {
-      display: inline-grid;
-      grid-template-columns: repeat(2, minmax(68px, 1fr));
-      gap: 4px;
-      padding: 4px;
-      border: 1px solid var(--lf-color-border, #d7dde7);
-      border-radius: 10px;
-      background: var(--lf-color-surface, #ffffff);
-      flex: 0 0 auto;
-    }
-
-    .model-switch button {
-      min-height: 32px;
-      border: 0;
-      border-radius: 7px;
-      background: transparent;
-      color: var(--lf-color-muted-text, #64748b);
-      cursor: pointer;
-      font: inherit;
-      font-size: 13px;
-    }
-
-    .model-switch button.active {
-      background: var(--lf-color-primary, #2563eb);
-      color: var(--lf-color-primary-foreground, #ffffff);
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 14px;
-    }
-
-    section {
-      min-width: 0;
-      border: 1px solid var(--lf-color-border, #d7dde7);
-      border-radius: 12px;
-      background: var(--lf-color-surface, #ffffff);
-      padding: 14px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-    }
-
-    h2 {
-      margin: 0 0 10px;
-      font-size: 15px;
-      line-height: 1.3;
-      font-weight: 650;
-      letter-spacing: 0;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--lf-color-muted-text, #64748b);
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 112px;
-      resize: vertical;
-      border: 1px solid var(--lf-color-border, #d7dde7);
-      border-radius: 10px;
-      padding: 10px 12px;
-      color: inherit;
-      background: var(--lf-color-input, #ffffff);
-      font: inherit;
-      font-size: 14px;
-      line-height: 1.5;
-      outline: none;
-    }
-
-    textarea:focus {
-      border-color: var(--lf-color-primary, #2563eb);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--lf-color-primary, #2563eb) 18%, transparent);
-    }
-
-    .actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 10px;
-    }
-
-    .primary {
-      min-height: 36px;
-      border: 0;
-      border-radius: 9px;
-      background: var(--lf-color-primary, #2563eb);
-      color: var(--lf-color-primary-foreground, #ffffff);
-      cursor: pointer;
-      font: inherit;
-      font-size: 14px;
-      font-weight: 600;
-      padding: 0 14px;
-    }
-
-    .secondary {
-      min-height: 36px;
-      border: 1px solid var(--lf-color-border, #d7dde7);
-      border-radius: 9px;
-      background: var(--lf-color-surface, #ffffff);
-      color: inherit;
-      cursor: pointer;
-      font: inherit;
-      font-size: 14px;
-      padding: 0 12px;
-    }
-
-    button:disabled {
-      cursor: default;
-      opacity: 0.58;
-    }
-
-    .output {
-      min-height: 132px;
-      margin-top: 12px;
-      border: 1px solid var(--lf-color-border, #d7dde7);
-      border-radius: 10px;
-      background: var(--lf-color-muted, #f1f5f9);
-      padding: 12px;
-      color: var(--lf-color-text, #172033);
-      font-size: 14px;
-      line-height: 1.6;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-    }
-
-    .image-box {
-      display: grid;
-      place-items: center;
-      min-height: 220px;
-      margin-top: 12px;
-      border: 1px solid var(--lf-color-border, #d7dde7);
-      border-radius: 10px;
-      background: var(--lf-color-muted, #f1f5f9);
-      overflow: hidden;
-    }
-
-    .image-box img {
-      width: 100%;
-      height: 100%;
-      max-height: 420px;
-      object-fit: contain;
-      display: block;
-    }
-
-    .placeholder {
-      color: var(--lf-color-muted-text, #64748b);
-      font-size: 13px;
-      text-align: center;
-      padding: 18px;
-    }
-
-    .status {
-      margin-top: 12px;
-      min-height: 20px;
-      color: var(--lf-color-muted-text, #64748b);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    .status.error {
-      color: var(--lf-color-danger, #dc2626);
-    }
-
-    @media (max-width: 760px) {
       main {
-        width: min(100vw - 24px, 920px);
-        padding: 18px 0;
+        width: min(920px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 28px 0;
       }
 
       header {
-        flex-direction: column;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        line-height: 1.2;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--lf-color-muted-text, #64748b);
+        font-size: 13px;
+        line-height: 1.6;
       }
 
       .model-switch {
-        width: 100%;
+        display: inline-grid;
+        grid-template-columns: repeat(2, minmax(68px, 1fr));
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--lf-color-border, #d7dde7);
+        border-radius: 10px;
+        background: var(--lf-color-surface, #ffffff);
+        flex: 0 0 auto;
+      }
+
+      .model-switch button {
+        min-height: 32px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--lf-color-muted-text, #64748b);
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .model-switch button.active {
+        background: var(--lf-color-primary, #2563eb);
+        color: var(--lf-color-primary-foreground, #ffffff);
       }
 
       .grid {
-        grid-template-columns: 1fr;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 14px;
       }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div>
-        <h1>AI 能力实例</h1>
-        <p class="subtitle">对话和生图都通过平台 SDK 执行，模型选择只使用平台标识。</p>
+
+      section {
+        min-width: 0;
+        border: 1px solid var(--lf-color-border, #d7dde7);
+        border-radius: 12px;
+        background: var(--lf-color-surface, #ffffff);
+        padding: 14px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+        line-height: 1.3;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--lf-color-muted-text, #64748b);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 112px;
+        resize: vertical;
+        border: 1px solid var(--lf-color-border, #d7dde7);
+        border-radius: 10px;
+        padding: 10px 12px;
+        color: inherit;
+        background: var(--lf-color-input, #ffffff);
+        font: inherit;
+        font-size: 14px;
+        line-height: 1.5;
+        outline: none;
+      }
+
+      textarea:focus {
+        border-color: var(--lf-color-primary, #2563eb);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--lf-color-primary, #2563eb) 18%, transparent);
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .primary {
+        min-height: 36px;
+        border: 0;
+        border-radius: 9px;
+        background: var(--lf-color-primary, #2563eb);
+        color: var(--lf-color-primary-foreground, #ffffff);
+        cursor: pointer;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        padding: 0 14px;
+      }
+
+      .secondary {
+        min-height: 36px;
+        border: 1px solid var(--lf-color-border, #d7dde7);
+        border-radius: 9px;
+        background: var(--lf-color-surface, #ffffff);
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+        font-size: 14px;
+        padding: 0 12px;
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.58;
+      }
+
+      .output {
+        min-height: 132px;
+        margin-top: 12px;
+        border: 1px solid var(--lf-color-border, #d7dde7);
+        border-radius: 10px;
+        background: var(--lf-color-muted, #f1f5f9);
+        padding: 12px;
+        color: var(--lf-color-text, #172033);
+        font-size: 14px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .image-box {
+        display: grid;
+        place-items: center;
+        min-height: 220px;
+        margin-top: 12px;
+        border: 1px solid var(--lf-color-border, #d7dde7);
+        border-radius: 10px;
+        background: var(--lf-color-muted, #f1f5f9);
+        overflow: hidden;
+      }
+
+      .image-box img {
+        width: 100%;
+        height: 100%;
+        max-height: 420px;
+        object-fit: contain;
+        display: block;
+      }
+
+      .placeholder {
+        color: var(--lf-color-muted-text, #64748b);
+        font-size: 13px;
+        text-align: center;
+        padding: 18px;
+      }
+
+      .status {
+        margin-top: 12px;
+        min-height: 20px;
+        color: var(--lf-color-muted-text, #64748b);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .status.error {
+        color: var(--lf-color-danger, #dc2626);
+      }
+
+      @media (max-width: 760px) {
+        main {
+          width: min(100vw - 24px, 920px);
+          padding: 18px 0;
+        }
+
+        header {
+          flex-direction: column;
+        }
+
+        .model-switch {
+          width: 100%;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>AI 能力实例</h1>
+          <p class="subtitle">对话和生图都通过平台 SDK 执行，模型选择只使用平台标识。</p>
+        </div>
+        <div class="model-switch" aria-label="模型">
+          <button id="fastModel" class="active" type="button" data-model="fast">快速</button>
+          <button id="premiumModel" type="button" data-model="premium">高级</button>
+        </div>
+      </header>
+
+      <div class="grid">
+        <section>
+          <h2>对话</h2>
+          <label for="chatPrompt">提示词</label>
+          <textarea id="chatPrompt">用三句话写一段适合插件市场的产品介绍。</textarea>
+          <div class="actions">
+            <button id="chatButton" class="primary" type="button">生成回复</button>
+            <button id="clearChat" class="secondary" type="button">清空</button>
+          </div>
+          <div id="chatOutput" class="output">等待生成</div>
+        </section>
+
+        <section>
+          <h2>生图</h2>
+          <label for="imagePrompt">画面描述</label>
+          <textarea id="imagePrompt">
+一张安静的桌面工作台，屏幕里打开插件市场，清爽插画风格，柔和自然光</textarea>
+          <div class="actions">
+            <button id="imageButton" class="primary" type="button">生成图片</button>
+            <button id="clearImage" class="secondary" type="button">清空</button>
+          </div>
+          <div id="imageOutput" class="image-box">
+            <div class="placeholder">等待生成</div>
+          </div>
+        </section>
       </div>
-      <div class="model-switch" aria-label="模型">
-        <button id="fastModel" class="active" type="button" data-model="fast">快速</button>
-        <button id="premiumModel" type="button" data-model="premium">高级</button>
-      </div>
-    </header>
 
-    <div class="grid">
-      <section>
-        <h2>对话</h2>
-        <label for="chatPrompt">提示词</label>
-        <textarea id="chatPrompt">用三句话写一段适合插件市场的产品介绍。</textarea>
-        <div class="actions">
-          <button id="chatButton" class="primary" type="button">生成回复</button>
-          <button id="clearChat" class="secondary" type="button">清空</button>
-        </div>
-        <div id="chatOutput" class="output">等待生成</div>
-      </section>
+      <div id="status" class="status"></div>
+    </main>
 
-      <section>
-        <h2>生图</h2>
-        <label for="imagePrompt">画面描述</label>
-        <textarea id="imagePrompt">一张安静的桌面工作台，屏幕里打开插件市场，清爽插画风格，柔和自然光</textarea>
-        <div class="actions">
-          <button id="imageButton" class="primary" type="button">生成图片</button>
-          <button id="clearImage" class="secondary" type="button">清空</button>
-        </div>
-        <div id="imageOutput" class="image-box">
-          <div class="placeholder">等待生成</div>
-        </div>
-      </section>
-    </div>
+    <script>
+      const state = {
+        model: 'fast',
+        busy: false,
+      };
 
-    <div id="status" class="status"></div>
-  </main>
+      const $ = (id) => document.getElementById(id);
+      const status = $('status');
+      const modelButtons = [$('fastModel'), $('premiumModel')];
+      const chatButton = $('chatButton');
+      const imageButton = $('imageButton');
+      const chatOutput = $('chatOutput');
+      const imageOutput = $('imageOutput');
 
-  <script>
-    const state = {
-      model: 'fast',
-      busy: false,
-    };
-
-    const $ = (id) => document.getElementById(id);
-    const status = $('status');
-    const modelButtons = [$('fastModel'), $('premiumModel')];
-    const chatButton = $('chatButton');
-    const imageButton = $('imageButton');
-    const chatOutput = $('chatOutput');
-    const imageOutput = $('imageOutput');
-
-    function setStatus(message, error) {
-      status.textContent = message || '';
-      status.className = error ? 'status error' : 'status';
-    }
-
-    function setBusy(value) {
-      state.busy = value;
-      chatButton.disabled = value;
-      imageButton.disabled = value;
-      for (const button of modelButtons) button.disabled = value;
-    }
-
-    function setModel(model) {
-      state.model = model;
-      for (const button of modelButtons) {
-        button.classList.toggle('active', button.dataset.model === model);
+      function setStatus(message, error) {
+        status.textContent = message || '';
+        status.className = error ? 'status error' : 'status';
       }
-    }
 
-    function requireSdk() {
-      if (!window.sdk?.llm?.chat || !window.sdk?.image?.generate) {
-        throw new Error('平台能力暂不可用，请确认已在灵坊桌面端运行插件。');
+      function setBusy(value) {
+        state.busy = value;
+        chatButton.disabled = value;
+        imageButton.disabled = value;
+        for (const button of modelButtons) button.disabled = value;
       }
-      return window.sdk;
-    }
 
-    async function runChat() {
-      const prompt = $('chatPrompt').value.trim();
-      if (!prompt) {
-        setStatus('请输入提示词。', true);
-        return;
+      function setModel(model) {
+        state.model = model;
+        for (const button of modelButtons) {
+          button.classList.toggle('active', button.dataset.model === model);
+        }
       }
-      setBusy(true);
-      setStatus('正在生成回复…');
-      chatOutput.textContent = '生成中…';
-      try {
-        const sdk = requireSdk();
-        const reply = await sdk.llm.chat({
-          model: state.model,
-          messages: [{ role: 'user', content: prompt }],
-        });
-        chatOutput.textContent = reply || '平台返回为空';
-        setStatus('回复已生成。');
-      } catch (error) {
-        chatOutput.textContent = '生成失败';
-        setStatus(error instanceof Error ? error.message : String(error), true);
-      } finally {
-        setBusy(false);
-      }
-    }
 
-    async function runImage() {
-      const prompt = $('imagePrompt').value.trim();
-      if (!prompt) {
-        setStatus('请输入画面描述。', true);
-        return;
+      function requireSdk() {
+        if (!window.sdk?.llm?.chat || !window.sdk?.image?.generate) {
+          throw new Error('平台能力暂不可用，请确认已在灵坊桌面端运行插件。');
+        }
+        return window.sdk;
       }
-      setBusy(true);
-      setStatus('正在生成图片…');
-      imageOutput.innerHTML = '<div class="placeholder">生成中…</div>';
-      try {
-        const sdk = requireSdk();
-        const result = await sdk.image.generate({
-          model: state.model,
-          prompt,
-          size: '1024x1024',
-          n: 1,
-        });
-        const src = Array.isArray(result?.images) ? result.images[0] : '';
-        if (!src) throw new Error('平台未返回图片。');
-        imageOutput.innerHTML = '';
-        const image = document.createElement('img');
-        image.alt = '生成图片';
-        image.src = src;
-        imageOutput.appendChild(image);
-        setStatus('图片已生成。');
-      } catch (error) {
-        imageOutput.innerHTML = '<div class="placeholder">生成失败</div>';
-        setStatus(error instanceof Error ? error.message : String(error), true);
-      } finally {
-        setBusy(false);
-      }
-    }
 
-    $('fastModel').addEventListener('click', () => setModel('fast'));
-    $('premiumModel').addEventListener('click', () => setModel('premium'));
-    chatButton.addEventListener('click', () => { void runChat(); });
-    imageButton.addEventListener('click', () => { void runImage(); });
-    $('clearChat').addEventListener('click', () => {
-      chatOutput.textContent = '等待生成';
-      setStatus('');
-    });
-    $('clearImage').addEventListener('click', () => {
-      imageOutput.innerHTML = '<div class="placeholder">等待生成</div>';
-      setStatus('');
-    });
-  </script>
-</body>
+      async function runChat() {
+        const prompt = $('chatPrompt').value.trim();
+        if (!prompt) {
+          setStatus('请输入提示词。', true);
+          return;
+        }
+        setBusy(true);
+        setStatus('正在生成回复…');
+        chatOutput.textContent = '生成中…';
+        try {
+          const sdk = requireSdk();
+          const reply = await sdk.llm.chat({
+            model: state.model,
+            messages: [{ role: 'user', content: prompt }],
+          });
+          chatOutput.textContent = reply || '平台返回为空';
+          setStatus('回复已生成。');
+        } catch (error) {
+          chatOutput.textContent = '生成失败';
+          setStatus(error instanceof Error ? error.message : String(error), true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function runImage() {
+        const prompt = $('imagePrompt').value.trim();
+        if (!prompt) {
+          setStatus('请输入画面描述。', true);
+          return;
+        }
+        setBusy(true);
+        setStatus('正在生成图片…');
+        imageOutput.innerHTML = '<div class="placeholder">生成中…</div>';
+        try {
+          const sdk = requireSdk();
+          const result = await sdk.image.generate({
+            model: state.model,
+            prompt,
+            size: '1024x1024',
+            n: 1,
+          });
+          const src = Array.isArray(result?.images) ? result.images[0] : '';
+          if (!src) throw new Error('平台未返回图片。');
+          imageOutput.innerHTML = '';
+          const image = document.createElement('img');
+          image.alt = '生成图片';
+          image.src = src;
+          imageOutput.appendChild(image);
+          setStatus('图片已生成。');
+        } catch (error) {
+          imageOutput.innerHTML = '<div class="placeholder">生成失败</div>';
+          setStatus(error instanceof Error ? error.message : String(error), true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      $('fastModel').addEventListener('click', () => setModel('fast'));
+      $('premiumModel').addEventListener('click', () => setModel('premium'));
+      chatButton.addEventListener('click', () => {
+        void runChat();
+      });
+      imageButton.addEventListener('click', () => {
+        void runImage();
+      });
+      $('clearChat').addEventListener('click', () => {
+        chatOutput.textContent = '等待生成';
+        setStatus('');
+      });
+      $('clearImage').addEventListener('click', () => {
+        imageOutput.innerHTML = '<div class="placeholder">等待生成</div>';
+        setStatus('');
+      });
+    </script>
+  </body>
 </html>

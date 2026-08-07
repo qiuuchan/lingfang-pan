@@ -14,7 +14,7 @@ import type { PermissionEntry, PermissionModule } from '@/lib/types';
  *  显示名优先用自定义分组覆盖，否则用权限自带 moduleLabel。 */
 export function buildModules(
   permissions: PermissionEntry[],
-  groupLabelOverride: Map<string, string>,
+  groupLabelOverride: Map<string, string>
 ): PermissionModule[] {
   const map = new Map<string, PermissionModule>();
   for (const p of permissions) {
@@ -31,7 +31,9 @@ export function buildModules(
     }
     m.operations.push(p);
   }
-  return [...map.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.moduleKey.localeCompare(b.moduleKey));
+  return [...map.values()].sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.moduleKey.localeCompare(b.moduleKey)
+  );
 }
 
 /** 两级权限勾选面板：模块父级（全选/取消全选）→ 操作子项。
@@ -52,13 +54,21 @@ export function PermissionChecklist({
   onToggleAll: (codes: string[]) => void;
   lock?: boolean;
 }) {
-  const modules = useMemo(() => buildModules(permissions, groupLabelOverride), [permissions, groupLabelOverride]);
+  const modules = useMemo(
+    () => buildModules(permissions, groupLabelOverride),
+    [permissions, groupLabelOverride]
+  );
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label>权限分配{lock && <span className="ml-2 text-xs text-muted-foreground">（内置角色锁定）</span>}</Label>
-        <span className="text-xs text-muted-foreground">已选 {selected.size} / {permissions.length}</span>
+        <Label>
+          权限分配
+          {lock && <span className="ml-2 text-xs text-muted-foreground">（内置角色锁定）</span>}
+        </Label>
+        <span className="text-xs text-muted-foreground">
+          已选 {selected.size} / {permissions.length}
+        </span>
       </div>
       <div className={`rounded-md border p-3 ${lock ? 'pointer-events-none opacity-60' : ''}`}>
         <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
@@ -68,10 +78,7 @@ export function PermissionChecklist({
             return (
               <div key={m.moduleKey}>
                 <div className="mb-1.5 flex items-center gap-2">
-                  <Checkbox
-                    checked={allOn}
-                    onCheckedChange={() => onToggleAll(codes)}
-                  />
+                  <Checkbox checked={allOn} onCheckedChange={() => onToggleAll(codes)} />
                   <span className="text-sm font-medium">{m.moduleLabel}</span>
                   <span className="text-xs text-muted-foreground">{m.moduleKey}</span>
                 </div>

@@ -32,35 +32,47 @@ test('shared namespace declarations bind active and readable schema versions', (
   };
   expect(SharedNamespaceDeclaration.parse(declaration).active_schema_version).toBe(2);
   expect(() =>
-    SharedNamespaceDeclaration.parse({ ...declaration, active_schema_version: 3 })).toThrow();
+    SharedNamespaceDeclaration.parse({ ...declaration, active_schema_version: 3 })
+  ).toThrow();
   expect(() =>
     SharedNamespaceDeclaration.parse({
       ...declaration,
       schemas: [declaration.schemas[0], declaration.schemas[0]],
-    })).toThrow();
+    })
+  ).toThrow();
 });
 
 test('shared writes require schema version and support decimal CAS revisions', () => {
   expect(SharedWrite.safeParse({ value: { ok: true }, schema_version: 2 }).success).toBe(true);
-  expect(SharedWrite.safeParse({ value: null, schema_version: 1, expected_revision: '0007' }).success).toBe(true);
+  expect(
+    SharedWrite.safeParse({ value: null, schema_version: 1, expected_revision: '0007' }).success
+  ).toBe(true);
   expect(SharedWrite.safeParse({ value: null, schema_version: 0 }).success).toBe(false);
-  expect(SharedWrite.safeParse({ value: null, schema_version: 1, expected_revision: 'r7' }).success).toBe(false);
+  expect(
+    SharedWrite.safeParse({ value: null, schema_version: 1, expected_revision: 'r7' }).success
+  ).toBe(false);
 });
 
 test('namespace lifecycle and explicit migrations have generation-safe contracts', () => {
-  expect(SharedNamespaceReactivate.parse({ active_schema_version: 3 }).active_schema_version).toBe(3);
-  expect(SharedSchemaMigration.safeParse({
+  expect(SharedNamespaceReactivate.parse({ active_schema_version: 3 }).active_schema_version).toBe(
+    3
+  );
+  expect(
+    SharedSchemaMigration.safeParse({
       value: { version: 2 },
       source_schema_version: 1,
       target_schema_version: 2,
       expected_revision: '19',
-    }).success).toBe(true);
-  expect(SharedSchemaMigration.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    SharedSchemaMigration.safeParse({
       value: {},
       source_schema_version: 2,
       target_schema_version: 2,
       expected_revision: '19',
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
   const lifecycle = SharedNamespaceLifecycleResult.parse({
     namespace_id: 'namespace-1',
     namespace_generation: 4,
@@ -83,7 +95,9 @@ test('keys are normalized and reject path/control/reserved semantics', () => {
 test('JSON quota is measured as UTF-8 bytes', () => {
   const encoded = serializeSharedJson({ value: '🙂' });
   expect(encoded.bytes).toBe(new TextEncoder().encode(encoded.json).byteLength);
-  expect(() => serializeSharedJson('x'.repeat(SHARED_VALUE_MAX_BYTES))).toThrow(/shared_value_too_large/);
+  expect(() => serializeSharedJson('x'.repeat(SHARED_VALUE_MAX_BYTES))).toThrow(
+    /shared_value_too_large/
+  );
 });
 
 test('change event uses namespace cursor independent from value revision', () => {

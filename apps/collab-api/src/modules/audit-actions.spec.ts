@@ -5,7 +5,12 @@
 //  - AUDIT_CATEGORIES：8 个分类 key 齐全 + label 非空。
 //  - 跨前缀归类：invitation.* / team_admin_application.* → team；plugin.marketplace.* → marketplace。
 import { describe, expect, it } from 'vitest';
-import { auditActionCategory, auditActionLabel, AUDIT_ACTION_LABEL, AUDIT_CATEGORIES } from './audit-actions';
+import {
+  auditActionCategory,
+  auditActionLabel,
+  AUDIT_ACTION_LABEL,
+  AUDIT_CATEGORIES,
+} from './audit-actions';
 
 describe('audit-actions 分类推断', () => {
   it('auth 前缀归 auth', () => {
@@ -99,7 +104,16 @@ describe('audit-actions 中文说明', () => {
 describe('AUDIT_CATEGORIES 元数据', () => {
   it('包含 8 个分类 key', () => {
     const keys = AUDIT_CATEGORIES.map((c) => c.key);
-    expect(keys).toEqual(['auth', 'team', 'plugin', 'marketplace', 'wallet', 'llm', 'admin', 'system']);
+    expect(keys).toEqual([
+      'auth',
+      'team',
+      'plugin',
+      'marketplace',
+      'wallet',
+      'llm',
+      'admin',
+      'system',
+    ]);
   });
 
   it('每个分类有非空 label 与 description', () => {

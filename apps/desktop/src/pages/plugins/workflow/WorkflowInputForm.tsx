@@ -3,8 +3,8 @@ import type { PortableJsonSchemaNode } from '@lingfang/contract';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   initialWorkflowInput,
@@ -39,13 +39,33 @@ function dateTimeLocalValue(value: unknown): string {
 function FieldIssues({ issues, path }: { issues: WorkflowInputIssue[]; path: string[] }) {
   const exact = issues.filter((issue) => issue.path === pointer(path));
   if (!exact.length) return null;
-  return <div className="space-y-0.5 text-xs text-destructive">{exact.map((issue, index) => <p key={`${issue.path}-${index}`}>{issue.message}</p>)}</div>;
+  return (
+    <FieldError className="flex flex-col gap-0.5 text-xs">
+      {exact.map((issue, index) => (
+        <p key={`${issue.path}-${index}`}>{issue.message}</p>
+      ))}
+    </FieldError>
+  );
 }
 
-function JsonField({ value, onChange, disabled, artifact }: { value: unknown; onChange: (value: unknown) => void; disabled?: boolean; artifact?: boolean }) {
-  const [text, setText] = useState(() => value === undefined ? '' : JSON.stringify(value, null, 2));
+function JsonField({
+  value,
+  onChange,
+  disabled,
+  artifact,
+}: {
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled?: boolean;
+  artifact?: boolean;
+}) {
+  const [text, setText] = useState(() =>
+    value === undefined ? '' : JSON.stringify(value, null, 2)
+  );
   const [error, setError] = useState('');
-  useEffect(() => { setText(value === undefined ? '' : JSON.stringify(value, null, 2)); }, [value]);
+  useEffect(() => {
+    setText(value === undefined ? '' : JSON.stringify(value, null, 2));
+  }, [value]);
   const commit = () => {
     try {
       onChange(JSON.parse(text));
@@ -55,7 +75,7 @@ function JsonField({ value, onChange, disabled, artifact }: { value: unknown; on
     }
   };
   return (
-    <div className="space-y-1.5">
+    <div className="flex flex-col gap-1.5">
       <Textarea
         value={text}
         disabled={disabled}
@@ -66,7 +86,7 @@ function JsonField({ value, onChange, disabled, artifact }: { value: unknown; on
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <FieldError className="text-xs">{error}</FieldError>}
     </div>
   );
 }
@@ -91,133 +111,220 @@ function SchemaField({
   onChange: (value: unknown) => void;
 }) {
   const type = typeOf(schema);
+  const controlId = `workflow-${path.join('-')}`;
   if (!required && value === undefined) {
     return (
-      <div className="rounded-lg border border-dashed p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div><Label>{name}</Label><p className="mt-0.5 text-xs text-muted-foreground">可选 · {type || 'JSON'}</p></div>
-          <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange(initialWorkflowInput(schema))}>
-            <PlusIcon className="size-3.5" />填写
-          </Button>
+      <Field
+        orientation="horizontal"
+        className="justify-between gap-3 rounded-lg border border-dashed p-3"
+      >
+        <div className="flex flex-col gap-0.5">
+          <FieldLabel>{name}</FieldLabel>
+          <FieldDescription className="text-xs">可选 · {type || 'JSON'}</FieldDescription>
         </div>
-      </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => onChange(initialWorkflowInput(schema))}
+        >
+          <PlusIcon className="size-3.5" />
+          填写
+        </Button>
+      </Field>
     );
   }
 
   const removable = !required;
   const heading = (
     <div className="flex items-center justify-between gap-2">
-      <Label htmlFor={`workflow-${path.join('-')}`}>{name}{required && <span className="ml-1 text-destructive">*</span>}</Label>
+      <FieldLabel htmlFor={controlId}>
+        {name}
+        {required && <span className="ml-1 text-destructive">*</span>}
+      </FieldLabel>
       {removable && (
-        <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => onChange(undefined)}>
-          <Trash2Icon className="size-3.5" />清除
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onChange(undefined)}
+        >
+          <Trash2Icon className="size-3.5" />
+          清除
         </Button>
       )}
     </div>
   );
 
   if (schema.$ref) {
-    return <div className="space-y-1.5">{heading}<p className="text-xs text-muted-foreground">ArtifactRef（仅填写平台返回的引用，不粘贴二进制正文）</p><JsonField artifact value={value} disabled={disabled} onChange={onChange} /><FieldIssues issues={issues} path={path} /></div>;
+    return (
+      <Field>
+        {heading}
+        <FieldDescription className="text-xs">
+          ArtifactRef（仅填写平台返回的引用，不粘贴二进制正文）
+        </FieldDescription>
+        <JsonField artifact value={value} disabled={disabled} onChange={onChange} />
+        <FieldIssues issues={issues} path={path} />
+      </Field>
+    );
   }
   if ('const' in schema) {
-    return <div className="space-y-1.5">{heading}<pre className="overflow-auto rounded-md border bg-muted/50 p-2 text-xs">{JSON.stringify(schema.const, null, 2)}</pre><FieldIssues issues={issues} path={path} /></div>;
+    return (
+      <Field>
+        {heading}
+        <pre className="overflow-auto rounded-md border bg-muted/50 p-2 text-xs">
+          {JSON.stringify(schema.const, null, 2)}
+        </pre>
+        <FieldIssues issues={issues} path={path} />
+      </Field>
+    );
   }
   if (schema.enum?.length) {
     return (
-      <div className="space-y-1.5">
+      <Field>
         {heading}
         <select
-          id={`workflow-${path.join('-')}`}
+          id={controlId}
           value={JSON.stringify(value)}
           disabled={disabled}
           className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           onChange={(event) => onChange(JSON.parse(event.target.value))}
         >
-          {schema.enum.map((item, index) => <option key={index} value={JSON.stringify(item)}>{typeof item === 'string' ? item : JSON.stringify(item)}</option>)}
+          {schema.enum.map((item, index) => (
+            <option key={index} value={JSON.stringify(item)}>
+              {typeof item === 'string' ? item : JSON.stringify(item)}
+            </option>
+          ))}
         </select>
         <FieldIssues issues={issues} path={path} />
-      </div>
+      </Field>
     );
   }
   if (type === 'object') {
-    const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const record =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
     const requiredChildren = new Set(schema.required ?? []);
     return (
       <fieldset className="space-y-3 rounded-lg border p-3" disabled={disabled}>
-        <legend className="px-1 text-sm font-medium">{name}{required && <span className="ml-1 text-destructive">*</span>}</legend>
-        {Object.entries(schema.properties ?? {}).map(([childName, childSchema]) => (
-          <SchemaField
-            key={childName}
-            name={childName}
-            schema={childSchema}
-            value={record[childName]}
-            path={[...path, childName]}
-            required={requiredChildren.has(childName)}
-            issues={issues}
-            disabled={disabled}
-            onChange={(next) => onChange(setWorkflowInputValue(record, [childName], next))}
-          />
-        ))}
-        <FieldIssues issues={issues} path={path} />
+        <legend className="px-1 text-sm font-medium">
+          {name}
+          {required && <span className="ml-1 text-destructive">*</span>}
+        </legend>
+        <FieldGroup className="gap-3">
+          {Object.entries(schema.properties ?? {}).map(([childName, childSchema]) => (
+            <SchemaField
+              key={childName}
+              name={childName}
+              schema={childSchema}
+              value={record[childName]}
+              path={[...path, childName]}
+              required={requiredChildren.has(childName)}
+              issues={issues}
+              disabled={disabled}
+              onChange={(next) => onChange(setWorkflowInputValue(record, [childName], next))}
+            />
+          ))}
+          <FieldIssues issues={issues} path={path} />
+        </FieldGroup>
       </fieldset>
     );
   }
   if (type === 'array') {
-    return <div className="space-y-1.5">{heading}<JsonField value={value} disabled={disabled} onChange={onChange} /><FieldIssues issues={issues} path={path} /></div>;
+    return (
+      <Field>
+        {heading}
+        <JsonField value={value} disabled={disabled} onChange={onChange} />
+        <FieldIssues issues={issues} path={path} />
+      </Field>
+    );
   }
   if (type === 'boolean') {
     return (
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <Checkbox id={`workflow-${path.join('-')}`} checked={Boolean(value)} disabled={disabled} onCheckedChange={(checked) => onChange(Boolean(checked))} />
-          <Label htmlFor={`workflow-${path.join('-')}`}>{name}{required && <span className="ml-1 text-destructive">*</span>}</Label>
-        </div>
+      <Field>
+        <Field orientation="horizontal">
+          <Checkbox
+            id={controlId}
+            checked={Boolean(value)}
+            disabled={disabled}
+            onCheckedChange={(checked) => onChange(Boolean(checked))}
+          />
+          <FieldLabel htmlFor={controlId}>
+            {name}
+            {required && <span className="ml-1 text-destructive">*</span>}
+          </FieldLabel>
+        </Field>
         <FieldIssues issues={issues} path={path} />
-      </div>
+      </Field>
     );
   }
   if (type === 'number' || type === 'integer') {
     return (
-      <div className="space-y-1.5">
+      <Field>
         {heading}
         <Input
-          id={`workflow-${path.join('-')}`}
+          id={controlId}
           type="number"
           value={typeof value === 'number' ? value : ''}
           min={schema.minimum}
           max={schema.maximum}
-          step={type === 'integer' ? 1 : schema.multipleOf ?? 'any'}
+          step={type === 'integer' ? 1 : (schema.multipleOf ?? 'any')}
           disabled={disabled}
-          onChange={(event) => onChange(event.target.value === '' ? undefined : Number(event.target.value))}
+          onChange={(event) =>
+            onChange(event.target.value === '' ? undefined : Number(event.target.value))
+          }
         />
         <FieldIssues issues={issues} path={path} />
-      </div>
+      </Field>
     );
   }
   return (
-    <div className="space-y-1.5">
+    <Field>
       {heading}
       <Input
-        id={`workflow-${path.join('-')}`}
+        id={controlId}
         type={schema.format === 'date-time' ? 'datetime-local' : 'text'}
-        value={schema.format === 'date-time' ? dateTimeLocalValue(value) : typeof value === 'string' ? value : ''}
+        value={
+          schema.format === 'date-time'
+            ? dateTimeLocalValue(value)
+            : typeof value === 'string'
+              ? value
+              : ''
+        }
         minLength={schema.minLength}
         maxLength={schema.maxLength}
         disabled={disabled}
-        onChange={(event) => onChange(schema.format === 'date-time' && event.target.value ? new Date(event.target.value).toISOString() : event.target.value)}
+        onChange={(event) =>
+          onChange(
+            schema.format === 'date-time' && event.target.value
+              ? new Date(event.target.value).toISOString()
+              : event.target.value
+          )
+        }
       />
       <FieldIssues issues={issues} path={path} />
-    </div>
+    </Field>
   );
 }
 
 export function WorkflowInputForm({ schema, value, issues, disabled, onChange }: Props) {
-  const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   const required = new Set(schema.required ?? []);
   const properties = Object.entries(schema.properties ?? {});
-  if (!properties.length) return <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">此工作流不需要输入参数。</p>;
+  if (!properties.length)
+    return (
+      <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+        此工作流不需要输入参数。
+      </p>
+    );
   return (
-    <div className="space-y-4">
+    <FieldGroup className="gap-4">
       {properties.map(([name, childSchema]) => (
         <SchemaField
           key={name}
@@ -232,6 +339,6 @@ export function WorkflowInputForm({ schema, value, issues, disabled, onChange }:
         />
       ))}
       <FieldIssues issues={issues} path={[]} />
-    </div>
+    </FieldGroup>
   );
 }

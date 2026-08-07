@@ -44,16 +44,17 @@ export function CreateAccountDialog({
     if (password.length < 8) return toast.error('初始密码至少 8 位');
     const platformRole: PlatformRole = kind === 'admin' ? 'PLATFORM_ADMIN' : 'NONE';
     const ok = await run(
-      () => api('/api/admin/users', {
-        method: 'POST',
-        body: {
-          email: email.trim(),
-          password,
-          displayName: displayName.trim() || email.trim(),
-          platformRole,
-        },
-      }),
-      kind === 'admin' ? '平台管理员已创建' : '用户已创建',
+      () =>
+        api('/api/admin/users', {
+          method: 'POST',
+          body: {
+            email: email.trim(),
+            password,
+            displayName: displayName.trim() || email.trim(),
+            platformRole,
+          },
+        }),
+      kind === 'admin' ? '平台管理员已创建' : '用户已创建'
     );
     if (!ok) return;
     setOpen(false);
@@ -106,8 +107,12 @@ export function CreateAccountDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
-          <Button type="button" onClick={() => void create()}>创建</Button>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            取消
+          </Button>
+          <Button type="button" onClick={() => void create()}>
+            创建
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -148,7 +153,7 @@ export function EditAccountDialog({
     if (password.trim()) body.password = password;
     const ok = await run(
       () => api(`/api/admin/users/${user.id}`, { method: 'PATCH', body }),
-      kind === 'admin' ? '管理员信息已更新' : '用户信息已更新',
+      kind === 'admin' ? '管理员信息已更新' : '用户信息已更新'
     );
     if (!ok) return;
     setOpen(false);
@@ -158,11 +163,12 @@ export function EditAccountDialog({
   async function changePlatformRole() {
     const platformRole: PlatformRole = kind === 'admin' ? 'NONE' : 'PLATFORM_ADMIN';
     const ok = await run(
-      () => api(`/api/admin/users/${user.id}/platform-role`, {
-        method: 'PATCH',
-        body: { platformRole },
-      }),
-      kind === 'admin' ? '已降级为普通用户' : '已提升为平台管理员',
+      () =>
+        api(`/api/admin/users/${user.id}/platform-role`, {
+          method: 'PATCH',
+          body: { platformRole },
+        }),
+      kind === 'admin' ? '已降级为普通用户' : '已提升为平台管理员'
     );
     if (!ok) return;
     setOpen(false);
@@ -177,10 +183,12 @@ export function EditAccountDialog({
           <DialogTitle>{kind === 'admin' ? '编辑管理员' : '编辑用户'}</DialogTitle>
           <DialogDescription>{user.email}</DialogDescription>
         </DialogHeader>
-        <InfoGrid items={[
-          ['账号 ID', user.id],
-          ['当前角色', labelOf(user.platformRole)],
-        ]} />
+        <InfoGrid
+          items={[
+            ['账号 ID', user.id],
+            ['当前角色', labelOf(user.platformRole)],
+          ]}
+        />
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor={`edit-email-${user.id}`}>邮箱</Label>
@@ -219,13 +227,21 @@ export function EditAccountDialog({
             className="w-full"
             onClick={() => void changePlatformRole()}
           >
-            {kind === 'admin' ? <ShieldOffIcon className="size-4" /> : <ShieldCheckIcon className="size-4" />}
+            {kind === 'admin' ? (
+              <ShieldOffIcon className="size-4" />
+            ) : (
+              <ShieldCheckIcon className="size-4" />
+            )}
             {kind === 'admin' ? '降级为普通用户' : '提升为平台管理员'}
           </Button>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
-          <Button type="button" onClick={() => void save()}>保存</Button>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            取消
+          </Button>
+          <Button type="button" onClick={() => void save()}>
+            保存
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

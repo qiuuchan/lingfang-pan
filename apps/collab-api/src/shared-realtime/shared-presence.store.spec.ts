@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { SHARED_PRESENCE_HEARTBEAT_MS, SHARED_PRESENCE_TTL_MS } from '@lingfang/contract';
-import { DisabledSharedPresenceStore, InMemorySharedPresenceStore, presenceRoomKey } from './shared-presence.store';
+import {
+  DisabledSharedPresenceStore,
+  InMemorySharedPresenceStore,
+  presenceRoomKey,
+} from './shared-presence.store';
 
 const room = { teamId: 'team-1', namespaceId: 'namespace-1', namespaceGeneration: 2 };
 const session = {
-  connectionId: 'socket-1', userId: 'user-1', displayName: 'Lin',
-  packageId: 'package-1', workflowReleaseId: null,
+  connectionId: 'socket-1',
+  userId: 'user-1',
+  displayName: 'Lin',
+  packageId: 'package-1',
+  workflowReleaseId: null,
 };
 
 describe('shared presence store', () => {

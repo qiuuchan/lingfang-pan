@@ -5,7 +5,14 @@
 // betav2：工具走自建 defineTool（ToolDefinition），execute(args, ctx) 直接收对象返回 ToolResult。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { configureApiBase, FIXED_BACKEND_URL, setAuthToken } from '@/lib/api';
-import { createAgentTools, normalizeToolFileContent, detectCapabilities, isVersionNewer, type AgentToolsOptions, type TodoItem } from './tools';
+import {
+  createAgentTools,
+  normalizeToolFileContent,
+  detectCapabilities,
+  isVersionNewer,
+  type AgentToolsOptions,
+  type TodoItem,
+} from './tools';
 
 // RunPlugin 测试需要 mock tauriInvoke（list/read 文件）+ runPluginScript（试跑）。
 // Bash 测试需要 mock runPluginShell（plugin-script.ts）。
@@ -14,10 +21,19 @@ const runPluginMock = vi.hoisted(() => vi.fn());
 const runShellMock = vi.hoisted(() => vi.fn());
 const tauriInvokeMock = vi.hoisted(() => vi.fn());
 const assertPolicyMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock('@/lib/plugin-script', () => ({ runPluginScript: runPluginMock, runPluginShell: runShellMock }));
+vi.mock('@/lib/plugin-script', () => ({
+  runPluginScript: runPluginMock,
+  runPluginShell: runShellMock,
+}));
 vi.mock('@/lib/plugin-ai-policy', () => ({
   assertPluginAiPolicy: assertPolicyMock,
-  checkPluginAiPolicy: vi.fn().mockResolvedValue({ policyVersion: 1, ok: true, diagnostics: [], requiredCapabilities: [], truncated: false }),
+  checkPluginAiPolicy: vi.fn().mockResolvedValue({
+    policyVersion: 1,
+    ok: true,
+    diagnostics: [],
+    requiredCapabilities: [],
+    truncated: false,
+  }),
   policyDiagnosticMessage: vi.fn(() => ''),
 }));
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -35,17 +51,26 @@ function makeOpts(initialTodos: TodoItem[] = []) {
     onFilesChanged: vi.fn(),
     onAskQuestion: vi.fn(async () => ({ answer: 'ok' })),
     getTodos: () => [...todos],
-    onTodoUpdate: (next) => { todos = [...next]; },
+    onTodoUpdate: (next) => {
+      todos = [...next];
+    },
   };
   return { opts, read: () => todos };
 }
 
 /** 从 ToolDefinition 里取出 execute 并调用（betav2 自建契约：execute(args, ctx) → ToolResult）。
  *  返回 ToolResult；旧测试断言 data 字符串（兼容：ok 时取 data）。 */
-async function callExecute(tools: ReturnType<typeof createAgentTools>['tools'], name: string, args: unknown) {
+async function callExecute(
+  tools: ReturnType<typeof createAgentTools>['tools'],
+  name: string,
+  args: unknown
+) {
   const t = tools.find((x) => x.name === name);
   if (!t) throw new Error(`tool ${name} not found`);
-  const result = await t.execute(args, { toolCallId: 'test-call', signal: new AbortController().signal });
+  const result = await t.execute(args, {
+    toolCallId: 'test-call',
+    signal: new AbortController().signal,
+  });
   // 旧断言期望字符串；ToolResult.ok 时 data 是字符串，!ok 时 error 是字符串。
   return result.ok ? String(result.data ?? '') : String(result.error ?? '');
 }
@@ -149,11 +174,21 @@ describe('WebFetch 工具', () => {
   });
 
   it('成功抓取返回正文 + URL 前缀（mock 后端 /api/search/fetch）', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      new Response(JSON.stringify({
-        url: 'https://example.com', content: '# Example\n\n正文内容', truncated: false, fetchedVia: 'jina',
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              url: 'https://example.com',
+              content: '# Example\n\n正文内容',
+              truncated: false,
+              fetchedVia: 'jina',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+      )
+    );
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'WebFetch', { url: 'https://example.com' });
     expect(out).toContain('URL: https://example.com');
@@ -161,11 +196,22 @@ describe('WebFetch 工具', () => {
   });
 
   it('fetchedVia=fail 返回错误前缀（触发卡片标红）', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      new Response(JSON.stringify({
-        url: 'https://example.com', content: '', truncated: false, fetchedVia: 'fail', error: '目标网页返回 403',
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              url: 'https://example.com',
+              content: '',
+              truncated: false,
+              fetchedVia: 'fail',
+              error: '目标网页返回 403',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+      )
+    );
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'WebFetch', { url: 'https://example.com' });
     expect(out).toMatch(/^错误[:：]/);
@@ -175,14 +221,24 @@ describe('WebFetch 工具', () => {
   it('maxLength 字符串入参被归一化（容错，避免 InvalidToolInputError）', async () => {
     // 后端返回正文标记 truncated=true，验证 maxLength 字符串 "100" 被当数字传给后端。
     // 注意：100 被 clamp 到下限 500（tools.ts 的 Math.max(500, ...)）。
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({
-        url: 'https://example.com', content: 'x'.repeat(100), truncated: true, fetchedVia: 'jina',
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            url: 'https://example.com',
+            content: 'x'.repeat(100),
+            truncated: true,
+            fetchedVia: 'jina',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
     );
     vi.stubGlobal('fetch', fetchMock);
     const { tools } = createAgentTools(makeOpts().opts);
-    const out = await callExecute(tools, 'WebFetch', { url: 'https://example.com', maxLength: '100' });
+    const out = await callExecute(tools, 'WebFetch', {
+      url: 'https://example.com',
+      maxLength: '100',
+    });
     expect(out).toContain('已截断');
     // 验证请求 body 里 maxLength 是归一化后的数字（100 → clamp 到 500）。
     const callArgs = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -191,7 +247,12 @@ describe('WebFetch 工具', () => {
   });
 
   it('网络错误返回错误前缀', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      })
+    );
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'WebFetch', { url: 'https://example.com' });
     expect(out).toMatch(/^错误[:：]/);
@@ -227,7 +288,9 @@ describe('normalizeToolFileContent 文件内容容错', () => {
   });
 
   it('对象无可识别字段 → JSON 序列化兜底', () => {
-    expect(normalizeToolFileContent({ foo: 1, bar: 2 })).toBe(JSON.stringify({ foo: 1, bar: 2 }, null, 2));
+    expect(normalizeToolFileContent({ foo: 1, bar: 2 })).toBe(
+      JSON.stringify({ foo: 1, bar: 2 }, null, 2)
+    );
   });
 
   it('null/undefined → 空串', () => {
@@ -242,7 +305,9 @@ describe('normalizeToolFileContent 文件内容容错', () => {
 });
 
 describe('CreatePlugin 草稿工作区', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   const createArgs = {
     id: 'demo-plugin',
@@ -257,7 +322,8 @@ describe('CreatePlugin 草稿工作区', () => {
 
   it('先创建 workspace，再写文件并同步 ledger 元数据', async () => {
     tauriInvokeMock.mockImplementation(async (command: string) => {
-      if (command === 'create_draft_workspace') return { workspaceId: '11111111-1111-4111-8111-111111111111' };
+      if (command === 'create_draft_workspace')
+        return { workspaceId: '11111111-1111-4111-8111-111111111111' };
       return undefined;
     });
     const { opts } = makeOpts();
@@ -278,7 +344,10 @@ describe('CreatePlugin 草稿工作区', () => {
         sourceLabel: '灵枋创建器',
       }),
     });
-    const writeArgs = tauriInvokeMock.mock.calls[1]?.[1] as { pluginId: string; files: Array<{ path: string; content: string }> };
+    const writeArgs = tauriInvokeMock.mock.calls[1]?.[1] as {
+      pluginId: string;
+      files: Array<{ path: string; content: string }>;
+    };
     expect(writeArgs.pluginId).toBe('11111111-1111-4111-8111-111111111111');
     expect(tauriInvokeMock.mock.calls[2]?.[1]).toEqual({
       workspaceId: '11111111-1111-4111-8111-111111111111',
@@ -286,11 +355,16 @@ describe('CreatePlugin 草稿工作区', () => {
       sourceKind: 'LINGFANG_CREATOR',
       sourceLabel: '灵枋创建器',
     });
-    const manifest = JSON.parse(writeArgs.files.find((file) => file.path === 'manifest.json')!.content);
+    const manifest = JSON.parse(
+      writeArgs.files.find((file) => file.path === 'manifest.json')!.content
+    );
     expect(manifest).not.toHaveProperty('draft');
     expect(manifest).not.toHaveProperty('sourceKind');
     expect(manifest).not.toHaveProperty('sourceLabel');
-    expect(opts.onPluginCreated).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', expect.objectContaining({ id: 'demo-plugin' }));
+    expect(opts.onPluginCreated).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+      expect.objectContaining({ id: 'demo-plugin' })
+    );
   });
 
   it('已有 workspace 时沿用同一 ID，不创建第二条草稿', async () => {
@@ -301,10 +375,16 @@ describe('CreatePlugin 草稿工作区', () => {
     await callExecute(createAgentTools(opts).tools, 'CreatePlugin', createArgs);
 
     expect(tauriInvokeMock).not.toHaveBeenCalledWith('create_draft_workspace', expect.anything());
-    expect(tauriInvokeMock).toHaveBeenCalledWith('write_plugin_files', expect.objectContaining({
-      pluginId: '22222222-2222-4222-8222-222222222222',
-    }));
-    expect(opts.onPluginCreated).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222', expect.anything());
+    expect(tauriInvokeMock).toHaveBeenCalledWith(
+      'write_plugin_files',
+      expect.objectContaining({
+        pluginId: '22222222-2222-4222-8222-222222222222',
+      })
+    );
+    expect(opts.onPluginCreated).toHaveBeenCalledWith(
+      '22222222-2222-4222-8222-222222222222',
+      expect.anything()
+    );
   });
 });
 
@@ -321,26 +401,36 @@ describe('ListTeamPlugins registry catalog', () => {
   });
 
   it('读取团队 registry 的嵌套 package/release 数据', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      items: [{
-        package: { manifestId: 'team.demo', name: '团队 Demo', description: '说明' },
-        latestRelease: { version: '1.2.3', manifest: { runtime_type: 'nodejs' } },
-      }],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                package: { manifestId: 'team.demo', name: '团队 Demo', description: '说明' },
+                latestRelease: { version: '1.2.3', manifest: { runtime_type: 'nodejs' } },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const out = await callExecute(createAgentTools(makeOpts().opts).tools, 'ListTeamPlugins', {});
 
     expect(fetchMock).toHaveBeenCalledWith(
       `${FIXED_BACKEND_URL}/api/plugin-registry/team`,
-      expect.objectContaining({ method: 'GET' }),
+      expect.objectContaining({ method: 'GET' })
     );
     expect(out).toContain('团队 Demo (team.demo) v1.2.3 [nodejs] 说明');
   });
 });
 
 describe('RunPlugin 工具', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('已注册到工具集', () => {
     const { tools } = createAgentTools(makeOpts().opts);
@@ -352,10 +442,17 @@ describe('RunPlugin 工具', () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'manifest.json')
+        return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
       return "print('hello')";
     });
-    runPluginMock.mockResolvedValueOnce({ ok: true, stdout: 'hello\n', stderr: '', exitCode: 0, elapsedMs: 120 });
+    runPluginMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: 'hello\n',
+      stderr: '',
+      exitCode: 0,
+      elapsedMs: 120,
+    });
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'RunPlugin', {});
     expect(out).toContain('运行成功');
@@ -371,32 +468,47 @@ describe('RunPlugin 工具', () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({
-        runtime_type: 'python',
-        entry: 'main.py',
-        capabilities: [{ kind: 'llm.chat', requires_admin: true }],
-      });
+      if (file === 'manifest.json')
+        return JSON.stringify({
+          runtime_type: 'python',
+          entry: 'main.py',
+          capabilities: [{ kind: 'llm.chat', requires_admin: true }],
+        });
       return "print('hello')";
     });
-    runPluginMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', exitCode: 0, elapsedMs: 1 });
+    runPluginMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+      elapsedMs: 1,
+    });
 
     await callExecute(createAgentTools(makeOpts().opts).tools, 'RunPlugin', {});
 
-    expect(runPluginMock).toHaveBeenCalledWith(expect.objectContaining({
-      capabilities: ['llm.chat'],
-      timeoutMs: 180_000,
-    }));
+    expect(runPluginMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilities: ['llm.chat'],
+        timeoutMs: 180_000,
+      })
+    );
   });
 
   it('运行失败（非零退出码）→ ❌ + stderr 供模型修复', async () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'manifest.json')
+        return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
       return 'print(x'; // 故意语法错
     });
     runPluginMock.mockResolvedValueOnce({
-      ok: false, stdout: '', stderr: 'SyntaxError: unexpected EOF', exitCode: 1, failure: 'nonzero_exit', elapsedMs: 80,
+      ok: false,
+      stdout: '',
+      stderr: 'SyntaxError: unexpected EOF',
+      exitCode: 1,
+      failure: 'nonzero_exit',
+      elapsedMs: 80,
     });
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'RunPlugin', {});
@@ -409,12 +521,17 @@ describe('RunPlugin 工具', () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'requirements.txt', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'manifest.json')
+        return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
       if (file === 'requirements.txt') return 'requests';
       return "print('ok')";
     });
     runPluginMock.mockResolvedValueOnce({
-      ok: true, stdout: 'ok\n', stderr: '', exitCode: 0, elapsedMs: 100,
+      ok: true,
+      stdout: 'ok\n',
+      stderr: '',
+      exitCode: 0,
+      elapsedMs: 100,
       installLog: 'Python 依赖已就绪（venv: /path/py）',
     });
     const { tools } = createAgentTools(makeOpts().opts);
@@ -428,13 +545,15 @@ describe('RunPlugin 工具', () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'requirements.txt', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'manifest.json')
+        return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
       if (file === 'requirements.txt') return 'nonexistent-pkg-xyz';
       return 'print(1)';
     });
     // 装依赖失败：Rust 返回 exit_code=null + install_log 含「依赖安装失败」。
     runPluginMock.mockResolvedValueOnce({
-      ok: false, failure: 'spawn_failed',
+      ok: false,
+      failure: 'spawn_failed',
       stderr: '依赖安装失败：pip install 失败：Could not find nonexistent-pkg-xyz',
       installLog: '依赖安装失败：pip install 失败：Could not find nonexistent-pkg-xyz',
     });
@@ -448,7 +567,8 @@ describe('RunPlugin 工具', () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['ui/index.html', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'client', entry: 'ui/index.html' });
+      if (file === 'manifest.json')
+        return JSON.stringify({ runtime_type: 'client', entry: 'ui/index.html' });
       return '<html></html>';
     });
     const { tools } = createAgentTools(makeOpts().opts);
@@ -462,10 +582,15 @@ describe('RunPlugin 工具', () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'manifest.json'];
       const file = (args?.file as string) ?? '';
-      if (file === 'manifest.json') return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
+      if (file === 'manifest.json')
+        return JSON.stringify({ runtime_type: 'python', entry: 'main.py' });
       return 'print(1)';
     });
-    runPluginMock.mockResolvedValueOnce({ ok: false, failure: 'interpreter_missing', stderr: '未检测到内置 Python' });
+    runPluginMock.mockResolvedValueOnce({
+      ok: false,
+      failure: 'interpreter_missing',
+      stderr: '未检测到内置 Python',
+    });
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'RunPlugin', {});
     expect(out).toContain('运行时缺失');
@@ -473,7 +598,9 @@ describe('RunPlugin 工具', () => {
 });
 
 describe('Bash 工具', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('已注册到工具集', () => {
     const { tools } = createAgentTools(makeOpts().opts);
@@ -481,7 +608,13 @@ describe('Bash 工具', () => {
   });
 
   it('插件模式：pluginId 非空 → 透传 pluginId 给 runPluginShell', async () => {
-    runShellMock.mockResolvedValueOnce({ stdout: 'ok\n', stderr: '', exit_code: 0, timed_out: false, elapsed_ms: 50 });
+    runShellMock.mockResolvedValueOnce({
+      stdout: 'ok\n',
+      stderr: '',
+      exit_code: 0,
+      timed_out: false,
+      elapsed_ms: 50,
+    });
     const { tools } = createAgentTools(makeOpts().opts); // getPluginId → 'test-plugin'
     const out = await callExecute(tools, 'Bash', { command: 'echo ok' });
     expect(out).toContain('退出码 0');
@@ -492,7 +625,13 @@ describe('Bash 工具', () => {
 
   it('无插件模式：pluginId 为空 → 仍执行，pluginId 传 undefined（落临时目录）', async () => {
     // 这是本次修复的核心断言：以前会 return '错误：当前没有插件...'，现在应正常执行。
-    runShellMock.mockResolvedValueOnce({ stdout: 'done', stderr: '', exit_code: 0, timed_out: false, elapsed_ms: 10 });
+    runShellMock.mockResolvedValueOnce({
+      stdout: 'done',
+      stderr: '',
+      exit_code: 0,
+      timed_out: false,
+      elapsed_ms: 10,
+    });
     const { opts } = makeOpts();
     opts.getPluginId = () => null;
     const { tools } = createAgentTools(opts);
@@ -512,7 +651,13 @@ describe('Bash 工具', () => {
   });
 
   it('命令失败（非零退出码）→ 仍返回结果，含 stderr 供模型修复', async () => {
-    runShellMock.mockResolvedValueOnce({ stdout: '', stderr: 'boom', exit_code: 1, timed_out: false, elapsed_ms: 5 });
+    runShellMock.mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'boom',
+      exit_code: 1,
+      timed_out: false,
+      elapsed_ms: 5,
+    });
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'Bash', { command: 'false' });
     expect(out).toContain('退出码 1');
@@ -520,7 +665,13 @@ describe('Bash 工具', () => {
   });
 
   it('超时 → 返回 ⏱ + 耗时', async () => {
-    runShellMock.mockResolvedValueOnce({ stdout: '', stderr: '', exit_code: null, timed_out: true, elapsed_ms: 120000 });
+    runShellMock.mockResolvedValueOnce({
+      stdout: '',
+      stderr: '',
+      exit_code: null,
+      timed_out: true,
+      elapsed_ms: 120000,
+    });
     const { tools } = createAgentTools(makeOpts().opts);
     const out = await callExecute(tools, 'Bash', { command: 'sleep 999', timeoutMs: 1000 });
     expect(out).toContain('超时');
@@ -528,7 +679,9 @@ describe('Bash 工具', () => {
 });
 
 describe('DeleteFile 工具', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('已注册到工具集', () => {
     const { tools } = createAgentTools(makeOpts().opts);
@@ -561,7 +714,9 @@ describe('DeleteFile 工具', () => {
 });
 
 describe('MoveFile 工具', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('已注册到工具集', () => {
     const { tools } = createAgentTools(makeOpts().opts);
@@ -585,7 +740,9 @@ describe('MoveFile 工具', () => {
 });
 
 describe('Grep 工具', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('已注册到工具集', () => {
     const { tools } = createAgentTools(makeOpts().opts);
@@ -625,7 +782,9 @@ describe('Grep 工具', () => {
     const { tools } = createAgentTools(makeOpts().opts);
     await callExecute(tools, 'Grep', { pattern: 'target_line', glob: '*.py' });
     // 只读了 main.py（*.py 过滤掉 index.js）。
-    const readFileCalls = tauriInvokeMock.mock.calls.filter((c) => c[0] === 'read_local_plugin_file');
+    const readFileCalls = tauriInvokeMock.mock.calls.filter(
+      (c) => c[0] === 'read_local_plugin_file'
+    );
     expect(readFileCalls.length).toBe(1);
     expect(readFileCalls[0][1].file).toBe('main.py');
   });
@@ -667,7 +826,9 @@ describe('isVersionNewer 语义版本比较', () => {
 });
 
 describe('UpdatePlugin 工具', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('已注册到工具集', () => {
     const { tools } = createAgentTools(makeOpts().opts);
@@ -676,7 +837,8 @@ describe('UpdatePlugin 工具', () => {
 
   it('升版本号成功 → 写回 manifest', async () => {
     tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === 'read_local_plugin_file') return JSON.stringify({ id: 'p1', name: '老名字', version: '0.1.0', description: '旧' });
+      if (cmd === 'read_local_plugin_file')
+        return JSON.stringify({ id: 'p1', name: '老名字', version: '0.1.0', description: '旧' });
       if (cmd === 'write_plugin_file') return undefined;
       return undefined;
     });
@@ -698,11 +860,16 @@ describe('UpdatePlugin 工具', () => {
 
   it('同时更新名字和描述', async () => {
     tauriInvokeMock.mockImplementation(async (cmd: string) => {
-      if (cmd === 'read_local_plugin_file') return JSON.stringify({ name: '旧', version: '0.1.0', description: '旧描述' });
+      if (cmd === 'read_local_plugin_file')
+        return JSON.stringify({ name: '旧', version: '0.1.0', description: '旧描述' });
       return undefined;
     });
     const { tools } = createAgentTools(makeOpts().opts);
-    const out = await callExecute(tools, 'UpdatePlugin', { version: '0.2.0', name: '新名字', description: '新描述' });
+    const out = await callExecute(tools, 'UpdatePlugin', {
+      version: '0.2.0',
+      name: '新名字',
+      description: '新描述',
+    });
     expect(out).toContain('名字 → 新名字');
     expect(out).toContain('描述已更新');
   });
@@ -712,7 +879,7 @@ describe('detectCapabilities 能力声明检测', () => {
   it('检测网络请求 → net.fetch', () => {
     const r = detectCapabilities(
       [{ path: 'main.py', content: 'import requests\nrequests.get("http://x")' }],
-      [],
+      []
     );
     expect(r.detected).toContain('net.fetch');
     expect(r.missing).toContain('net.fetch');
@@ -721,24 +888,21 @@ describe('detectCapabilities 能力声明检测', () => {
   it('检测文件读写 → fs.read + fs.write', () => {
     const r = detectCapabilities(
       [{ path: 'main.py', content: 'with open("f.txt", "w") as f:\n    f.write("x")' }],
-      [],
+      []
     );
     expect(r.detected).toContain('fs.read');
     expect(r.detected).toContain('fs.write');
   });
 
   it('检测平台 LLM 调用 → llm.chat', () => {
-    const r = detectCapabilities(
-      [{ path: 'main.py', content: 'result = sdk.llm.chat("hi")' }],
-      [],
-    );
+    const r = detectCapabilities([{ path: 'main.py', content: 'result = sdk.llm.chat("hi")' }], []);
     expect(r.detected).toContain('llm.chat');
   });
 
   it('已声明的能力不计入 missing', () => {
     const r = detectCapabilities(
       [{ path: 'main.py', content: 'import requests' }],
-      ['net.fetch', 'ui.view'],
+      ['net.fetch', 'ui.view']
     );
     expect(r.detected).toContain('net.fetch');
     expect(r.missing).toEqual([]); // net.fetch 已声明，不缺漏
@@ -747,7 +911,7 @@ describe('detectCapabilities 能力声明检测', () => {
   it('代码无任何能力特征 → detected 为空', () => {
     const r = detectCapabilities(
       [{ path: 'main.py', content: 'def add(a, b):\n    return a + b' }],
-      ['ui.view'],
+      ['ui.view']
     );
     expect(r.detected).toEqual([]);
     expect(r.missing).toEqual([]);
@@ -756,16 +920,19 @@ describe('detectCapabilities 能力声明检测', () => {
   it('Node fetch 也检测为 net.fetch', () => {
     const r = detectCapabilities(
       [{ path: 'index.js', content: 'const res = await fetch(url)' }],
-      [],
+      []
     );
     expect(r.detected).toContain('net.fetch');
   });
 
   it('多文件合并检测', () => {
-    const r = detectCapabilities([
-      { path: 'main.py', content: 'import requests' },
-      { path: 'utils.py', content: 'open("f")' },
-    ], []);
+    const r = detectCapabilities(
+      [
+        { path: 'main.py', content: 'import requests' },
+        { path: 'utils.py', content: 'open("f")' },
+      ],
+      []
+    );
     expect(r.detected).toContain('net.fetch');
     expect(r.detected).toContain('fs.read');
   });

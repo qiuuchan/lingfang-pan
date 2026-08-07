@@ -11,7 +11,9 @@ export const SHARED_PRESENCE_EVENT = 'presence:snapshot';
 export class SharedRealtimeBroadcaster {
   private namespace: Namespace | null = null;
 
-  attach(namespace: Namespace): void { this.namespace = namespace; }
+  attach(namespace: Namespace): void {
+    this.namespace = namespace;
+  }
 
   roomName(room: SharedPresenceRoom): string {
     return `shared:${createHash('sha256').update(presenceRoomKey(room)).digest('hex')}`;
@@ -26,7 +28,11 @@ export class SharedRealtimeBroadcaster {
     revision: bigint;
   }): Promise<void> {
     if (!this.namespace) throw new Error('shared_realtime_gateway_not_ready');
-    const room = { teamId: row.teamId, namespaceId: row.namespaceId, namespaceGeneration: row.namespaceGeneration };
+    const room = {
+      teamId: row.teamId,
+      namespaceId: row.namespaceId,
+      namespaceGeneration: row.namespaceGeneration,
+    };
     const event = SharedRealtimeInvalidation.parse({
       cursor: row.cursor.toString(),
       key: row.key,

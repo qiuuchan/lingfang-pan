@@ -91,29 +91,35 @@ test('manifest accepts multiple actions and dependencies with runtime-safe handl
 
 test('action IDs, dependencies and exact targets are bounded', () => {
   expect(PluginAction.safeParse({ ...imageAction, action_id: 'Bad ID' }).success).toBe(false);
-  expect(PluginActionDependency.safeParse({
+  expect(
+    PluginActionDependency.safeParse({
       dependency_id: 'dep',
       package_id: 'p',
       release_version_range: 'not-a-range',
       action_id: 'a',
       action_contract_version_range: '^1.0.0',
-    }).success).toBe(false);
-  expect(ActionTarget.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    ActionTarget.safeParse({
       package_id: 'p',
       release_id: 'r',
       sha256: 'A'.repeat(64),
       action_id: 'a',
       action_contract_version: '1.0.0',
       action_surface_sha256: 'b'.repeat(64),
-    }).success).toBe(false);
-  expect(ActionTarget.safeParse({
+    }).success
+  ).toBe(false);
+  expect(
+    ActionTarget.safeParse({
       package_id: 'p',
       release_id: 'r',
       sha256: 'a'.repeat(64),
       action_id: 'a',
       action_contract_version: '1.0.0',
       action_surface_sha256: 'b'.repeat(64),
-    }).success).toBe(true);
+    }).success
+  ).toBe(true);
 });
 
 test('action dependency ranges share one bounded matcher across hosts', () => {
@@ -128,40 +134,54 @@ test('action dependency ranges share one bounded matcher across hosts', () => {
 });
 
 test('previewable actions are cloud-capable and never side effects', () => {
-  expect(PluginAction.safeParse({ ...imageAction, cloud_capable: true, previewable: true }).success).toBe(true);
-  expect(PluginAction.safeParse({ ...imageAction, cloud_capable: false, previewable: true }).success).toBe(false);
-  expect(PluginAction.safeParse({
+  expect(
+    PluginAction.safeParse({ ...imageAction, cloud_capable: true, previewable: true }).success
+  ).toBe(true);
+  expect(
+    PluginAction.safeParse({ ...imageAction, cloud_capable: false, previewable: true }).success
+  ).toBe(false);
+  expect(
+    PluginAction.safeParse({
       ...imageAction,
       cloud_capable: true,
       previewable: true,
       execution_semantics: 'side_effect',
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
 });
 
 test('restricted schema rejects regex, unknown keywords, open objects and remote refs', () => {
   const bad = (schema) => PluginAction.safeParse({ ...imageAction, input_schema: schema }).success;
-  expect(bad({
+  expect(
+    bad({
       type: 'object',
       properties: {},
       required: [],
       additionalProperties: false,
       pattern: '.*',
-    })).toBe(false);
-  expect(bad({ type: 'object', properties: {}, required: [], additionalProperties: true })).toBe(false);
-  expect(bad({
+    })
+  ).toBe(false);
+  expect(bad({ type: 'object', properties: {}, required: [], additionalProperties: true })).toBe(
+    false
+  );
+  expect(
+    bad({
       type: 'object',
       properties: {},
       required: [],
       additionalProperties: false,
       $ref: 'https://example.com/schema',
-    })).toBe(false);
+    })
+  ).toBe(false);
   expect(bad({ type: 'string', minLength: 1 })).toBe(false);
-  expect(bad({
+  expect(
+    bad({
       type: 'object',
       properties: { broken: null },
       required: [],
       additionalProperties: false,
-    })).toBe(false);
+    })
+  ).toBe(false);
 });
 
 test('surface projection is canonical and independent of property ordering', () => {
@@ -174,28 +194,34 @@ test('surface projection is canonical and independent of property ordering', () 
       type: 'object',
     },
   };
-  expect(canonicalPluginActionSurfaceJson('client', PluginAction.parse(imageAction))).toBe(canonicalPluginActionSurfaceJson('client', PluginAction.parse(reordered)));
+  expect(canonicalPluginActionSurfaceJson('client', PluginAction.parse(imageAction))).toBe(
+    canonicalPluginActionSurfaceJson('client', PluginAction.parse(reordered))
+  );
 });
 
 test('artifact refs, execution kind and stable errors are explicit contracts', () => {
   expect(ActionInvocationKind.parse('PREVIEW')).toBe('PREVIEW');
   expect(ActionErrorCode.parse('action_runtime_unavailable')).toBe('action_runtime_unavailable');
-  expect(ArtifactRefV1.safeParse({
+  expect(
+    ArtifactRefV1.safeParse({
       type: 'artifact_ref',
       artifact_id: 'a1',
       media_type: 'image/png',
       size_bytes: 42,
       sha256: 'a'.repeat(64),
       authorization: { scope: 'TEAM', team_id: 'team-1', handle: 'mac' },
-    }).success).toBe(true);
-  expect(ArtifactRefV1.safeParse({
+    }).success
+  ).toBe(true);
+  expect(
+    ArtifactRefV1.safeParse({
       type: 'artifact_ref',
       artifact_id: 'a1',
       media_type: 'image/png',
       size_bytes: 42,
       sha256: 'a'.repeat(64),
       authorization: { scope: 'TEAM', team_id: 'team-1' },
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
 });
 
 test('nested invocation identity is bounded and exposes one portable call chain', () => {

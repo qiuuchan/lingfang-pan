@@ -23,8 +23,14 @@ export type SharedPresenceSession = {
 };
 
 export interface SharedPresenceStore {
-  join(room: SharedPresenceRoom, session: SharedPresenceSession): Promise<SharedPresenceMemberValue>;
-  heartbeat(room: SharedPresenceRoom, session: SharedPresenceSession): Promise<SharedPresenceMemberValue | null>;
+  join(
+    room: SharedPresenceRoom,
+    session: SharedPresenceSession
+  ): Promise<SharedPresenceMemberValue>;
+  heartbeat(
+    room: SharedPresenceRoom,
+    session: SharedPresenceSession
+  ): Promise<SharedPresenceMemberValue | null>;
   leave(room: SharedPresenceRoom, connectionId: string): Promise<void>;
   list(room: SharedPresenceRoom): Promise<SharedPresenceMemberValue[]>;
   close(): Promise<void>;
@@ -34,19 +40,31 @@ type StoredPresence = SharedPresenceMemberValue & { connection_id: string };
 type Clock = () => number;
 
 export class DisabledSharedPresenceStore implements SharedPresenceStore {
-  async join(): Promise<never> { throw new Error('shared_realtime_disabled'); }
-  async heartbeat(): Promise<null> { return null; }
+  async join(): Promise<never> {
+    throw new Error('shared_realtime_disabled');
+  }
+  async heartbeat(): Promise<null> {
+    return null;
+  }
   async leave(): Promise<void> {}
-  async list(): Promise<SharedPresenceMemberValue[]> { return []; }
+  async list(): Promise<SharedPresenceMemberValue[]> {
+    return [];
+  }
   async close(): Promise<void> {}
 }
 
 export class InMemorySharedPresenceStore implements SharedPresenceStore {
-  private readonly rooms = new Map<string, Map<string, { member: SharedPresenceMemberValue; expiresAt: number }>>();
+  private readonly rooms = new Map<
+    string,
+    Map<string, { member: SharedPresenceMemberValue; expiresAt: number }>
+  >();
 
   constructor(private readonly now: Clock = Date.now) {}
 
-  async join(room: SharedPresenceRoom, session: SharedPresenceSession): Promise<SharedPresenceMemberValue> {
+  async join(
+    room: SharedPresenceRoom,
+    session: SharedPresenceSession
+  ): Promise<SharedPresenceMemberValue> {
     const key = presenceRoomKey(room);
     const members = this.rooms.get(key) ?? new Map();
     this.rooms.set(key, members);
@@ -58,7 +76,10 @@ export class InMemorySharedPresenceStore implements SharedPresenceStore {
     return member;
   }
 
-  async heartbeat(room: SharedPresenceRoom, session: SharedPresenceSession): Promise<SharedPresenceMemberValue | null> {
+  async heartbeat(
+    room: SharedPresenceRoom,
+    session: SharedPresenceSession
+  ): Promise<SharedPresenceMemberValue | null> {
     const members = this.rooms.get(presenceRoomKey(room));
     const connectionId = requireText(session.connectionId, 'connectionId');
     const existing = members?.get(connectionId);
@@ -91,30 +112,48 @@ export class InMemorySharedPresenceStore implements SharedPresenceStore {
     return [...members.values()].map((entry) => entry.member).sort(comparePresence);
   }
 
-  async close(): Promise<void> { this.rooms.clear(); }
+  async close(): Promise<void> {
+    this.rooms.clear();
+  }
 }
 
-type RedisPresenceClient = Pick<IORedis, 'multi' | 'zrangebyscore' | 'zrange' | 'hmget' | 'eval' | 'quit' | 'disconnect' | 'status'>;
+type RedisPresenceClient = Pick<
+  IORedis,
+  'multi' | 'zrangebyscore' | 'zrange' | 'hmget' | 'eval' | 'quit' | 'disconnect' | 'status'
+>;
 
 export class RedisSharedPresenceStore implements SharedPresenceStore, OnModuleDestroy {
   private readonly redis: RedisPresenceClient;
 
-  constructor(redisUrl: string, client?: RedisPresenceClient, private readonly now: Clock = Date.now) {
-    this.redis = client ?? new IORedis(redisUrl, {
-      lazyConnect: true,
-      enableReadyCheck: true,
-      maxRetriesPerRequest: 2,
-      connectionName: 'lingfang-plugin-shared-realtime',
-    });
+  constructor(
+    redisUrl: string,
+    client?: RedisPresenceClient,
+    private readonly now: Clock = Date.now
+  ) {
+    this.redis =
+      client ??
+      new IORedis(redisUrl, {
+        lazyConnect: true,
+        enableReadyCheck: true,
+        maxRetriesPerRequest: 2,
+        connectionName: 'lingfang-plugin-shared-realtime',
+      });
     if (!client) (this.redis as IORedis).on('error', () => undefined);
   }
 
-  async join(room: SharedPresenceRoom, session: SharedPresenceSession): Promise<SharedPresenceMemberValue> {
+  async join(
+    room: SharedPresenceRoom,
+    session: SharedPresenceSession
+  ): Promise<SharedPresenceMemberValue> {
     const now = this.now();
     const member = presenceMember(session, now);
-    const stored: StoredPresence = { ...member, connection_id: requireText(session.connectionId, 'connectionId') };
+    const stored: StoredPresence = {
+      ...member,
+      connection_id: requireText(session.connectionId, 'connectionId'),
+    };
     const keys = redisPresenceKeys(room);
-    await this.redis.multi()
+    await this.redis
+      .multi()
       .hset(keys.members, stored.connection_id, JSON.stringify(stored))
       .zadd(keys.expiry, now + SHARED_PRESENCE_TTL_MS, stored.connection_id)
       .pexpire(keys.members, SHARED_PRESENCE_TTL_MS * 2)
@@ -123,13 +162,28 @@ export class RedisSharedPresenceStore implements SharedPresenceStore, OnModuleDe
     return member;
   }
 
-  async heartbeat(room: SharedPresenceRoom, session: SharedPresenceSession): Promise<SharedPresenceMemberValue | null> {
+  async heartbeat(
+    room: SharedPresenceRoom,
+    session: SharedPresenceSession
+  ): Promise<SharedPresenceMemberValue | null> {
     const now = this.now();
     const member = presenceMember(session, now);
-    const stored: StoredPresence = { ...member, connection_id: requireText(session.connectionId, 'connectionId') };
+    const stored: StoredPresence = {
+      ...member,
+      connection_id: requireText(session.connectionId, 'connectionId'),
+    };
     const keys = redisPresenceKeys(room);
-    const result = await this.redis.eval(HEARTBEAT_SCRIPT, 2, keys.members, keys.expiry, stored.connection_id,
-      String(now), String(now + SHARED_PRESENCE_TTL_MS), JSON.stringify(stored), String(SHARED_PRESENCE_TTL_MS * 2));
+    const result = await this.redis.eval(
+      HEARTBEAT_SCRIPT,
+      2,
+      keys.members,
+      keys.expiry,
+      stored.connection_id,
+      String(now),
+      String(now + SHARED_PRESENCE_TTL_MS),
+      JSON.stringify(stored),
+      String(SHARED_PRESENCE_TTL_MS * 2)
+    );
     return Number(result) === 1 ? member : null;
   }
 
@@ -143,7 +197,12 @@ export class RedisSharedPresenceStore implements SharedPresenceStore, OnModuleDe
     const keys = redisPresenceKeys(room);
     const now = this.now();
     const expired = await this.redis.zrangebyscore(keys.expiry, '-inf', now);
-    if (expired.length > 0) await this.redis.multi().zrem(keys.expiry, ...expired).hdel(keys.members, ...expired).exec();
+    if (expired.length > 0)
+      await this.redis
+        .multi()
+        .zrem(keys.expiry, ...expired)
+        .hdel(keys.members, ...expired)
+        .exec();
     const live = await this.redis.zrange(keys.expiry, 0, -1);
     if (live.length === 0) return [];
     const payloads = await this.redis.hmget(keys.members, ...live);
@@ -155,25 +214,32 @@ export class RedisSharedPresenceStore implements SharedPresenceStore, OnModuleDe
     else await this.redis.quit().catch(() => this.redis.disconnect(false));
   }
 
-  async onModuleDestroy(): Promise<void> { await this.close(); }
+  async onModuleDestroy(): Promise<void> {
+    await this.close();
+  }
 }
 
 export function createSharedPresenceStore(config: SharedRealtimeConfig): SharedPresenceStore {
   if (!config.enabled) return new DisabledSharedPresenceStore();
-  if (config.transport === 'redis' && config.redisUrl) return new RedisSharedPresenceStore(config.redisUrl);
+  if (config.transport === 'redis' && config.redisUrl)
+    return new RedisSharedPresenceStore(config.redisUrl);
   return new InMemorySharedPresenceStore();
 }
 
 export function presenceRoomKey(room: SharedPresenceRoom): string {
   const teamId = requireText(room.teamId, 'teamId');
   const namespaceId = requireText(room.namespaceId, 'namespaceId');
-  if (!Number.isSafeInteger(room.namespaceGeneration) || room.namespaceGeneration < 1) throw new Error('namespaceGeneration must be a positive integer');
+  if (!Number.isSafeInteger(room.namespaceGeneration) || room.namespaceGeneration < 1)
+    throw new Error('namespaceGeneration must be a positive integer');
   return `${teamId}\0${namespaceId}\0${room.namespaceGeneration}`;
 }
 
 function redisPresenceKeys(room: SharedPresenceRoom) {
   const digest = createHash('sha256').update(presenceRoomKey(room)).digest('hex');
-  return { members: `lf:plugin-shared:presence:${digest}:members`, expiry: `lf:plugin-shared:presence:${digest}:expiry` };
+  return {
+    members: `lf:plugin-shared:presence:${digest}:members`,
+    expiry: `lf:plugin-shared:presence:${digest}:expiry`,
+  };
 }
 
 function presenceMember(session: SharedPresenceSession, now: number): SharedPresenceMemberValue {

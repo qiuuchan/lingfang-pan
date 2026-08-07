@@ -155,31 +155,29 @@ export const SKILLS: Skill[] = [
 ];
 
 /** 默认激活的 skill id 列表。 */
-export const DEFAULT_ACTIVE_SKILLS: string[] = SKILLS
-  .filter((s) => s.defaultActive)
-  .map((s) => s.id);
-
-const SKILL_BY_ID: Record<string, Skill> = Object.fromEntries(
-  SKILLS.map((s) => [s.id, s]),
+export const DEFAULT_ACTIVE_SKILLS: string[] = SKILLS.filter((s) => s.defaultActive).map(
+  (s) => s.id
 );
+
+const SKILL_BY_ID: Record<string, Skill> = Object.fromEntries(SKILLS.map((s) => [s.id, s]));
 
 /**
  * 拼装系统提示词：base + 激活的 skills（按注册顺序追加，每个 skill 用分隔线隔开）。
  * 未知 id 静默跳过（容错：UI 删了某 skill 不致整体失败）。
  */
-export function assembleSystemPrompt(base: string, activeIds: string[] | readonly string[]): string {
-  const fragments: string[] = [];
-  for (const id of activeIds) {
-    const skill = SKILL_BY_ID[id];
-    if (skill) fragments.push(skill.prompt);
-  }
+export function assembleSystemPrompt(
+  base: string,
+  activeIds: string[] | readonly string[]
+): string {
+  // 按注册顺序（而非 activeIds 传入顺序）遍历，保证同一组 skill 无论 UI 勾选先后
+  // 都拼出稳定一致的提示词；未注册的 id 自然被忽略，重复 id 也不会重复注入。
+  const active = new Set(activeIds);
+  const fragments = SKILLS.filter((s) => active.has(s.id)).map((s) => s.prompt);
   if (fragments.length === 0) return base;
   return `${base}\n\n---\n\n${fragments.join('\n\n---\n\n')}`;
 }
 
 /** 取激活 skill 的展示信息（供 UI 列出当前生效的能力）。 */
 export function activeSkills(activeIds: string[] | readonly string[]): Skill[] {
-  return activeIds
-    .map((id) => SKILL_BY_ID[id])
-    .filter((s): s is Skill => Boolean(s));
+  return activeIds.map((id) => SKILL_BY_ID[id]).filter((s): s is Skill => Boolean(s));
 }

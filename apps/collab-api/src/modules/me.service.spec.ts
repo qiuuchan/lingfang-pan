@@ -15,7 +15,16 @@ function mockPrisma() {
   const auditLog = { create: vi.fn() };
   const tx = { user: { update: user.update }, auditLog: { create: auditLog.create } };
   const $transaction = vi.fn(async (cb: (tx: typeof tx) => Promise<unknown>) => cb(tx));
-  return { user, pluginPackage, purchase, walletTransaction, teamMembership, auditLog, $transaction, __tx: tx };
+  return {
+    user,
+    pluginPackage,
+    purchase,
+    walletTransaction,
+    teamMembership,
+    auditLog,
+    $transaction,
+    __tx: tx,
+  };
 }
 
 describe('MeService 数据导出 + 账号注销', () => {
@@ -31,7 +40,10 @@ describe('MeService 数据导出 + 账号注销', () => {
   describe('exportMyData', () => {
     it('用户不存在时抛 not_found', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      await expect(service.exportMyData('missing')).rejects.toMatchObject({ status: 404, code: 'not_found' });
+      await expect(service.exportMyData('missing')).rejects.toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
     });
 
     it('导出个人信息含 email/displayName/createdAt，不含 passwordHash/tokenVersion', async () => {
@@ -61,42 +73,115 @@ describe('MeService 数据导出 + 账号注销', () => {
     });
 
     it('并行查询五类数据（authorUserId/buyerUserId/userId 过滤）', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE', createdAt: new Date() });
-      prisma.pluginPackage.findMany.mockResolvedValue([{
-        id: 'pkg-1', name: '插件A', description: 'd', createdAt: new Date(),
-        listing: { status: 'ACTIVE', priceCents: 100 },
-        releases: [
-          { version: '1.9.0', marketReviewStatus: 'APPROVED' },
-          { version: '1.10.0', marketReviewStatus: 'PENDING' },
-        ],
-      }]);
-      prisma.purchase.findMany.mockResolvedValue([
-        { id: 'pu1', packageId: 'pkg-1', releaseId: 'rel-1', sellerUserId: 'u2', priceCents: 200, createdAt: new Date() },
-        { id: 'pu2', packageId: 'pkg-2', releaseId: 'rel-2', sellerUserId: 'u3', priceCents: 300, createdAt: new Date() },
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        email: 'a@b.com',
+        displayName: 'A',
+        status: 'ACTIVE',
+        platformRole: 'NONE',
+        createdAt: new Date(),
+      });
+      prisma.pluginPackage.findMany.mockResolvedValue([
+        {
+          id: 'pkg-1',
+          name: '插件A',
+          description: 'd',
+          createdAt: new Date(),
+          listing: { status: 'ACTIVE', priceCents: 100 },
+          releases: [
+            { version: '1.9.0', marketReviewStatus: 'APPROVED' },
+            { version: '1.10.0', marketReviewStatus: 'PENDING' },
+          ],
+        },
       ]);
-      prisma.walletTransaction.findMany.mockResolvedValue([{ id: 'w1', amountCents: 1000, direction: 'CREDIT', reason: 'signup_bonus', pluginId: null, createdAt: new Date() }]);
-      prisma.teamMembership.findMany.mockResolvedValue([{ teamId: 't1', role: 'MEMBER', status: 'ACTIVE', joinedAt: new Date(), team: { id: 't1', name: '团队A', slug: 'a' } }]);
+      prisma.purchase.findMany.mockResolvedValue([
+        {
+          id: 'pu1',
+          packageId: 'pkg-1',
+          releaseId: 'rel-1',
+          sellerUserId: 'u2',
+          priceCents: 200,
+          createdAt: new Date(),
+        },
+        {
+          id: 'pu2',
+          packageId: 'pkg-2',
+          releaseId: 'rel-2',
+          sellerUserId: 'u3',
+          priceCents: 300,
+          createdAt: new Date(),
+        },
+      ]);
+      prisma.walletTransaction.findMany.mockResolvedValue([
+        {
+          id: 'w1',
+          amountCents: 1000,
+          direction: 'CREDIT',
+          reason: 'signup_bonus',
+          pluginId: null,
+          createdAt: new Date(),
+        },
+      ]);
+      prisma.teamMembership.findMany.mockResolvedValue([
+        {
+          teamId: 't1',
+          role: 'MEMBER',
+          status: 'ACTIVE',
+          joinedAt: new Date(),
+          team: { id: 't1', name: '团队A', slug: 'a' },
+        },
+      ]);
 
       const result = await service.exportMyData('u1');
       // plugins 按 authorUserId 过滤。
-      expect(prisma.pluginPackage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { authorUserId: 'u1' } }));
+      expect(prisma.pluginPackage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { authorUserId: 'u1' } })
+      );
       expect(result.plugins).toHaveLength(1);
-      expect(result.plugins[0]).toMatchObject({ id: 'pkg-1', name: '插件A', version: '1.10.0', reviewStatus: 'PENDING', priceCents: 100 });
+      expect(result.plugins[0]).toMatchObject({
+        id: 'pkg-1',
+        name: '插件A',
+        version: '1.10.0',
+        reviewStatus: 'PENDING',
+        priceCents: 100,
+      });
       // purchases 按 buyerUserId 过滤。
-      expect(prisma.purchase.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { buyerUserId: 'u1' } }));
+      expect(prisma.purchase.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { buyerUserId: 'u1' } })
+      );
       expect(result.purchases).toHaveLength(2);
-      expect(result.purchases[1]).toMatchObject({ pluginId: null, packageId: 'pkg-2', releaseId: 'rel-2', priceCents: 300 });
+      expect(result.purchases[1]).toMatchObject({
+        pluginId: null,
+        packageId: 'pkg-2',
+        releaseId: 'rel-2',
+        priceCents: 300,
+      });
       // wallet 按 userId 过滤。
-      expect(prisma.walletTransaction.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'u1' } }));
+      expect(prisma.walletTransaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'u1' } })
+      );
       expect(result.wallet).toHaveLength(1);
       // teams 按 userId 过滤。
-      expect(prisma.teamMembership.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'u1' } }));
+      expect(prisma.teamMembership.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'u1' } })
+      );
       expect(result.teams).toHaveLength(1);
-      expect(result.teams[0]).toMatchObject({ teamId: 't1', role: 'MEMBER', team: { id: 't1', name: '团队A' } });
+      expect(result.teams[0]).toMatchObject({
+        teamId: 't1',
+        role: 'MEMBER',
+        team: { id: 't1', name: '团队A' },
+      });
     });
 
     it('无任何关联数据时返回空数组（非 null）', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', displayName: 'A', status: 'ACTIVE', platformRole: 'NONE', createdAt: new Date() });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        email: 'a@b.com',
+        displayName: 'A',
+        status: 'ACTIVE',
+        platformRole: 'NONE',
+        createdAt: new Date(),
+      });
       const result = await service.exportMyData('u1');
       expect(result.plugins).toEqual([]);
       expect(result.purchases).toEqual([]);
@@ -108,7 +193,10 @@ describe('MeService 数据导出 + 账号注销', () => {
   describe('deleteMyAccount', () => {
     it('用户不存在时抛 not_found 且不开启事务', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      await expect(service.deleteMyAccount('missing')).rejects.toMatchObject({ status: 404, code: 'not_found' });
+      await expect(service.deleteMyAccount('missing')).rejects.toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
@@ -132,15 +220,17 @@ describe('MeService 数据导出 + 账号注销', () => {
     it('审计 action=user.account_deleted，metadata 仅 {userId}（不记原邮箱）', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com' });
       await service.deleteMyAccount('u1');
-      expect(prisma.__tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({
-          actorUserId: 'u1',
-          action: 'user.account_deleted',
-          targetType: 'User',
-          targetId: 'u1',
-          metadata: { userId: 'u1' },
-        }),
-      }));
+      expect(prisma.__tx.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: 'u1',
+            action: 'user.account_deleted',
+            targetType: 'User',
+            targetId: 'u1',
+            metadata: { userId: 'u1' },
+          }),
+        })
+      );
     });
 
     it('审计 metadata 不泄漏原邮箱', async () => {

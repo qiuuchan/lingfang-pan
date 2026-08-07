@@ -23,28 +23,97 @@ const prisma = new PrismaClient({ adapter });
 /** 默认模型定价（灵石）。PER_TOKEN_* 的 pricePerUnit = 每 1M token 灵石数（v0.0.6 改为每百万）。admin 可调整。 */
 const DEFAULT_PRICING = [
   // chat：每 1M token（例：每百万输入 token 1000 灵石 ≈ 500 token 扣 1 灵石）
-  { capability: 'chat', model: 'gpt-4o-mini', label: 'GPT-4o mini（快速版）', unit: 'PER_TOKEN_INPUT' as const, pricePerUnit: 1000, tier: 'FAST' as const },
-  { capability: 'chat', model: 'claude-sonnet-4-6', label: 'Claude Sonnet（高级版）', unit: 'PER_TOKEN_INPUT' as const, pricePerUnit: 3000, tier: 'PREMIUM' as const },
+  {
+    capability: 'chat',
+    model: 'gpt-4o-mini',
+    label: 'GPT-4o mini（快速版）',
+    unit: 'PER_TOKEN_INPUT' as const,
+    pricePerUnit: 1000,
+    tier: 'FAST' as const,
+  },
+  {
+    capability: 'chat',
+    model: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet（高级版）',
+    unit: 'PER_TOKEN_INPUT' as const,
+    pricePerUnit: 3000,
+    tier: 'PREMIUM' as const,
+  },
   // image：按张
-  { capability: 'image', model: 'dall-e-3', label: 'DALL·E 3 生图', unit: 'PER_IMAGE' as const, pricePerUnit: 50, tier: null },
-  { capability: 'image', model: 'dall-e-2', label: 'DALL·E 2 生图', unit: 'PER_IMAGE' as const, pricePerUnit: 20, tier: null },
+  {
+    capability: 'image',
+    model: 'dall-e-3',
+    label: 'DALL·E 3 生图',
+    unit: 'PER_IMAGE' as const,
+    pricePerUnit: 50,
+    tier: null,
+  },
+  {
+    capability: 'image',
+    model: 'dall-e-2',
+    label: 'DALL·E 2 生图',
+    unit: 'PER_IMAGE' as const,
+    pricePerUnit: 20,
+    tier: null,
+  },
   // action：按次（示例：创建插件聊天会话固定扣 Y 灵石）
-  { capability: 'action', model: 'create_plugin_session', label: '创建插件会话', unit: 'PER_CALL' as const, pricePerUnit: 10, tier: null },
+  {
+    capability: 'action',
+    model: 'create_plugin_session',
+    label: '创建插件会话',
+    unit: 'PER_CALL' as const,
+    pricePerUnit: 10,
+    tier: null,
+  },
   // video：按秒（RunningHub 动作迁移视频生成，按参考视频时长计费）
-  { capability: 'video', model: 'video_generate', label: '视频生成（动作迁移）', unit: 'PER_SECOND' as const, pricePerUnit: 0.5, tier: null },
+  {
+    capability: 'video',
+    model: 'video_generate',
+    label: '视频生成（动作迁移）',
+    unit: 'PER_SECOND' as const,
+    pricePerUnit: 0.5,
+    tier: null,
+  },
   // audio：按秒（RunningHub 声音克隆，按目标文本估算的输出音频时长计费）
-  { capability: 'audio', model: 'voice_clone', label: '声音克隆（文本转语音）', unit: 'PER_SECOND' as const, pricePerUnit: 0.5, tier: null },
+  {
+    capability: 'audio',
+    model: 'voice_clone',
+    label: '声音克隆（文本转语音）',
+    unit: 'PER_SECOND' as const,
+    pricePerUnit: 0.5,
+    tier: null,
+  },
 ];
 
 /** 默认灵石全局参数（PlatformSetting 键值表）。 */
 const DEFAULT_SETTINGS = [
   { key: 'creditSignupBonus', value: '1000', description: '新团队注册赠送灵石数' },
-  { key: 'creditReserveCapFast', value: '200', description: '快速版单次调用预扣灵石上限（实算后冲销）' },
-  { key: 'creditReserveCapPremium', value: '2000', description: '高级版单次调用预扣灵石上限（实算后冲销）' },
-  { key: 'aiUsageGuardRule', value: DEFAULT_AI_USAGE_GUARD_RULE, description: '系统提示词强制规则（AI 能力必须且仅能使用灵坊平台服务）' },
+  {
+    key: 'creditReserveCapFast',
+    value: '200',
+    description: '快速版单次调用预扣灵石上限（实算后冲销）',
+  },
+  {
+    key: 'creditReserveCapPremium',
+    value: '2000',
+    description: '高级版单次调用预扣灵石上限（实算后冲销）',
+  },
+  {
+    key: 'aiUsageGuardRule',
+    value: DEFAULT_AI_USAGE_GUARD_RULE,
+    description: '系统提示词强制规则（AI 能力必须且仅能使用灵坊平台服务）',
+  },
   // RBFLow 视频生成服务配置（平台运营实例，后台管理配置；空值=未配置）
-  { key: 'rbflowUrl', value: '', description: 'RBFLow 视频生成服务地址（平台运营实例，服务端转发用，用户不可见）' },
-  { key: 'rbflowApiKey', value: '', description: 'RBFLow 静态 API-KEY（服务端转发用，非用户可见；后台 reveal-secret 可查）' },
+  {
+    key: 'rbflowUrl',
+    value: '',
+    description: 'RBFLow 视频生成服务地址（平台运营实例，服务端转发用，用户不可见）',
+  },
+  {
+    key: 'rbflowApiKey',
+    value: '',
+    description: 'RBFLow 静态 API-KEY（服务端转发用，非用户可见；后台 reveal-secret 可查）',
+  },
 ];
 
 async function main() {

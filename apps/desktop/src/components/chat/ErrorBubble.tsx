@@ -1,14 +1,27 @@
 import { useState } from 'react';
-import { AlertTriangleIcon, InfoIcon, RefreshCwIcon, CopyIcon, CheckIcon, LifeBuoyIcon } from 'lucide-react';
+import {
+  AlertTriangleIcon,
+  InfoIcon,
+  RefreshCwIcon,
+  CopyIcon,
+  CheckIcon,
+  LifeBuoyIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import type { CreatorError, CreatorErrorLevel } from '@/lib/creator-error';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 // 等级 → 图标 + 边框/底色映射。error 用红色，warning 用琥珀，info 降级为中性提示。
-const LEVEL_STYLE: Record<CreatorErrorLevel, { icon: typeof AlertTriangleIcon; className: string }> = {
+const LEVEL_STYLE: Record<
+  CreatorErrorLevel,
+  { icon: typeof AlertTriangleIcon; className: string }
+> = {
   error: { icon: AlertTriangleIcon, className: 'border-destructive/30 bg-destructive/5' },
-  warning: { icon: AlertTriangleIcon, className: 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30' },
+  warning: {
+    icon: AlertTriangleIcon,
+    className: 'border-warning/40 bg-warning/10',
+  },
   info: { icon: InfoIcon, className: 'border-border bg-muted/60' },
 };
 
@@ -83,7 +96,12 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
   const supportHref = `mailto:support@lingfang.example?subject=${supportSubject}&body=${supportBody}`;
 
   return (
-    <div className={cn('self-start max-w-[82%] rounded-xl border px-4 py-3 text-sm break-words', className)}>
+    <div
+      className={cn(
+        'self-start max-w-[82%] rounded-xl border px-4 py-3 text-sm break-words',
+        className
+      )}
+    >
       <div className="flex items-start gap-2">
         <Icon className="mt-0.5 size-4 shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
@@ -91,9 +109,13 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
           {error.detail && <p className="mt-1 text-xs text-muted-foreground">{error.detail}</p>}
           {error.raw && (
             <details className="mt-2">
-              <summary className="cursor-pointer select-none text-xs text-muted-foreground">查看详细信息</summary>
+              <summary className="cursor-pointer select-none text-xs text-muted-foreground">
+                查看详细信息
+              </summary>
               {/* 折叠的原始技术信息：功能性滚动区，需可见细滚动条。 */}
-              <pre className="scrollbar-thin mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-background/60 p-2 font-mono text-xs">{error.raw}</pre>
+              <pre className="scrollbar-thin mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-background/60 p-2 font-mono text-xs">
+                {error.raw}
+              </pre>
             </details>
           )}
           {/* 反馈操作区：复制错误信息 + 联系支持（调研报告 A4 错误反馈通道）。 */}

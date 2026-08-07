@@ -19,7 +19,7 @@ import type {
 
 type PageQuery = { page: number; pageSize: number };
 
-function queryString(values: Record<string, string | number | undefined>): string {
+export function queryString(values: Record<string, string | number | undefined>): string {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
     if (value !== undefined && value !== '') params.set(key, String(value));
@@ -28,7 +28,7 @@ function queryString(values: Record<string, string | number | undefined>): strin
   return query ? `?${query}` : '';
 }
 
-function segment(value: string): string {
+export function segment(value: string): string {
   return encodeURIComponent(value);
 }
 
@@ -39,9 +39,11 @@ export function loadPluginPackages(
     reviewStatus?: PluginReviewStatus;
     sourceKind?: PluginSourceKind;
   },
-  signal: AbortSignal,
+  signal: AbortSignal
 ) {
-  return api<Page<PluginPackageSummary>>(`/api/admin/plugin-packages${queryString(query)}`, { signal });
+  return api<Page<PluginPackageSummary>>(`/api/admin/plugin-packages${queryString(query)}`, {
+    signal,
+  });
 }
 
 /** v4 待审核发行版队列：消费 GET /api/admin/plugin-releases/review-pending。 */
@@ -56,7 +58,7 @@ export function loadPluginPackage(packageId: string, signal: AbortSignal) {
 export function loadPluginReleases(packageId: string, query: PageQuery, signal: AbortSignal) {
   return api<Page<PluginReleaseSummary>>(
     `/api/admin/plugin-packages/${segment(packageId)}/releases${queryString(query)}`,
-    { signal },
+    { signal }
   );
 }
 
@@ -65,20 +67,22 @@ export function loadPluginRelease(releaseId: string, signal: AbortSignal) {
 }
 
 export function loadPluginManifest(releaseId: string, signal: AbortSignal) {
-  return api<PluginManifestDetail>(`/api/admin/plugin-releases/${segment(releaseId)}/manifest`, { signal });
+  return api<PluginManifestDetail>(`/api/admin/plugin-releases/${segment(releaseId)}/manifest`, {
+    signal,
+  });
 }
 
 export function loadPluginFiles(releaseId: string, query: PageQuery, signal: AbortSignal) {
   return api<Page<PluginFileSummary>>(
     `/api/admin/plugin-releases/${segment(releaseId)}/files${queryString(query)}`,
-    { signal },
+    { signal }
   );
 }
 
 export function loadPluginReviews(releaseId: string, query: PageQuery, signal: AbortSignal) {
   return api<Page<PluginReviewSummary>>(
     `/api/admin/plugin-releases/${segment(releaseId)}/reviews${queryString(query)}`,
-    { signal },
+    { signal }
   );
 }
 
@@ -109,23 +113,25 @@ export function relistPluginPackage(packageId: string, reason: string) {
 
 export function loadApplications(
   query: PageQuery & { q?: string; status?: ApplicationStatus },
-  signal: AbortSignal,
+  signal: AbortSignal
 ) {
   return api<Page<TeamAdminApplicationSummary>>(
     `/api/admin/team-admin-applications${queryString(query)}`,
-    { signal },
+    { signal }
   );
 }
 
 export function loadApplication(applicationId: string, signal: AbortSignal) {
   return api<{ application: TeamAdminApplicationDetail }>(
     `/api/admin/team-admin-applications/${segment(applicationId)}`,
-    { signal },
+    { signal }
   );
 }
 
 export function approveApplication(applicationId: string) {
-  return api(`/api/admin/team-admin-applications/${segment(applicationId)}/approve`, { method: 'POST' });
+  return api(`/api/admin/team-admin-applications/${segment(applicationId)}/approve`, {
+    method: 'POST',
+  });
 }
 
 export function rejectApplication(applicationId: string, reason: string) {

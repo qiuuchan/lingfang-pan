@@ -33,7 +33,14 @@ import { isTeamManager } from '@/lib/permissions';
 import { tauriListen } from '@/lib/api';
 
 // 导航项：切换主区 view。插件工作台在主区展示运行/开发两个模式。
-type NavItem = { kind: 'view'; v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean };
+type NavItem = {
+  kind: 'view';
+  v: View;
+  label: string;
+  icon: LucideIcon;
+  teamAdminOnly?: boolean;
+  platformAdminOnly?: boolean;
+};
 
 const NAV: NavItem[] = [
   { kind: 'view', v: 'home', label: '首页', icon: HomeIcon },
@@ -78,12 +85,32 @@ export function Sidebar({
   /** 唤起左下角用户菜单 AvatarMenu（项 4：替代直接打开 AccountDialog）。 */
   onOpenAvatarMenu: () => void;
 }) {
-  const { session, view, setView, setRunningPlugin, runningPlugin, runningPlugins, pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, removeFromRecent, openPluginCenter } = useApp();
-  const items = NAV.filter((n) => (!n.teamAdminOnly || isTeamManager(session.permissions)) && (!n.platformAdminOnly || session.isPlatformAdmin));
+  const {
+    session,
+    view,
+    setView,
+    setRunningPlugin,
+    runningPlugin,
+    runningPlugins,
+    pinnedPlugins,
+    recentPlugins,
+    isPinned,
+    pinPlugin,
+    unpinPlugin,
+    removeFromRecent,
+    openPluginCenter,
+  } = useApp();
+  const items = NAV.filter(
+    (n) =>
+      (!n.teamAdminOnly || isTeamManager(session.permissions)) &&
+      (!n.platformAdminOnly || session.isPlatformAdmin)
+  );
   // 历史使用中已固定的项不重复展示，避免与「固定常用」区冗余。
   const recentUnpinned = recentPlugins.filter((p) => !isPinned(p.id));
-  const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
-  const roleLabel = session.role ? (ROLE_LABEL[session.role] || session.role) : '已登录';
+  const tenantLabel =
+    session.tenantName ||
+    (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
+  const roleLabel = session.role ? ROLE_LABEL[session.role] || session.role : '已登录';
 
   const [width, setWidth] = useState<number>(loadWidth);
   const [dragging, setDragging] = useState(false);
@@ -114,33 +141,40 @@ export function Sidebar({
 
   // 持久化最终宽度（拖拽结束时调用，避免每次 mousemove 写 localStorage）。
   const persist = useCallback((w: number) => {
-    try { localStorage.setItem(WIDTH_STORAGE, String(w)); } catch { /* 忽略配额/禁用 */ }
+    try {
+      localStorage.setItem(WIDTH_STORAGE, String(w));
+    } catch {
+      /* 忽略配额/禁用 */
+    }
   }, []);
 
   // 拖拽右边缘调整宽度（仅展开态）。document 级 mousemove/mouseup，避免鼠标移出 handle 失去捕获。
-  const startResize = useCallback((e: React.MouseEvent) => {
-    if (collapsed) return;
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = widthRef.current;
-    setDragging(true);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    const onMove = (ev: MouseEvent) => {
-      const next = Math.max(WIDTH_MIN, Math.min(WIDTH_MAX, startWidth + (ev.clientX - startX)));
-      setWidth(next);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      persist(widthRef.current);
-      setDragging(false);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [collapsed, persist]);
+  const startResize = useCallback(
+    (e: React.MouseEvent) => {
+      if (collapsed) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = widthRef.current;
+      setDragging(true);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      const onMove = (ev: MouseEvent) => {
+        const next = Math.max(WIDTH_MIN, Math.min(WIDTH_MAX, startWidth + (ev.clientX - startX)));
+        setWidth(next);
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        persist(widthRef.current);
+        setDragging(false);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [collapsed, persist]
+  );
 
   // 双击手柄 → 复位默认宽度。
   const resetWidth = useCallback(() => {
@@ -150,7 +184,10 @@ export function Sidebar({
 
   // 展开态宽度变化时调整 CSS 变量（供 main 区 min-width/过渡参考，可选）。
   useEffect(() => {
-    document.documentElement.style.setProperty('--sidebar-width', `${collapsed ? COLLAPSED_WIDTH : width}px`);
+    document.documentElement.style.setProperty(
+      '--sidebar-width',
+      `${collapsed ? COLLAPSED_WIDTH : width}px`
+    );
   }, [width, collapsed]);
 
   const activeView = (v: View) => view === v;
@@ -160,7 +197,7 @@ export function Sidebar({
       className={cn(
         'relative flex h-full shrink-0 flex-col border-r bg-card overflow-hidden',
         // 仅在非拖拽时过渡宽度（汉堡折叠/复位用）；拖拽中逐帧改 width，过渡会卡顿。
-        !dragging && 'transition-[width] duration-200',
+        !dragging && 'transition-[width] duration-200'
       )}
       style={{ width: collapsed ? COLLAPSED_WIDTH : width }}
     >
@@ -172,7 +209,7 @@ export function Sidebar({
           className={cn(
             buttonVariants({ variant: 'outline', size: 'sm' }),
             'h-9 w-full justify-start gap-2 px-2.5 text-muted-foreground',
-            collapsed && 'justify-center px-0',
+            collapsed && 'justify-center px-0'
           )}
           title="搜索（Ctrl K）"
           aria-label="搜索"
@@ -180,7 +217,9 @@ export function Sidebar({
           <SearchIcon className="size-4 shrink-0" />
           {!collapsed && <span className="text-xs">搜插件、搜功能…</span>}
           {!collapsed && (
-            <kbd className="ml-auto rounded border bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">⌘K</kbd>
+            <kbd className="ml-auto rounded border bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+              ⌘K
+            </kbd>
           )}
         </button>
       </div>
@@ -189,9 +228,10 @@ export function Sidebar({
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
         {items.map((item) => {
           const Icon = item.icon;
-          const active = item.v === 'run-plugins'
-            ? view === 'run-plugins' || view === 'develop-plugins'
-            : activeView(item.v);
+          const active =
+            item.v === 'run-plugins'
+              ? view === 'run-plugins' || view === 'develop-plugins'
+              : activeView(item.v);
           // 定时任务红点：仅在 schedules 项 + scheduleFailed=true 时显示。
           const showDot = item.v === 'schedules' && scheduleFailed && !active;
           return (
@@ -199,26 +239,33 @@ export function Sidebar({
               key={item.v}
               variant="ghost"
               onClick={() => {
-                if (item.v === 'run-plugins') { openPluginCenter(); return; }
+                if (item.v === 'run-plugins') {
+                  openPluginCenter();
+                  return;
+                }
                 setRunningPlugin(null);
                 setView(item.v);
               }}
-              onFocus={() => { preloadView(item.v); }}
-              onMouseEnter={() => { preloadView(item.v); }}
+              onFocus={() => {
+                preloadView(item.v);
+              }}
+              onMouseEnter={() => {
+                preloadView(item.v);
+              }}
               title={collapsed ? item.label : undefined}
               className={cn(
                 'relative h-9 shrink-0 gap-2.5 font-medium',
                 collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
                 active
                   ? 'bg-primary text-primary-foreground hover:bg-primary! hover:text-primary-foreground!'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
               <Icon className="size-4 shrink-0" />
               {!collapsed && item.label}
               {showDot && (
                 <span
-                  className="absolute right-2 top-2 size-2 rounded-full bg-red-500 ring-2 ring-card"
+                  className="absolute right-2 top-2 size-2 rounded-full bg-destructive ring-2 ring-card"
                   aria-label="有任务执行失败"
                 />
               )}
@@ -231,7 +278,8 @@ export function Sidebar({
           <div className="mt-2 flex flex-col gap-0.5">
             {!collapsed && (
               <div className="flex items-center gap-1.5 px-1 pb-0.5 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-                <PinIcon className="size-3" />固定常用
+                <PinIcon className="size-3" />
+                固定常用
               </div>
             )}
             {pinnedPlugins.map((p) => (
@@ -244,7 +292,9 @@ export function Sidebar({
                 actionIcon={<PinOffIcon className="size-3.5" />}
                 actionTitle="取消固定"
                 onAction={() => unpinPlugin(p.id)}
-                onClick={() => { setRunningPlugin(p); }}
+                onClick={() => {
+                  setRunningPlugin(p);
+                }}
               />
             ))}
           </div>
@@ -255,7 +305,8 @@ export function Sidebar({
           <div className="mt-2 flex flex-col gap-0.5">
             {!collapsed && (
               <div className="flex items-center gap-1.5 px-1 pb-0.5 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-                <HistoryIcon className="size-3" />历史使用
+                <HistoryIcon className="size-3" />
+                历史使用
               </div>
             )}
             {recentUnpinned.map((p) => (
@@ -267,7 +318,9 @@ export function Sidebar({
                 isActive={runningPlugin?.id === p.id}
                 onPin={() => pinPlugin(p)}
                 onRemove={() => removeFromRecent(p.id)}
-                onClick={() => { setRunningPlugin(p); }}
+                onClick={() => {
+                  setRunningPlugin(p);
+                }}
               />
             ))}
           </div>
@@ -280,7 +333,11 @@ export function Sidebar({
           type="button"
           onClick={onOpenAvatarMenu}
           title={collapsed ? tenantLabel : undefined}
-          className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-auto w-full gap-2 px-2 py-2', collapsed && 'justify-center px-0')}
+          className={cn(
+            buttonVariants({ variant: 'ghost', size: 'sm' }),
+            'h-auto w-full gap-2 px-2 py-2',
+            collapsed && 'justify-center px-0'
+          )}
         >
           <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
             <UserRoundIcon className="size-4" />
@@ -344,7 +401,7 @@ function SidebarPluginItem({
           collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
           isActive
             ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
-            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
         )}
       >
         {/* 去图标后用插件名首字符占位（折叠态仅显示首字符,展开态显示全名+草稿徽章）。 */}
@@ -352,7 +409,7 @@ function SidebarPluginItem({
           {plugin.name.trim().charAt(0) || '?'}
           {isRunning && (
             <span
-              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-card"
+              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-success ring-2 ring-card"
               aria-label="插件运行中"
             />
           )}
@@ -361,12 +418,12 @@ function SidebarPluginItem({
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-sm">{plugin.name}</span>
             {isRunning && (
-              <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+              <span className="shrink-0 rounded border border-success/30 bg-success/10 px-1 py-0.5 text-[10px] font-medium text-success">
                 运行中
               </span>
             )}
             {plugin.draft && (
-              <span className="shrink-0 rounded border border-amber-500/30 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+              <span className="shrink-0 rounded border border-warning/30 bg-warning/10 px-1 py-0.5 text-[10px] font-medium text-warning">
                 草稿
               </span>
             )}
@@ -378,7 +435,10 @@ function SidebarPluginItem({
           variant="ghost"
           size="icon-sm"
           title={actionTitle}
-          onClick={(e) => { e.stopPropagation(); onAction(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction();
+          }}
           className="absolute right-1 size-6 opacity-0 transition-opacity group-hover/item:opacity-100"
         >
           {actionIcon}
@@ -420,14 +480,14 @@ function SidebarRecentItem({
           collapsed ? 'w-full justify-center px-0' : 'justify-start px-3',
           isActive
             ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
-            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
         )}
       >
         <span className="relative flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
           {plugin.name.trim().charAt(0) || '?'}
           {isRunning && (
             <span
-              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-card"
+              className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-success ring-2 ring-card"
               aria-label="插件运行中"
             />
           )}
@@ -436,12 +496,12 @@ function SidebarRecentItem({
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-sm">{plugin.name}</span>
             {isRunning && (
-              <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 group-hover/item:opacity-0 dark:bg-emerald-950/30 dark:text-emerald-400">
+              <span className="shrink-0 rounded border border-success/30 bg-success/10 px-1 py-0.5 text-[10px] font-medium text-success group-hover/item:opacity-0">
                 运行中
               </span>
             )}
             {plugin.draft && (
-              <span className="shrink-0 rounded border border-amber-500/30 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 group-hover/item:opacity-0 dark:bg-amber-950/30 dark:text-amber-400">
+              <span className="shrink-0 rounded border border-warning/30 bg-warning/10 px-1 py-0.5 text-[10px] font-medium text-warning group-hover/item:opacity-0">
                 草稿
               </span>
             )}
@@ -454,7 +514,10 @@ function SidebarRecentItem({
             variant="ghost"
             size="icon-sm"
             title="固定常用"
-            onClick={(e) => { e.stopPropagation(); onPin(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPin();
+            }}
             className="size-6"
           >
             <PinIcon className="size-3.5" />
@@ -463,7 +526,10 @@ function SidebarRecentItem({
             variant="ghost"
             size="icon-sm"
             title="从历史中移除"
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
             className="size-6 text-destructive hover:text-destructive"
           >
             <XIcon className="size-3.5" />

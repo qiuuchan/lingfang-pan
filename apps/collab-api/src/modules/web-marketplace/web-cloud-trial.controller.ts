@@ -11,8 +11,14 @@ const Uuid = z.string().uuid();
 export class WebCloudTrialController {
   constructor(@Inject(WebCloudTrialService) private readonly trials: WebCloudTrialService) {}
   @Post(':packageId/:actionId/preview')
-  start(@Req() req: Request, @Param('packageId') packageId: string, @Param('actionId') actionId: string, @Body() body: unknown) {
-    if (!Uuid.safeParse(packageId).success || !ActionId.safeParse(actionId).success) throw new AppError(400, 'web_preview_target_invalid', 'Cloud Trial 目标无效');
+  start(
+    @Req() req: Request,
+    @Param('packageId') packageId: string,
+    @Param('actionId') actionId: string,
+    @Body() body: unknown
+  ) {
+    if (!Uuid.safeParse(packageId).success || !ActionId.safeParse(actionId).success)
+      throw new AppError(400, 'web_preview_target_invalid', 'Cloud Trial 目标无效');
     return this.trials.start(requireUser(req).id, packageId, actionId, body);
   }
   @Get('preview/:invocationId')
@@ -28,5 +34,6 @@ export class WebCloudTrialController {
 }
 
 function assertInvocationId(invocationId: string): void {
-  if (!Uuid.safeParse(invocationId).success) throw new AppError(400, 'web_preview_invocation_id_invalid', 'Cloud Trial invocationId 无效');
+  if (!Uuid.safeParse(invocationId).success)
+    throw new AppError(400, 'web_preview_invocation_id_invalid', 'Cloud Trial invocationId 无效');
 }

@@ -70,13 +70,20 @@ export class GeetestService {
     if (!config.captchaId) return true;
 
     // 已配置极验：4 参数必须齐全，任一缺失视为未完成验证码。
-    if (!params?.lot_number || !params?.captcha_output || !params?.pass_token || !params?.gen_time) {
+    if (
+      !params?.lot_number ||
+      !params?.captcha_output ||
+      !params?.pass_token ||
+      !params?.gen_time
+    ) {
       return false;
     }
 
     // 生成签名：HMAC-SHA256(captchaKey, lot_number) hex。
     // lot_number 作为消息，captchaKey 作为密钥（极验官方固定算法，与服务端 key 一致才能通过校验）。
-    const sign_token = createHmac('sha256', config.captchaKey).update(params.lot_number).digest('hex');
+    const sign_token = createHmac('sha256', config.captchaKey)
+      .update(params.lot_number)
+      .digest('hex');
 
     // 构造表单 5 参数（application/x-www-form-urlencoded）。
     const form = new URLSearchParams({
@@ -162,7 +169,7 @@ export class GeetestService {
       scenesRaw
         .split(',')
         .map((s) => normalizeScene(s.trim().toLowerCase()))
-        .filter((s): s is GeetestScene => !!s),
+        .filter((s): s is GeetestScene => !!s)
     );
     const sceneOrder = ['admin_login', 'admin_forgot'] as const;
     const scenes: GeetestScene[] = sceneOrder.filter((s) => sceneSet.has(s));

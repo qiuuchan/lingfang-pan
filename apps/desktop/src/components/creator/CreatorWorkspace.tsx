@@ -40,7 +40,11 @@ import { CreatorMessageList } from '@/components/creator/CreatorMessageList';
 import { CreatorSkillsDialog } from '@/components/creator/CreatorSkillsDialog';
 import { assembleSystemPrompt, DEFAULT_ACTIVE_SKILLS } from '@/lib/skills';
 import { CREATOR_CONTEXT_PROMPT } from '@/lib/agent/prompts';
-import { buildContextMessages, compressHistoryManually, emptyCompressState } from '@/lib/plugin-creator/context-compress';
+import {
+  buildContextMessages,
+  compressHistoryManually,
+  emptyCompressState,
+} from '@/lib/plugin-creator/context-compress';
 import {
   cleanTurnParts,
   detectDuplicateOutput,
@@ -67,7 +71,13 @@ type ContextBreakdown = {
   summary: string;
   keptTurns: Array<{ role: string; content: string }>;
   currentInput: string;
-  estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+  estimatedTokens: {
+    system: number;
+    summary: number;
+    history: number;
+    input: number;
+    total: number;
+  };
   compressInfo: { threshold: number; currentTokens: number; remainingTokens: number; pct: number };
 };
 
@@ -75,7 +85,12 @@ interface SpeechRecognitionLike {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
-  onresult: ((event: { resultIndex?: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onresult:
+    | ((event: {
+        resultIndex?: number;
+        results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+      }) => void)
+    | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
@@ -90,7 +105,9 @@ function defaultEntryForRuntime(runtime: StagedPlugin['runtime_type']) {
   return 'ui/index.html';
 }
 
-export function normalizeLoadedRuntime(runtime: LoadedPlugin['runtime_type']): StagedPlugin['runtime_type'] {
+export function normalizeLoadedRuntime(
+  runtime: LoadedPlugin['runtime_type']
+): StagedPlugin['runtime_type'] {
   return runtime === 'cloud' || runtime === 'python' || runtime === 'nodejs' ? runtime : 'client';
 }
 
@@ -99,7 +116,7 @@ function recordFromMaybeJson(value: unknown): Record<string, unknown> {
   if (typeof value !== 'string') return {};
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -125,31 +142,42 @@ const KNOWN_CAPABILITY_KINDS = new Set([
 function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    const rawKind = typeof item === 'string'
-      ? item.trim()
-      : item && typeof item === 'object' && typeof (item as Record<string, unknown>).kind === 'string'
-        ? String((item as Record<string, unknown>).kind).trim()
-        : '';
+    const rawKind =
+      typeof item === 'string'
+        ? item.trim()
+        : item &&
+            typeof item === 'object' &&
+            typeof (item as Record<string, unknown>).kind === 'string'
+          ? String((item as Record<string, unknown>).kind).trim()
+          : '';
     if (!KNOWN_CAPABILITY_KINDS.has(rawKind)) {
       return [];
     }
-    const raw = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-    const risk = raw.risk === 'none' || raw.risk === 'medium' || raw.risk === 'high' ? raw.risk : 'low';
-    return [{
-      kind: rawKind,
-      reason: typeof raw.reason === 'string' ? raw.reason : '',
-      risk,
-      requires_admin: capabilityRequiresAdmin(rawKind, raw.requires_admin),
-    } as StagedPlugin['capabilities'][number]];
+    const raw = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+    const risk =
+      raw.risk === 'none' || raw.risk === 'medium' || raw.risk === 'high' ? raw.risk : 'low';
+    return [
+      {
+        kind: rawKind,
+        reason: typeof raw.reason === 'string' ? raw.reason : '',
+        risk,
+        requires_admin: capabilityRequiresAdmin(rawKind, raw.requires_admin),
+      } as StagedPlugin['capabilities'][number],
+    ];
   });
 }
 
-export function stagedPluginFromLoadedPlugin(plugin: LoadedPlugin, files = plugin.files ?? []): StagedPlugin {
+export function stagedPluginFromLoadedPlugin(
+  plugin: LoadedPlugin,
+  files = plugin.files ?? []
+): StagedPlugin {
   const manifestFile = files.find((file) => file.path === 'manifest.json' && !file.binary);
   const fileManifest = recordFromMaybeJson(manifestFile?.content);
   const pluginManifest = recordFromMaybeJson(plugin.manifest);
   const manifest = { ...pluginManifest, ...fileManifest };
-  const runtime = normalizeLoadedRuntime((manifest.runtime_type as LoadedPlugin['runtime_type']) ?? plugin.runtime_type);
+  const runtime = normalizeLoadedRuntime(
+    (manifest.runtime_type as LoadedPlugin['runtime_type']) ?? plugin.runtime_type
+  );
   const stringField = (key: string, fallback: string) => {
     const value = manifest[key];
     return typeof value === 'string' && value.trim() ? value : fallback;
@@ -194,7 +222,14 @@ function loadCreatorSidebarOpen() {
  * 上下文自动压缩见 lib/plugin-creator/context-compress.ts（超阈值时摘要早期对话轮，保留近期+插件包原文）。
  */
 export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
-  const { session, recentPlugins, pendingAutoFix, setPendingAutoFix, pendingDraftEdit, setPendingDraftEdit } = useApp();
+  const {
+    session,
+    recentPlugins,
+    pendingAutoFix,
+    setPendingAutoFix,
+    pendingDraftEdit,
+    setPendingDraftEdit,
+  } = useApp();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [conversations, setConversations] = useState<CreatorConversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(loadCreatorSidebarOpen);
@@ -231,10 +266,14 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null); // 文件选择（支持多次累积）
   const folderInputRef = useRef<HTMLInputElement>(null); // 文件夹选择（webkitdirectory）。
-  const [selectedFiles, setSelectedFiles] = useState<Array<{ id: string; name: string; file: File }>>([]); // 已选文件列表
+  const [selectedFiles, setSelectedFiles] = useState<
+    Array<{ id: string; name: string; file: File }>
+  >([]); // 已选文件列表
   // R2：悬挂的 AskQuestion deferred —— 用户作答后 resolve（人在环）。
   // key=toolCallId，存 resolve/reject；切对话/取消/关窗时必须清掉防卡死。
-  const pendingAnswersRef = useRef<Map<string, { resolve: (r: AskQuestionResult) => void; reject: (e: unknown) => void }>>(new Map());
+  const pendingAnswersRef = useRef<
+    Map<string, { resolve: (r: AskQuestionResult) => void; reject: (e: unknown) => void }>
+  >(new Map());
   // 提问卡片的自由文本输入暂存（key=toolCallId）。
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   // 多选暂存（key=toolCallId → 已选 value 集合）。
@@ -243,7 +282,11 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   // R2：清理所有悬挂的提问 deferred（取消/切对话/关窗时调用），避免 agent run 卡死。
   function clearPendingAnswers() {
     for (const [, d] of pendingAnswersRef.current) {
-      try { d.reject(new DOMException('cancelled', 'AbortError')); } catch { /* ignore */ }
+      try {
+        d.reject(new DOMException('cancelled', 'AbortError'));
+      } catch {
+        /* ignore */
+      }
     }
     pendingAnswersRef.current.clear();
   }
@@ -251,13 +294,19 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   function toggleSidebar() {
     setSidebarOpen((current) => {
       const next = !current;
-      try { localStorage.setItem(CREATOR_SIDEBAR_OPEN_KEY, next ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
+      try {
+        localStorage.setItem(CREATOR_SIDEBAR_OPEN_KEY, next ? '1' : '0');
+      } catch {
+        /* 忽略配额/禁用 */
+      }
       return next;
     });
   }
 
   // 展示用草稿 = AI 暂存的原始草稿叠加用户的手动编辑（用户改过的字段优先），并始终同步 manifest.json。
-  const draft: StagedPlugin | null = stagedDraft ? withSyncedStagedManifest({ ...stagedDraft, ...userEdits }) : null;
+  const draft: StagedPlugin | null = stagedDraft
+    ? withSyncedStagedManifest({ ...stagedDraft, ...userEdits })
+    : null;
 
   // CreatePlugin 工具回调：工具已写入 workspaces/{workspaceId}/，这里同步右侧草稿预览状态。
   // 同一插件 id 继续修改时保留用户已改字段；换 id（新插件）则清空旧编辑。
@@ -301,7 +350,8 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     if (!pluginId) return false;
     try {
       const files = await readWorkspaceFiles(pluginId);
-      const manifestRaw = files.find((f) => f.path === 'manifest.json' && !f.binary)?.content ?? '{}';
+      const manifestRaw =
+        files.find((f) => f.path === 'manifest.json' && !f.binary)?.content ?? '{}';
       const manifest = JSON.parse(manifestRaw) as Partial<StagedPlugin> & { id?: string };
       const runtime = normalizeLoadedRuntime(manifest.runtime_type);
       const next: StagedPlugin = withSyncedStagedManifest({
@@ -374,12 +424,21 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       setStagedDraft(imported);
       setSelectedFiles([]); // 导入成功后清空文件列表
       const skippedNote = result.skipped.length ? `，跳过 ${result.skipped.length} 个文件` : '';
-      toast.success(`已导入「${imported.name}」（${result.files.length} 个文件${skippedNote}），可在右侧预览并修改后提交`);
+      toast.success(
+        `已导入「${imported.name}」（${result.files.length} 个文件${skippedNote}），可在右侧预览并修改后提交`
+      );
       // 在对话区留一条记录，让 AI 知道当前草稿来自导入（draft 会注入 systemPrompt，可继续让 AI 改）。
       setTurns((prev) => [
         ...prev,
-        { role: 'user', content: `（从本地导入了插件「${imported.name}」，共 ${result.files.length} 个文件）` },
-        { role: 'assistant', content: '已载入导入的插件为草稿，你可以在右侧预览、修改信息后提交，或告诉我要怎么改。', status: 'done' },
+        {
+          role: 'user',
+          content: `（从本地导入了插件「${imported.name}」，共 ${result.files.length} 个文件）`,
+        },
+        {
+          role: 'assistant',
+          content: '已载入导入的插件为草稿，你可以在右侧预览、修改信息后提交，或告诉我要怎么改。',
+          status: 'done',
+        },
       ]);
     } catch (e) {
       toast.error(`导入失败：${(e as Error).message || String(e)}`);
@@ -390,7 +449,11 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     const loaded = loadConversations(session.userId, session.tenantId);
     setConversations(loaded);
     let selected: string | null = null;
-    try { selected = localStorage.getItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
+    try {
+      selected = localStorage.getItem(selectedConversationKey(session.userId, session.tenantId));
+    } catch {
+      /* ignore */
+    }
     const active = loaded.find((conversation) => conversation.id === selected) ?? loaded[0] ?? null;
     setActiveConversationId(active?.id ?? null);
     setTurns(active?.turns ?? []);
@@ -431,9 +494,19 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       if (cancelled) return;
       setConversations((prev) => {
         const now = new Date().toISOString();
-        const next = prev.map((conversation) => conversation.id === activeConversationId
-          ? { ...conversation, turns, stagedDraft, workspacePluginId, userEdits, todos: todos.length ? todos : undefined, updatedAt: now }
-          : conversation);
+        const next = prev.map((conversation) =>
+          conversation.id === activeConversationId
+            ? {
+                ...conversation,
+                turns,
+                stagedDraft,
+                workspacePluginId,
+                userEdits,
+                todos: todos.length ? todos : undefined,
+                updatedAt: now,
+              }
+            : conversation
+        );
         saveConversations(session.userId, session.tenantId, next);
         return next;
       });
@@ -442,7 +515,16 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [activeConversationId, session.tenantId, session.userId, turns, stagedDraft, workspacePluginId, userEdits, todos]);
+  }, [
+    activeConversationId,
+    session.tenantId,
+    session.userId,
+    turns,
+    stagedDraft,
+    workspacePluginId,
+    userEdits,
+    todos,
+  ]);
 
   function ensureConversation(firstUserText: string) {
     if (activeConversationId) return activeConversationId;
@@ -455,7 +537,14 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       updatedAt: now,
     };
     setActiveConversationId(conversation.id);
-    try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(
+        selectedConversationKey(session.userId, session.tenantId),
+        conversation.id
+      );
+    } catch {
+      /* ignore */
+    }
     setConversations((prev) => {
       const next = [conversation, ...prev].slice(0, 30);
       saveConversations(session.userId, session.tenantId, next);
@@ -483,17 +572,27 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     setPublishedName(null);
     // 切回该会话时恢复其暂存草稿与用户编辑（右侧栏随之重现）。
     setStagedDraft(conversation.stagedDraft ?? null);
-    const conversationWorkspaceId = conversation.workspacePluginId ?? conversation.stagedDraft?.id ?? null;
+    const conversationWorkspaceId =
+      conversation.workspacePluginId ?? conversation.stagedDraft?.id ?? null;
     setWorkspacePluginId(conversationWorkspaceId);
     currentPluginIdRef.current = conversationWorkspaceId;
     usePluginCreatorStore.getState().clearDraft();
     if (conversationWorkspaceId && conversation.stagedDraft) {
-      usePluginCreatorStore.getState().createPlugin(conversationWorkspaceId, conversation.stagedDraft);
+      usePluginCreatorStore
+        .getState()
+        .createPlugin(conversationWorkspaceId, conversation.stagedDraft);
     }
     setUserEdits(conversation.userEdits ?? {});
     setTodos(conversation.todos ?? []);
     compressRef.current = emptyCompressState();
-    try { localStorage.setItem(selectedConversationKey(session.userId, session.tenantId), conversation.id); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(
+        selectedConversationKey(session.userId, session.tenantId),
+        conversation.id
+      );
+    } catch {
+      /* ignore */
+    }
   }
 
   function selectConversationById(id: string) {
@@ -524,7 +623,11 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     setTodos([]);
     compressRef.current = emptyCompressState();
     setCompressedHint(0);
-    try { localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId)); } catch { /* ignore */ }
+    try {
+      localStorage.removeItem(selectedConversationKey(session.userId, session.tenantId));
+    } catch {
+      /* ignore */
+    }
   }
 
   // R3：删除单条历史对话。删的是当前会话时重置为新对话。
@@ -547,7 +650,9 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       if (!mounted) return;
       setContextWindow(tier === 'fast' ? cw.fast : cw.premium);
     });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [tier]);
 
   // Composer 始终使用实时对话估算，避免打开过一次 ContextInspector 后沿用旧 breakdown。
@@ -557,20 +662,22 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   // useMemo：流式每 token 都在重渲染，整段会话估算放这里避免每次全量 O(n) 扫描。
   const usedTokens = useMemo(
     () =>
-      estimateTokens(buildSystemPrompt())
-      + estimateTokens(turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content), ''))
-      + estimateTokens(input)
-      + selectedFiles.reduce((sum, item) => sum + Math.ceil(item.file.size / 4), 0),
+      estimateTokens(buildSystemPrompt()) +
+      estimateTokens(turns.reduce((sum, turn) => sum + (turn.modelContent ?? turn.content), '')) +
+      estimateTokens(input) +
+      selectedFiles.reduce((sum, item) => sum + Math.ceil(item.file.size / 4), 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [turns, input, selectedFiles, activeSkillIds, creatorMode, referencedPlugin, draft],
+    [turns, input, selectedFiles, activeSkillIds, creatorMode, referencedPlugin, draft]
   );
   const inspectorTokens = contextBreakdown?.estimatedTokens.total ?? usedTokens;
-  const usagePct = contextWindow ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0;
+  const usagePct = contextWindow
+    ? Math.min(100, Math.round((usedTokens / contextWindow) * 100))
+    : 0;
   const compressInfo = contextBreakdown?.compressInfo;
   const compressHint = compressInfo
-    ? (compressInfo.remainingTokens > 0
+    ? compressInfo.remainingTokens > 0
       ? `还差 ${compressInfo.remainingTokens.toLocaleString()} tokens 压缩`
-      : '下次将压缩')
+      : '下次将压缩'
     : undefined;
 
   function buildContextPreviewBreakdown(args: {
@@ -579,9 +686,7 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     systemPrompt: string;
   }): ContextBreakdown {
     // 阈值与 buildContextMessages 同源（contextWindow × 0.7，token 维度）。
-    const threshold = contextWindow
-      ? Math.floor(contextWindow * 0.7)
-      : 8_000;
+    const threshold = contextWindow ? Math.floor(contextWindow * 0.7) : 8_000;
     const summary = compressRef.current.summary;
     const historyText = args.historyTurns.reduce((sum, turn) => sum + turn.content, '');
     const systemTok = estimateTokens(args.systemPrompt);
@@ -700,11 +805,13 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         role: t.role,
         content: t.modelContent ?? t.content,
       }));
-      setContextBreakdown(buildContextPreviewBreakdown({
-        historyTurns,
-        currentInput,
-        systemPrompt: buildSystemPrompt(),
-      }));
+      setContextBreakdown(
+        buildContextPreviewBreakdown({
+          historyTurns,
+          currentInput,
+          systemPrompt: buildSystemPrompt(),
+        })
+      );
       setContextInspectorOpen(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '上下文预览失败');
@@ -758,23 +865,35 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         status: 'done',
         parts: [{ type: 'text', content: summaryText } as TextPart],
       };
-      const keptOriginalIdx = new Set(result.keptTurnIndices.map((i) => compressible[i]?.idx).filter((x): x is number => x != null));
+      const keptOriginalIdx = new Set(
+        result.keptTurnIndices
+          .map((i) => compressible[i]?.idx)
+          .filter((x): x is number => x != null)
+      );
       // 被摘要的轮（在 compressible 里但不在 kept 里）的原 idx，这些要删除。
       const removedOriginalIdx = new Set(
-        compressible.filter(({ idx }) => !keptOriginalIdx.has(idx)).map(({ idx }) => idx),
+        compressible.filter(({ idx }) => !keptOriginalIdx.has(idx)).map(({ idx }) => idx)
       );
       // 保留原序：摘要轮置顶，其余未删除的轮按原序跟在后面。
-      const nextTurns: Turn[] = [summaryTurn, ...turns.filter((_, idx) => !removedOriginalIdx.has(idx))];
+      const nextTurns: Turn[] = [
+        summaryTurn,
+        ...turns.filter((_, idx) => !removedOriginalIdx.has(idx)),
+      ];
 
       setTurns(nextTurns);
       compressRef.current = result.state;
       setCompressedHint(result.compressedCount);
       // 刷新 breakdown（反映压缩后的占用）。
-      setContextBreakdown(buildContextPreviewBreakdown({
-        historyTurns: nextTurns.map((t) => ({ role: t.role, content: t.modelContent ?? t.content })),
-        currentInput: input,
-        systemPrompt: buildSystemPrompt(),
-      }));
+      setContextBreakdown(
+        buildContextPreviewBreakdown({
+          historyTurns: nextTurns.map((t) => ({
+            role: t.role,
+            content: t.modelContent ?? t.content,
+          })),
+          currentInput: input,
+          systemPrompt: buildSystemPrompt(),
+        })
+      );
       toast.success(`已压缩 ${result.compressedCount} 轮历史，上下文占用已降低`);
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') return;
@@ -793,7 +912,9 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      const inner = document.querySelector('[role="dialog"][data-state="open"], [role="presentation"][data-state="open"]');
+      const inner = document.querySelector(
+        '[role="dialog"][data-state="open"], [role="presentation"][data-state="open"]'
+      );
       if (inner) return; // 内层 overlay 优先
       abortRef.current?.abort();
       clearPendingAnswers();
@@ -805,11 +926,14 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
 
   // 卸载（关窗：X/点遮罩/父组件卸载）时中止流式请求 + 清理悬挂提问 deferred。
   // 必须 abort，否则关窗时若 agent 仍在流式输出，底层 relay 请求会在后台续跑并继续按团队计费（费用泄漏）。
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    speechRef.current?.stop();
-    clearPendingAnswers();
-  }, []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      speechRef.current?.stop();
+      clearPendingAnswers();
+    },
+    []
+  );
 
   // 一键 AI 修复消费：插件启动/运行报错跳创建器时，pendingAutoFix 携带提示词 + 出错插件。
   // 此处预填提示词到输入框 + 引用该插件源码（注入上下文），但不自动发送——用户确认后点发送即修。
@@ -857,7 +981,10 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     try {
       const attachment = await buildAttachmentContextFromSelection();
       modelText = composeModelInput(text, attachment.context);
-      const attachmentSummary = summarizeAttachmentDisplay(attachment.fileCount, attachment.skippedCount);
+      const attachmentSummary = summarizeAttachmentDisplay(
+        attachment.fileCount,
+        attachment.skippedCount
+      );
       if (attachmentSummary) {
         displayText = `${text}\n\n[${attachmentSummary}]`;
         setSelectedFiles([]);
@@ -869,7 +996,11 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     }
     const userTurn: Turn = { role: 'user', content: displayText, modelContent: modelText };
     const assistantIdx = turns.length + 1;
-    setTurns((prev) => [...prev, userTurn, { role: 'assistant', content: '', streaming: true, status: 'generating' }]);
+    setTurns((prev) => [
+      ...prev,
+      userTurn,
+      { role: 'assistant', content: '', streaming: true, status: 'generating' },
+    ]);
     await runAgentTurn(assistantIdx, modelText, { conversationId });
   }
 
@@ -884,24 +1015,39 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
     const curTurns = turnsRef.current;
     let lastAssistantIdx = -1;
     for (let i = curTurns.length - 1; i >= 0; i--) {
-      if (curTurns[i].role === 'assistant') { lastAssistantIdx = i; break; }
+      if (curTurns[i].role === 'assistant') {
+        lastAssistantIdx = i;
+        break;
+      }
     }
     if (lastAssistantIdx < 0) return;
     const cur = curTurns[lastAssistantIdx];
     if (cur.status !== 'failed' && cur.status !== 'cancelled') return;
     // 取上一条 user 轮的输入作为重跑文本；找不到则放弃。
-    const userTurn = curTurns.slice(0, lastAssistantIdx).reverse().find((t) => t.role === 'user');
+    const userTurn = curTurns
+      .slice(0, lastAssistantIdx)
+      .reverse()
+      .find((t) => t.role === 'user');
     const userText = userTurn?.modelContent ?? userTurn?.content ?? '';
     if (!userText.trim()) return;
     // 重置该轮：清空旧 parts 与 content，回到生成中态。
     setTurns((prev) => {
       const next = [...prev];
-      next[lastAssistantIdx] = { role: 'assistant', content: '', streaming: true, status: 'generating', parts: [] };
+      next[lastAssistantIdx] = {
+        role: 'assistant',
+        content: '',
+        streaming: true,
+        status: 'generating',
+        parts: [],
+      };
       return next;
     });
     // 重试模式：turns 里已含上一条 user 轮（紧邻被重置的 assistant 轮之前），
     // 所以不应再追加 currentInput（否则用户消息重复）。传 isRetry=true 让 runAgentTurn 跳过追加。
-    await runAgentTurnRef.current(lastAssistantIdx, userText, { isRetry: true, conversationId: activeConversationIdRef.current });
+    await runAgentTurnRef.current(lastAssistantIdx, userText, {
+      isRetry: true,
+      conversationId: activeConversationIdRef.current,
+    });
   }, []);
 
   /**
@@ -914,7 +1060,7 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   async function runAgentTurn(
     assistantIdx: number,
     text: string,
-    opts: { isRetry?: boolean; conversationId?: string | null } = {},
+    opts: { isRetry?: boolean; conversationId?: string | null } = {}
   ) {
     setBusy(true);
 
@@ -929,16 +1075,18 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       // 不必重跑 WebSearch 等工具（断点续的关键）。仅纳入 status==='done' 的 assistant 轮。
       // 重试模式：turns 里已含被重置的失败 assistant 轮（generating），切片到 assistantIdx 之前，
       // 并跳过追加 currentInput（对应 user 轮已在前面的 turns 里，避免重复）。
-      const historyTurns = opts.isRetry
-        ? turns.slice(0, assistantIdx)
-        : turns;
+      const historyTurns = opts.isRetry ? turns.slice(0, assistantIdx) : turns;
       const built = await buildContextMessages({
         // parts 透传给 buildContextMessages：内部用 turnsToMessages 还原原生 function calling 历史
         // （tool_calls + role:'tool' 配对），并据此判断哪些轮可压缩。
         turns: historyTurns.map((t) => {
           const content = t.modelContent ?? t.content;
           if (t.role === 'assistant' && t.status === 'done') {
-            return { role: t.role, content, parts: t.parts as unknown as HistoryPart[] | undefined };
+            return {
+              role: t.role,
+              content,
+              parts: t.parts as unknown as HistoryPart[] | undefined,
+            };
           }
           return { role: t.role, content };
         }),
@@ -957,7 +1105,10 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
 
       // R2：AskQuestion 人在环回调——写提问卡片到当前 assistant 气泡的 parts，
       // 返回 deferred Promise；用户在卡片作答后 resolve，agent 多步循环继续。
-      const onAskQuestion = (args: AskQuestionArgs, toolCallId: string): Promise<AskQuestionResult> => {
+      const onAskQuestion = (
+        args: AskQuestionArgs,
+        toolCallId: string
+      ): Promise<AskQuestionResult> => {
         setTurns((prev) => {
           const next = [...prev];
           const cur = next[assistantIdx];
@@ -1009,11 +1160,14 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
           currentPluginIdRef.current = pluginId;
         },
         onFilesChanged: () => {
-          void usePluginCreatorStore.getState().refreshDraft().then(() => {
-            // 同步本地草稿视图
-            const storeDraft = usePluginCreatorStore.getState().aiDraft;
-            if (storeDraft) setStagedDraft(storeDraft);
-          });
+          void usePluginCreatorStore
+            .getState()
+            .refreshDraft()
+            .then(() => {
+              // 同步本地草稿视图
+              const storeDraft = usePluginCreatorStore.getState().aiDraft;
+              if (storeDraft) setStagedDraft(storeDraft);
+            });
         },
         onAskQuestion,
         getTodos: () => todos,
@@ -1053,7 +1207,11 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
           // 兼容旧 onToolResult 行为
           if (output.name === 'CreatePlugin') {
             setUploadingViaTool(false);
-            if (!output.ok && typeof output.result === 'string' && output.result.startsWith('错误')) {
+            if (
+              !output.ok &&
+              typeof output.result === 'string' &&
+              output.result.startsWith('错误')
+            ) {
               stageErrMsg = output.result;
             }
           } else if (output.name === 'WebSearch') {
@@ -1084,7 +1242,9 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         // 「有内容」判定：有文本/工具/提问 part，或文本 part 含非空文字。
         const hasText = parts.some((p) => p.type === 'text' && p.content.trim().length > 0);
         const hasToolOrQuestion = parts.some((p) => p.type === 'tool' || p.type === 'question');
-        const hasReasoning = parts.some((p) => p.type === 'reasoning' && p.content.trim().length > 0);
+        const hasReasoning = parts.some(
+          (p) => p.type === 'reasoning' && p.content.trim().length > 0
+        );
         // 兜底时追加一个 text part（保持链式渲染一致），而非写回旧 content。
         const withFallbackText = (msg: string, status: Turn['status']): Turn => ({
           ...cur,
@@ -1102,15 +1262,23 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
           next[assistantIdx] = { ...cur, streaming: false, status: 'done' };
         } else if (stagedName) {
           // 工具步可见化（H1）：只调了 stage 没说话 → 补占位文本，配合右侧草稿面板。
-          next[assistantIdx] = withFallbackText('已为你生成插件草稿，可在右侧预览并修改信息后提交。', 'done');
+          next[assistantIdx] = withFallbackText(
+            '已为你生成插件草稿，可在右侧预览并修改信息后提交。',
+            'done'
+          );
         } else if (hasReasoning || reasoningText.trim().length > 0) {
           // reasoning 兜底（H2）：只输出了思考过程没有正文（思考块已内联在气泡中可展开）。
-          next[assistantIdx] = withFallbackText('模型仅输出了思考过程，可展开上方「思考过程」查看，或重试。', 'done');
+          next[assistantIdx] = withFallbackText(
+            '模型仅输出了思考过程，可展开上方「思考过程」查看，或重试。',
+            'done'
+          );
         } else {
           // 空响应安全网：无文本、无工具、无思考 → 友好提示并标记失败。
           next[assistantIdx] = withFallbackText(
-            sawToolCall ? '本轮未返回文字说明，请重试或换用高级版。' : '模型未返回内容，请重试或换用高级版。',
-            'failed',
+            sawToolCall
+              ? '本轮未返回文字说明，请重试或换用高级版。'
+              : '模型未返回内容，请重试或换用高级版。',
+            'failed'
           );
         }
         return next;
@@ -1130,7 +1298,12 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         errorMsg = e.message || errorMsg;
         // 某些情况下，AI SDK 会把原始响应包装在自定义属性中，尝试提取。
         const errWithCause = e as Error & { cause?: unknown };
-        if (errWithCause.cause && typeof errWithCause.cause === 'object' && errWithCause.cause !== null && 'message' in errWithCause.cause) {
+        if (
+          errWithCause.cause &&
+          typeof errWithCause.cause === 'object' &&
+          errWithCause.cause !== null &&
+          'message' in errWithCause.cause
+        ) {
           errorMsg = String((errWithCause.cause as { message: unknown }).message) || errorMsg;
         }
       } else if (typeof e === 'string') {
@@ -1190,12 +1363,18 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       return;
     }
 
-    const SpeechCtor = (window as unknown as {
-      SpeechRecognition?: new () => SpeechRecognitionLike;
-      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-    }).SpeechRecognition ?? (window as unknown as {
-      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-    }).webkitSpeechRecognition;
+    const SpeechCtor =
+      (
+        window as unknown as {
+          SpeechRecognition?: new () => SpeechRecognitionLike;
+          webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+        }
+      ).SpeechRecognition ??
+      (
+        window as unknown as {
+          webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+        }
+      ).webkitSpeechRecognition;
 
     if (!SpeechCtor) {
       toast.error('当前环境暂不支持本地语音输入');
@@ -1243,7 +1422,12 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   }
 
   function renderComposer() {
-    const hasInspectableContext = turns.length > 0 || input.trim().length > 0 || selectedFiles.length > 0 || referencedPlugin != null || draft != null;
+    const hasInspectableContext =
+      turns.length > 0 ||
+      input.trim().length > 0 ||
+      selectedFiles.length > 0 ||
+      referencedPlugin != null ||
+      draft != null;
     const contextUsageLabel = contextWindow
       ? `${usedTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens${compressedHint > 0 ? ` · 已压缩 ${compressedHint} 轮` : ''}`
       : `约 ${usedTokens.toLocaleString()} tokens${compressedHint > 0 ? ` · 已压缩 ${compressedHint} 轮` : ''}`;
@@ -1258,18 +1442,30 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         input={input}
         mode={creatorMode}
         onClearFiles={() => setSelectedFiles([])}
-        onImportFiles={() => { void importFromSelectedFiles(); }}
-        onOpenContext={() => { void openContextInspector(); }}
+        onImportFiles={() => {
+          void importFromSelectedFiles();
+        }}
+        onOpenContext={() => {
+          void openContextInspector();
+        }}
         onOpenSkills={() => setSkillDialogOpen(true)}
-        onOpenWorkspace={() => { void openWorkspaceFolder(); }}
+        onOpenWorkspace={() => {
+          void openWorkspaceFolder();
+        }}
         onInputChange={setInput}
         onModeChange={setCreatorMode}
-        onOptimizePrompt={() => { void optimizePrompt(); }}
+        onOptimizePrompt={() => {
+          void optimizePrompt();
+        }}
         onPickFiles={() => fileInputRef.current?.click()}
         onPickFolder={() => folderInputRef.current?.click()}
-        onRefreshWorkspace={() => { void refreshWorkspaceFolder(); }}
+        onRefreshWorkspace={() => {
+          void refreshWorkspaceFolder();
+        }}
         onRemoveFile={removeFile}
-        onSend={() => { void send(); }}
+        onSend={() => {
+          void send();
+        }}
         onSelectReferencedPlugin={handleSelectReferencedPlugin}
         onSelectTier={setTier}
         onStop={stop}
@@ -1293,7 +1489,16 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   // R2：用户在提问卡片作答 → 标记 parts 的该 question 为 answered + 写 answer，并 resolve 悬挂的 deferred，
   // agent 多步循环据此继续。turnIdx 用于定位气泡。
   // 工具调用卡片：按 toolCallId 写入/更新 assistant 气泡的 parts（调用建卡，结果补状态）。
-  function upsertToolPart(turnIdx: number, patch: { toolCallId: string; name: string; args?: unknown; result?: unknown; status: 'running' | 'ok' | 'error' }) {
+  function upsertToolPart(
+    turnIdx: number,
+    patch: {
+      toolCallId: string;
+      name: string;
+      args?: unknown;
+      result?: unknown;
+      status: 'running' | 'ok' | 'error';
+    }
+  ) {
     setTurns((prev) => {
       const next = [...prev];
       const cur = next[turnIdx];
@@ -1329,7 +1534,10 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       // 整段重复检测：上游模型在多轮工具调用后会整段复述之前的总结/分析。
       // 检查当前 turn 的所有 text parts（不只末尾的），delta 已存在则跳过。
       // 这解决"几百字总结重复 5-6 次"的问题（跨 tool turn 的 text part 重复）。
-      const allText = parts.filter((p): p is TextPart => p.type === 'text').map((p) => p.content).join('\n');
+      const allText = parts
+        .filter((p): p is TextPart => p.type === 'text')
+        .map((p) => p.content)
+        .join('\n');
       if (last && last.type === 'text') {
         const deduped = detectDuplicateOutput(allText, delta);
         if (deduped === null) return next; // 判定为重复，跳过
@@ -1388,7 +1596,9 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         next[turnIdx] = {
           ...cur,
           parts: cleanTurnParts(cur.parts).map((p) =>
-            p.type === 'question' && p.toolCallId === toolCallId ? { ...p, answer: trimmed, answered: true } : p,
+            p.type === 'question' && p.toolCallId === toolCallId
+              ? { ...p, answer: trimmed, answered: true }
+              : p
           ),
         };
       }
@@ -1399,8 +1609,16 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
       deferred.resolve({ answer: trimmed });
       pendingAnswersRef.current.delete(toolCallId);
     }
-    setAnswerDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
-    setMultiSelectDrafts((prev) => { const n = { ...prev }; delete n[toolCallId]; return n; });
+    setAnswerDrafts((prev) => {
+      const n = { ...prev };
+      delete n[toolCallId];
+      return n;
+    });
+    setMultiSelectDrafts((prev) => {
+      const n = { ...prev };
+      delete n[toolCallId];
+      return n;
+    });
   }, []);
 
   const handleAnswerDraftChange = useCallback((toolCallId: string, text: string) => {
@@ -1410,110 +1628,120 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
   const handleToggleMultiSelect = useCallback((toolCallId: string, value: string) => {
     setMultiSelectDrafts((prev) => {
       const cur = prev[toolCallId] ?? [];
-      return { ...prev, [toolCallId]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
+      return {
+        ...prev,
+        [toolCallId]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value],
+      };
     });
   }, []);
 
-
   return (
     <>
-    {/* 隐藏输入：普通文件与文件夹分开，避免 webkitdirectory 阻断单文件选择。 */}
-    <input
-      ref={fileInputRef}
-      type="file"
-      multiple
-      className="hidden"
-      onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
-    />
-    <input
-      ref={folderInputRef}
-      type="file"
-      // webkitdirectory 为非标准属性，React 不识别故用属性透传；选目录时浏览器给目录下全部文件。
-      {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
-      multiple
-      className="hidden"
-      onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
-    />
-    <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
-      {/* 关闭/退出创建器：浮窗（替代 Dialog 默认 X）与全屏模式共用，浅色/深色均可见（z-50 防被内容遮挡）。 */}
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="关闭创建插件"
-        title="关闭创建插件"
-        className="absolute right-3 top-3 z-50 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <XIcon className="size-4" />
-      </button>
-      <CreatorWorkspaceSidebar
-            activeConversationId={activeConversationId}
-            busy={busy}
-            collapsed={!sidebarOpen}
-            confirmDeleteId={confirmDeleteId}
-            conversations={conversations}
-            onCancelDeleteConversation={() => setConfirmDeleteId(null)}
-            onConfirmDeleteConversation={deleteConversation}
-            onDeleteConversation={setConfirmDeleteId}
-            onNewConversation={newConversation}
-            onSelectConversation={selectConversationById}
-            onToggleCollapsed={toggleSidebar}
+      {/* 隐藏输入：普通文件与文件夹分开，避免 webkitdirectory 阻断单文件选择。 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          handleFileSelect(e.target.files);
+          e.target.value = '';
+        }}
       />
-      <div className="flex min-w-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-        {turns.length === 0 ? (
-          <CreatorEmptyState onSelectPreset={setInput} />
-        ) : (
-          <CreatorMessageList
-            turns={turns}
-            busy={busy}
-            scrollRef={scrollRef}
-            answerDrafts={answerDrafts}
-            multiSelectDrafts={multiSelectDrafts}
-            todos={todos}
-            publishedName={publishedName}
-            compressing={compressing}
-            searchingQuery={searchingQuery}
-            uploadingViaTool={uploadingViaTool}
-            onAnswer={answerQuestion}
-            onAnswerDraftChange={handleAnswerDraftChange}
-            onToggleMultiSelect={handleToggleMultiSelect}
-            onRetry={retry}
-          />
-        )}
-        {renderComposer()}
+      <input
+        ref={folderInputRef}
+        type="file"
+        // webkitdirectory 为非标准属性，React 不识别故用属性透传；选目录时浏览器给目录下全部文件。
+        {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          handleFileSelect(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
+        {/* 关闭/退出创建器：浮窗（替代 Dialog 默认 X）与全屏模式共用，浅色/深色均可见（z-50 防被内容遮挡）。 */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭创建插件"
+          title="关闭创建插件"
+          className="absolute right-3 top-3 z-50 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <XIcon className="size-4" />
+        </button>
+        <CreatorWorkspaceSidebar
+          activeConversationId={activeConversationId}
+          busy={busy}
+          collapsed={!sidebarOpen}
+          confirmDeleteId={confirmDeleteId}
+          conversations={conversations}
+          onCancelDeleteConversation={() => setConfirmDeleteId(null)}
+          onConfirmDeleteConversation={deleteConversation}
+          onDeleteConversation={setConfirmDeleteId}
+          onNewConversation={newConversation}
+          onSelectConversation={selectConversationById}
+          onToggleCollapsed={toggleSidebar}
+        />
+        <div className="flex min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            {turns.length === 0 ? (
+              <CreatorEmptyState onSelectPreset={setInput} />
+            ) : (
+              <CreatorMessageList
+                turns={turns}
+                busy={busy}
+                scrollRef={scrollRef}
+                answerDrafts={answerDrafts}
+                multiSelectDrafts={multiSelectDrafts}
+                todos={todos}
+                publishedName={publishedName}
+                compressing={compressing}
+                searchingQuery={searchingQuery}
+                uploadingViaTool={uploadingViaTool}
+                onAnswer={answerQuestion}
+                onAnswerDraftChange={handleAnswerDraftChange}
+                onToggleMultiSelect={handleToggleMultiSelect}
+                onRetry={retry}
+              />
+            )}
+            {renderComposer()}
+          </div>
+          {draft && (
+            <CreatorDraftPanel
+              draft={draft}
+              onChange={patchDraft}
+              onSubmitted={onDraftSubmitted}
+              busy={busy}
+              conversationId={activeConversationId}
+              turns={turns}
+              workspaceId={workspacePluginId}
+              onWorkspacePersisted={onWorkspacePersisted}
+            />
+          )}
         </div>
-        {draft && (
-          <CreatorDraftPanel
-            draft={draft}
-            onChange={patchDraft}
-            onSubmitted={onDraftSubmitted}
-            busy={busy}
-            conversationId={activeConversationId}
-            turns={turns}
-            workspaceId={workspacePluginId}
-            onWorkspacePersisted={onWorkspacePersisted}
-          />
-        )}
       </div>
-    </div>
-    <CreatorSkillsDialog
-      open={skillDialogOpen}
-      onOpenChange={setSkillDialogOpen}
-      activeSkillIds={activeSkillIds}
-      onToggle={toggleSkill}
-    />
+      <CreatorSkillsDialog
+        open={skillDialogOpen}
+        onOpenChange={setSkillDialogOpen}
+        activeSkillIds={activeSkillIds}
+        onToggle={toggleSkill}
+      />
 
-    {/* 上下文查看面板 */}
-    <ContextInspector
-      breakdown={contextBreakdown}
-      open={contextInspectorOpen}
-      onClose={() => setContextInspectorOpen(false)}
-      modelTokens={inspectorTokens}
-      contextWindow={contextWindow}
-      canCompress={!busy && turns.length > 0}
-      compressing={compressing}
-      onCompress={() => { void handleManualCompress(); }}
-    />
+      {/* 上下文查看面板 */}
+      <ContextInspector
+        breakdown={contextBreakdown}
+        open={contextInspectorOpen}
+        onClose={() => setContextInspectorOpen(false)}
+        modelTokens={inspectorTokens}
+        contextWindow={contextWindow}
+        canCompress={!busy && turns.length > 0}
+        compressing={compressing}
+        onCompress={() => {
+          void handleManualCompress();
+        }}
+      />
     </>
   );
 }

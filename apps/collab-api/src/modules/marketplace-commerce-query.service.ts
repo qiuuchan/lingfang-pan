@@ -8,7 +8,7 @@ import { AuthService } from './auth.service';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_STATEMENT_RANGE_MS = 90 * DAY_MS;
 const ORDER_STATUSES = ['PENDING_SETTLEMENT', 'REFUND_REQUESTED', 'SETTLED', 'REFUNDED'] as const;
-type OrderStatus = typeof ORDER_STATUSES[number];
+type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export type MarketplaceOrderQuery = {
   from?: string;
@@ -69,7 +69,7 @@ type OrderItemRow = Prisma.PurchaseGetPayload<{ select: typeof ORDER_ITEM_SELECT
 export class MarketplaceCommerceQueryService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   async buyerOrders(userId: string, input: MarketplaceOrderQuery = {}) {
@@ -124,11 +124,13 @@ export class MarketplaceCommerceQueryService {
           sellerAmountCents: true,
         },
       }),
-      ...ORDER_STATUSES.map((status) => this.prisma.purchase.aggregate({
-        where: { ...where, status },
-        _count: { _all: true },
-        _sum: { priceCents: true, sellerAmountCents: true },
-      })),
+      ...ORDER_STATUSES.map((status) =>
+        this.prisma.purchase.aggregate({
+          where: { ...where, status },
+          _count: { _all: true },
+          _sum: { priceCents: true, sellerAmountCents: true },
+        })
+      ),
     ]);
     return {
       range: publicRange(range),
@@ -139,11 +141,16 @@ export class MarketplaceCommerceQueryService {
         gross_cents: totals._sum.priceCents ?? 0,
         platform_cents: totals._sum.platformAmountCents ?? 0,
         seller_cents: totals._sum.sellerAmountCents ?? 0,
-        by_status: Object.fromEntries(ORDER_STATUSES.map((status, index) => [status, {
-          count: statusTotals[index]._count._all,
-          gross_cents: statusTotals[index]._sum.priceCents ?? 0,
-          seller_cents: statusTotals[index]._sum.sellerAmountCents ?? 0,
-        }])),
+        by_status: Object.fromEntries(
+          ORDER_STATUSES.map((status, index) => [
+            status,
+            {
+              count: statusTotals[index]._count._all,
+              gross_cents: statusTotals[index]._sum.priceCents ?? 0,
+              seller_cents: statusTotals[index]._sum.sellerAmountCents ?? 0,
+            },
+          ])
+        ),
       },
       items: rows.map(publicOrder),
       total,
@@ -201,7 +208,9 @@ export class MarketplaceCommerceQueryService {
     }
     return {
       range: publicRange(range),
-      items: [...daily.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, values]) => ({ date, ...values })),
+      items: [...daily.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([date, values]) => ({ date, ...values })),
     };
   }
 
@@ -280,12 +289,21 @@ export class MarketplaceCommerceQueryService {
     await this.auth.ensurePlatformAdmin(adminUserId);
     const campaign = await this.prisma.marketplaceCampaign.findUnique({
       where: { id: campaignId },
-      include: { items: { include: { package: { select: { name: true } } }, orderBy: { rank: 'asc' } } },
+      include: {
+        items: { include: { package: { select: { name: true } } }, orderBy: { rank: 'asc' } },
+      },
     });
     if (!campaign) throw notFound('市场活动不存在');
     const orders = await this.prisma.purchase.findMany({
       where: { campaignId, attributionKind: 'CAMPAIGN', campaignItemId: { not: null } },
-      select: { campaignItemId: true, packageId: true, status: true, priceCents: true, createdAt: true, refundedAt: true },
+      select: {
+        campaignItemId: true,
+        packageId: true,
+        status: true,
+        priceCents: true,
+        createdAt: true,
+        refundedAt: true,
+      },
     });
     const attributed = summarizeCampaignOrders(orders);
     const byItem = new Map<string, typeof orders>();
@@ -325,14 +343,23 @@ function normalizePage(input: { page?: number; pageSize?: number }) {
   return { page, pageSize, skip: (page - 1) * pageSize };
 }
 
-function normalizeDateRange(input: { from?: string; to?: string; timezone?: string }, defaults: boolean) {
+function normalizeDateRange(
+  input: { from?: string; to?: string; timezone?: string },
+  defaults: boolean
+) {
   if (!defaults && !input.from && !input.to) return null;
   const to = input.to ? new Date(input.to) : new Date();
   const from = input.from ? new Date(input.from) : new Date(to.getTime() - 30 * DAY_MS);
-  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw badRequest('市场对账日期范围无效');
-  if (to.getTime() - from.getTime() > MAX_STATEMENT_RANGE_MS) throw badRequest('市场对账单次最多查询 90 天');
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to)
+    throw badRequest('市场对账日期范围无效');
+  if (to.getTime() - from.getTime() > MAX_STATEMENT_RANGE_MS)
+    throw badRequest('市场对账单次最多查询 90 天');
   const timeZone = input.timezone?.trim() || 'UTC';
-  try { assertIanaTimeZone(timeZone); } catch { throw badRequest('市场对账时区无效'); }
+  try {
+    assertIanaTimeZone(timeZone);
+  } catch {
+    throw badRequest('市场对账时区无效');
+  }
   return { from, to, timeZone };
 }
 
@@ -364,15 +391,17 @@ function publicOrder(row: OrderItemRow) {
     refundable_until: row.refundableUntil?.toISOString() ?? null,
     settled_at: row.settledAt?.toISOString() ?? null,
     refunded_at: row.refundedAt?.toISOString() ?? null,
-    refund_request: row.refundRequest ? {
-      id: row.refundRequest.id,
-      purchase_id: row.refundRequest.purchaseId,
-      status: row.refundRequest.status,
-      reason: row.refundRequest.reason,
-      requested_at: row.refundRequest.requestedAt.toISOString(),
-      reviewed_at: row.refundRequest.reviewedAt?.toISOString() ?? null,
-      review_reason: row.refundRequest.reviewReason,
-    } : null,
+    refund_request: row.refundRequest
+      ? {
+          id: row.refundRequest.id,
+          purchase_id: row.refundRequest.purchaseId,
+          status: row.refundRequest.status,
+          reason: row.refundRequest.reason,
+          requested_at: row.refundRequest.requestedAt.toISOString(),
+          reviewed_at: row.refundRequest.reviewedAt?.toISOString() ?? null,
+          review_reason: row.refundRequest.reviewReason,
+        }
+      : null,
   };
 }
 
@@ -421,12 +450,16 @@ function inRange(value: Date, range: { from: Date; to: Date }) {
 }
 
 function dateKey(value: Date, timeZone: string) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US-u-ca-iso8601', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(value).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US-u-ca-iso8601', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(value)
+      .map((part) => [part.type, part.value])
+  );
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
@@ -454,6 +487,9 @@ function summarizeCampaignOrders(rows: Array<{ status: string; priceCents: numbe
     refunded_order_count: refunded.length,
     refunded_gross_cents: refunded.reduce((sum, row) => sum + row.priceCents, 0),
     net_order_count: rows.length - refunded.length,
-    net_gross_cents: rows.reduce((sum, row) => sum + (row.status === 'REFUNDED' ? 0 : row.priceCents), 0),
+    net_gross_cents: rows.reduce(
+      (sum, row) => sum + (row.status === 'REFUNDED' ? 0 : row.priceCents),
+      0
+    ),
   };
 }

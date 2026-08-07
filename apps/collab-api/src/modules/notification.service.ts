@@ -28,7 +28,8 @@ export class NotificationService {
    *  - opts.unreadOnly=true 时仅返回未读（前端「未读」tab 用）。
    *  - limit clamp 到 [1,100]，与 release.list 的 clamp 风格一致。 */
   async listForUser(userId: string, opts: { unreadOnly?: boolean; limit?: number } = {}) {
-    const limit = opts.limit === undefined ? 50 : Math.min(100, Math.max(1, Math.floor(opts.limit)));
+    const limit =
+      opts.limit === undefined ? 50 : Math.min(100, Math.max(1, Math.floor(opts.limit)));
     const where: { userId: string; read?: boolean } = { userId };
     if (opts.unreadOnly) where.read = false;
 
@@ -66,7 +67,13 @@ export class NotificationService {
   /** 内部触发：创建一条通知。调用方必须用 try/catch 包裹，失败仅记日志不抛错（不阻塞主操作）。
    *  - title/body 由调用方构造文案；type 为业务类型串（如 plugin_approved）。
    *  - related 可选，指向触发实体（如 { relatedType: 'Plugin', relatedId: 'p1' }）。 */
-  async create(userId: string, type: string, title: string, body: string, related?: NotificationRelated) {
+  async create(
+    userId: string,
+    type: string,
+    title: string,
+    body: string,
+    related?: NotificationRelated
+  ) {
     return this.prisma.notification.create({
       data: {
         userId,

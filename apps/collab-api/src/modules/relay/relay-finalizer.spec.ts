@@ -3,7 +3,9 @@ import { relayOutcome, type RelayStaticTerminalStatus } from './relay-finalizer'
 
 describe('relayOutcome', () => {
   it('maps each static terminal status to its canonical (httpStatus, errorCode)', () => {
-    const cases: Array<[RelayStaticTerminalStatus, { httpStatus: number; errorCode: string | null }]> = [
+    const cases: Array<
+      [RelayStaticTerminalStatus, { httpStatus: number; errorCode: string | null }]
+    > = [
       ['insufficient_balance', { httpStatus: 402, errorCode: 'insufficient_balance' }],
       ['success', { httpStatus: 200, errorCode: null }],
       ['no_channel', { httpStatus: 503, errorCode: 'no_channel_available' }],

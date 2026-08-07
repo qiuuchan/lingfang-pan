@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fromRunResult, isPluginAiPolicyError, toCreatorError, toUploadError } from '@/lib/creator-error';
+import {
+  fromRunResult,
+  isPluginAiPolicyError,
+  toCreatorError,
+  toUploadError,
+} from '@/lib/creator-error';
 import type { ApiError } from '@/lib/api';
 
 function makeApiError(message: string, code?: string): ApiError {
@@ -89,7 +94,11 @@ describe('toUploadError', () => {
 
 describe('fromRunResult', () => {
   it('interpreter_missing 解析为对应 kind 并展示探测路径', () => {
-    const err = fromRunResult({ ok: false, failure: 'interpreter_missing', interpreter: '/usr/bin/node' });
+    const err = fromRunResult({
+      ok: false,
+      failure: 'interpreter_missing',
+      interpreter: '/usr/bin/node',
+    });
     expect(err.kind).toBe('interpreter_missing');
     expect(err.retryable).toBe(false);
     expect(err.detail).toContain('/usr/bin/node');

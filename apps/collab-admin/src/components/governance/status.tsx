@@ -40,15 +40,19 @@ export function delistActorLabel(value: PluginDelistActor | null) {
 }
 
 export function PackageStatusBadge({ value }: { value: PluginGovernanceStatus }) {
-  return value === 'ACTIVE'
-    ? <Badge variant="success">包正常</Badge>
-    : <Badge variant="secondary">包已归档</Badge>;
+  return value === 'ACTIVE' ? (
+    <Badge variant="success">包正常</Badge>
+  ) : (
+    <Badge variant="secondary">包已归档</Badge>
+  );
 }
 
 export function ReleaseStatusBadge({ value }: { value: PluginReleaseStatus }) {
-  return value === 'PUBLISHED'
-    ? <Badge variant="success">已发布</Badge>
-    : <Badge variant="destructive">已撤回</Badge>;
+  return value === 'PUBLISHED' ? (
+    <Badge variant="success">已发布</Badge>
+  ) : (
+    <Badge variant="destructive">已撤回</Badge>
+  );
 }
 
 export function PluginSourceSummary({
@@ -88,13 +92,14 @@ export function ReviewBadge({ value }: { value: PluginReviewStatus }) {
     APPROVED: '已通过',
     REJECTED: '已驳回',
   };
-  const variant = value === 'APPROVED'
-    ? 'success'
-    : value === 'PENDING'
-      ? 'warning'
-      : value === 'REJECTED'
-        ? 'destructive'
-        : 'secondary';
+  const variant =
+    value === 'APPROVED'
+      ? 'success'
+      : value === 'PENDING'
+        ? 'warning'
+        : value === 'REJECTED'
+          ? 'destructive'
+          : 'secondary';
   return <Badge variant={variant}>{labels[value]}</Badge>;
 }
 

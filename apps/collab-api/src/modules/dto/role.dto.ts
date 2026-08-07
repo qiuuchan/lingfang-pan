@@ -1,6 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 /** 角色编码格式：小写字母/数字开头，允许小写字母、数字、下划线、连字符，1-64 字符。 */
 const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -24,7 +35,7 @@ export class RoleListQueryDto {
 
   @ApiPropertyOptional({ description: '角色名称、编码或描述关键词' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
@@ -38,11 +49,15 @@ export class CreateRoleDto {
   @MaxLength(64, { message: 'name 最长 64 字符' })
   name!: string;
 
-  @ApiPropertyOptional({ description: '角色编码（可选、同 scope+teamId 下唯一，如 admin/operator）' })
+  @ApiPropertyOptional({
+    description: '角色编码（可选、同 scope+teamId 下唯一，如 admin/operator）',
+  })
   @IsOptional()
   @IsString({ message: 'code 必须是字符串' })
   @MaxLength(64, { message: 'code 最长 64 字符' })
-  @Matches(ROLE_CODE_PATTERN, { message: '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头' })
+  @Matches(ROLE_CODE_PATTERN, {
+    message: '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头',
+  })
   code?: string;
 
   @ApiPropertyOptional({ description: '角色描述（最长 255 字符）' })
@@ -51,7 +66,10 @@ export class CreateRoleDto {
   @MaxLength(255, { message: 'description 最长 255 字符' })
   description?: string;
 
-  @ApiPropertyOptional({ description: '权限码数组（来自注册表，scope 须与目标角色 scope 一致）', type: [String] })
+  @ApiPropertyOptional({
+    description: '权限码数组（来自注册表，scope 须与目标角色 scope 一致）',
+    type: [String],
+  })
   @IsOptional()
   @IsArray({ message: 'permissions 必须是数组' })
   @ArrayMinSize(0)
@@ -72,7 +90,9 @@ export class UpdateRoleDto {
   @IsOptional()
   @IsString({ message: 'code 必须是字符串' })
   @MaxLength(64, { message: 'code 最长 64 字符' })
-  @Matches(ROLE_CODE_PATTERN, { message: '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头' })
+  @Matches(ROLE_CODE_PATTERN, {
+    message: '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头',
+  })
   code?: string;
 
   @ApiPropertyOptional({ description: '角色描述' })
@@ -101,7 +121,10 @@ export class AssignMemberRoleDto {
 
 /** 设置插件授权请求体 DTO。subjectKind=USER 时 subjectId=userId；ROLE 时 subjectId=团队角色 id。 */
 export class SetPluginGrantDto {
-  @ApiProperty({ description: '授权主体类型：USER 指定用户 / ROLE 指定角色', enum: ['USER', 'ROLE'] })
+  @ApiProperty({
+    description: '授权主体类型：USER 指定用户 / ROLE 指定角色',
+    enum: ['USER', 'ROLE'],
+  })
   @IsString()
   subjectKind!: 'USER' | 'ROLE';
 
@@ -109,7 +132,10 @@ export class SetPluginGrantDto {
   @IsString()
   subjectId!: string;
 
-  @ApiProperty({ description: '授权效果：ALLOW 放行 / DENY 拒绝（deny 优先）', enum: ['ALLOW', 'DENY'] })
+  @ApiProperty({
+    description: '授权效果：ALLOW 放行 / DENY 拒绝（deny 优先）',
+    enum: ['ALLOW', 'DENY'],
+  })
   @IsString()
   effect!: 'ALLOW' | 'DENY';
 }

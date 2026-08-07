@@ -46,7 +46,12 @@ export function RoleEditDialog({
   title: string;
   description?: string;
   onClose: () => void;
-  onSubmit: (body: { name?: string; code?: string; description?: string; permissions?: string[] }) => Promise<unknown>;
+  onSubmit: (body: {
+    name?: string;
+    code?: string;
+    description?: string;
+    permissions?: string[];
+  }) => Promise<unknown>;
 }) {
   const isSystem = role?.isSystem ?? false;
   const [name, setName] = useState(role?.name ?? '');
@@ -94,7 +99,12 @@ export function RoleEditDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-1.5">
@@ -112,10 +122,20 @@ export function RoleEditDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>角色名</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder="如：运营专员" />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={64}
+                placeholder="如：运营专员"
+              />
             </div>
             <div className="space-y-2">
-              <Label>编码{isSystem && <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>}</Label>
+              <Label>
+                编码
+                {isSystem && (
+                  <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>
+                )}
+              </Label>
               <Input
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
@@ -123,12 +143,20 @@ export function RoleEditDialog({
                 placeholder="如：operator"
                 disabled={isSystem}
               />
-              <p className="text-xs text-muted-foreground">小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。</p>
+              <p className="text-xs text-muted-foreground">
+                小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。
+              </p>
             </div>
           </div>
           <div className="space-y-2">
             <Label>说明</Label>
-            <Textarea value={descriptionText} onChange={(e) => setDescriptionText(e.target.value)} maxLength={255} rows={2} placeholder="描述该角色的职责" />
+            <Textarea
+              value={descriptionText}
+              onChange={(e) => setDescriptionText(e.target.value)}
+              maxLength={255}
+              rows={2}
+              placeholder="描述该角色的职责"
+            />
           </div>
 
           <PermissionChecklist
@@ -142,7 +170,9 @@ export function RoleEditDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
           <Button onClick={handleSave}>{role ? '保存' : '创建'}</Button>
         </DialogFooter>
       </DialogContent>

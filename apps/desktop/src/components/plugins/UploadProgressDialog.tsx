@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatBytes } from '@/lib/tickets';
 import type { UploadProgress } from '@/lib/plugin-upload';
@@ -40,41 +41,50 @@ export function UploadProgressDialog({
   onClose,
 }: UploadProgressDialogProps) {
   const canClose = stage === 'done' || stage === 'error';
-  const percent = progress && progress.total > 0
-    ? Math.min(100, Math.round((progress.uploaded / progress.total) * 100))
-    : null;
+  const percent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.uploaded / progress.total) * 100))
+      : null;
 
-  const titleText = stage === 'reading'
-    ? '正在准备插件文件…'
-    : stage === 'uploading'
-    ? '正在上传插件…'
-    : stage === 'done'
-    ? '上传完成'
-    : '上传失败';
+  const titleText =
+    stage === 'reading'
+      ? '正在准备插件文件…'
+      : stage === 'uploading'
+        ? '正在上传插件…'
+        : stage === 'done'
+          ? '上传完成'
+          : '上传失败';
 
-  const statusText = stage === 'reading'
-    ? `正在读取「${pluginName}」的源文件…`
-    : stage === 'uploading'
-    ? percent !== null
-      ? `${percent}% · ${formatBytes(progress!.uploaded)} / ${formatBytes(progress!.total)}`
-      : `${formatBytes(progress?.uploaded ?? 0)} 已上传`
-    : stage === 'done'
-    ? `「${pluginName}」已成功发布`
-    : errorMessage ?? '上传过程中发生错误';
+  const statusText =
+    stage === 'reading'
+      ? `正在读取「${pluginName}」的源文件…`
+      : stage === 'uploading'
+        ? percent !== null
+          ? `${percent}% · ${formatBytes(progress!.uploaded)} / ${formatBytes(progress!.total)}`
+          : `${formatBytes(progress?.uploaded ?? 0)} 已上传`
+        : stage === 'done'
+          ? `「${pluginName}」已成功发布`
+          : (errorMessage ?? '上传过程中发生错误');
 
-  const speedText = progress && progress.speed > 0 && stage === 'uploading'
-    ? `${formatSpeed(progress.speed)}`
-    : null;
+  const speedText =
+    progress && progress.speed > 0 && stage === 'uploading'
+      ? `${formatSpeed(progress.speed)}`
+      : null;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v && canClose) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v && canClose) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-md" showCloseButton={canClose}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {stage === 'reading' || stage === 'uploading' ? (
               <Loader2Icon className="size-5 animate-spin text-primary" />
             ) : stage === 'done' ? (
-              <CheckCircle2Icon className="size-5 text-emerald-500" />
+              <CheckCircle2Icon className="size-5 text-success" />
             ) : (
               <XCircleIcon className="size-5 text-destructive" />
             )}
@@ -83,7 +93,7 @@ export function UploadProgressDialog({
           <DialogDescription className="sr-only">插件上传进度</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="flex flex-col gap-4 py-2">
           {/* 阶段提示 */}
           <div className="flex items-center gap-2 text-sm">
             <UploadIcon className="size-4 text-muted-foreground" />
@@ -92,12 +102,10 @@ export function UploadProgressDialog({
 
           {/* 进度条（reading 阶段显示不确定动画，uploading 阶段显示百分比） */}
           {(stage === 'uploading' || stage === 'reading') && (
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{stage === 'reading' ? '准备中…' : speedText ?? '上传中…'}</span>
-                <span>
-                  {percent !== null ? `${percent}%` : stage === 'reading' ? '…' : ''}
-                </span>
+                <span>{stage === 'reading' ? '准备中…' : (speedText ?? '上传中…')}</span>
+                <span>{percent !== null ? `${percent}%` : stage === 'reading' ? '…' : ''}</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-muted">
                 {stage === 'reading' ? (
@@ -116,11 +124,13 @@ export function UploadProgressDialog({
 
           {/* 错误详情 */}
           {stage === 'error' && errorMessage && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-              <pre className="scrollbar-thin max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs text-destructive">
-                {errorMessage}
-              </pre>
-            </div>
+            <Alert variant="destructive" className="border-destructive/30 bg-destructive/5">
+              <AlertDescription>
+                <pre className="scrollbar-thin max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs text-destructive">
+                  {errorMessage}
+                </pre>
+              </AlertDescription>
+            </Alert>
           )}
 
           {/* 完成后提示 */}

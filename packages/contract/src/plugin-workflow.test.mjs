@@ -67,14 +67,16 @@ const summary = {
 };
 
 test('workflow run create request owns the public snake_case boundary', () => {
-  expect(WorkflowRunCreateRequest.parse({
+  expect(
+    WorkflowRunCreateRequest.parse({
       workflow_release_id: 'workflow-release',
       sha256: digest('c'),
       execution_target: 'DESKTOP',
       input: {},
       idempotency_key: 'key-1',
       deadline_at: '2099-01-01T00:00:00.000Z',
-    }).execution_scope).toBe('PRODUCTION');
+    }).execution_scope
+  ).toBe('PRODUCTION');
   expect(() =>
     WorkflowRunCreateRequest.parse({
       workflow_release_id: 'workflow-release',
@@ -84,7 +86,8 @@ test('workflow run create request owns the public snake_case boundary', () => {
       idempotency_key: 'key-1',
       deadline_at: '2099-01-01T00:00:00.000Z',
       caller_id: 'untrusted-page',
-    })).toThrow();
+    })
+  ).toThrow();
   expect(() =>
     WorkflowRunCreateRequest.parse({
       workflow_release_id: 'workflow-release',
@@ -94,7 +97,8 @@ test('workflow run create request owns the public snake_case boundary', () => {
       idempotency_key: 'key-1',
       deadline_at: '2099-01-01T00:00:00.000Z',
       preview: true,
-    })).toThrow();
+    })
+  ).toThrow();
 });
 
 test('workflow detail, list and preflight DTOs expose only explicit fields', () => {
@@ -117,18 +121,24 @@ test('workflow detail, list and preflight DTOs expose only explicit fields', () 
     completed_at: null,
     error: null,
   };
-  expect(WorkflowRunDetailResponse.parse({
+  expect(
+    WorkflowRunDetailResponse.parse({
       run: { ...summary, input: {}, output: null, plan, attempts: [attempt] },
-    }).run.plan.plan_version).toBe('1');
-  expect(WorkflowRunListResponse.parse({ runs: [summary], next_cursor: null }).runs[0].attempt_counts).toEqual(summary.attempt_counts);
-  expect(WorkflowPreflightResponse.parse({
+    }).run.plan.plan_version
+  ).toBe('1');
+  expect(
+    WorkflowRunListResponse.parse({ runs: [summary], next_cursor: null }).runs[0].attempt_counts
+  ).toEqual(summary.attempt_counts);
+  expect(
+    WorkflowPreflightResponse.parse({
       eligible: true,
       workflow_release_id: 'workflow-release',
       execution_target: 'DESKTOP',
       execution_scope: 'PRODUCTION',
       plan,
       diagnostics: [],
-    }).eligible).toBe(true);
+    }).eligible
+  ).toBe(true);
   expect(() =>
     WorkflowRunDetailResponse.parse({
       run: {
@@ -139,7 +149,8 @@ test('workflow detail, list and preflight DTOs expose only explicit fields', () 
         attempts: [attempt],
         authorization_decision: { secret: true },
       },
-    })).toThrow();
+    })
+  ).toThrow();
 });
 
 test('workflow upgrade suggestions are exact advisory targets and cannot carry mutation instructions', () => {
@@ -164,5 +175,7 @@ test('workflow upgrade suggestions are exact advisory targets and cannot carry m
     ],
   });
   expect(response.suggestions[0].suggested_target.release_id).toBe('release-image-2');
-  expect(() => WorkflowUpgradeSuggestionResponse.parse({ ...response, auto_apply: true })).toThrow();
+  expect(() =>
+    WorkflowUpgradeSuggestionResponse.parse({ ...response, auto_apply: true })
+  ).toThrow();
 });

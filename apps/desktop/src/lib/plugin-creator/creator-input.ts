@@ -105,7 +105,10 @@ export function formatAttachmentContext(files: DraftFile[], skipped: string[] = 
   if (files.length === 0 && skipped.length === 0) return '';
 
   let remaining = MAX_ATTACHMENT_TOTAL_CHARS;
-  const chunks: string[] = ['# 本轮上传附件', '以下文件由用户通过输入栏上传，请作为本轮需求上下文使用。'];
+  const chunks: string[] = [
+    '# 本轮上传附件',
+    '以下文件由用户通过输入栏上传，请作为本轮需求上下文使用。',
+  ];
 
   for (const file of files) {
     if (remaining <= 0) break;
@@ -129,16 +132,21 @@ export function formatAttachmentContext(files: DraftFile[], skipped: string[] = 
         '',
         `--- ${file.path}（共 ${raw.length} 字符${wasTruncated ? '，已按上限截断' : ''}，已分 ${pieceCount} 块以适配 Write 工具）---`,
         ...pieces,
-        `[说明] 此文件已预分块。请用 Write 写「块 1」到 ${file.path}，再用 Edit 逐步把后续块追加到文件末尾（每次 Edit 的 new_string ≤ ${WRITE_SAFE_CHARS} 字符），不要一次性写整文件，否则参数会被截断。`,
+        `[说明] 此文件已预分块。请用 Write 写「块 1」到 ${file.path}，再用 Edit 逐步把后续块追加到文件末尾（每次 Edit 的 new_string ≤ ${WRITE_SAFE_CHARS} 字符），不要一次性写整文件，否则参数会被截断。`
       );
     } else {
-      const content = wasTruncated ? `${truncated}\n...(已截断，原文件 ${raw.length} 字符)` : truncated;
+      const content = wasTruncated
+        ? `${truncated}\n...(已截断，原文件 ${raw.length} 字符)`
+        : truncated;
       chunks.push('', `--- ${file.path} ---`, content);
     }
   }
 
   if (skipped.length > 0) {
-    chunks.push('', `已跳过 ${skipped.length} 个文件：${skipped.slice(0, 12).join('、')}${skipped.length > 12 ? '...' : ''}`);
+    chunks.push(
+      '',
+      `已跳过 ${skipped.length} 个文件：${skipped.slice(0, 12).join('、')}${skipped.length > 12 ? '...' : ''}`
+    );
   }
 
   return chunks.join('\n').trim();

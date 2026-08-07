@@ -3,7 +3,11 @@ import path from 'node:path';
 
 export const PLUGIN_README_MAX_BYTES = 256 * 1024;
 
-export type ReadmeValidationError = { code: 'readme_too_large' | 'readme_invalid_utf8'; path: string; message: string };
+export type ReadmeValidationError = {
+  code: 'readme_too_large' | 'readme_invalid_utf8';
+  path: string;
+  message: string;
+};
 
 /** Validate the exact root README.md using the same boundary as the registry. */
 export function validateRootReadme(pluginPath: string): ReadmeValidationError | null {
@@ -16,7 +20,11 @@ export function validateRootReadme(pluginPath: string): ReadmeValidationError | 
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
-    return { code: 'readme_invalid_utf8', path: 'README.md', message: 'README.md 必须是 UTF-8 文本' };
+    return {
+      code: 'readme_invalid_utf8',
+      path: 'README.md',
+      message: 'README.md 必须是 UTF-8 文本',
+    };
   }
   return null;
 }

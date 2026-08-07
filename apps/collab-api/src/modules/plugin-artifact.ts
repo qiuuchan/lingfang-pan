@@ -30,19 +30,30 @@ const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
 const RUNTIME_TYPES = ['client', 'cloud', 'nodejs', 'python', 'workflow'] as const;
 const VISIBILITIES = ['private', 'tenant'] as const;
 const CAPABILITY_KINDS = [
-  'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'image.generate', 'image.edit', 'storage.kv',
-  'system.info', 'system.screenshot', 'system.notify',
-  'plugin.upload', 'plugin.submitMarketplace',
+  'ui.view',
+  'fs.pick',
+  'fs.read',
+  'fs.write',
+  'net.fetch',
+  'clipboard',
+  'llm.chat',
+  'image.generate',
+  'image.edit',
+  'storage.kv',
+  'system.info',
+  'system.screenshot',
+  'system.notify',
+  'plugin.upload',
+  'plugin.submitMarketplace',
   'video.generate',
   'audio.generate',
 ] as const;
 const CAPABILITY_RISKS = ['none', 'low', 'medium', 'high'] as const;
 
-type RuntimeType = typeof RUNTIME_TYPES[number];
-type PluginVisibility = typeof VISIBILITIES[number];
-type CapabilityKind = typeof CAPABILITY_KINDS[number];
-type CapabilityRisk = typeof CAPABILITY_RISKS[number];
+type RuntimeType = (typeof RUNTIME_TYPES)[number];
+type PluginVisibility = (typeof VISIBILITIES)[number];
+type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
+type CapabilityRisk = (typeof CAPABILITY_RISKS)[number];
 
 type PluginCapability = {
   kind: CapabilityKind;
@@ -93,7 +104,15 @@ function safePath(raw: string): string {
   if (parts.some((part) => !part || part === '.' || part === '..')) {
     throw badRequest('插件制品路径不能包含空段、. 或 ..', { path });
   }
-  const excluded = new Set(['data', '.git', '.venv', 'venv', 'node_modules', '.lingfang', '__pycache__']);
+  const excluded = new Set([
+    'data',
+    '.git',
+    '.venv',
+    'venv',
+    'node_modules',
+    '.lingfang',
+    '__pycache__',
+  ]);
   if (parts.some((part) => excluded.has(part.toLowerCase()))) {
     throw badRequest('插件制品不能包含数据或运行缓存目录', { path });
   }
@@ -116,8 +135,17 @@ async function readExactly(filePath: string, position: number, length: number): 
   }
 }
 
-async function readExactlyFrom(file: FileHandle, position: number, length: number): Promise<Buffer> {
-  if (!Number.isSafeInteger(position) || position < 0 || !Number.isSafeInteger(length) || length < 0) {
+async function readExactlyFrom(
+  file: FileHandle,
+  position: number,
+  length: number
+): Promise<Buffer> {
+  if (
+    !Number.isSafeInteger(position) ||
+    position < 0 ||
+    !Number.isSafeInteger(length) ||
+    length < 0
+  ) {
     throw badRequest('ZIP 条目偏移或长度无效');
   }
   const buffer = Buffer.alloc(length);
@@ -126,10 +154,16 @@ async function readExactlyFrom(file: FileHandle, position: number, length: numbe
   return buffer;
 }
 
-async function validateLocalEntry(file: FileHandle, entry: ZipEntry, centralOffset: number): Promise<void> {
-  if (entry.localOffset + 30 > centralOffset) throw badRequest('ZIP 本地条目偏移损坏', { path: entry.path });
+async function validateLocalEntry(
+  file: FileHandle,
+  entry: ZipEntry,
+  centralOffset: number
+): Promise<void> {
+  if (entry.localOffset + 30 > centralOffset)
+    throw badRequest('ZIP 本地条目偏移损坏', { path: entry.path });
   const header = await readExactlyFrom(file, entry.localOffset, 30);
-  if (header.readUInt32LE(0) !== LOCAL_SIGNATURE) throw badRequest('ZIP 本地条目头损坏', { path: entry.path });
+  if (header.readUInt32LE(0) !== LOCAL_SIGNATURE)
+    throw badRequest('ZIP 本地条目头损坏', { path: entry.path });
 
   const flags = header.readUInt16LE(6);
   const compression = header.readUInt16LE(8);
@@ -140,36 +174,52 @@ async function validateLocalEntry(file: FileHandle, entry: ZipEntry, centralOffs
   const extraLength = header.readUInt16LE(28);
   const dataOffset = entry.localOffset + 30 + nameLength + extraLength;
   const dataEnd = dataOffset + entry.compressedSize;
-  if (nameLength === 0 || nameLength > MAX_PATH_BYTES || dataOffset > centralOffset || dataEnd > centralOffset) {
+  if (
+    nameLength === 0 ||
+    nameLength > MAX_PATH_BYTES ||
+    dataOffset > centralOffset ||
+    dataEnd > centralOffset
+  ) {
     throw badRequest('ZIP 本地条目边界损坏', { path: entry.path });
   }
   if (flags !== entry.flags || compression !== entry.compression) {
     throw badRequest('ZIP 本地条目元数据与中央目录不一致', { path: entry.path });
   }
   const localName = await readExactlyFrom(file, entry.localOffset + 30, nameLength);
-  if (!localName.equals(entry.rawName)) throw badRequest('ZIP 本地条目名称与中央目录不一致', { path: entry.path });
+  if (!localName.equals(entry.rawName))
+    throw badRequest('ZIP 本地条目名称与中央目录不一致', { path: entry.path });
 
   let recordEnd = dataEnd;
   if ((entry.flags & 0x08) === 0) {
-    if (crc32 !== entry.crc32 || compressedSize !== entry.compressedSize || uncompressedSize !== entry.uncompressedSize) {
+    if (
+      crc32 !== entry.crc32 ||
+      compressedSize !== entry.compressedSize ||
+      uncompressedSize !== entry.uncompressedSize
+    ) {
       throw badRequest('ZIP 本地条目大小或校验信息与中央目录不一致', { path: entry.path });
     }
   } else {
-    if ((crc32 !== 0 && crc32 !== entry.crc32)
-      || (compressedSize !== 0 && compressedSize !== entry.compressedSize)
-      || (uncompressedSize !== 0 && uncompressedSize !== entry.uncompressedSize)) {
+    if (
+      (crc32 !== 0 && crc32 !== entry.crc32) ||
+      (compressedSize !== 0 && compressedSize !== entry.compressedSize) ||
+      (uncompressedSize !== 0 && uncompressedSize !== entry.uncompressedSize)
+    ) {
       throw badRequest('ZIP 数据描述符条目的本地元数据无效', { path: entry.path });
     }
     const available = centralOffset - dataEnd;
     if (available < 12) throw badRequest('ZIP 数据描述符缺失', { path: entry.path });
     const descriptor = await readExactlyFrom(file, dataEnd, Math.min(16, available));
-    const matchesDescriptorAt = (candidateOffset: number) => descriptor.length >= candidateOffset + 12
-      && descriptor.readUInt32LE(candidateOffset) === entry.crc32
-      && descriptor.readUInt32LE(candidateOffset + 4) === entry.compressedSize
-      && descriptor.readUInt32LE(candidateOffset + 8) === entry.uncompressedSize;
-    const descriptorOffset = descriptor.readUInt32LE(0) === DATA_DESCRIPTOR_SIGNATURE && matchesDescriptorAt(4)
-      ? 4
-      : matchesDescriptorAt(0) ? 0 : -1;
+    const matchesDescriptorAt = (candidateOffset: number) =>
+      descriptor.length >= candidateOffset + 12 &&
+      descriptor.readUInt32LE(candidateOffset) === entry.crc32 &&
+      descriptor.readUInt32LE(candidateOffset + 4) === entry.compressedSize &&
+      descriptor.readUInt32LE(candidateOffset + 8) === entry.uncompressedSize;
+    const descriptorOffset =
+      descriptor.readUInt32LE(0) === DATA_DESCRIPTOR_SIGNATURE && matchesDescriptorAt(4)
+        ? 4
+        : matchesDescriptorAt(0)
+          ? 0
+          : -1;
     if (descriptorOffset < 0) {
       throw badRequest('ZIP 数据描述符与中央目录不一致', { path: entry.path });
     }
@@ -194,7 +244,11 @@ async function readEntries(filePath: string): Promise<ZipEntry[]> {
   if (disk !== 0 || centralDisk !== 0 || diskEntries !== totalEntries || totalEntries === 0xffff) {
     throw badRequest('不支持多卷或 ZIP64 制品');
   }
-  if (totalEntries > PLUGIN_ARTIFACT_MAX_FILES || centralSize > 16 * 1024 * 1024 || centralOffset + centralSize > info.size) {
+  if (
+    totalEntries > PLUGIN_ARTIFACT_MAX_FILES ||
+    centralSize > 16 * 1024 * 1024 ||
+    centralOffset + centralSize > info.size
+  ) {
     throw badRequest('ZIP 中央目录超限或损坏');
   }
 
@@ -205,7 +259,8 @@ async function readEntries(filePath: string): Promise<ZipEntry[]> {
   let offset = 0;
   let totalBytes = 0;
   while (offset < central.length) {
-    if (offset + 46 > central.length || central.readUInt32LE(offset) !== CENTRAL_SIGNATURE) throw badRequest('ZIP 中央目录损坏');
+    if (offset + 46 > central.length || central.readUInt32LE(offset) !== CENTRAL_SIGNATURE)
+      throw badRequest('ZIP 中央目录损坏');
     const flags = central.readUInt16LE(offset + 8);
     const compression = central.readUInt16LE(offset + 10);
     const crc32 = central.readUInt32LE(offset + 16);
@@ -218,9 +273,11 @@ async function readEntries(filePath: string): Promise<ZipEntry[]> {
     const externalAttributes = central.readUInt32LE(offset + 38);
     const localOffset = central.readUInt32LE(offset + 42);
     const end = offset + 46 + nameLength + extraLength + commentLength;
-    if (end > central.length || nameLength === 0 || nameLength > MAX_PATH_BYTES) throw badRequest('ZIP 条目名称损坏');
+    if (end > central.length || nameLength === 0 || nameLength > MAX_PATH_BYTES)
+      throw badRequest('ZIP 条目名称损坏');
     if ((flags & 0x1) !== 0) throw badRequest('插件制品不能包含加密 ZIP 条目');
-    if (compression !== 0 && compression !== 8) throw badRequest('插件制品只允许 store/deflate 压缩');
+    if (compression !== 0 && compression !== 8)
+      throw badRequest('插件制品只允许 store/deflate 压缩');
     if (diskNumber !== 0) throw badRequest('不支持多卷 ZIP 条目');
     const rawNameBytes = Buffer.from(central.subarray(offset + 46, offset + 46 + nameLength));
     const rawName = rawNameBytes.toString((flags & 0x800) !== 0 ? 'utf8' : 'latin1');
@@ -229,14 +286,19 @@ async function readEntries(filePath: string): Promise<ZipEntry[]> {
     if (paths.has(path)) throw badRequest('插件制品包含重复路径', { path });
     paths.add(path);
     const windowsPath = path.toLocaleLowerCase('en-US');
-    if (windowsPaths.has(windowsPath)) throw badRequest('插件制品包含 Windows 大小写冲突路径', { path });
+    if (windowsPaths.has(windowsPath))
+      throw badRequest('插件制品包含 Windows 大小写冲突路径', { path });
     windowsPaths.add(windowsPath);
     const unixMode = (externalAttributes >>> 16) & 0xffff;
     if ((unixMode & 0o170000) === 0o120000) throw badRequest('插件制品不能包含符号链接', { path });
-    if (uncompressedSize > PLUGIN_ARTIFACT_MAX_FILE_BYTES || compressedSize > PLUGIN_ARTIFACT_MAX_BYTES) {
+    if (
+      uncompressedSize > PLUGIN_ARTIFACT_MAX_FILE_BYTES ||
+      compressedSize > PLUGIN_ARTIFACT_MAX_BYTES
+    ) {
       throw badRequest('插件制品单文件大小超限', { path });
     }
-    if (compression === 0 && compressedSize !== uncompressedSize) throw badRequest('ZIP store 条目大小声明不一致', { path });
+    if (compression === 0 && compressedSize !== uncompressedSize)
+      throw badRequest('ZIP store 条目大小声明不一致', { path });
     totalBytes += uncompressedSize;
     if (totalBytes > PLUGIN_ARTIFACT_MAX_BYTES) throw badRequest('插件制品解压总量超限');
     entries.push({
@@ -273,7 +335,8 @@ const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let index = 0; index < table.length; index += 1) {
     let value = index;
-    for (let bit = 0; bit < 8; bit += 1) value = (value & 1) !== 0 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    for (let bit = 0; bit < 8; bit += 1)
+      value = (value & 1) !== 0 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
     table[index] = value >>> 0;
   }
   return table;
@@ -285,10 +348,18 @@ function updateCrc32(crc: number, chunk: Buffer): number {
   return value >>> 0;
 }
 
-async function consumeEntry(filePath: string, entry: ZipEntry, collect: boolean): Promise<Buffer | null> {
-  const source = entry.compressedSize === 0
-    ? null
-    : createReadStream(filePath, { start: entry.dataOffset, end: entry.dataOffset + entry.compressedSize - 1 });
+async function consumeEntry(
+  filePath: string,
+  entry: ZipEntry,
+  collect: boolean
+): Promise<Buffer | null> {
+  const source =
+    entry.compressedSize === 0
+      ? null
+      : createReadStream(filePath, {
+          start: entry.dataOffset,
+          end: entry.dataOffset + entry.compressedSize - 1,
+        });
   const stream = entry.compression === 8 && source ? source.pipe(createInflateRaw()) : source;
   const chunks: Buffer[] = [];
   let outputBytes = 0;
@@ -311,22 +382,28 @@ async function consumeEntry(filePath: string, entry: ZipEntry, collect: boolean)
     if (error instanceof Error && 'code' in error && error.code === 'bad_request') throw error;
     throw badRequest('ZIP 条目解压失败', { path: entry.path });
   }
-  if (outputBytes !== entry.uncompressedSize) throw badRequest('ZIP 条目声明大小与实际不一致', { path: entry.path });
-  if (((crc ^ 0xffffffff) >>> 0) !== entry.crc32) throw badRequest('ZIP 条目 CRC-32 校验失败', { path: entry.path });
+  if (outputBytes !== entry.uncompressedSize)
+    throw badRequest('ZIP 条目声明大小与实际不一致', { path: entry.path });
+  if ((crc ^ 0xffffffff) >>> 0 !== entry.crc32)
+    throw badRequest('ZIP 条目 CRC-32 校验失败', { path: entry.path });
   return collect ? Buffer.concat(chunks, outputBytes) : null;
 }
 
 function parseJsonObject(buffer: Buffer, path: string): Record<string, unknown> {
   try {
     const value = JSON.parse(buffer.toString('utf8')) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('object required');
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('object required');
     return value as Record<string, unknown>;
   } catch {
     throw badRequest(`${path} 不是有效的 JSON 对象`);
   }
 }
 
-function isAllowedValue<const T extends readonly string[]>(values: T, value: string): value is T[number] {
+function isAllowedValue<const T extends readonly string[]>(
+  values: T,
+  value: string
+): value is T[number] {
   return (values as readonly string[]).includes(value);
 }
 
@@ -334,7 +411,7 @@ function manifestString(
   input: Record<string, unknown>,
   field: string,
   maxLength?: number,
-  options: { defaultValue?: string; trim?: boolean } = {},
+  options: { defaultValue?: string; trim?: boolean } = {}
 ): string {
   const raw = input[field] === undefined ? options.defaultValue : input[field];
   if (typeof raw !== 'string') throw badRequest(`manifest.${field} 必须是字符串`);
@@ -364,18 +441,23 @@ function validateCapabilities(input: unknown): PluginCapability[] {
       throw badRequest('manifest.capabilities.kind 不受支持', { index, kind: capability.kind });
     }
     const reason = capability.reason === undefined ? '' : capability.reason;
-    if (typeof reason !== 'string') throw badRequest('manifest.capabilities.reason 必须是字符串', { index });
+    if (typeof reason !== 'string')
+      throw badRequest('manifest.capabilities.reason 必须是字符串', { index });
     if (reason.length > MAX_CAPABILITY_REASON_LENGTH) {
-      throw badRequest(`manifest.capabilities.reason 长度不能超过 ${MAX_CAPABILITY_REASON_LENGTH}`, {
-        index,
-        limit: MAX_CAPABILITY_REASON_LENGTH,
-      });
+      throw badRequest(
+        `manifest.capabilities.reason 长度不能超过 ${MAX_CAPABILITY_REASON_LENGTH}`,
+        {
+          index,
+          limit: MAX_CAPABILITY_REASON_LENGTH,
+        }
+      );
     }
     const risk = capability.risk === undefined ? 'low' : capability.risk;
     if (typeof risk !== 'string' || !isAllowedValue(CAPABILITY_RISKS, risk)) {
       throw badRequest('manifest.capabilities.risk 不受支持', { index, risk });
     }
-    const requiresAdmin = capability.requires_admin === undefined ? false : capability.requires_admin;
+    const requiresAdmin =
+      capability.requires_admin === undefined ? false : capability.requires_admin;
     if (typeof requiresAdmin !== 'boolean') {
       throw badRequest('manifest.capabilities.requires_admin 必须是布尔值', { index });
     }
@@ -389,9 +471,9 @@ function validateCapabilities(input: unknown): PluginCapability[] {
       risk,
       // llm.chat/image.generate/image.edit 不保留管理员审批语义；旧 manifest 值统一归一化。
       requires_admin:
-        capability.kind === 'llm.chat'
-        || capability.kind === 'image.generate'
-        || capability.kind === 'image.edit'
+        capability.kind === 'llm.chat' ||
+        capability.kind === 'image.generate' ||
+        capability.kind === 'image.edit'
           ? false
           : requiresAdmin,
       ...(scope === undefined ? {} : { scope: scope as Record<string, unknown> }),
@@ -399,7 +481,10 @@ function validateCapabilities(input: unknown): PluginCapability[] {
   });
 }
 
-function validateManifest(input: Record<string, unknown>, paths: Set<string>): InspectedPluginArtifact['manifest'] {
+function validateManifest(
+  input: Record<string, unknown>,
+  paths: Set<string>
+): InspectedPluginArtifact['manifest'] {
   const id = manifestString(input, 'id', MAX_MANIFEST_ID_LENGTH, { trim: true });
   const name = manifestString(input, 'name', MAX_MANIFEST_NAME_LENGTH, { trim: true });
   const version = manifestString(input, 'version', undefined, { trim: true });
@@ -423,33 +508,71 @@ function validateManifest(input: Record<string, unknown>, paths: Set<string>): I
   const capabilities = validateCapabilities(input.capabilities);
   const actions = validateActionDeclarations(input.actions, runtime, paths);
   const actionDependencies = validateActionDependencies(input.action_dependencies);
-  if (runtime === 'workflow' && !actions.some((action) => action.action_id === 'default')) throw badRequest('workflow manifest 必须导出 default action');
-  if (!parseStrictSemVer(version)) throw badRequest('manifest.version 必须是严格 SemVer', { version });
+  if (runtime === 'workflow' && !actions.some((action) => action.action_id === 'default'))
+    throw badRequest('workflow manifest 必须导出 default action');
+  if (!parseStrictSemVer(version))
+    throw badRequest('manifest.version 必须是严格 SemVer', { version });
   if (!paths.has(entry)) throw badRequest('manifest.entry 指向的文件不存在', { entry });
-  return { ...input, id, name, version, description, runtime_type: runtime, entry, visibility, capabilities, actions, action_dependencies: actionDependencies };
+  return {
+    ...input,
+    id,
+    name,
+    version,
+    description,
+    runtime_type: runtime,
+    entry,
+    visibility,
+    capabilities,
+    actions,
+    action_dependencies: actionDependencies,
+  };
 }
 
-function validateActionDeclarations(input: unknown, runtime: RuntimeType, paths: Set<string>): Record<string, unknown>[] {
+function validateActionDeclarations(
+  input: unknown,
+  runtime: RuntimeType,
+  paths: Set<string>
+): Record<string, unknown>[] {
   if (input === undefined) return [];
-  if (!Array.isArray(input) || input.length > 32) throw badRequest('manifest.actions 必须是最多 32 项的数组');
+  if (!Array.isArray(input) || input.length > 32)
+    throw badRequest('manifest.actions 必须是最多 32 项的数组');
   const ids = new Set<string>();
   return input.map((raw, index) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('manifest.actions 条目必须是对象', { index });
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+      throw badRequest('manifest.actions 条目必须是对象', { index });
     const action = raw as Record<string, unknown>;
     const actionId = String(action.action_id || '');
-    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(actionId) || ids.has(actionId)) throw badRequest('manifest.actions.action_id 无效或重复', { index });
+    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(actionId) || ids.has(actionId))
+      throw badRequest('manifest.actions.action_id 无效或重复', { index });
     ids.add(actionId);
-    if (!parseStrictSemVer(String(action.action_contract_version || ''))) throw badRequest('manifest.actions.action_contract_version 必须是严格 SemVer', { index });
-    if (!action.input_schema || typeof action.input_schema !== 'object' || !action.output_schema || typeof action.output_schema !== 'object') throw badRequest('manifest action 必须声明 input_schema 和 output_schema', { index });
+    if (!parseStrictSemVer(String(action.action_contract_version || '')))
+      throw badRequest('manifest.actions.action_contract_version 必须是严格 SemVer', { index });
+    if (
+      !action.input_schema ||
+      typeof action.input_schema !== 'object' ||
+      !action.output_schema ||
+      typeof action.output_schema !== 'object'
+    )
+      throw badRequest('manifest action 必须声明 input_schema 和 output_schema', { index });
     const handler = action.handler;
     if (runtime === 'cloud' || runtime === 'workflow') {
-      if (handler !== undefined) throw badRequest(`${runtime} action 不能声明包内 handler`, { index });
+      if (handler !== undefined)
+        throw badRequest(`${runtime} action 不能声明包内 handler`, { index });
     } else {
-      if (!handler || typeof handler !== 'object' || Array.isArray(handler)) throw badRequest('本地 action 必须声明 handler', { index });
+      if (!handler || typeof handler !== 'object' || Array.isArray(handler))
+        throw badRequest('本地 action 必须声明 handler', { index });
       const entry = safePath(String((handler as Record<string, unknown>).entry || ''));
-      if (!paths.has(entry)) throw badRequest('manifest action handler 指向的文件不存在', { index, entry });
-      const callable = runtime === 'python' ? (handler as Record<string, unknown>).callable : (handler as Record<string, unknown>).export;
-      if (typeof callable !== 'string' || !/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(callable)) throw badRequest('manifest action handler 导出名称无效', { index });
+      if (!paths.has(entry))
+        throw badRequest('manifest action handler 指向的文件不存在', { index, entry });
+      const callable =
+        runtime === 'python'
+          ? (handler as Record<string, unknown>).callable
+          : (handler as Record<string, unknown>).export;
+      if (
+        typeof callable !== 'string' ||
+        !/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(callable)
+      )
+        throw badRequest('manifest action handler 导出名称无效', { index });
     }
     return action;
   });
@@ -457,15 +580,25 @@ function validateActionDeclarations(input: unknown, runtime: RuntimeType, paths:
 
 function validateActionDependencies(input: unknown): Record<string, unknown>[] {
   if (input === undefined) return [];
-  if (!Array.isArray(input) || input.length > 64) throw badRequest('manifest.action_dependencies 必须是最多 64 项的数组');
+  if (!Array.isArray(input) || input.length > 64)
+    throw badRequest('manifest.action_dependencies 必须是最多 64 项的数组');
   const ids = new Set<string>();
   return input.map((raw, index) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('manifest.action_dependencies 条目必须是对象', { index });
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+      throw badRequest('manifest.action_dependencies 条目必须是对象', { index });
     const dependency = raw as Record<string, unknown>;
     const id = String(dependency.dependency_id || '');
-    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(id) || ids.has(id)) throw badRequest('manifest action dependency id 无效或重复', { index });
+    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(id) || ids.has(id))
+      throw badRequest('manifest action dependency id 无效或重复', { index });
     ids.add(id);
-    for (const field of ['package_id', 'release_version_range', 'action_id', 'action_contract_version_range']) if (typeof dependency[field] !== 'string' || !String(dependency[field]).trim()) throw badRequest(`manifest action dependency ${field} 无效`, { index });
+    for (const field of [
+      'package_id',
+      'release_version_range',
+      'action_id',
+      'action_contract_version_range',
+    ])
+      if (typeof dependency[field] !== 'string' || !String(dependency[field]).trim())
+        throw badRequest(`manifest action dependency ${field} 无效`, { index });
     return dependency;
   });
 }
@@ -488,7 +621,8 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
   const manifestBytes = await consumeEntry(filePath, manifestEntry, true);
   if (!metaBytes || !manifestBytes) throw badRequest('v4 制品缺少可读取的元数据');
   const meta = parseJsonObject(metaBytes, '_meta.json');
-  if (meta.format !== 'lingfang-plugin' || meta.formatVersion !== 4) throw badRequest('只支持 .lfplugin v4 制品');
+  if (meta.format !== 'lingfang-plugin' || meta.formatVersion !== 4)
+    throw badRequest('只支持 .lfplugin v4 制品');
   const manifestRaw = parseJsonObject(manifestBytes, 'manifest.json');
   const manifest = validateManifest(manifestRaw, new Set(byPath.keys()));
   const policyFiles: PluginAiPolicyFile[] = [];
@@ -504,11 +638,12 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
       if (entry.uncompressedSize > pluginAiPolicyTextLimit(entry.path)) {
         policyFiles.push({
           path: entry.path,
-          scanError: entry.path.toLowerCase().endsWith('package.json')
-            || entry.path.toLowerCase().endsWith('requirements.txt')
-            || entry.path.toLowerCase().endsWith('pyproject.toml')
-            ? 'dependency_too_large'
-            : 'too_large',
+          scanError:
+            entry.path.toLowerCase().endsWith('package.json') ||
+            entry.path.toLowerCase().endsWith('requirements.txt') ||
+            entry.path.toLowerCase().endsWith('pyproject.toml')
+              ? 'dependency_too_large'
+              : 'too_large',
         });
       } else if (collectedPolicyBytes + entry.uncompressedSize > PLUGIN_AI_POLICY_MAX_TOTAL_BYTES) {
         if (!totalLimitReported) {
@@ -521,20 +656,31 @@ export async function inspectPluginArtifact(filePath: string): Promise<Inspected
       }
     }
     const workflowEntry = manifest.runtime_type === 'workflow' && entry.path === manifest.entry;
-    if (workflowEntry && entry.uncompressedSize > 256 * 1024) throw badRequest('workflow.json 不能超过 256 KiB');
+    if (workflowEntry && entry.uncompressedSize > 256 * 1024)
+      throw badRequest('workflow.json 不能超过 256 KiB');
     if (entry.path === 'README.md' && entry.uncompressedSize > PLUGIN_ARTIFACT_MAX_METADATA_BYTES) {
       throw badRequest('README.md 不能超过 256 KiB');
     }
-    const output = await consumeEntry(filePath, entry, collectPolicy || entry.path === 'README.md' || workflowEntry);
-    if (manifest.runtime_type === 'workflow' && entry.path === manifest.entry && output) workflowDefinition = validateWorkflowDefinition(parseJsonObject(output, manifest.entry));
+    const output = await consumeEntry(
+      filePath,
+      entry,
+      collectPolicy || entry.path === 'README.md' || workflowEntry
+    );
+    if (manifest.runtime_type === 'workflow' && entry.path === manifest.entry && output)
+      workflowDefinition = validateWorkflowDefinition(parseJsonObject(output, manifest.entry));
     if (entry.path === 'README.md' && output) {
-      if (output.length > PLUGIN_ARTIFACT_MAX_METADATA_BYTES) throw badRequest('README.md 不能超过 256 KiB');
-      try { readmeMarkdown = new TextDecoder('utf-8', { fatal: true }).decode(output); }
-      catch { throw badRequest('README.md 必须是 UTF-8 文本'); }
+      if (output.length > PLUGIN_ARTIFACT_MAX_METADATA_BYTES)
+        throw badRequest('README.md 不能超过 256 KiB');
+      try {
+        readmeMarkdown = new TextDecoder('utf-8', { fatal: true }).decode(output);
+      } catch {
+        throw badRequest('README.md 必须是 UTF-8 文本');
+      }
     }
     if (collectPolicy && output) policyFiles.push(decodePluginAiPolicyText(entry.path, output));
   }
-  if (manifest.runtime_type === 'workflow' && !workflowDefinition) throw badRequest('workflow 制品缺少可读取的 workflow.json');
+  if (manifest.runtime_type === 'workflow' && !workflowDefinition)
+    throw badRequest('workflow 制品缺少可读取的 workflow.json');
   return {
     manifest,
     files: entries.map((entry) => ({ path: entry.path, sizeBytes: entry.uncompressedSize })),
@@ -562,12 +708,50 @@ export async function readPluginArtifactEntry(filePath: string, rawPath: string)
 }
 
 function validateWorkflowDefinition(definition: Record<string, unknown>): Record<string, unknown> {
-  if (definition.definition_version !== '1' || !Array.isArray(definition.nodes) || definition.nodes.length < 1 || definition.nodes.length > 64 || !Array.isArray(definition.output_bindings)) throw badRequest('workflow.json 不是有效的 WorkflowDefinition V1');
-  const ids = new Set<string>(); const dependencies = new Map<string, string[]>(); let edgeCount = 0;
-  definition.nodes.forEach((raw, index) => { if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('workflow node 必须是对象', { index }); const node = raw as Record<string, unknown>; const id = String(node.node_id || ''); if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || ids.has(id)) throw badRequest('workflow node_id 无效或重复', { index }); if (!Array.isArray(node.depends_on) || !Array.isArray(node.input_bindings) || ![0, 1, 2].includes(Number(node.retry_limit))) throw badRequest('workflow node 结构无效', { index }); ids.add(id); dependencies.set(id, node.depends_on.map(String)); edgeCount += node.depends_on.length; });
+  if (
+    definition.definition_version !== '1' ||
+    !Array.isArray(definition.nodes) ||
+    definition.nodes.length < 1 ||
+    definition.nodes.length > 64 ||
+    !Array.isArray(definition.output_bindings)
+  )
+    throw badRequest('workflow.json 不是有效的 WorkflowDefinition V1');
+  const ids = new Set<string>();
+  const dependencies = new Map<string, string[]>();
+  let edgeCount = 0;
+  definition.nodes.forEach((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+      throw badRequest('workflow node 必须是对象', { index });
+    const node = raw as Record<string, unknown>;
+    const id = String(node.node_id || '');
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || ids.has(id))
+      throw badRequest('workflow node_id 无效或重复', { index });
+    if (
+      !Array.isArray(node.depends_on) ||
+      !Array.isArray(node.input_bindings) ||
+      ![0, 1, 2].includes(Number(node.retry_limit))
+    )
+      throw badRequest('workflow node 结构无效', { index });
+    ids.add(id);
+    dependencies.set(id, node.depends_on.map(String));
+    edgeCount += node.depends_on.length;
+  });
   if (edgeCount > 256) throw badRequest('workflow 依赖边不能超过 256 条');
-  for (const [id, values] of dependencies) for (const dependency of values) if (!ids.has(dependency) || dependency === id) throw badRequest('workflow 包含未知依赖或自依赖', { nodeId: id, dependency });
-  const visiting = new Set<string>(); const visited = new Set<string>(); const visit = (id: string) => { if (visiting.has(id)) throw badRequest('workflow 不能包含循环依赖', { nodeId: id }); if (visited.has(id)) return; visiting.add(id); dependencies.get(id)?.forEach(visit); visiting.delete(id); visited.add(id); }; ids.forEach(visit);
+  for (const [id, values] of dependencies)
+    for (const dependency of values)
+      if (!ids.has(dependency) || dependency === id)
+        throw badRequest('workflow 包含未知依赖或自依赖', { nodeId: id, dependency });
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string) => {
+    if (visiting.has(id)) throw badRequest('workflow 不能包含循环依赖', { nodeId: id });
+    if (visited.has(id)) return;
+    visiting.add(id);
+    dependencies.get(id)?.forEach(visit);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  ids.forEach(visit);
   return definition;
 }
 

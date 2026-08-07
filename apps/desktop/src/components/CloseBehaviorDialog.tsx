@@ -7,7 +7,15 @@
 // 「以后不再询问」勾选后，本次选择写入 lf:close-action，下次直接执行不再弹。
 import { useState } from 'react';
 import { MinusIcon, LogOutIcon } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { saveCloseAction } from '@/lib/close-behavior';
@@ -43,13 +51,18 @@ export function CloseBehaviorDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>关闭窗口</DialogTitle>
-          <DialogDescription>是否最小化到托盘？最小化后应用在后台继续运行，可从托盘图标恢复。</DialogDescription>
+          <DialogDescription>
+            是否最小化到托盘？最小化后应用在后台继续运行，可从托盘图标恢复。
+          </DialogDescription>
         </DialogHeader>
         {/* 本地定时任务告警：有 ACTIVE 任务时提示。直接退出会暂停所有任务（不补跑）。 */}
         {activeSchedules > 0 && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-50 p-2.5 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            ⚠️ 有 {activeSchedules} 个定时任务正在运行。最小化到托盘可保持任务触发；直接退出将暂停所有任务，且漏掉的不会补跑。
-          </div>
+          <Alert className="border-warning/30 bg-warning/10 text-warning">
+            <AlertDescription className="text-xs text-current">
+              ⚠️ 有 {activeSchedules}{' '}
+              个定时任务正在运行。最小化到托盘可保持任务触发；直接退出将暂停所有任务，且漏掉的不会补跑。
+            </AlertDescription>
+          </Alert>
         )}
         <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
           <Checkbox checked={remember} onCheckedChange={(v) => setRemember(Boolean(v))} />

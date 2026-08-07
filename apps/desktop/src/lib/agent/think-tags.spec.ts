@@ -58,8 +58,11 @@ describe('createThinkTagStreamParser', () => {
   });
 
   it('filters duplicated reasoning leaked before an extra close tag', () => {
-    const reasoning = '用户发送了一个简单的问候"你好"，我应该用中文回复，表示友好并询问他们需要什么帮助。这是一个简单的交流，不需要调用任何工具。';
-    const events = collect([`<think>${reasoning}</think>${reasoning} </think> 你好！有什么我可以帮助你的吗？`]);
+    const reasoning =
+      '用户发送了一个简单的问候"你好"，我应该用中文回复，表示友好并询问他们需要什么帮助。这是一个简单的交流，不需要调用任何工具。';
+    const events = collect([
+      `<think>${reasoning}</think>${reasoning} </think> 你好！有什么我可以帮助你的吗？`,
+    ]);
 
     expect(joined(events, 'reasoning')).toBe(reasoning);
     expect(joined(events, 'text')).toBe('你好！有什么我可以帮助你的吗？');

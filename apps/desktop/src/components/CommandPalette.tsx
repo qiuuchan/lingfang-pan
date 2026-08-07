@@ -52,7 +52,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       const t = setTimeout(() => inputRef.current?.focus(), 50);
       void listMarketplaceRegistry()
         .then(setMarketCatalog)
-        .catch(() => { /* 市场不可达时仍保留本地插件与动作搜索。 */ });
+        .catch(() => {
+          /* 市场不可达时仍保留本地插件与动作搜索。 */
+        });
       return () => clearTimeout(t);
     }
   }, [open]);
@@ -60,7 +62,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   // Esc 关闭。
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [open, onClose]);
@@ -68,13 +72,32 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   // 动作集合（按角色过滤 team-admin / review）。
   const actions = useCallback((): SearchResult[] => {
     const go = (v: View, title: string, description: string): SearchResult => ({
-      id: `action-${v}`, title, description, group: 'action',
-      action: () => { setRunningPlugin(null); setView(v); onClose(); }, actionLabel: '前往',
+      id: `action-${v}`,
+      title,
+      description,
+      group: 'action',
+      action: () => {
+        setRunningPlugin(null);
+        setView(v);
+        onClose();
+      },
+      actionLabel: '前往',
     });
     // 插件中心 / 市场进入主区插件工作台运行页（带初始 tab）。
-    const openCenter = (tab: PluginCenterTab, title: string, description: string): SearchResult => ({
-      id: `action-plugin-center-${tab}`, title, description, group: 'action',
-      action: () => { openPluginCenter(tab); onClose(); }, actionLabel: '前往',
+    const openCenter = (
+      tab: PluginCenterTab,
+      title: string,
+      description: string
+    ): SearchResult => ({
+      id: `action-plugin-center-${tab}`,
+      title,
+      description,
+      group: 'action',
+      action: () => {
+        openPluginCenter(tab);
+        onClose();
+      },
+      actionLabel: '前往',
     });
     const list: SearchResult[] = [
       go('home', '首页', '推荐插件与搜索'),
@@ -92,65 +115,101 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   }, [session.role, session.isPlatformAdmin, setRunningPlugin, setView, openPluginCenter, onClose]);
 
   // 合并搜索结果。
-  const recompute = useCallback((q: string, market: RegistryCatalogItem[]) => {
-    const lower = q.toLowerCase();
-    const installed: SearchResult[] = pinnedPlugins
-      .filter((p) => p.name.toLowerCase().includes(lower))
-      .slice(0, 5)
-      .map((p: LoadedPlugin) => ({
-        id: `installed-${p.id}`, title: p.name, description: '已安装', group: 'installed',
-        action: () => { setRunningPlugin(p); onClose(); }, actionLabel: '打开',
-      }));
+  const recompute = useCallback(
+    (q: string, market: RegistryCatalogItem[]) => {
+      const lower = q.toLowerCase();
+      const installed: SearchResult[] = pinnedPlugins
+        .filter((p) => p.name.toLowerCase().includes(lower))
+        .slice(0, 5)
+        .map((p: LoadedPlugin) => ({
+          id: `installed-${p.id}`,
+          title: p.name,
+          description: '已安装',
+          group: 'installed',
+          action: () => {
+            setRunningPlugin(p);
+            onClose();
+          },
+          actionLabel: '打开',
+        }));
 
-    const installedPackageIds = new Set(pinnedPlugins.map((p) => p.packageId).filter(Boolean));
-    const marketHits: SearchResult[] = market
-      .filter((item) => {
-        if (installedPackageIds.has(item.package.id)) return false;
-        const searchable = [
-          item.package.name,
-          item.package.description,
-          item.package.manifestId,
-          item.latestRelease.version,
-        ];
-        return searchable.some((value) => typeof value === 'string' && value.toLowerCase().includes(lower));
-      })
-      .slice(0, 5)
-      .map((item) => ({
-        id: `market-${item.package.id}`, title: item.package.name,
-        description: item.package.description || item.package.manifestId,
-        group: 'market', badge: (item.priceCents || 0) === 0 ? '免费' : undefined,
-        action: () => { openPluginCenter('market'); onClose(); }, actionLabel: '前往',
-      }));
+      const installedPackageIds = new Set(pinnedPlugins.map((p) => p.packageId).filter(Boolean));
+      const marketHits: SearchResult[] = market
+        .filter((item) => {
+          if (installedPackageIds.has(item.package.id)) return false;
+          const searchable = [
+            item.package.name,
+            item.package.description,
+            item.package.manifestId,
+            item.latestRelease.version,
+          ];
+          return searchable.some(
+            (value) => typeof value === 'string' && value.toLowerCase().includes(lower)
+          );
+        })
+        .slice(0, 5)
+        .map((item) => ({
+          id: `market-${item.package.id}`,
+          title: item.package.name,
+          description: item.package.description || item.package.manifestId,
+          group: 'market',
+          badge: (item.priceCents || 0) === 0 ? '免费' : undefined,
+          action: () => {
+            openPluginCenter('market');
+            onClose();
+          },
+          actionLabel: '前往',
+        }));
 
-    const acts = actions().filter(
-      (a) => a.title.toLowerCase().includes(lower) || (a.description?.toLowerCase().includes(lower) ?? false),
-    );
+      const acts = actions().filter(
+        (a) =>
+          a.title.toLowerCase().includes(lower) ||
+          (a.description?.toLowerCase().includes(lower) ?? false)
+      );
 
-    const create: SearchResult[] = [];
-    if (q.trim().length >= 3) {
-      create.push({
-        id: 'create-new', title: '创建插件', group: 'create',
-        description: `没找到「${q.trim()}」？让 AI 创建一个新插件`,
-        action: () => { setView('creator'); onClose(); }, actionLabel: '创建',
-      });
-    }
+      const create: SearchResult[] = [];
+      if (q.trim().length >= 3) {
+        create.push({
+          id: 'create-new',
+          title: '创建插件',
+          group: 'create',
+          description: `没找到「${q.trim()}」？让 AI 创建一个新插件`,
+          action: () => {
+            setView('creator');
+            onClose();
+          },
+          actionLabel: '创建',
+        });
+      }
 
-    const merged = [...installed, ...marketHits, ...acts, ...create];
-    setResults(merged);
-    setFocusIndex(0);
-  }, [pinnedPlugins, actions, setRunningPlugin, openPluginCenter, onClose]);
+      const merged = [...installed, ...marketHits, ...acts, ...create];
+      setResults(merged);
+      setFocusIndex(0);
+    },
+    [pinnedPlugins, actions, setRunningPlugin, openPluginCenter, onClose]
+  );
 
   // Registry catalog 不提供搜索接口；目录只拉取一次，输入时与本地结果一起即时过滤。
   useEffect(() => {
     const q = query.trim();
-    if (!q) { setResults([]); return; }
+    if (!q) {
+      setResults([]);
+      return;
+    }
     recompute(query, marketCatalog);
   }, [marketCatalog, query, recompute]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIndex((i) => Math.min(i + 1, results.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusIndex((i) => Math.max(i - 1, 0)); }
-    else if (e.key === 'Enter' && results[focusIndex]) { e.preventDefault(); results[focusIndex].action(); }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFocusIndex((i) => Math.min(i + 1, results.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFocusIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter' && results[focusIndex]) {
+      e.preventDefault();
+      results[focusIndex].action();
+    }
   };
 
   if (!open) return null;
@@ -177,7 +236,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoComplete="off"
           />
-          <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">ESC</kbd>
+          <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            ESC
+          </kbd>
         </div>
 
         {results.length > 0 ? (
@@ -200,16 +261,31 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                         onMouseEnter={() => setFocusIndex(idx)}
                         className={cn(
                           'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors',
-                          focused ? 'bg-primary/10 text-foreground' : 'hover:bg-muted',
+                          focused ? 'bg-primary/10 text-foreground' : 'hover:bg-muted'
                         )}
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{r.title}</div>
-                          {r.description && <div className="truncate text-xs text-muted-foreground">{r.description}</div>}
+                          {r.description && (
+                            <div className="truncate text-xs text-muted-foreground">
+                              {r.description}
+                            </div>
+                          )}
                         </div>
-                        {r.badge && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{r.badge}</span>}
+                        {r.badge && (
+                          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                            {r.badge}
+                          </span>
+                        )}
                         {r.actionLabel && (
-                          <kbd className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px]', focused ? 'border-primary/30 text-primary' : 'border-border text-muted-foreground')}>
+                          <kbd
+                            className={cn(
+                              'shrink-0 rounded border px-1.5 py-0.5 text-[10px]',
+                              focused
+                                ? 'border-primary/30 text-primary'
+                                : 'border-border text-muted-foreground'
+                            )}
+                          >
                             {r.actionLabel}
                           </kbd>
                         )}
@@ -223,11 +299,19 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         ) : query.trim().length >= 3 ? (
           <div className="p-6 text-center">
             <p className="mb-3 text-sm text-muted-foreground">没找到匹配「{query.trim()}」的插件</p>
-            <Button onClick={() => { setView('creator'); onClose(); }}>创建插件草稿</Button>
+            <Button
+              onClick={() => {
+                setView('creator');
+                onClose();
+              }}
+            >
+              创建插件草稿
+            </Button>
           </div>
         ) : (
           <div className="p-6 text-center text-sm text-muted-foreground">
-            输入关键词搜索插件，或按 <kbd className="rounded border bg-muted px-1 text-[10px]">↑↓</kbd> 选择动作。
+            输入关键词搜索插件，或按{' '}
+            <kbd className="rounded border bg-muted px-1 text-[10px]">↑↓</kbd> 选择动作。
           </div>
         )}
       </div>

@@ -7,19 +7,15 @@ export const DEFAULT_PAGE_SIZE = 5;
 /** 可选每页条数：默认 5，另提供 10/20/50 档。 */
 export const PAGE_SIZE_OPTIONS = [5, 10, 20, 50] as const;
 
-export function paginateItems<T>(
-	items: T[],
-	page: number,
-	pageSize: number = DEFAULT_PAGE_SIZE,
-) {
-	const safePageSize = Math.max(1, Math.floor(pageSize));
-	const totalPages = Math.max(1, Math.ceil(items.length / safePageSize));
-	const currentPage = Math.min(Math.max(1, page), totalPages);
-	const start = (currentPage - 1) * safePageSize;
-	return {
-		currentPage,
-		totalPages,
-		total: items.length,
-		items: items.slice(start, start + safePageSize),
-	};
+export function paginateItems<T>(items: T[], page: number, pageSize: number = DEFAULT_PAGE_SIZE) {
+  const safePageSize = Math.max(1, Math.floor(pageSize));
+  const totalPages = Math.max(1, Math.ceil(items.length / safePageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const start = (currentPage - 1) * safePageSize;
+  return {
+    currentPage,
+    totalPages,
+    total: items.length,
+    items: items.slice(start, start + safePageSize),
+  };
 }

@@ -43,9 +43,10 @@ export function DetailSheet({
 
   if (open && !wasOpenRef.current && typeof document !== 'undefined') {
     const activeElement = document.activeElement;
-    returnFocusRef.current = activeElement instanceof HTMLElement && activeElement !== document.body
-      ? activeElement
-      : null;
+    returnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : null;
   }
   wasOpenRef.current = open;
 
@@ -63,7 +64,7 @@ export function DetailSheet({
         className={cn(
           'flex h-dvh w-full max-w-full flex-col gap-0 overflow-hidden p-0',
           sizeClassName[size],
-          className,
+          className
         )}
       >
         <SheetHeader className="shrink-0 gap-1 border-b px-5 py-4 pr-12 text-left">
@@ -78,9 +79,7 @@ export function DetailSheet({
         </div>
 
         {footer ? (
-          <SheetFooter className="block shrink-0 border-t px-5 py-4">
-            {footer}
-          </SheetFooter>
+          <SheetFooter className="block shrink-0 border-t px-5 py-4">{footer}</SheetFooter>
         ) : null}
       </SheetContent>
     </Sheet>

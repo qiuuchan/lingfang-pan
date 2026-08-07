@@ -84,7 +84,7 @@ describe('PluginRegistryService upload provenance', () => {
         ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId, role: 'TEAM_ADMIN' }),
         ensurePermission: vi.fn(),
       } as never,
-      artifacts as never,
+      artifacts as never
     );
 
     const sourceLabelBase64 = Buffer.from('Cursor workspace', 'utf8').toString('base64url');
@@ -93,7 +93,7 @@ describe('PluginRegistryService upload provenance', () => {
       Readable.from([Buffer.from('test-artifact')]),
       undefined,
       undefined,
-      { sourceKind: 'external_tool', sourceLabelBase64, ingestChannel: 'desktop' },
+      { sourceKind: 'external_tool', sourceLabelBase64, ingestChannel: 'desktop' }
     );
 
     expect(releaseCreate).toHaveBeenCalledWith({

@@ -47,24 +47,60 @@ import { PageTransition, ListSkeleton } from '@/lib/motion';
 import { getLatestRelease } from '@/lib/releases';
 import pkg from '../package.json';
 
-const Dashboard = lazy(() => import('@/components/dashboard').then((m) => ({ default: m.Dashboard })));
-const UsersView = lazy(() => import('@/components/users-view').then((m) => ({ default: m.UsersView })));
-const TeamsView = lazy(() => import('@/components/teams-view').then((m) => ({ default: m.TeamsView })));
-const GovernanceView = lazy(() => import('@/components/governance-view').then((m) => ({ default: m.GovernanceView })));
-const MarketplaceCommerceView = lazy(() => import('@/components/marketplace-commerce-view').then((m) => ({ default: m.MarketplaceCommerceView })));
-const AdminsView = lazy(() => import('@/components/admins-view').then((m) => ({ default: m.AdminsView })));
-const AuditView = lazy(() => import('@/components/audit-view').then((m) => ({ default: m.AuditView })));
-const SettingsView = lazy(() => import('@/components/settings-view').then((m) => ({ default: m.SettingsView })));
-const ReleasesView = lazy(() => import('@/components/releases-view').then((m) => ({ default: m.ReleasesView })));
-const TicketsView = lazy(() => import('@/components/tickets-view').then((m) => ({ default: m.TicketsView })));
-const RolesView = lazy(() => import('@/components/roles-view').then((m) => ({ default: m.RolesView })));
+const Dashboard = lazy(() =>
+  import('@/components/dashboard').then((m) => ({ default: m.Dashboard }))
+);
+const UsersView = lazy(() =>
+  import('@/components/users-view').then((m) => ({ default: m.UsersView }))
+);
+const TeamsView = lazy(() =>
+  import('@/components/teams-view').then((m) => ({ default: m.TeamsView }))
+);
+const GovernanceView = lazy(() =>
+  import('@/components/governance-view').then((m) => ({ default: m.GovernanceView }))
+);
+const MarketplaceCommerceView = lazy(() =>
+  import('@/components/marketplace-commerce-view').then((m) => ({
+    default: m.MarketplaceCommerceView,
+  }))
+);
+const AdminsView = lazy(() =>
+  import('@/components/admins-view').then((m) => ({ default: m.AdminsView }))
+);
+const AuditView = lazy(() =>
+  import('@/components/audit-view').then((m) => ({ default: m.AuditView }))
+);
+const SettingsView = lazy(() =>
+  import('@/components/settings-view').then((m) => ({ default: m.SettingsView }))
+);
+const ReleasesView = lazy(() =>
+  import('@/components/releases-view').then((m) => ({ default: m.ReleasesView }))
+);
+const TicketsView = lazy(() =>
+  import('@/components/tickets-view').then((m) => ({ default: m.TicketsView }))
+);
+const RolesView = lazy(() =>
+  import('@/components/roles-view').then((m) => ({ default: m.RolesView }))
+);
 // 计费与模型（资源池模型重构后）：资源池/渠道/计费/灵石/调用日志。
-const PoolsView = lazy(() => import('@/components/billing/pools-view').then((m) => ({ default: m.PoolsView })));
-const ChannelsView = lazy(() => import('@/components/billing/channels-view').then((m) => ({ default: m.ChannelsView })));
-const BillingView = lazy(() => import('@/components/billing/billing-view').then((m) => ({ default: m.BillingView })));
-const CreditsView = lazy(() => import('@/components/billing/credits-view').then((m) => ({ default: m.CreditsView })));
-const CallLogsView = lazy(() => import('@/components/billing/call-logs-view').then((m) => ({ default: m.CallLogsView })));
-const RoadmapView = lazy(() => import('@/components/roadmap-view').then((m) => ({ default: m.RoadmapView })));
+const PoolsView = lazy(() =>
+  import('@/components/billing/pools-view').then((m) => ({ default: m.PoolsView }))
+);
+const ChannelsView = lazy(() =>
+  import('@/components/billing/channels-view').then((m) => ({ default: m.ChannelsView }))
+);
+const BillingView = lazy(() =>
+  import('@/components/billing/billing-view').then((m) => ({ default: m.BillingView }))
+);
+const CreditsView = lazy(() =>
+  import('@/components/billing/credits-view').then((m) => ({ default: m.CreditsView }))
+);
+const CallLogsView = lazy(() =>
+  import('@/components/billing/call-logs-view').then((m) => ({ default: m.CallLogsView }))
+);
+const RoadmapView = lazy(() =>
+  import('@/components/roadmap-view').then((m) => ({ default: m.RoadmapView }))
+);
 
 // 主题初始化：在模块加载时同步应用，避免首屏亮暗闪烁（FOUC）。
 // 放在模块顶层执行一次，早于 React 渲染，读取 localStorage 的主题偏好并应用到 <html>。
@@ -79,9 +115,14 @@ export default function App() {
   // 加载即尝试基于 Cookie 恢复会话（HttpOnly Cookie 由浏览器自动携带），无需读取本地令牌。
   const [checking, setChecking] = useState(true);
   const [view, setView] = useState<View>('dashboard');
-  const [governanceIntent, setGovernanceIntent] = useState<GovernanceIntent>({ tab: 'plugins', nonce: 0 });
+  const [governanceIntent, setGovernanceIntent] = useState<GovernanceIntent>({
+    tab: 'plugins',
+    nonce: 0,
+  });
   // 未登录态的落地页视图：首页 / 登录页 / 下载页 / 更新日志页（各自独立全屏页，状态机 AJAX 切换，无路由库）。
-  const [landingView, setLandingView] = useState<'home' | 'login' | 'download' | 'changelog'>('home');
+  const [landingView, setLandingView] = useState<'home' | 'login' | 'download' | 'changelog'>(
+    'home'
+  );
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -234,7 +275,11 @@ export default function App() {
     return (
       <PageTransition viewKey={landingView}>
         {landingView === 'login' && (
-          <LoginPage initialEmail={setupEmail} onAuthed={setSession} onBack={() => setLandingView('home')} />
+          <LoginPage
+            initialEmail={setupEmail}
+            onAuthed={setSession}
+            onBack={() => setLandingView('home')}
+          />
         )}
         {landingView === 'download' && <DownloadPage onBack={() => setLandingView('home')} />}
         {landingView === 'changelog' && <ChangelogPage onBack={() => setLandingView('home')} />}
@@ -254,60 +299,71 @@ export default function App() {
 
   // header/footer 是函数槽 props，memo 化 Sidebar 需要它们引用稳定；
   // 用 useMemo 包裹后，App 外壳其它状态（对话框开合等）变化时侧栏不再重建。
-  const sidebarHeader = useMemo(() => ({ compact }: SidebarSlotContext) => (
-    <div className={compact ? 'flex justify-center py-1' : 'flex items-center gap-3 px-2 py-1'}>
-      <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary text-primary-foreground">
-          {/* logoUrl 有值显示图片，无值 fallback ShieldCheckIcon 默认图标。 */}
-          {platformLogoUrl ? (
-            <img
-              src={platformLogoUrl}
-              alt={platformName}
-              className="size-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <ShieldCheckIcon className="size-4" />
+  const sidebarHeader = useMemo(
+    () =>
+      ({ compact }: SidebarSlotContext) => (
+        <div className={compact ? 'flex justify-center py-1' : 'flex items-center gap-3 px-2 py-1'}>
+          <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary text-primary-foreground">
+            {/* logoUrl 有值显示图片，无值 fallback ShieldCheckIcon 默认图标。 */}
+            {platformLogoUrl ? (
+              <img
+                src={platformLogoUrl}
+                alt={platformName}
+                className="size-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <ShieldCheckIcon className="size-4" />
+            )}
+          </div>
+          {!compact && (
+            <div className="min-w-0">
+              {/* 云同步平台名：展示后端 platformName（admin 可在「设置 → 平台信息」改名）。 */}
+              <div className="truncate text-sm font-semibold">{platformName}</div>
+              <div className="text-xs text-muted-foreground">Platform Admin</div>
+            </div>
           )}
-      </div>
-      {!compact && (
-        <div className="min-w-0">
-          {/* 云同步平台名：展示后端 platformName（admin 可在「设置 → 平台信息」改名）。 */}
-          <div className="truncate text-sm font-semibold">{platformName}</div>
-          <div className="text-xs text-muted-foreground">Platform Admin</div>
         </div>
-      )}
-    </div>
-  ), [platformLogoUrl, platformName]);
+      ),
+    [platformLogoUrl, platformName]
+  );
 
-  const sidebarFooter = useMemo(() => ({ compact }: SidebarSlotContext) => (
-    <div className="space-y-1 border-t pt-2">
-      {!compact && (
-        <div className="truncate px-3 py-1 text-xs text-muted-foreground" title={session.user.email}>
-          {session.user.email}
+  const sidebarFooter = useMemo(
+    () =>
+      ({ compact }: SidebarSlotContext) => (
+        <div className="space-y-1 border-t pt-2">
+          {!compact && (
+            <div
+              className="truncate px-3 py-1 text-xs text-muted-foreground"
+              title={session.user.email}
+            >
+              {session.user.email}
+            </div>
+          )}
+          <button
+            type="button"
+            aria-label="退出登录"
+            title={compact ? '退出登录' : undefined}
+            onClick={() => setLogoutOpen(true)}
+            className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${compact ? 'justify-center' : 'gap-3'}`}
+          >
+            <LogOutIcon className="size-4" />
+            {!compact && '退出登录'}
+          </button>
+          <button
+            type="button"
+            aria-label="关于"
+            title={compact ? '关于' : undefined}
+            onClick={() => setAboutOpen(true)}
+            className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${compact ? 'justify-center' : 'gap-3'}`}
+          >
+            <InfoIcon className="size-4" />
+            {!compact && '关于'}
+          </button>
         </div>
-      )}
-      <button
-        type="button"
-        aria-label="退出登录"
-        title={compact ? '退出登录' : undefined}
-        onClick={() => setLogoutOpen(true)}
-        className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${compact ? 'justify-center' : 'gap-3'}`}
-      >
-        <LogOutIcon className="size-4" />
-        {!compact && '退出登录'}
-      </button>
-      <button
-        type="button"
-        aria-label="关于"
-        title={compact ? '关于' : undefined}
-        onClick={() => setAboutOpen(true)}
-        className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${compact ? 'justify-center' : 'gap-3'}`}
-      >
-        <InfoIcon className="size-4" />
-        {!compact && '关于'}
-      </button>
-    </div>
-  ), [session.user.email]);
+      ),
+    [session.user.email]
+  );
 
   return (
     <TooltipProvider>
@@ -343,7 +399,10 @@ export default function App() {
                 <Breadcrumb>
                   <BreadcrumbList>
                     <BreadcrumbItem>
-                      <BreadcrumbLink className="cursor-pointer" onClick={() => navigate('dashboard')}>
+                      <BreadcrumbLink
+                        className="cursor-pointer"
+                        onClick={() => navigate('dashboard')}
+                      >
                         {currentGroup}
                       </BreadcrumbLink>
                     </BreadcrumbItem>
@@ -353,7 +412,9 @@ export default function App() {
                     </BreadcrumbItem>
                   </BreadcrumbList>
                 </Breadcrumb>
-                <h1 className="truncate text-lg font-semibold text-foreground sm:text-xl">{currentLabel}</h1>
+                <h1 className="truncate text-lg font-semibold text-foreground sm:text-xl">
+                  {currentLabel}
+                </h1>
               </div>
             </div>
             <button
@@ -364,7 +425,9 @@ export default function App() {
             >
               <SearchIcon className="size-4" />
               <span className="hidden sm:inline">快捷搜索</span>
-              <kbd className="hidden rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] md:inline">⌘K</kbd>
+              <kbd className="hidden rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] md:inline">
+                ⌘K
+              </kbd>
             </button>
           </header>
 
@@ -376,7 +439,9 @@ export default function App() {
                   {view === 'users' && <UsersView />}
                   {view === 'platformAdmins' && <AdminsView />}
                   {view === 'teams' && <TeamsView />}
-                  {view === 'governance' && <GovernanceView key={governanceIntent.nonce} intent={governanceIntent} />}
+                  {view === 'governance' && (
+                    <GovernanceView key={governanceIntent.nonce} intent={governanceIntent} />
+                  )}
                   {view === 'marketplaceCommerce' && <MarketplaceCommerceView />}
                   {view === 'tickets' && <TicketsView />}
                   {view === 'audit' && <AuditView />}
@@ -404,7 +469,9 @@ export default function App() {
             <DialogDescription>确认退出当前平台管理员账号？</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLogoutOpen(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setLogoutOpen(false)}>
+              取消
+            </Button>
             <Button variant="destructive" onClick={handleLogout}>
               <LogOutIcon className="mr-1 size-4" />
               确认退出
@@ -450,7 +517,9 @@ export default function App() {
               disabled={checkingUpdate}
               onClick={checkUpdate}
             >
-              <RefreshCwIcon className={checkingUpdate ? 'mr-1.5 size-4 animate-spin' : 'mr-1.5 size-4'} />
+              <RefreshCwIcon
+                className={checkingUpdate ? 'mr-1.5 size-4 animate-spin' : 'mr-1.5 size-4'}
+              />
               {checkingUpdate ? '检查中…' : '检查更新'}
             </Button>
 
@@ -462,7 +531,7 @@ export default function App() {
             )}
             {updateResult === 'error' && (
               <p className="text-center text-xs text-muted-foreground">
-              无法连接服务器，检查网络后重试。
+                无法连接服务器，检查网络后重试。
               </p>
             )}
             {updateResult?.startsWith('new:') && (
@@ -472,7 +541,15 @@ export default function App() {
             )}
           </div>
           <DialogFooter>
-            <Button onClick={() => { setAboutOpen(false); setUpdateResult(null); }} className="w-full">确定</Button>
+            <Button
+              onClick={() => {
+                setAboutOpen(false);
+                setUpdateResult(null);
+              }}
+              className="w-full"
+            >
+              确定
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

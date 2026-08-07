@@ -30,7 +30,7 @@ function publicGrant(grant: {
 export class PluginGrantService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   /** 列出某插件在当前团队的全部授权。需 team.plugin.grant.manage 权限。 */
@@ -47,7 +47,11 @@ export class PluginGrantService {
   }
 
   /** 设置/更新插件授权（upsert 语义：同 teamId+packageId+subjectKind+subjectId 存在则更新 effect）。 */
-  async setGrant(userId: string, packageId: string, input: { subjectKind: 'USER' | 'ROLE'; subjectId: string; effect: 'ALLOW' | 'DENY' }) {
+  async setGrant(
+    userId: string,
+    packageId: string,
+    input: { subjectKind: 'USER' | 'ROLE'; subjectId: string; effect: 'ALLOW' | 'DENY' }
+  ) {
     await this.auth.ensurePermission(userId, 'team.plugin.grant.manage');
     const m = await this.resolveCurrentTeam(userId);
     const pluginPackage = await this.prisma.pluginPackage.findUnique({ where: { id: packageId } });
@@ -61,7 +65,8 @@ export class PluginGrantService {
       if (!member || member.status !== 'ACTIVE') throw badRequest('目标用户不是本团队成员');
     } else {
       const role = await this.prisma.role.findUnique({ where: { id: input.subjectId } });
-      if (!role || role.scope !== 'TEAM' || role.teamId !== m.teamId) throw badRequest('目标角色不是本团队角色');
+      if (!role || role.scope !== 'TEAM' || role.teamId !== m.teamId)
+        throw badRequest('目标角色不是本团队角色');
     }
 
     const grant = await this.prisma.pluginGrant.upsert({
@@ -83,12 +88,23 @@ export class PluginGrantService {
         createdBy: userId,
       },
     });
-    await this.audit(userId, 'plugin.grant.set', 'PluginGrant', grant.id, { teamId: m.teamId, packageId, subjectKind: input.subjectKind, subjectId: input.subjectId, effect: input.effect });
+    await this.audit(userId, 'plugin.grant.set', 'PluginGrant', grant.id, {
+      teamId: m.teamId,
+      packageId,
+      subjectKind: input.subjectKind,
+      subjectId: input.subjectId,
+      effect: input.effect,
+    });
     return { grant: publicGrant(grant) };
   }
 
   /** 移除插件授权（恢复默认）。 */
-  async removeGrant(userId: string, packageId: string, subjectKind: 'USER' | 'ROLE', subjectId: string) {
+  async removeGrant(
+    userId: string,
+    packageId: string,
+    subjectKind: 'USER' | 'ROLE',
+    subjectId: string
+  ) {
     await this.auth.ensurePermission(userId, 'team.plugin.grant.manage');
     const m = await this.resolveCurrentTeam(userId);
     const grant = await this.prisma.pluginGrant.findUnique({
@@ -103,7 +119,12 @@ export class PluginGrantService {
     });
     if (!grant) throw notFound('授权记录不存在');
     await this.prisma.pluginGrant.delete({ where: { id: grant.id } });
-    await this.audit(userId, 'plugin.grant.removed', 'PluginGrant', grant.id, { teamId: m.teamId, packageId, subjectKind, subjectId });
+    await this.audit(userId, 'plugin.grant.removed', 'PluginGrant', grant.id, {
+      teamId: m.teamId,
+      packageId,
+      subjectKind,
+      subjectId,
+    });
     return { ok: true };
   }
 
@@ -115,7 +136,12 @@ export class PluginGrantService {
    *
    * 供 v4 package governance 与桌面端运行时二次校验。
    */
-  async resolvePluginAccess(teamId: string, packageId: string, userId: string, teamRoleId: string | null): Promise<boolean> {
+  async resolvePluginAccess(
+    teamId: string,
+    packageId: string,
+    userId: string,
+    teamRoleId: string | null
+  ): Promise<boolean> {
     const orConditions: Array<{ subjectKind: 'USER' | 'ROLE'; subjectId: string }> = [
       { subjectKind: 'USER', subjectId: userId },
     ];
@@ -153,7 +179,15 @@ export class PluginGrantService {
     return membership;
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 }

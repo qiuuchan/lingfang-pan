@@ -4,7 +4,8 @@ import { renderPrismaSchemaForProvider } from './prisma-schema';
 
 describe('renderPrismaSchemaForProvider', () => {
   it('keeps the PostgreSQL datasource provider unchanged', () => {
-    const schema = 'datasource db {\n  provider = "postgresql"\n}\n\nmodel Role {\n  permissions String[] @default([])\n}\n';
+    const schema =
+      'datasource db {\n  provider = "postgresql"\n}\n\nmodel Role {\n  permissions String[] @default([])\n}\n';
 
     expect(renderPrismaSchemaForProvider(schema, 'postgresql')).toBe(schema);
   });
@@ -22,22 +23,27 @@ describe('renderPrismaSchemaForProvider', () => {
       '',
     ].join('\n');
 
-    expect(renderPrismaSchemaForProvider(schema, 'mysql')).toBe([
-      'datasource db {',
-      '  provider = "mysql"',
-      '}',
-      '',
-      'model Role {',
-      '  permissions Json @default("[]")',
-      '  users       User[]',
-      '}',
-      '',
-    ].join('\n'));
+    expect(renderPrismaSchemaForProvider(schema, 'mysql')).toBe(
+      [
+        'datasource db {',
+        '  provider = "mysql"',
+        '}',
+        '',
+        'model Role {',
+        '  permissions Json @default("[]")',
+        '  users       User[]',
+        '}',
+        '',
+      ].join('\n')
+    );
   });
 
   it('renders plugin README storage as MySQL LONGTEXT', () => {
-    const schema = 'datasource db {\n  provider = "postgresql"\n}\nmodel PluginRelease {\n  readmeMarkdown String @default("") @db.Text\n}\n';
-    expect(renderPrismaSchemaForProvider(schema, 'mysql')).toContain('readmeMarkdown String @default(dbgenerated("(\'\')")) @db.LongText');
+    const schema =
+      'datasource db {\n  provider = "postgresql"\n}\nmodel PluginRelease {\n  readmeMarkdown String @default("") @db.Text\n}\n';
+    expect(renderPrismaSchemaForProvider(schema, 'mysql')).toContain(
+      'readmeMarkdown String @default(dbgenerated("(\'\')")) @db.LongText'
+    );
   });
 
   it('bounds MySQL action identity fields so composite runtime indexes fit InnoDB', () => {
@@ -90,7 +96,7 @@ describe('renderPrismaSchemaForProvider', () => {
   it('keeps the cloud automation PostgreSQL migration additive', async () => {
     const migration = await readFile(
       'prisma/migrations/20260716191000_cloud_automation/migration.sql',
-      'utf8',
+      'utf8'
     );
     expect(migration).toContain('CREATE TABLE "CloudActionDeployment"');
     expect(migration).toContain('CREATE TABLE "AutomationSchedule"');
@@ -114,7 +120,9 @@ describe('renderPrismaSchemaForProvider', () => {
       expect(rendered).toContain('model MarketplaceRefundRequest');
       expect(rendered).toContain('model MarketplaceDiscount');
       expect(rendered).toContain('model MarketplaceCampaign');
-      expect(rendered).toContain('settlementVersion MarketplaceSettlementVersion @default(LEGACY_V1)');
+      expect(rendered).toContain(
+        'settlementVersion MarketplaceSettlementVersion @default(LEGACY_V1)'
+      );
       expect(rendered).toContain('priceVersion String @default("legacy-v1")');
       expect(rendered).toContain('marketplaceEntryKind MarketplaceLedgerEntryKind?');
     }
@@ -123,7 +131,7 @@ describe('renderPrismaSchemaForProvider', () => {
   it('keeps the marketplace commerce migration additive and initializes dark LEGACY state', async () => {
     const migration = await readFile(
       'prisma/migrations/20260716200000_marketplace_commerce_foundation/migration.sql',
-      'utf8',
+      'utf8'
     );
     expect(migration).toContain('CREATE TABLE "MarketplaceCommerceState"');
     expect(migration).toContain('CREATE TABLE "MarketplacePlatformAccount"');

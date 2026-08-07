@@ -37,7 +37,10 @@ export function estimateTokens(text: string): number {
     else otherChars++;
   }
   // 向上取整，避免零碎长度被抹零（短文本至少 1 token）。
-  return Math.max(1, Math.ceil(cjkChars / CHARS_PER_TOKEN_CJK + otherChars / CHARS_PER_TOKEN_LATIN));
+  return Math.max(
+    1,
+    Math.ceil(cjkChars / CHARS_PER_TOKEN_CJK + otherChars / CHARS_PER_TOKEN_LATIN)
+  );
 }
 
 /**

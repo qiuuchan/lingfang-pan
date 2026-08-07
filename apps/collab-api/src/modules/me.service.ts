@@ -39,9 +39,20 @@ export class MeService {
           releases: { select: { version: true, marketReviewStatus: true } },
         },
       }),
-      this.prisma.purchase.findMany({ where: { buyerUserId: userId }, orderBy: { createdAt: 'desc' } }),
-      this.prisma.walletTransaction.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 200 }),
-      this.prisma.teamMembership.findMany({ where: { userId }, include: { team: true }, orderBy: { joinedAt: 'desc' } }),
+      this.prisma.purchase.findMany({
+        where: { buyerUserId: userId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.walletTransaction.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+      this.prisma.teamMembership.findMany({
+        where: { userId },
+        include: { team: true },
+        orderBy: { joinedAt: 'desc' },
+      }),
     ]);
     if (!user) throw notFound('用户不存在');
     return {
@@ -100,7 +111,10 @@ export class MeService {
   async deleteMyAccount(userId: string) {
     // 事务外先读当前用户（拿到原邮箱构造打码邮箱）。事务内再 update + audit 原子提交。
     // 不在事务内 findUnique 是为了把「用户不存在」的 404 在事务前抛出，避免空事务开销。
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    });
     if (!user) throw notFound('用户不存在');
     const deletedEmail = `${user.email}-deleted-${Date.now()}@deleted.local`;
     const randomPasswordHash = await bcrypt.hash(randomBytes(32).toString('hex'), 12);
@@ -117,7 +131,13 @@ export class MeService {
       });
       // 审计：metadata 仅 {userId}，不记原邮箱（已打码，记录原邮箱无追溯价值且泄漏隐私）。
       await tx.auditLog.create({
-        data: { actorUserId: userId, action: 'user.account_deleted', targetType: 'User', targetId: userId, metadata: { userId } },
+        data: {
+          actorUserId: userId,
+          action: 'user.account_deleted',
+          targetType: 'User',
+          targetId: userId,
+          metadata: { userId },
+        },
       });
     });
     return { ok: true };

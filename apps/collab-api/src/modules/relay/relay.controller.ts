@@ -27,19 +27,31 @@ export class RelayController {
 
   @Post('chat/completions')
   @ApiOperation({ summary: 'OpenAI 兼容聊天转发（计费 + 日志）' })
-  chatCompletions(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: Record<string, unknown>) {
+  chatCompletions(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: Record<string, unknown>
+  ) {
     return this.relay.chatCompletions(req, res, body);
   }
 
   @Post('messages')
   @ApiOperation({ summary: 'Anthropic 兼容消息转发（计费 + 日志）' })
-  messages(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: Record<string, unknown>) {
+  messages(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: Record<string, unknown>
+  ) {
     return this.relay.messages(req, res, body);
   }
 
   @Post('images/generations')
   @ApiOperation({ summary: 'AI 生图转发（按张计费）' })
-  images(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: Record<string, unknown>) {
+  images(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: Record<string, unknown>
+  ) {
     return this.relay.imageGenerations(req, res, body);
   }
 
@@ -79,7 +91,9 @@ export class RelayController {
   }
 
   @Get('rbflow-config')
-  @ApiOperation({ summary: '读取 RBFLow 服务配置（供桌面桥转发用，已登录用户即可；插件进程不可见）' })
+  @ApiOperation({
+    summary: '读取 RBFLow 服务配置（供桌面桥转发用，已登录用户即可；插件进程不可见）',
+  })
   rbflowConfig(@Req() req: Request) {
     return this.relay.getRbflowConfig(req);
   }

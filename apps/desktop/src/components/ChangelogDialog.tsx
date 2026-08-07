@@ -12,9 +12,11 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { DownloadIcon, SparklesIcon, ChevronRightIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { LoadingButton } from '@/components/loading-button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -27,7 +29,13 @@ import 'highlight.js/styles/github-dark.css';
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function ChangelogDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [releases, setReleases] = useState<ChangelogEntry[]>([]);
   const [degraded, setDegraded] = useState(false);
   const [degradedMessage, setDegradedMessage] = useState<string | null>(null);
@@ -69,14 +77,25 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
         {/* 标题栏（可拖拽窗口）。
             刷新按钮放左侧标题旁——右上角的关闭按钮（DialogContent 自带 absolute right-2）
             与刷新分列两侧，避免挤在一起。 */}
-        <div {...dragRegionProps} className="flex shrink-0 items-center justify-between border-b pl-5 pr-12 py-3.5">
+        <div
+          {...dragRegionProps}
+          className="flex shrink-0 items-center justify-between border-b pl-5 pr-12 py-3.5"
+        >
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2.5">
               <SparklesIcon className="size-4 text-primary" />
-              <DialogTitle className="text-base" data-tauri-drag-region>更新日志</DialogTitle>
+              <DialogTitle className="text-base" data-tauri-drag-region>
+                更新日志
+              </DialogTitle>
             </div>
             <DialogDescription className="sr-only">查看 灵坊 各版本的变更说明</DialogDescription>
-            <LoadingButton variant="ghost" size="sm" loading={status === 'loading'} onClick={load} className="h-7 px-2 text-xs">
+            <LoadingButton
+              variant="ghost"
+              size="sm"
+              loading={status === 'loading'}
+              onClick={load}
+              className="h-7 px-2 text-xs"
+            >
               刷新
             </LoadingButton>
           </div>
@@ -84,9 +103,9 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
 
         {/* 降级横幅 */}
         {status === 'ready' && degraded && degradedMessage && (
-          <div className="shrink-0 border-b bg-amber-500/10 px-5 py-2 text-xs text-amber-700 dark:text-amber-400">
-            {degradedMessage}
-          </div>
+          <Alert className="shrink-0 rounded-none border-x-0 border-t-0 border-b bg-warning/10 px-5 py-2 text-warning">
+            <AlertDescription className="text-xs text-current">{degradedMessage}</AlertDescription>
+          </Alert>
         )}
 
         {/* 主体：左侧目录 + 右侧时间线 */}
@@ -105,11 +124,17 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
                       type="button"
                       onClick={() => jumpTo(r.id)}
                       className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-                        activeId === r.id ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        activeId === r.id
+                          ? 'bg-primary/10 font-medium text-primary'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
                       <span className="font-mono">v{r.version}</span>
-                      {r.isLatest && <Badge variant="secondary" className="h-4 px-1 text-[9px]">最新</Badge>}
+                      {r.isLatest && (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                          最新
+                        </Badge>
+                      )}
                     </button>
                   ))}
                 </nav>
@@ -120,25 +145,29 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
           {/* 右侧：版本时间线 */}
           <div className="min-h-0 flex-1">
             {status === 'loading' ? (
-              <div className="space-y-3 p-5">
+              <div className="flex flex-col gap-3 p-5">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+                  <Skeleton key={i} className="h-24 rounded-lg" />
                 ))}
               </div>
             ) : status === 'error' ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
                 <p>加载失败</p>
-                <Button variant="outline" size="sm" onClick={load}>重试</Button>
+                <Button variant="outline" size="sm" onClick={load}>
+                  重试
+                </Button>
               </div>
             ) : releases.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
                 <DownloadIcon className="size-8 text-muted-foreground/40" />
                 <span>暂无更新日志</span>
-                <span className="text-xs">平台管理员配置 Gitee 更新日志源后，此处自动展示版本时间线。</span>
+                <span className="text-xs">
+                  平台管理员配置 Gitee 更新日志源后，此处自动展示版本时间线。
+                </span>
               </div>
             ) : (
               <ScrollArea className="h-full">
-                <div className="space-y-5 p-5">
+                <div className="flex flex-col gap-5 p-5">
                   {releases.map((release) => (
                     <div
                       key={release.id}
@@ -150,23 +179,41 @@ export function ChangelogDialog({ open, onOpenChange }: { open: boolean; onOpenC
                     >
                       {/* 版本头 */}
                       <div className="flex items-center gap-3 border-b px-4 py-3">
-                        <Badge variant={release.isLatest ? 'default' : 'secondary'} className="font-mono">
+                        <Badge
+                          variant={release.isLatest ? 'default' : 'secondary'}
+                          className="font-mono"
+                        >
                           v{release.version}
                         </Badge>
-                        {release.title && <span className="min-w-0 flex-1 truncate text-sm font-medium">{release.title}</span>}
-                        {release.publishedAt && (
-                          <span className="shrink-0 font-mono text-xs text-muted-foreground">{formatDate(release.publishedAt)}</span>
+                        {release.title && (
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {release.title}
+                          </span>
                         )}
-                        {release.isLatest && <Badge variant="outline" className="shrink-0 text-emerald-600 dark:text-emerald-400">最新</Badge>}
+                        {release.publishedAt && (
+                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                            {formatDate(release.publishedAt)}
+                          </span>
+                        )}
+                        {release.isLatest && (
+                          <Badge variant="outline" className="shrink-0 text-success">
+                            最新
+                          </Badge>
+                        )}
                       </div>
                       {/* notes markdown 渲染 */}
                       <div className="changelog-md px-4 py-3">
                         {release.notes && release.notes.trim() ? (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            rehypePlugins={[rehypeHighlight]}
+                          >
                             {release.notes}
                           </ReactMarkdown>
                         ) : (
-                          <p className="font-mono text-xs text-muted-foreground/60">// 本版本无更新说明</p>
+                          <p className="font-mono text-xs text-muted-foreground/60">
+                            // 本版本无更新说明
+                          </p>
                         )}
                       </div>
                     </div>

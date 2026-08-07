@@ -56,7 +56,9 @@ describe('PermissionGroupService 权限分组显示名管理', () => {
   describe('listGroups', () => {
     it('合并内置基线 + DB 覆盖，标注 customized', async () => {
       // DB 有一条自定义覆盖（team.plugin → 插件中心）
-      prisma.permissionGroup.findMany.mockResolvedValue([makeGroupRow({ displayName: '插件中心' })]);
+      prisma.permissionGroup.findMany.mockResolvedValue([
+        makeGroupRow({ displayName: '插件中心' }),
+      ]);
       const result = await service.listGroups('admin-1', 'TEAM');
       const pluginGroup = result.groups.find((g) => g.groupKey === 'team.plugin');
       expect(pluginGroup?.displayName).toBe('插件中心');
@@ -76,58 +78,79 @@ describe('PermissionGroupService 权限分组显示名管理', () => {
   describe('upsertGroup', () => {
     it('管理员改名内置分组显示名', async () => {
       prisma.permissionGroup.upsert.mockResolvedValue(makeGroupRow({ displayName: '插件中心' }));
-      const result = await service.upsertGroup('admin-1', 'TEAM', { groupKey: 'team.plugin', displayName: '插件中心' });
+      const result = await service.upsertGroup('admin-1', 'TEAM', {
+        groupKey: 'team.plugin',
+        displayName: '插件中心',
+      });
       expect(result.group.displayName).toBe('插件中心');
-      expect(prisma.permissionGroup.upsert).toHaveBeenCalledWith(expect.objectContaining({
-        where: { scope_groupKey: { scope: 'TEAM', groupKey: 'team.plugin' } },
-        update: { displayName: '插件中心' },
-      }));
+      expect(prisma.permissionGroup.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { scope_groupKey: { scope: 'TEAM', groupKey: 'team.plugin' } },
+          update: { displayName: '插件中心' },
+        })
+      );
       expect(prisma.auditLog.create).toHaveBeenCalled();
     });
 
     it('未知 groupKey（非已注册模块）拒绝 400', async () => {
       await expect(
-        service.upsertGroup('admin-1', 'TEAM', { groupKey: 'team.unknown', displayName: 'X' }),
+        service.upsertGroup('admin-1', 'TEAM', { groupKey: 'team.unknown', displayName: 'X' })
       ).rejects.toMatchObject({ status: 400 });
     });
 
     it('空 displayName 经 DTO 校验在前置层，service 收到即 upsert', async () => {
       prisma.permissionGroup.upsert.mockResolvedValue(makeGroupRow({ displayName: '插件管理' }));
       // service 不做空校验（DTO 已校验），正常 upsert
-      await service.upsertGroup('admin-1', 'TEAM', { groupKey: 'team.plugin', displayName: '插件管理' });
+      await service.upsertGroup('admin-1', 'TEAM', {
+        groupKey: 'team.plugin',
+        displayName: '插件管理',
+      });
       expect(prisma.permissionGroup.upsert).toHaveBeenCalled();
     });
 
     it('PLATFORM scope 无需团队归属校验', async () => {
-      prisma.permissionGroup.upsert.mockResolvedValue(makeGroupRow({ scope: 'PLATFORM', groupKey: 'platform.user' }));
-      await service.upsertGroup('admin-1', 'PLATFORM', { groupKey: 'platform.user', displayName: '账号中心' });
-      expect(prisma.permissionGroup.upsert).toHaveBeenCalledWith(expect.objectContaining({
-        where: { scope_groupKey: { scope: 'PLATFORM', groupKey: 'platform.user' } },
-      }));
+      prisma.permissionGroup.upsert.mockResolvedValue(
+        makeGroupRow({ scope: 'PLATFORM', groupKey: 'platform.user' })
+      );
+      await service.upsertGroup('admin-1', 'PLATFORM', {
+        groupKey: 'platform.user',
+        displayName: '账号中心',
+      });
+      expect(prisma.permissionGroup.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { scope_groupKey: { scope: 'PLATFORM', groupKey: 'platform.user' } },
+        })
+      );
     });
   });
 
   describe('deleteGroup（重置为内置默认）', () => {
     it('已自定义分组重置为内置默认显示名', async () => {
-      prisma.permissionGroup.findUnique.mockResolvedValue(makeGroupRow({ displayName: '插件中心' }));
+      prisma.permissionGroup.findUnique.mockResolvedValue(
+        makeGroupRow({ displayName: '插件中心' })
+      );
       await service.deleteGroup('admin-1', 'TEAM', 'team.plugin');
       // update 重置 displayName 为内置默认（team.plugin → 插件管理）
-      expect(prisma.permissionGroup.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { scope_groupKey: { scope: 'TEAM', groupKey: 'team.plugin' } },
-        data: { displayName: '插件管理' },
-      }));
+      expect(prisma.permissionGroup.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { scope_groupKey: { scope: 'TEAM', groupKey: 'team.plugin' } },
+          data: { displayName: '插件管理' },
+        })
+      );
       expect(prisma.auditLog.create).toHaveBeenCalled();
     });
 
     it('未自定义的分组拒绝 404', async () => {
       prisma.permissionGroup.findUnique.mockResolvedValue(null);
-      await expect(service.deleteGroup('admin-1', 'TEAM', 'team.plugin')).rejects.toMatchObject({ status: 404 });
+      await expect(service.deleteGroup('admin-1', 'TEAM', 'team.plugin')).rejects.toMatchObject({
+        status: 404,
+      });
     });
 
     it('未知 groupKey 拒绝 400', async () => {
-      await expect(
-        service.deleteGroup('admin-1', 'TEAM', 'team.unknown'),
-      ).rejects.toMatchObject({ status: 400 });
+      await expect(service.deleteGroup('admin-1', 'TEAM', 'team.unknown')).rejects.toMatchObject({
+        status: 400,
+      });
     });
   });
 
@@ -140,7 +163,11 @@ describe('PermissionGroupService 权限分组显示名管理', () => {
     });
 
     it('TEAM scope 团队 SUSPENDED 拒绝 403', async () => {
-      prisma.teamMembership.findFirst.mockResolvedValue({ teamId: 'team-1', userId: 'admin-1', team: { status: 'SUSPENDED' } });
+      prisma.teamMembership.findFirst.mockResolvedValue({
+        teamId: 'team-1',
+        userId: 'admin-1',
+        team: { status: 'SUSPENDED' },
+      });
       auth.ensurePermission.mockResolvedValue({ perms: new Set() });
       await expect(service.listGroups('admin-1', 'TEAM')).rejects.toMatchObject({ status: 403 });
     });

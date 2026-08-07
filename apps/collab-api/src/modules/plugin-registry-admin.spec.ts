@@ -19,7 +19,7 @@ function registry(prisma: Record<string, unknown>) {
   return new PluginRegistryService(
     prisma as never,
     { ensurePlatformAdmin: vi.fn().mockResolvedValue({}) } as never,
-    {} as never,
+    {} as never
   );
 }
 
@@ -58,21 +58,25 @@ function releaseSummary(version: string, id: string) {
 
 describe('PluginRegistryService admin governance', () => {
   it('validates source filters against the release provenance enum', async () => {
-    const valid = Object.assign(new AdminPluginPackageListQueryDto(), { sourceKind: 'EXTERNAL_TOOL' });
+    const valid = Object.assign(new AdminPluginPackageListQueryDto(), {
+      sourceKind: 'EXTERNAL_TOOL',
+    });
     const invalid = Object.assign(new AdminPluginPackageListQueryDto(), { sourceKind: 'CURSOR' });
 
     await expect(validate(valid)).resolves.toHaveLength(0);
-    await expect(validate(invalid)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ property: 'sourceKind' }),
-    ]));
+    await expect(validate(invalid)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ property: 'sourceKind' })])
+    );
   });
 
   it('uses lightweight package/release selects and picks 1.10.0 over 1.9.0', async () => {
     const packageFindMany = vi.fn().mockResolvedValue([packageListRow()]);
-    const releaseFindMany = vi.fn().mockResolvedValue([
-      releaseSummary('1.9.0', 'release-19'),
-      releaseSummary('1.10.0', 'release-110'),
-    ]);
+    const releaseFindMany = vi
+      .fn()
+      .mockResolvedValue([
+        releaseSummary('1.9.0', 'release-19'),
+        releaseSummary('1.10.0', 'release-110'),
+      ]);
     const service = registry({
       pluginPackage: { findMany: packageFindMany, count: vi.fn().mockResolvedValue(1) },
       pluginRelease: { findMany: releaseFindMany },
@@ -91,27 +95,31 @@ describe('PluginRegistryService admin governance', () => {
       total: 1,
       page: 2,
       pageSize: 10,
-      items: [{
-        latestRelease: {
-          id: 'release-110',
-          version: '1.10.0',
-          sourceKind: 'EXTERNAL_TOOL',
-          sourceLabel: 'Cursor',
-          ingestChannel: 'DESKTOP',
+      items: [
+        {
+          latestRelease: {
+            id: 'release-110',
+            version: '1.10.0',
+            sourceKind: 'EXTERNAL_TOOL',
+            sourceLabel: 'Cursor',
+            ingestChannel: 'DESKTOP',
+          },
+          marketplaceCurrentVersion: '1.9.0',
+          releaseCount: 2,
         },
-        marketplaceCurrentVersion: '1.9.0',
-        releaseCount: 2,
-      }],
+      ],
     });
-    expect(packageFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        governanceStatus: 'ACTIVE',
-        releases: { some: { marketReviewStatus: 'APPROVED', sourceKind: 'EXTERNAL_TOOL' } },
-      }),
-      select: ADMIN_PACKAGE_LIST_SELECT,
-      skip: 10,
-      take: 10,
-    }));
+    expect(packageFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          governanceStatus: 'ACTIVE',
+          releases: { some: { marketReviewStatus: 'APPROVED', sourceKind: 'EXTERNAL_TOOL' } },
+        }),
+        select: ADMIN_PACKAGE_LIST_SELECT,
+        skip: 10,
+        take: 10,
+      })
+    );
     expect(releaseFindMany).toHaveBeenCalledWith({
       where: { packageId: { in: [packageId] } },
       select: ADMIN_RELEASE_SUMMARY_SELECT,
@@ -128,15 +136,13 @@ describe('PluginRegistryService admin governance', () => {
 
   it('allows list and review permissions to read deferred release details', () => {
     for (const method of ['detail', 'manifest', 'files', 'reviews'] as const) {
-      expect(Reflect.getMetadata(
-        PERMISSIONS_KEY,
-        AdminPluginRegistryController.prototype[method],
-      )).toEqual(['platform.plugin.list_all', 'platform.plugin.review']);
+      expect(
+        Reflect.getMetadata(PERMISSIONS_KEY, AdminPluginRegistryController.prototype[method])
+      ).toEqual(['platform.plugin.list_all', 'platform.plugin.review']);
     }
-    expect(Reflect.getMetadata(
-      PERMISSIONS_KEY,
-      AdminPluginRegistryController.prototype.artifact,
-    )).toEqual(['platform.plugin.review']);
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, AdminPluginRegistryController.prototype.artifact)
+    ).toEqual(['platform.plugin.review']);
   });
 
   it('keeps the DELISTED release pointer without marking it marketplace-current', async () => {
@@ -236,12 +242,18 @@ describe('PluginRegistryService admin governance', () => {
     ]);
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    );
     expect(rejected?.reason).toMatchObject({ code: 'conflict' });
     expect(updateMany).toHaveBeenCalledTimes(2);
     expect(reviewCreate).toHaveBeenCalledOnce();
     expect(auditCreate).toHaveBeenCalledOnce();
-    expect(transaction.mock.calls.some((call) => call[1]?.isolationLevel === Prisma.TransactionIsolationLevel.Serializable)).toBe(true);
+    expect(
+      transaction.mock.calls.some(
+        (call) => call[1]?.isolationLevel === Prisma.TransactionIsolationLevel.Serializable
+      )
+    ).toBe(true);
   });
 
   it('package delist preserves the current release id and rejects an empty reason', async () => {
@@ -264,7 +276,8 @@ describe('PluginRegistryService admin governance', () => {
       delistedAt: now,
       delistedByUserId: 'admin',
     };
-    const listingFindUnique = vi.fn()
+    const listingFindUnique = vi
+      .fn()
       .mockResolvedValueOnce(activeListing)
       .mockResolvedValueOnce(delistedListing);
     const listingUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -288,7 +301,9 @@ describe('PluginRegistryService admin governance', () => {
     });
     const updateData = listingUpdateMany.mock.calls[0]?.[0]?.data;
     expect(updateData).not.toHaveProperty('currentReleaseId');
-    await expect(service.delistPackage('admin', packageId, '   ')).rejects.toMatchObject({ code: 'bad_request' });
+    await expect(service.delistPackage('admin', packageId, '   ')).rejects.toMatchObject({
+      code: 'bad_request',
+    });
   });
 
   it('exact-current release delist rejects an empty reason before reading registry state', async () => {
@@ -302,7 +317,8 @@ describe('PluginRegistryService admin governance', () => {
   });
 
   it('sorts and slices file manifests while review history uses database pagination', async () => {
-    const releaseFindUnique = vi.fn()
+    const releaseFindUnique = vi
+      .fn()
       .mockResolvedValueOnce({
         id: 'release-files',
         fileManifest: [
@@ -312,26 +328,32 @@ describe('PluginRegistryService admin governance', () => {
         ],
       })
       .mockResolvedValueOnce({ id: 'release-files' });
-    const reviewFindMany = vi.fn().mockResolvedValue([{
-      id: 'review-2',
-      releaseId: 'release-files',
-      status: 'REJECTED',
-      reason: 'policy',
-      createdAt: now,
-      reviewer: { id: 'admin', displayName: 'Admin', email: 'admin@example.com' },
-    }]);
+    const reviewFindMany = vi.fn().mockResolvedValue([
+      {
+        id: 'review-2',
+        releaseId: 'release-files',
+        status: 'REJECTED',
+        reason: 'policy',
+        createdAt: now,
+        reviewer: { id: 'admin', displayName: 'Admin', email: 'admin@example.com' },
+      },
+    ]);
     const service = registry({
       pluginRelease: { findUnique: releaseFindUnique },
       pluginReleaseReview: { findMany: reviewFindMany, count: vi.fn().mockResolvedValue(3) },
     });
 
-    await expect(service.adminReleaseFiles('admin', 'release-files', { page: 2, pageSize: 2 })).resolves.toEqual({
+    await expect(
+      service.adminReleaseFiles('admin', 'release-files', { page: 2, pageSize: 2 })
+    ).resolves.toEqual({
       items: [{ path: 'z.ts', sizeBytes: 3 }],
       total: 3,
       page: 2,
       pageSize: 2,
     });
-    await expect(service.adminReleaseReviews('admin', 'release-files', { page: 2, pageSize: 1 })).resolves.toMatchObject({
+    await expect(
+      service.adminReleaseReviews('admin', 'release-files', { page: 2, pageSize: 1 })
+    ).resolves.toMatchObject({
       items: [{ reviewer: { id: 'admin', displayName: 'Admin', email: 'admin@example.com' } }],
       total: 3,
       page: 2,

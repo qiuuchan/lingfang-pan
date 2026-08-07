@@ -24,15 +24,24 @@ describe('remapUpstreamHttpStatus', () => {
 
 describe('extractUpstreamCause', () => {
   it('returns nulls for non-UpstreamError', () => {
-    expect(extractUpstreamCause(new Error('boom'))).toEqual({ upstreamStatus: null, upstreamDetail: null });
+    expect(extractUpstreamCause(new Error('boom'))).toEqual({
+      upstreamStatus: null,
+      upstreamDetail: null,
+    });
   });
   it('extracts message from a JSON error body', () => {
     const e = new UpstreamError(400, 'bad', JSON.stringify({ message: 'schema invalid' }));
-    expect(extractUpstreamCause(e)).toEqual({ upstreamStatus: 400, upstreamDetail: 'schema invalid' });
+    expect(extractUpstreamCause(e)).toEqual({
+      upstreamStatus: 400,
+      upstreamDetail: 'schema invalid',
+    });
   });
   it('falls back to raw body text when body is not JSON', () => {
     const e = new UpstreamError(400, 'bad', 'plain rejection');
-    expect(extractUpstreamCause(e)).toEqual({ upstreamStatus: 400, upstreamDetail: 'plain rejection' });
+    expect(extractUpstreamCause(e)).toEqual({
+      upstreamStatus: 400,
+      upstreamDetail: 'plain rejection',
+    });
   });
 });
 

@@ -31,7 +31,6 @@ export const LLM_PROVIDER = [
   'custom',
 ] as const;
 
-
 // === 应用版本发布相关常量 ===
 
 /** 发布通道（与 ReleaseChannel 对齐，STABLE 正式 / BETA 预览）。 */

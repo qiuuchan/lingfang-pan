@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoadedPlugin } from '@/lib/types';
-import { handleRuntimeCall, loadPluginDocument, pluginRelayClientSource, runtimeErrorPayload, runtimeMessageFromFrame } from './plugins-runtime';
+import {
+  handleRuntimeCall,
+  loadPluginDocument,
+  pluginRelayClientSource,
+  runtimeErrorPayload,
+  runtimeMessageFromFrame,
+} from './plugins-runtime';
 
 function plugin(overrides: Partial<LoadedPlugin> = {}): LoadedPlugin {
   return {
@@ -30,10 +36,27 @@ describe('plugin iframe AI runtime', () => {
   it('accepts bridge calls only from the current opaque-origin frame', () => {
     const contentWindow = {} as Window;
     const frame = { contentWindow } as HTMLIFrameElement;
-    const data = { __lf_call: true, id: 1, kind: 'actions.call', args: { dependency_id: 'video_generator' } };
-    expect(runtimeMessageFromFrame({ origin: 'null', source: contentWindow, data } as MessageEvent, frame)).toMatchObject({ kind: 'actions.call' });
-    expect(runtimeMessageFromFrame({ origin: 'https://attacker.example', source: contentWindow, data } as MessageEvent, frame)).toBeNull();
-    expect(runtimeMessageFromFrame({ origin: 'null', source: {} as Window, data } as MessageEvent, frame)).toBeNull();
+    const data = {
+      __lf_call: true,
+      id: 1,
+      kind: 'actions.call',
+      args: { dependency_id: 'video_generator' },
+    };
+    expect(
+      runtimeMessageFromFrame(
+        { origin: 'null', source: contentWindow, data } as MessageEvent,
+        frame
+      )
+    ).toMatchObject({ kind: 'actions.call' });
+    expect(
+      runtimeMessageFromFrame(
+        { origin: 'https://attacker.example', source: contentWindow, data } as MessageEvent,
+        frame
+      )
+    ).toBeNull();
+    expect(
+      runtimeMessageFromFrame({ origin: 'null', source: {} as Window, data } as MessageEvent, frame)
+    ).toBeNull();
   });
 
   it('ignores spoofed principal and token fields from iframe messages', () => {
@@ -48,8 +71,14 @@ describe('plugin iframe AI runtime', () => {
       kind: 'actions.call',
       args: { dependency_id: 'video_generator' },
     };
-    const message = runtimeMessageFromFrame({ origin: 'null', source: contentWindow, data } as MessageEvent, frame);
-    expect(message).toMatchObject({ kind: 'actions.call', args: { dependency_id: 'video_generator' } });
+    const message = runtimeMessageFromFrame(
+      { origin: 'null', source: contentWindow, data } as MessageEvent,
+      frame
+    );
+    expect(message).toMatchObject({
+      kind: 'actions.call',
+      args: { dependency_id: 'video_generator' },
+    });
     // The host passes only the active LoadedPlugin to handleRuntimeCall; no
     // iframe-supplied principal/token field exists in the typed message shape.
     expect(message).not.toHaveProperty('token');
@@ -68,25 +97,30 @@ describe('plugin iframe AI runtime', () => {
       args: { messages: [{ role: 'user', content: 'hello' }], model: 'gpt-4o' },
     });
 
-    expect(postMessage).toHaveBeenCalledWith({
-      __lf_reply: true,
-      id: 1,
-      error: expect.objectContaining({
-        message: '仅支持平台模型档位 fast 或 premium',
-        code: 'unsupported_model',
-        status: 400,
-      }),
-    }, '*');
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        __lf_reply: true,
+        id: 1,
+        error: expect.objectContaining({
+          message: '仅支持平台模型档位 fast 或 premium',
+          code: 'unsupported_model',
+          status: 400,
+        }),
+      },
+      '*'
+    );
   });
 
   it('maps stable product error metadata without reducing it to a string', () => {
-    expect(runtimeErrorPayload({
-      name: 'PluginAiError',
-      message: '团队额度不足',
-      code: 'insufficient_balance',
-      status: 402,
-      requestId: 'req-1',
-    })).toEqual({
+    expect(
+      runtimeErrorPayload({
+        name: 'PluginAiError',
+        message: '团队额度不足',
+        code: 'insufficient_balance',
+        status: 402,
+        requestId: 'req-1',
+      })
+    ).toEqual({
       name: 'PluginAiError',
       message: '团队额度不足',
       code: 'insufficient_balance',

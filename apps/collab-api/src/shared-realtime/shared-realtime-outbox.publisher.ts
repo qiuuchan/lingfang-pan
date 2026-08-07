@@ -12,7 +12,7 @@ export class SharedRealtimeOutboxPublisher implements OnModuleInit, OnModuleDest
   constructor(
     @Inject(SHARED_REALTIME_CONFIG) private readonly config: SharedRealtimeConfig,
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    private readonly broadcaster: SharedRealtimeBroadcaster,
+    private readonly broadcaster: SharedRealtimeBroadcaster
   ) {}
 
   onModuleInit(): void {
@@ -33,8 +33,13 @@ export class SharedRealtimeOutboxPublisher implements OnModuleInit, OnModuleDest
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: Math.max(1, Math.min(500, limit)),
       select: {
-        id: true, teamId: true, namespaceId: true, namespaceGeneration: true,
-        cursor: true, key: true, revision: true,
+        id: true,
+        teamId: true,
+        namespaceId: true,
+        namespaceGeneration: true,
+        cursor: true,
+        key: true,
+        revision: true,
       },
     });
     const result = { delivered: 0, failed: 0, stale: 0 };
@@ -48,10 +53,12 @@ export class SharedRealtimeOutboxPublisher implements OnModuleInit, OnModuleDest
         if (updated.count === 1) result.delivered += 1;
         else result.stale += 1;
       } catch {
-        await this.prisma.sharedStateOutbox.updateMany({
-          where: { id: row.id, publishedAt: null },
-          data: { attempts: { increment: 1 } },
-        }).catch(() => undefined);
+        await this.prisma.sharedStateOutbox
+          .updateMany({
+            where: { id: row.id, publishedAt: null },
+            data: { attempts: { increment: 1 } },
+          })
+          .catch(() => undefined);
         result.failed += 1;
       }
     }
@@ -61,7 +68,12 @@ export class SharedRealtimeOutboxPublisher implements OnModuleInit, OnModuleDest
   private async tick(): Promise<void> {
     if (this.publishing) return;
     this.publishing = true;
-    try { await this.publishOnce(); } catch { /* Readiness owns database dependency reporting. */ }
-    finally { this.publishing = false; }
+    try {
+      await this.publishOnce();
+    } catch {
+      /* Readiness owns database dependency reporting. */
+    } finally {
+      this.publishing = false;
+    }
   }
 }

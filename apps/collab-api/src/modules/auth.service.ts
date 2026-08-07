@@ -24,14 +24,17 @@ export class AuthService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MailService) private readonly mail: MailService,
-    @Inject(GeetestService) private readonly geetest: GeetestService,
+    @Inject(GeetestService) private readonly geetest: GeetestService
   ) {}
 
   /**
    * 管理端极验验证码校验守卫。
    * 普通应用端认证入口不接收、不要求验证码；验证码只用于管理端登录和管理端找回密码。
    */
-  private async requireAdminCaptcha(scene: GeetestScene, captcha: Partial<GeetestCaptchaParams> | undefined): Promise<void> {
+  private async requireAdminCaptcha(
+    scene: GeetestScene,
+    captcha: Partial<GeetestCaptchaParams> | undefined
+  ): Promise<void> {
     const enabled = await this.geetest.isSceneEnabled(scene);
     if (enabled) {
       const ok = await this.geetest.validate(captcha);
@@ -44,12 +47,19 @@ export class AuthService {
       this.warnedCaptchaScenes.add(scene);
       this.logger.warn(
         `[安全] 极验未启用，管理端「${scene}」人机校验已跳过(fail-open)。` +
-          `若已上线生产，请配置 geetestCaptchaId+geetestCaptchaKey 并在场景中启用「${scene}」，否则平台管理员账号面临暴力破解风险。`,
+          `若已上线生产，请配置 geetestCaptchaId+geetestCaptchaKey 并在场景中启用「${scene}」，否则平台管理员账号面临暴力破解风险。`
       );
     }
   }
 
-  async register(input: { email: string; password: string; displayName?: string; wantsTeamAdmin?: boolean; teamName?: string; reason?: string }) {
+  async register(input: {
+    email: string;
+    password: string;
+    displayName?: string;
+    wantsTeamAdmin?: boolean;
+    teamName?: string;
+    reason?: string;
+  }) {
     const email = input.email?.trim().toLowerCase();
     // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
     // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
@@ -67,7 +77,15 @@ export class AuthService {
         },
       });
       // 注册审计：actor=新用户自身，targetType=User（与 team_admin_application.created 事务内并列）。
-      await tx.auditLog.create({ data: { actorUserId: user.id, action: 'auth.register', targetType: 'User', targetId: user.id, metadata: { email } } });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          action: 'auth.register',
+          targetType: 'User',
+          targetId: user.id,
+          metadata: { email },
+        },
+      });
       if (input.wantsTeamAdmin) {
         await tx.teamAdminApplication.create({
           data: {
@@ -76,7 +94,15 @@ export class AuthService {
             reason: input.reason?.trim() || '',
           },
         });
-        await tx.auditLog.create({ data: { actorUserId: user.id, action: 'team_admin_application.created', targetType: 'User', targetId: user.id, metadata: { email } } });
+        await tx.auditLog.create({
+          data: {
+            actorUserId: user.id,
+            action: 'team_admin_application.created',
+            targetType: 'User',
+            targetId: user.id,
+            metadata: { email },
+          },
+        });
       }
       return user.id;
     });
@@ -92,40 +118,74 @@ export class AuthService {
    * verify_link 形如 <base>/?verify_token=xxx，由前端解析后调 verify-email 端点完成验证。
    */
   private async sendVerificationEmail(userId: string, email: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true, emailVerified: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tokenVersion: true, emailVerified: true },
+    });
     // 已验证的用户不重发（幂等，避免重复邮件骚扰）。
     if (!user || user.emailVerified) return;
     const token = this.issueVerifyToken(userId, email, user.tokenVersion);
     const baseUrl = (process.env.EMAIL_VERIFY_BASE_URL || '').replace(/\/+$/, '');
-    const link = baseUrl ? `${baseUrl}/?verify_token=${encodeURIComponent(token)}` : `/?verify_token=${encodeURIComponent(token)}`;
+    const link = baseUrl
+      ? `${baseUrl}/?verify_token=${encodeURIComponent(token)}`
+      : `/?verify_token=${encodeURIComponent(token)}`;
     // 修复 AUTH-EMAIL-01：邮件是可降级能力，SMTP 未配置或发送失败不应阻断注册/重发验证邮件。
     // 此前 sendEmailVerification 在 SMTP 未配置时抛错并向上传播，导致整个 register 返回 500
     // （即使用户行已在事务中提交）。此处捕获并记告警，保证注册成功且运维可感知邮件未发出。
     try {
       await this.mail.sendEmailVerification(email, link);
     } catch (err) {
-      this.logger.warn(`发送验证邮件失败（用户 ${userId} / ${email}）：${(err as Error)?.message ?? err}`);
+      this.logger.warn(
+        `发送验证邮件失败（用户 ${userId} / ${email}）：${(err as Error)?.message ?? err}`
+      );
     }
   }
 
-  async login(input: { email: string; password: string }, options: { allowPlatformAdmin?: boolean } = {}) {
+  async login(
+    input: { email: string; password: string },
+    options: { allowPlatformAdmin?: boolean } = {}
+  ) {
     const email = input.email?.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 登录失败统一审计：actorUserId 可为 null（用户不存在时），便于安全审计追踪暴力破解尝试。
     // 不在错误消息中区分「用户不存在」与「密码错误」（防探测），但审计记录 email 供管理员追溯。
     if (!user || user.status !== 'ACTIVE') {
-      await this.prisma.auditLog.create({ data: { actorUserId: null, action: 'auth.login.failed', targetType: 'User', targetId: user?.id ?? null, metadata: { email, reason: user ? 'account_inactive' : 'user_not_found' } } });
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: null,
+          action: 'auth.login.failed',
+          targetType: 'User',
+          targetId: user?.id ?? null,
+          metadata: { email, reason: user ? 'account_inactive' : 'user_not_found' },
+        },
+      });
       throw unauthorized('邮箱或密码错误');
     }
     if (user.platformRole === 'PLATFORM_ADMIN' && !options.allowPlatformAdmin) {
-      await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.failed', targetType: 'User', targetId: user.id, metadata: { email, reason: 'platform_admin_requires_admin_login' } } });
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          action: 'auth.login.failed',
+          targetType: 'User',
+          targetId: user.id,
+          metadata: { email, reason: 'platform_admin_requires_admin_login' },
+        },
+      });
       throw forbidden('平台管理员请从管理端登录');
     }
     // 组B 账户级锁定：与 throttler（IP 限流）正交。lockedUntil 未过期直接拒绝并返剩余分钟，
     // 防分布式 IP 池对单账户的暴力爆破。user_not_found/account_inactive 分支不在此校验（无 user 行）。
     if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
       const remainingMinutes = this.remainingLockMinutes(user.lockedUntil);
-      await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.locked', targetType: 'User', targetId: user.id, metadata: { email, remainingMinutes } } });
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          action: 'auth.login.locked',
+          targetType: 'User',
+          targetId: user.id,
+          metadata: { email, remainingMinutes },
+        },
+      });
       throw forbidden(`账户已锁定，请 ${remainingMinutes} 分钟后再试`);
     }
     const ok = await bcrypt.compare(input.password || '', user.passwordHash);
@@ -133,19 +193,42 @@ export class AuthService {
       // 组B 密码错误累计：failedLoginAttempts++，达阈值则设 lockedUntil 并审计 auth.login.locked。
       // 阈值/锁定期由 PlatformSetting 可配（缺省 5 次 / 15min）；事务保证 attempts 与 lockedUntil 原子落库。
       await this.recordFailedLogin(user.id, email);
-      await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.failed', targetType: 'User', targetId: user.id, metadata: { email, reason: 'wrong_password' } } });
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          action: 'auth.login.failed',
+          targetType: 'User',
+          targetId: user.id,
+          metadata: { email, reason: 'wrong_password' },
+        },
+      });
       throw unauthorized('邮箱或密码错误');
     }
     // 登录成功审计：actor=用户自身，记录成功事件便于安全合规追溯（此前完全缺失）。
     // 组B 成功后重置失败计数与锁定状态（清零 failedLoginAttempts、置空 lockedUntil）。
     await this.resetFailedLogin(user.id);
-    await this.prisma.auditLog.create({ data: { actorUserId: user.id, action: 'auth.login.success', targetType: 'User', targetId: user.id, metadata: { email } } });
+    await this.prisma.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        action: 'auth.login.success',
+        targetType: 'User',
+        targetId: user.id,
+        metadata: { email },
+      },
+    });
     return this.sessionFor(user.id);
   }
 
-  async adminLogin(input: { email: string; password: string; captcha?: Partial<GeetestCaptchaParams> }) {
+  async adminLogin(input: {
+    email: string;
+    password: string;
+    captcha?: Partial<GeetestCaptchaParams>;
+  }) {
     await this.requireAdminCaptcha('admin_login', input.captcha);
-    const session = await this.login({ email: input.email, password: input.password }, { allowPlatformAdmin: true });
+    const session = await this.login(
+      { email: input.email, password: input.password },
+      { allowPlatformAdmin: true }
+    );
     if (session.user.platformRole !== 'PLATFORM_ADMIN') throw forbidden('该账号不是平台管理员');
     return session;
   }
@@ -167,8 +250,10 @@ export class AuthService {
       const maxAttempts = Number.parseInt(map.get('maxLoginAttempts') ?? '', 10);
       const lockMinutes = Number.parseInt(map.get('lockDurationMinutes') ?? '', 10);
       return {
-        maxAttempts: Number.isFinite(maxAttempts) && maxAttempts > 0 ? maxAttempts : defaults.maxAttempts,
-        lockMinutes: Number.isFinite(lockMinutes) && lockMinutes > 0 ? lockMinutes : defaults.lockMinutes,
+        maxAttempts:
+          Number.isFinite(maxAttempts) && maxAttempts > 0 ? maxAttempts : defaults.maxAttempts,
+        lockMinutes:
+          Number.isFinite(lockMinutes) && lockMinutes > 0 ? lockMinutes : defaults.lockMinutes,
       };
     } catch {
       // PlatformSetting 读取失败降级为默认值，登录主流程不中断（容灾优先于精确阈值）。
@@ -192,29 +277,45 @@ export class AuthService {
     // 先读当前 attempts 计算下一次累计值，决定是否跨过阈值触发锁定。
     // 不用原子 increment + 条件判断是因 Prisma 无法在单条 update 内「自增并按新值条件置锁定」，
     // 故采用「读-算-写」两步：并发场景下最坏多算一两次错误，但锁定仍会触发（安全侧偏向锁定）。
-    const row = await this.prisma.user.findUnique({ where: { id: userId }, select: { failedLoginAttempts: true } });
+    const row = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { failedLoginAttempts: true },
+    });
     const nextAttempts = (row?.failedLoginAttempts ?? 0) + 1;
     const nowOverThreshold = nextAttempts >= maxAttempts;
     await this.prisma.user.update({
       where: { id: userId },
       data: nowOverThreshold
-        ? { failedLoginAttempts: nextAttempts, lockedUntil: new Date(Date.now() + lockMinutes * 60_000) }
+        ? {
+            failedLoginAttempts: nextAttempts,
+            lockedUntil: new Date(Date.now() + lockMinutes * 60_000),
+          }
         : { failedLoginAttempts: nextAttempts },
     });
     if (nowOverThreshold) {
-      await this.prisma.auditLog.create({ data: { actorUserId: userId, action: 'auth.login.locked', targetType: 'User', targetId: userId, metadata: { email, attempts: nextAttempts, lockMinutes } } });
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: userId,
+          action: 'auth.login.locked',
+          targetType: 'User',
+          targetId: userId,
+          metadata: { email, attempts: nextAttempts, lockMinutes },
+        },
+      });
     }
   }
 
   /** 组B：登录成功后重置失败计数与锁定状态（failedLoginAttempts=0、lockedUntil=null）。
    *  写失败不阻塞登录主流程（session 签发优先于计数复位），降级吞错；下次密码错误仍会正常累计。 */
   private async resetFailedLogin(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { failedLoginAttempts: 0, lockedUntil: null },
-    }).catch(() => {
-      // 重置失败不阻塞登录主流程（session 签发优先），降级吞错；下次失败仍会正常累计。
-    });
+    await this.prisma.user
+      .update({
+        where: { id: userId },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      })
+      .catch(() => {
+        // 重置失败不阻塞登录主流程（session 签发优先），降级吞错；下次失败仍会正常累计。
+      });
   }
 
   async me(userId: string) {
@@ -236,16 +337,28 @@ export class AuthService {
       select: { teamId: true },
     });
     if (!membership) throw forbidden('无法切换到该团队');
-    await this.prisma.user.update({ where: { id: userId }, data: { teamContextVersion: { increment: 1 } } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { teamContextVersion: { increment: 1 } },
+    });
     return this.sessionFor(userId, true, teamId);
   }
 
   async refresh(userId: string) {
     // token 刷新审计：记录滑动续签事件（actor=用户自身），便于安全审计追踪会话活跃度。
     // 失败（sessionFor 抛 unauthorized）时不审计，与 login.failed 区分（refresh 失败多为 token 过期，非恶意）。
-    await this.prisma.auditLog.create({ data: { actorUserId: userId, action: 'auth.token.refreshed', targetType: 'User', targetId: userId } }).catch(() => {
-      // 审计写入失败不阻塞 refresh 主流程（token 续签优先于审计），降级吞错。
-    });
+    await this.prisma.auditLog
+      .create({
+        data: {
+          actorUserId: userId,
+          action: 'auth.token.refreshed',
+          targetType: 'User',
+          targetId: userId,
+        },
+      })
+      .catch(() => {
+        // 审计写入失败不阻塞 refresh 主流程（token 续签优先于审计），降级吞错。
+      });
     return this.sessionFor(userId);
   }
 
@@ -255,9 +368,13 @@ export class AuthService {
    * 审计写入失败不阻塞响应（降级吞错，logout 优先返回成功）。
    */
   async logout(userId: string) {
-    await this.prisma.auditLog.create({ data: { actorUserId: userId, action: 'auth.logout', targetType: 'User', targetId: userId } }).catch(() => {
-      // 审计写入失败不阻塞 logout 响应。
-    });
+    await this.prisma.auditLog
+      .create({
+        data: { actorUserId: userId, action: 'auth.logout', targetType: 'User', targetId: userId },
+      })
+      .catch(() => {
+        // 审计写入失败不阻塞 logout 响应。
+      });
     return { ok: true };
   }
 
@@ -278,14 +395,18 @@ export class AuthService {
     return this.sendPasswordResetIfEligible(input.email, { platformAdminOnly: true });
   }
 
-  private async sendPasswordResetIfEligible(rawEmail: string, options: { excludePlatformAdmin?: boolean; platformAdminOnly?: boolean } = {}) {
+  private async sendPasswordResetIfEligible(
+    rawEmail: string,
+    options: { excludePlatformAdmin?: boolean; platformAdminOnly?: boolean } = {}
+  ) {
     const email = rawEmail?.trim().toLowerCase();
     if (!email) throw badRequest('请输入邮箱');
     const user = await this.prisma.user.findUnique({ where: { email } });
     // 邮箱不存在/已禁用/入口账号类型不匹配：静默跳过，不抛错（防邮箱探测）。前端统一提示「链接已发送」。
-    const roleAllowed = user
-      && (!options.excludePlatformAdmin || user.platformRole !== 'PLATFORM_ADMIN')
-      && (!options.platformAdminOnly || user.platformRole === 'PLATFORM_ADMIN');
+    const roleAllowed =
+      user &&
+      (!options.excludePlatformAdmin || user.platformRole !== 'PLATFORM_ADMIN') &&
+      (!options.platformAdminOnly || user.platformRole === 'PLATFORM_ADMIN');
     if (user && user.status === 'ACTIVE' && roleAllowed) {
       // 修复 H1/H3：reset token 内嵌签发时的 tokenVersion，resetPassword 校验时与库比对。
       // 这样既防重放（改密后 tokenVersion++，旧 reset token 校验失败），
@@ -294,7 +415,9 @@ export class AuthService {
       const baseUrl = (process.env.PASSWORD_RESET_BASE_URL || '').replace(/\/+$/, '');
       // 重置链接：前端路由 ?reset_token=xxx（Auth.tsx 解析后弹「重置密码」对话框）。
       // baseUrl 未配时降级为只带 token 的相对路径（开发期 console.log 可见完整 token）。
-      const link = baseUrl ? `${baseUrl}/?reset_token=${encodeURIComponent(token)}` : `/?reset_token=${encodeURIComponent(token)}`;
+      const link = baseUrl
+        ? `${baseUrl}/?reset_token=${encodeURIComponent(token)}`
+        : `/?reset_token=${encodeURIComponent(token)}`;
       try {
         await this.mail.sendPasswordReset(email, link);
       } catch (error) {
@@ -318,7 +441,9 @@ export class AuthService {
     if (!secret) throw unauthorized('服务端未配置密钥');
     let payload: jwt.JwtPayload;
     try {
-      payload = jwt.verify(input.token, secret as Secret, { algorithms: ['HS256'] }) as jwt.JwtPayload;
+      payload = jwt.verify(input.token, secret as Secret, {
+        algorithms: ['HS256'],
+      }) as jwt.JwtPayload;
     } catch {
       throw badRequest('重置链接已过期或无效');
     }
@@ -328,7 +453,10 @@ export class AuthService {
     // 修复 H1/H3：加载当前 tokenVersion 与 status，与 reset token 内嵌的 tokenVersion 比对。
     // - 重放防护：resetPassword 成功后 tokenVersion++，旧 reset token（内嵌旧 tokenVersion）校验失败。
     // - 降级覆盖：admin 改 status/platformRole 时已 tokenVersion++，旧 reset token 同步失效。
-    const userRow = await this.prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true, status: true } });
+    const userRow = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tokenVersion: true, status: true },
+    });
     if (!userRow || userRow.status !== 'ACTIVE') throw badRequest('账号不可用，重置失败');
     const tokenVersionInPayload = Number(payload.tokenVersion);
     if (!Number.isFinite(tokenVersionInPayload) || tokenVersionInPayload !== userRow.tokenVersion) {
@@ -346,7 +474,13 @@ export class AuthService {
       return tx.user.findUniqueOrThrow({ where: { id: userId } });
     });
     await this.prisma.auditLog.create({
-      data: { actorUserId: user.id, action: 'auth.password.reset', targetType: 'User', targetId: user.id, metadata: { email: user.email } },
+      data: {
+        actorUserId: user.id,
+        action: 'auth.password.reset',
+        targetType: 'User',
+        targetId: user.id,
+        metadata: { email: user.email },
+      },
     });
     return { ok: true, message: '密码已重置，请使用新密码登录' };
   }
@@ -367,14 +501,19 @@ export class AuthService {
     if (!secret) throw unauthorized('服务端未配置密钥');
     let payload: jwt.JwtPayload;
     try {
-      payload = jwt.verify(input.token, secret as Secret, { algorithms: ['HS256'] }) as jwt.JwtPayload;
+      payload = jwt.verify(input.token, secret as Secret, {
+        algorithms: ['HS256'],
+      }) as jwt.JwtPayload;
     } catch {
       throw badRequest('验证链接已过期或无效');
     }
     if (payload.scope !== 'email_verify' || !payload.sub) throw badRequest('验证链接无效');
 
     const userId = String(payload.sub);
-    const userRow = await this.prisma.user.findUnique({ where: { id: userId }, select: { tokenVersion: true, status: true, emailVerified: true } });
+    const userRow = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tokenVersion: true, status: true, emailVerified: true },
+    });
     if (!userRow || userRow.status !== 'ACTIVE') throw badRequest('账号不可用，验证失败');
     // 幂等：已验证直接成功返回（不报错，前端重试友好）。
     if (userRow.emailVerified) return { ok: true, message: '邮箱已验证', alreadyVerified: true };
@@ -387,7 +526,12 @@ export class AuthService {
       data: { emailVerified: new Date() },
     });
     await this.prisma.auditLog.create({
-      data: { actorUserId: userId, action: 'auth.email.verified', targetType: 'User', targetId: userId },
+      data: {
+        actorUserId: userId,
+        action: 'auth.email.verified',
+        targetType: 'User',
+        targetId: userId,
+      },
     });
     return { ok: true, message: '邮箱验证成功' };
   }
@@ -398,9 +542,13 @@ export class AuthService {
    * 邮件发送失败会向上抛出，避免前端误提示「验证邮件已发送」。
    */
   async resendVerification(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, status: true, emailVerified: true, tokenVersion: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, status: true, emailVerified: true, tokenVersion: true },
+    });
     if (!user || user.status !== 'ACTIVE') throw unauthorized('账号不可用');
-    if (user.emailVerified) return { ok: true, message: '邮箱已验证，无需重发', alreadyVerified: true };
+    if (user.emailVerified)
+      return { ok: true, message: '邮箱已验证，无需重发', alreadyVerified: true };
     await this.sendVerificationEmail(userId, user.email);
     return { ok: true, message: '验证邮件已发送，请查收' };
   }
@@ -408,7 +556,13 @@ export class AuthService {
   private async sessionFor(userId: string, includeToken = true, preferredTeamId?: string | null) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { memberships: { where: { status: 'ACTIVE' }, include: { team: true }, orderBy: { joinedAt: 'desc' } } },
+      include: {
+        memberships: {
+          where: { status: 'ACTIVE' },
+          include: { team: true },
+          orderBy: { joinedAt: 'desc' },
+        },
+      },
     });
     // 修复 AUTH-01：/auth/me 与 /auth/refresh 共享此入口，必须校验 status，
     // 否则被禁用用户可凭旧 token 经 refresh 永久续命（login 已校验但 sessionFor 此前缺失）。
@@ -417,20 +571,38 @@ export class AuthService {
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
     });
-    const membership = preferredTeamId === undefined
-      ? user.memberships[0] || null
-      : user.memberships.find((candidate) => candidate.teamId === preferredTeamId && candidate.team.status === 'ACTIVE') || null;
+    const membership =
+      preferredTeamId === undefined
+        ? user.memberships[0] || null
+        : user.memberships.find(
+            (candidate) =>
+              candidate.teamId === preferredTeamId && candidate.team.status === 'ACTIVE'
+          ) || null;
     if (preferredTeamId && !membership) throw forbidden('当前团队会话已失效');
-    const teamContextVersion = Number.isInteger(user.teamContextVersion) ? user.teamContextVersion : 0;
+    const teamContextVersion = Number.isInteger(user.teamContextVersion)
+      ? user.teamContextVersion
+      : 0;
 
     // RBAC：解析当前用户的全部权限码，随 session 下发给前端做入口门控（替代旧枚举判定）。
     // 平台角色权限（User.platformRoleId）+ 团队角色权限（membership.teamRoleId，仅团队 ACTIVE 时）。
     const permissions = await this.resolveUserPermissions(user.platformRoleId, membership);
 
-    const onboarding: OnboardingState = this.resolveOnboarding(user.platformRole, membership?.role, application?.status, permissions);
+    const onboarding: OnboardingState = this.resolveOnboarding(
+      user.platformRole,
+      membership?.role,
+      application?.status,
+      permissions
+    );
     const payload = {
       token: includeToken
-        ? this.issueToken(user.id, user.email, user.platformRole, user.tokenVersion, membership?.teamId ?? null, teamContextVersion)
+        ? this.issueToken(
+            user.id,
+            user.email,
+            user.platformRole,
+            user.tokenVersion,
+            membership?.teamId ?? null,
+            teamContextVersion
+          )
         : undefined,
       user: {
         id: user.id,
@@ -443,16 +615,25 @@ export class AuthService {
         // 邮箱验证状态：null=未验证（前端提示去验证），非 null=已验证时间。
         emailVerified: user.emailVerified,
       },
-      team: membership ? {
-        id: membership.team.id,
-        name: membership.team.name,
-        slug: membership.team.slug,
-        role: membership.role,
-        teamRoleId: membership.teamRoleId,
-      } : null,
+      team: membership
+        ? {
+            id: membership.team.id,
+            name: membership.team.name,
+            slug: membership.team.slug,
+            role: membership.role,
+            teamRoleId: membership.teamRoleId,
+          }
+        : null,
       // RBAC：当前用户拥有的全部权限码（平台 + 团队），前端据此渲染入口与操作按钮。
       permissions,
-      application: application ? { id: application.id, status: application.status, teamName: application.teamName, reviewReason: application.reviewReason } : null,
+      application: application
+        ? {
+            id: application.id,
+            status: application.status,
+            teamName: application.teamName,
+            reviewReason: application.reviewReason,
+          }
+        : null,
       onboarding,
     };
     return payload;
@@ -463,11 +644,15 @@ export class AuthService {
    * 与 PermissionsGuard.resolvePermissions 同款逻辑，供 sessionFor 注入前端可读权限集。
    * 团队 SUSPENDED 时不解析团队权限（与 ensureCurrentTeam 拦截语义一致）。
    */
-  private async resolveUserPermissions(platformRoleId: string | null, membership: { teamRoleId: string | null; team: { status: string } } | null): Promise<string[]> {
+  private async resolveUserPermissions(
+    platformRoleId: string | null,
+    membership: { teamRoleId: string | null; team: { status: string } } | null
+  ): Promise<string[]> {
     const perms = new Set<string>();
     const roleIds: string[] = [];
     if (platformRoleId) roleIds.push(platformRoleId);
-    if (membership?.teamRoleId && membership.team.status === 'ACTIVE') roleIds.push(membership.teamRoleId);
+    if (membership?.teamRoleId && membership.team.status === 'ACTIVE')
+      roleIds.push(membership.teamRoleId);
     if (roleIds.length === 0) return [];
     const roles = await this.prisma.role.findMany({
       where: { id: { in: roleIds } },
@@ -477,10 +662,21 @@ export class AuthService {
     return [...perms];
   }
 
-  private resolveOnboarding(platformRole: string, teamRole: string | undefined, applicationStatus: string | undefined, permissions: string[] = []): OnboardingState {
+  private resolveOnboarding(
+    platformRole: string,
+    teamRole: string | undefined,
+    applicationStatus: string | undefined,
+    permissions: string[] = []
+  ): OnboardingState {
     if (platformRole === 'PLATFORM_ADMIN') return 'PLATFORM_ADMIN_WEB_ONLY';
     // RBAC：onboarding 基于实际权限而非旧枚举——有任意 team.* 管理权限视为团队管理员空间。
-    if (permissions.some((p) => p.startsWith('team.') && !['team.dashboard.view', 'team.plugin.list', 'team.balance.view'].includes(p))) {
+    if (
+      permissions.some(
+        (p) =>
+          p.startsWith('team.') &&
+          !['team.dashboard.view', 'team.plugin.list', 'team.balance.view'].includes(p)
+      )
+    ) {
       return 'TEAM_ADMIN_SPACE';
     }
     if (teamRole === 'TEAM_ADMIN') return 'TEAM_ADMIN_SPACE';
@@ -496,9 +692,11 @@ export class AuthService {
     platformRole: string,
     tokenVersion: number,
     teamId: string | null,
-    teamContextVersion: number,
+    teamContextVersion: number
   ) {
-    const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as SignOptions['expiresIn'] };
+    const options: SignOptions = {
+      expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as SignOptions['expiresIn'],
+    };
     // payload 携带 tokenVersion，JwtAuthGuard 校验时与库比对实现吊销（ADMIN-02/AUTH-01）。
     // 与 main.ts 启动断言 + security.ts 的 JwtAuthGuard 对齐：JWT_SECRET 缺失时直接抛错而非回退弱默认值
     // （XSEC-04 / AUTH-04）。生产环境由 main.ts fail-fast 兜底；开发环境 .env 必须配置合法密钥。
@@ -507,7 +705,7 @@ export class AuthService {
     return jwt.sign(
       { sub: userId, email, platformRole, tokenVersion, teamId, teamContextVersion },
       secret as Secret,
-      options,
+      options
     );
   }
 
@@ -524,7 +722,11 @@ export class AuthService {
     const options: SignOptions = { expiresIn: '15m' };
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET 未配置，无法签发重置 token');
-    return jwt.sign({ sub: userId, email, scope: 'pwd_reset', tokenVersion }, secret as Secret, options);
+    return jwt.sign(
+      { sub: userId, email, scope: 'pwd_reset', tokenVersion },
+      secret as Secret,
+      options
+    );
   }
 
   /**
@@ -538,11 +740,23 @@ export class AuthService {
     const options: SignOptions = { expiresIn: '24h' };
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET 未配置，无法签发验证 token');
-    return jwt.sign({ sub: userId, email, scope: 'email_verify', tokenVersion }, secret as Secret, options);
+    return jwt.sign(
+      { sub: userId, email, scope: 'email_verify', tokenVersion },
+      secret as Secret,
+      options
+    );
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 
   async ensureCurrentTeam(userId: string) {
@@ -643,5 +857,4 @@ export class AuthService {
 
     return perms;
   }
-
 }

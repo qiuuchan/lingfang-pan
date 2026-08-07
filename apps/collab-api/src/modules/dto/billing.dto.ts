@@ -2,7 +2,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Min,
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
 } from 'class-validator';
 
 const CHANNEL_PROTOCOL = ['OPENAI', 'ANTHROPIC'] as const;
@@ -10,7 +18,13 @@ const CHANNEL_KIND = ['CHAT', 'IMAGE'] as const;
 const CHANNEL_TIER = ['FAST', 'PREMIUM'] as const;
 const CHANNEL_STATUS = ['ENABLED', 'DISABLED'] as const;
 const POOL_SCOPE = ['SHARED', 'DEDICATED'] as const;
-const PRICING_UNIT = ['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE', 'PER_SECOND'] as const;
+const PRICING_UNIT = [
+  'PER_TOKEN_INPUT',
+  'PER_TOKEN_OUTPUT',
+  'PER_CALL',
+  'PER_IMAGE',
+  'PER_SECOND',
+] as const;
 const PRICING_CAPABILITY = ['chat', 'image', 'action', 'video', 'audio'] as const;
 const TIER = ['FAST', 'PREMIUM'] as const;
 const LEDGER_DIR = ['CREDIT', 'DEBIT'] as const;
@@ -21,7 +35,9 @@ export class PoolUpsertDto {
   @ApiProperty() @IsString() @IsNotEmpty() name!: string;
   @ApiProperty({ enum: POOL_SCOPE }) @IsEnum(POOL_SCOPE) scope!: 'SHARED' | 'DEDICATED';
   @ApiPropertyOptional({ description: 'DEDICATED 时必填（teamId）；SHARED 留空' })
-  @IsOptional() @IsString() teamId?: string;
+  @IsOptional()
+  @IsString()
+  teamId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
 }
 
@@ -36,29 +52,44 @@ export class ChannelUpsertDto {
   @ApiProperty() @IsString() @IsNotEmpty() name!: string;
   @ApiProperty({ enum: CHANNEL_KIND }) @IsEnum(CHANNEL_KIND) kind!: 'CHAT' | 'IMAGE';
   @ApiProperty({ enum: CHANNEL_TIER }) @IsEnum(CHANNEL_TIER) tier!: 'FAST' | 'PREMIUM';
-  @ApiProperty({ enum: CHANNEL_PROTOCOL }) @IsEnum(CHANNEL_PROTOCOL) protocol!: 'OPENAI' | 'ANTHROPIC';
+  @ApiProperty({ enum: CHANNEL_PROTOCOL }) @IsEnum(CHANNEL_PROTOCOL) protocol!:
+    'OPENAI' | 'ANTHROPIC';
   @ApiProperty() @IsString() @IsNotEmpty() provider!: string;
   @ApiProperty() @IsString() @IsNotEmpty() poolId!: string;
   @ApiProperty() @IsString() @IsNotEmpty() baseUrl!: string;
   @ApiProperty({ description: '上游 API Key 明文（创建必填；更新时省略=保留原密）' })
-  @IsOptional() @IsString() upstreamKey?: string;
+  @IsOptional()
+  @IsString()
+  upstreamKey?: string;
   @ApiPropertyOptional({ type: [String], description: '该渠道可调用的多个上游模型，轮询调用' })
-  @IsOptional() @IsArray() @IsString({ each: true }) models?: string[];
-  @ApiPropertyOptional({ enum: CHANNEL_STATUS }) @IsOptional() @IsEnum(CHANNEL_STATUS) status?: 'ENABLED' | 'DISABLED';
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  models?: string[];
+  @ApiPropertyOptional({ enum: CHANNEL_STATUS }) @IsOptional() @IsEnum(CHANNEL_STATUS) status?:
+    'ENABLED' | 'DISABLED';
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
 }
 
 // === 定价（单位：PER_TOKEN_* = 每 1M token；PER_CALL 每次；PER_IMAGE 每张）===
 
 export class PricingUpsertDto {
-  @ApiProperty({ enum: PRICING_CAPABILITY }) @IsEnum(PRICING_CAPABILITY) capability!: 'chat' | 'image' | 'action' | 'video' | 'audio';
+  @ApiProperty({ enum: PRICING_CAPABILITY }) @IsEnum(PRICING_CAPABILITY) capability!:
+    'chat' | 'image' | 'action' | 'video' | 'audio';
   @ApiProperty() @IsString() @IsNotEmpty() model!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() label?: string;
   @ApiProperty({ enum: PRICING_UNIT }) @IsEnum(PRICING_UNIT) unit!: string;
   @ApiProperty({ description: '单价（灵石）；PER_TOKEN_* 时为每 1M token 灵石数，支持小数' })
-  @Type(() => Number) @IsNumber() @Min(0) pricePerUnit!: number;
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  pricePerUnit!: number;
   @ApiPropertyOptional({ description: '该模型最大上下文窗口（token）' })
-  @IsOptional() @Type(() => Number) @IsInt() @Min(0) contextWindow?: number;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  contextWindow?: number;
   @ApiPropertyOptional({ enum: TIER }) @IsOptional() @IsEnum(TIER) tier?: 'FAST' | 'PREMIUM';
   @ApiPropertyOptional() @IsOptional() @IsBoolean() enabled?: boolean;
 }

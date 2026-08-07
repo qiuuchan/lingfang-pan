@@ -64,18 +64,19 @@ function hostMatchesDomain(host: string, domain: string): boolean {
  */
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
-  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return false;
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255))
+    return false;
   const [a, b] = parts;
   return (
-    a === 0 ||                            // 0.0.0.0/8 本网络
-    a === 10 ||                           // 10.0.0.0/8 私有
-    a === 127 ||                          // 127.0.0.0/8 回环
-    (a === 172 && b >= 16 && b <= 31) ||   // 172.16.0.0/12 私有
-    (a === 192 && b === 168) ||            // 192.168.0.0/16 私有
-    (a === 169 && b === 254) ||            // 169.254.0.0/16 链路本地（含云元数据 169.254.169.254）
-    (a === 100 && b >= 64 && b <= 127) ||  // 100.64.0.0/10 运营商级 NAT
+    a === 0 || // 0.0.0.0/8 本网络
+    a === 10 || // 10.0.0.0/8 私有
+    a === 127 || // 127.0.0.0/8 回环
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12 私有
+    (a === 192 && b === 168) || // 192.168.0.0/16 私有
+    (a === 169 && b === 254) || // 169.254.0.0/16 链路本地（含云元数据 169.254.169.254）
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 运营商级 NAT
     (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmark
-    a >= 224                              // 224.0.0.0/4 组播 + 240.0.0.0/4 保留
+    a >= 224 // 224.0.0.0/4 组播 + 240.0.0.0/4 保留
   );
 }
 
@@ -85,9 +86,15 @@ function isPrivateIPv4(ip: string): boolean {
  */
 function isPrivateIPv6(ip: string): boolean {
   const lower = ip.toLowerCase();
-  if (lower === '::1' || lower === '::') return true;            // 回环 / 未指定
+  if (lower === '::1' || lower === '::') return true; // 回环 / 未指定
   if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // fc00::/7 唯一本地
-  if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true; // fe80::/10 链路本地
+  if (
+    lower.startsWith('fe8') ||
+    lower.startsWith('fe9') ||
+    lower.startsWith('fea') ||
+    lower.startsWith('feb')
+  )
+    return true; // fe80::/10 链路本地
   // IPv4 映射地址 ::ffff:a.b.c.d —— 但 Node URL 会把 http://[::ffff:127.0.0.1]/ 规范化为
   // 十六进制压缩形式（如 ::ffff:7f00:1），点分十进制正则匹配不到 → 绕过。
   // 用 node:net.isIP 判定后，对 IPv6 尝试用 dns/promises 反查不现实，改用：把 IPv6 的最后
@@ -200,11 +207,15 @@ export class SearchService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AppCacheService) private readonly cache: AppCacheService,
+    @Inject(AppCacheService) private readonly cache: AppCacheService
   ) {}
 
   /** 读取搜索相关 PlatformSetting（searxngUrl / tavilyApiKey / braveApiKey）。 */
-  private async loadSettings(): Promise<{ searxngUrl: string; tavilyApiKey: string; braveApiKey: string }> {
+  private async loadSettings(): Promise<{
+    searxngUrl: string;
+    tavilyApiKey: string;
+    braveApiKey: string;
+  }> {
     const rows = await this.prisma.platformSetting.findMany({
       where: { key: { in: ['searxngUrl', 'tavilyApiKey', 'braveApiKey'] } },
       select: { key: true, value: true },
@@ -222,12 +233,15 @@ export class SearchService {
     const cfg = await this.loadSettings();
     const providers: SearchProvider[] = [];
     // 自建 SearXNG（管理员配置）优先。
-    if (/^https?:\/\//i.test(cfg.searxngUrl)) providers.push(new SearxngProvider(cfg.searxngUrl, 'self'));
+    if (/^https?:\/\//i.test(cfg.searxngUrl))
+      providers.push(new SearxngProvider(cfg.searxngUrl, 'self'));
     // 带密钥源（管理员可选）。
     if (cfg.tavilyApiKey) providers.push(new TavilyProvider(cfg.tavilyApiKey));
     if (cfg.braveApiKey) providers.push(new BraveProvider(cfg.braveApiKey));
     // 公共 SearXNG 兜底（免密钥，恒注入；不可达者由健康探测跳过）。
-    PUBLIC_SEARXNG_INSTANCES.forEach((url, i) => providers.push(new SearxngProvider(url, `pub${i}`)));
+    PUBLIC_SEARXNG_INSTANCES.forEach((url, i) =>
+      providers.push(new SearxngProvider(url, `pub${i}`))
+    );
     // Bing HTML 兜底（免密钥、免实例、免管理员配置，大陆可达性最佳）：
     // 作为最低优先级恒注入。即便所有 SearXNG 实例都被墙，也能保证 WebSearch 有结果。
     providers.push(new BingHtmlProvider());
@@ -240,7 +254,9 @@ export class SearchService {
   }
 
   private async markUnhealthy(name: string): Promise<void> {
-    await this.cache.set(HEALTH_KEY_PREFIX + name, '1', HEALTH_DISABLE_TTL_MS).catch(() => undefined);
+    await this.cache
+      .set(HEALTH_KEY_PREFIX + name, '1', HEALTH_DISABLE_TTL_MS)
+      .catch(() => undefined);
   }
 
   /**
@@ -251,8 +267,12 @@ export class SearchService {
   async search(rawQuery: string, rawLimit?: number): Promise<SearchResponse> {
     const query = (rawQuery ?? '').trim();
     if (!query) throw badRequest('搜索关键词不能为空');
-    if (query.length > MAX_QUERY_LEN) throw badRequest(`搜索关键词过长（上限 ${MAX_QUERY_LEN} 字符）`);
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? Number(rawLimit) : DEFAULT_LIMIT, 1), MAX_LIMIT);
+    if (query.length > MAX_QUERY_LEN)
+      throw badRequest(`搜索关键词过长（上限 ${MAX_QUERY_LEN} 字符）`);
+    const limit = Math.min(
+      Math.max(Number.isFinite(rawLimit) ? Number(rawLimit) : DEFAULT_LIMIT, 1),
+      MAX_LIMIT
+    );
 
     // 结果缓存命中直接返回。
     const cacheKey = `${RESULT_KEY_PREFIX}${limit}:${query}`;
@@ -278,13 +298,15 @@ export class SearchService {
     // 过滤掉近期不健康（被墙/超时）的源。
     const healthy: SearchProvider[] = [];
     for (const p of providers) {
-      if (await this.isUnhealthy(p.name)) sourcesSkipped.push({ source: p.name, reason: '近期不可达，已临时禁用' });
+      if (await this.isUnhealthy(p.name))
+        sourcesSkipped.push({ source: p.name, reason: '近期不可达，已临时禁用' });
       else healthy.push(p);
     }
 
     if (healthy.length === 0) {
       // 全部源近期被标记不可达：清一次健康缓存并强制重试本批（避免缓存把所有源永久挡死）。
-      for (const p of providers) await this.cache.delete(HEALTH_KEY_PREFIX + p.name).catch(() => undefined);
+      for (const p of providers)
+        await this.cache.delete(HEALTH_KEY_PREFIX + p.name).catch(() => undefined);
       healthy.push(...providers);
     }
 
@@ -294,7 +316,7 @@ export class SearchService {
       healthy.map(async (p) => {
         const items = await p.search(searchQuery, limit, controller.signal);
         return { name: p.name, items };
-      }),
+      })
     );
 
     const merged: SearchResultItem[] = [];
@@ -305,7 +327,8 @@ export class SearchService {
         sourcesUsed.push(outcome.value.name);
         merged.push(...outcome.value.items);
       } else {
-        const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+        const reason =
+          outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
         sourcesSkipped.push({ source: provider.name, reason: `查询失败：${reason}` });
         await this.markUnhealthy(provider.name);
       }
@@ -313,25 +336,39 @@ export class SearchService {
 
     // 若指定了 site:<domain>（非 github，github 已走原生源），按域名后过滤结果，
     // 确保只返回该域名的条目（搜索引擎的 site: 操作符不可靠，这里做权威过滤）。
-    const filtered = scopedDomain && scopedDomain !== 'github.com'
-      ? merged.filter((r) => {
-          try { return hostMatchesDomain(new URL(r.url).hostname, scopedDomain); }
-          catch { return false; }
-        })
-      : merged;
+    const filtered =
+      scopedDomain && scopedDomain !== 'github.com'
+        ? merged.filter((r) => {
+            try {
+              return hostMatchesDomain(new URL(r.url).hostname, scopedDomain);
+            } catch {
+              return false;
+            }
+          })
+        : merged;
     const results = dedupeByUrl(filtered).slice(0, MAX_LIMIT);
     // allSourcesFailed：没有任何源成功（sourcesUsed 为空）。即便空结果也应区分：
     //  - 有源成功但确实无匹配（allSourcesFailed=false，真无结果）
     //  - 全部源失败（allSourcesFailed=true，应作为错误暴露给用户/模型，而非静默「无结果」）
     const allSourcesFailed = sourcesUsed.length === 0;
-    const response: SearchResponse = { query, results, sourcesUsed, sourcesSkipped, allSourcesFailed };
+    const response: SearchResponse = {
+      query,
+      results,
+      sourcesUsed,
+      sourcesSkipped,
+      allSourcesFailed,
+    };
 
     // 仅当确有结果时缓存（空结果可能是临时全源故障，不缓存以便下次重试）。
     if (results.length > 0) {
-      await this.cache.set(cacheKey, JSON.stringify(response), RESULT_CACHE_TTL_MS).catch(() => undefined);
+      await this.cache
+        .set(cacheKey, JSON.stringify(response), RESULT_CACHE_TTL_MS)
+        .catch(() => undefined);
     }
     if (allSourcesFailed) {
-      this.logger.warn(`搜索「${query}」全部源不可用：${sourcesSkipped.map((s) => s.source).join(', ')}`);
+      this.logger.warn(
+        `搜索「${query}」全部源不可用：${sourcesSkipped.map((s) => s.source).join(', ')}`
+      );
     }
     return response;
   }
@@ -350,7 +387,10 @@ export class SearchService {
    *
    * @returns { url, content, truncated, fetchedVia } fetchedVia 标识实际抓取路径（jina/direct/fail）
    */
-  async fetchPage(url: string, maxLength = 6_000): Promise<{
+  async fetchPage(
+    url: string,
+    maxLength = 6_000
+  ): Promise<{
     url: string;
     content: string;
     truncated: boolean;
@@ -394,12 +434,19 @@ export class SearchService {
       const res = await fetch(url, {
         headers: {
           Accept: 'text/html,application/xhtml+xml',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         },
         signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) {
-        return { url, content: '', truncated: false, fetchedVia: 'fail', error: `目标网页返回 ${res.status}` };
+        return {
+          url,
+          content: '',
+          truncated: false,
+          fetchedVia: 'fail',
+          error: `目标网页返回 ${res.status}`,
+        };
       }
       const html = await res.text();
       // 去掉 script/style/nav/header/footer，再去标签，压空白。粗抽取，无正文识别。
@@ -411,14 +458,31 @@ export class SearchService {
         .replace(/<footer[\s\S]*?<\/footer>/gi, '')
         .replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;|&ensp;|&emsp;/g, ' ')
-        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
         .replace(/\s+/g, ' ')
         .trim();
-      if (!text) return { url, content: '', truncated: false, fetchedVia: 'fail', error: '抓取到的正文为空（可能是 JS 渲染页）' };
+      if (!text)
+        return {
+          url,
+          content: '',
+          truncated: false,
+          fetchedVia: 'fail',
+          error: '抓取到的正文为空（可能是 JS 渲染页）',
+        };
       const truncated = text.length > limit;
       return { url, content: text.slice(0, limit), truncated, fetchedVia: 'direct' };
     } catch (e) {
-      return { url, content: '', truncated: false, fetchedVia: 'fail', error: `抓取失败：${(e as Error).message}` };
+      return {
+        url,
+        content: '',
+        truncated: false,
+        fetchedVia: 'fail',
+        error: `抓取失败：${(e as Error).message}`,
+      };
     }
   }
 }
@@ -441,7 +505,9 @@ export function normalizeUrl(raw: string): string {
   try {
     const u = new URL(raw);
     u.hash = '';
-    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'spm'].forEach((p) => u.searchParams.delete(p));
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'spm'].forEach((p) =>
+      u.searchParams.delete(p)
+    );
     const host = u.host.toLowerCase();
     const path = u.pathname.replace(/\/+$/, '');
     const search = u.searchParams.toString();

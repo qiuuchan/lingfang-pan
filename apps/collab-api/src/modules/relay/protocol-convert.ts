@@ -34,7 +34,11 @@ function contentToText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content
-      .map((part) => (part && typeof part === 'object' && 'text' in part ? String((part as { text: unknown }).text ?? '') : ''))
+      .map((part) =>
+        part && typeof part === 'object' && 'text' in part
+          ? String((part as { text: unknown }).text ?? '')
+          : ''
+      )
       .join('');
   }
   return content == null ? '' : String(content);
@@ -76,7 +80,11 @@ export function openAiToAnthropicRequest(body: Record<string, unknown>): Record<
         if (text.trim()) blocks.push({ type: 'text', text });
         for (const tc of m.tool_calls) {
           let input: unknown = {};
-          try { input = tc.function.arguments ? JSON.parse(tc.function.arguments) : {}; } catch { input = {}; }
+          try {
+            input = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+          } catch {
+            input = {};
+          }
           blocks.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input });
         }
         messages.push({ role: 'assistant', content: blocks });
@@ -128,10 +136,14 @@ export function openAiToAnthropicRequest(body: Record<string, unknown>): Record<
 function mapFinishReason(stop: string | null | undefined): string {
   switch (stop) {
     case 'end_turn':
-    case 'stop_sequence': return 'stop';
-    case 'max_tokens': return 'length';
-    case 'tool_use': return 'tool_calls';
-    default: return 'stop';
+    case 'stop_sequence':
+      return 'stop';
+    case 'max_tokens':
+      return 'length';
+    case 'tool_use':
+      return 'tool_calls';
+    default:
+      return 'stop';
   }
 }
 
@@ -144,10 +156,17 @@ interface AnthropicResponse {
 }
 
 /** Anthropic 非流式响应 → OpenAI chat.completion JSON。 */
-export function anthropicToOpenAiResponse(data: AnthropicResponse, createdSec: number): Record<string, unknown> {
+export function anthropicToOpenAiResponse(
+  data: AnthropicResponse,
+  createdSec: number
+): Record<string, unknown> {
   const blocks = data.content ?? [];
   const textParts: string[] = [];
-  const toolCalls: { id: string; type: 'function'; function: { name: string; arguments: string } }[] = [];
+  const toolCalls: {
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }[] = [];
   for (const b of blocks) {
     if (b.type === 'text' && b.text) textParts.push(b.text);
     else if (b.type === 'tool_use') {
@@ -158,7 +177,10 @@ export function anthropicToOpenAiResponse(data: AnthropicResponse, createdSec: n
       });
     }
   }
-  const message: Record<string, unknown> = { role: 'assistant', content: textParts.join('') || null };
+  const message: Record<string, unknown> = {
+    role: 'assistant',
+    content: textParts.join('') || null,
+  };
   if (toolCalls.length) message.tool_calls = toolCalls;
   const inTok = data.usage?.input_tokens ?? 0;
   const outTok = data.usage?.output_tokens ?? 0;
@@ -185,7 +207,9 @@ export class AnthropicStreamToOpenAi {
   private nextToolIndex = 0;
   private finishReason = 'stop';
 
-  constructor(createdSec: number) { this.created = createdSec; }
+  constructor(createdSec: number) {
+    this.created = createdSec;
+  }
 
   /** 解析一个完整 SSE 事件块（含 event:/data: 行），返回要下发的 OpenAI chunk 数组。 */
   consume(rawEvent: string): Record<string, unknown>[] {
@@ -196,7 +220,11 @@ export class AnthropicStreamToOpenAi {
     }
     if (!dataLine || dataLine === '[DONE]') return [];
     let obj: Record<string, unknown>;
-    try { obj = JSON.parse(dataLine) as Record<string, unknown>; } catch { return []; }
+    try {
+      obj = JSON.parse(dataLine) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
     const type = obj.type as string | undefined;
     const out: Record<string, unknown>[] = [];
 
@@ -217,23 +245,41 @@ export class AnthropicStreamToOpenAi {
       if (cb?.type === 'tool_use') {
         const toolIdx = this.nextToolIndex++;
         this.toolIndexByBlock.set(idx, toolIdx);
-        out.push(this.chunk({
-          tool_calls: [{ index: toolIdx, id: cb.id ?? '', type: 'function', function: { name: cb.name ?? '', arguments: '' } }],
-        }, null));
+        out.push(
+          this.chunk(
+            {
+              tool_calls: [
+                {
+                  index: toolIdx,
+                  id: cb.id ?? '',
+                  type: 'function',
+                  function: { name: cb.name ?? '', arguments: '' },
+                },
+              ],
+            },
+            null
+          )
+        );
       }
       return out;
     }
 
     if (type === 'content_block_delta') {
       const idx = obj.index as number;
-      const delta = obj.delta as { type?: string; text?: string; partial_json?: string } | undefined;
+      const delta = obj.delta as
+        { type?: string; text?: string; partial_json?: string } | undefined;
       if (delta?.type === 'text_delta' && delta.text) {
         out.push(this.chunk({ content: delta.text }, null));
       } else if (delta?.type === 'input_json_delta' && delta.partial_json != null) {
         const toolIdx = this.toolIndexByBlock.get(idx) ?? 0;
-        out.push(this.chunk({
-          tool_calls: [{ index: toolIdx, function: { arguments: delta.partial_json } }],
-        }, null));
+        out.push(
+          this.chunk(
+            {
+              tool_calls: [{ index: toolIdx, function: { arguments: delta.partial_json } }],
+            },
+            null
+          )
+        );
       }
       return out;
     }
@@ -253,7 +299,10 @@ export class AnthropicStreamToOpenAi {
   }
 
   /** 构造一个 OpenAI chat.completion.chunk。 */
-  private chunk(delta: Record<string, unknown>, finishReason: string | null): Record<string, unknown> {
+  private chunk(
+    delta: Record<string, unknown>,
+    finishReason: string | null
+  ): Record<string, unknown> {
     return {
       id: this.id,
       object: 'chat.completion.chunk',

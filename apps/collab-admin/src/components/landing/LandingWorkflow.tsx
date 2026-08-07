@@ -7,7 +7,8 @@ const STEPS = [
   {
     id: 'describe',
     label: '描述需求',
-    description: '用日常语言告诉 AI 你想要什么："帮我做一个团队周报汇总插件"，就像和同事交代任务一样简单。',
+    description:
+      '用日常语言告诉 AI 你想要什么："帮我做一个团队周报汇总插件"，就像和同事交代任务一样简单。',
     Icon: MessageSquare,
   },
   {
@@ -37,7 +38,10 @@ export function LandingWorkflow() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="max-w-2xl">
           <span className="lf-section-label">workflow</span>
-          <h2 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
+          <h2
+            className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight"
+            style={{ color: 'var(--lf-fg)' }}
+          >
             三步，把一句话变成能力
           </h2>
           <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
@@ -52,7 +56,10 @@ export function LandingWorkflow() {
                 <div className="flex items-start gap-4">
                   <div
                     className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-                    style={{ backgroundColor: 'rgba(199, 62, 29, 0.08)', color: 'var(--lf-accent)' }}
+                    style={{
+                      backgroundColor: 'rgba(199, 62, 29, 0.08)',
+                      color: 'var(--lf-accent)',
+                    }}
                   >
                     <step.Icon size={24} strokeWidth={1.6} />
                   </div>
@@ -62,10 +69,16 @@ export function LandingWorkflow() {
                         step {index + 1}
                       </span>
                     </div>
-                    <h3 className="lf-display mt-1 text-lg font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
+                    <h3
+                      className="lf-display mt-1 text-lg font-semibold tracking-tight"
+                      style={{ color: 'var(--lf-fg)' }}
+                    >
                       {step.label}
                     </h3>
-                    <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--lf-fg-muted)' }}>
+                    <p
+                      className="mt-2 text-sm leading-relaxed"
+                      style={{ color: 'var(--lf-fg-muted)' }}
+                    >
                       {step.description}
                     </p>
                   </div>

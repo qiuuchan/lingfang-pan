@@ -91,10 +91,7 @@ function base64urlEncode(text: string): string {
  * @param out           可选自定义输出路径（透传给 build）
  * @returns             生成的 .lfplugin 绝对路径；失败返回 null
  */
-async function runBuild(
-  workspacePath: string,
-  out?: string,
-): Promise<string | null> {
+async function runBuild(workspacePath: string, out?: string): Promise<string | null> {
   let explicitOut = out;
 
   // 若调用方未指定 out，则按 archive.ts 的命名规则推导并写到临时目录。
@@ -160,10 +157,7 @@ async function deriveSuggestedFilename(workspacePath: string): Promise<string | 
  * @param opts  选项（来自 CLI --flags 或代码调用）
  * @returns     退出码（0 = 成功，1 = 失败）
  */
-export async function publishCommand(
-  argv: string[],
-  opts?: PublishOptions,
-): Promise<number> {
+export async function publishCommand(argv: string[], opts?: PublishOptions): Promise<number> {
   // ── 1. 解析配置 ──────────────────────────────────────────────────
   const resolvedPath = opts?.path ?? (argv.length > 0 ? argv[0] : process.cwd());
 
@@ -184,10 +178,7 @@ export async function publishCommand(
   let artifactPath: string;
 
   // 情况 A：路径以 .lfplugin 结尾且文件存在 → 直接使用
-  if (
-    resolvedPath.endsWith('.lfplugin') &&
-    (await pathExists(resolvedPath))
-  ) {
+  if (resolvedPath.endsWith('.lfplugin') && (await pathExists(resolvedPath))) {
     artifactPath = path.resolve(resolvedPath);
     log.info(`使用已有制品：${artifactPath}`);
   }
@@ -195,7 +186,7 @@ export async function publishCommand(
   else if (await isWorkspace(resolvedPath)) {
     if (opts?.build === false) {
       log.error(
-        '当前为工作区目录，未找到 .lfplugin 制品。请先运行 lingfang-plugin build，或去掉 --no-build 选项让 publish 自动构建。',
+        '当前为工作区目录，未找到 .lfplugin 制品。请先运行 lingfang-plugin build，或去掉 --no-build 选项让 publish 自动构建。'
       );
       return 1;
     }
@@ -209,12 +200,10 @@ export async function publishCommand(
     if (await pathExists(resolvedPath)) {
       if ((await stat(resolvedPath)).isDirectory()) {
         log.error(
-          `目录 "${resolvedPath}" 不像插件工作区（缺少 manifest.json），请确认路径是否正确。`,
+          `目录 "${resolvedPath}" 不像插件工作区（缺少 manifest.json），请确认路径是否正确。`
         );
       } else {
-        log.error(
-          `文件 "${resolvedPath}" 不是 .lfplugin 插件制品。`,
-        );
+        log.error(`文件 "${resolvedPath}" 不是 .lfplugin 插件制品。`);
       }
     } else {
       log.error(`路径 "${resolvedPath}" 不存在。`);
@@ -237,7 +226,7 @@ export async function publishCommand(
 
   // ── 4. 构建请求 ──────────────────────────────────────────────────
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${token}`,
+    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/octet-stream',
   };
 
@@ -320,7 +309,9 @@ export async function publishCommand(
   if (response.status === 401) {
     log.info('提示：token 可能已过期，请重新登录获取新 token。');
   } else if (response.status === 403) {
-    log.info('提示：当前团队没有上传插件的权限（需要 team.plugin.upload 或 team.plugin.edit_draft 权限）。');
+    log.info(
+      '提示：当前团队没有上传插件的权限（需要 team.plugin.upload 或 team.plugin.edit_draft 权限）。'
+    );
   } else if (response.status === 413) {
     log.info('提示：插件制品过大（上限 300 MiB）。');
   } else if (response.status === 409) {

@@ -82,7 +82,9 @@ async function seedPermissionGroups() {
       },
     });
   }
-  console.log(`权限分组 seed：${BUILTIN_PERMISSION_GROUPS.length} 条内置分组已同步到 PermissionGroup。`);
+  console.log(
+    `权限分组 seed：${BUILTIN_PERMISSION_GROUPS.length} 条内置分组已同步到 PermissionGroup。`
+  );
 }
 
 async function seedPlatformAdminRole() {
@@ -180,8 +182,8 @@ async function migrateLegacyPermissionCodes() {
 
   await prisma.$transaction(
     updates.map((u) =>
-      prisma.role.update({ where: { id: u.id }, data: { permissions: u.permissions } }),
-    ),
+      prisma.role.update({ where: { id: u.id }, data: { permissions: u.permissions } })
+    )
   );
   console.log(`权限码迁移：${updates.length} 个角色的旧权限码已扩张为新码集合。`);
 }
@@ -214,9 +216,16 @@ async function assertNoLegacyPermissionCodes() {
   const roles = await prisma.role.findMany({ select: { id: true, name: true, permissions: true } });
   const offenders = roles
     .filter((r) => (r.permissions ?? []).some((c) => LEGACY_PERMISSION_CODES.has(c)))
-    .map((r) => ({ id: r.id, name: r.name, legacy: (r.permissions ?? []).filter((c) => LEGACY_PERMISSION_CODES.has(c)) }));
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      legacy: (r.permissions ?? []).filter((c) => LEGACY_PERMISSION_CODES.has(c)),
+    }));
   if (offenders.length > 0) {
-    console.warn(`[RBAC 迁移后断言 WARN] 仍有 ${offenders.length} 个角色含旧码：`, JSON.stringify(offenders));
+    console.warn(
+      `[RBAC 迁移后断言 WARN] 仍有 ${offenders.length} 个角色含旧码：`,
+      JSON.stringify(offenders)
+    );
   } else {
     console.log('权限码迁移后断言：全部角色已无旧码残留（0 stale）。');
   }

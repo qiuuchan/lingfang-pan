@@ -29,7 +29,14 @@ import {
 import { useApp } from '@/App';
 import { isTeamManager } from '@/lib/permissions';
 import { useUnreadCount } from '@/components/NotificationCenter';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -43,7 +50,14 @@ export function AvatarMenu({
   /** 侧栏折叠态：决定弹出层 left 定位（折叠态贴窄轨道）。 */
   collapsed: boolean;
 }) {
-  const { session, resetSession, openAccountSettings, openNotifications, openTeamAdmin, openHelpFeedback } = useApp();
+  const {
+    session,
+    resetSession,
+    openAccountSettings,
+    openNotifications,
+    openTeamAdmin,
+    openHelpFeedback,
+  } = useApp();
   const { theme, setTheme } = useTheme();
   // 项 11：退出登录确认弹窗。
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -81,7 +95,9 @@ export function AvatarMenu({
   const avatarChar = (session.displayName?.charAt(0) || '?').toUpperCase();
   // 团队管理 / 开发者入口同门控（团队管理员可见，与 v4 语义一致）。
   const canManageTeam = isTeamManager(session.permissions);
-  const tenantLabel = session.tenantName || (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
+  const tenantLabel =
+    session.tenantName ||
+    (session.tenantId ? `团队 ${session.tenantId.slice(0, 8)}…` : '未加入团队');
   const roleLabel = session.role === 'TEAM_ADMIN' ? '管理员' : session.role ? '成员' : '已登录';
 
   type Item = {
@@ -95,22 +111,86 @@ export function AvatarMenu({
 
   // 上半部分菜单（个人资料 / 通知 / 团队钱包 / 插件 / 团队管理 / 开发者 / 其他设置）。
   const items: Item[] = [
-    { key: 'profile', label: '个人资料', icon: UserRoundIcon, visible: true, onClick: () => { openAccountSettings('account'); onClose(); } },
+    {
+      key: 'profile',
+      label: '个人资料',
+      icon: UserRoundIcon,
+      visible: true,
+      onClick: () => {
+        openAccountSettings('account');
+        onClose();
+      },
+    },
     // 项 1：通知中心改为 App 顶层独立悬浮窗（openNotifications），不再嵌套本菜单内。
-    { key: 'notif', label: '通知中心', icon: BellIcon, visible: true, badge: unread, onClick: () => { openNotifications(); onClose(); } },
+    {
+      key: 'notif',
+      label: '通知中心',
+      icon: BellIcon,
+      visible: true,
+      badge: unread,
+      onClick: () => {
+        openNotifications();
+        onClose();
+      },
+    },
     // 06-24：原「钱包」+「团队空间」两项合并为「团队钱包」（团队共享余额 + 灵石）。
-    { key: 'team-wallet', label: '团队钱包', icon: WalletIcon, visible: true, onClick: () => { openAccountSettings('team-wallet'); onClose(); } },
+    {
+      key: 'team-wallet',
+      label: '团队钱包',
+      icon: WalletIcon,
+      visible: true,
+      onClick: () => {
+        openAccountSettings('team-wallet');
+        onClose();
+      },
+    },
     // 项 5：团队管理改为居中悬浮窗（openTeamAdmin），不再走主区页面导航。
-    { key: 'team-admin', label: '团队管理', icon: UsersIcon, visible: canManageTeam, onClick: () => { openTeamAdmin(); onClose(); } },
+    {
+      key: 'team-admin',
+      label: '团队管理',
+      icon: UsersIcon,
+      visible: canManageTeam,
+      onClick: () => {
+        openTeamAdmin();
+        onClose();
+      },
+    },
     // 开发插件入口在标题栏模式切换与插件工作台内，不在此菜单重复放置。
     // 项 8：「LLM 设置」改为「其他设置」，点击进设置页第一个 tab（general）。
-    { key: 'other-settings', label: '其他设置', icon: CpuIcon, visible: true, onClick: () => { openAccountSettings('settings', 'general'); onClose(); } },
+    {
+      key: 'other-settings',
+      label: '其他设置',
+      icon: CpuIcon,
+      visible: true,
+      onClick: () => {
+        openAccountSettings('settings', 'general');
+        onClose();
+      },
+    },
   ];
 
   // 下半部分菜单（帮助 / 关于）。项 9/10：「设置与快捷键」「本地权限与安全」已删除（统一并入「其他设置」）。
   const bottomItems: Item[] = [
-    { key: 'help', label: '帮助与反馈', icon: HelpCircleIcon, visible: true, onClick: () => { openHelpFeedback(); onClose(); } },
-    { key: 'about', label: '关于', icon: InfoIcon, visible: true, onClick: () => { openAccountSettings('settings', 'about'); onClose(); } },
+    {
+      key: 'help',
+      label: '帮助与反馈',
+      icon: HelpCircleIcon,
+      visible: true,
+      onClick: () => {
+        openHelpFeedback();
+        onClose();
+      },
+    },
+    {
+      key: 'about',
+      label: '关于',
+      icon: InfoIcon,
+      visible: true,
+      onClick: () => {
+        openAccountSettings('settings', 'about');
+        onClose();
+      },
+    },
   ];
 
   const themeOpts: { value: string; label: string; icon: typeof SunIcon }[] = [
@@ -132,7 +212,7 @@ export function AvatarMenu({
             ref={menuRef}
             className={cn(
               'fixed bottom-14 z-50 w-72 overflow-hidden rounded-xl border bg-card shadow-2xl',
-              collapsed ? 'left-3' : 'left-2',
+              collapsed ? 'left-3' : 'left-2'
             )}
             role="menu"
             aria-orientation="vertical"
@@ -141,78 +221,95 @@ export function AvatarMenu({
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
             transition={{ duration: MOTION.menu, ease: 'easeOut' }}
           >
-        {/* 头部：头像 + 显示名 + 租户 + 角色 */}
-        <div className="flex items-center gap-3 border-b p-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-            {avatarChar}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-foreground">
-              {session.displayName || '未登录'}
+            {/* 头部：头像 + 显示名 + 租户 + 角色 */}
+            <div className="flex items-center gap-3 border-b p-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                {avatarChar}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-foreground">
+                  {session.displayName || '未登录'}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {tenantLabel} · {roleLabel}
+                </div>
+              </div>
             </div>
-            <div className="truncate text-xs text-muted-foreground">
-              {tenantLabel} · {roleLabel}
+
+            {/* 上半部分菜单 */}
+            <div className="p-1.5">
+              {items
+                .filter((i) => i.visible)
+                .map((item) => (
+                  <MenuRow
+                    key={item.key}
+                    icon={item.icon}
+                    label={item.label}
+                    badge={item.badge}
+                    onClick={item.onClick}
+                  />
+                ))}
             </div>
-          </div>
-        </div>
 
-        {/* 上半部分菜单 */}
-        <div className="p-1.5">
-          {items.filter((i) => i.visible).map((item) => (
-            <MenuRow key={item.key} icon={item.icon} label={item.label} badge={item.badge} onClick={item.onClick} />
-          ))}
-        </div>
+            <div className="h-px bg-border" />
 
-        <div className="h-px bg-border" />
+            {/* 外观主题 */}
+            <div className="p-1.5">
+              <div className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+                外观主题
+              </div>
+              <div className="flex gap-1 px-1.5 pb-1">
+                {themeOpts.map((opt) => {
+                  const active = theme === opt.value;
+                  const OptIcon = opt.icon;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTheme(opt.value)}
+                      className={cn(
+                        'flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-1.5 py-1.5 text-xs transition-colors',
+                        active
+                          ? 'border-transparent bg-primary text-primary-foreground'
+                          : 'border-border text-muted-foreground hover:bg-muted'
+                      )}
+                    >
+                      <OptIcon className="size-3.5 shrink-0" />
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-        {/* 外观主题 */}
-        <div className="p-1.5">
-          <div className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">外观主题</div>
-          <div className="flex gap-1 px-1.5 pb-1">
-            {themeOpts.map((opt) => {
-              const active = theme === opt.value;
-              const OptIcon = opt.icon;
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => setTheme(opt.value)}
-                  className={cn(
-                    'flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-1.5 py-1.5 text-xs transition-colors',
-                    active
-                      ? 'border-transparent bg-primary text-primary-foreground'
-                      : 'border-border text-muted-foreground hover:bg-muted',
-                  )}
-                >
-                  <OptIcon className="size-3.5 shrink-0" />
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+            <div className="h-px bg-border" />
 
-        <div className="h-px bg-border" />
+            {/* 下半部分菜单 */}
+            <div className="p-1.5">
+              {bottomItems
+                .filter((i) => i.visible)
+                .map((item) => (
+                  <MenuRow
+                    key={item.key}
+                    icon={item.icon}
+                    label={item.label}
+                    onClick={item.onClick}
+                  />
+                ))}
+            </div>
 
-        {/* 下半部分菜单 */}
-        <div className="p-1.5">
-          {bottomItems.filter((i) => i.visible).map((item) => (
-            <MenuRow key={item.key} icon={item.icon} label={item.label} onClick={item.onClick} />
-          ))}
-        </div>
+            <div className="h-px bg-border" />
 
-        <div className="h-px bg-border" />
-
-        {/* 退出登录（项 11：点击弹确认，不直接退出） */}
-        <div className="p-1.5">
-          <button
-            onClick={() => setLogoutConfirmOpen(true)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
-            role="menuitem"
-          >
-            <LogOutIcon className="size-4" />
-            退出登录
-          </button>
-        </div>
+            {/* 退出登录（项 11：点击弹确认，不直接退出） */}
+            <div className="p-1.5">
+              <button
+                onClick={() => setLogoutConfirmOpen(true)}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+                role="menuitem"
+              >
+                <LogOutIcon className="size-4" />
+                退出登录
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -225,8 +322,17 @@ export function AvatarMenu({
             <DialogDescription>确认退出当前账号？退出后需重新登录。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLogoutConfirmOpen(false)}>取消</Button>
-            <Button variant="destructive" onClick={() => { resetSession(); setLogoutConfirmOpen(false); onClose(); }}>
+            <Button variant="outline" onClick={() => setLogoutConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                resetSession();
+                setLogoutConfirmOpen(false);
+                onClose();
+              }}
+            >
               <LogOutIcon className="size-4" /> 确认退出
             </Button>
           </DialogFooter>

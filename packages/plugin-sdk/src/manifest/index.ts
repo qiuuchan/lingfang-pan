@@ -6,11 +6,15 @@ import type { PluginManifest } from '@lingfang/contract';
 import { RULES, type ManifestError } from './rules.ts';
 
 export type { ManifestError } from './rules.ts';
-export type { PluginManifest, PluginCapability, CapabilityKind, RuntimeType } from '@lingfang/contract';
+export type {
+  PluginManifest,
+  PluginCapability,
+  CapabilityKind,
+  RuntimeType,
+} from '@lingfang/contract';
 
 export type ManifestResult =
-  | { success: true; manifest: PluginManifest }
-  | { success: false; errors: ManifestError[] };
+  { success: true; manifest: PluginManifest } | { success: false; errors: ManifestError[] };
 
 /**
  * 校验插件 manifest（任意 JSON 输入）。

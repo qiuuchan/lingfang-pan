@@ -16,7 +16,12 @@ function parseMasterKey(value: string | undefined): Buffer {
   let key: Buffer;
   if (/^[a-fA-F0-9]{64}$/.test(normalized)) key = Buffer.from(normalized, 'hex');
   else if (/^[A-Za-z0-9_-]{43}=?$/.test(normalized) || /^[A-Za-z0-9+/]{43}=$/.test(normalized)) {
-    key = Buffer.from(normalized, normalized.includes('+') || normalized.includes('/') || normalized.endsWith('=') ? 'base64' : 'base64url');
+    key = Buffer.from(
+      normalized,
+      normalized.includes('+') || normalized.includes('/') || normalized.endsWith('=')
+        ? 'base64'
+        : 'base64url'
+    );
   } else throw unavailable();
   if (key.length !== 32) throw unavailable();
   return key;
@@ -40,13 +45,28 @@ export class CloudEndpointSecretCipher {
     cipher.setAAD(Buffer.from(`${AAD_PREFIX}${deploymentId}`, 'utf8'));
     const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
-    return { ciphertext: [CIPHER_VERSION, iv.toString('base64url'), encrypted.toString('base64url'), tag.toString('base64url')].join('.'), version: 1 };
+    return {
+      ciphertext: [
+        CIPHER_VERSION,
+        iv.toString('base64url'),
+        encrypted.toString('base64url'),
+        tag.toString('base64url'),
+      ].join('.'),
+      version: 1,
+    };
   }
 
   decrypt(ciphertext: string, deploymentId: string): string {
     try {
       const [version, ivEncoded, encryptedEncoded, tagEncoded, extra] = ciphertext.split('.');
-      if (version !== CIPHER_VERSION || !ivEncoded || !encryptedEncoded || !tagEncoded || extra !== undefined) throw unavailable();
+      if (
+        version !== CIPHER_VERSION ||
+        !ivEncoded ||
+        !encryptedEncoded ||
+        !tagEncoded ||
+        extra !== undefined
+      )
+        throw unavailable();
       const iv = Buffer.from(ivEncoded, 'base64url');
       const encrypted = Buffer.from(encryptedEncoded, 'base64url');
       const tag = Buffer.from(tagEncoded, 'base64url');

@@ -18,10 +18,7 @@ import { CREATOR_PROVENANCE } from '@/lib/plugin-provenance';
 import { readWorkspaceFiles, writeWorkspaceFiles } from '@/lib/plugin-status';
 import type { LoadedPlugin } from '@/lib/types';
 import { capabilityRequiresAdmin } from '@/lib/plugin-capabilities';
-import {
-  withSyncedStagedManifest,
-  type StagedPlugin,
-} from '@/lib/plugin-creator/creator-tools';
+import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 
 // === 工具函数（从 FloatingCreator 迁移，保持逻辑一致）===
 
@@ -36,9 +33,21 @@ function defaultEntryForRuntime(runtime: StagedPlugin['runtime_type']): string {
 }
 
 const KNOWN_CAPABILITY_KINDS = new Set([
-  'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch', 'clipboard',
-  'llm.chat', 'image.generate', 'image.edit', 'storage.kv', 'system.info',
-  'system.screenshot', 'system.notify', 'plugin.upload', 'plugin.submitMarketplace',
+  'ui.view',
+  'fs.pick',
+  'fs.read',
+  'fs.write',
+  'net.fetch',
+  'clipboard',
+  'llm.chat',
+  'image.generate',
+  'image.edit',
+  'storage.kv',
+  'system.info',
+  'system.screenshot',
+  'system.notify',
+  'plugin.upload',
+  'plugin.submitMarketplace',
   'video.generate',
   'audio.generate',
 ]);
@@ -46,20 +55,26 @@ const KNOWN_CAPABILITY_KINDS = new Set([
 function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    const rawKind = typeof item === 'string'
-      ? item.trim()
-      : item && typeof item === 'object' && typeof (item as Record<string, unknown>).kind === 'string'
-        ? String((item as Record<string, unknown>).kind).trim()
-        : '';
+    const rawKind =
+      typeof item === 'string'
+        ? item.trim()
+        : item &&
+            typeof item === 'object' &&
+            typeof (item as Record<string, unknown>).kind === 'string'
+          ? String((item as Record<string, unknown>).kind).trim()
+          : '';
     if (!KNOWN_CAPABILITY_KINDS.has(rawKind)) return [];
-    const raw = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-    const risk = raw.risk === 'none' || raw.risk === 'medium' || raw.risk === 'high' ? raw.risk : 'low';
-    return [{
-      kind: rawKind,
-      reason: typeof raw.reason === 'string' ? raw.reason : '',
-      risk,
-      requires_admin: capabilityRequiresAdmin(rawKind, raw.requires_admin),
-    } as StagedPlugin['capabilities'][number]];
+    const raw = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+    const risk =
+      raw.risk === 'none' || raw.risk === 'medium' || raw.risk === 'high' ? raw.risk : 'low';
+    return [
+      {
+        kind: rawKind,
+        reason: typeof raw.reason === 'string' ? raw.reason : '',
+        risk,
+        requires_admin: capabilityRequiresAdmin(rawKind, raw.requires_admin),
+      } as StagedPlugin['capabilities'][number],
+    ];
   });
 }
 
@@ -70,7 +85,7 @@ function normalizeCapabilities(value: unknown): StagedPlugin['capabilities'] {
  */
 async function buildDraftFromRoot(
   pluginId: string,
-  provenance?: Pick<StagedPlugin, 'sourceKind' | 'sourceLabel'>,
+  provenance?: Pick<StagedPlugin, 'sourceKind' | 'sourceLabel'>
 ): Promise<StagedPlugin> {
   const files = await readWorkspaceFiles(pluginId);
   const manifestFile = files.find((file) => file.path === 'manifest.json');
@@ -238,10 +253,15 @@ export const usePluginCreatorStore = create<PluginCreatorState>((set, get) => ({
     if (!pluginId) return false;
     try {
       const current = get().aiDraft;
-      const draft = await buildDraftFromRoot(pluginId, current ? {
-        sourceKind: current.sourceKind,
-        sourceLabel: current.sourceLabel,
-      } : undefined);
+      const draft = await buildDraftFromRoot(
+        pluginId,
+        current
+          ? {
+              sourceKind: current.sourceKind,
+              sourceLabel: current.sourceLabel,
+            }
+          : undefined
+      );
       set({ aiDraft: draft });
       return true;
     } catch {

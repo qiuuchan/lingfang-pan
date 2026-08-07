@@ -23,12 +23,19 @@ function Harness() {
   const toolVariants: { id: string; data: ToolCardData }[] = [
     {
       id: 'running',
-      data: { toolCallId: 't1', name: 'WebSearch', status: 'running', args: { query: '今天新闻头条' } },
+      data: {
+        toolCallId: 't1',
+        name: 'WebSearch',
+        status: 'running',
+        args: { query: '今天新闻头条' },
+      },
     },
     {
       id: 'ok',
       data: {
-        toolCallId: 't2', name: 'Read', status: 'ok',
+        toolCallId: 't2',
+        name: 'Read',
+        status: 'ok',
         args: { path: 'plugin/main.py' },
         result: { path: 'plugin/main.py', content: 'print("hello")\n' },
       },
@@ -36,7 +43,9 @@ function Harness() {
     {
       id: 'error',
       data: {
-        toolCallId: 't3', name: 'Edit', status: 'error',
+        toolCallId: 't3',
+        name: 'Edit',
+        status: 'error',
         args: { path: 'plugin/main.py' },
         result: '错误：文件不存在，请先用 Read 读取再 Edit。',
       },
@@ -44,7 +53,9 @@ function Harness() {
     {
       id: 'todo-summary',
       data: {
-        toolCallId: 't4', name: 'TodoWrite', status: 'ok',
+        toolCallId: 't4',
+        name: 'TodoWrite',
+        status: 'ok',
         args: {
           todos: [
             { content: '初始化插件', status: 'completed', priority: 'high' },
@@ -57,7 +68,9 @@ function Harness() {
     {
       id: 'datetime',
       data: {
-        toolCallId: 't5', name: 'DateTime', status: 'ok',
+        toolCallId: 't5',
+        name: 'DateTime',
+        status: 'ok',
         result: '当前时间：2026年6月29日 周日 15:30（Asia/Shanghai）',
       },
     },
@@ -85,7 +98,10 @@ function Harness() {
       </Section>
 
       <Section title="TodoPanel — 已完成（静态）">
-        <TodoPanel todos={todos.map((t) => ({ ...t, status: 'completed' as const }))} streaming={false} />
+        <TodoPanel
+          todos={todos.map((t) => ({ ...t, status: 'completed' as const }))}
+          streaming={false}
+        />
       </Section>
 
       <Section title="Markdown 排版">
@@ -139,7 +155,10 @@ def hello():
       </Section>
 
       <Section title="思考块（reasoning）">
-        <details className="overflow-hidden rounded-lg border border-border/30 bg-card/60 text-xs" open>
+        <details
+          className="overflow-hidden rounded-lg border border-border/30 bg-card/60 text-xs"
+          open
+        >
           <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 text-muted-foreground/70 transition-colors hover:bg-muted/25 hover:text-muted-foreground">
             Thinking...
           </summary>
@@ -159,5 +178,5 @@ def hello():
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Harness />
-  </React.StrictMode>,
+  </React.StrictMode>
 );

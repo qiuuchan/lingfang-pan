@@ -175,7 +175,7 @@ export function AnimatedNumber({
   const reduce = useReducedMotion();
   const count = useMotionValue(0);
   const display = useTransform(count, (latest) =>
-    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN'),
+    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN')
   );
 
   useEffect(() => {
@@ -214,7 +214,7 @@ export function Shimmer({ className }: { className?: string }) {
  *  用于列表加载态（Plugins/Market/Review 等）与 Suspense fallback。 */
 export function ListSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
   return (
-    <div className={cn('space-y-3', className)}>
+    <div className={cn('flex flex-col gap-3', className)}>
       {Array.from({ length: rows }).map((_, i) => (
         <Shimmer key={i} className={cn('h-12 w-full', i === rows - 1 ? 'w-2/3' : '')} />
       ))}
@@ -225,7 +225,15 @@ export function ListSkeleton({ rows = 4, className }: { rows?: number; className
 /** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade only。
  *  mode="wait" 保证旧视图退出后再挂载新视图，避免双视图同时撑开布局。
  *  仅 App.tsx 的视图容器使用（PluginCreatorHome 常驻挂载，不进此组件）。 */
-export function PageTransition({ viewKey, children, className }: { viewKey: string; children: ReactNode; className?: string }) {
+export function PageTransition({
+  viewKey,
+  children,
+  className,
+}: {
+  viewKey: string;
+  children: ReactNode;
+  className?: string;
+}) {
   const reduce = useReducedMotion();
   return (
     <AnimatePresence mode="wait">

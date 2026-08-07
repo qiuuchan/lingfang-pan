@@ -29,7 +29,13 @@ function FooterLink({ item }: { item: FooterItem }) {
       <button
         onClick={item.onClick}
         className={`${baseCls} ${hoverCls} justify-self-start text-left`}
-        style={{ color: 'var(--lf-fg-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+        style={{
+          color: 'var(--lf-fg-muted)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
       >
         {item.label}
       </button>
@@ -49,7 +55,9 @@ function FooterLink({ item }: { item: FooterItem }) {
 function FooterCol({ title, items }: { title: string; items: FooterItem[] }) {
   return (
     <div className="space-y-3">
-      <span className="lf-section-label" style={{ fontSize: '0.75rem' }}>{title}</span>
+      <span className="lf-section-label" style={{ fontSize: '0.75rem' }}>
+        {title}
+      </span>
       <div className="space-y-2">
         {items.map((item) => (
           <FooterLink key={item.label} item={item} />
@@ -73,7 +81,9 @@ export function LandingFooter({
     getLatestRelease().then((r) => {
       if (!aborted) setVersion(r?.version ?? null);
     });
-    return () => { aborted = true; };
+    return () => {
+      aborted = true;
+    };
   }, []);
 
   const year = 2026;
@@ -91,14 +101,23 @@ export function LandingFooter({
               >
                 灵
               </span>
-              <span className="lf-display font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>LingFang</span>
+              <span
+                className="lf-display font-semibold tracking-tight"
+                style={{ color: 'var(--lf-fg)' }}
+              >
+                LingFang
+              </span>
             </div>
             <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--lf-fg-muted)' }}>
               用自然语言生成插件，让每个人的业务经验都能变成可复用的数字能力。
             </p>
             {version && (
-              <div className="mt-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
-                style={{ borderColor: 'var(--lf-border-bright)', backgroundColor: 'var(--lf-bg-card)' }}
+              <div
+                className="mt-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
+                style={{
+                  borderColor: 'var(--lf-border-bright)',
+                  backgroundColor: 'var(--lf-bg-card)',
+                }}
               >
                 <span className="relative flex h-1.5 w-1.5">
                   <span
@@ -111,7 +130,9 @@ export function LandingFooter({
                   />
                 </span>
                 <span style={{ color: 'var(--lf-fg-muted)' }}>当前版本</span>
-                <span className="lf-mono font-medium" style={{ color: 'var(--lf-accent)' }}>v{version}</span>
+                <span className="lf-mono font-medium" style={{ color: 'var(--lf-accent)' }}>
+                  v{version}
+                </span>
               </div>
             )}
           </div>

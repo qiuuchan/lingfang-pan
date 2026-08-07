@@ -29,7 +29,11 @@ export interface SearchProvider {
 export const PROVIDER_TIMEOUT_MS = 6_000;
 
 /** 带超时的 fetch（叠加调用方传入的 signal 与本地超时）。 */
-export async function fetchWithTimeout(url: string, init: RequestInit, outerSignal: AbortSignal): Promise<Response> {
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  outerSignal: AbortSignal
+): Promise<Response> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   const onOuterAbort = () => controller.abort();
@@ -53,7 +57,10 @@ function str(v: unknown): string {
  */
 export class SearxngProvider implements SearchProvider {
   readonly name: string;
-  constructor(private readonly baseUrl: string, nameSuffix?: string) {
+  constructor(
+    private readonly baseUrl: string,
+    nameSuffix?: string
+  ) {
     this.name = nameSuffix ? `searxng:${nameSuffix}` : 'searxng';
   }
   isConfigured(): boolean {
@@ -67,7 +74,12 @@ export class SearxngProvider implements SearchProvider {
     const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
     const results = Array.isArray(data.results) ? data.results : [];
     return results
-      .map((r) => ({ title: str(r.title), url: str(r.url), snippet: str(r.content), source: this.name }))
+      .map((r) => ({
+        title: str(r.title),
+        url: str(r.url),
+        snippet: str(r.content),
+        source: this.name,
+      }))
       .filter((r) => r.url && r.title)
       .slice(0, limit);
   }
@@ -89,15 +101,25 @@ export class TavilyProvider implements SearchProvider {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: this.apiKey, query, max_results: limit, search_depth: 'basic' }),
+        body: JSON.stringify({
+          api_key: this.apiKey,
+          query,
+          max_results: limit,
+          search_depth: 'basic',
+        }),
       },
-      signal,
+      signal
     );
     if (!res.ok) throw new Error(`Tavily 返回 ${res.status}`);
     const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
     const results = Array.isArray(data.results) ? data.results : [];
     return results
-      .map((r) => ({ title: str(r.title), url: str(r.url), snippet: str(r.content), source: this.name }))
+      .map((r) => ({
+        title: str(r.title),
+        url: str(r.url),
+        snippet: str(r.content),
+        source: this.name,
+      }))
       .filter((r) => r.url && r.title)
       .slice(0, limit);
   }
@@ -117,13 +139,18 @@ export class BraveProvider implements SearchProvider {
     const res = await fetchWithTimeout(
       url,
       { headers: { Accept: 'application/json', 'X-Subscription-Token': this.apiKey } },
-      signal,
+      signal
     );
     if (!res.ok) throw new Error(`Brave 返回 ${res.status}`);
     const data = (await res.json()) as { web?: { results?: Array<Record<string, unknown>> } };
     const results = Array.isArray(data.web?.results) ? data.web!.results! : [];
     return results
-      .map((r) => ({ title: str(r.title), url: str(r.url), snippet: str(r.description), source: this.name }))
+      .map((r) => ({
+        title: str(r.title),
+        url: str(r.url),
+        snippet: str(r.description),
+        source: this.name,
+      }))
       .filter((r) => r.url && r.title)
       .slice(0, limit);
   }
@@ -168,7 +195,7 @@ export class BingHtmlProvider implements SearchProvider {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         },
       },
-      signal,
+      signal
     );
     if (!res.ok) throw new Error(`Bing 返回 ${res.status}`);
     const html = await res.text();
@@ -309,7 +336,7 @@ export class GitHubProvider implements SearchProvider {
           'User-Agent': 'lingfang-search/1.0',
         },
       },
-      signal,
+      signal
     );
     if (!res.ok) {
       // 403 常见为限速；抛错让上层跳过，回落其它源。
@@ -317,48 +344,52 @@ export class GitHubProvider implements SearchProvider {
     }
     const data = (await res.json()) as { items?: Array<Record<string, unknown>> };
     const items = Array.isArray(data.items) ? data.items : [];
-    return items.map((it) => {
-      const name = str(it.full_name) || str(it.name);
-      const htmlUrl = str(it.html_url);
-      const desc = str(it.description);
-      // snippet：描述 + ⭐星数 + 语言，便于模型判断相关性。
-      const stars = typeof it.stargazers_count === 'number' ? it.stargazers_count : 0;
-      const lang = str(it.language);
-      const extra = [lang, `⭐${stars}`].filter(Boolean).join(' · ');
-      return {
-        title: name,
-        url: htmlUrl,
-        snippet: [desc, extra].filter(Boolean).join(' | '),
-        source: this.name,
-      };
-    }).filter((r) => r.url && r.title);
+    return items
+      .map((it) => {
+        const name = str(it.full_name) || str(it.name);
+        const htmlUrl = str(it.html_url);
+        const desc = str(it.description);
+        // snippet：描述 + ⭐星数 + 语言，便于模型判断相关性。
+        const stars = typeof it.stargazers_count === 'number' ? it.stargazers_count : 0;
+        const lang = str(it.language);
+        const extra = [lang, `⭐${stars}`].filter(Boolean).join(' · ');
+        return {
+          title: name,
+          url: htmlUrl,
+          snippet: [desc, extra].filter(Boolean).join(' | '),
+          source: this.name,
+        };
+      })
+      .filter((r) => r.url && r.title);
   }
 }
 
 /** 去除 HTML 标签并解码常见实体，得到纯文本用于标题/摘要展示。 */
 function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, '')
-    .replace(/&ensp;|&emsp;|&nbsp;/g, ' ')
-    .replace(/&middot;|&#0183;|&#183;/g, '·')
-    .replace(/&hellip;|&#8230;/g, '…')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&mdash;/g, '—')
-    .replace(/&ndash;/g, '–')
-    // 兜底：数字实体（&#0183; / &#xNN; 等）解码为字符，避免摘要里残留实体。
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => {
-      const code = parseInt(h, 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
-    })
-    .replace(/&#(\d+);/g, (_, n) => {
-      const code = Number(n);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
-    })
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    html
+      .replace(/<[^>]+>/g, '')
+      .replace(/&ensp;|&emsp;|&nbsp;/g, ' ')
+      .replace(/&middot;|&#0183;|&#183;/g, '·')
+      .replace(/&hellip;|&#8230;/g, '…')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      // 兜底：数字实体（&#0183; / &#xNN; 等）解码为字符，避免摘要里残留实体。
+      .replace(/&#x([0-9a-f]+);/gi, (_, h) => {
+        const code = parseInt(h, 16);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+      })
+      .replace(/&#(\d+);/g, (_, n) => {
+        const code = Number(n);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+      })
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }

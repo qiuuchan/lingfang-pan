@@ -42,7 +42,7 @@ export class PluginGrantsController {
     @Req() req: Request,
     @Param('id') packageId: string,
     @Query('subjectKind') subjectKind: 'USER' | 'ROLE',
-    @Query('subjectId') subjectId: string,
+    @Query('subjectId') subjectId: string
   ) {
     return this.grants.removeGrant(requireUser(req).id, packageId, subjectKind, subjectId);
   }

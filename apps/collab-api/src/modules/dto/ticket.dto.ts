@@ -4,7 +4,16 @@
 //     文件由 FileFieldsInterceptor 处理，不在 DTO 内。
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { TICKET_CATEGORY, TICKET_PRIORITY, TICKET_STATUS } from './enums';
 
 /** POST /api/tickets 表单字段（multipart，files 另由拦截器处理）。 */

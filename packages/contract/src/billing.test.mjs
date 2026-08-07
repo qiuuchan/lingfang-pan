@@ -66,7 +66,9 @@ test('relay schemas default an omitted model to fast', () => {
 test('ImageRelayInputSchema enforces prompt + tier + bounds n', () => {
   expect(ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'a cat' }).success).toBe(true);
   // n 上限 10
-  expect(ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'x', n: 11 }).success).toBe(false);
+  expect(ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'x', n: 11 }).success).toBe(
+    false
+  );
   // 空 prompt 拒绝
   expect(ImageRelayInputSchema.safeParse({ model: 'fast', prompt: '' }).success).toBe(false);
 });

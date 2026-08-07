@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 # 取消同一分支上互相竞争的旧运行，节省 runner 时长。
 concurrency:

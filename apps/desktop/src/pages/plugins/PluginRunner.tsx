@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type Ref, type RefObject } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, CloudIcon, InfoIcon, PencilIcon, ExternalLinkIcon, WandSparklesIcon } from 'lucide-react';
+import {
+  ArrowLeftIcon,
+  CloudIcon,
+  InfoIcon,
+  PencilIcon,
+  ExternalLinkIcon,
+  WandSparklesIcon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { PluginManifestDialog } from '@/components/PluginManifestDialog';
@@ -21,11 +28,7 @@ import {
   loadInstalledPlugin,
   requiresRunnerActivation,
 } from '@/lib/plugin-registry';
-import {
-  handleRuntimeCall,
-  loadPluginDocument,
-  runtimeMessageFromFrame,
-} from '../plugins-runtime';
+import { handleRuntimeCall, loadPluginDocument, runtimeMessageFromFrame } from '../plugins-runtime';
 import { draftFromPlugin, usePluginRunnerActions } from './use-plugin-runner-actions';
 import { WorkflowRunner } from './workflow/WorkflowRunner';
 
@@ -34,13 +37,24 @@ function isScriptRuntime(runtime: string): runtime is ScriptRuntime {
 }
 
 export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
-  const { setCurrentDraft, setView, setRunningPlugin, clearRunningPlugin, setPendingAutoFix, setPendingDraftEdit } = useApp();
+  const {
+    setCurrentDraft,
+    setView,
+    setRunningPlugin,
+    clearRunningPlugin,
+    setPendingAutoFix,
+    setPendingDraftEdit,
+  } = useApp();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const runtime = resolvePluginRuntime(plugin);
   const document = usePluginDocument(plugin, runtime);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [scriptPreviewKey, setScriptPreviewKey] = useState(0);
-  const pendingInteractive = usePendingInteractiveActivation(plugin, document.error, setRunningPlugin);
+  const pendingInteractive = usePendingInteractiveActivation(
+    plugin,
+    document.error,
+    setRunningPlugin
+  );
   const actions = usePluginRunnerActions({
     plugin,
     setCurrentDraft,
@@ -50,12 +64,15 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
     setView,
   });
   const canEdit = !plugin.builtin && Boolean(plugin.installationId || plugin.draft);
-  const openAdoptedWorkflowDraft = useCallback((draft: LoadedPlugin) => {
-    setCurrentDraft(draftFromPlugin(draft));
-    setPendingDraftEdit({ draft, turns: [] });
-    setRunningPlugin(null);
-    setView('creator');
-  }, [setCurrentDraft, setPendingDraftEdit, setRunningPlugin, setView]);
+  const openAdoptedWorkflowDraft = useCallback(
+    (draft: LoadedPlugin) => {
+      setCurrentDraft(draftFromPlugin(draft));
+      setPendingDraftEdit({ draft, turns: [] });
+      setRunningPlugin(null);
+      setView('creator');
+    },
+    [setCurrentDraft, setPendingDraftEdit, setRunningPlugin, setView]
+  );
   usePluginBridge(plugin, iframeRef);
 
   return (
@@ -74,7 +91,11 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
         }}
         onEdit={actions.editInGenerator}
         onShowManifest={() => setManifestOpen(true)}
-        onPopOut={() => { void openPluginInWindow(plugin).catch((e) => toast.error(e instanceof Error ? e.message : String(e))); }}
+        onPopOut={() => {
+          void openPluginInWindow(plugin).catch((e) =>
+            toast.error(e instanceof Error ? e.message : String(e))
+          );
+        }}
       />
       <RunnerContent
         error={document.error}
@@ -111,37 +132,42 @@ export function PluginRunner({ plugin, onBack }: { plugin: LoadedPlugin; onBack:
 function usePendingInteractiveActivation(
   plugin: LoadedPlugin,
   documentError: CreatorError | null,
-  setRunningPlugin: (plugin: LoadedPlugin | null) => void,
+  setRunningPlugin: (plugin: LoadedPlugin | null) => void
 ) {
   const settlingRef = useRef(false);
   const mountedRef = useRef(true);
   const isPendingInteractive = Boolean(
-    plugin.pendingActivation
-    && plugin.installationId
-    && requiresRunnerActivation(plugin.runtime_type),
+    plugin.pendingActivation &&
+    plugin.installationId &&
+    requiresRunnerActivation(plugin.runtime_type)
   );
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
     settlingRef.current = false;
   }, [plugin.id, plugin.pendingActivation?.releaseId]);
 
-  const restoreActive = useCallback(async (reason: string) => {
-    if (!isPendingInteractive || !plugin.installationId || settlingRef.current) return;
-    settlingRef.current = true;
-    try {
-      await discardPendingPluginUpdate(plugin.installationId, reason);
-      const active = await loadInstalledPlugin(plugin.installationId);
-      if (mountedRef.current) setRunningPlugin(active);
-      toast.error(`${reason}，已恢复活动版本`);
-    } catch (caught) {
-      toast.error(`待更新版本启动失败：${errorMessage(caught, reason)}`);
-    }
-  }, [isPendingInteractive, plugin.installationId, setRunningPlugin]);
+  const restoreActive = useCallback(
+    async (reason: string) => {
+      if (!isPendingInteractive || !plugin.installationId || settlingRef.current) return;
+      settlingRef.current = true;
+      try {
+        await discardPendingPluginUpdate(plugin.installationId, reason);
+        const active = await loadInstalledPlugin(plugin.installationId);
+        if (mountedRef.current) setRunningPlugin(active);
+        toast.error(`${reason}，已恢复活动版本`);
+      } catch (caught) {
+        toast.error(`待更新版本启动失败：${errorMessage(caught, reason)}`);
+      }
+    },
+    [isPendingInteractive, plugin.installationId, setRunningPlugin]
+  );
 
   useEffect(() => {
     if (!documentError) return;
@@ -172,7 +198,9 @@ function usePendingInteractiveActivation(
 
   return {
     onReady,
-    onError: () => { void restoreActive('待更新插件运行入口加载失败'); },
+    onError: () => {
+      void restoreActive('待更新插件运行入口加载失败');
+    },
   };
 }
 
@@ -254,8 +282,26 @@ function RunnerContent({
     );
   }
   if (runtime === 'cloud') return <CloudRuntimeNotice plugin={plugin} onReady={onFrameLoad} />;
-  if (runtime === 'workflow') return <WorkflowRunner plugin={plugin} onReady={onFrameLoad} onAdoptedDraft={onAdoptedWorkflowDraft} />;
-  return <RunnerBody error={error} iframeRef={iframeRef} loading={loading} onAutoFix={onAutoFix} plugin={plugin} srcDoc={srcDoc} onFrameLoad={onFrameLoad} onFrameError={onFrameError} />;
+  if (runtime === 'workflow')
+    return (
+      <WorkflowRunner
+        plugin={plugin}
+        onReady={onFrameLoad}
+        onAdoptedDraft={onAdoptedWorkflowDraft}
+      />
+    );
+  return (
+    <RunnerBody
+      error={error}
+      iframeRef={iframeRef}
+      loading={loading}
+      onAutoFix={onAutoFix}
+      plugin={plugin}
+      srcDoc={srcDoc}
+      onFrameLoad={onFrameLoad}
+      onFrameError={onFrameError}
+    />
+  );
 }
 
 function ScriptRunner({
@@ -279,7 +325,9 @@ function ScriptRunner({
         runtime={runtime}
         builtin={plugin.source === 'builtin' || Boolean(plugin.builtin)}
         installedOrigin={plugin.installationOrigin}
-        policyPreflight={Boolean(plugin.draft || plugin.local || plugin.installationOrigin === 'local')}
+        policyPreflight={Boolean(
+          plugin.draft || plugin.local || plugin.installationOrigin === 'local'
+        )}
         pendingActivation={Boolean(plugin.pendingActivation)}
         packageId={plugin.packageId}
         releaseId={plugin.releaseId}
@@ -313,23 +361,38 @@ function RunnerHeader({
   onPopOut: () => void;
 }) {
   return (
-    <div {...dragRegionProps} className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
-      <span className="truncate text-sm font-medium" data-tauri-drag-region>{plugin.name}</span>
+    <div
+      {...dragRegionProps}
+      className="flex shrink-0 items-center justify-between border-b px-4 py-2.5"
+    >
+      <span className="truncate text-sm font-medium" data-tauri-drag-region>
+        {plugin.name}
+      </span>
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onShowManifest}>
-          <InfoIcon className="size-4" />详情
+          <InfoIcon className="size-4" />
+          详情
         </Button>
         {/* Task 15 多窗口：把插件弹出到独立窗口运行（一插件一窗口，聚焦即不重复创建）。 */}
-        <Button variant="ghost" size="sm" title={canPopOut ? '在新窗口打开' : '待更新版本激活后可在新窗口打开'} disabled={!canPopOut} onClick={onPopOut}>
-          <ExternalLinkIcon className="size-4" />新窗口
+        <Button
+          variant="ghost"
+          size="sm"
+          title={canPopOut ? '在新窗口打开' : '待更新版本激活后可在新窗口打开'}
+          disabled={!canPopOut}
+          onClick={onPopOut}
+        >
+          <ExternalLinkIcon className="size-4" />
+          新窗口
         </Button>
         {canEdit && (
           <LoadingButton variant="outline" size="sm" loading={editing} onClick={onEdit}>
-            <PencilIcon className="size-4" />继续修改
+            <PencilIcon className="size-4" />
+            继续修改
           </LoadingButton>
         )}
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeftIcon className="size-4" />返回插件列表
+          <ArrowLeftIcon className="size-4" />
+          返回插件列表
         </Button>
       </div>
     </div>
@@ -360,12 +423,16 @@ function RunnerBody({
   if (error) {
     return (
       <div className="relative min-h-0 flex-1 bg-muted/30">
-        <div className="space-y-3 p-4">
+        <div className="flex flex-col gap-3 p-4">
           <ErrorBubble error={error} />
           {canAutoFix && (
-            <Button variant="outline" size="sm" onClick={() => onAutoFix(error.raw || error.title)}>
-              <WandSparklesIcon className="mr-1 size-3.5" />
-              让 AI 修复
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => onAutoFix(error.raw || error.title)}
+            >
+              <WandSparklesIcon className="mr-1 size-3.5" />让 AI 修复
             </Button>
           )}
         </div>
@@ -390,7 +457,9 @@ function RunnerBody({
 }
 
 function CloudRuntimeNotice({ plugin, onReady }: { plugin: LoadedPlugin; onReady: () => void }) {
-  useEffect(() => { onReady(); }, [onReady]);
+  useEffect(() => {
+    onReady();
+  }, [onReady]);
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/30 p-6">
       <div className="flex max-w-md flex-col items-center gap-3 text-center">

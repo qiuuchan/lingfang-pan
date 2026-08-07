@@ -60,7 +60,13 @@ export interface BuildResult {
     keptTurns: Array<{ role: string; content: string }>;
     currentInput: string;
     /** 粗略 token 估算（中文为主，1 token ≈ 1.5 字符；英文约 4 字符/token）。 */
-    estimatedTokens: { system: number; summary: number; history: number; input: number; total: number };
+    estimatedTokens: {
+      system: number;
+      summary: number;
+      history: number;
+      input: number;
+      total: number;
+    };
     /** 压缩进度（供 UI 显示「距离下次压缩还有多少」）。 */
     compressInfo: {
       /** 触发压缩的 token 阈值。 */
@@ -164,7 +170,11 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
 
   // 未超阈值：原文返回（原生 function calling 历史），保留 assistant 的 parts（工具历史）。
   if (historyTokens <= threshold) {
-    const historyMessages = turnsToMessages(historyTurnsForEstimate, args.skipAppendCurrent ? '' : args.currentInput, args.skipAppendCurrent);
+    const historyMessages = turnsToMessages(
+      historyTurnsForEstimate,
+      args.skipAppendCurrent ? '' : args.currentInput,
+      args.skipAppendCurrent
+    );
     const messages: ChatMessage[] = [
       { role: 'system', content: args.systemPrompt },
       ...historyMessages,
@@ -177,7 +187,10 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
       breakdown: {
         systemPrompt: args.systemPrompt,
         summary: '',
-        keptTurns: turns.map((t) => ({ role: t.role, content: renderTurnText(t.content, t.parts) })),
+        keptTurns: turns.map((t) => ({
+          role: t.role,
+          content: renderTurnText(t.content, t.parts),
+        })),
         currentInput: args.currentInput,
         estimatedTokens: {
           system: systemTokens,
@@ -203,7 +216,10 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
   const protectedFromCompressIdx = new Set<number>();
   older.forEach((t, i) => {
     // 同时检测 content 与 parts 渲染文本（包块可能在 text part 里）。
-    if (turnHasPackage(t.content) || (t.parts && t.parts.some((p) => p.type === 'text' && turnHasPackage(p.content)))) {
+    if (
+      turnHasPackage(t.content) ||
+      (t.parts && t.parts.some((p) => p.type === 'text' && turnHasPackage(p.content)))
+    ) {
       protectedFromCompressIdx.add(i);
     }
   });
@@ -223,7 +239,9 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
     // 增量摘要：prior summary + 新可压缩轮。
     const summarizeInput: SimpleChatMessage[] = [
       { role: 'system', content: SUMMARIZE_PROMPT },
-      ...(state.summary ? [{ role: 'assistant' as const, content: `已有摘要：\n${state.summary}` }] : []),
+      ...(state.summary
+        ? [{ role: 'assistant' as const, content: `已有摘要：\n${state.summary}` }]
+        : []),
       ...newOnesToSummarize.map((t): SimpleChatMessage => ({ role: t.role, content: t.content })),
       { role: 'user', content: '请输出更新后的完整摘要（含上面已有摘要的内容 + 这些新对话）。' },
     ];
@@ -245,7 +263,11 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
     ...older.filter((_, i) => protectedFromCompressIdx.has(i)),
     ...turns.slice(recentStart),
   ];
-  const verbatimMessages = turnsToMessages(toHistoryTurns(verbatimTurns), args.skipAppendCurrent ? '' : args.currentInput, args.skipAppendCurrent);
+  const verbatimMessages = turnsToMessages(
+    toHistoryTurns(verbatimTurns),
+    args.skipAppendCurrent ? '' : args.currentInput,
+    args.skipAppendCurrent
+  );
 
   const messages: ChatMessage[] = [{ role: 'system', content: args.systemPrompt }];
   if (nextSummary.trim()) {
@@ -263,7 +285,10 @@ export async function buildContextMessages(args: BuildArgs): Promise<BuildResult
     breakdown: {
       systemPrompt: args.systemPrompt,
       summary: nextSummary,
-      keptTurns: verbatimTurns.map((t) => ({ role: t.role, content: renderTurnText(t.content, t.parts) })),
+      keptTurns: verbatimTurns.map((t) => ({
+        role: t.role,
+        content: renderTurnText(t.content, t.parts),
+      })),
       currentInput: args.currentInput,
       estimatedTokens: {
         system: systemTokens,
@@ -328,7 +353,10 @@ export async function compressHistoryManually(args: {
   // older 里含插件包的轮必须原文保留；其余可压缩。
   const protectedFromCompressIdx = new Set<number>();
   older.forEach((t, i) => {
-    if (turnHasPackage(t.content) || (t.parts && t.parts.some((p) => p.type === 'text' && turnHasPackage(p.content)))) {
+    if (
+      turnHasPackage(t.content) ||
+      (t.parts && t.parts.some((p) => p.type === 'text' && turnHasPackage(p.content)))
+    ) {
       protectedFromCompressIdx.add(i);
     }
   });
@@ -353,7 +381,9 @@ export async function compressHistoryManually(args: {
   // 增量摘要：prior summary + 全部可压缩轮。
   const summarizeInput: SimpleChatMessage[] = [
     { role: 'system', content: SUMMARIZE_PROMPT },
-    ...(state.summary ? [{ role: 'assistant' as const, content: `已有摘要：\n${state.summary}` }] : []),
+    ...(state.summary
+      ? [{ role: 'assistant' as const, content: `已有摘要：\n${state.summary}` }]
+      : []),
     ...toCompress.map((t): SimpleChatMessage => ({ role: t.role, content: t.content })),
     { role: 'user', content: '请输出更新后的完整摘要（含上面已有摘要的内容 + 这些新对话）。' },
   ];
@@ -377,4 +407,3 @@ export async function compressHistoryManually(args: {
     state: { lastSummarizedIndex: older.length - 1, summary: nextSummary },
   };
 }
-

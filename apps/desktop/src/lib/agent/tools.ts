@@ -11,7 +11,12 @@
 import { z } from 'zod';
 import { api, errorMessage, type ApiError, tauriInvoke } from '@/lib/api';
 import { CREATOR_PROVENANCE } from '@/lib/plugin-provenance';
-import { runPluginScript, runPluginShell, type ScriptFile, type ScriptRuntime } from '@/lib/plugin-script';
+import {
+  runPluginScript,
+  runPluginShell,
+  type ScriptFile,
+  type ScriptRuntime,
+} from '@/lib/plugin-script';
 import { deletePluginFile, movePluginFile, writeWorkspaceFiles } from '@/lib/plugin-status';
 import {
   validateStagedCompleteness,
@@ -21,7 +26,11 @@ import {
 } from '@/lib/plugin-creator/creator-tools';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { normalizeAiCapabilityAdmin } from '@/lib/plugin-capabilities';
-import { assertPluginAiPolicy, checkPluginAiPolicy, policyDiagnosticMessage } from '@/lib/plugin-ai-policy';
+import {
+  assertPluginAiPolicy,
+  checkPluginAiPolicy,
+  policyDiagnosticMessage,
+} from '@/lib/plugin-ai-policy';
 
 /**
  * 自建工具定义辅助（取代 @openai/agents 的 tool() 工厂）。
@@ -47,16 +56,20 @@ function defineTool(opts: LegacyToolOptions): ToolDefinition {
     name: opts.name,
     description: opts.description,
     // zod 4 原生 toJSONSchema()，转成 OpenAI function calling 期望的 JSON Schema。
-    parameters: typeof (opts.parameters as ZodSchema & { toJSONSchema?: () => Record<string, unknown> }).toJSONSchema === 'function'
-      ? (opts.parameters as ZodSchema & { toJSONSchema: () => Record<string, unknown> }).toJSONSchema()
-      : { type: 'object', properties: {}, additionalProperties: true },
+    parameters:
+      typeof (opts.parameters as ZodSchema & { toJSONSchema?: () => Record<string, unknown> })
+        .toJSONSchema === 'function'
+        ? (
+            opts.parameters as ZodSchema & { toJSONSchema: () => Record<string, unknown> }
+          ).toJSONSchema()
+        : { type: 'object', properties: {}, additionalProperties: true },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async execute(args: any, ctx): Promise<ToolResult> {
       const raw = await opts.execute(args, ctx);
       if (typeof raw !== 'string') return raw;
       // 字符串结果：按约定前缀判定 ok/error（兼容现有工具返回）。
-      const isErr = /^错误[:：]/.test(raw)
-        || /^(读取|写入|执行|创建|删除|移动|解析|安装|运行)失败/.test(raw);
+      const isErr =
+        /^错误[:：]/.test(raw) || /^(读取|写入|执行|创建|删除|移动|解析|安装|运行)失败/.test(raw);
       return isErr ? { ok: false, error: raw } : { ok: true, data: raw };
     },
   };
@@ -113,7 +126,9 @@ interface TeamPluginBrief {
 // 模型对大段源码（含大量引号/反斜杠）有时会传成对象/嵌套结构/畸形值，
 // 严格 union 校验会直接抛 InvalidToolInputError（与 WebSearch.limit 同类根因），
 // 故用 unknown + 手动归一化兜底，永不因入参形状失败。
-const fileContentSchema = z.unknown().describe('文件完整内容（字符串）；复杂多行源码也可用字符串数组逐行传入。');
+const fileContentSchema = z
+  .unknown()
+  .describe('文件完整内容（字符串）；复杂多行源码也可用字符串数组逐行传入。');
 
 /**
  * 把模型传入的文件内容归一化为字符串。
@@ -129,13 +144,17 @@ export function normalizeToolFileContent(content: unknown): string {
     const picked = obj.content ?? obj.text ?? obj.value ?? obj.body ?? obj.code;
     if (typeof picked === 'string') return picked;
     if (Array.isArray(picked)) return picked.map((line) => String(line)).join('\n');
-    try { return JSON.stringify(content, null, 2); } catch { return String(content); }
+    try {
+      return JSON.stringify(content, null, 2);
+    } catch {
+      return String(content);
+    }
   }
   return content == null ? '' : String(content);
 }
 
 /**
-   * 构造 Agents SDK 工具集。读写全部落到 workspaces/{workspaceId}/（Rust 命令），唯一真相源。
+ * 构造 Agents SDK 工具集。读写全部落到 workspaces/{workspaceId}/（Rust 命令），唯一真相源。
  * readPaths 跟踪本 run 内已 Read 的文件，强制 Edit 前先 Read（read-before-edit 不变式）。
  */
 export function createAgentTools(opts: AgentToolsOptions) {
@@ -162,7 +181,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
       const pluginId = requirePluginId();
       if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
       try {
-        const content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path });
+        const content = await tauriInvoke<string>('read_local_plugin_file', {
+          pluginId,
+          file: path,
+        });
         readPaths.add(path);
         return content;
       } catch (e) {
@@ -181,11 +203,16 @@ export function createAgentTools(opts: AgentToolsOptions) {
       content: fileContentSchema,
     }),
     async execute({ path, content }): Promise<string> {
-      if (!path || typeof path !== 'string') return '错误：缺少必需参数 path（文件路径）。请传入 path 和 content 两个参数。';
+      if (!path || typeof path !== 'string')
+        return '错误：缺少必需参数 path（文件路径）。请传入 path 和 content 两个参数。';
       const pluginId = requirePluginId();
       if (!isSafePath(path)) return `错误：非法文件路径 ${path}（禁绝对路径/空段/../隐藏段）`;
       try {
-        await tauriInvoke<void>('write_plugin_file', { pluginId, path, content: normalizeToolFileContent(content) });
+        await tauriInvoke<void>('write_plugin_file', {
+          pluginId,
+          path,
+          content: normalizeToolFileContent(content),
+        });
         readPaths.add(path); // 写过即视为已知内容，后续可直接 Edit
         opts.onFilesChanged();
         return `已写入 ${path}。`;
@@ -220,11 +247,14 @@ export function createAgentTools(opts: AgentToolsOptions) {
       }
       if (old_string === new_string) return '错误：old_string 与 new_string 相同，无需修改。';
       const occurrences = content.split(old_string).length - 1;
-      if (occurrences === 0) return `错误：在 ${path} 中找不到 old_string，无法替换。请先 Read 确认原文。`;
+      if (occurrences === 0)
+        return `错误：在 ${path} 中找不到 old_string，无法替换。请先 Read 确认原文。`;
       if (occurrences > 1 && !replace_all) {
         return `错误：old_string 在 ${path} 中出现 ${occurrences} 次（不唯一）。请提供更长的上下文，或设 replace_all=true。`;
       }
-      const next = replace_all ? content.split(old_string).join(new_string) : content.replace(old_string, new_string);
+      const next = replace_all
+        ? content.split(old_string).join(new_string)
+        : content.replace(old_string, new_string);
       try {
         await tauriInvoke<void>('write_plugin_file', { pluginId, path, content: next });
         opts.onFilesChanged();
@@ -273,7 +303,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
             reason: z.string().default(''),
             risk: z.enum(['none', 'low', 'medium', 'high']).default('low'),
             requires_admin: z.boolean().default(false),
-          }),
+          })
         )
         .nullable()
         .optional()
@@ -286,10 +316,18 @@ export function createAgentTools(opts: AgentToolsOptions) {
         path: file.path,
         content: normalizeToolFileContent(file.content),
       }));
-      const capabilities = (args.capabilities?.length
-        ? args.capabilities
-        : [{ kind: 'ui.view', reason: '展示插件界面', risk: 'low' as const, requires_admin: false }])
-        .map(normalizeAiCapabilityAdmin) as StagedPlugin['capabilities'];
+      const capabilities = (
+        args.capabilities?.length
+          ? args.capabilities
+          : [
+              {
+                kind: 'ui.view',
+                reason: '展示插件界面',
+                risk: 'low' as const,
+                requires_admin: false,
+              },
+            ]
+      ).map(normalizeAiCapabilityAdmin) as StagedPlugin['capabilities'];
       const draft: StagedPlugin = {
         id: args.id,
         name: args.name,
@@ -341,7 +379,9 @@ export function createAgentTools(opts: AgentToolsOptions) {
         return `已创建插件「${args.name}」(${args.id})，保存到草稿工作区，可在草稿页继续管理。`;
       } catch (e) {
         if (createdWorkspaceId) {
-          await tauriInvoke('delete_draft_workspace', { workspaceId: createdWorkspaceId }).catch(() => undefined);
+          await tauriInvoke('delete_draft_workspace', { workspaceId: createdWorkspaceId }).catch(
+            () => undefined
+          );
         }
         return `创建失败：${errorMessage(e, '草稿工作区创建失败')}`;
       }
@@ -362,7 +402,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
       '更新当前插件的元信息并写回 manifest.json。修改插件代码后调用此工具升版本号（如 0.1.0 → 0.1.1），' +
       '也可同时更新名字/描述。version 必填（语义版本 x.y.z），name/description 选填（留空则不改）。',
     parameters: z.object({
-      version: z.string().regex(/^\d+\.\d+\.\d+/, 'version 须为语义版本 x.y.z（如 0.1.1）').describe('新版本号，如 0.1.1 / 1.0.0'),
+      version: z
+        .string()
+        .regex(/^\d+\.\d+\.\d+/, 'version 须为语义版本 x.y.z（如 0.1.1）')
+        .describe('新版本号，如 0.1.1 / 1.0.0'),
       name: z.string().optional().describe('可选：新插件名（留空不改）'),
       description: z.string().optional().describe('可选：新描述（留空不改）'),
     }),
@@ -371,7 +414,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // 读当前 manifest。
       let manifestRaw: string;
       try {
-        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'manifest.json' });
+        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', {
+          pluginId,
+          file: 'manifest.json',
+        });
       } catch (e) {
         return `错误：读取 manifest.json 失败：${e instanceof Error ? e.message : String(e)}`;
       }
@@ -392,12 +438,18 @@ export function createAgentTools(opts: AgentToolsOptions) {
       if (description !== undefined) updated.description = description;
       // 写回。
       try {
-        await tauriInvoke<void>('write_plugin_file', { pluginId, path: 'manifest.json', content: `${JSON.stringify(updated, null, 2)}\n` });
+        await tauriInvoke<void>('write_plugin_file', {
+          pluginId,
+          path: 'manifest.json',
+          content: `${JSON.stringify(updated, null, 2)}\n`,
+        });
         readPaths.add('manifest.json'); // 视为已知内容
         opts.onFilesChanged();
         const changes = [`版本 ${oldVersion} → ${version}`];
-        if (name && name.trim() && name.trim() !== manifest.name) changes.push(`名字 → ${name.trim()}`);
-        if (description !== undefined && description !== manifest.description) changes.push('描述已更新');
+        if (name && name.trim() && name.trim() !== manifest.name)
+          changes.push(`名字 → ${name.trim()}`);
+        if (description !== undefined && description !== manifest.description)
+          changes.push('描述已更新');
         return `已更新插件元信息：${changes.join('，')}。`;
       } catch (e) {
         return `写入失败：${e instanceof Error ? e.message : String(e)}`;
@@ -420,11 +472,18 @@ export function createAgentTools(opts: AgentToolsOptions) {
       }
       let manifestRaw = '';
       try {
-        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'manifest.json' });
+        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', {
+          pluginId,
+          file: 'manifest.json',
+        });
       } catch {
         return '错误：缺少 manifest.json。';
       }
-      let manifest: { runtime_type?: string; entry?: string; capabilities?: Array<{ kind?: string }> };
+      let manifest: {
+        runtime_type?: string;
+        entry?: string;
+        capabilities?: Array<{ kind?: string }>;
+      };
       try {
         manifest = JSON.parse(manifestRaw);
       } catch {
@@ -445,7 +504,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
       for (const filePath of codeFiles) {
         let content = '';
         try {
-          content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: filePath });
+          content = await tauriInvoke<string>('read_local_plugin_file', {
+            pluginId,
+            file: filePath,
+          });
         } catch {
           continue;
         }
@@ -462,35 +524,48 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // 能力声明检测：扫描代码推断实际用到的能力，对比 manifest 声明，找出缺漏。
       // 缺漏的能力运行时会被 capability 网关拒绝（如用了网络请求但没声明 net.fetch），
       // Check 必须抓出来提示 AI 补充，让能力声明与代码实际一致。
-      const declaredKinds = (manifest.capabilities ?? []).map((c) => c.kind).filter((k): k is string => Boolean(k));
+      const declaredKinds = (manifest.capabilities ?? [])
+        .map((c) => c.kind)
+        .filter((k): k is string => Boolean(k));
       const capResult = detectCapabilities(codeFileList, declaredKinds);
       if (capResult.missing.length) {
-        const hints = capResult.missing.map((k) => {
-          const rule = [
-            { kind: 'llm.chat', fix: '调用平台 LLM 须声明 llm.chat（capabilities 加 {kind:"llm.chat"}）' },
-            { kind: 'image.generate', fix: '调用平台生图须声明 image.generate' },
-            { kind: 'net.fetch', fix: '发起网络请求须声明 net.fetch' },
-            { kind: 'fs.read', fix: '读取文件须声明 fs.read' },
-            { kind: 'fs.write', fix: '写入文件须声明 fs.write' },
-            { kind: 'clipboard', fix: '访问剪贴板须声明 clipboard' },
-            { kind: 'storage.kv', fix: '使用本地存储须声明 storage.kv' },
-            { kind: 'system.notify', fix: '发送系统通知须声明 system.notify' },
-          ].find((r) => r.kind === k);
-          return `- ${k}：${rule?.fix ?? '代码用到了但未声明'}`;
-        }).join('\n');
+        const hints = capResult.missing
+          .map((k) => {
+            const rule = [
+              {
+                kind: 'llm.chat',
+                fix: '调用平台 LLM 须声明 llm.chat（capabilities 加 {kind:"llm.chat"}）',
+              },
+              { kind: 'image.generate', fix: '调用平台生图须声明 image.generate' },
+              { kind: 'net.fetch', fix: '发起网络请求须声明 net.fetch' },
+              { kind: 'fs.read', fix: '读取文件须声明 fs.read' },
+              { kind: 'fs.write', fix: '写入文件须声明 fs.write' },
+              { kind: 'clipboard', fix: '访问剪贴板须声明 clipboard' },
+              { kind: 'storage.kv', fix: '使用本地存储须声明 storage.kv' },
+              { kind: 'system.notify', fix: '发送系统通知须声明 system.notify' },
+            ].find((r) => r.kind === k);
+            return `- ${k}：${rule?.fix ?? '代码用到了但未声明'}`;
+          })
+          .join('\n');
         return `发现问题：代码用到了以下能力但 manifest 未声明（运行时会被拒绝）：\n${hints}\n请用 CreatePlugin 或编辑 manifest.json 补充这些 capabilities 后重新 Check。`;
       }
       const policyFiles: ScriptFile[] = [];
       for (const path of files) {
         try {
-          policyFiles.push({ path, content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }) });
+          policyFiles.push({
+            path,
+            content: await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: path }),
+          });
         } catch {
           return `错误：无法读取 ${path}，平台 AI 使用政策检查失败，已阻止试跑。`;
         }
       }
       let policy;
       try {
-        policy = await checkPluginAiPolicy(manifest as unknown as Record<string, unknown>, policyFiles);
+        policy = await checkPluginAiPolicy(
+          manifest as unknown as Record<string, unknown>,
+          policyFiles
+        );
       } catch (error) {
         return `错误：平台 AI 使用政策检查失败，已阻止试跑：${errorMessage(error, '平台不可用')}`;
       }
@@ -511,12 +586,16 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // limit 故意不在这里做强校验：不同模型/中转会发数字、字符串、null、空串甚至非法值，
       // zod 严格校验任一不合法都触发 InvalidToolInputError（用户反馈的 WebSearch 失败根因）。
       // 改为「宽松接收（含 null）+ execute 内手动归一化」，任何值都回落默认值，绝不报错。
-      limit: z.union([z.number(), z.string(), z.null()]).optional().describe('期望结果条数，默认 8'),
+      limit: z
+        .union([z.number(), z.string(), z.null()])
+        .optional()
+        .describe('期望结果条数，默认 8'),
     }),
     async execute({ query, limit }): Promise<string> {
       // 归一化 limit：接受 number/string，非法/越界一律回落默认 8，永不抛错。
       const parsedLimit = (() => {
-        const n = typeof limit === 'string' ? Number(limit) : typeof limit === 'number' ? limit : NaN;
+        const n =
+          typeof limit === 'string' ? Number(limit) : typeof limit === 'number' ? limit : NaN;
         if (!Number.isFinite(n)) return 8;
         return Math.min(20, Math.max(1, Math.trunc(n)));
       })();
@@ -527,17 +606,17 @@ export function createAgentTools(opts: AgentToolsOptions) {
           // 后端诊断位：所有源都失败（fetch 失败/被墙）时为 true，与「真无结果」区分。
           allSourcesFailed?: boolean;
           sourcesSkipped?: Array<{ source: string; reason: string }>;
-        }>(
-          '/api/search',
-          { method: 'POST', body: { query, limit: parsedLimit } },
-        );
+        }>('/api/search', { method: 'POST', body: { query, limit: parsedLimit } });
         const results = Array.isArray(resp.results) ? resp.results : [];
         // 全源故障：以「错误：」前缀返回，触发 adapter 的 error 判定让工具卡片标红，
         // 并把跳过的源摘要透出，便于用户/管理员定位（是网络/上游问题，而非真的无结果）。
         if (results.length === 0 && resp.allSourcesFailed) {
           const skipped = Array.isArray(resp.sourcesSkipped) ? resp.sourcesSkipped : [];
           const detail = skipped.length
-            ? `（不可达源：${skipped.slice(0, 4).map((s) => s.source).join('、')}）`
+            ? `（不可达源：${skipped
+                .slice(0, 4)
+                .map((s) => s.source)
+                .join('、')}）`
             : '';
           return `错误：所有搜索源当前不可达，稍后重试或联系管理员配置搜索源。${detail}`;
         }
@@ -558,10 +637,12 @@ export function createAgentTools(opts: AgentToolsOptions) {
     parameters: z.object({}),
     async execute(): Promise<string> {
       try {
-        const response = await api<{ items: Array<{
-          package: { manifestId: string; name: string; description: string };
-          latestRelease: { version: string; manifest: { runtime_type: string } };
-        }> }>('/api/plugin-registry/team');
+        const response = await api<{
+          items: Array<{
+            package: { manifestId: string; name: string; description: string };
+            latestRelease: { version: string; manifest: { runtime_type: string } };
+          }>;
+        }>('/api/plugin-registry/team');
         const plugins: TeamPluginBrief[] = response.items.map((item) => ({
           id: item.package.manifestId,
           name: item.package.name,
@@ -570,7 +651,9 @@ export function createAgentTools(opts: AgentToolsOptions) {
           runtime_type: item.latestRelease.manifest.runtime_type,
         }));
         if (!plugins.length) return '团队暂无已有插件。';
-        return plugins.map((p) => `- ${p.name} (${p.id}) v${p.version} [${p.runtime_type}] ${p.description}`).join('\n');
+        return plugins
+          .map((p) => `- ${p.name} (${p.id}) v${p.version} [${p.runtime_type}] ${p.description}`)
+          .join('\n');
       } catch (e) {
         return `查询失败：${(e as ApiError).message || String(e)}`;
       }
@@ -602,7 +685,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
           allowFreeText: args.allowFreeText,
           multiSelect: args.multiSelect,
         },
-        toolCallId,
+        toolCallId
       );
       return res.answer;
     },
@@ -624,7 +707,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
             content: z.string().describe('该步要做什么，一句话'),
             status: z.enum(['pending', 'in_progress', 'completed']),
             priority: z.enum(['high', 'medium', 'low']),
-          }),
+          })
         )
         .describe('完整任务清单（覆盖式替换）；同一时间至多一项 in_progress'),
     }),
@@ -694,12 +777,20 @@ export function createAgentTools(opts: AgentToolsOptions) {
     parameters: z.object({
       url: z.string().url().describe('要抓取的网页 URL（必须是完整 http(s):// 链接）'),
       // maxLength 容错（与 WebSearch limit 同模式）：部分模型会把数字序列化成字符串/null。
-      maxLength: z.union([z.number(), z.string(), z.null()]).optional().describe('正文最大字符数，默认 6000'),
+      maxLength: z
+        .union([z.number(), z.string(), z.null()])
+        .optional()
+        .describe('正文最大字符数，默认 6000'),
     }),
     async execute({ url, maxLength }): Promise<string> {
       // 归一化 maxLength：非法值回落默认 6000，clamp 到 [500, 20000]。
       const limit = (() => {
-        const n = typeof maxLength === 'string' ? Number(maxLength) : typeof maxLength === 'number' ? maxLength : NaN;
+        const n =
+          typeof maxLength === 'string'
+            ? Number(maxLength)
+            : typeof maxLength === 'number'
+              ? maxLength
+              : NaN;
         if (!Number.isFinite(n)) return 6_000;
         return Math.min(20_000, Math.max(500, Math.trunc(n)));
       })();
@@ -710,11 +801,17 @@ export function createAgentTools(opts: AgentToolsOptions) {
           truncated: boolean;
           fetchedVia: 'jina' | 'direct' | 'fail';
           error?: string;
-        }>('/api/search/fetch', { method: 'POST', body: { url, maxLength: limit }, timeoutMs: 45_000 });
+        }>('/api/search/fetch', {
+          method: 'POST',
+          body: { url, maxLength: limit },
+          timeoutMs: 45_000,
+        });
         if (resp.fetchedVia === 'fail' || !resp.content) {
           return `错误：抓取失败${resp.error ? `：${resp.error}` : '（网页不可达或为 JS 渲染页）'}。`;
         }
-        const note = resp.truncated ? `\n\n（正文超过 ${limit} 字符，已截断；如需更多可加大 maxLength）` : '';
+        const note = resp.truncated
+          ? `\n\n（正文超过 ${limit} 字符，已截断；如需更多可加大 maxLength）`
+          : '';
         // fetchedVia=direct 表示用了降级抓取（质量较低），标注一下便于模型判断可信度。
         const viaNote = resp.fetchedVia === 'direct' ? '（降级抓取，正文可能含噪音）' : '';
         return `URL: ${url}${viaNote}\n\n${resp.content}${note}`;
@@ -747,7 +844,12 @@ export function createAgentTools(opts: AgentToolsOptions) {
       '需要 GUI 的插件（PySide6 等），传 args 如 ["--test"] 走无 GUI 测试模式（脚本据 sys.argv/process.argv 判断）。',
     parameters: z.object({
       entry: z.string().optional().describe('可选：指定入口文件（缺省用 manifest.entry）'),
-      args: z.array(z.string()).optional().describe('可选：传给脚本的命令行参数（如 ["--test"]），脚本通过 sys.argv/process.argv 读取'),
+      args: z
+        .array(z.string())
+        .optional()
+        .describe(
+          '可选：传给脚本的命令行参数（如 ["--test"]），脚本通过 sys.argv/process.argv 读取'
+        ),
     }),
     async execute({ entry, args }): Promise<string> {
       const pluginId = requirePluginId();
@@ -762,11 +864,18 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // 读 manifest 拿 runtime_type + entry。
       let manifestRaw = '';
       try {
-        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'manifest.json' });
+        manifestRaw = await tauriInvoke<string>('read_local_plugin_file', {
+          pluginId,
+          file: 'manifest.json',
+        });
       } catch {
         return '错误：缺少 manifest.json，无法确定运行时类型和入口。';
       }
-      let manifest: { runtime_type?: string; entry?: string; capabilities?: Array<string | { kind?: string }> };
+      let manifest: {
+        runtime_type?: string;
+        entry?: string;
+        capabilities?: Array<string | { kind?: string }>;
+      };
       try {
         manifest = JSON.parse(manifestRaw);
       } catch {
@@ -786,21 +895,29 @@ export function createAgentTools(opts: AgentToolsOptions) {
         const pkgFile = files.find((f) => f === 'package.json');
         if (pkgFile) {
           try {
-            const pkgRaw = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: 'package.json' });
+            const pkgRaw = await tauriInvoke<string>('read_local_plugin_file', {
+              pluginId,
+              file: 'package.json',
+            });
             const pkg = JSON.parse(pkgRaw) as { scripts?: { start?: string } };
             const start = pkg.scripts?.start?.trim() ?? '';
             const isPlainNode = start.startsWith('node ') && start.trim().split(/\s+/).length === 2;
             if (start && !isPlainNode) {
               return `错误：该 Node 插件声明了 scripts.start（${start}），需要专属运行时而非裸 node 直跑，预览执行无法启动。请在「插件」页用「运行」按钮以独立进程启动（pnpm start）。`;
             }
-          } catch { /* package.json 解析失败忽略，交给真实 node 错误兜底 */ }
+          } catch {
+            /* package.json 解析失败忽略，交给真实 node 错误兜底 */
+          }
         }
       }
       // 组装 ScriptFile[]（逐文件读回内容）。
       const scriptFiles: ScriptFile[] = [];
       for (const p of files) {
         try {
-          const content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: p });
+          const content = await tauriInvoke<string>('read_local_plugin_file', {
+            pluginId,
+            file: p,
+          });
           scriptFiles.push({ path: p, content });
         } catch (e) {
           return `错误：读取 ${p} 失败：${e instanceof Error ? e.message : String(e)}`;
@@ -827,7 +944,8 @@ export function createAgentTools(opts: AgentToolsOptions) {
         args: args ?? [],
       });
       // 格式化为 AI 可读文本。
-      const trim = (s: string, max: number) => s.length > max ? s.slice(0, max) + `\n…(已截断，共 ${s.length} 字符)` : s;
+      const trim = (s: string, max: number) =>
+        s.length > max ? s.slice(0, max) + `\n…(已截断，共 ${s.length} 字符)` : s;
       // 依赖安装日志前缀（若有）：让 AI 知道装了什么/是否成功，便于判断依赖问题。
       const installNote = result.installLog ? `[依赖] ${result.installLog}\n` : '';
       if (result.ok && !result.failure) {
@@ -867,9 +985,21 @@ export function createAgentTools(opts: AgentToolsOptions) {
       'Chromium 已内置，禁止执行 playwright install。' +
       '返回 stdout/stderr/exitCode；命令失败（exit≠0）时仍返回结果（不抛异常），便于读 stderr 修复后重试。',
     parameters: z.object({
-      command: z.string().describe("shell 命令（如 'pip install requests' / 'npm install axios' / 'python -c \"...\"'）"),
-      cwd: z.string().optional().describe('相对插件目录的子路径（如 src），仅插件模式有效，默认插件目录根；不能是绝对路径或含 ..'),
-      shell: z.enum(['cmd', 'powershell', 'pwsh']).optional().describe('shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）'),
+      command: z
+        .string()
+        .describe(
+          "shell 命令（如 'pip install requests' / 'npm install axios' / 'python -c \"...\"'）"
+        ),
+      cwd: z
+        .string()
+        .optional()
+        .describe(
+          '相对插件目录的子路径（如 src），仅插件模式有效，默认插件目录根；不能是绝对路径或含 ..'
+        ),
+      shell: z
+        .enum(['cmd', 'powershell', 'pwsh'])
+        .optional()
+        .describe('shell 类型，默认 cmd（非 Windows 走 /bin/sh，本字段忽略）'),
       timeoutMs: z.number().optional().describe('超时毫秒，默认 120000；安装大型依赖时可按需调大'),
     }),
     async execute({ command, cwd, shell, timeoutMs }): Promise<string> {
@@ -887,9 +1017,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
           // runtime 省略，让 Rust 自动探测（按 requirements.txt / package.json 存在性）。
         });
         // 结构化输出（参考 RunPlugin 的格式）：header + stdout + stderr。
-        const header = r.timed_out
-          ? `⏱ 超时（${r.elapsed_ms}ms）`
-          : `退出码 ${r.exit_code ?? '?'}`;
+        const header = r.timed_out ? `⏱ 超时（${r.elapsed_ms}ms）` : `退出码 ${r.exit_code ?? '?'}`;
         const out = r.stdout.trim();
         const err = r.stderr.trim();
         if (!out && !err) return `【${header}】（无输出）`;
@@ -980,7 +1108,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
     parameters: z.object({
       pattern: z.string().min(1).describe('搜索的正则表达式，如 \\bdef\\s+main\\b 或 onClick'),
       // glob 过滤同 Edit.replace_all：宽松接收，execute 内归一化。
-      glob: z.union([z.string(), z.null()]).optional().describe('可选：只搜匹配的文件（如 *.py / *.js），缺省搜全部源文件'),
+      glob: z
+        .union([z.string(), z.null()])
+        .optional()
+        .describe('可选：只搜匹配的文件（如 *.py / *.js），缺省搜全部源文件'),
     }),
     async execute({ pattern, glob }): Promise<string> {
       const pluginId = requirePluginId();
@@ -1001,7 +1132,14 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // glob 过滤（简单后缀/通配匹配，如 *.py / ui/*）。
       const globStr = typeof glob === 'string' && glob.trim() ? glob.trim() : null;
       if (globStr) {
-        const filterRe = new RegExp('^' + globStr.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'), 'u');
+        const filterRe = new RegExp(
+          '^' +
+            globStr
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+              .replace(/\*/g, '.*')
+              .replace(/\?/g, '.'),
+          'u'
+        );
         files = files.filter((f) => filterRe.test(f));
       }
       if (!files.length) return '没有匹配的文件可搜索。';
@@ -1014,7 +1152,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
         if (total >= MAX_TOTAL) break;
         let content: string;
         try {
-          content = await tauriInvoke<string>('read_local_plugin_file', { pluginId, file: filePath });
+          content = await tauriInvoke<string>('read_local_plugin_file', {
+            pluginId,
+            file: filePath,
+          });
         } catch {
           continue; // 二进制/读取失败跳过
         }
@@ -1060,7 +1201,10 @@ export function createAgentTools(opts: AgentToolsOptions) {
     parameters: z.object({
       name: z.string().min(1).max(100).describe('任务名称'),
       kind: z.enum(['ONCE', 'CRON']).describe('触发类型'),
-      cron: z.string().optional().describe('cron 表达式（kind=CRON 时必填，5 字段：分 时 日 月 周）'),
+      cron: z
+        .string()
+        .optional()
+        .describe('cron 表达式（kind=CRON 时必填，5 字段：分 时 日 月 周）'),
       run_at: z.string().optional().describe('一次性触发时间（kind=ONCE 时必填，RFC 3339 UTC）'),
       time_zone: z.string().optional().describe('IANA 时区名（kind=CRON 时使用，默认系统时区）'),
       type: z.enum(['AGENT_PROMPT', 'PLUGIN_ACTION', 'NOTIFY']).describe('执行体类型'),
@@ -1070,7 +1214,13 @@ export function createAgentTools(opts: AgentToolsOptions) {
       input: z.unknown().optional().describe('action 入参 JSON（type=PLUGIN_ACTION 时使用）'),
       title: z.string().max(200).optional().describe('通知标题（type=NOTIFY 时必填）'),
       body: z.string().max(2000).optional().describe('通知正文（type=NOTIFY 时使用）'),
-      timeout_ms: z.number().int().min(1000).max(3600000).optional().describe('单次执行超时（ms），默认 1800000'),
+      timeout_ms: z
+        .number()
+        .int()
+        .min(1000)
+        .max(3600000)
+        .optional()
+        .describe('单次执行超时（ms），默认 1800000'),
     }),
     async execute(args): Promise<string> {
       const a = args as {
@@ -1091,7 +1241,8 @@ export function createAgentTools(opts: AgentToolsOptions) {
       // 校验必填。
       if (a.kind === 'CRON' && !a.cron) return '错误：kind=CRON 时必须提供 cron 表达式';
       if (a.kind === 'ONCE' && !a.run_at) return '错误：kind=ONCE 时必须提供 run_at';
-      if (a.type === 'AGENT_PROMPT' && !a.prompt) return '错误：type=AGENT_PROMPT 时必须提供 prompt';
+      if (a.type === 'AGENT_PROMPT' && !a.prompt)
+        return '错误：type=AGENT_PROMPT 时必须提供 prompt';
       if (a.type === 'PLUGIN_ACTION' && (!a.plugin_id || !a.action))
         return '错误：type=PLUGIN_ACTION 时必须提供 plugin_id 和 action';
       if (a.type === 'NOTIFY' && !a.title) return '错误：type=NOTIFY 时必须提供 title';
@@ -1151,7 +1302,7 @@ export function createAgentTools(opts: AgentToolsOptions) {
           (t) =>
             `- ${t.name}（id=${t.id}, status=${t.status}, type=${t.payload.type}, ` +
             `trigger=${t.trigger.kind}${t.trigger.kind === 'CRON' ? ` ${t.trigger.cron}` : ''}, ` +
-            `next_run=${t.next_run_at ?? '—'}）`,
+            `next_run=${t.next_run_at ?? '—'}）`
         );
         return `共 ${list.length} 个任务：\n${lines.join('\n')}`;
       } catch (e) {
@@ -1215,7 +1366,31 @@ export function createAgentTools(opts: AgentToolsOptions) {
   });
 
   return {
-    tools: [Read, Write, Edit, Glob, CreatePlugin, UpdatePlugin, Check, WebSearch, ListTeamPlugins, AskQuestion, TodoWrite, DateTime, WebFetch, RunPlugin, Bash, DeleteFile, MoveFile, Grep, ScheduleCreate, ScheduleList, ScheduleDelete, SchedulePause, ScheduleResume],
+    tools: [
+      Read,
+      Write,
+      Edit,
+      Glob,
+      CreatePlugin,
+      UpdatePlugin,
+      Check,
+      WebSearch,
+      ListTeamPlugins,
+      AskQuestion,
+      TodoWrite,
+      DateTime,
+      WebFetch,
+      RunPlugin,
+      Bash,
+      DeleteFile,
+      MoveFile,
+      Grep,
+      ScheduleCreate,
+      ScheduleList,
+      ScheduleDelete,
+      SchedulePause,
+      ScheduleResume,
+    ],
     /** 重置 read-before-edit 跟踪（每次新 run 开始时调用）。 */
     resetReadTracking() {
       readPaths.clear();
@@ -1264,25 +1439,55 @@ export function isVersionNewer(newVer: string, oldVer: string): boolean {
  */
 export function detectCapabilities(
   codeFiles: { path: string; content: string }[],
-  declaredKinds: string[],
+  declaredKinds: string[]
 ): { missing: string[]; declared: string[]; detected: string[] } {
   // 代码特征 → 能力 kind 的映射（正则）。
   // 注意：ua.*（ui.view）默认所有有界面的插件都该有，不靠代码检测（HTML 插件必有界面）。
   // fs.read/fs.write 收窄排除浏览器/HTTP API（window.open/document.open/res.write/stream.write 等），
   // 避免对 client/HTML 插件误报（这些 API 不读写本地文件）。
   const rules: Array<{ kind: string; pattern: RegExp; desc: string }> = [
-    { kind: 'llm.chat', pattern: /sdk\.llm|llm\.chat|chat_completion|LLM_PLUGIN_BRIDGE|lingfang.*llm/i, desc: '调用了平台 LLM 能力' },
-    { kind: 'image.generate', pattern: /sdk\.image|image\.generate|generate_image/i, desc: '调用了平台生图能力' },
-    { kind: 'net.fetch', pattern: /\brequests\b|\bfetch\s*\(|urllib|aiohttp|http\.client|\bhttpx\b|axios/i, desc: '发起了网络请求' },
+    {
+      kind: 'llm.chat',
+      pattern: /sdk\.llm|llm\.chat|chat_completion|LLM_PLUGIN_BRIDGE|lingfang.*llm/i,
+      desc: '调用了平台 LLM 能力',
+    },
+    {
+      kind: 'image.generate',
+      pattern: /sdk\.image|image\.generate|generate_image/i,
+      desc: '调用了平台生图能力',
+    },
+    {
+      kind: 'net.fetch',
+      pattern: /\brequests\b|\bfetch\s*\(|urllib|aiohttp|http\.client|\bhttpx\b|axios/i,
+      desc: '发起了网络请求',
+    },
     // fs.read：Python open( 是文件读；JS 排除 window./document./process. 前缀（浏览器 API）。
     // readFile 加词边界 \b 防匹配 myreadFile。pathlib/os.path 是 Python 文件操作。
-    { kind: 'fs.read', pattern: /(?<!window\.)(?<!document\.)(?<!process\.)\bopen\s*\(|\breadFile\b|\bread_file\b|\bpathlib\b|\bos\.path\.|\bos\.listdir\b/i, desc: '读取了文件' },
+    {
+      kind: 'fs.read',
+      pattern:
+        /(?<!window\.)(?<!document\.)(?<!process\.)\bopen\s*\(|\breadFile\b|\bread_file\b|\bpathlib\b|\bos\.path\.|\bos\.listdir\b/i,
+      desc: '读取了文件',
+    },
     // fs.write：open(...'w'/'a') 是文件写（Python）；.write( 排除 res./stream./socket./process.stdout./document./response. 前缀。
     // writeFile/fs.write/shutil 是明确的文件写操作。
-    { kind: 'fs.write', pattern: /open\s*\([^)]*['"][wa][^)]*\)|\bwriteFile\b|\bwrite_file\b|\bfs\.write\b|(?<!res\.)(?<!stream\.)(?<!socket\.)(?<!stdout\.)(?<!document\.)(?<!response\.)\.write\s*\(|\bshutil\.(?:move|copy)/i, desc: '写入了文件' },
+    {
+      kind: 'fs.write',
+      pattern:
+        /open\s*\([^)]*['"][wa][^)]*\)|\bwriteFile\b|\bwrite_file\b|\bfs\.write\b|(?<!res\.)(?<!stream\.)(?<!socket\.)(?<!stdout\.)(?<!document\.)(?<!response\.)\.write\s*\(|\bshutil\.(?:move|copy)/i,
+      desc: '写入了文件',
+    },
     { kind: 'clipboard', pattern: /clipboard|pyperclip/i, desc: '访问了剪贴板' },
-    { kind: 'storage.kv', pattern: /localStorage|sessionStorage|sqlite|\.kv\b|key_value|keyvalue/i, desc: '使用了本地存储' },
-    { kind: 'system.notify', pattern: /notification|notify\s*\(|toast|plyer\.notification/i, desc: '发送了系统通知' },
+    {
+      kind: 'storage.kv',
+      pattern: /localStorage|sessionStorage|sqlite|\.kv\b|key_value|keyvalue/i,
+      desc: '使用了本地存储',
+    },
+    {
+      kind: 'system.notify',
+      pattern: /notification|notify\s*\(|toast|plyer\.notification/i,
+      desc: '发送了系统通知',
+    },
   ];
   const detected = new Set<string>();
   for (const { content } of codeFiles) {
@@ -1322,19 +1527,43 @@ function checkCodeSyntax(filePath: string, content: string): string | null {
   while (i < content.length) {
     const ch = content[i];
     const next = content[i + 1] ?? '';
-    if (ch === '\n') { line++; inComment = false; i++; continue; }
-    if (inComment) { i++; continue; }
+    if (ch === '\n') {
+      line++;
+      inComment = false;
+      i++;
+      continue;
+    }
+    if (inComment) {
+      i++;
+      continue;
+    }
     if (inString) {
-      if (ch === '\\') { i += 2; continue; } // 转义字符跳过
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      } // 转义字符跳过
       if (ch === inString) inString = null;
-      i++; continue;
+      i++;
+      continue;
     }
     // 进入注释（Python # 或 JS //）
-    if (ch === '#' || (ch === '/' && next === '/')) { inComment = true; i++; continue; }
+    if (ch === '#' || (ch === '/' && next === '/')) {
+      inComment = true;
+      i++;
+      continue;
+    }
     // 进入字符串
-    if (ch === '"' || ch === "'") { inString = ch; i++; continue; }
+    if (ch === '"' || ch === "'") {
+      inString = ch;
+      i++;
+      continue;
+    }
     // 括号
-    if (opens.has(ch)) { stack.push({ char: ch, line }); i++; continue; }
+    if (opens.has(ch)) {
+      stack.push({ char: ch, line });
+      i++;
+      continue;
+    }
     if (ch in pairs) {
       if (stack.length === 0 || stack[stack.length - 1].char !== pairs[ch]) {
         issues.push(`${filePath} 第 ${line} 行：括号 "${ch}" 不配对（多余或顺序错误）`);
@@ -1342,7 +1571,8 @@ function checkCodeSyntax(filePath: string, content: string): string | null {
       } else {
         stack.pop();
       }
-      i++; continue;
+      i++;
+      continue;
     }
     i++;
   }
@@ -1355,7 +1585,29 @@ function checkCodeSyntax(filePath: string, content: string): string | null {
   //    匹配 os.path. 后接非下划线/字母开头的标识符
   const invalidAttr = content.match(/os\.path\.([a-z][_a-z0-9]*)/gi);
   // 已知的合法 os.path 属性
-  const validOsPath = new Set(['join', 'exists', 'isfile', 'isdir', 'dirname', 'basename', 'abspath', 'split', 'splitext', 'expanduser', 'normpath', 'realpath', 'relpath', 'getsize', 'getmtime', 'getatime', 'sep', 'altsep', 'linesep', 'curdir', 'pardir']);
+  const validOsPath = new Set([
+    'join',
+    'exists',
+    'isfile',
+    'isdir',
+    'dirname',
+    'basename',
+    'abspath',
+    'split',
+    'splitext',
+    'expanduser',
+    'normpath',
+    'realpath',
+    'relpath',
+    'getsize',
+    'getmtime',
+    'getatime',
+    'sep',
+    'altsep',
+    'linesep',
+    'curdir',
+    'pardir',
+  ]);
   if (invalidAttr) {
     for (const m of invalidAttr) {
       const attr = m.split('.').pop()!.toLowerCase();

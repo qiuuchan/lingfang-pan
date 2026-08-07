@@ -25,7 +25,7 @@ export async function askText(question: string, defaultValue?: string): Promise<
 export async function askSelect(
   question: string,
   options: string[],
-  defaultIndex?: number,
+  defaultIndex?: number
 ): Promise<number> {
   if (!isTTY) return defaultIndex ?? 0;
   if (options.length === 0) throw new Error('选项不能为空');
@@ -66,7 +66,7 @@ export async function askConfirm(question: string, defaultValue: boolean): Promi
 export async function askMultiselect(
   question: string,
   options: string[],
-  defaults?: boolean[],
+  defaults?: boolean[]
 ): Promise<number[]> {
   if (!isTTY) {
     const result: number[] = [];

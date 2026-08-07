@@ -3,7 +3,19 @@
 // 所有字段 camelCase（与 /api/releases/* 及 /api/admin/releases/* 契约一致）。
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { ASSET_ARCH, ASSET_PLATFORM, RELEASE_CHANNEL, RELEASE_STATUS } from './enums';
 
 /** semver 正则（宽松，支持 1.0.0 / 1.0.0-beta，不严格校验 prerelease 复杂规则，够用且可读）。 */
@@ -51,7 +63,10 @@ export class ReleaseUpdateDto {
   @IsEnum(RELEASE_CHANNEL, { message: 'channel 只允许 STABLE 或 BETA' })
   channel?: (typeof RELEASE_CHANNEL)[number];
 
-  @ApiPropertyOptional({ description: '首发时间（ISO 字符串，手动修正；null 清空）', example: '2026-06-17T10:00:00.000Z' })
+  @ApiPropertyOptional({
+    description: '首发时间（ISO 字符串，手动修正；null 清空）',
+    example: '2026-06-17T10:00:00.000Z',
+  })
   @IsOptional()
   @IsString()
   publishedAt?: string | null;
@@ -86,7 +101,7 @@ export class AdminReleaseListQueryDto {
 
   @ApiPropertyOptional({ description: '版本号或标题关键词' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
@@ -102,7 +117,10 @@ export class ReleaseAssetCreateDto {
   @IsEnum(ASSET_ARCH, { message: 'arch 只允许 X86_64 / AARCH64 / UNIVERSAL' })
   arch!: (typeof ASSET_ARCH)[number];
 
-  @ApiProperty({ description: '下载直链（外链，https 优先）', example: 'https://github.com/.../LingFang_1.0.0_x64-setup.exe' })
+  @ApiProperty({
+    description: '下载直链（外链，https 优先）',
+    example: 'https://github.com/.../LingFang_1.0.0_x64-setup.exe',
+  })
   @IsString()
   @MinLength(1, { message: 'url 不能为空' })
   url!: string;
@@ -140,7 +158,10 @@ export class ReleaseLatestQueryDto {
   @IsEnum(ASSET_ARCH)
   arch?: (typeof ASSET_ARCH)[number];
 
-  @ApiPropertyOptional({ description: '当前版本（提供时返回 updateAvailable 标志）', example: '0.9.0' })
+  @ApiPropertyOptional({
+    description: '当前版本（提供时返回 updateAvailable 标志）',
+    example: '0.9.0',
+  })
   @IsOptional()
   @IsString()
   currentVersion?: string;
