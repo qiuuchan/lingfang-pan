@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitest/config';
 
-// 仅运行受版本控制的测试文件（*.test.mjs / *.spec.ts / *.test.ts）。
-// 显式排除 *-tdd-* 文件：那些是探索期/红态（red-state）的临时用例，
-// 不入库、不进入 CI 门禁，避免未完成的特性测试把门禁弄红。
+// include 与其它工作区包统一为 `*.{test,spec}.{ts,tsx,mts,mjs}`，避免各包方言不同
+// 导致新测试被静默跳过。exclude 必须显式写全 node_modules/dist/coverage —— 一旦提供
+// exclude，vitest 就不再叠加默认值。
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.mjs', 'src/**/*.spec.ts', 'src/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/*-tdd-*'],
+    include: ['src/**/*.{test,spec}.{ts,tsx,mts,mjs}'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/coverage/**'],
   },
 });

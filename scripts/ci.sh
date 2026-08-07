@@ -5,7 +5,7 @@
 #
 # 设计要点（为何无需 Redis / 外部 Postgres）：
 #   - 后端单元测试全部 Mock 了 PrismaService + $transaction，不连真实数据库；
-#   - 4 个 integration spec 按 env 门控（AUTOMATION_TEST_REDIS_URL /
+#   - 5 个 integration spec 按 env 门控（AUTOMATION_TEST_REDIS_URL /
 #     SHARED_REALTIME_TEST_REDIS_URL / SHARED_STATE_DATABASE_INTEGRATION /
 #     WORKFLOW_E2E_*），未配置时自动 describe.skip，不会在 CI 误挂。
 #   因此本脚本在「无外部服务」的标准 runner 上即可全绿。
@@ -69,7 +69,8 @@ $PNPM format:check
 echo "==> [5/7] typecheck (all workspace packages)"
 # 同样改成递归：此前只查 collab-api / collab-admin，apps/desktop（改动量最大的
 # 应用）、apps/web、apps/plugin-preview 与 packages/* 的类型错误可以直接穿过门禁。
-# 9 个项目全量 tsc --noEmit 也只要 ~13s，没有理由不查。
+# 目前 8 个包带 typecheck（ui-tokens 是纯 token 资产包，无脚本），
+# 全量 tsc --noEmit 也只要 ~13s，没有理由不查。
 $PNPM -r typecheck
 
 echo "==> [6/7] unit tests (all workspace packages; integration auto-skips)"
