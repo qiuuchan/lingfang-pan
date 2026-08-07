@@ -33,24 +33,9 @@
       "sha256": "82cc5793a3ba146a3ef6f6fa96982ca70780290d66f91d18fb021be10c6475d7"
     },
     {
-      "path": "ffmpeg/ffmpeg.exe",
-      "size": 242496512,
-      "sha256": "ad8f211bc894755e0061c55ab280ae00e8d3d4f15a8cc4372b24cfa247b5942e"
-    },
-    {
-      "path": "ffmpeg/ffprobe.exe",
-      "size": 242291712,
-      "sha256": "9df3b0b5275e830961df6d94e1f7a71121a7abd5ff708e9fec8a0b6084a55015"
-    },
-    {
       "path": "chromium/ms-playwright/chromium-1228/chrome-win64/chrome.exe",
       "size": 4059648,
       "sha256": "b798f9e53a98d29eb7f36f8c409f905d3184780a04d2bcb56989067194784bd1"
-    },
-    {
-      "path": "chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe",
-      "size": 203034112,
-      "sha256": "28016df6864d302434c9231e1f9f1a8a7ecc512cb2fe3faabb2a36130b96bcf1"
     }
   ],
   "materializedFiles": [
@@ -65,6 +50,42 @@
         "chromium/ms-playwright/chromium-1228/chrome-win64/chrome.dll.part-002",
         "chromium/ms-playwright/chromium-1228/chrome-win64/chrome.dll.part-003",
         "chromium/ms-playwright/chromium-1228/chrome-win64/chrome.dll.part-004"
+      ]
+    },
+    {
+      "path": "ffmpeg/ffmpeg.exe",
+      "size": 242496512,
+      "sha256": "ad8f211bc894755e0061c55ab280ae00e8d3d4f15a8cc4372b24cfa247b5942e",
+      "partsRoot": "../runtime-parts",
+      "parts": [
+        "ffmpeg/ffmpeg.exe.part-000",
+        "ffmpeg/ffmpeg.exe.part-001",
+        "ffmpeg/ffmpeg.exe.part-002",
+        "ffmpeg/ffmpeg.exe.part-003"
+      ]
+    },
+    {
+      "path": "ffmpeg/ffprobe.exe",
+      "size": 242291712,
+      "sha256": "9df3b0b5275e830961df6d94e1f7a71121a7abd5ff708e9fec8a0b6084a55015",
+      "partsRoot": "../runtime-parts",
+      "parts": [
+        "ffmpeg/ffprobe.exe.part-000",
+        "ffmpeg/ffprobe.exe.part-001",
+        "ffmpeg/ffprobe.exe.part-002",
+        "ffmpeg/ffprobe.exe.part-003"
+      ]
+    },
+    {
+      "path": "chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe",
+      "size": 203034112,
+      "sha256": "28016df6864d302434c9231e1f9f1a8a7ecc512cb2fe3faabb2a36130b96bcf1",
+      "partsRoot": "../runtime-parts",
+      "parts": [
+        "chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe.part-000",
+        "chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe.part-001",
+        "chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe.part-002",
+        "chromium/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe.part-003"
       ]
     }
   ],
