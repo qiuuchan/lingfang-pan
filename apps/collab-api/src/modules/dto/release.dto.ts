@@ -4,12 +4,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
-  IsUrl,
   Matches,
   Max,
   MaxLength,
@@ -117,8 +115,13 @@ export class ReleaseAssetCreateDto {
   @IsEnum(ASSET_ARCH, { message: 'arch 只允许 X86_64 / AARCH64 / UNIVERSAL' })
   arch!: (typeof ASSET_ARCH)[number];
 
+  // 刻意不加 @IsUrl()：本字段允许相对路径（如 /downloads/x.exe），由桌面壳
+  // update.rs 的 absolute_url() 拼到 backendUrl 上——这是自托管产物的支持形态，
+  // 有 Rust 单测 absolute_url_joins_relative 覆盖。加 @IsUrl() 会直接打断它。
+  // 安全性不靠这里保证：下载前桌面壳 is_safe_download_url() 强制 https + 拒绝
+  // 内网/保留地址，之后还有 sha256 + minisign 验签（fail-closed）。
   @ApiProperty({
-    description: '下载直链（外链，https 优先）',
+    description: '下载直链（绝对 https 外链，或相对 backendUrl 的路径）',
     example: 'https://github.com/.../LingFang_1.0.0_x64-setup.exe',
   })
   @IsString()

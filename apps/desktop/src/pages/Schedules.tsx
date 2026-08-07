@@ -4,8 +4,8 @@
 // - 顶部 banner：定时任务仅在应用运行时触发，关闭窗口将暂停所有任务。
 // - 工具条：[+ 新建] [筛选：全部/激活/暂停/已完成]
 // - 任务卡片列表：名称 + 类型徽章 + cron/时间 + 下次触发 + 上次结果 + 操作按钮
-// - 编辑对话框（新建/编辑共用）：名称 / 类型 / 触发 / payload / timeout / 时区
-// - 历史抽屉：单任务的 runs.jsonl 最近 200 条
+// - 编辑对话框（新建/编辑共用）：已抽到 components/schedules/ScheduleEditDialog.tsx
+// - 历史抽屉：单任务的 runs.jsonl 最近 200 条（本文件内的 Sheet）
 //
 // 与 Rust 端 commands.rs 一一对应，前端 API 封装在 lib/local-scheduler.ts。
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -28,17 +28,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   Sheet,
   SheetContent,
