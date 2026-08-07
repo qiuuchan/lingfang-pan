@@ -112,8 +112,10 @@ pub(super) fn remove_external_python_environment(package_path: &str) -> Result<(
         return remove_environment_directory(&environment);
     }
     #[cfg(not(windows))]
-    let _ = package_path;
-    Ok(())
+    {
+        let _ = package_path;
+        Ok(())
+    }
 }
 
 pub(super) fn remove_environment_directory(path: &Path) -> Result<(), String> {
