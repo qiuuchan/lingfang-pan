@@ -14,6 +14,8 @@
     "test:shared-realtime:integration:docker": "../../scripts/test-shared-realtime-redis-integration.sh",
     "test:shared-state:database:integration": "vitest run src/modules/plugin-shared-state.database.integration.spec.ts --testTimeout=60000",
     "test:shared-state:database:integration:docker": "../../scripts/test-shared-state-database-integration.sh",
+    "test:cross-tenant:integration": "vitest run src/modules/cross-tenant-authz.database.integration.spec.ts --testTimeout=60000",
+    "test:cross-tenant:integration:docker": "../../scripts/test-cross-tenant-database-integration.sh",
     "test:workflow:integration:docker": "../../scripts/test-workflow-postgres-https-integration.sh",
     "prisma:generate": "tsx src/prisma-cli.ts generate",
     "prisma:migrate": "tsx src/prisma-cli.ts migrate",
