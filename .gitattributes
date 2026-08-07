@@ -1,0 +1,27 @@
+# 全仓库换行符规范：文本文件一律以 LF 检出。
+#
+# 为什么必须显式声明：Windows 开发机常见 core.autocrlf=true，会把文本文件
+# 以 CRLF 检出，而 Prettier 3 的 endOfLine 默认是 "lf"，导致 `pnpm format:check`
+# 在 Windows 上对几乎每个文件都报错（实测 708 个文件全挂），而同样的代码在
+# Linux CI 上却是绿的。声明 eol=lf 后，检出行为与平台和个人 git 配置解耦，
+# 本地门禁与 CI 门禁结果一致。
+* text=auto eol=lf
+
+# 二进制资源：禁止任何换行符转换与文本 diff，避免文件损坏。
+*.exe binary
+*.dll binary
+*.gif binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.gz binary
+*.node binary
+
+# 锁文件由包管理器生成，不参与 diff 审阅。
+pnpm-lock.yaml -diff
