@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Table,
   TableBody,
@@ -272,8 +272,8 @@ export function SharedStateTab() {
               generation。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="shared-reactivate-schema">Active schema version</Label>
+          <Field>
+            <FieldLabel htmlFor="shared-reactivate-schema">Active schema version</FieldLabel>
             <Input
               id="shared-reactivate-schema"
               type="number"
@@ -282,7 +282,7 @@ export function SharedStateTab() {
               value={reactivateSchema}
               onChange={(event) => setReactivateSchema(event.target.value)}
             />
-          </div>
+          </Field>
           <DialogFooter>
             <Button
               variant="outline"
@@ -380,18 +380,18 @@ function MigrationDialog({
             STANDARD invocation 授权。
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor="shared-migrate-key">Key</Label>
+        <FieldGroup className="grid gap-3 sm:grid-cols-2">
+          <Field className="gap-1 sm:col-span-2">
+            <FieldLabel htmlFor="shared-migrate-key">Key</FieldLabel>
             <Input
               id="shared-migrate-key"
               value={key}
               onChange={(event) => setKey(event.target.value)}
               maxLength={128}
             />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="shared-migrate-source">源 schema</Label>
+          </Field>
+          <Field className="gap-1">
+            <FieldLabel htmlFor="shared-migrate-source">源 schema</FieldLabel>
             <Input
               id="shared-migrate-source"
               type="number"
@@ -399,9 +399,9 @@ function MigrationDialog({
               value={sourceSchema}
               onChange={(event) => setSourceSchema(event.target.value)}
             />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="shared-migrate-target">目标 schema</Label>
+          </Field>
+          <Field className="gap-1">
+            <FieldLabel htmlFor="shared-migrate-target">目标 schema</FieldLabel>
             <Input
               id="shared-migrate-target"
               type="number"
@@ -409,18 +409,18 @@ function MigrationDialog({
               value={targetSchema}
               onChange={(event) => setTargetSchema(event.target.value)}
             />
-          </div>
-          <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor="shared-migrate-revision">Expected revision</Label>
+          </Field>
+          <Field className="gap-1 sm:col-span-2">
+            <FieldLabel htmlFor="shared-migrate-revision">Expected revision</FieldLabel>
             <Input
               id="shared-migrate-revision"
               inputMode="numeric"
               value={expectedRevision}
               onChange={(event) => setExpectedRevision(event.target.value)}
             />
-          </div>
-          <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor="shared-migrate-value">目标 JSON</Label>
+          </Field>
+          <Field className="gap-1 sm:col-span-2">
+            <FieldLabel htmlFor="shared-migrate-value">目标 JSON</FieldLabel>
             <Textarea
               id="shared-migrate-value"
               rows={9}
@@ -428,8 +428,8 @@ function MigrationDialog({
               value={valueJson}
               onChange={(event) => setValueJson(event.target.value)}
             />
-          </div>
-        </div>
+          </Field>
+        </FieldGroup>
         <DialogFooter>
           <Button variant="outline" disabled={saving} onClick={onClose}>
             取消

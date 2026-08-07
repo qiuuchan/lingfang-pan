@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Table,
   TableHeader,
@@ -80,9 +80,9 @@ export function InvitationsTab() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex max-w-lg flex-wrap items-end gap-2">
-            <div className="space-y-1">
-              <Label htmlFor="invite-max-uses">最大使用次数</Label>
+          <FieldGroup className="max-w-lg flex-row flex-wrap items-end gap-2">
+            <Field className="w-32 gap-1">
+              <FieldLabel htmlFor="invite-max-uses">最大使用次数</FieldLabel>
               <Input
                 id="invite-max-uses"
                 className="w-32"
@@ -90,9 +90,9 @@ export function InvitationsTab() {
                 onChange={(e) => setMaxUses(e.target.value)}
                 placeholder="最大使用次数"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="invite-expires-at">过期时间（可选）</Label>
+            </Field>
+            <Field className="w-44 gap-1">
+              <FieldLabel htmlFor="invite-expires-at">过期时间（可选）</FieldLabel>
               <Input
                 id="invite-expires-at"
                 className="w-44"
@@ -100,11 +100,11 @@ export function InvitationsTab() {
                 value={expiresAt}
                 onChange={(e) => setExpiresAt(e.target.value)}
               />
-            </div>
+            </Field>
             <LoadingButton loading={generating} onClick={createInvitation}>
               生成
             </LoadingButton>
-          </div>
+          </FieldGroup>
           {newCode && (
             <div className="flex max-w-xl items-center gap-2 rounded-md border bg-muted/50 p-3">
               <code className="min-w-0 flex-1 break-all font-mono text-sm">{newCode}</code>

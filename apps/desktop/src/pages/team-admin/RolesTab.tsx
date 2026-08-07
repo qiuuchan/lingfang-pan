@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -301,53 +301,52 @@ function RoleEditDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>角色名</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={64}
-                placeholder="如：开发者"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>
-                编码
-                {isSystem && (
-                  <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>
-                )}
-              </Label>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                maxLength={64}
-                placeholder="如：developer"
-                disabled={isSystem}
-              />
-              <p className="text-xs text-muted-foreground">
-                小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。
-              </p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>说明</Label>
+        <FieldGroup className="grid grid-cols-2 gap-4 py-2">
+          <Field>
+            <FieldLabel htmlFor="role-name">角色名</FieldLabel>
+            <Input
+              id="role-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={64}
+              placeholder="如：开发者"
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="role-code">
+              编码
+              {isSystem && <span className="ml-1 text-xs text-muted-foreground">（内置锁定）</span>}
+            </FieldLabel>
+            <Input
+              id="role-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              maxLength={64}
+              placeholder="如：developer"
+              disabled={isSystem}
+            />
+            <FieldDescription className="text-xs">
+              小写字母/数字开头，可含下划线、连字符。同 scope 下唯一。
+            </FieldDescription>
+          </Field>
+          <Field className="col-span-2">
+            <FieldLabel htmlFor="role-description">说明</FieldLabel>
             <Textarea
+              id="role-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               maxLength={255}
               rows={2}
             />
-          </div>
-          <div className="space-y-2">
+          </Field>
+          <Field className="col-span-2">
             <div className="flex items-center justify-between">
-              <Label>
+              <FieldLabel>
                 权限分配
                 {isSystem && (
                   <span className="ml-2 text-xs text-muted-foreground">（内置锁定）</span>
                 )}
-              </Label>
+              </FieldLabel>
               <span className="text-xs text-muted-foreground">
                 已选 {selected.size} / {permissions.length}
               </span>
@@ -391,8 +390,8 @@ function RoleEditDialog({
                 })}
               </div>
             </div>
-          </div>
-        </div>
+          </Field>
+        </FieldGroup>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

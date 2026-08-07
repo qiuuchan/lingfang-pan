@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
 
 export function PluginPolicyCard() {
@@ -165,10 +166,11 @@ export function PluginPolicyCard() {
               选择作用范围、允许或拒绝的操作。高风险操作没有明确允许规则时仍会拒绝。
             </p>
           </div>
-          <div className="grid gap-2 md:grid-cols-3">
-            <label className="text-sm">
-              范围
+          <FieldGroup className="grid gap-2 md:grid-cols-3">
+            <Field className="gap-0 text-sm">
+              <FieldLabel htmlFor="policy-rule-scope">范围</FieldLabel>
               <select
+                id="policy-rule-scope"
                 className="mt-1 w-full rounded-md border bg-background p-2"
                 value={scope}
                 onChange={(e) => setScope(e.target.value as typeof scope)}
@@ -178,10 +180,11 @@ export function PluginPolicyCard() {
                 <option value="ACTION">Action</option>
                 <option value="WORKFLOW">工作流</option>
               </select>
-            </label>
-            <label className="text-sm">
-              效果
+            </Field>
+            <Field className="gap-0 text-sm">
+              <FieldLabel htmlFor="policy-rule-effect">效果</FieldLabel>
               <select
+                id="policy-rule-effect"
                 className="mt-1 w-full rounded-md border bg-background p-2"
                 value={effect}
                 onChange={(e) => setEffect(e.target.value as typeof effect)}
@@ -189,10 +192,11 @@ export function PluginPolicyCard() {
                 <option value="ALLOW">允许</option>
                 <option value="DENY">拒绝</option>
               </select>
-            </label>
-            <label className="text-sm">
-              操作
+            </Field>
+            <Field className="gap-0 text-sm">
+              <FieldLabel htmlFor="policy-rule-operation">操作</FieldLabel>
               <select
+                id="policy-rule-operation"
                 className="mt-1 w-full rounded-md border bg-background p-2"
                 value={operation}
                 onChange={(e) => setOperation(e.target.value)}
@@ -213,59 +217,75 @@ export function PluginPolicyCard() {
                   <option key={value}>{value}</option>
                 ))}
               </select>
-            </label>
-          </div>
+            </Field>
+          </FieldGroup>
           {scope === 'PACKAGE' && (
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input
-                placeholder="Package ID"
-                value={packageId}
-                onChange={(e) => setPackageId(e.target.value)}
-              />
-              <Input
-                placeholder="批准的 surface SHA（高风险推荐）"
-                value={surface}
-                onChange={(e) => setSurface(e.target.value)}
-              />
-            </div>
+            <FieldGroup className="grid gap-2 md:grid-cols-2">
+              <Field>
+                <Input
+                  placeholder="Package ID"
+                  value={packageId}
+                  onChange={(e) => setPackageId(e.target.value)}
+                />
+              </Field>
+              <Field>
+                <Input
+                  placeholder="批准的 surface SHA（高风险推荐）"
+                  value={surface}
+                  onChange={(e) => setSurface(e.target.value)}
+                />
+              </Field>
+            </FieldGroup>
           )}
           {scope === 'ACTION' && (
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input
-                placeholder="Package ID"
-                value={packageId}
-                onChange={(e) => setPackageId(e.target.value)}
-              />
-              <Input
-                placeholder="Action ID"
-                value={actionId}
-                onChange={(e) => setActionId(e.target.value)}
-              />
-              <Input
-                placeholder="Contract version"
-                value={contractVersion}
-                onChange={(e) => setContractVersion(e.target.value)}
-              />
-              <Input
-                placeholder="Action surface SHA"
-                value={surface}
-                onChange={(e) => setSurface(e.target.value)}
-              />
-            </div>
+            <FieldGroup className="grid gap-2 md:grid-cols-2">
+              <Field>
+                <Input
+                  placeholder="Package ID"
+                  value={packageId}
+                  onChange={(e) => setPackageId(e.target.value)}
+                />
+              </Field>
+              <Field>
+                <Input
+                  placeholder="Action ID"
+                  value={actionId}
+                  onChange={(e) => setActionId(e.target.value)}
+                />
+              </Field>
+              <Field>
+                <Input
+                  placeholder="Contract version"
+                  value={contractVersion}
+                  onChange={(e) => setContractVersion(e.target.value)}
+                />
+              </Field>
+              <Field>
+                <Input
+                  placeholder="Action surface SHA"
+                  value={surface}
+                  onChange={(e) => setSurface(e.target.value)}
+                />
+              </Field>
+            </FieldGroup>
           )}
           {scope === 'WORKFLOW' && (
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input
-                placeholder="Workflow release ID"
-                value={workflowReleaseId}
-                onChange={(e) => setWorkflowReleaseId(e.target.value)}
-              />
-              <Input
-                placeholder="Workflow plan SHA"
-                value={planSha}
-                onChange={(e) => setPlanSha(e.target.value)}
-              />
-            </div>
+            <FieldGroup className="grid gap-2 md:grid-cols-2">
+              <Field>
+                <Input
+                  placeholder="Workflow release ID"
+                  value={workflowReleaseId}
+                  onChange={(e) => setWorkflowReleaseId(e.target.value)}
+                />
+              </Field>
+              <Field>
+                <Input
+                  placeholder="Workflow plan SHA"
+                  value={planSha}
+                  onChange={(e) => setPlanSha(e.target.value)}
+                />
+              </Field>
+            </FieldGroup>
           )}
           <Button type="button" variant="outline" onClick={addRule}>
             添加规则
@@ -326,7 +346,7 @@ export function PluginPolicyCard() {
         </div>
         <details className="rounded-lg border p-3">
           <summary className="cursor-pointer text-sm font-medium">高级 JSON</summary>
-          <div className="mt-3 space-y-2">
+          <Field className="mt-3">
             <Textarea
               className="min-h-72 font-mono text-xs"
               value={draft}
@@ -336,16 +356,18 @@ export function PluginPolicyCard() {
               }}
             />
             {parsed && !parsed.success && (
-              <p className="text-sm text-destructive">{parsed.error.issues[0]?.message}</p>
+              <FieldError>{parsed.error.issues[0]?.message}</FieldError>
             )}
-            {!parsed && <p className="text-sm text-destructive">JSON 格式无效</p>}
-          </div>
+            {!parsed && <FieldError>JSON 格式无效</FieldError>}
+          </Field>
         </details>
-        <Input
-          placeholder="变更原因（可选）"
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
+        <Field>
+          <Input
+            placeholder="变更原因（可选）"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </Field>
         <LoadingButton loading={saving} disabled={!parsed?.success || !dirty} onClick={publish}>
           保存并应用
         </LoadingButton>

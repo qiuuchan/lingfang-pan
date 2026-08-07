@@ -4,6 +4,7 @@ import { api } from '@/lib/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Field, FieldGroup } from '@/components/ui/field';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -161,38 +162,50 @@ export function CloudAutomationTab() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-2 md:grid-cols-2">
-            <Input
-              placeholder="Package ID"
-              value={packageId}
-              onChange={(e) => setPackageId(e.target.value)}
-            />
-            <Input
-              placeholder="Release ID"
-              value={releaseId}
-              onChange={(e) => setReleaseId(e.target.value)}
-            />
-            <Input
-              placeholder="Release SHA-256"
-              value={sha}
-              onChange={(e) => setSha(e.target.value)}
-            />
-            <Input
-              placeholder="Action ID"
-              value={actionId}
-              onChange={(e) => setActionId(e.target.value)}
-            />
-            <Input
-              placeholder="Action surface SHA-256"
-              value={surfaceSha}
-              onChange={(e) => setSurfaceSha(e.target.value)}
-            />
-            <Input
-              placeholder="HTTPS Endpoint"
-              value={endpoint}
-              onChange={(e) => setEndpoint(e.target.value)}
-            />
-          </div>
+          <FieldGroup className="grid gap-2 md:grid-cols-2">
+            <Field>
+              <Input
+                placeholder="Package ID"
+                value={packageId}
+                onChange={(e) => setPackageId(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Input
+                placeholder="Release ID"
+                value={releaseId}
+                onChange={(e) => setReleaseId(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Input
+                placeholder="Release SHA-256"
+                value={sha}
+                onChange={(e) => setSha(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Input
+                placeholder="Action ID"
+                value={actionId}
+                onChange={(e) => setActionId(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Input
+                placeholder="Action surface SHA-256"
+                value={surfaceSha}
+                onChange={(e) => setSurfaceSha(e.target.value)}
+              />
+            </Field>
+            <Field>
+              <Input
+                placeholder="HTTPS Endpoint"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+              />
+            </Field>
+          </FieldGroup>
           <div className="flex gap-2">
             <Button
               disabled={busy}
@@ -295,29 +308,35 @@ export function CloudAutomationTab() {
             <div className="mb-2 text-sm font-medium">
               灰度路由 · generation {routing?.generation ?? 0}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                className="min-w-56 flex-1"
-                placeholder="Stable deployment ID"
-                value={stableId}
-                onChange={(e) => setStableId(e.target.value)}
-              />
-              <Input
-                className="min-w-56 flex-1"
-                placeholder="Candidate deployment ID（可空）"
-                value={candidateId}
-                onChange={(e) => setCandidateId(e.target.value)}
-              />
-              <Input
-                className="w-28"
-                type="number"
-                min={0}
-                max={100}
-                value={candidatePercent}
-                onChange={(e) =>
-                  setCandidatePercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))
-                }
-              />
+            <FieldGroup className="flex-row flex-wrap items-center gap-2">
+              <Field className="min-w-56 flex-1">
+                <Input
+                  className="min-w-56 flex-1"
+                  placeholder="Stable deployment ID"
+                  value={stableId}
+                  onChange={(e) => setStableId(e.target.value)}
+                />
+              </Field>
+              <Field className="min-w-56 flex-1">
+                <Input
+                  className="min-w-56 flex-1"
+                  placeholder="Candidate deployment ID（可空）"
+                  value={candidateId}
+                  onChange={(e) => setCandidateId(e.target.value)}
+                />
+              </Field>
+              <Field className="w-28">
+                <Input
+                  className="w-28"
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={candidatePercent}
+                  onChange={(e) =>
+                    setCandidatePercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))
+                  }
+                />
+              </Field>
               <Button
                 disabled={busy || !stableId || (candidatePercent > 0 && !candidateId)}
                 onClick={() => void updateRouting()}
@@ -331,7 +350,7 @@ export function CloudAutomationTab() {
               >
                 回滚到稳定
               </Button>
-            </div>
+            </FieldGroup>
           </div>
         </CardContent>
       </Card>

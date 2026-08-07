@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Table,
   TableHeader,
@@ -258,9 +259,14 @@ function GrantsDialog({
           {/* 新增授权规则 */}
           <div className="space-y-2 rounded-md border p-3">
             <div className="text-sm font-medium">添加授权规则</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">主体类型</label>
+            <FieldGroup className="grid grid-cols-2 gap-2">
+              <Field className="gap-1">
+                <FieldLabel
+                  htmlFor="grant-subject-kind"
+                  className="text-xs text-muted-foreground"
+                >
+                  主体类型
+                </FieldLabel>
                 <Select
                   value={subjectKind}
                   onValueChange={(v) => {
@@ -268,7 +274,7 @@ function GrantsDialog({
                     setSubjectId('');
                   }}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="grant-subject-kind" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="min-w-[12rem]">
@@ -276,11 +282,13 @@ function GrantsDialog({
                     <SelectItem value="ROLE">角色</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">效果</label>
+              </Field>
+              <Field className="gap-1">
+                <FieldLabel htmlFor="grant-effect" className="text-xs text-muted-foreground">
+                  效果
+                </FieldLabel>
                 <Select value={effect} onValueChange={(v) => setEffect(v as PluginGrantEffect)}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="grant-effect" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="min-w-[12rem]">
@@ -288,30 +296,30 @@ function GrantsDialog({
                     <SelectItem value="ALLOW">允许</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">
-                {subjectKind === 'USER' ? '选择用户' : '选择角色'}
-              </label>
-              <Select
-                value={subjectId}
-                onValueChange={(v) => {
-                  if (v) setSubjectId(v);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择…" />
-                </SelectTrigger>
-                <SelectContent className="min-w-[12rem]">
-                  {subjectOptions.map((o) => (
-                    <SelectItem key={o.id} value={o.id}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              </Field>
+              <Field className="col-span-2 gap-1">
+                <FieldLabel htmlFor="grant-subject" className="text-xs text-muted-foreground">
+                  {subjectKind === 'USER' ? '选择用户' : '选择角色'}
+                </FieldLabel>
+                <Select
+                  value={subjectId}
+                  onValueChange={(v) => {
+                    if (v) setSubjectId(v);
+                  }}
+                >
+                  <SelectTrigger id="grant-subject" className="w-full">
+                    <SelectValue placeholder="选择…" />
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[12rem]">
+                    {subjectOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </FieldGroup>
             <LoadingButton loading={saving} onClick={handleSet} disabled={!subjectId}>
               添加规则
             </LoadingButton>
