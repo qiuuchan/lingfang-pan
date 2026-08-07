@@ -37,6 +37,21 @@ pnpm -r test           # 运行各包单元测试
 它和 CI 跑的是同一个脚本；只想快速自查时至少跑
 `pnpm lint && pnpm format:check && pnpm -r typecheck && pnpm -r test`。
 
+### 不在门禁内的检查
+
+以下检查**不会**被 CI 拦截，改到相关代码时请本地自行跑：
+
+- **Playwright e2e**（`pnpm -C apps/{desktop,web,collab-admin,plugin-preview} test:e2e`）。
+  配置里带 `webServer`，会自动起 vite dev server，本地直接跑即可。
+  之所以还没进 CI：`apps/desktop/e2e` 的视觉回归快照只有 win32 基线
+  （`*-chromium-win32.png`），在 Linux runner 上找不到对应基线会直接判失败；
+  而且 `todo-panel-collapsed/expanded` 两张基线本身就缺失。要把 e2e 纳入门禁，
+  得先补齐跨平台基线（或把视觉回归拆成单独的、只在固定平台上跑的作业）。
+- **`cargo test -p lingfang-desktop`** 与 `tauri build`：需要 Rust 工具链和
+  数 GB 运行时产物，不进快速门禁。
+- **集成冒烟**（真实 Postgres + 起 API）：见 `.github/workflows/smoke.yml`，
+  手动 `workflow_dispatch` 触发。
+
 ## 提交规范
 
 使用 [Conventional Commits](https://www.conventionalcommits.org/)：
