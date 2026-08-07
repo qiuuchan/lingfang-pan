@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { api, isEmail } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Field, FieldGroup } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
 
 interface SetupWizardProps {
@@ -61,11 +62,23 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
         <p className="text-sm text-muted-foreground">
           当前平台尚未初始化。创建首个平台管理员账号并设置平台名称，完成后即可登录。
         </p>
-        <Input placeholder="管理员邮箱" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        <Input type="password" placeholder="密码（≥8 位）" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        <Input type="password" placeholder="确认密码" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        <Input placeholder="显示名称（可选）" value={displayName} onChange={(e) => setDisplayName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        <Input placeholder="平台名称（可选）" value={platformName} onChange={(e) => setPlatformName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <FieldGroup className="gap-3">
+          <Field>
+            <Input placeholder="管理员邮箱" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          </Field>
+          <Field>
+            <Input type="password" placeholder="密码（≥8 位）" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          </Field>
+          <Field>
+            <Input type="password" placeholder="确认密码" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          </Field>
+          <Field>
+            <Input placeholder="显示名称（可选）" value={displayName} onChange={(e) => setDisplayName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          </Field>
+          <Field>
+            <Input placeholder="平台名称（可选）" value={platformName} onChange={(e) => setPlatformName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          </Field>
+        </FieldGroup>
         <LoadingButton className="w-full" loading={loading} onClick={submit}>完成初始化</LoadingButton>
       </CardContent>
     </Card>
