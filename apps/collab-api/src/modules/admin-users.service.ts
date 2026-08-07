@@ -30,9 +30,8 @@ export class AdminUsersService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
-    @Inject(MailService) private readonly mail: MailService,
-  ) {
-  }
+    @Inject(MailService) private readonly mail: MailService
+  ) {}
 
   async adminUsers(userId: string, query: AdminUserListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
@@ -65,19 +64,47 @@ export class AdminUsersService {
     return { items, total: items.length, page: 1, pageSize };
   }
 
-  async adminCreateUser(actorId: string, input: { email: string; password: string; displayName?: string; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
+  async adminCreateUser(
+    actorId: string,
+    input: {
+      email: string;
+      password: string;
+      displayName?: string;
+      platformRole?: 'NONE' | 'PLATFORM_ADMIN';
+    }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     const email = input.email.trim().toLowerCase();
-    const passwordHash = await bcrypt.hash(input.password || 'ChangeMe123!', 12);
+    if (!input.password) throw badRequest('初始密码不能为空');
+    if (input.password.length < 8) throw badRequest('密码至少 8 位');
+    const passwordHash = await bcrypt.hash(input.password, 12);
     const platformRole = input.platformRole || 'NONE';
     // RBAC 双写：platformRole 枚举 + platformRoleId 同步。
     const platformRoleId = platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null;
-    const user = await this.prisma.user.create({ data: { email, passwordHash, displayName: input.displayName || email, platformRole, platformRoleId } });
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        displayName: input.displayName || email,
+        platformRole,
+        platformRoleId,
+      },
+    });
     await this.audit(actorId, 'admin.user.created', 'User', user.id, { email });
     return { user: publicUser(user) };
   }
 
-  async adminUpdateUser(actorId: string, id: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; email?: string; password?: string }) {
+  async adminUpdateUser(
+    actorId: string,
+    id: string,
+    input: {
+      displayName?: string;
+      status?: 'ACTIVE' | 'DISABLED';
+      platformRole?: 'NONE' | 'PLATFORM_ADMIN';
+      email?: string;
+      password?: string;
+    }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 ADMIN-09：禁止自降级/自禁用（会锁死末位平台管理员）。
     if (id === actorId && (input.status === 'DISABLED' || input.platformRole === 'NONE')) {
@@ -85,9 +112,14 @@ export class AdminUsersService {
     }
     // 修复 ADMIN-09：禁止禁用/降级最后一个 PLATFORM_ADMIN。
     if (input.status === 'DISABLED' || input.platformRole === 'NONE') {
-      const target = await this.prisma.user.findUnique({ where: { id }, select: { platformRole: true, status: true } });
+      const target = await this.prisma.user.findUnique({
+        where: { id },
+        select: { platformRole: true, status: true },
+      });
       if (target?.platformRole === 'PLATFORM_ADMIN' && target.status === 'ACTIVE') {
-        const remainingAdmins = await this.prisma.user.count({ where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' } });
+        const remainingAdmins = await this.prisma.user.count({
+          where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' },
+        });
         if (remainingAdmins <= 1) throw forbidden('不能禁用或降级最后一个平台管理员');
       }
     }
@@ -101,13 +133,22 @@ export class AdminUsersService {
       }
     }
     // 显式仅取声明字段，避免客户端误传非法键透传进 prisma.user.update。
-    const data: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; platformRoleId?: string | null; email?: string; passwordHash?: string; tokenVersion?: { increment: number } } = {};
+    const data: {
+      displayName?: string;
+      status?: 'ACTIVE' | 'DISABLED';
+      platformRole?: 'NONE' | 'PLATFORM_ADMIN';
+      platformRoleId?: string | null;
+      email?: string;
+      passwordHash?: string;
+      tokenVersion?: { increment: number };
+    } = {};
     if (input.displayName !== undefined) data.displayName = input.displayName;
     if (input.status !== undefined) data.status = input.status;
     if (input.platformRole !== undefined) {
       data.platformRole = input.platformRole;
       // RBAC 双写：platformRole 枚举变化时同步 platformRoleId，保持权限守卫解析一致。
-      data.platformRoleId = input.platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null;
+      data.platformRoleId =
+        input.platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null;
     }
     if (normalizedEmail !== undefined) data.email = normalizedEmail;
     // password 明文 → bcrypt hash（与 register/login 一致 cost=12）。
@@ -117,7 +158,12 @@ export class AdminUsersService {
     }
     // 修复 ADMIN-02 / AUTH-01：禁用或降级时自增 tokenVersion，使已签发的旧 token 立即失效。
     // 改 email 或 password 也自增 tokenVersion（强制重新登录，旧 token 作废）。
-    if (input.status === 'DISABLED' || input.platformRole === 'NONE' || normalizedEmail !== undefined || input.password !== undefined) {
+    if (
+      input.status === 'DISABLED' ||
+      input.platformRole === 'NONE' ||
+      normalizedEmail !== undefined ||
+      input.password !== undefined
+    ) {
       data.tokenVersion = { increment: 1 };
     }
     const user = await this.prisma.user.update({ where: { id }, data });
@@ -133,13 +179,21 @@ export class AdminUsersService {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 ADMIN-09：禁止自禁用与禁用最后一个平台管理员。
     if (id === actorId) throw forbidden('不能禁用自己的账号');
-    const target = await this.prisma.user.findUnique({ where: { id }, select: { platformRole: true, status: true } });
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { platformRole: true, status: true },
+    });
     if (target?.platformRole === 'PLATFORM_ADMIN' && target.status === 'ACTIVE') {
-      const remainingAdmins = await this.prisma.user.count({ where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' } });
+      const remainingAdmins = await this.prisma.user.count({
+        where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' },
+      });
       if (remainingAdmins <= 1) throw forbidden('不能禁用最后一个平台管理员');
     }
     // tokenVersion 自增使旧 token 立即失效（ADMIN-02）；此前旧 token 最长 7 天仍可用。
-    const user = await this.prisma.user.update({ where: { id }, data: { status: 'DISABLED', tokenVersion: { increment: 1 } } });
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: { status: 'DISABLED', tokenVersion: { increment: 1 } },
+    });
     await this.audit(actorId, 'admin.user.disabled', 'User', id, {});
     return { user: publicUser(user) };
   }
@@ -251,7 +305,10 @@ export class AdminUsersService {
   //  - tokenVersion++ 作废旧 token，避免攻击者继续使用旧会话（与 auth.resetPassword 同款语义）。
   async adminResetUserPassword(actorId: string, id: string) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const user = await this.prisma.user.findUnique({ where: { id }, select: { id: true, email: true, displayName: true, status: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, displayName: true, status: true },
+    });
     if (!user) throw notFound('用户不存在');
     // 生成临时密码：randomBytes(9) → base64url 恰好 12 字符（72 bits，ceil(72/6)=12，无 padding 截断）。
     // base64url 字母表（A-Z a-z 0-9 - _）无歧义字符，便于人工转抄。
@@ -259,7 +316,10 @@ export class AdminUsersService {
     const passwordHash = await bcrypt.hash(tempPassword, 12);
     // 事务：改密 + tokenVersion++（原子，作废旧 token）+ 审计（审计不记密码值）。
     await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
+      await tx.user.update({
+        where: { id },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
+      });
       await tx.auditLog.create({
         data: {
           actorUserId: actorId,
@@ -278,7 +338,7 @@ export class AdminUsersService {
         'password_reset_by_admin',
         '密码已被管理员重置',
         `你的账号密码已被平台管理员重置，请联系管理员获取临时密码并尽快登录后修改。`,
-        { relatedType: 'User', relatedId: id },
+        { relatedType: 'User', relatedId: id }
       );
     } catch {
       // 通知触发失败不阻塞重置主流程。
@@ -309,30 +369,51 @@ export class AdminUsersService {
   //  - 禁止降级最后一个 PLATFORM_ADMIN（保持平台治理可用性）。
   //  - 升级为 PLATFORM_ADMIN：写审计 admin.user.role_changed，metadata 记 from/to。
   //  - 降级为 NONE：tokenVersion++（作废旧 token，防被降级管理员继续用旧 token 操作）。
-  async adminUpdateUserPlatformRole(actorId: string, id: string, input: { platformRole: 'NONE' | 'PLATFORM_ADMIN' }) {
+  async adminUpdateUserPlatformRole(
+    actorId: string,
+    id: string,
+    input: { platformRole: 'NONE' | 'PLATFORM_ADMIN' }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 禁止自改自身：防自降级（锁死末位管理员）+ 防自提权（绕过审批链）。
     if (id === actorId) throw forbidden('不能调整自己的平台管理员角色');
-    const target = await this.prisma.user.findUnique({ where: { id }, select: { id: true, email: true, displayName: true, platformRole: true, status: true } });
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, displayName: true, platformRole: true, status: true },
+    });
     if (!target) throw notFound('用户不存在');
     // 幂等优化：已是目标角色则不重复写审计，避免无变更操作污染审计日志。
     if (target.platformRole === input.platformRole) {
       return { user: publicUser(target) };
     }
     // 降级（PLATFORM_ADMIN → NONE）时禁止降级最后一个管理员。
-    if (input.platformRole === 'NONE' && target.platformRole === 'PLATFORM_ADMIN' && target.status === 'ACTIVE') {
-      const remainingAdmins = await this.prisma.user.count({ where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' } });
+    if (
+      input.platformRole === 'NONE' &&
+      target.platformRole === 'PLATFORM_ADMIN' &&
+      target.status === 'ACTIVE'
+    ) {
+      const remainingAdmins = await this.prisma.user.count({
+        where: { platformRole: 'PLATFORM_ADMIN', status: 'ACTIVE' },
+      });
       if (remainingAdmins <= 1) throw forbidden('不能降级最后一个平台管理员');
     }
     // 降级时 tokenVersion++ 作废旧 token（与 adminUpdateUser 同款语义），升级则不需要（提权不涉及吊销）。
     // RBAC 双写：platformRole 枚举 + platformRoleId 同步。
-    const data: { platformRole: 'NONE' | 'PLATFORM_ADMIN'; platformRoleId: string | null; tokenVersion?: { increment: number } } = {
+    const data: {
+      platformRole: 'NONE' | 'PLATFORM_ADMIN';
+      platformRoleId: string | null;
+      tokenVersion?: { increment: number };
+    } = {
       platformRole: input.platformRole,
-      platformRoleId: input.platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null,
+      platformRoleId:
+        input.platformRole === 'PLATFORM_ADMIN' ? SYSTEM_PLATFORM_ADMIN_ROLE_ID : null,
     };
     if (input.platformRole === 'NONE') data.tokenVersion = { increment: 1 };
     const user = await this.prisma.user.update({ where: { id }, data });
-    await this.audit(actorId, 'admin.user.role_changed', 'User', id, { from: target.platformRole, to: input.platformRole });
+    await this.audit(actorId, 'admin.user.role_changed', 'User', id, {
+      from: target.platformRole,
+      to: input.platformRole,
+    });
     return { user: publicUser(user) };
   }
 
@@ -366,7 +447,15 @@ export class AdminUsersService {
     if (!user) throw notFound('用户不存在');
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId?: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 }
