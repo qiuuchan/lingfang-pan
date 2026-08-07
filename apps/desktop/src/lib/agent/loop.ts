@@ -202,9 +202,6 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
             }
           }
         },
-        onUsage: () => {
-          _hasUsage = true;
-        },
       });
       // 流正常结束：flush thinkParser 残留（未闭合 <think> 等）。
       thinkParser.flush();
@@ -363,7 +360,9 @@ interface StreamOptions {
   onToolCallDelta: (
     calls: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
   ) => void;
-  onUsage: (usage: { promptTokens?: number; completionTokens?: number }) => void;
+  // 可选：目前桌面端没有 token 计量，没有订阅方。请求仍带 stream_options.include_usage，
+  // 中继照常回报每轮用量，接线时在这里挂订阅即可，不用改 SSE 解析。
+  onUsage?: (usage: { promptTokens?: number; completionTokens?: number }) => void;
 }
 
 /**
@@ -517,7 +516,7 @@ async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<Str
       const fr = obj.choices?.[0]?.finish_reason;
       if (fr) finishReason = fr;
       if (obj.usage) {
-        opts.onUsage({
+        opts.onUsage?.({
           promptTokens: obj.usage.prompt_tokens,
           completionTokens: obj.usage.completion_tokens,
         });

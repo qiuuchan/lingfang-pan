@@ -181,9 +181,10 @@ export function SettingsView() {
 
   // 组E 搜索源：searxngUrl 明文 + tavily/brave 密钥脱敏。AI 联网搜索的源配置。
   // 密钥 Draft 仅在输入新值时非空（留空保持不变，与 Gitee token 同款约定）。
-  // 只写不读：setSearch 在加载和保存后都调了，但界面全程只渲染 searchDraft，
-  // 这份服务端态没有任何读取方（每次 set 都是一次白白的重渲染）。
-  const [_search, setSearch] = useState<SearchSettings>(EMPTY_SEARCH);
+  // 这里刻意只有 draft，没有 rbflow/`rbflow` 那样的「已保存快照」state：
+  // 快照的存在意义是连通性测试要用已保存值而非草稿（见 rbflow 的 test-rbflow），
+  // 而搜索源没有这个功能，快照就没有任何读取方 —— 曾经存在过一份，加载和保存后
+  // 各 set 一次，纯粹是两次白白的重渲染。要加回来请先有真实读取方。
   const [searchDraft, setSearchDraft] = useState<SearchSettings>(EMPTY_SEARCH);
   const [tavilyKeyDraft, setTavilyKeyDraft] = useState('');
   const [braveKeyDraft, setBraveKeyDraft] = useState('');
@@ -307,9 +308,7 @@ export function SettingsView() {
       api<SearchSettings>('/api/admin/settings/search')
         .then((data) => {
           if (cancelled) return;
-          const next = { ...EMPTY_SEARCH, ...data };
-          setSearch(next);
-          setSearchDraft(next);
+          setSearchDraft({ ...EMPTY_SEARCH, ...data });
         })
         .catch((e: unknown) => {
           if (cancelled) return;
@@ -504,13 +503,12 @@ export function SettingsView() {
       if (tavilyKeyDraft.length > 0) entries.push({ key: 'tavilyApiKey', value: tavilyKeyDraft });
       if (braveKeyDraft.length > 0) entries.push({ key: 'braveApiKey', value: braveKeyDraft });
       await api('/api/admin/settings', { method: 'PATCH', body: { settings: entries } });
-      // 同步本地快照 + 清空密钥草稿（后端已存新值，下次加载 hasXxx=true）。
+      // 回写草稿：trim 后的 url 与新的 hasXxx 标志（后端已存新值，下次加载 hasXxx=true）。
       const updated: SearchSettings = {
         searxngUrl: searchDraft.searxngUrl.trim(),
         hasTavilyApiKey: tavilyKeyDraft.length > 0 ? true : searchDraft.hasTavilyApiKey,
         hasBraveApiKey: braveKeyDraft.length > 0 ? true : searchDraft.hasBraveApiKey,
       };
-      setSearch(updated);
       setSearchDraft(updated);
       setTavilyKeyDraft('');
       setBraveKeyDraft('');

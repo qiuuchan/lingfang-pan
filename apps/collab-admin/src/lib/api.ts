@@ -2,11 +2,9 @@
 // 不再把令牌存入 localStorage / 内存，从源头消除 XSS 窃取可复用凭据的攻击面。
 // 浏览器在同源（生产经 nginx 代理）或同站（开发 localhost 跨端口）请求时自动携带 Cookie；
 // 写操作需附带 x-csrf-token（取自可读的 lingfang_admin_csrf Cookie）以防御跨站请求伪造。
-// 调查结论（见本次死代码清理报告）：CSRF 防护本身没漏 —— readCsrfToken() 直接把
-// 同一个 cookie 名硬编码进了正则，写操作照常带 x-csrf-token，后端 security.ts 也在校验。
-// 这个常量只是被 readCsrfToken 漏用的重复字面量，改名时两处会失步。修法（一行）：
-// 让 readCsrfToken 用它构造正则。但接线属于安全改动，留给 owner 定夺，先不动。
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// 必须与后端 apps/collab-api/src/security.ts 的同名常量保持一致（跨包，故为重复字面量）。
+// readCsrfToken() 用它构造正则而非再写一遍字面量：曾经两处各写一份，改 cookie 名时
+// 只改一处就会让 x-csrf-token 静默读空 —— 写请求全部被后端 403，且没有任何编译期提示。
 const ADMIN_CSRF_COOKIE = 'lingfang_admin_csrf';
 
 // ADMIN-01 修复：401 全局拦截事件名。
@@ -25,7 +23,7 @@ export interface ApiError extends Error {
 
 // 从可读 CSRF Cookie 中读取令牌，供写操作放入 x-csrf-token 头（防御跨站请求伪造）。
 function readCsrfToken(): string {
-  const m = document.cookie.match(/(?:^|;\s*)lingfang_admin_csrf=([^;]*)/);
+  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${ADMIN_CSRF_COOKIE}=([^;]*)`));
   return m ? decodeURIComponent(m[1]) : '';
 }
 

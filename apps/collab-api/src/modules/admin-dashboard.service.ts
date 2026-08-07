@@ -69,10 +69,6 @@ export class AdminDashboardService {
       totalCalls,
       totalSuccess,
       totalFailed,
-      // 累计平均耗时：这条 aggregate 每次打开看板都真的查了库，但返回体的 total
-      // 块里没有 avgDurationMs 字段，结果被直接丢掉 —— 要么把它接进返回体，要么
-      // 把这次查询删掉省一次聚合。先标记不用，别默默浪费一次全表聚合还没人知道。
-      _totalDurationAgg,
     ] = await Promise.all([
       this.prisma.llmCallLog.count({ where: { createdAt: { gte: monthStart } } }),
       this.prisma.llmCallLog.count({
@@ -88,10 +84,12 @@ export class AdminDashboardService {
       this.prisma.llmCallLog.count({}),
       this.prisma.llmCallLog.count({ where: { status: 'success' } }),
       this.prisma.llmCallLog.count({ where: { status: { in: failStatuses } } }),
-      this.prisma.llmCallLog.aggregate({
-        where: { status: 'success' },
-        _avg: { durationMs: true },
-      }),
+      // 注意：这里刻意没有「累计平均耗时」的 aggregate。曾经有一条
+      // aggregate({ where: { status: 'success' }, _avg: { durationMs } })，
+      // 无时间边界、每次打开看板都全表扫一遍 llmCallLog，而返回体的 total 块
+      // 根本没有 avgDurationMs 字段（只有月度那一个），结果被直接丢弃。
+      // llmCallLog 是无上限增长的调用流水表，要加累计维度得先想清楚索引/物化，
+      // 不能顺手挂一条全表聚合在看板首屏上。
     ]);
     const safeRate = (calls: number, success: number) =>
       calls > 0 ? Math.round((success / calls) * 1000) / 10 : 0;
