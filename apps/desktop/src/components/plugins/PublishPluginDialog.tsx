@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { errorMessage } from '@/lib/api';
@@ -345,25 +346,33 @@ export function PublishPluginDialog({
             </TabsContent>
           </Tabs>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-xs text-muted-foreground">发布目标
-              <select value={target} onChange={(event) => setTarget(event.target.value as PublishTarget)} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground">
-                <option value="team">团队空间</option>
-                <option value="market" disabled={!canSubmitMarket}>团队 + 市场提审</option>
-              </select>
-            </label>
-            <label className="grid gap-1.5 text-xs text-muted-foreground">来源类型
-              <select value={sourceKind} onChange={(event) => { const next = event.target.value as PluginReleaseSourceKind; setSourceKind(next); if (!sourceLabel || sourceLabel === DEFAULT_SOURCE_LABELS[sourceKind]) setSourceLabel(DEFAULT_SOURCE_LABELS[next]); }} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground">
-                {SOURCE_OPTIONS.map((kind) => <option key={kind} value={kind}>{DEFAULT_SOURCE_LABELS[kind]}</option>)}
-              </select>
-            </label>
-          </div>
-          <label className="grid gap-1.5 text-xs text-muted-foreground">来源说明
-            <Input value={sourceLabel} maxLength={80} onChange={(event) => setSourceLabel(event.target.value)} placeholder="例如：VS Code 插件工程" />
-          </label>
-          {target === 'market' && <label className="grid gap-1.5 text-xs text-muted-foreground">市场价格（分）
-            <Input inputMode="numeric" value={price} onChange={(event) => setPrice(event.target.value.replace(/[^0-9]/g, ''))} placeholder="0 表示免费" />
-          </label>}
+          <FieldGroup className="gap-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="publish-target" className="text-xs font-normal text-muted-foreground">发布目标</FieldLabel>
+                <select id="publish-target" value={target} onChange={(event) => setTarget(event.target.value as PublishTarget)} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground">
+                  <option value="team">团队空间</option>
+                  <option value="market" disabled={!canSubmitMarket}>团队 + 市场提审</option>
+                </select>
+              </Field>
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="publish-source-kind" className="text-xs font-normal text-muted-foreground">来源类型</FieldLabel>
+                <select id="publish-source-kind" value={sourceKind} onChange={(event) => { const next = event.target.value as PluginReleaseSourceKind; setSourceKind(next); if (!sourceLabel || sourceLabel === DEFAULT_SOURCE_LABELS[sourceKind]) setSourceLabel(DEFAULT_SOURCE_LABELS[next]); }} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground">
+                  {SOURCE_OPTIONS.map((kind) => <option key={kind} value={kind}>{DEFAULT_SOURCE_LABELS[kind]}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor="publish-source-label" className="text-xs font-normal text-muted-foreground">来源说明</FieldLabel>
+              <Input id="publish-source-label" value={sourceLabel} maxLength={80} onChange={(event) => setSourceLabel(event.target.value)} placeholder="例如：VS Code 插件工程" />
+            </Field>
+            {target === 'market' && (
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="publish-price" className="text-xs font-normal text-muted-foreground">市场价格（分）</FieldLabel>
+                <Input id="publish-price" inputMode="numeric" value={price} onChange={(event) => setPrice(event.target.value.replace(/[^0-9]/g, ''))} placeholder="0 表示免费" />
+              </Field>
+            )}
+          </FieldGroup>
 
           {effectiveSummary && (
             <div className="divide-y rounded-lg border bg-muted/10 text-sm">
