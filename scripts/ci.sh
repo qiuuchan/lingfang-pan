@@ -22,7 +22,7 @@
 #  _smoke-helpers.mjs 冒烟脚本共享工具（幂等确保 demo 租户/用户）。
 #  enable-settlement-v2.mjs  把市场结算切到 SETTLEMENT_V2（购买扣费前提，幂等）。
 #  ci.sh              【单元门禁】install→prisma generate→lint→format:check→
-#                     typecheck→全工作区 vitest→build。
+#                     全工作区 typecheck→全工作区 vitest→全工作区生产构建。
 #                     无需外部服务（单测 Mock Prisma；integration spec 按 env 门控跳过）。
 #  smoke-ci.sh        【集成门禁】全新库上启动真实 API 并跑 verify-all。
 #  .github/workflows/ci.yml     调用 ci.sh，每次 push/PR 跑（快速）。
@@ -81,10 +81,17 @@ echo "==> [6/7] unit tests (all workspace packages; integration auto-skips)"
 # 需要真实 Redis/Postgres 的 integration spec 按 env 门控自动 skip。
 $PNPM -r test
 
-echo "==> [7/7] build collab-api"
+echo "==> [7/7] production builds (all CI-buildable packages)"
+# 这里不能用 `pnpm -r build`：apps/desktop 的 build 是 `tauri build`，需要 Rust
+# 工具链 + 数 GB 运行时产物（runtime-parts），标准 runner 上跑不动。
+# 因此枚举，并让 desktop 走纯前端的 `vite:build`（不依赖 runtime:verify）。
+# 此前门禁只构建 collab-api / collab-admin，desktop / web / plugin-preview 的
+# 打包期错误（Vite 解析失败、循环依赖、产物体积炸裂）完全不会被拦住。
+# 新增的三个加起来只多 ~7s，性价比极高。
 $PNPM -C apps/collab-api build
-
-echo "==> build collab-admin"
 $PNPM -C apps/collab-admin build
+$PNPM -C apps/web build
+$PNPM -C apps/plugin-preview build
+$PNPM -C apps/desktop vite:build
 
 echo "==> CI core checks passed ✅"
