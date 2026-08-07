@@ -103,7 +103,11 @@ apps/desktop/playwright/.cache/
 .zcode/
 .agents/
 .kimi-code/ 
-pnpm-lock.yaml
+
+# 根目录的 npm 锁文件是历史误操作产物（某次在根跑了 npm install）。
+# 本仓库由 pnpm workspace 管理，根 package-lock.json 只会误导人和工具。
+# 注意用 / 前缀只锁根目录：tools/package-lock.json 是独立的 npm 小工具，需保留。
+/package-lock.json
 
 # 工具/测试运行态缓存（不入仓）
 .playwright-cli/
