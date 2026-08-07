@@ -56,6 +56,11 @@ export default tseslint.config(
       // Legacy inline `eslint-disable-next-line react-hooks/exhaustive-deps` comments exist
       // in the codebase; registering the plugin (rule off) resolves "rule not found" errors.
       'react-hooks/exhaustive-deps': 'off',
+      // rules-of-hooks 与 exhaustive-deps 不同：后者噪声大、常有误报，前者的每一条命中
+      // 都是真 bug —— 条件调用 Hook 会让前后两次渲染的 Hook 数量对不上，React 直接抛
+      // “Rendered more hooks than during the previous render”。开启时全仓只有 2 处违规
+      // （collab-admin App.tsx 的两个 useMemo 落在 early return 之后），已一并修掉。
+      'react-hooks/rules-of-hooks': 'error',
       // Basic best-practice error rules that catch genuine bugs.
       'no-unreachable': 'error',
       'no-fallthrough': 'error',
