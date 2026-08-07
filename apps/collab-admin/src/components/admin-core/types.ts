@@ -127,9 +127,11 @@ export type TeamMembersPage = Page<TeamMemberEntry>;
 export type TeamRolesPage = Page<RoleSummary>;
 export type TeamPluginsPage = Page<TeamPluginEntry>;
 export type TeamPurchasesPage = Page<TeamPurchaseEntry>;
-export type TeamLedgerPage = Page<TeamLedgerEntry & {
-  actor?: { id: string; email: string; displayName: string } | null;
-}> & {
+export type TeamLedgerPage = Page<
+  TeamLedgerEntry & {
+    actor?: { id: string; email: string; displayName: string } | null;
+  }
+> & {
   summary: {
     totalCreditCents: number;
     totalDebitCents: number;

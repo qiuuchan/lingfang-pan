@@ -161,7 +161,7 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
 
     const timeoutMs = Math.max(
       LOCAL_SCHEDULE_TIMEOUT_MS_MIN,
-      Math.min(LOCAL_SCHEDULE_TIMEOUT_MS_MAX, Math.round(timeoutMin * 60_000)),
+      Math.min(LOCAL_SCHEDULE_TIMEOUT_MS_MAX, Math.round(timeoutMin * 60_000))
     );
 
     setSaving(true);
@@ -197,9 +197,7 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
       <DialogContent className="flex max-h-[90vh] w-[92vw] max-w-2xl flex-col gap-4 overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? '编辑定时任务' : '新建定时任务'}</DialogTitle>
-          <DialogDescription>
-            配置触发规则与执行内容；任务仅在应用运行时触发
-          </DialogDescription>
+          <DialogDescription>配置触发规则与执行内容；任务仅在应用运行时触发</DialogDescription>
         </DialogHeader>
 
         {/* 名称 */}
@@ -221,17 +219,20 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
             <SelectContent>
               <SelectItem value="AGENT_PROMPT">
                 <span className="flex items-center gap-2">
-                  <BotIcon className="size-4" />Agent Prompt（跑一段 Agent 对话）
+                  <BotIcon className="size-4" />
+                  Agent Prompt（跑一段 Agent 对话）
                 </span>
               </SelectItem>
               <SelectItem value="PLUGIN_ACTION">
                 <span className="flex items-center gap-2">
-                  <PackageIcon className="size-4" />插件 Action（调用插件能力）
+                  <PackageIcon className="size-4" />
+                  插件 Action（调用插件能力）
                 </span>
               </SelectItem>
               <SelectItem value="NOTIFY">
                 <span className="flex items-center gap-2">
-                  <BellIcon className="size-4" />系统通知（仅发提醒）
+                  <BellIcon className="size-4" />
+                  系统通知（仅发提醒）
                 </span>
               </SelectItem>
             </SelectContent>
@@ -247,12 +248,14 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
             <SelectContent>
               <SelectItem value="CRON">
                 <span className="flex items-center gap-2">
-                  <ClockIcon className="size-4" />周期触发（cron 表达式）
+                  <ClockIcon className="size-4" />
+                  周期触发（cron 表达式）
                 </span>
               </SelectItem>
               <SelectItem value="ONCE">
                 <span className="flex items-center gap-2">
-                  <CalendarIcon className="size-4" />一次性触发
+                  <CalendarIcon className="size-4" />
+                  一次性触发
                 </span>
               </SelectItem>
             </SelectContent>
@@ -285,10 +288,7 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
 
         {/* payload 按类型切换 */}
         {taskType === 'AGENT_PROMPT' && (
-          <Field
-            label="Prompt"
-            hint={`Agent 任务指令，最多 10000 字符（当前 ${prompt.length}）`}
-          >
+          <Field label="Prompt" hint={`Agent 任务指令，最多 10000 字符（当前 ${prompt.length}）`}>
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}

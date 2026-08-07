@@ -16,7 +16,8 @@ export class WebMarketplaceController {
   constructor(
     @Inject(WebMarketplaceService) private readonly marketplace: WebMarketplaceService,
     @Inject(MarketplaceCommerceService) private readonly commerce: MarketplaceCommerceService,
-    @Inject(MarketplaceCommerceQueryService) private readonly commerceQueries: MarketplaceCommerceQueryService,
+    @Inject(MarketplaceCommerceQueryService)
+    private readonly commerceQueries: MarketplaceCommerceQueryService
   ) {}
 
   @Public()
@@ -26,7 +27,10 @@ export class WebMarketplaceController {
     const parsed = WebPluginCatalogQuery.safeParse(query);
     if (!parsed.success) {
       throw new AppError(400, 'web_catalog_query_invalid', '插件目录筛选参数无效', {
-        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
       });
     }
     return this.marketplace.catalog(parsed.data);
@@ -54,7 +58,7 @@ export class WebMarketplaceController {
     @Req() req: Request,
     @Param('packageId') packageId: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Body() body: MarketplacePurchaseDto,
+    @Body() body: MarketplacePurchaseDto
   ) {
     return this.commerce.purchaseV2(requireUser(req).id, {
       packageId,

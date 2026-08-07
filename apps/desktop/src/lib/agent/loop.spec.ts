@@ -27,20 +27,24 @@ function contentDelta(text: string, role: 'assistant' = 'assistant') {
 /** 构造 tool_calls delta chunk（首个分片含 id+name，后续只含 arguments 增量）。 */
 function toolCallDelta(index: number, opts: { id?: string; name?: string; arguments?: string }) {
   return {
-    choices: [{
-      index: 0,
-      delta: {
-        tool_calls: [{
-          index,
-          ...(opts.id != null ? { id: opts.id } : {}),
-          type: 'function',
-          function: {
-            ...(opts.name != null ? { name: opts.name } : {}),
-            ...(opts.arguments != null ? { arguments: opts.arguments } : {}),
-          },
-        }],
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index,
+              ...(opts.id != null ? { id: opts.id } : {}),
+              type: 'function',
+              function: {
+                ...(opts.name != null ? { name: opts.name } : {}),
+                ...(opts.arguments != null ? { arguments: opts.arguments } : {}),
+              },
+            },
+          ],
+        },
       },
-    }],
+    ],
   };
 }
 
@@ -58,9 +62,11 @@ function mockFetchOnce(sseText: string) {
       controller.close();
     },
   });
-  return vi.fn().mockResolvedValue(
-    new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
-  );
+  return vi
+    .fn()
+    .mockResolvedValue(
+      new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    );
 }
 
 // === 测试 ===
@@ -79,7 +85,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function makeCallbacks(): LoopCallbacks & { calls: string[]; outputs: Array<{ name: string; result: unknown; ok: boolean }> } {
+function makeCallbacks(): LoopCallbacks & {
+  calls: string[];
+  outputs: Array<{ name: string; result: unknown; ok: boolean }>;
+} {
   const calls: string[] = [];
   const outputs: Array<{ name: string; result: unknown; ok: boolean }> = [];
   return {
@@ -98,10 +107,7 @@ function makeCallbacks(): LoopCallbacks & { calls: string[]; outputs: Array<{ na
 
 describe('runAgentLoop', () => {
   it('纯文本响应：单轮结束，回调收到 text delta', async () => {
-    globalThis.fetch = mockFetchOnce(sseBody([
-      contentDelta('你好'),
-      contentDelta('世界'),
-    ]));
+    globalThis.fetch = mockFetchOnce(sseBody([contentDelta('你好'), contentDelta('世界')]));
     const cbs = makeCallbacks();
     const result = await runAgentLoop({
       messages: [{ role: 'user', content: 'hi' }],
@@ -130,9 +136,14 @@ describe('runAgentLoop', () => {
       const encoder = new TextEncoder();
       const text = callCount === 1 ? fetch1 : fetch2;
       const stream = new ReadableStream({
-        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+        start(controller) {
+          controller.enqueue(encoder.encode(text));
+          controller.close();
+        },
       });
-      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      );
     });
 
     const echoTool: ToolDefinition = {
@@ -157,13 +168,16 @@ describe('runAgentLoop', () => {
   });
 
   it('工具错误：ToolResult.ok:false → onToolOutput 收到 err', async () => {
-    globalThis.fetch = mockFetchOnce(sseBody([
-      toolCallDelta(0, { id: 'call_1', name: 'Fail', arguments: '{}' }),
-    ]));
+    globalThis.fetch = mockFetchOnce(
+      sseBody([toolCallDelta(0, { id: 'call_1', name: 'Fail', arguments: '{}' })])
+    );
     // 第二轮（工具失败后模型应收到错误并回复）
-    globalThis.fetch = vi.fn().mockImplementationOnce(mockFetchOnce(sseBody([
-      toolCallDelta(0, { id: 'call_1', name: 'Fail', arguments: '{}' }),
-    ]))).mockImplementationOnce(mockFetchOnce(sseBody([contentDelta('抱歉')])));
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementationOnce(
+        mockFetchOnce(sseBody([toolCallDelta(0, { id: 'call_1', name: 'Fail', arguments: '{}' })]))
+      )
+      .mockImplementationOnce(mockFetchOnce(sseBody([contentDelta('抱歉')])));
 
     const failTool: ToolDefinition = {
       name: 'Fail',
@@ -216,7 +230,9 @@ describe('runAgentLoop', () => {
       argChunks.push(fullArgs.slice(i, i + chunkSize));
     }
 
-    const fetch1Chunks = [toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: argChunks[0] ?? '' })];
+    const fetch1Chunks = [
+      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: argChunks[0] ?? '' }),
+    ];
     for (let i = 1; i < argChunks.length; i++) {
       fetch1Chunks.push(toolCallDelta(0, { arguments: argChunks[i] }));
     }
@@ -229,16 +245,24 @@ describe('runAgentLoop', () => {
       const encoder = new TextEncoder();
       const text = callCount === 1 ? fetch1 : fetch2;
       const stream = new ReadableStream({
-        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+        start(controller) {
+          controller.enqueue(encoder.encode(text));
+          controller.close();
+        },
       });
-      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      );
     });
 
     let capturedArgs: unknown = null;
     const writeTool: ToolDefinition = {
       name: 'Write',
       description: '写文件',
-      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' }, content: { type: 'string' } },
+      },
       execute: async (args) => {
         capturedArgs = args;
         return { ok: true, data: '已写入' };
@@ -261,7 +285,11 @@ describe('runAgentLoop', () => {
   it('畸形 arguments：解析失败时回灌错误给模型，不静默用 {} 执行', async () => {
     // 模型传了被截断的 arguments（缺少闭合 }）
     const fetch1 = sseBody([
-      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: '{"path":"gui.py","content":"miss' }),
+      toolCallDelta(0, {
+        id: 'call_1',
+        name: 'Write',
+        arguments: '{"path":"gui.py","content":"miss',
+      }),
     ]);
     const fetch2 = sseBody([contentDelta('好的，我重新传完整参数')]);
 
@@ -272,15 +300,23 @@ describe('runAgentLoop', () => {
       const encoder = new TextEncoder();
       const text = callCount === 1 ? fetch1 : fetch2;
       const stream = new ReadableStream({
-        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+        start(controller) {
+          controller.enqueue(encoder.encode(text));
+          controller.close();
+        },
       });
-      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      );
     });
 
     const writeTool: ToolDefinition = {
       name: 'Write',
       description: '写文件',
-      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' }, content: { type: 'string' } },
+      },
       execute: async () => {
         executeCalled = true; // 不应该被调用
         return { ok: true, data: '不应到达' };
@@ -303,7 +339,11 @@ describe('runAgentLoop', () => {
   it('max_tokens 截断（finish_reason=length）：不执行工具，回灌分块提示', async () => {
     // 模拟上游因 max_tokens 截断：arguments 只传了一半，finish_reason='length'
     const fetch1 = sseBody([
-      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: '{"path":"big.py","content":"xxx' }),
+      toolCallDelta(0, {
+        id: 'call_1',
+        name: 'Write',
+        arguments: '{"path":"big.py","content":"xxx',
+      }),
       finishChunk('length'), // 截断信号
     ]);
     // 第二轮：模型看到分块提示后，改用小块写入
@@ -316,15 +356,23 @@ describe('runAgentLoop', () => {
       const encoder = new TextEncoder();
       const text = callCount === 1 ? fetch1 : fetch2;
       const stream = new ReadableStream({
-        start(controller) { controller.enqueue(encoder.encode(text)); controller.close(); },
+        start(controller) {
+          controller.enqueue(encoder.encode(text));
+          controller.close();
+        },
       });
-      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      );
     });
 
     const writeTool: ToolDefinition = {
       name: 'Write',
       description: '写文件',
-      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' }, content: { type: 'string' } },
+      },
       execute: async () => {
         executeCalled = true; // 截断时不应执行
         return { ok: true, data: '不应到达' };
@@ -349,7 +397,11 @@ describe('runAgentLoop', () => {
   it('连续截断早终止：连续 3 次 finish_reason=length 直接 failed，不空转到 max_turns', async () => {
     // 模拟模型对大附件整段重写：连续 3 轮都被上游 max_tokens 截断，参数不完整。
     const truncatedResp = sseBody([
-      toolCallDelta(0, { id: 'call_1', name: 'Write', arguments: '{"path":"big.py","content":"xxx' }),
+      toolCallDelta(0, {
+        id: 'call_1',
+        name: 'Write',
+        arguments: '{"path":"big.py","content":"xxx',
+      }),
       finishChunk('length'),
     ]);
     // 前 3 次 fetch 都返回截断；第 4 次不应被调用（第 3 次截断后即 failed 返回）。
@@ -359,16 +411,24 @@ describe('runAgentLoop', () => {
       if (callCount > 3) throw new Error('不应发起第 4 次模型调用：连续截断应早终止');
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
-        start(controller) { controller.enqueue(encoder.encode(truncatedResp)); controller.close(); },
+        start(controller) {
+          controller.enqueue(encoder.encode(truncatedResp));
+          controller.close();
+        },
       });
-      return Promise.resolve(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      );
     });
 
     let executeCalled = false;
     const writeTool: ToolDefinition = {
       name: 'Write',
       description: '写文件',
-      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' }, content: { type: 'string' } },
+      },
       execute: async () => {
         executeCalled = true; // 截断时不应执行
         return { ok: true, data: '不应到达' };
@@ -405,7 +465,13 @@ describe('runAgentLoop', () => {
       {
         role: 'assistant',
         content: null,
-        tool_calls: [{ id: 'call_recent', type: 'function', function: { name: 'WebSearch', arguments: '{"query":"x"}' } }],
+        tool_calls: [
+          {
+            id: 'call_recent',
+            type: 'function',
+            function: { name: 'WebSearch', arguments: '{"query":"x"}' },
+          },
+        ],
       },
       { role: 'tool', tool_call_id: 'call_recent', content: '近期工具结果' },
       { role: 'user', content: '近期问题' },
@@ -415,19 +481,25 @@ describe('runAgentLoop', () => {
     let capturedMessages: Array<{ role: string; content?: string | null }> = [];
     globalThis.fetch = vi.fn().mockImplementation(((_url: string, init: RequestInit) => {
       try {
-        const body = JSON.parse(String(init.body)) as { messages: Array<{ role: string; content?: string | null }> };
+        const body = JSON.parse(String(init.body)) as {
+          messages: Array<{ role: string; content?: string | null }>;
+        };
         capturedMessages = body.messages;
-      } catch { /* 忽略 */ }
-      return Promise.resolve(new Response(
-        new ReadableStream({
-          start(controller) {
-            const encoder = new TextEncoder();
-            controller.enqueue(encoder.encode(sseBody([contentDelta('好的')])));
-            controller.close();
-          },
-        }),
-        { status: 200, headers: { 'content-type': 'text/event-stream' } },
-      ));
+      } catch {
+        /* 忽略 */
+      }
+      return Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              controller.enqueue(encoder.encode(sseBody([contentDelta('好的')])));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'text/event-stream' } }
+        )
+      );
     }) as typeof globalThis.fetch);
 
     const cbs = makeCallbacks();
@@ -446,7 +518,14 @@ describe('runAgentLoop', () => {
     // 断言 2：保留了首条 system prompt。
     expect(capturedMessages[0]).toMatchObject({ role: 'system', content: 'sys' });
     // 断言 3：注入了压缩提示 system 消息。
-    expect(capturedMessages.some((m) => m.role === 'system' && typeof m.content === 'string' && m.content.includes('运行中历史压缩'))).toBe(true);
+    expect(
+      capturedMessages.some(
+        (m) =>
+          m.role === 'system' &&
+          typeof m.content === 'string' &&
+          m.content.includes('运行中历史压缩')
+      )
+    ).toBe(true);
     // 断言 4：保留了近期的 tool_calls + tool result 配对（不是孤立的 tool result）。
     const toolResultIdx = capturedMessages.findIndex((m) => m.role === 'tool');
     if (toolResultIdx >= 0) {
@@ -463,19 +542,25 @@ describe('runAgentLoop', () => {
     let capturedMessages: Array<{ role: string; content?: string | null }> = [];
     globalThis.fetch = vi.fn().mockImplementation(((_url: string, init: RequestInit) => {
       try {
-        const body = JSON.parse(String(init.body)) as { messages: Array<{ role: string; content?: string | null }> };
+        const body = JSON.parse(String(init.body)) as {
+          messages: Array<{ role: string; content?: string | null }>;
+        };
         capturedMessages = body.messages;
-      } catch { /* 忽略 */ }
-      return Promise.resolve(new Response(
-        new ReadableStream({
-          start(controller) {
-            const encoder = new TextEncoder();
-            controller.enqueue(encoder.encode(sseBody([contentDelta('好的')])));
-            controller.close();
-          },
-        }),
-        { status: 200, headers: { 'content-type': 'text/event-stream' } },
-      ));
+      } catch {
+        /* 忽略 */
+      }
+      return Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              controller.enqueue(encoder.encode(sseBody([contentDelta('好的')])));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'text/event-stream' } }
+        )
+      );
     }) as typeof globalThis.fetch);
 
     const messages: ChatMessage[] = [
@@ -494,6 +579,13 @@ describe('runAgentLoop', () => {
     });
     // 原文发出，无压缩提示。
     expect(capturedMessages.length).toBe(3);
-    expect(capturedMessages.some((m) => m.role === 'system' && typeof m.content === 'string' && m.content.includes('运行中历史压缩'))).toBe(false);
+    expect(
+      capturedMessages.some(
+        (m) =>
+          m.role === 'system' &&
+          typeof m.content === 'string' &&
+          m.content.includes('运行中历史压缩')
+      )
+    ).toBe(false);
   });
 });

@@ -8,7 +8,8 @@ function readLimit(argv: string[]) {
   const value = argv.find((item) => item.startsWith('--limit='))?.slice('--limit='.length);
   if (!value) return undefined;
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100_000) throw new Error('--limit 必须是 1..100000 的整数');
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100_000)
+    throw new Error('--limit 必须是 1..100000 的整数');
   return parsed;
 }
 

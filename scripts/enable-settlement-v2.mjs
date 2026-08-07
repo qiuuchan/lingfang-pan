@@ -11,14 +11,20 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const require = createRequire(resolve(dirname(fileURLToPath(import.meta.url)), '../apps/collab-api/package.json'));
+const require = createRequire(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../apps/collab-api/package.json')
+);
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 
 // 允许 DATABASE_URL 来自环境变量或 collab-api/.env（与运行中的 API 一致）。
 try {
-  require('dotenv').config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../apps/collab-api/.env') });
-} catch { /* dotenv 缺失时忽略，依赖已设置的环境变量 */ }
+  require('dotenv').config({
+    path: resolve(dirname(fileURLToPath(import.meta.url)), '../apps/collab-api/.env'),
+  });
+} catch {
+  /* dotenv 缺失时忽略，依赖已设置的环境变量 */
+}
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -33,7 +39,9 @@ try {
     create: { id: 'singleton', writerMode: 'SETTLEMENT_V2', settlementV2ActivatedAt: new Date() },
     update: { writerMode: 'SETTLEMENT_V2', settlementV2ActivatedAt: new Date() },
   });
-  console.log(`[enable-settlement-v2] writerMode -> ${row.writerMode} (激活于 ${row.settlementV2ActivatedAt})`);
+  console.log(
+    `[enable-settlement-v2] writerMode -> ${row.writerMode} (激活于 ${row.settlementV2ActivatedAt})`
+  );
 } finally {
   await prisma.$disconnect();
 }

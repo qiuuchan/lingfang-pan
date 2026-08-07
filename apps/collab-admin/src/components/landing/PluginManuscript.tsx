@@ -72,9 +72,18 @@ export function PluginManuscript() {
         style={{ borderColor: 'var(--lf-border)' }}
       >
         <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: 'var(--lf-fg-subtle)' }} />
-          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: 'var(--lf-border-bright)' }} />
-          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: 'var(--lf-border)' }} />
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: 'var(--lf-fg-subtle)' }}
+          />
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: 'var(--lf-border-bright)' }}
+          />
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: 'var(--lf-border)' }}
+          />
         </div>
         <span className="lf-mono text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
           plugin.manuscript
@@ -84,16 +93,28 @@ export function PluginManuscript() {
       <div className="p-6 sm:p-7">
         {/* 自然语言输入区 */}
         <div className="space-y-3">
-          <span className="lf-section-label" style={{ fontSize: '0.7rem' }}>request</span>
-          <div className="min-h-[3.5rem] text-base sm:text-lg leading-relaxed" style={{ color: 'var(--lf-fg)' }}>
+          <span className="lf-section-label" style={{ fontSize: '0.7rem' }}>
+            request
+          </span>
+          <div
+            className="min-h-[3.5rem] text-base sm:text-lg leading-relaxed"
+            style={{ color: 'var(--lf-fg)' }}
+          >
             {typed}
-            {phase === 'prompt' && <span className="lf-animate-blink" style={{ color: 'var(--lf-accent)' }}>▌</span>}
+            {phase === 'prompt' && (
+              <span className="lf-animate-blink" style={{ color: 'var(--lf-accent)' }}>
+                ▌
+              </span>
+            )}
           </div>
         </div>
 
         {/* 思考中提示 */}
         {phase !== 'prompt' && (
-          <div className="mt-5 flex items-center gap-2 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+          <div
+            className="mt-5 flex items-center gap-2 text-sm"
+            style={{ color: 'var(--lf-fg-muted)' }}
+          >
             <span className="relative flex h-2 w-2">
               <span
                 className="absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping"
@@ -110,7 +131,10 @@ export function PluginManuscript() {
 
         {/* 生成的清单 */}
         {phase === 'manifest' || phase === 'seal' ? (
-          <div className="mt-6 rounded-xl border p-4 lf-mono text-sm" style={{ borderColor: 'var(--lf-border)', backgroundColor: 'var(--lf-bg-card)' }}>
+          <div
+            className="mt-6 rounded-xl border p-4 lf-mono text-sm"
+            style={{ borderColor: 'var(--lf-border)', backgroundColor: 'var(--lf-bg-card)' }}
+          >
             <div className="space-y-2.5">
               {MANIFEST_LINES.map((line, index) => (
                 <div
@@ -123,8 +147,12 @@ export function PluginManuscript() {
                     transitionDelay: `${index * 60}ms`,
                   }}
                 >
-                  <span style={{ color: 'var(--lf-fg-subtle)', minWidth: '6.5rem' }}>{line.prefix}</span>
-                  <span style={{ color: index === 0 ? 'var(--lf-accent)' : 'var(--lf-fg)' }}>{line.value}</span>
+                  <span style={{ color: 'var(--lf-fg-subtle)', minWidth: '6.5rem' }}>
+                    {line.prefix}
+                  </span>
+                  <span style={{ color: index === 0 ? 'var(--lf-accent)' : 'var(--lf-fg)' }}>
+                    {line.value}
+                  </span>
                 </div>
               ))}
             </div>
@@ -133,7 +161,8 @@ export function PluginManuscript() {
 
         {/* 朱砂印章 */}
         {sealVisible && (
-          <div className="lf-seal-stamp absolute right-6 bottom-6 sm:right-8 sm:bottom-8 flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-lg border-2"
+          <div
+            className="lf-seal-stamp absolute right-6 bottom-6 sm:right-8 sm:bottom-8 flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-lg border-2"
             style={{
               borderColor: 'var(--lf-accent)',
               color: 'var(--lf-accent)',

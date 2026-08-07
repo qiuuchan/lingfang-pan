@@ -42,19 +42,21 @@ describe('AdminService dynamic loading read models', () => {
   });
 
   it('paginates users with DB filters, a shared where, and an explicit no-secret select', async () => {
-    prisma.user.findMany.mockResolvedValueOnce([{
-      id: 'u1',
-      email: 'user@example.com',
-      displayName: 'User',
-      status: 'ACTIVE',
-      platformRole: 'PLATFORM_ADMIN',
-      platformRoleId: 'role-platform',
-      emailVerified: NOW,
-      createdAt: NOW,
-      updatedAt: NOW,
-      passwordHash: 'must-not-leak',
-      tokenVersion: 9,
-    }]);
+    prisma.user.findMany.mockResolvedValueOnce([
+      {
+        id: 'u1',
+        email: 'user@example.com',
+        displayName: 'User',
+        status: 'ACTIVE',
+        platformRole: 'PLATFORM_ADMIN',
+        platformRoleId: 'role-platform',
+        emailVerified: NOW,
+        createdAt: NOW,
+        updatedAt: NOW,
+        passwordHash: 'must-not-leak',
+        tokenVersion: 9,
+      },
+    ]);
     prisma.user.count.mockResolvedValueOnce(12);
 
     const result = await service.adminUsers('admin', {
@@ -80,9 +82,15 @@ describe('AdminService dynamic loading read models', () => {
   });
 
   it('bounds user options at 50 and avoids a COUNT query for autocomplete', async () => {
-    prisma.user.findMany.mockResolvedValueOnce([{
-      id: 'u1', email: 'user@example.com', displayName: 'User', status: 'ACTIVE', platformRole: 'NONE',
-    }]);
+    prisma.user.findMany.mockResolvedValueOnce([
+      {
+        id: 'u1',
+        email: 'user@example.com',
+        displayName: 'User',
+        status: 'ACTIVE',
+        platformRole: 'NONE',
+      },
+    ]);
 
     const result = await service.adminUserOptions('admin', { q: 'user', limit: 999 });
 
@@ -95,9 +103,14 @@ describe('AdminService dynamic loading read models', () => {
 
   it('keeps user login pages lightweight and uses the same where for rows/count', async () => {
     prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1' });
-    prisma.auditLog.findMany.mockResolvedValueOnce([{
-      id: 'log-1', action: 'auth.login.success', createdAt: NOW, metadata: { ip: '127.0.0.1' },
-    }]);
+    prisma.auditLog.findMany.mockResolvedValueOnce([
+      {
+        id: 'log-1',
+        action: 'auth.login.success',
+        createdAt: NOW,
+        metadata: { ip: '127.0.0.1' },
+      },
+    ]);
     prisma.auditLog.count.mockResolvedValueOnce(1);
 
     const result = await service.adminUserLogins('admin', 'u1', { page: 3, pageSize: 10 });
@@ -111,21 +124,28 @@ describe('AdminService dynamic loading read models', () => {
   });
 
   it('lists teams without membership rows and keeps filtered count consistent', async () => {
-    prisma.team.findMany.mockResolvedValueOnce([{
-      id: 't1',
-      name: 'Team',
-      slug: 'team',
-      status: 'ACTIVE',
-      balanceCents: 10,
-      defaultPoolId: null,
-      createdAt: NOW,
-      updatedAt: NOW,
-      _count: { memberships: 4 },
-      memberships: [{ user: { passwordHash: 'must-not-leak' } }],
-    }]);
+    prisma.team.findMany.mockResolvedValueOnce([
+      {
+        id: 't1',
+        name: 'Team',
+        slug: 'team',
+        status: 'ACTIVE',
+        balanceCents: 10,
+        defaultPoolId: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+        _count: { memberships: 4 },
+        memberships: [{ user: { passwordHash: 'must-not-leak' } }],
+      },
+    ]);
     prisma.team.count.mockResolvedValueOnce(8);
 
-    const result = await service.adminTeams('admin', { page: 2, pageSize: 3, q: 'team', status: 'ACTIVE' });
+    const result = await service.adminTeams('admin', {
+      page: 2,
+      pageSize: 3,
+      q: 'team',
+      status: 'ACTIVE',
+    });
 
     const listArgs = prisma.team.findMany.mock.calls[0][0] as Record<string, any>;
     const countArgs = prisma.team.count.mock.calls[0][0] as Record<string, any>;
@@ -139,19 +159,26 @@ describe('AdminService dynamic loading read models', () => {
 
   it('filters team members in the database and strips nested user secrets', async () => {
     prisma.team.findUnique.mockResolvedValueOnce({ id: 't1' });
-    prisma.teamMembership.findMany.mockResolvedValueOnce([{
-      teamId: 't1',
-      userId: 'u1',
-      role: 'MEMBER',
-      status: 'ACTIVE',
-      teamRoleId: 'team-member-t1',
-      joinedAt: NOW,
-      user: {
-        id: 'u1', email: 'user@example.com', displayName: 'User', status: 'ACTIVE', platformRole: 'NONE',
-        passwordHash: 'must-not-leak', tokenVersion: 2,
+    prisma.teamMembership.findMany.mockResolvedValueOnce([
+      {
+        teamId: 't1',
+        userId: 'u1',
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        teamRoleId: 'team-member-t1',
+        joinedAt: NOW,
+        user: {
+          id: 'u1',
+          email: 'user@example.com',
+          displayName: 'User',
+          status: 'ACTIVE',
+          platformRole: 'NONE',
+          passwordHash: 'must-not-leak',
+          tokenVersion: 2,
+        },
+        teamRole: { id: 'team-member-t1', name: 'Member', code: 'team_member' },
       },
-      teamRole: { id: 'team-member-t1', name: 'Member', code: 'team_member' },
-    }]);
+    ]);
     prisma.teamMembership.count.mockResolvedValueOnce(1);
 
     const result = await service.adminTeamMembers('admin', 't1', { q: 'user' });
@@ -165,20 +192,29 @@ describe('AdminService dynamic loading read models', () => {
   });
 
   it('excludes audit metadata from pages and returns it only from detail', async () => {
-    prisma.auditLog.findMany.mockResolvedValueOnce([{
-      id: 'audit-1',
-      action: 'admin.user.updated',
-      targetType: 'User',
-      targetId: 'u1',
-      createdAt: NOW,
-      metadata: { changed: ['email'] },
-      actor: {
-        id: 'admin', email: 'admin@example.com', displayName: 'Admin', passwordHash: 'must-not-leak',
+    prisma.auditLog.findMany.mockResolvedValueOnce([
+      {
+        id: 'audit-1',
+        action: 'admin.user.updated',
+        targetType: 'User',
+        targetId: 'u1',
+        createdAt: NOW,
+        metadata: { changed: ['email'] },
+        actor: {
+          id: 'admin',
+          email: 'admin@example.com',
+          displayName: 'Admin',
+          passwordHash: 'must-not-leak',
+        },
       },
-    }]);
+    ]);
     prisma.auditLog.count.mockResolvedValueOnce(1);
 
-    const page = await service.auditLogs('admin', { q: 'user', actorId: 'admin', targetType: 'User' });
+    const page = await service.auditLogs('admin', {
+      q: 'user',
+      actorId: 'admin',
+      targetType: 'User',
+    });
     const listArgs = prisma.auditLog.findMany.mock.calls[0][0] as Record<string, any>;
     const countArgs = prisma.auditLog.count.mock.calls[0][0] as Record<string, any>;
     expect(countArgs.where).toBe(listArgs.where);
@@ -194,7 +230,10 @@ describe('AdminService dynamic loading read models', () => {
       createdAt: NOW,
       metadata: { changed: ['email'] },
       actor: {
-        id: 'admin', email: 'admin@example.com', displayName: 'Admin', passwordHash: 'must-not-leak',
+        id: 'admin',
+        email: 'admin@example.com',
+        displayName: 'Admin',
+        passwordHash: 'must-not-leak',
       },
     });
     const detail = await service.auditLog('admin', 'audit-1');

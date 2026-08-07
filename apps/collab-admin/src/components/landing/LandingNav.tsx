@@ -42,17 +42,31 @@ export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }:
       <nav className="mx-auto max-w-6xl px-6 h-16 flex items-center justify-between">
         <a href="#lf-top" className="flex items-center gap-2.5 group">
           <LandingLogo size={32} />
-          <span className="lf-display font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>LingFang</span>
+          <span
+            className="lf-display font-semibold tracking-tight"
+            style={{ color: 'var(--lf-fg)' }}
+          >
+            LingFang
+          </span>
         </a>
 
-        <div className="hidden md:flex items-center gap-8 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
+        <div
+          className="hidden md:flex items-center gap-8 text-sm"
+          style={{ color: 'var(--lf-fg-muted)' }}
+        >
           {NAV(onNavigateDownload, onNavigateChangelog).map((item) =>
             item.onClick ? (
               <button
                 key={item.label}
                 onClick={item.onClick}
                 className="transition-colors hover:text-[var(--lf-fg)]"
-                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
               >
                 {item.label}
               </button>
@@ -65,7 +79,7 @@ export function LandingNav({ onLogin, onNavigateDownload, onNavigateChangelog }:
               >
                 {item.label}
               </a>
-            ),
+            )
           )}
         </div>
 

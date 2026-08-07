@@ -25,7 +25,8 @@ for (const entry of lock.keyFiles ?? []) {
   if (!existsSync(path)) fail(`missing key file: ${entry.path}`);
   const stat = statSync(path);
   if (!stat.isFile()) fail(`key path is not a file: ${entry.path}`);
-  if (stat.size !== entry.size) fail(`size mismatch: ${entry.path} expected=${entry.size} actual=${stat.size}`);
+  if (stat.size !== entry.size)
+    fail(`size mismatch: ${entry.path} expected=${entry.size} actual=${stat.size}`);
   const digest = await sha256(path);
   if (digest !== entry.sha256) fail(`sha256 mismatch: ${entry.path}`);
 }
@@ -54,7 +55,8 @@ async function verifyFile(entry) {
   if (!existsSync(path)) fail(`missing materialized file: ${entry.path}`);
   const stat = statSync(path);
   if (!stat.isFile()) fail(`materialized path is not a file: ${entry.path}`);
-  if (stat.size !== entry.size) fail(`size mismatch: ${entry.path} expected=${entry.size} actual=${stat.size}`);
+  if (stat.size !== entry.size)
+    fail(`size mismatch: ${entry.path} expected=${entry.size} actual=${stat.size}`);
   const digest = await sha256(path);
   if (digest !== entry.sha256) fail(`sha256 mismatch: ${entry.path}`);
 }
@@ -70,14 +72,24 @@ function verifyPlaywrightLock(runtimeLock) {
     fail('playwright-core is not installed; run pnpm install before verification');
   }
   const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
-  const browsersJson = JSON.parse(readFileSync(join(dirname(packagePath), 'browsers.json'), 'utf8'));
+  const browsersJson = JSON.parse(
+    readFileSync(join(dirname(packagePath), 'browsers.json'), 'utf8')
+  );
   const chromium = browsersJson.browsers.find((browser) => browser.name === 'chromium');
   const expected = runtimeLock.runtimes.chromium;
   if (packageJson.version !== expected.playwrightVersion) {
-    fail(`Playwright version drift: lock=${expected.playwrightVersion} installed=${packageJson.version}`);
+    fail(
+      `Playwright version drift: lock=${expected.playwrightVersion} installed=${packageJson.version}`
+    );
   }
-  if (!chromium || chromium.revision !== expected.revision || chromium.browserVersion !== expected.browserVersion) {
-    fail(`Chromium revision drift: lock=${expected.revision}/${expected.browserVersion} installed=${chromium?.revision}/${chromium?.browserVersion}`);
+  if (
+    !chromium ||
+    chromium.revision !== expected.revision ||
+    chromium.browserVersion !== expected.browserVersion
+  ) {
+    fail(
+      `Chromium revision drift: lock=${expected.revision}/${expected.browserVersion} installed=${chromium?.revision}/${chromium?.browserVersion}`
+    );
   }
 }
 

@@ -59,7 +59,12 @@ export const STATUS_LABEL: Record<TicketStatus, string> = {
 };
 
 /** 提交工单（multipart：title/body/category + files[]）。 */
-export async function submitTicket(input: { title: string; body: string; category: TicketCategory; files: File[] }) {
+export async function submitTicket(input: {
+  title: string;
+  body: string;
+  category: TicketCategory;
+  files: File[];
+}) {
   const form = new FormData();
   form.append('title', input.title);
   form.append('body', input.body);
@@ -84,7 +89,10 @@ export async function replyTicket(id: string, input: { body: string; files: File
   const form = new FormData();
   if (input.body) form.append('body', input.body);
   for (const f of input.files) form.append('files', f);
-  return api<{ ticket: TicketDetail }>(`/api/tickets/${id}/messages`, { method: 'POST', formData: form });
+  return api<{ ticket: TicketDetail }>(`/api/tickets/${id}/messages`, {
+    method: 'POST',
+    formData: form,
+  });
 }
 
 /** 下载附件：需 Bearer，故 fetch 取 blob 后用临时 <a> 触发下载。 */

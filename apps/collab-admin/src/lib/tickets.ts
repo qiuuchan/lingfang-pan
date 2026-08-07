@@ -100,7 +100,10 @@ export interface AdminTicketListQuery {
 }
 
 /** 工单列表（筛选 + 分页）。 */
-export async function listAdminTickets(query: AdminTicketListQuery, signal?: AbortSignal): Promise<AdminTicketListResult> {
+export async function listAdminTickets(
+  query: AdminTicketListQuery,
+  signal?: AbortSignal
+): Promise<AdminTicketListResult> {
   const params = new URLSearchParams();
   if (query.status) params.set('status', query.status);
   if (query.category) params.set('category', query.category);
@@ -118,24 +121,39 @@ export async function getAdminTicket(id: string): Promise<{ ticket: TicketDetail
 }
 
 /** 管理员回复（multipart：body + files[]）。 */
-export async function replyAdminTicket(id: string, input: { body: string; files: File[] }): Promise<{ ticket: TicketDetail }> {
+export async function replyAdminTicket(
+  id: string,
+  input: { body: string; files: File[] }
+): Promise<{ ticket: TicketDetail }> {
   const form = new FormData();
   if (input.body) form.append('body', input.body);
   for (const f of input.files) form.append('files', f);
-  return api<{ ticket: TicketDetail }>(`/api/admin/tickets/${id}/messages`, { method: 'POST', formData: form });
+  return api<{ ticket: TicketDetail }>(`/api/admin/tickets/${id}/messages`, {
+    method: 'POST',
+    formData: form,
+  });
 }
 
 /** 变更状态/优先级。 */
-export async function updateAdminTicket(id: string, body: { status?: TicketStatus; priority?: TicketPriority }): Promise<{ ticket: TicketDetail }> {
+export async function updateAdminTicket(
+  id: string,
+  body: { status?: TicketStatus; priority?: TicketPriority }
+): Promise<{ ticket: TicketDetail }> {
   return api<{ ticket: TicketDetail }>(`/api/admin/tickets/${id}`, { method: 'PATCH', body });
 }
 
 /** 下载附件：鉴权由 HttpOnly Cookie 承载（浏览器自动附带），fetch 取 blob 后用临时 <a> 触发。 */
-export async function downloadAttachment(ticketId: string, attachment: TicketAttachment): Promise<void> {
-  const res = await fetch(`${apiBase()}/api/admin/tickets/${ticketId}/attachments/${attachment.id}`, {
-    method: 'GET',
-    credentials: 'include',
-  });
+export async function downloadAttachment(
+  ticketId: string,
+  attachment: TicketAttachment
+): Promise<void> {
+  const res = await fetch(
+    `${apiBase()}/api/admin/tickets/${ticketId}/attachments/${attachment.id}`,
+    {
+      method: 'GET',
+      credentials: 'include',
+    }
+  );
   if (!res.ok) throw new Error('附件下载失败');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

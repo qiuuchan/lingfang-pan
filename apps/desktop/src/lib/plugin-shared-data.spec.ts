@@ -1,19 +1,34 @@
 // plugin-shared-data.spec.ts — Task 5 插件间数据互通回归测试。
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setSharedData, getSharedData, listSharedKeys, clearSharedData } from './plugin-shared-data';
+import {
+  setSharedData,
+  getSharedData,
+  listSharedKeys,
+  clearSharedData,
+} from './plugin-shared-data';
 
 // vitest 为 node 环境（无 localStorage），用内存 stub 模拟（仅测纯函数逻辑）。
 function installLocalStorageStub() {
   const store = new Map<string, string>();
   const ls = {
     getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => { store.set(k, String(v)); },
-    removeItem: (k: string) => { store.delete(k); },
+    setItem: (k: string, v: string) => {
+      store.set(k, String(v));
+    },
+    removeItem: (k: string) => {
+      store.delete(k);
+    },
     key: (i: number) => Array.from(store.keys())[i] ?? null,
     clear: () => store.clear(),
-    get length() { return store.size; },
+    get length() {
+      return store.size;
+    },
   };
-  Object.defineProperty(globalThis, 'localStorage', { value: ls, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: ls,
+    configurable: true,
+    writable: true,
+  });
 }
 
 installLocalStorageStub();

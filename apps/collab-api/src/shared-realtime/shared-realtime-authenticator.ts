@@ -33,15 +33,16 @@ export type SharedRealtimeAuthContext = RealtimePrincipal;
 export class SharedRealtimeAuthenticator {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(PluginGovernanceService) private readonly governance: PluginGovernanceService,
+    @Inject(PluginGovernanceService) private readonly governance: PluginGovernanceService
   ) {}
 
   async authenticate(socket: Pick<Socket, 'handshake'>): Promise<SharedRealtimeAuthContext> {
     const token = bearerToken(socket.handshake);
     const payload = verifyToken(token);
-    const invocationId = payload.scope === 'plugin_shared_realtime'
-      ? requireText(payload.invocationId, 'invocation_id')
-      : requireText(socket.handshake.auth?.invocation_id, 'invocation_id');
+    const invocationId =
+      payload.scope === 'plugin_shared_realtime'
+        ? requireText(payload.invocationId, 'invocation_id')
+        : requireText(socket.handshake.auth?.invocation_id, 'invocation_id');
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
@@ -51,7 +52,10 @@ export class SharedRealtimeAuthenticator {
     if (payload.tokenVersion !== undefined && Number(payload.tokenVersion) !== user.tokenVersion) {
       throw authError('shared_realtime_session_revoked');
     }
-    if (payload.scope !== 'plugin_shared_realtime' && payload.teamContextVersion !== user.teamContextVersion) {
+    if (
+      payload.scope !== 'plugin_shared_realtime' &&
+      payload.teamContextVersion !== user.teamContextVersion
+    ) {
       throw authError('shared_realtime_session_revoked');
     }
 
@@ -83,7 +87,8 @@ export class SharedRealtimeAuthenticator {
       },
     });
     if (!invocation) throw authError('shared_realtime_invocation_invalid');
-    if (payload.scope === 'plugin_shared_realtime') assertRuntimeBinding(payload, invocation, payload.teamId);
+    if (payload.scope === 'plugin_shared_realtime')
+      assertRuntimeBinding(payload, invocation, payload.teamId);
 
     return {
       userId: payload.sub,
@@ -102,7 +107,7 @@ export class SharedRealtimeAuthenticator {
 
   async authorizeRoom(
     principal: SharedRealtimeAuthContext,
-    room: Pick<SharedPresenceRoom, 'namespaceId' | 'namespaceGeneration'>,
+    room: Pick<SharedPresenceRoom, 'namespaceId' | 'namespaceGeneration'>
   ): Promise<SharedPresenceRoom> {
     const namespace = await this.prisma.pluginSharedNamespace.findFirst({
       where: {
@@ -114,12 +119,17 @@ export class SharedRealtimeAuthenticator {
       select: { id: true, ownerKind: true, ownerId: true, generation: true },
     });
     if (!namespace) throw authError('shared_realtime_namespace_not_found');
-    const owner = namespace.ownerKind === 'PACKAGE'
-      ? namespace.ownerId === principal.packageId
-      : namespace.ownerId === principal.workflowReleaseId;
+    const owner =
+      namespace.ownerKind === 'PACKAGE'
+        ? namespace.ownerId === principal.packageId
+        : namespace.ownerId === principal.workflowReleaseId;
     const decision = await this.governance.authorizeRelease(
       principal.userId,
-      { releaseId: principal.releaseId, packageId: principal.packageId, sha256: principal.releaseSha256 },
+      {
+        releaseId: principal.releaseId,
+        packageId: principal.packageId,
+        sha256: principal.releaseSha256,
+      },
       ['shared_data_read'],
       {
         enforce: !owner,
@@ -128,16 +138,27 @@ export class SharedRealtimeAuthenticator {
           action_contract_version: principal.actionContractVersion,
           action_surface_sha256: principal.actionSurfaceSha256,
         },
-      },
+      }
     );
     if (!owner && !decision.decision.allowed) throw authError('shared_realtime_forbidden');
-    if (owner && !decision.decision.allowed && decision.decision.reason_code !== 'high_risk_not_enabled') {
+    if (
+      owner &&
+      !decision.decision.allowed &&
+      decision.decision.reason_code !== 'high_risk_not_enabled'
+    ) {
       throw authError('shared_realtime_forbidden');
     }
-    return { teamId: principal.teamId, namespaceId: namespace.id, namespaceGeneration: namespace.generation };
+    return {
+      teamId: principal.teamId,
+      namespaceId: namespace.id,
+      namespaceGeneration: namespace.generation,
+    };
   }
 
-  presenceSession(connectionId: string, principal: SharedRealtimeAuthContext): SharedPresenceSession {
+  presenceSession(
+    connectionId: string,
+    principal: SharedRealtimeAuthContext
+  ): SharedPresenceSession {
     return {
       connectionId,
       userId: principal.userId,
@@ -150,7 +171,8 @@ export class SharedRealtimeAuthenticator {
 
 function bearerToken(handshake: Socket['handshake']): string {
   const authToken = typeof handshake.auth?.token === 'string' ? handshake.auth.token.trim() : '';
-  const header = typeof handshake.headers.authorization === 'string' ? handshake.headers.authorization : '';
+  const header =
+    typeof handshake.headers.authorization === 'string' ? handshake.headers.authorization : '';
   const headerToken = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   const token = authToken || headerToken;
   if (!token) throw authError('shared_realtime_unauthorized');
@@ -162,9 +184,17 @@ function verifyToken(token: string): SessionJwt {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('missing secret');
     const payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as SessionJwt;
-    if (!payload.sub || !payload.email || typeof payload.teamId !== 'string' || !payload.teamId.trim()) throw new Error('invalid subject');
-    if (payload.scope !== undefined && payload.scope !== 'plugin_shared_realtime') throw new Error('invalid scope');
-    if (payload.scope !== 'plugin_shared_realtime' && !Number.isInteger(payload.teamContextVersion)) throw new Error('invalid team context');
+    if (
+      !payload.sub ||
+      !payload.email ||
+      typeof payload.teamId !== 'string' ||
+      !payload.teamId.trim()
+    )
+      throw new Error('invalid subject');
+    if (payload.scope !== undefined && payload.scope !== 'plugin_shared_realtime')
+      throw new Error('invalid scope');
+    if (payload.scope !== 'plugin_shared_realtime' && !Number.isInteger(payload.teamContextVersion))
+      throw new Error('invalid team context');
     return payload;
   } catch {
     throw authError('shared_realtime_unauthorized');
@@ -174,18 +204,21 @@ function verifyToken(token: string): SessionJwt {
 function assertRuntimeBinding(
   payload: SessionJwt,
   invocation: { id: string; packageId: string; releaseId: string },
-  teamId: string,
+  teamId: string
 ): void {
-  if (payload.teamId !== teamId
-    || payload.invocationId !== invocation.id
-    || payload.packageId !== invocation.packageId
-    || payload.releaseId !== invocation.releaseId) {
+  if (
+    payload.teamId !== teamId ||
+    payload.invocationId !== invocation.id ||
+    payload.packageId !== invocation.packageId ||
+    payload.releaseId !== invocation.releaseId
+  ) {
     throw authError('shared_realtime_token_binding_invalid');
   }
 }
 
 function requireText(value: unknown, field: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw authError(`shared_realtime_${field}_required`);
+  if (typeof value !== 'string' || !value.trim())
+    throw authError(`shared_realtime_${field}_required`);
   return value.trim();
 }
 

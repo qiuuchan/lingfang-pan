@@ -23,14 +23,7 @@
 // 返回分类元数据，供前端筛选下拉渲染（前后端分类 key 对齐）。
 
 export type AuditCategoryKey =
-  | 'auth'
-  | 'team'
-  | 'plugin'
-  | 'marketplace'
-  | 'wallet'
-  | 'llm'
-  | 'admin'
-  | 'system';
+  'auth' | 'team' | 'plugin' | 'marketplace' | 'wallet' | 'llm' | 'admin' | 'system';
 
 export interface AuditCategoryMeta {
   key: AuditCategoryKey;
@@ -46,7 +39,11 @@ export const AUDIT_CATEGORIES: AuditCategoryMeta[] = [
   { key: 'marketplace', label: '市场', description: '市场上架/购买/评分' },
   { key: 'wallet', label: '钱包', description: '钱包余额变动/赠送/购买扣款' },
   { key: 'llm', label: 'LLM 绑定', description: '租户 API Key 绑定/解绑/解密' },
-  { key: 'admin', label: '平台管理', description: '平台管理员对用户/团队/插件/provider/release 的治理操作' },
+  {
+    key: 'admin',
+    label: '平台管理',
+    description: '平台管理员对用户/团队/插件/provider/release 的治理操作',
+  },
   { key: 'system', label: '系统配置', description: '平台设置/SMTP 测试/启动引导' },
 ];
 

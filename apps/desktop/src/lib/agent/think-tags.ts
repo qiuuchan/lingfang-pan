@@ -65,7 +65,9 @@ export function createThinkTagStreamParser(handlers: ThinkTagHandlers): ThinkTag
       if (!normalizedPending || lastClosedReasoning.startsWith(normalizedPending)) return;
 
       if (pendingAfterThinkText.startsWith(lastClosedReasoning)) {
-        const visibleRest = pendingAfterThinkText.slice(lastClosedReasoning.length).replace(/^\s+/, '');
+        const visibleRest = pendingAfterThinkText
+          .slice(lastClosedReasoning.length)
+          .replace(/^\s+/, '');
         pendingAfterThinkText = '';
         emitText(visibleRest);
         return;
@@ -100,7 +102,11 @@ export function createThinkTagStreamParser(handlers: ThinkTagHandlers): ThinkTag
         // Some relay/model combinations can emit: <think>x</think>x</think> answer.
         // Drop the duplicated reasoning leak, but keep unrelated text as visible answer content.
         pendingAfterThinkText = '';
-        if (!normalizedBefore || normalizedBefore === lastClosedReasoning || lastClosedReasoning.startsWith(normalizedBefore)) {
+        if (
+          !normalizedBefore ||
+          normalizedBefore === lastClosedReasoning ||
+          lastClosedReasoning.startsWith(normalizedBefore)
+        ) {
           buffer = afterClose.replace(/^\s+/, '');
           return;
         }
@@ -117,7 +123,11 @@ export function createThinkTagStreamParser(handlers: ThinkTagHandlers): ThinkTag
       return;
     } else if (pendingAfterThinkText && sawThinkTag) {
       const normalizedPending = normalizedReasoning(pendingAfterThinkText);
-      if (!normalizedPending || normalizedPending === lastClosedReasoning || lastClosedReasoning.startsWith(normalizedPending)) {
+      if (
+        !normalizedPending ||
+        normalizedPending === lastClosedReasoning ||
+        lastClosedReasoning.startsWith(normalizedPending)
+      ) {
         pendingAfterThinkText = '';
         buffer = afterClose.replace(/^\s+/, '');
         return;

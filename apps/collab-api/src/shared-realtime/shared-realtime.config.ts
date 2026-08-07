@@ -13,14 +13,18 @@ const DISABLED_CONFIG: SharedRealtimeConfig = Object.freeze({
   redisUrl: null,
 });
 
-export function resolveSharedRealtimeConfig(env: NodeJS.ProcessEnv = process.env): SharedRealtimeConfig {
+export function resolveSharedRealtimeConfig(
+  env: NodeJS.ProcessEnv = process.env
+): SharedRealtimeConfig {
   const enabled = parseBooleanSwitch(env.PLUGIN_SHARED_REALTIME_ENABLED);
   // Feature-off is a hard dependency barrier: stale Redis settings must not affect REST startup.
   if (!enabled) return DISABLED_CONFIG;
 
   const redisUrl = optionalRedisUrl(env.PLUGIN_SHARED_REALTIME_REDIS_URL);
   if (env.NODE_ENV === 'production' && !redisUrl) {
-    throw new Error('PLUGIN_SHARED_REALTIME_REDIS_URL is required when shared realtime is enabled in production');
+    throw new Error(
+      'PLUGIN_SHARED_REALTIME_REDIS_URL is required when shared realtime is enabled in production'
+    );
   }
   return {
     enabled: true,

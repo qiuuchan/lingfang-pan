@@ -8,14 +8,18 @@
 //  - 上游 key 仅作请求头临时使用，绝不记日志（pino redact 已覆盖 authorization 头）。
 //  - 失败：抛 UpstreamError携带 httpStatus/errorCode，RelayService 据此故障转移/退款/记日志。
 import type { Response as ExpressResponse } from 'express';
-import { openAiToAnthropicRequest, anthropicToOpenAiResponse, AnthropicStreamToOpenAi } from './protocol-convert';
+import {
+  openAiToAnthropicRequest,
+  anthropicToOpenAiResponse,
+  AnthropicStreamToOpenAi,
+} from './protocol-convert';
 
 /** 上游错误（relay 据此故障转移到下一候选 + 记日志）。 */
 export class UpstreamError extends Error {
   constructor(
     public readonly httpStatus: number,
     message: string,
-    public readonly body?: string,
+    public readonly body?: string
   ) {
     super(message);
   }
@@ -37,7 +41,7 @@ const UPSTREAM_IMAGE_TIMEOUT_MS = 300_000; // 图片编辑上游超时 5 分钟�
 async function upstreamFetch(
   url: string,
   init: RequestInit,
-  timeoutMs: number = UPSTREAM_TIMEOUT_MS,
+  timeoutMs: number = UPSTREAM_TIMEOUT_MS
 ): Promise<globalThis.Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -106,7 +110,13 @@ export async function forwardOpenAiChat(args: {
   // 非流式：转发 JSON，解析 usage。同时把 message.reasoning_content 归一化进 content（<think> 包裹）。
   const data = (await upstream.json()) as {
     usage?: { prompt_tokens?: number; completion_tokens?: number };
-    choices?: { message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null } }[];
+    choices?: {
+      message?: {
+        content?: string | null;
+        reasoning_content?: string | null;
+        reasoning?: string | null;
+      };
+    }[];
   };
   normalizeNonStreamReasoning(data);
   res.status(200).json(data);
@@ -119,7 +129,13 @@ export async function forwardOpenAiChat(args: {
 
 /** 非流式：把 choices[].message.reasoning_content 前置为 <think>…</think> 合入 content（与流式归一化对称）。 */
 function normalizeNonStreamReasoning(data: {
-  choices?: { message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null } }[];
+  choices?: {
+    message?: {
+      content?: string | null;
+      reasoning_content?: string | null;
+      reasoning?: string | null;
+    };
+  }[];
 }): void {
   for (const choice of data.choices ?? []) {
     const msg = choice.message;
@@ -178,11 +194,15 @@ export async function forwardRawPassthrough(args: {
   res: ExpressResponse;
 }): Promise<ForwardResult> {
   const url = `${args.baseUrl}/${args.path.replace(/^\//, '')}`;
-  const upstream = await upstreamFetch(url, {
-    method: args.method,
-    headers: { 'Content-Type': args.contentType, Authorization: `Bearer ${args.upstreamKey}` },
-    body: new Uint8Array(args.rawBody),
-  }, UPSTREAM_IMAGE_TIMEOUT_MS);
+  const upstream = await upstreamFetch(
+    url,
+    {
+      method: args.method,
+      headers: { 'Content-Type': args.contentType, Authorization: `Bearer ${args.upstreamKey}` },
+      body: new Uint8Array(args.rawBody),
+    },
+    UPSTREAM_IMAGE_TIMEOUT_MS
+  );
   await ensureOk(upstream);
   // 尝试解析 JSON 取图片数；非 JSON（少见）默认按 1 张。
   let images = 1;
@@ -234,7 +254,9 @@ export async function forwardAnthropicMessages(args: {
   if (args.body.stream) {
     return pipeSseAndExtractUsage(upstream, args.res, parseAnthropicUsage);
   }
-  const data = (await upstream.json()) as { usage?: { input_tokens?: number; output_tokens?: number } };
+  const data = (await upstream.json()) as {
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
   args.res.status(200).json(data);
   return {
     inputTokens: data.usage?.input_tokens ?? 0,
@@ -280,7 +302,9 @@ export async function forwardOpenAiChatViaAnthropic(args: {
     return pipeAnthropicSseAsOpenAi(upstream, args.res, createdSec);
   }
   // 非流式：Anthropic JSON → OpenAI chat.completion JSON。
-  const data = (await upstream.json()) as { usage?: { input_tokens?: number; output_tokens?: number } };
+  const data = (await upstream.json()) as {
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
   const openai = anthropicToOpenAiResponse(data as never, createdSec);
   args.res.status(200).json(openai);
   return {
@@ -297,7 +321,7 @@ export async function forwardOpenAiChatViaAnthropic(args: {
 async function pipeAnthropicSseAsOpenAi(
   upstream: globalThis.Response,
   res: ExpressResponse,
-  createdSec: number,
+  createdSec: number
 ): Promise<ForwardResult> {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream');
@@ -308,7 +332,11 @@ async function pipeAnthropicSseAsOpenAi(
   const usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
   const converter = new AnthropicStreamToOpenAi(createdSec);
   const reader = upstream.body?.getReader();
-  if (!reader) { res.write('data: [DONE]\n\n'); res.end(); return usage; }
+  if (!reader) {
+    res.write('data: [DONE]\n\n');
+    res.end();
+    return usage;
+  }
   const decoder = new TextDecoder();
   let buffer = '';
   const handleEvent = (evt: string) => {
@@ -369,7 +397,7 @@ async function pipeAnthropicSseAsOpenAi(
  */
 async function pipeOpenAiSseNormalizingReasoning(
   upstream: globalThis.Response,
-  res: ExpressResponse,
+  res: ExpressResponse
 ): Promise<ForwardResult> {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream');
@@ -380,7 +408,10 @@ async function pipeOpenAiSseNormalizingReasoning(
   let usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
   let inThinking = false; // 已发 <think> 未闭合
   const reader = upstream.body?.getReader();
-  if (!reader) { res.end(); return usage; }
+  if (!reader) {
+    res.end();
+    return usage;
+  }
   const decoder = new TextDecoder();
   let buffer = '';
   const handleEvent = (evt: string) => {
@@ -406,7 +437,10 @@ async function pipeOpenAiSseNormalizingReasoning(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     const errorChunk = {
-      id: 'chatcmpl-error', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'unknown',
+      id: 'chatcmpl-error',
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: 'unknown',
       choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
       error: { message: errMsg, type: 'upstream_error', code: 'stream_error' },
     };
@@ -426,33 +460,61 @@ async function pipeOpenAiSseNormalizingReasoning(
  * - finish/结束事件：若仍 inThinking，把 </think> 补在 delta.content 前闭合。
  * 返回改写后的 SSE 文本 + 新的 inThinking 状态。
  */
-export function normalizeEventReasoning(rawEvent: string, inThinking: boolean): { out: string; nextInThinking: boolean } {
+export function normalizeEventReasoning(
+  rawEvent: string,
+  inThinking: boolean
+): { out: string; nextInThinking: boolean } {
   let dataLine: string | null = null;
   for (const line of rawEvent.split('\n')) {
     const t = line.trim();
-    if (t.startsWith('data:')) { dataLine = t.slice(5).trim(); break; }
+    if (t.startsWith('data:')) {
+      dataLine = t.slice(5).trim();
+      break;
+    }
   }
   // 结束标记：若思考未闭合，补一个 </think> 的 content chunk 再 [DONE]。
   if (dataLine === '[DONE]') {
     if (inThinking) {
-      const closeChunk = { object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }] };
-      return { out: `data: ${JSON.stringify(closeChunk)}\n\ndata: [DONE]\n\n`, nextInThinking: false };
+      const closeChunk = {
+        object: 'chat.completion.chunk',
+        choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }],
+      };
+      return {
+        out: `data: ${JSON.stringify(closeChunk)}\n\ndata: [DONE]\n\n`,
+        nextInThinking: false,
+      };
     }
     return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
   }
   if (!dataLine) return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
 
   let obj: {
-    choices?: { delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null; tool_calls?: unknown[] }; finish_reason?: string | null }[];
+    choices?: {
+      delta?: {
+        content?: string | null;
+        reasoning_content?: string | null;
+        reasoning?: string | null;
+        tool_calls?: unknown[];
+      };
+      finish_reason?: string | null;
+    }[];
   };
-  try { obj = JSON.parse(dataLine); } catch { return { out: `${rawEvent}\n\n`, nextInThinking: inThinking }; }
+  try {
+    obj = JSON.parse(dataLine);
+  } catch {
+    return { out: `${rawEvent}\n\n`, nextInThinking: inThinking };
+  }
 
   const choice = obj.choices?.[0];
   const delta = choice?.delta;
   // 收尾 chunk（带 finish_reason，delta 缺失或为空）：若思考未闭合，先补 </think> content chunk。
-  const deltaEmpty = !delta || (delta.content == null && delta.reasoning_content == null && delta.reasoning == null);
+  const deltaEmpty =
+    !delta || (delta.content == null && delta.reasoning_content == null && delta.reasoning == null);
   if (inThinking && choice?.finish_reason && deltaEmpty) {
-    const closeChunk = { object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }] };
+    const closeChunk = {
+      object: 'chat.completion.chunk',
+      choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }],
+    };
     return { out: `data: ${JSON.stringify(closeChunk)}\n\n${rawEvent}\n\n`, nextInThinking: false };
   }
   if (!delta) {
@@ -466,7 +528,10 @@ export function normalizeEventReasoning(rawEvent: string, inThinking: boolean): 
   const hasToolCall = Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0;
   const reasoningField = delta.reasoning_content ?? delta.reasoning;
   if (inThinking && hasToolCall && !(reasoningField && reasoningField.trim())) {
-    const closeChunk = { object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }] };
+    const closeChunk = {
+      object: 'chat.completion.chunk',
+      choices: [{ index: 0, delta: { content: '</think>' }, finish_reason: null }],
+    };
     return { out: `data: ${JSON.stringify(closeChunk)}\n\n${rawEvent}\n\n`, nextInThinking: false };
   }
 
@@ -506,7 +571,7 @@ export function normalizeEventReasoning(rawEvent: string, inThinking: boolean): 
 async function pipeSseAndExtractUsage(
   upstream: globalThis.Response,
   res: ExpressResponse,
-  usageParser: (rawEvent: string) => { inputTokens: number; outputTokens: number } | null,
+  usageParser: (rawEvent: string) => { inputTokens: number; outputTokens: number } | null
 ): Promise<ForwardResult> {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream');
@@ -570,7 +635,9 @@ function parseOpenAiUsage(rawEvent: string): { inputTokens: number; outputTokens
     const jsonStr = t.slice(5).trim();
     if (jsonStr === '[DONE]') continue;
     try {
-      const obj = JSON.parse(jsonStr) as { usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      const obj = JSON.parse(jsonStr) as {
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
       if (obj.usage) {
         return {
           inputTokens: obj.usage.prompt_tokens ?? 0,
@@ -585,7 +652,9 @@ function parseOpenAiUsage(rawEvent: string): { inputTokens: number; outputTokens
 }
 
 /** 解析 Anthropic SSE 的 message_delta / message_start usage。 */
-function parseAnthropicUsage(rawEvent: string): { inputTokens: number; outputTokens: number } | null {
+function parseAnthropicUsage(
+  rawEvent: string
+): { inputTokens: number; outputTokens: number } | null {
   for (const line of rawEvent.split('\n')) {
     const t = line.trim();
     if (!t.startsWith('data:')) continue;
@@ -613,7 +682,10 @@ function parseAnthropicUsage(rawEvent: string): { inputTokens: number; outputTok
 }
 
 /** 提取响应 IP（relay 日志 clientIp 用，取 X-Forwarded-For 首段兜底 socket）。 */
-export function extractClientIp(req: { headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } }): string {
+export function extractClientIp(req: {
+  headers: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string };
+}): string {
   const xff = req.headers['x-forwarded-for'];
   if (typeof xff === 'string') return xff.split(',')[0].trim();
   return req.socket?.remoteAddress ?? '';

@@ -4,7 +4,13 @@ import { AsyncResource } from '@/components/ui/async-resource';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -17,7 +23,10 @@ import {
 import { Section, StatusBadge } from '@/components/shared';
 import { adminCoreApi } from '@/components/admin-core/api';
 import { usePageCorrection } from '@/components/admin-core/pagination';
-import { CreateAccountDialog, EditAccountDialog } from '@/components/admin-core/user-account-dialogs';
+import {
+  CreateAccountDialog,
+  EditAccountDialog,
+} from '@/components/admin-core/user-account-dialogs';
 import { UserDetailSheet } from '@/components/admin-core/user-detail-sheet';
 import type { UserSummary } from '@/components/admin-core/types';
 import { useAsyncResource } from '@/lib/async-resource';
@@ -34,15 +43,19 @@ export function UsersView() {
   const [selected, setSelected] = useState<UserSummary | null>(null);
 
   const users = useAsyncResource(
-    (signal) => adminCoreApi.users({
-      page,
-      pageSize,
-      q: query || undefined,
-      status: status === 'ALL' ? undefined : status,
-      platformRole: 'NONE',
-    }, signal),
+    (signal) =>
+      adminCoreApi.users(
+        {
+          page,
+          pageSize,
+          q: query || undefined,
+          status: status === 'ALL' ? undefined : status,
+          platformRole: 'NONE',
+        },
+        signal
+      ),
     [page, pageSize, query, status],
-    { isEmpty: (data) => data.items.length === 0 },
+    { isEmpty: (data) => data.items.length === 0 }
   );
 
   usePageCorrection(users.data, page, pageSize, setPage);
@@ -63,14 +76,14 @@ export function UsersView() {
     <Section
       title="用户管理"
       description="普通用户账号与访问状态。"
-      actions={(
+      actions={
         <CreateAccountDialog kind="user" onChanged={users.reload}>
           <Button type="button">
             <PlusIcon className="size-4" />
             创建用户
           </Button>
         </CreateAccountDialog>
-      )}
+      }
     >
       <div className="space-y-4">
         <form className="flex flex-col gap-2 sm:flex-row" onSubmit={applySearch}>
@@ -109,7 +122,11 @@ export function UsersView() {
           status={users.status}
           error={users.error}
           retry={users.reload}
-          emptyFallback={<div className="py-12 text-center text-sm text-muted-foreground">暂无符合条件的普通用户</div>}
+          emptyFallback={
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              暂无符合条件的普通用户
+            </div>
+          }
         >
           {users.data ? (
             <>
@@ -138,12 +155,23 @@ export function UsersView() {
                           </span>
                         </TableCellAction>
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell">{user.displayName || '—'}</TableCell>
-                      <TableCell><StatusBadge value={user.status} /></TableCell>
-                      <TableCell className="hidden md:table-cell"><StatusBadge value={user.platformRole} /></TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {user.displayName || '—'}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge value={user.status} />
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <StatusBadge value={user.platformRole} />
+                      </TableCell>
                       <TableCell className="text-right">
                         <EditAccountDialog user={user} kind="user" onChanged={users.reload}>
-                          <Button type="button" variant="ghost" size="icon" aria-label={`编辑用户：${user.email}`}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`编辑用户：${user.email}`}
+                          >
                             <PencilIcon className="size-4" />
                           </Button>
                         </EditAccountDialog>
@@ -167,7 +195,9 @@ export function UsersView() {
       <UserDetailSheet
         user={selected}
         mode="user"
-        onOpenChange={(open) => { if (!open) setSelected(null); }}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
         onChanged={users.reload}
       />
     </Section>

@@ -1,5 +1,21 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsISO8601, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, Matches, ValidateNested } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsISO8601,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  Matches,
+  ValidateNested,
+} from 'class-validator';
 
 export class MarketplacePurchaseDto {
   @IsOptional() @IsString() @Matches(/^pv1\.[A-Za-z0-9_-]{43}$/) expectedPriceVersion?: string;
@@ -60,7 +76,11 @@ export class MarketplaceCampaignCreateDto {
   @IsOptional() @IsString() @MaxLength(4096) description?: string;
   @IsISO8601() startsAt!: string;
   @IsISO8601() endsAt!: string;
-  @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => MarketplaceCampaignItemDto) items!: MarketplaceCampaignItemDto[];
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => MarketplaceCampaignItemDto)
+  items!: MarketplaceCampaignItemDto[];
 }
 
 export class MarketplaceOrderQueryDto {
@@ -68,7 +88,8 @@ export class MarketplaceOrderQueryDto {
   @IsOptional() @IsISO8601() to?: string;
   @IsOptional() @IsString() @MaxLength(100) timezone?: string;
   @IsOptional() @IsUUID() packageId?: string;
-  @IsOptional() @IsIn(['PENDING_SETTLEMENT', 'REFUND_REQUESTED', 'SETTLED', 'REFUNDED']) status?: 'PENDING_SETTLEMENT' | 'REFUND_REQUESTED' | 'SETTLED' | 'REFUNDED';
+  @IsOptional() @IsIn(['PENDING_SETTLEMENT', 'REFUND_REQUESTED', 'SETTLED', 'REFUNDED']) status?:
+    'PENDING_SETTLEMENT' | 'REFUND_REQUESTED' | 'SETTLED' | 'REFUNDED';
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize?: number;
 }
@@ -76,7 +97,8 @@ export class MarketplaceOrderQueryDto {
 export class MarketplaceRefundAdminQueryDto {
   @IsOptional() @IsISO8601() from?: string;
   @IsOptional() @IsISO8601() to?: string;
-  @IsOptional() @IsIn(['PENDING', 'APPROVED', 'REJECTED']) status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  @IsOptional() @IsIn(['PENDING', 'APPROVED', 'REJECTED']) status?:
+    'PENDING' | 'APPROVED' | 'REJECTED';
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize?: number;
 }

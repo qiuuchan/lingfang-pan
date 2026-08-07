@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** 极验 V4 验证码参数（gt4.js captchaObj.onSuccess 回调产出的 4 参数）。 */
@@ -66,7 +73,10 @@ export class LoginDto {
 
 /** 管理端登录请求体 DTO。 */
 export class AdminLoginDto extends LoginDto {
-  @ApiPropertyOptional({ description: '管理端极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+  @ApiPropertyOptional({
+    description: '管理端极验 V4 验证码参数（配置极验后必填）',
+    type: GeetestCaptchaDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => GeetestCaptchaDto)
@@ -82,7 +92,10 @@ export class ForgotPasswordDto {
 
 /** 管理端找回密码请求体 DTO。 */
 export class AdminForgotPasswordDto extends ForgotPasswordDto {
-  @ApiPropertyOptional({ description: '管理端极验 V4 验证码参数（配置极验后必填）', type: GeetestCaptchaDto })
+  @ApiPropertyOptional({
+    description: '管理端极验 V4 验证码参数（配置极验后必填）',
+    type: GeetestCaptchaDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => GeetestCaptchaDto)

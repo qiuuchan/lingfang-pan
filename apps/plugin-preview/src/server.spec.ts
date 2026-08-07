@@ -8,7 +8,9 @@ const SERVICE_KEY = 'preview-service-key-32-characters-minimum';
 const servers: ReturnType<typeof createPreviewOriginServer>[] = [];
 
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  await Promise.all(
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
+  );
 });
 
 describe('independent plugin preview origin', () => {
@@ -18,17 +20,22 @@ describe('independent plugin preview origin', () => {
       expect(headers.get('cookie')).toBeNull();
       expect(headers.get('authorization')).toBeNull();
       expect(headers.get('x-lingfang-preview-service-key')).toBe(SERVICE_KEY);
-      return new Response('<!doctype html><html><head></head><body><script>window.rendered = true;</script></body></html>', {
-        headers: {
-          'content-type': 'text/html; charset=utf-8',
-          'set-cookie': 'should-never-reach-browser=1',
-          'x-lingfang-preview-entry': '1',
-          'x-lingfang-preview-entry-path': encodeURIComponent('ui/index.html'),
-        },
-      });
+      return new Response(
+        '<!doctype html><html><head></head><body><script>window.rendered = true;</script></body></html>',
+        {
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'set-cookie': 'should-never-reach-browser=1',
+            'x-lingfang-preview-entry': '1',
+            'x-lingfang-preview-entry-path': encodeURIComponent('ui/index.html'),
+          },
+        }
+      );
     });
     const origin = await start(upstream);
-    const response = await fetch(`${origin}/sessions/${SESSION_ID}/index.html`, { headers: { cookie: 'lingfang_web_session=secret', authorization: 'Bearer secret' } });
+    const response = await fetch(`${origin}/sessions/${SESSION_ID}/index.html`, {
+      headers: { cookie: 'lingfang_web_session=secret', authorization: 'Bearer secret' },
+    });
     const html = await response.text();
     expect(response.status).toBe(200);
     expect(response.headers.get('set-cookie')).toBeNull();
@@ -36,7 +43,9 @@ describe('independent plugin preview origin', () => {
     expect(response.headers.get('permissions-policy')).toContain('clipboard-read=()');
     expect(response.headers.get('content-security-policy')).toContain("default-src 'none'");
     expect(response.headers.get('content-security-policy')).toContain("connect-src 'none'");
-    expect(response.headers.get('content-security-policy')).toContain('frame-ancestors http://web.example.test');
+    expect(response.headers.get('content-security-policy')).toContain(
+      'frame-ancestors http://web.example.test'
+    );
     expect(response.headers.get('content-security-policy')).toMatch(/script-src 'self' 'sha256-/);
     expect(html).toContain(`<base href="/sessions/${SESSION_ID}/ui/">`);
     expect(html).toContain('<script src="/_lingfang/bridge.js"></script>');
@@ -52,12 +61,14 @@ describe('independent plugin preview origin', () => {
   });
 
   it('refuses a deployment that reuses the Web app origin', () => {
-    expect(() => createPreviewOriginServer({
-      internalOrigin: 'http://api.example.test',
-      serviceKey: SERVICE_KEY,
-      webAppOrigins: ['https://web.example.test'],
-      publicOrigin: 'https://web.example.test',
-    })).toThrow(/must differ/);
+    expect(() =>
+      createPreviewOriginServer({
+        internalOrigin: 'http://api.example.test',
+        serviceKey: SERVICE_KEY,
+        webAppOrigins: ['https://web.example.test'],
+        publicOrigin: 'https://web.example.test',
+      })
+    ).toThrow(/must differ/);
   });
 });
 

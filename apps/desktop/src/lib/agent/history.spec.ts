@@ -24,7 +24,14 @@ describe('turnsToMessages', () => {
         status: 'done',
         content: '',
         parts: [
-          { type: 'tool', toolCallId: 'call_1', name: 'WebSearch', args: { query: 'tauri' }, result: 'Tauri 2.0', status: 'ok' },
+          {
+            type: 'tool',
+            toolCallId: 'call_1',
+            name: 'WebSearch',
+            args: { query: 'tauri' },
+            result: 'Tauri 2.0',
+            status: 'ok',
+          },
           { type: 'text', content: '找到了 Tauri' },
         ],
       },
@@ -35,11 +42,13 @@ describe('turnsToMessages', () => {
       {
         role: 'assistant',
         content: '找到了 Tauri',
-        tool_calls: [{
-          id: 'call_1',
-          type: 'function',
-          function: { name: 'WebSearch', arguments: JSON.stringify({ query: 'tauri' }) },
-        }],
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'WebSearch', arguments: JSON.stringify({ query: 'tauri' }) },
+          },
+        ],
       },
       { role: 'tool', tool_call_id: 'call_1', content: 'Tauri 2.0' },
     ]);
@@ -53,18 +62,35 @@ describe('turnsToMessages', () => {
         status: 'done',
         content: '',
         parts: [
-          { type: 'tool', toolCallId: 'c1', name: 'Read', args: { path: 'main.py' }, result: 'code', status: 'ok' },
-          { type: 'tool', toolCallId: 'c2', name: 'Write', args: { path: 'ui/index.html' }, result: 'ok', status: 'ok' },
+          {
+            type: 'tool',
+            toolCallId: 'c1',
+            name: 'Read',
+            args: { path: 'main.py' },
+            result: 'code',
+            status: 'ok',
+          },
+          {
+            type: 'tool',
+            toolCallId: 'c2',
+            name: 'Write',
+            args: { path: 'ui/index.html' },
+            result: 'ok',
+            status: 'ok',
+          },
         ],
       },
     ];
     const msgs = turnsToMessages(turns, '');
     // 应该有：user + assistant(2 tool_calls) + 2 个 tool result
     expect(msgs).toHaveLength(4);
-    expect(msgs[1]).toMatchObject({ role: 'assistant', tool_calls: expect.arrayContaining([
-      expect.objectContaining({ id: 'c1' }),
-      expect.objectContaining({ id: 'c2' }),
-    ]) });
+    expect(msgs[1]).toMatchObject({
+      role: 'assistant',
+      tool_calls: expect.arrayContaining([
+        expect.objectContaining({ id: 'c1' }),
+        expect.objectContaining({ id: 'c2' }),
+      ]),
+    });
     expect(msgs[2]).toMatchObject({ role: 'tool', tool_call_id: 'c1' });
     expect(msgs[3]).toMatchObject({ role: 'tool', tool_call_id: 'c2' });
   });
@@ -76,9 +102,7 @@ describe('turnsToMessages', () => {
         role: 'assistant',
         status: 'done',
         content: '',
-        parts: [
-          { type: 'tool', toolCallId: 'c1', name: 'Read', status: 'running' },
-        ],
+        parts: [{ type: 'tool', toolCallId: 'c1', name: 'Read', status: 'running' }],
       },
     ];
     const msgs = turnsToMessages(turns, '');
@@ -118,12 +142,21 @@ describe('turnsToMessages', () => {
         status: 'done',
         content: '',
         parts: [
-          { type: 'tool', toolCallId: 'c1', name: 'Check', result: { errors: [], warnings: [] }, status: 'ok' },
+          {
+            type: 'tool',
+            toolCallId: 'c1',
+            name: 'Check',
+            result: { errors: [], warnings: [] },
+            status: 'ok',
+          },
         ],
       },
     ];
     const msgs = turnsToMessages(turns, '');
-    const toolMsg = msgs.find((m) => m.role === 'tool') as Extract<typeof msgs[number], { role: 'tool' }>;
+    const toolMsg = msgs.find((m) => m.role === 'tool') as Extract<
+      (typeof msgs)[number],
+      { role: 'tool' }
+    >;
     expect(toolMsg.content).toBe(JSON.stringify({ errors: [], warnings: [] }));
   });
 });

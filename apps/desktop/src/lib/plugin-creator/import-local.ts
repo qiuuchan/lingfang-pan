@@ -8,7 +8,12 @@ import type { StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 import { EXTERNAL_TOOL_PROVENANCE } from '@/lib/plugin-provenance';
 import type { DraftFile } from '@/lib/types';
 
-const DEFAULT_CAPABILITY: PluginCapability = { kind: 'ui.view', reason: '展示插件界面', risk: 'low', requires_admin: false };
+const DEFAULT_CAPABILITY: PluginCapability = {
+  kind: 'ui.view',
+  reason: '展示插件界面',
+  risk: 'low',
+  requires_admin: false,
+};
 
 // v4 ZIP 总上限为 1500 entries；固定 _meta.json + manifest.json 占 2 条。
 export const MAX_SOURCE_FILES = 1498;
@@ -17,9 +22,34 @@ const MAX_TOTAL_BYTES = 300 * 1024 * 1024;
 
 // 文本文件扩展名白名单：白名单内尝试 fatal UTF-8 解码；失败或其余扩展名按二进制处理。
 const TEXT_EXTENSIONS = new Set([
-  'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'json', 'jsonc',
-  'py', 'pyi', 'txt', 'md', 'markdown', 'yml', 'yaml', 'toml', 'ini', 'cfg',
-  'csv', 'svg', 'xml', 'env', 'sh', 'bat', 'lock',
+  'html',
+  'htm',
+  'css',
+  'js',
+  'mjs',
+  'cjs',
+  'jsx',
+  'ts',
+  'tsx',
+  'json',
+  'jsonc',
+  'py',
+  'pyi',
+  'txt',
+  'md',
+  'markdown',
+  'yml',
+  'yaml',
+  'toml',
+  'ini',
+  'cfg',
+  'csv',
+  'svg',
+  'xml',
+  'env',
+  'sh',
+  'bat',
+  'lock',
 ]);
 
 function isTextPath(path: string): boolean {
@@ -72,18 +102,35 @@ export async function readLocalFiles(fileList: FileList | File[]): Promise<Impor
   for (const file of all) {
     const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
     // 去掉顶层目录名，得到插件内相对路径（单文件导入时无目录前缀，rel 即文件名）。
-    const stripped = rootName && rel.startsWith(`${rootName}/`) ? rel.slice(rootName.length + 1) : rel;
+    const stripped =
+      rootName && rel.startsWith(`${rootName}/`) ? rel.slice(rootName.length + 1) : rel;
     const checked = cleanPathFrontend(stripped);
-    if (!checked.ok) { skipped.push(`${stripped}（路径非法）`); continue; }
-    const path = checked.value;
-    // 跳过依赖、版本控制和运行缓存。dist/build 可能包含真实入口，必须保留。
-    if (/(^|\/)(node_modules|\.git|\.venv|venv|__pycache__|\.pytest_cache|\.mypy_cache)\//.test(`/${path}`)) continue;
-    if (file.size > MAX_FILE_BYTES) { skipped.push(`${path}（超 ${MAX_FILE_BYTES / 1024 / 1024}MiB，已跳过）`); continue; }
-    if (files.length >= MAX_SOURCE_FILES) {
-      skipped.push(`${path}（超 ${MAX_SOURCE_FILES} 个源码文件上限；v4 制品 1500 条目含 2 个固定元数据文件）`);
+    if (!checked.ok) {
+      skipped.push(`${stripped}（路径非法）`);
       continue;
     }
-    if (totalBytes + file.size > MAX_TOTAL_BYTES) { skipped.push(`${path}（超 ${MAX_TOTAL_BYTES / 1024 / 1024}MiB 总量上限）`); continue; }
+    const path = checked.value;
+    // 跳过依赖、版本控制和运行缓存。dist/build 可能包含真实入口，必须保留。
+    if (
+      /(^|\/)(node_modules|\.git|\.venv|venv|__pycache__|\.pytest_cache|\.mypy_cache)\//.test(
+        `/${path}`
+      )
+    )
+      continue;
+    if (file.size > MAX_FILE_BYTES) {
+      skipped.push(`${path}（超 ${MAX_FILE_BYTES / 1024 / 1024}MiB，已跳过）`);
+      continue;
+    }
+    if (files.length >= MAX_SOURCE_FILES) {
+      skipped.push(
+        `${path}（超 ${MAX_SOURCE_FILES} 个源码文件上限；v4 制品 1500 条目含 2 个固定元数据文件）`
+      );
+      continue;
+    }
+    if (totalBytes + file.size > MAX_TOTAL_BYTES) {
+      skipped.push(`${path}（超 ${MAX_TOTAL_BYTES / 1024 / 1024}MiB 总量上限）`);
+      continue;
+    }
     const buffer = await file.arrayBuffer();
     const text = isTextPath(path) ? decodeUtf8(buffer) : null;
     totalBytes += file.size;
@@ -103,7 +150,9 @@ export function filesToStagedPlugin(result: ImportResult): StagedPlugin {
   // 运行类型：manifest 优先；无 manifest 时按入口文件启发式。
   const runtimeRaw = manifest.runtime_type;
   let runtime: StagedPlugin['runtime_type'] =
-    runtimeRaw === 'cloud' || runtimeRaw === 'nodejs' || runtimeRaw === 'python' ? runtimeRaw : 'client';
+    runtimeRaw === 'cloud' || runtimeRaw === 'nodejs' || runtimeRaw === 'python'
+      ? runtimeRaw
+      : 'client';
   if (!hasManifest) {
     if (files.some((f) => f.path === 'main.py')) runtime = 'python';
     else if (files.some((f) => f.path === 'index.js')) runtime = 'nodejs';
@@ -111,12 +160,14 @@ export function filesToStagedPlugin(result: ImportResult): StagedPlugin {
   }
 
   // 入口：manifest 优先；无则按运行类型默认入口，再回退到第一个匹配文件。
-  const defaultEntry = runtime === 'python' ? 'main.py' : runtime === 'nodejs' ? 'index.js' : 'ui/index.html';
+  const defaultEntry =
+    runtime === 'python' ? 'main.py' : runtime === 'nodejs' ? 'index.js' : 'ui/index.html';
   let entry = hasManifest && manifest.entry ? manifest.entry : defaultEntry;
   if (!files.some((f) => f.path === entry)) {
     // 入口不存在：client 找任意 .html，否则用第一个文件，保证 entry 有效（提交校验要求 entry∈files）。
     const htmlFallback = files.find((f) => f.path.endsWith('.html'));
-    entry = (runtime === 'client' && htmlFallback ? htmlFallback.path : files[0]?.path) || defaultEntry;
+    entry =
+      (runtime === 'client' && htmlFallback ? htmlFallback.path : files[0]?.path) || defaultEntry;
   }
 
   // id：manifest.id 优先，其次根目录名，再兜底 'imported-plugin'，统一过 safePluginId 收敛为合法 kebab。
@@ -127,10 +178,12 @@ export function filesToStagedPlugin(result: ImportResult): StagedPlugin {
   const name = manifest.title || (hasManifest ? manifest.name : '') || rootName || id;
 
   // 能力：有 manifest 用其声明；无 manifest 时显式用 ui.view 默认能力，避免给导入插件挂上意外的高权限能力。
-  const capabilities = hasManifest && manifest.capabilities.length
-    ? (manifest.capabilities as PluginCapability[])
-    : [DEFAULT_CAPABILITY];
-  const visibility: StagedPlugin['visibility'] = manifest.visibility === 'private' ? 'private' : 'tenant';
+  const capabilities =
+    hasManifest && manifest.capabilities.length
+      ? (manifest.capabilities as PluginCapability[])
+      : [DEFAULT_CAPABILITY];
+  const visibility: StagedPlugin['visibility'] =
+    manifest.visibility === 'private' ? 'private' : 'tenant';
 
   return {
     id,

@@ -120,11 +120,30 @@ export function PluginsTab() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <LoadingButton loading={saving} onClick={() => { void savePath(); }}>保存路径</LoadingButton>
-          <LoadingButton variant="outline" loading={saving} onClick={() => { void resetDefault(); }}>
+          <LoadingButton
+            loading={saving}
+            onClick={() => {
+              void savePath();
+            }}
+          >
+            保存路径
+          </LoadingButton>
+          <LoadingButton
+            variant="outline"
+            loading={saving}
+            onClick={() => {
+              void resetDefault();
+            }}
+          >
             恢复默认
           </LoadingButton>
-          <LoadingButton variant="outline" loading={false} onClick={() => { void openRoot(); }}>
+          <LoadingButton
+            variant="outline"
+            loading={false}
+            onClick={() => {
+              void openRoot();
+            }}
+          >
             打开目录
           </LoadingButton>
         </div>

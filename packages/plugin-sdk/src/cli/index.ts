@@ -91,9 +91,12 @@ async function main(): Promise<number> {
       const { validateCommand } = await import('./commands/validate.ts');
       // 支持 positional path 或 --path，并接受 --json
       const opts = {
-        path: typeof restArgs[0] === 'string' && restArgs[0].length > 0
-          ? restArgs[0]
-          : (typeof args.flags['path'] === 'string' ? args.flags['path'] : undefined),
+        path:
+          typeof restArgs[0] === 'string' && restArgs[0].length > 0
+            ? restArgs[0]
+            : typeof args.flags['path'] === 'string'
+              ? args.flags['path']
+              : undefined,
         json: args.flags['json'] === true,
       };
       return validateCommand(restArgs, opts);
@@ -101,9 +104,12 @@ async function main(): Promise<number> {
     case 'build': {
       const { buildCommand } = await import('./commands/build.ts');
       const opts = {
-        path: typeof restArgs[0] === 'string' && restArgs[0].length > 0
-          ? restArgs[0]
-          : (typeof args.flags['path'] === 'string' ? args.flags['path'] : undefined),
+        path:
+          typeof restArgs[0] === 'string' && restArgs[0].length > 0
+            ? restArgs[0]
+            : typeof args.flags['path'] === 'string'
+              ? args.flags['path']
+              : undefined,
         out: typeof args.flags['out'] === 'string' ? args.flags['out'] : undefined,
         json: args.flags['json'] === true,
       };
@@ -112,14 +118,20 @@ async function main(): Promise<number> {
     case 'publish': {
       const { publishCommand } = await import('./commands/publish.ts');
       const opts = {
-        path: typeof restArgs[0] === 'string' && restArgs[0].length > 0
-          ? restArgs[0]
-          : (typeof args.flags['path'] === 'string' ? args.flags['path'] : undefined),
+        path:
+          typeof restArgs[0] === 'string' && restArgs[0].length > 0
+            ? restArgs[0]
+            : typeof args.flags['path'] === 'string'
+              ? args.flags['path']
+              : undefined,
         base: typeof args.flags['base'] === 'string' ? args.flags['base'] : undefined,
         token: typeof args.flags['token'] === 'string' ? args.flags['token'] : undefined,
-        packageId: typeof args.flags['package-id'] === 'string' ? args.flags['package-id'] : undefined,
-        sourceKind: typeof args.flags['source-kind'] === 'string' ? args.flags['source-kind'] : undefined,
-        sourceLabel: typeof args.flags['source-label'] === 'string' ? args.flags['source-label'] : undefined,
+        packageId:
+          typeof args.flags['package-id'] === 'string' ? args.flags['package-id'] : undefined,
+        sourceKind:
+          typeof args.flags['source-kind'] === 'string' ? args.flags['source-kind'] : undefined,
+        sourceLabel:
+          typeof args.flags['source-label'] === 'string' ? args.flags['source-label'] : undefined,
         clientKind: typeof args.flags['client'] === 'string' ? args.flags['client'] : undefined,
         build: args.flags['no-build'] === true ? false : undefined,
       };

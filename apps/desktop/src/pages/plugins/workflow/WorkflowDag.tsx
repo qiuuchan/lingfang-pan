@@ -39,10 +39,10 @@ const STATUS_TEXT: Record<string, string> = {
 
 function StatusIcon({ status }: { status: string }) {
   if (status === 'RUNNING') return <Loader2Icon className="size-4 animate-spin text-primary" />;
-  if (status === 'SUCCEEDED') return <CheckCircle2Icon className="size-4 text-emerald-600" />;
+  if (status === 'SUCCEEDED') return <CheckCircle2Icon className="size-4 text-success" />;
   if (status === 'FAILED') return <XCircleIcon className="size-4 text-destructive" />;
   if (status === 'SKIPPED' || status === 'CANCELED') return <BanIcon className="size-4 text-muted-foreground" />;
-  if (status === 'READY') return <Clock3Icon className="size-4 text-amber-600" />;
+  if (status === 'READY') return <Clock3Icon className="size-4 text-warning" />;
   return <CircleDashedIcon className="size-4 text-muted-foreground" />;
 }
 
@@ -82,7 +82,7 @@ export function WorkflowDag({ definition, levels, attempts = [] }: { definition:
                     'group relative rounded-xl border bg-card shadow-sm transition-colors',
                     status === 'RUNNING' && 'border-primary/60',
                     status === 'FAILED' && 'border-destructive/60',
-                    status === 'SUCCEEDED' && 'border-emerald-500/50',
+                    status === 'SUCCEEDED' && 'border-success/50',
                   )}
                 >
                   {levelIndex > 0 && <span aria-hidden className="absolute -left-8 top-7 h-px w-8 bg-border after:absolute after:-right-px after:-top-1 after:size-2 after:rotate-45 after:border-r after:border-t after:border-border" />}

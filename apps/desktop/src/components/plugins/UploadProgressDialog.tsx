@@ -74,7 +74,7 @@ export function UploadProgressDialog({
             {stage === 'reading' || stage === 'uploading' ? (
               <Loader2Icon className="size-5 animate-spin text-primary" />
             ) : stage === 'done' ? (
-              <CheckCircle2Icon className="size-5 text-emerald-500" />
+              <CheckCircle2Icon className="size-5 text-success" />
             ) : (
               <XCircleIcon className="size-5 text-destructive" />
             )}

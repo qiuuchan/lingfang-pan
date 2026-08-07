@@ -117,7 +117,8 @@ function expandIpv6(address: string): bigint | null {
   const left = parseHalf(halves[0]);
   const right = parseHalf(halves[1] ?? '');
   const omitted = halves.length === 2 ? 8 - left.length - right.length : 0;
-  const words = halves.length === 2 ? [...left, ...Array(Math.max(0, omitted)).fill(0), ...right] : left;
+  const words =
+    halves.length === 2 ? [...left, ...Array(Math.max(0, omitted)).fill(0), ...right] : left;
   if (words.length !== 8) return null;
   return words.reduce((value, word) => (value << 16n) | BigInt(word), 0n);
 }
@@ -126,7 +127,7 @@ function ipv6InCidr(value: bigint, base: string, prefix: number): boolean {
   const parsed = expandIpv6(base);
   if (parsed === null) return false;
   const shift = BigInt(128 - prefix);
-  return (value >> shift) === (parsed >> shift);
+  return value >> shift === parsed >> shift;
 }
 
 const DENIED_IPV6_RANGES: ReadonlyArray<readonly [string, number]> = [
@@ -147,7 +148,8 @@ const DENIED_IPV6_RANGES: ReadonlyArray<readonly [string, number]> = [
 export function isPublicEndpointAddress(address: string): boolean {
   const unwrapped = address.replace(/^\[|\]$/g, '');
   const v4 = parseIpv4(unwrapped);
-  if (v4 !== null) return !DENIED_IPV4_RANGES.some(([base, prefix]) => ipv4InCidr(v4, base, prefix));
+  if (v4 !== null)
+    return !DENIED_IPV4_RANGES.some(([base, prefix]) => ipv4InCidr(v4, base, prefix));
   const v6 = expandIpv6(unwrapped);
   if (v6 === null) return false;
   // IPv4-mapped IPv6 must be classified using the embedded IPv4 address.
@@ -163,30 +165,35 @@ export const defaultSafeHttpResolver: SafeHttpResolver = async (hostname) => {
   return answers.map((answer) => ({ address: answer.address, family: answer.family as 4 | 6 }));
 };
 
-export const defaultSafeHttpTransport: SafeHttpTransport = (request) => new Promise((resolve, reject) => {
-  const req = httpsRequest({
-    protocol: 'https:',
-    hostname: request.address.address,
-    family: request.address.family,
-    port: request.url.port ? Number(request.url.port) : 443,
-    path: `${request.url.pathname}${request.url.search}`,
-    method: request.method,
-    headers: { ...request.headers, host: request.url.host },
-    servername: request.url.hostname,
-    rejectUnauthorized: true,
-    maxHeaderSize: request.maxHeaderBytes,
-    agent: false,
-    signal: request.signal,
-  }, (response) => resolve({
-    statusCode: response.statusCode ?? 0,
-    headers: response.headers,
-    body: response,
-    close: () => response.destroy(),
-  }));
-  req.once('error', reject);
-  if (request.body.length > 0) req.write(request.body);
-  req.end();
-});
+export const defaultSafeHttpTransport: SafeHttpTransport = (request) =>
+  new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      {
+        protocol: 'https:',
+        hostname: request.address.address,
+        family: request.address.family,
+        port: request.url.port ? Number(request.url.port) : 443,
+        path: `${request.url.pathname}${request.url.search}`,
+        method: request.method,
+        headers: { ...request.headers, host: request.url.host },
+        servername: request.url.hostname,
+        rejectUnauthorized: true,
+        maxHeaderSize: request.maxHeaderBytes,
+        agent: false,
+        signal: request.signal,
+      },
+      (response) =>
+        resolve({
+          statusCode: response.statusCode ?? 0,
+          headers: response.headers,
+          body: response,
+          close: () => response.destroy(),
+        })
+    );
+    req.once('error', reject);
+    if (request.body.length > 0) req.write(request.body);
+    req.end();
+  });
 
 @Injectable()
 export class SafeOutboundHttpClient {
@@ -211,33 +218,53 @@ export class SafeOutboundHttpClient {
   }
 
   validateUrl(raw: string): URL {
-    if (typeof raw !== 'string' || raw.length === 0 || raw.length > this.maxUrlLength) throw unsafe();
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > this.maxUrlLength)
+      throw unsafe();
     let url: URL;
-    try { url = new URL(raw); } catch { throw unsafe(); }
+    try {
+      url = new URL(raw);
+    } catch {
+      throw unsafe();
+    }
     if (url.protocol !== 'https:' || !url.hostname) throw unsafe('Cloud endpoint 只允许 HTTPS');
     if (url.username || url.password) throw unsafe('Cloud endpoint URL 不允许内嵌凭据');
     if (url.hash) throw unsafe('Cloud endpoint URL 不允许 fragment');
-    const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+    const hostname = url.hostname
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.$/, '')
+      .toLowerCase();
     if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) throw unsafe();
     if (isIP(hostname) !== 0 && !isPublicEndpointAddress(hostname)) throw unsafe();
     url.hostname = hostname;
     const port = url.port ? Number(url.port) : 443;
-    if (!Number.isInteger(port) || !this.allowedPorts.has(port)) throw unsafe('Cloud endpoint 端口不在允许列表');
+    if (!Number.isInteger(port) || !this.allowedPorts.has(port))
+      throw unsafe('Cloud endpoint 端口不在允许列表');
     return url;
   }
 
   async request(input: SafeOutboundRequest): Promise<SafeOutboundResponse> {
     const url = this.validateUrl(input.url);
     const addresses = await this.resolveAndValidate(url.hostname);
-    const selected = [...addresses].sort((a, b) => a.family - b.family || a.address.localeCompare(b.address))[0];
-    const timeoutMs = Math.min(Math.max(input.timeoutMs ?? this.defaultTimeoutMs, 1), MAX_TIMEOUT_MS);
-    const responseLimitBytes = Math.min(Math.max(input.responseLimitBytes ?? this.defaultResponseLimitBytes, 1), MAX_RESPONSE_BYTES);
+    const selected = [...addresses].sort(
+      (a, b) => a.family - b.family || a.address.localeCompare(b.address)
+    )[0];
+    const timeoutMs = Math.min(
+      Math.max(input.timeoutMs ?? this.defaultTimeoutMs, 1),
+      MAX_TIMEOUT_MS
+    );
+    const responseLimitBytes = Math.min(
+      Math.max(input.responseLimitBytes ?? this.defaultResponseLimitBytes, 1),
+      MAX_RESPONSE_BYTES
+    );
     const body = Buffer.isBuffer(input.body) ? input.body : Buffer.from(input.body ?? '', 'utf8');
     const controller = new AbortController();
     let timedOut = false;
     const onAbort = () => controller.abort(input.signal?.reason);
     input.signal?.addEventListener('abort', onAbort, { once: true });
-    const timeout = setTimeout(() => { timedOut = true; controller.abort(new Error('timeout')); }, timeoutMs);
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error('timeout'));
+    }, timeoutMs);
     try {
       const transportRequest = this.transport({
         url,
@@ -250,7 +277,11 @@ export class SafeOutboundHttpClient {
       });
       const response = await Promise.race([
         transportRequest,
-        new Promise<never>((_, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true })),
+        new Promise<never>((_, reject) =>
+          controller.signal.addEventListener('abort', () => reject(controller.signal.reason), {
+            once: true,
+          })
+        ),
       ]);
       if (response.statusCode >= 300 && response.statusCode < 400) {
         response.close?.();
@@ -267,11 +298,17 @@ export class SafeOutboundHttpClient {
         }
         chunks.push(bytes);
       }
-      return { statusCode: response.statusCode, headers: response.headers, body: Buffer.concat(chunks), resolvedAddress: selected };
+      return {
+        statusCode: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks),
+        resolvedAddress: selected,
+      };
     } catch (error) {
       if (error instanceof AppError) throw error;
       if (timedOut) throw new AppError(504, 'cloud_timeout', 'Cloud endpoint 请求超时');
-      if (input.signal?.aborted) throw new AppError(499, 'cloud_request_cancelled', 'Cloud endpoint 请求已取消');
+      if (input.signal?.aborted)
+        throw new AppError(499, 'cloud_request_cancelled', 'Cloud endpoint 请求已取消');
       throw new AppError(502, 'cloud_endpoint_unavailable', 'Cloud endpoint 当前不可用');
     } finally {
       clearTimeout(timeout);
@@ -283,14 +320,24 @@ export class SafeOutboundHttpClient {
     const literalFamily = isIP(hostname);
     let answers: ResolvedAddress[];
     try {
-      answers = literalFamily ? [{ address: hostname, family: literalFamily as 4 | 6 }] : await this.resolver(hostname);
+      answers = literalFamily
+        ? [{ address: hostname, family: literalFamily as 4 | 6 }]
+        : await this.resolver(hostname);
     } catch {
       throw new AppError(502, 'cloud_endpoint_unavailable', 'Cloud endpoint DNS 解析失败');
     }
-    const unique = [...new Map(answers.map((answer) => [`${answer.family}:${answer.address}`, answer])).values()];
-    if (unique.length === 0 || unique.length > this.maxDnsAnswers) throw unsafe('Cloud endpoint DNS 结果不合法');
+    const unique = [
+      ...new Map(answers.map((answer) => [`${answer.family}:${answer.address}`, answer])).values(),
+    ];
+    if (unique.length === 0 || unique.length > this.maxDnsAnswers)
+      throw unsafe('Cloud endpoint DNS 结果不合法');
     for (const answer of unique) {
-      if ((answer.family !== 4 && answer.family !== 6) || isIP(answer.address) !== answer.family || !isPublicEndpointAddress(answer.address)) throw unsafe();
+      if (
+        (answer.family !== 4 && answer.family !== 6) ||
+        isIP(answer.address) !== answer.family ||
+        !isPublicEndpointAddress(answer.address)
+      )
+        throw unsafe();
     }
     return unique;
   }

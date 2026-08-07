@@ -23,7 +23,7 @@ const MYSQL_DEFAULT_PORT = 3306;
 
 export function createPrismaAdapter(
   env: NodeJS.ProcessEnv = process.env,
-  loaders: PrismaAdapterLoaders = {},
+  loaders: PrismaAdapterLoaders = {}
 ): PrismaAdapter {
   const config = resolveDatabaseConfig(env);
   if (config.provider === 'postgresql') {

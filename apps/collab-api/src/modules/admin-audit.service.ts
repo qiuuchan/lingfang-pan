@@ -17,7 +17,7 @@ import {
 export class AdminAuditService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
   async auditLogs(userId: string, filters: AdminAuditListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
@@ -54,5 +54,4 @@ export class AdminAuditService {
     await this.auth.ensurePlatformAdmin(userId);
     return { categories: AUDIT_CATEGORIES };
   }
-
 }

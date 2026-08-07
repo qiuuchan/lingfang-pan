@@ -2,7 +2,16 @@
 // 覆盖：8 个现有插件全量通过 + 每条业务规则 ≥1 个非法用例 + validateManifest 结果形状。
 import { describe, it, expect } from 'vitest';
 import { validateManifest, type ManifestResult } from './index.ts';
-import { RULES, ruleId, ruleVersion, ruleEntryRuntimeMatch, ruleKnownCapability, ruleMissingReason, ruleDuplicateCapability, ruleUnsafeEntryPath } from './rules.ts';
+import {
+  RULES,
+  ruleId,
+  ruleVersion,
+  ruleEntryRuntimeMatch,
+  ruleKnownCapability,
+  ruleMissingReason,
+  ruleDuplicateCapability,
+  ruleUnsafeEntryPath,
+} from './rules.ts';
 import type { PluginManifest } from '@lingfang/contract';
 
 // 8 个现有插件的 manifest.json（静态 import，vitest 直接支持）
@@ -35,11 +44,15 @@ function validManifest(overrides?: Partial<PluginManifest>): PluginManifest {
   } satisfies PluginManifest;
 }
 
-function expectSuccess(result: ManifestResult): asserts result is { success: true; manifest: PluginManifest } {
+function expectSuccess(
+  result: ManifestResult
+): asserts result is { success: true; manifest: PluginManifest } {
   expect(result.success).toBe(true);
 }
 
-function expectFailure(result: ManifestResult): asserts result is Extract<ManifestResult, { success: false }> {
+function expectFailure(
+  result: ManifestResult
+): asserts result is Extract<ManifestResult, { success: false }> {
   expect(result.success).toBe(false);
 }
 
@@ -232,7 +245,9 @@ describe('M7 — unknown_capability', () => {
     // （错误码 schema_invalid），M7 业务规则作为 defensive check 不会触发。
     // 因此这里直接调用规则函数验证其正确性。
     const m = validManifest({
-      capabilities: [{ kind: 'unknown.kind' as never, reason: '', risk: 'low', requires_admin: false }],
+      capabilities: [
+        { kind: 'unknown.kind' as never, reason: '', risk: 'low', requires_admin: false },
+      ],
     });
     const errors = ruleKnownCapability(m);
     expect(errors).toHaveLength(1);
@@ -285,7 +300,9 @@ describe('M8 — missing_reason', () => {
 
   it('medium 风险 + 有 reason → 通过', () => {
     const m = validManifest({
-      capabilities: [{ kind: 'llm.chat', reason: '调用大模型', risk: 'medium', requires_admin: false }],
+      capabilities: [
+        { kind: 'llm.chat', reason: '调用大模型', risk: 'medium', requires_admin: false },
+      ],
     });
     expect(ruleMissingReason(m)).toHaveLength(0);
   });

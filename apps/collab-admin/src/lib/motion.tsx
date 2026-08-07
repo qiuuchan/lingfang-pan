@@ -160,7 +160,7 @@ export function AnimatedNumber({
   const reduce = useReducedMotion();
   const count = useMotionValue(0);
   const display = useTransform(count, (latest) =>
-    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN'),
+    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN')
   );
 
   useEffect(() => {
@@ -192,7 +192,9 @@ export function MiniBarChart({
   const reduce = useReducedMotion();
   if (data.length === 0) {
     return (
-      <div className={cn('py-4 text-center text-sm text-muted-foreground', className)}>暂无数据</div>
+      <div className={cn('py-4 text-center text-sm text-muted-foreground', className)}>
+        暂无数据
+      </div>
     );
   }
   const max = Math.max(1, ...data.map((d) => d.value));

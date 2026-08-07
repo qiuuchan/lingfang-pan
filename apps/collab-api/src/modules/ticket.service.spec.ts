@@ -40,18 +40,29 @@ function mockPrisma() {
     findUnique: vi.fn(async () => makeTicket()),
     findMany: vi.fn(async () => []),
     count: vi.fn(async () => 0),
-    update: vi.fn(async (args: { data: Record<string, unknown> }) => ({ ...makeTicket(), ...args.data })),
+    update: vi.fn(async (args: { data: Record<string, unknown> }) => ({
+      ...makeTicket(),
+      ...args.data,
+    })),
     updateMany: vi.fn(async () => ({ count: 1 })),
   };
   const ticketMessage = { create: vi.fn(async () => ({ id: 'm2' })) };
-  const ticketAttachment = { create: vi.fn(async () => ({ id: 'a1' })), findUnique: vi.fn(async () => null) };
+  const ticketAttachment = {
+    create: vi.fn(async () => ({ id: 'a1' })),
+    findUnique: vi.fn(async () => null),
+  };
   const auditLog = { create: vi.fn(async () => ({})) };
-  const user = { findUnique: vi.fn(async () => ({ id: 'user-1', displayName: 'U', email: 'u@x.com' })), findMany: vi.fn(async () => []) };
+  const user = {
+    findUnique: vi.fn(async () => ({ id: 'user-1', displayName: 'U', email: 'u@x.com' })),
+    findMany: vi.fn(async () => []),
+  };
   const team = { findUnique: vi.fn(async () => ({ id: 'team-1', name: 'T' })) };
   const prisma = { ticket, ticketMessage, ticketAttachment, auditLog, user, team };
   return {
     ...prisma,
-    $transaction: vi.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) => callback(prisma)),
+    $transaction: vi.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) =>
+      callback(prisma)
+    ),
   };
 }
 
@@ -68,7 +79,11 @@ function mockNotifications() {
   return { create: vi.fn(async () => ({})) };
 }
 
-function makeService(prisma: ReturnType<typeof mockPrisma>, auth = mockAuth(), notify = mockNotifications()) {
+function makeService(
+  prisma: ReturnType<typeof mockPrisma>,
+  auth = mockAuth(),
+  notify = mockNotifications()
+) {
   // @ts-expect-error mock 不实现完整接口，仅测用到的方法。
   return { service: new TicketService(prisma, auth, notify), auth, notify };
 }
@@ -84,36 +99,58 @@ describe('TicketService', () => {
     it('用当前团队 teamId 建工单 + 首条 USER 消息', async () => {
       const { service, auth } = makeService(prisma);
       // getForUser 在 create 末尾被调用，需 loadFull 返回带 messages/attachments 的工单。
-      prisma.ticket.findUnique.mockResolvedValue({ ...makeTicket(), messages: [], attachments: [] } as never);
+      prisma.ticket.findUnique.mockResolvedValue({
+        ...makeTicket(),
+        messages: [],
+        attachments: [],
+      } as never);
       await service.create('user-1', { title: '标题', body: '描述', category: 'BUG' }, []);
       expect(auth.ensureCurrentTeam).toHaveBeenCalledWith('user-1');
       expect(prisma.ticket.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ userId: 'user-1', teamId: 'team-1', title: '标题', status: 'OPEN' }),
-        }),
+          data: expect.objectContaining({
+            userId: 'user-1',
+            teamId: 'team-1',
+            title: '标题',
+            status: 'OPEN',
+          }),
+        })
       );
     });
 
     it('无团队时 teamId 降级为 null，不阻断提交', async () => {
       const { service } = makeService(prisma, mockAuth(null));
-      prisma.ticket.findUnique.mockResolvedValue({ ...makeTicket({ teamId: null }), messages: [], attachments: [] } as never);
+      prisma.ticket.findUnique.mockResolvedValue({
+        ...makeTicket({ teamId: null }),
+        messages: [],
+        attachments: [],
+      } as never);
       await service.create('user-1', { title: '标题', body: '描述' }, []);
       expect(prisma.ticket.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ teamId: null }) }),
+        expect.objectContaining({ data: expect.objectContaining({ teamId: null }) })
       );
     });
 
     it('空标题抛 bad_request', async () => {
       const { service } = makeService(prisma);
-      await expect(service.create('user-1', { title: '  ', body: '描述' }, [])).rejects.toMatchObject({ status: 400 });
+      await expect(
+        service.create('user-1', { title: '  ', body: '描述' }, [])
+      ).rejects.toMatchObject({ status: 400 });
     });
   });
 
   describe('getForUser 越权隔离', () => {
     it('他人工单返回 not_found（不泄漏存在性）', async () => {
       const { service } = makeService(prisma);
-      prisma.ticket.findUnique.mockResolvedValue({ ...makeTicket({ userId: 'user-other' }), messages: [], attachments: [] } as never);
-      await expect(service.getForUser('user-1', 't1')).rejects.toMatchObject({ status: 404, code: 'not_found' });
+      prisma.ticket.findUnique.mockResolvedValue({
+        ...makeTicket({ userId: 'user-other' }),
+        messages: [],
+        attachments: [],
+      } as never);
+      await expect(service.getForUser('user-1', 't1')).rejects.toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
     });
   });
 
@@ -122,23 +159,34 @@ describe('TicketService', () => {
       const { service } = makeService(prisma);
       prisma.ticket.findUnique
         .mockResolvedValueOnce(makeTicket({ status: 'RESOLVED' }) as never) // 第一次：取状态
-        .mockResolvedValue({ ...makeTicket({ status: 'IN_PROGRESS' }), messages: [], attachments: [] } as never); // getForUser
+        .mockResolvedValue({
+          ...makeTicket({ status: 'IN_PROGRESS' }),
+          messages: [],
+          attachments: [],
+        } as never); // getForUser
       await service.addUserMessage('user-1', 't1', { body: '还没好' }, []);
       expect(prisma.ticket.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ status: 'RESOLVED' }), data: expect.objectContaining({ status: 'IN_PROGRESS' }) }),
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'RESOLVED' }),
+          data: expect.objectContaining({ status: 'IN_PROGRESS' }),
+        })
       );
     });
 
     it('CLOSED 工单不可追加回复', async () => {
       const { service } = makeService(prisma);
       prisma.ticket.findUnique.mockResolvedValue(makeTicket({ status: 'CLOSED' }) as never);
-      await expect(service.addUserMessage('user-1', 't1', { body: 'x' }, [])).rejects.toMatchObject({ status: 400 });
+      await expect(service.addUserMessage('user-1', 't1', { body: 'x' }, [])).rejects.toMatchObject(
+        { status: 400 }
+      );
     });
 
     it('他人工单追加 → not_found', async () => {
       const { service } = makeService(prisma);
       prisma.ticket.findUnique.mockResolvedValue(makeTicket({ userId: 'other' }) as never);
-      await expect(service.addUserMessage('user-1', 't1', { body: 'x' }, [])).rejects.toMatchObject({ status: 404 });
+      await expect(service.addUserMessage('user-1', 't1', { body: 'x' }, [])).rejects.toMatchObject(
+        { status: 404 }
+      );
     });
   });
 
@@ -147,20 +195,35 @@ describe('TicketService', () => {
       const { service, notify } = makeService(prisma);
       prisma.ticket.findUnique
         .mockResolvedValueOnce(makeTicket({ status: 'OPEN' }) as never)
-        .mockResolvedValue({ ...makeTicket({ status: 'IN_PROGRESS' }), messages: [], attachments: [] } as never);
+        .mockResolvedValue({
+          ...makeTicket({ status: 'IN_PROGRESS' }),
+          messages: [],
+          attachments: [],
+        } as never);
       await service.addAdminMessage('admin-1', 't1', { body: '已处理' }, []);
       expect(prisma.ticket.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ status: 'OPEN' }), data: expect.objectContaining({ status: 'IN_PROGRESS', handlerUserId: 'admin-1' }) }),
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'OPEN' }),
+          data: expect.objectContaining({ status: 'IN_PROGRESS', handlerUserId: 'admin-1' }),
+        })
       );
       expect(prisma.auditLog.create).toHaveBeenCalled();
-      expect(notify.create).toHaveBeenCalledWith('user-1', 'ticket_reply', expect.any(String), expect.any(String), expect.objectContaining({ relatedType: 'Ticket', relatedId: 't1' }));
+      expect(notify.create).toHaveBeenCalledWith(
+        'user-1',
+        'ticket_reply',
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ relatedType: 'Ticket', relatedId: 't1' })
+      );
     });
 
     it('关闭操作抢先完成时不再写入回复消息', async () => {
       const { service } = makeService(prisma);
       prisma.ticket.findUnique.mockResolvedValue(makeTicket({ status: 'OPEN' }) as never);
       prisma.ticket.updateMany.mockResolvedValue({ count: 0 });
-      await expect(service.addAdminMessage('admin-1', 't1', { body: '并发回复' }, [])).rejects.toMatchObject({
+      await expect(
+        service.addAdminMessage('admin-1', 't1', { body: '并发回复' }, [])
+      ).rejects.toMatchObject({
         status: 409,
         code: 'conflict',
       });
@@ -172,19 +235,25 @@ describe('TicketService', () => {
     it('非法状态转移抛 bad_request（CLOSED→OPEN）', async () => {
       const { service } = makeService(prisma);
       prisma.ticket.findUnique.mockResolvedValue(makeTicket({ status: 'CLOSED' }) as never);
-      await expect(service.updateStatus('admin-1', 't1', { status: 'OPEN' })).rejects.toMatchObject({ status: 400 });
+      await expect(service.updateStatus('admin-1', 't1', { status: 'OPEN' })).rejects.toMatchObject(
+        { status: 400 }
+      );
     });
 
     it('无 status/priority 抛 bad_request', async () => {
       const { service } = makeService(prisma);
-      await expect(service.updateStatus('admin-1', 't1', {})).rejects.toMatchObject({ status: 400 });
+      await expect(service.updateStatus('admin-1', 't1', {})).rejects.toMatchObject({
+        status: 400,
+      });
     });
 
     it('状态被并发修改时拒绝覆盖新状态', async () => {
       const { service } = makeService(prisma);
       prisma.ticket.findUnique.mockResolvedValue(makeTicket({ status: 'OPEN' }) as never);
       prisma.ticket.updateMany.mockResolvedValue({ count: 0 });
-      await expect(service.updateStatus('admin-1', 't1', { status: 'CLOSED' })).rejects.toMatchObject({
+      await expect(
+        service.updateStatus('admin-1', 't1', { status: 'CLOSED' })
+      ).rejects.toMatchObject({
         status: 409,
         code: 'conflict',
       });
@@ -196,16 +265,18 @@ describe('TicketService', () => {
       const { service } = makeService(prisma);
       prisma.ticket.findMany.mockResolvedValue([]);
       const result = await service.listAdmin({ page: 2, pageSize: 10 });
-      expect(prisma.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        skip: 10,
-        take: 10,
-        orderBy: [{ lastReplyAt: 'desc' }, { id: 'desc' }],
-        select: expect.objectContaining({
-          title: true,
-          user: { select: { id: true, displayName: true, email: true } },
-          _count: { select: { messages: true, attachments: true } },
-        }),
-      }));
+      expect(prisma.ticket.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          skip: 10,
+          take: 10,
+          orderBy: [{ lastReplyAt: 'desc' }, { id: 'desc' }],
+          select: expect.objectContaining({
+            title: true,
+            user: { select: { id: true, displayName: true, email: true } },
+            _count: { select: { messages: true, attachments: true } },
+          }),
+        })
+      );
       expect(result).toEqual({ items: [], total: 0, page: 2, pageSize: 10 });
     });
   });
@@ -214,29 +285,51 @@ describe('TicketService', () => {
     it('非 admin 下载他人工单附件 → not_found', async () => {
       const { service } = makeService(prisma);
       prisma.ticketAttachment.findUnique.mockResolvedValue({
-        id: 'a1', ticketId: 't1', storedName: 'x.log', filename: 'x.log', mimeType: 'text/plain', sizeBytes: 10,
+        id: 'a1',
+        ticketId: 't1',
+        storedName: 'x.log',
+        filename: 'x.log',
+        mimeType: 'text/plain',
+        sizeBytes: 10,
         ticket: { id: 't1', userId: 'user-other' },
       } as never);
-      await expect(service.streamAttachment('t1', 'a1', { userId: 'user-1', isAdmin: false })).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.streamAttachment('t1', 'a1', { userId: 'user-1', isAdmin: false })
+      ).rejects.toMatchObject({ status: 404 });
     });
 
     it('admin 可下载任意附件', async () => {
       const { service } = makeService(prisma);
       prisma.ticketAttachment.findUnique.mockResolvedValue({
-        id: 'a1', ticketId: 't1', storedName: 'x.log', filename: 'x.log', mimeType: 'text/plain', sizeBytes: 10,
+        id: 'a1',
+        ticketId: 't1',
+        storedName: 'x.log',
+        filename: 'x.log',
+        mimeType: 'text/plain',
+        sizeBytes: 10,
         ticket: { id: 't1', userId: 'user-other' },
       } as never);
-      const result = await service.streamAttachment('t1', 'a1', { userId: 'admin-1', isAdmin: true });
+      const result = await service.streamAttachment('t1', 'a1', {
+        userId: 'admin-1',
+        isAdmin: true,
+      });
       expect(result.filename).toBe('x.log');
     });
 
     it('附件不属于该工单 → not_found', async () => {
       const { service } = makeService(prisma);
       prisma.ticketAttachment.findUnique.mockResolvedValue({
-        id: 'a1', ticketId: 'other-ticket', storedName: 'x.log', filename: 'x.log', mimeType: 'text/plain', sizeBytes: 10,
+        id: 'a1',
+        ticketId: 'other-ticket',
+        storedName: 'x.log',
+        filename: 'x.log',
+        mimeType: 'text/plain',
+        sizeBytes: 10,
         ticket: { id: 'other-ticket', userId: 'user-1' },
       } as never);
-      await expect(service.streamAttachment('t1', 'a1', { userId: 'user-1', isAdmin: false })).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.streamAttachment('t1', 'a1', { userId: 'user-1', isAdmin: false })
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 });

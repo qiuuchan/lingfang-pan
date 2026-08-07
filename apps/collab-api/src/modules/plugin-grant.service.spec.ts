@@ -63,30 +63,54 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
       prisma.pluginPackage.findUnique.mockResolvedValue({ id: 'package-1', ownerTeamId: 'team-1' });
       prisma.teamMembership.findUnique.mockResolvedValue(null);
       await expect(
-        service.setGrant('admin-1', 'package-1', { subjectKind: 'USER', subjectId: 'u2', effect: 'DENY' }),
+        service.setGrant('admin-1', 'package-1', {
+          subjectKind: 'USER',
+          subjectId: 'u2',
+          effect: 'DENY',
+        })
       ).rejects.toMatchObject({ status: 400 });
     });
 
     it('ROLE 主体：目标非本团队角色拒绝 400', async () => {
       prisma.pluginPackage.findUnique.mockResolvedValue({ id: 'package-1', ownerTeamId: 'team-1' });
-      prisma.role.findUnique.mockResolvedValue({ id: 'role-x', scope: 'TEAM', teamId: 'other-team' });
+      prisma.role.findUnique.mockResolvedValue({
+        id: 'role-x',
+        scope: 'TEAM',
+        teamId: 'other-team',
+      });
       await expect(
-        service.setGrant('admin-1', 'package-1', { subjectKind: 'ROLE', subjectId: 'role-x', effect: 'ALLOW' }),
+        service.setGrant('admin-1', 'package-1', {
+          subjectKind: 'ROLE',
+          subjectId: 'role-x',
+          effect: 'ALLOW',
+        })
       ).rejects.toMatchObject({ status: 400 });
     });
 
     it('插件不存在拒绝 404', async () => {
       prisma.pluginPackage.findUnique.mockResolvedValue(null);
       await expect(
-        service.setGrant('admin-1', 'nope', { subjectKind: 'USER', subjectId: 'u2', effect: 'DENY' }),
+        service.setGrant('admin-1', 'nope', {
+          subjectKind: 'USER',
+          subjectId: 'u2',
+          effect: 'DENY',
+        })
       ).rejects.toMatchObject({ status: 404 });
     });
 
     it('正常 upsert USER DENY 授权', async () => {
       prisma.pluginPackage.findUnique.mockResolvedValue({ id: 'package-1', ownerTeamId: 'team-1' });
-      prisma.teamMembership.findUnique.mockResolvedValue({ teamId: 'team-1', userId: 'u2', status: 'ACTIVE' });
+      prisma.teamMembership.findUnique.mockResolvedValue({
+        teamId: 'team-1',
+        userId: 'u2',
+        status: 'ACTIVE',
+      });
       prisma.pluginGrant.upsert.mockResolvedValue(makeGrant());
-      const result = await service.setGrant('admin-1', 'package-1', { subjectKind: 'USER', subjectId: 'u2', effect: 'DENY' });
+      const result = await service.setGrant('admin-1', 'package-1', {
+        subjectKind: 'USER',
+        subjectId: 'u2',
+        effect: 'DENY',
+      });
       expect(result.grant.effect).toBe('DENY');
       expect(prisma.auditLog.create).toHaveBeenCalled();
     });
@@ -95,9 +119,9 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
   describe('removeGrant', () => {
     it('授权记录不存在拒绝 404', async () => {
       prisma.pluginGrant.findUnique.mockResolvedValue(null);
-      await expect(
-        service.removeGrant('admin-1', 'plugin-1', 'USER', 'u2'),
-      ).rejects.toMatchObject({ status: 404 });
+      await expect(service.removeGrant('admin-1', 'plugin-1', 'USER', 'u2')).rejects.toMatchObject({
+        status: 404,
+      });
     });
 
     it('正常删除', async () => {
@@ -111,7 +135,12 @@ describe('PluginGrantService 授权管理 + resolvePluginAccess', () => {
   describe('resolvePluginAccess', () => {
     it('团队管理员没有运行时绕过，显式 DENY 仍生效', async () => {
       prisma.pluginGrant.findMany.mockResolvedValue([{ subjectKind: 'USER', effect: 'DENY' }]);
-      const ok = await service.resolvePluginAccess('team-1', 'plugin-1', 'admin-1', 'team-admin-team-1');
+      const ok = await service.resolvePluginAccess(
+        'team-1',
+        'plugin-1',
+        'admin-1',
+        'team-admin-team-1'
+      );
       expect(ok).toBe(false);
       expect(prisma.pluginGrant.findMany).toHaveBeenCalledOnce();
     });

@@ -1,8 +1,27 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApplicationStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsEmail, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { BALANCE_DIRECTION, PLATFORM_ROLE, PLUGIN_STATUS, PLUGIN_VISIBILITY, TEAM_ROLE, TEAM_STATUS, USER_STATUS } from './enums';
+import {
+  IsEmail,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+import {
+  BALANCE_DIRECTION,
+  PLATFORM_ROLE,
+  PLUGIN_STATUS,
+  PLUGIN_VISIBILITY,
+  TEAM_ROLE,
+  TEAM_STATUS,
+  USER_STATUS,
+} from './enums';
 
 export const ADMIN_SORT_ORDER = ['asc', 'desc'] as const;
 export const ADMIN_USER_SORT = ['createdAt', 'updatedAt', 'email', 'displayName'] as const;
@@ -30,7 +49,7 @@ export class AdminPageQueryDto {
 export class AdminUsersQueryDto extends AdminPageQueryDto {
   @ApiPropertyOptional({ description: '邮箱或展示名称关键词' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
@@ -60,7 +79,7 @@ export class AdminUsersQueryDto extends AdminPageQueryDto {
 export class AdminUserOptionsQueryDto {
   @ApiPropertyOptional({ description: '邮箱或展示名称关键词' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
@@ -78,7 +97,7 @@ export class AdminUserOptionsQueryDto {
 export class AdminTeamsQueryDto extends AdminPageQueryDto {
   @ApiPropertyOptional({ description: '团队名称或 slug 关键词' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
@@ -103,7 +122,7 @@ export class AdminTeamsQueryDto extends AdminPageQueryDto {
 export class AdminTeamMembersQueryDto extends AdminPageQueryDto {
   @ApiPropertyOptional({ description: '成员邮箱或展示名称关键词' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;
@@ -117,6 +136,7 @@ export class AdminCreateUserDto {
 
   @ApiProperty({ description: '初始密码' })
   @IsString()
+  @IsNotEmpty({ message: '初始密码不能为空' })
   password!: string;
 
   @ApiPropertyOptional({ description: '展示名称' })
@@ -319,7 +339,7 @@ export class AdminApplicationsQueryDto {
 /** 驳回团队管理员申请请求体 DTO。 */
 export class AdminRejectApplicationDto {
   @ApiProperty({ description: '驳回原因（1-500 字）' })
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(1, { message: '驳回原因不能为空' })
   @MaxLength(500, { message: '驳回原因最多为 500 字' })
@@ -363,17 +383,28 @@ export class AdminPlatformRoleDto {
  *  category：按 action 前缀分类筛选（auth/team/plugin/marketplace/wallet/llm/admin/system）。
  *  q：关键词搜索（匹配 action / actor email / targetId）。
  *  actorId / targetType：精确过滤。全部可选。 */
-export const AUDIT_CATEGORY = ['auth', 'team', 'plugin', 'marketplace', 'wallet', 'llm', 'admin', 'system'] as const;
+export const AUDIT_CATEGORY = [
+  'auth',
+  'team',
+  'plugin',
+  'marketplace',
+  'wallet',
+  'llm',
+  'admin',
+  'system',
+] as const;
 
 export class AdminAuditLogsQueryDto extends AdminPageQueryDto {
   @ApiPropertyOptional({ description: '分类筛选', enum: AUDIT_CATEGORY })
   @IsOptional()
-  @IsEnum(AUDIT_CATEGORY, { message: 'category 只允许 auth/team/plugin/marketplace/wallet/llm/admin/system' })
+  @IsEnum(AUDIT_CATEGORY, {
+    message: 'category 只允许 auth/team/plugin/marketplace/wallet/llm/admin/system',
+  })
   category?: (typeof AUDIT_CATEGORY)[number];
 
   @ApiPropertyOptional({ description: '关键词搜索（action / actor email / targetId）' })
   @IsOptional()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(200, { message: 'q 最多为 200 字' })
   q?: string;

@@ -39,10 +39,12 @@ describe('resolveAutomationConfig', () => {
   });
 
   it('requires the dedicated persistent Redis URL only for infrastructure roles', () => {
-    expect(() => resolveAutomationConfig({
-      AUTOMATION_ENABLED: 'true',
-      AUTOMATION_PROCESS_ROLE: 'worker',
-    })).toThrow('AUTOMATION_REDIS_URL');
+    expect(() =>
+      resolveAutomationConfig({
+        AUTOMATION_ENABLED: 'true',
+        AUTOMATION_PROCESS_ROLE: 'worker',
+      })
+    ).toThrow('AUTOMATION_REDIS_URL');
 
     const config = resolveAutomationConfig({
       AUTOMATION_ENABLED: 'true',
@@ -58,17 +60,21 @@ describe('resolveAutomationConfig', () => {
   });
 
   it('accepts an isolated Redis prefix and rejects unsafe prefix characters', () => {
-    expect(resolveAutomationConfig({
-      AUTOMATION_ENABLED: 'true',
-      AUTOMATION_PROCESS_ROLE: 'worker',
-      AUTOMATION_REDIS_URL: 'redis://127.0.0.1:6379/15',
-      AUTOMATION_REDIS_PREFIX: 'lf:automation:test:run-1',
-    }).redisPrefix).toBe('lf:automation:test:run-1');
-    expect(() => resolveAutomationConfig({
-      AUTOMATION_ENABLED: 'true',
-      AUTOMATION_PROCESS_ROLE: 'worker',
-      AUTOMATION_REDIS_URL: 'redis://127.0.0.1:6379/15',
-      AUTOMATION_REDIS_PREFIX: 'lf automation *',
-    })).toThrow('AUTOMATION_REDIS_PREFIX');
+    expect(
+      resolveAutomationConfig({
+        AUTOMATION_ENABLED: 'true',
+        AUTOMATION_PROCESS_ROLE: 'worker',
+        AUTOMATION_REDIS_URL: 'redis://127.0.0.1:6379/15',
+        AUTOMATION_REDIS_PREFIX: 'lf:automation:test:run-1',
+      }).redisPrefix
+    ).toBe('lf:automation:test:run-1');
+    expect(() =>
+      resolveAutomationConfig({
+        AUTOMATION_ENABLED: 'true',
+        AUTOMATION_PROCESS_ROLE: 'worker',
+        AUTOMATION_REDIS_URL: 'redis://127.0.0.1:6379/15',
+        AUTOMATION_REDIS_PREFIX: 'lf automation *',
+      })
+    ).toThrow('AUTOMATION_REDIS_PREFIX');
   });
 });

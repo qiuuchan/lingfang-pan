@@ -44,23 +44,37 @@ export class WebCloudTrialService {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PluginActionRegistryService) private readonly actions: PluginActionRegistryService,
     @Inject(CloudActionRoutingService) private readonly routing: CloudActionRoutingService,
-    @Inject(ActionInvocationService) private readonly invocations: ActionInvocationService,
+    @Inject(ActionInvocationService) private readonly invocations: ActionInvocationService
   ) {}
 
   async start(userId: string, packageId: string, actionId: string, body: unknown) {
     const parsed = WebCloudTrialCreateRequest.safeParse(body);
     if (!parsed.success) {
       throw new AppError(400, 'web_preview_request_invalid', 'Cloud Trial 请求参数无效', {
-        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
       });
     }
     const membership = await this.auth.ensureCurrentTeam(userId);
     const listing = await this.prisma.marketplaceListing.findFirst({
-      where: { packageId, status: 'ACTIVE', currentRelease: { status: 'PUBLISHED', marketReviewStatus: 'APPROVED', aiPolicyStatus: 'PASSED' } },
+      where: {
+        packageId,
+        status: 'ACTIVE',
+        currentRelease: {
+          status: 'PUBLISHED',
+          marketReviewStatus: 'APPROVED',
+          aiPolicyStatus: 'PASSED',
+        },
+      },
       include: { currentRelease: true },
     });
     if (!listing?.currentRelease) throw notFound('可试用插件不存在');
-    if (listing.currentRelease.id !== parsed.data.release_id || listing.currentRelease.sha256 !== parsed.data.release_sha256) {
+    if (
+      listing.currentRelease.id !== parsed.data.release_id ||
+      listing.currentRelease.sha256 !== parsed.data.release_sha256
+    ) {
       throw new AppError(409, 'web_preview_release_changed', '插件发行版已更新，请刷新页面后重试');
     }
     const target = {
@@ -68,21 +82,30 @@ export class WebCloudTrialService {
       release_id: listing.currentRelease.id,
       sha256: listing.currentRelease.sha256,
       action_id: actionId,
-      action_contract_version: actionVersion(listing.currentRelease.actionSurfaceManifest, actionId),
+      action_contract_version: actionVersion(
+        listing.currentRelease.actionSurfaceManifest,
+        actionId
+      ),
       action_surface_sha256: actionSurface(listing.currentRelease.actionSurfaceManifest, actionId),
     };
-    if (target.action_contract_version !== parsed.data.action_contract_version
-      || target.action_surface_sha256 !== parsed.data.action_surface_sha256) {
+    if (
+      target.action_contract_version !== parsed.data.action_contract_version ||
+      target.action_surface_sha256 !== parsed.data.action_surface_sha256
+    ) {
       throw new AppError(409, 'web_preview_action_changed', 'Action 契约已更新，请刷新页面后重试');
     }
     const resolved = await this.actions.resolve(target);
     const action = resolved.action as Record<string, unknown>;
     const semantics = String(action.execution_semantics || '');
-    if (action.previewable !== true || action.cloud_capable !== true || semantics !== 'read_only' && semantics !== 'idempotent') {
+    if (
+      action.previewable !== true ||
+      action.cloud_capable !== true ||
+      (semantics !== 'read_only' && semantics !== 'idempotent')
+    ) {
       throw new AppError(409, 'web_preview_unavailable', '该 Action 不允许 Web Cloud Trial');
     }
 
-    const existing = await this.prisma.actionInvocation.findFirst({
+    const existing = (await this.prisma.actionInvocation.findFirst({
       where: {
         teamId: membership.teamId,
         principalUserId: userId,
@@ -93,7 +116,7 @@ export class WebCloudTrialService {
         actionId,
         requestIdempotencyKey: parsed.data.request_idempotency_key,
       },
-    }) as PreviewInvocationRow | null;
+    })) as PreviewInvocationRow | null;
     if (existing) {
       if (existing.inputSha256 !== digest(parsed.data.input)) {
         throw new AppError(409, 'action_idempotency_conflict', '相同幂等键对应了不同输入');
@@ -102,11 +125,19 @@ export class WebCloudTrialService {
     }
 
     const quota = await this.quotaSnapshot(userId, membership.teamId);
-    if (quota.daily >= DAILY_LIMIT) throw new AppError(429, 'web_preview_quota_exceeded', '今日 Cloud Trial 次数已用完');
-    if (quota.concurrent >= CONCURRENCY_LIMIT) throw new AppError(429, 'web_preview_concurrency_exceeded', '已有 Cloud Trial 正在运行');
+    if (quota.daily >= DAILY_LIMIT)
+      throw new AppError(429, 'web_preview_quota_exceeded', '今日 Cloud Trial 次数已用完');
+    if (quota.concurrent >= CONCURRENCY_LIMIT)
+      throw new AppError(429, 'web_preview_concurrency_exceeded', '已有 Cloud Trial 正在运行');
 
     const requestId = randomUUID();
-    const binding = await this.routing.freeze(userId, resolved.target, 'PREVIEW', requestId, `web-preview:${actionId}`);
+    const binding = await this.routing.freeze(
+      userId,
+      resolved.target,
+      'PREVIEW',
+      requestId,
+      `web-preview:${actionId}`
+    );
     const invocation = await this.invocations.create(userId, {
       target: resolved.target,
       preview: true,
@@ -114,11 +145,26 @@ export class WebCloudTrialService {
       request_idempotency_key: parsed.data.request_idempotency_key,
       deadline_at: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
       caller: { kind: 'WEB', id: userId },
-      cloud_binding: { deployment_id: binding.deployment_id, routing_generation: binding.routing_generation, environment: 'PREVIEW' },
+      cloud_binding: {
+        deployment_id: binding.deployment_id,
+        routing_generation: binding.routing_generation,
+        environment: 'PREVIEW',
+      },
     });
     await this.prisma.automationOutbox.upsert({
-      where: { kind_aggregateId_generation: { kind: 'ENQUEUE_ACTION', aggregateId: invocation.id, generation: 0 } },
-      create: { kind: 'ENQUEUE_ACTION', aggregateId: invocation.id, generation: 0, payload: { invocation_id: invocation.id } },
+      where: {
+        kind_aggregateId_generation: {
+          kind: 'ENQUEUE_ACTION',
+          aggregateId: invocation.id,
+          generation: 0,
+        },
+      },
+      create: {
+        kind: 'ENQUEUE_ACTION',
+        aggregateId: invocation.id,
+        generation: 0,
+        payload: { invocation_id: invocation.id },
+      },
       update: {},
     });
     const row = await this.loadOwned(userId, membership.teamId, invocation.id);
@@ -139,10 +185,20 @@ export class WebCloudTrialService {
     return this.project(row, await this.quotaSnapshot(userId, membership.teamId));
   }
 
-  private async loadOwned(userId: string, teamId: string, invocationId: string): Promise<PreviewInvocationRow> {
-    const row = await this.prisma.actionInvocation.findFirst({
-      where: { id: invocationId, teamId, principalUserId: userId, kind: 'PREVIEW', callerKind: 'WEB' },
-    }) as PreviewInvocationRow | null;
+  private async loadOwned(
+    userId: string,
+    teamId: string,
+    invocationId: string
+  ): Promise<PreviewInvocationRow> {
+    const row = (await this.prisma.actionInvocation.findFirst({
+      where: {
+        id: invocationId,
+        teamId,
+        principalUserId: userId,
+        kind: 'PREVIEW',
+        callerKind: 'WEB',
+      },
+    })) as PreviewInvocationRow | null;
     if (!row) throw notFound('Cloud Trial 不存在');
     return row;
   }
@@ -151,13 +207,32 @@ export class WebCloudTrialService {
     const dayStart = new Date();
     dayStart.setUTCHours(0, 0, 0, 0);
     const [daily, concurrent] = await Promise.all([
-      this.prisma.actionInvocation.count({ where: { teamId, principalUserId: userId, kind: 'PREVIEW', callerKind: 'WEB', createdAt: { gte: dayStart } } }),
-      this.prisma.actionInvocation.count({ where: { teamId, principalUserId: userId, kind: 'PREVIEW', callerKind: 'WEB', status: { in: [...ACTIVE_STATUSES] } } }),
+      this.prisma.actionInvocation.count({
+        where: {
+          teamId,
+          principalUserId: userId,
+          kind: 'PREVIEW',
+          callerKind: 'WEB',
+          createdAt: { gte: dayStart },
+        },
+      }),
+      this.prisma.actionInvocation.count({
+        where: {
+          teamId,
+          principalUserId: userId,
+          kind: 'PREVIEW',
+          callerKind: 'WEB',
+          status: { in: [...ACTIVE_STATUSES] },
+        },
+      }),
     ]);
     return { daily, concurrent, resetAt: nextUtcDay(dayStart) };
   }
 
-  private project(row: PreviewInvocationRow, quota: { daily: number; concurrent: number; resetAt: Date }) {
+  private project(
+    row: PreviewInvocationRow,
+    quota: { daily: number; concurrent: number; resetAt: Date }
+  ) {
     return WebCloudTrialProjection.parse({
       invocation_id: row.id,
       status: row.status,
@@ -177,9 +252,13 @@ export class WebCloudTrialService {
       expires_at: row.deadlineAt.toISOString(),
       policy_decision_id: `policy-revision:${row.policyRevision}`,
       output: recordOrNull(row.output),
-      error: row.errorCode || row.errorMessage
-        ? { code: row.errorCode || 'action_execution_failed', message: row.errorMessage || 'Cloud Trial 执行失败' }
-        : null,
+      error:
+        row.errorCode || row.errorMessage
+          ? {
+              code: row.errorCode || 'action_execution_failed',
+              message: row.errorMessage || 'Cloud Trial 执行失败',
+            }
+          : null,
       created_at: row.createdAt.toISOString(),
       started_at: row.startedAt?.toISOString() ?? null,
       completed_at: row.completedAt?.toISOString() ?? null,
@@ -189,7 +268,12 @@ export class WebCloudTrialService {
 
 function actionRecord(value: unknown, actionId: string): Record<string, unknown> {
   const found = Array.isArray(value)
-    ? value.find((item) => item && typeof item === 'object' && (item as Record<string, unknown>).action_id === actionId)
+    ? value.find(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          (item as Record<string, unknown>).action_id === actionId
+      )
     : null;
   if (!found) throw notFound('Action 不存在');
   return found as Record<string, unknown>;
@@ -210,7 +294,9 @@ function nextUtcDay(dayStart: Date): Date {
 }
 
 function recordOrNull(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function canonicalJson(value: unknown): string {
@@ -218,7 +304,8 @@ function canonicalJson(value: unknown): string {
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`).join(',')}}`;
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .join(',')}}`;
   }
   return JSON.stringify(value);
 }

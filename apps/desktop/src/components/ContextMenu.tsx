@@ -7,7 +7,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { RotateCwIcon, CopyIcon, ClipboardPasteIcon, TerminalSquareIcon } from 'lucide-react';
 import { tauriInvoke } from '@/lib/api';
 
-interface Pos { x: number; y: number; }
+interface Pos {
+  x: number;
+  y: number;
+}
 
 interface MenuItemDef {
   key: string;
@@ -30,7 +33,9 @@ export function ContextMenu({ children }: { children?: ReactNode }) {
       if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
       setPos(null);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPos(null); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPos(null);
+    };
     document.addEventListener('contextmenu', onContextMenu);
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKey);
@@ -43,14 +48,43 @@ export function ContextMenu({ children }: { children?: ReactNode }) {
 
   const run = useCallback(async (fn: () => void | Promise<void>) => {
     setPos(null);
-    try { await fn(); } catch { /* execCommand 在无选区/无焦点时静默失败，忽略 */ }
+    try {
+      await fn();
+    } catch {
+      /* execCommand 在无选区/无焦点时静默失败，忽略 */
+    }
   }, []);
 
   const items: MenuItemDef[] = [
-    { key: 'refresh', icon: <RotateCwIcon className="size-4" />, label: '刷新', shortcut: 'Ctrl+R', onClick: () => window.location.reload() },
-    { key: 'copy', icon: <CopyIcon className="size-4" />, label: '复制', shortcut: 'Ctrl+C', onClick: () => document.execCommand('copy') },
-    { key: 'paste', icon: <ClipboardPasteIcon className="size-4" />, label: '粘贴', shortcut: 'Ctrl+V', onClick: () => document.execCommand('paste') },
-    { key: 'devtools', icon: <TerminalSquareIcon className="size-4" />, label: '控制台', onClick: () => { void tauriInvoke('toggle_devtools'); } },
+    {
+      key: 'refresh',
+      icon: <RotateCwIcon className="size-4" />,
+      label: '刷新',
+      shortcut: 'Ctrl+R',
+      onClick: () => window.location.reload(),
+    },
+    {
+      key: 'copy',
+      icon: <CopyIcon className="size-4" />,
+      label: '复制',
+      shortcut: 'Ctrl+C',
+      onClick: () => document.execCommand('copy'),
+    },
+    {
+      key: 'paste',
+      icon: <ClipboardPasteIcon className="size-4" />,
+      label: '粘贴',
+      shortcut: 'Ctrl+V',
+      onClick: () => document.execCommand('paste'),
+    },
+    {
+      key: 'devtools',
+      icon: <TerminalSquareIcon className="size-4" />,
+      label: '控制台',
+      onClick: () => {
+        void tauriInvoke('toggle_devtools');
+      },
+    },
   ];
 
   return (

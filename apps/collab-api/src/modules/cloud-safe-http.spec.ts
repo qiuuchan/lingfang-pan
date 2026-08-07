@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SafeOutboundHttpClient, isPublicEndpointAddress, type SafeHttpTransport } from './cloud-safe-http';
+import {
+  SafeOutboundHttpClient,
+  isPublicEndpointAddress,
+  type SafeHttpTransport,
+} from './cloud-safe-http';
 
 async function* body(value: string): AsyncIterable<Uint8Array> {
   yield Buffer.from(value);
@@ -19,7 +23,14 @@ describe('SafeOutboundHttpClient', () => {
     ]) {
       expect(() => client.validateUrl(url)).toThrow();
     }
-    for (const address of ['127.0.0.1', '10.0.0.1', '169.254.169.254', '::1', 'fc00::1', '::ffff:127.0.0.1']) {
+    for (const address of [
+      '127.0.0.1',
+      '10.0.0.1',
+      '169.254.169.254',
+      '::1',
+      'fc00::1',
+      '::ffff:127.0.0.1',
+    ]) {
       expect(isPublicEndpointAddress(address)).toBe(false);
     }
     expect(isPublicEndpointAddress('8.8.8.8')).toBe(true);
@@ -56,9 +67,11 @@ describe('SafeOutboundHttpClient', () => {
     await expect(client.request({ url: 'https://example.com/action' })).rejects.toMatchObject({
       code: 'cloud_endpoint_redirect_denied',
     });
-    expect(transport).toHaveBeenCalledWith(expect.objectContaining({
-      address: { address: '8.8.8.8', family: 4 },
-    }));
+    expect(transport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: { address: '8.8.8.8', family: 4 },
+      })
+    );
     expect(close).toHaveBeenCalledOnce();
   });
 
@@ -68,10 +81,12 @@ describe('SafeOutboundHttpClient', () => {
       resolver: async () => [{ address: '8.8.8.8', family: 4 }],
       transport: async () => ({ statusCode: 200, headers: {}, body: body('oversized'), close }),
     });
-    await expect(client.request({
-      url: 'https://example.com/action',
-      responseLimitBytes: 4,
-    })).rejects.toMatchObject({ code: 'cloud_response_too_large' });
+    await expect(
+      client.request({
+        url: 'https://example.com/action',
+        responseLimitBytes: 4,
+      })
+    ).rejects.toMatchObject({ code: 'cloud_response_too_large' });
     expect(close).toHaveBeenCalledOnce();
   });
 });

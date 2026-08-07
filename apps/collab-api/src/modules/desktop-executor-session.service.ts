@@ -52,7 +52,11 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function text(value: unknown, field: string, max = 256): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) {
-    throw new AppError(400, 'workflow_executor_session_invalid', `桌面执行器清单字段 ${field} 无效`);
+    throw new AppError(
+      400,
+      'workflow_executor_session_invalid',
+      `桌面执行器清单字段 ${field} 无效`
+    );
   }
   return value.trim();
 }
@@ -77,10 +81,18 @@ function parseInventory(raw: unknown): InventoryItem[] {
       throw new AppError(400, 'workflow_executor_session_invalid', '桌面执行器依赖状态无效');
     }
     if (installations.has(installationId)) {
-      throw new AppError(409, 'workflow_installation_mismatch', '桌面执行器清单包含重复 installation_id');
+      throw new AppError(
+        409,
+        'workflow_installation_mismatch',
+        '桌面执行器清单包含重复 installation_id'
+      );
     }
     if (packages.has(packageId)) {
-      throw new AppError(409, 'workflow_installation_mismatch', '桌面执行器清单包含重复 package_id');
+      throw new AppError(
+        409,
+        'workflow_installation_mismatch',
+        '桌面执行器清单包含重复 package_id'
+      );
     }
     installations.add(installationId);
     packages.add(packageId);
@@ -92,9 +104,12 @@ function parseInventory(raw: unknown): InventoryItem[] {
       dependency_status: dependencyStatus as InventoryItem['dependency_status'],
     };
   });
-  return items.sort((a, b) => a.installation_id.localeCompare(b.installation_id)
-    || a.package_id.localeCompare(b.package_id)
-    || a.release_id.localeCompare(b.release_id));
+  return items.sort(
+    (a, b) =>
+      a.installation_id.localeCompare(b.installation_id) ||
+      a.package_id.localeCompare(b.package_id) ||
+      a.release_id.localeCompare(b.release_id)
+  );
 }
 
 function inventoryDigest(items: InventoryItem[]): string {
@@ -105,7 +120,7 @@ function inventoryDigest(items: InventoryItem[]): string {
 export class DesktopExecutorSessionService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   async create(userId: string, deviceId: string, rawInventory: unknown) {
@@ -140,19 +155,42 @@ export class DesktopExecutorSessionService {
     await this.assertExactReleases(membership.teamId, inventory);
     const inventorySha256 = inventoryDigest(inventory);
     const now = new Date();
-    if (session.inventorySchemaVersion !== INVENTORY_SCHEMA_VERSION || !equalDigest(session.inventorySha256, inventorySha256)) {
+    if (
+      session.inventorySchemaVersion !== INVENTORY_SCHEMA_VERSION ||
+      !equalDigest(session.inventorySha256, inventorySha256)
+    ) {
       await this.revokeInternal(id, membership.teamId, userId, 'inventory_changed');
-      throw new AppError(409, 'workflow_inventory_changed', '桌面安装清单已变化，执行器 session 已撤销');
+      throw new AppError(
+        409,
+        'workflow_inventory_changed',
+        '桌面安装清单已变化，执行器 session 已撤销'
+      );
     }
-    if (session.expiresAt <= now || session.lastHeartbeatAt <= new Date(now.getTime() - HEARTBEAT_FRESHNESS_MS)) {
+    if (
+      session.expiresAt <= now ||
+      session.lastHeartbeatAt <= new Date(now.getTime() - HEARTBEAT_FRESHNESS_MS)
+    ) {
       await this.expireInternal(id, membership.teamId, userId);
-      throw new AppError(409, 'workflow_executor_session_invalid', '桌面执行器 heartbeat 已过期，请重新预检');
+      throw new AppError(
+        409,
+        'workflow_executor_session_invalid',
+        '桌面执行器 heartbeat 已过期，请重新预检'
+      );
     }
     const updated = await this.prisma.desktopExecutorSession.updateMany({
-      where: { id, teamId: membership.teamId, userId, status: 'ACTIVE', tokenSha256: digest(token), inventorySha256: session.inventorySha256, expiresAt: { gt: now } },
+      where: {
+        id,
+        teamId: membership.teamId,
+        userId,
+        status: 'ACTIVE',
+        tokenSha256: digest(token),
+        inventorySha256: session.inventorySha256,
+        expiresAt: { gt: now },
+      },
       data: { lastHeartbeatAt: now, expiresAt: new Date(now.getTime() + SESSION_TTL_MS) },
     });
-    if (updated.count !== 1) throw new AppError(409, 'workflow_executor_session_invalid', '桌面执行器 session 已失效');
+    if (updated.count !== 1)
+      throw new AppError(409, 'workflow_executor_session_invalid', '桌面执行器 session 已失效');
     return { session: await this.get(userId, id) };
   }
 
@@ -166,7 +204,11 @@ export class DesktopExecutorSessionService {
     }
     if (session.lastHeartbeatAt <= new Date(now.getTime() - HEARTBEAT_FRESHNESS_MS)) {
       await this.expireInternal(id, membership.teamId, userId);
-      throw new AppError(409, 'workflow_executor_session_invalid', '桌面执行器 heartbeat 已过期，请重新预检');
+      throw new AppError(
+        409,
+        'workflow_executor_session_invalid',
+        '桌面执行器 heartbeat 已过期，请重新预检'
+      );
     }
     if (expectedInventorySha256 && !equalDigest(session.inventorySha256, expectedInventorySha256)) {
       await this.revokeInternal(id, membership.teamId, userId, 'inventory_changed');
@@ -177,7 +219,9 @@ export class DesktopExecutorSessionService {
 
   async get(userId: string, id: string) {
     const membership = await this.auth.ensureCurrentTeam(userId);
-    const session = await this.prisma.desktopExecutorSession.findFirst({ where: { id, teamId: membership.teamId, userId } });
+    const session = await this.prisma.desktopExecutorSession.findFirst({
+      where: { id, teamId: membership.teamId, userId },
+    });
     if (!session) throw notFound('桌面执行器 session 不存在');
     return this.publicSession(session as SessionRow);
   }
@@ -185,17 +229,32 @@ export class DesktopExecutorSessionService {
   async revoke(userId: string, id: string, token?: string) {
     const membership = await this.auth.ensureCurrentTeam(userId);
     if (token) await this.findAuthenticated(membership.teamId, userId, id, token);
-    const result = await this.prisma.desktopExecutorSession.updateMany({ where: { id, teamId: membership.teamId, userId, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: new Date() } });
+    const result = await this.prisma.desktopExecutorSession.updateMany({
+      where: { id, teamId: membership.teamId, userId, status: 'ACTIVE' },
+      data: { status: 'REVOKED', revokedAt: new Date() },
+    });
     if (result.count !== 1) throw forbidden('桌面执行器 session 已失效');
     return { ok: true };
   }
 
-  private async findAuthenticated(teamId: string, userId: string, id: string, token: string): Promise<SessionRow> {
+  private async findAuthenticated(
+    teamId: string,
+    userId: string,
+    id: string,
+    token: string
+  ): Promise<SessionRow> {
     if (typeof token !== 'string' || token.length < 32 || token.length > 256) {
       throw new AppError(409, 'workflow_executor_session_invalid', '桌面执行器 session token 无效');
     }
-    const session = await this.prisma.desktopExecutorSession.findFirst({ where: { id, teamId, userId, status: 'ACTIVE', tokenSha256: digest(token) } });
-    if (!session) throw new AppError(409, 'workflow_executor_session_invalid', '桌面执行器 session 无效或已撤销');
+    const session = await this.prisma.desktopExecutorSession.findFirst({
+      where: { id, teamId, userId, status: 'ACTIVE', tokenSha256: digest(token) },
+    });
+    if (!session)
+      throw new AppError(
+        409,
+        'workflow_executor_session_invalid',
+        '桌面执行器 session 无效或已撤销'
+      );
     return session as SessionRow;
   }
 
@@ -206,29 +265,61 @@ export class DesktopExecutorSessionService {
     if (!inventory.length) return;
     const releases = await this.prisma.pluginRelease.findMany({
       where: { id: { in: inventory.map((item) => item.release_id) } },
-      select: { id: true, packageId: true, sha256: true, status: true, package: { select: { id: true, ownerTeamId: true, governanceStatus: true } } },
+      select: {
+        id: true,
+        packageId: true,
+        sha256: true,
+        status: true,
+        package: { select: { id: true, ownerTeamId: true, governanceStatus: true } },
+      },
     });
     const byId = new Map(releases.map((release) => [release.id, release]));
     for (const item of inventory) {
       const release = byId.get(item.release_id);
-      if (!release || release.packageId !== item.package_id || release.package.id !== item.package_id || release.sha256 !== item.sha256 || release.status !== 'PUBLISHED' || release.package.governanceStatus !== 'ACTIVE') {
-        throw new AppError(409, 'workflow_installation_mismatch', '桌面执行器清单未匹配到可运行的精确插件发行版', { package_id: item.package_id, release_id: item.release_id });
+      if (
+        !release ||
+        release.packageId !== item.package_id ||
+        release.package.id !== item.package_id ||
+        release.sha256 !== item.sha256 ||
+        release.status !== 'PUBLISHED' ||
+        release.package.governanceStatus !== 'ACTIVE'
+      ) {
+        throw new AppError(
+          409,
+          'workflow_installation_mismatch',
+          '桌面执行器清单未匹配到可运行的精确插件发行版',
+          { package_id: item.package_id, release_id: item.release_id }
+        );
       }
       // PRIVATE package releases are only valid when the current team owns the package.
       if (release.package.ownerTeamId !== teamId) {
-        const entitlement = await this.prisma.pluginEntitlement.findUnique({ where: { teamId_packageId: { teamId, packageId: item.package_id } }, select: { id: true } });
-        if (!entitlement) throw new AppError(403, 'workflow_installation_mismatch', '当前团队没有该插件发行版的有效权益');
+        const entitlement = await this.prisma.pluginEntitlement.findUnique({
+          where: { teamId_packageId: { teamId, packageId: item.package_id } },
+          select: { id: true },
+        });
+        if (!entitlement)
+          throw new AppError(
+            403,
+            'workflow_installation_mismatch',
+            '当前团队没有该插件发行版的有效权益'
+          );
       }
     }
   }
 
   private async revokeInternal(id: string, teamId: string, userId: string, reason: string) {
-    await this.prisma.desktopExecutorSession.updateMany({ where: { id, teamId, userId, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: new Date() } });
+    await this.prisma.desktopExecutorSession.updateMany({
+      where: { id, teamId, userId, status: 'ACTIVE' },
+      data: { status: 'REVOKED', revokedAt: new Date() },
+    });
     void reason;
   }
 
   private async expireInternal(id: string, teamId: string, userId: string) {
-    await this.prisma.desktopExecutorSession.updateMany({ where: { id, teamId, userId, status: 'ACTIVE' }, data: { status: 'EXPIRED' } });
+    await this.prisma.desktopExecutorSession.updateMany({
+      where: { id, teamId, userId, status: 'ACTIVE' },
+      data: { status: 'EXPIRED' },
+    });
   }
 
   private publicSession(session: SessionRow) {

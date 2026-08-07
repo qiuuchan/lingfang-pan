@@ -22,7 +22,10 @@ const { version } = BUILD_INFO;
  */
 @Injectable()
 export class ReadinessService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(AutomationReadinessService) private readonly automation: AutomationReadinessService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AutomationReadinessService) private readonly automation: AutomationReadinessService
+  ) {}
 
   async check() {
     try {
@@ -30,7 +33,11 @@ export class ReadinessService {
       // SELECT 1 仅校验连接可用，无副作用。
       await this.prisma.$queryRaw`SELECT 1`;
       const automation = await this.automation.check();
-      return { status: automation.status === 'degraded' ? 'degraded' as const : 'ok' as const, db: 'up' as const, automation };
+      return {
+        status: automation.status === 'degraded' ? ('degraded' as const) : ('ok' as const),
+        db: 'up' as const,
+        automation,
+      };
     } catch {
       // DB 不可达：返 degraded + 503，让反代/探活摘除流量，而非重启进程（进程本身健康）。
       return { status: 'degraded' as const, db: 'down' as const, automation: null };
@@ -41,14 +48,23 @@ export class ReadinessService {
 @ApiTags('Health')
 @Controller()
 export class HealthController {
-  constructor(@Inject(ReadinessService) private readonly readiness: ReadinessService, @Inject(AutomationReadinessService) private readonly automation: AutomationReadinessService) {}
+  constructor(
+    @Inject(ReadinessService) private readonly readiness: ReadinessService,
+    @Inject(AutomationReadinessService) private readonly automation: AutomationReadinessService
+  ) {}
 
   @Public()
   @Get('health')
   @ApiOperation({ summary: '服务存活检查（liveness，不查依赖）' })
   health() {
     // 返回 version + 构建元信息供 collab-admin 做版本比对 + 运维定位部署时间。
-    return { status: 'ok', service: 'collab-api', version, gitHash: BUILD_INFO.gitHash, buildTime: BUILD_INFO.buildTime };
+    return {
+      status: 'ok',
+      service: 'collab-api',
+      version,
+      gitHash: BUILD_INFO.gitHash,
+      buildTime: BUILD_INFO.buildTime,
+    };
   }
 
   /**
@@ -75,5 +91,7 @@ export class HealthController {
 
   @Get('api/automation/metrics')
   @ApiOperation({ summary: '自动化队列与 Endpoint 基础指标' })
-  metrics() { return this.automation.metrics(); }
+  metrics() {
+    return this.automation.metrics();
+  }
 }

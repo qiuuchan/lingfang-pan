@@ -7,50 +7,86 @@ import { useTeamResource, runAction } from './shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '@/components/ui/dialog';
-import type { PluginGrantRow, PluginGrantSubject, PluginGrantEffect, Role, TeamMember } from '@/lib/types';
+import type {
+  PluginGrantRow,
+  PluginGrantSubject,
+  PluginGrantEffect,
+  Role,
+  TeamMember,
+} from '@/lib/types';
 import type { RegistryCatalogItem } from '@/lib/plugin-registry';
 import { PluginPolicyCard } from './PluginPolicyCard';
 
-interface AvailablePlugins { items: RegistryCatalogItem[] }
-interface GrantsResp { grants: PluginGrantRow[] }
-interface RolesResp { roles: Role[] }
-interface MembersResp { members: TeamMember[] }
+interface AvailablePlugins {
+  items: RegistryCatalogItem[];
+}
+interface GrantsResp {
+  grants: PluginGrantRow[];
+}
+interface RolesResp {
+  roles: Role[];
+}
+interface MembersResp {
+  members: TeamMember[];
+}
 
 export function PluginGrantsTab() {
   const [available, reloadAvailable, loadingAvailable] = useTeamResource<AvailablePlugins>(
     '/api/plugin-registry/team',
     (r) => r as AvailablePlugins,
-    { items: [] },
+    { items: [] }
   );
   const [members, reloadMembers] = useTeamResource<MembersResp>(
     '/api/teams/current/members',
     (r) => r as MembersResp,
-    { members: [] },
+    { members: [] }
   );
   const [roles, reloadRoles] = useTeamResource<RolesResp>(
     '/api/teams/current/roles',
     (r) => r as RolesResp,
-    { roles: [] },
+    { roles: [] }
   );
   const [editingPlugin, setEditingPlugin] = useState<RegistryCatalogItem | null>(null);
   const [grants, setGrants] = useState<PluginGrantRow[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(false);
 
   const reload = useCallback(() => {
-    void reloadAvailable(); void reloadMembers(); void reloadRoles();
+    void reloadAvailable();
+    void reloadMembers();
+    void reloadRoles();
   }, [reloadAvailable, reloadMembers, reloadRoles]);
 
   async function openGrants(plugin: RegistryCatalogItem) {
     setEditingPlugin(plugin);
     setGrantsLoading(true);
     try {
-      const r = await api<GrantsResp>(`/api/teams/current/plugin-packages/${plugin.package.id}/grants`);
+      const r = await api<GrantsResp>(
+        `/api/teams/current/plugin-packages/${plugin.package.id}/grants`
+      );
       setGrants(r.grants);
     } catch (e) {
       setGrants([]);
@@ -61,67 +97,90 @@ export function PluginGrantsTab() {
 
   async function reloadGrants() {
     if (!editingPlugin) return;
-    const r = await api<GrantsResp>(`/api/teams/current/plugin-packages/${editingPlugin.package.id}/grants`);
+    const r = await api<GrantsResp>(
+      `/api/teams/current/plugin-packages/${editingPlugin.package.id}/grants`
+    );
     setGrants(r.grants);
   }
 
   return (
-    <div className="space-y-4"><PluginPolicyCard /><Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <div>
-          <CardTitle>插件授权</CardTitle>
-          <p className="text-sm text-muted-foreground">为团队内插件按用户或角色设置可用/禁用。deny 优先，无设置默认可用。</p>
-        </div>
-        <LoadingButton variant="outline" loading={loadingAvailable} onClick={reload}>刷新</LoadingButton>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>插件</TableHead>
-              <TableHead>来源</TableHead>
-              <TableHead>授权规则数</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {available.items.map((p) => {
-              const count = editingPlugin?.package.id === p.package.id ? grants.length : 0;
-              return (
-                <TableRow key={p.package.id}>
-                  <TableCell className="font-medium">{p.package.name}</TableCell>
-                  <TableCell><Badge variant="secondary">团队库</Badge></TableCell>
-                  <TableCell>{count}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="outline" size="sm" onClick={() => openGrants(p)}>管理授权</Button>
+    <div className="space-y-4">
+      <PluginPolicyCard />
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>插件授权</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              为团队内插件按用户或角色设置可用/禁用。deny 优先，无设置默认可用。
+            </p>
+          </div>
+          <LoadingButton variant="outline" loading={loadingAvailable} onClick={reload}>
+            刷新
+          </LoadingButton>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>插件</TableHead>
+                <TableHead>来源</TableHead>
+                <TableHead>授权规则数</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {available.items.map((p) => {
+                const count = editingPlugin?.package.id === p.package.id ? grants.length : 0;
+                return (
+                  <TableRow key={p.package.id}>
+                    <TableCell className="font-medium">{p.package.name}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">团队库</Badge>
+                    </TableCell>
+                    <TableCell>{count}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="outline" size="sm" onClick={() => openGrants(p)}>
+                        管理授权
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {available.items.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    暂无可用插件
                   </TableCell>
                 </TableRow>
-              );
-            })}
-            {available.items.length === 0 && (
-              <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">暂无可用插件</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
 
-      {editingPlugin && (
-        <GrantsDialog
-          plugin={editingPlugin}
-          grants={grants}
-          loading={grantsLoading}
-          members={members.members}
-          roles={roles.roles}
-          onClose={() => setEditingPlugin(null)}
-          onChanged={reloadGrants}
-        />
-      )}
-    </Card></div>
+        {editingPlugin && (
+          <GrantsDialog
+            plugin={editingPlugin}
+            grants={grants}
+            loading={grantsLoading}
+            members={members.members}
+            roles={roles.roles}
+            onClose={() => setEditingPlugin(null)}
+            onChanged={reloadGrants}
+          />
+        )}
+      </Card>
+    </div>
   );
 }
 
 function GrantsDialog({
-  plugin, grants, loading, members, roles, onClose, onChanged,
+  plugin,
+  grants,
+  loading,
+  members,
+  roles,
+  onClose,
+  onChanged,
 }: {
   plugin: RegistryCatalogItem;
   grants: PluginGrantRow[];
@@ -136,27 +195,37 @@ function GrantsDialog({
   const [effect, setEffect] = useState<PluginGrantEffect>('DENY');
   const [saving, setSaving] = useState(false);
 
-  const subjectOptions = subjectKind === 'USER'
-    ? members.map((m) => ({ id: m.userId, label: `${m.user.displayName} (${m.user.email})` }))
-    : roles.map((r) => ({ id: r.id, label: r.name }));
+  const subjectOptions =
+    subjectKind === 'USER'
+      ? members.map((m) => ({ id: m.userId, label: `${m.user.displayName} (${m.user.email})` }))
+      : roles.map((r) => ({ id: r.id, label: r.name }));
 
   async function handleSet() {
     if (!subjectId) return;
     setSaving(true);
     const ok = await runAction(
-      () => api(`/api/teams/current/plugin-packages/${plugin.package.id}/grants`, {
-        method: 'POST', body: { subjectKind, subjectId, effect },
-      }),
-      '授权已设置',
+      () =>
+        api(`/api/teams/current/plugin-packages/${plugin.package.id}/grants`, {
+          method: 'POST',
+          body: { subjectKind, subjectId, effect },
+        }),
+      '授权已设置'
     );
     setSaving(false);
-    if (ok) { setSubjectId(''); await onChanged(); }
+    if (ok) {
+      setSubjectId('');
+      await onChanged();
+    }
   }
 
   async function handleRemove(grant: PluginGrantRow) {
     const ok = await runAction(
-      () => api(`/api/teams/current/plugin-packages/${plugin.package.id}/grants?subjectKind=${grant.subjectKind}&subjectId=${grant.subjectId}`, { method: 'DELETE' }),
-      '授权已移除',
+      () =>
+        api(
+          `/api/teams/current/plugin-packages/${plugin.package.id}/grants?subjectKind=${grant.subjectKind}&subjectId=${grant.subjectId}`,
+          { method: 'DELETE' }
+        ),
+      '授权已移除'
     );
     if (ok) await onChanged();
   }
@@ -171,11 +240,18 @@ function GrantsDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>插件授权：{plugin.package.name}</DialogTitle>
-          <DialogDescription>为用户或角色设置 allow/deny。deny 优先，无规则默认可用。</DialogDescription>
+          <DialogDescription>
+            为用户或角色设置 allow/deny。deny 优先，无规则默认可用。
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -185,8 +261,16 @@ function GrantsDialog({
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">主体类型</label>
-                <Select value={subjectKind} onValueChange={(v) => { setSubjectKind(v as PluginGrantSubject); setSubjectId(''); }}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <Select
+                  value={subjectKind}
+                  onValueChange={(v) => {
+                    setSubjectKind(v as PluginGrantSubject);
+                    setSubjectId('');
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent className="min-w-[12rem]">
                     <SelectItem value="USER">用户</SelectItem>
                     <SelectItem value="ROLE">角色</SelectItem>
@@ -196,7 +280,9 @@ function GrantsDialog({
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">效果</label>
                 <Select value={effect} onValueChange={(v) => setEffect(v as PluginGrantEffect)}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent className="min-w-[12rem]">
                     <SelectItem value="DENY">禁用（拒绝）</SelectItem>
                     <SelectItem value="ALLOW">允许</SelectItem>
@@ -205,17 +291,30 @@ function GrantsDialog({
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">{subjectKind === 'USER' ? '选择用户' : '选择角色'}</label>
-              <Select value={subjectId} onValueChange={(v) => { if (v) setSubjectId(v); }}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="选择…" /></SelectTrigger>
+              <label className="text-xs text-muted-foreground">
+                {subjectKind === 'USER' ? '选择用户' : '选择角色'}
+              </label>
+              <Select
+                value={subjectId}
+                onValueChange={(v) => {
+                  if (v) setSubjectId(v);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="选择…" />
+                </SelectTrigger>
                 <SelectContent className="min-w-[12rem]">
                   {subjectOptions.map((o) => (
-                    <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <LoadingButton loading={saving} onClick={handleSet} disabled={!subjectId}>添加规则</LoadingButton>
+            <LoadingButton loading={saving} onClick={handleSet} disabled={!subjectId}>
+              添加规则
+            </LoadingButton>
           </div>
 
           {/* 现有规则列表 */}
@@ -239,14 +338,20 @@ function GrantsDialog({
                   {grants.map((g) => (
                     <TableRow key={g.id}>
                       <TableCell>{subjectLabel(g)}</TableCell>
-                      <TableCell><Badge variant="outline">{g.subjectKind === 'USER' ? '用户' : '角色'}</Badge></TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {g.subjectKind === 'USER' ? '用户' : '角色'}
+                        </Badge>
+                      </TableCell>
                       <TableCell>
                         <Badge variant={g.effect === 'DENY' ? 'destructive' : 'default'}>
                           {g.effect === 'DENY' ? '禁用' : '允许'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => handleRemove(g)}>移除</Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleRemove(g)}>
+                          移除
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -257,7 +362,9 @@ function GrantsDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>关闭</Button>
+          <Button variant="outline" onClick={onClose}>
+            关闭
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

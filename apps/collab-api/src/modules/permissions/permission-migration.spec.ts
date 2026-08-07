@@ -33,20 +33,33 @@ describe('expandLegacyPermissions 旧码扩张', () => {
     const { permissions, changed } = expandLegacyPermissions(before);
     expect(changed).toBe(true);
     expect(permissions.sort()).toEqual(
-      ['team.dashboard.view', 'team.plugin.edit_metadata', 'team.plugin.edit_draft', 'team.plugin.edit_price', 'team.plugin.list'].sort(),
+      [
+        'team.dashboard.view',
+        'team.plugin.edit_metadata',
+        'team.plugin.edit_draft',
+        'team.plugin.edit_price',
+        'team.plugin.list',
+      ].sort()
     );
   });
 
   it('platform.user.update → [update_profile, reset_password]', () => {
-    const { permissions, changed } = expandLegacyPermissions(['platform.user.update', 'platform.user.list']);
+    const { permissions, changed } = expandLegacyPermissions([
+      'platform.user.update',
+      'platform.user.list',
+    ]);
     expect(changed).toBe(true);
-    expect(permissions.sort()).toEqual(['platform.user.update_profile', 'platform.user.reset_password', 'platform.user.list'].sort());
+    expect(permissions.sort()).toEqual(
+      ['platform.user.update_profile', 'platform.user.reset_password', 'platform.user.list'].sort()
+    );
   });
 
   it('team.role.manage → [create, update, delete]', () => {
     const { permissions, changed } = expandLegacyPermissions(['team.role.manage']);
     expect(changed).toBe(true);
-    expect(permissions.sort()).toEqual(['team.role.create', 'team.role.update', 'team.role.delete'].sort());
+    expect(permissions.sort()).toEqual(
+      ['team.role.create', 'team.role.update', 'team.role.delete'].sort()
+    );
   });
 
   it('platform.plugin.manage → [edit, delete]', () => {
@@ -114,7 +127,13 @@ describe('expandLegacyPermissions 旧码扩张', () => {
 
   it('自定义角色含旧码：扩张后新码全部在注册表白名单内（合法）', () => {
     const valid = new Set(ALL_PERMISSIONS.map((p) => p.code));
-    const before = ['team.plugin.edit', 'platform.user.update', 'team.role.manage', 'platform.plugin.manage', 'team.balance.view'];
+    const before = [
+      'team.plugin.edit',
+      'platform.user.update',
+      'team.role.manage',
+      'platform.plugin.manage',
+      'team.balance.view',
+    ];
     const { permissions } = expandLegacyPermissions(before);
     for (const code of permissions) {
       expect(valid.has(code), `扩张后码 ${code} 必须在注册表白名单内`).toBe(true);
@@ -141,6 +160,8 @@ describe('LEGACY_PERMISSION_EXPANSION 注册表一致性', () => {
   });
 
   it('LEGACY_PERMISSION_CODES 与 LEGACY_PERMISSION_EXPANSION 的 key 一致', () => {
-    expect([...LEGACY_PERMISSION_CODES].sort()).toEqual(Object.keys(LEGACY_PERMISSION_EXPANSION).sort());
+    expect([...LEGACY_PERMISSION_CODES].sort()).toEqual(
+      Object.keys(LEGACY_PERMISSION_EXPANSION).sort()
+    );
   });
 });

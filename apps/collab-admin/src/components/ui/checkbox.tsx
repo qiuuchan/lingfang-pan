@@ -26,7 +26,7 @@ export const Checkbox = React.forwardRef<
       className={cn(
         'inline-flex size-4 shrink-0 items-center justify-center rounded-[5px] border border-input bg-background transition-colors hover:border-ring/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50',
         checked && 'border-primary bg-primary text-primary-foreground',
-        className,
+        className
       )}
       {...props}
     >

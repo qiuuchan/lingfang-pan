@@ -45,7 +45,14 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
         {/* 顶栏 */}
         <header className="lf-page-topbar">
           <button onClick={onBack} className="lf-back-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             返回首页
@@ -66,7 +73,9 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
           <div className="lf-changelog-inner">
             <div>
               <span className="lf-section-label">changelog</span>
-              <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">更新日志</h1>
+              <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">
+                更新日志
+              </h1>
               <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
                 每一次发布都记录在案。点击展开查看版本的完整变更说明。
               </p>
@@ -86,9 +95,18 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
                   <svg
                     className="mt-0.5 shrink-0"
                     style={{ color: '#f59e0b' }}
-                    width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
                   >
-                    <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                   <span>{degradedMessage}</span>
                 </div>
@@ -97,7 +115,11 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
               {status === 'loading' ? (
                 <div className="space-y-3">
                   {[0, 1, 2].map((i) => (
-                    <div key={i} className="h-16 animate-pulse rounded-lg" style={{ backgroundColor: 'var(--lf-bg-card)' }} />
+                    <div
+                      key={i}
+                      className="h-16 animate-pulse rounded-lg"
+                      style={{ backgroundColor: 'var(--lf-bg-card)' }}
+                    />
                   ))}
                 </div>
               ) : releases.length === 0 ? (
@@ -125,14 +147,22 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
                           onClick={() => setExpanded(isOpen ? null : release.id)}
                           className="flex w-full items-center gap-4 px-5 py-4 text-left"
                           aria-expanded={isOpen}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                          }}
                         >
                           <span
                             className="lf-mono inline-flex shrink-0 items-center rounded-md border px-2.5 py-1 text-sm font-medium"
                             style={
                               release.isLatest
                                 ? { borderColor: 'var(--lf-accent)', color: 'var(--lf-accent)' }
-                                : { borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg-muted)' }
+                                : {
+                                    borderColor: 'var(--lf-border-bright)',
+                                    color: 'var(--lf-fg-muted)',
+                                  }
                             }
                           >
                             v{release.version}
@@ -140,18 +170,28 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
 
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                              {release.title && <span className="truncate text-sm font-medium">{release.title}</span>}
+                              {release.title && (
+                                <span className="truncate text-sm font-medium">
+                                  {release.title}
+                                </span>
+                              )}
                               {release.isLatest && (
                                 <span
                                   className="lf-mono rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                                  style={{ backgroundColor: 'rgba(59,130,246,0.12)', color: 'var(--lf-accent)' }}
+                                  style={{
+                                    backgroundColor: 'rgba(59,130,246,0.12)',
+                                    color: 'var(--lf-accent)',
+                                  }}
                                 >
                                   latest
                                 </span>
                               )}
                             </div>
                             {release.publishedAt && (
-                              <div className="lf-mono mt-0.5 text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
+                              <div
+                                className="lf-mono mt-0.5 text-xs"
+                                style={{ color: 'var(--lf-fg-subtle)' }}
+                              >
                                 {formatDate(release.publishedAt)}
                               </div>
                             )}
@@ -159,15 +199,26 @@ export function ChangelogPage({ onBack }: { onBack: () => void }) {
 
                           <svg
                             className="shrink-0 transition-transform"
-                            style={{ color: 'var(--lf-fg-subtle)', transform: isOpen ? 'rotate(90deg)' : 'none' }}
-                            width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                            style={{
+                              color: 'var(--lf-fg-subtle)',
+                              transform: isOpen ? 'rotate(90deg)' : 'none',
+                            }}
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
                           >
                             <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </button>
 
                         {isOpen && (
-                          <div className="border-t px-5 py-4" style={{ borderColor: 'var(--lf-border)' }}>
+                          <div
+                            className="border-t px-5 py-4"
+                            style={{ borderColor: 'var(--lf-border)' }}
+                          >
                             {hasNotes ? (
                               <div className="space-y-1.5">{renderMarkdown(release.notes)}</div>
                             ) : (

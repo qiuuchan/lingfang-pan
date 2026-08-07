@@ -91,7 +91,8 @@ export class GiteeChangelogService {
         source: 'gitee',
         releases: cached,
         degraded: true,
-        message: cached.length > 0 ? 'Gitee 暂时不可用，展示缓存内容' : 'Gitee 暂时不可用，请稍后重试',
+        message:
+          cached.length > 0 ? 'Gitee 暂时不可用，展示缓存内容' : 'Gitee 暂时不可用，请稍后重试',
       };
     }
   }
@@ -125,7 +126,10 @@ export class GiteeChangelogService {
    *  - 8s 超时（AbortController）。
    *  - 按 created_at desc 排序后首条 isLatest=true。 */
   private async doFetch(config: GiteeConfig): Promise<ChangelogEntry[]> {
-    const url = new URL(`/api/v5/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases`, GITEE_API_BASE);
+    const url = new URL(
+      `/api/v5/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases`,
+      GITEE_API_BASE
+    );
     url.searchParams.set('page', '1');
     url.searchParams.set('per_page', '100'); // changelog 不翻页，仅取最近 100 条（注释标注已知截断）
     url.searchParams.set('direction', 'desc');
@@ -172,7 +176,7 @@ export class GiteeChangelogService {
     return {
       id: r.id != null ? String(r.id) : tag,
       version: tag.replace(/^v/i, ''),
-      title: (r.name?.trim() || tag) || '未命名版本',
+      title: r.name?.trim() || tag || '未命名版本',
       notes: r.body ?? '',
       publishedAt: r.created_at ?? null,
       isLatest: index === 0,

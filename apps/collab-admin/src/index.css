@@ -1,12 +1,14 @@
-@import url("https://s1.hdslb.com/bfs/static/jinkela/long/font/HarmonyOS_Regular.css");
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import url('https://s1.hdslb.com/bfs/static/jinkela/long/font/HarmonyOS_Regular.css');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: "HarmonyOS_Regular", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-sans:
+    'HarmonyOS_Regular', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Microsoft YaHei', sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -72,13 +74,20 @@
 }
 
 @layer base {
-  * { @apply border-border outline-ring/50; }
+  * {
+    @apply border-border outline-ring/50;
+  }
   /* theme-transition：切换主题时对颜色属性做平滑过渡，避免生硬闪烁。
      仅在 useTheme 切换前临时挂上，切换后移除以不影响日常交互性能。 */
-  body { @apply bg-background text-foreground font-sans; }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
   body.theme-transition,
   body.theme-transition * {
-    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease;
   }
 }
 

@@ -4,7 +4,11 @@ import { PrismaService } from '../prisma.service';
 import { AuthService } from './auth.service';
 import { badRequest, forbidden, insufficientBalance, notFound, slugify } from '../common';
 import { highestSemVer } from './plugin-registry-model';
-import { SYSTEM_TEAM_ADMIN_ROLE_CODE, teamAdminRoleId, teamMemberRoleId } from './permissions/permission-codes';
+import {
+  SYSTEM_TEAM_ADMIN_ROLE_CODE,
+  teamAdminRoleId,
+  teamMemberRoleId,
+} from './permissions/permission-codes';
 import { applicationTeamSystemRoles } from './admin-applications';
 import {
   ADMIN_TEAM_SUMMARY_SELECT,
@@ -37,7 +41,7 @@ import {
 export class AdminTeamsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   async adminTeams(userId: string, query: AdminTeamListQuery = {}) {
@@ -68,16 +72,29 @@ export class AdminTeamsService {
     return { items, total, page, pageSize };
   }
 
-  async adminCreateTeam(actorId: string, input: { name: string; slug?: string; balanceCents?: number }) {
+  async adminCreateTeam(
+    actorId: string,
+    input: { name: string; slug?: string; balanceCents?: number }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     const name = input.name.trim();
     // 修复 ADMIN-07：balanceCents 强制取整（Int 列不接受浮点，且避免浮点 cents 误差）。
     const balanceCents = Math.max(0, Math.floor(Number(input.balanceCents || 0)));
     // 修复 ADMIN-06：建团与初始流水放入同一事务，保证「余额变更必有流水」不变量。
     const team = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.team.create({ data: { name, slug: input.slug || slugify(name), balanceCents } });
+      const created = await tx.team.create({
+        data: { name, slug: input.slug || slugify(name), balanceCents },
+      });
       if (created.balanceCents > 0) {
-        await tx.balanceLedger.create({ data: { teamId: created.id, amountCents: created.balanceCents, direction: 'CREDIT', reason: 'initial_balance', actorUserId: actorId } });
+        await tx.balanceLedger.create({
+          data: {
+            teamId: created.id,
+            amountCents: created.balanceCents,
+            direction: 'CREDIT',
+            reason: 'initial_balance',
+            actorUserId: actorId,
+          },
+        });
       }
       return created;
     });
@@ -85,17 +102,26 @@ export class AdminTeamsService {
     return { team };
   }
 
-  async adminUpdateTeam(actorId: string, id: string, input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null }) {
+  async adminUpdateTeam(
+    actorId: string,
+    id: string,
+    input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 XLOG-01：显式字段白名单（此前 data: input 直接透传，可静默改 balanceCents 绕过流水审计）。
-    const data: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null } = {};
+    const data: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null } =
+      {};
     if (input.name !== undefined) data.name = input.name;
     if (input.status !== undefined) data.status = input.status;
     if (input.defaultPoolId !== undefined) {
       // 验证池子存在且团队有权使用（SHARED 或本团队的 DEDICATED）
-      const normalizedPoolId = input.defaultPoolId === null || input.defaultPoolId === '' ? null : input.defaultPoolId;
+      const normalizedPoolId =
+        input.defaultPoolId === null || input.defaultPoolId === '' ? null : input.defaultPoolId;
       if (normalizedPoolId) {
-        const pool = await this.prisma.pool.findUnique({ where: { id: normalizedPoolId }, select: { id: true, scope: true, teamId: true } });
+        const pool = await this.prisma.pool.findUnique({
+          where: { id: normalizedPoolId },
+          select: { id: true, scope: true, teamId: true },
+        });
         if (!pool) throw notFound('资源池不存在');
         const team = await this.prisma.team.findUnique({ where: { id }, select: { id: true } });
         if (!team) throw notFound('团队不存在');
@@ -132,9 +158,15 @@ export class AdminTeamsService {
   async adminSetTeamAdmin(actorId: string, teamId: string, input: { userId: string }) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 ADMIN-08：校验目标团队与用户状态，避免给已 SUSPENDED 团队或 DISABLED 用户授权产生僵尸管理员。
-    const team = await this.prisma.team.findUnique({ where: { id: teamId }, select: { status: true } });
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: { status: true },
+    });
     if (!team || team.status !== 'ACTIVE') throw notFound('团队不存在或已挂起');
-    const targetUser = await this.prisma.user.findUnique({ where: { id: input.userId }, select: { status: true } });
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: input.userId },
+      select: { status: true },
+    });
     if (!targetUser || targetUser.status !== 'ACTIVE') throw notFound('用户不存在或已禁用');
     const membership = await this.prisma.$transaction(async (tx) => {
       const teamRoleId = await this.ensureSystemTeamRole(tx, teamId, 'TEAM_ADMIN');
@@ -191,21 +223,42 @@ export class AdminTeamsService {
     return { membership };
   }
 
-  async adminAdjustBalance(actorId: string, teamId: string, input: { amountCents: number; direction: 'CREDIT' | 'DEBIT'; reason?: string }) {
+  async adminAdjustBalance(
+    actorId: string,
+    teamId: string,
+    input: { amountCents: number; direction: 'CREDIT' | 'DEBIT'; reason?: string }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 修复 ADMIN-10：前置存在性校验，CREDIT 分支此前用无条件 team.update，团队不存在时 P2025 被吞成 500。
-    const exists = await this.prisma.team.findUnique({ where: { id: teamId }, select: { id: true } });
+    const exists = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: { id: true },
+    });
     if (!exists) throw notFound('团队不存在');
     const amount = Math.max(1, Math.floor(Number(input.amountCents || 0)));
     await this.prisma.$transaction(async (tx) => {
-      const data = input.direction === 'CREDIT' ? { balanceCents: { increment: amount } } : { balanceCents: { decrement: amount } };
+      const data =
+        input.direction === 'CREDIT'
+          ? { balanceCents: { increment: amount } }
+          : { balanceCents: { decrement: amount } };
       if (input.direction === 'DEBIT') {
-        const updated = await tx.team.updateMany({ where: { id: teamId, balanceCents: { gte: amount } }, data });
+        const updated = await tx.team.updateMany({
+          where: { id: teamId, balanceCents: { gte: amount } },
+          data,
+        });
         if (updated.count !== 1) throw insufficientBalance();
       } else {
         await tx.team.update({ where: { id: teamId }, data });
       }
-      await tx.balanceLedger.create({ data: { teamId, amountCents: amount, direction: input.direction, reason: input.reason || 'admin_adjustment', actorUserId: actorId } });
+      await tx.balanceLedger.create({
+        data: {
+          teamId,
+          amountCents: amount,
+          direction: input.direction,
+          reason: input.reason || 'admin_adjustment',
+          actorUserId: actorId,
+        },
+      });
       // 修复 H4：auditLog 写入移入事务，与 balanceLedger 原子提交。
       // 修复 H5：metadata 显式挑白名单字段，此前透传 input DTO 引用，shape 随 DTO 演进而漂移。
       await tx.auditLog.create({
@@ -214,14 +267,23 @@ export class AdminTeamsService {
           action: 'admin.team.balance_adjusted',
           targetType: 'Team',
           targetId: teamId,
-          metadata: { teamId, amountCents: input.amountCents, direction: input.direction, reason: input.reason },
+          metadata: {
+            teamId,
+            amountCents: input.amountCents,
+            direction: input.direction,
+            reason: input.reason,
+          },
         },
       });
     });
     return this.prisma.team.findUnique({ where: { id: teamId } });
   }
 
-  async adminTeamMembers(userId: string, teamId: string, query: AdminPageQuery & { q?: string } = {}) {
+  async adminTeamMembers(
+    userId: string,
+    teamId: string,
+    query: AdminPageQuery & { q?: string } = {}
+  ) {
     await this.auth.ensurePlatformAdmin(userId);
     await this.ensureAdminTeamExists(teamId);
     const { page, pageSize, skip } = normalizeAdminPage(query);
@@ -255,11 +317,13 @@ export class AdminTeamsService {
       teamRoleId: membership.teamRoleId,
       joinedAt: membership.joinedAt,
       user: adminUserOption(membership.user),
-      teamRole: membership.teamRole ? {
-        id: membership.teamRole.id,
-        name: membership.teamRole.name,
-        code: membership.teamRole.code,
-      } : null,
+      teamRole: membership.teamRole
+        ? {
+            id: membership.teamRole.id,
+            name: membership.teamRole.name,
+            code: membership.teamRole.code,
+          }
+        : null,
     }));
     return { items, total, page, pageSize };
   }
@@ -273,16 +337,24 @@ export class AdminTeamsService {
   //  - { roleId: '<role-id>' }：指定任意团队自定义角色（child-4 D7 新前端用），双写 teamRoleId + role 枚举
   //    （系统团队管理员 code → TEAM_ADMIN，否则 MEMBER），与 RoleService.assignMemberRole 同款语义。
   //  - 两者都未传：400 拒绝（DTO 用 @IsOptional 放宽，运行时显式校验）。
-  async adminUpdateMemberRole(actorId: string, teamId: string, targetUserId: string, input: { role?: 'TEAM_ADMIN' | 'MEMBER'; roleId?: string }) {
+  async adminUpdateMemberRole(
+    actorId: string,
+    teamId: string,
+    targetUserId: string,
+    input: { role?: 'TEAM_ADMIN' | 'MEMBER'; roleId?: string }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
     // 前置存在性校验：update 在记录不存在时抛 P2025，此前被吞成 500（与 adminRevokeTeamAdmin 的 ADMIN-08 修复同源）。
-    const existing = await this.prisma.teamMembership.findUnique({ where: { teamId_userId: { teamId, userId: targetUserId } } });
+    const existing = await this.prisma.teamMembership.findUnique({
+      where: { teamId_userId: { teamId, userId: targetUserId } },
+    });
     if (!existing) throw notFound('团队成员关系不存在');
 
     // === 分支 1：roleId 形态（child-4 D7，指定任意团队角色）===
     if (input.roleId !== undefined) {
       const role = await this.prisma.role.findUnique({ where: { id: input.roleId } });
-      if (!role || role.scope !== 'TEAM' || role.teamId !== teamId) throw badRequest('团队角色不存在');
+      if (!role || role.scope !== 'TEAM' || role.teamId !== teamId)
+        throw badRequest('团队角色不存在');
       const isTeamAdmin = role.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE;
       const nextRole: 'TEAM_ADMIN' | 'MEMBER' = isTeamAdmin ? 'TEAM_ADMIN' : 'MEMBER';
       // 幂等优化：role 与 teamRoleId 都未变则不重复写审计。
@@ -321,8 +393,10 @@ export class AdminTeamsService {
 
     // === 分支 2：role 枚举形态（旧前端兼容）===
     if (input.role === undefined) throw badRequest('必须提供 role 或 roleId');
-    const expectedRoleId = input.role === 'TEAM_ADMIN' ? teamAdminRoleId(teamId) : teamMemberRoleId(teamId);
-    if (existing.role === input.role && existing.teamRoleId === expectedRoleId) return { membership: existing };
+    const expectedRoleId =
+      input.role === 'TEAM_ADMIN' ? teamAdminRoleId(teamId) : teamMemberRoleId(teamId);
+    if (existing.role === input.role && existing.teamRoleId === expectedRoleId)
+      return { membership: existing };
     const membership = await this.prisma.$transaction(async (tx) => {
       const teamRoleId = await this.ensureSystemTeamRole(tx, teamId, input.role!);
       const updated = await tx.teamMembership.update({
@@ -356,13 +430,23 @@ export class AdminTeamsService {
   // 团队启用/停用（ACTIVE↔SUSPENDED）。与 adminUpdateTeam 的 status 字段区别：
   // 此端点是专用状态切换，前端 footer 按钮直接用，语义明确；adminUpdateTeam 是综合信息更新（name+status）。
   // 不在此处重复审计 admin.team.updated：状态切换是更细粒度的事件，用独立 action 便于审计区分。
-  async adminUpdateTeamStatus(actorId: string, teamId: string, input: { status: 'ACTIVE' | 'SUSPENDED' }) {
+  async adminUpdateTeamStatus(
+    actorId: string,
+    teamId: string,
+    input: { status: 'ACTIVE' | 'SUSPENDED' }
+  ) {
     await this.auth.ensurePlatformAdmin(actorId);
-    const team = await this.prisma.team.findUnique({ where: { id: teamId }, select: { id: true, status: true } });
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: { id: true, status: true },
+    });
     if (!team) throw notFound('团队不存在');
     // 幂等优化：已是目标状态则不重复写审计，避免无变更操作污染审计日志。
     if (team.status === input.status) return { team };
-    const updated = await this.prisma.team.update({ where: { id: teamId }, data: { status: input.status } });
+    const updated = await this.prisma.team.update({
+      where: { id: teamId },
+      data: { status: input.status },
+    });
     // action 统一前缀分类（team.status.suspended / team.status.activated）。
     const action = input.status === 'SUSPENDED' ? 'team.status.suspended' : 'team.status.activated';
     await this.audit(actorId, action, 'Team', teamId, { from: team.status, to: input.status });
@@ -406,7 +490,11 @@ export class AdminTeamsService {
       roleCount,
       pluginCount,
       purchaseCount,
-      ledgerSummary: { totalCreditCents: creditSum, totalDebitCents: debitSum, netCents: creditSum - debitSum },
+      ledgerSummary: {
+        totalCreditCents: creditSum,
+        totalDebitCents: debitSum,
+        netCents: creditSum - debitSum,
+      },
     };
   }
 
@@ -493,8 +581,10 @@ export class AdminTeamsService {
         _sum: { amountCents: true },
       }),
     ]);
-    const totalCreditCents = ledgerAgg.find((entry) => entry.direction === 'CREDIT')?._sum.amountCents ?? 0;
-    const totalDebitCents = ledgerAgg.find((entry) => entry.direction === 'DEBIT')?._sum.amountCents ?? 0;
+    const totalCreditCents =
+      ledgerAgg.find((entry) => entry.direction === 'CREDIT')?._sum.amountCents ?? 0;
+    const totalDebitCents =
+      ledgerAgg.find((entry) => entry.direction === 'DEBIT')?._sum.amountCents ?? 0;
     const items = rows.map((entry) => ({
       id: entry.id,
       teamId: entry.teamId,
@@ -503,11 +593,13 @@ export class AdminTeamsService {
       reason: entry.reason,
       actorUserId: entry.actorUserId,
       createdAt: entry.createdAt,
-      actor: entry.actor ? {
-        id: entry.actor.id,
-        email: entry.actor.email,
-        displayName: entry.actor.displayName,
-      } : null,
+      actor: entry.actor
+        ? {
+            id: entry.actor.id,
+            email: entry.actor.email,
+            displayName: entry.actor.displayName,
+          }
+        : null,
     }));
     return {
       items,
@@ -522,17 +614,27 @@ export class AdminTeamsService {
     };
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId?: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 
   private async ensureSystemTeamRole(
     tx: Prisma.TransactionClient,
     teamId: string,
-    legacyRole: 'TEAM_ADMIN' | 'MEMBER',
+    legacyRole: 'TEAM_ADMIN' | 'MEMBER'
   ) {
     const roleId = legacyRole === 'TEAM_ADMIN' ? teamAdminRoleId(teamId) : teamMemberRoleId(teamId);
-    const role = applicationTeamSystemRoles(teamId).roles.find((candidate) => candidate.id === roleId);
+    const role = applicationTeamSystemRoles(teamId).roles.find(
+      (candidate) => candidate.id === roleId
+    );
     if (!role) throw notFound('团队系统角色未初始化');
     await tx.role.upsert({
       where: { id: roleId },

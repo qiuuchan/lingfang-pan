@@ -12,11 +12,22 @@
 
 import { useEffect, useState } from 'react';
 import { FileJsonIcon, ShieldCheckIcon, ShieldAlertIcon } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { parseManifest } from '@/lib/plugin-draft';
-import { verifyPluginSignature, checkPluginRecall, type PluginSignatureStatus, type PluginRecallInfo } from '@/lib/plugin-status';
+import {
+  verifyPluginSignature,
+  checkPluginRecall,
+  type PluginSignatureStatus,
+  type PluginRecallInfo,
+} from '@/lib/plugin-status';
 import type { DraftFile } from '@/lib/types';
 
 // 运行时类型 → 中文展示（与 plugin-status RUNTIME_DISPLAY 对齐，独立维护避免循环依赖）。
@@ -71,10 +82,25 @@ export function PluginManifestDialog({
   useEffect(() => {
     if (!open || !id || id === '—') return;
     let cancelled = false;
-    void verifyPluginSignature(id).then((s) => { if (!cancelled) setSig(s); }).catch(() => { if (!cancelled) setSig(null); });
+    void verifyPluginSignature(id)
+      .then((s) => {
+        if (!cancelled) setSig(s);
+      })
+      .catch(() => {
+        if (!cancelled) setSig(null);
+      });
     const ver = version !== '—' ? version : '';
-    if (ver) void checkPluginRecall(id, ver).then((r) => { if (!cancelled) setRecall(r); }).catch(() => { if (!cancelled) setRecall(null); });
-    return () => { cancelled = true; };
+    if (ver)
+      void checkPluginRecall(id, ver)
+        .then((r) => {
+          if (!cancelled) setRecall(r);
+        })
+        .catch(() => {
+          if (!cancelled) setRecall(null);
+        });
+    return () => {
+      cancelled = true;
+    };
   }, [open, id, version]);
 
   // 关键字段网格项：label + value，统一渲染。
@@ -83,7 +109,10 @@ export function PluginManifestDialog({
     { label: '展示名', value: <span className="font-medium">{title}</span> },
     { label: '程序标识符', value: <code className="font-mono text-xs">{name}</code> },
     { label: '版本', value: <Badge variant="secondary">v{version}</Badge> },
-    { label: '运行时', value: <Badge variant="outline">{RUNTIME_LABEL[runtimeType] ?? runtimeType}</Badge> },
+    {
+      label: '运行时',
+      value: <Badge variant="outline">{RUNTIME_LABEL[runtimeType] ?? runtimeType}</Badge>,
+    },
     { label: '入口文件', value: <code className="font-mono text-xs">{entry}</code> },
   ];
   if (visibility) {
@@ -131,7 +160,11 @@ export function PluginManifestDialog({
               <span className="text-xs text-muted-foreground">能力声明（capabilities）</span>
               <div className="flex flex-wrap gap-1.5">
                 {capabilities.map((cap, index) => (
-                  <Badge key={`${cap.kind}-${index}`} variant="secondary" className="font-mono text-xs">
+                  <Badge
+                    key={`${cap.kind}-${index}`}
+                    variant="secondary"
+                    className="font-mono text-xs"
+                  >
                     {cap.kind}
                   </Badge>
                 ))}
@@ -149,20 +182,25 @@ export function PluginManifestDialog({
                     variant="outline"
                     className={
                       sig.verified
-                        ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                        ? 'border-success/40 text-success'
                         : sig.signed
                           ? 'border-rose-500/40 text-rose-600 dark:text-rose-400'
                           : 'text-muted-foreground'
                     }
                     title={sig.reason}
                   >
-                    {sig.verified ? <ShieldCheckIcon className="mr-1 size-3" /> : <ShieldAlertIcon className="mr-1 size-3" />}
+                    {sig.verified ? (
+                      <ShieldCheckIcon className="mr-1 size-3" />
+                    ) : (
+                      <ShieldAlertIcon className="mr-1 size-3" />
+                    )}
                     {sig.verified ? '签名已验证' : sig.signed ? '签名无效' : '未签名'}
                   </Badge>
                 )}
                 {recall?.recalled && (
                   <Badge variant="destructive" title={recall.reason || '该版本已被平台召回'}>
-                    <ShieldAlertIcon className="mr-1 size-3" />版本已召回（v{recall.version}）
+                    <ShieldAlertIcon className="mr-1 size-3" />
+                    版本已召回（v{recall.version}）
                   </Badge>
                 )}
               </div>

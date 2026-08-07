@@ -1,4 +1,9 @@
-import { CapabilityKind, RuntimeType, type CapabilityKind as CapabilityKindType, type PluginCapability } from '@lingfang/contract';
+import {
+  CapabilityKind,
+  RuntimeType,
+  type CapabilityKind as CapabilityKindType,
+  type PluginCapability,
+} from '@lingfang/contract';
 import type { DraftDiagnostic, DraftFile, LoadedPlugin } from '@/lib/types';
 import { capabilityRequiresAdmin } from '@/lib/plugin-capabilities';
 
@@ -32,7 +37,10 @@ export function defaultEntryForRuntime(runtimeType: string | undefined): string 
  * - nodejs → index.js 最小骨架
  * 这样即便 AI 未产入口，scan 判 ready 且运行时不崩（与 defaultEntryForRuntime 配套）。
  */
-export function buildFallbackEntryFile(runtimeType: string | undefined, meta: { notes?: string; manifestName: string; description?: string }): { content: string; language: string } {
+export function buildFallbackEntryFile(
+  runtimeType: string | undefined,
+  meta: { notes?: string; manifestName: string; description?: string }
+): { content: string; language: string } {
   switch (runtimeType) {
     case 'python':
       return {
@@ -80,8 +88,12 @@ const FALLBACK_CAPABILITY = {
 
 // 前端版 cleanPath：与后端 plugin-package.ts:61-69 cleanPath 行为对齐，产出端前置收敛。
 // 与后端不同：不 throw，返回 discriminated union，把非法 path 记进 diagnostics 而非中断解析（容错目标）。
-export function cleanPathFrontend(value: string): { ok: true; value: string } | { ok: false; reason: string } {
-  const path = String(value || '').trim().replace(/\\/g, '/');
+export function cleanPathFrontend(
+  value: string
+): { ok: true; value: string } | { ok: false; reason: string } {
+  const path = String(value || '')
+    .trim()
+    .replace(/\\/g, '/');
   if (!path) return { ok: false, reason: '插件文件路径不能为空' };
   if (path.startsWith('/') || path.startsWith('~') || /^[a-zA-Z]:\//.test(path)) {
     return { ok: false, reason: '插件文件路径不能是绝对路径' };
@@ -99,12 +111,24 @@ export function cleanPathFrontend(value: string): { ok: true; value: string } | 
 // 契约收敛：把任意形态的 capabilities 规范化为合法对象数组。
 // 设计要点：合法对象数组（全部 kind 在白名单）→ map 规范化；否则整体兜底 [fallback]。
 // 关键回归点：绝不兜底为裸 code-assistant（白名单外，会被后端 400 拒绝）。
-export function normalizeCapabilities(parsed: unknown, fallback: PluginCapability = FALLBACK_CAPABILITY): PluginCapability[] {
-  if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(
-    (c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && typeof c.kind === 'string' && FRONTEND_CAPABILITY_KINDS.has(c.kind as CapabilityKindType),
-  )) {
+export function normalizeCapabilities(
+  parsed: unknown,
+  fallback: PluginCapability = FALLBACK_CAPABILITY
+): PluginCapability[] {
+  if (
+    Array.isArray(parsed) &&
+    parsed.length > 0 &&
+    parsed.every(
+      (c): c is Record<string, unknown> =>
+        Boolean(c) &&
+        typeof c === 'object' &&
+        typeof c.kind === 'string' &&
+        FRONTEND_CAPABILITY_KINDS.has(c.kind as CapabilityKindType)
+    )
+  ) {
     return parsed.map((c) => {
-      const risk = typeof c.risk === 'string' && FRONTEND_CAPABILITY_RISKS.has(c.risk) ? c.risk : 'low';
+      const risk =
+        typeof c.risk === 'string' && FRONTEND_CAPABILITY_RISKS.has(c.risk) ? c.risk : 'low';
       const base: PluginCapability = {
         kind: c.kind as CapabilityKindType,
         reason: typeof c.reason === 'string' ? c.reason : '',
@@ -140,19 +164,32 @@ export function normalizeEnum(value: unknown, allowed: Set<string>, fallback: st
 // 用于 mergeFollowupDraft / mergeFollowupDraftWithSandbox：仅当 parsed 提供合法 capabilities
 // 才覆盖 prev，否则透传 prev（避免追问未重发完整 manifest 时多能力降级为单能力兜底）。
 export function hasValidCapabilities(value: unknown): boolean {
-  return Array.isArray(value)
-    && value.length > 0
-    && value.every(
-      (c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && typeof (c as { kind?: unknown }).kind === 'string' && FRONTEND_CAPABILITY_KINDS.has((c as { kind: CapabilityKindType }).kind),
-    );
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (c): c is Record<string, unknown> =>
+        Boolean(c) &&
+        typeof c === 'object' &&
+        typeof (c as { kind?: unknown }).kind === 'string' &&
+        FRONTEND_CAPABILITY_KINDS.has((c as { kind: CapabilityKindType }).kind)
+    )
+  );
 }
 
 // parseStructuredPackage 的返回结构。
 function escapeHtml(input: string): string {
-  return input.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char] || char));
+  return input.replace(
+    /[&<>]/g,
+    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char] || char
+  );
 }
 
-export function buildFallbackEntryHtml(input: { notes?: string; manifestName: string; description?: string }): string {
+export function buildFallbackEntryHtml(input: {
+  notes?: string;
+  manifestName: string;
+  description?: string;
+}): string {
   const name = escapeHtml(input.manifestName || '本地代码助手插件');
   const desc = escapeHtml(input.description || '');
   const notes = escapeHtml(input.notes || '');
@@ -202,7 +239,17 @@ export function parseManifest(files: DraftFile[]) {
     };
   } catch {
     // 解析失败：无能力声明，空数组合法（后端接受）。
-    return { id: 'generated-plugin', name: '未命名插件', title: '', version: '0.1.0', description: '', runtime_type: 'client', entry: 'ui/index.html', visibility: 'tenant', capabilities: [] };
+    return {
+      id: 'generated-plugin',
+      name: '未命名插件',
+      title: '',
+      version: '0.1.0',
+      description: '',
+      runtime_type: 'client',
+      entry: 'ui/index.html',
+      visibility: 'tenant',
+      capabilities: [],
+    };
   }
 }
 
@@ -265,7 +312,8 @@ export function validatePluginStructure(files: DraftFile[]): DraftDiagnostic[] {
     diagnostics.push({
       stage: 'schema',
       status: 'fail',
-      message: '缺少 manifest.json，插件无法运行。请让 AI 重新生成并确保产出 manifest.json 清单文件。',
+      message:
+        '缺少 manifest.json，插件无法运行。请让 AI 重新生成并确保产出 manifest.json 清单文件。',
     });
     return diagnostics; // 无 manifest 则后续 entry 校验无意义。
   }

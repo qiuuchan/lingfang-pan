@@ -60,7 +60,9 @@ export function clientSourceFromRequest(req: Request): ClientSource {
  * developer role 语义与 system 等价（OpenAI 用它区分推理模型的「开发者指令」），归一化为 system
  * 对 OpenAI 系（gpt-5.5，兼容 system）和 Moonshot 系（只认 system）都安全。
  */
-function normalizeDeveloperRole(messages: { role: string; content: string }[]): { role: string; content: string }[] {
+function normalizeDeveloperRole(
+  messages: { role: string; content: string }[]
+): { role: string; content: string }[] {
   return messages.map((m) => (m.role === 'developer' ? { ...m, role: 'system' } : m));
 }
 
@@ -86,7 +88,7 @@ export class RelayService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PricingService) private readonly pricing: PricingService,
     @Inject(CreditService) private readonly credits: CreditService,
-    @Inject(ChannelRouterService) private readonly router: ChannelRouterService,
+    @Inject(ChannelRouterService) private readonly router: ChannelRouterService
   ) {}
 
   /** GET /api/relay/v1/models —— 返回当前团队实际可用的版本哨兵、资源池与 contextWindow。 */
@@ -94,20 +96,21 @@ export class RelayService {
     const auth = req?.relayAuth ?? null;
     const poolRefs = auth
       ? await this.prisma.pool.findMany({
-        where: { OR: [{ scope: 'SHARED' }, { scope: 'DEDICATED', teamId: auth.teamId }] },
-        select: {
-          id: true,
-          name: true,
-          scope: true,
-          teamId: true,
-          channels: { where: { kind: 'CHAT', status: 'ENABLED' }, select: { tier: true } },
-        },
-        orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
-      })
+          where: { OR: [{ scope: 'SHARED' }, { scope: 'DEDICATED', teamId: auth.teamId }] },
+          select: {
+            id: true,
+            name: true,
+            scope: true,
+            teamId: true,
+            channels: { where: { kind: 'CHAT', status: 'ENABLED' }, select: { tier: true } },
+          },
+          orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
+        })
       : [];
-    const poolNamesFor = (tier: Tier) => poolRefs
-      .filter((pool) => pool.channels.some((channel) => channel.tier === tier))
-      .map((pool) => ({ id: pool.id, name: pool.name, scope: pool.scope, teamId: pool.teamId }));
+    const poolNamesFor = (tier: Tier) =>
+      poolRefs
+        .filter((pool) => pool.channels.some((channel) => channel.tier === tier))
+        .map((pool) => ({ id: pool.id, name: pool.name, scope: pool.scope, teamId: pool.teamId }));
 
     // contextWindow：按 tier 查候选模型定价行的最小 contextWindow（保守预算）。
     // 不依赖 teamId（contextWindow 是模型固有属性，与团队无关），任何已登录用户都能拿到。
@@ -147,7 +150,10 @@ export class RelayService {
    * 在 executeRelay（预扣灵石/选渠道/转发）之前调用——超限时不消耗任何额度、不触达上游。
    * contextWindow 未知（后端未配置）时跳过预检，交前端护栏 + 上游硬限兜底（不阻断正常调用）。
    */
-  private async assertInputWithinWindow(tier: Tier, messages: { role: string; content: unknown }[]): Promise<void> {
+  private async assertInputWithinWindow(
+    tier: Tier,
+    messages: { role: string; content: unknown }[]
+  ): Promise<void> {
     const contextWindow = await this.pricing.lookupMinContextWindow({ tier });
     if (!contextWindow || contextWindow <= 0) return; // 未配置 → 跳过（不阻断）
     const estimated = estimateMessagesTokens(messages as never);
@@ -156,7 +162,7 @@ export class RelayService {
         413,
         'input_too_long',
         `本次对话内容过长，已超过模型上下文上限（约 ${estimated.toLocaleString()} / ${contextWindow.toLocaleString()} token）。请新建对话或精简后重试。`,
-        { estimatedTokens: estimated, contextWindow },
+        { estimatedTokens: estimated, contextWindow }
       );
     }
   }
@@ -177,7 +183,9 @@ export class RelayService {
     const rawMessages = (body.messages as { role: string; content: string }[]) ?? [];
     const messages = normalizeDeveloperRole(rawMessages);
     const injectedMessages = guardRule?.trim()
-      ? (guardRule ? this.injectGuard(messages, guardRule) : messages)
+      ? guardRule
+        ? this.injectGuard(messages, guardRule)
+        : messages
       : messages;
 
     // 输入预检：估算注入后 messages 的 token，超上游窗口上限则直接返回友好的 413，
@@ -196,7 +204,12 @@ export class RelayService {
       forward: (upstreamKey, baseUrl, protocol, model) => {
         const upstreamBody = { ...body, model, messages: injectedMessages };
         if (protocol === 'ANTHROPIC') {
-          return forwardOpenAiChatViaAnthropic({ baseUrl, upstreamKey, body: upstreamBody as never, res });
+          return forwardOpenAiChatViaAnthropic({
+            baseUrl,
+            upstreamKey,
+            body: upstreamBody as never,
+            res,
+          });
         }
         return forwardOpenAiChat({ baseUrl, upstreamKey, body: upstreamBody as never, res });
       },
@@ -210,7 +223,9 @@ export class RelayService {
     const stream = Boolean(body.stream);
     const guardRule = await this.credits.readAiUsageGuardRule();
     const systemField = guardRule?.trim()
-      ? [body.system as string | undefined, guardRule].filter((s) => s && String(s).trim()).join('\n\n')
+      ? [body.system as string | undefined, guardRule]
+          .filter((s) => s && String(s).trim())
+          .join('\n\n')
       : (body.system as string | undefined);
 
     // 输入预检：把 system + messages 合并估算，超窗口上限返回友好 413（同 chatCompletions）。
@@ -227,7 +242,11 @@ export class RelayService {
       stream,
       requestSummary: { tier, temperature: body.temperature, stream },
       forward: (upstreamKey, baseUrl, _protocol, model) => {
-        const upstreamBody = { ...body, model, ...(systemField != null ? { system: systemField } : {}) };
+        const upstreamBody = {
+          ...body,
+          model,
+          ...(systemField != null ? { system: systemField } : {}),
+        };
         return forwardAnthropicMessages({ baseUrl, upstreamKey, body: upstreamBody as never, res });
       },
     });
@@ -269,8 +288,13 @@ export class RelayService {
         // 与 images/generations 由 relay 覆盖 model 的行为对齐（CONTRACT: model 仅作平台标识）。
         const injected = injectMultipartModel(contentType, Buffer.from(rawBody), model);
         const fr = await forwardRawPassthrough({
-          baseUrl, upstreamKey, path: 'images/edits', method: 'POST',
-          contentType: injected.contentType, rawBody: injected.body, res,
+          baseUrl,
+          upstreamKey,
+          path: 'images/edits',
+          method: 'POST',
+          contentType: injected.contentType,
+          rawBody: injected.body,
+          res,
         });
         return fr;
       },
@@ -297,9 +321,17 @@ export class RelayService {
     const clientSource = clientSourceFromRequest(req);
 
     // 查视频单价（capability='video', model='video_generate'，tier 可空）。
-    const price = await this.pricing.lookupPrice({ capability: 'video', model: 'video_generate', tier });
+    const price = await this.pricing.lookupPrice({
+      capability: 'video',
+      model: 'video_generate',
+      tier,
+    });
     if (!price) {
-      throw new AppError(503, 'no_pricing', '视频生成未配置定价（请联系管理员在价目表配置 video/video_generate）');
+      throw new AppError(
+        503,
+        'no_pricing',
+        '视频生成未配置定价（请联系管理员在价目表配置 video/video_generate）'
+      );
     }
 
     // 实扣额 = PER_SECOND 单价 × 秒数（computeCredits 内部已 clamp seconds≥1）。
@@ -324,23 +356,47 @@ export class RelayService {
 
     // 预扣：cap=实扣额（视频固定价，无事后用量校准，故 cap=real，净效果=实扣）。
     let finalized = false;
-    const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; credits: number }) => {
+    const ensureFinalized = async (args: {
+      status: string;
+      errorCode: string | null;
+      httpStatus: number | null;
+      credits: number;
+    }) => {
       if (finalized) return;
       finalized = true;
       try {
-        await this.finalizeLog(pendingLog.id, { ...args, channelId: null, model: 'video_generate', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 1 }, credits: args.credits });
-      } catch { /* finalize 失败不阻断主流程 */ }
+        await this.finalizeLog(pendingLog.id, {
+          ...args,
+          channelId: null,
+          model: 'video_generate',
+          durationMs: Date.now() - startedAt,
+          usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+          credits: args.credits,
+        });
+      } catch {
+        /* finalize 失败不阻断主流程 */
+      }
     };
 
     try {
       await this.credits.reserve(auth.teamId, totalCredits, pendingLog.id, auth.userId);
     } catch (e) {
-      await ensureFinalized({ status: 'insufficient_balance', ...relayOutcome('insufficient_balance'), credits: 0 });
+      await ensureFinalized({
+        status: 'insufficient_balance',
+        ...relayOutcome('insufficient_balance'),
+        credits: 0,
+      });
       throw e; // AppError(402) 透传给桥→插件
     }
 
     // 实算：cap=real=totalCredits，reconcile 净效果=实扣 totalCredits。
-    const charged = await this.credits.reconcile(auth.teamId, totalCredits, totalCredits, pendingLog.id, auth.userId);
+    const charged = await this.credits.reconcile(
+      auth.teamId,
+      totalCredits,
+      totalCredits,
+      pendingLog.id,
+      auth.userId
+    );
 
     // 计费成功 → 转发到 RBFLow 提交任务（平台运营实例，凭证在 PlatformSetting）。
     // 转发失败则退款（凭 call_log_id，幂等），避免扣费无服务。
@@ -350,13 +406,36 @@ export class RelayService {
       await ensureFinalized({ status: 'success', ...relayOutcome('success'), credits: charged });
     } catch (e) {
       // 转发失败：退款 + finalize 错误态，把真实错误透传给桥→插件。
-      await this.credits.refundConsumed(auth.teamId, pendingLog.id, auth.userId, '视频生成转发失败退款');
-      await ensureFinalized({ status: 'client_error', errorCode: 'rbflow_forward_failed', httpStatus: 502, credits: 0 });
-      throw e instanceof AppError ? e : new AppError(502, 'rbflow_forward_failed', `RBFLow 服务转发失败：${(e as Error).message}`);
+      await this.credits.refundConsumed(
+        auth.teamId,
+        pendingLog.id,
+        auth.userId,
+        '视频生成转发失败退款'
+      );
+      await ensureFinalized({
+        status: 'client_error',
+        errorCode: 'rbflow_forward_failed',
+        httpStatus: 502,
+        credits: 0,
+      });
+      throw e instanceof AppError
+        ? e
+        : new AppError(
+            502,
+            'rbflow_forward_failed',
+            `RBFLow 服务转发失败：${(e as Error).message}`
+          );
     }
 
     // 返回扣费票据 + RBFLow task_id（桥据此建任务卡片 + 监听进度）。
-    return { charged: true, credits: charged, call_log_id: pendingLog.id, task_id, seconds, request_id: requestId };
+    return {
+      charged: true,
+      credits: charged,
+      call_log_id: pendingLog.id,
+      task_id,
+      seconds,
+      request_id: requestId,
+    };
   }
 
   /**
@@ -376,7 +455,11 @@ export class RelayService {
       throw new AppError(400, 'bad_request', 'audio.generate 缺少 prompt_text（目标文本）');
     }
     if (promptText.length > VOICE_MAX_PROMPT_CHARS) {
-      throw new AppError(400, 'bad_request', `prompt_text 过长（最多 ${VOICE_MAX_PROMPT_CHARS} 字符）`);
+      throw new AppError(
+        400,
+        'bad_request',
+        `prompt_text 过长（最多 ${VOICE_MAX_PROMPT_CHARS} 字符）`
+      );
     }
     // 输出音频秒数：由目标文本长度估算（向上取整 + clamp ≥1）。
     const seconds = estimateVoiceSeconds(promptText);
@@ -386,9 +469,17 @@ export class RelayService {
     const clientSource = clientSourceFromRequest(req);
 
     // 查音频单价（capability='audio', model='voice_clone'，tier 可空）。
-    const price = await this.pricing.lookupPrice({ capability: 'audio', model: 'voice_clone', tier });
+    const price = await this.pricing.lookupPrice({
+      capability: 'audio',
+      model: 'voice_clone',
+      tier,
+    });
     if (!price) {
-      throw new AppError(503, 'no_pricing', '声音克隆未配置定价（请联系管理员在价目表配置 audio/voice_clone）');
+      throw new AppError(
+        503,
+        'no_pricing',
+        '声音克隆未配置定价（请联系管理员在价目表配置 audio/voice_clone）'
+      );
     }
 
     // 实扣额 = PER_SECOND 单价 × 估算秒数（computeCredits 内部已 clamp seconds≥1）。
@@ -404,7 +495,12 @@ export class RelayService {
         model: 'voice_clone',
         status: 'reserve',
         requestId,
-        requestSummary: { seconds, chars: promptText.length, tier, model: body.model ?? 'fast' } as never,
+        requestSummary: {
+          seconds,
+          chars: promptText.length,
+          tier,
+          model: body.model ?? 'fast',
+        } as never,
         clientIp,
         clientSource,
         credits: 0,
@@ -413,23 +509,47 @@ export class RelayService {
 
     // 预扣：cap=实扣额（音频估算固定价，无事后用量校准，故 cap=real，净效果=实扣）。
     let finalized = false;
-    const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; credits: number }) => {
+    const ensureFinalized = async (args: {
+      status: string;
+      errorCode: string | null;
+      httpStatus: number | null;
+      credits: number;
+    }) => {
       if (finalized) return;
       finalized = true;
       try {
-        await this.finalizeLog(pendingLog.id, { ...args, channelId: null, model: 'voice_clone', durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: args.credits });
-      } catch { /* finalize 失败不阻断主流程 */ }
+        await this.finalizeLog(pendingLog.id, {
+          ...args,
+          channelId: null,
+          model: 'voice_clone',
+          durationMs: Date.now() - startedAt,
+          usage: { inputTokens: 0, outputTokens: 0, images: 0 },
+          credits: args.credits,
+        });
+      } catch {
+        /* finalize 失败不阻断主流程 */
+      }
     };
 
     try {
       await this.credits.reserve(auth.teamId, totalCredits, pendingLog.id, auth.userId);
     } catch (e) {
-      await ensureFinalized({ status: 'insufficient_balance', ...relayOutcome('insufficient_balance'), credits: 0 });
+      await ensureFinalized({
+        status: 'insufficient_balance',
+        ...relayOutcome('insufficient_balance'),
+        credits: 0,
+      });
       throw e; // AppError(402) 透传给桥→插件
     }
 
     // 实算：cap=real=totalCredits，reconcile 净效果=实扣 totalCredits。
-    const charged = await this.credits.reconcile(auth.teamId, totalCredits, totalCredits, pendingLog.id, auth.userId);
+    const charged = await this.credits.reconcile(
+      auth.teamId,
+      totalCredits,
+      totalCredits,
+      pendingLog.id,
+      auth.userId
+    );
 
     // 计费成功 → 转发到 RBFLow 声音克隆工作流（平台运营实例，凭证在 PlatformSetting）。
     // 转发失败则退款（凭 call_log_id，幂等），避免扣费无服务。
@@ -438,13 +558,36 @@ export class RelayService {
       task_id = await this.forwardToRbflowVoice(body, promptText);
       await ensureFinalized({ status: 'success', ...relayOutcome('success'), credits: charged });
     } catch (e) {
-      await this.credits.refundConsumed(auth.teamId, pendingLog.id, auth.userId, '声音克隆转发失败退款');
-      await ensureFinalized({ status: 'client_error', errorCode: 'rbflow_forward_failed', httpStatus: 502, credits: 0 });
-      throw e instanceof AppError ? e : new AppError(502, 'rbflow_forward_failed', `RBFLow 服务转发失败：${(e as Error).message}`);
+      await this.credits.refundConsumed(
+        auth.teamId,
+        pendingLog.id,
+        auth.userId,
+        '声音克隆转发失败退款'
+      );
+      await ensureFinalized({
+        status: 'client_error',
+        errorCode: 'rbflow_forward_failed',
+        httpStatus: 502,
+        credits: 0,
+      });
+      throw e instanceof AppError
+        ? e
+        : new AppError(
+            502,
+            'rbflow_forward_failed',
+            `RBFLow 服务转发失败：${(e as Error).message}`
+          );
     }
 
     // 返回扣费票据 + RBFLow task_id（桥据此建任务卡片 + 监听进度）。
-    return { charged: true, credits: charged, call_log_id: pendingLog.id, task_id, seconds, request_id: requestId };
+    return {
+      charged: true,
+      credits: charged,
+      call_log_id: pendingLog.id,
+      task_id,
+      seconds,
+      request_id: requestId,
+    };
   }
 
   /**
@@ -454,7 +597,10 @@ export class RelayService {
    * body 含 audio（base64）+ audio_filename/audio_mime_type；prompt_text 为克隆语音要说的目标文本。
    * 转发是计费成功后执行的——relay 持有 RBFLow 凭证转发，插件进程永远拿不到（防绕过）。
    */
-  private async forwardToRbflowVoice(body: Record<string, unknown>, promptText: string): Promise<string> {
+  private async forwardToRbflowVoice(
+    body: Record<string, unknown>,
+    promptText: string
+  ): Promise<string> {
     const rows = await this.prisma.platformSetting.findMany({
       where: { key: { in: ['rbflowUrl', 'rbflowApiKey'] } },
       select: { key: true, value: true },
@@ -463,7 +609,11 @@ export class RelayService {
     const url = (map.get('rbflowUrl') ?? '').trim();
     const apiKey = map.get('rbflowApiKey') ?? '';
     if (!url) {
-      throw new AppError(503, 'rbflow_not_configured', 'RBFLow 服务未配置（请在后台管理「设置 → 视频」填写 RBFLow 地址）');
+      throw new AppError(
+        503,
+        'rbflow_not_configured',
+        'RBFLow 服务未配置（请在后台管理「设置 → 视频」填写 RBFLow 地址）'
+      );
     }
 
     // 解码 base64 音频素材。
@@ -485,20 +635,26 @@ export class RelayService {
     const boundary = 'lfAudioRelay7n4q9wR2';
     const parts: Buffer[] = [];
     const filePart = (name: string, filename: string, mime: string, data: Buffer) => {
-      parts.push(Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`,
-      ));
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
+        )
+      );
       parts.push(data);
       parts.push(Buffer.from('\r\n'));
     };
     filePart('audio', audioFilename, audioMime, audioBytes);
-    parts.push(Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="prompt_text"\r\n\r\n${promptText}\r\n`,
-    ));
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="prompt_text"\r\n\r\n${promptText}\r\n`
+      )
+    );
     if (callbackUrl) {
-      parts.push(Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="callback_url"\r\n\r\n${callbackUrl}\r\n`,
-      ));
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="callback_url"\r\n\r\n${callbackUrl}\r\n`
+        )
+      );
     }
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     const multipartBody = Buffer.concat(parts);
@@ -519,14 +675,30 @@ export class RelayService {
       });
     } catch (e) {
       clearTimeout(timer);
-      throw new AppError(502, 'rbflow_forward_failed', `无法连接 RBFLow 服务：${(e as Error).message}`);
+      throw new AppError(
+        502,
+        'rbflow_forward_failed',
+        `无法连接 RBFLow 服务：${(e as Error).message}`
+      );
     }
     clearTimeout(timer);
 
     if (!res.ok) {
       let detail = '';
-      try { detail = JSON.stringify(await res.json()).slice(0, 300); } catch { try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ } }
-      throw new AppError(502, 'rbflow_forward_failed', `RBFLow 声音克隆提交失败（${res.status}）：${detail}`);
+      try {
+        detail = JSON.stringify(await res.json()).slice(0, 300);
+      } catch {
+        try {
+          detail = (await res.text()).slice(0, 300);
+        } catch {
+          /* ignore */
+        }
+      }
+      throw new AppError(
+        502,
+        'rbflow_forward_failed',
+        `RBFLow 声音克隆提交失败（${res.status}）：${detail}`
+      );
     }
     const data = (await res.json()) as { task_id?: string };
     const taskId = data.task_id ?? '';
@@ -556,9 +728,23 @@ export class RelayService {
     if (!log) {
       throw new AppError(404, 'not_found', '扣费记录不存在或不属于当前团队');
     }
-    const refunded = await this.credits.refundConsumed(auth.teamId, callLogId, auth.userId, '声音克隆转发失败退款');
+    const refunded = await this.credits.refundConsumed(
+      auth.teamId,
+      callLogId,
+      auth.userId,
+      '声音克隆转发失败退款'
+    );
     if (refunded > 0) {
-      await this.finalizeLog(callLogId, { status: 'refunded', errorCode: 'audio_forward_failed', httpStatus: null, channelId: null, model: 'voice_clone', durationMs: 0, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
+      await this.finalizeLog(callLogId, {
+        status: 'refunded',
+        errorCode: 'audio_forward_failed',
+        httpStatus: null,
+        channelId: null,
+        model: 'voice_clone',
+        durationMs: 0,
+        usage: { inputTokens: 0, outputTokens: 0, images: 0 },
+        credits: 0,
+      });
     }
     return { refunded: refunded > 0, credits: refunded, call_log_id: callLogId };
   }
@@ -579,7 +765,11 @@ export class RelayService {
     const url = (map.get('rbflowUrl') ?? '').trim();
     const apiKey = map.get('rbflowApiKey') ?? '';
     if (!url) {
-      throw new AppError(503, 'rbflow_not_configured', 'RBFLow 服务未配置（请在后台管理「设置 → 视频」填写 RBFLow 地址）');
+      throw new AppError(
+        503,
+        'rbflow_not_configured',
+        'RBFLow 服务未配置（请在后台管理「设置 → 视频」填写 RBFLow 地址）'
+      );
     }
 
     // 解码 base64 素材。
@@ -605,18 +795,22 @@ export class RelayService {
     const boundary = 'lfVideoRelay3k8m2xQ7';
     const parts: Buffer[] = [];
     const filePart = (name: string, filename: string, mime: string, data: Buffer) => {
-      parts.push(Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`,
-      ));
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
+        )
+      );
       parts.push(data);
       parts.push(Buffer.from('\r\n'));
     };
     filePart('image', imageFilename, imageMime, imageBytes);
     filePart('video', videoFilename, videoMime, videoBytes);
     if (callbackUrl) {
-      parts.push(Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="callback_url"\r\n\r\n${callbackUrl}\r\n`,
-      ));
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="callback_url"\r\n\r\n${callbackUrl}\r\n`
+        )
+      );
     }
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     const multipartBody = Buffer.concat(parts);
@@ -637,14 +831,30 @@ export class RelayService {
       });
     } catch (e) {
       clearTimeout(timer);
-      throw new AppError(502, 'rbflow_forward_failed', `无法连接 RBFLow 服务：${(e as Error).message}`);
+      throw new AppError(
+        502,
+        'rbflow_forward_failed',
+        `无法连接 RBFLow 服务：${(e as Error).message}`
+      );
     }
     clearTimeout(timer);
 
     if (!res.ok) {
       let detail = '';
-      try { detail = JSON.stringify(await res.json()).slice(0, 300); } catch { try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ } }
-      throw new AppError(502, 'rbflow_forward_failed', `RBFLow 提交失败（${res.status}）：${detail}`);
+      try {
+        detail = JSON.stringify(await res.json()).slice(0, 300);
+      } catch {
+        try {
+          detail = (await res.text()).slice(0, 300);
+        } catch {
+          /* ignore */
+        }
+      }
+      throw new AppError(
+        502,
+        'rbflow_forward_failed',
+        `RBFLow 提交失败（${res.status}）：${detail}`
+      );
     }
     const data = (await res.json()) as { task_id?: string };
     const taskId = data.task_id ?? '';
@@ -674,9 +884,23 @@ export class RelayService {
     if (!log) {
       throw new AppError(404, 'not_found', '扣费记录不存在或不属于当前团队');
     }
-    const refunded = await this.credits.refundConsumed(auth.teamId, callLogId, auth.userId, '视频生成转发失败退款');
+    const refunded = await this.credits.refundConsumed(
+      auth.teamId,
+      callLogId,
+      auth.userId,
+      '视频生成转发失败退款'
+    );
     if (refunded > 0) {
-      await this.finalizeLog(callLogId, { status: 'refunded', errorCode: 'video_forward_failed', httpStatus: null, channelId: null, model: 'video_generate', durationMs: 0, usage: { inputTokens: 0, outputTokens: 0, images: 1 }, credits: 0 });
+      await this.finalizeLog(callLogId, {
+        status: 'refunded',
+        errorCode: 'video_forward_failed',
+        httpStatus: null,
+        channelId: null,
+        model: 'video_generate',
+        durationMs: 0,
+        usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+        credits: 0,
+      });
     }
     return { refunded: refunded > 0, credits: refunded, call_log_id: callLogId };
   }
@@ -699,7 +923,11 @@ export class RelayService {
     const url = (map.get('rbflowUrl') ?? '').trim();
     const apiKey = map.get('rbflowApiKey') ?? '';
     if (!url) {
-      throw new AppError(503, 'rbflow_not_configured', 'RBFLow 服务未配置（请在后台管理「设置」填写 RBFLow 地址）');
+      throw new AppError(
+        503,
+        'rbflow_not_configured',
+        'RBFLow 服务未配置（请在后台管理「设置」填写 RBFLow 地址）'
+      );
     }
     return { url, api_key: apiKey };
   }
@@ -716,7 +944,10 @@ export class RelayService {
   }
 
   /** 把规则注入 messages（OpenAI）：已有 system 追加一段，否则前插。 */
-  private injectGuard(messages: { role: string; content: string }[], rule: string): { role: string; content: string }[] {
+  private injectGuard(
+    messages: { role: string; content: string }[],
+    rule: string
+  ): { role: string; content: string }[] {
     const hasSystem = messages.some((m) => m.role === 'system');
     if (hasSystem) return [...messages, { role: 'system', content: rule }];
     return [{ role: 'system', content: rule }, ...messages];
@@ -735,8 +966,13 @@ export class RelayService {
       tier: Tier;
       stream: boolean;
       requestSummary: Record<string, unknown>;
-      forward: (upstreamKey: string, baseUrl: string, protocol: 'OPENAI' | 'ANTHROPIC', model: string) => Promise<ForwardResult>;
-    },
+      forward: (
+        upstreamKey: string,
+        baseUrl: string,
+        protocol: 'OPENAI' | 'ANTHROPIC',
+        model: string
+      ) => Promise<ForwardResult>;
+    }
   ) {
     const { auth, kind, tier } = plan;
     const startedAt = Date.now();
@@ -762,27 +998,54 @@ export class RelayService {
     });
     // finalizedRef：确保 pendingLog 至少被 finalize 一次（防 catch 链中途抛错导致日志永久卡 pending）。
     let finalized = false;
-    const ensureFinalized = async (args: { status: string; errorCode: string | null; httpStatus: number | null; channelId: string | null; model: string }) => {
+    const ensureFinalized = async (args: {
+      status: string;
+      errorCode: string | null;
+      httpStatus: number | null;
+      channelId: string | null;
+      model: string;
+    }) => {
       if (finalized) return;
       finalized = true;
       try {
-        await this.finalizeLog(pendingLog.id, { ...args, durationMs: Date.now() - startedAt, usage: { inputTokens: 0, outputTokens: 0, images: 0 }, credits: 0 });
-      } catch { /* finalize 本身失败不阻断主流程（避免吞掉真实错误） */ }
+        await this.finalizeLog(pendingLog.id, {
+          ...args,
+          durationMs: Date.now() - startedAt,
+          usage: { inputTokens: 0, outputTokens: 0, images: 0 },
+          credits: 0,
+        });
+      } catch {
+        /* finalize 本身失败不阻断主流程（避免吞掉真实错误） */
+      }
     };
 
     try {
       try {
         await this.credits.reserve(auth.teamId, cap, pendingLog.id, auth.userId);
       } catch (e) {
-        await ensureFinalized({ status: 'insufficient_balance', ...relayOutcome('insufficient_balance'), channelId: null, model: '(reserve-failed)' });
+        await ensureFinalized({
+          status: 'insufficient_balance',
+          ...relayOutcome('insufficient_balance'),
+          channelId: null,
+          model: '(reserve-failed)',
+        });
         throw e;
       }
 
       const candidates = await this.router.selectCandidates({ teamId: auth.teamId, kind, tier });
       if (candidates.length === 0) {
         await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-        await ensureFinalized({ status: 'no_channel', ...relayOutcome('no_channel'), channelId: null, model: '(no-channel)' });
-        throw new AppError(503, 'no_channel_available', `无可用${kind === 'CHAT' ? '聊天' : '生图'}渠道（${tier === 'FAST' ? '快速' : '高级'}版）`);
+        await ensureFinalized({
+          status: 'no_channel',
+          ...relayOutcome('no_channel'),
+          channelId: null,
+          model: '(no-channel)',
+        });
+        throw new AppError(
+          503,
+          'no_channel_available',
+          `无可用${kind === 'CHAT' ? '聊天' : '生图'}渠道（${tier === 'FAST' ? '快速' : '高级'}版）`
+        );
       }
 
       let lastError: unknown;
@@ -792,22 +1055,43 @@ export class RelayService {
         lastCand = { id: cand.id, model: cand.model };
         // 按候选 model 查定价；无定价则跳过该候选（不能盲调不扣费）。
         const price = await this.pricing.lookupPrice({ capability, model: cand.model, tier });
-        if (!price) { skippedForNoPricing++; continue; }
+        if (!price) {
+          skippedForNoPricing++;
+          continue;
+        }
         try {
           const routed = await this.router.decryptUpstreamKey(cand.id);
-          const fr = await plan.forward(routed.upstreamKey, routed.baseUrl, routed.protocol, cand.model);
+          const fr = await plan.forward(
+            routed.upstreamKey,
+            routed.baseUrl,
+            routed.protocol,
+            cand.model
+          );
           // 计费：按命中 model 的单价。
-          const usage = { inputTokens: fr.inputTokens, outputTokens: fr.outputTokens, images: fr.images };
+          const usage = {
+            inputTokens: fr.inputTokens,
+            outputTokens: fr.outputTokens,
+            images: fr.images,
+          };
           const realCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
-          const charged = await this.credits.reconcile(auth.teamId, cap, realCredits, pendingLog.id, auth.userId);
+          const charged = await this.credits.reconcile(
+            auth.teamId,
+            cap,
+            realCredits,
+            pendingLog.id,
+            auth.userId
+          );
           finalized = true; // 成功路径手动置位（ensureFinalized 跳过，保留 usage/credits）
           // 计费漏洞检测（usage_missing）：聊天调用成功但上游未返回任何 token usage（input/output 双 0）。
           // 多见于上游网关不支持 stream_options.include_usage（部分国产/自建网关会忽略该参数），
           // 导致 parseOpenAiUsage/parseAnthropicUsage 解析不到 → computeCredits 算出 0 → 用户实际消耗了上游 token 却未计费。
           // 此处不改变成功语义（响应照常下发），仅在日志 errorCode 补标 usage_missing + 打 warn，便于后台对账筛出漏费渠道。
-          const usageMissing = kind === 'CHAT' && usage.inputTokens === 0 && usage.outputTokens === 0;
+          const usageMissing =
+            kind === 'CHAT' && usage.inputTokens === 0 && usage.outputTokens === 0;
           if (usageMissing) {
-            console.warn(`[relay] usage_missing: 上游未返回 token usage，本次可能漏计费 (callLogId=${pendingLog.id}, model=${cand.model}, charged=${charged})`);
+            console.warn(
+              `[relay] usage_missing: 上游未返回 token usage，本次可能漏计费 (callLogId=${pendingLog.id}, model=${cand.model}, charged=${charged})`
+            );
           }
           // R3-2：钱已扣（reconcile 完成），finalizeLog 失败不得影响已成功的响应，
           // 否则错误冒泡到外层 catch（此时 finalized===true，不会重复退款，但会把成功响应改写成错误）。
@@ -815,13 +1099,35 @@ export class RelayService {
           // 避免「扣了费但日志卡 pending/错态」的对账黑洞。
           const successErrorCode = usageMissing ? 'usage_missing' : null;
           try {
-            await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: successErrorCode, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
+            await this.finalizeLog(pendingLog.id, {
+              status: 'success',
+              errorCode: successErrorCode,
+              httpStatus: 200,
+              channelId: routed.id,
+              model: cand.model,
+              durationMs: Date.now() - startedAt,
+              usage,
+              credits: charged,
+            });
           } catch (logErr) {
             const msg = logErr instanceof Error ? logErr.message : String(logErr);
-            console.warn(`[relay] finalizeLog failed after successful charge (callLogId=${pendingLog.id}, charged=${charged}): ${msg}`);
+            console.warn(
+              `[relay] finalizeLog failed after successful charge (callLogId=${pendingLog.id}, charged=${charged}): ${msg}`
+            );
             try {
-              await this.finalizeLog(pendingLog.id, { status: 'success', errorCode: successErrorCode, httpStatus: 200, channelId: routed.id, model: cand.model, durationMs: Date.now() - startedAt, usage, credits: charged });
-            } catch { /* 二次失败仅吞掉：响应已成功，扣费已正确，留 warn 供人工对账 */ }
+              await this.finalizeLog(pendingLog.id, {
+                status: 'success',
+                errorCode: successErrorCode,
+                httpStatus: 200,
+                channelId: routed.id,
+                model: cand.model,
+                durationMs: Date.now() - startedAt,
+                usage,
+                credits: charged,
+              });
+            } catch {
+              /* 二次失败仅吞掉：响应已成功，扣费已正确，留 warn 供人工对账 */
+            }
           }
           return;
         } catch (e) {
@@ -831,7 +1137,13 @@ export class RelayService {
             // 即使部分 chunk 已透传（利于用户、对平台有损，接受为 MVP；后续可按已收 usage 部分计费）。
             // 这里不可能误扣用户：reconcile 仅在成功路径调用，发头后失败只走 refund。
             await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
-            await ensureFinalized({ status: 'upstream_error', errorCode: e instanceof UpstreamError ? upstreamErrorCode(e) : 'upstream_llm_error', httpStatus: e instanceof UpstreamError ? e.httpStatus : 502, channelId: cand.id, model: cand.model });
+            await ensureFinalized({
+              status: 'upstream_error',
+              errorCode: e instanceof UpstreamError ? upstreamErrorCode(e) : 'upstream_llm_error',
+              httpStatus: e instanceof UpstreamError ? e.httpStatus : 502,
+              channelId: cand.id,
+              model: cand.model,
+            });
             return;
           }
           // 非流式：继续下一候选（故障转移）。
@@ -842,25 +1154,57 @@ export class RelayService {
       if (lastError === undefined && skippedForNoPricing === candidates.length) {
         // 所有候选都因无定价被跳过：明确提示配价，而非笼统 upstream_error。
         const modelNames = Array.from(new Set(candidates.map((c) => c.model))).join('、');
-        await ensureFinalized({ status: 'no_pricing', ...relayOutcome('no_pricing'), channelId: null, model: modelNames || '(none)' });
-        throw new AppError(503, 'pricing_not_configured', '当前模型版本暂不可用，请联系平台管理员配置定价');
+        await ensureFinalized({
+          status: 'no_pricing',
+          ...relayOutcome('no_pricing'),
+          channelId: null,
+          model: modelNames || '(none)',
+        });
+        throw new AppError(
+          503,
+          'pricing_not_configured',
+          '当前模型版本暂不可用，请联系平台管理员配置定价'
+        );
       }
       // 上游错误 → 平台表示（状态重映射 + 根因摘要 + errorCode 全在 upstream-status-policy 单点定义）。
       const summary = summarizeUpstreamError(lastError);
       const { upstreamStatus, upstreamDetail, httpStatus, errorCode } = summary;
       // 服务端日志：上游错误全量输出（含 body 摘要），便于 SSH 看日志即时定位渠道/模型问题。
-      console.warn(`[relay] upstream_error: capability=${capability} tier=${tier} model=${lastCand?.model ?? '?'} channel=${lastCand?.id ?? '?'} upstreamStatus=${upstreamStatus} httpStatus=${httpStatus} detail=${upstreamDetail ?? '(none)'}`);
-      await ensureFinalized({ status: 'upstream_error', errorCode, httpStatus, channelId: lastCand?.id ?? null, model: lastCand?.model ?? '(none)' });
+      console.warn(
+        `[relay] upstream_error: capability=${capability} tier=${tier} model=${lastCand?.model ?? '?'} channel=${lastCand?.id ?? '?'} upstreamStatus=${upstreamStatus} httpStatus=${httpStatus} detail=${upstreamDetail ?? '(none)'}`
+      );
+      await ensureFinalized({
+        status: 'upstream_error',
+        errorCode,
+        httpStatus,
+        channelId: lastCand?.id ?? null,
+        model: lastCand?.model ?? '(none)',
+      });
       // details 透传上游真实原因（status + body 摘要），客户端据此显示可读错误而非无意义 statusText。
-      throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败', { upstreamStatus, upstreamDetail });
+      throw new AppError(httpStatus, 'upstream_llm_error', '上游模型调用失败', {
+        upstreamStatus,
+        upstreamDetail,
+      });
     } catch (e) {
       // 任何未预期错误：退款兜底（防灵石泄漏）+ 确保日志终态，再原样抛给客户端。
       if (!finalized) {
-        try { await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId); } catch (refundErr) { console.warn(`[relay] refund failed in error path (callLogId=${pendingLog.id}): ${refundErr instanceof Error ? refundErr.message : refundErr}`); }
+        try {
+          await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+        } catch (refundErr) {
+          console.warn(
+            `[relay] refund failed in error path (callLogId=${pendingLog.id}): ${refundErr instanceof Error ? refundErr.message : refundErr}`
+          );
+        }
         // 把原生错误信息记入 errorCode（前 120 字），便于后台调用日志直接看到根因（如 Prisma 列类型错）。
         const errMsg = e instanceof Error ? e.message : String(e);
         const errCode = e instanceof AppError ? e.code : `internal:${errMsg.slice(0, 120)}`;
-        await ensureFinalized({ status: 'client_error', errorCode: errCode, httpStatus: e instanceof AppError ? (e as AppError).status : 500, channelId: null, model: '(error)' });
+        await ensureFinalized({
+          status: 'client_error',
+          errorCode: errCode,
+          httpStatus: e instanceof AppError ? (e as AppError).status : 500,
+          channelId: null,
+          model: '(error)',
+        });
         // 抛给客户端的消息也带根因（debug 友好）。
         if (e instanceof AppError) throw e;
         throw new AppError(500, 'internal', `relay 内部错误：${errMsg}`, { error: errMsg });
@@ -872,17 +1216,29 @@ export class RelayService {
   private async finalizeLog(
     id: string,
     args: {
-      status: string; errorCode: string | null; httpStatus: number | null;
-      channelId: string | null; model: string; durationMs: number;
-      usage: { inputTokens: number; outputTokens: number; images: number }; credits: number;
-    },
+      status: string;
+      errorCode: string | null;
+      httpStatus: number | null;
+      channelId: string | null;
+      model: string;
+      durationMs: number;
+      usage: { inputTokens: number; outputTokens: number; images: number };
+      credits: number;
+    }
   ) {
     await this.prisma.llmCallLog.update({
       where: { id },
       data: {
-        status: args.status, errorCode: args.errorCode, httpStatus: args.httpStatus,
-        channelId: args.channelId, model: args.model, durationMs: args.durationMs,
-        inputTokens: args.usage.inputTokens, outputTokens: args.usage.outputTokens, images: args.usage.images, credits: args.credits,
+        status: args.status,
+        errorCode: args.errorCode,
+        httpStatus: args.httpStatus,
+        channelId: args.channelId,
+        model: args.model,
+        durationMs: args.durationMs,
+        inputTokens: args.usage.inputTokens,
+        outputTokens: args.usage.outputTokens,
+        images: args.usage.images,
+        credits: args.credits,
       },
     });
   }
@@ -912,12 +1268,15 @@ function readRawBody(req: Request): Promise<Uint8Array> {
 export function injectMultipartModel(
   contentType: string,
   rawBody: Buffer,
-  model: string,
+  model: string
 ): { contentType: string; body: Buffer } {
   const boundaryMatch = /boundary=("?)([^";\r\n]+)\1/i.exec(contentType);
   if (!boundaryMatch) return { contentType, body: rawBody };
   const boundary = boundaryMatch[2]!;
-  if (rawBody.includes(Buffer.from('name="model"')) || rawBody.includes(Buffer.from('name=model'))) {
+  if (
+    rawBody.includes(Buffer.from('name="model"')) ||
+    rawBody.includes(Buffer.from('name=model'))
+  ) {
     return { contentType, body: rawBody };
   }
   const closing = Buffer.from(`--${boundary}--`);
@@ -926,7 +1285,7 @@ export function injectMultipartModel(
   const safeModel = model.replace(/[\r\n]/g, '');
   const part = Buffer.from(
     `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\nContent-Type: text/plain\r\n\r\n${safeModel}\r\n`,
-    'utf8',
+    'utf8'
   );
   return {
     contentType,

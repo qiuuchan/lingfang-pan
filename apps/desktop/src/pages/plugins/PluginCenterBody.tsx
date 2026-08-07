@@ -558,7 +558,7 @@ function InstalledList({
 									{dependencyLabel(installation.activeRelease.dependencyStatus)}
 								</span>
 								{installation.pendingRelease && (
-									<span className="text-amber-600">
+									<span className="text-warning">
 										待激活 v{installation.pendingRelease.version}
 									</span>
 								)}

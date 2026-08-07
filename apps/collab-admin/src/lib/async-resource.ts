@@ -38,7 +38,7 @@ function normalizeError(error: unknown): Error {
 export function useAsyncResource<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   dependencies: DependencyList,
-  options: UseAsyncResourceOptions<T> = {},
+  options: UseAsyncResourceOptions<T> = {}
 ): UseAsyncResourceResult<T> {
   const { enabled = true } = options;
   const loaderRef = useRef(loader);
@@ -57,11 +57,11 @@ export function useAsyncResource<T>(
   useEffect(() => {
     const requestId = ++requestIdRef.current;
     if (!enabled) {
-      setState((current) => (
+      setState((current) =>
         current.status === 'idle' && current.data === null && current.error === null
           ? current
           : { status: 'idle', data: null, error: null }
-      ));
+      );
       return undefined;
     }
 
@@ -92,9 +92,10 @@ export function useAsyncResource<T>(
 
   const setData = useCallback<Dispatch<SetStateAction<T | null>>>((nextData) => {
     setState((current) => {
-      const data = typeof nextData === 'function'
-        ? (nextData as (previous: T | null) => T | null)(current.data)
-        : nextData;
+      const data =
+        typeof nextData === 'function'
+          ? (nextData as (previous: T | null) => T | null)(current.data)
+          : nextData;
       if (data === null) return { status: 'idle', data: null, error: null };
       return {
         status: isEmptyRef.current?.(data) ? 'empty' : 'ready',

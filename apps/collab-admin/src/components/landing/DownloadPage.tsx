@@ -3,7 +3,15 @@
 // 日期统一用 formatDate（与更新日志页时区一致）；签名状态数据驱动；平台卡 hover accent 线；release notes 折叠区。
 // 顶栏：返回首页 + logo。窄列居中内容。API 不可用时优雅降级。
 import { useEffect, useState } from 'react';
-import { getLatestRelease, formatSize, formatDate, PLATFORM_META, absoluteDownloadUrl, type Release, type ReleaseAsset } from '@/lib/releases';
+import {
+  getLatestRelease,
+  formatSize,
+  formatDate,
+  PLATFORM_META,
+  absoluteDownloadUrl,
+  type Release,
+  type ReleaseAsset,
+} from '@/lib/releases';
 import { renderMarkdown } from '@/lib/markdown';
 
 type Platform = keyof typeof PLATFORM_META;
@@ -57,13 +65,15 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
   }, [channel]);
 
   // 按平台去重，每个平台取第一个 asset。
-  const assetsByPlatform = (release?.assets ?? []).reduce<Record<Platform, ReleaseAsset | undefined>>(
+  const assetsByPlatform = (release?.assets ?? []).reduce<
+    Record<Platform, ReleaseAsset | undefined>
+  >(
     (acc, asset) => {
       const p = asset.platform as Platform;
       if (!acc[p] && p in PLATFORM_META) acc[p] = asset;
       return acc;
     },
-    {} as Record<Platform, ReleaseAsset | undefined>,
+    {} as Record<Platform, ReleaseAsset | undefined>
   );
 
   const platforms = Object.keys(PLATFORM_META) as Platform[];
@@ -76,7 +86,14 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
         {/* 顶栏 */}
         <header className="lf-page-topbar">
           <button onClick={onBack} className="lf-back-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             返回首页
@@ -97,21 +114,35 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
           <div className="lf-download-inner">
             <div>
               <span className="lf-section-label">download</span>
-              <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">下载 LingFang 客户端</h1>
+              <h1 className="lf-display mt-3 text-4xl sm:text-5xl font-semibold tracking-tight">
+                下载 LingFang 客户端
+              </h1>
               <p className="mt-4 text-lg" style={{ color: 'var(--lf-fg-muted)' }}>
                 最新稳定版的各平台安装包。需要提前体验测试版时，可手动切换到 beta 通道。
               </p>
-              <div className="mt-5 inline-flex rounded-lg border p-1" style={{ borderColor: 'var(--lf-border)', backgroundColor: 'var(--lf-bg-elevated)' }}>
+              <div
+                className="mt-5 inline-flex rounded-lg border p-1"
+                style={{
+                  borderColor: 'var(--lf-border)',
+                  backgroundColor: 'var(--lf-bg-elevated)',
+                }}
+              >
                 <button
                   className="rounded-md px-4 py-2 text-sm transition-colors"
-                  style={{ backgroundColor: channel === 'STABLE' ? 'var(--lf-accent)' : 'transparent', color: channel === 'STABLE' ? '#000' : 'var(--lf-fg-muted)' }}
+                  style={{
+                    backgroundColor: channel === 'STABLE' ? 'var(--lf-accent)' : 'transparent',
+                    color: channel === 'STABLE' ? '#000' : 'var(--lf-fg-muted)',
+                  }}
                   onClick={() => setChannel('STABLE')}
                 >
                   正式版
                 </button>
                 <button
                   className="rounded-md px-4 py-2 text-sm transition-colors"
-                  style={{ backgroundColor: channel === 'BETA' ? 'var(--lf-accent)' : 'transparent', color: channel === 'BETA' ? '#000' : 'var(--lf-fg-muted)' }}
+                  style={{
+                    backgroundColor: channel === 'BETA' ? 'var(--lf-accent)' : 'transparent',
+                    color: channel === 'BETA' ? '#000' : 'var(--lf-fg-muted)',
+                  }}
                   onClick={() => setChannel('BETA')}
                 >
                   beta 测试版
@@ -127,23 +158,34 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                   style={{ borderColor: 'var(--lf-border)' }}
                 >
                   <div>
-                    <div className="lf-mono text-xs uppercase tracking-wider" style={{ color: 'var(--lf-accent)' }}>
+                    <div
+                      className="lf-mono text-xs uppercase tracking-wider"
+                      style={{ color: 'var(--lf-accent)' }}
+                    >
                       {channel === 'STABLE' ? 'stable channel' : 'beta channel'}
                     </div>
                     {status === 'ready' && release ? (
                       <>
                         <div className="mt-1 flex items-baseline gap-3">
                           <span className="lf-mono text-3xl font-bold">v{release.version}</span>
-                          {release.title && <span style={{ color: 'var(--lf-fg-muted)' }}>{release.title}</span>}
+                          {release.title && (
+                            <span style={{ color: 'var(--lf-fg-muted)' }}>{release.title}</span>
+                          )}
                         </div>
                         {release.publishedAt && (
-                          <div className="lf-mono mt-1 text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
+                          <div
+                            className="lf-mono mt-1 text-xs"
+                            style={{ color: 'var(--lf-fg-subtle)' }}
+                          >
                             发布于 {formatDate(release.publishedAt)}
                           </div>
                         )}
                       </>
                     ) : status === 'loading' ? (
-                      <div className="mt-2 h-8 w-32 animate-pulse rounded" style={{ backgroundColor: 'var(--lf-bg-hover)' }} />
+                      <div
+                        className="mt-2 h-8 w-32 animate-pulse rounded"
+                        style={{ backgroundColor: 'var(--lf-bg-hover)' }}
+                      />
                     ) : (
                       <div className="mt-1">
                         <span className="lf-mono text-2xl" style={{ color: 'var(--lf-fg-muted)' }}>
@@ -187,30 +229,56 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                             aria-hidden="true"
                           />
                         )}
-                        <div className="flex items-center justify-between" style={{ color: 'var(--lf-fg-muted)' }}>
+                        <div
+                          className="flex items-center justify-between"
+                          style={{ color: 'var(--lf-fg-muted)' }}
+                        >
                           <PlatformIcon platform={platform} />
                           {available && (
                             <svg
                               className="transition-all group-hover:text-[var(--lf-accent)] group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
                               style={{ color: 'var(--lf-fg-subtle)' }}
-                              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
                             >
-                              <path d="M7 17L17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+                              <path
+                                d="M7 17L17 7M9 7h8v8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
                             </svg>
                           )}
                         </div>
                         <div className="mt-3 font-semibold">{meta.label}</div>
-                        <div className="lf-mono mt-0.5 text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
+                        <div
+                          className="lf-mono mt-0.5 text-xs"
+                          style={{ color: 'var(--lf-fg-subtle)' }}
+                        >
                           {meta.arch} · {meta.ext}
                         </div>
                         {available && asset!.sizeBytes ? (
-                          <div className="lf-mono mt-3 text-xs" style={{ color: 'var(--lf-accent)' }}>
+                          <div
+                            className="lf-mono mt-3 text-xs"
+                            style={{ color: 'var(--lf-accent)' }}
+                          >
                             {formatSize(asset!.sizeBytes)}
                           </div>
                         ) : available ? (
-                          <div className="lf-mono mt-3 text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>—</div>
+                          <div
+                            className="lf-mono mt-3 text-xs"
+                            style={{ color: 'var(--lf-fg-subtle)' }}
+                          >
+                            —
+                          </div>
                         ) : (
-                          <div className="lf-mono mt-3 text-xs" style={{ color: 'var(--lf-fg-subtle)' }}>
+                          <div
+                            className="lf-mono mt-3 text-xs"
+                            style={{ color: 'var(--lf-fg-subtle)' }}
+                          >
                             {status === 'loading' ? '加载中…' : '即将推出'}
                           </div>
                         )}
@@ -219,51 +287,72 @@ export function DownloadPage({ onBack }: { onBack: () => void }) {
                   })}
                 </div>
 
-                {status === 'ready' && release && (() => {
-                  // 完整性校验状态数据驱动：遍历 assets 检查 sha256 非空，避免文案承诺与数据不符。
-                  const assets = release.assets ?? [];
-                  const hashedCount = assets.filter((a) => a.sha256 && a.sha256.trim().length > 0).length;
-                  const hashState = hashedCount === 0 ? 'none' : hashedCount === assets.length ? 'all' : 'partial';
-                  const signText =
-                    hashState === 'all'
-                      ? '所有安装包均提供 SHA-256 校验，客户端下载后比对哈希再安装。'
-                      : hashState === 'partial'
-                        ? '部分安装包尚未登记 SHA-256，未登记产物客户端将跳过完整性校验。'
-                        : ''; // none → 隐藏该行
-                  return (
-                    <>
-                      {signText && (
-                        <p className="lf-mono mt-5 text-xs leading-relaxed" style={{ color: 'var(--lf-fg-subtle)' }}>
-                          # {signText}
-                        </p>
-                      )}
-                      {/* release notes 折叠区（复用 lib/markdown renderMarkdown），默认折叠不塞进平台卡 */}
-                      {release.notes && release.notes.trim().length > 0 && (
-                        <details className="lf-card group mt-5 overflow-hidden">
-                          <summary
-                            className="flex cursor-pointer list-none items-center justify-between px-5 py-3 text-sm font-medium transition-colors hover:bg-[var(--lf-bg-hover)]"
-                            style={{ color: 'var(--lf-fg)' }}
+                {status === 'ready' &&
+                  release &&
+                  (() => {
+                    // 完整性校验状态数据驱动：遍历 assets 检查 sha256 非空，避免文案承诺与数据不符。
+                    const assets = release.assets ?? [];
+                    const hashedCount = assets.filter(
+                      (a) => a.sha256 && a.sha256.trim().length > 0
+                    ).length;
+                    const hashState =
+                      hashedCount === 0
+                        ? 'none'
+                        : hashedCount === assets.length
+                          ? 'all'
+                          : 'partial';
+                    const signText =
+                      hashState === 'all'
+                        ? '所有安装包均提供 SHA-256 校验，客户端下载后比对哈希再安装。'
+                        : hashState === 'partial'
+                          ? '部分安装包尚未登记 SHA-256，未登记产物客户端将跳过完整性校验。'
+                          : ''; // none → 隐藏该行
+                    return (
+                      <>
+                        {signText && (
+                          <p
+                            className="lf-mono mt-5 text-xs leading-relaxed"
+                            style={{ color: 'var(--lf-fg-subtle)' }}
                           >
-                            <span>版本更新说明</span>
-                            <svg
-                              className="shrink-0 transition-transform group-open:rotate-90"
-                              style={{ color: 'var(--lf-fg-subtle)' }}
-                              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                            # {signText}
+                          </p>
+                        )}
+                        {/* release notes 折叠区（复用 lib/markdown renderMarkdown），默认折叠不塞进平台卡 */}
+                        {release.notes && release.notes.trim().length > 0 && (
+                          <details className="lf-card group mt-5 overflow-hidden">
+                            <summary
+                              className="flex cursor-pointer list-none items-center justify-between px-5 py-3 text-sm font-medium transition-colors hover:bg-[var(--lf-bg-hover)]"
+                              style={{ color: 'var(--lf-fg)' }}
                             >
-                              <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          </summary>
-                          <div
-                            className="border-t px-5 py-4"
-                            style={{ borderColor: 'var(--lf-border)' }}
-                          >
-                            <div className="space-y-1.5">{renderMarkdown(release.notes)}</div>
-                          </div>
-                        </details>
-                      )}
-                    </>
-                  );
-                })()}
+                              <span>版本更新说明</span>
+                              <svg
+                                className="shrink-0 transition-transform group-open:rotate-90"
+                                style={{ color: 'var(--lf-fg-subtle)' }}
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <path
+                                  d="M9 6l6 6-6 6"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </summary>
+                            <div
+                              className="border-t px-5 py-4"
+                              style={{ borderColor: 'var(--lf-border)' }}
+                            >
+                              <div className="space-y-1.5">{renderMarkdown(release.notes)}</div>
+                            </div>
+                          </details>
+                        )}
+                      </>
+                    );
+                  })()}
               </div>
             </div>
           </div>

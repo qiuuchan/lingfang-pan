@@ -28,15 +28,18 @@ test('preview session is short-lived opaque handshake data without auth tokens',
     action_contract_version: '1.0.0',
     action_surface_sha256: 'b'.repeat(64),
   };
-  expect(WebCloudTrialCreateRequest.parse({
+  expect(
+    WebCloudTrialCreateRequest.parse({
       release_id: target.release_id,
       release_sha256: target.sha256,
       action_contract_version: target.action_contract_version,
       action_surface_sha256: target.action_surface_sha256,
       input: {},
       request_idempotency_key: 'request-1',
-    }).request_idempotency_key).toBe('request-1');
-  expect(WebCloudTrialProjection.parse({
+    }).request_idempotency_key
+  ).toBe('request-1');
+  expect(
+    WebCloudTrialProjection.parse({
       invocation_id: '33333333-3333-4333-8333-333333333333',
       status: 'AUTHORIZED',
       target,
@@ -52,15 +55,18 @@ test('preview session is short-lived opaque handshake data without auth tokens',
       created_at: '2026-07-16T00:00:00.000Z',
       started_at: null,
       completed_at: null,
-    }).status).toBe('AUTHORIZED');
-  expect(WebCloudPreviewAction.parse({
+    }).status
+  ).toBe('AUTHORIZED');
+  expect(
+    WebCloudPreviewAction.parse({
       action_id: 'image.generate',
       name: '生成图片',
       description: '',
       action_contract_version: '1.0.0',
       action_surface_sha256: 'b'.repeat(64),
       input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
-    }).action_id).toBe('image.generate');
+    }).action_id
+  ).toBe('image.generate');
 });
 import { inferMarketplaceCategory } from './marketplace-discovery.ts';
 

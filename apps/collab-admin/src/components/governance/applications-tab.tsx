@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { CheckCircleIcon, FileTextIcon, Loader2Icon, RefreshCwIcon, SearchIcon, XCircleIcon } from 'lucide-react';
+import {
+  CheckCircleIcon,
+  FileTextIcon,
+  Loader2Icon,
+  RefreshCwIcon,
+  SearchIcon,
+  XCircleIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { AsyncResource } from '@/components/ui/async-resource';
 import { Button } from '@/components/ui/button';
@@ -14,8 +21,22 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableCellAction, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableCellAction,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { InfoGrid, Section, StatusBadge } from '@/components/shared';
 import {
@@ -24,10 +45,7 @@ import {
   loadApplications,
   rejectApplication,
 } from '@/components/governance/api';
-import type {
-  ApplicationStatus,
-  TeamAdminApplicationSummary,
-} from '@/components/governance/types';
+import type { ApplicationStatus, TeamAdminApplicationSummary } from '@/components/governance/types';
 import { useAsyncResource } from '@/lib/async-resource';
 import { useGuardedAction } from '@/lib/helpers';
 import { formatTime } from '@/lib/types';
@@ -43,18 +61,27 @@ export function ApplicationsTab({ initialStatus }: { initialStatus?: Application
   const [active, setActive] = useState<TeamAdminApplicationSummary | null>(null);
 
   const applications = useAsyncResource(
-    (signal) => loadApplications({
-      page,
-      pageSize,
-      q: search || undefined,
-      status: status === 'ALL' ? undefined : status,
-    }, signal),
+    (signal) =>
+      loadApplications(
+        {
+          page,
+          pageSize,
+          q: search || undefined,
+          status: status === 'ALL' ? undefined : status,
+        },
+        signal
+      ),
     [page, pageSize, search, status],
-    { isEmpty: (result) => result.items.length === 0 },
+    { isEmpty: (result) => result.items.length === 0 }
   );
 
   useEffect(() => {
-    if (!applications.data || applications.data.page !== page || applications.data.pageSize !== pageSize) return;
+    if (
+      !applications.data ||
+      applications.data.page !== page ||
+      applications.data.pageSize !== pageSize
+    )
+      return;
     const totalPages = Math.max(1, Math.ceil(applications.data.total / pageSize));
     if (page > totalPages) setPage(totalPages);
   }, [applications.data, page, pageSize]);
@@ -69,15 +96,24 @@ export function ApplicationsTab({ initialStatus }: { initialStatus?: Application
     <Section
       title="团队管理员申请"
       description="审核团队管理员资格与建团申请。"
-      actions={(
-        <Button type="button" variant="outline" size="sm" onClick={applications.reload} disabled={applications.status === 'loading'}>
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={applications.reload}
+          disabled={applications.status === 'loading'}
+        >
           <RefreshCwIcon className={applications.status === 'loading' ? 'animate-spin' : ''} />
           刷新
         </Button>
-      )}
+      }
     >
       <div className="space-y-4">
-        <form className="grid gap-2 md:grid-cols-[minmax(16rem,1fr)_12rem_auto]" onSubmit={submitSearch}>
+        <form
+          className="grid gap-2 md:grid-cols-[minmax(16rem,1fr)_12rem_auto]"
+          onSubmit={submitSearch}
+        >
           <div className="relative min-w-0">
             <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -94,7 +130,9 @@ export function ApplicationsTab({ initialStatus }: { initialStatus?: Application
               setPage(1);
             }}
           >
-            <SelectTrigger aria-label="申请状态"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="申请状态">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部申请状态</SelectItem>
               <SelectItem value="PENDING">待审批</SelectItem>
@@ -102,19 +140,22 @@ export function ApplicationsTab({ initialStatus }: { initialStatus?: Application
               <SelectItem value="REJECTED">已驳回</SelectItem>
             </SelectContent>
           </Select>
-          <Button type="submit"><SearchIcon />查询</Button>
+          <Button type="submit">
+            <SearchIcon />
+            查询
+          </Button>
         </form>
 
         <AsyncResource
           status={applications.status}
           error={applications.error}
           retry={applications.reload}
-          emptyFallback={(
+          emptyFallback={
             <div className="flex min-h-40 flex-col items-center justify-center gap-2 border-y py-8 text-sm text-muted-foreground">
               <FileTextIcon className="size-6 opacity-60" />
               没有符合条件的申请
             </div>
-          )}
+          }
         >
           {applications.data && (
             <>
@@ -138,10 +179,14 @@ export function ApplicationsTab({ initialStatus }: { initialStatus?: Application
                         >
                           {application.user.displayName || application.user.email}
                         </TableCellAction>
-                        <div className="mt-0.5 max-w-64 truncate text-xs text-muted-foreground">{application.user.email}</div>
+                        <div className="mt-0.5 max-w-64 truncate text-xs text-muted-foreground">
+                          {application.user.email}
+                        </div>
                       </TableCell>
                       <TableCell className="font-medium">{application.teamName}</TableCell>
-                      <TableCell><StatusBadge value={application.status} /></TableCell>
+                      <TableCell>
+                        <StatusBadge value={application.status} />
+                      </TableCell>
                       <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
                         {formatTime(application.createdAt)}
                       </TableCell>
@@ -195,7 +240,7 @@ function ApplicationSheet({
   const detail = useAsyncResource(
     (signal) => loadApplication(applicationId, signal),
     [applicationId],
-    { enabled: open && Boolean(applicationId) },
+    { enabled: open && Boolean(applicationId) }
   );
   const application = detail.data?.application;
 
@@ -253,31 +298,42 @@ function ApplicationSheet({
         title={summary?.teamName ?? '申请详情'}
         description={summary?.user.email}
         size="lg"
-        footer={application?.status === 'PENDING' ? (
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button ref={rejectTriggerRef} type="button" variant="outline" onClick={() => setRejectOpen(true)} disabled={busy}>
-              <XCircleIcon />驳回
-            </Button>
-            <Button type="button" onClick={() => void approve()} disabled={busy}>
-              {busy ? <Loader2Icon className="animate-spin" /> : <CheckCircleIcon />}
-              通过申请
-            </Button>
-          </div>
-        ) : undefined}
+        footer={
+          application?.status === 'PENDING' ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                ref={rejectTriggerRef}
+                type="button"
+                variant="outline"
+                onClick={() => setRejectOpen(true)}
+                disabled={busy}
+              >
+                <XCircleIcon />
+                驳回
+              </Button>
+              <Button type="button" onClick={() => void approve()} disabled={busy}>
+                {busy ? <Loader2Icon className="animate-spin" /> : <CheckCircleIcon />}
+                通过申请
+              </Button>
+            </div>
+          ) : undefined
+        }
       >
         <AsyncResource status={detail.status} error={detail.error} retry={detail.reload}>
           {application && (
             <div className="space-y-5">
               <section className="space-y-2">
                 <h3 className="text-sm font-semibold">申请概览</h3>
-                <InfoGrid items={[
-                  ['申请人', `${application.user.displayName} (${application.user.email})`],
-                  ['团队名称', application.teamName],
-                  ['状态', <StatusBadge value={application.status} />],
-                  ['提交时间', formatTime(application.createdAt)],
-                  ['处理时间', formatTime(application.reviewedAt)],
-                  ['处理人', application.reviewedBy?.email || '—'],
-                ]} />
+                <InfoGrid
+                  items={[
+                    ['申请人', `${application.user.displayName} (${application.user.email})`],
+                    ['团队名称', application.teamName],
+                    ['状态', <StatusBadge value={application.status} />],
+                    ['提交时间', formatTime(application.createdAt)],
+                    ['处理时间', formatTime(application.reviewedAt)],
+                    ['处理人', application.reviewedBy?.email || '—'],
+                  ]}
+                />
               </section>
               <section className="space-y-2 border-t pt-5">
                 <h3 className="text-sm font-semibold">申请理由</h3>
@@ -288,7 +344,9 @@ function ApplicationSheet({
               {application.reviewReason && (
                 <section className="space-y-2 border-t pt-5">
                   <h3 className="text-sm font-semibold">处理说明</h3>
-                  <p className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">{application.reviewReason}</p>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                    {application.reviewReason}
+                  </p>
                 </section>
               )}
             </div>
@@ -316,7 +374,9 @@ function ApplicationSheet({
         >
           <DialogHeader>
             <DialogTitle>驳回申请</DialogTitle>
-            <DialogDescription>填写未通过原因。失败时内容会保留，便于修正后重试。</DialogDescription>
+            <DialogDescription>
+              填写未通过原因。失败时内容会保留，便于修正后重试。
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
             <Textarea
@@ -341,7 +401,12 @@ function ApplicationSheet({
             >
               取消
             </Button>
-            <Button type="button" variant="destructive" onClick={() => void reject()} disabled={busy || !reason.trim()}>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void reject()}
+              disabled={busy || !reason.trim()}
+            >
               {busy && <Loader2Icon className="animate-spin" />}
               确认驳回
             </Button>

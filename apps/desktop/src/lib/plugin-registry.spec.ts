@@ -19,9 +19,8 @@ vi.mock('@/lib/api', () => ({
   apiBase: vi.fn(() => 'http://test.local'),
   getAuthToken: vi.fn(() => 'token'),
   tauriInvoke: tauriInvokeMock,
-  errorMessage: (caught: unknown, fallback = '') => (
-    typeof caught === 'string' ? caught : caught instanceof Error ? caught.message : fallback
-  ),
+  errorMessage: (caught: unknown, fallback = '') =>
+    typeof caught === 'string' ? caught : caught instanceof Error ? caught.message : fallback,
 }));
 
 import {
@@ -83,12 +82,17 @@ describe('pending installation bridge', () => {
   beforeEach(() => {
     tauriInvokeMock.mockReset();
     apiMock.mockReset();
-    vi.stubGlobal('CustomEvent', class {
-      constructor(public type: string) {}
-    });
+    vi.stubGlobal(
+      'CustomEvent',
+      class {
+        constructor(public type: string) {}
+      }
+    );
     vi.stubGlobal('window', { dispatchEvent: vi.fn() });
   });
-  afterEach(() => { vi.unstubAllGlobals(); });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it('client 和 cloud 都必须等 Runner 成功边界后激活 pending', () => {
     expect(requiresRunnerActivation('client')).toBe(true);
@@ -198,14 +202,26 @@ describe('registry management api', () => {
       ['/api/plugin-registry/manage'],
       ['/api/plugin-packages/package%2Fid'],
       ['/api/plugin-releases/release%2Fid'],
-      ['/api/plugin-releases/release%2Fid/submit-marketplace', { method: 'POST', body: { priceCents: 990 } }],
-      ['/api/plugin-releases/release%2Fid/withdraw-marketplace', { method: 'POST', body: { reason: 'wait' } }],
-      ['/api/plugin-packages/package%2Fid/status', { method: 'PATCH', body: { status: 'ARCHIVED' } }],
+      [
+        '/api/plugin-releases/release%2Fid/submit-marketplace',
+        { method: 'POST', body: { priceCents: 990 } },
+      ],
+      [
+        '/api/plugin-releases/release%2Fid/withdraw-marketplace',
+        { method: 'POST', body: { reason: 'wait' } },
+      ],
+      [
+        '/api/plugin-packages/package%2Fid/status',
+        { method: 'PATCH', body: { status: 'ARCHIVED' } },
+      ],
       ['/api/plugin-releases/release%2Fid/status', { method: 'PATCH', body: { status: 'YANKED' } }],
-      ['/api/plugin-packages/package%2Fid/marketplace-status', {
-        method: 'PATCH',
-        body: { status: 'DELISTED', reason: 'owner request' },
-      }],
+      [
+        '/api/plugin-packages/package%2Fid/marketplace-status',
+        {
+          method: 'PATCH',
+          body: { status: 'DELISTED', reason: 'owner request' },
+        },
+      ],
     ]);
   });
 
@@ -220,17 +236,24 @@ describe('registry management api', () => {
   });
 
   it('rejects a missing or legacy price token before purchase', async () => {
-    await expect(buyMarketplacePackage('package-1', 'base_old')).rejects.toThrow('市场价格版本无效');
+    await expect(buyMarketplacePackage('package-1', 'base_old')).rejects.toThrow(
+      '市场价格版本无效'
+    );
     expect(apiMock).not.toHaveBeenCalled();
   });
 
   it('loads the exact owner quality snapshot and submits an appeal through the shared api boundary', async () => {
-    apiMock.mockResolvedValueOnce({ packageId: 'package/id', snapshot: null }).mockResolvedValueOnce({ ticket: { id: 'ticket-1' } });
+    apiMock
+      .mockResolvedValueOnce({ packageId: 'package/id', snapshot: null })
+      .mockResolvedValueOnce({ ticket: { id: 'ticket-1' } });
     await getMarketplaceOwnerQuality('package/id');
     await submitMarketplaceQualityAppeal('package/id', '快照数据异常');
     expect(apiMock.mock.calls).toEqual([
       ['/api/plugin-packages/package%2Fid/quality'],
-      ['/api/plugin-packages/package%2Fid/quality-appeals', { method: 'POST', body: { body: '快照数据异常' } }],
+      [
+        '/api/plugin-packages/package%2Fid/quality-appeals',
+        { method: 'POST', body: { body: '快照数据异常' } },
+      ],
     ]);
     apiMock.mockReset();
   });
@@ -334,7 +357,11 @@ describe('binary workspace round trip', () => {
 
   it('loads tagged binary files into the draft plugin unchanged', async () => {
     tauriInvokeMock.mockResolvedValueOnce([
-      { path: 'manifest.json', content: JSON.stringify({ description: 'demo', entry: 'ui/index.html' }), binary: false },
+      {
+        path: 'manifest.json',
+        content: JSON.stringify({ description: 'demo', entry: 'ui/index.html' }),
+        binary: false,
+      },
       { path: 'ui/index.html', content: '<main>demo</main>', binary: false },
       { path: 'assets/logo.png', content: 'AP8DBA==', binary: true },
     ]);
@@ -344,8 +371,15 @@ describe('binary workspace round trip', () => {
     expect(tauriInvokeMock).toHaveBeenCalledWith('read_draft_workspace_files', {
       workspaceId: workspace.workspaceId,
     });
-    expect(plugin.files).toContainEqual({ path: 'assets/logo.png', content: 'AP8DBA==', binary: true });
-    expect(plugin._meta).toMatchObject({ sourceKind: 'EXTERNAL_TOOL', sourceLabel: 'Cursor workspace' });
+    expect(plugin.files).toContainEqual({
+      path: 'assets/logo.png',
+      content: 'AP8DBA==',
+      binary: true,
+    });
+    expect(plugin._meta).toMatchObject({
+      sourceKind: 'EXTERNAL_TOOL',
+      sourceLabel: 'Cursor workspace',
+    });
   });
 
   it('new creator workspaces get explicit release provenance defaults', async () => {
@@ -375,28 +409,118 @@ describe('binary workspace round trip', () => {
   });
 
   it('creates a separate workflow draft for upgrade adoption and never mutates the release API', async () => {
-    const currentTarget = { package_id: 'package-image', release_id: 'release-image-1', sha256: 'a'.repeat(64), action_id: 'render', action_contract_version: '1.0.0', action_surface_sha256: 'b'.repeat(64) };
-    const definition = { definition_version: '1', input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false }, output_schema: { type: 'object', properties: {}, required: [], additionalProperties: false }, nodes: [{ node_id: 'image', declared_version_range: '^1.0.0', target: currentTarget, depends_on: [], input_bindings: [], retry_limit: 0 }], output_bindings: [] };
+    const currentTarget = {
+      package_id: 'package-image',
+      release_id: 'release-image-1',
+      sha256: 'a'.repeat(64),
+      action_id: 'render',
+      action_contract_version: '1.0.0',
+      action_surface_sha256: 'b'.repeat(64),
+    };
+    const definition = {
+      definition_version: '1',
+      input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      output_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      nodes: [
+        {
+          node_id: 'image',
+          declared_version_range: '^1.0.0',
+          target: currentTarget,
+          depends_on: [],
+          input_bindings: [],
+          retry_limit: 0,
+        },
+      ],
+      output_bindings: [],
+    };
     const sourceFiles = [
-      { path: 'manifest.json', content: JSON.stringify({ id: 'workflow.demo', name: 'Workflow', version: '1.0.0', runtime_type: 'workflow', entry: 'workflow.json' }), binary: false },
+      {
+        path: 'manifest.json',
+        content: JSON.stringify({
+          id: 'workflow.demo',
+          name: 'Workflow',
+          version: '1.0.0',
+          runtime_type: 'workflow',
+          entry: 'workflow.json',
+        }),
+        binary: false,
+      },
       { path: 'workflow.json', content: JSON.stringify(definition), binary: false },
     ];
-    const upgradedWorkspace = { ...workspace, currentVersion: '1.0.1', runtime: 'workflow' as const };
+    const upgradedWorkspace = {
+      ...workspace,
+      currentVersion: '1.0.1',
+      runtime: 'workflow' as const,
+    };
     tauriInvokeMock.mockImplementation(async (command: string) => {
       if (command === 'create_draft_workspace') return upgradedWorkspace;
       if (command === 'list_draft_workspaces') return [upgradedWorkspace];
       if (command === 'sync_draft_workspace_metadata') return upgradedWorkspace;
-      if (command === 'read_draft_workspace_files') return sourceFiles.map((file) => file.path === 'manifest.json' ? { ...file, content: JSON.stringify({ id: 'workflow.demo', name: 'Workflow', version: '1.0.1', runtime_type: 'workflow', entry: 'workflow.json' }) } : file);
+      if (command === 'read_draft_workspace_files')
+        return sourceFiles.map((file) =>
+          file.path === 'manifest.json'
+            ? {
+                ...file,
+                content: JSON.stringify({
+                  id: 'workflow.demo',
+                  name: 'Workflow',
+                  version: '1.0.1',
+                  runtime_type: 'workflow',
+                  entry: 'workflow.json',
+                }),
+              }
+            : file
+        );
       return undefined;
     });
 
-    const draft = await createWorkflowUpgradeDraft({ id: 'workflow-release', name: 'Workflow', version: '1.0.0', entry: 'workflow.json', runtime_type: 'workflow', releaseId: 'workflow-release', releaseSha256: 'f'.repeat(64), files: sourceFiles }, [{ node_id: 'image', declared_version_range: '^1.0.0', current_version: '1.0.0', current_target: currentTarget, suggested_version: '1.2.0', suggested_target: { ...currentTarget, release_id: 'release-image-2', sha256: 'c'.repeat(64), action_surface_sha256: 'd'.repeat(64) }, reason: 'compatible' }]);
+    const draft = await createWorkflowUpgradeDraft(
+      {
+        id: 'workflow-release',
+        name: 'Workflow',
+        version: '1.0.0',
+        entry: 'workflow.json',
+        runtime_type: 'workflow',
+        releaseId: 'workflow-release',
+        releaseSha256: 'f'.repeat(64),
+        files: sourceFiles,
+      },
+      [
+        {
+          node_id: 'image',
+          declared_version_range: '^1.0.0',
+          current_version: '1.0.0',
+          current_target: currentTarget,
+          suggested_version: '1.2.0',
+          suggested_target: {
+            ...currentTarget,
+            release_id: 'release-image-2',
+            sha256: 'c'.repeat(64),
+            action_surface_sha256: 'd'.repeat(64),
+          },
+          reason: 'compatible',
+        },
+      ]
+    );
 
     expect(draft.draft).toBe(true);
-    expect(tauriInvokeMock).toHaveBeenCalledWith('create_draft_workspace', { input: expect.objectContaining({ manifestId: 'workflow.demo', version: '1.0.1', runtime: 'workflow' }) });
-    const writeCall = tauriInvokeMock.mock.calls.find(([command]) => command === 'write_plugin_files');
-    const writtenWorkflow = writeCall?.[1]?.files.find((file: { path: string }) => file.path === 'workflow.json');
-    expect(JSON.parse(writtenWorkflow.content).nodes[0]).toMatchObject({ declared_version_range: '^1.0.0', target: { release_id: 'release-image-2' } });
+    expect(tauriInvokeMock).toHaveBeenCalledWith('create_draft_workspace', {
+      input: expect.objectContaining({
+        manifestId: 'workflow.demo',
+        version: '1.0.1',
+        runtime: 'workflow',
+      }),
+    });
+    const writeCall = tauriInvokeMock.mock.calls.find(
+      ([command]) => command === 'write_plugin_files'
+    );
+    const writtenWorkflow = writeCall?.[1]?.files.find(
+      (file: { path: string }) => file.path === 'workflow.json'
+    );
+    expect(JSON.parse(writtenWorkflow.content).nodes[0]).toMatchObject({
+      declared_version_range: '^1.0.0',
+      target: { release_id: 'release-image-2' },
+    });
     expect(apiMock).not.toHaveBeenCalled();
   });
 
@@ -444,12 +568,10 @@ describe('marketplace partial success orchestration', () => {
 
   it('retains the immutable team release and retries only marketplace submission', async () => {
     const publishTeam = vi.fn().mockResolvedValue(publishResult);
-    apiMock
-      .mockRejectedValueOnce(new Error('review service unavailable'))
-      .mockResolvedValueOnce({
-        package: publishResult.package,
-        releases: [{ ...publishResult.release, marketReviewStatus: 'DRAFT' }],
-      });
+    apiMock.mockRejectedValueOnce(new Error('review service unavailable')).mockResolvedValueOnce({
+      package: publishResult.package,
+      releases: [{ ...publishResult.release, marketReviewStatus: 'DRAFT' }],
+    });
     const phases: string[] = [];
 
     const failed = await publishPluginRelease({
@@ -469,7 +591,7 @@ describe('marketplace partial success orchestration', () => {
     expect(phases).toEqual(['uploading', 'team_published', 'submitting_market', 'market_failed']);
     expect(apiMock).toHaveBeenCalledWith(
       `/api/plugin-releases/${publishResult.release.id}/submit-marketplace`,
-      { method: 'POST', body: { priceCents: 500 } },
+      { method: 'POST', body: { priceCents: 500 } }
     );
 
     apiMock.mockResolvedValueOnce({
@@ -482,7 +604,7 @@ describe('marketplace partial success orchestration', () => {
     expect(publishTeam).toHaveBeenCalledTimes(1);
     expect(apiMock).toHaveBeenLastCalledWith(
       `/api/plugin-releases/${publishResult.release.id}/submit-marketplace`,
-      { method: 'POST', body: { priceCents: 500 } },
+      { method: 'POST', body: { priceCents: 500 } }
     );
     expect(apiMock).toHaveBeenCalledTimes(3);
   });
@@ -507,9 +629,11 @@ describe('marketplace partial success orchestration', () => {
   });
 
   it('normalizes source labels without carrying an absolute local path', () => {
-    expect(normalizePluginProvenance({
-      sourceKind: 'EXTERNAL_TOOL',
-      sourceLabel: '/Users/demo/private-plugin',
-    })).toEqual({ sourceKind: 'EXTERNAL_TOOL', sourceLabel: '外部开发工具' });
+    expect(
+      normalizePluginProvenance({
+        sourceKind: 'EXTERNAL_TOOL',
+        sourceLabel: '/Users/demo/private-plugin',
+      })
+    ).toEqual({ sourceKind: 'EXTERNAL_TOOL', sourceLabel: '外部开发工具' });
   });
 });

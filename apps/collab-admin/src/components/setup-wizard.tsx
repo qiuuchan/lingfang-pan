@@ -82,13 +82,30 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
 
             <div className="mt-6 space-y-4">
               <Field label="管理员邮箱">
-                <TextInput value={email} onChange={setEmail} onSubmit={submit} autoComplete="username" />
+                <TextInput
+                  value={email}
+                  onChange={setEmail}
+                  onSubmit={submit}
+                  autoComplete="username"
+                />
               </Field>
               <Field label="密码（至少 8 位）">
-                <TextInput type="password" value={password} onChange={setPassword} onSubmit={submit} autoComplete="new-password" />
+                <TextInput
+                  type="password"
+                  value={password}
+                  onChange={setPassword}
+                  onSubmit={submit}
+                  autoComplete="new-password"
+                />
               </Field>
               <Field label="确认密码">
-                <TextInput type="password" value={confirmPassword} onChange={setConfirmPassword} onSubmit={submit} autoComplete="new-password" />
+                <TextInput
+                  type="password"
+                  value={confirmPassword}
+                  onChange={setConfirmPassword}
+                  onSubmit={submit}
+                  autoComplete="new-password"
+                />
               </Field>
               <Field label="显示名称（可选）">
                 <TextInput value={displayName} onChange={setDisplayName} onSubmit={submit} />

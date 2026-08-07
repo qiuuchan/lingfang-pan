@@ -132,7 +132,15 @@ export const ROLE_CODE_REGEX = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export const CreateRoleRequest = z.object({
   name: z.string().min(1).max(64),
-  code: z.union([z.string().regex(ROLE_CODE_REGEX, '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头').max(64), z.null()]).optional(),
+  code: z
+    .union([
+      z
+        .string()
+        .regex(ROLE_CODE_REGEX, '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头')
+        .max(64),
+      z.null(),
+    ])
+    .optional(),
   description: z.string().max(255).optional(),
   permissions: z.array(z.string().min(1)).default([]),
 });
@@ -140,7 +148,15 @@ export type CreateRoleRequest = z.infer<typeof CreateRoleRequest>;
 
 export const UpdateRoleRequest = z.object({
   name: z.string().min(1).max(64).optional(),
-  code: z.union([z.string().regex(ROLE_CODE_REGEX, '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头').max(64), z.null()]).optional(),
+  code: z
+    .union([
+      z
+        .string()
+        .regex(ROLE_CODE_REGEX, '编码只能包含小写字母、数字、下划线、连字符，须以字母或数字开头')
+        .max(64),
+      z.null(),
+    ])
+    .optional(),
   description: z.string().max(255).optional(),
   permissions: z.array(z.string().min(1)).optional(),
 });

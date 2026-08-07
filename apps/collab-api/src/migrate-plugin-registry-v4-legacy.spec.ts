@@ -3,10 +3,27 @@ import { loadLegacyPlugins } from './migrate-plugin-registry-v4-legacy';
 
 function plugin() {
   return {
-    id: 'plugin-1', name: 'Legacy', description: '', version: '1.0.0', entry: 'index.js',
-    runtimeType: 'NODEJS', visibility: 'TEAM', teamId: 'team-owner', authorUserId: 'user-owner',
-    files: [], manifest: {}, capabilities: [], reviewStatus: 'APPROVED', reviewReason: '', reviewedById: null,
-    reviewedAt: null, marketplace: true, priceCents: 100, installCount: 1, ratingCount: 1, ratingSum: 5,
+    id: 'plugin-1',
+    name: 'Legacy',
+    description: '',
+    version: '1.0.0',
+    entry: 'index.js',
+    runtimeType: 'NODEJS',
+    visibility: 'TEAM',
+    teamId: 'team-owner',
+    authorUserId: 'user-owner',
+    files: [],
+    manifest: {},
+    capabilities: [],
+    reviewStatus: 'APPROVED',
+    reviewReason: '',
+    reviewedById: null,
+    reviewedAt: null,
+    marketplace: true,
+    priceCents: 100,
+    installCount: 1,
+    ratingCount: 1,
+    ratingSum: 5,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
   };
 }
@@ -47,6 +64,8 @@ describe('loadLegacyPlugins', () => {
 
   it('fails closed when a legacy relation points to a missing plugin', async () => {
     const prisma = rawClient([[], [{ id: 'purchase-1', pluginId: 'missing' }], [], [], [], []]);
-    await expect(loadLegacyPlugins(prisma as never, 'postgresql')).rejects.toThrow('references missing Plugin missing');
+    await expect(loadLegacyPlugins(prisma as never, 'postgresql')).rejects.toThrow(
+      'references missing Plugin missing'
+    );
   });
 });

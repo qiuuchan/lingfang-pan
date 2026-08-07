@@ -25,27 +25,45 @@ async function bundledFixture(directory: string) {
     }
   };
   await walk(root);
-  const manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as Record<string, unknown>;
-  const files = await Promise.all(paths
-    .filter((path) => !path.endsWith('manifest.json'))
-    .map(async (path) => ({ path: relative(root, path).replaceAll('\\', '/'), content: await readFile(path, 'utf8') })));
+  const manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  const files = await Promise.all(
+    paths
+      .filter((path) => !path.endsWith('manifest.json'))
+      .map(async (path) => ({
+        path: relative(root, path).replaceAll('\\', '/'),
+        content: await readFile(path, 'utf8'),
+      }))
+  );
   return { manifest, files };
 }
 
 describe('plugin AI policy', () => {
   it('accepts plugin-sdk chat and ordinary network code when capability is declared', () => {
-    const result = policy([{
-      path: 'ui/index.js',
-      content: `const weather = await fetch('https://weather.example/api');\nawait sdk.llm.chat({ messages, model: 'fast' });`,
-    }], ['llm.chat', 'net.fetch']);
+    const result = policy(
+      [
+        {
+          path: 'ui/index.js',
+          content: `const weather = await fetch('https://weather.example/api');\nawait sdk.llm.chat({ messages, model: 'fast' });`,
+        },
+      ],
+      ['llm.chat', 'net.fetch']
+    );
     expect(result).toMatchObject({ ok: true, requiredCapabilities: ['llm.chat'] });
   });
 
   it('does not reject an ordinary business provider field without AI context', () => {
-    const result = policy([{
-      path: 'index.js',
-      content: `const provider = 'weather-station';\nawait fetch('https://weather.example/forecast');`,
-    }], ['net.fetch']);
+    const result = policy(
+      [
+        {
+          path: 'index.js',
+          content: `const provider = 'weather-station';\nawait fetch('https://weather.example/forecast');`,
+        },
+      ],
+      ['net.fetch']
+    );
     expect(result.ok).toBe(true);
   });
 
@@ -76,77 +94,102 @@ describe('plugin AI policy', () => {
       },
       files: [{ path: 'index.js', content: 'console.log("ok")' }],
     });
-    expect(result.diagnostics.map((item) => item.code)).toEqual(expect.arrayContaining([
-      'ai.endpoint.third_party', 'ai.config.forbidden',
-    ]));
+    expect(result.diagnostics.map((item) => item.code)).toEqual(
+      expect.arrayContaining(['ai.endpoint.third_party', 'ai.config.forbidden'])
+    );
   });
 
   it('accepts the standard OpenAI client only with both injected bridge values', () => {
-    const result = policy([
-      { path: 'requirements.txt', content: 'openai==2.0.0' },
-      {
-        path: 'main.py',
-        content: [
-          'import os',
-          'from openai import OpenAI',
-          `client = OpenAI(base_url=os.environ['LINGFANG_PLUGIN_BRIDGE_URL'] + '/v1', api_key=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN'])`,
-          `client.chat.completions.create(model='premium', messages=[])`,
-        ].join('\n'),
-      },
-    ], ['llm.chat']);
+    const result = policy(
+      [
+        { path: 'requirements.txt', content: 'openai==2.0.0' },
+        {
+          path: 'main.py',
+          content: [
+            'import os',
+            'from openai import OpenAI',
+            `client = OpenAI(base_url=os.environ['LINGFANG_PLUGIN_BRIDGE_URL'] + '/v1', api_key=os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN'])`,
+            `client.chat.completions.create(model='premium', messages=[])`,
+          ].join('\n'),
+        },
+      ],
+      ['llm.chat']
+    );
     expect(result.ok).toBe(true);
   });
 
   it('allows empty missing-env defaults but rejects non-empty custom fallbacks', () => {
-    const allowed = policy([{
-      path: 'main.py',
-      content: [
-        `url = os.environ.get('LINGFANG_PLUGIN_BRIDGE_URL', '')`,
-        `token = os.environ.get('LINGFANG_PLUGIN_BRIDGE_TOKEN', '')`,
-      ].join('\n'),
-    }]);
-    expect(allowed.ok).toBe(true);
-    const rejected = policy([{
-      path: 'main.py',
-      content: [
-        `url = os.environ.get('LINGFANG_PLUGIN_BRIDGE_URL', 'https://custom.example')`,
-        `token = os.environ.get('LINGFANG_PLUGIN_BRIDGE_TOKEN', '')`,
-      ].join('\n'),
-    }]);
-    expect(rejected.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.bridge.custom' }));
-  });
-
-  it('rejects a default OpenAI client even when unused bridge env names appear', () => {
-    const result = policy([
-      { path: 'requirements.txt', content: 'openai==2.0.0' },
+    const allowed = policy([
       {
         path: 'main.py',
         content: [
-          'from openai import OpenAI',
-          `url = os.environ['LINGFANG_PLUGIN_BRIDGE_URL']`,
-          `token = os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN']`,
-          'client = OpenAI()',
-          `client.chat.completions.create(model='fast', messages=[])`,
+          `url = os.environ.get('LINGFANG_PLUGIN_BRIDGE_URL', '')`,
+          `token = os.environ.get('LINGFANG_PLUGIN_BRIDGE_TOKEN', '')`,
         ].join('\n'),
       },
-    ], ['llm.chat']);
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.bridge.custom' }));
+    ]);
+    expect(allowed.ok).toBe(true);
+    const rejected = policy([
+      {
+        path: 'main.py',
+        content: [
+          `url = os.environ.get('LINGFANG_PLUGIN_BRIDGE_URL', 'https://custom.example')`,
+          `token = os.environ.get('LINGFANG_PLUGIN_BRIDGE_TOKEN', '')`,
+        ].join('\n'),
+      },
+    ]);
+    expect(rejected.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.bridge.custom' })
+    );
+  });
+
+  it('rejects a default OpenAI client even when unused bridge env names appear', () => {
+    const result = policy(
+      [
+        { path: 'requirements.txt', content: 'openai==2.0.0' },
+        {
+          path: 'main.py',
+          content: [
+            'from openai import OpenAI',
+            `url = os.environ['LINGFANG_PLUGIN_BRIDGE_URL']`,
+            `token = os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN']`,
+            'client = OpenAI()',
+            `client.chat.completions.create(model='fast', messages=[])`,
+          ].join('\n'),
+        },
+      ],
+      ['llm.chat']
+    );
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.bridge.custom' })
+    );
   });
 
   it('rejects AI SDK dependencies outside the explicit OpenAI bridge allowlist', () => {
-    const result = policy([{
-      path: 'package.json',
-      content: JSON.stringify({ dependencies: { '@azure/openai': '^2.0.0' } }),
-    }]);
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.sdk.third_party' }));
+    const result = policy([
+      {
+        path: 'package.json',
+        content: JSON.stringify({ dependencies: { '@azure/openai': '^2.0.0' } }),
+      },
+    ]);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.sdk.third_party' })
+    );
   });
 
   it('does not let comment markers inside strings hide following violations', () => {
-    const result = policy([{
-      path: 'index.js',
-      content: `const marker = '/*'; const apiKey = 'sk-proj-abcdefghijklmnopqrstuv'; await sdk.llm.chat({messages:[]});`,
-    }], ['llm.chat']);
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.config.forbidden' }));
+    const result = policy(
+      [
+        {
+          path: 'index.js',
+          content: `const marker = '/*'; const apiKey = 'sk-proj-abcdefghijklmnopqrstuv'; await sdk.llm.chat({messages:[]});`,
+        },
+      ],
+      ['llm.chat']
+    );
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.config.forbidden' })
+    );
   });
 
   it('removes real inline JS, Python and HTML comments without flagging their endpoints', () => {
@@ -159,47 +202,61 @@ describe('plugin AI policy', () => {
   });
 
   it('rejects custom bridge fallback, third-party endpoints and hardcoded secrets', () => {
-    const result = policy([{
-      path: 'index.js',
-      content: [
-        `const baseURL = process.env.LINGFANG_PLUGIN_BRIDGE_URL || 'https://api.openai.com/v1';`,
-        `const apiKey = 'sk-proj-abcdefghijklmnopqrstuv';`,
-      ].join('\n'),
-    }], ['llm.chat']);
+    const result = policy(
+      [
+        {
+          path: 'index.js',
+          content: [
+            `const baseURL = process.env.LINGFANG_PLUGIN_BRIDGE_URL || 'https://api.openai.com/v1';`,
+            `const apiKey = 'sk-proj-abcdefghijklmnopqrstuv';`,
+          ].join('\n'),
+        },
+      ],
+      ['llm.chat']
+    );
     expect(result.ok).toBe(false);
-    expect(result.diagnostics.map((item) => item.code)).toEqual(expect.arrayContaining([
-      'ai.bridge.custom', 'ai.endpoint.third_party', 'ai.config.forbidden',
-    ]));
+    expect(result.diagnostics.map((item) => item.code)).toEqual(
+      expect.arrayContaining(['ai.bridge.custom', 'ai.endpoint.third_party', 'ai.config.forbidden'])
+    );
   });
 
   it('rejects third-party AI dependencies and secret sinks', () => {
     const result = policy([
-      { path: 'package.json', content: JSON.stringify({ dependencies: { '@anthropic-ai/sdk': '^1.0.0' } }) },
+      {
+        path: 'package.json',
+        content: JSON.stringify({ dependencies: { '@anthropic-ai/sdk': '^1.0.0' } }),
+      },
       { path: 'index.js', content: `console.log(process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN);` },
     ]);
-    expect(result.diagnostics.map((item) => item.code)).toEqual(expect.arrayContaining([
-      'ai.sdk.third_party', 'ai.bridge.secret_sink',
-    ]));
+    expect(result.diagnostics.map((item) => item.code)).toEqual(
+      expect.arrayContaining(['ai.sdk.third_party', 'ai.bridge.secret_sink'])
+    );
   });
 
   it('requires manifest capabilities and rejects real upstream model ids', () => {
-    const result = policy([{
-      path: 'index.js',
-      content: `await sdk.image.generate({ prompt: 'x', model: 'gpt-image-1' });`,
-    }]);
-    expect(result.diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'ai.capability.missing', capability: 'image.generate' }),
-      expect.objectContaining({ code: 'ai.model.invalid' }),
-    ]));
+    const result = policy([
+      {
+        path: 'index.js',
+        content: `await sdk.image.generate({ prompt: 'x', model: 'gpt-image-1' });`,
+      },
+    ]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'ai.capability.missing', capability: 'image.generate' }),
+        expect.objectContaining({ code: 'ai.model.invalid' }),
+      ])
+    );
   });
 
   it('requires image.edit capability when source calls the image edit bridge route', () => {
-    const result = policy([{
-      path: 'index.js',
-      content: `await fetch(bridge + '/image/edit', { method: 'POST', body: JSON.stringify({ prompt: '换装', images: [] }) });`,
-    }]);
+    const result = policy([
+      {
+        path: 'index.js',
+        content: `await fetch(bridge + '/image/edit', { method: 'POST', body: JSON.stringify({ prompt: '换装', images: [] }) });`,
+      },
+    ]);
     expect(result.diagnostics).toContainEqual(
-      expect.objectContaining({ code: 'ai.capability.missing', capability: 'image.edit' }),
+      expect.objectContaining({ code: 'ai.capability.missing', capability: 'image.edit' })
     );
   });
 
@@ -208,7 +265,9 @@ describe('plugin AI policy', () => {
       manifest: { id: 'demo', name: 'Demo', capabilities: [] },
       files: [{ path: 'main.py', scanError: 'invalid_utf8' }],
     });
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.policy.unscannable' }));
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.policy.unscannable' })
+    );
   });
 
   it('enforces text limits and entry text validity inside the authoritative scanner', () => {
@@ -219,9 +278,12 @@ describe('plugin AI policy', () => {
         { path: 'requirements.txt', content: 'x'.repeat(256 * 1024 + 1) },
       ],
     });
-    expect(oversizedDependency.diagnostics).toContainEqual(expect.objectContaining({
-      code: 'ai.policy.unscannable', path: 'requirements.txt',
-    }));
+    expect(oversizedDependency.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'ai.policy.unscannable',
+        path: 'requirements.txt',
+      })
+    );
 
     for (const files of [
       [{ path: 'run', content: 'print(1)', binary: true }],
@@ -232,7 +294,9 @@ describe('plugin AI policy', () => {
         manifest: { id: 'demo', name: 'Demo', entry: 'run', capabilities: [] },
         files,
       });
-      expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.policy.unscannable' }));
+      expect(result.diagnostics).toContainEqual(
+        expect.objectContaining({ code: 'ai.policy.unscannable' })
+      );
     }
   });
 
@@ -241,7 +305,9 @@ describe('plugin AI policy', () => {
       manifest: { id: 'demo', name: 'Demo', entry: path, capabilities: [] },
       files: [{ path, content: `fetch('https://api.anthropic.com/v1/messages')` }],
     });
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'ai.endpoint.third_party' }));
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'ai.endpoint.third_party' })
+    );
   });
 
   it('ignores declared binary media instead of counting it as policy text', () => {

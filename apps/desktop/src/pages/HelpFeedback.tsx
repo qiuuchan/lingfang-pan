@@ -22,7 +22,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   submitTicket,
   listMyTickets,
@@ -49,12 +55,24 @@ const STATUS_VARIANT: Record<TicketStatus, 'default' | 'secondary' | 'outline'> 
 function fmtTime(iso: string | null): string {
   if (!iso) return '-';
   const d = new Date(iso);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
-function AttachmentChip({ ticketId, attachment }: { ticketId: string; attachment: TicketAttachment }) {
+function AttachmentChip({
+  ticketId,
+  attachment,
+}: {
+  ticketId: string;
+  attachment: TicketAttachment;
+}) {
   const [busy, setBusy] = useState(false);
-  const Icon = attachment.kind === 'IMAGE' ? ImageIcon : attachment.kind === 'LOG' ? FileTextIcon : FileIcon;
+  const Icon =
+    attachment.kind === 'IMAGE' ? ImageIcon : attachment.kind === 'LOG' ? FileTextIcon : FileIcon;
   return (
     <button
       type="button"
@@ -110,7 +128,10 @@ function FilePicker({ files, onChange }: { files: File[]; onChange: (next: File[
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {files.map((f, i) => (
-            <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+            <span
+              key={`${f.name}-${i}`}
+              className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs"
+            >
               <span className="max-w-40 truncate">{f.name}</span>
               <span className="text-muted-foreground">{formatBytes(f.size)}</span>
               <button type="button" onClick={() => onChange(files.filter((_, j) => j !== i))}>
@@ -129,9 +150,21 @@ type Screen = { mode: 'list' } | { mode: 'submit' } | { mode: 'detail'; id: stri
 export function HelpFeedback() {
   const [screen, setScreen] = useState<Screen>({ mode: 'list' });
 
-  if (screen.mode === 'submit') return <SubmitView onDone={(id) => setScreen({ mode: 'detail', id })} onBack={() => setScreen({ mode: 'list' })} />;
-  if (screen.mode === 'detail') return <DetailView id={screen.id} onBack={() => setScreen({ mode: 'list' })} />;
-  return <ListView onNew={() => setScreen({ mode: 'submit' })} onOpen={(id) => setScreen({ mode: 'detail', id })} />;
+  if (screen.mode === 'submit')
+    return (
+      <SubmitView
+        onDone={(id) => setScreen({ mode: 'detail', id })}
+        onBack={() => setScreen({ mode: 'list' })}
+      />
+    );
+  if (screen.mode === 'detail')
+    return <DetailView id={screen.id} onBack={() => setScreen({ mode: 'list' })} />;
+  return (
+    <ListView
+      onNew={() => setScreen({ mode: 'submit' })}
+      onOpen={(id) => setScreen({ mode: 'detail', id })}
+    />
+  );
 }
 
 function ListView({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) => void }) {
@@ -157,7 +190,9 @@ function ListView({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">提交问题、建议或账号相关工单，我们会尽快处理并回复。</p>
+        <p className="text-sm text-muted-foreground">
+          提交问题、建议或账号相关工单，我们会尽快处理并回复。
+        </p>
         <Button size="sm" onClick={onNew}>
           <PlusIcon className="size-4" />
           新建工单
@@ -186,13 +221,17 @@ function ListView({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium">{t.title}</span>
-                  <Badge variant="outline" className="shrink-0 text-xs">{CATEGORY_LABEL[t.category]}</Badge>
+                  <Badge variant="outline" className="shrink-0 text-xs">
+                    {CATEGORY_LABEL[t.category]}
+                  </Badge>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {t.messageCount} 条对话 · 最近更新 {fmtTime(t.lastReplyAt)}
                 </p>
               </div>
-              <Badge variant={STATUS_VARIANT[t.status]} className="shrink-0">{STATUS_LABEL[t.status]}</Badge>
+              <Badge variant={STATUS_VARIANT[t.status]} className="shrink-0">
+                {STATUS_LABEL[t.status]}
+              </Badge>
             </button>
           ))}
         </div>
@@ -213,7 +252,12 @@ function SubmitView({ onDone, onBack }: { onDone: (id: string) => void; onBack: 
     if (!body.trim()) return toast.error('请填写问题描述');
     setSubmitting(true);
     try {
-      const { ticket } = await submitTicket({ title: title.trim(), body: body.trim(), category, files });
+      const { ticket } = await submitTicket({
+        title: title.trim(),
+        body: body.trim(),
+        category,
+        files,
+      });
       toast.success('工单已提交');
       onDone(ticket.id);
     } catch (e) {
@@ -233,10 +277,14 @@ function SubmitView({ onDone, onBack }: { onDone: (id: string) => void; onBack: 
       <div className="space-y-2">
         <Label>分类</Label>
         <Select value={category} onValueChange={(v) => setCategory(v as TicketCategory)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             {(Object.keys(CATEGORY_LABEL) as TicketCategory[]).map((c) => (
-              <SelectItem key={c} value={c}>{CATEGORY_LABEL[c]}</SelectItem>
+              <SelectItem key={c} value={c}>
+                {CATEGORY_LABEL[c]}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -244,7 +292,12 @@ function SubmitView({ onDone, onBack }: { onDone: (id: string) => void; onBack: 
 
       <div className="space-y-2">
         <Label>标题</Label>
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="简要描述你遇到的问题" maxLength={200} />
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="简要描述你遇到的问题"
+          maxLength={200}
+        />
       </div>
 
       <div className="space-y-2">
@@ -264,7 +317,9 @@ function SubmitView({ onDone, onBack }: { onDone: (id: string) => void; onBack: 
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onBack} disabled={submitting}>取消</Button>
+        <Button variant="outline" onClick={onBack} disabled={submitting}>
+          取消
+        </Button>
         <Button onClick={submit} disabled={submitting}>
           <SendIcon className="size-4" />
           {submitting ? '提交中…' : '提交工单'}
@@ -328,7 +383,9 @@ function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="min-w-0">
           <h3 className="truncate font-semibold">{ticket.title}</h3>
           <div className="mt-1 flex items-center gap-2">
-            <Badge variant="outline" className="text-xs">{CATEGORY_LABEL[ticket.category]}</Badge>
+            <Badge variant="outline" className="text-xs">
+              {CATEGORY_LABEL[ticket.category]}
+            </Badge>
             <Badge variant={STATUS_VARIANT[ticket.status]}>{STATUS_LABEL[ticket.status]}</Badge>
           </div>
         </div>
@@ -336,10 +393,15 @@ function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
 
       <div className="space-y-3">
         {ticket.messages.map((m) => (
-          <div key={m.id} className={`flex ${m.authorRole === 'USER' ? 'justify-end' : 'justify-start'}`}>
+          <div
+            key={m.id}
+            className={`flex ${m.authorRole === 'USER' ? 'justify-end' : 'justify-start'}`}
+          >
             <div
               className={`max-w-[80%] rounded-lg px-3 py-2 ${
-                m.authorRole === 'USER' ? 'bg-primary text-primary-foreground' : 'border bg-muted/40'
+                m.authorRole === 'USER'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'border bg-muted/40'
               }`}
             >
               <div className="mb-1 flex items-center gap-2 text-xs opacity-70">

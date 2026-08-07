@@ -9,11 +9,11 @@ services:
       POSTGRES_DB: lingfang
     # 宿主机 5432 已被原生 PostgreSQL 18 占用，这里映射到 5433 避让。
     ports:
-      - "5433:5432"
+      - '5433:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lingfang"]
+      test: ['CMD-SHELL', 'pg_isready -U lingfang']
       interval: 3s
       timeout: 3s
       retries: 10

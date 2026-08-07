@@ -31,16 +31,13 @@ export function CommandPalette({ open, onOpenChange, onSelect }: CommandPaletteP
         (item) =>
           item.label.toLowerCase().includes(q) ||
           item.view.toLowerCase().includes(q) ||
-          group.title.toLowerCase().includes(q),
+          group.title.toLowerCase().includes(q)
       ),
     })).filter((group) => group.items.length > 0);
   }, [query]);
 
   // 扁平化的命中项，用于键盘上下键导航索引。
-  const flatMatched = useMemo(
-    () => matchedGroups.flatMap((group) => group.items),
-    [matchedGroups],
-  );
+  const flatMatched = useMemo(() => matchedGroups.flatMap((group) => group.items), [matchedGroups]);
 
   // 打开时聚焦输入框 + 重置状态；关闭时清空 query。
   useEffect(() => {
@@ -69,7 +66,7 @@ export function CommandPalette({ open, onOpenChange, onSelect }: CommandPaletteP
       onSelect(view);
       onOpenChange(false);
     },
-    [onSelect, onOpenChange],
+    [onSelect, onOpenChange]
   );
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -113,7 +110,9 @@ export function CommandPalette({ open, onOpenChange, onSelect }: CommandPaletteP
             initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
             animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
-            transition={reduce ? { duration: 0.12 } : { type: 'spring', stiffness: 320, damping: 30 }}
+            transition={
+              reduce ? { duration: 0.12 } : { type: 'spring', stiffness: 320, damping: 30 }
+            }
             onKeyDown={onKeyDown}
           >
             {/* 搜索输入 */}
@@ -161,7 +160,7 @@ export function CommandPalette({ open, onOpenChange, onSelect }: CommandPaletteP
                             'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors',
                             isActive
                               ? 'bg-accent text-accent-foreground'
-                              : 'text-foreground hover:bg-accent/60',
+                              : 'text-foreground hover:bg-accent/60'
                           )}
                         >
                           <Icon className="size-4 shrink-0 text-muted-foreground" />

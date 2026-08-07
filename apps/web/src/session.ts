@@ -1,6 +1,11 @@
 import { requestJson, setWebCsrfToken, type FetchImplementation } from './api';
 
-const AnyObject = { parse(value: unknown) { if (!value || typeof value !== 'object') throw new Error('会话响应无效'); return value as Record<string, unknown>; } };
+const AnyObject = {
+  parse(value: unknown) {
+    if (!value || typeof value !== 'object') throw new Error('会话响应无效');
+    return value as Record<string, unknown>;
+  },
+};
 
 export async function prepareWebSession(fetchImplementation?: FetchImplementation) {
   const response = await requestJson('/api/web/session/csrf', AnyObject, {}, fetchImplementation);
@@ -10,8 +15,17 @@ export async function prepareWebSession(fetchImplementation?: FetchImplementatio
   return token;
 }
 
-export function loginWeb(email: string, password: string, fetchImplementation?: FetchImplementation) {
-  return requestJson('/api/web/session/login', AnyObject, { method: 'POST', body: JSON.stringify({ email, password }) }, fetchImplementation);
+export function loginWeb(
+  email: string,
+  password: string,
+  fetchImplementation?: FetchImplementation
+) {
+  return requestJson(
+    '/api/web/session/login',
+    AnyObject,
+    { method: 'POST', body: JSON.stringify({ email, password }) },
+    fetchImplementation
+  );
 }
 
 export function loadWebSession(fetchImplementation?: FetchImplementation) {
@@ -23,7 +37,12 @@ export function loadWebTeams(fetchImplementation?: FetchImplementation) {
 }
 
 export function switchWebTeam(teamId: string, fetchImplementation?: FetchImplementation) {
-  return requestJson('/api/web/session/team', AnyObject, { method: 'POST', body: JSON.stringify({ teamId }) }, fetchImplementation);
+  return requestJson(
+    '/api/web/session/team',
+    AnyObject,
+    { method: 'POST', body: JSON.stringify({ teamId }) },
+    fetchImplementation
+  );
 }
 
 export function logoutWeb(fetchImplementation?: FetchImplementation) {

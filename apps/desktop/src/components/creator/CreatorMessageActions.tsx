@@ -19,7 +19,13 @@ export function CreatorRetryButton({
   const isCancel = status === 'cancelled';
   return (
     <div className="mt-2 flex items-center gap-2">
-      <Button variant="outline" size="sm" onClick={onRetry} disabled={busy} className="h-7 gap-1.5 px-2.5 text-xs">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onRetry}
+        disabled={busy}
+        className="h-7 gap-1.5 px-2.5 text-xs"
+      >
         <RotateCcwIcon className="size-3" />
         {isCancel ? '继续' : '重试'}
       </Button>
@@ -48,7 +54,7 @@ export function CreatorCopyButton({ text, className }: { text: string; className
       className={cn(
         'absolute right-1.5 top-1.5 z-10 inline-flex size-6 items-center justify-center rounded-sm border border-border/50 bg-card text-muted-foreground opacity-0 transition-all hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100',
         copied && 'opacity-100 text-green-600',
-        className,
+        className
       )}
     >
       {copied ? <CheckCircle2Icon className="size-3.5" /> : <CopyIcon className="size-3.5" />}

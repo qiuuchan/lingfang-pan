@@ -36,15 +36,20 @@ async function writeDownload(download: ArtifactDownload, path: string): Promise<
     return;
   }
   const response = await fetch(download.url);
-  if (!response.ok || !response.body) throw new Error(`artifact download failed: ${response.status}`);
-  await pipeline(Readable.fromWeb(response.body as never), createWriteStream(path, { flags: 'wx' }));
+  if (!response.ok || !response.body)
+    throw new Error(`artifact download failed: ${response.status}`);
+  await pipeline(
+    Readable.fromWeb(response.body as never),
+    createWriteStream(path, { flags: 'wx' })
+  );
 }
 
 async function main() {
   const apply = process.argv.includes('--apply');
   const prisma = new PrismaService();
   const artifacts = createArtifactStore(process.env);
-  const stagingRoot = process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts');
+  const stagingRoot =
+    process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts');
   const summary: Summary = {
     mode: apply ? 'apply' : 'dry-run',
     releases: { total: 0, passed: 0, quarantined: 0, failed: 0 },
@@ -62,7 +67,10 @@ async function main() {
         const artifactPath = join(directory, 'artifact.lfplugin');
         await writeDownload(await artifacts.download(release.artifactKey), artifactPath);
         const inspected = await inspectPluginArtifact(artifactPath);
-        result = checkPluginAiPolicy({ manifest: inspected.manifest, files: inspected.policyFiles });
+        result = checkPluginAiPolicy({
+          manifest: inspected.manifest,
+          files: inspected.policyFiles,
+        });
       } catch {
         result = unscannableResult('artifact.lfplugin');
         summary.releases.failed += 1;
@@ -72,7 +80,11 @@ async function main() {
       if (result.ok) summary.releases.passed += 1;
       else {
         summary.releases.quarantined += 1;
-        summary.failures.push({ type: 'PluginRelease', id: release.id, reason: pluginAiPolicyReason(result) });
+        summary.failures.push({
+          type: 'PluginRelease',
+          id: release.id,
+          reason: pluginAiPolicyReason(result),
+        });
       }
       if (apply) {
         await prisma.$transaction(async (tx) => {
@@ -87,7 +99,11 @@ async function main() {
           });
           if (!result.ok) {
             await tx.marketplaceListing.updateMany({
-              where: { packageId: release.packageId, currentReleaseId: release.id, status: 'ACTIVE' },
+              where: {
+                packageId: release.packageId,
+                currentReleaseId: release.id,
+                status: 'ACTIVE',
+              },
               data: {
                 status: 'DELISTED',
                 delistedBy: 'PLATFORM',
@@ -101,7 +117,10 @@ async function main() {
                 action: 'plugin_release.ai_policy.quarantined',
                 targetType: 'PluginRelease',
                 targetId: release.id,
-                metadata: { policyVersion: result.policyVersion, diagnostics: result.diagnostics.map((item) => item.code) },
+                metadata: {
+                  policyVersion: result.policyVersion,
+                  diagnostics: result.diagnostics.map((item) => item.code),
+                },
               },
             });
           }

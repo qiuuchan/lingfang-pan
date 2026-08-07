@@ -14,10 +14,7 @@
  *  - client_error 中 httpStatus 取自调用方异常（AppError.status / 500）的情况。
  */
 export type RelayStaticTerminalStatus =
-  | 'insufficient_balance'
-  | 'success'
-  | 'no_channel'
-  | 'no_pricing';
+  'insufficient_balance' | 'success' | 'no_channel' | 'no_pricing';
 
 export interface RelayOutcome {
   /** 透传给客户端的 HTTP 状态码。 */

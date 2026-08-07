@@ -32,7 +32,9 @@ export const ADMIN_USER_OPTION_SELECT = {
   platformRole: true,
 } as const satisfies Prisma.UserSelect;
 
-export type AdminUserSummaryRow = Prisma.UserGetPayload<{ select: typeof ADMIN_USER_SUMMARY_SELECT }>;
+export type AdminUserSummaryRow = Prisma.UserGetPayload<{
+  select: typeof ADMIN_USER_SUMMARY_SELECT;
+}>;
 export type AdminUserOptionRow = Prisma.UserGetPayload<{ select: typeof ADMIN_USER_OPTION_SELECT }>;
 
 export function adminUserSummary(user: AdminUserSummaryRow) {
@@ -191,8 +193,12 @@ export const ADMIN_AUDIT_DETAIL_SELECT = {
   metadata: true,
 } as const satisfies Prisma.AuditLogSelect;
 
-export type AdminAuditSummaryRow = Prisma.AuditLogGetPayload<{ select: typeof ADMIN_AUDIT_SUMMARY_SELECT }>;
-export type AdminAuditDetailRow = Prisma.AuditLogGetPayload<{ select: typeof ADMIN_AUDIT_DETAIL_SELECT }>;
+export type AdminAuditSummaryRow = Prisma.AuditLogGetPayload<{
+  select: typeof ADMIN_AUDIT_SUMMARY_SELECT;
+}>;
+export type AdminAuditDetailRow = Prisma.AuditLogGetPayload<{
+  select: typeof ADMIN_AUDIT_DETAIL_SELECT;
+}>;
 
 export function adminAuditSummary(log: AdminAuditSummaryRow) {
   return {
@@ -201,11 +207,13 @@ export function adminAuditSummary(log: AdminAuditSummaryRow) {
     targetType: log.targetType,
     targetId: log.targetId,
     createdAt: log.createdAt,
-    actor: log.actor ? {
-      id: log.actor.id,
-      email: log.actor.email,
-      displayName: log.actor.displayName,
-    } : null,
+    actor: log.actor
+      ? {
+          id: log.actor.id,
+          email: log.actor.email,
+          displayName: log.actor.displayName,
+        }
+      : null,
   };
 }
 
@@ -246,10 +254,7 @@ export function adminUserWhere(query: AdminUserListQuery): Prisma.UserWhereInput
 export function adminUserOrderBy(query: AdminUserListQuery): Prisma.UserOrderByWithRelationInput[] {
   const sort = query.sort ?? 'createdAt';
   const order = query.order ?? 'desc';
-  return [
-    { [sort]: order } as Prisma.UserOrderByWithRelationInput,
-    { id: 'desc' },
-  ];
+  return [{ [sort]: order } as Prisma.UserOrderByWithRelationInput, { id: 'desc' }];
 }
 
 export type AdminTeamListQuery = AdminPageQuery & {
@@ -275,10 +280,7 @@ export function adminTeamWhere(query: AdminTeamListQuery): Prisma.TeamWhereInput
 export function adminTeamOrderBy(query: AdminTeamListQuery): Prisma.TeamOrderByWithRelationInput[] {
   const sort = query.sort ?? 'createdAt';
   const order = query.order ?? 'desc';
-  return [
-    { [sort]: order } as Prisma.TeamOrderByWithRelationInput,
-    { id: 'desc' },
-  ];
+  return [{ [sort]: order } as Prisma.TeamOrderByWithRelationInput, { id: 'desc' }];
 }
 
 export type AdminAuditListQuery = AdminPageQuery & {
@@ -302,13 +304,15 @@ function auditCategoryPrefixConditions(category: AuditCategoryKey): Prisma.Audit
         { action: { startsWith: 'permission_group.' } },
       ];
     case 'plugin':
-      return [{
-        AND: [
-          { action: { startsWith: 'plugin.' } },
-          { NOT: { action: { startsWith: 'plugin.marketplace.' } } },
-          { NOT: { action: { startsWith: 'plugin.grant.' } } },
-        ],
-      }];
+      return [
+        {
+          AND: [
+            { action: { startsWith: 'plugin.' } },
+            { NOT: { action: { startsWith: 'plugin.marketplace.' } } },
+            { NOT: { action: { startsWith: 'plugin.grant.' } } },
+          ],
+        },
+      ];
     case 'marketplace':
       return [
         { action: { startsWith: 'marketplace.' } },
@@ -319,12 +323,14 @@ function auditCategoryPrefixConditions(category: AuditCategoryKey): Prisma.Audit
     case 'llm':
       return [{ action: { startsWith: 'llm_binding.' } }];
     case 'admin':
-      return [{
-        AND: [
-          { action: { startsWith: 'admin.' } },
-          { NOT: { action: { startsWith: 'admin.setting' } } },
-        ],
-      }];
+      return [
+        {
+          AND: [
+            { action: { startsWith: 'admin.' } },
+            { NOT: { action: { startsWith: 'admin.setting' } } },
+          ],
+        },
+      ];
     case 'system':
       return [
         { action: { startsWith: 'admin.setting' } },
@@ -342,8 +348,9 @@ export function adminAuditWhere(query: AdminAuditListQuery): Prisma.AuditLogWher
   let categoryConditions: Prisma.AuditLogWhereInput[] | null = null;
   if (query.category) {
     const conditions = auditCategoryPrefixConditions(query.category);
-    const registered = Object.keys(AUDIT_ACTION_LABEL)
-      .filter((action) => auditActionCategory(action) === query.category);
+    const registered = Object.keys(AUDIT_ACTION_LABEL).filter(
+      (action) => auditActionCategory(action) === query.category
+    );
     if (registered.length > 0) conditions.push({ action: { in: registered } });
     if (conditions.length > 0) categoryConditions = conditions;
   }

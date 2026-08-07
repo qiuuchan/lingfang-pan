@@ -42,7 +42,8 @@ const STEPS: Step[] = [
     key: 'platform',
     index: 1,
     title: '配置平台信息',
-    description: '在「平台设置」页完善平台名称、Logo 与 SMTP 等基础信息，让平台对外形象一致。当前阶段可先跳过，后续随时回来调整。',
+    description:
+      '在「平台设置」页完善平台名称、Logo 与 SMTP 等基础信息，让平台对外形象一致。当前阶段可先跳过，后续随时回来调整。',
     icon: SettingsIcon,
     targetView: 'settings',
   },
@@ -50,7 +51,8 @@ const STEPS: Step[] = [
     key: 'provider',
     index: 2,
     title: '配置模型接入',
-    description: '在「模型接入」页接入上游模型、绑定资源池并配置价格，中转计费系统才能对外服务 AI 调用。',
+    description:
+      '在「模型接入」页接入上游模型、绑定资源池并配置价格，中转计费系统才能对外服务 AI 调用。',
     icon: ServerIcon,
     targetView: 'channels',
   },
@@ -66,7 +68,8 @@ const STEPS: Step[] = [
     key: 'release',
     index: 4,
     title: '发布首个版本',
-    description: '准备就绪后，在 release 模块（collab-api）发布首个客户端版本，用户即可下载使用。此步骤需在服务端操作。',
+    description:
+      '准备就绪后，在 release 模块（collab-api）发布首个客户端版本，用户即可下载使用。此步骤需在服务端操作。',
     icon: RocketIcon,
   },
 ];
@@ -111,7 +114,12 @@ export function OnboardingWizard({ onNavigate, onClose }: OnboardingWizardProps)
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) finish(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) finish();
+      }}
+    >
       <DialogContent className="max-w-lg p-0 overflow-hidden">
         {/* 顶部 banner：渐变背景 + 步骤图标，营造引导仪式感 */}
         <div className="relative bg-gradient-to-br from-primary/90 to-primary text-primary-foreground p-6 pb-5">
@@ -127,7 +135,9 @@ export function OnboardingWizard({ onNavigate, onClose }: OnboardingWizardProps)
               <StepIcon className="size-6" />
             </div>
             <div className="min-w-0">
-              <div className="text-xs/none opacity-80">首次登录引导 · 第 {step.index} / {STEPS.length} 步</div>
+              <div className="text-xs/none opacity-80">
+                首次登录引导 · 第 {step.index} / {STEPS.length} 步
+              </div>
               <DialogTitle className="mt-1 text-lg font-semibold tracking-tight text-primary-foreground">
                 {step.title}
               </DialogTitle>
@@ -147,7 +157,7 @@ export function OnboardingWizard({ onNavigate, onClose }: OnboardingWizardProps)
               key={s.key}
               className={cn(
                 'h-1.5 flex-1 rounded-full transition-colors',
-                i <= stepIndex ? 'bg-primary' : 'bg-muted',
+                i <= stepIndex ? 'bg-primary' : 'bg-muted'
               )}
             />
           ))}
@@ -163,9 +173,7 @@ export function OnboardingWizard({ onNavigate, onClose }: OnboardingWizardProps)
               exit={{ opacity: 0, x: -24 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
             >
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                {step.description}
-              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">{step.description}</p>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -182,13 +190,19 @@ export function OnboardingWizard({ onNavigate, onClose }: OnboardingWizardProps)
                   key={s.key}
                   className={cn(
                     'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
-                    active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground',
+                    active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'
                   )}
                 >
-                  <span className={cn(
-                    'flex size-5 shrink-0 items-center justify-center rounded-full text-[11px]',
-                    done ? 'bg-primary text-primary-foreground' : active ? 'bg-primary/15 text-primary' : 'bg-muted-foreground/15',
-                  )}>
+                  <span
+                    className={cn(
+                      'flex size-5 shrink-0 items-center justify-center rounded-full text-[11px]',
+                      done
+                        ? 'bg-primary text-primary-foreground'
+                        : active
+                          ? 'bg-primary/15 text-primary'
+                          : 'bg-muted-foreground/15'
+                    )}
+                  >
                     {done ? <CheckIcon className="size-3" /> : s.index}
                   </span>
                   <SIcon className="size-3.5 opacity-70" />

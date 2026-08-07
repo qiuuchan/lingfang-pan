@@ -35,7 +35,9 @@ async function main() {
     const affected = await prisma.wallet.count({ where: { balanceCents: { not: 0 } } });
     const totalCents = await prisma.wallet.aggregate({ _sum: { balanceCents: true } });
     console.log(`[clear-personal-wallet] 待清零钱包行数: ${affected}`);
-    console.log(`[clear-personal-wallet] 当前个人钱包余额总额(分): ${totalCents._sum.balanceCents ?? 0}`);
+    console.log(
+      `[clear-personal-wallet] 当前个人钱包余额总额(分): ${totalCents._sum.balanceCents ?? 0}`
+    );
 
     if (dryRun) {
       console.log('[clear-personal-wallet] --dry-run：未写库，退出。');

@@ -20,7 +20,7 @@ describe('creator input helpers', () => {
   it('formats uploaded text files as model context', () => {
     const context = formatAttachmentContext(
       [{ path: 'main.py', content: 'print("hi")' }],
-      ['image.png（二进制，已跳过）'],
+      ['image.png（二进制，已跳过）']
     );
 
     expect(context).toContain('# 本轮上传附件');

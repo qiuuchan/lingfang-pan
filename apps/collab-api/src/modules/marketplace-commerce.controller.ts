@@ -28,9 +28,11 @@ import {
 export class MarketplaceCommerceController {
   constructor(
     @Inject(MarketplaceCommerceService) private readonly commerce: MarketplaceCommerceService,
-    @Inject(MarketplaceCommerceQueryService) private readonly queries: MarketplaceCommerceQueryService,
-    @Inject(MarketplaceSettlementCutoverService) private readonly cutover: MarketplaceSettlementCutoverService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(MarketplaceCommerceQueryService)
+    private readonly queries: MarketplaceCommerceQueryService,
+    @Inject(MarketplaceSettlementCutoverService)
+    private readonly cutover: MarketplaceSettlementCutoverService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   @RequirePermission('team.balance.view')
@@ -62,24 +64,39 @@ export class MarketplaceCommerceController {
   }
 
   @Post('plugin-purchases/:id/refund-request')
-  requestRefund(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplaceRefundRequestDto) {
+  requestRefund(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplaceRefundRequestDto
+  ) {
     return this.commerce.requestRefund(requireUser(req).id, id, body.reason);
   }
 
   @Post('admin/marketplace/refund-requests/:id/approve')
-  approveRefund(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplaceRefundReviewDto) {
+  approveRefund(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplaceRefundReviewDto
+  ) {
     return this.commerce.approveRefund(requireUser(req).id, id, body.reason ?? '');
   }
 
   @Post('admin/marketplace/refund-requests/:id/reject')
-  rejectRefund(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplaceRefundReviewDto) {
+  rejectRefund(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplaceRefundReviewDto
+  ) {
     return this.commerce.rejectRefund(requireUser(req).id, id, body.reason ?? '');
   }
 
   @Post('admin/marketplace/settlement/trigger')
   async triggerSettlement(@Req() req: Request, @Body() body: MarketplaceSettlementTriggerDto) {
     await this.auth.ensurePlatformAdmin(requireUser(req).id);
-    return this.cutover.runSettlementJob(body.now ? new Date(body.now) : new Date(), body.limit ?? 100);
+    return this.cutover.runSettlementJob(
+      body.now ? new Date(body.now) : new Date(),
+      body.limit ?? 100
+    );
   }
 
   @Post('admin/marketplace/settlement/cutover/drain')
@@ -89,7 +106,10 @@ export class MarketplaceCommerceController {
   }
 
   @Post('admin/marketplace/settlement/cutover/activate')
-  async activateSettlementCutover(@Req() req: Request, @Body() body: MarketplaceCutoverGenerationDto) {
+  async activateSettlementCutover(
+    @Req() req: Request,
+    @Body() body: MarketplaceCutoverGenerationDto
+  ) {
     await this.auth.ensurePlatformAdmin(requireUser(req).id);
     return this.cutover.activate(body.expectedGeneration);
   }
@@ -101,7 +121,10 @@ export class MarketplaceCommerceController {
   }
 
   @Post('admin/marketplace/settlement/cutover/resume')
-  async resumeSettlementCutover(@Req() req: Request, @Body() body: MarketplaceCutoverGenerationDto) {
+  async resumeSettlementCutover(
+    @Req() req: Request,
+    @Body() body: MarketplaceCutoverGenerationDto
+  ) {
     await this.auth.ensurePlatformAdmin(requireUser(req).id);
     return this.cutover.resume(body.expectedGeneration);
   }
@@ -127,16 +150,33 @@ export class MarketplaceCommerceController {
   @Get('admin/marketplace/settlement/cutover/status')
   async settlementCutoverStatus(@Req() req: Request) {
     await this.auth.ensurePlatformAdmin(requireUser(req).id);
-    return { state: await this.cutover.state(), job: await this.cutover.settlementJobStatus(), scheduler_started: this.cutover.isStarted() };
+    return {
+      state: await this.cutover.state(),
+      job: await this.cutover.settlementJobStatus(),
+      scheduler_started: this.cutover.isStarted(),
+    };
   }
 
   @Post('plugin-packages/:id/marketplace-price')
-  updatePrice(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplacePriceUpdateDto) {
-    return this.commerce.updateListingPrice(requireUser(req).id, id, body.priceCents, body.expectedPriceVersion);
+  updatePrice(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplacePriceUpdateDto
+  ) {
+    return this.commerce.updateListingPrice(
+      requireUser(req).id,
+      id,
+      body.priceCents,
+      body.expectedPriceVersion
+    );
   }
 
   @Post('plugin-packages/:id/discounts')
-  createDiscount(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplaceDiscountCreateDto) {
+  createDiscount(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplaceDiscountCreateDto
+  ) {
     return this.commerce.createDiscount(requireUser(req).id, id, {
       priceCents: body.priceCents,
       startsAt: new Date(body.startsAt),
@@ -146,7 +186,11 @@ export class MarketplaceCommerceController {
   }
 
   @Post('marketplace-discounts/:id/cancel')
-  cancelDiscount(@Req() req: Request, @Param('id') id: string, @Body() body: MarketplacePriceVersionDto) {
+  cancelDiscount(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: MarketplacePriceVersionDto
+  ) {
     return this.commerce.cancelDiscount(requireUser(req).id, id, body.expectedPriceVersion);
   }
 
@@ -173,7 +217,11 @@ export class MarketplaceCommerceController {
   }
 
   @Get('marketplace/campaigns/:id/items/:packageId/attribution-token')
-  campaignAttributionToken(@Req() req: Request, @Param('id') id: string, @Param('packageId') packageId: string) {
+  campaignAttributionToken(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('packageId') packageId: string
+  ) {
     return this.commerce.issueCampaignToken(requireUser(req).id, id, packageId);
   }
 

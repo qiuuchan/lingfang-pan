@@ -5,7 +5,11 @@ import { api } from '@/lib/api';
 
 /** 通用数据加载 hook：管理 loading/error，组件卸载后不 setState（参考 collab-admin useLoad）。
  *  返回 [data, reload, loading]。reload 可手动触发重新拉取。 */
-export function useTeamResource<T>(path: string, map: (raw: unknown) => T, initial: T): [T, () => Promise<void>, boolean] {
+export function useTeamResource<T>(
+  path: string,
+  map: (raw: unknown) => T,
+  initial: T
+): [T, () => Promise<void>, boolean] {
   const [data, setData] = useState<T>(initial);
   const [loading, setLoading] = useState(false);
 
@@ -22,12 +26,17 @@ export function useTeamResource<T>(path: string, map: (raw: unknown) => T, initi
     }
   }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
   return [data, load, loading];
 }
 
 /** 执行写操作：成功 toast + 返回 true（供调用方决定是否关闭对话框/刷新）。失败 toast + 返回 false。 */
-export async function runAction(fn: () => Promise<unknown>, success = '操作成功'): Promise<boolean> {
+export async function runAction(
+  fn: () => Promise<unknown>,
+  success = '操作成功'
+): Promise<boolean> {
   try {
     await fn();
     toast.success(success);

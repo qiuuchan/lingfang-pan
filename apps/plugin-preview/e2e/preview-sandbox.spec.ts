@@ -8,7 +8,10 @@ const SESSION_ID = '11111111-1111-4111-8111-111111111111';
 const NONCE = 'n'.repeat(32);
 const SERVICE_KEY = 'preview-service-key-32-characters-minimum';
 
-test('opaque preview cannot read parent DOM/storage/token and rejects every invalid handshake shape', async ({ page, context }) => {
+test('opaque preview cannot read parent DOM/storage/token and rejects every invalid handshake shape', async ({
+  page,
+  context,
+}) => {
   let previewOrigin = '';
   const parent = parentServer(() => previewOrigin);
   const parentOrigin = await listen(parent, 'localhost');
@@ -16,7 +19,9 @@ test('opaque preview cannot read parent DOM/storage/token and rejects every inva
     internalOrigin: 'http://api.internal.test',
     serviceKey: SERVICE_KEY,
     webAppOrigins: [parentOrigin],
-    fetchImplementation: async () => new Response(`<!doctype html><html><head><title>Preview</title></head><body><main id="content">真实预览内容</main><script>
+    fetchImplementation: async () =>
+      new Response(
+        `<!doctype html><html><head><title>Preview</title></head><body><main id="content">真实预览内容</main><script>
       addEventListener('load', async () => {
         try {
           const view = await sdk.ui.view();
@@ -25,18 +30,22 @@ test('opaque preview cannot read parent DOM/storage/token and rejects every inva
           parent.postMessage({ type: 'plugin.preview.result', ok: false, code: error && error.code }, '*');
         }
       });
-    </script></body></html>`, {
-      headers: {
-        'content-type': 'text/html; charset=utf-8',
-        'x-lingfang-preview-entry': '1',
-        'x-lingfang-preview-entry-path': encodeURIComponent('ui/index.html'),
-      },
-    }),
+    </script></body></html>`,
+        {
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'x-lingfang-preview-entry': '1',
+            'x-lingfang-preview-entry-path': encodeURIComponent('ui/index.html'),
+          },
+        }
+      ),
   });
   previewOrigin = await listen(preview, '127.0.0.1');
 
   try {
-    await context.addCookies([{ name: 'lingfang_web_session', value: 'top-secret-cookie', url: parentOrigin }]);
+    await context.addCookies([
+      { name: 'lingfang_web_session', value: 'top-secret-cookie', url: parentOrigin },
+    ]);
     const previewRequests: Array<Record<string, string>> = [];
     page.on('request', async (request) => {
       if (request.url().startsWith(previewOrigin)) previewRequests.push(await request.allHeaders());
@@ -65,8 +74,14 @@ test('opaque preview cannot read parent DOM/storage/token and rejects every inva
       const frame = document.querySelector('iframe')!;
       const state = (window as any).__previewState;
       const data = state.initialHandshake;
-      const dispatch = (origin: string, source: MessageEventSource | null, override: Record<string, unknown> = {}) => {
-        window.dispatchEvent(new MessageEvent('message', { origin, source, data: { ...data, ...override } }));
+      const dispatch = (
+        origin: string,
+        source: MessageEventSource | null,
+        override: Record<string, unknown> = {}
+      ) => {
+        window.dispatchEvent(
+          new MessageEvent('message', { origin, source, data: { ...data, ...override } })
+        );
       };
       dispatch('https://preview.example.test', frame.contentWindow, {});
       dispatch('null', window, {});

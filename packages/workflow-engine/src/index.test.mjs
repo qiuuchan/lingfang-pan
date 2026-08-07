@@ -48,7 +48,9 @@ test('plans image then video and music in parallel', () => {
   const result = buildWorkflowPlan(definition);
   expect(result.diagnostics).toEqual([]);
   expect(result.plan.ready_sets).toEqual([['image'], ['music', 'video']]);
-  expect(readyWorkflowNodes(definition, { image: 'SUCCEEDED', video: 'PENDING', music: 'PENDING' })).toEqual(['music', 'video']);
+  expect(
+    readyWorkflowNodes(definition, { image: 'SUCCEEDED', video: 'PENDING', music: 'PENDING' })
+  ).toEqual(['music', 'video']);
 });
 test('rejects cycles and hidden node-output dependencies', () => {
   const cycle = { ...definition, nodes: [node('image', ['video']), node('video', ['image'])] };
@@ -283,35 +285,37 @@ test('deterministic E2E fans image ArtifactRef out to video/music, then fans in 
   expect(inputs.music.cover_image).toEqual(outputs.image.image);
   expect(inputs.aggregate).toEqual({ video: outputs.video.video, music: outputs.music.music });
   expect(finalOutput).toEqual({ package: refs.package, video: refs.video, music: refs.music });
-  expect(exactTargetTrace.map(({ node_id, release_id, action_id, action_contract_version }) => ({
+  expect(
+    exactTargetTrace.map(({ node_id, release_id, action_id, action_contract_version }) => ({
       node_id,
       release_id,
       action_id,
       action_contract_version,
-    }))).toEqual([
-      {
-        node_id: 'image',
-        release_id: 'rel-image-1.4.2',
-        action_id: 'image.generate',
-        action_contract_version: '1.2.0',
-      },
-      {
-        node_id: 'music',
-        release_id: 'rel-music-3.1.0',
-        action_id: 'music.compose',
-        action_contract_version: '3.0.1',
-      },
-      {
-        node_id: 'video',
-        release_id: 'rel-video-2.3.7',
-        action_id: 'video.from-image',
-        action_contract_version: '2.1.0',
-      },
-      {
-        node_id: 'aggregate',
-        release_id: 'rel-aggregate-1.0.5',
-        action_id: 'media.aggregate',
-        action_contract_version: '1.0.0',
-      },
-    ]);
+    }))
+  ).toEqual([
+    {
+      node_id: 'image',
+      release_id: 'rel-image-1.4.2',
+      action_id: 'image.generate',
+      action_contract_version: '1.2.0',
+    },
+    {
+      node_id: 'music',
+      release_id: 'rel-music-3.1.0',
+      action_id: 'music.compose',
+      action_contract_version: '3.0.1',
+    },
+    {
+      node_id: 'video',
+      release_id: 'rel-video-2.3.7',
+      action_id: 'video.from-image',
+      action_contract_version: '2.1.0',
+    },
+    {
+      node_id: 'aggregate',
+      release_id: 'rel-aggregate-1.0.5',
+      action_id: 'media.aggregate',
+      action_contract_version: '1.0.0',
+    },
+  ]);
 });

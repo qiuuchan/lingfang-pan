@@ -7,7 +7,11 @@ import {
   teamMemberRoleId,
 } from './permissions/permission-codes';
 
-const MEMBER_BASELINE_PERMISSIONS = ['team.dashboard.view', 'team.plugin.list', 'team.balance.view'];
+const MEMBER_BASELINE_PERMISSIONS = [
+  'team.dashboard.view',
+  'team.plugin.list',
+  'team.balance.view',
+];
 
 const governanceUserSelect = {
   id: true,

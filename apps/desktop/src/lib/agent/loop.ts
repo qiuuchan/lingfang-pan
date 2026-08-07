@@ -112,7 +112,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
       keepFrom < total &&
       working[keepFrom].role === 'tool' &&
       // keepFrom 之前没有 assistant(tool_calls) 与之配对（被压缩掉了）
-      !(keepFrom > 0 && working[keepFrom - 1].role === 'assistant' && 'tool_calls' in working[keepFrom - 1])
+      !(
+        keepFrom > 0 &&
+        working[keepFrom - 1].role === 'assistant' &&
+        'tool_calls' in working[keepFrom - 1]
+      )
     ) {
       keepFrom++;
     }
@@ -133,7 +137,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
     else working.push(notice, ...kept);
 
     console.warn(
-      `[agent] context budget guardrail triggered: ${used} → ~${estimateMessagesTokens(working)} tokens (dropped ${droppedHead} early messages)`,
+      `[agent] context budget guardrail triggered: ${used} → ~${estimateMessagesTokens(working)} tokens (dropped ${droppedHead} early messages)`
     );
   }
 
@@ -187,12 +191,17 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
                 _index: idx,
                 id: incoming.id ?? `call_${idx}_${Date.now()}`,
                 type: 'function',
-                function: { name: incoming.function?.name ?? '', arguments: incoming.function?.arguments ?? '' },
+                function: {
+                  name: incoming.function?.name ?? '',
+                  arguments: incoming.function?.arguments ?? '',
+                },
               });
             }
           }
         },
-        onUsage: () => { hasUsage = true; },
+        onUsage: () => {
+          hasUsage = true;
+        },
       });
       // 流正常结束：flush thinkParser 残留（未闭合 <think> 等）。
       thinkParser.flush();
@@ -322,8 +331,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
 
       // 工具结果作为 tool message 回灌（role:'tool' + tool_call_id + content）。
       const resultContent = result.ok
-        ? typeof result.data === 'string' ? result.data : JSON.stringify(result.data ?? '')
-        : result.error ?? '工具执行失败';
+        ? typeof result.data === 'string'
+          ? result.data
+          : JSON.stringify(result.data ?? '')
+        : (result.error ?? '工具执行失败');
       working.push({ role: 'tool', tool_call_id: call.id, content: resultContent });
     }
     // 继续下一轮：带着工具结果再调模型，让它决定继续调工具还是给最终答案。
@@ -332,7 +343,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
   // 达软上限：给友好提示（联网搜索多轮正常，但 40 轮仍不够说明任务过大或失控）。
   return {
     status: 'max_turns',
-    error: '本次对话步骤较多，已达到单轮处理上限。可点「重试」从上次进度继续，或把任务拆小分多轮完成。',
+    error:
+      '本次对话步骤较多，已达到单轮处理上限。可点「重试」从上次进度继续，或把任务拆小分多轮完成。',
     toolCallCount,
   };
 }
@@ -345,7 +357,9 @@ interface StreamOptions {
   tier: 'fast' | 'premium';
   signal: AbortSignal;
   onDelta: (delta: string) => void;
-  onToolCallDelta: (calls: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>) => void;
+  onToolCallDelta: (
+    calls: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
+  ) => void;
   onUsage: (usage: { promptTokens?: number; completionTokens?: number }) => void;
 }
 
@@ -406,8 +420,10 @@ async function streamChatCompletion(opts: StreamOptions): Promise<StreamResult> 
       const { detail, code } = readRelayErrorDetail(res.status, rawBody);
 
       // 429 / 503 / 502(upstream_llm_error)：可重试，指数退避。
-      const retryable = res.status === 429 || res.status === 503
-        || (res.status === 502 && code === 'upstream_llm_error');
+      const retryable =
+        res.status === 429 ||
+        res.status === 503 ||
+        (res.status === 502 && code === 'upstream_llm_error');
       if (retryable && attempt < HTTP_RETRY) {
         lastErr = new Error(detail);
         await sleep(1000 * Math.pow(2, attempt), opts.signal);
@@ -463,7 +479,11 @@ async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<Str
         choices?: Array<{
           delta?: {
             content?: string | null;
-            tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
+            tool_calls?: Array<{
+              index: number;
+              id?: string;
+              function?: { name?: string; arguments?: string };
+            }>;
           };
           finish_reason?: string | null;
         }>;
@@ -494,7 +514,10 @@ async function consumeSSEStream(res: Response, opts: StreamOptions): Promise<Str
       const fr = obj.choices?.[0]?.finish_reason;
       if (fr) finishReason = fr;
       if (obj.usage) {
-        opts.onUsage({ promptTokens: obj.usage.prompt_tokens, completionTokens: obj.usage.completion_tokens });
+        opts.onUsage({
+          promptTokens: obj.usage.prompt_tokens,
+          completionTokens: obj.usage.completion_tokens,
+        });
       }
     }
   };
@@ -531,7 +554,9 @@ function extractContent(data: unknown): string {
 }
 
 /** 非流式响应提取 tool_calls（转成增量回调期望的格式，index 用序号占位）。 */
-function extractToolCalls(data: unknown): Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> {
+function extractToolCalls(
+  data: unknown
+): Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> {
   const obj = data as {
     choices?: Array<{
       message?: {
@@ -547,10 +572,14 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
     if (signal) {
-      signal.addEventListener('abort', () => {
-        clearTimeout(timer);
-        reject(new DOMException('aborted', 'AbortError'));
-      }, { once: true });
+      signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          reject(new DOMException('aborted', 'AbortError'));
+        },
+        { once: true }
+      );
     }
   });
 }

@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { RELEASE_SOURCE_KINDS, type ReleaseSourceKind } from '../plugin-registry-model';
 
 export class AdminPluginPackageListQueryDto {
@@ -35,7 +45,10 @@ export class AdminPluginPackageListQueryDto {
   @IsIn(['DRAFT', 'PENDING', 'APPROVED', 'REJECTED'])
   reviewStatus?: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
-  @ApiPropertyOptional({ enum: RELEASE_SOURCE_KINDS, description: '只返回包含该发布来源发行版的插件包' })
+  @ApiPropertyOptional({
+    enum: RELEASE_SOURCE_KINDS,
+    description: '只返回包含该发布来源发行版的插件包',
+  })
   @IsOptional()
   @IsIn(RELEASE_SOURCE_KINDS)
   sourceKind?: ReleaseSourceKind;
@@ -60,7 +73,7 @@ export class AdminPluginPageQueryDto {
 
 export class AdminPluginReasonDto {
   @ApiProperty({ description: '操作原因，1-500 字符' })
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(1)
   @MaxLength(500)

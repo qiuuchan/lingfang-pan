@@ -3,7 +3,11 @@ import type { LoadedPlugin } from '@/lib/types';
 import { setSharedData, getSharedData, listSharedKeys } from '@/lib/plugin-shared-data';
 import { requestSystemPermission } from '@/lib/plugin-permissions';
 import { pluginModelTier } from '@/lib/model-tier';
-import { assertInstalledPluginAiPolicy, assertPluginAiPolicy, policyManifest } from '@/lib/plugin-ai-policy';
+import {
+  assertInstalledPluginAiPolicy,
+  assertPluginAiPolicy,
+  policyManifest,
+} from '@/lib/plugin-ai-policy';
 import { invokeInstalledPluginAction } from '@/lib/plugin-action-runtime';
 // SDK-06 修复：tokens.css 头注释与 spec（ui-tokens/frontend/tokens.md）均声明「宿主注入到所有插件容器」，
 // 但此前 apps/desktop 既未 import 也未在 srcDoc 注入，插件 var(--lf-color-*) 解析为空、设计令牌机制失效。
@@ -166,7 +170,9 @@ function requireCapability(plugin: LoadedPlugin, kind: string): void {
   if (!declaresCapability(plugin, kind)) throw new Error(`插件未声明能力: ${kind}`);
 }
 
-export function pluginRelayClientSource(plugin: LoadedPlugin): 'desktop-plugin' | 'desktop-plugin-test' {
+export function pluginRelayClientSource(
+  plugin: LoadedPlugin
+): 'desktop-plugin' | 'desktop-plugin-test' {
   return plugin.draft ? 'desktop-plugin-test' : 'desktop-plugin';
 }
 
@@ -189,7 +195,11 @@ export async function loadPluginDocument(plugin: LoadedPlugin): Promise<string> 
   if (packaged !== null) return tokensStyles() + sdkShim(plugin.id) + packaged;
   // collab-api 的 publicPlugin 始终内联 files，缺失即视为异常数据；不再回退到已下线的
   // Rust /plugins/:id/files/* 路由（collab-api 无对应能力），改返回占位 HTML。
-  return tokensStyles() + sdkShim(plugin.id) + `<!doctype html><html><body style="font-family:system-ui;margin:24px"><h1>${plugin.name}</h1><p>${plugin.description || '插件内容暂不可用。'}</p></body></html>`;
+  return (
+    tokensStyles() +
+    sdkShim(plugin.id) +
+    `<!doctype html><html><body style="font-family:system-ui;margin:24px"><h1>${plugin.name}</h1><p>${plugin.description || '插件内容暂不可用。'}</p></body></html>`
+  );
 }
 
 export type RuntimeMessage = {
@@ -209,7 +219,10 @@ export function runtimeMessage(data: unknown): RuntimeMessage | null {
   return { __lf_call: true, id: message.id, kind: message.kind, args: message.args };
 }
 
-export function runtimeMessageFromFrame(event: MessageEvent, frame: HTMLIFrameElement): RuntimeMessage | null {
+export function runtimeMessageFromFrame(
+  event: MessageEvent,
+  frame: HTMLIFrameElement
+): RuntimeMessage | null {
   if (event.origin !== 'null' || event.source !== frame.contentWindow) return null;
   return runtimeMessage(event.data);
 }
@@ -237,7 +250,7 @@ export type RuntimeErrorPayload = {
 };
 
 export function runtimeErrorPayload(error: unknown): RuntimeErrorPayload {
-  const source = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  const source = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
   return {
     name: typeof source.name === 'string' ? source.name : 'Error',
     message: errorMessage(error),
@@ -284,8 +297,11 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     const title = String(args?.title ?? '灵坊插件');
     const body = args?.body == null ? undefined : String(args.body);
     try {
-      if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body });
-    } catch { /* 浏览器通知不可用时静默降级 */ }
+      if ('Notification' in window && Notification.permission === 'granted')
+        new Notification(title, { body });
+    } catch {
+      /* 浏览器通知不可用时静默降级 */
+    }
     return undefined;
   }
   // Task 14：系统级权限运行时授权。插件调 sdk.system.requestPermission → 弹确认框（记忆决策）。
@@ -294,7 +310,7 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
       plugin.id,
       plugin.name,
       String(args?.code ?? ''),
-      String(args?.reason ?? ''),
+      String(args?.reason ?? '')
     );
   }
   if (kind === 'llm.chat') {
@@ -302,7 +318,11 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
     // 计费/中转：llm.chat 走平台 relay（/api/relay/v1/chat/completions），用当前登录态 JWT 鉴权，
     // 消费扣团队灵石。relay 据前台版本哨兵（fast/premium）解析真实模型并注入系统提示词规则。
     // 契约：input = { messages, model?: 'fast'|'premium', stream? }。非流式聚合为字符串返回（兼容 sdk.llm.chat 的 Promise<string>）。
-    const input = (args || {}) as { messages?: { role: string; content: string }[]; model?: string; stream?: boolean };
+    const input = (args || {}) as {
+      messages?: { role: string; content: string }[];
+      model?: string;
+      stream?: boolean;
+    };
     const messages = Array.isArray(input.messages) ? input.messages : [];
     if (messages.length === 0) throw new Error('llm.chat 缺少 messages');
     const tier = pluginModelTier(input.model);
@@ -313,7 +333,7 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
         body: { model: tier, messages, stream: false },
         timeoutMs: AI_BRIDGE_TIMEOUT_MS,
         clientSource: pluginRelayClientSource(plugin),
-      },
+      }
     );
     // OpenAI 形状：choices[0].message.content；兜底 content 字段。
     return res.choices?.[0]?.message?.content ?? res.content ?? '';
@@ -331,9 +351,11 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
         body: { model: tier, prompt: input.prompt, n: input.n ?? 1, size: input.size },
         timeoutMs: AI_BRIDGE_TIMEOUT_MS,
         clientSource: pluginRelayClientSource(plugin),
-      },
+      }
     );
-    const images = (res.data ?? []).map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : '')).filter(Boolean);
+    const images = (res.data ?? [])
+      .map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : ''))
+      .filter(Boolean);
     return { images };
   }
   if (isBuiltinPlugin(plugin)) {
@@ -351,7 +373,7 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
         plugin.id,
         plugin.name,
         'screenshot',
-        '截取当前屏幕画面',
+        '截取当前屏幕画面'
       );
       if (!decision.granted) throw new Error('用户未授权截屏');
       return tauriInvoke('invoke_capability', { pluginId: plugin.id, kind, args: args || {} });
@@ -367,12 +389,15 @@ async function invokeRuntime(plugin: LoadedPlugin, kind: string, args: RuntimeMe
 export async function handleRuntimeCall(
   plugin: LoadedPlugin,
   frame: HTMLIFrameElement,
-  message: RuntimeMessage,
+  message: RuntimeMessage
 ) {
   try {
     const result = await invokeRuntime(plugin, message.kind ?? '', message.args);
     frame.contentWindow?.postMessage({ __lf_reply: true, id: message.id, result }, '*');
   } catch (error) {
-    frame.contentWindow?.postMessage({ __lf_reply: true, id: message.id, error: runtimeErrorPayload(error) }, '*');
+    frame.contentWindow?.postMessage(
+      { __lf_reply: true, id: message.id, error: runtimeErrorPayload(error) },
+      '*'
+    );
   }
 }

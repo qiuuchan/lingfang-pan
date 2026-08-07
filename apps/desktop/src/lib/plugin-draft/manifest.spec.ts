@@ -29,11 +29,17 @@ describe('cleanPathFrontend', () => {
   });
 
   it('拒绝 Windows 盘符绝对路径', () => {
-    expect(cleanPathFrontend('C:/Windows/system32')).toEqual({ ok: false, reason: expect.any(String) });
+    expect(cleanPathFrontend('C:/Windows/system32')).toEqual({
+      ok: false,
+      reason: expect.any(String),
+    });
   });
 
   it('拒绝包含 .. 的路径穿越', () => {
-    expect(cleanPathFrontend('../../../etc/passwd')).toEqual({ ok: false, reason: expect.any(String) });
+    expect(cleanPathFrontend('../../../etc/passwd')).toEqual({
+      ok: false,
+      reason: expect.any(String),
+    });
   });
 
   it('拒绝空段', () => {
@@ -60,9 +66,7 @@ describe('cleanPathFrontend', () => {
 describe('normalizeCapabilities', () => {
   it('合法对象数组：原样规范化（risk 缺省补 low）', () => {
     const out = normalizeCapabilities([{ kind: 'ui.view', reason: '展示', requires_admin: false }]);
-    expect(out).toEqual([
-      { kind: 'ui.view', reason: '展示', risk: 'low', requires_admin: false },
-    ]);
+    expect(out).toEqual([{ kind: 'ui.view', reason: '展示', risk: 'low', requires_admin: false }]);
   });
 
   it('保留合法 risk 取值', () => {
@@ -208,25 +212,45 @@ describe('validatePluginStructure', () => {
   });
 
   it('有 manifest + 入口存在 + 入口名规范 → 无诊断', () => {
-    const manifest = file('manifest.json', JSON.stringify({
-      id: 'x', name: 'x', runtime_type: 'python', entry: 'main.py',
-    }));
+    const manifest = file(
+      'manifest.json',
+      JSON.stringify({
+        id: 'x',
+        name: 'x',
+        runtime_type: 'python',
+        entry: 'main.py',
+      })
+    );
     const diags = validatePluginStructure([manifest, file('main.py')]);
     expect(diags).toEqual([]);
   });
 
   it('有 manifest 但 entry 文件缺失 → warn', () => {
-    const manifest = file('manifest.json', JSON.stringify({
-      id: 'x', name: 'x', runtime_type: 'python', entry: 'main.py',
-    }));
+    const manifest = file(
+      'manifest.json',
+      JSON.stringify({
+        id: 'x',
+        name: 'x',
+        runtime_type: 'python',
+        entry: 'main.py',
+      })
+    );
     const diags = validatePluginStructure([manifest]); // 无 main.py
-    expect(diags.some((d) => d.status === 'warn' && d.message.includes('main.py 不存在'))).toBe(true);
+    expect(diags.some((d) => d.status === 'warn' && d.message.includes('main.py 不存在'))).toBe(
+      true
+    );
   });
 
   it('Python 入口非 main.py → warn 规范提示', () => {
-    const manifest = file('manifest.json', JSON.stringify({
-      id: 'x', name: 'x', runtime_type: 'python', entry: 'run.py',
-    }));
+    const manifest = file(
+      'manifest.json',
+      JSON.stringify({
+        id: 'x',
+        name: 'x',
+        runtime_type: 'python',
+        entry: 'run.py',
+      })
+    );
     const diags = validatePluginStructure([manifest, file('run.py')]);
     expect(diags.some((d) => d.status === 'warn' && d.message.includes('main.py'))).toBe(true);
   });

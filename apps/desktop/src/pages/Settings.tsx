@@ -10,7 +10,18 @@ import { RefreshCwIcon, HistoryIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/App';
 import { errorMessage } from '@/lib/api';
-import { checkUpdate, clearCachedUpdate, downloadUpdate, loadCachedUpdate, loadUpdateChannel, saveCachedUpdate, saveUpdateChannel, type CachedUpdate, type UpdateChannel, type UpdateMetadata } from '@/lib/updater';
+import {
+  checkUpdate,
+  clearCachedUpdate,
+  downloadUpdate,
+  loadCachedUpdate,
+  loadUpdateChannel,
+  saveCachedUpdate,
+  saveUpdateChannel,
+  type CachedUpdate,
+  type UpdateChannel,
+  type UpdateMetadata,
+} from '@/lib/updater';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingButton } from '@/components/loading-button';
@@ -72,14 +83,16 @@ export function Settings({
   const [internalTab, setInternalTab] = useState('cli');
   const currentTab = value !== undefined ? value : internalTab;
 
-
   // === Tab3 检查更新 state（design §3.2） ===
   // checking：检查中态；updateMeta：非 null 时弹更新 Dialog；updateInstalling：下载安装中（锁 Dialog）。
   // progress：下载进度（total 为 Content-Length，未知则 null；downloaded 为已累计字节数）。
   const [checking, setChecking] = useState(false);
   const [updateMeta, setUpdateMeta] = useState<UpdateMetadata | null>(null);
   const [updateInstalling, setUpdateInstalling] = useState(false);
-  const [progress, setProgress] = useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
+  const [progress, setProgress] = useState<{ downloaded: number; total: number | null }>({
+    downloaded: 0,
+    total: null,
+  });
   // 更新日志悬浮窗（ChangelogDialog）：检查更新卡片下方「查看更新日志」按钮触发。
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [updateChannel, setUpdateChannel] = useState<UpdateChannel>(() => loadUpdateChannel());
@@ -149,7 +162,10 @@ export function Settings({
           downloadStartedAtRef.current = Date.now();
           setProgress({ downloaded: 0, total: event.data.contentLength });
         } else if (event.event === 'Progress') {
-          setProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
+          setProgress((prev) => ({
+            ...prev,
+            downloaded: prev.downloaded + event.data.chunkLength,
+          }));
         } else if (event.event === 'Finished') {
           finished = true;
           toast.success('更新下载完成且校验通过，即将重启');
@@ -176,31 +192,59 @@ export function Settings({
     setUpdateMeta(null);
   }
 
-  const progressPercent = progress.total && progress.total > 0
-    ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
-    : null;
+  const progressPercent =
+    progress.total && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : null;
 
   // 下载速度 / 预计剩余时间：自 Started 起的平均速度（chunk 频繁触发渲染，显示持续刷新）。
-  const elapsedMs = downloadStartedAtRef.current !== null ? Date.now() - downloadStartedAtRef.current : 0;
-  const speedBps = updateInstalling && elapsedMs > 500 ? progress.downloaded / (elapsedMs / 1000) : null;
-  const etaSeconds = speedBps && speedBps > 0 && progress.total
-    ? (progress.total - progress.downloaded) / speedBps
-    : null;
+  const elapsedMs =
+    downloadStartedAtRef.current !== null ? Date.now() - downloadStartedAtRef.current : 0;
+  const speedBps =
+    updateInstalling && elapsedMs > 500 ? progress.downloaded / (elapsedMs / 1000) : null;
+  const etaSeconds =
+    speedBps && speedBps > 0 && progress.total
+      ? (progress.total - progress.downloaded) / speedBps
+      : null;
 
   return (
     <div className="mx-auto w-full max-w-5xl">
       <Tabs
         // value 未传时走 defaultValue（非受控，保持原行为）；传了则受控，支持父组件定向跳 Tab。
-        {...(value !== undefined ? { value, onValueChange: (v: unknown) => { if (onValueChange && typeof v === 'string') onValueChange(v); } } : { defaultValue: 'cli', onValueChange: (v: unknown) => { if (typeof v === 'string') setInternalTab(v); } })}
+        {...(value !== undefined
+          ? {
+              value,
+              onValueChange: (v: unknown) => {
+                if (onValueChange && typeof v === 'string') onValueChange(v);
+              },
+            }
+          : {
+              defaultValue: 'cli',
+              onValueChange: (v: unknown) => {
+                if (typeof v === 'string') setInternalTab(v);
+              },
+            })}
       >
         <TabsList className="inline-flex w-fit max-w-full gap-1">
-          <TabsTrigger value="general" className="px-3">通用</TabsTrigger>
-          <TabsTrigger value="cli" className="px-3">脚本运行环境</TabsTrigger>
-          <TabsTrigger value="gateway" className="px-3">模型与计费</TabsTrigger>
-          <TabsTrigger value="plugins" className="px-3">插件</TabsTrigger>
-  <TabsTrigger value="backend" className="px-3">更新</TabsTrigger>
-  <TabsTrigger value="about" className="px-3">关于</TabsTrigger>
-</TabsList>
+          <TabsTrigger value="general" className="px-3">
+            通用
+          </TabsTrigger>
+          <TabsTrigger value="cli" className="px-3">
+            脚本运行环境
+          </TabsTrigger>
+          <TabsTrigger value="gateway" className="px-3">
+            模型与计费
+          </TabsTrigger>
+          <TabsTrigger value="plugins" className="px-3">
+            插件
+          </TabsTrigger>
+          <TabsTrigger value="backend" className="px-3">
+            更新
+          </TabsTrigger>
+          <TabsTrigger value="about" className="px-3">
+            关于
+          </TabsTrigger>
+        </TabsList>
 
         <AnimatePresence mode="wait">
           <motion.div
@@ -248,14 +292,21 @@ export function Settings({
                         <RefreshCwIcon className="size-5 text-primary" />
                         <div className="flex items-center gap-2">
                           <CardTitle>更新</CardTitle>
-                          <Badge variant={updateChannel === 'BETA' ? 'default' : 'secondary'}>{updateChannel === 'BETA' ? 'Beta' : '正式版'}</Badge>
+                          <Badge variant={updateChannel === 'BETA' ? 'default' : 'secondary'}>
+                            {updateChannel === 'BETA' ? 'Beta' : '正式版'}
+                          </Badge>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                        <Checkbox checked={updateChannel === 'BETA'} onCheckedChange={(checked) => toggleBetaUpdates(Boolean(checked))} />
+                        <Checkbox
+                          checked={updateChannel === 'BETA'}
+                          onCheckedChange={(checked) => toggleBetaUpdates(Boolean(checked))}
+                        />
                         <div className="leading-tight">
                           <div className="font-medium">启用 beta 更新</div>
-                          <div className="text-xs text-muted-foreground">默认关闭，开启后优先检查测试版</div>
+                          <div className="text-xs text-muted-foreground">
+                            默认关闭，开启后优先检查测试版
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -271,32 +322,62 @@ export function Settings({
                               <span className="relative inline-flex size-2 rounded-full bg-primary" />
                             </span>
                             发现新版本 v{cachedUpdate.meta.version}
-                            {cachedUpdate.channel === 'BETA' && <Badge variant="default">Beta</Badge>}
+                            {cachedUpdate.channel === 'BETA' && (
+                              <Badge variant="default">Beta</Badge>
+                            )}
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            检查于 {new Date(cachedUpdate.checkedAt).toLocaleString()}，可直接更新，无需重新检查。
+                            检查于 {new Date(cachedUpdate.checkedAt).toLocaleString()}
+                            ，可直接更新，无需重新检查。
                           </div>
                         </div>
                         <div className="flex shrink-0 gap-2">
-                          <Button variant="outline" size="sm" onClick={() => { void checkForUpdate(); }}>重新检查</Button>
-                          <Button size="sm" onClick={() => { setDownloadFailed(false); setProgress({ downloaded: 0, total: null }); setUpdateMeta(cachedUpdate.meta); }}>立即更新</Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              void checkForUpdate();
+                            }}
+                          >
+                            重新检查
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setDownloadFailed(false);
+                              setProgress({ downloaded: 0, total: null });
+                              setUpdateMeta(cachedUpdate.meta);
+                            }}
+                          >
+                            立即更新
+                          </Button>
                         </div>
                       </div>
                     )}
                     <div className="rounded-lg border bg-background/40 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <div className="text-sm font-medium">{updateChannel === 'BETA' ? 'Beta 通道' : '正式版通道'}</div>
+                          <div className="text-sm font-medium">
+                            {updateChannel === 'BETA' ? 'Beta 通道' : '正式版通道'}
+                          </div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {backendUrl ? '已连接协作服务，可以检查更新。' : '当前未连接协作服务，无法检查更新。'}
+                            {backendUrl
+                              ? '已连接协作服务，可以检查更新。'
+                              : '当前未连接协作服务，无法检查更新。'}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <LoadingButton loading={checking} onClick={() => { void checkForUpdate(); }}>
+                          <LoadingButton
+                            loading={checking}
+                            onClick={() => {
+                              void checkForUpdate();
+                            }}
+                          >
                             检查{updateChannel === 'BETA' ? ' beta' : '正式版'}更新
                           </LoadingButton>
                           <Button variant="outline" onClick={() => setChangelogOpen(true)}>
-                            <HistoryIcon className="size-4" />查看更新日志
+                            <HistoryIcon className="size-4" />
+                            查看更新日志
                           </Button>
                         </div>
                       </div>
@@ -328,7 +409,11 @@ export function Settings({
 
       {/* 更新 Dialog（design §3.2/§3.3）：发现新版本时展示 changelog + 进度条 + 立即更新。
           安装中锁定：disablePointerDismissal 阻外点 + closeUpdateDialog 拦 Esc/关闭按钮。 */}
-      <Dialog open={updateMeta !== null} onOpenChange={closeUpdateDialog} disablePointerDismissal={updateInstalling}>
+      <Dialog
+        open={updateMeta !== null}
+        onOpenChange={closeUpdateDialog}
+        disablePointerDismissal={updateInstalling}
+      >
         <DialogContent showCloseButton={!updateInstalling} className="sm:max-w-lg">
           <DialogHeader {...dragRegionProps}>
             <DialogTitle data-tauri-drag-region>发现新版本 v{updateMeta?.version}</DialogTitle>
@@ -375,8 +460,21 @@ export function Settings({
           ) : null}
 
           <DialogFooter>
-            <LoadingButton variant="outline" loading={false} disabled={updateInstalling} onClick={() => closeUpdateDialog(false)}>稍后</LoadingButton>
-            <LoadingButton loading={updateInstalling} disabled={updateInstalling} onClick={() => { void installUpdate(); }}>
+            <LoadingButton
+              variant="outline"
+              loading={false}
+              disabled={updateInstalling}
+              onClick={() => closeUpdateDialog(false)}
+            >
+              稍后
+            </LoadingButton>
+            <LoadingButton
+              loading={updateInstalling}
+              disabled={updateInstalling}
+              onClick={() => {
+                void installUpdate();
+              }}
+            >
               {downloadFailed ? '重试下载' : '立即更新'}
             </LoadingButton>
           </DialogFooter>

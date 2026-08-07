@@ -34,15 +34,27 @@ const CONNECT_RETRY = 3;
  *
  * 导出供单测验证翻译语义（与 normalizeToolFileContent 同样导出）。
  */
-export function rewriteRelayErrorBody(status: number, rawBody: string): { body: string; status: number } {
+export function rewriteRelayErrorBody(
+  status: number,
+  rawBody: string
+): { body: string; status: number } {
   // relay 错误体：{code, message, requestId?, details?:{upstreamStatus?, upstreamDetail?}}
-  let parsed: { code?: string; message?: string; details?: { upstreamStatus?: number | null; upstreamDetail?: string | null } } | null = null;
+  let parsed: {
+    code?: string;
+    message?: string;
+    details?: { upstreamStatus?: number | null; upstreamDetail?: string | null };
+  } | null = null;
   try {
     parsed = JSON.parse(rawBody);
   } catch {
     // 非 JSON（如反代 502 的 HTML）→ 用原文截断作 message，不让 AI SDK 退化为 statusText。
     const fallbackMsg = rawBody.slice(0, 200).trim() || `HTTP ${status}`;
-    return { body: JSON.stringify({ error: { message: fallbackMsg, type: 'relay_error', code: `http_${status}` } }), status };
+    return {
+      body: JSON.stringify({
+        error: { message: fallbackMsg, type: 'relay_error', code: `http_${status}` },
+      }),
+      status,
+    };
   }
   const code = parsed?.code ?? `http_${status}`;
   // 优先透传上游真实原因（relay details.upstreamDetail），否则用 relay 自身 message。
@@ -73,10 +85,14 @@ export function rewriteRelayErrorBody(status: number, rawBody: string): { body: 
  * - detail 优先级：`error.message` → `message` → `code` → `HTTP {status}`（保证非空）。
  * - code 优先级：`error.code` → `code` → `error.type`（供重试判定，如 `upstream_llm_error`）。
  */
-export function readRelayErrorDetail(status: number, rawBody: string): { detail: string; code: string } {
+export function readRelayErrorDetail(
+  status: number,
+  rawBody: string
+): { detail: string; code: string } {
   const httpFallback = `HTTP ${status}`;
   let parsed: {
-    code?: string; message?: string;
+    code?: string;
+    message?: string;
     error?: { message?: string; type?: string; code?: string } | string;
     details?: { upstreamDetail?: string | null };
   } | null = null;
@@ -90,9 +106,8 @@ export function readRelayErrorDetail(status: number, rawBody: string): { detail:
   // relay 原生格式透传上游根因到 details.upstreamDetail（见 relay.service.ts extractUpstreamCause）。
   // 优先拼接出完整原因（"上游模型调用失败：<根因>"），便于用户/开发者一眼定位。
   const upstream = parsed?.details?.upstreamDetail;
-  const relayMessage = upstream && parsed?.message
-    ? `${parsed.message}：${upstream}`
-    : (parsed?.message ?? undefined);
+  const relayMessage =
+    upstream && parsed?.message ? `${parsed.message}：${upstream}` : (parsed?.message ?? undefined);
   const errObj = typeof parsed?.error === 'object' ? parsed.error : null;
   const errStr = typeof parsed?.error === 'string' ? parsed.error : null;
   const detail = errObj?.message ?? relayMessage ?? errStr ?? parsed?.code ?? httpFallback;

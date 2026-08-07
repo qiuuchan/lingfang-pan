@@ -18,7 +18,9 @@ describe('FilesystemArtifactStore', () => {
     await store.promote(staged, 'package/1.0.0/hash.lfplugin', 'unused');
     const download = await store.download('package/1.0.0/hash.lfplugin');
     expect(download.kind).toBe('stream');
-    expect(await readFile(join(root, 'permanent/package/1.0.0/hash.lfplugin'), 'utf8')).toBe('artifact');
+    expect(await readFile(join(root, 'permanent/package/1.0.0/hash.lfplugin'), 'utf8')).toBe(
+      'artifact'
+    );
     await rm(root, { recursive: true, force: true });
   });
 
@@ -27,11 +29,15 @@ describe('FilesystemArtifactStore', () => {
     const staged = join(root, 'staged');
     await writeFile(staged, 'artifact');
     const store = new FilesystemArtifactStore(join(root, 'permanent'));
-    vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }));
+    vi.mocked(rename).mockRejectedValueOnce(
+      Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
+    );
 
     await store.promote(staged, 'package/1.0.0/hash.lfplugin', 'unused');
 
-    expect(await readFile(join(root, 'permanent/package/1.0.0/hash.lfplugin'), 'utf8')).toBe('artifact');
+    expect(await readFile(join(root, 'permanent/package/1.0.0/hash.lfplugin'), 'utf8')).toBe(
+      'artifact'
+    );
     await expect(readFile(staged)).rejects.toMatchObject({ code: 'ENOENT' });
     await rm(root, { recursive: true, force: true });
   });
@@ -46,7 +52,9 @@ describe('FilesystemArtifactStore', () => {
   it('throws ArtifactUnavailableError when the artifact file is missing', async () => {
     const root = await mkdtemp(join(tmpdir(), 'artifact-store-'));
     const store = new FilesystemArtifactStore(root);
-    await expect(store.download('pkg/1.0.0/missing.lfplugin')).rejects.toBeInstanceOf(ArtifactUnavailableError);
+    await expect(store.download('pkg/1.0.0/missing.lfplugin')).rejects.toBeInstanceOf(
+      ArtifactUnavailableError
+    );
     await rm(root, { recursive: true, force: true });
   });
 
@@ -55,7 +63,8 @@ describe('FilesystemArtifactStore', () => {
     const store = new FilesystemArtifactStore(root);
     const first = join(root, 'first');
     const second = join(root, 'second');
-    await writeFile(first, 'one'); await writeFile(second, 'two');
+    await writeFile(first, 'one');
+    await writeFile(second, 'two');
     await store.promote(first, 'pkg/1/a.lfplugin', 'unused');
     await store.promote(second, 'pkg/2/b.lfplugin', 'unused');
     expect(await store.cleanupOrphans(new Set(['pkg/2/b.lfplugin']), -1)).toBe(1);

@@ -39,19 +39,54 @@ class RootErrorBoundary extends React.Component<
   render() {
     if (this.state.error) {
       return (
-        <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: '#0b0e14', color: '#e2e8f0', padding: 24 }}>
-          <div style={{ maxWidth: 480, textAlign: 'center', fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>
+        <div
+          style={{
+            display: 'flex',
+            minHeight: '100vh',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#0b0e14',
+            color: '#e2e8f0',
+            padding: 24,
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 480,
+              textAlign: 'center',
+              fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+            }}
+          >
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>应用遇到错误</h1>
             <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>
               页面渲染过程中出现问题。可以重置本地会话后重新进入应用。
             </p>
-            <pre style={{ textAlign: 'left', background: '#0f172a', padding: 12, borderRadius: 8, fontSize: 12, overflow: 'auto', maxHeight: 200, marginBottom: 16 }}>
+            <pre
+              style={{
+                textAlign: 'left',
+                background: '#0f172a',
+                padding: 12,
+                borderRadius: 8,
+                fontSize: 12,
+                overflow: 'auto',
+                maxHeight: 200,
+                marginBottom: 16,
+              }}
+            >
               {this.state.error.message || String(this.state.error)}
             </pre>
             <button
               type="button"
               onClick={this.handleReset}
-              style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14 }}
+              style={{
+                padding: '8px 16px',
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontSize: 14,
+              }}
             >
               重置本地会话并重载
             </button>
@@ -94,7 +129,7 @@ async function bootstrap() {
       <RootErrorBoundary>
         <App />
       </RootErrorBoundary>
-    </ThemeProvider>,
+    </ThemeProvider>
   );
 }
 

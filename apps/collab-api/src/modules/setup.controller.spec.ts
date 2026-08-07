@@ -72,7 +72,11 @@ describe('SetupController', () => {
 
     it('邮箱已被占用时抛 403（email_taken），不静默提权', async () => {
       prisma.user.count.mockResolvedValue(0);
-      prisma.user.findUnique.mockResolvedValue({ id: 'other', email: 'admin@example.com', platformRole: 'NONE' });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'other',
+        email: 'admin@example.com',
+        platformRole: 'NONE',
+      });
       await expect(controller.setup(validBody as never)).rejects.toMatchObject({
         status: 403,
         details: { reason: 'email_taken' },
@@ -83,12 +87,16 @@ describe('SetupController', () => {
     it('未初始化时建管理员 + 写 platformName + 审计（邮箱归一化 trim/lowercase）', async () => {
       await controller.setup(validBody as never);
       // 邮箱归一化为小写。
-      expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: 'admin@example.com' } });
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { email: 'admin@example.com' },
+      });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       // 事务内：先创建 bootstrap lock，再建管理员（platformRole=PLATFORM_ADMIN）。
-      expect(prisma.tx.platformSetting.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ key: '__setup_bootstrap_lock__', value: 'completed' }),
-      }));
+      expect(prisma.tx.platformSetting.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ key: '__setup_bootstrap_lock__', value: 'completed' }),
+        })
+      );
       const createCall = prisma.tx.user.create.mock.calls[0][0];
       expect(createCall.data.email).toBe('admin@example.com');
       expect(createCall.data.platformRole).toBe('PLATFORM_ADMIN');
@@ -131,7 +139,11 @@ describe('SetupController', () => {
     it('platformName 过长时抛 400', async () => {
       const longName = 'x'.repeat(101);
       await expect(
-        controller.setup({ email: 'a@b.com', password: 'ChangeMe123!', platformName: longName } as never),
+        controller.setup({
+          email: 'a@b.com',
+          password: 'ChangeMe123!',
+          platformName: longName,
+        } as never)
       ).rejects.toMatchObject({ status: 400, code: 'bad_request' });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });

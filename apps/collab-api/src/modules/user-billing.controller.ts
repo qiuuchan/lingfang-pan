@@ -16,7 +16,7 @@ import { CreditService } from './credit.service';
 export class UserCreditsController {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
-    @Inject(CreditService) private readonly credits: CreditService,
+    @Inject(CreditService) private readonly credits: CreditService
   ) {}
 
   @Get()

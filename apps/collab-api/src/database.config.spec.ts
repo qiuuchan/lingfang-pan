@@ -26,7 +26,7 @@ describe('resolveDatabaseConfig', () => {
       resolveDatabaseConfig({
         DATABASE_PROVIDER: 'mysql',
         DATABASE_URL: 'postgresql://user:pass@localhost:5432/lingfang',
-      }),
+      })
     ).toThrow('DATABASE_PROVIDER=mysql requires DATABASE_URL to start with mysql://');
   });
 });

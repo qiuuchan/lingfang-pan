@@ -45,7 +45,7 @@ export async function schedulerCreate(input: LocalScheduleCreateInput): Promise<
 /** 更新任务（部分字段）。 */
 export async function schedulerUpdate(
   id: string,
-  input: LocalScheduleUpdateInput,
+  input: LocalScheduleUpdateInput
 ): Promise<LocalSchedule> {
   return tauriInvoke<LocalSchedule>('scheduler_update', { id, input });
 }
@@ -56,9 +56,9 @@ export async function schedulerDelete(id: string): Promise<void> {
 }
 
 /** 列出任务（默认过滤 DELETED）。 */
-export async function schedulerList(
-  filter?: { status?: LocalScheduleStatus },
-): Promise<LocalSchedule[]> {
+export async function schedulerList(filter?: {
+  status?: LocalScheduleStatus;
+}): Promise<LocalSchedule[]> {
   return tauriInvoke<LocalSchedule[]>('scheduler_list', { filter: filter ?? null });
 }
 
@@ -78,10 +78,7 @@ export async function schedulerRunNow(id: string): Promise<void> {
 }
 
 /** 列出历史 run 记录。task_id 不传 → 跨任务合并。 */
-export async function schedulerListRuns(
-  taskId?: string,
-  limit = 50,
-): Promise<LocalScheduleRun[]> {
+export async function schedulerListRuns(taskId?: string, limit = 50): Promise<LocalScheduleRun[]> {
   return tauriInvoke<LocalScheduleRun[]>('scheduler_list_runs', {
     taskId: taskId ?? null,
     limit,

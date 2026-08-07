@@ -16,7 +16,13 @@ export class SharedRealtimeModule {
   static forRoot(env: NodeJS.ProcessEnv = process.env): DynamicModule {
     const config = resolveSharedRealtimeConfig(env);
     const realtimeProviders = config.enabled
-      ? [SharedRealtimeAuthenticator, SharedRealtimeBroadcaster, SharedRealtimeRedisAdapter, SharedRealtimeGateway, SharedRealtimeOutboxPublisher]
+      ? [
+          SharedRealtimeAuthenticator,
+          SharedRealtimeBroadcaster,
+          SharedRealtimeRedisAdapter,
+          SharedRealtimeGateway,
+          SharedRealtimeOutboxPublisher,
+        ]
       : [];
     return {
       module: SharedRealtimeModule,

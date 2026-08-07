@@ -109,17 +109,9 @@ async function main() {
   // 写入文件
   const output = createWriteStream(outputExe);
 
-  await pipelineAsync(
-    createReadStream(installerExe),
-    output,
-    { end: false }
-  );
+  await pipelineAsync(createReadStream(installerExe), output, { end: false });
 
-  await pipelineAsync(
-    createReadStream(payloadZip),
-    output,
-    { end: false }
-  );
+  await pipelineAsync(createReadStream(payloadZip), output, { end: false });
 
   output.write(trailer);
   output.end();

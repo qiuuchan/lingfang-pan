@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertInstalledPluginAiPolicy, assertPluginAiPolicy, checkPluginAiPolicy, policyManifest } from './plugin-ai-policy';
+import {
+  assertInstalledPluginAiPolicy,
+  assertPluginAiPolicy,
+  checkPluginAiPolicy,
+  policyManifest,
+} from './plugin-ai-policy';
 
 const apiMock = vi.hoisted(() => vi.fn());
 const tauriInvokeMock = vi.hoisted(() => vi.fn());
@@ -20,7 +25,10 @@ describe('plugin AI policy preflight', () => {
       truncated: false,
     });
     const files = [
-      { path: 'manifest.json', content: JSON.stringify({ id: 'demo', capabilities: [{ kind: 'llm.chat' }] }) },
+      {
+        path: 'manifest.json',
+        content: JSON.stringify({ id: 'demo', capabilities: [{ kind: 'llm.chat' }] }),
+      },
       { path: 'main.py', content: 'print("ok")' },
       { path: 'icon.png', content: '[binary file, 128 bytes]' },
     ];
@@ -28,30 +36,39 @@ describe('plugin AI policy preflight', () => {
 
     await checkPluginAiPolicy(manifest, files);
 
-    expect(apiMock).toHaveBeenCalledWith('/api/plugins/policy/check', expect.objectContaining({
-      method: 'POST',
-      body: {
-        manifest,
-        files: expect.arrayContaining([
-          expect.objectContaining({ path: 'icon.png', content: '', binary: true }),
-        ]),
-      },
-    }));
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/plugins/policy/check',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          manifest,
+          files: expect.arrayContaining([
+            expect.objectContaining({ path: 'icon.png', content: '', binary: true }),
+          ]),
+        },
+      })
+    );
   });
 
   it('fails closed with the stable policy code', async () => {
     apiMock.mockResolvedValue({
       policyVersion: 1,
       ok: false,
-      diagnostics: [{ code: 'ai.endpoint.third_party', path: 'main.py', line: 2, message: '不得直连第三方模型端点' }],
+      diagnostics: [
+        {
+          code: 'ai.endpoint.third_party',
+          path: 'main.py',
+          line: 2,
+          message: '不得直连第三方模型端点',
+        },
+      ],
       requiredCapabilities: [],
       truncated: false,
     });
 
-    const error = await assertPluginAiPolicy(
-      { id: 'blocked-demo' },
-      [{ path: 'main.py', content: 'blocked' }],
-    ).catch((caught) => caught);
+    const error = await assertPluginAiPolicy({ id: 'blocked-demo' }, [
+      { path: 'main.py', content: 'blocked' },
+    ]).catch((caught) => caught);
 
     expect(error).toMatchObject({ code: 'plugin_ai_policy_failed' });
     expect(error.message).toContain('main.py:2');
@@ -79,11 +96,14 @@ describe('plugin AI policy preflight', () => {
       installationId: 'installation-1',
       pending: true,
     });
-    expect(apiMock).toHaveBeenCalledWith('/api/plugins/policy/check', expect.objectContaining({
-      body: {
-        manifest,
-        files: expect.arrayContaining(files),
-      },
-    }));
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/plugins/policy/check',
+      expect.objectContaining({
+        body: {
+          manifest,
+          files: expect.arrayContaining(files),
+        },
+      })
+    );
   });
 });

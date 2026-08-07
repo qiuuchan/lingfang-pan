@@ -32,7 +32,11 @@ function mockPrisma() {
     notification: {
       findMany: vi.fn(async () => []),
       count: vi.fn(async () => 0),
-      create: vi.fn(async (args: { data: Record<string, unknown> }) => ({ id: 'n1', createdAt: now, ...args.data })),
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
+        id: 'n1',
+        createdAt: now,
+        ...args.data,
+      })),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
   };
@@ -50,7 +54,10 @@ describe('NotificationService', () => {
 
   describe('create', () => {
     it('写入正确字段（含 related 关联实体）', async () => {
-      await service.create('user-1', 'plugin_approved', '插件审核通过', '已上架', { relatedType: 'Plugin', relatedId: 'plugin-1' });
+      await service.create('user-1', 'plugin_approved', '插件审核通过', '已上架', {
+        relatedType: 'Plugin',
+        relatedId: 'plugin-1',
+      });
       expect(prisma.notification.create).toHaveBeenCalledWith({
         data: {
           userId: 'user-1',
@@ -81,7 +88,7 @@ describe('NotificationService', () => {
       expect(result.unreadCount).toBe(3);
       // findMany 不带 read 过滤（unreadOnly 默认 false）。
       expect(prisma.notification.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: 'user-1' } }),
+        expect.objectContaining({ where: { userId: 'user-1' } })
       );
     });
 
@@ -89,16 +96,20 @@ describe('NotificationService', () => {
       prisma.notification.count.mockResolvedValueOnce(0);
       await service.listForUser('user-1', { unreadOnly: true });
       expect(prisma.notification.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: 'user-1', read: false } }),
+        expect.objectContaining({ where: { userId: 'user-1', read: false } })
       );
     });
 
     it('limit clamp 到 [1,100]（超出取 100，<=0 取 1）', async () => {
       prisma.notification.count.mockResolvedValue(0);
       await service.listForUser('user-1', { limit: 999 });
-      expect(prisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+      expect(prisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 100 })
+      );
       await service.listForUser('user-1', { limit: 0 });
-      expect(prisma.notification.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 1 }));
+      expect(prisma.notification.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({ take: 1 })
+      );
     });
   });
 
@@ -116,7 +127,10 @@ describe('NotificationService', () => {
 
     it('越权或不存在（count=0）抛 not_found，不泄漏存在性', async () => {
       prisma.notification.updateMany.mockResolvedValueOnce({ count: 0 });
-      await expect(service.markRead('n1', 'user-other')).rejects.toMatchObject({ status: 404, code: 'not_found' });
+      await expect(service.markRead('n1', 'user-other')).rejects.toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
     });
   });
 

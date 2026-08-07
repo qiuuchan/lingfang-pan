@@ -21,7 +21,20 @@ const ALLOWED_MIME_PREFIX = ['text/', 'image/'];
 /** 允许的图片 MIME（精确，用于 kind 推断与额外校验）。 */
 const IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 /** 允许的扩展名白名单（兜底 octet-stream 的日志/文本类文件）。 */
-const ALLOWED_EXT = new Set(['.log', '.txt', '.json', '.ndjson', '.csv', '.yaml', '.yml', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
+const ALLOWED_EXT = new Set([
+  '.log',
+  '.txt',
+  '.json',
+  '.ndjson',
+  '.csv',
+  '.yaml',
+  '.yml',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+]);
 
 export type TicketAttachmentKindValue = 'LOG' | 'IMAGE' | 'OTHER';
 
@@ -46,8 +59,19 @@ export function isAllowedAttachment(mimeType: string, filename: string): boolean
 export function inferAttachmentKind(mimeType: string, filename: string): TicketAttachmentKindValue {
   const mime = (mimeType || '').toLowerCase();
   const ext = fileExt(filename);
-  if (mime.startsWith('image/') || IMAGE_MIME.has(mime) || ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) return 'IMAGE';
-  if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/x-ndjson' || ['.log', '.txt', '.json', '.ndjson', '.csv', '.yaml', '.yml'].includes(ext)) return 'LOG';
+  if (
+    mime.startsWith('image/') ||
+    IMAGE_MIME.has(mime) ||
+    ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)
+  )
+    return 'IMAGE';
+  if (
+    mime.startsWith('text/') ||
+    mime === 'application/json' ||
+    mime === 'application/x-ndjson' ||
+    ['.log', '.txt', '.json', '.ndjson', '.csv', '.yaml', '.yml'].includes(ext)
+  )
+    return 'LOG';
   return 'OTHER';
 }
 
@@ -66,10 +90,16 @@ export function validateAttachments(files: UploadedFileLike[]): void {
   }
   for (const f of files) {
     if (f.size > MAX_TICKET_ATTACHMENT_BYTES) {
-      throw badRequest('单个附件过大', { filename: f.originalname, limitBytes: MAX_TICKET_ATTACHMENT_BYTES });
+      throw badRequest('单个附件过大', {
+        filename: f.originalname,
+        limitBytes: MAX_TICKET_ATTACHMENT_BYTES,
+      });
     }
     if (!isAllowedAttachment(f.mimetype, f.originalname)) {
-      throw badRequest('附件类型不被允许（仅支持日志文本与常见图片）', { filename: f.originalname, mimeType: f.mimetype });
+      throw badRequest('附件类型不被允许（仅支持日志文本与常见图片）', {
+        filename: f.originalname,
+        mimeType: f.mimetype,
+      });
     }
   }
 }
@@ -78,7 +108,8 @@ export function validateAttachments(files: UploadedFileLike[]): void {
 export function cleanTitle(value: unknown): string {
   const title = String(value || '').trim();
   if (!title) throw badRequest('工单标题不能为空');
-  if (title.length > MAX_TICKET_TITLE_LEN) throw badRequest(`工单标题过长（最多 ${MAX_TICKET_TITLE_LEN} 字）`);
+  if (title.length > MAX_TICKET_TITLE_LEN)
+    throw badRequest(`工单标题过长（最多 ${MAX_TICKET_TITLE_LEN} 字）`);
   return title;
 }
 
@@ -86,7 +117,8 @@ export function cleanTitle(value: unknown): string {
 export function cleanBody(value: unknown, allowEmpty = false): string {
   const body = String(value || '').trim();
   if (!body && !allowEmpty) throw badRequest('内容不能为空');
-  if (body.length > MAX_TICKET_BODY_LEN) throw badRequest(`内容过长（最多 ${MAX_TICKET_BODY_LEN} 字）`);
+  if (body.length > MAX_TICKET_BODY_LEN)
+    throw badRequest(`内容过长（最多 ${MAX_TICKET_BODY_LEN} 字）`);
   return body;
 }
 

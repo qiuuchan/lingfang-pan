@@ -1,10 +1,46 @@
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  lazy,
+  Suspense,
+  type ReactNode,
+} from 'react';
 import { Loader2Icon, SparklesIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { api, apiBase, clearApiBase, configureApiBase, errorMessage, getAuthToken, normalizeBackendUrl, setAuthToken, tauriInvoke, tauriListen, UNAUTHORIZED_EVENT, BACKEND_UNREACHABLE_EVENT, BACKEND_REACHABLE_EVENT, type ApiError } from '@/lib/api';
-import type { AccountSettingsTab, CollabSessionResponse, LoadedPlugin, PendingAutoFix, PendingDraftEdit, PluginDraft, Session, SettingsTab, View } from '@/lib/types';
+import {
+  api,
+  apiBase,
+  clearApiBase,
+  configureApiBase,
+  errorMessage,
+  getAuthToken,
+  normalizeBackendUrl,
+  setAuthToken,
+  tauriInvoke,
+  tauriListen,
+  UNAUTHORIZED_EVENT,
+  BACKEND_UNREACHABLE_EVENT,
+  BACKEND_REACHABLE_EVENT,
+  type ApiError,
+} from '@/lib/api';
+import type {
+  AccountSettingsTab,
+  CollabSessionResponse,
+  LoadedPlugin,
+  PendingAutoFix,
+  PendingDraftEdit,
+  PluginDraft,
+  Session,
+  SettingsTab,
+  View,
+} from '@/lib/types';
 import { loadCloseAction } from '@/lib/close-behavior';
 import { checkUpdate, clearCachedUpdate, loadUpdateChannel, saveCachedUpdate } from '@/lib/updater';
 import { Sidebar } from '@/components/Sidebar';
@@ -39,18 +75,30 @@ import {
   previewPendingInstalledPlugin,
 } from '@/lib/plugin-registry';
 
-const PluginCenterBody = lazy(() => import('@/pages/plugins/PluginCenterBody').then((m) => ({ default: m.PluginCenterBody })));
-const PluginRunner = lazy(() => import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner })));
+const PluginCenterBody = lazy(() =>
+  import('@/pages/plugins/PluginCenterBody').then((m) => ({ default: m.PluginCenterBody }))
+);
+const PluginRunner = lazy(() =>
+  import('@/pages/plugins/PluginRunner').then((m) => ({ default: m.PluginRunner }))
+);
 const Review = lazy(() => import('./pages/Review').then((m) => ({ default: m.Review })));
 const TeamAdmin = lazy(() => import('./pages/TeamAdmin').then((m) => ({ default: m.TeamAdmin })));
-const HelpFeedback = lazy(() => import('./pages/HelpFeedback').then((m) => ({ default: m.HelpFeedback })));
+const HelpFeedback = lazy(() =>
+  import('./pages/HelpFeedback').then((m) => ({ default: m.HelpFeedback }))
+);
 // 项 14：AccountDialog 已删，其承载的功能改为各自由 PanelDialog 包裹的独立悬浮窗，
 // 在 App 顶层懒加载挂载（与原 AccountDialog 内的懒加载同款）。
 // 06-24 计费钱包重构：原「钱包」(Wallet) + 「团队空间」(TeamHome) 两页合并为「团队钱包」(TeamWallet)。
-const TeamWallet = lazy(() => import('@/pages/TeamWallet').then((m) => ({ default: m.TeamWallet })));
+const TeamWallet = lazy(() =>
+  import('@/pages/TeamWallet').then((m) => ({ default: m.TeamWallet }))
+);
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
-const CreatorWorkspace = lazy(() => import('@/components/creator/CreatorWorkspace').then((m) => ({ default: m.CreatorWorkspace })));
-const DraftPlugins = lazy(() => import('@/pages/DraftPlugins').then((m) => ({ default: m.DraftPlugins })));
+const CreatorWorkspace = lazy(() =>
+  import('@/components/creator/CreatorWorkspace').then((m) => ({ default: m.CreatorWorkspace }))
+);
+const DraftPlugins = lazy(() =>
+  import('@/pages/DraftPlugins').then((m) => ({ default: m.DraftPlugins }))
+);
 const Schedules = lazy(() => import('@/pages/Schedules').then((m) => ({ default: m.Schedules })));
 
 interface AppContextValue {
@@ -123,14 +171,21 @@ function loadPins(tenantId: string | null): string[] {
   try {
     const raw = localStorage.getItem(pinKey(tenantId));
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.map((item) => typeof item === 'string' ? item : item?.installationId || item?.id).filter((item): item is string => Boolean(item)) : [];
+    return Array.isArray(arr)
+      ? arr
+          .map((item) => (typeof item === 'string' ? item : item?.installationId || item?.id))
+          .filter((item): item is string => Boolean(item))
+      : [];
   } catch {
     return [];
   }
 }
 function savePins(tenantId: string | null, pins: LoadedPlugin[]) {
   try {
-    localStorage.setItem(pinKey(tenantId), JSON.stringify(pins.map((plugin) => plugin.installationId).filter(Boolean)));
+    localStorage.setItem(
+      pinKey(tenantId),
+      JSON.stringify(pins.map((plugin) => plugin.installationId).filter(Boolean))
+    );
   } catch (err) {
     // DESK-SHELL-04 修复：配额满 / localStorage 被禁用时不再静默吞错，
     // 给用户可见提示（持久化失败会导致下次重启「固定插件丢失」，需提示）。
@@ -145,7 +200,8 @@ const COMPACT_SIDEBAR_QUERY = '(max-width: 767px)';
 
 function loadSidebarOpen(): boolean {
   try {
-    if (typeof window !== 'undefined' && window.matchMedia?.(COMPACT_SIDEBAR_QUERY).matches) return false;
+    if (typeof window !== 'undefined' && window.matchMedia?.(COMPACT_SIDEBAR_QUERY).matches)
+      return false;
     return localStorage.getItem('lf:sidebar-open') === '1';
   } catch {
     return false;
@@ -156,14 +212,21 @@ function loadRecent(tenantId: string | null): string[] {
   try {
     const raw = localStorage.getItem(recentKey(tenantId));
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.map((item) => typeof item === 'string' ? item : item?.installationId || item?.id).filter((item): item is string => Boolean(item)) : [];
+    return Array.isArray(arr)
+      ? arr
+          .map((item) => (typeof item === 'string' ? item : item?.installationId || item?.id))
+          .filter((item): item is string => Boolean(item))
+      : [];
   } catch {
     return [];
   }
 }
 function saveRecent(tenantId: string | null, recent: LoadedPlugin[]) {
   try {
-    localStorage.setItem(recentKey(tenantId), JSON.stringify(recent.map((plugin) => plugin.installationId).filter(Boolean)));
+    localStorage.setItem(
+      recentKey(tenantId),
+      JSON.stringify(recent.map((plugin) => plugin.installationId).filter(Boolean))
+    );
   } catch (err) {
     reportPersistenceFailure(err);
   }
@@ -173,7 +236,9 @@ async function hydrateInstallationPreferences(ids: string[]): Promise<LoadedPlug
   if (!ids.length) return [];
   try {
     const installed = new Set((await listInstallations()).map((item) => item.installationId));
-    const loaded = await Promise.all(ids.filter((id) => installed.has(id)).map((id) => loadInstalledPlugin(id).catch(() => null)));
+    const loaded = await Promise.all(
+      ids.filter((id) => installed.has(id)).map((id) => loadInstalledPlugin(id).catch(() => null))
+    );
     return loaded.filter((plugin): plugin is LoadedPlugin => Boolean(plugin));
   } catch {
     return [];
@@ -204,13 +269,19 @@ let persistenceErrorReported = false;
 function reportPersistenceFailure(err: unknown) {
   if (persistenceErrorReported) return;
   persistenceErrorReported = true;
-  const isQuotaOrSecurity = err instanceof DOMException && (err.name === 'QuotaExceededError' || err.name === 'SecurityError');
+  const isQuotaOrSecurity =
+    err instanceof DOMException &&
+    (err.name === 'QuotaExceededError' || err.name === 'SecurityError');
   const hint = isQuotaOrSecurity
     ? '存储空间不足或被禁用，登录状态和固定插件可能无法保存，下次启动需重新登录。'
     : '存储写入失败，登录状态可能未保存。';
   // 延迟一帧再 toast，避免在模块顶层/事件回调同步路径触发渲染异常。
   setTimeout(() => {
-    try { import('sonner').then(({ toast }) => toast.warning(hint)); } catch { /* sonner 未加载则忽略 */ }
+    try {
+      import('sonner').then(({ toast }) => toast.warning(hint));
+    } catch {
+      /* sonner 未加载则忽略 */
+    }
   }, 0);
 }
 
@@ -246,7 +317,12 @@ function sessionFromPayload(payload: CollabSessionResponse, previousToken: strin
   // 又因 main.tsx 无 ErrorBoundary 会白屏不可恢复。此处显式校验 payload.user，
   // 缺失时抛出带语义的错误，由 refreshSession 的 .catch 兜底 resetSession，避免崩溃。
   const user = payload && typeof payload === 'object' ? payload.user : undefined;
-  if (!user || typeof user.id !== 'string' || typeof user.email !== 'string' || typeof user.displayName !== 'string') {
+  if (
+    !user ||
+    typeof user.id !== 'string' ||
+    typeof user.email !== 'string' ||
+    typeof user.displayName !== 'string'
+  ) {
     throw new Error('服务返回的数据缺少必要的用户信息，请重新登录。');
   }
   return {
@@ -291,7 +367,9 @@ export default function App() {
   // 帮助与反馈：工单中心悬浮窗。
   const [helpFeedbackOpen, setHelpFeedbackOpen] = useState(false);
   const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('installed');
-  const [creatorReturnView, setCreatorReturnView] = useState<'run-plugins' | 'draft-plugins'>('run-plugins');
+  const [creatorReturnView, setCreatorReturnView] = useState<'run-plugins' | 'draft-plugins'>(
+    'run-plugins'
+  );
   // 项 1：通知中心独立悬浮窗（不再嵌套在 AvatarMenu 内，修复点击即关闭/卡死 bug）。
   const [notifOpen, setNotifOpen] = useState(false);
   // 项 11：关窗询问悬浮窗（偏好为 'ask' 时弹出）。
@@ -309,70 +387,78 @@ export default function App() {
   const [recentPlugins, setRecentPlugins] = useState<LoadedPlugin[]>([]);
   // 项 9：包装 setRunningPlugin —— 运行插件时记入「最近使用」（置顶、去重、限量 RECENT_MAX、按租户持久化）。
   // 保留 ctx 上 setRunningPlugin 原签名，所有现有调用方（Sidebar/Home/Plugins 等）自动走包装逻辑。
-  const setRunningPlugin = useCallback((plugin: LoadedPlugin | null) => {
-    if (!plugin) {
-      setRunningPluginState(null);
-      return;
-    }
-    const requestKey = plugin.installationId || plugin.id;
-    const requestId = (runningPluginRequestRef.current[requestKey] ?? 0) + 1;
-    runningPluginRequestRef.current[requestKey] = requestId;
-    const commit = (prepared: LoadedPlugin) => {
-      if (runningPluginRequestRef.current[requestKey] !== requestId) return;
-      setRunningPluginState(prepared);
-      setRunningPlugins((prev) => ({ ...prev, [prepared.id]: prepared }));
-      if (!prepared.installationId) return;
-      setRecentPlugins((prev) => {
-        const next = [prepared, ...prev.filter((item) => item.id !== prepared.id)].slice(0, RECENT_MAX);
-        saveRecent(session.tenantId, next);
-        return next;
-      });
-    };
-    if (!plugin.installationId) {
-      commit(plugin);
-      return;
-    }
-
-    const isCurrent = () => runningPluginRequestRef.current[requestKey] === requestId;
-    void (async () => {
-      try {
-        const installations = await listInstallations();
-        if (!isCurrent()) return;
-        const installation = installations.find((item) => item.installationId === plugin.installationId);
-        if (!installation) throw new Error('本机安装项不存在或已卸载');
-
-        if (requiresRegistryRuntimeAccess(installation.origin)) {
-          const selectedRelease = installation.pendingRelease ?? installation.activeRelease;
-          await checkRuntimeAccess(installation.packageId, selectedRelease);
-          if (!isCurrent()) return;
-        }
-
-        if (!installation.pendingRelease) {
-          commit(plugin);
-          return;
-        }
-
-        let pending: LoadedPlugin;
-        try {
-          pending = await previewPendingInstalledPlugin(installation.installationId);
-        } catch (caught) {
-          if (!isCurrent()) return;
-          const reason = errorMessage(caught, '待更新版本校验失败');
-          await discardPendingPluginUpdate(installation.installationId, reason);
-          if (!isCurrent()) return;
-          toast.error(`${reason}，已恢复活动版本`);
-          commit(await loadInstalledPlugin(installation.installationId));
-          return;
-        }
-        if (!isCurrent()) return;
-
-        // client/cloud 由 Runner 成功挂载后激活；Node/Python 由进程成功启动后激活。
-        commit(pending);
-      } catch (caught) {
-        if (isCurrent()) toast.error(errorMessage(caught, '插件运行准备失败'));
+  const setRunningPlugin = useCallback(
+    (plugin: LoadedPlugin | null) => {
+      if (!plugin) {
+        setRunningPluginState(null);
+        return;
       }
-    })();
-  }, [session.tenantId]);
+      const requestKey = plugin.installationId || plugin.id;
+      const requestId = (runningPluginRequestRef.current[requestKey] ?? 0) + 1;
+      runningPluginRequestRef.current[requestKey] = requestId;
+      const commit = (prepared: LoadedPlugin) => {
+        if (runningPluginRequestRef.current[requestKey] !== requestId) return;
+        setRunningPluginState(prepared);
+        setRunningPlugins((prev) => ({ ...prev, [prepared.id]: prepared }));
+        if (!prepared.installationId) return;
+        setRecentPlugins((prev) => {
+          const next = [prepared, ...prev.filter((item) => item.id !== prepared.id)].slice(
+            0,
+            RECENT_MAX
+          );
+          saveRecent(session.tenantId, next);
+          return next;
+        });
+      };
+      if (!plugin.installationId) {
+        commit(plugin);
+        return;
+      }
+
+      const isCurrent = () => runningPluginRequestRef.current[requestKey] === requestId;
+      void (async () => {
+        try {
+          const installations = await listInstallations();
+          if (!isCurrent()) return;
+          const installation = installations.find(
+            (item) => item.installationId === plugin.installationId
+          );
+          if (!installation) throw new Error('本机安装项不存在或已卸载');
+
+          if (requiresRegistryRuntimeAccess(installation.origin)) {
+            const selectedRelease = installation.pendingRelease ?? installation.activeRelease;
+            await checkRuntimeAccess(installation.packageId, selectedRelease);
+            if (!isCurrent()) return;
+          }
+
+          if (!installation.pendingRelease) {
+            commit(plugin);
+            return;
+          }
+
+          let pending: LoadedPlugin;
+          try {
+            pending = await previewPendingInstalledPlugin(installation.installationId);
+          } catch (caught) {
+            if (!isCurrent()) return;
+            const reason = errorMessage(caught, '待更新版本校验失败');
+            await discardPendingPluginUpdate(installation.installationId, reason);
+            if (!isCurrent()) return;
+            toast.error(`${reason}，已恢复活动版本`);
+            commit(await loadInstalledPlugin(installation.installationId));
+            return;
+          }
+          if (!isCurrent()) return;
+
+          // client/cloud 由 Runner 成功挂载后激活；Node/Python 由进程成功启动后激活。
+          commit(pending);
+        } catch (caught) {
+          if (isCurrent()) toast.error(errorMessage(caught, '插件运行准备失败'));
+        }
+      })();
+    },
+    [session.tenantId]
+  );
   const clearRunningPlugin = useCallback((pluginId: string) => {
     setRunningPlugins((prev) => {
       if (!prev[pluginId]) return prev;
@@ -380,16 +466,19 @@ export default function App() {
       delete next[pluginId];
       return next;
     });
-    setRunningPluginState((current) => current?.id === pluginId ? null : current);
+    setRunningPluginState((current) => (current?.id === pluginId ? null : current));
   }, []);
   // 项 9：从「最近使用」中移除指定插件（侧栏历史区删除按钮用）。
-  const removeFromRecent = useCallback((pluginId: string) => {
-    setRecentPlugins((prev) => {
-      const next = prev.filter((x) => x.id !== pluginId);
-      saveRecent(session.tenantId, next);
-      return next;
-    });
-  }, [session.tenantId]);
+  const removeFromRecent = useCallback(
+    (pluginId: string) => {
+      setRecentPlugins((prev) => {
+        const next = prev.filter((x) => x.id !== pluginId);
+        saveRecent(session.tenantId, next);
+        return next;
+      });
+    },
+    [session.tenantId]
+  );
   // Settings 页受控 Tab：默认 'cli'。新手任务清单「去设置 → 模型服务」会把它改成 'gateway'。
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('cli');
   // 模型配置刷新信号已随创建器移除（relay 上线后无需前端 bumpModelConfig）。
@@ -410,12 +499,15 @@ export default function App() {
 
   // 项 14：路由到对应独立悬浮窗（保留原 openAccountSettings API，所有现有调用方零改动）。
   // 'account' → 个人资料、'team-wallet' → 团队钱包（余额+灵石）、'settings' → 设置（可用 nextSettingsTab 指定子 tab）。
-  const openAccountSettings = useCallback((tab: AccountSettingsTab = 'account', nextSettingsTab?: SettingsTab) => {
-    if (nextSettingsTab) setSettingsTab(nextSettingsTab);
-    if (tab === 'team-wallet') setTeamWalletOpen(true);
-    else if (tab === 'settings') setSettingsOpen(true);
-    else setProfileOpen(true);
-  }, []);
+  const openAccountSettings = useCallback(
+    (tab: AccountSettingsTab = 'account', nextSettingsTab?: SettingsTab) => {
+      if (nextSettingsTab) setSettingsTab(nextSettingsTab);
+      if (tab === 'team-wallet') setTeamWalletOpen(true);
+      else if (tab === 'settings') setSettingsOpen(true);
+      else setProfileOpen(true);
+    },
+    []
+  );
   // 项 1：打开通知中心独立悬浮窗（AvatarMenu / 任意组件通过 context 调用）。
   const openNotifications = useCallback(() => setNotifOpen(true), []);
   // 项 5：打开团队管理居中悬浮窗。
@@ -432,38 +524,44 @@ export default function App() {
   }, []);
 
   // 打开运行插件主界面（带可选初始 tab，承接原 market 直达语义）。
-  const openPluginCenter = useCallback((tab?: PluginCenterTab) => {
-    if (tab) setPluginCenterTab(tab);
-    closeFeaturePanels();
-    setRunningPlugin(null);
-    setViewState('run-plugins');
-  }, [closeFeaturePanels, setRunningPlugin]);
-
-  const setView = useCallback((nextView: View) => {
-    if (nextView === 'settings') {
-      openAccountSettings('settings');
-      return;
-    }
-    if (nextView === 'team-wallet') {
-      openAccountSettings('team-wallet');
-      return;
-    }
-    // 'creator' 是兼容入口：拦截后切到独立的开发插件主界面。
-    // 承接 Home / CommandPalette / 新手任务清单 / 插件运行「继续修改」等所有 setView('creator') 调用。
-    if (nextView === 'creator') {
-      setCreatorReturnView(view === 'draft-plugins' ? 'draft-plugins' : 'run-plugins');
+  const openPluginCenter = useCallback(
+    (tab?: PluginCenterTab) => {
+      if (tab) setPluginCenterTab(tab);
       closeFeaturePanels();
       setRunningPlugin(null);
-      setViewState('develop-plugins');
-      return;
-    }
-    if (nextView === 'develop-plugins') {
-      setCreatorReturnView(view === 'draft-plugins' ? 'draft-plugins' : 'run-plugins');
-    }
-    // 跳到其它页面时关闭所有功能悬浮窗，避免浮窗残留在新页面上。
-    closeFeaturePanels();
-    setViewState(nextView);
-  }, [closeFeaturePanels, openAccountSettings, setRunningPlugin, view]);
+      setViewState('run-plugins');
+    },
+    [closeFeaturePanels, setRunningPlugin]
+  );
+
+  const setView = useCallback(
+    (nextView: View) => {
+      if (nextView === 'settings') {
+        openAccountSettings('settings');
+        return;
+      }
+      if (nextView === 'team-wallet') {
+        openAccountSettings('team-wallet');
+        return;
+      }
+      // 'creator' 是兼容入口：拦截后切到独立的开发插件主界面。
+      // 承接 Home / CommandPalette / 新手任务清单 / 插件运行「继续修改」等所有 setView('creator') 调用。
+      if (nextView === 'creator') {
+        setCreatorReturnView(view === 'draft-plugins' ? 'draft-plugins' : 'run-plugins');
+        closeFeaturePanels();
+        setRunningPlugin(null);
+        setViewState('develop-plugins');
+        return;
+      }
+      if (nextView === 'develop-plugins') {
+        setCreatorReturnView(view === 'draft-plugins' ? 'draft-plugins' : 'run-plugins');
+      }
+      // 跳到其它页面时关闭所有功能悬浮窗，避免浮窗残留在新页面上。
+      closeFeaturePanels();
+      setViewState(nextView);
+    },
+    [closeFeaturePanels, openAccountSettings, setRunningPlugin, view]
+  );
 
   const revokePluginBridgeSessions = useCallback(async () => {
     try {
@@ -473,29 +571,34 @@ export default function App() {
     }
   }, []);
 
-  const saveBackendUrl = useCallback((url: string) => {
-    const resetForBackendChange = (nextUrl: string | null) => {
-      if (nextUrl) configureApiBase(nextUrl, { persist: true });
-      else clearApiBase();
-      setBackendUrl(nextUrl);
-      setAuthToken(null);
-      clearStoredSession();
-      sessionRef.current = emptySession;
-      setSession(emptySession);
-      setBackendUnreachable(false);
-      setView('home');
-    };
-    if (!url.trim()) {
-      if (sessionRef.current.token) void revokePluginBridgeSessions().finally(() => resetForBackendChange(null));
-      else resetForBackendChange(null);
+  const saveBackendUrl = useCallback(
+    (url: string) => {
+      const resetForBackendChange = (nextUrl: string | null) => {
+        if (nextUrl) configureApiBase(nextUrl, { persist: true });
+        else clearApiBase();
+        setBackendUrl(nextUrl);
+        setAuthToken(null);
+        clearStoredSession();
+        sessionRef.current = emptySession;
+        setSession(emptySession);
+        setBackendUnreachable(false);
+        setView('home');
+      };
+      if (!url.trim()) {
+        if (sessionRef.current.token)
+          void revokePluginBridgeSessions().finally(() => resetForBackendChange(null));
+        else resetForBackendChange(null);
+        return true;
+      }
+      const normalized = normalizeBackendUrl(url);
+      if (!normalized) return false;
+      if (sessionRef.current.token)
+        void revokePluginBridgeSessions().finally(() => resetForBackendChange(normalized));
+      else resetForBackendChange(normalized);
       return true;
-    }
-    const normalized = normalizeBackendUrl(url);
-    if (!normalized) return false;
-    if (sessionRef.current.token) void revokePluginBridgeSessions().finally(() => resetForBackendChange(normalized));
-    else resetForBackendChange(normalized);
-    return true;
-  }, [revokePluginBridgeSessions, setView]);
+    },
+    [revokePluginBridgeSessions, setView]
+  );
 
   // DESK-SHELL-03 修复：applySession / applyCollabSession 不再把 setAuthToken / saveStoredSession /
   // setView 等副作用放进 setSession updater（React 要求 updater 纯函数；StrictMode dev 下双调
@@ -503,38 +606,48 @@ export default function App() {
   // 改为先在函数体内顺序执行副作用，再调纯 setSession 拼接 next 状态。
   // 用 ref 跟踪最新 session，使 updater 之外也能读到 prev（避免闭包陈旧）。
   const sessionRef = useRef(session);
-  useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
-  const applySession = useCallback((patch: Partial<Session>) => {
-    const previous = sessionRef.current;
-    const next = { ...previous, ...patch };
-    const commit = () => {
-      setAuthToken(next.token);
-      saveStoredSession(next);
-      sessionRef.current = next;
-      setSession(next);
-    };
-    const teamContextChanged = Boolean(previous.token)
-      && (next.token !== previous.token || next.tenantId !== previous.tenantId);
-    if (teamContextChanged) void revokePluginBridgeSessions().finally(commit);
-    else commit();
-  }, [revokePluginBridgeSessions]);
+  const applySession = useCallback(
+    (patch: Partial<Session>) => {
+      const previous = sessionRef.current;
+      const next = { ...previous, ...patch };
+      const commit = () => {
+        setAuthToken(next.token);
+        saveStoredSession(next);
+        sessionRef.current = next;
+        setSession(next);
+      };
+      const teamContextChanged =
+        Boolean(previous.token) &&
+        (next.token !== previous.token || next.tenantId !== previous.tenantId);
+      if (teamContextChanged) void revokePluginBridgeSessions().finally(commit);
+      else commit();
+    },
+    [revokePluginBridgeSessions]
+  );
 
-  const applyCollabSession = useCallback((payload: CollabSessionResponse) => {
-    const previous = sessionRef.current;
-    const next = sessionFromPayload(payload, previous.token);
-    const commit = () => {
-      setAuthToken(next.token);
-      saveStoredSession(next);
-      sessionRef.current = next;
-      setView('home');
-      setSession(next);
-    };
-    const teamContextChanged = Boolean(previous.token)
-      && (next.token !== previous.token || next.tenantId !== previous.tenantId);
-    if (teamContextChanged) void revokePluginBridgeSessions().finally(commit);
-    else commit();
-  }, [revokePluginBridgeSessions, setView]);
+  const applyCollabSession = useCallback(
+    (payload: CollabSessionResponse) => {
+      const previous = sessionRef.current;
+      const next = sessionFromPayload(payload, previous.token);
+      const commit = () => {
+        setAuthToken(next.token);
+        saveStoredSession(next);
+        sessionRef.current = next;
+        setView('home');
+        setSession(next);
+      };
+      const teamContextChanged =
+        Boolean(previous.token) &&
+        (next.token !== previous.token || next.tenantId !== previous.tenantId);
+      if (teamContextChanged) void revokePluginBridgeSessions().finally(commit);
+      else commit();
+    },
+    [revokePluginBridgeSessions, setView]
+  );
 
   const refreshSession = useCallback(async () => {
     const payload = await api<CollabSessionResponse>('/api/auth/me');
@@ -604,7 +717,9 @@ export default function App() {
   // R6 连接失败页：监听 api() 派发的后端不可达/可达事件，切换 backendUnreachable 状态。
   // 仅在已登录主界面响应（Auth/SetupWizard 页的连接错误走各自 toast，不渲染全屏不可达页）。
   useEffect(() => {
-    const onUnreachable = () => { if (sessionRef.current.token) setBackendUnreachable(true); };
+    const onUnreachable = () => {
+      if (sessionRef.current.token) setBackendUnreachable(true);
+    };
     const onReachable = () => setBackendUnreachable(false);
     window.addEventListener(BACKEND_UNREACHABLE_EVENT, onUnreachable);
     window.addEventListener(BACKEND_REACHABLE_EVENT, onReachable);
@@ -642,7 +757,10 @@ export default function App() {
   useEffect(() => {
     if (!backendUrl) return;
     let cancelled = false;
-    api<{ platformName?: string; logoUrl?: string }>('/api/platform-info', { auth: false, method: 'GET' })
+    api<{ platformName?: string; logoUrl?: string }>('/api/platform-info', {
+      auth: false,
+      method: 'GET',
+    })
       .then((info) => {
         if (cancelled) return;
         if (info.platformName) setPlatformName(info.platformName.trim());
@@ -661,7 +779,9 @@ export default function App() {
   // 失败静默（网络/无更新均不打扰），仅 Tauri 桌面环境执行（checkUpdate 走 Tauri 命令）。
   useEffect(() => {
     if (!backendUrl || !session.token) return;
-    const isTauri = Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+    const isTauri = Boolean(
+      (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+    );
     if (!isTauri) return;
     const FLAG = 'lf:update-checked-this-launch';
     if (sessionStorage.getItem(FLAG)) return;
@@ -703,7 +823,9 @@ export default function App() {
       setPinnedPlugins(plugins);
       savePins(session.tenantId, plugins);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [session.tenantId]);
 
   useEffect(() => {
@@ -731,7 +853,9 @@ export default function App() {
       setRecentPlugins(plugins.slice(0, RECENT_MAX));
       saveRecent(session.tenantId, plugins.slice(0, RECENT_MAX));
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [session.tenantId]);
 
   // 小视口进入时自动收起一次，保留标题栏按钮供用户按需重新展开。
@@ -747,7 +871,11 @@ export default function App() {
 
   // 侧栏开合持久化：用户切换后写盘，跨重启保留；小视口默认折叠。
   useEffect(() => {
-    try { localStorage.setItem('lf:sidebar-open', sidebarOpen ? '1' : '0'); } catch { /* 忽略配额/禁用 */ }
+    try {
+      localStorage.setItem('lf:sidebar-open', sidebarOpen ? '1' : '0');
+    } catch {
+      /* 忽略配额/禁用 */
+    }
   }, [sidebarOpen]);
 
   // Task 15 多窗口：standalone 插件窗口（?standalone=1&plugin=<id>）启动时自动加载目标插件并设为 runningPlugin，
@@ -768,7 +896,9 @@ export default function App() {
         /* 加载失败静默：用户仍可手动在侧栏打开插件 */
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.token]);
 
@@ -784,25 +914,34 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const pinPlugin = useCallback((p: LoadedPlugin) => {
-    if (!p.installationId) return;
-    setPinnedPlugins((prev) => {
-      if (prev.some((x) => x.id === p.id)) return prev;
-      const next = [...prev, p];
-      savePins(session.tenantId, next);
-      return next;
-    });
-  }, [session.tenantId]);
+  const pinPlugin = useCallback(
+    (p: LoadedPlugin) => {
+      if (!p.installationId) return;
+      setPinnedPlugins((prev) => {
+        if (prev.some((x) => x.id === p.id)) return prev;
+        const next = [...prev, p];
+        savePins(session.tenantId, next);
+        return next;
+      });
+    },
+    [session.tenantId]
+  );
 
-  const unpinPlugin = useCallback((id: string) => {
-    setPinnedPlugins((prev) => {
-      const next = prev.filter((x) => x.id !== id);
-      savePins(session.tenantId, next);
-      return next;
-    });
-  }, [session.tenantId]);
+  const unpinPlugin = useCallback(
+    (id: string) => {
+      setPinnedPlugins((prev) => {
+        const next = prev.filter((x) => x.id !== id);
+        savePins(session.tenantId, next);
+        return next;
+      });
+    },
+    [session.tenantId]
+  );
 
-  const isPinned = useCallback((id: string) => pinnedPlugins.some((x) => x.id === id), [pinnedPlugins]);
+  const isPinned = useCallback(
+    (id: string) => pinnedPlugins.some((x) => x.id === id),
+    [pinnedPlugins]
+  );
 
   // Task 6/2：打开全局搜索悬浮窗（供首页居中搜索框 / 任意组件复用）。
   const openSearch = useCallback(() => setSearchOpen(true), []);
@@ -857,10 +996,13 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    tauriListen<{ pluginId: string; exitCode?: number | null; stderrTail?: string }>('plugin:exited', (event) => {
-      const pluginId = event.payload?.pluginId;
-      if (pluginId) clearRunningPlugin(pluginId);
-    })
+    tauriListen<{ pluginId: string; exitCode?: number | null; stderrTail?: string }>(
+      'plugin:exited',
+      (event) => {
+        const pluginId = event.payload?.pluginId;
+        if (pluginId) clearRunningPlugin(pluginId);
+      }
+    )
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -881,34 +1023,80 @@ export default function App() {
   // 仅在依赖状态真正变化时才重建，消费者得以跳过无关更新。
   const ctx: AppContextValue = useMemo(
     () => ({
-      backendUrl, saveBackendUrl,
-      session, applySession, applyCollabSession, refreshSession, resetSession,
-      view, setView,
-      currentDraft, setCurrentDraft,
-      runningPlugin, setRunningPlugin, clearRunningPlugin, runningPlugins,
-      pinnedPlugins, recentPlugins, pinPlugin, unpinPlugin, isPinned, removeFromRecent,
-      settingsTab, setSettingsTab,
-      openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
-      modelConfigVersion, bumpModelConfig,
-      pendingAutoFix, setPendingAutoFix,
-      pendingDraftEdit, setPendingDraftEdit,
-      platformName, platformLogoUrl,
+      backendUrl,
+      saveBackendUrl,
+      session,
+      applySession,
+      applyCollabSession,
+      refreshSession,
+      resetSession,
+      view,
+      setView,
+      currentDraft,
+      setCurrentDraft,
+      runningPlugin,
+      setRunningPlugin,
+      clearRunningPlugin,
+      runningPlugins,
+      pinnedPlugins,
+      recentPlugins,
+      pinPlugin,
+      unpinPlugin,
+      isPinned,
+      removeFromRecent,
+      settingsTab,
+      setSettingsTab,
+      openAccountSettings,
+      openNotifications,
+      openTeamAdmin,
+      openPluginCenter,
+      openHelpFeedback,
+      modelConfigVersion,
+      bumpModelConfig,
+      pendingAutoFix,
+      setPendingAutoFix,
+      pendingDraftEdit,
+      setPendingDraftEdit,
+      platformName,
+      platformLogoUrl,
       openSearch,
       openAvatarMenu,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      backendUrl, session, view, currentDraft,
-      runningPlugin, runningPlugins,
-      pinnedPlugins, recentPlugins, isPinned,
+      backendUrl,
+      session,
+      view,
+      currentDraft,
+      runningPlugin,
+      runningPlugins,
+      pinnedPlugins,
+      recentPlugins,
+      isPinned,
       settingsTab,
-      modelConfigVersion, pendingAutoFix, pendingDraftEdit,
-      platformName, platformLogoUrl,
-      saveBackendUrl, applySession, applyCollabSession, refreshSession, resetSession,
-      clearRunningPlugin, pinPlugin, unpinPlugin, removeFromRecent,
-      openAccountSettings, openNotifications, openTeamAdmin, openPluginCenter, openHelpFeedback,
-      bumpModelConfig, openSearch, openAvatarMenu,
-    ],
+      modelConfigVersion,
+      pendingAutoFix,
+      pendingDraftEdit,
+      platformName,
+      platformLogoUrl,
+      saveBackendUrl,
+      applySession,
+      applyCollabSession,
+      refreshSession,
+      resetSession,
+      clearRunningPlugin,
+      pinPlugin,
+      unpinPlugin,
+      removeFromRecent,
+      openAccountSettings,
+      openNotifications,
+      openTeamAdmin,
+      openPluginCenter,
+      openHelpFeedback,
+      bumpModelConfig,
+      openSearch,
+      openAvatarMenu,
+    ]
   );
 
   if (restoring) {
@@ -922,7 +1110,11 @@ export default function App() {
           </div>
         </Centered>
         {/* 关窗询问悬浮窗：登录前的居中态也需渲染，否则关闭按钮 prevent_close 后无对话框、应用关不掉。 */}
-        <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} activeSchedules={closeActiveSchedules} />
+        <CloseBehaviorDialog
+          open={closePromptOpen}
+          onChoose={handleCloseChoice}
+          activeSchedules={closeActiveSchedules}
+        />
         <Toaster position="top-right" richColors closeButton />
       </AppContext.Provider>
     );
@@ -931,16 +1123,28 @@ export default function App() {
   if (!session.token) {
     // 组D：needsSetup=true（平台未初始化）时渲染 SetupWizard 替代 Auth，拦截在登录之前。
     // 向导完成后 needsSetup 置 false（effect 重查亦会刷新），回到 Auth 走正常登录。
-    const authBody = needsSetup ? (
-      <SetupWizard onDone={() => setNeedsSetup(false)} />
-    ) : (
-      <Auth />
+    const authBody = needsSetup ? <SetupWizard onDone={() => setNeedsSetup(false)} /> : <Auth />;
+    return (
+      <AppContext.Provider value={ctx}>
+        <Centered chrome label={platformName}>
+          {authBody}
+        </Centered>
+        <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} />
+        <Toaster position="top-right" richColors closeButton />
+      </AppContext.Provider>
     );
-    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}>{authBody}</Centered><CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} /><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
   }
 
   if (session.onboarding && !['TEAM_SPACE', 'TEAM_ADMIN_SPACE'].includes(session.onboarding)) {
-    return <AppContext.Provider value={ctx}><Centered chrome label={platformName}><Onboarding /></Centered><CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} /><Toaster position="top-right" richColors closeButton /></AppContext.Provider>;
+    return (
+      <AppContext.Provider value={ctx}>
+        <Centered chrome label={platformName}>
+          <Onboarding />
+        </Centered>
+        <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} />
+        <Toaster position="top-right" richColors closeButton />
+      </AppContext.Provider>
+    );
   }
 
   let body: ReactNode;
@@ -1014,7 +1218,12 @@ export default function App() {
                                 onClose={() => undefined}
                               />
                             ) : (
-                              <CreatorWorkspace onClose={() => { setViewState(creatorReturnView); setCreatorReturnView('run-plugins'); }} />
+                              <CreatorWorkspace
+                                onClose={() => {
+                                  setViewState(creatorReturnView);
+                                  setCreatorReturnView('run-plugins');
+                                }}
+                              />
                             )}
                           </PageTransition>
                         </Suspense>
@@ -1038,29 +1247,66 @@ export default function App() {
       {/* 项 14：各功能独立悬浮窗（替代已删的 AccountDialog 聚合体）。每个由 AvatarMenu 对应按钮
           经 openAccountSettings 路由打开；TeamWallet/Settings 懒加载，Suspense 兜底首次加载。
           06-24：原「钱包」+「团队空间」两窗合并为「团队钱包」（同页展示团队余额 + 团队灵石两类账户）。 */}
-      <PanelDialog open={teamWalletOpen} onOpenChange={setTeamWalletOpen} title="团队钱包" description="团队共享余额（插件市场）与灵石（AI 计费）" size="md">
-        <Suspense fallback={<ListSkeleton rows={6} />}><TeamWallet /></Suspense>
+      <PanelDialog
+        open={teamWalletOpen}
+        onOpenChange={setTeamWalletOpen}
+        title="团队钱包"
+        description="团队共享余额（插件市场）与灵石（AI 计费）"
+        size="md"
+      >
+        <Suspense fallback={<ListSkeleton rows={6} />}>
+          <TeamWallet />
+        </Suspense>
       </PanelDialog>
-      <PanelDialog open={settingsOpen} onOpenChange={setSettingsOpen} title="设置" description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新 / 关于">
-        <Suspense fallback={<ListSkeleton rows={6} />}><Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} /></Suspense>
+      <PanelDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        title="设置"
+        description="通用 / 脚本运行环境 / 模型与计费 / 插件 / 更新 / 关于"
+      >
+        <Suspense fallback={<ListSkeleton rows={6} />}>
+          <Settings value={settingsTab} onValueChange={(v) => setSettingsTab(v as SettingsTab)} />
+        </Suspense>
       </PanelDialog>
       <PanelDialog open={profileOpen} onOpenChange={setProfileOpen} title="个人资料" size="auto">
-        <ProfilePanel session={session} applySession={applySession} resetSession={resetSession} onClose={() => setProfileOpen(false)} />
+        <ProfilePanel
+          session={session}
+          applySession={applySession}
+          resetSession={resetSession}
+          onClose={() => setProfileOpen(false)}
+        />
       </PanelDialog>
       {/* 项 5：团队管理居中悬浮窗（TeamAdmin 页，仅团队管理员；权限门控在 AvatarMenu 入口）。 */}
       <PanelDialog open={teamAdminOpen} onOpenChange={setTeamAdminOpen} title="团队管理" size="lg">
-        <Suspense fallback={<ListSkeleton rows={6} />}><TeamAdmin /></Suspense>
+        <Suspense fallback={<ListSkeleton rows={6} />}>
+          <TeamAdmin />
+        </Suspense>
       </PanelDialog>
       {/* 帮助与反馈：工单中心悬浮窗（提交/查询/对话，入口在 AvatarMenu）。 */}
-      <PanelDialog open={helpFeedbackOpen} onOpenChange={setHelpFeedbackOpen} title="帮助与反馈" size="md">
-        <Suspense fallback={<ListSkeleton rows={4} />}><HelpFeedback /></Suspense>
+      <PanelDialog
+        open={helpFeedbackOpen}
+        onOpenChange={setHelpFeedbackOpen}
+        title="帮助与反馈"
+        size="md"
+      >
+        <Suspense fallback={<ListSkeleton rows={4} />}>
+          <HelpFeedback />
+        </Suspense>
       </PanelDialog>
       {/* 项 1：通知中心独立悬浮窗（Sheet portal，生命周期与 AvatarMenu 解耦，修复点击即关/卡死 bug）。 */}
       <NotificationCenter open={notifOpen} onOpenChange={setNotifOpen} />
       {/* 项 11：关窗询问悬浮窗（偏好 'ask' 时弹；tray/quit/cancel 三选项）。 */}
-      <CloseBehaviorDialog open={closePromptOpen} onChoose={handleCloseChoice} activeSchedules={closeActiveSchedules} />
+      <CloseBehaviorDialog
+        open={closePromptOpen}
+        onChoose={handleCloseChoice}
+        activeSchedules={closeActiveSchedules}
+      />
       {/* 项 4：左下角用户按钮弹出的 AvatarMenu（v4 形态，适配当前 RBAC/View）。 */}
-      <AvatarMenu open={avatarMenuOpen} onClose={() => setAvatarMenuOpen(false)} collapsed={!sidebarOpen} />
+      <AvatarMenu
+        open={avatarMenuOpen}
+        onClose={() => setAvatarMenuOpen(false)}
+        collapsed={!sidebarOpen}
+      />
       {/* Task 6 全局搜索悬浮窗：Ctrl/Cmd+K 唤起，背景模糊居中浮层。 */}
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       {view !== 'develop-plugins' && !creatorFloatingOpen && (
@@ -1076,9 +1322,14 @@ export default function App() {
         </Button>
       )}
       <Dialog open={creatorFloatingOpen} onOpenChange={setCreatorFloatingOpen}>
-        <DialogContent showCloseButton={false} className="flex h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1500px]">
+        <DialogContent
+          showCloseButton={false}
+          className="flex h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1500px]"
+        >
           <DialogTitle className="sr-only">AI 创建插件</DialogTitle>
-          <DialogDescription className="sr-only">通过 AI 对话创建、编辑并发布插件</DialogDescription>
+          <DialogDescription className="sr-only">
+            通过 AI 对话创建、编辑并发布插件
+          </DialogDescription>
           <Suspense fallback={<ListSkeleton rows={8} />}>
             <CreatorWorkspace onClose={() => setCreatorFloatingOpen(false)} />
           </Suspense>
@@ -1095,11 +1346,21 @@ export default function App() {
   );
 }
 
-function Centered({ children, chrome = false, label = '灵坊' }: { children: ReactNode; chrome?: boolean; label?: string }) {
+function Centered({
+  children,
+  chrome = false,
+  label = '灵坊',
+}: {
+  children: ReactNode;
+  chrome?: boolean;
+  label?: string;
+}) {
   // chrome=true（登录/安装向导/恢复中等无侧边栏全屏态）：顶部渲染 TitleBar（承载窗口拖拽 + 最小化/最大化/关闭），
   // 内容在剩余空间垂直水平居中。decorations:false 隐藏了系统标题栏，登录页必须自实现拖拽入口。
   const body = (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-background p-4 text-foreground">{children}</div>
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-background p-4 text-foreground">
+      {children}
+    </div>
   );
   if (!chrome) {
     return <div className="flex min-h-screen flex-col bg-background text-foreground">{body}</div>;

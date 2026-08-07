@@ -6,7 +6,12 @@
   "runtime_type": "nodejs",
   "entry": "index.js",
   "capabilities": [
-    { "kind": "ui.view", "reason": "展示 2048 游戏 http 服务", "risk": "none", "requires_admin": false }
+    {
+      "kind": "ui.view",
+      "reason": "展示 2048 游戏 http 服务",
+      "risk": "none",
+      "requires_admin": false
+    }
   ],
   "visibility": "tenant"
 }

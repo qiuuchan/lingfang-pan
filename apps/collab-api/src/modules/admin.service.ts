@@ -23,7 +23,7 @@ export class AdminService {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
     // MailService 用于 adminResetUserPassword 发送「临时密码 / 重置链接」邮件（与 auth.forgotPassword 同款通道）。
-    @Inject(MailService) private readonly mail: MailService,
+    @Inject(MailService) private readonly mail: MailService
   ) {
     // 团队管理簇委托给 AdminTeamsService（见 admin-teams.service.ts）。
     // 用户管理簇委托给 AdminUsersService（见 admin-users.service.ts）。
@@ -63,11 +63,29 @@ export class AdminService {
     return this.users.adminUserOptions(userId, query);
   }
 
-  async adminCreateUser(actorId: string, input: { email: string; password: string; displayName?: string; platformRole?: 'NONE' | 'PLATFORM_ADMIN' }) {
+  async adminCreateUser(
+    actorId: string,
+    input: {
+      email: string;
+      password: string;
+      displayName?: string;
+      platformRole?: 'NONE' | 'PLATFORM_ADMIN';
+    }
+  ) {
     return this.users.adminCreateUser(actorId, input);
   }
 
-  async adminUpdateUser(actorId: string, id: string, input: { displayName?: string; status?: 'ACTIVE' | 'DISABLED'; platformRole?: 'NONE' | 'PLATFORM_ADMIN'; email?: string; password?: string }) {
+  async adminUpdateUser(
+    actorId: string,
+    id: string,
+    input: {
+      displayName?: string;
+      status?: 'ACTIVE' | 'DISABLED';
+      platformRole?: 'NONE' | 'PLATFORM_ADMIN';
+      email?: string;
+      password?: string;
+    }
+  ) {
     return this.users.adminUpdateUser(actorId, id, input);
   }
 
@@ -95,7 +113,11 @@ export class AdminService {
     return this.users.adminResetUserPassword(actorId, id);
   }
 
-  async adminUpdateUserPlatformRole(actorId: string, id: string, input: { platformRole: 'NONE' | 'PLATFORM_ADMIN' }) {
+  async adminUpdateUserPlatformRole(
+    actorId: string,
+    id: string,
+    input: { platformRole: 'NONE' | 'PLATFORM_ADMIN' }
+  ) {
     return this.users.adminUpdateUserPlatformRole(actorId, id, input);
   }
 
@@ -108,11 +130,18 @@ export class AdminService {
     return this.teams.adminTeams(userId, query);
   }
 
-  async adminCreateTeam(actorId: string, input: { name: string; slug?: string; balanceCents?: number }) {
+  async adminCreateTeam(
+    actorId: string,
+    input: { name: string; slug?: string; balanceCents?: number }
+  ) {
     return this.teams.adminCreateTeam(actorId, input);
   }
 
-  async adminUpdateTeam(actorId: string, id: string, input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null }) {
+  async adminUpdateTeam(
+    actorId: string,
+    id: string,
+    input: { name?: string; status?: 'ACTIVE' | 'SUSPENDED'; defaultPoolId?: string | null }
+  ) {
     return this.teams.adminUpdateTeam(actorId, id, input);
   }
 
@@ -128,19 +157,36 @@ export class AdminService {
     return this.teams.adminRevokeTeamAdmin(actorId, teamId, targetUserId);
   }
 
-  async adminAdjustBalance(actorId: string, teamId: string, input: { amountCents: number; direction: 'CREDIT' | 'DEBIT'; reason?: string }) {
+  async adminAdjustBalance(
+    actorId: string,
+    teamId: string,
+    input: { amountCents: number; direction: 'CREDIT' | 'DEBIT'; reason?: string }
+  ) {
     return this.teams.adminAdjustBalance(actorId, teamId, input);
   }
 
-  async adminTeamMembers(userId: string, teamId: string, query: AdminPageQuery & { q?: string } = {}) {
+  async adminTeamMembers(
+    userId: string,
+    teamId: string,
+    query: AdminPageQuery & { q?: string } = {}
+  ) {
     return this.teams.adminTeamMembers(userId, teamId, query);
   }
 
-  async adminUpdateMemberRole(actorId: string, teamId: string, targetUserId: string, input: { role?: 'TEAM_ADMIN' | 'MEMBER'; roleId?: string }) {
+  async adminUpdateMemberRole(
+    actorId: string,
+    teamId: string,
+    targetUserId: string,
+    input: { role?: 'TEAM_ADMIN' | 'MEMBER'; roleId?: string }
+  ) {
     return this.teams.adminUpdateMemberRole(actorId, teamId, targetUserId, input);
   }
 
-  async adminUpdateTeamStatus(actorId: string, teamId: string, input: { status: 'ACTIVE' | 'SUSPENDED' }) {
+  async adminUpdateTeamStatus(
+    actorId: string,
+    teamId: string,
+    input: { status: 'ACTIVE' | 'SUSPENDED' }
+  ) {
     return this.teams.adminUpdateTeamStatus(actorId, teamId, input);
   }
 
@@ -189,5 +235,4 @@ export class AdminService {
   async auditCategories(userId: string) {
     return this.audit.auditCategories(userId);
   }
-
 }

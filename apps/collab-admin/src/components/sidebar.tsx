@@ -1,9 +1,5 @@
 import { memo, useEffect, useState, type ReactNode, type RefObject } from 'react';
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  MenuIcon,
-} from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, MenuIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -89,7 +85,7 @@ export const Sidebar = memo(function Sidebar({
   function renderItem(
     { view, label, icon: Icon }: SidebarNavItem,
     compact: boolean,
-    closeAfterSelect: boolean,
+    closeAfterSelect: boolean
   ) {
     const isActive = activeView === view;
     const button = (
@@ -108,7 +104,7 @@ export const Sidebar = memo(function Sidebar({
           isActive
             ? 'bg-primary text-primary-foreground shadow-sm'
             : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          compact && 'justify-center px-2',
+          compact && 'justify-center px-2'
         )}
       >
         <Icon className="size-4 shrink-0" />
@@ -171,7 +167,7 @@ export const Sidebar = memo(function Sidebar({
         aria-label="桌面导航"
         className={cn(
           'hidden shrink-0 border-r bg-background transition-all duration-200 lg:flex lg:flex-col',
-          collapsed ? 'w-16' : 'w-64',
+          collapsed ? 'w-16' : 'w-64'
         )}
       >
         <div className="relative flex-1 p-3">
@@ -185,7 +181,11 @@ export const Sidebar = memo(function Sidebar({
             onClick={() => setCollapsed((current) => !current)}
             className="flex w-full items-center justify-center rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            {collapsed ? <ChevronRightIcon className="size-4" /> : <ChevronLeftIcon className="size-4" />}
+            {collapsed ? (
+              <ChevronRightIcon className="size-4" />
+            ) : (
+              <ChevronLeftIcon className="size-4" />
+            )}
           </button>
         </div>
       </aside>

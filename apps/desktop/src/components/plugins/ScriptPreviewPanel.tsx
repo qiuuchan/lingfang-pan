@@ -458,8 +458,8 @@ export function ScriptPreviewPanel({
             <div className="space-y-3">
               <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">插件运行中</span>
+                  <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-success" />
+                  <span className="font-medium text-success">插件运行中</span>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   进程 PID：<span className="font-mono text-foreground">{persistentRun.pid}</span>
@@ -483,7 +483,7 @@ export function ScriptPreviewPanel({
               <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <span className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'}`} />
-                  <span className={`font-medium ${persistentRun.clean ? 'text-amber-600 dark:text-amber-400' : 'text-destructive'}`}>
+                  <span className={`font-medium ${persistentRun.clean ? 'text-warning' : 'text-destructive'}`}>
                     {persistentRun.clean ? '插件进程已结束' : '插件进程异常退出'}
                   </span>
                 </div>
@@ -613,7 +613,7 @@ export function ScriptPreviewPanel({
         {previewRun.status === 'done' && (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
-              <span>运行结果：<span className={previewRun.exitCode === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>{previewRun.exitCode ?? '未知'}</span></span>
+              <span>运行结果：<span className={previewRun.exitCode === 0 ? 'text-success' : 'text-destructive'}>{previewRun.exitCode ?? '未知'}</span></span>
               {previewRun.elapsedMs > 0 && (
                 <span className="text-muted-foreground">耗时 {(previewRun.elapsedMs / 1000).toFixed(2)}s</span>
               )}
@@ -671,7 +671,7 @@ function StartProgressView({
             <div key={s} className="flex items-center gap-2.5 text-sm">
               <span className="flex size-5 shrink-0 items-center justify-center">
                 {done ? (
-                  <span className="flex size-5 items-center justify-center rounded-full bg-emerald-500 text-emerald-50">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-success text-emerald-50">
                     <CheckIcon className="size-3" />
                   </span>
                 ) : active ? (

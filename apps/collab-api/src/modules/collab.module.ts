@@ -36,7 +36,10 @@ import { PermissionGroupService } from './permission-group.service';
 import { RolesController, AdminRolesController } from './roles.controller';
 import { AdminTeamRolesController } from './admin-team-roles.controller';
 import { PluginGrantsController } from './plugin-grants.controller';
-import { AdminPermissionGroupsController, PermissionGroupsController } from './permission-groups.controller';
+import {
+  AdminPermissionGroupsController,
+  PermissionGroupsController,
+} from './permission-groups.controller';
 import { PricingService } from './pricing.service';
 import { CreditService } from './credit.service';
 import { ChannelService, ChannelRouterService, PoolService } from './channel.service';
@@ -52,7 +55,11 @@ import { TicketService } from './ticket.service';
 import { PoolsController } from './pools.controller';
 import { TeamPoolService } from './pools.service';
 import { ARTIFACT_STORE, createArtifactStore } from './artifact-store';
-import { AdminPluginPackageController, AdminPluginRegistryController, PluginRegistryController } from './plugin-registry.controller';
+import {
+  AdminPluginPackageController,
+  AdminPluginRegistryController,
+  PluginRegistryController,
+} from './plugin-registry.controller';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginArtifactCleanupService } from './plugin-artifact-cleanup.service';
 import { PluginAiPolicyController } from './plugin-ai-policy.controller';
@@ -86,8 +93,16 @@ import { MarketplaceSettlementCutoverService } from './marketplace-settlement-cu
 import { AutomationScheduleController } from './automation-schedule.controller';
 import { AutomationScheduleService } from './automation-schedule.service';
 import { AutomationScheduleFireProcessor } from './automation-schedule-fire.processor';
-import { MARKETPLACE_METRIC_REPOSITORY, MarketplaceMetricRecorder, PrismaMarketplaceMetricRepository } from './marketplace-metric-recorder';
-import { MARKETPLACE_QUALITY_COMPUTATION_REPOSITORY, MarketplaceQualityComputationService, PrismaMarketplaceQualityComputationRepository } from './marketplace-quality-computation.service';
+import {
+  MARKETPLACE_METRIC_REPOSITORY,
+  MarketplaceMetricRecorder,
+  PrismaMarketplaceMetricRepository,
+} from './marketplace-metric-recorder';
+import {
+  MARKETPLACE_QUALITY_COMPUTATION_REPOSITORY,
+  MarketplaceQualityComputationService,
+  PrismaMarketplaceQualityComputationRepository,
+} from './marketplace-quality-computation.service';
 import { resolveAutomationConfig } from '../automation/automation-config';
 import { AUTOMATION_CONFIG } from '../automation/automation.tokens';
 import { CloudExecutionQuotaService } from './cloud-execution-quota.service';
@@ -95,10 +110,59 @@ import { MarketplaceDiscoveryService } from './marketplace-discovery.service';
 import { MarketplaceQualityController } from './marketplace-quality.controller';
 import { MarketplaceQualityService } from './marketplace-quality.service';
 import { MarketplaceQualityDailyScheduler } from './marketplace-quality-daily.scheduler';
-import { MARKETPLACE_COMMERCE_FACTS_PORT, MarketplaceQualityFactsService, PrismaMarketplaceCommerceFactsAdapter } from './marketplace-quality-facts.service';
+import {
+  MARKETPLACE_COMMERCE_FACTS_PORT,
+  MarketplaceQualityFactsService,
+  PrismaMarketplaceCommerceFactsAdapter,
+} from './marketplace-quality-facts.service';
 
 @Module({
-  controllers: [RuntimeArtifactController, MarketplaceQualityController, MarketplaceCommerceController, AutomationScheduleController, CloudActionDeploymentController, PluginSharedStateAdminController, PluginSharedStateController, DesktopExecutorSessionController, WorkflowExecutorController, WorkflowRunController, ActionInvocationController, PluginActionRegistryController, PluginGovernanceController, MeController, PublicTeamsController, TeamsController, InvitationsController, ApplicationsController, PluginsController, PluginAiPolicyController, PluginRegistryController, AdminPluginRegistryController, AdminPluginPackageController, AdminController, AdminRolesController, AdminTeamRolesController, AdminPermissionGroupsController,  WalletController, MarketplaceController, ReleaseController, PlatformInfoController, ChangelogController, NotificationController, SetupController, RolesController, PluginGrantsController, PermissionGroupsController, RelayController, BillingController, UserCreditsController, SearchController, TicketController, AdminTicketController, PoolsController],
+  controllers: [
+    RuntimeArtifactController,
+    MarketplaceQualityController,
+    MarketplaceCommerceController,
+    AutomationScheduleController,
+    CloudActionDeploymentController,
+    PluginSharedStateAdminController,
+    PluginSharedStateController,
+    DesktopExecutorSessionController,
+    WorkflowExecutorController,
+    WorkflowRunController,
+    ActionInvocationController,
+    PluginActionRegistryController,
+    PluginGovernanceController,
+    MeController,
+    PublicTeamsController,
+    TeamsController,
+    InvitationsController,
+    ApplicationsController,
+    PluginsController,
+    PluginAiPolicyController,
+    PluginRegistryController,
+    AdminPluginRegistryController,
+    AdminPluginPackageController,
+    AdminController,
+    AdminRolesController,
+    AdminTeamRolesController,
+    AdminPermissionGroupsController,
+    WalletController,
+    MarketplaceController,
+    ReleaseController,
+    PlatformInfoController,
+    ChangelogController,
+    NotificationController,
+    SetupController,
+    RolesController,
+    PluginGrantsController,
+    PermissionGroupsController,
+    RelayController,
+    BillingController,
+    UserCreditsController,
+    SearchController,
+    TicketController,
+    AdminTicketController,
+    PoolsController,
+  ],
   // CollabModule 直接声明 AuthService（与 AuthModule 重复声明，历史架构；TeamService 等注入之），
   // 故 MailService / GeetestService（AuthService 依赖）也需在此提供，否则 DI 在 CollabModule 实例化 AuthService 时找不到它们。
   // NotificationService 无外部依赖（仅 PrismaService），被 AdminService 等服务注入以发送业务通知。
@@ -107,7 +171,84 @@ import { MARKETPLACE_COMMERCE_FACTS_PORT, MarketplaceQualityFactsService, Prisma
   // 计费/中转：PricingService/CreditService/ChannelService(+Router)/RelayService 构成中转计费闭环；
   // RelayController 使用全局 JWT + RelayTeamGuard；BillingController(admin) + UserCreditsController(前台)。
   // TeamPoolService：团队端获取可用资源池（PoolsController，区别于 PoolService 管理端 CRUD）。
-  providers: [PrismaService, { provide: AUTOMATION_CONFIG, useFactory: () => resolveAutomationConfig(process.env) }, { provide: AppCacheService, useClass: CacheService }, { provide: ARTIFACT_STORE, useFactory: () => createArtifactStore(process.env) }, { provide: MARKETPLACE_METRIC_REPOSITORY, useClass: PrismaMarketplaceMetricRepository }, { provide: MARKETPLACE_QUALITY_COMPUTATION_REPOSITORY, useClass: PrismaMarketplaceQualityComputationRepository }, { provide: MARKETPLACE_COMMERCE_FACTS_PORT, useClass: PrismaMarketplaceCommerceFactsAdapter }, MarketplaceMetricRecorder, MarketplaceQualityComputationService, MarketplaceQualityFactsService, MarketplaceQualityDailyScheduler, MarketplaceDiscoveryService, MarketplaceQualityService, AuthService, MailService, GeetestService, TeamService, PluginRegistryService, PluginArtifactCleanupService, AdminService, AdminTeamsService, AdminUsersService, AdminApplicationsService, AdminDashboardService, AdminAuditService, MarketplaceCommerceService, MarketplaceCommerceQueryService, MarketplaceSettlementCutoverService, ReleaseService, SettingsService, GiteeChangelogService, NotificationService, MeService, RoleService, PluginGrantService, PluginGovernancePolicyService, PluginGovernanceService, PluginActionRegistryService, CloudEndpointSecretCipher, SafeOutboundHttpClient, CloudExecutionQuotaService, CloudActionDeploymentService, CloudActionRoutingService, CloudActionGatewayService, GovernanceActionAdapter, ActionInvocationService, CloudActionWorkerProcessor, CloudPreviewWorkerProcessor, AutomationScheduleService, AutomationScheduleFireProcessor, RuntimeArtifactService, WorkflowRunService, DesktopExecutorSessionService, PluginSharedStateService, PermissionGroupService, PricingService, CreditService, ChannelService, ChannelRouterService, PoolService, RelayService, RelayTeamGuard, SearchService, TicketService, TeamPoolService],
-  exports: [PrismaService, PluginGovernanceService, MarketplaceSettlementCutoverService, CloudActionWorkerProcessor, CloudPreviewWorkerProcessor, AutomationScheduleFireProcessor, WorkflowRunService],
+  providers: [
+    PrismaService,
+    { provide: AUTOMATION_CONFIG, useFactory: () => resolveAutomationConfig(process.env) },
+    { provide: AppCacheService, useClass: CacheService },
+    { provide: ARTIFACT_STORE, useFactory: () => createArtifactStore(process.env) },
+    { provide: MARKETPLACE_METRIC_REPOSITORY, useClass: PrismaMarketplaceMetricRepository },
+    {
+      provide: MARKETPLACE_QUALITY_COMPUTATION_REPOSITORY,
+      useClass: PrismaMarketplaceQualityComputationRepository,
+    },
+    { provide: MARKETPLACE_COMMERCE_FACTS_PORT, useClass: PrismaMarketplaceCommerceFactsAdapter },
+    MarketplaceMetricRecorder,
+    MarketplaceQualityComputationService,
+    MarketplaceQualityFactsService,
+    MarketplaceQualityDailyScheduler,
+    MarketplaceDiscoveryService,
+    MarketplaceQualityService,
+    AuthService,
+    MailService,
+    GeetestService,
+    TeamService,
+    PluginRegistryService,
+    PluginArtifactCleanupService,
+    AdminService,
+    AdminTeamsService,
+    AdminUsersService,
+    AdminApplicationsService,
+    AdminDashboardService,
+    AdminAuditService,
+    MarketplaceCommerceService,
+    MarketplaceCommerceQueryService,
+    MarketplaceSettlementCutoverService,
+    ReleaseService,
+    SettingsService,
+    GiteeChangelogService,
+    NotificationService,
+    MeService,
+    RoleService,
+    PluginGrantService,
+    PluginGovernancePolicyService,
+    PluginGovernanceService,
+    PluginActionRegistryService,
+    CloudEndpointSecretCipher,
+    SafeOutboundHttpClient,
+    CloudExecutionQuotaService,
+    CloudActionDeploymentService,
+    CloudActionRoutingService,
+    CloudActionGatewayService,
+    GovernanceActionAdapter,
+    ActionInvocationService,
+    CloudActionWorkerProcessor,
+    CloudPreviewWorkerProcessor,
+    AutomationScheduleService,
+    AutomationScheduleFireProcessor,
+    RuntimeArtifactService,
+    WorkflowRunService,
+    DesktopExecutorSessionService,
+    PluginSharedStateService,
+    PermissionGroupService,
+    PricingService,
+    CreditService,
+    ChannelService,
+    ChannelRouterService,
+    PoolService,
+    RelayService,
+    RelayTeamGuard,
+    SearchService,
+    TicketService,
+    TeamPoolService,
+  ],
+  exports: [
+    PrismaService,
+    PluginGovernanceService,
+    MarketplaceSettlementCutoverService,
+    CloudActionWorkerProcessor,
+    CloudPreviewWorkerProcessor,
+    AutomationScheduleFireProcessor,
+    WorkflowRunService,
+  ],
 })
 export class CollabModule {}

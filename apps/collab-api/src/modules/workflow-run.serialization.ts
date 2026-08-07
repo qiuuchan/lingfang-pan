@@ -18,10 +18,12 @@ function jsonValue(value: Prisma.JsonValue | null): WorkflowJsonValue | null {
     return value;
   }
   if (Array.isArray(value)) return value.map((item) => jsonValue(item) as WorkflowJsonValue);
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-    if (item === undefined) throw new Error(`Workflow JSON contains undefined at ${key}`);
-    return [key, jsonValue(item) as WorkflowJsonValue];
-  }));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      if (item === undefined) throw new Error(`Workflow JSON contains undefined at ${key}`);
+      return [key, jsonValue(item) as WorkflowJsonValue];
+    })
+  );
 }
 
 function runError(code: string, message: string): WorkflowRunSummary['error'] {
@@ -29,7 +31,9 @@ function runError(code: string, message: string): WorkflowRunSummary['error'] {
   return { code, message };
 }
 
-function attemptCounts(attempts: WorkflowRunWithAttempts['attempts']): WorkflowRunSummary['attempt_counts'] {
+function attemptCounts(
+  attempts: WorkflowRunWithAttempts['attempts']
+): WorkflowRunSummary['attempt_counts'] {
   const counts: WorkflowRunSummary['attempt_counts'] = {
     pending: 0,
     ready: 0,
@@ -41,13 +45,27 @@ function attemptCounts(attempts: WorkflowRunWithAttempts['attempts']): WorkflowR
   };
   for (const attempt of attempts) {
     switch (attempt.status) {
-      case 'PENDING': counts.pending += 1; break;
-      case 'READY': counts.ready += 1; break;
-      case 'RUNNING': counts.running += 1; break;
-      case 'SUCCEEDED': counts.succeeded += 1; break;
-      case 'FAILED': counts.failed += 1; break;
-      case 'SKIPPED': counts.skipped += 1; break;
-      case 'CANCELED': counts.canceled += 1; break;
+      case 'PENDING':
+        counts.pending += 1;
+        break;
+      case 'READY':
+        counts.ready += 1;
+        break;
+      case 'RUNNING':
+        counts.running += 1;
+        break;
+      case 'SUCCEEDED':
+        counts.succeeded += 1;
+        break;
+      case 'FAILED':
+        counts.failed += 1;
+        break;
+      case 'SKIPPED':
+        counts.skipped += 1;
+        break;
+      case 'CANCELED':
+        counts.canceled += 1;
+        break;
     }
   }
   return counts;
@@ -79,7 +97,9 @@ export function publicWorkflowRunSummary(row: WorkflowRunWithAttempts): Workflow
   };
 }
 
-export function publicWorkflowStepAttempt(row: WorkflowRunWithAttempts['attempts'][number]): WorkflowStepAttemptDTO {
+export function publicWorkflowStepAttempt(
+  row: WorkflowRunWithAttempts['attempts'][number]
+): WorkflowStepAttemptDTO {
   return {
     id: row.id,
     run_id: row.runId,

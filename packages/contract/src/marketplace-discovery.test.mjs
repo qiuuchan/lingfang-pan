@@ -50,15 +50,22 @@ test('quality metrics reject floating rates, invalid denominators and unknown fi
     security_incidents_90d: 0,
   };
   expect(MarketplaceQualityMetricSummary.parse(metrics).failure_rate_bps).toBe(200);
-  expect(() => MarketplaceQualityMetricSummary.parse({ ...metrics, failure_rate_bps: 2.5 })).toThrow();
   expect(() =>
-    MarketplaceQualityMetricSummary.parse({ ...metrics, legacy_install_count: 999 })).toThrow();
+    MarketplaceQualityMetricSummary.parse({ ...metrics, failure_rate_bps: 2.5 })
+  ).toThrow();
+  expect(() =>
+    MarketplaceQualityMetricSummary.parse({ ...metrics, legacy_install_count: 999 })
+  ).toThrow();
 });
 
 test('deterministic category inference centralizes the existing keyword priority', () => {
   expect(inferMarketplaceCategory({ name: 'AI 代码助手', description: '生成代码' })).toBe('AI');
-  expect(inferMarketplaceCategory({ name: '会议纪要生成器', description: '整理待办' })).toBe('PRODUCTIVITY');
-  expect(inferMarketplaceCategory({ name: 'HTTP 爬虫', description: '抓取接口数据' })).toBe('NETWORK');
+  expect(inferMarketplaceCategory({ name: '会议纪要生成器', description: '整理待办' })).toBe(
+    'PRODUCTIVITY'
+  );
+  expect(inferMarketplaceCategory({ name: 'HTTP 爬虫', description: '抓取接口数据' })).toBe(
+    'NETWORK'
+  );
   expect(inferMarketplaceCategory({ name: '神秘插件' })).toBe('OTHER');
 });
 
@@ -106,7 +113,8 @@ test('old catalog payload remains valid while discovery responses stay strict', 
     },
   };
   expect(PluginCatalogItem.safeParse(oldItem).success).toBe(true);
-  expect(MarketplaceDiscoveryHome.safeParse({
+  expect(
+    MarketplaceDiscoveryHome.safeParse({
       policy: MARKETPLACE_QUALITY_POLICY_V1,
       generated_at: '2026-07-16T00:00:00.000Z',
       category: null,
@@ -114,5 +122,6 @@ test('old catalog payload remains valid while discovery responses stay strict', 
       category_popular: [],
       recent_quality: [],
       legacy_items: [],
-    }).success).toBe(false);
+    }).success
+  ).toBe(false);
 });

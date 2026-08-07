@@ -12,7 +12,8 @@ function routeMethods(controller: Controller, prefix?: string): string[] {
   const prototype = Object.getPrototypeOf(controller) as Record<string, unknown>;
   return Object.getOwnPropertyNames(prototype).filter((name) => {
     if (name === 'constructor' || typeof prototype[name] !== 'function') return false;
-    const path = Reflect.getMetadata(PATH_METADATA, prototype[name] as object) as string | string[] | undefined;
+    const path = Reflect.getMetadata(PATH_METADATA, prototype[name] as object) as
+      string | string[] | undefined;
     if (path === undefined) return false;
     if (!prefix) return true;
     const paths = Array.isArray(path) ? path : [path];
@@ -24,7 +25,7 @@ function expectClientUpgrade(controller: Controller, methodNames: string[]): voi
   for (const methodName of methodNames) {
     const method = controller[methodName] as (...args: unknown[]) => unknown;
     expect(() => method.call(controller, {}, 'resource-id', {}), methodName).toThrowError(
-      expect.objectContaining({ status: 410, code: 'legacy_plugin_api_retired' }),
+      expect.objectContaining({ status: 410, code: 'legacy_plugin_api_retired' })
     );
   }
 }
@@ -45,7 +46,11 @@ describe('legacy plugin protocol cutover', () => {
   });
 
   it('disables every legacy admin/plugins route while leaving other admin routes untouched', () => {
-    const controller = new AdminController({} as never, {} as never, {} as never) as unknown as Controller;
+    const controller = new AdminController(
+      {} as never,
+      {} as never,
+      {} as never
+    ) as unknown as Controller;
     const methods = routeMethods(controller, 'plugins');
     expect(methods).toHaveLength(9);
     expectClientUpgrade(controller, methods);

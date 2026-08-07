@@ -74,7 +74,7 @@ function activeListing(currentReleaseId: string): AdminPluginListingProjection {
 
 function delistedListing(
   currentReleaseId: string,
-  delistedBy: 'OWNER' | 'PLATFORM',
+  delistedBy: 'OWNER' | 'PLATFORM'
 ): AdminPluginListingProjection {
   return {
     status: 'DELISTED',
@@ -276,7 +276,9 @@ export class GovernanceApiMock {
   }
 
   count(method: string, pathname: string) {
-    return this.requests.filter((request) => request.method === method && request.pathname === pathname).length;
+    return this.requests.filter(
+      (request) => request.method === method && request.pathname === pathname
+    ).length;
   }
 
   last(method: string, pathname: string) {
@@ -288,10 +290,11 @@ export class GovernanceApiMock {
   }
 
   pluginRequests() {
-    return this.requests.filter((request) => (
-      request.pathname.startsWith('/api/admin/plugin-packages')
-      || request.pathname.startsWith('/api/admin/plugin-releases')
-    ));
+    return this.requests.filter(
+      (request) =>
+        request.pathname.startsWith('/api/admin/plugin-packages') ||
+        request.pathname.startsWith('/api/admin/plugin-releases')
+    );
   }
 
   private record(request: Request) {
@@ -370,7 +373,10 @@ export class GovernanceApiMock {
       const sourceKind = url.searchParams.get('sourceKind');
       const items = this.packages
         .map((fixture) => this.packageListItem(fixture))
-        .filter((item) => !search || `${item.name} ${item.manifestId}`.toLocaleLowerCase().includes(search))
+        .filter(
+          (item) =>
+            !search || `${item.name} ${item.manifestId}`.toLocaleLowerCase().includes(search)
+        )
         .filter((item) => !status || item.governanceStatus === status)
         .filter((item) => !reviewStatus || item.latestRelease?.marketReviewStatus === reviewStatus)
         .filter((item) => !sourceKind || item.latestRelease?.sourceKind === sourceKind);
@@ -380,7 +386,11 @@ export class GovernanceApiMock {
     const relistMatch = pathname.match(/^\/api\/admin\/plugin-packages\/([^/]+)\/relist$/);
     if (method === 'POST' && relistMatch) {
       const fixture = this.findPackage(relistMatch[1]);
-      if (!fixture || fixture.listing?.status !== 'DELISTED' || fixture.listing.delistedBy !== 'PLATFORM') {
+      if (
+        !fixture ||
+        fixture.listing?.status !== 'DELISTED' ||
+        fixture.listing.delistedBy !== 'PLATFORM'
+      ) {
         return this.json(route, { message: '只有平台下架的插件可以恢复' }, 409);
       }
       const currentReleaseId = fixture.listing.currentReleaseId;
@@ -395,11 +405,14 @@ export class GovernanceApiMock {
       if (!fixture) return this.notFound(route);
       const page = Number(url.searchParams.get('page') ?? '1');
       const pageSize = Number(url.searchParams.get('pageSize') ?? '10');
-      return this.json(route, pageOf(
-        fixture.releases.map((release) => this.releaseListItem(fixture, release)),
-        page,
-        pageSize,
-      ));
+      return this.json(
+        route,
+        pageOf(
+          fixture.releases.map((release) => this.releaseListItem(fixture, release)),
+          page,
+          pageSize
+        )
+      );
     }
 
     const packageMatch = pathname.match(/^\/api\/admin\/plugin-packages\/([^/]+)$/);
@@ -412,15 +425,20 @@ export class GovernanceApiMock {
     if (method === 'POST' && delistMatch) {
       if (this.delistConflictsRemaining > 0) {
         this.delistConflictsRemaining -= 1;
-        return this.json(route, { message: '发行版状态已变化', code: 'plugin_state_conflict' }, 409);
+        return this.json(
+          route,
+          { message: '发行版状态已变化', code: 'plugin_state_conflict' },
+          409
+        );
       }
       const match = this.findRelease(delistMatch[1]);
       if (!match || !this.isMarketplaceCurrent(match.fixture, match.release)) {
         return this.json(route, { message: '只能下架精确的市场当前发行版' }, 409);
       }
-      const reason = typeof recorded.body === 'object' && recorded.body
-        ? String((recorded.body as { reason?: unknown }).reason ?? '')
-        : '';
+      const reason =
+        typeof recorded.body === 'object' && recorded.body
+          ? String((recorded.body as { reason?: unknown }).reason ?? '')
+          : '';
       match.fixture.listing = {
         status: 'DELISTED',
         currentReleaseId: match.release.core.id,
@@ -460,7 +478,9 @@ export class GovernanceApiMock {
     const releaseMatch = pathname.match(/^\/api\/admin\/plugin-releases\/([^/]+)$/);
     if (method === 'GET' && releaseMatch) {
       const match = this.findRelease(releaseMatch[1]);
-      return match ? this.json(route, this.releaseCore(match.fixture, match.release)) : this.notFound(route);
+      return match
+        ? this.json(route, this.releaseCore(match.fixture, match.release))
+        : this.notFound(route);
     }
 
     return this.json(route, { message: `未模拟的 API：${method} ${pathname}` }, 404);
@@ -479,7 +499,9 @@ export class GovernanceApiMock {
   }
 
   private isMarketplaceCurrent(fixture: PackageFixture, release: ReleaseFixture) {
-    return fixture.listing?.status === 'ACTIVE' && fixture.listing.currentReleaseId === release.core.id;
+    return (
+      fixture.listing?.status === 'ACTIVE' && fixture.listing.currentReleaseId === release.core.id
+    );
   }
 
   private releaseSummary(release: ReleaseFixture): AdminPluginReleaseSummary {
@@ -496,7 +518,10 @@ export class GovernanceApiMock {
     };
   }
 
-  private releaseListItem(fixture: PackageFixture, release: ReleaseFixture): AdminPluginReleaseListItem {
+  private releaseListItem(
+    fixture: PackageFixture,
+    release: ReleaseFixture
+  ): AdminPluginReleaseListItem {
     return {
       ...this.releaseSummary(release),
       targetPlatform: release.core.targetPlatform,
@@ -507,9 +532,9 @@ export class GovernanceApiMock {
 
   private packageListItem(fixture: PackageFixture): AdminPluginPackageListItem {
     const latestRelease = fixture.releases[0] ?? null;
-    const currentRelease = fixture.releases.find((release) => (
-      release.core.id === fixture.listing?.currentReleaseId
-    ));
+    const currentRelease = fixture.releases.find(
+      (release) => release.core.id === fixture.listing?.currentReleaseId
+    );
     return {
       id: fixture.package.id,
       manifestId: fixture.package.manifestId,
@@ -521,7 +546,9 @@ export class GovernanceApiMock {
       latestRelease: latestRelease ? this.releaseSummary(latestRelease) : null,
       marketplaceCurrentVersion: currentRelease?.core.version ?? null,
       releaseCount: fixture.releases.length,
-      pendingReviewCount: fixture.releases.filter((release) => release.core.marketReviewStatus === 'PENDING').length,
+      pendingReviewCount: fixture.releases.filter(
+        (release) => release.core.marketReviewStatus === 'PENDING'
+      ).length,
       createdAt: fixture.package.createdAt,
       updatedAt: fixture.package.updatedAt,
     };
@@ -533,11 +560,16 @@ export class GovernanceApiMock {
       ownerTeam: fixture.ownerTeam,
       listing: fixture.listing,
       releaseCount: fixture.releases.length,
-      pendingReviewCount: fixture.releases.filter((release) => release.core.marketReviewStatus === 'PENDING').length,
+      pendingReviewCount: fixture.releases.filter(
+        (release) => release.core.marketReviewStatus === 'PENDING'
+      ).length,
     };
   }
 
-  private releaseCore(fixture: PackageFixture, release: ReleaseFixture): AdminPluginReleaseCoreDetail {
+  private releaseCore(
+    fixture: PackageFixture,
+    release: ReleaseFixture
+  ): AdminPluginReleaseCoreDetail {
     return {
       release: release.core,
       listing: fixture.listing,

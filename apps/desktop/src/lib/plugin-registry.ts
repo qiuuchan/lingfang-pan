@@ -24,7 +24,10 @@ import {
   sanitizePluginSourceLabel,
   type PluginProvenance,
 } from '@/lib/plugin-provenance';
-import { readWorkspaceFiles as readTaggedWorkspaceFiles, writeWorkspaceFiles } from '@/lib/plugin-status';
+import {
+  readWorkspaceFiles as readTaggedWorkspaceFiles,
+  writeWorkspaceFiles,
+} from '@/lib/plugin-status';
 
 export type RegistryCatalogItem = PluginCatalogItem;
 export type RegistryPackage = PluginPackageSummary;
@@ -39,14 +42,23 @@ export type RegistryReleaseStatus = RegistryRelease['status'];
 export type RegistrySourceKind = PluginReleaseSourceKind;
 export type Installation = LocalPluginInstallation;
 export type Workspace = DraftWorkspace;
-export type { MarketplaceListingProjection, PluginManagementItem, PluginPackageDetail, PluginReleaseSourceKind } from '@lingfang/contract';
+export type {
+  MarketplaceListingProjection,
+  PluginManagementItem,
+  PluginPackageDetail,
+  PluginReleaseSourceKind,
+} from '@lingfang/contract';
 export type { PluginProvenance } from '@/lib/plugin-provenance';
 export { DEFAULT_SOURCE_LABELS, normalizePluginProvenance } from '@/lib/plugin-provenance';
 export const INSTALLATIONS_CHANGED_EVENT = 'lf:plugin-installations-changed';
 
 function normalizeWorkspace(workspace: Workspace): Workspace {
   const sourceKind = isPluginSourceKind(workspace.sourceKind) ? workspace.sourceKind : 'UNKNOWN';
-  return { ...workspace, sourceKind, sourceLabel: sanitizePluginSourceLabel(workspace.sourceLabel) };
+  return {
+    ...workspace,
+    sourceKind,
+    sourceLabel: sanitizePluginSourceLabel(workspace.sourceLabel),
+  };
 }
 
 export type PluginArtifactInspection = {
@@ -67,7 +79,14 @@ function notifyInstallationsChanged() {
 }
 
 export type TransferProgress = {
-  stage: 'inspecting' | 'packing' | 'downloading' | 'verifying' | 'installing' | 'uploading' | 'finished';
+  stage:
+    | 'inspecting'
+    | 'packing'
+    | 'downloading'
+    | 'verifying'
+    | 'installing'
+    | 'uploading'
+    | 'finished';
   message: string;
   transferred: number;
   total: number | null;
@@ -167,7 +186,9 @@ export function getPluginPackageDetail(packageId: string): Promise<RegistryPacka
   return api<RegistryPackageDetail>(`/api/plugin-packages/${encodeURIComponent(packageId)}`);
 }
 
-export function getPluginReleaseDetail(releaseId: string): Promise<{ release: PluginReleaseDetail }> {
+export function getPluginReleaseDetail(
+  releaseId: string
+): Promise<{ release: PluginReleaseDetail }> {
   return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}`);
 }
 
@@ -184,7 +205,7 @@ export function submitMarketplaceQualityAppeal(packageId: string, body: string):
 
 export async function submitReleaseToMarketplace(
   releaseId: string,
-  priceCents?: number,
+  priceCents?: number
 ): Promise<{ release: RegistryRelease }> {
   return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/submit-marketplace`, {
     method: 'POST',
@@ -194,7 +215,7 @@ export async function submitReleaseToMarketplace(
 
 export async function withdrawMarketplaceSubmission(
   releaseId: string,
-  reason?: string,
+  reason?: string
 ): Promise<{ release: RegistryRelease }> {
   return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/withdraw-marketplace`, {
     method: 'POST',
@@ -204,7 +225,7 @@ export async function withdrawMarketplaceSubmission(
 
 export function updatePluginPackageStatus(
   packageId: string,
-  status: RegistryPackageStatus,
+  status: RegistryPackageStatus
 ): Promise<{ package: RegistryPackage; listing: RegistryListing | null }> {
   return api(`/api/plugin-packages/${encodeURIComponent(packageId)}/status`, {
     method: 'PATCH',
@@ -214,7 +235,7 @@ export function updatePluginPackageStatus(
 
 export function updatePluginReleaseStatus(
   releaseId: string,
-  status: RegistryReleaseStatus,
+  status: RegistryReleaseStatus
 ): Promise<{ release: RegistryRelease; listing: RegistryListing | null }> {
   return api(`/api/plugin-releases/${encodeURIComponent(releaseId)}/status`, {
     method: 'PATCH',
@@ -225,7 +246,7 @@ export function updatePluginReleaseStatus(
 export function updateOwnerMarketplaceStatus(
   packageId: string,
   status: 'ACTIVE' | 'DELISTED',
-  reason?: string,
+  reason?: string
 ): Promise<{ packageId: string; listing: RegistryListing }> {
   return api(`/api/plugin-packages/${encodeURIComponent(packageId)}/marketplace-status`, {
     method: 'PATCH',
@@ -260,13 +281,16 @@ export type PluginPublishAction =
   | { type: 'team_failed'; error: string }
   | { type: 'market_failed'; error: string };
 
-export function createPluginPublishState(target: PluginPublishTarget, priceCents?: number): PluginPublishState {
+export function createPluginPublishState(
+  target: PluginPublishTarget,
+  priceCents?: number
+): PluginPublishState {
   return { target, phase: 'idle', priceCents };
 }
 
 export function pluginPublishReducer(
   state: PluginPublishState,
-  action: PluginPublishAction,
+  action: PluginPublishAction
 ): PluginPublishState {
   switch (action.type) {
     case 'start_upload':
@@ -282,7 +306,12 @@ export function pluginPublishReducer(
       if (!state.result) return state;
       return { ...state, phase: 'done', error: undefined };
     case 'team_failed':
-      return { target: state.target, phase: 'team_failed', priceCents: state.priceCents, error: action.error };
+      return {
+        target: state.target,
+        phase: 'team_failed',
+        priceCents: state.priceCents,
+        error: action.error,
+      };
     case 'market_failed':
       if (!state.result) return state;
       return { ...state, phase: 'market_failed', error: action.error };
@@ -292,7 +321,7 @@ export function pluginPublishReducer(
 function publishStateEmitter(
   target: PluginPublishTarget,
   priceCents?: number,
-  onState?: (state: PluginPublishState) => void,
+  onState?: (state: PluginPublishState) => void
 ) {
   let state = createPluginPublishState(target, priceCents);
   return {
@@ -305,12 +334,15 @@ function publishStateEmitter(
 }
 
 async function reconcileMarketplaceSubmission(
-  published: RegistryPublishResult,
+  published: RegistryPublishResult
 ): Promise<RegistryPublishResult | null> {
   try {
     const detail = await getPluginPackageDetail(published.package.id);
     const release = detail.releases.find((item) => item.id === published.release.id);
-    if (!release || (release.marketReviewStatus !== 'PENDING' && release.marketReviewStatus !== 'APPROVED')) {
+    if (
+      !release ||
+      (release.marketReviewStatus !== 'PENDING' && release.marketReviewStatus !== 'APPROVED')
+    ) {
       return null;
     }
     return { package: detail.package, release };
@@ -321,7 +353,7 @@ async function reconcileMarketplaceSubmission(
 
 async function submitMarketplaceOrReconcile(
   published: RegistryPublishResult,
-  priceCents?: number,
+  priceCents?: number
 ): Promise<RegistryPublishResult> {
   try {
     const submitted = await submitReleaseToMarketplace(published.release.id, priceCents);
@@ -359,7 +391,10 @@ export async function publishPluginRelease(options: {
     const submitted = await submitMarketplaceOrReconcile(published, options.priceCents);
     return state.dispatch({ type: 'market_submitted', result: submitted });
   } catch (caught) {
-    return state.dispatch({ type: 'market_failed', error: errorMessage(caught, '团队版本已发布，但提交市场审核失败') });
+    return state.dispatch({
+      type: 'market_failed',
+      error: errorMessage(caught, '团队版本已发布，但提交市场审核失败'),
+    });
   }
 }
 
@@ -367,7 +402,7 @@ export async function publishPluginRelease(options: {
 export async function retryMarketplaceSubmission(
   failed: PluginPublishState,
   priceCents?: number,
-  onState?: (state: PluginPublishState) => void,
+  onState?: (state: PluginPublishState) => void
 ): Promise<PluginPublishState> {
   if (failed.phase !== 'market_failed' || !failed.result) {
     throw new Error('当前发布状态没有可重试的市场提审');
@@ -394,14 +429,18 @@ export async function loadInstalledPlugin(installationId: string): Promise<Loade
 }
 
 export async function previewPendingInstalledPlugin(installationId: string): Promise<LoadedPlugin> {
-  const payload = await tauriInvoke<InstalledPayload>('preview_pending_installed_plugin', { installationId });
+  const payload = await tauriInvoke<InstalledPayload>('preview_pending_installed_plugin', {
+    installationId,
+  });
   const release = payload.installation.pendingRelease;
   if (!release) throw new Error('安装项没有待激活版本');
   return installedPayloadToPlugin(payload, release, release.releaseId);
 }
 
 export async function activatePendingClientPlugin(installationId: string): Promise<Installation> {
-  const installation = await tauriInvoke<Installation>('activate_pending_client_plugin', { installationId });
+  const installation = await tauriInvoke<Installation>('activate_pending_client_plugin', {
+    installationId,
+  });
   notifyInstallationsChanged();
   return installation;
 }
@@ -410,8 +449,14 @@ export function requiresRunnerActivation(runtime: LoadedPlugin['runtime_type']):
   return runtime === 'client' || runtime === 'cloud';
 }
 
-export async function discardPendingPluginUpdate(installationId: string, reason?: string): Promise<Installation> {
-  const installation = await tauriInvoke<Installation>('discard_pending_plugin_update', { installationId, reason });
+export async function discardPendingPluginUpdate(
+  installationId: string,
+  reason?: string
+): Promise<Installation> {
+  const installation = await tauriInvoke<Installation>('discard_pending_plugin_update', {
+    installationId,
+    reason,
+  });
   notifyInstallationsChanged();
   return installation;
 }
@@ -419,12 +464,15 @@ export async function discardPendingPluginUpdate(installationId: string, reason?
 function installedPayloadToPlugin(
   payload: InstalledPayload,
   release: Installation['activeRelease'],
-  pendingReleaseId?: string,
+  pendingReleaseId?: string
 ): LoadedPlugin {
   const manifest = payload.manifest;
   const entry = String(manifest.entry || 'ui/index.html');
   const runtime = String(manifest.runtime_type || 'client') as LoadedPlugin['runtime_type'];
-  const manifestFile: DraftFile = { path: 'manifest.json', content: JSON.stringify(manifest, null, 2) };
+  const manifestFile: DraftFile = {
+    path: 'manifest.json',
+    content: JSON.stringify(manifest, null, 2),
+  };
   return {
     id: payload.installation.installationId,
     installationId: payload.installation.installationId,
@@ -449,7 +497,7 @@ function installedPayloadToPlugin(
 export async function downloadRelease(
   item: RegistryCatalogItem,
   origin: 'team' | 'marketplace',
-  onProgress?: (progress: TransferProgress) => void,
+  onProgress?: (progress: TransferProgress) => void
 ): Promise<Installation> {
   const { base, token } = connection();
   const installation = await tauriInvoke<Installation>('download_plugin_release', {
@@ -485,7 +533,7 @@ export async function importLocalArtifact(artifactPath: string): Promise<Install
 export async function publishLocalArtifact(
   artifactPath: string,
   options: Partial<PluginProvenance> & { packageId?: string } = {},
-  onProgress?: (progress: TransferProgress) => void,
+  onProgress?: (progress: TransferProgress) => void
 ): Promise<RegistryPublishResult> {
   const { base, token } = connection();
   const provenance = normalizePluginProvenance(options, 'LOCAL_ARTIFACT');
@@ -502,8 +550,12 @@ export async function publishLocalArtifact(
   });
 }
 
-export async function buyMarketplacePackage(packageId: string, expectedPriceVersion: string): Promise<void> {
-  if (!/^pv1\.[A-Za-z0-9_-]{43}$/.test(expectedPriceVersion)) throw new Error('市场价格版本无效，请刷新插件目录后重试');
+export async function buyMarketplacePackage(
+  packageId: string,
+  expectedPriceVersion: string
+): Promise<void> {
+  if (!/^pv1\.[A-Za-z0-9_-]{43}$/.test(expectedPriceVersion))
+    throw new Error('市场价格版本无效，请刷新插件目录后重试');
   await api(`/api/plugin-packages/${packageId}/purchase`, {
     method: 'POST',
     headers: { 'Idempotency-Key': crypto.randomUUID() },
@@ -513,7 +565,7 @@ export async function buyMarketplacePackage(packageId: string, expectedPriceVers
 
 export async function startInstalledPlugin(
   plugin: LoadedPlugin,
-  registryAccessGranted: boolean,
+  registryAccessGranted: boolean
 ): Promise<{ pid: number; started_at: string }> {
   const { base, token } = connection();
   return tauriInvoke('start_installed_plugin', {
@@ -529,7 +581,9 @@ export async function stopInstalledPlugin(installationId: string): Promise<void>
 }
 
 export async function rollbackInstallation(installationId: string): Promise<Installation> {
-  const installation = await tauriInvoke<Installation>('rollback_plugin_installation', { installationId });
+  const installation = await tauriInvoke<Installation>('rollback_plugin_installation', {
+    installationId,
+  });
   notifyInstallationsChanged();
   return installation;
 }
@@ -565,28 +619,37 @@ export async function deleteDraftWorkspace(workspaceId: string): Promise<void> {
 }
 
 export async function importDraftWorkspace(artifactPath: string): Promise<Workspace> {
-  return normalizeWorkspace(await tauriInvoke<Workspace>('import_draft_workspace', { artifactPath }));
+  return normalizeWorkspace(
+    await tauriInvoke<Workspace>('import_draft_workspace', { artifactPath })
+  );
 }
 
 export async function copyInstallationToDraft(installationId: string): Promise<Workspace> {
-  return normalizeWorkspace(await tauriInvoke<Workspace>('copy_installation_to_draft_workspace', { installationId }));
+  return normalizeWorkspace(
+    await tauriInvoke<Workspace>('copy_installation_to_draft_workspace', { installationId })
+  );
 }
 
 export function deleteLocalCreatorConversation(
   conversationId: string | null,
   userId: string | null,
-  tenantId: string | null,
+  tenantId: string | null
 ): void {
   if (!conversationId) return;
   const conversationsKey = conversationKey(userId, tenantId);
   const selectedKey = selectedConversationKey(userId, tenantId);
   try {
     const raw = localStorage.getItem(conversationsKey);
-    const conversations = raw ? JSON.parse(raw) as unknown : [];
+    const conversations = raw ? (JSON.parse(raw) as unknown) : [];
     if (Array.isArray(conversations)) {
       localStorage.setItem(
         conversationsKey,
-        JSON.stringify(conversations.filter((item) => !item || typeof item !== 'object' || (item as { id?: unknown }).id !== conversationId)),
+        JSON.stringify(
+          conversations.filter(
+            (item) =>
+              !item || typeof item !== 'object' || (item as { id?: unknown }).id !== conversationId
+          )
+        )
       );
     }
     if (localStorage.getItem(selectedKey) === conversationId) localStorage.removeItem(selectedKey);
@@ -600,29 +663,38 @@ export type PublishWorkspaceOptions = Partial<PluginProvenance> & { packageId?: 
 export function publishDraftWorkspace(
   workspace: Workspace,
   onProgress?: (progress: TransferProgress) => void,
-  options?: PublishWorkspaceOptions,
+  options?: PublishWorkspaceOptions
 ): Promise<RegistryPublishResult>;
 export function publishDraftWorkspace(
   workspace: Workspace,
   options?: PublishWorkspaceOptions,
-  onProgress?: (progress: TransferProgress) => void,
+  onProgress?: (progress: TransferProgress) => void
 ): Promise<RegistryPublishResult>;
 export async function publishDraftWorkspace(
   workspace: Workspace,
   optionsOrProgress?: PublishWorkspaceOptions | ((progress: TransferProgress) => void),
-  progressOrOptions?: PublishWorkspaceOptions | ((progress: TransferProgress) => void),
+  progressOrOptions?: PublishWorkspaceOptions | ((progress: TransferProgress) => void)
 ): Promise<RegistryPublishResult> {
   const { base, token } = connection();
-  const options = typeof optionsOrProgress === 'object' && optionsOrProgress !== null
-    ? optionsOrProgress
-    : (typeof progressOrOptions === 'object' && progressOrOptions !== null ? progressOrOptions : {});
-  const onProgress = typeof optionsOrProgress === 'function'
-    ? optionsOrProgress
-    : (typeof progressOrOptions === 'function' ? progressOrOptions : undefined);
-  const provenance = normalizePluginProvenance({
-    sourceKind: options.sourceKind ?? workspace.sourceKind,
-    sourceLabel: options.sourceLabel ?? workspace.sourceLabel,
-  }, workspace.sourceKind || 'UNKNOWN');
+  const options =
+    typeof optionsOrProgress === 'object' && optionsOrProgress !== null
+      ? optionsOrProgress
+      : typeof progressOrOptions === 'object' && progressOrOptions !== null
+        ? progressOrOptions
+        : {};
+  const onProgress =
+    typeof optionsOrProgress === 'function'
+      ? optionsOrProgress
+      : typeof progressOrOptions === 'function'
+        ? progressOrOptions
+        : undefined;
+  const provenance = normalizePluginProvenance(
+    {
+      sourceKind: options.sourceKind ?? workspace.sourceKind,
+      sourceLabel: options.sourceLabel ?? workspace.sourceLabel,
+    },
+    workspace.sourceKind || 'UNKNOWN'
+  );
   return tauriInvoke<RegistryPublishResult>('publish_draft_workspace', {
     input: {
       apiBase: base,
@@ -643,7 +715,10 @@ export function readWorkspaceFiles(workspaceId: string): Promise<DraftFile[]> {
 export async function loadDraftWorkspacePlugin(workspace: Workspace): Promise<LoadedPlugin> {
   const files = await readWorkspaceFiles(workspace.workspaceId);
   const manifestFile = files.find((file) => file.path === 'manifest.json');
-  const manifest = manifestFile && !manifestFile.binary ? JSON.parse(manifestFile.content) as Record<string, unknown> : {};
+  const manifest =
+    manifestFile && !manifestFile.binary
+      ? (JSON.parse(manifestFile.content) as Record<string, unknown>)
+      : {};
   return {
     id: workspace.workspaceId,
     name: workspace.title,
@@ -669,14 +744,18 @@ export async function loadDraftWorkspacePlugin(workspace: Workspace): Promise<Lo
 
 export async function createWorkflowUpgradeDraft(
   plugin: LoadedPlugin,
-  suggestions: WorkflowUpgradeSuggestion[],
+  suggestions: WorkflowUpgradeSuggestion[]
 ): Promise<LoadedPlugin> {
-  if (plugin.runtime_type !== 'workflow' || !plugin.files?.length) throw new Error('当前工作流没有可复制的发行版文件');
+  if (plugin.runtime_type !== 'workflow' || !plugin.files?.length)
+    throw new Error('当前工作流没有可复制的发行版文件');
   const manifestFile = plugin.files.find((file) => file.path === 'manifest.json' && !file.binary);
   if (!manifestFile) throw new Error('当前工作流缺少 manifest.json');
   let manifest: Record<string, unknown>;
-  try { manifest = JSON.parse(manifestFile.content) as Record<string, unknown>; }
-  catch { throw new Error('当前工作流 manifest.json 无法解析'); }
+  try {
+    manifest = JSON.parse(manifestFile.content) as Record<string, unknown>;
+  } catch {
+    throw new Error('当前工作流 manifest.json 无法解析');
+  }
   const manifestId = String(manifest.id || '').trim();
   if (!manifestId) throw new Error('当前工作流 manifest ID 无效');
   const adopted = applyWorkflowUpgradeSuggestions(plugin.files, plugin.entry, suggestions);
@@ -707,7 +786,9 @@ export async function createWorkflowUpgradeDraft(
 }
 
 export async function exportDraftWorkspace(workspaceId: string): Promise<string> {
-  const result = await tauriInvoke<{ artifactPath: string }>('pack_draft_workspace', { workspaceId });
+  const result = await tauriInvoke<{ artifactPath: string }>('pack_draft_workspace', {
+    workspaceId,
+  });
   return result.artifactPath;
 }
 
@@ -723,8 +804,9 @@ export async function persistDraftWorkspace(input: {
   files: DraftFile[];
 }): Promise<Workspace> {
   const workspaces = await listDraftWorkspaces();
-  let workspace = workspaces.find((item) => item.workspaceId === input.preferredWorkspaceId)
-    || workspaces.find((item) => item.manifestId === input.manifestId);
+  let workspace =
+    workspaces.find((item) => item.workspaceId === input.preferredWorkspaceId) ||
+    workspaces.find((item) => item.manifestId === input.manifestId);
   if (!workspace) {
     workspace = await createDraftWorkspace({
       title: input.title,
@@ -737,10 +819,13 @@ export async function persistDraftWorkspace(input: {
     });
   }
   await writeWorkspaceFiles(workspace.workspaceId, input.files);
-  const provenance = normalizePluginProvenance({
-    sourceKind: input.sourceKind ?? workspace.sourceKind,
-    sourceLabel: input.sourceLabel ?? workspace.sourceLabel,
-  }, workspace.sourceKind || 'LINGFANG_CREATOR');
+  const provenance = normalizePluginProvenance(
+    {
+      sourceKind: input.sourceKind ?? workspace.sourceKind,
+      sourceLabel: input.sourceLabel ?? workspace.sourceLabel,
+    },
+    workspace.sourceKind || 'LINGFANG_CREATOR'
+  );
   const synced = await tauriInvoke<Workspace>('sync_draft_workspace_metadata', {
     workspaceId: workspace.workspaceId,
     conversationId: input.conversationId,

@@ -65,7 +65,12 @@ function tokenFingerprint(): string {
 export async function fetchContextWindow(forceRefresh = false): Promise<ContextWindow> {
   const fp = tokenFingerprint();
   const now = Date.now();
-  if (!forceRefresh && cache && cache.tokenFingerprint === fp && now - cache.fetchedAt < CACHE_TTL_MS) {
+  if (
+    !forceRefresh &&
+    cache &&
+    cache.tokenFingerprint === fp &&
+    now - cache.fetchedAt < CACHE_TTL_MS
+  ) {
     return cache.value;
   }
 
@@ -77,7 +82,8 @@ export async function fetchContextWindow(forceRefresh = false): Promise<ContextW
     const premium = find('premium');
     result = {
       fast: typeof fast === 'number' && fast > 0 ? fast : FALLBACK_CONTEXT_WINDOW.fast,
-      premium: typeof premium === 'number' && premium > 0 ? premium : FALLBACK_CONTEXT_WINDOW.premium,
+      premium:
+        typeof premium === 'number' && premium > 0 ? premium : FALLBACK_CONTEXT_WINDOW.premium,
     };
   } catch {
     // 后端不可达 / 未配置 / 旧版本无 contextWindow 字段 → 保守默认，不阻断对话。

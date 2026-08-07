@@ -7,7 +7,9 @@ import { errorMessage } from '@/lib/api';
 describe('errorMessage', () => {
   it('裸字符串原样返回（Tauri Result<_, String> reject 形态）', () => {
     // Rust 侧 .map_err(|e| e.to_string()) 抛出的真实错误，此前被 (err as ApiError).message 吞掉。
-    expect(errorMessage('ClaudeCode SDK 返回错误：HTTP 401')).toBe('ClaudeCode SDK 返回错误：HTTP 401');
+    expect(errorMessage('ClaudeCode SDK 返回错误：HTTP 401')).toBe(
+      'ClaudeCode SDK 返回错误：HTTP 401'
+    );
   });
 
   it('裸字符串去除首尾空白', () => {

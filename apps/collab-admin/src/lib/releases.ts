@@ -51,7 +51,7 @@ async function fetchPublic(path: string): Promise<Response> {
  *  （semver 比较，宽松解析主.次.修 + prerelease），避免调用方自行实现版本比较导致格式不一致误判。 */
 export async function getLatestRelease(
   channel: 'STABLE' | 'BETA' = 'STABLE',
-  currentVersion?: string,
+  currentVersion?: string
 ): Promise<Release | null> {
   try {
     const cv = currentVersion ? `&currentVersion=${encodeURIComponent(currentVersion)}` : '';
@@ -64,7 +64,10 @@ export async function getLatestRelease(
 }
 
 /** 获取已发布版本列表（changelog 时间线）。API 不可用时返回空数组。 */
-export async function listReleases(channel: 'STABLE' | 'BETA' = 'STABLE', limit = 10): Promise<Release[]> {
+export async function listReleases(
+  channel: 'STABLE' | 'BETA' = 'STABLE',
+  limit = 10
+): Promise<Release[]> {
   try {
     const resp = await fetchPublic(`/api/releases?channel=${channel}&limit=${limit}`);
     if (!resp.ok) return [];
@@ -82,10 +85,10 @@ export function formatSize(bytes: number | null | undefined): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** 格式化发布日期（2026-06-14）。 */
-export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
+/** 格式化发布日期（2026-06-14）。支持 ISO 字符串或 Date 对象，null/undefined/非法值返回空串。 */
+export function formatDate(input: string | Date | null | undefined): string {
+  if (!input) return '';
+  const d = new Date(input);
   if (Number.isNaN(d.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -136,11 +139,21 @@ export async function listChangelog(): Promise<ChangelogResponse> {
   try {
     const resp = await fetchPublic('/api/changelog');
     if (!resp.ok) {
-      return { source: 'unconfigured', releases: [], degraded: true, message: '更新日志暂时不可用' };
+      return {
+        source: 'unconfigured',
+        releases: [],
+        degraded: true,
+        message: '更新日志暂时不可用',
+      };
     }
     return (await resp.json()) as ChangelogResponse;
   } catch {
-    return { source: 'unconfigured', releases: [], degraded: true, message: '无法连接服务器，检查网络后重试' };
+    return {
+      source: 'unconfigured',
+      releases: [],
+      degraded: true,
+      message: '无法连接服务器，检查网络后重试',
+    };
   }
 }
 
@@ -177,7 +190,10 @@ export function createRelease(input: ReleaseCreateInput) {
 }
 
 /** PATCH /api/admin/releases/:id：更新 title/notes/channel/publishedAt。 */
-export function updateRelease(id: string, body: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: string | null }) {
+export function updateRelease(
+  id: string,
+  body: { title?: string; notes?: string; channel?: 'STABLE' | 'BETA'; publishedAt?: string | null }
+) {
   return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}`, { method: 'PATCH', body });
 }
 
@@ -188,17 +204,24 @@ export function deleteRelease(id: string) {
 
 /** POST /api/admin/releases/:id/publish：发布。 */
 export function publishRelease(id: string) {
-  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}/publish`, { method: 'POST' });
+  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}/publish`, {
+    method: 'POST',
+  });
 }
 
 /** POST /api/admin/releases/:id/archive：归档。 */
 export function archiveRelease(id: string) {
-  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}/archive`, { method: 'POST' });
+  return api<{ release: AdminReleaseCore }>(`/api/admin/releases/${id}/archive`, {
+    method: 'POST',
+  });
 }
 
 /** POST /api/admin/releases/:id/assets：登记外链产物。 */
 export function addAsset(id: string, input: AssetCreateInput) {
-  return api<{ asset: ReleaseAsset }>(`/api/admin/releases/${id}/assets`, { method: 'POST', body: input });
+  return api<{ asset: ReleaseAsset }>(`/api/admin/releases/${id}/assets`, {
+    method: 'POST',
+    body: input,
+  });
 }
 
 /** POST /api/admin/releases/:id/assets/upload：上传安装包文件（multipart）。
@@ -208,7 +231,7 @@ export async function uploadAsset(
   id: string,
   file: File,
   platform: 'WINDOWS' | 'DARWIN' | 'LINUX',
-  arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL',
+  arch: 'X86_64' | 'AARCH64' | 'UNIVERSAL'
 ): Promise<ReleaseAsset> {
   const form = new FormData();
   form.append('file', file);

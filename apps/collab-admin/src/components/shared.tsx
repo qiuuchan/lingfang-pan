@@ -30,7 +30,15 @@ export function Section({
   );
 }
 
-export function Panel({ title, description, children }: { title: string; description: string; children?: ReactNode }) {
+export function Panel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
   return (
     <div className="rounded-lg border bg-muted/20 p-4">
       <div className="mb-3">

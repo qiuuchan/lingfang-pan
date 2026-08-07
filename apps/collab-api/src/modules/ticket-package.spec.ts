@@ -16,7 +16,13 @@ import {
 } from './ticket-package';
 
 function file(over: Partial<UploadedFileLike> = {}): UploadedFileLike {
-  return { originalname: 'a.png', mimetype: 'image/png', size: 1024, buffer: Buffer.from('x'), ...over };
+  return {
+    originalname: 'a.png',
+    mimetype: 'image/png',
+    size: 1024,
+    buffer: Buffer.from('x'),
+    ...over,
+  };
 }
 
 describe('ticket-package', () => {
@@ -59,15 +65,19 @@ describe('ticket-package', () => {
       expect(() => validateAttachments(files)).toThrow();
     });
     it('单文件超大抛 bad_request', () => {
-      expect(() => validateAttachments([file({ size: MAX_TICKET_ATTACHMENT_BYTES + 1 })]))
-        .toThrowError(/过大/);
+      expect(() =>
+        validateAttachments([file({ size: MAX_TICKET_ATTACHMENT_BYTES + 1 })])
+      ).toThrowError(/过大/);
     });
     it('非白名单 MIME 抛 bad_request', () => {
-      expect(() => validateAttachments([file({ originalname: 'x.exe', mimetype: 'application/x-msdownload' })]))
-        .toThrowError(/不被允许/);
+      expect(() =>
+        validateAttachments([file({ originalname: 'x.exe', mimetype: 'application/x-msdownload' })])
+      ).toThrowError(/不被允许/);
     });
     it('合规附件通过', () => {
-      expect(() => validateAttachments([file(), file({ originalname: 'b.log', mimetype: 'text/plain' })])).not.toThrow();
+      expect(() =>
+        validateAttachments([file(), file({ originalname: 'b.log', mimetype: 'text/plain' })])
+      ).not.toThrow();
     });
   });
 

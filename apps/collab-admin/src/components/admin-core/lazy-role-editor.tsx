@@ -24,14 +24,20 @@ export function LazyRoleEditor({
   roleId?: string;
   title: string;
   onClose: () => void;
-  onSubmit: (body: { name?: string; code?: string; description?: string; permissions?: string[] }) => Promise<unknown>;
+  onSubmit: (body: {
+    name?: string;
+    code?: string;
+    description?: string;
+    permissions?: string[];
+  }) => Promise<unknown>;
 }) {
   const role = useAsyncResource<Role>(
-    (signal) => scope === 'team'
-      ? adminCoreApi.teamRoleDetail(teamId!, roleId!, signal)
-      : adminCoreApi.roleDetail(roleId!, signal),
+    (signal) =>
+      scope === 'team'
+        ? adminCoreApi.teamRoleDetail(teamId!, roleId!, signal)
+        : adminCoreApi.roleDetail(roleId!, signal),
     [scope, teamId, roleId],
-    { enabled: !!roleId && (scope === 'platform' || !!teamId) },
+    { enabled: !!roleId && (scope === 'platform' || !!teamId) }
   );
 
   const references = useAsyncResource(
@@ -47,7 +53,7 @@ export function LazyRoleEditor({
       return { permissions: permissions.permissions, groups: groups.groups };
     },
     [scope, teamId],
-    { enabled: scope === 'platform' || !!teamId },
+    { enabled: scope === 'platform' || !!teamId }
   );
 
   const loadedRole = roleId ? role.data : undefined;
@@ -58,7 +64,7 @@ export function LazyRoleEditor({
     const groupLabels = new Map(
       referenceData.groups
         .filter((group) => group.customized)
-        .map((group) => [group.groupKey, group.displayName]),
+        .map((group) => [group.groupKey, group.displayName])
     );
     return (
       <RoleEditDialog
@@ -73,15 +79,21 @@ export function LazyRoleEditor({
     );
   }
 
-  const status = references.status === 'error' || role.status === 'error'
-    ? 'error'
-    : references.status === 'loading' || (roleId && role.status === 'loading')
-      ? 'loading'
-      : 'idle';
+  const status =
+    references.status === 'error' || role.status === 'error'
+      ? 'error'
+      : references.status === 'loading' || (roleId && role.status === 'loading')
+        ? 'loading'
+        : 'idle';
   const error = references.error ?? role.error;
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

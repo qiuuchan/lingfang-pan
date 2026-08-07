@@ -11,9 +11,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis"
-    ],
+    "targets": ["nsis"],
     "resources": {
       "../builtin-plugins": "builtin-plugins",
       "../runtimes": "runtimes"
@@ -34,10 +32,7 @@
       "nsis": {
         "installMode": "currentUser",
         "displayLanguageSelector": false,
-        "languages": [
-          "SimpChinese",
-          "English"
-        ],
+        "languages": ["SimpChinese", "English"],
         "installerIcon": "icons/icon.ico"
       }
     }
@@ -54,9 +49,7 @@
         "decorations": false,
         "center": true,
         "windowEffects": {
-          "effects": [
-            "mica"
-          ],
+          "effects": ["mica"],
           "radius": 12
         }
       }

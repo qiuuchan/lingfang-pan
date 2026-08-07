@@ -5,8 +5,22 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableCellAction, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableCellAction,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { PluginPackageSheet } from '@/components/governance/plugin-package-sheet';
 import { loadPluginPackages } from '@/components/governance/api';
 import {
@@ -31,7 +45,11 @@ type StatusFilter = PluginGovernanceStatus | 'ALL';
 type ReviewFilter = PluginReviewStatus | 'ALL';
 type SourceFilter = PluginSourceKind | 'ALL';
 
-export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus?: PluginReviewStatus }) {
+export function PluginPackagesTab({
+  initialReviewStatus,
+}: {
+  initialReviewStatus?: PluginReviewStatus;
+}) {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('ALL');
@@ -42,20 +60,25 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
   const [active, setActive] = useState<PluginPackageSummary | null>(null);
 
   const packages = useAsyncResource(
-    (signal) => loadPluginPackages({
-      page,
-      pageSize,
-      search: search || undefined,
-      status: status === 'ALL' ? undefined : status,
-      reviewStatus: reviewStatus === 'ALL' ? undefined : reviewStatus,
-      sourceKind: sourceKind === 'ALL' ? undefined : sourceKind,
-    }, signal),
+    (signal) =>
+      loadPluginPackages(
+        {
+          page,
+          pageSize,
+          search: search || undefined,
+          status: status === 'ALL' ? undefined : status,
+          reviewStatus: reviewStatus === 'ALL' ? undefined : reviewStatus,
+          sourceKind: sourceKind === 'ALL' ? undefined : sourceKind,
+        },
+        signal
+      ),
     [page, pageSize, search, status, reviewStatus, sourceKind],
-    { isEmpty: (result) => result.items.length === 0 },
+    { isEmpty: (result) => result.items.length === 0 }
   );
 
   useEffect(() => {
-    if (!packages.data || packages.data.page !== page || packages.data.pageSize !== pageSize) return;
+    if (!packages.data || packages.data.page !== page || packages.data.pageSize !== pageSize)
+      return;
     const totalPages = Math.max(1, Math.ceil(packages.data.total / pageSize));
     if (page > totalPages) setPage(totalPages);
   }, [packages.data, page, pageSize]);
@@ -70,15 +93,24 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
     <Section
       title="插件发行"
       description="按插件包核对发布来源与市场状态，处理审核、下架和恢复。"
-      actions={(
-        <Button type="button" variant="outline" size="sm" onClick={packages.reload} disabled={packages.status === 'loading'}>
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={packages.reload}
+          disabled={packages.status === 'loading'}
+        >
           <RefreshCwIcon className={packages.status === 'loading' ? 'animate-spin' : ''} />
           刷新
         </Button>
-      )}
+      }
     >
       <div className="space-y-4">
-        <form className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_10rem_10rem_12rem_auto]" onSubmit={submitSearch}>
+        <form
+          className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_10rem_10rem_12rem_auto]"
+          onSubmit={submitSearch}
+        >
           <div className="relative min-w-0 sm:col-span-2 xl:col-span-1">
             <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -95,7 +127,9 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
               setPage(1);
             }}
           >
-            <SelectTrigger aria-label="审核状态"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="审核状态">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部审核状态</SelectItem>
               <SelectItem value="PENDING">待审核</SelectItem>
@@ -111,7 +145,9 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
               setPage(1);
             }}
           >
-            <SelectTrigger aria-label="插件包状态"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="插件包状态">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部包状态</SelectItem>
               <SelectItem value="ACTIVE">正常</SelectItem>
@@ -125,27 +161,34 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
               setPage(1);
             }}
           >
-            <SelectTrigger aria-label="发布来源"><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="发布来源">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部发布来源</SelectItem>
               {Object.entries(SOURCE_KIND_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button type="submit" className="w-full xl:w-auto"><SearchIcon />查询</Button>
+          <Button type="submit" className="w-full xl:w-auto">
+            <SearchIcon />
+            查询
+          </Button>
         </form>
 
         <AsyncResource
           status={packages.status}
           error={packages.error}
           retry={packages.reload}
-          emptyFallback={(
+          emptyFallback={
             <div className="flex min-h-40 flex-col items-center justify-center gap-2 border-y py-8 text-sm text-muted-foreground">
               <PackageOpenIcon className="size-6 opacity-60" />
               没有符合条件的插件包
             </div>
-          )}
+          }
         >
           {packages.data && (
             <>
@@ -175,7 +218,9 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
                           </TableCellAction>
                           <PackageStatusBadge value={item.governanceStatus} />
                         </div>
-                        <div className="mt-0.5 max-w-72 truncate font-mono text-xs text-muted-foreground">{item.manifestId}</div>
+                        <div className="mt-0.5 max-w-72 truncate font-mono text-xs text-muted-foreground">
+                          {item.manifestId}
+                        </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <div>{item.ownerTeam.name}</div>
@@ -194,13 +239,19 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
                               ingestChannel={item.latestRelease.ingestChannel}
                               showPrefix
                             />
-                            <div className="text-xs text-muted-foreground">共 {item.releaseCount} 个版本</div>
+                            <div className="text-xs text-muted-foreground">
+                              共 {item.releaseCount} 个版本
+                            </div>
                           </div>
-                        ) : '—'}
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
                       <TableCell>
                         {item.pendingReviewCount > 0 ? (
-                          <span className="inline-flex rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-200">{item.pendingReviewCount} 待审核</span>
+                          <span className="inline-flex rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                            {item.pendingReviewCount} 待审核
+                          </span>
                         ) : item.latestRelease ? (
                           <ReviewBadge value={item.latestRelease.marketReviewStatus} />
                         ) : (
@@ -214,7 +265,8 @@ export function PluginPackagesTab({ initialReviewStatus }: { initialReviewStatus
                             <div className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
                               市场当前 v{item.marketplaceCurrentVersion}
                             </div>
-                          ) : item.listing?.status === 'DELISTED' && item.marketplaceCurrentVersion ? (
+                          ) : item.listing?.status === 'DELISTED' &&
+                            item.marketplaceCurrentVersion ? (
                             <div className="text-xs text-muted-foreground">
                               下架前版本 v{item.marketplaceCurrentVersion}
                             </div>

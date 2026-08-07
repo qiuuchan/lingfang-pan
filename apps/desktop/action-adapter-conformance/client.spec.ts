@@ -13,7 +13,9 @@ type Fixtures = {
   cases: FixtureCase[];
 };
 
-const fixtures = JSON.parse(readFileSync(new URL('./fixtures.json', import.meta.url), 'utf8')) as Fixtures;
+const fixtures = JSON.parse(
+  readFileSync(new URL('./fixtures.json', import.meta.url), 'utf8')
+) as Fixtures;
 const cases = new Map(fixtures.cases.map((fixture) => [fixture.id, fixture]));
 
 const handlerSource = `
@@ -46,38 +48,50 @@ function fixture(id: string): FixtureCase {
 async function executeInBrowser(
   page: Page,
   selected: FixtureCase,
-  options: { timeoutMs?: number; cancelAfterMs?: number } = {},
+  options: { timeoutMs?: number; cancelAfterMs?: number } = {}
 ) {
-  return page.evaluate(async ({ input, source, timeoutMs, cancelAfterMs }) => {
-    const { executeClientActionAdapter } = await import('/src/lib/plugin-action-client-adapter.ts');
-    const controller = cancelAfterMs === undefined ? undefined : new AbortController();
-    if (controller) window.setTimeout(() => controller.abort(), cancelAfterMs);
-    try {
-      const output = await executeClientActionAdapter({
-        invocationId: crypto.randomUUID(),
-        source,
-        exportName: 'run',
-        input,
-        timeoutMs,
-        signal: controller?.signal,
-        onCapability: async () => { throw new Error('fixture handler must not call host capabilities'); },
-      });
-      return { output, errorCode: null, errorMessage: null, remainingFrames: document.querySelectorAll('iframe').length };
-    } catch (error) {
-      return {
-        output: null,
-        errorCode: error && typeof error === 'object' && 'code' in error ? String(error.code) : null,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : null,
-        remainingFrames: document.querySelectorAll('iframe').length,
-      };
+  return page.evaluate(
+    async ({ input, source, timeoutMs, cancelAfterMs }) => {
+      const { executeClientActionAdapter } =
+        await import('/src/lib/plugin-action-client-adapter.ts');
+      const controller = cancelAfterMs === undefined ? undefined : new AbortController();
+      if (controller) window.setTimeout(() => controller.abort(), cancelAfterMs);
+      try {
+        const output = await executeClientActionAdapter({
+          invocationId: crypto.randomUUID(),
+          source,
+          exportName: 'run',
+          input,
+          timeoutMs,
+          signal: controller?.signal,
+          onCapability: async () => {
+            throw new Error('fixture handler must not call host capabilities');
+          },
+        });
+        return {
+          output,
+          errorCode: null,
+          errorMessage: null,
+          remainingFrames: document.querySelectorAll('iframe').length,
+        };
+      } catch (error) {
+        return {
+          output: null,
+          errorCode:
+            error && typeof error === 'object' && 'code' in error ? String(error.code) : null,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : null,
+          remainingFrames: document.querySelectorAll('iframe').length,
+        };
+      }
+    },
+    {
+      input: selected.input,
+      source: handlerSource,
+      timeoutMs: options.timeoutMs ?? 1_000,
+      cancelAfterMs: options.cancelAfterMs,
     }
-  }, {
-    input: selected.input,
-    source: handlerSource,
-    timeoutMs: options.timeoutMs ?? 1_000,
-    cancelAfterMs: options.cancelAfterMs,
-  });
+  );
 }
 
 test.beforeEach(async ({ page }) => {
@@ -111,7 +125,9 @@ test('returns action_timeout and tears down the pending sandbox', async ({ page 
   expect(result.remainingFrames).toBe(0);
 });
 
-test('honors AbortSignal with action_cancelled and tears down the pending sandbox', async ({ page }) => {
+test('honors AbortSignal with action_cancelled and tears down the pending sandbox', async ({
+  page,
+}) => {
   const selected = fixture('cancel');
   const result = await executeInBrowser(page, selected, { timeoutMs: 5_000, cancelAfterMs: 30 });
   expect(result.errorCode).toBe(selected.expected_error);

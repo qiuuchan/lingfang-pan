@@ -56,7 +56,9 @@ describe('GeetestService', () => {
     vi.stubGlobal('fetch', fetchFn);
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
-    expect(await service.validate({ lot_number: 'x', captcha_output: '', pass_token: '', gen_time: '' })).toBe(false);
+    expect(
+      await service.validate({ lot_number: 'x', captcha_output: '', pass_token: '', gen_time: '' })
+    ).toBe(false);
     // 缺参不应发起极验请求。
     expect(fetchFn).not.toHaveBeenCalled();
   });
@@ -87,7 +89,9 @@ describe('GeetestService', () => {
     expect(body).toContain('lot_number=lot123');
     expect(body).toContain('sign_token=');
     // Content-Type 为表单。
-    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/x-www-form-urlencoded');
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe(
+      'application/x-www-form-urlencoded'
+    );
   });
 
   it('极验返回 result!==success 时拒绝', async () => {
@@ -95,10 +99,18 @@ describe('GeetestService', () => {
       { key: 'geetestCaptchaId', value: 'fake-id' },
       { key: 'geetestCaptchaKey', value: 'fake-key' },
     ]);
-    vi.stubGlobal('fetch', mockFetch({ ok: true, status: 200, json: async () => ({ result: 'fail', reason: 'fake' }) }));
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({ ok: true, status: 200, json: async () => ({ result: 'fail', reason: 'fake' }) })
+    );
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
-    const ok = await service.validate({ lot_number: 'lot', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+    const ok = await service.validate({
+      lot_number: 'lot',
+      captcha_output: 'o',
+      pass_token: 'p',
+      gen_time: 'g',
+    });
     expect(ok).toBe(false);
   });
 
@@ -107,12 +119,20 @@ describe('GeetestService', () => {
       { key: 'geetestCaptchaId', value: 'fake-id' },
       { key: 'geetestCaptchaKey', value: 'fake-key' },
     ]);
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      throw new Error('network down');
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network down');
+      })
+    );
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
-    const ok = await service.validate({ lot_number: 'lot', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+    const ok = await service.validate({
+      lot_number: 'lot',
+      captcha_output: 'o',
+      pass_token: 'p',
+      gen_time: 'g',
+    });
     expect(ok).toBe(false);
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
@@ -125,7 +145,12 @@ describe('GeetestService', () => {
     vi.stubGlobal('fetch', mockFetch({ ok: false, status: 503, json: async () => ({}) }));
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
-    const ok = await service.validate({ lot_number: 'lot', captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+    const ok = await service.validate({
+      lot_number: 'lot',
+      captcha_output: 'o',
+      pass_token: 'p',
+      gen_time: 'g',
+    });
     expect(ok).toBe(false);
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
@@ -142,7 +167,12 @@ describe('GeetestService', () => {
     vi.stubGlobal('fetch', fetchFn);
     // @ts-expect-error mock
     const service = new GeetestService(prisma);
-    await service.validate({ lot_number: lotNumber, captcha_output: 'o', pass_token: 'p', gen_time: 'g' });
+    await service.validate({
+      lot_number: lotNumber,
+      captcha_output: 'o',
+      pass_token: 'p',
+      gen_time: 'g',
+    });
     const init = fetchFn.mock.calls[0][1] as RequestInit;
     const body = String(init.body);
     expect(body).toContain(`sign_token=${expectedSign}`);

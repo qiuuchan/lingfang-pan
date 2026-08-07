@@ -43,10 +43,13 @@ describe('withRetryFetch', () => {
 
   it('拿到 HTTP 5xx 响应 → 不重试；body 被翻译成 OpenAI 兼容格式（流式不重放）', async () => {
     // relay 错误体：{code, message}（非 SSE）。withRetryFetch 应把它改写成 {error:{message}}。
-    const serverErr = new Response(JSON.stringify({ code: 'upstream_llm_error', message: '上游模型调用失败' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const serverErr = new Response(
+      JSON.stringify({ code: 'upstream_llm_error', message: '上游模型调用失败' }),
+      {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
     const fetchMock = vi.fn(async () => serverErr);
     vi.stubGlobal('fetch', fetchMock);
     const retryFetch = withRetryFetch();
@@ -58,11 +61,15 @@ describe('withRetryFetch', () => {
     expect(res.status).toBe(503);
     // body 被翻译成 OpenAI 兼容格式 {error:{message}}，供 @ai-sdk/openai 解析。
     const body = await res.json();
-    expect(body).toMatchObject({ error: { message: '上游模型调用失败', type: 'upstream_llm_error' } });
+    expect(body).toMatchObject({
+      error: { message: '上游模型调用失败', type: 'upstream_llm_error' },
+    });
   });
 
   it('AbortError（取消）→ 立即抛出，不重试', async () => {
-    const fetchMock = vi.fn(async () => { throw new DOMException('aborted', 'AbortError'); });
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException('aborted', 'AbortError');
+    });
     vi.stubGlobal('fetch', fetchMock);
     const retryFetch = withRetryFetch();
 
@@ -71,7 +78,9 @@ describe('withRetryFetch', () => {
   });
 
   it('非 TypeError 的其它错误 → 直接抛出，不重试', async () => {
-    const fetchMock = vi.fn(async () => { throw new SyntaxError('bad json'); });
+    const fetchMock = vi.fn(async () => {
+      throw new SyntaxError('bad json');
+    });
     vi.stubGlobal('fetch', fetchMock);
     const retryFetch = withRetryFetch();
 
@@ -80,7 +89,9 @@ describe('withRetryFetch', () => {
   });
 
   it('重试次数用尽仍连接失败 → 抛最后一次 TypeError', async () => {
-    const fetchMock = vi.fn(async () => { throw new TypeError('fetch failed'); });
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
     vi.stubGlobal('fetch', fetchMock);
     const retryFetch = withRetryFetch();
 
@@ -89,8 +100,10 @@ describe('withRetryFetch', () => {
       const p = retryFetch('https://relay/v1/chat');
       // 先挂一个 noop catch 占位，避免推进时间时 reject 飞出无人接住。
       const handled = p.then(
-        () => { throw new Error('应 reject 却 resolve'); },
-        (e: unknown) => e,
+        () => {
+          throw new Error('应 reject 却 resolve');
+        },
+        (e: unknown) => e
       );
       // CONNECT_RETRY=3，共 4 次尝试（1 首次 + 3 重试），退避 500/1000/2000。
       await vi.advanceTimersByTimeAsync(500);
@@ -113,7 +126,11 @@ describe('rewriteRelayErrorBody', () => {
     const { body, status } = rewriteRelayErrorBody(402, raw);
     expect(status).toBe(402);
     expect(JSON.parse(body)).toMatchObject({
-      error: { message: '钱包余额不足', type: 'insufficient_balance', code: 'insufficient_balance' },
+      error: {
+        message: '钱包余额不足',
+        type: 'insufficient_balance',
+        code: 'insufficient_balance',
+      },
     });
   });
 
@@ -122,7 +139,10 @@ describe('rewriteRelayErrorBody', () => {
     const raw = JSON.stringify({
       code: 'upstream_llm_error',
       message: '上游模型调用失败',
-      details: { upstreamStatus: 400, upstreamDetail: 'tool schema invalid: description must be an object' },
+      details: {
+        upstreamStatus: 400,
+        upstreamDetail: 'tool schema invalid: description must be an object',
+      },
     });
     const { body, status } = rewriteRelayErrorBody(400, raw);
     expect(status).toBe(400);
@@ -165,7 +185,11 @@ describe('readRelayErrorDetail', () => {
   it('OpenAI 格式 {error:{message}}（withRetryFetch 翻译后）→ 读出 error.message（回归核心）', () => {
     // 这正是 loop.ts 此前读不到的格式：withRetryFetch 已把 relay 错误翻译成 OpenAI 兼容。
     const raw = JSON.stringify({
-      error: { message: '上游模型调用失败：tokenization failed: unexpected role developer', type: 'upstream_llm_error', code: 'upstream_llm_error' },
+      error: {
+        message: '上游模型调用失败：tokenization failed: unexpected role developer',
+        type: 'upstream_llm_error',
+        code: 'upstream_llm_error',
+      },
     });
     const { detail, code } = readRelayErrorDetail(400, raw);
     // 核心断言：detail 不再回落为 "HTTP 400"，而是透出完整根因。
@@ -184,7 +208,10 @@ describe('readRelayErrorDetail', () => {
     const raw = JSON.stringify({
       code: 'upstream_llm_error',
       message: '上游模型调用失败',
-      details: { upstreamStatus: 400, upstreamDetail: 'tool schema invalid: description must be an object' },
+      details: {
+        upstreamStatus: 400,
+        upstreamDetail: 'tool schema invalid: description must be an object',
+      },
     });
     const { detail, code } = readRelayErrorDetail(400, raw);
     expect(detail).toContain('上游模型调用失败');
@@ -230,7 +257,11 @@ describe('readRelayErrorDetail', () => {
     // loop.ts 用 code 判断 502 是否为可重试的 upstream_llm_error。
     // withRetryFetch 翻译后 code 在 error.code 里，验证能正确取出。
     const raw = JSON.stringify({
-      error: { message: '上游模型调用失败', type: 'upstream_llm_error', code: 'upstream_llm_error' },
+      error: {
+        message: '上游模型调用失败',
+        type: 'upstream_llm_error',
+        code: 'upstream_llm_error',
+      },
     });
     const { code } = readRelayErrorDetail(502, raw);
     expect(code).toBe('upstream_llm_error');

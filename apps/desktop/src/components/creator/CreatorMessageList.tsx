@@ -77,48 +77,61 @@ const TurnBubble = memo(function TurnBubble({
         <SparklesIcon className="size-3.5" />
       </span>
       <div className="min-w-0 flex-1 space-y-3">
-        {parts.length > 0 ? parts.map((part, partIndex) => {
-          if (part.type === 'reasoning') {
-            return (
-              <details key={`reasoning-${partIndex}`} className="overflow-hidden rounded-lg border border-border/70 bg-muted/25 text-xs" open={!part.done && turn.streaming}>
-                <summary className="flex cursor-pointer items-center gap-2 px-3 py-2.5 font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
-                  {!part.done && turn.streaming ? '正在思考' : '思考过程'}
-                  {!part.done && turn.streaming && <Loader2Icon className="size-3 animate-spin" />}
-                </summary>
-                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words border-t border-border/60 px-3 py-3 font-mono text-[11px] leading-6 text-muted-foreground">
-                  {part.content}
+        {parts.length > 0 ? (
+          parts.map((part, partIndex) => {
+            if (part.type === 'reasoning') {
+              return (
+                <details
+                  key={`reasoning-${partIndex}`}
+                  className="overflow-hidden rounded-lg border border-border/70 bg-muted/25 text-xs"
+                  open={!part.done && turn.streaming}
+                >
+                  <summary className="flex cursor-pointer items-center gap-2 px-3 py-2.5 font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
+                    {!part.done && turn.streaming ? '正在思考' : '思考过程'}
+                    {!part.done && turn.streaming && (
+                      <Loader2Icon className="size-3 animate-spin" />
+                    )}
+                  </summary>
+                  <div className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words border-t border-border/60 px-3 py-3 font-mono text-[11px] leading-6 text-muted-foreground">
+                    {part.content}
+                  </div>
+                </details>
+              );
+            }
+            if (part.type === 'text') {
+              if (!part.content.trim()) return null;
+              return (
+                <div
+                  key={`text-${partIndex}`}
+                  className="creator-assistant-bubble group relative py-0.5 pr-8 text-[15px] leading-7 text-foreground"
+                >
+                  <CreatorCopyButton text={part.content} className="top-0" />
+                  <div className="break-words">
+                    <MemoMarkdown content={part.content} />
+                  </div>
                 </div>
-              </details>
-            );
-          }
-          if (part.type === 'text') {
-            if (!part.content.trim()) return null;
+              );
+            }
+            if (part.type === 'tool') return <ToolCallCard key={part.toolCallId} data={part} />;
             return (
-              <div key={`text-${partIndex}`} className="creator-assistant-bubble group relative py-0.5 pr-8 text-[15px] leading-7 text-foreground">
-                <CreatorCopyButton text={part.content} className="top-0" />
-                <div className="break-words"><MemoMarkdown content={part.content} /></div>
-              </div>
+              <QuestionCard
+                key={part.toolCallId}
+                question={part.question}
+                toolCallId={part.toolCallId}
+                options={part.options}
+                allowFreeText={part.allowFreeText}
+                multiSelect={part.multiSelect}
+                answer={part.answer}
+                answered={part.answered}
+                draftText={answerDrafts[part.toolCallId] ?? ''}
+                selected={multiSelectDrafts[part.toolCallId] ?? []}
+                onAnswer={(answer) => onAnswer(turnIndex, part.toolCallId, answer)}
+                onDraftChange={(text) => onAnswerDraftChange(part.toolCallId, text)}
+                onToggleOption={(value) => onToggleMultiSelect(part.toolCallId, value)}
+              />
             );
-          }
-          if (part.type === 'tool') return <ToolCallCard key={part.toolCallId} data={part} />;
-          return (
-            <QuestionCard
-              key={part.toolCallId}
-              question={part.question}
-              toolCallId={part.toolCallId}
-              options={part.options}
-              allowFreeText={part.allowFreeText}
-              multiSelect={part.multiSelect}
-              answer={part.answer}
-              answered={part.answered}
-              draftText={answerDrafts[part.toolCallId] ?? ''}
-              selected={multiSelectDrafts[part.toolCallId] ?? []}
-              onAnswer={(answer) => onAnswer(turnIndex, part.toolCallId, answer)}
-              onDraftChange={(text) => onAnswerDraftChange(part.toolCallId, text)}
-              onToggleOption={(value) => onToggleMultiSelect(part.toolCallId, value)}
-            />
-          );
-        }) : (
+          })
+        ) : (
           <div className="creator-assistant-bubble group relative min-h-6 pr-8 text-[15px] leading-7 text-foreground">
             {turn.content && <CreatorCopyButton text={turn.content} className="top-0" />}
             {turn.content ? (
@@ -130,11 +143,19 @@ const TurnBubble = memo(function TurnBubble({
             ) : !turn.streaming ? (
               <span className="text-muted-foreground">无内容</span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />生成中…</span>
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <Loader2Icon className="size-3.5 animate-spin" />
+                生成中…
+              </span>
             )}
           </div>
         )}
-        <CreatorRetryButton busy={busy} status={turn.status} streaming={turn.streaming} onRetry={onRetry} />
+        <CreatorRetryButton
+          busy={busy}
+          status={turn.status}
+          streaming={turn.streaming}
+          onRetry={onRetry}
+        />
       </div>
     </div>
   );
@@ -160,7 +181,10 @@ export function CreatorMessageList(props: CreatorMessageListProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef as React.Ref<HTMLDivElement>} className="min-h-0 flex-1 overflow-y-auto px-4 py-8 [scrollbar-gutter:stable] sm:px-7 sm:py-10">
+      <div
+        ref={scrollRef as React.Ref<HTMLDivElement>}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-8 [scrollbar-gutter:stable] sm:px-7 sm:py-10"
+      >
         <div className={cn(CREATOR_COLUMN_CLASS, 'flex flex-col gap-7')}>
           {turns.map((turn, turnIndex) => (
             <TurnBubble
@@ -178,11 +202,13 @@ export function CreatorMessageList(props: CreatorMessageListProps) {
           ))}
 
           {publishedName && (
-            <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-emerald-500/8 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-success/8 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-success" />
               <div>
                 <div className="font-medium text-foreground">草稿“{publishedName}”已保存到本地</div>
-                <div className="mt-1 text-xs leading-5 text-muted-foreground">可在插件中心的草稿页继续运行或发布。</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  可在插件中心的草稿页继续运行或发布。
+                </div>
               </div>
             </div>
           )}
@@ -193,7 +219,12 @@ export function CreatorMessageList(props: CreatorMessageListProps) {
 
       {(compressing || searchingQuery != null || uploadingViaTool) && (
         <div className="shrink-0 border-t border-border/70 bg-background/85 px-4 py-2 backdrop-blur-sm sm:px-6">
-          <div className={cn(CREATOR_COLUMN_CLASS, 'flex items-center gap-2 text-xs text-muted-foreground')}>
+          <div
+            className={cn(
+              CREATOR_COLUMN_CLASS,
+              'flex items-center gap-2 text-xs text-muted-foreground'
+            )}
+          >
             <Loader2Icon className="size-3.5 animate-spin text-primary" />
             <span>
               {compressing

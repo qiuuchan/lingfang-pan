@@ -9,7 +9,7 @@
 // - 与创建器 env-readiness 横幅互补：横幅处理「地址未配置」，本组件处理「地址已配但 fetch 失败」。
 
 import { useState } from 'react';
-import { CloudOffIcon, RefreshCwIcon } from "lucide-react";
+import { CloudOffIcon, RefreshCwIcon } from 'lucide-react';
 import { apiBase, testBackendUrl, dispatchBackendReachable } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 
@@ -58,9 +58,7 @@ export function BackendUnreachable() {
           <span className="break-all font-mono text-foreground">{address}</span>
         </div>
 
-        {lastError && (
-          <p className="text-xs text-destructive">{lastError}</p>
-        )}
+        {lastError && <p className="text-xs text-destructive">{lastError}</p>}
 
         <div className="flex w-full">
           <Button className="w-full" onClick={handleRetry} disabled={retrying}>
@@ -72,4 +70,3 @@ export function BackendUnreachable() {
     </div>
   );
 }
-

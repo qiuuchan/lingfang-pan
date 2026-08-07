@@ -23,14 +23,18 @@ export function BillingTab() {
   async function loadModels() {
     setLoading(true);
     try {
-      const result = await api<{ data: RelayModel[] }>('/api/relay/v1/models').catch(() => ({ data: [] }));
+      const result = await api<{ data: RelayModel[] }>('/api/relay/v1/models').catch(() => ({
+        data: [],
+      }));
       setModels(result.data ?? []);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { void loadModels(); }, []);
+  useEffect(() => {
+    void loadModels();
+  }, []);
 
   return (
     <div className="flex flex-col gap-4">
@@ -43,21 +47,36 @@ export function BillingTab() {
               <CardDescription>插件和创建器可选择平台提供的模型版本。</CardDescription>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => { void loadModels(); }} disabled={loading}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void loadModels();
+            }}
+            disabled={loading}
+          >
             刷新
           </Button>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {models.length ? models.map((model) => {
-              const tier = normalizeModelTier(model.id);
-              return (
-                <Badge key={model.id} variant="secondary" className="text-sm">
-                  {model.label ?? (tier ? modelTierLabel(tier) : model.id)}
-                  {model.resourcePools?.length ? ` · ${model.resourcePools.map((pool) => pool.name).join('、')}` : ' · 暂无可用资源池'}
-                </Badge>
-              );
-            }) : <span className="text-sm text-muted-foreground">{loading ? '加载中…' : '连接平台后显示'}</span>}
+            {models.length ? (
+              models.map((model) => {
+                const tier = normalizeModelTier(model.id);
+                return (
+                  <Badge key={model.id} variant="secondary" className="text-sm">
+                    {model.label ?? (tier ? modelTierLabel(tier) : model.id)}
+                    {model.resourcePools?.length
+                      ? ` · ${model.resourcePools.map((pool) => pool.name).join('、')}`
+                      : ' · 暂无可用资源池'}
+                  </Badge>
+                );
+              })
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                {loading ? '加载中…' : '连接平台后显示'}
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>

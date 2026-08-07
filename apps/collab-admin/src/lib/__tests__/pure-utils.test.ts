@@ -85,7 +85,9 @@ describe('formatBytes (字节 -> 体积文案, tickets)', () => {
 
 describe('absoluteDownloadUrl (相对/绝对 URL 归一)', () => {
   it('已经是绝对 URL 则原样返回', () => {
-    expect(absoluteDownloadUrl('https://cdn.example.com/x.exe')).toBe('https://cdn.example.com/x.exe');
+    expect(absoluteDownloadUrl('https://cdn.example.com/x.exe')).toBe(
+      'https://cdn.example.com/x.exe'
+    );
   });
   it('相对路径拼到 API 基址前', () => {
     const out = absoluteDownloadUrl('/downloads/x.AppImage');
@@ -99,7 +101,9 @@ describe('isPlatformAdminSession (RBAC 谓词)', () => {
     expect(isPlatformAdminSession(null)).toBe(false);
   });
   it('platformRole 为 PLATFORM_ADMIN 才为真', () => {
-    expect(isPlatformAdminSession({ user: { platformRole: 'PLATFORM_ADMIN' } } as never)).toBe(true);
+    expect(isPlatformAdminSession({ user: { platformRole: 'PLATFORM_ADMIN' } } as never)).toBe(
+      true
+    );
   });
   it('租户管理员/普通用户/缺字段均为假', () => {
     expect(isPlatformAdminSession({ user: { platformRole: 'TENANT_ADMIN' } } as never)).toBe(false);

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { modelTierFromRecord, modelTierLabel, modelTierRequestLabel, normalizeModelTier, pluginModelTier } from './model-tier';
+import {
+  modelTierFromRecord,
+  modelTierLabel,
+  modelTierRequestLabel,
+  normalizeModelTier,
+  pluginModelTier,
+} from './model-tier';
 
 describe('model tier helpers', () => {
   it('normalizes common tier wire values', () => {
@@ -22,7 +28,11 @@ describe('model tier helpers', () => {
   it('defaults an omitted plugin model and rejects unknown upstream names', () => {
     expect(pluginModelTier(undefined)).toBe('fast');
     expect(pluginModelTier('premium')).toBe('premium');
-    expect(() => pluginModelTier('gpt-4o')).toThrow(expect.objectContaining({ code: 'unsupported_model' }));
-    expect(() => pluginModelTier(null)).toThrow(expect.objectContaining({ code: 'unsupported_model' }));
+    expect(() => pluginModelTier('gpt-4o')).toThrow(
+      expect.objectContaining({ code: 'unsupported_model' })
+    );
+    expect(() => pluginModelTier(null)).toThrow(
+      expect.objectContaining({ code: 'unsupported_model' })
+    );
   });
 });

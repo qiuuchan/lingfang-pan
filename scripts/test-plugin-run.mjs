@@ -28,7 +28,7 @@ const PNPM_CMD = join(RUNTIMES, 'nodejs', 'pnpm.cmd');
 const NPM_CMD = join(RUNTIMES, 'nodejs', 'npm.cmd');
 
 const PLUGIN_PORTS = {
-  'facefusion': 7860,
+  facefusion: 7860,
   'moneyprinter-turbo': 8501,
   'pixelle-video': 8501,
   'huobao-drama': 5679,
@@ -40,9 +40,18 @@ function parseArgs(argv) {
   let bridgeUrl = 'http://127.0.0.1:0'; // 占位（不真实调，仅验证启动）
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--no-venv-recreate') { noRecreate = true; continue; }
-    if (a === '--bridge-url') { bridgeUrl = argv[++i]; continue; }
-    if (a === '--help' || a === '-h') { ids.length = 0; break; }
+    if (a === '--no-venv-recreate') {
+      noRecreate = true;
+      continue;
+    }
+    if (a === '--bridge-url') {
+      bridgeUrl = argv[++i];
+      continue;
+    }
+    if (a === '--help' || a === '-h') {
+      ids.length = 0;
+      break;
+    }
     ids.push(a);
   }
   return { ids, noRecreate, bridgeUrl };
@@ -50,15 +59,28 @@ function parseArgs(argv) {
 
 /** 模拟 plugin_runner::minimal_env（白名单转发宿主变量）。 */
 function minimalEnv() {
-  const keys = ['PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TEMP', 'TMP', 'LANG', 'LC_ALL'];
+  const keys = [
+    'PATH',
+    'HOME',
+    'USERPROFILE',
+    'APPDATA',
+    'LOCALAPPDATA',
+    'SystemRoot',
+    'TEMP',
+    'TMP',
+    'LANG',
+    'LC_ALL',
+  ];
   const env = {};
-  for (const k of keys) { if (process.env[k] !== undefined) env[k] = process.env[k]; }
+  for (const k of keys) {
+    if (process.env[k] !== undefined) env[k] = process.env[k];
+  }
   // 运行时 PATH：node + node/bin + python + python/Scripts + python/bin（与 RuntimeResolver.path_value 一致）。
   const paths = [
     join(RUNTIMES, 'nodejs'),
     join(RUNTIMES, 'python'),
     join(RUNTIMES, 'python', 'Scripts'),
-  ].filter(p => existsSync(p));
+  ].filter((p) => existsSync(p));
   // 宿主 SystemRoot 下 system32（ffmpeg/git/curl 等系统工具）。
   if (process.env.SystemRoot) paths.push(join(process.env.SystemRoot, 'System32'));
   // WinGet shim 目录（ffmpeg/git 等经 winget 装后的 PATH 入口；本机测试用）。
@@ -90,16 +112,25 @@ function venvDir(pluginDir) {
   const base = process.env.LOCALAPPDATA || process.env.HOME;
   return join(base, 'LingFang', 'python-venvs', `venv-test-${stablePathHash(pluginDir)}`);
 }
-function venvPython(vdir) { return join(vdir, 'Scripts', 'python.exe'); }
+function venvPython(vdir) {
+  return join(vdir, 'Scripts', 'python.exe');
+}
 
 function run(cmd, args, opts = {}) {
   return new Promise((resolveFn) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
-    let stdout = '', stderr = '';
-    child.stdout.on('data', c => { stdout += c; process.stdout.write(c); });
-    child.stderr.on('data', c => { stderr += c; process.stderr.write(c); });
-    child.on('exit', code => resolveFn({ code, stdout, stderr }));
-    child.on('error', err => resolveFn({ code: -1, stdout, stderr, error: err }));
+    let stdout = '',
+      stderr = '';
+    child.stdout.on('data', (c) => {
+      stdout += c;
+      process.stdout.write(c);
+    });
+    child.stderr.on('data', (c) => {
+      stderr += c;
+      process.stderr.write(c);
+    });
+    child.on('exit', (code) => resolveFn({ code, stdout, stderr }));
+    child.on('error', (err) => resolveFn({ code: -1, stdout, stderr, error: err }));
   });
 }
 
@@ -111,7 +142,10 @@ async function ensurePythonVenv(pluginDir, noRecreate) {
   const vdir = venvDir(pluginDir);
   const py = venvPython(vdir);
   if (!existsSync(py) || !venvHasPip(vdir) || !noRecreate) {
-    if (existsSync(vdir)) { console.log(`[harness] 清理旧测试 venv: ${vdir}`); rmSync(vdir, { recursive: true, force: true }); }
+    if (existsSync(vdir)) {
+      console.log(`[harness] 清理旧测试 venv: ${vdir}`);
+      rmSync(vdir, { recursive: true, force: true });
+    }
     console.log(`[harness] 创建 venv: ${vdir}`);
     const r = await run(PYTHON_EXE, ['-m', 'venv', '--clear', vdir], { env: minimalEnv() });
     if (r.code !== 0) throw new Error(`venv 创建失败 (exit ${r.code})`);
@@ -119,7 +153,10 @@ async function ensurePythonVenv(pluginDir, noRecreate) {
   const req = join(pluginDir, 'requirements.txt');
   if (existsSync(req)) {
     console.log(`[harness] pip install -r requirements.txt（清华镜像，可能几分钟）…`);
-    const r = await run(py, ['-m', 'pip', 'install', '--no-input', '-r', req], { cwd: pluginDir, env: minimalEnv() });
+    const r = await run(py, ['-m', 'pip', 'install', '--no-input', '-r', req], {
+      cwd: pluginDir,
+      env: minimalEnv(),
+    });
     if (r.code !== 0) throw new Error(`pip install 失败 (exit ${r.code})`);
   }
   return py;
@@ -129,7 +166,10 @@ async function ensureNodeDeps(pluginDir, noRecreate) {
   const nm = join(pluginDir, 'node_modules');
   const pkg = join(pluginDir, 'package.json');
   if (!existsSync(pkg)) return;
-  if (existsSync(nm)) { console.log(`[harness] node_modules 已存在，跳过 install`); return; }
+  if (existsSync(nm)) {
+    console.log(`[harness] node_modules 已存在，跳过 install`);
+    return;
+  }
   // 优先 runtime pnpm，回退 runtime npm，最后回退系统 npm/pnpm
   // （dev runtime 的 pnpm/npm shim 可能损坏，生产安装包会用可用的内置版）。
   const candidates = [
@@ -137,7 +177,7 @@ async function ensureNodeDeps(pluginDir, noRecreate) {
     { cmd: NPM_CMD, name: 'npm', useShell: true },
     { cmd: 'pnpm', name: 'pnpm(system)', useShell: true },
     { cmd: 'npm', name: 'npm(system)', useShell: true },
-  ].filter(c => c.cmd && (existsSync(c.cmd) || !c.cmd.includes('\\')));
+  ].filter((c) => c.cmd && (existsSync(c.cmd) || !c.cmd.includes('\\')));
   for (const c of candidates) {
     console.log(`[harness] ${c.name} install（npmmirror，可能几分钟）…`);
     const r = await run(c.cmd, ['install'], {
@@ -164,7 +204,11 @@ function probePort(port, timeoutMs) {
         if (Date.now() - start >= timeoutMs) resolveFn(false);
         else setTimeout(tick, 1500);
       });
-      req.on('timeout', () => { req.destroy(); if (Date.now() - start >= timeoutMs) resolveFn(false); else setTimeout(tick, 1000); });
+      req.on('timeout', () => {
+        req.destroy();
+        if (Date.now() - start >= timeoutMs) resolveFn(false);
+        else setTimeout(tick, 1000);
+      });
     };
     tick();
   });
@@ -176,25 +220,50 @@ async function runPythonPlugin(pluginId, pluginDir, py, bridgeUrl, port) {
   env.LINGFANG_PLUGIN_BRIDGE_TOKEN = 'test-token-placeholder';
   // 与 runner 一致：stdin=null, stdout=null, stderr=piped。
   console.log(`[harness] spawn: ${py} -u main.py (cwd=${pluginDir}, stdout=null, stderr=piped)`);
-  const child = spawn(py, ['-u', 'main.py'], { cwd: pluginDir, env, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(py, ['-u', 'main.py'], {
+    cwd: pluginDir,
+    env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
   let stderr = '';
-  child.stderr.on('data', c => { stderr += c; process.stderr.write(c); });
+  child.stderr.on('data', (c) => {
+    stderr += c;
+    process.stderr.write(c);
+  });
   // facefusion 首启下载 ONNX 模型（数百 MB），给 15 分钟；其余插件 2 分钟够。
   const waitMs = pluginId === 'facefusion' ? 15 * 60 * 1000 : 120000;
-  console.log(`[harness] 等待端口 ${port} 起来（最多 ${Math.round(waitMs/1000)}s）…`);
+  console.log(`[harness] 等待端口 ${port} 起来（最多 ${Math.round(waitMs / 1000)}s）…`);
   const up = await probePort(port, waitMs);
   let exitCode = null;
   if (up) {
     console.log(`\n[harness] ✅ 端口 ${port} 已响应 = 插件成功启动！`);
     console.log('[harness] 停止插件进程…');
-    try { child.kill('SIGTERM'); } catch { /* noop */ }
-    setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* noop */ } }, 5000);
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      /* noop */
+    }
+    setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* noop */
+      }
+    }, 5000);
     return { ok: true, stderr };
   } else {
     // 超时：进程可能还活着但没起端口，或已退出。
     const still = child.exitCode === null && child.pid;
-    console.log(`\n[harness] ❌ 端口 ${port} 未在 120s 内响应${still ? '（进程仍存活但没开端口）' : `（进程已退出）`}`);
-    if (still) { try { child.kill('SIGKILL'); } catch { /* noop */ } }
+    console.log(
+      `\n[harness] ❌ 端口 ${port} 未在 120s 内响应${still ? '（进程仍存活但没开端口）' : `（进程已退出）`}`
+    );
+    if (still) {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* noop */
+      }
+    }
     return { ok: false, stderr, exitCode: child.exitCode };
   }
 }
@@ -203,22 +272,49 @@ async function runNodePlugin(pluginId, pluginDir, bridgeUrl, port) {
   const env = minimalEnv();
   env.LINGFANG_PLUGIN_BRIDGE_URL = bridgeUrl;
   env.LINGFANG_PLUGIN_BRIDGE_TOKEN = 'test-token-placeholder';
-  console.log(`[harness] spawn: ${NODE_EXE} index.js (cwd=${pluginDir}, stdout=null, stderr=piped)`);
-  const child = spawn(NODE_EXE, ['index.js'], { cwd: pluginDir, env, stdio: ['ignore', 'ignore', 'pipe'] });
+  console.log(
+    `[harness] spawn: ${NODE_EXE} index.js (cwd=${pluginDir}, stdout=null, stderr=piped)`
+  );
+  const child = spawn(NODE_EXE, ['index.js'], {
+    cwd: pluginDir,
+    env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
   let stderr = '';
-  child.stderr.on('data', c => { stderr += c; process.stderr.write(c); });
+  child.stderr.on('data', (c) => {
+    stderr += c;
+    process.stderr.write(c);
+  });
   console.log(`[harness] 等待端口 ${port} 起来（最多 120s）…`);
   const up = await probePort(port, 120000);
   if (up) {
     console.log(`\n[harness] ✅ 端口 ${port} 已响应 = 插件成功启动！`);
     console.log('[harness] 停止插件进程…');
-    try { child.kill('SIGTERM'); } catch { /* noop */ }
-    setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* noop */ } }, 5000);
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      /* noop */
+    }
+    setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* noop */
+      }
+    }, 5000);
     return { ok: true, stderr };
   } else {
     const still = child.exitCode === null && child.pid;
-    console.log(`\n[harness] ❌ 端口 ${port} 未在 120s 内响应${still ? '（进程仍存活但没开端口）' : `（进程已退出）`}`);
-    if (still) { try { child.kill('SIGKILL'); } catch { /* noop */ } }
+    console.log(
+      `\n[harness] ❌ 端口 ${port} 未在 120s 内响应${still ? '（进程仍存活但没开端口）' : `（进程已退出）`}`
+    );
+    if (still) {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* noop */
+      }
+    }
     return { ok: false, stderr, exitCode: child.exitCode };
   }
 }
@@ -226,15 +322,24 @@ async function runNodePlugin(pluginId, pluginDir, bridgeUrl, port) {
 async function testPlugin(pluginId, opts) {
   console.log(`\n${'='.repeat(70)}\n测试插件：${pluginId}\n${'='.repeat(70)}`);
   const pluginDir = join(REPO, 'plugins', pluginId);
-  if (!existsSync(pluginDir)) { console.error(`插件目录不存在：${pluginDir}`); return { id: pluginId, ok: false, reason: '目录不存在' }; }
+  if (!existsSync(pluginDir)) {
+    console.error(`插件目录不存在：${pluginDir}`);
+    return { id: pluginId, ok: false, reason: '目录不存在' };
+  }
   const port = PLUGIN_PORTS[pluginId];
-  if (!port) { console.error(`未知插件：${pluginId}`); return { id: pluginId, ok: false, reason: '未知插件' }; }
+  if (!port) {
+    console.error(`未知插件：${pluginId}`);
+    return { id: pluginId, ok: false, reason: '未知插件' };
+  }
   const manifest = JSON.parse(readFileSync(join(pluginDir, 'manifest.json'), 'utf8'));
   console.log(`[harness] runtime=${manifest.runtime_type} entry=${manifest.entry} port=${port}`);
   try {
     if (manifest.runtime_type === 'python') {
       const py = await ensurePythonVenv(pluginDir, opts.noRecreate);
-      return { id: pluginId, ...(await runPythonPlugin(pluginId, pluginDir, py, opts.bridgeUrl, port)) };
+      return {
+        id: pluginId,
+        ...(await runPythonPlugin(pluginId, pluginDir, py, opts.bridgeUrl, port)),
+      };
     } else if (manifest.runtime_type === 'nodejs') {
       await ensureNodeDeps(pluginDir, opts.noRecreate);
       return { id: pluginId, ...(await runNodePlugin(pluginId, pluginDir, opts.bridgeUrl, port)) };
@@ -250,18 +355,30 @@ async function testPlugin(pluginId, opts) {
 async function main() {
   const opts = parseArgs(process.argv);
   if (opts.ids.length === 0) {
-    console.log('用法: node scripts/test-plugin-run.mjs <plugin-id>... [--no-venv-recreate] [--bridge-url URL]');
+    console.log(
+      '用法: node scripts/test-plugin-run.mjs <plugin-id>... [--no-venv-recreate] [--bridge-url URL]'
+    );
     console.log('可用插件: facefusion moneyprinter-turbo pixelle-video huobao-drama');
     console.log('示例: node scripts/test-plugin-run.mjs facefusion');
     process.exit(0);
   }
-  if (!existsSync(PYTHON_EXE)) { console.error(`内置 Python 不存在：${PYTHON_EXE}`); process.exit(1); }
-  if (!existsSync(NODE_EXE)) { console.error(`内置 Node 不存在：${NODE_EXE}`); process.exit(1); }
+  if (!existsSync(PYTHON_EXE)) {
+    console.error(`内置 Python 不存在：${PYTHON_EXE}`);
+    process.exit(1);
+  }
+  if (!existsSync(NODE_EXE)) {
+    console.error(`内置 Node 不存在：${NODE_EXE}`);
+    process.exit(1);
+  }
   const results = [];
   for (const id of opts.ids) results.push(await testPlugin(id, opts));
   console.log(`\n${'='.repeat(70)}\n汇总\n${'='.repeat(70)}`);
-  for (const r of results) console.log(`${r.ok ? '✅' : '❌'} ${r.id}: ${r.ok ? '成功启动' : (r.reason || '失败')}`);
-  process.exit(results.every(r => r.ok) ? 0 : 1);
+  for (const r of results)
+    console.log(`${r.ok ? '✅' : '❌'} ${r.id}: ${r.ok ? '成功启动' : r.reason || '失败'}`);
+  process.exit(results.every((r) => r.ok) ? 0 : 1);
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

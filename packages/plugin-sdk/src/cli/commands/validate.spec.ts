@@ -105,7 +105,7 @@ describe('validateCommand — schema_invalid', () => {
         entry: 'index.html',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
 
     const result = await runValidate(dir);
@@ -131,7 +131,7 @@ describe('validateCommand — entry_runtime_mismatch', () => {
         entry: 'index.js',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
 
     const result = await runValidate(dir);
@@ -156,7 +156,7 @@ describe('validateCommand — entry_not_found', () => {
         entry: 'ui/missing.html',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
 
     const result = await runValidate(dir);
@@ -183,7 +183,7 @@ describe('validateCommand — entry_not_file', () => {
         entry: 'index.html',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
     await mkdir(path.join(dir, 'index.html'));
 
@@ -209,7 +209,7 @@ describe('validateCommand — package_json_invalid (nodejs)', () => {
         entry: 'index.js',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
     // 创建入口文件以满足 entry 检查
     await writeFile(path.join(dir, 'index.js'), 'console.log("hi");');
@@ -238,11 +238,14 @@ describe('validateCommand — requirements_invalid_format (python)', () => {
         entry: 'main.py',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
     await writeFile(path.join(dir, 'main.py'), 'print("hello")');
     // 包含非法行（-r 标志或 >= 带空格的变体）
-    await writeFile(path.join(dir, 'requirements.txt'), 'requests\n-r requirements-dev.txt\ninvalid line here\n');
+    await writeFile(
+      path.join(dir, 'requirements.txt'),
+      'requests\n-r requirements-dev.txt\ninvalid line here\n'
+    );
 
     const result = await runValidate(dir);
     expect(result.valid).toBe(false);
@@ -254,12 +257,28 @@ describe('validateCommand — README.md contract', () => {
   it('rejects an oversized or non-UTF-8 root README', async () => {
     const dir = await tempDir();
     await mkdir(path.join(dir, 'ui'), { recursive: true });
-    await writeFile(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'com.test.readme', name: 'README', version: '1.0.0', description: '', runtime_type: 'client', entry: 'ui/index.html', visibility: 'tenant', capabilities: [] }));
+    await writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        id: 'com.test.readme',
+        name: 'README',
+        version: '1.0.0',
+        description: '',
+        runtime_type: 'client',
+        entry: 'ui/index.html',
+        visibility: 'tenant',
+        capabilities: [],
+      })
+    );
     await writeFile(path.join(dir, 'ui/index.html'), '<main></main>');
     await writeFile(path.join(dir, 'README.md'), Buffer.alloc(256 * 1024 + 1, 0x61));
-    expect((await runValidate(dir)).errors.some((error) => error.code === 'readme_too_large')).toBe(true);
+    expect((await runValidate(dir)).errors.some((error) => error.code === 'readme_too_large')).toBe(
+      true
+    );
     await writeFile(path.join(dir, 'README.md'), Buffer.from([0xc3, 0x28]));
-    expect((await runValidate(dir)).errors.some((error) => error.code === 'readme_invalid_utf8')).toBe(true);
+    expect(
+      (await runValidate(dir)).errors.some((error) => error.code === 'readme_invalid_utf8')
+    ).toBe(true);
   });
 });
 

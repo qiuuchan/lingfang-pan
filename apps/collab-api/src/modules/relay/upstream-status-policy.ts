@@ -39,17 +39,29 @@ export function remapUpstreamHttpStatus(rawStatus: number | null): number {
 }
 
 /** 从最后一次上游错误中提取「根因摘要」，供 errorCode + 客户端 details 使用。 */
-export function extractUpstreamCause(error: unknown): { upstreamStatus: number | null; upstreamDetail: string | null } {
+export function extractUpstreamCause(error: unknown): {
+  upstreamStatus: number | null;
+  upstreamDetail: string | null;
+} {
   if (!(error instanceof UpstreamError)) return { upstreamStatus: null, upstreamDetail: null };
   const body = (error.body ?? '').slice(0, 300);
   // 尝试从 JSON body 抽取 message/error.message（OpenAI/Moonshot 错误体常见字段）。
   try {
-    const parsed = JSON.parse(error.body ?? '') as { message?: string; error?: { message?: string } | string; msg?: string };
-    const msg = parsed.message ?? parsed.msg ?? (typeof parsed.error === 'object' ? parsed.error?.message : undefined);
+    const parsed = JSON.parse(error.body ?? '') as {
+      message?: string;
+      error?: { message?: string } | string;
+      msg?: string;
+    };
+    const msg =
+      parsed.message ??
+      parsed.msg ??
+      (typeof parsed.error === 'object' ? parsed.error?.message : undefined);
     if (msg && typeof msg === 'string') {
       return { upstreamStatus: error.httpStatus, upstreamDetail: msg.slice(0, 300) };
     }
-  } catch { /* body 非 JSON，回落到原文截断 */ }
+  } catch {
+    /* body 非 JSON，回落到原文截断 */
+  }
   return { upstreamStatus: error.httpStatus, upstreamDetail: body || null };
 }
 
@@ -66,6 +78,7 @@ export function upstreamErrorCode(error: unknown): string {
 export function summarizeUpstreamError(error: unknown): UpstreamSummary {
   const { upstreamStatus, upstreamDetail } = extractUpstreamCause(error);
   const httpStatus = remapUpstreamHttpStatus(upstreamStatus);
-  const errorCode = error instanceof UpstreamError ? upstreamErrorCode(error) : 'upstream_llm_error';
+  const errorCode =
+    error instanceof UpstreamError ? upstreamErrorCode(error) : 'upstream_llm_error';
   return { upstreamStatus, upstreamDetail, httpStatus, errorCode };
 }

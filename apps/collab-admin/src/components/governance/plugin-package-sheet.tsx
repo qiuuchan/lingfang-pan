@@ -24,8 +24,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { InfoGrid } from '@/components/shared';
@@ -70,12 +83,15 @@ type ConfirmAction = 'reject' | 'delist' | 'relist' | null;
 
 type ResourceCache = Map<string, unknown>;
 
-const CONFIRMATION_COPY: Record<Exclude<ConfirmAction, null>, {
-  title: string;
-  description: string;
-  placeholder: string;
-  submitLabel: string;
-}> = {
+const CONFIRMATION_COPY: Record<
+  Exclude<ConfirmAction, null>,
+  {
+    title: string;
+    description: string;
+    placeholder: string;
+    submitLabel: string;
+  }
+> = {
   reject: {
     title: '驳回发行版',
     description: '驳回只影响当前发行版，可由发布方修正后重新提交。',
@@ -133,49 +149,52 @@ export function PluginPackageSheet({
   const packageDetail = useAsyncResource(
     (signal) => loadPluginPackage(packageId, signal),
     [packageId],
-    { enabled: open && Boolean(packageId) },
+    { enabled: open && Boolean(packageId) }
   );
   const releases = useAsyncResource(
-    (signal) => loadPluginReleases(packageId, { page: releasePage, pageSize: releasePageSize }, signal),
+    (signal) =>
+      loadPluginReleases(packageId, { page: releasePage, pageSize: releasePageSize }, signal),
     [packageId, releasePage, releasePageSize],
-    { enabled: open && Boolean(packageId), isEmpty: (result) => result.items.length === 0 },
+    { enabled: open && Boolean(packageId), isEmpty: (result) => result.items.length === 0 }
   );
 
   const releaseCore = useAsyncResource(
-    (signal) => cached(
-      cacheRef.current,
-      `core:${selectedReleaseId}`,
-      () => loadPluginRelease(selectedReleaseId!, signal),
-    ),
+    (signal) =>
+      cached(cacheRef.current, `core:${selectedReleaseId}`, () =>
+        loadPluginRelease(selectedReleaseId!, signal)
+      ),
     [selectedReleaseId],
-    { enabled: open && Boolean(selectedReleaseId) },
+    { enabled: open && Boolean(selectedReleaseId) }
   );
   const manifest = useAsyncResource(
-    (signal) => cached(
-      cacheRef.current,
-      `manifest:${selectedReleaseId}`,
-      () => loadPluginManifest(selectedReleaseId!, signal),
-    ),
+    (signal) =>
+      cached(cacheRef.current, `manifest:${selectedReleaseId}`, () =>
+        loadPluginManifest(selectedReleaseId!, signal)
+      ),
     [selectedReleaseId],
-    { enabled: open && Boolean(selectedReleaseId) && activeTab === 'manifest' },
+    { enabled: open && Boolean(selectedReleaseId) && activeTab === 'manifest' }
   );
   const files = useAsyncResource(
-    (signal) => cached(
-      cacheRef.current,
-      `files:${selectedReleaseId}:${filePage}`,
-      () => loadPluginFiles(selectedReleaseId!, { page: filePage, pageSize: 20 }, signal),
-    ),
+    (signal) =>
+      cached(cacheRef.current, `files:${selectedReleaseId}:${filePage}`, () =>
+        loadPluginFiles(selectedReleaseId!, { page: filePage, pageSize: 20 }, signal)
+      ),
     [selectedReleaseId, filePage],
-    { enabled: open && Boolean(selectedReleaseId) && activeTab === 'files', isEmpty: (result) => result.items.length === 0 },
+    {
+      enabled: open && Boolean(selectedReleaseId) && activeTab === 'files',
+      isEmpty: (result) => result.items.length === 0,
+    }
   );
   const reviews = useAsyncResource(
-    (signal) => cached(
-      cacheRef.current,
-      `reviews:${selectedReleaseId}:${reviewPage}`,
-      () => loadPluginReviews(selectedReleaseId!, { page: reviewPage, pageSize: 10 }, signal),
-    ),
+    (signal) =>
+      cached(cacheRef.current, `reviews:${selectedReleaseId}:${reviewPage}`, () =>
+        loadPluginReviews(selectedReleaseId!, { page: reviewPage, pageSize: 10 }, signal)
+      ),
     [selectedReleaseId, reviewPage],
-    { enabled: open && Boolean(selectedReleaseId) && activeTab === 'reviews', isEmpty: (result) => result.items.length === 0 },
+    {
+      enabled: open && Boolean(selectedReleaseId) && activeTab === 'reviews',
+      isEmpty: (result) => result.items.length === 0,
+    }
   );
 
   useEffect(() => {
@@ -198,11 +217,15 @@ export function PluginPackageSheet({
     }
     setSelectedReleaseId((current) => {
       // 优先深链 initialReleaseId，其次保留已选，否则首个。
-      const preferred = initialReleaseId && items.some((release: PluginReleaseSummary) => release.id === initialReleaseId)
-        ? initialReleaseId
-        : null;
+      const preferred =
+        initialReleaseId &&
+        items.some((release: PluginReleaseSummary) => release.id === initialReleaseId)
+          ? initialReleaseId
+          : null;
       if (preferred) return preferred;
-      return current && items.some((release: PluginReleaseSummary) => release.id === current) ? current : items[0].id;
+      return current && items.some((release: PluginReleaseSummary) => release.id === current)
+        ? current
+        : items[0].id;
     });
   }, [releases.data, initialReleaseId]);
 
@@ -286,7 +309,7 @@ export function PluginPackageSheet({
         title={summary?.name ?? '插件包详情'}
         description={summary?.manifestId}
         size="xl"
-        footer={(
+        footer={
           <div className="flex flex-wrap justify-end gap-2">
             {canPlatformRelist && (
               <Button
@@ -298,7 +321,8 @@ export function PluginPackageSheet({
                 }}
                 disabled={busy}
               >
-                <ArchiveRestoreIcon />恢复市场上架
+                <ArchiveRestoreIcon />
+                恢复市场上架
               </Button>
             )}
             {canDelistCurrentRelease && (
@@ -311,7 +335,8 @@ export function PluginPackageSheet({
                 }}
                 disabled={busy}
               >
-                <BanIcon />平台下架当前版
+                <BanIcon />
+                平台下架当前版
               </Button>
             )}
             {core?.release.marketReviewStatus === 'PENDING' && (
@@ -325,7 +350,8 @@ export function PluginPackageSheet({
                   }}
                   disabled={busy}
                 >
-                  <XCircleIcon />驳回
+                  <XCircleIcon />
+                  驳回
                 </Button>
                 <Button type="button" onClick={() => void approve()} disabled={busy}>
                   {busy ? <Loader2Icon className="animate-spin" /> : <CheckCircleIcon />}
@@ -334,9 +360,13 @@ export function PluginPackageSheet({
               </>
             )}
           </div>
-        )}
+        }
       >
-        <AsyncResource status={packageDetail.status} error={packageDetail.error} retry={packageDetail.reload}>
+        <AsyncResource
+          status={packageDetail.status}
+          error={packageDetail.error}
+          retry={packageDetail.reload}
+        >
           {packageDetail.data && (
             <section className="space-y-2">
               <h3 className="text-sm font-semibold">插件包概览</h3>
@@ -360,7 +390,9 @@ export function PluginPackageSheet({
                   setSelectedReleaseId(nextReleaseId);
                 }}
               >
-                <SelectTrigger className="w-full sm:w-64" aria-label="选择发行版"><SelectValue placeholder="选择发行版" /></SelectTrigger>
+                <SelectTrigger className="w-full sm:w-64" aria-label="选择发行版">
+                  <SelectValue placeholder="选择发行版" />
+                </SelectTrigger>
                 <SelectContent>
                   {releases.data.items.map((release: PluginReleaseSummary) => (
                     <SelectItem key={release.id} value={release.id}>
@@ -376,22 +408,45 @@ export function PluginPackageSheet({
           <AsyncResource status={releases.status} error={releases.error} retry={releases.reload}>
             {releases.data && releases.data.items.length > 0 && (
               <>
-                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReleaseTab)}>
+                <Tabs
+                  value={activeTab}
+                  onValueChange={(value) => setActiveTab(value as ReleaseTab)}
+                >
                   <div className="overflow-x-auto scrollbar-thin">
                     <TabsList className="min-w-max">
-                      <TabsTrigger value="overview"><ShieldCheckIcon className="mr-1.5 size-4" />概览</TabsTrigger>
-                      <TabsTrigger value="manifest"><FileJsonIcon className="mr-1.5 size-4" />Manifest</TabsTrigger>
-                      <TabsTrigger value="files"><FilesIcon className="mr-1.5 size-4" />文件</TabsTrigger>
-                      <TabsTrigger value="reviews"><HistoryIcon className="mr-1.5 size-4" />审核记录</TabsTrigger>
+                      <TabsTrigger value="overview">
+                        <ShieldCheckIcon className="mr-1.5 size-4" />
+                        概览
+                      </TabsTrigger>
+                      <TabsTrigger value="manifest">
+                        <FileJsonIcon className="mr-1.5 size-4" />
+                        Manifest
+                      </TabsTrigger>
+                      <TabsTrigger value="files">
+                        <FilesIcon className="mr-1.5 size-4" />
+                        文件
+                      </TabsTrigger>
+                      <TabsTrigger value="reviews">
+                        <HistoryIcon className="mr-1.5 size-4" />
+                        审核记录
+                      </TabsTrigger>
                     </TabsList>
                   </div>
-                  <TabsContent value="overview"><ReleaseOverview resource={releaseCore} /></TabsContent>
-                  <TabsContent value="manifest"><ManifestView resource={manifest} /></TabsContent>
+                  <TabsContent value="overview">
+                    <ReleaseOverview resource={releaseCore} />
+                  </TabsContent>
+                  <TabsContent value="manifest">
+                    <ManifestView resource={manifest} />
+                  </TabsContent>
                   <TabsContent value="files">
                     <FilesView resource={files} page={filePage} onPageChange={setFilePage} />
                   </TabsContent>
                   <TabsContent value="reviews">
-                    <ReviewsView resource={reviews} page={reviewPage} onPageChange={setReviewPage} />
+                    <ReviewsView
+                      resource={reviews}
+                      page={reviewPage}
+                      onPageChange={setReviewPage}
+                    />
                   </TabsContent>
                 </Tabs>
 
@@ -453,7 +508,14 @@ export function PluginPackageSheet({
             <div className="text-right text-xs text-muted-foreground">{reason.length}/500</div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirmAction(null)} disabled={busy}>取消</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmAction(null)}
+              disabled={busy}
+            >
+              取消
+            </Button>
             <Button
               type="button"
               variant={confirmAction === 'relist' ? 'default' : 'destructive'}
@@ -491,41 +553,51 @@ function PackageOverview({ detail }: { detail: PluginPackageDetail }) {
     items.push(
       [
         '下架时保留的发行版 ID',
-        listing.currentReleaseId
-          ? <span className="font-mono text-xs">{listing.currentReleaseId}</span>
-          : '未记录',
+        listing.currentReleaseId ? (
+          <span className="font-mono text-xs">{listing.currentReleaseId}</span>
+        ) : (
+          '未记录'
+        ),
       ],
       ['下架方', delistActorLabel(listing.delistedBy)],
       ['下架原因', listing.delistReason || '未记录'],
       ['下架时间', listing.delistedAt ? formatTime(listing.delistedAt) : '未记录'],
       [
         '操作人 ID',
-        listing.delistedByUserId
-          ? <span className="font-mono text-xs">{listing.delistedByUserId}</span>
-          : '系统或历史操作',
-      ],
+        listing.delistedByUserId ? (
+          <span className="font-mono text-xs">{listing.delistedByUserId}</span>
+        ) : (
+          '系统或历史操作'
+        ),
+      ]
     );
   }
 
   return <InfoGrid items={items} />;
 }
 
-function ReleaseOverview({ resource }: { resource: ReturnType<typeof useAsyncResource<PluginReleaseCore>> }) {
+function ReleaseOverview({
+  resource,
+}: {
+  resource: ReturnType<typeof useAsyncResource<PluginReleaseCore>>;
+}) {
   const data = resource.data;
-  const items: Array<[string, ReactNode]> = data ? [
-    ['版本', `v${data.release.version}`],
-    ['发行状态', <ReleaseStatusBadge value={data.release.status} />],
-    ['审核状态', <ReviewBadge value={data.release.marketReviewStatus} />],
-    ['市场状态', <ListingBadge status={data.listing?.status ?? null} />],
-    ['发布来源', sourceKindLabel(data.release.sourceKind)],
-    ['来源标记', data.release.sourceLabel || '未提供'],
-    ['接入通道', ingestChannelLabel(data.release.ingestChannel)],
-    ['目标平台', data.release.targetPlatform],
-    ['制品大小', formatBytes(data.release.sizeBytes)],
-    ['SHA-256', <span className="font-mono text-xs">{data.release.sha256}</span>],
-    ['审核原因', data.release.reviewReason || '—'],
-    ['发布时间', formatTime(data.release.createdAt)],
-  ] : [];
+  const items: Array<[string, ReactNode]> = data
+    ? [
+        ['版本', `v${data.release.version}`],
+        ['发行状态', <ReleaseStatusBadge value={data.release.status} />],
+        ['审核状态', <ReviewBadge value={data.release.marketReviewStatus} />],
+        ['市场状态', <ListingBadge status={data.listing?.status ?? null} />],
+        ['发布来源', sourceKindLabel(data.release.sourceKind)],
+        ['来源标记', data.release.sourceLabel || '未提供'],
+        ['接入通道', ingestChannelLabel(data.release.ingestChannel)],
+        ['目标平台', data.release.targetPlatform],
+        ['制品大小', formatBytes(data.release.sizeBytes)],
+        ['SHA-256', <span className="font-mono text-xs">{data.release.sha256}</span>],
+        ['审核原因', data.release.reviewReason || '—'],
+        ['发布时间', formatTime(data.release.createdAt)],
+      ]
+    : [];
   if (data?.isMarketplaceCurrent) {
     items.splice(4, 0, ['市场当前版', <Badge variant="success">是</Badge>]);
   }
@@ -537,7 +609,11 @@ function ReleaseOverview({ resource }: { resource: ReturnType<typeof useAsyncRes
   );
 }
 
-function ManifestView({ resource }: { resource: ReturnType<typeof useAsyncResource<PluginManifestDetail>> }) {
+function ManifestView({
+  resource,
+}: {
+  resource: ReturnType<typeof useAsyncResource<PluginManifestDetail>>;
+}) {
   return (
     <AsyncResource status={resource.status} error={resource.error} retry={resource.reload}>
       {resource.data && (
@@ -563,7 +639,12 @@ function FilesView({
       {resource.data && (
         <>
           <Table>
-            <TableHeader><TableRow><TableHead>路径</TableHead><TableHead className="w-28">大小</TableHead></TableRow></TableHeader>
+            <TableHeader>
+              <TableRow>
+                <TableHead>路径</TableHead>
+                <TableHead className="w-28">大小</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               {resource.data.items.map((file: PluginFileSummary) => (
                 <TableRow key={file.path}>
@@ -573,7 +654,14 @@ function FilesView({
               ))}
             </TableBody>
           </Table>
-          <Pagination totalItems={resource.data.total} pageSize={20} currentPage={page} onPageChange={onPageChange} onPageSizeChange={() => undefined} pageSizeOptions={[20]} />
+          <Pagination
+            totalItems={resource.data.total}
+            pageSize={20}
+            currentPage={page}
+            onPageChange={onPageChange}
+            onPageSizeChange={() => undefined}
+            pageSizeOptions={[20]}
+          />
         </>
       )}
     </AsyncResource>
@@ -595,7 +683,10 @@ function ReviewsView({
         <>
           <div className="divide-y rounded-lg border">
             {resource.data.items.map((review: PluginReviewSummary) => (
-              <div key={review.id} className="grid gap-2 px-3 py-3 text-sm sm:grid-cols-[7rem_1fr_auto]">
+              <div
+                key={review.id}
+                className="grid gap-2 px-3 py-3 text-sm sm:grid-cols-[7rem_1fr_auto]"
+              >
                 <ReviewBadge value={review.status} />
                 <div className="min-w-0 break-words">{review.reason || '无补充说明'}</div>
                 <div className="text-xs text-muted-foreground sm:text-right">
@@ -605,7 +696,14 @@ function ReviewsView({
               </div>
             ))}
           </div>
-          <Pagination totalItems={resource.data.total} pageSize={10} currentPage={page} onPageChange={onPageChange} onPageSizeChange={() => undefined} pageSizeOptions={[10]} />
+          <Pagination
+            totalItems={resource.data.total}
+            pageSize={10}
+            currentPage={page}
+            onPageChange={onPageChange}
+            onPageSizeChange={() => undefined}
+            pageSizeOptions={[10]}
+          />
         </>
       )}
     </AsyncResource>
@@ -613,7 +711,13 @@ function ReviewsView({
 }
 
 function reviewLabel(status: string) {
-  return status === 'PENDING' ? '待审核' : status === 'APPROVED' ? '已通过' : status === 'REJECTED' ? '已驳回' : '未提交';
+  return status === 'PENDING'
+    ? '待审核'
+    : status === 'APPROVED'
+      ? '已通过'
+      : status === 'REJECTED'
+        ? '已驳回'
+        : '未提交';
 }
 
 function formatBytes(bytes: number) {

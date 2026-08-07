@@ -1,4 +1,12 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger, SetMetadata } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+  SetMetadata,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -25,19 +33,22 @@ export class AppError extends Error {
     public readonly status: number,
     public readonly code: string,
     message: string,
-    public readonly details?: unknown,
+    public readonly details?: unknown
   ) {
     super(message);
   }
 }
 
-export const badRequest = (message: string, details?: unknown) => new AppError(400, 'bad_request', message, details);
+export const badRequest = (message: string, details?: unknown) =>
+  new AppError(400, 'bad_request', message, details);
 export const unauthorized = (message = '请先登录') => new AppError(401, 'unauthorized', message);
 export const forbidden = (message = '权限不足') => new AppError(403, 'forbidden', message);
 export const notFound = (message = '资源不存在') => new AppError(404, 'not_found', message);
-export const conflict = (message: string, details?: unknown) => new AppError(409, 'conflict', message, details);
+export const conflict = (message: string, details?: unknown) =>
+  new AppError(409, 'conflict', message, details);
 export const insufficientBalance = () => new AppError(402, 'insufficient_balance', '钱包余额不足');
-export const clientUpgradeRequired = () => new AppError(410, 'legacy_plugin_api_retired', '旧插件协议已永久停用，请升级桌面客户端后重试');
+export const clientUpgradeRequired = () =>
+  new AppError(410, 'legacy_plugin_api_retired', '旧插件协议已永久停用，请升级桌面客户端后重试');
 
 /**
  * 取或生成请求级 requestId 并回写到 req.headers，确保 service 日志、异常响应、
@@ -60,7 +71,13 @@ export function slugify(input: string) {
   return base || `team-${Date.now()}`;
 }
 
-export const publicUser = (user: { id: string; email: string; displayName: string; status: string; platformRole?: string }) => ({
+export const publicUser = (user: {
+  id: string;
+  email: string;
+  displayName: string;
+  status: string;
+  platformRole?: string;
+}) => ({
   id: user.id,
   email: user.email,
   displayName: user.displayName,
@@ -97,7 +114,10 @@ export class AppExceptionFilter implements ExceptionFilter {
     if (error instanceof HttpException) {
       const status = error.getStatus();
       const body = error.getResponse();
-      const message = typeof body === 'object' && body && 'message' in body ? (body as { message?: string | string[] }).message : error.message;
+      const message =
+        typeof body === 'object' && body && 'message' in body
+          ? (body as { message?: string | string[] }).message
+          : error.message;
       response.status(status).json({
         code: status === HttpStatus.UNAUTHORIZED ? 'unauthorized' : 'http_error',
         message: Array.isArray(message) ? message.join('；') : message || error.message,
@@ -115,17 +135,22 @@ export class AppExceptionFilter implements ExceptionFilter {
     }
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       const mapped = mapPrismaKnownError(error);
-      response.status(mapped.status).json({ code: mapped.code, message: mapped.message, requestId });
+      response
+        .status(mapped.status)
+        .json({ code: mapped.code, message: mapped.message, requestId });
       return;
     }
 
-    this.logger.error({
-      requestId,
-      method: request.method,
-      url: request.path,
-      errorMessage: error instanceof Error ? error.message : String(error),
-      errorStack: error instanceof Error ? error.stack : undefined,
-    }, '未处理异常：已返回 500');
+    this.logger.error(
+      {
+        requestId,
+        method: request.method,
+        url: request.path,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
+      '未处理异常：已返回 500'
+    );
     response.status(500).json({
       code: 'internal_error',
       message: '服务内部错误',
@@ -135,7 +160,11 @@ export class AppExceptionFilter implements ExceptionFilter {
 }
 
 /** 把 PrismaClientKnownRequestError 的错误码映射为语义化 HTTP 响应（不泄漏 schema 信息）。 */
-function mapPrismaKnownError(error: Prisma.PrismaClientKnownRequestError): { status: number; code: string; message: string } {
+function mapPrismaKnownError(error: Prisma.PrismaClientKnownRequestError): {
+  status: number;
+  code: string;
+  message: string;
+} {
   switch (error.code) {
     case 'P2002': // 唯一约束冲突
       return { status: 409, code: 'conflict', message: '资源已存在或与现有记录冲突' };

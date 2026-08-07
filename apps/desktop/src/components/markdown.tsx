@@ -124,7 +124,10 @@ const COMPONENTS: Components = {
     }
     // inline 代码：维持灰底药丸观感（与 fenced 暗色高亮块明确区分）
     return (
-      <code className="rounded-md bg-black/10 px-1.5 py-0.5 font-mono text-[0.85em] shadow-sm dark:bg-white/10" {...props}>
+      <code
+        className="rounded-md bg-black/10 px-1.5 py-0.5 font-mono text-[0.85em] shadow-sm dark:bg-white/10"
+        {...props}
+      >
         {children}
       </code>
     );
@@ -132,7 +135,14 @@ const COMPONENTS: Components = {
   // pre 指向独立组件引用（hooks 必须在组件函数体内调用），
   // 复制按钮与最大高度/横向滚动均在此处提供。
   pre: PreBlock,
-  a: ({ children, href }) => <a href={href} className="font-medium text-primary underline decoration-primary/30 underline-offset-2 transition-colors hover:decoration-primary">{children}</a>,
+  a: ({ children, href }) => (
+    <a
+      href={href}
+      className="font-medium text-primary underline decoration-primary/30 underline-offset-2 transition-colors hover:decoration-primary"
+    >
+      {children}
+    </a>
+  ),
   // 表格美化：react-markdown 默认渲染为浏览器裸 table（无边框圆角、行间无分隔），
   // 在气泡内显得呆板。这里包一层圆角边框容器 + 表头底色 + 行分隔线 + 偶数行浅底，
   // 列数多时外层 overflow-x-auto 横向滚动（气泡 max-w 受限）。
@@ -146,7 +156,9 @@ const COMPONENTS: Components = {
   ),
   // divide-y 画行间分隔线；偶数行浅底提升多行可读性（斑马纹）。
   tbody: ({ children }) => (
-    <tbody className="divide-y divide-border/40 [&_tr:nth-child(even)]:bg-muted/30">{children}</tbody>
+    <tbody className="divide-y divide-border/40 [&_tr:nth-child(even)]:bg-muted/30">
+      {children}
+    </tbody>
   ),
   th: ({ children }) => <th className="px-4 py-2.5 font-semibold">{children}</th>,
   td: ({ children }) => <td className="px-4 py-2.5 align-top">{children}</td>,
@@ -162,17 +174,40 @@ export function safePluginReadmeHref(href: string | undefined): string | null {
   }
 }
 
-export function Markdown({ children, pluginReadme = false }: { children: string; pluginReadme?: boolean }) {
-  const components = pluginReadme ? {
-    ...COMPONENTS,
-    a: ({ children: linkChildren, href }: { children?: ReactNode; href?: string }) => {
-      const safeHref = safePluginReadmeHref(href);
-      return safeHref
-        ? <a href={safeHref} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline decoration-primary/30 underline-offset-2">{linkChildren}</a>
-        : <span className="text-muted-foreground" title="插件说明仅支持 HTTP(S) 外部链接">{linkChildren}</span>;
-    },
-    img: ({ alt }: { alt?: string }) => <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">[图片未显示{alt ? `：${alt}` : ''}]</span>,
-  } satisfies Components : COMPONENTS;
+export function Markdown({
+  children,
+  pluginReadme = false,
+}: {
+  children: string;
+  pluginReadme?: boolean;
+}) {
+  const components = pluginReadme
+    ? ({
+        ...COMPONENTS,
+        a: ({ children: linkChildren, href }: { children?: ReactNode; href?: string }) => {
+          const safeHref = safePluginReadmeHref(href);
+          return safeHref ? (
+            <a
+              href={safeHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline decoration-primary/30 underline-offset-2"
+            >
+              {linkChildren}
+            </a>
+          ) : (
+            <span className="text-muted-foreground" title="插件说明仅支持 HTTP(S) 外部链接">
+              {linkChildren}
+            </span>
+          );
+        },
+        img: ({ alt }: { alt?: string }) => (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+            [图片未显示{alt ? `：${alt}` : ''}]
+          </span>
+        ),
+      } satisfies Components)
+    : COMPONENTS;
   return (
     <div className="text-sm">
       <ReactMarkdown

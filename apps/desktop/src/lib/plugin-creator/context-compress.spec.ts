@@ -1,6 +1,11 @@
 // context-compress.spec.ts —— 验证 buildContextMessages 的压缩与原生 function calling 历史还原。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildContextMessages, compressHistoryManually, emptyCompressState, turnHasPackage } from './context-compress';
+import {
+  buildContextMessages,
+  compressHistoryManually,
+  emptyCompressState,
+  turnHasPackage,
+} from './context-compress';
 import { chatComplete } from '@/lib/relay-chat-stream';
 
 vi.mock('@/lib/relay-chat-stream', () => ({
@@ -37,10 +42,17 @@ describe('buildContextMessages', () => {
     expect(result.compressedCount).toBe(0);
     // messages = [system, user, assistant, user(当前输入)]
     expect(result.messages[0]).toEqual({ role: 'system', content: 'system prompt' });
-    expect(result.messages[result.messages.length - 1]).toEqual({ role: 'user', content: '继续优化' });
+    expect(result.messages[result.messages.length - 1]).toEqual({
+      role: 'user',
+      content: '继续优化',
+    });
     // 早期 user/assistant 原文保留
-    expect(result.messages.some((m) => m.role === 'user' && m.content === '请做一个天气插件')).toBe(true);
-    expect(result.messages.some((m) => m.role === 'assistant' && m.content === '先确认城市与温度单位')).toBe(true);
+    expect(result.messages.some((m) => m.role === 'user' && m.content === '请做一个天气插件')).toBe(
+      true
+    );
+    expect(
+      result.messages.some((m) => m.role === 'assistant' && m.content === '先确认城市与温度单位')
+    ).toBe(true);
   });
 
   it('超阈值：摘要较早轮 + 保留含插件包的轮原文 + 近期轮原文', async () => {
@@ -67,13 +79,22 @@ describe('buildContextMessages', () => {
     expect(result.compressedCount).toBeGreaterThan(0);
     expect(result.breakdown.summary).toContain('核心需求');
     // 含插件包的轮原文保留（不进摘要）
-    expect(result.messages.some((m) => typeof m.content === 'string' && m.content.includes('```lingfang-plugin'))).toBe(true);
+    expect(
+      result.messages.some(
+        (m) => typeof m.content === 'string' && m.content.includes('```lingfang-plugin')
+      )
+    ).toBe(true);
     // 近期轮原文保留
     expect(result.messages.some((m) => m.content === '再补一个设置页')).toBe(true);
     // 摘要作为 system 消息注入
-    expect(result.messages.some((m) => m.role === 'system' && m.content.includes('[历史上下文摘要]'))).toBe(true);
+    expect(
+      result.messages.some((m) => m.role === 'system' && m.content.includes('[历史上下文摘要]'))
+    ).toBe(true);
     // 当前输入在末尾
-    expect(result.messages[result.messages.length - 1]).toEqual({ role: 'user', content: '继续优化' });
+    expect(result.messages[result.messages.length - 1]).toEqual({
+      role: 'user',
+      content: '继续优化',
+    });
   });
 
   it('超阈值且 assistant 带工具调用：近期轮保留原生 tool_calls + role:tool 配对', async () => {
@@ -87,7 +108,14 @@ describe('buildContextMessages', () => {
           role: 'assistant',
           content: '',
           parts: [
-            { type: 'tool', toolCallId: 'call_1', name: 'WebSearch', args: { query: 'tauri' }, result: 'Tauri 2.0', status: 'ok' },
+            {
+              type: 'tool',
+              toolCallId: 'call_1',
+              name: 'WebSearch',
+              args: { query: 'tauri' },
+              result: 'Tauri 2.0',
+              status: 'ok',
+            },
             { type: 'text', content: '找到了 Tauri' },
           ],
         },
@@ -96,7 +124,14 @@ describe('buildContextMessages', () => {
           role: 'assistant',
           content: '',
           parts: [
-            { type: 'tool', toolCallId: 'call_2', name: 'WebSearch', args: { query: 'rust' }, result: 'Rust lang', status: 'ok' },
+            {
+              type: 'tool',
+              toolCallId: 'call_2',
+              name: 'WebSearch',
+              args: { query: 'rust' },
+              result: 'Rust lang',
+              status: 'ok',
+            },
           ],
         },
       ],
@@ -110,11 +145,15 @@ describe('buildContextMessages', () => {
 
     // 应有 assistant 带 tool_calls 的消息
     const assistantWithTools = result.messages.find(
-      (m) => m.role === 'assistant' && Array.isArray((m as { tool_calls?: unknown[] }).tool_calls),
+      (m) => m.role === 'assistant' && Array.isArray((m as { tool_calls?: unknown[] }).tool_calls)
     );
     expect(assistantWithTools).toBeTruthy();
     // 应有 role:'tool' 消息，且 tool_call_id 与 tool_calls 配对
-    const toolMsgs = result.messages.filter((m) => m.role === 'tool') as Array<{ role: 'tool'; tool_call_id: string; content: string }>;
+    const toolMsgs = result.messages.filter((m) => m.role === 'tool') as Array<{
+      role: 'tool';
+      tool_call_id: string;
+      content: string;
+    }>;
     expect(toolMsgs.length).toBeGreaterThan(0);
     expect(toolMsgs.some((m) => m.tool_call_id === 'call_1')).toBe(true);
     expect(toolMsgs.some((m) => m.tool_call_id === 'call_2')).toBe(true);
@@ -272,7 +311,14 @@ describe('compressHistoryManually（手动压缩）', () => {
           role: 'assistant',
           content: '',
           parts: [
-            { type: 'tool', toolCallId: 'c1', name: 'WebSearch', args: { query: 'tauri' }, result: 'Tauri 2.0', status: 'ok' },
+            {
+              type: 'tool',
+              toolCallId: 'c1',
+              name: 'WebSearch',
+              args: { query: 'tauri' },
+              result: 'Tauri 2.0',
+              status: 'ok',
+            },
           ],
         },
         { role: 'user', content: '基于搜索结果做插件' },
@@ -287,17 +333,19 @@ describe('compressHistoryManually（手动压缩）', () => {
 
   it('摘要失败：抛错（不静默丢轮）', async () => {
     mockChatComplete.mockRejectedValue(new Error('网络错误'));
-    await expect(compressHistoryManually({
-      turns: [
-        { role: 'user', content: '需求1' },
-        { role: 'assistant', content: '回复1' },
-        { role: 'user', content: '需求2' },
-        { role: 'assistant', content: '回复2' },
-      ],
-      state: emptyCompressState(),
-      recentWindowTurns: 1,
-      tier: 'fast',
-    })).rejects.toThrow('网络错误');
+    await expect(
+      compressHistoryManually({
+        turns: [
+          { role: 'user', content: '需求1' },
+          { role: 'assistant', content: '回复1' },
+          { role: 'user', content: '需求2' },
+          { role: 'assistant', content: '回复2' },
+        ],
+        state: emptyCompressState(),
+        recentWindowTurns: 1,
+        tier: 'fast',
+      })
+    ).rejects.toThrow('网络错误');
   });
 
   it('增量合并：已有 summary 与新可压缩轮一起进摘要', async () => {
@@ -315,7 +363,9 @@ describe('compressHistoryManually（手动压缩）', () => {
     });
     expect(result.summary).toContain('合并摘要');
     // 验证摘要输入包含了已有 summary
-    const inputContent = mockChatComplete.mock.calls[0]?.[0]?.map((m: { content: string }) => m.content).join('\n') ?? '';
+    const inputContent =
+      mockChatComplete.mock.calls[0]?.[0]?.map((m: { content: string }) => m.content).join('\n') ??
+      '';
     expect(inputContent).toContain('已有摘要：之前做了计算器');
   });
 });

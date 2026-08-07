@@ -28,7 +28,10 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-async function runBuild(dir: string, opts?: { out?: string; json?: boolean }): Promise<{ exitCode: number; result?: BuildResult }> {
+async function runBuild(
+  dir: string,
+  opts?: { out?: string; json?: boolean }
+): Promise<{ exitCode: number; result?: BuildResult }> {
   const originalStdout = process.stdout.write;
   let captured = '';
   process.stdout.write = ((chunk: string | Uint8Array) => {
@@ -149,7 +152,7 @@ describe('buildCommand — entry_not_found', () => {
         entry: 'ui/missing.html',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
 
     const { exitCode, result } = await runBuild(dir);
@@ -176,7 +179,7 @@ describe('buildCommand — manifest_validation_failed', () => {
         entry: 'index.html',
         visibility: 'tenant',
         capabilities: [],
-      }),
+      })
     );
 
     const { exitCode, result } = await runBuild(dir);
@@ -190,7 +193,19 @@ describe('buildCommand — manifest_validation_failed', () => {
 describe('buildCommand — README.md contract', () => {
   it('fails before packing an oversized or non-UTF-8 README', async () => {
     const dir = await tempDir();
-    await writeFile(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'com.test.readme', name: 'README', version: '1.0.0', description: '', runtime_type: 'client', entry: 'index.html', visibility: 'tenant', capabilities: [] }));
+    await writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        id: 'com.test.readme',
+        name: 'README',
+        version: '1.0.0',
+        description: '',
+        runtime_type: 'client',
+        entry: 'index.html',
+        visibility: 'tenant',
+        capabilities: [],
+      })
+    );
     await writeFile(path.join(dir, 'index.html'), '<main></main>');
     await writeFile(path.join(dir, 'README.md'), Buffer.alloc(256 * 1024 + 1, 0x61));
     const oversized = await runBuild(dir);

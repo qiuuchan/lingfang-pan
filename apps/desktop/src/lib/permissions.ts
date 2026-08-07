@@ -10,7 +10,11 @@ export function hasPermission(permissions: string[], ...codes: string[]): boolea
 
 /** 判断是否拥有任意团队管理权限（用于「团队管理」入口门控）。
  *  排除三个基线只读权限（dashboard.view/plugin.list/balance.view），只有管理类权限才算团队管理员。 */
-const TEAM_BASELINE_READONLY = new Set(['team.dashboard.view', 'team.plugin.list', 'team.balance.view']);
+const TEAM_BASELINE_READONLY = new Set([
+  'team.dashboard.view',
+  'team.plugin.list',
+  'team.balance.view',
+]);
 export function isTeamManager(permissions: string[]): boolean {
   return permissions.some((p) => p.startsWith('team.') && !TEAM_BASELINE_READONLY.has(p));
 }

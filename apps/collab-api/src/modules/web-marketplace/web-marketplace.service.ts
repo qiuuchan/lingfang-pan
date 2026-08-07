@@ -23,7 +23,8 @@ type PublicListingRow = {
   priceCents: number;
   priceRevision: number;
   status: string;
-  category?: 'AI' | 'PRODUCTIVITY' | 'DEV' | 'DATA' | 'MEDIA' | 'FILES' | 'NETWORK' | 'SYSTEM' | 'OTHER';
+  category?:
+    'AI' | 'PRODUCTIVITY' | 'DEV' | 'DATA' | 'MEDIA' | 'FILES' | 'NETWORK' | 'SYSTEM' | 'OTHER';
   qualityTier?: 'LISTED' | 'QUALITY' | 'FEATURED';
   qualityQualifiedAt?: Date | null;
   installCount: number;
@@ -109,7 +110,9 @@ const PUBLIC_DETAIL_SELECT = {
 export class WebMarketplaceService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Optional() @Inject(MarketplaceDiscoveryService) private readonly discovery?: MarketplaceDiscoveryService,
+    @Optional()
+    @Inject(MarketplaceDiscoveryService)
+    private readonly discovery?: MarketplaceDiscoveryService
   ) {}
 
   async catalog(input: unknown) {
@@ -120,7 +123,10 @@ export class WebMarketplaceService {
       select: PUBLIC_LISTING_SELECT,
     });
     const now = new Date();
-    const discounts = await this.priceDiscounts(rows.map((row) => row.packageId), now);
+    const discounts = await this.priceDiscounts(
+      rows.map((row) => row.packageId),
+      now
+    );
     const cards = (rows as PublicListingRow[])
       .filter(isPublicListing)
       .map((row) => publicCard(row, discounts.get(row.packageId) ?? null, now))
@@ -175,10 +181,22 @@ export class WebMarketplaceService {
   }
 
   private async priceDiscounts(packageIds: string[], now: Date) {
-    const state = await this.prisma.marketplaceCommerceState.findUnique({ where: { id: 'singleton' } });
-    if (state?.writerMode !== 'SETTLEMENT_V2' || !state.settlementV2ActivatedAt || packageIds.length === 0) return new Map();
+    const state = await this.prisma.marketplaceCommerceState.findUnique({
+      where: { id: 'singleton' },
+    });
+    if (
+      state?.writerMode !== 'SETTLEMENT_V2' ||
+      !state.settlementV2ActivatedAt ||
+      packageIds.length === 0
+    )
+      return new Map();
     const rows = await this.prisma.marketplaceDiscount.findMany({
-      where: { packageId: { in: packageIds }, canceledAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
+      where: {
+        packageId: { in: packageIds },
+        canceledAt: null,
+        startsAt: { lte: now },
+        endsAt: { gt: now },
+      },
       orderBy: [{ startsAt: 'asc' }, { revision: 'desc' }],
     });
     return new Map(rows.map((row: { packageId: string }) => [row.packageId, row]));
@@ -190,9 +208,12 @@ function publicPreviewActions(actionSurfaceManifest: unknown) {
   return actionSurfaceManifest.flatMap((item) => {
     const action = objectValue(item);
     const semantics = action.execution_semantics;
-    if (action.previewable !== true
-      || action.cloud_capable !== true
-      || semantics !== 'read_only' && semantics !== 'idempotent') return [];
+    if (
+      action.previewable !== true ||
+      action.cloud_capable !== true ||
+      (semantics !== 'read_only' && semantics !== 'idempotent')
+    )
+      return [];
     const parsed = WebCloudPreviewAction.safeParse({
       action_id: action.action_id,
       name: action.name,
@@ -205,22 +226,26 @@ function publicPreviewActions(actionSurfaceManifest: unknown) {
   });
 }
 
-function isPublicListing(row: PublicListingRow): row is PublicListingRow & { currentRelease: NonNullable<PublicListingRow['currentRelease']> } {
-  return row.status === 'ACTIVE'
-    && row.package.governanceStatus === 'ACTIVE'
-    && row.currentReleaseId !== null
-    && row.currentRelease !== null
-    && row.currentRelease.id === row.currentReleaseId
-    && row.currentRelease.status === 'PUBLISHED'
-    && row.currentRelease.marketReviewStatus === 'APPROVED'
-    && row.currentRelease.aiPolicyVersion === PLUGIN_AI_POLICY_VERSION
-    && row.currentRelease.aiPolicyStatus === 'PASSED';
+function isPublicListing(
+  row: PublicListingRow
+): row is PublicListingRow & { currentRelease: NonNullable<PublicListingRow['currentRelease']> } {
+  return (
+    row.status === 'ACTIVE' &&
+    row.package.governanceStatus === 'ACTIVE' &&
+    row.currentReleaseId !== null &&
+    row.currentRelease !== null &&
+    row.currentRelease.id === row.currentReleaseId &&
+    row.currentRelease.status === 'PUBLISHED' &&
+    row.currentRelease.marketReviewStatus === 'APPROVED' &&
+    row.currentRelease.aiPolicyVersion === PLUGIN_AI_POLICY_VERSION &&
+    row.currentRelease.aiPolicyStatus === 'PASSED'
+  );
 }
 
 function publicCard(
   row: PublicListingRow & { currentRelease: NonNullable<PublicListingRow['currentRelease']> },
   discount: Parameters<typeof resolveMarketplacePrice>[0]['discount'],
-  now: Date,
+  now: Date
 ): PublicPluginCard {
   const manifest = objectValue(row.currentRelease.manifest);
   const runtime = RuntimeType.safeParse(manifest.runtime_type).success
@@ -228,12 +253,17 @@ function publicCard(
     : 'client';
   const capabilities = Array.isArray(manifest.capabilities)
     ? manifest.capabilities.flatMap((capability) => {
-      if (typeof capability === 'string') return [capability];
-      const kind = objectValue(capability).kind;
-      return typeof kind === 'string' ? [kind] : [];
-    })
+        if (typeof capability === 'string') return [capability];
+        const kind = objectValue(capability).kind;
+        return typeof kind === 'string' ? [kind] : [];
+      })
     : [];
-  const price = resolveMarketplacePrice({ listPriceCents: row.priceCents, priceRevision: row.priceRevision, discount, now });
+  const price = resolveMarketplacePrice({
+    listPriceCents: row.priceCents,
+    priceRevision: row.priceRevision,
+    discount,
+    now,
+  });
   return {
     package_id: row.package.id,
     listing_id: row.id,
@@ -241,43 +271,62 @@ function publicCard(
     name: row.package.name,
     summary: row.package.description,
     author_display_name: row.package.author?.displayName ?? null,
-    category: row.category ?? inferMarketplaceCategory({
-      name: row.package.name,
-      description: row.package.description,
-      capabilities,
-    }),
+    category:
+      row.category ??
+      inferMarketplaceCategory({
+        name: row.package.name,
+        description: row.package.description,
+        capabilities,
+      }),
     runtime_type: runtime,
-    quality_tier: row.qualityTier === 'FEATURED' || row.qualityTier === 'QUALITY' ? row.qualityTier : 'LISTED',
+    quality_tier:
+      row.qualityTier === 'FEATURED' || row.qualityTier === 'QUALITY' ? row.qualityTier : 'LISTED',
     version: row.currentRelease.version,
     install_count: row.installCount,
     rating_count: row.ratingCount,
-    average_rating_tenths: row.ratingCount > 0
-      ? Math.max(0, Math.min(50, Math.round((row.ratingSum / row.ratingCount) * 10)))
-      : 0,
+    average_rating_tenths:
+      row.ratingCount > 0
+        ? Math.max(0, Math.min(50, Math.round((row.ratingSum / row.ratingCount) * 10)))
+        : 0,
     base_price_cents: row.priceCents,
     discount_amount_cents: price.discount_amount_cents,
     effective_price_cents: price.price_cents,
     price_version: price.price_version,
     preview_mode: previewMode(runtime, row.currentRelease.actionSurfaceManifest),
-    updated_at: maxDate(row.updatedAt, row.package.updatedAt, row.currentRelease.createdAt).toISOString(),
+    updated_at: maxDate(
+      row.updatedAt,
+      row.package.updatedAt,
+      row.currentRelease.createdAt
+    ).toISOString(),
   };
 }
 
 function previewMode(runtime: string, actionSurfaceManifest: unknown): WebPluginPreviewMode {
-  if (runtime === 'client') return process.env.CLIENT_PLUGIN_PREVIEW_ENABLED === 'false' ? 'STATIC_DESKTOP' : 'CLIENT_SANDBOX';
+  if (runtime === 'client')
+    return process.env.CLIENT_PLUGIN_PREVIEW_ENABLED === 'false'
+      ? 'STATIC_DESKTOP'
+      : 'CLIENT_SANDBOX';
   if (runtime !== 'cloud' || !Array.isArray(actionSurfaceManifest)) return 'STATIC_DESKTOP';
   const previewable = actionSurfaceManifest.some((item) => {
     const action = objectValue(item);
-    return action.previewable === true
-      && action.cloud_capable === true
-      && (action.execution_semantics === 'read_only' || action.execution_semantics === 'idempotent');
+    return (
+      action.previewable === true &&
+      action.cloud_capable === true &&
+      (action.execution_semantics === 'read_only' || action.execution_semantics === 'idempotent')
+    );
   });
   return previewable ? 'CLOUD_TRIAL' : 'STATIC_DESKTOP';
 }
 
 function matchesQuery(card: PublicPluginCard, query: WebPluginCatalogQueryType): boolean {
   const keyword = query.q.toLocaleLowerCase();
-  if (keyword && !`${card.name} ${card.summary} ${card.author_display_name ?? ''}`.toLocaleLowerCase().includes(keyword)) return false;
+  if (
+    keyword &&
+    !`${card.name} ${card.summary} ${card.author_display_name ?? ''}`
+      .toLocaleLowerCase()
+      .includes(keyword)
+  )
+    return false;
   if (query.category && card.category !== query.category) return false;
   if (query.runtime_type && card.runtime_type !== query.runtime_type) return false;
   if (query.quality_tier && card.quality_tier !== query.quality_tier) return false;
@@ -293,14 +342,19 @@ function cardComparator(sort: WebPluginCatalogQueryType['sort']) {
     let primary = 0;
     if (sort === 'RECENT') primary = right.updated_at.localeCompare(left.updated_at);
     if (sort === 'POPULAR') primary = right.install_count - left.install_count;
-    if (sort === 'RATING') primary = right.average_rating_tenths - left.average_rating_tenths || right.rating_count - left.rating_count;
+    if (sort === 'RATING')
+      primary =
+        right.average_rating_tenths - left.average_rating_tenths ||
+        right.rating_count - left.rating_count;
     if (sort === 'NAME') primary = left.name.localeCompare(right.name);
     return primary || left.package_id.localeCompare(right.package_id);
   };
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function maxDate(...dates: Date[]): Date {

@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Inject, Param, Put, Req, StreamableFile } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Put,
+  Req,
+  StreamableFile,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Readable } from 'node:stream';
@@ -17,7 +27,9 @@ import { PluginSharedStateService } from './plugin-shared-state.service';
 @ApiBearerAuth()
 @Controller('api/teams/current/plugin-shared/namespaces')
 export class PluginSharedStateAdminController {
-  constructor(@Inject(PluginSharedStateService) private readonly shared: PluginSharedStateService) {}
+  constructor(
+    @Inject(PluginSharedStateService) private readonly shared: PluginSharedStateService
+  ) {}
 
   @Get()
   @ApiOperation({ summary: '团队管理员查看共享命名空间元数据' })
@@ -49,7 +61,12 @@ export class PluginSharedStateAdminController {
 
   @Put(':id/values/:key/migrate')
   @ApiOperation({ summary: '团队管理员执行无 ArtifactRef 的共享值 schema 迁移' })
-  migrate(@Req() req: Request, @Param('id') id: string, @Param('key') key: string, @Body() body: unknown) {
+  migrate(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('key') key: string,
+    @Body() body: unknown
+  ) {
     return this.shared.adminMigrateNamespaceValue(requireUser(req).id, id, key, body);
   }
 }

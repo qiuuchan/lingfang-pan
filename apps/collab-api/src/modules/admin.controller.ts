@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UploadedFiles,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
@@ -24,7 +37,12 @@ import {
   AdminUserOptionsQueryDto,
   AdminUsersQueryDto,
 } from './dto/admin.dto';
-import { AdminReleaseListQueryDto, ReleaseAssetCreateDto, ReleaseCreateDto, ReleaseUpdateDto } from './dto/release.dto';
+import {
+  AdminReleaseListQueryDto,
+  ReleaseAssetCreateDto,
+  ReleaseCreateDto,
+  ReleaseUpdateDto,
+} from './dto/release.dto';
 import { RevealSecretDto, UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
 import { ReleaseService } from './release.service';
 import { SettingsService } from './settings.service';
@@ -36,7 +54,7 @@ export class AdminController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(ReleaseService) private readonly releases: ReleaseService,
-    @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SettingsService) private readonly settings: SettingsService
   ) {}
 
   @RequirePermission('platform.dashboard.view')
@@ -133,7 +151,11 @@ export class AdminController {
   @RequirePermission('platform.user.role.assign')
   @Patch('users/:id/platform-role')
   @ApiOperation({ summary: '调整用户平台角色（NONE↔PLATFORM_ADMIN，禁止自改自身）' })
-  updateUserPlatformRole(@Req() req: Request, @Param('id') id: string, @Body() body: AdminPlatformRoleDto) {
+  updateUserPlatformRole(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: AdminPlatformRoleDto
+  ) {
     return this.admin.adminUpdateUserPlatformRole(requireUser(req).id, id, body);
   }
 
@@ -175,35 +197,56 @@ export class AdminController {
   @RequirePermission('platform.team.set_admin')
   @Delete('teams/:teamId/admins/:userId')
   @ApiOperation({ summary: '撤销团队管理员' })
-  revokeTeamAdmin(@Req() req: Request, @Param('teamId') teamId: string, @Param('userId') userId: string) {
+  revokeTeamAdmin(
+    @Req() req: Request,
+    @Param('teamId') teamId: string,
+    @Param('userId') userId: string
+  ) {
     return this.admin.adminRevokeTeamAdmin(requireUser(req).id, teamId, userId);
   }
 
   @RequirePermission('platform.team.adjust_balance')
   @Post('teams/:teamId/balance-adjustments')
   @ApiOperation({ summary: '调整团队共享余额' })
-  adjustBalance(@Req() req: Request, @Param('teamId') teamId: string, @Body() body: AdminAdjustBalanceDto) {
+  adjustBalance(
+    @Req() req: Request,
+    @Param('teamId') teamId: string,
+    @Body() body: AdminAdjustBalanceDto
+  ) {
     return this.admin.adminAdjustBalance(requireUser(req).id, teamId, body);
   }
 
   @RequirePermission('platform.team.list')
   @Get('teams/:id/members')
   @ApiOperation({ summary: '团队成员列表（含 role/status/joinedAt）' })
-  teamMembers(@Req() req: Request, @Param('id') id: string, @Query() query: AdminTeamMembersQueryDto) {
+  teamMembers(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Query() query: AdminTeamMembersQueryDto
+  ) {
     return this.admin.adminTeamMembers(requireUser(req).id, id, query);
   }
 
   @RequirePermission('platform.team.member.role')
   @Patch('teams/:id/members/:userId/role')
   @ApiOperation({ summary: '调整团队成员角色（TEAM_ADMIN↔MEMBER）' })
-  updateMemberRole(@Req() req: Request, @Param('id') id: string, @Param('userId') userId: string, @Body() body: AdminUpdateMemberRoleDto) {
+  updateMemberRole(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() body: AdminUpdateMemberRoleDto
+  ) {
     return this.admin.adminUpdateMemberRole(requireUser(req).id, id, userId, body);
   }
 
   @RequirePermission('platform.team.suspend')
   @Patch('teams/:id/status')
   @ApiOperation({ summary: '团队启用/停用（ACTIVE/SUSPENDED）' })
-  updateTeamStatus(@Req() req: Request, @Param('id') id: string, @Body() body: AdminUpdateTeamStatusDto) {
+  updateTeamStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: AdminUpdateTeamStatusDto
+  ) {
     return this.admin.adminUpdateTeamStatus(requireUser(req).id, id, body);
   }
 
@@ -411,22 +454,32 @@ export class AdminController {
   @RequirePermission('platform.release.manage')
   @Post('releases/:id/assets')
   @ApiOperation({ summary: '登记版本产物（平台/架构/下载链接）' })
-  addReleaseAsset(@Req() req: Request, @Param('id') id: string, @Body() body: ReleaseAssetCreateDto) {
+  addReleaseAsset(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: ReleaseAssetCreateDto
+  ) {
     return this.releases.addAsset(requireUser(req).id, id, body);
   }
 
   @RequirePermission('platform.release.manage')
   @Post('releases/:id/assets/upload')
-  @ApiOperation({ summary: '上传安装包文件（自动创建 asset，存 downloads/ 目录，上传时自动计算 SHA-256）' })
-  @UseInterceptors(FileFieldsInterceptor(
-    [{ name: 'file', maxCount: 1 }],
-    { limits: { fileSize: 500 * 1024 * 1024 } },
-  ))
+  @ApiOperation({
+    summary: '上传安装包文件（自动创建 asset，存 downloads/ 目录，上传时自动计算 SHA-256）',
+  })
+  @UseInterceptors(
+    FileFieldsInterceptor([{ name: 'file', maxCount: 1 }], {
+      limits: { fileSize: 500 * 1024 * 1024 },
+    })
+  )
   uploadReleaseAsset(
     @Req() req: Request,
     @Param('id') id: string,
-    @UploadedFiles() files: { file?: Array<{ originalname: string; buffer?: Buffer; path?: string; size?: number }> },
-    @Body() body: { platform?: string; arch?: string },
+    @UploadedFiles()
+    files: {
+      file?: Array<{ originalname: string; buffer?: Buffer; path?: string; size?: number }>;
+    },
+    @Body() body: { platform?: string; arch?: string }
   ) {
     const file = files?.file?.[0];
     return this.releases.uploadAsset(requireUser(req).id, id, file, body.platform, body.arch);
@@ -435,7 +488,11 @@ export class AdminController {
   @RequirePermission('platform.release.manage')
   @Delete('releases/:id/assets/:assetId')
   @ApiOperation({ summary: '删除版本产物' })
-  deleteReleaseAsset(@Req() req: Request, @Param('id') id: string, @Param('assetId') assetId: string) {
+  deleteReleaseAsset(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('assetId') assetId: string
+  ) {
     return this.releases.deleteAsset(requireUser(req).id, id, assetId);
   }
 
@@ -457,7 +514,9 @@ export class AdminController {
 
   @RequirePermission('platform.setting.manage')
   @Get('settings/smtp')
-  @ApiOperation({ summary: '当前生效的 SMTP 配置（PlatformSetting 优先，.env fallback；密码脱敏）' })
+  @ApiOperation({
+    summary: '当前生效的 SMTP 配置（PlatformSetting 优先，.env fallback；密码脱敏）',
+  })
   smtpSettings(@Req() req: Request) {
     return this.settings.getSmtpSettings(requireUser(req).id);
   }
@@ -506,14 +565,18 @@ export class AdminController {
 
   @RequirePermission('platform.setting.manage')
   @Post('settings/test-rbflow')
-  @ApiOperation({ summary: '测试 RBFLow 服务连通性（探测 /api/v1/health，返成功/失败 + 错误信息）' })
+  @ApiOperation({
+    summary: '测试 RBFLow 服务连通性（探测 /api/v1/health，返成功/失败 + 错误信息）',
+  })
   testRbflow(@Req() req: Request) {
     return this.settings.testRbflow(requireUser(req).id);
   }
 
   @RequirePermission('platform.setting.manage')
   @Post('settings/test-gitee')
-  @ApiOperation({ summary: '测试 Gitee 配置是否可用（探测 releases 端点连通性，返成功/失败 + 错误信息）' })
+  @ApiOperation({
+    summary: '测试 Gitee 配置是否可用（探测 releases 端点连通性，返成功/失败 + 错误信息）',
+  })
   testGitee(@Req() req: Request) {
     return this.settings.testGitee(requireUser(req).id);
   }

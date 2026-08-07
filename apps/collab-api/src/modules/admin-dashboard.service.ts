@@ -6,7 +6,7 @@ import { AuthService } from './auth.service';
 export class AdminDashboardService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
   async adminDashboard(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
@@ -54,22 +54,58 @@ export class AdminDashboardService {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     // 失败状态集合（relay executeRelay 的所有非 success 终态）。
-    const failStatuses = ['upstream_error', 'client_error', 'no_channel', 'no_pricing', 'insufficient_balance'];
-    const [monthCalls, monthSuccess, monthFailed, monthDurationAgg, totalCalls, totalSuccess, totalFailed, totalDurationAgg] = await Promise.all([
+    const failStatuses = [
+      'upstream_error',
+      'client_error',
+      'no_channel',
+      'no_pricing',
+      'insufficient_balance',
+    ];
+    const [
+      monthCalls,
+      monthSuccess,
+      monthFailed,
+      monthDurationAgg,
+      totalCalls,
+      totalSuccess,
+      totalFailed,
+      totalDurationAgg,
+    ] = await Promise.all([
       this.prisma.llmCallLog.count({ where: { createdAt: { gte: monthStart } } }),
-      this.prisma.llmCallLog.count({ where: { status: 'success', createdAt: { gte: monthStart } } }),
-      this.prisma.llmCallLog.count({ where: { status: { in: failStatuses }, createdAt: { gte: monthStart } } }),
-      this.prisma.llmCallLog.aggregate({ where: { status: 'success', createdAt: { gte: monthStart } }, _avg: { durationMs: true } }),
+      this.prisma.llmCallLog.count({
+        where: { status: 'success', createdAt: { gte: monthStart } },
+      }),
+      this.prisma.llmCallLog.count({
+        where: { status: { in: failStatuses }, createdAt: { gte: monthStart } },
+      }),
+      this.prisma.llmCallLog.aggregate({
+        where: { status: 'success', createdAt: { gte: monthStart } },
+        _avg: { durationMs: true },
+      }),
       this.prisma.llmCallLog.count({}),
       this.prisma.llmCallLog.count({ where: { status: 'success' } }),
       this.prisma.llmCallLog.count({ where: { status: { in: failStatuses } } }),
-      this.prisma.llmCallLog.aggregate({ where: { status: 'success' }, _avg: { durationMs: true } }),
+      this.prisma.llmCallLog.aggregate({
+        where: { status: 'success' },
+        _avg: { durationMs: true },
+      }),
     ]);
-    const safeRate = (calls: number, success: number) => (calls > 0 ? Math.round((success / calls) * 1000) / 10 : 0);
+    const safeRate = (calls: number, success: number) =>
+      calls > 0 ? Math.round((success / calls) * 1000) / 10 : 0;
     return {
       period: 'current_month',
-      month: { calls: monthCalls, success: monthSuccess, failed: monthFailed, successRate: safeRate(monthCalls, monthSuccess) },
-      total: { calls: totalCalls, success: totalSuccess, failed: totalFailed, successRate: safeRate(totalCalls, totalSuccess) },
+      month: {
+        calls: monthCalls,
+        success: monthSuccess,
+        failed: monthFailed,
+        successRate: safeRate(monthCalls, monthSuccess),
+      },
+      total: {
+        calls: totalCalls,
+        success: totalSuccess,
+        failed: totalFailed,
+        successRate: safeRate(totalCalls, totalSuccess),
+      },
       // 平均耗时：成功调用的 avg(durationMs)，null 时前端不渲染（Prisma 对无匹配行返回 null）。
       avgDurationMs: monthDurationAgg._avg.durationMs ?? null,
     };
@@ -87,7 +123,10 @@ export class AdminDashboardService {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const [monthGmvAgg, totalGmvAgg, paidBuyers, totalUsers, topPluginsRaw] = await Promise.all([
       // Prisma aggregate _sum 对空表返回 null，用 ?? 0 兜底避免 NaN。
-      this.prisma.purchase.aggregate({ where: { createdAt: { gte: monthStart } }, _sum: { priceCents: true } }),
+      this.prisma.purchase.aggregate({
+        where: { createdAt: { gte: monthStart } },
+        _sum: { priceCents: true },
+      }),
       this.prisma.purchase.aggregate({ _sum: { priceCents: true } }),
       this.prisma.purchase.findMany({ select: { buyerUserId: true }, distinct: ['buyerUserId'] }),
       this.prisma.user.count(),
@@ -95,13 +134,21 @@ export class AdminDashboardService {
         where: { status: 'ACTIVE' },
         orderBy: [{ installCount: 'desc' }, { ratingCount: 'desc' }],
         take: 5,
-        select: { packageId: true, installCount: true, ratingCount: true, ratingSum: true, priceCents: true, package: { select: { name: true } } },
+        select: {
+          packageId: true,
+          installCount: true,
+          ratingCount: true,
+          ratingSum: true,
+          priceCents: true,
+          package: { select: { name: true } },
+        },
       }),
     ]);
     const monthGmv = monthGmvAgg._sum.priceCents ?? 0;
     const totalGmv = totalGmvAgg._sum.priceCents ?? 0;
     const paidUserCount = paidBuyers.length;
-    const conversionRate = totalUsers > 0 ? Math.round((paidUserCount / totalUsers) * 1000) / 10 : 0;
+    const conversionRate =
+      totalUsers > 0 ? Math.round((paidUserCount / totalUsers) * 1000) / 10 : 0;
     const topPlugins = topPluginsRaw.map((p) => ({
       id: p.packageId,
       name: p.package.name,

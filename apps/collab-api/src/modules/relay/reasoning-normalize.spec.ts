@@ -15,7 +15,11 @@ function parseOut(out: string): any[] {
       if (!line) return null;
       const payload = line.trim().slice(5).trim();
       if (payload === '[DONE]') return { done: true };
-      try { return JSON.parse(payload); } catch { return null; }
+      try {
+        return JSON.parse(payload);
+      } catch {
+        return null;
+      }
     })
     .filter(Boolean);
 }
@@ -26,7 +30,7 @@ describe('normalizeEventReasoning', () => {
   it('首个 reasoning_content 增量前置 <think>，置 inThinking', () => {
     const { out, nextInThinking } = normalizeEventReasoning(
       evt({ choices: [{ index: 0, delta: { reasoning_content: '用户问' } }] }),
-      false,
+      false
     );
     expect(nextInThinking).toBe(true);
     const [chunk] = parseOut(out);
@@ -37,7 +41,7 @@ describe('normalizeEventReasoning', () => {
   it('后续 reasoning 增量不再重复 <think>', () => {
     const { out, nextInThinking } = normalizeEventReasoning(
       evt({ choices: [{ index: 0, delta: { reasoning_content: '我是谁' } }] }),
-      true,
+      true
     );
     expect(nextInThinking).toBe(true);
     const [chunk] = parseOut(out);
@@ -47,7 +51,7 @@ describe('normalizeEventReasoning', () => {
   it('思考中遇到正文增量：补 </think> 闭合再拼正文', () => {
     const { out, nextInThinking } = normalizeEventReasoning(
       evt({ choices: [{ index: 0, delta: { content: '我是 Step。' } }] }),
-      true,
+      true
     );
     expect(nextInThinking).toBe(false);
     const [chunk] = parseOut(out);
@@ -56,7 +60,21 @@ describe('normalizeEventReasoning', () => {
 
   it('思考中遇到 tool_call 增量：先补 </think> 闭合，再原样下发 tool_call', () => {
     const toolDelta = {
-      choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'gen', arguments: '' } }] } }],
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'gen', arguments: '' },
+              },
+            ],
+          },
+        },
+      ],
     };
     const { out, nextInThinking } = normalizeEventReasoning(evt(toolDelta), true);
     expect(nextInThinking).toBe(false);
@@ -79,7 +97,25 @@ describe('normalizeEventReasoning', () => {
       }
     };
     feed(evt({ choices: [{ index: 0, delta: { reasoning_content: '思考A' } }] }));
-    feed(evt({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'gen', arguments: '{}' } }] } }] }));
+    feed(
+      evt({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'c1',
+                  type: 'function',
+                  function: { name: 'gen', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      })
+    );
     feed(evt({ choices: [{ index: 0, delta: { reasoning_content: '思考B' } }] }));
     feed('data: [DONE]');
     const full = collected.join('');
@@ -113,7 +149,7 @@ describe('normalizeEventReasoning', () => {
   it('带 finish_reason 但无 delta 的收尾 chunk：思考未闭合时前插 </think>', () => {
     const { out, nextInThinking } = normalizeEventReasoning(
       evt({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
-      true,
+      true
     );
     expect(nextInThinking).toBe(false);
     const events = parseOut(out);

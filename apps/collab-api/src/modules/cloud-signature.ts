@@ -81,30 +81,49 @@ function verifyCanonical(canonical: string, signature: string, secret: string | 
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-export function signCloudRequest(input: CloudRequestSignatureInput, secret: string | Buffer): string {
+export function signCloudRequest(
+  input: CloudRequestSignatureInput,
+  secret: string | Buffer
+): string {
   return signCanonical(canonicalCloudRequest(input), secret);
 }
 
-export function verifyCloudRequestSignature(input: CloudRequestSignatureInput, signature: string, secret: string | Buffer): boolean {
+export function verifyCloudRequestSignature(
+  input: CloudRequestSignatureInput,
+  signature: string,
+  secret: string | Buffer
+): boolean {
   return verifyCanonical(canonicalCloudRequest(input), signature, secret);
 }
 
-export function signCloudResponse(input: CloudResponseSignatureInput, secret: string | Buffer): string {
+export function signCloudResponse(
+  input: CloudResponseSignatureInput,
+  secret: string | Buffer
+): string {
   return signCanonical(canonicalCloudResponse(input), secret);
 }
 
-export function verifyCloudResponseSignature(input: CloudResponseSignatureInput, signature: string, secret: string | Buffer): boolean {
+export function verifyCloudResponseSignature(
+  input: CloudResponseSignatureInput,
+  signature: string,
+  secret: string | Buffer
+): boolean {
   return verifyCanonical(canonicalCloudResponse(input), signature, secret);
 }
 
-export function cloudRequestHeaders(input: CloudRequestSignatureInput, secret: string | Buffer): Record<string, string> {
+export function cloudRequestHeaders(
+  input: CloudRequestSignatureInput,
+  secret: string | Buffer
+): Record<string, string> {
   return {
     'content-type': 'application/json',
     'x-lingfang-signature-version': CLOUD_SIGNATURE_VERSION,
     'x-lingfang-timestamp': String(input.timestamp),
     'x-lingfang-nonce': input.nonce,
     'x-lingfang-invocation-id': input.invocationId,
-    ...(input.effectIdempotencyKey ? { 'x-lingfang-effect-idempotency-key': input.effectIdempotencyKey } : {}),
+    ...(input.effectIdempotencyKey
+      ? { 'x-lingfang-effect-idempotency-key': input.effectIdempotencyKey }
+      : {}),
     'x-lingfang-package-id': input.target.packageId,
     'x-lingfang-release-id': input.target.releaseId,
     'x-lingfang-release-sha256': input.target.sha256,

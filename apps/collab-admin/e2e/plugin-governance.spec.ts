@@ -1,9 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import {
-  FIXTURE_IDS,
-  FIXTURE_NAMES,
-  GovernanceApiMock,
-} from './governance-api-mock';
+import { FIXTURE_IDS, FIXTURE_NAMES, GovernanceApiMock } from './governance-api-mock';
 
 const packagePath = (packageId: string) => `/api/admin/plugin-packages/${packageId}`;
 const releasesPath = (packageId: string) => `${packagePath(packageId)}/releases`;
@@ -30,9 +26,11 @@ async function enterPluginGovernance(page: Page) {
     .getByRole('button', { name: '治理中心', exact: true })
     .click();
   await expect(page.getByRole('heading', { level: 1, name: '治理中心' })).toBeVisible();
-  await expect(page.getByRole('button', {
-    name: `查看插件包详情：${FIXTURE_NAMES.currentPackage}`,
-  })).toBeVisible();
+  await expect(
+    page.getByRole('button', {
+      name: `查看插件包详情：${FIXTURE_NAMES.currentPackage}`,
+    })
+  ).toBeVisible();
 }
 
 async function openPackage(page: Page, name: string) {
@@ -57,11 +55,13 @@ async function assertNoViewportOverflow(page: Page, dialog?: Locator) {
   expect(overflow.body).toBeLessThanOrEqual(overflow.viewport + 1);
 
   if (dialog) {
-    await expect.poll(async () => {
-      const box = await dialog.boundingBox();
-      if (!box) return Number.POSITIVE_INFINITY;
-      return Math.max(-box.x, box.x + box.width - overflow.viewport);
-    }).toBeLessThanOrEqual(1);
+    await expect
+      .poll(async () => {
+        const box = await dialog.boundingBox();
+        if (!box) return Number.POSITIVE_INFINITY;
+        return Math.max(-box.x, box.x + box.width - overflow.viewport);
+      })
+      .toBeLessThanOrEqual(1);
   }
 }
 
@@ -71,9 +71,13 @@ test.describe('插件发行治理', () => {
     await enterPluginGovernance(page);
     await page.waitForTimeout(100);
 
-    expect(new Set(api.pluginRequests().map((request) => (
-      `${request.method} ${request.pathname}${request.search}`
-    )))).toEqual(new Set(['GET /api/admin/plugin-packages?page=1&pageSize=10']));
+    expect(
+      new Set(
+        api
+          .pluginRequests()
+          .map((request) => `${request.method} ${request.pathname}${request.search}`)
+      )
+    ).toEqual(new Set(['GET /api/admin/plugin-packages?page=1&pageSize=10']));
 
     const dialog = await openPackage(page, FIXTURE_NAMES.currentPackage);
     await expect(dialog.getByText('Cursor 导入')).toBeVisible();
@@ -128,9 +132,12 @@ test.describe('插件发行治理', () => {
     const endpoint = `${releasePath(FIXTURE_IDS.currentRelease)}/delist`;
     await expect.poll(() => api.count('POST', endpoint)).toBe(1);
     expect(api.last('POST', endpoint)?.body).toEqual({ reason: '测试精确当前版下架' });
-    expect(api.pluginRequests().filter((request) => (
-      request.method === 'POST' && request.pathname.endsWith('/delist')
-    )).map((request) => request.pathname)).toEqual([endpoint]);
+    expect(
+      api
+        .pluginRequests()
+        .filter((request) => request.method === 'POST' && request.pathname.endsWith('/delist'))
+        .map((request) => request.pathname)
+    ).toEqual([endpoint]);
     await expect(confirmation).toBeHidden();
     await expect(dialog.getByRole('button', { name: '恢复市场上架' })).toBeVisible();
   });
@@ -140,7 +147,9 @@ test.describe('插件发行治理', () => {
     await enterPluginGovernance(page);
 
     const ownerDialog = await openPackage(page, FIXTURE_NAMES.ownerDelistedPackage);
-    await expect.poll(() => api.count('GET', releasePath(FIXTURE_IDS.ownerDelistedRelease))).toBe(1);
+    await expect
+      .poll(() => api.count('GET', releasePath(FIXTURE_IDS.ownerDelistedRelease)))
+      .toBe(1);
     await expect(ownerDialog.getByRole('button', { name: '恢复市场上架' })).toHaveCount(0);
     await ownerDialog.getByRole('button', { name: '关闭' }).click();
     await expect(ownerDialog).toBeHidden();
@@ -181,7 +190,7 @@ test.describe('插件发行治理', () => {
       reviews: `${releasePath(FIXTURE_IDS.currentRelease)}/reviews`,
     };
     const baseline = Object.fromEntries(
-      Object.entries(paths).map(([key, path]) => [key, api.count('GET', path)]),
+      Object.entries(paths).map(([key, path]) => [key, api.count('GET', path)])
     ) as Record<keyof typeof paths, number>;
 
     await dialog.getByRole('button', { name: '平台下架当前版' }).click();
@@ -203,7 +212,9 @@ test.describe('插件发行治理', () => {
     { width: 1440, height: 900, label: 'desktop' },
     { width: 390, height: 844, label: 'mobile' },
   ]) {
-    test(`${viewport.label} ${viewport.width}x${viewport.height} 列表与详情无页面级横向溢出`, async ({ page }, testInfo) => {
+    test(`${viewport.label} ${viewport.width}x${viewport.height} 列表与详情无页面级横向溢出`, async ({
+      page,
+    }, testInfo) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       const api = await boot(page);
       await enterPluginGovernance(page);

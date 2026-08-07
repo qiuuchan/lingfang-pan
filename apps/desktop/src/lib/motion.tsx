@@ -175,7 +175,7 @@ export function AnimatedNumber({
   const reduce = useReducedMotion();
   const count = useMotionValue(0);
   const display = useTransform(count, (latest) =>
-    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN'),
+    format ? format(latest) : Math.round(latest).toLocaleString('zh-CN')
   );
 
   useEffect(() => {
@@ -225,7 +225,15 @@ export function ListSkeleton({ rows = 4, className }: { rows?: number; className
 /** 页面切换转场：AnimatePresence + motion.div，子级按 viewKey 切换时 fade only。
  *  mode="wait" 保证旧视图退出后再挂载新视图，避免双视图同时撑开布局。
  *  仅 App.tsx 的视图容器使用（PluginCreatorHome 常驻挂载，不进此组件）。 */
-export function PageTransition({ viewKey, children, className }: { viewKey: string; children: ReactNode; className?: string }) {
+export function PageTransition({
+  viewKey,
+  children,
+  className,
+}: {
+  viewKey: string;
+  children: ReactNode;
+  className?: string;
+}) {
   const reduce = useReducedMotion();
   return (
     <AnimatePresence mode="wait">

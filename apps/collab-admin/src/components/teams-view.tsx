@@ -4,7 +4,13 @@ import { AsyncResource } from '@/components/ui/async-resource';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -35,14 +41,18 @@ export function TeamsView() {
   const [selected, setSelected] = useState<TeamSummary | null>(null);
 
   const teams = useAsyncResource(
-    (signal) => adminCoreApi.teams({
-      page,
-      pageSize,
-      q: query || undefined,
-      status: status === 'ALL' ? undefined : status,
-    }, signal),
+    (signal) =>
+      adminCoreApi.teams(
+        {
+          page,
+          pageSize,
+          q: query || undefined,
+          status: status === 'ALL' ? undefined : status,
+        },
+        signal
+      ),
     [page, pageSize, query, status],
-    { isEmpty: (data) => data.items.length === 0 },
+    { isEmpty: (data) => data.items.length === 0 }
   );
 
   usePageCorrection(teams.data, page, pageSize, setPage);
@@ -63,14 +73,14 @@ export function TeamsView() {
     <Section
       title="团队管理"
       description="团队资料、成员、角色和余额。"
-      actions={(
+      actions={
         <CreateTeamDialog onChanged={teams.reload}>
           <Button type="button">
             <PlusIcon className="size-4" />
             创建团队
           </Button>
         </CreateTeamDialog>
-      )}
+      }
     >
       <div className="space-y-4">
         <form className="flex flex-col gap-2 sm:flex-row" onSubmit={applySearch}>
@@ -109,7 +119,11 @@ export function TeamsView() {
           status={teams.status}
           error={teams.error}
           retry={teams.reload}
-          emptyFallback={<div className="py-12 text-center text-sm text-muted-foreground">暂无符合条件的团队</div>}
+          emptyFallback={
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              暂无符合条件的团队
+            </div>
+          }
         >
           {teams.data ? (
             <>
@@ -138,9 +152,15 @@ export function TeamsView() {
                           </span>
                         </TableCellAction>
                       </TableCell>
-                      <TableCell className="hidden font-mono text-xs sm:table-cell">{team.slug}</TableCell>
-                      <TableCell><StatusBadge value={team.status} /></TableCell>
-                      <TableCell className="hidden font-medium md:table-cell">{money(team.balanceCents)}</TableCell>
+                      <TableCell className="hidden font-mono text-xs sm:table-cell">
+                        {team.slug}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge value={team.status} />
+                      </TableCell>
+                      <TableCell className="hidden font-medium md:table-cell">
+                        {money(team.balanceCents)}
+                      </TableCell>
                       <TableCell className="hidden md:table-cell">{team.memberCount}</TableCell>
                     </TableRow>
                   ))}
@@ -160,7 +180,9 @@ export function TeamsView() {
 
       <TeamDetailSheet
         team={selected}
-        onOpenChange={(open) => { if (!open) setSelected(null); }}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
         onChanged={teams.reload}
       />
     </Section>

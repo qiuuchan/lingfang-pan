@@ -21,29 +21,27 @@ export function SchedulerNotifier() {
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     (async () => {
-      unlisten = await tauriListen<SchedulerNotifyPayload>(
-        'scheduler:notify',
-        async (event) => {
-          const { title, body } = event.payload;
-          // 1. 应用内 toast（任何状态都显示）。
-          // 标题前缀 [定时任务] 由 Rust 端已加；按内容判断 level。
-          const isFailure = title.includes('失败') || title.includes('超时') || title.includes('跳过');
-          if (isFailure) {
-            toast.error(title, { description: body || undefined, duration: 10000 });
-          } else {
-            toast.success(title, { description: body || undefined, duration: 6000 });
-          }
+      unlisten = await tauriListen<SchedulerNotifyPayload>('scheduler:notify', async (event) => {
+        const { title, body } = event.payload;
+        // 1. 应用内 toast（任何状态都显示）。
+        // 标题前缀 [定时任务] 由 Rust 端已加；按内容判断 level。
+        const isFailure =
+          title.includes('失败') || title.includes('超时') || title.includes('跳过');
+        if (isFailure) {
+          toast.error(title, { description: body || undefined, duration: 10000 });
+        } else {
+          toast.success(title, { description: body || undefined, duration: 6000 });
+        }
 
-          // 2. 系统通知（尊重勿扰时段）。
-          if (!isInDndWindow()) {
-            try {
-              await sendSystemNotification(title, body);
-            } catch (e) {
-              console.warn('[scheduler] 系统通知失败', e);
-            }
+        // 2. 系统通知（尊重勿扰时段）。
+        if (!isInDndWindow()) {
+          try {
+            await sendSystemNotification(title, body);
+          } catch (e) {
+            console.warn('[scheduler] 系统通知失败', e);
           }
-        },
-      );
+        }
+      });
     })();
     return () => unlisten?.();
   }, []);
@@ -73,8 +71,10 @@ function isInDndWindow(): boolean {
 
 /** 调 tauri-plugin-notification 发系统通知。 */
 async function sendSystemNotification(title: string, body: string): Promise<void> {
-  const tauri = (window as unknown as {
-    __TAURI__?: { notification?: { sendNotification?: (n: unknown) => void } };
-  }).__TAURI__;
+  const tauri = (
+    window as unknown as {
+      __TAURI__?: { notification?: { sendNotification?: (n: unknown) => void } };
+    }
+  ).__TAURI__;
   tauri?.notification?.sendNotification?.({ title, body });
 }

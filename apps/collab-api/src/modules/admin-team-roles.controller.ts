@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
@@ -55,7 +66,12 @@ export class AdminTeamRolesController {
 
   @Patch(':id/roles/:roleId')
   @ApiOperation({ summary: '更新指定团队的角色（系统角色不可改权限/编码）' })
-  update(@Req() req: Request, @Param('id') id: string, @Param('roleId') roleId: string, @Body() dto: UpdateRoleDto) {
+  update(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('roleId') roleId: string,
+    @Body() dto: UpdateRoleDto
+  ) {
     return this.role.updateTeamRoleForTeam(requireUser(req).id, id, roleId, dto);
   }
 

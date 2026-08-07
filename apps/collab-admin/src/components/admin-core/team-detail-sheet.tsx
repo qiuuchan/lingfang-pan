@@ -15,7 +15,13 @@ import { Button } from '@/components/ui/button';
 import { DetailSheet } from '@/components/ui/detail-sheet';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InfoGrid, StatusBadge } from '@/components/shared';
 import { adminCoreApi } from '@/components/admin-core/api';
@@ -51,7 +57,10 @@ export function TeamDetailSheet({
 }) {
   const teamId = team?.id ?? '';
   const [tab, setTab] = useState<TeamTab>('overview');
-  const [visitedState, setVisitedState] = useState<VisitedTeamTabs>({ teamId, tabs: new Set(['overview']) });
+  const [visitedState, setVisitedState] = useState<VisitedTeamTabs>({
+    teamId,
+    tabs: new Set(['overview']),
+  });
   const [membersPage, setMembersPage] = useState(1);
   const [membersDraftQuery, setMembersDraftQuery] = useState('');
   const [membersQuery, setMembersQuery] = useState('');
@@ -76,18 +85,16 @@ export function TeamDetailSheet({
     setRoleEditor(null);
   }, [teamId]);
 
-  const overview = useAsyncResource(
-    (signal) => adminCoreApi.teamDetail(teamId, signal),
-    [teamId],
-    { enabled: !!teamId },
-  );
+  const overview = useAsyncResource((signal) => adminCoreApi.teamDetail(teamId, signal), [teamId], {
+    enabled: !!teamId,
+  });
   const members = useAsyncResource(
     (signal) => adminCoreApi.teamMembers(teamId, membersPage, PAGE_SIZE, membersQuery, signal),
     [teamId, membersPage, membersQuery],
     {
       enabled: !!teamId && visitedState.teamId === teamId && visitedState.tabs.has('members'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
   const roles = useAsyncResource(
     (signal) => adminCoreApi.teamRoles(teamId, rolesPage, PAGE_SIZE, signal),
@@ -95,12 +102,15 @@ export function TeamDetailSheet({
     {
       enabled: !!teamId && visitedState.teamId === teamId && visitedState.tabs.has('roles'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
   const roleOptions = useAsyncResource(
     (signal) => adminCoreApi.teamRoles(teamId, 1, 50, signal),
     [teamId],
-    { enabled: !!teamId && roleOptionsTeamId === teamId, isEmpty: (data) => data.items.length === 0 },
+    {
+      enabled: !!teamId && roleOptionsTeamId === teamId,
+      isEmpty: (data) => data.items.length === 0,
+    }
   );
   const plugins = useAsyncResource(
     (signal) => adminCoreApi.teamPlugins(teamId, pluginsPage, PAGE_SIZE, signal),
@@ -108,7 +118,7 @@ export function TeamDetailSheet({
     {
       enabled: !!teamId && visitedState.teamId === teamId && visitedState.tabs.has('plugins'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
   const purchases = useAsyncResource(
     (signal) => adminCoreApi.teamPurchases(teamId, purchasesPage, PAGE_SIZE, signal),
@@ -116,7 +126,7 @@ export function TeamDetailSheet({
     {
       enabled: !!teamId && visitedState.teamId === teamId && visitedState.tabs.has('purchases'),
       isEmpty: (data) => data.items.length === 0,
-    },
+    }
   );
   const ledger = useAsyncResource(
     (signal) => adminCoreApi.teamLedger(teamId, ledgerPage, PAGE_SIZE, signal),
@@ -124,7 +134,7 @@ export function TeamDetailSheet({
     {
       enabled: !!teamId && visitedState.teamId === teamId && visitedState.tabs.has('ledger'),
       isEmpty: () => false,
-    },
+    }
   );
 
   usePageCorrection(members.data, membersPage, PAGE_SIZE, setMembersPage);
@@ -133,13 +143,14 @@ export function TeamDetailSheet({
   usePageCorrection(purchases.data, purchasesPage, PAGE_SIZE, setPurchasesPage);
   usePageCorrection(ledger.data, ledgerPage, PAGE_SIZE, setLedgerPage);
 
-  const currentTeam: TeamSummary | null = overview.data?.team.id === teamId
-    ? {
-        ...overview.data.team,
-        memberCount: overview.data.memberCount,
-        pluginCount: overview.data.pluginCount,
-      }
-    : null;
+  const currentTeam: TeamSummary | null =
+    overview.data?.team.id === teamId
+      ? {
+          ...overview.data.team,
+          memberCount: overview.data.memberCount,
+          pluginCount: overview.data.pluginCount,
+        }
+      : null;
 
   function selectTab(value: string) {
     const nextTab = value as TeamTab;
@@ -177,7 +188,7 @@ export function TeamDetailSheet({
     if (status === 'SUSPENDED' && !window.confirm(`确认停用团队「${currentTeam.name}」？`)) return;
     const ok = await run(
       () => api(`/api/admin/teams/${currentTeam.id}/status`, { method: 'PATCH', body: { status } }),
-      status === 'SUSPENDED' ? '团队已停用' : '团队已启用',
+      status === 'SUSPENDED' ? '团队已停用' : '团队已启用'
     );
     if (ok) refreshCore();
   }
@@ -191,11 +202,12 @@ export function TeamDetailSheet({
   async function changeMemberRole(member: TeamMemberEntry, roleId: string) {
     if (member.status !== 'ACTIVE' || member.teamRoleId === roleId) return;
     const ok = await run(
-      () => api(`/api/admin/teams/${teamId}/members/${member.userId}/role`, {
-        method: 'PATCH',
-        body: { roleId },
-      }),
-      '成员角色已更新',
+      () =>
+        api(`/api/admin/teams/${teamId}/members/${member.userId}/role`, {
+          method: 'PATCH',
+          body: { roleId },
+        }),
+      '成员角色已更新'
     );
     if (ok) refreshMembers();
   }
@@ -204,7 +216,7 @@ export function TeamDetailSheet({
     if (!window.confirm(`确认撤销 ${member.user.email} 的团队管理员权限？`)) return;
     const ok = await run(
       () => api(`/api/admin/teams/${teamId}/admins/${member.userId}`, { method: 'DELETE' }),
-      '团队管理员已撤销',
+      '团队管理员已撤销'
     );
     if (ok) refreshMembers();
   }
@@ -213,7 +225,7 @@ export function TeamDetailSheet({
     if (!window.confirm(`确认删除角色「${role.name}」？`)) return;
     const ok = await run(
       () => api(`/api/admin/teams/${teamId}/roles/${role.id}`, { method: 'DELETE' }),
-      '角色已删除',
+      '角色已删除'
     );
     if (!ok) return;
     roles.reload();
@@ -228,30 +240,32 @@ export function TeamDetailSheet({
       title={team?.name || ''}
       description={team?.slug}
       size="xl"
-      footer={currentTeam ? (
-        <div className="grid gap-2 sm:grid-cols-3">
-          <EditTeamDialog team={currentTeam} onChanged={refreshCore}>
-            <Button type="button" variant="outline" className="w-full">
-              <PencilIcon className="size-4" />
-              编辑资料
+      footer={
+        currentTeam ? (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <EditTeamDialog team={currentTeam} onChanged={refreshCore}>
+              <Button type="button" variant="outline" className="w-full">
+                <PencilIcon className="size-4" />
+                编辑资料
+              </Button>
+            </EditTeamDialog>
+            <BalanceAdjustmentDialog team={currentTeam} onChanged={refreshBalance}>
+              <Button type="button" variant="outline" className="w-full">
+                <BanknoteIcon className="size-4" />
+                调整余额
+              </Button>
+            </BalanceAdjustmentDialog>
+            <Button
+              type="button"
+              variant={currentTeam.status === 'ACTIVE' ? 'destructive' : 'default'}
+              onClick={() => void toggleStatus()}
+            >
+              <PowerIcon className="size-4" />
+              {currentTeam.status === 'ACTIVE' ? '停用团队' : '启用团队'}
             </Button>
-          </EditTeamDialog>
-          <BalanceAdjustmentDialog team={currentTeam} onChanged={refreshBalance}>
-            <Button type="button" variant="outline" className="w-full">
-              <BanknoteIcon className="size-4" />
-              调整余额
-            </Button>
-          </BalanceAdjustmentDialog>
-          <Button
-            type="button"
-            variant={currentTeam.status === 'ACTIVE' ? 'destructive' : 'default'}
-            onClick={() => void toggleStatus()}
-          >
-            <PowerIcon className="size-4" />
-            {currentTeam.status === 'ACTIVE' ? '停用团队' : '启用团队'}
-          </Button>
-        </div>
-      ) : null}
+          </div>
+        ) : null
+      }
     >
       {team ? (
         <Tabs value={tab} onValueChange={selectTab}>
@@ -268,22 +282,26 @@ export function TeamDetailSheet({
             <AsyncResource status={overview.status} error={overview.error} retry={overview.reload}>
               {overview.data ? (
                 <>
-                  <InfoGrid items={[
-                    ['团队 ID', overview.data.team.id],
-                    ['Slug', overview.data.team.slug],
-                    ['状态', <StatusBadge key="status" value={overview.data.team.status} />],
-                    ['当前余额', money(overview.data.team.balanceCents)],
-                    ['成员', String(overview.data.memberCount)],
-                    ['角色', String(overview.data.roleCount)],
-                    ['插件', String(overview.data.pluginCount)],
-                    ['购买记录', String(overview.data.purchaseCount)],
-                    ['创建时间', formatTime(overview.data.team.createdAt)],
-                  ]} />
-                  <InfoGrid items={[
-                    ['累计入账', money(overview.data.ledgerSummary.totalCreditCents)],
-                    ['累计扣减', money(overview.data.ledgerSummary.totalDebitCents)],
-                    ['净流入', money(overview.data.ledgerSummary.netCents)],
-                  ]} />
+                  <InfoGrid
+                    items={[
+                      ['团队 ID', overview.data.team.id],
+                      ['Slug', overview.data.team.slug],
+                      ['状态', <StatusBadge key="status" value={overview.data.team.status} />],
+                      ['当前余额', money(overview.data.team.balanceCents)],
+                      ['成员', String(overview.data.memberCount)],
+                      ['角色', String(overview.data.roleCount)],
+                      ['插件', String(overview.data.pluginCount)],
+                      ['购买记录', String(overview.data.purchaseCount)],
+                      ['创建时间', formatTime(overview.data.team.createdAt)],
+                    ]}
+                  />
+                  <InfoGrid
+                    items={[
+                      ['累计入账', money(overview.data.ledgerSummary.totalCreditCents)],
+                      ['累计扣减', money(overview.data.ledgerSummary.totalDebitCents)],
+                      ['净流入', money(overview.data.ledgerSummary.netCents)],
+                    ]}
+                  />
                   {overview.data.team.description ? (
                     <div className="rounded-lg border px-3 py-3 text-sm whitespace-pre-wrap break-words">
                       {overview.data.team.description}
@@ -306,7 +324,9 @@ export function TeamDetailSheet({
                     className="pl-9"
                   />
                 </div>
-                <Button type="submit" variant="outline">搜索</Button>
+                <Button type="submit" variant="outline">
+                  搜索
+                </Button>
               </form>
               {currentTeam ? (
                 <AssignTeamAdminDialog team={currentTeam} onChanged={refreshMembers}>
@@ -326,9 +346,14 @@ export function TeamDetailSheet({
               {members.data ? (
                 <PagedStack total={members.data.total} page={membersPage} setPage={setMembersPage}>
                   {members.data.items.map((member) => (
-                    <div key={member.userId} className="flex flex-col gap-3 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div
+                      key={member.userId}
+                      className="flex flex-col gap-3 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
+                    >
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{member.user.displayName || member.user.email}</div>
+                        <div className="truncate font-medium">
+                          {member.user.displayName || member.user.email}
+                        </div>
                         <div className="truncate text-xs text-muted-foreground">
                           {member.user.email} · {formatTime(member.joinedAt)}
                         </div>
@@ -337,24 +362,44 @@ export function TeamDetailSheet({
                         {member.status === 'ACTIVE' ? (
                           <Select
                             value={member.teamRoleId ?? undefined}
-                            onOpenChange={(open) => { if (open) setRoleOptionsTeamId(teamId); }}
+                            onOpenChange={(open) => {
+                              if (open) setRoleOptionsTeamId(teamId);
+                            }}
                             onValueChange={(roleId) => void changeMemberRole(member, roleId)}
                           >
-                            <SelectTrigger className="w-36" aria-label={`调整 ${member.user.email} 的角色`}>
-                              <SelectValue placeholder={member.teamRole?.name || labelOf(member.role)} />
+                            <SelectTrigger
+                              className="w-36"
+                              aria-label={`调整 ${member.user.email} 的角色`}
+                            >
+                              <SelectValue
+                                placeholder={member.teamRole?.name || labelOf(member.role)}
+                              />
                             </SelectTrigger>
                             <SelectContent>
                               {roleOptions.data?.items.map((role) => (
-                                <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                                <SelectItem key={role.id} value={role.id}>
+                                  {role.name}
+                                </SelectItem>
                               ))}
-                              {roleOptions.status === 'loading' ? <SelectItem value="__loading" disabled>加载中…</SelectItem> : null}
+                              {roleOptions.status === 'loading' ? (
+                                <SelectItem value="__loading" disabled>
+                                  加载中…
+                                </SelectItem>
+                              ) : null}
                             </SelectContent>
                           </Select>
                         ) : (
                           <Badge variant="secondary">{labelOf(member.status)}</Badge>
                         )}
                         {member.role === 'TEAM_ADMIN' ? (
-                          <Button type="button" variant="ghost" size="sm" onClick={() => void revokeAdmin(member)}>撤销管理员</Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void revokeAdmin(member)}
+                          >
+                            撤销管理员
+                          </Button>
                         ) : null}
                       </div>
                     </div>
@@ -380,23 +425,42 @@ export function TeamDetailSheet({
               {roles.data ? (
                 <PagedStack total={roles.data.total} page={rolesPage} setPage={setRolesPage}>
                   {roles.data.items.map((role) => (
-                    <div key={role.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                    <div
+                      key={role.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                    >
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          {role.isSystem ? <LockIcon className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+                          {role.isSystem ? (
+                            <LockIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          ) : null}
                           <span className="truncate font-medium">{role.name}</span>
-                          <Badge variant={role.isSystem ? 'default' : 'secondary'}>{role.isSystem ? '内置' : '自定义'}</Badge>
+                          <Badge variant={role.isSystem ? 'default' : 'secondary'}>
+                            {role.isSystem ? '内置' : '自定义'}
+                          </Badge>
                         </div>
                         <div className="truncate text-xs text-muted-foreground">
                           {role.code || '—'} · 权限 {role.permissionCount} · 成员 {role.memberCount}
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-1">
-                        <Button type="button" variant="ghost" size="icon" aria-label={`编辑角色：${role.name}`} onClick={() => setRoleEditor({ teamId, role })}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`编辑角色：${role.name}`}
+                          onClick={() => setRoleEditor({ teamId, role })}
+                        >
                           <PencilIcon className="size-4" />
                         </Button>
                         {!role.isSystem ? (
-                          <Button type="button" variant="ghost" size="icon" aria-label={`删除角色：${role.name}`} onClick={() => void deleteRole(role)}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`删除角色：${role.name}`}
+                            onClick={() => void deleteRole(role)}
+                          >
                             <Trash2Icon className="size-4" />
                           </Button>
                         ) : null}
@@ -418,11 +482,15 @@ export function TeamDetailSheet({
               {plugins.data ? (
                 <PagedStack total={plugins.data.total} page={pluginsPage} setPage={setPluginsPage}>
                   {plugins.data.items.map((plugin) => (
-                    <div key={plugin.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                    <div
+                      key={plugin.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                    >
                       <div className="min-w-0">
                         <div className="truncate font-medium">{plugin.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {labelOf(plugin.visibility)} · {labelOf(plugin.reviewStatus)} · 安装 {plugin.installCount}
+                          {labelOf(plugin.visibility)} · {labelOf(plugin.reviewStatus)} · 安装{' '}
+                          {plugin.installCount}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
@@ -444,12 +512,21 @@ export function TeamDetailSheet({
               emptyFallback={<EmptyState label="暂无购买记录" />}
             >
               {purchases.data ? (
-                <PagedStack total={purchases.data.total} page={purchasesPage} setPage={setPurchasesPage}>
+                <PagedStack
+                  total={purchases.data.total}
+                  page={purchasesPage}
+                  setPage={setPurchasesPage}
+                >
                   {purchases.data.items.map((purchase) => (
-                    <div key={purchase.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                    <div
+                      key={purchase.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                    >
                       <div className="min-w-0">
                         <div className="truncate font-medium">{purchase.pluginName}</div>
-                        <div className="text-xs text-muted-foreground">{formatTime(purchase.createdAt)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatTime(purchase.createdAt)}
+                        </div>
                       </div>
                       <span className="shrink-0 font-medium">{money(purchase.priceCents)}</span>
                     </div>
@@ -463,19 +540,27 @@ export function TeamDetailSheet({
             <AsyncResource status={ledger.status} error={ledger.error} retry={ledger.reload}>
               {ledger.data ? (
                 <>
-                  <InfoGrid items={[
-                    ['累计入账', money(ledger.data.summary.totalCreditCents)],
-                    ['累计扣减', money(ledger.data.summary.totalDebitCents)],
-                    ['净流入', money(ledger.data.summary.netCents)],
-                  ]} />
+                  <InfoGrid
+                    items={[
+                      ['累计入账', money(ledger.data.summary.totalCreditCents)],
+                      ['累计扣减', money(ledger.data.summary.totalDebitCents)],
+                      ['净流入', money(ledger.data.summary.netCents)],
+                    ]}
+                  />
                   {ledger.data.items.length ? (
                     <PagedStack total={ledger.data.total} page={ledgerPage} setPage={setLedgerPage}>
                       {ledger.data.items.map((entry) => (
-                        <div key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm">
+                        <div
+                          key={entry.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                        >
                           <div className="min-w-0">
                             <div className="truncate font-medium">{entry.reason}</div>
                             <div className="truncate text-xs text-muted-foreground">
-                              {formatTime(entry.createdAt)}{entry.actor ? ` · ${entry.actor.displayName || entry.actor.email}` : ''}
+                              {formatTime(entry.createdAt)}
+                              {entry.actor
+                                ? ` · ${entry.actor.displayName || entry.actor.email}`
+                                : ''}
                             </div>
                           </div>
                           <Badge variant={entry.direction === 'CREDIT' ? 'success' : 'destructive'}>
@@ -484,7 +569,9 @@ export function TeamDetailSheet({
                         </div>
                       ))}
                     </PagedStack>
-                  ) : <EmptyState label="暂无余额流水" />}
+                  ) : (
+                    <EmptyState label="暂无余额流水" />
+                  )}
                 </>
               ) : null}
             </AsyncResource>
@@ -497,7 +584,9 @@ export function TeamDetailSheet({
           scope="team"
           teamId={team.id}
           roleId={roleEditor.role?.id}
-          title={roleEditor.role ? `编辑团队角色：${roleEditor.role.name}` : `创建团队角色：${team.name}`}
+          title={
+            roleEditor.role ? `编辑团队角色：${roleEditor.role.name}` : `创建团队角色：${team.name}`
+          }
           onClose={() => setRoleEditor(null)}
           onSubmit={async (body) => {
             const path = roleEditor.role

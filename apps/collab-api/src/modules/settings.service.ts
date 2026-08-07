@@ -17,7 +17,11 @@ import { AuthService } from './auth.service';
 import { MailService } from './mail.service';
 import { GeetestService } from './geetest.service';
 import { GiteeChangelogService } from './gitee-changelog.service';
-import { REVEALABLE_SECRET_KEYS, type RevealableSecretKey, type UpdateSettingsDto } from './dto/settings.dto';
+import {
+  REVEALABLE_SECRET_KEYS,
+  type RevealableSecretKey,
+  type UpdateSettingsDto,
+} from './dto/settings.dto';
 import { AppCacheService, CACHE_DEFAULT_TTL_MS, createMemoryCacheStore } from '../cache.service';
 
 /** 极验二次校验接口地址（与 geetest.service 保持一致，用于 testCaptcha 探测连通性）。 */
@@ -29,7 +33,12 @@ const GEETEST_TIMEOUT_MS = 5_000;
  *  其余 key（运营内部备注、未发布开关、geetestCaptchaKey 等密钥）仅 Admin 可见，绝不在公开端点暴露。
  *  组C 极验：geetestCaptchaId 公开（前端需据此初始化极验组件），geetestScenes 公开（管理端前端按场景决定是否渲染验证码，
  *  场景未启用时不强制校验，与后端 requireAdminCaptcha(scene) 语义一致），但 geetestCaptchaKey 不公开（仅后端校验用）。 */
-export const PUBLIC_SETTING_KEYS = ['platformName', 'logoUrl', 'geetestCaptchaId', 'geetestScenes'] as const;
+export const PUBLIC_SETTING_KEYS = [
+  'platformName',
+  'logoUrl',
+  'geetestCaptchaId',
+  'geetestScenes',
+] as const;
 
 /** 极验场景归一化：当前仅管理端场景生效；兼容旧配置 login/forgot，register 已无对应应用端验证码语义。 */
 function normalizeGeetestScenes(raw: string): string {
@@ -42,7 +51,10 @@ function normalizeGeetestScenes(raw: string): string {
     register: null,
   };
   const valid = new Set<string>();
-  const items = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const items = raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
   for (const item of items) {
     if (!(item in aliases)) {
       throw badRequest(`geetestScenes 含未知场景：${item}（仅支持 admin_login/admin_forgot）`);
@@ -88,7 +100,9 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
       if (!/:\d+$/.test(v)) v += ':465';
       return `smtps://${v}`;
     }
-    throw badRequest('smtpUrl 格式不正确（示例：smtpdm.aliyun.com:465 或 smtps://smtpdm.aliyun.com:465）');
+    throw badRequest(
+      'smtpUrl 格式不正确（示例：smtpdm.aliyun.com:465 或 smtps://smtpdm.aliyun.com:465）'
+    );
   },
   // 组A SMTP 发件人地址：允许纯地址或「名称 <addr>」格式，长度上限防滥用。空值允许（用品牌默认）。
   smtpFrom: (raw) => {
@@ -129,14 +143,16 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
   maxLoginAttempts: (raw) => {
     const v = raw.trim();
     const n = Number.parseInt(v, 10);
-    if (!Number.isFinite(n) || n < 1 || n > 100) throw badRequest('maxLoginAttempts 必须是 1~100 的整数');
+    if (!Number.isFinite(n) || n < 1 || n > 100)
+      throw badRequest('maxLoginAttempts 必须是 1~100 的整数');
     return String(n);
   },
   // 组B 账户锁定持续分钟数：正整数（1~10080，上限一周），默认 15。
   lockDurationMinutes: (raw) => {
     const v = raw.trim();
     const n = Number.parseInt(v, 10);
-    if (!Number.isFinite(n) || n < 1 || n > 10080) throw badRequest('lockDurationMinutes 必须是 1~10080 的整数');
+    if (!Number.isFinite(n) || n < 1 || n > 10080)
+      throw badRequest('lockDurationMinutes 必须是 1~10080 的整数');
     return String(n);
   },
   // 组D Gitee 更新日志：owner/repo 是路径段，拼进 fetch URL（gitee.com/api/v5/repos/{owner}/{repo}/releases），
@@ -148,7 +164,10 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
   // 允许空值（未配置则更新日志降级 unconfigured）。
   giteeAccessToken: (raw) => {
     const v = raw.trim();
-    if (v && !/^[A-Za-z0-9_-]{20,200}$/.test(v)) throw badRequest('giteeAccessToken 格式不合法（仅允许字母数字、下划线、连字符，20~200 字符）');
+    if (v && !/^[A-Za-z0-9_-]{20,200}$/.test(v))
+      throw badRequest(
+        'giteeAccessToken 格式不合法（仅允许字母数字、下划线、连字符，20~200 字符）'
+      );
     return v;
   },
   // 组E 搜索源：自建 SearXNG 实例 URL（免密钥元搜索）。空=不配自建，仅用内置公共实例兜底。
@@ -163,13 +182,15 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
   // Tavily key 形如 tvly-xx...，放宽到 URL-safe 字符 + 长度区间容未来格式变化。
   tavilyApiKey: (raw) => {
     const v = raw.trim();
-    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('tavilyApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
+    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v))
+      throw badRequest('tavilyApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
     return v;
   },
   // 组E Brave Search API 密钥（管理员可选配置；用户永不填）。空=不启用该源。
   braveApiKey: (raw) => {
     const v = raw.trim();
-    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('braveApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
+    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v))
+      throw badRequest('braveApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
     return v;
   },
   // 组F RBFLow 视频生成服务地址（平台运营实例）。桥转发 RBFLow 任务的 base URL（拼进 fetch path），
@@ -184,7 +205,8 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
   // 允许空（未配置=桥报 503 rbflow_not_configured）。
   rbflowApiKey: (raw) => {
     const v = raw.trim();
-    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v)) throw badRequest('rbflowApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
+    if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v))
+      throw badRequest('rbflowApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
     return v;
   },
 };
@@ -208,12 +230,26 @@ function validateRepoSegment(key: string): (raw: string) => string {
 /** 密钥类 PlatformSetting key 集合：审计时对命中 key 脱敏（只记 {configured} 布尔，不记明文 value）。
  *  既有缺陷修复（本次随 giteeAccessToken 一并补）：updateSettings 原对 smtpPass/geetestCaptchaKey 也记明文。
  *  SECRET_KEYS 命中后审计 metadata 改记 {key, configured}，与 testCaptcha 同范式。 */
-const SECRET_KEYS = new Set(['smtpPass', 'geetestCaptchaKey', 'giteeAccessToken', 'tavilyApiKey', 'braveApiKey', 'rbflowApiKey']);
+const SECRET_KEYS = new Set([
+  'smtpPass',
+  'geetestCaptchaKey',
+  'giteeAccessToken',
+  'tavilyApiKey',
+  'braveApiKey',
+  'rbflowApiKey',
+]);
 
 /** 影响 MailService SMTP / 品牌缓存的 PlatformSetting key 集合。
  *  组A：更新这些 key 后调用 mail.invalidateSmtpCache()，保证 admin 保存后下一封邮件即读到新配置（AC1），
  *  不依赖 SMTP_CACHE_TTL 过期。smtpUrl/smtpFrom/smtpUser/smtpPass 影响 SMTP 连接，platformName/logoUrl 影响品牌渲染。 */
-const MAIL_CACHE_KEYS = new Set(['smtpUrl', 'smtpFrom', 'smtpUser', 'smtpPass', 'platformName', 'logoUrl']);
+const MAIL_CACHE_KEYS = new Set([
+  'smtpUrl',
+  'smtpFrom',
+  'smtpUser',
+  'smtpPass',
+  'platformName',
+  'logoUrl',
+]);
 
 /** 影响 GeetestService 极验配置缓存的 PlatformSetting key 集合。
  *  组C：更新这些 key 后调用 geetest.invalidateConfigCache()，使 admin 改极验配置后下一次管理端验证码校验即读到新值
@@ -245,7 +281,7 @@ export class SettingsService {
     @Inject(MailService) private readonly mail: MailService,
     @Inject(GeetestService) private readonly geetest: GeetestService,
     @Inject(GiteeChangelogService) private readonly gitee: GiteeChangelogService,
-    @Inject(AppCacheService) private readonly cache: AppCacheService = fallbackPublicInfoCache,
+    @Inject(AppCacheService) private readonly cache: AppCacheService = fallbackPublicInfoCache
   ) {}
 
   /** GET /api/admin/settings：返回全部设置项（Admin 视角，含 description + updatedById）。
@@ -291,7 +327,15 @@ export class SettingsService {
         const auditMeta = SECRET_KEYS.has(item.key)
           ? { key: item.key, configured: item.value.length > 0 }
           : { key: item.key, value: item.value };
-        await tx.auditLog.create({ data: { actorUserId: actorId, action: 'admin.setting.updated', targetType: 'PlatformSetting', targetId: item.key, metadata: auditMeta } });
+        await tx.auditLog.create({
+          data: {
+            actorUserId: actorId,
+            action: 'admin.setting.updated',
+            targetType: 'PlatformSetting',
+            targetId: item.key,
+            metadata: auditMeta,
+          },
+        });
       }
       return written;
     });
@@ -377,7 +421,8 @@ export class SettingsService {
   async testEmail(actorId: string, to: string) {
     await this.auth.ensurePlatformAdmin(actorId);
     const target = to?.trim().toLowerCase();
-    if (!target || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) throw badRequest('收件邮箱格式不正确');
+    if (!target || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target))
+      throw badRequest('收件邮箱格式不正确');
     const result = await this.mail.sendTestEmail(target);
     await this.audit(actorId, 'admin.setting.test_email', 'PlatformSetting', undefined, {
       to: target.slice(0, 2) + '***',
@@ -430,8 +475,15 @@ export class SettingsService {
     const captchaKey = map.get('geetestCaptchaKey') ?? '';
 
     if (!captchaId || !captchaKey) {
-      const result = { ok: false, configured: false, message: '极验 captchaId / captchaKey 未配置，请先填写并保存。' };
-      await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, { ok: false, configured: false });
+      const result = {
+        ok: false,
+        configured: false,
+        message: '极验 captchaId / captchaKey 未配置，请先填写并保存。',
+      };
+      await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, {
+        ok: false,
+        configured: false,
+      });
       return result;
     }
 
@@ -461,8 +513,15 @@ export class SettingsService {
       }
       if (!res.ok) {
         // 接口返回非 200：连通性异常（极验服务异常或 captchaId 被拒）。
-        const result = { ok: false, configured: true, message: `极验接口返回异常状态（${res.status}），请检查 captchaId 是否正确。` };
-        await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, { ok: false, configured: true });
+        const result = {
+          ok: false,
+          configured: true,
+          message: `极验接口返回异常状态（${res.status}），请检查 captchaId 是否正确。`,
+        };
+        await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, {
+          ok: false,
+          configured: true,
+        });
         return result;
       }
       const data = (await res.json()) as { result?: string; reason?: string };
@@ -473,12 +532,22 @@ export class SettingsService {
         ? '极验配置连通正常，接口已响应。'
         : `极验接口返回未知结果（${data.result ?? '空'}），请检查 captchaId / captchaKey。`;
       const result = { ok, configured: true, message };
-      await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, { ok, configured: true });
+      await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, {
+        ok,
+        configured: true,
+      });
       return result;
     } catch (error) {
       // 网络异常 / 超时：连通性问题（与 GeetestService.validate 容灾语义不同——测试场景需明确告知 admin 失败）。
-      const result = { ok: false, configured: true, message: `极验接口请求失败：${(error as Error).message}` };
-      await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, { ok: false, configured: true });
+      const result = {
+        ok: false,
+        configured: true,
+        message: `极验接口请求失败：${(error as Error).message}`,
+      };
+      await this.audit(actorId, 'admin.setting.test_captcha', 'PlatformSetting', undefined, {
+        ok: false,
+        configured: true,
+      });
       return result;
     }
   }
@@ -549,8 +618,15 @@ export class SettingsService {
     const url = (map.get('rbflowUrl') ?? '').trim();
 
     if (!url) {
-      const result = { ok: false, configured: false, message: 'rbflowUrl 未配置，请先填写并保存。' };
-      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, { ok: false, configured: false });
+      const result = {
+        ok: false,
+        configured: false,
+        message: 'rbflowUrl 未配置，请先填写并保存。',
+      };
+      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, {
+        ok: false,
+        configured: false,
+      });
       return result;
     }
 
@@ -567,11 +643,22 @@ export class SettingsService {
       const message = mapRbflowStatus(res.status);
       const ok = res.ok;
       const result = { ok, configured: true, message };
-      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, { ok, configured: true, status: res.status });
+      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, {
+        ok,
+        configured: true,
+        status: res.status,
+      });
       return result;
     } catch (error) {
-      const result = { ok: false, configured: true, message: `RBFLow 接口请求失败：${(error as Error).message}` };
-      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, { ok: false, configured: true });
+      const result = {
+        ok: false,
+        configured: true,
+        message: `RBFLow 接口请求失败：${(error as Error).message}`,
+      };
+      await this.audit(actorId, 'admin.setting.test_rbflow', 'PlatformSetting', undefined, {
+        ok: false,
+        configured: true,
+      });
       return result;
     }
   }
@@ -592,8 +679,15 @@ export class SettingsService {
     const accessToken = (map.get('giteeAccessToken') ?? '').trim();
 
     if (!accessToken) {
-      const result = { ok: false, configured: false, message: 'giteeAccessToken 未配置，请先填写并保存。' };
-      await this.audit(actorId, 'admin.setting.test_gitee', 'PlatformSetting', undefined, { ok: false, configured: false });
+      const result = {
+        ok: false,
+        configured: false,
+        message: 'giteeAccessToken 未配置，请先填写并保存。',
+      };
+      await this.audit(actorId, 'admin.setting.test_gitee', 'PlatformSetting', undefined, {
+        ok: false,
+        configured: false,
+      });
       return result;
     }
 
@@ -614,11 +708,22 @@ export class SettingsService {
       const message = mapGiteeStatus(res.status);
       const ok = res.ok;
       const result = { ok, configured: true, message };
-      await this.audit(actorId, 'admin.setting.test_gitee', 'PlatformSetting', undefined, { ok, configured: true, status: res.status });
+      await this.audit(actorId, 'admin.setting.test_gitee', 'PlatformSetting', undefined, {
+        ok,
+        configured: true,
+        status: res.status,
+      });
       return result;
     } catch (error) {
-      const result = { ok: false, configured: true, message: `Gitee 接口请求失败：${(error as Error).message}` };
-      await this.audit(actorId, 'admin.setting.test_gitee', 'PlatformSetting', undefined, { ok: false, configured: true });
+      const result = {
+        ok: false,
+        configured: true,
+        message: `Gitee 接口请求失败：${(error as Error).message}`,
+      };
+      await this.audit(actorId, 'admin.setting.test_gitee', 'PlatformSetting', undefined, {
+        ok: false,
+        configured: true,
+      });
       return result;
     }
   }
@@ -640,16 +745,33 @@ export class SettingsService {
     }
     const passwordOk = await bcrypt.compare(input.password || '', user.passwordHash);
     if (!passwordOk) {
-      await this.audit(actorId, 'admin.setting.secret_revealed', 'PlatformSetting', key, { key, ok: false });
+      await this.audit(actorId, 'admin.setting.secret_revealed', 'PlatformSetting', key, {
+        key,
+        ok: false,
+      });
       throw unauthorized('管理员密码错误');
     }
-    const row = await this.prisma.platformSetting.findUnique({ where: { key }, select: { value: true } });
-    await this.audit(actorId, 'admin.setting.secret_revealed', 'PlatformSetting', key, { key, ok: true });
+    const row = await this.prisma.platformSetting.findUnique({
+      where: { key },
+      select: { value: true },
+    });
+    await this.audit(actorId, 'admin.setting.secret_revealed', 'PlatformSetting', key, {
+      key,
+      ok: true,
+    });
     return { value: row?.value ?? '' };
   }
 
-  private async audit(actorUserId: string, action: string, targetType: string, targetId?: string, metadata?: unknown) {
-    await this.prisma.auditLog.create({ data: { actorUserId, action, targetType, targetId, metadata: metadata as object } });
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetType: string,
+    targetId?: string,
+    metadata?: unknown
+  ) {
+    await this.prisma.auditLog.create({
+      data: { actorUserId, action, targetType, targetId, metadata: metadata as object },
+    });
   }
 }
 
@@ -667,7 +789,9 @@ function mapGiteeStatus(status: number): string {
  *  /api/v1/health 是公开端点（不需鉴权），主要判连通性 + 服务存活。 */
 function mapRbflowStatus(status: number): string {
   if (status === 200) return 'RBFLow 服务连通正常，健康检查通过。';
-  if (status === 404) return 'RBFLow 服务未找到 /api/v1/health，请检查 URL 是否指向正确的 RBFLow 实例。';
-  if (status === 502 || status === 503) return 'RBFLow 服务暂时不可用（502/503），可能正在重启或过载。';
+  if (status === 404)
+    return 'RBFLow 服务未找到 /api/v1/health，请检查 URL 是否指向正确的 RBFLow 实例。';
+  if (status === 502 || status === 503)
+    return 'RBFLow 服务暂时不可用（502/503），可能正在重启或过载。';
   return `RBFLow 健康检查返回异常状态（${status}），请检查 URL 是否正确。`;
 }

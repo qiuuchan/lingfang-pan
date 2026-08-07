@@ -15,7 +15,9 @@ test.describe('Markdown 渲染', () => {
   });
 
   test('标题/粗体/斜体/行内代码正确渲染', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section.getByRole('heading', { name: '标题' })).toBeVisible();
     await expect(section.locator('strong', { hasText: '粗体' })).toBeVisible();
     await expect(section.locator('em', { hasText: '斜体' })).toBeVisible();
@@ -23,21 +25,27 @@ test.describe('Markdown 渲染', () => {
   });
 
   test('无序列表渲染为 ul + 3 项', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     const ul = section.locator('ul').first();
     await expect(ul).toBeVisible();
     await expect(ul.locator('li')).toHaveCount(3);
   });
 
   test('有序列表渲染为 ol + 2 项', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     const ol = section.locator('ol').first();
     await expect(ol).toBeVisible();
     await expect(ol.locator('li')).toHaveCount(2);
   });
 
   test('表格正确渲染（2 列 3 行）', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     const table = section.locator('table').first();
     await expect(table).toBeVisible();
     // 表头 1 行 + 数据 2 行 = 3 行。
@@ -46,7 +54,9 @@ test.describe('Markdown 渲染', () => {
   });
 
   test('代码块渲染为 pre + 高亮', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     const codeBlock = section.locator('pre').first();
     await expect(codeBlock).toBeVisible();
     await expect(codeBlock.getByText(/def hello/)).toBeVisible();
@@ -54,14 +64,18 @@ test.describe('Markdown 渲染', () => {
   });
 
   test('引用块渲染为 blockquote', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     const quote = section.locator('blockquote').first();
     await expect(quote).toBeVisible();
     await expect(quote.getByText('这是一段引用文字')).toBeVisible();
   });
 
   test('Markdown 整体截图', async ({ page }) => {
-    const section = page.locator('h2:has-text("Markdown 排版")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("Markdown 排版")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section).toHaveScreenshot('markdown-render.png', { maxDiffPixelRatio: 0.05 });
   });
 });
@@ -74,7 +88,9 @@ test.describe('对话气泡布局', () => {
 
   test('用户气泡右对齐 + 主色背景', async ({ page }) => {
     // 用户气泡：含 justify-end 的外层 + from-primary 的气泡。
-    const wrapper = page.locator('div.justify-end').filter({ hasText: '做一个带界面的天气查询插件' });
+    const wrapper = page
+      .locator('div.justify-end')
+      .filter({ hasText: '做一个带界面的天气查询插件' });
     await expect(wrapper).toBeVisible();
     const bubble = wrapper.locator('div').filter({ hasText: '做一个带界面的天气查询插件' }).first();
     const cls = await bubble.evaluate((el) => el.className);
@@ -107,7 +123,9 @@ test.describe('对话气泡布局', () => {
   });
 
   test('对话气泡整体截图', async ({ page }) => {
-    const section = page.locator('h2:has-text("对话气泡")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("对话气泡")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section).toHaveScreenshot('chat-bubbles.png', { maxDiffPixelRatio: 0.05 });
   });
 });
@@ -126,7 +144,9 @@ test.describe('思考块（reasoning）', () => {
   });
 
   test('思考块截图', async ({ page }) => {
-    const section = page.locator('h2:has-text("思考块")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("思考块")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section).toHaveScreenshot('reasoning-block.png', { maxDiffPixelRatio: 0.05 });
   });
 });

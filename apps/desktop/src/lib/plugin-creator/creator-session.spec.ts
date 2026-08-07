@@ -56,39 +56,47 @@ describe('creator session storage', () => {
   });
 
   it('normalizes legacy persisted conversations', () => {
-    localStorage.setItem(conversationKey('user-1', null), JSON.stringify([
-      null,
-      { id: 42, turns: [] },
-      {
-        id: 'legacy-conversation',
-        title: 42,
-        turns: [
-          { role: 'user', content: 'legacy request', status: 'unknown' },
-          {
-            role: 'assistant',
-            content: 'legacy response',
-            status: 'done',
-            streaming: true,
-            parts: [
-              { type: 'text', content: 'answer' },
-              { type: 'tool', name: 'Read', status: 'ok' },
-              { type: 'question', question: 'continue?', allowFreeText: false, multiSelect: true },
-              { type: 'unknown' },
-            ],
-          },
-          { role: 'system', content: 'ignored' },
-        ],
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-02T00:00:00.000Z',
-        workspacePluginId: 123,
-        userEdits: { name: 'Renamed plugin' },
-        todos: [
-          { content: 'Keep me', status: 'invalid', priority: 'invalid' },
-          { content: '', status: 'completed', priority: 'high' },
-          null,
-        ],
-      },
-    ]));
+    localStorage.setItem(
+      conversationKey('user-1', null),
+      JSON.stringify([
+        null,
+        { id: 42, turns: [] },
+        {
+          id: 'legacy-conversation',
+          title: 42,
+          turns: [
+            { role: 'user', content: 'legacy request', status: 'unknown' },
+            {
+              role: 'assistant',
+              content: 'legacy response',
+              status: 'done',
+              streaming: true,
+              parts: [
+                { type: 'text', content: 'answer' },
+                { type: 'tool', name: 'Read', status: 'ok' },
+                {
+                  type: 'question',
+                  question: 'continue?',
+                  allowFreeText: false,
+                  multiSelect: true,
+                },
+                { type: 'unknown' },
+              ],
+            },
+            { role: 'system', content: 'ignored' },
+          ],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+          workspacePluginId: 123,
+          userEdits: { name: 'Renamed plugin' },
+          todos: [
+            { content: 'Keep me', status: 'invalid', priority: 'invalid' },
+            { content: '', status: 'completed', priority: 'high' },
+            null,
+          ],
+        },
+      ])
+    );
 
     const conversations = loadConversations('user-1', null);
 
@@ -112,7 +120,14 @@ describe('creator session storage', () => {
     });
     expect(conversations[0].turns[1].parts).toEqual([
       { type: 'text', content: 'answer' },
-      { type: 'tool', toolCallId: 'legacy-tool-1', name: 'Read', args: undefined, result: undefined, status: 'ok' },
+      {
+        type: 'tool',
+        toolCallId: 'legacy-tool-1',
+        name: 'Read',
+        args: undefined,
+        result: undefined,
+        status: 'ok',
+      },
       {
         type: 'question',
         toolCallId: 'legacy-question-2',
@@ -142,10 +157,12 @@ describe('creator session storage', () => {
     expect(persisted).toHaveLength(30);
     expect(persisted[0]).toMatchObject({ id: 'conversation-0' });
     expect(persisted[29]).toMatchObject({ id: 'conversation-29' });
-    expect(persisted.every((conversation) => {
-      const turns = conversation.turns as Array<Record<string, unknown>>;
-      return turns.every((turn) => !('modelContent' in turn));
-    })).toBe(true);
+    expect(
+      persisted.every((conversation) => {
+        const turns = conversation.turns as Array<Record<string, unknown>>;
+        return turns.every((turn) => !('modelContent' in turn));
+      })
+    ).toBe(true);
     expect(conversations[0].turns[0].modelContent).toBe('private-0');
   });
 });
@@ -153,9 +170,9 @@ describe('creator session storage', () => {
 describe('creator session streaming text helpers', () => {
   it('merges cumulative and overlapping streaming text', () => {
     expect(mergeStreamingText('hello', 'hello world')).toBe('hello world');
-    expect(
-      mergeStreamingText('prefix-abcdefghijklmnop', 'abcdefghijklmnop-suffix'),
-    ).toBe('prefix-abcdefghijklmnop-suffix');
+    expect(mergeStreamingText('prefix-abcdefghijklmnop', 'abcdefghijklmnop-suffix')).toBe(
+      'prefix-abcdefghijklmnop-suffix'
+    );
   });
 
   it('detects duplicate output and keeps distinct output', () => {

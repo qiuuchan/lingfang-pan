@@ -5,13 +5,26 @@
 // 也可在桌面环境点「保存草稿到本地」写入本地文件系统。
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2Icon, SendIcon, ChevronDownIcon, AlertTriangleIcon, XCircleIcon, UploadIcon, FileCode2Icon } from 'lucide-react';
+import {
+  Loader2Icon,
+  SendIcon,
+  ChevronDownIcon,
+  AlertTriangleIcon,
+  XCircleIcon,
+  UploadIcon,
+  FileCode2Icon,
+} from 'lucide-react';
 import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { buildStagedManifest, validateStagedCompleteness, withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
+import {
+  buildStagedManifest,
+  validateStagedCompleteness,
+  withSyncedStagedManifest,
+  type StagedPlugin,
+} from '@/lib/plugin-creator/creator-tools';
 import { PublishPluginDialog } from '@/components/plugins/PublishPluginDialog';
 import { validatePluginStructure } from '@/lib/plugin-draft/manifest';
 import { cn } from '@/lib/utils';
@@ -19,13 +32,24 @@ import { persistDraftWorkspace } from '@/lib/plugin-registry';
 
 // 能力白名单：必须与后端 plugin-package.ts ALLOWED_CAPABILITIES 完全一致，否则勾选后端不认的能力会 400。
 const ALLOWED_CAPABILITY_KINDS: CapabilityKindType[] = [
-  'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'image.generate', 'storage.kv',
-  'system.info', 'system.screenshot', 'system.notify',
-  'plugin.upload', 'plugin.submitMarketplace',
+  'ui.view',
+  'fs.pick',
+  'fs.read',
+  'fs.write',
+  'net.fetch',
+  'clipboard',
+  'llm.chat',
+  'image.generate',
+  'storage.kv',
+  'system.info',
+  'system.screenshot',
+  'system.notify',
+  'plugin.upload',
+  'plugin.submitMarketplace',
 ];
 
-const CONTROL_BASE_CLASS = 'w-full rounded-md border-input bg-background px-3 py-2 text-sm text-foreground shadow-none transition-colors placeholder:text-muted-foreground hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20';
+const CONTROL_BASE_CLASS =
+  'w-full rounded-md border-input bg-background px-3 py-2 text-sm text-foreground shadow-none transition-colors placeholder:text-muted-foreground hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20';
 const INPUT_CLASS = cn(CONTROL_BASE_CLASS, 'h-9');
 const TEXTAREA_CLASS = cn(CONTROL_BASE_CLASS, 'min-h-[72px] resize-none leading-5');
 const SELECT_CLASS = cn(CONTROL_BASE_CLASS, 'h-9 appearance-none pr-9');
@@ -63,7 +87,10 @@ export function CreatorDraftPanel({
   const entryMissing = !preparedDraft.files.some((f) => f.path === preparedDraft.entry);
   const idValid = /^[a-z0-9-]+$/.test(preparedDraft.id);
   // 结构诊断：检测 manifest/入口/命名规范等结构问题，显式提示用户（fail 红 / warn 黄）。
-  const diagnostics = useMemo(() => validatePluginStructure(preparedDraft.files), [preparedDraft.files]);
+  const diagnostics = useMemo(
+    () => validatePluginStructure(preparedDraft.files),
+    [preparedDraft.files]
+  );
   const hasFail = diagnostics.some((d) => d.status === 'fail');
 
   const capKinds = ALLOWED_CAPABILITY_KINDS;
@@ -77,12 +104,28 @@ export function CreatorDraftPanel({
   }
 
   function validateDraftReady() {
-    if (!draft.name.trim()) { toast.error('请填写插件名字'); return; }
-    if (!idValid) { toast.error('插件 ID 仅允许小写字母/数字/连字符'); return; }
-    if (entryMissing) { toast.error(`入口文件 ${preparedDraft.entry} 不在文件列表中`); return; }
+    if (!draft.name.trim()) {
+      toast.error('请填写插件名字');
+      return;
+    }
+    if (!idValid) {
+      toast.error('插件 ID 仅允许小写字母/数字/连字符');
+      return;
+    }
+    if (entryMissing) {
+      toast.error(`入口文件 ${preparedDraft.entry} 不在文件列表中`);
+      return;
+    }
     // 完整性关卡：按 runtime 校验必需文件与入口命名，阻止把不完整草稿落盘（与 stage/submit 同一份校验）。
-    const completenessErr = validateStagedCompleteness(preparedDraft.runtime_type, preparedDraft.entry, preparedDraft.files);
-    if (completenessErr) { toast.error(completenessErr); return; }
+    const completenessErr = validateStagedCompleteness(
+      preparedDraft.runtime_type,
+      preparedDraft.entry,
+      preparedDraft.files
+    );
+    if (completenessErr) {
+      toast.error(completenessErr);
+      return;
+    }
     return true;
   }
 
@@ -95,7 +138,11 @@ export function CreatorDraftPanel({
     if (!validateDraftReady()) return;
     setSavingDraft(true);
     try {
-      const workspace = await persistPreparedWorkspace(preparedDraft, workspaceId ?? undefined, conversationId);
+      const workspace = await persistPreparedWorkspace(
+        preparedDraft,
+        workspaceId ?? undefined,
+        conversationId
+      );
       onWorkspacePersisted(workspace.workspaceId);
       toast.success(`草稿「${draft.name}」已保存到工作区`);
       onSubmitted(draft.name);
@@ -123,7 +170,9 @@ export function CreatorDraftPanel({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-sm font-semibold text-foreground">插件草稿</h2>
-                <span className="rounded-md border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">产物</span>
+                <span className="rounded-md border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  产物
+                </span>
               </div>
               <p className="mt-0.5 truncate text-xs text-muted-foreground" title={draft.name}>
                 {draft.name || '未命名插件'} · {preparedDraft.files.length} 个文件
@@ -131,8 +180,12 @@ export function CreatorDraftPanel({
             </div>
           </div>
           <TabsList variant="line" className="h-9 w-full justify-start gap-4 px-4">
-            <TabsTrigger value="overview" className="flex-none px-1">概览</TabsTrigger>
-            <TabsTrigger value="files" className="flex-none px-1">文件</TabsTrigger>
+            <TabsTrigger value="overview" className="flex-none px-1">
+              概览
+            </TabsTrigger>
+            <TabsTrigger value="files" className="flex-none px-1">
+              文件
+            </TabsTrigger>
           </TabsList>
         </header>
 
@@ -172,7 +225,12 @@ export function CreatorDraftPanel({
                   />
                 </Field>
                 <Field label="版本号">
-                  <Input aria-label="版本号" value={draft.version} onChange={(e) => onChange({ version: e.target.value })} className={INPUT_CLASS} />
+                  <Input
+                    aria-label="版本号"
+                    value={draft.version}
+                    onChange={(e) => onChange({ version: e.target.value })}
+                    className={INPUT_CLASS}
+                  />
                 </Field>
               </div>
             </PanelSection>
@@ -184,7 +242,9 @@ export function CreatorDraftPanel({
                     <select
                       aria-label="运行类型"
                       value={draft.runtime_type}
-                      onChange={(e) => onChange({ runtime_type: e.target.value as StagedPlugin['runtime_type'] })}
+                      onChange={(e) =>
+                        onChange({ runtime_type: e.target.value as StagedPlugin['runtime_type'] })
+                      }
                       className={SELECT_CLASS}
                     >
                       <option value="client">前端 client</option>
@@ -208,7 +268,9 @@ export function CreatorDraftPanel({
                   <select
                     aria-label="可见性"
                     value={draft.visibility}
-                    onChange={(e) => onChange({ visibility: e.target.value as StagedPlugin['visibility'] })}
+                    onChange={(e) =>
+                      onChange({ visibility: e.target.value as StagedPlugin['visibility'] })
+                    }
                     className={SELECT_CLASS}
                   >
                     <option value="tenant">团队可见</option>
@@ -247,12 +309,14 @@ export function CreatorDraftPanel({
                         'flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed',
                         d.status === 'fail'
                           ? 'border-destructive/30 bg-destructive/10 text-destructive'
-                          : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                          : 'border-warning/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
                       )}
                     >
-                      {d.status === 'fail'
-                        ? <XCircleIcon className="mt-0.5 size-3.5 shrink-0" />
-                        : <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />}
+                      {d.status === 'fail' ? (
+                        <XCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      ) : (
+                        <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      )}
                       <span>{d.message}</span>
                     </div>
                   ))}
@@ -266,7 +330,9 @@ export function CreatorDraftPanel({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-foreground">文件产物</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">当前草稿包含 {preparedDraft.files.length} 个文件</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                当前草稿包含 {preparedDraft.files.length} 个文件
+              </p>
             </div>
             <span className="rounded-md border bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
               {preparedDraft.runtime_type}
@@ -280,9 +346,13 @@ export function CreatorDraftPanel({
                 className="flex items-center gap-2.5 px-3 py-2.5 transition-colors hover:bg-muted/50"
               >
                 <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{file.path}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+                  {file.path}
+                </span>
                 {file.path === preparedDraft.entry && (
-                  <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">入口</span>
+                  <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                    入口
+                  </span>
                 )}
               </div>
             ))}
@@ -298,16 +368,26 @@ export function CreatorDraftPanel({
             onClick={handleOpenPublish}
             disabled={actionDisabled}
           >
-            {hasFail ? <XCircleIcon data-icon="inline-start" /> : <UploadIcon data-icon="inline-start" />}
+            {hasFail ? (
+              <XCircleIcon data-icon="inline-start" />
+            ) : (
+              <UploadIcon data-icon="inline-start" />
+            )}
             {busy ? 'AI 生成中，请稍候…' : hasFail ? '请先修复检查结果中的问题' : '发布插件'}
           </Button>
           <Button
             variant="outline"
             className="h-10 w-full rounded-lg px-6 text-sm font-medium shadow-none"
-            onClick={() => { void handleSaveDraft(); }}
+            onClick={() => {
+              void handleSaveDraft();
+            }}
             disabled={actionDisabled}
           >
-            {savingDraft ? <Loader2Icon data-icon="inline-start" className="animate-spin" /> : <SendIcon data-icon="inline-start" />}
+            {savingDraft ? (
+              <Loader2Icon data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <SendIcon data-icon="inline-start" />
+            )}
             {savingDraft ? '保存中…' : '保存草稿到本地'}
           </Button>
         </div>
@@ -322,12 +402,18 @@ export function CreatorDraftPanel({
         defaultSourceKind={preparedDraft.sourceKind || 'LINGFANG_CREATOR'}
         defaultSourceLabel={preparedDraft.sourceLabel || '灵枋创建器'}
         onPrepareWorkspace={async () => {
-          const workspace = await persistPreparedWorkspace(preparedDraft, workspaceId ?? undefined, conversationId);
+          const workspace = await persistPreparedWorkspace(
+            preparedDraft,
+            workspaceId ?? undefined,
+            conversationId
+          );
           onWorkspacePersisted(workspace.workspaceId);
           return workspace;
         }}
         onPublished={(result) => {
-          toast.success(`插件「${preparedDraft.name}」已发布 v${result.release?.version || preparedDraft.version}`);
+          toast.success(
+            `插件「${preparedDraft.name}」已发布 v${result.release?.version || preparedDraft.version}`
+          );
           onSubmitted(preparedDraft.name);
         }}
       />
@@ -338,7 +424,7 @@ export function CreatorDraftPanel({
 async function persistPreparedWorkspace(
   draft: StagedPlugin,
   preferredWorkspaceId?: string,
-  conversationId?: string | null,
+  conversationId?: string | null
 ) {
   const manifest = buildStagedManifest(draft);
   return persistDraftWorkspace({
@@ -357,7 +443,15 @@ async function persistPreparedWorkspace(
   });
 }
 
-function PanelSection({ title, children, withDivider = true }: { title: string; children: React.ReactNode; withDivider?: boolean }) {
+function PanelSection({
+  title,
+  children,
+  withDivider = true,
+}: {
+  title: string;
+  children: React.ReactNode;
+  withDivider?: boolean;
+}) {
   return (
     <section className={cn('flex flex-col gap-3', withDivider && 'border-b pb-5')}>
       <h3 className="text-xs font-semibold text-foreground">{title}</h3>
@@ -366,7 +460,15 @@ function PanelSection({ title, children, withDivider = true }: { title: string; 
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
@@ -388,9 +490,13 @@ function SelectWrapper({ children }: { children: React.ReactNode }) {
 }
 
 function capabilityPillClass(active: boolean) {
-  const base = 'rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
+  const base =
+    'rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
   if (!active) {
-    return cn(base, 'border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground');
+    return cn(
+      base,
+      'border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
+    );
   }
   return cn(base, 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15');
 }

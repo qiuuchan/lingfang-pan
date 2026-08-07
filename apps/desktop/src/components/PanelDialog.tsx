@@ -4,7 +4,13 @@
 // PanelDialog 实例，从 AvatarMenu 对应按钮打开。承载既有页面组件（TeamWallet /
 // Settings 等），不在本组件内放业务逻辑——只提供统一的浮窗外壳（标题栏 + 拖拽 + 滚动）。
 import { type ReactNode } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -39,7 +45,7 @@ export function PanelDialog({
               ? 'h-[80vh] max-h-[80vh] w-[90vw] sm:max-w-2xl'
               : size === 'auto'
                 ? 'max-h-[80vh] w-[88vw] sm:max-w-xl'
-                : 'h-[60vh] max-h-[60vh] w-[88vw] sm:max-w-xl',
+                : 'h-[60vh] max-h-[60vh] w-[88vw] sm:max-w-xl'
         )}
       >
         <DialogHeader className="border-b px-5 py-4" {...dragRegionProps}>

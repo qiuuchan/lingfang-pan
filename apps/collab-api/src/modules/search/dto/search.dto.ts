@@ -24,7 +24,11 @@ export class WebFetchDto {
   @IsUrl({}, { message: '请提供合法的 URL' })
   url!: string;
 
-  @ApiProperty({ description: '正文最大字符数（500~20000，默认 6000）', required: false, example: 6000 })
+  @ApiProperty({
+    description: '正文最大字符数（500~20000，默认 6000）',
+    required: false,
+    example: 6000,
+  })
   @IsOptional()
   @IsInt()
   @Min(500)

@@ -123,7 +123,7 @@ class RedisRespClient {
     const run = this.commandQueue.then(() => this.executeCommand(parts));
     this.commandQueue = run.then(
       () => undefined,
-      () => undefined,
+      () => undefined
     );
     return run;
   }
@@ -235,7 +235,10 @@ function parseValue(buffer: Buffer): { value: unknown; offset: number } | null {
   throw new Error(`Unsupported Redis response type: ${type}`);
 }
 
-function parseLine<T>(buffer: Buffer, map: (line: string) => T): { value: T; offset: number } | null {
+function parseLine<T>(
+  buffer: Buffer,
+  map: (line: string) => T
+): { value: T; offset: number } | null {
   const end = buffer.indexOf('\r\n');
   if (end < 0) return null;
   return { value: map(buffer.subarray(1, end).toString('utf8')), offset: end + 2 };

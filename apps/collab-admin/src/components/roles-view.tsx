@@ -39,7 +39,7 @@ export function RolesView() {
   const roles = useAsyncResource(
     (signal) => adminCoreApi.roles({ page, pageSize, q: query || undefined }, signal),
     [page, pageSize, query],
-    { isEmpty: (data) => data.items.length === 0 },
+    { isEmpty: (data) => data.items.length === 0 }
   );
 
   usePageCorrection(roles.data, page, pageSize, setPage);
@@ -65,7 +65,7 @@ export function RolesView() {
     if (!window.confirm(`确认删除角色「${role.name}」？`)) return;
     const ok = await run(
       () => api(`/api/admin/roles/${role.id}`, { method: 'DELETE' }),
-      '角色已删除',
+      '角色已删除'
     );
     if (!ok) return;
     if (selected?.id === role.id) setSelected(null);
@@ -76,12 +76,12 @@ export function RolesView() {
     <Section
       title="角色管理"
       description="平台角色与权限分配。"
-      actions={(
+      actions={
         <Button type="button" onClick={() => setEditor({})}>
           <PlusIcon className="size-4" />
           创建角色
         </Button>
-      )}
+      }
     >
       <div className="space-y-4">
         <form className="flex max-w-md gap-2" onSubmit={applySearch}>
@@ -104,7 +104,11 @@ export function RolesView() {
           status={roles.status}
           error={roles.error}
           retry={roles.reload}
-          emptyFallback={<div className="py-12 text-center text-sm text-muted-foreground">暂无符合条件的平台角色</div>}
+          emptyFallback={
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              暂无符合条件的平台角色
+            </div>
+          }
         >
           {roles.data ? (
             <>
@@ -130,7 +134,9 @@ export function RolesView() {
                           onClick={() => setSelected(role)}
                         >
                           <span className="flex items-center gap-1.5">
-                            {role.isSystem ? <LockIcon className="size-3.5 text-muted-foreground" /> : null}
+                            {role.isSystem ? (
+                              <LockIcon className="size-3.5 text-muted-foreground" />
+                            ) : null}
                             <span className="min-w-0">
                               <span className="block truncate">{role.name}</span>
                               <span className="mt-0.5 block truncate font-mono text-xs font-normal text-muted-foreground sm:hidden">
@@ -140,13 +146,33 @@ export function RolesView() {
                           </span>
                         </TableCellAction>
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell">{role.code ? <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{role.code}</code> : '—'}</TableCell>
-                      <TableCell className="hidden md:table-cell"><Badge variant={role.isSystem ? 'default' : 'secondary'}>{role.isSystem ? '内置' : '自定义'}</Badge></TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {role.code ? (
+                          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                            {role.code}
+                          </code>
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <Badge variant={role.isSystem ? 'default' : 'secondary'}>
+                          {role.isSystem ? '内置' : '自定义'}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="hidden md:table-cell">{role.permissionCount}</TableCell>
                       <TableCell className="hidden lg:table-cell">{role.memberCount}</TableCell>
-                      <TableCell className="hidden text-muted-foreground lg:table-cell">{formatTime(role.createdAt)}</TableCell>
+                      <TableCell className="hidden text-muted-foreground lg:table-cell">
+                        {formatTime(role.createdAt)}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Button type="button" variant="ghost" size="icon" aria-label={`编辑角色：${role.name}`} onClick={() => setEditor({ role })}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`编辑角色：${role.name}`}
+                          onClick={() => setEditor({ role })}
+                        >
                           <PencilIcon className="size-4" />
                         </Button>
                       </TableCell>
@@ -169,7 +195,9 @@ export function RolesView() {
       <RoleDetailSheet
         role={selected}
         refreshKey={detailVersion}
-        onOpenChange={(open) => { if (!open) setSelected(null); }}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
         onEdit={(role) => setEditor({ role })}
         onDelete={(role) => void deleteRole(role)}
       />
@@ -209,7 +237,7 @@ function RoleDetailSheet({
   const detail = useAsyncResource(
     (signal) => adminCoreApi.roleDetail(roleId, signal),
     [roleId, refreshKey],
-    { enabled: !!roleId },
+    { enabled: !!roleId }
   );
   const actionableRole = detail.data?.id === roleId ? role : null;
 
@@ -219,37 +247,55 @@ function RoleDetailSheet({
       onOpenChange={onOpenChange}
       title={role?.name || ''}
       description={role?.code || '平台角色'}
-      footer={actionableRole ? (
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" className="flex-1" onClick={() => onEdit(actionableRole)}>
-            <PencilIcon className="size-4" />
-            编辑角色
-          </Button>
-          {!actionableRole.isSystem ? (
-            <Button type="button" variant="destructive" className="flex-1" onClick={() => onDelete(actionableRole)}>
-              <Trash2Icon className="size-4" />
-              删除角色
+      footer={
+        actionableRole ? (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => onEdit(actionableRole)}
+            >
+              <PencilIcon className="size-4" />
+              编辑角色
             </Button>
-          ) : null}
-        </div>
-      ) : null}
+            {!actionableRole.isSystem ? (
+              <Button
+                type="button"
+                variant="destructive"
+                className="flex-1"
+                onClick={() => onDelete(actionableRole)}
+              >
+                <Trash2Icon className="size-4" />
+                删除角色
+              </Button>
+            ) : null}
+          </div>
+        ) : null
+      }
     >
       <AsyncResource status={detail.status} error={detail.error} retry={detail.reload}>
         {detail.data ? (
           <div className="space-y-4">
-            <InfoGrid items={[
-              ['角色 ID', detail.data.id],
-              ['名称', detail.data.name],
-              ['编码', detail.data.code || '—'],
-              ['类型', detail.data.isSystem ? '内置角色' : '自定义角色'],
-              ['成员', String(detail.data.memberCount)],
-              ['权限', String(detail.data.permissions.length)],
-              ['创建时间', formatTime(detail.data.createdAt)],
-            ]} />
-            {detail.data.description ? <p className="rounded-lg border px-3 py-3 text-sm">{detail.data.description}</p> : null}
+            <InfoGrid
+              items={[
+                ['角色 ID', detail.data.id],
+                ['名称', detail.data.name],
+                ['编码', detail.data.code || '—'],
+                ['类型', detail.data.isSystem ? '内置角色' : '自定义角色'],
+                ['成员', String(detail.data.memberCount)],
+                ['权限', String(detail.data.permissions.length)],
+                ['创建时间', formatTime(detail.data.createdAt)],
+              ]}
+            />
+            {detail.data.description ? (
+              <p className="rounded-lg border px-3 py-3 text-sm">{detail.data.description}</p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {detail.data.permissions.map((permission) => (
-                <Badge key={permission} variant="secondary">{permission}</Badge>
+                <Badge key={permission} variant="secondary">
+                  {permission}
+                </Badge>
               ))}
             </div>
           </div>

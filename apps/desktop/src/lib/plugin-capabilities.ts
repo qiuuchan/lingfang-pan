@@ -9,7 +9,7 @@ export function capabilityRequiresAdmin(kind: unknown, value: unknown): boolean 
 }
 
 export function normalizeAiCapabilityAdmin<T extends { kind: unknown; requires_admin?: boolean }>(
-  capability: T,
+  capability: T
 ): T & { requires_admin: boolean } {
   return {
     ...capability,

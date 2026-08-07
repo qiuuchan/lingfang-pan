@@ -1,19 +1,30 @@
 import 'dotenv/config';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { createPrismaAdapter } from './prisma.adapter';
-import { RETIRED_PERMISSION_CODES, stripRetiredPermissions } from './modules/permissions/permission-codes';
+import {
+  RETIRED_PERMISSION_CODES,
+  stripRetiredPermissions,
+} from './modules/permissions/permission-codes';
 
-type PermissionCleanupClient = Pick<Prisma.TransactionClient, 'role' | 'permissionEntry' | 'permissionGroup'>;
+type PermissionCleanupClient = Pick<
+  Prisma.TransactionClient,
+  'role' | 'permissionEntry' | 'permissionGroup'
+>;
 
 /** Idempotent for PostgreSQL scalar arrays and MySQL JSON arrays. */
 export async function cleanupRetiredPermissions(prisma: PermissionCleanupClient): Promise<number> {
   const roles = await prisma.role.findMany({ select: { id: true, permissions: true } });
   let changedRoles = 0;
   for (const role of roles) {
-    const current = Array.isArray(role.permissions) ? role.permissions.filter((code): code is string => typeof code === 'string') : [];
+    const current = Array.isArray(role.permissions)
+      ? role.permissions.filter((code): code is string => typeof code === 'string')
+      : [];
     const stripped = stripRetiredPermissions(current);
     if (!stripped.changed) continue;
-    await prisma.role.update({ where: { id: role.id }, data: { permissions: stripped.permissions } });
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { permissions: stripped.permissions },
+    });
     changedRoles += 1;
   }
 

@@ -2,13 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LocalPluginInstallation } from '@lingfang/contract';
 import { satisfiesActionVersionRange } from '@lingfang/contract';
 import type { LoadedPlugin } from '@/lib/types';
-import {
-  invokeInstalledPluginAction,
-} from './plugin-action-runtime';
+import { invokeInstalledPluginAction } from './plugin-action-runtime';
 
 const digest = (character: string) => character.repeat(64);
 
-function installation(overrides: Partial<LocalPluginInstallation> & { installationId: string; packageId: string; releaseId: string; version: string; sha256: string }): LocalPluginInstallation {
+function installation(
+  overrides: Partial<LocalPluginInstallation> & {
+    installationId: string;
+    packageId: string;
+    releaseId: string;
+    version: string;
+    sha256: string;
+  }
+): LocalPluginInstallation {
   return {
     installationId: overrides.installationId,
     packageId: overrides.packageId,
@@ -50,13 +56,15 @@ function callerPlugin(): LoadedPlugin {
       entry: 'ui/index.html',
       capabilities: [],
       actions: [],
-      action_dependencies: [{
-        dependency_id: 'video_generator',
-        package_id: 'video-package',
-        release_version_range: '^2.0.0',
-        action_id: 'generate_video',
-        action_contract_version_range: '^1.0.0',
-      }],
+      action_dependencies: [
+        {
+          dependency_id: 'video_generator',
+          package_id: 'video-package',
+          release_version_range: '^2.0.0',
+          action_id: 'generate_video',
+          action_contract_version_range: '^1.0.0',
+        },
+      ],
     },
   };
 }
@@ -69,11 +77,16 @@ const inputSchema = {
 };
 
 function actionSurface(runtimeType: 'nodejs' | 'client' | 'cloud' | 'workflow' = 'nodejs') {
-  const execution = runtimeType === 'cloud'
-    ? { runtime_type: 'cloud' as const, adapter: 'cloud' as const }
-    : runtimeType === 'workflow'
-      ? { runtime_type: 'workflow' as const, entry: 'workflow.json', definition_sha256: digest('e') }
-      : { runtime_type: runtimeType, entry: 'actions/video.mjs', export: 'run' };
+  const execution =
+    runtimeType === 'cloud'
+      ? { runtime_type: 'cloud' as const, adapter: 'cloud' as const }
+      : runtimeType === 'workflow'
+        ? {
+            runtime_type: 'workflow' as const,
+            entry: 'workflow.json',
+            definition_sha256: digest('e'),
+          }
+        : { runtime_type: runtimeType, entry: 'actions/video.mjs', export: 'run' };
   return {
     schema_version: 1,
     action_id: 'generate_video',
@@ -94,7 +107,12 @@ function actionSurface(runtimeType: 'nodejs' | 'client' | 'cloud' | 'workflow' =
   };
 }
 
-function invocation(status: 'AUTHORIZED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED', output: Record<string, unknown> | null = null, errorCode = '', errorMessage = '') {
+function invocation(
+  status: 'AUTHORIZED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED',
+  output: Record<string, unknown> | null = null,
+  errorCode = '',
+  errorMessage = ''
+) {
   return {
     id: 'invocation-1',
     team_id: 'team-1',
@@ -110,17 +128,19 @@ function invocation(status: 'AUTHORIZED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED', o
     },
     root_invocation_id: 'invocation-1',
     parent_invocation_id: null,
-    call_chain: [{
-      invocation_id: 'invocation-1',
-      target: {
-        package_id: 'video-package',
-        release_id: 'video-release',
-        sha256: digest('b'),
-        action_id: 'generate_video',
-        action_contract_version: '1.2.0',
-        action_surface_sha256: digest('c'),
+    call_chain: [
+      {
+        invocation_id: 'invocation-1',
+        target: {
+          package_id: 'video-package',
+          release_id: 'video-release',
+          sha256: digest('b'),
+          action_id: 'generate_video',
+          action_contract_version: '1.2.0',
+          action_surface_sha256: digest('c'),
+        },
       },
-    }],
+    ],
     policy_revision: 1,
     required_operations: ['invoke_action', 'run_local'],
     input: { prompt: 'demo' },
@@ -156,33 +176,48 @@ function installations() {
 describe('desktop plugin action host', () => {
   it('binds the caller to the active plugin, derives keys, executes exact local target and returns terminal output', async () => {
     const apiMock = vi.fn(async (path: string, options?: { method?: string; body?: any }) => {
-      if (path === '/api/plugin-releases/video-release/actions') return {
-        release_id: 'video-release', package_id: 'video-package', sha256: digest('b'), actions: [actionSurface()],
-      };
-      if (path === '/api/plugin-actions/invocations' && options?.method === 'POST') return invocation('AUTHORIZED');
+      if (path === '/api/plugin-releases/video-release/actions')
+        return {
+          release_id: 'video-release',
+          package_id: 'video-package',
+          sha256: digest('b'),
+          actions: [actionSurface()],
+        };
+      if (path === '/api/plugin-actions/invocations' && options?.method === 'POST')
+        return invocation('AUTHORIZED');
       if (path.endsWith('/claim')) return invocation('RUNNING');
       if (path.endsWith('/complete')) return invocation('SUCCEEDED', { video_id: 'video-1' });
-      if (path === '/api/plugin-actions/invocations/invocation-1') return invocation('SUCCEEDED', { video_id: 'video-1' });
+      if (path === '/api/plugin-actions/invocations/invocation-1')
+        return invocation('SUCCEEDED', { video_id: 'video-1' });
       throw new Error(`unexpected API call: ${path}`);
     });
     const tauriMock = vi.fn().mockResolvedValue({ video_id: 'video-1' });
-    const uuid = vi.fn().mockReturnValueOnce('request-key-host').mockReturnValueOnce('root-logical-call-host');
+    const uuid = vi
+      .fn()
+      .mockReturnValueOnce('request-key-host')
+      .mockReturnValueOnce('root-logical-call-host');
     const hash = vi.fn().mockResolvedValue(digest('d'));
 
-    await expect(invokeInstalledPluginAction(callerPlugin(), {
-      dependency_id: 'video_generator',
-      input: { prompt: 'demo' },
-      idempotency_key: 'scene-7',
-      pluginId: 'spoofed-plugin',
-    } as never, {
-      api: apiMock as never,
-      tauriInvoke: tauriMock as never,
-      listInstallations: vi.fn().mockResolvedValue(installations()),
-      uuid,
-      sha256: hash,
-      now: () => Date.parse('2026-07-16T00:00:00.000Z'),
-      sleep: vi.fn().mockResolvedValue(undefined),
-    })).resolves.toEqual({ video_id: 'video-1' });
+    await expect(
+      invokeInstalledPluginAction(
+        callerPlugin(),
+        {
+          dependency_id: 'video_generator',
+          input: { prompt: 'demo' },
+          idempotency_key: 'scene-7',
+          pluginId: 'spoofed-plugin',
+        } as never,
+        {
+          api: apiMock as never,
+          tauriInvoke: tauriMock as never,
+          listInstallations: vi.fn().mockResolvedValue(installations()),
+          uuid,
+          sha256: hash,
+          now: () => Date.parse('2026-07-16T00:00:00.000Z'),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        }
+      )
+    ).resolves.toEqual({ video_id: 'video-1' });
 
     const create = apiMock.mock.calls.find(([path]) => path === '/api/plugin-actions/invocations');
     expect(create?.[1]?.body).toMatchObject({
@@ -206,89 +241,144 @@ describe('desktop plugin action host', () => {
     expect(create?.[1]?.body).not.toHaveProperty('caller');
     expect(create?.[1]?.body.request_idempotency_key).not.toBe('scene-7');
     expect(create?.[1]?.body.effect_idempotency_key).not.toBe('scene-7');
-    expect(tauriMock).toHaveBeenCalledWith('workflow_executor_execute_action', expect.objectContaining({
-      target: expect.objectContaining({ release_id: 'video-release', action_id: 'generate_video' }),
-      input: { prompt: 'demo' },
-      invocationId: 'invocation-1',
-    }));
+    expect(tauriMock).toHaveBeenCalledWith(
+      'workflow_executor_execute_action',
+      expect.objectContaining({
+        target: expect.objectContaining({
+          release_id: 'video-release',
+          action_id: 'generate_video',
+        }),
+        input: { prompt: 'demo' },
+        invocationId: 'invocation-1',
+      })
+    );
   });
 
   it('rejects undeclared aliases before discovery or execution', async () => {
     const apiMock = vi.fn();
     const tauriMock = vi.fn();
-    await expect(invokeInstalledPluginAction(callerPlugin(), {
-      dependency_id: 'undeclared', input: { prompt: 'demo' },
-    }, {
-      api: apiMock as never,
-      tauriInvoke: tauriMock as never,
-      listInstallations: vi.fn().mockResolvedValue(installations()),
-    })).rejects.toMatchObject({ code: 'action_dependency_denied' });
+    await expect(
+      invokeInstalledPluginAction(
+        callerPlugin(),
+        {
+          dependency_id: 'undeclared',
+          input: { prompt: 'demo' },
+        },
+        {
+          api: apiMock as never,
+          tauriInvoke: tauriMock as never,
+          listInstallations: vi.fn().mockResolvedValue(installations()),
+        }
+      )
+    ).rejects.toMatchObject({ code: 'action_dependency_denied' });
     expect(apiMock).not.toHaveBeenCalled();
     expect(tauriMock).not.toHaveBeenCalled();
   });
 
   it('executes client actions through the opaque-frame adapter', async () => {
     const apiMock = vi.fn(async (path: string, options?: { method?: string; body?: any }) => {
-      if (path === '/api/plugin-releases/video-release/actions') return {
-        release_id: 'video-release', package_id: 'video-package', sha256: digest('b'), actions: [actionSurface('client')],
-      };
-      if (path === '/api/plugin-actions/invocations' && options?.method === 'POST') return invocation('AUTHORIZED');
+      if (path === '/api/plugin-releases/video-release/actions')
+        return {
+          release_id: 'video-release',
+          package_id: 'video-package',
+          sha256: digest('b'),
+          actions: [actionSurface('client')],
+        };
+      if (path === '/api/plugin-actions/invocations' && options?.method === 'POST')
+        return invocation('AUTHORIZED');
       if (path.endsWith('/claim')) return invocation('RUNNING');
-      if (path.endsWith('/complete')) return invocation('SUCCEEDED', { video_id: 'video-client-1' });
-      if (path.endsWith('/artifacts') && options?.method === 'POST') return { type: 'artifact_ref', artifact_id: 'artifact-1' };
-      if (path === '/api/plugin-actions/invocations/invocation-1') return invocation('SUCCEEDED', { video_id: 'video-client-1' });
+      if (path.endsWith('/complete'))
+        return invocation('SUCCEEDED', { video_id: 'video-client-1' });
+      if (path.endsWith('/artifacts') && options?.method === 'POST')
+        return { type: 'artifact_ref', artifact_id: 'artifact-1' };
+      if (path === '/api/plugin-actions/invocations/invocation-1')
+        return invocation('SUCCEEDED', { video_id: 'video-client-1' });
       throw new Error(`unexpected API call: ${path}`);
     });
     const tauriMock = vi.fn().mockResolvedValue({
       source: 'export async function run(input) { return { video_id: input.prompt }; }',
       export_name: 'run',
-      manifest: { ...callerPlugin().manifest as object, id: 'video', name: 'Video', version: '2.3.0' },
+      manifest: {
+        ...(callerPlugin().manifest as object),
+        id: 'video',
+        name: 'Video',
+        version: '2.3.0',
+      },
     });
     const executeClientAction = vi.fn().mockResolvedValue({ video_id: 'video-client-1' });
 
-    await expect(invokeInstalledPluginAction(callerPlugin(), {
-      dependency_id: 'video_generator', input: { prompt: 'demo' }, idempotency_key: 'scene-7',
-    }, {
-      api: apiMock as never,
-      tauriInvoke: tauriMock as never,
-      listInstallations: vi.fn().mockResolvedValue(installations()),
-      uuid: vi.fn().mockReturnValue('host-key'),
-      sha256: vi.fn().mockResolvedValue(digest('d')),
-      executeClientAction,
-      now: () => Date.parse('2026-07-16T00:00:00.000Z'),
-      sleep: vi.fn().mockResolvedValue(undefined),
-    })).resolves.toEqual({ video_id: 'video-client-1' });
+    await expect(
+      invokeInstalledPluginAction(
+        callerPlugin(),
+        {
+          dependency_id: 'video_generator',
+          input: { prompt: 'demo' },
+          idempotency_key: 'scene-7',
+        },
+        {
+          api: apiMock as never,
+          tauriInvoke: tauriMock as never,
+          listInstallations: vi.fn().mockResolvedValue(installations()),
+          uuid: vi.fn().mockReturnValue('host-key'),
+          sha256: vi.fn().mockResolvedValue(digest('d')),
+          executeClientAction,
+          now: () => Date.parse('2026-07-16T00:00:00.000Z'),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        }
+      )
+    ).resolves.toEqual({ video_id: 'video-client-1' });
 
     expect(tauriMock).toHaveBeenCalledWith('workflow_executor_read_client_action_handler', {
       target: expect.objectContaining({ release_id: 'video-release', action_id: 'generate_video' }),
     });
-    expect(executeClientAction).toHaveBeenCalledWith(expect.objectContaining({
-      invocationId: 'invocation-1',
-      exportName: 'run',
-      input: { prompt: 'demo' },
-      onCapability: expect.any(Function),
-    }));
+    expect(executeClientAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invocationId: 'invocation-1',
+        exportName: 'run',
+        input: { prompt: 'demo' },
+        onCapability: expect.any(Function),
+      })
+    );
     const clientRequest = executeClientAction.mock.calls[0][0];
-    await expect(clientRequest.onCapability('artifacts.create', { data_base64: 'UE5H', media_type: 'image/png' })).resolves.toMatchObject({ artifact_id: 'artifact-1' });
-    expect(apiMock).toHaveBeenCalledWith('/api/plugin-actions/invocations/invocation-1/artifacts', { method: 'POST', body: { data_base64: 'UE5H', media_type: 'image/png' } });
+    await expect(
+      clientRequest.onCapability('artifacts.create', {
+        data_base64: 'UE5H',
+        media_type: 'image/png',
+      })
+    ).resolves.toMatchObject({ artifact_id: 'artifact-1' });
+    expect(apiMock).toHaveBeenCalledWith('/api/plugin-actions/invocations/invocation-1/artifacts', {
+      method: 'POST',
+      body: { data_base64: 'UE5H', media_type: 'image/png' },
+    });
   });
 
   it('adds only the host-owned parent invocation id for nested calls', async () => {
     const apiMock = vi.fn(async (path: string, options?: { method?: string; body?: any }) => {
-      if (path === '/api/plugin-releases/video-release/actions') return {
-        release_id: 'video-release', package_id: 'video-package', sha256: digest('b'), actions: [actionSurface()],
-      };
-      if (path === '/api/plugin-actions/invocations' && options?.method === 'POST') return invocation('SUCCEEDED', { video_id: 'existing' });
+      if (path === '/api/plugin-releases/video-release/actions')
+        return {
+          release_id: 'video-release',
+          package_id: 'video-package',
+          sha256: digest('b'),
+          actions: [actionSurface()],
+        };
+      if (path === '/api/plugin-actions/invocations' && options?.method === 'POST')
+        return invocation('SUCCEEDED', { video_id: 'existing' });
       throw new Error(`unexpected API call: ${path}`);
     });
-    await invokeInstalledPluginAction(callerPlugin(), {
-      dependency_id: 'video_generator', input: { prompt: 'demo' },
-    }, {
-      api: apiMock as never,
-      listInstallations: vi.fn().mockResolvedValue(installations()),
-      uuid: vi.fn().mockReturnValue('host-key'),
-      now: () => Date.parse('2026-07-16T00:00:00.000Z'),
-    }, { parentInvocationId: 'parent-invocation-1' });
+    await invokeInstalledPluginAction(
+      callerPlugin(),
+      {
+        dependency_id: 'video_generator',
+        input: { prompt: 'demo' },
+      },
+      {
+        api: apiMock as never,
+        listInstallations: vi.fn().mockResolvedValue(installations()),
+        uuid: vi.fn().mockReturnValue('host-key'),
+        now: () => Date.parse('2026-07-16T00:00:00.000Z'),
+      },
+      { parentInvocationId: 'parent-invocation-1' }
+    );
     const create = apiMock.mock.calls.find(([path]) => path === '/api/plugin-actions/invocations');
     expect(create?.[1]?.body).toMatchObject({ parent_invocation_id: 'parent-invocation-1' });
     expect(create?.[1]?.body).not.toHaveProperty('caller');
@@ -299,32 +389,46 @@ describe('desktop plugin action host', () => {
       let terminalCode = '';
       let terminalMessage = '';
       const apiMock = vi.fn(async (path: string, options?: { method?: string; body?: any }) => {
-        if (path === '/api/plugin-releases/video-release/actions') return {
-          release_id: 'video-release', package_id: 'video-package', sha256: digest('b'), actions: [actionSurface(runtimeType)],
-        };
-        if (path === '/api/plugin-actions/invocations' && options?.method === 'POST') return invocation('AUTHORIZED');
+        if (path === '/api/plugin-releases/video-release/actions')
+          return {
+            release_id: 'video-release',
+            package_id: 'video-package',
+            sha256: digest('b'),
+            actions: [actionSurface(runtimeType)],
+          };
+        if (path === '/api/plugin-actions/invocations' && options?.method === 'POST')
+          return invocation('AUTHORIZED');
         if (path.endsWith('/claim')) return invocation('RUNNING');
         if (path.endsWith('/fail')) {
           terminalCode = String(options?.body?.code || '');
           terminalMessage = String(options?.body?.message || '');
           return { ok: true };
         }
-        if (path === '/api/plugin-actions/invocations/invocation-1') return invocation('FAILED', null, terminalCode, terminalMessage);
+        if (path === '/api/plugin-actions/invocations/invocation-1')
+          return invocation('FAILED', null, terminalCode, terminalMessage);
         throw new Error(`unexpected API call: ${path}`);
       });
       const tauriMock = vi.fn();
 
-      await expect(invokeInstalledPluginAction(callerPlugin(), {
-        dependency_id: 'video_generator', input: { prompt: 'demo' }, idempotency_key: 'scene-7',
-      }, {
-        api: apiMock as never,
-        tauriInvoke: tauriMock as never,
-        listInstallations: vi.fn().mockResolvedValue(installations()),
-        uuid: vi.fn().mockReturnValue('host-key'),
-        sha256: vi.fn().mockResolvedValue(digest('d')),
-        now: () => Date.parse('2026-07-16T00:00:00.000Z'),
-        sleep: vi.fn().mockResolvedValue(undefined),
-      })).rejects.toMatchObject({ code: 'action_runtime_unavailable' });
+      await expect(
+        invokeInstalledPluginAction(
+          callerPlugin(),
+          {
+            dependency_id: 'video_generator',
+            input: { prompt: 'demo' },
+            idempotency_key: 'scene-7',
+          },
+          {
+            api: apiMock as never,
+            tauriInvoke: tauriMock as never,
+            listInstallations: vi.fn().mockResolvedValue(installations()),
+            uuid: vi.fn().mockReturnValue('host-key'),
+            sha256: vi.fn().mockResolvedValue(digest('d')),
+            now: () => Date.parse('2026-07-16T00:00:00.000Z'),
+            sleep: vi.fn().mockResolvedValue(undefined),
+          }
+        )
+      ).rejects.toMatchObject({ code: 'action_runtime_unavailable' });
 
       expect(terminalCode).toBe('action_runtime_unavailable');
       expect(tauriMock).not.toHaveBeenCalled();

@@ -50,8 +50,22 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableCellAction, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableCellAction,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
 import { DetailSheet } from '@/components/ui/detail-sheet';
 
@@ -80,7 +94,13 @@ const STATUS_VARIANT: Record<TicketStatus, 'default' | 'secondary' | 'outline'> 
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString('zh-CN', {
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 async function loadTicketDetail(id: string, signal: AbortSignal): Promise<TicketDetail> {
@@ -88,9 +108,16 @@ async function loadTicketDetail(id: string, signal: AbortSignal): Promise<Ticket
   return result.ticket;
 }
 
-function AttachmentChip({ ticketId, attachment }: { ticketId: string; attachment: TicketAttachment }) {
+function AttachmentChip({
+  ticketId,
+  attachment,
+}: {
+  ticketId: string;
+  attachment: TicketAttachment;
+}) {
   const [busy, setBusy] = useState(false);
-  const Icon = attachment.kind === 'IMAGE' ? ImageIcon : attachment.kind === 'LOG' ? FileTextIcon : FileIcon;
+  const Icon =
+    attachment.kind === 'IMAGE' ? ImageIcon : attachment.kind === 'LOG' ? FileTextIcon : FileIcon;
   return (
     <button
       type="button"
@@ -115,7 +142,15 @@ function AttachmentChip({ ticketId, attachment }: { ticketId: string; attachment
   );
 }
 
-function FilePicker({ files, onChange, disabled = false }: { files: File[]; onChange: (next: File[]) => void; disabled?: boolean }) {
+function FilePicker({
+  files,
+  onChange,
+  disabled = false,
+}: {
+  files: File[];
+  onChange: (next: File[]) => void;
+  disabled?: boolean;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="space-y-2">
@@ -134,16 +169,30 @@ function FilePicker({ files, onChange, disabled = false }: { files: File[]; onCh
           e.target.value = '';
         }}
       />
-      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => inputRef.current?.click()}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
         <PaperclipIcon className="size-4" />
         添加附件
       </Button>
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {files.map((f, i) => (
-            <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+            <span
+              key={`${f.name}-${i}`}
+              className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs"
+            >
               <span className="max-w-40 truncate">{f.name}</span>
-              <button type="button" disabled={disabled} aria-label={`移除附件：${f.name}`} onClick={() => onChange(files.filter((_, j) => j !== i))}>
+              <button
+                type="button"
+                disabled={disabled}
+                aria-label={`移除附件：${f.name}`}
+                onClick={() => onChange(files.filter((_, j) => j !== i))}
+              >
                 <XIcon className="size-3 text-muted-foreground hover:text-foreground" />
               </button>
             </span>
@@ -163,19 +212,24 @@ export function TicketsView() {
   const [appliedSearch, setAppliedSearch] = useState('');
 
   const ticketList = useAsyncResource(
-    (signal) => listAdminTickets({
-      status: statusFilter === 'ALL' ? undefined : statusFilter,
-      category: categoryFilter === 'ALL' ? undefined : categoryFilter,
-      q: appliedSearch || undefined,
-      page,
-      pageSize,
-    }, signal),
+    (signal) =>
+      listAdminTickets(
+        {
+          status: statusFilter === 'ALL' ? undefined : statusFilter,
+          category: categoryFilter === 'ALL' ? undefined : categoryFilter,
+          q: appliedSearch || undefined,
+          page,
+          pageSize,
+        },
+        signal
+      ),
     [statusFilter, categoryFilter, appliedSearch, page, pageSize],
-    { isEmpty: (result) => result.items.length === 0 },
+    { isEmpty: (result) => result.items.length === 0 }
   );
 
   useEffect(() => {
-    if (!ticketList.data || ticketList.data.page !== page || ticketList.data.pageSize !== pageSize) return;
+    if (!ticketList.data || ticketList.data.page !== page || ticketList.data.pageSize !== pageSize)
+      return;
     const totalPages = Math.max(1, Math.ceil(ticketList.data.total / pageSize));
     if (page > totalPages) setPage(totalPages);
   }, [ticketList.data, page, pageSize]);
@@ -183,11 +237,9 @@ export function TicketsView() {
   const [active, setActive] = useState<TicketSummary | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const activeId = active?.id ?? '';
-  const detail = useAsyncResource(
-    (signal) => loadTicketDetail(activeId, signal),
-    [activeId],
-    { enabled: detailOpen && Boolean(activeId) },
-  );
+  const detail = useAsyncResource((signal) => loadTicketDetail(activeId, signal), [activeId], {
+    enabled: detailOpen && Boolean(activeId),
+  });
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
 
@@ -202,25 +254,57 @@ export function TicketsView() {
   };
 
   return (
-    <Section title="帮助与反馈" description="处理用户提交的问题、建议与账号工单，可回复并变更状态。">
+    <Section
+      title="帮助与反馈"
+      description="处理用户提交的问题、建议与账号工单，可回复并变更状态。"
+    >
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as typeof statusFilter); setPage(1); }}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => {
+            setStatusFilter(v as typeof statusFilter);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="h-9 w-36">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
-            {STATUS_FILTERS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            {STATUS_FILTERS.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                {s.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v as typeof categoryFilter); setPage(1); }}>
-          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+        <Select
+          value={categoryFilter}
+          onValueChange={(v) => {
+            setCategoryFilter(v as typeof categoryFilter);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="h-9 w-36">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
-            {CATEGORY_FILTERS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+            {CATEGORY_FILTERS.map((c) => (
+              <SelectItem key={c.value} value={c.value}>
+                {c.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <div className="flex items-center gap-1">
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setAppliedSearch(search.trim()); setPage(1); } }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setAppliedSearch(search.trim());
+                setPage(1);
+              }
+            }}
             placeholder="搜索标题…"
             className="h-9 w-48"
           />
@@ -229,7 +313,10 @@ export function TicketsView() {
             size="icon"
             className="size-9"
             aria-label="搜索工单"
-            onClick={() => { setAppliedSearch(search.trim()); setPage(1); }}
+            onClick={() => {
+              setAppliedSearch(search.trim());
+              setPage(1);
+            }}
           >
             <SearchIcon className="size-4" />
           </Button>
@@ -240,12 +327,12 @@ export function TicketsView() {
         status={ticketList.status}
         error={ticketList.error}
         retry={ticketList.reload}
-        emptyFallback={(
+        emptyFallback={
           <div className="flex min-h-40 flex-col items-center justify-center gap-2 border-y py-8 text-sm text-muted-foreground">
             <LifeBuoyIcon className="size-7 opacity-50" />
             暂无工单
           </div>
-        )}
+        }
       >
         {ticketList.data && (
           <>
@@ -276,12 +363,26 @@ export function TicketsView() {
                           {ticket.title}
                         </TableCellAction>
                       </TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs">{CATEGORY_LABEL[ticket.category]}</Badge></TableCell>
-                      <TableCell className="text-sm">{ticket.submitter?.displayName ?? '-'}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{ticket.team?.name ?? '-'}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {CATEGORY_LABEL[ticket.category]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {ticket.submitter?.displayName ?? '-'}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {ticket.team?.name ?? '-'}
+                      </TableCell>
                       <TableCell className="text-sm">{PRIORITY_LABEL[ticket.priority]}</TableCell>
-                      <TableCell><Badge variant={STATUS_VARIANT[ticket.status]}>{STATUS_LABEL[ticket.status]}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{fmtTime(ticket.lastReplyAt)}</TableCell>
+                      <TableCell>
+                        <Badge variant={STATUS_VARIANT[ticket.status]}>
+                          {STATUS_LABEL[ticket.status]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {fmtTime(ticket.lastReplyAt)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -341,7 +442,10 @@ function TicketDetailSheet({
     if (!replyBody.trim() && replyFiles.length === 0) return toast.error('请填写内容或添加附件');
     await guardMutation(async () => {
       try {
-        const result = await replyAdminTicket(ticket.id, { body: replyBody.trim(), files: replyFiles });
+        const result = await replyAdminTicket(ticket.id, {
+          body: replyBody.trim(),
+          files: replyFiles,
+        });
         onChanged(result.ticket);
         setReplyBody('');
         setReplyFiles([]);
@@ -352,7 +456,10 @@ function TicketDetailSheet({
     });
   };
 
-  async function updateTicket(body: { status?: TicketStatus; priority?: TicketPriority }, message: string) {
+  async function updateTicket(
+    body: { status?: TicketStatus; priority?: TicketPriority },
+    message: string
+  ) {
     if (!ticket) return;
     await guardMutation(async () => {
       try {
@@ -370,40 +477,60 @@ function TicketDetailSheet({
       open={open}
       onOpenChange={onOpenChange}
       title={summary?.title ?? '工单详情'}
-      description={summary
-        ? `${CATEGORY_LABEL[summary.category]} · ${summary.submitter?.displayName ?? '未知用户'}${summary.team ? ` · ${summary.team.name}` : ''}`
-        : undefined}
+      description={
+        summary
+          ? `${CATEGORY_LABEL[summary.category]} · ${summary.submitter?.displayName ?? '未知用户'}${summary.team ? ` · ${summary.team.name}` : ''}`
+          : undefined
+      }
     >
       <AsyncResource status={resource.status} error={resource.error} retry={resource.reload}>
         {ticket && (
           <div className="space-y-5">
             <div className="flex flex-wrap gap-3">
               <div className="space-y-1">
-                <label htmlFor="ticket-status" className="text-xs text-muted-foreground">状态</label>
+                <label htmlFor="ticket-status" className="text-xs text-muted-foreground">
+                  状态
+                </label>
                 <Select
                   value={ticket.status}
-                  onValueChange={(value) => { void updateTicket({ status: value as TicketStatus }, '状态已更新'); }}
+                  onValueChange={(value) => {
+                    void updateTicket({ status: value as TicketStatus }, '状态已更新');
+                  }}
                   disabled={closed || mutating}
                 >
-                  <SelectTrigger id="ticket-status" className="h-8 w-32"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="ticket-status" className="h-8 w-32">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as TicketStatus[]).map((status) => (
-                      <SelectItem key={status} value={status}>{STATUS_LABEL[status]}</SelectItem>
-                    ))}
+                    {(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as TicketStatus[]).map(
+                      (status) => (
+                        <SelectItem key={status} value={status}>
+                          {STATUS_LABEL[status]}
+                        </SelectItem>
+                      )
+                    )}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1">
-                <label htmlFor="ticket-priority" className="text-xs text-muted-foreground">优先级</label>
+                <label htmlFor="ticket-priority" className="text-xs text-muted-foreground">
+                  优先级
+                </label>
                 <Select
                   value={ticket.priority}
-                  onValueChange={(value) => { void updateTicket({ priority: value as TicketPriority }, '优先级已更新'); }}
+                  onValueChange={(value) => {
+                    void updateTicket({ priority: value as TicketPriority }, '优先级已更新');
+                  }}
                   disabled={mutating}
                 >
-                  <SelectTrigger id="ticket-priority" className="h-8 w-28"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="ticket-priority" className="h-8 w-28">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     {(['LOW', 'NORMAL', 'HIGH'] as TicketPriority[]).map((priority) => (
-                      <SelectItem key={priority} value={priority}>{PRIORITY_LABEL[priority]}</SelectItem>
+                      <SelectItem key={priority} value={priority}>
+                        {PRIORITY_LABEL[priority]}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -412,17 +539,28 @@ function TicketDetailSheet({
 
             <div className="space-y-3">
               {ticket.messages.map((message) => (
-                <div key={message.id} className={`flex ${message.authorRole === 'ADMIN' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-lg px-3 py-2 ${message.authorRole === 'ADMIN' ? 'bg-primary text-primary-foreground' : 'border bg-muted/40'}`}>
+                <div
+                  key={message.id}
+                  className={`flex ${message.authorRole === 'ADMIN' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[85%] rounded-lg px-3 py-2 ${message.authorRole === 'ADMIN' ? 'bg-primary text-primary-foreground' : 'border bg-muted/40'}`}
+                  >
                     <div className="mb-1 flex items-center gap-2 text-xs opacity-70">
                       <span>{message.authorRole === 'ADMIN' ? '客服' : '用户'}</span>
                       <span>{fmtTime(message.createdAt)}</span>
                     </div>
-                    {message.body && <p className="whitespace-pre-wrap break-words text-sm">{message.body}</p>}
+                    {message.body && (
+                      <p className="whitespace-pre-wrap break-words text-sm">{message.body}</p>
+                    )}
                     {message.attachments.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {message.attachments.map((attachment) => (
-                          <AttachmentChip key={attachment.id} ticketId={ticket.id} attachment={attachment} />
+                          <AttachmentChip
+                            key={attachment.id}
+                            ticketId={ticket.id}
+                            attachment={attachment}
+                          />
                         ))}
                       </div>
                     )}
@@ -432,13 +570,28 @@ function TicketDetailSheet({
             </div>
 
             {closed ? (
-              <p className="rounded-md border bg-muted/30 px-3 py-2 text-center text-xs text-muted-foreground">工单已关闭，无法继续回复。</p>
+              <p className="rounded-md border bg-muted/30 px-3 py-2 text-center text-xs text-muted-foreground">
+                工单已关闭，无法继续回复。
+              </p>
             ) : (
               <div className="space-y-2 border-t pt-3">
-                <Textarea aria-label="回复内容" disabled={mutating} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="输入回复…" rows={3} maxLength={10000} />
+                <Textarea
+                  aria-label="回复内容"
+                  disabled={mutating}
+                  value={replyBody}
+                  onChange={(e) => setReplyBody(e.target.value)}
+                  placeholder="输入回复…"
+                  rows={3}
+                  maxLength={10000}
+                />
                 <FilePicker files={replyFiles} onChange={setReplyFiles} disabled={mutating} />
                 <div className="flex justify-end">
-                  <Button onClick={() => { void send(); }} disabled={mutating}>
+                  <Button
+                    onClick={() => {
+                      void send();
+                    }}
+                    disabled={mutating}
+                  >
                     <SendIcon className="size-4" />
                     {mutating ? '处理中…' : '发送回复'}
                   </Button>

@@ -13,7 +13,11 @@
 const PREFIX = 'lf:plugin-shared:';
 
 /** 写入本插件命名空间下的共享数据。value 任意可序列化值。返回写入的条目信息。 */
-export function setSharedData(pluginId: string, key: string, value: unknown): { ok: true; key: string; storedAt: string } {
+export function setSharedData(
+  pluginId: string,
+  key: string,
+  value: unknown
+): { ok: true; key: string; storedAt: string } {
   if (!pluginId) throw new Error('setSharedData 缺少 pluginId');
   if (!key || typeof key !== 'string') throw new Error('setSharedData 缺少 key');
   const storedAt = new Date().toISOString();
@@ -22,14 +26,19 @@ export function setSharedData(pluginId: string, key: string, value: unknown): { 
     localStorage.setItem(storageKey(pluginId, key), JSON.stringify(entry));
   } catch (err) {
     // 配额满 / localStorage 禁用：抛出明确错误，调用方提示用户（不静默吞）。
-    throw new Error(`共享数据写入失败（存储不可用）：${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `共享数据写入失败（存储不可用）：${err instanceof Error ? err.message : String(err)}`
+    );
   }
   return { ok: true, key, storedAt };
 }
 
 /** 读取指定源插件的共享数据（跨插件读取，opt-in：源插件需先 setSharedData 写入）。
  *  返回 { value, storedAt, by } 或 null（不存在）。 */
-export function getSharedData(sourcePluginId: string, key: string): { value: unknown; storedAt: string; by: string } | null {
+export function getSharedData(
+  sourcePluginId: string,
+  key: string
+): { value: unknown; storedAt: string; by: string } | null {
   if (!sourcePluginId) throw new Error('getSharedData 缺少 sourcePluginId');
   if (!key || typeof key !== 'string') throw new Error('getSharedData 缺少 key');
   let raw: string | null;

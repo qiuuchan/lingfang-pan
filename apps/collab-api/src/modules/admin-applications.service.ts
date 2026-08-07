@@ -18,7 +18,7 @@ export class AdminApplicationsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
-    @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(NotificationService) private readonly notifications: NotificationService
   ) {}
   async adminApplications(userId: string, query: AdminApplicationListQuery = {}) {
     await this.auth.ensurePlatformAdmin(userId);
@@ -105,7 +105,7 @@ export class AdminApplicationsService {
         'application_approved',
         '团队管理员申请已通过',
         `你的团队管理员申请已通过，团队「${result.application.teamName}」已创建。`,
-        { relatedType: 'Team', relatedId: result.team.id },
+        { relatedType: 'Team', relatedId: result.team.id }
       );
     } catch {
       // 通知失败不回滚已提交的审批事务。
@@ -155,7 +155,7 @@ export class AdminApplicationsService {
         'application_rejected',
         '团队管理员申请未通过',
         `你的团队管理员申请未通过：${reviewReason}。`,
-        { relatedType: 'TeamAdminApplication', relatedId: id },
+        { relatedType: 'TeamAdminApplication', relatedId: id }
       );
     } catch {
       // 通知失败不回滚已提交的审批事务。

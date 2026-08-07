@@ -56,7 +56,9 @@ test('buyer orders and seller statements share one strict paged order projection
     refunded_at: null,
     refund_request: null,
   };
-  expect(MarketplaceOrderPage.safeParse({ items: [item], total: 1, page: 1, pageSize: 20 }).success).toBe(true);
+  expect(
+    MarketplaceOrderPage.safeParse({ items: [item], total: 1, page: 1, pageSize: 20 }).success
+  ).toBe(true);
   const totals = { count: 0, gross_cents: 0, seller_cents: 0 };
   const statement = {
     items: [item],
@@ -84,24 +86,31 @@ test('buyer orders and seller statements share one strict paged order projection
     },
   };
   expect(MarketplaceStatementPage.safeParse(statement).success).toBe(true);
-  expect(MarketplaceStatementPage.safeParse({ ...statement, buyer_email: 'private@example.com' })
-      .success).toBe(false);
+  expect(
+    MarketplaceStatementPage.safeParse({ ...statement, buyer_email: 'private@example.com' }).success
+  ).toBe(false);
 });
 
 test('journal signed deltas prove purchase, refund and settlement conservation', () => {
-  expect(marketplaceJournalNet([
+  expect(
+    marketplaceJournalNet([
       { entry_kind: 'BUYER_PURCHASE_DEBIT', direction: 'DEBIT', amount_cents: 101 },
       { entry_kind: 'PLATFORM_PURCHASE_CLEARING_CREDIT', direction: 'CREDIT', amount_cents: 101 },
-    ])).toBe(0);
-  expect(marketplaceJournalNet([
+    ])
+  ).toBe(0);
+  expect(
+    marketplaceJournalNet([
       { entry_kind: 'PLATFORM_REFUND_CLEARING_DEBIT', direction: 'DEBIT', amount_cents: 101 },
       { entry_kind: 'BUYER_REFUND_CREDIT', direction: 'CREDIT', amount_cents: 101 },
-    ])).toBe(0);
-  expect(marketplaceJournalNet([
+    ])
+  ).toBe(0);
+  expect(
+    marketplaceJournalNet([
       { entry_kind: 'PLATFORM_SETTLEMENT_CLEARING_DEBIT', direction: 'DEBIT', amount_cents: 101 },
       { entry_kind: 'SELLER_SETTLEMENT_CREDIT', direction: 'CREDIT', amount_cents: 81 },
       { entry_kind: 'PLATFORM_SETTLEMENT_CREDIT', direction: 'CREDIT', amount_cents: 20 },
-    ])).toBe(0);
+    ])
+  ).toBe(0);
 });
 
 test('public price version is opaque from its first contract version', () => {
@@ -150,5 +159,7 @@ test('price and order snapshots enforce both pricing and split invariants', () =
     refunded_at: null,
   };
   expect(MarketplaceOrderSnapshot.safeParse(order).success).toBe(true);
-  expect(MarketplaceOrderSnapshot.safeParse({ ...order, seller_amount_cents: 65 }).success).toBe(false);
+  expect(MarketplaceOrderSnapshot.safeParse({ ...order, seller_amount_cents: 65 }).success).toBe(
+    false
+  );
 });

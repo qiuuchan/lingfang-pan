@@ -39,23 +39,31 @@ type ClientActionAdapterDependencies = {
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
 export function clientActionMessageFromFrame(
   event: MessageEvent,
   frame: HTMLIFrameElement,
-  expected: { sessionId: string; invocationId: string; nonce: string },
+  expected: { sessionId: string; invocationId: string; nonce: string }
 ): ClientActionFrameMessage | null {
   if (event.origin !== 'null' || event.source !== frame.contentWindow) return null;
   const message = record(event.data) as ClientActionFrameMessage | null;
-  if (!message
-    || message.session_id !== expected.sessionId
-    || message.invocation_id !== expected.invocationId
-    || message.nonce !== expected.nonce) return null;
+  if (
+    !message ||
+    message.session_id !== expected.sessionId ||
+    message.invocation_id !== expected.invocationId ||
+    message.nonce !== expected.nonce
+  )
+    return null;
   if (message.__lf_client_action_call === true) {
-    if (typeof message.request_id !== 'string' || !message.request_id || typeof message.kind !== 'string') return null;
+    if (
+      typeof message.request_id !== 'string' ||
+      !message.request_id ||
+      typeof message.kind !== 'string'
+    )
+      return null;
     return {
       __lf_client_action_call: true,
       session_id: expected.sessionId,
@@ -83,7 +91,11 @@ function scriptJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, '\\u003c');
 }
 
-function clientActionDocument(request: ClientActionAdapterRequest, sessionId: string, nonce: string): string {
+function clientActionDocument(
+  request: ClientActionAdapterRequest,
+  sessionId: string,
+  nonce: string
+): string {
   return `<!doctype html><meta charset="utf-8"><script type="module">
 const sessionId = ${scriptJson(sessionId)};
 const invocationId = ${scriptJson(request.invocationId)};
@@ -129,7 +141,7 @@ try {
 
 export function executeClientActionAdapter(
   request: ClientActionAdapterRequest,
-  overrides: Partial<ClientActionAdapterDependencies> = {},
+  overrides: Partial<ClientActionAdapterDependencies> = {}
 ): Promise<Record<string, unknown>> {
   const deps: ClientActionAdapterDependencies = {
     document: overrides.document ?? globalThis.document,
@@ -163,55 +175,103 @@ export function executeClientActionAdapter(
       callback();
     };
     const fail = (error: Error) => finish(() => reject(error));
-    const onAbort = () => fail(Object.assign(new Error('Client Action 已取消'), { code: 'action_cancelled' }));
+    const onAbort = () =>
+      fail(Object.assign(new Error('Client Action 已取消'), { code: 'action_cancelled' }));
     const onLoad = () => {
       loadCount += 1;
-      if (loadCount > 1) fail(Object.assign(new Error('Client Action frame 导航后已失效'), { code: 'action_execution_failed' }));
+      if (loadCount > 1)
+        fail(
+          Object.assign(new Error('Client Action frame 导航后已失效'), {
+            code: 'action_execution_failed',
+          })
+        );
     };
     const onMessage = (event: MessageEvent) => {
-      const message = clientActionMessageFromFrame(event, frame, { sessionId, invocationId: request.invocationId, nonce });
+      const message = clientActionMessageFromFrame(event, frame, {
+        sessionId,
+        invocationId: request.invocationId,
+        nonce,
+      });
       if (!message || settled) return;
       if (message.__lf_client_action_call === true) {
         const requestId = String(message.request_id);
         if (seenRequests.has(requestId)) return;
         seenRequests.add(requestId);
-        const reply = (payload: Record<string, unknown>) => frame.contentWindow?.postMessage({
-          __lf_client_action_reply: true,
-          session_id: sessionId,
-          invocation_id: request.invocationId,
-          nonce,
-          request_id: requestId,
-          ...payload,
-        }, '*');
-        if (!['actions.call', 'artifacts.create', 'artifacts.materialize', 'artifacts.import'].includes(String(message.kind))) {
-          reply({ error: { code: 'action_dependency_denied', message: `Client Action 不允许调用能力：${String(message.kind)}` } });
+        const reply = (payload: Record<string, unknown>) =>
+          frame.contentWindow?.postMessage(
+            {
+              __lf_client_action_reply: true,
+              session_id: sessionId,
+              invocation_id: request.invocationId,
+              nonce,
+              request_id: requestId,
+              ...payload,
+            },
+            '*'
+          );
+        if (
+          ![
+            'actions.call',
+            'artifacts.create',
+            'artifacts.materialize',
+            'artifacts.import',
+          ].includes(String(message.kind))
+        ) {
+          reply({
+            error: {
+              code: 'action_dependency_denied',
+              message: `Client Action 不允许调用能力：${String(message.kind)}`,
+            },
+          });
           return;
         }
         void request.onCapability(String(message.kind), message.args).then(
           (result) => reply({ result }),
           (error) => {
             const source = record(error);
-            reply({ error: { name: source?.name, message: source?.message || String(error), code: source?.code, status: source?.status, requestId: source?.requestId } });
-          },
+            reply({
+              error: {
+                name: source?.name,
+                message: source?.message || String(error),
+                code: source?.code,
+                status: source?.status,
+                requestId: source?.requestId,
+              },
+            });
+          }
         );
         return;
       }
       if (message.error !== undefined) {
         const source = record(message.error);
-        fail(Object.assign(new Error(typeof source?.message === 'string' ? source.message : 'Client Action 执行失败'), {
-          name: typeof source?.name === 'string' ? source.name : 'Error',
-          code: typeof source?.code === 'string' ? source.code : 'action_execution_failed',
-        }));
+        fail(
+          Object.assign(
+            new Error(
+              typeof source?.message === 'string' ? source.message : 'Client Action 执行失败'
+            ),
+            {
+              name: typeof source?.name === 'string' ? source.name : 'Error',
+              code: typeof source?.code === 'string' ? source.code : 'action_execution_failed',
+            }
+          )
+        );
         return;
       }
       const output = record(message.result);
       if (!output) {
-        fail(Object.assign(new Error('Client Action output 必须是 JSON 对象'), { code: 'action_output_invalid' }));
+        fail(
+          Object.assign(new Error('Client Action output 必须是 JSON 对象'), {
+            code: 'action_output_invalid',
+          })
+        );
         return;
       }
       finish(() => resolve(output));
     };
-    timer = deps.setTimer(() => fail(Object.assign(new Error('Client Action 执行超时'), { code: 'action_timeout' })), Math.max(1, request.timeoutMs));
+    timer = deps.setTimer(
+      () => fail(Object.assign(new Error('Client Action 执行超时'), { code: 'action_timeout' })),
+      Math.max(1, request.timeoutMs)
+    );
     deps.window.addEventListener('message', onMessage);
     frame.addEventListener('load', onLoad);
     request.signal?.addEventListener('abort', onAbort, { once: true });

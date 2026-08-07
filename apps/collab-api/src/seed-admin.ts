@@ -2,7 +2,10 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { createPrismaAdapter } from './prisma.adapter';
-import { SYSTEM_PLATFORM_ADMIN_ROLE_ID, SYSTEM_PLATFORM_ADMIN_ROLE_CODE } from './modules/permissions/permission-codes';
+import {
+  SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+  SYSTEM_PLATFORM_ADMIN_ROLE_CODE,
+} from './modules/permissions/permission-codes';
 
 const adapter = createPrismaAdapter(process.env);
 const prisma = new PrismaClient({ adapter });
@@ -44,8 +47,18 @@ async function main() {
   // RBAC 双写：platformRole 枚举 + platformRoleId 同步，否则新权限守卫解析不到平台角色权限。
   const user = await prisma.user.upsert({
     where: { email },
-    create: { email, displayName, passwordHash, platformRole: 'PLATFORM_ADMIN', platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
-    update: { platformRole: 'PLATFORM_ADMIN', displayName, platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID },
+    create: {
+      email,
+      displayName,
+      passwordHash,
+      platformRole: 'PLATFORM_ADMIN',
+      platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+    },
+    update: {
+      platformRole: 'PLATFORM_ADMIN',
+      displayName,
+      platformRoleId: SYSTEM_PLATFORM_ADMIN_ROLE_ID,
+    },
   });
   await prisma.auditLog.create({
     data: {

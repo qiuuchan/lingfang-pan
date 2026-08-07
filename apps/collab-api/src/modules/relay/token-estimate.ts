@@ -57,7 +57,10 @@ export function estimateTokens(text: string): number {
     if (CJK_RANGE.test(text[i])) cjkChars++;
     else otherChars++;
   }
-  return Math.max(1, Math.ceil(cjkChars / CHARS_PER_TOKEN_CJK + otherChars / CHARS_PER_TOKEN_LATIN));
+  return Math.max(
+    1,
+    Math.ceil(cjkChars / CHARS_PER_TOKEN_CJK + otherChars / CHARS_PER_TOKEN_LATIN)
+  );
 }
 
 /** 估算单条消息的 token 数。 */

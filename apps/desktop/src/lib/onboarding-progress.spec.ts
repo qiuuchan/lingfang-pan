@@ -15,12 +15,24 @@ import { TASK_STEPS } from '@/components/onboarding/task-steps';
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();
   return {
-    get length() { return store.size; },
-    clear() { store.clear(); },
-    getItem(key: string) { return store.has(key) ? store.get(key)! : null; },
-    key(index: number) { return Array.from(store.keys())[index] ?? null; },
-    setItem(key: string, value: string) { store.set(key, String(value)); },
-    removeItem(key: string) { store.delete(key); },
+    get length() {
+      return store.size;
+    },
+    clear() {
+      store.clear();
+    },
+    getItem(key: string) {
+      return store.has(key) ? store.get(key)! : null;
+    },
+    key(index: number) {
+      return Array.from(store.keys())[index] ?? null;
+    },
+    setItem(key: string, value: string) {
+      store.set(key, String(value));
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
   };
 }
 
@@ -109,7 +121,9 @@ describe('loadDone / saveDone / clearDone', () => {
   it('done key 与 progress key 互不干扰', () => {
     saveProgress('user-10', [true, false, false, false, false]);
     saveDone('user-10');
-    expect(localStorage.getItem(progressKey('user-10'))).not.toBe(localStorage.getItem(doneKey('user-10')));
+    expect(localStorage.getItem(progressKey('user-10'))).not.toBe(
+      localStorage.getItem(doneKey('user-10'))
+    );
     expect(loadDone('user-10')).toBe(true);
     expect(loadProgress('user-10', TASK_STEPS)[0]).toBe(true);
   });

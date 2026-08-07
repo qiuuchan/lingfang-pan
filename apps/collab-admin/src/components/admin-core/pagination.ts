@@ -5,7 +5,7 @@ export function usePageCorrection<T>(
   data: Page<T> | null,
   page: number,
   pageSize: number,
-  setPage: Dispatch<SetStateAction<number>>,
+  setPage: Dispatch<SetStateAction<number>>
 ) {
   useEffect(() => {
     if (!data || data.page !== page || data.pageSize !== pageSize) return;
@@ -13,4 +13,3 @@ export function usePageCorrection<T>(
     if (page > totalPages) setPage(totalPages);
   }, [data, page, pageSize, setPage]);
 }
-

@@ -35,6 +35,6 @@ describe('isVersionNewer', () => {
   });
   it('非法版本按 0.0.0 比较', () => {
     expect(isVersionNewer('bad', '0.0.0')).toBe(false); // 0.0.0 vs 0.0.0
-    expect(isVersionNewer('0.0.1', 'bad')).toBe(true);  // 0.0.1 vs 0.0.0
+    expect(isVersionNewer('0.0.1', 'bad')).toBe(true); // 0.0.1 vs 0.0.0
   });
 });

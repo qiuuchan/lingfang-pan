@@ -36,15 +36,23 @@ describe('installed plugin start gate', () => {
       authToken: 'jwt-token',
       registryAccessGranted: true,
     });
-    expect(apiMock.mock.invocationCallOrder[0]).toBeLessThan(tauriInvokeMock.mock.invocationCallOrder[0]!);
+    expect(apiMock.mock.invocationCallOrder[0]).toBeLessThan(
+      tauriInvokeMock.mock.invocationCallOrder[0]!
+    );
   });
 
   it('does not require the remote registry gate for local installations', async () => {
-    await startInstalledPlugin('installation-1', 'package-1', 'local', { releaseId: '', sha256: '' });
+    await startInstalledPlugin('installation-1', 'package-1', 'local', {
+      releaseId: '',
+      sha256: '',
+    });
 
     expect(apiMock).not.toHaveBeenCalled();
-    expect(tauriInvokeMock).toHaveBeenCalledWith('start_installed_plugin', expect.objectContaining({
-      registryAccessGranted: false,
-    }));
+    expect(tauriInvokeMock).toHaveBeenCalledWith(
+      'start_installed_plugin',
+      expect.objectContaining({
+        registryAccessGranted: false,
+      })
+    );
   });
 });

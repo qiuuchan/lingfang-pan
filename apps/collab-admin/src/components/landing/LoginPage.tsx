@@ -63,7 +63,14 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
         // 云同步平台名：后端 platformName（缺省 'LingFang'），用于顶栏与登录页标题展示。
         setPlatformName((info.platformName || '').trim());
         // 场景开关：解析逗号分隔串为 Set，管理端登录/找回密码分别判定是否强制验证码。
-        setCaptchaScenes(new Set((info.geetestScenes ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)));
+        setCaptchaScenes(
+          new Set(
+            (info.geetestScenes ?? '')
+              .split(',')
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean)
+          )
+        );
       })
       .catch(() => {
         /* 拉取失败不阻断登录 */
@@ -85,10 +92,12 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
   }, []);
 
   /** 当前管理端场景是否启用验证码。 */
-  const sceneEnabled = (scene: 'admin_login' | 'admin_forgot') => (scene === 'admin_login' ? loginCaptchaEnabled : forgotCaptchaEnabled);
+  const sceneEnabled = (scene: 'admin_login' | 'admin_forgot') =>
+    scene === 'admin_login' ? loginCaptchaEnabled : forgotCaptchaEnabled;
 
   async function submit() {
-    if (sceneEnabled('admin_login') && !loginCaptcha.validateResult) return toast.error('请先完成验证码');
+    if (sceneEnabled('admin_login') && !loginCaptcha.validateResult)
+      return toast.error('请先完成验证码');
     setLoading(true);
     try {
       const result = await api<AdminSession>('/api/auth/admin/login', {
@@ -110,7 +119,8 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
 
   async function onForgotPassword() {
     if (!forgotEmail.trim()) return toast.error('请输入邮箱');
-    if (sceneEnabled('admin_forgot') && !forgotCaptcha.validateResult) return toast.error('请先完成验证码');
+    if (sceneEnabled('admin_forgot') && !forgotCaptcha.validateResult)
+      return toast.error('请先完成验证码');
     setForgotLoading(true);
     try {
       const result = await api<{ message?: string }>('/api/auth/admin/forgot-password', {
@@ -166,7 +176,14 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
         {/* 顶栏：logo + 返回首页 */}
         <header className="lf-page-topbar">
           <button onClick={onBack} className="lf-back-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             返回首页
@@ -179,14 +196,19 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               灵
             </span>
             {/* 云同步平台名：后端 platformName（缺省 'LingFang'），与后台保持一致。 */}
-            <span className="lf-display text-sm font-semibold tracking-tight">{platformName || 'LingFang'}</span>
+            <span className="lf-display text-sm font-semibold tracking-tight">
+              {platformName || 'LingFang'}
+            </span>
           </div>
         </header>
 
         {/* 居中表单卡 */}
         <div className="lf-login-wrap">
           <div className="lf-login-card">
-            <h1 className="lf-display text-xl font-semibold tracking-tight" style={{ color: 'var(--lf-fg)' }}>
+            <h1
+              className="lf-display text-xl font-semibold tracking-tight"
+              style={{ color: 'var(--lf-fg)' }}
+            >
               {platformName ? `${platformName} · 登录管理后台` : '登录管理后台'}
             </h1>
             <p className="mt-1.5 text-sm" style={{ color: 'var(--lf-fg-muted)' }}>
@@ -202,7 +224,11 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               }}
             >
               <div>
-                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--lf-fg-muted)' }} htmlFor="admin-login-email">
+                <label
+                  className="mb-1.5 block text-xs font-medium"
+                  style={{ color: 'var(--lf-fg-muted)' }}
+                  htmlFor="admin-login-email"
+                >
                   邮箱
                 </label>
                 <input
@@ -224,7 +250,11 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--lf-fg-muted)' }} htmlFor="admin-login-password">
+                <label
+                  className="mb-1.5 block text-xs font-medium"
+                  style={{ color: 'var(--lf-fg-muted)' }}
+                  htmlFor="admin-login-password"
+                >
                   密码
                 </label>
                 <input
@@ -247,9 +277,21 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               {sceneEnabled('admin_login') && (
                 <div className="flex flex-col gap-1">
                   <div ref={loginCaptcha.containerRef} />
-                  {!loginCaptcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}
-                  {loginCaptcha.ready && !loginCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>请点击完成上方验证</p>}
-                  {loginCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
+                  {!loginCaptcha.ready && (
+                    <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>
+                      验证码组件加载中…
+                    </p>
+                  )}
+                  {loginCaptcha.ready && !loginCaptcha.validateResult && (
+                    <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>
+                      请点击完成上方验证
+                    </p>
+                  )}
+                  {loginCaptcha.validateResult && (
+                    <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>
+                      验证已通过
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -307,14 +349,28 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
             {sceneEnabled('admin_forgot') && (
               <div className="flex flex-col gap-1">
                 <div ref={forgotCaptcha.containerRef} />
-                {!forgotCaptcha.ready && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>验证码组件加载中…</p>}
-                {forgotCaptcha.ready && !forgotCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>请点击完成上方验证</p>}
-                {forgotCaptcha.validateResult && <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>验证已通过</p>}
+                {!forgotCaptcha.ready && (
+                  <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>
+                    验证码组件加载中…
+                  </p>
+                )}
+                {forgotCaptcha.ready && !forgotCaptcha.validateResult && (
+                  <p className="text-xs" style={{ color: 'var(--lf-fg-muted)' }}>
+                    请点击完成上方验证
+                  </p>
+                )}
+                {forgotCaptcha.validateResult && (
+                  <p className="text-xs" style={{ color: 'var(--lf-accent)' }}>
+                    验证已通过
+                  </p>
+                )}
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setForgotOpen(false)}>取消</Button>
+            <Button variant="outline" onClick={() => setForgotOpen(false)}>
+              取消
+            </Button>
             <Button onClick={onForgotPassword} disabled={forgotLoading}>
               {forgotLoading ? '发送中…' : '发送重置链接'}
             </Button>
@@ -344,7 +400,11 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
-              style={{ backgroundColor: 'var(--lf-bg-elevated)', borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg)' }}
+              style={{
+                backgroundColor: 'var(--lf-bg-elevated)',
+                borderColor: 'var(--lf-border-bright)',
+                color: 'var(--lf-fg)',
+              }}
             />
             <input
               id="admin-reset-password-confirm"
@@ -356,11 +416,17 @@ export function LoginPage({ onAuthed, onBack, initialEmail }: LoginPageProps) {
               onChange={(e) => setConfirmPassword(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void onResetPassword()}
               className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--lf-accent)]"
-              style={{ backgroundColor: 'var(--lf-bg-elevated)', borderColor: 'var(--lf-border-bright)', color: 'var(--lf-fg)' }}
+              style={{
+                backgroundColor: 'var(--lf-bg-elevated)',
+                borderColor: 'var(--lf-border-bright)',
+                color: 'var(--lf-fg)',
+              }}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setResetOpen(false)} disabled={resetLoading}>取消</Button>
+            <Button variant="outline" onClick={() => setResetOpen(false)} disabled={resetLoading}>
+              取消
+            </Button>
             <Button onClick={() => void onResetPassword()} disabled={resetLoading || !resetToken}>
               {resetLoading ? '保存中…' : '重置密码'}
             </Button>

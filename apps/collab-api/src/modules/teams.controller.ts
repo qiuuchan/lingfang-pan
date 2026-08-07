@@ -5,7 +5,13 @@ import type { Request } from 'express';
 import { Public, requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import { TeamService } from './team.service';
-import { ConsumeBalanceDto, CreateInvitationDto, RedeemInvitationDto, UpdateTeamProfileDto, UpdateDefaultPoolDto } from './dto/teams.dto';
+import {
+  ConsumeBalanceDto,
+  CreateInvitationDto,
+  RedeemInvitationDto,
+  UpdateTeamProfileDto,
+  UpdateDefaultPoolDto,
+} from './dto/teams.dto';
 
 /**
  * 公开团队发现控制器（Top1「注册即孤儿」解法）。

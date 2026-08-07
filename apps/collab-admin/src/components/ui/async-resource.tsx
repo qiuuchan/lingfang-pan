@@ -39,7 +39,10 @@ export function AsyncResource({
       <div
         role="status"
         aria-live="polite"
-        className={cn('flex min-h-32 items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground', className)}
+        className={cn(
+          'flex min-h-32 items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground',
+          className
+        )}
       >
         <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
         正在加载
@@ -53,7 +56,7 @@ export function AsyncResource({
         role="alert"
         className={cn(
           'flex min-h-32 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-8 text-center',
-          className,
+          className
         )}
       >
         <AlertCircleIcon className="size-5 text-destructive" aria-hidden="true" />
@@ -76,7 +79,10 @@ export function AsyncResource({
     return (
       <div
         role="status"
-        className={cn('flex min-h-32 flex-col items-center justify-center gap-2 px-4 py-8 text-center text-sm text-muted-foreground', className)}
+        className={cn(
+          'flex min-h-32 flex-col items-center justify-center gap-2 px-4 py-8 text-center text-sm text-muted-foreground',
+          className
+        )}
       >
         <InboxIcon className="size-5 opacity-60" aria-hidden="true" />
         暂无数据

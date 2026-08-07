@@ -49,7 +49,10 @@ describe('validateStagedFiles', () => {
 describe('validateStagedCompleteness', () => {
   describe('python', () => {
     it('入口非 main.py 报错', () => {
-      const err = validateStagedCompleteness('python', 'run.py', [f('run.py'), f('requirements.txt')]);
+      const err = validateStagedCompleteness('python', 'run.py', [
+        f('run.py'),
+        f('requirements.txt'),
+      ]);
       expect(err).toContain('main.py');
     });
 
@@ -59,7 +62,9 @@ describe('validateStagedCompleteness', () => {
     });
 
     it('齐备返回 null', () => {
-      expect(validateStagedCompleteness('python', 'main.py', [f('main.py'), f('requirements.txt')])).toBeNull();
+      expect(
+        validateStagedCompleteness('python', 'main.py', [f('main.py'), f('requirements.txt')])
+      ).toBeNull();
     });
   });
 
@@ -75,7 +80,9 @@ describe('validateStagedCompleteness', () => {
     });
 
     it('齐备返回 null', () => {
-      expect(validateStagedCompleteness('nodejs', 'index.js', [f('index.js'), f('package.json')])).toBeNull();
+      expect(
+        validateStagedCompleteness('nodejs', 'index.js', [f('index.js'), f('package.json')])
+      ).toBeNull();
     });
   });
 
@@ -86,12 +93,16 @@ describe('validateStagedCompleteness', () => {
     });
 
     it('HTML 入口存在返回 null', () => {
-      expect(validateStagedCompleteness('client', 'ui/index.html', [f('ui/index.html')])).toBeNull();
+      expect(
+        validateStagedCompleteness('client', 'ui/index.html', [f('ui/index.html')])
+      ).toBeNull();
     });
   });
 
   it('cloud 保留声明的现有入口，不套用 client/node/python 命名约束', () => {
-    expect(validateStagedCompleteness('cloud', 'cloud/handler.ts', [f('cloud/handler.ts')])).toBeNull();
+    expect(
+      validateStagedCompleteness('cloud', 'cloud/handler.ts', [f('cloud/handler.ts')])
+    ).toBeNull();
   });
 
   it('基础校验失败优先返回（入口不在 files）', () => {
@@ -125,13 +136,12 @@ describe('withSyncedStagedManifest', () => {
   });
 
   it('已有旧 manifest.json 时只替换不重复', () => {
-    const synced = withSyncedStagedManifest(stagedDraft({
-      name: 'Updated Name',
-      files: [
-        f('manifest.json', '{"name":"old"}'),
-        f('ui/index.html', '<html></html>'),
-      ],
-    }));
+    const synced = withSyncedStagedManifest(
+      stagedDraft({
+        name: 'Updated Name',
+        files: [f('manifest.json', '{"name":"old"}'), f('ui/index.html', '<html></html>')],
+      })
+    );
 
     const manifests = synced.files.filter((file) => file.path === 'manifest.json');
     expect(manifests).toHaveLength(1);

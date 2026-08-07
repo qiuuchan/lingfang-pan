@@ -61,13 +61,20 @@ function listing(overrides: Record<string, unknown> = {}) {
 
 function setup(rows: ReturnType<typeof listing>[]) {
   const prisma = {
-    marketplaceCommerceState: { findUnique: vi.fn().mockResolvedValue({ writerMode: 'LEGACY', settlementV2ActivatedAt: null }) },
+    marketplaceCommerceState: {
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ writerMode: 'LEGACY', settlementV2ActivatedAt: null }),
+    },
     marketplaceDiscount: { findMany: vi.fn().mockResolvedValue([]) },
     marketplaceListing: {
       findMany: vi.fn().mockResolvedValue(rows),
-      findUnique: vi.fn().mockImplementation(({ where }: { where: { packageId: string } }) => (
-        rows.find((row) => row.packageId === where.packageId) ?? null
-      )),
+      findUnique: vi
+        .fn()
+        .mockImplementation(
+          ({ where }: { where: { packageId: string } }) =>
+            rows.find((row) => row.packageId === where.packageId) ?? null
+        ),
     },
   };
   return { prisma, service: new WebMarketplaceService(prisma as never) };
@@ -118,17 +125,23 @@ describe('WebMarketplaceService', () => {
         ...listing().currentRelease,
         id: IDS.releaseB,
         manifest: { ...listing().currentRelease.manifest, runtime_type: 'cloud' },
-        actionSurfaceManifest: [{
-          previewable: true,
-          cloud_capable: true,
-          execution_semantics: 'read_only',
-        }],
+        actionSurfaceManifest: [
+          {
+            previewable: true,
+            cloud_capable: true,
+            execution_semantics: 'read_only',
+          },
+        ],
       },
     });
     const { service } = setup([second, listing()]);
     const freeWeb = await service.catalog({ price: 'FREE', compatibility: 'WEB' });
     expect(freeWeb.items).toHaveLength(1);
-    expect(freeWeb.items[0]).toMatchObject({ package_id: IDS.packageB, category: 'AI', preview_mode: 'CLOUD_TRIAL' });
+    expect(freeWeb.items[0]).toMatchObject({
+      package_id: IDS.packageB,
+      category: 'AI',
+      preview_mode: 'CLOUD_TRIAL',
+    });
 
     const paged = await service.catalog({ sort: 'POPULAR', page: 1, page_size: 1 });
     expect(paged.total).toBe(2);
@@ -153,25 +166,66 @@ describe('WebMarketplaceService', () => {
   });
 
   it('projects only safe previewable cloud actions needed by the Web trial form', async () => {
-    const inputSchema = { type: 'object', properties: { prompt: { type: 'string', maxLength: 100 } }, required: ['prompt'], additionalProperties: false };
+    const inputSchema = {
+      type: 'object',
+      properties: { prompt: { type: 'string', maxLength: 100 } },
+      required: ['prompt'],
+      additionalProperties: false,
+    };
     const cloud = listing({
       currentRelease: {
         ...listing().currentRelease,
         manifest: { ...listing().currentRelease.manifest, runtime_type: 'cloud' },
         actionSurfaceManifest: [
-          { action_id: 'image.generate', name: '生成图片', description: '生成预览图片', action_contract_version: '1.0.0', action_surface_sha256: 'b'.repeat(64), input_schema: inputSchema, previewable: true, cloud_capable: true, execution_semantics: 'read_only', output_schema: { type: 'object', properties: {}, required: [], additionalProperties: false }, execution: { runtime_type: 'cloud', adapter: 'cloud' }, schema_version: 1, timeout_seconds: 30 },
-          { action_id: 'publish', name: '发布', description: '', action_contract_version: '1.0.0', action_surface_sha256: 'c'.repeat(64), input_schema: inputSchema, previewable: false, cloud_capable: true, execution_semantics: 'side_effect' },
+          {
+            action_id: 'image.generate',
+            name: '生成图片',
+            description: '生成预览图片',
+            action_contract_version: '1.0.0',
+            action_surface_sha256: 'b'.repeat(64),
+            input_schema: inputSchema,
+            previewable: true,
+            cloud_capable: true,
+            execution_semantics: 'read_only',
+            output_schema: {
+              type: 'object',
+              properties: {},
+              required: [],
+              additionalProperties: false,
+            },
+            execution: { runtime_type: 'cloud', adapter: 'cloud' },
+            schema_version: 1,
+            timeout_seconds: 30,
+          },
+          {
+            action_id: 'publish',
+            name: '发布',
+            description: '',
+            action_contract_version: '1.0.0',
+            action_surface_sha256: 'c'.repeat(64),
+            input_schema: inputSchema,
+            previewable: false,
+            cloud_capable: true,
+            execution_semantics: 'side_effect',
+          },
         ],
       },
     });
     const { service } = setup([cloud]);
     const detail = await service.detail(IDS.packageA);
-    expect(detail.preview_actions).toEqual([expect.objectContaining({ action_id: 'image.generate', input_schema: inputSchema })]);
+    expect(detail.preview_actions).toEqual([
+      expect.objectContaining({ action_id: 'image.generate', input_schema: inputSchema }),
+    ]);
     expect(JSON.stringify(detail)).not.toContain('output_schema');
   });
 
   it('fails closed when the listing release is withdrawn after a page was opened', async () => {
-    const { service } = setup([listing({ currentRelease: { ...listing().currentRelease, status: 'YANKED' } })]);
-    await expect(service.detail(IDS.packageA)).rejects.toMatchObject<AppError>({ status: 404, code: 'not_found' });
+    const { service } = setup([
+      listing({ currentRelease: { ...listing().currentRelease, status: 'YANKED' } }),
+    ]);
+    await expect(service.detail(IDS.packageA)).rejects.toMatchObject<AppError>({
+      status: 404,
+      code: 'not_found',
+    });
   });
 });

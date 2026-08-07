@@ -14,20 +14,28 @@ function plugin(overrides: Partial<LoadedPlugin>): LoadedPlugin {
 
 describe('resolvePluginRuntime', () => {
   it('优先使用 manifest 对象里的运行时，避免旧列表字段把脚本误判为 client', () => {
-    expect(resolvePluginRuntime(plugin({
-      runtime_type: 'client',
-      manifest: { runtime_type: 'python' },
-    }))).toBe('python');
+    expect(
+      resolvePluginRuntime(
+        plugin({
+          runtime_type: 'client',
+          manifest: { runtime_type: 'python' },
+        })
+      )
+    ).toBe('python');
   });
 
   it('files 中 manifest.json 可覆盖默认 runtime_type', () => {
-    expect(resolvePluginRuntime(plugin({
-      runtime_type: 'client',
-      files: [
-        { path: 'manifest.json', content: '{"runtime_type":"nodejs"}' },
-        { path: 'index.js', content: 'console.log("ok")' },
-      ],
-    }))).toBe('nodejs');
+    expect(
+      resolvePluginRuntime(
+        plugin({
+          runtime_type: 'client',
+          files: [
+            { path: 'manifest.json', content: '{"runtime_type":"nodejs"}' },
+            { path: 'index.js', content: 'console.log("ok")' },
+          ],
+        })
+      )
+    ).toBe('nodejs');
   });
 
   it('缺少 manifest 时回退列表字段，再缺失时为 client', () => {

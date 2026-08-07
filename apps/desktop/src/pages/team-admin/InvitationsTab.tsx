@@ -10,17 +10,24 @@ import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import type { InvitationCode } from '@/lib/types';
 import { formatTime } from '@/lib/types';
 
 export function InvitationsTab() {
-  const [invitations, reloadInvites, loadingInvites] = useTeamResource<{ invitations: InvitationCode[] }>(
-    '/api/teams/current/invitations',
-    (r) => r as { invitations: InvitationCode[] },
-    { invitations: [] },
-  );
+  const [invitations, reloadInvites, loadingInvites] = useTeamResource<{
+    invitations: InvitationCode[];
+  }>('/api/teams/current/invitations', (r) => r as { invitations: InvitationCode[] }, {
+    invitations: [],
+  });
   const [maxUses, setMaxUses] = useState('5');
   const [expiresAt, setExpiresAt] = useState('');
   const [newCode, setNewCode] = useState('');
@@ -34,9 +41,13 @@ export function InvitationsTab() {
       // 后端 team.service.ts:createInvitation 已校验合法未来日期，留空则不传（永不过期）。
       const body: { maxUses: number; expiresAt?: string } = { maxUses: Number(maxUses) || 1 };
       if (expiresAt) body.expiresAt = new Date(`${expiresAt}T00:00:00Z`).toISOString();
-      const result = await api<{ invitation: InvitationCode & { code?: string } }>('/api/teams/current/invitations', {
-        method: 'POST', body,
-      });
+      const result = await api<{ invitation: InvitationCode & { code?: string } }>(
+        '/api/teams/current/invitations',
+        {
+          method: 'POST',
+          body,
+        }
+      );
       setNewCode(result.invitation.code || '');
       setCopiedCode(false);
       await reloadInvites();
@@ -64,36 +75,62 @@ export function InvitationsTab() {
       <Card>
         <CardHeader>
           <CardTitle>生成邀请码</CardTitle>
-          <CardDescription>普通用户注册后凭有效邀请码加入团队。完整邀请码只在生成时显示一次。</CardDescription>
+          <CardDescription>
+            普通用户注册后凭有效邀请码加入团队。完整邀请码只在生成时显示一次。
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex max-w-lg flex-wrap items-end gap-2">
             <div className="space-y-1">
               <Label htmlFor="invite-max-uses">最大使用次数</Label>
-              <Input id="invite-max-uses" className="w-32" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder="最大使用次数" />
+              <Input
+                id="invite-max-uses"
+                className="w-32"
+                value={maxUses}
+                onChange={(e) => setMaxUses(e.target.value)}
+                placeholder="最大使用次数"
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="invite-expires-at">过期时间（可选）</Label>
-              <Input id="invite-expires-at" className="w-44" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+              <Input
+                id="invite-expires-at"
+                className="w-44"
+                type="date"
+                value={expiresAt}
+                onChange={(e) => setExpiresAt(e.target.value)}
+              />
             </div>
-            <LoadingButton loading={generating} onClick={createInvitation}>生成</LoadingButton>
+            <LoadingButton loading={generating} onClick={createInvitation}>
+              生成
+            </LoadingButton>
           </div>
           {newCode && (
             <div className="flex max-w-xl items-center gap-2 rounded-md border bg-muted/50 p-3">
               <code className="min-w-0 flex-1 break-all font-mono text-sm">{newCode}</code>
-              <Button type="button" variant="outline" size="sm" onClick={copyNewCode} aria-label="复制完整邀请码">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={copyNewCode}
+                aria-label="复制完整邀请码"
+              >
                 {copiedCode ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
               </Button>
             </div>
           )}
-          <p className="text-xs text-muted-foreground">下方历史列表仅展示前缀，不能用于加入团队。</p>
+          <p className="text-xs text-muted-foreground">
+            下方历史列表仅展示前缀，不能用于加入团队。
+          </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle>邀请码历史</CardTitle>
-          <LoadingButton variant="outline" loading={loadingInvites} onClick={reloadInvites}>刷新</LoadingButton>
+          <LoadingButton variant="outline" loading={loadingInvites} onClick={reloadInvites}>
+            刷新
+          </LoadingButton>
         </CardHeader>
         <CardContent>
           <Table>
@@ -115,23 +152,38 @@ export function InvitationsTab() {
                       {i.status === 'ACTIVE' ? '正常' : '已禁用'}
                     </Badge>
                   </TableCell>
-                  <TableCell>{i.usedCount}/{i.maxUses}</TableCell>
+                  <TableCell>
+                    {i.usedCount}/{i.maxUses}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{formatTime(i.createdAt)}</TableCell>
                   <TableCell className="text-right">
                     {i.status === 'ACTIVE' && (
-                      <Button variant="outline" size="sm" onClick={async () => {
-                        const ok = await runAction(
-                          () => api(`/api/teams/current/invitations/${i.id}/disable`, { method: 'PATCH' }),
-                          '邀请码已禁用',
-                        );
-                        if (ok) await reloadInvites();
-                      }}>禁用</Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          const ok = await runAction(
+                            () =>
+                              api(`/api/teams/current/invitations/${i.id}/disable`, {
+                                method: 'PATCH',
+                              }),
+                            '邀请码已禁用'
+                          );
+                          if (ok) await reloadInvites();
+                        }}
+                      >
+                        禁用
+                      </Button>
                     )}
                   </TableCell>
                 </TableRow>
               ))}
               {invitations.invitations.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">暂无邀请码</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    暂无邀请码
+                  </TableCell>
+                </TableRow>
               )}
             </TableBody>
           </Table>

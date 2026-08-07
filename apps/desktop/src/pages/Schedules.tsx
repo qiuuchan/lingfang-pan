@@ -192,18 +192,21 @@ export function Schedules() {
   return (
     <div className="flex h-full flex-col gap-4 p-6">
       {/* Banner：明示任务生命周期。 */}
-      <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+      <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-amber-900 dark:text-amber-200">
         <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
         <div>
           <p className="font-medium">定时任务仅在应用运行时触发</p>
-          <p className="mt-0.5 text-xs opacity-90">关闭窗口或退出应用将暂停所有任务；漏掉的任务不会自动补跑。</p>
+          <p className="mt-0.5 text-xs opacity-90">
+            关闭窗口或退出应用将暂停所有任务；漏掉的任务不会自动补跑。
+          </p>
         </div>
       </div>
 
       {/* 工具条。 */}
       <div className="flex items-center gap-2">
         <Button onClick={openCreate} size="sm" className="gap-1.5">
-          <PlusIcon className="size-4" />新建任务
+          <PlusIcon className="size-4" />
+          新建任务
         </Button>
         <Select value={filter} onValueChange={(v) => setFilter(v as Filter)}>
           <SelectTrigger className="h-9 w-40" size="sm">
@@ -225,7 +228,8 @@ export function Schedules() {
       <Card className="flex-1 overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ClockIcon className="size-5 text-primary" />本地定时任务
+            <ClockIcon className="size-5 text-primary" />
+            本地定时任务
           </CardTitle>
         </CardHeader>
         <CardContent className="overflow-y-auto">
@@ -352,22 +356,33 @@ function TaskCard({
           disabled={busy || task.status === 'COMPLETED'}
           className="gap-1.5"
         >
-          <PlayIcon className="size-3.5" />立即运行
+          <PlayIcon className="size-3.5" />
+          立即运行
         </Button>
         {task.status === 'ACTIVE' ? (
           <Button variant="outline" size="sm" onClick={onPause} disabled={busy} className="gap-1.5">
-            <PauseIcon className="size-3.5" />暂停
+            <PauseIcon className="size-3.5" />
+            暂停
           </Button>
         ) : task.status === 'PAUSED' ? (
-          <Button variant="outline" size="sm" onClick={onResume} disabled={busy} className="gap-1.5">
-            <PlayIcon className="size-3.5" />恢复
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onResume}
+            disabled={busy}
+            className="gap-1.5"
+          >
+            <PlayIcon className="size-3.5" />
+            恢复
           </Button>
         ) : null}
         <Button variant="ghost" size="sm" onClick={onEdit} disabled={busy} className="gap-1.5">
-          <PencilIcon className="size-3.5" />编辑
+          <PencilIcon className="size-3.5" />
+          编辑
         </Button>
         <Button variant="ghost" size="sm" onClick={onHistory} className="gap-1.5">
-          <HistoryIcon className="size-3.5" />历史
+          <HistoryIcon className="size-3.5" />
+          历史
         </Button>
         <Button
           variant="ghost"
@@ -376,7 +391,8 @@ function TaskCard({
           disabled={busy}
           className="ml-auto gap-1.5 text-destructive hover:text-destructive"
         >
-          <TrashIcon className="size-3.5" />删除
+          <TrashIcon className="size-3.5" />
+          删除
         </Button>
       </div>
     </div>
@@ -393,7 +409,9 @@ function RunItem({ run }: { run: LocalScheduleRun }) {
           <RunStatusBadge status={run.status} />
           <span className="text-muted-foreground">{formatTime(run.started_at)}</span>
           {run.duration_ms != null && (
-            <span className="text-muted-foreground">耗时 {(run.duration_ms / 1000).toFixed(1)}s</span>
+            <span className="text-muted-foreground">
+              耗时 {(run.duration_ms / 1000).toFixed(1)}s
+            </span>
           )}
         </div>
         {run.skip_reason && <p className="mt-1 text-muted-foreground">原因：{run.skip_reason}</p>}
@@ -417,10 +435,13 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       </div>
       <div>
         <p className="text-sm font-medium">还没有定时任务</p>
-        <p className="mt-1 text-xs text-muted-foreground">创建一个任务，让 Agent 或插件在指定时间自动运行</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          创建一个任务，让 Agent 或插件在指定时间自动运行
+        </p>
       </div>
       <Button onClick={onCreate} size="sm" className="gap-1.5">
-        <PlusIcon className="size-4" />新建任务
+        <PlusIcon className="size-4" />
+        新建任务
       </Button>
     </div>
   );
@@ -437,7 +458,13 @@ function StatusBadge({ status }: { status: LocalScheduleStatus }) {
           ? 'outline'
           : 'destructive';
   const text =
-    status === 'ACTIVE' ? '激活' : status === 'PAUSED' ? '暂停' : status === 'COMPLETED' ? '已完成' : '已删除';
+    status === 'ACTIVE'
+      ? '激活'
+      : status === 'PAUSED'
+        ? '暂停'
+        : status === 'COMPLETED'
+          ? '已完成'
+          : '已删除';
   return <Badge variant={variant}>{text}</Badge>;
 }
 
@@ -445,20 +472,23 @@ function PayloadTypeBadge({ payload }: { payload: LocalTaskPayload }) {
   if (payload.type === 'AGENT_PROMPT') {
     return (
       <Badge variant="outline" className="gap-1">
-        <BotIcon className="size-3" />Agent
+        <BotIcon className="size-3" />
+        Agent
       </Badge>
     );
   }
   if (payload.type === 'PLUGIN_ACTION') {
     return (
       <Badge variant="outline" className="gap-1">
-        <PackageIcon className="size-3" />插件
+        <PackageIcon className="size-3" />
+        插件
       </Badge>
     );
   }
   return (
     <Badge variant="outline" className="gap-1">
-      <BellIcon className="size-3" />通知
+      <BellIcon className="size-3" />
+      通知
     </Badge>
   );
 }
@@ -466,8 +496,8 @@ function PayloadTypeBadge({ payload }: { payload: LocalTaskPayload }) {
 function RunStatusBadge({ status }: { status: LocalScheduleRun['status'] }) {
   const map: Record<LocalScheduleRun['status'], { text: string; className: string }> = {
     RUNNING: { text: '运行中', className: 'text-blue-600' },
-    SUCCESS: { text: '成功', className: 'text-green-600' },
-    FAILED: { text: '失败', className: 'text-red-600' },
+    SUCCESS: { text: '成功', className: 'text-success' },
+    FAILED: { text: '失败', className: 'text-destructive' },
     TIMEOUT: { text: '超时', className: 'text-orange-600' },
     SKIPPED: { text: '跳过', className: 'text-muted-foreground' },
   };
@@ -476,10 +506,14 @@ function RunStatusBadge({ status }: { status: LocalScheduleRun['status'] }) {
 }
 
 function RunStatusIcon({ status }: { status: LocalScheduleRun['status'] }) {
-  if (status === 'SUCCESS') return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-green-500" />;
-  if (status === 'FAILED') return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-red-500" />;
-  if (status === 'TIMEOUT') return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-orange-500" />;
-  if (status === 'RUNNING') return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-blue-500" />;
+  if (status === 'SUCCESS')
+    return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-success" />;
+  if (status === 'FAILED')
+    return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-destructive" />;
+  if (status === 'TIMEOUT')
+    return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-orange-500" />;
+  if (status === 'RUNNING')
+    return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-blue-500" />;
   return <div className="mt-0.5 size-2 shrink-0 rounded-full bg-muted-foreground" />;
 }
 

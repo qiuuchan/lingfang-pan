@@ -2,7 +2,11 @@
 // 插件不直连网络、不持 LLM key——所有越权操作经宿主注入的桥 __lingfangInvoke，
 // 由壳的 capability 网关三重校验后执行。
 
-import { ArtifactRefV1, type ArtifactRefV1 as ArtifactRefV1Type, type CapabilityKind } from '@lingfang/contract';
+import {
+  ArtifactRefV1,
+  type ArtifactRefV1 as ArtifactRefV1Type,
+  type CapabilityKind,
+} from '@lingfang/contract';
 
 export {
   SharedRecoveryError,
@@ -43,19 +47,51 @@ type VideoGenerateInput = {
   video_mime_type?: string;
   callback_url?: string;
 };
-type VideoGenerateResult = { task_id: string; call_log_id: string; charged: boolean; credits: number };
+type VideoGenerateResult = {
+  task_id: string;
+  call_log_id: string;
+  charged: boolean;
+  credits: number;
+};
 type PluginFile = { path: string; content: string };
 type PluginUploadInput = { manifest: unknown; files: PluginFile[]; priceCents?: number };
 type PluginSubmitMarketplaceInput = { pluginId: string; priceCents?: number };
 type ActionCallOptions = { idempotencyKey?: string; signal?: AbortSignal };
 type ArtifactCreateInput = { dataBase64: string; mediaType: string };
-type ArtifactMaterialized = { dataBase64: string; mediaType: string; sizeBytes: number; sha256: string };
+type ArtifactMaterialized = {
+  dataBase64: string;
+  mediaType: string;
+  sizeBytes: number;
+  sha256: string;
+};
 type SharedRevision = string;
-type SharedValue<T = unknown> = { key: string; value: T; schema_version: number; revision: SharedRevision };
-type SharedSetInput<T = unknown> = { namespace: string; key: string; value: T; schema_version: number };
-type SharedCompareAndSetInput<T = unknown> = SharedSetInput<T> & { expected_revision: SharedRevision };
-type SharedListInput = { namespace: string; page_cursor?: string; limit?: number; relist_token?: string };
-type SharedListResult<T = unknown> = { values: SharedValue<T>[]; next_page_cursor: string | null; snapshot_cursor: SharedRevision; relist_token: string };
+type SharedValue<T = unknown> = {
+  key: string;
+  value: T;
+  schema_version: number;
+  revision: SharedRevision;
+};
+type SharedSetInput<T = unknown> = {
+  namespace: string;
+  key: string;
+  value: T;
+  schema_version: number;
+};
+type SharedCompareAndSetInput<T = unknown> = SharedSetInput<T> & {
+  expected_revision: SharedRevision;
+};
+type SharedListInput = {
+  namespace: string;
+  page_cursor?: string;
+  limit?: number;
+  relist_token?: string;
+};
+type SharedListResult<T = unknown> = {
+  values: SharedValue<T>[];
+  next_page_cursor: string | null;
+  snapshot_cursor: SharedRevision;
+  relist_token: string;
+};
 
 export type PluginAiErrorInit = {
   code?: string;
@@ -110,52 +146,64 @@ const AI_BRIDGE_TIMEOUT_MS = 180_000;
 const ACTION_BRIDGE_TIMEOUT_MS = 24 * 60 * 60 * 1000 + 30_000;
 
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function pluginAiError(error: unknown, fallback: PluginAiErrorInit & { message?: string } = {}): PluginAiError {
+function pluginAiError(
+  error: unknown,
+  fallback: PluginAiErrorInit & { message?: string } = {}
+): PluginAiError {
   if (error instanceof PluginAiError) return error;
   const source = record(error);
   const nested = record(source.error);
-  const message = nonEmptyString(nested.message)
-    ?? nonEmptyString(source.message)
-    ?? (error instanceof Error ? nonEmptyString(error.message) : undefined)
-    ?? fallback.message
-    ?? '平台 AI 调用失败';
+  const message =
+    nonEmptyString(nested.message) ??
+    nonEmptyString(source.message) ??
+    (error instanceof Error ? nonEmptyString(error.message) : undefined) ??
+    fallback.message ??
+    '平台 AI 调用失败';
   const statusValue = nested.status ?? source.status ?? fallback.status;
   return new PluginAiError(message, {
-    code: nonEmptyString(nested.code)
-      ?? nonEmptyString(source.code)
-      ?? (nonEmptyString(source.message) ? nonEmptyString(source.error) : undefined)
-      ?? fallback.code,
+    code:
+      nonEmptyString(nested.code) ??
+      nonEmptyString(source.code) ??
+      (nonEmptyString(source.message) ? nonEmptyString(source.error) : undefined) ??
+      fallback.code,
     status: typeof statusValue === 'number' ? statusValue : undefined,
-    requestId: nonEmptyString(nested.requestId) ?? nonEmptyString(source.requestId) ?? fallback.requestId,
+    requestId:
+      nonEmptyString(nested.requestId) ?? nonEmptyString(source.requestId) ?? fallback.requestId,
     cause: error,
   });
 }
 
-function pluginActionError(error: unknown, fallback: PluginActionErrorInit & { message?: string } = {}): PluginActionError {
+function pluginActionError(
+  error: unknown,
+  fallback: PluginActionErrorInit & { message?: string } = {}
+): PluginActionError {
   if (error instanceof PluginActionError) return error;
   const source = record(error);
   const nested = record(source.error);
-  const rawMessage = nonEmptyString(nested.message)
-    ?? nonEmptyString(source.message)
-    ?? (error instanceof Error ? nonEmptyString(error.message) : undefined);
+  const rawMessage =
+    nonEmptyString(nested.message) ??
+    nonEmptyString(source.message) ??
+    (error instanceof Error ? nonEmptyString(error.message) : undefined);
   const bridgeUnavailable = rawMessage?.startsWith('capability bridge 未注入:') === true;
   const bridgeTimedOut = rawMessage?.startsWith('capability 调用超时:') === true;
   const statusValue = nested.status ?? source.status ?? fallback.status;
   return new PluginActionError(rawMessage ?? fallback.message ?? '插件 Action 调用失败', {
-    code: nonEmptyString(nested.code)
-      ?? nonEmptyString(source.code)
-      ?? (bridgeUnavailable ? 'action_runtime_unavailable' : undefined)
-      ?? (bridgeTimedOut ? 'action_timeout' : undefined)
-      ?? fallback.code,
+    code:
+      nonEmptyString(nested.code) ??
+      nonEmptyString(source.code) ??
+      (bridgeUnavailable ? 'action_runtime_unavailable' : undefined) ??
+      (bridgeTimedOut ? 'action_timeout' : undefined) ??
+      fallback.code,
     status: typeof statusValue === 'number' ? statusValue : undefined,
-    requestId: nonEmptyString(nested.requestId) ?? nonEmptyString(source.requestId) ?? fallback.requestId,
+    requestId:
+      nonEmptyString(nested.requestId) ?? nonEmptyString(source.requestId) ?? fallback.requestId,
     cause: error,
   });
 }
@@ -172,8 +220,15 @@ function platformModel(value: unknown): 'fast' | 'premium' {
 function localhostBridgeBase(value: string): string {
   try {
     const url = new URL(value);
-    const loopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
-    if (url.protocol !== 'http:' || !loopback || url.username || url.password || (url.pathname !== '/' && url.pathname !== '')) {
+    const loopback =
+      url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
+    if (
+      url.protocol !== 'http:' ||
+      !loopback ||
+      url.username ||
+      url.password ||
+      (url.pathname !== '/' && url.pathname !== '')
+    ) {
       throw new Error('invalid bridge URL');
     }
     return url.toString().replace(/\/$/, '');
@@ -223,7 +278,9 @@ function assertSerializable(value: unknown, label: string): void {
     // 但对循环引用会抛 TypeError）。这里主要防循环引用；函数字段已在 sanitize 阶段过滤。
     JSON.stringify(value);
   } catch (e) {
-    throw new Error(`${label} 包含不可序列化的值（如循环引用），无法传递给宿主：${(e as Error).message}`);
+    throw new Error(
+      `${label} 包含不可序列化的值（如循环引用），无法传递给宿主：${(e as Error).message}`
+    );
   }
 }
 
@@ -257,9 +314,13 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
   if (!baseValue || !token || typeof g.fetch !== 'function') return null;
   const base = localhostBridgeBase(baseValue);
   const input = record(args);
-  const body = capability === 'llm.chat' || capability === 'image.generate' || capability === 'image.edit' || capability === 'video.generate'
-    ? { ...input, model: platformModel(input.model) }
-    : input;
+  const body =
+    capability === 'llm.chat' ||
+    capability === 'image.generate' ||
+    capability === 'image.edit' ||
+    capability === 'video.generate'
+      ? { ...input, model: platformModel(input.model) }
+      : input;
   const res = await g.fetch(`${base}${path}`, {
     method: 'POST',
     headers: {
@@ -268,14 +329,15 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
     },
     body: JSON.stringify(body),
   });
-  const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     const fallback = {
       status: res.status,
       requestId: res.headers.get('x-request-id') ?? undefined,
       message: `平台调用失败：HTTP ${res.status}`,
     };
-    if (capability.startsWith('actions.') || capability.startsWith('artifacts.')) throw pluginActionError(data, fallback);
+    if (capability.startsWith('actions.') || capability.startsWith('artifacts.'))
+      throw pluginActionError(data, fallback);
     throw pluginAiError(data, fallback);
   }
   if (capability === 'llm.chat') {
@@ -290,16 +352,22 @@ async function invokeScriptBridge<T>(capability: string, args: unknown): Promise
 
 // 桥调用默认超时（与桌面 plugins-runtime.ts 的 RUNTIME_BRIDGE_TIMEOUT_MS 对齐）。
 // 宿主可能未注入带超时的桥（旧版或未升级的容器），SDK 自身加一层超时兜底。
-async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}, timeoutMs = DEFAULT_BRIDGE_TIMEOUT_MS): Promise<T> {
-  const bridge = (globalThis as unknown as { __lingfangInvoke?: (c: string, a: unknown) => Promise<unknown> })
-    .__lingfangInvoke;
-  const operation = typeof bridge === 'function'
-    ? bridge(capability, args) as Promise<T>
-    : (async () => {
-        const scriptResult = await invokeScriptBridge<T>(capability, args);
-        if (scriptResult !== null) return scriptResult;
-        throw new Error(`capability bridge 未注入: ${capability}`);
-      })();
+async function invoke<T>(
+  capability: CapabilityKind | string,
+  args: unknown = {},
+  timeoutMs = DEFAULT_BRIDGE_TIMEOUT_MS
+): Promise<T> {
+  const bridge = (
+    globalThis as unknown as { __lingfangInvoke?: (c: string, a: unknown) => Promise<unknown> }
+  ).__lingfangInvoke;
+  const operation =
+    typeof bridge === 'function'
+      ? (bridge(capability, args) as Promise<T>)
+      : (async () => {
+          const scriptResult = await invokeScriptBridge<T>(capability, args);
+          if (scriptResult !== null) return scriptResult;
+          throw new Error(`capability bridge 未注入: ${capability}`);
+        })();
   // SDK-04：用 Promise.race 加超时兜底，避免桥返回的 Promise 永不 settle。
   if (timeoutMs <= 0) return operation;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -313,47 +381,75 @@ async function invoke<T>(capability: CapabilityKind | string, args: unknown = {}
   }
 }
 
-async function invokeAi<T>(capability: 'llm.chat' | 'image.generate' | 'image.edit' | 'video.generate', input: Record<string, unknown>): Promise<T> {
+async function invokeAi<T>(
+  capability: 'llm.chat' | 'image.generate' | 'image.edit' | 'video.generate',
+  input: Record<string, unknown>
+): Promise<T> {
   const args = { ...input, model: platformModel(input.model) };
   try {
     return await invoke<T>(capability, args, AI_BRIDGE_TIMEOUT_MS);
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('capability 调用超时:');
-    const bridgeUnavailable = error instanceof Error && error.message.startsWith('capability bridge 未注入:');
-    throw pluginAiError(error, timedOut
-      ? { code: 'request_timeout', status: 408, message: `平台 AI 调用超时: ${capability}` }
-      : bridgeUnavailable
-        ? { code: 'bridge_unavailable', status: 503 }
-        : { code: 'plugin_ai_error' });
+    const bridgeUnavailable =
+      error instanceof Error && error.message.startsWith('capability bridge 未注入:');
+    throw pluginAiError(
+      error,
+      timedOut
+        ? { code: 'request_timeout', status: 408, message: `平台 AI 调用超时: ${capability}` }
+        : bridgeUnavailable
+          ? { code: 'bridge_unavailable', status: 503 }
+          : { code: 'plugin_ai_error' }
+    );
   }
 }
 
 async function invokeAction<TOutput>(
   dependencyId: string,
   input: Record<string, unknown>,
-  options: ActionCallOptions = {},
+  options: ActionCallOptions = {}
 ): Promise<TOutput> {
   const dependency = dependencyId.trim();
-  if (!dependency) throw new PluginActionError('dependencyId 不能为空', { code: 'action_dependency_denied', status: 400 });
+  if (!dependency)
+    throw new PluginActionError('dependencyId 不能为空', {
+      code: 'action_dependency_denied',
+      status: 400,
+    });
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new PluginActionError('Action input 必须是 JSON 对象', { code: 'action_input_invalid', status: 400 });
+    throw new PluginActionError('Action input 必须是 JSON 对象', {
+      code: 'action_input_invalid',
+      status: 400,
+    });
   }
-  if (options.idempotencyKey !== undefined && (!options.idempotencyKey.trim() || options.idempotencyKey.length > 256)) {
-    throw new PluginActionError('idempotencyKey 必须是 1 到 256 个字符', { code: 'action_idempotency_conflict', status: 400 });
+  if (
+    options.idempotencyKey !== undefined &&
+    (!options.idempotencyKey.trim() || options.idempotencyKey.length > 256)
+  ) {
+    throw new PluginActionError('idempotencyKey 必须是 1 到 256 个字符', {
+      code: 'action_idempotency_conflict',
+      status: 400,
+    });
   }
   assertSerializable(input, 'actions.call input');
-  if (options.signal?.aborted) throw new PluginActionError('Action 调用已取消', { code: 'action_cancelled' });
+  if (options.signal?.aborted)
+    throw new PluginActionError('Action 调用已取消', { code: 'action_cancelled' });
 
-  const operation = invoke<TOutput>('actions.call', {
-    dependency_id: dependency,
-    input,
-    ...(options.idempotencyKey === undefined ? {} : { idempotency_key: options.idempotencyKey }),
-  }, ACTION_BRIDGE_TIMEOUT_MS);
+  const operation = invoke<TOutput>(
+    'actions.call',
+    {
+      dependency_id: dependency,
+      input,
+      ...(options.idempotencyKey === undefined ? {} : { idempotency_key: options.idempotencyKey }),
+    },
+    ACTION_BRIDGE_TIMEOUT_MS
+  );
   let abortHandler: (() => void) | undefined;
-  const abort = options.signal && new Promise<never>((_, reject) => {
-    abortHandler = () => reject(new PluginActionError('Action 调用已取消', { code: 'action_cancelled' }));
-    options.signal?.addEventListener('abort', abortHandler, { once: true });
-  });
+  const abort =
+    options.signal &&
+    new Promise<never>((_, reject) => {
+      abortHandler = () =>
+        reject(new PluginActionError('Action 调用已取消', { code: 'action_cancelled' }));
+      options.signal?.addEventListener('abort', abortHandler, { once: true });
+    });
   try {
     return await (abort ? Promise.race([operation, abort]) : operation);
   } catch (error) {
@@ -365,18 +461,32 @@ async function invokeAction<TOutput>(
 
 function artifactRef(value: unknown): ArtifactRefV1Type {
   const parsed = ArtifactRefV1.safeParse(value);
-  if (!parsed.success) throw new PluginActionError('ArtifactRef 无效', { code: 'action_artifact_invalid', status: 400 });
+  if (!parsed.success)
+    throw new PluginActionError('ArtifactRef 无效', {
+      code: 'action_artifact_invalid',
+      status: 400,
+    });
   return parsed.data;
 }
 
-function artifactCreateInput(input: ArtifactCreateInput): { data_base64: string; media_type: string } {
+function artifactCreateInput(input: ArtifactCreateInput): {
+  data_base64: string;
+  media_type: string;
+} {
   const mediaType = input?.mediaType?.trim();
   if (!mediaType || mediaType.length > 256 || /[\u0000-\u001f\u007f]/.test(mediaType)) {
     throw new PluginActionError('mediaType 无效', { code: 'action_artifact_invalid', status: 400 });
   }
   const dataBase64 = input?.dataBase64?.trim();
-  if (!dataBase64 || dataBase64.length > 400 * 1024 * 1024 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(dataBase64)) {
-    throw new PluginActionError('dataBase64 必须是有效且受限的 base64', { code: 'action_artifact_invalid', status: 400 });
+  if (
+    !dataBase64 ||
+    dataBase64.length > 400 * 1024 * 1024 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(dataBase64)
+  ) {
+    throw new PluginActionError('dataBase64 必须是有效且受限的 base64', {
+      code: 'action_artifact_invalid',
+      status: 400,
+    });
   }
   return { data_base64: dataBase64, media_type: mediaType };
 }
@@ -390,27 +500,44 @@ export const sdk = {
     call: <TOutput = Record<string, unknown>>(
       dependencyId: string,
       input: Record<string, unknown>,
-      options?: ActionCallOptions,
+      options?: ActionCallOptions
     ) => invokeAction<TOutput>(dependencyId, input, options),
   },
   artifacts: {
     /** Create an invocation-scoped artifact from bytes; storage keys stay host-owned. */
-    create: (input: ArtifactCreateInput) => invoke<ArtifactRefV1Type>('artifacts.create', artifactCreateInput(input), ACTION_BRIDGE_TIMEOUT_MS),
+    create: (input: ArtifactCreateInput) =>
+      invoke<ArtifactRefV1Type>(
+        'artifacts.create',
+        artifactCreateInput(input),
+        ACTION_BRIDGE_TIMEOUT_MS
+      ),
     /** Materialize only an ArtifactRef granted to the current invocation. */
-    materialize: (ref: ArtifactRefV1Type) => invoke<ArtifactMaterialized>('artifacts.materialize', { artifact_ref: artifactRef(ref) }, ACTION_BRIDGE_TIMEOUT_MS),
+    materialize: (ref: ArtifactRefV1Type) =>
+      invoke<ArtifactMaterialized>(
+        'artifacts.materialize',
+        { artifact_ref: artifactRef(ref) },
+        ACTION_BRIDGE_TIMEOUT_MS
+      ),
     /** Import a preview ArtifactRef through the host's explicit trust boundary. */
-    import: (ref: ArtifactRefV1Type) => invoke<ArtifactRefV1Type>('artifacts.import', { artifact_ref: artifactRef(ref) }, ACTION_BRIDGE_TIMEOUT_MS),
+    import: (ref: ArtifactRefV1Type) =>
+      invoke<ArtifactRefV1Type>(
+        'artifacts.import',
+        { artifact_ref: artifactRef(ref) },
+        ACTION_BRIDGE_TIMEOUT_MS
+      ),
   },
   fs: {
     pick: (opts?: { accept?: string[] }) => invoke<string[]>('fs.pick', opts ?? {}),
     // SDK-01 修复：fs.read 实际返回 {content}（文件）/ {entries}（目录）对象，而非裸字符串。
     // 原契约 Promise<string> 与 Rust capability.rs 返回结构不一致，按契约编写的插件会拿到 [object Object]。
-    read: (path: string) => invoke<{ content: string } | { entries: string[] }>('fs.read', { path }),
+    read: (path: string) =>
+      invoke<{ content: string } | { entries: string[] }>('fs.read', { path }),
     write: (path: string, content: string) => invoke<void>('fs.write', { path, content }),
   },
   net: {
     // SDK-05 修复：init 白名单过滤为可序列化字段，丢弃 AbortSignal/函数等。
-    fetch: (url: string, init?: unknown) => invoke<unknown>('net.fetch', { url, init: sanitizeFetchInit(init) }),
+    fetch: (url: string, init?: unknown) =>
+      invoke<unknown>('net.fetch', { url, init: sanitizeFetchInit(init) }),
   },
   clipboard: {
     readText: () => invoke<string>('clipboard', { op: 'read' }),
@@ -425,7 +552,8 @@ export const sdk = {
     },
   },
   shared: {
-    get: <T = unknown>(namespace: string, key: string) => invoke<SharedValue<T> | null>('shared.get', { namespace, key }),
+    get: <T = unknown>(namespace: string, key: string) =>
+      invoke<SharedValue<T> | null>('shared.get', { namespace, key }),
     set: <T = unknown>(input: SharedSetInput<T>) => {
       assertSerializable(input.value, 'shared.set value');
       return invoke<SharedValue<T>>('shared.set', input);
@@ -434,8 +562,10 @@ export const sdk = {
       assertSerializable(input.value, 'shared.compareAndSet value');
       return invoke<SharedValue<T>>('shared.compare_and_set', input);
     },
-    delete: (namespace: string, key: string, expected_revision: SharedRevision) => invoke<{ revision: SharedRevision }>('shared.delete', { namespace, key, expected_revision }),
-    list: <T = unknown>(input: SharedListInput) => invoke<SharedListResult<T>>('shared.list', input),
+    delete: (namespace: string, key: string, expected_revision: SharedRevision) =>
+      invoke<{ revision: SharedRevision }>('shared.delete', { namespace, key, expected_revision }),
+    list: <T = unknown>(input: SharedListInput) =>
+      invoke<SharedListResult<T>>('shared.list', input),
   },
   system: {
     // SDK-08 修复：补齐 system.info 分组，原 invoke 泄漏（可 sdk.invoke('system.info')）现收敛为正式方法。
@@ -466,7 +596,8 @@ export const sdk = {
   },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),
-    submitMarketplace: (input: PluginSubmitMarketplaceInput) => invoke<unknown>('plugin.submitMarketplace', input),
+    submitMarketplace: (input: PluginSubmitMarketplaceInput) =>
+      invoke<unknown>('plugin.submitMarketplace', input),
   },
   ui: {
     // SDK-05 修复：content 预检可序列化（防 DOM 节点 / 循环引用）。

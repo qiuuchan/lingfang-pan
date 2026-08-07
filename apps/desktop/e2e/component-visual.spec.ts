@@ -14,7 +14,10 @@ test.describe('ToolCallCard 组件状态', () => {
   });
 
   test('running 态显示 spinner + Running 标签', async ({ page }) => {
-    const card = page.locator('text=WebSearch').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const card = page
+      .locator('text=WebSearch')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")]')
+      .first();
     await expect(card).toBeVisible();
     // 状态徽标是 Running。
     await expect(card.getByText('Running')).toBeVisible();
@@ -23,7 +26,10 @@ test.describe('ToolCallCard 组件状态', () => {
   });
 
   test('ok 态显示对勾 + Done 标签 + 文件路径摘要', async ({ page }) => {
-    const card = page.locator('text=Read').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const card = page
+      .locator('text=Read')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")]')
+      .first();
     await expect(card).toBeVisible();
     await expect(card.getByText('Done')).toBeVisible();
     // 摘要显示文件路径。
@@ -31,16 +37,25 @@ test.describe('ToolCallCard 组件状态', () => {
   });
 
   test('error 态显示叉号 + Failed 标签 + 红色样式', async ({ page }) => {
-    const card = page.locator('text=Edit').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const card = page
+      .locator('text=Edit')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")]')
+      .first();
     await expect(card).toBeVisible();
     await expect(card.getByText('Failed')).toBeVisible();
     // error 徽标含 text-destructive 类（红色）。徽标是唯一同时含 Failed 文本 + 状态色的 span。
-    const badge = card.locator('span', { hasText: 'Failed' }).filter({ hasText: /Failed/ }).last();
+    const badge = card
+      .locator('span', { hasText: 'Failed' })
+      .filter({ hasText: /Failed/ })
+      .last();
     await expect(badge).toHaveClass(/text-destructive/);
   });
 
   test('点击卡片展开 Input/Output 面板', async ({ page }) => {
-    const card = page.locator('text=Read').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const card = page
+      .locator('text=Read')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")]')
+      .first();
     // 初始收起：无 Input/Output 标签。
     await expect(card.getByText('Input')).toHaveCount(0);
     // 点击展开。
@@ -52,7 +67,10 @@ test.describe('ToolCallCard 组件状态', () => {
   });
 
   test('再点击收起面板', async ({ page }) => {
-    const card = page.locator('text=Read').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const card = page
+      .locator('text=Read')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")]')
+      .first();
     await card.getByRole('button').click();
     await expect(card.getByText('Input')).toBeVisible();
     await card.getByRole('button').click();
@@ -60,14 +78,19 @@ test.describe('ToolCallCard 组件状态', () => {
   });
 
   test('TodoWrite 摘要显示完成数', async ({ page }) => {
-    const card = page.locator('text=Todo').locator('xpath=ancestor::div[contains(@class,"rounded-lg")]').first();
+    const card = page
+      .locator('text=Todo')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-lg")]')
+      .first();
     await expect(card).toBeVisible();
     // 3 项 todo 里 1 完成（初始化插件 completed）。
     await expect(card.getByText('1/3 完成')).toBeVisible();
   });
 
   test('三态卡片整组截图', async ({ page }) => {
-    const section = page.locator('h2:has-text("三种状态")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("三种状态")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section).toHaveScreenshot('toolcard-states.png', { maxDiffPixelRatio: 0.05 });
   });
 });
@@ -81,7 +104,10 @@ test.describe('TodoPanel 组件', () => {
   // 辅助：定位第 N 个 TodoPanel 容器（harness 挂了「进行中」「已完成」两个）。
   // 新样式用 rounded-xl + 底部折叠抽屉风格。
   const panelAt = (page: import('@playwright/test').Page, idx: number) =>
-    page.locator('text=任务清单').locator('xpath=ancestor::div[contains(@class,"rounded-xl")]').nth(idx);
+    page
+      .locator('text=任务清单')
+      .locator('xpath=ancestor::div[contains(@class,"rounded-xl")]')
+      .nth(idx);
 
   test('折叠态显示标题 + 完成数 + 百分比', async ({ page }) => {
     const panel = panelAt(page, 0);
@@ -140,14 +166,18 @@ test.describe('TodoPanel 组件', () => {
   });
 
   test('折叠态面板截图', async ({ page }) => {
-    const section = page.locator('h2:has-text("进行中")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("进行中")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section).toHaveScreenshot('todo-panel-collapsed.png', { maxDiffPixelRatio: 0.05 });
   });
 
   test('展开态面板截图', async ({ page }) => {
     const panel = panelAt(page, 0);
     await panel.getByRole('button').click(); // 展开
-    const section = page.locator('h2:has-text("进行中")').locator('xpath=following-sibling::div[1]');
+    const section = page
+      .locator('h2:has-text("进行中")')
+      .locator('xpath=following-sibling::div[1]');
     await expect(section).toHaveScreenshot('todo-panel-expanded.png', { maxDiffPixelRatio: 0.05 });
   });
 });

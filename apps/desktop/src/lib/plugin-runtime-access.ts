@@ -11,7 +11,10 @@ export function requiresRegistryRuntimeAccess(origin: InstalledPluginOrigin): bo
   return origin === 'team' || origin === 'marketplace';
 }
 
-export async function checkRuntimeAccess(packageId: string, release: RuntimeAccessRelease): Promise<void> {
+export async function checkRuntimeAccess(
+  packageId: string,
+  release: RuntimeAccessRelease
+): Promise<void> {
   await api(`/api/plugin-packages/${packageId}/runtime-access`, {
     method: 'POST',
     body: { releaseId: release.releaseId, sha256: release.sha256 },

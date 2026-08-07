@@ -1,0 +1,23 @@
+# Build / generated / deps
+**/dist/**
+**/node_modules/**
+**/target/**
+**/coverage/**
+**/out/**
+**/.next/**
+
+# Generated sources
+**/*.generated.ts
+**/*.generated.tsx
+**/prisma/migrations/**
+
+# Lockfiles (never reformat)
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Knowledge base / prose docs — excluded from the formatter to avoid churn on the
+# spec/template corpus and prose wrapping. Code + configs remain formatted.
+.trellis/
+**/*.md
+docs/
