@@ -23,7 +23,12 @@ pnpm -r test           # 运行各包单元测试
 所有变更必须通过 `scripts/ci.sh`（CI 自动执行），包含：
 
 1. 依赖安装（frozen lockfile）
-2. Prisma client 生成 + 请求路径敏感模式扫描
+2. Prisma client 生成 + 两项静态安全扫描：
+   - 请求处理路径禁止出现 `$queryRawUnsafe`（仅离线迁移脚本与 `*.spec.ts` 例外）
+   - `.github/workflows/*.yml` 的 `run:` 块内禁止出现 `${{ }}` 插值
+     （Actions 对 `${{ }}` 是执行前文本替换，可被引号闭合注入命令并读走同 step 的
+     secrets；插值一律写进 `env:` 段，`run:` 里用 `"$VAR"`。`env:`/`with:`/`if:`
+     里的插值是安全用法，不拦）
 3. `eslint` 静态检查（`--max-warnings=0`）
 4. `prettier --check` 格式检查
 5. `pnpm -r typecheck`：全部 8 个带 typecheck 的工作区包

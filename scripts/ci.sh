@@ -21,8 +21,9 @@
 #  verify-all.mjs     串联以上三个脚本的一键全量自检（需运行中的 API）。
 #  _smoke-helpers.mjs 冒烟脚本共享工具（幂等确保 demo 租户/用户）。
 #  enable-settlement-v2.mjs  把市场结算切到 SETTLEMENT_V2（购买扣费前提，幂等）。
-#  ci.sh              【单元门禁】install→prisma generate→lint→format:check→
-#                     全工作区 typecheck→全工作区 vitest→全工作区生产构建。
+#  ci.sh              【单元门禁】install→prisma generate→静态安全扫描→lint→
+#                     format:check→全工作区 typecheck→全工作区 vitest→全工作区生产构建。
+#                     静态安全扫描含：请求路径 $queryRawUnsafe、workflow run: 块内 ${{ }} 插值。
 #                     无需外部服务（单测 Mock Prisma；integration spec 按 env 门控跳过）。
 #  smoke-ci.sh        【集成门禁】全新库上启动真实 API 并跑 verify-all。
 #  .github/workflows/ci.yml     调用 ci.sh，每次 push/PR 跑（快速）。
@@ -58,6 +59,42 @@ if grep -rn --include='*.ts' '$queryRawUnsafe' apps/collab-api/src \
    | grep -v 'migrate-plugin-registry-v4-legacy\.ts' \
    | grep -v '\.spec\.ts'; then
   echo '错误：发现 $queryRawUnsafe 出现在非迁移脚本（仅离线迁移 migrate-plugin-registry-v4-legacy.ts 与测试 *.spec.ts 允许）'; exit 1
+fi
+
+echo "==> scan: unsafe \${{ }} interpolation inside workflow run: blocks"
+# GitHub Actions 在把 run: 交给 shell 之前，对 ${{ }} 做的是纯文本替换。
+# 只要插值内容能被外部影响（workflow_call inputs、issue/PR 标题、分支名……），
+# 攻击者就能用引号闭合注入任意命令，并读走同一 step env 里的 secrets。
+# desktop-sign.yml 就出过这个洞：run: 里插了 ${{ inputs.artifact-path }}，
+# 而同 step env 挂着 MINISIGN_PASSWORD —— 足以把签名私钥口令外传。
+# 正确写法：所有 ${{ }} 只出现在 env: 段，run: 里一律用普通 shell 变量 "$VAR"。
+# 注意：本扫描只看 run: 块；env: / with: / if: 里的 ${{ }} 是安全用法，不拦。
+workflow_injection="$(
+  find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null \
+    | xargs -0 -r awk '
+        # run: | 或 run: > —— 块标量，记下 run 关键字的缩进作为块边界基准
+        /^[[:space:]]*-?[[:space:]]*run:[[:space:]]*[|>]/ {
+          match($0, /[^[:space:]]/); runind = RSTART; inrun = 1; next
+        }
+        # run: xxx —— 单行形式，本行自身就是脚本内容
+        /^[[:space:]]*-?[[:space:]]*run:[[:space:]]*[^|>[:space:]]/ {
+          inrun = 0
+          if ($0 ~ /\$\{\{/) print FILENAME ":" FNR ":" $0
+          next
+        }
+        inrun {
+          if ($0 ~ /^[[:space:]]*$/) next          # 空行仍属块内
+          match($0, /[^[:space:]]/)
+          if (RSTART <= runind) { inrun = 0; next } # 缩进退回 => 块结束
+          if ($0 ~ /\$\{\{/) print FILENAME ":" FNR ":" $0
+        }
+      ' 2>/dev/null || true
+)"
+if [ -n "$workflow_injection" ]; then
+  echo "$workflow_injection"
+  echo '错误：workflow 的 run: 块内出现 ${{ }} 插值（GitHub Actions 脚本注入风险）。'
+  echo '      请把插值移到该 step/job 的 env: 段，run: 里改用 "$VAR" 引用。'
+  exit 1
 fi
 
 echo "==> [3/7] lint (eslint, error-level baseline)"
