@@ -146,7 +146,7 @@ export function CloudAutomationTab() {
   }
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+      <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
         Cloud
         定时任务已停止新建和执行。历史配置仅保留查看与迁移参考，请改用桌面端本地定时任务调用插件或工作流。
       </div>

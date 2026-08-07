@@ -62,7 +62,7 @@ const TYPE_META: Record<string, TypeMeta> = {
   plugin_delisted: {
     icon: PackageXIcon,
     iconClass: 'text-warning',
-    iconBg: 'bg-amber-500/10',
+    iconBg: 'bg-warning/10',
     label: '插件下架',
   },
   application_approved: {

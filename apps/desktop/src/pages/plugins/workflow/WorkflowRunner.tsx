@@ -92,7 +92,7 @@ function CompatibilityCard({
   disabled?: boolean;
 }) {
   return (
-    <Card size="sm" className={selected ? 'ring-2 ring-primary' : available ? 'ring-emerald-500/30' : undefined}>
+    <Card size="sm" className={selected ? 'ring-2 ring-primary' : available ? 'ring-success/30' : undefined}>
       <CardHeader><CardTitle className="flex items-center gap-2">{icon}{title}</CardTitle></CardHeader>
       <CardContent className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">

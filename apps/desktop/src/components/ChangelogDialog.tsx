@@ -101,7 +101,7 @@ export function ChangelogDialog({
 
         {/* 降级横幅 */}
         {status === 'ready' && degraded && degradedMessage && (
-          <div className="shrink-0 border-b bg-amber-500/10 px-5 py-2 text-xs text-warning">
+          <div className="shrink-0 border-b bg-warning/10 px-5 py-2 text-xs text-warning">
             {degradedMessage}
           </div>
         )}

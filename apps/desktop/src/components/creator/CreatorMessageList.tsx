@@ -202,7 +202,7 @@ export function CreatorMessageList(props: CreatorMessageListProps) {
           ))}
 
           {publishedName && (
-            <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-success/8 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex items-start gap-3 border-l-2 border-success bg-success/8 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
               <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-success" />
               <div>
                 <div className="font-medium text-foreground">草稿“{publishedName}”已保存到本地</div>

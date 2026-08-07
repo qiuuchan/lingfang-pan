@@ -184,7 +184,7 @@ export function PluginManifestDialog({
                       sig.verified
                         ? 'border-success/40 text-success'
                         : sig.signed
-                          ? 'border-rose-500/40 text-rose-600 dark:text-rose-400'
+                          ? 'border-destructive/40 text-destructive'
                           : 'text-muted-foreground'
                     }
                     title={sig.reason}

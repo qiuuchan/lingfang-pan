@@ -20,7 +20,7 @@ const LEVEL_STYLE: Record<
   error: { icon: AlertTriangleIcon, className: 'border-destructive/30 bg-destructive/5' },
   warning: {
     icon: AlertTriangleIcon,
-    className: 'border-amber-200 bg-warning/10 dark:border-amber-900/40 dark:bg-amber-950/30',
+    className: 'border-warning/40 bg-warning/10',
   },
   info: { icon: InfoIcon, className: 'border-border bg-muted/60' },
 };

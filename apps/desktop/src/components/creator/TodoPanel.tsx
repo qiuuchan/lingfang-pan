@@ -18,7 +18,7 @@ import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 
 const PRIORITY_STYLE: Record<TodoItem['priority'], string> = {
   high: 'border-destructive/40 bg-destructive/10 text-destructive',
-  medium: 'border-warning/40 bg-amber-500/10 text-warning',
+  medium: 'border-warning/40 bg-warning/10 text-warning',
   low: 'border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400',
 };
 const PRIORITY_LABEL: Record<TodoItem['priority'], string> = {

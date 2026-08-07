@@ -111,7 +111,7 @@ ai换装版本批量版.py
 .workbuddy/
 .codebuddy/settings.local.json
 plugins/ai-video-mixer
-plugins/
+/plugins/
 # 插件制品（.lfplugin）是构建产物，经管理后台「版本发布」分发，不入 git
 *.lfplugin
 .pi-subagents/

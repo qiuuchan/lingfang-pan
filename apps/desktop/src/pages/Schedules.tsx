@@ -192,7 +192,7 @@ export function Schedules() {
   return (
     <div className="flex h-full flex-col gap-4 p-6">
       {/* Banner：明示任务生命周期。 */}
-      <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+      <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
         <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
         <div>
           <p className="font-medium">定时任务仅在应用运行时触发</p>

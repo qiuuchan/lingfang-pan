@@ -482,7 +482,7 @@ export function ScriptPreviewPanel({
             <div className="space-y-3">
               <div className="space-y-2 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'}`} />
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-warning' : 'bg-destructive'}`} />
                   <span className={`font-medium ${persistentRun.clean ? 'text-warning' : 'text-destructive'}`}>
                     {persistentRun.clean ? '插件进程已结束' : '插件进程异常退出'}
                   </span>
@@ -671,7 +671,7 @@ function StartProgressView({
             <div key={s} className="flex items-center gap-2.5 text-sm">
               <span className="flex size-5 shrink-0 items-center justify-center">
                 {done ? (
-                  <span className="flex size-5 items-center justify-center rounded-full bg-success text-emerald-50">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-success text-white">
                     <CheckIcon className="size-3" />
                   </span>
                 ) : active ? (

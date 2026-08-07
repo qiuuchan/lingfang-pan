@@ -56,7 +56,7 @@ export function CloseBehaviorDialog({
         </DialogHeader>
         {/* 本地定时任务告警：有 ACTIVE 任务时提示。直接退出会暂停所有任务（不补跑）。 */}
         {activeSchedules > 0 && (
-          <div className="rounded-md border border-warning/30 bg-warning/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+          <div className="rounded-md border border-warning/30 bg-warning/10 p-2.5 text-xs text-warning">
             ⚠️ 有 {activeSchedules}{' '}
             个定时任务正在运行。最小化到托盘可保持任务触发；直接退出将暂停所有任务，且漏掉的不会补跑。
           </div>
