@@ -26,11 +26,11 @@ Required sections:
 
 ## Real CLI Matrix
 
-| Tool | Binary | Version | Auth ready | Model | Probe | Generate | Upload | Run | Cleanup |
-|---|---|---|---|---|---|---|---|---|---|
-| Claude Code | required | required | required | required | required | required | required | required | required |
-| Codex | required | required | required | required | required | required | required | required | required |
-| OpenCode | required | required | required | required | required | required | required | required | required |
+| Tool        | Binary   | Version  | Auth ready | Model    | Probe    | Generate | Upload   | Run      | Cleanup  |
+| ----------- | -------- | -------- | ---------- | -------- | -------- | -------- | -------- | -------- | -------- |
+| Claude Code | required | required | required   | required | required | required | required | required | required |
+| Codex       | required | required | required   | required | required | required | required | required | required |
+| OpenCode    | required | required | required   | required | required | required | required | required | required |
 
 ## Result Policy
 

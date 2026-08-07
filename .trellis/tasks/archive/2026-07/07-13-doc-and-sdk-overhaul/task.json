@@ -18,11 +18,7 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-13-plugin-dev-sdk",
-    "07-13-docs-rewrite",
-    "07-13-readme-refresh"
-  ],
+  "children": ["07-13-plugin-dev-sdk", "07-13-docs-rewrite", "07-13-readme-refresh"],
   "parent": null,
   "relatedFiles": [],
   "notes": "",

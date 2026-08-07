@@ -18,7 +18,9 @@
 
 - [ ] 2.1 `governance/api.ts` 新增：
   ```ts
-  export function loadPendingReleases(signal: AbortSignal): Promise<{ items: PendingReleaseItem[] }>
+  export function loadPendingReleases(
+    signal: AbortSignal
+  ): Promise<{ items: PendingReleaseItem[] }>;
   ```
   调 `GET /api/admin/plugin-releases/review-pending`。
 - [ ] 2.2 补 `PendingReleaseItem` 类型（package + release + fileManifest，复用既有 `PluginPackageSummary`/`PluginReleaseCore`）。

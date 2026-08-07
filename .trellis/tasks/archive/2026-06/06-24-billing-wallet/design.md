@@ -47,12 +47,12 @@
 
 ## 1. 技术边界
 
-| 维度 | 子任务 A（本设计） | 子任务 B（前端 relay 渲染） |
-|------|------|------|
-| 范围 | 后端扣费正确性、计费口径、R1/R2/R3 后端 + 桌面端「团队钱包/团队空间」页面、余额账户归属迁移 | desktop 端 relay 流式渲染、对话 UI |
-| relay 调用链 | 管 reserve/reconcile/refund/日志 + `/api/relay/*` 服务端 | 管前端如何发起/渲染 SSE |
-| 交叉点 | `relay.service.executeRelay` 的计费时机；流式中断时服务端「退款 vs 计费」语义 | 流式中断时前端如何提示用户 |
-| 不碰 | 前端 SSE 解析与渲染 | 服务端扣费逻辑、schema、账户归属 |
+| 维度         | 子任务 A（本设计）                                                                          | 子任务 B（前端 relay 渲染）        |
+| ------------ | ------------------------------------------------------------------------------------------- | ---------------------------------- |
+| 范围         | 后端扣费正确性、计费口径、R1/R2/R3 后端 + 桌面端「团队钱包/团队空间」页面、余额账户归属迁移 | desktop 端 relay 流式渲染、对话 UI |
+| relay 调用链 | 管 reserve/reconcile/refund/日志 + `/api/relay/*` 服务端                                    | 管前端如何发起/渲染 SSE            |
+| 交叉点       | `relay.service.executeRelay` 的计费时机；流式中断时服务端「退款 vs 计费」语义               | 流式中断时前端如何提示用户         |
+| 不碰         | 前端 SSE 解析与渲染                                                                         | 服务端扣费逻辑、schema、账户归属   |
 
 **安全红线**：本任务核心是「计费正确性 + 鉴权 + 资金账户归属正确」。任何改动必须保证：①失败不净扣费；②成功只扣一次；③扣费金额 = `min(realCredits, cap)`（cap>0）或实算（cap=0，且不透支）；④`/api/relay/*` 双鉴权与 scope 校验不被削弱；⑤所有余额变动有流水（`CreditLedger`/`WalletTransaction`/`BalanceLedger`）+（admin 路径）审计；⑥**余额账户改团队共享后，扣款/加款的原子条件扣款语义（防透支、防并发重复）不被削弱**。
 
@@ -61,15 +61,18 @@
 ## 2. R1 · 版本选择下放渠道
 
 ### 现状（核实结论）
+
 版本已由渠道决定：`relay.service.wireToTier`（34-38）把 `model` 哨兵 `fast`/`premium` 映射成 tier；`ChannelRouterService.selectCandidates`（channel.service）按 `kind+tier` 选「渠道×模型」候选轮询。BillingTab 已只读。
 
 ### 改动方案（轻量）
+
 - **R1-a 清理陈旧注释 / 死代码确认**：确认 `schema.prisma:749-753` 仅注释、无 model；保留或精简注释（不删表，因为本就没有表）。不产生迁移。
 - **R1-b API Key scope 中的 `tier:*` 决策（已定：不启用强校验）**：当前 `SCOPE_OPTIONS` 含 `tier:fast`/`tier:premium`，但 `relay.service.assertScope`（181-184）只校验 `chat`/`image`/`action`，**从不校验 `tier:*`**。即 `tier:*` scope 当前是**展示性标签**（前端可勾、后端不据其限版）。
   - **最终结论**：保留 UI、**不新增 `assertScope` 的 tier 维度强校验**（启用会使未勾选对应 tier 的存量 key 被 403，属鉴权收紧的破坏性变更）。在 `assertScope` 上方补注释说明「`tier:*` 不参与鉴权」。
 - **R1-c 前端默认勾选**：`BillingTab` 创建 key 默认 `['chat','tier:fast']`，与 R1-b 决策一致即可，无需改。
 
 ### API 兼容性
+
 relay 仍接受 `fast`/`premium` 哨兵（`wireToTier`、`listModels`）。无端点签名变化。**前端无感。**
 
 ---
@@ -77,6 +80,7 @@ relay 仍接受 `fast`/`premium` 哨兵（`wireToTier`、`listModels`）。无�
 ## 3. R3 · 修复「未成功对话仍扣费」（核心）
 
 ### 计费状态机现状（核实 `executeRelay` 201-315）
+
 ```
 建 pendingLog(status=reserve)
  └ reserve(cap)            # cap>0: 原子 DEBIT；cap=0: no-op
@@ -101,6 +105,7 @@ relay 仍接受 `fast`/`premium` 哨兵（`wireToTier`、`listModels`）。无�
 ```
 
 ### 确认的不变量（已正确，加测试锁定）
+
 - `refund`（170-184）幂等：仅当存在该 `callLogId` 的 `reserve` 流水才退；cap=0 直接 return。**双重退款不会发生**（reserve 流水只 1 条；退一次后再退仍会写第二条 refund CREDIT——**注意：refund 本身不检查"是否已 refund 过"，只检查"是否 reserve 过"**）。
   - ⚠️ **潜在 Bug E（新发现，需修）**：`refund` 的幂等条件是「有 reserve 流水」，**不是「未退过」**。当前调用点保证 refund 每条调用链至多走一次（各分支 `return`/`throw` 后不再触达另一 refund），所以现状安全。但这是**靠调用方纪律维持的脆弱不变量**。加固方案：`refund` 改为「有 reserve 流水 **且** 无 refund/llm_consume 终结流水」才退，使其对重复调用真正幂等。**推荐纳入修复**，并加单测。
 - `reconcile`（125-167）：cap>0 时「全额退预扣 + 实扣 min(real,cap)」，cap=0 时「条件扣款防透支，余额不足扣到 0」。数学自洽（spec 已覆盖 real<cap、real>cap）。
@@ -109,6 +114,7 @@ relay 仍接受 `fast`/`premium` 哨兵（`wireToTier`、`listModels`）。无�
 
 **R3-1（核心，必做）：refund 真正幂等。**
 `credit.service.refund` 增加终结流水检查：
+
 ```
 reserved = findFirst(source:'reserve', callLogId)
 if (!reserved) return
@@ -116,6 +122,7 @@ settled = findFirst({ callLogId, source: { in: ['refund','llm_consume'] } })  //
 if (settled) return   // 已终结，幂等
 ... 退款
 ```
+
 这样即使未来调用链出现「reconcile 后又 refund」或「refund 被调两次」，余额也不会被错误加回。**这是防"失败仍扣费"反面（防"成功却被退款 → 平台漏计费"）的关键加固。**
 
 **R3-2（核心，必做）：成功路径 `finalizeLog` 失败的可观测性。**
@@ -125,18 +132,20 @@ if (settled) return   // 已终结，幂等
 281-285 流式发头后失败统一 `refund + upstream_error + credits=0`。明确接受「流式中断一律不计费（利于用户）」为产品取舍，**写入验收**。不改逻辑，但加注释 + 单测固化。
 
 **R3-4（必做）：补集成级单测**（`relay.service.spec.ts`，新建或扩充）。Mock `forwarders` + `CreditService` + `ChannelRouterService` + Prisma，断言**每种失败路径下 `reconcile` 未被调用、`refund` 恰调一次（cap>0）/零次（cap=0）、最终团队余额净变化 == 0**：
-| 场景 | cap | 期望 |
-|------|-----|------|
-| 余额不足 | >0 | reserve 抛 402；无 refund（钱没扣）；余额不变 |
-| 无渠道 | >0 | refund 1 次；余额回滚到调用前 |
-| 全候选无定价 | >0 | refund 1 次；no_pricing 503 |
-| 非流式上游全失败 | >0 | 故障转移耗尽 → refund 1 次；upstream_error 502 |
-| 流式发头后断流 | >0 | refund 1 次；upstream_error；credits=0 |
-| 成功 | >0 | reconcile 1 次；charged=min(real,cap)；无 refund |
-| 成功 | =0 | reconcile 条件扣款；无 refund |
-| cap=0 上游失败 | =0 | refund no-op；余额不变（本就没扣） |
+
+| 场景             | cap | 期望                                             |
+| ---------------- | --- | ------------------------------------------------ |
+| 余额不足         | >0  | reserve 抛 402；无 refund（钱没扣）；余额不变    |
+| 无渠道           | >0  | refund 1 次；余额回滚到调用前                    |
+| 全候选无定价     | >0  | refund 1 次；no_pricing 503                      |
+| 非流式上游全失败 | >0  | 故障转移耗尽 → refund 1 次；upstream_error 502   |
+| 流式发头后断流   | >0  | refund 1 次；upstream_error；credits=0           |
+| 成功             | >0  | reconcile 1 次；charged=min(real,cap)；无 refund |
+| 成功             | =0  | reconcile 条件扣款；无 refund                    |
+| cap=0 上游失败   | =0  | refund no-op；余额不变（本就没扣）               |
 
 ### API 兼容性
+
 端点签名不变；错误码语义不变（`insufficient_balance`/`no_channel_available`/`pricing_not_configured`/`upstream_llm_error`）。客户端无感。
 
 ---
@@ -144,6 +153,7 @@ if (settled) return   // 已终结，幂等
 ## 4. R2 · 删团队空间 + 整合「团队钱包」（余额账户改团队共享，废弃个人钱包）
 
 > **最终决策（用户拍板）**：插件市场购买的「余额」也改为**团队级共享**，**不再保留个人钱包**——个人 `Wallet` 账户取消。
+>
 > - 余额（市场购买）→ 团队级共享，**废弃个人 `Wallet`/`/api/wallet`/前台钱包页**。
 > - 灵石（AI 计费）→ 团队级共享（已是）。
 > - 「团队钱包」页同页管理这两类**团队**账户，团队成员共用。
@@ -153,11 +163,11 @@ if (settled) return   // 已终结，幂等
 
 ### 4.1 现状账户拓扑（核实结论）
 
-| 账户 | 表 | 归属 | 用途 | 流水 | 谁在用 | 最终去向 |
-|------|----|----|------|------|--------|--------|
-| 余额(个人) | `Wallet` | `userId @unique` | 市场买卖/注册赠送 | `WalletTransaction(userId)` | `EconomyService.purchase/getWallet`、前台 `Wallet.tsx`(`/api/wallet`) | **废弃**（余额迁团队、页面删、端点下线） |
-| 余额(团队) | `Team.balanceCents` + `BalanceLedger` | `teamId` | admin 治理余额 | `BalanceLedger(teamId)` | `admin.service`(建团/调额/统计)、`team.service`(balance/ledger/consume)、collab-admin | **承接市场购买余额**（团队共享购买账户） |
-| 灵石 | `TeamCredit` + `CreditLedger` | `teamId` | AI 计费 | `CreditLedger(teamId)` | relay、`UserCreditsController`(`/api/teams/current/credits`)、BillingTab | 不变（已团队级） |
+| 账户       | 表                                    | 归属             | 用途              | 流水                        | 谁在用                                                                                | 最终去向                                 |
+| ---------- | ------------------------------------- | ---------------- | ----------------- | --------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 余额(个人) | `Wallet`                              | `userId @unique` | 市场买卖/注册赠送 | `WalletTransaction(userId)` | `EconomyService.purchase/getWallet`、前台 `Wallet.tsx`(`/api/wallet`)                 | **废弃**（余额迁团队、页面删、端点下线） |
+| 余额(团队) | `Team.balanceCents` + `BalanceLedger` | `teamId`         | admin 治理余额    | `BalanceLedger(teamId)`     | `admin.service`(建团/调额/统计)、`team.service`(balance/ledger/consume)、collab-admin | **承接市场购买余额**（团队共享购买账户） |
+| 灵石       | `TeamCredit` + `CreditLedger`         | `teamId`         | AI 计费           | `CreditLedger(teamId)`      | relay、`UserCreditsController`(`/api/teams/current/credits`)、BillingTab              | 不变（已团队级）                         |
 
 **关键观察**：市场买卖当前**只走个人 `Wallet`**；团队已有现成的团队级余额账户（`Team.balanceCents`+`BalanceLedger`），但没接市场。最终形态 = **市场购买改打团队余额账户 + 彻底废弃个人 Wallet**。
 
@@ -230,6 +240,7 @@ if (settled) return   // 已终结，幂等
 - **`users-view.tsx:287` 的 `detail.wallet.balanceCents`**：个人 Wallet 废弃 + 清零后该字段恒为 0、含义消失。配套改 collab-admin（`admin.service.ts:236` 的 `wallet:{balanceCents}` 与 `users-view` 展示）**放本任务之后单独处理**（不在本任务两文件范围）。迁移期 admin 端个人钱包显示 0（历史在 `WalletTransaction`），属已知、可接受。
 
 ### API 兼容性
+
 - 复用既有团队端点，新「团队钱包」页无需新端点。
 - `GET /api/wallet`（个人余额）**下线**；`POST /api/wallet/purchase` **路径保留、语义改为团队余额扣款**（前端调用点不变，最小改动）。
 - `/api/relay/*` 不受影响。
@@ -238,18 +249,18 @@ if (settled) return   // 已终结，幂等
 
 ## 5. 风险点
 
-| # | 风险 | 等级 | 缓解 |
-|---|------|------|------|
-| R-1 | R3 改 `refund` 幂等条件，若逻辑写错可能「该退不退」→ 失败仍扣费（恶化） | 高 | 单测覆盖 8 场景；保持「有 reserve 且未终结才退」语义；先加测后改码 |
-| R-2 | R3 改 reconcile/refund 时机引入双重扣费 | 高 | 不改既有成功路径计费数学，仅加幂等护栏 + 可观测性；spec 锁定 |
-| R-3 | R2 删 TeamHome 漏改引用导致 desktop 构建失败 | 中 | grep 全量引用（App/view-preload/AvatarMenu/types）；删后 `pnpm build` |
-| R-4 | R1-b 若误开 `tier:*` 强校验，旧 API Key 被 403 | 高 | 已定**不启用**强校验 |
-| R-5 | **R2 余额改团队共享：市场扣款从个人切团队，若条件扣款语义写错 → 透支/并发重复扣** | 极高 | 复用 `Team.updateMany(balanceCents:{gte})` 原子条件扣款；事务内写流水；单测覆盖余额不足/并发 |
-| R-6 | 个人余额清零作废可能引用户不满（余额消失） | 中 | 已定存量清零（团队从 0 起，admin 充值）；`pg_dump` 备份可还原；上线前运营告知/公告 |
-| R-7 | **R2 卖家收益进卖家当前/主团队，多团队卖家归属可能非预期** | 中 | 已定归 `ensureCurrentTeam(sellerId)`；审计 metadata 记收益团队便于追溯 |
-| R-8 | 流式中断「不计费」被滥用（白嫖 token） | 低-中 | 接受为 MVP 取舍，写入验收；后续可按已收 usage 部分计费 |
-| R-9 | `finalizeLog` 失败导致对账黑洞 | 中 | R3-2 加 warn 日志 + 保证至少落终态 |
-| R-10 | 废弃个人 Wallet 后 collab-admin `users-view.wallet.balanceCents` 恒 0 | 中 | 配套改 collab-admin（放本任务之后单独处理）；迁移期显示历史 0 可接受 |
+| #    | 风险                                                                              | 等级  | 缓解                                                                                         |
+| ---- | --------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------- |
+| R-1  | R3 改 `refund` 幂等条件，若逻辑写错可能「该退不退」→ 失败仍扣费（恶化）           | 高    | 单测覆盖 8 场景；保持「有 reserve 且未终结才退」语义；先加测后改码                           |
+| R-2  | R3 改 reconcile/refund 时机引入双重扣费                                           | 高    | 不改既有成功路径计费数学，仅加幂等护栏 + 可观测性；spec 锁定                                 |
+| R-3  | R2 删 TeamHome 漏改引用导致 desktop 构建失败                                      | 中    | grep 全量引用（App/view-preload/AvatarMenu/types）；删后 `pnpm build`                        |
+| R-4  | R1-b 若误开 `tier:*` 强校验，旧 API Key 被 403                                    | 高    | 已定**不启用**强校验                                                                         |
+| R-5  | **R2 余额改团队共享：市场扣款从个人切团队，若条件扣款语义写错 → 透支/并发重复扣** | 极高  | 复用 `Team.updateMany(balanceCents:{gte})` 原子条件扣款；事务内写流水；单测覆盖余额不足/并发 |
+| R-6  | 个人余额清零作废可能引用户不满（余额消失）                                        | 中    | 已定存量清零（团队从 0 起，admin 充值）；`pg_dump` 备份可还原；上线前运营告知/公告           |
+| R-7  | **R2 卖家收益进卖家当前/主团队，多团队卖家归属可能非预期**                        | 中    | 已定归 `ensureCurrentTeam(sellerId)`；审计 metadata 记收益团队便于追溯                       |
+| R-8  | 流式中断「不计费」被滥用（白嫖 token）                                            | 低-中 | 接受为 MVP 取舍，写入验收；后续可按已收 usage 部分计费                                       |
+| R-9  | `finalizeLog` 失败导致对账黑洞                                                    | 中    | R3-2 加 warn 日志 + 保证至少落终态                                                           |
+| R-10 | 废弃个人 Wallet 后 collab-admin `users-view.wallet.balanceCents` 恒 0             | 中    | 配套改 collab-admin（放本任务之后单独处理）；迁移期显示历史 0 可接受                         |
 
 ---
 
@@ -267,16 +278,16 @@ if (settled) return   // 已终结，幂等
 
 > 用户已确认全部迁移/账户决策。以下为最终结论，本设计据此收口，**不再有「待确认」项**。
 
-| # | 决策项 | 最终结论 |
-|---|--------|---------|
-| 1 | 余额账户载体 | **W2：复用现有 `Team.balanceCents`+`BalanceLedger`**，不新建 `TeamWallet` 表 |
-| 2 | 存量个人余额处理 | **不迁移、直接清零作废**。无资金搬运脚本；团队余额从 0 起，靠 collab-admin 后台充值。仍 `pg_dump` 备份 + 清零可回滚 |
-| 3 | 卖家收益归属 | 进**卖家所属团队** `Team.balanceCents` + `BalanceLedger(CREDIT, plugin_sale)`；多团队卖家归**当前/主团队**（`ensureCurrentTeam(sellerId)`） |
-| 4 | 注册赠送 ¥10 | **取消**（团队灵石已有 `signup_bonus`，避免重复）。删 `ensureWallet` 赠送逻辑 |
-| 5 | `/api/wallet` 端点 | `GET /api/wallet` **下线**；`POST /api/wallet/purchase` **路径保留、语义改为团队余额扣款**（最小改动，前端调用点不变） |
-| 6 | `DROP TABLE Wallet/WalletTransaction` | **本任务不删，仅清零**；观察期（≥1 发布周期）后另议 |
-| 7 | collab-admin 个人钱包展示适配 | **放本任务之后单独处理**（不在本任务两文件范围） |
-| 8 | R1 API Key `tier:*` scope 强校验 | **不启用**（保持现状：`tier:*` 为展示性标签，relay 不据其限版） |
+| #   | 决策项                                | 最终结论                                                                                                                                    |
+| --- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 余额账户载体                          | **W2：复用现有 `Team.balanceCents`+`BalanceLedger`**，不新建 `TeamWallet` 表                                                                |
+| 2   | 存量个人余额处理                      | **不迁移、直接清零作废**。无资金搬运脚本；团队余额从 0 起，靠 collab-admin 后台充值。仍 `pg_dump` 备份 + 清零可回滚                         |
+| 3   | 卖家收益归属                          | 进**卖家所属团队** `Team.balanceCents` + `BalanceLedger(CREDIT, plugin_sale)`；多团队卖家归**当前/主团队**（`ensureCurrentTeam(sellerId)`） |
+| 4   | 注册赠送 ¥10                          | **取消**（团队灵石已有 `signup_bonus`，避免重复）。删 `ensureWallet` 赠送逻辑                                                               |
+| 5   | `/api/wallet` 端点                    | `GET /api/wallet` **下线**；`POST /api/wallet/purchase` **路径保留、语义改为团队余额扣款**（最小改动，前端调用点不变）                      |
+| 6   | `DROP TABLE Wallet/WalletTransaction` | **本任务不删，仅清零**；观察期（≥1 发布周期）后另议                                                                                         |
+| 7   | collab-admin 个人钱包展示适配         | **放本任务之后单独处理**（不在本任务两文件范围）                                                                                            |
+| 8   | R1 API Key `tier:*` scope 强校验      | **不启用**（保持现状：`tier:*` 为展示性标签，relay 不据其限版）                                                                             |
 
 R1（版本下放清理）、R3（扣费幂等 + finalizeLog 容错）维持原结论不变。
 

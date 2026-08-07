@@ -31,16 +31,16 @@
 
 ## 二、Gitee API 契约（已交叉验证）
 
-| 项 | 值 | 来源 |
-|---|---|---|
-| 列表端点 | `GET https://gitee.com/api/v5/repos/{owner}/{repo}/releases` | gitee-php/gitee-sdk RepositoriesApi.md |
-| 鉴权 | `Authorization: Bearer <token>`（**禁 query**） | 安全专家核验 app.module.ts redact 只覆盖 header/body |
-| 分页 | `page`(1起) / `per_page`(默认20,上限100) / `direction`(asc/desc) | gitee-php/gitee-sdk |
-| 字段 | snake_case：`id`(int) / `tag_name` / `name` / `body` / `created_at`(ISO) / `assets[].browser_download_url` | 官方 issue I7UFD9 Response Class |
-| **无 published_at** | 用 `created_at` 排序 | 与 GitHub 的关键差异 |
-| **无 draft** | Gitee 不暴露草稿状态 | 同上 |
-| rate limit | 存在但数值未公开 | 官方 issue I3VUJD → 必须服务端缓存 |
-| asset name/size | SDK 未完整建模 | 降级：不展示 size |
+| 项                  | 值                                                                                                         | 来源                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 列表端点            | `GET https://gitee.com/api/v5/repos/{owner}/{repo}/releases`                                               | gitee-php/gitee-sdk RepositoriesApi.md               |
+| 鉴权                | `Authorization: Bearer <token>`（**禁 query**）                                                            | 安全专家核验 app.module.ts redact 只覆盖 header/body |
+| 分页                | `page`(1起) / `per_page`(默认20,上限100) / `direction`(asc/desc)                                           | gitee-php/gitee-sdk                                  |
+| 字段                | snake_case：`id`(int) / `tag_name` / `name` / `body` / `created_at`(ISO) / `assets[].browser_download_url` | 官方 issue I7UFD9 Response Class                     |
+| **无 published_at** | 用 `created_at` 排序                                                                                       | 与 GitHub 的关键差异                                 |
+| **无 draft**        | Gitee 不暴露草稿状态                                                                                       | 同上                                                 |
+| rate limit          | 存在但数值未公开                                                                                           | 官方 issue I3VUJD → 必须服务端缓存                   |
+| asset name/size     | SDK 未完整建模                                                                                             | 降级：不展示 size                                    |
 
 ## 三、接口契约（定稿）
 
@@ -59,7 +59,7 @@ giteeAccessToken: 空 || /^[A-Za-z0-9_-]{20,200}$/（不 trim 之外做格式校
 function validateRepoSegment(key: string): (raw: string) => string {
   return (raw) => {
     const v = raw.trim();
-    if (v.length === 0) return '';           // 空=用默认（读侧兜底，同 smtpUrl 清空回退 .env 语义）
+    if (v.length === 0) return ''; // 空=用默认（读侧兜底，同 smtpUrl 清空回退 .env 语义）
     if (v.length > 100) throw badRequest(`${key} 过长（上限 100 字符）`);
     if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(v))
       throw badRequest(`${key} 仅允许字母数字/点/下划线/连字符，首尾须字母数字`);
@@ -73,32 +73,40 @@ function validateRepoSegment(key: string): (raw: string) => string {
 
 ```ts
 interface ChangelogEntry {
-  id: string;              // String(giteeId)，无 id 时用 tag_name 兜底
-  version: string;         // tag_name 剥离前导 v/V
-  title: string;           // name?.trim() || tag_name
-  notes: string;           // body 原文（前端 renderNotes 解析）
-  publishedAt: string | null;  // created_at ISO（Gitee 无 published_at）
-  isLatest: boolean;       // 按 created_at desc 排序后首条 true
+  id: string; // String(giteeId)，无 id 时用 tag_name 兜底
+  version: string; // tag_name 剥离前导 v/V
+  title: string; // name?.trim() || tag_name
+  notes: string; // body 原文（前端 renderNotes 解析）
+  publishedAt: string | null; // created_at ISO（Gitee 无 published_at）
+  isLatest: boolean; // 按 created_at desc 排序后首条 true
 }
 interface ChangelogResponse {
   source: 'gitee' | 'unconfigured';
   releases: ChangelogEntry[];
-  degraded: boolean;       // true=本次降级（失败/限流/吐缓存兜底）
-  message?: string;        // degraded=true 时给前端展示
+  degraded: boolean; // true=本次降级（失败/限流/吐缓存兜底）
+  message?: string; // degraded=true 时给前端展示
 }
 ```
 
 ### GET /api/admin/settings/gitee（ensurePlatformAdmin）
 
 ```ts
-{ giteeOwner: string; giteeRepo: string; hasAccessToken: boolean }
+{
+  giteeOwner: string;
+  giteeRepo: string;
+  hasAccessToken: boolean;
+}
 // owner/repo 读侧兜底默认值（?? 'yijianruyuan' / ?? 'lingfang'），token 脱敏
 ```
 
 ### POST /api/admin/settings/test-gitee（ensurePlatformAdmin，无 body）
 
 ```ts
-{ ok: boolean; configured: boolean; message: string }
+{
+  ok: boolean;
+  configured: boolean;
+  message: string;
+}
 // 探测 GET {GITEE_API_BASE}/repos/{owner}/{repo}/releases?per_page=1&page=1，Bearer，8s 超时
 // 状态映射：200=通；401=token失效；403=缺scope；404=owner/repo错；429=限流；网络=异常
 // 直接查库不读 gitee 缓存（避免缓存延迟掩盖问题，同 testCaptcha 注释）
@@ -143,8 +151,8 @@ ChangelogPage (renderNotes 升级解析器, degraded 横幅)
 const GITEE_API_BASE = 'https://gitee.com/api/v5';
 const DEFAULT_GITEE_OWNER = 'yijianruyuan';
 const DEFAULT_GITEE_REPO = 'lingfang';
-const GITEE_TIMEOUT_MS = 8_000;       // 比 geetest 5s 宽，Gitee 偶有慢响应
-const GITEE_CACHE_TTL_MS = 600_000;   // 10min，外部限流
+const GITEE_TIMEOUT_MS = 8_000; // 比 geetest 5s 宽，Gitee 偶有慢响应
+const GITEE_CACHE_TTL_MS = 600_000; // 10min，外部限流
 
 @Injectable()
 export class GiteeChangelogService {
@@ -153,14 +161,19 @@ export class GiteeChangelogService {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  invalidateChangelogCache(): void { this.changelogCache = null; }
+  invalidateChangelogCache(): void {
+    this.changelogCache = null;
+  }
 
-  async getChangelog(): Promise<ChangelogResponse> { /* 见数据流 */ }
+  async getChangelog(): Promise<ChangelogResponse> {
+    /* 见数据流 */
+  }
 
   // singleflight：回源期间并发请求共享同一个 Promise，避免 N 用户同时打 Gitee
   private async fetchWithCache(): Promise<ChangelogEntry[]> {
     const now = Date.now();
-    if (this.changelogCache && this.changelogCache.expiresAt > now) return this.changelogCache.value;
+    if (this.changelogCache && this.changelogCache.expiresAt > now)
+      return this.changelogCache.value;
     if (this.inflight) return this.inflight;
     this.inflight = (async () => {
       try {
@@ -168,7 +181,7 @@ export class GiteeChangelogService {
         this.changelogCache = { value: list, expiresAt: now + GITEE_CACHE_TTL_MS };
         return list;
       } finally {
-        this.inflight = null;   // 失败不写缓存，下次立即重试
+        this.inflight = null; // 失败不写缓存，下次立即重试
       }
     })();
     return this.inflight;
@@ -184,7 +197,7 @@ export class GiteeChangelogService {
     return {
       id: r.id != null ? String(r.id) : tag,
       version: tag.replace(/^v/i, ''),
-      title: (r.name?.trim()) || tag,
+      title: r.name?.trim() || tag,
       notes: r.body ?? '',
       publishedAt: r.created_at ?? null,
       isLatest: index === 0,
@@ -198,7 +211,10 @@ URL 构造（SSRF 双保险）：
 ```ts
 const owner = cfg.owner || DEFAULT_GITEE_OWNER;
 const repo = cfg.repo || DEFAULT_GITEE_REPO;
-const url = new URL(`/api/v5/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`, GITEE_API_BASE);
+const url = new URL(
+  `/api/v5/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`,
+  GITEE_API_BASE
+);
 url.searchParams.set('page', '1');
 url.searchParams.set('per_page', '100');
 url.searchParams.set('direction', 'desc');
@@ -208,34 +224,34 @@ const res = await fetch(url, { headers: { Authorization: `Bearer ${cfg.accessTok
 
 ## 六、缓存策略
 
-| 缓存 | 位置 | TTL | 失效时机 | 并发保护 |
-|---|---|---|---|---|
-| changelogCache | GiteeChangelogService 实例字段 | 10min | updateSettings 命中 GITEE_CACHE_KEYS 调 invalidateChangelogCache（零窗口） | singleflight inflight Promise 去重 |
-| publicInfoCache | module-level | 30s | updateSettings 末尾 publicInfoCache=null | 无（本地 DB 毫秒级） |
-| mail.smtpCache | 实例 | 30s | MAIL_CACHE_KEYS 命中调 invalidateSmtpCache | 无 |
-| geetest.configCache | 实例 | 30s | GEETEST_CACHE_KEYS 命中调 invalidateConfigCache | 无 |
+| 缓存                | 位置                           | TTL   | 失效时机                                                                   | 并发保护                           |
+| ------------------- | ------------------------------ | ----- | -------------------------------------------------------------------------- | ---------------------------------- |
+| changelogCache      | GiteeChangelogService 实例字段 | 10min | updateSettings 命中 GITEE_CACHE_KEYS 调 invalidateChangelogCache（零窗口） | singleflight inflight Promise 去重 |
+| publicInfoCache     | module-level                   | 30s   | updateSettings 末尾 publicInfoCache=null                                   | 无（本地 DB 毫秒级）               |
+| mail.smtpCache      | 实例                           | 30s   | MAIL_CACHE_KEYS 命中调 invalidateSmtpCache                                 | 无                                 |
+| geetest.configCache | 实例                           | 30s   | GEETEST_CACHE_KEYS 命中调 invalidateConfigCache                            | 无                                 |
 
 - **失败不写缓存**：fetchReleases 异常返回的 `[]` 不进 cache（finally 只清 inflight），下次请求立即重试，避免「Gitee 抖动 → 缓存空 10min → 用户看不到更新」。
 - **单实例约束**（文件头注释标注）：当前 collab-api 单实例，多实例部署需改 Redis 共享缓存。不为未来多实例现在引入 Redis（违反禁止过度架构）。
 
 ## 七、容灾降级
 
-| 场景 | 行为 | HTTP |
-|---|---|---|
-| token 未配 | `{source:'unconfigured', releases:[], degraded:false, message}` | 200 |
-| 成功 | 写缓存，`{source:'gitee', releases, degraded:false}` | 200 |
-| 401（token 失效）| 不清缓存，吐 cached + degraded:true，message「Gitee token 已失效」 | 200 |
-| 403（缺 scope）| 同上，message「token 缺少 repo 权限」 | 200 |
-| 404（owner/repo 错）| 同上，message「owner/repo 不存在或无权访问」 | 200 |
-| 429（限流）| **不清缓存**（缓存有效历史），吐 cached + degraded，message「Gitee 限流，展示缓存内容」 | 200 |
-| 网络异常/超时 | 同 429，message「Gitee 暂时不可用，请稍后重试」 | 200 |
-| ChangelogPage .catch | 网络层兜底 setReleases([]) | — |
+| 场景                 | 行为                                                                                    | HTTP |
+| -------------------- | --------------------------------------------------------------------------------------- | ---- |
+| token 未配           | `{source:'unconfigured', releases:[], degraded:false, message}`                         | 200  |
+| 成功                 | 写缓存，`{source:'gitee', releases, degraded:false}`                                    | 200  |
+| 401（token 失效）    | 不清缓存，吐 cached + degraded:true，message「Gitee token 已失效」                      | 200  |
+| 403（缺 scope）      | 同上，message「token 缺少 repo 权限」                                                   | 200  |
+| 404（owner/repo 错） | 同上，message「owner/repo 不存在或无权访问」                                            | 200  |
+| 429（限流）          | **不清缓存**（缓存有效历史），吐 cached + degraded，message「Gitee 限流，展示缓存内容」 | 200  |
+| 网络异常/超时        | 同 429，message「Gitee 暂时不可用，请稍后重试」                                         | 200  |
+| ChangelogPage .catch | 网络层兜底 setReleases([])                                                              | —    |
 
 前端降级横幅：degraded=true 时顶部橙色边框卡片显示 message，不阻断时间线渲染。
 
 ## 八、前端 renderNotes 升级（交付成败关键）
 
-现有解析器只认 `## / - / > / **bold** / \`code\`` 5 种，Gitee body 标准含 `#`/`###`/图片/链接，不升级会渲染乱码。升级要点：
+现有解析器只认 `## / - / > / **bold** / \`code\``5 种，Gitee body 标准含`#`/`###`/图片/链接，不升级会渲染乱码。升级要点：
 
 - 标题：`#`/`##`/`###` 全支持（正则 `/^(#{1,3})\s+(.*)$/`，level 决定 text-lg/base/sm）。
 - 图片 `![alt](url)`：**必须在链接前匹配**（`!\[` 前缀），`<img>` + `loading="lazy"` + border。
@@ -243,7 +259,7 @@ const res = await fetch(url, { headers: { Authorization: `Bearer ${cfg.accessTok
 - 列表 `- `/`* `：保留缩进（`paddingLeft: indent*0.5rem`），层级不塌平。
 - `---` 分隔线：`<hr>`。
 - 保留空行（原 `.filter(Boolean)` 塌了段落，改为返回 null 占位）。
-- 多行代码块 fence ```` ``` ```` 不解析（标注「release notes 不建议贴代码块」），可接受。
+- 多行代码块 fence ` ``` ` 不解析（标注「release notes 不建议贴代码块」），可接受。
 
 ## 九、前端 settings-view Gitee 卡片
 

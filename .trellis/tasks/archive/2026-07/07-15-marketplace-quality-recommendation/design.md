@@ -269,19 +269,19 @@ current release pointer 变化时通过统一 writer 在同一事务保存 activ
 
 ## 11. Failure Matrix
 
-| Failure | Result |
-| --- | --- |
-| usage session 过期/错绑/重复终态 | 409/400，不写 metric，记录受限审计 |
-| listing/current release/pointer 或 eligibility epoch 在计算中变化 | snapshot 可保留，listing CAS 不更新，下一轮重算 |
-| 日计算部分失败 | 保留上一快照，继续其他 package，管理端显示 stale |
-| 精选与下架并发 | 目录硬门禁优先；精选记录保留但不展示 |
-| 两个管理员并发精选 | listing CAS/updatedAt version 只接受一个，另一方 409 刷新 |
-| rating 重复提交 | 更新同一 team/package 行，不增加计数 |
-| 申诉重复提交 | 返回同 snapshot 的活动 Ticket |
-| settlement-v2 无持久化激活事实或窗口含 legacy | refundMetricState=DATA_UNAVAILABLE，不计算为 0、不晋级 |
-| settlement-v2 已激活且 writerMode=PAUSED | 继续还原既有 V2 cohort；事实读取失败则 job 失败并保留上一成功快照 |
-| cohort 有 REFUND_REQUESTED | 本次成功 snapshot 为 DATA_UNAVAILABLE/autoQualified=false，latest-success CAS 使自动 QUALITY 回落 LISTED |
-| 同 jobKey 重试/旧 job 迟到 | 重试复用 computation；旧 snapshot 可保留但 listing CAS 不覆盖更新的 watermark/revision |
+| Failure                                                           | Result                                                                                                   |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| usage session 过期/错绑/重复终态                                  | 409/400，不写 metric，记录受限审计                                                                       |
+| listing/current release/pointer 或 eligibility epoch 在计算中变化 | snapshot 可保留，listing CAS 不更新，下一轮重算                                                          |
+| 日计算部分失败                                                    | 保留上一快照，继续其他 package，管理端显示 stale                                                         |
+| 精选与下架并发                                                    | 目录硬门禁优先；精选记录保留但不展示                                                                     |
+| 两个管理员并发精选                                                | listing CAS/updatedAt version 只接受一个，另一方 409 刷新                                                |
+| rating 重复提交                                                   | 更新同一 team/package 行，不增加计数                                                                     |
+| 申诉重复提交                                                      | 返回同 snapshot 的活动 Ticket                                                                            |
+| settlement-v2 无持久化激活事实或窗口含 legacy                     | refundMetricState=DATA_UNAVAILABLE，不计算为 0、不晋级                                                   |
+| settlement-v2 已激活且 writerMode=PAUSED                          | 继续还原既有 V2 cohort；事实读取失败则 job 失败并保留上一成功快照                                        |
+| cohort 有 REFUND_REQUESTED                                        | 本次成功 snapshot 为 DATA_UNAVAILABLE/autoQualified=false，latest-success CAS 使自动 QUALITY 回落 LISTED |
+| 同 jobKey 重试/旧 job 迟到                                        | 重试复用 computation；旧 snapshot 可保留但 listing CAS 不覆盖更新的 watermark/revision                   |
 
 ## 12. Validation Strategy
 

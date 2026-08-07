@@ -22,11 +22,13 @@
 ## 三、LandingTopology 组件结构
 
 ```tsx
-<section id="lf-topology" className="py-20 sm:py-28"
+<section
+  id="lf-topology"
+  className="py-20 sm:py-28"
   style={{
     borderTop: '1px solid transparent',
     borderImage: 'linear-gradient(to right, transparent, var(--lf-border), transparent) 1',
-    scrollMarginTop: '4rem',   // 与 fixed nav h-16(4rem) 对齐
+    scrollMarginTop: '4rem', // 与 fixed nav h-16(4rem) 对齐
   }}
 >
   <div className="mx-auto max-w-6xl px-6">
@@ -65,16 +67,19 @@
 **viewBox**：`0 0 900 360`，节点用 `<rect rx>` 圆角框，连线用 `<path>`，光点沿 path 流动。
 
 **配色**：
+
 - desktop / admin 节点：`--lf-accent`（#3b82f6）
 - collab-api 节点：`--lf-accent-bright`（#60a5fa）
 - PostgreSQL 节点：`--lf-fg`（#e6edf3，**不用 --lf-cyan**——landing.css:28 已重定义为 #60a5fa，与 accent-bright 撞色）
 
 **不掉帧铁律**：
+
 1. 流动光点用纯 CSS `@keyframes lf-flow`（offset-path 沿连线），**不用 framer-motion repeat:Infinity**（主线程开销 + SVG transform 跨浏览器兼容坑）。
 2. 光点只动 `transform`/`opacity`，**禁 `filter: drop-shadow`/`blur`**（深色页 + accent 蓝叠加是最常见掉帧源）。发光感用 `<radialGradient>` fill 静态实现。
 3. `will-change: transform` 仅给光点 `<g>`，不给整个 SVG（撑内存）。
 
 **节点布局**（viewBox 900×360）：
+
 - 上层两个节点并排：desktop（左，x≈120）+ admin（右，x≈780），y≈80
 - 中层：collab-api（居中，x≈450），y≈200
 - 下层：PostgreSQL（居中，x≈450），y≈320
@@ -86,10 +91,20 @@
 ```css
 /* topology 流动光点：沿 path 滚动，三段错峰 */
 @keyframes lf-flow {
-  from { offset-distance: 0%; opacity: 0; }
-  10%  { opacity: 1; }
-  90%  { opacity: 1; }
-  to   { offset-distance: 100%; opacity: 0; }
+  from {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  to {
+    offset-distance: 100%;
+    opacity: 0;
+  }
 }
 .lf-flow-dot {
   offset-path: path('M120,80 C 450,80 450,200 450,200');

@@ -8,15 +8,16 @@
 
 平台当前有**两套并行、互不相通**的插件系统：
 
-| 能力 | legacy `Plugin` 表 | v4 `PluginPackage`+`PluginRelease` |
-|---|---|---|
-| 上传发布 | `plugin.service.ts:uploadPlugin` → `POST /api/plugins/upload`（旧 v3，桌面端**已不走**） | `POST /api/plugin-registry/releases` + `submit-marketplace`（桌面端发布走这条） |
-| 后台审核列表 | `admin.service.ts:1001` `prisma.plugin.findMany({reviewStatus:'PENDING'})` → 后台「插件审核」页 | `GET /api/admin/plugin-releases/review-pending`（后端有，**前端没调**）+ `plugin-packages?reviewStatus=PENDING` 间接筛 |
-| 审批动作 | `POST /api/admin/plugins/:id/approve`（写 `Plugin.reviewStatus`） | `POST /api/admin/plugin-releases/:id/approve`（写 `PluginRelease.marketReviewStatus` + `MarketplaceListing.currentReleaseId`） |
-| 市场货架/详情/安装数 | ✅ `marketplace.service.ts` 全查 `prisma.plugin` | ❌ |
-| 购买计费 | ✅ `economy.service.ts` 查 `prisma.plugin` | ❌ |
+| 能力                 | legacy `Plugin` 表                                                                              | v4 `PluginPackage`+`PluginRelease`                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 上传发布             | `plugin.service.ts:uploadPlugin` → `POST /api/plugins/upload`（旧 v3，桌面端**已不走**）        | `POST /api/plugin-registry/releases` + `submit-marketplace`（桌面端发布走这条）                                                |
+| 后台审核列表         | `admin.service.ts:1001` `prisma.plugin.findMany({reviewStatus:'PENDING'})` → 后台「插件审核」页 | `GET /api/admin/plugin-releases/review-pending`（后端有，**前端没调**）+ `plugin-packages?reviewStatus=PENDING` 间接筛         |
+| 审批动作             | `POST /api/admin/plugins/:id/approve`（写 `Plugin.reviewStatus`）                               | `POST /api/admin/plugin-releases/:id/approve`（写 `PluginRelease.marketReviewStatus` + `MarketplaceListing.currentReleaseId`） |
+| 市场货架/详情/安装数 | ✅ `marketplace.service.ts` 全查 `prisma.plugin`                                                | ❌                                                                                                                             |
+| 购买计费             | ✅ `economy.service.ts` 查 `prisma.plugin`                                                      | ❌                                                                                                                             |
 
 **两个已确认的断链**：
+
 1. **审核断链**：v4 提交写 `PluginRelease.marketReviewStatus='PENDING'`，但后台审核列表查 legacy `Plugin.reviewStatus` → v4 提交在后台审核页**永远空**（用户本次踩到的坑）。
 2. **上架断链**：v4 `approveRelease` 只更新 `PluginRelease` + `MarketplaceListing`，**不回写 legacy `Plugin`**；而市场货架 `marketplace.service.ts` 读 legacy `Plugin` → **v4 审通过的插件上不了市场货架、不能买**。
 
@@ -24,11 +25,11 @@
 
 ## Task Map（三阶段，独立可验收）
 
-| 子任务 | 目标 | 风险 | 状态 |
-|---|---|---|---|
-| [`phase0-admin-review-v4`](../07-18-phase0-admin-review-v4/prd.md) | 后台审核入口统一到 v4：v4 待审核直列页 + 废弃旧审核页 | 低（纯 UI/路由） | 规划中 |
-| [`phase1-marketplace-on-v4`](../07-18-phase1-marketplace-on-v4/prd.md) | `marketplace.service`/`economy.service` 改读 v4，v4 审批→可上架可购 | 中高（动购买/计费） | 目标级 PRD，阶段0 完成后详规 |
-| [`phase2-retire-legacy-plugin`](../07-18-phase2-retire-legacy-plugin/prd.md) | 存量 `Plugin` 迁进 v4，下线旧接口/前端，删 legacy 代码 | 高（数据迁移、购买记录） | 目标级 PRD，阶段1 完成后详规 |
+| 子任务                                                                       | 目标                                                                | 风险                     | 状态                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------ | ---------------------------- |
+| [`phase0-admin-review-v4`](../07-18-phase0-admin-review-v4/prd.md)           | 后台审核入口统一到 v4：v4 待审核直列页 + 废弃旧审核页               | 低（纯 UI/路由）         | 规划中                       |
+| [`phase1-marketplace-on-v4`](../07-18-phase1-marketplace-on-v4/prd.md)       | `marketplace.service`/`economy.service` 改读 v4，v4 审批→可上架可购 | 中高（动购买/计费）      | 目标级 PRD，阶段0 完成后详规 |
+| [`phase2-retire-legacy-plugin`](../07-18-phase2-retire-legacy-plugin/prd.md) | 存量 `Plugin` 迁进 v4，下线旧接口/前端，删 legacy 代码              | 高（数据迁移、购买记录） | 目标级 PRD，阶段1 完成后详规 |
 
 顺序约束：phase1 依赖 phase0 的 v4 审核闭环可用；phase2 依赖 phase1 让所有读路径离开 `Plugin` 后才能安全删表。
 

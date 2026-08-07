@@ -7,15 +7,18 @@
 ### 批次1：collab-api 鉴权与安全（P0/P1）
 
 **P0 critical**
+
 - [ ] PPK-01 付费墙绕过：`plugin.service.ts:131-147` installMarketplacePlugin 加付费校验（对照 marketplace.service.ts:94-97），抽取共享 ensurePurchased 辅助
 - [ ] AUTH-01 refresh 续命：`auth.service.ts:63-89` sessionFor 加 `user.status !== 'ACTIVE'` 守卫
 - [ ] ADMIN-02 不吊销 JWT：引入 token 版本号（user.tokenVersion），JwtAuthGuard 校验
 
 **P1 系统性根因**
+
 - [ ] XSEC-01 全局 ValidationPipe：main.ts 注册 useGlobalPipes(ValidationPipe whitelist+forbidNonWhitelist+transform)，各 controller @Body 改 DTO + class-validator 装饰器
 - [ ] XERR-01 Prisma 错误映射：新增 PrismaExceptionFilter，P2002→409、P2025→404、PrismaClientValidationError→400，不回显 schema 信息
 
 **其他**
+
 - [ ] AUTH-03 register 非原子：user.create + application.create + audit 包进 $transaction
 - [ ] AUTH-04 JWT_SECRET 启动期断言：main.ts bootstrap 检查，缺失则 fail-fast
 - [ ] XSEC-02 CORS fail-close：未配置时不 reflect true
@@ -100,6 +103,7 @@
 ## 验证
 
 每批后：
+
 ```bash
 pnpm -C apps/collab-api typecheck
 pnpm -C apps/collab-api test

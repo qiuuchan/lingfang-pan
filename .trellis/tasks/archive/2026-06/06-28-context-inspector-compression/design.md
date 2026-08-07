@@ -1,4 +1,4 @@
- # Context inspector and compression - Design
+# Context inspector and compression - Design
 
 ## Architecture
 
@@ -41,4 +41,3 @@ Target shape:
 - Keeping the existing dialog avoids reworking a known-good inspection surface.
 - A top-level entry point improves discoverability without changing the actual data model.
 - A focused helper test gives us confidence in the compression path without freezing the entire UI.
-

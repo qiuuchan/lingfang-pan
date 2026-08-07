@@ -48,31 +48,37 @@
 ### 1. Code Inspection
 
 输入条件：
+
 - 当前源码树、已有 `.trellis/spec/**`、已归档审计任务的大文件清单。
 - 排除 `node_modules`、`target`、`dist`、`build`、生成 schema、锁文件和历史证据文件。
 
 输出条件：
+
 - 确认可拆源码候选：`code_assistant.rs`、`plugin-draft.ts`、`PluginCreatorHome.tsx`、`plugin_store.rs`、`plugin_runner.rs`、`plugin_script.rs`、`settings-view.tsx`、`plugin-draft.spec.ts`、`code_assistant/tests.rs`。
 - 确认例外类别：`Cargo.lock`、`apps/desktop/src-tauri/gen/schemas/*.json`。
 
 ### 2. Spec Update
 
 输入条件：
+
 - 拆分过程中确认的稳定职责边界。
 - Rust reader 测试并发假失败根因：生产 reader 先写 transcript 后 emit event，测试若等待 transcript 行数会早于最后一次 emit 断言。
 - 前端/后台拆分后的模块组织。
 
 输出条件：
+
 - 更新 backend/frontend/admin spec，记录大文件拆分边界、测试组织和 reader 测试同步规则。
 - 不新增跨层 API 或运行时契约变更。
 
 ### 3. Refactor Split
 
 输入条件：
+
 - 拆分前测试基线：`cargo test -p lingfang-desktop`、`pnpm -C apps/desktop typecheck/test`、`pnpm -C apps/collab-admin typecheck`。
 - 各候选文件的现有 import surface 和调用点。
 
 输出条件：
+
 - `apps/desktop/src-tauri/src/code_assistant.rs`：从 3824 行拆到 1305 行；新增 `process/`、`stream/`、拆分测试子模块。
 - `apps/desktop/src/lib/plugin-draft.ts`：从 1594 行变为 6 行 barrel；实现拆到 `plugin-draft/*.ts`。
 - `apps/desktop/src/lib/plugin-draft.spec.ts`：拆为 `plugin-draft/*.spec.ts`，单文件最大 388 行。

@@ -7,12 +7,14 @@
 ## Requirements
 
 ### R1 移除计费配置中的版本选择逻辑（需求 #1）
+
 - 计费配置界面（`BillingTab.tsx`）不再承担版本（fast/premium）的选择/配置职责。
 - 版本控制完全由渠道管理（Channel，tier 标签 FAST/PREMIUM + models[]）决定。
 - relay 仍接受 `fast`/`premium` 哨兵作为 model 字段（前端无感），但配置入口从计费页移除。
 - 清理 schema 中遗留的 ModelTierConfig 注释/死代码（若确认无引用）。
 
 ### R2 删除团队空间，整合为团队钱包（需求 #10）
+
 - 删除「团队空间」页面 `TeamHome.tsx`（存在两个金额显示混淆 bug）。
 - 统一为「团队钱包」：团队共享一个余额。明确以 TeamCredit（灵石）为唯一团队账户口径。
 - 前端余额展示口径统一（消除 Team.balanceCents 人民币 与 TeamCredit 灵石 双显示）。
@@ -20,6 +22,7 @@
 - 数据迁移策略（BalanceLedger / Wallet 历史数据）须在 design 中定，动表前需用户确认。
 
 ### R3 修复未成功对话仍扣费（需求 #11）
+
 - 对话失败（上游错误、流式中断、无渠道、余额不足）时不应净扣费。
 - 重点修复 `relay.service.ts` executeRelay 的 reserve/reconcile/refund 时机，以及 `credit.service.ts` refund 在「无预扣 cap=0」与「reconcile 已转 DEBIT」场景下的幂等回退。
 

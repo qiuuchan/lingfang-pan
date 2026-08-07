@@ -107,6 +107,7 @@ PySide6（Qt6）三栏桌面插件，**只调平台桥，不直连 RBFLow**。
 ## RBFLow v0.4 对接更新（重新读取后同步）
 
 RBFLow 已升级到 v0.4.1，对本插件方案的影响：
+
 - **下载**：改用 `GET /tasks/{id}/download`（流式 mp4 blob，`tasks.py:311`）替代旧的 `/result` 302 重定向——桥代理转发更干净。
 - **SSE 字段**：v0.4 已改名 `node`/`node_progress`（原 `current_node`）——插件 SSE 解析须对齐 v0.4。
 - **提交**：`POST /tasks` 支持 `priority` 字段（0-100，`tasks.py:73`）——桥转发时可透传，插件队列排序可映射到 RBFLow 优先级。

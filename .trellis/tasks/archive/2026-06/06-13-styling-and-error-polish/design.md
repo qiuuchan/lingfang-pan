@@ -23,16 +23,16 @@
 
 ### 2.1 贴边问题清单
 
-| # | 问题 | 位置 | 现状代码 | 根因 |
-|---|---|---|---|---|
-| P1 | Composer 输入框文字贴边（左右上下无内距） | `apps/desktop/src/components/creator/Composer.tsx:44` | `className="… border-0 bg-transparent p-0 shadow-none …"` | `Textarea` 基础类（`textarea.tsx:10`）本带 `px-2.5 py-2`，被 `p-0` 清零，导致内容贴在容器内壁 |
-| P2 | 诊断文本裸 `<p>`，无容器包裹 | `apps/desktop/src/components/creator/panels/CreationStatusPanel.tsx:24-26` | `<p …>[{stage}] {status} — {message}</p>` | 诊断项直接是 `<p>`，与同级 `Info` 卡片风格不一致，长 message 易溢出卡片且无背景区分 |
-| P3 | Bubble 错误态无内 padding | `apps/desktop/src/components/chat/Bubble.tsx:7,9` | `error && '… border border-destructive/30 bg-destructive/5 …'`；渲染为 `<div className="max-h-72 overflow-auto">` | 错误分支容器只继承 Bubble 外层 `px-4 py-3`，但长堆栈贴住内壁；且无标题/图标区分错误等级 |
-| P4 | Info 组件 truncate 截断关键信息（入口/Transcript 路径） | `apps/desktop/src/components/creator/Info.tsx:5` | `<div className="truncate font-medium">{value}</div>` | 单行 `truncate` 把长路径（如 `transcriptPath`、`manifest.entry`）直接截断成 `…`，用户无法看全 |
-| P5 | aside 固定 420px，无响应式 | `apps/desktop/src/pages/PluginCreatorHome.tsx:405-409` | `detailsOpen ? 'w-[420px]' : 'w-0'`；内层 `w-[420px]` 硬写死 | 窄窗口下（< 1024px）420px 详情面板会挤压对话区到不可用 |
-| P6 | 全局隐藏滚动条导致溢出不可见 | `apps/desktop/src/index.css:120-127`（`@layer base`） | `* { scrollbar-width: none }` + `*::-webkit-scrollbar { display: none }` | 对所有元素隐藏滚动条，长 stdout/stderr/源码区域虽能滚动但**用户看不出可滚动**，误以为内容被截断 |
-| P7 | header padding 不对称 | `apps/desktop/src/pages/PluginCreatorHome.tsx:349` | `pl-16 pr-4 py-3` | `pl-16`（为避开左侧 Sidebar 折叠按钮）与右侧 `pr-4` 不对称，视觉偏移 |
-| P8 | SourcePanel Tabs 横向溢出 flex-wrap 挤压 | `apps/desktop/src/components/creator/panels/SourcePanel.tsx:16` | `<TabsList className="max-w-full flex-wrap">` | 文件多时 tabs 全部换行堆叠，占用大量纵向空间，应改为**横向可滚动 + 单行** |
+| #   | 问题                                                    | 位置                                                                       | 现状代码                                                                                                          | 根因                                                                                            |
+| --- | ------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| P1  | Composer 输入框文字贴边（左右上下无内距）               | `apps/desktop/src/components/creator/Composer.tsx:44`                      | `className="… border-0 bg-transparent p-0 shadow-none …"`                                                         | `Textarea` 基础类（`textarea.tsx:10`）本带 `px-2.5 py-2`，被 `p-0` 清零，导致内容贴在容器内壁   |
+| P2  | 诊断文本裸 `<p>`，无容器包裹                            | `apps/desktop/src/components/creator/panels/CreationStatusPanel.tsx:24-26` | `<p …>[{stage}] {status} — {message}</p>`                                                                         | 诊断项直接是 `<p>`，与同级 `Info` 卡片风格不一致，长 message 易溢出卡片且无背景区分             |
+| P3  | Bubble 错误态无内 padding                               | `apps/desktop/src/components/chat/Bubble.tsx:7,9`                          | `error && '… border border-destructive/30 bg-destructive/5 …'`；渲染为 `<div className="max-h-72 overflow-auto">` | 错误分支容器只继承 Bubble 外层 `px-4 py-3`，但长堆栈贴住内壁；且无标题/图标区分错误等级         |
+| P4  | Info 组件 truncate 截断关键信息（入口/Transcript 路径） | `apps/desktop/src/components/creator/Info.tsx:5`                           | `<div className="truncate font-medium">{value}</div>`                                                             | 单行 `truncate` 把长路径（如 `transcriptPath`、`manifest.entry`）直接截断成 `…`，用户无法看全   |
+| P5  | aside 固定 420px，无响应式                              | `apps/desktop/src/pages/PluginCreatorHome.tsx:405-409`                     | `detailsOpen ? 'w-[420px]' : 'w-0'`；内层 `w-[420px]` 硬写死                                                      | 窄窗口下（< 1024px）420px 详情面板会挤压对话区到不可用                                          |
+| P6  | 全局隐藏滚动条导致溢出不可见                            | `apps/desktop/src/index.css:120-127`（`@layer base`）                      | `* { scrollbar-width: none }` + `*::-webkit-scrollbar { display: none }`                                          | 对所有元素隐藏滚动条，长 stdout/stderr/源码区域虽能滚动但**用户看不出可滚动**，误以为内容被截断 |
+| P7  | header padding 不对称                                   | `apps/desktop/src/pages/PluginCreatorHome.tsx:349`                         | `pl-16 pr-4 py-3`                                                                                                 | `pl-16`（为避开左侧 Sidebar 折叠按钮）与右侧 `pr-4` 不对称，视觉偏移                            |
+| P8  | SourcePanel Tabs 横向溢出 flex-wrap 挤压                | `apps/desktop/src/components/creator/panels/SourcePanel.tsx:16`            | `<TabsList className="max-w-full flex-wrap">`                                                                     | 文件多时 tabs 全部换行堆叠，占用大量纵向空间，应改为**横向可滚动 + 单行**                       |
 
 ### 2.2 错误抛出现状（散落、双轨、不分级）
 
@@ -72,14 +72,14 @@ export type CreatorErrorLevel = 'error' | 'warning' | 'info';
 
 /** 错误分类：映射到友好文案与展示位置 */
 export type CreatorErrorKind =
-  | 'cli_start_failed'      // CLI 启动失败（code_assistant_start_session 抛错）
-  | 'transcript_failed'     // 读取 transcript 失败（read_transcript 抛错）
-  | 'cli_session_error'     // CLI 运行中 error 事件（code-assistant://error）
-  | 'upload_failed'         // 上传团队云端 4xx/5xx
-  | 'submit_market_failed'  // 提交公共市场失败
-  | 'interpreter_missing'   // 解释器缺失（来自 R3 run_plugin_script）
-  | 'run_timeout'           // 预览执行超时（来自 R3）
-  | 'run_failed'            // 预览执行非零退出（来自 R3）
+  | 'cli_start_failed' // CLI 启动失败（code_assistant_start_session 抛错）
+  | 'transcript_failed' // 读取 transcript 失败（read_transcript 抛错）
+  | 'cli_session_error' // CLI 运行中 error 事件（code-assistant://error）
+  | 'upload_failed' // 上传团队云端 4xx/5xx
+  | 'submit_market_failed' // 提交公共市场失败
+  | 'interpreter_missing' // 解释器缺失（来自 R3 run_plugin_script）
+  | 'run_timeout' // 预览执行超时（来自 R3）
+  | 'run_failed' // 预览执行非零退出（来自 R3）
   | 'unknown';
 
 /** 统一错误对象 */
@@ -181,7 +181,11 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
 `PluginCreatorHome.tsx:380` 渲染处改为：
 
 ```tsx
-{!streaming && liveError && <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? send : undefined} />}
+{
+  !streaming && liveError && (
+    <ErrorBubble error={liveError} onRetry={lastPromptRef.current ? send : undefined} />
+  );
+}
 ```
 
 > `lastPromptRef` 复用现有 `pendingPromptRef`（`PluginCreatorHome.tsx:238` 已有 prompt 快照），retry 时重发同一 prompt。
@@ -223,18 +227,22 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
 `apps/desktop/src/components/creator/panels/CreationStatusPanel.tsx:24-26`：把裸 `<p>` 包进带背景的行容器：
 
 ```tsx
-{diagnostics.map((item, index) => (
-  <div
-    key={index}
-    className={cn(
-      'flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs',
-      item.status === 'pass' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-destructive/30 bg-destructive/5 text-destructive'
-    )}
-  >
-    <span className="shrink-0 font-medium">[{item.stage}]</span>
-    <span className="break-words">{item.message}</span>
-  </div>
-))}
+{
+  diagnostics.map((item, index) => (
+    <div
+      key={index}
+      className={cn(
+        'flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs',
+        item.status === 'pass'
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : 'border-destructive/30 bg-destructive/5 text-destructive'
+      )}
+    >
+      <span className="shrink-0 font-medium">[{item.stage}]</span>
+      <span className="break-words">{item.message}</span>
+    </div>
+  ));
+}
 ```
 
 空态 `26` 行的 `<p>` 同步换成与上面一致的 muted 行容器。
@@ -270,7 +278,8 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
 ```css
 @layer base {
   /* 仅装饰性滚动隐藏（页面级、非内容容器） */
-  body, html,
+  body,
+  html,
   .scrollbar-hide {
     scrollbar-width: none;
   }
@@ -282,8 +291,12 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
   * {
     @apply border-border outline-ring/50;
   }
-  body { @apply bg-background text-foreground; }
-  html { @apply font-sans; }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
 }
 
 @layer utilities {
@@ -349,15 +362,15 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
 
 ## 4. 关键决策与权衡
 
-| 决策 | 选择 | 理由 | 权衡/代价 |
-|---|---|---|---|
-| **错误展示双通道（toast + 气泡）vs 单通道** | 双通道：toast 作瞬时通知标题，气泡承载完整错误可回看 | AC6 要求「无裸 toast 或静默」——完全去掉 toast 会让用户错过瞬时反馈；纯气泡又不够即时。双通道兼顾即时性与可回看 | 需保证两通道文案一致（都用 `CreatorError.title`） |
-| **`liveError` 类型升级为 `CreatorError` 对象** | 是（破坏性） | 单 `string` 无法承载等级/可重试/原始堆栈 | 需同步 6 处 `setLiveError` 调用点（`142,208,270,288` 等）+ `380` 渲染点 |
-| **`Info` 默认不 truncate** | 是（破坏性，默认值翻转） | 长路径是关键信息，截断损害可用性 | 短值调用点需显式传 `truncate`，改动 `CreationStatusPanel`/`SessionStatusPanel` 共 8 处调用 |
-| **滚动条策略：全局收紧 + 显式工具类** | 是 | 一刀切隐藏损害功能性滚动可见性；显式 `.scrollbar-thin` 让需要可见处可控 | 需在 4-5 处 `overflow-auto` 元素追加类名 |
-| **aside 响应式用默认断点（md）而非 container query** | 默认断点 | 项目无 `@container` 配置，零新依赖 | 窄屏覆盖态需 `z-20` 处理层级 |
-| **删除 `Bubble.error` 分支** | 是（破坏性） | 错误有专门 `ErrorBubble` 承载，职责单一 | 仅 1 处调用点（`380`），改动可控 |
-| **P7（header padding）保留非对称** | 保留 + 注释 | `pl-16` 是 Sidebar 避让的功能需要 | 视觉略不对称，可接受 |
+| 决策                                                 | 选择                                                 | 理由                                                                                                           | 权衡/代价                                                                                  |
+| ---------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **错误展示双通道（toast + 气泡）vs 单通道**          | 双通道：toast 作瞬时通知标题，气泡承载完整错误可回看 | AC6 要求「无裸 toast 或静默」——完全去掉 toast 会让用户错过瞬时反馈；纯气泡又不够即时。双通道兼顾即时性与可回看 | 需保证两通道文案一致（都用 `CreatorError.title`）                                          |
+| **`liveError` 类型升级为 `CreatorError` 对象**       | 是（破坏性）                                         | 单 `string` 无法承载等级/可重试/原始堆栈                                                                       | 需同步 6 处 `setLiveError` 调用点（`142,208,270,288` 等）+ `380` 渲染点                    |
+| **`Info` 默认不 truncate**                           | 是（破坏性，默认值翻转）                             | 长路径是关键信息，截断损害可用性                                                                               | 短值调用点需显式传 `truncate`，改动 `CreationStatusPanel`/`SessionStatusPanel` 共 8 处调用 |
+| **滚动条策略：全局收紧 + 显式工具类**                | 是                                                   | 一刀切隐藏损害功能性滚动可见性；显式 `.scrollbar-thin` 让需要可见处可控                                        | 需在 4-5 处 `overflow-auto` 元素追加类名                                                   |
+| **aside 响应式用默认断点（md）而非 container query** | 默认断点                                             | 项目无 `@container` 配置，零新依赖                                                                             | 窄屏覆盖态需 `z-20` 处理层级                                                               |
+| **删除 `Bubble.error` 分支**                         | 是（破坏性）                                         | 错误有专门 `ErrorBubble` 承载，职责单一                                                                        | 仅 1 处调用点（`380`），改动可控                                                           |
+| **P7（header padding）保留非对称**                   | 保留 + 注释                                          | `pl-16` 是 Sidebar 避让的功能需要                                                                              | 视觉略不对称，可接受                                                                       |
 
 > **已确认的用户决策**（来自父 PRD「用户决策」与 R5 研究结论）：错误友好化采用「对话气泡/友好卡片」形式（非纯 toast）；滚动条策略需区分装饰隐藏与功能可见；aside 需响应式收缩。本设计完全遵循。
 
@@ -386,14 +399,14 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
 
 > 按项目准则，安全性不作为验收条件；此处仅记录与样式/错误展示相关的可用性风险与已知边界。
 
-| 风险 | 等级 | 说明 | 缓解 |
-|---|---|---|---|
-| **`raw` 堆栈泄露内部信息** | 低 | `ErrorBubble` 折叠展示原始 message/raw，可能含路径、CLI 命令、token 前缀 | 默认折叠（`<details>`），标题/详情用友好文案；raw 仅排障用，桌面端用户即开发者，可接受 |
-| **Node/Python 执行安全边界（R3 侧）** | 不属本任务 | 软隔离 sandbox 由 R3 设计；本任务仅展示 R3 返回的失败结果 | 在 `creator-error.ts` 注释标明「执行安全边界见 R3 design」 |
-| **响应式 aside 在极窄窗口（< 480px）覆盖对话区** | 低 | md 断点以下面板占满，对话区被完全遮盖 | 用户可手动关闭面板（已有 `setDetailsOpen(false)`，`PluginCreatorHome.tsx:412` 关闭按钮）；可接受 |
-| **`scrollbar-thin` 在某些 WebView2 版本渲染异常** | 低 | Tauri Windows 用 WebView2，`scrollbar-color` 支持度高但极旧版本可能忽略 | 降级为无颜色细滚动条（`scrollbar-width: thin` 兜底），不影响功能 |
-| **`Info` 默认不 truncate 导致短值换行** | 低 | 状态/退出码等短值若不传 `truncate` 可能多行 | 调用点显式传 `truncate`（见 §3.5.3） |
-| **错误双通道文案漂移** | 低 | toast 与气泡标题若分别硬编码会不一致 | 统一从 `CreatorError.title` 取值，工厂函数单一来源 |
+| 风险                                              | 等级       | 说明                                                                     | 缓解                                                                                             |
+| ------------------------------------------------- | ---------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| **`raw` 堆栈泄露内部信息**                        | 低         | `ErrorBubble` 折叠展示原始 message/raw，可能含路径、CLI 命令、token 前缀 | 默认折叠（`<details>`），标题/详情用友好文案；raw 仅排障用，桌面端用户即开发者，可接受           |
+| **Node/Python 执行安全边界（R3 侧）**             | 不属本任务 | 软隔离 sandbox 由 R3 设计；本任务仅展示 R3 返回的失败结果                | 在 `creator-error.ts` 注释标明「执行安全边界见 R3 design」                                       |
+| **响应式 aside 在极窄窗口（< 480px）覆盖对话区**  | 低         | md 断点以下面板占满，对话区被完全遮盖                                    | 用户可手动关闭面板（已有 `setDetailsOpen(false)`，`PluginCreatorHome.tsx:412` 关闭按钮）；可接受 |
+| **`scrollbar-thin` 在某些 WebView2 版本渲染异常** | 低         | Tauri Windows 用 WebView2，`scrollbar-color` 支持度高但极旧版本可能忽略  | 降级为无颜色细滚动条（`scrollbar-width: thin` 兜底），不影响功能                                 |
+| **`Info` 默认不 truncate 导致短值换行**           | 低         | 状态/退出码等短值若不传 `truncate` 可能多行                              | 调用点显式传 `truncate`（见 §3.5.3）                                                             |
+| **错误双通道文案漂移**                            | 低         | toast 与气泡标题若分别硬编码会不一致                                     | 统一从 `CreatorError.title` 取值，工厂函数单一来源                                               |
 
 ## 7. 验证策略（本地可重复）
 

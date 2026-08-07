@@ -7,6 +7,7 @@
 ## 范围（4 块，用户全选）
 
 ### 1. 平台设置端点（接前端 settings-view TODO）
+
 - 新增 `PlatformSetting` 表（key/value 键值存全局配置：platformName/platformDescription/logoUrl/smtpConfig 等）。
 - `GET /api/admin/settings`：读全部配置（ensurePlatformAdmin）。
 - `PATCH /api/admin/settings`：更新配置（批量 key/value）。
@@ -14,6 +15,7 @@
 - 平台名称/logo 等公开部分：`GET /api/platform-info`（@Public，官网/客户端展示用）。
 
 ### 2. 通知系统
+
 - 新增 `Notification` 表（userId/type/title/body/read/createdAt/relatedType?/relatedId?）。
 - 触发点（在现有 service 内埋点）：
   - 审核通过/驳回（adminApprovePlugin/adminRejectPlugin）→ 通知插件作者。
@@ -24,6 +26,7 @@
 - `POST /api/notifications/read-all`：全部已读。
 
 ### 3. 结构化日志 + 健康检查增强
+
 - 引入 `nestjs-pino`（JSON 结构化日志，生产可聚合到 ELK/Loki）。
   - 请求日志（method/url/status/duration/ip/userId）。
   - 替代 Nest 默认 logger。
@@ -32,6 +35,7 @@
   - 区别于现有 `/api/health`（liveness，始终 200）：ready 检查依赖是否就绪。
 
 ### 4. 数据导出 + 账号注销（合规）
+
 - `GET /api/me/export`：导出当前用户数据（个人信息 + 插件 + 购买记录 + 钱包流水 + 对话，返 JSON 或 ZIP）。
 - `POST /api/me/delete-account`：注销账号（软删除：status=DISABLED + email 打码 + tokenVersion++，保留数据 N 天后硬删的留 TODO；或硬删 + 审计记录）。
   - 注销前校验无进行中的购买/余额为 0（或允许，标注后果）。
@@ -58,8 +62,9 @@
 - [ ] AC9 全量测试绿（新端点单测 + 现有测试不回归 + typecheck/build）。
 
 ## 实施顺序（Workflow 并行 4 组）
+
 - 组A：平台设置（schema PlatformSetting + service/controller + platform-info 公开端点）。
 - 组B：通知系统（schema Notification + service/controller + 触发点埋点）。
 - 组C：pino 日志 + health/ready（main.ts + health.controller）。
 - 组D：导出 + 注销（me.controller 扩展 + service）。
-4 组改不同文件（A: admin/new setting / B: notification / C: main/health / D: me），冲突最小。schema 迁移各自一个文件。
+  4 组改不同文件（A: admin/new setting / B: notification / C: main/health / D: me），冲突最小。schema 迁移各自一个文件。

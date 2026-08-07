@@ -23,12 +23,15 @@
 ## 2. 桌面 Rust：fetch_models 命令（新建）
 
 ### 2.1 Cargo.toml
+
 ```toml
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 ```
+
 （rustls-tls 避免原生 OpenSSL/WinHTTP 依赖；default-features=false 裁掉不需要的 feature。）
 
 ### 2.2 新建 `apps/desktop/src-tauri/src/llm_fetch.rs`
+
 ```rust
 use serde::{Deserialize, Serialize};
 
@@ -85,16 +88,25 @@ main.rs 注册：`mod llm_fetch;` + invoke_handler 加 `llm_fetch::fetch_models`
 ## 3. 前端：重做 ModelGatewayTab
 
 ### 3.1 lib 封装（改 `lib/install-cli.ts` 同款，新建或并入现有 lib）
+
 ```ts
 // fetch_models 命令封装
-export async function fetchModels(provider: string, apiUrl: string, apiKey: string): Promise<string[]> {
-  const r = await tauriInvoke<{ models: string[] }>('fetch_models', { input: { provider, apiUrl, apiKey } });
+export async function fetchModels(
+  provider: string,
+  apiUrl: string,
+  apiKey: string
+): Promise<string[]> {
+  const r = await tauriInvoke<{ models: string[] }>('fetch_models', {
+    input: { provider, apiUrl, apiKey },
+  });
   return r.models;
 }
 ```
 
 ### 3.2 ModelGatewayTab 新交互（重写 433 行）
+
 state：
+
 - `providers: LlmGatewayPublic[]`（云分发列表，GET /llm/gateways）
 - `bindings: TenantBindingPublic[]`（当前绑定）
 - `selectedProviderId: string | null`（选中的 provider）
@@ -105,6 +117,7 @@ state：
 - `saving: boolean`
 
 UI 结构：
+
 1. **provider 选择区**：从 providers 渲染下拉/卡片（显示 name + provider）。选中后：
    - 若已有该 provider 的绑定 → 显示 `apiKeyHint`（脱敏）+ 标记「已配置」。
    - apiKeyInput 清空（placeholder「重新填写覆盖」）。

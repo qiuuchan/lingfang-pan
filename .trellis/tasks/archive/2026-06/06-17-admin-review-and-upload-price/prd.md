@@ -3,6 +3,7 @@
 ## Goal
 
 补全两个小缺口：
+
 - **admin 审核按钮**：admin plugins-view 详情缺「通过/驳回」按钮（后端 `POST /api/admin/plugins/:id/approve|reject` 端点已有，前端未接）。
 - **上传期设价**：创建器上传插件时命名 Dialog 缺价格输入（后端 `PluginPackageDto` 已接受 `priceCents`，前端 doUpload 没传，默认 0 免费上传）。
 

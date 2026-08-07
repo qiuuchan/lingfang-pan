@@ -13,21 +13,28 @@
 > 独立、低风险。可合并为一个 commit「shell layout: collapse default / drop footer / drop brand text / center search」。
 
 ### A1. 项 8 — 删侧栏顶部品牌区（含 logo）
+
 - [ ] `apps/desktop/src/components/Sidebar.tsx:138-153`：删除整个 header `<div>`（logo + platformName span + `<br/>` + 副标题 span）。搜索栏（原 `:155-193`）成为侧栏最顶部。
 - [ ] 清理 Sidebar 内不再使用的 import / 解构：若 `platformName`、`platformLogoUrl`、`HomeIcon` 仅 header 用，从 `useApp()` 解构与 import 中移除（避免未用变量 lint）。
 - [ ] 验证：展开/折叠态侧栏顶部直接是搜索栏；无报错。
 
 ### A2. 项 5 — 删页脚
+
 - [ ] `apps/desktop/src/App.tsx`：删 `import { Footer } from '@/components/Footer';`（`:8`）与 `<Footer />`（`:556`）。
 - [ ] 全仓搜 Footer 引用：`grep -rn "components/Footer\|from '@/components/Footer'" apps/desktop/src`。确认仅 App.tsx 后删 `apps/desktop/src/components/Footer.tsx`。
 
 ### A3. 项 2 — 侧栏默认折叠 + 持久化
+
 - [ ] `App.tsx:192`：`useState(true)` → 改为加载函数：
   ```ts
   const SIDEBAR_OPEN_KEY = 'lf:sidebar-open';
   function loadSidebarOpen(): boolean {
-    try { const raw = localStorage.getItem(SIDEBAR_OPEN_KEY); return raw === null ? false : raw === '1'; }
-    catch { return false; }
+    try {
+      const raw = localStorage.getItem(SIDEBAR_OPEN_KEY);
+      return raw === null ? false : raw === '1';
+    } catch {
+      return false;
+    }
   }
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(loadSidebarOpen);
   ```
@@ -35,6 +42,7 @@
 - [ ] 验证：首启折叠；切换后重启保留。
 
 ### A4. 项 1 — 搜索框居中（实测驱动）
+
 - [ ] `pnpm tauri dev` 启动，登录到首页。
 - [ ] 不同窗口宽度（窄/中/宽）+ 侧栏开/合，截图观察搜索框水平位置。
 - [ ] 判定根因：
@@ -53,6 +61,7 @@
 > 项 4 先行（建 AvatarMenu），项 3 随后（拆侧栏入口搬进去）。
 
 ### B1. 项 4 — 移植 AvatarMenu
+
 - [ ] `git show origin/lingfang-v4:apps/desktop/src/components/AvatarMenu.tsx > /tmp/AvatarMenu.v4.tsx`（参考用，不直接落盘）。
 - [ ] 新建 `apps/desktop/src/components/AvatarMenu.tsx`，基于 v4 改写：
   - props：`{ open: boolean; onClose: () => void; collapsed: boolean }`。
@@ -76,6 +85,7 @@
 **commit**：`feat(desktop): port AvatarMenu from lingfang-v4 (adapted to current RBAC/View)`
 
 ### B2. 项 3 — 拆侧栏入口搬入菜单
+
 - [ ] `Sidebar.tsx:34-40` NAV：删除 `{ v: 'team-admin', label: '团队管理', icon: UsersRoundIcon, teamAdminOnly: true }`。
   - 保留 `review`（platformAdminOnly）不动。
   - 若 `UsersRoundIcon` 不再被引用，删 import。
@@ -91,6 +101,7 @@
 ## 阶段 C — 插件体验（项 6/7/9）
 
 ### C1. 项 6 — 插件图标全量 + 放大默认
+
 - [ ] `components/plugins/author-actions/shared.tsx`：`PluginIcon` 默认 class `size-8` → `size-10`（img 与 fallback 两处，`:18,21`）。
 - [ ] `pages/plugins/TeamPluginRow.tsx:78`：`size-9` → `size-10`（与默认一致；或显式 `size-10` 覆盖）。
 - [ ] `pages/plugins/LocalPluginRow.tsx`：
@@ -105,6 +116,7 @@
 **commit**：`feat(desktop): show plugin icons across all plugin rows, enlarge default`
 
 ### C2. 项 7 — 创建器模糊 + 开关态持久化
+
 - [ ] 前置确认：草稿/对话内容跨重启持久化**已存在**（`lib/conversations.ts:59 saveDraft` 落盘 + `PluginCreatorHome.tsx:201-220` 挂载按 activeId 恢复）。本步**不动**内容持久化，只做开关态 + 模糊。
 - [ ] `App.tsx`：
   - `creatorOpen` 改为带持久化的加载/包装（见 design §7）：`useState(loadCreatorOpen)` + 包装 setter `setCreatorOpen` 写 localStorage（key `lf:creator-open`）。
@@ -116,6 +128,7 @@
 **commit**：`feat(desktop): creator overlay backdrop-blur + persist open state`
 
 ### C3. 项 9 — 侧栏最近使用插件
+
 - [ ] `App.tsx`：加 recent 机制（仿 pins，见 design §9.1）：
   - `recentKey(tenantId)` → `lf:recent:{tenantId || 'none'}`；`loadRecent`/`saveRecent`。
   - `recentPlugins` state；`useEffect([session.tenantId])` 重载。
@@ -149,6 +162,7 @@ pnpm --filter @lingfang/desktop typecheck    # 若有
 ```
 
 运行 app 手测：
+
 ```bash
 pnpm --filter @lingfang/desktop tauri dev    # 或项目既定启动方式
 ```

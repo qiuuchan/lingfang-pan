@@ -132,8 +132,11 @@ export const RuntimeType = z.enum(['client', 'cloud', 'nodejs', 'python']);
   ```
 - `:121`（`normalizedManifest.runtime_type` cast）与 `:130`（`runtimeType` 映射）—— **头号陷阱修复**：用显式映射表替代三元：
   ```ts
-  const RUNTIME_TYPE_MAP: Record<string, 'CLIENT'|'CLOUD'|'NODEJS'|'PYTHON'> = {
-    client: 'CLIENT', cloud: 'CLOUD', nodejs: 'NODEJS', python: 'PYTHON',
+  const RUNTIME_TYPE_MAP: Record<string, 'CLIENT' | 'CLOUD' | 'NODEJS' | 'PYTHON'> = {
+    client: 'CLIENT',
+    cloud: 'CLOUD',
+    nodejs: 'NODEJS',
+    python: 'PYTHON',
   };
   const runtimeType = RUNTIME_TYPE_MAP[runtime] ?? 'CLIENT';
   ```
@@ -317,12 +320,12 @@ fn minimal_env() -> Vec<(OsString, OsString)> {
 
 将以下私有函数改为 `pub(crate)`，供 `plugin_script.rs` 复用（不暴露给 crate 外，符合「最小可见性」）：
 
-| 函数 | 当前行号 | 改动 | 用途 |
-|---|---|---|---|
-| `run_capture` | `:717` | 抽出 `run_captured_inner` 并 `pub(crate)`；新增 `pub(crate) run_capture_with_env` | 脚本带超时运行 |
-| `find_binary` | `:786` | `fn` → `pub(crate) fn` | 解释器探测 |
-| `find_command` | `:762` | `fn` → `pub(crate) fn` | 多候选探测（Python 跨平台顺序） |
-| `resolve_workspace` | `:819` | `fn` → `pub(crate) fn` | sandbox canonicalize（复用其 canonicalize 逻辑） |
+| 函数                | 当前行号 | 改动                                                                              | 用途                                             |
+| ------------------- | -------- | --------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `run_capture`       | `:717`   | 抽出 `run_captured_inner` 并 `pub(crate)`；新增 `pub(crate) run_capture_with_env` | 脚本带超时运行                                   |
+| `find_binary`       | `:786`   | `fn` → `pub(crate) fn`                                                            | 解释器探测                                       |
+| `find_command`      | `:762`   | `fn` → `pub(crate) fn`                                                            | 多候选探测（Python 跨平台顺序）                  |
+| `resolve_workspace` | `:819`   | `fn` → `pub(crate) fn`                                                            | sandbox canonicalize（复用其 canonicalize 逻辑） |
 
 > `stop_child_process`（`:637`）与 `spawn_waiter`/`spawn_reader` 是流式长会话专用，`run_plugin_script` 不复用（一次性同步运行由 `run_capture` 内部 kill 兜底）。
 
@@ -335,7 +338,10 @@ import { tauriInvoke } from '@/lib/api';
 
 export type ScriptRuntime = 'nodejs' | 'python';
 
-export interface ScriptFile { path: string; content: string; }
+export interface ScriptFile {
+  path: string;
+  content: string;
+}
 
 export interface ProbeResult {
   available: boolean;
@@ -376,8 +382,10 @@ export function runPluginScript(input: {
 
 // 安装指引文案（缺失解释器时展示）
 export const RUNTIME_INSTALL_HINT: Record<ScriptRuntime, string> = {
-  nodejs: '未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.Technology.NodeJS.LTS',
-  python: '未检测到 Python。请安装：运行 winget install Python.Python.3.12，或访问 https://python.org 下载。Windows 推荐 py launcher。',
+  nodejs:
+    '未检测到 Node.js。请安装：访问 https://nodejs.org 下载 LTS，或运行 winget install OpenJS.Technology.NodeJS.LTS',
+  python:
+    '未检测到 Python。请安装：运行 winget install Python.Python.3.12，或访问 https://python.org 下载。Windows 推荐 py launcher。',
 };
 ```
 
@@ -414,11 +422,11 @@ export function PreviewPanel({ files, previewKey, onRefresh }) {
 
 本子任务**不实现** systemPrompt 协议与 `parseStructuredPackage`（那是 R2 的职责），但需与 R2 约定 manifest 字段：
 
-| 字段 | Node | Python | 说明 |
-|---|---|---|---|
-| `runtime_type` | `"nodejs"` | `"python"` | 驱动前端分派 + 后端映射 |
-| `entry` | `src/index.js` 等 | `main.py` 等 | `run_plugin_script` 的入口参数 |
-| `files` | 多文件（含 `package.json` 占位可空） | 多文件（含 `requirements.txt` 可空） | R2 解析产出 |
+| 字段           | Node                                 | Python                               | 说明                           |
+| -------------- | ------------------------------------ | ------------------------------------ | ------------------------------ |
+| `runtime_type` | `"nodejs"`                           | `"python"`                           | 驱动前端分派 + 后端映射        |
+| `entry`        | `src/index.js` 等                    | `main.py` 等                         | `run_plugin_script` 的入口参数 |
+| `files`        | 多文件（含 `package.json` 占位可空） | 多文件（含 `requirements.txt` 可空） | R2 解析产出                    |
 
 本子任务**保证**：只要 `files` 含 `manifest.json` 且 `runtime_type ∈ {nodejs,python}`、`entry` 指向的文件存在于 `files`，`run_plugin_script` 即可运行。
 
@@ -564,6 +572,7 @@ AC3 验证：分别生成 Node.js 与 Python 插件 → 预览执行展示 stdou
 ## 8. 文件清单（新增 / 修改）
 
 **新增**：
+
 - `apps/desktop/src-tauri/src/plugin_script.rs`（Rust 命令模块）
 - `apps/desktop/src/lib/plugin-script.ts`（前端类型 + invoke 封装）
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx`（终端预览组件）
@@ -571,6 +580,7 @@ AC3 验证：分别生成 Node.js 与 Python 插件 → 预览执行展示 stdou
 - `apps/collab-api/src/modules/plugin-package.spec.ts`（新增或扩展，覆盖 §4.1）
 
 **修改**：
+
 - `packages/contract/src/plugin.ts:4`（RuntimeType 四值）
 - `apps/collab-api/src/modules/plugin-package.ts:34,40,81-82,121,130`（类型 + 校验 + 映射表）
 - `apps/collab-api/prisma/schema.prisma:56-59`（enum 扩展）

@@ -12,14 +12,14 @@
 
 ### 批次划分
 
-| 批次 | 子系统 | 优先级 | 关键缺陷 |
-|------|--------|--------|----------|
-| 批次1 | collab-api 鉴权与安全 | P0/P1 | PPK-01 付费墙绕过、AUTH-01 refresh 续命、ADMIN-02 不吊销 JWT、XSEC-01 无 ValidationPipe、XERR-01 Prisma 错误吞 500 |
-| 批次2 | collab-api 经济与团队 | P0/P1 | TEAM-01 邀请码超发、MKT-02 评分 TOCTOU、PLUGIN-02 installCount、SCHEMA-01 signup_bonus 重复、TEAM-03 软删除团队未阻断 |
-| 批次3 | collab-api 插件与管理 | P1/P2 | PLUGIN-04 APPROVED 下架、ADMIN-09 自禁用锁死、XLOG-01 adminUpdateTeam 透传、各 P2025→404 映射、PPK-02 源码泄露 |
-| 批次4 | desktop Rust | P0/P1 | SCRIPT-01 路径穿越删除、RT-01 iframe 越权、RUSTSHIM-01 无锁持久化、SPAWN 系列、SCRIPT-02 超时孤儿 |
-| 批次5 | desktop React | P1/P2 | CREATOR-01/02 草稿脏写、CREATOR-03~12 流式 UI、DESK 系列会话/基础库、STREAM 系列 |
-| 批次6 | collab-admin + packages | P2/P3 | ADMIN-VIEW-01 资金双击、ADMIN-VIEW-04 表单吞异常、CONTRACT 契约对齐、SDK 系列 |
+| 批次  | 子系统                  | 优先级 | 关键缺陷                                                                                                              |
+| ----- | ----------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| 批次1 | collab-api 鉴权与安全   | P0/P1  | PPK-01 付费墙绕过、AUTH-01 refresh 续命、ADMIN-02 不吊销 JWT、XSEC-01 无 ValidationPipe、XERR-01 Prisma 错误吞 500    |
+| 批次2 | collab-api 经济与团队   | P0/P1  | TEAM-01 邀请码超发、MKT-02 评分 TOCTOU、PLUGIN-02 installCount、SCHEMA-01 signup_bonus 重复、TEAM-03 软删除团队未阻断 |
+| 批次3 | collab-api 插件与管理   | P1/P2  | PLUGIN-04 APPROVED 下架、ADMIN-09 自禁用锁死、XLOG-01 adminUpdateTeam 透传、各 P2025→404 映射、PPK-02 源码泄露        |
+| 批次4 | desktop Rust            | P0/P1  | SCRIPT-01 路径穿越删除、RT-01 iframe 越权、RUSTSHIM-01 无锁持久化、SPAWN 系列、SCRIPT-02 超时孤儿                     |
+| 批次5 | desktop React           | P1/P2  | CREATOR-01/02 草稿脏写、CREATOR-03~12 流式 UI、DESK 系列会话/基础库、STREAM 系列                                      |
+| 批次6 | collab-admin + packages | P2/P3  | ADMIN-VIEW-01 资金双击、ADMIN-VIEW-04 表单吞异常、CONTRACT 契约对齐、SDK 系列                                         |
 
 ## Constraints
 

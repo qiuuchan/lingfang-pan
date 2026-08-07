@@ -7,12 +7,12 @@
 
 ### 1.1 前置依赖（子任务间）
 
-| 依赖项 | 来源子任务 | 关系 | 说明 |
-|---|---|---|---|
-| `Bubble` / `Composer` / `Info` / 各 Panel | 当前既有代码 | 直接改造 | 无需等待 |
-| `markdown.tsx` | `06-13-output-rendering-polish`（R4） | **弱耦合** | 本任务只删除 `Bubble.error` 分支，不碰 `markdown.tsx`；R4 改高亮/复制与本任务并行无冲突 |
-| `run_plugin_script` 返回结构 | `06-13-node-python-local-exec`（R3） | **接口对接** | 本任务定义 `RunScriptResult` 期望形状（`design.md` §3.3）；R3 实现须对齐。**本任务可先实现 `fromRunResult` 解析器并独立验证，不阻塞于 R3 完成** |
-| 后端契约 | `06-13-structured-output-parsing`（R2） | **无** | 本任务无契约面，上传错误的友好映射基于 `ApiError.code`/HTTP status，不依赖契约变更 |
+| 依赖项                                    | 来源子任务                              | 关系         | 说明                                                                                                                                            |
+| ----------------------------------------- | --------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Bubble` / `Composer` / `Info` / 各 Panel | 当前既有代码                            | 直接改造     | 无需等待                                                                                                                                        |
+| `markdown.tsx`                            | `06-13-output-rendering-polish`（R4）   | **弱耦合**   | 本任务只删除 `Bubble.error` 分支，不碰 `markdown.tsx`；R4 改高亮/复制与本任务并行无冲突                                                         |
+| `run_plugin_script` 返回结构              | `06-13-node-python-local-exec`（R3）    | **接口对接** | 本任务定义 `RunScriptResult` 期望形状（`design.md` §3.3）；R3 实现须对齐。**本任务可先实现 `fromRunResult` 解析器并独立验证，不阻塞于 R3 完成** |
+| 后端契约                                  | `06-13-structured-output-parsing`（R2） | **无**       | 本任务无契约面，上传错误的友好映射基于 `ApiError.code`/HTTP status，不依赖契约变更                                                              |
 
 **结论**：本子任务**可与其它并行启动**，仅在与 R3 对接 `RunScriptResult` 形状时需在 review gate 协调（见 §4 G3）。
 
@@ -73,7 +73,11 @@ pnpm install
 - [ ] 新建 `apps/desktop/src/components/chat/ErrorBubble.tsx`（design §3.5.1）：图标+标题+detail+`<details>` 折叠 raw（`max-h-48 overflow-auto scrollbar-thin`）+条件重试按钮。
 - [ ] `PluginCreatorHome.tsx:380`：
   ```tsx
-  {!streaming && liveError && <ErrorBubble error={liveError} onRetry={pendingPromptRef.current ? send : undefined} />}
+  {
+    !streaming && liveError && (
+      <ErrorBubble error={liveError} onRetry={pendingPromptRef.current ? send : undefined} />
+    );
+  }
   ```
 - [ ] retry 复用 `pendingPromptRef.current`（`238` 行已有 prompt 快照）。
 - [ ] **验证**：
@@ -204,12 +208,12 @@ pnpm install
 
 本子任务改动集中在 `apps/desktop/src` 的 **8 个文件 + 1 个新脚本**，无数据面/契约面影响，回滚即 `git revert`：
 
-| 回滚单元 | 涉及文件 | 回滚方式 |
-|---|---|---|
-| 错误模型 | `src/lib/creator-error.ts`（新）、`scripts/probe-creator-error.mjs`（新） | 删除两文件 |
+| 回滚单元                                             | 涉及文件                                                                                                         | 回滚方式      |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------- |
+| 错误模型                                             | `src/lib/creator-error.ts`（新）、`scripts/probe-creator-error.mjs`（新）                                        | 删除两文件    |
 | `liveError` 升级 + `ErrorBubble` + `Bubble` 删 error | `src/pages/PluginCreatorHome.tsx`、`src/components/chat/Bubble.tsx`、`src/components/chat/ErrorBubble.tsx`（新） | revert commit |
-| `Info` 增强 + 调用点 | `src/components/creator/Info.tsx`、`CreationStatusPanel.tsx`、`SessionStatusPanel.tsx` | revert commit |
-| 样式 7 处 | `Composer.tsx`、`CreationStatusPanel.tsx`、`PluginCreatorHome.tsx`、`index.css`、`SourcePanel.tsx` | revert commit |
+| `Info` 增强 + 调用点                                 | `src/components/creator/Info.tsx`、`CreationStatusPanel.tsx`、`SessionStatusPanel.tsx`                           | revert commit |
+| 样式 7 处                                            | `Composer.tsx`、`CreationStatusPanel.tsx`、`PluginCreatorHome.tsx`、`index.css`、`SourcePanel.tsx`               | revert commit |
 
 **建议提交粒度**（小步可回滚）：
 

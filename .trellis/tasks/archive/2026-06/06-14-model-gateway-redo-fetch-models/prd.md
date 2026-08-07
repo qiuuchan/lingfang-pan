@@ -7,12 +7,14 @@
 ## 背景（为什么改）
 
 上一版模型网关（settings-cli-runtime-model-gateway 任务）做成了「网关目录让租户选 + 从静态 models 列表勾选」——Admin 维护 `LlmGateway.models` 静态数组，租户从中选子集。用户反馈这不对：
+
 - 大模型 url 应**后台云分发**（或打包进软件），不是让租户感知「网关目录」。
 - 租户**只填 apiKey**，模型应该是**填 key 后动态拉取**（调 provider 真实的 `/v1/models`），不是从静态列表选。
 
 ## Scope（范围）
 
 ### 保留不变（上一版已就绪，复用）
+
 - `LlmGateway` 表 + `/api/llm/gateways` 端点：语义从「网关目录」改为「**provider 配置云分发**」（下发给所有客户端的固定 provider 列表：provider + apiUrl + 默认模型提示）。表结构不动。
 - `TenantLlmBinding` 表：`(teamId, gatewayId)` 唯一（一个 provider 一条绑定），`encryptedApiKey`（AES-256-GCM）+ `apiKeyHint` + `keyFingerprint` 保留。`modelOverride` 语义微调（见下）。
 - 加密/审计/端点鉴权（ensureTeamAdmin 等）全部保留。
@@ -20,6 +22,7 @@
 ### 改动
 
 #### R1 桌面 Rust：新增 fetch_models 命令
+
 - 新建命令 `fetch_models({ provider, apiUrl, apiKey })`：
   - 用 reqwest 调 `{apiUrl}/v1/models`（OpenAI 兼容标准），`Authorization: Bearer {apiKey}`。
   - 解析返回的 `{ data: [{ id: "gpt-4o", ... }, ...] }`，提取 `id` 列表。
@@ -29,6 +32,7 @@
 - Cargo.toml 加 `reqwest`（features: json，rustls-tls 避免原生 TLS 依赖）。
 
 #### R2 前端：重做 ModelGatewayTab
+
 - 去掉当前「网关下拉 + 静态模型 checkbox 组」的交互。
 - 新交互：
   1. **provider 选择**：从云分发列表（`GET /api/llm/gateways`）选一个 provider（下拉/卡片）。选 provider 只为确定 apiUrl（url 来自云分发，用户不感知 url）。
@@ -38,6 +42,7 @@
 - 模型展示：拉取后用 checkbox 组或多选展示，选中态存 `modelOverride`。
 
 #### R3 后端：微调（可选，最小）
+
 - `TenantLlmBinding.modelOverride`：语义从「gateway.models 静态子集」改为「拉取后选的子集」。字段类型不变（Json? string[]），service 的 `effectiveModels` 逻辑不变（modelOverride ?? gateway.models）。**若不拉取就保存，modelOverride 为空，effectiveModels 退回 gateway.models（默认提示模型）**。
 - `LlmGateway.models` 字段：从「静态可选列表」改为「**默认/推荐模型提示**」（拉取失败或未拉取时的 fallback）。语义松绑，不强求精确。
 - 无需新端点（fetch_models 是桌面 Rust 直连 provider，不经后端）。

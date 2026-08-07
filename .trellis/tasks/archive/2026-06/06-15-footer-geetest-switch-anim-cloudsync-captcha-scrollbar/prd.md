@@ -16,10 +16,12 @@
 ## Requirements（需求）
 
 ### R1 页脚固定（flex 布局，不随主内容滚动）
+
 - desktop 与 collab-admin 的 `<main>` 改 `flex-col overflow-hidden`，内容区 `min-h-0 flex-1 overflow-y-auto`，`<Footer />` 作为 `shrink-0` 兄弟节点贴视口底部。
 - Footer 自身 `shrink-0`，注释明确「固定在视口底部，不随主内容滚动」。
 
 ### R2 极验开关测试（全栈闭环 + 单测）
+
 - 后端 `geetestScenes` 配置项（白名单 `login`/`register`/`forgot`，固定顺序归一化），入 `PUBLIC_SETTING_KEYS` 与公开信息。
 - `requireCaptcha(scene, captcha?)` 按场景判定，替代原全局 `isConfigured`；login/register/forgotPassword 三处分别传对应场景。
 - 管理端设置页「验证码服务（极验）」Section：captchaId/captchaKey 输入 + 三场景 Checkbox + 保存/重置/测试按钮。
@@ -27,18 +29,22 @@
 - `getGeetestSettings` 对 captchaKey 脱敏；`testCaptcha` 区分未配置/接口正常/网络异常三态 + 403 权限。
 
 ### R3 弹窗动画（framer-motion + reduced-motion）
+
 - dialog 重写：Overlay/Content 由 `forceMount + asChild` 交 motion.div 接管，Content 用 spring（stiffness 320/damping 30）做 scale+fade，遮罩 `backdrop-blur-[2px]`，尊重 `prefers-reduced-motion` 退化为瞬时 opacity。
 - detail-sheet / command-palette 同步引入 `useReducedMotion` 与 spring 过渡，与 Dialog 风格统一。
 
 ### R4 平台信息云同步
+
 - 后端 `getPublicInfo` 返回值与 `PublicInfoCacheEntry.value` 增 `geetestScenes` 字段。
 - collab-admin 登录落地页与 desktop 登录页拉取 `platformName` + `geetestScenes`，平台名徽标块（首字母+平台名）展示，标题用 `{platformName} · 管理员登录`。
 
 ### R5 验证码容器
+
 - 极验 `product` 由 `bind` 改为 `float`（容器浮入自带「点击验证」按钮）。
 - 登录页容器渲染与提交校验均改为按场景判定（`captchaVisible = captchaId && sceneEnabled(scene)`），register/login/forgot 三场景各自独立校验。
 
 ### R6 隐藏滚动条
+
 - desktop 与 collab-admin `index.css` 的 `@layer base` 全局隐藏 `*, body, html, .scrollbar-hide`（scrollbar-width:none + ::-webkit-scrollbar display:none）。
 - `@layer utilities` 新增 `.scrollbar-thin`（功能性细滚动条，覆盖全局隐藏，用于代码块/日志/详情面板）。
 

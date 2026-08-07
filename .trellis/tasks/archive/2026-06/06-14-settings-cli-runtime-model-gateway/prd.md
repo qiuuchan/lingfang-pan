@@ -20,17 +20,20 @@
 ### R1 后端：模型网关模块（collab-api）
 
 **数据模型**（新增 2 表 + 2 枚举）：
+
 - `LlmGateway`（平台级）：`provider`（String，平台维护的白名单值）/ `name`（唯一展示名）/ `apiUrl`（规范化去尾斜杠）/ `models`（Json string[]）/ `description` / `sortOrder` / `status`（ENABLED|DISABLED）。
 - `TenantLlmBinding`（租户级）：`teamId` / `gatewayId` / `provider`（冗余）/ `encryptedApiKey`（AES-256-GCM 密文）/ `apiKeyHint`（脱敏串）/ `keyFingerprint`（sha256 前16位）/ `enabled` / `modelOverride`（Json?）/ `createdById` / `updatedById`，唯一约束 `(teamId, gatewayId)`。
 - `Team`/`User` 加反向关系。
 
 **加密**（新 `crypto/credential-cipher.ts`）：
+
 - Node `crypto` AES-256-GCM，密钥从 env `LLM_KEY_ENCRYPTION_KEY`（64 位 hex → 32 字节）读取。
 - 密文打包为单字符串 `base64(iv(12B) || tag(16B) || ciphertext)`，每次新 IV。
 - `encryptApiKey`/`decryptApiKey`/`maskApiKey`/`fingerprintApiKey`/`requireKeyEncryptionKey`，全单测覆盖（往返/篡改 tag/iv 各自抛错/IV 随机性/脱敏边界）。
 - `main.ts` 复刻 JWT_SECRET 的 fail-fast 断言：生产缺密钥 throw，dev warn 但**不生成兜底密钥**（首次加解密 throw `llm_key_not_configured`）。
 
 **端点**（全局 JwtAuthGuard 下，前缀 `/api`）：
+
 - 平台 Admin（`AdminController` + `ensurePlatformAdmin`）：
   - `GET /api/admin/llm-gateways`（含 DISABLED + 全字段）
   - `POST /api/admin/llm-gateways`（`GatewayCreateDto`）
@@ -50,17 +53,20 @@
 ### R2 桌面端：CLI/运行时检测 + winget 自动安装（Tauri）
 
 **复用现有**（前端 `tauriInvoke` 调用，不重写探测）：
+
 - `code_assistant_list_tools()` → `Vec<ToolAvailability>`（含 version/binary_path/models/default_model）
 - `code_assistant_check_tool({tool})` → `ToolAvailability`
 - `probe_script_runtime({runtime})` → `Result<ProbeResult, String>`
 
 **新增命令**（新 `cli_installer.rs`）：
+
 - `install_cli({target: 'claude'|'codex'|'opencode'})` → `Result<InstallResult, String>`，走 `Command::new("winget")` + `env_clear()` + 最小白名单 env（裁掉宿主 token/key），300s 硬超时。
 - `install_runtime({target: 'nodejs'|'python'})` → 同上。
 - `cancel_install({target})` → 杀进程组。
 - 安装成功后 emit `code-assistant://availability-changed`（payload = 全量 `Vec<ToolAvailability>`，与 main.rs:232 首启 emit 同形态）。
 
 **winget 包 id**（已核实，microsoft/winget-pkgs 官方 manifest）：
+
 - claude → `Anthropic.ClaudeCode`（独立二进制，非 npm）
 - codex → `OpenAI.Codex`（Rust 二进制）
 - opencode → `SST.opencode`（注意 publisher 是 SST）
@@ -76,6 +82,7 @@
 ### R3 前端：设置页 Tab 化（apps/desktop/src）
 
 **Settings.tsx 改造**为三 Tab 骨架（`<Tabs defaultValue="cli">` + 3 个 `TabsTrigger` + 3 个 `keepMounted` 的 `TabsContent`）：
+
 - Tab1 `cli`：CLI 与运行时管理（新 `settings/CliRuntimeTab.tsx`）
 - Tab2 `gateway`：模型网关（新 `settings/ModelGatewayTab.tsx`）
 - Tab3 `backend`：现有后端地址 Card（零改动搬入）

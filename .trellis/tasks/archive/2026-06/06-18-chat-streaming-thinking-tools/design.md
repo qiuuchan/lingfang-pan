@@ -60,6 +60,7 @@ pub struct SseDecoder { buf: Vec<u8> }
 ```
 
 `AnthropicStreamState::into_assistant_content() -> Value` 产出该数组。续轮：
+
 1. `messages.push({ role: "assistant", content: <重建数组> })`
 2. `messages.push({ role: "user", content: [ {type:"tool_result", tool_use_id, content} ... ] })`（沿用现有 `LocalToolExecutor::execute`）
 
@@ -112,4 +113,3 @@ pub struct SseDecoder { buf: Vec<u8> }
 - 破坏性变更：请求体新增 `stream:true`（+ Anthropic `thinking`），响应路径从阻塞 `.json()` 改 SSE。不保留旧阻塞分支。
 - 回滚点：改动集中在 `engine/`，`git checkout -- apps/desktop/src-tauri/src/code_assistant/engine/` 即回退；前端无改动不受影响。
 - 风险：自定义 Anthropic 代理若不支持 `thinking` 参数可能 400 → 经 `errorMessage` 透出真实报错，用户可感知（不再是静默兜底）。
-

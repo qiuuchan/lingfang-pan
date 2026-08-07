@@ -31,13 +31,13 @@
 
 ## patchright 版本 ↔ chromium revision 映射（实测确认）
 
-| 库版本 | chromium revision | browserVersion |
-| --- | --- | --- |
-| playwright/patchright 1.58.x | 1208 | 145.0.7632.6 |
-| playwright 1.59.x | ~1216 | 147.0.7727.15 |
-| playwright 1.60.x | 1223 | 148.0.7778.96 |
-| **playwright/patchright 1.61.0–1.61.1** | **1228** | **149.0.7827.55** ✅ 与内置完全一致 |
-| playwright main(1.61+) | 1231/1232 | 150.0.7871.46 |
+| 库版本                                  | chromium revision | browserVersion                      |
+| --------------------------------------- | ----------------- | ----------------------------------- |
+| playwright/patchright 1.58.x            | 1208              | 145.0.7632.6                        |
+| playwright 1.59.x                       | ~1216             | 147.0.7727.15                       |
+| playwright 1.60.x                       | 1223              | 148.0.7778.96                       |
+| **playwright/patchright 1.61.0–1.61.1** | **1228**          | **149.0.7827.55** ✅ 与内置完全一致 |
+| playwright main(1.61+)                  | 1231/1232         | 150.0.7871.46                       |
 
 **结论：pin `patchright==1.61.1` + `playwright==1.61.0`，二者期望的 chromium revision 恰为 1228，与软件内置完全一致。**
 注意 PyPI 可用性：`playwright` 只发布到 **1.61.0**（无 1.61.1）；`patchright` 有 1.61.1/1.61.2。故取 patchright==1.61.1 + playwright==1.61.0。

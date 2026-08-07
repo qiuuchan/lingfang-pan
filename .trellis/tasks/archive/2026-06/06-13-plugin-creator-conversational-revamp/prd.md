@@ -20,18 +20,21 @@
 ## Requirements（需求）
 
 ### R1 对话式多轮创建（子任务：conversational-multiturn）
+
 - 用户在同一会话内可追问澄清需求、基于生成结果继续迭代修改。
 - 不再每轮 `setCurrentDraft(null)` 清空；草稿与对话历史跨轮累积。
 - 三 CLI 均可多轮；非真复用的 CLI（codex/opencode）需对用户透明提示降级语义。
 - 多轮失败（会话已退出 / cli_session_id 缺失）必须有明确 UI 反馈，不得静默失败。
 
 ### R2 代码助手结构化输出与解析（子任务：structured-output-parsing）
+
 - CLI 真正产出符合契约的结构化插件包（`manifest.json` + 多文件代码），前端解析采用，**不再硬编码兜底覆盖**。
 - 采用「文本内约定标记」协议（` ```lingfang-manifest json` / ` ```file path=` / ` ```lingfang-notes`），跨三 CLI 零适配。
 - 容错：部分缺失用前端兜底补全，完全失败退回当前行为并标记 `invalid`。
 - **修复 capabilities 契约 bug**：产出对象数组 `{kind,reason,risk,requires_admin,scope?}`，kind 命中白名单（`code-assistant.run` 等），**绝不再用裸 `code-assistant`**。`uploadCloud` 流程不再被后端 400 拒绝。
 
 ### R3 Node/Python 语言与本地预览执行（子任务：node-python-local-exec）
+
 - 支持生成 Node.js / Python 插件（按运行时语言分模板），并可在本地预览执行。
 - 桌面壳新增 `run_plugin_script` 命令，复用 `code_assistant.rs` 子进程基础设施（探测解释器、超时、流式/同步回传、sandbox 落盘）。
 - PreviewPanel 按 runtime 分派：client→iframe，nodejs/python→终端输出组件（stdout/stderr/exitCode/超时标记）。
@@ -40,12 +43,14 @@
 - 安全边界：本轮 sandbox 仅软隔离（用户权限运行），design 必须标注后续 OS 级隔离为独立大任务。
 
 ### R4 输出渲染美化（子任务：output-rendering-polish）
+
 - 引入 `rehype-highlight`（github-dark 主题），代码块语法高亮覆盖 Node/Python/HTML/JS/TS 等常见语言。
 - 区分 inline code 与 fenced code block（react-markdown v10 用 className 正则，非已废弃的 `inline` prop）。
 - fenced 代码块带复制按钮（挂 pre 层，`navigator.clipboard`）、最大高度约束、横向滚动。
 - 流式过程中的 assistant 内容复用同一 Markdown 组件（含高亮），与最终态观感一致。
 
 ### R5 样式与错误友好化（子任务：styling-and-error-polish）
+
 - 修复 Composer 输入框贴边（Textarea 被 `p-0` 清零默认 padding）、诊断文本裸 `<p>` 无容器、Bubble 错误态无内 padding、Info 组件 truncate 截断关键信息、aside 固定 420px 无响应式。
 - 制定全局滚动条策略（当前 `index.css` 全局隐藏滚动条导致溢出不可见），区分「装饰性隐藏」与「功能性需可见」。
 - 创建过程中所有错误（CLI 启动失败、transcript 读取失败、上传 4xx/5xx、解释器缺失、超时）以**对话气泡/友好卡片**形式抛出，而非裸 toast 或静默。
@@ -63,13 +68,13 @@
 
 ## 子任务地图
 
-| 子任务 | 职责 | 依赖 |
-|---|---|---|
-| `06-13-conversational-multiturn` | 多轮 send_input 解锁、turns 累积、生成后迭代 | 依赖 R2 的结构化协议（迭代需基于结构化草稿） |
-| `06-13-structured-output-parsing` | systemPrompt 协议、parseStructuredPackage、normalizeCapabilities、修契约 bug | **核心基础**，无前置依赖；R1/R3 依赖它 |
-| `06-13-node-python-local-exec` | run_plugin_script 命令、预览分派、契约四值扩展 | 依赖 R2 的结构化产出（Node/Python 代码需被正确解析为多文件） |
-| `06-13-output-rendering-polish` | rehype-highlight、inline/fenced 区分、复制按钮、流式高亮 | 独立，可与其它并行 |
-| `06-13-styling-and-error-polish` | 贴边修复、滚动条策略、aside 响应式、错误友好抛出 | 独立，可与其它并行；但作用于同一主链路需协调 |
+| 子任务                            | 职责                                                                         | 依赖                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `06-13-conversational-multiturn`  | 多轮 send_input 解锁、turns 累积、生成后迭代                                 | 依赖 R2 的结构化协议（迭代需基于结构化草稿）                 |
+| `06-13-structured-output-parsing` | systemPrompt 协议、parseStructuredPackage、normalizeCapabilities、修契约 bug | **核心基础**，无前置依赖；R1/R3 依赖它                       |
+| `06-13-node-python-local-exec`    | run_plugin_script 命令、预览分派、契约四值扩展                               | 依赖 R2 的结构化产出（Node/Python 代码需被正确解析为多文件） |
+| `06-13-output-rendering-polish`   | rehype-highlight、inline/fenced 区分、复制按钮、流式高亮                     | 独立，可与其它并行                                           |
+| `06-13-styling-and-error-polish`  | 贴边修复、滚动条策略、aside 响应式、错误友好抛出                             | 独立，可与其它并行；但作用于同一主链路需协调                 |
 
 > 依赖仅写在各子任务 `implement.md`，树结构本身不表达依赖（遵循 Trellis 规范）。
 

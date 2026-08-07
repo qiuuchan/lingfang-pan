@@ -86,7 +86,7 @@
 - Cargo.toml：删 `tauri-plugin-updater`、`url`（仅 updater 用）。
   **保留 `minisign-verify`**（plugin_security.rs 插件签名仍在用，与本任务无关）。
 - Rust：删 `updater.rs`、main.rs 的 updater 插件注册 + `check_update`/`download_and_install` 命令注册
-  + `PendingUpdate` State。
+  - `PendingUpdate` State。
 - 前端：删/改造 `lib/updater.ts`，`Settings.tsx` 更新 UI 改对接新更新器（不是删，是换数据源/命令）。
 - 后端：删 `/api/releases/tauri-update` 端点 + `tauriManifest()` + `ReleaseTauriQueryDto`。
   `ReleaseAsset.signature` DB 列保留（不强删避免 migration 风险），停止使用；admin 上传 `.sig` 逻辑移除。
@@ -130,6 +130,7 @@
 ## Acceptance Criteria
 
 ### 安装器
+
 - [ ] 双击 `LingFang-Setup-x.y.z.exe` 弹出 egui 安装界面，可选/确认安装目录（默认 `%LOCALAPPDATA%\LingFang`）。
 - [ ] 安装完成后：app 文件（主程序 + `runtimes/` + `builtin-plugins/` + `updater.exe`）落到目标目录；
       开始菜单 + 桌面有「灵坊工作台」快捷方式；注册表写入 Uninstall key（控制面板「添加删除程序」可见）。
@@ -137,22 +138,26 @@
 - [ ] 安装后双击快捷方式可正常启动主程序，内置插件/runtime 可用。
 
 ### 更新器
+
 - [ ] 主程序「检查更新」命中新版本时，下载新版 EXE 到临时目录并校验 SHA-256；哈希不匹配则中止并报错，不安装。
 - [ ] 校验通过后启动 `updater.exe` 并退出主程序；`updater.exe` 等主进程退出后静默覆盖安装目录、重启主程序到新版本。
 - [ ] 更新进度（下载字节/总量）在主程序 UI 内展示；更新失败（网络/校验/覆盖）有可读错误提示，主程序可恢复。
 
 ### 卸载器
+
 - [ ] 控制面板「添加删除程序」点卸载调起卸载流程：关闭运行中的主进程 → 删除安装目录文件 →
       删快捷方式 → 删注册表 Uninstall key → 卸载器自删除。
 - [ ] 卸载后开始菜单/桌面/注册表项均清除，安装目录清空。
 
 ### 后端 + 发布
+
 - [ ] `ReleaseAsset` 新增 `sha256` 字段，`uploadAsset()` 上传时自动计算并存储。
 - [ ] `/api/releases/latest` asset 出参包含 `sha256`；自制更新器据此校验。
 - [ ] `/api/releases/tauri-update` 端点 + `tauriManifest()` + `ReleaseTauriQueryDto` 已移除；相关测试更新/删除。
 - [ ] collab-admin 发布页上传安装包后展示 sha256；移除 `.sig` 上传相关 UI。
 
 ### 清理 + 构建
+
 - [ ] `tauri-plugin-updater`、`url` crate、`updater.rs`、main.rs updater 注册/命令/State 全部移除；
       `minisign-verify` 保留且 plugin_security.rs 仍编译通过。
 - [ ] `tauri.conf.json` 移除 `plugins.updater`、`createUpdaterArtifacts`、`nsis` targets/段、`installerHooks`；
@@ -160,6 +165,7 @@
 - [ ] 构建脚本可一键产出 `LingFang-Setup-x.y.z.exe`，无需 `TAURI_SIGNING_PRIVATE_KEY_PATH` / `.tauri/lingfang.key`。
 
 ### 验证
+
 - [ ] `cargo build`（workspace，含新 installer crate + src-tauri）通过。
 - [ ] `installer` crate 关键纯函数（自解压偏移定位、SHA-256 校验、路径解析）有单元测试且通过。
 - [ ] collab-api release 模块相关测试（`release.service.spec.ts` / `release-url.spec.ts`）更新后通过。

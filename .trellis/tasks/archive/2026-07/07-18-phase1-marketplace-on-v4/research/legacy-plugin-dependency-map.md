@@ -7,6 +7,7 @@
 核心字段：`name/description/version/entry/runtimeType/status/visibility/teamId/authorUserId`、市场 `marketplace(bool)/priceCents/installCount/ratingCount/ratingSum`、审核 `reviewStatus/reviewReason/reviewedById/At`、政策 `aiPolicyVersion/Status/Reason`、内容 `files/manifest/capabilities(contentHash)`。
 
 **关联（FK）**：
+
 - `PluginInstallation[]`（强 FK `pluginId`，onDelete Cascade）
 - `PluginReview[]`（legacy 审核记录）
 - `Purchase[]`（**双写**：`pluginId?` + `packageId?` + `releaseId?`）
@@ -15,38 +16,44 @@
 
 ## 2. legacy `Plugin` 消费点全量（collab-api，排除 spec）
 
-| 文件 | 用途 | 关键行 |
-|---|---|---|
-| `plugin.service.ts` | legacy CRUD/上传/上下架：create/update/delete/findMany/findUnique | 39,45,57,67,95,104,136,167,178,191,198,208,219,229,240,253,280,346,374,391 |
-| `marketplace.service.ts` | **货架列表/详情/安装计数** | 32(list),52(detail),91,123(installCount++),134 |
-| `economy.service.ts` | **购买计费**：resolve plugin | 25 |
-| `admin.service.ts` | 后台 plugin 管理：审核/编辑/下架/删除/列表/计数 | 151,850,887,894,993,1001,1011,1070,1116,1133,1144,1187,1190,1199 |
-| `me.service.ts` | 「我的插件」by authorUserId | 33 |
-| `audit-plugin-ai-policy.ts` | 存量政策审计脚本（findMany+update） | 57,76 |
+| 文件                        | 用途                                                              | 关键行                                                                     |
+| --------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `plugin.service.ts`         | legacy CRUD/上传/上下架：create/update/delete/findMany/findUnique | 39,45,57,67,95,104,136,167,178,191,198,208,219,229,240,253,280,346,374,391 |
+| `marketplace.service.ts`    | **货架列表/详情/安装计数**                                        | 32(list),52(detail),91,123(installCount++),134                             |
+| `economy.service.ts`        | **购买计费**：resolve plugin                                      | 25                                                                         |
+| `admin.service.ts`          | 后台 plugin 管理：审核/编辑/下架/删除/列表/计数                   | 151,850,887,894,993,1001,1011,1070,1116,1133,1144,1187,1190,1199           |
+| `me.service.ts`             | 「我的插件」by authorUserId                                       | 33                                                                         |
+| `audit-plugin-ai-policy.ts` | 存量政策审计脚本（findMany+update）                               | 57,76                                                                      |
 
 ## 3. v4 模型替代映射
 
 ### `MarketplaceListing`（v4 市场实体，**字段比 legacy Plugin 更全**）
+
 含：`packageId(unique)`、`currentReleaseId`、`priceCents`、`priceRevision`、`status(DRAFT/ACTIVE/DELISTED)`、`installCount`、`ratingCount`、`ratingSum`、`category`、`qualityTier`、delist 元数据、eligibility/quality 快照等。
 → **货架列表/详情/安装计数/评分聚合全部可从此读取**，无需补字段。
 
 ### `PluginPackage`（v4 包）
+
 `id/ownerTeamId/authorUserId/manifestId/name/description/governanceStatus`。
 → 替代 `Plugin` 的身份与归属（name/description/team/author）。
 
 ### `PluginRelease`（v4 发行版，不可变）
+
 `id/packageId/version/manifest/fileManifest/sha256/sizeBytes/status/marketReviewStatus/sourceKind/targetPlatform/aiPolicy*`。
 → 替代 `Plugin` 的 version/manifest/files/capabilities/policy；readmeMarkdown 在 detail 路由。
 
 ### `Purchase`（已双写）
+
 `pluginId?/packageId?/releaseId?` 三者皆可选 + `settlementVersion(LEGACY_V1)` + 完整结算字段。
 → **phase1 购买单可直接写 `packageId`+`releaseId`，不动 schema**。遗留 `pluginId` 留给存量。
 
 ### `PluginGrant`（已双写）
+
 `pluginId?/packageId?` + 唯一约束 `[teamId,pluginId,...]` 与 `[teamId,packageId,...]` 并存。
 → 授权可迁 packageId。
 
 ### 仍是 legacy 强 FK（phase2 处理）
+
 - `PluginInstallation.pluginId`（required，Cascade）—— v4 安装可能由桌面端本地跟踪，需确认服务端是否有 v4 安装模型。
 - `PluginRating.pluginId`（required）—— 每用户评分记录，聚合已在 MarketplaceListing；phase2 迁移或废弃。
 - `PluginReview`（legacy 审核记录，v4 有 `PluginReleaseReview` 替代）。
@@ -54,6 +61,7 @@
 ## 4. 关键结论
 
 **Phase1（货架 + 购买迁 v4）无需任何 Prisma schema 变更**：
+
 - 货架读：`MarketplaceListing`(ACTIVE) join `PluginPackage` join current `PluginRelease`。
 - 购买写：`Purchase.packageId`+`releaseId`（字段已存在）。
 - 安装计数：写 `MarketplaceListing.installCount++`（已存在）。

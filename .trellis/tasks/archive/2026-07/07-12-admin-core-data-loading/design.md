@@ -72,4 +72,3 @@ GET /api/admin/roles/:id
 ## Compatibility
 
 优先让现有 route 接受新 query 并返回新 envelope；如旧调用方存在，短期可同时返回旧命名 key，但新 admin 统一消费 `items`。
-

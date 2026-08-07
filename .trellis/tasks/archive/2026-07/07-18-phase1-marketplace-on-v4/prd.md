@@ -10,13 +10,13 @@
 
 ## v4 闭环现状（已存在，phase0 勘察 + 本研究确认）
 
-| 环节 | v4 实现 | 桌面端入口 |
-|---|---|---|
-| 审批→上架 | `approveRelease` 设 `MarketplaceListing.currentReleaseId`+`status=ACTIVE` | 后台「待审核发行版」直列页（phase0） |
-| 货架列表/详情 | `MarketplaceDiscoveryService`（catalog/home/page + snapshots/prices/quality） | `GET /api/plugin-registry/marketplace`（`plugin-registry.ts:157`） |
+| 环节           | v4 实现                                                                                                                                                  | 桌面端入口                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 审批→上架      | `approveRelease` 设 `MarketplaceListing.currentReleaseId`+`status=ACTIVE`                                                                                | 后台「待审核发行版」直列页（phase0）                                 |
+| 货架列表/详情  | `MarketplaceDiscoveryService`（catalog/home/page + snapshots/prices/quality）                                                                            | `GET /api/plugin-registry/marketplace`（`plugin-registry.ts:157`）   |
 | 购买/计费/权益 | `marketplace-commerce.service:purchaseV2`（packageId→listing.currentRelease→`Purchase(packageId,releaseId)`+`pluginEntitlement`，幂等/折扣/活动/结算V2） | `POST /api/plugin-packages/:id/purchase`（`plugin-registry.ts:507`） |
-| 评分/质量 | `marketplace-quality.service` + `MarketplaceQualitySnapshot`（ratingTeams/ratingSum/averageRatingTenths 喂 discovery） | `POST .../rate`（`marketplace-quality.controller:30`） |
-| 参与度排序 | discovery popular 用快照；`MarketplaceListing.installCount` 等为 legacy 残留计数（v4 用快照为主） | — |
+| 评分/质量      | `marketplace-quality.service` + `MarketplaceQualitySnapshot`（ratingTeams/ratingSum/averageRatingTenths 喂 discovery）                                   | `POST .../rate`（`marketplace-quality.controller:30`）               |
+| 参与度排序     | discovery popular 用快照；`MarketplaceListing.installCount` 等为 legacy 残留计数（v4 用快照为主）                                                        | —                                                                    |
 
 `Purchase`/`PluginGrant` 已双写（`pluginId?`+`packageId?`/`releaseId?`）→ **v4 化无需 schema 变更**。`MarketplaceListing` 已含 `installCount/ratingCount/ratingSum/priceCents/currentReleaseId/qualityTier` 等全字段。
 
@@ -27,12 +27,14 @@
 ## Requirements
 
 ### 验证性
+
 - **R1 审批可见**：detail-poster 0.2.4（或任一 v4 release）经 phase0 直列页 approve 后，`marketReviewStatus=APPROVED` 且 `MarketplaceListing.currentReleaseId` 已设。
 - **R2 货架上架**：approve 后 `GET /api/plugin-registry/marketplace` 能搜到该插件，详情字段正确。
 - **R3 购买/权益**：桌面 `POST /api/plugin-packages/:id/purchase` 跑通（免费插件直接获权益；付费扣灵石正确，团队计费对齐 [[billing-relay-over-byok]]），`Purchase.packageId/releaseId`+`pluginEntitlement` 落库。
 - **R4 评分**：`marketplace-quality.rate` 对该 package 写快照，discovery 评分位展示。
 
 ### 清理性（圈定，不改）
+
 - **R5 legacy 残留清单**：确认 `marketplace.service`（`@Controller('marketplace')`）/`economy.service`/`plugin.service` legacy CRUD/`admin` legacy-plugin 端点**无活跃消费**（前端/外部），归入 phase2。仅产出清单，不删。
 
 ## Acceptance Criteria

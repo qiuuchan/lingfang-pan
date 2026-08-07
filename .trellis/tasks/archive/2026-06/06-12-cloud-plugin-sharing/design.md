@@ -103,13 +103,13 @@ flowchart TD
 
 ## Permission Matrix
 
-| Action | Member | Team Admin | Author | Platform Admin |
-|---|---:|---:|---:|---:|
-| upload team plugin | yes, in own team | yes | yes | no desktop flow |
-| list team plugins | yes | yes | yes | via admin only |
-| submit marketplace | only if author | yes for own team | yes | no |
-| approve/reject | no | no | no | yes |
-| disable public plugin | no | no | no | yes |
+| Action                |           Member |       Team Admin | Author |  Platform Admin |
+| --------------------- | ---------------: | ---------------: | -----: | --------------: |
+| upload team plugin    | yes, in own team |              yes |    yes | no desktop flow |
+| list team plugins     |              yes |              yes |    yes |  via admin only |
+| submit marketplace    |   only if author | yes for own team |    yes |              no |
+| approve/reject        |               no |               no |     no |             yes |
+| disable public plugin |               no |               no |     no |             yes |
 
 ## Error Handling
 

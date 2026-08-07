@@ -72,11 +72,11 @@
 
 ### 2.5 体积对比结论（Tauri 桌面壳敏感）
 
-| 方案 | 体积 | 备注 |
-|---|---|---|
-| **rehype-highlight**（lowlight + highlight.js 子集） | 核心 ~30KB + 按语言增量 | 默认捆绑 37 common 语言，含 js/ts/python/bash/json/html/css/sql/yaml/markdown/go/java/c/cpp/rust/php，与 react-markdown 同生态零摩擦 |
-| shiki | WASM(oniguruma) + grammar 500KB-1MB | 过重，Tauri 体积敏感场景排除 |
-| react-syntax-highlighter (Prism) | 全量更重 | 过重，排除 |
+| 方案                                                 | 体积                                | 备注                                                                                                                                 |
+| ---------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **rehype-highlight**（lowlight + highlight.js 子集） | 核心 ~30KB + 按语言增量             | 默认捆绑 37 common 语言，含 js/ts/python/bash/json/html/css/sql/yaml/markdown/go/java/c/cpp/rust/php，与 react-markdown 同生态零摩擦 |
+| shiki                                                | WASM(oniguruma) + grammar 500KB-1MB | 过重，Tauri 体积敏感场景排除                                                                                                         |
+| react-syntax-highlighter (Prism)                     | 全量更重                            | 过重，排除                                                                                                                           |
 
 **结论**：选 `rehype-highlight`，弃 shiki。
 
@@ -97,7 +97,7 @@
 
 ```ts
 // apps/desktop/src/components/markdown.tsx
-export function Markdown({ children }: { children: string }): JSX.Element
+export function Markdown({ children }: { children: string }): JSX.Element;
 ```
 
 内部增强（对调用方透明）：
@@ -107,7 +107,7 @@ export function Markdown({ children }: { children: string }): JSX.Element
 
 ### 3.3 数据流
 
-```
+````
 AI 文本（含 ```lang 围栏）
   → ReactMarkdown（remark-gfm 解析 GFM）
   → rehype-highlight（同步遍历 hast，对带 language-* 的 code 注入 hljs-* class span）
@@ -117,7 +117,7 @@ AI 文本（含 ```lang 围栏）
            ├─ 有 language-X className → fenced 代码：hljs span 接管着色（仅设透明背景/继承字体）
            └─ 无 language-* className → inline 代码：bg-black/10 rounded px-1
   → highlight.js/styles/github-dark.css（全局生效，给 .hljs / .hljs-keyword 等上色）
-```
+````
 
 ### 3.4 组件拆分与改造点（`markdown.tsx`）
 
@@ -225,23 +225,23 @@ pre: ({ children }) => (
 
 ### 4.1 已确认的用户决策（父 PRD）
 
-| 决策项 | 决策内容 | 出处 |
-|---|---|---|
-| 高亮主题 | 固定 `github-dark`，暂不跟随亮/暗切换 | 父 PRD 决策 4（第 18 行）、R4 第 43 行 |
-| 区分方式 | react-markdown v10 用 className 正则（`language-(\w+)`），非已废弃的 `inline` prop | 父 PRD R4 第 44 行 |
+| 决策项   | 决策内容                                                                           | 出处                                   |
+| -------- | ---------------------------------------------------------------------------------- | -------------------------------------- |
+| 高亮主题 | 固定 `github-dark`，暂不跟随亮/暗切换                                              | 父 PRD 决策 4（第 18 行）、R4 第 43 行 |
+| 区分方式 | react-markdown v10 用 className 正则（`language-(\w+)`），非已废弃的 `inline` prop | 父 PRD R4 第 44 行                     |
 
 ### 4.2 本子任务的技术权衡
 
-| 决策点 | 选择 | 理由 |
-|---|---|---|
-| 高亮引擎 | rehype-highlight（非 shiki / 非 Prism） | Tauri 体积敏感；rehype-highlight ~30KB 级，与 react-markdown 同生态零摩擦；shiki WASM 500KB-1MB 过重 |
-| 复制按钮挂载层 | pre 包装层 `<div>`（非 code 内） | code 内会随每个 hljs span 重复挂载且取不到完整文本；pre 层 + `extractText(children)` 才能拿到整块代码 |
-| 文本提取 | 递归读 React 节点 `props.children` | react-markdown v10 传给 pre 的是 React 元子树（含 hljs span），非纯字符串，必须递归 |
-| 最大高度 | `max-h-96 overflow-auto` | 384px 足够覆盖常见代码块，超长纵向滚动，不撑爆气泡 |
-| 横向滚动 | `overflow-auto`（含 x），不 wrap | 长行代码 wrap 会破坏可读性与对齐，横向滚动 + 可见滚动条策略 |
-| inline 背景 | 维持 `bg-black/10`（dark: `bg-white/10`） | 保持现有 inline 观感不变，仅 fenced 走暗色高亮块 |
-| fenced 底色 | 显式 `bg-[#0d1117]` | github-dark CSS 默认透明，需显式底色保证暗色块观感（桌面壳固定浅色主题，见 `sonner.tsx:8` 注释「桌面壳固定浅色主题」） |
-| 语言探测 | `detect: false` + `ignoreMissing: true` | 不误猜、未注册语言不抛错，容错流式中途状态 |
+| 决策点         | 选择                                      | 理由                                                                                                                   |
+| -------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 高亮引擎       | rehype-highlight（非 shiki / 非 Prism）   | Tauri 体积敏感；rehype-highlight ~30KB 级，与 react-markdown 同生态零摩擦；shiki WASM 500KB-1MB 过重                   |
+| 复制按钮挂载层 | pre 包装层 `<div>`（非 code 内）          | code 内会随每个 hljs span 重复挂载且取不到完整文本；pre 层 + `extractText(children)` 才能拿到整块代码                  |
+| 文本提取       | 递归读 React 节点 `props.children`        | react-markdown v10 传给 pre 的是 React 元子树（含 hljs span），非纯字符串，必须递归                                    |
+| 最大高度       | `max-h-96 overflow-auto`                  | 384px 足够覆盖常见代码块，超长纵向滚动，不撑爆气泡                                                                     |
+| 横向滚动       | `overflow-auto`（含 x），不 wrap          | 长行代码 wrap 会破坏可读性与对齐，横向滚动 + 可见滚动条策略                                                            |
+| inline 背景    | 维持 `bg-black/10`（dark: `bg-white/10`） | 保持现有 inline 观感不变，仅 fenced 走暗色高亮块                                                                       |
+| fenced 底色    | 显式 `bg-[#0d1117]`                       | github-dark CSS 默认透明，需显式底色保证暗色块观感（桌面壳固定浅色主题，见 `sonner.tsx:8` 注释「桌面壳固定浅色主题」） |
+| 语言探测       | `detect: false` + `ignoreMissing: true`   | 不误猜、未注册语言不抛错，容错流式中途状态                                                                             |
 
 ### 4.3 复用优先（呼应父 PRD 约束第 58 行）
 
@@ -287,16 +287,16 @@ pre: ({ children }) => (
 
 ### 6.1 风险清单
 
-| # | 风险 | 触发条件 | 缓解 |
-|---|---|---|---|
-| R1 | react-markdown v10 无 `inline` prop，旧写法编译报错 | 直接照搬 `code({node, inline, ...})` | 用 className 正则 `language-(\w+)` 区分（见 3.4-C） |
-| R2 | 复制按钮误挂 code 内 → 重复挂载 / 取不到完整文本 | 在 `code` 映射里放按钮 | 按钮只挂 pre 包装层 `<div>`，用 `extractText(children)` 递归取整块文本（见 3.4-B/D） |
-| R3 | 忘记 import `highlight.js/styles/github-dark.css` → 有 hljs class 但无颜色 | 仅装依赖不引 CSS | 显式 `import 'highlight.js/styles/github-dark.css'`（见 3.4-A） |
-| R4 | Tailwind v4 preflight 重置 `.hljs` 类样式 | Tailwind v4 base reset 覆盖 hljs CSS | Vite CSS import 顺序：hljs CSS 在 Tailwind 之后引入，或用 `@layer`；实测若被覆盖，用具体性更高的选择器或 `!` 前缀。验证步骤含此检查（见 7.x） |
-| R5 | `navigator.clipboard` 在 Tauri webview 不可用 | webview 非 secure context | Tauri `tauri://` 协议通常满足 secure context；回退 `document.execCommand('copy')`（含隐藏 textarea），再不行静默 + toast 提示「复制失败，请手动选取」（见 3.4-B 失败分支） |
-| R6 | 流式中途未闭合围栏 / 非法 token 抛错 | token 切在 ``` 中间 | `rehype-highlight` 传 `ignoreMissing: true` + `detect: false`；react-markdown 自身对未闭合围栏按普通文本渲染，下 token 补全后重渲染（见 3.4-E） |
-| R7 | 超长内容（>1 万行）流式卡顿 | manifest 巨大 / 长代码 | 预留调用方节流降级点（50-100ms），本子任务不实现，仅标注（见 3.5） |
-| R8 | hljs 默认 37 语言不含目标语言（如纯 shell 无 `sh` 别名） | 某语言未注册 | `ignoreMissing: true` 容错降级为无高亮纯文本；常见语言（js/ts/python/bash/json/html/css/sql/yaml/go/java/c/cpp/rust/php）已含，覆盖本任务需求 |
+| #   | 风险                                                                       | 触发条件                             | 缓解                                                                                                                                                                       |
+| --- | -------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | react-markdown v10 无 `inline` prop，旧写法编译报错                        | 直接照搬 `code({node, inline, ...})` | 用 className 正则 `language-(\w+)` 区分（见 3.4-C）                                                                                                                        |
+| R2  | 复制按钮误挂 code 内 → 重复挂载 / 取不到完整文本                           | 在 `code` 映射里放按钮               | 按钮只挂 pre 包装层 `<div>`，用 `extractText(children)` 递归取整块文本（见 3.4-B/D）                                                                                       |
+| R3  | 忘记 import `highlight.js/styles/github-dark.css` → 有 hljs class 但无颜色 | 仅装依赖不引 CSS                     | 显式 `import 'highlight.js/styles/github-dark.css'`（见 3.4-A）                                                                                                            |
+| R4  | Tailwind v4 preflight 重置 `.hljs` 类样式                                  | Tailwind v4 base reset 覆盖 hljs CSS | Vite CSS import 顺序：hljs CSS 在 Tailwind 之后引入，或用 `@layer`；实测若被覆盖，用具体性更高的选择器或 `!` 前缀。验证步骤含此检查（见 7.x）                              |
+| R5  | `navigator.clipboard` 在 Tauri webview 不可用                              | webview 非 secure context            | Tauri `tauri://` 协议通常满足 secure context；回退 `document.execCommand('copy')`（含隐藏 textarea），再不行静默 + toast 提示「复制失败，请手动选取」（见 3.4-B 失败分支） |
+| R6  | 流式中途未闭合围栏 / 非法 token 抛错                                       | token 切在 ``` 中间                  | `rehype-highlight` 传 `ignoreMissing: true` + `detect: false`；react-markdown 自身对未闭合围栏按普通文本渲染，下 token 补全后重渲染（见 3.4-E）                            |
+| R7  | 超长内容（>1 万行）流式卡顿                                                | manifest 巨大 / 长代码               | 预留调用方节流降级点（50-100ms），本子任务不实现，仅标注（见 3.5）                                                                                                         |
+| R8  | hljs 默认 37 语言不含目标语言（如纯 shell 无 `sh` 别名）                   | 某语言未注册                         | `ignoreMissing: true` 容错降级为无高亮纯文本；常见语言（js/ts/python/bash/json/html/css/sql/yaml/go/java/c/cpp/rust/php）已含，覆盖本任务需求                              |
 
 ### 6.2 软隔离边界声明（呼应父 PRD 安全约束）
 
@@ -330,7 +330,7 @@ pnpm --filter @lingfang/desktop build
 
 在 PluginCreatorHome 触发一次 assistant 回复（含 fenced 代码块），人工核验：
 
-1. **fenced 高亮**：```python / ```javascript / ```json / ```typescript 代码块有 github-dark 配色（关键字着色）。
+1. **fenced 高亮**：`python / `javascript / `json / `typescript 代码块有 github-dark 配色（关键字着色）。
 2. **inline 区分**：行内 `` `code` `` 仍是灰底药丸，非暗色高亮块。
 3. **复制按钮**：hover fenced 块右上角出现 Copy 图标 → 点击 → 图标变 Check → toast「已复制代码」→ 粘贴验证内容完整（含多行）。
 4. **最大高度**：粘贴一段 >40 行代码，块纵向出现滚动条，不撑爆气泡。

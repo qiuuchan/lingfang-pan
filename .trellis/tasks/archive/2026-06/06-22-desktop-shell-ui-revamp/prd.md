@@ -34,10 +34,12 @@
 ## Acceptance Criteria
 
 通用：
+
 - [ ] 所有改动仅落在 `apps/desktop`；`pnpm --filter @lingfang/desktop build` 通过；`pnpm --filter @lingfang/desktop lint`、typecheck 无新增错误。
 - [ ] 不破坏现有 RBAC 门控（`isTeamManager` / `isPlatformAdmin`）——非团队管理员看不到团队管理入口，非平台管理员看不到审核入口。
 
 逐项：
+
 - [ ] 1. 运行 app，首页搜索框在主体区水平视觉居中（不同窗口宽度/侧栏开合下均居中于主体）。
 - [ ] 2. 首次启动侧栏默认折叠；手动展开后重启 app，侧栏保持展开；反之亦然（持久化生效）。
 - [ ] 3. 侧栏不再出现「团队管理」导航项与通知铃铛；两者仅作为用户菜单内的入口可见。
@@ -75,6 +77,7 @@
 ## 项 11 — 后台运行 + 最小化到托盘
 
 关窗口时不直接退出，弹询问「最小化到托盘 / 直接退出」+「以后不再询问」复选：
+
 - 选最小化 → 隐藏窗口到系统托盘（进程保留，单击托盘图标恢复，右键菜单含「显示窗口/退出」）。
 - 勾「以后不再询问」→ 按上次选择直接执行，偏好持久化（`lf:close-action`）。
 - 设置中保留修改入口（SettingsDialog 内「通用」/账户相关 tab 一个开关：「关闭窗口时」→ 最小化到托盘 / 直接退出 / 每次询问）。
@@ -92,6 +95,7 @@
 ## 项 14 — 头像菜单 = 所有功能入口，每个按钮对应一个独立悬浮窗；删除 AccountDialog
 
 **需求（用户确认 A）**：AvatarMenu 每个按钮各打开**一个独立悬浮窗**，删掉 AccountDialog 聚合体，其功能拆分整合进菜单：
+
 - 通知中心 → NotificationCenter（项 10 已独立化）
 - 钱包 → WalletDialog（承载 Wallet 页）
 - 切换团队 → TeamDialog（承载 TeamHome 页）

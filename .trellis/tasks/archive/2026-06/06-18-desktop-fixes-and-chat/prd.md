@@ -14,13 +14,13 @@
 
 ## 根因排查结论（规划期已定位）
 
-| # | 子任务 | 根因 | 确定性 |
-|---|--------|------|--------|
-| 3 | fix-market-hooks | `apps/desktop/src/pages/Market.tsx` 第 80 行 `useEffect` 位于第 69 行 `if (detail) return <Detail.../>` 提前返回之后。点击插件置 `detail` → 重渲染在 return 处截断 → 本次少渲染一个 Hook → React #300「Rendered fewer hooks than expected」崩溃 | 确定 |
-| 2 | fix-invite-case | 生成邀请码时 `code.toUpperCase()` 后做 SHA256；兑换入口 `Onboarding.tsx:56` 只 `code.trim()` 不归一大小写。用户输入大小写不符 → 哈希不匹配 → 查无记录 → 抛"邀请码无效"（与"没用过"现象吻合，非次数上限） | 高 |
-| 5 | restore-claude-provider | `apps/desktop/src/lib/plugin-draft/providers.ts:36` `compatibleProviderIds`：仅 `anthropic` 返回 `['claude']`，custom/openai 兼容 provider 只返回 `['codex']`。按提交 0aa2fd8 意图 custom 应同时提供 claude | 高 |
-| 1 | fix-update-check | 链路：Tauri updater → `/api/releases/tauri-update`。前端报通用兜底"检查更新失败，请重试"（`Settings.tsx`），说明 `check_update` 调用抛异常。具体失败点需实现阶段运行时诊断（URL 解析 / 网络 / 未发布 STABLE release / 平台 asset 缺失 / 签名验证） | 待诊断 |
-| 4 | chat-streaming-thinking-tools | Rust SDK Runtime（`code_assistant/engine/`）+ `AssistantChat.tsx` 已有 ReasoningBlock/ToolBlock 代码骨架，但用户实测三者（流式/思考/工具）都不可见。需端到端排查事件透传链路缺口并补齐 | 待排查 |
+| #   | 子任务                        | 根因                                                                                                                                                                                                                                               | 确定性 |
+| --- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 3   | fix-market-hooks              | `apps/desktop/src/pages/Market.tsx` 第 80 行 `useEffect` 位于第 69 行 `if (detail) return <Detail.../>` 提前返回之后。点击插件置 `detail` → 重渲染在 return 处截断 → 本次少渲染一个 Hook → React #300「Rendered fewer hooks than expected」崩溃    | 确定   |
+| 2   | fix-invite-case               | 生成邀请码时 `code.toUpperCase()` 后做 SHA256；兑换入口 `Onboarding.tsx:56` 只 `code.trim()` 不归一大小写。用户输入大小写不符 → 哈希不匹配 → 查无记录 → 抛"邀请码无效"（与"没用过"现象吻合，非次数上限）                                           | 高     |
+| 5   | restore-claude-provider       | `apps/desktop/src/lib/plugin-draft/providers.ts:36` `compatibleProviderIds`：仅 `anthropic` 返回 `['claude']`，custom/openai 兼容 provider 只返回 `['codex']`。按提交 0aa2fd8 意图 custom 应同时提供 claude                                        | 高     |
+| 1   | fix-update-check              | 链路：Tauri updater → `/api/releases/tauri-update`。前端报通用兜底"检查更新失败，请重试"（`Settings.tsx`），说明 `check_update` 调用抛异常。具体失败点需实现阶段运行时诊断（URL 解析 / 网络 / 未发布 STABLE release / 平台 asset 缺失 / 签名验证） | 待诊断 |
+| 4   | chat-streaming-thinking-tools | Rust SDK Runtime（`code_assistant/engine/`）+ `AssistantChat.tsx` 已有 ReasoningBlock/ToolBlock 代码骨架，但用户实测三者（流式/思考/工具）都不可见。需端到端排查事件透传链路缺口并补齐                                                             | 待排查 |
 
 ## 子任务映射
 

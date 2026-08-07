@@ -5,31 +5,34 @@
 **改动的文件**
 
 服务端 `apps/collab-api/src`：
+
 - `common.ts` — 新增 `ensureRequestId(req)` helper；`AppExceptionFilter` 改用它，保证响应体里的 `requestId` 与 service 日志一致；并在 500 兜底分支加 `logger.error`（含 requestId/method/path/error），让所有未处理异常落日志、可凭 requestId 定位（用 `request.path` 避免 query 泄漏）。
 - `modules/artifact-store.ts` — 新增 `ArtifactUnavailableError`；`FilesystemArtifactStore.download` 在 `ENOENT` 时抛该错误，其他 IO 错误（EACCES 等）包装为带上下文的普通 Error；`S3ArtifactStore.download` 包装构造期错误。
 - `modules/plugin-registry.service.ts` — 注入 NestJS `Logger`；`artifactDownload` / `adminArtifactDownload` 增加 `requestId` 形参，用 try/catch 包住 `artifacts.download`，对 `ArtifactUnavailableError` 映射 `AppError(410, 'plugin_artifact_unavailable', ...)`，其余原生 Error 先打结构化 error 日志再透传。
 - `modules/plugin-registry.controller.ts` — 两个 `artifact` 端点用 `ensureRequestId(req)` 取 id 传入 service。
 
 客户端 `apps/desktop/src-tauri/src/plugin_package_manager/network.rs`：
+
 - 新增 `render_download_error(status, body) -> String`：尝试把 body 解析为 `{code, message, requestId}` JSON，按 `code`/状态码映射中文提示并附 `requestId`；解析失败回退原文。
 - `download_plugin_release` 非 2xx 分支改调该 helper。
 
 **不改的东西**
+
 - 成功下载路径（流式 pipe、`x-plugin-sha256`、`content-disposition`、SHA-256 校验、ZIP 解压）。
 - assertArtifactKey 对越界 key 仍抛错（属数据完整性，500 + 日志，不映射 410）。
 - 其他 API 的错误处理（upload/update 暂不在本任务范围，`render_download_error` 后续可复用）。
 
 ## 错误契约（下载端点）
 
-| 场景 | HTTP | code | 客户端提示 |
-|---|---|---|---|
-| release 不存在/已撤回 | 404 | `not_found` | 插件发行版不存在或已撤回 |
-| 无团队/市场授权 | 403 | `forbidden` | 没有该插件的使用授权 |
-| 未购且非免费 | 402 | `payment_required` | 当前团队尚未购买该插件 |
-| AI 政策未过 | 409 | `plugin_ai_policy_required` | 该插件未通过当前 AI 使用政策检查 |
-| **制品文件缺失/不可读** | **410** | **`plugin_artifact_unavailable`** | 制品文件已被清理或不可用，请联系作者重新发布 |
-| artifactKey 非法（数据异常） | 500 | `internal_error` | 服务暂时不可用，请稍后重试 |
-| 其他未知错误 | 500 | `internal_error` | 服务暂时不可用，请稍后重试 |
+| 场景                         | HTTP    | code                              | 客户端提示                                   |
+| ---------------------------- | ------- | --------------------------------- | -------------------------------------------- |
+| release 不存在/已撤回        | 404     | `not_found`                       | 插件发行版不存在或已撤回                     |
+| 无团队/市场授权              | 403     | `forbidden`                       | 没有该插件的使用授权                         |
+| 未购且非免费                 | 402     | `payment_required`                | 当前团队尚未购买该插件                       |
+| AI 政策未过                  | 409     | `plugin_ai_policy_required`       | 该插件未通过当前 AI 使用政策检查             |
+| **制品文件缺失/不可读**      | **410** | **`plugin_artifact_unavailable`** | 制品文件已被清理或不可用，请联系作者重新发布 |
+| artifactKey 非法（数据异常） | 500     | `internal_error`                  | 服务暂时不可用，请稍后重试                   |
+| 其他未知错误                 | 500     | `internal_error`                  | 服务暂时不可用，请稍后重试                   |
 
 404/403/402/409 沿用现有 AppError，本任务只新增 410 这一行。
 
@@ -74,7 +77,7 @@ export function ensureRequestId(req: Request): string {
   const existing = req.header('x-request-id');
   if (existing) return existing;
   const generated = randomUUID();
-  req.headers['x-request-id'] = generated;   // 回写，让 filter 复用同一个值
+  req.headers['x-request-id'] = generated; // 回写，让 filter 复用同一个值
   return generated;
 }
 ```

@@ -14,6 +14,7 @@
 ## 步骤 2：单测
 
 `plugin_runner.rs` 测试模块加秒退判定测试：
+
 - 造一个秒退的「插件」（python `-c "raise SystemExit(1)"` 或用 echo 假 binary）→ 验证 start_plugin 返回 `plugin_crashed:` 前缀。
 - 注意：start_plugin 依赖 PluginStore + ensure_python_venv，单测难直接调。改为抽出 `wait_for_crash(child) -> Option<String>` 纯函数测：spawn 一个 sleep 进程（存活）→ None；spawn 一个立即退的进程 → Some(stderr)。
 

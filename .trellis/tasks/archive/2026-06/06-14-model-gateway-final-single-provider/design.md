@@ -23,6 +23,7 @@ Admin 后台（collab-admin providers 页）
 ## 2. 数据模型变更（schema 迁移）
 
 ### 2.1 LlmGateway 加 isActive
+
 ```prisma
 model LlmGateway {
   // ... 现有字段 ...
@@ -33,6 +34,7 @@ model LlmGateway {
 ```
 
 ### 2.2 TenantLlmBinding 去 gatewayId（破坏式）
+
 ```prisma
 model TenantLlmBinding {
   id              String     @id @default(uuid())
@@ -57,6 +59,7 @@ model TenantLlmBinding {
 ```
 
 ### 2.3 迁移 SQL（`prisma migrate dev --name llm_single_provider`）
+
 - `ALTER TABLE "LlmGateway" ADD COLUMN "isActive" BOOLEAN NOT NULL DEFAULT false;`
 - `CREATE INDEX "LlmGateway_isActive_idx" ON "LlmGateway"("isActive");`
 - `DELETE FROM "TenantLlmBinding"` 或迁移旧数据（首版无生产数据，直接删旧 binding 重建最简；若有数据保留：保留每 teamId 最新一条，去重）。
@@ -71,25 +74,25 @@ Team model 的 `bindings` 反向关系保留。User 的 createdLlmBindings/updat
 
 ### 3.1 租户端点（改 + 新增）
 
-| 方法 | 路径 | 入参 | 出参 |
-|---|---|---|---|
-| GET | `/api/llm/active-provider` | — | `{ apiUrl, name?, defaultModels: string[] }`（当前启用 provider；无则 404 `no_active_provider`） |
-| GET | `/api/llm/binding` | — | `{ binding: TenantBindingPublic \| null }`（单条，无 gatewayId） |
-| PUT | `/api/llm/binding` | `{ apiKey, enabled?, modelOverride? }`（**无 gatewayId**） | `{ binding }`（teamId upsert） |
-| DELETE | `/api/llm/binding` | — | `{ ok: true }`（删 teamId 唯一绑定） |
-| POST | `/api/llm/binding/decrypt` | — | `{ apiKey: string }`（按 teamId 取唯一绑定解密） |
+| 方法   | 路径                       | 入参                                                       | 出参                                                                                             |
+| ------ | -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| GET    | `/api/llm/active-provider` | —                                                          | `{ apiUrl, name?, defaultModels: string[] }`（当前启用 provider；无则 404 `no_active_provider`） |
+| GET    | `/api/llm/binding`         | —                                                          | `{ binding: TenantBindingPublic \| null }`（单条，无 gatewayId）                                 |
+| PUT    | `/api/llm/binding`         | `{ apiKey, enabled?, modelOverride? }`（**无 gatewayId**） | `{ binding }`（teamId upsert）                                                                   |
+| DELETE | `/api/llm/binding`         | —                                                          | `{ ok: true }`（删 teamId 唯一绑定）                                                             |
+| POST   | `/api/llm/binding/decrypt` | —                                                          | `{ apiKey: string }`（按 teamId 取唯一绑定解密）                                                 |
 
 > `GET /api/llm/gateways` 废弃（租户不用，Admin 用 `/api/admin/llm-providers`）。
 
 ### 3.2 Admin 端点（新）
 
-| 方法 | 路径 | 鉴权 | 用途 |
-|---|---|---|---|
-| GET | `/api/admin/llm-providers` | ensurePlatformAdmin | provider 列表（含 isActive 标记） |
-| POST | `/api/admin/llm-providers` | ensurePlatformAdmin | 新增 provider |
-| PATCH | `/api/admin/llm-providers/:id` | ensurePlatformAdmin | 编辑 provider |
-| DELETE | `/api/admin/llm-providers/:id` | ensurePlatformAdmin | 删除（active 的不允许删，或删时自动取消 active） |
-| PATCH | `/api/admin/llm-providers/:id/activate` | ensurePlatformAdmin | **设为当前启用**（$transaction 唯一 active） |
+| 方法   | 路径                                    | 鉴权                | 用途                                             |
+| ------ | --------------------------------------- | ------------------- | ------------------------------------------------ |
+| GET    | `/api/admin/llm-providers`              | ensurePlatformAdmin | provider 列表（含 isActive 标记）                |
+| POST   | `/api/admin/llm-providers`              | ensurePlatformAdmin | 新增 provider                                    |
+| PATCH  | `/api/admin/llm-providers/:id`          | ensurePlatformAdmin | 编辑 provider                                    |
+| DELETE | `/api/admin/llm-providers/:id`          | ensurePlatformAdmin | 删除（active 的不允许删，或删时自动取消 active） |
+| PATCH  | `/api/admin/llm-providers/:id/activate` | ensurePlatformAdmin | **设为当前启用**（$transaction 唯一 active）     |
 
 旧的 `/api/admin/llm-gateways` 路由替换为 `/api/admin/llm-providers`（或保留别名，首版直接改名）。
 
@@ -110,6 +113,7 @@ Team model 的 `bindings` 反向关系保留。User 的 createdLlmBindings/updat
 - 去掉所有 gatewayId 相关逻辑（upsert 的 gateway 存在性校验、gateway_disabled 错误等）。
 
 ### 3.4 DTO（llm.dto.ts）
+
 - `BindingUpsertDto`：去 `gatewayId`，只 `{ apiKey?, enabled?, modelOverride? }`。
 - 新 `ProviderCreateDto` / `ProviderUpdateDto`：`{ name, apiUrl, models?, description?, sortOrder? }` + `isActive`（创建时不设，通过 activate 端点）。
 - 契约 `packages/contract/src/llm.ts` 同步：`TenantBindingPublic` 去 gatewayId/provider/gatewayModels/effectiveModels（改成 `defaultModels` from active provider）；新增 `ActiveProviderSchema`；`BindingUpsertInput` 去 gatewayId。
@@ -121,6 +125,7 @@ Team model 的 `bindings` 反向关系保留。User 的 createdLlmBindings/updat
 ## 5. 前端 ModelGatewayTab（再次重写）
 
 去 provider 选择，只留：
+
 ```
 ┌─ 模型网关 ─────────────────────────┐
 │ apiKey:  [____________]  [拉取模型] │  ← 已绑定显示 sk-***xxxx
@@ -133,6 +138,7 @@ Team model 的 `bindings` 反向关系保留。User 的 createdLlmBindings/updat
 │              [保存]                  │
 └─────────────────────────────────────┘
 ```
+
 - 挂载：`GET /api/llm/active-provider`（拿 apiUrl，存内存）+ `GET /api/llm/binding`（显示 hint + modelOverride）。
 - active-provider 404 (`no_active_provider`) → 整个 Card 显示「平台尚未配置模型服务，请联系管理员」，禁用输入。
 - 拉取模型：`fetchModels(activeProvider.apiUrl, apiKey)`。
@@ -142,6 +148,7 @@ Team model 的 `bindings` 反向关系保留。User 的 createdLlmBindings/updat
 ## 6. Admin UI（collab-admin providers-view）
 
 新建 `apps/collab-admin/src/components/providers-view.tsx`（参考 plugins-view 模式）：
+
 - 表格列：name / apiUrl / models 数量 / isActive Badge / 操作（编辑/删除/设为启用）。
 - 新增/编辑 Dialog：name + apiUrl + models（逗号分隔）+ description。
 - 「设为启用」按钮（调 activate 端点，当前 active 的显示「当前启用」Badge）。

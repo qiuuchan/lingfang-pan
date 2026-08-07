@@ -31,6 +31,7 @@
 ### F3. releases-view.tsx 主页面
 
 参考 plugins-view 结构：
+
 - 顶部：channel 筛选（全部/STABLE/BETA）+「创建版本」按钮。
 - Table 列：version / channel / title / status Badge / isLatest / asset 数 / publishedAt / 操作。
 - DetailSheet：版本详情 + asset 列表（url 可复制 + 删除）+ 上传安装包区（platform/arch Select + .exe file input + 自动找同名 .sig + 上传按钮）+ 登记外链 asset 表单 + 编辑 title/notes。

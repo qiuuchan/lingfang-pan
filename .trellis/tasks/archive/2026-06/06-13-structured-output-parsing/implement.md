@@ -24,14 +24,14 @@
 
 ### 1.4 关键文件清单（已核实精确行号）
 
-| 文件 | 关键位置 |
-|---|---|
-| `apps/desktop/src/lib/plugin-draft.ts` | `buildLocalDraft:186-243`、`extractCliText:119-121`、`parseManifest:255-272`、`previewSrcDoc:274-285`、`capabilities bug:198`、`tailText:166-168` |
-| `apps/desktop/src/pages/PluginCreatorHome.tsx` | `send():226-277`、`systemPrompt:240`、`uploadCloud:293-310` |
-| `apps/desktop/src/lib/types.ts` | `DraftFile/DraftTurn/PluginDraft:67-91` |
-| `packages/contract/src/plugin.ts` | `PluginManifest:29-39`、`PluginCapability:19-26`、`CapabilityKind:7-13`、`RuntimeType:4-5` |
-| `apps/collab-api/src/modules/plugin-package.ts` | `ALLOWED_CAPABILITIES:48-53`、`normalizePluginPackage:71-134`、`cleanPath:61-69`、`capabilities 校验:102-114`、`entry 校验:101`、字节限制:45-47 |
-| `apps/desktop/src-tauri/src/code_assistant.rs` | `systemPrompt 拼接:285-287`、`OutputFormat 分派:373-374`、`extract_stream_json_text:550`、`spawn_reader:574`（**不改**） |
+| 文件                                            | 关键位置                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop/src/lib/plugin-draft.ts`          | `buildLocalDraft:186-243`、`extractCliText:119-121`、`parseManifest:255-272`、`previewSrcDoc:274-285`、`capabilities bug:198`、`tailText:166-168` |
+| `apps/desktop/src/pages/PluginCreatorHome.tsx`  | `send():226-277`、`systemPrompt:240`、`uploadCloud:293-310`                                                                                       |
+| `apps/desktop/src/lib/types.ts`                 | `DraftFile/DraftTurn/PluginDraft:67-91`                                                                                                           |
+| `packages/contract/src/plugin.ts`               | `PluginManifest:29-39`、`PluginCapability:19-26`、`CapabilityKind:7-13`、`RuntimeType:4-5`                                                        |
+| `apps/collab-api/src/modules/plugin-package.ts` | `ALLOWED_CAPABILITIES:48-53`、`normalizePluginPackage:71-134`、`cleanPath:61-69`、`capabilities 校验:102-114`、`entry 校验:101`、字节限制:45-47   |
+| `apps/desktop/src-tauri/src/code_assistant.rs`  | `systemPrompt 拼接:285-287`、`OutputFormat 分派:373-374`、`extract_stream_json_text:550`、`spawn_reader:574`（**不改**）                          |
 
 ## 2. 有序执行 checklist
 
@@ -46,7 +46,7 @@
 
 - [ ] **A2. 写 `plugin-creator-protocol.spec.ts`（先于实现，TDD）**
   - 新建 `apps/desktop/src/lib/plugin-creator-protocol.spec.ts`，覆盖 `classifyBlockInfo`：
-    - `lingfang-manifest json` → `manifest`；`lingfang-notes` → `notes`；`file path="ui/index.html"` → `file`；裸 `` ``` ``（空 info）→ `unknown`；`html`/`python` → `unknown`（候选归类）。
+    - `lingfang-manifest json` → `manifest`；`lingfang-notes` → `notes`；`file path="ui/index.html"` → `file`；裸 ` ``` `（空 info）→ `unknown`；`html`/`python` → `unknown`（候选归类）。
   - 此时实现尚未写，测试应失败（红）。
   - 验证：`pnpm -C apps/desktop test`（确认红）。
 
@@ -215,14 +215,14 @@
 
 ## 6. 产出物清单
 
-| 产出 | 路径 | 类型 |
-|---|---|---|
-| 协议常量 + 纯函数 | `apps/desktop/src/lib/plugin-creator-protocol.ts` | 新增 |
-| 协议单测 | `apps/desktop/src/lib/plugin-creator-protocol.spec.ts` | 新增 |
-| 解析器 + capabilities 收敛 + buildLocalDraft 重构 | `apps/desktop/src/lib/plugin-draft.ts` | 改 |
-| 解析器单测 | `apps/desktop/src/lib/plugin-draft.spec.ts` | 新增 |
-| 测试基建 | `apps/desktop/vitest.config.ts` + `package.json` test 脚本 | 新增/改 |
-| UI systemPrompt 接入 | `apps/desktop/src/pages/PluginCreatorHome.tsx` | 改（最小） |
-| 操作日志 | `.claude/operations-log.md` | 记录 |
+| 产出                                              | 路径                                                       | 类型       |
+| ------------------------------------------------- | ---------------------------------------------------------- | ---------- |
+| 协议常量 + 纯函数                                 | `apps/desktop/src/lib/plugin-creator-protocol.ts`          | 新增       |
+| 协议单测                                          | `apps/desktop/src/lib/plugin-creator-protocol.spec.ts`     | 新增       |
+| 解析器 + capabilities 收敛 + buildLocalDraft 重构 | `apps/desktop/src/lib/plugin-draft.ts`                     | 改         |
+| 解析器单测                                        | `apps/desktop/src/lib/plugin-draft.spec.ts`                | 新增       |
+| 测试基建                                          | `apps/desktop/vitest.config.ts` + `package.json` test 脚本 | 新增/改    |
+| UI systemPrompt 接入                              | `apps/desktop/src/pages/PluginCreatorHome.tsx`             | 改（最小） |
+| 操作日志                                          | `.claude/operations-log.md`                                | 记录       |
 
 > 全部步骤可重复执行；失败即止，记录到 operations-log 并回到对应 gate 修复。

@@ -98,6 +98,7 @@ OPEN ──(管理员开始处理)──▶ IN_PROGRESS ──(标记解决)─�
 RESOLVED/IN_PROGRESS ──(用户追加回复)──▶ 自动回到 IN_PROGRESS(重新打开讨论)
 CLOSED:只读,双方均不可追加(前台 R7 / 后台 R9)。需重开则新建工单。
 ```
+
 - 用户追加消息:若工单为 RESOLVED,自动置回 IN_PROGRESS(用户不满意继续沟通);OPEN/IN_PROGRESS 保持。
 - 管理员可显式设 status/priority;每次管理员回复默认把 status 至少推进到 IN_PROGRESS 并记 handlerUserId。
 - 任意消息写入后更新 `lastReplyAt`。
@@ -105,6 +106,7 @@ CLOSED:只读,双方均不可追加(前台 R7 / 后台 R9)。需重开则新建�
 ## API 契约
 
 ### 前台(`TicketController`,`@Controller('tickets')`,全部 `requireUser(req).id`)
+
 - `POST /api/tickets` — multipart:fields(category,title,body)+ files[](≤5)。
   service 内 `ensureCurrentTeam(userId)` 取 teamId(无团队则 null,catch 兜底),建 Ticket + 首条 USER message + 附件。
 - `GET /api/tickets` — 本人工单列表,query:status?/limit?(clamp [1,50]),按 lastReplyAt desc。
@@ -113,6 +115,7 @@ CLOSED:只读,双方均不可追加(前台 R7 / 后台 R9)。需重开则新建�
 - `GET /api/tickets/:id/attachments/:attachmentId` — 鉴权流式下载(见下「附件下载」)。
 
 ### 后台(`AdminTicketController`,`@Controller('admin/tickets')`)
+
 - `GET` (`platform.ticket.view`) — 全部工单,query:status?/category?/teamId?/q?(标题模糊)/page/pageSize。
 - `GET /:id` (`platform.ticket.view`) — 任意工单详情。
 - `POST /:id/messages` (`platform.ticket.manage`) — multipart:追加 ADMIN 消息(+附件),记 handlerUserId,推进状态,触发 Notification。
@@ -139,18 +142,21 @@ CLOSED:只读,双方均不可追加(前台 R7 / 后台 R9)。需重开则新建�
 ## 权限(`permission-codes.ts` 增量)
 
 在 `PLATFORM_MODULES` 加一个模块(sortOrder 取 75,介于 release 70 与 admin 80 之间):
+
 ```ts
 defineModule('PLATFORM', 'platform.ticket', '工单反馈', 75, [
   { code: 'platform.ticket.view',   label: '查看工单',   description: '查看用户提交的帮助与反馈工单' },
   { code: 'platform.ticket.manage', label: '处理工单',   description: '回复工单、变更状态与优先级' },
 ]),
 ```
+
 - `seed-rbac.ts` 全量 upsert ALL_PERMISSIONS,新码自动入 PermissionEntry;系统平台管理员角色应包含新码(确认 seed-rbac 给 PLATFORM_ADMIN 授全量平台权限,否则显式补)。
 - AdminTicketController 方法挂 `@RequirePermission('platform.ticket.view'|'manage')`。
 
 ## 前端设计
 
 ### desktop
+
 - 新 `pages/HelpFeedback.tsx`(或 `pages/help/` 目录,若 >300 行拆 list/detail/submit 子组件)。
 - `lib/tickets.ts`:API helpers(list/get/submit/reply/下载 URL 构造)。multipart 用 `FormData`,
   经 `api()` 发送时需绕过默认 `Content-Type: application/json` —— 新增 `apiUpload()` helper 或给 `api()` 加
@@ -160,6 +166,7 @@ defineModule('PLATFORM', 'platform.ticket', '工单反馈', 75, [
 - `AvatarMenu.tsx:120`:`onClick` 从 `window.open(docs)` 改为切到工单页面(走 AppContext 的页面切换)。
 
 ### collab-admin
+
 - 新 `components/tickets-view.tsx`,套 `releases-view.tsx` 模板:Section + 筛选栏 + Table + 分页 + DetailSheet/Dialog。
 - `lib/tickets.ts`:admin API helpers。multipart 上传同样需 FormData(确认 `lib/api.ts` 的 `api()` 是否已支持 FormData,
   不支持则同样加分支)。
@@ -167,19 +174,23 @@ defineModule('PLATFORM', 'platform.ticket', '工单反馈', 75, [
   `lib/navigation.ts` 在「内容」或新增组里加 `{ view:'tickets', label:'工单反馈', icon: LifeBuoyIcon }`。
 
 ## 通知联动
+
 - 管理员回复 / 改状态后,`NotificationService.create(ticket.userId, 'ticket_reply', title, body, { relatedType:'Ticket', relatedId:ticket.id })`,
   try/catch 包裹仅记日志(与现有埋点一致)。TicketModule 注入 NotificationService。
 
 ## 模块装配
+
 - 新 `ticket.module.ts` 或并入现有聚合 module。注册 TicketController、AdminTicketController、TicketService;
   导入 PrismaService、AuthService、NotificationService。参考 `collab.module.ts` 装配方式。
 
 ## 风险与权衡
+
 - **multipart + 全局 JSON 中间件**:`main.ts` 全局 `json()`/`urlencoded()` 不影响 multipart(multer 拦截器先吃 multipart body)。已被 release 上传验证可行。
 - **MySQL enum 渲染**:双 provider,迁移需核对 `.generated/mysql`。新增 5 个枚举,风险低但需 typecheck + 生成验证。
 - **附件目录权限**:`uploads/` 应在部署文档/`.gitignore` 标注(与 `downloads/` 同款,不入库)。检查 `.gitignore` 是否需加 `uploads/`。
 - **下载越权**:核心安全点。service 层统一校验 viewer,单测必须覆盖「他人下载本人附件被拒」。
 
 ## 回滚
+
 - 后端:删 TicketModule/三 controller-service/权限码增量;migration 写对应 down(或新 migration 删表)。
 - 前端:View 联合、navigation、App.tsx、AvatarMenu 改动均为增量,revert 即可;无破坏性 schema 外改动。

@@ -104,7 +104,11 @@ export function hasStructuredBlocks(rawText: string): boolean {
 ```ts
 // 纯对话态草稿：无 files/manifest，仅 turns。status 用 'generating' 占位（AC1 不弹 invalid）。
 export function makeConversationDraft(userPrompt: string, assistantOutput: string): PluginDraft;
-export function mergeConversationTurn(prev: PluginDraft, userPrompt: string, assistantOutput: string): PluginDraft;
+export function mergeConversationTurn(
+  prev: PluginDraft,
+  userPrompt: string,
+  assistantOutput: string
+): PluginDraft;
 ```
 
 > 注意：纯对话态 `status` 不能是 `invalid`（否则触发现有 `PluginCreatorHome.tsx:443` 的 destructive Badge 与「预览」disabled）。约定纯对话态 `status: 'generating'`（`STATUS_LABEL` 已有此键，`plugin-draft.ts:113`）。
@@ -192,7 +196,7 @@ export interface ConversationMeta {
 // 完整对话态（切换到该会话时加载）。
 export interface Conversation {
   meta: ConversationMeta;
-  draft: PluginDraft | null;        // 结构化草稿（hasStructuredBlocks 时非空）或纯对话 draft
+  draft: PluginDraft | null; // 结构化草稿（hasStructuredBlocks 时非空）或纯对话 draft
   assistantSession: AssistantSessionState | null;
 }
 ```
@@ -201,8 +205,8 @@ export interface Conversation {
 
 ```ts
 interface ConversationStore {
-  metas: ConversationMeta[];         // tauriInvoke('code_assistant_list_sessions') 一次拉取
-  activeId: string | null;           // 当前活动会话 id（localStorage 持久化）
+  metas: ConversationMeta[]; // tauriInvoke('code_assistant_list_sessions') 一次拉取
+  activeId: string | null; // 当前活动会话 id（localStorage 持久化）
 }
 ```
 
@@ -279,6 +283,7 @@ export function PreviewDrawer({ open, onOpenChange, files, activeFile, activeCon
 ```
 
 要点：
+
 - `SheetContent` 的 `className="w-[min(95vw,1400px)]"` 覆盖 `sheetVariants.right`（`sheet.tsx:37` 的 `w-[min(92vw,640px)]`）——`cn`（`sheet.tsx:52-55`）后写覆盖先写，宽度生效。
 - 多文件切换：复用 `SourcePanel` 的 `Tabs`（`SourcePanel.tsx:15-17`）+ `activeFile`/`onActiveFileChange` props 透传（与现状 `PluginCreatorHome.tsx:68/515/521` 完全一致）。
 - `previewKey`（`PluginCreatorHome.tsx:69/230`）复用，刷新按钮走原 `onRefreshPreview`（`:522`）。
@@ -352,23 +357,23 @@ ConversationRail.onSelect(id)
 
 ### 5.1 新增
 
-| 文件 | 职责 |
-| --- | --- |
+| 文件                                                       | 职责                                                 |
+| ---------------------------------------------------------- | ---------------------------------------------------- |
 | `apps/desktop/src/components/creator/ConversationRail.tsx` | 会话栏（列表/新建/切换/删除/重命名/归档），w-64 固定 |
-| `apps/desktop/src/components/creator/PreviewDrawer.tsx` | 全屏预览 Sheet（复用 PreviewPanel+SourcePanel） |
+| `apps/desktop/src/components/creator/PreviewDrawer.tsx`    | 全屏预览 Sheet（复用 PreviewPanel+SourcePanel）      |
 
 ### 5.2 修改
 
-| 文件 | 改动 |
-| --- | --- |
-| `apps/desktop/src/pages/PluginCreatorHome.tsx` | 引入 ConversationRail 三栏布局；删 `:275` systemPrompt 硬编码；改 `:185-251` finalizeSession 加 gate（§3.1.2）；listener 守卫 `:115/136/142/158/164` 改 activeIdRef；顶部按钮 `:445-450` 加「预览」；新增 `forceConvertToDraft`；草稿落盘 save_draft；切换会话读写 |
-| `apps/desktop/src/components/creator/DetailsPanel.tsx` | 删 preview tab（`:52/60-63`）+ SourcePanel/PreviewPanel import（`:6-7`）；TabsList `:51` 改 grid-cols-3；props 删预览相关 |
-| `apps/desktop/src/App.tsx` | `currentDraft` 单 useState（`:129`）保持，但增 `ConversationStore`（metas+activeId）——置于 `PluginCreatorHome` 内部 state 而非 App context（避免全局污染）；App 仅作为渲染容器 |
-| `apps/desktop/src/lib/plugin-draft.ts` | 新增 `hasStructuredBlocks`/`makeConversationDraft`/`mergeConversationTurn` 纯函数；`ConversationMeta` 类型；`AssistantSessionRecord` 补 title/draftUpdatedAt/archived |
-| `apps/desktop/src/components/chat/Bubble.tsx` | 增可选 `actions?: ReactNode` 渲染槽（最小扩展，主体不变） |
-| `apps/desktop/src-tauri/src/code_assistant/store.rs` | `SessionRecord` 加三字段（`:56` 后）；`drafts_dir`/`draft_path`/`read_draft`/`write_draft`/`delete_session` 方法；`AssistantStore::new`（`:109-112`）建 drafts 目录 |
-| `apps/desktop/src-tauri/src/code_assistant.rs` | 四命令函数 `rename_session`/`delete_session`/`save_draft`/`read_draft` + 四 Input 结构体 |
-| `apps/desktop/src-tauri/src/main.rs` | 四 `#[tauri::command]` wrapper（`:150-156` 区）+ invoke_handler 注册（`:208` 后） |
+| 文件                                                   | 改动                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/desktop/src/pages/PluginCreatorHome.tsx`         | 引入 ConversationRail 三栏布局；删 `:275` systemPrompt 硬编码；改 `:185-251` finalizeSession 加 gate（§3.1.2）；listener 守卫 `:115/136/142/158/164` 改 activeIdRef；顶部按钮 `:445-450` 加「预览」；新增 `forceConvertToDraft`；草稿落盘 save_draft；切换会话读写 |
+| `apps/desktop/src/components/creator/DetailsPanel.tsx` | 删 preview tab（`:52/60-63`）+ SourcePanel/PreviewPanel import（`:6-7`）；TabsList `:51` 改 grid-cols-3；props 删预览相关                                                                                                                                          |
+| `apps/desktop/src/App.tsx`                             | `currentDraft` 单 useState（`:129`）保持，但增 `ConversationStore`（metas+activeId）——置于 `PluginCreatorHome` 内部 state 而非 App context（避免全局污染）；App 仅作为渲染容器                                                                                     |
+| `apps/desktop/src/lib/plugin-draft.ts`                 | 新增 `hasStructuredBlocks`/`makeConversationDraft`/`mergeConversationTurn` 纯函数；`ConversationMeta` 类型；`AssistantSessionRecord` 补 title/draftUpdatedAt/archived                                                                                              |
+| `apps/desktop/src/components/chat/Bubble.tsx`          | 增可选 `actions?: ReactNode` 渲染槽（最小扩展，主体不变）                                                                                                                                                                                                          |
+| `apps/desktop/src-tauri/src/code_assistant/store.rs`   | `SessionRecord` 加三字段（`:56` 后）；`drafts_dir`/`draft_path`/`read_draft`/`write_draft`/`delete_session` 方法；`AssistantStore::new`（`:109-112`）建 drafts 目录                                                                                                |
+| `apps/desktop/src-tauri/src/code_assistant.rs`         | 四命令函数 `rename_session`/`delete_session`/`save_draft`/`read_draft` + 四 Input 结构体                                                                                                                                                                           |
+| `apps/desktop/src-tauri/src/main.rs`                   | 四 `#[tauri::command]` wrapper（`:150-156` 区）+ invoke_handler 注册（`:208` 后）                                                                                                                                                                                  |
 
 ### 5.3 不动
 
@@ -428,7 +433,7 @@ ConversationRail.onSelect(id)
 
 `plugin-draft.ts` 新增纯函数单测：
 
-- `hasStructuredBlocks`：纯文本 → false；含 ```` ```manifest ```` → true；含 ```` ```file path="x" ```` → true；只有 ```` ```js ```` unknown 块 → false（gate 严格只认 manifest/file）。
+- `hasStructuredBlocks`：纯文本 → false；含 ` ```manifest ` → true；含 ` ```file path="x" ` → true；只有 ` ```js ` unknown 块 → false（gate 严格只认 manifest/file）。
 - `makeConversationDraft`：产 `turns=[u,a]`、`files=[]`、`status='generating'`。
 - `mergeConversationTurn`：在既有 draft 上追加 turn、`normalizeTurns` 去重。
 

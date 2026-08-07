@@ -17,6 +17,7 @@ async editPluginMeta(
 ```
 
 **逻辑**：
+
 1. `ensureCurrentTeam(userId)` → membership。
 2. `findUnique({ id })`，不存在 `notFound('插件不存在')`。
 3. `ensurePluginManager(plugin, teamId, userId, role)`（作者或团队管理员）。

@@ -10,12 +10,14 @@
 **任务**：精确反推桌面壳 `inspect_artifact` 期望的 zip 内部结构。
 
 **步骤**：
+
 1. 读 `apps/desktop/src-tauri/src/plugin_package_manager.rs` 第 800-1000 行（`install` / `inspect_artifact`）
 2. 读 `apps/desktop/src-tauri/src/plugin_store.rs` 中读取 release 目录的代码
 3. 在 `apps/desktop/builtin-plugins/` 找一个真实插件，用 `Compress-Archive` 或 `pnpm dlx bestzip` 生成临时 zip，看 `inspect_artifact` 解析报错
 4. 在仓库中找已发布的 `.lfplugin` 样本（如有）解压查看
 
 **输出**：在 `.trellis/tasks/07-13-plugin-dev-sdk/research/lfplugin-format.md` 写下：
+
 - zip 内部顶层目录结构（是否含 `manifest.json` 在根，还是 `<id>/manifest.json`）
 - 是否需要 `meta.json`，字段是什么
 - v4 版本号在 zip 的哪里声明
@@ -28,12 +30,14 @@
 **任务**：确认 `plugin_runner.rs` spawn nodejs 插件时是否 honors `package.json` 的 `type: module`。
 
 **步骤**：
+
 1. 读 `plugin_runner.rs` 中 `ensure_node_dependencies` 与 spawn 节点的代码（约 880-960、1462-1474 行）
 2. 看 spawn 命令是否进入插件目录、node 是否自动读 package.json
 3. 跑 `apps/desktop/builtin-plugins/game-2048/`（package.json `"type": "commonjs"`，用 require）确认基线
 4. 在 `tmp/` 起一个最小 ESM 测试插件（package.json `"type": "module"`，index.js 用 `import`），让桌面壳尝试运行，看是否成功
 
 **输出**：在 `.trellis/tasks/07-13-plugin-dev-sdk/research/nodejs-esm-support.md` 写下结论：
+
 - 模板用 ESM（`import`）还是 CommonJS（`require`）
 
 **闸门**：未写出此文档不得开始 §4.2（nodejs 模板）。
@@ -45,6 +49,7 @@
 **已完成（bg_4551c121）**：写入 `.trellis/tasks/07-13-plugin-dev-sdk/research/publish-endpoint.md`。
 
 **关键发现（修正 design 假设）**：
+
 - **不是 multipart！** 端点读 `req: Request` 作为 raw `Readable` 流
 - 请求体：`.lfplugin` 文件 raw 二进制（`body: fileBuffer`）
 - `Content-Type: application/octet-stream`
@@ -291,19 +296,19 @@ rm -rf tmp-root-test
 
 ## 预计耗时
 
-| 章节 | 时长 |
-|------|------|
-| §0 | 1.5h |
-| §1 | 1h |
-| §2 | 2h |
-| §3 | 0.5h |
-| §4 | 3h |
-| §5 | 1h |
-| §6 | 2h |
-| §7 | 1h |
-| §8 | 0.5h |
-| §9 | 0.2h |
-| §10 | 1h |
+| 章节     | 时长                      |
+| -------- | ------------------------- |
+| §0       | 1.5h                      |
+| §1       | 1h                        |
+| §2       | 2h                        |
+| §3       | 0.5h                      |
+| §4       | 3h                        |
+| §5       | 1h                        |
+| §6       | 2h                        |
+| §7       | 1h                        |
+| §8       | 0.5h                      |
+| §9       | 0.2h                      |
+| §10      | 1h                        |
 | **合计** | **~13.7h**（约 2 工作日） |
 
 ## Review Gates

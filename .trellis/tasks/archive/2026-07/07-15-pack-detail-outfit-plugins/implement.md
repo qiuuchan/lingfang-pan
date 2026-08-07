@@ -8,12 +8,14 @@
 ## 执行清单
 
 ### 阶段 0 · 脚手架
+
 - [ ] 0.1 `mkdir plugins/detail-poster plugins/outfit-batch`
 - [ ] 0.2 `cp ~/Downloads/详情页.py plugins/detail-poster/main.py`（重命名为 main.py）
 - [ ] 0.3 `cp ~/Downloads/ai换装版本批量版.py plugins/outfit-batch/main.py`
 - [ ] 0.4 写两份 `manifest.json`（design.md 契约段）、空 `requirements.txt`、占位 `README.md`
 
 ### 阶段 1 · detail-poster 改造（tkinter）
+
 - [ ] 1.1 读完整 `main.py`（已读 1-2689，补读 2690-3257：GPT5.5 窗口、颜色图生成、入口）。
 - [ ] 1.2 顶部配置块：删 `GEN_API_BASE_URL/GEN_API_KEY/GEN_EDITS_API/REVERSE_API_URL/REVERSE_MODEL/REVERSE_API_KEY/GPT55_*`；新增桥 helper（design.md 代码段）+ tier 默认值。
 - [ ] 1.3 `_call_api()` → 改调 `bridge_image_edit()`；删手搓 multipart/boundary；`gpt-image-2` → tier；返回 data:URI/URL 落盘逻辑保留。
@@ -25,6 +27,7 @@
 - [ ] 1.9 启动时 `bridge_ready()` 检查，未在桌面壳内运行给友好提示。
 
 ### 阶段 2 · outfit-batch 改造（PyQt5）
+
 - [ ] 2.1 读完整 `main.py`（已读 1-1440，补读 1441-2058：init_ui、generate_action、各模式入口）。
 - [ ] 2.2 配置块：删 `DEFAULT_API_KEY/DEFAULT_API_BASE/DEFAULT_API_ENDPOINT/API_GROUPS`；加桥 helper + tier。
 - [ ] 2.3 `LocalAPIGenerator.generate()`：两路径合并为 `bridge_image_edit()`；删 `use_json`/endpoint 拼接/`X-API-Group`；images 返回值落盘。
@@ -34,11 +37,13 @@
 - [ ] 2.7 `get_api_key/get_api_group` 及残留密钥引用清理。
 
 ### 阶段 3 · 依赖与文档
+
 - [ ] 3.1 `detail-poster/requirements.txt`：Pillow、requests、（tkinterdnd2 注释为可选）。
 - [ ] 3.2 `outfit-batch/requirements.txt`：PyQt5、Pillow、requests、psutil。
 - [ ] 3.3 两份 `README.md`（参照 videodl：用途、运行机制、首次 venv 安装提示、档位/计费说明、局限）。
 
 ### 阶段 4 · AI 政策验证（review gate）
+
 - [ ] 4.1 静态自检：grep 确认两插件源码无 `sk-`、无 `api_key\s*=`、无 `base_url\s*=`、桥变量读取无第二参数、无 print 桥变量。
 - [ ] 4.2 调 `checkPluginAiPolicy`：用 node 跑 collab-api 的扫描器对两插件 manifest+files，确认 `ok:true`、零诊断。
   ```bash
@@ -47,11 +52,13 @@
 - [ ] 4.3 修复任何剩余诊断，回到 4.2 直到通过。
 
 ### 阶段 5 · 打包
+
 - [ ] 5.1 `cd plugins/detail-poster && zip -r ../detail-poster.lfplugin manifest.json main.py requirements.txt README.md`
 - [ ] 5.2 `cd plugins/outfit-batch && zip -r ../outfit-batch.lfplugin manifest.json main.py requirements.txt README.md`
 - [ ] 5.3 `file plugins/*.lfplugin` 确认是 zip；`unzip -l` 确认内含 4 文件、无 `data/`/`__pycache__`。
 
 ### 阶段 6 · 实跑验证（条件性，需桌面壳）
+
 - [ ] 6.1 在桌面客户端加载两插件，确认 manifest 解析、venv 创建、进程启动、窗口弹出。
 - [ ] 6.2 detail-poster：生图 + 反推各试一次；outfit-batch：换装任务试一次。
 - [ ] 6.3 若无法跑桌面壳（环境限制），明确告知用户需手动验证，不谎报通过。

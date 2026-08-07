@@ -4,14 +4,14 @@
 
 本任务改动范围：
 
-| 改 | 文件 | 说明 |
-|---|---|---|
-| 插件源码 | `plugins/detail-poster/main.py` | 比例绑定、size 映射、字体加载、（必要时）裁剪 |
-| 插件源码 | `plugins/outfit-batch/main.py` | 仅确认图标加载，无源码改动（`favicon (4).ico` 放进去即可生效） |
-| 资源 | `plugins/detail-poster/app.ico`、`plugins/detail-poster/fonts/*` | 新增 |
-| 资源 | `plugins/outfit-batch/favicon (4).ico` | 新增 |
-| 元数据 | 两插件 `manifest.json` | version 递增 |
-| 产物 | `plugins/*.lfplugin` | 重新 `lingfang-plugin build` |
+| 改       | 文件                                                             | 说明                                                           |
+| -------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| 插件源码 | `plugins/detail-poster/main.py`                                  | 比例绑定、size 映射、字体加载、（必要时）裁剪                  |
+| 插件源码 | `plugins/outfit-batch/main.py`                                   | 仅确认图标加载，无源码改动（`favicon (4).ico` 放进去即可生效） |
+| 资源     | `plugins/detail-poster/app.ico`、`plugins/detail-poster/fonts/*` | 新增                                                           |
+| 资源     | `plugins/outfit-batch/favicon (4).ico`                           | 新增                                                           |
+| 元数据   | 两插件 `manifest.json`                                           | version 递增                                                   |
+| 产物     | `plugins/*.lfplugin`                                             | 重新 `lingfang-plugin build`                                   |
 
 **不动**：`plugin_llm_bridge.rs`、`relay.service.ts`/`forwarders.ts`、`plugin-ai-policy.ts`、桌面壳解包逻辑。
 
@@ -43,6 +43,7 @@ gen_single/gen_main ─> _call_api(mod, target_size?)
 **问题**：上游不认 `1254x1254` 这类自定义值。即便映射到标准值，上游原生比例可能只到 2:3（1024x1536），没有真正的 3:4。
 
 **方案（两层）**：
+
 1. **请求层**：把 `size_map` 全部改为上游标准值，按目标比例选最近的上游尺寸：
    - `1:1` → `1024x1024`
    - `3:4` → `1024x1536`（上游无 3:4，取最接近的竖图；下一步裁剪到精确 3:4）
@@ -76,6 +77,7 @@ gen_single/gen_main ─> _call_api(mod, target_size?)
 **问题**：`BUILTIN_FONTS = {}` 空；`_find_font_file` 找不到任何字体→fallback `load_default`→中文不可见。
 
 **方案**：
+
 1. 新增 `plugins/detail-poster/fonts/` 目录，放入 `字体.zip` 解压后的全部 `.ttf/.otf`。
 2. 启动时扫描该目录，按「文件名去扩展名」建 `BUILTIN_FONTS` 字典（如 `白无常可可体常规` → `fonts/白无常可可体常规_mianfeiziti.com.ttf`）。注意 `字体.zip` 里文件名带 `_mianfeiziti.com` 后缀和空格，需建立**显示名→文件名**映射；显示名取去掉 `_mianfeiziti.com` 后缀的部分，或维护一份精简别名表（至少覆盖默认的「白无常可可体常规」）。
 3. `_find_font_file` 现有逻辑（先查 `BUILTIN_FONTS`，再查 `imported_fonts`）即可命中。系统字体走 tkinter 渲染（颜色图用 PIL 绘制，系统字体若 PIL 找不到文件则 fallback，保持现状）。
@@ -85,12 +87,14 @@ gen_single/gen_main ─> _call_api(mod, target_size?)
 **字体目录定位**：`os.path.join(os.path.dirname(__file__), "fonts")`，与 `app.ico` 加载方式一致（main.py:132），不依赖 cwd。
 
 **显示名映射（最小别名表，确保默认字体可用）**：
+
 ```
 白无常可可体常规 → 白无常可可体常规_mianfeiziti.com.ttf
 白无常可可体粗   → 白无常可可体粗_mianfeiziti.com.ttf
 思源黑体CN-Medium → 思源黑体CN-Medium_mianfeiziti.com.otf
 ...（其余按文件名 stem 自动建表）
 ```
+
 扫描时：对每个字体文件，stem 去掉 `_mianfeiziti.com` 后缀作为显示名；同时保留原始 stem 作为别名，两者都指向同一文件。
 
 ### D5 资源打包布局

@@ -11,16 +11,20 @@ desktop 客户端适配子任务 B 新增的 collab-api 路由（wallet/market �
 ## Requirements
 
 ### C1 wallet/market 调用改 /api 前缀（依赖子任务 B）
+
 - Wallet.tsx：`/wallet` → `/api/wallet`
 - Market.tsx：`/marketplace/*` → `/api/marketplace/*`、`/wallet/purchase` → `/api/wallet/purchase`
 
 ### C2 切 tab 中断生成（需求 5 前半）
+
 - App.tsx：PluginCreatorHome 常驻挂载（display 控制），不再因 view 切换卸载，保留 Tauri 会话状态
 
 ### C3 侧边栏悬浮字（需求 3）
+
 - Sidebar.tsx：PopoverContent/导航文字在深色下显式保证 text-popover-foreground/text-foreground
 
 ### C4 JSON 输出步骤化（需求 5 后半，参考 AionUI）
+
 - code_assistant adapters 解析 CLI 结构化输出，发出细粒度 transcript 事件
 - 前端 LiveProcess 改为事件时间线渲染
 

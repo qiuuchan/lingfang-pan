@@ -14,16 +14,16 @@
 
 ### API 封装（新增到 api.ts 或 releases.ts）
 
-| 方法 | 端点 | 用途 |
-|---|---|---|
-| `listAdminReleases()` | `GET /api/admin/releases` | 列表（含 DRAFT/ARCHIVED，公开端点只返 PUBLISHED）|
-| `createRelease(body)` | `POST /api/admin/releases` | 创建 DRAFT |
-| `updateRelease(id, body)` | `PATCH /api/admin/releases/:id` | 改 title/notes |
-| `publishRelease(id)` | `POST /api/admin/releases/:id/publish` | 发布 |
-| `archiveRelease(id)` | `POST /api/admin/releases/:id/archive` | 归档 |
-| `addAsset(id, body)` | `POST /api/admin/releases/:id/assets` | 登记外链 asset |
-| `uploadAsset(id, file, platform, arch)` | `POST /api/admin/releases/:id/assets/upload` | 上传安装包（multipart）|
-| `deleteAsset(id, assetId)` | `DELETE /api/admin/releases/:id/assets/:assetId` | 删 asset |
+| 方法                                    | 端点                                             | 用途                                              |
+| --------------------------------------- | ------------------------------------------------ | ------------------------------------------------- |
+| `listAdminReleases()`                   | `GET /api/admin/releases`                        | 列表（含 DRAFT/ARCHIVED，公开端点只返 PUBLISHED） |
+| `createRelease(body)`                   | `POST /api/admin/releases`                       | 创建 DRAFT                                        |
+| `updateRelease(id, body)`               | `PATCH /api/admin/releases/:id`                  | 改 title/notes                                    |
+| `publishRelease(id)`                    | `POST /api/admin/releases/:id/publish`           | 发布                                              |
+| `archiveRelease(id)`                    | `POST /api/admin/releases/:id/archive`           | 归档                                              |
+| `addAsset(id, body)`                    | `POST /api/admin/releases/:id/assets`            | 登记外链 asset                                    |
+| `uploadAsset(id, file, platform, arch)` | `POST /api/admin/releases/:id/assets/upload`     | 上传安装包（multipart）                           |
+| `deleteAsset(id, assetId)`              | `DELETE /api/admin/releases/:id/assets/:assetId` | 删 asset                                          |
 
 **注意**：后端无 `GET /api/admin/releases`（列表）端点？需查证。若仅有公开 `GET /api/releases`（只返 PUBLISHED），admin 列表看不到 DRAFT/ARCHIVED——需后端补 admin 列表端点，或前端用公开端点 + 约束（admin 只能管理 PUBLISHED？不行）。
 
@@ -32,17 +32,20 @@
 ### 上传 FormData 契约
 
 后端 `FileInterceptor('file')` + body `{ platform, arch }`：
+
 ```
 FormData:
   file: <LingFang_0.0.2_x64-setup.exe>
   platform: WINDOWS
   arch: X86_64
 ```
+
 后端自动：落 `downloads/<随机前缀>_<文件名>`，url=`/downloads/<...>`，sizeBytes=文件大小。
 
 ### api() 扩展（FormData）
 
 当前 `api()` 硬编码 `Content-Type: application/json` + `JSON.stringify(body)`。扩展方案：
+
 - `ApiOptions` 加 `formData?: FormData` 字段。
 - 有 formData 时不设 Content-Type（浏览器自动加 multipart boundary），body 直接传 FormData。
 - 其余（token、timeout、错误处理）复用。
@@ -54,11 +57,13 @@ FormData:
 **问题**：后端 `uploadAsset` 只 `FileInterceptor('file')` 接收 .exe，.sig 读取逻辑是从 `downloads/<uniqueName>.sig` 读——但前端没传 .sig，所以 signature 永远空。updater 验签会失败。
 
 **决策**：后端改用 `FileFieldsInterceptor` 同时接收 .exe（field: `file`）+ .sig（field: `signature`）。上传时：
+
 - .exe 落 `downloads/<随机前缀>_<文件名>`，url=`/downloads/<...>`。
 - .sig 内容直接读为 signature 填入 asset（不再依赖同名文件读取）。
 - .sig 可选（未传则 signature 留空，兼容纯下载场景）。
 
 **后端改动**（`admin.controller.ts` + `release.service.ts`）：
+
 - controller：`FileInterceptor('file')` → `FileFieldsInterceptor({ file, signature? })`，`@UploadedFiles()`。
 - service：`uploadAsset` 签名加 `sigFile?` 参数，有则 `readFileSync(sigFile.path)` 或 `sigFile.buffer.toString()` 填 signature，删除原「读同名 .sig」逻辑。
 
@@ -75,6 +80,7 @@ FormData:
 ### D3：UI 结构
 
 参考 plugins-view 模式：
+
 - 顶部：channel 筛选（STABLE/BETA/全部）+ 「创建版本」按钮。
 - Table：version / channel / title / status（DRAFT/PUBLISHED/ARCHIVED Badge）/ isLatest / asset 数 / publishedAt / 操作（详情/发布/归档）。
 - DetailSheet：版本详情 + asset 列表（下载链接可复制 + 删除）+ 上传安装包区（platform/arch 选择 + file input + 上传按钮）+ 登记外链 asset 表单 + 编辑 title/notes。

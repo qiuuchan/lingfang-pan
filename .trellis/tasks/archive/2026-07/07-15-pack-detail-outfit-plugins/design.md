@@ -3,6 +3,7 @@
 ## 边界
 
 **改动范围**（仅插件目录新增 + 脚本内部 API 层改造）：
+
 - 新增 `plugins/detail-poster/`（4 文件）+ `plugins/detail-poster.lfplugin`
 - 新增 `plugins/outfit-batch/`（4 文件）+ `plugins/outfit-batch.lfplugin`
 - 改造两脚本的 AI 调用层、设置 UI、状态路径、硬编码路径
@@ -11,12 +12,12 @@
 
 ## 参考实现
 
-| 参照 | 说明 |
-|------|------|
-| `plugins/ai-outfit-test/index.js` | 桥 `/image/edit` 调用的标准范式（token 头、body 形状、env 无 fallback） |
-| `plugins/videodl/manifest.json` + `main.py` | Python 插件 manifest 形状、`data/` 持久化、venv 运行、弹独立窗口 |
-| `apps/desktop/src-tauri/src/plugin_llm_bridge.rs:393-582` | `/image/edit`、`/llm/chat`、`/v1/chat/completions` 路由契约 |
-| `apps/collab-api/src/modules/plugin-ai-policy.ts` | 扫描器规则（合规判据） |
+| 参照                                                      | 说明                                                                    |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `plugins/ai-outfit-test/index.js`                         | 桥 `/image/edit` 调用的标准范式（token 头、body 形状、env 无 fallback） |
+| `plugins/videodl/manifest.json` + `main.py`               | Python 插件 manifest 形状、`data/` 持久化、venv 运行、弹独立窗口        |
+| `apps/desktop/src-tauri/src/plugin_llm_bridge.rs:393-582` | `/image/edit`、`/llm/chat`、`/v1/chat/completions` 路由契约             |
+| `apps/collab-api/src/modules/plugin-ai-policy.ts`         | 扫描器规则（合规判据）                                                  |
 
 ## 契约
 
@@ -63,6 +64,7 @@ def bridge_chat(messages, tier="fast", timeout=(30, 300)):
 ### manifest 形状
 
 **detail-poster/manifest.json**
+
 ```json
 {
   "id": "com.lingfang.detail-poster",
@@ -73,13 +75,24 @@ def bridge_chat(messages, tier="fast", timeout=(30, 300)):
   "entry": "main.py",
   "visibility": "tenant",
   "capabilities": [
-    { "kind": "image.edit", "reason": "经平台图片编辑能力生成海报/主图/换装图", "risk": "medium", "requires_admin": false },
-    { "kind": "llm.chat", "reason": "经平台对话能力反推与精简提示词", "risk": "medium", "requires_admin": false }
+    {
+      "kind": "image.edit",
+      "reason": "经平台图片编辑能力生成海报/主图/换装图",
+      "risk": "medium",
+      "requires_admin": false
+    },
+    {
+      "kind": "llm.chat",
+      "reason": "经平台对话能力反推与精简提示词",
+      "risk": "medium",
+      "requires_admin": false
+    }
   ]
 }
 ```
 
 **outfit-batch/manifest.json**
+
 ```json
 {
   "id": "com.lingfang.outfit-batch",
@@ -90,7 +103,12 @@ def bridge_chat(messages, tier="fast", timeout=(30, 300)):
   "entry": "main.py",
   "visibility": "tenant",
   "capabilities": [
-    { "kind": "image.edit", "reason": "经平台图片编辑能力批量换装/换头/裂变", "risk": "medium", "requires_admin": false }
+    {
+      "kind": "image.edit",
+      "reason": "经平台图片编辑能力批量换装/换头/裂变",
+      "risk": "medium",
+      "requires_admin": false
+    }
   ]
 }
 ```
@@ -98,6 +116,7 @@ def bridge_chat(messages, tier="fast", timeout=(30, 300)):
 ## 数据流
 
 ### 生图（两插件共用）
+
 ```
 GUI 收集(prompt, 参考图paths, tier, size)
   → bridge_image_edit(...)            # base64 编码图 + POST 桥 /image/edit
@@ -108,6 +127,7 @@ GUI 收集(prompt, 参考图paths, tier, size)
 ```
 
 ### 反推提示词（仅 detail-poster）
+
 ```
 GUI(参考图base64 + theme/cloth/scene)
   → bridge_chat(messages=[{role:user, content:[{type:text,...},{type:image_url,...}]}])
@@ -119,6 +139,7 @@ GUI(参考图base64 + theme/cloth/scene)
 ## 各插件改造点
 
 ### detail-poster（原 详情页.py，tkinter）
+
 1. **API 层替换**：
    - `_call_api()`（`GEN_EDITS_API` multipart）→ `bridge_image_edit()`；删除手搓 boundary/multipart 代码。
    - `_call_reverse_api()`、`_refine_prompt_with_title()`（`REVERSE_API_URL`）→ `bridge_chat()`；`REVERSE_MODEL="gpt-5.5"` 删除，tier 走 fast/premium。
@@ -130,6 +151,7 @@ GUI(参考图base64 + theme/cloth/scene)
 6. **model 字段**：所有 `"gpt-image-2"` → tier 变量。
 
 ### outfit-batch（原 ai换装版本批量版.py，PyQt5）
+
 1. **API 层替换**：`LocalAPIGenerator.generate()` 两条路径（JSON / multipart）合并为单次 `bridge_image_edit()` 调用；`use_json`/`endpoint`/`api_base_url`/分组逻辑全删；返回的 images 直接落盘。
 2. **删配置**：`DEFAULT_API_KEY`/`DEFAULT_API_BASE`/`DEFAULT_API_ENDPOINT`/`API_GROUPS` 删；`ApiKeyDialog` 重做为「执行参数」（并发/超时/重试/档位 fast-premium），删 URL/密钥/分组字段。
 3. **档位**：`app_settings` 的 `api_group` → `tier`（fast/premium），UI 下拉替换原分组；`get_api_group()`/`X-API-Group` 头删除。
@@ -139,16 +161,16 @@ GUI(参考图base64 + theme/cloth/scene)
 
 ## AI 政策合规细节（对照 `plugin-ai-policy.ts`）
 
-| 扫描规则 | 合规做法 |
-|----------|----------|
-| `ai.config.forbidden`（`sk-...{16+}`） | 删全部硬编码密钥；占位符用中文（`sk-此处替换` 不命中，但仍删） |
-| `ai.config.forbidden`（AI 上下文 `api_key=`/`base_url=` 赋值） | 删模块级 `*_API_KEY`/`*_API_URL`/`*_BASE_URL` 变量；settings 读取改用不触发正则的键名或直接用 dict |
-| `ai.bridge.custom`（桥变量带 fallback） | `os.environ.get("LINGFANG_PLUGIN_BRIDGE_URL")` 无第二参数 |
-| `ai.bridge.secret_sink`（print/写文件含桥变量） | 桥变量不进任何 print/log/磁盘 |
-| `ai.capability.missing` | manifest 声明 `image.edit`（两插件）+ `llm.chat`（detail-poster） |
-| `ai.sdk.third_party`（requirements） | 不含 anthropic/dashscope 等；Pillow/requests/PyQt5/psutil 均允许 |
-| `ai.endpoint.third_party` | 自定义 IP 本不在黑名单；删除后更无关 |
-| `detectCapabilities`（`/image/edit`、`/v1/chat/completions` 字符串触发能力探测） | 与 manifest 声明一致，正常通过 |
+| 扫描规则                                                                         | 合规做法                                                                                           |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `ai.config.forbidden`（`sk-...{16+}`）                                           | 删全部硬编码密钥；占位符用中文（`sk-此处替换` 不命中，但仍删）                                     |
+| `ai.config.forbidden`（AI 上下文 `api_key=`/`base_url=` 赋值）                   | 删模块级 `*_API_KEY`/`*_API_URL`/`*_BASE_URL` 变量；settings 读取改用不触发正则的键名或直接用 dict |
+| `ai.bridge.custom`（桥变量带 fallback）                                          | `os.environ.get("LINGFANG_PLUGIN_BRIDGE_URL")` 无第二参数                                          |
+| `ai.bridge.secret_sink`（print/写文件含桥变量）                                  | 桥变量不进任何 print/log/磁盘                                                                      |
+| `ai.capability.missing`                                                          | manifest 声明 `image.edit`（两插件）+ `llm.chat`（detail-poster）                                  |
+| `ai.sdk.third_party`（requirements）                                             | 不含 anthropic/dashscope 等；Pillow/requests/PyQt5/psutil 均允许                                   |
+| `ai.endpoint.third_party`                                                        | 自定义 IP 本不在黑名单；删除后更无关                                                               |
+| `detectCapabilities`（`/image/edit`、`/v1/chat/completions` 字符串触发能力探测） | 与 manifest 声明一致，正常通过                                                                     |
 
 **关键陷阱**：`bridgeEnvHasFallback` 对 Python 也生效——`os.environ.get('X', '默认')`（逗号 + 默认值）会命中；`getenv("X") or "x"` 也命中。必须裸 `os.environ.get("X")` 或 `os.environ["X"]`。
 

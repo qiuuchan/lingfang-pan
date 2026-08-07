@@ -88,12 +88,12 @@ find apps/desktop/src -name "*.tsx" -o -name "*.ts" | xargs wc -l | sort -rn | h
 
 ## 风险与回滚点
 
-| 风险 | 缓解 |
-|---|---|
-| `View` 收窄致 TS 报错 | typecheck 捕获，修复遗漏的 setView |
-| 拆分后 import 路径错 | 每拆一个文件即 typecheck |
+| 风险                                | 缓解                                   |
+| ----------------------------------- | -------------------------------------- |
+| `View` 收窄致 TS 报错               | typecheck 捕获，修复遗漏的 setView     |
+| 拆分后 import 路径错                | 每拆一个文件即 typecheck               |
 | shadcn add 组件冲突 components.json | 已确认 base-nova style，按现有模式 add |
-| TenantSelect Dialog 内 Card 双层 | 去外层 max-w，保留 Card 结构 |
+| TenantSelect Dialog 内 Card 双层    | 去外层 max-w，保留 Card 结构           |
 
 每步独立可 revert。S2（拆分）是最大改动块，单独提交。
 

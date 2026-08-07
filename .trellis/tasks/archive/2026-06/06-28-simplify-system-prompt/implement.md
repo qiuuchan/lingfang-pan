@@ -1,4 +1,4 @@
- # Simplify system prompt - Implementation
+# Simplify system prompt - Implementation
 
 ## Ordered Checklist
 
@@ -43,4 +43,3 @@ If the code changes alter UI assembly or the shared creator flow, also run:
 - Prompt text changes in `run.ts`.
 - Prompt text changes in `FloatingCreator.tsx`.
 - Any wording tweak in `skills.ts`.
-

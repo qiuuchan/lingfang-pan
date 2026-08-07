@@ -71,13 +71,13 @@ flowchart TD
 
 LingFang 插件工作台由五个可独立交付的子系统组成：
 
-| 子系统 | 目录 | 责任 | 不负责 |
-| --- | --- | --- | --- |
-| 插件创建首页 | `apps/desktop/src` | 首页、对话生成、预览、云端分享、最近插件 | 本机进程实现、云端审核规则 |
-| 本地代码助手运行时 | `apps/desktop/src-tauri` | CLI 发现、probe、session、transcript、进程 registry | 团队权限、市场审核 |
-| 插件能力与 SDK | `packages/contract`、`packages/plugin-sdk`、`plugins-runtime.ts` | 能力名、类型、桥接策略、运行态限制 | 业务持久化、CLI adapter 细节 |
-| 云端插件分享 | `apps/collab-api` | 上传、团队共享、公共审核、安装、审计 | 本机 CLI 运行、iframe 渲染 |
-| 真实 CLI 验证 | `docs/plugin-workbench-real-cli-test.md` | 记录真实命令、版本、模型、结果、截图/日志 | 替代自动化测试 |
+| 子系统             | 目录                                                             | 责任                                                | 不负责                       |
+| ------------------ | ---------------------------------------------------------------- | --------------------------------------------------- | ---------------------------- |
+| 插件创建首页       | `apps/desktop/src`                                               | 首页、对话生成、预览、云端分享、最近插件            | 本机进程实现、云端审核规则   |
+| 本地代码助手运行时 | `apps/desktop/src-tauri`                                         | CLI 发现、probe、session、transcript、进程 registry | 团队权限、市场审核           |
+| 插件能力与 SDK     | `packages/contract`、`packages/plugin-sdk`、`plugins-runtime.ts` | 能力名、类型、桥接策略、运行态限制                  | 业务持久化、CLI adapter 细节 |
+| 云端插件分享       | `apps/collab-api`                                                | 上传、团队共享、公共审核、安装、审计                | 本机 CLI 运行、iframe 渲染   |
+| 真实 CLI 验证      | `docs/plugin-workbench-real-cli-test.md`                         | 记录真实命令、版本、模型、结果、截图/日志           | 替代自动化测试               |
 
 这个边界避免把本地工具运行和云端多租户治理混在一起。远程 API 只接收插件成品，不接管用户机器上的代码助手。
 
@@ -378,11 +378,11 @@ Adapter 统一输出：
 
 当前工具定义：
 
-| 工具 | binary | probe/run 形态 | 默认模型 |
-| --- | --- | --- | --- |
-| Claude Code | `claude` | `claude -p <prompt> --model <model>` | `sonnet` |
-| Codex | `codex` 或 `npx --no-install @openai/codex` | `codex exec <prompt> --model <model>` | `default` |
-| OpenCode | `opencode` | `opencode run <prompt> --model <model>` | `default` |
+| 工具        | binary                                      | probe/run 形态                          | 默认模型  |
+| ----------- | ------------------------------------------- | --------------------------------------- | --------- |
+| Claude Code | `claude`                                    | `claude -p <prompt> --model <model>`    | `sonnet`  |
+| Codex       | `codex` 或 `npx --no-install @openai/codex` | `codex exec <prompt> --model <model>`   | `default` |
+| OpenCode    | `opencode`                                  | `opencode run <prompt> --model <model>` | `default` |
 
 Adapter 要求：
 
@@ -524,24 +524,24 @@ model Plugin {
 
 前台插件 API：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/plugins/upload` | 上传插件包到当前团队 |
-| `GET` | `/api/plugins/mine` | 当前用户创建的插件 |
-| `GET` | `/api/plugins/available` | 当前团队可运行插件 |
+| 方法   | 路径                                  | 说明                         |
+| ------ | ------------------------------------- | ---------------------------- |
+| `POST` | `/api/plugins/upload`                 | 上传插件包到当前团队         |
+| `GET`  | `/api/plugins/mine`                   | 当前用户创建的插件           |
+| `GET`  | `/api/plugins/available`              | 当前团队可运行插件           |
 | `POST` | `/api/plugins/:id/submit-marketplace` | 作者或团队管理员提交市场审核 |
-| `POST` | `/api/plugins/:id/edit-draft` | 编辑未审核中的团队插件 |
-| `POST` | `/api/plugins/:id/install` | 安装已审核公共市场插件 |
+| `POST` | `/api/plugins/:id/edit-draft`         | 编辑未审核中的团队插件       |
+| `POST` | `/api/plugins/:id/install`            | 安装已审核公共市场插件       |
 
 管理端插件 API：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/api/admin/plugins` | 平台插件列表 |
-| `GET` | `/api/admin/plugins/review-pending` | 待审核市场插件 |
-| `POST` | `/api/admin/plugins/:id/approve` | 审核通过 |
-| `POST` | `/api/admin/plugins/:id/reject` | 审核驳回 |
-| `PATCH` | `/api/admin/plugins/:id` | 禁用、改描述、改价格 |
+| 方法    | 路径                                | 说明                 |
+| ------- | ----------------------------------- | -------------------- |
+| `GET`   | `/api/admin/plugins`                | 平台插件列表         |
+| `GET`   | `/api/admin/plugins/review-pending` | 待审核市场插件       |
+| `POST`  | `/api/admin/plugins/:id/approve`    | 审核通过             |
+| `POST`  | `/api/admin/plugins/:id/reject`     | 审核驳回             |
+| `PATCH` | `/api/admin/plugins/:id`            | 禁用、改描述、改价格 |
 
 响应原则：
 
@@ -579,17 +579,17 @@ model Plugin {
 
 ## 23. 权限矩阵
 
-| 操作 | 普通团队成员 | 作者 | 团队管理员 | 平台管理员 |
-| --- | ---: | ---: | ---: | ---: |
-| 上传团队插件 | yes | yes | yes | no desktop flow |
-| 查看团队共享插件 | yes | yes | yes | admin list only |
-| 编辑自己插件 | no | yes | yes | no |
-| 编辑他人团队插件 | no | no | yes | no |
-| 提交市场审核 | no | yes | yes | no |
-| 安装公共插件 | yes | yes | yes | no desktop flow |
-| 审核通过/驳回 | no | no | no | yes |
-| 禁用公共插件 | no | no | no | yes |
-| 读取其他团队私有插件 | no | no | no | admin list only |
+| 操作                 | 普通团队成员 | 作者 | 团队管理员 |      平台管理员 |
+| -------------------- | -----------: | ---: | ---------: | --------------: |
+| 上传团队插件         |          yes |  yes |        yes | no desktop flow |
+| 查看团队共享插件     |          yes |  yes |        yes | admin list only |
+| 编辑自己插件         |           no |  yes |        yes |              no |
+| 编辑他人团队插件     |           no |   no |        yes |              no |
+| 提交市场审核         |           no |  yes |        yes |              no |
+| 安装公共插件         |          yes |  yes |        yes | no desktop flow |
+| 审核通过/驳回        |           no |   no |         no |             yes |
+| 禁用公共插件         |           no |   no |         no |             yes |
+| 读取其他团队私有插件 |           no |   no |         no | admin list only |
 
 关键规则：
 
@@ -1000,13 +1000,13 @@ LingFang 需要区分三种身份：
 
 插件来源决定运行权限。建议把 `LoadedPlugin.source` 收敛为以下语义：
 
-| source | 说明 | 信任等级 | 默认能力 |
-| --- | --- | --- | --- |
-| `builtin` | 随桌面端分发的内置插件 | 高 | 本地 Tauri capability、受控 code assistant |
-| `local-draft` | 当前用户本机刚生成的草稿 | 中高 | 预览、诊断、上传；code assistant 仅由工作台触发 |
-| `team` | 当前团队云端共享插件 | 中 | `llm.chat` 和低风险云端能力 |
-| `marketplace` | 公共市场审核通过插件 | 中低 | `llm.chat`、受限云端能力 |
-| `platform` | 平台预置数据库插件 | 中 | 与 marketplace 相同或更严格 |
+| source        | 说明                     | 信任等级 | 默认能力                                        |
+| ------------- | ------------------------ | -------- | ----------------------------------------------- |
+| `builtin`     | 随桌面端分发的内置插件   | 高       | 本地 Tauri capability、受控 code assistant      |
+| `local-draft` | 当前用户本机刚生成的草稿 | 中高     | 预览、诊断、上传；code assistant 仅由工作台触发 |
+| `team`        | 当前团队云端共享插件     | 中       | `llm.chat` 和低风险云端能力                     |
+| `marketplace` | 公共市场审核通过插件     | 中低     | `llm.chat`、受限云端能力                        |
+| `platform`    | 平台预置数据库插件       | 中       | 与 marketplace 相同或更严格                     |
 
 信任等级不应只靠前端字符串判断。前端可以用于 UI 和 bridge 路由，但服务端和 Tauri 仍必须做自己的校验。即使前端误把 marketplace 插件标成 builtin，Tauri 的 `invoke_capability` 也应依赖本地 manifest registry，而不是信任 iframe 传来的来源。
 
@@ -1079,8 +1079,7 @@ type WorkbenchPhase =
 ```
 
 ```html path="ui/index.html"
-<!doctype html>
-...
+<!doctype html> ...
 ```
 ````
 
@@ -1245,16 +1244,16 @@ Tauri process registry 必须处理这些情况：
 
 失败恢复要围绕用户能继续完成插件创建，而不是只报告错误：
 
-| 失败点 | 用户可见行为 | 恢复路径 |
-| --- | --- | --- |
-| CLI 未安装 | 显示缺失 binary 和候选命令 | 引导安装后重新检查 |
-| CLI 未登录 | 显示真实 stderr tail | 用户完成 CLI 登录后 probe |
-| 生成超时 | 保留 transcript 和 partial output | 停止或继续等待 |
-| 输出不可解析 | 显示缺少 manifest/files | 将诊断发送给 CLI 修复 |
-| entry 渲染失败 | 预览面板显示 iframe error | 查看源码并继续修改 |
-| 上传失败 | 显示服务端 validation details | 本地修复后重试 |
-| 审核驳回 | 显示 reviewReason | 带 reason 继续修改并重新提交 |
-| 进程清理失败 | 显示 pid 和建议 | 用户手动结束或重启后清理 |
+| 失败点         | 用户可见行为                      | 恢复路径                     |
+| -------------- | --------------------------------- | ---------------------------- |
+| CLI 未安装     | 显示缺失 binary 和候选命令        | 引导安装后重新检查           |
+| CLI 未登录     | 显示真实 stderr tail              | 用户完成 CLI 登录后 probe    |
+| 生成超时       | 保留 transcript 和 partial output | 停止或继续等待               |
+| 输出不可解析   | 显示缺少 manifest/files           | 将诊断发送给 CLI 修复        |
+| entry 渲染失败 | 预览面板显示 iframe error         | 查看源码并继续修改           |
+| 上传失败       | 显示服务端 validation details     | 本地修复后重试               |
+| 审核驳回       | 显示 reviewReason                 | 带 reason 继续修改并重新提交 |
+| 进程清理失败   | 显示 pid 和建议                   | 用户手动结束或重启后清理     |
 
 恢复动作必须保留上下文：原 prompt、工具、模型、session id、diagnostics、files。不要让用户因为一次失败丢掉全部草稿。
 

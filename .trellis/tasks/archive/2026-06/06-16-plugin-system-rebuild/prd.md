@@ -8,20 +8,22 @@
 
 ### 三类插件各自的运行方式
 
-| 类型 | 入口 | 运行方式 | UI 显示 |
-|------|------|----------|---------|
-| **HTML（CLIENT）** | ui/index.html | 软件内 iframe 显示（当前已有） | iframe 内嵌 |
-| **Node.js** | package.json | `pnpm install && pnpm start` 在独立终端运行 | 软件「运行中」状态 + 可强制关闭 |
-| **Python** | main.py | 独立 venv 环境 `venv/bin/python main.py` | 软件「运行中」状态 + 可强制关闭 |
+| 类型               | 入口          | 运行方式                                    | UI 显示                         |
+| ------------------ | ------------- | ------------------------------------------- | ------------------------------- |
+| **HTML（CLIENT）** | ui/index.html | 软件内 iframe 显示（当前已有）              | iframe 内嵌                     |
+| **Node.js**        | package.json  | `pnpm install && pnpm start` 在独立终端运行 | 软件「运行中」状态 + 可强制关闭 |
+| **Python**         | main.py       | 独立 venv 环境 `venv/bin/python main.py`    | 软件「运行中」状态 + 可强制关闭 |
 
 ### 10 项需求（逐条）
 
 #### 1. 插件名用户命名
+
 - 插件名不自动从 manifest.name 取，由用户在创建时命名。
 - 创建 UI 有「插件名称」输入框。
 - manifest.name 仍保留（程序标识符），但 UI 展示用用户命名的 title。
 
 #### 2. 插件状态动态获取
+
 - 不硬编码"创建状态"。
 - 状态根据插件文件分析动态判定：
   - `ready`：有完整入口文件 + manifest。
@@ -32,22 +34,26 @@
 - 状态从文件系统实时扫描获取（不存 DB）。
 
 #### 3. Python venv 隔离运行
+
 - 每个 Python 插件有独立 venv（`<插件目录>/.venv/`）。
 - 运行前自动创建 venv + `pip install -r requirements.txt`（如果有）。
 - 运行用 venv 内的 python：Windows `.\.venv\Scripts\python.exe main.py`，Unix `.venv/bin/python main.py`。
 
 #### 4. 插件数据持久化
+
 - 插件文件存在**持久化目录**（不是临时 sandbox），重启软件后还在。
 - 每个插件有独立的 `<插件目录>/data/` 子目录存储运行数据（JSON/SQLite/文件等）。
 - Python/Node/HTML 插件的数据都存在这里。
 
 #### 5. Python = 单一 main.py + 外部窗口
+
 - Python 插件只有 `main.py` 作为入口。
 - 运行时作为**独立进程**启动（不嵌入软件 UI）。
 - 如果是 GUI 应用（PyQt5/Tkinter 等），它会弹独立窗口。
 - 软件内显示「插件运行中」+ 进程信息 + 「强制关闭」按钮。
 
 #### 6. 每个插件独立文件夹 + 路径可配置
+
 - 每个插件有独立文件夹：`<插件根目录>/<plugin-id>/`。
 - 结构：
   ```
@@ -64,20 +70,24 @@
 - 设置页加「插件存放路径」配置（默认 `app_data/plugins/`）。
 
 #### 7. Node.js 用 pnpm 启动
+
 - Node.js 插件有 `package.json`，运行前 `pnpm install`（如果有依赖）。
 - 运行用 `pnpm start`（对应 package.json scripts.start）。
 - 独立进程运行（同 Python，外部终端方式）。
 
 #### 8. HTML 在软件内显示
+
 - HTML 插件在软件插件区域用 iframe 显示（当前已有 iframe 预览，保留）。
 - 不需要外部窗口。
 
 #### 9. Python/Node 独立运行在外部
+
 - Python/Node 插件作为**独立进程**运行（spawn 后 detach）。
 - 软件只显示「运行中」状态 + 可监控/强制关闭。
 - 不在软件 UI 内嵌入终端输出（运行输出在插件自己的窗口/控制台）。
 
 #### 10. 沙盒在正确目录
+
 - AI 生成插件时，workspace 目录应该是**插件的持久化目录**（不是 claude-sandbox 临时目录）。
 - 生成的文件直接写入 `<插件根目录>/<plugin-id>/`。
 - 不在别的项目目录生成文件。

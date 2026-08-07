@@ -11,9 +11,11 @@
 ## Task 1: Backend Tool Boundary Tests
 
 **Files:**
+
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/tools.rs`
 
 **Steps:**
+
 1. Add failing Rust tests for:
    - `list_local_directory` accepts an absolute temp directory.
    - `read_local_file` accepts an absolute UTF-8 temp file.
@@ -28,9 +30,11 @@
 ## Task 2: Path Helpers And External Read Tools
 
 **Files:**
+
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/tools.rs`
 
 **Steps:**
+
 1. Add helper functions for absolute local path validation and canonicalization.
 2. Implement `list_local_directory`, `read_local_file`, and `search_local_files`.
 3. Keep functions under project limits by extracting helpers for directory entry projection, text read with limit, and recursive search.
@@ -41,9 +45,11 @@
 ## Task 3: Import/Copy Tool
 
 **Files:**
+
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/tools.rs`
 
 **Steps:**
+
 1. Implement `import_local_project(source_path, destination?)`.
 2. Resolve `destination` with existing workspace write-path semantics.
 3. Recursively copy regular files and directories.
@@ -54,9 +60,11 @@
 ## Task 4: Controlled Command Tool
 
 **Files:**
+
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/tools.rs`
 
 **Steps:**
+
 1. Implement workspace-scoped `run_command(command, args?, cwd?)`.
 2. Implement `run_command(command, args?, cwd?)` using `std::process::Command`.
 3. Allow cwd only inside workspace or a workspace subdirectory.
@@ -67,12 +75,14 @@
 ## Task 5: Tool Definitions And Prompt Guidance
 
 **Files:**
+
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/tools.rs`
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/anthropic.rs`
 - Modify: `apps/desktop/src-tauri/src/code_assistant/engine/openai.rs`
 - Modify: `apps/desktop/src/lib/plugin-creator-protocol.ts`
 
 **Steps:**
+
 1. Add Anthropic and OpenAI definitions for all new tools.
 2. Update request body tests to assert representative new tools exist after existing ones.
 3. Update `DEFAULT_CONVERSATION_SYSTEM_PROMPT` with concise guidance:
@@ -86,12 +96,14 @@
 ## Task 6: Tool Result UI Projection If Needed
 
 **Files:**
+
 - Modify if schema changes: `apps/desktop/src/lib/plugin-draft/tool-cards.ts`
 - Modify if schema changes: `apps/desktop/src/components/chat/chat-output-model.ts`
 - Modify if schema changes: `apps/desktop/src/components/chat/AssistantChat.tsx`
 - Test: `apps/desktop/src/components/chat/chat-output-model.spec.ts`
 
 **Steps:**
+
 1. If runtime continues streaming only call arguments, leave UI code unchanged.
 2. If runtime streams call/result JSON lines, add a parser that handles both legacy `"Name {json}"` and JSON-line events.
 3. Add Vitest coverage for a successful tool result and failed tool result rendering.
@@ -101,10 +113,12 @@
 ## Task 7: Specs And Full Verification
 
 **Files:**
+
 - Modify: `.trellis/spec/lingfang-desktop/backend/sdk-runtime-engine.md`
 - Optional modify: `.trellis/spec/lingfang-desktop/backend/capability-gateway.md`
 
 **Steps:**
+
 1. Document the new SDK Runtime local tool boundary.
 2. Run verification:
    - `cargo test -p lingfang-desktop`

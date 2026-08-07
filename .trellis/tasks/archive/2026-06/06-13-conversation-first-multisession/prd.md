@@ -15,21 +15,25 @@
 四块联动改造：
 
 ### R1 对话优先（解耦"对话"与"插件创建"）
+
 - 默认通用对话，不注入插件协议 systemPrompt。
 - `finalizeSession` 加 gate：产出含 manifest 块才解析为草稿（自动检测）；否则只累积对话 turn，不判 invalid、不弹详情。
 - 保留多轮迭代（mergeFollowupDraft 仅在 draft!=null 会话触发）。
 
 ### R2 多会话管理（本机，参考 AionUi）
+
 - Rust 侧 SessionRecord 加 title 字段 + draft 分文件存（drafts/{id}.json）+ CRUD 命令（rename/delete/save_draft/read_draft，list/create 已有）。
 - 前端会话栏（新建/切换/删除/重命名），activeId 持久化到 localStorage（lf:active-conversation:{tenantId}）。
 - 每会话绑 cli_session_id，切换靠现有 --resume/历史摘要（无状态续接，不保持常驻进程）。
 
 ### R3 预览大窗
+
 - 删 DetailsPanel 的预览 tab 与 SourcePanel 固定展示。
 - 顶部「新对话」旁加「预览」按钮（仅 hasDraft 时可用，否则 disabled+tooltip）。
 - 点击 → 全屏 Sheet 大范围预览（复用 PreviewPanel，client→iframe，nodejs/python→ScriptPreviewPanel）；多文件在大窗内用文件选择器切换。
 
 ### R4 草稿生成双触发
+
 - 自动检测：assistant 输出含 manifest 块或 ≥1 个 file 块时自动解析为草稿。
 - 手动按钮：对话区/assistant 气泡下「✨ 转为插件草稿」按钮，显式解析当前轮产出。
 

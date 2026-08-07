@@ -22,7 +22,7 @@
 
 4. **插件管理当前是「主区页面」而非悬浮窗**：`Plugins.tsx` 用 `Tabs`（本地/团队/市场），`App.tsx:650` 在 `view in {plugins, author-center, market}` 时把它渲染进主体区；`AvatarMenu.tsx:111` 的「插件管理」走 `go('plugins')` 切 view。`runningPlugin` 存在时 `Plugins.tsx:23` 直接返回 `PluginRunner`，再经 `App.tsx:674` 的 `isPluginCenterView(view) && runningPlugin` 分支全屏铺满。R1（路线 A）要把「插件中心」从主区页面**完全改为悬浮窗**，并把插件运行从 view 体系中解耦。
 
-7. **路线 A 完整影响面（已核实，用户拍板走路线 A）**——`plugins/author-center/market` 三个 view 仅服务插件中心主区页，全仓引用点：
+5. **路线 A 完整影响面（已核实，用户拍板走路线 A）**——`plugins/author-center/market` 三个 view 仅服务插件中心主区页，全仓引用点：
    - 渲染分支：`App.tsx:650`（`<Plugins/>` 主区渲染）、`App.tsx:674`（`isPluginCenterView(view) && runningPlugin` 全屏运行分支）、`App.tsx:27`（import `isPluginCenterView`）、`App.tsx:29`（lazy import Plugins）。
    - view 工具：`lib/plugin-center.ts`（`pluginCenterTabFromView/pluginCenterViewForTab/isPluginCenterView`）+ 其测试 `lib/plugin-center.spec.ts`；`pages/plugins/use-plugin-center.ts` 的 `usePluginCenterTab`（用 view 双向同步 tab，路线 A 下改为纯本地 state）。
    - 入口/导航：`AvatarMenu.tsx:111`（`go('plugins')`）、`Sidebar.tsx:36`（NAV 项 `plugins`）+`:124`（`activeView` 用 `isPluginCenterView`）+`:27`（import）+`:196`（recent 点击 `setView('plugins')`）、`Home.tsx:45`（recent 点击）、`CommandPalette.tsx:86-87`（`go('plugins')/'market'` 动作）+`:104`（installed 运行）+`:115`（market 前往）。
@@ -31,9 +31,9 @@
    - **关键耦合点①（运行宿主）**：插件运行（`runningPlugin`）当前依赖 `isPluginCenterView(view)` 才全屏渲染（`App.tsx:674`）。删 view 后运行宿主必须改为「仅由 `runningPlugin` 驱动，与 view 无关」（见 §2.6）。
    - **关键耦合点②（PluginRunner 内部用 setView）**：`PluginRunner.tsx:27` 解构 `setView`，传入 `use-plugin-runner-actions` 的「继续修改」会 `setView('creator')`？——经核实 creator 是悬浮窗（`creatorOpen`）非 view，需在实现阶段核对 `use-plugin-runner-actions.ts` 实际跳转方式，确保删 plugins view 后「继续修改」仍能开创建器。
 
-5. **pins/recent 基础设施已完备**（`App.tsx:53-58,91-129,258-271,542-559`）：`pinnedPlugins / recentPlugins`（均 `LoadedPlugin[]`，按 `tenantId` 持久化隔离）、`pinPlugin / unpinPlugin / isPinned`，`recentPlugins` 在 `setRunningPlugin` 时自动置顶去重限量 5。R1 侧边栏「固定常用 + 历史」可直接复用，无需新建存储。
+6. **pins/recent 基础设施已完备**（`App.tsx:53-58,91-129,258-271,542-559`）：`pinnedPlugins / recentPlugins`（均 `LoadedPlugin[]`，按 `tenantId` 持久化隔离）、`pinPlugin / unpinPlugin / isPinned`，`recentPlugins` 在 `setRunningPlugin` 时自动置顶去重限量 5。R1 侧边栏「固定常用 + 历史」可直接复用，无需新建存储。
 
-6. **已有可复用的悬浮窗外壳**：`PanelDialog.tsx`（Dialog + 标题栏 + ScrollArea，size lg/md/sm），App 顶层已用它承载 钱包/团队/设置/个人资料/团队管理。R1/R3 的居中悬浮窗应复用此模式而非另造轮子。
+7. **已有可复用的悬浮窗外壳**：`PanelDialog.tsx`（Dialog + 标题栏 + ScrollArea，size lg/md/sm），App 顶层已用它承载 钱包/团队/设置/个人资料/团队管理。R1/R3 的居中悬浮窗应复用此模式而非另造轮子。
 
 ---
 
@@ -52,21 +52,25 @@
 > **用户已拍板走路线 A**：悬浮窗完全取代 `plugins/author-center/market` 主区渲染，删除 App 相关主区分支，清理仅服务这些主区页的 view 体系。插件运行从 view 解耦。
 
 ### 2.1 现状与目标
+
 - 现状：`view in {plugins, author-center, market}` → 主区渲染 `Plugins.tsx`（3 Tab）；`runningPlugin` 存在时经 `App.tsx:674` 全屏渲染 PluginRunner。入口在 `AvatarMenu`/`Sidebar`/`CommandPalette`/`Home`。
 - 目标：插件中心改为**居中悬浮窗**（App 顶层 `pluginCenterOpen` 状态，与 walletOpen 等同构）；窗内**左侧固定侧边栏**（固定常用 + 历史）+ **右侧**本地/团队/市场内容（保留 3 Tab）。插件**运行**改为独立的全屏 overlay，仅由 `runningPlugin` 驱动，不再依赖 view。
 
 ### 2.2 新组件结构
+
 ```
 components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自定义 size=lg Dialog，body 不套 PanelDialog 的 ScrollArea）
   └─ pages/plugins/PluginCenterBody.tsx     ← 新增：两栏（左侧栏各自滚动 + 右侧 Tabs 内容）
        ├─ PluginCenterSidebar (新增/内联)   ← 固定常用(pinned) + 历史(recent)，复用 useApp() 的 pins/recent
        └─ <原 Tabs 内容>                     ← 复用 LocalPluginsSection / TeamPluginsSection / MarketplacePluginsSection / *Row
 ```
+
 - **复用优先**：`LocalPluginsSection / TeamPluginsSection / MarketplacePluginsSection / *Row` 全部保留。`Plugins.tsx` 的数据 hooks（`useTeamPluginList / useLocalPluginList / usePluginOpeners`）原样迁入 `PluginCenterBody`。
 - **`Plugins.tsx` 处置**：删除其主区页面外壳（含 `runningPlugin → return <PluginRunner/>` 分支，运行改由全屏 overlay 接管，见 §2.6）。其 import 的 `usePluginCenterTab` 改为纯本地 tab state（不再与 view 同步，见 §2.4）。`Plugins.tsx` 文件本身可删或瘦身为只导出 body（建议直接由 `PluginCenterBody` 取代，删 `Plugins.tsx`）。
 - **容器**：因 `PanelDialog` 自带 ScrollArea 包裹 children，不适配两栏各自滚动，R1 **新建** `PluginCenterDialog`（自定义 `Dialog` + `DialogContent` `h-[86vh] w-[94vw] sm:max-w-6xl`，body 自行分栏滚动），不复用 PanelDialog，避免动公共组件波及其余五个悬浮窗。
 
 ### 2.3 侧边栏：固定常用 + 历史（复用 pins/recent）
+
 - 数据：`const { pinnedPlugins, recentPlugins, isPinned, pinPlugin, unpinPlugin, setRunningPlugin } = useApp()`。
 - 两分区：
   - **固定常用**：`pinnedPlugins`，点击 → 运行（复用 opener）；「取消固定」→ `unpinPlugin(id)`。
@@ -76,6 +80,7 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 - 运行后 `App.tsx` 的 `setRunningPlugin` 包装自动写 recent，无需额外逻辑。
 
 ### 2.4 view 体系清理范围（路线 A 核心）
+
 删除 `plugins/author-center/market` 三个 view 及其专用工具，改为悬浮窗开关 + 本地 tab state：
 
 1. **`lib/types.ts:165`**：`View` 联合删除 `'plugins' | 'author-center' | 'market'`，保留 `'home' | 'creator'?(见下) | 'team-admin' | 'review'` 等。注意 `'team' | 'settings' | 'wallet'` 已是悬浮窗路由（`setView` 内拦截转 openAccountSettings，`App.tsx:302-323`），`'creator'` 实际未作为 view 渲染（创建器是 `creatorOpen`）——清理时一并核对这些「名存实亡」的 view 值是否可一并精简（谨慎，避免破坏 `setView` 的兼容拦截）。
@@ -90,19 +95,23 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 > `openPluginCenter(tab?: 'local'|'team'|'market')` 建议带可选初始 tab，承接原 `market` 直达语义（CommandPalette「前往市场」、Plugins 空态「去市场安装」）。
 
 ### 2.5 App 顶层状态与 context
+
 - 新增 `const [pluginCenterOpen, setPluginCenterOpen] = useState(false)` + `const [pluginCenterTab, setPluginCenterTab] = useState<PluginCenterTab>('local')`。
 - `openPluginCenter = useCallback((tab?) => { if (tab) setPluginCenterTab(tab); setPluginCenterOpen(true); }, [])`，挂到 `AppContextValue`（仿 `openTeamAdmin/openNotifications`）。
 - 顶层挂载 `<PluginCenterDialog open={pluginCenterOpen} onOpenChange={setPluginCenterOpen} tab={pluginCenterTab} onTabChange={setPluginCenterTab} />`（lazy + Suspense，仿设置/钱包）。
 - 打开插件中心时不强制关运行 overlay；点插件运行后关插件中心、显示运行 overlay。
 
 ### 2.6 插件运行宿主解耦（关键设计）
+
 路线 A 删了 `plugins` view，原 `App.tsx:674` 的 `isPluginCenterView(view) && runningPlugin` 全屏分支失效。改为**独立的全屏运行 overlay**，仅由 `runningPlugin` 驱动：
+
 - 在 `App.tsx` 主体区新增：`runningPlugin ? <全屏 PluginRunner overlay> : <正常 view body>`。即把「是否全屏跑插件」的判定从 `view` 改为 `!!runningPlugin`，与任何 view 无关。
 - `PluginRunner` 的 `onBack`（返回插件列表）从「`setRunningPlugin(null)` 回到 plugins view」改为「`setRunningPlugin(null)` + `openPluginCenter()`」（返回即重开插件中心悬浮窗），保持「返回插件列表」语义。
 - **核对 `PluginRunner.tsx:27` 的 `setView`**：实现阶段须读 `use-plugin-runner-actions.ts` 确认「继续修改」的跳转目标。若它走 `setView('creator')` 而 creator 实为悬浮窗，需改为开 `creatorOpen`（设 `currentDraft` + `setCreatorOpen(true)`）。这是路线 A 必须连带修的隐藏耦合。
 - 运行仍是**全屏**（非悬浮窗内 iframe），规避 Dialog 内跑 iframe 的尺寸/层级/pointer-events 风险。
 
 ### 2.7 入口改造汇总
+
 见 §2.4 第 6~8 点：`Sidebar`/`Home`/`CommandPalette`/`AvatarMenu` 所有进插件中心的入口统一改为 `openPluginCenter()`；所有「运行某插件」入口统一改为 `setRunningPlugin(p)`（不再附带 `setView`）。
 
 ---
@@ -110,12 +119,14 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 ## 3. R3 内置 Skill 居中悬浮窗 + 话术改写
 
 ### 3.1 UI 方案
+
 - 现状：`FloatingCreator.tsx:374-395` 的小 `Popover`（`w-72`，列 SKILLS 复选）。
 - 改为**居中悬浮窗 + 背景模糊**：用 `Dialog`（`ui/dialog.tsx` 自带 overlay `supports-backdrop-filter:backdrop-blur-xs`；如需更强模糊在 DialogContent/overlay 叠加 `backdrop-blur-md`）。触发按钮（WrenchIcon「Skill」）保留，`onClick` 改为开 Dialog（新增本地 `skillDialogOpen` 状态）。
 - 窗内：标题 + 一句通俗说明 + 卡片化的 skill 列表（每项 Checkbox + 名称 + 通俗描述），底部「完成」关闭。比小 Popover 更宽松、可读性更好，便于「扩量」后滚动。
 - 复用 `Checkbox` + 现有 `toggleSkill` / `activeSkillIds`，逻辑零改动。
 
 ### 3.2 话术改写原则
+
 - **去内部术语**：删除「拼入系统提示词」（`FloatingCreator.tsx:382`）、「systemPrompt」「token」「片段」等开发者措辞。改为面向用户的「能力开关」语言。
   - 例：标题「Skill（拼入系统提示词）」→「创建偏好 / 能力」；副标题改为「按需开启，让 AI 生成更符合预期的插件」。
 - **skill 描述改写**（改 `lib/skills.ts` 的 `name/description`，**不动 `prompt`**）：
@@ -125,6 +136,7 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 - 原则：描述只讲「对用户/插件结果的影响」，不讲实现机制；保持简体中文、≤ 一句话。
 
 ### 3.3 扩量
+
 - 在 `SKILLS` 注册表追加新 skill（如「界面美化」「输入校验/健壮性」「中文优先」等），每个含 `id/name/description/prompt`，`defaultActive` 谨慎设置（默认激活集合 `DEFAULT_ACTIVE_SKILLS` 由 `defaultActive` 派生，新增默认激活会改变创建器开箱行为，需评估）。
 - 新增 skill 不需改创建器主流程（`assembleSystemPrompt` 按注册顺序自动拼装、UI 自动列出）。
 
@@ -133,16 +145,19 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 ## 4. R4 全局动画 token 化与调慢
 
 ### 4.1 策略（结合 §0.2/§0.3 修正）
+
 分三类来源统一调慢，**不要只改 ui-tokens**：
 
 1. **CSS 变量（桌面壳实际生效来源）**：在 `apps/desktop/src/index.css` 的 `:root` 定义时长 token，例如：
+
    ```css
    :root {
      --lf-dur-fast: 200ms;
-     --lf-dur-base: 320ms;   /* 由原 ~150/100 调慢 */
+     --lf-dur-base: 320ms; /* 由原 ~150/100 调慢 */
      --lf-dur-slow: 480ms;
    }
    ```
+
    供 dialog/popover 等 Tailwind 工具类引用（见下）。可同步在 `packages/ui-tokens/tokens.css` 追加同名变量以维持「设计令牌单一来源」的文档语义，但桌面端必须以 index.css 为准。
 
 2. **Tailwind 工具类动画（dialog/popover/sheet/select）**：当前 `duration-100`（`ui/dialog.tsx:35,57`、`ui/popover.tsx:38`，sheet/select 同类）。两种改法：
@@ -151,12 +166,20 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 
 3. **framer-motion JS duration（motion.tsx + inline）**：framer 的 `transition.duration` 是数字，读 CSS 变量不便，故在 `lib/motion.tsx` 顶部集中定义常量并全量引用：
    ```ts
-   export const MOTION = { fadeIn: 0.6, slideIn: 0.65, stagger: 0.1, item: 0.55, page: 0.4, menu: 0.25 } as const;
+   export const MOTION = {
+     fadeIn: 0.6,
+     slideIn: 0.65,
+     stagger: 0.1,
+     item: 0.55,
+     page: 0.4,
+     menu: 0.25,
+   } as const;
    ```
    把 `FadeIn/SlideIn/StaggerItem/PageTransition` 默认 duration 改为引用常量并整体上调（约 ×1.4~1.5）。`AvatarMenu.tsx:150`(0.15→0.25)、`FloatingCreateButton.tsx`(200ms/260ms 适度上调)、`FloatingCreator.tsx:493`(用量条 300ms 可保留或微调) 同步引用/上调。
    - `AnimatedNumber`(1.2s)、`Shimmer`(1.6s 循环) 属「持续/循环」类，非入场，建议**不调**或轻调，避免数字滚动拖沓、骨架闪光变慢显卡顿。
 
 ### 4.2 调慢幅度建议
+
 - 入场类（FadeIn/SlideIn/Page/菜单）整体 ×1.4~1.5，保证「整体变慢且观感一致」而非各处幅度不一。
 - 保持 `ease: 'easeOut'` 不变；`prefers-reduced-motion` 降级路径不受影响。
 
@@ -165,6 +188,7 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 ## 5. R2 / R5 / R6 具体改法
 
 ### R2 FAB 点击弹窗动画
+
 - 现状：`FloatingCreateButton.tsx` 已有点击 ring 缩放（保留）；但 `FloatingCreator` 在 `App.tsx:698 {creatorOpen && <FloatingCreator/>}` 挂载时**无入场动画**（直接出现）。
 - 改法：在 `FloatingCreator` 最外层 overlay + 居中面板加入场动画。两种实现：
   - **A（推荐，轻量）**：给 overlay 加 `animate-in fade-in`（tw-animate-css），给面板加 `animate-in zoom-in-95 fade-in`（可叠 `slide-in-from-bottom-2` 模拟从 FAB 升起），时长引用 §4 token。无需引入 AnimatePresence。
@@ -172,6 +196,7 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 - 注意：面板 `transform-origin` 设为右下（靠近 FAB）会更自然，但非必须。
 
 ### R5 缩小个人资料页底部高度
+
 - 现状：`App.tsx:720` `<PanelDialog ... size="sm">`，`PanelDialog.tsx:39` sm = `h-[60vh] max-h-[60vh]` **固定高**。ProfilePanel 内容短，固定 60vh 导致底部大片留白。
 - 改法（二选一）：
   - **改 PanelDialog 的 sm 档**：把 `h-[60vh] max-h-[60vh]` 改为**不设固定 `h`、仅 `max-h-[70vh]`**（高度随内容自适应，内容少则窗矮，底部留白消失）。需确认 sm 档仅 ProfilePanel 在用（`App.tsx` 中 size="sm" 仅 profile），影响面可控。
@@ -179,6 +204,7 @@ components/plugins/PluginCenterDialog.tsx   ← 新增：悬浮窗容器（自�
 - 同时可压 `ProfilePanel`/`PanelDialog` 的内边距（`p-5`）与表单 gap，进一步降高。
 
 ### R6 主题未选中按钮加边框
+
 - 现状：`AvatarMenu.tsx:184-196` 主题按钮：选中 `bg-primary text-primary-foreground`，未选中 `text-muted-foreground hover:bg-muted`（**无边框**，三个按钮在卡片上区分度低）。
 - 改法：未选中态加 `border border-border`（选中态可加 `border border-transparent` 保持尺寸一致避免跳动）。即：
   ```

@@ -3,6 +3,7 @@
 ## Goal
 
 支持删除插件，分本地与云端两层：
+
 - **本地删除**：桌面端删 `plugins_root/<plugin_id>/` 目录（temp 草稿 + 本地正式插件）。
 - **云端删除**：作者删自己未上架的插件；admin 删任意插件（含已上架）。
 
@@ -11,6 +12,7 @@
 **本地删除**（桌面端 Rust delete_plugin）：删 `plugins_root/<id>/` 目录。不删云端记录。builtin 不删。
 
 **云端删除**（后端 DELETE 端点）：
+
 - **作者删**（DELETE /api/plugins/:id）：仅删自己的 + 仅未上架市场（marketplace=false，即草稿/驳回/团队内未上架）。已上架必须先 admin 下架（delist）再删。级联删 PluginInstallation（安装记录）。
 - **admin 删**（DELETE /api/admin/plugins/:id）：删任意插件（含已上架），二次确认 + 审计。级联删 PluginInstallation + Purchase。
 - 已上架 + 有 Purchase 的：admin 可删（兜底，物理删级联清购买记录——已确认接受）；作者不能删（先下架）。

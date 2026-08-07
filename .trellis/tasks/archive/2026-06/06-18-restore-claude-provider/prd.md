@@ -9,7 +9,15 @@
 `apps/desktop/src/lib/plugin-draft/providers.ts` 的 `compatibleProviderIds`（第 36-41 行）：
 
 ```ts
-const OPENAI_COMPATIBLE_PROVIDER_IDS = new Set(['openai', 'azure', 'deepseek', 'minimax', 'moonshot', 'qwen', 'custom']);
+const OPENAI_COMPATIBLE_PROVIDER_IDS = new Set([
+  'openai',
+  'azure',
+  'deepseek',
+  'minimax',
+  'moonshot',
+  'qwen',
+  'custom',
+]);
 function compatibleProviderIds(provider) {
   const normalized = (provider || '').trim().toLowerCase();
   if (normalized === 'anthropic') return ['claude'];

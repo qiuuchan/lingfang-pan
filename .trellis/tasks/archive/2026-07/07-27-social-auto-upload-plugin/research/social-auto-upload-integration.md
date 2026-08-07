@@ -90,16 +90,16 @@ YT_PROXY = None
 
 ## 平台 ↔ API 对照（sau_cli.py imports）
 
-| 平台 | setup | cookie_auth | 上传对象 |
-| --- | --- | --- | --- |
-| 抖音 douyin | douyin_setup | douyin_cookie_auth | DouYinVideo / DouYinNote |
-| 快手 kuaishou | ks_setup | kuaishou_cookie_auth | KSVideo / KSNote |
-| 视频号 tencent | tencent_setup | tencent_cookie_auth | TencentVideo |
-| 小红书 xiaohongshu | xiaohongshu_setup | xiaohongshu_cookie_auth | XiaoHongShuVideo / XiaoHongShuNote |
-| YouTube | youtube_setup | youtube_cookie_auth | YouTubeVideo |
-| B站 bilibili | run_biliup_command（biliup CLI 子进程，机制不同） | — | — |
-| 百家号 baijiahao | uploader/baijiahao_uploader（sau_cli 未导入，需单独确认） | — | — |
-| TikTok tk | uploader/tk_uploader（sau_cli 未导入） | — | — |
+| 平台               | setup                                                     | cookie_auth             | 上传对象                           |
+| ------------------ | --------------------------------------------------------- | ----------------------- | ---------------------------------- |
+| 抖音 douyin        | douyin_setup                                              | douyin_cookie_auth      | DouYinVideo / DouYinNote           |
+| 快手 kuaishou      | ks_setup                                                  | kuaishou_cookie_auth    | KSVideo / KSNote                   |
+| 视频号 tencent     | tencent_setup                                             | tencent_cookie_auth     | TencentVideo                       |
+| 小红书 xiaohongshu | xiaohongshu_setup                                         | xiaohongshu_cookie_auth | XiaoHongShuVideo / XiaoHongShuNote |
+| YouTube            | youtube_setup                                             | youtube_cookie_auth     | YouTubeVideo                       |
+| B站 bilibili       | run_biliup_command（biliup CLI 子进程，机制不同）         | —                       | —                                  |
+| 百家号 baijiahao   | uploader/baijiahao_uploader（sau_cli 未导入，需单独确认） | —                       | —                                  |
+| TikTok tk          | uploader/tk_uploader（sau_cli 未导入）                    | —                       | —                                  |
 
 - `*Video` dataclass 字段：account_name, video_file, title, description, tags, publish_date, thumbnail_file(+landscape/portrait), product_link/title, publish_strategy(immediate/scheduled), debug, headless, declaration 等。
 - **bilibili 特殊**：走 `biliup` 第三方 CLI（`run_biliup_command`），需额外装 biliup 包，cookie/登录机制与他平台不同。实现时需单独验证。
