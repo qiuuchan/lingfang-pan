@@ -98,7 +98,7 @@ async function handleRequest(
   return send(response, 200, contentType, output, request.method === 'HEAD');
 }
 
-function validateConfig(input: PreviewOriginConfig) {
+export function validateConfig(input: PreviewOriginConfig) {
   if (!input.serviceKey || input.serviceKey.length < 32)
     throw new Error('PLUGIN_PREVIEW_SERVICE_KEY must contain at least 32 characters');
   const internalOrigin = exactOrigin(input.internalOrigin, 'COLLAB_API_INTERNAL_ORIGIN');
@@ -121,7 +121,7 @@ function validateConfig(input: PreviewOriginConfig) {
   };
 }
 
-function exactOrigin(value: string, name: string): string {
+export function exactOrigin(value: string, name: string): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -141,7 +141,7 @@ function exactOrigin(value: string, name: string): string {
   return url.origin;
 }
 
-function decodeAssetPath(raw: string): string | null {
+export function decodeAssetPath(raw: string): string | null {
   try {
     const parts = raw.split('/').map((part) => decodeURIComponent(part));
     if (
@@ -158,7 +158,7 @@ function decodeAssetPath(raw: string): string | null {
   }
 }
 
-function decodeHeaderPath(value: string | null): string {
+export function decodeHeaderPath(value: string | null): string {
   if (!value) return 'index.html';
   try {
     return decodeURIComponent(value);
@@ -167,7 +167,7 @@ function decodeHeaderPath(value: string | null): string {
   }
 }
 
-function injectPreviewBootstrap(html: string, sessionId: string, entryPath: string): Buffer {
+export function injectPreviewBootstrap(html: string, sessionId: string, entryPath: string): Buffer {
   const slash = entryPath.lastIndexOf('/');
   const directory = slash >= 0 ? entryPath.slice(0, slash + 1) : '';
   const base = `<base href="/sessions/${sessionId}/${escapeAttribute(directory)}">`;
@@ -181,7 +181,7 @@ function injectPreviewBootstrap(html: string, sessionId: string, entryPath: stri
   return Buffer.from(output);
 }
 
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
@@ -189,7 +189,7 @@ function escapeAttribute(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function inlineScriptHashes(html: string): string[] {
+export function inlineScriptHashes(html: string): string[] {
   const values = new Set<string>();
   const expression = /<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script\s*>/gi;
   let match: RegExpExecArray | null;
@@ -203,7 +203,7 @@ function inlineScriptHashes(html: string): string[] {
   return [...values];
 }
 
-function contentSecurityPolicy(webAppOrigins: string[], html = ''): string {
+export function contentSecurityPolicy(webAppOrigins: string[], html = ''): string {
   const scripts = ["'self'", ...inlineScriptHashes(html)].join(' ');
   return [
     "default-src 'none'",
