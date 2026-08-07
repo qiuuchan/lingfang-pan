@@ -59,20 +59,33 @@ if grep -rn --include='*.ts' '$queryRawUnsafe' apps/collab-api/src \
   echo '错误：发现 $queryRawUnsafe 出现在非迁移脚本（仅离线迁移 migrate-plugin-registry-v4-legacy.ts 与测试 *.spec.ts 允许）'; exit 1
 fi
 
-echo "==> [3/7] typecheck (collab-api, collab-admin)"
+echo "==> [3/8] lint (eslint, error-level baseline)"
+$PNPM lint
+
+echo "==> [4/8] format check (prettier --check)"
+$PNPM format:check
+
+echo "==> [5/8] typecheck (collab-api, collab-admin)"
 $PNPM -C apps/collab-api typecheck
 $PNPM -C apps/collab-admin typecheck
 
-echo "==> [4/7] unit tests (collab-api; integration auto-skips)"
+echo "==> [6/8] unit tests (collab-api; integration auto-skips)"
 $PNPM -C apps/collab-api test
 
-echo "==> [5/7] unit tests (collab-admin; jsdom 纯函数单测)"
+echo "==> [7/8] unit tests (collab-admin; jsdom 纯函数单测)"
 $PNPM -C apps/collab-admin test
 
-echo "==> [6/7] build collab-api"
+echo "==> unit tests (packages: contract / plugin-sdk / workflow-engine)"
+# 这三套单测是 Vitest 迁移的核心交付：此前 CI 单元门禁只跑 apps，
+# packages 下的契约/SDK/工作流引擎单测并未被门禁覆盖，存在回归无感的风险。
+$PNPM -C packages/contract test
+$PNPM -C packages/plugin-sdk test
+$PNPM -C packages/workflow-engine test
+
+echo "==> [8/8] build collab-api"
 $PNPM -C apps/collab-api build
 
-echo "==> [7/7] build collab-admin"
+echo "==> build collab-admin"
 $PNPM -C apps/collab-admin build
 
 echo "==> CI core checks passed ✅"

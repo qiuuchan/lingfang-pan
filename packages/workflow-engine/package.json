@@ -3,7 +3,18 @@
   "version": "0.0.1",
   "type": "module",
   "main": "src/index.ts",
-  "scripts": { "typecheck": "tsc --noEmit", "test": "node --test" },
-  "dependencies": { "@dagrejs/graphlib": "^4.0.1", "@lingfang/contract": "workspace:*" },
-  "devDependencies": { "typescript": "^5" }
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@dagrejs/graphlib": "^4.0.1",
+    "@lingfang/contract": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.8",
+    "@vitest/coverage-v8": "4.1.8"
+  }
 }

@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test, expect } from 'vitest';
 import {
   TierSchema,
   ChatRelayInputSchema,
@@ -13,10 +12,10 @@ import {
 // 需求 #3：系统提示词规则注入必须在所有路径生效，且不破坏既有 system 内容。
 test('injectSystemGuardRule prepends a system message when none exists', () => {
   const out = injectSystemGuardRule([{ role: 'user', content: 'hi' }]);
-  assert.equal(out[0].role, 'system');
-  assert.equal(out[0].content, DEFAULT_AI_USAGE_GUARD_RULE);
-  assert.equal(out.length, 2);
-  assert.equal(out[1].role, 'user');
+  expect(out[0].role).toBe('system');
+  expect(out[0].content).toBe(DEFAULT_AI_USAGE_GUARD_RULE);
+  expect(out.length).toBe(2);
+  expect(out[1].role).toBe('user');
 });
 
 test('injectSystemGuardRule appends a separate system segment when system already present (no mutation of original)', () => {
@@ -25,25 +24,25 @@ test('injectSystemGuardRule appends a separate system segment when system alread
     { role: 'user', content: '画一张猫' },
   ];
   const out = injectSystemGuardRule(original);
-  assert.equal(out.length, 3);
-  assert.equal(out[0].content, '你是助手'); // 原 system 保留
-  assert.equal(out[2].role, 'system'); // 规则作为独立 system 段追加在末尾
-  assert.equal(out[2].content, DEFAULT_AI_USAGE_GUARD_RULE);
+  expect(out.length).toBe(3);
+  expect(out[0].content).toBe('你是助手'); // 原 system 保留
+  expect(out[2].role).toBe('system'); // 规则作为独立 system 段追加在末尾
+  expect(out[2].content).toBe(DEFAULT_AI_USAGE_GUARD_RULE);
   // 不 mutate 入参
-  assert.equal(original.length, 2);
+  expect(original.length).toBe(2);
 });
 
 test('injectSystemGuardRule is a no-op when rule is blank (允许后台清空规则)', () => {
   const out = injectSystemGuardRule([{ role: 'user', content: 'hi' }], '   ');
-  assert.equal(out.length, 1);
+  expect(out.length).toBe(1);
 });
 
 // 需求 #5：协议层强制两版本——model 只接受 'fast'/'premium' 哨兵。
 test('TierSchema accepts only fast/premium', () => {
-  assert.equal(TierSchema.safeParse('fast').success, true);
-  assert.equal(TierSchema.safeParse('premium').success, true);
-  assert.equal(TierSchema.safeParse('gpt-4o').success, false);
-  assert.equal(TierSchema.safeParse('').success, false);
+  expect(TierSchema.safeParse('fast').success).toBe(true);
+  expect(TierSchema.safeParse('premium').success).toBe(true);
+  expect(TierSchema.safeParse('gpt-4o').success).toBe(false);
+  expect(TierSchema.safeParse('').success).toBe(false);
 });
 
 test('ChatRelayInputSchema rejects custom model ids (protocol enforces two tiers)', () => {
@@ -51,44 +50,35 @@ test('ChatRelayInputSchema rejects custom model ids (protocol enforces two tiers
     model: 'fast',
     messages: [{ role: 'user', content: 'hi' }],
   });
-  assert.equal(ok.success, true);
+  expect(ok.success).toBe(true);
   const bad = ChatRelayInputSchema.safeParse({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: 'hi' }],
   });
-  assert.equal(bad.success, false);
+  expect(bad.success).toBe(false);
 });
 
 test('relay schemas default an omitted model to fast', () => {
   const parsed = ChatRelayInputSchema.parse({ messages: [{ role: 'user', content: 'hi' }] });
-  assert.equal(parsed.model, 'fast');
+  expect(parsed.model).toBe('fast');
 });
 
 test('ImageRelayInputSchema enforces prompt + tier + bounds n', () => {
-  assert.equal(
-    ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'a cat' }).success,
-    true,
-  );
+  expect(ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'a cat' }).success).toBe(true);
   // n 上限 10
-  assert.equal(
-    ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'x', n: 11 }).success,
-    false,
-  );
+  expect(ImageRelayInputSchema.safeParse({ model: 'premium', prompt: 'x', n: 11 }).success).toBe(false);
   // 空 prompt 拒绝
-  assert.equal(
-    ImageRelayInputSchema.safeParse({ model: 'fast', prompt: '' }).success,
-    false,
-  );
+  expect(ImageRelayInputSchema.safeParse({ model: 'fast', prompt: '' }).success).toBe(false);
 });
 
 test('LlmCallLogSchema exposes client telemetry without an API key relation', () => {
-  assert.equal('clientSource' in LlmCallLogSchema.shape, true);
-  assert.equal('apiKeyId' in LlmCallLogSchema.shape, false);
+  expect('clientSource' in LlmCallLogSchema.shape).toBe(true);
+  expect('apiKeyId' in LlmCallLogSchema.shape).toBe(false);
 });
 
 test('RelayModelsResponseSchema accepts the available fast/premium tier subset', () => {
   const parsed = RelayModelsResponseSchema.parse({
     data: [{ id: 'fast' }, { id: 'premium' }],
   });
-  assert.equal(parsed.data.length, 2);
+  expect(parsed.data.length).toBe(2);
 });

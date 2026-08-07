@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test, expect } from 'vitest';
 import {
   AdminDelistReasonRequest,
   AdminPaginationMetadata,
@@ -57,51 +56,57 @@ const packageItem = {
 };
 
 test('admin page metadata enforces bounded server-side pagination', () => {
-  assert.equal(AdminPaginationMetadata.safeParse({ total: 0, page: 1, pageSize: 20 }).success, true);
-  assert.equal(AdminPaginationMetadata.safeParse({ total: -1, page: 1, pageSize: 20 }).success, false);
-  assert.equal(AdminPaginationMetadata.safeParse({ total: 1, page: 0, pageSize: 20 }).success, false);
-  assert.equal(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 0 }).success, false);
-  assert.equal(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 101 }).success, false);
+  expect(AdminPaginationMetadata.safeParse({ total: 0, page: 1, pageSize: 20 }).success).toBe(true);
+  expect(AdminPaginationMetadata.safeParse({ total: -1, page: 1, pageSize: 20 }).success).toBe(false);
+  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 0, pageSize: 20 }).success).toBe(false);
+  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 0 }).success).toBe(false);
+  expect(AdminPaginationMetadata.safeParse({ total: 1, page: 1, pageSize: 101 }).success).toBe(false);
 });
 
 test('admin user summary exposes only identity display fields', () => {
-  assert.equal(AdminUserSummary.safeParse(user).success, true);
-  assert.equal(AdminUserSummary.safeParse({ ...user, status: 'ACTIVE' }).success, false);
-  assert.equal(AdminUserSummary.safeParse({ ...user, platformRole: 'PLATFORM_ADMIN' }).success, false);
+  expect(AdminUserSummary.safeParse(user).success).toBe(true);
+  expect(AdminUserSummary.safeParse({ ...user, status: 'ACTIVE' }).success).toBe(false);
+  expect(AdminUserSummary.safeParse({ ...user, platformRole: 'PLATFORM_ADMIN' }).success).toBe(false);
 });
 
 test('admin plugin package page rejects heavyweight list fields', () => {
-  assert.equal(AdminPluginPackagePage.safeParse({
-    items: [packageItem], total: 1, page: 1, pageSize: 20,
-  }).success, true);
-  assert.equal(AdminPluginPackagePage.safeParse({
-    items: [{ ...packageItem, manifest: {}, fileManifest: [], reviews: [] }],
-    total: 1,
-    page: 1,
-    pageSize: 20,
-  }).success, false);
-  assert.equal(AdminPluginPackagePage.safeParse({
-    items: [{ ...packageItem, latestRelease: { ...releaseSummary, manifest: {} } }],
-    total: 1,
-    page: 1,
-    pageSize: 20,
-  }).success, false);
-  assert.equal(AdminPluginPackagePage.safeParse({
-    items: [{ ...packageItem, marketplaceCurrentVersion: 'v1.2.3' }],
-    total: 1,
-    page: 1,
-    pageSize: 20,
-  }).success, false);
-  assert.equal(AdminPluginPackagePage.safeParse({
-    items: [{ ...packageItem, latestRelease: { ...releaseSummary, sourceKind: 'CURSOR' } }],
-    total: 1,
-    page: 1,
-    pageSize: 20,
-  }).success, false);
+  expect(AdminPluginPackagePage.safeParse({
+      items: [packageItem],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(true);
+  expect(AdminPluginPackagePage.safeParse({
+      items: [{ ...packageItem, manifest: {}, fileManifest: [], reviews: [] }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(false);
+  expect(AdminPluginPackagePage.safeParse({
+      items: [{ ...packageItem, latestRelease: { ...releaseSummary, manifest: {} } }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(false);
+  expect(AdminPluginPackagePage.safeParse({
+      items: [{ ...packageItem, marketplaceCurrentVersion: 'v1.2.3' }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(false);
+  expect(AdminPluginPackagePage.safeParse({
+      items: [{ ...packageItem, latestRelease: { ...releaseSummary, sourceKind: 'CURSOR' } }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(false);
   const { marketplaceCurrentVersion: _omitted, ...withoutCurrentVersion } = packageItem;
-  assert.equal(AdminPluginPackagePage.safeParse({
-    items: [withoutCurrentVersion], total: 1, page: 1, pageSize: 20,
-  }).success, false);
+  expect(AdminPluginPackagePage.safeParse({
+      items: [withoutCurrentVersion],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(false);
 });
 
 test('admin release list and core detail reject deferred payload fields', () => {
@@ -111,16 +116,19 @@ test('admin release list and core detail reject deferred payload fields', () => 
     sizeBytes: 1024,
     isMarketplaceCurrent: false,
   };
-  assert.equal(AdminPluginReleasePage.safeParse({
-    items: [listItem], total: 1, page: 1, pageSize: 20,
-  }).success, true);
-  for (const field of ['manifest', 'fileManifest', 'artifactKey', 'reviews']) {
-    assert.equal(AdminPluginReleasePage.safeParse({
-      items: [{ ...listItem, [field]: field === 'artifactKey' ? 'private/key' : [] }],
+  expect(AdminPluginReleasePage.safeParse({
+      items: [listItem],
       total: 1,
       page: 1,
       pageSize: 20,
-    }).success, false, field);
+    }).success).toBe(true);
+  for (const field of ['manifest', 'fileManifest', 'artifactKey', 'reviews']) {
+    expect(AdminPluginReleasePage.safeParse({
+        items: [{ ...listItem, [field]: field === 'artifactKey' ? 'private/key' : [] }],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      }).success, field).toBe(false);
   }
 
   const release = {
@@ -140,33 +148,56 @@ test('admin release list and core detail reject deferred payload fields', () => 
     ingestChannel: 'API',
     createdAt: CREATED_AT,
   };
-  assert.equal(AdminPluginReleaseCoreDetail.safeParse({
-    release, listing: null, isMarketplaceCurrent: false,
-  }).success, true);
-  assert.equal(AdminPluginReleaseCoreDetail.safeParse({
-    release: { ...release, manifest: {} }, listing: null, isMarketplaceCurrent: false,
-  }).success, false);
-  assert.equal(AdminPluginReleaseManifest.safeParse({
-    releaseId: RELEASE_ID,
-    manifest: {
-      id: 'demo.plugin', name: 'Demo', version: '1.2.3', entry: 'main.py', runtime_type: 'python',
-    },
-  }).success, true);
+  expect(AdminPluginReleaseCoreDetail.safeParse({
+      release,
+      listing: null,
+      isMarketplaceCurrent: false,
+    }).success).toBe(true);
+  expect(AdminPluginReleaseCoreDetail.safeParse({
+      release: { ...release, manifest: {} },
+      listing: null,
+      isMarketplaceCurrent: false,
+    }).success).toBe(false);
+  expect(AdminPluginReleaseManifest.safeParse({
+      releaseId: RELEASE_ID,
+      manifest: {
+        id: 'demo.plugin',
+        name: 'Demo',
+        version: '1.2.3',
+        entry: 'main.py',
+        runtime_type: 'python',
+      },
+    }).success).toBe(true);
 });
 
 test('delisted listings retain their release pointer without becoming marketplace-current', () => {
-  assert.equal(AdminPluginListingProjection.safeParse({
-    status: 'ACTIVE', priceCents: 0, currentReleaseId: RELEASE_ID,
-    delistedBy: null, delistReason: '', delistedAt: null, delistedByUserId: null,
-  }).success, true);
-  assert.equal(AdminPluginListingProjection.safeParse({
-    status: 'DELISTED', priceCents: 0, currentReleaseId: null,
-    delistedBy: 'PLATFORM', delistReason: 'policy', delistedAt: CREATED_AT, delistedByUserId: USER_ID,
-  }).success, true);
-  assert.equal(AdminPluginListingProjection.safeParse({
-    status: 'DELISTED', priceCents: 0, currentReleaseId: RELEASE_ID,
-    delistedBy: 'PLATFORM', delistReason: 'policy', delistedAt: CREATED_AT, delistedByUserId: USER_ID,
-  }).success, true);
+  expect(AdminPluginListingProjection.safeParse({
+      status: 'ACTIVE',
+      priceCents: 0,
+      currentReleaseId: RELEASE_ID,
+      delistedBy: null,
+      delistReason: '',
+      delistedAt: null,
+      delistedByUserId: null,
+    }).success).toBe(true);
+  expect(AdminPluginListingProjection.safeParse({
+      status: 'DELISTED',
+      priceCents: 0,
+      currentReleaseId: null,
+      delistedBy: 'PLATFORM',
+      delistReason: 'policy',
+      delistedAt: CREATED_AT,
+      delistedByUserId: USER_ID,
+    }).success).toBe(true);
+  expect(AdminPluginListingProjection.safeParse({
+      status: 'DELISTED',
+      priceCents: 0,
+      currentReleaseId: RELEASE_ID,
+      delistedBy: 'PLATFORM',
+      delistReason: 'policy',
+      delistedAt: CREATED_AT,
+      delistedByUserId: USER_ID,
+    }).success).toBe(true);
 });
 
 test('team admin application list excludes reasons while detail carries them', () => {
@@ -177,32 +208,35 @@ test('team admin application list excludes reasons while detail carries them', (
     createdAt: CREATED_AT,
     user,
   };
-  assert.equal(TeamAdminApplicationPage.safeParse({
-    items: [summary], total: 1, page: 1, pageSize: 20,
-  }).success, true);
-  assert.equal(TeamAdminApplicationPage.safeParse({
-    items: [{ ...summary, reason: 'full application reason', reviewReason: '' }],
-    total: 1,
-    page: 1,
-    pageSize: 20,
-  }).success, false);
-  assert.equal(TeamAdminApplicationDetailResponse.safeParse({
-    application: {
-      ...summary,
-      reason: 'full application reason',
-      reviewReason: '',
-      reviewedAt: null,
-      reviewedBy: null,
-    },
-  }).success, true);
+  expect(TeamAdminApplicationPage.safeParse({
+      items: [summary],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(true);
+  expect(TeamAdminApplicationPage.safeParse({
+      items: [{ ...summary, reason: 'full application reason', reviewReason: '' }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    }).success).toBe(false);
+  expect(TeamAdminApplicationDetailResponse.safeParse({
+      application: {
+        ...summary,
+        reason: 'full application reason',
+        reviewReason: '',
+        reviewedAt: null,
+        reviewedBy: null,
+      },
+    }).success).toBe(true);
 });
 
 test('reject and delist reasons trim input and enforce 1..500 characters', () => {
   for (const schema of [AdminRejectReasonRequest, AdminDelistReasonRequest]) {
-    assert.equal(schema.parse({ reason: '  policy violation  ' }).reason, 'policy violation');
-    assert.equal(schema.safeParse({ reason: 'x'.repeat(500) }).success, true);
-    assert.equal(schema.safeParse({ reason: '' }).success, false);
-    assert.equal(schema.safeParse({ reason: '   ' }).success, false);
-    assert.equal(schema.safeParse({ reason: 'x'.repeat(501) }).success, false);
+    expect(schema.parse({ reason: '  policy violation  ' }).reason).toBe('policy violation');
+    expect(schema.safeParse({ reason: 'x'.repeat(500) }).success).toBe(true);
+    expect(schema.safeParse({ reason: '' }).success).toBe(false);
+    expect(schema.safeParse({ reason: '   ' }).success).toBe(false);
+    expect(schema.safeParse({ reason: 'x'.repeat(501) }).success).toBe(false);
   }
 });
