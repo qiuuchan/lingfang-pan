@@ -15,8 +15,8 @@ import {
 import { api, isEmail, type ApiError } from '@/lib/api';
 import type { Session } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { LoadingButton } from '@/components/loading-button';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -174,27 +174,29 @@ function ProfileForm({
         description="这些信息会展示在你的团队空间中。"
       />
       <div className="mt-4 grid gap-3">
-        <div className="grid gap-1.5">
-          <Label htmlFor="account-name">昵称</Label>
-          <Input
-            id="account-name"
-            className="h-9"
-            value={displayName}
-            onChange={(event) => onDisplayNameChange(event.target.value)}
-            placeholder="显示名称"
-          />
-        </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="account-email">邮箱</Label>
-          <Input
-            id="account-email"
-            className="h-9"
-            type="email"
-            value={email}
-            onChange={(event) => onEmailChange(event.target.value)}
-            placeholder="name@example.com"
-          />
-        </div>
+        <FieldGroup className="gap-3">
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="account-name">昵称</FieldLabel>
+            <Input
+              id="account-name"
+              className="h-9"
+              value={displayName}
+              onChange={(event) => onDisplayNameChange(event.target.value)}
+              placeholder="显示名称"
+            />
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="account-email">邮箱</FieldLabel>
+            <Input
+              id="account-email"
+              className="h-9"
+              type="email"
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              placeholder="name@example.com"
+            />
+          </Field>
+        </FieldGroup>
         <LoadingButton className="mt-1 justify-self-end" loading={saving} onClick={onSave}>
           {saving ? '保存中…' : '保存基本资料'}
         </LoadingButton>
@@ -222,8 +224,8 @@ function PasswordForm({
         description="建议使用至少 8 位且不易猜测的新密码。"
       />
       <div className="mt-4 grid gap-3">
-        <div className="grid gap-1.5">
-          <Label htmlFor="account-password">新密码</Label>
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="account-password">新密码</FieldLabel>
           <Input
             id="account-password"
             className="h-9"
@@ -233,7 +235,7 @@ function PasswordForm({
             onChange={(event) => onPasswordChange(event.target.value)}
             placeholder="输入至少 8 位新密码"
           />
-        </div>
+        </Field>
         <LoadingButton
           variant="outline"
           className="justify-self-end"
