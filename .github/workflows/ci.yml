@@ -24,8 +24,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        # 不显式指定 version：让 action 读取 package.json 的 packageManager
+        # (pnpm@9.0.0)，避免与 packageManager 字段冲突导致
+        # “Multiple versions of pnpm specified” 告警。
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
