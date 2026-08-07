@@ -39,14 +39,14 @@ flowchart LR
   Plugin --> Bridge
 ```
 
-| 子系统 | 技术 | 主要职责 |
-|---|---|---|
-| `apps/desktop` | Tauri 2 + React + Vite | 创建、安装、运行、市场、本地能力、工作流和定时任务 |
-| `apps/collab-api` | NestJS 11 + Prisma 7 | 身份、团队、v4 注册中心、市场、relay、计费和治理 |
-| `apps/collab-admin` | React + Vite + shadcn/ui | 官网、审核、用户/团队、计费配置和平台设置 |
-| `packages/contract` | Zod | 跨运行时共享契约 |
-| `packages/plugin-sdk` | TypeScript | SDK、manifest 校验器和 `lingfang-plugin` CLI |
-| `packages/workflow-engine` | TypeScript | 工作流定义与执行辅助 |
+| 子系统                     | 技术                     | 主要职责                                           |
+| -------------------------- | ------------------------ | -------------------------------------------------- |
+| `apps/desktop`             | Tauri 2 + React + Vite   | 创建、安装、运行、市场、本地能力、工作流和定时任务 |
+| `apps/collab-api`          | NestJS 11 + Prisma 7     | 身份、团队、v4 注册中心、市场、relay、计费和治理   |
+| `apps/collab-admin`        | React + Vite + shadcn/ui | 官网、审核、用户/团队、计费配置和平台设置          |
+| `packages/contract`        | Zod                      | 跨运行时共享契约                                   |
+| `packages/plugin-sdk`      | TypeScript               | SDK、manifest 校验器和 `lingfang-plugin` CLI       |
+| `packages/workflow-engine` | TypeScript               | 工作流定义与执行辅助                               |
 
 更完整的边界与数据流见 [愿景与架构](docs/01-vision-and-architecture.md)。
 
@@ -54,13 +54,13 @@ flowchart LR
 
 ### 环境要求
 
-| 工具 | 版本 |
-|---|---|
-| Node.js | 20+ |
-| pnpm | 9+ |
+| 工具       | 版本                            |
+| ---------- | ------------------------------- |
+| Node.js    | 20+                             |
+| pnpm       | 9+                              |
 | PostgreSQL | 16+，或 MySQL 8+/MariaDB 10.11+ |
-| Rust/Cargo | 构建 Tauri 桌面端时需要 |
-| Redis | 可选 |
+| Rust/Cargo | 构建 Tauri 桌面端时需要         |
+| Redis      | 可选                            |
 
 ### 一键启动
 
@@ -77,7 +77,7 @@ pnpm start
 4. 启动 collab-api，并等待 `/api/health`。
 5. 未传 `-SkipDesktop` 时启动 Tauri；桌面退出后清理后端子进程。
 
-仓库示例 `.env` 使用 `PORT=19006`；代码未设置 `PORT` 时回退 3000。管理端开发端口是 19005，桌面 Vite 端口是 1420。
+仓库示例 `.env` 使用 `PORT=19006`；代码未设置 `PORT` 时回退 3000。管理端开发端口是 19005，桌面 Vite 端口是 1420，插件中心 Web 前端开发端口是 19007（dev 时 `/api` 默认代理到 `collab-api` 的 19006，可用 `VITE_API_PROXY_TARGET` 覆盖）。
 
 ```powershell
 # 仅启动后端
@@ -87,6 +87,7 @@ pnpm start:backend
 pnpm -C apps/collab-api dev
 pnpm -C apps/collab-admin dev
 pnpm -C apps/desktop dev
+pnpm -C apps/web dev   # 插件中心 Web 前端，默认 http://localhost:19007
 ```
 
 开发环境 Swagger：`http://localhost:19006/api/docs`。
@@ -103,11 +104,11 @@ pnpm plugin:build .\demo --out .\demo.lfplugin
 
 `lingfang-plugin create` 提供三套模板：
 
-| 模板 | 入口 | 适用场景 |
-|---|---|---|
-| `client` | `ui/index.html` | iframe UI 与 SDK 能力 |
-| `nodejs` | `index.js` | Node 本地工具与自动化 |
-| `python` | `main.py` | 图像、视频、数据处理和桌面 UI |
+| 模板     | 入口            | 适用场景                      |
+| -------- | --------------- | ----------------------------- |
+| `client` | `ui/index.html` | iframe UI 与 SDK 能力         |
+| `nodejs` | `index.js`      | Node 本地工具与自动化         |
+| `python` | `main.py`       | 图像、视频、数据处理和桌面 UI |
 
 平台契约还支持 `cloud` 和 `workflow`，它们由动作/工作流工具链生成。Manifest 上传可见性只允许 `private` 或 `tenant`；公开上架由审核决定。
 
@@ -130,13 +131,13 @@ pnpm plugin:publish .\demo `
 
 下表名称与 `apps/desktop/builtin-plugins/*/manifest.json` 的 `name` 字段一致。
 
-| 目录 | Manifest ID | 名称 | 运行时 |
-|---|---|---|---|
-| `ai-example` | `builtin.ai-example` | AI 能力实例 | client |
+| 目录                | Manifest ID                 | 名称           | 运行时 |
+| ------------------- | --------------------------- | -------------- | ------ |
+| `ai-example`        | `builtin.ai-example`        | AI 能力实例    | client |
 | `ai-python-example` | `builtin.ai-python-example` | Python AI 实例 | python |
-| `calculator` | `builtin.calculator` | 计算器 | python |
-| `game-2048` | `builtin.game-2048` | 2048 小游戏 | nodejs |
-| `notes` | `builtin.notes` | Markdown 笔记 | client |
+| `calculator`        | `builtin.calculator`        | 计算器         | python |
+| `game-2048`         | `builtin.game-2048`         | 2048 小游戏    | nodejs |
+| `notes`             | `builtin.notes`             | Markdown 笔记  | client |
 
 `plugins/` 还包含 summarizer、detail-poster、outfit-batch、rbflow-video 等可发布插件源码。
 
@@ -151,17 +152,17 @@ pnpm -C apps/desktop vite:build
 cargo test -p lingfang-desktop
 ```
 
-| 根脚本 | 作用 |
-|---|---|
-| `pnpm start` | 后端准备 + 桌面端 |
-| `pnpm start:backend` | 只启动后端 |
-| `pnpm dist` | 创建桌面分发产物 |
-| `pnpm typecheck` | 全 workspace 类型检查 |
-| `pnpm test` | 全 workspace 测试 |
-| `pnpm plugin:create` | 创建插件工程 |
-| `pnpm plugin:validate` | 校验插件 |
-| `pnpm plugin:build` | 构建 v4 制品 |
-| `pnpm plugin:publish` | 发布插件 |
+| 根脚本                 | 作用                  |
+| ---------------------- | --------------------- |
+| `pnpm start`           | 后端准备 + 桌面端     |
+| `pnpm start:backend`   | 只启动后端            |
+| `pnpm dist`            | 创建桌面分发产物      |
+| `pnpm typecheck`       | 全 workspace 类型检查 |
+| `pnpm test`            | 全 workspace 测试     |
+| `pnpm plugin:create`   | 创建插件工程          |
+| `pnpm plugin:validate` | 校验插件              |
+| `pnpm plugin:build`    | 构建 v4 制品          |
+| `pnpm plugin:publish`  | 发布插件              |
 
 ## 项目结构
 
@@ -190,19 +191,19 @@ lingfang-platform/
 
 完整示例见 `apps/collab-api/.env.example`。
 
-| 变量 | 说明 |
-|---|---|
-| `PORT` | API 监听端口；示例为 19006 |
-| `DATABASE_PROVIDER` | `postgresql` 或 `mysql` |
-| `DATABASE_URL` | 数据库连接串 |
-| `CACHE_DRIVER` / `REDIS_URL` | 可选缓存 |
-| `JWT_SECRET` / `JWT_EXPIRES_IN` | JWT 签名与有效期 |
-| `CORS_ALLOWED_ORIGINS` | 管理端和 Tauri origin 白名单 |
-| `LLM_KEY_ENCRYPTION_KEY` | 团队模型密钥 AES-256-GCM 加密密钥 |
-| `PLATFORM_ADMIN_*` | 首次管理员 seed |
-| `SMTP_URL` / `SMTP_FROM` | 邮件服务 fallback |
-| `PASSWORD_RESET_BASE_URL` | 密码重置链接前缀 |
-| `EMAIL_VERIFY_BASE_URL` | 邮箱验证链接前缀 |
+| 变量                            | 说明                              |
+| ------------------------------- | --------------------------------- |
+| `PORT`                          | API 监听端口；示例为 19006        |
+| `DATABASE_PROVIDER`             | `postgresql` 或 `mysql`           |
+| `DATABASE_URL`                  | 数据库连接串                      |
+| `CACHE_DRIVER` / `REDIS_URL`    | 可选缓存                          |
+| `JWT_SECRET` / `JWT_EXPIRES_IN` | JWT 签名与有效期                  |
+| `CORS_ALLOWED_ORIGINS`          | 管理端和 Tauri origin 白名单      |
+| `LLM_KEY_ENCRYPTION_KEY`        | 团队模型密钥 AES-256-GCM 加密密钥 |
+| `PLATFORM_ADMIN_*`              | 首次管理员 seed                   |
+| `SMTP_URL` / `SMTP_FROM`        | 邮件服务 fallback                 |
+| `PASSWORD_RESET_BASE_URL`       | 密码重置链接前缀                  |
+| `EMAIL_VERIFY_BASE_URL`         | 邮箱验证链接前缀                  |
 
 部署细节见 [部署指南](docs/collab-deployment.md)。
 
