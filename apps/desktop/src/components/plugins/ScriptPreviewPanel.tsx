@@ -459,7 +459,12 @@ export function ScriptPreviewPanel({
         });
       }
     }
-  }, [entryFile, files, manifest.entry, manifest.id, pluginId, runtime]);
+    // deps 依赖整个 manifest 而非 manifest.entry/.id：本回调用 manifest.capabilities
+    // 决定 sandbox 授予哪些能力，并把整个 manifest 交给 assertPluginAiPolicy 做政策校验。
+    // 只列窄化字段的话，能力清单的新鲜度是靠「manifest 由 files 派生 + files 在 deps 里」
+    // 间接保住的；哪天 manifest 改成不从 files 派生，就会变成「用旧清单授权」的越权 bug。
+    // manifest 已是 useMemo([files])，列整个对象不会带来额外重建。
+  }, [entryFile, files, manifest, pluginId, runtime]);
 
   // === 缺失解释器降级视图（两种模式共用） ===
   if (probe.status === 'missing') {
