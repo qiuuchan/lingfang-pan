@@ -55,6 +55,9 @@ const CONTROL_BASE_CLASS =
 const INPUT_CLASS = cn(CONTROL_BASE_CLASS, 'h-9');
 const TEXTAREA_CLASS = cn(CONTROL_BASE_CLASS, 'min-h-[72px] resize-none leading-5');
 const SELECT_CLASS = cn(CONTROL_BASE_CLASS, 'h-9 appearance-none pr-9');
+// 字段标签/错误文案沿用原面板的紧凑排版（xs 号字），避免迁移到 Field 后字号变大。
+const FIELD_LABEL_CLASS = 'text-xs font-medium text-muted-foreground';
+const FIELD_ERROR_CLASS = 'text-[11px]';
 
 type InspectorTab = 'overview' | 'files';
 
@@ -494,26 +497,6 @@ function PanelSection({
       <h3 className="text-xs font-semibold text-foreground">{title}</h3>
       {children}
     </section>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        {hint && <span className="text-[11px] text-destructive">{hint}</span>}
-      </div>
-      {children}
-    </div>
   );
 }
 
