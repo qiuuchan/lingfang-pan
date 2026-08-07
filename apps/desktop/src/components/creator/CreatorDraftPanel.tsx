@@ -17,6 +17,7 @@ import {
 import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -193,40 +194,61 @@ export function CreatorDraftPanel({
         <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
           <div className="flex flex-col gap-5">
             <PanelSection title="基础信息">
-              <Field label="名字">
-                <Input
-                  aria-label="插件名字"
-                  value={draft.name}
-                  onChange={(e) => onChange({ name: e.target.value })}
-                  placeholder="插件展示名"
-                  className={INPUT_CLASS}
-                />
-              </Field>
-              <Field label="描述">
-                <Textarea
-                  aria-label="插件描述"
-                  value={draft.description}
-                  onChange={(e) => onChange({ description: e.target.value })}
-                  placeholder="一句话说明插件用途"
-                  rows={2}
-                  className={TEXTAREA_CLASS}
-                />
-              </Field>
+              <FieldGroup className="gap-3">
+                <Field className="gap-1.5">
+                  <FieldLabel htmlFor="creator-draft-name" className={FIELD_LABEL_CLASS}>
+                    名字
+                  </FieldLabel>
+                  <Input
+                    id="creator-draft-name"
+                    aria-label="插件名字"
+                    value={draft.name}
+                    onChange={(e) => onChange({ name: e.target.value })}
+                    placeholder="插件展示名"
+                    className={INPUT_CLASS}
+                  />
+                </Field>
+                <Field className="gap-1.5">
+                  <FieldLabel htmlFor="creator-draft-description" className={FIELD_LABEL_CLASS}>
+                    描述
+                  </FieldLabel>
+                  <Textarea
+                    id="creator-draft-description"
+                    aria-label="插件描述"
+                    value={draft.description}
+                    onChange={(e) => onChange({ description: e.target.value })}
+                    placeholder="一句话说明插件用途"
+                    rows={2}
+                    className={TEXTAREA_CLASS}
+                  />
+                </Field>
+              </FieldGroup>
             </PanelSection>
 
             <PanelSection title="元数据">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="插件 ID" hint={idValid ? undefined : '仅小写字母/数字/连字符'}>
+                <Field className="gap-1.5">
+                  <FieldLabel htmlFor="creator-draft-id" className={FIELD_LABEL_CLASS}>
+                    插件 ID
+                  </FieldLabel>
                   <Input
+                    id="creator-draft-id"
                     aria-label="插件 ID"
                     value={draft.id}
                     onChange={(e) => onChange({ id: e.target.value })}
                     aria-invalid={!idValid || undefined}
                     className={cn(INPUT_CLASS, !idValid && 'border-destructive')}
                   />
+                  {!idValid && (
+                    <FieldError className={FIELD_ERROR_CLASS}>仅小写字母/数字/连字符</FieldError>
+                  )}
                 </Field>
-                <Field label="版本号">
+                <Field className="gap-1.5">
+                  <FieldLabel htmlFor="creator-draft-version" className={FIELD_LABEL_CLASS}>
+                    版本号
+                  </FieldLabel>
                   <Input
+                    id="creator-draft-version"
                     aria-label="版本号"
                     value={draft.version}
                     onChange={(e) => onChange({ version: e.target.value })}
@@ -238,9 +260,13 @@ export function CreatorDraftPanel({
 
             <PanelSection title="运行配置">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="运行类型">
+                <Field className="gap-1.5">
+                  <FieldLabel htmlFor="creator-draft-runtime" className={FIELD_LABEL_CLASS}>
+                    运行类型
+                  </FieldLabel>
                   <SelectWrapper>
                     <select
+                      id="creator-draft-runtime"
                       aria-label="运行类型"
                       value={draft.runtime_type}
                       onChange={(e) =>
@@ -254,19 +280,28 @@ export function CreatorDraftPanel({
                     </select>
                   </SelectWrapper>
                 </Field>
-                <Field label="入口文件" hint={entryMissing ? '该文件不存在' : undefined}>
+                <Field className="gap-1.5">
+                  <FieldLabel htmlFor="creator-draft-entry" className={FIELD_LABEL_CLASS}>
+                    入口文件
+                  </FieldLabel>
                   <Input
+                    id="creator-draft-entry"
                     aria-label="入口文件"
                     value={draft.entry}
                     onChange={(e) => onChange({ entry: e.target.value })}
                     aria-invalid={entryMissing || undefined}
                     className={cn(INPUT_CLASS, entryMissing && 'border-destructive')}
                   />
+                  {entryMissing && <FieldError className={FIELD_ERROR_CLASS}>该文件不存在</FieldError>}
                 </Field>
               </div>
-              <Field label="可见性">
+              <Field className="gap-1.5">
+                <FieldLabel htmlFor="creator-draft-visibility" className={FIELD_LABEL_CLASS}>
+                  可见性
+                </FieldLabel>
                 <SelectWrapper>
                   <select
+                    id="creator-draft-visibility"
                     aria-label="可见性"
                     value={draft.visibility}
                     onChange={(e) =>
