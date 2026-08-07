@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -193,11 +194,7 @@ export function NotificationCenter({
           <DialogTitle className="flex items-center gap-2" data-tauri-drag-region>
             <BellIcon className="size-4" />
             通知中心
-            {unread > 0 && (
-              <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
-                {unread} 条未读
-              </span>
-            )}
+            {unread > 0 && <Badge>{unread} 条未读</Badge>}
           </DialogTitle>
           <DialogDescription>插件过审、新版本推送、消费等消息汇总在此。</DialogDescription>
         </DialogHeader>
@@ -286,9 +283,9 @@ function NotificationRow({ item, onRead }: { item: NotificationItem; onRead: () 
           >
             {item.title}
           </span>
-          <span className="shrink-0 rounded-full border bg-background px-2 py-0.5 text-[10px] text-muted-foreground">
+          <Badge variant="outline" className="bg-background text-muted-foreground">
             {meta.label}
-          </span>
+          </Badge>
           {!item.read && (
             <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary ring-2 ring-primary/15" />
           )}

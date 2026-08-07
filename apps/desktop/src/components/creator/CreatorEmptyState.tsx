@@ -1,5 +1,6 @@
 import { BookOpenIcon, Code2Icon, PenLineIcon, SparklesIcon, WandSparklesIcon } from 'lucide-react';
 import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
+import { cn } from '@/lib/utils';
 
 const EXAMPLES = [
   { icon: Code2Icon, title: '界面工具', prompt: '做一个带界面的代码格式化插件，支持多种语言' },
@@ -15,7 +16,7 @@ export function CreatorEmptyState({
 }) {
   return (
     <div className="flex min-h-0 flex-1 items-center overflow-y-auto px-5 py-10 sm:px-8">
-      <div className={`${CREATOR_COLUMN_CLASS} flex flex-col items-center text-center`}>
+      <div className={cn(CREATOR_COLUMN_CLASS, 'flex flex-col items-center text-center')}>
         <span className="mb-5 flex size-10 items-center justify-center rounded-lg border border-border bg-card text-primary shadow-sm">
           <SparklesIcon className="size-5" />
         </span>

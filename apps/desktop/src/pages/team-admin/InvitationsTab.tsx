@@ -9,6 +9,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { LoadingButton } from '@/components/loading-button';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from '@/components/ui/input-group';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Table,
@@ -81,15 +87,20 @@ export function InvitationsTab() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <FieldGroup className="max-w-lg flex-row flex-wrap items-end gap-2">
+            {/* Field 自身已是 w-32，*:w-full 只会把 InputGroup 撑到 32，不会溢出。 */}
             <Field className="w-32 gap-1">
-              <FieldLabel htmlFor="invite-max-uses">最大使用次数</FieldLabel>
-              <Input
-                id="invite-max-uses"
-                className="w-32"
-                value={maxUses}
-                onChange={(e) => setMaxUses(e.target.value)}
-                placeholder="最大使用次数"
-              />
+              <FieldLabel htmlFor="invite-max-uses">最大使用</FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  id="invite-max-uses"
+                  value={maxUses}
+                  onChange={(e) => setMaxUses(e.target.value)}
+                  placeholder="最大使用次数"
+                />
+                <InputGroupAddon align="inline-end">
+                  <InputGroupText>次</InputGroupText>
+                </InputGroupAddon>
+              </InputGroup>
             </Field>
             <Field className="w-44 gap-1">
               <FieldLabel htmlFor="invite-expires-at">过期时间（可选）</FieldLabel>

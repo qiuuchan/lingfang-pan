@@ -62,6 +62,7 @@ import { parseManifest } from '@/lib/plugin-draft';
 import { formatTimestamp } from '@/lib/time';
 import { errorMessage } from '@/pages/plugins-runtime';
 import type { DraftFile } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import { requiresRegistryRuntimeAccess } from '@/lib/plugin-runtime-access';
 import { assertInstalledPluginAiPolicy, assertPluginAiPolicy } from '@/lib/plugin-ai-policy';
 
@@ -593,10 +594,18 @@ export function ScriptPreviewPanel({
               <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`inline-flex h-2.5 w-2.5 rounded-full ${persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'}`}
+                    className={cn(
+                      'inline-flex h-2.5 w-2.5 rounded-full',
+                      persistentRun.clean ? 'bg-amber-500' : 'bg-destructive'
+                    )}
                   />
                   <span
-                    className={`font-medium ${persistentRun.clean ? 'text-amber-600 dark:text-amber-400' : 'text-destructive'}`}
+                    className={cn(
+                      'font-medium',
+                      persistentRun.clean
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-destructive'
+                    )}
                   >
                     {persistentRun.clean ? '插件进程已结束' : '插件进程异常退出'}
                   </span>
@@ -607,7 +616,10 @@ export function ScriptPreviewPanel({
                     <span className="ml-3">
                       退出码：
                       <span
-                        className={`font-mono ${persistentRun.clean ? 'text-foreground' : 'text-destructive'}`}
+                        className={cn(
+                          'font-mono',
+                          persistentRun.clean ? 'text-foreground' : 'text-destructive'
+                        )}
                       >
                         {persistentRun.exitCode}
                       </span>

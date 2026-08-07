@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { api, isEmail, type ApiError } from '@/lib/api';
 import type { Session } from '@/lib/types';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -108,10 +110,11 @@ function AccountSummary({ session }: { session: Session }) {
             <span className="truncate">{session.email || '尚未设置邮箱'}</span>
           </p>
         </div>
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm">
-          <ShieldCheckIcon className="size-3.5 text-primary" />
+        {/* h-6/px-2.5/gap-1.5 保持与原手写标签一致的尺寸（Badge 默认 h-5 会略矮）。 */}
+        <Badge variant="outline" className="h-6 gap-1.5 bg-background px-2.5 shadow-sm">
+          <ShieldCheckIcon className="text-primary" />
           {roleLabel}
-        </span>
+        </Badge>
       </div>
       <div className="grid gap-px bg-border sm:grid-cols-2">
         <SummaryItem
@@ -143,7 +146,7 @@ function SummaryItem({
       </span>
       <div className="min-w-0">
         <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className={`truncate text-xs font-medium ${mono ? 'font-mono' : ''}`} title={value}>
+        <p className={cn('truncate text-xs font-medium', mono && 'font-mono')} title={value}>
           {value}
         </p>
       </div>

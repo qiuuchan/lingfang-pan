@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { Field, FieldGroup } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import {
   Select,
   SelectContent,
@@ -176,18 +177,19 @@ export function DraftPlugins() {
 
         <TabsContent value="local" className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-64 flex-1">
-              <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
+            <InputGroup className="min-w-64 flex-1">
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+              <InputGroupInput
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setPage(1);
                 }}
                 placeholder="搜索名称或 manifest ID"
-                className="pl-9"
               />
-            </div>
+            </InputGroup>
             <Select
               value={status}
               onValueChange={(value) => {

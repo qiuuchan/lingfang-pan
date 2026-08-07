@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import { PlusIcon, PencilIcon, Trash2Icon, LockIcon } from 'lucide-react';
 import type { PermissionEntry, PermissionModule, PermissionGroup, Role } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 const ROLE_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -352,7 +353,7 @@ function RoleEditDialog({
               </span>
             </div>
             <div
-              className={`rounded-md border p-3 ${isSystem ? 'pointer-events-none opacity-60' : ''}`}
+              className={cn('rounded-md border p-3', isSystem && 'pointer-events-none opacity-60')}
             >
               <div className="flex max-h-72 flex-col gap-3 overflow-y-auto pr-1">
                 {modules.map((m) => {

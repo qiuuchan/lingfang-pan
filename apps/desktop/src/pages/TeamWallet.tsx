@@ -23,6 +23,7 @@ import {
   WalletIcon,
 } from 'lucide-react';
 import { api, type ApiError } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import type { BalanceLedger } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -304,12 +305,20 @@ function AccountCard({
   return (
     <section className="relative overflow-hidden rounded-xl border bg-card p-5 shadow-sm">
       <div
-        className={`absolute -right-10 -top-10 size-32 rounded-full blur-3xl ${violet ? 'bg-violet-500/10' : 'bg-primary/10'}`}
+        className={cn(
+          'absolute -right-10 -top-10 size-32 rounded-full blur-3xl',
+          violet ? 'bg-violet-500/10' : 'bg-primary/10'
+        )}
       />
       <div className="relative flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <span
-            className={`flex size-10 items-center justify-center rounded-full ${violet ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400' : 'bg-primary/10 text-primary'} [&_svg]:size-5`}
+            className={cn(
+              'flex size-10 items-center justify-center rounded-full [&_svg]:size-5',
+              violet
+                ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                : 'bg-primary/10 text-primary'
+            )}
           >
             {icon}
           </span>
@@ -320,11 +329,11 @@ function AccountCard({
             <h3 className="text-sm font-semibold">{title}</h3>
           </div>
         </div>
-        <SparklesIcon className={`size-4 ${violet ? 'text-violet-500/50' : 'text-primary/40'}`} />
+        <SparklesIcon className={cn('size-4', violet ? 'text-violet-500/50' : 'text-primary/40')} />
       </div>
       <div className="relative mt-6 flex min-h-10 items-baseline">
         {value === null ? (
-          <Shimmer className={`h-9 ${loadingWidth}`} />
+          <Shimmer className={cn('h-9', loadingWidth)} />
         ) : (
           <span className="text-3xl font-semibold tracking-tight tabular-nums">{value}</span>
         )}
@@ -516,7 +525,12 @@ function LedgerDialog({
                   <StaggerItem key={t.id}>
                     <div className="flex items-center gap-3 bg-card p-3.5">
                       <span
-                        className={`flex size-8 shrink-0 items-center justify-center rounded-full ${credit_ ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}
+                        className={cn(
+                          'flex size-8 shrink-0 items-center justify-center rounded-full',
+                          credit_
+                            ? 'bg-success/10 text-success'
+                            : 'bg-destructive/10 text-destructive'
+                        )}
                       >
                         {credit_ ? (
                           <ArrowDownLeftIcon className="size-4" />
@@ -536,7 +550,10 @@ function LedgerDialog({
                         <div className="text-xs text-muted-foreground">{fmtTime(t.createdAt)}</div>
                       </div>
                       <span
-                        className={`text-sm font-semibold tabular-nums ${credit_ ? 'text-success' : 'text-destructive'}`}
+                        className={cn(
+                          'text-sm font-semibold tabular-nums',
+                          credit_ ? 'text-success' : 'text-destructive'
+                        )}
                       >
                         {t.amountText}
                       </span>

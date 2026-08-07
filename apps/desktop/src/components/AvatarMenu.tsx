@@ -38,6 +38,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 
 export function AvatarMenu({
@@ -258,27 +259,31 @@ export function AvatarMenu({
               <div className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
                 外观主题
               </div>
-              <div className="flex gap-1 px-1.5 pb-1">
+              {/* 单选 ToggleGroup：Base UI 的 value 恒为数组，取消选中会回传 []，此时保持当前主题不变。 */}
+              <ToggleGroup
+                variant="outline"
+                spacing={1}
+                value={theme ? [theme] : []}
+                onValueChange={(next) => {
+                  const value = next[0];
+                  if (value) setTheme(value);
+                }}
+                className="w-full px-1.5 pb-1"
+              >
                 {themeOpts.map((opt) => {
-                  const active = theme === opt.value;
                   const OptIcon = opt.icon;
                   return (
-                    <button
+                    <ToggleGroupItem
                       key={opt.value}
-                      onClick={() => setTheme(opt.value)}
-                      className={cn(
-                        'flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-1.5 py-1.5 text-xs transition-colors',
-                        active
-                          ? 'border-transparent bg-primary text-primary-foreground'
-                          : 'border-border text-muted-foreground hover:bg-muted'
-                      )}
+                      value={opt.value}
+                      className="h-auto flex-1 gap-1 border-border px-1.5 py-1.5 text-xs text-muted-foreground aria-pressed:border-transparent aria-pressed:bg-primary aria-pressed:text-primary-foreground"
                     >
                       <OptIcon className="size-3.5 shrink-0" />
                       {opt.label}
-                    </button>
+                    </ToggleGroupItem>
                   );
                 })}
-              </div>
+              </ToggleGroup>
             </div>
 
             <div className="h-px bg-border" />

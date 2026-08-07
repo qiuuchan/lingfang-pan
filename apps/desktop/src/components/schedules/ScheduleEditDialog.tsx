@@ -19,6 +19,12 @@ import { toast } from 'sonner';
 import { BotIcon, PackageIcon, BellIcon, ClockIcon, CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from '@/components/ui/input-group';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -404,20 +410,24 @@ export function ScheduleEditDialog({ open, editing, onClose, onSaved }: Props) {
           )}
 
           {/* timeout */}
-          {/* *:data-[slot=input]:w-32 保住原来的窄输入框宽度（Field 默认给子元素 w-full）。 */}
-          <Field className="gap-1.5 *:data-[slot=input]:w-32">
+          {/* *:data-[slot=input-group]:w-32 保住原来的窄输入框宽度（Field 默认给子元素 w-full）。 */}
+          <Field className="gap-1.5 *:data-[slot=input-group]:w-32">
             <FieldLabel htmlFor="schedule-timeout" className="text-xs font-medium">
-              单次执行超时（分钟）
+              单次执行超时
             </FieldLabel>
-            <Input
-              id="schedule-timeout"
-              type="number"
-              min={1}
-              max={60}
-              value={timeoutMin}
-              onChange={(e) => setTimeoutMin(Number(e.target.value) || 30)}
-              className="w-32"
-            />
+            <InputGroup>
+              <InputGroupInput
+                id="schedule-timeout"
+                type="number"
+                min={1}
+                max={60}
+                value={timeoutMin}
+                onChange={(e) => setTimeoutMin(Number(e.target.value) || 30)}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>分钟</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
             <FieldDescription className="text-xs">范围 1-60 分钟，默认 30</FieldDescription>
           </Field>
         </FieldGroup>

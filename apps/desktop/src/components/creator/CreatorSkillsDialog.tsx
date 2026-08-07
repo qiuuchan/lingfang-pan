@@ -10,7 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { FieldLegend, FieldSet } from '@/components/ui/field';
 import { SKILLS } from '@/lib/skills';
+import { cn } from '@/lib/utils';
 
 export interface CreatorSkillsDialogProps {
   open: boolean;
@@ -32,13 +34,18 @@ export function CreatorSkillsDialog({
           <DialogTitle>技能</DialogTitle>
           <DialogDescription>按需开启，让 AI 生成更符合预期的插件。</DialogDescription>
         </DialogHeader>
-        <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto">
+        {/* fieldset 承载「这是一组勾选项」的语义；组名与 DialogTitle 重复，故 legend 只给读屏。 */}
+        <FieldSet className="max-h-[56vh] gap-2 overflow-y-auto">
+          <FieldLegend className="sr-only">技能</FieldLegend>
           {SKILLS.map((s) => {
             const checked = activeSkillIds.includes(s.id);
             return (
               <label
                 key={s.id}
-                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${checked ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'}`}
+                className={cn(
+                  'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors',
+                  checked ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
+                )}
               >
                 <Checkbox
                   checked={checked}
@@ -52,7 +59,7 @@ export function CreatorSkillsDialog({
               </label>
             );
           })}
-        </div>
+        </FieldSet>
         <div className="flex justify-end">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             完成

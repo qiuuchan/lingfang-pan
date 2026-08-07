@@ -17,6 +17,7 @@ import {
   LifeBuoyIcon,
   XIcon,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -134,6 +135,7 @@ function FilePicker({ files, onChange }: { files: File[]; onChange: (next: File[
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {files.map((f, i) => (
+            // 不用 Badge：内含删除按钮，而 Badge 固定 h-5 + overflow-hidden 会压扁按钮并裁掉其焦点环。
             <span
               key={`${f.name}-${i}`}
               className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs"
@@ -405,14 +407,15 @@ function DetailView({ id, onBack }: { id: string; onBack: () => void }) {
         {ticket.messages.map((m) => (
           <div
             key={m.id}
-            className={`flex ${m.authorRole === 'USER' ? 'justify-end' : 'justify-start'}`}
+            className={cn('flex', m.authorRole === 'USER' ? 'justify-end' : 'justify-start')}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-3 py-2 ${
+              className={cn(
+                'max-w-[80%] rounded-lg px-3 py-2',
                 m.authorRole === 'USER'
                   ? 'bg-primary text-primary-foreground'
                   : 'border bg-muted/40'
-              }`}
+              )}
             >
               <div className="mb-1 flex items-center gap-2 text-xs opacity-70">
                 <span>{m.authorRole === 'USER' ? '我' : '客服'}</span>

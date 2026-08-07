@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '@/App';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SearchIcon } from 'lucide-react';
 import type { LoadedPlugin, View } from '@/lib/types';
@@ -272,11 +273,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                             </div>
                           )}
                         </div>
-                        {r.badge && (
-                          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                            {r.badge}
-                          </span>
-                        )}
+                        {r.badge && <Badge variant="secondary">{r.badge}</Badge>}
                         {r.actionLabel && (
                           <kbd
                             className={cn(

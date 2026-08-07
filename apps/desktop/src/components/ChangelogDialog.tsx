@@ -23,6 +23,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { listChangelog, formatDate, type ChangelogEntry } from '@/lib/changelog';
 import { dragRegionProps } from '@/lib/window-drag';
+import { cn } from '@/lib/utils';
 
 // highlight.js 暗色主题（代码块语法高亮配色）。导入即注入全局 CSS。
 import 'highlight.js/styles/github-dark.css';
@@ -123,11 +124,12 @@ export function ChangelogDialog({
                       key={r.id}
                       type="button"
                       onClick={() => jumpTo(r.id)}
-                      className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                      className={cn(
+                        'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                         activeId === r.id
                           ? 'bg-primary/10 font-medium text-primary'
                           : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                      }`}
+                      )}
                     >
                       <span className="font-mono">v{r.version}</span>
                       {r.isLatest && (

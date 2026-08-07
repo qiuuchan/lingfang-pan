@@ -16,11 +16,20 @@ import {
 } from 'lucide-react';
 import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   buildStagedManifest,
   validateStagedCompleteness,
@@ -108,6 +117,14 @@ export function CreatorDraftPanel({
     onChange({ capabilities: next });
   }
 
+  // ToggleGroup 回传全量选中列表，这里换算回「变动的那一项」再走原来的逐项切换：
+  // 白名单外的已声明能力（CapabilityKind 比白名单多几项）不在组里渲染，按列表重建会把它们丢掉。
+  function handleCapabilityChange(nextKinds: string[]) {
+    const selected = new Set(nextKinds);
+    const changed = capKinds.find((kind) => selected.has(kind) !== activeCaps.has(kind));
+    if (changed) toggleCapability(changed);
+  }
+
   function validateDraftReady() {
     if (!draft.name.trim()) {
       toast.error('请填写插件名字');
@@ -175,9 +192,7 @@ export function CreatorDraftPanel({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-sm font-semibold text-foreground">插件草稿</h2>
-                <span className="rounded-md border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  产物
-                </span>
+                <Badge variant="secondary">产物</Badge>
               </div>
               <p className="mt-0.5 truncate text-xs text-muted-foreground" title={draft.name}>
                 {draft.name || '未命名插件'} · {preparedDraft.files.length} 个文件
@@ -321,24 +336,31 @@ export function CreatorDraftPanel({
               </Field>
             </PanelSection>
 
-            <PanelSection title="能力声明">
-              <div className="flex flex-wrap gap-2">
-                {capKinds.map((kind) => {
-                  const on = activeCaps.has(kind);
-                  return (
-                    <button
-                      key={kind}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => toggleCapability(kind)}
-                      className={capabilityPillClass(on)}
-                    >
-                      {kind}
-                    </button>
-                  );
-                })}
-              </div>
-            </PanelSection>
+            {/* 能力声明是一组多选项，用 fieldset/legend 承载组语义（legend 在 flex fieldset 中不参与
+                gap 计算，用 mb-3 复现原来的 gap-3 间距）。 */}
+            <FieldSet className="gap-3 border-b pb-5">
+              <FieldLegend variant="label" className="mb-3 text-xs font-semibold text-foreground">
+                能力声明
+              </FieldLegend>
+              <ToggleGroup
+                multiple
+                variant="outline"
+                size="sm"
+                value={capKinds.filter((kind) => activeCaps.has(kind))}
+                onValueChange={handleCapabilityChange}
+                className="w-full flex-wrap"
+              >
+                {capKinds.map((kind) => (
+                  <ToggleGroupItem
+                    key={kind}
+                    value={kind}
+                    className="h-auto rounded-md border-border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] leading-none text-muted-foreground hover:bg-muted hover:text-foreground aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-primary aria-pressed:hover:bg-primary/15"
+                  >
+                    {kind}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </FieldSet>
 
             {diagnostics.length > 0 && (
               <PanelSection title="检查结果" withDivider={false}>
@@ -378,9 +400,9 @@ export function CreatorDraftPanel({
                 当前草稿包含 {preparedDraft.files.length} 个文件
               </p>
             </div>
-            <span className="rounded-md border bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground">
+            <Badge variant="secondary" className="font-mono">
               {preparedDraft.runtime_type}
-            </span>
+            </Badge>
           </div>
           <div className="divide-y overflow-hidden rounded-lg border bg-background">
             {preparedDraft.files.map((file) => (
@@ -393,11 +415,7 @@ export function CreatorDraftPanel({
                 <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
                   {file.path}
                 </span>
-                {file.path === preparedDraft.entry && (
-                  <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                    入口
-                  </span>
-                )}
+                {file.path === preparedDraft.entry && <Badge variant="secondary">入口</Badge>}
               </div>
             ))}
           </div>
@@ -511,16 +529,4 @@ function SelectWrapper({ children }: { children: React.ReactNode }) {
       <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
     </div>
   );
-}
-
-function capabilityPillClass(active: boolean) {
-  const base =
-    'rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
-  if (!active) {
-    return cn(
-      base,
-      'border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
-    );
-  }
-  return cn(base, 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15');
 }

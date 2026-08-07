@@ -71,6 +71,7 @@ import type {
   LocalTaskPayload,
 } from '@lingfang/contract';
 import { ScheduleEditDialog } from '@/components/schedules/ScheduleEditDialog';
+import { cn } from '@/lib/utils';
 
 /** 筛选器。 */
 type Filter = 'ALL' | 'ACTIVE' | 'PAUSED' | 'COMPLETED';
@@ -501,7 +502,7 @@ function RunStatusBadge({ status }: { status: LocalScheduleRun['status'] }) {
     SKIPPED: { text: '跳过', className: 'text-muted-foreground' },
   };
   const entry = map[status];
-  return <span className={`text-xs font-medium ${entry.className}`}>{entry.text}</span>;
+  return <span className={cn('text-xs font-medium', entry.className)}>{entry.text}</span>;
 }
 
 function RunStatusIcon({ status }: { status: LocalScheduleRun['status'] }) {
