@@ -21,7 +21,8 @@
 #  verify-all.mjs     串联以上三个脚本的一键全量自检（需运行中的 API）。
 #  _smoke-helpers.mjs 冒烟脚本共享工具（幂等确保 demo 租户/用户）。
 #  enable-settlement-v2.mjs  把市场结算切到 SETTLEMENT_V2（购买扣费前提，幂等）。
-#  ci.sh              【单元门禁】install→prisma generate→typecheck→vitest→build。
+#  ci.sh              【单元门禁】install→prisma generate→lint→format:check→
+#                     typecheck→全工作区 vitest→build。
 #                     无需外部服务（单测 Mock Prisma；integration spec 按 env 门控跳过）。
 #  smoke-ci.sh        【集成门禁】全新库上启动真实 API 并跑 verify-all。
 #  .github/workflows/ci.yml     调用 ci.sh，每次 push/PR 跑（快速）。
@@ -44,10 +45,10 @@ cd "$ROOT"
 PNPM="pnpm"
 if ! command -v pnpm >/dev/null 2>&1; then PNPM="npx -y pnpm@9"; fi
 
-echo "==> [1/6] install dependencies (frozen lockfile)"
+echo "==> [1/7] install dependencies (frozen lockfile)"
 $PNPM install --frozen-lockfile
 
-echo "==> [2/6] prisma generate (apps/collab-api)"
+echo "==> [2/7] prisma generate (apps/collab-api)"
 $PNPM -C apps/collab-api prisma:generate
 
 echo "==> scan: forbidden patterns in request paths"
@@ -59,30 +60,26 @@ if grep -rn --include='*.ts' '$queryRawUnsafe' apps/collab-api/src \
   echo '错误：发现 $queryRawUnsafe 出现在非迁移脚本（仅离线迁移 migrate-plugin-registry-v4-legacy.ts 与测试 *.spec.ts 允许）'; exit 1
 fi
 
-echo "==> [3/8] lint (eslint, error-level baseline)"
+echo "==> [3/7] lint (eslint, error-level baseline)"
 $PNPM lint
 
-echo "==> [4/8] format check (prettier --check)"
+echo "==> [4/7] format check (prettier --check)"
 $PNPM format:check
 
-echo "==> [5/8] typecheck (collab-api, collab-admin)"
+echo "==> [5/7] typecheck (collab-api, collab-admin)"
 $PNPM -C apps/collab-api typecheck
 $PNPM -C apps/collab-admin typecheck
 
-echo "==> [6/8] unit tests (collab-api; integration auto-skips)"
-$PNPM -C apps/collab-api test
+echo "==> [6/7] unit tests (all workspace packages; integration auto-skips)"
+# 用 `pnpm -r test` 递归覆盖全部工作区包，而不是逐个枚举。
+# 枚举写法曾经漏掉 apps/desktop(430) / apps/web(33) / apps/plugin-preview(31)
+# 共 494 个单测——它们一直在跑绿却从未被门禁保护，回归了也没人知道。
+# 递归写法还有一个长期好处：以后新增的包只要有 test 脚本就自动进门禁。
+# 当前 8 个包的 test 均为 `vitest run`（无 e2e/playwright），不需要外部服务；
+# 需要真实 Redis/Postgres 的 integration spec 按 env 门控自动 skip。
+$PNPM -r test
 
-echo "==> [7/8] unit tests (collab-admin; jsdom 纯函数单测)"
-$PNPM -C apps/collab-admin test
-
-echo "==> unit tests (packages: contract / plugin-sdk / workflow-engine)"
-# 这三套单测是 Vitest 迁移的核心交付：此前 CI 单元门禁只跑 apps，
-# packages 下的契约/SDK/工作流引擎单测并未被门禁覆盖，存在回归无感的风险。
-$PNPM -C packages/contract test
-$PNPM -C packages/plugin-sdk test
-$PNPM -C packages/workflow-engine test
-
-echo "==> [8/8] build collab-api"
+echo "==> [7/7] build collab-api"
 $PNPM -C apps/collab-api build
 
 echo "==> build collab-admin"
