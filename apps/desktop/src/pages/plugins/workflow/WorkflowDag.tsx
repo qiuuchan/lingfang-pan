@@ -7,6 +7,7 @@ import {
   Loader2Icon,
   XCircleIcon,
 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -103,7 +104,7 @@ export function WorkflowDag({ definition, levels, attempts = [] }: { definition:
                     <p><span className="text-muted-foreground">SHA：</span>{shortDigest(node.target.sha256)}</p>
                     <p><span className="text-muted-foreground">契约：</span>v{node.target.action_contract_version}</p>
                     <p><span className="text-muted-foreground">重试上限：</span>{node.retry_limit}</p>
-                    {attempt?.error_message && <div className="rounded-md bg-destructive/10 p-2 text-destructive"><p className="font-medium">{attempt.error_code || 'workflow_step_failed'}</p><p className="mt-0.5 whitespace-pre-wrap">{attempt.error_message}</p></div>}
+                    {attempt?.error_message && <Alert variant="destructive" className="border-transparent bg-destructive/10 text-destructive"><AlertTitle className="text-xs">{attempt.error_code || 'workflow_step_failed'}</AlertTitle><AlertDescription className="whitespace-pre-wrap text-xs text-destructive">{attempt.error_message}</AlertDescription></Alert>}
                     {attempt?.output != null && <pre className="max-h-36 overflow-auto rounded-md bg-muted p-2 text-[11px]">{JSON.stringify(attempt.output, null, 2)}</pre>}
                   </div>
                 </details>

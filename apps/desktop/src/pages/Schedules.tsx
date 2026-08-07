@@ -24,6 +24,7 @@ import {
   BotIcon,
   PackageIcon,
 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -192,15 +193,13 @@ export function Schedules() {
   return (
     <div className="flex h-full flex-col gap-4 p-6">
       {/* Banner：明示任务生命周期。 */}
-      <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-        <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <p className="font-medium">定时任务仅在应用运行时触发</p>
-          <p className="mt-0.5 text-xs opacity-90">
-            关闭窗口或退出应用将暂停所有任务；漏掉的任务不会自动补跑。
-          </p>
-        </div>
-      </div>
+      <Alert className="border-warning/30 bg-warning/10 text-warning">
+        <AlertTriangleIcon className="size-4 shrink-0" />
+        <AlertTitle>定时任务仅在应用运行时触发</AlertTitle>
+        <AlertDescription className="text-xs text-current opacity-90">
+          关闭窗口或退出应用将暂停所有任务；漏掉的任务不会自动补跑。
+        </AlertDescription>
+      </Alert>
 
       {/* 工具条。 */}
       <div className="flex items-center gap-2">

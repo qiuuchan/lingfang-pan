@@ -26,6 +26,7 @@ import {
 } from "@/components/plugins/PluginSourceBadge";
 import { Markdown } from "@/components/markdown";
 import { Pagination } from "@/components/pagination";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -284,9 +285,12 @@ export function PluginCenterBody({
 				</div>
 
 				{error && (
-					<div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-						{error}
-					</div>
+					<Alert
+						variant="destructive"
+						className="mb-4 border-destructive/40 bg-destructive/5 text-destructive"
+					>
+						<AlertDescription className="text-destructive">{error}</AlertDescription>
+					</Alert>
 				)}
 				{progress && <TransferProgressBar progress={progress} />}
 
@@ -1043,9 +1047,12 @@ function PluginDetailDialog({
 									正在加载插件说明…
 								</div>
 							) : readmeError ? (
-								<div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-									{readmeError}
-								</div>
+								<Alert
+									variant="destructive"
+									className="border-destructive/30 bg-destructive/5 text-destructive"
+								>
+									<AlertDescription className="text-destructive">{readmeError}</AlertDescription>
+								</Alert>
 							) : view.readmeMarkdown?.trim() ? (
 								<Markdown pluginReadme>{view.readmeMarkdown}</Markdown>
 							) : (

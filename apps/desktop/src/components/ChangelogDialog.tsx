@@ -12,9 +12,11 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { DownloadIcon, SparklesIcon, ChevronRightIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { LoadingButton } from '@/components/loading-button';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -101,9 +103,9 @@ export function ChangelogDialog({
 
         {/* 降级横幅 */}
         {status === 'ready' && degraded && degradedMessage && (
-          <div className="shrink-0 border-b bg-warning/10 px-5 py-2 text-xs text-warning">
-            {degradedMessage}
-          </div>
+          <Alert className="shrink-0 rounded-none border-x-0 border-t-0 border-b bg-warning/10 px-5 py-2 text-warning">
+            <AlertDescription className="text-xs text-current">{degradedMessage}</AlertDescription>
+          </Alert>
         )}
 
         {/* 主体：左侧目录 + 右侧时间线 */}
@@ -145,7 +147,7 @@ export function ChangelogDialog({
             {status === 'loading' ? (
               <div className="space-y-3 p-5">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+                  <Skeleton key={i} className="h-24 rounded-lg" />
                 ))}
               </div>
             ) : status === 'error' ? (

@@ -10,6 +10,7 @@ import {
   SquareIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -111,7 +112,7 @@ function DefinitionError({ diagnostics }: { diagnostics: Array<{ code: string; p
     <div className="min-h-0 flex-1 overflow-y-auto bg-muted/30 p-6">
       <div className="mx-auto max-w-3xl rounded-xl border border-destructive/30 bg-background p-5">
         <div className="flex items-start gap-3"><AlertTriangleIcon className="mt-0.5 size-5 text-destructive" /><div><h3 className="font-semibold">工作流定义不可运行</h3><p className="mt-1 text-sm text-muted-foreground">入口文件未通过共享工作流契约校验，请由插件作者修复并发布新版本。</p></div></div>
-        <div className="mt-4 space-y-2">{diagnostics.map((diagnostic, index) => <div key={`${diagnostic.path}-${index}`} className="rounded-lg bg-destructive/5 p-3 text-sm"><p className="font-mono text-xs text-destructive">{diagnostic.code} · {diagnostic.path || '/'}</p><p className="mt-1">{diagnostic.message}</p></div>)}</div>
+        <div className="mt-4 space-y-2">{diagnostics.map((diagnostic, index) => <Alert key={`${diagnostic.path}-${index}`} variant="destructive" className="border-transparent bg-destructive/5"><AlertTitle className="font-mono text-xs text-destructive">{diagnostic.code} · {diagnostic.path || '/'}</AlertTitle><AlertDescription className="text-sm text-foreground">{diagnostic.message}</AlertDescription></Alert>)}</div>
       </div>
     </div>
   );
@@ -321,7 +322,7 @@ function RunnableWorkflow({ plugin, decoded, onAdoptedDraft }: { plugin: LoadedP
           <CompatibilityCard icon={<ShieldCheckIcon className="size-4" />} title={`${executionTarget === 'CLOUD' ? 'Cloud' : '本地'}运行策略`} available={policyAvailable} reason={preflightLoading ? '正在检查精确发行版、执行位置与策略…' : preflightError || blockingDiagnostics[0]?.message || (currentPreflight?.eligible ? '当前预检允许运行；启动时仍会实时复验' : currentPreflight ? '当前执行位置未通过预检' : '等待平台预检')} />
         </section>
 
-        {(preflightError || executorMessage) && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{preflightError || executorMessage}</div>}
+        {(preflightError || executorMessage) && <Alert variant="destructive" className="border-destructive/30 bg-destructive/5 text-destructive"><AlertDescription className="text-destructive">{preflightError || executorMessage}</AlertDescription></Alert>}
         {(currentPreflight?.diagnostics.length ?? 0) > 0 && <details className="rounded-lg border bg-background p-3"><summary className="cursor-pointer text-sm font-medium">预检诊断（{currentPreflight!.diagnostics.length}）</summary><div className="mt-3 space-y-2">{currentPreflight!.diagnostics.map((item, index) => <div key={`${item.code}-${index}`} className="rounded-md bg-muted/60 p-2 text-xs"><p className="font-mono">{item.severity} · {item.code}{item.node_id ? ` · ${item.node_id}` : ''}</p><p className="mt-1 text-muted-foreground">{item.message}</p></div>)}</div></details>}
 
         {upgradeSuggestions.length > 0 && (
@@ -350,7 +351,7 @@ function RunnableWorkflow({ plugin, decoded, onAdoptedDraft }: { plugin: LoadedP
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2">运行 {run.id}<Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge></CardTitle><CardDescription>精确计划 {run.plan_sha256.slice(0, 12)}… · {run.execution_target} · {run.execution_scope}</CardDescription></CardHeader>
             <CardContent className="space-y-3">
-              {run.error && <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"><p className="font-mono text-xs">{run.error.code}</p><p className="mt-1">{run.error.message}</p></div>}
+              {run.error && <Alert variant="destructive" className="border-transparent bg-destructive/10 text-destructive"><AlertTitle className="font-mono text-xs">{run.error.code}</AlertTitle><AlertDescription className="text-destructive">{run.error.message}</AlertDescription></Alert>}
               <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><div className="rounded-md bg-muted p-2">完成 {run.attempt_counts.succeeded}</div><div className="rounded-md bg-muted p-2">运行中 {run.attempt_counts.running}</div><div className="rounded-md bg-muted p-2">失败 {run.attempt_counts.failed}</div><div className="rounded-md bg-muted p-2">取消/跳过 {run.attempt_counts.canceled + run.attempt_counts.skipped}</div></div>
               {run.output != null && <div><p className="mb-1 text-xs font-medium text-muted-foreground">最终输出</p><pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">{JSON.stringify(run.output, null, 2)}</pre></div>}
             </CardContent>

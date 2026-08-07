@@ -3,6 +3,7 @@ import { CheckCircle2Icon, Loader2Icon, SparklesIcon } from 'lucide-react';
 import type { RefObject } from 'react';
 import type * as React from 'react';
 import { Markdown } from '@/components/markdown';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { ToolCallCard } from '@/components/creator/ToolCallCard';
 import { TodoPanel } from '@/components/creator/TodoPanel';
@@ -202,15 +203,13 @@ export function CreatorMessageList(props: CreatorMessageListProps) {
           ))}
 
           {publishedName && (
-            <div className="flex items-start gap-3 border-l-2 border-success bg-success/8 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-success" />
-              <div>
-                <div className="font-medium text-foreground">草稿“{publishedName}”已保存到本地</div>
-                <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  可在插件中心的草稿页继续运行或发布。
-                </div>
-              </div>
-            </div>
+            <Alert className="border-l-2 border-success bg-success/10 px-4 py-3 text-success animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <CheckCircle2Icon className="size-4 shrink-0 text-success" />
+              <AlertTitle className="text-foreground">草稿“{publishedName}”已保存到本地</AlertTitle>
+              <AlertDescription className="text-xs leading-5 text-muted-foreground">
+                可在插件中心的草稿页继续运行或发布。
+              </AlertDescription>
+            </Alert>
           )}
         </div>
       </div>

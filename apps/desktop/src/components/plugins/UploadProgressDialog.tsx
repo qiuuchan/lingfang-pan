@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatBytes } from '@/lib/tickets';
 import type { UploadProgress } from '@/lib/plugin-upload';
@@ -116,11 +117,13 @@ export function UploadProgressDialog({
 
           {/* 错误详情 */}
           {stage === 'error' && errorMessage && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-              <pre className="scrollbar-thin max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs text-destructive">
-                {errorMessage}
-              </pre>
-            </div>
+            <Alert variant="destructive" className="border-destructive/30 bg-destructive/5">
+              <AlertDescription>
+                <pre className="scrollbar-thin max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs text-destructive">
+                  {errorMessage}
+                </pre>
+              </AlertDescription>
+            </Alert>
           )}
 
           {/* 完成后提示 */}

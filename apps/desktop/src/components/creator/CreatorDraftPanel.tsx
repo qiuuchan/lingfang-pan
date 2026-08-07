@@ -15,6 +15,7 @@ import {
   FileCode2Icon,
 } from 'lucide-react';
 import { type CapabilityKind as CapabilityKindType } from '@lingfang/contract';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -303,22 +304,23 @@ export function CreatorDraftPanel({
               <PanelSection title="检查结果" withDivider={false}>
                 <div className="space-y-2">
                   {diagnostics.map((d, i) => (
-                    <div
+                    <Alert
                       key={i}
+                      variant={d.status === 'fail' ? 'destructive' : 'default'}
                       className={cn(
-                        'flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed',
+                        'text-xs leading-relaxed',
                         d.status === 'fail'
                           ? 'border-destructive/30 bg-destructive/10 text-destructive'
                           : 'border-warning/30 bg-warning/10 text-warning'
                       )}
                     >
                       {d.status === 'fail' ? (
-                        <XCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+                        <XCircleIcon className="size-3.5 shrink-0" />
                       ) : (
-                        <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                        <AlertTriangleIcon className="size-3.5 shrink-0" />
                       )}
-                      <span>{d.message}</span>
-                    </div>
+                      <AlertDescription className="text-xs text-current">{d.message}</AlertDescription>
+                    </Alert>
                   ))}
                 </div>
               </PanelSection>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -146,10 +147,12 @@ export function CloudAutomationTab() {
   }
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
-        Cloud
-        定时任务已停止新建和执行。历史配置仅保留查看与迁移参考，请改用桌面端本地定时任务调用插件或工作流。
-      </div>
+      <Alert className="border-warning/40 bg-warning/10 text-warning">
+        <AlertDescription className="text-current">
+          Cloud
+          定时任务已停止新建和执行。历史配置仅保留查看与迁移参考，请改用桌面端本地定时任务调用插件或工作流。
+        </AlertDescription>
+      </Alert>
       <Card>
         <CardHeader>
           <CardTitle>Cloud Endpoint</CardTitle>

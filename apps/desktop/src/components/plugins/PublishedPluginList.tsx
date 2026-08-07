@@ -17,6 +17,7 @@ import { useApp } from "@/App";
 import { LoadingButton } from "@/components/loading-button";
 import { Pagination } from "@/components/pagination";
 import { PluginSourceBadge } from "@/components/plugins/PluginSourceBadge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -159,9 +160,12 @@ export function PublishedPluginList({
 				</Button>
 			</div>
 			{error && (
-				<div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-					{error}
-				</div>
+				<Alert
+					variant="destructive"
+					className="border-destructive/30 bg-destructive/5 text-destructive"
+				>
+					<AlertDescription className="text-destructive">{error}</AlertDescription>
+				</Alert>
 			)}
 			{!items.length ? (
 				<div className="flex h-44 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
@@ -284,9 +288,12 @@ export function PublishedPluginList({
 						</DialogDescription>
 					</DialogHeader>
 					{actionError && (
-						<div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-							{actionError}
-						</div>
+						<Alert
+							variant="destructive"
+							className="border-destructive/30 bg-destructive/5 text-destructive"
+						>
+							<AlertDescription className="text-destructive">{actionError}</AlertDescription>
+						</Alert>
 					)}
 					{detailLoading ? (
 						<ListLoading label="正在加载版本详情" />

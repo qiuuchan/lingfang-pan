@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -372,7 +373,7 @@ export function PublishPluginDialog({
           )}
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground"><span className={stage === 'error' || stage === 'market_failed' ? 'text-destructive' : stage === 'done' ? 'text-success' : 'text-primary'}>{stage === 'error' || stage === 'market_failed' ? <XCircleIcon className="inline size-3.5" /> : stage === 'done' ? <CheckCircle2Icon className="inline size-3.5" /> : <Loader2Icon className={busy ? 'inline size-3.5 animate-spin' : 'inline size-3.5'} />}</span><span className="min-w-0 break-words">{stageText}{progress?.message ? ` · ${progress.message}` : ''}{percent != null ? ` ${percent}%` : ''}</span></div>
-          {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
+          {error && <Alert variant="destructive" className="border-destructive/30 bg-destructive/5 text-destructive"><AlertDescription className="text-destructive">{error}</AlertDescription></Alert>}
         </div>
 
         <DialogFooter>

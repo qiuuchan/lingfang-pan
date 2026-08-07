@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { getVersion, getName } from '@tauri-apps/api/app';
 import { InfoIcon } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 // 兜底版本（非 Tauri 环境展示）：构建时由 vite 注入。
@@ -86,9 +87,11 @@ export function AboutTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           {!info?.desktop && info ? (
-            <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-              当前为 web 预览，显示的是 package.json 兜底版本；在桌面客户端中以 Tauri 实际版本为准。
-            </div>
+            <Alert className="border-warning/40 bg-warning/10 text-warning">
+              <AlertDescription className="text-xs text-current">
+                当前为 web 预览，显示的是 package.json 兜底版本；在桌面客户端中以 Tauri 实际版本为准。
+              </AlertDescription>
+            </Alert>
           ) : null}
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-lg border bg-muted/20 px-3 py-2">
