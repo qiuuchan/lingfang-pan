@@ -23,15 +23,19 @@ pnpm -r test           # 运行各包单元测试
 所有变更必须通过 `scripts/ci.sh`（CI 自动执行），包含：
 
 1. 依赖安装（frozen lockfile）
-2. Prisma client 生成
-3. 请求路径敏感模式扫描
-4. `eslint` 静态检查
-5. `prettier --check` 格式检查
-6. `tsc --noEmit` 类型检查（各 app / package）
-7. 单元测试（collab-api / collab-admin / packages）
-8. 生产构建（collab-api / collab-admin）
+2. Prisma client 生成 + 请求路径敏感模式扫描
+3. `eslint` 静态检查（`--max-warnings=0`）
+4. `prettier --check` 格式检查
+5. `pnpm -r typecheck`：全部 8 个带 typecheck 的工作区包
+6. `pnpm -r test`：全部 8 个包的 vitest（需真实 Redis/Postgres 的
+   integration spec 按环境变量门控自动 skip，不需要外部服务）
+7. 生产构建：collab-api、collab-admin、web、plugin-preview，
+   以及 desktop 的纯前端 `vite:build`（不含 `tauri build`，
+   那需要 Rust 工具链和数 GB 运行时产物，不进快速门禁）
 
-提交前请本地跑一遍 `pnpm lint && pnpm format:check && pnpm -r typecheck`。
+提交前直接本地跑 `bash scripts/ci.sh` 最省事（全量约 1 分钟），
+它和 CI 跑的是同一个脚本；只想快速自查时至少跑
+`pnpm lint && pnpm format:check && pnpm -r typecheck && pnpm -r test`。
 
 ## 提交规范
 

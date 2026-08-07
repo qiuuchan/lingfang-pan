@@ -12,8 +12,10 @@
 
 如果你发现安全漏洞，**请勿公开披露**。请通过以下方式 privately 报告：
 
-- 在仓库（GitHub / Gitee）提交 **私有安全 Issue**；或
-- 直接联系维护团队（安全联系人见仓库 README）。
+- 首选：在 GitHub 仓库的 **Security → Report a vulnerability**（Private
+  vulnerability reporting）提交。这是唯一不会公开可见的仓库内渠道——
+  普通 Issue 即便在私有仓库里，对所有协作者也都是可见的，不要用它报漏洞。
+- 若该入口未开启：联系仓库 Owner（GitHub 个人主页上的联系方式）。
 
 我们会在 **72 小时内** 确认收到，并在确认后给出修复与披露时间表。
 

@@ -19,7 +19,7 @@
 
 ## 决策
 
-采用单一布局哲学（详见 [06 工程规范](../04-engineering.md)）：
+采用单一布局哲学（详见 [工程规范](../04-engineering.md)）：
 
 - **只用 `apps/`**（`desktop` + `server`）+ `packages/`（`contract`/`plugin-sdk`/`ui-tokens`）+ 独立 `plugins/` + `docs/` + `tools/`。**不再有 `platform/` 双轨。**
 - **AI 工具配置不入仓**：`.gitignore` 排除个人 AI 工具目录；团队级约定集中单一入口。
@@ -39,4 +39,9 @@
 
 ## 后果
 
-- 仓库结构与 [06 工程规范](../04-engineering.md) 的目录树一致；偏离即视为规范缺陷。
+- 仓库结构与 [工程规范](../04-engineering.md) 的目录树一致；偏离即视为规范缺陷。
+
+> 现状补记（2026-08）：本 ADR 记录的是当时的决策，`apps/` 后来按职责拆开了，
+> 现为 `desktop` / `collab-api`（即决策里说的 server）/ `collab-admin` / `web` /
+> `plugin-preview`，`packages/` 增加了 `workflow-engine`。以 `pnpm-workspace.yaml`
+> 为准。拆分属于同一布局哲学下的自然演进，不构成对本 ADR 的偏离。
