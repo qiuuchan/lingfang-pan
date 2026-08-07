@@ -30,6 +30,14 @@
 
 后端单元测试必须带 60 秒硬超时执行，避免卡死任务。
 
+数据库集成测试（env 门控 + 真实 PG/MySQL，常规 `test` 下 describe.skip）：
+
+- 共享状态 CAS：`pnpm -C apps/collab-api test:shared-state:database:integration`（docker 版加 `:docker` 后缀）
+- 跨租户越权隔离：`pnpm -C apps/collab-api test:cross-tenant:integration`（门控 `CROSS_TENANT_DATABASE_INTEGRATION=1`）
+
+约定：新增团队隔离面（teamId 行级过滤）时，同步在 `cross-tenant-authz.database.integration.spec.ts`
+补越权用例 + 同团正向对照——mock 级测试无法暴露「查询漏拼 teamId where」这类真实 SQL 缺陷。
+
 ## File Size Policy
 
 - `>1500` 行源码必须拆分。
