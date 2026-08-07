@@ -8,6 +8,7 @@ import type { CollabSessionResponse, PublicTeam } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Field, FieldGroup } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
 import { Button } from '@/components/ui/button';
 
@@ -147,13 +148,21 @@ export function Onboarding() {
           {/* 重新提交团队管理员申请 */}
           <div className="space-y-3">
             <p className="text-xs font-medium text-muted-foreground">重新提交团队管理员申请</p>
-            <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
-            <Textarea placeholder="重新申请说明" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <FieldGroup className="gap-3">
+              <Field>
+                <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+              </Field>
+              <Field>
+                <Textarea placeholder="重新申请说明" value={reason} onChange={(e) => setReason(e.target.value)} />
+              </Field>
+            </FieldGroup>
             <LoadingButton loading={loading} onClick={submitApplication}>重新提交团队管理员申请</LoadingButton>
           </div>
           <div className="border-t pt-4 space-y-3">
             <p className="text-xs font-medium text-muted-foreground">或使用邀请码作为普通成员加入团队</p>
-            <Input placeholder={INVITATION_CODE_PLACEHOLDER} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+            <Field>
+              <Input placeholder={INVITATION_CODE_PLACEHOLDER} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+            </Field>
             <LoadingButton variant="outline" loading={loading} onClick={redeem}>加入团队</LoadingButton>
           </div>
           {discoveryCard}
@@ -170,7 +179,9 @@ export function Onboarding() {
         <CardDescription>注册后可通过邀请码加入，或直接加入下方公开团队。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input placeholder={INVITATION_CODE_PLACEHOLDER} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+        <Field>
+          <Input placeholder={INVITATION_CODE_PLACEHOLDER} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && redeem()} />
+        </Field>
         <div className="flex gap-2"><LoadingButton loading={loading} onClick={redeem}>加入团队</LoadingButton><Button variant="outline" onClick={resetSession}>退出登录</Button></div>
         {discoveryCard}
       </CardContent>
