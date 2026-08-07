@@ -101,6 +101,11 @@ apps/desktop/playwright/.cache/
 .kimi-code/ 
 pnpm-lock.yaml
 
+# 工具/测试运行态缓存（不入仓）
+.playwright-cli/
+.trellis/tasks/
+apps/web/test-results/
+
 # R4 换装逻辑来源（独立工具脚本，仅作复刻参考，不入仓）
 ai换装版本批量版.py
 .workbuddy/
