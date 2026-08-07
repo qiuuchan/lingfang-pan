@@ -66,9 +66,11 @@ $PNPM lint
 echo "==> [4/7] format check (prettier --check)"
 $PNPM format:check
 
-echo "==> [5/7] typecheck (collab-api, collab-admin)"
-$PNPM -C apps/collab-api typecheck
-$PNPM -C apps/collab-admin typecheck
+echo "==> [5/7] typecheck (all workspace packages)"
+# 同样改成递归：此前只查 collab-api / collab-admin，apps/desktop（改动量最大的
+# 应用）、apps/web、apps/plugin-preview 与 packages/* 的类型错误可以直接穿过门禁。
+# 9 个项目全量 tsc --noEmit 也只要 ~13s，没有理由不查。
+$PNPM -r typecheck
 
 echo "==> [6/7] unit tests (all workspace packages; integration auto-skips)"
 # 用 `pnpm -r test` 递归覆盖全部工作区包，而不是逐个枚举。
