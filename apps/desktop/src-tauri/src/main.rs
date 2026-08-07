@@ -49,6 +49,20 @@ fn extract_host(raw_url: &str) -> Option<String> {
     }
 }
 
+/// IpAddr 枚举本身没有 `is_private`/`is_link_local`（这两个方法只存在于
+/// `Ipv4Addr`/`Ipv6Addr`），SSRF 判断需按 IP 版本拆分。
+fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(a) => {
+            a.is_loopback() || a.is_private() || a.is_link_local() || a.is_unspecified() || a.is_multicast()
+        }
+        std::net::IpAddr::V6(a) => {
+            // IPv6 没有 is_private/is_link_local；对应概念为唯一本地(fc00::/7)与单播链路本地。
+            a.is_loopback() || a.is_unspecified() || a.is_multicast() || a.is_unicast_link_local() || a.is_unique_local()
+        }
+    }
+}
+
 /// net.fetch SSRF 防护：拒绝环回/私网/链路本地/未指定/组播地址（含云元数据 169.254.169.254）。
 /// 域名会做 DNS 解析后逐一检查；解析失败按拦截处理（fail-closed）。
 fn is_blocked_host(host: &str) -> bool {
@@ -57,20 +71,13 @@ fn is_blocked_host(host: &str) -> bool {
         return true;
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return ip.is_loopback()
-            || ip.is_private()
-            || ip.is_link_local()
-            || ip.is_unspecified()
-            || ip.is_multicast();
+        return is_blocked_ip(ip);
     }
     // 域名：解析后逐地址检查（fail-closed：解析失败即拦截）。
-    let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:0")) else {
+    let Ok(mut addrs) = std::net::ToSocketAddrs::to_socket_addrs(&format!("{host}:0")) else {
         return true;
     };
-    addrs.any(|addr| {
-        let ip = addr.ip();
-        ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified() || ip.is_multicast()
-    })
+    addrs.any(|addr| is_blocked_ip(addr.ip()))
 }
 
 /// 壳全局状态：能力注册表 + 已加载插件。
