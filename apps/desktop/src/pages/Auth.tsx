@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { dragRegionProps } from '@/lib/window-drag';
@@ -182,22 +183,37 @@ export function Auth() {
           <CardTitle>{mode === 'login' ? '登录本地客户端' : '注册新账号'}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" spellCheck={false} />
-          <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" />
+          <FieldGroup className="gap-3">
+            <Field>
+              <Input placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" spellCheck={false} />
+            </Field>
+            <Field>
+              <Input type="password" placeholder={mode === 'login' ? '密码' : '密码（≥8 位）'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoComplete="off" />
+            </Field>
+          </FieldGroup>
           <div className={cn('grid transition-all duration-300 ease-out', mode === 'register' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
-            <div className="flex flex-col gap-3 overflow-hidden">
-              <Input placeholder="昵称（可选）" value={name} onChange={(e) => setName(e.target.value)} />
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-                <Checkbox checked={wantsTeamAdmin} onCheckedChange={(v) => setWantsTeamAdmin(v === true)} />
+            <FieldGroup className="gap-3 overflow-hidden">
+              <Field>
+                <Input placeholder="昵称（可选）" value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <FieldLabel
+                htmlFor="auth-wants-team-admin"
+                className="w-full cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-normal"
+              >
+                <Checkbox id="auth-wants-team-admin" checked={wantsTeamAdmin} onCheckedChange={(v) => setWantsTeamAdmin(v === true)} />
                 我是团队管理员，需要提交审批申请
-              </label>
+              </FieldLabel>
               {wantsTeamAdmin && (
-                <div className="flex flex-col gap-3">
-                  <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
-                  <Textarea placeholder="申请说明（可选）" value={reason} onChange={(e) => setReason(e.target.value)} />
-                </div>
+                <>
+                  <Field>
+                    <Input placeholder="团队名称" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+                  </Field>
+                  <Field>
+                    <Textarea placeholder="申请说明（可选）" value={reason} onChange={(e) => setReason(e.target.value)} />
+                  </Field>
+                </>
               )}
-            </div>
+            </FieldGroup>
           </div>
           <LoadingButton className="w-full" loading={loading} onClick={submit}>{mode === 'login' ? '登录' : '注册'}</LoadingButton>
           <div className="flex items-center justify-between">
@@ -224,12 +240,14 @@ export function Auth() {
             <DialogTitle data-tauri-drag-region>找回密码</DialogTitle>
             <DialogDescription>输入注册邮箱，我们会发送密码重置链接到你的邮箱。</DialogDescription>
           </DialogHeader>
-          <Input
-            placeholder="注册邮箱"
-            value={forgotEmail}
-            onChange={(e) => setForgotEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && onForgotPassword()}
-          />
+          <Field>
+            <Input
+              placeholder="注册邮箱"
+              value={forgotEmail}
+              onChange={(e) => setForgotEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onForgotPassword()}
+            />
+          </Field>
           <DialogFooter>
             <Button variant="outline" onClick={() => setForgotOpen(false)}>取消</Button>
             <LoadingButton loading={forgotLoading} onClick={onForgotPassword}>发送重置链接</LoadingButton>
@@ -244,13 +262,15 @@ export function Auth() {
             <DialogTitle data-tauri-drag-region>设置新密码</DialogTitle>
             <DialogDescription>请输入你的新密码（至少 8 位）。重置后需使用新密码重新登录。</DialogDescription>
           </DialogHeader>
-          <Input
-            type="password"
-            placeholder="新密码（≥8 位）"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && onResetPassword()}
-          />
+          <Field>
+            <Input
+              type="password"
+              placeholder="新密码（≥8 位）"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onResetPassword()}
+            />
+          </Field>
           <DialogFooter>
             <Button variant="outline" onClick={() => setResetOpen(false)}>取消</Button>
             <LoadingButton loading={resetLoading} onClick={onResetPassword}>重置密码</LoadingButton>
