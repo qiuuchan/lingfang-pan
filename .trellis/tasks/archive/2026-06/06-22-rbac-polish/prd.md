@@ -18,27 +18,32 @@
 - **child-4 `admin-team-roles`**：④-D7 web 端团队角色管理 B+C（新功能，complex）
 
 ## child-1：成员角色名显示 + 清理
+
 - 后端 `currentMembers`（`team.service.ts:166`）补返回 `teamRoleId + roleName + roleCode`。
 - 前端 `MembersTab.tsx` 改用 `teamRoleId` 匹配下拉、显示 `roleName`；清理 `roleById` 冗余 + name 字符串反查。
 - contract + 前端 types 同步。
 
 ## child-2：权限码细分（全拆 4 处）+ 迁移
+
 映射：
-| 旧码 | 拆成 |
-|---|---|
-| `team.plugin.edit` | `team.plugin.edit_metadata` / `edit_draft` / `edit_price` |
-| `platform.user.update` | `platform.user.update_profile` / `reset_password` |
-| `team.role.manage` | `team.role.create` / `update` / `delete` |
-| `platform.plugin.manage` | `platform.plugin.edit` / `delete` |
+
+| 旧码                     | 拆成                                                      |
+| ------------------------ | --------------------------------------------------------- |
+| `team.plugin.edit`       | `team.plugin.edit_metadata` / `edit_draft` / `edit_price` |
+| `platform.user.update`   | `platform.user.update_profile` / `reset_password`         |
+| `team.role.manage`       | `team.role.create` / `update` / `delete`                  |
+| `platform.plugin.manage` | `platform.plugin.edit` / `delete`                         |
 
 影响点：`admin.controller.ts:77,98,203,225,239` / `plugins.controller.ts:46,53,60` / `roles.controller.ts:79,86,94,101` / `role.service.ts` ensurePermission×5 / `permission-group.service.ts:123`。
 **迁移策略：扩张映射**（seed-rbac 幂等迁移，旧码→全部新码，自定义角色不丢权限；系统角色 seed 全量自动覆盖）。
 
 ## child-3：插件授权 UI + D1–D4
+
 - `PluginGrantsTab.tsx:183` trigger + SelectContent 加宽度。
 - D1 状态中文化；D2 暴露 `expiresAt`；D3 公开加入开关换项目 Checkbox；D4 历史加创建时间列。
 
 ## child-4：D7 web 端团队角色管理（B+C）
+
 - **B 管**：collab-admin 团队详情新增角色 CRUD + 两级权限勾选（作用域=某团队）。后端新端点 `/api/admin/teams/:id/roles*` + `/permissions`。
 - **C 分配**：`teams-view` 成员 tab 的 TEAM_ADMIN/MEMBER 二选一 → 该团队全部角色下拉。
 

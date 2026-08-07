@@ -16,11 +16,11 @@
 ## SDK Shape
 
 ```ts
-sdk.codeAssistant.check(input)
-sdk.codeAssistant.run(input)
-sdk.codeAssistant.stop(sessionId)
-sdk.plugin.upload(input)
-sdk.plugin.submitMarketplace(input)
+sdk.codeAssistant.check(input);
+sdk.codeAssistant.run(input);
+sdk.codeAssistant.stop(sessionId);
+sdk.plugin.upload(input);
+sdk.plugin.submitMarketplace(input);
 ```
 
 ## Runtime Policy

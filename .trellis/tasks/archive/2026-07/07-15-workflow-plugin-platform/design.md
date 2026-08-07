@@ -40,14 +40,26 @@ workflow manifest 必须包含 action 子任务定义的一个导出 action：
 {
   "runtime_type": "workflow",
   "entry": "workflow.json",
-  "actions": [{
-    "action_id": "default",
-    "action_contract_version": "1.0.0",
-    "execution_semantics": "side_effect",
-    "cloud_capable": false,
-    "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
-    "output_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
-  }]
+  "actions": [
+    {
+      "action_id": "default",
+      "action_contract_version": "1.0.0",
+      "execution_semantics": "side_effect",
+      "cloud_capable": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  ]
 }
 ```
 

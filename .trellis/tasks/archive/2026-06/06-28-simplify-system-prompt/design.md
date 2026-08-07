@@ -1,4 +1,4 @@
- # Simplify system prompt - Design
+# Simplify system prompt - Design
 
 ## Architecture
 
@@ -46,4 +46,3 @@ Target shape:
 
 - Update prompt literals first, then verify with typecheck and the existing test suite.
 - If behavior regresses, rollback is limited to restoring prompt text and skill wording; no data migration is required.
-

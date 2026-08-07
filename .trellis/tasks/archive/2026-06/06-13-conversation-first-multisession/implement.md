@@ -199,12 +199,12 @@
 
 ## 4. Review Gate（每阶段强制）
 
-| 阶段 | Gate 命令 | 通过标准 | 未过处理 |
-| --- | --- | --- | --- |
-| 1 | `cd apps/desktop/src-tauri && cargo test` | 全测绿 + 无 warning | 修到绿才进 2 |
-| 2 | `pnpm --filter desktop typecheck && pnpm --filter desktop build` + 手动多会话 | typecheck/build 绿 + AC2 手动 | 修到过才进 3 |
-| 3 | `pnpm --filter desktop typecheck && pnpm --filter desktop test && pnpm --filter desktop build` + AC1/3/6 | 全绿 + 手动通过 | 修到过才进 4 |
-| 4 | `pnpm --filter desktop typecheck && pnpm --filter desktop build` + AC4/5 | 全绿 + 手动通过 | 修到过才收尾 |
+| 阶段 | Gate 命令                                                                                                | 通过标准                      | 未过处理     |
+| ---- | -------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------ |
+| 1    | `cd apps/desktop/src-tauri && cargo test`                                                                | 全测绿 + 无 warning           | 修到绿才进 2 |
+| 2    | `pnpm --filter desktop typecheck && pnpm --filter desktop build` + 手动多会话                            | typecheck/build 绿 + AC2 手动 | 修到过才进 3 |
+| 3    | `pnpm --filter desktop typecheck && pnpm --filter desktop test && pnpm --filter desktop build` + AC1/3/6 | 全绿 + 手动通过               | 修到过才进 4 |
+| 4    | `pnpm --filter desktop typecheck && pnpm --filter desktop build` + AC4/5                                 | 全绿 + 手动通过               | 修到过才收尾 |
 
 最终收尾：全量 `cargo test` + `pnpm --filter desktop typecheck/test/build` + 旧 `sessions.json` 可读（AC8）。
 
@@ -241,13 +241,13 @@
 
 ### PRD AC 映射
 
-| AC | 阶段 | 验证 |
-| --- | --- | --- |
-| AC1「你好」纯对话 | 阶段 3 | 手动 + test hasStructuredBlocks |
-| AC2 多会话 | 阶段 2 | 手动切换/删除/重命名 + cargo test delete_session |
-| AC3 自动检测草稿 | 阶段 3 | 手动番茄钟 |
-| AC4 预览大窗 | 阶段 4 | 手动 Sheet 多文件 |
-| AC5 删固定源码 | 阶段 4 | 手动详情面板无 preview tab |
-| AC6 手动转草稿 | 阶段 3 | 手动按钮 |
-| AC7 既有不回归 | 全程 | 上传/`--resume`/shim/ErrorBubble 手动冒烟 |
-| AC8 本地验证全绿 | 收尾 | cargo test + pnpm typecheck/test/build + 旧 sessions.json |
+| AC                | 阶段   | 验证                                                      |
+| ----------------- | ------ | --------------------------------------------------------- |
+| AC1「你好」纯对话 | 阶段 3 | 手动 + test hasStructuredBlocks                           |
+| AC2 多会话        | 阶段 2 | 手动切换/删除/重命名 + cargo test delete_session          |
+| AC3 自动检测草稿  | 阶段 3 | 手动番茄钟                                                |
+| AC4 预览大窗      | 阶段 4 | 手动 Sheet 多文件                                         |
+| AC5 删固定源码    | 阶段 4 | 手动详情面板无 preview tab                                |
+| AC6 手动转草稿    | 阶段 3 | 手动按钮                                                  |
+| AC7 既有不回归    | 全程   | 上传/`--resume`/shim/ErrorBubble 手动冒烟                 |
+| AC8 本地验证全绿  | 收尾   | cargo test + pnpm typecheck/test/build + 旧 sessions.json |

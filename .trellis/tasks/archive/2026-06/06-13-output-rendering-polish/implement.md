@@ -26,9 +26,9 @@
 
 ### 1.3 文件改动清单（全在 `apps/desktop`）
 
-| 文件 | 改动类型 |
-|---|---|
-| `apps/desktop/package.json` | 新增依赖 `rehype-highlight` |
+| 文件                                       | 改动类型                                                                                                                |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop/package.json`                | 新增依赖 `rehype-highlight`                                                                                             |
 | `apps/desktop/src/components/markdown.tsx` | 重写：import 依赖/CSS、抽 `PreBlock` + `CodeBlockActions` + `extractText`、重写 `code`/`pre` 映射、注入 `rehypePlugins` |
 
 > 零后端改动、零契约改动、零迁移。`Bubble.tsx` / `LiveProcess.tsx` 不改。
@@ -115,6 +115,7 @@
 ### 步骤 4：Tailwind v4 preflight 覆盖检查（风险 R4）
 
 - [ ] 启动 dev，devtools 核验 `.hljs` computed color 来源。
+
   ```powershell
   pnpm --filter @lingfang/desktop dev
   ```
@@ -125,7 +126,7 @@
 
 ### 步骤 5：渲染人工核验（design §7.3 全 7 项）
 
-- [ ] 触发一次含 fenced 代码块的 assistant 回复（若无 R1/R2，手工构造一段含 ```python / ```javascript / ```json / ```typescript 的 assistant 文本喂入 `<Markdown>`）。
+- [ ] 触发一次含 fenced 代码块的 assistant 回复（若无 R1/R2，手工构造一段含 `python / `javascript / `json / `typescript 的 assistant 文本喂入 `<Markdown>`）。
 - [ ] 逐项核验：
   - [ ] fenced 高亮（github-dark 配色）。
   - [ ] inline 区分（灰底药丸）。
@@ -175,13 +176,13 @@
 
 ## 4. Review Gate 汇总
 
-| Gate | 位置 | 通过标准 | 失败动作 |
-|---|---|---|---|
-| Gate 1 | 步骤 1 后 | rehype-highlight 入 package.json；hljs CSS 存在；typecheck 基线未破 | 重装依赖 / 排查 pnpm |
-| Gate 2 | 步骤 2 后 | typecheck 零错误；code 无 inline prop；pre 指向 PreBlock 组件引用；rehypePlugins 注入 | 回对应小步（2a-2g）修正 |
-| Gate 3 | 步骤 3 后 | build 零错误；体积增量 ~30-50KB 量级 | 排查误装重依赖 / 构建配置 |
-| Gate 4 | 步骤 5 后 | design §7.3 七项人工核验全过 | 回步骤 2 对应小步修正 |
-| Gate 5 | 步骤 7 后 | Tauri webview 剪贴板可用 + 异常回退有效 | 补 execCommand 回退 / toast 反馈 |
+| Gate   | 位置      | 通过标准                                                                              | 失败动作                         |
+| ------ | --------- | ------------------------------------------------------------------------------------- | -------------------------------- |
+| Gate 1 | 步骤 1 后 | rehype-highlight 入 package.json；hljs CSS 存在；typecheck 基线未破                   | 重装依赖 / 排查 pnpm             |
+| Gate 2 | 步骤 2 后 | typecheck 零错误；code 无 inline prop；pre 指向 PreBlock 组件引用；rehypePlugins 注入 | 回对应小步（2a-2g）修正          |
+| Gate 3 | 步骤 3 后 | build 零错误；体积增量 ~30-50KB 量级                                                  | 排查误装重依赖 / 构建配置        |
+| Gate 4 | 步骤 5 后 | design §7.3 七项人工核验全过                                                          | 回步骤 2 对应小步修正            |
+| Gate 5 | 步骤 7 后 | Tauri webview 剪贴板可用 + 异常回退有效                                               | 补 execCommand 回退 / toast 反馈 |
 
 每个 Gate 失败即止（父 PRD 第 61 行「失败即止，禁带缺陷交付」），不跳过进入下一步。
 
@@ -219,10 +220,10 @@
 
 ## 6. 与父任务 AC 的映射
 
-| 父 AC | 本子任务贡献 | 验证步骤 |
-|---|---|---|
-| AC4 输出美化（代码块高亮、一键复制、流式与最终态一致） | 直接交付 | 步骤 5（design §7.3 七项） |
-| AC5 样式（长内容溢出有可见滚动指示） | fenced 块 max-h-96 + overflow-auto 提供滚动容器（可见性策略由 R5 全局滚动条负责，本子任务保证可滚动） | 步骤 5 第 4/5 项 |
-| AC8 本地验证可重复 | 步骤 0-8 全可重复 | 全流程 |
+| 父 AC                                                  | 本子任务贡献                                                                                          | 验证步骤                   |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------- |
+| AC4 输出美化（代码块高亮、一键复制、流式与最终态一致） | 直接交付                                                                                              | 步骤 5（design §7.3 七项） |
+| AC5 样式（长内容溢出有可见滚动指示）                   | fenced 块 max-h-96 + overflow-auto 提供滚动容器（可见性策略由 R5 全局滚动条负责，本子任务保证可滚动） | 步骤 5 第 4/5 项           |
+| AC8 本地验证可重复                                     | 步骤 0-8 全可重复                                                                                     | 全流程                     |
 
 > 注：AC1/AC2/AC3/AC6/AC7 由其它子任务交付，本子任务不直接贡献，但步骤 5 的「流式一致」与「LiveProcess 不受影响」为 AC2/AC3 提供渲染侧不回归保证。

@@ -33,7 +33,7 @@
   if (!isFollowup && !currentMeta?.title && promptText) {
     const applyTitle = (title: string) => {
       if (!title) return;
-      setMetas((prev) => prev.map((m) => m.sessionId === sessionId ? { ...m, title } : m));
+      setMetas((prev) => prev.map((m) => (m.sessionId === sessionId ? { ...m, title } : m)));
       void renameConversation(sessionId, title).catch(() => {
         /* rename 失败静默，标题已停留在内存 metas */
       });

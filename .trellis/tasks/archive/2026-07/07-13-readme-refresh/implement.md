@@ -44,11 +44,11 @@
 ### 现有（错）
 
 ```markdown
-| 插件 | 能力 |
-|------|------|
+| 插件            | 能力       |
+| --------------- | ---------- |
 | `file-explorer` | 文件管理器 |
-| `system-info` | 系统信息 |
-| `todo-list` | 待办事项 |
+| `system-info`   | 系统信息   |
+| `todo-list`     | 待办事项   |
 
 另有 `plugins/summarizer`（长文总结）作为 LLM 能力示例插件。
 ```
@@ -58,21 +58,21 @@
 ```markdown
 桌面端内置 5 个示例插件（位于 `apps/desktop/builtin-plugins/`）：
 
-| 目录 | 名称 | runtime | 能力 |
-|------|------|---------|------|
-| `ai-example` | AI 能力实例 | client | `llm.chat` + `image.generate` 演示 |
-| `ai-python-example` | Python AI 实例 | python | Python 版 AI 演示 |
-| `game-2048` | 2048 小游戏 | nodejs | 自建 HTTP 服务 + 浏览器游戏 |
-| `calculator` | 计算器 | python | PySide6 GUI |
-| `notes` | Markdown 笔记 | client | `storage.kv` + `llm.chat` 综合应用 |
+| 目录                | 名称           | runtime | 能力                               |
+| ------------------- | -------------- | ------- | ---------------------------------- |
+| `ai-example`        | AI 能力实例    | client  | `llm.chat` + `image.generate` 演示 |
+| `ai-python-example` | Python AI 实例 | python  | Python 版 AI 演示                  |
+| `game-2048`         | 2048 小游戏    | nodejs  | 自建 HTTP 服务 + 浏览器游戏        |
+| `calculator`        | 计算器         | python  | PySide6 GUI                        |
+| `notes`             | Markdown 笔记  | client  | `storage.kv` + `llm.chat` 综合应用 |
 
 另有 3 个独立示例插件（位于 `plugins/`）：
 
-| 目录 | 名称 | runtime | 能力 |
-|------|------|---------|------|
-| `summarizer` | 长文总结 | client | `fs.pick` + `fs.read` + `llm.chat` |
-| `ai-demo` | AI 能力演示 | nodejs | `llm.chat` + `image.generate`（脚本桥调用） |
-| `videodl` | 视频下载器 | python | PySide6 GUI + videofetch |
+| 目录         | 名称        | runtime | 能力                                        |
+| ------------ | ----------- | ------- | ------------------------------------------- |
+| `summarizer` | 长文总结    | client  | `fs.pick` + `fs.read` + `llm.chat`          |
+| `ai-demo`    | AI 能力演示 | nodejs  | `llm.chat` + `image.generate`（脚本桥调用） |
+| `videodl`    | 视频下载器  | python  | PySide6 GUI + videofetch                    |
 
 > 想自己写一个？见 [插件开发](#插件开发) 章节，或直接 [插件开发文档](docs/plugin-development/README.md)。
 ```
@@ -109,11 +109,11 @@ pnpm plugin:build
 
 ### 三类运行时
 
-| runtime | 入口 | 适用场景 |
-|---------|------|---------|
-| `client` | HTML | UI 交互、需要宿主样式、单页应用（iframe 内运行） |
-| `nodejs` | `.js` | 后端服务、HTTP API、需要 npm 包 |
-| `python` | `.py` | 数据处理、ML、需要 pip 包 |
+| runtime  | 入口  | 适用场景                                         |
+| -------- | ----- | ------------------------------------------------ |
+| `client` | HTML  | UI 交互、需要宿主样式、单页应用（iframe 内运行） |
+| `nodejs` | `.js` | 后端服务、HTTP API、需要 npm 包                  |
+| `python` | `.py` | 数据处理、ML、需要 pip 包                        |
 
 > `cloud` runtime 在桌面壳内视为 `client`；v1 不提供模板。
 
@@ -128,7 +128,7 @@ pnpm plugin:build
 \`\`\`bash
 pnpm plugin:build
 pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
-  --base http://localhost:3000 --token $JWT
+--base http://localhost:3000 --token $JWT
 \`\`\`
 
 ### 深入阅读
@@ -150,19 +150,19 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 ### 现有（不完整）
 
 ```markdown
-| 文档 | 内容 |
-|------|------|
-| [愿景与架构](docs/01-vision-and-architecture.md) | ... |
-| [领域模型与插件](docs/02-domain-and-plugins.md) | ... |
-| [后端与 LLM](docs/03-backend-and-llm.md) | ... |
-| [工程规范](docs/04-engineering.md) | ... |
-| [协作平台架构](docs/collab-platform.md) | ... |
-| [协作 API](docs/collab-api.md) | ... |
-| [协作部署](docs/collab-deployment.md) | ... |
-| [桌面客户端](docs/collab-desktop-client.md) | ... |
-| [管理端指南](docs/collab-admin-guide.md) | ... |
-| [插件工作台实跑测试](docs/plugin-workbench-real-cli-test.md) | ... |
-| [ADR](docs/adr/) | ... |
+| 文档                                                         | 内容 |
+| ------------------------------------------------------------ | ---- |
+| [愿景与架构](docs/01-vision-and-architecture.md)             | ...  |
+| [领域模型与插件](docs/02-domain-and-plugins.md)              | ...  |
+| [后端与 LLM](docs/03-backend-and-llm.md)                     | ...  |
+| [工程规范](docs/04-engineering.md)                           | ...  |
+| [协作平台架构](docs/collab-platform.md)                      | ...  |
+| [协作 API](docs/collab-api.md)                               | ...  |
+| [协作部署](docs/collab-deployment.md)                        | ...  |
+| [桌面客户端](docs/collab-desktop-client.md)                  | ...  |
+| [管理端指南](docs/collab-admin-guide.md)                     | ...  |
+| [插件工作台实跑测试](docs/plugin-workbench-real-cli-test.md) | ...  |
+| [ADR](docs/adr/)                                             | ...  |
 ```
 
 ### 改为（完整）
@@ -170,35 +170,35 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 ```markdown
 ### 架构与领域
 
-| 文档 | 内容 |
-|------|------|
-| [愿景与架构](docs/01-vision-and-architecture.md) | 产品定位、系统设计 |
-| [领域模型与插件](docs/02-domain-and-plugins.md) | 实体契约、插件清单、领域边界 |
+| 文档                                              | 内容                                         |
+| ------------------------------------------------- | -------------------------------------------- |
+| [愿景与架构](docs/01-vision-and-architecture.md)  | 产品定位、系统设计                           |
+| [领域模型与插件](docs/02-domain-and-plugins.md)   | 实体契约、插件清单、领域边界                 |
 | [后端与 LLM 历史沿革](docs/03-backend-and-llm.md) | v0.x Rust 后端的历史沿革（已被 NestJS 取代） |
-| [工程规范](docs/04-engineering.md) | Monorepo 约定、配置隔离 |
+| [工程规范](docs/04-engineering.md)                | Monorepo 约定、配置隔离                      |
 
 ### 部署与运维
 
-| 文档 | 内容 |
-|------|------|
-| [协作部署](docs/collab-deployment.md) | Docker 与手动部署 |
-| [桌面客户端](docs/collab-desktop-client.md) | 桌面端说明 |
-| [管理端指南](docs/collab-admin-guide.md) | 管理后台使用 |
+| 文档                                        | 内容              |
+| ------------------------------------------- | ----------------- |
+| [协作部署](docs/collab-deployment.md)       | Docker 与手动部署 |
+| [桌面客户端](docs/collab-desktop-client.md) | 桌面端说明        |
+| [管理端指南](docs/collab-admin-guide.md)    | 管理后台使用      |
 
 ### 计费与模型
 
-| 文档 | 内容 |
-|------|------|
-| [计费与中继设计](docs/billing-and-relay-design.md) | 资源池、渠道、信用、relay、定价 |
-| [API 概览](docs/collab-api.md) | 鉴权、错误格式、分页约定（端点详见 api-reference/） |
+| 文档                                               | 内容                                                |
+| -------------------------------------------------- | --------------------------------------------------- |
+| [计费与中继设计](docs/billing-and-relay-design.md) | 资源池、渠道、信用、relay、定价                     |
+| [API 概览](docs/collab-api.md)                     | 鉴权、错误格式、分页约定（端点详见 api-reference/） |
 
 ### 插件开发
 
-| 文档 | 内容 |
-|------|------|
+| 文档                                              | 内容                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------- |
 | [插件开发指南](docs/plugin-development/README.md) | 完整开发流程：quickstart、manifest、runtime、能力、调试、发布 |
-| [SDK 使用指南](docs/sdk-guide/README.md) | CLI、运行时客户端、manifest 校验器、模板、TypeScript 类型 |
-| [HTTP API 参考](docs/api-reference/README.md) | 全部 controller 端点逐个文档 |
+| [SDK 使用指南](docs/sdk-guide/README.md)          | CLI、运行时客户端、manifest 校验器、模板、TypeScript 类型     |
+| [HTTP API 参考](docs/api-reference/README.md)     | 全部 controller 端点逐个文档                                  |
 
 ### 架构决策记录
 
@@ -206,6 +206,7 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 ```
 
 注意：
+
 - 删除"协作平台架构"`collab-platform.md`（已归档）
 - 删除"插件工作台实跑测试"`plugin-workbench-real-cli-test.md`（已归档）
 - 加入"计费与中继设计"`billing-and-relay-design.md`
@@ -222,11 +223,13 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 ### 项目结构图
 
 修订：
+
 - "5 篇 ADR" → 确认仍是 5 篇（在 §0.5 已验证）
 - "11 个迁移" → 用 §0.6 的实际数字
 - 模块清单：把"auth / me / teams / applications / plugins / marketplace / wallet / llm / notifications / release / admin / settings"改为更准确描述（不必全列 24+，但分类汇总）
 
 例：
+
 ```
 │   │   └── modules/              业务模块（24+ controller，含 auth/me/teams/applications/plugins/
 │   │                              plugin-registry/marketplace/wallet/billing/pools/notifications/
@@ -236,6 +239,7 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 ### 环境变量表
 
 逐项对照 `apps/collab-api/.env.example`（在 §0.7 已读取）：
+
 - 缺的环境变量加上
 - 多余的删掉
 - 默认值与 `.env.example` 一致
@@ -245,6 +249,7 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 ### 仓库结构图中的 packages/
 
 确认 `plugin-sdk` 描述准确：
+
 - 现有："插件能力客户端 SDK（桥 __lingfangInvoke）"
 - 改为："插件开发 SDK（运行时客户端 + CLI 脚手架 + manifest 校验器 + 模板）"
 
@@ -290,14 +295,14 @@ pnpm -C packages/plugin-sdk exec lingfang-plugin publish <plugin>.lfplugin \
 
 ## 预计耗时
 
-| 章节 | 时长 |
-|------|------|
-| §0 | 0.3h |
-| §1 | 0.3h |
-| §2 | 0.5h |
-| §3 | 0.3h |
-| §4 | 0.5h |
-| §5 | 0.3h |
+| 章节     | 时长                |
+| -------- | ------------------- |
+| §0       | 0.3h                |
+| §1       | 0.3h                |
+| §2       | 0.5h                |
+| §3       | 0.3h                |
+| §4       | 0.5h                |
+| §5       | 0.3h                |
 | **合计** | **~2.2h**（约半天） |
 
 ## Review Gates

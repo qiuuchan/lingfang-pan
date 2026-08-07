@@ -6,6 +6,7 @@
 ## Goal
 
 基于现有 README 结构（保留章节顺序与风格），重写 README，使其：
+
 - 删除已不存在的引用（`file-explorer`/`system-info`/`todo-list` 内置插件）
 - 补全文档索引（含 Child B 新增的 `plugin-development/`、`api-reference/`、`sdk-guide/`）
 - 新增"插件开发"章节，指向 Child A 的 SDK 与 Child B 的开发文档

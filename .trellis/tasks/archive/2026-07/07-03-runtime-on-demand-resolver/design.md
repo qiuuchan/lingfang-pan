@@ -3,25 +3,27 @@
 ## 1. 模块边界
 
 **Rust（`apps/desktop/src-tauri/src/`）**
-| 模块 | 性质 | 职责 |
-|---|---|---|
-| `runtime_resolver.rs` | 重构自 `embedded_runtime.rs` | 统一解析 + env 注入；公开 API 签名不变 |
-| `runtime_config.rs` | 新增 | `RuntimeConfig` serde + 原子读写（复用 plugin_store 的 read_json/write_json 模式） |
-| `runtime_download.rs` | 新增 | 下载 / SHA256 / 解压 / 原子落盘 / 激活 / 进度 event / 重试 |
-| `mirror_presets.rs` | 新增 | 预置 pip / npm 镜像源清单 |
-| `plugin_script.rs` | 改 | `probe_script_runtime` 数据源换 resolver；新增 `probe_system_runtime`（仅信息展示，不参与执行） |
-| `plugin_runner.rs` | 改（小） | `from_app` → `resolve`；验证 `bundled_pip_wheel_dir`（`:420`，依赖 `Lib/ensurepip/_bundled/pip-*.whl`）在 portable python 下仍命中 |
-| `main.rs` | 改 | mod 声明 + `generate_handler!` 注册新命令 |
+
+| 模块                  | 性质                         | 职责                                                                                                                               |
+| --------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime_resolver.rs` | 重构自 `embedded_runtime.rs` | 统一解析 + env 注入；公开 API 签名不变                                                                                             |
+| `runtime_config.rs`   | 新增                         | `RuntimeConfig` serde + 原子读写（复用 plugin_store 的 read_json/write_json 模式）                                                 |
+| `runtime_download.rs` | 新增                         | 下载 / SHA256 / 解压 / 原子落盘 / 激活 / 进度 event / 重试                                                                         |
+| `mirror_presets.rs`   | 新增                         | 预置 pip / npm 镜像源清单                                                                                                          |
+| `plugin_script.rs`    | 改                           | `probe_script_runtime` 数据源换 resolver；新增 `probe_system_runtime`（仅信息展示，不参与执行）                                    |
+| `plugin_runner.rs`    | 改（小）                     | `from_app` → `resolve`；验证 `bundled_pip_wheel_dir`（`:420`，依赖 `Lib/ensurepip/_bundled/pip-*.whl`）在 portable python 下仍命中 |
+| `main.rs`             | 改                           | mod 声明 + `generate_handler!` 注册新命令                                                                                          |
 
 **前端（`apps/desktop/src/`）**
-| 模块 | 性质 |
-|---|---|
-| `pages/settings/RuntimeEnvTab.tsx` | 重构自 `CliRuntimeTab.tsx`（保留 tab id `cli`） |
-| `components/runtime/RuntimeSetupGate.tsx` | 新增，首启引导 |
-| `components/runtime/DownloadProgress.tsx` | 新增，订阅 Tauri event 进度条 |
-| `lib/runtime-config.ts` | 新增，封装运行时相关 Tauri 命令 |
-| `lib/cli-types.ts` | 改，加 RuntimeStatus / DownloadProgress / MirrorConfig 类型 |
-| `components/onboarding/{task-steps,TaskChecklist}.tsx` | 改第 1 步文案 + 完成判定 |
+
+| 模块                                                   | 性质                                                        |
+| ------------------------------------------------------ | ----------------------------------------------------------- |
+| `pages/settings/RuntimeEnvTab.tsx`                     | 重构自 `CliRuntimeTab.tsx`（保留 tab id `cli`）             |
+| `components/runtime/RuntimeSetupGate.tsx`              | 新增，首启引导                                              |
+| `components/runtime/DownloadProgress.tsx`              | 新增，订阅 Tauri event 进度条                               |
+| `lib/runtime-config.ts`                                | 新增，封装运行时相关 Tauri 命令                             |
+| `lib/cli-types.ts`                                     | 改，加 RuntimeStatus / DownloadProgress / MirrorConfig 类型 |
+| `components/onboarding/{task-steps,TaskChecklist}.tsx` | 改第 1 步文案 + 完成判定                                    |
 
 ## 2. 数据结构（契约）
 
@@ -59,11 +61,13 @@ struct RuntimeResolver {
 ## 3. 解析优先级与「唯一来源」不变式
 
 `resolve(kind)` 顺序，**严格按 config，不回退系统 PATH**：
+
 1. `config.user_specified[kind]` → 校验 exe 存在 → `UserSpecified`；路径失效则该项作废、标异常
 2. `config.app_managed[kind]` → 校验 exe 存在 → `AppManaged`
 3. 都没有 → `None`；`require_*` 返回结构化错误 `RuntimeMissing { kind }`，前端引导下载
 
 **三条不变式**（保证「Agent 一定用应用内的」）：
+
 1. `resolve_runtime_command()` 永不 `which`/PATH 搜索，只查 AppManaged/UserSpecified
 2. `env()` 清空宿主 PATH（现状已做 `embedded_runtime.rs:127`），只注入命中来源的 PATH —— 子进程内部 `subprocess.run("python")` 也只能命中应用管理的解释器
 3. 找不到返回 `RuntimeMissing` 错误，前端引导，不静默回退

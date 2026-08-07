@@ -5,6 +5,7 @@
 审计目标：为全库 spec 更新、规范修复和大文件拆分提供证据输入。
 
 审计范围：
+
 - `apps/**`
 - `packages/**`
 - `plugins/**`
@@ -12,6 +13,7 @@
 - 根 `package.json`
 
 排除范围：
+
 - `node_modules/**`
 - `dist/**`
 - `build/**`
@@ -25,18 +27,19 @@
 
 ## Package Matrix
 
-| Area | Path | Manifest | Runtime | Spec status |
-| --- | --- | --- | --- | --- |
-| Desktop app | `apps/desktop` | `apps/desktop/package.json` | React + Vite + Tauri frontend | Covered by `.trellis/spec/desktop/frontend` and `.trellis/spec/desktop/backend` |
-| Tauri shell | `apps/desktop/src-tauri` | `apps/desktop/src-tauri/Cargo.toml` | Rust + Tauri 2 | Covered by `.trellis/spec/lingfang-desktop/backend` |
-| Collab API | `apps/collab-api` | `apps/collab-api/package.json` | NestJS + Prisma + Vitest | No dedicated `.trellis/spec/collab-api`; current guidance is scattered under deprecated `.trellis/spec/server/backend` and cross-package specs |
-| Collab admin | `apps/collab-admin` | `apps/collab-admin/package.json` | React + Vite admin frontend | No dedicated `.trellis/spec/collab-admin` |
-| Contract | `packages/contract` | `packages/contract/package.json` | TypeScript + zod | Covered by `.trellis/spec/contract/backend` and `.trellis/spec/contract/frontend` |
-| Plugin SDK | `packages/plugin-sdk` | `packages/plugin-sdk/package.json` | TypeScript SDK | Covered by `.trellis/spec/plugin-sdk/backend` and `.trellis/spec/plugin-sdk/frontend` |
-| UI tokens | `packages/ui-tokens` | `packages/ui-tokens/package.json` | CSS package | Covered by `.trellis/spec/ui-tokens/frontend` |
-| Summarizer plugin | `plugins/summarizer` | no package.json; `manifest.json` + `ui/index.html` | Builtin plugin asset | Covered by `.trellis/spec/summarizer/backend` and `.trellis/spec/summarizer/frontend` |
+| Area              | Path                     | Manifest                                           | Runtime                       | Spec status                                                                                                                                    |
+| ----------------- | ------------------------ | -------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop app       | `apps/desktop`           | `apps/desktop/package.json`                        | React + Vite + Tauri frontend | Covered by `.trellis/spec/desktop/frontend` and `.trellis/spec/desktop/backend`                                                                |
+| Tauri shell       | `apps/desktop/src-tauri` | `apps/desktop/src-tauri/Cargo.toml`                | Rust + Tauri 2                | Covered by `.trellis/spec/lingfang-desktop/backend`                                                                                            |
+| Collab API        | `apps/collab-api`        | `apps/collab-api/package.json`                     | NestJS + Prisma + Vitest      | No dedicated `.trellis/spec/collab-api`; current guidance is scattered under deprecated `.trellis/spec/server/backend` and cross-package specs |
+| Collab admin      | `apps/collab-admin`      | `apps/collab-admin/package.json`                   | React + Vite admin frontend   | No dedicated `.trellis/spec/collab-admin`                                                                                                      |
+| Contract          | `packages/contract`      | `packages/contract/package.json`                   | TypeScript + zod              | Covered by `.trellis/spec/contract/backend` and `.trellis/spec/contract/frontend`                                                              |
+| Plugin SDK        | `packages/plugin-sdk`    | `packages/plugin-sdk/package.json`                 | TypeScript SDK                | Covered by `.trellis/spec/plugin-sdk/backend` and `.trellis/spec/plugin-sdk/frontend`                                                          |
+| UI tokens         | `packages/ui-tokens`     | `packages/ui-tokens/package.json`                  | CSS package                   | Covered by `.trellis/spec/ui-tokens/frontend`                                                                                                  |
+| Summarizer plugin | `plugins/summarizer`     | no package.json; `manifest.json` + `ui/index.html` | Builtin plugin asset          | Covered by `.trellis/spec/summarizer/backend` and `.trellis/spec/summarizer/frontend`                                                          |
 
 Spec update inputs:
+
 - Add or relocate current `apps/collab-api` guidance away from deprecated `server/backend`.
 - Add admin frontend guidance for `apps/collab-admin`, or explicitly map it under a current package/layer.
 - Keep deprecated server docs as history only.
@@ -45,19 +48,20 @@ Spec update inputs:
 
 Commands found in manifests:
 
-| Area | typecheck | test | build | lint |
-| --- | --- | --- | --- | --- |
-| Root | `pnpm -r typecheck` | `pnpm -r test` | `pnpm -C apps/collab-api build`, `pnpm -C apps/collab-admin build`, distribution scripts | `pnpm -r lint` |
-| `apps/desktop` | `pnpm -C apps/desktop typecheck` | `pnpm -C apps/desktop test` | `pnpm -C apps/desktop vite:build`, `pnpm -C apps/desktop build` | no package-level lint script observed |
-| `apps/desktop/src-tauri` | n/a | `cargo test -p lingfang-desktop` | Tauri build via `apps/desktop` | n/a |
-| `apps/collab-api` | `pnpm -C apps/collab-api typecheck` | `pnpm -C apps/collab-api test` | `pnpm -C apps/collab-api build` | no package-level lint script observed |
-| `apps/collab-admin` | `pnpm -C apps/collab-admin typecheck` | no package-level test script observed | `pnpm -C apps/collab-admin build` | no package-level lint script observed |
-| `packages/contract` | `pnpm -C packages/contract typecheck` | `pnpm -C packages/contract test` | no package-level build script observed | no package-level lint script observed |
-| `packages/plugin-sdk` | `pnpm -C packages/plugin-sdk typecheck` | no package-level test script observed | no package-level build script observed | no package-level lint script observed |
-| `packages/ui-tokens` | no script observed | no script observed | no script observed | no script observed |
-| `plugins/summarizer` | no package manifest | no package manifest | no package manifest | no package manifest |
+| Area                     | typecheck                               | test                                  | build                                                                                    | lint                                  |
+| ------------------------ | --------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
+| Root                     | `pnpm -r typecheck`                     | `pnpm -r test`                        | `pnpm -C apps/collab-api build`, `pnpm -C apps/collab-admin build`, distribution scripts | `pnpm -r lint`                        |
+| `apps/desktop`           | `pnpm -C apps/desktop typecheck`        | `pnpm -C apps/desktop test`           | `pnpm -C apps/desktop vite:build`, `pnpm -C apps/desktop build`                          | no package-level lint script observed |
+| `apps/desktop/src-tauri` | n/a                                     | `cargo test -p lingfang-desktop`      | Tauri build via `apps/desktop`                                                           | n/a                                   |
+| `apps/collab-api`        | `pnpm -C apps/collab-api typecheck`     | `pnpm -C apps/collab-api test`        | `pnpm -C apps/collab-api build`                                                          | no package-level lint script observed |
+| `apps/collab-admin`      | `pnpm -C apps/collab-admin typecheck`   | no package-level test script observed | `pnpm -C apps/collab-admin build`                                                        | no package-level lint script observed |
+| `packages/contract`      | `pnpm -C packages/contract typecheck`   | `pnpm -C packages/contract test`      | no package-level build script observed                                                   | no package-level lint script observed |
+| `packages/plugin-sdk`    | `pnpm -C packages/plugin-sdk typecheck` | no package-level test script observed | no package-level build script observed                                                   | no package-level lint script observed |
+| `packages/ui-tokens`     | no script observed                      | no script observed                    | no script observed                                                                       | no script observed                    |
+| `plugins/summarizer`     | no package manifest                     | no package manifest                   | no package manifest                                                                      | no package manifest                   |
 
 Verification policy:
+
 - Backend unit tests must be wrapped with a 60 second timeout.
 - This audit did not run these commands; later tasks must record real pass/fail output.
 
@@ -71,33 +75,34 @@ $results = @(); $items = rg --files -g '!node_modules/**' -g '!dist/**' -g '!bui
 
 ### Must Split: >1500 Lines
 
-| Lines | Path | Classification | Next task |
-| ---: | --- | --- | --- |
-| 3782 | `apps/desktop/src-tauri/src/code_assistant.rs` | Source; very high priority | `large-file-refactor` |
-| 1594 | `apps/desktop/src/lib/plugin-draft.ts` | Source; high priority | `large-file-refactor` |
+| Lines | Path                                           | Classification             | Next task             |
+| ----: | ---------------------------------------------- | -------------------------- | --------------------- |
+|  3782 | `apps/desktop/src-tauri/src/code_assistant.rs` | Source; very high priority | `large-file-refactor` |
+|  1594 | `apps/desktop/src/lib/plugin-draft.ts`         | Source; high priority      | `large-file-refactor` |
 
 ### Split Or Justify: 1000-1500 Lines
 
-| Lines | Path | Classification | Next task |
-| ---: | --- | --- | --- |
-| 1441 | `apps/desktop/src/pages/PluginCreatorHome.tsx` | Source; split recommended | `large-file-refactor` |
-| 1211 | `apps/desktop/src/lib/plugin-draft.spec.ts` | Test; split by parser/draft/manifest themes after source split | `large-file-refactor` |
-| 1209 | `apps/desktop/src-tauri/src/plugin_store.rs` | Source; split recommended | `large-file-refactor` |
-| 1129 | `apps/desktop/src-tauri/src/plugin_runner.rs` | Source; split recommended | `large-file-refactor` |
-| 1066 | `apps/collab-admin/src/components/settings-view.tsx` | Source; split recommended | `large-file-refactor` |
-| 1063 | `apps/desktop/src-tauri/src/plugin_script.rs` | Source; split recommended | `large-file-refactor` |
+| Lines | Path                                                 | Classification                                                 | Next task             |
+| ----: | ---------------------------------------------------- | -------------------------------------------------------------- | --------------------- |
+|  1441 | `apps/desktop/src/pages/PluginCreatorHome.tsx`       | Source; split recommended                                      | `large-file-refactor` |
+|  1211 | `apps/desktop/src/lib/plugin-draft.spec.ts`          | Test; split by parser/draft/manifest themes after source split | `large-file-refactor` |
+|  1209 | `apps/desktop/src-tauri/src/plugin_store.rs`         | Source; split recommended                                      | `large-file-refactor` |
+|  1129 | `apps/desktop/src-tauri/src/plugin_runner.rs`        | Source; split recommended                                      | `large-file-refactor` |
+|  1066 | `apps/collab-admin/src/components/settings-view.tsx` | Source; split recommended                                      | `large-file-refactor` |
+|  1063 | `apps/desktop/src-tauri/src/plugin_script.rs`        | Source; split recommended                                      | `large-file-refactor` |
 
 ### Near Threshold: 800-999 Lines
 
-| Lines | Path | Classification | Next task |
-| ---: | --- | --- | --- |
-| 983 | `apps/collab-api/src/modules/admin.service.spec.ts` | Test; monitor after service split | `large-file-refactor` if related code changes |
-| 954 | `apps/desktop/src-tauri/src/cli_installer.rs` | Source; monitor | `large-file-refactor` optional |
-| 938 | `apps/collab-api/src/modules/admin.service.ts` | Source; monitor | `quality-fixes`/future split |
-| 891 | `apps/desktop/src-tauri/src/code_assistant/store.rs` | Source; monitor | after `code_assistant.rs` split |
-| 862 | `apps/collab-admin/src/components/plugins-view.tsx` | Source; monitor | admin frontend follow-up |
+| Lines | Path                                                 | Classification                    | Next task                                     |
+| ----: | ---------------------------------------------------- | --------------------------------- | --------------------------------------------- |
+|   983 | `apps/collab-api/src/modules/admin.service.spec.ts`  | Test; monitor after service split | `large-file-refactor` if related code changes |
+|   954 | `apps/desktop/src-tauri/src/cli_installer.rs`        | Source; monitor                   | `large-file-refactor` optional                |
+|   938 | `apps/collab-api/src/modules/admin.service.ts`       | Source; monitor                   | `quality-fixes`/future split                  |
+|   891 | `apps/desktop/src-tauri/src/code_assistant/store.rs` | Source; monitor                   | after `code_assistant.rs` split               |
+|   862 | `apps/collab-admin/src/components/plugins-view.tsx`  | Source; monitor                   | admin frontend follow-up                      |
 
 Generated or evidence files excluded from refactor target:
+
 - `apps/desktop/src-tauri/gen/schemas/*.json`
 - `docs/evidence/**`
 
@@ -106,6 +111,7 @@ Generated or evidence files excluded from refactor target:
 ### `apps/desktop/src-tauri/src/code_assistant.rs`
 
 Current observed responsibilities:
+
 - CLI adapter module wiring.
 - `CodeAssistantState` and persistent `AssistantStore` access.
 - tool availability/probe input/output DTOs.
@@ -116,6 +122,7 @@ Current observed responsibilities:
 - CLI config preparation integration.
 
 Recommended split:
+
 - `code_assistant/mod.rs` for exports and Tauri commands.
 - `code_assistant/state.rs` for `CodeAssistantState`.
 - `code_assistant/process.rs` for process tree and kill/wait helpers.
@@ -127,6 +134,7 @@ Recommended split:
 ### `apps/desktop/src/lib/plugin-draft.ts`
 
 Current observed responsibilities:
+
 - provider constants and labels.
 - tool card parsing and ask-user extraction.
 - transcript parsing and title summarization.
@@ -138,6 +146,7 @@ Current observed responsibilities:
 - structure diagnostics.
 
 Recommended split:
+
 - `plugin-draft/providers.ts`
 - `plugin-draft/transcript.ts`
 - `plugin-draft/tool-cards.ts`
@@ -151,6 +160,7 @@ Recommended split:
 ### `apps/desktop/src/pages/PluginCreatorHome.tsx`
 
 Current observed responsibilities:
+
 - page-level state.
 - CLI/provider/model readiness.
 - session start/stop/send controls.
@@ -160,6 +170,7 @@ Current observed responsibilities:
 - layout composition.
 
 Recommended split:
+
 - route/page shell stays in `PluginCreatorHome.tsx`.
 - stateful hooks under `components/creator` or `lib/plugin-creator`.
 - upload/review actions in a small API helper.
@@ -168,6 +179,7 @@ Recommended split:
 ### `apps/desktop/src-tauri/src/plugin_store.rs`
 
 Current observed responsibilities:
+
 - plugin root config.
 - path sanitization and canonicalization.
 - manifest scanning.
@@ -177,6 +189,7 @@ Current observed responsibilities:
 - tests.
 
 Recommended split:
+
 - `plugin_store/mod.rs`
 - `plugin_store/config.rs`
 - `plugin_store/path.rs`
@@ -187,6 +200,7 @@ Recommended split:
 ### `apps/desktop/src-tauri/src/plugin_runner.rs`
 
 Current observed responsibilities:
+
 - manifest runtime parsing.
 - Python venv management.
 - Node dependency install.
@@ -195,6 +209,7 @@ Current observed responsibilities:
 - detached process launch.
 
 Recommended split:
+
 - `plugin_runner/mod.rs`
 - `plugin_runner/manifest.rs`
 - `plugin_runner/python.rs`
@@ -205,6 +220,7 @@ Recommended split:
 ### `apps/desktop/src-tauri/src/plugin_script.rs`
 
 Current observed responsibilities:
+
 - runtime probing.
 - environment sanitization.
 - script entry/path validation.
@@ -214,6 +230,7 @@ Current observed responsibilities:
 - tests.
 
 Recommended split:
+
 - `plugin_script/mod.rs`
 - `plugin_script/probe.rs`
 - `plugin_script/env.rs`
@@ -224,6 +241,7 @@ Recommended split:
 ### `apps/collab-admin/src/components/settings-view.tsx`
 
 Current observed responsibilities:
+
 - platform settings form.
 - SMTP settings form.
 - Geetest settings form.
@@ -232,6 +250,7 @@ Current observed responsibilities:
 - layout and loading states.
 
 Recommended split:
+
 - `settings-view.tsx` page shell.
 - `settings/platform-form.tsx`
 - `settings/smtp-form.tsx`
@@ -259,12 +278,14 @@ Recommended split:
 ### Fallback and silent behavior review targets
 
 The search found multiple intentional UI fallbacks and test mocks. These are not automatically defects. Items needing review in `quality-fixes`:
+
 - `apps/desktop/src-tauri/src/plugin_store.rs:176` silently skips unreadable plugin root during startup cleanup.
 - `apps/desktop/src-tauri/src/plugin_script.rs:443` silently skips unreadable sandbox cleanup directory.
 - `apps/desktop/src/components/creator/panels/ScriptPreviewPanel.tsx:139` silently ignores scan failure.
 - `apps/desktop/src/pages/PluginCreatorHome.tsx:218` catches tool/model list failure and falls back to bundled providers.
 
 Allowed examples that should not be treated as defects without further evidence:
+
 - React `Suspense fallback`.
 - display fallback labels/icons.
 - test mocks in `*.spec.ts`.
@@ -289,6 +310,7 @@ Allowed examples that should not be treated as defects without further evidence:
 ## Inputs To `large-file-refactor`
 
 Priority order:
+
 1. `apps/desktop/src-tauri/src/code_assistant.rs`
 2. `apps/desktop/src/lib/plugin-draft.ts`
 3. `apps/desktop/src/pages/PluginCreatorHome.tsx`
@@ -299,6 +321,7 @@ Priority order:
 8. `apps/desktop/src/lib/plugin-draft.spec.ts`
 
 Each refactor must record:
+
 - split boundary;
 - files created;
 - public API retained or changed;

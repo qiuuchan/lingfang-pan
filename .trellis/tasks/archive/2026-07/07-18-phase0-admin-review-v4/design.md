@@ -4,14 +4,14 @@
 
 本阶段以**前端（collab-admin）消费为主**，后端几乎不动。
 
-| 改 | 文件 | 说明 |
-|---|---|---|
-| 前端 API | `apps/collab-admin/src/components/governance/api.ts` | 新增 `loadPendingReleases()` 调 `review-pending` |
-| 前端视图 | `apps/collab-admin/src/components/governance/pending-releases-tab.tsx`（新） | 待审核发行版直列页 |
-| 前端容器 | `apps/collab-admin/src/components/governance/governance-view.tsx` | 注册新 tab，设为默认/主入口 |
-| 前端 dashboard | `apps/collab-admin/src/components/dashboard.tsx` | 「待审核插件发行版」卡片 onClick → 跳 v4 直列页 |
-| 前端 legacy | 主导航 + legacy 审核页组件 | 移除主导航入口；legacy 页加跳转提示 |
-| 后端（可选） | `plugin-registry.service.ts:pendingReviews` | 仅在需要分页时加 `take/skip` + count |
+| 改             | 文件                                                                         | 说明                                             |
+| -------------- | ---------------------------------------------------------------------------- | ------------------------------------------------ |
+| 前端 API       | `apps/collab-admin/src/components/governance/api.ts`                         | 新增 `loadPendingReleases()` 调 `review-pending` |
+| 前端视图       | `apps/collab-admin/src/components/governance/pending-releases-tab.tsx`（新） | 待审核发行版直列页                               |
+| 前端容器       | `apps/collab-admin/src/components/governance/governance-view.tsx`            | 注册新 tab，设为默认/主入口                      |
+| 前端 dashboard | `apps/collab-admin/src/components/dashboard.tsx`                             | 「待审核插件发行版」卡片 onClick → 跳 v4 直列页  |
+| 前端 legacy    | 主导航 + legacy 审核页组件                                                   | 移除主导航入口；legacy 页加跳转提示              |
+| 后端（可选）   | `plugin-registry.service.ts:pendingReviews`                                  | 仅在需要分页时加 `take/skip` + count             |
 
 **不动**：后端审核/批准逻辑、`Plugin` 表、桌面端、市场/购买。
 

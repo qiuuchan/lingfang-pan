@@ -64,16 +64,16 @@
 
 ### 2.6 问题汇总
 
-| # | 问题 | 位置 | 影响 |
-|---|------|------|------|
-| P1 | `send_input` 硬编码拒绝 | `code_assistant.rs:397-407` | 多轮不可用 |
-| P2 | 一次性子进程 + 退出即清理 | `code_assistant.rs:309,663-707` | 无续接通道 |
-| P3 | `build_args` 无 resume 入参 | `adapters/mod.rs:40` | 无法构造续接命令 |
-| P4 | session id 未捕获 | `code_assistant.rs:550-572` | claude 无续接 id |
-| P5 | `SessionRecord` 无 `cli_session_id` | `store.rs:33-54` | 无法持久化续接 id |
-| P6 | 前端每轮清空 + 无 start/send 分流 | `PluginCreatorHome.tsx:236,226-277` | 草稿无法累积 |
-| P7 | `finalizeSession` finally 重置全部态 | `PluginCreatorHome.tsx:210-215` | 追问无 session 句柄 |
-| P8 | turns 硬编码两条 | `plugin-draft.ts:232-235` | 历史不累积 |
+| #   | 问题                                 | 位置                                | 影响                |
+| --- | ------------------------------------ | ----------------------------------- | ------------------- |
+| P1  | `send_input` 硬编码拒绝              | `code_assistant.rs:397-407`         | 多轮不可用          |
+| P2  | 一次性子进程 + 退出即清理            | `code_assistant.rs:309,663-707`     | 无续接通道          |
+| P3  | `build_args` 无 resume 入参          | `adapters/mod.rs:40`                | 无法构造续接命令    |
+| P4  | session id 未捕获                    | `code_assistant.rs:550-572`         | claude 无续接 id    |
+| P5  | `SessionRecord` 无 `cli_session_id`  | `store.rs:33-54`                    | 无法持久化续接 id   |
+| P6  | 前端每轮清空 + 无 start/send 分流    | `PluginCreatorHome.tsx:236,226-277` | 草稿无法累积        |
+| P7  | `finalizeSession` finally 重置全部态 | `PluginCreatorHome.tsx:210-215`     | 追问无 session 句柄 |
+| P8  | turns 硬编码两条                     | `plugin-draft.ts:232-235`           | 历史不累积          |
 
 ---
 
@@ -84,6 +84,7 @@
 采用研究结论的**方案 B**：**非常驻 stdin**，而是「每轮新 spawn 一个一次性子进程 + 传 `--resume`（claude）或拼历史摘要（codex/opencode）复用上下文」。
 
 **为什么不常驻 stdin**：
+
 - claude headless 模式（`-p`）本就是一次性进程，官方续接靠 `--resume`，不靠 stdin。
 - codex/opencode 非交互模式同样一次性。
 - 常驻 stdin 需要引入「长期持有子进程 + 行协议解析 + 超时心跳」一整套基础设施，维护面过大，违反「标准化 + 生态复用 + 维护成本下降」原则。新 spawn 复用既有 `start_session` / `spawn_reader` / `spawn_waiter` 管线，增量最小。
@@ -115,6 +116,7 @@
 **文件**：`adapters/mod.rs`、`claude.rs`、`codex.rs`、`opencode.rs`
 
 **接口变更**（`mod.rs:40`）：
+
 ```rust
 // 旧
 pub build_args: fn(prompt: &str, model: Option<&str>) -> Vec<String>,
@@ -125,6 +127,7 @@ pub build_args: fn(prompt: &str, model: Option<&str>, resume_id: Option<&str>) -
 同步更新 `ToolDefinition::probe_args` / `run_args`（`mod.rs:43-51`）签名，补 `resume_id: Option<&str>` 参数并透传。
 
 **claude.rs `build_args`（:17-30）**：当 `resume_id.is_some()` 时，追加 `--resume <id>`。官方续接语义：`claude -p <prompt> --resume <id> --output-format stream-json …`。
+
 ```rust
 fn build_args(prompt: &str, model: Option<&str>, resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec![
@@ -162,6 +165,7 @@ pub struct SessionRecord {
 **文件**：`code_assistant.rs:574-625`（`spawn_reader`）+ `:550-572`（`extract_stream_json_text`）
 
 新增 `extract_stream_json_session_id(line: &str) -> Option<String>`：解析 claude stream-json 的 `system`（init）/ `result` 行，取 `session_id` 字段。
+
 ```rust
 fn extract_stream_json_session_id(line: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
@@ -264,20 +268,25 @@ fn build_history_summary(store: &AssistantStore, session_id: &str) -> Result<Str
 **文件**：`PluginCreatorHome.tsx`、`plugin-draft.ts`
 
 **(a) 新增多轮运行态**（`PluginCreatorHome.tsx:52-62` 附近）：
+
 ```ts
 const [cliSessionId, setCliSessionId] = useState<string | null>(null); // claude 的 --resume id
 const [multiturnMode, setMultiturnMode] = useState<'native' | 'degraded' | null>(null);
 ```
+
 新增 listener `code-assistant://session-cli-id` → `setCliSessionId(payload.cliSessionId)`（仅 claude 会收到）。
 
 **(b) `send()` 分流（改写 `:226-277`）**：
+
 ```ts
 async function send() {
   const text = input.trim();
   if (!text || streaming) return;
   setInput('');
   setPendingUser(text);
-  setLiveEvents([]); setLiveError(null); setStreaming(true);
+  setLiveEvents([]);
+  setLiveError(null);
+  setStreaming(true);
   // 关键：移除 setCurrentDraft(null)（原 :236）——草稿跨轮累积
   pendingPromptRef.current = { text, providerLabel: providerInfo.label, model };
 
@@ -286,9 +295,15 @@ async function send() {
   if (firstRoundDone) {
     // 追问路径
     try {
-      await tauriInvoke('code_assistant_send_input', { input: { sessionId: activeId, input: text } });
+      await tauriInvoke('code_assistant_send_input', {
+        input: { sessionId: activeId, input: text },
+      });
       // send_input 成功后，新一轮的 output/exit 事件会触发既有 listener
-      setLiveStage(multiturnMode === 'degraded' ? '本地代码助手基于历史继续生成（降级多轮）…' : '本地代码助手续接上下文生成…');
+      setLiveStage(
+        multiturnMode === 'degraded'
+          ? '本地代码助手基于历史继续生成（降级多轮）…'
+          : '本地代码助手续接上下文生成…'
+      );
     } catch (error) {
       handleMultiturnError(error); // 见 (d)
     }
@@ -300,20 +315,27 @@ async function send() {
 ```
 
 **(c) `finalizeSession` 累积语义（改写 `:163-216`）**：
+
 - 不再每次 `setCurrentDraft(draft)` 覆盖。改为：
   - 首轮：`setCurrentDraft(buildLocalDraft(首轮))`（turns=[u1,a1]）。
   - 追问：读取既有 `currentDraft`，**追加** `[user u_n, assistant a_n]` 到 `currentDraft.turns`，files/manifest 用 R2 解析的新结构化产出**覆盖**（迭代），diagnostics 合并。提取为 `mergeFollowupDraft(prevDraft, probeResult, prompt)`（放 `plugin-draft.ts`）。
 - `finally` 块（`:210-215`）**不再清空** `assistantSessionIdRef.current`（追问需保留），仅 `setStreaming(false)` + 清 `liveStage`。`assistantSession` 保留 `exited` 态供追问判断。
 
 **(d) 降级提示与错误处理**：
+
 - `multiturnMode`：首次成功捕获 `cliSessionId`（claude）→ `'native'`；codex/opencode 首轮 exit 后无 `cliSessionId` → `'degraded'`。在追问 Bubble 上方加一行 muted 文案：`此 CLI 不支持原生多轮，已基于历史继续（上下文非真复用）`。
 - `handleMultiturnError`：会话已退出（`session 不存在或已结束`）→ 提示「对话已结束，请新开对话」并引导 `newDraft`；CLI 不可用 → 友好卡片（呼应 R5）；`cli_session_id` 缺失但选了 claude → 提示「未能捕获会话 id，自动降级为新对话」并以 Bubble error 形式展示。所有错误走 `setLiveError` + `Bubble error`（`Bubble.tsx:9` 已支持），不裸 toast。
 
 **(e) `plugin-draft.ts` turns 累积（改 `:232-235` + 新增）**：
+
 ```ts
 // buildLocalDraft 首轮仍返回 [u1,a1]（结构不变，由 R2 决定内容来源）
 // 新增：追问合并
-export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, prompt: string): PluginDraft {
+export function mergeFollowupDraft(
+  prev: PluginDraft,
+  result: CliProbeResult,
+  prompt: string
+): PluginDraft {
   const output = extractCliText(result);
   // files/manifest 由 R2 parseStructuredPackage 解析覆盖；本任务兜底：若 R2 未产出，保留 prev.files
   const files = parseStructuredPackage(output).files ?? prev.files; // parseStructuredPackage 属 R2
@@ -321,23 +343,29 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
     ...prev,
     status: result.success ? 'ready' : 'partial',
     files,
-    turns: [...prev.turns,
+    turns: [
+      ...prev.turns,
       { role: 'user', content: prompt, at: new Date().toISOString() },
-      { role: 'assistant', content: output || '本地 CLI 没有返回可展示内容。', at: new Date().toISOString() },
+      {
+        role: 'assistant',
+        content: output || '本地 CLI 没有返回可展示内容。',
+        at: new Date().toISOString(),
+      },
     ],
     diagnostics: [...prev.diagnostics, ...followupDiagnostics(result)],
   };
 }
 ```
+
 `normalizeTurns`（`:245-253`）的相邻去重逻辑保留，作为追加后的兜底防重复（追问若 CLI 无输出会与上一轮 a 相同 → 被去重，符合预期）。
 
 ### 3.4 三 CLI 多轮能力矩阵
 
-| CLI | 续接机制 | 真伪 | 依赖 | 失败降级 |
-|-----|---------|------|------|---------|
-| claude | `--resume <cli_session_id>` | 真 | 捕获 session id（system/result 行） | 缺 id → 降级伪多轮（拼历史） |
-| codex | 历史摘要拼 system_prompt | 伪 | transcript 可读 | 历史过长 → 截断后继续 |
-| opencode | 历史摘要拼 system_prompt | 伪 | transcript 可读 | 历史过长 → 截断后继续 |
+| CLI      | 续接机制                    | 真伪 | 依赖                                | 失败降级                     |
+| -------- | --------------------------- | ---- | ----------------------------------- | ---------------------------- |
+| claude   | `--resume <cli_session_id>` | 真   | 捕获 session id（system/result 行） | 缺 id → 降级伪多轮（拼历史） |
+| codex    | 历史摘要拼 system_prompt    | 伪   | transcript 可读                     | 历史过长 → 截断后继续        |
+| opencode | 历史摘要拼 system_prompt    | 伪   | transcript 可读                     | 历史过长 → 截断后继续        |
 
 ---
 
@@ -352,14 +380,14 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
 
 ### 4.2 权衡
 
-| 决策 | 选 A（采用） | 选 B（否决） | 理由 |
-|------|------------|------------|------|
-| 续接模型 | 每轮新 spawn + --resume | stdin 常驻长进程 | 复用既有 spawn 管线；claude headless 本就一次性；常驻需行协议+心跳，维护面过大 |
-| codex/opencode | 历史摘要拼 system_prompt | `codex resume` 子命令 | `codex resume` 非交互续接待验证且与 `exec` 模型不一致；摘要法跨两者统一，零适配 |
-| session id 存储 | `SessionRecord.cli_session_id`（本地） | 新建独立 sessions-cli 表 | 字段最小化，复用 sessions.json，serde default 兼容旧盘 |
-| claude id 捕获时机 | `spawn_reader` 旁路捕获 system/result 行 | 首轮 exit 后从 transcript 全量回扫 | 流式捕获即时可用，exit 后回扫延迟且需额外 IO |
-| turns 模型 | 累积追加（`mergeFollowupDraft`） | 每轮重建 transcript 转 turns | 追加增量小、与现有 Bubble 渲染（`PluginCreatorHome.tsx:377`）直接兼容 |
-| 前端是否保留 `newDraft` | 保留，作为「重置多轮」入口 | 追问无限累积 | 长会话历史摘要会膨胀，提供显式重置 |
+| 决策                    | 选 A（采用）                             | 选 B（否决）                       | 理由                                                                            |
+| ----------------------- | ---------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
+| 续接模型                | 每轮新 spawn + --resume                  | stdin 常驻长进程                   | 复用既有 spawn 管线；claude headless 本就一次性；常驻需行协议+心跳，维护面过大  |
+| codex/opencode          | 历史摘要拼 system_prompt                 | `codex resume` 子命令              | `codex resume` 非交互续接待验证且与 `exec` 模型不一致；摘要法跨两者统一，零适配 |
+| session id 存储         | `SessionRecord.cli_session_id`（本地）   | 新建独立 sessions-cli 表           | 字段最小化，复用 sessions.json，serde default 兼容旧盘                          |
+| claude id 捕获时机      | `spawn_reader` 旁路捕获 system/result 行 | 首轮 exit 后从 transcript 全量回扫 | 流式捕获即时可用，exit 后回扫延迟且需额外 IO                                    |
+| turns 模型              | 累积追加（`mergeFollowupDraft`）         | 每轮重建 transcript 转 turns       | 追加增量小、与现有 Bubble 渲染（`PluginCreatorHome.tsx:377`）直接兼容           |
+| 前端是否保留 `newDraft` | 保留，作为「重置多轮」入口               | 追问无限累积                       | 长会话历史摘要会膨胀，提供显式重置                                              |
 
 ### 4.3 codex resume 探针的处置
 
@@ -402,16 +430,16 @@ export function mergeFollowupDraft(prev: PluginDraft, result: CliProbeResult, pr
 
 ### 6.2 风险清单
 
-| # | 风险 | 概率 | 影响 | 缓解 |
-|---|------|------|------|------|
-| RISK1 | claude session id 输出格式在不同版本变化（system vs result 行） | 中 | claude 退化为伪多轮 | `extract_stream_json_session_id` 同时认 `system`+`result`；缺 id 自动降级 + UI 提示 |
-| RISK2 | codex `resume` 非交互续接不可靠 | 高 | codex 保持伪多轮 | 默认伪多轮；探针验证后才升级（implement step 6） |
-| RISK3 | opencode 无任何 session 复用 | 高 | opencode 仅伪多轮 | 已规划为伪多轮，符合父 PRD 决策；无需额外动作 |
-| RISK4 | 历史摘要过长 → Windows 命令行参数超限（~32k） | 中 | codex/opencode 追问失败 | `truncate_history` 整体限长 12k 字符；超长按段 tail |
-| RISK5 | turns 重复追加（CLI 无输出时与上轮相同） | 低 | UI 重复 Bubble | `normalizeTurns`（:245-253）相邻去重兜底 |
-| RISK6 | `send_input` 在会话已退出后调用 → 状态机错乱 | 中 | 追问卡死 | `send_input` 校验 session 存在；前端 `firstRoundDone` 判断；错误走 `handleMultiturnError` |
-| RISK7 | 前端 `assistantSessionIdRef` 跨追问生命周期错乱 | 中 | 追问打到错误 session | listener 用 `assistantSessionIdRef` 过滤（既有模式 `:104,123`），追问不改 id |
-| RISK8 | 多轮中 R2 结构化解析失败 | 中 | 追问后草稿 files 不更新 | `mergeFollowupDraft` 兜底保留 `prev.files`，标记 `partial` |
+| #     | 风险                                                            | 概率 | 影响                    | 缓解                                                                                      |
+| ----- | --------------------------------------------------------------- | ---- | ----------------------- | ----------------------------------------------------------------------------------------- |
+| RISK1 | claude session id 输出格式在不同版本变化（system vs result 行） | 中   | claude 退化为伪多轮     | `extract_stream_json_session_id` 同时认 `system`+`result`；缺 id 自动降级 + UI 提示       |
+| RISK2 | codex `resume` 非交互续接不可靠                                 | 高   | codex 保持伪多轮        | 默认伪多轮；探针验证后才升级（implement step 6）                                          |
+| RISK3 | opencode 无任何 session 复用                                    | 高   | opencode 仅伪多轮       | 已规划为伪多轮，符合父 PRD 决策；无需额外动作                                             |
+| RISK4 | 历史摘要过长 → Windows 命令行参数超限（~32k）                   | 中   | codex/opencode 追问失败 | `truncate_history` 整体限长 12k 字符；超长按段 tail                                       |
+| RISK5 | turns 重复追加（CLI 无输出时与上轮相同）                        | 低   | UI 重复 Bubble          | `normalizeTurns`（:245-253）相邻去重兜底                                                  |
+| RISK6 | `send_input` 在会话已退出后调用 → 状态机错乱                    | 中   | 追问卡死                | `send_input` 校验 session 存在；前端 `firstRoundDone` 判断；错误走 `handleMultiturnError` |
+| RISK7 | 前端 `assistantSessionIdRef` 跨追问生命周期错乱                 | 中   | 追问打到错误 session    | listener 用 `assistantSessionIdRef` 过滤（既有模式 `:104,123`），追问不改 id              |
+| RISK8 | 多轮中 R2 结构化解析失败                                        | 中   | 追问后草稿 files 不更新 | `mergeFollowupDraft` 兜底保留 `prev.files`，标记 `partial`                                |
 
 ---
 

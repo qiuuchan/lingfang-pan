@@ -16,15 +16,15 @@ A 是 B 的前提。B 的 UI 骨架可与 A 并行（A 未就绪时桥层 mock�
 
 ### 1.2 关键决策（v2 已定）
 
-| 决策点 | 选择 | 理由 |
-|---|---|---|
-| Qt 框架 | **PySide6 (Qt6)** | 与 `videodl`/`facefusion` 一致；`plugin_runner.rs:13` 已为 PySide6 深层 wheel 做短路径缓存 |
-| UI 风格 | **现代深色 QSS + 自定义控件** | 用户要求美化；对照截图暗色三栏 |
-| 计费方式 | **按秒 PER_SECOND（新增单元）** | 用户要求；按视频时长计费比按条更公平 |
-| RBFLow 凭证位置 | **平台侧配置（用户不可见）** | 防绕过的根本对策 |
-| 桥形态 | **代理转发 RBFLow**（先扣费→转发→返回 task_id） | 桥持有平台 RBFLow 凭证，插件无凭证→物理无法绕过 |
-| RBFLow 归属 | **平台统一运营单实例** | 凭证天然放平台侧；用户无需知道 RBFLow 存在 |
-| relay 端点形态 | **精简计费编排，不接渠道路由** | 视频上游是 RBFLow（桥转发），relay 只做灵石账本 |
+| 决策点          | 选择                                            | 理由                                                                                       |
+| --------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Qt 框架         | **PySide6 (Qt6)**                               | 与 `videodl`/`facefusion` 一致；`plugin_runner.rs:13` 已为 PySide6 深层 wheel 做短路径缓存 |
+| UI 风格         | **现代深色 QSS + 自定义控件**                   | 用户要求美化；对照截图暗色三栏                                                             |
+| 计费方式        | **按秒 PER_SECOND（新增单元）**                 | 用户要求；按视频时长计费比按条更公平                                                       |
+| RBFLow 凭证位置 | **平台侧配置（用户不可见）**                    | 防绕过的根本对策                                                                           |
+| 桥形态          | **代理转发 RBFLow**（先扣费→转发→返回 task_id） | 桥持有平台 RBFLow 凭证，插件无凭证→物理无法绕过                                            |
+| RBFLow 归属     | **平台统一运营单实例**                          | 凭证天然放平台侧；用户无需知道 RBFLow 存在                                                 |
+| relay 端点形态  | **精简计费编排，不接渠道路由**                  | 视频上游是 RBFLow（桥转发），relay 只做灵石账本                                            |
 
 ### 1.3 防绕过数据流（核心安全保证）
 
@@ -58,20 +58,20 @@ A 是 B 的前提。B 的 UI 骨架可与 A 并行（A 未就绪时桥层 mock�
 
 ### 2.1 改动清单
 
-| 层 | 文件 | 改动 |
-|---|---|---|
-| 契约 | `packages/contract/src/plugin.ts:16` | `CapabilityKind` enum 加 `'video.generate'` |
-| **计费契约** | `apps/collab-api/prisma/schema.prisma:313` | `PricingUnit` enum 加 `PER_SECOND` |
-| **计费实现** | `apps/collab-api/src/modules/pricing.service.ts:76` | `computeCredits` switch 加 `case 'PER_SECOND': return pricePerUnit * Math.max(0, usage.seconds ?? 0)`（向上取整秒） |
-| 桥 session | `apps/desktop/src-tauri/src/plugin_llm_bridge.rs:44` | BridgeSession 加 `allow_video_generate: bool` |
-| 桥路由 | `plugin_llm_bridge.rs:444` | match 加 `"/video/generate"` + `"/video/stream"` + `"/video/download"` |
-| 桥转发实现 | `plugin_llm_bridge.rs` 新增 `route_video_generate`/`route_video_stream`/`route_video_download` | gate + 计费(经relay) + **注入平台 RBFLow 凭证转发**（复用 `build_*_multipart` + `relay_post_raw` 模式） |
-| 桥调用方 | `plugin_runner.rs:1552` + `plugin_script.rs:581` | 各加 `\|\| k=="video.generate"` → `allow_video_generate` |
-| relay 控制器 | `apps/collab-api/src/modules/relay/relay.controller.ts:51` | 加 `@Post('videos/generations')` |
-| relay 服务 | `apps/collab-api/src/modules/relay/relay.service.ts` | 新增 `videoGenerations`（精简计费编排，收 seconds，PER_SECOND） |
-| 价目 seed | `apps/collab-api/src/seed-credits-channels.ts` | 加 `{ capability:'video', model:'video_generate', unit:'PER_SECOND', pricePerUnit:1, tier:null }`（1灵石/秒占位，可改） |
-| **平台 RBFLow 配置** | 桥读 env/配置（`LINGFANG_RBFLOW_URL`/`LINGFANG_RBFLOW_API_KEY`）或 collab-api PlatformSetting | RBFLow 凭证平台侧注入，不入插件 env |
-| SDK 路由表 | `packages/plugin-sdk/src/index.ts:222` | SCRIPT_BRIDGE_PATH 加 `'video.generate':'/video/generate'` |
+| 层                   | 文件                                                                                           | 改动                                                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 契约                 | `packages/contract/src/plugin.ts:16`                                                           | `CapabilityKind` enum 加 `'video.generate'`                                                                             |
+| **计费契约**         | `apps/collab-api/prisma/schema.prisma:313`                                                     | `PricingUnit` enum 加 `PER_SECOND`                                                                                      |
+| **计费实现**         | `apps/collab-api/src/modules/pricing.service.ts:76`                                            | `computeCredits` switch 加 `case 'PER_SECOND': return pricePerUnit * Math.max(0, usage.seconds ?? 0)`（向上取整秒）     |
+| 桥 session           | `apps/desktop/src-tauri/src/plugin_llm_bridge.rs:44`                                           | BridgeSession 加 `allow_video_generate: bool`                                                                           |
+| 桥路由               | `plugin_llm_bridge.rs:444`                                                                     | match 加 `"/video/generate"` + `"/video/stream"` + `"/video/download"`                                                  |
+| 桥转发实现           | `plugin_llm_bridge.rs` 新增 `route_video_generate`/`route_video_stream`/`route_video_download` | gate + 计费(经relay) + **注入平台 RBFLow 凭证转发**（复用 `build_*_multipart` + `relay_post_raw` 模式）                 |
+| 桥调用方             | `plugin_runner.rs:1552` + `plugin_script.rs:581`                                               | 各加 `\|\| k=="video.generate"` → `allow_video_generate`                                                                |
+| relay 控制器         | `apps/collab-api/src/modules/relay/relay.controller.ts:51`                                     | 加 `@Post('videos/generations')`                                                                                        |
+| relay 服务           | `apps/collab-api/src/modules/relay/relay.service.ts`                                           | 新增 `videoGenerations`（精简计费编排，收 seconds，PER_SECOND）                                                         |
+| 价目 seed            | `apps/collab-api/src/seed-credits-channels.ts`                                                 | 加 `{ capability:'video', model:'video_generate', unit:'PER_SECOND', pricePerUnit:1, tier:null }`（1灵石/秒占位，可改） |
+| **平台 RBFLow 配置** | 桥读 env/配置（`LINGFANG_RBFLOW_URL`/`LINGFANG_RBFLOW_API_KEY`）或 collab-api PlatformSetting  | RBFLow 凭证平台侧注入，不入插件 env                                                                                     |
+| SDK 路由表           | `packages/plugin-sdk/src/index.ts:222`                                                         | SCRIPT_BRIDGE_PATH 加 `'video.generate':'/video/generate'`                                                              |
 
 **不动**：`capability.rs`（AI 能力不经 invoke 网关）、现有 `executeRelay` 链路、现有 chat/image 扣费。
 
@@ -156,6 +156,7 @@ fn route_video_generate(session: &BridgeSession, body: RequestBody) -> BridgeRes
 ### 2.5 平台 RBFLow 凭证配置
 
 三种可选（MVP 取最简）：
+
 - **A（推荐 MVP）**：桌面进程 env `LINGFANG_RBFLOW_URL`/`LINGFANG_RBFLOW_API_KEY`，由软件启动时从平台配置/`.env` 注入桌面进程（非插件进程）。桥读 `std::env::var`。
 - B：collab-api PlatformSetting 表存 RBFLow 配置，桥调 collab-api 取。多一跳。
 - C：管理端 UI 配置 RBFLow 凭证。
@@ -187,8 +188,13 @@ plugins/rbflow-video/
   "entry": "main.py",
   "visibility": "tenant",
   "capabilities": [
-    { "kind": "video.generate", "reason": "经平台视频能力按秒扣灵石生成视频", "risk": "medium", "requires_admin": false }
-  ]
+    {
+      "kind": "video.generate",
+      "reason": "经平台视频能力按秒扣灵石生成视频",
+      "risk": "medium",
+      "requires_admin": false,
+    },
+  ],
 }
 ```
 
@@ -196,25 +202,26 @@ plugins/rbflow-video/
 
 ### 3.3 main.py 模块划分
 
-| 模块 | 职责 |
-|---|---|
-| **桥层** | `_BRIDGE_URL`/`_TOKEN` 读 env（无 fallback）；`bridge_submit_video(image,video,seconds,tier)` 调 `/video/generate`；`bridge_stream(task_id)` 调 `/video/stream`；`bridge_download(task_id,dest)` 调 `/video/download` |
-| **时长探测** | `probe_duration(video_path)` → 用 `ffmpeg-python`/`ffprobe` subprocess 读 duration（秒） |
-| **三栏 UI** | `ImagePanel`(左)、`VideoPanel`(中)、`QueuePanel`(右)，`MainWindow` 组装 |
-| **任务模型+持久化** | `Task` dataclass + `TaskStore`(JSON) |
-| **工作线程** | `SubmitWorker`(笛卡尔积+探测时长+逐个扣费提交)、`ProgressWorker`(桥SSE)、`DownloadWorker`(下载落盘) |
-| **主题** | `theme.qss` 加载 + 自定义控件（CardWidget/ProgressBar/RoundButton/StatusBadge） |
+| 模块                | 职责                                                                                                                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **桥层**            | `_BRIDGE_URL`/`_TOKEN` 读 env（无 fallback）；`bridge_submit_video(image,video,seconds,tier)` 调 `/video/generate`；`bridge_stream(task_id)` 调 `/video/stream`；`bridge_download(task_id,dest)` 调 `/video/download` |
+| **时长探测**        | `probe_duration(video_path)` → 用 `ffmpeg-python`/`ffprobe` subprocess 读 duration（秒）                                                                                                                              |
+| **三栏 UI**         | `ImagePanel`(左)、`VideoPanel`(中)、`QueuePanel`(右)，`MainWindow` 组装                                                                                                                                               |
+| **任务模型+持久化** | `Task` dataclass + `TaskStore`(JSON)                                                                                                                                                                                  |
+| **工作线程**        | `SubmitWorker`(笛卡尔积+探测时长+逐个扣费提交)、`ProgressWorker`(桥SSE)、`DownloadWorker`(下载落盘)                                                                                                                   |
+| **主题**            | `theme.qss` 加载 + 自定义控件（CardWidget/ProgressBar/RoundButton/StatusBadge）                                                                                                                                       |
 
 ### 3.4 三栏 UI + 美化（对照截图）
 
-| 栏 | 控件 |
-|---|---|
-| **顶栏** | 深色 banner：Logo + 标题 + 计费档位(fast/premium 切换) + 「🔌 按秒·灵石计费」状态徽章 |
-| **左栏 图片输入** | 圆角分组：「📁 图片素材」标题 + 分类下拉(新建/刷新) + 「选择图片」「选文件夹」圆角按钮 + QListWidget(IconMode 圆角缩略图多选) + 工具行(全选/反选/未选/删除/移动) |
-| **中栏 参考视频** | 圆角分组：「🎬 参考视频」+ 分类下拉 + 「上传视频」「选文件夹」 + QListWidget(多选) + 「⚙ 工作流节点」配置卡(4×QLineEdit 默认 78/image/77/video) |
+| 栏                | 控件                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **顶栏**          | 深色 banner：Logo + 标题 + 计费档位(fast/premium 切换) + 「🔌 按秒·灵石计费」状态徽章                                                                                                                |
+| **左栏 图片输入** | 圆角分组：「📁 图片素材」标题 + 分类下拉(新建/刷新) + 「选择图片」「选文件夹」圆角按钮 + QListWidget(IconMode 圆角缩略图多选) + 工具行(全选/反选/未选/删除/移动)                                     |
+| **中栏 参考视频** | 圆角分组：「🎬 参考视频」+ 分类下拉 + 「上传视频」「选文件夹」 + QListWidget(多选) + 「⚙ 工作流节点」配置卡(4×QLineEdit 默认 78/image/77/video)                                                      |
 | **右栏 任务队列** | 统计卡(总计/等待/执行中/错误/完成，带图标) + 状态 QTabWidget + 输出目录(LineEdit+浏览) + 任务 QListWidget(每项=CardWidget：缩略图行+进度环+状态色标+时长+灵石+时间戳+操作图标) + 底部批量操作 + 开关 |
 
 **美化要点（QSS）**：
+
 - 配色：背景 `#1e1e2e`/`#181825`，卡片 `#313244`，强调 `#89b4fa`（蓝），成功 `#a6e3a1`，警告 `#f9e2af`，错误 `#f38ba8`（Catppuccin Mocha 暗色系，与截图暗色风一致）
 - 控件：圆角 8px、卡片阴影 `QGraphicsDropShadowEffect`、按钮 hover/press 态、进度用 `QProgressBar` 自绘圆角 + 百分比文字、状态色标圆点
 - 字体：系统默认 + 适当字重
@@ -259,14 +266,14 @@ plugins/rbflow-video/
 
 ## 5. 测试策略
 
-| 层 | 测试 |
-|---|---|
-| contract | `validateManifest` 对 `video.generate` 通过；`PricingUnit` 含 PER_SECOND |
-| pricing | `computeCredits('PER_SECOND', price, {seconds:10})` = price×10；0秒 clamp 到 1 |
-| relay | `videoGenerations`：扣费成功 / 402 / 无定价 503 / refund |
-| bridge | Rust 测试：gate 403；计费失败不转发 RBFLow（mock relay 402）；计费成功转发 RBFLow（mock）；RBFLow 失败触发 refund |
-| **防绕过** | 断言插件进程 env 无 `LINGFANG_RBFLOW_*`；插件无法直连 RBFLow（无地址） |
-| 插件 | 手动 QA（三栏美化 + 端到端扣费→转发→进度→落盘） |
+| 层         | 测试                                                                                                              |
+| ---------- | ----------------------------------------------------------------------------------------------------------------- |
+| contract   | `validateManifest` 对 `video.generate` 通过；`PricingUnit` 含 PER_SECOND                                          |
+| pricing    | `computeCredits('PER_SECOND', price, {seconds:10})` = price×10；0秒 clamp 到 1                                    |
+| relay      | `videoGenerations`：扣费成功 / 402 / 无定价 503 / refund                                                          |
+| bridge     | Rust 测试：gate 403；计费失败不转发 RBFLow（mock relay 402）；计费成功转发 RBFLow（mock）；RBFLow 失败触发 refund |
+| **防绕过** | 断言插件进程 env 无 `LINGFANG_RBFLOW_*`；插件无法直连 RBFLow（无地址）                                            |
+| 插件       | 手动 QA（三栏美化 + 端到端扣费→转发→进度→落盘）                                                                   |
 
 ## 6. 风险与缓解
 

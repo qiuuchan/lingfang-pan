@@ -5,12 +5,14 @@
 两个子需求独立，改动：
 
 ### A 修改已有插件
+
 - `apps/desktop/src-tauri/src/plugin_store.rs` — 新增 `write_plugin_files` 命令（批量写 files 到 plugin 目录）。
 - `apps/desktop/src-tauri/src/main.rs` — 注册 write_plugin_files。
 - `apps/desktop/src/lib/plugin-status.ts` — 新增 `writePluginFiles(pluginId, files)` 封装。
 - `apps/desktop/src/pages/Plugins.tsx` — editInGenerator 先 writePluginFiles 落盘再跳创建器。
 
 ### B 聊天引用插件
+
 - `apps/desktop/src/components/creator/Composer.tsx` — Textarea 加 @触发 + Popover 插件选择 + 引用 chip。
 - `apps/desktop/src/pages/PluginCreatorHome.tsx` — attachedPlugins state + send 时拼 manifest 摘要进 prompt。
 
@@ -42,10 +44,20 @@ pub fn write_plugin_files(
 
 ```ts
 async function editInGenerator() {
-  if (!plugin.files?.length) { toast.error('插件缺少安装文件'); return; }
+  if (!plugin.files?.length) {
+    toast.error('插件缺少安装文件');
+    return;
+  }
   // 先落盘云端 files 到本地目录，让 AI 进创建器能读到现有代码。
   await writePluginFiles(plugin.id, plugin.files);
-  setCurrentDraft({ id: plugin.id, status: plugin.status, files: plugin.files, turns: [], diagnostics: [], plugin_id: plugin.id });
+  setCurrentDraft({
+    id: plugin.id,
+    status: plugin.status,
+    files: plugin.files,
+    turns: [],
+    diagnostics: [],
+    plugin_id: plugin.id,
+  });
   setView('home');
 }
 ```
@@ -57,6 +69,7 @@ async function editInGenerator() {
 ### Composer @触发
 
 Textarea `onChange` 检测：光标前最后一个 `@` 后无空格 → 弹 Popover（插件列表，按名称筛选）。
+
 - 插件来源：PluginCreatorHome 传入 `availablePlugins`（team + 本地合并）。
 - 选中：input 插入 `@<name>` + attachedPlugins 加该 pluginId。
 - Popover 复用 shadcn Popover + Command（若有）或简单列表 + filter。
@@ -68,6 +81,7 @@ Textarea 上方：已引用插件 chip 列表（`@ai-image-studio ×`），点 �
 ### send 拼接 manifest 摘要
 
 PluginCreatorHome send(prompt)：
+
 - 若 attachedPlugins 非空，prompt 前拼：
   ```
   [引用插件参考]

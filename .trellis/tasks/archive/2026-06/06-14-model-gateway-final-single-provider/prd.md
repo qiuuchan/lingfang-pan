@@ -7,6 +7,7 @@
 ## 背景（为什么改，第三版定稿）
 
 模型网关已经做了两版，都不对：
+
 - **v1**（settings-cli-runtime-model-gateway）：网关目录让租户选 + 静态模型勾选。错在让用户感知「网关目录」+ 模型是静态的。
 - **v2**（model-gateway-redo-fetch-models）：选 provider + 填 key + Rust 拉取模型。对了一半（动态拉取），但仍让用户**选 provider**。
 - **v3（本任务，定稿）**：用户**完全不感知 provider**。平台 Admin 管多 provider + 设一个「当前启用」，应用只拿当前启用的 url。用户界面只有 key + 模型。
@@ -16,11 +17,13 @@
 ### 后端 collab-api
 
 #### 数据模型变更（schema 迁移）
+
 - **`LlmGateway` 表**：加 `isActive Boolean @default(false)` 字段。同一时间最多一条 `isActive=true`（service 层事务维护唯一性：设新的 active 时先把同表其他置 false）。保留多 provider 记录（Admin 维护列表）。
 - **`TenantLlmBinding` 表**：**去掉 `gatewayId`**，改成 `teamId @unique`（一个团队一条 apiKey 绑定）。去掉 `provider` 冗余字段（不再绑特定 provider）。保留 `encryptedApiKey`/`apiKeyHint`/`keyFingerprint`/`enabled`/`modelOverride`/`createdById`/`updatedById`。`gateway` 关系删除。
 - 迁移：删 `teamId_gatewayId` 唯一约束 + 加 `teamId @unique`；加 `LlmGateway.isActive`；binding 的 gateway FK 删除（`onDelete: Restrict` 不再需要）。
 
 #### 端点变更
+
 - **新增 `GET /api/llm/active-provider`**（`@Public` 或 ensureCurrentTeam）：返回**当前启用 provider** 的 `{ apiUrl, defaultModels }`（不返回其他 provider，不暴露「有多个」）。无启用 provider → 404 `no_active_provider`。
 - **改 `GET /api/llm/gateways`** → 废弃或保留给 Admin。租户侧不再用（用 active-provider 替代）。
 - **`PUT /api/llm/binding`**：入参去掉 `gatewayId`（只 `{ apiKey, enabled?, modelOverride? }`）。upsert 改为按 `teamId` 唯一。
@@ -29,15 +32,18 @@
 - **Admin 端点**：`GET/POST/PATCH /api/admin/llm-providers`（CRUD provider 列表）+ `PATCH /api/admin/llm-providers/:id/activate`（设当前启用，事务维护唯一 active）。
 
 #### service 改造
+
 - `upsertBinding`：按 teamId upsert（不再 teamId+gatewayId）。去掉 gateway 存在性/ENABLED 校验（无 gatewayId 了）。
 - `decryptBindingKey`：按 teamId 取唯一绑定。
 - 新 `getActiveProvider()`：查 `LlmGateway.findFirst({ where: { isActive: true, status: ENABLED } })`。
 - 新 `adminActivateProvider(id)`：`$transaction` 先把所有 isActive 置 false，再把目标置 true。
 
 ### 桌面端 Rust
+
 - `fetch_models` 命令：**不变**（已经只接收 apiUrl + apiKey，不含 provider 概念）。前端从 `active-provider` 端点拿 apiUrl 传给它。
 
 ### 前端 ModelGatewayTab（再次重写）
+
 - 去掉 provider 下拉/选择。
 - UI：**一个 apiKey 输入框 + 「拉取模型」按钮 + 模型 checkbox 组 + 保存**。
 - 挂载：`GET /api/llm/active-provider` 拿当前 provider 的 apiUrl + `GET /api/llm/binding` 拿当前绑定（脱敏 hint + modelOverride）。
@@ -46,6 +52,7 @@
 - 错误：`no_active_provider` → 提示「平台尚未配置模型服务，请联系管理员」。
 
 ### Admin 后台 collab-admin（新页面）
+
 - 新增 provider 管理页：
   - provider 列表（name + apiUrl + isActive 标记）。
   - 新增/编辑/删除 provider（name + apiUrl + 默认模型）。

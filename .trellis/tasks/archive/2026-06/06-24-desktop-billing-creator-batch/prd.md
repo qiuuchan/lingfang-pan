@@ -12,23 +12,23 @@
 
 ## 需求清单与任务映射
 
-| # | 需求 | 子任务 |
-|---|------|--------|
-| 1 | 移除计费配置中的版本选择逻辑，版本控制交由渠道管理 | A billing-wallet |
-| 10 | 删除团队空间模块，整合为「团队钱包」（团队共享余额） | A billing-wallet |
-| 11 | 修复未成功对话仍然扣费 | A billing-wallet |
-| 2 | 修复创建插件页对话后显示无内容（线上调试） | B creator-askquestion |
-| 6 | 适配 AskQuestion 工具（内置提示词、默认走该工具、Claude 风格 UI、复用 Agent 框架） | B creator-askquestion |
-| 3 | 历史记录加删除 + 分页 | B creator-askquestion |
-| 4 | 移除 AI 创建插件旁的「铂觅」团队名显示 | B creator-askquestion |
-| 5 | 新建对话按钮移到历史记录按钮左侧 | B creator-askquestion |
-| 8 | 插件管理重构为悬浮窗 + 侧边栏固定/历史插件 + 重设计 | C ui-interaction |
-| 13 | 右下角创建插件悬浮按钮点击弹窗动画 | C ui-interaction |
-| 14 | 扩展内置 Skill 数量 + 居中悬浮窗 + 背景模糊 + 去专业术语 | C ui-interaction |
-| 7 | 调慢所有界面动画速度 | C ui-interaction |
-| 9 | 缩小个人资料页底部高度 | C ui-interaction |
-| 12 | 外观主题未选中按钮加边框 | C ui-interaction |
-| 15 | 全量代码审查 + 中文提交信息 + 安装包打包 | D review-package |
+| #   | 需求                                                                               | 子任务                |
+| --- | ---------------------------------------------------------------------------------- | --------------------- |
+| 1   | 移除计费配置中的版本选择逻辑，版本控制交由渠道管理                                 | A billing-wallet      |
+| 10  | 删除团队空间模块，整合为「团队钱包」（团队共享余额）                               | A billing-wallet      |
+| 11  | 修复未成功对话仍然扣费                                                             | A billing-wallet      |
+| 2   | 修复创建插件页对话后显示无内容（线上调试）                                         | B creator-askquestion |
+| 6   | 适配 AskQuestion 工具（内置提示词、默认走该工具、Claude 风格 UI、复用 Agent 框架） | B creator-askquestion |
+| 3   | 历史记录加删除 + 分页                                                              | B creator-askquestion |
+| 4   | 移除 AI 创建插件旁的「铂觅」团队名显示                                             | B creator-askquestion |
+| 5   | 新建对话按钮移到历史记录按钮左侧                                                   | B creator-askquestion |
+| 8   | 插件管理重构为悬浮窗 + 侧边栏固定/历史插件 + 重设计                                | C ui-interaction      |
+| 13  | 右下角创建插件悬浮按钮点击弹窗动画                                                 | C ui-interaction      |
+| 14  | 扩展内置 Skill 数量 + 居中悬浮窗 + 背景模糊 + 去专业术语                           | C ui-interaction      |
+| 7   | 调慢所有界面动画速度                                                               | C ui-interaction      |
+| 9   | 缩小个人资料页底部高度                                                             | C ui-interaction      |
+| 12  | 外观主题未选中按钮加边框                                                           | C ui-interaction      |
+| 15  | 全量代码审查 + 中文提交信息 + 安装包打包                                           | D review-package      |
 
 ## 子任务
 

@@ -61,6 +61,7 @@ pub(crate) async fn start_installed_plugin(
 ```
 
 要点：
+
 - `app.clone()`：`AppHandle` 是 cheap clone（内部 Arc），`Send + Sync`。
 - `process_table.inner().clone()` / `bridge.inner().clone()`：拿 owned 值，满足闭包 `'static`。
 - `spawn_blocking` 返回 `Result<Result<StartPluginResult, String>, JoinError>`：外层 `.await?` 处理 panic/取消，内层再 `match`。

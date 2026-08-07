@@ -93,58 +93,179 @@ function responseFor(url, method) {
   if (pathname === '/api/platform-info') return { platformName: 'LingFang', logoUrl: '' };
   if (pathname === '/api/auth/me') return { user: admin, onboarding: 'done' };
   if (pathname === '/api/admin/dashboard') {
-    return { users: 2, teams: 1, pendingApplications: 0, enabledPlugins: 1, disabledPlugins: 0, pendingPluginReviews: 0 };
+    return {
+      users: 2,
+      teams: 1,
+      pendingApplications: 0,
+      enabledPlugins: 1,
+      disabledPlugins: 0,
+      pendingPluginReviews: 0,
+    };
   }
   if (pathname === '/api/admin/stats/generation') {
-    return { period: 'current_month', month: { calls: 0, success: 0, failed: 0, successRate: 0 }, total: { calls: 0, success: 0, failed: 0, successRate: 0 }, avgDurationMs: null };
+    return {
+      period: 'current_month',
+      month: { calls: 0, success: 0, failed: 0, successRate: 0 },
+      total: { calls: 0, success: 0, failed: 0, successRate: 0 },
+      avgDurationMs: null,
+    };
   }
   if (pathname === '/api/admin/stats/finance') {
-    return { period: 'current_month', month: { gmvCents: 0 }, total: { gmvCents: 0 }, platformRevenueCents: 0, paidUserCount: 0, totalUserCount: 2, conversionRate: 0, topPlugins: [] };
+    return {
+      period: 'current_month',
+      month: { gmvCents: 0 },
+      total: { gmvCents: 0 },
+      platformRevenueCents: 0,
+      paidUserCount: 0,
+      totalUserCount: 2,
+      conversionRate: 0,
+      topPlugins: [],
+    };
   }
   if (pathname === '/api/admin/users') {
-    return page(searchParams.get('platformRole') === 'PLATFORM_ADMIN' ? [admin] : [user, secondUser]);
+    return page(
+      searchParams.get('platformRole') === 'PLATFORM_ADMIN' ? [admin] : [user, secondUser]
+    );
   }
   if (pathname === '/api/admin/users/options') return page([user], 20);
   if (pathname === `/api/admin/users/${user.id}/detail`) return { user };
   if (pathname === `/api/admin/users/${secondUser.id}/detail`) return { user: secondUser };
   if (pathname === `/api/admin/users/${admin.id}/detail`) return { user: admin };
   if (pathname === `/api/admin/users/${user.id}/teams`) {
-    return page([{ teamId: team.id, userId: user.id, role: 'MEMBER', status: 'ACTIVE', teamRoleId: null, joinedAt: '2026-06-02T08:00:00.000Z', team }]);
+    return page([
+      {
+        teamId: team.id,
+        userId: user.id,
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        teamRoleId: null,
+        joinedAt: '2026-06-02T08:00:00.000Z',
+        team,
+      },
+    ]);
   }
   if (pathname === `/api/admin/users/${user.id}/wallet`) {
-    return { ...page([{ id: 'wallet-1', amountCents: 3000, direction: 'CREDIT', reason: '测试入账', pluginId: null, createdAt: '2026-07-01T08:00:00.000Z' }]), balanceCents: 5500 };
+    return {
+      ...page([
+        {
+          id: 'wallet-1',
+          amountCents: 3000,
+          direction: 'CREDIT',
+          reason: '测试入账',
+          pluginId: null,
+          createdAt: '2026-07-01T08:00:00.000Z',
+        },
+      ]),
+      balanceCents: 5500,
+    };
   }
   if (pathname === `/api/admin/users/${user.id}/logins`) {
-    return page([{ id: 'login-1', action: 'auth.login.success', createdAt: '2026-07-10T08:00:00.000Z' }]);
+    return page([
+      { id: 'login-1', action: 'auth.login.success', createdAt: '2026-07-10T08:00:00.000Z' },
+    ]);
   }
   if (pathname === `/api/admin/admins/${admin.id}/activity`) {
-    return page([{ id: 'audit-1', action: 'admin.user.updated', targetType: 'User', targetId: user.id, createdAt: '2026-07-10T08:00:00.000Z' }]);
+    return page([
+      {
+        id: 'audit-1',
+        action: 'admin.user.updated',
+        targetType: 'User',
+        targetId: user.id,
+        createdAt: '2026-07-10T08:00:00.000Z',
+      },
+    ]);
   }
   if (pathname === '/api/admin/teams') return page([team, secondTeam]);
   if (pathname === `/api/admin/teams/${team.id}/detail`) {
-    return { team: { ...team, allowPublicJoin: false, description: '团队详情' }, memberCount: 2, roleCount: 1, pluginCount: 1, purchaseCount: 1, ledgerSummary: { totalCreditCents: 128000, totalDebitCents: 0, netCents: 128000 } };
+    return {
+      team: { ...team, allowPublicJoin: false, description: '团队详情' },
+      memberCount: 2,
+      roleCount: 1,
+      pluginCount: 1,
+      purchaseCount: 1,
+      ledgerSummary: { totalCreditCents: 128000, totalDebitCents: 0, netCents: 128000 },
+    };
   }
   if (pathname === `/api/admin/teams/${secondTeam.id}/detail`) {
-    return { team: { ...secondTeam, allowPublicJoin: false, description: '' }, memberCount: 1, roleCount: 0, pluginCount: 0, purchaseCount: 0, ledgerSummary: { totalCreditCents: 128000, totalDebitCents: 0, netCents: 128000 } };
+    return {
+      team: { ...secondTeam, allowPublicJoin: false, description: '' },
+      memberCount: 1,
+      roleCount: 0,
+      pluginCount: 0,
+      purchaseCount: 0,
+      ledgerSummary: { totalCreditCents: 128000, totalDebitCents: 0, netCents: 128000 },
+    };
   }
   if (pathname === `/api/admin/teams/${team.id}/members`) {
-    return page([{ teamId: team.id, userId: user.id, role: 'MEMBER', status: 'ACTIVE', teamRoleId: teamRole.id, joinedAt: '2026-06-02T08:00:00.000Z', user, teamRole: { id: teamRole.id, name: teamRole.name, code: teamRole.code } }]);
+    return page([
+      {
+        teamId: team.id,
+        userId: user.id,
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        teamRoleId: teamRole.id,
+        joinedAt: '2026-06-02T08:00:00.000Z',
+        user,
+        teamRole: { id: teamRole.id, name: teamRole.name, code: teamRole.code },
+      },
+    ]);
   }
   if (pathname === `/api/admin/teams/${team.id}/roles`) return page([teamRole]);
-  if (pathname === `/api/admin/teams/${team.id}/roles/permissions`) return { permissions: [{ ...permission, scope: 'TEAM', code: 'team.member.list' }] };
-  if (pathname === `/api/admin/teams/${team.id}/roles/${teamRole.id}`) return { role: { ...teamRole, permissions: ['team.member.list'] } };
+  if (pathname === `/api/admin/teams/${team.id}/roles/permissions`)
+    return { permissions: [{ ...permission, scope: 'TEAM', code: 'team.member.list' }] };
+  if (pathname === `/api/admin/teams/${team.id}/roles/${teamRole.id}`)
+    return { role: { ...teamRole, permissions: ['team.member.list'] } };
   if (pathname === `/api/admin/teams/${team.id}/plugins`) {
-    return page([{ id: 'plugin-1', name: '周报助手', status: 'ENABLED', visibility: 'TEAM', reviewStatus: 'APPROVED', marketplace: false, priceCents: 0, installCount: 5, createdAt: '2026-06-01T08:00:00.000Z', updatedAt: '2026-07-01T08:00:00.000Z' }]);
+    return page([
+      {
+        id: 'plugin-1',
+        name: '周报助手',
+        status: 'ENABLED',
+        visibility: 'TEAM',
+        reviewStatus: 'APPROVED',
+        marketplace: false,
+        priceCents: 0,
+        installCount: 5,
+        createdAt: '2026-06-01T08:00:00.000Z',
+        updatedAt: '2026-07-01T08:00:00.000Z',
+      },
+    ]);
   }
   if (pathname === `/api/admin/teams/${team.id}/purchases`) {
-    return page([{ id: 'purchase-1', pluginId: 'plugin-1', packageId: null, pluginName: '周报助手', priceCents: 1200, buyerUserId: user.id, sellerUserId: admin.id, createdAt: '2026-07-01T08:00:00.000Z' }]);
+    return page([
+      {
+        id: 'purchase-1',
+        pluginId: 'plugin-1',
+        packageId: null,
+        pluginName: '周报助手',
+        priceCents: 1200,
+        buyerUserId: user.id,
+        sellerUserId: admin.id,
+        createdAt: '2026-07-01T08:00:00.000Z',
+      },
+    ]);
   }
   if (pathname === `/api/admin/teams/${team.id}/ledger`) {
-    return { ...page([{ id: 'ledger-1', teamId: team.id, amountCents: 128000, direction: 'CREDIT', reason: '初始余额', actorUserId: admin.id, createdAt: '2026-06-01T08:00:00.000Z', actor: admin }]), summary: { totalCreditCents: 128000, totalDebitCents: 0, netCents: 128000 } };
+    return {
+      ...page([
+        {
+          id: 'ledger-1',
+          teamId: team.id,
+          amountCents: 128000,
+          direction: 'CREDIT',
+          reason: '初始余额',
+          actorUserId: admin.id,
+          createdAt: '2026-06-01T08:00:00.000Z',
+          actor: admin,
+        },
+      ]),
+      summary: { totalCreditCents: 128000, totalDebitCents: 0, netCents: 128000 },
+    };
   }
   if (pathname === '/api/admin/roles') return page([platformRole]);
   if (pathname === '/api/admin/roles/permissions') return { permissions: [permission] };
-  if (pathname === `/api/admin/roles/${platformRole.id}`) return { role: { ...platformRole, permissions: [permission.code] } };
+  if (pathname === `/api/admin/roles/${platformRole.id}`)
+    return { role: { ...platformRole, permissions: [permission.code] } };
   if (pathname === '/api/admin/permission-groups') return { groups: [] };
   return page([]);
 }
@@ -166,7 +287,10 @@ await context.addInitScript(() => {
 await context.route(`${apiOrigin}/**`, async (route) => {
   const request = route.request();
   if (request.method() === 'OPTIONS') {
-    await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
+    await route.fulfill({
+      status: 204,
+      headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' },
+    });
     return;
   }
   requests.push(request.url());
@@ -186,7 +310,10 @@ let start = requests.length;
 await pageHandle.getByRole('button', { name: '用户管理' }).click();
 await pageHandle.getByText(user.email, { exact: false }).last().waitFor();
 let phase = requests.slice(start);
-assert(phase.some((url) => url.includes('/api/admin/users?page=1&pageSize=10&platformRole=NONE')), '用户页未请求服务端分页列表');
+assert(
+  phase.some((url) => url.includes('/api/admin/users?page=1&pageSize=10&platformRole=NONE')),
+  '用户页未请求服务端分页列表'
+);
 assert(!phase.some((url) => url.includes(`/users/${user.id}/`)), '用户页首屏提前请求了详情数据');
 
 await pageHandle.getByRole('button', { name: `查看用户详情：${user.email}` }).click();
@@ -198,21 +325,43 @@ await pageHandle.getByText(team.name, { exact: true }).waitFor();
 await pageHandle.getByRole('tab', { name: '钱包' }).click();
 await pageHandle.getByText('钱包余额').waitFor();
 await pageHandle.getByRole('tab', { name: '团队' }).click();
-assert(count(`/users/${user.id}/teams`) === 1, '用户团队 Tab 返回后重复请求，未在 Sheet 会话内缓存');
+assert(
+  count(`/users/${user.id}/teams`) === 1,
+  '用户团队 Tab 返回后重复请求，未在 Sheet 会话内缓存'
+);
 const secondUserStart = requests.length;
-await pageHandle.locator(`button[aria-label="查看用户详情：${secondUser.email}"]`).evaluate((button) => button.click());
+await pageHandle
+  .locator(`button[aria-label="查看用户详情：${secondUser.email}"]`)
+  .evaluate((button) => button.click());
 await pageHandle.getByRole('dialog').getByText(secondUser.email, { exact: true }).waitFor();
 const secondUserRequests = requests.slice(secondUserStart);
-assert(secondUserRequests.some((url) => url.includes(`/users/${secondUser.id}/detail`)), '快速切换用户后未请求新 overview');
-assert(!secondUserRequests.some((url) => url.includes(`/users/${secondUser.id}/teams`) || url.includes(`/users/${secondUser.id}/wallet`) || url.includes(`/users/${secondUser.id}/logins`)), '新用户继承旧 visited Tabs 并提前请求子资源');
+assert(
+  secondUserRequests.some((url) => url.includes(`/users/${secondUser.id}/detail`)),
+  '快速切换用户后未请求新 overview'
+);
+assert(
+  !secondUserRequests.some(
+    (url) =>
+      url.includes(`/users/${secondUser.id}/teams`) ||
+      url.includes(`/users/${secondUser.id}/wallet`) ||
+      url.includes(`/users/${secondUser.id}/logins`)
+  ),
+  '新用户继承旧 visited Tabs 并提前请求子资源'
+);
 
 await pageHandle.getByRole('button', { name: '关闭' }).click();
 start = requests.length;
 await pageHandle.getByRole('button', { name: '团队管理' }).click();
 await pageHandle.getByRole('button', { name: `查看团队详情：${team.name}` }).waitFor();
 phase = requests.slice(start);
-assert(phase.some((url) => url.includes('/api/admin/teams?page=1&pageSize=10')), '团队页未请求服务端分页列表');
-assert(!phase.some((url) => url.includes(`/teams/${team.id}/`)), '团队页首屏提前请求了详情或用户候选');
+assert(
+  phase.some((url) => url.includes('/api/admin/teams?page=1&pageSize=10')),
+  '团队页未请求服务端分页列表'
+);
+assert(
+  !phase.some((url) => url.includes(`/teams/${team.id}/`)),
+  '团队页首屏提前请求了详情或用户候选'
+);
 
 await pageHandle.getByRole('button', { name: `查看团队详情：${team.name}` }).click();
 await pageHandle.getByText('累计入账').waitFor();
@@ -229,20 +378,44 @@ await pageHandle.getByRole('dialog').getByText('指定团队管理员').waitFor(
 assert(count('/api/admin/users/options') === 1, '指定管理员弹窗打开后未请求用户候选');
 await pageHandle.getByRole('button', { name: '取消' }).click();
 const secondTeamStart = requests.length;
-await pageHandle.locator(`button[aria-label="查看团队详情：${secondTeam.name}"]`).evaluate((button) => button.click());
+await pageHandle
+  .locator(`button[aria-label="查看团队详情：${secondTeam.name}"]`)
+  .evaluate((button) => button.click());
 await pageHandle.getByRole('dialog').getByText(secondTeam.slug, { exact: true }).waitFor();
 const secondTeamRequests = requests.slice(secondTeamStart);
-assert(secondTeamRequests.some((url) => url.includes(`/teams/${secondTeam.id}/detail`)), '快速切换团队后未请求新 overview');
-assert(!secondTeamRequests.some((url) => url.includes(`/teams/${secondTeam.id}/members`) || url.includes(`/teams/${secondTeam.id}/roles`) || url.includes(`/teams/${secondTeam.id}/plugins`) || url.includes(`/teams/${secondTeam.id}/purchases`) || url.includes(`/teams/${secondTeam.id}/ledger`)), '新团队继承旧 visited Tabs 并提前请求子资源');
+assert(
+  secondTeamRequests.some((url) => url.includes(`/teams/${secondTeam.id}/detail`)),
+  '快速切换团队后未请求新 overview'
+);
+assert(
+  !secondTeamRequests.some(
+    (url) =>
+      url.includes(`/teams/${secondTeam.id}/members`) ||
+      url.includes(`/teams/${secondTeam.id}/roles`) ||
+      url.includes(`/teams/${secondTeam.id}/plugins`) ||
+      url.includes(`/teams/${secondTeam.id}/purchases`) ||
+      url.includes(`/teams/${secondTeam.id}/ledger`)
+  ),
+  '新团队继承旧 visited Tabs 并提前请求子资源'
+);
 
 await pageHandle.getByRole('button', { name: '关闭' }).click();
 start = requests.length;
 await pageHandle.getByRole('button', { name: '角色管理' }).click();
 await pageHandle.getByText(platformRole.code, { exact: true }).waitFor();
 phase = requests.slice(start);
-assert(phase.some((url) => url.includes('/api/admin/roles?page=1&pageSize=10')), '角色页未请求服务端分页列表');
-assert(!phase.some((url) => new URL(url).searchParams.has('scope')), '平台角色固定路由不应发送未白名单 scope 参数');
-assert(!phase.some((url) => url.includes('/roles/permissions') || url.includes('/permission-groups')), '角色页首屏提前请求了权限字典');
+assert(
+  phase.some((url) => url.includes('/api/admin/roles?page=1&pageSize=10')),
+  '角色页未请求服务端分页列表'
+);
+assert(
+  !phase.some((url) => new URL(url).searchParams.has('scope')),
+  '平台角色固定路由不应发送未白名单 scope 参数'
+);
+assert(
+  !phase.some((url) => url.includes('/roles/permissions') || url.includes('/permission-groups')),
+  '角色页首屏提前请求了权限字典'
+);
 await pageHandle.getByRole('button', { name: `查看角色详情：${platformRole.name}` }).click();
 await pageHandle.getByText(permission.code, { exact: true }).waitFor();
 assert(count('/api/admin/roles/permissions') === 0, '查看角色详情时提前请求了权限注册表');
@@ -282,7 +455,9 @@ await mobile.screenshot({
 await mobile.getByRole('button', { name: `查看团队详情：${team.name}` }).click();
 await mobile.getByText('累计入账').waitFor();
 await mobile.waitForTimeout(600);
-const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+const overflow = await mobile.evaluate(
+  () => document.documentElement.scrollWidth - window.innerWidth
+);
 assert(overflow <= 1, `移动端出现 ${overflow}px 页面横向溢出`);
 await mobile.screenshot({
   path: '.trellis/tasks/07-12-admin-core-data-loading/research/admin-core-mobile.png',

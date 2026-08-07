@@ -78,7 +78,7 @@ The shim still includes `pluginId` as internal context, but host message handlin
 The host injects:
 
 ```js
-globalThis.__lingfangInvoke = (capability, args) => call(capability, args || {})
+globalThis.__lingfangInvoke = (capability, args) => call(capability, args || {});
 ```
 
 `window.sdk` can remain for generated inline plugins, but it must call the same bridge and accept `llm.chat({ messages, model })` to align with `@lingfang/plugin-sdk`.

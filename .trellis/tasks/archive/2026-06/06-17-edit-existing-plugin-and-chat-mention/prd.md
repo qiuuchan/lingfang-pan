@@ -3,12 +3,14 @@
 ## Goal
 
 两个子需求：
+
 - **A. 修改已有插件**：从插件页「继续修改」进创建器时，先把云端 files 落盘到本地目录，让 AI 看到现有代码能改（而非重新生成）。新会话（不 resume 原创建会话）。
 - **B. 聊天引用插件**：创建器 Composer 输入框支持 @触发选插件（自己的 team + 本地），选中后把该插件 manifest 摘要插入 prompt，让 AI 参考。
 
 ## 已确认事实（来自代码查证）
 
 ### A 修改已有插件
+
 - **editInGenerator 已存在**（`Plugins.tsx:65`）：从 `plugin.files` 构造 draft（`turns:[]`）+ `setView('home')` 跳创建器。但**不落盘 files 到本地**——AI 进创建器看到空目录，会重新生成而非改。
 - **后端 edit-draft 端点已存在**（`POST /api/plugins/:id/edit-draft`，`plugin.service.editPluginDraft`）：接收完整 manifest+files 更新，重置 reviewStatus=DRAFT。ensurePluginManager 作者校验 + PENDING 拒绝。
 - **plugin.id 是 UUID**（schema `@default(uuid())`），含 `-`，`sanitize_plugin_id` 接受 `[A-Za-z0-9_-]`——可作本地目录名。
@@ -16,6 +18,7 @@
 - **草稿恢复**：editInGenerator 设 `plugin_id=plugin.id`，创建器据此建本地目录。
 
 ### B 聊天引用插件
+
 - **Composer**（`Composer.tsx`）：纯 Textarea + 选择器，无 @机制。`onInputChange` 写 input state，`onSend` 发送。
 - **send(prompt)**（`PluginCreatorHome.tsx:700`）：input 作 prompt 传 start_session/send_input。
 - **插件来源**：team 插件（`loadPlugins` 拉云端 `/api/plugins/mine`）+ 本地插件（`scanPluginStatus` 扫文件系统）。
@@ -23,6 +26,7 @@
 ## Requirements
 
 ### A 修改已有插件
+
 - R1 editInGenerator 跳创建器前，先把云端 `plugin.files` 落盘到 `plugins_root/<plugin.id>/`（调 Rust 写文件命令或复用 ensure_plugin_dir + 逐文件写）。
 - R2 落盘后跳创建器，AI 进 start_session 时 workspace=该目录，能 Read 现有文件并改。
 - R3 落盘幂等：目录已有同名文件覆盖（保证是云端最新版本）。
@@ -30,6 +34,7 @@
 - R5 改完上传走已有 edit-draft 端点（不新建，覆盖原插件）。
 
 ### B 聊天引用插件
+
 - R6 Composer Textarea 输入 `@` 时弹 Popover 列插件（自己的 team + 本地插件），按名称筛选。
 - R7 选中插件后在 input 插入 `@<plugin-name>` 标记，并记录引用的 pluginId 列表（attachedPlugins state）。
 - R8 发送时把引用插件的 manifest 摘要（id/name/runtime_type/entry/capabilities）拼进 prompt 前面，让 AI 参考。

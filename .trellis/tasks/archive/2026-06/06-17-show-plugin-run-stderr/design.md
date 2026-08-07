@@ -62,6 +62,7 @@ Ok(StartPluginResult { pid, started_at })
 ```
 
 **关键点**：
+
 1. `try_wait` 轮询（非 `wait` 阻塞）——GUI 正常启动会一直跑，wait 会阻塞 start_plugin 命令 800ms+，try_wait + sleep 轮询可控制超时。
 2. 秒退才读 stderr（child 已退出，stderr 可 read_to_string 一次读完）。
 3. 正常运行时 stderr 交后台线程排空（防 pipe 满阻塞进程）——读后丢弃，不进 UI（符合 PRD 需求 9）。
@@ -85,6 +86,7 @@ Ok(StartPluginResult { pid, started_at })
 **设计思路**：创建器已有追问机制——`send(text)`（PluginCreatorHome.tsx:700）的追问路径（line 708-731）走 `code_assistant_send_input` --resume 续接，AI 在原会话上下文（它生成过插件代码）继续。send 已支持外部传入 text 参数，一键修复只需构造修复 prompt 调 send。
 
 **链路**：
+
 1. ScriptPreviewPanel 的 plugin_crashed 错误卡片加「让 AI 修复」按钮。
 2. 点击 → 调 `onRequestFix(stderr)` callback（stderr 来自 plugin_crashed 错误的 raw）。
 3. PluginCreatorHome 实现 `handleAutoFix(stderr)`：
@@ -96,6 +98,7 @@ Ok(StartPluginResult { pid, started_at })
 **ScriptPreviewPanel 接口**：加 `onRequestFix?: (stderr: string) => void` prop。有此 prop 时错误卡片显示「让 AI 修复」按钮，无则不显示（从插件页独立运行崩溃时无会话上下文，不显示按钮）。
 
 **边界（R8）**：
+
 - 会话能 resume（activeId 存在 + assistantSession 已 exited）→ 按钮可用，send 走追问路径。
 - 会话不可 resume（无 activeId / 首轮仍 running / degraded 无 cli_session_id 但 send_input 仍可发伪多轮）→ send 内部会自行分流：有 activeSessionId+exited 走追问，否则走首轮 start_session（等于新会话重述问题）。一键修复前可校验 activeId 存在，不存在则按钮禁用 + 提示「该会话已不可续接，请重新创建」。
 - 实际上 send 已处理分流，handleAutoFix 直接调 send 即可；按钮禁用判断 = `!activeId || assistantSession?.status === 'running'`。

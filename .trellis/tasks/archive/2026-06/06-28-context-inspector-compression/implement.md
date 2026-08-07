@@ -1,4 +1,4 @@
- # Context inspector and compression - Implementation
+# Context inspector and compression - Implementation
 
 ## Ordered Checklist
 
@@ -36,4 +36,3 @@ If the toolbar/UI changes affect layout or import wiring, also run:
 - Toolbar entry-point changes in `FloatingCreator.tsx`.
 - New vitest spec under `apps/desktop/src/lib/plugin-creator/`.
 - Any accidental change to `context-compress.ts` summary logic.
-

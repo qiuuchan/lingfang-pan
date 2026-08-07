@@ -30,25 +30,39 @@ Add optional fields to `PluginManifest`; omission preserves all existing manifes
 
 ```json
 {
-  "actions": [{
-    "action_id": "generate_image",
-    "name": "生成图片",
-    "description": "",
-    "action_contract_version": "1.0.0",
-    "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
-    "output_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
-    "execution_semantics": "idempotent",
-    "timeout_seconds": 900,
-    "cloud_capable": false,
-    "handler": { "entry": "actions/generate.mjs", "export": "run" }
-  }],
-  "action_dependencies": [{
-    "dependency_id": "video_generator",
-    "package_id": "uuid",
-    "release_version_range": "^1.0.0",
-    "action_id": "generate_video",
-    "action_contract_version_range": "^1.0.0"
-  }]
+  "actions": [
+    {
+      "action_id": "generate_image",
+      "name": "生成图片",
+      "description": "",
+      "action_contract_version": "1.0.0",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "execution_semantics": "idempotent",
+      "timeout_seconds": 900,
+      "cloud_capable": false,
+      "handler": { "entry": "actions/generate.mjs", "export": "run" }
+    }
+  ],
+  "action_dependencies": [
+    {
+      "dependency_id": "video_generator",
+      "package_id": "uuid",
+      "release_version_range": "^1.0.0",
+      "action_id": "generate_video",
+      "action_contract_version_range": "^1.0.0"
+    }
+  ]
 }
 ```
 

@@ -62,41 +62,43 @@ packages/plugin-sdk/
 ```jsonc
 {
   "name": "@lingfang/plugin-sdk",
-  "version": "0.1.0",  // minor bump：新增功能，向后兼容
+  "version": "0.1.0", // minor bump：新增功能，向后兼容
   "type": "module",
-  "main": "src/index.ts",          // 不变：workspace 消费的 TS 入口
+  "main": "src/index.ts", // 不变：workspace 消费的 TS 入口
   "bin": {
-    "lingfang-plugin": "src/cli/index.ts"  // tsx-style，由 consumer 编译
+    "lingfang-plugin": "src/cli/index.ts", // tsx-style，由 consumer 编译
   },
   "exports": {
     ".": "./src/index.ts",
     "./manifest": "./src/manifest/index.ts",
-    "./types/client-entry": "./src/types/client-entry.ts"
+    "./types/client-entry": "./src/types/client-entry.ts",
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "cli:dev": "tsx src/cli/index.ts"  // 本地开发用
+    "cli:dev": "tsx src/cli/index.ts", // 本地开发用
   },
   "dependencies": {
     "@lingfang/contract": "workspace:*",
-    "jszip": "^3.10.1"  // 唯一新增运行时依赖（用于 .lfplugin 打包）
+    "jszip": "^3.10.1", // 唯一新增运行时依赖（用于 .lfplugin 打包）
   },
   "devDependencies": {
     "typescript": "^5",
     "vitest": "^4.1.8",
-    "tsx": "^4"
-  }
+    "tsx": "^4",
+  },
 }
 ```
 
 **为什么单包不拆**：
+
 - 主题一致（都为"插件作者服务"）
 - 一条 `pnpm add @lingfang/plugin-sdk` 拿全
 - workspace 内消费简单（contract ↔ sdk 一次性安装）
 - 模板复用 manifest 类型定义
 
 **为什么用 `jszip` 不用 Node 标准 `zlib`**：
+
 - `.lfplugin` v4 是 zip 结构（不是 tar.gz 或纯 zlib）。`zlib` 不能直接做 zip 容器
 - `jszip` 是 npm 上 zip 库事实标准，纯 JS、零原生依赖、3M 月下载
 - 替代方案 `adm-zip` 也可，但社区活跃度低；`yazl`/`yauzl` 太底层
@@ -106,6 +108,7 @@ packages/plugin-sdk/
 ### 2.1 `lingfang-plugin create [name]`
 
 **用法**：
+
 ```bash
 lingfang-plugin create my-plugin                    # 交互式
 lingfang-plugin create my-plugin --runtime nodejs   # 一行式
@@ -113,6 +116,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 ```
 
 **交互式流程**（无参数或部分参数缺失时）：
+
 1. 插件显示名（默认取 name）
 2. id（默认根据 name 推导：`com.author.<kebab-name>`，author 默认从 git config.user.name 取，否则 `example`）
 3. version（默认 `0.1.0`）
@@ -121,6 +125,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 6. 是否声明能力（多选：ui.view / fs.read / fs.write / fs.pick / llm.chat / image.generate / clipboard / storage.kv / system.info / system.notify / net.fetch；每选一个追加 reason 输入）
 
 **输出**：在 `<cwd>/<name>/` 下生成完整工程，最后打印：
+
 ```
 ✓ 已创建插件：./my-plugin
   下一步：
@@ -134,6 +139,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 **默认 path**：当前目录
 
 **校验层次**：
+
 1. **JSON 语法**：`manifest.json` 能被 `JSON.parse`
 2. **Zod schema**：`PluginManifest.parse(input)` 通过
 3. **业务规则**（见 §3）
@@ -145,6 +151,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 **退出码**：0=成功，1=校验失败
 
 **输出格式**：
+
 ```
 ✓ manifest.json 语法正确
 ✓ Zod schema 校验通过
@@ -156,6 +163,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 ```
 
 或失败：
+
 ```
 ✗ manifest.json 第 3 行：JSON 语法错误
   > Unexpected token } in JSON at position 42
@@ -171,6 +179,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 **默认 out**：`<pluginName>-<version>.lfplugin`
 
 **打包逻辑**（基于 `plugin_package_manager.rs::inspect_artifact` 反推的 v4 格式）：
+
 1. 先跑 `validate`，失败则中止
 2. 创建 zip：
    ```
@@ -190,6 +199,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 ### 2.4 `lingfang-plugin publish [path] --base <url> --token <jwt> [--package-id <id>] [--source-kind <kind>] [--source-label <text>]`
 
 **逻辑**（**调研后修正**：不是 multipart，是 raw binary stream）：
+
 1. 先 `build` 生成临时 `.lfplugin`
 2. `POST <base>/api/plugin-registry/releases`：
    - 请求体：raw 二进制（`body: fileBuffer`，**不是 FormData**）
@@ -203,6 +213,7 @@ lingfang-plugin create my-plugin --runtime client --id com.example.my-plugin --a
 3. 期望 201 响应：`{ package: {...}, release: {...} }`
 
 **重要**：
+
 - 不调用 `sdk.plugin.upload()`——它在运行时直接抛错（`plugins-runtime.ts:344` "运行中的插件不能发布制品"）。改用直接 HTTP 调 plugin-registry 端点（已勘探确认存在且工作）。
 - 端点权限：JWT 必须有 `team.plugin.upload` 或 `team.plugin.edit_draft`。
 - 大小限制：300 MiB（`PLUGIN_ARTIFACT_MAX_BYTES`）。
@@ -226,25 +237,25 @@ v1 仅在 `lingfang-plugin validate` 后输出一段"本地预览"提示：
 
 Zod `PluginManifest` 通过后，再跑下列业务规则（每条违反生成一个 `ManifestError`）：
 
-| 编号 | 规则 | 错误码 |
-|------|------|--------|
-| M1 | `id` 不为空，且匹配 `^[a-zA-Z][a-zA-Z0-9-_.]*$`（允许反向域名 `com.foo.bar` 与点式 `builtin.x`，不允许纯数字开头） | `invalid_id` |
-| M2 | `version` 必须是有效 semver（由 `StrictSemVer` 保证，但额外禁止 `0.0.0` 与 `0.0.0-xxx` 起步） | `invalid_version` |
-| M3 | `runtime_type === 'client'` 时 `entry` 必须以 `.html` 结尾 | `entry_runtime_mismatch` |
-| M4 | `runtime_type === 'nodejs'` 时 `entry` 必须以 `.js`/`.mjs`/`.cjs` 结尾 | `entry_runtime_mismatch` |
-| M5 | `runtime_type === 'python'` 时 `entry` 必须以 `.py` 结尾 | `entry_runtime_mismatch` |
-| M6 | `runtime_type === 'cloud'` 时 `entry` 必须是 URL（`https?://`） | `entry_runtime_mismatch` |
-| M7 | `capabilities[].kind` 必须在 `CapabilityKind` 枚举中（Zod 已保证，但再校验一次防止 contract 漂移） | `unknown_capability` |
-| M8 | `capabilities[].reason` 当 risk ≥ medium 时不应为空（提醒作者写清楚为什么需要这个能力） | `missing_reason` |
-| M9 | `capabilities` 不允许重复声明同一 `kind`（去重） | `duplicate_capability` |
-| M10 | `entry` 文件路径不包含 `..` / 不绝对（防路径逃逸） | `unsafe_entry_path` |
+| 编号 | 规则                                                                                                               | 错误码                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| M1   | `id` 不为空，且匹配 `^[a-zA-Z][a-zA-Z0-9-_.]*$`（允许反向域名 `com.foo.bar` 与点式 `builtin.x`，不允许纯数字开头） | `invalid_id`             |
+| M2   | `version` 必须是有效 semver（由 `StrictSemVer` 保证，但额外禁止 `0.0.0` 与 `0.0.0-xxx` 起步）                      | `invalid_version`        |
+| M3   | `runtime_type === 'client'` 时 `entry` 必须以 `.html` 结尾                                                         | `entry_runtime_mismatch` |
+| M4   | `runtime_type === 'nodejs'` 时 `entry` 必须以 `.js`/`.mjs`/`.cjs` 结尾                                             | `entry_runtime_mismatch` |
+| M5   | `runtime_type === 'python'` 时 `entry` 必须以 `.py` 结尾                                                           | `entry_runtime_mismatch` |
+| M6   | `runtime_type === 'cloud'` 时 `entry` 必须是 URL（`https?://`）                                                    | `entry_runtime_mismatch` |
+| M7   | `capabilities[].kind` 必须在 `CapabilityKind` 枚举中（Zod 已保证，但再校验一次防止 contract 漂移）                 | `unknown_capability`     |
+| M8   | `capabilities[].reason` 当 risk ≥ medium 时不应为空（提醒作者写清楚为什么需要这个能力）                            | `missing_reason`         |
+| M9   | `capabilities` 不允许重复声明同一 `kind`（去重）                                                                   | `duplicate_capability`   |
+| M10  | `entry` 文件路径不包含 `..` / 不绝对（防路径逃逸）                                                                 | `unsafe_entry_path`      |
 
 `validateManifest` 返回：
+
 ```ts
 type ManifestError = { code: string; path: string; message: string };
 type ManifestResult =
-  | { success: true; manifest: PluginManifest }
-  | { success: false; errors: ManifestError[] };
+  { success: true; manifest: PluginManifest } | { success: false; errors: ManifestError[] };
 ```
 
 ## 4. 模板规格
@@ -254,6 +265,7 @@ type ManifestResult =
 ### 4.1 client 模板（`templates/client/`）
 
 **manifest.json.tmpl**：
+
 ```json
 {
   "id": "{{id}}",
@@ -274,46 +286,52 @@ type ManifestResult =
 （实际实现用极简 string.replace 或自带模板函数，**不引入 handlebars**——理由：模板变量少，依赖过重）
 
 **ui/index.html.tmpl**：
+
 ```html
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <title>{{name}}</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body {
-      font-family: system-ui, sans-serif;
-      margin: 24px;
-      background: var(--lf-bg, #fff);
-      color: var(--lf-fg, #111);
-    }
-    button { padding: 8px 16px; cursor: pointer; }
-  </style>
-</head>
-<body>
-  <h1>{{name}}</h1>
-  <p>{{description}}</p>
-  <button id="btn">点击调用 llm.chat</button>
-  <pre id="out"></pre>
-  <script>
-    // client 插件：window.sdk 由宿主在 iframe 加载前注入。
-    // TS 用户可：import type { ClientPluginEntry } from '@lingfang/plugin-sdk/types/client-entry'
-    //          然后声明：declare const sdk: ClientPluginEntry
-    /** @type {any} */
-    const sdk = window.sdk;
-    document.getElementById('btn').addEventListener('click', async () => {
-      if (!sdk?.llm?.chat) {
-        document.getElementById('out').textContent = '当前运行环境未注入 sdk.llm.chat';
-        return;
+  <head>
+    <meta charset="utf-8" />
+    <title>{{name}}</title>
+    <style>
+      :root {
+        color-scheme: light dark;
       }
-      const reply = await sdk.llm.chat({
-        messages: [{ role: 'user', content: '你好，请用一句话介绍 LingFang 平台。' }],
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 24px;
+        background: var(--lf-bg, #fff);
+        color: var(--lf-fg, #111);
+      }
+      button {
+        padding: 8px 16px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{name}}</h1>
+    <p>{{description}}</p>
+    <button id="btn">点击调用 llm.chat</button>
+    <pre id="out"></pre>
+    <script>
+      // client 插件：window.sdk 由宿主在 iframe 加载前注入。
+      // TS 用户可：import type { ClientPluginEntry } from '@lingfang/plugin-sdk/types/client-entry'
+      //          然后声明：declare const sdk: ClientPluginEntry
+      /** @type {any} */
+      const sdk = window.sdk;
+      document.getElementById('btn').addEventListener('click', async () => {
+        if (!sdk?.llm?.chat) {
+          document.getElementById('out').textContent = '当前运行环境未注入 sdk.llm.chat';
+          return;
+        }
+        const reply = await sdk.llm.chat({
+          messages: [{ role: 'user', content: '你好，请用一句话介绍 LingFang 平台。' }],
+        });
+        document.getElementById('out').textContent = reply;
       });
-      document.getElementById('out').textContent = reply;
-    });
-  </script>
-</body>
+    </script>
+  </body>
 </html>
 ```
 
@@ -322,6 +340,7 @@ type ManifestResult =
 **manifest.json.tmpl**：runtime_type="nodejs", entry="index.js"
 
 **index.js.tmpl**：
+
 ```js
 // {{name}} — Node.js 脚本插件
 // 通过 @lingfang/plugin-sdk 调用平台能力（推荐，比手写 fetch 桥客户端干净）
@@ -371,11 +390,14 @@ for (let port = PORT_BASE; port < PORT_BASE + 100; port++) {
     });
     console.log(`[{{name}}] 服务已启动：http://127.0.0.1:${port}`);
     break;
-  } catch { /* try next */ }
+  } catch {
+    /* try next */
+  }
 }
 ```
 
 **package.json.tmpl**：
+
 ```json
 {
   "name": "{{id}}",
@@ -395,6 +417,7 @@ for (let port = PORT_BASE; port < PORT_BASE + 100; port++) {
 **manifest.json.tmpl**：runtime_type="python", entry="main.py"
 
 **main.py.tmpl**（纯标准库 http.server，与 ai-python-example 风格一致）：
+
 ```python
 """{{name}} — Python 脚本插件"""
 import http.server
@@ -517,14 +540,14 @@ declare global {
 
 ## 6. 依赖论证
 
-| 依赖 | 用途 | 必要性 | 替代方案 | 决定 |
-|------|------|--------|---------|------|
-| `jszip` | build 命令打 zip | 必要（`.lfplugin` 是 zip） | `adm-zip` / `yazl+yauzl` / 自己写 | **保留 jszip**：事实标准，纯 JS，活跃维护 |
-| `tsx` (dev) | CLI 本地开发用 tsx 跑 TS | 仅 dev | `ts-node` / 自带 `--loader ts-node/esm` | **保留 tsx**：现代、ESM 友好 |
-| `commander` / `yargs` | CLI 参数解析 | **不要** | 自写 60 行 parser | **不用**：CLI 命令少（4 个），自写更轻 |
-| `inquirer` / `prompts` | 交互式提示 | **不要** | Node.js readline | **不用**：readline 已够用，避免额外依赖 |
-| `chalk` / `kolorist` | 终端着色 | **不要** | ANSI 转义自写 | **不用**：3 行函数搞定 |
-| `handlebars` | 模板变量替换 | **不要** | 自写 string.replace | **不用**：模板变量少 |
+| 依赖                   | 用途                     | 必要性                     | 替代方案                                | 决定                                      |
+| ---------------------- | ------------------------ | -------------------------- | --------------------------------------- | ----------------------------------------- |
+| `jszip`                | build 命令打 zip         | 必要（`.lfplugin` 是 zip） | `adm-zip` / `yazl+yauzl` / 自己写       | **保留 jszip**：事实标准，纯 JS，活跃维护 |
+| `tsx` (dev)            | CLI 本地开发用 tsx 跑 TS | 仅 dev                     | `ts-node` / 自带 `--loader ts-node/esm` | **保留 tsx**：现代、ESM 友好              |
+| `commander` / `yargs`  | CLI 参数解析             | **不要**                   | 自写 60 行 parser                       | **不用**：CLI 命令少（4 个），自写更轻    |
+| `inquirer` / `prompts` | 交互式提示               | **不要**                   | Node.js readline                        | **不用**：readline 已够用，避免额外依赖   |
+| `chalk` / `kolorist`   | 终端着色                 | **不要**                   | ANSI 转义自写                           | **不用**：3 行函数搞定                    |
+| `handlebars`           | 模板变量替换             | **不要**                   | 自写 string.replace                     | **不用**：模板变量少                      |
 
 **最终新增运行时依赖：`jszip` 一个**。
 
@@ -538,6 +561,7 @@ declare global {
 ## 8. 向后兼容证据
 
 实施时**逐字保留**：
+
 - `packages/plugin-sdk/src/index.ts` 第 1-292 行的所有 `export`（`sdk`、`PluginAiError`、`PluginAiErrorInit`、所有 type 别名）
 - `packages/plugin-sdk/src/index.spec.ts` 的 7 个测试用例全部继续通过
 - `package.json` 的 `main`、`type`、现有 `scripts.typecheck`、`scripts.test`
@@ -561,9 +585,9 @@ declare global {
 
 ## 11. 关键风险与缓解
 
-| 风险 | 概率 | 影响 | 缓解 |
-|------|------|------|------|
-| `.lfplugin` v4 格式反推错误 → build 产物桌面壳不认 | 中 | 高 | 实施第一步必须读 Rust 源码 + 用真实 `.lfplugin`（如有）反向解压对照 |
-| `publish` 端点要求 multipart 字段名未知 | 中 | 中 | 实施时用 `curl` 先打一次 `/api/plugin-registry/releases` 探字段名 |
-| 现有 8 个插件中某些 manifest 字段顺序混乱导致 Zod schema 严格化时失败 | 低 | 中 | Zod schema 不关心字段顺序；只关心结构。已确认 8 个现有插件均通过 schema 校验 |
-| nodejs 模板用 `import { sdk }` ESM，但桌面壳 spawn 用 `node index.js`（CommonJS）失败 | 高 | 高 | **必须**先验证 `plugin_runner.rs` 启动 nodejs 插件时是否 honors `package.json.type=module`。如果不 honors，模板必须改回 CommonJS（`require`）。这是 implement.md 第 0 步验证项。 |
+| 风险                                                                                  | 概率 | 影响 | 缓解                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ---- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.lfplugin` v4 格式反推错误 → build 产物桌面壳不认                                    | 中   | 高   | 实施第一步必须读 Rust 源码 + 用真实 `.lfplugin`（如有）反向解压对照                                                                                                              |
+| `publish` 端点要求 multipart 字段名未知                                               | 中   | 中   | 实施时用 `curl` 先打一次 `/api/plugin-registry/releases` 探字段名                                                                                                                |
+| 现有 8 个插件中某些 manifest 字段顺序混乱导致 Zod schema 严格化时失败                 | 低   | 中   | Zod schema 不关心字段顺序；只关心结构。已确认 8 个现有插件均通过 schema 校验                                                                                                     |
+| nodejs 模板用 `import { sdk }` ESM，但桌面壳 spawn 用 `node index.js`（CommonJS）失败 | 高   | 高   | **必须**先验证 `plugin_runner.rs` 启动 nodejs 插件时是否 honors `package.json.type=module`。如果不 honors，模板必须改回 CommonJS（`require`）。这是 implement.md 第 0 步验证项。 |

@@ -141,6 +141,7 @@ cd P:/lingfang-platform/apps/desktop && pnpm build
 - **Rollback point R3B**：后端改动完成 commit；回滚 = 还原 `pg_dump` 备份（恢复个人余额）+ 回退 `EconomyService`/`WalletController` 代码。
 
 ### 阶段 3-后续（本任务之外，仅标注）
+
 - [ ] **collab-admin 适配**：`users-view.tsx:287` 个人钱包 `wallet.balanceCents` 清零后恒 0，需配套改 collab-admin（`admin.service.ts:236` + 展示）。**本任务不改 collab-admin，交后续单独处理。**
 - [ ] **`DROP TABLE wallet/wallet_transaction`**：观察期（≥1 发布周期）后另议，本任务不做。
 
@@ -161,23 +162,23 @@ cd P:/lingfang-platform/apps/desktop && pnpm build
 
 ## Rollback point 汇总
 
-| 标记 | 位置 | 回退动作 |
-|------|------|---------|
-| R0 | 开工前 `edc08b6` | `git reset` / 丢弃工作区 |
-| R1 | R1 完成 | 回退阶段 1 改动（仅注释） |
-| R3 | R3 完成 | 回退 credit/relay 改动 + 删新增 spec |
-| R3A | R2 前端完成 | 恢复 TeamHome + Wallet 页 + 引用；删新「团队钱包」页 |
-| R3B | R2 后端完成 | 还原 `pg_dump` 备份（恢复个人余额）+ 回退 `EconomyService`/`WalletController` 代码 |
+| 标记 | 位置             | 回退动作                                                                           |
+| ---- | ---------------- | ---------------------------------------------------------------------------------- |
+| R0   | 开工前 `edc08b6` | `git reset` / 丢弃工作区                                                           |
+| R1   | R1 完成          | 回退阶段 1 改动（仅注释）                                                          |
+| R3   | R3 完成          | 回退 credit/relay 改动 + 删新增 spec                                               |
+| R3A  | R2 前端完成      | 恢复 TeamHome + Wallet 页 + 引用；删新「团队钱包」页                               |
+| R3B  | R2 后端完成      | 还原 `pg_dump` 备份（恢复个人余额）+ 回退 `EconomyService`/`WalletController` 代码 |
 
 ## 决策收口（用户已全部拍板，无悬挂待确认项）
 
-| # | 决策 | 结论 |
-|---|------|------|
-| 1 | 余额账户载体 | W2：复用 `Team.balanceCents`，不新建表 |
-| 2 | 存量个人余额 | 不搬运、直接清零（团队从 0 起，admin 充值）；`pg_dump` 备份可回滚 |
-| 3 | 卖家收益 | 进卖家当前/主团队 `Team.balanceCents` + `BalanceLedger(plugin_sale)` |
-| 4 | 注册赠送 ¥10 | 取消（团队灵石已有 signup_bonus） |
-| 5 | `/api/wallet` | `GET` 下线；`POST /purchase` 路径保留、改打团队余额 |
-| 6 | `DROP TABLE wallet/*` | 本任务不删，仅清零，观察期后另议 |
-| 7 | collab-admin 个人钱包展示 | 本任务之后单独处理 |
-| 8 | R1 `tier:*` scope 强校验 | 不启用 |
+| #   | 决策                      | 结论                                                                 |
+| --- | ------------------------- | -------------------------------------------------------------------- |
+| 1   | 余额账户载体              | W2：复用 `Team.balanceCents`，不新建表                               |
+| 2   | 存量个人余额              | 不搬运、直接清零（团队从 0 起，admin 充值）；`pg_dump` 备份可回滚    |
+| 3   | 卖家收益                  | 进卖家当前/主团队 `Team.balanceCents` + `BalanceLedger(plugin_sale)` |
+| 4   | 注册赠送 ¥10              | 取消（团队灵石已有 signup_bonus）                                    |
+| 5   | `/api/wallet`             | `GET` 下线；`POST /purchase` 路径保留、改打团队余额                  |
+| 6   | `DROP TABLE wallet/*`     | 本任务不删，仅清零，观察期后另议                                     |
+| 7   | collab-admin 个人钱包展示 | 本任务之后单独处理                                                   |
+| 8   | R1 `tier:*` scope 强校验  | 不启用                                                               |

@@ -13,11 +13,13 @@
 ## Requirements
 
 ### 功能性
+
 - **R1 详情页插件**（`detail-poster`）：保留原脚本全部 GUI 能力——提示词模板库、多模块批量生图、SKU/创意模块、换装/换脸模式、拼长图、主图生成、高清修复、颜色图工具、反推提示词。生图走桥 `/image/edit`，反推走桥 `/v1/chat/completions`。
 - **R2 换装批量版插件**（`outfit-batch`）：保留原脚本全部 GUI 能力——换装/换内搭/换头/裂变/创意/口令/批量换装多模式、多人模式、任务队列（并发/超时/重试）、预览区选择/拖拽/重命名、PNG→JPEG、高清放大。生图走桥 `/image/edit`。
 - **R3 档位选择**：两个插件 UI 提供 fast/premium 档位选择（替换原 API 分组/密钥设置），默认 fast。
 
 ### 约束（AI 政策合规）
+
 - **C1 源码零硬编码密钥**：删除所有 `sk-...` 及明文 API key/url 默认值。
 - **C2 桥环境变量无 fallback**：`LINGFANG_PLUGIN_BRIDGE_URL`/`_TOKEN` 读取不得带第二参数（`os.environ.get('X')` 无默认值），不 `print` 桥变量。
 - **C3 删除 AI 上下文里的自管配置字段**：源码不得出现 `api_key=`/`api_url=`/`base_url=`/`baseURL=`/`authorization=` 赋值（AI 上下文，含 `chat.completions`/`images.generat`/`openai` 等关键词的文件）。
@@ -25,6 +27,7 @@
 - **C5 第三方依赖合规**：requirements.txt 不得含 `anthropic`/`google-generativeai`/`dashscope` 等被禁 SDK；`openai` 可保留但本插件不使用。
 
 ### 工程
+
 - **E1 工程化适配**：硬编码 Windows 路径（字体 `C:\Users\admin\Documents\详情页\*.ttf`、图标 `app.ico`）去硬编码/降级处理；状态文件（`app_state.json`、`task_db.json` 等）落 `data/` 子目录（框架保证存在）。
 - **E2 打包**：每个插件产 `manifest.json` + 入口 `main.py` + `requirements.txt` + `README.md`，并打包成同名 `.lfplugin`（zip）放 `plugins/`。
 - **E3 依赖**：detail-poster → Pillow、requests、（可选 tkinterdnd2）；outfit-batch → PyQt5、Pillow、requests、psutil。

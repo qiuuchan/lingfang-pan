@@ -21,7 +21,8 @@
 变更：移除 `'generator'`。其余 `market`/`wallet`/`review` 已存在，无需新增。TenantSelect 不进 View（纯 Dialog）。
 
 ```ts
-export type View = 'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'market' | 'wallet' | 'review';
+export type View =
+  'home' | 'team' | 'team-manage' | 'plugins' | 'settings' | 'market' | 'wallet' | 'review';
 ```
 
 ### App.tsx 分支（`apps/desktop/src/App.tsx`）
@@ -46,7 +47,13 @@ Review 做双保险守卫：Sidebar 过滤 + App 分支内 `isPlatformAdmin` 判
 `NAV` 数组新增三项，并扩展过滤条件：
 
 ```ts
-interface NavItem { v: View; label: string; icon: LucideIcon; teamAdminOnly?: boolean; platformAdminOnly?: boolean }
+interface NavItem {
+  v: View;
+  label: string;
+  icon: LucideIcon;
+  teamAdminOnly?: boolean;
+  platformAdminOnly?: boolean;
+}
 
 const NAV: NavItem[] = [
   { v: 'home', label: '创建插件', icon: SparklesIcon },
@@ -59,9 +66,10 @@ const NAV: NavItem[] = [
   { v: 'settings', label: '设置', icon: SettingsIcon },
 ];
 
-const items = NAV.filter((n) =>
-  (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') &&
-  (!n.platformAdminOnly || session.isPlatformAdmin)
+const items = NAV.filter(
+  (n) =>
+    (!n.teamAdminOnly || session.role === 'TEAM_ADMIN') &&
+    (!n.platformAdminOnly || session.isPlatformAdmin)
 );
 ```
 
@@ -77,20 +85,20 @@ const items = NAV.filter((n) =>
 
 当前 1007 行，拆为：
 
-| 新文件 | 内容 | 预估行数 |
-|---|---|---|
-| `pages/PluginCreatorHome.tsx` | 主框架：状态编排、Tauri 事件监听、布局、Sheet 容器 | ~240 |
-| `lib/plugin-draft.ts` | 类型（CliProbeResult/AssistantSessionState 等）+ 工具函数（safePluginId/parseManifest/previewSrcDoc/buildLocalDraft/parseTranscript/transcriptText 等）+ 常量（PROVIDERS/EXAMPLES/STATUS_LABEL） | ~280 |
-| `components/creator/Composer.tsx` | 输入区 + provider/model 选择 + 发送/停止 | ~110 |
-| `components/creator/DetailsPanel.tsx` | Sheet 内容容器，组合各子面板 | ~90 |
-| `components/creator/panels/SessionStatusPanel.tsx` | 长任务状态 | ~80 |
-| `components/creator/panels/CreationStatusPanel.tsx` | 创建状态 + 诊断 | ~70 |
-| `components/creator/panels/PreviewPanel.tsx` | iframe 预览 | ~50 |
-| `components/creator/panels/SourcePanel.tsx` | 源码 Tabs | ~55 |
-| `components/creator/panels/CloudSharePanel.tsx` | 云端上传/市场提交 | ~75 |
-| `components/creator/panels/RecentPlugins.tsx` | 最近插件列表 | ~45 |
-| `components/chat/Bubble.tsx` | 对话气泡（user/assistant/error） | ~30 |
-| `components/chat/LiveProcess.tsx` | 流式生成过程卡片 | ~50 |
+| 新文件                                              | 内容                                                                                                                                                                                             | 预估行数 |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| `pages/PluginCreatorHome.tsx`                       | 主框架：状态编排、Tauri 事件监听、布局、Sheet 容器                                                                                                                                               | ~240     |
+| `lib/plugin-draft.ts`                               | 类型（CliProbeResult/AssistantSessionState 等）+ 工具函数（safePluginId/parseManifest/previewSrcDoc/buildLocalDraft/parseTranscript/transcriptText 等）+ 常量（PROVIDERS/EXAMPLES/STATUS_LABEL） | ~280     |
+| `components/creator/Composer.tsx`                   | 输入区 + provider/model 选择 + 发送/停止                                                                                                                                                         | ~110     |
+| `components/creator/DetailsPanel.tsx`               | Sheet 内容容器，组合各子面板                                                                                                                                                                     | ~90      |
+| `components/creator/panels/SessionStatusPanel.tsx`  | 长任务状态                                                                                                                                                                                       | ~80      |
+| `components/creator/panels/CreationStatusPanel.tsx` | 创建状态 + 诊断                                                                                                                                                                                  | ~70      |
+| `components/creator/panels/PreviewPanel.tsx`        | iframe 预览                                                                                                                                                                                      | ~50      |
+| `components/creator/panels/SourcePanel.tsx`         | 源码 Tabs                                                                                                                                                                                        | ~55      |
+| `components/creator/panels/CloudSharePanel.tsx`     | 云端上传/市场提交                                                                                                                                                                                | ~75      |
+| `components/creator/panels/RecentPlugins.tsx`       | 最近插件列表                                                                                                                                                                                     | ~45      |
+| `components/chat/Bubble.tsx`                        | 对话气泡（user/assistant/error）                                                                                                                                                                 | ~30      |
+| `components/chat/LiveProcess.tsx`                   | 流式生成过程卡片                                                                                                                                                                                 | ~50      |
 
 详情入口合并：Composer 不再传 `onOpenDetails`，主框架仅保留 header 的 `<SheetTrigger>`。
 
@@ -105,14 +113,20 @@ const items = NAV.filter((n) =>
 ```css
 @layer base {
   * {
-    scrollbar-width: none;          /* firefox */
+    scrollbar-width: none; /* firefox */
   }
   *::-webkit-scrollbar {
-    display: none;                  /* webkit/tauri webview */
+    display: none; /* webkit/tauri webview */
   }
-  * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground; }
-  html { @apply font-sans; }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
 }
 ```
 
@@ -120,24 +134,26 @@ const items = NAV.filter((n) =>
 
 ### 圆角规约
 
-| 类 | 用途 |
-|---|---|
-| `rounded-md` | Input/Textarea/小图标按钮 |
-| `rounded-lg` | 列表项、`divide-y border` 容器、pre 块 |
-| `rounded-xl` | Card（对齐 card 组件默认）、Sheet/Dialog |
-| `rounded-full` | 头像、badge 圆角、图标圆背景 |
+| 类             | 用途                                     |
+| -------------- | ---------------------------------------- |
+| `rounded-md`   | Input/Textarea/小图标按钮                |
+| `rounded-lg`   | 列表项、`divide-y border` 容器、pre 块   |
+| `rounded-xl`   | Card（对齐 card 组件默认）、Sheet/Dialog |
+| `rounded-full` | 头像、badge 圆角、图标圆背景             |
 
 全局清理：`rounded-2xl`/`rounded-3xl`/`rounded-4xl` 全部降级到 `rounded-xl`。
 
 ## 文案清理策略
 
 删除类别：
+
 1. 产品定位 badge（"AionUI 式单对话 · 本地代码助手 · 右侧详情"）
 2. 空状态长说明句（"直接自然描述目标……都在右侧详情里查看。"）
 3. 解释卡片用途的 `CardDescription`（"插件 iframe 预览。""团队共享和公共市场审核。""发送需求后显示本地代码助手的运行状态。"）
 4. 首屏废话副标题（"本地内置插件、你发布的插件、从市场安装的插件都在这里运行。"）
 
 保留类别：
+
 - 数据展示（"团队名 · 角色"、"⭐ 评分 · 下载数"——但 emoji 要换 lucide icon）
 - 必要操作提示（表单 placeholder、错误处理提示）
 - Dialog 内说明（发布到市场的价格说明，属必要交互信息）
@@ -146,19 +162,20 @@ const items = NAV.filter((n) =>
 
 ## 原生元素替换映射
 
-| 原生 | shadcn | 位置 | 备注 |
-|---|---|---|---|
-| `<button>` | `Button variant="ghost"/"outline"` | Sidebar NAV、RecentPlugins、Market 列表 | active 态用 className |
-| `<details>/<summary>` | `Collapsible` | LiveProcess 思考过程 | 需 `npx shadcn@latest add collapsapsible` |
-| `<input type=checkbox>` | `Checkbox` | Auth 管理员申请 | 需 `npx shadcn@latest add checkbox` |
-| `<table>` | `Table`/`TableHeader`/`TableRow`/`TableCell` | TeamManage | 需 `npx shadcn@latest add table` |
-| ⭐⬇ emoji / ★☆ 字符 | `Stars`（基于 `lucide` `StarIcon`） | Market | 新建小组件 |
+| 原生                    | shadcn                                       | 位置                                    | 备注                                      |
+| ----------------------- | -------------------------------------------- | --------------------------------------- | ----------------------------------------- |
+| `<button>`              | `Button variant="ghost"/"outline"`           | Sidebar NAV、RecentPlugins、Market 列表 | active 态用 className                     |
+| `<details>/<summary>`   | `Collapsible`                                | LiveProcess 思考过程                    | 需 `npx shadcn@latest add collapsapsible` |
+| `<input type=checkbox>` | `Checkbox`                                   | Auth 管理员申请                         | 需 `npx shadcn@latest add checkbox`       |
+| `<table>`               | `Table`/`TableHeader`/`TableRow`/`TableCell` | TeamManage                              | 需 `npx shadcn@latest add table`          |
+| ⭐⬇ emoji / ★☆ 字符     | `Stars`（基于 `lucide` `StarIcon`）          | Market                                  | 新建小组件                                |
 
 pre 块的 `overflow-auto`（调试性日志/源码）保留，仅隐藏其滚动条。
 
 ## 数据流
 
 不变。本次纯 UI 层改造：
+
 - 页面继续用本地 state + `useEffect` + `api()`。
 - `AppContext` 不新增字段（TenantSelect 已用现有 `applySession`）。
 - 路由跳转通过现有 `setView`。

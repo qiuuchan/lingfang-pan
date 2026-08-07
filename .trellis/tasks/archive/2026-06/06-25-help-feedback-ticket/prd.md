@@ -35,6 +35,7 @@ collab-admin 后台管理员可列表筛选工单、查看详情与附件、变�
 ## Requirements
 
 ### 数据模型
+
 - R1 `Ticket`:id、提交人 userId、teamId(可空)、category(枚举:bug/feature/account/other)、
   title、status(OPEN/IN_PROGRESS/RESOLVED/CLOSED)、priority(LOW/NORMAL/HIGH,默认 NORMAL)、
   handlerUserId(可空,最近处理管理员)、lastReplyAt、createdAt、updatedAt。
@@ -43,22 +44,26 @@ collab-admin 后台管理员可列表筛选工单、查看详情与附件、变�
   filename、storedName、mimeType、sizeBytes、kind(LOG/IMAGE/OTHER)、createdAt。
 
 ### 前台(desktop)
+
 - R4 「帮助与反馈」入口从外链改为打开应用内工单页面(新 page)。
 - R5 提交工单:选分类、填标题、填首条描述、上传附件(日志/图片);提交后进列表。
 - R6 工单列表:仅本人工单,显示标题/分类/状态/最近更新,点开看详情。
 - R7 工单详情:对话时间线(用户+管理员消息)、附件下载、可追加回复与附件;CLOSED 工单只读。
 
 ### 后台(collab-admin)
+
 - R8 工单列表 view:全部工单,按 status/category/team/关键词筛选 + 分页;显示提交人、团队、状态、优先级、最近更新。
 - R9 工单详情:对话时间线、附件下载、改 status/priority、追加管理员回复(可带附件)。
 - R10 顶级菜单「工单反馈」,受新权限码控制。
 
 ### 附件存储与下载
+
 - R11 上传走 multer `memoryStorage`/`diskStorage`,写 `uploads/tickets/<ticketId>/<随机名>`,不公开静态托管。
 - R12 下载接口 `GET /api/tickets/:id/attachments/:attachmentId`:鉴权后校验「本人 or 后台权限」,流式返回文件。
 - R13 限制:单文件 ≤ 10MB,单次 ≤ 5 个,允许 MIME:`text/*`、`application/json`、常见日志后缀、`image/png|jpeg|webp|gif`。
 
 ### 权限与通知
+
 - R14 新权限码:`platform.ticket.view`(查看)、`platform.ticket.manage`(处理/回复/改状态)。注册 + seed。
 - R15 管理员回复或改状态时,触发 `NotificationService.create` 通知提交人(try/catch 包裹,不阻塞)。
 

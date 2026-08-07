@@ -36,7 +36,7 @@
 ### 步骤 1：扩展契约 RuntimeType
 
 - [ ] 编辑 `packages/contract/src/plugin.ts:4`：
-  `z.enum(['client', 'cloud'])` → `z.enum(['client', 'cloud', 'nodejs', 'python'])`
+      `z.enum(['client', 'cloud'])` → `z.enum(['client', 'cloud', 'nodejs', 'python'])`
 - [ ] `PluginManifest`（`:29-39`）无需单独改（`runtime_type: RuntimeType.default('client')` 自动跟随）。
 - [ ] **验证**：
   ```powershell
@@ -58,7 +58,10 @@
   - `:130` **修头号陷阱**：替换 `runtime === 'client' ? 'CLIENT' : 'CLOUD'` 为显式映射表：
     ```ts
     const RUNTIME_TYPE_MAP: Record<string, 'CLIENT' | 'CLOUD' | 'NODEJS' | 'PYTHON'> = {
-      client: 'CLIENT', cloud: 'CLOUD', nodejs: 'NODEJS', python: 'PYTHON',
+      client: 'CLIENT',
+      cloud: 'CLOUD',
+      nodejs: 'NODEJS',
+      python: 'PYTHON',
     };
     const runtimeType = RUNTIME_TYPE_MAP[runtime] ?? 'CLIENT';
     ```
@@ -202,12 +205,12 @@
 
 ## 8. Review Gate（关键检查点汇总）
 
-| Gate | 触发点 | 检查项 | 验证命令 |
-|---|---|---|---|
-| A | 契约+后端+迁移完成（步骤 3 后） | RuntimeType 四值、映射表修复、enum 迁移应用 | `pnpm --filter @lingfang/contract typecheck && pnpm --filter collab-api typecheck && pnpm --filter collab-api test` + `psql \dT "PluginRuntimeType"` |
-| B | Rust 命令完成（步骤 6 后） | 可见性提升不破坏现有测试、新命令单测全绿 | `cargo test -p lingfang-desktop && cargo build -p lingfang-desktop` |
-| C | 前端完成（步骤 9 后） | 分派逻辑、typecheck、build | `pnpm --filter desktop typecheck && pnpm --filter desktop build` |
-| D | 端到端（步骤 10 后，依赖 R2） | AC3 Node/Python 预览 + 缺失降级 | 手动预览验证 |
+| Gate | 触发点                          | 检查项                                      | 验证命令                                                                                                                                             |
+| ---- | ------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A    | 契约+后端+迁移完成（步骤 3 后） | RuntimeType 四值、映射表修复、enum 迁移应用 | `pnpm --filter @lingfang/contract typecheck && pnpm --filter collab-api typecheck && pnpm --filter collab-api test` + `psql \dT "PluginRuntimeType"` |
+| B    | Rust 命令完成（步骤 6 后）      | 可见性提升不破坏现有测试、新命令单测全绿    | `cargo test -p lingfang-desktop && cargo build -p lingfang-desktop`                                                                                  |
+| C    | 前端完成（步骤 9 后）           | 分派逻辑、typecheck、build                  | `pnpm --filter desktop typecheck && pnpm --filter desktop build`                                                                                     |
+| D    | 端到端（步骤 10 后，依赖 R2）   | AC3 Node/Python 预览 + 缺失降级             | 手动预览验证                                                                                                                                         |
 
 每个 gate 失败即止，不进入下一阶段。连续三次失败暂停，回 design 复盘（父 CLAUDE.md 要求）。
 
@@ -215,12 +218,12 @@
 
 ## 9. 回滚点
 
-| 回滚点 | 范围 | 策略 |
-|---|---|---|
-| RP1 | 契约/后端/迁移（commit at gate A） | `git revert <commit>`。Prisma enum 扩展无害可保留（ADD VALUE 无法 DROP，保留即等于禁用）。 |
-| RP2 | Rust 命令（commit at gate B） | `git revert <commit>`：移除 `mod plugin_script;` + 两命令注册 + 可见性改回私有。 |
-| RP3 | 前端（commit at gate C） | `git revert <commit>`：PreviewPanel 回退纯 iframe。 |
-| 整体 | 全部 | 按 RP1→RP2→RP3 顺序 revert（依赖倒序）。enum 扩展保留不影响 client/cloud 现有流程。 |
+| 回滚点 | 范围                               | 策略                                                                                       |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| RP1    | 契约/后端/迁移（commit at gate A） | `git revert <commit>`。Prisma enum 扩展无害可保留（ADD VALUE 无法 DROP，保留即等于禁用）。 |
+| RP2    | Rust 命令（commit at gate B）      | `git revert <commit>`：移除 `mod plugin_script;` + 两命令注册 + 可见性改回私有。           |
+| RP3    | 前端（commit at gate C）           | `git revert <commit>`：PreviewPanel 回退纯 iframe。                                        |
+| 整体   | 全部                               | 按 RP1→RP2→RP3 顺序 revert（依赖倒序）。enum 扩展保留不影响 client/cloud 现有流程。        |
 
 ---
 

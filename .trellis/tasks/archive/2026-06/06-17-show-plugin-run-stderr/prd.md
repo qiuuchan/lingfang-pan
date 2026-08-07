@@ -3,6 +3,7 @@
 ## Goal
 
 插件运行（start_plugin）崩溃时，用户只看到「无法启动」/「运行中」，看不到 Python/Node 真实异常，无法定位是插件代码 bug。两步改进：
+
 1. **展示 stderr**：spawn 后短暂等待判定是否秒退，秒退则捕获 stderr 展示给用户（如 `AttributeError: 'str' object has no attribute 'value'`）。
 2. **一键修复**：错误卡片加「让 AI 修复」按钮，把 stderr + 修复指令作为追问送回创建器的 AI 会话（走 send_input --resume），AI 在原上下文（它生成过插件代码）里定位修复、重写文件，用户再运行验证。
 

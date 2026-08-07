@@ -28,39 +28,47 @@
 ### 1. Code audit inventory
 
 输入条件：
+
 - 当前工作树源码、`package.json` / package-level manifest、`Cargo.toml`、现有 `.trellis/spec/`。
 - 排除 `node_modules`、构建产物、锁文件、生成 schema 和历史证据文件。
 
 输出条件：
+
 - 生成可复查的代码审计清单，包含大文件清单、测试命令矩阵、spec 覆盖矩阵、风险模块、问题列表和后续任务输入。
 
 ### 2. Spec update
 
 输入条件：
+
 - Code audit inventory 的审计结果。
 - 当前 `.trellis/spec/**` 文档和实际代码行为。
 
 输出条件：
+
 - 更新后的 Trellis spec，反映当前代码边界、质量命令、模块拆分约束和已废弃实现说明。
 
 ### 3. Quality fixes
 
 输入条件：
+
 - 审计问题清单。
 - 更新后的 spec。
 - 现有测试、类型检查和构建命令。
 
 输出条件：
+
 - 规范问题被修复，自动化检查通过或失败原因被明确记录，且不引入静默 fallback、mock 成功路径或防御性遮蔽错误。
 
 ### 4. Large file refactor
 
 输入条件：
+
 - 超大源码候选清单。
 - 对应模块 spec 和现有测试。
 - 拆分前的行为基线。
 
 输出条件：
+
 - 超过 1500 行的源码文件必须拆分；1000 到 1500 行的源码文件按职责复杂度拆分或写明保留理由。
 - 拆分后模块职责清晰，公开 API 稳定，相关检查通过。
 

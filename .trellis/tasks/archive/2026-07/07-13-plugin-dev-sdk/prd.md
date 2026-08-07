@@ -10,6 +10,7 @@
 ## Background
 
 **现状（已勘探确认）**：
+
 - `packages/plugin-sdk` v0.0.6，292 行，只是 `__lingfangInvoke` 桥的 8 组类型化包装 + localhost fallback。
 - **现有 8 个插件全部不 `import @lingfang/plugin-sdk`**：`client` 走宿主注入的 `window.sdk`，`nodejs`/`python` 自己内联 fetch 桥客户端。
 - **没有任何 CLI、模板、manifest 校验器**。

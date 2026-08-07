@@ -7,12 +7,14 @@
 ## 范围
 
 ### 1. SMTP 后台设置（admin settings 页配置，运行时生效）
+
 - SMTP 配置（smtpUrl/smtpFrom/smtpUser/smtpPass）从 .env 改为**后台 PlatformSetting 表存储**，admin settings 页可编辑。
 - mail.service 运行时读 PlatformSetting（缓存），不重启即生效。
 - .env 的 SMTP_URL 作为**初始化 fallback**（首次启动无后台配置时用 env）。
 - admin settings 页已有 SMTP 展示区（组A 之前加），补编辑表单 + 保存。
 
 ### 2. 密码重试锁定（防暴力破解）
+
 - 登录失败 N 次（默认 5）锁定账户 15 分钟。
 - 实现：
   - User 加 `failedLoginAttempts Int @default(0)` + `lockedUntil DateTime?` 字段（迁移）。
@@ -22,6 +24,7 @@
   - 区别于 throttler（throttler 按 IP 限流，这个按账户锁定）。
 
 ### 3. 极验 V4 验证码（登录/注册/找回密码）
+
 - 后端：
   - PlatformSetting 存 geetestCaptchaId + geetestCaptchaKey（admin 配置）。
   - 新 geetest.service.ts：validate(lot_number, captcha_output, pass_token, gen_time) → 调 `http://gcaptcha4.geetest.com/validate`（HMAC-SHA256(captchaKey, lot_number) 签名）。异常容灾（极验挂了不阻断，降级放行 + 日志）。
@@ -32,6 +35,7 @@
   - 验证通过后把 4 参数随登录/注册请求带给后端。
 
 ### 4. 首次启动安装向导
+
 - 后端：
   - GET /api/setup/status（@Public）：返 `{ needsSetup: boolean }`（DB 有无 PLATFORM_ADMIN）。
   - POST /api/setup（@Public，仅 needsSetup=true 时可用，否则 403）：入参 { email, password, displayName, platformName }。

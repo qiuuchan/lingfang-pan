@@ -29,6 +29,7 @@
 ### R3 后端适配 Tauri updater 契约端点（collab-api）
 
 Tauri updater 期望 endpoint 返回固定 JSON：`{version, pub_date, url, signature, notes}`（单 asset）。当前 `/api/releases/latest` 返回业务结构（assets 数组）。**新增** `GET /api/releases/tauri-update?channel=&platform=&arch=&current_version=`：
+
 - `@Public`。
 - 复用 `releaseService.latest()` 拿业务结构。
 - 挑出 platform/arch 匹配的单个 asset。

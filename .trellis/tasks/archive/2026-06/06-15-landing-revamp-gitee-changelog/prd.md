@@ -3,6 +3,7 @@
 ## Goal
 
 围绕 `apps/collab-admin` 落地页（未登录态）与 `apps/collab-api` 后端，完成 5 项交付：
+
 1. 首页「system — topology」动画美化（用动画替代 ASCII 静态框）
 2. 删掉 architecture section（含「单后端一个平台 / 契约先行」文案）+ 顶部导航「架构」入口
 3. 更新日志从 Gitee 私有仓库 release 拉取（地址 `https://gitee.com/yijianruyuan/lingfang`），管理平台可配置密钥

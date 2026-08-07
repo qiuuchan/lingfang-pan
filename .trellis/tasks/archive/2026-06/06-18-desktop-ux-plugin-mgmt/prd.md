@@ -15,14 +15,14 @@
 
 ## 子任务地图
 
-| 子任务目录 | 标题 | 复杂度 | 主要改动面 |
-| --- | --- | --- | --- |
-| 06-18-fix-plugin-iframe-click | 修复插件进入后无法点击 | 轻量 | 桌面前端 dialog.tsx |
-| 06-18-llm-chat-title | 大模型生成聊天标题 | 复杂 | collab-api + 桌面前端 |
-| 06-18-plugin-status-refresh | 插件运行状态支持刷新 | 轻量 | 桌面前端 PluginList |
-| 06-18-fix-wallet-table-padding | 修复余额流水表格贴边 | 轻量 | collab-admin 样式 |
-| 06-18-author-plugin-management | 作者侧插件管理 | 复杂 | collab-api + 桌面前端新页面 |
-| 06-18-beautify-ai-response | 美化 AI 回复渲染 | 轻量 | 桌面前端 markdown.tsx + prompt |
+| 子任务目录                     | 标题                   | 复杂度 | 主要改动面                     |
+| ------------------------------ | ---------------------- | ------ | ------------------------------ |
+| 06-18-fix-plugin-iframe-click  | 修复插件进入后无法点击 | 轻量   | 桌面前端 dialog.tsx            |
+| 06-18-llm-chat-title           | 大模型生成聊天标题     | 复杂   | collab-api + 桌面前端          |
+| 06-18-plugin-status-refresh    | 插件运行状态支持刷新   | 轻量   | 桌面前端 PluginList            |
+| 06-18-fix-wallet-table-padding | 修复余额流水表格贴边   | 轻量   | collab-admin 样式              |
+| 06-18-author-plugin-management | 作者侧插件管理         | 复杂   | collab-api + 桌面前端新页面    |
+| 06-18-beautify-ai-response     | 美化 AI 回复渲染       | 轻量   | 桌面前端 markdown.tsx + prompt |
 
 ## 子任务排序与依赖
 

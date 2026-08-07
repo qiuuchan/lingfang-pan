@@ -5,12 +5,14 @@
 ## 1. 26 条裁决（对抗评审综合，精简版）
 
 用户 4 个决策对综合方案的调整（**已采纳，覆盖原 B1/B3**）：
+
 - **D1（用户）apiKey 云端加密存储、跨电脑**：推翻原 B1 的 keychain 方案。后端 AES-256-GCM 密文存库为**唯一真源**；新增 `POST /api/llm/binding/:gatewayId/decrypt` 端点（ensureTeamAdmin + 强审计）按需解密下发明文。**砍掉** `keyring` crate 和 `llm_keychain.rs`。
 - **D2（用户）provider 平台管理 + seed 默认值**：provider 不写死 enum，`LlmGateway.provider` 为 String；应用 seed 一批默认网关。
 - **D3（用户）仅 Windows 安装**：cli_installer 只 winget；macOS/Linux 返回 `Unsupported`。
 - **D4（用户）半装检测+清理**：超时/失败后检测残留并 `winget uninstall` 清理。
 
 其余裁决（B2-B26 精简）：
+
 - **B2 契约单一真源**：`packages/contract/src/llm.ts` 重建 zod schema，前后端共用，ErrorCode 新增 6 个。
 - **B3 事件名**：`code-assistant://availability-changed`（与 main.rs:232 一致）+ install 用 `install-cli://done`。
 - **B4 可见性**：`kill_child_tree`/`minimal_env` 提升 `pub(crate)`；不复用 `redact_arg`（范畴错），cli_installer 新写 `redact_log_line`。
@@ -94,16 +96,16 @@ model TenantLlmBinding {
 ```ts
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 
-const IV_LEN = 12;   // GCM 推荐 12 字节
+const IV_LEN = 12; // GCM 推荐 12 字节
 const TAG_LEN = 16;
-const KEY_LEN = 32;  // AES-256
+const KEY_LEN = 32; // AES-256
 
 /** 启动期 fail-fast 解析密钥；缺失/格式错返回 null（由 main.ts 决定 throw/warn）。 */
 export function requireKeyEncryptionKey(): Buffer | null {
   const raw = process.env.LLM_KEY_ENCRYPTION_KEY;
   if (!raw) return null;
   if (!/^[0-9a-fA-F]{64}$/.test(raw)) return null; // 必须 64 位 hex
-  return Buffer.from(raw, 'hex');                  // → 32 字节
+  return Buffer.from(raw, 'hex'); // → 32 字节
 }
 
 /** 加密：返回 base64(iv || tag || ciphertext)，每次新 IV。 */
@@ -120,16 +122,22 @@ export function fingerprintApiKey(plain: string): string;
 ```
 
 **main.ts 断言**（复刻 JWT_SECRET 模式，main.ts:24-29）：
+
 ```ts
 const llmKey = requireKeyEncryptionKey();
 if (!llmKey) {
-  if (process.env.NODE_ENV === 'production') throw new Error('启动失败：必须设置 LLM_KEY_ENCRYPTION_KEY（64 位 hex，openssl rand -hex 32 生成）');
+  if (process.env.NODE_ENV === 'production')
+    throw new Error(
+      '启动失败：必须设置 LLM_KEY_ENCRYPTION_KEY（64 位 hex，openssl rand -hex 32 生成）'
+    );
   console.warn('[安全警告] LLM_KEY_ENCRYPTION_KEY 未设置，开发环境继续，生产将拒绝启动。');
 }
 ```
+
 密钥在 `main.ts` bootstrap 内解析后注入 `LlmService`（通过 Nest DI provider 或 module token），不重复解析。
 
 **`.env.example` 追加**（apps/collab-api/.env.example:9 后）：
+
 ```
 # apiKey 加密密钥（64 位 hex，openssl rand -hex 32 生成；生产必设，不入 git）
 LLM_KEY_ENCRYPTION_KEY=""
@@ -139,24 +147,24 @@ LLM_KEY_ENCRYPTION_KEY=""
 
 ### 4.1 平台 Admin 网关目录（挂 AdminController，ensurePlatformAdmin）
 
-| 方法 | 路径 | 入参 DTO | 出参 |
-|---|---|---|---|
-| GET | `/api/admin/llm-gateways` | — | `{ gateways: LlmGateway[] }`（含 DISABLED + 全字段） |
-| POST | `/api/admin/llm-gateways` | `GatewayCreateDto{provider,name,apiUrl,models?,description?,sortOrder?,status?}` | `{ gateway }` |
-| PATCH | `/api/admin/llm-gateways/:id` | `GatewayUpdateDto`（全可选） | `{ gateway }` |
-| PATCH | `/api/admin/llm-gateways/:id/status` | `{status:'ENABLED'\|'DISABLED'}` | `{ gateway }`（软删除） |
+| 方法  | 路径                                 | 入参 DTO                                                                         | 出参                                                 |
+| ----- | ------------------------------------ | -------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| GET   | `/api/admin/llm-gateways`            | —                                                                                | `{ gateways: LlmGateway[] }`（含 DISABLED + 全字段） |
+| POST  | `/api/admin/llm-gateways`            | `GatewayCreateDto{provider,name,apiUrl,models?,description?,sortOrder?,status?}` | `{ gateway }`                                        |
+| PATCH | `/api/admin/llm-gateways/:id`        | `GatewayUpdateDto`（全可选）                                                     | `{ gateway }`                                        |
+| PATCH | `/api/admin/llm-gateways/:id/status` | `{status:'ENABLED'\|'DISABLED'}`                                                 | `{ gateway }`（软删除）                              |
 
 **无 DELETE 端点**（B8）。binding 上 `onDelete: Restrict`，禁用网关不删绑定。
 
 ### 4.2 租户级（新 LlmController @Controller('llm')）
 
-| 方法 | 路径 | 鉴权 | 入参 | 出参 |
-|---|---|---|---|---|
-| GET | `/api/llm/gateways` | ensureCurrentTeam | — | `{ gateways: [{id,provider,name,apiUrl,models,description,sortOrder}] }`（仅 ENABLED） |
-| GET | `/api/llm/binding` | ensureCurrentTeam | — | `{ bindings: TenantBindingPublic[] }`（脱敏，零解密） |
-| PUT | `/api/llm/binding` | ensureTeamAdmin | `BindingUpsertDto{gatewayId,apiKey?,enabled?,modelOverride?}` | `{ binding }`（$transaction+audit） |
-| DELETE | `/api/llm/binding/:gatewayId` | ensureTeamAdmin | — | `{ ok:true }`（$transaction+audit） |
-| POST | `/api/llm/binding/:gatewayId/decrypt` | ensureTeamAdmin | — | `{ apiKey: string }`（$transaction+audit，强审计） |
+| 方法   | 路径                                  | 鉴权              | 入参                                                          | 出参                                                                                   |
+| ------ | ------------------------------------- | ----------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| GET    | `/api/llm/gateways`                   | ensureCurrentTeam | —                                                             | `{ gateways: [{id,provider,name,apiUrl,models,description,sortOrder}] }`（仅 ENABLED） |
+| GET    | `/api/llm/binding`                    | ensureCurrentTeam | —                                                             | `{ bindings: TenantBindingPublic[] }`（脱敏，零解密）                                  |
+| PUT    | `/api/llm/binding`                    | ensureTeamAdmin   | `BindingUpsertDto{gatewayId,apiKey?,enabled?,modelOverride?}` | `{ binding }`（$transaction+audit）                                                    |
+| DELETE | `/api/llm/binding/:gatewayId`         | ensureTeamAdmin   | —                                                             | `{ ok:true }`（$transaction+audit）                                                    |
+| POST   | `/api/llm/binding/:gatewayId/decrypt` | ensureTeamAdmin   | —                                                             | `{ apiKey: string }`（$transaction+audit，强审计）                                     |
 
 **TenantBindingPublic**（GET 出参单条）：`{id, gatewayId, provider, gatewayName, apiUrl, gatewayStatus, enabled, apiKeyHint, keyFingerprint, gatewayModels: string[], modelOverride: string[]|null, effectiveModels: string[], updatedBy?:{id,displayName}, updatedAt}`。
 
@@ -178,21 +186,32 @@ LLM_KEY_ENCRYPTION_KEY=""
 `apps/collab-api/src/modules/dto/llm.dto.ts`：
 
 ```ts
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class GatewayCreateDto {
   @IsString() @MinLength(1) provider: string;
   @IsString() @MinLength(1) name: string;
-  @IsString() @MinLength(1) apiUrl: string;           // 服务端规范化去尾斜杠
+  @IsString() @MinLength(1) apiUrl: string; // 服务端规范化去尾斜杠
   @IsOptional() @IsArray() @IsString({ each: true }) models?: string[];
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsInt() @Min(0) sortOrder?: number;
   @IsOptional() @IsEnum(['ENABLED', 'DISABLED']) status?: 'ENABLED' | 'DISABLED';
 }
-export class GatewayUpdateDto { /* 全可选，同上字段 */ }
+export class GatewayUpdateDto {
+  /* 全可选，同上字段 */
+}
 export class BindingUpsertDto {
   @IsString() gatewayId: string;
-  @IsOptional() @IsString() @MinLength(1) apiKey?: string;  // undefined=保留原密
+  @IsOptional() @IsString() @MinLength(1) apiKey?: string; // undefined=保留原密
   @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsArray() @IsString({ each: true }) modelOverride?: string[] | null;
 }
@@ -213,11 +232,11 @@ export class GatewayStatusDto {
 
 ### 6.2 新增命令
 
-| 命令 | 入参 | 出参 |
-|---|---|---|
-| `install_cli` | `{target:'claude'\|'codex'\|'opencode'}` | `Result<InstallResult, String>` |
-| `install_runtime` | `{target:'nodejs'\|'python'}` | `Result<InstallResult, String>` |
-| `cancel_install` | `{target: InstallTarget}` | `Result<(), String>` |
+| 命令              | 入参                                     | 出参                            |
+| ----------------- | ---------------------------------------- | ------------------------------- |
+| `install_cli`     | `{target:'claude'\|'codex'\|'opencode'}` | `Result<InstallResult, String>` |
+| `install_runtime` | `{target:'nodejs'\|'python'}`            | `Result<InstallResult, String>` |
+| `cancel_install`  | `{target: InstallTarget}`                | `Result<(), String>`            |
 
 ```rust
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -361,6 +380,7 @@ export function Settings() {
 ### 7.2 CliRuntimeTab（新 `pages/settings/CliRuntimeTab.tsx`）
 
 5 行：3 CLI（list_tools 取 claude/codex/opencode）+ 2 运行时（probe_script_runtime nodejs/python）。每行：
+
 - 名称（Claude Code / Codex / opencode / Node.js / Python）
 - 版本（`version` 字段）+ 路径（`binary_path`，可折叠）
 - 状态 Badge（已装=green / 未装=muted / 检测中=spinner）
@@ -389,17 +409,28 @@ export function Settings() {
 import { z } from 'zod';
 
 export const LlmGatewayPublicSchema = z.object({
-  id: z.string(), provider: z.string(), name: z.string(), apiUrl: z.string(),
-  models: z.array(z.string()).default([]), description: z.string().default(''),
+  id: z.string(),
+  provider: z.string(),
+  name: z.string(),
+  apiUrl: z.string(),
+  models: z.array(z.string()).default([]),
+  description: z.string().default(''),
   sortOrder: z.number().default(0),
 });
 export type LlmGatewayPublic = z.infer<typeof LlmGatewayPublicSchema>;
 
 export const TenantBindingPublicSchema = z.object({
-  id: z.string(), gatewayId: z.string(), provider: z.string(), gatewayName: z.string(),
-  apiUrl: z.string(), gatewayStatus: z.enum(['ENABLED','DISABLED']), enabled: z.boolean(),
-  apiKeyHint: z.string(), keyFingerprint: z.string(),
-  gatewayModels: z.array(z.string()), modelOverride: z.array(z.string()).nullable(),
+  id: z.string(),
+  gatewayId: z.string(),
+  provider: z.string(),
+  gatewayName: z.string(),
+  apiUrl: z.string(),
+  gatewayStatus: z.enum(['ENABLED', 'DISABLED']),
+  enabled: z.boolean(),
+  apiKeyHint: z.string(),
+  keyFingerprint: z.string(),
+  gatewayModels: z.array(z.string()),
+  modelOverride: z.array(z.string()).nullable(),
   effectiveModels: z.array(z.string()),
   updatedBy: z.object({ id: z.string(), displayName: z.string() }).nullable(),
   updatedAt: z.string(),
@@ -407,15 +438,21 @@ export const TenantBindingPublicSchema = z.object({
 export type TenantBindingPublic = z.infer<typeof TenantBindingPublicSchema>;
 
 export const BindingUpsertInputSchema = z.object({
-  gatewayId: z.string(), apiKey: z.string().min(1).optional(),
-  enabled: z.boolean().optional(), modelOverride: z.array(z.string()).nullable().optional(),
+  gatewayId: z.string(),
+  apiKey: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+  modelOverride: z.array(z.string()).nullable().optional(),
 });
 export type BindingUpsertInput = z.infer<typeof BindingUpsertInputSchema>;
 
 export const GatewayCreateInputSchema = z.object({
-  provider: z.string().min(1), name: z.string().min(1), apiUrl: z.string().min(1),
-  models: z.array(z.string()).optional(), description: z.string().optional(),
-  sortOrder: z.number().min(0).optional(), status: z.enum(['ENABLED','DISABLED']).optional(),
+  provider: z.string().min(1),
+  name: z.string().min(1),
+  apiUrl: z.string().min(1),
+  models: z.array(z.string()).optional(),
+  description: z.string().optional(),
+  sortOrder: z.number().min(0).optional(),
+  status: z.enum(['ENABLED', 'DISABLED']).optional(),
 });
 export type GatewayCreateInput = z.infer<typeof GatewayCreateInputSchema>;
 
@@ -424,8 +461,12 @@ export type GatewayUpdateInput = z.infer<typeof GatewayUpdateInputSchema>;
 
 // ErrorCode 追加（保留现有 ErrorCode，extend）
 export const LlmErrorCode = z.enum([
-  'gateway_disabled','binding_not_found','llm_key_decrypt_failed',
-  'llm_key_not_configured','install_unsupported','install_failed',
+  'gateway_disabled',
+  'binding_not_found',
+  'llm_key_decrypt_failed',
+  'llm_key_not_configured',
+  'install_unsupported',
+  'install_failed',
 ]);
 ```
 
@@ -435,12 +476,48 @@ export const LlmErrorCode = z.enum([
 
 ```ts
 const DEFAULT_GATEWAYS = [
-  { provider:'openai',    name:'OpenAI 官方',    apiUrl:'https://api.openai.com/v1',      models:['gpt-4o','gpt-4o-mini'], sortOrder:1 },
-  { provider:'anthropic', name:'Anthropic 官方', apiUrl:'https://api.anthropic.com',       models:['claude-sonnet-4-6','claude-opus-4-8'], sortOrder:2 },
-  { provider:'deepseek',  name:'DeepSeek',       apiUrl:'https://api.deepseek.com',         models:['deepseek-chat','deepseek-reasoner'], sortOrder:3 },
-  { provider:'moonshot',  name:'月之暗面 Kimi',   apiUrl:'https://api.moonshot.cn/v1',      models:['moonshot-v1-8k','moonshot-v1-32k'], sortOrder:4 },
-  { provider:'qwen',      name:'通义千问',        apiUrl:'https://dashscope.aliyuncs.com/compatible-mode/v1', models:['qwen-max','qwen-plus'], sortOrder:5 },
-  { provider:'azure',     name:'Azure OpenAI',   apiUrl:'https://<your-resource>.openai.azure.com', models:['gpt-4o','gpt-4o-mini'], sortOrder:6 },
+  {
+    provider: 'openai',
+    name: 'OpenAI 官方',
+    apiUrl: 'https://api.openai.com/v1',
+    models: ['gpt-4o', 'gpt-4o-mini'],
+    sortOrder: 1,
+  },
+  {
+    provider: 'anthropic',
+    name: 'Anthropic 官方',
+    apiUrl: 'https://api.anthropic.com',
+    models: ['claude-sonnet-4-6', 'claude-opus-4-8'],
+    sortOrder: 2,
+  },
+  {
+    provider: 'deepseek',
+    name: 'DeepSeek',
+    apiUrl: 'https://api.deepseek.com',
+    models: ['deepseek-chat', 'deepseek-reasoner'],
+    sortOrder: 3,
+  },
+  {
+    provider: 'moonshot',
+    name: '月之暗面 Kimi',
+    apiUrl: 'https://api.moonshot.cn/v1',
+    models: ['moonshot-v1-8k', 'moonshot-v1-32k'],
+    sortOrder: 4,
+  },
+  {
+    provider: 'qwen',
+    name: '通义千问',
+    apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen-max', 'qwen-plus'],
+    sortOrder: 5,
+  },
+  {
+    provider: 'azure',
+    name: 'Azure OpenAI',
+    apiUrl: 'https://<your-resource>.openai.azure.com',
+    models: ['gpt-4o', 'gpt-4o-mini'],
+    sortOrder: 6,
+  },
 ];
 // upsert by name（幂等，重复 seed 不报错）
 ```

@@ -15,22 +15,22 @@
 文件：apps/desktop/src-tauri/src/plugin_runner.rs
 
 Node.js 分支（第 1452-1486 行）：
+
 - 判断依据：manifest.entry（约定为 index.js）
 - 两条路径：
   - 有 scripts.start（第 1475 行）：pnpm start（或 npm start 回退）
   - 无 scripts.start（第 1483 行）：node <entry_abs>（裸 node 直跑）
 
 spawn 调用（第 1568-1576 行）：
-`
-let mut command = std::process::Command::new(&binary);
-command.current_dir(&plugin_dir).args(&args).env_clear().envs(env);
-`
+`let mut command = std::process::Command::new(&binary);
+command.current_dir(&plugin_dir).args(&args).env_clear().envs(env);`
 
 ### 2. 预览试跑流程（run_plugin_script）
 
 文件：apps/desktop/src-tauri/src/plugin_script.rs
 
 流程（第 441-611 行）：
+
 1. materialize_sandbox：把所有文件写到临时沙箱目录（含 package.json + index.js）
 2. ensure_node_dependencies：在沙箱目录安装依赖
 3. run_capture_with_env：运行 node <entry_canon>，cwd=沙箱目录
@@ -44,13 +44,13 @@ runtime.env（runtime_resolver.rs 第 247-279 行）：替换 PATH 为内置运�
 
 ### 4. 内置插件现状
 
-| 插件 | package.json | type 字段 | 模块语法 |
-|------|-------------|-----------|---------|
-| game-2048 | 有 | commonjs | require() |
-| ai-demo | 无 | N/A | require() |
-| ai-example | 无 | N/A | - |
-| calculator | 无 | N/A | - |
-| notes | 无 | N/A | - |
+| 插件       | package.json | type 字段 | 模块语法  |
+| ---------- | ------------ | --------- | --------- |
+| game-2048  | 有           | commonjs  | require() |
+| ai-demo    | 无           | N/A       | require() |
+| ai-example | 无           | N/A       | -         |
+| calculator | 无           | N/A       | -         |
+| notes      | 无           | N/A       | -         |
 
 全部内置插件均使用 CommonJS。暂无 ESM 先例。
 

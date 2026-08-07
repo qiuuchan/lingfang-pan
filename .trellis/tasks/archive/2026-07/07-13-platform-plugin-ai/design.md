@@ -18,13 +18,13 @@ Node/Python -> localhost bridge + 会话 token -----/
 
 ## 2. 模块边界
 
-| 模块 | 职责 |
-| --- | --- |
-| `packages/plugin-sdk` | 薄类型客户端、脚本 bridge fallback、结构化插件 AI 错误 |
-| `apps/desktop` | 绑定当前插件、注入 bridge、开发检查/试跑、来源标记 |
+| 模块                     | 职责                                                                 |
+| ------------------------ | -------------------------------------------------------------------- |
+| `packages/plugin-sdk`    | 薄类型客户端、脚本 bridge fallback、结构化插件 AI 错误               |
+| `apps/desktop`           | 绑定当前插件、注入 bridge、开发检查/试跑、来源标记                   |
 | `apps/desktop/src-tauri` | localhost token、capability gate、JWT 隔离、relay 转发、进程生命周期 |
-| `apps/collab-api` | JWT/团队校验、政策扫描、渠道路由、额度、计费与调用日志 |
-| `apps/collab-admin` | 平台渠道、定价、团队额度与调用日志；不再管理外部 relay Key |
+| `apps/collab-api`        | JWT/团队校验、政策扫描、渠道路由、额度、计费与调用日志               |
+| `apps/collab-admin`      | 平台渠道、定价、团队额度与调用日志；不再管理外部 relay Key           |
 
 平台管理员仍在渠道管理中配置上游 `baseUrl` 和加密 Key。这是平台内部运营能力，不进入插件 manifest、设置或运行参数。
 

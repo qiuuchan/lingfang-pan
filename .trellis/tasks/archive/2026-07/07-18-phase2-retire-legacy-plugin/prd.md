@@ -19,6 +19,7 @@ legacy `Plugin` 表完全退役：存量数据迁进 v4，旧上传/旧审核/�
 ## Scope
 
 预期改动面：
+
 - **数据迁移**：legacy `Plugin` → v4 `PluginPackage`+`PluginRelease`+`MarketplaceListing`；含购买、安装、评分、授权和审核历史的归属对齐。
 - **接口下线**：`POST /api/plugins/upload`（`uploadPlugin`）、`GET /api/admin/plugins/review-pending`、legacy `marketplace.service` 残余端点 → 返回 410 Gone 或删除。
 - **前端下线**：collab-admin legacy 插件审核页/编辑页、桌面端任何 legacy `/api/plugins/*` 残余调用（如 `plugin-ai-policy.ts` 的 `/api/plugins/policy/check` 迁移或确认废弃）。

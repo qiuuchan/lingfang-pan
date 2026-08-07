@@ -151,7 +151,12 @@ DTO 是显式 discriminated union：
 type ScheduleTrigger =
   | { kind: 'once'; run_at: IsoDateTime }
   | { kind: 'daily'; time_zone: IanaZone; local_time: 'HH:mm' }
-  | { kind: 'weekly'; time_zone: IanaZone; day_of_week: 1|2|3|4|5|6|7; local_time: 'HH:mm' };
+  | {
+      kind: 'weekly';
+      time_zone: IanaZone;
+      day_of_week: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+      local_time: 'HH:mm';
+    };
 ```
 
 - `luxon` 3.x 验证 IANA zone并生成用户预览；服务端生成内部 6-field cron pattern，客户端从不提交 cron。

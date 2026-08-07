@@ -19,14 +19,15 @@ CreatorDraftPanel / 工具卡片重构 / import-local）留下的未定义函数
 用户已确认「不管它，由那边补齐」。待 upsertToolPart 补齐后，全量构建即可恢复绿色，
 本任务无需再改动。
 
-
 ## 阶段 0：准备
+
 - [ ] 前端校验命令（apps/desktop/package.json 已确认）：
       `pnpm --filter @lingfang/desktop typecheck`（tsc --noEmit）+
       `pnpm --filter @lingfang/desktop vite:build`（vite 前端构建，比 `build`=tauri build 轻量）。
 - [ ] 测试命令：`pnpm --filter @lingfang/desktop test`（vitest run，已有 *.spec.ts）。
 
 ## 阶段 A：删除插件图标（低风险）
+
 - [ ] `LocalPluginRow.tsx`：`LocalPluginSummary` 删 `<PluginIcon>`，收紧左侧布局。
 - [ ] `TeamPluginRow.tsx`：删 `<PluginIcon>`（行 78）+ import。
 - [ ] `MarketplacePluginsSection.tsx`：删 `<PluginIcon>`（行 119）+ import。
@@ -38,6 +39,7 @@ CreatorDraftPanel / 工具卡片重构 / import-local）留下的未定义函数
 - [ ] 提交 A。
 
 ## 阶段 D：一键 AI 修复打通（最高价值）
+
 - [ ] `App.tsx`：扩展 AppContext —— 用结构化 `pendingAutoFix: { prompt; plugin } | null` +
       `setPendingAutoFix` 替换（或并存）`pendingAutoFixPrompt`。更新 interface（行 76）+ state（行 285）+
       ctx 装配（行 624）。
@@ -51,6 +53,7 @@ CreatorDraftPanel / 工具卡片重构 / import-local）留下的未定义函数
 - [ ] 提交 D。
 
 ## 阶段 C：完善启动报错（依赖 creator-error，已存在）
+
 - [ ] `PluginRunner.tsx` `RunnerBody`：HTML 加载错误纯文本 → `ErrorBubble`（toCreatorError）。
       必要时在 `creator-error.ts` 加 kind（如 `entry_read_failed`）或复用 `unknown` 带 raw。
 - [ ] 错误态统一挂「让 AI 修复」按钮（仅 AI 可修 kind：plugin_crashed/run_failed/manifest_missing）。
@@ -58,11 +61,9 @@ CreatorDraftPanel / 工具卡片重构 / import-local）留下的未定义函数
 - [ ] 提交 C。
 
 ## 阶段 B：统一启动中转页（行为变更，风险最高，放最后）
+
 - [ ] 提炼 `StartProgressView`（现 ScriptPreviewPanel 内）为共享组件 `PluginStartProgress.tsx`。
-- [ ] `PluginRunner.tsx` 引入 `LaunchState`（launching/ready/error）状态机：
-      - client：loadPluginDocument 期间 launching；成功 ready→iframe；失败 error。
-      - script：startPlugin onProgress 驱动 launching.stage；成功 running；失败 error。
-      - cloud：launching 一闪 → ready（notice）。
+- [ ] `PluginRunner.tsx` 引入 `LaunchState`（launching/ready/error）状态机：- client：loadPluginDocument 期间 launching；成功 ready→iframe；失败 error。- script：startPlugin onProgress 驱动 launching.stage；成功 running；失败 error。- cloud：launching 一闪 → ready（notice）。
 - [ ] `LocalPluginRow.RunButton`：脚本类「运行」改为「打开」进 Runner 中转页（统一入口），
       下线行内 `startPlugin + toast` 直跑路径（保留 running 态行内「停止」可选）。
 - [ ] 中转页错误态接 C 的 ErrorBubble + D 的「让 AI 修复」。
@@ -71,6 +72,7 @@ CreatorDraftPanel / 工具卡片重构 / import-local）留下的未定义函数
 - [ ] 提交 B。
 
 ## 阶段 收尾
+
 - [ ] 类型检查 `pnpm --filter @lingfang/desktop typecheck` 通过。
 - [ ] 前端构建 `pnpm --filter @lingfang/desktop vite:build` 通过。
 - [ ] 运行测试 `pnpm --filter @lingfang/desktop test` 通过。
@@ -78,14 +80,17 @@ CreatorDraftPanel / 工具卡片重构 / import-local）留下的未定义函数
 - [ ] 自检 PRD 全部 AC 勾选。
 
 ## 风险点 / 回滚
+
 - B 的入口行为变更影响最大 → 单独提交，问题可单独 revert。
 - D 的 AppContext 结构化替换 → 生产端+消费端必须同批提交。
 - 全程检查 `pendingAutoFixPrompt` 残留引用（grep 确认仅 App.tsx + use-plugin-runner-actions）。
 
 ## 验证命令
+
 ```bash
 pnpm --filter @lingfang/desktop typecheck
 pnpm --filter @lingfang/desktop vite:build
 pnpm --filter @lingfang/desktop test
 ```
+
 </content>

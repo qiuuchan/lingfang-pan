@@ -16,12 +16,14 @@
 ## Requirements
 
 ### 功能性
+
 - **R1 待审核直列页**：后台新增「待审核发行版」视图，列出所有 `marketReviewStatus='PENDING'` 的 `PluginRelease`（消费 `review-pending`），每条显示：插件包名/manifestId、版本、所属团队、提交时间、AI 政策状态、来源（desktop/api）。
 - **R2 一键进入审批**：每条可进 `plugin-package-sheet`（既有抽屉）定位到该 release，直接 approve/reject（复用 `approvePluginRelease`/`rejectPluginRelease`）。
 - **R3 主入口**：Dashboard「待审核插件发行版」计数卡片点击 → 跳到该直列页；主导航「插件审核」入口指向 v4 直列页。
 - **R4 legacy 降级**：旧 legacy 插件审核页（`/admin/plugins/review-pending`，查 `Plugin`）从主导航移除；路由保留但标注「仅历史 legacy 数据」并加跳转提示到 v4 页（legacy `Plugin` 完全退役留到 phase2）。
 
 ### 约束
+
 - **C1 不动后端审核逻辑**：`pendingReviews`/`approveRelease` 等已就绪，本阶段以**前端消费**为主；仅在接口缺分页/筛选时做最小后端补强。
 - **C2 不碰 legacy 数据**：legacy `Plugin` 表与旧上传接口保持原样，本阶段只调整后台「入口路由」。
 - **C3 权限不变**：沿用 `platform.plugin.review` 权限码。

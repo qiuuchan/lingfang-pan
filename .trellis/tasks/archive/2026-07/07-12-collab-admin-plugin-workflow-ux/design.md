@@ -139,7 +139,7 @@ GET /api/admin/team-admin-applications/:id
 审核动作使用事务内条件更新抢占：
 
 ```ts
-updateMany({ where: { id, marketReviewStatus: 'PENDING' }, data: nextState })
+updateMany({ where: { id, marketReviewStatus: 'PENDING' }, data: nextState });
 ```
 
 影响行数不是 1 时返回 `409 conflict`，失败者不得写 review、audit、team、membership 或通知。
@@ -188,4 +188,3 @@ Settings 拆为基础、邮件、安全、发布源、搜索五个 Tab。默认�
 - Frontend: typecheck/build；网络请求断言；详情竞态；移动响应式。
 - Visual: 1440x900、1024x768、768x1024、390x844、360x800、1280x720。
 - Accessibility: Sheet focus trap、ESC、焦点归还、背景滚动锁、按钮 aria-label 和键盘行入口。
-

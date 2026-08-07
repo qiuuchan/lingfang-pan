@@ -45,17 +45,17 @@
 
 新建 `apps/desktop/src/lib/agent/tools.ts`，用 `@openai/agents` 的 `tool()`，全部指向 `plugins_root/{id}/`：
 
-| 新工具（PascalCase） | 替代 | execute |
-|---|---|---|
-| `Read` | read_draft_file | `read_plugin_file_in_root` |
-| `Write` | patch_draft_file（整写） | `write_plugin_file` |
-| `Edit` | patch_draft_file（替换） | 读→字符串替换→写；**未 Read 过则报错** |
-| `Glob` | list_draft_files | `list_plugin_files` |
-| `CreatePlugin` | stage_plugin | 建目录 + manifest(draft:true) + 脚手架 |
-| `WebSearch` | web_search | `/api/search` |
-| `Check` | check_plugin | 复用 `validateStagedCompleteness` 等校验 |
-| `AskQuestion` | ask_question | 走框架 HITL（`needsApproval`/interruptions） |
-| `ListTeamPlugins` | list_team_plugins | `/api/plugins` |
+| 新工具（PascalCase） | 替代                     | execute                                      |
+| -------------------- | ------------------------ | -------------------------------------------- |
+| `Read`               | read_draft_file          | `read_plugin_file_in_root`                   |
+| `Write`              | patch_draft_file（整写） | `write_plugin_file`                          |
+| `Edit`               | patch_draft_file（替换） | 读→字符串替换→写；**未 Read 过则报错**       |
+| `Glob`               | list_draft_files         | `list_plugin_files`                          |
+| `CreatePlugin`       | stage_plugin             | 建目录 + manifest(draft:true) + 脚手架       |
+| `WebSearch`          | web_search               | `/api/search`                                |
+| `Check`              | check_plugin             | 复用 `validateStagedCompleteness` 等校验     |
+| `AskQuestion`        | ask_question             | 走框架 HITL（`needsApproval`/interruptions） |
+| `ListTeamPlugins`    | list_team_plugins        | `/api/plugins`                               |
 
 - read-before-edit 用一个 per-run 的 readPaths Set 跟踪。
 - 保留 `creator-tools.ts` 里的纯校验函数（`validateStagedCompleteness`/`isSafePath`/`buildStagedManifest`），只换工具壳。

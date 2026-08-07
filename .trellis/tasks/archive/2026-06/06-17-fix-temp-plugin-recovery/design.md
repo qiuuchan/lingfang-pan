@@ -13,6 +13,7 @@
 ## 层1：Rust 友好错误（parse_manifest）
 
 当前 `plugin_runner.rs:68`：
+
 ```rust
 let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
     format!("读取 manifest.json 失败（{}）：{e}", manifest_path.display())
@@ -20,6 +21,7 @@ let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
 ```
 
 改为区分错误类型，文件不存在返回 `manifest_missing:` 前缀（与 `interpreter_missing:` 同款前缀约定，前端可识别）：
+
 ```rust
 let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
     if e.kind() == std::io::ErrorKind::NotFound {
@@ -31,6 +33,7 @@ let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
 ```
 
 前端 `ScriptPreviewPanel.handleStart`(line 158) 已有 `interpreter_missing:` 前缀分支，加 `manifest_missing:` 分支：
+
 ```ts
 } else if (message.startsWith('manifest_missing:')) {
   setPersistentRun({ status: 'error', error: { /* 引导文案 */ } });
@@ -40,6 +43,7 @@ let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
 ## 层2：前端草稿恢复校验
 
 `PluginCreatorHome` 草稿恢复时（读 activeId → readDraft → setCurrentDraft + setPluginId），加校验：
+
 - 若恢复的草稿含 pluginId，调 `scanPluginStatus(pluginId)` 或 `read_plugin_file(pluginId, 'manifest.json')` 探测目录有效性。
 - 无效（manifest 不存在）→ 标记草稿 `status: 'incomplete'` + 设 `pluginIncomplete: true` state。
 - UI：`ScriptPreviewPanel` 接 `pluginIncomplete` prop，为 true 时禁用「运行」按钮 + 显示「该插件未生成完成，继续对话让 AI 补全」引导。
@@ -51,6 +55,7 @@ let raw = std::fs::read_to_string(&manifest_path).map_err(|e| {
 ## 层3：启动清理空 temp 目录
 
 `PluginStore::new`(plugin_store.rs:148) 初始化末尾加清理：
+
 ```rust
 pub fn new(app_data_dir: &Path) -> Result<Self, String> {
     // ... 现有初始化 ...

@@ -27,18 +27,18 @@
 
 ## Shared Contract Ownership
 
-| Contract | Owning child task | Consumers |
-|---|---|---|
-| PolicyAction、PolicySubject、PolicyDecision、PolicyVersion、PackagePolicySurfaceV1 | 团队插件策略与治理 | registry、action、workflow、cloud、shared、Web |
-| PluginAction、ActionDependency、ActionSurfaceDigest、InvocationPrincipal、InvocationEnvelope、ActionInvocation | 跨插件 Action 调用 | governance adapter、workflow、cloud、SDK、desktop、Web preview |
-| Restricted JSON Schema、ArtifactRef、RuntimeArtifactGrant/Hold/HANDOFF_PENDING | 跨插件 Action 调用 | workflow、cloud、shared、Web |
-| WorkflowDefinition、WorkflowVersion、WorkflowNode、field mapping | 工作流插件平台 | cloud、desktop、Web |
-| WorkflowRun/StepRun 状态契约 | 工作流插件平台 | cloud worker、Web、desktop、quality |
-| Durable queue、schedule、deployment、transport delivery/lease transition | Cloud 插件与定时自动化 | workflow-owned run reducer、preview、operations |
-| SharedNamespace、SharedValue、SharedChangeEvent | 插件共享数据与协作状态 | action、workflow、cloud、desktop |
-| QualityTier、QualitySnapshot、RecommendationSection | 市场质量与推荐 | desktop、Web、admin |
-| EffectivePrice、internal priceRevision、opaque string priceVersion/expectedPriceVersion、MarketplaceCommerceFactsPort、Settlement、Refund、Promotion | 市场结算与营销 | quality、purchase、desktop、Web、admin |
-| PublicPluginCard、PluginDetail、PreviewSession、CloudTrialProjection | Web 插件中心与预览 | apps/web、collab-api；projection 导入 action-owned invocation 状态 |
+| Contract                                                                                                                                             | Owning child task      | Consumers                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------ |
+| PolicyAction、PolicySubject、PolicyDecision、PolicyVersion、PackagePolicySurfaceV1                                                                   | 团队插件策略与治理     | registry、action、workflow、cloud、shared、Web                     |
+| PluginAction、ActionDependency、ActionSurfaceDigest、InvocationPrincipal、InvocationEnvelope、ActionInvocation                                       | 跨插件 Action 调用     | governance adapter、workflow、cloud、SDK、desktop、Web preview     |
+| Restricted JSON Schema、ArtifactRef、RuntimeArtifactGrant/Hold/HANDOFF_PENDING                                                                       | 跨插件 Action 调用     | workflow、cloud、shared、Web                                       |
+| WorkflowDefinition、WorkflowVersion、WorkflowNode、field mapping                                                                                     | 工作流插件平台         | cloud、desktop、Web                                                |
+| WorkflowRun/StepRun 状态契约                                                                                                                         | 工作流插件平台         | cloud worker、Web、desktop、quality                                |
+| Durable queue、schedule、deployment、transport delivery/lease transition                                                                             | Cloud 插件与定时自动化 | workflow-owned run reducer、preview、operations                    |
+| SharedNamespace、SharedValue、SharedChangeEvent                                                                                                      | 插件共享数据与协作状态 | action、workflow、cloud、desktop                                   |
+| QualityTier、QualitySnapshot、RecommendationSection                                                                                                  | 市场质量与推荐         | desktop、Web、admin                                                |
+| EffectivePrice、internal priceRevision、opaque string priceVersion/expectedPriceVersion、MarketplaceCommerceFactsPort、Settlement、Refund、Promotion | 市场结算与营销         | quality、purchase、desktop、Web、admin                             |
+| PublicPluginCard、PluginDetail、PreviewSession、CloudTrialProjection                                                                                 | Web 插件中心与预览     | apps/web、collab-api；projection 导入 action-owned invocation 状态 |
 
 同名字段只在 owning child 的 contract 模块定义。消费者导入 decoder 与投影，不复制枚举或在 UI 中重建状态机。
 

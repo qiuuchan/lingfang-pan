@@ -67,6 +67,7 @@ Plugin 模型需补：`purchases Purchase[]`、`ratings PluginRating[]`。
 ## 业务逻辑（翻译自 server，但用 Prisma）
 
 ### Wallet（EconomyService）
+
 - `getWallet(userId)`：`ensureWallet`（upsert，首次 balance=1000 赠送）→ 查最近 100 条 WalletTransaction
 - `purchase(userId, pluginId)`：
   1. 查 plugin（marketplace + APPROVED + priceCents>0）
@@ -77,6 +78,7 @@ Plugin 模型需补：`purchases Purchase[]`、`ratings PluginRating[]`。
 Prisma 条件扣款用 `prisma.wallet.updateMany({ where: { userId, balanceCents: { gte: price } }, data: { balanceCents: { decrement: price } } })`，`count===0` 即余额不足。
 
 ### Marketplace（MarketplaceService）
+
 - `search(q, sort)`：查 Plugin（marketplace+APPROVED+ENABLED），关键词 LIKE name/description，左连 ratings 算 avg。Prisma 需 `findMany + include ratings + 内存聚合`（或 `groupBy`）。排序 installs/rating/recent
 - `detail(userId, pluginId)`：查 plugin + ratings + 用户是否 Purchase + 本团队是否 PluginInstallation + can_rate 判定
 - `install(userId, pluginId)`：付费校验 Purchase；`$transaction` upsert PluginInstallation + plugin.installCount++

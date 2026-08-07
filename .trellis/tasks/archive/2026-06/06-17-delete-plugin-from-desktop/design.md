@@ -3,6 +3,7 @@
 ## 架构与边界
 
 三层改动：
+
 - **Rust 本地删除**：plugin_runner.rs `delete_plugin` 命令（stop 进程 + remove_dir_all 目录）。
 - **后端云端删除**：plugin.service 加 `deleteByAuthor` + admin.service 加 `adminDeletePlugin`；plugins.controller + admin.controller 加 DELETE 端点。
 - **前端**：Plugins.tsx 本地删除按钮 + PluginList.tsx 作者云端删除按钮 + admin plugins-view admin 删除按钮。
@@ -35,6 +36,7 @@ pub fn delete_plugin(
 ### 作者删（DELETE /api/plugins/:id）
 
 `plugin.service.ts` 加 `deleteByAuthor(userId, id)`：
+
 ```ts
 async deleteByAuthor(userId: string, id: string) {
   const plugin = await this.prisma.plugin.findUnique({ where: { id }, select: { id: true, authorUserId: true, marketplace: true, name: true } });
@@ -46,11 +48,13 @@ async deleteByAuthor(userId: string, id: string) {
   await this.audit(userId, 'plugin.deleted', 'Plugin', id, { name: plugin.name });
 }
 ```
+
 plugins.controller 加 `@Delete(':id')` → `deleteByAuthor(requireUser(req).id, id)`。
 
 ### admin 删（DELETE /api/admin/plugins/:id）
 
 `admin.service.ts` 加 `adminDeletePlugin(actorId, id)`：
+
 ```ts
 async adminDeletePlugin(actorId: string, id: string) {
   await this.auth.ensurePlatformAdmin(actorId);
@@ -61,6 +65,7 @@ async adminDeletePlugin(actorId: string, id: string) {
   await this.audit(actorId, 'admin.plugin.deleted', 'Plugin', id, { name: plugin.name, wasMarketplace: plugin.marketplace });
 }
 ```
+
 admin.controller 加 `@Delete('plugins/:id')` → `adminDeletePlugin(requireUser(req).id, id)`。
 
 **级联**：PluginInstallation / Purchase / PluginReview 都 `onDelete: Cascade`，Prisma `plugin.delete` 自动级联删，无需手动清。
@@ -68,16 +73,20 @@ admin.controller 加 `@Delete('plugins/:id')` → `adminDeletePlugin(requireUser
 ## 前端
 
 ### 桌面 Plugins.tsx（本地删除）
+
 本地插件（非 builtin）加「删除」按钮 → 二次确认 → deletePlugin(pluginId) → onRefresh。
 
 ### 桌面 PluginList.tsx（作者云端删除）
+
 作者插件（source==='team'）加「删除」按钮：
+
 - 二次确认（提示「云端记录 + 本地目录都将删除」）。
 - 调 DELETE /api/plugins/:id。
 - 成功后调 deletePlugin(pluginId) 清本地目录（若本地有）+ 刷新列表。
 - 已上架（marketplace=true）后端返 conflict → toast「已上架，先联系管理员下架」。
 
 ### admin plugins-view（admin 删除）
+
 插件行加「删除」按钮 → 二次确认（提示「级联删安装/购买记录，不可恢复」）→ DELETE /api/admin/plugins/:id → 刷新。
 
 ## 安全

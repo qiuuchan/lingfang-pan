@@ -39,6 +39,7 @@
 ### 批 2A：`collab-api.md` 全量改造（改为索引导航，详见 design.md §3）
 
 **委派 prompt 要点**：
+
 - 真源：`apps/collab-api/src/common/` 下的守卫 / 装饰器 / 异常过滤器
 - 输出：≤80 行中文文档，含鉴权概述 + 错误格式 + 分页 + 限流 + 示例 curl
 - 风格：按 design.md §7
@@ -47,6 +48,7 @@
 ### 批 2B：`02-domain-and-plugins.md` 全量重写
 
 **委派 prompt 要点**：
+
 - 真源：`packages/contract/src/*.ts` 全部 9 个 schema 文件
 - 必须覆盖：identity / plugin / plugin-registry / admin-governance / draft / llm / rbac / billing / semver 全部领域
 - 输出：领域边界 + 实体关系 + 状态机 + 契约文件路径索引
@@ -55,6 +57,7 @@
 ### 批 2C：`collab-admin-guide.md` 全量重写
 
 **委派 prompt 要点**：
+
 - 真源：`apps/collab-admin/src/components/admins/` 全部子目录 + `apps/collab-api/src/modules/admin-*` + `apps/collab-api/src/modules/admin/*.controller.ts`
 - 必须覆盖：仪表板、用户、团队、插件（含注册表）、应用、审批、审计、计费（pools/channels/pricing/credits/call-logs）、模型服务、平台设置、角色权限、发布、搜索配置、工单
 - 每个功能：位置（左导航路径）+ 配置项 + 后端端点索引
@@ -62,6 +65,7 @@
 ### 批 2D：`billing-and-relay-design.md` 全量重写
 
 **委派 prompt 要点**：
+
 - 真源：
   - `apps/collab-api/src/modules/billing.controller.ts`（含 2026-06-23 重构注释）
   - `apps/collab-api/src/modules/pool.service.ts` / `channel.service.ts` / `credit.service.ts` / `pricing.service.ts`
@@ -72,6 +76,7 @@
 ### 批 2E：`collab-desktop-client.md` 全量重写
 
 **委派 prompt 要点**：
+
 - 真源：
   - `apps/desktop/src/pages/*.tsx`（PluginCreator / Plugins / Settings / Market / Team / Wallet / Auth 等）
   - `apps/desktop/src/lib/cli/` + `conversations/` + `plugin-draft/` + `updater/`
@@ -126,6 +131,7 @@ grep -nE '4174|file-explorer|system-info|todo-list' docs/*.md
 8 篇文档 + README，按 design.md §4 顺序写。
 
 可委派并行：
+
 - 4A：README + 01-manifest + 02-runtimes（一组子代理）
 - 4B：03-capabilities + 04-sdk-usage（依赖 Child A）
 - 4C：05-local-dev + 06-publish + 07-examples
@@ -149,11 +155,15 @@ grep -nE '\]\(' docs/plugin-development/*.md | grep -vE '\]\(\./|\]\(\.\./|\]\(h
 按 design.md §2 的 30 个文件清单，**4 批并行委派**：
 
 ### 批 5A（auth + me + teams + applications + plugins）— 5 个 controller
+
 ### 批 5B（plugin-registry + plugin-grants + marketplace + wallet + billing）— 5 个
+
 ### 批 5C（user-billing + notifications + search + tickets + releases + changelog + setup + platform-info）— 8 个
+
 ### 批 5D（relay + admin-users + admin-teams + admin-plugins + admin-roles + admin-applications + admin-audit + admin-stats + admin-releases + admin-settings）— 10 个
 
 每篇委派 prompt 模板：
+
 ```
 [CONTEXT]
 Active task: .trellis/tasks/07-13-docs-rewrite
@@ -179,6 +189,7 @@ Active task: .trellis/tasks/07-13-docs-rewrite
 ### 闸门
 
 每批完成后跑：
+
 ```bash
 # 自查：所有 controller 都被覆盖
 $controllers = Get-ChildItem apps/collab-api/src/modules -Filter *.controller.ts -Recurse
@@ -260,16 +271,16 @@ rm -rf tmp-sdk-test
 
 ## 预计耗时
 
-| 章节 | 时长 |
-|------|------|
-| §0 | 0.5h |
-| §1 | 0.2h |
-| §2 | 4h（并行 5 子代理） |
-| §3 | 1.5h |
-| §4 | 3h（并行 3 子代理） |
-| §5 | 5h（并行 4 批子代理） |
-| §6 | 1.5h |
-| §7 | 1h |
+| 章节     | 时长                                              |
+| -------- | ------------------------------------------------- |
+| §0       | 0.5h                                              |
+| §1       | 0.2h                                              |
+| §2       | 4h（并行 5 子代理）                               |
+| §3       | 1.5h                                              |
+| §4       | 3h（并行 3 子代理）                               |
+| §5       | 5h（并行 4 批子代理）                             |
+| §6       | 1.5h                                              |
+| §7       | 1h                                                |
 | **合计** | **~16.7h**（约 2 工作日，并行委派后墙钟时间更短） |
 
 ## Review Gates

@@ -151,6 +151,7 @@
 **本任务不涉及 `packages/contract` 变更**（RuntimeType 四值扩展属 R3 / `node-python-local-exec`，capabilities 修正属 R2 / `structured-output-parsing`）。
 
 本任务仅变更桌面壳本地态：
+
 1. Rust 内部接口 `build_args` 签名（内部，无外部消费者）。
 2. `SessionRecord.cli_session_id`（本地 `sessions.json` 落盘，`#[serde(default)]` 向后兼容）。
 3. `send_input` transcript event `input-rejected` → `input`（kind=followup）。
@@ -162,17 +163,18 @@
 
 ## 4. Review Gate（关键检查点）
 
-| Gate | 位置（step 后） | 检查项 | 负责人 |
-|------|----------------|--------|--------|
-| G1 适配器签名 | Step 1 后 | build_args 三适配器签名一致；claude resume 正确；调用点全更新；cargo test adapters 绿 | dev |
-| G2 session id 捕获 | Step 3 后 | system/result 行都能取 id；assistant 行不误取；只设一次；emit 正确 | dev |
-| G3 send_input 续接 | Step 5 后 | 复用 spawn 管线（无复制粘贴）；claude resume / 其他摘要分流正确；main.rs 透传 app | dev |
-| G4 前端分流 | Step 8-9 后 | send 不再清空；首问/追问分流；turns 累积；finally 保留 id | dev |
-| G5 错误友好 | Step 10 后 | 三类失败路径均有 Bubble 反馈；无裸 toast；无静默 | dev |
-| G6 端到端 | Step 11 后 | claude 真 + codex/opencode 伪 + 失败路径三场景符合断言 | dev |
-| G7 回归 | Step 12 后 | cargo test + pnpm typecheck + pnpm test 全绿；首轮不回归 | reviewer |
+| Gate               | 位置（step 后） | 检查项                                                                                | 负责人   |
+| ------------------ | --------------- | ------------------------------------------------------------------------------------- | -------- |
+| G1 适配器签名      | Step 1 后       | build_args 三适配器签名一致；claude resume 正确；调用点全更新；cargo test adapters 绿 | dev      |
+| G2 session id 捕获 | Step 3 后       | system/result 行都能取 id；assistant 行不误取；只设一次；emit 正确                    | dev      |
+| G3 send_input 续接 | Step 5 后       | 复用 spawn 管线（无复制粘贴）；claude resume / 其他摘要分流正确；main.rs 透传 app     | dev      |
+| G4 前端分流        | Step 8-9 后     | send 不再清空；首问/追问分流；turns 累积；finally 保留 id                             | dev      |
+| G5 错误友好        | Step 10 后      | 三类失败路径均有 Bubble 反馈；无裸 toast；无静默                                      | dev      |
+| G6 端到端          | Step 11 后      | claude 真 + codex/opencode 伪 + 失败路径三场景符合断言                                | dev      |
+| G7 回归            | Step 12 后      | cargo test + pnpm typecheck + pnpm test 全绿；首轮不回归                              | reviewer |
 
 **G3 / G4 是最高风险 gate**（状态机 + 生命周期），必须重点审查：
+
 - 追问期间 status 正确回到 running，exit 后回 exited。
 - `assistantSessionIdRef` 跨追问不串台（listener 过滤 `:104,123` 模式）。
 - 历史摘要截断后不超 Windows 命令行上限。
@@ -181,12 +183,12 @@
 
 ## 5. 回滚点
 
-| 回滚点 | 触发条件 | 回滚动作 | 影响面 |
-|--------|---------|---------|--------|
-| RP1 | Step 1-5 任一编译/测试失败 | 回退 build_args 签名（删 resume_id）；send_input 恢复硬编码拒绝（`code_assistant.rs:397-407` 原样） | 仅桌面壳内部，无契约影响 |
-| RP2 | Step 6 codex 探针失败 | codex 保持 degraded（历史摘要），不升级 native | codex 多轮仍可用（伪），不阻塞 |
-| RP3 | Step 11 claude session id 捕获不稳 | claude 自动降级为伪多轮（缺 id 即走摘要），UI 提示降级 | claude 多轮仍可用（伪），真续接待修 |
-| RP4 | Step 12 回归红 | 前端 `send()` 分流判断失败时 fallback 到 `startNewSession`（追问=新对话），保证可用 | 多轮退化为「每次新开」，不崩溃 |
-| RP5 | cli_session_id 字段引发 sessions.json 损坏 | `#[serde(default)]` 保证旧盘可读；手动删 sessions.json 重建（本地态，可丢） | 丢失本地 session 历史，无云端影响 |
+| 回滚点 | 触发条件                                   | 回滚动作                                                                                            | 影响面                              |
+| ------ | ------------------------------------------ | --------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| RP1    | Step 1-5 任一编译/测试失败                 | 回退 build_args 签名（删 resume_id）；send_input 恢复硬编码拒绝（`code_assistant.rs:397-407` 原样） | 仅桌面壳内部，无契约影响            |
+| RP2    | Step 6 codex 探针失败                      | codex 保持 degraded（历史摘要），不升级 native                                                      | codex 多轮仍可用（伪），不阻塞      |
+| RP3    | Step 11 claude session id 捕获不稳         | claude 自动降级为伪多轮（缺 id 即走摘要），UI 提示降级                                              | claude 多轮仍可用（伪），真续接待修 |
+| RP4    | Step 12 回归红                             | 前端 `send()` 分流判断失败时 fallback 到 `startNewSession`（追问=新对话），保证可用                 | 多轮退化为「每次新开」，不崩溃      |
+| RP5    | cli_session_id 字段引发 sessions.json 损坏 | `#[serde(default)]` 保证旧盘可读；手动删 sessions.json 重建（本地态，可丢）                         | 丢失本地 session 历史，无云端影响   |
 
 **最终回滚底线**：即使全部多轮能力失败，回退到「单轮 + 每次新对话」的改造前行为，前端 `newDraft`（`PluginCreatorHome.tsx:333-344`）始终可用，不阻塞父任务其他子任务。

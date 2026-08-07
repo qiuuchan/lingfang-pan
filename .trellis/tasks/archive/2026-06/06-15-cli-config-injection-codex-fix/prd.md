@@ -14,23 +14,25 @@
 
 ## 三 CLI 配置注入机制（已查 context7 官方文档）
 
-| CLI | 隔离机制 | 注入内容 | 注入方式 |
-|---|---|---|---|
-| **claude** | 环境变量（无需配置文件） | `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` | spawn 时 `.envs([...])`（最简单）|
-| **codex** | `CODEX_HOME=<临时目录>` | 临时目录放 `config.toml`：`[model_providers.lingfang]` + `base_url` + `api_key` + `wire_api`；`model_provider = "lingfang"` | spawn 时 `.env("CODEX_HOME", <临时目录>)` |
-| **opencode** | `OPENCODE_CONFIG=<临时文件.json>` | 临时 json：`provider.lingfang.options.{baseURL, apiKey}` + `model` | spawn 时 `.env("OPENCODE_CONFIG", <临时文件>)` |
+| CLI          | 隔离机制                          | 注入内容                                                                                                                    | 注入方式                                       |
+| ------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **claude**   | 环境变量（无需配置文件）          | `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`                                                                                  | spawn 时 `.envs([...])`（最简单）              |
+| **codex**    | `CODEX_HOME=<临时目录>`           | 临时目录放 `config.toml`：`[model_providers.lingfang]` + `base_url` + `api_key` + `wire_api`；`model_provider = "lingfang"` | spawn 时 `.env("CODEX_HOME", <临时目录>)`      |
+| **opencode** | `OPENCODE_CONFIG=<临时文件.json>` | 临时 json：`provider.lingfang.options.{baseURL, apiKey}` + `model`                                                          | spawn 时 `.env("OPENCODE_CONFIG", <临时文件>)` |
 
 **关键**：每个 CLI 都支持「指定独立配置」，天然不污染默认。claude 最简单（纯 env），codex/opencode 要生成临时配置文件（放 app_data/cli-configs/<sessionId>/）。
 
 ## codex 可用性修复（任务4）
 
 codex `exec` 当前问题：
+
 1. **无配置注入** → 用默认 OpenAI（用户没装 key 就失败）。修复：上面 CODEX_HOME + config.toml。
 2. **思考/工具输出未流式**：codex `exec` 默认输出是最终结果，要看思考+工具需 `--output-last-message` 或 json 流。查 codex 文档确认 `exec` 是否支持 `--json` 流式输出思考/工具（若不支持，codex 的思考/工具展示降级为「最终结果聚合」，与 claude 的 stream-json 不同，文档标注）。
 
 ## Scope（范围）
 
 ### R1 桌面 Rust：CLI 配置注入（新 `cli_config.rs`）
+
 - 新建 `apps/desktop/src-tauri/src/cli_config.rs`：
   - `prepare_cli_env(tool, api_key, api_url, session_id) -> Vec<(OsString, OsString)>`：按 tool 生成 env 列表：
     - claude：`[("ANTHROPIC_BASE_URL", api_url), ("ANTHROPIC_API_KEY", api_key)]`。
@@ -42,10 +44,12 @@ codex `exec` 当前问题：
   - 在 start_session 前先调这俩端点（桌面 Rust 内 fetch，或前端拿好传入 invoke）。
 
 ### R2 codex 可用性（codex.rs adapter）
+
 - `codex.rs build_args`：若 codex exec 支持 `--json` / 流式思考输出，加上；否则文档标注 codex 思考/工具为聚合输出（不流式）。
 - 查 codex exec 的输出 flag（context7 已查，需确认 `--output-last-message` / json 流）。
 
 ### R3 前端
+
 - ModelGatewayTab 已有 apiKey 输入 + active-provider。启动 CLI 时（PluginCreatorHome 的 start_session）自动带上 key+url（前端从 binding 解密拿 key，从 active-provider 拿 url，传给 start_session invoke）。
 - 或：桌面 Rust 内部自己调后端拿（更安全，key 不进前端）。**选 Rust 内部调**（key 不经前端 webview）。
 

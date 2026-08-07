@@ -15,7 +15,7 @@ type LocalPluginFilePayload = {
   path: string;
   content: string;
   binary: boolean;
-}
+};
 ```
 
 Rust 对 UTF-8 文件返回原文，对非 UTF-8 返回标准 base64。前端 `readWorkspaceFiles()` 成为唯一读取 helper；`persistDraftWorkspace()` 将文本批量写入，binary 文件走 `write_plugin_file_bytes`。

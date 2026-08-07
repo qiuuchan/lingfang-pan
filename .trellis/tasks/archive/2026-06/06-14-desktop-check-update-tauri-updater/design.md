@@ -11,7 +11,7 @@ Tauri updater 期望 endpoint（`endpoints` 配置的 URL）返回**固定 JSON 
   "version": "1.0.0",
   "pub_date": "2026-06-14T12:00:06.843Z",
   "url": "https://.../LingFang_1.0.0_x64-setup.exe",
-  "signature": "dW50cnVzdGVk...",   // base64 签名（Tauri minisign 格式）
+  "signature": "dW50cnVzdGVk...", // base64 签名（Tauri minisign 格式）
   "notes": "## changelog..."
 }
 ```
@@ -45,6 +45,7 @@ Tauri updater 期望 endpoint（`endpoints` 配置的 URL）返回**固定 JSON 
 ## 3. 后端端点（新 `/api/releases/tauri-update`）
 
 `release.controller.ts` 追加（@Public）：
+
 ```ts
 @Get('tauri-update')
 @Public()
@@ -57,28 +58,32 @@ async tauruUpdate(@Req() req: Request, @Res() res: Response) {
 ```
 
 `release.service.ts` 追加 `tauriManifest(channel, platform, arch)`：
+
 - 复用 `latest()` 的查询逻辑（isLatest + PUBLISHED）。
 - 挑 `assets.find(a => a.platform===platform && a.arch===arch)`。
 - 返回 `{version, pub_date: publishedAt, url: asset.url, signature: asset.signature, notes}` 或 null。
 
 **平台映射**（Tauri → 后端枚举）：
-| Tauri target | 后端 platform | 后端 arch |
-|---|---|---|
-| `windows` + `x86_64` | WINDOWS | X86_64 |
-| `darwin` + `aarch64` | DARWIN | AARCH64 |
-| `darwin` + `x86_64` | DARWIN | X86_64 |
-| `linux` + `x86_64` | LINUX | X86_64 |
+
+| Tauri target         | 后端 platform | 后端 arch |
+| -------------------- | ------------- | --------- |
+| `windows` + `x86_64` | WINDOWS       | X86_64    |
+| `darwin` + `aarch64` | DARWIN        | AARCH64   |
+| `darwin` + `x86_64`  | DARWIN        | X86_64    |
+| `linux` + `x86_64`   | LINUX         | X86_64    |
 
 Rust 侧从 `std::env::consts::{OS, ARCH}` 取，映射成后端枚举值拼进 URL query。
 
 ## 4. 桌面 Rust（新 `updater.rs`）
 
 ### 4.1 Cargo.toml
+
 ```toml
 tauri-plugin-updater = "2"
 ```
 
 ### 4.2 tauri.conf.json
+
 ```json
 {
   "bundle": {
@@ -88,14 +93,16 @@ tauri-plugin-updater = "2"
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0NDI2MjgyQ0U4MjE0RjcKUldUM0ZJTE9nbUpDSkcxMUoybjJtQm0xTzZVQm1FMFJFbmFqUWFTUlFYbGRSV2xFWVlMTGZMcUEK",
-      "endpoints": []   // 空数组：不写死，运行时 updater_builder().endpoints() 动态注入
+      "endpoints": [] // 空数组：不写死，运行时 updater_builder().endpoints() 动态注入
     }
   }
 }
 ```
+
 > endpoints 留空数组（必须有这个 key 插件才初始化），真实 URL 由 Rust 命令运行时注入。pubkey 是已生成的公钥（`.tauri/lingfang.key.pub` 内容）。
 
 ### 4.3 main.rs
+
 ```rust
 mod updater;
 // setup 或 builder:
@@ -162,6 +169,7 @@ pub async fn download_and_install(pending: State<'_, PendingUpdate>, on_event: C
 ```
 
 `current_platform()`：
+
 ```rust
 fn current_platform() -> (&'static str, &'static str) {
     let os = match std::env::consts::OS {
@@ -177,10 +185,12 @@ fn current_platform() -> (&'static str, &'static str) {
 main.rs setup 注册 `app.manage(PendingUpdate(Mutex::new(None)))`。
 
 ### 4.5 Cargo.toml 追加依赖
+
 ```toml
 tauri-plugin-updater = "2"
 url = "2"   # url::Url::parse 用（若未引入）
 ```
+
 （`url` crate 若 Cargo.toml 未有则加；若用 format! 拼 URL 不 parse 则不需要 url crate，可省略——优先用 format! 避免新依赖。）
 
 ## 5. 前端 UI（Settings.tsx）
@@ -197,11 +207,13 @@ url = "2"   # url::Url::parse 用（若未引入）
 ## 6. 签名验证（构建时）
 
 构建带签名的安装包：
+
 ```bash
 $env:TAURI_SIGNING_PRIVATE_KEY_PATH="O:\lingfang-platform\.tauri\lingfang.key"
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 pnpm --filter desktop build   # tauri build
 ```
+
 产物：`target/release/bundle/*/LingFang_*.msi` + `LingFang_*.msi.zip`（Tauri updater 实际下载这个） + `LingFang_*.msi.zip.sig`（签名）。
 
 `.sig` 内容（base64 minisign）需上传到 release asset 的 `signature` 字段（替换 seed 的空值）才能让 updater 验签通过。

@@ -121,7 +121,7 @@ buildLocalDraft 产 capabilities: ['code-assistant']  (plugin-draft.ts:198，字
 
 新建 `apps/desktop/src/lib/plugin-creator-protocol.ts`（与 `plugin-draft.ts` 同目录，纯文本常量 + 协议解析纯函数，便于单测）：
 
-```ts
+````ts
 // 提示模型按协议产出的 systemPrompt（跨三 CLI 零适配，仅用 fenced code block）
 export const PLUGIN_CREATOR_SYSTEM_PROMPT = `你是一名 LingFang 插件工程师。请严格按以下协议产出插件包，使用三类围栏代码块（fenced code block），不要在块外输出关键信息：
 
@@ -152,16 +152,16 @@ export type StructuredBlockKind = 'manifest' | 'file' | 'notes' | 'unknown';
 
 export interface StructuredBlock {
   kind: StructuredBlockKind;
-  info: string;            // 原始 info string
-  language?: string;       // 推断语言(json/html/...)
-  path?: string;           // file 块的 path
-  content: string;         // 块内文本（去围栏）
-  start: number;           // 在原文中的字符偏移（诊断用）
+  info: string; // 原始 info string
+  language?: string; // 推断语言(json/html/...)
+  path?: string; // file 块的 path
+  content: string; // 块内文本（去围栏）
+  start: number; // 在原文中的字符偏移（诊断用）
 }
 
 // 协议 info string 识别（classifying info string）
 export function classifyBlockInfo(info: string): StructuredBlockKind;
-```
+````
 
 #### 3.2.2 新增 `parseStructuredPackage`（纯函数）
 
@@ -172,13 +172,13 @@ import { PluginManifest } from '@lingfang/contract';
 import type { DraftFile, DraftDiagnostic } from '@/lib/types';
 
 export interface ParsedStructuredPackage {
-  manifest: Partial<PluginManifest> | null;  // 解析失败为 null
-  files: DraftFile[];                          // 同 path 后者覆盖
-  notes: string;                               // notes 块拼接
-  rawBlocks: StructuredBlock[];                // 原始块（诊断用）
-  diagnostics: DraftDiagnostic[];              // schema stage 诊断
-  status: 'ready' | 'partial' | 'invalid';     // 总体判定
-  manifestJson: string | null;                 // 序列化的 manifest.json 内容
+  manifest: Partial<PluginManifest> | null; // 解析失败为 null
+  files: DraftFile[]; // 同 path 后者覆盖
+  notes: string; // notes 块拼接
+  rawBlocks: StructuredBlock[]; // 原始块（诊断用）
+  diagnostics: DraftDiagnostic[]; // schema stage 诊断
+  status: 'ready' | 'partial' | 'invalid'; // 总体判定
+  manifestJson: string | null; // 序列化的 manifest.json 内容
 }
 ```
 
@@ -211,11 +211,21 @@ import { CapabilityKind } from '@lingfang/contract';
 
 // 合法 capabilities 白名单（前端镜像，用于产出端收敛；权威在后端 plugin-package.ts:48-53）
 const FRONTEND_CAPABILITY_KINDS = new Set<CapabilityKind>([
-  'ui.view', 'fs.pick', 'fs.read', 'fs.write', 'net.fetch',
-  'clipboard', 'llm.chat', 'storage.kv',
-  'system.info', 'system.screenshot', 'system.notify',
-  'code-assistant.run', 'code-assistant.session',
-  'plugin.upload', 'plugin.submitMarketplace',
+  'ui.view',
+  'fs.pick',
+  'fs.read',
+  'fs.write',
+  'net.fetch',
+  'clipboard',
+  'llm.chat',
+  'storage.kv',
+  'system.info',
+  'system.screenshot',
+  'system.notify',
+  'code-assistant.run',
+  'code-assistant.session',
+  'plugin.upload',
+  'plugin.submitMarketplace',
 ]);
 
 // 合法 risk 取值（前端镜像后端 plugin-package.ts CapabilityRisk；契约 plugin.ts:16）
@@ -230,10 +240,20 @@ const FALLBACK_CAPABILITY = {
 
 export function normalizeCapabilities(
   parsed: unknown,
-  fallback = FALLBACK_CAPABILITY,
+  fallback = FALLBACK_CAPABILITY
 ): PluginCapability[] {
   // 1. 合法对象数组：过滤掉 kind 不在白名单的项，risk 缺省补 'low'
-  if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((c) => c && typeof c === 'object' && typeof c.kind === 'string' && FRONTEND_CAPABILITY_KINDS.has(c.kind as CapabilityKind))) {
+  if (
+    Array.isArray(parsed) &&
+    parsed.length > 0 &&
+    parsed.every(
+      (c) =>
+        c &&
+        typeof c === 'object' &&
+        typeof c.kind === 'string' &&
+        FRONTEND_CAPABILITY_KINDS.has(c.kind as CapabilityKind)
+    )
+  ) {
     return parsed.map((c: any) => ({
       kind: c.kind,
       reason: typeof c.reason === 'string' ? c.reason : '',
@@ -255,7 +275,9 @@ export function normalizeCapabilities(
 
 ```ts
 // 前端版 cleanPath：与后端 plugin-package.ts:61-69 对齐，产出端提前收敛
-export function cleanPathFrontend(path: string): { ok: true; value: string } | { ok: false; reason: string };
+export function cleanPathFrontend(
+  path: string
+): { ok: true; value: string } | { ok: false; reason: string };
 ```
 
 返回 discriminated union（不 throw，把非法 path 记进 diagnostics 而非中断解析，与「容错」目标一致）。
@@ -310,6 +332,7 @@ buildLocalDraft(input):
 ```
 
 > 关键约束：
+>
 > - **完全失败退回当前行为**：`parsed.status==='invalid' && !parsed.manifest` 时，状态走 `input.result.success && output ? 'partial' : 'invalid'`（与旧逻辑 `:227` 等价），保证模型完全不遵守协议时不比现在更差。
 > - **CLI 字段优先**：manifest 各字段若 CLI 已产出则采用，否则前端兜底补全（兼容模型少产字段的 `partial` 场景）。
 > - `normalizeCapabilities` 收敛后，`manifest.json` 中 capabilities 必为合法对象数组，**彻底消除 `:198` 的字符串数组 bug**。
@@ -361,15 +384,15 @@ const systemPrompt = PLUGIN_CREATOR_SYSTEM_PROMPT;
 
 ### 3.4 组件 / 文件拆分
 
-| 文件 | 变更类型 | 职责 |
-|---|---|---|
-| `apps/desktop/src/lib/plugin-creator-protocol.ts` | **新增** | 协议化 systemPrompt 常量、`StructuredBlock` 类型、`classifyBlockInfo` 纯函数 |
-| `apps/desktop/src/lib/plugin-draft.ts` | 改 | 新增 `parseStructuredPackage`/`normalizeCapabilities`/`cleanPathFrontend`/`buildFallbackEntryHtml`；重构 `buildLocalDraft`；`parseManifest` 复用 `normalizeCapabilities` |
-| `apps/desktop/src/pages/PluginCreatorHome.tsx` | 改（最小） | `send()` 中 systemPrompt 引用常量（`:240`） |
-| `packages/contract/src/plugin.ts` | **不改** | 契约已正确 |
-| `apps/collab-api/src/modules/plugin-package.ts` | **不改** | 守门人保持严格 |
-| `apps/desktop/src-tauri/src/code_assistant.rs` | **不改** | systemPrompt 拼接/OutputFormat/spawn_reader 不变 |
-| 测试（新增） | 新增 | 见 §7 |
+| 文件                                              | 变更类型   | 职责                                                                                                                                                                     |
+| ------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/desktop/src/lib/plugin-creator-protocol.ts` | **新增**   | 协议化 systemPrompt 常量、`StructuredBlock` 类型、`classifyBlockInfo` 纯函数                                                                                             |
+| `apps/desktop/src/lib/plugin-draft.ts`            | 改         | 新增 `parseStructuredPackage`/`normalizeCapabilities`/`cleanPathFrontend`/`buildFallbackEntryHtml`；重构 `buildLocalDraft`；`parseManifest` 复用 `normalizeCapabilities` |
+| `apps/desktop/src/pages/PluginCreatorHome.tsx`    | 改（最小） | `send()` 中 systemPrompt 引用常量（`:240`）                                                                                                                              |
+| `packages/contract/src/plugin.ts`                 | **不改**   | 契约已正确                                                                                                                                                               |
+| `apps/collab-api/src/modules/plugin-package.ts`   | **不改**   | 守门人保持严格                                                                                                                                                           |
+| `apps/desktop/src-tauri/src/code_assistant.rs`    | **不改**   | systemPrompt 拼接/OutputFormat/spawn_reader 不变                                                                                                                         |
+| 测试（新增）                                      | 新增       | 见 §7                                                                                                                                                                    |
 
 ## 4. 关键决策与权衡
 
@@ -381,14 +404,14 @@ const systemPrompt = PLUGIN_CREATOR_SYSTEM_PROMPT;
 
 ### 4.2 技术决策
 
-| 决策 | 选择 | 理由 | 权衡 / 风险 |
-|---|---|---|---|
-| 结构化协议载体 | **文本内围栏块**（非 JSON 整体 / 非 NDJSON / 非 XML） | 跨三 CLI 零适配；fenced block 是代码模型原生能力；不依赖后端 OutputFormat | 模型可能不严格产出围栏（裸块兜底归类 mitigates）；围栏嵌套 ` ``` ` 可能误截断（取到末尾兜底 mitigates） |
-| manifest 校验 | **复用契约 zod `PluginManifest.safeParse`** | 单一真源（契约层），不重复造校验；前端/后端校验逻辑同源 | zod safeParse 错误信息需转译为 `schema` stage 诊断（人类可读） |
-| capabilities 兜底 | 固定 `code-assistant.run`（白名单内） + risk `medium` | 本地代码助手执行插件是中等风险；kind 必须在白名单内才能通过后端 | 兜底覆盖了模型可能产出的更精确能力声明——但模型完全乱产时兜底比 400 好 |
-| file 路径校验 | 前端镜像后端 `cleanPath`（不 throw，返回 union） | 产出端提前收敛，减少后端 400；discriminated union 便于容错记录 | 前端/后端两份 cleanPath 需保持对齐（implement 中以注释标注来源行号） |
-| 解析失败策略 | 三级 `ready/partial/invalid` + 完全失败退回当前行为 | 保证不比现状更差；partial 兜底补全后可上传 | invalid 仍依赖用户重新生成（R1 多轮迭代可改善，非本子任务） |
-| systemPrompt 位置 | 抽为 `plugin-creator-protocol.ts` 常量 | 便于单测、便于 R1 多轮迭代时扩展、关注点分离 | 多一个文件——但纯文本常量 + 纯函数，成本极低 |
+| 决策              | 选择                                                  | 理由                                                                      | 权衡 / 风险                                                                                             |
+| ----------------- | ----------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 结构化协议载体    | **文本内围栏块**（非 JSON 整体 / 非 NDJSON / 非 XML） | 跨三 CLI 零适配；fenced block 是代码模型原生能力；不依赖后端 OutputFormat | 模型可能不严格产出围栏（裸块兜底归类 mitigates）；围栏嵌套 ` ``` ` 可能误截断（取到末尾兜底 mitigates） |
+| manifest 校验     | **复用契约 zod `PluginManifest.safeParse`**           | 单一真源（契约层），不重复造校验；前端/后端校验逻辑同源                   | zod safeParse 错误信息需转译为 `schema` stage 诊断（人类可读）                                          |
+| capabilities 兜底 | 固定 `code-assistant.run`（白名单内） + risk `medium` | 本地代码助手执行插件是中等风险；kind 必须在白名单内才能通过后端           | 兜底覆盖了模型可能产出的更精确能力声明——但模型完全乱产时兜底比 400 好                                   |
+| file 路径校验     | 前端镜像后端 `cleanPath`（不 throw，返回 union）      | 产出端提前收敛，减少后端 400；discriminated union 便于容错记录            | 前端/后端两份 cleanPath 需保持对齐（implement 中以注释标注来源行号）                                    |
+| 解析失败策略      | 三级 `ready/partial/invalid` + 完全失败退回当前行为   | 保证不比现状更差；partial 兜底补全后可上传                                | invalid 仍依赖用户重新生成（R1 多轮迭代可改善，非本子任务）                                             |
+| systemPrompt 位置 | 抽为 `plugin-creator-protocol.ts` 常量                | 便于单测、便于 R1 多轮迭代时扩展、关注点分离                              | 多一个文件——但纯文本常量 + 纯函数，成本极低                                                             |
 
 ### 4.3 不做的事（明确拒绝）
 
@@ -431,15 +454,15 @@ pnpm -C apps/desktop typecheck   # 验证回滚干净
 
 ### 6.3 风险登记
 
-| 风险 | 等级 | 缓解 |
-|---|---|---|
-| 模型不严格遵守协议（裸 ` ``` ` 无 info） | 中 | `unknown` 块候选归类（语言标识 / 内容特征推断 → `ui/index.html` 或 `snippet-N`）；status 降 partial |
-| 围栏嵌套 ` ``` ` 误截断 | 中 | 取到下一个未被消费的结束围栏；截断后剩余文本兜底归入 unknown 继续解析；diagnostics 标记 |
-| entry 文件缺失 | 中 | `buildLocalDraft` 自动生成兜底预览页 + warning；status partial |
-| 超大 HTML 字节预算 | 低 | parse 末尾字节检查，超 256KB/2MB 强制 invalid |
-| `normalizeCapabilities` 改 `parseManifest` 影响 `previewSrcDoc` | 低 | previewSrcDoc 只依赖 entry，capabilities 形态不影响；implement 回归验证 |
-| 模型产出的 capabilities kind 部分合法部分非法 | 低 | `normalizeCapabilities` 整体判定——若数组含任何非法项则整体兜底（保守）；diagnostics 记录被丢弃项 |
-| claude StreamJson 格式 vs 协议围栏块冲突 | 低 | `extract_stream_json_text`（`code_assistant.rs:550`）已把 streamjson 的 text 字段拼成连续 stdout，围栏块协议在其上工作，无需适配 |
+| 风险                                                            | 等级 | 缓解                                                                                                                             |
+| --------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 模型不严格遵守协议（裸 ` ``` ` 无 info）                        | 中   | `unknown` 块候选归类（语言标识 / 内容特征推断 → `ui/index.html` 或 `snippet-N`）；status 降 partial                              |
+| 围栏嵌套 ` ``` ` 误截断                                         | 中   | 取到下一个未被消费的结束围栏；截断后剩余文本兜底归入 unknown 继续解析；diagnostics 标记                                          |
+| entry 文件缺失                                                  | 中   | `buildLocalDraft` 自动生成兜底预览页 + warning；status partial                                                                   |
+| 超大 HTML 字节预算                                              | 低   | parse 末尾字节检查，超 256KB/2MB 强制 invalid                                                                                    |
+| `normalizeCapabilities` 改 `parseManifest` 影响 `previewSrcDoc` | 低   | previewSrcDoc 只依赖 entry，capabilities 形态不影响；implement 回归验证                                                          |
+| 模型产出的 capabilities kind 部分合法部分非法                   | 低   | `normalizeCapabilities` 整体判定——若数组含任何非法项则整体兜底（保守）；diagnostics 记录被丢弃项                                 |
+| claude StreamJson 格式 vs 协议围栏块冲突                        | 低   | `extract_stream_json_text`（`code_assistant.rs:550`）已把 streamjson 的 text 字段拼成连续 stdout，围栏块协议在其上工作，无需适配 |
 
 ## 7. 验证策略（本地可重复）
 

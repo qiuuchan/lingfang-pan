@@ -27,7 +27,7 @@ D 是用户最在意的「断裂链路」，优先级最高；A 最简单、低�
   - `pages/plugins/MarketplacePluginsSection.tsx`（第 119 行）。
   - `components/Sidebar.tsx`（第 309 行，固定/最近插件项）。
   - `components/plugins/author-actions/meta-actions.tsx`：去掉图标上传/编辑 UI（第 96 行 `<PluginIcon>`
-    + 相关 `icon` state / 上传逻辑）。**注意**：保留 manifest.icon 字段写回（不主动清空），仅去 UI。
+    - 相关 `icon` state / 上传逻辑）。**注意**：保留 manifest.icon 字段写回（不主动清空），仅去 UI。
 - 去图标后用文字名占位：列表项左侧改为名称直接起头或首字母圆底（轻量，统一）。
   倾向「名称直接起头」最简洁，不引入新视觉元素。
 - `lib/plugin-status.ts` 的 `icon?` 字段保留（scan 仍返回，不展示）。
@@ -35,15 +35,18 @@ D 是用户最在意的「断裂链路」，优先级最高；A 最简单、低�
 ## B. 统一启动中转页
 
 ### 现状回顾
+
 - HTML：`setRunningPlugin` → App overlay → `PluginRunner` → 立即 iframe（无启动期）。
 - 脚本：列表「运行」按钮直接 `startPlugin` + toast（**完全不进 Runner**）；或进 Runner 看 ScriptPreviewPanel。
 - cloud：Runner 显示 notice。
 
 ### 目标
+
 所有启动统一经过「中转页」。`runningPlugin` overlay 仍是承载体，但 `PluginRunner` 内部引入
 **启动状态机**，先渲染中转态，再按结果切到本体/错误。
 
 ### 设计
+
 新增 `pages/plugins/PluginLaunch.tsx`（或在 PluginRunner 内提炼 `useLaunchState`）：
 
 ```
@@ -54,6 +57,7 @@ type LaunchState =
 ```
 
 各运行时进入中转的方式：
+
 - **client(HTML)**：`loadPluginDocument` 期间 phase=launching（通常极快）；成功 ready→iframe；
   抛错 error（kind 映射，如 manifest/读取失败）。
 - **nodejs/python**：复用 `startPlugin(onProgress)` 的分阶段事件驱动 launching.stage；
@@ -66,6 +70,7 @@ type LaunchState =
 `components/plugins/PluginStartProgress.tsx`，HTML/cloud 用其简化态（单步「加载中」）。
 
 ### 入口改造
+
 - `usePluginOpeners.openLocalPlugin/openTeamPlugin`：仍 `setRunningPlugin`，但 PluginRunner 接管中转。
 - `LocalPluginRow.RunButton`（脚本类直接运行）：改为 `onOpen(item)` 进 Runner 中转页统一启动，
   移除行内 `startPlugin + toast` 路径（否则脚本类有两套启动 UX，违背「统一」）。
@@ -86,10 +91,12 @@ type LaunchState =
 ## D. 一键 AI 修复打通（最高优先级）
 
 ### 断点根因
+
 `handleAutoFix` 设了 `setPendingAutoFixPrompt(prompt)` + `setCurrentDraft(draft)` + 开创建器，
 但 `FloatingCreator` 从未读 `pendingAutoFixPrompt`/`currentDraft`，prompt 被丢弃。
 
 ### 方案
+
 1. **扩展 AppContext 的修复载荷**：把单一字符串 `pendingAutoFixPrompt` 升级为结构化载荷
    （或新增并存），携带预填所需全部信息：
    ```ts
@@ -106,11 +113,11 @@ type LaunchState =
    `handleAutoFix(stderr)` → 构造 `PendingAutoFix { prompt: autoFixPrompt(stderr, plugin), plugin }`
    → `setPendingAutoFix(...)` → `setView('creator')`。
    prompt 文案增强：带上插件 id/name/runtime + 报错，提示词模板：
-   ```
+   ````
    插件「<name>」(<runtime>) 启动/运行报错，请定位并修复：
    ```<错误标题/raw stderr>```
    请基于当前插件源码（已在上下文）修复问题并重新写出完整文件。
-   ```
+   ````
 3. **消费端**（`FloatingCreator.tsx`）：
    - `useApp()` 取 `pendingAutoFix`、`setPendingAutoFix`。
    - `useEffect`：组件挂载且 `pendingAutoFix` 非空时：
@@ -123,6 +130,7 @@ type LaunchState =
 4. **不自动发送**：仅 `setInput` + 引用，用户点发送按钮触发 `send()`（已读 input + referencedPlugin）。
 
 ### 端到端验证点
+
 - 跳转后输入框内容 = prompt；引用插件 chip 显示该插件名；点发送后 systemPrompt 含 referencedPlugin 源码。
 
 ## 数据流（D 链路）

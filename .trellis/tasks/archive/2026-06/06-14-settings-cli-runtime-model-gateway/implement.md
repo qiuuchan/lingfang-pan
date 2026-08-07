@@ -189,12 +189,12 @@
 
 ## Review Gate（每阶段强制）
 
-| 阶段 | Gate 命令 | 通过标准 | 未过处理 |
-| --- | --- | --- | --- |
-| 1 | `pnpm --filter @lingfang/contract typecheck` + `pnpm --filter @lingfang/collab-api typecheck && test` + migration 生成 | typecheck/test 绿 + credential-cipher 6 测 + migration.sql 正确 | 修到绿进 2 |
-| 2 | `pnpm --filter @lingfang/collab-api typecheck && test && build` + seed 6 条 + 手动 curl | 全绿 + seed 入库 + AC6-10/13 | 修到过进 4 |
-| 3 | `cd apps/desktop/src-tauri && cargo test && cargo build` | 全测绿 + 无 warning + AC3-5 手动 | 修到过进 4 |
-| 4 | `pnpm --filter desktop typecheck && test && build` + AC1-14 手动 | 全绿 + 手动全过 | 修到过收尾 |
+| 阶段 | Gate 命令                                                                                                              | 通过标准                                                        | 未过处理   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------- |
+| 1    | `pnpm --filter @lingfang/contract typecheck` + `pnpm --filter @lingfang/collab-api typecheck && test` + migration 生成 | typecheck/test 绿 + credential-cipher 6 测 + migration.sql 正确 | 修到绿进 2 |
+| 2    | `pnpm --filter @lingfang/collab-api typecheck && test && build` + seed 6 条 + 手动 curl                                | 全绿 + seed 入库 + AC6-10/13                                    | 修到过进 4 |
+| 3    | `cd apps/desktop/src-tauri && cargo test && cargo build`                                                               | 全测绿 + 无 warning + AC3-5 手动                                | 修到过进 4 |
+| 4    | `pnpm --filter desktop typecheck && test && build` + AC1-14 手动                                                       | 全绿 + 手动全过                                                 | 修到过收尾 |
 
 最终收尾：全量 `cargo test` + `pnpm --filter desktop typecheck/test/build` + `pnpm --filter @lingfang/collab-api typecheck/test/build` + `pnpm --filter @lingfang/contract typecheck`（AC15）。
 
@@ -216,6 +216,7 @@
 ### 代码
 
 **新增**（13 文件）：
+
 - `packages/contract/src/llm.ts`（重建，算改动）
 - `apps/collab-api/prisma/migrations/20260614*_llm_gateway_catalog/migration.sql`
 - `apps/collab-api/src/crypto/credential-cipher.ts` + `.spec.ts`
@@ -227,6 +228,7 @@
 - `apps/desktop/src/pages/settings/CliRuntimeTab.tsx` + `ModelGatewayTab.tsx`
 
 **修改**（11 文件）：
+
 - `apps/collab-api/prisma/schema.prisma`（2 表 2 枚举 + Team/User 关系）
 - `apps/collab-api/src/main.ts`（密钥断言）
 - `apps/collab-api/.env.example`
@@ -251,20 +253,20 @@
 
 ### PRD AC 映射
 
-| AC | 阶段 | 验证 |
-| --- | --- | --- |
-| AC1 三 Tab + 后端不回归 | 4 | 手动切换 + 保存/测试连接 |
-| AC2 检测已装 | 4 | 手动 list_tools/probe 返回 |
-| AC3 自动安装刷新 | 3+4 | 手动 install_cli + 监听事件 |
-| AC4 半装清理 | 3 | 手动超时场景 + cleanup 测 |
-| AC5 macOS/Linux Unsupported | 3 | cfg gate 测 |
-| AC6 Admin 网关 CRUD | 2 | 手动 + service 测 |
-| AC7 租户保存 + 脱敏 | 2 | 手动 PUT + GET 无明文 |
-| AC8 MEMBER 403 | 2 | service 测 |
-| AC9 decrypt 审计 | 2 | service 测 + 手动 |
-| AC10 禁用网关只读 | 2 | service 测 |
-| AC11 加密 + fail-fast | 1 | cipher 测 + 启动断言 |
-| AC12 审计无 key | 2 | service 测（metadata 断言） |
-| AC13 跨电脑 | 2 | 手动 A/B 电脑 |
-| AC14 seed 默认 | 2 | seed 后查库 |
-| AC15 全绿 | 收尾 | 全套 typecheck/test/build |
+| AC                          | 阶段 | 验证                        |
+| --------------------------- | ---- | --------------------------- |
+| AC1 三 Tab + 后端不回归     | 4    | 手动切换 + 保存/测试连接    |
+| AC2 检测已装                | 4    | 手动 list_tools/probe 返回  |
+| AC3 自动安装刷新            | 3+4  | 手动 install_cli + 监听事件 |
+| AC4 半装清理                | 3    | 手动超时场景 + cleanup 测   |
+| AC5 macOS/Linux Unsupported | 3    | cfg gate 测                 |
+| AC6 Admin 网关 CRUD         | 2    | 手动 + service 测           |
+| AC7 租户保存 + 脱敏         | 2    | 手动 PUT + GET 无明文       |
+| AC8 MEMBER 403              | 2    | service 测                  |
+| AC9 decrypt 审计            | 2    | service 测 + 手动           |
+| AC10 禁用网关只读           | 2    | service 测                  |
+| AC11 加密 + fail-fast       | 1    | cipher 测 + 启动断言        |
+| AC12 审计无 key             | 2    | service 测（metadata 断言） |
+| AC13 跨电脑                 | 2    | 手动 A/B 电脑               |
+| AC14 seed 默认              | 2    | seed 后查库                 |
+| AC15 全绿                   | 收尾 | 全套 typecheck/test/build   |

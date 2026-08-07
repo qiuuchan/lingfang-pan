@@ -36,10 +36,25 @@ plugins/social-auto-upload/
   "entry": "main.py",
   "visibility": "tenant",
   "capabilities": [
-    { "kind": "ui.view",   "reason": "展示插件操作界面", "risk": "none",   "requires_admin": false },
-    { "kind": "fs.pick",   "reason": "选择待上传的视频/图片/封面文件", "risk": "low", "requires_admin": false },
-    { "kind": "fs.write",  "reason": "保存登录态/日志/临时二维码到 data/", "risk": "low", "requires_admin": false },
-    { "kind": "net.fetch", "reason": "上传器需访问各社交平台站点完成发布", "risk": "medium", "requires_admin": false }
+    { "kind": "ui.view", "reason": "展示插件操作界面", "risk": "none", "requires_admin": false },
+    {
+      "kind": "fs.pick",
+      "reason": "选择待上传的视频/图片/封面文件",
+      "risk": "low",
+      "requires_admin": false
+    },
+    {
+      "kind": "fs.write",
+      "reason": "保存登录态/日志/临时二维码到 data/",
+      "risk": "low",
+      "requires_admin": false
+    },
+    {
+      "kind": "net.fetch",
+      "reason": "上传器需访问各社交平台站点完成发布",
+      "risk": "medium",
+      "requires_admin": false
+    }
   ]
 }
 ```
@@ -99,6 +114,7 @@ plugins/social-auto-upload/
 
   - `BUNDLED_CHROME_EXE` 由 `PLAYWRIGHT_BROWSERS_PATH` + `chromium-1228/chrome-win64/chrome.exe` 拼出（revision 从软件常量/目录探测）。
   - 同步 API（sync_playwright）同理 hook（上游部分路径可能用 sync）。实现期确认上游各平台用的是 async 还是 sync，分别 hook。
+
 - 这样 cookie 校验也用内置 chromium，机器无系统 Chrome 亦可。
 
 ### 4.3 headless 策略
@@ -176,14 +192,14 @@ PLATFORMS: dict[str, PlatformAdapter]  # douyin/tencent/ks/xiaohongshu/youtube/b
 
 ## 10. 风险与回退
 
-| 风险 | 缓解 |
-| --- | --- |
-| patchright 1.61.1 与内置 chromium 协议不兼容 | 已确认 revision 完全一致（1228）；实测 launch 冒烟 |
-| channel="chrome" hook 漏掉某些路径 | 全局 hook patchright launch；实测抖音 cookie 校验无系统 Chrome 通过 |
-| headless 登录触发平台风控 | 登录路径可切有头（弹窗扫码）；沿用上游有头策略 |
-| bilibili/baijiahao/tiktok 入口与他平台不同 | adapter 逐个验证；先保证抖音+视频号端到端，其余平台分阶段接通 |
-| Windows 长路径/大 wheel 安装失败 | 短路径缓存 + 实测 pip install；必要时压缩 vendored |
-| 上游 API 字段/方法名与假设不符 | 实现期以 vendored 源码为准逐平台核对 |
+| 风险                                         | 缓解                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------- |
+| patchright 1.61.1 与内置 chromium 协议不兼容 | 已确认 revision 完全一致（1228）；实测 launch 冒烟                  |
+| channel="chrome" hook 漏掉某些路径           | 全局 hook patchright launch；实测抖音 cookie 校验无系统 Chrome 通过 |
+| headless 登录触发平台风控                    | 登录路径可切有头（弹窗扫码）；沿用上游有头策略                      |
+| bilibili/baijiahao/tiktok 入口与他平台不同   | adapter 逐个验证；先保证抖音+视频号端到端，其余平台分阶段接通       |
+| Windows 长路径/大 wheel 安装失败             | 短路径缓存 + 实测 pip install；必要时压缩 vendored                  |
+| 上游 API 字段/方法名与假设不符               | 实现期以 vendored 源码为准逐平台核对                                |
 
 回退：插件独立目录，删除 `plugins/social-auto-upload/` 即完全回退，不影响其它插件与桌面。
 

@@ -7,25 +7,31 @@
 ## Requirements
 
 ### R1 插件管理重构为悬浮窗（需求 #8）
+
 - 现状：`pages/Plugins.tsx` 用 Tabs（本地/团队/市场）页面布局。
 - 改为悬浮窗形式展示；侧边栏支持固定常用插件 + 历史使用过的插件（已有 pins/recent 基础设施 `App.tsx:91-129`）。
 - 重新设计 UI + 完善整体交互逻辑。
 
 ### R2 FAB 点击弹窗动画（需求 #13）
+
 - 右下角创建插件 FAB（`FloatingCreateButton.tsx`）点击弹出悬浮窗（`FloatingCreator.tsx:324-541`）时加过渡动画。
 
 ### R3 内置 Skill 展示优化（需求 #14）
+
 - 现状：小 Popover 列表（`FloatingCreator.tsx:374-395`），数据在 `lib/skills.ts`。
 - 改居中悬浮窗 + 背景模糊；删除「拼入系统提示词」等专业术语，仅保留必要话术；扩展内置 Skill 数量。
 
 ### R4 调慢全局动画速度（需求 #7）
+
 - 统一调慢 `lib/motion.tsx` 各动画 duration（FadeIn/SlideIn/Stagger/PageTransition 等）及散落 inline 动画。
 - 优先在 `packages/ui-tokens` 定义动画时长 token，再统一引用。
 
 ### R5 缩小个人资料页底部高度（需求 #9）
+
 - `ProfilePanel.tsx` + `PanelDialog.tsx`：降低整体高度 / 底部留白。
 
 ### R6 外观主题未选中按钮加边框（需求 #12）
+
 - `AvatarMenu.tsx:184-195` 主题按钮未选中态加边框。
 
 ## Acceptance Criteria

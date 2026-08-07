@@ -96,7 +96,12 @@ type PackagePolicySurfaceV1 = {
     previewable: boolean;
   }>;
   workflow?: { workflow_release_id: string; workflow_plan_sha256: string; cloud_eligible: boolean };
-  shared_namespaces: Array<{ name: string; active_schema_version: string; read: boolean; write: boolean }>;
+  shared_namespaces: Array<{
+    name: string;
+    active_schema_version: string;
+    read: boolean;
+    write: boolean;
+  }>;
   schedule_eligible: boolean;
 };
 ```
@@ -120,7 +125,13 @@ type TeamPluginPolicyDocumentV1 = {
     target:
       | { kind: 'TEAM' }
       | { kind: 'PACKAGE'; package_id: string; approved_surface_sha256?: string }
-      | { kind: 'ACTION'; package_id: string; action_id: string; action_contract_version: string; action_surface_sha256: string }
+      | {
+          kind: 'ACTION';
+          package_id: string;
+          action_id: string;
+          action_contract_version: string;
+          action_surface_sha256: string;
+        }
       | { kind: 'WORKFLOW'; workflow_release_id: string; workflow_plan_sha256: string };
     version_range?: string;
     release_ids?: string[];
@@ -188,12 +199,12 @@ A missing `TeamPluginPolicy` resolves to a virtual revision `0` and is not eager
 
 Virtual revision 0 is fixed:
 
-| Operation class | Default |
-| --- | --- |
-| Existing v4 install/update/run_local | ALLOW, subject to existing platform/grant gates |
-| invoke_action/run_workflow/Cloud/schedule/shared data | DENY |
-| Web static/client sandbox preview | ALLOW only after existing listing/compatibility gates |
-| Web Cloud trial | DENY through execute_cloud |
+| Operation class                                       | Default                                               |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| Existing v4 install/update/run_local                  | ALLOW, subject to existing platform/grant gates       |
+| invoke_action/run_workflow/Cloud/schedule/shared data | DENY                                                  |
+| Web static/client sandbox preview                     | ALLOW only after existing listing/compatibility gates |
+| Web Cloud trial                                       | DENY through execute_cloud                            |
 
 `allowed_source_kinds` initially contains all current honest provenance kinds. `denied_capability_kinds` is empty. Teams may narrow either without changing registry rows.
 

@@ -37,12 +37,12 @@
 
 三合一二进制 `installer.exe`（crate `apps/desktop/installer`）的运行模式由命令行参数分派：
 
-| 模式 | 触发 | UI | 行为 |
-|------|------|----|----|
-| `install`（默认，无参/双击） | 用户双击 Setup.exe | egui | 交互安装：选目录→自解压→快捷方式→注册表→落 updater 副本 |
-| `--silent --target <dir>` | updater 调用 / 无人值守 | 无 | 静默安装/覆盖到 `<dir>` |
-| `update --target <dir> --setup <path> --wait-pid <pid>` | 主程序自更新 | 无 | 等 pid 退出→静默运行 setup→重启主程序 |
-| `uninstall` | 控制面板「添加删除程序」 | egui（确认）| 关进程→删文件/快捷方式/注册表→自删除 |
+| 模式                                                    | 触发                     | UI           | 行为                                                    |
+| ------------------------------------------------------- | ------------------------ | ------------ | ------------------------------------------------------- |
+| `install`（默认，无参/双击）                            | 用户双击 Setup.exe       | egui         | 交互安装：选目录→自解压→快捷方式→注册表→落 updater 副本 |
+| `--silent --target <dir>`                               | updater 调用 / 无人值守  | 无           | 静默安装/覆盖到 `<dir>`                                 |
+| `update --target <dir> --setup <path> --wait-pid <pid>` | 主程序自更新             | 无           | 等 pid 退出→静默运行 setup→重启主程序                   |
+| `uninstall`                                             | 控制面板「添加删除程序」 | egui（确认） | 关进程→删文件/快捷方式/注册表→自删除                    |
 
 > 注：`update` 模式本质是「等待 + 调 `--silent` + 重启」。安装目录里部署的 `updater.exe`
 > 是 installer.exe 的一份副本（同二进制），保证自更新时它不在被覆盖的关键路径上独立运行
@@ -73,6 +73,7 @@ trailer = MAGIC(8 bytes "LFSFX\0\0\0") + payload_len(u32 little-endian)
   追求体积可后续换 zstd，本期 deflate 够用且 zip crate 原生支持。
 
 **关键纯函数（单测覆盖，PRD 验收）**：
+
 - `locate_payload(exe_bytes_len, trailer) -> Option<offset>`：尾部偏移定位。
 - `verify_sha256(path, expected_hex) -> bool`：流式读文件算 sha256 比对。
 - `resolve_install_dir(arg, default) -> PathBuf`：目录解析（默认 `%LOCALAPPDATA%\LingFang`）。
@@ -113,16 +114,16 @@ anyhow = "1"
   - 桌面：`%USERPROFILE%\Desktop\灵坊工作台.lnk`（安装时可勾选）
 - 注册表 Uninstall key（currentUser → HKCU）：
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.lingfang.desktop`
-  | 值 | 内容 |
-  |----|----|
-  | DisplayName | 灵坊工作台 |
-  | DisplayVersion | x.y.z |
-  | Publisher | 灵坊工作台 |
-  | DisplayIcon | `<dir>\lingfang-desktop.exe` |
-  | InstallLocation | `<dir>` |
-  | UninstallString | `"<dir>\updater.exe" uninstall` |
-  | EstimatedSize | KB（安装后算） |
-  | NoModify / NoRepair | 1 |
+  | 值                  | 内容                            |
+  | ------------------- | ------------------------------- |
+  | DisplayName         | 灵坊工作台                      |
+  | DisplayVersion      | x.y.z                           |
+  | Publisher           | 灵坊工作台                      |
+  | DisplayIcon         | `<dir>\lingfang-desktop.exe`    |
+  | InstallLocation     | `<dir>`                         |
+  | UninstallString     | `"<dir>\updater.exe" uninstall` |
+  | EstimatedSize       | KB（安装后算）                  |
+  | NoModify / NoRepair | 1                               |
 
 ## 5. 更新流程（端到端）
 
@@ -147,6 +148,7 @@ anyhow = "1"
 `downloadAndInstall` 改名/改实现但事件类型不变）。
 
 updater 的 `update` 模式逻辑：
+
 1. `--wait-pid` 轮询等待该 pid 进程退出（windows-sys `OpenProcess` + `WaitForSingleObject`，超时兜底）。
 2. 运行 `--setup <path> --silent --target <dir>`（即解压覆盖；新版 Setup.exe 自带 payload）。
 3. 删除临时 Setup.exe。
@@ -161,13 +163,13 @@ updater 的 `update` 模式逻辑：
 - updater/silent 无 UI 模式：日志写 `%LOCALAPPDATA%\LingFang\logs\updater.log`（追加，带时间戳——
   注意 Rust 端可用 `std::time`，本进程非 workflow 沙箱，`SystemTime::now()` 可用）。
 - 关键失败点与对策：
-  | 失败 | 处理 |
-  |------|----|
-  | sha256 不匹配 | 删临时包，主程序 toast 报错，不启动 updater |
-  | 下载中断 | reqwest 错误冒泡，主程序可重试 |
-  | 主进程未在超时内退出 | updater 超时后强制继续（或放弃并写日志） |
-  | 覆盖时文件占用 | 重试 N 次 + 退避；仍失败写日志、保留旧版本可用 |
-  | 注册表写入失败（install） | egui 报错，回滚已复制文件（best-effort） |
+  | 失败                      | 处理                                           |
+  | ------------------------- | ---------------------------------------------- |
+  | sha256 不匹配             | 删临时包，主程序 toast 报错，不启动 updater    |
+  | 下载中断                  | reqwest 错误冒泡，主程序可重试                 |
+  | 主进程未在超时内退出      | updater 超时后强制继续（或放弃并写日志）       |
+  | 覆盖时文件占用            | 重试 N 次 + 退避；仍失败写日志、保留旧版本可用 |
+  | 注册表写入失败（install） | egui 报错，回滚已复制文件（best-effort）       |
 
 ## 7. 后端改动（collab-api）
 
