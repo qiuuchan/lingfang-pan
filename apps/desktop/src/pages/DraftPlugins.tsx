@@ -30,6 +30,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
 	Select,
@@ -495,32 +496,38 @@ function CreateWorkspaceDialog({
 						创建独立工作区后进入开发插件界面。
 					</DialogDescription>
 				</DialogHeader>
-				<div className="grid gap-3">
-					<Input
-						value={title}
-						onChange={(event) => setTitle(event.target.value)}
-						placeholder="插件名称"
-					/>
-					<Input
-						value={manifestId}
-						onChange={(event) => setManifestId(event.target.value)}
-						placeholder="manifest ID，例如 team.demo"
-					/>
-					<Select
-						value={runtime}
-						onValueChange={(value) => setRuntime(value as typeof runtime)}
-					>
-						<SelectTrigger>
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="client">网页插件</SelectItem>
-							<SelectItem value="cloud">云端插件</SelectItem>
-							<SelectItem value="python">Python</SelectItem>
-							<SelectItem value="nodejs">Node.js</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
+				<FieldGroup className="gap-3">
+					<Field>
+						<Input
+							value={title}
+							onChange={(event) => setTitle(event.target.value)}
+							placeholder="插件名称"
+						/>
+					</Field>
+					<Field>
+						<Input
+							value={manifestId}
+							onChange={(event) => setManifestId(event.target.value)}
+							placeholder="manifest ID，例如 team.demo"
+						/>
+					</Field>
+					<Field>
+						<Select
+							value={runtime}
+							onValueChange={(value) => setRuntime(value as typeof runtime)}
+						>
+							<SelectTrigger>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="client">网页插件</SelectItem>
+								<SelectItem value="cloud">云端插件</SelectItem>
+								<SelectItem value="python">Python</SelectItem>
+								<SelectItem value="nodejs">Node.js</SelectItem>
+							</SelectContent>
+						</Select>
+					</Field>
+				</FieldGroup>
 				<DialogFooter>
 					<Button variant="outline" onClick={onClose}>
 						取消
