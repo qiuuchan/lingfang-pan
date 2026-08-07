@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Select,
   SelectContent,
@@ -274,47 +274,51 @@ function SubmitView({ onDone, onBack }: { onDone: (id: string) => void; onBack: 
         返回列表
       </Button>
 
-      <div className="space-y-2">
-        <Label>分类</Label>
-        <Select value={category} onValueChange={(v) => setCategory(v as TicketCategory)}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(CATEGORY_LABEL) as TicketCategory[]).map((c) => (
-              <SelectItem key={c} value={c}>
-                {CATEGORY_LABEL[c]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="ticket-category">分类</FieldLabel>
+          <Select value={category} onValueChange={(v) => setCategory(v as TicketCategory)}>
+            <SelectTrigger id="ticket-category">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(CATEGORY_LABEL) as TicketCategory[]).map((c) => (
+                <SelectItem key={c} value={c}>
+                  {CATEGORY_LABEL[c]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
 
-      <div className="space-y-2">
-        <Label>标题</Label>
-        <Input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="简要描述你遇到的问题"
-          maxLength={200}
-        />
-      </div>
+        <Field>
+          <FieldLabel htmlFor="ticket-title">标题</FieldLabel>
+          <Input
+            id="ticket-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="简要描述你遇到的问题"
+            maxLength={200}
+          />
+        </Field>
 
-      <div className="space-y-2">
-        <Label>详细描述</Label>
-        <Textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="请描述问题的复现步骤、预期与实际表现。可附上日志或截图帮助我们更快定位。"
-          rows={6}
-          maxLength={10000}
-        />
-      </div>
+        <Field>
+          <FieldLabel htmlFor="ticket-body">详细描述</FieldLabel>
+          <Textarea
+            id="ticket-body"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="请描述问题的复现步骤、预期与实际表现。可附上日志或截图帮助我们更快定位。"
+            rows={6}
+            maxLength={10000}
+          />
+        </Field>
 
-      <div className="space-y-2">
-        <Label>附件</Label>
-        <FilePicker files={files} onChange={setFiles} />
-      </div>
+        <Field>
+          <FieldLabel>附件</FieldLabel>
+          <FilePicker files={files} onChange={setFiles} />
+        </Field>
+      </FieldGroup>
 
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={onBack} disabled={submitting}>
