@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-08-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~39 | Active |
+| `journal-1.md` | ~72 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -30,6 +30,7 @@
 
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-08-07 | 跨租户越权 e2e：真实 PG 行级隔离验证 | `6dae314e` | `main` |
 | 1 | 2026-08-07 | 商业就绪 P1 加固：核验签名闭环 + 补测试 | `39712595` | `main` |
 
 <!-- @@@/auto:session-history -->
