@@ -6,7 +6,8 @@
 // 设计：
 // - 友好图标 + 「无法访问灵坊工作台服务」标题 + 当前后端地址展示。
 // - 「重试」按钮：调 testBackendUrl 重新探测，成功派发 reachable 退出不可达态。
-// - 与创建器 env-readiness 横幅互补：横幅处理「地址未配置」，本组件处理「地址已配但 fetch 失败」。
+// - 只负责「地址已配但 fetch 失败」。曾经计划的「地址未配置」横幅（lib/env-readiness.ts）
+//   从未接入任何页面，已作为死代码移除；若要补这个场景，从这里新建即可。
 
 import { useState } from 'react';
 import { CloudOffIcon, RefreshCwIcon } from 'lucide-react';
