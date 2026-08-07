@@ -11,10 +11,16 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# 最小权限：单元门禁只需要读取代码，不写任何 GitHub 资源。
+permissions:
+  contents: read
+
 jobs:
   check:
-    name: Typecheck / Test / Build
+    name: Lint / Typecheck / Test / Build
     runs-on: ubuntu-latest
+    # 本地全量跑完约 50s；20 分钟足够覆盖冷缓存，又能在卡死时及时止损。
+    timeout-minutes: 20
     # 单元门禁不需要外部服务：
     #   - 后端单测全部 Mock PrismaService，不连真实库；
     #   - integration spec 按 env 门控自动 skip（见 scripts/ci.sh 注释）。
@@ -31,8 +37,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 用 .nvmrc 作为唯一版本来源，避免 workflow 与本地开发环境各写一份而漂移。
+          node-version-file: .nvmrc
           cache: pnpm
 
-      - name: Run CI core (install → prisma generate → typecheck → test → build)
+      - name: Run CI core (install → prisma → lint → format → typecheck → test → build)
         run: bash scripts/ci.sh
