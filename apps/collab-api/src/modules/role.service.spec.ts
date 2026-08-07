@@ -3,7 +3,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { RoleService } from './role.service';
 import { SYSTEM_PLATFORM_ADMIN_ROLE_ID as PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
-import { badRequest, conflict, forbidden, notFound } from '../common';
+import { forbidden } from '../common';
 
 function mockPrisma() {
   return {

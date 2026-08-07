@@ -100,10 +100,10 @@ function listPluginFiles(pluginDir) {
 
 // === 最小 ZIP 写入器（Store + Deflate）=====================================
 
-const DOS_EPOCH_TO_UNIX = 0;
 const DOS_DATETIME_DEFAULT = 0; // 与 Rust DateTime::default() 一致（1980-01-01 00:00:00 → 0）。
 
-function dosTime(date) {
+// 入参恒被忽略：产物要求逐字节确定性，时间戳一律写死成 Rust 侧的 default。
+function dosTime(_date) {
   // ZIP DOS time/date：与 Rust 侧 DateTime::default()（全 0）对齐，保证确定性。
   return { time: DOS_DATETIME_DEFAULT, date: DOS_DATETIME_DEFAULT };
 }
@@ -112,7 +112,6 @@ function dosTime(date) {
 function buildZipEntry(name, contentBytes, compress) {
   const nameBytes = Buffer.from(name, 'utf8');
   const crc = crc32(contentBytes) >>> 0;
-  let storedBytes = contentBytes;
   let method = 0; // 0 = stored
   let compressed = contentBytes;
   if (compress) {
@@ -183,7 +182,6 @@ function writeZip(entries) {
   }
   const centralStart = offset;
   const centralBuf = Buffer.concat(centrals);
-  const centralEnd = centralStart + centralBuf.length;
 
   // EOCD（22 字节）
   const eocd = Buffer.alloc(22);

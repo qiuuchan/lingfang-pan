@@ -11,7 +11,6 @@ import { XIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/App';
 import type { LoadedPlugin } from '@/lib/types';
-import { tauriInvoke } from '@/lib/api';
 import { chatComplete } from '@/lib/relay-chat-stream';
 import { getPluginsRoot, openPluginDir, openPluginsRoot } from '@/lib/plugin-status';
 import { withSyncedStagedManifest, type StagedPlugin } from '@/lib/plugin-creator/creator-tools';
@@ -310,6 +309,11 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
 
   // CreatePlugin 工具回调：工具已写入 workspaces/{workspaceId}/，这里同步右侧草稿预览状态。
   // 同一插件 id 继续修改时保留用户已改字段；换 id（新插件）则清空旧编辑。
+  // 这是组件内的局部函数，不是 props（真正接到 createAgentTools 的是下面 ~1152 行的
+  // 内联回调，store.ts 注释也写着「替代旧 onPluginCreated」）。零调用方，且它引用的
+  // draftRef 在本函数之后（~329 行）才声明，真被调到会踩 TDZ —— 建议删除，但这属于
+  // 迁移收尾决策，先保留。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function onPluginCreated(pluginId: string, next: StagedPlugin) {
     const synced = withSyncedStagedManifest(next);
     draftRef.current = synced;

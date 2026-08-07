@@ -30,7 +30,6 @@ const REPO = path.resolve(HERE, '..');
 const PLUGINS_ROOT = path.join(REPO, 'plugins');
 const RUNTIMES = path.join(REPO, 'apps/desktop/runtimes');
 const NODE_EXE = path.join(RUNTIMES, 'nodejs', 'node.exe');
-const PYTHON_EXE = path.join(RUNTIMES, 'python', 'python.exe');
 const FFMPEG_DIR = path.join(RUNTIMES, 'ffmpeg');
 const SYSTEM32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
 
@@ -460,7 +459,7 @@ except Exception as e:
       bridgePath = `桥函数调用未走通（import 可能触发 GUI 初始化需显示）：${bp.stdout.slice(-200) || bp.stderr.slice(-200)}`;
   }
 
-  const ok = depsOk && (bootAlive || true); // boot 在无头下常因无显示退出，依赖/导入通过即视为可运行
+  // boot 在无头下常因无显示退出，依赖/导入通过即视为可运行 —— 所以下面直接返回 depsOk。
   let detail = `依赖导入 ${depsOk ? '通过' : '失败'}（${plugin.gui}+requests）`;
   detail += `；入口拉起 ${bootAlive ? '进程存活(offscreen 可初始化)' : '退出(无头无显示器，真实桌面将显示窗口)'}`;
   if (bootErr && !bootAlive) detail += `；stderr尾：${bootErr.slice(0, 160)}`;

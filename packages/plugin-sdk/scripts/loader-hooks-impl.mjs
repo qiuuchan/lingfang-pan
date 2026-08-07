@@ -2,7 +2,7 @@
 // 通过 loader-hooks.mjs 的 register() 调用激活。
 
 import { fileURLToPath } from 'node:url';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 
 const TS_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts'];
 

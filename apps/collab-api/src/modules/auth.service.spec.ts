@@ -7,7 +7,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
-import { MailService } from './mail.service';
 
 // 测试用固定密钥（与 main.ts fail-fast 配合：dev 缺密钥仅 warn）。
 process.env.JWT_SECRET = 'test-secret-for-password-reset-at-least-16-chars';

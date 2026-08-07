@@ -4,7 +4,6 @@
 
 import { parseArgs } from './parser.ts';
 import { log } from './log.ts';
-import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

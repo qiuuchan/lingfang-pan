@@ -775,7 +775,7 @@ describe('Grep 工具', () => {
   });
 
   it('glob 过滤 → 只搜匹配文件', async () => {
-    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, _args?: Record<string, unknown>) => {
       if (cmd === 'list_plugin_files') return ['main.py', 'index.js'];
       return 'target_line';
     });
@@ -836,7 +836,7 @@ describe('UpdatePlugin 工具', () => {
   });
 
   it('升版本号成功 → 写回 manifest', async () => {
-    tauriInvokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    tauriInvokeMock.mockImplementation(async (cmd: string, _args?: Record<string, unknown>) => {
       if (cmd === 'read_local_plugin_file')
         return JSON.stringify({ id: 'p1', name: '老名字', version: '0.1.0', description: '旧' });
       if (cmd === 'write_plugin_file') return undefined;

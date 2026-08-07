@@ -12,7 +12,7 @@
 //   --recreate   强制重建 venv 并重装依赖
 //   --only <id>  只校验指定插件（可多次）
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,

@@ -6,7 +6,6 @@
 // 参考 economy.service.spec.ts：Mock PrismaService + $transaction，不连真实 DB。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { CreditService } from './credit.service';
-import { insufficientBalance } from '../common';
 import type { PrismaService } from '../prisma.service';
 
 function mockTx() {

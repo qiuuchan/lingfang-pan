@@ -8,7 +8,6 @@
 // 参考 release.service.spec.ts：Mock PrismaService，不连真实 DB。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { NotificationService } from './notification.service';
-import { notFound } from '../common';
 
 const now = new Date('2026-06-15T00:00:00.000Z');
 

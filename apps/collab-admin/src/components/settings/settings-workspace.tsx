@@ -181,7 +181,9 @@ export function SettingsView() {
 
   // 组E 搜索源：searxngUrl 明文 + tavily/brave 密钥脱敏。AI 联网搜索的源配置。
   // 密钥 Draft 仅在输入新值时非空（留空保持不变，与 Gitee token 同款约定）。
-  const [search, setSearch] = useState<SearchSettings>(EMPTY_SEARCH);
+  // 只写不读：setSearch 在加载和保存后都调了，但界面全程只渲染 searchDraft，
+  // 这份服务端态没有任何读取方（每次 set 都是一次白白的重渲染）。
+  const [_search, setSearch] = useState<SearchSettings>(EMPTY_SEARCH);
   const [searchDraft, setSearchDraft] = useState<SearchSettings>(EMPTY_SEARCH);
   const [tavilyKeyDraft, setTavilyKeyDraft] = useState('');
   const [braveKeyDraft, setBraveKeyDraft] = useState('');

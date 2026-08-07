@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ActionTarget } from '@lingfang/contract';
 import { randomBytes } from 'node:crypto';
-import { AppError, conflict, notFound } from '../common';
+import { AppError, conflict } from '../common';
 import { PrismaService } from '../prisma.service';
 import { CloudEndpointSecretCipher } from './cloud-endpoint-secret-cipher';
 import { SafeOutboundHttpClient } from './cloud-safe-http';

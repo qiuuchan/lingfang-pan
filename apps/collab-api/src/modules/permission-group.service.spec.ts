@@ -1,7 +1,7 @@
 // PermissionGroupService 单测：权限分组显示名 CRUD + 内置分组保护 + groupKey 白名单校验 + scope 隔离。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { PermissionGroupService } from './permission-group.service';
-import { badRequest, forbidden, notFound } from '../common';
+import { forbidden } from '../common';
 
 function mockPrisma() {
   return {

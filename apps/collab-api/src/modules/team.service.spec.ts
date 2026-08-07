@@ -5,7 +5,7 @@
 // 参考 release.service.spec.ts / admin.service.spec.ts：Mock PrismaService + AuthService，不连真实 DB。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { TeamService } from './team.service';
-import { forbidden, notFound } from '../common';
+import { forbidden } from '../common';
 
 function mockPrisma() {
   const team = {

@@ -89,7 +89,7 @@ export function PluginGrantsTab() {
         `/api/teams/current/plugin-packages/${plugin.package.id}/grants`
       );
       setGrants(r.grants);
-    } catch (e) {
+    } catch {
       setGrants([]);
     } finally {
       setGrantsLoading(false);

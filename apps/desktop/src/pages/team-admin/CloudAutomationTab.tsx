@@ -81,6 +81,9 @@ export function CloudAutomationTab() {
       setBusy(false);
     }
   }
+  // 写好了但没接到任何按钮上：整个 Cloud automation tab 疑似已废弃
+  // （docs/roadmap.md：「不再接受新建或执行」）。删不删是产品决策，先保留。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function lifecycle(item: Schedule, action: 'pause' | 'resume') {
     setBusy(true);
     try {
@@ -95,6 +98,8 @@ export function CloudAutomationTab() {
       setBusy(false);
     }
   }
+  // 同 lifecycle()：没有调用方，保留待产品决策。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function remove(item: Schedule) {
     setBusy(true);
     try {

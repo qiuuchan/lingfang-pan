@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ActionTarget } from './plugin-action.ts';
-import { WorkflowExecutionScope, WorkflowJsonValue, WorkflowNodeId } from './plugin-workflow.ts';
+import { WorkflowExecutionScope, WorkflowJsonValue } from './plugin-workflow.ts';
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/);
 const IsoDateTime = z.string().datetime();

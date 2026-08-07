@@ -10,7 +10,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { DownloadIcon, SparklesIcon, ChevronRightIcon } from 'lucide-react';
+import { DownloadIcon, SparklesIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';

@@ -419,6 +419,9 @@ function utf8ByteLength(value: string): number {
   return bytes;
 }
 
+// 零调用方：可移植 schema 的递归校验入口写完了却没被任何地方使用。删掉等于放弃这套
+// 校验，接上则会改变契约包的校验强度 —— 都不是清理该做的决定，先保留。
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function parsePortableSchema(value: unknown, root: boolean): PortableJsonSchemaNode {
   const result = PortableJsonSchemaBase.safeParse(value);
   if (!result.success)
@@ -759,8 +762,11 @@ export const ArtifactRefV1 = z
   .strict();
 export type ArtifactRefV1 = z.infer<typeof ArtifactRefV1>;
 
-const LocalRuntime = z.enum(['client', 'nodejs', 'python', 'cloud', 'workflow']);
-export type ActionRuntimeType = z.infer<typeof LocalRuntime>;
+// 这里原本包了一个 z.enum，但它从来没有被当成 schema 用过（没人 parse），只被
+// z.infer 取了类型。留着一个纯运行时对象只为拿类型是浪费，直接写成联合类型。
+// 值集合与 plugin.ts 的 RuntimeType 一致；不 import 过去是因为 plugin.ts 已经
+// 依赖本文件，反向引用会成环。
+export type ActionRuntimeType = 'client' | 'nodejs' | 'python' | 'cloud' | 'workflow';
 
 export const PluginActionSurfaceV1 = z
   .object({

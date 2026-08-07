@@ -50,9 +50,19 @@ export default tseslint.config(
       // earlier-declared closure then written later are reported as "never reassigned");
       // enforcing it would require build-breaking `const` edits. Also per "no prefer-const churn".
       'prefer-const': 'off',
-      // Pre-existing dead-code findings across the monorepo — tightened to keep the
-      // gate green and avoid mass-editing source; re-enable incrementally later.
-      '@typescript-eslint/no-unused-vars': 'off',
+      // 死代码会无声累积：规则关着的时候，被删掉的功能留下的导入、改签名后
+      // 遗留的参数、写了却没接上的 handler，全都不会有人发现。启用为 error 并
+      // 承认 `_` 前缀约定（代码里已有大量这种主动标记）。
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
       // Legacy inline `eslint-disable-next-line react-hooks/exhaustive-deps` comments exist
       // in the codebase; registering the plugin (rule off) resolves "rule not found" errors.
       'react-hooks/exhaustive-deps': 'off',

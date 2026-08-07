@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { type ReactNode } from 'react';
 import { ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 

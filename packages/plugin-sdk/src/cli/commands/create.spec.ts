@@ -13,8 +13,6 @@ const templatesRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 // 本 spec 覆盖 id 推导逻辑 + manifest 校验的核心流程。
 // 完整的 create 端到端测试在 §10 整合验证执行。
 
-const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9-_.]*$/;
-
 function toKebabCase(name: string): string {
   return name
     .trim()

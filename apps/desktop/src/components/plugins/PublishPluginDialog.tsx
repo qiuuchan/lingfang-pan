@@ -9,7 +9,6 @@ import {
   UploadIcon,
   XCircleIcon,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { useApp } from '@/App';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';

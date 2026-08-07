@@ -162,7 +162,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
 
     let assistantText = '';
     const pendingToolCalls: PendingCall[] = [];
-    let hasUsage = false;
+    // 中继回报了 usage 就置位，但没有任何地方读它 —— 也就是说每轮的 token 用量
+    // 收到了却被整个丢掉，桌面端 agent 至今没有 token 计数。要么接上计量，要么
+    // 连同下面的 onUsage 订阅一起删掉。
+    let _hasUsage = false;
 
     let streamed: StreamResult | null = null;
     try {
@@ -200,7 +203,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<LoopResult> 
           }
         },
         onUsage: () => {
-          hasUsage = true;
+          _hasUsage = true;
         },
       });
       // 流正常结束：flush thinkParser 残留（未闭合 <think> 等）。

@@ -28,7 +28,7 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-async function runValidate(dir: string, opts?: { json?: boolean }): Promise<ValidateResult> {
+async function runValidate(dir: string): Promise<ValidateResult> {
   // 捕获 stdout 以解析 JSON 输出
   const originalStdout = process.stdout.write;
   let captured = '';

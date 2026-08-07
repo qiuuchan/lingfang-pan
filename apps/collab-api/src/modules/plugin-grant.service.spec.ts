@@ -1,7 +1,6 @@
 // PluginGrantService 单测：覆盖授权 CRUD + resolvePluginAccess（deny 优先、user 级优先于 role 级、团队管理员默认放行）。
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { PluginGrantService } from './plugin-grant.service';
-import { badRequest, forbidden, notFound } from '../common';
 
 function mockPrisma() {
   return {

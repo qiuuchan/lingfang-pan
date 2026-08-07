@@ -405,10 +405,6 @@ integration('workflow PostgreSQL + HTTPS + Redis integration', () => {
     };
     const action = {
       process: async (job: { invocation_id: string }) => {
-        const node = job.invocation_id.replace(
-          '60000000-0000-4000-8000-00000000000',
-          ''
-        ) as unknown as NodeId;
         const resolved = nodes.find((candidate) => invocationId(candidate) === job.invocation_id)!;
         const inputs =
           resolved === 'video' || resolved === 'music'

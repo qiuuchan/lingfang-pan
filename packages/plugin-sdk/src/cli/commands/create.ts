@@ -4,8 +4,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { log } from '../log.ts';
-import { askText, askSelect, askConfirm, askMultiselect } from '../util/prompt.ts';
-import { ensureDir, copyDir, writeFile, pathExists, posixJoin } from '../util/fs.ts';
+import { askText, askSelect, askMultiselect } from '../util/prompt.ts';
+import { ensureDir, writeFile, pathExists } from '../util/fs.ts';
 import { readFile, readdir } from 'node:fs/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

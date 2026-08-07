@@ -69,7 +69,10 @@ export class AdminDashboardService {
       totalCalls,
       totalSuccess,
       totalFailed,
-      totalDurationAgg,
+      // 累计平均耗时：这条 aggregate 每次打开看板都真的查了库，但返回体的 total
+      // 块里没有 avgDurationMs 字段，结果被直接丢掉 —— 要么把它接进返回体，要么
+      // 把这次查询删掉省一次聚合。先标记不用，别默默浪费一次全表聚合还没人知道。
+      _totalDurationAgg,
     ] = await Promise.all([
       this.prisma.llmCallLog.count({ where: { createdAt: { gte: monthStart } } }),
       this.prisma.llmCallLog.count({

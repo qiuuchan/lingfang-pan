@@ -12,9 +12,9 @@
 //
 // 用法：node scripts/test-plugin-run.mjs <facefusion|moneyprinter-turbo|pixelle-video|huobao-drama> [--no-venv-recreate] [--bridge-url URL]
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
@@ -162,7 +162,8 @@ async function ensurePythonVenv(pluginDir, noRecreate) {
   return py;
 }
 
-async function ensureNodeDeps(pluginDir, noRecreate) {
+// _noRecreate 目前用不上（node_modules 存在就跳过），保留形参与 ensurePythonVenv 对齐。
+async function ensureNodeDeps(pluginDir, _noRecreate) {
   const nm = join(pluginDir, 'node_modules');
   const pkg = join(pluginDir, 'package.json');
   if (!existsSync(pkg)) return;
@@ -234,7 +235,6 @@ async function runPythonPlugin(pluginId, pluginDir, py, bridgeUrl, port) {
   const waitMs = pluginId === 'facefusion' ? 15 * 60 * 1000 : 120000;
   console.log(`[harness] 等待端口 ${port} 起来（最多 ${Math.round(waitMs / 1000)}s）…`);
   const up = await probePort(port, waitMs);
-  let exitCode = null;
   if (up) {
     console.log(`\n[harness] ✅ 端口 ${port} 已响应 = 插件成功启动！`);
     console.log('[harness] 停止插件进程…');

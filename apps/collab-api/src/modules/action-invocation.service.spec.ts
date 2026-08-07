@@ -88,9 +88,6 @@ describe('ActionInvocationService', () => {
   });
   it('claim uses an AUTHORIZED compare-and-swap barrier', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const findUniqueOrThrow = vi
-      .fn()
-      .mockResolvedValue(row({ status: 'RUNNING', startedAt: new Date() }));
     const service = new ActionInvocationService(
       {
         actionInvocation: {

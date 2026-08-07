@@ -58,7 +58,6 @@ const TOOL_META: Record<string, { icon: typeof FileTextIcon; label: string }> = 
 /** 单行摘要：从 args/result 提炼一句话（不展开时显示）。 */
 function summarize(data: ToolCardData): string {
   const a = (data.args ?? {}) as Record<string, unknown>;
-  const r = (data.result ?? {}) as Record<string, unknown>;
   switch (data.name) {
     case 'WebSearch':
     case 'web_search':

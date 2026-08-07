@@ -7,13 +7,11 @@ import {
   GavelIcon,
   ReceiptIcon,
   RocketIcon,
-  ScrollTextIcon,
   ServerIcon,
   SettingsIcon,
   ShieldCheckIcon,
   ShieldIcon,
   UsersIcon,
-  ZapIcon,
   TagIcon,
   MapIcon,
 } from 'lucide-react';

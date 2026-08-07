@@ -11,7 +11,7 @@ import {
   serializeSharedJson,
   type SharedNamespaceOwnerKind,
 } from '@lingfang/contract';
-import { AppError, badRequest, forbidden, notFound } from '../common';
+import { AppError, badRequest, forbidden } from '../common';
 import { PrismaService } from '../prisma.service';
 import { AuthService } from './auth.service';
 import { PluginGovernanceService } from './plugin-governance.service';

@@ -630,7 +630,6 @@ export class RuntimeArtifactService {
     retainUntil: Date
   ) {
     const scopeDigest = digest(scope);
-    const holderKey = digest({ holderKind, holderId, purpose, scopeDigest, kind });
     return this.prisma.$transaction(
       (tx) =>
         this.acquireHoldTx(

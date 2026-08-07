@@ -7,7 +7,6 @@ import { validateManifest, type ManifestResult } from '../../manifest/index.ts';
 import { packWorkspace } from '../util/archive.ts';
 import { log } from '../log.ts';
 import { parseArgs } from '../parser.ts';
-import { pathExists } from '../util/fs.ts';
 import { validateRootReadme } from '../util/readme.ts';
 
 export interface BuildOptions {
