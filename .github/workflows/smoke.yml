@@ -9,10 +9,16 @@ on:
   # push:
   #   branches: [ main ]
 
+# 最小权限：冒烟只读代码，不写任何 GitHub 资源。
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: Boot API + verify-all
     runs-on: ubuntu-latest
+    # 本作业要建库 + 构建 + 起服务，比单元门禁重；30 分钟兜底，卡死时及时止损。
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -37,13 +43,14 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        # 与 ci.yml 一致：不写 version，让 action 读 package.json 的 packageManager，
+        # 否则会触发 “Multiple versions of pnpm specified” 告警并可能装错版本。
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 与 ci.yml 一致：.nvmrc 是 Node 版本的唯一来源，避免多处硬编码漂移。
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Run integration smoke (boot API + verify-all)

