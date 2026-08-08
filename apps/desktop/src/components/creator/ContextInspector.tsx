@@ -133,11 +133,7 @@ export function ContextInspector({
                       <div
                         className={cn(
                           'h-full rounded-full transition-all',
-                          winPct > 90
-                            ? 'bg-destructive'
-                            : winPct > 70
-                              ? 'bg-amber-500'
-                              : 'bg-primary'
+                          winPct > 90 ? 'bg-destructive' : winPct > 70 ? 'bg-warning' : 'bg-primary'
                         )}
                         style={{ width: `${winPct}%` }}
                       />
@@ -183,7 +179,7 @@ export function ContextInspector({
                       compressStatus === 'critical'
                         ? 'bg-destructive'
                         : compressStatus === 'warning'
-                          ? 'bg-amber-500'
+                          ? 'bg-warning'
                           : 'bg-primary'
                     )}
                     style={{ width: `${Math.min(100, ci.pct)}%` }}

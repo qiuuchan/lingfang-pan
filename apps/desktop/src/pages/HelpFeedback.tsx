@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Select,
@@ -210,14 +211,20 @@ function ListView({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =
       {loading ? (
         <p className="py-12 text-center text-sm text-muted-foreground">加载中…</p>
       ) : tickets.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-12 text-center">
-          <LifeBuoyIcon className="size-10 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">还没有提交过工单</p>
-          <Button size="sm" variant="outline" onClick={onNew}>
-            <PlusIcon className="size-4" />
-            提交第一个工单
-          </Button>
-        </div>
+        <Empty className="py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <LifeBuoyIcon />
+            </EmptyMedia>
+            <EmptyTitle>还没有提交过工单</EmptyTitle>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button size="sm" variant="outline" onClick={onNew}>
+              <PlusIcon className="size-4" />
+              提交第一个工单
+            </Button>
+          </EmptyContent>
+        </Empty>
       ) : (
         <div className="flex flex-col gap-2">
           {tickets.map((t) => (

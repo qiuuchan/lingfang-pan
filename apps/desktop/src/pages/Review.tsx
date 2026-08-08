@@ -5,6 +5,13 @@ import { api, errorMessage } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { LoadingButton } from '@/components/loading-button';
 import { StaggerContainer, StaggerItem, Shimmer } from '@/lib/motion';
 
@@ -145,11 +152,15 @@ export function Review() {
             ))}
           </StaggerContainer>
         ) : (
-          <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
-            <ClipboardCheckIcon className="size-8 text-muted-foreground/50" />
-            <span>暂无待审核插件</span>
-            <span className="text-xs">团队提交到市场的插件审核请求会出现在这里。</span>
-          </div>
+          <Empty className="py-10">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <ClipboardCheckIcon />
+              </EmptyMedia>
+              <EmptyTitle>暂无待审核插件</EmptyTitle>
+              <EmptyDescription>团队提交到市场的插件审核请求会出现在这里。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
       </CardContent>
     </Card>

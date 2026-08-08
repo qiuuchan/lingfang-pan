@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import {
   Select,
   SelectContent,
@@ -485,7 +486,17 @@ function InstalledList({
   busyKey: string;
 }) {
   if (loading) return <ListLoading />;
-  if (!installations.length) return <EmptyState icon={BoxIcon} text="本机还没有安装插件" />;
+  if (!installations.length)
+    return (
+      <Empty className="h-40 border">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <BoxIcon />
+          </EmptyMedia>
+          <EmptyTitle>本机还没有安装插件</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    );
   return (
     <div className="divide-y rounded-lg border">
       {installations.map((installation) => {
@@ -569,10 +580,12 @@ function CatalogList({
   if (loading) return <ListLoading />;
   if (!items.length)
     return (
-      <EmptyState
-        icon={marketplace ? StoreIcon : UsersIcon}
-        text={marketplace ? '市场暂无可下载插件' : '团队库暂无已发布版本'}
-      />
+      <Empty className="h-40 border">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">{marketplace ? <StoreIcon /> : <UsersIcon />}</EmptyMedia>
+          <EmptyTitle>{marketplace ? '市场暂无可下载插件' : '团队库暂无已发布版本'}</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   return (
     <div className="divide-y rounded-lg border">
@@ -716,15 +729,6 @@ function ListLoading() {
     <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
       <Loader2Icon className="mr-2 size-4 animate-spin" />
       正在加载
-    </div>
-  );
-}
-
-function EmptyState({ icon: Icon, text }: { icon: typeof BoxIcon; text: string }) {
-  return (
-    <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
-      <Icon className="size-5" />
-      {text}
     </div>
   );
 }

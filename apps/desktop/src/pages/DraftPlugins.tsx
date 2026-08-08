@@ -20,6 +20,7 @@ import { Pagination } from '@/components/pagination';
 import { PluginSourceBadge } from '@/components/plugins/PluginSourceBadge';
 import { PublishPluginDialog } from '@/components/plugins/PublishPluginDialog';
 import { PublishedPluginList } from '@/components/plugins/PublishedPluginList';
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -219,10 +220,14 @@ export function DraftPlugins() {
               正在加载草稿
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
-              <FileEditIcon className="size-5" />
-              暂无符合条件的草稿
-            </div>
+            <Empty className="h-48 border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileEditIcon />
+                </EmptyMedia>
+                <EmptyTitle>暂无符合条件的草稿</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <div className="divide-y rounded-lg border">
               {paged.items.map((workspace) => (

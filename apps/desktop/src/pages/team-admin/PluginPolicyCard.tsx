@@ -20,6 +20,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export function PluginPolicyCard() {
   const [active, setActive] = useState<TeamPluginPolicyRevision | null>(null);
@@ -169,54 +176,56 @@ export function PluginPolicyCard() {
           <FieldGroup className="grid gap-2 md:grid-cols-3">
             <Field className="gap-0 text-sm">
               <FieldLabel htmlFor="policy-rule-scope">范围</FieldLabel>
-              <select
-                id="policy-rule-scope"
-                className="mt-1 w-full rounded-md border bg-background p-2"
-                value={scope}
-                onChange={(e) => setScope(e.target.value as typeof scope)}
-              >
-                <option value="TEAM">整个团队</option>
-                <option value="PACKAGE">插件包</option>
-                <option value="ACTION">Action</option>
-                <option value="WORKFLOW">工作流</option>
-              </select>
+              <Select value={scope} onValueChange={(next) => setScope(next as typeof scope)}>
+                <SelectTrigger id="policy-rule-scope" className="mt-1 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TEAM">整个团队</SelectItem>
+                  <SelectItem value="PACKAGE">插件包</SelectItem>
+                  <SelectItem value="ACTION">Action</SelectItem>
+                  <SelectItem value="WORKFLOW">工作流</SelectItem>
+                </SelectContent>
+              </Select>
             </Field>
             <Field className="gap-0 text-sm">
               <FieldLabel htmlFor="policy-rule-effect">效果</FieldLabel>
-              <select
-                id="policy-rule-effect"
-                className="mt-1 w-full rounded-md border bg-background p-2"
-                value={effect}
-                onChange={(e) => setEffect(e.target.value as typeof effect)}
-              >
-                <option value="ALLOW">允许</option>
-                <option value="DENY">拒绝</option>
-              </select>
+              <Select value={effect} onValueChange={(next) => setEffect(next as typeof effect)}>
+                <SelectTrigger id="policy-rule-effect" className="mt-1 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALLOW">允许</SelectItem>
+                  <SelectItem value="DENY">拒绝</SelectItem>
+                </SelectContent>
+              </Select>
             </Field>
             <Field className="gap-0 text-sm">
               <FieldLabel htmlFor="policy-rule-operation">操作</FieldLabel>
-              <select
-                id="policy-rule-operation"
-                className="mt-1 w-full rounded-md border bg-background p-2"
-                value={operation}
-                onChange={(e) => setOperation(e.target.value)}
-              >
-                {[
-                  'install',
-                  'update',
-                  'run_local',
-                  'invoke_action',
-                  'run_workflow',
-                  'execute_cloud',
-                  'manage_schedule',
-                  'trigger_schedule',
-                  'shared_data_read',
-                  'shared_data_write',
-                  'web_preview',
-                ].map((value) => (
-                  <option key={value}>{value}</option>
-                ))}
-              </select>
+              <Select value={operation} onValueChange={(next) => next && setOperation(next)}>
+                <SelectTrigger id="policy-rule-operation" className="mt-1 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[
+                    'install',
+                    'update',
+                    'run_local',
+                    'invoke_action',
+                    'run_workflow',
+                    'execute_cloud',
+                    'manage_schedule',
+                    'trigger_schedule',
+                    'shared_data_read',
+                    'shared_data_write',
+                    'web_preview',
+                  ].map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
           </FieldGroup>
           {scope === 'PACKAGE' && (

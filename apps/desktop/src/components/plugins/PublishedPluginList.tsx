@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { errorMessage } from '@/lib/api';
 import { DEFAULT_PAGE_SIZE, paginateItems } from '@/lib/pagination';
 import { hasPermission } from '@/lib/permissions';
@@ -148,10 +149,14 @@ export function PublishedPluginList({ refreshKey = 0 }: { refreshKey?: number })
         </Alert>
       )}
       {!items.length ? (
-        <div className="flex h-44 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
-          <PackageIcon className="size-5" />
-          团队还没有已发布插件
-        </div>
+        <Empty className="h-44 rounded-lg border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <PackageIcon />
+            </EmptyMedia>
+            <EmptyTitle>团队还没有已发布插件</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <div className="divide-y rounded-lg border">
           {paged.items.map((item) => {

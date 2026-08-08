@@ -15,6 +15,13 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LoadingButton } from '@/components/loading-button';
@@ -160,13 +167,17 @@ export function ChangelogDialog({
                 </Button>
               </div>
             ) : releases.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
-                <DownloadIcon className="size-8 text-muted-foreground/40" />
-                <span>暂无更新日志</span>
-                <span className="text-xs">
-                  平台管理员配置 Gitee 更新日志源后，此处自动展示版本时间线。
-                </span>
-              </div>
+              <Empty className="p-6">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <DownloadIcon className="size-8 text-muted-foreground/40" />
+                  </EmptyMedia>
+                  <EmptyTitle>暂无更新日志</EmptyTitle>
+                  <EmptyDescription>
+                    平台管理员配置 Gitee 更新日志源后，此处自动展示版本时间线。
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <ScrollArea className="h-full">
                 <div className="flex flex-col gap-5 p-5">

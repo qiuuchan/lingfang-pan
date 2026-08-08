@@ -24,6 +24,13 @@ import {
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { errorMessage } from '@/lib/api';
 import { hasPermission } from '@/lib/permissions';
 import {
@@ -490,17 +497,17 @@ export function PublishPluginDialog({
                 >
                   发布目标
                 </FieldLabel>
-                <select
-                  id="publish-target"
-                  value={target}
-                  onChange={(event) => setTarget(event.target.value as PublishTarget)}
-                  className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-                >
-                  <option value="team">团队空间</option>
-                  <option value="market" disabled={!canSubmitMarket}>
-                    团队 + 市场提审
-                  </option>
-                </select>
+                <Select value={target} onValueChange={(next) => setTarget(next as PublishTarget)}>
+                  <SelectTrigger id="publish-target" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="team">团队空间</SelectItem>
+                    <SelectItem value="market" disabled={!canSubmitMarket}>
+                      团队 + 市场提审
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
               <Field className="gap-1.5">
                 <FieldLabel
@@ -509,23 +516,26 @@ export function PublishPluginDialog({
                 >
                   来源类型
                 </FieldLabel>
-                <select
-                  id="publish-source-kind"
+                <Select
                   value={sourceKind}
-                  onChange={(event) => {
-                    const next = event.target.value as PluginReleaseSourceKind;
-                    setSourceKind(next);
+                  onValueChange={(next) => {
+                    const n = next as PluginReleaseSourceKind;
+                    setSourceKind(n);
                     if (!sourceLabel || sourceLabel === DEFAULT_SOURCE_LABELS[sourceKind])
-                      setSourceLabel(DEFAULT_SOURCE_LABELS[next]);
+                      setSourceLabel(DEFAULT_SOURCE_LABELS[n]);
                   }}
-                  className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
                 >
-                  {SOURCE_OPTIONS.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {DEFAULT_SOURCE_LABELS[kind]}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="publish-source-kind" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SOURCE_OPTIONS.map((kind) => (
+                      <SelectItem key={kind} value={kind}>
+                        {DEFAULT_SOURCE_LABELS[kind]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
             <Field className="gap-1.5">

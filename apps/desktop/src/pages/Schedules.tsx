@@ -29,6 +29,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -229,7 +237,21 @@ export function Schedules() {
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <EmptyState onCreate={openCreate} />
+            <Empty className="py-16">
+              <EmptyHeader>
+                <EmptyMedia variant="icon" className="size-12 rounded-full text-muted-foreground">
+                  <ClockIcon className="size-6" />
+                </EmptyMedia>
+                <EmptyTitle>还没有定时任务</EmptyTitle>
+                <EmptyDescription>创建一个任务，让 Agent 或插件在指定时间自动运行</EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button onClick={openCreate} size="sm" className="gap-1.5">
+                  <PlusIcon className="size-4" />
+                  新建任务
+                </Button>
+              </EmptyContent>
+            </Empty>
           ) : (
             <StaggerContainer className="flex flex-col gap-3" stagger={0.05}>
               {filtered.map((task) => (
@@ -411,27 +433,6 @@ function RunItem({ run }: { run: LocalScheduleRun }) {
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-// —— 空状态 ——
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-        <ClockIcon className="size-6 text-muted-foreground" />
-      </div>
-      <div>
-        <p className="text-sm font-medium">还没有定时任务</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          创建一个任务，让 Agent 或插件在指定时间自动运行
-        </p>
-      </div>
-      <Button onClick={onCreate} size="sm" className="gap-1.5">
-        <PlusIcon className="size-4" />
-        新建任务
-      </Button>
     </div>
   );
 }

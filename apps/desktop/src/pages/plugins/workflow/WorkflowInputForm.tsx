@@ -7,6 +7,13 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   initialWorkflowInput,
   setWorkflowInputValue,
   type WorkflowInputIssue,
@@ -185,19 +192,24 @@ function SchemaField({
     return (
       <Field>
         {heading}
-        <select
-          id={controlId}
+        <Select
           value={JSON.stringify(value)}
           disabled={disabled}
-          className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          onChange={(event) => onChange(JSON.parse(event.target.value))}
+          onValueChange={(next) => {
+            if (next != null) onChange(JSON.parse(next));
+          }}
         >
-          {schema.enum.map((item, index) => (
-            <option key={index} value={JSON.stringify(item)}>
-              {typeof item === 'string' ? item : JSON.stringify(item)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={controlId} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {schema.enum.map((item, index) => (
+              <SelectItem key={index} value={JSON.stringify(item)}>
+                {typeof item === 'string' ? item : JSON.stringify(item)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <FieldIssues issues={issues} path={path} />
       </Field>
     );

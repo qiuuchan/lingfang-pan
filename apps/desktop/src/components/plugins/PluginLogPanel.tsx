@@ -67,7 +67,7 @@ export function PluginLogPanel({ lines, autoScroll = true }: PluginLogPanelProps
             title="复制全部"
           >
             {copied ? (
-              <CheckIcon className="size-3 text-emerald-500" />
+              <CheckIcon className="size-3 text-success" />
             ) : (
               <CopyIcon className="size-3" />
             )}
