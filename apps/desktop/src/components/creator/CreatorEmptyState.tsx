@@ -1,3 +1,16 @@
+// CreatorEmptyState.tsx — 创建器「零对话」引导 / hero 空状态。
+//
+// 角色：用户在 creator 面板还没有任何对话（turns.length === 0）时展示的引导屏，
+// 带 4 个预设提示卡片；点击卡片把对应示例 prompt 回填到输入框（onSelectPreset）。
+// 使用位置：CreatorWorkspace.tsx（turns.length === 0 分支）。
+//
+// 为什么保持自定义、不收敛到 shadcn <Empty>：本组件是「富引导屏」而非通用列表空状态，
+// 包含 图标盒 + 大标题 + 描述 + 2 列预设按钮网格。shadcn <Empty> 默认带 `border-dashed`
+// 圆角盒子、内容限宽 `max-w-sm` 并居中，强行套用会注入虚线边框、压窄预设网格、破坏 hero 视觉，
+// 属于过度改造、收益为负。Stage 6 收敛据此有意保留。
+// 若日后要让空状态风格统一，应改造 <Empty> 组件本身（去掉强制虚线边框 / 放宽 max-w），
+// 而不是把本组件硬塞进 <Empty>。
+
 import { BookOpenIcon, Code2Icon, PenLineIcon, SparklesIcon, WandSparklesIcon } from 'lucide-react';
 import { CREATOR_COLUMN_CLASS } from '@/components/creator/creator-layout';
 import { cn } from '@/lib/utils';
@@ -9,6 +22,11 @@ const EXAMPLES = [
   { icon: PenLineIcon, title: '日常自动化', prompt: '做一个能整理待办、提醒进度并生成日报的插件' },
 ] as const;
 
+/**
+ * 创建器零对话引导屏。
+ *
+ * @param onSelectPreset 点击预设卡片时的回调，参数为该预设的示例 prompt，用于回填输入框。
+ */
 export function CreatorEmptyState({
   onSelectPreset,
 }: {
