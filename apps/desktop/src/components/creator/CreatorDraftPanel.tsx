@@ -76,7 +76,6 @@ export function CreatorDraftPanel({
   onSubmitted,
   busy,
   conversationId,
-  turns: _turns,
   workspaceId,
   onWorkspacePersisted,
 }: {
@@ -87,13 +86,9 @@ export function CreatorDraftPanel({
   busy: boolean;
   /** 对话 ID（保存草稿时记录，供编辑时恢复）。 */
   conversationId?: string | null;
-  /**
-   * 对话轮次（保存草稿时记录，供编辑时恢复）。
-   * 注意：目前只是接住了父组件传下来的值 —— persistDraftWorkspace 的入参里
-   * 根本没有 turns 字段，所以这份轮次从没被写盘过，注释里承诺的“编辑时恢复”
-   * 还没接上。留着 prop 以免改动调用方，接线时从这里往下走。
-   */
-  turns?: unknown[];
+  // 这里刻意没有 turns prop：曾经有一个，注释承诺「保存草稿时记录，供编辑时恢复」，
+  // 但 persistDraftWorkspace（lib/plugin-registry.ts）的入参里根本没有 turns 字段，
+  // 从没写过盘。要接这个功能得先给持久化层加字段，不是把 prop 传下来就行。
   /** 当前编辑的 DraftWorkspace UUID；保存和发布必须复用它。 */
   workspaceId?: string | null;
   onWorkspacePersisted: (workspaceId: string) => void;

@@ -1719,7 +1719,6 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
               onSubmitted={onDraftSubmitted}
               busy={busy}
               conversationId={activeConversationId}
-              turns={turns}
               workspaceId={workspacePluginId}
               onWorkspacePersisted={onWorkspacePersisted}
             />
