@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>灵坊适配冒烟 · A4 缺陷探针</title>
+  </head>
+  <body>
+    <main>
+      <h1>A4 改写破坏 · 探针</h1>
+      <p id="status">等待宿主桥就绪…</p>
+    </main>
+    <!-- 关键：待改写的赋值语句不在本文件内联，而在同级 ../index.js。 -->
+    <script src="../index.js"></script>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('status').textContent =
+          typeof window.__lingfangInvoke === 'function' ? '宿主桥已就绪' : '宿主桥未注入（预览模式）';
+      });
+    </script>
+  </body>
+</html>
