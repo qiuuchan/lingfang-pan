@@ -140,11 +140,14 @@ export function validateWorkspace(ws: AdaptWorkspace): AdaptationIssue[] {
     issues.push({
       code: 'manifest_not_found',
       category: 'manifest',
-      severity: 'needs_human',
+      severity: 'auto_fixable',
       path: 'manifest.json',
-      message: '缺少 manifest.json，无法自动推断（需提供插件名/运行时等元信息）',
-      fixable: false,
+      message: '缺少 manifest.json，将基于源码（package.json / 入口文件）自动合成',
+      fixable: true,
     });
+    // 即便缺 manifest，AI 边界扫描（硬编码 key/baseUrl/provider）与源码无关，
+    // 仍应运行以免漏报凭据泄漏；结构检查需 manifest，此处跳过。
+    issues.push(...aiBoundaryIssues(ws));
     return issues;
   }
 

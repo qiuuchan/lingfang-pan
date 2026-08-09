@@ -29,9 +29,59 @@ function slugFromName(name: string): string {
   return s.slice(0, 64);
 }
 
-/** A1 缺字段补齐：id / runtime_type / entry / version。 */
+/**
+ * 基于源码推导运行时：
+ *   package.json 带 scripts.start/main/bin 或依赖 → nodejs；
+ *   存在 main.py/app.py/__main__.py → python；
+ *   存在 ui/index.html/index.html → client；
+ *   否则落默认 client。
+ * 用于「覆盖而非沿用」仓库自带 manifest 的运行时字段（方案修正 4）。
+ */
+function deriveRuntime(ws: AdaptWorkspace): string {
+  const pkgRaw = ws.readFile('package.json');
+  if (pkgRaw != null) {
+    try {
+      const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+      const scripts = (pkg.scripts as Record<string, unknown> | undefined) ?? {};
+      const hasNodeScript = ['start', 'dev', 'main', 'serve', 'run'].some((k) => k in scripts);
+      const hasMain = typeof pkg.main === 'string';
+      const hasBin = typeof pkg.bin === 'string' || (pkg.bin != null && typeof pkg.bin === 'object');
+      const deps = pkg.dependencies;
+      const hasNodeDeps = deps != null && typeof deps === 'object' && Object.keys(deps as object).length > 0;
+      if (hasNodeScript || hasMain || hasBin || hasNodeDeps) return 'nodejs';
+    } catch {
+      // 损坏的 package.json 不阻塞：继续按入口文件判断。
+    }
+  }
+  const nodeEntries = ['index.js', 'server.js', 'app.js', 'main.js', 'index.mjs', 'index.cjs'];
+  if (nodeEntries.some((e) => ws.exists(e))) return 'nodejs';
+  if (ws.exists('main.py') || ws.exists('app.py') || ws.exists('__main__.py')) return 'python';
+  if (ws.exists('ui/index.html') || ws.exists('index.html')) return 'client';
+  return 'client';
+}
+
+/** A1 缺字段补齐：name / id / runtime_type / entry / version / visibility。 */
 export function transformMissingFields(ws: AdaptWorkspace, manifest: Record<string, unknown>): FixApplied[] {
   const fixes: FixApplied[] = [];
+
+  // name 优先取 package.json.name，否则用目录名（manifest.name 缺省为必填项）。
+  if (typeof manifest.name !== 'string' || manifest.name.trim() === '') {
+    let derivedName = '';
+    const pkgRaw = ws.readFile('package.json');
+    if (pkgRaw != null) {
+      try {
+        const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+        if (typeof pkg.name === 'string' && pkg.name.trim() !== '') derivedName = pkg.name.trim();
+      } catch {
+        // 损坏 package.json 忽略，回退到目录名。
+      }
+    }
+    if (!derivedName) derivedName = ws.dir.split(/[\\/]/).pop() ?? 'plugin';
+    const before = String(manifest.name ?? '');
+    manifest.name = derivedName;
+    fixes.push({ code: 'A1_name', category: 'manifest', message: `补齐 name → ${derivedName}`, path: 'name', diff: { before, after: derivedName } });
+  }
+
   const name = typeof manifest.name === 'string' ? manifest.name : '';
 
   if (typeof manifest.id !== 'string' || !ID_PATTERN.test(manifest.id)) {
@@ -41,10 +91,12 @@ export function transformMissingFields(ws: AdaptWorkspace, manifest: Record<stri
     fixes.push({ code: 'A1_id', category: 'manifest', message: `补齐/修正 id → ${newId}`, path: 'id', diff: { before, after: newId } });
   }
 
+  // 运行时：先由 package.json / 入口文件推导，找不到再落默认 client（覆盖而非沿用自带值）。
   if (typeof manifest.runtime_type !== 'string' || !RUNTIME_ENTRY_DEFAULT[manifest.runtime_type]) {
+    const derived = deriveRuntime(ws);
     const before = String(manifest.runtime_type ?? '');
-    manifest.runtime_type = 'client';
-    fixes.push({ code: 'A1_runtime', category: 'manifest', message: '运行时缺省为 client', path: 'runtime_type', diff: { before, after: 'client' } });
+    manifest.runtime_type = derived;
+    fixes.push({ code: 'A1_runtime', category: 'manifest', message: `运行时推导为 ${derived}`, path: 'runtime_type', diff: { before, after: derived } });
   }
 
   if (typeof manifest.entry !== 'string' || manifest.entry.trim() === '') {

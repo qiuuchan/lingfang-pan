@@ -35,6 +35,12 @@ export interface AdaptOptions {
   outDir?: string;
   /** 运行时检查的可选配置（桌面端注入内置运行时路径）。 */
   runtime?: RuntimeCheckOptions;
+  /**
+   * 强制重推导：忽略仓库自带 manifest 的运行时/入口等关键字段，
+   * 完全由源码（package.json / 入口文件）重新合成。GitHub 导入走此模式，
+   * 实现「覆盖而非沿用」自带 manifest（方案修正 4）。
+   */
+  forceReDerive?: boolean;
 }
 
 export interface AdaptResult extends AdaptationReport {
@@ -74,19 +80,36 @@ export async function runAdaptation(opts: AdaptOptions): Promise<AdaptResult> {
   // 1. 静态校验
   const issues: AdaptationIssue[] = validateWorkspace(ws);
 
-  // 2. 应用确定性改造（只处理 fixable 项；needs_human 留给人工/agent）
+  // 2. 应用确定性改造（A1-A5）。
+  //    - 无 manifest：以空对象起底，由 transform 基于源码合成。
+  //    - 有 manifest：默认沿用；forceReDerive（GitHub 导入）时剥离 runtime_type/entry，
+  //      强制重新推导——「覆盖而非沿用」自带 manifest（方案修正 4）。
+  //    - 损坏 manifest 且非强制：保持 null，交由重新校验报 needs_human（不拿空对象覆盖）。
   const fixes: FixApplied[] = [];
   let manifest: Record<string, unknown> | null = null;
+  let synthesize = false;
   if (ws.hasManifest()) {
-    manifest = ws.readManifest();
-    // readManifest 对损坏 JSON 返回 null：此时跳过改造（校验环节已给出
-    // manifest_invalid 需人工问题），不能拿空对象去跑 transform。
-    if (manifest) {
-      const applied = applyTransforms(ws, manifest);
-      if (applied.length > 0) {
-        ws.writeManifest(manifest);
-        fixes.push(...applied);
+    const existing = ws.readManifest();
+    if (existing && typeof existing === 'object') {
+      manifest = existing;
+      if (opts.forceReDerive) {
+        delete (manifest as Record<string, unknown>).runtime_type;
+        delete (manifest as Record<string, unknown>).entry;
       }
+    } else {
+      synthesize = Boolean(opts.forceReDerive);
+    }
+  } else {
+    synthesize = true;
+  }
+  if (synthesize) manifest = {};
+
+  if (manifest) {
+    const applied = applyTransforms(ws, manifest);
+    // 无 manifest 时即便 transform 未产生 fix（理论上 A1 必产生），也要写回合成结果。
+    if (applied.length > 0 || !ws.hasManifest()) {
+      ws.writeManifest(manifest);
+      fixes.push(...applied);
     }
   }
 

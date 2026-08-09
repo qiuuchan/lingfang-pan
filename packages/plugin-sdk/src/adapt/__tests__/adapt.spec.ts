@@ -237,3 +237,71 @@ describe('buildReport 状态判定', () => {
     ).toBe('ADAPTED_PASSED');
   });
 });
+
+describe('P1 GitHub 导入清单合成（覆盖而非沿用）', () => {
+  it('无 manifest 的 python 仓库 → 合成 runtime=python 且 name 取目录名', async () => {
+    const dir = makePlugin({ 'main.py': 'print("hi")' });
+    const result = await runAdaptation({ pluginDir: dir });
+    const syn = JSON.parse(readFileSync(join(result.workspaceDir, 'manifest.json'), 'utf-8'));
+    expect(syn.runtime_type).toBe('python');
+    // name 缺省取工作区目录名（无 package.json.name 时）；此处工作区即临时拷贝目录。
+    expect(syn.name).toBe(result.workspaceDir.split(/[\\/]/).pop());
+    expect(syn.version).toBe('0.1.0');
+    expect(typeof syn.id).toBe('string');
+  });
+
+  it('有 package.json(scripts.start) 的仓库 + forceReDerive → 合成 runtime=nodejs', async () => {
+    const dir = makePlugin({
+      'package.json': JSON.stringify({ name: 'demo-app', scripts: { start: 'node index.js' } }),
+      'index.js': 'console.log(1)',
+    });
+    const result = await runAdaptation({ pluginDir: dir, forceReDerive: true });
+    const syn = JSON.parse(readFileSync(join(result.workspaceDir, 'manifest.json'), 'utf-8'));
+    expect(syn.runtime_type).toBe('nodejs');
+    expect(syn.name).toBe('demo-app');
+  });
+
+  it('forceReDerive 覆盖仓库自带的错误 manifest 运行时', async () => {
+    const dir = makePlugin({
+      'manifest.json': JSON.stringify({ id: 'x', name: 'x', version: '0.1.0', runtime_type: 'python', entry: 'main.py', capabilities: [] }),
+      'package.json': JSON.stringify({ name: 'x', scripts: { start: 'node' } }),
+      'index.js': '1',
+    });
+    const result = await runAdaptation({ pluginDir: dir, forceReDerive: true });
+    const syn = JSON.parse(readFileSync(join(result.workspaceDir, 'manifest.json'), 'utf-8'));
+    expect(syn.runtime_type).toBe('nodejs');
+    expect(syn.entry).toBe('index.js');
+  });
+
+  it('非 forceReDerive 时沿用仓库自带 manifest 的运行时（不破坏既有插件）', async () => {
+    const dir = makePlugin({
+      'manifest.json': JSON.stringify({ id: 'x', name: 'x', version: '0.1.0', runtime_type: 'python', entry: 'main.py', capabilities: [] }),
+      'main.py': 'print(1)',
+    });
+    const result = await runAdaptation({ pluginDir: dir });
+    const syn = JSON.parse(readFileSync(join(result.workspaceDir, 'manifest.json'), 'utf-8'));
+    expect(syn.runtime_type).toBe('python');
+  });
+});
+
+describe('validateWorkspace manifest 缺失', () => {
+  it('缺 manifest 时 manifest_not_found 标记为可自动修复', () => {
+    const dir = makePlugin({ 'index.js': 'console.log(1)' });
+    const ws = new AdaptWorkspace(dir);
+    const issues = validateWorkspace(ws);
+    const m = issues.find((i) => i.code === 'manifest_not_found');
+    expect(m).toBeDefined();
+    expect(m?.fixable).toBe(true);
+    expect(m?.severity).toBe('auto_fixable');
+  });
+
+  it('缺 manifest 时仍执行 AI 边界扫描（不漏报硬编码凭据）', () => {
+    const dir = makePlugin({
+      'index.js': "const k = 'sk-abcdefghijklmnopqrstuvwx';",
+    });
+    const ws = new AdaptWorkspace(dir);
+    const issues = validateWorkspace(ws);
+    expect(issues.some((i) => i.code === 'manifest_not_found')).toBe(true);
+    expect(issues.some((i) => i.code === 'leaked_openai_key')).toBe(true);
+  });
+});
