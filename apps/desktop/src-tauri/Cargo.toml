@@ -30,6 +30,7 @@ reqwest = { version = "0.12", features = [
   "blocking",
   "rustls-tls",
   "stream",
+  "system-proxy",
 ], default-features = false }
 # v4 制品上传/下载流式 body：network.rs 使用 futures stream + bytes::Bytes。
 futures-util = "0.3"

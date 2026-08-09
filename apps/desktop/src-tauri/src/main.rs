@@ -6,6 +6,7 @@ mod builtin_plugin_bundle;
 mod builtin_plugin_index;
 mod capability;
 mod draft_plugin;
+mod github_import;
 mod mirror_presets;
 mod plugin_adapt;
 mod plugin_artifact_v4;
@@ -595,6 +596,7 @@ fn main() {
             plugin_shell::run_plugin_shell,
             runtime_commands::get_runtime_status,
             plugin_adapt::run_plugin_adapt,
+            github_import::import_github_repo,
             plugin_runner::start_plugin,
             plugin_runner::stop_plugin,
             plugin_runner::delete_plugin,

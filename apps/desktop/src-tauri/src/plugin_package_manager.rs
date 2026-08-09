@@ -545,6 +545,23 @@ impl PluginPackageManager {
         write_json(&self.workspaces_path(), ledger)
     }
 
+    /// 登记一条由 GitHub 导入产生的草稿工作区账本条目（P0）。
+    /// 必须在文件锁内写入，避免与 `create_draft_workspace` 等并发写账本竞争。
+    pub(crate) fn register_imported_github_workspace(
+        &self,
+        workspace: &DraftWorkspace,
+    ) -> Result<(), String> {
+        let _guard = lock_or_recover(&self.file_lock);
+        let mut ledger: WorkspaceLedger = read_json(&self.workspaces_path()).unwrap_or_else(|| {
+            WorkspaceLedger {
+                schema_version: 1,
+                workspaces: vec![],
+            }
+        });
+        ledger.workspaces.push(workspace.clone());
+        write_json(&self.workspaces_path(), &ledger)
+    }
+
     pub(crate) fn list_installations(&self) -> Vec<LocalInstallation> {
         self.read_installations().installations
     }
