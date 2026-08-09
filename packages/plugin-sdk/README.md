@@ -8,6 +8,7 @@
 lingfang-plugin create
 cd <plugin-directory>
 lingfang-plugin validate
+lingfang-plugin adapt      # 可选：适配检验改造（自动修缺字段/硬编码边界，产出报告）
 lingfang-plugin build
 lingfang-plugin publish
 ```
@@ -35,3 +36,11 @@ lingfang-plugin publish
 ## CLI 门禁
 
 `validate` 和 `build` 使用相同的 manifest、入口与 README 边界。README 超限或不是 UTF-8 时，`build` 会在生成 `.lfplugin` 前失败。`.lfplugin` 必须由 `lingfang-plugin build` 生成，不要手工压缩 ZIP。
+
+`adapt` 在 `validate` 之后、`build` 之前运行，执行[适配检验改造](../docs/plugin-development/10-adaptation.md)：自动补齐缺字段、归一化硬编码 AI 边界、探测能力，并产出一份随发布上送服务端留证的 `AdaptationReport`。本地开发可跳过，但经桌面端「适配校验并打包」发布的插件都会走这条链路。
+
+## 发布（publish）
+
+`pnpm build` 会把 SDK 编译到 `dist/`（纯 ESM + `.d.ts`，`lingfang-plugin` 带 shebang，无需 `tsx`）。
+发布到 npm 时由 `package.json` 的 `publishConfig` 把 `main` / `types` / `bin` / `exports` 切到 `dist/`，
+开发态仍指向 `src/`（由 vite / tsc 直接转译），因此消费方安装后无需再装 `tsx`。

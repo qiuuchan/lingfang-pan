@@ -20,5 +20,6 @@ pnpm plugin:build .\demo
 - [发布与审核](./07-publish.md)
 - [示例与排错](./08-examples-and-troubleshooting.md)
 - [安全边界](./09-security.md)
+- [适配检验改造](./10-adaptation.md)
 
 CLI 和公开类型的逐项说明见 [SDK 使用指南](../sdk-guide/README.md)，HTTP 端点见 [API 参考](../api-reference/README.md)。
